@@ -196,6 +196,13 @@ namespace Engine {
 			(*world)->DestroyBody(BodyHandle(12345));
 	}
 
+	ENGINE_DEATH_TEST("Physics/WorldResolvesSubShapeOfDeadBody")
+	{
+		Result<Scope<PhysicsWorld>> world = PhysicsWorld::Create({});
+		if (world.has_value())
+			static_cast<void>((*world)->GetSubShapeCollider(BodyHandle(12345), 0));
+	}
+
 	ENGINE_DEATH_TEST("Physics/WorldPushesStaticBody")
 	{
 		Result<Scope<PhysicsWorld>> world = PhysicsWorld::Create({});
@@ -552,7 +559,7 @@ namespace Engine {
 		// Docs/Decisions/0031-m20-contract.md decision 3 (W-P03): Jolt adds a contact as soon as two shapes are within its
 		// speculative contact distance. The world records whether a contact touched when it was added, and reports a
 		// speculative contact's first touch once (Touched); a contact that never touches gets no Touched record.
-		TEST_CASE("PhysicsWorld: a speculative contact is recorded not touching and reports Touched once when it touches" * doctest::skip(true))
+		TEST_CASE("PhysicsWorld: a speculative contact is recorded not touching and reports Touched once when it touches")
 		{
 			Scope<PhysicsWorld> world = CreateWorld();
 			Result<BodyHandle> brick = world->CreateBody(
@@ -599,6 +606,81 @@ namespace Engine {
 					&& ((event.BodyA == *brick && event.BodyB == settler) || (event.BodyA == settler && event.BodyB == *brick));
 			}));
 			CHECK(touched == 1);
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 3: Jolt adds a sensor's contacts only while the shapes overlap (its
+		// speculative contact distance is 0 for sensors), so every sensor contact is recorded touching and never needs a
+		// Touched record.
+		TEST_CASE("PhysicsWorld: a sensor's contacts are added only for overlapping shapes and recorded touching")
+		{
+			Scope<PhysicsWorld> world = CreateWorld();
+			Result<BodyHandle> sensor = world->CreateBody({ .Shape = CreateShape(BoxShapeGeometry{ .HalfExtents = glm::vec3(0.5f) }),
+				.MotionType = PhysicsMotionType::Kinematic,
+				.IsSensor = true,
+				.CollideKinematicVsNonDynamic = true });
+			REQUIRE(sensor.has_value());
+			BodyDescription glide{ .GravityFactor = 0.0f, .AllowSleeping = false };
+			glide.LinearDamping = 0.0f;
+			glide.LinearVelocity = glm::vec3(3.0f, 0.0f, 0.0f);
+			// One ball passes 1 cm above the sensor's top face, within the speculative contact distance of solid bodies; the
+			// other passes through the sensor.
+			const BodyHandle above = CreateDynamic(*world, SphereShapeGeometry{ .Radius = 0.25f }, glm::vec3(-2.0f, 0.76f, 0.0f), glide);
+			const BodyHandle through = CreateDynamic(*world, SphereShapeGeometry{ .Radius = 0.25f }, glm::vec3(-2.0f, 0.0f, 0.0f), glide);
+			std::vector<ContactEvent> records;
+			for (uint32_t step = 0; step < 90; ++step)
+			{
+				REQUIRE(world->Step(FixedDelta, 1).has_value());
+				std::vector<ContactEvent> drained = world->DrainContactEvents();
+				records.insert(records.end(), drained.begin(), drained.end());
+			}
+			CHECK_FALSE(HasAddedContact(records, *sensor, above));
+			const std::optional<ContactEvent> entered = FindContact(records, ContactEventKind::Added, *sensor, through);
+			REQUIRE(entered.has_value());
+			CHECK(entered->IsSensor);
+			CHECK(entered->Touching);
+			CHECK(FindContact(records, ContactEventKind::Removed, *sensor, through).has_value());
+			CHECK(std::none_of(records.begin(), records.end(), [](const ContactEvent& event)
+			{
+				return event.Kind == ContactEventKind::Touched;
+			}));
+		}
+
+		// Jolt reports a contact that persists after SetShape under its sub-shape ID, while the collider behind that ID is the
+		// new shape's (M20: Scene/PhysicsSystem resolves its contacts again with GetSubShapeCollider).
+		TEST_CASE("PhysicsWorld: GetSubShapeCollider names the collider behind a sub-shape of the body's current shape")
+		{
+			Scope<PhysicsWorld> world = CreateWorld();
+			const auto makeTrack = [](uint32_t firstUserData)
+			{
+				BodyShapeDescription track;
+				for (uint32_t piece = 0; piece < 3; ++piece)
+				{
+					track.Colliders.push_back(ColliderShapeDescription{ .Geometry = BoxShapeGeometry{ .HalfExtents = glm::vec3(0.5f) },
+						.Position = glm::vec3(static_cast<float>(piece), -0.5f, 0.0f),
+						.UserData = firstUserData + piece });
+				}
+				Result<Ref<const PhysicsShape>> shape = PhysicsShape::Create(track);
+				REQUIRE(shape.has_value());
+				return *shape;
+			};
+			Result<BodyHandle> track = world->CreateBody({ .Shape = makeTrack(10), .MotionType = PhysicsMotionType::Static });
+			REQUIRE(track.has_value());
+			const BodyHandle box = CreateDynamic(*world, BoxShapeGeometry{ .HalfExtents = glm::vec3(0.25f) }, glm::vec3(2.0f, 0.25f, 0.0f),
+				{ .AllowSleeping = false });
+			StepWorld(*world, 30);
+			const std::optional<ContactEvent> added = FindContact(world->DrainContactEvents(), ContactEventKind::Added, *track, box);
+			REQUIRE(added.has_value());
+			const bool trackIsA = added->BodyA == *track;
+			const uint32_t subShape = trackIsA ? added->SubShapeA : added->SubShapeB;
+			CHECK(world->GetSubShapeCollider(*track, subShape) == (trackIsA ? added->ColliderA : added->ColliderB));
+			CHECK(world->GetSubShapeCollider(*track, subShape) == 12);
+			CHECK(world->GetSubShapeCollider(box, trackIsA ? added->SubShapeB : added->SubShapeA) == 0);
+
+			// The same geometry with other collider indices: the contact persists under its sub-shape ID, which now names 22.
+			REQUIRE(world->SetShape(*track, makeTrack(20)).has_value());
+			StepWorld(*world, 2);
+			CHECK_FALSE(HasAddedContact(world->DrainContactEvents(), *track, box));
+			CHECK(world->GetSubShapeCollider(*track, subShape) == 22);
 		}
 
 		TEST_CASE("PhysicsWorld: a pile's contact records are identical across runs and thread counts once sorted")
@@ -851,6 +933,7 @@ namespace Engine {
 		{
 			// Callers validate their input first (PhysicsWorld.h); a release build without asserts ignores the call.
 			ENGINE_CHECK_DEATH("Physics/WorldDestroysDeadBody", "names no live body of this world");
+			ENGINE_CHECK_DEATH("Physics/WorldResolvesSubShapeOfDeadBody", "PhysicsWorld::GetSubShapeCollider");
 			ENGINE_CHECK_DEATH("Physics/WorldPushesStaticBody", "PhysicsWorld::AddForce does not apply to a Static body");
 		}
 

@@ -181,6 +181,10 @@ class RuntimeScriptTests(AutomationTestCase):
         self.editors.append(process)
         runtime = self.connect(process)
         self.assertEqual(runtime.call("script.eval", {"context": "play", "code": "Time.GetTimeScale()"})["value"], 0.5)
+        # Scene.GetCurrent names the start scene, then the scene Scene.Load loaded (ADR 0031 decision 5).
+        current = 'return Scene.GetCurrent() == Assets.Load("{}")'
+        start = runtime.call("script.eval", {"context": "play", "code": current.format("Assets/Scenes/Main.scene")})
+        self.assertIs(start["value"], True)
         event_cursor = runtime.call("events.read", {"cursor": "end"})["nextCursor"]
         log_cursor = runtime.call("log.read", {"cursor": "end"})["nextCursor"]
         with self.assertRaises(engine_client.EngineError):
@@ -188,6 +192,8 @@ class RuntimeScriptTests(AutomationTestCase):
         runtime.call("play.step", {"ticks": 2, "render": "none"})
         loaded = runtime.call("entity.get", {"entity": "/Loaded11"})["entity"]
         self.assertEqual(loaded["name"], "Loaded11")
+        second = runtime.call("script.eval", {"context": "play", "code": current.format("Assets/Scenes/Second.scene")})
+        self.assertIs(second["value"], True)
         self.assertEqual(runtime.call("entity.get", {"entity": "/Spawned9"})["entity"]["name"], "Spawned9")
         errors = runtime.call("script.errors")["errors"]
         self.assertEqual(len(errors), 1, errors)

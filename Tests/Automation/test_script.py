@@ -171,6 +171,31 @@ return Script.Define("Owner", Owner)
         client.call("entity.destroy", {"entities": ["/Game/Board"]})
         self.assertEqual(read_entity(), {"id": board["id"], "name": "Board", "path": ""})
 
+    def test_scene_reload_keeps_the_played_copy_and_get_current_names_the_scene(self) -> None:
+        # ADR 0031 decision 5 (ADR 0026 P06): Scene.Load of the played scene reloads its saved file, dropping the edits
+        # made since the save. Scene.Reload restarts from the play copy, unsaved edits included, with new parameters,
+        # and Scene.GetCurrent names the open scene's asset, in an edit evaluation (which refuses Scene.Reload) and in
+        # play.
+        client, _ = self.open_editor_with_scene()
+        client.call("scene.save")
+        current = 'return Scene.GetCurrent() == Assets.Load("Assets/Scenes/Main.scene")'
+        self.assertIs(client.call("script.eval", {"context": "edit", "code": current})["value"], True)
+        with self.assertRaises(engine_client.EngineError) as readonly:
+            client.call("script.eval", {"context": "edit", "code": "Scene.Reload()"})
+        self.assert_engine_error(readonly.exception, engine_client.SCRIPT_ERROR, "Script")
+        client.call("entity.create", {"name": "Unsaved"})
+        client.call("play.start", {"lockstep": True, "parameters": {"round": 1}})
+        self.assertIs(client.call("script.eval", {"context": "play", "code": current})["value"], True)
+        client.call("script.eval", {"context": "play",
+                                    "code": 'Scene.CreateEntity("Spawned"); Scene.Reload({round = 2})'})
+        client.call("play.step", {"ticks": 1})
+        state = client.call("script.eval", {"context": "play", "code": (
+            'return {unsaved = Scene.FindByName("Unsaved") ~= nil, spawned = Scene.FindByName("Spawned") ~= nil, '
+            'round = Scene.GetLoadParameters().round, '
+            'current = Scene.GetCurrent() == Assets.Load("Assets/Scenes/Main.scene")}')})["value"]
+        self.assertEqual(state, {"unsaved": True, "spawned": False, "round": 2, "current": True})
+        client.call("play.stop")
+
     def test_wait_for_predicate(self) -> None:
         client, _ = self.open_editor_with_scene()
         client.call("play.start", {"lockstep": True, "parameters": {"level": 4}, "pauseOnError": False})

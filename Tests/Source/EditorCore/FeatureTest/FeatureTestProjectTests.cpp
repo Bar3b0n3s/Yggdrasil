@@ -173,23 +173,51 @@ namespace Engine {
 				CHECK_MESSAGE(found.contains(kind.Name), "no override of kind ", kind.Name);
 		}
 
-		// The nested prefab of §15.5: Cart.prefab was saved from an entity holding two Wheel.prefab instances, which
-		// prefab.create flattens, so the file holds the wheels' subtrees as plain entities without instance components.
-		TEST_CASE("FeatureTest: Cart.prefab flattens its nested Wheel instances")
+		// The nested prefab of §15.5: Cart.prefab was saved from an entity holding two Wheel.prefab instances, which prefab.create
+		// keeps live, outermost in the new document (Docs/Decisions/0031-m20-contract.md decision 8): each wheel is an instance
+		// root of Wheel.prefab, each hub a member of its wheel's instance, and the cart's own entities carry no instance
+		// components, since the cart's instance is unpacked in the copy.
+		TEST_CASE("FeatureTest: Cart.prefab keeps its nested Wheel instances live")
 		{
 			Json document;
 			const JsonReader prefab = ReadProjectFile(document, "Assets/Prefabs/Cart.prefab");
 			CHECK(prefab.ReadFormatHeader("Prefab", 1, 1).has_value());
+			Json wheelMeta;
+			const auto wheelHandle = ReadProjectFile(wheelMeta, "Assets/Prefabs/Wheel.prefab.meta").ReadMember<std::string>("Handle");
+			REQUIRE(wheelHandle.has_value());
 			std::vector<std::string> names;
-			ForEachEntity(prefab, [&names](const JsonReader& entity)
+			std::string wheel;
+			ForEachEntity(prefab, [&names, &wheel, &wheelHandle](const JsonReader& entity)
 			{
 				const auto name = entity.ReadMember<std::string>("Name");
+				const auto id = entity.ReadMember<std::string>("ID");
 				REQUIRE(name.has_value());
+				REQUIRE(id.has_value());
 				names.push_back(*name);
 				const auto components = entity.GetMember("Components");
 				REQUIRE(components.has_value());
-				CHECK_MESSAGE(!components->HasMember("Prefab"), *name, " is still a nested instance root");
-				CHECK_MESSAGE(!components->HasMember("PrefabLink"), *name, " is still linked to a nested prefab");
+				const std::optional<JsonReader> instance = components->FindMember("Prefab");
+				const std::optional<JsonReader> link = components->FindMember("PrefabLink");
+				if (*name == "Cart" || *name == "Body")
+				{
+					CHECK_MESSAGE(!instance.has_value(), *name, " is an instance root");
+					CHECK_MESSAGE(!link.has_value(), *name, " is linked to a prefab");
+					return;
+				}
+				REQUIRE_MESSAGE(link.has_value(), *name, " is not linked to Wheel.prefab");
+				const auto outer = link->GetMember("OuterPrefabEntityID");
+				REQUIRE(outer.has_value());
+				CHECK_MESSAGE(outer->IsNull(), *name, " names an enclosing instance in the document that holds it outermost");
+				if (*name == "Hub")
+				{
+					CHECK_MESSAGE(!instance.has_value(), "a hub is a member, not an instance root");
+					CHECK(link->ReadMember<std::string>("InstanceRoot") == wheel);
+					return;
+				}
+				REQUIRE_MESSAGE(instance.has_value(), *name, " is not a live Wheel.prefab instance");
+				CHECK(instance->ReadMember<std::string>("Prefab") == *wheelHandle);
+				CHECK(link->ReadMember<std::string>("InstanceRoot") == *id);
+				wheel = *id;
 			});
 			CHECK(names == std::vector<std::string>{ "Cart", "Body", "FrontWheel", "Hub", "BackWheel", "Hub" });
 		}

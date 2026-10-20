@@ -1583,13 +1583,14 @@ namespace Engine {
 				resolve.Schemas = call.Engine->GetHost().GetFieldSchemas();
 				if (lua_userdatatag(call.State, 1) >= std::to_underlying(Detail::ScriptValueTag::ComponentBegin))
 				{
+					// A read: the components of an entity pending destruction stay readable until the flush (M20, W-P02).
 					const auto proxy = Check<ScriptProxyIdentity>(call, 1);
-					auto valid = ScriptProxy::ValidateComponent(call.Engine->GetHost(), proxy);
+					auto valid = ScriptProxy::ValidateComponentForRead(call.Engine->GetHost(), proxy);
 					if (!valid)
 						RaiseError(call, valid.error());
 					const auto* component = resolve.Registry->GetComponents()[proxy.ComponentTypeIndex];
 					resolve.OwnerType = component;
-					resolve.Owner = component->GetHostOps()->GetConst(call.Engine->GetHost().GetScene().FindEntityByID(proxy.Entity.ID));
+					resolve.Owner = component->GetHostOps()->GetConst(call.Engine->GetHost().GetScene().FindReadableEntityByID(proxy.Entity.ID));
 				}
 			}
 			Utils::PushValue(call, value, field.GetType(), 0, &field, resolve);

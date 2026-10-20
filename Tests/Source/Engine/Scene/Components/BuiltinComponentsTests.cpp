@@ -8,6 +8,9 @@
 #include "Engine/Scene/Components/UnknownComponentsComponent.h"
 #include "Support/SceneTestFixture.h"
 
+#include <cstdint>
+#include <map>
+#include <string>
 #include <type_traits>
 
 namespace Engine {
@@ -78,7 +81,7 @@ namespace Engine {
 			CHECK_FALSE(instance.Prefab.IsValid());
 			CHECK(instance.Overrides.empty());
 			const PrefabOverride prefabOverride;
-			CHECK_FALSE(prefabOverride.PrefabEntityID.IsValid());
+			CHECK(prefabOverride.Path.empty());
 			CHECK(prefabOverride.Kind == PrefabOverrideKind::Field);
 			CHECK(prefabOverride.Component.empty());
 			CHECK(prefabOverride.Field.empty());
@@ -89,6 +92,7 @@ namespace Engine {
 			CHECK(keys.Tags.empty());
 			CHECK_FALSE(PrefabLinkComponent{}.PrefabEntityID.IsValid());
 			CHECK_FALSE(PrefabLinkComponent{}.InstanceRoot.IsValid());
+			CHECK_FALSE(PrefabLinkComponent{}.OuterPrefabEntityID.IsValid());
 		}
 
 		TEST_CASE("BuiltinComponents: rendering defaults follow the component table")
@@ -327,11 +331,15 @@ namespace Engine {
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			const std::vector<std::string> categories = { "Core", "Rendering", "Physics", "Audio", "Scripting" };
+			// The components that migrated since their first version: Prefab's override paths (M20,
+			// Docs/Decisions/0031-m20-contract.md decision 10). Every other component is at version 1.
+			const std::map<std::string, uint32_t> migrated = { { "Prefab", 2 } };
 			for (const ComponentInfo* component : registry->GetComponents())
 			{
 				INFO(component->GetName());
 				CHECK(std::find(categories.begin(), categories.end(), component->GetCategory()) != categories.end());
-				CHECK(component->GetVersion() == 1);
+				const auto version = migrated.find(component->GetName());
+				CHECK(component->GetVersion() == (version != migrated.end() ? version->second : 1));
 				CHECK_FALSE(component->GetDescription().empty());
 				for (const Scope<FieldInfo>& field : component->GetFields())
 					CHECK_FALSE(field->GetDescription().empty());

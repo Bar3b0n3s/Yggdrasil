@@ -328,18 +328,24 @@ namespace Engine {
 		// member); the strict load's errors (Validation located at
 		// their JSON pointer, UnsupportedVersion) with the context "while starting the play session"; InvalidState
 		// "entity limit <N> reached" when the document holds more entities than MaxEntities; Validation from PlayInput::Create.
+		// The session keeps the document as its start document, which Scene.Reload restarts from while the scene it started
+		// with is current (M20, Docs/Decisions/0031-m20-contract.md decision 5): the overloads taking `const Json&` copy it,
+		// those taking shared immutable data keep it without a copy (InvalidArgument for a null document).
 		[[nodiscard]] static Result<Scope<PlaySession>> Create(const PlaySessionSpecification& specification, const Json& sceneDocument);
+		[[nodiscard]] static Result<Scope<PlaySession>> Create(const PlaySessionSpecification& specification, Ref<const Json> sceneDocument);
 		// The fallible part of Create: validates/loads the scene, input, physics and empty script VM, without gameplay
 		// callbacks, voices or mixer/time ownership. A rejected or discarded candidate leaves an existing session intact.
 		// Only configure run state or inspect the candidate until Activate; do not advance or invoke its script VM.
 		[[nodiscard]] static Result<Scope<PlaySession>> Prepare(const PlaySessionSpecification& specification, const Json& sceneDocument);
+		[[nodiscard]] static Result<Scope<PlaySession>> Prepare(const PlaySessionSpecification& specification, Ref<const Json> startDocument);
 		// Once, after retiring the previous session: acquire audio, initialize instances and run startup callbacks,
 		// then start PlayOnStart voices. Script faults use the normal error stream/pause/fatal-stop path, not an outer
 		// preparation error. Create is Prepare followed by Activate. Activate itself does not return a fallible result.
 		void Activate();
 
-		// The serializer copy of §5.6: SceneSerializer::ToJson(editScene) into an in-memory document, then Create. `editScene`
-		// is only read. Errors: those of ToJson and Create.
+		// The serializer copy of §5.6: SceneSerializer::ToJson(editScene) into an in-memory document, then Create, which keeps
+		// the document as the session's start document (the play copy that Scene.Reload restarts from, with the edit scene's
+		// unsaved edits). `editScene` is only read. Errors: those of ToJson and Create.
 		[[nodiscard]] static Result<Scope<PlaySession>> CreateFromScene(const PlaySessionSpecification& specification, const Scene& editScene);
 
 		// One fixed step (see the class comment).

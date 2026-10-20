@@ -5,7 +5,7 @@
 	"Seed": 42,
 	"ComponentVersions": {
 		"Transform": 1,
-		"Prefab": 1,
+		"Prefab": 2,
 		"PrefabLink": 1,
 		"MeshRenderer": 1,
 		"Camera": 1,
@@ -356,7 +356,7 @@
 					"Prefab": "3c9f2e7a11d04b88",
 					"Overrides": [
 						{
-							"PrefabEntityID": "00000000000b0002",
+							"Path": ["00000000000b0002"],
 							"Kind": "Field",
 							"Component": "Transform",
 							"Field": "Scale",
@@ -366,7 +366,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "00000000000b0001",
-					"InstanceRoot": "6b2d4f8a10c3e507"
+					"InstanceRoot": "6b2d4f8a10c3e507",
+					"OuterPrefabEntityID": null
 				}
 			}
 		},
@@ -384,7 +385,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "00000000000b0002",
-					"InstanceRoot": "6b2d4f8a10c3e507"
+					"InstanceRoot": "6b2d4f8a10c3e507",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",

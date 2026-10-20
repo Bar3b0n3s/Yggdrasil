@@ -14,6 +14,7 @@
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/VirtualFileSystem.h"
+#include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
 #include "Engine/Scene/PrefabInstantiator.h"
@@ -28,6 +29,7 @@
 #include <nlohmann/json.hpp>
 
 #include <filesystem>
+#include <format>
 #include <optional>
 #include <span>
 #include <string>
@@ -45,6 +47,33 @@ namespace Engine {
 	static std::span<const std::byte> AsEditorBytes(std::string_view text)
 	{
 		return std::as_bytes(std::span(text.data(), text.size()));
+	}
+
+	// A prefab of a nesting graph written by hand, as a file can hold one: `name`.prefab (asset `handle`, root `rootID`)
+	// whose root holds one child, an instance of the prefab `nested` (whose root is `nestedPrefabRoot`) rooted at `innerID`,
+	// written with its .meta through the editor's write path.
+	static void WriteNestingPrefab(EditorContext& editor, std::string_view name, AssetHandle handle, UUID rootID, UUID innerID, AssetHandle nested,
+		UUID nestedPrefabRoot)
+	{
+		constexpr std::string_view Transform = R"("Transform": { "Translation": [0, 0, 0], "Rotation": [0, 0, 0, 1], "Scale": [1, 1, 1] })";
+		const std::string document = std::format(R"({{
+	"Format": "Prefab", "Version": 1, "Name": "{0}", "Root": "{1}",
+	"ComponentVersions": {{ "Transform": 1, "Prefab": 2, "PrefabLink": 1 }},
+	"Entities": [
+		{{ "ID": "{1}", "Name": "{0}", "Parent": null, "Active": true, "Tags": [], "Components": {{ {5} }} }},
+		{{ "ID": "{2}", "Name": "Inner", "Parent": "{1}", "Active": true, "Tags": [], "Components": {{ {5},
+			"Prefab": {{ "Prefab": "{3}", "Overrides": [] }},
+			"PrefabLink": {{ "PrefabEntityID": "{4}", "InstanceRoot": "{2}", "OuterPrefabEntityID": null }} }} }}
+	]
+}}
+)",
+			name, rootID.ToString(), innerID.ToString(), nested.ToString(), nestedPrefabRoot.ToString(), Transform);
+		const std::string meta = std::format(
+			R"({{ "Format": "AssetMeta", "Version": 1, "Handle": "{}", "Type": "Prefab", "Importer": "Prefab", "ImporterVersion": 1, "Settings": null, "SubAssets": [] }})",
+			handle.ToString());
+		const std::string path = std::format("project://Assets/Prefabs/{}.prefab", name);
+		REQUIRE(editor.WriteProjectFile(MakeEditorPath(path), AsEditorBytes(document)).has_value());
+		REQUIRE(editor.WriteProjectFile(MakeEditorPath(path + ".meta"), AsEditorBytes(meta)).has_value());
 	}
 
 	namespace {
@@ -1140,7 +1169,7 @@ namespace Engine {
 		// a nested instance to an existing prefab, so a nesting cycle comes from a file. Here Lamp.prefab is written to hold
 		// an instance of itself; the nesting graph names the cycle with PREFAB_CYCLE, and applying an edit of a lamp, whose
 		// propagation would rewrite Lamp.prefab from itself forever, is refused and changes nothing.
-		TEST_CASE("EditorContext: a prefab update refuses a nesting cycle" * doctest::skip(true))
+		TEST_CASE("EditorContext: a prefab update refuses a nesting cycle")
 		{
 			Test::AutomationFixture setup("PrefabNestingCycle");
 			EditorContext& editor = setup.GetEditor();
@@ -1207,6 +1236,187 @@ namespace Engine {
 			const Result<std::string> after = FileSystem::ReadText(file);
 			REQUIRE(after.has_value());
 			CHECK(*after == written);
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 8 (Roadmap M20 acceptance "inner edits propagate"): the prefabs nesting
+		// a prefab, directly or through others, come from the import dependencies in nesting order, each after the prefabs it
+		// nests; the nesting rewrite writes each with its nested instances rebuilt from the prefab's new version, as one
+		// undoable command whose undo restores every file; and the prefab update rebuilds the outermost instances of every
+		// prefab nesting the changed one, their nested instances with them.
+		TEST_CASE("EditorContext: a prefab's new version is written into the prefabs nesting it in nesting order, as one undoable command")
+		{
+			Test::AutomationFixture setup("PrefabNestingUpdate");
+			EditorContext& editor = setup.GetEditor();
+			const auto call = [&setup](std::string_view method, const Json& params)
+			{
+				Result<Json> result = setup.Call(method, params);
+				REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+				return std::move(*result);
+			};
+			const auto handleOf = [](const Json& created)
+			{
+				const std::optional<UUID> id = UUID::FromString(JsonReader(created["prefab"]["id"]).ReadString().value_or(std::string()));
+				REQUIRE(id.has_value());
+				return AssetHandle(*id);
+			};
+			call("entity.create", Json{ { "name", "House" } });
+			call("entity.create", Json{ { "name", "Room" }, { "parent", "/House" } });
+			call("entity.create", Json{ { "name", "Lamp" }, { "parent", "/House/Room" } });
+			call("entity.create", Json{ { "name", "Bulb" }, { "parent", "/House/Room/Lamp" }, { "components", Json{ { "MeshRenderer", Json{ { "Mesh", "engine://Meshes/Cube" } } } } } });
+			const AssetHandle lamp = handleOf(call("prefab.create", Json{ { "entity", "/House/Room/Lamp" }, { "path", "Assets/Prefabs/Lamp.prefab" }, { "replaceWithInstance", true } }));
+			const AssetHandle room = handleOf(call("prefab.create", Json{ { "entity", "/House/Room" }, { "path", "Assets/Prefabs/Room.prefab" }, { "replaceWithInstance", true } }));
+			const AssetHandle house = handleOf(call("prefab.create", Json{ { "entity", "/House" }, { "path", "Assets/Prefabs/House.prefab" }, { "replaceWithInstance", true } }));
+			const AssetHandle shed = handleOf(call("prefab.create", Json{ { "entity", "/House/Room/Lamp/Bulb" }, { "path", "Assets/Prefabs/Shed.prefab" } }));
+
+			const AssetHandle lampOnly[] = { lamp };
+			const Result<std::vector<AssetHandle>> nesting = editor.GetNestingPrefabs(lampOnly);
+			REQUIRE_MESSAGE(nesting.has_value(), nesting.error().ToString());
+			CHECK(*nesting == std::vector<AssetHandle>{ room, house });
+			const AssetHandle roomOnly[] = { room };
+			const Result<std::vector<AssetHandle>> nestingRoom = editor.GetNestingPrefabs(roomOnly);
+			REQUIRE(nestingRoom.has_value());
+			CHECK(*nestingRoom == std::vector<AssetHandle>{ house });
+			const AssetHandle shedOnly[] = { shed };
+			const Result<std::vector<AssetHandle>> nothing = editor.GetNestingPrefabs(shedOnly);
+			REQUIRE(nothing.has_value());
+			CHECK(nothing->empty());
+			const AssetHandle unknown[] = { AssetHandle(0x1234567890abcdefull) };
+			const Result<std::vector<AssetHandle>> missing = editor.GetNestingPrefabs(unknown);
+			REQUIRE_FALSE(missing.has_value());
+			CHECK(missing.error().GetCode() == ErrorCode::NotFound);
+
+			// Lamp.prefab gets a new version outside the nesting rewrite: its bulb casts no shadows.
+			const std::filesystem::path root = setup.GetEditorFixture().GetProjectRoot();
+			const Result<std::string> lampText = FileSystem::ReadText(root / "Assets/Prefabs/Lamp.prefab");
+			REQUIRE(lampText.has_value());
+			std::string edited = *lampText;
+			const size_t shadows = edited.find("\"CastShadows\": true");
+			REQUIRE(shadows != std::string::npos);
+			edited.replace(shadows, std::string_view("\"CastShadows\": true").size(), "\"CastShadows\": false");
+			REQUIRE(editor.WriteProjectFile(MakeEditorPath("project://Assets/Prefabs/Lamp.prefab"), AsEditorBytes(edited)).has_value());
+			REQUIRE(editor.GetAssets().Reimport(lamp).has_value());
+			const Result<std::string> roomBefore = FileSystem::ReadText(root / "Assets/Prefabs/Room.prefab");
+			const Result<std::string> houseBefore = FileSystem::ReadText(root / "Assets/Prefabs/House.prefab");
+			REQUIRE(roomBefore.has_value());
+			REQUIRE(houseBefore.has_value());
+
+			Result<NestingPrefabUpdate> rewrite = editor.CreateNestingPrefabUpdateCommand(lampOnly);
+			REQUIRE_MESSAGE(rewrite.has_value(), rewrite.error().ToString());
+			REQUIRE(rewrite->Rewrite != nullptr);
+			CHECK(rewrite->Prefabs == std::vector<AssetHandle>{ room, house });
+			REQUIRE(editor.Execute(std::move(rewrite->Rewrite)).has_value());
+			// Rewritten from the same version again, no document changes: no command, and no prefab named.
+			const Result<NestingPrefabUpdate> again = editor.CreateNestingPrefabUpdateCommand(lampOnly);
+			REQUIRE_MESSAGE(again.has_value(), again.error().ToString());
+			CHECK(again->Rewrite == nullptr);
+			CHECK(again->Prefabs.empty());
+			const Result<std::string> roomAfter = FileSystem::ReadText(root / "Assets/Prefabs/Room.prefab");
+			const Result<std::string> houseAfter = FileSystem::ReadText(root / "Assets/Prefabs/House.prefab");
+			REQUIRE(roomAfter.has_value());
+			REQUIRE(houseAfter.has_value());
+			CHECK(roomAfter->contains("\"CastShadows\": false"));
+			CHECK(houseAfter->contains("\"CastShadows\": false"));
+
+			// The update rebuilds the house in the open scene, its room and lamp with it.
+			const Entity bulb = editor.GetScene().FindEntityByPath("/House/Room/Lamp/Bulb");
+			REQUIRE(bulb.IsValid());
+			CHECK(bulb.GetComponent<MeshRendererComponent>().CastShadows);
+			Result<Scope<Command>> update = editor.CreatePrefabUpdateCommand(lampOnly);
+			REQUIRE_MESSAGE(update.has_value(), update.error().ToString());
+			REQUIRE(*update != nullptr);
+			REQUIRE(editor.Execute(std::move(*update)).has_value());
+			CHECK_FALSE(editor.GetScene().FindEntityByPath("/House/Room/Lamp/Bulb").GetComponent<MeshRendererComponent>().CastShadows);
+
+			// Undoing the rewrite restores both files.
+			REQUIRE(setup.Call("edit.undo", Json::object()).has_value());
+			REQUIRE(setup.Call("edit.undo", Json::object()).has_value());
+			CHECK(FileSystem::ReadText(root / "Assets/Prefabs/Room.prefab").value_or(std::string()) == *roomBefore);
+			CHECK(FileSystem::ReadText(root / "Assets/Prefabs/House.prefab").value_or(std::string()) == *houseBefore);
+			CHECK(editor.GetScene().FindEntityByPath("/House/Room/Lamp/Bulb").GetComponent<MeshRendererComponent>().CastShadows);
+		}
+
+		// Command.h: Undo is atomic like Execute, so a failed undo leaves the command applied. Room.prefab's file held content
+		// the importer refuses when the nesting rewrite was built (written behind the editor's back; the imported version
+		// stays the last good one), so undoing the rewrite writes that content back and its import fails: the undo fails,
+		// and the rewritten document is written and imported again. The undo used to return with the refused content on disk.
+		TEST_CASE("EditorContext: a nesting rewrite whose undo cannot import the previous documents stays applied")
+		{
+			Test::AutomationFixture setup("PrefabNestingUndoAtomic");
+			EditorContext& editor = setup.GetEditor();
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Room" } }).has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Lamp" }, { "parent", "/Room" } }).has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Bulb" }, { "parent", "/Room/Lamp" }, { "components", Json{ { "MeshRenderer", Json{ { "Mesh", "engine://Meshes/Cube" } } } } } }).has_value());
+			const Result<Json> created = setup.Call("prefab.create", Json{ { "entity", "/Room/Lamp" }, { "path", "Assets/Prefabs/Lamp.prefab" }, { "replaceWithInstance", true } });
+			REQUIRE(created.has_value());
+			REQUIRE(setup.Call("prefab.create", Json{ { "entity", "/Room" }, { "path", "Assets/Prefabs/Room.prefab" }, { "replaceWithInstance", true } }).has_value());
+			const std::optional<UUID> lampID = UUID::FromString(JsonReader((*created)["prefab"]["id"]).ReadString().value_or(std::string()));
+			REQUIRE(lampID.has_value());
+			const AssetHandle lampOnly[] = { AssetHandle(*lampID) };
+
+			// Lamp.prefab gets a new version outside the nesting rewrite: its bulb casts no shadows.
+			const std::filesystem::path root = setup.GetEditorFixture().GetProjectRoot();
+			const Result<std::string> lampText = FileSystem::ReadText(root / "Assets/Prefabs/Lamp.prefab");
+			REQUIRE(lampText.has_value());
+			std::string edited = *lampText;
+			const size_t shadows = edited.find("\"CastShadows\": true");
+			REQUIRE(shadows != std::string::npos);
+			edited.replace(shadows, std::string_view("\"CastShadows\": true").size(), "\"CastShadows\": false");
+			REQUIRE(editor.WriteProjectFile(MakeEditorPath("project://Assets/Prefabs/Lamp.prefab"), AsEditorBytes(edited)).has_value());
+			REQUIRE(editor.GetAssets().Reimport(AssetHandle(*lampID)).has_value());
+			const std::filesystem::path roomFile = root / "Assets/Prefabs/Room.prefab";
+			REQUIRE(FileSystem::WriteFileAtomic(roomFile, AsEditorBytes("not a prefab document\n"), { .KeepBackup = false }).has_value());
+
+			Result<NestingPrefabUpdate> rewrite = editor.CreateNestingPrefabUpdateCommand(lampOnly);
+			REQUIRE_MESSAGE(rewrite.has_value(), rewrite.error().ToString());
+			REQUIRE(rewrite->Rewrite != nullptr);
+			REQUIRE(editor.Execute(std::move(rewrite->Rewrite)).has_value());
+			const Result<std::string> rewritten = FileSystem::ReadText(roomFile);
+			REQUIRE(rewritten.has_value());
+			REQUIRE(rewritten->contains("\"CastShadows\": false"));
+			const size_t steps = editor.GetHistory().GetUndoCount();
+			{
+				const Test::ExpectLog importFailure(LogLevel::Error, "ASSET_IMPORT_FAILED Assets/Prefabs/Room.prefab");
+				const Result<size_t> undone = editor.GetHistory().Undo(editor);
+				editor.GetAssets().WaitIdle();
+				REQUIRE_FALSE(undone.has_value());
+			}
+			CHECK(editor.GetHistory().GetUndoCount() == steps);
+			CHECK(FileSystem::ReadText(roomFile).value_or(std::string()) == *rewritten);
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 8: a cycle of two prefabs (A nests B, B nests A) is reported with one
+		// issue per prefab on it, A and B, and never names C, which nests A without being on the cycle; C itself has no
+		// prefab nesting it, so a new version of C meets no cycle.
+		TEST_CASE("EditorContext: a nesting cycle of two prefabs names both and no prefab that only nests it")
+		{
+			Test::EditorTestFixture fixture("PrefabNestingCycleOfTwo");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			const AssetHandle a(0x3a7e00000000a001ull), b(0x3a7e00000000b001ull), c(0x3a7e00000000c001ull);
+			const UUID aRoot(0xa1), bRoot(0xb1), cRoot(0xc1);
+			WriteNestingPrefab(editor, "A", a, aRoot, UUID(0xa2), b, bRoot);
+			WriteNestingPrefab(editor, "B", b, bRoot, UUID(0xb2), a, aRoot);
+			WriteNestingPrefab(editor, "C", c, cRoot, UUID(0xc2), a, aRoot);
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			// Imported now, so that the dependency graph holds each prefab's nested prefabs.
+			for (const AssetHandle prefab : { a, b, c })
+				REQUIRE(editor.GetAssets().Reimport(prefab).has_value());
+
+			const AssetHandle aOnly[] = { a };
+			const Result<std::vector<AssetHandle>> nesting = editor.GetNestingPrefabs(aOnly);
+			REQUIRE_FALSE(nesting.has_value());
+			CHECK(nesting.error().GetCode() == ErrorCode::Validation);
+			CHECK(nesting.error().ToString().contains("PREFAB_CYCLE"));
+			const std::vector<ErrorIssue>& issues = nesting.error().GetIssues();
+			REQUIRE(issues.size() == 2);
+			CHECK(issues[0].Message.contains("'Assets/Prefabs/A.prefab'"));
+			CHECK(issues[1].Message.contains("'Assets/Prefabs/B.prefab'"));
+			CHECK_FALSE(nesting.error().ToString().contains("C.prefab"));
+
+			const AssetHandle cOnly[] = { c };
+			const Result<std::vector<AssetHandle>> nestingC = editor.GetNestingPrefabs(cOnly);
+			REQUIRE_MESSAGE(nestingC.has_value(), nestingC.error().ToString());
+			CHECK(nestingC->empty());
 		}
 
 		TEST_CASE("EditorContext: moving and removing project files keeps provenance in step")

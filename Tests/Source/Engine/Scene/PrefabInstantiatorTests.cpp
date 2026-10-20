@@ -13,6 +13,7 @@
 #include "Engine/Scene/Components/SphereColliderComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Components/UnknownComponentsComponent.h"
+#include "Engine/Scene/PrefabAsset.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Scene/TransformSystem.h"
 #include "Support/FixtureSchemaSource.h"
@@ -54,6 +55,39 @@ namespace Engine {
 		return std::move(*edited);
 	}
 
+	// The prefab "Shelf" (Docs/Decisions/0031-m20-contract.md decision 8): a root (shelf-local id 0x7979) holding a live Block
+	// instance at the shelf-local id 0x7a7a, whose record in the shelf's document is one override of the block (its Visual
+	// receives no shadows). Built in a scratch scene of `setup`, as prefab.create builds a prefab from entities.
+	static Prefab MakeShelfPrefab(Test::SceneTestFixture& setup, const Prefab& block)
+	{
+		const Scope<Scene> source = setup.CreateEmptyScene();
+		const Entity shelfRoot = source->CreateEntityWithID(UUID(0x7979), "Shelf");
+		PrefabInstantiateOptions nestedOptions;
+		nestedOptions.PrefabHandle = AssetHandle(0x3c9f2e7a11d04b88);
+		nestedOptions.RootID = UUID(0x7a7a);
+		nestedOptions.Parent = shelfRoot;
+		LoadReport report;
+		const Result<Entity> nested = PrefabInstantiator::Instantiate(*source, block, nestedOptions, PrefabOptions{}, report);
+		REQUIRE(nested.has_value());
+		source->FindEntityByID(PrefabInstantiator::DeriveInstanceID(UUID(0x7a7a), UUID(0x00000000000b0002))).Patch<MeshRendererComponent>([](MeshRendererComponent& renderer)
+		{
+			renderer.ReceiveShadows = false;
+		});
+		REQUIRE(PrefabInstantiator::RefreshOverrides(*nested, block, PrefabOptions{}).has_value());
+		Result<Prefab> shelf = Prefab::CreateFromEntity(shelfRoot, "Shelf");
+		REQUIRE_MESSAGE(shelf.has_value(), (shelf ? std::string() : shelf.error().ToString()));
+		return std::move(*shelf);
+	}
+
+	// The Prefab component of the entity `id` of `prefab`'s document.
+	static Json GetDocumentInstance(const Prefab& prefab, UUID id)
+	{
+		const Json* entity = prefab.FindEntity(id);
+		REQUIRE(entity != nullptr);
+		REQUIRE((*entity)["Components"].contains("Prefab"));
+		return (*entity)["Components"]["Prefab"];
+	}
+
 	static PrefabInstantiateOptions MakeOptions(UUID rootID)
 	{
 		PrefabInstantiateOptions options;
@@ -77,7 +111,7 @@ namespace Engine {
 	static PrefabOverride MakeOverride(UUID prefabEntity, PrefabOverrideKind kind, std::string component, std::string field, Json value)
 	{
 		PrefabOverride prefabOverride;
-		prefabOverride.PrefabEntityID = prefabEntity;
+		prefabOverride.Path = { prefabEntity };
 		prefabOverride.Kind = kind;
 		prefabOverride.Component = std::move(component);
 		prefabOverride.Field = std::move(field);
@@ -245,7 +279,7 @@ namespace Engine {
 			REQUIRE(PrefabInstantiator::RefreshOverrides(*root, prefab, PrefabOptions{}).has_value());
 			const std::vector<PrefabOverride>& overrides = root->GetComponent<PrefabInstanceComponent>().Overrides;
 			REQUIRE(overrides.size() == 1);
-			CHECK(overrides[0].PrefabEntityID == UUID(0x00000000000b0002));
+			CHECK(overrides[0].Path == std::vector<UUID>{ UUID(0x00000000000b0002) });
 			CHECK(overrides[0].Kind == PrefabOverrideKind::Field);
 			CHECK(overrides[0].Component == "Transform");
 			CHECK(overrides[0].Field == "Scale");
@@ -352,7 +386,7 @@ namespace Engine {
 			REQUIRE(PrefabInstantiator::RefreshOverrides(*root, prefab, PrefabOptions{}).has_value());
 			const std::vector<PrefabOverride> overrides = root->GetComponent<PrefabInstanceComponent>().Overrides;
 			REQUIRE(overrides.size() == 1);
-			CHECK(overrides[0].PrefabEntityID == UUID(0x00000000000b0002));
+			CHECK(overrides[0].Path == std::vector<UUID>{ UUID(0x00000000000b0002) });
 			CHECK(overrides[0].Kind == PrefabOverrideKind::EntityKey);
 			CHECK(overrides[0].Component.empty());
 			CHECK(overrides[0].Field == "Active");
@@ -457,7 +491,7 @@ namespace Engine {
 			REQUIRE(PrefabInstantiator::RefreshOverrides(*root, prefab, PrefabOptions{}).has_value());
 			const std::vector<PrefabOverride> recorded = root->GetComponent<PrefabInstanceComponent>().Overrides;
 			REQUIRE(recorded.size() == 3);
-			CHECK(recorded[0].PrefabEntityID == UUID(0x00000000000b0001));
+			CHECK(recorded[0].Path == std::vector<UUID>{ UUID(0x00000000000b0001) });
 			CHECK(recorded[0].Kind == PrefabOverrideKind::EntityKey);
 			CHECK(recorded[0].Field == "Tags");
 			CHECK(recorded[0].Value.Get() == Json::array({ "Spawner" }));
@@ -764,7 +798,7 @@ namespace Engine {
 			REQUIRE(instance.Overrides.size() == recorded.size());
 			for (size_t index = 0; index < recorded.size(); ++index)
 			{
-				CHECK(instance.Overrides[index].PrefabEntityID == recorded[index].PrefabEntityID);
+				CHECK(instance.Overrides[index].Path == recorded[index].Path);
 				CHECK(instance.Overrides[index].Kind == recorded[index].Kind);
 				CHECK(instance.Overrides[index].Component == recorded[index].Component);
 				CHECK(instance.Overrides[index].Field == recorded[index].Field);
@@ -875,12 +909,12 @@ namespace Engine {
 			REQUIRE(PrefabInstantiator::RefreshOverrides(*root, turret, options).has_value());
 			const std::vector<PrefabOverride> recorded = root->GetComponent<PrefabInstanceComponent>().Overrides;
 			REQUIRE(recorded.size() == 2);
-			CHECK(recorded[0].PrefabEntityID == UUID(0x00000000000d0001));
+			CHECK(recorded[0].Path == std::vector<UUID>{ UUID(0x00000000000d0001) });
 			CHECK(recorded[0].Kind == PrefabOverrideKind::Field);
 			CHECK(recorded[0].Component == "Script");
 			CHECK(recorded[0].Field == "Fields");
 			CHECK(recorded[0].Value.Get()["Goal"] == Json(muzzle.GetUUID().ToString()));
-			CHECK(recorded[1].PrefabEntityID == UUID(0x00000000000d0002));
+			CHECK(recorded[1].Path == std::vector<UUID>{ UUID(0x00000000000d0002) });
 			CHECK(recorded[1].Kind == PrefabOverrideKind::AddComponent);
 			CHECK(recorded[1].Value.Get()["Fields"]["Goal"] == "00000000000d0001");
 
@@ -909,53 +943,11 @@ namespace Engine {
 			CHECK(remaining->empty());
 		}
 
-		TEST_CASE("PrefabInstantiator: an instance of a prefab created from nested instances is one flat instance")
-		{
-			Test::SceneTestFixture setup;
-			Scene& scene = setup.GetScene();
-			const Prefab block = LoadBlockPrefab(setup.GetRegistry());
-			LoadReport report;
-			const UUID outerID(0x6c6c);
-			const UUID innerID(0x6d6d);
-			const Result<Entity> outer = PrefabInstantiator::Instantiate(scene, block, MakeOptions(outerID), PrefabOptions{}, report);
-			REQUIRE(outer.has_value());
-			PrefabInstantiateOptions innerOptions = MakeOptions(innerID);
-			innerOptions.Parent = *outer;
-			REQUIRE(PrefabInstantiator::Instantiate(scene, block, innerOptions, PrefabOptions{}, report).has_value());
-
-			const Result<Prefab> tower = Prefab::CreateFromEntity(*outer, "Tower");
-			REQUIRE(tower.has_value());
-			const UUID outerVisual = PrefabInstantiator::DeriveInstanceID(outerID, UUID(0x00000000000b0002));
-			const UUID innerVisual = PrefabInstantiator::DeriveInstanceID(innerID, UUID(0x00000000000b0002));
-			CHECK(tower->GetEntityIDs() == std::vector<UUID>{ outerID, outerVisual, innerID, innerVisual });
-			for (const Json& entity : tower->GetEntities())
-			{
-				CHECK_FALSE(entity["Components"].contains("Prefab"));
-				CHECK_FALSE(entity["Components"].contains("PrefabLink"));
-			}
-
-			// An instance of the new prefab is one flat instance: one root, every entity a member linked to it.
-			const UUID towerID(0x6e6e);
-			const Result<Entity> instance = PrefabInstantiator::Instantiate(scene, *tower, MakeOptions(towerID), PrefabOptions{}, report);
-			REQUIRE(instance.has_value());
-			for (const UUID prefabID : tower->GetEntityIDs())
-			{
-				const Entity member = scene.FindEntityByID(prefabID == outerID ? towerID : PrefabInstantiator::DeriveInstanceID(towerID, prefabID));
-				REQUIRE(member.IsValid());
-				CHECK(member.GetComponent<PrefabLinkComponent>().InstanceRoot == towerID);
-				CHECK(member.GetComponent<PrefabLinkComponent>().PrefabEntityID == prefabID);
-				CHECK(member.HasComponent<PrefabInstanceComponent>() == (prefabID == outerID));
-			}
-			const Result<std::vector<PrefabOverride>> overrides = PrefabInstantiator::ComputeOverrides(*instance, *tower, PrefabOptions{});
-			REQUIRE(overrides.has_value());
-			CHECK(overrides->empty());
-		}
-
 		// Docs/Decisions/0031-m20-contract.md decision 8 (E-PFB-NEST): creating a prefab flattened the instances inside it.
 		// An instance wholly inside the subtree stays live in the new prefab, outermost there; the instance of the subtree's
 		// root is unpacked in the copy. An instance of the new prefab holds the nested instance as an instance of its own
 		// prefab at a derived root id, whose OuterPrefabEntityID names its id in the new prefab, and has no overrides.
-		TEST_CASE("Prefab: CreateFromEntity keeps a nested instance live" * doctest::skip(true))
+		TEST_CASE("Prefab: CreateFromEntity keeps a nested instance live")
 		{
 			Test::SceneTestFixture setup;
 			Scene& scene = setup.GetScene();
@@ -1021,7 +1013,7 @@ namespace Engine {
 		// Docs/Decisions/0031-m20-contract.md decision 8: an override targets an entity by its path from the outermost
 		// instance: the nested root's id in the outer prefab, then the member's id in the nested prefab. The levels of a
 		// nested member are its outermost root, then its nested root.
-		TEST_CASE("PrefabInstantiator: a nested member's override path names the nested root and the member" * doctest::skip(true))
+		TEST_CASE("PrefabInstantiator: a nested member's override path names the nested root and the member")
 		{
 			Test::SceneTestFixture setup;
 			Scene& scene = setup.GetScene();
@@ -1084,11 +1076,358 @@ namespace Engine {
 			CHECK(nested.GetComponent<PrefabInstanceComponent>().Overrides.empty());
 		}
 
+		// Docs/Decisions/0031-m20-contract.md decision 8 (Roadmap M20 acceptance "inner edits propagate"): a new version of a
+		// nested prefab reaches a document nesting it, whose nested instance is rebuilt from it keeping the record the
+		// document holds for it, and then every instance of that document, whose own overrides of the nested instance's
+		// entities (recorded on the outermost root by path) stay in force.
+		TEST_CASE("PrefabInstantiator: a nested prefab's new version reaches the prefab nesting it and its instances, every record kept")
+		{
+			Test::SceneTestFixture setup;
+			Scene& scene = setup.GetScene();
+			const Prefab block = LoadBlockPrefab(setup.GetRegistry());
+			const Prefab shelf = MakeShelfPrefab(setup, block);
+			CHECK(GetDocumentInstance(shelf, UUID(0x7a7a))["Overrides"].size() == 1);
+
+			LoadReport report;
+			const UUID rootID(0x7b7b);
+			const Result<Entity> root = PrefabInstantiator::Instantiate(scene, shelf, MakeOptions(rootID), PrefabOptions{}, report);
+			REQUIRE(root.has_value());
+			const UUID nestedID = PrefabInstantiator::DeriveInstanceID(rootID, UUID(0x7a7a));
+			const UUID visualID = PrefabInstantiator::DeriveInstanceID(nestedID, UUID(0x00000000000b0002));
+			const Entity visual = scene.FindEntityByID(visualID);
+			REQUIRE(visual.IsValid());
+			CHECK_FALSE(visual.GetComponent<MeshRendererComponent>().ReceiveShadows);
+			CHECK(scene.FindEntityByID(nestedID).GetComponent<PrefabInstanceComponent>().Overrides.empty());
+
+			// The scene's instance moves the nested Visual: recorded on the outermost root by its path.
+			visual.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(1.0f, 2.0f, 3.0f);
+			});
+			REQUIRE(PrefabInstantiator::RefreshOverrides(*root, shelf, PrefabOptions{}).has_value());
+			REQUIRE(root->GetComponent<PrefabInstanceComponent>().Overrides.size() == 1);
+			CHECK(root->GetComponent<PrefabInstanceComponent>().Overrides[0].Path == std::vector<UUID>{ UUID(0x7a7a), UUID(0x00000000000b0002) });
+
+			// Block gets a new version (another mesh, no shadows cast, a new child Light): the shelf's document is rewritten.
+			const Prefab edited = EditBlockPrefab(setup.GetRegistry(), block);
+			const std::map<AssetHandle, Prefab> versions{ { AssetHandle(0x3c9f2e7a11d04b88), edited } };
+			LoadReport updateReport;
+			const Result<Prefab> rewritten = UpdateNestedPrefabInstances(shelf, setup.GetRegistry(), versions, PrefabOptions{}, updateReport);
+			REQUIRE_MESSAGE(rewritten.has_value(), (rewritten ? std::string() : rewritten.error().ToString()));
+			const Json* rewrittenVisual = rewritten->FindEntity(PrefabInstantiator::DeriveInstanceID(UUID(0x7a7a), UUID(0x00000000000b0002)));
+			REQUIRE(rewrittenVisual != nullptr);
+			CHECK((*rewrittenVisual)["Components"]["MeshRenderer"]["Mesh"] == Json("0000000000000105"));
+			CHECK((*rewrittenVisual)["Components"]["MeshRenderer"]["ReceiveShadows"] == Json(false));
+			CHECK(rewritten->FindEntity(PrefabInstantiator::DeriveInstanceID(UUID(0x7a7a), UUID(0x00000000000b0003))) != nullptr);
+			CHECK(GetDocumentInstance(*rewritten, UUID(0x7a7a))["Overrides"].size() == 1);
+			// A document whose nested prefabs did not change is rewritten as it was.
+			const Result<Prefab> unchanged = UpdateNestedPrefabInstances(shelf, setup.GetRegistry(), {}, PrefabOptions{}, updateReport);
+			REQUIRE(unchanged.has_value());
+			const Result<std::string> unchangedText = unchanged->SaveToString();
+			const Result<std::string> shelfText = shelf.SaveToString();
+			REQUIRE(unchangedText.has_value());
+			REQUIRE(shelfText.has_value());
+			CHECK(*unchangedText == *shelfText);
+
+			// The scene's instance follows the rewritten shelf: the new mesh and child, the shelf's record and its own move.
+			REQUIRE(PrefabInstantiator::UpdateInstance(scene, *root, *rewritten, PrefabOptions{}, report).has_value());
+			const Entity updated = scene.FindEntityByID(visualID);
+			REQUIRE(updated.IsValid());
+			CHECK(updated.GetComponent<MeshRendererComponent>().Mesh.GetHandle() == AssetHandle(0x105));
+			CHECK_FALSE(updated.GetComponent<MeshRendererComponent>().ReceiveShadows);
+			CHECK_FALSE(updated.GetComponent<MeshRendererComponent>().CastShadows);
+			CHECK(updated.GetComponent<TransformComponent>().Translation == glm::vec3(1.0f, 2.0f, 3.0f));
+			const Entity light = scene.FindEntityByID(PrefabInstantiator::DeriveInstanceID(nestedID, UUID(0x00000000000b0003)));
+			REQUIRE(light.IsValid());
+			CHECK(light.GetComponent<PrefabLinkComponent>().InstanceRoot == nestedID);
+			CHECK(root->GetComponent<PrefabInstanceComponent>().Overrides.size() == 1);
+			CHECK(scene.FindEntityByID(nestedID).GetComponent<PrefabInstanceComponent>().Overrides.empty());
+		}
+
+		// Decision 8: an instance is rebuilt, diffed and applied from its outermost root only, so the operations refuse a
+		// nested root, naming the root to use; a nested root whose enclosing instance is gone has no levels.
+		TEST_CASE("PrefabInstantiator: a nested instance root refuses its outermost instance's operations and names that root")
+		{
+			Test::SceneTestFixture setup;
+			Scene& scene = setup.GetScene();
+			const Prefab block = LoadBlockPrefab(setup.GetRegistry());
+			const Prefab shelf = MakeShelfPrefab(setup, block);
+			LoadReport report;
+			const UUID rootID(0x7b7b);
+			REQUIRE(PrefabInstantiator::Instantiate(scene, shelf, MakeOptions(rootID), PrefabOptions{}, report).has_value());
+			const Entity nested = scene.FindEntityByID(PrefabInstantiator::DeriveInstanceID(rootID, UUID(0x7a7a)));
+			REQUIRE(nested.IsValid());
+
+			const auto checkRefused = [rootID](const Error& error)
+			{
+				CHECK(error.GetCode() == ErrorCode::InvalidArgument);
+				CHECK(error.ToString().contains(rootID.ToString()));
+			};
+			const Status updated = PrefabInstantiator::UpdateInstance(scene, nested, block, PrefabOptions{}, report);
+			REQUIRE_FALSE(updated.has_value());
+			checkRefused(updated.error());
+			const Status reverted = PrefabInstantiator::Revert(scene, nested, block, PrefabOptions{}, report);
+			REQUIRE_FALSE(reverted.has_value());
+			checkRefused(reverted.error());
+			const Status refreshed = PrefabInstantiator::RefreshOverrides(nested, block, PrefabOptions{});
+			REQUIRE_FALSE(refreshed.has_value());
+			checkRefused(refreshed.error());
+			const Status unpacked = PrefabInstantiator::Unpack(nested);
+			REQUIRE_FALSE(unpacked.has_value());
+			checkRefused(unpacked.error());
+			const Result<std::vector<PrefabOverride>> computed = PrefabInstantiator::ComputeOverrides(nested, block, PrefabOptions{});
+			REQUIRE_FALSE(computed.has_value());
+			checkRefused(computed.error());
+			const Result<Prefab> applied = PrefabInstantiator::ApplyOverrides(nested, block, PrefabOptions{});
+			REQUIRE_FALSE(applied.has_value());
+			checkRefused(applied.error());
+			CHECK(nested.HasComponent<PrefabInstanceComponent>());
+
+			// An OuterPrefabEntityID that no ancestor instance root derives is a broken chain; an entity outside every
+			// instance has no override path.
+			const Entity orphan = scene.CreateEntity("Orphan");
+			orphan.AddComponent<PrefabInstanceComponent>();
+			orphan.AddComponent<PrefabLinkComponent>(PrefabLinkComponent{ UUID(0x00000000000b0001), orphan.GetUUID(), UUID(0x99) });
+			const Result<std::vector<Entity>> levels = PrefabInstantiator::GetInstanceLevels(orphan);
+			REQUIRE_FALSE(levels.has_value());
+			CHECK(levels.error().GetCode() == ErrorCode::InvalidState);
+			const Result<std::vector<UUID>> path = PrefabInstantiator::GetOverridePath(scene.CreateEntity("Plain"));
+			REQUIRE_FALSE(path.has_value());
+			CHECK(path.error().GetCode() == ErrorCode::InvalidArgument);
+		}
+
+		// Decision 8: unpacking an outermost instance unpacks one level. Its own links go, and each instance nested directly
+		// in it becomes outermost, taking over the overrides the outermost root recorded within it, re-based onto it.
+		TEST_CASE("PrefabInstantiator: unpack makes the instances nested in the instance outermost with the overrides recorded for them")
+		{
+			Test::SceneTestFixture setup;
+			Scene& scene = setup.GetScene();
+			const Prefab block = LoadBlockPrefab(setup.GetRegistry());
+			const Prefab shelf = MakeShelfPrefab(setup, block);
+			LoadReport report;
+			const UUID rootID(0x7b7b);
+			const Result<Entity> root = PrefabInstantiator::Instantiate(scene, shelf, MakeOptions(rootID), PrefabOptions{}, report);
+			REQUIRE(root.has_value());
+			const UUID nestedID = PrefabInstantiator::DeriveInstanceID(rootID, UUID(0x7a7a));
+			const UUID visualID = PrefabInstantiator::DeriveInstanceID(nestedID, UUID(0x00000000000b0002));
+			scene.FindEntityByID(visualID).Patch<MeshRendererComponent>([](MeshRendererComponent& renderer)
+			{
+				renderer.Visible = false;
+			});
+			REQUIRE(PrefabInstantiator::RefreshOverrides(*root, shelf, PrefabOptions{}).has_value());
+
+			REQUIRE(PrefabInstantiator::Unpack(*root).has_value());
+			CHECK_FALSE(root->HasComponent<PrefabInstanceComponent>());
+			CHECK_FALSE(root->HasComponent<PrefabLinkComponent>());
+			const Entity nested = scene.FindEntityByID(nestedID);
+			REQUIRE(nested.IsValid());
+			CHECK_FALSE(nested.GetComponent<PrefabLinkComponent>().OuterPrefabEntityID.IsValid());
+			const std::vector<PrefabOverride>& moved = nested.GetComponent<PrefabInstanceComponent>().Overrides;
+			REQUIRE(moved.size() == 1);
+			CHECK(moved[0].Path == std::vector<UUID>{ UUID(0x00000000000b0002) });
+			CHECK(moved[0].Field == "Visible");
+			CHECK(scene.FindEntityByID(visualID).GetComponent<PrefabLinkComponent>().InstanceRoot == nestedID);
+			// It is an instance of its own now: an update from its prefab keeps the moved override.
+			REQUIRE(PrefabInstantiator::UpdateInstance(scene, nested, block, PrefabOptions{}, report).has_value());
+			CHECK_FALSE(scene.FindEntityByID(visualID).GetComponent<MeshRendererComponent>().Visible);
+		}
+
+		// Decision 9: prefab.apply at a nested level writes the overrides within that instance into its prefab, re-based onto
+		// it; the level root's Name and Transform are its placement and never reach its prefab, its other overrides do. At the
+		// outermost level, an edit of a nested instance becomes that instance's own override in the document nesting it.
+		TEST_CASE("PrefabInstantiator: apply at a level writes the overrides within it into the level's prefab, the level root's placement left out")
+		{
+			Test::SceneTestFixture setup;
+			Scene& scene = setup.GetScene();
+			const Prefab block = LoadBlockPrefab(setup.GetRegistry());
+			const Prefab shelf = MakeShelfPrefab(setup, block);
+			LoadReport report;
+			const UUID rootID(0x7b7b);
+			const Result<Entity> root = PrefabInstantiator::Instantiate(scene, shelf, MakeOptions(rootID), PrefabOptions{}, report);
+			REQUIRE(root.has_value());
+			const Entity nested = scene.FindEntityByID(PrefabInstantiator::DeriveInstanceID(rootID, UUID(0x7a7a)));
+			const Entity visual = scene.FindEntityByID(PrefabInstantiator::DeriveInstanceID(nested.GetUUID(), UUID(0x00000000000b0002)));
+			REQUIRE(nested.IsValid());
+			REQUIRE(visual.IsValid());
+			nested.SetName("Lantern");
+			nested.AddTag("Lit");
+			nested.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(5.0f, 0.0f, 0.0f);
+			});
+			visual.Patch<MeshRendererComponent>([](MeshRendererComponent& renderer)
+			{
+				renderer.Visible = false;
+			});
+			REQUIRE(PrefabInstantiator::RefreshOverrides(*root, shelf, PrefabOptions{}).has_value());
+			REQUIRE(root->GetComponent<PrefabInstanceComponent>().Overrides.size() == 4);
+
+			const Result<std::vector<Entity>> levels = PrefabInstantiator::GetInstanceLevels(nested);
+			REQUIRE(levels.has_value());
+			CHECK(*levels == std::vector<Entity>{ *root, nested });
+
+			// At the Block level: the tag and the Visual's edit, never the name or the move.
+			const Result<Prefab> atBlock = PrefabInstantiator::ApplyOverrides(nested, nested, block, PrefabOptions{});
+			REQUIRE_MESSAGE(atBlock.has_value(), (atBlock ? std::string() : atBlock.error().ToString()));
+			const Json* blockRoot = atBlock->FindEntity(UUID(0x00000000000b0001));
+			const Json* blockVisual = atBlock->FindEntity(UUID(0x00000000000b0002));
+			REQUIRE(blockRoot != nullptr);
+			REQUIRE(blockVisual != nullptr);
+			CHECK((*blockRoot)["Tags"] == Json::array({ "Lit" }));
+			CHECK((*blockRoot)["Name"] == Json("Block"));
+			CHECK((*blockRoot)["Components"]["Transform"]["Translation"] == Json::array({ 0, 0, 0 }));
+			CHECK((*blockVisual)["Components"]["MeshRenderer"]["Visible"] == Json(false));
+			CHECK((*blockVisual)["Components"]["MeshRenderer"]["ReceiveShadows"] == Json(true));
+
+			// At the Shelf level for the nested instance: written into the shelf's document, where the nested root's own record
+			// gains the tag and the Visual's edit beside the record it had; its name and move are the shelf's own data.
+			const Result<Prefab> atShelf = PrefabInstantiator::ApplyOverrides(nested, *root, shelf, PrefabOptions{});
+			REQUIRE_MESSAGE(atShelf.has_value(), (atShelf ? std::string() : atShelf.error().ToString()));
+			const Json* shelfNested = atShelf->FindEntity(UUID(0x7a7a));
+			REQUIRE(shelfNested != nullptr);
+			CHECK((*shelfNested)["Name"] == Json("Lantern"));
+			CHECK((*shelfNested)["Components"]["Transform"]["Translation"] == Json::array({ 5, 0, 0 }));
+			const Json record = (*shelfNested)["Components"]["Prefab"]["Overrides"];
+			REQUIRE(record.size() == 3);
+			CHECK(record[0]["Path"] == Json::array({ UUID(0x00000000000b0001).ToString() }));
+			CHECK(record[0]["Field"] == Json("Tags"));
+			CHECK(record[1]["Field"] == Json("ReceiveShadows"));
+			CHECK(record[2]["Field"] == Json("Visible"));
+			// The applied shelf instantiates to the same state: the record reproduces the edits.
+			const Scope<Scene> check = setup.CreateEmptyScene();
+			const Result<Entity> reloaded = PrefabInstantiator::Instantiate(*check, *atShelf, MakeOptions(rootID), PrefabOptions{}, report);
+			REQUIRE(reloaded.has_value());
+			const ConstEntity reloadedVisual = std::as_const(*check).FindEntityByID(visual.GetUUID());
+			REQUIRE(reloadedVisual.IsValid());
+			CHECK_FALSE(reloadedVisual.GetComponent<MeshRendererComponent>().Visible);
+
+			// A level that is not one of the instance's is refused.
+			const Result<Prefab> wrong = PrefabInstantiator::ApplyOverrides(nested, visual, block, PrefabOptions{});
+			REQUIRE_FALSE(wrong.has_value());
+			CHECK(wrong.error().GetCode() == ErrorCode::InvalidArgument);
+		}
+
+		// Decision 9 through the two-argument apply: writing the instance's state into its prefab keeps the nested instance
+		// live, its record composed with the instance's edits of it, so a later rebuild from the nested prefab keeps them.
+		TEST_CASE("PrefabInstantiator: apply records the edit of a nested instance as its own override in the prefab nesting it")
+		{
+			Test::SceneTestFixture setup;
+			Scene& scene = setup.GetScene();
+			const Prefab block = LoadBlockPrefab(setup.GetRegistry());
+			const Prefab shelf = MakeShelfPrefab(setup, block);
+			LoadReport report;
+			const UUID rootID(0x7b7b);
+			const Result<Entity> root = PrefabInstantiator::Instantiate(scene, shelf, MakeOptions(rootID), PrefabOptions{}, report);
+			REQUIRE(root.has_value());
+			const UUID nestedID = PrefabInstantiator::DeriveInstanceID(rootID, UUID(0x7a7a));
+			scene.FindEntityByID(PrefabInstantiator::DeriveInstanceID(nestedID, UUID(0x00000000000b0002))).Patch<MeshRendererComponent>([](MeshRendererComponent& renderer)
+			{
+				renderer.CastShadows = false;
+			});
+
+			const Result<Prefab> applied = PrefabInstantiator::ApplyOverrides(*root, shelf, PrefabOptions{});
+			REQUIRE_MESSAGE(applied.has_value(), (applied ? std::string() : applied.error().ToString()));
+			const Json instance = GetDocumentInstance(*applied, UUID(0x7a7a));
+			REQUIRE(instance["Overrides"].size() == 2);
+			CHECK(instance["Overrides"][0]["Field"] == Json("CastShadows"));
+			CHECK(instance["Overrides"][1]["Field"] == Json("ReceiveShadows"));
+			const Json* nested = applied->FindEntity(UUID(0x7a7a));
+			REQUIRE(nested != nullptr);
+			CHECK((*nested)["Components"]["PrefabLink"]["InstanceRoot"] == Json(UUID(0x7a7a).ToString()));
+			CHECK((*nested)["Components"]["PrefabLink"]["OuterPrefabEntityID"].is_null());
+
+			// The nested prefab gets a new version: the rewritten document keeps both edits.
+			const Prefab edited = EditBlockPrefab(setup.GetRegistry(), block);
+			const std::map<AssetHandle, Prefab> versions{ { AssetHandle(0x3c9f2e7a11d04b88), edited } };
+			const Result<Prefab> rewritten = UpdateNestedPrefabInstances(*applied, setup.GetRegistry(), versions, PrefabOptions{}, report);
+			REQUIRE(rewritten.has_value());
+			const Json* visual = rewritten->FindEntity(PrefabInstantiator::DeriveInstanceID(UUID(0x7a7a), UUID(0x00000000000b0002)));
+			REQUIRE(visual != nullptr);
+			CHECK((*visual)["Components"]["MeshRenderer"]["Mesh"] == Json("0000000000000105"));
+			CHECK((*visual)["Components"]["MeshRenderer"]["ReceiveShadows"] == Json(false));
+			CHECK((*visual)["Components"]["MeshRenderer"]["CastShadows"] == Json(false));
+		}
+
+		// Decision 8: a prefab created from an instance keeps the instances nested in it live, outermost in the new document.
+		// Prefab::CreateFromEntity moves onto each the overrides its enclosing instance recorded for it; the document nesting
+		// it in the enclosing prefab may record more (here the shelf's record of the Visual's shadows), which only its own
+		// prefab can tell, so the editor recomputes each record against its prefab (RefreshNestedPrefabOverrides).
+		TEST_CASE("PrefabInstantiator: a prefab created from an instance moves the nested instance's overrides, and a refresh recomputes them")
+		{
+			Test::SceneTestFixture setup;
+			Scene& scene = setup.GetScene();
+			const Prefab block = LoadBlockPrefab(setup.GetRegistry());
+			const Prefab shelf = MakeShelfPrefab(setup, block);
+			LoadReport report;
+			const UUID rootID(0x7b7b);
+			const Result<Entity> root = PrefabInstantiator::Instantiate(scene, shelf, MakeOptions(rootID), PrefabOptions{}, report);
+			REQUIRE(root.has_value());
+			const UUID nestedID = PrefabInstantiator::DeriveInstanceID(rootID, UUID(0x7a7a));
+			scene.FindEntityByID(PrefabInstantiator::DeriveInstanceID(nestedID, UUID(0x00000000000b0002))).Patch<MeshRendererComponent>([](MeshRendererComponent& renderer)
+			{
+				renderer.Visible = false;
+			});
+			REQUIRE(PrefabInstantiator::RefreshOverrides(*root, shelf, PrefabOptions{}).has_value());
+
+			const Result<Prefab> created = Prefab::CreateFromEntity(*root, "Case");
+			REQUIRE_MESSAGE(created.has_value(), (created ? std::string() : created.error().ToString()));
+			const Json* createdRoot = created->FindEntity(rootID);
+			REQUIRE(createdRoot != nullptr);
+			CHECK_FALSE((*createdRoot)["Components"].contains("Prefab"));
+			const Json moved = GetDocumentInstance(*created, nestedID);
+			REQUIRE(moved["Overrides"].size() == 1);
+			CHECK(moved["Overrides"][0]["Path"] == Json::array({ UUID(0x00000000000b0002).ToString() }));
+			CHECK(moved["Overrides"][0]["Field"] == Json("Visible"));
+			const Json* createdNested = created->FindEntity(nestedID);
+			REQUIRE(createdNested != nullptr);
+			CHECK((*createdNested)["Components"]["PrefabLink"]["OuterPrefabEntityID"].is_null());
+
+			const std::map<AssetHandle, Prefab> versions{ { AssetHandle(0x3c9f2e7a11d04b88), block } };
+			const Result<Prefab> refreshed = RefreshNestedPrefabOverrides(*created, setup.GetRegistry(), versions, PrefabOptions{});
+			REQUIRE_MESSAGE(refreshed.has_value(), (refreshed ? std::string() : refreshed.error().ToString()));
+			const Json record = GetDocumentInstance(*refreshed, nestedID);
+			REQUIRE(record["Overrides"].size() == 2);
+			CHECK(record["Overrides"][0]["Field"] == Json("ReceiveShadows"));
+			CHECK(record["Overrides"][1]["Field"] == Json("Visible"));
+			// The entities stay as they were.
+			const Json* refreshedVisual = refreshed->FindEntity(PrefabInstantiator::DeriveInstanceID(nestedID, UUID(0x00000000000b0002)));
+			const Json* createdVisual = created->FindEntity(PrefabInstantiator::DeriveInstanceID(nestedID, UUID(0x00000000000b0002)));
+			REQUIRE(refreshedVisual != nullptr);
+			REQUIRE(createdVisual != nullptr);
+			CHECK(*refreshedVisual == *createdVisual);
+		}
+
+		// Decisions 7 and 8: a member of a nested instance deleted from the outermost instance is recorded by its path and
+		// stays deleted across updates; revert brings it back.
+		TEST_CASE("PrefabInstantiator: a deleted member of a nested instance is recorded by its path and stays deleted")
+		{
+			Test::SceneTestFixture setup;
+			Scene& scene = setup.GetScene();
+			const Prefab block = LoadBlockPrefab(setup.GetRegistry());
+			const Prefab shelf = MakeShelfPrefab(setup, block);
+			LoadReport report;
+			const UUID rootID(0x7b7b);
+			const Result<Entity> root = PrefabInstantiator::Instantiate(scene, shelf, MakeOptions(rootID), PrefabOptions{}, report);
+			REQUIRE(root.has_value());
+			const UUID visualID = PrefabInstantiator::DeriveInstanceID(PrefabInstantiator::DeriveInstanceID(rootID, UUID(0x7a7a)), UUID(0x00000000000b0002));
+			scene.DestroyEntity(scene.FindEntityByID(visualID));
+			REQUIRE(PrefabInstantiator::RefreshOverrides(*root, shelf, PrefabOptions{}).has_value());
+			const std::vector<PrefabOverride>& recorded = root->GetComponent<PrefabInstanceComponent>().Overrides;
+			REQUIRE(recorded.size() == 1);
+			CHECK(recorded[0].Kind == PrefabOverrideKind::RemoveEntity);
+			CHECK(recorded[0].Path == std::vector<UUID>{ UUID(0x7a7a), UUID(0x00000000000b0002) });
+
+			REQUIRE(PrefabInstantiator::UpdateInstance(scene, *root, shelf, PrefabOptions{}, report).has_value());
+			CHECK_FALSE(scene.FindEntityByID(visualID).IsValid());
+			REQUIRE(PrefabInstantiator::Revert(scene, *root, shelf, PrefabOptions{}, report).has_value());
+			CHECK(scene.FindEntityByID(visualID).IsValid());
+		}
+
 		// Docs/Decisions/0031-m20-contract.md decision 7 (E-PFB-DEL; Roadmap M20 acceptance "A deleted prefab member stays
 		// deleted after an update"): no override recorded a deleted member, so the next update rebuilt it. The diff records
 		// one RemoveEntity for the top of the removed subtree; updates build neither it nor its descendants; revert brings
 		// them back with their derived ids.
-		TEST_CASE("PrefabInstantiator: a deleted prefab member stays deleted after an update" * doctest::skip(true))
+		TEST_CASE("PrefabInstantiator: a deleted prefab member stays deleted after an update")
 		{
 			Test::SceneTestFixture setup;
 			Scene& scene = setup.GetScene();
@@ -1136,6 +1475,106 @@ namespace Engine {
 			CHECK(scene.FindEntityByID(aID).IsValid());
 			CHECK(scene.FindEntityByID(bID).IsValid());
 			CHECK(root->GetComponent<PrefabInstanceComponent>().Overrides.empty());
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 7: a RemoveEntity applies to an entity the prefab still has below its
+		// root, and an override of an entity it removes has nothing to change; each is dropped with a warning instead, as a
+		// stale override is.
+		TEST_CASE("PrefabInstantiator: RemoveEntity overrides that no longer apply and overrides of removed entities are dropped with a warning")
+		{
+			Test::SceneTestFixture setup;
+			Scene& scene = setup.GetScene();
+			const Prefab chain = ParsePrefab(setup.GetRegistry(), ChainPrefab);
+			LoadReport report;
+			const UUID rootID(0x4f4f);
+			const Result<Entity> root = PrefabInstantiator::Instantiate(scene, chain, MakeOptions(rootID), PrefabOptions{}, report);
+			REQUIRE(root.has_value());
+			const UUID a(0x00000000000f0002);
+			const UUID b(0x00000000000f0003);
+			root->Patch<PrefabInstanceComponent>([a, b](PrefabInstanceComponent& instance)
+			{
+				instance.Overrides = {
+					MakeOverride(a, PrefabOverrideKind::RemoveEntity, "", "", Json()),
+					MakeOverride(b, PrefabOverrideKind::RemoveEntity, "", "", Json()),
+					MakeOverride(b, PrefabOverrideKind::Field, "Transform", "Scale", Json::array({ 2, 2, 2 })),
+					MakeOverride(UUID(0x00000000000f0001), PrefabOverrideKind::RemoveEntity, "", "", Json()),
+					MakeOverride(UUID(0x00000000000f0009), PrefabOverrideKind::RemoveEntity, "", "", Json()),
+				};
+			});
+
+			// Only A's RemoveEntity applies: B's is below it, the root cannot be removed, and the prefab has no f0009.
+			LoadReport updateReport;
+			REQUIRE(PrefabInstantiator::UpdateInstance(scene, *root, chain, PrefabOptions{}, updateReport).has_value());
+			CHECK(CountDiagnostics(updateReport, PrefabStaleOverrideCode) == 4);
+			const std::vector<PrefabOverride>& kept = root->GetComponent<PrefabInstanceComponent>().Overrides;
+			REQUIRE(kept.size() == 1);
+			CHECK(kept[0].Path == std::vector<UUID>{ a });
+			CHECK(kept[0].Kind == PrefabOverrideKind::RemoveEntity);
+			CHECK_FALSE(scene.FindEntityByID(PrefabInstantiator::DeriveInstanceID(rootID, a)).IsValid());
+			CHECK_FALSE(scene.FindEntityByID(PrefabInstantiator::DeriveInstanceID(rootID, b)).IsValid());
+			CHECK(root->IsValid());
+			CHECK(scene.GetEntityCount() == 1);
+
+			// The prefab without A: its RemoveEntity is stale too, and nothing is left to remove.
+			const Prefab rootOnly = RemovePrefabEntities(setup.GetRegistry(), chain, { 2, 1 });
+			LoadReport staleReport;
+			REQUIRE(PrefabInstantiator::UpdateInstance(scene, *root, rootOnly, PrefabOptions{}, staleReport).has_value());
+			CHECK(CountDiagnostics(staleReport, PrefabStaleOverrideCode) == 1);
+			CHECK(root->GetComponent<PrefabInstanceComponent>().Overrides.empty());
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 7: prefab.apply of an instance with a deleted member writes a prefab
+		// without it and its descendants. A reference to the deleted member keeps the prefab-local ID the prefab had, which
+		// names no entity any more; an entity that took the member's ID since is outside the instance and is kept as it is.
+		TEST_CASE("PrefabInstantiator: apply leaves a deleted member out and keeps a reference to it in prefab space")
+		{
+			Test::SceneTestFixture setup;
+			Scene& scene = setup.GetScene();
+			const Test::FixtureSchemaSource schemas = Test::FixtureSchemaSource::CreateStandard();
+			PrefabOptions options;
+			options.Schemas = &schemas;
+			const Prefab turret = ParsePrefab(setup.GetRegistry(), TurretPrefab, &schemas);
+			LoadReport report;
+			const UUID rootID(0x7c7c);
+			const UUID barrelID = PrefabInstantiator::DeriveInstanceID(rootID, UUID(0x00000000000d0002));
+			const Result<Entity> root = PrefabInstantiator::Instantiate(scene, turret, MakeOptions(rootID), options, report);
+			REQUIRE(root.has_value());
+
+			// The barrel, which the root's Goal names, is deleted.
+			scene.DestroyEntity(scene.FindEntityByID(barrelID));
+			REQUIRE(PrefabInstantiator::RefreshOverrides(*root, turret, options).has_value());
+			const std::vector<PrefabOverride> recorded = root->GetComponent<PrefabInstanceComponent>().Overrides;
+			REQUIRE(recorded.size() == 1);
+			CHECK(recorded[0].Path == std::vector<UUID>{ UUID(0x00000000000d0002) });
+			CHECK(recorded[0].Kind == PrefabOverrideKind::RemoveEntity);
+
+			const Result<Prefab> applied = PrefabInstantiator::ApplyOverrides(*root, turret, options);
+			REQUIRE(applied.has_value());
+			CHECK(applied->GetEntityIDs() == std::vector<UUID>{ UUID(0x00000000000d0001) });
+			const Json* appliedRoot = applied->FindEntity(UUID(0x00000000000d0001));
+			REQUIRE(appliedRoot != nullptr);
+			CHECK((*appliedRoot)["Components"]["Script"]["Fields"]["Goal"] == "00000000000d0002");
+
+			// Reverting to the applied prefab leaves nothing to override.
+			REQUIRE(PrefabInstantiator::Revert(scene, *root, *applied, options, report).has_value());
+			CHECK(root->GetComponent<PrefabInstanceComponent>().Overrides.empty());
+			CHECK(root->GetComponent<ScriptComponent>().Fields.at("Goal").Get() == Json("00000000000d0002"));
+			const Result<std::vector<PrefabOverride>> remaining = PrefabInstantiator::ComputeOverrides(*root, *applied, options);
+			REQUIRE(remaining.has_value());
+			CHECK(remaining->empty());
+
+			// A user child holding the deleted barrel's ID, as prefab.create {replaceWithInstance} leaves one, is named as it is.
+			const Result<Entity> second = PrefabInstantiator::Instantiate(scene, turret, MakeOptions(UUID(0x7d7d)), options, report);
+			REQUIRE(second.has_value());
+			const UUID secondBarrelID = PrefabInstantiator::DeriveInstanceID(UUID(0x7d7d), UUID(0x00000000000d0002));
+			scene.DestroyEntity(scene.FindEntityByID(secondBarrelID));
+			static_cast<void>(scene.CreateEntityWithID(secondBarrelID, "Replacement", *second));
+			const Result<Prefab> kept = PrefabInstantiator::ApplyOverrides(*second, turret, options);
+			REQUIRE(kept.has_value());
+			CHECK(kept->GetEntityIDs() == std::vector<UUID>{ UUID(0x00000000000d0001) });
+			const Json* keptRoot = kept->FindEntity(UUID(0x00000000000d0001));
+			REQUIRE(keptRoot != nullptr);
+			CHECK((*keptRoot)["Components"]["Script"]["Fields"]["Goal"] == Json(secondBarrelID.ToString()));
 		}
 
 		TEST_CASE("PrefabInstantiator: updates and unpack leave an instance placed inside another alone")

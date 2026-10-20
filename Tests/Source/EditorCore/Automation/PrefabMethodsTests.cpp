@@ -18,7 +18,10 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <filesystem>
 #include <format>
+#include <optional>
+#include <string>
 #include <vector>
 
 namespace Engine {
@@ -315,7 +318,7 @@ return Script.Define("Brick", Brick)
 			for (size_t index = 0; index < together.size(); ++index)
 			{
 				CAPTURE(index);
-				CHECK(together[index].PrefabEntityID == separate[index].PrefabEntityID);
+				CHECK(together[index].Path == separate[index].Path);
 				CHECK(together[index].Kind == separate[index].Kind);
 				CHECK(together[index].Component == separate[index].Component);
 				CHECK(together[index].Field == separate[index].Field);
@@ -383,55 +386,14 @@ return Script.Define("Brick", Brick)
 			CHECK_FALSE(setup.GetEditor().GetScene().FindEntityByPath("/Bad").IsValid());
 		}
 
-		// E-PFB-REFUSE (ADR 0028 decision 16): replacing a member with an instance of a new prefab took it out of its instance
-		// while the new root kept its id, so every later update of the instance failed ("already used in the scene outside the
-		// instance") and scene.open kept the stale state. The member is refused, as entity.destroy refuses deleting it.
-		TEST_CASE("PrefabMethods: prefab.create replaceWithInstance refuses a member of another instance")
-		{
-			Test::AutomationFixture setup("PrefabReplaceMember");
-			EditorContext& editor = setup.GetEditor();
-			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Lamp"})"));
-			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Bulb", "parent": "/Lamp"})"));
-			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Filament", "parent": "/Lamp/Bulb"})"));
-			CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Lamp", "path": "Assets/Prefabs/Lamp.prefab", "replaceWithInstance": true})"));
-			const Json before = CaptureEntity(editor, "/Lamp/Bulb");
-			const size_t steps = editor.GetHistory().GetUndoCount();
-			const std::filesystem::path bulbPrefab = setup.GetEditorFixture().GetProjectRoot() / "Assets/Prefabs/Bulb.prefab";
-
-			for (const bool dryRun : { false, true })
-			{
-				CAPTURE(dryRun);
-				Json params = ParsePrefabMethodJson(R"({"entity": "/Lamp/Bulb", "path": "Assets/Prefabs/Bulb.prefab", "replaceWithInstance": true})");
-				if (dryRun)
-					params["dryRun"] = true;
-				const Result<Json> refused = setup.Call("prefab.create", params);
-				REQUIRE_FALSE(refused.has_value());
-				INFO(refused.error().ToString());
-				CHECK(refused.error().GetCode() == ErrorCode::InvalidState);
-				REQUIRE_FALSE(refused.error().GetIssues().empty());
-				CHECK(refused.error().GetIssues()[0].JsonPointer == "/entity");
-				CHECK(refused.error().GetIssues()[0].Hint.contains("prefab.unpack"));
-				CHECK(CaptureEntity(editor, "/Lamp/Bulb") == before);
-				CHECK(editor.GetHistory().GetUndoCount() == steps);
-				CHECK_FALSE(FileSystem::Exists(bulbPrefab));
-			}
-
-			// Saving the member's subtree without replacing it, and replacing the whole instance, work as before; so does the
-			// member once its instance is unpacked.
-			CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Lamp/Bulb", "path": "Assets/Prefabs/Bulb.prefab"})"));
-			CHECK(CaptureEntity(editor, "/Lamp/Bulb") == before);
-			CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Lamp", "path": "Assets/Prefabs/Lamp2.prefab", "replaceWithInstance": true})"));
-			CallOrFail(setup, "prefab.unpack", ParsePrefabMethodJson(R"({"instance": "/Lamp"})"));
-			const Json replaced = CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Lamp/Bulb", "path": "Assets/Prefabs/Bulb2.prefab", "replaceWithInstance": true})"));
-			CHECK(replaced["instance"]["path"] == Json("/Lamp/Bulb"));
-		}
-
-		// Docs/Decisions/0031-m20-contract.md decision 7 (E-PFB-DEL): RemoveEntity replaces the setup's refusal (the case
-		// above, which stream A1 rewrites into this one). Replacing a member with an instance of a new prefab destroys the
-		// member and records its RemoveEntity on the outer instance root, and the new instance's root keeps the member's id as
-		// a user child of the outer instance, in one undo step; a dry run changes nothing; and the outer instance still
-		// updates, so a reopened scene rebuilds it around the new instance.
-		TEST_CASE("PrefabMethods: prefab.create replaceWithInstance of a member records its deletion and keeps its id" * doctest::skip(true))
+		// Docs/Decisions/0031-m20-contract.md decision 7 (E-PFB-DEL): RemoveEntity replaces the setup's refusal (ADR 0028
+		// decision 16), whose test this case rewrites. Replacing a member with an instance of a new prefab destroys the member
+		// and records its RemoveEntity on the outer instance root, and the new instance's root keeps the member's id as a user
+		// child of the outer instance, in one undo step; a dry run, and saving the member without replacing it, change
+		// nothing in the scene; reverting the RemoveEntity would rebuild the member over the new instance's id, so it fails
+		// as any update does then; and the outer instance still updates, so a reopened scene rebuilds it around the new
+		// instance.
+		TEST_CASE("PrefabMethods: prefab.create replaceWithInstance of a member records its deletion and keeps its id")
 		{
 			Test::AutomationFixture setup("PrefabReplaceMemberRecorded");
 			EditorContext& editor = setup.GetEditor();
@@ -441,12 +403,19 @@ return Script.Define("Brick", Brick)
 			CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Lamp", "path": "Assets/Prefabs/Lamp.prefab", "replaceWithInstance": true})"));
 			const UUID bulb = editor.GetScene().FindEntityByPath("/Lamp/Bulb").GetUUID();
 			const Json before = CaptureEntity(editor, "/Lamp/Bulb");
-			const size_t steps = editor.GetHistory().GetUndoCount();
+			const Json lampBefore = CaptureEntity(editor, "/Lamp");
 			const std::filesystem::path bulbPrefab = setup.GetEditorFixture().GetProjectRoot() / "Assets/Prefabs/Bulb.prefab";
+
+			// Saving the member's subtree without replacing it leaves the instance as it is.
+			CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Lamp/Bulb", "path": "Assets/Prefabs/BulbCopy.prefab"})"));
+			CHECK(CaptureEntity(editor, "/Lamp/Bulb") == before);
+			CHECK(CaptureEntity(editor, "/Lamp") == lampBefore);
+			const size_t steps = editor.GetHistory().GetUndoCount();
 
 			const Json dryRun = CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Lamp/Bulb", "path": "Assets/Prefabs/Bulb.prefab", "replaceWithInstance": true, "dryRun": true})"));
 			CHECK(dryRun["instance"]["id"] == Json(bulb.ToString()));
 			CHECK(CaptureEntity(editor, "/Lamp/Bulb") == before);
+			CHECK(CaptureEntity(editor, "/Lamp") == lampBefore);
 			CHECK(editor.GetHistory().GetUndoCount() == steps);
 			CHECK_FALSE(FileSystem::Exists(bulbPrefab));
 
@@ -458,10 +427,29 @@ return Script.Define("Brick", Brick)
 			const Json lamp = CaptureEntity(editor, "/Lamp");
 			REQUIRE(lamp["Components"]["Prefab"]["Overrides"].size() == 1);
 			CHECK(lamp["Components"]["Prefab"]["Overrides"][0]["Kind"] == Json("RemoveEntity"));
+			CHECK(lamp["Components"]["Prefab"]["Overrides"][0]["Path"] == Json::array({ before["Components"]["PrefabLink"]["PrefabEntityID"] }));
 			const Json instance = CaptureEntity(editor, "/Lamp/Bulb");
 			CHECK(instance["Components"].contains("Prefab"));
 			CHECK(instance["Components"]["PrefabLink"]["InstanceRoot"] == Json(bulb.ToString()));
 			CHECK(editor.GetScene().FindEntityByPath("/Lamp/Bulb/Filament").IsValid());
+
+			// The replacement is one undo step: undo brings the member back with the override gone, redo replaces it again.
+			REQUIRE(setup.Call("edit.undo", Json::object()).has_value());
+			CHECK(CaptureEntity(editor, "/Lamp/Bulb") == before);
+			CHECK(CaptureEntity(editor, "/Lamp") == lampBefore);
+			CHECK_FALSE(FileSystem::Exists(bulbPrefab));
+			REQUIRE(setup.Call("edit.redo", Json::object()).has_value());
+			CHECK(CaptureEntity(editor, "/Lamp/Bulb") == instance);
+			CHECK(CaptureEntity(editor, "/Lamp") == lamp);
+
+			// Reverting the RemoveEntity would rebuild the member with the id the new instance's root holds: the outer
+			// instance's update refuses it, naming that id, and nothing changes.
+			const Result<Json> reverted = setup.Call("prefab.revert", ParsePrefabMethodJson(R"({"instance": "/Lamp"})"));
+			REQUIRE_FALSE(reverted.has_value());
+			CHECK(reverted.error().GetCode() == ErrorCode::InvalidState);
+			CHECK(reverted.error().ToString().contains(bulb.ToString()));
+			CHECK(CaptureEntity(editor, "/Lamp") == lamp);
+			CHECK(CaptureEntity(editor, "/Lamp/Bulb") == instance);
 
 			// The outer instance still updates: reopening the saved scene rebuilds it, keeping the new instance in place.
 			CallOrFail(setup, "scene.save", Json::object());
@@ -478,7 +466,7 @@ return Script.Define("Brick", Brick)
 		// the Lamp level, changes Lamp.prefab, rewrites Room.prefab and reaches every room; the same apply without a level
 		// writes to the outermost prefab, Room, and leaves Lamp alone. One undo step each. The level root's own placement
 		// (Name, Transform, Parent) is never written into its prefab.
-		TEST_CASE("PrefabMethods: an applied edit of a nested prefab reaches the prefab nesting it and its instances" * doctest::skip(true))
+		TEST_CASE("PrefabMethods: an applied edit of a nested prefab reaches the prefab nesting it and its instances")
 		{
 			Test::AutomationFixture setup("PrefabNestedApply");
 			EditorContext& editor = setup.GetEditor();
@@ -543,6 +531,485 @@ return Script.Define("Brick", Brick)
 			const Result<Json> wrongLevel = setup.Call("prefab.apply", ParsePrefabMethodJson(R"({"instance": "/Room", "level": "/Room2/Lamp"})"));
 			REQUIRE_FALSE(wrongLevel.has_value());
 			CHECK(wrongLevel.error().GetCode() == ErrorCode::InvalidArgument);
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 9: prefab.apply's level is one of the instance's levels, the outermost
+		// instance root by default; a top-level instance is its own only level. A level that is not one of them, or names no
+		// entity, is refused at /level before anything is written, and the hint lists the levels.
+		TEST_CASE("PrefabMethods: prefab.apply writes to the outermost level by default and refuses a level outside the instance")
+		{
+			Test::AutomationFixture setup("PrefabApplyLevel");
+			EditorContext& editor = setup.GetEditor();
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Cell", "components": {"MeshRenderer": {"Mesh": "engine://Meshes/Cube"}}})"));
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Plain"})"));
+			CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Cell", "path": "Assets/Prefabs/Cell.prefab", "replaceWithInstance": true})"));
+			CallOrFail(setup, "prefab.instantiate", ParsePrefabMethodJson(R"({"prefab": "Assets/Prefabs/Cell.prefab", "name": "Cell2"})"));
+			CallOrFail(setup, "entity.update", ParsePrefabMethodJson(R"({"entity": "/Cell2", "components": {"MeshRenderer": {"CastShadows": false}}})"));
+			const std::filesystem::path cellPrefab = setup.GetEditorFixture().GetProjectRoot() / "Assets/Prefabs/Cell.prefab";
+			const Result<std::string> before = FileSystem::ReadText(cellPrefab);
+			REQUIRE(before.has_value());
+			const size_t steps = editor.GetHistory().GetUndoCount();
+
+			struct RefusedLevel
+			{
+				std::string_view Level{};
+				ErrorCode Code = ErrorCode::InvalidArgument;
+			};
+			for (const RefusedLevel refused : { RefusedLevel{ "/Cell", ErrorCode::InvalidArgument }, RefusedLevel{ "/Plain", ErrorCode::InvalidArgument },
+					 RefusedLevel{ "/Missing", ErrorCode::NotFound } })
+			{
+				CAPTURE(refused.Level);
+				const Result<Json> applied = setup.Call("prefab.apply", Json{ { "instance", "/Cell2" }, { "level", refused.Level } });
+				REQUIRE_FALSE(applied.has_value());
+				CHECK(applied.error().GetCode() == refused.Code);
+				REQUIRE_FALSE(applied.error().GetIssues().empty());
+				CHECK(applied.error().GetIssues()[0].JsonPointer == "/level");
+				if (refused.Code == ErrorCode::InvalidArgument)
+					CHECK(applied.error().GetIssues()[0].Hint.contains("'/Cell2'"));
+			}
+			CHECK(editor.GetHistory().GetUndoCount() == steps);
+			const Result<std::string> unchanged = FileSystem::ReadText(cellPrefab);
+			REQUIRE(unchanged.has_value());
+			CHECK(*unchanged == *before);
+
+			// The instance's own root is its only level: the same apply as without a level, which no prefab nests.
+			const Json applied = CallOrFail(setup, "prefab.apply", ParsePrefabMethodJson(R"({"instance": "/Cell2", "level": "/Cell2"})"));
+			CHECK(applied["prefab"]["path"] == Json("Assets/Prefabs/Cell.prefab"));
+			CHECK(applied["updatedInstances"] == Json(2));
+			CHECK(applied["updatedPrefabs"] == Json::array());
+			CHECK(editor.GetHistory().GetUndoCount() == steps + 1);
+			CHECK(CaptureEntity(editor, "/Cell")["Components"]["MeshRenderer"]["CastShadows"] == Json(false));
+			CallOrFail(setup, "entity.update", ParsePrefabMethodJson(R"({"entity": "/Cell", "components": {"MeshRenderer": {"Visible": false}}})"));
+			const Json outermost = CallOrFail(setup, "prefab.apply", ParsePrefabMethodJson(R"({"instance": "/Cell"})"));
+			CHECK(outermost["updatedPrefabs"] == Json::array());
+			CHECK(CaptureEntity(editor, "/Cell2")["Components"]["MeshRenderer"]["Visible"] == Json(false));
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 10: a PrefabOverrideKey names its override by the path the instance's
+		// Prefab component records, and its kind by any registered PrefabOverrideKind name in any case. Only the overrides a key
+		// selects go; a key of another entity's path selects none; a malformed key is refused at its pointer and reverts
+		// nothing; the version 1 key prefabEntityId is an unknown member.
+		TEST_CASE("PrefabMethods: prefab.revert removes the overrides its keys select by path")
+		{
+			Test::AutomationFixture setup("PrefabRevertPath");
+			EditorContext& editor = setup.GetEditor();
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Lamp", "components": {"MeshRenderer": {"Mesh": "engine://Meshes/Cube"}}})"));
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Bulb", "parent": "/Lamp", "components": {"MeshRenderer": {"Mesh": "engine://Meshes/Sphere"}}})"));
+			CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Lamp", "path": "Assets/Prefabs/Lamp.prefab", "replaceWithInstance": true})"));
+			CallOrFail(setup, "entity.update", ParsePrefabMethodJson(R"({"entity": "/Lamp/Bulb", "components": {"MeshRenderer": {"CastShadows": false, "Visible": false}}})"));
+			const auto overrides = [&editor]()
+			{
+				return editor.GetScene().FindEntityByPath("/Lamp").GetComponent<PrefabInstanceComponent>().Overrides;
+			};
+			REQUIRE(overrides().size() == 2);
+			const std::string bulb = editor.GetScene().FindEntityByPath("/Lamp/Bulb").GetComponent<PrefabLinkComponent>().PrefabEntityID.ToString();
+			const std::string lamp = editor.GetScene().FindEntityByPath("/Lamp").GetComponent<PrefabLinkComponent>().PrefabEntityID.ToString();
+			const size_t steps = editor.GetHistory().GetUndoCount();
+
+			const auto revert = [&setup](const Json& key)
+			{
+				return setup.Call("prefab.revert", Json{ { "instance", "/Lamp" }, { "overrides", Json::array({ key }) } });
+			};
+			struct MalformedKey
+			{
+				Json Key{};
+				std::string_view Pointer{};
+			};
+			const MalformedKey malformed[] = { { Json{ { "kind", "Field" } }, "/overrides/0/path" },
+				{ Json{ { "path", Json::array() } }, "/overrides/0/path" },
+				{ Json{ { "path", Json::array({ bulb, "not-an-id" }) } }, "/overrides/0/path/1" },
+				{ Json{ { "path", Json::array({ bulb }) }, { "kind", "Deleted" } }, "/overrides/0/kind" } };
+			for (const MalformedKey& entry : malformed)
+			{
+				CAPTURE(entry.Key.dump());
+				const Result<Json> refused = revert(entry.Key);
+				REQUIRE_FALSE(refused.has_value());
+				CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
+				REQUIRE_FALSE(refused.error().GetIssues().empty());
+				CHECK(refused.error().GetIssues()[0].JsonPointer == entry.Pointer);
+			}
+			const Json unknown = setup.Request("prefab.revert", Json{ { "instance", "/Lamp" }, { "overrides", Json::array({ Json{ { "prefabEntityId", bulb } } }) } });
+			INFO(unknown.dump());
+			CHECK(unknown["error"]["code"] == Json(-32602));
+			CHECK(overrides().size() == 2);
+			CHECK(editor.GetHistory().GetUndoCount() == steps);
+
+			// Another entity's path selects nothing; the bulb's path, a lower-case kind and the field select one override.
+			const Result<Json> none = revert(Json{ { "path", Json::array({ lamp }) }, { "component", "MeshRenderer" } });
+			REQUIRE_MESSAGE(none.has_value(), none.error().ToString());
+			CHECK((*none)["removedOverrides"] == Json(0));
+			CHECK(overrides().size() == 2);
+			const Result<Json> one = revert(Json{ { "path", Json::array({ bulb }) }, { "kind", "field" }, { "component", "MeshRenderer" }, { "field", "CastShadows" } });
+			REQUIRE_MESSAGE(one.has_value(), one.error().ToString());
+			CHECK((*one)["removedOverrides"] == Json(1));
+			REQUIRE(overrides().size() == 1);
+			CHECK(overrides()[0].Field == "Visible");
+			const Json reverted = CaptureEntity(editor, "/Lamp/Bulb")["Components"]["MeshRenderer"];
+			CHECK(reverted["CastShadows"] == Json(true));
+			CHECK(reverted["Visible"] == Json(false));
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 8 (E-PFB-NEST): prefab.revert on a nested instance root removes the
+		// overrides its outermost instance records within the nested instance (the nested root's path is their prefix), keeps
+		// the others, and rebuilds the outermost instance; with keys, only the matching ones among those go.
+		TEST_CASE("PrefabMethods: prefab.revert of a nested instance root removes the overrides within it")
+		{
+			Test::AutomationFixture setup("PrefabNestedRevert");
+			EditorContext& editor = setup.GetEditor();
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Room", "components": {"MeshRenderer": {"Mesh": "engine://Meshes/Cube"}}})"));
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Lamp", "parent": "/Room"})"));
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Bulb", "parent": "/Room/Lamp", "components": {"MeshRenderer": {"Mesh": "engine://Meshes/Sphere"}}})"));
+			CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Room/Lamp", "path": "Assets/Prefabs/Lamp.prefab", "replaceWithInstance": true})"));
+			CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Room", "path": "Assets/Prefabs/Room.prefab", "replaceWithInstance": true})"));
+			CallOrFail(setup, "entity.update", ParsePrefabMethodJson(R"({"entity": "/Room", "components": {"MeshRenderer": {"CastShadows": false}}})"));
+			CallOrFail(setup, "entity.update", ParsePrefabMethodJson(R"({"entity": "/Room/Lamp/Bulb", "components": {"MeshRenderer": {"CastShadows": false, "Visible": false}}})"));
+			const auto overrides = [&editor]()
+			{
+				return CaptureEntity(editor, "/Room")["Components"]["Prefab"]["Overrides"];
+			};
+			REQUIRE(overrides().size() == 3);
+
+			// A key within the nested instance: one override goes, the room's own and the other bulb override stay.
+			Json path;
+			for (const Json& entry : overrides())
+			{
+				if (entry.contains("Path") && entry["Field"] == Json("Visible"))
+					path = entry["Path"];
+			}
+			REQUIRE(path.size() == 2);
+			const Json one = CallOrFail(setup, "prefab.revert", Json{ { "instance", "/Room/Lamp" }, { "overrides", Json::array({ Json{ { "path", path }, { "field", "Visible" } } }) } });
+			CHECK(one["removedOverrides"] == Json(1));
+			CHECK(one["instance"]["path"] == Json("/Room/Lamp"));
+			CHECK(overrides().size() == 2);
+			CHECK(CaptureEntity(editor, "/Room/Lamp/Bulb")["Components"]["MeshRenderer"]["Visible"] == Json(true));
+
+			// Without keys every override within the nested instance goes; the room's own stays.
+			const Json all = CallOrFail(setup, "prefab.revert", ParsePrefabMethodJson(R"({"instance": "/Room/Lamp"})"));
+			CHECK(all["removedOverrides"] == Json(1));
+			const Json kept = overrides();
+			REQUIRE(kept.size() == 1);
+			REQUIRE(kept[0].contains("Path"));
+			CHECK(kept[0]["Path"].size() == 1);
+			CHECK(CaptureEntity(editor, "/Room/Lamp/Bulb")["Components"]["MeshRenderer"]["CastShadows"] == Json(true));
+			CHECK(CaptureEntity(editor, "/Room")["Components"]["MeshRenderer"]["CastShadows"] == Json(false));
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 8 (E-PFB-NEST): prefab.unpack unpacks one level. A nested instance root
+		// is refused with the call that unpacks its outermost instance, and nothing changes; that call unpacks the room, after
+		// which the lamp is an outermost instance of its own, keeping its overridden state, and can be unpacked in turn.
+		TEST_CASE("PrefabMethods: prefab.unpack refuses a nested instance root and unpacks one level from the outermost")
+		{
+			Test::AutomationFixture setup("PrefabNestedUnpack");
+			EditorContext& editor = setup.GetEditor();
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Room"})"));
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Lamp", "parent": "/Room"})"));
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Bulb", "parent": "/Room/Lamp", "components": {"MeshRenderer": {"Mesh": "engine://Meshes/Sphere"}}})"));
+			CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Room/Lamp", "path": "Assets/Prefabs/Lamp.prefab", "replaceWithInstance": true})"));
+			CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Room", "path": "Assets/Prefabs/Room.prefab", "replaceWithInstance": true})"));
+			CallOrFail(setup, "entity.update", ParsePrefabMethodJson(R"({"entity": "/Room/Lamp/Bulb", "components": {"MeshRenderer": {"CastShadows": false}}})"));
+			const Json before = CaptureEntity(editor, "/Room/Lamp");
+			const size_t steps = editor.GetHistory().GetUndoCount();
+
+			const Result<Json> refused = setup.Call("prefab.unpack", ParsePrefabMethodJson(R"({"instance": "/Room/Lamp"})"));
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::InvalidState);
+			REQUIRE_FALSE(refused.error().GetIssues().empty());
+			CHECK(refused.error().GetIssues()[0].JsonPointer == "/instance");
+			CHECK(refused.error().GetIssues()[0].Hint.contains("prefab.unpack {\"instance\":\"/Room\"}"));
+			CHECK(CaptureEntity(editor, "/Room/Lamp") == before);
+			CHECK(editor.GetHistory().GetUndoCount() == steps);
+
+			CallOrFail(setup, "prefab.unpack", ParsePrefabMethodJson(R"({"instance": "/Room"})"));
+			CHECK_FALSE(CaptureEntity(editor, "/Room")["Components"].contains("Prefab"));
+			const Json lamp = CaptureEntity(editor, "/Room/Lamp");
+			REQUIRE(lamp["Components"].contains("Prefab"));
+			REQUIRE(lamp["Components"]["PrefabLink"].contains("OuterPrefabEntityID"));
+			CHECK(lamp["Components"]["PrefabLink"]["OuterPrefabEntityID"].is_null());
+			const Json& lampOverrides = lamp["Components"]["Prefab"]["Overrides"];
+			REQUIRE(lampOverrides.size() == 1);
+			CHECK(lampOverrides[0]["Field"] == Json("CastShadows"));
+			CHECK(CaptureEntity(editor, "/Room/Lamp/Bulb")["Components"]["MeshRenderer"]["CastShadows"] == Json(false));
+			CallOrFail(setup, "prefab.unpack", ParsePrefabMethodJson(R"({"instance": "/Room/Lamp"})"));
+			CHECK_FALSE(CaptureEntity(editor, "/Room/Lamp/Bulb")["Components"].contains("PrefabLink"));
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 8: prefab.create keeps an instance nested in the subtree live, outermost
+		// in the new prefab, with its record recomputed against its own prefab. Room.prefab records the lamp's hidden bulb and
+		// an instance of Room records nothing for it, so the instance's records alone would leave the new prefab's lamp without
+		// that override, and the next rewrite of the new prefab from Lamp.prefab would show the bulb again.
+		TEST_CASE("PrefabMethods: prefab.create keeps a nested instance live with the record of the prefab that nested it")
+		{
+			Test::AutomationFixture setup("PrefabCreateNested");
+			EditorContext& editor = setup.GetEditor();
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Room"})"));
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Lamp", "parent": "/Room"})"));
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Bulb", "parent": "/Room/Lamp", "components": {"MeshRenderer": {"Mesh": "engine://Meshes/Sphere"}}})"));
+			CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Room/Lamp", "path": "Assets/Prefabs/Lamp.prefab", "replaceWithInstance": true})"));
+			CallOrFail(setup, "entity.update", ParsePrefabMethodJson(R"({"entity": "/Room/Lamp/Bulb", "components": {"MeshRenderer": {"Visible": false}}})"));
+			CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Room", "path": "Assets/Prefabs/Room.prefab", "replaceWithInstance": true})"));
+			CallOrFail(setup, "prefab.instantiate", ParsePrefabMethodJson(R"({"prefab": "Assets/Prefabs/Room.prefab", "name": "Room2"})"));
+			REQUIRE(CaptureEntity(editor, "/Room2")["Components"]["Prefab"]["Overrides"].empty());
+			const Json bulbPrefabID = CaptureEntity(editor, "/Room2/Lamp/Bulb")["Components"]["PrefabLink"]["PrefabEntityID"];
+
+			CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Room2", "path": "Assets/Prefabs/Hall.prefab"})"));
+			const Result<std::string> text = FileSystem::ReadText(setup.GetEditorFixture().GetProjectRoot() / "Assets/Prefabs/Hall.prefab");
+			REQUIRE(text.has_value());
+			const Result<Json> hall = JsonReader::Parse(*text);
+			REQUIRE(hall.has_value());
+			const Json& entities = (*hall)["Entities"];
+			const auto lamp = std::find_if(entities.begin(), entities.end(), [](const Json& entity)
+			{
+				return entity["Name"] == Json("Lamp");
+			});
+			REQUIRE(lamp != entities.end());
+			REQUIRE((*lamp)["Components"].contains("Prefab"));
+			CHECK((*lamp)["Components"]["PrefabLink"]["OuterPrefabEntityID"].is_null());
+			const Json& record = (*lamp)["Components"]["Prefab"]["Overrides"];
+			REQUIRE(record.size() == 1);
+			CHECK(record[0]["Path"] == Json::array({ bulbPrefabID }));
+			CHECK(record[0]["Field"] == Json("Visible"));
+			CHECK(record[0]["Value"] == Json(false));
+
+			// A Lamp-level apply rewrites both prefabs nesting Lamp.prefab, and the hall's lamp keeps its hidden bulb.
+			CallOrFail(setup, "prefab.instantiate", ParsePrefabMethodJson(R"({"prefab": "Assets/Prefabs/Hall.prefab", "name": "Hall"})"));
+			CallOrFail(setup, "entity.update", ParsePrefabMethodJson(R"({"entity": "/Room/Lamp/Bulb", "components": {"MeshRenderer": {"CastShadows": false}}})"));
+			const Json applied = CallOrFail(setup, "prefab.apply", ParsePrefabMethodJson(R"({"instance": "/Room/Lamp", "level": "/Room/Lamp"})"));
+			REQUIRE(applied["updatedPrefabs"].size() == 2);
+			CHECK(applied["updatedPrefabs"][0]["path"] == Json("Assets/Prefabs/Hall.prefab"));
+			CHECK(applied["updatedPrefabs"][1]["path"] == Json("Assets/Prefabs/Room.prefab"));
+			const Json hallBulb = CaptureEntity(editor, "/Hall/Lamp/Bulb")["Components"]["MeshRenderer"];
+			CHECK(hallBulb["CastShadows"] == Json(false));
+			CHECK(hallBulb["Visible"] == Json(false));
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decisions 8 and 9: an instance a user placed under a member of another instance
+		// belongs to no prefab, so it is outermost, its own only level: prefab.apply, prefab.revert and prefab.unpack act on it
+		// as on any top-level instance, and the instance it sits in is not one of its levels.
+		TEST_CASE("PrefabMethods: an instance placed under a member of another instance is its own only level")
+		{
+			Test::AutomationFixture setup("PrefabUserChildInstance");
+			EditorContext& editor = setup.GetEditor();
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Lamp"})"));
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Bulb", "parent": "/Lamp", "components": {"MeshRenderer": {"Mesh": "engine://Meshes/Sphere"}}})"));
+			CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Lamp", "path": "Assets/Prefabs/Lamp.prefab", "replaceWithInstance": true})"));
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Moth", "components": {"MeshRenderer": {"Mesh": "engine://Meshes/Cube"}}})"));
+			CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Moth", "path": "Assets/Prefabs/Moth.prefab", "replaceWithInstance": true})"));
+			CallOrFail(setup, "entity.reparent", ParsePrefabMethodJson(R"({"entity": "/Moth", "parent": "/Lamp/Bulb"})"));
+			CHECK(CaptureEntity(editor, "/Lamp/Bulb/Moth")["Components"]["PrefabLink"]["OuterPrefabEntityID"].is_null());
+
+			const Result<Json> wrongLevel = setup.Call("prefab.apply", ParsePrefabMethodJson(R"({"instance": "/Lamp/Bulb/Moth", "level": "/Lamp"})"));
+			REQUIRE_FALSE(wrongLevel.has_value());
+			CHECK(wrongLevel.error().GetCode() == ErrorCode::InvalidArgument);
+			REQUIRE_FALSE(wrongLevel.error().GetIssues().empty());
+			CHECK(wrongLevel.error().GetIssues()[0].JsonPointer == "/level");
+
+			CallOrFail(setup, "entity.update", ParsePrefabMethodJson(R"({"entity": "/Lamp/Bulb/Moth", "components": {"MeshRenderer": {"CastShadows": false}}})"));
+			const Json applied = CallOrFail(setup, "prefab.apply", ParsePrefabMethodJson(R"({"instance": "/Lamp/Bulb/Moth", "level": "/Lamp/Bulb/Moth"})"));
+			CHECK(applied["prefab"]["path"] == Json("Assets/Prefabs/Moth.prefab"));
+			CHECK(applied["updatedPrefabs"].empty());
+			const Result<std::string> moth = FileSystem::ReadText(setup.GetEditorFixture().GetProjectRoot() / "Assets/Prefabs/Moth.prefab");
+			REQUIRE(moth.has_value());
+			CHECK(moth->contains("\"CastShadows\": false"));
+
+			CallOrFail(setup, "entity.update", ParsePrefabMethodJson(R"({"entity": "/Lamp/Bulb/Moth", "components": {"MeshRenderer": {"Visible": false}}})"));
+			const Json reverted = CallOrFail(setup, "prefab.revert", ParsePrefabMethodJson(R"({"instance": "/Lamp/Bulb/Moth"})"));
+			CHECK(reverted["removedOverrides"] == Json(1));
+			CHECK(CaptureEntity(editor, "/Lamp/Bulb/Moth")["Components"]["MeshRenderer"]["Visible"] == Json(true));
+
+			CallOrFail(setup, "prefab.unpack", ParsePrefabMethodJson(R"({"instance": "/Lamp/Bulb/Moth"})"));
+			CHECK_FALSE(CaptureEntity(editor, "/Lamp/Bulb/Moth")["Components"].contains("Prefab"));
+			CHECK(CaptureEntity(editor, "/Lamp")["Components"].contains("Prefab"));
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 8: a nested root's OuterPrefabEntityID names its place in the instance
+		// enclosing it, and strict loading refuses one that no ancestor instance root derives the root's id from. Dragging a
+		// lamp out of its room (entity.reparent, which the hierarchy panel's drag calls) left that key behind, so play, a
+		// strict reopen and prefab.unpack of the lamp failed. The commit clears it: the lamp becomes an outermost instance
+		// recording its own overrides, and the room records the lamp's deletion, in one undo step. A lamp moved from one room
+		// into another is an outermost instance there, a user child of that room.
+		TEST_CASE("PrefabMethods: a nested instance moved out of its enclosing instance stays loadable")
+		{
+			Test::AutomationFixture setup("PrefabNestedMovedOut");
+			EditorContext& editor = setup.GetEditor();
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Room"})"));
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Lamp", "parent": "/Room"})"));
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Bulb", "parent": "/Room/Lamp", "components": {"MeshRenderer": {"Mesh": "engine://Meshes/Sphere"}}})"));
+			CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Room/Lamp", "path": "Assets/Prefabs/Lamp.prefab", "replaceWithInstance": true})"));
+			CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Room", "path": "Assets/Prefabs/Room.prefab", "replaceWithInstance": true})"));
+			CallOrFail(setup, "prefab.instantiate", ParsePrefabMethodJson(R"({"prefab": "Assets/Prefabs/Room.prefab", "name": "Room2"})"));
+			CallOrFail(setup, "entity.update", ParsePrefabMethodJson(R"({"entity": "/Room/Lamp/Bulb", "components": {"MeshRenderer": {"CastShadows": false}}})"));
+			const Json lampLink = CaptureEntity(editor, "/Room/Lamp")["Components"]["PrefabLink"];
+			REQUIRE_FALSE(lampLink["OuterPrefabEntityID"].is_null());
+			const Json bulbPrefabID = CaptureEntity(editor, "/Room/Lamp/Bulb")["Components"]["PrefabLink"]["PrefabEntityID"];
+			const Json roomBefore = CaptureEntity(editor, "/Room");
+			const size_t steps = editor.GetHistory().GetUndoCount();
+
+			CallOrFail(setup, "entity.reparent", ParsePrefabMethodJson(R"({"entity": "/Room/Lamp", "parent": ""})"));
+			CHECK(editor.GetHistory().GetUndoCount() == steps + 1);
+			const Json lamp = CaptureEntity(editor, "/Lamp");
+			CHECK(lamp["Components"]["PrefabLink"]["OuterPrefabEntityID"].is_null());
+			const Json& lampOverrides = lamp["Components"]["Prefab"]["Overrides"];
+			REQUIRE(lampOverrides.size() == 1);
+			CHECK(lampOverrides[0]["Path"] == Json::array({ bulbPrefabID }));
+			CHECK(lampOverrides[0]["Field"] == Json("CastShadows"));
+			const Json room = CaptureEntity(editor, "/Room");
+			const Json& roomOverrides = room["Components"]["Prefab"]["Overrides"];
+			REQUIRE(roomOverrides.size() == 1);
+			CHECK(roomOverrides[0]["Kind"] == Json("RemoveEntity"));
+			CHECK(roomOverrides[0]["Path"] == Json::array({ lampLink["OuterPrefabEntityID"] }));
+
+			// One undo step: undo puts the lamp back, nested, with the room's record of its bulb.
+			REQUIRE(setup.Call("edit.undo", Json::object()).has_value());
+			CHECK(CaptureEntity(editor, "/Room/Lamp")["Components"]["PrefabLink"] == lampLink);
+			CHECK(CaptureEntity(editor, "/Room") == roomBefore);
+			REQUIRE(setup.Call("edit.redo", Json::object()).has_value());
+			CHECK(CaptureEntity(editor, "/Lamp") == lamp);
+			CHECK(CaptureEntity(editor, "/Room") == room);
+
+			// The scene loads strictly: play starts, and the saved file reopens with the lamp's own record.
+			CallOrFail(setup, "play.start", Json{ { "lockstep", true } });
+			CallOrFail(setup, "play.stop", Json::object());
+			CallOrFail(setup, "scene.save", Json::object());
+			CallOrFail(setup, "scene.open", Json{ { "path", "Assets/Scenes/Main.scene" }, { "reload", true } });
+			CHECK(CaptureEntity(editor, "/Lamp/Bulb")["Components"]["MeshRenderer"]["CastShadows"] == Json(false));
+			CHECK_FALSE(editor.GetScene().FindEntityByPath("/Room/Lamp").IsValid());
+
+			// A lamp moved into another room is outermost there; the room it left records its deletion, the other only its own.
+			CallOrFail(setup, "entity.reparent", ParsePrefabMethodJson(R"({"entity": "/Room2/Lamp", "parent": "/Room"})"));
+			CHECK(CaptureEntity(editor, "/Room/Lamp")["Components"]["PrefabLink"]["OuterPrefabEntityID"].is_null());
+			const Json room2Overrides = CaptureEntity(editor, "/Room2")["Components"]["Prefab"]["Overrides"];
+			REQUIRE(room2Overrides.size() == 1);
+			CHECK(room2Overrides[0]["Kind"] == Json("RemoveEntity"));
+			CHECK(CaptureEntity(editor, "/Room")["Components"]["Prefab"]["Overrides"] == roomOverrides);
+			CallOrFail(setup, "play.start", Json{ { "lockstep", true } });
+			CallOrFail(setup, "play.stop", Json::object());
+
+			// Each lamp is an instance of its own, which unpacks like any outermost instance.
+			CallOrFail(setup, "prefab.unpack", ParsePrefabMethodJson(R"({"instance": "/Lamp"})"));
+			CHECK_FALSE(CaptureEntity(editor, "/Lamp")["Components"].contains("Prefab"));
+			CallOrFail(setup, "prefab.unpack", ParsePrefabMethodJson(R"({"instance": "/Room/Lamp"})"));
+			CHECK_FALSE(CaptureEntity(editor, "/Room/Lamp")["Components"].contains("Prefab"));
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decisions 8 and 9: a nested root moved under a user child of the instance
+		// enclosing it stays nested (that instance's root still derives its id), and its levels are still its enclosing
+		// instance's root and itself. prefab.apply, prefab.revert and prefab.unpack took a nested root whose parent is no
+		// prefab entity for an outermost one, so they refused it or named the wrong error.
+		TEST_CASE("PrefabMethods: a nested instance moved under a user child of its enclosing instance keeps its levels")
+		{
+			Test::AutomationFixture setup("PrefabNestedUnderUserChild");
+			EditorContext& editor = setup.GetEditor();
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Room"})"));
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Lamp", "parent": "/Room"})"));
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Bulb", "parent": "/Room/Lamp", "components": {"MeshRenderer": {"Mesh": "engine://Meshes/Sphere"}}})"));
+			CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Room/Lamp", "path": "Assets/Prefabs/Lamp.prefab", "replaceWithInstance": true})"));
+			CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Room", "path": "Assets/Prefabs/Room.prefab", "replaceWithInstance": true})"));
+			const std::string lamp = editor.GetScene().FindEntityByPath("/Room/Lamp").GetUUID().ToString();
+			const std::string bulb = editor.GetScene().FindEntityByPath("/Room/Lamp/Bulb").GetUUID().ToString();
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Group", "parent": "/Room"})"));
+			CallOrFail(setup, "entity.reparent", Json{ { "entity", lamp }, { "parent", "/Room/Group" } });
+			REQUIRE(editor.GetScene().FindEntityByPath("/Room/Group/Lamp").IsValid());
+			CHECK_FALSE(CaptureEntity(editor, "/Room/Group/Lamp")["Components"]["PrefabLink"]["OuterPrefabEntityID"].is_null());
+			const size_t steps = editor.GetHistory().GetUndoCount();
+
+			// prefab.unpack refuses the nested root with the call that unpacks the room, and nothing changes.
+			const Result<Json> refused = setup.Call("prefab.unpack", Json{ { "instance", lamp } });
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::InvalidState);
+			REQUIRE_FALSE(refused.error().GetIssues().empty());
+			CHECK(refused.error().GetIssues()[0].Hint.contains("prefab.unpack {\"instance\":\"/Room\"}"));
+			CHECK(editor.GetHistory().GetUndoCount() == steps);
+
+			// Its levels are the room and itself: the group is refused as a level, with the two named.
+			const Result<Json> wrongLevel = setup.Call("prefab.apply", Json{ { "instance", lamp }, { "level", "/Room/Group" } });
+			REQUIRE_FALSE(wrongLevel.has_value());
+			CHECK(wrongLevel.error().GetCode() == ErrorCode::InvalidArgument);
+			REQUIRE_FALSE(wrongLevel.error().GetIssues().empty());
+			CHECK(wrongLevel.error().GetIssues()[0].Hint.contains("'/Room', '/Room/Group/Lamp'"));
+
+			// prefab.apply at its own level writes Lamp.prefab (undone below, which puts the lamp back under the group).
+			CallOrFail(setup, "entity.update", Json{ { "entity", bulb }, { "components", Json{ { "MeshRenderer", Json{ { "CastShadows", false } } } } } });
+			const Json applied = CallOrFail(setup, "prefab.apply", Json{ { "instance", lamp }, { "level", lamp } });
+			CHECK(applied["prefab"]["path"] == Json("Assets/Prefabs/Lamp.prefab"));
+			const Result<std::string> lampText = FileSystem::ReadText(setup.GetEditorFixture().GetProjectRoot() / "Assets/Prefabs/Lamp.prefab");
+			REQUIRE(lampText.has_value());
+			CHECK(lampText->contains("\"CastShadows\": false"));
+			REQUIRE(setup.Call("edit.undo", Json::object()).has_value());
+			REQUIRE(editor.GetScene().FindEntityByPath("/Room/Group/Lamp/Bulb").IsValid());
+
+			// prefab.revert of it removes the overrides the room records within it.
+			const Json reverted = CallOrFail(setup, "prefab.revert", Json{ { "instance", lamp } });
+			CHECK(reverted["removedOverrides"] == Json(1));
+			CHECK(CaptureEntity(editor, "/Room")["Components"]["Prefab"]["Overrides"].empty());
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 9: updatedPrefabs names the prefabs nesting the applied one that the
+		// apply rewrote. Applying a lamp without overrides at its own level leaves Lamp.prefab as it is, and the room's
+		// document rebuilt from it is the same, so nothing is written and no prefab is reported; every prefab nesting it was
+		// reported before.
+		TEST_CASE("PrefabMethods: prefab.apply reports only the nesting prefabs it rewrites")
+		{
+			Test::AutomationFixture setup("PrefabApplyUnchangedNesting");
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Room"})"));
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Lamp", "parent": "/Room"})"));
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Bulb", "parent": "/Room/Lamp", "components": {"MeshRenderer": {"Mesh": "engine://Meshes/Sphere"}}})"));
+			CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Room/Lamp", "path": "Assets/Prefabs/Lamp.prefab", "replaceWithInstance": true})"));
+			CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Room", "path": "Assets/Prefabs/Room.prefab", "replaceWithInstance": true})"));
+			const std::filesystem::path root = setup.GetEditorFixture().GetProjectRoot();
+			const Result<std::string> lampBefore = FileSystem::ReadText(root / "Assets/Prefabs/Lamp.prefab");
+			const Result<std::string> roomBefore = FileSystem::ReadText(root / "Assets/Prefabs/Room.prefab");
+			REQUIRE(lampBefore.has_value());
+			REQUIRE(roomBefore.has_value());
+
+			const Json unchanged = CallOrFail(setup, "prefab.apply", ParsePrefabMethodJson(R"({"instance": "/Room/Lamp", "level": "/Room/Lamp"})"));
+			CHECK(unchanged["prefab"]["path"] == Json("Assets/Prefabs/Lamp.prefab"));
+			CHECK(unchanged["updatedPrefabs"] == Json::array());
+			CHECK(FileSystem::ReadText(root / "Assets/Prefabs/Lamp.prefab").value_or(std::string()) == *lampBefore);
+			CHECK(FileSystem::ReadText(root / "Assets/Prefabs/Room.prefab").value_or(std::string()) == *roomBefore);
+
+			// An edit that changes the room's document reports it.
+			CallOrFail(setup, "entity.update", ParsePrefabMethodJson(R"({"entity": "/Room/Lamp/Bulb", "components": {"MeshRenderer": {"CastShadows": false}}})"));
+			const Json changed = CallOrFail(setup, "prefab.apply", ParsePrefabMethodJson(R"({"instance": "/Room/Lamp", "level": "/Room/Lamp"})"));
+			REQUIRE(changed["updatedPrefabs"].size() == 1);
+			CHECK(changed["updatedPrefabs"][0]["path"] == Json("Assets/Prefabs/Room.prefab"));
+			CHECK(FileSystem::ReadText(root / "Assets/Prefabs/Room.prefab").value_or(std::string()) != *roomBefore);
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 8: only a nested instance makes a prefab nest another. A spawner prefab
+		// whose script field names the crate prefab, and a crate prefab whose own script field names itself, nest nothing:
+		// applying a crate rewrites neither, reports no nesting prefab and meets no cycle.
+		TEST_CASE("PrefabMethods: a prefab another prefab's script field names is not nested by it")
+		{
+			Test::AutomationFixture setup("PrefabScriptFieldNotNesting");
+			EditorContext& editor = setup.GetEditor();
+			CallOrFail(setup, "script.write", Json{ { "path", "Assets/Scripts/Spawner.luau" }, { "source", R"(
+local Spawner = { Fields = { Spawnable = Field.Asset("Prefab") } }
+return Script.Define("Spawner", Spawner)
+)" } });
+			const Json spawnerScript{ { "Script", "Assets/Scripts/Spawner.luau" }, { "Fields", Json{ { "Spawnable", "Assets/Prefabs/Crate.prefab" } } } };
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Crate", "components": {"MeshRenderer": {"Mesh": "engine://Meshes/Cube"}}})"));
+			const Json created = CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Crate", "path": "Assets/Prefabs/Crate.prefab", "replaceWithInstance": true})"));
+			const std::optional<UUID> crate = UUID::FromString(JsonReader(created["prefab"]["id"]).ReadString().value_or(std::string()));
+			REQUIRE(crate.has_value());
+			CallOrFail(setup, "entity.create", Json{ { "name", "Spawner" }, { "components", Json{ { "Script", spawnerScript } } } });
+			CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Spawner", "path": "Assets/Prefabs/Spawner.prefab"})"));
+			const std::filesystem::path spawnerFile = setup.GetEditorFixture().GetProjectRoot() / "Assets/Prefabs/Spawner.prefab";
+			const Result<std::string> spawnerBefore = FileSystem::ReadText(spawnerFile);
+			REQUIRE(spawnerBefore.has_value());
+			REQUIRE(spawnerBefore->contains(AssetHandle(*crate).ToString()));
+
+			// The crate's own script names the crate prefab; applied twice, the second time from a prefab naming itself.
+			CallOrFail(setup, "entity.update", Json{ { "entity", "/Crate" }, { "components", Json{ { "Script", spawnerScript }, { "MeshRenderer", Json{ { "CastShadows", false } } } } } });
+			const Json first = CallOrFail(setup, "prefab.apply", ParsePrefabMethodJson(R"({"instance": "/Crate"})"));
+			CHECK(first["updatedPrefabs"] == Json::array());
+			CallOrFail(setup, "entity.update", ParsePrefabMethodJson(R"({"entity": "/Crate", "components": {"MeshRenderer": {"Visible": false}}})"));
+			const Json second = CallOrFail(setup, "prefab.apply", ParsePrefabMethodJson(R"({"instance": "/Crate"})"));
+			CHECK(second["updatedPrefabs"] == Json::array());
+			CHECK(FileSystem::ReadText(spawnerFile).value_or(std::string()) == *spawnerBefore);
+			const AssetHandle crateOnly[] = { AssetHandle(*crate) };
+			const Result<std::vector<AssetHandle>> nesting = editor.GetNestingPrefabs(crateOnly);
+			REQUIRE_MESSAGE(nesting.has_value(), nesting.error().ToString());
+			CHECK(nesting->empty());
 		}
 
 		TEST_CASE("PrefabMethods: errors name the problem")

@@ -2,6 +2,7 @@
 #include "EditorCore/EditorContext.h"
 
 #include "EditorCore/Audio/AudioPreview.h"
+#include "EditorCore/Commands/AssetEditCommand.h"
 #include "EditorCore/Commands/CompositeCommand.h"
 #include "EditorCore/Commands/SceneEditCommand.h"
 #include "EditorCore/EngineAssetGenerators.h"
@@ -17,6 +18,7 @@
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
+#include "Engine/AssetPipeline/Importers/PrefabImporter.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
@@ -248,12 +250,32 @@ namespace Engine {
 			return parent.IsValid() ? parent.GetUUID() : UUID();
 		}
 
-		// EditorContext::UpdatePrefabInstances without its atomicity: every instance of `prefabs` (any prefab when empty)
-		// rebuilt from the prefab's current version, its overrides refreshed afterwards. Returns whether anything changed.
+		// EditorContext::UpdatePrefabInstances without its atomicity: every outermost instance of `prefabs` (any prefab when
+		// empty), or of a prefab nesting one of them (Docs/Decisions/0031-m20-contract.md decision 8), rebuilt from the
+		// prefab's current version, its overrides refreshed afterwards; nested instances follow their outermost ones.
+		// Returns whether anything changed. Errors: Validation PREFAB_CYCLE when the propagation from `prefabs` meets a nesting
+		// cycle (EditorContext::GetNestingPrefabs); those of the rebuild.
 		static Result<bool> RebuildPrefabInstances(EditorContext& context, Scene& scene,
 			std::span<const AssetHandle> prefabs)
 		{
-			const std::vector<std::pair<UUID, AssetHandle>> instances = Utils::FindPrefabInstances(scene, prefabs);
+			std::vector<AssetHandle> rebuilt(prefabs.begin(), prefabs.end());
+			if (!prefabs.empty() && context.HasProject())
+			{
+				// The prefabs that nest them (a deleted prefab nests nothing and is nested by nothing any more).
+				const AssetRegistry& registry = context.GetAssets().GetRegistry();
+				std::vector<AssetHandle> registered;
+				std::ranges::copy_if(prefabs, std::back_inserter(registered), [&registry](AssetHandle prefab)
+				{
+					const std::optional<AssetRegistry::Location> location = registry.Locate(prefab);
+					return location.has_value() && location->Type == AssetType::Prefab;
+				});
+				ENGINE_TRY_ASSIGN(const std::vector<AssetHandle> nesting, context.GetNestingPrefabs(registered));
+				rebuilt.insert(rebuilt.end(), nesting.begin(), nesting.end());
+				std::ranges::sort(rebuilt);
+				const auto [first, last] = std::ranges::unique(rebuilt);
+				rebuilt.erase(first, last);
+			}
+			const std::vector<std::pair<UUID, AssetHandle>> instances = Utils::FindPrefabInstances(scene, rebuilt);
 			if (instances.empty())
 				return false;
 			ENGINE_TRY_ASSIGN(const Ref<const ScriptFieldSchemaSource> schemas, context.GetScriptSchemaSnapshot());
@@ -354,6 +376,107 @@ namespace Engine {
 			std::vector<SceneEntityChange> m_Changes;
 			size_t m_MemorySize = 0;
 		};
+
+		// "Update Nesting Prefabs" (EditorContext::CreateNestingPrefabUpdateCommand, Docs/Decisions/0031-m20-contract.md
+		// decision 8): the rewritten documents of the prefabs nesting a changed prefab, written by an AssetEditCommand and
+		// imported at once, in nesting order, so the prefab update composed after it rebuilds instances from them. Undo
+		// writes the previous documents back and imports them too. Both directions are atomic (Command.h): when an import
+		// fails after the files were written, the other version of every file is written back and imported again, so a
+		// failed Execute leaves the previous documents and a failed Undo leaves the command applied, and the import's error
+		// is returned; a restore that fails too is logged at Error.
+		class NestingPrefabUpdateCommand final : public Command
+		{
+		public:
+			NestingPrefabUpdateCommand(Scope<AssetEditCommand> writes, std::vector<AssetHandle> prefabs)
+				: m_Writes(std::move(writes)), m_Prefabs(std::move(prefabs))
+			{
+			}
+
+			[[nodiscard]] Status Execute(EditorContext& context) override
+			{
+				ENGINE_TRY(m_Writes->Execute(context));
+				if (Status imported = Import(context); !imported)
+				{
+					// The documents go back to their previous versions, imported again.
+					Status restored = m_Writes->Undo(context);
+					if (restored)
+						restored = Import(context);
+					if (!restored)
+						ENGINE_ERROR("'{}' could not restore the prefabs after a failed import: {}", GetLabel(), restored.error().ToString());
+					return imported;
+				}
+				return {};
+			}
+
+			[[nodiscard]] Status Undo(EditorContext& context) override
+			{
+				ENGINE_TRY(m_Writes->Undo(context));
+				if (Status imported = Import(context); !imported)
+				{
+					// The command stays applied: the rewritten documents are written again and imported again.
+					Status restored = m_Writes->Execute(context);
+					if (restored)
+						restored = Import(context);
+					if (!restored)
+						ENGINE_ERROR("'{}' could not restore the rewritten prefabs after a failed import: {}", GetLabel(), restored.error().ToString());
+					return imported;
+				}
+				return {};
+			}
+
+			[[nodiscard]] std::string_view GetLabel() const override { return m_Writes->GetLabel(); }
+			[[nodiscard]] bool ChangesScene() const override { return false; }
+			[[nodiscard]] size_t GetMemorySize() const override { return sizeof(*this) + m_Writes->GetMemorySize() + m_Prefabs.size() * sizeof(AssetHandle); }
+		private:
+			// Imports every rewritten prefab, in nesting order. Errors: the first import's that fails.
+			[[nodiscard]] Status Import(EditorContext& context) const
+			{
+				for (const AssetHandle prefab : m_Prefabs)
+				{
+					ENGINE_TRY_ASSIGN(const AssetImportOutcome outcome, context.GetAssets().Reimport(prefab));
+					static_cast<void>(outcome);
+				}
+				return {};
+			}
+		private:
+			Scope<AssetEditCommand> m_Writes;
+			std::vector<AssetHandle> m_Prefabs; // in nesting order
+		};
+
+		// The prefab assets `prefab`'s document nests directly (the instances in it name them), from its current version;
+		// `cache` keeps each document read. Errors: those of LoadPrefabAsset.
+		static Result<std::vector<AssetHandle>> ReadNestedPrefabs(EditorAssetManager& assets, const TypeRegistry& registry, AssetHandle prefab,
+			std::map<AssetHandle, std::vector<AssetHandle>>& cache)
+		{
+			if (const auto found = cache.find(prefab); found != cache.end())
+				return found->second;
+			LoadReport report;
+			ENGINE_TRY_ASSIGN(const Prefab current, LoadPrefabAsset(assets, prefab, registry, nullptr, report));
+			std::vector<AssetHandle> nested = GetNestedPrefabAssets(current, registry);
+			cache.emplace(prefab, nested);
+			return nested;
+		}
+
+		// The Validation error PREFAB_CYCLE naming the prefabs of `cycle` (one issue each, by path).
+		static Error MakePrefabCycleError(const EditorAssetManager& assets, std::span<const AssetHandle> cycle)
+		{
+			std::vector<std::string> paths;
+			for (const AssetHandle prefab : cycle)
+				paths.push_back(assets.GetReferencePath(prefab));
+			std::ranges::sort(paths);
+			std::string names;
+			std::vector<ErrorIssue> issues;
+			for (const std::string& path : paths)
+			{
+				names += std::format("{}'{}'", names.empty() ? "" : ", ", path);
+				issues.push_back(ErrorIssue{ "", std::format("{}: '{}' is on a nesting cycle", PrefabCycleCode, path), {}, {} });
+			}
+			const std::string cycleText = paths.size() == 1 ? std::format("the prefab {} nests itself", names)
+															: std::format("the prefabs {} nest each other in a cycle", names);
+			return Error(ErrorCode::Validation, std::format("{}: {}, so a change of it could never finish propagating", PrefabCycleCode, cycleText))
+				.WithIssues(std::move(issues))
+				.WithHint("remove a nested instance from one of the prefab files so that no prefab nests itself, directly or through others");
+		}
 
 	}
 
@@ -558,16 +681,177 @@ namespace Engine {
 		return updated;
 	}
 
-	Result<std::vector<AssetHandle>> EditorContext::GetNestingPrefabs(std::span<const AssetHandle> /*prefabs*/) const
+	Result<std::vector<AssetHandle>> EditorContext::GetNestingPrefabs(std::span<const AssetHandle> prefabs) const
 	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "M20 nesting prefabs contract (Docs/Decisions/0031-m20-contract.md decision 8, stream A2)");
+		if (!HasProject())
+			return MakeError(ErrorCode::InvalidState, "the prefabs nesting a prefab cannot be found: no project is open");
+		EditorAssetManager& assets = *m_Assets;
+		const AssetRegistry& registry = assets.GetRegistry();
+		const TypeRegistry& types = GetTypeRegistry();
+		const auto isPrefab = [&registry](AssetHandle handle)
+		{
+			const std::optional<AssetRegistry::Location> location = registry.Locate(handle);
+			return location.has_value() && location->Type == AssetType::Prefab;
+		};
+		for (const AssetHandle prefab : prefabs)
+		{
+			if (!isPrefab(prefab))
+				return MakeError(ErrorCode::NotFound, "{} names no prefab asset of the project", prefab);
+		}
+
+		// The nesting graph upwards from `prefabs`, read from the import dependencies (a prefab's nested instances name
+		// their prefabs, which its import lists) and confirmed in the documents, since a prefab may reference another
+		// without nesting it (a field naming a prefab to spawn). A document may nest its own prefab, which the dependency
+		// graph does not record (it keeps no self-edges), so every reached prefab's own document is read too.
+		std::map<AssetHandle, std::vector<AssetHandle>> documents; // prefab -> the prefabs its document nests
+		std::map<AssetHandle, std::set<AssetHandle>> nestedBy;     // prefab -> the prefabs nesting it directly
+		std::set<AssetHandle> reached(prefabs.begin(), prefabs.end());
+		std::vector<AssetHandle> pending(reached.begin(), reached.end());
+		while (!pending.empty())
+		{
+			const AssetHandle nested = pending.back();
+			pending.pop_back();
+			std::vector<AssetHandle> candidates = assets.GetDependencyGraph().GetDependents(nested);
+			candidates.push_back(nested);
+			for (const AssetHandle candidate : candidates)
+			{
+				if (!isPrefab(candidate))
+					continue;
+				Result<std::vector<AssetHandle>> nests = Utils::ReadNestedPrefabs(assets, types, candidate, documents);
+				if (!nests)
+				{
+					ENGINE_WARN("The prefab '{}' is left out of the prefabs nesting '{}': {}", assets.GetReferencePath(candidate),
+						assets.GetReferencePath(nested), nests.error().ToString());
+					continue;
+				}
+				if (!std::ranges::binary_search(*nests, nested))
+					continue;
+				nestedBy[nested].insert(candidate);
+				if (reached.insert(candidate).second)
+					pending.push_back(candidate);
+			}
+		}
+
+		// Nesting order (Kahn's algorithm): each prefab after every reached prefab it nests, ties in asset path order. The
+		// prefabs left over are on a cycle, or nest one.
+		std::map<AssetHandle, size_t> waiting; // prefab -> the reached prefabs it nests that are not ordered yet
+		for (const AssetHandle prefab : reached)
+			waiting.emplace(prefab, 0);
+		for (const auto& [nested, nesting] : nestedBy)
+		{
+			for (const AssetHandle prefab : nesting)
+				++waiting[prefab];
+		}
+		std::set<std::pair<std::string, AssetHandle>> ready;
+		for (const auto& [prefab, count] : waiting)
+		{
+			if (count == 0)
+				ready.emplace(assets.GetReferencePath(prefab), prefab);
+		}
+		std::vector<AssetHandle> ordered;
+		std::set<AssetHandle> done;
+		while (!ready.empty())
+		{
+			const AssetHandle prefab = ready.begin()->second;
+			ready.erase(ready.begin());
+			done.insert(prefab);
+			if (std::ranges::find(prefabs, prefab) == prefabs.end())
+				ordered.push_back(prefab);
+			if (const auto nesting = nestedBy.find(prefab); nesting != nestedBy.end())
+			{
+				for (const AssetHandle next : nesting->second)
+				{
+					if (--waiting[next] == 0)
+						ready.emplace(assets.GetReferencePath(next), next);
+				}
+			}
+		}
+		if (done.size() == reached.size())
+			return ordered;
+
+		// The prefabs on a cycle: those of the rest that reach themselves through the prefabs nesting them.
+		std::vector<AssetHandle> cycle;
+		for (const AssetHandle prefab : reached)
+		{
+			if (done.contains(prefab))
+				continue;
+			std::set<AssetHandle> seen;
+			std::vector<AssetHandle> stack{ prefab };
+			bool returns = false;
+			while (!stack.empty() && !returns)
+			{
+				const AssetHandle current = stack.back();
+				stack.pop_back();
+				const auto nesting = nestedBy.find(current);
+				if (nesting == nestedBy.end())
+					continue;
+				for (const AssetHandle next : nesting->second)
+				{
+					returns = returns || next == prefab;
+					if (!done.contains(next) && seen.insert(next).second)
+						stack.push_back(next);
+				}
+			}
+			if (returns)
+				cycle.push_back(prefab);
+		}
+		return std::unexpected(Utils::MakePrefabCycleError(assets, cycle));
 	}
 
-	Result<Scope<Command>> EditorContext::CreateNestingPrefabUpdateCommand(std::span<const AssetHandle> /*prefabs*/)
+	Result<NestingPrefabUpdate> EditorContext::CreateNestingPrefabUpdateCommand(std::span<const AssetHandle> prefabs)
 	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "M20 nesting prefab update contract (Docs/Decisions/0031-m20-contract.md decision 8, stream A2)");
+		ENGINE_TRY_ASSIGN(const std::vector<AssetHandle> nesting, GetNestingPrefabs(prefabs));
+		if (nesting.empty())
+			return NestingPrefabUpdate{};
+		ENGINE_TRY_ASSIGN(const Ref<const ScriptFieldSchemaSource> schemas, GetScriptSchemaSnapshot());
+		const PrefabOptions options{ .Schemas = schemas.get() };
+		EditorAssetManager& assets = *m_Assets;
+		const TypeRegistry& types = GetTypeRegistry();
+
+		// Each nesting prefab's document with its nested instances rebuilt from the versions current now, in nesting order,
+		// so a prefab nesting another that is rewritten here takes that one's new version.
+		std::map<AssetHandle, Prefab> versions;
+		for (const AssetHandle prefab : prefabs)
+		{
+			LoadReport report;
+			ENGINE_TRY_ASSIGN(Prefab current, LoadPrefabAsset(assets, prefab, types, options.Schemas, report));
+			versions.emplace(prefab, std::move(current));
+		}
+		std::vector<std::pair<VfsPath, Buffer>> files;
+		std::vector<AssetHandle> written;
+		for (const AssetHandle prefab : nesting)
+		{
+			const AssetRecord* record = assets.GetRegistry().Find(prefab);
+			if (record == nullptr || record->Metadata.Importer != PrefabImporter::Id)
+				continue; // only a .prefab file nests other prefabs
+			LoadReport report;
+			ENGINE_TRY_ASSIGN(const Prefab current, LoadPrefabAsset(assets, prefab, types, options.Schemas, report));
+			std::map<AssetHandle, Prefab> nested;
+			for (const AssetHandle handle : GetNestedPrefabAssets(current, types))
+			{
+				if (const auto version = versions.find(handle); version != versions.end())
+					nested.emplace(handle, version->second);
+			}
+			LoadReport updateReport;
+			ENGINE_TRY_ASSIGN(Prefab updated, WithContext(UpdateNestedPrefabInstances(current, types, nested, options, updateReport), std::format("rewriting the prefab '{}' that nests a changed prefab", assets.GetReferencePath(prefab))));
+			for (const LoadDiagnostic& diagnostic : updateReport.Diagnostics)
+				ENGINE_WARN("Rewriting the prefab '{}': {} ({})", assets.GetReferencePath(prefab), diagnostic.Message, diagnostic.Code);
+			ENGINE_TRY_ASSIGN(const std::string before, current.SaveToString());
+			ENGINE_TRY_ASSIGN(const std::string after, updated.SaveToString());
+			versions.insert_or_assign(prefab, std::move(updated));
+			if (after == before)
+				continue;
+			const std::span<const std::byte> bytes = AsBytes(after);
+			files.emplace_back(record->SourcePath, Buffer(bytes.begin(), bytes.end()));
+			written.push_back(prefab);
+		}
+		if (files.empty())
+			return NestingPrefabUpdate{};
+		ENGINE_TRY_ASSIGN(Scope<AssetEditCommand> writes, AssetEditCommand::CreateForWrites(*this, files, "Update Nesting Prefabs"));
+		NestingPrefabUpdate update;
+		update.Prefabs = written;
+		update.Rewrite = CreateScope<Utils::NestingPrefabUpdateCommand>(std::move(writes), std::move(written));
+		return update;
 	}
 
 	Result<Scope<Command>> EditorContext::CreatePrefabUpdateCommand(std::span<const AssetHandle> prefabs)

@@ -60,7 +60,7 @@ namespace Engine {
 	static PrefabOverride MakeOverride(PrefabOverrideKind kind, std::string component, std::string field, Json value = Json())
 	{
 		PrefabOverride prefabOverride;
-		prefabOverride.PrefabEntityID = UUID(0x00000000000b0002);
+		prefabOverride.Path = { UUID(0x00000000000b0002) };
 		prefabOverride.Kind = kind;
 		prefabOverride.Component = std::move(component);
 		prefabOverride.Field = std::move(field);
@@ -120,7 +120,7 @@ namespace Engine {
 			std::vector<std::string> kindNames;
 			for (const EnumEntry& entry : kinds->GetEntries())
 				kindNames.push_back(entry.Name);
-			CHECK(kindNames == std::vector<std::string>{ "Field", "AddComponent", "RemoveComponent", "EntityKey" });
+			CHECK(kindNames == std::vector<std::string>{ "Field", "AddComponent", "RemoveComponent", "EntityKey", "RemoveEntity" });
 		}
 
 		TEST_CASE("CoreRegistration: Transform has the virtual world and render fields")
@@ -274,7 +274,7 @@ namespace Engine {
 			}
 
 			// So an override's Value never holds a prefab instance: it is kept unresolved instead of being read as one.
-			const Result<Json> json = JsonReader::Parse(R"({ "PrefabEntityID": "00000000000b0002", "Kind": "AddComponent", "Component": "Prefab",
+			const Result<Json> json = JsonReader::Parse(R"({ "Path": ["00000000000b0002"], "Kind": "AddComponent", "Component": "Prefab",
 				"Field": "", "Value": { "Prefab": null, "Overrides": [ { "Kind": "NotAKind" } ] } })");
 			REQUIRE(json.has_value());
 			std::vector<ValidationIssue> diagnostics;
@@ -329,6 +329,8 @@ namespace Engine {
 			CHECK(ValidateCore(*registry, overrideType, &removed).empty());
 			const PrefabOverride key = MakeOverride(PrefabOverrideKind::EntityKey, "", "Active", Json(false));
 			CHECK(ValidateCore(*registry, overrideType, &key).empty());
+			const PrefabOverride removedEntity = MakeOverride(PrefabOverrideKind::RemoveEntity, "", "");
+			CHECK(ValidateCore(*registry, overrideType, &removedEntity).empty());
 
 			const PrefabOverride addedField = MakeOverride(PrefabOverrideKind::AddComponent, "AudioListener", "Primary",
 				Json::object({ { "Primary", false } }));
@@ -339,13 +341,16 @@ namespace Engine {
 			CHECK(ValidateCore(*registry, overrideType, &keyComponent) == std::vector<std::string>{ "/Component" });
 			const PrefabOverride notAKey = MakeOverride(PrefabOverrideKind::EntityKey, "", "Parent", Json());
 			CHECK(ValidateCore(*registry, overrideType, &notAKey) == std::vector<std::string>{ "/Field" });
+			// A RemoveEntity names only the entity (Docs/Decisions/0031-m20-contract.md decision 7).
+			const PrefabOverride removedEntityNames = MakeOverride(PrefabOverrideKind::RemoveEntity, "Transform", "Scale", Json(true));
+			CHECK(ValidateCore(*registry, overrideType, &removedEntityNames) == std::vector<std::string>{ "/Component", "/Field", "/Value" });
 
 			// Targets that do not exist are not type-level errors: a default override (no prefab entity, no names) and an override
 			// of a vanished component are valid but unresolved, kept until PrefabInstantiator drops them at the next update.
 			const PrefabOverride defaults;
 			CHECK(ValidateCore(*registry, overrideType, &defaults).empty());
 			PrefabOverride unkeyed = field;
-			unkeyed.PrefabEntityID = UUID();
+			unkeyed.Path.clear();
 			CHECK(ValidateCore(*registry, overrideType, &unkeyed).empty());
 			const PrefabOverride unnamed = MakeOverride(PrefabOverrideKind::Field, "", "", Json(1));
 			CHECK(ValidateCore(*registry, overrideType, &unnamed).empty());
@@ -386,7 +391,13 @@ namespace Engine {
 			CHECK(key.Component.empty());
 			CHECK((key.Field == "Name" || key.Field == "Active" || key.Field == "Tags"));
 
-			for (const PrefabOverride* repaired : { &field, &removed, &key })
+			PrefabOverride removedEntity = MakeOverride(PrefabOverrideKind::RemoveEntity, "Transform", "Scale", Json::array({ 1, 1, 1 }));
+			overrideType.Generate(&removedEntity, random);
+			CHECK(removedEntity.Component.empty());
+			CHECK(removedEntity.Field.empty());
+			CHECK(removedEntity.Value.IsNull());
+
+			for (const PrefabOverride* repaired : { &field, &removed, &key, &removedEntity })
 			{
 				ResolveContext resolve;
 				resolve.Registry = registry.get();
@@ -438,6 +449,17 @@ namespace Engine {
 			REQUIRE(tags.has_value());
 			CHECK((*tags)->GetKind() == FieldType::Array);
 
+			// A RemoveEntity's value is null, whatever the (empty) names say.
+			PrefabOverride removedEntity;
+			removedEntity.Kind = PrefabOverrideKind::RemoveEntity;
+			resolve.Owner = &removedEntity;
+			const Result<const FieldInfo*> removed = value->ResolveVariant(resolve);
+			REQUIRE(removed.has_value());
+			CHECK((*removed)->GetKind() == FieldType::Variant);
+			ValidationContext nullValue;
+			(*removed)->ValidateJson(JsonReader(Json()), resolve, nullValue);
+			CHECK_FALSE(nullValue.HasErrors());
+
 			PrefabOverride missing;
 			missing.Component = "Transform";
 			missing.Field = "Scael";
@@ -457,7 +479,7 @@ namespace Engine {
 
 			// Without a C++ object the kind and names come from the override's JSON, in the file spelling.
 			const Result<Json> removedJson = JsonReader::Parse(
-				R"({ "PrefabEntityID": "00000000000b0002", "Kind": "RemoveComponent", "Component": "MeshRenderer", "Field": "", "Value": null })");
+				R"({ "Path": ["00000000000b0002"], "Kind": "RemoveComponent", "Component": "MeshRenderer", "Field": "", "Value": null })");
 			REQUIRE(removedJson.has_value());
 			const JsonReader removedReader(*removedJson);
 			ResolveContext resolve;

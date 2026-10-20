@@ -11,8 +11,8 @@ Every component of the type registry, in canonical component order: the order of
 | `Tags` | Core | Serializable, ScriptVisible, EditorVisible, EntityLevel | The entity's gameplay tags, written as the entity key "Tags". |
 | `Relationship` | Core | Serializable, ScriptVisible, EditorVisible, Required, Hidden, EntityLevel | The entity's place in the hierarchy; its parent is written as the entity key "Parent". |
 | `Transform` | Core | Serializable, ScriptVisible, EditorVisible, Required | Positions, rotates and scales the entity relative to its parent. |
-| `Prefab` | Core | Serializable, ScriptVisible, Hidden | Marks the root of a prefab instance and records its overrides. |
-| `PrefabLink` | Core | Serializable, ScriptVisible, Hidden | Links a prefab instance member, the root included, to its prefab entity. |
+| `Prefab` | Core | Serializable, ScriptVisible, Hidden | Marks the root of a prefab instance; an outermost one records the overrides of its instance and of the instances nested in it. |
+| `PrefabLink` | Core | Serializable, ScriptVisible, Hidden | Links an entity of a prefab instance, its root included, to its entity in the prefab of its innermost instance. |
 | `MeshRenderer` | Rendering | Serializable, ScriptVisible, EditorVisible, Removable | Draws a mesh asset with one material per submesh. |
 | `Camera` | Rendering | Serializable, ScriptVisible, EditorVisible, Removable | Renders the scene from the entity, looking down its local -Z axis. |
 | `DirectionalLight` | Rendering | Serializable, ScriptVisible, EditorVisible, Removable | A sun-like light shining down the entity's local -Z axis. |
@@ -136,10 +136,10 @@ Script members of `Transform`:
 
 ## Prefab
 
-Marks the root of a prefab instance and records its overrides.
+Marks the root of a prefab instance; an outermost one records the overrides of its instance and of the instances nested in it.
 
 - Category: Core
-- Version: 1
+- Version: 2
 - Flags: Serializable, ScriptVisible, Hidden
 - Requires: none
 - Excludes: none
@@ -147,11 +147,11 @@ Marks the root of a prefab instance and records its overrides.
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
 | `Prefab` | `AssetRef(Prefab)` | `null` |  |  |  | The prefab asset the instance was created from. |
-| `Overrides` | `Array<PrefabOverride>` | `[]` |  |  |  | The instance's differences from the prefab, sorted by prefab entity, component, kind and field. |
+| `Overrides` | `Array<PrefabOverride>` | `[]` |  |  |  | The differences of an outermost instance from its prefab, sorted by path, component, kind and field; empty on a nested instance root. |
 
 ## PrefabLink
 
-Links a prefab instance member, the root included, to its prefab entity.
+Links an entity of a prefab instance, its root included, to its entity in the prefab of its innermost instance.
 
 - Category: Core
 - Version: 1
@@ -161,8 +161,9 @@ Links a prefab instance member, the root included, to its prefab entity.
 
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
-| `PrefabEntityID` | `EntityRef` | `null` |  |  |  | The prefab-local ID of the entity this member was created from. |
-| `InstanceRoot` | `EntityRef` | `null` |  |  |  | The root entity of the instance, which has the Prefab component. |
+| `PrefabEntityID` | `EntityRef` | `null` |  |  |  | The entity's ID in the prefab of its innermost instance. |
+| `InstanceRoot` | `EntityRef` | `null` |  |  |  | The root of the entity's innermost instance (an instance root names itself), which has the Prefab component. |
+| `OuterPrefabEntityID` | `EntityRef` | `null` |  |  |  | On a nested instance root: its id in the prefab of the instance that encloses it; null on every other entity. |
 
 ## MeshRenderer
 
@@ -728,13 +729,13 @@ The structs component fields hold, in name order.
 
 ### PrefabOverride
 
-One recorded difference between a prefab instance and its prefab.
+One recorded difference between an outermost prefab instance and its prefab.
 
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
-| `PrefabEntityID` | `EntityRef` | `null` |  |  |  | The prefab-local ID of the entity the override applies to (never the derived instance ID). |
-| `Kind` | `PrefabOverrideKind` | `"Field"` |  |  |  | What the override changes: a field, an added or removed component, or an entity key. |
-| `Component` | `String` | `""` |  |  |  | The registry name of the component for Field, AddComponent and RemoveComponent; empty for EntityKey. |
+| `Path` | `Array<EntityRef>` | `[]` |  |  |  | The entity the override applies to: its id in the outermost prefab, or the ids of the nested instance roots on the way and then its id in its own prefab. |
+| `Kind` | `PrefabOverrideKind` | `"Field"` |  |  |  | What the override changes: a field, an added or removed component, an entity key, or the entity removed from the instance. |
+| `Component` | `String` | `""` |  |  |  | The registry name of the component for Field, AddComponent and RemoveComponent; empty for EntityKey and RemoveEntity. |
 | `Field` | `String` | `""` |  |  |  | The field name for Field; Name, Active or Tags for EntityKey; empty otherwise. |
 | `Value` | `Variant` | `null` |  |  |  | The overriding value, checked against the schema of its target: the field, the whole component, or the entity key. |
 
@@ -801,6 +802,7 @@ What a prefab override changes on one prefab entity of an instance.
 | `AddComponent` | A component added to the prefab entity; Value is the whole component. |
 | `RemoveComponent` | A component of the prefab entity removed from it; Value is null. |
 | `EntityKey` | An entity key (Name, Active or Tags); Value is the key's value. |
+| `RemoveEntity` | A prefab entity removed from the instance with its prefab descendants; Value is null. |
 
 ### ProjectionType
 

@@ -283,9 +283,18 @@ namespace Engine {
 		{
 			ENGINE_TRY_ASSIGN(api, GetScriptApi());
 		}
+		// The scene asset the played document came from (Scene.GetCurrent; M20, Docs/Decisions/0031-m20-contract.md decision
+		// 5): the open scene's or play.start's file, none for an empty test scene or an open scene never saved.
+		AssetHandle sceneAsset;
+		if (scenePath.has_value())
+		{
+			if (const AssetRecord* record = editor.GetAssets().GetRegistry().FindBySourcePath(*scenePath))
+				sceneAsset = record->Metadata.Handle;
+		}
 		PlaySessionSpecification specification;
 		specification.Registry = &editor.GetTypeRegistry();
 		specification.Assets = &editor.GetAssets();
+		specification.SceneAsset = sceneAsset;
 		specification.Mode = options.Mode;
 		specification.Seed = options.Seed.value_or(PlaySession::ComputeSessionSeed(project.Simulation.Seed, Utils::ReadSceneSeed(document)));
 		specification.Project = project;
@@ -320,10 +329,10 @@ namespace Engine {
 		if (scenePath.has_value())
 		{
 			result.Header.Scene.Path = std::string(scenePath->GetPath());
-			if (const AssetRecord* record = editor.GetAssets().GetRegistry().FindBySourcePath(*scenePath))
-				result.Header.Scene.Handle = record->Metadata.Handle;
+			result.Header.Scene.Handle = sceneAsset;
 		}
-		ENGINE_TRY_ASSIGN(result.Session, PlaySession::Prepare(specification, document));
+		// The session keeps the played document as its start document (Scene.Reload) without another copy.
+		ENGINE_TRY_ASSIGN(result.Session, PlaySession::Prepare(specification, CreateRef<const Json>(std::move(document))));
 		ENGINE_TRY(result.Session->SetTimeScale(options.TimeScale));
 		if (options.Lockstep)
 			result.Session->SetLockstep(true, options.LockstepOwner);

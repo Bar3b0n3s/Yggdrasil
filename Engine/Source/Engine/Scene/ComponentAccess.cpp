@@ -303,7 +303,7 @@ namespace Engine {
 
 	Result<Value> ComponentAccess::GetFieldValue(Entity entity, std::string_view component, std::string_view field)
 	{
-		ENGINE_CORE_ASSERT(entity.IsValid(), "ComponentAccess needs a valid entity");
+		ENGINE_CORE_ASSERT(entity.IsReadable(), "ComponentAccess needs a readable entity");
 		const TypeRegistry& registry = entity.GetScene()->GetTypeRegistry();
 		ENGINE_TRY_ASSIGN(const ComponentInfo* info, Utils::FindAccessibleComponent(registry, component, ComponentAccessKind::Read));
 		void* object = info->GetHostOps()->Get(entity);

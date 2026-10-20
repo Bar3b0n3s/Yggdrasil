@@ -1,0 +1,76 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "PrefabInstanceV1",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Prefab": 1,
+		"PrefabLink": 1,
+		"MeshRenderer": 1
+	},
+	"Entities": [
+		{
+			"ID": "6b2d4f8a10c3e507",
+			"Name": "Block",
+			"Parent": null,
+			"Active": true,
+			"Tags": ["Wall"],
+			"Components": {
+				"Transform": {
+					"Translation": [3, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Prefab": {
+					"Prefab": "3c9f2e7a11d04b88",
+					"Overrides": [
+						{
+							"PrefabEntityID": "00000000000b0001",
+							"Kind": "EntityKey",
+							"Component": "",
+							"Field": "Tags",
+							"Value": ["Wall"]
+						},
+						{
+							"PrefabEntityID": "00000000000b0002",
+							"Kind": "Field",
+							"Component": "Transform",
+							"Field": "Scale",
+							"Value": [1, 2, 1]
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "00000000000b0001",
+					"InstanceRoot": "6b2d4f8a10c3e507"
+				}
+			}
+		},
+		{
+			"ID": "ec685b183765f2e5",
+			"Name": "Visual",
+			"Parent": "6b2d4f8a10c3e507",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 2, 1]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "00000000000b0002",
+					"InstanceRoot": "6b2d4f8a10c3e507"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		}
+	]
+}

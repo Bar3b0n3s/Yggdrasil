@@ -96,7 +96,8 @@ namespace Engine {
 		// Destroys `entity` and its whole subtree in reverse canonical order (every child before its parent, later siblings
 		// before earlier ones: R[A[A1, A2], B] destroys B, A2, A1, A, R), and removes it from its parent's children. Edit
 		// scenes destroy immediately; runtime scenes add PendingDestroyTag to the subtree (Entity::IsValid becomes false at
-		// once) and destroy at the next FlushPendingDestroys (§5.7 step 8). Asserts a valid entity of this scene.
+		// once, while Entity::IsReadable stays true until the flush: FindReadableEntityByID) and destroy at the next
+		// FlushPendingDestroys (§5.7 step 8). Asserts a valid entity of this scene.
 		void DestroyEntity(Entity entity);
 
 		// Destroys every entity marked by DestroyEntity in a runtime scene, children first. No-op for edit scenes.
@@ -109,6 +110,16 @@ namespace Engine {
 		// overload returns a read-only handle.
 		[[nodiscard]] Entity FindEntityByID(UUID id);
 		[[nodiscard]] ConstEntity FindEntityByID(UUID id) const;
+
+		// The entity with `id` that readers may still use (M20, W-P02; Docs/Decisions/0031-m20-contract.md decision 4): the
+		// live entity FindEntityByID returns, or else, in a runtime scene, an entity marked by DestroyEntity, until the
+		// FlushPendingDestroys that destroys it. A pending entity's handle is not IsValid but IsReadable: its read accessors
+		// (its identity, name, components, tags, active state, parent and children) work until the flush, while its mutating
+		// members assert. An invalid handle for the invalid UUID and for an id that names neither. Only this lookup returns a
+		// pending entity: FindEntityByID, FindEntityByPath, GetCanonicalOrder, ForEachCanonical and GetEntityCount leave it
+		// out.
+		[[nodiscard]] Entity FindReadableEntityByID(UUID id);
+		[[nodiscard]] ConstEntity FindReadableEntityByID(UUID id) const;
 
 		// The entity at `path`, or an invalid handle when the path is malformed, matches nothing or is ambiguous.
 		// Grammar: a path is "/" followed by '/'-separated segments from a root ("/Game/Board"). A segment is an entity name
@@ -245,6 +256,9 @@ namespace Engine {
 		// Runtime scenes: entities marked by DestroyEntity, in destruction order, destroyed by FlushPendingDestroys. They
 		// are already out of the UUID index and the hierarchy.
 		std::vector<entt::entity> m_PendingDestroys;
+		// Runtime scenes: the same entities by UUID, for FindReadableEntityByID until the flush (lookup only, never iterated
+		// to produce output, §5.1). The latest marked entity of an id wins.
+		std::unordered_map<UUID, entt::entity> m_PendingIndex;
 		std::thread::id m_MainThread; // the creating thread (§4.11)
 	private:
 		friend class Entity;

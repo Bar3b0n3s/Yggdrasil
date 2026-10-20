@@ -42,13 +42,13 @@ namespace Engine {
 		{
 			const ConstEntity current = pending.back();
 			pending.pop_back();
-			if (!current.IsValid() || !current.IsActive())
+			if (!current.IsReadable() || !current.IsActive())
 				continue;
 			found = Utils::AddMeshBounds(current, assets, bounds) || found;
 			if (!options.IncludeDescendants)
 				break;
 			for (const UUID child : current.GetChildren())
-				pending.push_back(scene->FindEntityByID(child));
+				pending.push_back(scene->FindReadableEntityByID(child));
 		}
 		if (!found)
 			return std::nullopt;

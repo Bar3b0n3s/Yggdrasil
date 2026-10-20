@@ -11,6 +11,7 @@
 #include <doctest/doctest.h>
 
 #include <format>
+#include <optional>
 #include <vector>
 
 namespace Engine {
@@ -44,6 +45,7 @@ namespace Engine {
 			scene->Document = CreateRef<const Json>(Json::object());
 			fixture.GetAssetManager().Publish(AssetHandle(101), scene, "Assets/Next.scene");
 			fixture.Parameters = { { "Score", 7 }, { "Names", Json::array({ "A", "B" }) } };
+			fixture.CurrentScene = AssetHandle(101);
 			REQUIRE(fixture.Start().has_value());
 			const auto result = fixture.Evaluate(R"(
 assert(Scene.GetName() == "Test" and Scene.GetEntityCount() == 0)
@@ -84,6 +86,9 @@ params.Score = 99
 assert(Scene.GetLoadParameters().Score == 7)
 Scene.Load(Assets.Load("Assets/Next.scene"), {Score = 12, Nested = {Enabled = true}, Values = {1, 2, 3}})
 assert(root:IsValid() and Scene.GetName() == "Test")
+assert(Scene.GetCurrent() == Assets.Load("Assets/Next.scene"))
+Scene.Reload({Round = 2})
+assert(root:IsValid())
 return true
 )");
 			if (!result)
@@ -93,6 +98,8 @@ return true
 			CHECK(fixture.RequestedScene == AssetHandle(101));
 			CHECK(fixture.RequestedParameters == Json({ { "Nested", { { "Enabled", true } } }, { "Score", 12 }, { "Values", Json::array({ 1, 2, 3 }) } }));
 			CHECK(fixture.Parameters["Score"] == 7);
+			CHECK(fixture.ReloadRequested);
+			CHECK(fixture.RequestedReloadParameters == std::optional<Json>(Json{ { "Round", 2 } }));
 			CHECK_FALSE(fixture.GetEngine()->IsStopped());
 			const auto coverage = fixture.GetApi().GetCoverage(mode);
 			REQUIRE(coverage.has_value());
@@ -171,12 +178,18 @@ for _, fn in {
 	function() Scene.Load(scene, {1, 2}) end,
 	function() Scene.Load(scene, {Bad = function() end}) end,
 	function() Scene.Load(scene, {Bad = math.huge}) end,
+	function() Scene.Reload(7) end,
+	function() Scene.Reload(cycle) end,
+	function() Scene.Reload({1, 2}) end,
+	function() Scene.Reload({Bad = function() end}) end,
+	function() Scene.Reload({Bad = math.huge}) end,
 } do assert(not pcall(fn)) end
 return Scene.GetEntityCount() == 0
 )");
 			REQUIRE(result.has_value());
 			CHECK(result->Value.Get() == Json(true));
 			CHECK_FALSE(fixture.RequestedScene.IsValid());
+			CHECK_FALSE(fixture.ReloadRequested);
 			CHECK(fixture.ExternalMutations.empty());
 		}
 
@@ -224,12 +237,16 @@ assert(not pcall(Scene.CreateEntity, "Other"))
 assert(not pcall(Scene.Destroy, Scene.FindByName("Target")))
 assert(not pcall(Scene.Instantiate, Assets.Load("Assets/ScriptPrefab.prefab")))
 assert(not pcall(Scene.Load, Assets.Load("Assets/Next.scene")))
+assert(not pcall(Scene.Reload))
+assert(not pcall(Scene.Reload, {Round = 2}))
+assert(Scene.GetCurrent() == nil)
 return Scene.GetEntityCount() == 1
 )");
 			REQUIRE(result.has_value());
 			CHECK(result->Value.Get() == Json(true));
 			CHECK(target.IsValid());
 			CHECK_FALSE(fixture.RequestedScene.IsValid());
+			CHECK_FALSE(fixture.ReloadRequested);
 			CHECK(fixture.ExternalMutations.empty());
 		}
 

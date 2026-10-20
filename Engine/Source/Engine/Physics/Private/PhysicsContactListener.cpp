@@ -39,7 +39,7 @@ namespace Engine {
 			m_Contacts.clear();
 		}
 
-		void PhysicsStepContacts::Record(const JPH::BodyID& body1, const JPH::SubShapeID& subShape1, const JPH::BodyID& body2,
+		std::pair<uint64_t, uint64_t> MakePhysicsContactKey(const JPH::BodyID& body1, const JPH::SubShapeID& subShape1, const JPH::BodyID& body2,
 			const JPH::SubShapeID& subShape2)
 		{
 			const bool isOrdered = body1.GetIndexAndSequenceNumber() <= body2.GetIndexAndSequenceNumber();
@@ -47,8 +47,13 @@ namespace Engine {
 			const uint32_t highBody = isOrdered ? body2.GetIndexAndSequenceNumber() : body1.GetIndexAndSequenceNumber();
 			const uint32_t lowSubShape = isOrdered ? subShape1.GetValue() : subShape2.GetValue();
 			const uint32_t highSubShape = isOrdered ? subShape2.GetValue() : subShape1.GetValue();
-			const std::pair<uint64_t, uint64_t> key((static_cast<uint64_t>(lowBody) << 32) | highBody, (static_cast<uint64_t>(lowSubShape) << 32) | highSubShape);
+			return { (static_cast<uint64_t>(lowBody) << 32) | highBody, (static_cast<uint64_t>(lowSubShape) << 32) | highSubShape };
+		}
 
+		void PhysicsStepContacts::Record(const JPH::BodyID& body1, const JPH::SubShapeID& subShape1, const JPH::BodyID& body2,
+			const JPH::SubShapeID& subShape2)
+		{
+			const std::pair<uint64_t, uint64_t> key = MakePhysicsContactKey(body1, subShape1, body2, subShape2);
 			const std::scoped_lock lock(m_Mutex);
 			m_Contacts.push_back(key);
 		}
@@ -67,17 +72,27 @@ namespace Engine {
 			return { bodyPairs, static_cast<uint32_t>(m_Contacts.size()) };
 		}
 
+		bool PhysicsContactTouches(bool isSensor, float penetrationDepth, float relativeNormalSpeed, float collisionStepDelta)
+		{
+			if (isSensor || penetrationDepth >= 0.0f)
+				return true;
+			return relativeNormalSpeed * collisionStepDelta >= -penetrationDepth;
+		}
+
 		PhysicsContactListener::PhysicsContactListener(ContactBuffer& buffer, const std::vector<PhysicsBodyRecord>& bodies,
 			PhysicsStepContacts& stepContacts)
 			: m_Buffer(&buffer), m_Bodies(&bodies), m_StepContacts(&stepContacts)
 		{
 		}
 
-		void PhysicsContactListener::OnContactAdded(const JPH::Body& body1, const JPH::Body& body2, const JPH::ContactManifold& manifold,
-			JPH::ContactSettings& /*settings*/)
+		void PhysicsContactListener::SetCollisionStepDelta(float deltaTime)
 		{
-			m_StepContacts->Record(body1.GetID(), manifold.mSubShapeID1, body2.GetID(), manifold.mSubShapeID2);
+			m_CollisionStepDelta = deltaTime;
+		}
 
+		ContactEvent PhysicsContactListener::MakeRecord(ContactEventKind kind, const JPH::Body& body1, const JPH::Body& body2,
+			const JPH::ContactManifold& manifold) const
+		{
 			// The first contact point (on body 1's surface), or the manifold's base when Jolt gave no point.
 			const JPH::RVec3 point = manifold.mRelativeContactPointsOn1.empty() ? manifold.mBaseOffset : manifold.GetWorldSpaceContactPointOn1(0);
 			// Jolt's normal points from body 1 towards body 2 (the direction that moves body 2 out of the collision), so body 1
@@ -85,7 +100,7 @@ namespace Engine {
 			const JPH::Vec3 relativeVelocity = body1.GetPointVelocity(point) - body2.GetPointVelocity(point);
 
 			ContactEvent event;
-			event.Kind = ContactEventKind::Added;
+			event.Kind = kind;
 			event.BodyA = ToBodyHandle(body1.GetID());
 			event.BodyB = ToBodyHandle(body2.GetID());
 			event.SubShapeA = manifold.mSubShapeID1.GetValue();
@@ -96,6 +111,26 @@ namespace Engine {
 			event.Normal = ToGlm(manifold.mWorldSpaceNormal);
 			event.RelativeNormalSpeed = relativeVelocity.Dot(manifold.mWorldSpaceNormal);
 			event.IsSensor = body1.IsSensor() || body2.IsSensor();
+			event.Touching = PhysicsContactTouches(event.IsSensor, manifold.mPenetrationDepth, event.RelativeNormalSpeed, m_CollisionStepDelta);
+			return event;
+		}
+
+		void PhysicsContactListener::OnContactAdded(const JPH::Body& body1, const JPH::Body& body2, const JPH::ContactManifold& manifold,
+			JPH::ContactSettings& /*settings*/)
+		{
+			m_StepContacts->Record(body1.GetID(), manifold.mSubShapeID1, body2.GetID(), manifold.mSubShapeID2);
+			const ContactEvent event = MakeRecord(ContactEventKind::Added, body1, body2, manifold);
+			{
+				// A contact Jolt adds again (after it removed it) starts over: remembered when it does not touch, forgotten
+				// when it does.
+				const ContactKey key = MakePhysicsContactKey(body1.GetID(), manifold.mSubShapeID1, body2.GetID(), manifold.mSubShapeID2);
+				const std::scoped_lock lock(m_SpeculativeMutex);
+				if (event.Touching)
+					m_Speculative.erase(key);
+				else
+					m_Speculative.insert(key);
+				m_SpeculativeCount.store(m_Speculative.size(), std::memory_order_release);
+			}
 			m_Buffer->Append(event);
 		}
 
@@ -103,6 +138,25 @@ namespace Engine {
 			JPH::ContactSettings& /*settings*/)
 		{
 			m_StepContacts->Record(body1.GetID(), manifold.mSubShapeID1, body2.GetID(), manifold.mSubShapeID2);
+			if (m_SpeculativeCount.load(std::memory_order_acquire) == 0)
+				return;
+			const ContactKey key = MakePhysicsContactKey(body1.GetID(), manifold.mSubShapeID1, body2.GetID(), manifold.mSubShapeID2);
+			{
+				const std::scoped_lock lock(m_SpeculativeMutex);
+				if (!m_Speculative.contains(key))
+					return;
+			}
+			const ContactEvent event = MakeRecord(ContactEventKind::Touched, body1, body2, manifold);
+			if (!event.Touching)
+				return;
+			{
+				// Jolt may report one contact persisted twice in a step (its CCD pass); only the call that forgets it records it.
+				const std::scoped_lock lock(m_SpeculativeMutex);
+				if (m_Speculative.erase(key) == 0)
+					return;
+				m_SpeculativeCount.store(m_Speculative.size(), std::memory_order_release);
+			}
+			m_Buffer->Append(event);
 		}
 
 		void PhysicsContactListener::OnContactRemoved(const JPH::SubShapeIDPair& subShapePair)
@@ -114,6 +168,14 @@ namespace Engine {
 			event.SubShapeA = subShapePair.GetSubShapeID1().GetValue();
 			event.SubShapeB = subShapePair.GetSubShapeID2().GetValue();
 			event.IsSensor = IsRecordedSensor(subShapePair.GetBody1ID()) || IsRecordedSensor(subShapePair.GetBody2ID());
+			if (m_SpeculativeCount.load(std::memory_order_acquire) != 0)
+			{
+				const ContactKey key = MakePhysicsContactKey(subShapePair.GetBody1ID(), subShapePair.GetSubShapeID1(), subShapePair.GetBody2ID(),
+					subShapePair.GetSubShapeID2());
+				const std::scoped_lock lock(m_SpeculativeMutex);
+				m_Speculative.erase(key);
+				m_SpeculativeCount.store(m_Speculative.size(), std::memory_order_release);
+			}
 			m_Buffer->Append(event);
 		}
 

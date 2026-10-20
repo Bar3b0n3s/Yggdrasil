@@ -123,7 +123,7 @@ namespace Engine {
 		// collider events interleave; the full event lists, in dispatch order, are equal at every thread count. Each piece's
 		// Script component names a script, which alone makes it a scripted collider; the session simulates without a VM
 		// (Simulate mode), so the handle needs no asset.
-		TEST_CASE("Physics: contact event order identical at 0, 1 and 8 Jolt threads, collider events included" * doctest::skip(true))
+		TEST_CASE("Physics: contact event order identical at 0, 1 and 8 Jolt threads, collider events included")
 		{
 			Test::SetTestCaseTimeLimit(PileTimeoutSeconds);
 			const auto run = [](uint32_t workerThreads)

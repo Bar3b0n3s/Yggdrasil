@@ -45,6 +45,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <format>
 #include <limits>
 #include <map>
 #include <string>
@@ -1139,8 +1140,9 @@ end
 		{
 			const std::span<const std::string_view> codes = ProjectValidator::GetCodes();
 			// M4's 14 codes, M6's 11 (the asset codes but the runtime-only ASSET_UPLOAD_FAILED, and PREFAB_MISSING_ASSET), M8's
-			// RENDER_LIGHT_LIMIT_EXCEEDED, M9's two render warnings, M11's 10 physics codes, M12's 2 audio codes and M13's 7.
-			CHECK(codes.size() == 37 + PhysicsDiagnosticCodes.size());
+			// RENDER_LIGHT_LIMIT_EXCEEDED, M9's two render warnings, M11's 10 physics codes, M12's 2 audio codes, M13's 7 and
+			// M20's PREFAB_CYCLE.
+			CHECK(codes.size() == 38 + PhysicsDiagnosticCodes.size());
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -1155,7 +1157,9 @@ end
 			CHECK(position(PhysicsLimitExceededCode) < position(AudioNoListenerCode));
 			CHECK(position(PhysicsLimitExceededCode) + 1 == position("SCRIPT_COMPILE_ERROR"));
 			CHECK(position("INPUT_UNKNOWN_ACTION") + 1 == position(AudioNoListenerCode));
-			CHECK(codes.back() == "TEST_SUITE_INVALID");
+			// Later milestones' codes follow in landing order (Docs/Decisions/0028-backlog-program.md's ledger).
+			CHECK(position("TEST_SUITE_INVALID") + 1 == position(PrefabCycleCode));
+			CHECK(codes.back() == PrefabCycleCode);
 			CHECK(position(AudioNoListenerCode) + 1 == position(AudioMultiplePrimaryListenersCode));
 			CHECK(position(AudioMultiplePrimaryListenersCode) < position(RenderLightLimitExceededCode));
 			CHECK(position(RenderLightLimitExceededCode) < position(BuildStartSceneMissingCode));
@@ -1328,6 +1332,49 @@ end
 			REQUIRE(missing != nullptr);
 			CHECK(missing->Severity == DiagnosticSeverity::Warning);
 			CHECK_FALSE(missing->AutoFixable);
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 8: PREFAB_CYCLE is an error on each prefab on a nesting cycle. A.prefab
+		// and B.prefab nest each other, and C.prefab nests A without being on the cycle, so A and B are reported and C is not.
+		TEST_CASE("ProjectValidator: PREFAB_CYCLE is reported on each prefab of a cycle and not on a prefab nesting it")
+		{
+			Test::EditorTestFixture fixture("ValidatorPrefabCycleOfTwo");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			// `name`.prefab with root `root` and one child `inner`, an instance of the prefab `nested` whose root is `nestedRoot`.
+			const auto write = [&editor](std::string_view name, std::string_view handle, std::string_view root, std::string_view inner,
+								   std::string_view nested, std::string_view nestedRoot)
+			{
+				constexpr std::string_view Transform = R"("Transform": { "Translation": [0, 0, 0], "Rotation": [0, 0, 0, 1], "Scale": [1, 1, 1] })";
+				WriteValidatorFile(editor, std::format("Assets/Prefabs/{}.prefab", name),
+					std::format(R"({{ "Format": "Prefab", "Version": 1, "Name": "{0}", "Root": "{1}", "ComponentVersions": {{ "Transform": 1, "Prefab": 2, "PrefabLink": 1 }}, "Entities": [
+	{{ "ID": "{1}", "Name": "{0}", "Parent": null, "Active": true, "Tags": [], "Components": {{ {5} }} }},
+	{{ "ID": "{2}", "Name": "Inner", "Parent": "{1}", "Active": true, "Tags": [], "Components": {{ {5}, "Prefab": {{ "Prefab": "{3}", "Overrides": [] }},
+		"PrefabLink": {{ "PrefabEntityID": "{4}", "InstanceRoot": "{2}", "OuterPrefabEntityID": null }} }} }} ] }}
+)",
+						name, root, inner, nested, nestedRoot, Transform));
+				WriteValidatorFile(editor, std::format("Assets/Prefabs/{}.prefab.meta", name),
+					std::format(R"({{ "Format": "AssetMeta", "Version": 1, "Handle": "{}", "Type": "Prefab", "Importer": "Prefab", "ImporterVersion": 1, "Settings": null, "SubAssets": [] }})",
+						handle));
+			};
+			write("A", "3a7e00000000a001", "00000000000000a1", "00000000000000a2", "3a7e00000000b001", "00000000000000b1");
+			write("B", "3a7e00000000b001", "00000000000000b1", "00000000000000b2", "3a7e00000000a001", "00000000000000a1");
+			write("C", "3a7e00000000c001", "00000000000000c1", "00000000000000c2", "3a7e00000000a001", "00000000000000a1");
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Project);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			INFO(DescribeDiagnostics(*report));
+			std::vector<std::string> files;
+			for (const ProjectDiagnostic& diagnostic : report->Diagnostics)
+			{
+				if (diagnostic.Code != "PREFAB_CYCLE")
+					continue;
+				CHECK(diagnostic.Severity == DiagnosticSeverity::Error);
+				files.push_back(diagnostic.File);
+			}
+			std::ranges::sort(files);
+			CHECK(files == std::vector<std::string>{ "Assets/Prefabs/A.prefab", "Assets/Prefabs/B.prefab" });
 		}
 
 		TEST_CASE("ProjectValidator: GetCodes lists the M6 asset codes")

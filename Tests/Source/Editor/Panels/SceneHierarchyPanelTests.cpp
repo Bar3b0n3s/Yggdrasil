@@ -200,47 +200,11 @@ namespace Engine {
 			CHECK_FALSE(editor.GetScene().FindEntityByID(id).IsActiveSelf());
 		}
 
-		TEST_CASE("SceneHierarchyPanel: Delete of a prefab member is refused with its hint and keeps the member")
-		{
-			// The editor's Delete is entity.destroy, which refuses a member that is not its instance's root (ADR 0028 decision
-			// 16); the error notice shows the hint, the ways out a human needs too.
-			Test::WorkspaceTestUi test;
-			auto& editor = test.Environment.GetEditor();
-			REQUIRE(test.Client.Call("entity.create", Json{ { "name", "Lamp" } }));
-			REQUIRE(test.Client.Call("entity.create", Json{ { "name", "Bulb" }, { "parent", "/Lamp" } }));
-			REQUIRE(test.Client.Call("prefab.create", Json{ { "entity", "/Lamp" }, { "path", "Assets/Prefabs/Lamp.prefab" }, { "replaceWithInstance", true } }));
-			const UUID lamp = editor.GetScene().FindEntityByPath("/Lamp").GetUUID();
-			const UUID bulb = editor.GetScene().FindEntityByPath("/Lamp/Bulb").GetUUID();
-			const size_t steps = editor.GetHistory().GetUndoCount();
-			test.Draw();
-			test.Draw();
-			// A search opens the instance's row, so the member's row is drawn, inside the instance root's tree node.
-			const char* title = Utils::EditorWindowTitle(EditorPanel::SceneHierarchy);
-			test.Click(title, "##Search");
-			ImGui::GetIO().AddInputCharactersUTF8("Bulb");
-			test.Draw();
-			auto* hierarchy = test.Window(title);
-			const ImGuiID lampNode = ImHashStr("##Entity", 0, ImHashStr(lamp.ToString().c_str(), 0, hierarchy->ID));
-			const ImGuiID rowId = ImHashStr("##Entity", 0, ImHashStr(bulb.ToString().c_str(), 0, lampNode));
-			test.Click(test.Locate(hierarchy, rowId).GetCenter(), ImGuiMouseButton_Right);
-			const auto remove = test.FindText("Delete");
-			REQUIRE(remove.has_value());
-			const Test::ExpectLog failure(LogLevel::Error, "SceneHierarchyPanel:");
-			test.Click(*remove);
-			REQUIRE(test.Layer.OnSafePoint(0));
-			CHECK(editor.GetScene().FindEntityByID(bulb).IsValid());
-			CHECK(editor.GetHistory().GetUndoCount() == steps);
-			// The panel takes the action's result in its next frame, which logs the failure and shows it.
-			const std::string text = test.Text();
-			CHECK(text.contains("prefab.unpack"));
-			CHECK(text.contains("Dismiss"));
-			CHECK(failure.GetMatchCount() == 1);
-		}
-
-		// Docs/Decisions/0031-m20-contract.md decision 7 (E-PFB-DEL): RemoveEntity replaces the setup's refusal (the case
-		// above, which stream A1 rewrites into this one). The editor's Delete of a member destroys it with its subtree and
-		// records one RemoveEntity on its instance root, in one undo step and without an error notice; undo brings it back.
-		TEST_CASE("SceneHierarchyPanel: Delete of a prefab member records its deletion in one undo step" * doctest::skip(true))
+		// Docs/Decisions/0031-m20-contract.md decision 7 (E-PFB-DEL): RemoveEntity replaces the setup's refusal (ADR 0028
+		// decision 16), whose test this case rewrites. The editor's Delete is entity.destroy: deleting a member destroys it
+		// with its subtree and records one RemoveEntity on its instance root, in one undo step and without an error notice;
+		// undo brings it back.
+		TEST_CASE("SceneHierarchyPanel: Delete of a prefab member records its deletion in one undo step")
 		{
 			Test::WorkspaceTestUi test;
 			auto& editor = test.Environment.GetEditor();
@@ -479,6 +443,8 @@ namespace Engine {
 			failCreate();
 			CHECK(failures.GetMatchCount() == 1);
 			CHECK(text.contains("Dismiss"));
+			// The notice shows the error's hint after its message: the way out a human needs too.
+			CHECK(text.contains("start play mode first"));
 			REQUIRE(ui.Frame(draw));
 			CHECK(text.contains("Dismiss"));
 			REQUIRE(ui.Click(draw, button("Dismiss##EditorError")));

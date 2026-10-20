@@ -10,6 +10,7 @@
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Migrations.h"
 #include "Engine/Scene/Private/EntityDocument.h"
+#include "Engine/Scene/Private/PrefabNesting.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
 
@@ -20,6 +21,7 @@
 #include <format>
 #include <span>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -141,20 +143,54 @@ namespace Engine {
 		const TypeRegistry& registry = root.GetScene()->GetTypeRegistry();
 		const ComponentInfo* instanceInfo = registry.FindComponent<PrefabInstanceComponent>();
 		const ComponentInfo* linkInfo = registry.FindComponent<PrefabLinkComponent>();
+		ENGINE_CORE_ASSERT(instanceInfo != nullptr && linkInfo != nullptr, "The prefab components are built in");
+		if (instanceInfo == nullptr || linkInfo == nullptr)
+			return MakeError(ErrorCode::InvalidState, "the prefab components are not registered");
+
+		// Live nested prefabs (Docs/Decisions/0031-m20-contract.md decision 8): every instance whose root is strictly below
+		// `root` stays live; the instance of `root` itself and every instance whose root is outside the subtree are unpacked
+		// in the copy, as prefab.unpack leaves them.
+		const std::vector<ConstEntity> subtree = Utils::CollectSubtree(root);
+		std::unordered_set<UUID> live; // lookup only: the instance roots that stay live
+		for (const ConstEntity entity : subtree)
+		{
+			if (entity != root && entity.HasComponent<PrefabInstanceComponent>())
+				live.insert(entity.GetUUID());
+		}
 
 		Json entities = Json::array();
 		std::vector<std::pair<std::string, uint32_t>> unknownVersions;
-		for (const ConstEntity entity : Utils::CollectSubtree(root))
+		for (const ConstEntity entity : subtree)
 		{
 			ENGINE_TRY_ASSIGN(Json json, SceneSerializer::EntityToJson(entity));
 			if (entity == root)
 				json["Parent"] = nullptr;
-			// Nested instances are flattened (§5.5): their entities and data stay, their instance and link components go.
 			Json& components = json["Components"];
-			for (const ComponentInfo* info : { instanceInfo, linkInfo })
+			const PrefabLinkComponent* link = entity.TryGetComponent<PrefabLinkComponent>();
+			if (live.contains(entity.GetUUID()))
 			{
-				if (info != nullptr)
-					components.erase(info->GetName());
+				// A live instance nested in one that is unpacked becomes outermost in the document and takes over the
+				// overrides recorded for it; nested in a live one, it stays nested.
+				if (Utils::IsNestedInstanceRoot(entity))
+				{
+					ENGINE_TRY_ASSIGN(const std::vector<ConstEntity> levels, Utils::FindInstanceLevels(entity));
+					ENGINE_CORE_ASSERT(levels.size() > 1, "A nested instance root has an enclosing instance");
+					if (levels.size() > 1 && !live.contains(levels[levels.size() - 2].GetUUID()))
+					{
+						PrefabInstanceComponent instance = entity.GetComponent<PrefabInstanceComponent>();
+						ENGINE_TRY_ASSIGN(instance.Overrides, Utils::TakeNestedOverrides(entity));
+						PrefabLinkComponent outermost = *link;
+						outermost.OuterPrefabEntityID = UUID();
+						ENGINE_TRY_ASSIGN(components[instanceInfo->GetName()], instanceInfo->ToJson(&instance));
+						ENGINE_TRY_ASSIGN(components[linkInfo->GetName()], linkInfo->ToJson(&outermost));
+					}
+				}
+			}
+			else if (link == nullptr || link->InstanceRoot == entity.GetUUID() || !live.contains(link->InstanceRoot))
+			{
+				// An entity of an unpacked instance: its entities and data stay, its instance and link components go.
+				components.erase(instanceInfo->GetName());
+				components.erase(linkInfo->GetName());
 			}
 			entities.push_back(std::move(json));
 			Utils::CollectUnknownVersions(entity, unknownVersions);

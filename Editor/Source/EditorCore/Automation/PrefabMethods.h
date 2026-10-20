@@ -16,6 +16,12 @@
 // EditorContext::Execute, as one undo step labelled "[agent] ..." (a CompositeCommand of a SceneEditCommand and an
 // AssetEditCommand where both change), reporting undoIndex. Instances are always rebuilt through PrefabInstantiator, the
 // single path (§5.5).
+//
+// Live nested prefabs (M20, Docs/Decisions/0031-m20-contract.md decisions 8 and 9): an instance root is outermost, or
+// nested in the instance of a prefab that nests its prefab; PrefabInstantiator::GetInstanceLevels lists the instance roots
+// an instance root belongs to, from the outermost down to itself. Only the outermost instance records overrides, each
+// naming its entity by a path (PrefabOverride::Path), so prefab.apply, prefab.revert and prefab.unpack accept a nested
+// instance root and act through its outermost instance as each describes.
 
 namespace Engine {
 
@@ -24,13 +30,15 @@ namespace Engine {
 	class TypeRegistry;
 
 	// prefab.create {entity, path, replaceWithInstance?}: writes the entity's subtree as a new prefab asset at
-	// project-relative `path` (below Assets/, extension .prefab) with its .meta (Prefab::CreateFromEntity: nested instances
-	// are flattened, §1.2, §5.5). With replaceWithInstance (default false) the entity is replaced by an instance of the new
-	// prefab at the same place in the hierarchy, keeping its root ID (so references to it survive). replaceWithInstance
-	// refuses a subtree holding a member of another instance (Utils::FindKeptPrefabMember, as entity.destroy refuses
-	// deleting one): that instance's next update could not keep the change. Supports dry runs (§13.4: the files go to the
-	// overlay and the scene change to the dry run's copy). The result names the instance root `instance`, empty without
-	// replaceWithInstance (prefab.instantiate names its new root `entity`).
+	// project-relative `path` (below Assets/, extension .prefab) with its .meta (Prefab::CreateFromEntity: every instance
+	// wholly inside the subtree stays live in the new prefab, outermost there, while the instance of `entity` itself and the
+	// instances it is a member of are unpacked in the copy; Docs/Decisions/0031-m20-contract.md decision 8). With
+	// replaceWithInstance (default false) the entity is replaced by an instance of the new prefab at the same place in the
+	// hierarchy, keeping its root ID (so references to it survive). Replacing a member of another instance deletes it from
+	// that instance, which records a RemoveEntity override as entity.destroy does, and the new instance stays a user child
+	// of it (decision 7). Supports dry runs (§13.4: the files go to the overlay and the scene change to the dry run's copy).
+	// The result names the instance root `instance`, empty without replaceWithInstance (prefab.instantiate names its new
+	// root `entity`).
 	struct PrefabCreateParams
 	{
 		std::string Entity{};
@@ -71,38 +79,50 @@ namespace Engine {
 		uint32_t UndoIndex = 0;
 	};
 
-	// prefab.apply {instance}: writes the instance's overrides back into its prefab asset (PrefabInstantiator::
-	// ApplyOverrides; user children are not added) and rebuilds every instance of that prefab in the open scene from the new
-	// prefab (§5.5 "Update", EditorContext::CreatePrefabUpdateCommand), as one undo step (the .prefab file edit and the
-	// scene edit). The other ways a prefab gets a new version follow the same rule (EditorContext.h "Prefab updates"):
-	// asset.setImportSettings and asset.reimport of an instanced glTF compose the same update, and an external change
-	// raises SceneChangedOnDisk, adopted by scene.open {reload: true}, which rebuilds the instances.
+	// prefab.apply {instance, level?}: writes overrides of an instance back into a prefab asset (user children are not
+	// added) and rebuilds the instances that follow it (§5.5 "Update"), as one undo step. `instance` is an instance root,
+	// outermost or nested; the overrides written are those of its outermost instance that target `instance` or an entity
+	// below it in the instance (every override of an outermost root). `level` names the instance whose prefab receives them:
+	// one of PrefabInstantiator::GetInstanceLevels(instance), from the outermost root down to `instance` itself; absent, the
+	// outermost (decision 9: PrefabInstantiator::ApplyOverrides re-bases their paths onto that prefab and keeps the level
+	// root's own Name, Transform and Parent recorded on the outermost root). Then the prefab assets nesting the written one
+	// are rewritten in nesting order (EditorContext::GetNestingPrefabs and CreateNestingPrefabUpdateCommand), and every
+	// outermost instance in the open scene of a prefab written or rewritten is rebuilt (EditorContext::
+	// CreatePrefabUpdateCommand), all in the same undo step. The other ways a prefab gets a new version (EditorContext.h
+	// "Prefab updates"): asset.setImportSettings and asset.reimport of an instanced glTF rebuild its outermost instances and
+	// those of the prefabs nesting it in the same undo step, but rewrite the nesting prefab documents only from W20.2
+	// (Docs/Decisions/0031-m20-contract.md decisions 8 and 15, stream S-B); an external change raises SceneChangedOnDisk,
+	// adopted by scene.open {reload: true}, which rebuilds the instances.
 	struct PrefabApplyParams
 	{
 		std::string Instance{};
+		std::string Level{}; // only when given (MethodContext::HasParam); absent: the outermost instance root
 	};
 
 	struct PrefabApplyResult
 	{
-		AssetSummary Prefab{};
-		uint32_t UpdatedInstances = 0; // instances of the prefab in the open scene that were rebuilt, this one included
+		AssetSummary Prefab{};                      // the level's prefab asset, written
+		uint32_t UpdatedInstances = 0;              // outermost instances in the open scene rebuilt, this one's included
+		std::vector<AssetSummary> UpdatedPrefabs{}; // the prefab assets nesting it that were rewritten, in nesting order
 		uint32_t UndoIndex = 0;
 	};
 
 	// Registry struct "PrefabOverrideKey": selects overrides of an instance (prefab.revert {overrides}), matching
-	// PrefabOverride's PrefabEntityID, Kind, Component and Field (§5.5; ADR 0006 decision 18). An empty Kind, Component or
-	// Field matches any value of it.
+	// PrefabOverride's Path, Kind, Component and Field (§5.5; ADR 0006 decision 18; Docs/Decisions/0031-m20-contract.md
+	// decision 10). Path is required; an empty Kind, Component or Field matches any value of it.
 	struct PrefabOverrideKey
 	{
-		std::string PrefabEntityId{}; // the prefab-local entity id, 16 hex digits
-		std::string Kind{};           // "Field", "AddComponent", "RemoveComponent", "EntityKey" (case-insensitive) or empty
+		std::vector<std::string> Path{}; // the override's path as the instance's Prefab component records it: 16 hex digits each
+		std::string Kind{};              // a PrefabOverrideKind name (case-insensitive), or empty
 		std::string Component{};
 		std::string Field{};
 	};
 
-	// prefab.revert {instance, overrides?}: clears the instance's overrides and rebuilds it from its prefab
-	// (PrefabInstantiator::Revert; user children kept). With `overrides` only the matching overrides are removed and the
-	// others are kept. Supports dry runs.
+	// prefab.revert {instance, overrides?}: removes overrides of an instance and rebuilds it from its prefab (user children
+	// kept). On an outermost instance root, its overrides (every one: PrefabInstantiator::Revert); on a nested instance
+	// root, the overrides its outermost instance records whose paths lie within the nested instance, its root included
+	// (decision 8), and the outermost instance is rebuilt. With `overrides` only the matching ones among those are removed
+	// and the others are kept. Supports dry runs.
 	struct PrefabRevertParams
 	{
 		std::string Instance{};
@@ -116,7 +136,10 @@ namespace Engine {
 		uint32_t UndoIndex = 0;
 	};
 
-	// prefab.unpack {instance}: PrefabInstantiator::Unpack; the entities and their data stay, the links go. Supports dry runs.
+	// prefab.unpack {instance}: PrefabInstantiator::Unpack on an outermost instance root; the entities and their data stay,
+	// the links of the instance's own entities go, and each instance nested directly in it becomes outermost, keeping its
+	// state as its own overrides (decision 8: one level per call). A nested instance root is refused: its outermost
+	// instance is unpacked first. Supports dry runs.
 	struct PrefabUnpackParams
 	{
 		std::string Instance{};
@@ -131,19 +154,24 @@ namespace Engine {
 	namespace Automation {
 
 		// prefab.create. Errors: NotFound (entity); InvalidArgument for a path outside Assets/ or without .prefab;
-		// AlreadyExists for an existing file; InvalidState for an ambiguous reference (ADR 0006 decision 32) and, with
-		// replaceWithInstance, for a member of another instance (located at /entity, with a hint).
+		// AlreadyExists for an existing file; InvalidState for an ambiguous reference (ADR 0006 decision 32).
 		[[nodiscard]] Result<PrefabCreateResult> PrefabCreate(EditorMethodContext& context, const PrefabCreateParams& params);
 		// prefab.instantiate. Errors: NotFound (prefab or parent); Validation for an invalid transform (located under
 		// /transform) or a unique-per-scene collision; those of InstantiatePrefabAsset; those of entity.update's components
 		// (located under /components). Nothing is created on error.
 		[[nodiscard]] Result<PrefabInstantiateResult> PrefabInstantiate(EditorMethodContext& context, const PrefabInstantiateParams& params);
-		// prefab.apply. Errors: NotFound; InvalidArgument when `instance` is not an instance root; NotFound for its missing
-		// prefab asset (PREFAB_MISSING_ASSET); InvalidState for an ambiguous reference.
+		// prefab.apply. Errors: NotFound for a missing entity (located at /instance or /level) or a missing prefab asset
+		// (PREFAB_MISSING_ASSET); InvalidArgument when `instance` is not an instance root, when `level` is not one of its
+		// levels (the hint lists them by path) and when the level's prefab is imported rather than a .prefab file; Validation
+		// PREFAB_CYCLE when the propagation meets a nesting cycle, one through the prefab or among the prefabs nesting it
+		// (EditorContext::GetNestingPrefabs; one issue per prefab on it; nothing is written);
+		// InvalidState for an ambiguous reference.
 		[[nodiscard]] Result<PrefabApplyResult> PrefabApply(EditorMethodContext& context, const PrefabApplyParams& params);
-		// prefab.revert. Errors: as prefab.apply; InvalidArgument for a malformed override key.
+		// prefab.revert. Errors: as prefab.apply's for `instance`; InvalidArgument for a malformed override key (located at
+		// /overrides/<i>/path, /overrides/<i>/path/<j> or /overrides/<i>/kind).
 		[[nodiscard]] Result<PrefabRevertResult> PrefabRevert(EditorMethodContext& context, const PrefabRevertParams& params);
-		// prefab.unpack. Errors: NotFound; InvalidArgument when `instance` is not an instance root.
+		// prefab.unpack. Errors: NotFound; InvalidArgument when `instance` is not an instance root; InvalidState for a nested
+		// instance root (located at /instance; the hint unpacks its outermost instance).
 		[[nodiscard]] Result<PrefabUnpackResult> PrefabUnpack(EditorMethodContext& context, const PrefabUnpackParams& params);
 
 	}

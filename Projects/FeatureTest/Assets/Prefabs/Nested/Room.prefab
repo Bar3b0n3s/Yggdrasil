@@ -1,0 +1,113 @@
+{
+	"Format": "Prefab",
+	"Version": 1,
+	"Name": "Room",
+	"Root": "4e883ba1bb8ca358",
+	"ComponentVersions": {
+		"Transform": 1,
+		"Prefab": 2,
+		"PrefabLink": 1,
+		"MeshRenderer": 1
+	},
+	"Entities": [
+		{
+			"ID": "4e883ba1bb8ca358",
+			"Name": "Room",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 2],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			}
+		},
+		{
+			"ID": "2c3ff34378db699c",
+			"Name": "Table",
+			"Parent": "4e883ba1bb8ca358",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.4, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [2, 0.1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "54bf0f7aee459da4",
+			"Name": "Lamp",
+			"Parent": "4e883ba1bb8ca358",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0.5, 0.9, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Prefab": {
+					"Prefab": "6d9fed79aa9dc20e",
+					"Overrides": [
+						{
+							"Path": ["617612310501a32f"],
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Visible",
+							"Value": false
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "54bf0f7aee459da4",
+					"InstanceRoot": "54bf0f7aee459da4",
+					"OuterPrefabEntityID": null
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "340d3331fc76ae33",
+			"Name": "Bulb",
+			"Parent": "54bf0f7aee459da4",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.4, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.3, 0.3, 0.3]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "617612310501a32f",
+					"InstanceRoot": "54bf0f7aee459da4",
+					"OuterPrefabEntityID": null
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": false
+				}
+			}
+		}
+	]
+}

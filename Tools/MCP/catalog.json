@@ -571,7 +571,7 @@
 		{
 			"name": "entity_destroy",
 			"method": "entity.destroy",
-			"description": "Destroys entities with their subtrees, as one undoable command. In the edit scene a member of a prefab instance that is not its root is refused: deactivate it, or unpack the instance first.",
+			"description": "Destroys entities with their subtrees, as one undoable command. In the edit scene, destroying a member of a prefab instance records a RemoveEntity override on its instance root, so the member stays deleted when the prefab updates (prefab.revert brings it back).",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "EntityDestroyParams",
@@ -1292,7 +1292,7 @@
 		{
 			"name": "prefab_apply",
 			"method": "prefab.apply",
-			"description": "Writes an instance's overrides into its .prefab asset and rebuilds every instance of it in the open scene, as one undoable step.",
+			"description": "Writes an instance's overrides into a .prefab asset, by default its outermost instance's prefab, or with level the prefab of a nested instance on the way down; then rewrites the prefabs nesting it (updatedPrefabs) and rebuilds their instances in the open scene, as one undoable step.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "PrefabApplyParams",
@@ -1300,7 +1300,11 @@
 				"type": "object",
 				"properties": {
 					"instance": {
-						"description": "The instance root whose overrides become the prefab's.",
+						"description": "The instance root, outermost or nested, whose overrides are applied: those its outermost instance records for it and the entities below it.",
+						"type": "string"
+					},
+					"level": {
+						"description": "The instance whose prefab receives the overrides: the outermost instance root (the default) or a nested instance root down to instance.",
 						"type": "string"
 					},
 					"ifRevision": {
@@ -1319,7 +1323,7 @@
 		{
 			"name": "prefab_create",
 			"method": "prefab.create",
-			"description": "Saves an entity's subtree as a new .prefab asset (nested instances flattened), optionally replacing the entity with an instance of it, as one undoable step. The result's instance is that instance's root (empty without replaceWithInstance). Replacing a member of another prefab instance is refused: unpack that instance first.",
+			"description": "Saves an entity's subtree as a new .prefab asset (the instances inside it stay live, nested in it), optionally replacing the entity with an instance of it, as one undoable step. The result's instance is that instance's root (empty without replaceWithInstance). Replacing a member of another prefab instance records its deletion there (RemoveEntity), and the new instance becomes a user child of that instance.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "PrefabCreateParams",

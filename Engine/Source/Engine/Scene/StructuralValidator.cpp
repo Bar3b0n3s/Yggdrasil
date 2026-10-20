@@ -7,6 +7,7 @@
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/Components/PrefabInstanceComponent.h"
 #include "Engine/Scene/Components/PrefabLinkComponent.h"
+#include "Engine/Scene/PrefabInstantiator.h"
 
 #include <nlohmann/json.hpp>
 
@@ -16,8 +17,11 @@ namespace Engine {
 
 		constexpr size_t NoEntity = std::numeric_limits<size_t>::max();
 
-		// The JSON key of PrefabLinkComponent::InstanceRoot (its registered field name).
+		// The JSON keys of PrefabLinkComponent::InstanceRoot and OuterPrefabEntityID and of PrefabInstanceComponent::Overrides
+		// (their registered field names).
 		constexpr std::string_view InstanceRootKey = "InstanceRoot";
+		constexpr std::string_view OuterPrefabEntityKey = "OuterPrefabEntityID";
+		constexpr std::string_view OverridesKey = "Overrides";
 
 		// Where a finding sits within its document position: the document's own keys ("Root") come first, then for each
 		// entity its ID, its Parent and its components in key order. SCENE_NONCANONICAL_ORDER about the whole array is
@@ -82,6 +86,13 @@ namespace Engine {
 			[[nodiscard]] Status CheckComponents();
 			// The reason why the PrefabLink `link` does not point at an instance root, or an empty string when it does.
 			[[nodiscard]] std::string FindPrefabLinkProblem(const JsonReader& link, std::string_view instanceName, std::string& pointer) const;
+			// The OuterPrefabEntityID of the PrefabLink `link`; the invalid UUID when it is absent, null or not a UUID (a
+			// malformed value is the component reader's to report).
+			[[nodiscard]] static UUID ReadOuterPrefabEntityID(const JsonReader& link);
+			// The reason why entity `index`'s OuterPrefabEntityID `outer` (valid) names no enclosing instance, or an empty
+			// string when an ancestor instance root R gives Hash64(R, outer) == the entity's ID (Docs/Decisions/0031-m20-contract.md
+			// decision 8). `instanceRoots` marks the entities that keep a Prefab component.
+			[[nodiscard]] std::string FindOuterPrefabEntityProblem(size_t index, UUID outer, const std::vector<bool>& instanceRoots) const;
 			[[nodiscard]] Result<Json> Finish(LoadReport& report);
 
 			Finding& AddFinding(size_t entityIndex, FindingRank rank, std::string_view code, std::string pointer, std::string message);
@@ -95,6 +106,7 @@ namespace Engine {
 			std::unordered_map<UUID, size_t> m_FirstHolders; // lookup only: written ID -> first entity holding it
 			std::vector<size_t> m_Order;                     // canonical order of m_Nodes
 			std::vector<Finding> m_Findings;
+			size_t m_PrefabRoot = NoEntity; // the entity a prefab document's "Root" names, when it names one
 		};
 
 		Result<Json> DocumentValidator::Run(LoadReport& report)
@@ -378,6 +390,7 @@ namespace Engine {
 			}
 			else
 			{
+				m_PrefabRoot = holder->second;
 				const size_t rootCount = static_cast<size_t>(std::count_if(m_Nodes.begin(), m_Nodes.end(), [](const EntityNode& node)
 				{
 					return node.Parent == NoEntity;
@@ -397,11 +410,26 @@ namespace Engine {
 			const ComponentInfo* instanceInfo = m_Registry.FindComponent<PrefabInstanceComponent>();
 			std::unordered_map<const ComponentInfo*, size_t> uniqueHolders; // lookup only
 
+			// The entities that keep a Prefab component (a prefab's root entity loses its own, PREFAB_NESTED_INSTANCE): the
+			// instance roots an OuterPrefabEntityID can derive from.
+			std::vector<bool> instanceRoots(m_Nodes.size(), false);
+			if (instanceInfo != nullptr)
+			{
+				for (size_t index = 0; index < m_Nodes.size(); ++index)
+				{
+					const auto components = m_Nodes[index].Object.find("Components");
+					const bool isPrefabRoot = m_Kind == DocumentKind::Prefab && index == m_PrefabRoot;
+					instanceRoots[index] = !isPrefabRoot && components != m_Nodes[index].Object.end() && components->is_object()
+						&& components->contains(instanceInfo->GetName());
+				}
+			}
+
 			// Canonical order, so that the first holder of a unique component is the first in canonical order.
 			for (const size_t index : m_Order)
 			{
 				EntityNode& node = m_Nodes[index];
 				std::vector<std::string> dropped;
+				std::vector<std::pair<std::string, std::string_view>> cleared; // component, member: reset to its empty value
 				{
 					const JsonReader entity(node.Object, node.Pointer);
 					const std::optional<JsonReader> components = entity.FindMember("Components");
@@ -409,6 +437,19 @@ namespace Engine {
 						continue;
 					ENGINE_TRY(components->ExpectType(JsonType::Object));
 					ENGINE_TRY_ASSIGN(const std::vector<std::string> names, components->GetMemberNames());
+
+					// A nested instance root (Docs/Decisions/0031-m20-contract.md decision 8): its PrefabLink's
+					// OuterPrefabEntityID names its place in an enclosing instance. Only an outermost instance records
+					// overrides.
+					bool isNestedRoot = false;
+					if (linkInfo != nullptr && instanceRoots[index])
+					{
+						if (const std::optional<JsonReader> link = components->FindMember(linkInfo->GetName()); link && link->IsObject())
+						{
+							const UUID outer = ReadOuterPrefabEntityID(*link);
+							isNestedRoot = outer.IsValid() && FindOuterPrefabEntityProblem(index, outer, instanceRoots).empty();
+						}
+					}
 
 					for (size_t position = 0; position < names.size(); ++position)
 					{
@@ -423,6 +464,7 @@ namespace Engine {
 						std::string message;
 						std::string repair;
 						Json removed;
+						std::optional<std::string_view> clearedMember; // set: the member is reset instead of the component dropped
 						if (info->HasFlag(ComponentFlags::EntityLevel) || !info->HasFlag(ComponentFlags::Serializable))
 						{
 							code = SceneMisplacedComponentCode;
@@ -432,11 +474,11 @@ namespace Engine {
 							repair = std::format("dropped the misplaced '{}' component", name);
 							removed = component.GetValue();
 						}
-						else if (m_Kind == DocumentKind::Prefab && (info == linkInfo || info == instanceInfo))
+						else if (m_Kind == DocumentKind::Prefab && index == m_PrefabRoot && (info == linkInfo || info == instanceInfo))
 						{
 							code = PrefabNestedInstanceCode;
-							message = std::format("'{}' marks a nested prefab instance, which a prefab never contains", name);
-							repair = std::format("flattened the nested instance: dropped its '{}' component", name);
+							message = std::format("'{}' is on the prefab's root entity, which is never an instance root or member itself", name);
+							repair = std::format("dropped the root entity's '{}' component", name);
 							removed = component.GetValue();
 						}
 						else if (m_Kind == DocumentKind::Scene && info->HasFlag(ComponentFlags::UniquePerScene))
@@ -452,10 +494,35 @@ namespace Engine {
 						else if (info == linkInfo && instanceInfo != nullptr && component.IsObject())
 						{
 							message = FindPrefabLinkProblem(component, instanceInfo->GetName(), pointer);
+							repair = std::format("unpacked the member: removed its '{}' component", name);
 							if (message.empty())
+							{
+								const UUID outer = ReadOuterPrefabEntityID(component);
+								if (!outer.IsValid())
+									continue;
+								message = instanceRoots[index]
+									? FindOuterPrefabEntityProblem(index, outer, instanceRoots)
+									: std::format("\"{}\" {} is set on an entity without a '{}' component", OuterPrefabEntityKey, outer,
+										  instanceInfo->GetName());
+								if (message.empty())
+									continue;
+								pointer = JsonReader::AppendPointer(component.GetPointer(), OuterPrefabEntityKey);
+								repair = std::format("cleared its \"{}\"", OuterPrefabEntityKey);
+								clearedMember = OuterPrefabEntityKey;
+							}
+							code = SceneInconsistentPrefabLinkCode;
+						}
+						else if (info == instanceInfo && isNestedRoot && component.IsObject())
+						{
+							const std::optional<JsonReader> overrides = component.FindMember(OverridesKey);
+							if (!overrides || !overrides->IsArray() || overrides->GetValue().empty())
 								continue;
 							code = SceneInconsistentPrefabLinkCode;
-							repair = std::format("unpacked the member: removed its '{}' component", name);
+							pointer = overrides->GetPointer();
+							message = "a nested instance root records overrides, which only an outermost instance does";
+							repair = "dropped the nested instance root's overrides";
+							removed = overrides->GetValue();
+							clearedMember = OverridesKey;
 						}
 						else
 						{
@@ -466,17 +533,43 @@ namespace Engine {
 						finding.ComponentIndex = position;
 						finding.Repair = std::move(repair);
 						finding.Removed = std::move(removed);
-						dropped.push_back(name);
+						if (clearedMember)
+							cleared.emplace_back(name, *clearedMember);
+						else
+							dropped.push_back(name);
 					}
 				}
 
-				if (dropped.empty())
+				if (dropped.empty() && cleared.empty())
 					continue;
 				Json& components = node.Object["Components"];
+				for (const auto& [name, member] : cleared)
+					components[name][std::string(member)] = member == OverridesKey ? Json::array() : Json(nullptr);
 				for (const std::string& name : dropped)
 					components.erase(name);
 			}
 			return {};
+		}
+
+		UUID DocumentValidator::ReadOuterPrefabEntityID(const JsonReader& link)
+		{
+			const std::optional<JsonReader> outer = link.FindMember(OuterPrefabEntityKey);
+			if (!outer || outer->IsNull())
+				return UUID();
+			const Result<UUID> id = outer->ReadUUID();
+			return id ? *id : UUID();
+		}
+
+		std::string DocumentValidator::FindOuterPrefabEntityProblem(size_t index, UUID outer, const std::vector<bool>& instanceRoots) const
+		{
+			const UUID id = m_Nodes[index].ID;
+			for (size_t ancestor = m_Nodes[index].Parent; ancestor != NoEntity; ancestor = m_Nodes[ancestor].Parent)
+			{
+				if (instanceRoots[ancestor] && PrefabInstantiator::DeriveInstanceID(m_Nodes[ancestor].ID, outer) == id)
+					return {};
+			}
+			return std::format("\"{}\" {} names no enclosing instance: no ancestor instance root derives the entity's ID {} from it",
+				OuterPrefabEntityKey, outer, id);
 		}
 
 		std::string DocumentValidator::FindPrefabLinkProblem(const JsonReader& link, std::string_view instanceName, std::string& pointer) const

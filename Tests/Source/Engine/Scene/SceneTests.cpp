@@ -12,6 +12,8 @@
 #include "Support/GlmApprox.h"
 #include "Support/SceneTestFixture.h"
 
+#include <utility>
+
 namespace Engine {
 
 	static std::vector<std::string> CanonicalNames(Scene& scene)
@@ -443,6 +445,72 @@ namespace Engine {
 			const Entity kept = editFixture.GetScene().CreateEntity("Kept");
 			editFixture.GetScene().FlushPendingDestroys();
 			CHECK(kept.IsValid());
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 4: the read access of an entity pending destruction. Only
+		// FindReadableEntityByID finds it, nested ones included, with its place in the hierarchy and its world pose, until
+		// the flush; the searches never do, and an edit scene has no pending entity.
+		TEST_CASE("Scene: FindReadableEntityByID finds an entity pending destruction until the flush")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			const Entity parent = scene.CreateEntity("Parent");
+			parent.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(1.0f, 0.0f, 0.0f);
+			});
+			const Entity doomed = scene.CreateEntity("Doomed", parent);
+			const Entity child = scene.CreateEntity("Child", doomed);
+			child.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.0f, 0.0f, 3.0f);
+			});
+			CHECK(scene.FindReadableEntityByID(doomed.GetUUID()) == doomed);
+			CHECK_FALSE(scene.FindReadableEntityByID(UUID()).IsReadable());
+			CHECK_FALSE(scene.FindReadableEntityByID(UUID(0x999)).IsReadable());
+
+			const UUID doomedID = doomed.GetUUID();
+			const UUID childID = child.GetUUID();
+			scene.DestroyEntity(doomed);
+			const Entity pending = scene.FindReadableEntityByID(doomedID);
+			const Entity pendingChild = scene.FindReadableEntityByID(childID);
+			CHECK(pending == doomed);
+			CHECK(pendingChild == child);
+			CHECK_FALSE(pending.IsValid());
+			CHECK(pending.IsReadable());
+			CHECK(pending.GetName() == "Doomed");
+			CHECK(pending.GetParent() == parent);
+			CHECK(pendingChild.GetParent() == pending);
+			REQUIRE(pending.GetChildren().size() == 1);
+			CHECK(pending.GetChildren()[0] == childID);
+			CHECK(pending.IsActive());
+			CHECK(TransformSystem::GetWorldPosition(pendingChild) == glm::vec3(1.0f, 0.0f, 3.0f));
+			CHECK(std::as_const(scene).FindReadableEntityByID(childID) == ConstEntity(pendingChild));
+			CHECK_FALSE(scene.FindEntityByID(doomedID).IsValid());
+			CHECK_FALSE(scene.FindEntityByPath("/Parent/Doomed").IsValid());
+			CHECK(parent.GetChildren().empty());
+			CHECK(scene.GetEntityCount() == 1);
+			CHECK(CanonicalNames(scene) == std::vector<std::string>{ "Parent" });
+
+			scene.FlushPendingDestroys();
+			CHECK_FALSE(doomed.IsReadable());
+			CHECK_FALSE(scene.FindReadableEntityByID(doomedID).IsReadable());
+			CHECK_FALSE(scene.FindReadableEntityByID(childID).IsReadable());
+
+			// A cleared runtime scene keeps no pending entity either.
+			const Entity cleared = scene.CreateEntity("Cleared");
+			const UUID clearedID = cleared.GetUUID();
+			scene.DestroyEntity(cleared);
+			scene.Clear();
+			CHECK_FALSE(scene.FindReadableEntityByID(clearedID).IsReadable());
+
+			// Edit scenes destroy at once: nothing stays readable.
+			Test::SceneTestFixture editFixture;
+			const Entity gone = editFixture.GetScene().CreateEntity("Gone");
+			const UUID goneID = gone.GetUUID();
+			editFixture.GetScene().DestroyEntity(gone);
+			CHECK_FALSE(gone.IsReadable());
+			CHECK_FALSE(editFixture.GetScene().FindReadableEntityByID(goneID).IsReadable());
 		}
 
 		TEST_CASE("Scene: structural changes increment the revision")

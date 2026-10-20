@@ -164,7 +164,7 @@
 			"additionalProperties": false
 		},
 		"Prefab": {
-			"description": "Marks the root of a prefab instance and records its overrides.",
+			"description": "Marks the root of a prefab instance; an outermost one records the overrides of its instance and of the instances nested in it.",
 			"type": "object",
 			"properties": {
 				"Prefab": {
@@ -174,7 +174,7 @@
 					"x-assetType": "Prefab"
 				},
 				"Overrides": {
-					"description": "The instance's differences from the prefab, sorted by prefab entity, component, kind and field.",
+					"description": "The differences of an outermost instance from its prefab, sorted by path, component, kind and field; empty on a nested instance root.",
 					"type": "array",
 					"items": {
 						"$ref": "#/$defs/PrefabOverride"
@@ -184,16 +184,21 @@
 			"additionalProperties": false
 		},
 		"PrefabLink": {
-			"description": "Links a prefab instance member, the root included, to its prefab entity.",
+			"description": "Links an entity of a prefab instance, its root included, to its entity in the prefab of its innermost instance.",
 			"type": "object",
 			"properties": {
 				"PrefabEntityID": {
-					"description": "The prefab-local ID of the entity this member was created from.",
+					"description": "The entity's ID in the prefab of its innermost instance.",
 					"type": ["string", "null"],
 					"pattern": "^[0-9a-fA-F]{16}$"
 				},
 				"InstanceRoot": {
-					"description": "The root entity of the instance, which has the Prefab component.",
+					"description": "The root of the entity's innermost instance (an instance root names itself), which has the Prefab component.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				},
+				"OuterPrefabEntityID": {
+					"description": "On a nested instance root: its id in the prefab of the instance that encloses it; null on every other entity.",
 					"type": ["string", "null"],
 					"pattern": "^[0-9a-fA-F]{16}$"
 				}
@@ -1150,20 +1155,23 @@
 			"additionalProperties": false
 		},
 		"PrefabOverride": {
-			"description": "One recorded difference between a prefab instance and its prefab.",
+			"description": "One recorded difference between an outermost prefab instance and its prefab.",
 			"type": "object",
 			"properties": {
-				"PrefabEntityID": {
-					"description": "The prefab-local ID of the entity the override applies to (never the derived instance ID).",
-					"type": ["string", "null"],
-					"pattern": "^[0-9a-fA-F]{16}$"
+				"Path": {
+					"description": "The entity the override applies to: its id in the outermost prefab, or the ids of the nested instance roots on the way and then its id in its own prefab.",
+					"type": "array",
+					"items": {
+						"type": ["string", "null"],
+						"pattern": "^[0-9a-fA-F]{16}$"
+					}
 				},
 				"Kind": {
-					"description": "What the override changes: a field, an added or removed component, or an entity key.",
-					"enum": ["Field", "AddComponent", "RemoveComponent", "EntityKey"]
+					"description": "What the override changes: a field, an added or removed component, an entity key, or the entity removed from the instance.",
+					"enum": ["Field", "AddComponent", "RemoveComponent", "EntityKey", "RemoveEntity"]
 				},
 				"Component": {
-					"description": "The registry name of the component for Field, AddComponent and RemoveComponent; empty for EntityKey.",
+					"description": "The registry name of the component for Field, AddComponent and RemoveComponent; empty for EntityKey and RemoveEntity.",
 					"type": "string"
 				},
 				"Field": {

@@ -56,18 +56,26 @@ namespace Engine {
 		// entity pending destruction as they do now.
 		[[nodiscard]] static Status ValidateEntityForRead(IScriptHost& host, ScriptEntityIdentity entity);
 		// Checks entity generation/liveness, index, ScriptVisible and component presence. NotFound for stale/missing data,
-		// InvalidArgument for an out-of-range index or a component not exposed to scripts.
+		// InvalidArgument for an out-of-range index or a component not exposed to scripts. Writes and component methods
+		// that act on the entity or a system's state call this.
 		[[nodiscard]] static Status ValidateComponent(IScriptHost& host, ScriptProxyIdentity proxy);
+		// As ValidateComponent with the entity checked by ValidateEntityForRead: what proxy field reads and the component
+		// methods registered as not mutating call, so the components of an entity pending destruction stay readable until
+		// the flush (M20, W-P02). The entity is then Scene::FindReadableEntityByID's.
+		[[nodiscard]] static Status ValidateComponentForRead(IScriptHost& host, ScriptProxyIdentity proxy);
 		// Exact component name; unknown/nonvisible names fail with NotFound and suggestions; absent components return
 		// nullopt. GetShortcut also applies !Hidden && !EntityLevel && !NoShortcut. Entity members take precedence in
-		// dispatch and Freeze rejects collisions. GetComponent("Script") is legal; the .Script shortcut is absent.
+		// dispatch and Freeze rejects collisions. GetComponent("Script") is legal; the .Script shortcut is absent. Both are
+		// reads: the entity is checked by ValidateEntityForRead, so an entity pending destruction still returns its
+		// proxies, whose reads work until the flush.
 		[[nodiscard]] static Result<std::optional<ScriptProxyIdentity>> GetComponent(IScriptHost& host,
 			ScriptEntityIdentity entity, std::string_view component);
 		[[nodiscard]] static Result<std::optional<ScriptProxyIdentity>> GetShortcut(IScriptHost& host,
 			ScriptEntityIdentity entity, std::string_view component);
 
 		// Fresh resolution each time. Only Scriptable && !Hidden fields are exposed; FieldMeta.Modes is enforced. Reads
-		// return owned reflected values. Successful reads/writes increment the registry's canonical field counters once.
+		// return owned reflected values, an entity pending destruction's included (ValidateComponentForRead); writes refuse
+		// it (ValidateComponent). Successful reads/writes increment the registry's canonical field counters once.
 		// Writes check call.CheckWritable BEFORE mutation, validate against FieldMeta/resolved schemas and type-level
 		// rules, then call PrepareHostMutation immediately before ComponentAccess::SetFieldValue (patch + notifications).
 		// Rejected validation leaves the scene, recording and counters unchanged; a fault after mutation notification

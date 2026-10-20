@@ -10,7 +10,9 @@
 #include "EditorCore/Private/EditorFileError.h"
 #include "EditorCore/Private/PrefabInstances.h"
 #include "Engine/Asset/AssetMetadata.h"
+#include "Engine/Asset/AssetRegistry.h"
 #include "Engine/Asset/ScriptData.h"
+#include "Engine/AssetPipeline/AssetDependencyGraph.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/Importers/PrefabImporter.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
@@ -18,6 +20,7 @@
 #include "Engine/Core/UUIDGenerator.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Reflection/ComponentInfo.h"
+#include "Engine/Reflection/EnumInfo.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Reflection/Value.h"
 #include "Engine/Scene/ComponentAccess.h"
@@ -30,9 +33,12 @@
 
 #include <nlohmann/json.hpp>
 
-#include <array>
-#include <cctype>
+#include <algorithm>
+#include <map>
 #include <optional>
+#include <span>
+#include <string_view>
+#include <vector>
 
 namespace Engine {
 
@@ -52,14 +58,14 @@ namespace Engine {
 			return root;
 		}
 
-		// The prefab asset the instance root `root` names, at its current version. Errors: NotFound at "/instance" for a
-		// missing prefab (PREFAB_MISSING_ASSET); those of LoadPrefabAsset.
-		Result<Prefab> LoadInstancePrefab(EditorContext& editor, const Scene& scene, ConstEntity root)
+		// The prefab asset the instance root `root` names, at its current version. Errors: NotFound at `pointer` (the param
+		// that names the instance) for a missing prefab (PREFAB_MISSING_ASSET); those of LoadPrefabAsset.
+		Result<Prefab> LoadInstancePrefab(EditorContext& editor, const Scene& scene, ConstEntity root, std::string_view pointer)
 		{
 			const AssetHandle handle = root.GetComponent<PrefabInstanceComponent>().Prefab.GetHandle();
 			if (!handle.IsValid())
 			{
-				return std::unexpected(Utils::MakeParamError(ErrorCode::NotFound, "/instance",
+				return std::unexpected(Utils::MakeParamError(ErrorCode::NotFound, pointer,
 					std::format("the instance '{}' names no prefab asset", scene.GetEntityPath(root)), "unpack it with prefab.unpack"));
 			}
 			LoadReport report;
@@ -67,11 +73,115 @@ namespace Engine {
 			Result<Prefab> prefab = LoadPrefabAsset(editor.GetAssets(), handle, editor.GetTypeRegistry(), schemas.get(), report);
 			if (!prefab && prefab.error().GetCode() == ErrorCode::NotFound)
 			{
-				return std::unexpected(Utils::MakeParamError(ErrorCode::NotFound, "/instance",
+				return std::unexpected(Utils::MakeParamError(ErrorCode::NotFound, pointer,
 					std::format("the prefab asset {} of the instance '{}' is missing (PREFAB_MISSING_ASSET)", handle.ToString(), scene.GetEntityPath(root)),
 					"restore the prefab (edit.undo after asset.delete), or unpack the instance with prefab.unpack"));
 			}
 			return prefab;
+		}
+
+		// The instance roots `root` belongs to, from the outermost down to `root` itself (PrefabInstantiator::
+		// GetInstanceLevels; decision 8). An outermost instance root (no OuterPrefabEntityID: a top-level instance, or one a
+		// user placed under a member of another) is its own only level, without walking the hierarchy above it. A nested
+		// root's parent need not belong to the instance enclosing it (a user may move it under a user child of that
+		// instance), so a nested root's levels are always looked up.
+		Result<std::vector<Entity>> GetLevels(Entity root)
+		{
+			if (Utils::IsOutermostPrefabInstance(root))
+				return std::vector<Entity>{ root };
+			ENGINE_TRY_ASSIGN(std::vector<Entity> levels, PrefabInstantiator::GetInstanceLevels(root));
+			ENGINE_ASSERT(!levels.empty() && levels.back() == root, "GetInstanceLevels of an instance root ends with that root");
+			return levels;
+		}
+
+		// The paths of `levels`, outermost first, quoted and comma-separated, for a hint.
+		std::string DescribeLevels(const Scene& scene, std::span<const Entity> levels)
+		{
+			std::string text;
+			for (const Entity level : levels)
+				text += std::format("{}'{}'", text.empty() ? "" : ", ", scene.GetEntityPath(level));
+			return text;
+		}
+
+		// The instance whose prefab prefab.apply writes: `level` when given (one of `levels`), the outermost otherwise.
+		// Errors: those of ResolveEntity at "/level"; InvalidArgument at "/level" for an entity that is not one of `levels`.
+		Result<Entity> ResolveApplyLevel(const EditorMethodContext& context, Scene& scene, std::span<const Entity> levels, std::string_view level)
+		{
+			if (!context.HasParam("level"))
+				return levels.front();
+			ENGINE_TRY_ASSIGN(const Entity resolved, context.ResolveEntity(scene, level, "/level"));
+			if (std::ranges::find(levels, resolved) != levels.end())
+				return resolved;
+			return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/level",
+				std::format("'{}' is not a level of the prefab instance '{}'", scene.GetEntityPath(resolved), scene.GetEntityPath(levels.back())),
+				std::format("pass one of its levels, outermost first: {}; or leave level out for the outermost", DescribeLevels(scene, levels))));
+		}
+
+		// The prefab of `level`, one of `levels` (the levels of the instance root `root`), with the overrides prefab.apply
+		// writes back (decision 9): an outermost root applied to its own prefab is the two-argument ApplyOverrides, and every
+		// other level re-bases the overrides' paths onto its prefab. Errors: those of PrefabInstantiator::ApplyOverrides.
+		Result<Prefab> ApplyToLevel(Entity root, std::span<const Entity> levels, Entity level, const Prefab& levelPrefab, const PrefabOptions& options)
+		{
+			if (levels.size() == 1)
+				return PrefabInstantiator::ApplyOverrides(root, levelPrefab, options);
+			return PrefabInstantiator::ApplyOverrides(root, level, levelPrefab, options);
+		}
+
+		// Whether the canonical document of `prefab` holds a prefab instance (a Prefab component on one of its entities).
+		bool NestsPrefabInstances(const Prefab& prefab)
+		{
+			return std::ranges::any_of(prefab.GetEntities(), [](const Json& entity)
+			{
+				const auto components = entity.find("Components");
+				return components != entity.end() && components->is_object() && components->contains("Prefab");
+			});
+		}
+
+		// The prefab assets nesting `handle` that a new version of it rewrites, in their order (EditorContext::
+		// GetNestingPrefabs; Validation PREFAB_CYCLE when the propagation meets a nesting cycle, through `handle` or among the
+		// prefabs nesting it). Only a prefab that another prefab asset references (its import dependencies list every prefab
+		// it nests) can be nested, and only one that nests a prefab itself (`current`, its current version) can be on a
+		// nesting cycle; any other rewrites no prefab, so the nesting graph is not walked for it.
+		Result<std::vector<AssetHandle>> FindNestingPrefabs(const EditorContext& editor, AssetHandle handle, const Prefab& current)
+		{
+			const EditorAssetManager& assets = editor.GetAssets();
+			const AssetRegistry& registry = assets.GetRegistry();
+			const bool referenced = std::ranges::any_of(assets.GetDependencyGraph().GetDependents(handle), [&registry](AssetHandle dependent)
+			{
+				const std::optional<AssetRegistry::Location> location = registry.Locate(dependent);
+				return location.has_value() && location->Type == AssetType::Prefab;
+			});
+			if (!referenced && !NestsPrefabInstances(current))
+				return std::vector<AssetHandle>{};
+			const AssetHandle prefabs[] = { handle };
+			return editor.GetNestingPrefabs(prefabs);
+		}
+
+		// `created`, a prefab Prefab::CreateFromEntity wrote, with the record of every instance it keeps live recomputed against
+		// the current version of that instance's prefab (RefreshNestedPrefabOverrides; decision 8): CreateFromEntity moves onto
+		// it only the overrides its enclosing instance recorded for it, while the document of the prefab that nested it may
+		// record more. An instance of a prefab that is not registered keeps the record it was given (PREFAB_MISSING_ASSET).
+		// Errors: those of LoadPrefabAsset but NotFound; those of RefreshNestedPrefabOverrides.
+		Result<Prefab> RefreshCreatedPrefab(EditorContext& editor, const Prefab& created, const PrefabOptions& options)
+		{
+			const TypeRegistry& types = editor.GetTypeRegistry();
+			const std::vector<AssetHandle> nested = GetNestedPrefabAssets(created, types);
+			if (nested.empty())
+				return created;
+			std::map<AssetHandle, Prefab> versions;
+			for (const AssetHandle handle : nested)
+			{
+				LoadReport report;
+				Result<Prefab> version = LoadPrefabAsset(editor.GetAssets(), handle, types, options.Schemas, report);
+				if (!version)
+				{
+					if (version.error().GetCode() == ErrorCode::NotFound)
+						continue;
+					return std::unexpected(std::move(version).error());
+				}
+				versions.emplace(handle, std::move(*version));
+			}
+			return RefreshNestedPrefabOverrides(created, types, versions, options);
 		}
 
 		// Writes the (partial) Transform value `value` onto `entity`: stored fields in one write, then writable virtual fields
@@ -112,71 +222,85 @@ namespace Engine {
 			return {};
 		}
 
-		// The registry spelling of an override kind given in any ASCII case ("" for an empty one). Errors: InvalidArgument at
-		// `pointer` for an unknown kind.
-		Result<std::string> ParseOverrideKind(std::string_view kind, std::string_view pointer)
+		// True when `path` starts with `prefix` (equal included).
+		bool StartsWith(std::span<const UUID> path, std::span<const UUID> prefix)
 		{
-			if (kind.empty())
-				return std::string();
-			constexpr std::array<std::string_view, 4> Kinds = { "Field", "AddComponent", "RemoveComponent", "EntityKey" };
-			for (const std::string_view name : Kinds)
-			{
-				if (name.size() == kind.size() && std::equal(name.begin(), name.end(), kind.begin(), [](char left, char right)
-				{
-					return std::tolower(static_cast<unsigned char>(left)) == std::tolower(static_cast<unsigned char>(right));
-				}))
-				{
-					return std::string(name);
-				}
-			}
-			return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, pointer, std::format("'{}' is not an override kind", kind),
-				"use Field, AddComponent, RemoveComponent or EntityKey, or leave it empty"));
-		}
-
-		// The registry spelling of `kind`.
-		std::string_view OverrideKindToString(PrefabOverrideKind kind)
-		{
-			switch (kind)
-			{
-				case PrefabOverrideKind::Field:           return "Field";
-				case PrefabOverrideKind::AddComponent:    return "AddComponent";
-				case PrefabOverrideKind::RemoveComponent: return "RemoveComponent";
-				case PrefabOverrideKind::EntityKey:       return "EntityKey";
-			}
-			return "Field";
+			return path.size() >= prefix.size() && std::equal(prefix.begin(), prefix.end(), path.begin());
 		}
 
 		// One parsed PrefabOverrideKey.
 		struct OverrideSelector
 		{
-			UUID PrefabEntityID{};
-			std::string Kind{}; // empty: any
+			std::vector<UUID> Path{};
+			std::optional<PrefabOverrideKind> Kind{}; // nullopt: any
 			std::string Component{};
 			std::string Field{};
 
 			[[nodiscard]] bool Matches(const PrefabOverride& entry) const
 			{
-				return entry.PrefabEntityID == PrefabEntityID && (Kind.empty() || Kind == OverrideKindToString(entry.Kind))
-					&& (Component.empty() || Component == entry.Component) && (Field.empty() || Field == entry.Field);
+				return entry.Path == Path && (!Kind.has_value() || *Kind == entry.Kind) && (Component.empty() || Component == entry.Component)
+					&& (Field.empty() || Field == entry.Field);
 			}
 		};
 
-		Result<std::vector<OverrideSelector>> ParseOverrideKeys(std::span<const PrefabOverrideKey> keys)
+		// Whether prefab.revert removes `entry`: it lies within `within` (the path of the nested instance root reverted; empty
+		// for an outermost root) and, when the call gives keys (`selective`), one of `selectors` matches it.
+		bool IsReverted(const PrefabOverride& entry, std::span<const UUID> within, bool selective, std::span<const OverrideSelector> selectors)
 		{
+			if (!StartsWith(entry.Path, within))
+				return false;
+			return !selective || std::ranges::any_of(selectors, [&entry](const OverrideSelector& selector)
+			{
+				return selector.Matches(entry);
+			});
+		}
+
+		// The kind a PrefabOverrideKey names in any ASCII case, from the registry's PrefabOverrideKind (nullopt for an empty
+		// one, which matches every kind). Errors: InvalidArgument at `pointer` for a name the enum does not have.
+		Result<std::optional<PrefabOverrideKind>> ParseOverrideKind(const EnumInfo& kinds, std::string_view kind, std::string_view pointer)
+		{
+			if (kind.empty())
+				return std::optional<PrefabOverrideKind>();
+			if (const EnumEntry* entry = kinds.FindByNameIgnoreCase(kind))
+				return std::optional<PrefabOverrideKind>(static_cast<PrefabOverrideKind>(entry->Value));
+			std::string names;
+			for (const EnumEntry& entry : kinds.GetEntries())
+				names += std::format("{}{}", names.empty() ? "" : ", ", entry.Name);
+			return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, pointer, std::format("'{}' is not a prefab override kind", kind),
+				std::format("use one of {} (any case), or leave it empty to match every kind", names)));
+		}
+
+		Result<std::vector<OverrideSelector>> ParseOverrideKeys(const TypeRegistry& registry, std::span<const PrefabOverrideKey> keys)
+		{
+			const EnumInfo* kinds = registry.FindEnum<PrefabOverrideKind>();
+			ENGINE_ASSERT(kinds != nullptr, "PrefabOverrideKind is registered by every engine context");
+			constexpr std::string_view PathHint = "give the override's Path as the instance's Prefab component records it (entity.get with components [\"Prefab\"])";
 			std::vector<OverrideSelector> selectors;
 			selectors.reserve(keys.size());
 			for (size_t index = 0; index < keys.size(); ++index)
 			{
 				const PrefabOverrideKey& key = keys[index];
 				const std::string pointer = std::format("/overrides/{}", index);
-				const std::optional<UUID> id = key.PrefabEntityId.size() == UUID::TextLength ? UUID::FromString(key.PrefabEntityId) : std::nullopt;
-				if (!id.has_value() || !id->IsValid())
+				if (key.Path.empty())
 				{
-					return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, pointer + "/prefabEntityId",
-						std::format("'{}' is not a prefab-local entity id", key.PrefabEntityId), "give the 16 hex digits of the override's PrefabEntityID"));
+					return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, pointer + "/path", "an override path names at least one entity id",
+						std::string(PathHint)));
 				}
-				ENGINE_TRY_ASSIGN(std::string kind, ParseOverrideKind(key.Kind, pointer + "/kind"));
-				selectors.push_back(OverrideSelector{ .PrefabEntityID = *id, .Kind = std::move(kind), .Component = key.Component, .Field = key.Field });
+				OverrideSelector selector{ .Path = {}, .Kind = std::nullopt, .Component = key.Component, .Field = key.Field };
+				selector.Path.reserve(key.Path.size());
+				for (size_t element = 0; element < key.Path.size(); ++element)
+				{
+					const std::string& text = key.Path[element];
+					const std::optional<UUID> id = text.size() == UUID::TextLength ? UUID::FromString(text) : std::nullopt;
+					if (!id.has_value() || !id->IsValid())
+					{
+						return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, std::format("{}/path/{}", pointer, element),
+							std::format("'{}' is not an entity id of an override path: 16 hex digits", text), std::string(PathHint)));
+					}
+					selector.Path.push_back(*id);
+				}
+				ENGINE_TRY_ASSIGN(selector.Kind, ParseOverrideKind(*kinds, key.Kind, pointer + "/kind"));
+				selectors.push_back(std::move(selector));
 			}
 			return selectors;
 		}
@@ -190,22 +314,6 @@ namespace Engine {
 			EditorContext& editor = context.GetEditor();
 			ENGINE_TRY_ASSIGN(Scene * scene, context.ResolveTargetScene(SceneTarget::Edit, false, true));
 			ENGINE_TRY_ASSIGN(Entity entity, context.ResolveEntity(*scene, params.Entity, "/entity"));
-			// Replacing the subtree removes its entities: a member of another instance stays, as entity.destroy keeps it (§5.5).
-			if (params.ReplaceWithInstance)
-			{
-				if (const std::optional<Utils::KeptPrefabMember> kept = Utils::FindKeptPrefabMember(entity, {}))
-				{
-					const std::string instance = scene->GetEntityPath(kept->InstanceRoot);
-					// The way out as a call to copy, its params built as JSON so that any entity name is escaped.
-					const Json unpack{ { "instance", instance } };
-					return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidState, "/entity",
-						std::format("'{}' is a member of the prefab instance '{}' and cannot be replaced with an instance of a new prefab: the instance's "
-									"next update could not keep the change",
-							scene->GetEntityPath(kept->Member), instance),
-						std::format("create the prefab without replaceWithInstance, or unpack the instance first (prefab.unpack {})",
-							unpack.dump(-1, ' ', false, Json::error_handler_t::replace))));
-				}
-			}
 			ENGINE_TRY_ASSIGN(const VfsPath path, Utils::ResolveAssetsPath(context, params.Path, "/path", ".prefab"));
 			ENGINE_TRY(Utils::RefreshAssets(editor));
 			VirtualFileSystem& vfs = editor.GetVfs();
@@ -213,9 +321,11 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(const auto schemas, editor.GetScriptSchemaSnapshot());
 			const PrefabOptions prefabOptions{ .Schemas = schemas.get() };
 
-			// Nested instances are flattened (§5.5); the entities keep their ids as prefab-local ids.
+			// The entities keep their ids as prefab-local ids, and every instance wholly inside the subtree stays live, outermost
+			// in the new prefab, its record recomputed against its prefab (decision 8).
 			const std::string name(path.GetStem());
-			ENGINE_TRY_ASSIGN(const Prefab prefab, Prefab::CreateFromEntity(entity, name));
+			ENGINE_TRY_ASSIGN(const Prefab created, Prefab::CreateFromEntity(entity, name));
+			ENGINE_TRY_ASSIGN(const Prefab prefab, RefreshCreatedPrefab(editor, created, prefabOptions));
 			ENGINE_TRY_ASSIGN(const std::string text, prefab.SaveToString());
 			EditorAssetManager& assets = editor.GetAssets();
 			ENGINE_TRY_ASSIGN(const AssetMetadata metadata, assets.CreateMetadata(path));
@@ -239,7 +349,9 @@ namespace Engine {
 			}
 
 			// The entity becomes an instance of the new prefab in the same place, with the same root id, so references to it
-			// survive; the file and the scene change are one undo step.
+			// survive; the file and the scene change are one undo step. A member of another instance is replaced like any
+			// entity: the commit's override refresh records its deletion as a RemoveEntity on that instance's root, and the new
+			// instance stays there as a user child of it (§5.5).
 			EditorTransaction transaction(editor, label);
 			ENGINE_TRY(editor.Execute(CreateScope<AssetEditCommand>(label, std::move(edits))));
 			{
@@ -319,32 +431,46 @@ namespace Engine {
 			EditorContext& editor = context.GetEditor();
 			ENGINE_TRY_ASSIGN(Scene * scene, context.ResolveTargetScene(SceneTarget::Edit, false, true));
 			ENGINE_TRY_ASSIGN(const Entity root, ResolveInstanceRoot(context, *scene, params.Instance));
+			ENGINE_TRY_ASSIGN(const std::vector<Entity> levels, GetLevels(root));
+			ENGINE_TRY_ASSIGN(const Entity level, ResolveApplyLevel(context, *scene, levels, params.Level));
+			const std::string_view levelPointer = context.HasParam("level") ? "/level" : "/instance";
 			ENGINE_TRY(Utils::RefreshAssets(editor));
-			ENGINE_TRY_ASSIGN(const Prefab current, LoadInstancePrefab(editor, *scene, root));
-			const AssetHandle handle = root.GetComponent<PrefabInstanceComponent>().Prefab.GetHandle();
+			ENGINE_TRY_ASSIGN(const Prefab current, LoadInstancePrefab(editor, *scene, level, levelPointer));
+			const AssetHandle handle = level.GetComponent<PrefabInstanceComponent>().Prefab.GetHandle();
 			EditorAssetManager& assets = editor.GetAssets();
 			const AssetRecord* record = assets.GetRegistry().Find(handle);
 			if (record == nullptr || record->Metadata.Importer != PrefabImporter::Id)
 			{
-				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/instance",
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, levelPointer,
 					std::format("the prefab '{}' of '{}' is imported, not a .prefab file, and cannot be written", assets.GetReferencePath(handle),
-						scene->GetEntityPath(root)),
+						scene->GetEntityPath(level)),
 					"create a prefab from the instance with prefab.create, or unpack it with prefab.unpack"));
 			}
 			const VfsPath source = record->SourcePath;
 			ENGINE_TRY_ASSIGN(const auto schemas, editor.GetScriptSchemaSnapshot());
 			const PrefabOptions prefabOptions{ .Schemas = schemas.get() };
-			ENGINE_TRY_ASSIGN(const Prefab applied, PrefabInstantiator::ApplyOverrides(root, current, prefabOptions));
+			ENGINE_TRY_ASSIGN(const Prefab applied, ApplyToLevel(root, levels, level, current, prefabOptions));
 			ENGINE_TRY_ASSIGN(const std::string text, applied.SaveToString());
 			Result<std::string> before = editor.GetVfs().ReadText(source);
 			if (!before)
 				return std::unexpected(Utils::ToEditorFileError(std::move(before).error()));
+			// Before anything is written, so that a nesting cycle refuses the whole update.
+			ENGINE_TRY_ASSIGN(const std::vector<AssetHandle> nesting, FindNestingPrefabs(editor, handle, current));
+			std::vector<AssetHandle> rebuilt = nesting;
+			rebuilt.push_back(handle);
+			std::ranges::sort(rebuilt);
 
-			// One undo step (§5.5 "Update"): the overrides of every instance recorded against the current version, the .prefab
-			// written and imported, and every instance rebuilt from the new version.
+			// One undo step (§5.5 "Update"): the overrides of every instance recorded against the current versions, the .prefab
+			// written and imported, the prefabs nesting it rewritten, and every instance of them rebuilt from the new versions.
 			const std::string label = std::format("Apply Prefab '{}'", Utils::ToProjectRelative(source));
 			EditorTransaction transaction(editor, label);
 			ENGINE_TRY(Utils::RecordPrefabOverrides(editor, handle, current));
+			for (const AssetHandle nestingPrefab : nesting)
+			{
+				LoadReport report;
+				ENGINE_TRY_ASSIGN(const Prefab nestingCurrent, LoadPrefabAsset(assets, nestingPrefab, editor.GetTypeRegistry(), schemas.get(), report));
+				ENGINE_TRY(Utils::RecordPrefabOverrides(editor, nestingPrefab, nestingCurrent));
+			}
 			if (text != *before)
 			{
 				ENGINE_TRY_ASSIGN(Scope<AssetEditCommand> command, AssetEditCommand::CreateForWrite(editor, source, AsBytes(text), label));
@@ -352,15 +478,27 @@ namespace Engine {
 				ENGINE_TRY_ASSIGN(const AssetImportOutcome outcome, assets.Reimport(handle));
 				static_cast<void>(outcome);
 			}
-			const size_t instances = Utils::FindPrefabInstances(editor.GetScene(), std::span<const AssetHandle>(&handle, 1)).size();
-			const AssetHandle prefabs[] = { handle };
-			ENGINE_TRY_ASSIGN(Scope<Command> update, editor.CreatePrefabUpdateCommand(prefabs));
+			// The prefabs nesting it whose documents the rewrite changes: only those are written, and only those are reported.
+			std::vector<AssetHandle> rewritten;
+			if (!nesting.empty())
+			{
+				const AssetHandle prefabs[] = { handle };
+				ENGINE_TRY_ASSIGN(NestingPrefabUpdate rewrite, editor.CreateNestingPrefabUpdateCommand(prefabs));
+				if (rewrite.Rewrite != nullptr)
+					ENGINE_TRY(editor.Execute(std::move(rewrite.Rewrite)));
+				rewritten = std::move(rewrite.Prefabs);
+			}
+			const size_t instances = Utils::FindPrefabInstances(editor.GetScene(), rebuilt).size();
+			ENGINE_TRY_ASSIGN(Scope<Command> update, editor.CreatePrefabUpdateCommand(rebuilt));
 			if (update != nullptr)
 				ENGINE_TRY(editor.Execute(std::move(update)));
 
 			PrefabApplyResult result;
 			result.Prefab = Utils::MakeAssetSummary(assets, handle);
 			result.UpdatedInstances = ToAutomationCounter(instances);
+			result.UpdatedPrefabs.reserve(rewritten.size());
+			for (const AssetHandle nestingPrefab : rewritten)
+				result.UpdatedPrefabs.push_back(Utils::MakeAssetSummary(assets, nestingPrefab));
 			result.UndoIndex = ToAutomationCounter(transaction.Commit());
 			return result;
 		}
@@ -369,47 +507,52 @@ namespace Engine {
 		{
 			EditorContext& editor = context.GetEditor();
 			ENGINE_TRY_ASSIGN(Scene * scene, context.ResolveTargetScene(SceneTarget::Edit, false, true));
-			ENGINE_TRY_ASSIGN(Entity root, ResolveInstanceRoot(context, *scene, params.Instance));
+			ENGINE_TRY_ASSIGN(const Entity root, ResolveInstanceRoot(context, *scene, params.Instance));
 			const bool selective = context.HasParam("overrides");
 			std::vector<OverrideSelector> selectors;
 			if (selective)
 			{
-				ENGINE_TRY_ASSIGN(selectors, ParseOverrideKeys(params.Overrides));
+				ENGINE_TRY_ASSIGN(selectors, ParseOverrideKeys(editor.GetTypeRegistry(), params.Overrides));
+			}
+			// The outermost instance records the overrides and is the one rebuilt; a nested root's overrides are those whose
+			// paths start with its own.
+			ENGINE_TRY_ASSIGN(const std::vector<Entity> levels, GetLevels(root));
+			const Entity outermost = levels.front();
+			std::vector<UUID> within;
+			if (levels.size() > 1)
+			{
+				ENGINE_TRY_ASSIGN(within, PrefabInstantiator::GetOverridePath(root));
 			}
 			ENGINE_TRY(Utils::RefreshAssets(editor));
-			ENGINE_TRY_ASSIGN(const Prefab prefab, LoadInstancePrefab(editor, *scene, root));
+			ENGINE_TRY_ASSIGN(const Prefab prefab, LoadInstancePrefab(editor, *scene, outermost, "/instance"));
 			ENGINE_TRY_ASSIGN(const auto schemas, editor.GetScriptSchemaSnapshot());
 			const PrefabOptions prefabOptions{ .Schemas = schemas.get() };
 
 			// The overrides the instance has now, derived by diffing (ADR 0006 decision 17), whatever was recorded before.
-			ENGINE_TRY_ASSIGN(const std::vector<PrefabOverride> overrides, PrefabInstantiator::ComputeOverrides(root, prefab, prefabOptions));
+			ENGINE_TRY_ASSIGN(const std::vector<PrefabOverride> overrides, PrefabInstantiator::ComputeOverrides(outermost, prefab, prefabOptions));
 			SceneEdit edit(editor, std::format("Revert Prefab Instance '{}'", root.GetName()));
 			LoadReport report;
 			size_t removed = overrides.size();
-			if (!selective)
+			if (!selective && within.empty())
 			{
-				ENGINE_TRY(PrefabInstantiator::Revert(*scene, root, prefab, prefabOptions, report));
+				ENGINE_TRY(PrefabInstantiator::Revert(*scene, outermost, prefab, prefabOptions, report));
 			}
 			else
 			{
 				std::vector<PrefabOverride> kept;
 				for (const PrefabOverride& entry : overrides)
 				{
-					const bool selected = std::ranges::any_of(selectors, [&entry](const OverrideSelector& selector)
-					{
-						return selector.Matches(entry);
-					});
-					if (!selected)
+					if (!IsReverted(entry, within, selective, selectors))
 						kept.push_back(entry);
 				}
 				removed = overrides.size() - kept.size();
-				root.Patch<PrefabInstanceComponent>([&kept](PrefabInstanceComponent& instance)
+				outermost.Patch<PrefabInstanceComponent>([&kept](PrefabInstanceComponent& instance)
 				{
 					instance.Overrides = std::move(kept);
 				});
-				ENGINE_TRY(PrefabInstantiator::UpdateInstance(*scene, root, prefab, prefabOptions, report));
+				ENGINE_TRY(PrefabInstantiator::UpdateInstance(*scene, outermost, prefab, prefabOptions, report));
 			}
-			Utils::LogLoadDiagnostics(scene->GetEntityPath(root), report);
+			Utils::LogLoadDiagnostics(scene->GetEntityPath(outermost), report);
 			ENGINE_TRY_ASSIGN(const uint64_t undoIndex, edit.Commit());
 
 			PrefabRevertResult result;
@@ -424,6 +567,19 @@ namespace Engine {
 			EditorContext& editor = context.GetEditor();
 			ENGINE_TRY_ASSIGN(Scene * scene, context.ResolveTargetScene(SceneTarget::Edit, false, true));
 			ENGINE_TRY_ASSIGN(const Entity root, ResolveInstanceRoot(context, *scene, params.Instance));
+			// One level at a time (decision 8): a nested instance is unpacked after the instance that encloses it.
+			ENGINE_TRY_ASSIGN(const std::vector<Entity> levels, GetLevels(root));
+			if (levels.size() > 1)
+			{
+				const std::string outermost = scene->GetEntityPath(levels.front());
+				// The way out as a call to copy, its params built as JSON so that any entity name is escaped.
+				const Json unpack{ { "instance", outermost } };
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidState, "/instance",
+					std::format("'{}' is nested in the prefab instance '{}', and prefab.unpack unpacks one level at a time from the outermost",
+						scene->GetEntityPath(root), outermost),
+					std::format("unpack its outermost instance first (prefab.unpack {}), after which this one is an instance of its own",
+						unpack.dump(-1, ' ', false, Json::error_handler_t::replace))));
+			}
 			SceneEdit edit(editor, std::format("Unpack Prefab Instance '{}'", root.GetName()));
 			ENGINE_TRY(PrefabInstantiator::Unpack(root));
 			ENGINE_TRY_ASSIGN(const uint64_t undoIndex, edit.Commit());
@@ -437,9 +593,9 @@ namespace Engine {
 
 	void RegisterPrefabMethodTypes(TypeRegistry& registry)
 	{
-		registry.Struct<PrefabOverrideKey>("PrefabOverrideKey", "Selects overrides of a prefab instance; an empty kind, component or field matches any.")
-			.Field("prefabEntityId", &PrefabOverrideKey::PrefabEntityId, "The prefab-local id of the entity the override applies to: 16 hex digits.")
-			.Field("kind", &PrefabOverrideKey::Kind, "Field, AddComponent, RemoveComponent or EntityKey (any case); empty matches every kind.")
+		registry.Struct<PrefabOverrideKey>("PrefabOverrideKey", "Selects overrides of a prefab instance by path; an empty kind, component or field matches any.")
+			.Field("path", &PrefabOverrideKey::Path, "The override's path, as the instance's Prefab component records it.")
+			.Field("kind", &PrefabOverrideKey::Kind, "A PrefabOverrideKind name (any case); empty matches every kind.")
 			.Field("component", &PrefabOverrideKey::Component, "The component's registry name; empty matches every component.")
 			.Field("field", &PrefabOverrideKey::Field, "The field (or entity key) name; empty matches every field.");
 
@@ -473,15 +629,23 @@ namespace Engine {
 			.Field("undoIndex", &PrefabInstantiateResult::UndoIndex, "The undo index; 0 in a dry run or a batch.");
 
 		registry.Struct<PrefabApplyParams>("PrefabApplyParams", "The params of prefab.apply.")
-			.Field("instance", &PrefabApplyParams::Instance, "The instance root whose overrides become the prefab's.");
+			.Field("instance", &PrefabApplyParams::Instance,
+				"The instance root, outermost or nested, whose overrides are applied: those its outermost instance records for it and the "
+				"entities below it.")
+			.Field("level", &PrefabApplyParams::Level,
+				"The instance whose prefab receives the overrides: the outermost instance root (the default) or a nested instance root down "
+				"to instance.");
 
 		registry.Struct<PrefabApplyResult>("PrefabApplyResult", "The applied prefab.")
-			.Field("prefab", &PrefabApplyResult::Prefab, "The prefab asset written.")
-			.Field("updatedInstances", &PrefabApplyResult::UpdatedInstances, "The instances in the open scene rebuilt from it, this one included.")
+			.Field("prefab", &PrefabApplyResult::Prefab, "The prefab asset written: the level's.")
+			.Field("updatedInstances", &PrefabApplyResult::UpdatedInstances,
+				"The outermost instances in the open scene rebuilt from it or from a prefab nesting it, this one's included.")
+			.Field("updatedPrefabs", &PrefabApplyResult::UpdatedPrefabs, "The prefab assets nesting the applied prefab that were rewritten, in nesting order.")
 			.Field("undoIndex", &PrefabApplyResult::UndoIndex, "The undo index; 0 in a batch.");
 
 		registry.Struct<PrefabRevertParams>("PrefabRevertParams", "The params of prefab.revert.")
-			.Field("instance", &PrefabRevertParams::Instance, "The instance root to revert.")
+			.Field("instance", &PrefabRevertParams::Instance,
+				"The instance root to revert; a nested one reverts the overrides its outermost instance records within it.")
 			.Field("overrides", &PrefabRevertParams::Overrides, "Only the overrides these keys select; every override when absent.");
 
 		registry.Struct<PrefabRevertResult>("PrefabRevertResult", "The reverted instance.")
@@ -490,7 +654,8 @@ namespace Engine {
 			.Field("undoIndex", &PrefabRevertResult::UndoIndex, "The undo index; 0 when nothing changed, in a dry run or a batch.");
 
 		registry.Struct<PrefabUnpackParams>("PrefabUnpackParams", "The params of prefab.unpack.")
-			.Field("instance", &PrefabUnpackParams::Instance, "The instance root to unlink from its prefab.");
+			.Field("instance", &PrefabUnpackParams::Instance,
+				"The outermost instance root to unlink from its prefab; the instances nested in it become outermost.");
 
 		registry.Struct<PrefabUnpackResult>("PrefabUnpackResult", "The unpacked entity.")
 			.Field("entity", &PrefabUnpackResult::Entity, "The former instance root, now an ordinary entity.")
@@ -506,9 +671,10 @@ namespace Engine {
 		methods.Add(
 			{
 				.Name = "prefab.create",
-				.Description = "Saves an entity's subtree as a new .prefab asset (nested instances flattened), optionally replacing the entity "
-							   "with an instance of it, as one undoable step. The result's instance is that instance's root (empty without "
-							   "replaceWithInstance). Replacing a member of another prefab instance is refused: unpack that instance first.",
+				.Description = "Saves an entity's subtree as a new .prefab asset (the instances inside it stay live, nested in it), optionally "
+							   "replacing the entity with an instance of it, as one undoable step. The result's instance is that instance's root "
+							   "(empty without replaceWithInstance). Replacing a member of another prefab instance records its deletion there "
+							   "(RemoveEntity), and the new instance becomes a user child of that instance.",
 				.RequiredParams = { "entity", "path" },
 				.ExposeAsTool = true,
 				.Mutates = true,
@@ -546,16 +712,21 @@ namespace Engine {
 
 		Json applyExample = Json::object();
 		applyExample["instance"] = "/Board/Cell";
+		Json levelExample = Json::object();
+		levelExample["instance"] = "/Room/Lamp";
+		levelExample["level"] = "/Room/Lamp";
 		methods.Add(
 			{
 				.Name = "prefab.apply",
-				.Description = "Writes an instance's overrides into its .prefab asset and rebuilds every instance of it in the open scene, as "
-							   "one undoable step.",
+				.Description = "Writes an instance's overrides into a .prefab asset, by default its outermost instance's prefab, or with level the "
+							   "prefab of a nested instance on the way down; then rewrites the prefabs nesting it (updatedPrefabs) and rebuilds "
+							   "their instances in the open scene, as one undoable step.",
 				.RequiredParams = { "instance" },
 				.ExposeAsTool = true,
 				.Mutates = true,
 				.AllowedInBatch = true,
-				.Examples = { { .Description = "Make the cell's edits the prefab's.", .Params = applyExample } },
+				.Examples = { { .Description = "Make the cell's edits the prefab's.", .Params = applyExample },
+					{ .Description = "Make the edits of a lamp inside a room the Lamp prefab's, so every room's lamps follow.", .Params = levelExample } },
 			},
 			&Automation::PrefabApply);
 
@@ -565,7 +736,7 @@ namespace Engine {
 			{
 				.Name = "prefab.revert",
 				.Description = "Removes an instance's overrides (all, or those the keys select) and rebuilds it from its prefab; user children "
-							   "stay.",
+							   "stay. On a nested instance, the overrides its outermost instance records within it.",
 				.RequiredParams = { "instance" },
 				.Mutates = true,
 				.SupportsDryRun = true,
@@ -579,7 +750,8 @@ namespace Engine {
 		methods.Add(
 			{
 				.Name = "prefab.unpack",
-				.Description = "Unlinks an instance from its prefab: its entities and their data stay as ordinary entities.",
+				.Description = "Unlinks an outermost instance from its prefab, one level at a time: its entities and their data stay as ordinary "
+							   "entities, and the instances nested in it become outermost.",
 				.RequiredParams = { "instance" },
 				.Mutates = true,
 				.SupportsDryRun = true,

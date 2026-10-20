@@ -8,7 +8,10 @@
 #include "Engine/Core/Random.h"
 #include "Engine/Core/UUIDGenerator.h"
 #include "Engine/Core/VirtualFileSystem.h"
+#include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/ChangeTracker.h"
+#include "Engine/Scene/ComponentRegistration.h"
+#include "Engine/Scene/Components/BuiltinComponents.h"
 #include "Engine/Scene/Components/CharacterControllerComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
 #include "Engine/Scene/Components/PrefabInstanceComponent.h"
@@ -26,6 +29,10 @@
 #include "Support/TestData.h"
 
 #include <nlohmann/json.hpp>
+
+#include <limits>
+#include <map>
+#include <string>
 
 namespace Engine {
 
@@ -66,6 +73,59 @@ namespace Engine {
 	static std::string PointerOf(const Status& status)
 	{
 		return status ? std::string("(success)") : status.error().GetLocation().JsonPointer.value_or("(none)");
+	}
+
+	namespace {
+
+		// A component at version 2 whose version 1 called its only field "Old" (the loads that migrate).
+		struct SerializerVersionedComponent
+		{
+			int32_t New = 0;
+		};
+
+	}
+
+	// The migration of SerializerVersionedComponent from version 1 to 2: renames "Old" to "New".
+	static Status RenameOldToNew(Json& component)
+	{
+		const auto old = component.is_object() ? component.find("Old") : component.end();
+		if (old == component.end())
+		{
+			ErrorLocation location;
+			location.JsonPointer = std::string();
+			return std::unexpected(
+				Error(ErrorCode::Validation, "a version 1 'Versioned' component has the field 'Old'").WithLocation(std::move(location)));
+		}
+		Json value = *old;
+		component.erase("Old");
+		component["New"] = std::move(value);
+		return {};
+	}
+
+	// The built-in components and "Versioned" (version 2, migrated from version 1), frozen.
+	static Scope<TypeRegistry> CreateVersionedSceneRegistry()
+	{
+		Scope<TypeRegistry> registry = CreateScope<TypeRegistry>();
+		RegisterBuiltinComponents(*registry);
+		RegisterComponent<SerializerVersionedComponent>(*registry, "Versioned", "A test component at version 2.")
+			.Category("Core")
+			.Version(2)
+			.Migration(1, &RenameOldToNew)
+			.Field("New", &SerializerVersionedComponent::New, "The field version 1 called 'Old'.");
+		registry->Freeze();
+		return registry;
+	}
+
+	// The scene document of the "Versioned" entities 5200000000000001 and 5200000000000002 holding `first` and `second`, with
+	// "Versioned" at `version`.
+	static Json MakeVersionedDocument(std::string_view version, std::string_view first, std::string_view second)
+	{
+		return ParseDocument(std::format(R"({{ "Format": "Scene", "Version": 1, "Name": "Versions", "Seed": 0,
+			"ComponentVersions": {{ "Transform": 1, "Versioned": {} }},
+			"Entities": [
+				{{ "ID": "5200000000000001", "Name": "A", "Parent": null, "Active": true, "Tags": [], "Components": {{ "Versioned": {} }} }},
+				{{ "ID": "5200000000000002", "Name": "B", "Parent": null, "Active": true, "Tags": [], "Components": {{ "Versioned": {} }} }} ] }})",
+			version, first, second));
 	}
 
 	TEST_SUITE("Scene")
@@ -544,13 +604,15 @@ namespace Engine {
 				std::string_view Entities;
 				std::string_view Pointer;
 			};
-			const std::array<MalformedCase, 8> cases = { {
+			const std::array<MalformedCase, 10> cases = { {
 				{ R"([5])", "/Entities/0" },
 				{ R"([{ "ID": "4e00000000000001", "Name": 5 }])", "/Entities/0/Name" },
 				{ R"([{ "ID": "4e00000000000001", "Parent": 7 }])", "/Entities/0/Parent" },
 				{ R"([{ "ID": "4e00000000000001", "Active": "yes" }])", "/Entities/0/Active" },
 				{ R"([{ "ID": "4e00000000000001", "Tags": ["A", "A"] }])", "/Entities/0/Tags/1" },
 				{ R"([{ "ID": "4e00000000000001", "Tags": [""] }])", "/Entities/0/Tags/0" },
+				{ R"([{ "ID": "4e00000000000001", "Tags": [5] }])", "/Entities/0/Tags/0" },
+				{ R"([{ "ID": "4e00000000000001", "Tags": "A" }])", "/Entities/0/Tags" },
 				{ R"([{ "ID": "4e00000000000001", "Components": [] }])", "/Entities/0/Components" },
 				{ R"({})", "/Entities" },
 			} };
@@ -830,15 +892,15 @@ namespace Engine {
 			// member's flattened Script component both hold the value, as prefab.instantiate and entity.update write them.
 			constexpr std::string_view Text = R"({
 				"Format": "Scene", "Version": 1, "Name": "Turrets", "Seed": 0,
-				"ComponentVersions": { "Transform": 1, "Script": 1, "Prefab": 1, "PrefabLink": 1 },
+				"ComponentVersions": { "Transform": 1, "Script": 1, "Prefab": 2, "PrefabLink": 1 },
 				"Entities": [
 					{ "ID": "4f00000000000001", "Name": "Turret", "Parent": null, "Active": true, "Tags": [],
 					  "Components": {
 						"Transform": {},
 						"Script": { "Script": "00000000c0ffee01", "Fields": { "Torque": 60 }, "ExecutionOrder": 0 },
 						"Prefab": { "Prefab": null, "Overrides": [
-							{ "PrefabEntityID": "00000000000c0001", "Kind": "Field", "Component": "Script", "Field": "Fields", "Value": { "Torque": 60 } } ] },
-						"PrefabLink": { "PrefabEntityID": "00000000000c0001", "InstanceRoot": "4f00000000000001" } } }
+							{ "Path": ["00000000000c0001"], "Kind": "Field", "Component": "Script", "Field": "Fields", "Value": { "Torque": 60 } } ] },
+						"PrefabLink": { "PrefabEntityID": "00000000000c0001", "InstanceRoot": "4f00000000000001", "OuterPrefabEntityID": null } } }
 				]
 			})";
 			const Test::FixtureSchemaSource schemas = Test::FixtureSchemaSource::CreateStandard();
@@ -893,7 +955,7 @@ namespace Engine {
 			for (int level = 0; level < Levels; ++level)
 			{
 				Json prefabOverride = Json::object();
-				prefabOverride["PrefabEntityID"] = "00000000000b0001";
+				prefabOverride["Path"] = Json::array({ "00000000000b0001" });
 				prefabOverride["Kind"] = "AddComponent";
 				prefabOverride["Component"] = "Prefab";
 				prefabOverride["Field"] = "";
@@ -926,6 +988,122 @@ namespace Engine {
 			const Status rejected = SceneSerializer::LoadFromString(*strictScene, *text, strict, strictReport);
 			REQUIRE_FALSE(rejected.has_value());
 			CHECK(rejected.error().GetCode() == ErrorCode::Validation);
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 6: the faster serializer copy reads values as before. A value its common
+		// path rejects is read again with its pointers, so every problem keeps its location and its message names the value.
+		TEST_CASE("SceneSerializer: an invalid vector element is located at the element, and a range error names the rejected value")
+		{
+			const Json document = ParseDocument(R"({ "Format": "Scene", "Version": 1, "Name": "BadValues", "Seed": 0,
+				"ComponentVersions": { "Transform": 1, "RigidBody": 1, "DirectionalLight": 1 },
+				"Entities": [
+					{ "ID": "5100000000000001", "Name": "A", "Parent": null, "Active": true, "Tags": [],
+					  "Components": { "Transform": { "Translation": [0, "x", 0] } } },
+					{ "ID": "5100000000000002", "Name": "B", "Parent": null, "Active": true, "Tags": [],
+					  "Components": { "Transform": { "Scale": [1, 1e39, 1] } } },
+					{ "ID": "5100000000000003", "Name": "C", "Parent": null, "Active": true, "Tags": [],
+					  "Components": { "Transform": { "Rotation": [0, 0, 1] } } },
+					{ "ID": "5100000000000004", "Name": "D", "Parent": null, "Active": true, "Tags": [],
+					  "Components": { "RigidBody": { "Mass": -2.5 } } },
+					{ "ID": "5100000000000005", "Name": "E", "Parent": null, "Active": true, "Tags": [],
+					  "Components": { "DirectionalLight": { "CascadeCount": 37 } } } ] })");
+
+			Test::SceneTestFixture setup;
+			LoadReport report;
+			const Status loaded = SceneSerializer::FromJson(setup.GetScene(), document, LoadOptions{}, report);
+			REQUIRE_FALSE(loaded.has_value());
+			CHECK(loaded.error().GetCode() == ErrorCode::Validation);
+			CHECK(setup.GetScene().GetEntityCount() == 0);
+
+			std::map<std::string, std::string> messages; // the message of each issue, by its pointer
+			for (const ErrorIssue& issue : loaded.error().GetIssues())
+				messages.emplace(issue.JsonPointer, issue.Message);
+			CHECK(messages.size() == 5);
+			CHECK(messages.contains("/Entities/0/Components/Transform/Translation/1"));
+			CHECK(messages.contains("/Entities/1/Components/Transform/Scale/1"));
+			CHECK(messages.contains("/Entities/2/Components/Transform/Rotation"));
+			REQUIRE(messages.contains("/Entities/3/Components/RigidBody/Mass"));
+			CHECK(messages["/Entities/3/Components/RigidBody/Mass"].contains("-2.5"));
+			REQUIRE(messages.contains("/Entities/4/Components/DirectionalLight/CascadeCount"));
+			CHECK(messages["/Entities/4/Components/DirectionalLight/CascadeCount"].contains("37"));
+		}
+
+		TEST_CASE("SceneSerializer: a value that cannot be written is located at its entity's position in the document")
+		{
+			Test::SceneTestFixture setup;
+			Scene& scene = setup.GetScene();
+			static_cast<void>(scene.CreateEntity("First"));
+			Entity second = scene.CreateEntity("Second");
+			second.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation.y = std::numeric_limits<float>::infinity();
+			});
+
+			const Result<Json> document = SceneSerializer::ToJson(scene);
+			REQUIRE_FALSE(document.has_value());
+			CHECK(document.error().GetCode() == ErrorCode::Validation);
+			CHECK(document.error().GetLocation().JsonPointer == std::string("/Entities/1/Components/Transform/Translation/1"));
+
+			const Result<Json> entity = SceneSerializer::EntityToJson(second);
+			REQUIRE_FALSE(entity.has_value());
+			CHECK(entity.error().GetLocation().JsonPointer == std::string("/Components/Transform/Translation/1"));
+		}
+
+		// A document whose component versions are current is loaded as given (the play copy, every saved scene); an older
+		// component version is migrated on the way, and a version or migration that fails is located as Migrations reports it.
+		TEST_CASE("SceneSerializer: loading migrates an older component version and reports a current document as not migrated")
+		{
+			const Scope<TypeRegistry> registry = CreateVersionedSceneRegistry();
+			UUIDGenerator ids = UUIDGenerator::CreateDeterministic(1);
+			const auto readNew = [](const Scene& scene, uint64_t id)
+			{
+				const ConstEntity entity = scene.FindEntityByID(UUID(id));
+				REQUIRE(entity.IsValid());
+				return entity.GetComponent<SerializerVersionedComponent>().New;
+			};
+
+			{
+				const Scope<Scene> scene = Scene::Create({ .Name = "Current", .Registry = registry.get(), .IdGenerator = &ids });
+				LoadReport report;
+				REQUIRE(SceneSerializer::FromJson(*scene, MakeVersionedDocument("2", R"({ "New": 5 })", R"({ "New": 7 })"), LoadOptions{}, report).has_value());
+				CHECK(report.FileVersion == 1);
+				CHECK_FALSE(report.Migrated);
+				CHECK(readNew(*scene, 0x5200000000000001) == 5);
+				CHECK(readNew(*scene, 0x5200000000000002) == 7);
+			}
+			{
+				const Json older = MakeVersionedDocument("1", R"({ "Old": 5 })", R"({ "Old": 7 })");
+				const Json given = older;
+				const Scope<Scene> scene = Scene::Create({ .Name = "Older", .Registry = registry.get(), .IdGenerator = &ids });
+				LoadReport report;
+				REQUIRE(SceneSerializer::FromJson(*scene, older, LoadOptions{}, report).has_value());
+				CHECK(report.FileVersion == 1);
+				CHECK(report.Migrated);
+				CHECK(readNew(*scene, 0x5200000000000001) == 5);
+				CHECK(readNew(*scene, 0x5200000000000002) == 7);
+				CHECK(older == given);
+				Result<Json> saved = SceneSerializer::ToJson(*scene);
+				REQUIRE(saved.has_value());
+				CHECK((*saved)["ComponentVersions"]["Versioned"] == 2);
+			}
+			{
+				const Scope<Scene> scene = Scene::Create({ .Name = "Newer", .Registry = registry.get(), .IdGenerator = &ids });
+				LoadReport report;
+				const Status newer = SceneSerializer::FromJson(*scene, MakeVersionedDocument("3", R"({ "New": 5 })", R"({ "New": 7 })"), LoadOptions{}, report);
+				REQUIRE_FALSE(newer.has_value());
+				CHECK(newer.error().GetCode() == ErrorCode::UnsupportedVersion);
+				CHECK(PointerOf(newer) == "/ComponentVersions/Versioned");
+				CHECK(scene->GetEntityCount() == 0);
+			}
+			{
+				const Scope<Scene> scene = Scene::Create({ .Name = "Failing", .Registry = registry.get(), .IdGenerator = &ids });
+				LoadReport report;
+				const Status failing = SceneSerializer::FromJson(*scene, MakeVersionedDocument("1", R"({ "Old": 5 })", R"({ "Wrong": 7 })"), LoadOptions{}, report);
+				REQUIRE_FALSE(failing.has_value());
+				CHECK(failing.error().GetCode() == ErrorCode::Validation);
+				CHECK(PointerOf(failing) == "/Entities/1/Components/Versioned");
+				CHECK(scene->GetEntityCount() == 0);
+			}
 		}
 	}
 

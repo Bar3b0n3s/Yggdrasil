@@ -119,6 +119,20 @@
 				"Modes": ["Editor", "Release", "Dist"]
 			},
 			{
+				"Script": "Assets/Tests/PhysicsSemantics/PhysicsSemantics.test.luau",
+				"Scene": "Assets/Scenes/PhysicsSemantics.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
 				"Script": "Assets/Tests/Audio/Audio.test.luau",
 				"Scene": "Assets/Scenes/Audio.scene",
 				"Parameters": null,
@@ -709,6 +723,20 @@
 			{
 				"Script": "Assets/Tests/Prefabs/Prefabs.test.luau",
 				"Scene": "Assets/Scenes/Prefabs.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
+				"Script": "Assets/Tests/NestedPrefabs/NestedPrefabs.test.luau",
+				"Scene": "Assets/Scenes/NestedPrefabs.scene",
 				"Parameters": null,
 				"Isolation": "Suite",
 				"Clock": [],

@@ -199,7 +199,7 @@ namespace Engine {
 	static Json MakeOverrideJson(std::string_view kind, std::string_view component, std::string_view field, Json value)
 	{
 		Json json = Json::object();
-		json["PrefabEntityID"] = "00000000000b0002";
+		json["Path"] = Json::array({ "00000000000b0002" });
 		json["Kind"] = std::string(kind);
 		json["Component"] = std::string(component);
 		json["Field"] = std::string(field);

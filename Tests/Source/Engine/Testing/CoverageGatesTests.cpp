@@ -436,8 +436,8 @@ namespace Engine {
 			Test::SceneTestFixture fixture;
 			SceneCoverageRecorder recorder(fixture.GetRegistry());
 			PrefabInstanceComponent prefab;
-			prefab.Overrides.push_back(PrefabOverride{ .PrefabEntityID = UUID(0x71), .Kind = PrefabOverrideKind::RemoveComponent, .Component = "Camera", .Field = {}, .Value = {} });
-			prefab.Overrides.push_back(PrefabOverride{ .PrefabEntityID = UUID(0x72), .Kind = PrefabOverrideKind::RemoveComponent, .Component = "Text", .Field = {}, .Value = {} });
+			prefab.Overrides.push_back(PrefabOverride{ .Path = { UUID(0x71) }, .Kind = PrefabOverrideKind::RemoveComponent, .Component = "Camera", .Field = {}, .Value = {} });
+			prefab.Overrides.push_back(PrefabOverride{ .Path = { UUID(0x72) }, .Kind = PrefabOverrideKind::RemoveComponent, .Component = "Text", .Field = {}, .Value = {} });
 			fixture.GetScene().CreateEntity("Instance").AddComponent<PrefabInstanceComponent>(prefab);
 			MeshRendererComponent renderer;
 			renderer.Materials.emplace_back();
@@ -461,7 +461,7 @@ namespace Engine {
 			CHECK(count("field:Prefab/Overrides/*/Kind") == 2u);
 			CHECK(count("field:Prefab/Overrides/*/Component") == 2u);
 			CHECK(count("field:Prefab/Overrides/*/Field") == 0u);
-			CHECK(count("field:Prefab/Overrides/*/PrefabEntityID") == 2u);
+			CHECK(count("field:Prefab/Overrides/*/Path") == 2u);
 			CHECK(count("field:Prefab/Prefab") == 0u);
 			CHECK_FALSE(count("field:Prefab/Overrides").has_value());
 			CHECK(count("enum:PrefabOverrideKind/RemoveComponent") == 2u);

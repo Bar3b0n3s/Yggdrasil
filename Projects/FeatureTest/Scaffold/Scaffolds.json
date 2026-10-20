@@ -73,6 +73,16 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "PhysicsSemantics.jsonl",
+			"IdSeed": 1801,
+			"Renderer": "none"
+		},
+		{
+			"File": "NestedPrefabs.jsonl",
+			"IdSeed": 1802,
+			"Renderer": "none"
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

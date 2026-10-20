@@ -74,6 +74,16 @@ namespace Engine {
 		bool ChangedOnDisk = false; // its EditorContext::IsSceneChangedOnDisk
 	};
 
+	// What EditorContext::CreateNestingPrefabUpdateCommand builds (Docs/Decisions/0031-m20-contract.md decision 8): the
+	// command that rewrites the prefabs nesting a changed one, and the prefabs it rewrites. A nesting prefab whose rewritten
+	// document is the same as its current version is not written, so it is not listed; Rewrite is null exactly when Prefabs
+	// is empty.
+	struct NestingPrefabUpdate
+	{
+		Scope<Command> Rewrite{};
+		std::vector<AssetHandle> Prefabs{}; // in nesting order (EditorContext::GetNestingPrefabs)
+	};
+
 	// Main-thread host hooks. Captured services must outlive the binding; clear it only after asynchronous writers
 	// and the fatal hook are quiescent, before destroying those services. Empty callbacks preserve CPU-only behavior.
 	struct EditorLifecycleCallbacks
@@ -364,7 +374,8 @@ namespace Engine {
 		// whether anything changed. Not a command: scene.open (reload included) calls it on the scene it loaded before
 		// SetScene, and the scene opens dirty when it changed something (like a repair). An instance whose prefab is missing
 		// is left as it is (PREFAB_MISSING_ASSET, ProjectValidator). Errors: those of PrefabInstantiator and of loading the
-		// prefab assets (LoadPrefabAsset).
+		// prefab assets (LoadPrefabAsset); Validation PREFAB_CYCLE when the propagation from `prefabs` meets a nesting cycle
+		// (GetNestingPrefabs, below).
 		[[nodiscard]] Result<bool> UpdatePrefabInstances(Scene& scene, std::span<const AssetHandle> prefabs);
 
 		// The undoable form for the open scene: a SceneEditCommand labelled "Update Prefab Instances" whose effect is
@@ -382,17 +393,22 @@ namespace Engine {
 		// Live nested prefabs (M20, decision 8). The Prefab assets that nest one of `prefabs`, directly or through others
 		// (read from the registry's import dependencies, which a prefab's nested instances join), in the order they must be
 		// rewritten: every prefab after each prefab it nests, ties in asset path order; `prefabs` themselves excluded.
-		// Errors: Validation with the code PREFAB_CYCLE, naming the paths of a cycle, when the nesting graph has a cycle
-		// through one of `prefabs` (one issue per prefab on it); NotFound for a handle that names no Prefab asset.
+		// Errors: Validation with the code PREFAB_CYCLE when the propagation meets a nesting cycle, one through `prefabs` or
+		// among the prefabs nesting them (one issue per prefab on it, naming its path; a prefab that only nests the cycle is
+		// not named); NotFound for a handle that names no Prefab asset.
 		[[nodiscard]] Result<std::vector<AssetHandle>> GetNestingPrefabs(std::span<const AssetHandle> prefabs) const;
 
-		// The undoable command that rewrites the Prefab assets nesting `prefabs` (GetNestingPrefabs, in its order): when it
-		// executes, each document's nested instances of a changed prefab are rebuilt from that prefab's version current then
-		// (the asset commands composed before it have run), keeping the overrides the nesting prefab records for them, and
-		// the document is written through the asset writer; undo restores each file. Nullptr when no prefab nests them.
-		// prefab.apply and the other methods that give a prefab a new version compose their asset command, then this, then
-		// CreatePrefabUpdateCommand of every prefab that changed, into one undo step. Errors: those of GetNestingPrefabs.
-		[[nodiscard]] Result<Scope<Command>> CreateNestingPrefabUpdateCommand(std::span<const AssetHandle> prefabs);
+		// The undoable command that rewrites the Prefab assets nesting `prefabs` (GetNestingPrefabs, in its order), with the
+		// prefabs it rewrites (NestingPrefabUpdate): each document's nested instances of a changed prefab are rebuilt from
+		// that prefab's current version, keeping the overrides the nesting prefab records for them, each after the prefabs it
+		// nests, and a document whose rewrite changes it is written through the asset writer and imported when the command
+		// executes; undo restores each file. The rewrites are computed by this call, after the asset commands composed before
+		// it ran. No command (Rewrite null, Prefabs empty) when no prefab nests them or no nesting document changes. Atomic in
+		// both directions (Command.h): a failed import after the files were written, or written back, restores the other
+		// version, imported again, and returns the import's error. prefab.apply and the other methods that give a prefab a
+		// new version compose their asset command, then this, then CreatePrefabUpdateCommand of every prefab that changed,
+		// into one undo step. Errors: those of GetNestingPrefabs; those of loading and rewriting a nesting prefab.
+		[[nodiscard]] Result<NestingPrefabUpdate> CreateNestingPrefabUpdateCommand(std::span<const AssetHandle> prefabs);
 
 		// The editor's revision (§13.4: "_meta".revision, ifRevision, the revisions in results and history entries, scene.diff
 		// {against}). It increases with every mutation of the open scene and never repeats a value for the editor's lifetime,

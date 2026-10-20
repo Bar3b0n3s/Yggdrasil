@@ -62,7 +62,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "00000000000b0002",
-					"InstanceRoot": "e0000000000000ff"
+					"InstanceRoot": "e0000000000000ff",
+					"OuterPrefabEntityID": null
 				}
 			}
 		}

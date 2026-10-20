@@ -73,11 +73,11 @@
 //     local Transform (through the parent's current inverse, so the entity stays where the body is even when the parent
 //     moved), and characters theirs, visiting bodies in canonical order, never in Jolt's active-body order; then the
 //     contacts are drained, mapped to owners, collapsed into body-pair begin and end events with a per-pair reference
-//     count of sub-shape contacts (net over the step's records: a pair whose count rises from zero enters, one whose count
-//     falls to zero exits), sorted by PhysicsEventOrderKey, and dispatched (§9.4 steps 1 to 4, PhysicsEvent,
-//     IPhysicsEventListener). Sleeping never ends a pair: a Removed record for a contact whose bodies fell asleep leaves
-//     it dormant (it still counts), and a dormant contact is dropped only after a step that began with one of its bodies
-//     awake and did not report it again.
+//     count of sub-shape contacts (net over the step's records: a pair whose count rises from zero enters, once it holds a
+//     touching contact (the M20 paragraph), one whose count falls to zero exits), sorted by PhysicsEventOrderKey, and
+//     dispatched (§9.4 steps 1 to 4, PhysicsEvent, IPhysicsEventListener). Sleeping never ends a pair: a Removed record
+//     for a contact whose bodies fell asleep leaves it dormant (it still counts), and a dormant contact is dropped only
+//     after a step that began with one of its bodies awake and did not report it again.
 //   - FlushDestroyed (step 8, and the frame phase's destroy flush, before Scene::FlushPendingDestroys and after the
 //     scripts' OnDestroy): every active pair involving an entity marked for destruction (PendingDestroyTag) or effectively
 //     disabled is closed, each surviving side that received the pair's enter getting a synthesized exit (§9.4 "Exit on
@@ -107,7 +107,11 @@
 //     contact names the collider itself and the partner's collider of the first sub-shape pair, its normal pointing from
 //     the collider's body towards the partner. The partner and the body's owner keep their body-pair events unchanged. A
 //     collider that stops being a scripted gathered collider (its Script component removed or naming no script any more, a
-//     RigidBody of its own, moved out of the body) ends its collider pairs at the next PostStep with synthesized exits.
+//     RigidBody of its own, moved out of the body) ends its collider pairs at the next PostStep with synthesized exits, and
+//     one that becomes one while touching enters at the next PostStep. A collider pair is a collision or a trigger pair as
+//     its body pair is, and it counts the sub-shape contacts Jolt reports: Jolt's manifold reduction merges a body pair's
+//     contacts whose normals agree into the manifold of the first sub-shape pair it found, so of two coplanar pieces under
+//     one body, only that one counts the merged contact.
 //   - Order. Pair events are sorted by PhysicsEventOrderKey (Low owner, High owner, type, receiving collider); a body
 //     event's key has the null collider, so body events keep their relative order and a scene without scripted gathered
 //     colliders dispatches exactly as before. M21's 2D world and M26's height fields dispatch with the same key.

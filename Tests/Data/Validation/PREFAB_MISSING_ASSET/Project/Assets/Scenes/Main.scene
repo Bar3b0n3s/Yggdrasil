@@ -5,7 +5,7 @@
 	"Seed": 0,
 	"ComponentVersions": {
 		"Transform": 1,
-		"Prefab": 1,
+		"Prefab": 2,
 		"Camera": 1,
 		"DirectionalLight": 1,
 		"AudioListener": 1

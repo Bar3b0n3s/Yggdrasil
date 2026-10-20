@@ -18,7 +18,8 @@ namespace Engine {
 		Field,           // one field of one component of a prefab entity; Value is the field's value
 		AddComponent,    // a component added to a prefab entity; Value is the whole component object
 		RemoveComponent, // a prefab component removed from a prefab entity; Value is null
-		EntityKey        // an entity key of a prefab entity ("Name", "Active" or "Tags"); Value is the key's value
+		EntityKey,       // an entity key of a prefab entity ("Name", "Active" or "Tags"); Value is the key's value
+		RemoveEntity     // a prefab entity removed from the instance with its prefab descendants; Value is null (M20)
 	};
 
 	// Registry struct "PrefabEntityKeys": the entity keys a prefab override can change (PrefabOverrideKind::EntityKey),
@@ -32,25 +33,34 @@ namespace Engine {
 		std::vector<std::string> Tags;
 	};
 
-	// Registry struct "PrefabOverride" (Architecture §5.5, §6.2): one recorded difference between an instance and its prefab,
-	// keyed by the prefab-local ID of the entity it applies to (PrefabEntityID, never the derived instance ID, so it
-	// survives prefab edits). Value is a Variant resolved from Kind, Component and Field (PrefabOverrideValueResolver in
-	// CoreRegistration.cpp, ResolveContext rules): the field's schema for Field, the component's whole schema
-	// (GetSelfField()) for AddComponent, the PrefabEntityKeys field named by Field for EntityKey. Root Name, Transform and
-	// Parent are implicit overrides and are never recorded; the root's Active and Tags are recorded like any member's.
-	// Field order is the file's key order.
+	// Registry struct "PrefabOverride" (Architecture §5.5, §6.2): one recorded difference between an outermost instance and its
+	// prefab, keyed by the path of the entity it applies to (never the derived instance ID, so it survives prefab edits).
+	// Path (PrefabInstance version 2, Docs/Decisions/0031-m20-contract.md decision 10): for an entity of the outermost
+	// instance itself, [its ID in the outermost prefab]; for an entity of an instance nested in it, the OuterPrefabEntityID of
+	// each nested root from the outermost level inwards, then the entity's own PrefabEntityID unless it is that nested root
+	// (PrefabInstantiator::GetOverridePath). Version 1's single PrefabEntityID migrates to a one-element Path. Value is a
+	// Variant resolved from Kind, Component and Field (PrefabOverrideValueResolver in CoreRegistration.cpp, ResolveContext
+	// rules): the field's schema for Field, the component's whole schema (GetSelfField()) for AddComponent, the
+	// PrefabEntityKeys field named by Field for EntityKey, null for RemoveComponent and RemoveEntity. Root Name, Transform
+	// and Parent are implicit overrides and are never recorded; the root's Active and Tags are recorded like any member's. A
+	// RemoveEntity names the top of a removed subtree (never the root: deleting the root deletes the instance), and its
+	// prefab descendants have no overrides of their own. An override whose path names no entity of the prefab (an empty
+	// one included) is stale and dropped at the next update. Field order is the file's key order.
 	struct PrefabOverride
 	{
-		UUID PrefabEntityID;
+		std::vector<UUID> Path;
 		PrefabOverrideKind Kind = PrefabOverrideKind::Field;
-		std::string Component; // registry name for Field, AddComponent and RemoveComponent; empty for EntityKey
+		std::string Component; // registry name for Field, AddComponent and RemoveComponent; empty for EntityKey and RemoveEntity
 		std::string Field;     // field name for Field; "Name", "Active" or "Tags" for EntityKey; empty otherwise
 		VariantValue Value;
 	};
 
 	// Registry name "Prefab" (Architecture §5.3, §5.5): marks the root of a prefab instance. Hidden; on the instance root
-	// only. Prefab is the source prefab asset (a scene still loads when it is missing, diagnostic PREFAB_MISSING_ASSET);
-	// Overrides are kept sorted by (PrefabEntityID, Component, Kind, Field) so the file is canonical.
+	// only. Prefab is the source prefab asset (a scene still loads when it is missing, diagnostic PREFAB_MISSING_ASSET).
+	// Only an instance outermost in its document records Overrides, those of its own entities and of the instances nested
+	// in it (by path); a nested root's stay empty (one with overrides is SCENE_INCONSISTENT_PREFAB_LINK). Overrides are
+	// kept sorted by (Path, compared element by element with a prefix first; Component; Kind; Field) so the file is
+	// canonical.
 	struct PrefabInstanceComponent
 	{
 		TypedAssetHandle<AssetType::Prefab> Prefab;

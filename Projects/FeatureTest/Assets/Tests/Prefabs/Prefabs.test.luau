@@ -1,7 +1,8 @@
 --!strict
 -- Prefabs (§5.5, §15.5): instances the editor placed in Prefabs.scene, one carrying an override of every
--- PrefabOverrideKind (a field, an added and a removed component, and entity keys); a nested prefab flattened into one
--- instance; references into instances from outside; and instances a script creates with Scene.Instantiate.
+-- PrefabOverrideKind (a field, an added and a removed component, entity keys and a deleted member); a prefab nesting
+-- live instances of another; references into instances from outside; and instances a script creates with
+-- Scene.Instantiate.
 local LinkedScript = require("../../Scripts/Prefabs/Linked")
 local TaggerScript = require("../../Scripts/Prefabs/Tagger")
 
@@ -27,6 +28,7 @@ local function ExpectPlainCrate(root: Entity, what: string)
 	Test.ExpectEqual((lid.MeshRenderer :: MeshRenderer).Visible, true, what .. ": the lid is visible")
 	Test.Expect(not lid:HasComponent("PointLight"), what .. ": the lid has no light")
 	Test.ExpectEqual((label.Text :: Text).Text, "Crate", what .. ": the label")
+	Test.ExpectEqual(Names(label), "Strap", what .. ": the label's strap")
 	local tagger = root:GetScript() :: TaggerScript.Tagger
 	Test.ExpectEqual(tagger.Lid, lid, what .. ": the prefab's internal reference names this instance's lid")
 	Test.Expect(root:HasTag("Crate") and lid:HasTag("Lid"), what .. ": OnCreate ran for root and lid")
@@ -45,6 +47,7 @@ return Test.Suite("Prefabs", function()
 		Test.ExpectEqual((light :: PointLight).Range, 3)
 		local label = crate:FindChild("Label") :: Entity
 		Test.Expect(not label:HasComponent("Text"), "a removed component")
+		Test.ExpectEqual(Names(label), "", "a deleted member (the Strap) stays deleted")
 		Test.Expect(crate:HasTag("Editor") and crate:HasTag("Crate"), "the root's tag override and OnCreate's tag")
 		local tagger = crate:GetScript() :: TaggerScript.Tagger
 		Test.ExpectEqual(tagger.Lid, cover, "the internal reference follows the renamed member")
@@ -58,7 +61,7 @@ return Test.Suite("Prefabs", function()
 		Test.ExpectNear(crateB.Transform.WorldPosition, vector.create(0, 0.5, -3), 0.01, "placed where the editor put it")
 	end)
 
-	Test.Case("a nested prefab is flattened into one instance of the outer prefab", function()
+	Test.Case("a prefab nesting live instances of another instantiates them with it", function()
 		local cart = Find("/Cart")
 		Test.ExpectEqual(Names(cart), "Body,FrontWheel,BackWheel")
 		for _, name in { "FrontWheel", "BackWheel" } do
@@ -86,7 +89,7 @@ return Test.Suite("Prefabs", function()
 		local before = Scene.GetEntityCount()
 		local first = Scene.Instantiate(prefab, vector.create(-1, 2, 2), Quat.FromEuler(0, 90, 0))
 		local second = Scene.Instantiate(prefab, vector.create(1, 2, 2))
-		Test.ExpectEqual(Scene.GetEntityCount(), before + 6, "each instance has three entities")
+		Test.ExpectEqual(Scene.GetEntityCount(), before + 8, "each instance has four entities")
 		ExpectPlainCrate(first, "first")
 		ExpectPlainCrate(second, "second")
 		Test.Expect(first.ID ~= second.ID and first.ID ~= Find("/CrateB").ID, "every instance has its own ids")

@@ -832,7 +832,7 @@ namespace Engine {
 							const std::string prefabField = transform && field->GetName() == "EulerAngles" ? "Rotation" : field->GetName();
 							const bool overridden = std::any_of(overrides.begin(), overrides.end(), [&link, component, &prefabField](const PrefabOverride& item)
 							{
-								return item.PrefabEntityID == link.PrefabEntityID && item.Component == component->GetName() && item.Field == prefabField;
+								return item.Path == std::vector<UUID>{ link.PrefabEntityID } && item.Component == component->GetName() && item.Field == prefabField;
 							});
 							if (overridden)
 							{
@@ -843,7 +843,7 @@ namespace Engine {
 								if (ImGui::SmallButton("Revert"))
 								{
 									CancelEdit(context);
-									queue("prefab.revert", Json{ { "instance", link.InstanceRoot.ToString() }, { "overrides", Json::array({ Json{ { "prefabEntityId", link.PrefabEntityID.ToString() }, { "kind", "Field" }, { "component", component->GetName() }, { "field", prefabField } } }) } });
+									queue("prefab.revert", Json{ { "instance", link.InstanceRoot.ToString() }, { "overrides", Json::array({ Json{ { "path", Json::array({ link.PrefabEntityID.ToString() }) }, { "kind", "Field" }, { "component", component->GetName() }, { "field", prefabField } } }) } });
 								}
 								ImGui::EndDisabled();
 								ImGui::PopID();

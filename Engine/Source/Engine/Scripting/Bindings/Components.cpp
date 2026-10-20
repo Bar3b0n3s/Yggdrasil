@@ -31,6 +31,8 @@ namespace Engine {
 			if (!result)
 				Lua::RaiseError(call, result.error());
 		}
+		// The receiver of a mutating method, or of a read of a system's state (physics bodies, characters, voices), whose
+		// entity must be live: ValidateComponent refuses one pending destruction.
 		static Entity ComponentSelf(ScriptCall& call, std::string_view expected)
 		{
 			const auto proxy = Lua::Check<ScriptProxyIdentity>(call, 1);
@@ -39,6 +41,17 @@ namespace Engine {
 			if (host.GetTypes().GetComponents()[proxy.ComponentTypeIndex]->GetName() != expected)
 				Lua::RaiseError(call, "wrong component receiver");
 			return host.GetScene().FindEntityByID(proxy.Entity.ID);
+		}
+		// The receiver of a method that reads the component and its entity's transform: live, or pending destruction until
+		// the flush (M20, W-P02).
+		static Entity ComponentReadSelf(ScriptCall& call, std::string_view expected)
+		{
+			const auto proxy = Lua::Check<ScriptProxyIdentity>(call, 1);
+			auto& host = call.Engine->GetHost();
+			ComponentChecked(call, ScriptProxy::ValidateComponentForRead(host, proxy));
+			if (host.GetTypes().GetComponents()[proxy.ComponentTypeIndex]->GetName() != expected)
+				Lua::RaiseError(call, "wrong component receiver");
+			return host.GetScene().FindReadableEntityByID(proxy.Entity.ID);
 		}
 		static void ComponentMutation(ScriptCall& call)
 		{
@@ -80,7 +93,7 @@ namespace Engine {
 		template<int Axis>
 		static int TransformAxis(ScriptCall& call)
 		{
-			const Entity entity = ComponentSelf(call, "Transform");
+			const Entity entity = ComponentReadSelf(call, "Transform");
 			const glm::vec3 axis = Axis == 0 ? glm::vec3(0, 0, -1) : (Axis == 1 ? glm::vec3(1, 0, 0) : glm::vec3(0, 1, 0));
 			Lua::Push(call, TransformSystem::GetWorldRotation(entity) * axis);
 			return 1;
@@ -128,7 +141,7 @@ namespace Engine {
 		template<int Operation>
 		static int TransformPoint(ScriptCall& call)
 		{
-			const Entity entity = ComponentSelf(call, "Transform");
+			const Entity entity = ComponentReadSelf(call, "Transform");
 			const auto value = Lua::Check<glm::vec3>(call, 2);
 			const auto world = TransformSystem::ComputeWorldMatrix(entity);
 			if constexpr (Operation == 0)
@@ -291,7 +304,7 @@ namespace Engine {
 		}
 		static int MaterialGet(ScriptCall& call)
 		{
-			const Entity entity = ComponentSelf(call, "MeshRenderer");
+			const Entity entity = ComponentReadSelf(call, "MeshRenderer");
 			const uint32_t index = Lua::Check<uint32_t>(call, 2);
 			const auto renderer = entity.GetComponent<MeshRendererComponent>();
 			const auto mesh = MaterialMesh(call, renderer.Mesh.GetHandle());
@@ -335,7 +348,7 @@ namespace Engine {
 		}
 		static int CameraRay(ScriptCall& call)
 		{
-			const Entity entity = ComponentSelf(call, "Camera");
+			const Entity entity = ComponentReadSelf(call, "Camera");
 			const auto camera = entity.GetComponent<CameraComponent>();
 			const auto size = CameraSize(call);
 			const double x = Lua::Check<double>(call, 2), y = Lua::Check<double>(call, 3);
@@ -359,7 +372,7 @@ namespace Engine {
 		}
 		static int CameraScreen(ScriptCall& call)
 		{
-			const Entity entity = ComponentSelf(call, "Camera");
+			const Entity entity = ComponentReadSelf(call, "Camera");
 			const auto camera = entity.GetComponent<CameraComponent>();
 			const auto size = CameraSize(call);
 			const glm::dvec3 point(Lua::Check<glm::vec3>(call, 2));

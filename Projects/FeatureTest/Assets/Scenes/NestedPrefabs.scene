@@ -1,0 +1,268 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "NestedPrefabs",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Prefab": 2,
+		"PrefabLink": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"AudioListener": 1
+	},
+	"Entities": [
+		{
+			"ID": "084b10d2b3555a6f",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 4, 14],
+					"Rotation": [-0.104528464, 0, 0, 0.9945219],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 50,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Skybox",
+					"ClearColor": [0.05, 0.05, 0.06]
+				},
+				"AudioListener": {
+					"Primary": true
+				}
+			}
+		},
+		{
+			"ID": "851e34647ae90621",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [-0.4030582, 0.27253202, 0.12708376, 0.8643611],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 3,
+					"CastShadows": false,
+					"ShadowDistance": 100,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 1,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "4e883ba1bb8ca358",
+			"Name": "Room",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 2],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Prefab": {
+					"Prefab": "cbd8895728e7fe60",
+					"Overrides": []
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "4e883ba1bb8ca358",
+					"InstanceRoot": "4e883ba1bb8ca358",
+					"OuterPrefabEntityID": null
+				}
+			}
+		},
+		{
+			"ID": "744586617fe93ba9",
+			"Name": "Table",
+			"Parent": "4e883ba1bb8ca358",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.4, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [2, 0.1, 1]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "2c3ff34378db699c",
+					"InstanceRoot": "4e883ba1bb8ca358",
+					"OuterPrefabEntityID": null
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "8dc06c03367a2843",
+			"Name": "Lamp",
+			"Parent": "4e883ba1bb8ca358",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0.5, 0.9, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Prefab": {
+					"Prefab": "6d9fed79aa9dc20e",
+					"Overrides": []
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "54bf0f7aee459da4",
+					"InstanceRoot": "8dc06c03367a2843",
+					"OuterPrefabEntityID": "54bf0f7aee459da4"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "86c6a1435fbe85c0",
+			"Name": "Bulb",
+			"Parent": "8dc06c03367a2843",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.4, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.3, 0.3, 0.3]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "617612310501a32f",
+					"InstanceRoot": "8dc06c03367a2843",
+					"OuterPrefabEntityID": null
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": false
+				}
+			}
+		},
+		{
+			"ID": "3041eb8b434d1022",
+			"Name": "Room2",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, -2],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Prefab": {
+					"Prefab": "cbd8895728e7fe60",
+					"Overrides": [
+						{
+							"Path": ["2c3ff34378db699c"],
+							"Kind": "RemoveEntity",
+							"Component": "",
+							"Field": "",
+							"Value": null
+						},
+						{
+							"Path": ["54bf0f7aee459da4", "617612310501a32f"],
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "CastShadows",
+							"Value": false
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "4e883ba1bb8ca358",
+					"InstanceRoot": "3041eb8b434d1022",
+					"OuterPrefabEntityID": null
+				}
+			}
+		},
+		{
+			"ID": "8adc277a8eec05f7",
+			"Name": "Lamp",
+			"Parent": "3041eb8b434d1022",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0.5, 0.9, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Prefab": {
+					"Prefab": "6d9fed79aa9dc20e",
+					"Overrides": []
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "54bf0f7aee459da4",
+					"InstanceRoot": "8adc277a8eec05f7",
+					"OuterPrefabEntityID": "54bf0f7aee459da4"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "939cc77edabece93",
+			"Name": "Bulb",
+			"Parent": "8adc277a8eec05f7",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.4, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.3, 0.3, 0.3]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "617612310501a32f",
+					"InstanceRoot": "8adc277a8eec05f7",
+					"OuterPrefabEntityID": null
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": [],
+					"CastShadows": false,
+					"ReceiveShadows": true,
+					"Visible": false
+				}
+			}
+		}
+	]
+}

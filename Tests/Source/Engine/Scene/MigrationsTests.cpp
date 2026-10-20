@@ -86,6 +86,28 @@ namespace Engine {
 			CHECK(*saved == *golden);
 		}
 
+		// Docs/Decisions/0031-m20-contract.md decision 10: the golden fixture of the Prefab component's migration to version 2.
+		// The file loads, migrated, and saves as the upgraded fixture: each override's PrefabEntityID a one-element Path, and
+		// every PrefabLink with its additive OuterPrefabEntityID written as null.
+		TEST_CASE("Migrations: PrefabInstanceV1 fixture upgrades to version 2")
+		{
+			const Result<std::string> legacy = Test::ReadTestDataText("Formats/Scene/PrefabInstanceV1.scene");
+			const Result<std::string> golden = Test::ReadTestDataText("Formats/Scene/PrefabInstanceV1.upgraded.scene");
+			REQUIRE(legacy.has_value());
+			REQUIRE(golden.has_value());
+
+			Test::SceneTestFixture setup;
+			LoadReport report;
+			const Status loaded = SceneSerializer::LoadFromString(setup.GetScene(), *legacy, LoadOptions{}, report);
+			REQUIRE_MESSAGE(loaded.has_value(), (loaded ? std::string() : loaded.error().ToString()));
+			CHECK(report.FileVersion == 1);
+			CHECK(report.Migrated);
+
+			const Result<std::string> saved = SceneSerializer::SaveToString(setup.GetScene());
+			REQUIRE(saved.has_value());
+			CHECK(*saved == *golden);
+		}
+
 		TEST_CASE("Migrations: the version 0 step renames Enabled and keys components by type")
 		{
 			Result<Json> document = JsonReader::Parse(R"({
@@ -179,7 +201,7 @@ namespace Engine {
 
 		// Docs/Decisions/0031-m20-contract.md decision 10 (PrefabInstance version 2): an override names its target by a path,
 		// so version 1's single PrefabEntityID becomes a one-element Path at the same place, everything else unchanged.
-		TEST_CASE("Migrations: a Prefab component at version 1 migrates each override's PrefabEntityID to a one-element Path" * doctest::skip(true))
+		TEST_CASE("Migrations: a Prefab component at version 1 migrates each override's PrefabEntityID to a one-element Path")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			Json document = ParseJson(R"({ "Format": "Scene", "Version": 1, "Name": "Bricks", "Seed": 0,

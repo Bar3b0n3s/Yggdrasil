@@ -24,7 +24,9 @@ namespace Engine {
 	// World transforms (Architecture §5.2). TransformComponent is local TRS; world matrices are derived:
 	//   - Update recomputes WorldTransformComponent for every entity in canonical order (parents before children): O(n), no
 	//     dirty flags, so no stale-cache bugs. Systems read WorldTransformComponent after an Update.
-	//   - Between updates, gameplay reads (scripts, automation, the virtual fields) walk the parent chain on demand.
+	//   - Between updates, gameplay reads (scripts, automation, the virtual fields) walk the parent chain on demand. The
+	//     getters take a readable entity (Entity::IsReadable), so a script reads the pose of an entity pending destruction
+	//     until the flush (M20, decision 4 of Docs/Decisions/0031-m20-contract.md); the setters take a valid one.
 	//   - WorldPosition and WorldRotation are writable: the setters convert through the parent's world inverse and patch
 	//     the local TransformComponent (recorded by the change tracker). WorldScale is read-only (a non-uniformly scaled
 	//     parent can make a world scale unrepresentable as local TRS).

@@ -53,15 +53,19 @@ namespace Engine {
 			CHECK(*saved == *text);
 		}
 
-		TEST_CASE("Prefab: creating a prefab flattens nested instances and nulls the root's parent")
+		// Docs/Decisions/0031-m20-contract.md decision 8: an instance below the new prefab's root stays live in it; the root's
+		// own instance is unpacked in the copy (the prefab's root is never an instance root itself).
+		TEST_CASE("Prefab: creating a prefab keeps a nested instance live, unpacks the root's own and nulls the root's parent")
 		{
 			Test::SceneTestFixture setup;
 			Scene& scene = setup.GetScene();
 			const Entity holder = scene.CreateEntity("Holder");
 			const Entity root = scene.CreateEntity("Root", holder);
 			const Entity nested = scene.CreateEntity("Nested", root);
+			root.AddComponent<PrefabInstanceComponent>();
+			root.AddComponent<PrefabLinkComponent>(PrefabLinkComponent{ UUID(0x76), root.GetUUID(), UUID() });
 			nested.AddComponent<PrefabInstanceComponent>();
-			nested.AddComponent<PrefabLinkComponent>(PrefabLinkComponent{ UUID(0x77), nested.GetUUID() });
+			nested.AddComponent<PrefabLinkComponent>(PrefabLinkComponent{ UUID(0x77), nested.GetUUID(), UUID() });
 			root.AddComponent<MeshRendererComponent>();
 
 			const Result<Prefab> prefab = Prefab::CreateFromEntity(root, "Thing");
@@ -71,13 +75,15 @@ namespace Engine {
 			const Json* rootJson = prefab->FindEntity(root.GetUUID());
 			REQUIRE(rootJson != nullptr);
 			CHECK((*rootJson)["Parent"].is_null());
+			CHECK_FALSE((*rootJson)["Components"].contains("Prefab"));
+			CHECK_FALSE((*rootJson)["Components"].contains("PrefabLink"));
 			const Json* nestedJson = prefab->FindEntity(nested.GetUUID());
 			REQUIRE(nestedJson != nullptr);
-			CHECK_FALSE((*nestedJson)["Components"].contains("Prefab"));
-			CHECK_FALSE((*nestedJson)["Components"].contains("PrefabLink"));
+			CHECK((*nestedJson)["Components"].contains("Prefab"));
+			CHECK((*nestedJson)["Components"]["PrefabLink"]["InstanceRoot"] == Json(nested.GetUUID().ToString()));
 		}
 
-		TEST_CASE("Prefab: nested instances and several roots fail a strict load; repair flattens nested instances")
+		TEST_CASE("Prefab: several roots or an instance on the root entity fail a strict load; repair drops the root's instance")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			LoadReport report;
@@ -93,31 +99,49 @@ namespace Engine {
 			const Result<Prefab> sceneFormat = Prefab::LoadFromString(R"({ "Format": "Scene", "Version": 1 })", *registry, LoadOptions{}, report);
 			CHECK_FALSE(sceneFormat.has_value());
 
-			// A nested instance (PREFAB_NESTED_INSTANCE) fails a strict load; a repair load flattens it and reports the fix.
-			const std::string_view nested = R"({
-				"Format": "Prefab", "Version": 1, "Name": "Nested", "Root": "00000000000b0001", "ComponentVersions": {},
-				"Entities": [ { "ID": "00000000000b0001", "Name": "A", "Parent": null, "Active": true, "Tags": [], "Components": {} },
-				              { "ID": "00000000000b0002", "Name": "B", "Parent": "00000000000b0001", "Active": true, "Tags": [],
-				                "Components": { "PrefabLink": { "PrefabEntityID": "0000000000000077", "InstanceRoot": "00000000000b0002" } } } ]
+			// The prefab's root entity is never an instance root or member itself (PREFAB_NESTED_INSTANCE,
+			// Docs/Decisions/0031-m20-contract.md decision 8): a strict load fails, a repair load drops its link and reports
+			// the fix.
+			const std::string_view rooted = R"({
+				"Format": "Prefab", "Version": 1, "Name": "Rooted", "Root": "00000000000b0001", "ComponentVersions": {},
+				"Entities": [ { "ID": "00000000000b0001", "Name": "A", "Parent": null, "Active": true, "Tags": [],
+				                "Components": { "PrefabLink": { "PrefabEntityID": "0000000000000077", "InstanceRoot": "00000000000b0001" } } },
+				              { "ID": "00000000000b0002", "Name": "B", "Parent": "00000000000b0001", "Active": true, "Tags": [], "Components": {} } ]
 			})";
-			const Result<Prefab> strict = Prefab::LoadFromString(nested, *registry, LoadOptions{}, report);
+			const Result<Prefab> strict = Prefab::LoadFromString(rooted, *registry, LoadOptions{}, report);
 			REQUIRE_FALSE(strict.has_value());
 			CHECK(strict.error().GetCode() == ErrorCode::Validation);
 			CHECK(strict.error().GetMessageText().starts_with(PrefabNestedInstanceCode));
-			CHECK(strict.error().GetLocation().JsonPointer == "/Entities/1/Components/PrefabLink");
+			CHECK(strict.error().GetLocation().JsonPointer == "/Entities/0/Components/PrefabLink");
 
 			UUIDGenerator repairIds = UUIDGenerator::CreateDeterministic(3);
 			LoadOptions repair;
 			repair.Mode = LoadMode::Repair;
 			repair.RepairIdGenerator = &repairIds;
-			const Result<Prefab> repaired = Prefab::LoadFromString(nested, *registry, repair, report);
+			const Result<Prefab> repaired = Prefab::LoadFromString(rooted, *registry, repair, report);
 			REQUIRE(repaired.has_value());
 			REQUIRE(report.Repairs.size() == 1);
 			CHECK(report.Repairs[0].Code == PrefabNestedInstanceCode);
-			CHECK(report.Repairs[0].Removed.Get()["InstanceRoot"] == "00000000000b0002");
-			const Json* flattened = repaired->FindEntity(UUID(0x00000000000b0002));
-			REQUIRE(flattened != nullptr);
-			CHECK_FALSE((*flattened)["Components"].contains("PrefabLink"));
+			CHECK(report.Repairs[0].Removed.Get()["InstanceRoot"] == "00000000000b0001");
+			const Json* root = repaired->FindEntity(UUID(0x00000000000b0001));
+			REQUIRE(root != nullptr);
+			CHECK_FALSE((*root)["Components"].contains("PrefabLink"));
+
+			// An instance below the root is live: it loads strictly with its components.
+			const std::string_view nested = R"({
+				"Format": "Prefab", "Version": 1, "Name": "Nested", "Root": "00000000000b0001", "ComponentVersions": {},
+				"Entities": [ { "ID": "00000000000b0001", "Name": "A", "Parent": null, "Active": true, "Tags": [], "Components": {} },
+				              { "ID": "00000000000b0002", "Name": "B", "Parent": "00000000000b0001", "Active": true, "Tags": [],
+				                "Components": { "Prefab": { "Prefab": null, "Overrides": [] },
+				                                "PrefabLink": { "PrefabEntityID": "0000000000000077", "InstanceRoot": "00000000000b0002",
+				                                                "OuterPrefabEntityID": null } } } ]
+			})";
+			const Result<Prefab> live = Prefab::LoadFromString(nested, *registry, LoadOptions{}, report);
+			REQUIRE_MESSAGE(live.has_value(), (live ? std::string() : live.error().ToString()));
+			const Json* nestedRoot = live->FindEntity(UUID(0x00000000000b0002));
+			REQUIRE(nestedRoot != nullptr);
+			CHECK((*nestedRoot)["Components"].contains("Prefab"));
+			CHECK((*nestedRoot)["Components"]["PrefabLink"]["InstanceRoot"] == "00000000000b0002");
 		}
 
 		TEST_CASE("Prefab: 1,000 seeded mutations of a prefab file and of its cooked form never crash" * doctest::test_suite(Test::FuzzSuite))

@@ -39,7 +39,9 @@
 // done. Not copyable or movable. Every live world counts in PhysicsEngine::GetLiveWorldCount, every live body in
 // GetLiveBodyCount; destroying the world destroys its bodies.
 //
-// Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 3).
+// Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 3). M20, which owns the contact path in phase 1,
+// adds GetSubShapeCollider and the touching test of speculative contacts (Physics/ContactBuffer.h,
+// Docs/Decisions/0031-m20-contract.md decisions 2 and 3).
 
 namespace Engine {
 
@@ -176,6 +178,12 @@ namespace Engine {
 		// Kinematic body may take a mesh). Errors: InvalidArgument for a dead handle or a missing shape; for a Dynamic body,
 		// PhysicsShape::CheckDynamicBody's errors with its Mass and degrees of freedom.
 		[[nodiscard]] Status SetShape(BodyHandle body, const Ref<const PhysicsShape>& shape);
+		// The collider index (ColliderShapeDescription::UserData) of the sub-shape `subShape`, a Jolt SubShapeID value as a
+		// ContactEvent's SubShapeA or SubShapeB reports it, on the body's current shape (§9.2 "Collider identity in compounds"):
+		// what a contact record on that sub-shape would name now. Scene/PhysicsSystem resolves its contacts again with it after
+		// SetShape, since Jolt keeps reporting a contact that persists under its sub-shape ID while the collider behind that ID
+		// may have changed (M20, Docs/Decisions/0031-m20-contract.md decision 2). `body` live (asserted; 0 otherwise).
+		[[nodiscard]] uint32_t GetSubShapeCollider(BodyHandle body, uint32_t subShape) const;
 
 		// --- Poses and motion (§9.3) ----------------------------------------------------------------------------------
 		// The body origin's world pose (Jolt's position and rotation; the centre of mass is internal).

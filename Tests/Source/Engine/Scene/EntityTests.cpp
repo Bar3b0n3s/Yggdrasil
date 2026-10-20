@@ -29,11 +29,22 @@ namespace Engine {
 		static_cast<void>(entity.GetComponent<TransformComponent>());
 	}
 
-	ENGINE_DEATH_TEST("Scene/PendingDestroyEntityAccessAsserts")
+	// M20 (Docs/Decisions/0031-m20-contract.md decision 4): an entity pending destruction is readable until the flush, but
+	// every mutation of it asserts, and so does any access once the flush has destroyed it.
+	ENGINE_DEATH_TEST("Scene/PendingDestroyEntityWriteAsserts")
 	{
 		Test::SceneTestFixture fixture(1, true);
 		const Entity entity = fixture.GetScene().CreateEntity("Doomed");
 		fixture.GetScene().DestroyEntity(entity);
+		entity.SetName("Doomed");
+	}
+
+	ENGINE_DEATH_TEST("Scene/FlushedEntityAccessAsserts")
+	{
+		Test::SceneTestFixture fixture(1, true);
+		const Entity entity = fixture.GetScene().CreateEntity("Doomed");
+		fixture.GetScene().DestroyEntity(entity);
+		fixture.GetScene().FlushPendingDestroys();
 		static_cast<void>(entity.GetName());
 	}
 
@@ -265,7 +276,38 @@ namespace Engine {
 			CHECK_FALSE(static_cast<bool>(invalid));
 			ENGINE_CHECK_DEATH("Scene/InvalidEntityAccessAsserts", "invalid");
 			ENGINE_CHECK_DEATH("Scene/DestroyedEntityAccessAsserts", "invalid");
-			ENGINE_CHECK_DEATH("Scene/PendingDestroyEntityAccessAsserts", "invalid");
+			ENGINE_CHECK_DEATH("Scene/PendingDestroyEntityWriteAsserts", "invalid");
+			ENGINE_CHECK_DEATH("Scene/FlushedEntityAccessAsserts", "invalid");
+		}
+
+		// M20 (Docs/Decisions/0031-m20-contract.md decision 4): a handle of an entity pending destruction is not valid but
+		// readable until the flush: its identity, name, components, tags and active state read as before the Destroy, and a
+		// mutation that changes nothing (an equal name, the same active state, a present tag) still asserts, by the death
+		// test above.
+		TEST_CASE("Entity: an entity pending destruction is readable until the flush")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			const Entity entity = fixture.GetScene().CreateEntity("Doomed");
+			entity.AddTag("Tagged");
+			entity.SetActive(false);
+			const UUID id = entity.GetUUID();
+			fixture.GetScene().DestroyEntity(entity);
+			CHECK_FALSE(entity.IsValid());
+			CHECK(entity.IsReadable());
+			CHECK(ConstEntity(entity).IsReadable());
+			CHECK(entity.GetUUID() == id);
+			CHECK(entity.GetName() == "Doomed");
+			CHECK(entity.HasComponent<TransformComponent>());
+			CHECK(entity.TryGetComponent<RigidBodyComponent>() == nullptr);
+			CHECK(entity.GetComponent<TransformComponent>().Scale == glm::vec3(1.0f));
+			CHECK(entity.HasTag("Tagged"));
+			CHECK(entity.GetTags().size() == 1);
+			CHECK_FALSE(entity.IsActiveSelf());
+			CHECK_FALSE(entity.IsActive());
+			CHECK_FALSE(entity.GetParent().IsReadable());
+			fixture.GetScene().FlushPendingDestroys();
+			CHECK_FALSE(entity.IsReadable());
+			CHECK_FALSE(Entity().IsReadable());
 		}
 
 		TEST_CASE("Entity: removing a component every entity has asserts")

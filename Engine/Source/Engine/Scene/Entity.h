@@ -22,8 +22,8 @@ namespace Engine {
 	// A read-only handle to an entity of a scene: {entt::entity, const Scene*}, what the const members of Scene return
 	// (FindEntityByID, FindEntityByPath, ResolveEntityPath, ForEachCanonical) and what read-only code takes
 	// (SceneSerializer::EntityToJson, ComponentHostOps::Has and GetConst, the TransformSystem getters). Every Entity
-	// converts to it implicitly; the reverse conversion does not exist. Validity rules and the component-reference warning
-	// are Entity's. Main thread only, like the scene.
+	// converts to it implicitly; the reverse conversion does not exist. Validity and readability rules and the
+	// component-reference warning are Entity's. Main thread only, like the scene.
 	class ConstEntity
 	{
 	public:
@@ -36,6 +36,10 @@ namespace Engine {
 		// True when the handle names a live entity of a live registry that is not marked for destruction.
 		[[nodiscard]] bool IsValid() const;
 		explicit operator bool() const { return IsValid(); }
+		// True when IsValid, and also for an entity of a runtime scene marked for destruction that the flush has not
+		// destroyed yet: its data stays readable until then (Scene::FindReadableEntityByID; M20, decision 4 of
+		// Docs/Decisions/0031-m20-contract.md).
+		[[nodiscard]] bool IsReadable() const;
 
 		[[nodiscard]] UUID GetUUID() const;
 		[[nodiscard]] const std::string& GetName() const;
@@ -67,6 +71,7 @@ namespace Engine {
 		[[nodiscard]] bool operator==(const ConstEntity& other) const = default;
 	private:
 		void AssertValid() const;
+		void AssertReadable() const;
 	private:
 		entt::entity m_Handle{ entt::null };
 		const Scene* m_Scene = nullptr; // back-reference (§4.7)
@@ -74,8 +79,14 @@ namespace Engine {
 
 	// A handle to an entity of a scene (Architecture §5.1): {entt::entity, Scene*}, a small value type that is cheap to copy
 	// and compare, passed by value. It does not own anything; it stays valid until the entity is destroyed (for a runtime
-	// scene: until it is marked for destruction). Every accessor asserts validity; IsValid is the only member that accepts
-	// an invalid handle. Mutating members are const because they change the scene, not the handle.
+	// scene: until it is marked for destruction), and readable until the entity is destroyed (for a runtime scene: until
+	// the flush that destroys a marked entity; M20, decision 4 of Docs/Decisions/0031-m20-contract.md). The read accessors
+	// (GetUUID, GetName, GetComponent, TryGetComponent, HasComponent, GetParent, GetChildren, IsActiveSelf, HasTag,
+	// GetTags) assert readability, and IsActive walks the readable ancestors, so the data of an entity pending destruction
+	// can be read until the flush; the mutating members (SetName, AddComponent, RemoveComponent, Patch, SetActive, AddTag,
+	// RemoveTag) and GetSiblingIndex (a pending entity has left its parent's children) assert validity. IsValid and
+	// IsReadable are the only members that accept an invalid handle. Mutating members are const because they change the
+	// scene, not the handle.
 	//
 	// Never keep a component reference across a structural change (adding or removing components of the same type, or
 	// creating and destroying entities): EnTT storage moves (§4.7). Store the Entity or the UUID instead.
@@ -95,6 +106,8 @@ namespace Engine {
 		// True when the handle names a live entity of a live registry that is not marked for destruction.
 		[[nodiscard]] bool IsValid() const;
 		explicit operator bool() const { return IsValid(); }
+		// As ConstEntity::IsReadable: IsValid, or marked for destruction and not destroyed by the flush yet.
+		[[nodiscard]] bool IsReadable() const;
 
 		// Implicit on purpose: a mutable handle is usable wherever a read-only one is expected, like T* to const T*.
 		operator ConstEntity() const { return ConstEntity(m_Handle, m_Scene); }
@@ -158,6 +171,7 @@ namespace Engine {
 		[[nodiscard]] bool operator==(const Entity& other) const = default;
 	private:
 		void AssertValid() const;
+		void AssertReadable() const;
 	private:
 		entt::entity m_Handle{ entt::null };
 		Scene* m_Scene = nullptr; // back-reference (§4.7)
@@ -167,7 +181,7 @@ namespace Engine {
 	const T& ConstEntity::GetComponent() const
 	{
 		static_assert(!std::is_empty_v<T>, "Tag components have no data; use HasComponent");
-		AssertValid();
+		AssertReadable();
 		ENGINE_CORE_ASSERT(HasComponent<T>(), "The entity does not have this component");
 		return m_Scene->GetRegistry().get<T>(m_Handle);
 	}
@@ -176,14 +190,14 @@ namespace Engine {
 	const T* ConstEntity::TryGetComponent() const
 	{
 		static_assert(!std::is_empty_v<T>, "Tag components have no data; use HasComponent");
-		AssertValid();
+		AssertReadable();
 		return m_Scene->GetRegistry().try_get<T>(m_Handle);
 	}
 
 	template<typename T>
 	bool ConstEntity::HasComponent() const
 	{
-		AssertValid();
+		AssertReadable();
 		return m_Scene->GetRegistry().all_of<T>(m_Handle);
 	}
 
@@ -210,7 +224,7 @@ namespace Engine {
 	T& Entity::GetComponent() const
 	{
 		static_assert(!std::is_empty_v<T>, "Tag components have no data; use HasComponent");
-		AssertValid();
+		AssertReadable();
 		ENGINE_CORE_ASSERT(HasComponent<T>(), "The entity does not have this component");
 		return m_Scene->m_Registry.get<T>(m_Handle);
 	}
@@ -219,14 +233,14 @@ namespace Engine {
 	T* Entity::TryGetComponent() const
 	{
 		static_assert(!std::is_empty_v<T>, "Tag components have no data; use HasComponent");
-		AssertValid();
+		AssertReadable();
 		return m_Scene->m_Registry.try_get<T>(m_Handle);
 	}
 
 	template<typename T>
 	bool Entity::HasComponent() const
 	{
-		AssertValid();
+		AssertReadable();
 		return m_Scene->m_Registry.all_of<T>(m_Handle);
 	}
 

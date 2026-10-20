@@ -208,6 +208,17 @@ namespace Engine {
 		DebugDrawList DebugDraw{};
 		Scope<Scene> PendingScene{};
 		Json PendingParameters = Json::object();
+		// M20 (Scene.Reload, Scene.GetCurrent; Docs/Decisions/0031-m20-contract.md decision 5): the document the current
+		// scene started from (the session's start document until a Scene.Load, then the loaded asset's document as it was
+		// then; shared and immutable), the scene asset it came from (PlaySessionSpecification::SceneAsset, then the asset
+		// Scene.Load named) and its path for load diagnostics (empty for the start document, as at the session's start);
+		// then the same of the pending transition, which Scene.Reload takes from the current scene.
+		Ref<const Json> CurrentDocument{};
+		AssetHandle CurrentSceneAsset{};
+		std::string CurrentSourcePath{};
+		Ref<const Json> PendingDocument{};
+		AssetHandle PendingSceneAsset{};
+		std::string PendingSourcePath{};
 
 		[[nodiscard]] Scene& GetScene() override { return *RuntimeScene; }
 		[[nodiscard]] const TypeRegistry& GetTypes() const override { return *Registry; }
@@ -264,6 +275,15 @@ namespace Engine {
 		[[nodiscard]] Status PrepareScripts();
 		void StartScripts();
 		void FlushDestroyed();
+		// OK while the frame may still request a scene transition: one per frame, none during a replacement or after a stop
+		// or quit request.
+		[[nodiscard]] Status CheckSceneTransition() const;
+		// Scene.Load's and Scene.Reload's request: `document` loaded strictly into a new runtime scene before the request is
+		// accepted, so the caller still receives its located error, then kept with the parameters, the asset and the path as
+		// the pending transition that ConsumeRequests commits at the end of the frame.
+		[[nodiscard]] Status PrepareSceneTransition(Ref<const Json> document, AssetHandle asset, std::string sourcePath, Json parameters);
+		// Drops the pending transition.
+		void ClearPendingTransition();
 		void ConsumeRequests();
 		void ReportSessionError(const Error& error);
 
@@ -364,10 +384,45 @@ namespace Engine {
 		return Host->SetScriptCursorMode(mode);
 	}
 
-	Status PlaySession::State::RequestSceneLoad(AssetHandle scene, Json parameters)
+	Status PlaySession::State::CheckSceneTransition() const
 	{
 		if (ReplacingScene || PendingScene != nullptr || FatalStop || QuitRequest.has_value())
 			return MakeError(ErrorCode::InvalidState, "The session already has a pending scene transition or stop");
+		return {};
+	}
+
+	Status PlaySession::State::PrepareSceneTransition(Ref<const Json> document, AssetHandle asset, std::string sourcePath, Json parameters)
+	{
+		// Validate before accepting the request, while the caller can still receive its located error. No gameplay or
+		// teardown runs here; the active protected call continues in its original scene and VM until frame end.
+		Scope<Scene> candidate = Scene::Create({ .Name = "Play", .Seed = 0, .Registry = Registry, .IdGenerator = &IdGenerator, .Runtime = true });
+		LoadOptions options;
+		options.Schemas = Schemas.get();
+		options.SourcePath = sourcePath;
+		LoadReport report;
+		ENGINE_TRY(SceneSerializer::FromJson(*candidate, *document, options, report));
+		if (candidate->GetEntityCount() > Project.Simulation.MaxEntities)
+			return Utils::MakeSceneOverLimitError(Project.Simulation.MaxEntities, candidate->GetEntityCount());
+		PendingScene = std::move(candidate);
+		PendingParameters = std::move(parameters);
+		PendingDocument = std::move(document);
+		PendingSceneAsset = asset;
+		PendingSourcePath = std::move(sourcePath);
+		return {};
+	}
+
+	void PlaySession::State::ClearPendingTransition()
+	{
+		PendingScene.reset();
+		PendingParameters = Json::object();
+		PendingDocument.reset();
+		PendingSceneAsset = AssetHandle();
+		PendingSourcePath.clear();
+	}
+
+	Status PlaySession::State::RequestSceneLoad(AssetHandle scene, Json parameters)
+	{
+		ENGINE_TRY(CheckSceneTransition());
 		if (!parameters.is_object())
 			return MakeError(ErrorCode::Validation, "Scene.Load parameters must be an object");
 		if (Assets == nullptr)
@@ -376,31 +431,25 @@ namespace Engine {
 		const AssetRef<SceneData> data = AssetCast<SceneData>(loaded);
 		if (data == nullptr || data->Document == nullptr)
 			return MakeError(ErrorCode::Validation, "Scene.Load requires a valid Scene asset");
-		// Validate before accepting the request, while the caller can still receive its located error. No gameplay or
-		// teardown runs here; the active protected call continues in its original scene and VM until frame end.
-		Scope<Scene> candidate = Scene::Create({ .Name = "Play", .Seed = 0, .Registry = Registry, .IdGenerator = &IdGenerator, .Runtime = true });
-		LoadOptions options;
-		options.Schemas = Schemas.get();
-		options.SourcePath = Assets->GetReferencePath(scene);
-		LoadReport report;
-		ENGINE_TRY(SceneSerializer::FromJson(*candidate, *data->Document, options, report));
-		if (candidate->GetEntityCount() > Project.Simulation.MaxEntities)
-			return Utils::MakeSceneOverLimitError(Project.Simulation.MaxEntities, candidate->GetEntityCount());
-		PendingScene = std::move(candidate);
-		PendingParameters = std::move(parameters);
-		return {};
+		// The asset's document as it is now: a later Scene.Reload restarts from it even if the asset changes meanwhile.
+		return PrepareSceneTransition(data->Document, scene, Assets->GetReferencePath(scene), std::move(parameters));
 	}
 
-	Status PlaySession::State::RequestSceneReload(std::optional<Json> /*parameters*/)
+	Status PlaySession::State::RequestSceneReload(std::optional<Json> parameters)
 	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "M20 Scene.Reload contract (Docs/Decisions/0031-m20-contract.md decision 5, stream P2)");
+		ENGINE_TRY(CheckSceneTransition());
+		if (parameters.has_value() && !parameters->is_object())
+			return MakeError(ErrorCode::Validation, "Scene.Reload parameters must be an object");
+		ENGINE_CORE_ASSERT(CurrentDocument != nullptr, "A prepared play session keeps the document its scene started from");
+		// The document the current scene started from, never its asset's file now: in editor play the play copy, so the
+		// edit scene's unsaved edits are kept (§5.6), and what play changed since is not.
+		Json kept = parameters.has_value() ? std::move(*parameters) : Parameters;
+		return PrepareSceneTransition(CurrentDocument, CurrentSceneAsset, CurrentSourcePath, std::move(kept));
 	}
 
 	AssetHandle PlaySession::State::GetCurrentScene() const
 	{
-		ENGINE_CONTRACT_STUB();
-		return AssetHandle();
+		return CurrentSceneAsset;
 	}
 
 	void PlaySession::State::RequestQuit(int32_t exitCode)
@@ -509,7 +558,7 @@ namespace Engine {
 	{
 		if (QuitRequest.has_value() || FatalStop)
 		{
-			PendingScene.reset();
+			ClearPendingTransition();
 			if (FatalStop && Scripts != nullptr)
 				Scripts->Stop();
 			return;
@@ -525,7 +574,7 @@ namespace Engine {
 		if (!physics)
 		{
 			ReportSessionError(physics.error());
-			PendingScene.reset();
+			ClearPendingTransition();
 			return;
 		}
 		ReplacingScene = true;
@@ -537,8 +586,7 @@ namespace Engine {
 			// The candidate physics system owns signal connections into PendingScene. Disconnect them while that
 			// registry still exists, just as the committed session destroys physics before its scene.
 			physics->reset();
-			PendingScene.reset();
-			PendingParameters = Json::object();
+			ClearPendingTransition();
 			ReplacingScene = false;
 			return;
 		}
@@ -549,7 +597,10 @@ namespace Engine {
 		RuntimeScene = std::move(PendingScene);
 		Physics = std::move(*physics);
 		Parameters = std::move(PendingParameters);
-		PendingParameters = Json::object();
+		CurrentDocument = std::move(PendingDocument);
+		CurrentSceneAsset = PendingSceneAsset;
+		CurrentSourcePath = std::move(PendingSourcePath);
+		ClearPendingTransition();
 		ENGINE_CORE_VERIFY(SceneGeneration != std::numeric_limits<uint64_t>::max(), "Session scene generation exhausted");
 		++SceneGeneration;
 		DebugDraw.Clear();
@@ -820,13 +871,26 @@ namespace Engine {
 
 	Result<Scope<PlaySession>> PlaySession::Create(const PlaySessionSpecification& specification, const Json& sceneDocument)
 	{
-		ENGINE_TRY_ASSIGN(auto session, Prepare(specification, sceneDocument));
+		return Create(specification, CreateRef<const Json>(sceneDocument));
+	}
+
+	Result<Scope<PlaySession>> PlaySession::Create(const PlaySessionSpecification& specification, Ref<const Json> sceneDocument)
+	{
+		ENGINE_TRY_ASSIGN(auto session, Prepare(specification, std::move(sceneDocument)));
 		session->Activate();
 		return session;
 	}
 
 	Result<Scope<PlaySession>> PlaySession::Prepare(const PlaySessionSpecification& specification, const Json& sceneDocument)
 	{
+		return Prepare(specification, CreateRef<const Json>(sceneDocument));
+	}
+
+	Result<Scope<PlaySession>> PlaySession::Prepare(const PlaySessionSpecification& specification, Ref<const Json> startDocument)
+	{
+		if (startDocument == nullptr)
+			return MakeError(ErrorCode::InvalidArgument, "a play session needs a scene document");
+		const Json& sceneDocument = *startDocument;
 		ENGINE_TRY(Utils::ValidateSpecification(specification));
 		const uint32_t maxEntities = specification.Project.Simulation.MaxEntities;
 
@@ -884,6 +948,9 @@ namespace Engine {
 		const size_t loadedCount = state.RuntimeScene->GetEntityCount();
 		if (loadedCount > maxEntities)
 			return Utils::MakeSceneOverLimitError(maxEntities, loadedCount);
+		// M20: the start document Scene.Reload restarts from while this scene is current, and the asset it came from.
+		state.CurrentDocument = std::move(startDocument);
+		state.CurrentSceneAsset = specification.SceneAsset;
 
 		state.UpdateTransforms();
 		// M11: the bodies, in canonical order (§5.6 "Session setup").
@@ -926,7 +993,8 @@ namespace Engine {
 		Result<Json> document = SceneSerializer::ToJson(editScene);
 		if (!document)
 			return std::unexpected(std::move(document).error().WithContext("while copying the edit scene for play"));
-		return Create(specification, *document);
+		// The copy's document becomes the session's start document without another copy (Scene.Reload, M20).
+		return Create(specification, CreateRef<const Json>(std::move(*document)));
 	}
 
 	void PlaySession::FixedStep()
@@ -1103,8 +1171,7 @@ namespace Engine {
 
 	AssetHandle PlaySession::GetCurrentSceneAsset() const
 	{
-		ENGINE_CONTRACT_STUB();
-		return AssetHandle();
+		return m_State->CurrentSceneAsset;
 	}
 
 	ScriptErrorStream& PlaySession::GetScriptErrors()

@@ -483,27 +483,31 @@ namespace Engine {
 	Result<Scope<PlaySession>> RuntimeApp::State::PrepareSession(AssetHandle scene, ProjectSettings project, const PlayStartOptions& options,
 		bool ownsAudio, IPlaySessionTestHook* hook, IScriptTestHost* testHost, bool deferActivation, bool fixedView)
 	{
-		Json document;
+		// The session keeps the start document (Scene.Reload, M20): the cooked asset's own immutable document, not a copy.
+		Ref<const Json> document;
 		if (scene.IsValid())
 		{
 			ENGINE_TRY_ASSIGN(auto asset, App.m_Assets->Load(scene));
 			const auto data = AssetCast<SceneData>(asset);
 			if (!data || !data->Document)
 				return MakeError(ErrorCode::Validation, "session start asset is not a Scene");
-			document = *data->Document;
+			document = data->Document;
 		}
 		else
 		{
 			auto ids = UUIDGenerator::CreateDeterministic(0);
 			auto empty = Scene::Create({ .Name = "Test", .Registry = &App.GetContext().GetTypeRegistry(), .IdGenerator = &ids });
-			ENGINE_TRY_ASSIGN(document, SceneSerializer::ToJson(*empty));
+			ENGINE_TRY_ASSIGN(Json emptyDocument, SceneSerializer::ToJson(*empty));
+			document = CreateRef<const Json>(std::move(emptyDocument));
 		}
-		ENGINE_TRY_ASSIGN(const uint32_t sceneSeed, JsonReader(document).ReadMember<uint32_t>("Seed"));
+		ENGINE_TRY_ASSIGN(const uint32_t sceneSeed, JsonReader(*document).ReadMember<uint32_t>("Seed"));
 		if (options.PauseOnError)
 			project.Scripting.PauseOnError = *options.PauseOnError;
 		PlaySessionSpecification spec;
 		spec.Registry = &App.GetContext().GetTypeRegistry();
 		spec.Assets = App.m_Assets.get();
+		// Scene.GetCurrent's asset: the start scene, a suite's or a replay's; none for a suite without a scene.
+		spec.SceneAsset = scene;
 		spec.ScriptApi = &App.GetContext().GetScriptApiRegistry();
 		spec.ScriptSchemas = Schemas;
 		spec.Project = std::move(project);

@@ -178,13 +178,27 @@ namespace Engine {
 			return info.HasFlag(ComponentFlags::Serializable) && !info.HasFlag(ComponentFlags::EntityLevel) && info.GetHostOps() != nullptr;
 		}
 
-		// The canonical JSON of `entity`; `pointer` locates it for errors. Marks the known components it writes in `used`
-		// (indexed by ComponentInfo::GetIndex) and appends unknown component names with their versions to `unknown`
-		// (first use only), when they are given.
-		static Result<Json> WriteEntity(ConstEntity entity, std::string_view pointer, const TypeRegistry& registry, std::vector<bool>* used,
-			std::vector<std::pair<std::string, uint32_t>>* unknown)
+		// The components of `registry` written under an entity's "Components", in registry order.
+		static std::vector<const ComponentInfo*> GetWrittenComponents(const TypeRegistry& registry)
 		{
-			Json json = Json::object();
+			std::vector<const ComponentInfo*> written;
+			for (const ComponentInfo* info : registry.GetComponents())
+			{
+				if (IsWrittenUnderComponents(*info))
+					written.push_back(info);
+			}
+			return written;
+		}
+
+		// The canonical JSON of `entity`, whose components `written` lists (GetWrittenComponents). Errors are located at
+		// "/Entities/<index>" in a document, or at the entity object without an index. Marks the known components it writes
+		// in `used` (indexed by ComponentInfo::GetIndex) and appends unknown component names with their versions to `unknown`
+		// (first use only), when they are given.
+		static Result<Json> WriteEntity(ConstEntity entity, std::span<const ComponentInfo* const> written, std::optional<size_t> index,
+			std::vector<bool>* used, std::vector<std::pair<std::string, uint32_t>>* unknown)
+		{
+			Json::object_t json;
+			json.reserve(EntityKeys.size());
 			json["ID"] = entity.GetUUID().ToString();
 			json["Name"] = entity.GetName();
 			const UUID parent = entity.GetComponent<RelationshipComponent>().Parent;
@@ -195,18 +209,20 @@ namespace Engine {
 				tags.push_back(tag);
 			json["Tags"] = std::move(tags);
 
-			const std::string componentsPointer = JsonReader::AppendPointer(pointer, "Components");
 			Json components = Json::object();
-			for (const ComponentInfo* info : registry.GetComponents())
+			for (const ComponentInfo* info : written)
 			{
-				if (!IsWrittenUnderComponents(*info))
-					continue;
 				const void* object = info->GetHostOps()->GetConst(entity);
 				if (object == nullptr)
 					continue;
 				Result<Json> value = info->ToJson(object);
 				if (!value)
+				{
+					// The pointer is spelled only for the error.
+					const std::string pointer = index.has_value() ? JsonReader::AppendPointer("/Entities", *index) : std::string();
+					const std::string componentsPointer = JsonReader::AppendPointer(pointer, "Components");
 					return std::unexpected(PrefixPointers(value.error(), JsonReader::AppendPointer(componentsPointer, info->GetName())));
+				}
 				components[info->GetName()] = std::move(*value);
 				if (used != nullptr)
 					(*used)[info->GetIndex()] = true;
@@ -225,7 +241,7 @@ namespace Engine {
 					CollectUnknownVersions(entity, *unknown);
 			}
 			json["Components"] = std::move(components);
-			return json;
+			return Json(std::move(json));
 		}
 
 		// Adds the component to `entity`, or overwrites it when the entity has it already (the Required components every
@@ -389,6 +405,30 @@ namespace Engine {
 			UUID WrittenID;
 		};
 
+		// True when validation kept the input's entities in their order with their IDs as written (a canonical document: every
+		// saved scene and the play copy). Each entity's input position is then its position and its written ID its ID, which
+		// is what MapInputPositions would map it to.
+		static bool KeepsInputPositions(const Json& input, const Json& validated)
+		{
+			const auto inputEntities = input.find("Entities");
+			const auto validatedEntities = validated.find("Entities");
+			if (inputEntities == input.end() || validatedEntities == validated.end() || !inputEntities->is_array() || !validatedEntities->is_array()
+				|| inputEntities->size() != validatedEntities->size())
+				return false;
+			for (size_t index = 0; index < inputEntities->size(); ++index)
+			{
+				const Json& written = (*inputEntities)[index];
+				const Json& kept = (*validatedEntities)[index];
+				if (!written.is_object() || !kept.is_object())
+					return false;
+				const auto writtenID = written.find("ID");
+				const auto keptID = kept.find("ID");
+				if (writtenID == written.end() || keptID == kept.end() || *writtenID != *keptID)
+					return false;
+			}
+			return true;
+		}
+
 		static std::unordered_map<UUID, InputPosition> MapInputPositions(const Json& input, std::span<const LoadRepair> repairs)
 		{
 			std::unordered_map<UUID, InputPosition> positions; // lookup only
@@ -418,6 +458,31 @@ namespace Engine {
 			return positions;
 		}
 
+		// The document `document` as Migrations::UpgradeDocument leaves it: `document` itself when it needs no migration (the
+		// play copy, every saved scene), else `migrated`, an upgraded copy. A document at the current version is migrated by
+		// its "ComponentVersions" alone, so UpgradeDocument first runs on a copy of its members without "Entities", which
+		// reports the same errors at the same pointers and sets the same report members; only when that migrates something
+		// is the whole document copied and upgraded, which sets them again.
+		static Result<const Json*> UpgradeEntityDocument(const Json& document, uint32_t fileVersion, DocumentKind kind, const TypeRegistry& registry,
+			LoadReport& report, Json& migrated)
+		{
+			if (fileVersion == Migrations::CurrentVersion)
+			{
+				Json header = Json::object();
+				for (auto member = document.begin(); member != document.end(); ++member)
+				{
+					if (member.key() != "Entities")
+						header[member.key()] = *member;
+				}
+				ENGINE_TRY(Migrations::UpgradeDocument(header, kind, registry, report));
+				if (!report.Migrated)
+					return &document;
+			}
+			migrated = document;
+			ENGINE_TRY(Migrations::UpgradeDocument(migrated, kind, registry, report));
+			return &migrated;
+		}
+
 		// The whole load of a scene or prefab document after the report was reset (FromJson, Utils::LoadEntityDocument).
 		// A prefab document has "Root" (checked by StructuralValidator) instead of "Seed", so the scene's seed stays 0.
 		static Status LoadDocument(Scene& scene, const Json& document, DocumentKind kind, const LoadOptions& options, LoadReport& report)
@@ -425,10 +490,12 @@ namespace Engine {
 			const TypeRegistry& registry = scene.GetTypeRegistry();
 			const bool isScene = kind == DocumentKind::Scene;
 			const std::string_view format = isScene ? SceneSerializer::FormatName : Prefab::FormatName;
-			ENGINE_TRY(JsonReader(document).ReadFormatHeader(format, Migrations::MinimumVersion, Migrations::CurrentVersion));
+			ENGINE_TRY_ASSIGN(const uint32_t fileVersion,
+				JsonReader(document).ReadFormatHeader(format, Migrations::MinimumVersion, Migrations::CurrentVersion));
 
-			Json migrated = document;
-			ENGINE_TRY(Migrations::UpgradeDocument(migrated, kind, registry, report));
+			Json upgraded;
+			ENGINE_TRY_ASSIGN(const Json* current, UpgradeEntityDocument(document, fileVersion, kind, registry, report, upgraded));
+			const Json& migrated = *current;
 			const JsonReader root(migrated);
 
 			// The document's own members.
@@ -468,8 +535,10 @@ namespace Engine {
 			// entity is created.
 			const size_t firstRepair = report.Repairs.size();
 			ENGINE_TRY_ASSIGN(const Json validated, StructuralValidator::Validate(migrated, kind, registry, options, report));
-			const std::unordered_map<UUID, InputPosition> positions =
-				MapInputPositions(migrated, std::span<const LoadRepair>(report.Repairs).subspan(firstRepair));
+			// Without a map, each entity is at its input position (KeepsInputPositions).
+			const std::unordered_map<UUID, InputPosition> positions = KeepsInputPositions(migrated, validated)
+				? std::unordered_map<UUID, InputPosition>()
+				: MapInputPositions(migrated, std::span<const LoadRepair>(report.Repairs).subspan(firstRepair));
 
 			const auto entitiesMember = validated.find("Entities");
 			const Json* entities = entitiesMember != validated.end() ? &*entitiesMember : nullptr;
@@ -524,6 +593,18 @@ namespace Engine {
 
 	namespace {
 
+		// `read` of the member `key` of the object `entity` through `member`, a reader of that member without the document's
+		// pointer, so a valid value never spells it; a value `read` rejects is read again through `entity`'s own reader of the
+		// member, whose error is located at the member's pointer.
+		template<typename T>
+		static Result<T> ReadMember(const JsonReader& entity, std::string_view key, const JsonReader& member, Result<T> (JsonReader::*read)() const)
+		{
+			Result<T> value = (member.*read)();
+			if (!value)
+				return ((*entity.FindMember(key)).*read)();
+			return value;
+		}
+
 		void EntityReader::Read(const JsonReader& entity, PendingEntity& pending)
 		{
 			if (Status status = entity.ExpectType(JsonType::Object); !status)
@@ -532,9 +613,10 @@ namespace Engine {
 				return;
 			}
 
-			if (const std::optional<JsonReader> id = entity.FindMember("ID"))
+			const JsonReader bare(entity.GetValue()); // its members' pointers are short, never the document's
+			if (const std::optional<JsonReader> id = bare.FindMember("ID"))
 			{
-				if (const Result<UUID> value = id->ReadUUID())
+				if (const Result<UUID> value = ReadMember(entity, "ID", *id, &JsonReader::ReadUUID))
 				{
 					pending.ID = *value;
 					pending.HasID = true;
@@ -551,49 +633,49 @@ namespace Engine {
 
 			ReportUnknownKeys(entity, EntityKeys, pending.WrittenID);
 
-			if (const std::optional<JsonReader> name = entity.FindMember("Name"))
+			if (const std::optional<JsonReader> name = bare.FindMember("Name"))
 			{
-				if (Result<std::string> value = name->ReadString())
+				if (Result<std::string> value = ReadMember(entity, "Name", *name, &JsonReader::ReadString))
 					pending.Name = std::move(*value);
 				else
 					AddError(value.error(), {}, pending.WrittenID);
 			}
 
-			if (const std::optional<JsonReader> parent = entity.FindMember("Parent"); parent && !parent->IsNull())
+			if (const std::optional<JsonReader> parent = bare.FindMember("Parent"); parent && !parent->IsNull())
 			{
-				if (const Result<UUID> value = parent->ReadUUID())
+				if (const Result<UUID> value = ReadMember(entity, "Parent", *parent, &JsonReader::ReadUUID))
 					pending.Parent = *value;
 				else
 					AddError(value.error(), {}, pending.WrittenID);
 			}
 
-			if (const std::optional<JsonReader> active = entity.FindMember("Active"))
+			if (const std::optional<JsonReader> active = bare.FindMember("Active"))
 			{
-				if (const Result<bool> value = active->ReadBool())
+				if (const Result<bool> value = ReadMember(entity, "Active", *active, &JsonReader::ReadBool))
 					pending.Active = *value;
 				else
 					AddError(value.error(), {}, pending.WrittenID);
 			}
 
-			if (const std::optional<JsonReader> tags = entity.FindMember("Tags"))
-				ReadTags(*tags, pending);
+			if (const std::optional<JsonReader> tags = bare.FindMember("Tags"))
+			{
+				// An empty list, the usual case, has no element to locate.
+				if (!tags->IsArray() || tags->GetArraySize().value_or(0) != 0)
+					ReadTags(*entity.FindMember("Tags"), pending);
+			}
 
 			if (const std::optional<JsonReader> components = entity.FindMember("Components"))
 			{
-				Result<std::vector<std::string>> names = components->GetMemberNames();
-				if (!names)
+				if (Status object = components->ExpectType(JsonType::Object); !object)
 				{
-					AddError(names.error(), {}, pending.WrittenID);
+					AddError(object.error(), {}, pending.WrittenID);
 					return;
 				}
-				for (const std::string& name : *names)
-				{
-					const Result<JsonReader> component = components->GetMember(name);
-					if (component)
-						ReadComponent(name, *component, pending);
-					else
-						AddError(component.error(), {}, pending.WrittenID);
-				}
+				// In document order, each located as JsonReader::GetMember locates it.
+				const Json& members = components->GetValue();
+				pending.Components.reserve(members.size());
+				for (auto member = members.begin(); member != members.end(); ++member)
+					ReadComponent(member.key(), JsonReader(member.value(), JsonReader::AppendPointer(components->GetPointer(), member.key())), pending);
 				CheckRelations(pending);
 			}
 		}
@@ -1047,16 +1129,18 @@ namespace Engine {
 	Result<Json> SceneSerializer::ToJson(const Scene& scene)
 	{
 		const TypeRegistry& registry = scene.GetTypeRegistry();
+		const std::vector<const ComponentInfo*> written = Utils::GetWrittenComponents(registry);
 		std::vector<bool> used(registry.GetComponents().size(), false);
 		std::vector<std::pair<std::string, uint32_t>> unknown;
-		Json entities = Json::array();
-		for (const UUID id : scene.GetCanonicalOrder())
+		const std::span<const UUID> order = scene.GetCanonicalOrder();
+		Json::array_t entities;
+		entities.reserve(order.size());
+		for (const UUID id : order)
 		{
 			const ConstEntity entity = scene.FindEntityByID(id);
 			if (!entity.IsValid())
 				continue; // marked for destruction in a runtime scene
-			const std::string pointer = JsonReader::AppendPointer("/Entities", entities.size());
-			ENGINE_TRY_ASSIGN(Json json, Utils::WriteEntity(entity, pointer, registry, &used, &unknown));
+			ENGINE_TRY_ASSIGN(Json json, Utils::WriteEntity(entity, written, entities.size(), &used, &unknown));
 			entities.push_back(std::move(json));
 		}
 
@@ -1080,7 +1164,7 @@ namespace Engine {
 		document["Name"] = scene.GetName();
 		document["Seed"] = scene.GetSeed();
 		document["ComponentVersions"] = std::move(versions);
-		document["Entities"] = std::move(entities);
+		document["Entities"] = Json(std::move(entities));
 		return document;
 	}
 
@@ -1127,7 +1211,7 @@ namespace Engine {
 	Result<Json> SceneSerializer::EntityToJson(ConstEntity entity)
 	{
 		ENGINE_CORE_ASSERT(entity.IsValid(), "SceneSerializer::EntityToJson needs a valid entity");
-		return Utils::WriteEntity(entity, {}, entity.GetScene()->GetTypeRegistry(), nullptr, nullptr);
+		return Utils::WriteEntity(entity, Utils::GetWrittenComponents(entity.GetScene()->GetTypeRegistry()), std::nullopt, nullptr, nullptr);
 	}
 
 	Result<Entity> SceneSerializer::EntityFromJson(Scene& scene, const JsonReader& entity, std::optional<uint32_t> siblingIndex,

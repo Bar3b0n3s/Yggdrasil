@@ -17,8 +17,8 @@ namespace Engine {
 	// inserts before that row (a move down within one parent targets one slot earlier; a drop in place queues nothing).
 	// Selection uses edit.select and clears the selected asset; rows highlight only a selection of the shown scene.
 	// Every mutation is an EditorActions user command. The running scene is tinted with the play accent. A failed
-	// action shows a dismissible error, with its hint (a refused Delete of a prefab member names the way out), until the
-	// shown scene changes or a later action succeeds.
+	// action shows a dismissible error, with its hint, until the shown scene changes or a later action succeeds. Delete is
+	// entity.destroy, so deleting a prefab member records its RemoveEntity override (§5.5).
 	// Main thread inside ImGui. Retains only UI presentation state, no entity/component/asset pointers across frames.
 	// Pending rename identity includes the edit revision, play serial and runtime scene generation, not only entity UUID.
 	class SceneHierarchyPanel

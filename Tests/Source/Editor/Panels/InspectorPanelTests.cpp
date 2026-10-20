@@ -995,7 +995,7 @@ namespace Engine {
 			CHECK(overrides.front().Kind == PrefabOverrideKind::Field);
 			CHECK(overrides.front().Component == "Transform");
 			CHECK(overrides.front().Field == "Rotation");
-			CHECK(overrides.front().PrefabEntityID == context.Editor.GetScene().FindEntityByID(id).GetComponent<PrefabLinkComponent>().PrefabEntityID);
+			CHECK(overrides.front().Path == std::vector<UUID>{ context.Editor.GetScene().FindEntityByID(id).GetComponent<PrefabLinkComponent>().PrefabEntityID });
 			REQUIRE(context.Editor.SetSelection({ id }, SceneTarget::Edit));
 			REQUIRE(test.Frame());
 			REQUIRE(test.Frame());

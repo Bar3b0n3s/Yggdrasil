@@ -55,8 +55,10 @@ namespace Engine {
 		[[nodiscard]] static Status PatchComponentJson(Entity entity, std::string_view component, const Json& patch,
 			const IFieldSchemaSource* schemas = nullptr);
 
-		// The value of one field, virtual fields included (Transform.WorldPosition). Errors: NotFound for an unknown
-		// component, field or absent component; InvalidArgument for an entity-level component.
+		// The value of one field, virtual fields included (Transform.WorldPosition). `entity` is readable (Entity::IsReadable):
+		// a script reads the fields of an entity pending destruction until the flush (M20, decision 4 of
+		// Docs/Decisions/0031-m20-contract.md). Errors: NotFound for an unknown component, field or absent component;
+		// InvalidArgument for an entity-level component.
 		[[nodiscard]] static Result<Value> GetFieldValue(Entity entity, std::string_view component, std::string_view field);
 
 		// Validates and writes one field, virtual fields included (FieldInfo::SetValue inside a patch). Errors: as

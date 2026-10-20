@@ -90,12 +90,15 @@ namespace Engine {
 			CursorMode GetCursorMode() const override { return CursorMode::Normal; }
 			Status RequestSceneLoad(AssetHandle, Json) override { return ReadOnly(); }
 			Status RequestSceneReload(std::optional<Json>) override { return ReadOnly(); }
+			// M20 Scene.GetCurrent in edit evaluations (Docs/Decisions/0031-m20-contract.md decision 5): the open scene's asset,
+			// none for a scene never saved or not imported yet.
 			AssetHandle GetCurrentScene() const override
 			{
-				ENGINE_CONTRACT_STUB();
-				// M20 Scene.GetCurrent in edit evaluations: the open scene's asset (Docs/Decisions/0031-m20-contract.md decision 5,
-				// stream P2).
-				return AssetHandle();
+				const std::optional<VfsPath>& path = m_Editor.GetScenePath();
+				if (!path.has_value())
+					return AssetHandle();
+				const AssetRecord* record = m_Editor.GetAssets().GetRegistry().FindBySourcePath(*path);
+				return record != nullptr ? record->Metadata.Handle : AssetHandle();
 			}
 			void RequestQuit(int32_t) override {}
 			void RequestPause() override {}

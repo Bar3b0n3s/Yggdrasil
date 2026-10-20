@@ -63,6 +63,9 @@ COMPONENT_ORDER = [
     "Script", "ValidatorTarget", "ValidatorFollower",
 ]
 
+# The registered version of each component above 1 ("ComponentVersions"); every other component is at version 1.
+COMPONENT_VERSIONS = {"Prefab": 2}
+
 # ---------------------------------------------------------------------------------------------------------------------
 # Canonical JSON (the JsonWriter form of Architecture §6: tabs, LF, scalar arrays on one line, final newline)
 # ---------------------------------------------------------------------------------------------------------------------
@@ -211,8 +214,15 @@ def entity(identifier: str, name: str, components: dict[str, Any], parent: str |
 
 def scene(name: str, entities: list[dict[str, Any]], seed: int = 0) -> dict[str, Any]:
     present = {key for item in entities for key in item["Components"]}
-    versions = {key: 1 for key in COMPONENT_ORDER if key in present}
+    versions = {key: COMPONENT_VERSIONS.get(key, 1) for key in COMPONENT_ORDER if key in present}
     return {"Format": "Scene", "Version": 1, "Name": name, "Seed": seed, "ComponentVersions": versions,
+            "Entities": entities}
+
+
+def prefab(name: str, root: str, entities: list[dict[str, Any]]) -> dict[str, Any]:
+    present = {key for item in entities for key in item["Components"]}
+    versions = {key: COMPONENT_VERSIONS.get(key, 1) for key in COMPONENT_ORDER if key in present}
+    return {"Format": "Prefab", "Version": 1, "Name": name, "Root": root, "ComponentVersions": versions,
             "Entities": entities}
 
 
@@ -345,7 +355,8 @@ def validation_fixtures() -> list[Fixture]:
     item = fixture("SCENE_INCONSISTENT_PREFAB_LINK")
     item.entities.append(entity("e000000000000003", "Member", {
         "Transform": transform(),
-        "PrefabLink": {"PrefabEntityID": "00000000000b0002", "InstanceRoot": "e0000000000000ff"}}))
+        "PrefabLink": {"PrefabEntityID": "00000000000b0002", "InstanceRoot": "e0000000000000ff",
+                       "OuterPrefabEntityID": None}}))
 
     item = fixture("ENTITY_DUPLICATE_ID")
     item.entities.append(entity("e000000000000003", "First", {"Transform": transform()}))
@@ -424,6 +435,18 @@ def validation_fixtures() -> list[Fixture]:
     item = fixture("PREFAB_MISSING_ASSET")
     item.entities.append(entity("e000000000000003", "Instance", {
         "Transform": transform(), "Prefab": {"Prefab": "00000000abcdef02", "Overrides": []}}))
+
+    # A prefab whose document holds a live instance of itself (Docs/Decisions/0031-m20-contract.md decision 8). The file
+    # loads and imports on its own; only the nesting graph shows the cycle.
+    item = fixture("PREFAB_CYCLE")
+    item.add_json("Project/Assets/Prefabs/Loop.prefab", prefab("Loop", "00000000000a0001", [
+        entity("00000000000a0001", "Loop", {"Transform": transform()}),
+        entity("00000000000a0002", "Inner", {
+            "Transform": transform(1, 0, 0), "Prefab": {"Prefab": "3a7e000000000008", "Overrides": []},
+            "PrefabLink": {"PrefabEntityID": "00000000000a0001", "InstanceRoot": "00000000000a0002",
+                           "OuterPrefabEntityID": None}}, parent="00000000000a0001"),
+    ]))
+    item.add_json("Project/Assets/Prefabs/Loop.prefab.meta", meta("3a7e000000000008", "Prefab", "Prefab"))
 
     item = fixture("PHYSICS_NONCONVEX_DYNAMIC")
     item.entities.append(body("e000000000000003", "Rock", 0, "Dynamic",

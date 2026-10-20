@@ -107,7 +107,7 @@ return Script.Define("Brick", Brick)
 	"Seed": 0,
 	"ComponentVersions": {{
 		"Transform": 1,
-		"Prefab": 1,
+		"Prefab": 2,
 		"PrefabLink": 1,
 		"Script": 1
 	}},
@@ -128,7 +128,7 @@ return Script.Define("Brick", Brick)
 					"Prefab": "{1}",
 					"Overrides": [
 						{{
-							"PrefabEntityID": "{2}",
+							"Path": ["{2}"],
 							"Kind": "Field",
 							"Component": "Script",
 							"Field": "Fields",
@@ -140,7 +140,8 @@ return Script.Define("Brick", Brick)
 				}},
 				"PrefabLink": {{
 					"PrefabEntityID": "{2}",
-					"InstanceRoot": "{0}"
+					"InstanceRoot": "{0}",
+					"OuterPrefabEntityID": null
 				}},
 				"Script": {{
 					"Script": "{3}",

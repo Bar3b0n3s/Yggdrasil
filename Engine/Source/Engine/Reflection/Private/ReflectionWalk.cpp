@@ -66,18 +66,39 @@ namespace Engine {
 			return floatPrecision ? static_cast<double>(static_cast<float>(bound)) : bound;
 		}
 
-		// Range checks shared by every numeric component (FieldMeta: Min, Max, MinMagnitude; all inclusive).
-		static void CheckRange(double value, const FieldMeta* meta, bool floatPrecision, const std::string& text, std::string_view key,
-			ValidationContext& validation)
+		// The type a value checked by CheckRange was stored as before it became a double (exactly: every float, int32 and
+		// uint32 is a double).
+		enum class RangeValueKind : uint8_t
+		{
+			Float,
+			Int32,
+			UInt32
+		};
+
+		// The spelling of a checked value in a message, as its own type.
+		static std::string SpellRangeValue(double value, RangeValueKind kind)
+		{
+			if (kind == RangeValueKind::Float)
+				return FormatFloat(static_cast<float>(value));
+			return kind == RangeValueKind::Int32 ? std::to_string(static_cast<int32_t>(value)) : std::to_string(static_cast<uint32_t>(value));
+		}
+
+		// Range checks shared by every numeric component (FieldMeta: Min, Max, MinMagnitude; all inclusive); a float compares
+		// against the bounds rounded to float. The value is spelled only for a message, so a valid value is never formatted.
+		static void CheckRange(double value, const FieldMeta* meta, RangeValueKind kind, std::string_view key, ValidationContext& validation)
 		{
 			if (meta == nullptr)
 				return;
+			const bool floatPrecision = kind == RangeValueKind::Float;
 			if (meta->Min.has_value() && value < ToComparableBound(*meta->Min, floatPrecision))
-				validation.Error(key, std::format("must be >= {} (got {})", FormatDouble(*meta->Min), text));
+				validation.Error(key, std::format("must be >= {} (got {})", FormatDouble(*meta->Min), SpellRangeValue(value, kind)));
 			if (meta->Max.has_value() && value > ToComparableBound(*meta->Max, floatPrecision))
-				validation.Error(key, std::format("must be <= {} (got {})", FormatDouble(*meta->Max), text));
+				validation.Error(key, std::format("must be <= {} (got {})", FormatDouble(*meta->Max), SpellRangeValue(value, kind)));
 			if (meta->MinMagnitude.has_value() && std::fabs(value) < ToComparableBound(*meta->MinMagnitude, floatPrecision))
-				validation.Error(key, std::format("must have a magnitude of at least {} (got {})", FormatDouble(*meta->MinMagnitude), text));
+			{
+				validation.Error(key,
+					std::format("must have a magnitude of at least {} (got {})", FormatDouble(*meta->MinMagnitude), SpellRangeValue(value, kind)));
+			}
 		}
 
 		static void CheckFloat(float value, const FieldMeta* meta, std::string_view key, ValidationContext& validation)
@@ -87,30 +108,53 @@ namespace Engine {
 				validation.Error(key, "must be finite");
 				return;
 			}
-			CheckRange(static_cast<double>(value), meta, true, FormatFloat(value), key, validation);
+			CheckRange(static_cast<double>(value), meta, RangeValueKind::Float, key, validation);
 		}
+
+		// The keys of a vector's, color's or quaternion's components, the pointer tokens of their array elements.
+		static constexpr std::array<std::string_view, 4> ComponentKeys = { "0", "1", "2", "3" };
 
 		static void CheckFloatComponents(std::span<const float> components, const FieldMeta* meta, ValidationContext& validation)
 		{
+			ENGINE_CORE_ASSERT(components.size() <= ComponentKeys.size(), "A float vector has at most {} components", ComponentKeys.size());
 			for (size_t i = 0; i < components.size(); ++i)
-				CheckFloat(components[i], meta, std::to_string(i), validation);
+				CheckFloat(components[i], meta, ComponentKeys[i], validation);
 		}
 
 		static Result<Json> FloatComponentsToJson(std::span<const float> components)
 		{
-			Json array = Json::array();
+			Json::array_t array;
+			array.reserve(components.size());
 			for (size_t i = 0; i < components.size(); ++i)
 			{
 				if (!std::isfinite(components[i]))
 					return std::unexpected(MakeLocatedValidationError(JsonReader::AppendPointer("", i), "must be finite"));
-				array.push_back(static_cast<double>(components[i]));
+				array.emplace_back(static_cast<double>(components[i]));
 			}
-			return array;
+			return Json(std::move(array));
 		}
 
 		template<size_t Count>
 		static Result<std::array<float, Count>> ReadFloatComponents(const JsonReader& reader)
 		{
+			// The common case reads the elements through readers without a pointer; anything it rejects is read again below,
+			// element by element with their pointers, which locates the error exactly as before.
+			const Json& json = reader.GetValue();
+			if (json.is_array() && json.size() == Count)
+			{
+				std::array<float, Count> components{};
+				bool read = true;
+				for (size_t i = 0; i < Count && read; ++i)
+				{
+					const Result<float> component = JsonReader(json[i]).ReadFloat();
+					read = component.has_value();
+					if (read)
+						components[i] = *component;
+				}
+				if (read)
+					return components;
+			}
+
 			ENGINE_TRY_ASSIGN(const size_t size, reader.GetArraySize());
 			if (size != Count)
 			{
@@ -181,6 +225,30 @@ namespace Engine {
 					return index;
 			}
 			return NoField;
+		}
+
+		// The fields of a struct whose members ReadStructJson gathers without allocating.
+		static constexpr size_t InlineFieldCount = 16;
+
+		// ReadJson of the JSON value `json` of a scalar field other than Variant, for the common case: when the value reads and
+		// passes the field's checks it is written to `address` (when not null) and the result is true, without spelling a
+		// pointer. Otherwise nothing is written and the result is false, and the caller reads the value through ReadJson,
+		// which reports its issues at their pointers; both read and check exactly as ReadJson does.
+		static bool TryReadValidScalar(const FieldInfo& field, const Json& json, void* address)
+		{
+			const TypeInfo& type = field.GetType();
+			if (type.GetKind() == FieldType::Variant || !IsScalarFieldType(type.GetKind()))
+				return false;
+			const Result<Value> value = ScalarFromJson(JsonReader(json), type);
+			if (!value)
+				return false;
+			ValidationContext checks;
+			CheckScalarValue(*value, type, &field.GetMeta(), checks);
+			if (!checks.GetIssues().empty())
+				return false;
+			if (address != nullptr)
+				type.GetOps().Write(address, *value);
+			return true;
 		}
 
 		size_t ComputeJsonDepth(const Json& value)
@@ -426,13 +494,13 @@ namespace Engine {
 				case FieldType::Int32:
 				{
 					const int32_t number = value.AsInt32();
-					CheckRange(static_cast<double>(number), meta, false, std::to_string(number), {}, validation);
+					CheckRange(static_cast<double>(number), meta, RangeValueKind::Int32, {}, validation);
 					return;
 				}
 				case FieldType::UInt32:
 				{
 					const uint32_t number = value.AsUInt32();
-					CheckRange(static_cast<double>(number), meta, false, std::to_string(number), {}, validation);
+					CheckRange(static_cast<double>(number), meta, RangeValueKind::UInt32, {}, validation);
 					return;
 				}
 				case FieldType::Float:
@@ -633,8 +701,9 @@ namespace Engine {
 
 			if (kind == FieldType::Array)
 			{
-				Json array = Json::array();
 				const size_t count = ops.GetCount(object);
+				Json::array_t array;
+				array.reserve(count);
 				for (size_t i = 0; i < count; ++i)
 				{
 					Result<Json> element = ObjectToJson(*type.GetElement(), ops.GetConstElement(object, i));
@@ -642,7 +711,7 @@ namespace Engine {
 						return std::unexpected(PrependPointer(std::move(element).error(), JsonReader::AppendPointer("", i)));
 					array.push_back(std::move(*element));
 				}
-				return array;
+				return Json(std::move(array));
 			}
 
 			if (kind == FieldType::Map)
@@ -672,7 +741,9 @@ namespace Engine {
 			}
 
 			const StructInfo& structType = *type.GetStruct();
-			Json result = Json::object();
+			// The members' keys are const, so a growing object would copy each of them again: room for every field first.
+			Json::object_t result;
+			result.reserve(structType.GetFields().size());
 			for (const Scope<FieldInfo>& field : structType.GetFields())
 			{
 				if (!field->IsStored() || !field->GetMeta().Serialized)
@@ -682,7 +753,7 @@ namespace Engine {
 					return std::unexpected(PrependPointer(std::move(member).error(), JsonReader::AppendPointer("", field->GetName())));
 				result[field->GetName()] = std::move(*member);
 			}
-			return result;
+			return Json(std::move(result));
 		}
 
 		Value ObjectToValue(const TypeInfo& type, const void* object)
@@ -869,7 +940,13 @@ namespace Engine {
 
 			const size_t errorsBefore = validation.GetErrorCount();
 			const std::span<const Scope<FieldInfo>> fields = type.GetFields();
-			std::vector<const Json*> members(fields.size(), nullptr);
+			// The member of each field, in a buffer on the stack for the usual struct (a component has a handful of fields).
+			std::array<const Json*, InlineFieldCount> inlineMembers{};
+			std::vector<const Json*> heapMembers;
+			if (fields.size() > inlineMembers.size())
+				heapMembers.assign(fields.size(), nullptr);
+			const std::span<const Json*> members = heapMembers.empty() ? std::span<const Json*>(inlineMembers.data(), fields.size())
+																	   : std::span<const Json*>(heapMembers);
 			size_t searchStart = 0;
 			for (auto member = json.begin(); member != json.end(); ++member)
 			{
@@ -891,8 +968,10 @@ namespace Engine {
 				if (members[i] == nullptr)
 					continue;
 				const FieldInfo& field = *fields[i];
-				validation.PushKey(field.GetName());
 				void* address = target != nullptr && field.IsStored() ? field.GetAddress(target) : nullptr;
+				if (TryReadValidScalar(field, *members[i], address))
+					continue;
+				validation.PushKey(field.GetName());
 				ReadJson(field.GetType(), field, true, JsonReader(*members[i]), address, owner, walk);
 				validation.PopKey();
 			}

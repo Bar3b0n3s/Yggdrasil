@@ -709,7 +709,7 @@ Example: Create an orthographic primary camera.
 
 ### entity.destroy
 
-Destroys entities with their subtrees, as one undoable command. In the edit scene a member of a prefab instance that is not its root is refused: deactivate it, or unpack the instance first.
+Destroys entities with their subtrees, as one undoable command. In the edit scene, destroying a member of a prefab instance records a RemoveEntity override on its instance root, so the member stays deleted when the prefab updates (prefab.revert brings it back).
 
 - Flags: tool `entity_destroy`, mutates, dry run, batch
 - Timeout: 60 s
@@ -1303,7 +1303,7 @@ Example: Wait for tick 60.
 
 ### prefab.apply
 
-Writes an instance's overrides into its .prefab asset and rebuilds every instance of it in the open scene, as one undoable step.
+Writes an instance's overrides into a .prefab asset, by default its outermost instance's prefab, or with level the prefab of a nested instance on the way down; then rewrites the prefabs nesting it (updatedPrefabs) and rebuilds their instances in the open scene, as one undoable step.
 
 - Flags: tool `prefab_apply`, mutates, batch
 - Timeout: 60 s
@@ -1311,12 +1311,14 @@ Writes an instance's overrides into its .prefab asset and rebuilds every instanc
 
 | Param | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `instance` | `String` | yes | `""` | The instance root whose overrides become the prefab's. |
+| `instance` | `String` | yes | `""` | The instance root, outermost or nested, whose overrides are applied: those its outermost instance records for it and the entities below it. |
+| `level` | `String` |  | `""` | The instance whose prefab receives the overrides: the outermost instance root (the default) or a nested instance root down to instance. |
 
 | Result | Type | Description |
 |---|---|---|
-| `prefab` | `AssetSummary` | The prefab asset written. |
-| `updatedInstances` | `UInt32` | The instances in the open scene rebuilt from it, this one included. |
+| `prefab` | `AssetSummary` | The prefab asset written: the level's. |
+| `updatedInstances` | `UInt32` | The outermost instances in the open scene rebuilt from it or from a prefab nesting it, this one's included. |
+| `updatedPrefabs` | `Array<AssetSummary>` | The prefab assets nesting the applied prefab that were rewritten, in nesting order. |
 | `undoIndex` | `UInt32` | The undo index; 0 in a batch. |
 
 Example: Make the cell's edits the prefab's.
@@ -1325,9 +1327,15 @@ Example: Make the cell's edits the prefab's.
 {"instance":"/Board/Cell"}
 ```
 
+Example: Make the edits of a lamp inside a room the Lamp prefab's, so every room's lamps follow.
+
+```json
+{"instance":"/Room/Lamp","level":"/Room/Lamp"}
+```
+
 ### prefab.create
 
-Saves an entity's subtree as a new .prefab asset (nested instances flattened), optionally replacing the entity with an instance of it, as one undoable step. The result's instance is that instance's root (empty without replaceWithInstance). Replacing a member of another prefab instance is refused: unpack that instance first.
+Saves an entity's subtree as a new .prefab asset (the instances inside it stay live, nested in it), optionally replacing the entity with an instance of it, as one undoable step. The result's instance is that instance's root (empty without replaceWithInstance). Replacing a member of another prefab instance records its deletion there (RemoveEntity), and the new instance becomes a user child of that instance.
 
 - Flags: tool `prefab_create`, mutates, dry run, batch
 - Timeout: 60 s
@@ -1388,7 +1396,7 @@ Example: Place a named cell that casts no shadow (an override of the instance).
 
 ### prefab.revert
 
-Removes an instance's overrides (all, or those the keys select) and rebuilds it from its prefab; user children stay.
+Removes an instance's overrides (all, or those the keys select) and rebuilds it from its prefab; user children stay. On a nested instance, the overrides its outermost instance records within it.
 
 - Flags: mutates, dry run, batch
 - Timeout: 60 s
@@ -1396,7 +1404,7 @@ Removes an instance's overrides (all, or those the keys select) and rebuilds it 
 
 | Param | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `instance` | `String` | yes | `""` | The instance root to revert. |
+| `instance` | `String` | yes | `""` | The instance root to revert; a nested one reverts the overrides its outermost instance records within it. |
 | `overrides` | `Array<PrefabOverrideKey>` |  | `[]` | Only the overrides these keys select; every override when absent. |
 
 | Result | Type | Description |
@@ -1413,7 +1421,7 @@ Example: Drop every edit of the cell.
 
 ### prefab.unpack
 
-Unlinks an instance from its prefab: its entities and their data stay as ordinary entities.
+Unlinks an outermost instance from its prefab, one level at a time: its entities and their data stay as ordinary entities, and the instances nested in it become outermost.
 
 - Flags: mutates, dry run, batch
 - Timeout: 60 s
@@ -1421,7 +1429,7 @@ Unlinks an instance from its prefab: its entities and their data stay as ordinar
 
 | Param | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `instance` | `String` | yes | `""` | The instance root to unlink from its prefab. |
+| `instance` | `String` | yes | `""` | The outermost instance root to unlink from its prefab; the instances nested in it become outermost. |
 
 | Result | Type | Description |
 |---|---|---|

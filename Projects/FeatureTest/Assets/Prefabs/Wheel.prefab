@@ -2,14 +2,14 @@
 	"Format": "Prefab",
 	"Version": 1,
 	"Name": "Wheel",
-	"Root": "f1b29596cea5868d",
+	"Root": "cc69313b582ada20",
 	"ComponentVersions": {
 		"Transform": 1,
 		"MeshRenderer": 1
 	},
 	"Entities": [
 		{
-			"ID": "f1b29596cea5868d",
+			"ID": "cc69313b582ada20",
 			"Name": "Wheel",
 			"Parent": null,
 			"Active": true,
@@ -30,9 +30,9 @@
 			}
 		},
 		{
-			"ID": "cc69313b582ada20",
+			"ID": "656b4d2b8368e3a0",
 			"Name": "Hub",
-			"Parent": "f1b29596cea5868d",
+			"Parent": "cc69313b582ada20",
 			"Active": true,
 			"Tags": [],
 			"Components": {

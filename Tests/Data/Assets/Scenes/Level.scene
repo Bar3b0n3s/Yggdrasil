@@ -5,7 +5,7 @@
 	"Seed": 7,
 	"ComponentVersions": {
 		"Transform": 1,
-		"Prefab": 1,
+		"Prefab": 2,
 		"PrefabLink": 1,
 		"MeshRenderer": 1,
 		"Camera": 1,
@@ -99,7 +99,7 @@
 					"Prefab": "5b1e7c40d29a8f13",
 					"Overrides": [
 						{
-							"PrefabEntityID": "00000000000c0002",
+							"Path": ["00000000000c0002"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Mesh",
@@ -109,7 +109,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "00000000000c0001",
-					"InstanceRoot": "5ce0000000000004"
+					"InstanceRoot": "5ce0000000000004",
+					"OuterPrefabEntityID": null
 				},
 				"PointLight": {
 					"Color": [1, 0.8, 0.6],
@@ -133,7 +134,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "00000000000c0002",
-					"InstanceRoot": "5ce0000000000004"
+					"InstanceRoot": "5ce0000000000004",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000107",

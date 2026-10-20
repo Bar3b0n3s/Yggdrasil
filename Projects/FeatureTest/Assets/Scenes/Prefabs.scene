@@ -5,7 +5,7 @@
 	"Seed": 0,
 	"ComponentVersions": {
 		"Transform": 1,
-		"Prefab": 1,
+		"Prefab": 2,
 		"PrefabLink": 1,
 		"MeshRenderer": 1,
 		"Camera": 1,
@@ -129,31 +129,31 @@
 					"Scale": [1, 1, 1]
 				},
 				"Prefab": {
-					"Prefab": "4751cc3abde45d4f",
+					"Prefab": "8ebde7a44d12e739",
 					"Overrides": [
 						{
-							"PrefabEntityID": "12ebd362e68c8fbe",
+							"Path": ["12ebd362e68c8fbe"],
 							"Kind": "EntityKey",
 							"Component": "",
 							"Field": "Tags",
 							"Value": ["Editor"]
 						},
 						{
-							"PrefabEntityID": "6d8e2bb074da88d3",
+							"Path": ["6d8e2bb074da88d3"],
 							"Kind": "EntityKey",
 							"Component": "",
 							"Field": "Name",
 							"Value": "Cover"
 						},
 						{
-							"PrefabEntityID": "6d8e2bb074da88d3",
+							"Path": ["6d8e2bb074da88d3"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Visible",
 							"Value": false
 						},
 						{
-							"PrefabEntityID": "6d8e2bb074da88d3",
+							"Path": ["6d8e2bb074da88d3"],
 							"Kind": "AddComponent",
 							"Component": "PointLight",
 							"Field": "",
@@ -165,9 +165,16 @@
 							}
 						},
 						{
-							"PrefabEntityID": "a8530e1895e5ea5a",
+							"Path": ["a8530e1895e5ea5a"],
 							"Kind": "RemoveComponent",
 							"Component": "Text",
+							"Field": "",
+							"Value": null
+						},
+						{
+							"Path": ["f1b29596cea5868d"],
+							"Kind": "RemoveEntity",
+							"Component": "",
 							"Field": "",
 							"Value": null
 						}
@@ -175,7 +182,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "12ebd362e68c8fbe",
-					"InstanceRoot": "12ebd362e68c8fbe"
+					"InstanceRoot": "12ebd362e68c8fbe",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -233,7 +241,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "6d8e2bb074da88d3",
-					"InstanceRoot": "12ebd362e68c8fbe"
+					"InstanceRoot": "12ebd362e68c8fbe",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -271,12 +280,13 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "a8530e1895e5ea5a",
-					"InstanceRoot": "12ebd362e68c8fbe"
+					"InstanceRoot": "12ebd362e68c8fbe",
+					"OuterPrefabEntityID": null
 				}
 			}
 		},
 		{
-			"ID": "656b4d2b8368e3a0",
+			"ID": "ec65c7d15f038f74",
 			"Name": "Cart",
 			"Parent": null,
 			"Active": true,
@@ -288,19 +298,20 @@
 					"Scale": [1, 1, 1]
 				},
 				"Prefab": {
-					"Prefab": "227a073ef515ca5d",
+					"Prefab": "122db8f04a3feaea",
 					"Overrides": []
 				},
 				"PrefabLink": {
-					"PrefabEntityID": "656b4d2b8368e3a0",
-					"InstanceRoot": "656b4d2b8368e3a0"
+					"PrefabEntityID": "ec65c7d15f038f74",
+					"InstanceRoot": "ec65c7d15f038f74",
+					"OuterPrefabEntityID": null
 				}
 			}
 		},
 		{
-			"ID": "0fbbee278ead29dc",
+			"ID": "ae299cc9afc5addf",
 			"Name": "Body",
-			"Parent": "656b4d2b8368e3a0",
+			"Parent": "ec65c7d15f038f74",
 			"Active": true,
 			"Tags": [],
 			"Components": {
@@ -310,8 +321,9 @@
 					"Scale": [2, 0.5, 1]
 				},
 				"PrefabLink": {
-					"PrefabEntityID": "ec65c7d15f038f74",
-					"InstanceRoot": "656b4d2b8368e3a0"
+					"PrefabEntityID": "4751cc3abde45d4f",
+					"InstanceRoot": "ec65c7d15f038f74",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -323,9 +335,9 @@
 			}
 		},
 		{
-			"ID": "ff75a21cc81932a7",
+			"ID": "8eb88e31386368c8",
 			"Name": "FrontWheel",
-			"Parent": "656b4d2b8368e3a0",
+			"Parent": "ec65c7d15f038f74",
 			"Active": true,
 			"Tags": [],
 			"Components": {
@@ -334,9 +346,14 @@
 					"Rotation": [0, 0, 0, 1],
 					"Scale": [0.6, 0.6, 0.6]
 				},
+				"Prefab": {
+					"Prefab": "2797dfc642ed43c5",
+					"Overrides": []
+				},
 				"PrefabLink": {
-					"PrefabEntityID": "2797dfc642ed43c5",
-					"InstanceRoot": "656b4d2b8368e3a0"
+					"PrefabEntityID": "cc69313b582ada20",
+					"InstanceRoot": "8eb88e31386368c8",
+					"OuterPrefabEntityID": "934bbdfb2c014767"
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000102",
@@ -348,9 +365,9 @@
 			}
 		},
 		{
-			"ID": "1b77a0f4745ed931",
+			"ID": "e4a4eddf80792206",
 			"Name": "Hub",
-			"Parent": "ff75a21cc81932a7",
+			"Parent": "8eb88e31386368c8",
 			"Active": true,
 			"Tags": [],
 			"Components": {
@@ -360,8 +377,9 @@
 					"Scale": [0.4, 0.4, 1.2]
 				},
 				"PrefabLink": {
-					"PrefabEntityID": "f6c63ec82c2f32c0",
-					"InstanceRoot": "656b4d2b8368e3a0"
+					"PrefabEntityID": "656b4d2b8368e3a0",
+					"InstanceRoot": "8eb88e31386368c8",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -373,9 +391,9 @@
 			}
 		},
 		{
-			"ID": "501804b971f8bf9e",
+			"ID": "79eea7a6721840d9",
 			"Name": "BackWheel",
-			"Parent": "656b4d2b8368e3a0",
+			"Parent": "ec65c7d15f038f74",
 			"Active": true,
 			"Tags": [],
 			"Components": {
@@ -384,9 +402,14 @@
 					"Rotation": [0, 0, 0, 1],
 					"Scale": [0.6, 0.6, 0.6]
 				},
+				"Prefab": {
+					"Prefab": "2797dfc642ed43c5",
+					"Overrides": []
+				},
 				"PrefabLink": {
-					"PrefabEntityID": "934bbdfb2c014767",
-					"InstanceRoot": "656b4d2b8368e3a0"
+					"PrefabEntityID": "cc69313b582ada20",
+					"InstanceRoot": "79eea7a6721840d9",
+					"OuterPrefabEntityID": "227a073ef515ca5d"
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000102",
@@ -398,9 +421,9 @@
 			}
 		},
 		{
-			"ID": "c8bab68b945f90a8",
+			"ID": "4f9272e9f8711b52",
 			"Name": "Hub",
-			"Parent": "501804b971f8bf9e",
+			"Parent": "79eea7a6721840d9",
 			"Active": true,
 			"Tags": [],
 			"Components": {
@@ -410,8 +433,9 @@
 					"Scale": [0.4, 0.4, 1.2]
 				},
 				"PrefabLink": {
-					"PrefabEntityID": "3d58a8b25988479a",
-					"InstanceRoot": "656b4d2b8368e3a0"
+					"PrefabEntityID": "656b4d2b8368e3a0",
+					"InstanceRoot": "79eea7a6721840d9",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -423,7 +447,7 @@
 			}
 		},
 		{
-			"ID": "122db8f04a3feaea",
+			"ID": "d98a5219589e9568",
 			"Name": "CrateB",
 			"Parent": null,
 			"Active": true,
@@ -435,12 +459,13 @@
 					"Scale": [1, 1, 1]
 				},
 				"Prefab": {
-					"Prefab": "4751cc3abde45d4f",
+					"Prefab": "8ebde7a44d12e739",
 					"Overrides": []
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "12ebd362e68c8fbe",
-					"InstanceRoot": "122db8f04a3feaea"
+					"InstanceRoot": "d98a5219589e9568",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -477,7 +502,7 @@
 				"Script": {
 					"Script": "cdca1d8d3f05d703",
 					"Fields": {
-						"Lid": "6b31210422515746",
+						"Lid": "19fcb5ddee48a19e",
 						"Tag": "Crate"
 					},
 					"ExecutionOrder": 0
@@ -485,9 +510,9 @@
 			}
 		},
 		{
-			"ID": "6b31210422515746",
+			"ID": "19fcb5ddee48a19e",
 			"Name": "Lid",
-			"Parent": "122db8f04a3feaea",
+			"Parent": "d98a5219589e9568",
 			"Active": true,
 			"Tags": [],
 			"Components": {
@@ -498,7 +523,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "6d8e2bb074da88d3",
-					"InstanceRoot": "122db8f04a3feaea"
+					"InstanceRoot": "d98a5219589e9568",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -517,9 +543,9 @@
 			}
 		},
 		{
-			"ID": "8efbac905ca0600f",
+			"ID": "b0d45121a2c3c2ea",
 			"Name": "Label",
-			"Parent": "122db8f04a3feaea",
+			"Parent": "d98a5219589e9568",
 			"Active": true,
 			"Tags": [],
 			"Components": {
@@ -530,7 +556,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "a8530e1895e5ea5a",
-					"InstanceRoot": "122db8f04a3feaea"
+					"InstanceRoot": "d98a5219589e9568",
+					"OuterPrefabEntityID": null
 				},
 				"Text": {
 					"Text": "Crate",
@@ -547,7 +574,33 @@
 			}
 		},
 		{
-			"ID": "d98a5219589e9568",
+			"ID": "1a67ef347dfdeb99",
+			"Name": "Strap",
+			"Parent": "b0d45121a2c3c2ea",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, -0.3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 0.1, 0.02]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "f1b29596cea5868d",
+					"InstanceRoot": "d98a5219589e9568",
+					"OuterPrefabEntityID": null
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "5255e90d92ab3fb4",
 			"Name": "Inspector",
 			"Parent": null,
 			"Active": true,
@@ -561,9 +614,9 @@
 				"Script": {
 					"Script": "4e82919435a15290",
 					"Fields": {
-						"Crate": "122db8f04a3feaea",
-						"Spawnable": "4751cc3abde45d4f",
-						"Target": "6b31210422515746"
+						"Crate": "d98a5219589e9568",
+						"Spawnable": "8ebde7a44d12e739",
+						"Target": "19fcb5ddee48a19e"
 					},
 					"ExecutionOrder": 0
 				}

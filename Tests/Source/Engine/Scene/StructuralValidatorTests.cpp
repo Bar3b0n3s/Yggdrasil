@@ -5,8 +5,10 @@
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/UUIDGenerator.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
+#include "Engine/Scene/Components/PrefabInstanceComponent.h"
 #include "Engine/Scene/Components/PrefabLinkComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/PrefabInstantiator.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Support/SceneTestFixture.h"
 #include "Support/TestData.h"
@@ -285,12 +287,16 @@ namespace Engine {
 			CHECK(report.Diagnostics.empty());
 		}
 
-		TEST_CASE("StructuralValidator: a nested instance in a prefab fails strict loading and repair flattens it")
+		// Docs/Decisions/0031-m20-contract.md decision 8: an instance nested below a prefab's root is live; the root entity itself
+		// is never an instance root or member (PREFAB_NESTED_INSTANCE), which strict loading rejects and repair drops.
+		TEST_CASE("StructuralValidator: an instance on a prefab's root entity fails strict loading, repair drops it, and one below the root is kept")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			const Json document = ParseJson(R"({
 				"Format": "Prefab", "Version": 1, "Name": "Outer", "Root": "00000000000b0001", "ComponentVersions": {},
-				"Entities": [ { "ID": "00000000000b0001", "Name": "A", "Parent": null, "Components": {} },
+				"Entities": [ { "ID": "00000000000b0001", "Name": "A", "Parent": null,
+				                "Components": { "Prefab": { "Prefab": null, "Overrides": [] },
+				                                "PrefabLink": { "PrefabEntityID": "0000000000000076", "InstanceRoot": "00000000000b0001" } } },
 				              { "ID": "00000000000b0002", "Name": "B", "Parent": "00000000000b0001",
 				                "Components": { "Prefab": { "Prefab": null, "Overrides": [] },
 				                                "PrefabLink": { "PrefabEntityID": "0000000000000077", "InstanceRoot": "00000000000b0002" } } } ]
@@ -300,8 +306,8 @@ namespace Engine {
 			REQUIRE_FALSE(strict.has_value());
 			CHECK(strict.error().GetCode() == ErrorCode::Validation);
 			REQUIRE(strict.error().GetIssues().size() == 2);
-			CHECK(strict.error().GetIssues()[0].JsonPointer == "/Entities/1/Components/Prefab");
-			CHECK(strict.error().GetIssues()[1].JsonPointer == "/Entities/1/Components/PrefabLink");
+			CHECK(strict.error().GetIssues()[0].JsonPointer == "/Entities/0/Components/Prefab");
+			CHECK(strict.error().GetIssues()[1].JsonPointer == "/Entities/0/Components/PrefabLink");
 			CHECK(HasCode(strictReport.Diagnostics, PrefabNestedInstanceCode));
 
 			Test::SceneTestFixture setup;
@@ -311,16 +317,76 @@ namespace Engine {
 			LoadReport repairReport;
 			const Result<Json> repaired = StructuralValidator::Validate(document, DocumentKind::Prefab, *registry, repair, repairReport);
 			REQUIRE(repaired.has_value());
+			REQUIRE(repairReport.Repairs.size() == 2);
 			CHECK(HasRepair(repairReport.Repairs, PrefabNestedInstanceCode));
-			CHECK((*repaired)["Entities"][1]["Components"].empty());
+			CHECK((*repaired)["Entities"][0]["Components"].empty());
+			// The instance below the root stays live.
+			CHECK((*repaired)["Entities"][1]["Components"] == document["Entities"][1]["Components"]);
+		}
 
-			// In a scene the same components are an ordinary, consistent prefab instance.
-			Json scene = document;
-			scene["Format"] = "Scene";
-			scene.erase("Root");
-			LoadReport sceneReport;
-			const Result<Json> instance = StructuralValidator::Validate(scene, DocumentKind::Scene, *registry, LoadOptions{}, sceneReport);
-			REQUIRE_MESSAGE(instance.has_value(), (instance ? std::string() : instance.error().ToString()));
+		// Docs/Decisions/0031-m20-contract.md decision 10: an OuterPrefabEntityID names a nested root's place in the instance
+		// enclosing it, so one on an entity without a Prefab component is inconsistent; repair clears it, keeping the member.
+		TEST_CASE("StructuralValidator: an OuterPrefabEntityID on a member fails strict loading and repair clears it")
+		{
+			Test::SceneTestFixture setup;
+			const Scope<Scene> repaired = setup.CreateEmptyScene();
+			const std::string_view fixture = "Scenes/Invalid/PrefabLinkOuterWithoutInstance.scene";
+			const InvalidLoadOutcome outcome = LoadInvalidFixture(setup, setup.GetScene(), *repaired, fixture);
+			CheckStrictFailure(outcome, setup.GetScene(), fixture, SceneInconsistentPrefabLinkCode,
+				"/Entities/1/Components/PrefabLink/OuterPrefabEntityID");
+
+			REQUIRE(outcome.Repair.has_value());
+			REQUIRE(outcome.RepairReport.Repairs.size() == 1);
+			CHECK(outcome.RepairReport.Repairs[0].Code == SceneInconsistentPrefabLinkCode);
+			CHECK(outcome.RepairReport.Repairs[0].Entity == UUID(0x4d00000000000002));
+			const Entity member = repaired->FindEntityByID(UUID(0x4d00000000000002));
+			REQUIRE(member.IsValid());
+			REQUIRE(member.HasComponent<PrefabLinkComponent>());
+			CHECK(member.GetComponent<PrefabLinkComponent>().InstanceRoot == UUID(0x4d00000000000001));
+			CHECK_FALSE(member.GetComponent<PrefabLinkComponent>().OuterPrefabEntityID.IsValid());
+		}
+
+		// Decision 10: a nested root's OuterPrefabEntityID must derive its ID from an ancestor instance root; one that no
+		// ancestor derives is inconsistent, and repair clears it, which leaves the instance outermost.
+		TEST_CASE("StructuralValidator: an OuterPrefabEntityID that no ancestor instance root derives fails strict loading and repair clears it")
+		{
+			Test::SceneTestFixture setup;
+			const Scope<Scene> repaired = setup.CreateEmptyScene();
+			const std::string_view fixture = "Scenes/Invalid/PrefabLinkOuterWithoutEnclosing.scene";
+			const InvalidLoadOutcome outcome = LoadInvalidFixture(setup, setup.GetScene(), *repaired, fixture);
+			CheckStrictFailure(outcome, setup.GetScene(), fixture, SceneInconsistentPrefabLinkCode,
+				"/Entities/1/Components/PrefabLink/OuterPrefabEntityID");
+
+			REQUIRE(outcome.Repair.has_value());
+			REQUIRE(outcome.RepairReport.Repairs.size() == 1);
+			const Entity nested = repaired->FindEntityByID(UUID(0x4d00000000000002));
+			REQUIRE(nested.IsValid());
+			CHECK(nested.HasComponent<PrefabInstanceComponent>());
+			CHECK_FALSE(nested.GetComponent<PrefabLinkComponent>().OuterPrefabEntityID.IsValid());
+		}
+
+		// Decision 8: only an outermost instance records overrides, so a consistent nested root with overrides is
+		// inconsistent; repair drops them, keeping them in the repair's Removed.
+		TEST_CASE("StructuralValidator: a nested instance root with overrides fails strict loading and repair drops them")
+		{
+			Test::SceneTestFixture setup;
+			const Scope<Scene> repaired = setup.CreateEmptyScene();
+			const std::string_view fixture = "Scenes/Invalid/PrefabNestedRootOverrides.scene";
+			const InvalidLoadOutcome outcome = LoadInvalidFixture(setup, setup.GetScene(), *repaired, fixture);
+			const UUID nestedID = PrefabInstantiator::DeriveInstanceID(UUID(0x4d00000000000001), UUID(0x00000000000b0002));
+			REQUIRE(nestedID == UUID(0xdf74f1821ee765b2)); // the fixture's nested root derives from its enclosing root
+			CheckStrictFailure(outcome, setup.GetScene(), fixture, SceneInconsistentPrefabLinkCode, "/Entities/1/Components/Prefab/Overrides");
+
+			REQUIRE(outcome.Repair.has_value());
+			REQUIRE(outcome.RepairReport.Repairs.size() == 1);
+			const LoadRepair& dropped = outcome.RepairReport.Repairs[0];
+			CHECK(dropped.Code == SceneInconsistentPrefabLinkCode);
+			REQUIRE(dropped.Removed.Get().is_array());
+			CHECK(dropped.Removed.Get().size() == 1);
+			const Entity nested = repaired->FindEntityByID(nestedID);
+			REQUIRE(nested.IsValid());
+			CHECK(nested.GetComponent<PrefabInstanceComponent>().Overrides.empty());
+			CHECK(nested.GetComponent<PrefabLinkComponent>().OuterPrefabEntityID == UUID(0x00000000000b0002));
 		}
 
 		TEST_CASE("StructuralValidator: every defect is reported in document order with its code")

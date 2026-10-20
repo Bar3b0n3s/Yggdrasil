@@ -594,6 +594,18 @@ namespace Engine {
 		return {};
 	}
 
+	uint32_t PhysicsWorld::GetSubShapeCollider(BodyHandle body, uint32_t subShape) const
+	{
+		const State& state = *m_State;
+		const std::optional<LiveBody> live = Utils::RequireBody(*state.System, body, Utils::AnyBodies, "GetSubShapeCollider");
+		if (!live.has_value())
+			return 0;
+		const uint32_t slot = live->ID.GetIndex();
+		if (slot >= state.Bodies.size() || state.Bodies[slot].ID != live->ID || state.Bodies[slot].Shape == nullptr)
+			return 0;
+		return State::ResolveColliderUserData(*state.Bodies[slot].Shape, subShape);
+	}
+
 	PhysicsPose PhysicsWorld::GetPose(BodyHandle body) const
 	{
 		const std::optional<LiveBody> live = Utils::RequireBody(*m_State->System, body, Utils::AnyBodies, "GetPose");
@@ -779,6 +791,9 @@ namespace Engine {
 		ENGINE_CORE_ASSERT(Detail::IsPhysicsMainThread(), "PhysicsWorld::Step called off the main thread");
 
 		state.StepContacts.Reset();
+		// The touching test of speculative contacts uses the delta of one collision step, which Jolt computes the same way
+		// (Physics/ContactBuffer.h, Docs/Decisions/0031-m20-contract.md decision 3).
+		state.ContactListener.SetCollisionStepDelta(deltaTime / static_cast<float>(collisionSteps));
 		Utils::BoundAccumulatedForces(*state.System, deltaTime);
 		const JPH::EPhysicsUpdateError errors = state.System->Update(deltaTime, static_cast<int>(collisionSteps), state.TempAllocator.get(), jobSystem);
 		const auto [bodyPairs, contacts] = state.StepContacts.CountBodyPairsAndContacts();

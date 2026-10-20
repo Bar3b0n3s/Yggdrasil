@@ -1,0 +1,81 @@
+{
+	"Format": "Replay",
+	"Version": 2,
+	"Scene": {
+		"Handle": "a02799e9aa1e04fe",
+		"Path": "Assets/Scenes/PhysicsSemantics.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.1.0",
+	"Config": "Editor",
+	"Events": [
+		{
+			"Tick": 100,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Down"
+		},
+		{
+			"Tick": 101,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Up"
+		},
+		{
+			"Tick": 200,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Down"
+		},
+		{
+			"Tick": 201,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Up"
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 90,
+			"Luau": "local p = Scene.FindByName(\"BrickB\"):GetScript()\nlocal e = p.Events[1]\nreturn #p.Events == 1 and e.Kind == \"CollisionEnter\" and e.Other == \"DropBall\" and e.Collider == \"BrickB\" and e.OtherCollider == \"DropBall\""
+		},
+		{
+			"Tick": 160,
+			"Luau": "local p = Scene.FindByName(\"BrickB\"):GetScript()\nfor _, e in p.Events do\n\tif e.Kind == \"CollisionEnter\" and e.Other == \"Pebble\" and e.Collider == \"BrickB\" and e.OtherCollider == \"Pebble\" and e.Tick > 100 then return true end\nend\nreturn false"
+		},
+		{
+			"Tick": 160,
+			"Luau": "local d = Scene.FindByName(\"Pebble\"):GetScript()\nreturn d.Presses == 1 and d.Dropped"
+		},
+		{
+			"Tick": 260,
+			"Luau": "local p = Scene.FindByName(\"BrickB\"):GetScript()\nfor _, e in p.Events do\n\tif e.Kind == \"CollisionExit\" and e.Other == \"Pebble\" and e.Tick >= 200 then return true end\nend\nreturn false"
+		},
+		{
+			"Tick": 260,
+			"Luau": "local g = Scene.FindByName(\"Glider\")\nreturn #g:GetScript().Events == 0 and #Scene.FindByName(\"GlideBrick\"):GetScript().Events == 0"
+		}
+	],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "72b22f688a78d71b"
+		},
+		{
+			"Tick": 120,
+			"StateHash": "3631e9dd5533a08a"
+		},
+		{
+			"Tick": 180,
+			"StateHash": "9438aeda774d8abd"
+		},
+		{
+			"Tick": 240,
+			"StateHash": "84f64d7cc9cecd7b"
+		}
+	],
+	"FinalTick": 260,
+	"FinalStateHash": "b005ad3987af6eb3"
+}

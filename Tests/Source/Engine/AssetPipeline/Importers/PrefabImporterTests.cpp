@@ -47,7 +47,7 @@ namespace Engine {
 
 	TEST_SUITE("AssetPipeline")
 	{
-		TEST_CASE("PrefabImporter: cooks Block.prefab canonically and rejects nested instances")
+		TEST_CASE("PrefabImporter: cooks Block.prefab canonically, lists the prefabs it nests and rejects an instance on its root entity")
 		{
 			Test::AssetTestFixture fixture;
 			CopyTestData(fixture, "Prefabs/Block.prefab", "Assets/Prefabs/Block.prefab");
@@ -67,17 +67,36 @@ namespace Engine {
 			CHECK(*canonical == AsStringView(fixture.ReadProjectFile("Assets/Prefabs/Block.prefab")));
 			CHECK(imported->Dependencies == std::vector<AssetHandle>{ AssetHandle(0x101) });
 
-			// A prefab never contains a prefab instance (§5.5): a nested Prefab component fails the strict load.
+			// Live nested prefabs (Docs/Decisions/0031-m20-contract.md decision 8): an instance below the root imports, and the
+			// prefab it nests is a dependency (M19's rule that every importer fills Import.Dependencies), which the editor's
+			// nesting graph reads.
 			Result<Json> nested = JsonReader::Parse(AsStringView(fixture.ReadProjectFile("Assets/Prefabs/Block.prefab")));
 			REQUIRE(nested.has_value());
+			const Json member = (*nested)["Entities"][1];
 			Json instance = Json::object();
 			instance["Prefab"] = "3c9f2e7a11d04b88";
 			instance["Overrides"] = Json::array();
+			Json link = Json::object();
+			link["PrefabEntityID"] = "00000000000e0001";
+			link["InstanceRoot"] = member["ID"];
+			link["OuterPrefabEntityID"] = nullptr;
 			(*nested)["Entities"][1]["Components"]["Prefab"] = instance;
+			(*nested)["Entities"][1]["Components"]["PrefabLink"] = link;
 			Result<std::string> nestedText = JsonWriter::Write(*nested);
 			REQUIRE(nestedText.has_value());
 			fixture.WriteProjectText("Assets/Prefabs/Nested.prefab", *nestedText);
-			Result<ImportResult> rejected = ImportPrefab(fixture, "Assets/Prefabs/Nested.prefab");
+			Result<ImportResult> nesting = ImportPrefab(fixture, "Assets/Prefabs/Nested.prefab");
+			REQUIRE_MESSAGE(nesting.has_value(), nesting.error().ToString());
+			CHECK(nesting->Dependencies == std::vector<AssetHandle>{ AssetHandle(0x101), AssetHandle(0x3c9f2e7a11d04b88ull) });
+
+			// The prefab's root is never an instance root itself: a Prefab component there fails the strict load.
+			Result<Json> rooted = JsonReader::Parse(AsStringView(fixture.ReadProjectFile("Assets/Prefabs/Block.prefab")));
+			REQUIRE(rooted.has_value());
+			(*rooted)["Entities"][0]["Components"]["Prefab"] = instance;
+			Result<std::string> rootedText = JsonWriter::Write(*rooted);
+			REQUIRE(rootedText.has_value());
+			fixture.WriteProjectText("Assets/Prefabs/Rooted.prefab", *rootedText);
+			Result<ImportResult> rejected = ImportPrefab(fixture, "Assets/Prefabs/Rooted.prefab");
 			REQUIRE_FALSE(rejected.has_value());
 			CHECK(rejected.error().GetCode() == ErrorCode::Validation);
 			CHECK(rejected.error().ToString().find(std::string(PrefabNestedInstanceCode)) != std::string::npos);

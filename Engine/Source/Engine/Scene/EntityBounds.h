@@ -25,6 +25,8 @@ namespace Engine {
 	// as rendering skips them; MeshRenderer::Visible does not matter (an invisible mesh still occupies its space for layout).
 	// A mesh that is missing or fails to load counts with its placeholder's bounds (the unit cube, AssetManager::
 	// GetOrPlaceholder, which records the diagnostic). nullopt when no included entity has a MeshRenderer with a mesh.
+	// `entity` is readable (Entity::IsReadable): an entity pending destruction and its subtree, also pending, still have
+	// their bounds until the flush (Entity:GetWorldBounds; M20, decision 4 of Docs/Decisions/0031-m20-contract.md).
 	// Main thread (the scene and the manager).
 	[[nodiscard]] std::optional<Aabb> ComputeEntityWorldBounds(ConstEntity entity, AssetManager& assets, const EntityBoundsOptions& options = {});
 

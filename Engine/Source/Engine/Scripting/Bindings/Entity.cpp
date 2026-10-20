@@ -28,6 +28,7 @@ namespace Engine {
 			if (!status)
 				Lua::RaiseError(call, status.error());
 		}
+		// The receiver of a mutating member: a live entity (ValidateEntity refuses one pending destruction).
 		static Entity EntitySelf(ScriptCall& call)
 		{
 			if (!call.Engine)
@@ -36,9 +37,18 @@ namespace Engine {
 			EntityChecked(call, ScriptProxy::ValidateEntity(call.Engine->GetHost(), identity));
 			return call.Engine->GetHost().GetScene().FindEntityByID(identity.ID);
 		}
+		// The receiver of a member registered as not mutating: live, or pending destruction until the flush (M20, W-P02).
+		static Entity EntityReadSelf(ScriptCall& call)
+		{
+			if (!call.Engine)
+				Lua::RaiseError(call, "requires an active script engine");
+			const auto identity = Lua::Check<ScriptEntityIdentity>(call, 1);
+			EntityChecked(call, ScriptProxy::ValidateEntityForRead(call.Engine->GetHost(), identity));
+			return call.Engine->GetHost().GetScene().FindReadableEntityByID(identity.ID);
+		}
 		static void PushEntity(ScriptCall& call, Entity entity)
 		{
-			Lua::Push(call, ScriptEntityIdentity{ entity.IsValid() ? entity.GetUUID() : UUID{}, call.Engine->GetHost().GetSceneGeneration() });
+			Lua::Push(call, ScriptEntityIdentity{ entity.IsReadable() ? entity.GetUUID() : UUID{}, call.Engine->GetHost().GetSceneGeneration() });
 		}
 		static void EntityMutation(ScriptCall& call)
 		{
@@ -58,7 +68,7 @@ namespace Engine {
 		}
 		static int EntityName(ScriptCall& call)
 		{
-			Lua::PushString(call, EntitySelf(call).GetName());
+			Lua::PushString(call, EntityReadSelf(call).GetName());
 			return 1;
 		}
 		static int EntitySetName(ScriptCall& call)
@@ -78,12 +88,12 @@ namespace Engine {
 		}
 		static int EntityActive(ScriptCall& call)
 		{
-			Lua::Push(call, EntitySelf(call).IsActive());
+			Lua::Push(call, EntityReadSelf(call).IsActive());
 			return 1;
 		}
 		static int EntityActiveSelf(ScriptCall& call)
 		{
-			Lua::Push(call, EntitySelf(call).IsActiveSelf());
+			Lua::Push(call, EntityReadSelf(call).IsActiveSelf());
 			return 1;
 		}
 		static int EntitySetActive(ScriptCall& call)
@@ -100,7 +110,7 @@ namespace Engine {
 		}
 		static int EntityHasTag(ScriptCall& call)
 		{
-			const Entity entity = EntitySelf(call);
+			const Entity entity = EntityReadSelf(call);
 			Lua::Push(call, entity.HasTag(Tag(call)));
 			return 1;
 		}
@@ -130,7 +140,7 @@ namespace Engine {
 		}
 		static int EntityTags(ScriptCall& call)
 		{
-			const Entity entity = EntitySelf(call);
+			const Entity entity = EntityReadSelf(call);
 			lua_newtable(call.State);
 			int i = 1;
 			for (const auto& tag : entity.GetTags())
@@ -273,13 +283,13 @@ namespace Engine {
 		}
 		static int EntityScript(ScriptCall& call)
 		{
-			const Entity entity = EntitySelf(call);
+			const Entity entity = EntityReadSelf(call);
 			EntityChecked(call, Detail::ScriptEngineAccess::PushInstance(call, entity.GetUUID()));
 			return 1;
 		}
 		static int EntityParent(ScriptCall& call)
 		{
-			PushEntity(call, EntitySelf(call).GetParent());
+			PushEntity(call, EntityReadSelf(call).GetParent());
 			return 1;
 		}
 		static int EntitySetParent(ScriptCall& call)
@@ -309,13 +319,14 @@ namespace Engine {
 		}
 		static int EntityChildren(ScriptCall& call)
 		{
-			const Entity entity = EntitySelf(call);
+			// A live entity's children are live; those of an entity pending destruction are pending and readable too.
+			const Entity entity = EntityReadSelf(call);
 			lua_newtable(call.State);
 			int i = 1;
 			for (UUID id : entity.GetChildren())
 			{
-				const auto child = entity.GetScene()->FindEntityByID(id);
-				if (child)
+				const auto child = entity.GetScene()->FindReadableEntityByID(id);
+				if (child.IsReadable())
 				{
 					PushEntity(call, child);
 					lua_rawseti(call.State, -2, i++);
@@ -325,7 +336,7 @@ namespace Engine {
 		}
 		static int EntityFindChild(ScriptCall& call)
 		{
-			const Entity entity = EntitySelf(call);
+			const Entity entity = EntityReadSelf(call);
 			const auto name = Lua::Check<std::string>(call, 2);
 			const bool recursive = !Lua::IsNoneOrNil(call, 3) && Lua::Check<bool>(call, 3);
 			std::vector<UUID> pending(entity.GetChildren().rbegin(), entity.GetChildren().rend());
@@ -333,8 +344,8 @@ namespace Engine {
 			{
 				const UUID id = pending.back();
 				pending.pop_back();
-				const auto child = entity.GetScene()->FindEntityByID(id);
-				if (!child)
+				const auto child = entity.GetScene()->FindReadableEntityByID(id);
+				if (!child.IsReadable())
 					continue;
 				if (child.GetName() == name)
 				{
@@ -349,7 +360,7 @@ namespace Engine {
 		}
 		static int EntityBounds(ScriptCall& call)
 		{
-			const Entity entity = EntitySelf(call);
+			const Entity entity = EntityReadSelf(call);
 			auto* assets = call.Engine->GetHost().GetAssets();
 			// Loading the meshes (an import when one is not cached) is host time (Detail::LoadAssetAsHost).
 			std::optional<Aabb> bounds;
@@ -400,7 +411,8 @@ namespace Engine {
 														 "returned when the new Script's OnCreate destroyed the entity. Each value holds at most {} bytes of text (strings, "
 														 "map keys and Variant text together).",
 				MaxScriptComponentStringBytes);
-			api.Type("Entity", "A UUID and scene generation identifying an entity; no native address is exposed.")
+			api.Type("Entity", "A UUID and scene generation identifying an entity; no native address is exposed. After a Destroy, the entity's reads keep working "
+							   "until the destruction flush, while IsValid is false and its writes raise.")
 				.Property("ID", Utils::EntityID, nullptr, "string", "The immutable 16-digit hexadecimal UUID.", read)
 				.Property("Name", Utils::EntityName, Utils::EntitySetName, "string", std::format("The entity name; a written name is UTF-8 without NUL and at most {} bytes.", MaxScriptEntityNameBytes), read)
 				.Method("IsValid", Utils::EntityValid, "(self: Entity) -> boolean", "Whether this identity still names a live entity in this scene.", read)
@@ -418,7 +430,7 @@ namespace Engine {
 				.Method("GetScript", Utils::EntityScript, "(self: Entity) -> any", "Get the existing behaviour instance or nil; cast to the module's exported instance type.", read)
 				.Method("GetParent", Utils::EntityParent, "(self: Entity) -> Entity?", "Get the parent, or nil for a root.", read)
 				.Method("SetParent", Utils::EntitySetParent, "(self: Entity, parent: Entity?, keepWorld: boolean?) -> ()", "Reparent to the last sibling, preserving world pose by default; synchronize effective lifecycle transitions.", write)
-				.Method("GetChildren", Utils::EntityChildren, "(self: Entity) -> {Entity}", "Copy live children in sibling order.", read)
+				.Method("GetChildren", Utils::EntityChildren, "(self: Entity) -> {Entity}", "Copy the children in sibling order.", read)
 				.Method("FindChild", Utils::EntityFindChild, "(self: Entity, name: string, recursive: boolean?) -> Entity?", "Find the first exact child name in depth-first sibling order; recursive defaults false.", read)
 				.Method("GetWorldBounds", Utils::EntityBounds, "(self: Entity) -> (vector?, vector?)", "Get this entity's render mesh world AABB; nil without a mesh.", read)
 				.Method("Destroy", Utils::EntityDestroy, "(self: Entity) -> ()", "Mark this subtree for the normal destruction flush.", write)

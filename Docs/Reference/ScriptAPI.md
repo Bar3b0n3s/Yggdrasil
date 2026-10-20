@@ -854,6 +854,14 @@ Returns the first tagged entity in canonical scene order, or nil.
 
 All modes; Runtime|Test; pure/read.
 
+### Scene.GetCurrent
+
+`() -> AssetRef?`
+
+Returns the scene asset the current scene came from, or nil for a scene without one.
+
+All modes; Runtime|Test; pure/read.
+
 ### Scene.GetEntityCount
 
 `() -> number`
@@ -899,6 +907,14 @@ All modes; Runtime|Test; mutates.
 `(scene: AssetRef, parameters: {[string]: any}?) -> ()`
 
 Requests a scene/VM replacement at the end of the frame with copied JSON parameters; never destroys the calling VM inline.
+
+All modes; Runtime|Test; mutates.
+
+### Scene.Reload
+
+`(parameters: {[string]: any}?) -> ()`
+
+Requests a restart of the current scene from the document it started from, at the end of the frame; parameters replace the load parameters, absent keeps them.
 
 All modes; Runtime|Test; mutates.
 
@@ -1896,7 +1912,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 ## Entity
 
-A UUID and scene generation identifying an entity; no native address is exposed.
+A UUID and scene generation identifying an entity; no native address is exposed. After a Destroy, the entity's reads keep working until the destruction flush, while IsValid is false and its writes raise.
 
 ### Entity.AddComponent
 
@@ -1998,7 +2014,7 @@ All modes; Runtime|Test; pure/read.
 
 `(self: Entity) -> {Entity}`
 
-Copy live children in sibling order.
+Copy the children in sibling order.
 
 All modes; Runtime|Test; pure/read.
 
@@ -3975,6 +3991,8 @@ What a prefab override changes on one prefab entity of an instance.
 - `RemoveComponent`: A component of the prefab entity removed from it; Value is null.
 
 - `EntityKey`: An entity key (Name, Active or Tags); Value is the key's value.
+
+- `RemoveEntity`: A prefab entity removed from the instance with its prefab descendants; Value is null.
 
 ## ProjectTemplate
 

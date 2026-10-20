@@ -11,16 +11,24 @@
 #include <Jolt/Physics/Collision/ContactListener.h>
 #include <Jolt/Physics/Collision/Shape/SubShapeID.h>
 
+#include <atomic>
 #include <cstdint>
 #include <mutex>
+#include <set>
 #include <utility>
 #include <vector>
 
 // The world's JPH::ContactListener (Architecture §9.4) and the per-body data it reads: Jolt calls it on its worker threads
-// during PhysicsSystem::Update, and it only appends records to the world's ContactBuffer and counts the step's contacts for
-// the limit diagnostics; nothing else happens on workers. Contact listener code runs while Jolt holds every body locked and,
-// in MSVC Debug, with floating-point exceptions enabled, so it never locks a body and never produces NaN or Inf (§9.1).
-// Private to the Physics module.
+// during PhysicsSystem::Update, and it only appends records to the world's ContactBuffer, counts the step's contacts for the
+// limit diagnostics and remembers the speculative contacts that have not touched yet; nothing else happens on workers.
+// Contact listener code runs while Jolt holds every body locked and, in MSVC Debug, with floating-point exceptions enabled,
+// so it never locks a body and never produces NaN or Inf (§9.1). Private to the Physics module.
+//
+// Speculative contacts (Physics/ContactBuffer.h, Docs/Decisions/0031-m20-contract.md decision 3): an Added record carries
+// whether the contact touches (PhysicsContactTouches); a contact added without touching is remembered until Jolt removes it
+// or it touches, and at the first collision step in which OnContactPersisted finds it touching the listener appends one
+// Touched record. Which contacts are remembered depends only on the contacts Jolt reports, never on the order its threads
+// report them in, so the records stay deterministic once sorted.
 
 namespace Engine {
 
@@ -58,6 +66,20 @@ namespace Engine {
 		// body without a record). Callable while Jolt holds the body locked (it only reads the body's shape and the records).
 		[[nodiscard]] uint32_t ResolvePhysicsCollider(const std::vector<PhysicsBodyRecord>& bodies, const JPH::Body& body, const JPH::SubShapeID& subShape);
 
+		// The key of a sub-shape contact: (body pair, sub-shape pair), each packed with the lower body ID's half first, so a
+		// contact has one key whichever order Jolt reports its bodies in. Pure; any thread.
+		[[nodiscard]] std::pair<uint64_t, uint64_t> MakePhysicsContactKey(const JPH::BodyID& body1, const JPH::SubShapeID& subShape1,
+			const JPH::BodyID& body2, const JPH::SubShapeID& subShape2);
+
+		// Whether a contact touches (Physics/ContactBuffer.h, Docs/Decisions/0031-m20-contract.md decision 3): a sensor contact
+		// always (Jolt adds sensor contacts only for overlapping shapes); any other when its manifold's penetration depth is at
+		// least 0, or when Jolt's solver acts on it within the collision step, its relative normal speed (positive when
+		// approaching) times the collision step's delta time being at least its separation (the negated penetration depth).
+		// Jolt applies a speculative contact's impulse and restitution by that test (ContactConstraintManager's
+		// CalculateNonPenetrationConstraintProperties), so a body that bounces or stops on a speculative contact touches at
+		// that step. Pure; any thread.
+		[[nodiscard]] bool PhysicsContactTouches(bool isSensor, float penetrationDepth, float relativeNormalSpeed, float collisionStepDelta);
+
 		// The contacts of the last step, counted by the listener for PhysicsWorldStats and the limit diagnostics: each
 		// sub-shape contact (manifold) and each body pair that reported OnContactAdded or OnContactPersisted. Thread-safe.
 		class PhysicsStepContacts
@@ -89,16 +111,35 @@ namespace Engine {
 			PhysicsContactListener(const PhysicsContactListener&) = delete;
 			PhysicsContactListener& operator=(const PhysicsContactListener&) = delete;
 
+			// Main thread, before each world step: the delta time of one collision step (the step's delta over its collision
+			// steps, as Jolt divides it), which the touching test uses.
+			void SetCollisionStepDelta(float deltaTime);
+
 			void OnContactAdded(const JPH::Body& body1, const JPH::Body& body2, const JPH::ContactManifold& manifold, JPH::ContactSettings& settings) override;
+			// Counts the contact; appends one Touched record when it is a speculative contact that touches now.
 			void OnContactPersisted(const JPH::Body& body1, const JPH::Body& body2, const JPH::ContactManifold& manifold, JPH::ContactSettings& settings) override;
 			void OnContactRemoved(const JPH::SubShapeIDPair& subShapePair) override;
 		private:
+			// A sub-shape contact (MakePhysicsContactKey).
+			using ContactKey = std::pair<uint64_t, uint64_t>;
+
 			// Whether the record of `body` says it is a sensor (Removed records, whose bodies Jolt does not let it touch).
 			[[nodiscard]] bool IsRecordedSensor(const JPH::BodyID& body) const;
+			// The Added or Touched record of a manifold, its Touching set by PhysicsContactTouches.
+			[[nodiscard]] ContactEvent MakeRecord(ContactEventKind kind, const JPH::Body& body1, const JPH::Body& body2, const JPH::ContactManifold& manifold) const;
 		private:
 			ContactBuffer* m_Buffer = nullptr;
 			const std::vector<PhysicsBodyRecord>* m_Bodies = nullptr;
 			PhysicsStepContacts* m_StepContacts = nullptr;
+			// Written on the main thread between steps, read by workers during them.
+			float m_CollisionStepDelta = 1.0f / 60.0f;
+			// The contacts added without touching that have neither touched nor been removed since.
+			std::mutex m_SpeculativeMutex; // guards m_Speculative
+			std::set<ContactKey> m_Speculative;
+			// m_Speculative's size, so OnContactPersisted skips the lock while no contact waits (the common case). A contact's
+			// own Added callback happens before its Persisted callbacks (Jolt's step phases are separated by job barriers), so
+			// a stale count can only concern other contacts.
+			std::atomic<size_t> m_SpeculativeCount = 0;
 		};
 
 	}

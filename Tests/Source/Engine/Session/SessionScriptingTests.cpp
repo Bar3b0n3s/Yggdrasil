@@ -348,7 +348,7 @@ return Script.Define("Activation", T)
 		// file, dropping the play copy's unsaved edits. Scene.Reload restarts the current scene from the document it started
 		// from (here the play copy of a scene that has no asset at all), with new parameters or, without them, the current
 		// ones; one transition per frame.
-		TEST_CASE("PlaySession: Scene.Reload restarts the current scene from its start document with its parameters" * doctest::skip(true))
+		TEST_CASE("PlaySession: Scene.Reload restarts the current scene from its start document with its parameters")
 		{
 			Test::ScriptTestFixture fixture;
 			static_cast<void>(fixture.GetScene().CreateEntity("Unsaved"));
@@ -385,7 +385,7 @@ return true
 
 		// Docs/Decisions/0031-m20-contract.md decision 5: Scene.GetCurrent names the scene asset the current scene came from:
 		// the session's, then the one Scene.Load named, kept by Scene.Reload; nil for a scene without an asset.
-		TEST_CASE("PlaySession: Scene.GetCurrent names the scene asset the session plays" * doctest::skip(true))
+		TEST_CASE("PlaySession: Scene.GetCurrent names the scene asset the session plays")
 		{
 			Test::ScriptTestFixture fixture;
 			auto document = SceneSerializer::ToJson(fixture.GetScene());
@@ -433,10 +433,71 @@ return true
 			REQUIRE_MESSAGE(none.has_value(), (none ? "" : none.error().ToString()));
 		}
 
+		// Docs/Decisions/0031-m20-contract.md decision 5's second branch: once a Scene.Load replaced the start scene,
+		// Scene.Reload restarts the loaded asset's document as it was when Scene.Load loaded it, never the session's start
+		// document and never the asset's version published since (a reimport while playing).
+		TEST_CASE("PlaySession: Scene.Reload after Scene.Load restarts the loaded scene's document as it was loaded")
+		{
+			Test::ScriptTestFixture fixture;
+			Scene& authored = fixture.GetScene();
+			// Three documents of one scene file's story: the start scene, the loaded one, and the loaded one changed later.
+			const auto documentWith = [&authored](std::string_view name)
+			{
+				const Entity entity = authored.CreateEntity(std::string(name));
+				Result<Json> document = SceneSerializer::ToJson(authored);
+				REQUIRE(document);
+				authored.DestroyEntity(entity);
+				return CreateRef<const Json>(std::move(*document));
+			};
+			const Ref<const Json> startDocument = documentWith("InStart");
+			const Ref<const Json> nextDocument = documentWith("InNext");
+			const Ref<const Json> republishedDocument = documentWith("Republished");
+			const auto publish = [&fixture](AssetHandle handle, const Ref<const Json>& document, std::string path)
+			{
+				auto data = CreateRef<SceneData>();
+				data->Document = document;
+				fixture.GetAssetManager().Publish(handle, data, std::move(path));
+			};
+			const AssetHandle start(0x710061);
+			const AssetHandle next(0x710062);
+			publish(start, startDocument, "Assets/Scenes/Start.scene");
+			publish(next, nextDocument, "Assets/Scenes/Next.scene");
+
+			auto specification = Test::ScriptSessionSpecification(fixture);
+			specification.SceneAsset = start;
+			auto created = PlaySession::Create(specification, *startDocument);
+			REQUIRE(created);
+			auto session = std::move(*created);
+			session->SetExtractionEnabled(false);
+			REQUIRE(session->GetScene().FindEntityByPath("/InStart").IsValid());
+			REQUIRE(session->GetScripts()->GetHost().RequestSceneLoad(next, Json{ { "Level", 2 } }));
+			session->Tick();
+			REQUIRE(session->GetScene().FindEntityByPath("/InNext").IsValid());
+
+			// The asset changes while the loaded scene plays; the reload keeps the document it was loaded from.
+			publish(next, republishedDocument, "Assets/Scenes/Next.scene");
+			const auto reloaded = session->GetScripts()->Evaluate(R"(
+Scene.FindByName("InNext").Name = "Renamed"
+Scene.Reload()
+return true
+)",
+				{});
+			REQUIRE_MESSAGE(reloaded.has_value(), (reloaded ? "" : reloaded.error().ToString()));
+			session->Tick();
+			CHECK(session->GetSceneGeneration() == 3);
+			CHECK(session->GetCurrentSceneAsset() == next);
+			CHECK(session->GetLoadParameters() == Json{ { "Level", 2 } });
+			CHECK(session->GetScene().FindEntityByPath("/InNext").IsValid());
+			CHECK_FALSE(session->GetScene().FindEntityByPath("/Renamed").IsValid());
+			CHECK_FALSE(session->GetScene().FindEntityByPath("/InStart").IsValid());
+			CHECK_FALSE(session->GetScene().FindEntityByPath("/Republished").IsValid());
+			CHECK(session->GetScriptErrors().GetErrors().empty());
+		}
+
 		// Docs/Decisions/0031-m20-contract.md decision 4 (W-P02, ADR 0026 P02): a partner's callback that read an entity
 		// destroyed earlier in the same dispatch raised "was destroyed". An entity pending destruction stays readable until
 		// the flush (its name, its components' fields), refuses writes, is not IsValid, and is unreadable once flushed.
-		TEST_CASE("ScriptProxy: an entity pending destruction stays readable until the flush and refuses writes" * doctest::skip(true))
+		TEST_CASE("ScriptProxy: an entity pending destruction stays readable until the flush and refuses writes")
 		{
 			Test::ScriptTestFixture fixture;
 			const AssetHandle script(0x710053);

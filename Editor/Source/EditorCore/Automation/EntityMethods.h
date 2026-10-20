@@ -69,10 +69,11 @@ namespace Engine {
 	};
 
 	// entity.destroy {entities, target?}: destroys each entity with its subtree, in one command. An entity listed twice, or
-	// inside another listed entity's subtree, is destroyed once. In the edit scene, a member of a prefab instance that is not
-	// its root, and that is not destroyed with its instance root, is refused (Utils::FindKeptPrefabMember, §1.2, §5.5): the
-	// instance's next update would rebuild it, so the agent deactivates it or unpacks the instance instead. A "play" target
-	// destroys members like scripts' Scene.Destroy, since nothing rebuilds the transient play scene's instances.
+	// inside another listed entity's subtree, is destroyed once. In the edit scene, destroying a member of a prefab instance
+	// that is not its root (and is not destroyed with its instance root) is a deletion the commit's override refresh records
+	// as a RemoveEntity override on the instance root, in the same undo step, so the instance's next update keeps it deleted
+	// (§5.5; Docs/Decisions/0031-m20-contract.md decision 7). A "play" target destroys members like scripts' Scene.Destroy
+	// and records nothing, since nothing rebuilds the transient play scene's instances.
 	struct EntityDestroyParams
 	{
 		std::vector<std::string> Entities{};
@@ -124,9 +125,7 @@ namespace Engine {
 		[[nodiscard]] Result<EntityCreateResult> EntityCreate(EditorMethodContext& context, const EntityCreateParams& params);
 		// entity.update. Errors: as entity.create, plus InvalidState for a removal that is not allowed.
 		[[nodiscard]] Result<EntityUpdateResult> EntityUpdate(EditorMethodContext& context, const EntityUpdateParams& params);
-		// entity.destroy. Errors: NotFound for any reference (nothing destroyed then); InvalidArgument for an empty list;
-		// InvalidState for a prefab member in the edit scene (see EntityDestroyParams), located at the "/entities/<i>" that
-		// names it or one of its ancestors, with a hint.
+		// entity.destroy. Errors: NotFound for any reference (nothing destroyed then); InvalidArgument for an empty list.
 		[[nodiscard]] Result<EntityDestroyResult> EntityDestroy(EditorMethodContext& context, const EntityDestroyParams& params);
 		// entity.duplicate. Errors: NotFound for any reference; InvalidArgument for an empty list; InvalidState when an entity
 		// of a prefab instance (its root included) or a unique-per-scene component would be duplicated.

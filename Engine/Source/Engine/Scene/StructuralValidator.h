@@ -23,6 +23,11 @@ namespace Engine {
 	//     becomes a root);
 	//   - a "PrefabLink" whose InstanceRoot is missing or lacks the "Prefab" component, i.e. a member whose root is not an
 	//     instance root (SCENE_INCONSISTENT_PREFAB_LINK): the member is unpacked (its PrefabLink is removed);
+	//   - M20 (Docs/Decisions/0031-m20-contract.md decision 10), also SCENE_INCONSISTENT_PREFAB_LINK: a PrefabLink's
+	//     OuterPrefabEntityID set on an entity without the "Prefab" component, or that no ancestor instance root R derives
+	//     the entity's ID from (Hash64(R, OuterPrefabEntityID)): it is cleared, so the instance is outermost; and a nested
+	//     instance root (one with a consistent OuterPrefabEntityID) whose "Prefab" component records overrides, which only
+	//     an outermost instance does: they are dropped, their JSON kept in LoadRepair::Removed;
 	//   - a UniquePerScene component on a second entity (SCENE_DUPLICATE_UNIQUE_COMPONENT, scenes only): every extra after
 	//     the first in canonical order is dropped, its JSON kept in LoadRepair::Removed;
 	//   - a registered component that is entity-level or not Serializable under "Components" (SCENE_MISPLACED_COMPONENT,
@@ -30,8 +35,9 @@ namespace Engine {
 	//     LoadRepair::Removed. Such a component is never added to an entity (adding a Required one would assert);
 	//   - prefabs only (PREFAB_INVALID_ROOT): "Root" missing, naming no entity, or not the only root entity; not
 	//     repairable;
-	//   - prefabs only (PREFAB_NESTED_INSTANCE): a "Prefab" or "PrefabLink" component, i.e. a nested instance, which a
-	//     prefab never contains (§5.5): it is dropped, which flattens the instance, its JSON kept in LoadRepair::Removed.
+	//   - prefabs only (PREFAB_NESTED_INSTANCE): a "Prefab" or "PrefabLink" component on the root entity "Root" names,
+	//     which is never an instance root or member itself (M20: instances nested below the root are live, §5.5): it is
+	//     dropped, its JSON kept in LoadRepair::Removed.
 	// A child listed before its parent is not an error: the result is normalized to canonical order with the warning
 	// SCENE_NONCANONICAL_ORDER, in both modes.
 	//

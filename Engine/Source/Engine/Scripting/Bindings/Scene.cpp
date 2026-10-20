@@ -19,7 +19,9 @@
 #include <array>
 #include <cmath>
 #include <format>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace Engine {
@@ -262,6 +264,31 @@ namespace Engine {
 			return 0;
 		}
 
+		static int SceneReload(ScriptCall& call)
+		{
+			std::optional<Json> parameters;
+			if (!Lua::IsNoneOrNil(call, 1))
+			{
+				parameters = Lua::CheckJson(call, 1);
+				if (!parameters->is_object())
+					return Lua::RaiseError(call, "load parameters must be a JSON-serializable object table");
+			}
+			const auto permission = call.PrepareHostMutation();
+			if (!permission)
+				return Lua::RaiseError(call, permission.error());
+			const auto result = call.Engine->GetHost().RequestSceneReload(std::move(parameters));
+			if (!result)
+				return Lua::RaiseError(call, result.error());
+			return 0;
+		}
+
+		static int SceneCurrent(ScriptCall& call)
+		{
+			// nil for the invalid handle: a scene without an asset.
+			Lua::Push(call, call.Engine->GetHost().GetCurrentScene());
+			return 1;
+		}
+
 		static int SceneParameters(ScriptCall& call)
 		{
 			Lua::PushJson(call, call.Engine->GetHost().GetLoadParameters());
@@ -290,6 +317,8 @@ namespace Engine {
 				.Function("GetName", &Utils::SceneName, "() -> string", "Returns the scene name.", read)
 				.Function("GetEntityCount", &Utils::SceneCount, "() -> number", "Returns the number of live entities, excluding pending destruction.", read)
 				.Function("Load", &Utils::SceneLoad, "(scene: AssetRef, parameters: {[string]: any}?) -> ()", "Requests a scene/VM replacement at the end of the frame with copied JSON parameters; never destroys the calling VM inline.")
+				.Function("Reload", &Utils::SceneReload, "(parameters: {[string]: any}?) -> ()", "Requests a restart of the current scene from the document it started from, at the end of the frame; parameters replace the load parameters, absent keeps them.")
+				.Function("GetCurrent", &Utils::SceneCurrent, "() -> AssetRef?", "Returns the scene asset the current scene came from, or nil for a scene without one.", read)
 				.Function("GetLoadParameters", &Utils::SceneParameters, "() -> {[string]: any}", "Returns a detached copy of the parameters passed to the current scene.", read);
 			return {};
 		}

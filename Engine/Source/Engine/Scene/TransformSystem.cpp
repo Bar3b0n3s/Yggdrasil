@@ -45,7 +45,7 @@ namespace Engine {
 		static std::vector<ConstEntity> CollectChain(ConstEntity entity)
 		{
 			std::vector<ConstEntity> chain;
-			for (ConstEntity current = entity; current.IsValid(); current = current.GetParent())
+			for (ConstEntity current = entity; current.IsReadable(); current = current.GetParent())
 				chain.push_back(current);
 			std::ranges::reverse(chain);
 			return chain;
@@ -140,7 +140,7 @@ namespace Engine {
 		{
 			if (!entity.GetScene()->IsRuntime())
 				return nullptr;
-			for (ConstEntity current = entity; current.IsValid(); current = current.GetParent())
+			for (ConstEntity current = entity; current.IsReadable(); current = current.GetParent())
 			{
 				if (current.HasComponent<InterpolationResetTag>())
 					return nullptr;
@@ -187,7 +187,7 @@ namespace Engine {
 
 	glm::mat4 TransformSystem::ComputeWorldMatrix(ConstEntity entity)
 	{
-		ENGINE_CORE_ASSERT(entity.IsValid(), "ComputeWorldMatrix needs a valid entity");
+		ENGINE_CORE_ASSERT(entity.IsReadable(), "ComputeWorldMatrix needs a readable entity");
 		// The same products in the same order as Update (root local first, then ParentWorld * Local), so both give
 		// bit-identical matrices.
 		const std::vector<ConstEntity> chain = Utils::CollectChain(entity);
@@ -270,7 +270,7 @@ namespace Engine {
 
 	glm::quat TransformSystem::GetWorldRotation(ConstEntity entity)
 	{
-		ENGINE_CORE_ASSERT(entity.IsValid(), "GetWorldRotation needs a valid entity");
+		ENGINE_CORE_ASSERT(entity.IsReadable(), "GetWorldRotation needs a readable entity");
 		const std::vector<ConstEntity> chain = Utils::CollectChain(entity);
 		glm::quat rotation = chain.front().GetComponent<TransformComponent>().Rotation;
 		for (size_t index = 1; index < chain.size(); ++index)
@@ -297,10 +297,10 @@ namespace Engine {
 
 	glm::vec3 TransformSystem::GetWorldScale(ConstEntity entity)
 	{
-		ENGINE_CORE_ASSERT(entity.IsValid(), "GetWorldScale needs a valid entity");
+		ENGINE_CORE_ASSERT(entity.IsReadable(), "GetWorldScale needs a readable entity");
 		const glm::mat4 world = ComputeWorldMatrix(entity);
 		glm::vec3 scale(glm::length(glm::vec3(world[0])), glm::length(glm::vec3(world[1])), glm::length(glm::vec3(world[2])));
-		for (ConstEntity current = entity; current.IsValid(); current = current.GetParent())
+		for (ConstEntity current = entity; current.IsReadable(); current = current.GetParent())
 		{
 			const glm::vec3& local = current.GetComponent<TransformComponent>().Scale;
 			for (glm::length_t axis = 0; axis < 3; ++axis)

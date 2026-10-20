@@ -42,6 +42,25 @@ namespace Engine {
 			}
 			return strict.ToStatus("script component write");
 		}
+		// The identity names an entity of the current scene generation that is live or pending destruction (M20, W-P02).
+		static bool IsReadable(IScriptHost& host, ScriptEntityIdentity entity)
+		{
+			return entity.ID.IsValid() && entity.SceneGeneration != 0 && entity.SceneGeneration == host.GetSceneGeneration()
+				&& host.GetScene().FindReadableEntityByID(entity.ID).IsReadable();
+		}
+		// ValidateComponent's checks of the proxy's component on `entity`, an entity already validated.
+		static Status ValidateProxyComponent(IScriptHost& host, ScriptProxyIdentity proxy, ConstEntity entity)
+		{
+			const auto components = host.GetTypes().GetComponents();
+			if (proxy.ComponentTypeIndex >= components.size())
+				return MakeError(ErrorCode::InvalidArgument, "invalid component identity");
+			const auto& info = *components[proxy.ComponentTypeIndex];
+			if (!VisibleComponent(info))
+				return MakeError(ErrorCode::InvalidArgument, "component '{}' is not exposed to scripts", info.GetName());
+			if (!info.GetHostOps()->Has(entity))
+				return MakeError(ErrorCode::NotFound, "entity {} no longer has '{}'", proxy.Entity.ID, info.GetName());
+			return {};
+		}
 
 	}
 
@@ -59,31 +78,30 @@ namespace Engine {
 			return MakeError(ErrorCode::NotFound, "entity {} belongs to an expired scene", entity.ID);
 		return MakeError(ErrorCode::NotFound, "entity {} was destroyed", entity.ID);
 	}
-	Status ScriptProxy::ValidateEntityForRead(IScriptHost& /*host*/, ScriptEntityIdentity /*entity*/)
+	Status ScriptProxy::ValidateEntityForRead(IScriptHost& host, ScriptEntityIdentity entity)
 	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "M20 pending-destruction read rule contract (Docs/Decisions/0031-m20-contract.md decision 4, stream P2)");
+		if (Utils::IsReadable(host, entity))
+			return {};
+		// Not readable, so not valid either: ValidateEntity's error names why.
+		return ValidateEntity(host, entity);
 	}
 	Status ScriptProxy::ValidateComponent(IScriptHost& host, ScriptProxyIdentity proxy)
 	{
 		ENGINE_TRY(ValidateEntity(host, proxy.Entity));
-		const auto components = host.GetTypes().GetComponents();
-		if (proxy.ComponentTypeIndex >= components.size())
-			return MakeError(ErrorCode::InvalidArgument, "invalid component identity");
-		const auto& info = *components[proxy.ComponentTypeIndex];
-		if (!Utils::VisibleComponent(info))
-			return MakeError(ErrorCode::InvalidArgument, "component '{}' is not exposed to scripts", info.GetName());
-		if (!info.GetHostOps()->Has(host.GetScene().FindEntityByID(proxy.Entity.ID)))
-			return MakeError(ErrorCode::NotFound, "entity {} no longer has '{}'", proxy.Entity.ID, info.GetName());
-		return {};
+		return Utils::ValidateProxyComponent(host, proxy, host.GetScene().FindEntityByID(proxy.Entity.ID));
+	}
+	Status ScriptProxy::ValidateComponentForRead(IScriptHost& host, ScriptProxyIdentity proxy)
+	{
+		ENGINE_TRY(ValidateEntityForRead(host, proxy.Entity));
+		return Utils::ValidateProxyComponent(host, proxy, host.GetScene().FindReadableEntityByID(proxy.Entity.ID));
 	}
 	Result<std::optional<ScriptProxyIdentity>> ScriptProxy::GetComponent(IScriptHost& host, ScriptEntityIdentity entity, std::string_view component)
 	{
-		ENGINE_TRY(ValidateEntity(host, entity));
+		ENGINE_TRY(ValidateEntityForRead(host, entity));
 		const auto* info = host.GetTypes().FindComponent(component);
 		if (!info || !Utils::VisibleComponent(*info))
 			return std::unexpected(Error(ErrorCode::NotFound, std::format("unknown script component '{}'", component)).WithHint(MakeDidYouMeanHint(host.GetTypes().SuggestComponentNames(component))));
-		if (!info->GetHostOps()->Has(host.GetScene().FindEntityByID(entity.ID)))
+		if (!info->GetHostOps()->Has(host.GetScene().FindReadableEntityByID(entity.ID)))
 			return std::optional<ScriptProxyIdentity>{};
 		return std::optional<ScriptProxyIdentity>{ { entity, info->GetIndex() } };
 	}
@@ -100,10 +118,10 @@ namespace Engine {
 		if (!call.Engine)
 			return MakeError(ErrorCode::InvalidState, "requires an active script engine");
 		auto& host = call.Engine->GetHost();
-		ENGINE_TRY(ValidateComponent(host, proxy));
+		ENGINE_TRY(ValidateComponentForRead(host, proxy));
 		const auto& info = *host.GetTypes().GetComponents()[proxy.ComponentTypeIndex];
 		ENGINE_TRY(Utils::ProxyField(call, info, field));
-		ENGINE_TRY_ASSIGN(auto value, ComponentAccess::GetFieldValue(host.GetScene().FindEntityByID(proxy.Entity.ID), info.GetName(), field));
+		ENGINE_TRY_ASSIGN(auto value, ComponentAccess::GetFieldValue(host.GetScene().FindReadableEntityByID(proxy.Entity.ID), info.GetName(), field));
 		ENGINE_TRY(call.Engine->GetApi().RecordProxyAccess(call, proxy.ComponentTypeIndex, field, false));
 		return value;
 	}

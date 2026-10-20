@@ -2,14 +2,16 @@
 	"Format": "Prefab",
 	"Version": 1,
 	"Name": "Cart",
-	"Root": "656b4d2b8368e3a0",
+	"Root": "ec65c7d15f038f74",
 	"ComponentVersions": {
 		"Transform": 1,
+		"Prefab": 2,
+		"PrefabLink": 1,
 		"MeshRenderer": 1
 	},
 	"Entities": [
 		{
-			"ID": "656b4d2b8368e3a0",
+			"ID": "ec65c7d15f038f74",
 			"Name": "Cart",
 			"Parent": null,
 			"Active": true,
@@ -23,9 +25,9 @@
 			}
 		},
 		{
-			"ID": "ec65c7d15f038f74",
+			"ID": "4751cc3abde45d4f",
 			"Name": "Body",
-			"Parent": "656b4d2b8368e3a0",
+			"Parent": "ec65c7d15f038f74",
 			"Active": true,
 			"Tags": [],
 			"Components": {
@@ -44,9 +46,9 @@
 			}
 		},
 		{
-			"ID": "2797dfc642ed43c5",
+			"ID": "934bbdfb2c014767",
 			"Name": "FrontWheel",
-			"Parent": "656b4d2b8368e3a0",
+			"Parent": "ec65c7d15f038f74",
 			"Active": true,
 			"Tags": [],
 			"Components": {
@@ -54,6 +56,15 @@
 					"Translation": [0.6, -0.3, 0],
 					"Rotation": [0, 0, 0, 1],
 					"Scale": [0.6, 0.6, 0.6]
+				},
+				"Prefab": {
+					"Prefab": "2797dfc642ed43c5",
+					"Overrides": []
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "cc69313b582ada20",
+					"InstanceRoot": "934bbdfb2c014767",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000102",
@@ -65,9 +76,9 @@
 			}
 		},
 		{
-			"ID": "f6c63ec82c2f32c0",
+			"ID": "2689ae1eee055295",
 			"Name": "Hub",
-			"Parent": "2797dfc642ed43c5",
+			"Parent": "934bbdfb2c014767",
 			"Active": true,
 			"Tags": [],
 			"Components": {
@@ -75,6 +86,11 @@
 					"Translation": [0, 0, 0],
 					"Rotation": [0, 0, 0, 1],
 					"Scale": [0.4, 0.4, 1.2]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "656b4d2b8368e3a0",
+					"InstanceRoot": "934bbdfb2c014767",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -86,9 +102,9 @@
 			}
 		},
 		{
-			"ID": "934bbdfb2c014767",
+			"ID": "227a073ef515ca5d",
 			"Name": "BackWheel",
-			"Parent": "656b4d2b8368e3a0",
+			"Parent": "ec65c7d15f038f74",
 			"Active": true,
 			"Tags": [],
 			"Components": {
@@ -96,6 +112,15 @@
 					"Translation": [-0.6, -0.3, 0],
 					"Rotation": [0, 0, 0, 1],
 					"Scale": [0.6, 0.6, 0.6]
+				},
+				"Prefab": {
+					"Prefab": "2797dfc642ed43c5",
+					"Overrides": []
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "cc69313b582ada20",
+					"InstanceRoot": "227a073ef515ca5d",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000102",
@@ -107,9 +132,9 @@
 			}
 		},
 		{
-			"ID": "3d58a8b25988479a",
+			"ID": "f458baf1c7572e9d",
 			"Name": "Hub",
-			"Parent": "934bbdfb2c014767",
+			"Parent": "227a073ef515ca5d",
 			"Active": true,
 			"Tags": [],
 			"Components": {
@@ -117,6 +142,11 @@
 					"Translation": [0, 0, 0],
 					"Rotation": [0, 0, 0, 1],
 					"Scale": [0.4, 0.4, 1.2]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "656b4d2b8368e3a0",
+					"InstanceRoot": "227a073ef515ca5d",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",

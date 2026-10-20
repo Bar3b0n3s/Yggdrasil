@@ -18,6 +18,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include <array>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -112,11 +113,18 @@ namespace Engine {
 	};
 
 	// An active pair (§9.4), keyed by its two owners, never by body handle, so it survives the rebuild of either body.
+	// M20 (Docs/Decisions/0031-m20-contract.md decision 2): a collider pair, the pair of a scripted gathered collider with the
+	// partner's body owner, is keyed by (the collider entity, the partner's body owner, kind): Collider is the collider entity,
+	// and Low and High are the collider entity and the partner, the lower UUID first. A body pair's Collider is the null UUID,
+	// so body pairs keep their order among themselves.
 	struct PhysicsPairKey
 	{
 		UUID Low{};
 		UUID High{};
 		PhysicsPairKind Kind = PhysicsPairKind::Collision;
+		UUID Collider{};
+
+		[[nodiscard]] bool IsColliderPair() const { return Collider.IsValid(); }
 
 		auto operator<=>(const PhysicsPairKey&) const = default;
 	};
@@ -134,29 +142,55 @@ namespace Engine {
 		auto operator<=>(const PhysicsSubShapeKey&) const = default;
 	};
 
-	// A sub-shape contact's state. Jolt reports OnContactRemoved for the contacts of bodies that fall asleep (ContactListener
-	// "as soon as a body goes to sleep the contacts between that body and all other bodies will receive an OnContactRemoved
-	// callback"), although they still touch: such a contact stays, dormant, until a step that began with one of its bodies
-	// awake does not report it again (PhysicsSystem.cpp).
+	// A sub-shape contact's state, and the pairs it counts in. Jolt reports OnContactRemoved for the contacts of bodies that
+	// fall asleep (ContactListener "as soon as a body goes to sleep the contacts between that body and all other bodies will
+	// receive an OnContactRemoved callback"), although they still touch: such a contact stays, dormant, until a step that
+	// began with one of its bodies awake does not report it again (PhysicsSystem.cpp).
 	struct PhysicsSubShapeContact
 	{
+		// The body pair it counts in.
+		PhysicsPairKey Pair{};
+		// M20: the collider pairs it counts in (at most one for each side whose collider is a scripted gathered collider),
+		// sorted.
+		std::vector<PhysicsPairKey> ColliderPairs{};
+		// The body owners and the collider entities of its two sides, its BodyA's, then its BodyB's (PhysicsSubShapeKey's
+		// order), as its records, or the resolution after a shape was replaced in place, last named them.
+		std::array<UUID, 2> Owners{};
+		std::array<UUID, 2> Colliders{};
+		// The first point, the normal from its BodyA's side towards its BodyB's, and the relative speed of its last touching
+		// record (of its Added record while it has not touched): the enter contact of a pair it starts without a record of
+		// that step (a collider pair whose collider became a scripted gathered collider, or that a resolution moved it to).
+		glm::vec3 Point = glm::vec3(0.0f);
+		glm::vec3 Normal = glm::vec3(0.0f, 1.0f, 0.0f);
+		float RelativeSpeed = 0.0f;
 		bool Dormant = false;
+		// M20 (Docs/Decisions/0031-m20-contract.md decision 3): it touched (an Added record that touched, or a Touched record
+		// since). A contact that has not touched counts for its pairs but cannot start them.
+		bool Touching = true;
 	};
 
 	struct PhysicsPair
 	{
-		// The sub-shape contacts that touch (the pair's reference count is their number).
-		std::map<PhysicsSubShapeKey, PhysicsSubShapeContact> Contacts;
-		// The enter was dispatched (to the sides that are flagged), and the exit not yet.
+		// The sub-shape contacts it counts (its reference count is their number); their state is in State::Contacts.
+		std::set<PhysicsSubShapeKey> Contacts;
+		// The enter was dispatched (to the sides that are flagged), and the exit not yet. A collider pair's callbacks go to its
+		// collider's side only.
 		bool Active = false;
 		bool EnteredLow = false;
 		bool EnteredHigh = false;
-		// PreStep destroyed a body of the pair, which lost every contact; PostStep ends it unless a contact re-established it.
+		// PreStep destroyed a body of the pair, which lost every contact, or a collider pair's collider stopped being a
+		// scripted gathered collider: PostStep ends it with a synthesized exit unless a contact re-established it.
 		bool Unconfirmed = false;
+		// M20 (decision 3): one of its contacts touched since the pair began. An inactive pair enters at the PostStep that
+		// sets it; an inactive one that had set it before had its enter dropped (PhysicsSystem.h) and waits for the flush.
+		bool Touched = false;
 		uint64_t SinceTick = 0;
-		// The collider entities of the first sub-shape pair that touched (§9.4 contact.Collider and OtherCollider).
+		// The collider entities of the first sub-shape pair that touched (§9.4 contact.Collider and OtherCollider), on the Low
+		// and High sides.
 		UUID LowCollider{};
 		UUID HighCollider{};
+		// A collider pair's: the owner of its collider's body (PhysicsEvent::SelfBody), as its contacts last named it.
+		UUID ColliderBody{};
 	};
 
 	struct PhysicsSystem::State
@@ -178,12 +212,20 @@ namespace Engine {
 		std::map<std::pair<UUID, PhysicsBodyOrigin>, uint32_t> BodiesByOwner;
 		std::map<UUID, uint32_t> GatheredColliders;
 		std::map<uint32_t, UUID> InnerBodies;
-		// The pairs, the pair of each sub-shape contact, the sub-shape contacts of each body handle value and the pairs of
-		// each owner (indexes kept in step with Pairs).
+		// The pairs (body pairs and M20's collider pairs), the sub-shape contacts with their state and pairs, the sub-shape
+		// contacts of each body handle value and the pairs of each owner, a collider pair under its collider and its partner
+		// (indexes kept in step with Pairs).
 		std::map<PhysicsPairKey, PhysicsPair> Pairs;
-		std::map<PhysicsSubShapeKey, PhysicsPairKey> ContactPairs;
+		std::map<PhysicsSubShapeKey, PhysicsSubShapeContact> Contacts;
 		std::map<uint32_t, std::set<PhysicsSubShapeKey>> ContactsByBody;
 		std::map<UUID, std::set<PhysicsPairKey>> PairsByOwner;
+		// M20 (Docs/Decisions/0031-m20-contract.md decision 2): the contacts of each gathered collider entity (a side's
+		// collider that is not its body's owner), scripted or not, and the collider pairs of each collider entity.
+		std::map<UUID, std::set<PhysicsSubShapeKey>> GatheredContacts;
+		std::map<UUID, std::set<PhysicsPairKey>> ColliderPairsByCollider;
+		// The bodies whose shape or collider table PreStep replaced in place (ReplaceShape): Jolt keeps reporting a contact
+		// that persists under its sub-shape IDs, so PostStep resolves the colliders of their contacts again.
+		std::set<uint32_t> ReattributedBodies;
 		// Dormant contacts a body of which was awake when the coming step began (PreStep end).
 		std::set<PhysicsSubShapeKey> EligibleDormantContacts;
 		// Every diagnostic raised, by (code, severity, entity, subject), and those raised since the listener last heard them.
@@ -227,10 +269,24 @@ namespace Engine {
 		void WakeOwners(const std::set<UUID>& owners);
 		void CollectPartners(UUID owner, std::set<UUID>& partners) const;
 
-		void AddContact(const PhysicsSubShapeKey& key, const PhysicsPairKey& pair);
+		// Records a new contact `key` in the body pair `pair` (which exists) and in the indexes, and returns its state.
+		PhysicsSubShapeContact& AddContact(const PhysicsSubShapeKey& key, const PhysicsPairKey& pair);
+		// Removes a contact from its pairs and the indexes; the pairs stay, for PostStep's transitions.
 		void EraseContact(const PhysicsSubShapeKey& key);
+		// Removes a pair: a body pair with its contacts; a collider pair from its contacts, which stay in their body pair.
 		void ErasePair(const PhysicsPairKey& key);
 		void PurgeBodyContacts(uint32_t handle, std::set<UUID>& partners);
+		// M20: sets the owners and colliders of a contact's sides, moving it between the gathered colliders' contacts and
+		// unlinking it from the collider pairs of a side's previous collider.
+		void SetContactSides(const PhysicsSubShapeKey& key, PhysicsSubShapeContact& contact, const std::array<UUID, 2>& owners,
+			const std::array<UUID, 2>& colliders);
+		// M20: counts the contact in the collider pair `pair` (which exists), or no longer.
+		void LinkColliderPair(const PhysicsSubShapeKey& key, PhysicsSubShapeContact& contact, const PhysicsPairKey& pair);
+		void UnlinkColliderPair(const PhysicsSubShapeKey& key, PhysicsSubShapeContact& contact, const PhysicsPairKey& pair);
+		// M20 (decision 2): whether `entity` is a scripted gathered collider: present (IsPresent), its colliders gathered into
+		// another owner's body (GatheredColliders), and its Script component naming a script. The system reads the component
+		// alone, never the script or a VM.
+		[[nodiscard]] bool IsScriptedGatheredCollider(UUID entity) const;
 
 		// Records a diagnostic once per (code, severity, entity, subject) and logs it, unless `alreadyLogged` (the world's own
 		// PHYSICS_LIMIT_EXCEEDED warning near a limit, PhysicsWorldLimits; the body limit's refusals after the first).

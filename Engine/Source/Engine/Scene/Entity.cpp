@@ -20,11 +20,22 @@ namespace Engine {
 			return registry.valid(handle) && !registry.all_of<PendingDestroyTag>(handle);
 		}
 
+		// Live, or marked for destruction and still in the registry until the flush (a runtime scene's pending entity).
+		static bool IsReadableEntity(const entt::registry& registry, entt::entity handle)
+		{
+			return registry.valid(handle);
+		}
+
 	}
 
 	bool ConstEntity::IsValid() const
 	{
 		return m_Scene != nullptr && Utils::IsLiveEntity(m_Scene->GetRegistry(), m_Handle);
+	}
+
+	bool ConstEntity::IsReadable() const
+	{
+		return m_Scene != nullptr && Utils::IsReadableEntity(m_Scene->GetRegistry(), m_Handle);
 	}
 
 	UUID ConstEntity::GetUUID() const
@@ -39,8 +50,10 @@ namespace Engine {
 
 	ConstEntity ConstEntity::GetParent() const
 	{
+		// A live entity's parent is live, and a pending entity's parent is live or pending too (DestroyEntity marks whole
+		// subtrees), so the parent of a readable entity is readable.
 		const UUID parent = GetComponent<RelationshipComponent>().Parent;
-		return parent.IsValid() ? m_Scene->FindEntityByID(parent) : ConstEntity{};
+		return parent.IsValid() ? m_Scene->FindReadableEntityByID(parent) : ConstEntity{};
 	}
 
 	std::span<const UUID> ConstEntity::GetChildren() const
@@ -50,6 +63,7 @@ namespace Engine {
 
 	uint32_t ConstEntity::GetSiblingIndex() const
 	{
+		AssertValid();
 		const ConstEntity parent = GetParent();
 		const std::span<const UUID> siblings = parent.IsValid() ? parent.GetChildren() : m_Scene->GetRootEntities();
 		const UUID id = GetUUID();
@@ -65,7 +79,7 @@ namespace Engine {
 
 	bool ConstEntity::IsActive() const
 	{
-		for (ConstEntity current = *this; current.IsValid(); current = current.GetParent())
+		for (ConstEntity current = *this; current.IsReadable(); current = current.GetParent())
 		{
 			if (!current.IsActiveSelf())
 				return false;
@@ -89,9 +103,19 @@ namespace Engine {
 		ENGINE_CORE_ASSERT(IsValid(), "Use of an invalid or destroyed entity");
 	}
 
+	void ConstEntity::AssertReadable() const
+	{
+		ENGINE_CORE_ASSERT(IsReadable(), "Read of an invalid or destroyed entity");
+	}
+
 	bool Entity::IsValid() const
 	{
 		return m_Scene != nullptr && Utils::IsLiveEntity(m_Scene->m_Registry, m_Handle);
+	}
+
+	bool Entity::IsReadable() const
+	{
+		return m_Scene != nullptr && Utils::IsReadableEntity(m_Scene->m_Registry, m_Handle);
 	}
 
 	UUID Entity::GetUUID() const
@@ -106,6 +130,7 @@ namespace Engine {
 
 	void Entity::SetName(std::string_view name) const
 	{
+		AssertValid();
 		if (GetName() == name)
 			return; // not a mutation
 		Patch<NameComponent>([name](NameComponent& component)
@@ -117,7 +142,7 @@ namespace Engine {
 	Entity Entity::GetParent() const
 	{
 		const ConstEntity parent = ConstEntity(*this).GetParent();
-		return parent.IsValid() ? Entity(parent.GetHandle(), m_Scene) : Entity{};
+		return parent.IsReadable() ? Entity(parent.GetHandle(), m_Scene) : Entity{};
 	}
 
 	std::span<const UUID> Entity::GetChildren() const
@@ -142,6 +167,7 @@ namespace Engine {
 
 	void Entity::SetActive(bool active) const
 	{
+		AssertValid();
 		if (active == IsActiveSelf())
 			return; // not a mutation
 		if (active)
@@ -157,6 +183,7 @@ namespace Engine {
 
 	void Entity::AddTag(std::string_view tag) const
 	{
+		AssertValid();
 		ENGINE_CORE_ASSERT(!tag.empty(), "Entity::AddTag needs a non-empty tag");
 		if (HasTag(tag))
 			return;
@@ -168,6 +195,7 @@ namespace Engine {
 
 	void Entity::RemoveTag(std::string_view tag) const
 	{
+		AssertValid();
 		ENGINE_CORE_ASSERT(!tag.empty(), "Entity::RemoveTag needs a non-empty tag");
 		if (!HasTag(tag))
 			return;
@@ -185,6 +213,11 @@ namespace Engine {
 	void Entity::AssertValid() const
 	{
 		ENGINE_CORE_ASSERT(IsValid(), "Use of an invalid or destroyed entity");
+	}
+
+	void Entity::AssertReadable() const
+	{
+		ENGINE_CORE_ASSERT(IsReadable(), "Read of an invalid or destroyed entity");
 	}
 
 }

@@ -16,6 +16,7 @@
 #include "Engine/Scene/Components/RelationshipComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
+#include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/SphereColliderComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
@@ -51,15 +52,28 @@
 //     instead: it keeps counting, a later OnContactAdded for it changes nothing, and it is dropped (possibly ending its
 //     pair) only after a step that began with one of its bodies awake and did not report it again. So sleeping never ends
 //     a pair, and a sleeping body that is moved away still gets its exit.
+//   - Touching (M20, Docs/Decisions/0031-m20-contract.md decision 3). A contact remembers whether it touched (its Added
+//     record's Touching, or a Touched record since); a pair remembers whether one of its contacts touched since it began
+//     (PhysicsPair::Touched), and an inactive pair enters at the PostStep that sets it. A pair whose enter was dropped has
+//     set it already, so it never enters again; the flush that follows removes it.
+//   - Collider pairs (M20, decision 2). A contact also counts in a collider pair for each side whose collider is a scripted
+//     gathered collider. PostStep keeps them in step after the records: it resolves again the colliders of the contacts of
+//     bodies whose shape PreStep replaced in place (Jolt keeps a persisting contact's sub-shape IDs, whose collider may have
+//     changed), links each scripted gathered collider's contacts to its collider pairs, and unlinks every contact of a
+//     collider that is not one any more (an active pair of a collider still present then ends with a synthesized exit, as an
+//     unconfirmed pair does). Collider pairs never wake bodies and never count in the stats or physics.bodyInfo, so they
+//     cannot change the simulation or what body pairs report. They see the sub-shape contacts Jolt reports: its manifold
+//     reduction merges a body pair's contacts whose normals agree into the manifold of the first sub-shape pair it found,
+//     so of two coplanar pieces under one body, only that one counts the merged contact.
 //   - Callbacks to the listener run with Dispatching set; the step hooks assert it is clear. Diagnostics raised inside a
 //     hook are logged at once and heard by the listener when the hook's own work is done, so a listener that changes the
 //     scene never runs in the middle of a rebuild.
 //   - Range. Every pose the system hands to the world or a character passes IsPlaceablePhysicsPose first. A Transform
 //     written beyond it is not applied: PreStep writes the body's own pose back into it (the values PostStep last wrote,
 //     or the pose the body was placed at), and a Kinematic body stops there instead of keeping its last velocity.
-//   - The cross-indexes (Pairs, ContactPairs, ContactsByBody, PairsByOwner, BodiesByOwner, GatheredColliders) are kept in
-//     step by the functions that change them; a lookup that finds one out of step is verified (ENGINE_CORE_VERIFY, also
-//     in Dist), since going on would corrupt the pair state.
+//   - The cross-indexes (Pairs, Contacts, ContactsByBody, PairsByOwner, GatheredContacts, ColliderPairsByCollider,
+//     BodiesByOwner, GatheredColliders) are kept in step by the functions that change them; a lookup that finds one out of
+//     step is verified (ENGINE_CORE_VERIFY, also in Dist), since going on would corrupt the pair state.
 
 namespace Engine {
 
@@ -83,10 +97,20 @@ namespace Engine {
 			// Enter events: the collider entities of the first sub-shape pair.
 			UUID LowCollider{};
 			UUID HighCollider{};
+			// A collider pair's: its collider's body owner (PhysicsEvent::SelfBody).
+			UUID ColliderBody{};
 		};
 
-		// The first contact of a pair entering this step, oriented from the Low owner to the High one. The step's records
-		// arrive in a different order every run, so "first" is the smallest by a total order on the record's content.
+		// A pair as PostStep first found it, before the step's records changed it.
+		struct PairBefore
+		{
+			size_t Contacts = 0;
+			bool Touched = false;
+		};
+
+		// The first contact of a pair entering this step, oriented from the pair's Low side to its High one (a collider pair's
+		// sides are its collider's and its partner's). The step's records arrive in a different order every run, so "first" is
+		// the smallest by a total order on the record's content.
 		struct FirstContact
 		{
 			UUID LowCollider{};
@@ -113,6 +137,7 @@ namespace Engine {
 			bool ToHigh = false;
 			UUID LowCollider{};
 			UUID HighCollider{};
+			UUID ColliderBody{};
 		};
 
 		// A body or character inner body resolved to its owner and the collider entity of a sub-shape.
@@ -380,6 +405,62 @@ namespace Engine {
 			return type == PhysicsEventType::CollisionEnter || type == PhysicsEventType::TriggerEnter;
 		}
 
+		// The side (0: the contact's BodyA, 1: its BodyB) whose collider is `collider` gathered into another owner's body.
+		static std::optional<size_t> FindGatheredSide(const PhysicsSubShapeContact& contact, UUID collider)
+		{
+			for (size_t side = 0; side < 2; ++side)
+			{
+				if (contact.Colliders[side] == collider && contact.Owners[side] != collider)
+					return side;
+			}
+			return std::nullopt;
+		}
+
+		// The collider pair of `collider` with the partner's body owner `partner` (PhysicsPairKey).
+		static PhysicsPairKey MakeColliderPairKey(UUID collider, UUID partner, PhysicsPairKind kind)
+		{
+			const bool colliderIsLow = collider < partner;
+			return PhysicsPairKey{ .Low = colliderIsLow ? collider : partner, .High = colliderIsLow ? partner : collider, .Kind = kind, .Collider = collider };
+		}
+
+		// The side of `contact` on which `key`'s Low party is: a body pair's Low owner, or a collider pair's collider or partner.
+		static size_t GetLowSide(const PhysicsPairKey& key, const PhysicsSubShapeContact& contact)
+		{
+			if (!key.IsColliderPair())
+				return contact.Owners[0] == key.Low ? 0 : 1;
+			const size_t colliderSide = FindGatheredSide(contact, key.Collider).value_or(0);
+			return key.Low == key.Collider ? colliderSide : 1 - colliderSide;
+		}
+
+		// `contact` as the enter contact of a pair whose Low party is on its side `lowSide`.
+		static FirstContact MakeFirstContact(const PhysicsSubShapeKey& key, const PhysicsSubShapeContact& contact, size_t lowSide)
+		{
+			const std::array<uint32_t, 2> subShapes = { key.SubShapeA, key.SubShapeB };
+			FirstContact candidate;
+			candidate.LowCollider = contact.Colliders[lowSide];
+			candidate.HighCollider = contact.Colliders[1 - lowSide];
+			candidate.LowSubShape = subShapes[lowSide];
+			candidate.HighSubShape = subShapes[1 - lowSide];
+			candidate.Point = contact.Point;
+			candidate.Normal = lowSide == 0 ? contact.Normal : -contact.Normal;
+			candidate.RelativeSpeed = contact.RelativeSpeed;
+			candidate.Bits = { std::bit_cast<uint32_t>(candidate.Point.x), std::bit_cast<uint32_t>(candidate.Point.y), std::bit_cast<uint32_t>(candidate.Point.z),
+				std::bit_cast<uint32_t>(candidate.Normal.x), std::bit_cast<uint32_t>(candidate.Normal.y), std::bit_cast<uint32_t>(candidate.Normal.z),
+				std::bit_cast<uint32_t>(candidate.RelativeSpeed) };
+			return candidate;
+		}
+
+		// The canonical order key (PhysicsEventOrderKey) of a pair's event of `type`: a body pair's owners, or a collider pair's
+		// collider body owner and partner with the collider.
+		static PhysicsEventOrderKey GetPairOrderKey(const PhysicsPairKey& key, PhysicsEventType type, UUID colliderBody)
+		{
+			if (!key.IsColliderPair())
+				return PhysicsEventOrderKey{ .Low = key.Low, .High = key.High, .Type = type, .Collider = UUID() };
+			const UUID partner = key.Low == key.Collider ? key.High : key.Low;
+			const bool bodyIsLow = colliderBody < partner;
+			return PhysicsEventOrderKey{ .Low = bodyIsLow ? colliderBody : partner, .High = bodyIsLow ? partner : colliderBody, .Type = type, .Collider = key.Collider };
+		}
+
 		static void AppendFloat(std::vector<std::byte>& bytes, float value)
 		{
 			const auto bits = std::bit_cast<uint32_t>(value);
@@ -566,20 +647,43 @@ namespace Engine {
 
 	// --- State: contacts and pairs ------------------------------------------------------------------------------------
 
-	void PhysicsSystem::State::AddContact(const PhysicsSubShapeKey& key, const PhysicsPairKey& pair)
+	PhysicsSubShapeContact& PhysicsSystem::State::AddContact(const PhysicsSubShapeKey& key, const PhysicsPairKey& pair)
 	{
-		ContactPairs.emplace(key, pair);
+		PhysicsSubShapeContact& contact = Contacts[key];
+		contact.Pair = pair;
+		const auto found = Pairs.find(pair);
+		ENGINE_CORE_VERIFY(found != Pairs.end(), "PhysicsSystem: a contact is added to a pair that does not exist");
+		if (found != Pairs.end())
+			found->second.Contacts.insert(key);
 		ContactsByBody[key.BodyA].insert(key);
 		ContactsByBody[key.BodyB].insert(key);
+		return contact;
 	}
 
 	void PhysicsSystem::State::EraseContact(const PhysicsSubShapeKey& key)
 	{
-		const auto found = ContactPairs.find(key);
-		if (found == ContactPairs.end())
+		const auto found = Contacts.find(key);
+		if (found == Contacts.end())
 			return;
-		if (const auto pair = Pairs.find(found->second); pair != Pairs.end())
+		PhysicsSubShapeContact& contact = found->second;
+		if (const auto pair = Pairs.find(contact.Pair); pair != Pairs.end())
 			pair->second.Contacts.erase(key);
+		for (const PhysicsPairKey& colliderPair : contact.ColliderPairs)
+		{
+			if (const auto pair = Pairs.find(colliderPair); pair != Pairs.end())
+				pair->second.Contacts.erase(key);
+		}
+		for (size_t side = 0; side < 2; ++side)
+		{
+			if (!contact.Colliders[side].IsValid() || contact.Colliders[side] == contact.Owners[side])
+				continue;
+			if (const auto gathered = GatheredContacts.find(contact.Colliders[side]); gathered != GatheredContacts.end())
+			{
+				gathered->second.erase(key);
+				if (gathered->second.empty())
+					GatheredContacts.erase(gathered);
+			}
+		}
 		for (const uint32_t body : { key.BodyA, key.BodyB })
 		{
 			if (const auto contacts = ContactsByBody.find(body); contacts != ContactsByBody.end())
@@ -590,7 +694,7 @@ namespace Engine {
 			}
 		}
 		EligibleDormantContacts.erase(key);
-		ContactPairs.erase(found);
+		Contacts.erase(found);
 	}
 
 	void PhysicsSystem::State::ErasePair(const PhysicsPairKey& key)
@@ -598,12 +702,20 @@ namespace Engine {
 		const auto pair = Pairs.find(key);
 		if (pair == Pairs.end())
 			return;
-		std::vector<PhysicsSubShapeKey> contacts;
-		contacts.reserve(pair->second.Contacts.size());
-		for (const auto& [contact, state] : pair->second.Contacts)
-			contacts.push_back(contact);
+		const std::vector<PhysicsSubShapeKey> contacts(pair->second.Contacts.begin(), pair->second.Contacts.end());
 		for (const PhysicsSubShapeKey& contact : contacts)
-			EraseContact(contact);
+		{
+			if (!key.IsColliderPair())
+			{
+				EraseContact(contact);
+				continue;
+			}
+			// A collider pair's contacts stay in their body pair.
+			const auto found = Contacts.find(contact);
+			ENGINE_CORE_VERIFY(found != Contacts.end(), "PhysicsSystem: a collider pair counts a contact that does not exist (Pairs and Contacts out of step)");
+			if (found != Contacts.end())
+				UnlinkColliderPair(contact, found->second, key);
+		}
 		Pairs.erase(key);
 		for (const UUID owner : { key.Low, key.High })
 		{
@@ -612,6 +724,15 @@ namespace Engine {
 				owned->second.erase(key);
 				if (owned->second.empty())
 					PairsByOwner.erase(owned);
+			}
+		}
+		if (key.IsColliderPair())
+		{
+			if (const auto owned = ColliderPairsByCollider.find(key.Collider); owned != ColliderPairsByCollider.end())
+			{
+				owned->second.erase(key);
+				if (owned->second.empty())
+					ColliderPairsByCollider.erase(owned);
 			}
 		}
 	}
@@ -624,27 +745,100 @@ namespace Engine {
 		const std::set<PhysicsSubShapeKey> contacts = found->second;
 		for (const PhysicsSubShapeKey& contact : contacts)
 		{
-			const auto owner = ContactPairs.find(contact);
-			ENGINE_CORE_VERIFY(owner != ContactPairs.end(), "PhysicsSystem: a body's contact has no pair (ContactsByBody and ContactPairs out of step)");
-			if (owner == ContactPairs.end())
+			const auto state = Contacts.find(contact);
+			ENGINE_CORE_VERIFY(state != Contacts.end(), "PhysicsSystem: a body's contact does not exist (ContactsByBody and Contacts out of step)");
+			if (state == Contacts.end())
 				continue;
-			const PhysicsPairKey key = owner->second;
+			// Its body pair first, then its collider pairs (M20), each of which follows the body pair's rule.
+			std::vector<PhysicsPairKey> keys = { state->second.Pair };
+			keys.insert(keys.end(), state->second.ColliderPairs.begin(), state->second.ColliderPairs.end());
 			EraseContact(contact);
-			const auto pairEntry = Pairs.find(key);
-			ENGINE_CORE_VERIFY(pairEntry != Pairs.end(), "PhysicsSystem: a contact names a pair that does not exist (ContactPairs and Pairs out of step)");
-			if (pairEntry == Pairs.end())
-				continue;
-			PhysicsPair& pair = pairEntry->second;
-			partners.insert(key.Low);
-			partners.insert(key.High);
-			if (pair.Contacts.empty())
+			for (const PhysicsPairKey& key : keys)
 			{
-				if (pair.Active)
-					pair.Unconfirmed = true; // §9.4: PostStep ends it unless a contact re-establishes it
-				else
-					ErasePair(key);
+				const auto pairEntry = Pairs.find(key);
+				ENGINE_CORE_VERIFY(pairEntry != Pairs.end(), "PhysicsSystem: a contact names a pair that does not exist (Contacts and Pairs out of step)");
+				if (pairEntry == Pairs.end())
+					continue;
+				PhysicsPair& pair = pairEntry->second;
+				// The partners woken are the body pairs' owners only: a collider pair never changes the simulation.
+				if (!key.IsColliderPair())
+				{
+					partners.insert(key.Low);
+					partners.insert(key.High);
+				}
+				if (pair.Contacts.empty())
+				{
+					if (pair.Active)
+						pair.Unconfirmed = true; // §9.4: PostStep ends it unless a contact re-establishes it
+					else
+						ErasePair(key);
+				}
 			}
 		}
+	}
+
+	void PhysicsSystem::State::SetContactSides(const PhysicsSubShapeKey& key, PhysicsSubShapeContact& contact, const std::array<UUID, 2>& owners,
+		const std::array<UUID, 2>& colliders)
+	{
+		for (size_t side = 0; side < 2; ++side)
+		{
+			const UUID previous = contact.Colliders[side];
+			const bool wasGathered = previous.IsValid() && previous != contact.Owners[side];
+			if (!wasGathered || (previous == colliders[side] && owners[side] == contact.Owners[side]))
+				continue;
+			if (const auto gathered = GatheredContacts.find(previous); gathered != GatheredContacts.end())
+			{
+				gathered->second.erase(key);
+				if (gathered->second.empty())
+					GatheredContacts.erase(gathered);
+			}
+			const std::vector<PhysicsPairKey> linked = contact.ColliderPairs;
+			for (const PhysicsPairKey& pair : linked)
+			{
+				if (pair.Collider == previous)
+					UnlinkColliderPair(key, contact, pair);
+			}
+		}
+		contact.Owners = owners;
+		contact.Colliders = colliders;
+		for (size_t side = 0; side < 2; ++side)
+		{
+			if (colliders[side].IsValid() && colliders[side] != owners[side])
+				GatheredContacts[colliders[side]].insert(key);
+		}
+	}
+
+	void PhysicsSystem::State::LinkColliderPair(const PhysicsSubShapeKey& key, PhysicsSubShapeContact& contact, const PhysicsPairKey& pair)
+	{
+		const auto found = Pairs.find(pair);
+		ENGINE_CORE_VERIFY(found != Pairs.end(), "PhysicsSystem: a contact is linked to a collider pair that does not exist");
+		if (found == Pairs.end())
+			return;
+		found->second.Contacts.insert(key);
+		const auto position = std::lower_bound(contact.ColliderPairs.begin(), contact.ColliderPairs.end(), pair);
+		if (position == contact.ColliderPairs.end() || *position != pair)
+			contact.ColliderPairs.insert(position, pair);
+		PairsByOwner[pair.Low].insert(pair);
+		PairsByOwner[pair.High].insert(pair);
+		ColliderPairsByCollider[pair.Collider].insert(pair);
+	}
+
+	void PhysicsSystem::State::UnlinkColliderPair(const PhysicsSubShapeKey& key, PhysicsSubShapeContact& contact, const PhysicsPairKey& pair)
+	{
+		if (const auto found = Pairs.find(pair); found != Pairs.end())
+			found->second.Contacts.erase(key);
+		std::erase(contact.ColliderPairs, pair);
+	}
+
+	bool PhysicsSystem::State::IsScriptedGatheredCollider(UUID entity) const
+	{
+		if (!GatheredColliders.contains(entity))
+			return false;
+		const ConstEntity found = std::as_const(*Specification.RuntimeScene).FindEntityByID(entity);
+		if (!found.IsValid() || found.HasComponent<HierarchyDisabledTag>())
+			return false;
+		const ScriptComponent* script = found.TryGetComponent<ScriptComponent>();
+		return script != nullptr && script->Script.IsValid();
 	}
 
 	void PhysicsSystem::State::CollectPartners(UUID owner, std::set<UUID>& partners) const
@@ -653,7 +847,11 @@ namespace Engine {
 		if (owned == PairsByOwner.end())
 			return;
 		for (const PhysicsPairKey& key : owned->second)
-			partners.insert(key.Low == owner ? key.High : key.Low);
+		{
+			// Body pairs only: a collider pair never changes the simulation.
+			if (!key.IsColliderPair())
+				partners.insert(key.Low == owner ? key.High : key.Low);
+		}
 	}
 
 	void PhysicsSystem::State::WakeOwners(const std::set<UUID>& owners)
@@ -965,6 +1163,8 @@ namespace Engine {
 			entry.ShapeDescription = std::move(*description);
 		}
 		AssignPlan(entry, plan);
+		// The collider behind a sub-shape ID of the body may be another one now (M20, PhysicsSystemState.h).
+		ReattributedBodies.insert(handle);
 		return true;
 	}
 
@@ -1348,18 +1548,15 @@ namespace Engine {
 
 		// Dormant contacts a body of which is awake now: the step will report them again if they still touch.
 		state.EligibleDormantContacts.clear();
-		for (const auto& [key, pair] : state.Pairs)
+		for (const auto& [contact, contactState] : state.Contacts)
 		{
-			for (const auto& [contact, contactState] : pair.Contacts)
-			{
-				if (!contactState.Dormant)
-					continue;
-				const BodyHandle a(contact.BodyA);
-				const BodyHandle b(contact.BodyB);
-				const bool awake = (state.World->IsBodyValid(a) && !state.World->IsSleeping(a)) || (state.World->IsBodyValid(b) && !state.World->IsSleeping(b));
-				if (awake)
-					state.EligibleDormantContacts.insert(contact);
-			}
+			if (!contactState.Dormant)
+				continue;
+			const BodyHandle a(contact.BodyA);
+			const BodyHandle b(contact.BodyB);
+			const bool awake = (state.World->IsBodyValid(a) && !state.World->IsSleeping(a)) || (state.World->IsBodyValid(b) && !state.World->IsSleeping(b));
+			if (awake)
+				state.EligibleDormantContacts.insert(contact);
 		}
 
 		state.DeliverPendingDiagnostics();
@@ -1448,109 +1645,296 @@ namespace Engine {
 			return std::nullopt;
 		};
 
-		std::map<PhysicsPairKey, size_t> before;
+		// Each pair as the step found it (captured before anything changes it), and the first touching contact of each pair
+		// the step's records touched.
+		std::map<PhysicsPairKey, PairBefore> before;
 		std::map<PhysicsPairKey, FirstContact> firstContacts;
 		const auto touch = [&state, &before](const PhysicsPairKey& key) -> PhysicsPair&
 		{
 			PhysicsPair& pair = state.Pairs[key];
-			before.try_emplace(key, pair.Contacts.size());
+			before.try_emplace(key, PairBefore{ .Contacts = pair.Contacts.size(), .Touched = pair.Touched });
 			return pair;
 		};
+		const auto touchContact = [&state, &touch](const PhysicsSubShapeKey& contact)
+		{
+			const auto found = state.Contacts.find(contact);
+			if (found == state.Contacts.end())
+				return;
+			static_cast<void>(touch(found->second.Pair));
+			for (const PhysicsPairKey& key : found->second.ColliderPairs)
+				static_cast<void>(touch(key));
+		};
+		const auto offerFirstContact = [&firstContacts](const PhysicsPairKey& key, const FirstContact& candidate)
+		{
+			if (const auto [first, added] = firstContacts.try_emplace(key, candidate); !added && candidate < first->second)
+				first->second = candidate;
+		};
+		// M20 (decision 2): whether an entity is a scripted gathered collider, decided once per entity and PostStep.
+		std::map<UUID, bool> scriptedColliders;
+		const auto isScriptedCollider = [&state, &scriptedColliders](UUID entity)
+		{
+			const auto [found, added] = scriptedColliders.try_emplace(entity, false);
+			if (added)
+				found->second = state.IsScriptedGatheredCollider(entity);
+			return found->second;
+		};
+		// The collider pairs a contact counts in by its sides: one for each side whose collider is a scripted gathered collider
+		// (and is not the partner's owner itself).
+		const auto forEachColliderPair = [&isScriptedCollider](const PhysicsSubShapeContact& contact, const auto& visit)
+		{
+			for (size_t side = 0; side < 2; ++side)
+			{
+				const UUID collider = contact.Colliders[side];
+				const UUID partner = contact.Owners[1 - side];
+				if (!collider.IsValid() || collider == contact.Owners[side] || collider == partner || !isScriptedCollider(collider))
+					continue;
+				visit(Utils::MakeColliderPairKey(collider, partner, contact.Pair.Kind));
+			}
+		};
+		// A touching record's contact is a candidate for the enter contact of its body pair and of its collider pairs.
+		const auto offerTouchingContact = [&offerFirstContact, &forEachColliderPair](const PhysicsSubShapeKey& key, const PhysicsSubShapeContact& contact)
+		{
+			offerFirstContact(contact.Pair, Utils::MakeFirstContact(key, contact, Utils::GetLowSide(contact.Pair, contact)));
+			forEachColliderPair(contact, [&offerFirstContact, &key, &contact](const PhysicsPairKey& pair)
+			{
+				offerFirstContact(pair, Utils::MakeFirstContact(key, contact, Utils::GetLowSide(pair, contact)));
+			});
+		};
+		// The state of a contact an index names (verified: going on with the indexes out of step would corrupt the pairs).
+		const auto findContact = [&state](const PhysicsSubShapeKey& key) -> PhysicsSubShapeContact*
+		{
+			const auto found = state.Contacts.find(key);
+			ENGINE_CORE_VERIFY(found != state.Contacts.end(), "PhysicsSystem: an index names a contact that does not exist (indexes and Contacts out of step)");
+			return found != state.Contacts.end() ? &found->second : nullptr;
+		};
+		const auto markTouched = [&state](const PhysicsSubShapeContact& contact)
+		{
+			state.Pairs[contact.Pair].Touched = true;
+			for (const PhysicsPairKey& key : contact.ColliderPairs)
+				state.Pairs[key].Touched = true;
+		};
+
 		for (const ContactEvent& record : state.World->DrainContactEvents())
 		{
 			const PhysicsSubShapeKey contact = Utils::MakeSubShapeKey(record);
-			if (record.Kind == ContactEventKind::Added)
+			if (record.Kind == ContactEventKind::Removed)
 			{
-				const std::optional<ResolvedBody> a = resolve(record.BodyA, record.ColliderA);
-				const std::optional<ResolvedBody> b = resolve(record.BodyB, record.ColliderB);
-				if (!a.has_value() || !b.has_value() || a->Owner == b->Owner)
-					continue;
-				const bool aIsLow = a->Owner < b->Owner;
-				const PhysicsPairKey key{ .Low = aIsLow ? a->Owner : b->Owner,
-					.High = aIsLow ? b->Owner : a->Owner,
-					.Kind = record.IsSensor ? PhysicsPairKind::Trigger : PhysicsPairKind::Collision };
-				if (const auto existing = state.ContactPairs.find(contact); existing != state.ContactPairs.end() && existing->second != key)
-				{
-					// The same sub-shape pair now belongs to another pair of owners (a body rebuilt in place): move it.
-					const auto previousPair = state.Pairs.find(existing->second);
-					ENGINE_CORE_VERIFY(previousPair != state.Pairs.end(), "PhysicsSystem: a contact names a pair that does not exist");
-					if (previousPair != state.Pairs.end())
-						before.try_emplace(existing->second, previousPair->second.Contacts.size());
+				const auto found = state.Contacts.find(contact);
+				if (found == state.Contacts.end())
+					continue; // a contact of a body already destroyed, or one never recorded
+				touchContact(contact);
+				const auto pair = state.Pairs.find(found->second.Pair);
+				ENGINE_CORE_VERIFY(pair != state.Pairs.end() && pair->second.Contacts.contains(contact),
+					"PhysicsSystem: a contact's pair does not hold it (Contacts and Pairs out of step)");
+				const BodyHandle a(contact.BodyA);
+				const BodyHandle b(contact.BodyB);
+				const bool asleep = !record.FromCharacter && state.World->IsBodyValid(a) && state.World->IsBodyValid(b) && state.World->IsSleeping(a)
+					&& state.World->IsSleeping(b);
+				if (asleep)
+					found->second.Dormant = true;
+				else
 					state.EraseContact(contact);
-				}
-				PhysicsPair& pair = touch(key);
-				state.PairsByOwner[key.Low].insert(key);
-				state.PairsByOwner[key.High].insert(key);
-				const auto [entry, inserted] = pair.Contacts.try_emplace(contact);
-				entry->second.Dormant = false;
-				if (inserted)
-					state.AddContact(contact, key);
-
-				FirstContact candidate;
-				candidate.LowCollider = aIsLow ? a->Collider : b->Collider;
-				candidate.HighCollider = aIsLow ? b->Collider : a->Collider;
-				candidate.LowSubShape = aIsLow ? record.SubShapeA : record.SubShapeB;
-				candidate.HighSubShape = aIsLow ? record.SubShapeB : record.SubShapeA;
-				candidate.Point = record.Point;
-				candidate.Normal = aIsLow ? record.Normal : -record.Normal;
-				candidate.RelativeSpeed = record.RelativeNormalSpeed;
-				candidate.Bits = { std::bit_cast<uint32_t>(candidate.Point.x), std::bit_cast<uint32_t>(candidate.Point.y), std::bit_cast<uint32_t>(candidate.Point.z),
-					std::bit_cast<uint32_t>(candidate.Normal.x), std::bit_cast<uint32_t>(candidate.Normal.y), std::bit_cast<uint32_t>(candidate.Normal.z),
-					std::bit_cast<uint32_t>(candidate.RelativeSpeed) };
-				if (const auto [first, added] = firstContacts.try_emplace(key, candidate); !added && candidate < first->second)
-					first->second = candidate;
 				continue;
 			}
 
-			const auto owner = state.ContactPairs.find(contact);
-			if (owner == state.ContactPairs.end())
-				continue; // a contact of a body already destroyed, or one never recorded
-			const PhysicsPairKey key = owner->second;
-			PhysicsPair& pair = touch(key);
-			const BodyHandle a(contact.BodyA);
-			const BodyHandle b(contact.BodyB);
-			const bool asleep = !record.FromCharacter && state.World->IsBodyValid(a) && state.World->IsBodyValid(b) && state.World->IsSleeping(a)
-				&& state.World->IsSleeping(b);
-			const auto known = pair.Contacts.find(contact);
-			ENGINE_CORE_VERIFY(known != pair.Contacts.end(), "PhysicsSystem: a contact's pair does not hold it (ContactPairs and Pairs out of step)");
-			if (asleep && known != pair.Contacts.end())
-				known->second.Dormant = true;
-			else
+			const std::optional<ResolvedBody> a = resolve(record.BodyA, record.ColliderA);
+			const std::optional<ResolvedBody> b = resolve(record.BodyB, record.ColliderB);
+			if (!a.has_value() || !b.has_value() || a->Owner == b->Owner)
+				continue;
+			// The record's sides in the contact's order (its lower body handle first), with its normal from the first to the
+			// second.
+			const bool recordAIsFirst = record.BodyA.GetValue() <= record.BodyB.GetValue();
+			const std::array<UUID, 2> owners = recordAIsFirst ? std::array<UUID, 2>{ a->Owner, b->Owner } : std::array<UUID, 2>{ b->Owner, a->Owner };
+			const std::array<UUID, 2> colliders = recordAIsFirst ? std::array<UUID, 2>{ a->Collider, b->Collider }
+																 : std::array<UUID, 2>{ b->Collider, a->Collider };
+			const glm::vec3 normal = recordAIsFirst ? record.Normal : -record.Normal;
+			const auto keep = [&record, &normal](PhysicsSubShapeContact& target)
+			{
+				target.Point = record.Point;
+				target.Normal = normal;
+				target.RelativeSpeed = record.RelativeNormalSpeed;
+			};
+
+			if (record.Kind == ContactEventKind::Touched)
+			{
+				// A speculative contact touches now (decision 3): its pairs may enter.
+				const auto found = state.Contacts.find(contact);
+				if (found == state.Contacts.end() || found->second.Owners != owners)
+					continue; // a contact the system never recorded (an owner it does not know), or one of other bodies
+				touchContact(contact);
+				PhysicsSubShapeContact& contactState = found->second;
+				state.SetContactSides(contact, contactState, owners, colliders);
+				contactState.Touching = true;
+				keep(contactState);
+				markTouched(contactState);
+				offerTouchingContact(contact, contactState);
+				continue;
+			}
+
+			const bool aIsLow = a->Owner < b->Owner;
+			const PhysicsPairKey key{ .Low = aIsLow ? a->Owner : b->Owner,
+				.High = aIsLow ? b->Owner : a->Owner,
+				.Kind = record.IsSensor ? PhysicsPairKind::Trigger : PhysicsPairKind::Collision };
+			if (const auto existing = state.Contacts.find(contact); existing != state.Contacts.end() && existing->second.Pair != key)
+			{
+				// The same sub-shape pair now belongs to another pair of owners (a body rebuilt in place): move it.
+				touchContact(contact);
 				state.EraseContact(contact);
+			}
+			static_cast<void>(touch(key));
+			state.PairsByOwner[key.Low].insert(key);
+			state.PairsByOwner[key.High].insert(key);
+			const auto existing = state.Contacts.find(contact);
+			const bool isNew = existing == state.Contacts.end();
+			if (!isNew)
+				touchContact(contact);
+			PhysicsSubShapeContact& contactState = isNew ? state.AddContact(contact, key) : existing->second;
+			const bool wasTouching = !isNew && contactState.Touching;
+			contactState.Dormant = false;
+			// A contact Jolt adds again (after its bodies slept) keeps having touched; one that touched now has.
+			contactState.Touching = wasTouching || record.Touching;
+			state.SetContactSides(contact, contactState, owners, colliders);
+			if (!wasTouching || record.Touching)
+				keep(contactState);
+			if (contactState.Touching)
+				markTouched(contactState);
+			if (record.Touching)
+				offerTouchingContact(contact, contactState);
 		}
 		// Dormant contacts that a step begun with one of their bodies awake did not report again have really ended.
 		const std::vector<PhysicsSubShapeKey> eligible(state.EligibleDormantContacts.begin(), state.EligibleDormantContacts.end());
 		state.EligibleDormantContacts.clear();
 		for (const PhysicsSubShapeKey& contact : eligible)
 		{
-			const auto owner = state.ContactPairs.find(contact);
-			if (owner == state.ContactPairs.end())
+			const auto found = state.Contacts.find(contact);
+			if (found == state.Contacts.end())
 				continue;
-			PhysicsPair& pair = touch(owner->second);
-			const auto known = pair.Contacts.find(contact);
-			ENGINE_CORE_VERIFY(known != pair.Contacts.end(), "PhysicsSystem: a contact's pair does not hold it (ContactPairs and Pairs out of step)");
-			if (known == pair.Contacts.end() || known->second.Dormant)
+			touchContact(contact);
+			const auto pair = state.Pairs.find(found->second.Pair);
+			ENGINE_CORE_VERIFY(pair != state.Pairs.end() && pair->second.Contacts.contains(contact),
+				"PhysicsSystem: a contact's pair does not hold it (Contacts and Pairs out of step)");
+			if (found->second.Dormant)
 				state.EraseContact(contact);
 		}
 
-		// Transitions over the step: a count that rose from zero enters, one that fell to zero exits; an active pair left
-		// without contacts otherwise (a body PreStep destroyed and nothing re-established) ends with a synthesized exit.
+		// M20 (decision 2): the contacts of bodies whose shape PreStep replaced in place may name other colliders now; resolve
+		// the colliders of their sub-shapes again.
+		const std::set<uint32_t> reshaped = std::exchange(state.ReattributedBodies, {});
+		for (const uint32_t handle : reshaped)
+		{
+			const auto contacts = state.ContactsByBody.find(handle);
+			if (contacts == state.ContactsByBody.end() || !state.Bodies.contains(handle) || !state.World->IsBodyValid(BodyHandle(handle)))
+				continue;
+			const std::vector<PhysicsSubShapeKey> keys(contacts->second.begin(), contacts->second.end());
+			for (const PhysicsSubShapeKey& contact : keys)
+			{
+				PhysicsSubShapeContact* contactState = findContact(contact);
+				if (contactState == nullptr)
+					continue;
+				std::array<UUID, 2> colliders = contactState->Colliders;
+				const std::array<std::pair<uint32_t, uint32_t>, 2> sides = { { { contact.BodyA, contact.SubShapeA }, { contact.BodyB, contact.SubShapeB } } };
+				for (size_t side = 0; side < 2; ++side)
+				{
+					if (sides[side].first != handle)
+						continue;
+					const BodyHandle body(handle);
+					if (const std::optional<ResolvedBody> resolved = resolve(body, state.World->GetSubShapeCollider(body, sides[side].second)))
+						colliders[side] = resolved->Collider;
+				}
+				if (colliders == contactState->Colliders)
+					continue;
+				touchContact(contact);
+				state.SetContactSides(contact, *contactState, contactState->Owners, colliders);
+			}
+		}
+
+		// M20 (decision 2): the collider pairs. A scripted gathered collider's contacts count in its collider pairs; a collider
+		// that is not one (any more) counts in none, and when it is still present, its active collider pairs end with
+		// synthesized exits.
+		std::set<UUID> colliders;
+		for (const auto& [collider, contacts] : state.GatheredContacts)
+			colliders.insert(collider);
+		for (const auto& [collider, pairs] : state.ColliderPairsByCollider)
+			colliders.insert(collider);
+		for (const UUID collider : colliders)
+		{
+			if (!isScriptedCollider(collider))
+			{
+				const auto owned = state.ColliderPairsByCollider.find(collider);
+				if (owned == state.ColliderPairsByCollider.end())
+					continue;
+				const bool leaving = state.IsPresent(collider);
+				const std::vector<PhysicsPairKey> keys(owned->second.begin(), owned->second.end());
+				for (const PhysicsPairKey& key : keys)
+				{
+					PhysicsPair& pair = touch(key);
+					const std::vector<PhysicsSubShapeKey> contacts(pair.Contacts.begin(), pair.Contacts.end());
+					for (const PhysicsSubShapeKey& contact : contacts)
+					{
+						if (PhysicsSubShapeContact* contactState = findContact(contact))
+							state.UnlinkColliderPair(contact, *contactState, key);
+					}
+					if (leaving && pair.Active)
+						pair.Unconfirmed = true;
+				}
+				continue;
+			}
+			const auto gathered = state.GatheredContacts.find(collider);
+			if (gathered == state.GatheredContacts.end())
+				continue;
+			const std::vector<PhysicsSubShapeKey> contacts(gathered->second.begin(), gathered->second.end());
+			for (const PhysicsSubShapeKey& contact : contacts)
+			{
+				PhysicsSubShapeContact* contactState = findContact(contact);
+				const std::optional<size_t> side = contactState != nullptr ? Utils::FindGatheredSide(*contactState, collider) : std::nullopt;
+				const UUID partner = side.has_value() ? contactState->Owners[1 - *side] : UUID();
+				if (!side.has_value() || partner == collider)
+					continue;
+				const PhysicsPairKey key = Utils::MakeColliderPairKey(collider, partner, contactState->Pair.Kind);
+				if (std::binary_search(contactState->ColliderPairs.begin(), contactState->ColliderPairs.end(), key))
+					continue;
+				PhysicsPair& pair = touch(key);
+				pair.ColliderBody = contactState->Owners[*side];
+				state.LinkColliderPair(contact, *contactState, key);
+				if (contactState->Touching)
+					pair.Touched = true;
+			}
+		}
+
+		// Transitions over the step: an inactive pair enters when it has touched since the step began (decision 3: a contact
+		// added without touching cannot start it), a count that fell to zero exits; an active pair left without contacts
+		// otherwise (a body PreStep destroyed and nothing re-established, or a collider that left) ends with a synthesized
+		// exit.
 		std::vector<PendingPairEvent> events;
 		std::vector<PhysicsPairKey> finished;
 		for (auto& [key, pair] : state.Pairs)
 		{
 			const size_t after = pair.Contacts.size();
 			const auto counted = before.find(key);
-			const size_t previous = counted != before.end() ? counted->second : after;
+			const PairBefore previous = counted != before.end() ? counted->second : PairBefore{ .Contacts = after, .Touched = pair.Touched };
 			if (after > 0)
 			{
 				pair.Unconfirmed = false;
-				if (!pair.Active && previous == 0)
+				if (!pair.Active && pair.Touched && !previous.Touched)
 				{
 					PendingPairEvent event;
 					event.Key = key;
 					event.Type = Utils::GetEnterType(key.Kind);
-					if (const auto first = firstContacts.find(key); first != firstContacts.end())
+					event.ColliderBody = pair.ColliderBody;
+					auto first = firstContacts.find(key);
+					if (first == firstContacts.end())
+					{
+						// No touching record of the step (a collider pair that its collider's script or a resolution started):
+						// the first of its touching contacts.
+						for (const PhysicsSubShapeKey& contact : pair.Contacts)
+						{
+							const PhysicsSubShapeContact* contactState = findContact(contact);
+							if (contactState != nullptr && contactState->Touching)
+								offerFirstContact(key, Utils::MakeFirstContact(contact, *contactState, Utils::GetLowSide(key, *contactState)));
+						}
+						first = firstContacts.find(key);
+					}
+					if (first != firstContacts.end())
 					{
 						event.LowCollider = first->second.LowCollider;
 						event.HighCollider = first->second.HighCollider;
@@ -1573,24 +1957,27 @@ namespace Engine {
 			PendingPairEvent event;
 			event.Key = key;
 			event.Type = Utils::GetExitType(key.Kind);
-			event.Synthesized = pair.Unconfirmed || previous == 0;
+			event.Synthesized = pair.Unconfirmed || previous.Contacts == 0;
+			event.ColliderBody = pair.ColliderBody;
 			events.push_back(event);
 		}
 		for (const PhysicsPairKey& key : finished)
 			state.ErasePair(key);
 
+		// The canonical order (PhysicsEventOrderKey): a total order on the step's events, since each pair has one event.
 		std::sort(events.begin(), events.end(), [](const PendingPairEvent& a, const PendingPairEvent& b)
 		{
-			return std::tie(a.Key.Low, a.Key.High, a.Type) < std::tie(b.Key.Low, b.Key.High, b.Type);
+			return Utils::GetPairOrderKey(a.Key, a.Type, a.ColliderBody) < Utils::GetPairOrderKey(b.Key, b.Type, b.ColliderBody);
 		});
 
-		// Dispatch (§9.4 steps 3 and 4; the drop rules of IPhysicsEventListener).
+		// Dispatch (§9.4 steps 3 and 4; the drop rules of IPhysicsEventListener). A body event goes to Low, then High; a
+		// collider event to its collider alone, with SelfBody its body's owner.
 		std::vector<bool> blocked(events.size());
 		for (size_t index = 0; index < events.size(); ++index)
 			blocked[index] = !state.IsPresent(events[index].Key.Low) || !state.IsPresent(events[index].Key.High);
-		const auto deliver = [&state, &step](PhysicsEventType type, UUID self, UUID other, const PhysicsContact& contact, bool synthesized)
+		const auto deliver = [&state, &step](PhysicsEventType type, UUID self, UUID other, UUID selfBody, const PhysicsContact& contact, bool synthesized)
 		{
-			const PhysicsEvent event{ .Type = type, .Self = self, .Other = other, .Contact = contact, .Synthesized = synthesized, .Tick = step.Tick, .SelfBody = self };
+			const PhysicsEvent event{ .Type = type, .Self = self, .Other = other, .Contact = contact, .Synthesized = synthesized, .Tick = step.Tick, .SelfBody = selfBody };
 			state.LastEvents.push_back(event);
 			if (state.Listener != nullptr)
 				state.Listener->OnPhysicsEvent(event);
@@ -1605,6 +1992,11 @@ namespace Engine {
 			PhysicsPair& pair = found->second;
 			const UUID low = event.Key.Low;
 			const UUID high = event.Key.High;
+			const bool isColliderPair = event.Key.IsColliderPair();
+			const bool lowReceives = !isColliderPair || event.Key.Collider == low;
+			const bool highReceives = !isColliderPair || event.Key.Collider == high;
+			const UUID lowBody = isColliderPair && lowReceives ? pair.ColliderBody : low;
+			const UUID highBody = isColliderPair && highReceives ? pair.ColliderBody : high;
 			if (Utils::IsEnter(event.Type))
 			{
 				pair.Active = true;
@@ -1622,15 +2014,15 @@ namespace Engine {
 					.Collider = event.HighCollider,
 					.OtherCollider = event.LowCollider };
 				// Callbacks cannot erase pairs (only the step hooks do, and they are not reentrant), so `pair` stays valid.
-				if (state.IsPresent(low))
+				if (lowReceives && state.IsPresent(low))
 				{
 					pair.EnteredLow = true;
-					deliver(event.Type, low, high, lowContact, false);
+					deliver(event.Type, low, high, lowBody, lowContact, false);
 				}
-				if (state.IsPresent(high))
+				if (highReceives && state.IsPresent(high))
 				{
 					pair.EnteredHigh = true;
-					deliver(event.Type, high, low, highContact, false);
+					deliver(event.Type, high, low, highBody, highContact, false);
 				}
 				continue;
 			}
@@ -1641,9 +2033,9 @@ namespace Engine {
 			const PhysicsContact highContact{ .Collider = pair.HighCollider, .OtherCollider = pair.LowCollider };
 			state.ErasePair(event.Key);
 			if (toLow && state.IsPresent(low))
-				deliver(event.Type, low, high, lowContact, event.Synthesized);
+				deliver(event.Type, low, high, lowBody, lowContact, event.Synthesized);
 			if (toHigh && state.IsPresent(high))
-				deliver(event.Type, high, low, highContact, event.Synthesized);
+				deliver(event.Type, high, low, highBody, highContact, event.Synthesized);
 		}
 		state.Dispatching = false;
 	}
@@ -1674,7 +2066,8 @@ namespace Engine {
 			if (gone.empty())
 				break;
 
-			// Close their pairs (sorted by key): a synthesized exit for each side that got the enter and is still here.
+			// Close their pairs: a synthesized exit for each side that got the enter and is still here, in the canonical order
+			// (PhysicsEventOrderKey; a collider pair's to its collider alone).
 			std::set<PhysicsPairKey> closing;
 			std::set<UUID> woken;
 			for (const UUID owner : gone)
@@ -1691,12 +2084,21 @@ namespace Engine {
 				if (found != state.Pairs.end() && found->second.Active)
 				{
 					const PhysicsPair& pair = found->second;
-					exits.push_back(ClosingPair{
-						.Key = key, .ToLow = pair.EnteredLow, .ToHigh = pair.EnteredHigh, .LowCollider = pair.LowCollider, .HighCollider = pair.HighCollider });
+					exits.push_back(ClosingPair{ .Key = key,
+						.ToLow = pair.EnteredLow,
+						.ToHigh = pair.EnteredHigh,
+						.LowCollider = pair.LowCollider,
+						.HighCollider = pair.HighCollider,
+						.ColliderBody = pair.ColliderBody });
 				}
 				state.ErasePair(key);
 			}
-			const auto deliver = [&state, tick](PhysicsEventType type, UUID self, UUID other, UUID collider, UUID otherCollider)
+			std::sort(exits.begin(), exits.end(), [](const ClosingPair& a, const ClosingPair& b)
+			{
+				return Utils::GetPairOrderKey(a.Key, Utils::GetExitType(a.Key.Kind), a.ColliderBody)
+					< Utils::GetPairOrderKey(b.Key, Utils::GetExitType(b.Key.Kind), b.ColliderBody);
+			});
+			const auto deliver = [&state, tick](PhysicsEventType type, UUID self, UUID other, UUID selfBody, UUID collider, UUID otherCollider)
 			{
 				const PhysicsEvent event{ .Type = type,
 					.Self = self,
@@ -1704,7 +2106,7 @@ namespace Engine {
 					.Contact = PhysicsContact{ .Collider = collider, .OtherCollider = otherCollider },
 					.Synthesized = true,
 					.Tick = tick,
-					.SelfBody = self };
+					.SelfBody = selfBody };
 				state.LastEvents.push_back(event);
 				if (state.Listener != nullptr)
 					state.Listener->OnPhysicsEvent(event);
@@ -1713,10 +2115,13 @@ namespace Engine {
 			for (const ClosingPair& ending : exits)
 			{
 				const PhysicsEventType type = Utils::GetExitType(ending.Key.Kind);
+				const bool isColliderPair = ending.Key.IsColliderPair();
+				const UUID lowBody = isColliderPair && ending.Key.Collider == ending.Key.Low ? ending.ColliderBody : ending.Key.Low;
+				const UUID highBody = isColliderPair && ending.Key.Collider == ending.Key.High ? ending.ColliderBody : ending.Key.High;
 				if (ending.ToLow && state.IsPresent(ending.Key.Low))
-					deliver(type, ending.Key.Low, ending.Key.High, ending.LowCollider, ending.HighCollider);
+					deliver(type, ending.Key.Low, ending.Key.High, lowBody, ending.LowCollider, ending.HighCollider);
 				if (ending.ToHigh && state.IsPresent(ending.Key.High))
-					deliver(type, ending.Key.High, ending.Key.Low, ending.HighCollider, ending.LowCollider);
+					deliver(type, ending.Key.High, ending.Key.Low, highBody, ending.HighCollider, ending.LowCollider);
 			}
 			state.Dispatching = false;
 
@@ -1991,7 +2396,8 @@ namespace Engine {
 			{
 				const auto found = state.Pairs.find(key);
 				ENGINE_CORE_VERIFY(found != state.Pairs.end(), "PhysicsSystem: an owner's pair does not exist (PairsByOwner and Pairs out of step)");
-				if (found == state.Pairs.end() || !found->second.Active)
+				// The body's pairs: a collider pair is its collider's (M20), not the body's.
+				if (found == state.Pairs.end() || !found->second.Active || key.IsColliderPair())
 					continue;
 				const PhysicsPair& pair = found->second;
 				const bool low = key.Low == report.Owner;
@@ -2024,7 +2430,7 @@ namespace Engine {
 		stats.CharacterCount = static_cast<uint32_t>(state.Characters.size());
 		stats.ContactPairCount = static_cast<uint32_t>(std::count_if(state.Pairs.begin(), state.Pairs.end(), [](const auto& pair)
 		{
-			return pair.second.Active;
+			return pair.second.Active && !pair.first.IsColliderPair();
 		}));
 		return stats;
 	}

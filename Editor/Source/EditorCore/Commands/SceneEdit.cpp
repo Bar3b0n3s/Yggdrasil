@@ -4,6 +4,7 @@
 #include "EditorCore/Commands/SceneEditCommand.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Play/EditorPlayController.h"
+#include "EditorCore/Private/PrefabInstances.h"
 #include "EditorCore/Private/SceneEditRollback.h"
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
@@ -43,14 +44,20 @@ namespace Engine {
 			return parent.IsValid() ? parent.GetUUID() : UUID();
 		}
 
-		// True when `entity` (the instance root itself when `isRoot`) or a prefab member below it was touched by the active edit.
-		// A nested instance root answers for its own members, and user children (no PrefabLinkComponent) never count: they
-		// are stored in the scene as they are, not as overrides (§5.5).
+		// True when `entity` (the instance root itself when `isRoot`) or a prefab member below it was touched by the active edit,
+		// or when the child list of one of them, or of a user child below them, changed: a member below it may have been
+		// destroyed or replaced, a deletion the refresh records as a RemoveEntity (Docs/Decisions/0031-m20-contract.md
+		// decision 7). The entities of instances nested in it count as its own (decision 8: the outermost instance records
+		// their overrides); an instance a user placed below a member is outermost and answers for its own members; and the
+		// edits of user children (no PrefabLinkComponent) never count: they are stored in the scene as they are, not as
+		// overrides (§5.5).
 		static bool HasTouchedMember(const Scene& scene, const ChangeTracker& tracker, ConstEntity entity, bool isRoot)
 		{
-			if (!isRoot && entity.TryGetComponent<PrefabInstanceComponent>() != nullptr)
+			if (!isRoot && IsOutermostPrefabInstance(entity))
 				return false;
 			if ((isRoot || entity.TryGetComponent<PrefabLinkComponent>() != nullptr) && !tracker.NeedsSnapshot(entity.GetUUID()))
+				return true;
+			if (!tracker.NeedsChildOrder(entity.GetUUID()))
 				return true;
 			for (const UUID child : entity.GetChildren())
 			{
@@ -61,22 +68,50 @@ namespace Engine {
 			return false;
 		}
 
+		// Keeps decision 8's link invariant through hierarchy edits: a nested instance root that the edit moved out of the
+		// instance enclosing it (entity.reparent and the hierarchy panel's drag, of the root or of a subtree holding it, to
+		// the scene root or into another instance) keeps an OuterPrefabEntityID that no ancestor derives its id from, which
+		// strict loading refuses (SCENE_INCONSISTENT_PREFAB_LINK). Its key is cleared, tracked, so it becomes an outermost
+		// instance, as StructuralValidator's repair makes it; RecordTouchedInstanceOverrides then records its own overrides
+		// against its prefab, while the instance it left records its deletion (RemoveEntity), all in the edit's undo step.
+		static void DetachMovedNestedInstances(Scene& scene)
+		{
+			std::vector<UUID> detached;
+			std::as_const(scene).ForEachCanonical([&detached](ConstEntity entity)
+			{
+				if (HasLostEnclosingInstance(entity))
+					detached.push_back(entity.GetUUID());
+			});
+			for (const UUID id : detached)
+			{
+				scene.FindEntityByID(id).Patch<PrefabLinkComponent>([](PrefabLinkComponent& link)
+				{
+					link.OuterPrefabEntityID = UUID();
+				});
+			}
+		}
+
 		// §5.5 "When an edit commits on an instance member, the change tracker records field-level overrides": refreshes the
-		// override records of every prefab instance whose root or members the active edit touched, against the prefab's
-		// current version (PrefabInstantiator::RefreshOverrides; overrides are derived by diffing, ADR 0006 decision 17), while
-		// the tracker still runs, so the new records are part of the same undo step and scene.open's rebuild from prefab +
-		// overrides (ADR 0010 decision 11) keeps the edit. An instance whose prefab is not registered keeps its records
-		// (PREFAB_MISSING_ASSET); one whose prefab cannot be loaded or diffed keeps them with a warning.
+		// override records of every outermost prefab instance whose root or entities (those of its nested instances included)
+		// the active edit touched, against the prefab's current version (PrefabInstantiator::RefreshOverrides; overrides are
+		// derived by diffing, ADR 0006 decision 17), while the tracker still runs, so the new records are part of the same
+		// undo step and scene.open's rebuild from prefab + overrides (ADR 0010 decision 11) keeps the edit. An instance that
+		// became outermost in the edit (prefab.unpack of the instance enclosing it, or a move out of it:
+		// DetachMovedNestedInstances) records its own overrides now. An instance whose prefab is not registered keeps its
+		// records (PREFAB_MISSING_ASSET); one whose prefab cannot be loaded or diffed keeps them with a warning.
 		static void RecordTouchedInstanceOverrides(EditorContext& context, Scene& scene, std::string_view label)
 		{
+			DetachMovedNestedInstances(scene);
 			const Scene& constScene = scene;
 			const ChangeTracker& tracker = scene.GetChangeTracker();
 			std::vector<std::pair<UUID, AssetHandle>> touched;
 			constScene.ForEachCanonical([&constScene, &tracker, &touched](ConstEntity entity)
 			{
-				const PrefabInstanceComponent* instance = entity.TryGetComponent<PrefabInstanceComponent>();
-				if (instance != nullptr && instance->Prefab.GetHandle().IsValid() && HasTouchedMember(constScene, tracker, entity, true))
-					touched.emplace_back(entity.GetUUID(), instance->Prefab.GetHandle());
+				if (!IsOutermostPrefabInstance(entity))
+					return;
+				const PrefabInstanceComponent& instance = entity.GetComponent<PrefabInstanceComponent>();
+				if (instance.Prefab.GetHandle().IsValid() && HasTouchedMember(constScene, tracker, entity, true))
+					touched.emplace_back(entity.GetUUID(), instance.Prefab.GetHandle());
 			});
 			if (touched.empty())
 				return;

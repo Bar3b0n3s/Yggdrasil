@@ -99,7 +99,7 @@ export type PlayRunState = "Edit" | "Play" | "Simulate" | "Paused"
 export type PlayStepRender = "Every" | "Last" | "None"
 
 -- What a prefab override changes on one prefab entity of an instance.
-export type PrefabOverrideKind = "Field" | "AddComponent" | "RemoveComponent" | "EntityKey"
+export type PrefabOverrideKind = "Field" | "AddComponent" | "RemoveComponent" | "EntityKey" | "RemoveEntity"
 
 -- What a new project starts with.
 export type ProjectTemplate = "Empty" | "Basic3D"
@@ -398,7 +398,7 @@ declare extern type DirectionalLight with
 	ShadowDistance: number
 end
 
--- A UUID and scene generation identifying an entity; no native address is exposed.
+-- A UUID and scene generation identifying an entity; no native address is exposed. After a Destroy, the entity's reads keep working until the destruction flush, while IsValid is false and its writes raise.
 declare extern type Entity with
 	-- Validate and add a component and return its proxy; Script instances are synchronized before returning, and nil is returned when the new Script's OnCreate destroyed the entity. Each value holds at most 4096 bytes of text (strings, map keys and Variant text together). [All modes; Runtime|Test; mutates]
 	AddComponent: (self: Entity, name: string, values: {[string]: any}?) -> any
@@ -424,7 +424,7 @@ declare extern type Entity with
 	Environment: Environment?
 	-- Find the first exact child name in depth-first sibling order; recursive defaults false. [All modes; Runtime|Test; pure/read]
 	FindChild: (self: Entity, name: string, recursive: boolean?) -> Entity?
-	-- Copy live children in sibling order. [All modes; Runtime|Test; pure/read]
+	-- Copy the children in sibling order. [All modes; Runtime|Test; pure/read]
 	GetChildren: (self: Entity) -> {Entity}
 	-- Get a component proxy, or nil when absent. [All modes; Runtime|Test; pure/read]
 	function GetComponent(self, name: "Transform"): Transform?
@@ -1049,6 +1049,8 @@ declare Scene: {
 	FindByPath: (path: string) -> Entity?,
 	-- Returns the first tagged entity in canonical scene order, or nil. [All modes; Runtime|Test; pure/read]
 	FindByTag: (tag: string) -> Entity?,
+	-- Returns the scene asset the current scene came from, or nil for a scene without one. [All modes; Runtime|Test; pure/read]
+	GetCurrent: () -> AssetRef?,
 	-- Returns the number of live entities, excluding pending destruction. [All modes; Runtime|Test; pure/read]
 	GetEntityCount: () -> number,
 	-- Returns a detached copy of the parameters passed to the current scene. [All modes; Runtime|Test; pure/read]
@@ -1061,6 +1063,8 @@ declare Scene: {
 	Instantiate: (prefab: AssetRef, position: vector?, rotation: Quat?, parent: Entity?) -> Entity,
 	-- Requests a scene/VM replacement at the end of the frame with copied JSON parameters; never destroys the calling VM inline. [All modes; Runtime|Test; mutates]
 	Load: (scene: AssetRef, parameters: {[string]: any}?) -> (),
+	-- Requests a restart of the current scene from the document it started from, at the end of the frame; parameters replace the load parameters, absent keeps them. [All modes; Runtime|Test; mutates]
+	Reload: (parameters: {[string]: any}?) -> (),
 }
 
 -- Behaviour class registration.

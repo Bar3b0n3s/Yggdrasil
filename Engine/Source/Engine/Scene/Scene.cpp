@@ -293,11 +293,13 @@ namespace Engine {
 
 		if (m_Specification.Runtime)
 		{
-			// §5.7: the entities stay in the registry until the flush point, invisible to lookups, the hierarchy and IsValid.
+			// §5.7: the entities stay in the registry until the flush point, invisible to lookups, the hierarchy and IsValid,
+			// but still readable through FindReadableEntityByID (M20, decision 4).
 			for (const entt::entity handle : subtree)
 			{
 				m_Registry.emplace<PendingDestroyTag>(handle);
 				m_PendingDestroys.push_back(handle);
+				m_PendingIndex.insert_or_assign(m_Registry.get<IDComponent>(handle).ID, handle);
 			}
 		}
 		else
@@ -319,6 +321,7 @@ namespace Engine {
 				m_Registry.destroy(handle);
 		}
 		m_PendingDestroys.clear();
+		m_PendingIndex.clear();
 	}
 
 	void Scene::Clear()
@@ -340,6 +343,7 @@ namespace Engine {
 		m_EntityIndex.clear();
 		m_RootEntities.clear();
 		m_PendingDestroys.clear();
+		m_PendingIndex.clear();
 		++m_Revision;
 		m_CanonicalOrderDirty = true;
 	}
@@ -356,6 +360,25 @@ namespace Engine {
 		AssertMainThread();
 		const entt::entity handle = FindHandle(id);
 		return handle == entt::null ? ConstEntity{} : ConstEntity(handle, this);
+	}
+
+	Entity Scene::FindReadableEntityByID(UUID id)
+	{
+		const ConstEntity found = std::as_const(*this).FindReadableEntityByID(id);
+		return found.GetScene() == nullptr ? Entity{} : Entity(found.GetHandle(), this);
+	}
+
+	ConstEntity Scene::FindReadableEntityByID(UUID id) const
+	{
+		AssertMainThread();
+		if (const entt::entity live = FindHandle(id); live != entt::null)
+			return ConstEntity(live, this);
+		const auto pending = m_PendingIndex.find(id);
+		if (pending == m_PendingIndex.end())
+			return ConstEntity{};
+		ENGINE_CORE_ASSERT(m_Registry.valid(pending->second) && m_Registry.all_of<PendingDestroyTag>(pending->second),
+			"The pending-destruction index of scene '{}' names an entity that is not pending for {}", m_Specification.Name, id);
+		return ConstEntity(pending->second, this);
 	}
 
 	Entity Scene::FindEntityByPath(std::string_view path)

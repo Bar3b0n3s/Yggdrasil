@@ -90,8 +90,10 @@ namespace Engine {
 	inline constexpr std::string_view SceneParentCycleCode = "SCENE_PARENT_CYCLE";
 	// Warning in both modes: a child listed before its parent, normalized to canonical order.
 	inline constexpr std::string_view SceneNonCanonicalOrderCode = "SCENE_NONCANONICAL_ORDER";
-	// Repair: the member is unpacked (its PrefabLink removed), also when the instance root's Prefab component is dropped as
-	// invalid.
+	// A PrefabLink whose InstanceRoot names no instance root. Repair: the member is unpacked (its PrefabLink removed), also
+	// when the instance root's Prefab component is dropped as invalid. M20 (Docs/Decisions/0031-m20-contract.md decision 10):
+	// also an OuterPrefabEntityID on an entity without a Prefab component, or that no ancestor instance root derives the
+	// entity's ID from (repair: cleared), and a nested instance root with overrides (repair: dropped).
 	inline constexpr std::string_view SceneInconsistentPrefabLinkCode = "SCENE_INCONSISTENT_PREFAB_LINK";
 	// Repair: every extra after the first in canonical order is dropped.
 	inline constexpr std::string_view SceneDuplicateUniqueComponentCode = "SCENE_DUPLICATE_UNIQUE_COMPONENT";
@@ -110,12 +112,17 @@ namespace Engine {
 	inline constexpr std::string_view SceneUnknownKeyCode = "SCENE_UNKNOWN_KEY";
 	// "Root" missing, naming no entity, or not the only root. Not repairable.
 	inline constexpr std::string_view PrefabInvalidRootCode = "PREFAB_INVALID_ROOT";
-	// A "Prefab" or "PrefabLink" component in a prefab document: prefabs never contain nested instances (they are flattened
-	// when a prefab is created, §5.5). Repair: dropped, which flattens the nested instance.
+	// A "Prefab" or "PrefabLink" component on a prefab document's root entity: the prefab's root is never an instance root
+	// or a member itself (M20, Docs/Decisions/0031-m20-contract.md decision 8: instances nested below the root are live).
+	// Repair: dropped.
 	inline constexpr std::string_view PrefabNestedInstanceCode = "PREFAB_NESTED_INSTANCE";
 	// Warning (PrefabInstantiator::UpdateInstance; Revert applies no overrides): an override that no longer matches the
 	// prefab (its prefab entity, component, field or entity key is gone, or its value is no longer valid there) was dropped
 	// (§5.5 "Update").
 	inline constexpr std::string_view PrefabStaleOverrideCode = "PREFAB_STALE_OVERRIDE";
+	// A prefab nests itself, directly or through other prefabs (M20, Docs/Decisions/0031-m20-contract.md decision 8). A
+	// document alone cannot show it: the editor refuses a prefab update whose propagation meets one (Validation, one issue
+	// per prefab on the cycle), and project validation reports it on every prefab on a cycle. Also a validation code.
+	inline constexpr std::string_view PrefabCycleCode = "PREFAB_CYCLE";
 
 }

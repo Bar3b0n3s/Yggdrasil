@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/Scene/Components/BuiltinComponents.h"
 
+#include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Random.h"
 #include "Engine/Reflection/FuzzySuggest.h"
 #include "Engine/Reflection/TypeRegistry.h"
@@ -106,7 +107,7 @@ namespace Engine {
 		}
 
 		// The type-level rules of PrefabOverride (§5.5, ADR 0006 decision 18): the combinations of Kind, Component, Field and
-		// Value that contradict each other. Whether PrefabEntityID, Component and Field name something that exists is not a
+		// Value that contradict each other. Whether Path, Component and Field name something that exists is not a
 		// type-level rule: the Value resolver reports an unknown (or empty) component or field, and PrefabInstantiator drops
 		// an override whose prefab entity or target no longer exists, with a warning, at the next update (§5.5). A
 		// default-constructed override (Kind Field, no names) is therefore a valid, unresolved one, as the registry suite's
@@ -133,6 +134,16 @@ namespace Engine {
 						context.Error("Component", "must be empty for an EntityKey override");
 					if (!IsEntityKeyName(prefabOverride.Field))
 						context.Error("Field", "must be Name, Active or Tags for an EntityKey override");
+					break;
+				}
+				case PrefabOverrideKind::RemoveEntity:
+				{
+					if (!prefabOverride.Component.empty())
+						context.Error("Component", "must be empty for a RemoveEntity override");
+					if (!prefabOverride.Field.empty())
+						context.Error("Field", "must be empty for a RemoveEntity override");
+					if (!prefabOverride.Value.IsNull())
+						context.Error("Value", "must be null for a RemoveEntity override");
 					break;
 				}
 			}
@@ -166,6 +177,13 @@ namespace Engine {
 					}
 					break;
 				}
+				case PrefabOverrideKind::RemoveEntity:
+				{
+					prefabOverride.Component.clear();
+					prefabOverride.Field.clear();
+					prefabOverride.Value = VariantValue();
+					break;
+				}
 			}
 		}
 
@@ -194,6 +212,25 @@ namespace Engine {
 		{
 			static const TypeInfo RemovedValueType(MakeFreeFormVariantType());
 			static const FieldInfo RemovedValueField(MakeRemovedComponentValueField(RemovedValueType));
+			return RemovedValueField;
+		}
+
+		// The schema-only field describing a RemoveEntity override's Value.
+		static FieldInfo::Specification MakeRemovedEntityValueField(const TypeInfo& type)
+		{
+			FieldInfo::Specification specification;
+			specification.Name = "Value";
+			specification.Description = "A RemoveEntity override has no value: null.";
+			specification.Type = &type;
+			return specification;
+		}
+
+		// The schema of a RemoveEntity override's Value: free-form JSON, which ValidatePrefabOverride restricts to null.
+		// Immutable constants after their thread-safe first-use initialization; they outlive every resolution.
+		static const FieldInfo& GetRemovedEntityValueSchema()
+		{
+			static const TypeInfo RemovedValueType(MakeFreeFormVariantType());
+			static const FieldInfo RemovedValueField(MakeRemovedEntityValueField(RemovedValueType));
 			return RemovedValueField;
 		}
 
@@ -288,8 +325,8 @@ namespace Engine {
 
 		// The VariantSchemaResolver of PrefabOverride.Value (§5.4): the overridden field's schema for Field (free-form JSON
 		// for a field whose own values resolve against their component, GetComponentResolvedValueSchema), the component's
-		// whole schema for AddComponent, null for RemoveComponent (of a component that exists), the PrefabEntityKeys field
-		// for EntityKey.
+		// whole schema for AddComponent, null for RemoveComponent (of a component that exists) and RemoveEntity, the
+		// PrefabEntityKeys field for EntityKey.
 		static Result<const FieldInfo*> ResolvePrefabOverrideValue(const ResolveContext& context)
 		{
 			if (context.OwnerType == nullptr || context.OwnerType->GetType().GetKey() != TypeKeyOf<PrefabOverride>())
@@ -331,6 +368,8 @@ namespace Engine {
 						return MakeError(ErrorCode::NotFound, "'{}' is not an entity key (Name, Active or Tags)", target.Field);
 					return field;
 				}
+				case PrefabOverrideKind::RemoveEntity:
+					return &GetRemovedEntityValueSchema();
 			}
 
 			ENGINE_CORE_ASSERT(false, "Unknown PrefabOverrideKind {}", std::to_underlying(target.Kind));
@@ -451,6 +490,36 @@ namespace Engine {
 			return Value::FromQuat(TransformSystem::GetRenderRotation(*context.Owner));
 		}
 
+		// The Prefab component from version 1 to 2 (Docs/Decisions/0031-m20-contract.md decision 10): each override's
+		// "PrefabEntityID": X becomes "Path": [X] at the same position, its other members unchanged. Errors: Validation
+		// (located within the component) for "Overrides" that is not an array or an override that is not an object.
+		static Status MigratePrefabInstanceV1(Json& component)
+		{
+			const JsonReader reader(component);
+			ENGINE_TRY(reader.ExpectType(JsonType::Object));
+			const std::optional<JsonReader> overrides = reader.FindMember("Overrides");
+			if (!overrides)
+				return {};
+			ENGINE_TRY_ASSIGN(const size_t count, overrides->GetArraySize());
+			Json migrated = Json::array();
+			for (size_t index = 0; index < count; ++index)
+			{
+				ENGINE_TRY_ASSIGN(const JsonReader entry, overrides->GetElement(index));
+				ENGINE_TRY(entry.ExpectType(JsonType::Object));
+				Json upgraded = Json::object();
+				for (auto member = entry.GetValue().begin(); member != entry.GetValue().end(); ++member)
+				{
+					if (member.key() == "PrefabEntityID")
+						upgraded["Path"] = Json::array({ *member });
+					else
+						upgraded[member.key()] = *member;
+				}
+				migrated.push_back(std::move(upgraded));
+			}
+			component["Overrides"] = std::move(migrated);
+			return {};
+		}
+
 	}
 
 	void RegisterCoreComponents(TypeRegistry& registry)
@@ -459,7 +528,8 @@ namespace Engine {
 			.Entry(PrefabOverrideKind::Field, "Field", "One field of one component; Value is the field's value.")
 			.Entry(PrefabOverrideKind::AddComponent, "AddComponent", "A component added to the prefab entity; Value is the whole component.")
 			.Entry(PrefabOverrideKind::RemoveComponent, "RemoveComponent", "A component of the prefab entity removed from it; Value is null.")
-			.Entry(PrefabOverrideKind::EntityKey, "EntityKey", "An entity key (Name, Active or Tags); Value is the key's value.");
+			.Entry(PrefabOverrideKind::EntityKey, "EntityKey", "An entity key (Name, Active or Tags); Value is the key's value.")
+			.Entry(PrefabOverrideKind::RemoveEntity, "RemoveEntity", "A prefab entity removed from the instance with its prefab descendants; Value is null.");
 
 		registry.Struct<PrefabEntityKeys>("PrefabEntityKeys", "The entity keys an EntityKey prefab override can change, with their file spelling.")
 			.Field("Name", &PrefabEntityKeys::Name, "The entity's display name (the entity key \"Name\").")
@@ -468,12 +538,13 @@ namespace Engine {
 			.Validate(&Utils::ValidateEntityKeys)
 			.Generate(&Utils::MakeEntityKeysValid);
 
-		registry.Struct<PrefabOverride>("PrefabOverride", "One recorded difference between a prefab instance and its prefab.")
-			.Field("PrefabEntityID", &PrefabOverride::PrefabEntityID,
-				"The prefab-local ID of the entity the override applies to (never the derived instance ID).")
-			.Field("Kind", &PrefabOverride::Kind, "What the override changes: a field, an added or removed component, or an entity key.")
+		registry.Struct<PrefabOverride>("PrefabOverride", "One recorded difference between an outermost prefab instance and its prefab.")
+			.Field("Path", &PrefabOverride::Path,
+				"The entity the override applies to: its id in the outermost prefab, or the ids of the nested instance roots on the way and then its id in its own prefab.")
+			.Field("Kind", &PrefabOverride::Kind,
+				"What the override changes: a field, an added or removed component, an entity key, or the entity removed from the instance.")
 			.Field("Component", &PrefabOverride::Component,
-				"The registry name of the component for Field, AddComponent and RemoveComponent; empty for EntityKey.")
+				"The registry name of the component for Field, AddComponent and RemoveComponent; empty for EntityKey and RemoveEntity.")
 			.Field("Field", &PrefabOverride::Field, "The field name for Field; Name, Active or Tags for EntityKey; empty otherwise.")
 			.VariantField("Value", &PrefabOverride::Value,
 				"The overriding value, checked against the schema of its target: the field, the whole component, or the entity key.",
@@ -537,22 +608,28 @@ namespace Engine {
 			.VirtualField<glm::quat>("RenderRotation", "The rendered world rotation, interpolated between fixed steps (read-only).",
 				&Utils::GetRenderRotation, nullptr);
 
-		RegisterComponent<PrefabInstanceComponent>(registry, "Prefab", "Marks the root of a prefab instance and records its overrides.")
+		RegisterComponent<PrefabInstanceComponent>(registry, "Prefab",
+			"Marks the root of a prefab instance; an outermost one records the overrides of its instance and of the instances nested in it.")
 			.Category("Core")
-			.Version(1)
+			.Version(2)
 			.Flags(ComponentFlags::Hidden)
 			.RemoveFlags(ComponentFlags::EditorVisible | ComponentFlags::Removable)
+			.Migration(1, &Utils::MigratePrefabInstanceV1)
 			.Field("Prefab", &PrefabInstanceComponent::Prefab, "The prefab asset the instance was created from.")
 			.Field("Overrides", &PrefabInstanceComponent::Overrides,
-				"The instance's differences from the prefab, sorted by prefab entity, component, kind and field.");
+				"The differences of an outermost instance from its prefab, sorted by path, component, kind and field; empty on a nested instance root.");
 
-		RegisterComponent<PrefabLinkComponent>(registry, "PrefabLink", "Links a prefab instance member, the root included, to its prefab entity.")
+		RegisterComponent<PrefabLinkComponent>(registry, "PrefabLink",
+			"Links an entity of a prefab instance, its root included, to its entity in the prefab of its innermost instance.")
 			.Category("Core")
 			.Version(1)
 			.Flags(ComponentFlags::Hidden)
 			.RemoveFlags(ComponentFlags::EditorVisible | ComponentFlags::Removable)
-			.Field("PrefabEntityID", &PrefabLinkComponent::PrefabEntityID, "The prefab-local ID of the entity this member was created from.")
-			.Field("InstanceRoot", &PrefabLinkComponent::InstanceRoot, "The root entity of the instance, which has the Prefab component.");
+			.Field("PrefabEntityID", &PrefabLinkComponent::PrefabEntityID, "The entity's ID in the prefab of its innermost instance.")
+			.Field("InstanceRoot", &PrefabLinkComponent::InstanceRoot,
+				"The root of the entity's innermost instance (an instance root names itself), which has the Prefab component.")
+			.Field("OuterPrefabEntityID", &PrefabLinkComponent::OuterPrefabEntityID,
+				"On a nested instance root: its id in the prefab of the instance that encloses it; null on every other entity.");
 	}
 
 }

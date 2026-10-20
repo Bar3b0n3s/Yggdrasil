@@ -152,6 +152,37 @@ namespace Engine {
 			}));
 		}
 
+		// Docs/Decisions/0031-m20-contract.md decision 3: CharacterVirtual reports through its listener only the contacts its
+		// update collided with (a body it moved into, or the ground it stands on), never one merely within its predictive
+		// contact distance, so the character's contacts are recorded touching.
+		TEST_CASE("CharacterController: a character records the contacts it collides with, touching, and not a wall it walks past")
+		{
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			const BodyHandle floor = CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f));
+			// A wall whose face is 5 cm beside the capsule (radius 0.3 m), well within the character's predictive contact
+			// distance, along the way it walks.
+			const BodyHandle wall = CreateBlock(*world, glm::vec3(0.85f, 2.0f, 0.0f), glm::vec3(0.5f, 1.0f, 10.0f));
+			Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f, 0.5f, -5.0f));
+			static_cast<void>(world->DrainContactEvents());
+			Walk(*world, *character, glm::vec3(0.0f, 0.0f, 2.0f), 120);
+			CHECK(character->GetPose().Position.z > -2.0f);
+			CHECK(character->GetPose().Position.x == doctest::Approx(0.0f).epsilon(1.0e-3));
+			const std::vector<ContactEvent> contacts = world->DrainContactEvents();
+			const auto added = [&contacts](BodyHandle body)
+			{
+				return std::count_if(contacts.begin(), contacts.end(), [body](const ContactEvent& event)
+				{
+					return event.Kind == ContactEventKind::Added && event.FromCharacter && event.BodyB == body;
+				});
+			};
+			CHECK(added(floor) >= 1);
+			CHECK(added(wall) == 0);
+			CHECK(std::all_of(contacts.begin(), contacts.end(), [](const ContactEvent& event)
+			{
+				return event.Kind != ContactEventKind::Added || event.Touching;
+			}));
+		}
+
 		TEST_CASE("CharacterController: invalid descriptions are refused before Jolt sees them")
 		{
 			Scope<PhysicsWorld> world = CreateCharacterWorld();

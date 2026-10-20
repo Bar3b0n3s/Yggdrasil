@@ -122,6 +122,8 @@ namespace Engine {
 			BuildStartSceneMissingCode,
 			BuildSceneMissingCode,
 			TestSuiteInvalidCode,
+			// M20 (Scene/LoadReport.h, Docs/Decisions/0031-m20-contract.md decision 10), appended in landing order.
+			PrefabCycleCode,
 		};
 
 		// The documentation of every code, in ValidatorCodes order (M14, ADR 0022 decision 10): Docs/Reference/Validation.md, the
@@ -144,8 +146,10 @@ namespace Engine {
 				"A scene file has an entity whose Parent names no entity of the scene or forms a parent cycle.",
 				"Open the scene with scene.open {repair: true}, which reparents orphans to the root and cuts cycles, then scene.save." },
 			ValidationCodeInfo{ SceneInconsistentPrefabLinkCode, "Error", false,
-				"A scene file has a prefab instance member whose PrefabLink does not match its instance root.",
-				"Open the scene with scene.open {repair: true}, which unpacks the member, then scene.save, or re-instantiate the prefab." },
+				"A scene file has a prefab instance member whose PrefabLink does not match its instance root, an OuterPrefabEntityID that "
+				"names no enclosing instance, or a nested instance root that records overrides.",
+				"Open the scene with scene.open {repair: true}, which unpacks the member, clears the OuterPrefabEntityID or drops the "
+				"nested root's overrides, then scene.save, or re-instantiate the prefab." },
 			ValidationCodeInfo{ EntityDuplicateIdCode, "Error", false,
 				"Two entities of a scene file carry the same ID.",
 				"Open the scene with scene.open {repair: true}, which gives the later duplicate a fresh ID, then scene.save." },
@@ -270,6 +274,9 @@ namespace Engine {
 			ValidationCodeInfo{ TestSuiteInvalidCode, "Error", false,
 				"A Testing.Suites entry names a script that is not a TestSuite, or a scene that is not a registered Scene asset.",
 				"Assign a script that returns Test.Suite, and create the scene or leave Scene empty for an empty test scene." },
+			ValidationCodeInfo{ PrefabCycleCode, "Error", false,
+				"A prefab nests itself, directly or through other prefabs.",
+				"Remove the nested instance that closes the cycle from one of the prefab files, then reimport it." },
 		};
 
 		// The code documentation lists exactly the codes, in order.
@@ -1405,6 +1412,82 @@ namespace Engine {
 			}
 		}
 
+		// PREFAB_CYCLE (M20, Docs/Decisions/0031-m20-contract.md decision 8): every prefab file whose document nests itself,
+		// directly or through other prefabs. The nesting graph is read from the files: the Prefab component of each instance
+		// in a prefab's document names the prefab it nests. One Error on each prefab on a cycle.
+		static void CheckPrefabNesting(const EditorContext& editor, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			const TypeRegistry& registry = editor.GetTypeRegistry();
+			const ComponentInfo* instanceInfo = registry.FindComponent<PrefabInstanceComponent>();
+			if (instanceInfo == nullptr)
+				return;
+			std::map<AssetHandle, std::set<AssetHandle>> nests; // prefab -> the prefabs its document nests
+			std::map<AssetHandle, std::string> files;
+			for (const AssetRecord* record : editor.GetAssets().GetRegistry().GetRecords())
+			{
+				const AssetMetadata& metadata = record->Metadata;
+				if (metadata.Kind != AssetMetaKind::Asset || metadata.Importer != "Prefab")
+					continue;
+				files.emplace(metadata.Handle, std::string(record->SourcePath.GetPath()));
+				// An unreadable or malformed file is the import's to report (ASSET_IMPORT_FAILED).
+				const Result<std::string> text = editor.GetVfs().ReadText(record->SourcePath);
+				if (!text.has_value())
+					continue;
+				const Result<Json> document = JsonReader::Parse(*text);
+				if (!document.has_value() || !document->is_object())
+					continue;
+				const auto entities = document->find("Entities");
+				if (entities == document->end() || !entities->is_array())
+					continue;
+				std::set<AssetHandle>& nested = nests[metadata.Handle];
+				for (const Json& entity : *entities)
+				{
+					const auto components = entity.is_object() ? entity.find("Components") : entity.end();
+					if (!entity.is_object() || components == entity.end() || !components->is_object())
+						continue;
+					const auto instance = components->find(instanceInfo->GetName());
+					if (instance == components->end() || !instance->is_object())
+						continue;
+					const auto prefab = instance->find("Prefab");
+					if (prefab == instance->end())
+						continue;
+					if (const Result<UUID> handle = JsonReader(*prefab).ReadUUID(); handle && handle->IsValid())
+						nested.insert(*handle);
+				}
+			}
+
+			for (const auto& [prefab, file] : files)
+			{
+				// On a cycle when it reaches itself through the prefabs it nests.
+				std::set<AssetHandle> seen;
+				std::vector<AssetHandle> pending{ prefab };
+				bool cycle = false;
+				while (!pending.empty() && !cycle)
+				{
+					const auto found = nests.find(pending.back());
+					pending.pop_back();
+					if (found == nests.end())
+						continue;
+					for (const AssetHandle next : found->second)
+					{
+						cycle = cycle || next == prefab;
+						if (seen.insert(next).second)
+							pending.push_back(next);
+					}
+				}
+				if (!cycle)
+					continue;
+				DiagnosticSite site;
+				site.File = file;
+				site.Subject = prefab.ToString();
+				CollectedDiagnostic collected = MakeDiagnostic(PrefabCycleCode, DiagnosticSeverity::Error,
+					"the prefab nests itself, directly or through other prefabs, so a change of it could never finish propagating", site,
+					"remove the nested instance that closes the cycle from one of the prefab files", false);
+				collected.Diagnostic.Asset = prefab.ToString();
+				diagnostics.push_back(std::move(collected));
+			}
+		}
+
 		constexpr std::string_view EntitiesPointer = "/Entities/";
 		constexpr std::string_view ScriptFieldsPointer = "/Components/Script/Fields/";
 
@@ -1676,6 +1759,7 @@ namespace Engine {
 				ENGINE_TRY_ASSIGN(collection.Scanned, ScanAssets(context, diagnostics));
 				CollectImportDiagnostics(context, diagnostics);
 				CheckAssetFiles(context, diagnostics);
+				CheckPrefabNesting(context, diagnostics);
 				ENGINE_TRY(CheckPrefabScriptFields(context, diagnostics));
 				ENGINE_TRY_ASSIGN(const std::vector<VfsPath> scenes, ListSceneFiles(context));
 				for (const VfsPath& scene : scenes)
