@@ -177,6 +177,72 @@ namespace Engine {
 			CHECK(document["Entities"][2]["Components"]["Versioned"] == ParseJson(R"({ "New": 7 })"));
 		}
 
+		// Docs/Decisions/0031-m20-contract.md decision 10 (PrefabInstance version 2): an override names its target by a path,
+		// so version 1's single PrefabEntityID becomes a one-element Path at the same place, everything else unchanged.
+		TEST_CASE("Migrations: a Prefab component at version 1 migrates each override's PrefabEntityID to a one-element Path" * doctest::skip(true))
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			Json document = ParseJson(R"({ "Format": "Scene", "Version": 1, "Name": "Bricks", "Seed": 0,
+				"ComponentVersions": { "Prefab": 1, "PrefabLink": 1 },
+				"Entities": [ { "ID": "5e00000000000001", "Name": "Brick", "Parent": null, "Active": true, "Tags": [],
+				                "Components": {
+				                  "Prefab": { "Prefab": "11d04163305d2e9f", "Overrides": [
+				                    { "PrefabEntityID": "55425a047af78945", "Kind": "Field", "Component": "Script", "Field": "Fields", "Value": { "Points": 3 } },
+				                    { "PrefabEntityID": "55425a047af78945", "Kind": "EntityKey", "Component": "", "Field": "Name", "Value": "Brick" } ] },
+				                  "PrefabLink": { "PrefabEntityID": "55425a047af78945", "InstanceRoot": "5e00000000000001" } } } ] })");
+			LoadReport report;
+			const Status upgraded = Migrations::UpgradeDocument(document, DocumentKind::Scene, *registry, report);
+			REQUIRE_MESSAGE(upgraded.has_value(), (upgraded ? std::string() : upgraded.error().ToString()));
+			CHECK(report.Migrated);
+			CHECK(document["ComponentVersions"]["Prefab"] == 2);
+			const Json& overrides = document["Entities"][0]["Components"]["Prefab"]["Overrides"];
+			REQUIRE(overrides.size() == 2);
+			CHECK(overrides[0] == ParseJson(R"({ "Path": ["55425a047af78945"], "Kind": "Field", "Component": "Script", "Field": "Fields", "Value": { "Points": 3 } })"));
+			CHECK(KeysOf(overrides[1]) == std::vector<std::string>{ "Path", "Kind", "Component", "Field", "Value" });
+			CHECK(overrides[1]["Path"] == ParseJson(R"(["55425a047af78945"])"));
+			// PrefabLink stays at version 1; its additive key needs no migration (a missing key reads as its default).
+			CHECK(document["ComponentVersions"]["PrefabLink"] == 1);
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decisions 17 and 19 (Script version 2, S-MULTI): the Script component becomes
+		// an ordered list of slots, so version 1's one script is the list's only slot, unchanged inside it; and the prefab
+		// overrides that target the Script component follow it in the same upgrade, whatever the Prefab component's version:
+		// a Field override names slot 0's member, and an AddComponent override's value becomes a one-slot list.
+		TEST_CASE("Migrations: a Script component at version 1 becomes a one-slot list, its prefab overrides with it" * doctest::skip(true))
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			Json document = ParseJson(R"({ "Format": "Scene", "Version": 1, "Name": "Slots", "Seed": 0,
+				"ComponentVersions": { "Prefab": 1, "PrefabLink": 1, "Script": 1 },
+				"Entities": [ { "ID": "5e00000000000001", "Name": "Brick", "Parent": null, "Active": true, "Tags": [],
+				                "Components": {
+				                  "Prefab": { "Prefab": "11d04163305d2e9f", "Overrides": [
+				                    { "PrefabEntityID": "55425a047af78945", "Kind": "Field", "Component": "Script", "Field": "Fields", "Value": { "Points": 3 } },
+				                    { "PrefabEntityID": "55425a047af78945", "Kind": "Field", "Component": "Script", "Field": "ExecutionOrder", "Value": 2 },
+				                    { "PrefabEntityID": "66425a047af78946", "Kind": "AddComponent", "Component": "Script", "Field": "",
+				                      "Value": { "Script": "22d04163305d2e9f", "Fields": {}, "ExecutionOrder": 0 } },
+				                    { "PrefabEntityID": "55425a047af78945", "Kind": "EntityKey", "Component": "", "Field": "Name", "Value": "Brick" } ] },
+				                  "PrefabLink": { "PrefabEntityID": "55425a047af78945", "InstanceRoot": "5e00000000000001" },
+				                  "Script": { "Script": "33d04163305d2e9f", "Fields": { "Points": 3 }, "ExecutionOrder": 2 } } },
+				              { "ID": "5e00000000000002", "Name": "Plain", "Parent": null, "Active": true, "Tags": [],
+				                "Components": { "Script": { "Script": "44d04163305d2e9f" } } } ] })");
+			LoadReport report;
+			const Status upgraded = Migrations::UpgradeDocument(document, DocumentKind::Scene, *registry, report);
+			REQUIRE_MESSAGE(upgraded.has_value(), (upgraded ? std::string() : upgraded.error().ToString()));
+			CHECK(report.Migrated);
+			CHECK(document["ComponentVersions"]["Script"] == 2);
+			const Json& components = document["Entities"][0]["Components"];
+			CHECK(components["Script"] == ParseJson(R"({ "Scripts": [ { "Script": "33d04163305d2e9f", "Fields": { "Points": 3 }, "ExecutionOrder": 2 } ] })"));
+			// A version 1 component without its optional members keeps them absent inside its slot.
+			CHECK(document["Entities"][1]["Components"]["Script"] == ParseJson(R"({ "Scripts": [ { "Script": "44d04163305d2e9f" } ] })"));
+			const Json& overrides = components["Prefab"]["Overrides"];
+			REQUIRE(overrides.size() == 4);
+			CHECK(overrides[0]["Field"] == Json("Scripts/0/Fields"));
+			CHECK(overrides[0]["Value"] == ParseJson(R"({ "Points": 3 })"));
+			CHECK(overrides[1]["Field"] == Json("Scripts/0/ExecutionOrder"));
+			CHECK(overrides[2]["Value"] == ParseJson(R"({ "Scripts": [ { "Script": "22d04163305d2e9f", "Fields": {}, "ExecutionOrder": 0 } ] })"));
+			CHECK(overrides[3]["Field"] == Json("Name"));
+		}
+
 		TEST_CASE("Migrations: a failing component migration is located in the document and changes nothing")
 		{
 			const Scope<TypeRegistry> registry = CreateVersionedRegistry();

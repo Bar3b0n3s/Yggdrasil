@@ -96,6 +96,18 @@ namespace Engine {
 		// Takes ownership of the detached parameters. Callers and hosts move the tree into pending storage so accepted
 		// MaxJsonDepth values never require a recursive JSON copy at this boundary.
 		[[nodiscard]] virtual Status RequestSceneLoad(AssetHandle scene, Json parameters) = 0;
+		// Scene.Reload (M20, W-P06; Docs/Decisions/0031-m20-contract.md decision 5): requests, like RequestSceneLoad, the
+		// replacement of the current scene at the end of the frame, by the document the current scene was started from: the
+		// session's start document (in editor play the play copy, unsaved edits included) while the current scene is the
+		// one the session started with, otherwise the document of the scene asset the last Scene.Load loaded, as it was
+		// then. `parameters` replaces the load parameters; nullopt keeps the current scene's (GetLoadParameters). One
+		// transition per frame: a second Scene.Load or Scene.Reload in the same frame is refused with InvalidState, as a
+		// second RequestSceneLoad is.
+		[[nodiscard]] virtual Status RequestSceneReload(std::optional<Json> parameters) = 0;
+		// Scene.GetCurrent (M20): the scene asset the current scene came from (the editor's open scene or the play.start
+		// scene, a suite's scene, the Runtime's start scene, then the asset each Scene.Load names; a Scene.Reload keeps it);
+		// the invalid handle for a scene without an asset (an editor scene never saved).
+		[[nodiscard]] virtual AssetHandle GetCurrentScene() const = 0;
 		virtual void RequestQuit(int32_t exitCode) = 0;
 		virtual void RequestPause() = 0;
 		// Publish to Script logging, EventLog and host observability. fatal means second/hard memory breach; stop safely.

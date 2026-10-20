@@ -1099,6 +1099,18 @@ namespace Engine {
 		return std::optional<AutosaveRecoveryInfo>(recovery->Info);
 	}
 
+	Result<std::vector<AutosaveRecoveryInfo>> Autosave::FindRecoveries() const
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "M20 per-scene recovery contract (Docs/Decisions/0031-m20-contract.md decision 15, stream S-A)");
+	}
+
+	Status Autosave::OpenRecoveredProject(Scope<LoadedProject> /*project*/, std::span<const AutosaveRecoveryInfo> /*recoveries*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "M20 per-scene recovery contract (Docs/Decisions/0031-m20-contract.md decision 15, stream S-A)");
+	}
+
 	Status Autosave::Recover(const AutosaveRecoveryInfo& recovery)
 	{
 		State& state = *m_State;

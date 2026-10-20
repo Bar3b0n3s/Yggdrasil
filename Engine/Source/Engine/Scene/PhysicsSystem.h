@@ -74,7 +74,7 @@
 //     moved), and characters theirs, visiting bodies in canonical order, never in Jolt's active-body order; then the
 //     contacts are drained, mapped to owners, collapsed into body-pair begin and end events with a per-pair reference
 //     count of sub-shape contacts (net over the step's records: a pair whose count rises from zero enters, one whose count
-//     falls to zero exits), sorted by (UUID a, UUID b, type), and dispatched (§9.4 steps 1 to 4, PhysicsEvent,
+//     falls to zero exits), sorted by PhysicsEventOrderKey, and dispatched (§9.4 steps 1 to 4, PhysicsEvent,
 //     IPhysicsEventListener). Sleeping never ends a pair: a Removed record for a contact whose bodies fell asleep leaves
 //     it dormant (it still counts), and a dormant contact is dropped only after a step that began with one of its bodies
 //     awake and did not report it again.
@@ -88,13 +88,38 @@
 //     destroyed there joins the same loop). When it returns, no entity pending destruction or disabled has a body, a
 //     character or an active pair.
 //
+// M20 (Docs/Decisions/0031-m20-contract.md decisions 2 and 3):
+//   - The pending enter (W-P03). A contact that Jolt added without touching (ContactEvent::Touching false: a speculative
+//     contact, Physics/ContactBuffer.h) counts for its pair's lifetime but cannot start it: a pair enters at the first
+//     PostStep after which it holds a touching contact (an Added record that touches, or a Touched record), its enter's
+//     contact being the first of its touching contacts of that step by the same total order as today. A pair whose
+//     contacts all end before one touched reports nothing, neither enter nor exit; an entered pair exits when its last
+//     contact, touching or not, ends. The rule runs inside PostStep; it adds no PlaySessionPhase.
+//   - Collider events (W-P01). A scripted gathered collider, an entity whose Script component names a script (Script
+//     version 1: a valid Script handle; version 2: a slot with a script, decision 17) and whose solid colliders are
+//     gathered into another owner's body (a RigidBody's compound or an implicit static body's tree; it is in the body's
+//     PhysicsBodyEntry::Colliders and is not the body's owner), receives events of its own. The system reads the component
+//     alone, never the script or a VM, so a Simulate session decides the same way. A collider pair, keyed by
+//     (the collider entity, the partner's body owner, kind), counts only the contacts of the collider's own sub-shapes and
+//     follows every body-pair rule (the pending enter, dormant contacts, rebuilds and unconfirmed pairs, the drop rules,
+//     synthesized exits at the destroy and disable flushes of either side) with the collider entity as its only receiving
+//     side: PhysicsEvent::Self is the collider entity, SelfBody its body's owner, Other the partner's body owner, and the
+//     contact names the collider itself and the partner's collider of the first sub-shape pair, its normal pointing from
+//     the collider's body towards the partner. The partner and the body's owner keep their body-pair events unchanged. A
+//     collider that stops being a scripted gathered collider (its Script component removed or naming no script any more, a
+//     RigidBody of its own, moved out of the body) ends its collider pairs at the next PostStep with synthesized exits.
+//   - Order. Pair events are sorted by PhysicsEventOrderKey (Low owner, High owner, type, receiving collider); a body
+//     event's key has the null collider, so body events keep their relative order and a scene without scripted gathered
+//     colliders dispatches exactly as before. M21's 2D world and M26's height fields dispatch with the same key.
+//
 // Determinism (§9.1): bodies, characters, write-back, events and the state hash all follow canonical order or UUID order;
 // nothing iterates an unordered container to produce output; results do not depend on the worker thread count.
 //
 // Threading: main thread only (§4.11). Not copyable or movable. The system reads and writes its scene directly (a runtime
 // system, §5.1), so its writes do not count in the scene's revision.
 //
-// Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decisions 11 to 13).
+// Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decisions 11 to 13); M20, which owns the contact path in
+// phase 1, extends it (the M20 paragraph above; Docs/Decisions/0031-m20-contract.md).
 
 namespace Engine {
 
@@ -160,9 +185,37 @@ namespace Engine {
 		bool Synthesized = false;
 		// The tick whose PostStep or flush produced it.
 		uint64_t Tick = 0;
+		// M20 (Docs/Decisions/0031-m20-contract.md decision 2): the owner of the body the event concerns on Self's side:
+		// for a collider event, whose Self is the scripted gathered collider (see the file comment), that body's owner; for a
+		// body event Self, or the null UUID (the default), which also means a body event, so an event built without it
+		// (a test's, or a later milestone's dispatch) is a body event. The system sets it to Self on every body event.
+		UUID SelfBody{};
+
+		// Whether this is a collider event: SelfBody is set and differs from Self.
+		[[nodiscard]] bool IsColliderEvent() const { return SelfBody.IsValid() && SelfBody != Self; }
 
 		bool operator==(const PhysicsEvent&) const = default;
 	};
+
+	// The canonical order of pair events (§9.4 step 2, Docs/Decisions/0031-m20-contract.md decision 2): every system that
+	// dispatches PhysicsEvents sorts its pair events by this key, ascending, compared member by member (UUIDs by value).
+	// Low and High are the pair's two body owners, the lower UUID first; Collider is the null UUID for a body event and the
+	// receiving collider entity for a collider event. A body event delivers its callbacks to Low, then High; a collider
+	// event its one callback to Collider.
+	struct PhysicsEventOrderKey
+	{
+		UUID Low{};
+		UUID High{};
+		PhysicsEventType Type = PhysicsEventType::CollisionEnter;
+		UUID Collider{};
+
+		auto operator<=>(const PhysicsEventOrderKey&) const = default;
+	};
+
+	// The key of the pair event `event` was delivered for: Low and High from Self's body owner (SelfBody, or Self when
+	// SelfBody is null) and Other, Collider = Self for a collider event and the null UUID otherwise. Both callbacks of a body
+	// event map to one key, whether or not they set SelfBody.
+	[[nodiscard]] PhysicsEventOrderKey GetPhysicsEventOrderKey(const PhysicsEvent& event);
 
 	// Receives the sorted events and the run-time diagnostics (the interface scripting consumes in M13: the ScriptEngine
 	// dispatches each event to the scripts on Self, and turns diagnostics about refused bodies into script errors, §9.1).
@@ -173,8 +226,8 @@ namespace Engine {
 		virtual ~IPhysicsEventListener() = default;
 
 		// Called on the main thread from PostStep and FlushDestroyed, once per event, in this order: pair events sorted by
-		// (lower UUID, higher UUID, PhysicsEventType), and for each pair event first the callback whose Self is the lower
-		// UUID, then the other. What is dropped (§9.4 step 3):
+		// PhysicsEventOrderKey, and for each body event first the callback whose Self is the lower UUID, then the other (a
+		// collider event has one callback, to its collider). What is dropped (§9.4 step 3):
 		//   - the events of a pair with an entity that is already pending destruction or effectively disabled when the
 		//     dispatch starts (destroyed or disabled earlier in the tick, while its body still simulated): an enter is not
 		//     delivered and the pair is not recorded as active, so it never gets an exit; an exit is left to FlushDestroyed,

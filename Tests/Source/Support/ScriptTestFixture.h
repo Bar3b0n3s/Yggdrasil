@@ -83,6 +83,8 @@ namespace Engine {
 			[[nodiscard]] Status SetCursorMode(CursorMode mode) override;
 			[[nodiscard]] CursorMode GetCursorMode() const override { return Cursor; }
 			[[nodiscard]] Status RequestSceneLoad(AssetHandle scene, Json parameters) override;
+			[[nodiscard]] Status RequestSceneReload(std::optional<Json> parameters) override;
+			[[nodiscard]] AssetHandle GetCurrentScene() const override { return CurrentScene; }
 			void RequestQuit(int32_t exitCode) override { QuitCode = exitCode; }
 			void RequestPause() override { PauseRequested = true; }
 			void OnScriptError(const ScriptError& error, bool fatal) override;
@@ -106,6 +108,11 @@ namespace Engine {
 			std::optional<int32_t> QuitCode{};
 			AssetHandle RequestedScene{};
 			Json RequestedParameters{};
+			// Scene.Reload requests (the last one's parameters; nullopt: keep the current ones) and what Scene.GetCurrent
+			// returns.
+			bool ReloadRequested = false;
+			std::optional<Json> RequestedReloadParameters{};
+			AssetHandle CurrentScene{};
 			std::vector<ScriptError> Errors{};
 			bool FatalError = false;
 			std::vector<std::string> ExternalMutations{};

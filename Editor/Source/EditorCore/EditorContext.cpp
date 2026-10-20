@@ -558,6 +558,18 @@ namespace Engine {
 		return updated;
 	}
 
+	Result<std::vector<AssetHandle>> EditorContext::GetNestingPrefabs(std::span<const AssetHandle> /*prefabs*/) const
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "M20 nesting prefabs contract (Docs/Decisions/0031-m20-contract.md decision 8, stream A2)");
+	}
+
+	Result<Scope<Command>> EditorContext::CreateNestingPrefabUpdateCommand(std::span<const AssetHandle> /*prefabs*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "M20 nesting prefab update contract (Docs/Decisions/0031-m20-contract.md decision 8, stream A2)");
+	}
+
 	Result<Scope<Command>> EditorContext::CreatePrefabUpdateCommand(std::span<const AssetHandle> prefabs)
 	{
 		if (m_Scene == nullptr)
@@ -1124,6 +1136,73 @@ namespace Engine {
 		m_UiState.SetSelectedAsset({});
 	}
 
+	std::vector<OpenSceneId> EditorContext::GetOpenScenes() const
+	{
+		ENGINE_CONTRACT_STUB();
+		// M20 open scenes (Docs/Decisions/0031-m20-contract.md decision 13, stream S-A).
+		return {};
+	}
+
+	OpenSceneId EditorContext::GetActiveSceneId() const
+	{
+		ENGINE_CONTRACT_STUB();
+		return NoOpenScene;
+	}
+
+	OpenSceneId EditorContext::GetAddressedSceneId() const
+	{
+		ENGINE_CONTRACT_STUB();
+		return NoOpenScene;
+	}
+
+	OpenSceneId EditorContext::FindOpenScene(const VfsPath& /*path*/) const
+	{
+		ENGINE_CONTRACT_STUB();
+		return NoOpenScene;
+	}
+
+	Scene* EditorContext::FindScene(OpenSceneId /*id*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return nullptr;
+	}
+
+	const Scene* EditorContext::FindScene(OpenSceneId /*id*/) const
+	{
+		ENGINE_CONTRACT_STUB();
+		return nullptr;
+	}
+
+	Result<OpenSceneInfo> EditorContext::DescribeOpenScene(OpenSceneId /*id*/) const
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "M20 open scenes contract (Docs/Decisions/0031-m20-contract.md decision 13, stream S-A)");
+	}
+
+	bool EditorContext::IsAnySceneDirty() const
+	{
+		ENGINE_CONTRACT_STUB();
+		return false;
+	}
+
+	Result<OpenSceneId> EditorContext::AddScene(Scope<Scene> /*scene*/, std::optional<VfsPath> /*path*/, bool /*dirty*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "M20 open scenes contract (Docs/Decisions/0031-m20-contract.md decision 14, stream S-A)");
+	}
+
+	Status EditorContext::ActivateScene(OpenSceneId /*id*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "M20 open scenes contract (Docs/Decisions/0031-m20-contract.md decision 14, stream S-A)");
+	}
+
+	Status EditorContext::CloseScene(OpenSceneId /*id*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "M20 open scenes contract (Docs/Decisions/0031-m20-contract.md decision 14, stream S-A)");
+	}
+
 	bool EditorContext::IsSceneDirty() const
 	{
 		return m_Scene != nullptr && (m_SceneDirty || m_History.IsDirty());
@@ -1585,6 +1664,30 @@ namespace Engine {
 	std::vector<std::string> EditorDryRunScope::GetChangedPaths() const
 	{
 		return m_State->Overlay != nullptr ? m_State->Overlay->GetChangedPaths() : std::vector<std::string>{};
+	}
+
+	struct EditorSceneTargetScope::State
+	{
+		EditorContext* Context = nullptr; // documented back-reference: outlives the scope
+		OpenSceneId Scene = NoOpenScene;
+	};
+
+	EditorSceneTargetScope::EditorSceneTargetScope(ConstructionKey /*key*/, EditorContext& context, OpenSceneId scene)
+		: m_State(CreateScope<State>(State{ .Context = &context, .Scene = scene }))
+	{
+	}
+
+	Result<Scope<EditorSceneTargetScope>> EditorSceneTargetScope::Begin(EditorContext& /*context*/, OpenSceneId /*scene*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "M20 scene target scope contract (Docs/Decisions/0031-m20-contract.md decision 13, stream S-A)");
+	}
+
+	EditorSceneTargetScope::~EditorSceneTargetScope() = default;
+
+	OpenSceneId EditorSceneTargetScope::GetScene() const
+	{
+		return m_State->Scene;
 	}
 
 }

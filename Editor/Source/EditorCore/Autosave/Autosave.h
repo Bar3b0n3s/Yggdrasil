@@ -84,6 +84,19 @@ namespace Engine {
 	// Writes use generation directories under Library/Autosave and atomically publish the manifest LAST. Incomplete
 	// generations are ignored. Read-only/dry-run/no-project states never publish paths or write into the project.
 	// OS faults/signals do not call this service. Fatal writes can fail (OOM/I/O); failure never recurses into FatalError.
+	//
+	// Open scenes (M20, E-SCENES; Docs/Decisions/0031-m20-contract.md decision 15; stream S-A). Autosave is isolated per open
+	// scene: every member above that names "the scene" applies to each open scene on its own. Publish keeps one immutable
+	// snapshot slot per open scene (at most MaxOpenScenes, so the fatal path's slots stay fixed and bounded), each keyed by
+	// its scene document (path plus EditorContext's document epoch for that scene); a clean scene withdraws only its own.
+	// One generation holds one scene, as before M20: Save, and WriteFatalSnapshot from every published slot, write one
+	// generation per dirty open scene, in tab order, and publish the manifest once, last; retention keeps
+	// RetainedGenerations per scene. AutosaveWriteResult::Files lists every scene written, in tab order, and Generation is
+	// the last generation written. FindRecovery keeps offering the newest recoverable generation (the last of
+	// FindRecoveries, which offers one per scene); Recover installs its scene as the open scene of that source (replacing it
+	// when it is open, else as an additional open scene, EditorContext::AddScene), dirty with an empty history;
+	// DiscardSavedRecovery after an explicit save discards only the saved scene's generations. The generation and manifest
+	// formats are unchanged.
 	class Autosave
 	{
 	public:
@@ -133,6 +146,11 @@ namespace Engine {
 		// Reopening proves freshness from the stored base fingerprint and dirty revision, not process-local scene counters.
 		// Untitled scene is recoverable. Malformed manifests return Parse/Validation; no source files change.
 		[[nodiscard]] Result<std::optional<AutosaveRecoveryInfo>> FindRecovery() const;
+		// M20 (decision 15): FindRecovery's offer for every scene with a recoverable generation, one per scene source (its
+		// canonical path, or the untitled token), each the newest of its scene, ordered by the persisted manifest sequence of
+		// that newest generation (oldest first, so the scenes of one save come back in the tab order they were written in).
+		// Empty when nothing is recoverable. Errors: those of FindRecovery.
+		[[nodiscard]] Result<std::vector<AutosaveRecoveryInfo>> FindRecoveries() const;
 		// Validate all bytes into temporary CPU objects first, then install the recovered scene once, dirty, empty history.
 		// Never overwrite source Assets files. A failure leaves current scene/project data untouched. Requires the held
 		// writer lock: PermissionDenied read-only; InvalidState while a test run owns the editor; NotFound stale
@@ -147,6 +165,11 @@ namespace Engine {
 		// in the launcher and the transferred project lock is released. On success installs once, dirty, empty history,
 		// retaining the validated baseline in this same long-lived service for matching cleanup after explicit save.
 		[[nodiscard]] Status OpenRecoveredProject(Scope<LoadedProject> project, const AutosaveRecoveryInfo& recovery);
+		// M20 (decision 15): OpenRecoveredProject for several scenes (FindRecoveries' offers, in their order): every one is
+		// preflighted before anything opens, then each opens as an open scene, dirty with an empty history, in the given
+		// order, and the first becomes active. A failure of any leaves the editor in the launcher, as above. Errors: those
+		// above; InvalidArgument for an empty list, two offers of one scene source or more than MaxOpenScenes offers.
+		[[nodiscard]] Status OpenRecoveredProject(Scope<LoadedProject> project, std::span<const AutosaveRecoveryInfo> recoveries);
 		// After successful explicit save, discard only generations whose source matches the saved canonical path and
 		// captured source fingerprint (untitled uses the captured in-session document token until first save).
 		// Never discard another scene's recovery: a generation that cannot be read or belongs to another canonical project

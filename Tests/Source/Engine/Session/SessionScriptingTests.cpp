@@ -8,6 +8,7 @@
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Scene/AudioSystem.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
+#include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Scripting/ScriptEngine.h"
@@ -341,6 +342,139 @@ return Script.Define("Activation", T)
 			current.reset();
 			CHECK(audio.GetGroupVolume(AudioGroup::Music) == 0.75f);
 			CHECK_FALSE(audio.IsSimulationTimeOwned());
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 5 (W-P06, ADR 0026 P06): Scene.Load of the played scene loaded its saved
+		// file, dropping the play copy's unsaved edits. Scene.Reload restarts the current scene from the document it started
+		// from (here the play copy of a scene that has no asset at all), with new parameters or, without them, the current
+		// ones; one transition per frame.
+		TEST_CASE("PlaySession: Scene.Reload restarts the current scene from its start document with its parameters" * doctest::skip(true))
+		{
+			Test::ScriptTestFixture fixture;
+			static_cast<void>(fixture.GetScene().CreateEntity("Unsaved"));
+			auto created = PlaySession::CreateFromScene(Test::ScriptSessionSpecification(fixture), fixture.GetScene());
+			REQUIRE(created);
+			auto session = std::move(*created);
+			session->SetExtractionEnabled(false);
+			// What play changed is not in the start document; a second transition in the same frame is refused.
+			const auto requested = session->GetScripts()->Evaluate(R"(
+Scene.CreateEntity("Spawned")
+Scene.FindByName("Unsaved").Name = "Renamed"
+Scene.Reload({ Round = 2 })
+assert(not pcall(function() Scene.Reload() end))
+return true
+)",
+				{});
+			REQUIRE_MESSAGE(requested.has_value(), (requested ? "" : requested.error().ToString()));
+			CHECK(session->GetSceneGeneration() == 1);
+			session->Tick();
+			CHECK(session->GetSceneGeneration() == 2);
+			CHECK(session->GetLoadParameters() == Json{ { "Round", 2 } });
+			CHECK(session->GetScene().FindEntityByPath("/Unsaved").IsValid());
+			CHECK_FALSE(session->GetScene().FindEntityByPath("/Renamed").IsValid());
+			CHECK_FALSE(session->GetScene().FindEntityByPath("/Spawned").IsValid());
+
+			// Without parameters the current scene's are kept.
+			REQUIRE(session->GetScripts()->GetHost().RequestSceneReload(std::nullopt));
+			session->Tick();
+			CHECK(session->GetSceneGeneration() == 3);
+			CHECK(session->GetLoadParameters() == Json{ { "Round", 2 } });
+			CHECK(session->GetScene().FindEntityByPath("/Unsaved").IsValid());
+			CHECK(session->GetScriptErrors().GetErrors().empty());
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 5: Scene.GetCurrent names the scene asset the current scene came from:
+		// the session's, then the one Scene.Load named, kept by Scene.Reload; nil for a scene without an asset.
+		TEST_CASE("PlaySession: Scene.GetCurrent names the scene asset the session plays" * doctest::skip(true))
+		{
+			Test::ScriptTestFixture fixture;
+			auto document = SceneSerializer::ToJson(fixture.GetScene());
+			REQUIRE(document);
+			auto data = CreateRef<SceneData>();
+			data->Document = CreateRef<const Json>(*document);
+			const AssetHandle start(0x710051);
+			const AssetHandle next(0x710052);
+			fixture.GetAssetManager().Publish(start, data, "Assets/Scenes/Start.scene");
+			fixture.GetAssetManager().Publish(next, data, "Assets/Scenes/Next.scene");
+			{
+				auto specification = Test::ScriptSessionSpecification(fixture);
+				specification.SceneAsset = start;
+				auto created = PlaySession::Create(specification, *document);
+				REQUIRE(created);
+				auto session = std::move(*created);
+				session->SetExtractionEnabled(false);
+				CHECK(session->GetCurrentSceneAsset() == start);
+				const auto loaded = session->GetScripts()->Evaluate(R"(
+assert(Scene.GetCurrent() == Assets.Load("Assets/Scenes/Start.scene"))
+Scene.Load(Assets.Load("Assets/Scenes/Next.scene"))
+return true
+)",
+					{});
+				REQUIRE_MESSAGE(loaded.has_value(), (loaded ? "" : loaded.error().ToString()));
+				session->Tick();
+				CHECK(session->GetCurrentSceneAsset() == next);
+				REQUIRE(session->GetScripts()->GetHost().RequestSceneReload(std::nullopt));
+				session->Tick();
+				CHECK(session->GetSceneGeneration() == 3);
+				CHECK(session->GetCurrentSceneAsset() == next);
+				const auto kept = session->GetScripts()->Evaluate(R"(
+assert(Scene.GetCurrent() == Assets.Load("Assets/Scenes/Next.scene"))
+return true
+)",
+					{});
+				REQUIRE_MESSAGE(kept.has_value(), (kept ? "" : kept.error().ToString()));
+			}
+
+			// A session of a scene without an asset (an editor scene never saved).
+			auto unsaved = PlaySession::CreateFromScene(Test::ScriptSessionSpecification(fixture), fixture.GetScene());
+			REQUIRE(unsaved);
+			CHECK_FALSE((*unsaved)->GetCurrentSceneAsset().IsValid());
+			const auto none = (*unsaved)->GetScripts()->Evaluate("assert(Scene.GetCurrent() == nil)\nreturn true", {});
+			REQUIRE_MESSAGE(none.has_value(), (none ? "" : none.error().ToString()));
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 4 (W-P02, ADR 0026 P02): a partner's callback that read an entity
+		// destroyed earlier in the same dispatch raised "was destroyed". An entity pending destruction stays readable until
+		// the flush (its name, its components' fields), refuses writes, is not IsValid, and is unreadable once flushed.
+		TEST_CASE("ScriptProxy: an entity pending destruction stays readable until the flush and refuses writes" * doctest::skip(true))
+		{
+			Test::ScriptTestFixture fixture;
+			const AssetHandle script(0x710053);
+			REQUIRE(fixture.AddScript(script, "Assets/Scripts/Reader.luau", R"(
+local Reader = {}
+function Reader:OnFixedUpdate()
+	if self.Target == nil then
+		local target = Scene.FindByName("Target")
+		self.Target = target
+		Scene.Destroy(target)
+		local name = target.Name
+		local x = target.Transform.Translation.x
+		local wrote = pcall(function() target.Transform.Translation = vector.create(9, 9, 9) end)
+		self.Entity.Name = string.format("read:%s:%d:%s:%s", name, x, tostring(wrote), tostring(target:IsValid()))
+	elseif not self.Checked then
+		self.Checked = true
+		local readable = pcall(function() return self.Target.Name end)
+		self.Entity.Name = self.Entity.Name .. ":after:" .. tostring(readable)
+	end
+end
+return Script.Define("Reader", Reader)
+)"));
+			Entity target = fixture.GetScene().CreateEntity("Target");
+			target.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(3.0f, 0.0f, 0.0f);
+			});
+			Test::AttachSessionScript(fixture.GetScene().CreateEntity("Reader"), script);
+			auto created = PlaySession::CreateFromScene(Test::ScriptSessionSpecification(fixture), fixture.GetScene());
+			REQUIRE(created);
+			auto session = std::move(*created);
+			session->SetExtractionEnabled(false);
+			session->Tick();
+			CHECK(session->GetScene().FindEntityByPath("/read:Target:3:false:false").IsValid());
+			CHECK_FALSE(session->GetScene().FindEntityByPath("/Target").IsValid());
+			session->Tick();
+			CHECK(session->GetScene().FindEntityByPath("/read:Target:3:false:false:after:false").IsValid());
+			CHECK(session->GetScriptErrors().GetErrors().empty());
 		}
 
 		TEST_CASE("PlaySession: quit from OnDestroy cancels a pending scene replacement")

@@ -49,6 +49,8 @@ namespace Engine {
 		std::function<double()> ClockSeconds{};
 	};
 
+	// One behaviour instance. M20 (S-MULTI; Docs/Decisions/0031-m20-contract.md decision 17): an instance is identified by
+	// (Entity, Slot), Slot being the index of its script in the entity's Script list; 0 until stream M-A lands the list.
 	struct ScriptInstanceInfo
 	{
 		UUID Entity{};
@@ -56,6 +58,7 @@ namespace Engine {
 		bool Started = false;
 		bool Disabled = false;
 		int32_t ExecutionOrder = 0;
+		uint32_t Slot = 0;
 	};
 
 	struct ScriptReloadResult
@@ -67,6 +70,17 @@ namespace Engine {
 	// One runtime-scene VM and its instances, tasks, require cache and error stream (§11). Main-thread-only, including
 	// creation/destruction. No Lua state escapes; references are checked against this VM's unique generation. The host
 	// consumes quit/scene-load/fatal-stop requests only after protected calls unwind. Simulate creates no ScriptEngine.
+	//
+	// Script slots (M20, S-MULTI; Docs/Decisions/0031-m20-contract.md decisions 17 and 18; stream M-A). The Script component
+	// is an ordered list of scripts, and every slot whose script is set is its own instance, keyed (entity UUID, slot), with
+	// its own table, field overrides, ExecutionOrder, tasks, held physics events and fault state. Wherever this class says
+	// "(ExecutionOrder, canonical entity) order" the order is (ExecutionOrder, canonical entity, slot). A fault disables
+	// only its own instance; the entity's other slots keep running. Entity-addressed callbacks (OnEnable, OnDisable, the
+	// physics callbacks) reach every started slot of the entity in slot order, each slot holding or discarding its own
+	// events; OnDestroy runs for the slots of one entity in reverse slot order, children first as before. A write of the
+	// Script component (its list) keeps an instance whose slot index still holds the same script asset and destroys and
+	// creates the others, as removing and adding the component would. Evaluate and ExecuteBytecode address an entity's
+	// first slot, or the slot whose behaviour is named by the caller (script.eval's `script`).
 	class ScriptEngine final : public IPhysicsEventListener
 	{
 	public:

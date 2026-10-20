@@ -309,6 +309,50 @@ return Script.Define("References", References)
 			CHECK((*unpacked)["destroyed"].size() == 2);
 		}
 
+		// Docs/Decisions/0031-m20-contract.md decision 7 (E-PFB-DEL): RemoveEntity replaces the setup's refusal (the case
+		// above, which stream A1 rewrites into this one). Deleting a member destroys it with its subtree and records one
+		// RemoveEntity on its instance root in the same undo step; the member stays deleted when the prefab updates, and undo
+		// brings it back with the override gone.
+		TEST_CASE("EntityMethods: entity.destroy of a prefab member records a RemoveEntity override in one undo step" * doctest::skip(true))
+		{
+			Test::AutomationFixture setup("EntityDestroyPrefabMemberRecorded");
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Lamp" } }).has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Bulb" }, { "parent", "/Lamp" } }).has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Filament" }, { "parent", "/Lamp/Bulb" } }).has_value());
+			REQUIRE(setup.Call("prefab.create", Json{ { "entity", "/Lamp" }, { "path", "Assets/Prefabs/Lamp.prefab" }, { "replaceWithInstance", true } }).has_value());
+			REQUIRE(setup.Call("prefab.instantiate", Json{ { "prefab", "Assets/Prefabs/Lamp.prefab" }, { "name", "Lamp2" } }).has_value());
+			EditorContext& editor = setup.GetEditor();
+			const size_t steps = editor.GetHistory().GetUndoCount();
+
+			Result<Json> destroyed = setup.Call("entity.destroy", Json{ { "entities", Json::array({ "/Lamp/Bulb" }) } });
+			REQUIRE_MESSAGE(destroyed.has_value(), destroyed.error().ToString());
+			CHECK((*destroyed)["destroyed"].size() == 2);
+			CHECK(editor.GetHistory().GetUndoCount() == steps + 1);
+			CHECK_FALSE(editor.GetScene().FindEntityByPath("/Lamp/Bulb").IsValid());
+			const Result<Json> lamp = setup.Call("entity.get", Json{ { "entity", "/Lamp" }, { "components", Json::array({ "Prefab" }) } });
+			REQUIRE(lamp.has_value());
+			const Json& overrides = (*lamp)["entity"]["components"]["Prefab"]["Overrides"];
+			REQUIRE(overrides.size() == 1);
+			CHECK(overrides[0]["Kind"] == Json("RemoveEntity"));
+			CHECK(overrides[0]["Path"].size() == 1);
+
+			// An update of the instance (applying the other instance's edit to the prefab) keeps the member deleted.
+			REQUIRE(setup.Call("entity.update", Json{ { "entity", "/Lamp2/Bulb" }, { "name", "Globe" } }).has_value());
+			Result<Json> applied = setup.Call("prefab.apply", Json{ { "instance", "/Lamp2" } });
+			REQUIRE_MESSAGE(applied.has_value(), applied.error().ToString());
+			CHECK((*applied)["updatedInstances"] == Json(2));
+			CHECK_FALSE(editor.GetScene().FindEntityByPath("/Lamp/Bulb").IsValid());
+			CHECK_FALSE(editor.GetScene().FindEntityByPath("/Lamp/Globe").IsValid());
+			CHECK(editor.GetScene().FindEntityByPath("/Lamp2/Globe/Filament").IsValid());
+
+			// Undo of the apply, then of the deletion, restores the member and clears the override.
+			REQUIRE(setup.Call("edit.undo", Json{ { "steps", 2 } }).has_value());
+			CHECK(editor.GetScene().FindEntityByPath("/Lamp/Bulb/Filament").IsValid());
+			const Result<Json> restored = setup.Call("entity.get", Json{ { "entity", "/Lamp" }, { "components", Json::array({ "Prefab" }) } });
+			REQUIRE(restored.has_value());
+			CHECK((*restored)["entity"]["components"]["Prefab"]["Overrides"].empty());
+		}
+
 		TEST_CASE("EntityMethods: dry runs report the would-be result and change nothing")
 		{
 			Test::AutomationFixture setup("EntityDryRun");

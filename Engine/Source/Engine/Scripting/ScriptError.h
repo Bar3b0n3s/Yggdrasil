@@ -39,6 +39,10 @@ namespace Engine {
 		std::string Callback{};
 		UUID Entity{};
 		std::string EntityName{};
+		// M20 (S-MULTI; Docs/Decisions/0031-m20-contract.md decision 17): the faulting instance's slot in its entity's Script
+		// list. ScriptErrorToJson writes it as "slot" after "entity" for an error that has an entity, from stream M-A on
+		// (with script.errors' registry entry); 0 until then.
+		uint32_t Slot = 0;
 		uint64_t Tick = 0;
 		uint64_t Count = 1;
 		std::vector<ScriptTraceFrame> Traceback{};

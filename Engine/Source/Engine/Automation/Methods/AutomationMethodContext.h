@@ -69,6 +69,17 @@ namespace Engine {
 		// the open scene or the play session changes. Errors: InvalidState "no scene open" (editor without an open scene),
 		// InvalidState "not playing" for "play" without a play session (located at /target), InvalidState for "edit" in the
 		// Runtime, which has no edit scene (located at /target).
+		// M20 (E-SCENES; Docs/Decisions/0031-m20-contract.md decision 16): the request's scene target (GetOptions().Scene)
+		// chooses the open edit scene; without one it is the active scene, as before. The play scene is the session's copy
+		// of the scene it started from, the played scene, while that scene stays open (closed, or replaced by scene.open, it
+		// plays on and belongs to no open scene). Without a scene target the play-scene rules above apply unchanged whatever
+		// tab is active: reads without `target` and "play" reach the session, and mutations the active scene. With a scene
+		// target naming the played scene they apply unchanged too; with one naming another open scene the edit scene is
+		// that scene, reads without `target` included, and "play" is InvalidArgument at /scene (that scene is not playing).
+		// "_meta" always describes the addressed edit scene (its revision, dirty flag and sceneChangedOnDisk), never the play
+		// copy, as before M20. The editor resolves the target once, at admission, by opening an EditorSceneTargetScope, so
+		// this function's edit scene is EditorContext::GetScene(). The Runtime, which has no open scenes, refuses a given
+		// scene target with InvalidState located at /scene.
 		[[nodiscard]] virtual Result<Scene*> ResolveTargetScene(SceneTarget target, bool given, bool mutation) const = 0;
 
 		// Resolves an EntityRef (§13.4) in `scene`: 16 hex digits (either case) is an exact id; 6 to 15 hex digits a unique

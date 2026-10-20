@@ -89,6 +89,14 @@ namespace Engine {
 			Status SetCursorMode(CursorMode) override { return ReadOnly(); }
 			CursorMode GetCursorMode() const override { return CursorMode::Normal; }
 			Status RequestSceneLoad(AssetHandle, Json) override { return ReadOnly(); }
+			Status RequestSceneReload(std::optional<Json>) override { return ReadOnly(); }
+			AssetHandle GetCurrentScene() const override
+			{
+				ENGINE_CONTRACT_STUB();
+				// M20 Scene.GetCurrent in edit evaluations: the open scene's asset (Docs/Decisions/0031-m20-contract.md decision 5,
+				// stream P2).
+				return AssetHandle();
+			}
 			void RequestQuit(int32_t) override {}
 			void RequestPause() override {}
 			void OnScriptError(const ScriptError& error, bool /*fatal*/) override
@@ -290,6 +298,12 @@ namespace Engine {
 			return std::unexpected(Error(ErrorCode::InvalidState, "no scene open").WithHint("open one with scene.open {path} or create one with scene.new {path}"));
 		}
 		return &m_Editor->GetScene();
+	}
+
+	Result<OpenSceneId> EditorMethodContext::ResolveSceneTarget() const
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "M20 scene target contract (Docs/Decisions/0031-m20-contract.md decision 16, stream S-D)");
 	}
 
 	Result<Entity> EditorMethodContext::ResolveEntity(Scene& scene, std::string_view reference, std::string_view pointer) const

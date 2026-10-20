@@ -59,6 +59,11 @@ namespace Engine {
 			return MakeError(ErrorCode::NotFound, "entity {} belongs to an expired scene", entity.ID);
 		return MakeError(ErrorCode::NotFound, "entity {} was destroyed", entity.ID);
 	}
+	Status ScriptProxy::ValidateEntityForRead(IScriptHost& /*host*/, ScriptEntityIdentity /*entity*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "M20 pending-destruction read rule contract (Docs/Decisions/0031-m20-contract.md decision 4, stream P2)");
+	}
 	Status ScriptProxy::ValidateComponent(IScriptHost& host, ScriptProxyIdentity proxy)
 	{
 		ENGINE_TRY(ValidateEntity(host, proxy.Entity));

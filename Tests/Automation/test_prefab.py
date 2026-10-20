@@ -18,6 +18,10 @@ Brick.Fields = {
 return Script.Define("Brick", Brick)
 """
 BRICK_PREFAB = "Assets/Prefabs/Brick.prefab"
+SKIP_REMOVE_ENTITY = ("contract stub: RemoveEntity records a deleted prefab member "
+                      "(ADR 0031 decision 7, streams A1 and B)")
+SKIP_APPLY_LEVEL = ("contract stub: live nested prefabs and the prefab.apply level "
+                    "(ADR 0031 decisions 8 and 9, streams A2 and B)")
 
 
 class PrefabTests(AutomationTestCase):
@@ -170,6 +174,89 @@ class PrefabTests(AutomationTestCase):
 
         client.call("prefab.create", {"entity": "/Lamp/Bulb", "path": "Assets/Prefabs/Bulb.prefab"})
         self.assertTrue((root / "Assets" / "Prefabs" / "Bulb.prefab").is_file())
+
+    @unittest.skip(SKIP_REMOVE_ENTITY)
+    def test_destroying_a_prefab_member_records_its_deletion(self) -> None:
+        # Docs/Decisions/0031-m20-contract.md decision 7 (E-PFB-DEL): RemoveEntity replaces the setup's refusal (the
+        # two refusal tests above, which stream A1 rewrites into this one). Deleting a member records one RemoveEntity
+        # on its instance root in one undo step, alone or as a batch op; the member stays deleted when the prefab
+        # updates; and a member replaced by an instance of a new prefab becomes a user child of the outer instance.
+        client, root = self.open_editor_with_scene()
+        client.call("entity.create", {"name": "Lamp", "components": {"MeshRenderer": {"Mesh": "engine://Meshes/Cube"}}})
+        client.call("entity.create", {"name": "Bulb", "parent": "/Lamp"})
+        client.call("entity.create", {"name": "Shade", "parent": "/Lamp"})
+        client.call("prefab.create", {"entity": "/Lamp", "path": "Assets/Prefabs/Lamp.prefab",
+                                      "replaceWithInstance": True})
+        client.call("prefab.instantiate", {"prefab": "Assets/Prefabs/Lamp.prefab", "name": "Lamp2"})
+        undo_entries = len(client.call("edit.history")["entries"])
+
+        destroyed = client.call("entity.destroy", {"entities": ["/Lamp/Bulb"]})["destroyed"]
+        self.assertEqual(len(destroyed), 1)
+        self.assertEqual(len(client.call("edit.history")["entries"]), undo_entries + 1)
+        overrides = client.call("entity.get", {"entity": "/Lamp"})["entity"]["components"]["Prefab"]["Overrides"]
+        self.assertEqual([entry["Kind"] for entry in overrides], ["RemoveEntity"])
+        self.assertEqual(len(overrides[0]["Path"]), 1)
+
+        # An update of the prefab (applying the other instance's edit) keeps the member deleted.
+        client.call("entity.update", {"entity": "/Lamp2", "components": {"MeshRenderer": {"CastShadows": False}}})
+        self.assertEqual(client.call("prefab.apply", {"instance": "/Lamp2"})["updatedInstances"], 2)
+        names = [entity["name"] for entity in client.call("scene.tree", {"format": "json"})["entities"]]
+        self.assertEqual(names, ["Lamp", "Shade", "Lamp2", "Bulb", "Shade"])
+
+        # As a batch op, and replacing a member with an instance of a new prefab, also record deletions.
+        client.call("edit.batch", {"ops": [{"method": "entity.destroy", "params": {"entities": ["/Lamp2/Bulb"]}}]})
+        replaced = client.call("prefab.create", {"entity": "/Lamp/Shade", "path": "Assets/Prefabs/Shade.prefab",
+                                                 "replaceWithInstance": True})
+        self.assertEqual(replaced["instance"]["path"], "/Lamp/Shade")
+        self.assertTrue((root / "Assets" / "Prefabs" / "Shade.prefab").is_file())
+        lamp = client.call("entity.get", {"entity": "/Lamp", "components": "all"})["entity"]["components"]
+        self.assertEqual([entry["Kind"] for entry in lamp["Prefab"]["Overrides"]], ["RemoveEntity", "RemoveEntity"])
+        shade = client.call("entity.get", {"entity": "/Lamp/Shade", "components": "all"})["entity"]["components"]
+        self.assertIn("Prefab", shade)
+        self.assertEqual(shade["PrefabLink"]["InstanceRoot"], replaced["instance"]["id"])
+
+    @unittest.skip(SKIP_APPLY_LEVEL)
+    def test_apply_writes_to_the_level_the_caller_picks(self) -> None:
+        # Docs/Decisions/0031-m20-contract.md decisions 8 and 9 (E-PFB-NEST): a Room prefab created around a Lamp
+        # instance keeps it live. prefab.apply writes an edit of a lamp inside a room to the level the caller picks: at
+        # the Lamp level Lamp.prefab changes and Room.prefab is rewritten; without a level the outermost prefab, Room,
+        # receives it.
+        client, root = self.open_editor_with_scene()
+        client.call("entity.create", {"name": "Room"})
+        client.call("entity.create", {"name": "Lamp", "parent": "/Room"})
+        client.call("entity.create", {"name": "Bulb", "parent": "/Room/Lamp",
+                                      "components": {"MeshRenderer": {"Mesh": "engine://Meshes/Cube"}}})
+        client.call("prefab.create", {"entity": "/Room/Lamp", "path": "Assets/Prefabs/Lamp.prefab",
+                                      "replaceWithInstance": True})
+        client.call("prefab.create", {"entity": "/Room", "path": "Assets/Prefabs/Room.prefab",
+                                      "replaceWithInstance": True})
+        client.call("prefab.instantiate", {"prefab": "Assets/Prefabs/Room.prefab", "name": "Room2"})
+        nested = client.call("entity.get", {"entity": "/Room/Lamp", "components": "all"})["entity"]["components"]
+        self.assertIn("Prefab", nested)
+        self.assertIsNotNone(nested["PrefabLink"]["OuterPrefabEntityID"])
+
+        client.call("entity.update", {"entity": "/Room/Lamp/Bulb",
+                                      "components": {"MeshRenderer": {"CastShadows": False}}})
+        applied = client.call("prefab.apply", {"instance": "/Room/Lamp", "level": "/Room/Lamp"})
+        self.assertEqual(applied["prefab"]["path"], "Assets/Prefabs/Lamp.prefab")
+        self.assertEqual([prefab["path"] for prefab in applied["updatedPrefabs"]], ["Assets/Prefabs/Room.prefab"])
+        bulb = client.call("entity.get", {"entity": "/Room2/Lamp/Bulb", "components": ["MeshRenderer"]})
+        self.assertFalse(bulb["entity"]["components"]["MeshRenderer"]["CastShadows"])
+        lamp_prefab = read_json(root / "Assets" / "Prefabs" / "Lamp.prefab")
+        bulbs = [entity for entity in lamp_prefab["Entities"] if entity["Name"] == "Bulb"]
+        self.assertFalse(bulbs[0]["Components"]["MeshRenderer"]["CastShadows"])
+
+        client.call("entity.update", {"entity": "/Room/Lamp/Bulb", "components": {"MeshRenderer": {"Visible": False}}})
+        outermost = client.call("prefab.apply", {"instance": "/Room"})
+        self.assertEqual(outermost["prefab"]["path"], "Assets/Prefabs/Room.prefab")
+        self.assertEqual(outermost["updatedPrefabs"], [])
+        lamp_prefab = read_json(root / "Assets" / "Prefabs" / "Lamp.prefab")
+        bulbs = [entity for entity in lamp_prefab["Entities"] if entity["Name"] == "Bulb"]
+        self.assertTrue(bulbs[0]["Components"]["MeshRenderer"]["Visible"])
+
+        with self.assertRaises(engine_client.EngineError) as wrong_level:
+            client.call("prefab.apply", {"instance": "/Room", "level": "/Room2/Lamp"})
+        self.assert_engine_error(wrong_level.exception, engine_client.INVALID_PARAMS)
 
     def test_prefab_errors_and_dry_run(self) -> None:
         client, root = self.open_editor_with_scene()

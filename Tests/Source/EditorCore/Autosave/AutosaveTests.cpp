@@ -10,6 +10,7 @@
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Json/JsonWriter.h"
+#include "Engine/Core/VfsPath.h"
 #include "Engine/Platform/Process.h"
 #include "Engine/Platform/ProjectLock.h"
 #include "Engine/Project/ProjectSerializer.h"
@@ -27,7 +28,9 @@
 #include <limits>
 #include <map>
 #include <semaphore>
+#include <string>
 #include <thread>
+#include <vector>
 
 namespace Engine {
 
@@ -1040,6 +1043,88 @@ namespace Engine {
 			manifest = AutosaveReadJson(setup.Root() / "Manifest.json");
 			CHECK(manifest["Generations"].size() == 2);
 			CHECK(AutosaveRead(setup.Root() / setup.Offer().Generation / "Scene.json").contains("Newer"));
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 15 (E-SCENES; Roadmap M20 acceptance "autosave is isolated per open
+		// scene"): a save writes one generation per dirty open scene, in tab order; each scene is offered and recovered on its
+		// own; an explicit save of one discards only that scene's generations.
+		TEST_CASE("Autosave: each dirty open scene is written and recovered on its own" * doctest::skip(true))
+		{
+			AutosaveSetup setup;
+			EditorContext& editor = setup.Fixture.GetEditor();
+			setup.Dirty("InMain");
+			const OpenSceneId main = editor.GetActiveSceneId();
+			REQUIRE(main != NoOpenScene);
+			const Result<VfsPath> secondPath = VfsPath::Parse("project://Assets/Scenes/Second.scene");
+			REQUIRE(secondPath.has_value());
+			const Result<OpenSceneId> second = editor.AddScene(editor.CreateScene("Second"), *secondPath);
+			REQUIRE_MESSAGE(second.has_value(), second.error().ToString());
+			setup.Dirty("InSecond");
+			REQUIRE(setup.Service.Publish().has_value());
+
+			const AutosaveWriteResult written = setup.Save();
+			CHECK(written.Files == std::vector<std::string>{ "Assets/Scenes/Main.scene", "Assets/Scenes/Second.scene" });
+			const auto offers = setup.Service.FindRecoveries();
+			REQUIRE_MESSAGE(offers.has_value(), offers.error().ToString());
+			REQUIRE(offers->size() == 2);
+			CHECK((*offers)[0].ScenePath == "Assets/Scenes/Main.scene");
+			CHECK((*offers)[1].ScenePath == "Assets/Scenes/Second.scene");
+			CHECK((*offers)[0].Generation != (*offers)[1].Generation);
+			CHECK(AutosaveRead(setup.Root() / (*offers)[0].Generation / "Scene.json").contains("InMain"));
+			CHECK_FALSE(AutosaveRead(setup.Root() / (*offers)[0].Generation / "Scene.json").contains("InSecond"));
+			CHECK(AutosaveRead(setup.Root() / (*offers)[1].Generation / "Scene.json").contains("InSecond"));
+
+			// Saving the second scene discards its recovery only.
+			const auto bytes = SceneSerializer::SaveToString(editor.GetScene());
+			REQUIRE(bytes.has_value());
+			AutosaveWrite(setup.Fixture.GetProjectRoot() / "Assets/Scenes/Second.scene", *bytes);
+			REQUIRE(editor.MarkSceneSaved(*secondPath).has_value());
+			REQUIRE(setup.Service.DiscardSavedRecovery().has_value());
+			const auto remaining = setup.Service.FindRecoveries();
+			REQUIRE(remaining.has_value());
+			REQUIRE(remaining->size() == 1);
+			CHECK((*remaining)[0].ScenePath == "Assets/Scenes/Main.scene");
+
+			// Recovering the first scene replaces that open scene, dirty with an empty history; the second is untouched.
+			REQUIRE(setup.Service.Recover((*remaining)[0]).has_value());
+			CHECK(editor.GetOpenScenes().size() == 2);
+			CHECK(editor.GetScene().GetName() == "Main");
+			CHECK(editor.IsSceneDirty());
+			CHECK_FALSE(editor.GetHistory().CanUndo());
+			const Result<OpenSceneInfo> secondInfo = editor.DescribeOpenScene(*second);
+			REQUIRE(secondInfo.has_value());
+			CHECK_FALSE(secondInfo->Dirty);
+		}
+
+		// Decision 15 (Roadmap M20 acceptance "an injected device loss with two open scenes autosaves both"): the fatal path
+		// writes every published dirty open scene from its own fixed slot.
+		TEST_CASE("Autosave: a fatal snapshot writes every dirty open scene" * doctest::skip(true))
+		{
+			AutosaveSetup setup;
+			EditorContext& editor = setup.Fixture.GetEditor();
+			setup.Dirty("FatalMain");
+			const Result<VfsPath> secondPath = VfsPath::Parse("project://Assets/Scenes/Second.scene");
+			REQUIRE(secondPath.has_value());
+			const Result<OpenSceneId> second = editor.AddScene(editor.CreateScene("Second"), *secondPath);
+			REQUIRE_MESSAGE(second.has_value(), second.error().ToString());
+			setup.Dirty("FatalSecond");
+			REQUIRE(setup.Service.Publish().has_value());
+
+			AutosaveFatalResult result{};
+			std::jthread worker([&setup, &result]()
+			{
+				result = setup.Service.WriteFatalSnapshot();
+			});
+			worker.join();
+			CHECK(result == AutosaveFatalResult::Saved);
+			const auto offers = setup.Service.FindRecoveries();
+			REQUIRE_MESSAGE(offers.has_value(), offers.error().ToString());
+			REQUIRE(offers->size() == 2);
+			CHECK(AutosaveRead(setup.Root() / (*offers)[0].Generation / "Scene.json").contains("FatalMain"));
+			CHECK(AutosaveRead(setup.Root() / (*offers)[1].Generation / "Scene.json").contains("FatalSecond"));
+			// The manifest was published once, after both generations.
+			const Json manifest = AutosaveReadJson(setup.Root() / "Manifest.json");
+			CHECK(manifest["Generations"].size() == 2);
 		}
 	}
 

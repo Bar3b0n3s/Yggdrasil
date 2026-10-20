@@ -4,11 +4,16 @@
 
 #include "Engine/Core/Hash.h"
 #include "Engine/Physics/PhysicsEngine.h"
+#include "Engine/Scene/Components/RigidBodyComponent.h"
+#include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/PhysicsSystem.h"
 #include "Engine/Scene/Scene.h"
 #include "Support/PhysicsTestScene.h"
 #include "Support/TestTimeout.h"
+
+#include <algorithm>
+#include <vector>
 
 // Physics determinism through the play session's state hash (Architecture §9.1, §9.7: "A 200-body pile stepped 600 times
 // gives the same ComputeStateHash() across repeated runs and with Jolt thread counts 0, 1 and 8. Contact-event order is
@@ -111,6 +116,56 @@ namespace Engine {
 			REQUIRE(first.size() > 200);
 			CHECK(second == first);
 			CHECK(threaded == first);
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 2 (Roadmap M20 acceptance "Event order is equal at Jolt thread counts
+		// 0, 1 and 8"): boxes falling onto a floor of scripted pieces gathered into one static compound, so body events and
+		// collider events interleave; the full event lists, in dispatch order, are equal at every thread count. Each piece's
+		// Script component names a script, which alone makes it a scripted collider; the session simulates without a VM
+		// (Simulate mode), so the handle needs no asset.
+		TEST_CASE("Physics: contact event order identical at 0, 1 and 8 Jolt threads, collider events included" * doctest::skip(true))
+		{
+			Test::SetTestCaseTimeLimit(PileTimeoutSeconds);
+			const auto run = [](uint32_t workerThreads)
+			{
+				const Test::ScopedWorkerThreadCount threads(workerThreads);
+				Test::SceneTestFixture fixture;
+				Scene& scene = fixture.GetScene();
+				Entity floor = scene.CreateEntity("Floor");
+				floor.AddComponent<RigidBodyComponent>(RigidBodyComponent{ .Type = BodyType::Static });
+				for (int row = 0; row < 4; ++row)
+				{
+					for (int column = 0; column < 4; ++column)
+					{
+						Entity piece = Test::AddBoxBody(scene, "Piece", glm::vec3(static_cast<float>(column) * 2.0f, -0.5f, static_cast<float>(row) * 2.0f),
+							glm::vec3(1.0f, 0.5f, 1.0f), std::nullopt, floor);
+						piece.AddComponent<ScriptComponent>().Script = TypedAssetHandle<AssetType::Script>(AssetHandle(0x5c0de02));
+					}
+				}
+				for (int box = 0; box < 40; ++box)
+				{
+					const glm::vec3 position(static_cast<float>(box % 7) * 0.875f + 0.0625f, 1.0f + static_cast<float>(box / 7) * 1.25f,
+						static_cast<float>(box % 5) * 1.25f + 0.125f);
+					static_cast<void>(Test::AddBoxBody(scene, "Box", position, glm::vec3(0.25f), BodyType::Dynamic));
+				}
+				Result<Scope<PlaySession>> session = Test::StartPhysicsSession(fixture, Test::MakePhysicsSessionSpecification(fixture, 77, PlayMode::Simulate));
+				REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+				Test::RecordingPhysicsListener listener;
+				(*session)->GetPhysics().SetEventListener(&listener);
+				Test::RunTicks(**session, 240);
+				(*session)->GetPhysics().SetEventListener(nullptr);
+				return listener.Events;
+			};
+			const std::vector<PhysicsEvent> none = run(0);
+			const std::vector<PhysicsEvent> one = run(1);
+			const std::vector<PhysicsEvent> eight = run(8);
+			const size_t colliderEvents = static_cast<size_t>(std::count_if(none.begin(), none.end(), [](const PhysicsEvent& event)
+			{
+				return event.IsColliderEvent();
+			}));
+			REQUIRE(colliderEvents >= 30);
+			CHECK(one == none);
+			CHECK(eight == none);
 		}
 
 		TEST_CASE("PlaySession: a session without physics components hashes as it did before physics")

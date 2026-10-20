@@ -43,8 +43,18 @@ namespace Engine {
 	public:
 		// False for zero/stale generation, dead/marked entities, and invalid IDs. Never dereferences an old scene.
 		[[nodiscard]] static bool IsValid(IScriptHost& host, ScriptEntityIdentity entity);
-		// NotFound for a stale/dead entity; used before calling Scene's assertion-based Entity operations.
+		// NotFound for a stale/dead entity; used before calling Scene's assertion-based Entity operations. Writes and every
+		// other mutating member call this, so an entity pending destruction refuses them ("entity <id> was destroyed").
 		[[nodiscard]] static Status ValidateEntity(IScriptHost& host, ScriptEntityIdentity entity);
+		// The read rule for entities pending destruction (M20, W-P02; Docs/Decisions/0031-m20-contract.md decision 4): as
+		// ValidateEntity, except that an entity of the current scene generation marked for destruction (Scene.Destroy or a
+		// destroyed ancestor earlier in the tick: PendingDestroyTag) is accepted until the flush that destroys it. Every
+		// member the binding layer registers as not mutating (ScriptMemberOptions::Mutates false) and every proxy field read
+		// validates with this, so a partner's collision callback can still read an entity destroyed earlier in the same
+		// dispatch; IsValid stays false for it, the scene's searches keep leaving it out, and after the flush it is NotFound
+		// as before. The systems' own state (physics bodies, audio voices) is not covered: their functions keep refusing an
+		// entity pending destruction as they do now.
+		[[nodiscard]] static Status ValidateEntityForRead(IScriptHost& host, ScriptEntityIdentity entity);
 		// Checks entity generation/liveness, index, ScriptVisible and component presence. NotFound for stale/missing data,
 		// InvalidArgument for an out-of-range index or a component not exposed to scripts.
 		[[nodiscard]] static Status ValidateComponent(IScriptHost& host, ScriptProxyIdentity proxy);

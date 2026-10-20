@@ -15,6 +15,7 @@
 #include "Engine/Scene/Components/CharacterControllerComponent.h"
 #include "Engine/Scene/Components/MeshColliderComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
+#include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/SphereColliderComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Scene.h"
@@ -1261,6 +1262,163 @@ namespace Engine {
 					CHECK(std::tie(previous.Self, previous.Other, previous.Type) < std::tie(first.Self, first.Other, first.Type));
 				}
 			}
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 3 (W-P03, ADR 0026 P03): Jolt reports OnContactAdded for a speculative
+		// contact, a pair within its speculative contact distance (2 cm) that is still apart, so a ball gliding past a brick
+		// 1 cm away got OnCollisionEnter without ever touching it. The enter waits until the pair touches; a pair that never
+		// touches reports nothing.
+		TEST_CASE("PhysicsSystem: a speculative contact that never touches reports no enter" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			// A static brick whose top face is at y = 0.5, and a ball of radius 0.25 gliding along +X 1 cm above it, without
+			// gravity or damping, so it passes over the brick untouched.
+			static_cast<void>(Test::AddBoxBody(scene, "Brick", glm::vec3(0.0f), glm::vec3(0.5f), BodyType::Static));
+			Entity ball = Test::AddSphereBody(scene, "Ball", glm::vec3(-2.0f, 0.76f, 0.0f), 0.25f, BodyType::Dynamic);
+			Test::PatchRigidBody(ball, [](RigidBodyComponent& body)
+			{
+				body.GravityFactor = 0.0f;
+				body.LinearDamping = 0.0f;
+				body.AngularDamping = 0.0f;
+				body.AllowSleeping = false;
+				body.InitialLinearVelocity = glm::vec3(3.0f, 0.0f, 0.0f);
+			});
+			Test::RecordingPhysicsListener listener;
+			Scope<PlaySession> session = StartSession(fixture, &listener);
+			Test::RunTicks(*session, 90);
+			const UUID ballId = Test::GetEntityId(session->GetScene(), "/Ball");
+			const UUID brickId = Test::GetEntityId(session->GetScene(), "/Brick");
+			// The ball crossed the brick and kept its height and velocity: nothing touched it.
+			const glm::vec3 position = Test::GetWorldPosition(*session, "/Ball");
+			CHECK(position.x > 1.5f);
+			CHECK(position.y == doctest::Approx(0.76f).epsilon(1.0e-4));
+			const Result<glm::vec3> velocity = session->GetPhysics().GetLinearVelocity(ballId);
+			REQUIRE(velocity.has_value());
+			CHECK(velocity->x == doctest::Approx(3.0f).epsilon(1.0e-4));
+			CHECK(velocity->y == doctest::Approx(0.0f).epsilon(1.0e-4));
+			CHECK(listener.Find(ballId, PhysicsEventType::CollisionEnter).empty());
+			CHECK(listener.Find(brickId, PhysicsEventType::CollisionEnter).empty());
+			CHECK(listener.Find(ballId, PhysicsEventType::CollisionExit).empty());
+		}
+
+		// The rule the pending enter keeps (Docs/Decisions/0031-m20-contract.md decision 3): Jolt's solver acts on a
+		// speculative contact whose pair would meet within the step, so a fast bouncy ball reverses before it touches the
+		// wall. That contact is a real one: the pair enters at the step the ball bounces, and exits once.
+		TEST_CASE("PhysicsSystem: a speculative contact that bounces a body enters at the step it bounces")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			static_cast<void>(Test::AddBoxBody(scene, "Wall", glm::vec3(0.0f), glm::vec3(0.5f), BodyType::Static));
+			Entity ball = Test::AddSphereBody(scene, "Ball", glm::vec3(-3.0f, 0.0f, 0.0f), 0.25f, BodyType::Dynamic);
+			Test::PatchRigidBody(ball, [](RigidBodyComponent& body)
+			{
+				body.GravityFactor = 0.0f;
+				body.LinearDamping = 0.0f;
+				body.AngularDamping = 0.0f;
+				body.Restitution = 1.0f;
+				body.Friction = 0.0f;
+				body.AllowSleeping = false;
+				body.InitialLinearVelocity = glm::vec3(30.0f, 0.0f, 0.0f);
+			});
+			Test::RecordingPhysicsListener listener;
+			Scope<PlaySession> session = StartSession(fixture, &listener);
+			const UUID ballId = Test::GetEntityId(session->GetScene(), "/Ball");
+			std::optional<uint64_t> bounced;
+			for (uint64_t tick = 0; tick < 30; ++tick)
+			{
+				session->Tick();
+				const Result<glm::vec3> velocity = session->GetPhysics().GetLinearVelocity(ballId);
+				REQUIRE(velocity.has_value());
+				if (!bounced.has_value() && velocity->x < 0.0f)
+					bounced = tick;
+			}
+			REQUIRE(bounced.has_value());
+			const std::vector<PhysicsEvent> enters = listener.Find(ballId, PhysicsEventType::CollisionEnter);
+			REQUIRE(enters.size() == 1);
+			CHECK(enters[0].Tick == *bounced);
+			CHECK(listener.Find(ballId, PhysicsEventType::CollisionExit).size() == 1);
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 2 (W-P01, ADR 0026 P01): bricks gathered into one compound reported
+		// their collisions only to the compound's owner. A scripted gathered collider receives its own enter and exit, the
+		// owner and the partner keep their body events, and unscripted pieces receive nothing.
+		TEST_CASE("PhysicsSystem: a scripted collider gathered into a compound receives its own enter and exit" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			AddTrack(scene, 3, true);
+			// The third piece's Script component names a script, which alone decides: the session simulates without a VM
+			// (Simulate mode), so the handle needs no asset.
+			scene.FindEntityByPath("/Level/Piece[2]").AddComponent<ScriptComponent>().Script = TypedAssetHandle<AssetType::Script>(AssetHandle(0x5c0de01));
+			static_cast<void>(Test::AddSphereBody(scene, "Ball", glm::vec3(2.0f, 3.0f, 0.0f), 0.25f, BodyType::Dynamic));
+			Test::RecordingPhysicsListener listener;
+			Result<Scope<PlaySession>> started = Test::StartPhysicsSession(fixture, Test::MakePhysicsSessionSpecification(fixture, 42, PlayMode::Simulate));
+			REQUIRE_MESSAGE(started.has_value(), started.error().ToString());
+			Scope<PlaySession> session = std::move(*started);
+			session->GetPhysics().SetEventListener(&listener);
+			Test::RunTicks(*session, 90);
+			const Scene& runtime = session->GetScene();
+			const UUID ball = Test::GetEntityId(runtime, "/Ball");
+			const UUID level = Test::GetEntityId(runtime, "/Level");
+			const UUID scripted = Test::GetEntityId(runtime, "/Level/Piece[2]");
+			const UUID plain = Test::GetEntityId(runtime, "/Level/Piece[1]");
+
+			const std::vector<PhysicsEvent> enters = listener.Find(scripted, PhysicsEventType::CollisionEnter);
+			REQUIRE(enters.size() == 1);
+			CHECK(enters[0].IsColliderEvent());
+			CHECK(enters[0].SelfBody == level);
+			CHECK(enters[0].Other == ball);
+			CHECK(enters[0].Contact.Collider == scripted);
+			CHECK(enters[0].Contact.OtherCollider == ball);
+			CHECK(enters[0].Contact.Normal.y > 0.9f);
+			// The body pair is unchanged: one enter each for the level and the ball, which names the piece it hit.
+			REQUIRE(listener.Find(level, PhysicsEventType::CollisionEnter).size() == 1);
+			const std::vector<PhysicsEvent> ballEnters = listener.Find(ball, PhysicsEventType::CollisionEnter);
+			REQUIRE(ballEnters.size() == 1);
+			CHECK(ballEnters[0].Other == level);
+			CHECK(ballEnters[0].Contact.OtherCollider == scripted);
+			CHECK(listener.Find(plain, PhysicsEventType::CollisionEnter).empty());
+
+			// Lifted away, the ball leaves the piece: the piece, the level and the ball each get one exit.
+			REQUIRE(session->GetPhysics().Teleport(ball, glm::vec3(2.0f, 10.0f, 0.0f), std::nullopt).has_value());
+			Test::RunTicks(*session, 2);
+			const std::vector<PhysicsEvent> exits = listener.Find(scripted, PhysicsEventType::CollisionExit);
+			REQUIRE(exits.size() == 1);
+			CHECK(exits[0].IsColliderEvent());
+			CHECK(exits[0].Other == ball);
+			CHECK(listener.Find(level, PhysicsEventType::CollisionExit).size() == 1);
+			CHECK(listener.Find(ball, PhysicsEventType::CollisionExit).size() == 1);
+		}
+
+		TEST_CASE("PhysicsSystem: the event order key sorts a pair's body event before its collider events")
+		{
+			const UUID low(0x10);
+			const UUID high(0x20);
+			const UUID piece(0x05);
+			const PhysicsEvent toLow{ .Type = PhysicsEventType::CollisionEnter, .Self = low, .Other = high, .SelfBody = low };
+			const PhysicsEvent toHigh{ .Type = PhysicsEventType::CollisionEnter, .Self = high, .Other = low, .SelfBody = high };
+			// A scripted piece gathered into the high owner's body: its event belongs to the same body pair.
+			const PhysicsEvent toPiece{ .Type = PhysicsEventType::CollisionEnter, .Self = piece, .Other = low, .SelfBody = high };
+			const PhysicsEvent exit{ .Type = PhysicsEventType::CollisionExit, .Self = low, .Other = high, .SelfBody = low };
+
+			CHECK_FALSE(toLow.IsColliderEvent());
+			CHECK(toPiece.IsColliderEvent());
+			// Both callbacks of a body event map to one key, with the null collider.
+			CHECK(GetPhysicsEventOrderKey(toLow) == GetPhysicsEventOrderKey(toHigh));
+			// An event built without SelfBody (null, the default) is a body event, keyed as one: a later dispatch or a test
+			// that never sets it cannot turn a body event into a collider event.
+			const PhysicsEvent unset{ .Type = PhysicsEventType::CollisionEnter, .Self = high, .Other = low };
+			CHECK_FALSE(unset.IsColliderEvent());
+			CHECK(GetPhysicsEventOrderKey(unset) == GetPhysicsEventOrderKey(toLow));
+			CHECK(GetPhysicsEventOrderKey(toLow) == PhysicsEventOrderKey{ .Low = low, .High = high, .Type = PhysicsEventType::CollisionEnter, .Collider = UUID() });
+			CHECK(GetPhysicsEventOrderKey(toPiece) == PhysicsEventOrderKey{ .Low = low, .High = high, .Type = PhysicsEventType::CollisionEnter, .Collider = piece });
+			// The body event first, then the pair's collider events of that type, then the next type.
+			CHECK(GetPhysicsEventOrderKey(toLow) < GetPhysicsEventOrderKey(toPiece));
+			CHECK(GetPhysicsEventOrderKey(toPiece) < GetPhysicsEventOrderKey(exit));
+			// Pairs order by their owners before anything else.
+			const PhysicsEvent otherPair{ .Type = PhysicsEventType::CollisionEnter, .Self = UUID(0x11), .Other = UUID(0x12), .SelfBody = UUID(0x11) };
+			CHECK(GetPhysicsEventOrderKey(exit) < GetPhysicsEventOrderKey(otherPair));
 		}
 
 		TEST_CASE("PhysicsSystem: body functions refuse missing bodies, wrong motion types and non-finite values")

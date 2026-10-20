@@ -16,7 +16,9 @@
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
+#include "Engine/Scene/PrefabInstantiator.h"
 #include "Engine/Scene/Scene.h"
+#include "Support/AutomationTestClient.h"
 #include "Support/EditorTestFixture.h"
 #include "Support/ExpectLog.h"
 #include "Support/ScriptOverrideProject.h"
@@ -24,6 +26,12 @@
 #include "Support/TestData.h"
 
 #include <nlohmann/json.hpp>
+
+#include <filesystem>
+#include <optional>
+#include <span>
+#include <string>
+#include <vector>
 
 namespace Engine {
 
@@ -1126,6 +1134,79 @@ namespace Engine {
 			CHECK(editor.GetAssets().HasProject());
 			REQUIRE(editor.CloseProject());
 			CHECK_FALSE(editor.GetAssets().HasProject());
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 8 (Roadmap M20 acceptance "cycles are refused"): no editor action adds
+		// a nested instance to an existing prefab, so a nesting cycle comes from a file. Here Lamp.prefab is written to hold
+		// an instance of itself; the nesting graph names the cycle with PREFAB_CYCLE, and applying an edit of a lamp, whose
+		// propagation would rewrite Lamp.prefab from itself forever, is refused and changes nothing.
+		TEST_CASE("EditorContext: a prefab update refuses a nesting cycle" * doctest::skip(true))
+		{
+			Test::AutomationFixture setup("PrefabNestingCycle");
+			EditorContext& editor = setup.GetEditor();
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Lamp" } }).has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Bulb" }, { "parent", "/Lamp" } }).has_value());
+			const Result<Json> created =
+				setup.Call("prefab.create", Json{ { "entity", "/Lamp" }, { "path", "Assets/Prefabs/Lamp.prefab" }, { "replaceWithInstance", true } });
+			REQUIRE(created.has_value());
+			const std::optional<UUID> lamp = UUID::FromString(JsonReader((*created)["prefab"]["id"]).ReadString().value_or(std::string()));
+			REQUIRE(lamp.has_value());
+
+			// Lamp.prefab with a nested instance of Lamp under its root, expanded as instantiation would expand it.
+			const std::filesystem::path file = setup.GetEditorFixture().GetProjectRoot() / "Assets/Prefabs/Lamp.prefab";
+			const Result<std::string> text = FileSystem::ReadText(file);
+			REQUIRE(text.has_value());
+			Result<Json> document = JsonReader::Parse(*text);
+			REQUIRE(document.has_value());
+			const std::optional<UUID> root = UUID::FromString(JsonReader((*document)["Root"]).ReadString().value_or(std::string()));
+			REQUIRE(root.has_value());
+			const UUID nested(0x5151);
+			const Json entities = (*document)["Entities"];
+			for (const Json& entity : entities)
+			{
+				const std::optional<UUID> id = UUID::FromString(JsonReader(entity["ID"]).ReadString().value_or(std::string()));
+				REQUIRE(id.has_value());
+				Json copy = entity;
+				const bool isRoot = *id == *root;
+				copy["ID"] = (isRoot ? nested : PrefabInstantiator::DeriveInstanceID(nested, *id)).ToString();
+				if (isRoot)
+					copy["Parent"] = root->ToString();
+				else
+				{
+					const std::optional<UUID> parent = UUID::FromString(JsonReader(entity["Parent"]).ReadString().value_or(std::string()));
+					REQUIRE(parent.has_value());
+					copy["Parent"] = (*parent == *root ? nested : PrefabInstantiator::DeriveInstanceID(nested, *parent)).ToString();
+					copy["Components"]["PrefabLink"] = Json{ { "PrefabEntityID", id->ToString() }, { "InstanceRoot", nested.ToString() }, { "OuterPrefabEntityID", nullptr } };
+				}
+				if (isRoot)
+				{
+					copy["Components"]["Prefab"] = Json{ { "Prefab", lamp->ToString() }, { "Overrides", Json::array() } };
+					copy["Components"]["PrefabLink"] = Json{ { "PrefabEntityID", root->ToString() }, { "InstanceRoot", nested.ToString() }, { "OuterPrefabEntityID", nullptr } };
+				}
+				(*document)["Entities"].push_back(std::move(copy));
+			}
+			(*document)["ComponentVersions"]["Prefab"] = 2;
+			(*document)["ComponentVersions"]["PrefabLink"] = 1;
+			const std::string written = document->dump(1, '\t') + "\n";
+			REQUIRE(editor.WriteProjectFile(MakeEditorPath("project://Assets/Prefabs/Lamp.prefab"), AsEditorBytes(written)).has_value());
+			editor.GetAssets().WaitIdle();
+
+			const Result<std::vector<AssetHandle>> nesting = editor.GetNestingPrefabs(std::span(&*lamp, 1));
+			REQUIRE_FALSE(nesting.has_value());
+			CHECK(nesting.error().GetCode() == ErrorCode::Validation);
+			CHECK(nesting.error().ToString().contains("PREFAB_CYCLE"));
+			CHECK(nesting.error().ToString().contains("Assets/Prefabs/Lamp.prefab"));
+
+			REQUIRE(setup.Call("entity.update", Json{ { "entity", "/Lamp/Bulb" }, { "name", "Globe" } }).has_value());
+			const size_t steps = editor.GetHistory().GetUndoCount();
+			const Result<Json> applied = setup.Call("prefab.apply", Json{ { "instance", "/Lamp" } });
+			REQUIRE_FALSE(applied.has_value());
+			CHECK(applied.error().GetCode() == ErrorCode::Validation);
+			CHECK(applied.error().ToString().contains("PREFAB_CYCLE"));
+			CHECK(editor.GetHistory().GetUndoCount() == steps);
+			const Result<std::string> after = FileSystem::ReadText(file);
+			REQUIRE(after.has_value());
+			CHECK(*after == written);
 		}
 
 		TEST_CASE("EditorContext: moving and removing project files keeps provenance in step")

@@ -549,6 +549,58 @@ namespace Engine {
 			CHECK(hash == CommittedWorldPileHash);
 		}
 
+		// Docs/Decisions/0031-m20-contract.md decision 3 (W-P03): Jolt adds a contact as soon as two shapes are within its
+		// speculative contact distance. The world records whether a contact touched when it was added, and reports a
+		// speculative contact's first touch once (Touched); a contact that never touches gets no Touched record.
+		TEST_CASE("PhysicsWorld: a speculative contact is recorded not touching and reports Touched once when it touches" * doctest::skip(true))
+		{
+			Scope<PhysicsWorld> world = CreateWorld();
+			Result<BodyHandle> brick = world->CreateBody(
+				{ .Shape = CreateShape(BoxShapeGeometry{ .HalfExtents = glm::vec3(0.5f) }), .MotionType = PhysicsMotionType::Static });
+			REQUIRE(brick.has_value());
+			const BodyDescription floating{ .GravityFactor = 0.0f, .AllowSleeping = false };
+
+			// A ball gliding past the brick's top face 1 cm away: added within the speculative distance, never touching.
+			BodyDescription glide = floating;
+			glide.LinearDamping = 0.0f;
+			glide.LinearVelocity = glm::vec3(3.0f, 0.0f, 0.0f);
+			const BodyHandle glider = CreateDynamic(*world, SphereShapeGeometry{ .Radius = 0.25f }, glm::vec3(-2.0f, 0.76f, 0.0f), glide);
+			std::vector<ContactEvent> glided;
+			for (uint32_t step = 0; step < 90; ++step)
+			{
+				REQUIRE(world->Step(FixedDelta, 1).has_value());
+				std::vector<ContactEvent> drained = world->DrainContactEvents();
+				glided.insert(glided.end(), drained.begin(), drained.end());
+			}
+			const std::optional<ContactEvent> passed = FindContact(glided, ContactEventKind::Added, *brick, glider);
+			REQUIRE(passed.has_value());
+			CHECK_FALSE(passed->Touching);
+			CHECK_FALSE(FindContact(glided, ContactEventKind::Touched, *brick, glider).has_value());
+			world->DestroyBody(glider);
+
+			// A ball settling onto the brick at 0.4 m/s from 1.5 cm above: added speculative, then touching once the solver
+			// would act on it within a step; one Touched record, and none while it rests.
+			BodyDescription settle = floating;
+			settle.LinearVelocity = glm::vec3(0.0f, -0.4f, 0.0f);
+			const BodyHandle settler = CreateDynamic(*world, SphereShapeGeometry{ .Radius = 0.25f }, glm::vec3(0.0f, 0.765f, 0.0f), settle);
+			std::vector<ContactEvent> settled;
+			for (uint32_t step = 0; step < 30; ++step)
+			{
+				REQUIRE(world->Step(FixedDelta, 1).has_value());
+				std::vector<ContactEvent> drained = world->DrainContactEvents();
+				settled.insert(settled.end(), drained.begin(), drained.end());
+			}
+			const std::optional<ContactEvent> added = FindContact(settled, ContactEventKind::Added, *brick, settler);
+			REQUIRE(added.has_value());
+			CHECK_FALSE(added->Touching);
+			const size_t touched = static_cast<size_t>(std::count_if(settled.begin(), settled.end(), [&brick, settler](const ContactEvent& event)
+			{
+				return event.Kind == ContactEventKind::Touched
+					&& ((event.BodyA == *brick && event.BodyB == settler) || (event.BodyA == settler && event.BodyB == *brick));
+			}));
+			CHECK(touched == 1);
+		}
+
 		TEST_CASE("PhysicsWorld: a pile's contact records are identical across runs and thread counts once sorted")
 		{
 			std::vector<ContactEvent> first;

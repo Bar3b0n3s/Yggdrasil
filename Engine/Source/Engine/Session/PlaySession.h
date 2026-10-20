@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine/Asset/AssetHandle.h"
 #include "Engine/Automation/Protocol/JsonRpc.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Json/Json.h"
@@ -215,6 +216,11 @@ namespace Engine {
 		ScriptApiRegistry* ScriptApi = nullptr;
 		Ref<const ScriptFieldSchemaSource> ScriptSchemas{};
 		VariantValue Parameters{}; // absent normalizes to an empty JSON object
+		// M20 (Docs/Decisions/0031-m20-contract.md decision 5): the scene asset the scene document came from (the editor's
+		// open scene or play.start's scene, a suite's or replay's scene, the Runtime's start scene); the invalid handle for a
+		// scene without an asset (an editor scene never saved). Scene.GetCurrent returns it until a Scene.Load. The document
+		// itself is kept as the session's start document, which Scene.Reload reloads while the current scene is the first.
+		AssetHandle SceneAsset{};
 		ScriptEnvironment Environment{};
 		RunModes ScriptRunMode = RunModes::Editor;
 		bool TestMode = false;
@@ -371,6 +377,10 @@ namespace Engine {
 		[[nodiscard]] const ScriptEngine* GetScripts() const;
 		[[nodiscard]] uint64_t GetSceneGeneration() const;
 		[[nodiscard]] const Json& GetLoadParameters() const;
+		// M20 (Docs/Decisions/0031-m20-contract.md decision 5): the scene asset the current scene came from, what
+		// Scene.GetCurrent returns: PlaySessionSpecification::SceneAsset until a Scene.Load, then the asset it named (a
+		// Scene.Reload keeps it); the invalid handle for a scene without an asset.
+		[[nodiscard]] AssetHandle GetCurrentSceneAsset() const;
 		// Session-owned history, including faults of scenes whose VM has been replaced. Cursors never reset on Scene.Load.
 		[[nodiscard]] ScriptErrorStream& GetScriptErrors();
 		[[nodiscard]] const ScriptErrorStream& GetScriptErrors() const;

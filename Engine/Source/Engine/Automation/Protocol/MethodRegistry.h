@@ -117,6 +117,23 @@ namespace Engine {
 		// Accepts "dryRun": true (§13.4). Usually a Mutates method; project.validate supports it without being one (it changes
 		// something only when asked to fix).
 		bool SupportsDryRun = false;
+		// Accepts the scene target "scene" (M20, E-SCENES; Docs/Decisions/0031-m20-contract.md decision 16): a reserved
+		// member, like dryRun, that names the open scene the request addresses (RequestOptions::Scene); absent, the request
+		// addresses the active scene, exactly as before M20. Set on every scene-addressing method (the inventory test of
+		// decision 16 lists every method's relation to the open scenes); PrepareParams moves "scene" into the options only for
+		// these methods, so a method without the flag that declares its own "scene" member (play.start's scene file) keeps
+		// it, and any other answers an unknown-member InvalidParams. The params struct of a method with the flag never
+		// declares "scene" (asserted at registration), and its schemas list the member as they list dryRun. A method with the
+		// flag is registered with Add, never AddPending (asserted at registration): the editor holds the target's scope for
+		// the request's one stretch on the main thread, from admission to its response, which a pending operation's polls
+		// would outlast (EditorSceneTargetScope). None of the scene-addressing methods of M20 is pending; a later one that
+		// needs to be amends this rule with a per-poll check of its target.
+		bool SupportsSceneTarget = false;
+		// The scene target is required (M20, Docs/Decisions/0031-m20-contract.md decision 14: scene.activate, whose target is
+		// its subject; implies SupportsSceneTarget, asserted at registration): PrepareParams answers a request without
+		// "scene" with InvalidParams naming it, as for a missing RequiredParams member, and the schemas (full and compact)
+		// list "scene" in "required".
+		bool RequiresSceneTarget = false;
 		// Also served by the Runtime's automation subset (§13.5; from M7).
 		bool AvailableInRuntime = false;
 		// Callable in the launcher state, before a project is open (§12.1: session.*, rpc.discover, docs.get,

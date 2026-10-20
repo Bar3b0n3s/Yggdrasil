@@ -4,6 +4,7 @@
 #include "EditorCore/Commands/Command.h"
 #include "EditorCore/Commands/CommandHistory.h"
 #include "EditorCore/EditorUiState.h"
+#include "EditorCore/OpenSceneId.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "EditorCore/Viewport/EditorViewportState.h"
 #include "Engine/Asset/AssetHandle.h"
@@ -32,10 +33,11 @@
 #include <string_view>
 #include <vector>
 
-// The editor's state (Architecture §12.1), frozen by the M4 contract: the open project, the one open scene (v1 edits a
-// single scene at a time), the selection, the undo history, write attribution and provenance, dry runs and transactions.
-// Panels (M10) and automation handlers read it and change it only through Execute, the same entry point for both (§12.1),
-// so every change is undoable and every agent change is labelled "[agent]".
+// The editor's state (Architecture §12.1), frozen by the M4 contract: the open project, the open scenes (one before M20; M20
+// keeps several open, one of them active: Docs/Decisions/0031-m20-contract.md decision 13), the selection, the undo history,
+// write attribution and provenance, dry runs and transactions. Panels (M10) and automation handlers read it and change it
+// only through Execute, the same entry point for both (§12.1), so every change is undoable and every agent change is
+// labelled "[agent]".
 
 namespace Engine {
 
@@ -58,6 +60,19 @@ namespace Engine {
 	class VirtualFileSystem;
 	struct AssetRefreshReport;
 	struct AssetWriteContext;
+
+	// One open scene as EditorContext::DescribeOpenScene reports it (scene.list's entries, decision 14).
+	struct OpenSceneInfo
+	{
+		OpenSceneId Id = NoOpenScene;
+		std::optional<VfsPath> Path{}; // the file it was opened from or last saved to; nullopt for a scene never saved
+		std::string Name{};
+		uint64_t Revision = 0; // its EditorContext::GetRevision
+		size_t EntityCount = 0;
+		bool Active = false;        // the active scene (EditorContext::GetActiveSceneId)
+		bool Dirty = false;         // its EditorContext::IsSceneDirty
+		bool ChangedOnDisk = false; // its EditorContext::IsSceneChangedOnDisk
+	};
 
 	// Main-thread host hooks. Captured services must outlive the binding; clear it only after asynchronous writers
 	// and the fatal hook are quiescent, before destroying those services. Empty callbacks preserve CPU-only behavior.
@@ -132,6 +147,22 @@ namespace Engine {
 	// asset (a glTF), whose import then runs before the method returns. External changes are never applied silently: they
 	// raise SceneChangedOnDisk, and scene.open (reload included) rebuilds the loaded scene's instances from the current
 	// prefab versions (UpdatePrefabInstances), so adopting the disk version adopts the changed prefabs too.
+	//
+	// Open scenes (M20, E-SCENES; Docs/Decisions/0031-m20-contract.md decisions 13 to 16). The editor holds up to
+	// MaxOpenScenes open scenes in tab order, one of them active: the tab the editor shows, play mode plays and the UI edits.
+	// Each open scene is its own document, with its own scene, path, dirty and SceneChangedOnDisk flags, undo history,
+	// revision, document epoch and selection. The members that name "the open scene" (HasScene, GetScene, GetScenePath,
+	// IsSceneDirty, MarkSceneSaved, IsSceneChangedOnDisk, UpdatePrefabInstances' command form, GetRevision,
+	// GetSceneDocumentEpoch, GetHistory, Execute's history, CloseScene() and the selection) address one of them: the
+	// addressed scene, which is the active scene unless an EditorSceneTargetScope is open (a request with a scene target), and
+	// that scope's scene while one is. So GetScene() stays the active-scene accessor for every caller outside a targeted
+	// request, and a targeted request's handlers and commands address its scene without passing it on. A command that changes
+	// no scene (project settings, an asset edit) is recorded in the addressed scene's history, as it is recorded in the one
+	// history before M20; with no open scene it goes to the editor's scene-less history, which the next scene opened
+	// replaces. Revisions never repeat across the open scenes (GetRevision). An editor write of a Prefab asset (any command,
+	// its undo and its redo) rebuilds that prefab's instances in every other open scene that instantiates it, as one "Update
+	// Prefab Instances" entry in that scene's own history, so a prefab update reaches every open scene while undo stays
+	// isolated per scene (decision 15).
 	class EditorContext
 	{
 	public:
@@ -243,7 +274,7 @@ namespace Engine {
 		// A failure prevents play. Disposable dry runs do not call host services.
 		[[nodiscard]] Status PrepareForPlay();
 
-		// --- The open scene ------------------------------------------------------------------------------------------------
+		// --- The open scene (the addressed one, see the class comment) -----------------------------------------------------
 
 		[[nodiscard]] bool HasScene() const { return m_Scene != nullptr; }
 		// The open scene (asserted HasScene).
@@ -258,10 +289,56 @@ namespace Engine {
 		// Makes `scene` (created with CreateScene, or loaded into one) the open scene, from `path`: clears the history and the
 		// selection, sets the dirty flag to `dirty` (a repaired load is dirty until saved), appends a SceneOpened event and
 		// logs the scene's name and entity count. Asserts a project, and a scene on this context's registry and generator.
+		// M20 (decision 13): `scene` replaces the addressed scene in its tab position (opens the first scene when none is
+		// open), gets a new OpenSceneId and becomes the active scene; the other open scenes are untouched.
 		void SetScene(Scope<Scene> scene, std::optional<VfsPath> path, bool dirty = false);
 
-		// Closes the open scene without saving; no effect without one.
+		// Closes the open scene without saving; no effect without one. M20: the addressed scene, as CloseScene(id) closes it.
 		void CloseScene();
+
+		// --- Open scenes (M20, E-SCENES; Docs/Decisions/0031-m20-contract.md decisions 13 and 14) ------------------------
+
+		// The open scenes in tab order: the order they were opened, a scene replaced by SetScene keeping its place. Empty
+		// without an open scene.
+		[[nodiscard]] std::vector<OpenSceneId> GetOpenScenes() const;
+		// The active scene; NoOpenScene without an open scene.
+		[[nodiscard]] OpenSceneId GetActiveSceneId() const;
+		// The addressed scene (the class comment): the open EditorSceneTargetScope's scene, else the active one.
+		[[nodiscard]] OpenSceneId GetAddressedSceneId() const;
+		// The open scene whose path is `path`; NoOpenScene when none is.
+		[[nodiscard]] OpenSceneId FindOpenScene(const VfsPath& path) const;
+		// The scene of the open scene `id`, or nullptr when no open scene has that id. Valid until it closes or is replaced.
+		[[nodiscard]] Scene* FindScene(OpenSceneId id);
+		[[nodiscard]] const Scene* FindScene(OpenSceneId id) const;
+		// What scene.list reports of the open scene `id`. Errors: NotFound when no open scene has that id.
+		[[nodiscard]] Result<OpenSceneInfo> DescribeOpenScene(OpenSceneId id) const;
+		// True when any open scene has unsaved changes (the close and shutdown prompts, project.save, project.upgrade).
+		[[nodiscard]] bool IsAnySceneDirty() const;
+
+		// scene.open and scene.new with keepOpen (decision 14): opens `scene` (created with CreateScene, or loaded into one)
+		// from `path` as an additional open scene at the end of the tab order and makes it active, with its own empty history
+		// and selection, the dirty flag `dirty`, and the SceneOpened event and log line of SetScene. Returns its id. Errors:
+		// InvalidState when MaxOpenScenes scenes are open, inside a transaction or dry run, or while a test run owns the
+		// editor; AlreadyExists when an open scene already has `path`. Asserts a project and a scene on this context's
+		// registry and generator.
+		[[nodiscard]] Result<OpenSceneId> AddScene(Scope<Scene> scene, std::optional<VfsPath> path, bool dirty = false);
+
+		// scene.activate: makes the open scene `id` the active one, appending a SceneActivated event; every open scene keeps
+		// its document (history, selection, dirty flag). No effect when it is already active. Allowed while playing: the
+		// session keeps playing the scene it started from. Inside an EditorSceneTargetScope only the scope's own scene can be
+		// activated (scene.activate's target is its subject). Errors: NotFound when no open scene has that id; InvalidState
+		// inside a transaction, a dry run or a scope of another scene, or while a test run owns the editor.
+		[[nodiscard]] Status ActivateScene(OpenSceneId id);
+
+		// scene.close: closes the open scene `id` without saving (callers ask its dirty flag first) and discards its history,
+		// appending a SceneClosed event. When it was active, the next scene in tab order becomes active (the previous one when
+		// it was the last), and no scene is open after the only one closes. Allowed while playing, the played scene's tab
+		// included: the session plays on, as it does when scene.open replaces the played scene, and then belongs to no open
+		// scene (decision 13). Inside an EditorSceneTargetScope only the scope's own scene can be closed (scene.close's
+		// target is its subject); the scope then addresses no scene until it ends. Errors: NotFound when no open scene has
+		// that id; InvalidState inside a transaction, a dry run or a scope of another scene, or while a test run owns the
+		// editor.
+		[[nodiscard]] Status CloseScene(OpenSceneId id);
 
 		// True when the open scene has unsaved changes: a scene-changing command since the save point, or a dirty SetScene
 		// (repairs) not saved since.
@@ -294,7 +371,28 @@ namespace Engine {
 		// UpdatePrefabInstances(GetScene(), prefabs), or nullptr when it would change nothing. The methods that give a
 		// prefab a new version compose it with their asset command (see the class comment). Errors: InvalidState without an
 		// open scene; those of UpdatePrefabInstances.
+		//
+		// Live nested prefabs (M20, Docs/Decisions/0031-m20-contract.md decision 8): an instance is rebuilt only from its
+		// outermost root (PrefabInstantiator), so both functions rebuild every outermost instance whose prefab is one of
+		// `prefabs` or nests one of them, directly or through others; a nested instance follows its outermost one.
+		// Open scenes (M20, decision 15): the command updates the addressed scene, in the caller's undo step; the prefab
+		// asset write it is composed with rebuilds the other open scenes' instances, each as an entry of its own history.
 		[[nodiscard]] Result<Scope<Command>> CreatePrefabUpdateCommand(std::span<const AssetHandle> prefabs);
+
+		// Live nested prefabs (M20, decision 8). The Prefab assets that nest one of `prefabs`, directly or through others
+		// (read from the registry's import dependencies, which a prefab's nested instances join), in the order they must be
+		// rewritten: every prefab after each prefab it nests, ties in asset path order; `prefabs` themselves excluded.
+		// Errors: Validation with the code PREFAB_CYCLE, naming the paths of a cycle, when the nesting graph has a cycle
+		// through one of `prefabs` (one issue per prefab on it); NotFound for a handle that names no Prefab asset.
+		[[nodiscard]] Result<std::vector<AssetHandle>> GetNestingPrefabs(std::span<const AssetHandle> prefabs) const;
+
+		// The undoable command that rewrites the Prefab assets nesting `prefabs` (GetNestingPrefabs, in its order): when it
+		// executes, each document's nested instances of a changed prefab are rebuilt from that prefab's version current then
+		// (the asset commands composed before it have run), keeping the overrides the nesting prefab records for them, and
+		// the document is written through the asset writer; undo restores each file. Nullptr when no prefab nests them.
+		// prefab.apply and the other methods that give a prefab a new version compose their asset command, then this, then
+		// CreatePrefabUpdateCommand of every prefab that changed, into one undo step. Errors: those of GetNestingPrefabs.
+		[[nodiscard]] Result<Scope<Command>> CreateNestingPrefabUpdateCommand(std::span<const AssetHandle> prefabs);
 
 		// The editor's revision (§13.4: "_meta".revision, ifRevision, the revisions in results and history entries, scene.diff
 		// {against}). It increases with every mutation of the open scene and never repeats a value for the editor's lifetime,
@@ -303,6 +401,10 @@ namespace Engine {
 		// base that SetScene and CloseScene advance past every value reported so far. 0 before the first scene opens. During
 		// a dry run it is the real revision plus the mutations the sandbox copy has seen, so a dry run reports what the real
 		// call would produce (EditorDryRunScope adjusts the base while it swaps the scene).
+		// Open scenes (M20, decision 13): the addressed scene's revision. One editor-wide counter, which every mutation of any
+		// open scene advances as a mutation of the one open scene advances it before M20, gives each open scene its revision
+		// at its last change, so a revision names one state of one scene and never matches another open scene's; with one
+		// open scene the values are exactly those before M20.
 		[[nodiscard]] uint64_t GetRevision() const;
 		// The identity of the open scene document for services keyed to it (Autosave's source baseline): SetScene and
 		// CloseScene advance it outside a dry run; edits, undo/redo and project-settings installations, which all advance
@@ -326,6 +428,9 @@ namespace Engine {
 
 		// --- Selection (§12.1 SelectionSet; edit.select, edit.getSelection) ---------------------------------------------
 
+		// M20 (decision 13): each open scene keeps its own selection, which survives switching tabs; these members read and
+		// replace the addressed scene's, and play mode's selection belongs to the scene the session plays.
+		//
 		// The selected entities, in the order selected, without duplicates. A Play selection belongs to the runtime scene it
 		// was made in (the session's serial and scene generation): once Scene.Load or a session replacement swaps that scene,
 		// it reads as empty (ADR 0018: runtime scene replacement clears its selection), and PruneSelection drops it.
@@ -531,6 +636,7 @@ namespace Engine {
 		friend class CommandHistory;        // reads GetRevisionBeforeCommand; undo and redo check CheckMutationPermission
 		friend class EditorFeatureTestHost; // synchronous, guarded Test.ReloadScript import only
 		friend class EditorDryRunScope;
+		friend class EditorSceneTargetScope; // M20: swaps the addressed scene in and out
 		friend class EditorTransaction;
 		friend class ProjectSettingsCommand; // the one caller of ApplyProjectSettings
 		friend class SceneEdit;              // sets m_PendingRevisionBefore around its Execute and appends m_TransientPlayUndos
@@ -634,6 +740,53 @@ namespace Engine {
 	private:
 		// The context back-reference and what the dry run swapped out: the real scene, history, id generator, settings,
 		// revision base and project:// mount, and the OverlayMount (EditorContext.cpp).
+		struct State;
+	private:
+		Scope<State> m_State;
+	};
+
+	// Addresses one open scene for its lifetime (M20, E-SCENES; Docs/Decisions/0031-m20-contract.md decision 13). While it is
+	// open, the members of EditorContext that name "the open scene" (its class comment lists them) address the scope's scene
+	// instead of the active one, and Execute records in that scene's history; the active scene, the tab order and what the
+	// editor shows do not change (but through ActivateScene and CloseScene of the scope's own scene, scene.activate's and
+	// scene.close's subject), and the destructor makes the active scene the addressed one again. The automation server
+	// opens one for a request of a method with MethodSpecification::SupportsSceneTarget that names a scene
+	// (RequestOptions::Scene), for the request's whole stretch on the main thread (decision 16): AdmitRequest resolves the
+	// target (EditorMethodContext::ResolveSceneTarget) and opens the scope before the deny-mutations discard check, the
+	// ifRevision check and the dry-run sandbox, which therefore all read the target; FinishRequest closes the sandbox, records
+	// the response's "_meta" state while the scope is still open, then closes the scope. So the handlers, the commands they
+	// execute, entity paths and batch references, revisions, ifRevision, "_meta", the dry run's copy and the selection all
+	// address the target without passing it on. A method with the flag is never pending (MethodSpecification), so the scope
+	// never spans a frame. Main thread; scoped; not nested; not copyable or movable.
+	class EditorSceneTargetScope
+	{
+	public:
+		// Restricts construction to Begin; CreateScope still reaches the constructor.
+		class ConstructionKey
+		{
+			ConstructionKey() = default;
+			friend class EditorSceneTargetScope;
+		};
+
+		// Use Begin. Records `context` and `scene` only; Begin then makes `scene` the addressed one.
+		EditorSceneTargetScope(ConstructionKey key, EditorContext& context, OpenSceneId scene);
+
+		// Opens a scope on `context` addressing the open scene `scene`. Errors: NotFound when no open scene has that id;
+		// InvalidState inside a dry run, a transaction or another EditorSceneTargetScope (the server opens the scope outside
+		// them, and scopes do not nest).
+		[[nodiscard]] static Result<Scope<EditorSceneTargetScope>> Begin(EditorContext& context, OpenSceneId scene);
+
+		~EditorSceneTargetScope();
+
+		EditorSceneTargetScope(const EditorSceneTargetScope&) = delete;
+		EditorSceneTargetScope& operator=(const EditorSceneTargetScope&) = delete;
+		EditorSceneTargetScope(EditorSceneTargetScope&&) = delete;
+		EditorSceneTargetScope& operator=(EditorSceneTargetScope&&) = delete;
+
+		// The open scene this scope addresses.
+		[[nodiscard]] OpenSceneId GetScene() const;
+	private:
+		// The context back-reference, the addressed scene and what the scope swapped out (EditorContext.cpp).
 		struct State;
 	private:
 		Scope<State> m_State;

@@ -237,6 +237,50 @@ namespace Engine {
 			CHECK(failure.GetMatchCount() == 1);
 		}
 
+		// Docs/Decisions/0031-m20-contract.md decision 7 (E-PFB-DEL): RemoveEntity replaces the setup's refusal (the case
+		// above, which stream A1 rewrites into this one). The editor's Delete of a member destroys it with its subtree and
+		// records one RemoveEntity on its instance root, in one undo step and without an error notice; undo brings it back.
+		TEST_CASE("SceneHierarchyPanel: Delete of a prefab member records its deletion in one undo step" * doctest::skip(true))
+		{
+			Test::WorkspaceTestUi test;
+			auto& editor = test.Environment.GetEditor();
+			REQUIRE(test.Client.Call("entity.create", Json{ { "name", "Lamp" } }));
+			REQUIRE(test.Client.Call("entity.create", Json{ { "name", "Bulb" }, { "parent", "/Lamp" } }));
+			REQUIRE(test.Client.Call("entity.create", Json{ { "name", "Filament" }, { "parent", "/Lamp/Bulb" } }));
+			REQUIRE(test.Client.Call("prefab.create", Json{ { "entity", "/Lamp" }, { "path", "Assets/Prefabs/Lamp.prefab" }, { "replaceWithInstance", true } }));
+			const UUID lamp = editor.GetScene().FindEntityByPath("/Lamp").GetUUID();
+			const UUID bulb = editor.GetScene().FindEntityByPath("/Lamp/Bulb").GetUUID();
+			const size_t steps = editor.GetHistory().GetUndoCount();
+			test.Draw();
+			test.Draw();
+			// A search opens the instance's row, so the member's row is drawn, inside the instance root's tree node.
+			const char* title = Utils::EditorWindowTitle(EditorPanel::SceneHierarchy);
+			test.Click(title, "##Search");
+			ImGui::GetIO().AddInputCharactersUTF8("Bulb");
+			test.Draw();
+			auto* hierarchy = test.Window(title);
+			const ImGuiID lampNode = ImHashStr("##Entity", 0, ImHashStr(lamp.ToString().c_str(), 0, hierarchy->ID));
+			const ImGuiID rowId = ImHashStr("##Entity", 0, ImHashStr(bulb.ToString().c_str(), 0, lampNode));
+			test.Click(test.Locate(hierarchy, rowId).GetCenter(), ImGuiMouseButton_Right);
+			const auto remove = test.FindText("Delete");
+			REQUIRE(remove.has_value());
+			test.Click(*remove);
+			REQUIRE(test.Layer.OnSafePoint(0));
+			CHECK_FALSE(editor.GetScene().FindEntityByID(bulb).IsValid());
+			CHECK_FALSE(editor.GetScene().FindEntityByPath("/Lamp/Bulb/Filament").IsValid());
+			CHECK(editor.GetHistory().GetUndoCount() == steps + 1);
+			const auto overrides = test.Client.Call("entity.get", Json{ { "entity", "/Lamp" }, { "components", Json::array({ "Prefab" }) } });
+			REQUIRE(overrides.has_value());
+			const Json& recorded = (*overrides)["entity"]["components"]["Prefab"]["Overrides"];
+			REQUIRE(recorded.size() == 1);
+			CHECK(recorded[0]["Kind"] == Json("RemoveEntity"));
+			test.Draw();
+			CHECK_FALSE(test.Text().contains("Dismiss"));
+			REQUIRE(test.Client.Call("edit.undo", Json::object()));
+			CHECK(editor.GetScene().FindEntityByID(bulb).IsValid());
+			CHECK(editor.GetScene().FindEntityByPath("/Lamp/Bulb/Filament").IsValid());
+		}
+
 		TEST_CASE("SceneHierarchyPanel: pending hierarchy renames reject replaced runtime scenes with the same entity UUID")
 		{
 			Test::WorkspaceTestUi test;

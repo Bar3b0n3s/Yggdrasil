@@ -24,8 +24,11 @@ namespace Engine {
 	// "Seed":
 	//     { "Format": "Prefab", "Version": 1, "Name": <string>, "Root": <hex>, "ComponentVersions": {...},
 	//       "Entities": [ ...canonical order, the root first... ] }
-	// Prefabs never contain PrefabInstance or PrefabLink components: nested instances are flattened when a prefab is
-	// created (live nested prefabs are a non-goal, §1.2).
+	// Live nested prefabs (M20, Docs/Decisions/0031-m20-contract.md decision 8): a prefab document holds instances of other
+	// prefabs as a scene holds them, expanded, with their Prefab and PrefabLink components and their overrides, each
+	// instance outermost within the document. The prefab's root is never an instance root or member itself
+	// (PREFAB_NESTED_INSTANCE); a prefab that nests itself, directly or through others, is PREFAB_CYCLE, which the editor
+	// and project validation report (a document alone cannot see it).
 	//
 	// A Prefab holds its validated canonical document (the entity array with its header and "ComponentVersions", so that
 	// unknown components keep their versions); it is immutable after creation, cheap to copy (the document is shared,
@@ -52,8 +55,12 @@ namespace Engine {
 			const LoadOptions& options, LoadReport& report);
 
 		// Creates a prefab from the subtree rooted at `root`: entities keep their current IDs as prefab-local IDs and their
-		// canonical JSON, the root's "Parent" becomes null, and nested instances are flattened (their PrefabInstance and
-		// PrefabLink components dropped, their entities kept). Errors: as SceneSerializer::EntityToJson.
+		// canonical JSON, and the root's "Parent" becomes null. M20 (decision 8): every instance wholly inside the subtree
+		// (its root strictly below `root`) stays live, as an instance outermost in the new document (its
+		// OuterPrefabEntityID cleared, the overrides its enclosing instance recorded for it moved onto its own root); the
+		// instance of `root` itself and every instance with its root outside the subtree are unpacked in the copy, as
+		// prefab.unpack leaves them (their links dropped, their nested instances kept live). Errors: as
+		// SceneSerializer::EntityToJson.
 		[[nodiscard]] static Result<Prefab> CreateFromEntity(ConstEntity root, std::string name);
 
 		// The canonical document. Errors: InvalidArgument for an empty prefab, which has none.

@@ -193,6 +193,15 @@ namespace Engine {
 			return {};
 		}
 
+		Status ScriptTestFixture::RequestSceneReload(std::optional<Json> parameters)
+		{
+			if (parameters.has_value() && !parameters->is_object())
+				return MakeError(ErrorCode::Validation, "Scene.Reload parameters must be an object");
+			ReloadRequested = true;
+			RequestedReloadParameters = std::move(parameters);
+			return {};
+		}
+
 		void ScriptTestFixture::OnScriptError(const ScriptError& error, bool fatal)
 		{
 			Errors.push_back(error);

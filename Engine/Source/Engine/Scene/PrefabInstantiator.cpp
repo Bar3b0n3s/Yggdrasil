@@ -1229,4 +1229,35 @@ namespace Engine {
 		return Prefab::FromJson(document, registry, loadOptions, report);
 	}
 
+	Result<std::vector<Entity>> PrefabInstantiator::GetInstanceLevels(Entity /*entity*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "M20 nested prefab levels contract (Docs/Decisions/0031-m20-contract.md decision 8, stream A2)");
+	}
+
+	Result<std::vector<UUID>> PrefabInstantiator::GetOverridePath(ConstEntity /*entity*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "M20 nested override paths contract (Docs/Decisions/0031-m20-contract.md decision 8, stream A2)");
+	}
+
+	Result<Prefab> PrefabInstantiator::ApplyOverrides(Entity /*instance*/, Entity /*level*/, const Prefab& /*levelPrefab*/, const PrefabOptions& /*options*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "M20 prefab.apply level contract (Docs/Decisions/0031-m20-contract.md decision 9, stream A2)");
+	}
+
+	std::optional<ScriptSlotField> PrefabInstantiator::ParseScriptSlotField(std::string_view /*field*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		// M20 per-slot overrides (Docs/Decisions/0031-m20-contract.md decision 19, stream M-B).
+		return std::nullopt;
+	}
+
+	std::string PrefabInstantiator::MakeScriptSlotField(uint32_t /*slot*/, std::string_view /*member*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return {};
+	}
+
 }

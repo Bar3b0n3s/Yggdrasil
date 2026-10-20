@@ -242,6 +242,8 @@ namespace Engine {
 		[[nodiscard]] Status SetCursorMode(CursorMode mode) override;
 		[[nodiscard]] CursorMode GetCursorMode() const override { return Host != nullptr ? Host->GetScriptCursorMode() : CursorMode::Normal; }
 		[[nodiscard]] Status RequestSceneLoad(AssetHandle scene, Json parameters) override;
+		[[nodiscard]] Status RequestSceneReload(std::optional<Json> parameters) override;
+		[[nodiscard]] AssetHandle GetCurrentScene() const override;
 		void RequestQuit(int32_t exitCode) override;
 		void RequestPause() override { Session.SetPaused(true); }
 		void OnScriptError(const ScriptError& error, bool fatal) override;
@@ -387,6 +389,18 @@ namespace Engine {
 		PendingScene = std::move(candidate);
 		PendingParameters = std::move(parameters);
 		return {};
+	}
+
+	Status PlaySession::State::RequestSceneReload(std::optional<Json> /*parameters*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "M20 Scene.Reload contract (Docs/Decisions/0031-m20-contract.md decision 5, stream P2)");
+	}
+
+	AssetHandle PlaySession::State::GetCurrentScene() const
+	{
+		ENGINE_CONTRACT_STUB();
+		return AssetHandle();
 	}
 
 	void PlaySession::State::RequestQuit(int32_t exitCode)
@@ -1085,6 +1099,12 @@ namespace Engine {
 	const Json& PlaySession::GetLoadParameters() const
 	{
 		return m_State->Parameters;
+	}
+
+	AssetHandle PlaySession::GetCurrentSceneAsset() const
+	{
+		ENGINE_CONTRACT_STUB();
+		return AssetHandle();
 	}
 
 	ScriptErrorStream& PlaySession::GetScriptErrors()

@@ -12,6 +12,8 @@
 
 #include <cstdint>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace Engine {
@@ -28,6 +30,14 @@ namespace Engine {
 		// values when member JSON is read. May be null: script field values are then copied verbatim (never remapped) and
 		// kept with REFLECTION_VARIANT_UNRESOLVED.
 		const IFieldSchemaSource* Schemas = nullptr;
+	};
+
+	// A per-slot Field override's target (M20, Docs/Decisions/0031-m20-contract.md decision 19): the index of a slot in a
+	// Script component's list and one member of that slot.
+	struct ScriptSlotField
+	{
+		uint32_t Slot = 0;
+		std::string Member{}; // "Script", "Fields" or "ExecutionOrder"
 	};
 
 	// Where and how Instantiate creates one instance.
@@ -55,8 +65,8 @@ namespace Engine {
 	// Overrides (PrefabOverride) are field-level {PrefabEntityID, Component, Field, Value}, component-level {AddComponent |
 	// RemoveComponent} and entity keys {EntityKey: Name, Active or Tags}, so a deactivated or renamed member stays so
 	// across updates. Root Name, Transform and Parent are always implicit overrides. Entities under an instance without
-	// PrefabLinkComponent are user children and survive updates. Deleting members inside an instance is a non-goal (§1.2:
-	// deactivate or unpack instead).
+	// PrefabLinkComponent are user children and survive updates. Deleting a member is recorded as a RemoveEntity override
+	// (M20, below).
 	//
 	// Comparisons between an instance and its prefab (ComputeOverrides, RefreshOverrides) are made in instance space: the
 	// prefab entity's JSON is first remapped as instantiation would remap it, so a fresh instance has no overrides and an
@@ -71,6 +81,29 @@ namespace Engine {
 	// A Map of Variants (Script.Fields) holds independently authored values (§11.2), so its Field override records only the
 	// keys that differ from the prefab, as an RFC 7386 patch (null for a key the instance removed), and applying it changes
 	// only those keys: the prefab's edits to the other keys still reach the instance.
+	//
+	// M20 (Docs/Decisions/0031-m20-contract.md decisions 7 and 8; the functions above keep their signatures and take this
+	// behaviour with streams A1 and A2):
+	//   - RemoveEntity. A member deleted from an instance in the edit scene is recorded by the diff, as every override is:
+	//     PrefabOverrideKind::RemoveEntity for each prefab entity absent from the instance whose prefab parent is present,
+	//     and updates and reverts build neither it nor its prefab descendants until the override goes (prefab.revert).
+	//   - Live nested prefabs. A prefab document holds instances of other prefabs exactly as a scene holds them (expanded,
+	//     linked, with their overrides). An instance nested in a document is an instance of its prefab at its root's id: a
+	//     nested root's id derives at the level that encloses it, Hash64(enclosing root, its id in the enclosing prefab),
+	//     which its PrefabLink records as OuterPrefabEntityID (null on every other entity), and its members derive from it.
+	//     Every PrefabLink keeps naming the entity's own innermost instance (a root, nested or not, names itself). Only an
+	//     instance outermost in its document (OuterPrefabEntityID null) records overrides, each targeting an entity by its
+	//     path (PrefabInstance version 2): its id in the outermost prefab, or the ids of the nested roots on the way and then
+	//     its id in its own prefab. Updates rebuild nested instances from the outer prefab's document, so a nested prefab's
+	//     edit reaches an instance once the prefab assets nesting it are rewritten (EditorContext's prefab updates).
+	//
+	// M20 per-slot overrides (S-MULTI; Docs/Decisions/0031-m20-contract.md decision 19; stream M-B). The Script component is
+	// an ordered list of slots (Script version 2), and its Field overrides target one slot's member: Field is
+	// "Scripts/<slot>/<member>", <slot> the slot's index in the prefab entity's list and <member> one of Script, Fields
+	// and ExecutionOrder (ScriptSlotField). When the member's list has as many slots as the prefab entity's, the diff records
+	// one such override per differing slot member, a slot's Fields as the RFC 7386 key patch above; when the lengths
+	// differ, it records the whole list as one Field override "Scripts" instead, as for any other list field. Applying a
+	// slot override whose slot the prefab entity no longer has drops it with PREFAB_STALE_OVERRIDE.
 	//
 	// Static functions only; main thread, like the scene. Every mutating function is atomic: on error the scene is unchanged.
 	class PrefabInstantiator
@@ -139,6 +172,52 @@ namespace Engine {
 		// instance root or `prefab` is empty; InvalidState for a reference that ComputeOverrides rejects; Validation when
 		// the written-back document fails to load as a prefab.
 		[[nodiscard]] static Result<Prefab> ApplyOverrides(Entity instanceRoot, const Prefab& prefab, const PrefabOptions& options);
+
+		// --- Nesting (M20, E-PFB-NEST; Docs/Decisions/0031-m20-contract.md decisions 8 and 9) ----------------------------
+
+		// The instance roots that `entity` belongs to, from the outermost to the innermost: the instance root that encloses
+		// every other, then each nested instance root on the way down, ending with the innermost instance that has `entity`
+		// as its root or a member. An outermost instance's own member gives one root; a member of a nested instance gives
+		// the outermost root, then each nested root down to its own; an entity outside every instance (a user child
+		// included) gives an empty list. These are the levels prefab.apply offers (decision 9). Errors: InvalidArgument for an
+		// invalid entity; InvalidState for a broken link chain (a PrefabLink naming no instance root, an OuterPrefabEntityID
+		// that no enclosing instance root derives the entity's id from).
+		[[nodiscard]] static Result<std::vector<Entity>> GetInstanceLevels(Entity entity);
+
+		// The override path of `entity` within its outermost instance (PrefabOverride::Path): for an entity of the outermost
+		// instance itself (its root included), its id in the outermost prefab; for an entity of a nested instance, the
+		// OuterPrefabEntityID of each nested root from the outermost level inwards, then the entity's own PrefabEntityID
+		// unless it is that nested instance's root. So the outermost root's path is its prefab root's id, a nested root's
+		// ends with its id in the prefab that nests it, and fold(Hash64, outermost root, path) is the entity's id for every
+		// entity but the outermost root. Errors: InvalidArgument for an entity outside every instance; those of
+		// GetInstanceLevels.
+		[[nodiscard]] static Result<std::vector<UUID>> GetOverridePath(ConstEntity entity);
+
+		// prefab.apply at a level (decision 9): `levelPrefab`, the prefab of the instance rooted at `level`, with the
+		// overrides of `instance`'s outermost instance that target `instance` or entities below it in the instance (all of
+		// them when `instance` is the outermost root) written back, their paths re-based onto `level`'s prefab (the part of
+		// the path that leads to `level` dropped). An override of `level` itself, whose path ends at `level`, is re-based to
+		// [the id of `levelPrefab`'s root], except the level root's Name, Transform and Parent: those are its placement in
+		// the prefab that encloses it, implicit at its own level as every instance root's are, so they are never written
+		// into `levelPrefab` and stay recorded on the outermost root (the root's Active, Tags and components are written
+		// like any member's). An override of an instance nested in `level`'s prefab is written as that nested instance's
+		// own override in `levelPrefab`'s document; a RemoveEntity removes the entity and its descendants from it. `level`
+		// is one of GetInstanceLevels(instance), `instance` itself included; ApplyOverrides above is the
+		// case `level` = `instance` = the outermost root. The caller writes the asset, rewrites the prefab assets nesting it
+		// and updates their instances. Errors: InvalidArgument when `instance` is not an instance root, `level` is not one of
+		// its levels or `levelPrefab` is empty; InvalidState for a reference that ComputeOverrides rejects; Validation when
+		// the written-back document fails to load as a prefab.
+		[[nodiscard]] static Result<Prefab> ApplyOverrides(Entity instance, Entity level, const Prefab& levelPrefab, const PrefabOptions& options);
+
+		// --- Script slots (M20, S-MULTI; Docs/Decisions/0031-m20-contract.md decision 19) ----------------------------------
+
+		// The slot and member a Field override of the Script component names when its Field is "Scripts/<slot>/<member>":
+		// <slot> a decimal index without leading zeros (0 to 2^32 - 1) and <member> Script, Fields or ExecutionOrder;
+		// nullopt for anything else ("Scripts" itself included). The override resolver, the diff, the instantiator and the
+		// inspector's override list read Field through it.
+		[[nodiscard]] static std::optional<ScriptSlotField> ParseScriptSlotField(std::string_view field);
+		// The Field of a per-slot override: "Scripts/<slot>/<member>". `member` is Script, Fields or ExecutionOrder (asserted).
+		[[nodiscard]] static std::string MakeScriptSlotField(uint32_t slot, std::string_view member);
 	};
 
 }

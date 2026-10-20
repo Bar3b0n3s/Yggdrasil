@@ -45,6 +45,18 @@ namespace Engine {
 		std::optional<uint64_t> TranscriptLine{};
 	};
 
+	// A request's scene target "scene" (M20, E-SCENES; Docs/Decisions/0031-m20-contract.md decision 16): a scene path as a
+	// string (project-relative or project://, the path scene.list reports) or an open scene's id as an integer from 1 to
+	// 2^32 - 1 (the uint32 id scene.list reports, EditorCore's OpenSceneId; the only way to name a scene that was never
+	// saved). Exactly one of the two is set. The protocol layer only checks the JSON type and the id's range (InvalidParams
+	// located at /scene otherwise); the host resolves it against its open scenes (EditorMethodContext::ResolveSceneTarget;
+	// the Runtime, which has no open scenes, refuses it).
+	struct SceneTargetReference
+	{
+		std::string Path{}; // non-empty when the target is a path
+		uint32_t Id = 0;    // non-zero when the target is an id
+	};
+
 	// The reserved params any request may carry. MethodRegistry::PrepareParams removes them from the params before the
 	// param struct is read, so no param struct declares them (the param-struct conventions in MethodRegistry.h).
 	struct RequestOptions
@@ -56,6 +68,10 @@ namespace Engine {
 		// revision differs (the editor's
 		// EditorContext::GetRevision, which never repeats a value across scenes).
 		std::optional<uint64_t> IfRevision{};
+		// "scene" (M20, decision 16): accepted only by methods with MethodSpecification::SupportsSceneTarget; nullopt when
+		// the request names no scene (it then addresses the active scene). The ops of edit.batch inherit their batch's, and
+		// an op that carries its own is InvalidArgument, as one carrying dryRun or ifRevision is.
+		std::optional<SceneTargetReference> Scene{};
 	};
 
 	// Resolves the readable spellings of an asset reference in params (§7.1, convention 13 of MethodRegistry.h): a project

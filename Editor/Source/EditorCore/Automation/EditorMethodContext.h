@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EditorCore/Automation/AutomationTypes.h"
+#include "EditorCore/OpenSceneId.h"
 #include "Engine/Automation/Methods/AutomationMethodContext.h"
 #include "Engine/Automation/Protocol/MethodContext.h"
 #include "Engine/Core/Base.h"
@@ -59,6 +60,16 @@ namespace Engine {
 		// edit scene, InvalidState "not playing" for the play scene without a session (located at /target). The pointer is
 		// non-owning and valid until the open scene or the play session changes.
 		[[nodiscard]] Result<Scene*> ResolveTargetScene(SceneTarget target, bool given, bool mutation) const override;
+
+		// The open scene the request addresses (M20, E-SCENES; Docs/Decisions/0031-m20-contract.md decision 16): the scene
+		// target (GetOptions().Scene) resolved against the open scenes, a path by EditorContext::FindOpenScene after
+		// ResolveProjectPath with the ".scene" extension, an id by EditorContext::FindScene; without a target, the active
+		// scene. The server calls it in AdmitRequest, before the request's permission checks, ifRevision and dry-run
+		// sandbox, and, when the request names a scene, opens its EditorSceneTargetScope on the id it returns (decision 16);
+		// scene.activate and scene.close read their subject with it. Errors: InvalidArgument for a malformed path (located
+		// at /scene); NotFound for a path or id that names no open scene (located at /scene, the hint listing the open
+		// scenes' paths and ids); InvalidState "no scene open" without a target while no scene is open.
+		[[nodiscard]] Result<OpenSceneId> ResolveSceneTarget() const;
 
 		// Resolves an EntityRef (§13.4) in `scene`: 16 hex digits (either case) is an exact id; 6 to 15 hex digits a unique
 		// prefix of an entity's id; text starting with '/' an entity path (Scene::ResolveEntityPath). `pointer` locates the

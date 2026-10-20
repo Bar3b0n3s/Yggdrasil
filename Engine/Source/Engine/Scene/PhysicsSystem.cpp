@@ -1590,7 +1590,7 @@ namespace Engine {
 			blocked[index] = !state.IsPresent(events[index].Key.Low) || !state.IsPresent(events[index].Key.High);
 		const auto deliver = [&state, &step](PhysicsEventType type, UUID self, UUID other, const PhysicsContact& contact, bool synthesized)
 		{
-			const PhysicsEvent event{ .Type = type, .Self = self, .Other = other, .Contact = contact, .Synthesized = synthesized, .Tick = step.Tick };
+			const PhysicsEvent event{ .Type = type, .Self = self, .Other = other, .Contact = contact, .Synthesized = synthesized, .Tick = step.Tick, .SelfBody = self };
 			state.LastEvents.push_back(event);
 			if (state.Listener != nullptr)
 				state.Listener->OnPhysicsEvent(event);
@@ -1703,7 +1703,8 @@ namespace Engine {
 					.Other = other,
 					.Contact = PhysicsContact{ .Collider = collider, .OtherCollider = otherCollider },
 					.Synthesized = true,
-					.Tick = tick };
+					.Tick = tick,
+					.SelfBody = self };
 				state.LastEvents.push_back(event);
 				if (state.Listener != nullptr)
 					state.Listener->OnPhysicsEvent(event);
@@ -2067,6 +2068,16 @@ namespace Engine {
 			}
 		}
 		hasher.Update(bytes);
+	}
+
+	PhysicsEventOrderKey GetPhysicsEventOrderKey(const PhysicsEvent& event)
+	{
+		const UUID selfBody = event.SelfBody.IsValid() ? event.SelfBody : event.Self;
+		const bool selfIsLow = selfBody < event.Other;
+		return PhysicsEventOrderKey{ .Low = selfIsLow ? selfBody : event.Other,
+			.High = selfIsLow ? event.Other : selfBody,
+			.Type = event.Type,
+			.Collider = event.IsColliderEvent() ? event.Self : UUID() };
 	}
 
 	std::string_view PhysicsEventTypeToString(PhysicsEventType type)

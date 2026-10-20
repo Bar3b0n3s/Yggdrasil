@@ -340,6 +340,24 @@ namespace Engine {
 			return result;
 		}
 
+		Result<SceneListResult> SceneList(EditorMethodContext& /*context*/, const NoParams& /*params*/)
+		{
+			ENGINE_CONTRACT_STUB();
+			return MakeError(ErrorCode::Unsupported, "M20 scene.list contract (Docs/Decisions/0031-m20-contract.md decision 14, stream S-D)");
+		}
+
+		Result<SceneActivateResult> SceneActivate(EditorMethodContext& /*context*/, const NoParams& /*params*/)
+		{
+			ENGINE_CONTRACT_STUB();
+			return MakeError(ErrorCode::Unsupported, "M20 scene.activate contract (Docs/Decisions/0031-m20-contract.md decision 14, stream S-D)");
+		}
+
+		Result<SceneCloseResult> SceneClose(EditorMethodContext& /*context*/, const SceneCloseParams& /*params*/)
+		{
+			ENGINE_CONTRACT_STUB();
+			return MakeError(ErrorCode::Unsupported, "M20 scene.close contract (Docs/Decisions/0031-m20-contract.md decision 14, stream S-D)");
+		}
+
 	}
 
 	void RegisterEditorSceneMethodTypes(TypeRegistry& registry)
