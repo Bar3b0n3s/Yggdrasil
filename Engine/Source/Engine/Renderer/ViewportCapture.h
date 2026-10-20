@@ -3,6 +3,7 @@
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
 #include "Engine/Graphics/Image.h"
+#include "Engine/Renderer/RenderSnapshot.h"
 
 #include <nvrhi/nvrhi.h>
 
@@ -22,7 +23,6 @@ namespace Engine {
 	class Readback;
 	class SceneRenderer;
 	class SceneRendererPipelines;
-	struct RenderSnapshot;
 
 	// The golden-image size (§15.4), the default of viewport screenshots.
 	inline constexpr uint32_t DefaultViewportScreenshotWidth = 640;
@@ -77,6 +77,12 @@ namespace Engine {
 		// Width or Height or one above MaxViewportScreenshotDimension; those of SceneRenderer::Resize and Render,
 		// Readback::ReadTexture and DownscaleImage.
 		[[nodiscard]] Result<Image> Capture(const ViewportScreenshotRequest& request, const RenderSnapshot& snapshot);
+
+		// M18 (C18.1, R-2D-PIXEL; Docs/Decisions/0029-m18-contract.md decision 6): the output mapping of the last successful
+		// Capture's rendered image (request.Width x request.Height, before MaxDimension's downscale), SceneRenderer's
+		// GetOutputMapping: which of its pixels show which scene pixels, and which are letterbox. A caller that maps pixels of
+		// a downscaled image scales them to the rendered size first. The identity at 1 x 1 before the first Capture.
+		[[nodiscard]] RenderOutputMapping GetLastOutputMapping() const;
 	private:
 		GraphicsDevice* m_Device = nullptr; // documented back-reference
 		Scope<SceneRenderer> m_SceneRenderer;

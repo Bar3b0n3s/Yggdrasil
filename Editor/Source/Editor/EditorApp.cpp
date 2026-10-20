@@ -118,6 +118,7 @@ namespace Engine {
 		Scope<EditorHostClose> Close; // the window-close confirmation; uses Actions and Saves
 		uint64_t ProjectGeneration = 0;
 		bool DeviceLostQueued = false;
+		bool DeviceLostUnrecoverable = false;        // debug.deviceLost {unrecoverable} (M18, C18.3)
 		const LoadedProject* BoundProject = nullptr; // identity only; cleared before project close
 		std::vector<std::filesystem::path> ContentDrops{};
 		std::optional<AssetHandle> AudioRequest{};
@@ -558,9 +559,10 @@ namespace Engine {
 			// --export-root (§13.4; ADR 0024 decision 3): project.export writes below it instead of <Project>/Build/.
 			serverSpecification.ExportRoot = options.ExportRoot.value_or(std::filesystem::path());
 			if (options.AutomationTestHooks && context.GetGraphicsDevice())
-				serverSpecification.QueueDeviceLost = [&app]() -> Status
+				serverSpecification.QueueDeviceLost = [&app](bool unrecoverable) -> Status
 				{
 					app.m_State->DeviceLostQueued = true;
+					app.m_State->DeviceLostUnrecoverable = unrecoverable;
 					return {};
 				};
 			serverSpecification.ReadHostStatistics = [&app]()
@@ -730,9 +732,10 @@ namespace Engine {
 			// A Vulkan error thrown out of NVRHI inside a method (vk::SystemError, §4.6 item 2) ends the process like the
 			// frame-boundary catch (App/FrameLoop.cpp) would, instead of becoming an Internal response on a lost device.
 			systemErrors = [this, handler = MakeVulkanSystemErrorHandler(GetContext())](const std::system_error& error, std::string_view phase)
+				-> std::optional<Error>
 			{
 				RefreshFatalSnapshot();
-				handler(error, phase);
+				return handler(error, phase);
 			};
 		}
 
@@ -1189,8 +1192,15 @@ namespace Engine {
 		// Test-only fault intent is consumed after publishing the post-dispatch scene. The next real submission takes
 		// the normal device-loss path, so the fatal callback can recover this edit rather than a startup snapshot.
 		if (std::exchange(state.DeviceLostQueued, false))
+		{
 			if (GraphicsDevice* device = GetContext().GetGraphicsDevice())
-				device->GetDiagnostics().SetDeviceLost(true);
+			{
+				if (std::exchange(state.DeviceLostUnrecoverable, false))
+					device->GetDiagnostics().InjectUnrecoverableDeviceLoss();
+				else
+					device->GetDiagnostics().SetDeviceLost(true);
+			}
+		}
 
 		if (state.Editor != nullptr)
 		{

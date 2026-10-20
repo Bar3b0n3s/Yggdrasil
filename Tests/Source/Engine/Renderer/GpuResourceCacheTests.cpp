@@ -17,6 +17,7 @@
 #include "Engine/Graphics/GpuResourceTracker.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Readback.h"
+#include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/SceneRenderer.h"
 #include "Support/AssetTestFixture.h"
@@ -589,6 +590,28 @@ namespace Engine {
 				}
 			}
 			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		TEST_CASE("GpuResourceCache: a device loss drops every mirror, and the next Get uploads it again"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 acceptance (C18.3, decision 27): the asset mirrors are uploaded again from the loaded assets, and a material's
+			// mirror gets a generation never used before, so no binding set from before the loss is found again.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu);
+			GpuResourceCache& cache = setup.Cache();
+			const uint64_t generation = cache.GetMaterial(UUID(8911)).Generation;
+			CHECK(cache.GetMesh(UUID(8910)).VertexBuffer != nullptr);
+			CHECK(cache.GetStats().MeshCount == 1);
+
+			cache.ReleaseGpuObjects();
+			CHECK(cache.GetStats().MeshCount == 0);
+			CHECK(cache.GetStats().MaterialCount == 0);
+			const GpuMesh& mesh = cache.GetMesh(UUID(8910));
+			CHECK(mesh.VertexBuffer != nullptr);
+			CHECK_FALSE(mesh.IsPlaceholder);
+			CHECK(cache.GetMaterial(UUID(8911)).Generation > generation);
 		}
 	}
 

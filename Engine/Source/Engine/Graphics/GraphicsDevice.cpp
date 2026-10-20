@@ -1148,8 +1148,8 @@ namespace Engine {
 		// The query is valid only on a lost device (validation reports it otherwise), and an injected loss has no fault.
 		if (!m_Diagnostics.IsDeviceLost())
 			return "no fault information";
-		if (m_Diagnostics.GetInjectedFault() == GpuFault::DeviceLost)
-			return std::format("no fault information (the device loss was injected by --gpu-inject-fault={})", GpuFaultToString(GpuFault::DeviceLost));
+		if (const GpuFault fault = m_Diagnostics.GetInjectedFault(); fault == GpuFault::DeviceLost || fault == GpuFault::DeviceLostUnrecoverable)
+			return std::format("no fault information (the device loss was injected by --gpu-inject-fault={})", GpuFaultToString(fault));
 		if (m_Diagnostics.IsDeviceLossInjected())
 			return "no fault information (the device loss was injected)";
 		const vk::detail::DispatchLoaderDynamic& dispatcher = VULKAN_HPP_DEFAULT_DISPATCHER;
@@ -1230,6 +1230,37 @@ namespace Engine {
 	void GraphicsDevice::QueueSignalSemaphore(VkSemaphore semaphore, uint64_t value)
 	{
 		static_cast<nvrhi::vulkan::IDevice*>(m_VulkanNvrhiDevice.Get())->queueSignalSemaphore(nvrhi::CommandQueue::Graphics, semaphore, value);
+	}
+
+	bool GraphicsDevice::IsLost() const
+	{
+		return m_Diagnostics.IsDeviceLost();
+	}
+
+	void GraphicsDevice::ReportDeviceLost(std::string_view /*context*/)
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
+	std::optional<GpuDeviceLossReport> GraphicsDevice::GetLossReport() const
+	{
+		return m_LossReport;
+	}
+
+	Status GraphicsDevice::Recover(Window* /*presentWindow*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return std::unexpected(Error(ErrorCode::Unsupported, "M18 device-loss recovery contract (Docs/Decisions/0029-m18-contract.md decision 29, stream A)"));
+	}
+
+	uint32_t GraphicsDevice::GetRecoveryCount() const
+	{
+		return m_RecoveryCount;
+	}
+
+	GpuRecreationRegistry& GraphicsDevice::GetRecreation()
+	{
+		return m_Recreation;
 	}
 
 }

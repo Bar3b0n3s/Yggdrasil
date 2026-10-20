@@ -128,6 +128,34 @@ namespace Engine {
 			gate->reset();
 			commandList->Reset();
 		}
+
+		TEST_CASE("RenderTargetPool: ReleaseAll drops every target, acquired or free"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 acceptance (C18.3, decision 27): the pool of a renderer releases everything in the recovery, whatever the
+			// submissions that used its targets.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			RenderTargetPool pool(gpu.GetDevice());
+			const nvrhi::TextureDesc desc = MakeTargetDesc(16, nvrhi::Format::RGBA8_UNORM, "PoolTarget");
+			Result<nvrhi::TextureHandle> held = pool.Acquire(desc);
+			REQUIRE_MESSAGE(held.has_value(), held.error().ToString());
+			{
+				Result<nvrhi::TextureHandle> freed = pool.Acquire(desc);
+				REQUIRE_MESSAGE(freed.has_value(), freed.error().ToString());
+			}
+			pool.EndFrame();
+			CHECK(pool.GetTargetCount() == 2);
+
+			pool.ReleaseAll();
+			CHECK(pool.GetTargetCount() == 0);
+			CHECK(pool.GetAcquiredCount() == 0);
+			CHECK(*held != nullptr); // the holder's handle stays valid until it drops it
+			held->Reset();
+			Result<nvrhi::TextureHandle> again = pool.Acquire(desc);
+			REQUIRE_MESSAGE(again.has_value(), again.error().ToString());
+			CHECK(pool.GetTargetCount() == 1);
+		}
 	}
 
 }

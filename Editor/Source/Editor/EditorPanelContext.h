@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Editor/FileDialog.h"
 #include "EditorCore/Autosave/Autosave.h"
 #include "Engine/Asset/AssetHandle.h"
 #include "Engine/Core/Result.h"
@@ -125,6 +126,10 @@ namespace Engine {
 		// OS drops are copied as native paths; asset.import validates them and writes/provenance through existing commands.
 		// External editor launch uses Process with argument lists, never a shell, and propagates Io/NotFound.
 		std::function<Status(const std::filesystem::path&, uint32_t)> OpenSource{};
+		// M18 (Docs/Decisions/0029-m18-contract.md decision 19): the native dialog backend every panel's FileDialog offers
+		// its requests to (FileDialog::Open): MakeNativeFileDialogBackend over the main window in a windowed editor. Unset in
+		// headless editors and tests: every dialog is the ImGui picker.
+		FileDialogBackend FileDialogs{};
 	};
 
 }

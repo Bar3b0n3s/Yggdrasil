@@ -71,6 +71,21 @@ namespace Engine {
 		: m_Root(std::move(root)), m_Device(device), m_Vfs(&vfs)
 	{
 		ENGINE_CORE_ASSERT(!m_Root.IsEmpty(), "ShaderLibrary needs a root directory");
+		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 33): a lost device's shaders are dropped and their SPIR-V
+		// kept; the next Get creates them again from it on the recovered device. W18.1's reload keeps this hook covering
+		// every shader map it adds.
+		if (m_Device != nullptr)
+		{
+			ShaderLibrary* owner = this;
+			GpuRecreationHooks hooks;
+			hooks.Name = "ShaderLibrary";
+			hooks.Release = [owner]()
+			{
+				for (auto& [stem, variant] : owner->m_Shaders)
+					variant.Shader = nullptr;
+			};
+			m_Recreation = m_Device->GetRecreation().Register(std::move(hooks));
+		}
 	}
 
 	ShaderLibrary::~ShaderLibrary() = default;
@@ -82,15 +97,23 @@ namespace Engine {
 		if (m_Device == nullptr)
 			return MakeError(ErrorCode::InvalidState, "cannot create the shader '{}': this ShaderLibrary serves reflection only", stem);
 
-		if (const auto cached = m_Shaders.find(stem); cached != m_Shaders.end())
-			return cached->second;
+		const auto cached = m_Shaders.find(stem);
+		if (cached != m_Shaders.end() && cached->second.Shader != nullptr)
+			return cached->second.Shader;
 
-		ENGINE_TRY_ASSIGN(const Buffer binary, Utils::ReadVariantFile(*m_Vfs, m_Root, stem, ".spv"));
-		if (!Utils::IsSpirvBinary(binary))
+		// A variant whose shader a device loss dropped is created again from the bytes it was created from, which match its
+		// cached reflection; any other variant is read from its file.
+		Buffer read;
+		if (cached == m_Shaders.end())
 		{
-			Error error(ErrorCode::Validation, std::format("'{}.spv' under '{}' is not a SPIR-V binary ({} bytes)", stem, m_Root.ToString(), binary.size()));
-			return std::unexpected(std::move(error).WithHint(std::string(Utils::CompileHint)));
+			ENGINE_TRY_ASSIGN(read, Utils::ReadVariantFile(*m_Vfs, m_Root, stem, ".spv"));
+			if (!Utils::IsSpirvBinary(read))
+			{
+				Error error(ErrorCode::Validation, std::format("'{}.spv' under '{}' is not a SPIR-V binary ({} bytes)", stem, m_Root.ToString(), read.size()));
+				return std::unexpected(std::move(error).WithHint(std::string(Utils::CompileHint)));
+			}
 		}
+		const std::span<const std::byte> binary = cached != m_Shaders.end() ? std::span<const std::byte>(cached->second.Binary) : std::span<const std::byte>(read);
 		ENGINE_TRY_ASSIGN(const ShaderReflection* reflection, GetReflection(program, entry, permutation));
 
 		nvrhi::ShaderDesc desc;
@@ -98,7 +121,10 @@ namespace Engine {
 		desc.entryName = reflection->EntryPoint;
 		desc.debugName = stem;
 		ENGINE_TRY_ASSIGN(nvrhi::ShaderHandle shader, m_Device->CreateShader(desc, binary));
-		m_Shaders.emplace(stem, shader);
+		if (cached != m_Shaders.end())
+			cached->second.Shader = shader;
+		else
+			m_Shaders.emplace(stem, Detail::ShaderLibraryVariant{ .Binary = std::move(read), .Shader = shader });
 		return shader;
 	}
 
@@ -119,6 +145,16 @@ namespace Engine {
 		}
 
 		return &m_Reflections.emplace(std::move(stem), std::move(*reflection)).first->second;
+	}
+
+	void ShaderLibrary::BeginReload()
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
+	void ShaderLibrary::EndReload(bool /*keep*/)
+	{
+		ENGINE_CONTRACT_STUB();
 	}
 
 }

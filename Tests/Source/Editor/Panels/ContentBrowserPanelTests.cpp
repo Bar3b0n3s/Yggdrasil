@@ -234,6 +234,37 @@ namespace Engine {
 			REQUIRE(ui.Frame(draw)); // drain the real command result; failures must not be logged
 		}
 
+		TEST_CASE("ContentBrowserPanel: creating a sprite sheet queues an empty sheet" * doctest::skip(true))
+		{
+			// M18, R-2D-SHEET (Docs/Decisions/0029-m18-contract.md decision 18, stream S): the Create popup's last entry,
+			// asset.create {type: SpriteSheet} without values.
+			Test::PanelInteractionFixture fixture("ContentCreateSpriteSheet", false);
+			auto& context = fixture.GetContext();
+			ContentBrowserPanel panel;
+			Test::AssetDesignInteraction ui;
+			const auto draw = [&panel, &context]()
+			{
+				return panel.Draw(context);
+			};
+			REQUIRE(ui.Frame(draw));
+			CreateContentAsset(ui, draw, context.Editor, 8, "Sprite sheet", "Tiles");
+			CHECK_FALSE(context.Editor.GetAssets().Resolve("Assets/Tiles.spritesheet"));
+			context.Actions.Pump();
+			context.Editor.GetAssets().WaitIdle();
+			context.Actions.Pump();
+			const auto asset = context.Editor.GetAssets().Resolve("Assets/Tiles.spritesheet");
+			REQUIRE(asset);
+			CHECK(context.Editor.GetAssets().GetAssetType(*asset) == AssetType::SpriteSheet);
+			const auto properties = fixture.GetAutomation().Call("asset.getProperties", Json{ { "asset", asset->ToString() } });
+			REQUIRE(properties);
+			CHECK((*properties)["values"]["Frames"] == Json::array());
+			CHECK((*properties)["values"]["Texture"].is_null());
+			const auto history = context.Editor.GetHistory().GetEntries(10);
+			REQUIRE(history.size() == 1);
+			CHECK(history.front().Origin == CommandOrigin::User);
+			REQUIRE(ui.Frame(draw));
+		}
+
 		TEST_CASE("ContentBrowserPanel: registered thumbnails enter the real ImGui draw list without rendering in Draw")
 		{
 			Test::PanelInteractionFixture fixture("ContentTexture", false);

@@ -33,7 +33,10 @@ namespace Engine {
 		// waits for it with WaitForSubmission (bounded; a hang or device loss is fatal, FramePacer.h). Blocks the caller
 		// until the pixels are on the CPU, so it is for screenshots and tests, never for per-frame work. Errors:
 		// InvalidArgument for a depth or block-compressed format, a multisampled or 3D texture, or a mip or slice out of range;
-		// Gpu when the staging texture or command list cannot be created, or mapping fails.
+		// Gpu when the staging texture or command list cannot be created, or mapping fails. M18 (C18.3,
+		// Docs/Decisions/0029-m18-contract.md decision 28): Gpu when the device is lost before or during the copy
+		// (GraphicsDevice::IsLost after the wait), since a lost device copies nothing; the command list it keeps is a GPU
+		// object, so its owner destroys the Readback in the recovery's release (decision 33).
 		[[nodiscard]] Result<Image> ReadTexture(nvrhi::ITexture& texture, uint32_t mipLevel = 0, uint32_t arraySlice = 0);
 	private:
 		GraphicsDevice* m_Device = nullptr;     // documented back-reference

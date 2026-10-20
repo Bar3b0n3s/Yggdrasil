@@ -31,6 +31,7 @@ namespace Engine {
 	class ImGuiLayer;
 #endif
 	class ProcessContext;
+	struct GpuDeviceLossReport;
 	struct RenderContext;
 
 	struct ApplicationSpecification
@@ -134,8 +135,9 @@ namespace Engine {
 	//   --expect-no-gpu-errors  ExpectNoGpuErrors = true
 	//   --vulkan-api <version>  Graphics.MaxApiVersion: "1.3" or "1.4" (§8.1)
 	//   --gpu <index|name>      Graphics.GpuOverride (§8.1; ENGINE_GPU when absent)
-	//   --gpu-inject-fault <f>  Graphics.InjectFault: "device-lost", "oom-texture", "hang" or "oom-specialization" (§8.14
-	//                           item 8)
+	//   --gpu-inject-fault <f>  Graphics.InjectFault: "device-lost", "oom-texture", "hang", "oom-specialization" or
+	//                           "device-lost-unrecoverable" (§8.14 item 8; M18, Docs/Decisions/0029-m18-contract.md
+	//                           decision 30)
 	//   --audio-device <kind>   Audio = GetDefaultAudioSpecification(Window) with Device System for "system", Null for
 	//                           "null" or None for "none" (M12: windowed processes that tests start never open the
 	//                           machine's audio device, §15.1 T1); the decoding mode stays the window mode's
@@ -182,6 +184,18 @@ namespace Engine {
 	//      replaced by a resize stays alive until every frame that cleared it has completed. A Gpu error from
 	//      ImGuiLayer::Render (a pipeline, buffer or binding set could not be created) ends the process through
 	//      FatalError(OutOfMemory) (§8.14 item 7); other Render errors are logged once per run of failing frames.
+	//   2b. M18 (C18.3, Docs/Decisions/0029-m18-contract.md decisions 28, 29 and 33): device loss. A frame on a lost device
+	//      (GraphicsDevice::IsLost) renders nothing: no BeginFrame wait, no OnRender, no OnImGuiRender, no submission or
+	//      Present, as for a frame the swapchain skips (the simulation, its scripts and its audio still run). A Gpu error on a
+	//      lost device is the loss, never FatalError(OutOfMemory). At the frame boundary (FrameLoop's OnFrameDeviceLost) the
+	//      application recovers the device: OnDeviceLost with the loss's report (the editor writes its autosave there), then
+	//      EngineContext::RecoverGraphics, which releases every registered owner (the rendering objects of step 1 register as
+	//      one owner, "Application frame", and the ImGuiLayer's renderer as another), creates the device again and creates
+	//      them again. On success it appends one EngineEventType::GpuDeviceLost event (Message: the report's context and fault
+	//      description) to the context's EventLog, calls OnDeviceRecovered, and the next frame renders; on failure it ends the
+	//      process through GraphicsDevice::RaiseDeviceLost with the report and the recovery's error (FatalError(DeviceLost):
+	//      the fatal hook's autosave, a crash report, exit code 4). A loss during initialization, before the first frame,
+	//      ends the process the same way (decision 25).
 	//   3. OnShutdown, GraphicsDevice::WaitForIdle, the rendering objects (ImGuiLayer, GpuProfiler, swapchain or offscreen
 	//      target, pacer), then the GPU services (EngineContext::DestroyGraphics) with the ExpectNoGpuErrors check (see the
 	//      field), then the rest of the context (reverse order), then the ExpectNoErrors check, which so counts the errors
@@ -216,6 +230,12 @@ namespace Engine {
 		[[nodiscard]] ProcessContext& GetProcessContext();
 		// After the context exists and before the first frame. An error makes Run return ExitCode::InitFailed.
 		[[nodiscard]] virtual Status OnInitialize() { return {}; }
+		// M18 (C18.3, decision 29): at the frame boundary after a device loss, before the recovery releases anything: CPU work
+		// only, never the GPU (the editor publishes and writes its autosave, like its fatal hook). Does nothing by default.
+		virtual void OnDeviceLost(const GpuDeviceLossReport& /*report*/) {}
+		// M18 (C18.3, decision 29): after a successful recovery, before the next frame: what depends on the recreated GPU
+		// objects beyond its own registration (the editor asks for a fresh UI frame). Does nothing by default.
+		virtual void OnDeviceRecovered(const GpuDeviceLossReport& /*report*/) {}
 		// After the last frame, while the context still exists. Runs when OnInitialize succeeded.
 		virtual void OnShutdown() {}
 		// Every window or injected event, before InputState sees it; mark it handled to keep it from the game.
@@ -270,6 +290,8 @@ namespace Engine {
 		void OnFrameFixedStep(const SimStep& step) override;
 		void OnFrameUpdate(const FrameTime& frame) override;
 		void OnFrameRender(const FrameTime& frame) override;
+		// M18 (C18.3, decision 29): step 2b's recovery.
+		void OnFrameDeviceLost() override;
 
 		// Step 1's rendering objects (see the class comment); does nothing with RendererMode::None.
 		[[nodiscard]] Status InitializeRendering();

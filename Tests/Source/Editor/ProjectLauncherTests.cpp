@@ -3,6 +3,7 @@
 
 #include "Editor/AssetDesignInteraction.h"
 #include "Editor/PanelInteractionFixture.h"
+#include "Editor/ScriptedFileDialog.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/VirtualFileSystem.h"
@@ -127,6 +128,42 @@ namespace Engine {
 			context.Actions.Pump();
 			REQUIRE(context.Editor.HasProject());
 			CHECK(context.Editor.GetProject().GetProjectFile() == projects[1]);
+		}
+
+		TEST_CASE("ProjectLauncher: Browse projects shows the injected native dialog and opens the chosen project" * doctest::skip(true))
+		{
+			// M18, E-DIALOGS (Docs/Decisions/0029-m18-contract.md decision 19, stream G): with a native backend in the panel
+			// context, the launcher's browser is the native dialog; its answer fills the path, which project.open takes.
+			Test::PanelInteractionFixture fixture("LauncherNativeDialog", false);
+			auto& context = fixture.GetContext();
+			REQUIRE(context.Editor.CloseProject());
+			const auto& directory = fixture.GetAutomation().GetEditorFixture().GetDirectory();
+			const auto created = ProjectManager::CreateProject({ .Directory = directory / "Native", .Name = "Demo", .Template = ProjectTemplate::Empty, .TemplatesDirectory = context.Editor.GetSpecification().TemplatesDirectory }, context.Editor.GetTypeRegistry());
+			REQUIRE(created);
+			const auto script = CreateRef<Test::ScriptedFileDialogScript>();
+			script->Outcome = FileDialogOutcome{ .State = FileDialogState::Accepted, .Path = created->ProjectFile };
+			context.FileDialogs = Test::MakeScriptedFileDialogBackend(script);
+			ProjectLauncher launcher;
+			Test::AssetDesignInteraction ui;
+			const auto draw = [&launcher, &context]()
+			{
+				return launcher.Draw(context);
+			};
+			REQUIRE(ui.Frame(draw));
+			auto* root = ui.Window("Panel interaction");
+			auto* landing = ui.Child(root, root->GetID("ProjectLanding"));
+			const ImGuiID tab = ImHashStr("Open project", 0, landing->GetID("ProjectChoices"));
+			ui.Click(draw, landing, tab);
+			ui.Click(draw, landing, ImHashStr("Browse projects...", 0, tab));
+			REQUIRE(script->Requests.size() == 1);
+			CHECK(script->Requests.front().Kind == FileDialogKind::OpenFile);
+			CHECK(script->Requests.front().Extensions == std::vector<std::string>{ ".eproj" });
+			for (int frame = 0; frame < 2; ++frame)
+				REQUIRE(ui.Frame(draw));
+			CHECK(script->LiveSessions == 0);
+			context.Actions.Pump();
+			REQUIRE(context.Editor.HasProject());
+			CHECK(context.Editor.GetProject().GetProjectFile() == created->ProjectFile);
 		}
 
 		TEST_CASE("ProjectLauncher: folder browsers start outside the engine's resources")

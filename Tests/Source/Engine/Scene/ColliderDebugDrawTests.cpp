@@ -388,7 +388,7 @@ namespace Engine {
 			(*session)->FrameUpdate(FrameTime{ .DeltaTime = 1.0 / 240.0, .UnscaledDeltaTime = 1.0 / 240.0, .Alpha = ViewAlpha, .FrameIndex = 3 });
 			const Scene& runtime = (*session)->GetScene();
 			const UUID id = Test::GetEntityId(runtime, "/Ball");
-			const std::vector<MeshDrawItem>& meshes = (*session)->GetLastExtraction().Meshes;
+			const std::pmr::vector<MeshDrawItem>& meshes = (*session)->GetLastExtraction().Meshes;
 			REQUIRE(meshes.size() == 1);
 			const glm::vec3 drawn(meshes[0].World[3]);
 

@@ -242,11 +242,14 @@ namespace Engine {
 				EngineEventType::ScriptErrorRaised,
 				EngineEventType::DiagnosticsChanged,
 				EngineEventType::AutomationClientDisconnected,
+				EngineEventType::GpuDeviceLost,
 			};
 			for (const EngineEventType type : types)
 				CHECK(EngineEventTypeFromString(EngineEventTypeToString(type)) == type);
 
 			CHECK(EngineEventTypeToString(EngineEventType::SceneChangedOnDisk) == "SceneChangedOnDisk");
+			CHECK(EngineEventTypeToString(EngineEventType::GpuDeviceLost) == "GpuDeviceLost"); // M18 (C18.3): appended, value 11
+			CHECK(static_cast<int>(EngineEventType::GpuDeviceLost) == 11);
 			CHECK(EngineEventTypeFromString("scenechangedondisk") == EngineEventType::SceneChangedOnDisk);
 			CHECK(EngineEventTypeFromString("ENTITYCREATED") == EngineEventType::EntityCreated);
 			CHECK_FALSE(EngineEventTypeFromString("EntityMoved").has_value());

@@ -83,6 +83,11 @@ namespace Engine {
 		return std::nullopt;
 	}
 
+	RenderSnapshot::RenderSnapshot(std::pmr::memory_resource* /*resource*/)
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
 	glm::mat4 ComputeReverseZProjection(RenderProjection projection, float verticalFovDegrees, float orthographicSize, float nearClip, float farClip,
 		uint32_t width, uint32_t height)
 	{

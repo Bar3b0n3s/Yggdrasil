@@ -13,13 +13,15 @@ namespace Engine {
 			Test::EditorTestFixture fixture("DebugDeviceLost");
 			uint32_t queued = 0;
 			bool fail = false;
+			std::vector<bool> unrecoverable;
 			auto specification = Test::MakeTestServerSpecification();
 			specification.RendererName = "vulkan";
-			specification.QueueDeviceLost = [&queued, &fail]() -> Status
+			specification.QueueDeviceLost = [&queued, &fail, &unrecoverable](bool lossIsUnrecoverable) -> Status
 			{
 				if (fail)
 					return MakeError(ErrorCode::Conflict, "Injected queue refusal");
 				++queued;
+				unrecoverable.push_back(lossIsUnrecoverable);
 				return {};
 			};
 			Test::AutomationTestClient client(fixture.GetEditor(), specification);
@@ -30,12 +32,17 @@ namespace Engine {
 			REQUIRE(result.has_value());
 			CHECK((*result)["queued"] == true);
 			CHECK(queued == 1);
+			// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 30): unrecoverable reaches the host, false by default.
+			const auto fatal = client.Call("debug.deviceLost", Json{ { "unrecoverable", true } });
+			REQUIRE(fatal.has_value());
+			CHECK(queued == 2);
+			CHECK(unrecoverable == std::vector<bool>{ false, true });
 			fail = true;
 			const auto refused = client.Call("debug.deviceLost", Json::object());
 			REQUIRE_FALSE(refused.has_value());
 			CHECK(refused.error().GetCode() == ErrorCode::Conflict);
 			CHECK(refused.error().ToString().contains("Injected queue refusal"));
-			CHECK(queued == 1);
+			CHECK(queued == 2);
 			const auto* method = client.GetServer().GetMethods().Find("debug.deviceLost");
 			REQUIRE(method != nullptr);
 			CHECK(method->Specification.TestHook);
@@ -47,7 +54,7 @@ namespace Engine {
 			CHECK_FALSE(client.Call("debug.deviceLost", Json{ { "dryRun", true } }).has_value());
 			CHECK_FALSE(client.GetServer().GetMethods().BuildToolCatalog().dump().contains("debug.deviceLost"));
 			CHECK_FALSE(client.GetServer().GetMethods().BuildMethodCatalog().dump().contains("debug.deviceLost"));
-			CHECK(queued == 1);
+			CHECK(queued == 2);
 		}
 
 		TEST_CASE("DebugMethods: device loss without a rendering callback is Unsupported")
@@ -62,7 +69,7 @@ namespace Engine {
 			}
 			SUBCASE("renderer none even with callback")
 			{
-				specification.QueueDeviceLost = [&queued]() -> Status
+				specification.QueueDeviceLost = [&queued](bool /*unrecoverable*/) -> Status
 				{
 					++queued;
 					return {};

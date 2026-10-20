@@ -9,6 +9,7 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <memory_resource>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -27,9 +28,24 @@
 // Frozen by the M7 contract (Docs/Decisions/0012-m7-decisions.md decision 6) with the members the walking skeleton
 // extracts. The M8 contract added the texts, the debug draw list and the debug view (Docs/Decisions/0013-m8-decisions.md
 // decision 5); M9 added the pick table, the view flags, the selected entities, the annotations and their draw list, the
-// quality settings, the icons and the frame and scene revision stamps (ADR 0017). Additions are frozen-header changes
-// reviewed by their contract owner; no member here changes meaning. A plain value type: copyable, movable,
-// thread-compatible.
+// quality settings, the icons and the frame and scene revision stamps (ADR 0017). The M18 contract (C18.1,
+// Docs/Decisions/0029-m18-contract.md decisions 5 to 8) added the output stage (RenderOutputSettings, the view-to-scene
+// mapping) and the memory resource of the containers (decision 9). Additions are frozen-header changes reviewed by their
+// contract owner; no member here changes meaning. A plain value type: copyable, movable, thread-compatible.
+//
+// Containers (M18, R-ARENA): the snapshot's own containers that grow with the scene (Meshes, Lights, Texts, PickTable,
+// Icons, and the commands of DebugDraw and AnnotationDraw) are std::pmr containers. A snapshot built with
+// RenderSnapshot(resource) allocates them from that memory resource, which must outlive the snapshot; a default-constructed
+// one, and every copy (std::pmr's copy construction), allocates from std::pmr::get_default_resource(), the global heap
+// unless a host changed it. Assignment keeps the target's resource. SelectedEntities (a handful of UUIDs, copied from the
+// host's selection) and the nested containers (a mesh item's Materials, a text's Text, the annotations' label list) keep
+// the default allocator.
+//
+// The output stage (M18, decisions 5 to 8): a view renders its scene at the scene resolution of RenderOutputSettings (the
+// view's size by default, which renders exactly as before the output stage), then the output stage upscales the scene image
+// by the largest integer factor that fits the view, with point sampling, centred in a letterbox. Picking, CPU rays,
+// captures and UI hit testing map view pixels to scene pixels with RenderOutputMapping (ComputeRenderOutputMapping and the
+// Map* functions below). UI is laid out and hit-tested in scene pixels.
 
 namespace Engine {
 
@@ -190,6 +206,8 @@ namespace Engine {
 		float OrthographicSize = 10.0f; // half the view height in metres, orthographic
 		float NearClip = 0.1f;
 		float FarClip = 1000.0f; // the orthographic depth range and the culling distance of both projections
+		// The viewport the projection was made for: the scene resolution (M18: RenderOutputSettings, the view's size by
+		// default). Pixel rays (ComputeViewPixelRay) take scene pixels of this size.
 		uint32_t ViewportWidth = 1;
 		uint32_t ViewportHeight = 1;
 		// CameraComponent::ClearColor, linear. SceneColor is cleared to it; with ClearToSkybox and an environment map the
@@ -298,16 +316,67 @@ namespace Engine {
 		UUID Entity{};
 	};
 
+	// The output stage of one view (M18, C18.1, R-2D-PIXEL; Docs/Decisions/0029-m18-contract.md decisions 5 to 8). Its
+	// defaults render the scene at the view's size with the snapshot's post-processing, exactly as before the output stage.
+	// M18 sets it from tests only; M21's PixelPerfectCamera sets it from the scene.
+	struct RenderOutputSettings
+	{
+		// The scene resolution: the size of every scene-resolution target (depth, normals, colour, EntityId, the LDR targets)
+		// and of the camera's viewport (CameraData::ViewportWidth and ViewportHeight). A 0 component takes the view's. When it
+		// differs from the view, the output stage upscales the scene image by the integer factor of ComputeRenderOutputMapping
+		// with point sampling, centred in a letterbox of LetterboxColor.
+		uint32_t SceneWidth = 0;
+		uint32_t SceneHeight = 0;
+		// The 2D colour path (decision 7): the post chain runs the Linear tonemapper at exposure 1 (2^0) with the sRGB OETF
+		// and without the blue-noise dither, bloom or FXAA, whatever Post says, so a texel drawn into SceneColor (a sprite's,
+		// M21) reaches the output unchanged. GTAO still follows Post (it shades meshes only).
+		bool PixelArt = false;
+		// The letterbox around the upscaled scene image: linear RGB, encoded with the sRGB OETF like a clear colour.
+		glm::vec3 LetterboxColor = glm::vec3(0.0f);
+
+		bool operator==(const RenderOutputSettings&) const = default;
+	};
+
+	// Where the scene image lands in the view (ComputeRenderOutputMapping): view pixel (x, y) shows scene pixel
+	// (floor((x - OffsetX) / Scale), floor((y - OffsetY) / Scale)) when that lies in the scene image, and the letterbox
+	// otherwise. Top-left origin, +y down, in both spaces.
+	struct RenderOutputMapping
+	{
+		uint32_t ViewWidth = 1;
+		uint32_t ViewHeight = 1;
+		uint32_t SceneWidth = 1;
+		uint32_t SceneHeight = 1;
+		// View pixels per scene pixel along each axis, at least 1.
+		uint32_t Scale = 1;
+		// The view pixel of the scene image's top-left corner: floor((View - Scale * Scene) / 2) per axis, rounded toward
+		// negative infinity (not C++'s truncating division), so an odd leftover pixel goes to the right or bottom letterbox;
+		// negative when a scene larger than the view is cropped, and then an odd surplus pixel is cropped from the left or
+		// top (a 161-pixel scene in a 100-pixel view has offset -31: 31 pixels cropped on the left, 30 on the right).
+		int32_t OffsetX = 0;
+		int32_t OffsetY = 0;
+
+		// True when the scene image is the view (equal sizes, so Scale 1 and no offset): the output stage records nothing.
+		[[nodiscard]] bool IsIdentity() const { return ViewWidth == SceneWidth && ViewHeight == SceneHeight; }
+
+		bool operator==(const RenderOutputMapping&) const = default;
+	};
+
 	// One view's render snapshot (§8.2). Vectors are in canonical entity order (§5.1), so a snapshot of a deterministic scene
 	// is deterministic.
 	struct RenderSnapshot
 	{
+		// The containers allocate from the default memory resource (see the file comment).
+		RenderSnapshot() = default;
+		// M18 (R-ARENA, decision 9): the containers allocate from `resource` (not null, asserted), which outlives the snapshot;
+		// a host measures or uses a per-frame arena through it. Copies allocate from the default resource.
+		explicit RenderSnapshot(std::pmr::memory_resource* resource);
+
 		// False when the view has no camera (a game view of a scene without a primary camera): the renderer then clears to
 		// the default ClearColor and draws nothing but screen texts (M8, TextRenderInputs::HasCamera).
 		bool HasCamera = false;
 		CameraData Camera{};
-		std::vector<MeshDrawItem> Meshes{};
-		std::vector<LightData> Lights{};
+		std::pmr::vector<MeshDrawItem> Meshes{};
+		std::pmr::vector<LightData> Lights{};
 		RenderEnvironment Environment{};
 		PostProcessSettings Post{};
 		// The interpolation alpha the poses were extracted at (§5.2): the frame's Alpha for the game view (1 for ManualClock
@@ -317,7 +386,7 @@ namespace Engine {
 		float Alpha = 1.0f;
 		// M8: every effectively enabled TextComponent with non-empty Text, in canonical entity order (screen and world texts
 		// together; the text pass draws the world ones, depth-tested, then the screen ones, §8.3 pass 14).
-		std::vector<TextItem> Texts{};
+		std::pmr::vector<TextItem> Texts{};
 		// M8: the ordinary debug primitives of this view (DebugDrawList.h): M13's scripts through the session's persistent list,
 		// the editor's gizmos. Extraction leaves it empty; its producers append to it. The AO, ShadowCascades and Overdraw data
 		// views leave it out (ADR 0017).
@@ -328,21 +397,42 @@ namespace Engine {
 		// M8: what the forward passes output; Lit except a viewport.screenshot with "debugView" or the editor's debug view.
 		RenderDebugView DebugView = RenderDebugView::Lit;
 		// M9: assigned once in canonical mesh-entity order before visibility culling; no duplicate or invalid UUIDs.
-		std::vector<UUID> PickTable{};
+		std::pmr::vector<UUID> PickTable{};
 		RenderViewFlags Flags = RenderViewFlags::None;
 		std::vector<UUID> SelectedEntities{}; // copied, canonicalized; unknown ids ignored; never component references
 		RenderAnnotations Annotations{};
 		RenderQualitySettings Quality{};
-		std::vector<RenderIcon> Icons{};
+		std::pmr::vector<RenderIcon> Icons{};
 		uint64_t FrameIndex = 0;    // host frame for nonblocking timings; capture hosts use their own sequence
 		uint64_t SceneRevision = 0; // opaque host revision stamped alongside FrameIndex before Render, echoed by picking
+		// M18 (C18.1): the output stage (RenderOutputSettings); the default renders the scene at the view's size.
+		RenderOutputSettings Output{};
 	};
 
-	// World ray through pixel centre (x + 0.5, y + 0.5), top-left origin, in Camera.ViewportWidth/Height.
+	// World ray through pixel centre (x + 0.5, y + 0.5), top-left origin, in Camera.ViewportWidth/Height: scene pixels (M18:
+	// a view pixel maps to them through MapViewPixelToScenePixel first).
 	// Perspective starts at Position; orthographic starts on the near plane and uses constant forward direction.
 	// Pure, thread-safe, deterministic (DetMath). InvalidArgument: non-finite/singular camera, invalid clip range,
 	// zero extent or pixel outside [0, width) x [0, height). No viewport or GPU state is read.
 	[[nodiscard]] Result<RenderRay> ComputeViewPixelRay(const CameraData& camera, uint32_t x, uint32_t y);
+
+	// M18 (C18.1, decision 6): the output stage's mapping for a view of `viewWidth` x `viewHeight` (both >= 1, asserted) and
+	// `settings`. The scene resolution is the settings' (a 0 component takes the view's); Scale is the largest integer s >= 1
+	// with s * SceneWidth <= ViewWidth and s * SceneHeight <= ViewHeight, or 1 when the scene does not fit the view (then the
+	// scene image is centred and cropped); the offsets centre the scaled image (RenderOutputMapping). Default settings give
+	// the identity. Pure, thread-safe and deterministic (integer arithmetic only).
+	[[nodiscard]] RenderOutputMapping ComputeRenderOutputMapping(uint32_t viewWidth, uint32_t viewHeight, const RenderOutputSettings& settings);
+
+	// The scene pixel that view pixel (x, y) shows under `mapping`; nullopt for a pixel of the letterbox (outside the scene
+	// image) or outside the view. Picking (SceneRenderer::RequestPick), CPU rays (viewport.pick) and captures map view pixels
+	// to scene pixels with it. Pure, thread-safe.
+	[[nodiscard]] std::optional<glm::uvec2> MapViewPixelToScenePixel(const RenderOutputMapping& mapping, uint32_t x, uint32_t y);
+
+	// The UI coordinate space (decision 8): a view point (pixel units, top-left origin; (x + 0.5, y + 0.5) is the centre of
+	// pixel (x, y)) in scene pixel units, (point - Offset) / Scale, without clamping: a point of the letterbox maps outside
+	// [0, SceneWidth) x [0, SceneHeight). UI hit testing maps the pointer's view position with it. Pure, thread-safe,
+	// deterministic (IEEE-exact operations only).
+	[[nodiscard]] glm::vec2 MapViewPointToScenePoint(const RenderOutputMapping& mapping, glm::vec2 viewPoint);
 
 	// Canonical debug-view spelling, including M9's AO, ShadowCascades and Overdraw.
 	[[nodiscard]] std::string_view RenderDebugViewToString(RenderDebugView view);
@@ -375,6 +465,14 @@ namespace Engine {
 	// InvalidArgument for an unrepresentable interval. Narrow-phase queries reject out-of-interval hits while searching,
 	// so a near-clipped foreground triangle cannot hide a valid farther triangle.
 	[[nodiscard]] Result<RenderRayInterval> ComputeViewPixelRayInterval(const CameraData& camera, uint32_t x, uint32_t y);
+
+	// M18 (C18.1, decision 6): the camera-clipped ray through the centre of view pixel (x, y) of a view under `mapping`:
+	// ComputeViewPixelRayInterval of `camera` (its viewport at the scene resolution, mapping's SceneWidth x SceneHeight) at
+	// the scene pixel MapViewPixelToScenePixel gives, the mapping applied exactly once; nullopt for a pixel of the letterbox
+	// or outside the view, which shows no scene (no hit). viewport.pick's CPU ray goes through it. Pure, thread-safe,
+	// deterministic. Errors: those of ComputeViewPixelRayInterval.
+	[[nodiscard]] Result<std::optional<RenderRayInterval>> ComputeOutputPixelRayInterval(const CameraData& camera, const RenderOutputMapping& mapping,
+		uint32_t x, uint32_t y);
 
 	// Pure data-view palette helpers, thread-safe. Display-encoded colors, bypass OETF/dither. Counts: 0 black,
 	// 1 blue, 2 cyan, 3 green, 4 yellow, >=5 red (unit RGB primaries). Input is accepted-fragment count per pixel.

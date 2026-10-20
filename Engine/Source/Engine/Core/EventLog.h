@@ -27,7 +27,11 @@ namespace Engine {
 		AssetImportFailed,
 		ScriptErrorRaised,
 		DiagnosticsChanged,
-		AutomationClientDisconnected
+		AutomationClientDisconnected,
+		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 31; the plan's "gpu.deviceLost" event): the GPU device was
+		// lost and recovered. Appended by Application after each successful recovery, so a failed one, which ends the
+		// process, never appears. Registered for automation (the "EngineEventType" registry enum) by W18.3's integration.
+		GpuDeviceLost
 	};
 
 	// The enumerator name ("EntityCreated").
@@ -47,6 +51,7 @@ namespace Engine {
 	//   ScriptErrorRaised             Id = entity (invalid for module-level errors), Path = script path, Message = error
 	//   DiagnosticsChanged            Message = summary ("2 errors, 1 warning")
 	//   AutomationClientDisconnected  Name = client name
+	//   GpuDeviceLost                 Message = the loss's report: "<context>: device lost; <fault description>" (M18)
 	struct EngineEvent
 	{
 		uint64_t Seq = 0;             // assigned by EventLog::Append: 1, 2, 3 ... never reused

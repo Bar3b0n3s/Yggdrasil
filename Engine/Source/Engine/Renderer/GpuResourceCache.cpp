@@ -470,6 +470,8 @@ namespace Engine {
 		std::map<MirrorKey, EnvironmentEntry> Environments;
 		size_t UploadFailures = 0;
 		uint64_t NextGeneration = 1; // GpuMaterial::Generation: only increases
+		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 26): the cache's registration with its device.
+		GpuRecreationRegistration Recreation{};
 
 		[[nodiscard]] UploadContext GetContext() { return { .Device = Device, .Assets = Assets, .UploadFailures = &UploadFailures }; }
 		// The texture of `slot`, or of the built-in `fallback` when the slot is empty, through the texture mirrors.
@@ -485,6 +487,15 @@ namespace Engine {
 	{
 		m_State->Device = &device;
 		m_State->Assets = &assets;
+		// M18 (C18.3, decisions 26 and 27): released with every mirror; the next Get uploads each one again.
+		GpuResourceCache* owner = this;
+		GpuRecreationHooks hooks;
+		hooks.Name = "GpuResourceCache";
+		hooks.Release = [owner]()
+		{
+			owner->ReleaseGpuObjects();
+		};
+		m_State->Recreation = device.GetRecreation().Register(std::move(hooks));
 	}
 
 	GpuResourceCache::~GpuResourceCache() = default;
@@ -693,6 +704,11 @@ namespace Engine {
 		m_State->Environments.clear();
 		m_State->Meshes.Clear();
 		m_State->Textures.Clear();
+	}
+
+	void GpuResourceCache::ReleaseGpuObjects()
+	{
+		ENGINE_CONTRACT_STUB();
 	}
 
 	GpuResourceCacheStats GpuResourceCache::GetStats() const

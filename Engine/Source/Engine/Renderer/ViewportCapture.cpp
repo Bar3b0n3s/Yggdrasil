@@ -64,4 +64,10 @@ namespace Engine {
 		return image;
 	}
 
+	RenderOutputMapping ViewportCapture::GetLastOutputMapping() const
+	{
+		ENGINE_CONTRACT_STUB();
+		return {};
+	}
+
 }

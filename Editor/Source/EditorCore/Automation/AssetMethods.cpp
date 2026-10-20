@@ -288,6 +288,13 @@ namespace Engine {
 					ENGINE_TRY_ASSIGN(const SoundEffectDescription sound, PatchSoundEffect(defaults, patch, registry, "/values"));
 					return SoundEffectToText(sound, registry);
 				}
+				case AssetCreateType::SpriteSheet:
+				{
+					// M18 SpriteSheet contract (Docs/Decisions/0029-m18-contract.md decision 18, stream S): a sprite sheet from
+					// `values` over the defaults, checked by ValidateSpriteSheet and against its texture's size.
+					ENGINE_CONTRACT_STUB();
+					return std::unexpected(Error(ErrorCode::Unsupported, "M18 SpriteSheet contract (Docs/Decisions/0029-m18-contract.md decision 18, stream S)"));
+				}
 				case AssetCreateType::Folder:
 					break;
 			}
@@ -304,6 +311,7 @@ namespace Engine {
 				case AssetCreateType::Prefab:      return ".prefab";
 				case AssetCreateType::SoundEffect: return ".sfx";
 				case AssetCreateType::Folder:      return {};
+				case AssetCreateType::SpriteSheet: return ".spritesheet";
 			}
 			return {};
 		}

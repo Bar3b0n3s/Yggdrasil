@@ -28,17 +28,31 @@ namespace Engine {
 		Vulkan14
 	};
 
-	// The faults --gpu-inject-fault forces in non-Dist builds (§8.14 item 8; GpuDiagnostics).
+	// The faults --gpu-inject-fault forces in non-Dist builds (§8.14 item 8; GpuDiagnostics). Values are appended, never
+	// reordered.
 	enum class GpuFault : uint8_t
 	{
 		None,
-		DeviceLost, // "device-lost": the device-lost flag is set after the next submission
+		// "device-lost": the device-lost flag is set after a submission. M18 (C18.3, Docs/Decisions/0029-m18-contract.md
+		// decision 30): at the first submission after the device's first RunGarbageCollection (an application's second
+		// frame, once its startup objects exist), once per process; the frame boundary recovers it (GraphicsDevice::Recover)
+		// and the process keeps running.
+		DeviceLost,
 		OomTexture, // "oom-texture": creating a sampled-only texture fails as if the device were out of memory
 		Hang,       // "hang": every bounded GPU wait times out until its budget is spent, so the first one ends in GpuHang
 		// "oom-specialization": creating a specialized shader fails as if the device were out of memory. Only the debug views'
 		// forward pipelines, created on first use (§8.5), specialize shaders, so startup is unaffected.
-		OomSpecialization
+		OomSpecialization,
+		// M18 (C18.3, decision 30), "device-lost-unrecoverable": the same loss as DeviceLost, and every device creation of its
+		// recovery fails (GpuDiagnostics::ShouldFailDeviceRecreation) without the reset wait, so the recovery ends in
+		// FatalError(DeviceLost) after its one retry: the editor's autosave, a crash report and exit code 4.
+		DeviceLostUnrecoverable
 	};
+
+	// M18 (C18.3, decision 29): the default reset wait (GraphicsSpecification::ResetWaitMilliseconds), long enough for the
+	// operating systems' GPU resets: a Windows TDR takes about 2 s plus the driver's recovery, a Linux kernel GPU hang check
+	// up to about 10 s.
+	inline constexpr uint32_t DefaultGpuResetWaitMilliseconds = 15'000;
 
 	// Whether Vulkan and NVRHI validation is on by default in this configuration (§2.2): on in Debug, off in Release
 	// (--gpu-validation turns it on; the GPU tests always do), never in Dist.
@@ -85,6 +99,11 @@ namespace Engine {
 		// every device. Honoured in every configuration, with no command-line option, so callers can deterministically
 		// exercise the extended-near shadow fallback.
 		bool DisableDepthClamp = false;
+		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 29): the reset wait. A device-loss recovery whose first
+		// device creation fails waits this long for the operating system's GPU reset before its one retry
+		// (GraphicsDevice::Recover); C18.4 makes it also the second bounded wait after a hang's 10 s budget and decides how a
+		// user sets it. 0 retries at once. Tests never wait it: an injected recreation failure retries at once.
+		uint32_t ResetWaitMilliseconds = DefaultGpuResetWaitMilliseconds;
 	};
 
 	// "None" or "Vulkan".
@@ -140,16 +159,18 @@ namespace Engine {
 		return std::nullopt;
 	}
 
-	// The --gpu-inject-fault spelling: "none", "device-lost", "oom-texture", "hang" or "oom-specialization".
+	// The --gpu-inject-fault spelling: "none", "device-lost", "oom-texture", "hang", "oom-specialization" or
+	// "device-lost-unrecoverable".
 	[[nodiscard]] constexpr std::string_view GpuFaultToString(GpuFault fault)
 	{
 		switch (fault)
 		{
-			case GpuFault::None:              return "none";
-			case GpuFault::DeviceLost:        return "device-lost";
-			case GpuFault::OomTexture:        return "oom-texture";
-			case GpuFault::Hang:              return "hang";
-			case GpuFault::OomSpecialization: return "oom-specialization";
+			case GpuFault::None:                    return "none";
+			case GpuFault::DeviceLost:              return "device-lost";
+			case GpuFault::OomTexture:              return "oom-texture";
+			case GpuFault::Hang:                    return "hang";
+			case GpuFault::OomSpecialization:       return "oom-specialization";
+			case GpuFault::DeviceLostUnrecoverable: return "device-lost-unrecoverable";
 		}
 		return "unknown";
 	}
@@ -167,6 +188,8 @@ namespace Engine {
 			return GpuFault::Hang;
 		if (text == "oom-specialization")
 			return GpuFault::OomSpecialization;
+		if (text == "device-lost-unrecoverable")
+			return GpuFault::DeviceLostUnrecoverable;
 		return std::nullopt;
 	}
 

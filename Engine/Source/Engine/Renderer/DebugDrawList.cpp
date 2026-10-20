@@ -20,6 +20,11 @@ namespace Engine {
 
 	}
 
+	DebugDrawList::DebugDrawList(std::pmr::memory_resource* /*resource*/)
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
 	void DebugDrawList::AddLine(const glm::vec3& from, const glm::vec3& to, const glm::vec4& color, float duration, DebugDepthMode depth)
 	{
 		Add({ .Shape = DebugLine{ .From = from, .To = to }, .Color = color, .Duration = duration, .Depth = depth, .Remaining = 0.0f });

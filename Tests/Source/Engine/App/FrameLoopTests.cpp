@@ -7,6 +7,7 @@
 #include "Engine/App/ProcessContext.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Platform/CrashHandler.h"
 #include "Engine/Platform/Process.h"
 #include "Support/ChildOutput.h"
@@ -126,6 +127,52 @@ namespace Engine {
 			}
 		private:
 			bool m_ThrowInUpdate = false;
+		};
+
+		// M18 (C18.3): loses the context's device in the update of frame `LoseInFrame` (by the test hooks' flag, or by a
+		// vk::DeviceLostError thrown as NVRHI's internal calls throw it), and recovers it when the loop asks.
+		class RecoveringClient final : public IFrameLoopClient
+		{
+		public:
+			explicit RecoveringClient(EngineContext& context)
+				: m_Context(&context)
+			{
+			}
+
+			void OnFrameEvent(Event& /*event*/) override {}
+
+			void OnFrameFixedStep(const SimStep& step) override
+			{
+				Calls.push_back(std::format("step {}", step.Tick));
+			}
+
+			void OnFrameUpdate(const FrameTime& frame) override
+			{
+				Calls.push_back(std::format("update {}", frame.FrameIndex));
+				if (frame.FrameIndex != LoseInFrame)
+					return;
+				if (Throw)
+					vk::detail::resultCheck(vk::Result::eErrorDeviceLost, "FrameLoopTests: a device loss thrown out of NVRHI");
+				m_Context->GetGraphicsDevice()->GetDiagnostics().SetDeviceLost(true);
+			}
+
+			void OnFrameRender(const FrameTime& frame) override
+			{
+				Calls.push_back(std::format("render {}", frame.FrameIndex));
+			}
+
+			void OnFrameDeviceLost() override
+			{
+				Calls.push_back("device lost");
+				Recovery = m_Context->RecoverGraphics();
+			}
+		public:
+			std::vector<std::string> Calls;
+			uint64_t LoseInFrame = 0;
+			bool Throw = false;
+			Status Recovery{};
+		private:
+			EngineContext* m_Context = nullptr; // documented back-reference
 		};
 
 		// Crashes in its fixed step once told to.
@@ -513,6 +560,43 @@ namespace Engine {
 			// The catch covers the whole frame (§4.2 step 7), not only rendering: NVRHI work outside the render step (a
 			// screenshot read back during an update, an asset swap's upload) is guarded the same way.
 			CheckFrameBoundaryCatch("App/FrameLoopUpdateThrowsSystemError", "Update");
+		}
+
+		TEST_CASE("FrameLoop: a frame that lost the device ends with the client's recovery, and the next frame steps on"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 acceptance (C18.3, Docs/Decisions/0029-m18-contract.md decisions 28 and 29): the loss is recovered at the
+			// frame boundary, the frame's steps, update and render still run, and the next frame starts on the recovered
+			// device; the same for a vk::DeviceLostError thrown out of the frame, which ends that frame instead.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			for (const bool thrown : { false, true })
+			{
+				CAPTURE(thrown);
+				GraphicsSpecification graphics;
+				graphics.Validation = true;
+				graphics.SynchronizationValidation = true;
+				graphics.MaxApiVersion = Test::GetTestOptions().VulkanApi;
+				Result<Scope<EngineContext>> created = EngineContext::Create({ .WorkerCount = 0, .Graphics = graphics });
+				REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+				EngineContext& context = **created;
+				RecoveringClient client(context);
+				client.Throw = thrown;
+				FrameLoop loop(context, client, CreateScope<ManualClock>(FixedDelta), {});
+				loop.RunFrame();
+				loop.RunFrame();
+				const std::vector<std::string> expected = thrown
+					? std::vector<std::string>{ "step 0", "update 0", "device lost", "step 1", "update 1", "render 1" }
+					: std::vector<std::string>{ "step 0", "update 0", "render 0", "device lost", "step 1", "update 1", "render 1" };
+				CHECK(client.Calls == expected);
+				CHECK_MESSAGE(client.Recovery.has_value(), (client.Recovery.has_value() ? std::string() : client.Recovery.error().ToString()));
+				CHECK_FALSE(context.GetGraphicsDevice()->IsLost());
+				CHECK(context.GetGraphicsDevice()->GetRecoveryCount() == 1);
+				CHECK(loop.GetFrameCount() == 2);
+				const GpuMessageCounts counts = context.DestroyGraphics();
+				CHECK(counts.Errors == 0);
+				CHECK(counts.Warnings == 0);
+			}
 		}
 
 		TEST_CASE("FrameLoop: the time scale scales the steps and the frame delta")

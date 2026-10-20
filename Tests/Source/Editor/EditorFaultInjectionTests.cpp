@@ -74,9 +74,10 @@ namespace Engine {
 		return MakeError(ErrorCode::InvalidState, "Injected GPU fault did not terminate the child");
 	}
 
+	// The unrecoverable loss: from M18 a plain device loss is recovered (Docs/Decisions/0029-m18-contract.md decision 30).
 	ENGINE_DEATH_TEST("Editor/AutosaveDeviceLost")
 	{
-		const auto result = RunAutosaveGpuFaultChild(GpuFault::DeviceLost);
+		const auto result = RunAutosaveGpuFaultChild(GpuFault::DeviceLostUnrecoverable);
 		if (!result)
 			ENGINE_ERROR("Autosave fault child: {}", result.error());
 	}
@@ -173,21 +174,44 @@ namespace Engine {
 		// two runs prove the exit code and the crash report only. The editor's autosave on those faults is proven by
 		// "EditorApp: its fatal hook preserves a published dirty scene through device loss and hang" above (the production
 		// hook, MakeEditorAutosaveFatalHook, under both real faults) and, through the real EditorApp, by the Python
-		// test_device_loss_autosaves_current_dirty_scene (debug.deviceLost after a dirty edit, then recover: true).
-		TEST_CASE("EditorApp: --gpu-inject-fault=device-lost exits 4 with a crash report"
+		// test_device_loss_autosaves_current_dirty_scene (debug.deviceLost {unrecoverable} after a dirty edit, then recover:
+		// true). The fatal loss is the unrecoverable one: from M18 a plain device loss is recovered
+		// (Docs/Decisions/0029-m18-contract.md decision 30; "EditorApp: --gpu-inject-fault=device-lost recovers the device
+		// and runs to the end").
+		TEST_CASE("EditorApp: --gpu-inject-fault=device-lost-unrecoverable exits 4 with a crash report"
 			* doctest::test_suite(Test::GpuSuite))
 		{
 			if (!Test::ProbeGpuForProcess())
 				return;
 			Test::TempDirectory userData("EditorDeviceLost");
 			const Result<ProcessResult> result =
-				RunRenderingEditor(userData, { "--headless", "--frames", "10", "--gpu-inject-fault", "device-lost" });
+				RunRenderingEditor(userData, { "--headless", "--frames", "10", "--gpu-inject-fault", "device-lost-unrecoverable" });
 			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
 			INFO("editor stderr: ", result->StandardError);
 			CHECK(result->ExitCode == ExitCode::Crash);
 			const Result<std::string> report = Test::ReadOnlyCrashReport(userData.GetPath());
 			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
 			CHECK(report->contains("Reason: Fatal error (DeviceLost)"));
+			CHECK(Test::FindGpuMessageLines(result->StandardError).empty());
+		}
+
+		TEST_CASE("EditorApp: --gpu-inject-fault=device-lost recovers the device and runs to the end"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 acceptance (C18.3, Docs/Decisions/0029-m18-contract.md decisions 29 and 30): the loss strikes the second
+			// frame, the frame boundary recovers it, and the editor renders its remaining frames and exits 0, with no crash
+			// report and no GPU message (--expect-no-gpu-errors, GetGpuApplicationArguments).
+			if (!Test::ProbeGpuForProcess())
+				return;
+			Test::TempDirectory userData("EditorDeviceLostRecovered");
+			const Result<ProcessResult> result =
+				RunRenderingEditor(userData, { "--headless", "--frames", "10", "--gpu-inject-fault", "device-lost" });
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			INFO("editor stderr: ", result->StandardError);
+			CHECK(result->ExitCode == ExitCode::Success);
+			CHECK(result->StandardError.contains("GPU device recovered"));
+			const std::vector<std::filesystem::path> reports = Test::ListCrashFiles(userData / ENGINE_PRODUCT_NAME / "Crashes", ".txt");
+			CHECK(reports.empty());
 			CHECK(Test::FindGpuMessageLines(result->StandardError).empty());
 		}
 

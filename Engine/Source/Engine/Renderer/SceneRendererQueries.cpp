@@ -43,6 +43,12 @@ namespace Engine {
 		state.SubmittedPicking = false;
 	}
 
+	RenderOutputMapping SceneRenderer::GetOutputMapping() const
+	{
+		ENGINE_CONTRACT_STUB();
+		return {};
+	}
+
 	RenderStats SceneRenderer::GetRenderStats() const
 	{
 		return m_State->History.GetLatest();

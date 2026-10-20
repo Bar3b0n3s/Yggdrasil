@@ -54,6 +54,10 @@ namespace Engine {
 	// (GraphicsDevice::GetCompletedSubmissionID). A Hang ends the process through FatalError(GpuHang) naming `context` and
 	// the submission; DeviceLost through GraphicsDevice::RaiseDeviceLost(context); Failed through FatalError with
 	// GetFatalErrorKind of the failed slice's VkResult (OutOfMemory for the out-of-memory results, otherwise Gpu).
+	// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 28): DeviceLost reports the loss
+	// (GraphicsDevice::ReportDeviceLost("<context>: waiting for GPU submission <id>")) and returns, and on a device already
+	// lost the wait returns at once; a caller that reads what the submission wrote checks GraphicsDevice::IsLost first
+	// (Readback::ReadTexture then fails with Gpu). The Hang path is C18.4's (W18.4).
 	//
 	// Under --gpu-inject-fault=hang (GpuDiagnostics::ShouldInjectHang) the wait skips the completed-submission early return
 	// and goes straight to RunBoundedGpuWait, whose every slice reports Timeout without calling vkWaitSemaphores, so the
@@ -84,7 +88,8 @@ namespace Engine {
 
 		// Advances to the next frame and waits until its slot is free: pollEventQuery on the slot's event query, and when it
 		// has not signaled, WaitForSubmission on the slot's recorded submission ID (a fatal error on hang or device loss, so
-		// this returns only when the slot is free). The first FramesInFlight frames never wait. Under
+		// this returns only when the slot is free). M18 (C18.3, decision 28): on a lost device it waits for nothing and
+		// returns; the pacer's owner destroys it in the recovery's release and creates a new one (decision 33). The first FramesInFlight frames never wait. Under
 		// --gpu-inject-fault=hang, every frame whose slot has a recorded submission skips pollEventQuery and calls
 		// WaitForSubmission, which then never returns (see WaitForSubmission), so a headless run ends with
 		// FatalError(GpuHang) at its first such frame even when the GPU finished long ago.

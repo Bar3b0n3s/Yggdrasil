@@ -325,6 +325,20 @@ namespace Engine {
 			+ state.Fxaa->GetPipelineCount() + state.Debug->GetPipelineCount() + state.Text->GetPipelineCount() + state.DfgLut->GetPipelineCount()
 			+ ShadowPass::PipelineCount + DepthPyramidPass::PipelineCount + GtaoPass::PipelineCount + SelectionPass::PipelineCount + 1;
 		ENGINE_CORE_INFO("Created the scene renderer's {} pipelines", state.PipelineCount);
+		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decisions 26 and 27): released with its passes, created again
+		// through the one creation entry.
+		SceneRendererPipelines* owner = set.get();
+		GpuRecreationHooks hooks;
+		hooks.Name = "SceneRendererPipelines";
+		hooks.Release = [owner]()
+		{
+			owner->ReleaseGpuObjects();
+		};
+		hooks.Recreate = [owner]()
+		{
+			return owner->CreatePipelines();
+		};
+		state.Recreation = device.GetRecreation().Register(std::move(hooks));
 		return set;
 	}
 
@@ -352,6 +366,18 @@ namespace Engine {
 	uint32_t SceneRendererPipelines::GetPipelineCount() const
 	{
 		return m_State->PipelineCount;
+	}
+
+	Status SceneRendererPipelines::CreatePipelines()
+	{
+		ENGINE_CONTRACT_STUB();
+		return std::unexpected(Error(ErrorCode::Unsupported, "M18 CreatePipelines contract (Docs/Decisions/0029-m18-contract.md decision 2, stream A)"));
+	}
+
+	uint64_t SceneRendererPipelines::GetGeneration() const
+	{
+		ENGINE_CONTRACT_STUB();
+		return 0;
 	}
 
 	std::vector<PipelineLayoutDescription> SceneRendererPipelines::GetLayoutDescriptions(nvrhi::Format bloomFormat)
@@ -717,6 +743,19 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(state.ShadowConstantsBuffer, Utils::CreateViewBuffer(device, sizeof(ShadowConstants), 0, "SceneRenderer.ShadowConstants"));
 		ENGINE_TRY_ASSIGN(state.ShadowCasterConstantsBuffer, device.CreateBuffer(ShadowPass::GetCasterConstantsDesc()));
 		ENGINE_TRY_ASSIGN(state.Targets, state.CreateTargets(specification.Width, specification.Height));
+		// M18 (C18.3, decisions 26 and 27): released with its per-view objects, which it creates again.
+		SceneRenderer* owner = renderer.get();
+		GpuRecreationHooks hooks;
+		hooks.Name = "SceneRenderer";
+		hooks.Release = [owner]()
+		{
+			owner->ReleaseGpuObjects();
+		};
+		hooks.Recreate = [owner]()
+		{
+			return owner->RecreateGpuObjects();
+		};
+		state.Recreation = device.GetRecreation().Register(std::move(hooks));
 		return renderer;
 	}
 
@@ -926,7 +965,7 @@ namespace Engine {
 		state.ImageFrame = snapshot.FrameIndex;
 		state.ImageRevision = snapshot.SceneRevision;
 		state.ImageGeneration = state.Generation;
-		state.ImagePickTable = picking ? snapshot.PickTable : std::vector<UUID>();
+		state.ImagePickTable = picking ? std::vector<UUID>(snapshot.PickTable.begin(), snapshot.PickTable.end()) : std::vector<UUID>();
 		state.FinalTarget = 0;
 		commandList.beginMarker("SceneRenderer");
 		commandList.writeBuffer(state.ViewConstantsBuffer, &view, sizeof(view));
@@ -1257,6 +1296,57 @@ namespace Engine {
 	const SceneRenderStats& SceneRenderer::GetLastStats() const
 	{
 		return m_State->Stats;
+	}
+
+	Status SceneRenderer::State::RecordPrepareStage(Detail::SceneRendererFrame& /*frame*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return std::unexpected(Error(ErrorCode::Unsupported, "M18 stage split contract (Docs/Decisions/0029-m18-contract.md decision 1, stream A)"));
+	}
+
+	void SceneRenderer::State::RecordDeformStage(Detail::SceneRendererFrame& /*frame*/)
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
+	void SceneRenderer::State::RecordShadowsStage(Detail::SceneRendererFrame& /*frame*/)
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
+	void SceneRenderer::State::RecordDepthNormalStage(Detail::SceneRendererFrame& /*frame*/)
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
+	void SceneRenderer::State::RecordAmbientStage(Detail::SceneRendererFrame& /*frame*/)
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
+	void SceneRenderer::State::RecordForwardStage(Detail::SceneRendererFrame& /*frame*/)
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
+	void SceneRenderer::State::RecordSpritesStage(Detail::SceneRendererFrame& /*frame*/)
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
+	void SceneRenderer::State::RecordHdrPostStage(Detail::SceneRendererFrame& /*frame*/)
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
+	void SceneRenderer::State::RecordTonemapStage(Detail::SceneRendererFrame& /*frame*/)
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
+	void SceneRenderer::State::RecordLdrPostStage(Detail::SceneRendererFrame& /*frame*/)
+	{
+		ENGINE_CONTRACT_STUB();
 	}
 
 }

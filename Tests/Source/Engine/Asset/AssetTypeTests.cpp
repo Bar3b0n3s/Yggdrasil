@@ -20,6 +20,7 @@ namespace Engine {
 				AssetType::Script,
 				AssetType::Font,
 				AssetType::Replay,
+				AssetType::SpriteSheet,
 			};
 			for (const AssetType type : Types)
 			{
@@ -41,6 +42,8 @@ namespace Engine {
 			static_assert(std::to_underlying(AssetType::None) == 0);
 			static_assert(std::to_underlying(AssetType::Scene) == 1);
 			static_assert(std::to_underlying(AssetType::Replay) == 10);
+			// M18's sprite sheets, phase 1's only new type (ADR 0028's phase-1 ledger: values follow the landing order).
+			static_assert(std::to_underlying(AssetType::SpriteSheet) == 11);
 			CHECK(AssetTypeToString(static_cast<AssetType>(999)) == "None");
 		}
 	}

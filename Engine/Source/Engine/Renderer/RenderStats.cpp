@@ -159,4 +159,14 @@ namespace Engine {
 		state.IsOpen = false;
 	}
 
+	void RenderRecordingContext::BeginStage(RenderStage /*stage*/, nvrhi::ICommandList* /*commandList*/)
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
+	void RenderRecordingContext::EndStage()
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
 }

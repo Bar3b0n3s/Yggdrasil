@@ -80,22 +80,45 @@ namespace Engine {
 		// Zeroes both counters (a test that provokes a validation message on purpose resets afterwards).
 		void ResetCounts();
 
-		// Set by message's "Device Removed!", by SetDeviceLost, or by the injected device-lost fault. GraphicsDevice checks it
-		// after every submission and then calls RaiseDeviceLost (§8.1). Never cleared: recovery is out of scope (§8.14).
+		// Set by message's "Device Removed!", by SetDeviceLost, or by the injected device-lost faults. GraphicsDevice checks it
+		// after every submission (§8.1). M18 (C18.3, Docs/Decisions/0029-m18-contract.md decisions 28 and 29): the device is
+		// lost while it is set (GraphicsDevice::IsLost), and GraphicsDevice::Recover clears it (ClearDeviceLost) once the
+		// device exists again; a recovery whose device creation fails leaves it set.
 		[[nodiscard]] bool IsDeviceLost() const;
 		// injected=true publishes synthetic loss and the lost flag together. Both are sticky, including across later
-		// native-loss reports/SetDeviceLost(false) and ResetCounts. A reader observing synthetic loss through IsDeviceLost
-		// also observes IsDeviceLossInjected; native-only loss never sets that marker. Never changes GetInjectedFault.
+		// native-loss reports/SetDeviceLost(false) and ResetCounts, until ClearDeviceLost. A reader observing synthetic loss
+		// through IsDeviceLost also observes IsDeviceLossInjected; native-only loss never sets that marker. Never changes
+		// GetInjectedFault.
 		void SetDeviceLost(bool injected = false);
-		// True once loss is injected by SetDeviceLost(true) or OnSubmitted's CLI fault. GraphicsDevice must never query
-		// native device-fault details for that device: synthetic loss does not put the Vulkan device into a lost state.
+		// True once loss is injected by SetDeviceLost(true), InjectUnrecoverableDeviceLoss or OnSubmitted's CLI fault, until
+		// ClearDeviceLost. GraphicsDevice must never query native device-fault details for that device: synthetic loss does
+		// not put the Vulkan device into a lost state.
 		[[nodiscard]] bool IsDeviceLossInjected() const;
+		// M18 (C18.3, decision 29): clears the device-lost flag and the injected-loss marker, which GraphicsDevice::Recover
+		// calls once the device was created again, before it recreates the device's owners (a loss reported after this is a
+		// second loss), and never after a failed creation. Never clears ShouldFailDeviceRecreation, and never re-arms a CLI
+		// fault: the fault's arming lives apart from the flag (m_InjectedFaultArming), and this leaves it alone, so an
+		// injected device-lost fault strikes once per process.
+		void ClearDeviceLost();
+
+		// M18 (C18.3, decision 30): the test hooks' unrecoverable loss (debug.deviceLost {unrecoverable: true}, the loss-test
+		// helper): SetDeviceLost(true), and ShouldFailDeviceRecreation from now on, for the diagnostics' lifetime.
+		void InjectUnrecoverableDeviceLoss();
+		// M18 (C18.3, decision 30): whether every device creation of a recovery must fail as if the device could not be
+		// created again, without calling Vulkan and without the reset wait: true under GpuFault::DeviceLostUnrecoverable and
+		// after InjectUnrecoverableDeviceLoss.
+		[[nodiscard]] bool ShouldFailDeviceRecreation() const;
 
 		[[nodiscard]] GpuFault GetInjectedFault() const { return m_InjectedFault; }
 
-		// Called by GraphicsDevice after each executeCommandLists. With GpuFault::DeviceLost, the first call sets the
-		// device-lost flag, so the check that follows the submission takes the device-loss path (§8.14 item 8).
+		// Called by GraphicsDevice after each executeCommandLists. With GpuFault::DeviceLost or DeviceLostUnrecoverable, one
+		// call sets the device-lost flag (injected), so the check that follows the submission takes the device-loss path
+		// (§8.14 item 8). M18 (C18.3, decision 30): the first call after OnGarbageCollected, once per process, so an
+		// application's startup submissions (the DFG LUT, the first uploads) and its first frame are unaffected.
 		void OnSubmitted();
+		// M18 (C18.3, decision 30): called by GraphicsDevice::RunGarbageCollection, once per frame; the first call arms
+		// OnSubmitted's injected device-lost faults.
+		void OnGarbageCollected();
 
 		// GpuFault::OomTexture: whether creating a texture with `desc` must fail as if out of device memory. True for
 		// sampled-only textures (neither isRenderTarget nor isUAV), so render targets, the swapchain and storage images keep
@@ -116,6 +139,12 @@ namespace Engine {
 		std::atomic<uint64_t> m_ErrorCount{ 0 };
 		std::atomic<uint64_t> m_WarningCount{ 0 };
 		std::atomic<uint8_t> m_DeviceLossState{ 0 }; // lost and synthetic bits are published in one atomic operation
+		// M18 (C18.3): InjectUnrecoverableDeviceLoss's marker.
+		std::atomic<bool> m_FailDeviceRecreation{ false };
+		// M18 (C18.3, decision 30): the injected device-lost faults' once-per-process state, apart from m_DeviceLossState so
+		// that ClearDeviceLost never re-arms them: an armed bit (OnGarbageCollected's first call, stream A) and a struck bit
+		// (the OnSubmitted call that set the flag; no later call strikes again).
+		std::atomic<uint8_t> m_InjectedFaultArming{ 0 };
 	};
 
 	// The fatal error a failed Vulkan result becomes (§4.6 item 2, §8.14 item 6): VK_ERROR_DEVICE_LOST is DeviceLost,

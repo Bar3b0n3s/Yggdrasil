@@ -58,6 +58,13 @@ namespace Engine {
 		// acquired since the last EndFrame, or used by a frame still in flight, stays until a later EndFrame releases it.
 		void ReleaseFree();
 
+		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 27): releases every target the pool holds, free or
+		// acquired, whatever its last submission, for its owner's Release hook in the recreation protocol (a lost device runs
+		// no submission again, and the recovery retires them all). Handles acquired by others stay valid until they drop them
+		// (NVRHI reference counting); their holders are released in the same recovery. Afterwards GetTargetCount is 0, and
+		// Acquire creates new targets. Main thread.
+		void ReleaseAll();
+
 		// Targets the pool holds, free or acquired.
 		[[nodiscard]] size_t GetTargetCount() const;
 		// Targets someone besides the pool references (HasOtherReferences).

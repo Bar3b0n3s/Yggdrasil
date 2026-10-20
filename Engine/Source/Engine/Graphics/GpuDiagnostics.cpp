@@ -17,6 +17,9 @@ namespace Engine {
 		constexpr std::string_view LoaderMessageIdName = "Loader Message";
 		constexpr uint8_t DeviceLostFlag = 1;
 		constexpr uint8_t InjectedDeviceLossFlag = 2;
+		// GpuDiagnostics::m_InjectedFaultArming's bit of the injected device-lost fault that struck (bit 1 is the armed one,
+		// set by OnGarbageCollected).
+		constexpr uint8_t InjectedFaultStruckFlag = 2;
 
 		static GpuMessageSeverity FromNvrhiSeverity(nvrhi::MessageSeverity severity)
 		{
@@ -146,14 +149,39 @@ namespace Engine {
 		return (m_DeviceLossState.load(std::memory_order_acquire) & Utils::InjectedDeviceLossFlag) != 0;
 	}
 
+	void GpuDiagnostics::ClearDeviceLost()
+	{
+		m_DeviceLossState.store(0, std::memory_order_release);
+	}
+
+	void GpuDiagnostics::InjectUnrecoverableDeviceLoss()
+	{
+		m_FailDeviceRecreation.store(true);
+		SetDeviceLost(true);
+	}
+
+	bool GpuDiagnostics::ShouldFailDeviceRecreation() const
+	{
+		return m_InjectedFault == GpuFault::DeviceLostUnrecoverable || m_FailDeviceRecreation.load();
+	}
+
+	void GpuDiagnostics::OnGarbageCollected()
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
 	void GpuDiagnostics::OnSubmitted()
 	{
-		if (m_InjectedFault != GpuFault::DeviceLost)
+		if (m_InjectedFault != GpuFault::DeviceLost && m_InjectedFault != GpuFault::DeviceLostUnrecoverable)
+			return;
+		// Once per process: the struck bit, which ClearDeviceLost leaves alone (stream A also requires the armed bit,
+		// decision 30).
+		if ((m_InjectedFaultArming.fetch_or(Utils::InjectedFaultStruckFlag, std::memory_order_acq_rel) & Utils::InjectedFaultStruckFlag) != 0)
 			return;
 		// The first submission sets the flag; the check after it (GraphicsDevice::ExecuteCommandList) ends the process.
 		const uint8_t previous = m_DeviceLossState.fetch_or(Utils::DeviceLostFlag | Utils::InjectedDeviceLossFlag, std::memory_order_acq_rel);
 		if ((previous & Utils::DeviceLostFlag) == 0)
-			ENGINE_CORE_WARN("Injected GPU fault (device-lost): the device is reported lost after this submission");
+			ENGINE_CORE_WARN("Injected GPU fault ({}): the device is reported lost after this submission", GpuFaultToString(m_InjectedFault));
 	}
 
 	bool GpuDiagnostics::ShouldFailTextureCreation(const nvrhi::TextureDesc& desc) const

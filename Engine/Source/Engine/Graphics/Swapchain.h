@@ -47,9 +47,12 @@ namespace Engine {
 		Recreate,             // VK_ERROR_OUT_OF_DATE_KHR (acquire or present), VK_SUBOPTIMAL_KHR from present: recreate the swapchain
 		RecreateSurface,      // VK_ERROR_SURFACE_LOST_KHR: recreate the surface and the swapchain
 		Retry,                // VK_TIMEOUT or VK_NOT_READY from the bounded acquire: no image this frame; the next frame tries again
-		DeviceLost,           // VK_ERROR_DEVICE_LOST: GraphicsDevice::RaiseDeviceLost
-		OutOfMemory,          // VK_ERROR_OUT_OF_HOST_MEMORY / VK_ERROR_OUT_OF_DEVICE_MEMORY: FatalError(OutOfMemory)
-		Fail                  // anything else: FatalError(Gpu)
+		// VK_ERROR_DEVICE_LOST: GraphicsDevice::RaiseDeviceLost. M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 28):
+		// GraphicsDevice::ReportDeviceLost, and the frame gets no image (acquire) or is not presented (present); the frame
+		// boundary recovers the device, and the application destroys this swapchain and creates a new one (decision 33).
+		DeviceLost,
+		OutOfMemory, // VK_ERROR_OUT_OF_HOST_MEMORY / VK_ERROR_OUT_OF_DEVICE_MEMORY: FatalError(OutOfMemory)
+		Fail         // anything else: FatalError(Gpu)
 	};
 
 	// The action for vkAcquireNextImageKHR's result.
@@ -183,7 +186,8 @@ namespace Engine {
 		void DestroySwapchain();
 		void DestroySurface();
 		// The fatal end of a swapchain call: GraphicsDevice::RaiseDeviceLost for VK_ERROR_DEVICE_LOST, otherwise
-		// FatalError with GetFatalErrorKind(result).
+		// FatalError with GetFatalErrorKind(result). M18 (C18.3, decision 28): VK_ERROR_DEVICE_LOST no longer ends the process
+		// (SwapchainAction::DeviceLost); the other results still do.
 		[[noreturn]] void EndProcess(std::string_view call, VkResult result);
 	private:
 		GraphicsDevice* m_Device = nullptr; // documented back-reference: outlives the swapchain

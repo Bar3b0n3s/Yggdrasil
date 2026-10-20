@@ -444,7 +444,7 @@ Tests support (`Tests/Source/Support/`): recording assert handler, death-test re
 **Scope.** Phase 2. The 2D path on M18's primitives and output stage, 2D physics on Jolt, 2D lighting and tilemaps (`Docs/Decisions/0028-backlog-program.md` decisions 4 and 6; waves W21.1 and W21.2). Every new GPU owner joins M18's recreation protocol. Its milestone end runs `CI.py --require-clang-cl`; M23's gate hardens phase 2 (ADR 0028 decision 12).
 
 **Deliverables**
-- SpriteRenderer and the sprite pass, sorting layers, a tick-driven SpriteAnimator playing SpriteSheet clips, PixelPerfectCamera driving M18's output stage, a 2D editor mode, the 2D automation and script surface, procedural built-in sprite textures.
+- SpriteRenderer and the sprite pass, sorting layers, a tick-driven SpriteAnimator playing SpriteSheet clips, PixelPerfectCamera driving M18's output stage, a 2D editor mode with the sprite sheet inspector (M18's sheets have none, `Docs/Decisions/0029-m18-contract.md` decision 18), the 2D automation and script surface, procedural built-in sprite textures.
 - 2D physics on Jolt: bodies with plane (degree-of-freedom) locks behind the `Physics2DWorld` interface, deterministic like the 3D world, with no new library; 2D body and collider components, queries and contact events in the canonical sort order.
 - 2D lighting (Light2D, lit sprites); tilemaps with chunked rendering, merged-box collision in the 2D world, and `tilemap.paint`.
 

@@ -20,9 +20,9 @@
 // This file is the protocol's allowlisted try/catch boundary (Architecture §4.6 item 5). Only the three calls into method
 // code are guarded (the handler through MethodRegistry::Invoke, PendingOperation::Poll and PendingOperation::Cancel):
 // std::bad_alloc is fatal like everywhere else (§4.6 "Fatal environment"); a std::system_error goes to the host's
-// SystemErrorHandler first (a Vulkan error ends the process there); any other std::exception, and a system error the
-// handler returns from, asserts in Debug builds and becomes an Internal error response in the others, so a Release editor
-// keeps serving its other clients.
+// SystemErrorHandler first (a Vulkan error ends the process there, and a device loss is answered with the handler's error,
+// M18); any other std::exception, and a system error the handler returns nullopt for, asserts in Debug builds and becomes
+// an Internal error response in the others, so a Release editor keeps serving its other clients.
 //
 // Handlers may change the client set while they run (a session.shutdown that disconnects, an in-process client that
 // removes itself), so the pump never holds a reference into the client map across a call into the host or a method: it
@@ -88,12 +88,15 @@ namespace Engine {
 			return Error(ErrorCode::Unknown, std::format("method '{}' failed with an unexpected exception: {}", method, what));
 		}
 
-		// A std::system_error escaping method code: the host's handler first (it may end the process), then the error of
-		// any other exception.
+		// A std::system_error escaping method code: the host's handler first (it may end the process, or answer with the
+		// request's error), then the error of any other exception.
 		[[nodiscard]] static Error MakeSystemErrorError(const SystemErrorHandler& handler, std::string_view method, const std::system_error& error)
 		{
 			if (handler)
-				handler(error, method);
+			{
+				if (std::optional<Error> handled = handler(error, method))
+					return std::move(*handled);
+			}
 			return MakeExceptionError(method, error.what());
 		}
 

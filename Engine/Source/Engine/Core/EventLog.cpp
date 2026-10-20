@@ -28,6 +28,7 @@ namespace Engine {
 				case EngineEventType::ScriptErrorRaised:            return "ScriptErrorRaised";
 				case EngineEventType::DiagnosticsChanged:           return "DiagnosticsChanged";
 				case EngineEventType::AutomationClientDisconnected: return "AutomationClientDisconnected";
+				case EngineEventType::GpuDeviceLost:                return "GpuDeviceLost";
 			}
 			return {};
 		}

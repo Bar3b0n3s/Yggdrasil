@@ -4,11 +4,13 @@
 
 #include "Engine/Core/Log.h"
 #include "Engine/Graphics/FramePacer.h"
+#include "Engine/Graphics/GpuRecreation.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Image.h"
 #include "Engine/Graphics/OffscreenTarget.h"
 #include "Engine/Graphics/Readback.h"
 #include "Shared/ImGuiConstants.h"
+#include "Support/DeviceLossTest.h"
 #include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
 
@@ -419,6 +421,66 @@ namespace Engine {
 			CHECK(layout.bindings[1].slot == 0);
 			CHECK(layout.bindings[2].type == nvrhi::ResourceType::PushConstants);
 			CHECK(layout.bindings[2].size == sizeof(ImGuiConstants));
+		}
+
+		TEST_CASE("ImGuiRenderer: a device loss uploads ImGui's textures again and draws the same image"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 acceptance (C18.3, Docs/Decisions/0029-m18-contract.md decisions 32 and 33): the renderer registers itself
+			// ("ImGuiRenderer"); its Release drops its pipelines, buffers, sampler, binding sets and texture handles and marks
+			// ImGui's textures for creation, so the font atlas is uploaded again from ImGui's own pixels and the same frame draws
+			// the same image. The frame's own objects stand for an application's frame owner, which registers them.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			ImGuiTestContext context;
+			Result<Scope<ImGuiRenderer>> created = ImGuiRenderer::Create(device, gpu.GetPipelines(), { .FramesInFlight = 1 });
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			ImGuiRenderer& renderer = **created;
+			std::optional<FramePacer> pacer;
+			std::optional<OffscreenTarget> target;
+			nvrhi::CommandListHandle commandList;
+			const auto createFrame = [&device, &pacer, &target, &commandList]() -> Status
+			{
+				pacer.emplace(device, 1);
+				ENGINE_TRY_ASSIGN(OffscreenTarget frameTarget, OffscreenTarget::Create(device, { .Width = 256, .Height = 128 }));
+				target.emplace(std::move(frameTarget));
+				ENGINE_TRY_ASSIGN(commandList, device.CreateCommandList());
+				return {};
+			};
+			REQUIRE(createFrame().has_value());
+			GpuRecreationHooks hooks;
+			hooks.Name = "ImGuiRendererTests frame";
+			hooks.Release = [&pacer, &target, &commandList]()
+			{
+				pacer.reset();
+				target.reset();
+				commandList = nullptr;
+			};
+			hooks.Recreate = createFrame;
+			const GpuRecreationRegistration frame = device.GetRecreation().Register(std::move(hooks));
+
+			Test::DeviceLossTest test;
+			test.Owners = { "ImGuiRenderer" };
+			test.Use = [&device, &renderer, &pacer, &target, &commandList]() -> Result<std::vector<std::byte>>
+			{
+				if (!pacer.has_value() || !target.has_value() || commandList == nullptr)
+					return MakeError(ErrorCode::InvalidState, "the frame's objects were released");
+				BuildFrame(renderer, *pacer, "ImGui after a device loss");
+				commandList->open();
+				target->Clear(*commandList);
+				const Status rendered = renderer.RenderDrawData(*commandList, *target->GetFramebuffer(), *ImGui::GetDrawData());
+				commandList->close();
+				pacer->EndFrame(device.ExecuteCommandList(*commandList));
+				ENGINE_TRY(rendered);
+				Readback readback(device);
+				ENGINE_TRY_ASSIGN(const Image image, readback.ReadTexture(*target->GetColorTexture()));
+				return image.Pixels;
+			};
+			const Result<Test::DeviceLossReport> report = Test::RunDeviceLossTest(gpu, test);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			device.WaitForIdle();
+			renderer.DestroyTextures();
 		}
 	}
 

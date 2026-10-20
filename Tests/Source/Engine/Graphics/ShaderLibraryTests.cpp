@@ -111,6 +111,46 @@ namespace Engine {
 			CHECK((*cached)->Stage == nvrhi::ShaderType::Vertex);
 		}
 
+		TEST_CASE("ShaderLibrary: a reload reads variants again, and a dropped reload restores them" * doctest::skip(true))
+		{
+			// M18 (C18.1, R-SHR; Docs/Decisions/0029-m18-contract.md decision 3): BeginReload and EndReload around a shader
+			// reload; every reflection pointer handed out stays valid.
+			VirtualFileSystem vfs;
+			Scope<MemoryMount> ownedMount = CreateScope<MemoryMount>();
+			MemoryMount& mount = *ownedMount;
+			REQUIRE(vfs.Mount(ShaderScheme, std::move(ownedMount)).has_value());
+			WriteText(mount, "Probe/VSMain.refl.json", MakeVertexReflection("VSMain"));
+			Result<VfsPath> root = VfsPath::Create(ShaderScheme, "");
+			REQUIRE(root.has_value());
+			ShaderLibrary library(nullptr, vfs, *root);
+			const Result<const ShaderReflection*> original = library.GetReflection("Probe", "VSMain");
+			REQUIRE_MESSAGE(original.has_value(), original.error().ToString());
+			CHECK((*original)->Stage == nvrhi::ShaderType::Vertex);
+
+			// The build rewrote the variant: a reload reads it again, and dropping the reload restores the earlier one.
+			WriteText(mount, "Probe/VSMain.refl.json", R"({ "entryPoints": [ { "name": "VSMain", "stage": "fragment" } ] })");
+			library.BeginReload();
+			const Result<const ShaderReflection*> reread = library.GetReflection("Probe", "VSMain");
+			REQUIRE_MESSAGE(reread.has_value(), reread.error().ToString());
+			CHECK((*reread)->Stage == nvrhi::ShaderType::Pixel);
+			library.EndReload(false);
+			const Result<const ShaderReflection*> restored = library.GetReflection("Probe", "VSMain");
+			REQUIRE(restored.has_value());
+			CHECK(*restored == *original);
+			CHECK((*original)->Stage == nvrhi::ShaderType::Vertex);
+
+			// A kept reload replaces the variant; the pointers handed out before stay valid.
+			library.BeginReload();
+			const Result<const ShaderReflection*> kept = library.GetReflection("Probe", "VSMain");
+			REQUIRE(kept.has_value());
+			library.EndReload(true);
+			const Result<const ShaderReflection*> current = library.GetReflection("Probe", "VSMain");
+			REQUIRE(current.has_value());
+			CHECK(*current == *kept);
+			CHECK((*current)->Stage == nvrhi::ShaderType::Pixel);
+			CHECK((*original)->Stage == nvrhi::ShaderType::Vertex);
+		}
+
 		TEST_CASE("ShaderLibrary: a malformed reflection is an error naming the file")
 		{
 			VirtualFileSystem vfs;
@@ -153,6 +193,79 @@ namespace Engine {
 			REQUIRE_FALSE(missing.has_value());
 			CHECK(missing.error().GetCode() == ErrorCode::NotFound);
 			CHECK(missing.error().ToString().contains("Triangle/GSMain.spv"));
+		}
+
+		TEST_CASE("ShaderLibrary: a device loss drops the shaders, keeps every reflection and creates the shaders again"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 acceptance (C18.3, Docs/Decisions/0029-m18-contract.md decision 33): the library registers itself; a lost
+			// device's shader modules are dropped, the reflections (CPU data) stay at their addresses, and the next Get creates
+			// the shader on the recovered device.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			ShaderLibrary& library = gpu.GetShaders();
+			Result<const ShaderReflection*> reflection = library.GetReflection("Triangle", "VSMain");
+			REQUIRE_MESSAGE(reflection.has_value(), reflection.error().ToString());
+			Result<nvrhi::ShaderHandle> before = library.Get("Triangle", "VSMain");
+			REQUIRE_MESSAGE(before.has_value(), before.error().ToString());
+			before->Reset();
+			const std::vector<std::string> owners = device.GetRecreation().GetOwnerNames();
+			CHECK(std::ranges::find(owners, std::string("ShaderLibrary")) != owners.end());
+
+			device.GetDiagnostics().SetDeviceLost(true);
+			device.ReportDeviceLost("ShaderLibraryTests");
+			const Status recovered = device.Recover(nullptr);
+			REQUIRE_MESSAGE(recovered.has_value(), recovered.error().ToString());
+			Result<const ShaderReflection*> kept = library.GetReflection("Triangle", "VSMain");
+			REQUIRE(kept.has_value());
+			CHECK(*kept == *reflection);
+			Result<nvrhi::ShaderHandle> after = library.Get("Triangle", "VSMain");
+			REQUIRE_MESSAGE(after.has_value(), after.error().ToString());
+			CHECK(*after != nullptr);
+		}
+
+		TEST_CASE("ShaderLibrary: after a device loss a shader is created again from the SPIR-V read before, not from a rebuilt file"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 (C18.3, decision 33): each created variant keeps its SPIR-V as CPU data, so a recovery never pairs a rebuilt
+			// file with the reflection read before it. The variant is copied from the build output into a memory mount and
+			// created; then the file is overwritten with bytes that are not SPIR-V, as an unreloaded rebuild would change it,
+			// and the shader is created again after the loss all the same.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			VirtualFileSystem vfs;
+			Scope<MemoryMount> ownedMount = CreateScope<MemoryMount>();
+			MemoryMount& mount = *ownedMount;
+			REQUIRE(vfs.Mount(ShaderScheme, std::move(ownedMount)).has_value());
+			for (const std::string_view extension : { std::string_view(".spv"), std::string_view(".refl.json") })
+			{
+				Result<VfsPath> path = VfsPath::Create(ShaderScheme, std::format("Triangle/VSMain{}", extension));
+				REQUIRE(path.has_value());
+				Result<Buffer> contents = gpu.GetVfs().ReadFile(*path);
+				REQUIRE_MESSAGE(contents.has_value(), contents.error().ToString());
+				REQUIRE(mount.CreateDirectories(path->GetParent()).has_value());
+				REQUIRE(mount.WriteFileAtomic(*path, *contents).has_value());
+			}
+			Result<VfsPath> root = VfsPath::Create(ShaderScheme, "");
+			REQUIRE(root.has_value());
+			{
+				ShaderLibrary library(&device, vfs, *root);
+				Result<nvrhi::ShaderHandle> before = library.Get("Triangle", "VSMain");
+				REQUIRE_MESSAGE(before.has_value(), before.error().ToString());
+				before->Reset();
+				WriteText(mount, "Triangle/VSMain.spv", "not SPIR-V");
+
+				device.GetDiagnostics().SetDeviceLost(true);
+				device.ReportDeviceLost("ShaderLibraryTests");
+				const Status recovered = device.Recover(nullptr);
+				REQUIRE_MESSAGE(recovered.has_value(), recovered.error().ToString());
+				Result<nvrhi::ShaderHandle> after = library.Get("Triangle", "VSMain");
+				REQUIRE_MESSAGE(after.has_value(), after.error().ToString());
+				CHECK(*after != nullptr);
+			}
+			device.RunGarbageCollection();
 		}
 	}
 

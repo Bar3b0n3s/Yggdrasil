@@ -2,6 +2,7 @@
 
 #include "EditorCore/Automation/EditorAutomationControls.h"
 #include "EditorCore/Automation/ScreenshotMethods.h"
+#include "EditorCore/Automation/ShaderMethods.h"
 #include "Engine/Automation/Methods/StatsMethods.h"
 #include "Engine/Automation/Protocol/Dispatcher.h"
 #include "Engine/Automation/Protocol/JsonRpc.h"
@@ -82,7 +83,14 @@ namespace Engine {
 		// Test-hooks-only, main-thread request to queue device loss after the host's next autosave publication. The
 		// callback only queues intent, never renders, loses the device or writes recovery inside method dispatch. Captured
 		// host state outlives the server. Empty, or RendererName == "none", makes debug.deviceLost Unsupported.
-		std::function<Status()> QueueDeviceLost{};
+		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 30): `unrecoverable` is debug.deviceLost's: the host then
+		// also makes the recovery fail (GpuDiagnostics::InjectUnrecoverableDeviceLoss).
+		std::function<Status(bool unrecoverable)> QueueDeviceLost{};
+		// M18 (R-SHR; Docs/Decisions/0029-m18-contract.md decision 3): shaders.reload's reload of the editor's scene renderer
+		// pipelines (SceneRendererPipelines::ReloadShaders, then their count and generation), injected by the editor when it
+		// has a GraphicsDevice and called on the main thread between frames. Empty (and with --renderer none): shaders.reload
+		// is Unsupported.
+		std::function<Result<ShadersReloadResult>()> ReloadShaders{};
 	};
 
 	// One connected client, for session.info and the AutomationPanel (M10).

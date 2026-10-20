@@ -7,16 +7,17 @@
 #include <vulkan/vulkan.hpp>
 
 #include <format>
+#include <optional>
 
 namespace Engine {
 
 	SystemErrorHandler MakeVulkanSystemErrorHandler(EngineContext& context)
 	{
 		EngineContext* owner = &context;
-		return [owner](const std::system_error& error, std::string_view method)
+		return [owner](const std::system_error& error, std::string_view method) -> std::optional<Error>
 		{
 			if (error.code().category() != vk::errorCategory())
-				return;
+				return std::nullopt;
 			RaiseVulkanError(owner->GetGraphicsDevice(), static_cast<VkResult>(error.code().value()),
 				std::format("Vulkan error in automation method '{}': {}", method, error.what()));
 		};

@@ -162,6 +162,51 @@ namespace Engine {
 			}
 		};
 
+		// M18 (C18.3): loses its device in the update of frame `LoseAtFrame` (the test hooks' flag) and records the frames
+		// it renders, the recovery hooks and the GpuDeviceLost events its run appended.
+		class LosingApplication final : public Application
+		{
+		public:
+			explicit LosingApplication(ApplicationSpecification specification)
+				: Application(std::move(specification))
+			{
+			}
+		public:
+			std::vector<std::string> Calls;
+			uint64_t LoseAtFrame = 1;
+			size_t DeviceLostEvents = 0;
+			uint32_t RecoveryCount = 0;
+		protected:
+			void OnUpdate(const FrameTime& frame) override
+			{
+				Calls.push_back(std::format("update {}", frame.FrameIndex));
+				if (frame.FrameIndex == LoseAtFrame)
+					GetContext().GetGraphicsDevice()->GetDiagnostics().SetDeviceLost(true);
+			}
+
+			void OnRender(RenderContext& /*context*/) override
+			{
+				Calls.push_back("render");
+			}
+
+			void OnDeviceLost(const GpuDeviceLossReport& report) override
+			{
+				Calls.push_back(report.Injected ? "lost (injected)" : "lost");
+			}
+
+			void OnDeviceRecovered(const GpuDeviceLossReport& /*report*/) override
+			{
+				Calls.push_back("recovered");
+			}
+
+			void OnShutdown() override
+			{
+				const std::array types = { EngineEventType::GpuDeviceLost };
+				DeviceLostEvents = GetContext().GetEventLog().Read(0, types).Events.size();
+				RecoveryCount = GetContext().GetGraphicsDevice()->GetRecoveryCount();
+			}
+		};
+
 		// Reports one GPU message of `Severity` through its device's diagnostics during its first update, as a validation
 		// message would; or, with LeakAtShutdown, leaves a host image counted as alive, which only the device's teardown
 		// reports.
@@ -548,6 +593,24 @@ namespace Engine {
 			}
 		}
 
+		TEST_CASE("Application: a device loss is recovered at the frame boundary and the run goes on"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 acceptance (C18.3, Docs/Decisions/0029-m18-contract.md decision 29): the lost frame renders nothing, the
+			// recovery runs OnDeviceLost, recovers the device with the frame's objects and the ImGui renderer, appends one
+			// GpuDeviceLost event and calls OnDeviceRecovered, and the next frames render; no GPU message, and the run succeeds.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			ApplicationSpecification specification = MakeHeadlessSpecification(4);
+			UseTestRenderer(specification);
+			specification.EnableImGui = true;
+			LosingApplication application(std::move(specification));
+			CHECK(application.Run() == ExitCode::Success);
+			CHECK(application.Calls == std::vector<std::string>{ "update 0", "render", "update 1", "lost (injected)", "recovered", "update 2", "render", "update 3", "render" });
+			CHECK(application.DeviceLostEvents == 1);
+			CHECK(application.RecoveryCount == 1);
+		}
+
 		TEST_CASE("Application: with ImGui each rendered frame submits its UI after OnRender"
 			* doctest::test_suite(Test::GpuSuite))
 		{
@@ -618,6 +681,58 @@ namespace Engine {
 		{
 			std::vector<std::string> arguments = {
 				"--windowed-child=Application: a windowed Vulkan application presents its frames except while minimized",
+			};
+			const std::vector<std::string> gpuArguments = Test::GetGpuTestsChildArguments();
+			arguments.insert(arguments.end(), gpuArguments.begin(), gpuArguments.end());
+			const Result<ProcessResult> child = Process::Run(Test::MakeTestsChildSpecification(std::move(arguments)), std::chrono::seconds(60));
+			REQUIRE_MESSAGE(child.has_value(), child.error().ToString());
+			INFO("child stdout: ", child->StandardOutput);
+			INFO("child stderr: ", child->StandardError);
+			CHECK(child->ExitCode == 0);
+		}
+
+		// Runs only in a windowed child process (Support/WindowedChild.h), M18 (C18.3, Docs/Decisions/0029-m18-contract.md
+		// decisions 29 and 32): a windowed application on a swapchain loses its device in the update of frame 2. The recovery
+		// releases the "Application frame" owner's swapchain and surface before the old VkInstance is destroyed, creates the
+		// device again with Recover(window) (presentation support scored again) and the swapchain on a new surface, and the
+		// frames after it present. ExpectNoGpuErrors fails the run on any GPU message of the device's whole life.
+		TEST_CASE("Application: a windowed run loses its device and presents again after the recovery"
+			* doctest::test_suite(Test::ChildTargetSuite) * doctest::skip(true))
+		{
+			if (!Test::ProbeGpuForProcess())
+				return;
+			ApplicationSpecification specification;
+			specification.Name = "ApplicationTests";
+			specification.Window = WindowMode::Windowed;
+			specification.WindowSettings = { .Title = "Application test", .Width = 320, .Height = 240 };
+			specification.Clock = ClockKind::Manual;
+			specification.MaxFrames = 6;
+			specification.WorkerCount = 0;
+			specification.EnableImGui = true;
+			// No test touches the machine's audio device (§15.1 T1).
+			specification.Audio = AudioEngineSpecification{};
+			UseTestRenderer(specification);
+			LosingApplication application(std::move(specification));
+			application.LoseAtFrame = 2;
+			CHECK(application.Run() == ExitCode::Success);
+			const auto lost = std::ranges::find(application.Calls, std::string("lost (injected)"));
+			REQUIRE(lost != application.Calls.end());
+			REQUIRE(std::next(lost) != application.Calls.end());
+			CHECK(*std::next(lost) == "recovered");
+			// Frames 3 to 5 render after the recovery; at most one is skipped while the swapchain is created again.
+			CHECK(std::count(lost, application.Calls.end(), std::string("render")) >= 2);
+			CHECK(application.DeviceLostEvents == 1);
+			CHECK(application.RecoveryCount == 1);
+		}
+
+		TEST_CASE("Application: a windowed run recovers its swapchain after an injected loss and presents the next frame without a GPU message"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 acceptance (C18.3): the recovery of a presenting device, which the headless cases and the shared loss-test
+			// helper (Support/DeviceLossTest.h, Recover(nullptr)) cannot reach: the swapchain's and the surface's release and
+			// creation across the recreated VkInstance, and Recover(window).
+			std::vector<std::string> arguments = {
+				"--windowed-child=Application: a windowed run loses its device and presents again after the recovery",
 			};
 			const std::vector<std::string> gpuArguments = Test::GetGpuTestsChildArguments();
 			arguments.insert(arguments.end(), gpuArguments.begin(), gpuArguments.end());
@@ -877,7 +992,8 @@ namespace Engine {
 			const std::span<const CommandLineOption> options = GetEngineCommandLineOptions();
 			const auto option = std::ranges::find(options, std::string_view("--gpu-inject-fault"), &CommandLineOption::Name);
 			REQUIRE(option != options.end());
-			for (const GpuFault fault : { GpuFault::DeviceLost, GpuFault::OomTexture, GpuFault::Hang, GpuFault::OomSpecialization })
+			for (const GpuFault fault : { GpuFault::DeviceLost, GpuFault::OomTexture, GpuFault::Hang, GpuFault::OomSpecialization,
+					 GpuFault::DeviceLostUnrecoverable })
 			{
 				const std::string spelled(GpuFaultToString(fault));
 				CAPTURE(spelled);

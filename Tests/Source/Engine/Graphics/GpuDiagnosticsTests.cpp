@@ -78,7 +78,7 @@ namespace Engine {
 			CHECK(diagnostics.GetWarningCount() == 2);
 		}
 
-		TEST_CASE("GpuDiagnostics: the device-lost flag is set by SetDeviceLost and never cleared")
+		TEST_CASE("GpuDiagnostics: the device-lost flag is set by SetDeviceLost and cleared only by ClearDeviceLost")
 		{
 			GpuDiagnostics diagnostics;
 			CHECK_FALSE(diagnostics.IsDeviceLost());
@@ -90,6 +90,34 @@ namespace Engine {
 			CHECK(diagnostics.IsDeviceLost());
 			CHECK(diagnostics.GetInjectedFault() == GpuFault::None);
 			CHECK(GpuMessageSeverityToString(GpuMessageSeverity::Fatal) == "Fatal");
+			// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 29): the recovery clears the flag and the injected marker
+			// once the device exists again.
+			diagnostics.SetDeviceLost(true);
+			diagnostics.ClearDeviceLost();
+			CHECK_FALSE(diagnostics.IsDeviceLost());
+			CHECK_FALSE(diagnostics.IsDeviceLossInjected());
+		}
+
+		TEST_CASE("GpuDiagnostics: an unrecoverable loss fails every device recreation, also after the flag is cleared")
+		{
+			// M18 (C18.3, decision 30): the test hooks' unrecoverable loss and --gpu-inject-fault=device-lost-unrecoverable.
+			GpuDiagnostics hook;
+			CHECK_FALSE(hook.ShouldFailDeviceRecreation());
+			hook.InjectUnrecoverableDeviceLoss();
+			CHECK(hook.IsDeviceLost());
+			CHECK(hook.IsDeviceLossInjected());
+			CHECK(hook.ShouldFailDeviceRecreation());
+			hook.ClearDeviceLost();
+			CHECK_FALSE(hook.IsDeviceLost());
+			CHECK(hook.ShouldFailDeviceRecreation());
+
+			GpuDiagnostics fault(GpuFault::DeviceLostUnrecoverable);
+			CHECK(fault.ShouldFailDeviceRecreation());
+			CHECK_FALSE(fault.ShouldInjectHang());
+			GpuDiagnostics recoverable(GpuFault::DeviceLost);
+			CHECK_FALSE(recoverable.ShouldFailDeviceRecreation());
+			recoverable.SetDeviceLost(true);
+			CHECK_FALSE(recoverable.ShouldFailDeviceRecreation());
 		}
 
 		TEST_CASE("GpuDiagnostics: injected device loss stays marked after native reports and resetting counts")
@@ -128,6 +156,31 @@ namespace Engine {
 				return diagnostics.IsDeviceLost();
 			}));
 			CHECK(diagnostics.IsDeviceLossInjected());
+		}
+
+		TEST_CASE("GpuDiagnostics: an injected device loss strikes once, at the first submission after a garbage collection"
+			* doctest::skip(true))
+		{
+			// M18 acceptance (C18.3, decision 30): the startup submissions and the first frame are unaffected, the loss strikes
+			// the second frame, and the recovered device is not lost again.
+			for (const GpuFault fault : { GpuFault::DeviceLost, GpuFault::DeviceLostUnrecoverable })
+			{
+				CAPTURE(GpuFaultToString(fault));
+				GpuDiagnostics diagnostics(fault);
+				diagnostics.OnSubmitted();
+				CHECK_FALSE(diagnostics.IsDeviceLost());
+				diagnostics.OnGarbageCollected();
+				{
+					Test::ExpectLog injected(LogLevel::Warn, "Injected GPU fault");
+					diagnostics.OnSubmitted();
+				}
+				CHECK(diagnostics.IsDeviceLost());
+				CHECK(diagnostics.IsDeviceLossInjected());
+				diagnostics.ClearDeviceLost();
+				diagnostics.OnGarbageCollected();
+				diagnostics.OnSubmitted();
+				CHECK_FALSE(diagnostics.IsDeviceLost());
+			}
 		}
 
 		TEST_CASE("GpuDiagnostics: injected faults follow --gpu-inject-fault")

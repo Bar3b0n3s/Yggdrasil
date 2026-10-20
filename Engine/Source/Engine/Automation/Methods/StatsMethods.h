@@ -69,6 +69,10 @@ namespace Engine {
 		uint32_t MemoryAllocationCount = 0;
 		uint32_t MaxMemoryAllocationCount = 0;
 		std::vector<StatsViewSummary> Views{}; // scene then game; Runtime game only
+		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 31; the plan's device-loss counter): the device losses the
+		// host recovered from since it started (GraphicsDevice::GetRecoveryCount), in the Editor and the Runtime; 0 with
+		// renderer none. Filled and registered ("deviceLosses") by W18.3's integration.
+		uint32_t DeviceLosses = 0;
 	};
 
 	// Owned diagnostic copy of one displayed renderer's history, preserving both CPU and delayed GPU identities.

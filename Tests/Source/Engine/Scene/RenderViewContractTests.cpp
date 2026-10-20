@@ -65,7 +65,7 @@ namespace Engine {
 			const auto snapshot = ExtractRenderSnapshot(scene, {});
 			REQUIRE(snapshot.has_value());
 			// Architecture §5.1: roots retain stored order; the offscreen root precedes the visible root.
-			CHECK(snapshot->PickTable == std::vector<UUID>{ UUID(5), UUID(1) });
+			CHECK(snapshot->PickTable == std::pmr::vector<UUID>{ UUID(5), UUID(1) });
 			REQUIRE(snapshot->Meshes.size() == 2);
 			for (size_t index = 0; index < snapshot->Meshes.size(); ++index)
 			{

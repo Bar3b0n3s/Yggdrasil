@@ -9,6 +9,7 @@
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/SceneRenderer.h"
 #include "Support/AssetTestFixture.h"
+#include "Support/DeviceLossTest.h"
 #include "Support/HeadlessGpuFixture.h"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -182,6 +183,32 @@ namespace Engine {
 				REQUIRE_MESSAGE(small.has_value(), small.error().ToString());
 				CHECK(small->Width == 48);
 				CHECK(small->Height == 24);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		TEST_CASE("ViewportCapture: a capture after a device loss is byte-identical to one before"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 acceptance (C18.3, Docs/Decisions/0029-m18-contract.md decisions 32 and 33; Roadmap M18: "a screenshot after
+			// recovery is byte-identical to one taken before"): the capture registers itself for its own objects (its read-back
+			// command list), and its private renderer, the pipeline set and the cache recover through the placement rule.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::AssetTestFixture assets;
+			{
+				CaptureSetup setup(gpu, assets);
+				const RenderSnapshot snapshot = MakeCubeSnapshot(320, 200);
+				ViewportCapture& capture = setup.GetCapture();
+				Test::DeviceLossTest test;
+				test.Owners = { "GpuResourceCache", "SceneRendererPipelines", "ViewportCapture" };
+				test.Use = [&capture, &snapshot]() -> Result<std::vector<std::byte>>
+				{
+					ENGINE_TRY_ASSIGN(const Image image, capture.Capture({ .Width = 320, .Height = 200 }, snapshot));
+					return image.Pixels;
+				};
+				const Result<Test::DeviceLossReport> report = Test::RunDeviceLossTest(gpu, test);
+				REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}

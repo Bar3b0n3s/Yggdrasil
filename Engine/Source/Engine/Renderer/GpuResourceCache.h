@@ -163,6 +163,15 @@ namespace Engine {
 		// Releases every mirror, placeholders included.
 		void Clear();
 
+		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decisions 26 and 27): the cache's Release hook in the recreation
+		// protocol; the constructor registers the cache with its device (as "GpuResourceCache"), the placement rule's place
+		// for asset mirrors. Drops every mirror, placeholders included (Clear), and every handle a mirror's upload still holds,
+		// while keeping the material generation counter (no GpuMaterial::Generation is ever reused, so no renderer's binding
+		// set from before the loss is ever found again) and GetStats().UploadFailures. There is no Recreate: the next Get
+		// uploads each mirror again from the asset manager's loaded data, as on first use. Main thread, from
+		// GraphicsDevice::Recover.
+		void ReleaseGpuObjects();
+
 		[[nodiscard]] GpuResourceCacheStats GetStats() const;
 	private:
 		// The device and asset-manager back-references and the mirror tables (GpuResourceCache.cpp).

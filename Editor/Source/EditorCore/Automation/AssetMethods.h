@@ -127,14 +127,15 @@ namespace Engine {
 		std::vector<AssetDiagnosticInfo> Diagnostics{};
 	};
 
-	// Registry enum "AssetCreateType" (§13.5 asset.create {type: Material|Scene|Prefab|SoundEffect|Folder}).
+	// Registry enum "AssetCreateType" (§13.5 asset.create {type: Material|Scene|Prefab|SoundEffect|Folder|SpriteSheet}).
 	enum class AssetCreateType : uint8_t
 	{
 		Material,
 		Scene,
 		Prefab,
 		SoundEffect, // M12: a .sfx sound effect (§6.6)
-		Folder
+		Folder,
+		SpriteSheet // M18: a .spritesheet sprite sheet (§6.9; Docs/Decisions/0029-m18-contract.md decision 18)
 	};
 
 	// asset.create {type, path, values?}: creates a native asset at project-relative `path` (below Assets/, with the type's
@@ -148,6 +149,12 @@ namespace Engine {
 	// parent folders; supports dry runs (the files then go to the overlay, §13.4). M17 friction F07 (additive): a Folder
 	// whose path is already a directory succeeds without a command (nothing written, undoIndex 0) and reports created:
 	// false, so an edit.batch no longer fails on a folder the project template made; a file at the path stays AlreadyExists.
+	// M18 (additive; Docs/Decisions/0029-m18-contract.md decision 18): a SpriteSheet (.spritesheet) takes `values` of the
+	// "SpriteSheet" registry struct (Asset/SpriteSheetData.h, written with SpriteSheetToText) over the defaults (no texture,
+	// no frames, no clips; absent values make that empty sheet), which must pass ValidateSpriteSheet (every violation
+	// Validation located under /values, such as /values/Clips/0/Frames/2/Frame); when its Texture is a registered Texture
+	// that loads, every frame's Rect must also lie inside the texture (Validation at /values/Frames/<i>/Rect naming the
+	// texture's size). Its type is SpriteSheet.
 	struct AssetCreateParams
 	{
 		AssetCreateType Type = AssetCreateType::Material;
@@ -164,7 +171,8 @@ namespace Engine {
 	};
 
 	// asset.getProperties {asset}: the properties of a native asset (§13.5: materials; sound effects from M12, the .sfx
-	// document's fields after its header) as its registry JSON (PascalCase, every field).
+	// document's fields after its header; sprite sheets from M18, the .spritesheet document's fields after its header) as its
+	// registry JSON (PascalCase, every field).
 	struct AssetGetPropertiesParams
 	{
 		std::string Asset{};
@@ -177,9 +185,11 @@ namespace Engine {
 	};
 
 	// asset.setProperties {asset, values}: an RFC 7386 merge patch of a native asset's properties (null resets a field),
-	// validated through the registry and written as one AssetEditCommand; supports dry runs. A play session in lockstep (a
-	// recording or replay included) or a test run sees the change only after it ends: the asset reload is deferred like a
-	// script reload (§7.5 race rule 4).
+	// validated through the registry and written as one AssetEditCommand; supports dry runs. A sprite sheet's result passes
+	// asset.create's checks (ValidateSpriteSheet, and every frame inside its texture when the texture loads); an array in the
+	// patch (Frames, Clips) replaces the whole array, as RFC 7386 says. A play session in lockstep (a recording or replay
+	// included) or a test run sees the change only after it ends: the asset reload is deferred like a script reload (§7.5
+	// race rule 4).
 	struct AssetSetPropertiesParams
 	{
 		std::string Asset{};
@@ -282,15 +292,16 @@ namespace Engine {
 		// when the operation resolves.
 		[[nodiscard]] Result<Scope<PendingOperation>> AssetReimport(EditorMethodContext& context, const AssetReimportParams& params);
 		// asset.create. Errors: InvalidArgument for a path outside Assets/, a wrong extension, values given for a type that
-		// takes none, and a Material's or SoundEffect's values that are not an object or that set "Format" or "Version";
-		// AlreadyExists (for a Folder, only when a file is at its path); Validation for invalid values (located under /values;
-		// a SoundEffect without layers included).
+		// takes none, and a Material's, SoundEffect's or SpriteSheet's values that are not an object or that set "Format" or
+		// "Version"; AlreadyExists (for a Folder, only when a file is at its path); Validation for invalid values (located under
+		// /values; a SoundEffect without layers and a SpriteSheet frame outside its texture included).
 		[[nodiscard]] Result<AssetCreateResult> AssetCreate(EditorMethodContext& context, const AssetCreateParams& params);
 		// asset.getProperties. Errors: as asset.info; InvalidArgument for an asset that is not native (with the hint
 		// "use asset.getImportSettings").
 		[[nodiscard]] Result<AssetGetPropertiesResult> AssetGetProperties(EditorMethodContext& context, const AssetGetPropertiesParams& params);
 		// asset.setProperties. Errors: as asset.getProperties; InvalidArgument for values that are not an object or that set
-		// "Format" or "Version"; Validation (located under /values) for an invalid result, a material's or a sound effect's.
+		// "Format" or "Version"; Validation (located under /values) for an invalid result, a material's, a sound effect's or a
+		// sprite sheet's.
 		[[nodiscard]] Result<AssetSetPropertiesResult> AssetSetProperties(EditorMethodContext& context, const AssetSetPropertiesParams& params);
 		// asset.getImportSettings. Errors: as asset.info; InvalidArgument for a sub-asset or built-in.
 		[[nodiscard]] Result<AssetGetImportSettingsResult> AssetGetImportSettings(EditorMethodContext& context,

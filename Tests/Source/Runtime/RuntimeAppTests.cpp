@@ -435,19 +435,20 @@ namespace Engine {
 			CHECK(image->Height == 90);
 		}
 
-		TEST_CASE("RuntimeApp: --gpu-inject-fault=device-lost exits 4 with a crash report"
+		TEST_CASE("RuntimeApp: --gpu-inject-fault=device-lost-unrecoverable exits 4 with a crash report"
 			* doctest::test_suite(Test::GpuSuite))
 		{
-			// §8.14 item 8: the device is
-			// reported lost after the first submission, and the check that follows it ends the process through
-			// GraphicsDevice::RaiseDeviceLost.
+			// §8.14 item 8: the device is reported lost after a submission, and its recovery fails, which ends the process
+			// through GraphicsDevice::RaiseDeviceLost. From M18 a plain device loss is recovered
+			// (Docs/Decisions/0029-m18-contract.md decision 30; "RuntimeApp: --gpu-inject-fault=device-lost recovers the
+			// device and writes the same screenshot").
 			if (!Test::ProbeGpuForProcess())
 				return;
 			Test::TempDirectory userData("RuntimeDeviceLost");
 			const Result<std::filesystem::path> manifest = Test::WriteTestGame(userData / "Game", { .Name = "DeviceLostGame", .Shaders = true });
 			REQUIRE_MESSAGE(manifest.has_value(), manifest.error().ToString());
 			const Result<ProcessResult> result =
-				RunRenderingRuntime(userData, { "--headless", "--frames", "10", "--gpu-inject-fault", "device-lost", ManifestArgument(*manifest) });
+				RunRenderingRuntime(userData, { "--headless", "--frames", "10", "--gpu-inject-fault", "device-lost-unrecoverable", ManifestArgument(*manifest) });
 			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
 			INFO("runtime stderr: ", result->StandardError);
 			CHECK(result->ExitCode == ExitCode::Crash);
@@ -456,6 +457,40 @@ namespace Engine {
 			CHECK(report->contains("Reason: Fatal error (DeviceLost)"));
 			CHECK(report->contains("device lost"));
 			CHECK(Test::FindGpuMessageLines(result->StandardError).empty());
+		}
+
+		TEST_CASE("RuntimeApp: --gpu-inject-fault=device-lost recovers the device and writes the same screenshot"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 acceptance (C18.3, Docs/Decisions/0029-m18-contract.md decisions 29 and 30): the loss strikes the second
+			// frame and is recovered, the run goes on to its end, and the screenshot of tick 10 equals a run's without the loss.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			Test::TempDirectory userData("RuntimeDeviceLostRecovered");
+			const Result<std::filesystem::path> manifest = Test::WriteTestGame(userData / "Game", { .Name = "RecoveredGame", .Shaders = true });
+			REQUIRE_MESSAGE(manifest.has_value(), manifest.error().ToString());
+			std::vector<std::vector<std::byte>> images;
+			for (const bool lose : { false, true })
+			{
+				CAPTURE(lose);
+				const std::filesystem::path png = userData / (lose ? "Lost.png" : "Kept.png");
+				std::vector<std::string> arguments = { "--headless", "--frames", "12", "--expect-no-errors",
+					"--screenshot-at=10:" + Test::PathToUtf8(png), ManifestArgument(*manifest) };
+				if (lose)
+				{
+					arguments.push_back("--gpu-inject-fault");
+					arguments.push_back("device-lost");
+				}
+				const Result<ProcessResult> result = RunRenderingRuntime(userData, std::move(arguments));
+				REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+				INFO("runtime stderr: ", result->StandardError);
+				CHECK(result->ExitCode == ExitCode::Success);
+				CHECK(result->StandardError.contains("GPU device recovered") == lose);
+				const Result<Image> image = ReadPng(png);
+				REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
+				images.push_back(image->Pixels);
+			}
+			CHECK(images[1] == images[0]);
 		}
 
 		TEST_CASE("RuntimeApp: F1 toggles the stats overlay in a windowed run and the game still receives F1"

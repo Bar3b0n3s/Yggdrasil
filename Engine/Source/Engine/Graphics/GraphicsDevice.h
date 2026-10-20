@@ -4,6 +4,7 @@
 #include "Engine/Core/Result.h"
 #include "Engine/Graphics/DeviceSelection.h"
 #include "Engine/Graphics/GpuDiagnostics.h"
+#include "Engine/Graphics/GpuRecreation.h"
 #include "Engine/Graphics/GpuResourceTracker.h"
 #include "Engine/Graphics/GraphicsSpecification.h"
 
@@ -12,6 +13,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -70,6 +72,20 @@ namespace Engine {
 		uint32_t GraphicsQueueFamily = 0;
 	};
 
+	// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 28): what the first report of a device loss recorded
+	// (GraphicsDevice::ReportDeviceLost), kept until the device is recovered.
+	struct GpuDeviceLossReport
+	{
+		// Where the loss surfaced: "executeCommandLists", "vkGetSemaphoreCounterValue", "FramePacer::BeginFrame: waiting for
+		// GPU submission 7", "Vulkan error at the frame boundary: ...", "Vulkan error in automation method
+		// 'viewport.screenshot': ...", or "the frame boundary" when only the flag was set (an NVRHI report, a test hook).
+		std::string Context{};
+		// DescribeDeviceFault() at that report: the VK_EXT_device_fault description, or why there is none.
+		std::string FaultDescription{};
+		// GpuDiagnostics::IsDeviceLossInjected at that report.
+		bool Injected = false;
+	};
+
 	class GraphicsDevice;
 
 	// Ends the process for a Vulkan error that vulkan.hpp threw out of NVRHI (a vk::SystemError, §4.6 item 2): with
@@ -77,6 +93,10 @@ namespace Engine {
 	// VK_EXT_device_fault description; otherwise through FatalError(GetFatalErrorKind(result), message) (out-of-memory codes
 	// become OutOfMemory, everything else Gpu). The frame-boundary catch (App/FrameLoop.cpp) and the editor's handler of
 	// system errors in automation methods (DispatcherSpecification::SystemErrors) share it.
+	// M18 (C18.3, decision 28): a device loss, and any Vulkan error thrown while `device` IsLost, takes the recoverable path
+	// before this function is reached: the frame-boundary catch and MakeVulkanSystemErrorHandler report the loss
+	// (ReportDeviceLost) and return, so this function ends the process only for the other errors, and for a loss without a
+	// device.
 	[[noreturn]] void RaiseVulkanError(GraphicsDevice* device, VkResult result, std::string_view message);
 
 	// One GPU device. Not copyable or movable; held by EngineContext in a Scope (null with RendererMode::None).
@@ -90,6 +110,15 @@ namespace Engine {
 	// Fatal paths (§8.1, §8.14 item 6): device loss, a hang and GPU out-of-memory of a render target or pipeline end in
 	// FatalError, whose handler writes the autosave first (the editor's hook) and then the crash report. RaiseDeviceLost
 	// puts the VK_EXT_device_fault description into the FatalError message, so the report's Reason line carries it.
+	//
+	// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decisions 25 to 33): device loss is recovered in process. Every path
+	// that meets a loss reports it (ReportDeviceLost) and returns instead of ending the process; the device is then lost
+	// (IsLost) and does no GPU work until the frame boundary, where the application recovers it in place (Recover): every
+	// owner registered with GetRecreation releases its GPU objects, the device creates its Vulkan objects again with the
+	// stored specification, and every owner creates again what it needs. The GraphicsDevice object, and every reference to
+	// it, survive the recovery. Only a failed recovery ends the process (RaiseDeviceLost): a device creation that fails
+	// again after one retry, a loss reported during the recovery, an owner whose Recreate fails, or a GPU object that an
+	// unregistered owner still holds.
 	class GraphicsDevice
 	{
 	public:
@@ -167,6 +196,9 @@ namespace Engine {
 		// (--gpu-inject-fault=oom-texture). None of them ever crashes on a null result; the caller decides between a
 		// placeholder (asset uploads) and FatalError(OutOfMemory) (render targets and pipelines created at startup or
 		// resize, §8.14 item 7).
+		// M18 (C18.3, decision 28): on a lost device (IsLost) every wrapper, CreateHandleForNativeTexture included, fails with
+		// Gpu ("cannot create <type> '<name>': the device is lost") without calling NVRHI, and no caller treats a Gpu error on
+		// a lost device as out-of-memory: it is the loss, which the frame boundary recovers.
 		[[nodiscard]] Result<nvrhi::TextureHandle> CreateTexture(const nvrhi::TextureDesc& desc);
 		[[nodiscard]] Result<nvrhi::StagingTextureHandle> CreateStagingTexture(const nvrhi::TextureDesc& desc, nvrhi::CpuAccessMode cpuAccess);
 		[[nodiscard]] Result<nvrhi::BufferHandle> CreateBuffer(const nvrhi::BufferDesc& desc);
@@ -196,34 +228,100 @@ namespace Engine {
 		// semaphore reaches when they complete). Afterwards: GpuDiagnostics::OnSubmitted, then, when the device-lost flag is
 		// set, RaiseDeviceLost (§8.1: NVRHI reports device loss inside submit through its message callback). Every
 		// submission of the engine goes through these two functions.
+		// M18 (C18.3, decision 28): the flag leads to ReportDeviceLost("executeCommandLists"), which returns. On a device
+		// already lost nothing is submitted, and the result is GetLastSubmissionID.
 		uint64_t ExecuteCommandList(nvrhi::ICommandList& commandList);
 		uint64_t ExecuteCommandLists(std::span<nvrhi::ICommandList* const> commandLists);
 		// The ID of the last submission; 0 before the first.
 		[[nodiscard]] uint64_t GetLastSubmissionID() const;
 		// The highest submission ID the GPU has completed (vkGetSemaphoreCounterValue on the graphics queue's timeline
 		// semaphore; never waits). A VK_ERROR_DEVICE_LOST result calls RaiseDeviceLost.
+		// M18 (C18.3, decision 28): VK_ERROR_DEVICE_LOST leads to ReportDeviceLost("vkGetSemaphoreCounterValue"), and on a
+		// lost device the result is GetLastSubmissionID: nothing in flight will run, and nothing needs to wait for it.
 		[[nodiscard]] uint64_t GetCompletedSubmissionID();
 
 		// Once per frame, after the frame's last submission (§8.2): NVRHI's runGarbageCollection, which retires the
 		// completed command lists and their references, then the tracker's Sweep, which releases what only the tracker
 		// still holds, then HostImageUpload::CollectGarbage, the host images' deferred release.
+		// M18 (C18.3, decision 30): then GpuDiagnostics::OnGarbageCollected, which arms the injected device-lost faults. On
+		// a lost device it does nothing: Recover retires what the lost device held.
 		void RunGarbageCollection();
 
 		// vkDeviceWaitIdle, for shutdown and resize (§8.1), through the dispatcher's C entry point, so it never throws
 		// (§4.6 item 2) and works outside the frame boundary too. VK_ERROR_DEVICE_LOST, or the device-lost flag already set,
 		// calls RaiseDeviceLost; any other failure ends the process with FatalError(GetFatalErrorKind(result)) (out of
 		// memory is OutOfMemory). Never waits on its own beyond what vkDeviceWaitIdle does.
+		// M18 (C18.3, decision 28): VK_ERROR_DEVICE_LOST, or the flag, leads to ReportDeviceLost("vkDeviceWaitIdle"), which
+		// returns: a lost device waits for nothing.
 		void WaitForIdle();
 
 		// Ends the process through FatalError(DeviceLost) with "<context>: device lost" followed by DescribeDeviceFault()
 		// when VK_EXT_device_fault is enabled (§8.14 item 6). The fatal-error handler then writes the autosave and the
 		// crash report. Callable from any submission or wait path on the main thread.
+		// M18 (C18.3, decision 29): only the paths that cannot recover call it: an application after a failed Recover (its
+		// context names the loss and the recovery's error) and a loss before an application's first frame.
 		[[noreturn]] void RaiseDeviceLost(std::string_view context);
+
+		// M18 (C18.3, decision 28): whether the device is lost (GpuDiagnostics::IsDeviceLost): from the first report of a
+		// loss (ReportDeviceLost, NVRHI's "Device Removed!", an injected loss) until Recover has created the device again
+		// (its step 4). A recovery whose device creation fails leaves it lost. Thread-safe.
+		[[nodiscard]] bool IsLost() const;
+		// M18 (C18.3, decision 28): the device-loss path of every surface that can return (§8.1). Sets the device-lost flag;
+		// the first report of a loss records its GpuDeviceLossReport (the context, DescribeDeviceFault() while the device is
+		// really lost, whether it was injected) and logs one Warn line "GPU device lost (<context>); recovering at the frame
+		// boundary: <fault description>"; later reports of the same loss change nothing. Never waits, never calls NVRHI, and
+		// returns: the caller finishes without GPU work (a creation fails, a submission is skipped, a wait returns), and the
+		// frame boundary recovers the device. Main thread.
+		void ReportDeviceLost(std::string_view context);
+		// M18 (C18.3, decision 28): the current loss's report: the first ReportDeviceLost's since the device was created or
+		// last recovered; nullopt while the device is not lost, or while only its flag is set.
+		[[nodiscard]] std::optional<GpuDeviceLossReport> GetLossReport() const;
+
+		// M18 (C18.3, decision 29): recovers a lost device in place, between frames, on the main thread. `presentWindow` is
+		// Create's GraphicsDeviceSpecification::PresentWindow again (null for a headless device), whose title is the
+		// application name again; nothing else is read from outside the device. In order:
+		//   1. A loss whose flag alone was set is reported first (ReportDeviceLost("the frame boundary")).
+		//   2. Release: GetRecreation().ReleaseAll(), the owners in reverse registration order; then the device's own
+		//      objects: the HostImageUpload's host images and the references of NVRHI's in-flight command lists, retired as
+		//      completed (a lost device runs nothing more); then its garbage collection and the tracker's Sweep. A tracked
+		//      object still alive is held by an owner outside the placement rule (GpuRecreation.h): InvalidState naming the
+		//      live counts (GpuResourceTracker::DescribeLiveCounts), checked where the tracker counts (not in Dist).
+		//   3. Teardown in §8.14 item 4's order: the NVRHI device, the VkDevice, the debug messenger, the VkInstance.
+		//   4. Create's steps again with the stored specification, scoring the devices again (SelectDevice, with the same GPU
+		//      override), so GetInfo is filled again and the HostImageUpload created again. When the creation fails, the
+		//      device waits GraphicsSpecification::ResetWaitMilliseconds for the operating system's reset and tries once more
+		//      (MaxDeviceCreationAttempts); under GpuDiagnostics::ShouldFailDeviceRecreation every attempt fails with Gpu
+		//      without calling Vulkan and without the wait. A creation that fails both times is the loss continuing: the
+		//      device stays lost (IsLost, its report kept) without Vulkan objects. Once the device exists again,
+		//      GpuDiagnostics::ClearDeviceLost: from here a reported loss is a second one.
+		//   5. Recreate: GetRecreation().RecreateAll(), the owners in registration order.
+		//   6. A loss reported after the clear, during step 5 (a second loss), fails the recovery; the device is lost again.
+		//   7. GetRecoveryCount grows by one, GetLossReport becomes nullopt, and one Warn line "GPU device recovered after a
+		//      device loss (<context>)" is logged.
+		// Errors, after which the caller ends the process (RaiseDeviceLost, decision 29): InvalidState when the device is not
+		// lost (also asserted) or for a live object after the release; Gpu when the device cannot be created after the retry
+		// ("the device could not be created again after a device loss: ...") or for a second loss ("the device was lost again
+		// during its recovery"); the first error of an owner's Recreate, with the owner's name as context. After a failed
+		// Recover the device may only be destroyed: lost (a failed creation, a second loss), its destruction calls nothing on
+		// Vulkan but the release of what exists and waits for nothing; not lost (an owner's Recreate failed on the recreated
+		// device), it is destroyed as a healthy device. The GPU message counts (GpuDiagnostics) and the tracker's created and
+		// destroyed counts carry on across the recovery, so the checks of a device's whole life (HeadlessGpuFixture,
+		// --expect-no-gpu-errors) cover both devices.
+		[[nodiscard]] Status Recover(Window* presentWindow);
+		// M18 (C18.3, decision 29): the device creations a recovery attempts at most: the first, and one retry after the reset
+		// wait.
+		static constexpr uint32_t MaxDeviceCreationAttempts = 2;
+		// M18 (C18.3, decision 31): the losses this device recovered from since Create (each successful Recover); stats.get
+		// reports it as deviceLosses.
+		[[nodiscard]] uint32_t GetRecoveryCount() const;
+		// M18 (C18.3, decision 26): the owners of this device's GPU objects (GpuRecreation.h). Valid for the device's
+		// lifetime; main thread.
+		[[nodiscard]] GpuRecreationRegistry& GetRecreation();
 		// vkGetDeviceFaultInfoEXT as text (description, address infos, vendor infos); "VK_EXT_device_fault is not
 		// available" when the extension is not enabled, "no fault information" when the driver reports none. The query is
 		// valid only on a device that is really lost (the validation layer rejects it otherwise), so a healthy device, and
-		// one marked by SetDeviceLost(true) or the CLI injected device-lost fault, report "no fault information" without
-		// querying. Synthetic marking is sticky even when RaiseDeviceLost subsequently reports loss again.
+		// one marked by SetDeviceLost(true) or the CLI injected device-lost faults, report "no fault information" without
+		// querying. Synthetic marking is sticky even when RaiseDeviceLost subsequently reports loss again (until Recover).
 		[[nodiscard]] std::string DescribeDeviceFault();
 
 		// Native handles for the code that calls Vulkan itself through the dispatcher's C entry points: Swapchain and
@@ -244,8 +342,8 @@ namespace Engine {
 		// GraphicsSpecification::FramesInFlight.
 		[[nodiscard]] uint32_t GetFramesInFlight() const { return m_Specification.FramesInFlight; }
 	private:
-		// The steps of Create, in order; each fills the members it creates, which the destructor tears down when a later
-		// step fails.
+		// The steps of Create, in order (Recover runs them again); each fills the members it creates, which the destructor
+		// tears down when a later step fails.
 		[[nodiscard]] Status CreateInstance(const GraphicsDeviceSpecification& specification);
 		[[nodiscard]] Status CreateLogicalDevice(const GraphicsDeviceSpecification& specification);
 		[[nodiscard]] Status CreateNvrhiDevice();
@@ -280,6 +378,11 @@ namespace Engine {
 		bool m_IsMemoryTracking = false;
 		// Set by Shutdown, which runs once.
 		bool m_IsShutDown = false;
+		// M18 (C18.3): the owners of the device's GPU objects (destroyed after Shutdown: every owner is destroyed before its
+		// device, §8.14 item 4), the current loss's report and the recoveries so far.
+		GpuRecreationRegistry m_Recreation;
+		std::optional<GpuDeviceLossReport> m_LossReport{};
+		uint32_t m_RecoveryCount = 0;
 	};
 
 }

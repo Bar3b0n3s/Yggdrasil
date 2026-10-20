@@ -938,6 +938,57 @@ namespace Engine {
 			gpu.GetDevice().RunGarbageCollection();
 		}
 
+		TEST_CASE("SceneRenderer: a material that leaves and re-enters the view makes no new binding set"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 acceptance (C18.1, R-MATSET; Docs/Decisions/0029-m18-contract.md decision 13; Backlog's "a material that
+			// leaves the view and returns gets a new binding set"): a material's set outlives a frame in which every draw of
+			// the material is culled, so the material reuses it when it returns. A second material stays in view throughout,
+			// so every pass records in every frame and only the returning material's set could be new. Before the fix the
+			// culled frame's ReleaseUnused drops the set, and the last frame creates it again.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::InMemoryAssetManager assets;
+			constexpr AssetHandle StayingHandle{ 0x9341 };
+			constexpr AssetHandle ReturningHandle{ 0x9342 };
+			assets.Publish(StayingHandle, CreateRef<MaterialData>());
+			MaterialData returning;
+			returning.BaseColor = glm::vec4(0.5f, 1.0f, 0.5f, 1.0f);
+			assets.Publish(ReturningHandle, CreateRef<MaterialData>(std::move(returning)));
+			{
+				GpuResourceCache cache(gpu.GetDevice(), assets);
+				Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());
+				REQUIRE_MESSAGE(pipelines.has_value(), pipelines.error().ToString());
+				Result<Scope<SceneRenderer>> renderer = SceneRenderer::Create(gpu.GetDevice(), **pipelines, cache, assets, { .Width = 32, .Height = 32 });
+				REQUIRE_MESSAGE(renderer.has_value(), renderer.error().ToString());
+				RenderSnapshot snapshot = MakeCubeSnapshot(32, 32, 1.0f);
+				const MeshDrawItem staying{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(-1.0f, 0.0f, 0.0f)),
+					.Mesh = BuiltinAssetHandles::CubeMesh,
+					.Materials = { StayingHandle } };
+				// In view beside the staying cube, or at z = 50, behind the camera (at z = 5, looking down -Z), where it is culled.
+				const glm::mat4 inView = glm::translate(glm::mat4(1.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+				const glm::mat4 behindCamera = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 50.0f));
+				const auto render = [&](const glm::mat4& world)
+				{
+					snapshot.Meshes = { staying, MeshDrawItem{ .World = world, .Mesh = BuiltinAssetHandles::CubeMesh, .Materials = { ReturningHandle } } };
+					++snapshot.FrameIndex;
+					const Status rendered = Render(gpu.GetDevice(), **renderer, snapshot);
+					REQUIRE_MESSAGE(rendered.has_value(), rendered.error().ToString());
+				};
+				render(inView);
+				render(inView);
+				render(behindCamera);
+				CHECK((*renderer)->GetRenderStats().CulledSubmeshes >= 1);
+				const GpuResourceTracker& tracker = gpu.GetDevice().GetResourceTracker();
+				const uint64_t before = tracker.GetCounts(GpuResourceType::BindingSet).Created;
+				render(inView);
+				if (GpuResourceTracker::IsEnabled())
+					CHECK(tracker.GetCounts(GpuResourceType::BindingSet).Created == before);
+				gpu.GetDevice().WaitForIdle();
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
 		TEST_CASE("SceneRenderer: an emissive map multiplies the emissive factor, which emits alone without a map" * doctest::test_suite(Test::GpuSuite))
 		{
 			// An empty emissive slot binds Black (§8.4), so the shader takes the factor alone then (MaterialFlagEmissiveMap).

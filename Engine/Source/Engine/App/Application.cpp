@@ -117,9 +117,9 @@ namespace Engine {
 			CommandLineOption{
 				.Name = GpuInjectFaultOption,
 				.Value = CommandLineValue::Required,
-				.ValueName = "device-lost|oom-texture|hang|oom-specialization",
-				.Description = "Force a GPU fault path for tests: device loss, texture out-of-memory, a GPU hang or "
-							   "shader-specialization out-of-memory.",
+				.ValueName = "device-lost|oom-texture|hang|oom-specialization|device-lost-unrecoverable",
+				.Description = "Force a GPU fault path for tests: device loss, texture out-of-memory, a GPU hang, "
+							   "shader-specialization out-of-memory or a device loss whose recovery fails.",
 			},
 			CommandLineOption{
 				.Name = AudioDeviceOption,
@@ -349,7 +349,8 @@ namespace Engine {
 			const std::optional<GpuFault> injected = GpuFaultFromString(*fault);
 			if (!injected.has_value() || *injected == GpuFault::None)
 			{
-				return MakeError(ErrorCode::InvalidArgument, "option '{}' takes 'device-lost', 'oom-texture', 'hang' or 'oom-specialization', got '{}'",
+				return MakeError(ErrorCode::InvalidArgument,
+					"option '{}' takes 'device-lost', 'oom-texture', 'hang', 'oom-specialization' or 'device-lost-unrecoverable', got '{}'",
 					Utils::GpuInjectFaultOption, *fault);
 			}
 			specification.Graphics.InjectFault = *injected;
@@ -705,6 +706,11 @@ namespace Engine {
 			rendering.WindowSwapchain->Present();
 		rendering.Pacer->EndFrame(device.GetLastSubmissionID());
 		device.RunGarbageCollection();
+	}
+
+	void Application::OnFrameDeviceLost()
+	{
+		ENGINE_CONTRACT_STUB();
 	}
 
 	Status Application::InitializeRendering()

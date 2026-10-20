@@ -177,6 +177,12 @@ namespace Engine {
 		return GraphicsDevice::Destroy(std::move(m_GraphicsDevice));
 	}
 
+	Status EngineContext::RecoverGraphics()
+	{
+		ENGINE_CONTRACT_STUB();
+		return std::unexpected(Error(ErrorCode::Unsupported, "M18 device-loss recovery contract (Docs/Decisions/0029-m18-contract.md decision 29, stream A)"));
+	}
+
 	std::string_view EngineContextStepToString(EngineContextStep step)
 	{
 		switch (step)

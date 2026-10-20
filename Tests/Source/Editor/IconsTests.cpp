@@ -11,7 +11,8 @@ namespace Engine {
 	namespace {
 
 		constexpr EditorIcon AllEditorIcons[] = { EditorIcon::Folder, EditorIcon::Scene, EditorIcon::Prefab, EditorIcon::Mesh, EditorIcon::Material,
-			EditorIcon::Texture, EditorIcon::Environment, EditorIcon::Audio, EditorIcon::Script, EditorIcon::Font, EditorIcon::Replay };
+			EditorIcon::Texture, EditorIcon::Environment, EditorIcon::Audio, EditorIcon::Script, EditorIcon::Font, EditorIcon::Replay,
+			EditorIcon::SpriteSheet };
 
 		struct DrawnIcon
 		{
@@ -86,6 +87,7 @@ namespace Engine {
 			CHECK(AssetTypeToEditorIcon(AssetType::Script) == EditorIcon::Script);
 			CHECK(AssetTypeToEditorIcon(AssetType::Font) == EditorIcon::Font);
 			CHECK(AssetTypeToEditorIcon(AssetType::Replay) == EditorIcon::Replay);
+			CHECK(AssetTypeToEditorIcon(AssetType::SpriteSheet) == EditorIcon::SpriteSheet);
 		}
 	}
 
