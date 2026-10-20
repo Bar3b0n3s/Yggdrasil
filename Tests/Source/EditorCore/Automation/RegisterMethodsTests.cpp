@@ -19,14 +19,16 @@ namespace Engine {
 	// The M4 method set (Roadmap M4), M5's screenshot methods (registered at the M4/M5 merge, ADR 0009 decision 33), M6's
 	// asset.*, prefab.*, entity.bounds and project.refreshAssets (ADR 0010 decision 20), M7's play.*, input.inject and
 	// project.export (ADR 0012 decisions 4, 8 and 14), M11's physics.bodyInfo (ADR 0014 decision 18) and M12's audio.stats
-	// (ADR 0015 decision 15), test hooks excluded.
+	// (ADR 0015 decision 15), and M19's native.* (ADR 0030 decision 32), test hooks excluded.
 	static const std::vector<std::string>& GetExpectedMethodNames()
 	{
 		static const std::vector<std::string> ExpectedNames = { "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
 			"asset.import", "asset.info", "asset.list", "asset.move", "asset.reimport", "asset.setImportSettings", "asset.setProperties",
 			"audio.stats", "component.list", "component.schema", "docs.get", "edit.batch", "edit.getSelection", "edit.history", "edit.redo", "edit.select",
 			"edit.undo", "editor.screenshot", "editor.state", "entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get",
-			"entity.reparent", "entity.update", "events.read", "input.inject", "input.record", "input.replay", "log.read", "physics.bodyInfo", "play.pause", "play.resume",
+			"entity.reparent", "entity.update", "events.read", "input.inject", "input.readReplay", "input.record", "input.replay", "log.read",
+			"native.build", "native.getComponents", "native.load", "native.read", "native.setComponents", "native.status", "native.write",
+			"physics.bodyInfo", "play.pause", "play.resume",
 			"play.setTimeScale", "play.start", "play.state", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "prefab.revert",
 			"prefab.unpack", "project.create", "project.export", "project.getSettings", "project.info", "project.open", "project.refreshAssets",
 			"project.save", "project.setSettings", "project.upgrade", "project.validate", "rpc.discover", "scene.diff", "scene.get", "scene.new", "scene.open",
@@ -111,7 +113,8 @@ namespace Engine {
 			const std::vector<std::string> tools = { "asset.create", "asset.delete", "asset.getProperties", "asset.import", "asset.list", "asset.move",
 				"asset.setProperties", "component.list", "component.schema", "docs.get", "edit.batch", "edit.redo", "edit.undo", "editor.screenshot",
 				"entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get", "entity.reparent", "entity.update", "input.inject",
-				"input.record", "input.replay", "log.read", "play.start", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "project.create",
+				"input.readReplay", "input.record", "input.replay", "log.read", "native.build", "native.getComponents", "native.load", "native.read",
+				"native.setComponents", "native.status", "native.write", "play.start", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "project.create",
 				"project.export", "project.getSettings", "project.open", "project.save", "project.setSettings", "project.upgrade", "project.validate", "scene.diff",
 				"scene.new", "scene.open", "scene.query", "scene.save", "scene.tree",
 				"script.check", "script.create", "script.errors", "script.eval", "script.read", "script.write", "test.run", "viewport.screenshot" };
@@ -120,7 +123,8 @@ namespace Engine {
 			const std::vector<std::string> batchable = { "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
 				"asset.info", "asset.list", "asset.move", "asset.setImportSettings", "asset.setProperties", "audio.stats", "component.list", "component.schema",
 				"docs.get", "edit.getSelection", "edit.history", "editor.state", "entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get",
-				"entity.reparent", "entity.update", "events.read", "log.read", "physics.bodyInfo", "prefab.apply", "prefab.create", "prefab.instantiate",
+				"entity.reparent", "entity.update", "events.read", "log.read", "native.getComponents", "native.read", "native.setComponents", "native.status",
+				"native.write", "physics.bodyInfo", "prefab.apply", "prefab.create", "prefab.instantiate",
 				"prefab.revert", "prefab.unpack", "project.getSettings", "project.info", "project.setSettings", "project.validate", "rpc.discover", "scene.diff",
 				"scene.get", "scene.query", "scene.raycast", "scene.tree", "script.check", "script.create", "script.errors", "script.fields", "script.read", "script.write",
 				"session.info", "stats.get", "viewport.pick" };
@@ -270,8 +274,9 @@ namespace Engine {
 			// The 25 M4 tools, viewport_screenshot and editor_screenshot, and M6's asset_list, asset_import, asset_create,
 			// asset_set_properties, asset_move, asset_delete, prefab_create, prefab_instantiate, prefab_apply and entity_bounds, and
 			// M7's play_start, play_stop, play_step, input_inject and project_export, plus M13's ten script/replay/test tools, and
-			// M16's project_upgrade (friction S3-09), and M17's asset_get_properties (friction F11).
-			CHECK(catalog["Tools"].size() == 54);
+			// M16's project_upgrade (friction S3-09), M17's asset_get_properties (friction F11), and M19's input_read_replay
+			// (ADR 0030 decision 14) and seven native tools (decision 32).
+			CHECK(catalog["Tools"].size() == 62);
 			for (Json& tool : catalog["Tools"])
 			{
 				INFO(tool["name"].dump());

@@ -25,6 +25,16 @@ namespace Engine {
 	// Version 2 adds Checkpoints. A version 1 file migrates to version 2 with no checkpoints: only its FinalStateHash is
 	// compared, as before, and project.upgrade rewrites it canonically.
 	inline constexpr uint32_t ReplayFormatVersion = 2;
+	// The first version with the start fingerprint (Fingerprint, below; Docs/Decisions/0030-m19-contract.md decision 2,
+	// A-FPRINT), reserved for M19 by the phase 1 ledger: ReplayFormatVersion, ReplayData::FormatVersion and
+	// ReplayImporter::Version all become 3 with the readers, the writer and the cooked codec that carry it (stream B). A
+	// version 1 or 2 file migrates to version 3 with a null Fingerprint (nothing recorded, so nothing can be named), which
+	// project.upgrade writes (Tests/Data/Formats/Replay/v2.upgraded.replay); every recording writes a fingerprint.
+	inline constexpr uint32_t ReplayFingerprintFormatVersion = 3;
+	// The EngineVersion every recorder writes into a replay header (input.record, test.run's record, the Runtime's
+	// recordings): the constant "0.1.0", never EngineVersionString or the build id (Core/BuildId.h), so neither a version
+	// bump nor a commit rewrites a replay (decision 13, B-BVER). Readers accept any header text, as before.
+	inline constexpr std::string_view ReplayEngineVersionString = "0.1.0";
 	// The recorders (input.record, test.run's record) store the state hash of every completed-tick boundary that is a
 	// positive multiple of this interval and lies before FinalTick (one second at 60 Hz; a tick inside a frame where a
 	// suite's scripted clock grouped several steps is no completed boundary, ReplayRecorder::CaptureCheckpoint), so a replay proves the
@@ -86,9 +96,62 @@ namespace Engine {
 		std::string StateHash{}; // Exactly 16 lowercase hex digits.
 	};
 
-	// The JSON document is flattened: Format, Version, Header's members, Events, Expect, Checkpoints, FinalTick,
-	// FinalStateHash. Event Tick is the zero-based step where input is applied. Expect, Checkpoint and FinalTick ticks count
-	// completed ticks: 0 is setup; N is the boundary after ticks [0, N), including the frame phase and pending Scene.Load.
+	// The start fingerprint (version 3; Docs/Decisions/0030-m19-contract.md decision 2, A-FPRINT): what the recorded
+	// session held at tick 0 after its setup, the moment ReplayRecorder::Begin binds the recording, per entity and component
+	// and per asset its components reference, so a playback whose state hash differs at a checkpoint or at FinalTick names
+	// what changed since the recording (ReplayPlaybackResult::Changes, Session/ReplayFingerprint.h) instead of only listing
+	// the possible causes (M17 friction F13). Computed by ComputeReplayFingerprint (Session/ReplayFingerprint.h). Every hash
+	// is XXH64 (seed 0) as 16 lowercase hex digits; paths are readable and never compared.
+	struct ReplayComponentFingerprint
+	{
+		std::string Component{}; // the component's registry name ("PostProcess"); file: the key of the entity's Components
+		// Of the component's value as the scene's minified canonical serialization holds it (the entity's "Components" member,
+		// SceneSerializer::SaveToString, the document the state hash covers); file: that key's value.
+		std::string Hash{};
+
+		[[nodiscard]] bool operator==(const ReplayComponentFingerprint& other) const = default;
+	};
+
+	struct ReplayEntityFingerprint
+	{
+		UUID Entity{};      // file key Id
+		std::string Path{}; // Scene::GetEntityPath at tick 0, readable only
+		// Of the entity's own members as that serialization writes them (its id, name, parent, active flag, tags), without
+		// its Components.
+		std::string Hash{};
+		std::vector<ReplayComponentFingerprint> Components{}; // in registry order, the order scene files use
+
+		[[nodiscard]] bool operator==(const ReplayEntityFingerprint& other) const = default;
+	};
+
+	struct ReplayAssetFingerprint
+	{
+		AssetHandle Handle{};
+		std::string Path{}; // AssetManager::GetReferencePath when it was recorded, readable only
+		std::string Type{}; // its AssetType name ("Script", "Material")
+		std::string Hash{}; // of its cooked artifact (AssetManager::GetCookedHash), equal in the editor's cache and a pak
+
+		[[nodiscard]] bool operator==(const ReplayAssetFingerprint& other) const = default;
+	};
+
+	// File form, the "Fingerprint" member (after Config): {"Entities": [{"Id", "Path", "Hash", "Components": {<name>: <hash>,
+	// ...}}, ...], "Assets": [{"Handle", "Path", "Type", "Hash"}, ...]}, or null for a replay migrated from version 1 or 2.
+	struct ReplayFingerprint
+	{
+		std::vector<ReplayEntityFingerprint> Entities{}; // every entity of the scene at tick 0, sorted by id
+		// Every asset an AssetRef value of those components names (a Script component's script and its asset fields, typed
+		// by the session's script field schemas, a MeshRenderer's mesh and materials, ...), once, sorted by handle; cooked
+		// built-ins included, while a procedural built-in (no artifact) and a handle that names no asset are left out. Only
+		// direct references: a module that only a script requires, or a material's texture, is not listed.
+		std::vector<ReplayAssetFingerprint> Assets{};
+
+		[[nodiscard]] bool operator==(const ReplayFingerprint& other) const = default;
+	};
+
+	// The JSON document is flattened: Format, Version, Header's members, Fingerprint (version 3), Events, Expect,
+	// Checkpoints, FinalTick, FinalStateHash. Event Tick is the zero-based step where input is applied. Expect, Checkpoint
+	// and FinalTick ticks count completed ticks: 0 is setup; N is the boundary after ticks [0, N), including the frame phase
+	// and pending Scene.Load.
 	//
 	// The state hash (PlaySession::ComputeStateHash) covers the simulated world: the scene's minified canonical
 	// serialization (every entity with its id, name, parent, active flag, tags and serialized components, a Script
@@ -106,6 +169,11 @@ namespace Engine {
 		std::vector<ReplayCheckpoint> Checkpoints{}; // Strictly increasing ticks; the final tick's hash is FinalStateHash.
 		uint64_t FinalTick = 0;
 		std::string FinalStateHash{}; // Exactly 16 lowercase hex digits.
+		// Version 3 (ReplayFingerprintFormatVersion, decision 2): the start fingerprint, written after Config; nullopt (null in
+		// the file) for a replay migrated from version 1 or 2. Validation: entities strictly increasing by id with valid ids,
+		// component names unique per entity and in registry order, assets strictly increasing by valid handle, every hash
+		// canonical.
+		std::optional<ReplayFingerprint> Fingerprint{};
 	};
 
 	// Engine-compiled, trusted bytecode from ReplayImporter; no Luau type or compiler dependency in Asset/Session.
@@ -129,6 +197,9 @@ namespace Engine {
 		std::vector<ReplayCheckpoint> Checkpoints{};
 		uint64_t FinalTick = 0;
 		std::string FinalStateHash{};
+		// Cooked FormatVersion 3 (decision 2): the source's Fingerprint, which ReplayPlayer compares with the playback's own
+		// (ComputeReplayFingerprint) when a hash differs, in the editor and in every exported configuration.
+		std::optional<ReplayFingerprint> Fingerprint{};
 	};
 
 	struct ReplayLoadReport
@@ -146,7 +217,9 @@ namespace Engine {
 	[[nodiscard]] Status ValidateReplayDocument(const ReplayDocument& document);
 	// The readers accept versions 1 and 2. Version 1 has no Checkpoints member (one is an unknown member there) and
 	// migrates to version 2 with none; the document returned is always ReplayFormatVersion, and report.FileVersion keeps
-	// the file's own version. Version 2 requires Checkpoints.
+	// the file's own version. Version 2 requires Checkpoints. From version 3 (stream B, decision 2) they also accept version
+	// 3, which requires Fingerprint (an object or null); in versions 1 and 2 a Fingerprint member is unknown, and both
+	// migrate with a null one.
 	[[nodiscard]] Result<ReplayDocument> ReplayFromJson(const Json& document, ReplayLoadReport& report, bool strictUnknowns = false);
 	[[nodiscard]] Result<ReplayDocument> ReplayFromText(std::string_view text, ReplayLoadReport& report, bool strictUnknowns = false);
 	[[nodiscard]] Result<Json> ReplayToJson(const ReplayDocument& document);
@@ -161,7 +234,10 @@ namespace Engine {
 	// Cooked FormatVersion 2 uses the standard ECKD header. Payload, little-endian: u32 source version; scene UUID
 	// u64; length-prefixed UTF-8 scene path and canonical Parameters JSON; seed u64; FixedHz u32; length-prefixed
 	// EngineVersion and Config; event count u32; events in array order; expectation count u32; expectations;
-	// checkpoint count u32; checkpoints (Tick u64, state hash u64); FinalTick u64; state hash u64. Version 1 artifacts
+	// checkpoint count u32; checkpoints (Tick u64, state hash u64); FinalTick u64; state hash u64. FormatVersion 3 (stream
+	// B, decision 2) appends the fingerprint: u8 present (0 or 1); when present, entity count u32 and per entity its id u64,
+	// length-prefixed path, hash u64, component count u32 and per component its length-prefixed name and hash u64; then
+	// asset count u32 and per asset its handle u64, length-prefixed path and type name, and hash u64. Version 1 artifacts
 	// (no checkpoints) are UnsupportedVersion: the cache rebuilds them (ReplayImporter's version is part of the cache
 	// key) and exports are made again. A string/buffer length is u32. Event records: Tick u64, kind u8 (the nine kinds
 	// above in that order), then type-specific fields: strings, state u8 (Down=0, Up=1, Tap=2), f32 value or vec2;

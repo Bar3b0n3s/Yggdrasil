@@ -47,7 +47,11 @@
 //      echoed in canonical PascalCase (§6, §13.4): PrepareParams rewrites every recognized spelling to the registry name
 //      before strict parsing, so handlers and ComponentAccess only ever see canonical names.
 //   7. Entity references. std::string members holding an EntityRef (§13.4: 16 hex digits, a unique prefix of at least 6,
-//      or a path such as "/Game/Board"); the host resolves them (EditorMethodContext::ResolveEntity).
+//      or a path such as "/Game/Board"); the host resolves them (EditorMethodContext::ResolveEntity). M19
+//      (Docs/Decisions/0030-m19-contract.md decision 7): EntityRef values inside component data take the same spellings,
+//      which Invoke rewrites to the 16-hex id through the context's IEntityReferenceResolver
+//      (MethodContext::GetEntityReferenceResolver) before strict validation, as convention 13 rewrites asset references;
+//      a host without one keeps them to 16-hex ids (A4's refusal).
 //   8. Paths. std::string members holding a project-relative path ("Assets/Scenes/Main.scene") or a project:// path; the
 //      host confines them to project:// (§13.2 "Paths"). project.create and project.open take native paths.
 //   9. Lists. "limit" (uint32_t, default 100, Min 1, Max 1000) and "cursor" (std::string, opaque, "" for the start);
@@ -260,7 +264,12 @@ namespace Engine {
 		// every other unresolved reference names nothing; otherwise InvalidArgument (reported as InvalidParams) with one
 		// issue per reference, located at its value. An EntityRef value in component data that is a string but not a 16-hex
 		// id is such an issue, never NotFound, with the hint that component data takes the entity's id, which is also the
-		// error's hint when every issue is one (Docs/Decisions/0027-m17-contract.md decision 3, A4). A parse failure is
+		// error's hint when every issue is one (Docs/Decisions/0027-m17-contract.md decision 3, A4), when the context has no
+		// IEntityReferenceResolver. M19 (Docs/Decisions/0030-m19-contract.md decision 7): when it has one, every such value
+		// is rewritten to the id the resolver returns, in the pass that reaches it (the schema-less pass for component
+		// fields, the pass with schemas for Script.Fields), and the resolver's errors join the asset references' under the
+		// same rule (its NotFound counts with theirs; its InvalidArgument is an issue; any other code is returned unchanged).
+		// A parse failure is
 		// InvalidArgument carrying every issue. Does not catch exceptions: the Dispatcher's allowlisted boundary does (§4.6
 		// item 5).
 		[[nodiscard]] MethodResult Invoke(MethodContext& context) const;

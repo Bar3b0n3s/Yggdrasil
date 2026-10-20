@@ -63,7 +63,7 @@ namespace Engine {
 		Game   // the target scene through its primary camera (M7)
 	};
 
-	// viewport.screenshot {view, target?, width?, height?, camera?, debugView?, annotate?, maxDimension?, inline?} (§13.5).
+	// viewport.screenshot {view, target?, width?, height?, camera?, debugView?, annotate?, maxDimension?, inline?, keep?} (§13.5).
 	struct ViewportScreenshotParams
 	{
 		ViewportView View = ViewportView::Scene; // required
@@ -76,6 +76,10 @@ namespace Engine {
 		VariantValue Annotate{};      // {labels, colliders, bounds, axes} (M9)
 		uint32_t MaxDimension = 1024; // 1 to MaxViewportScreenshotDimension
 		bool Inline = false;          // also return the PNG as base64 in "data", when it fits MaxInlineScreenshotPngBytes
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 9, A-SHOTS): write the PNG into the host's kept-files directory
+		// (AutomationMethodContext::WriteKeptFile: Library/Automation/Kept/), which no later session prunes, instead of the
+		// output directory; the result's path names it as usual.
+		bool Keep = false;
 	};
 
 	struct ViewportScreenshotResult

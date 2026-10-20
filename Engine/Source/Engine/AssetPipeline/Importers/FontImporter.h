@@ -26,7 +26,10 @@ namespace Engine {
 	// (sorted by codepoint, a fixed shelf packer into the smallest power-of-two square that fits). Cooked as one FontData
 	// (CookFont). A font stb_truetype cannot read, or one without any glyph of the character set, is ImportFailed.
 	// Version 2: CFF (.otf) outlines keep their cubic segments in the distance field (ADR 0022 "Integration"); TrueType
-	// atlases are byte-identical to version 1's.
+	// atlases are byte-identical to version 1's. Version 3 (M19, Docs/Decisions/0030-m19-contract.md decision 23, A-STBTT;
+	// reserved by the phase 1 ledger): the rasterizer compiles stb_truetype.h of the vendored stb (Vendor/stb, the pinned
+	// commit 2c980bb) instead of Dear ImGui's imstb_truetype.h, so cached atlases are rebuilt once; stream J bumps Version
+	// with the switch and proves the atlases unchanged, or regenerates the Text golden as a reviewed change.
 	class FontImporter final : public IAssetImporter
 	{
 	public:

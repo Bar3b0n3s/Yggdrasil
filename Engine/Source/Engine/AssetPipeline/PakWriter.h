@@ -22,12 +22,19 @@ namespace Engine {
 		std::string Type{};
 		std::string Path{};
 		Buffer Data{};
+		// Pak version 2 (Docs/Decisions/0030-m19-contract.md decision 17, stream G): whether the writer may deflate the entry.
+		// False stores it whatever deflate would save: data that is compressed already (M23's BC textures and Opus clips).
+		bool Compress = true;
 	};
 
 	// Builds a pak (Architecture §14.1, §7.6), used by the exporter (M7) for Engine.pak and Game.pak. Deterministic: the same
 	// entries and metadata give byte-identical paks whatever the order of Add ("Pak: writer is deterministic"): entries are
 	// laid out sorted by (Handle, Path), each at the next 16-byte boundary with zero padding, followed by the canonical TOC.
-	// Not thread-safe (one owner).
+	// Not thread-safe (one owner). Pak version 2 (Docs/Decisions/0030-m19-contract.md decision 17, stream G): Build deflates
+	// each entry whose Compress is set and whose Data is at most MaxPakCompressedEntrySize bytes (DeflatePakEntry, at the
+	// fixed PakDeflateQuality) and keeps the stream only when it saves at least an eighth (8 × (Size − StoredSize) >= Size);
+	// every other entry, an empty one included, is stored. So paks stay byte-identical for equal inputs, also between the
+	// Debug and Release editors.
 	class PakWriter
 	{
 	public:

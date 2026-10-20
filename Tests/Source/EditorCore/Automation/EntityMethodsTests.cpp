@@ -389,6 +389,41 @@ return Script.Define("References", References)
 			REQUIRE(fetched.has_value());
 			CHECK((*fetched)["entity"]["components"]["MeshRenderer"]["Mesh"] == Json("0000000000000102"));
 		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 7 (A-EREF): component data takes the spellings entity params take, an
+		// entity path or a unique id prefix, resolved in the scene the request addresses (the edit scene here; the ledger's
+		// "Entity paths and scenes"), and the component holds the entity's id; a path that names nothing is NotFound at its
+		// pointer, and nothing changes.
+		TEST_CASE("EntityMethods: entity.update resolves an entity path and a unique id prefix in component data in the edit scene" * doctest::skip(true))
+		{
+			Test::AutomationFixture setup("EntityComponentPaths");
+			const std::string path = "Assets/Scripts/Hud.luau";
+			REQUIRE(setup.Call("script.write", Json{ { "path", path }, { "source", R"(
+local Hud = { Fields = { Score = Field.Entity(), Lives = Field.Array(Field.Entity()) } }
+return Script.Define("Hud", Hud)
+)" } })
+					.has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Game" } }).has_value());
+			auto score = setup.Call("entity.create", Json{ { "name", "ScoreText" }, { "parent", "/Game" } });
+			REQUIRE(score.has_value());
+			auto lives = setup.Call("entity.create", Json{ { "name", "Lives" }, { "parent", "/Game" } });
+			REQUIRE(lives.has_value());
+			const std::string scoreID = ReadEntityId(*score);
+			const std::string livesID = ReadEntityId(*lives);
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Hud" } }).has_value());
+
+			const Json fields{ { "Score", "/Game/ScoreText" }, { "Lives", Json::array({ livesID.substr(0, 10) }) } };
+			const auto updated = setup.Call("entity.update", Json{ { "entity", "/Hud" }, { "components", Json{ { "Script", Json{ { "Script", path }, { "Fields", fields } } } } } });
+			REQUIRE_MESSAGE(updated.has_value(), updated.error().ToString());
+			CHECK((*updated)["entity"]["components"]["Script"]["Fields"]["Score"] == Json(scoreID));
+			CHECK((*updated)["entity"]["components"]["Script"]["Fields"]["Lives"][0] == Json(livesID));
+
+			const uint64_t revision = setup.GetEditor().GetRevision();
+			const auto missing = setup.Call("entity.update", Json{ { "entity", "/Hud" }, { "components", Json{ { "Script", Json{ { "Fields", Json{ { "Score", "/Game/Missing" } } } } } } } });
+			REQUIRE_FALSE(missing.has_value());
+			CHECK(missing.error().GetCode() == ErrorCode::NotFound);
+			CHECK(setup.GetEditor().GetRevision() == revision);
+		}
 	}
 
 }

@@ -31,6 +31,8 @@
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Image.h"
 #include "Engine/Graphics/RenderContext.h"
+#include "Engine/Native/NativeApi.h"
+#include "Engine/Native/NativeModule.h"
 #include "Engine/Platform/Process.h"
 #include "Engine/Platform/Window.h"
 #include "Engine/Project/ProjectSerializer.h"
@@ -240,6 +242,9 @@ namespace Engine {
 		PlaySession* TestSession = nullptr; // Borrowed from Runner, unpublished before destruction.
 		ProjectSettings Project{};
 		Ref<const ScriptFieldSchemaSource> Schemas{};
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 30): the game's native module when this Runtime links one
+		// (GetLinkedNativeModule), null otherwise; every session runs it.
+		Ref<const NativeModuleTypes> Native{};
 		ScriptErrorStream Errors{};
 		std::map<uint64_t, ReplayHeader> Headers{};
 		uint64_t NextSerial = 1;
@@ -506,6 +511,7 @@ namespace Engine {
 		spec.Assets = App.m_Assets.get();
 		spec.ScriptApi = &App.GetContext().GetScriptApiRegistry();
 		spec.ScriptSchemas = Schemas;
+		spec.Native = Native;
 		spec.Project = std::move(project);
 		spec.Serial = NextSerial++;
 		spec.Seed = options.Seed.value_or(PlaySession::ComputeSessionSeed(spec.Project.Simulation.Seed, sceneSeed));
@@ -537,7 +543,9 @@ namespace Engine {
 		header.Parameters.Set(session->GetLoadParameters());
 		header.Seed = spec.Seed;
 		header.FixedHz = spec.Project.Simulation.FixedHz;
-		header.EngineVersion = Manifest.EngineVersion;
+		// The replay header's constant, never the manifest's version or build id, so a version bump rewrites no replay
+		// (Docs/Decisions/0030-m19-contract.md decision 13).
+		header.EngineVersion = std::string(ReplayEngineVersionString);
 		// The run mode that recorded it (Release, or Dist), never the build configuration: Debug and Release Runtimes record
 		// the same bytes (§9.1, ADR 0022 "Integration").
 		header.Config = RuntimeTestMode == TestSuiteSettings::Mode::Dist ? "Dist" : "Release";
@@ -857,6 +865,13 @@ namespace Engine {
 					scripts.emplace(entry.Handle, std::move(script));
 				}
 		ENGINE_TRY_ASSIGN(state.Schemas, ScriptFieldSchemaSource::Create(std::move(scripts)));
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 30): the game's native module, statically linked by its export.
+		if (const NativeModuleEntryPoint linked = GetLinkedNativeModule(); linked.Register != nullptr)
+		{
+			ENGINE_TRY_ASSIGN(state.Native, WithContext(BuildNativeModuleTypes(linked, nullptr), std::format("while registering the native module of '{}'", manifest.Name)));
+			ENGINE_INFO("Runtime: native module with {} component type(s), {} resource type(s) and {} system(s)", state.Native->GetComponents().size(),
+				state.Native->GetResources().size(), state.Native->GetSystems().size());
+		}
 		const auto [viewWidth, viewHeight] = Utils::GetViewSize(*context.GetWindow());
 		state.ViewWidth = viewWidth;
 		state.ViewHeight = viewHeight;
@@ -1038,6 +1053,7 @@ namespace Engine {
 		state.Pipelines.reset();
 		state.Session.reset();
 		state.Schemas.reset();
+		state.Native.reset();
 		state.GpuCache.reset();
 		EngineContext& context = GetContext();
 		if (context.GetAssetManager() == m_Assets.get())

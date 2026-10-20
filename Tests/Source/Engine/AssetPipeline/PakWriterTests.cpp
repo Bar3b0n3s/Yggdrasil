@@ -10,9 +10,15 @@
 #include "Engine/Asset/TextureData.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
+#include "Engine/Core/Random.h"
 #include "Support/TempDirectory.h"
 
 #include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <string>
+#include <string_view>
+#include <vector>
 
 // The "Pak:" acceptance tests of Roadmap M6 cover the writer and the reader together.
 
@@ -27,6 +33,25 @@ namespace Engine {
 				{ .Handle = AssetHandle(0x185), .Type = "Texture", .Path = "engine://Textures/Missing", .Data = CookTexture(GenerateBuiltinTexture(BuiltinTexture::Missing), 1) },
 				{ .Handle = AssetHandle(0x101), .Type = "Mesh", .Path = "engine://Meshes/Cube", .Data = CookMesh(GenerateBuiltinMesh(BuiltinMesh::Cube), 1) },
 				{ .Handle = AssetHandle(), .Type = "File", .Path = "Shaders/Readme.txt", .Data = Buffer(AsBytes(text).begin(), AsBytes(text).end()) },
+			};
+		}
+
+		// Decision 17's entries of fixed bytes (Docs/Decisions/0030-m19-contract.md, B-PAKZ): one that deflate shrinks
+		// (Data/Repetitive.txt), seeded noise it cannot shrink by an eighth (Data/Noise.bin), a shrinkable one whose Compress is
+		// false (Data/Kept.txt) and an empty one (Data/Empty.txt).
+		std::vector<PakWriterEntry> MakeCompressionEntries()
+		{
+			const std::string repetitive(4096, 'a');
+			const Buffer text(AsBytes(repetitive).begin(), AsBytes(repetitive).end());
+			Buffer noise(4096);
+			Random random(0x5EED);
+			for (std::byte& value : noise)
+				value = static_cast<std::byte>(random.NextU32() & 0xffu);
+			return {
+				{ .Handle = AssetHandle(), .Type = "File", .Path = "Data/Repetitive.txt", .Data = text },
+				{ .Handle = AssetHandle(), .Type = "File", .Path = "Data/Noise.bin", .Data = noise },
+				{ .Handle = AssetHandle(), .Type = "File", .Path = "Data/Kept.txt", .Data = text, .Compress = false },
+				{ .Handle = AssetHandle(), .Type = "File", .Path = "Data/Empty.txt", .Data = {} },
 			};
 		}
 
@@ -186,6 +211,72 @@ namespace Engine {
 			CHECK_FALSE(FileSystem::Exists(directory / "Game.pak.bak"));
 			// The parent directory must exist.
 			CHECK_FALSE(writer.WriteToFile(directory / "Missing" / "Game.pak").has_value());
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 17 (B-PAKZ, stream G): Build deflates an entry when that saves at least
+		// an eighth of it, and stores it otherwise, when it is empty, or when its Compress is false; the reader returns every
+		// entry's own bytes, and the pak stays independent of the order of Add.
+		TEST_CASE("PakWriter: an entry is deflated when that saves at least an eighth, and stored otherwise or when Compress is false" * doctest::skip(true))
+		{
+			const auto makeEntries = []()
+			{
+				std::vector<PakWriterEntry> entries = MakeEntries();
+				for (PakWriterEntry& entry : MakeCompressionEntries())
+					entries.push_back(std::move(entry));
+				return entries;
+			};
+			const Buffer pak = BuildPak(makeEntries());
+			Result<Ref<const PakReader>> reader = PakReader::OpenMemory(pak, "Compressed.pak");
+			REQUIRE_MESSAGE(reader.has_value(), reader.error().ToString());
+			CHECK((*reader)->GetHeader().Version == PakCompressionFormatVersion);
+
+			const PakEntry* deflated = (*reader)->FindByPath("Data/Repetitive.txt");
+			REQUIRE(deflated != nullptr);
+			CHECK(deflated->Compression == PakCompression::Deflate);
+			CHECK(deflated->Size == 4096);
+			CHECK(deflated->StoredSize < deflated->Size);
+			CHECK(8 * (deflated->Size - deflated->StoredSize) >= deflated->Size);
+			for (const std::string_view stored : { "Data/Noise.bin", "Data/Kept.txt", "Data/Empty.txt" })
+			{
+				CAPTURE(stored);
+				const PakEntry* entry = (*reader)->FindByPath(stored);
+				REQUIRE(entry != nullptr);
+				CHECK(entry->Compression == PakCompression::None);
+				CHECK(entry->StoredSize == entry->Size);
+			}
+			for (const PakWriterEntry& entry : makeEntries())
+			{
+				CAPTURE(entry.Path);
+				const PakEntry* found = (*reader)->FindByPath(entry.Path);
+				REQUIRE(found != nullptr);
+				CHECK(found->Hash == XXH64(entry.Data));
+				Result<Buffer> bytes = (*reader)->ReadEntry(*found);
+				REQUIRE_MESSAGE(bytes.has_value(), bytes.error().ToString());
+				CHECK(*bytes == entry.Data);
+			}
+
+			std::vector<PakWriterEntry> reversed = makeEntries();
+			std::ranges::reverse(reversed);
+			CHECK(BuildPak(std::move(reversed)) == pak);
+		}
+
+		// Decision 17 (stream G): Roadmap M19's acceptance "compressed paks are byte-identical from the Debug and Release
+		// editors". A pak's bytes depend only on its entries (PakWriter.h), so a pak built from fixed entries, a deflated one
+		// among them, has one XXH64 in every configuration, which the Debug and the Release unit runs both compare with the
+		// value pinned here. Two exports cannot prove it, since Game.json and Engine.pak's metadata carry the exporting
+		// build's id (decision 13).
+		TEST_CASE("PakWriter: a pak with deflated entries built from fixed entries has its pinned bytes in every configuration" * doctest::skip(true))
+		{
+			// Stream G records the XXH64 its first run computes when it lifts the skip: the contract cannot, since neither the
+			// version 2 TOC nor the codec exists before it.
+			constexpr uint64_t PinnedPakHash = 0;
+			const Buffer pak = BuildPak(MakeCompressionEntries());
+			Result<Ref<const PakReader>> reader = PakReader::OpenMemory(pak, "Pinned.pak");
+			REQUIRE_MESSAGE(reader.has_value(), reader.error().ToString());
+			const PakEntry* deflated = (*reader)->FindByPath("Data/Repetitive.txt");
+			REQUIRE(deflated != nullptr);
+			CHECK(deflated->Compression == PakCompression::Deflate);
+			CHECK(XXH64(pak) == PinnedPakHash);
 		}
 	}
 

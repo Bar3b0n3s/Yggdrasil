@@ -34,6 +34,7 @@
 #include "Engine/Scene/LoadReport.h"
 #include "Engine/Scene/RenderAnnotations.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Scripting/ScriptAssetLoads.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/EditorTestFixture.h"
 #include "Support/ExpectLog.h"
@@ -1826,6 +1827,48 @@ end
 			{
 				return diagnostic.Code == "TEST_SUITE_INVALID";
 			}) == 2);
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 21 (B-PRUNE-GAME, stream R): with Export.PruneUnreferenced on, every
+		// computed Assets.Load of a script the export would package is a SCRIPT_COMPUTED_ASSET_LOAD warning at its line, not
+		// fixable, since a pruned export cannot follow it; a literal load is none, a script Export.Exclude leaves out is not
+		// read, and with the setting off nothing is reported.
+		TEST_CASE("ProjectValidator: with Export.PruneUnreferenced a computed Assets.Load is a SCRIPT_COMPUTED_ASSET_LOAD warning" * doctest::skip(true))
+		{
+			Test::EditorTestFixture fixture("ValidatorComputedLoads");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			const std::string_view source = "local name = \"Beep\"\n"
+											"local literal = Assets.Load(\"Assets/Audio/Beep.sfx\")\n"
+											"local computed = Assets.Load(\"Assets/Audio/\" .. name .. \".sfx\")\n"
+											"return { Literal = literal, Computed = computed }\n";
+			WriteValidatorFile(editor, "Assets/Loads.luau", source);
+			WriteValidatorFile(editor, "Assets/Tests/Loads.luau", source);
+			const auto computedLoads = [&editor]()
+			{
+				const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Project);
+				REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+				std::vector<ProjectDiagnostic> found;
+				for (const ProjectDiagnostic& diagnostic : report->Diagnostics)
+				{
+					if (diagnostic.Code == ScriptComputedAssetLoadCode)
+						found.push_back(diagnostic);
+				}
+				return found;
+			};
+			CHECK(computedLoads().empty());
+
+			Result<Scope<ProjectSettingsCommand>> settings = ProjectSettingsCommand::CreateFromPatch(editor,
+				ParseValidatorJson(R"({"Export":{"PruneUnreferenced":true}})"), "Prune unreferenced assets");
+			REQUIRE_MESSAGE(settings.has_value(), settings.error().ToString());
+			REQUIRE(editor.Execute(std::move(*settings)).has_value());
+			const std::vector<ProjectDiagnostic> found = computedLoads();
+			REQUIRE(found.size() == 1);
+			CHECK(found.front().File == "Assets/Loads.luau");
+			CHECK(found.front().Line == 3);
+			CHECK(found.front().Severity == DiagnosticSeverity::Warning);
+			CHECK_FALSE(found.front().AutoFixable);
+			CHECK(std::ranges::find(ProjectValidator::GetCodes(), ScriptComputedAssetLoadCode) != ProjectValidator::GetCodes().end());
 		}
 	}
 

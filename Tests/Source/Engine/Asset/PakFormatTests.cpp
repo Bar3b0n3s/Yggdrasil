@@ -172,6 +172,60 @@ namespace Engine {
 			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
 			CHECK(read->Entries.size() == 2);
 		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 17 (B-PAKZ): pak version 2 gives every entry its Compression and
+		// StoredSize after its XXH64; the byte ranges are those of the stored bytes, a None entry stores exactly its Size,
+		// and a Deflate entry saves at least an eighth of it. Readers read the current version only.
+		TEST_CASE("PakFormat: version 2 entries carry their compression and stored size, and the ranges cover the stored bytes" * doctest::skip(true))
+		{
+			CHECK(PakHeader::CurrentVersion == PakCompressionFormatVersion);
+			CHECK(PakToc::CurrentVersion == PakCompressionFormatVersion);
+			Result<PakHeader> older = ReadPakHeader(WritePakHeader({ .Version = 1 }));
+			REQUIRE_FALSE(older.has_value());
+			CHECK(older.error().GetCode() == ErrorCode::UnsupportedVersion);
+
+			PakToc toc;
+			toc.Entries = {
+				{ .Handle = AssetHandle(), .Type = std::string(PakFileEntryType), .Path = "Shaders/A.spv", .Offset = 64, .Size = 100, .Hash = 1, .Compression = PakCompression::None, .StoredSize = 100 },
+				{ .Handle = AssetHandle(0x101), .Type = "Mesh", .Path = "engine://Meshes/Cube", .Offset = 176, .Size = 4096, .Hash = 2, .Compression = PakCompression::Deflate, .StoredSize = 512 },
+			};
+			const std::string text = SerializePakToc(toc);
+			CHECK(text.starts_with("{\n\t\"Format\": \"PakToc\",\n\t\"Version\": 2,\n"));
+			CHECK(text.contains("\"Compression\": \"None\""));
+			CHECK(text.contains("\"Compression\": \"Deflate\""));
+			CHECK(text.contains("\"StoredSize\": 512"));
+			CHECK(text.find("\"XXH64\"") < text.find("\"Compression\""));
+			CHECK(text.find("\"Compression\"") < text.find("\"StoredSize\""));
+			// The deflated entry's 4096 bytes would leave a data area that ends at 1024; its 512 stored bytes fit.
+			Result<PakToc> read = ParsePakToc(text, 1024);
+			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
+			CHECK(*read == toc);
+			CHECK(SerializePakToc(*read) == text);
+
+			const auto rejects = [&toc](size_t index, PakCompression compression, uint64_t storedSize)
+			{
+				PakToc edited = toc;
+				edited.Entries[index].Compression = compression;
+				edited.Entries[index].StoredSize = storedSize;
+				CAPTURE(index);
+				CAPTURE(storedSize);
+				Result<PakToc> parsed = ParsePakToc(SerializePakToc(edited), 8192);
+				REQUIRE_FALSE(parsed.has_value());
+				CHECK(parsed.error().GetCode() == ErrorCode::Validation);
+			};
+			// A stored entry whose StoredSize is not its Size; a deflated one that saves nothing, less than an eighth, or is
+			// empty.
+			rejects(0, PakCompression::None, 99);
+			rejects(1, PakCompression::Deflate, 4096);
+			rejects(1, PakCompression::Deflate, 3600);
+			rejects(1, PakCompression::Deflate, 0);
+
+			std::string unknown = text;
+			unknown.replace(unknown.find("\"Deflate\""), std::string_view("\"Deflate\"").size(), "\"Zstd\"");
+			Result<PakToc> unknownRead = ParsePakToc(unknown, 1024);
+			REQUIRE_FALSE(unknownRead.has_value());
+			CHECK(unknownRead.error().GetCode() == ErrorCode::Validation);
+		}
 	}
 
 }

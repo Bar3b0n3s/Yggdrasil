@@ -305,6 +305,55 @@ end)
 			std::error_code error;
 			CHECK_FALSE(std::filesystem::exists(build, error));
 		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 10 (A-DISTSELF): a testing export with featureTest runs the staged
+		// game's --feature-test (by its fixed path, with --renderer none from an editor without a device) and reports the run
+		// and every replay's observed state hash, sorted by path, the hashes the games suite's Dist half compares; the report
+		// lies inside the exported package, and phaseTimings lists FeatureTest. featureTest needs testing.
+		TEST_CASE("ExportMethods: a testing export with featureTest reports every replay's state hash from the exported game" * doctest::skip(true))
+		{
+			Test::EditorTestFixture fixture("ExportFeatureTest");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			MakeExportable(fixture.GetEditor());
+			EditorContext& editor = fixture.GetEditor();
+			const Test::TempDirectory binaries("ExportBinaries");
+			Test::AutomationTestClient client(editor, MakeExportServerSpecification(MakeBinaryRoot(binaries)));
+			REQUIRE(client.Call("scene.save", Json::object()).has_value());
+			REQUIRE(client.Call("input.record", Json{ { "action", "start" } }).has_value());
+			REQUIRE(client.Call("play.step", Json{ { "ticks", 30 }, { "render", "none" } }).has_value());
+			const Result<Json> recorded = client.Call("input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Idle.replay" } });
+			REQUIRE_MESSAGE(recorded.has_value(), recorded.error().ToString());
+			REQUIRE(client.Call("play.stop", Json::object()).has_value());
+			const Result<Json> patch = JsonReader::Parse(R"({"Testing":{"Replays":["Assets/Tests/*.replay"]}})");
+			REQUIRE(patch.has_value());
+			Result<Scope<ProjectSettingsCommand>> command = ProjectSettingsCommand::CreateFromPatch(editor, *patch, "Testing Settings");
+			REQUIRE_MESSAGE(command.has_value(), command.error().ToString());
+			REQUIRE(editor.Execute(std::move(*command)).has_value());
+
+			const Result<Json> refused = client.Call("project.export", Json{ { "config", "release" }, { "featureTest", true } });
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
+
+			const Result<Json> exported = client.Call("project.export", Json{ { "config", "release" }, { "testing", true }, { "featureTest", true } });
+			REQUIRE_MESSAGE(exported.has_value(), exported.error().ToString());
+			const Json& run = (*exported)["featureTest"];
+			CHECK(run["ran"] == Json(true));
+			CHECK(run["exitCode"] == Json(0));
+			CHECK(run["passed"] == Json(true));
+			const std::string reportPath = JsonReader(run["reportPath"]).ReadString().value_or("");
+			const std::string outputDirectory = JsonReader((*exported)["outputDirectory"]).ReadString().value_or("");
+			CHECK(reportPath.starts_with(outputDirectory));
+			CHECK(FileSystem::Exists(FileSystem::PathFromUtf8(reportPath)));
+			REQUIRE(run["replays"].size() == 1);
+			CHECK(run["replays"][0]["path"] == Json("Assets/Tests/Idle.replay"));
+			CHECK(run["replays"][0]["stateHash"] == (*recorded)["stateHash"]);
+			CHECK(run["replays"][0]["passed"] == Json(true));
+			bool listed = false;
+			for (const Json& timing : (*exported)["phaseTimings"])
+				listed = listed || timing["phase"] == Json("FeatureTest");
+			CHECK(listed);
+		}
 	}
 
 }

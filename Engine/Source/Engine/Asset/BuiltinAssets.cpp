@@ -285,6 +285,12 @@ namespace Engine {
 		return Entries;
 	}
 
+	std::span<const AssetHandle> GetRuntimeRequiredBuiltinHandles()
+	{
+		ENGINE_CONTRACT_STUB();
+		return {};
+	}
+
 	Result<BuiltinAssetCatalog> BuiltinAssetCatalog::Parse(std::string_view text)
 	{
 		ENGINE_TRY_ASSIGN(const Json document, JsonReader::Parse(text));

@@ -104,6 +104,11 @@ namespace Engine {
 	{
 		m_Unavailable = false;
 	}
+	Status EditorHostViewports::ForceGameView()
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "the headless editor's game view (--headless-game-view; Docs/Decisions/0030-m19-contract.md decision 11, stream E)");
+	}
 	bool EditorHostViewports::IsLayoutReady() const
 	{
 		if (!m_Editor.HasProject())

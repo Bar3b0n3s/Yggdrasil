@@ -252,6 +252,110 @@ class ReplayTests(AutomationTestCase):
         self.assertEqual(document["Version"], 2)
         self.assertEqual([checkpoint["Tick"] for checkpoint in document["Checkpoints"]], [60])
 
+    @unittest.skip("contract stub: input.replay continuePastCheckpoint (Docs/Decisions/0030-m19-contract.md decision "
+                   "3, A-F29; streams A and B, lifted by the integration)")
+    def test_replay_continue_past_checkpoint_counts_every_failed_checkpoint(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 3 (A-F29): continuePastCheckpoint plays on past every checkpoint
+        # whose hash differs to the final tick and compares the final hash too; the replay still fails, counting the
+        # failed checkpoints and naming the first, and the session waits at the final tick. It needs strictHash.
+        client, _ = self.open_editor_with_scene()
+        add_key_mover(client)
+        client.call("scene.save")
+        client.call("input.record", {"action": "start"})
+        # Space is held from tick 50: checkpoints 60 and 120 and the final hash differ from a run without input.
+        client.call("play.step", {"ticks": 130, "render": "none", "input": [
+            {"tick": 50, "type": "key", "key": "Space", "state": "down"}]})
+        path = "Assets/Tests/Held.replay"
+        saved = client.call("input.record", {"action": "stop", "path": path})
+        self.assertEqual(saved["checkpoints"], 2)
+        client.call("play.stop")
+        with self.assertRaises(engine_client.EngineError) as failed:
+            client.call("input.replay", {"path": path, "verify": True, "strictHash": True, "withoutInput": True,
+                                         "continuePastCheckpoint": True})
+        self.assert_engine_error(failed.exception, engine_client.VALIDATION_FAILED, "Validation")
+        outcome = failed.exception.data["replay"]
+        self.assertFalse(outcome["passed"])
+        self.assertTrue(outcome["checkpointFailed"])
+        self.assertEqual((outcome["checkpointsChecked"], outcome["checkpointsFailed"],
+                          outcome["firstFailedCheckpointTick"]), (2, 2, 60))
+        self.assertEqual((outcome["finalTick"], outcome["hashMatched"]), (130, False))
+        self.assertEqual(client.call("play.state")["tick"], 130)
+        client.call("play.stop")
+        with self.assertRaises(engine_client.EngineError) as unstrict:
+            client.call("input.replay", {"path": path, "verify": True, "continuePastCheckpoint": True})
+        self.assert_engine_error(unstrict.exception, engine_client.INVALID_PARAMS, "InvalidArgument")
+
+    @unittest.skip("contract stub: the replay start fingerprint's changes (Docs/Decisions/0030-m19-contract.md "
+                   "decision 2, A-FPRINT; streams A and B, lifted by the integration)")
+    def test_replay_names_the_script_and_material_that_changed_since_the_recording(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 2 (A-FPRINT; ADR 0027 friction F13): a replay records its start
+        # fingerprint, so a playback whose hash differs names what changed since the recording in its result's changes,
+        # and its error's message ends with the first.
+        client, _ = self.open_editor_with_scene()
+        add_key_mover(client)
+        client.call("asset.create", {"type": "Material", "path": "Assets/Materials/Red.material",
+                                     "values": {"Roughness": 0.45}})
+        client.call("entity.create", {"name": "Box", "components": {"MeshRenderer": {
+            "Mesh": "engine://Meshes/Cube", "Materials": ["Assets/Materials/Red.material"]}}})
+        client.call("scene.save")
+        client.call("input.record", {"action": "start"})
+        client.call("play.step", {"ticks": 70, "render": "none", "input": [
+            {"tick": 3, "type": "key", "key": "Space", "state": "down"}]})
+        path = "Assets/Tests/Changed.replay"
+        client.call("input.record", {"action": "stop", "path": path})
+        client.call("play.stop")
+        # The mover now moves two units per tick, so the hash differs; the material changes too.
+        client.call("script.write", {"path": "Assets/Scripts/KeyMover.luau",
+                                     "source": KEY_MOVER.replace("vector.create(1, 0, 0)", "vector.create(2, 0, 0)")})
+        client.call("asset.setProperties", {"asset": "Assets/Materials/Red.material", "values": {"Roughness": 0.9}})
+        with self.assertRaises(engine_client.EngineError) as changed:
+            client.call("input.replay", {"path": path, "verify": True, "strictHash": True})
+        self.assert_engine_error(changed.exception, engine_client.VALIDATION_FAILED, "Validation")
+        changes = changed.exception.data["replay"]["changes"]
+        self.assertTrue(any(line.startswith("Script Assets/Scripts/KeyMover.luau (") for line in changes), changes)
+        self.assertTrue(any(line.startswith("Material Assets/Materials/Red.material (") for line in changes), changes)
+        self.assertIn("; changed since the recording: ", changed.exception.detail)
+        client.call("play.stop")
+
+    @unittest.skip("contract stub: input.record's final-hash warning (Docs/Decisions/0030-m19-contract.md decision 3, "
+                   "A-F29; streams A and B, lifted by the integration)")
+    def test_record_warns_when_only_the_final_hash_does_not_depend_on_the_input(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 3 (A-F29; ADR 0026 friction F29): a recording whose input shows
+        # at its checkpoints but whose end state a reset restores passes the input check and is written, with one
+        # warning in warnings that its final hash alone does not depend on its input; a recording whose final state
+        # shows its input gets none.
+        client, root = self.open_editor_with_scene()
+        client.call("script.write", {"path": "Assets/Scripts/Resetter.luau", "source":
+                    "local Resetter = {}\nfunction Resetter.OnFixedUpdate(self: any, dt: number)\n"
+                    "\tif Input.IsKeyDown(\"Space\") then self.Entity.Transform:Translate(vector.create(1, 0, 0)) end\n"
+                    "\tif Time.GetTick() == 125 then self.Entity.Transform.Translation = vector.create(0, 0, 0) end\n"
+                    "end\nreturn Script.Define(\"Resetter\", Resetter)\n"})
+        client.call("entity.create", {"name": "Resetter",
+                                       "components": {"Script": {"Script": "Assets/Scripts/Resetter.luau"}}})
+        client.call("scene.save")
+        client.call("input.record", {"action": "start"})
+        client.call("play.step", {"ticks": 130, "render": "none", "input": [
+            {"tick": 10, "type": "key", "key": "Space", "state": "down"},
+            {"tick": 70, "type": "key", "key": "Space", "state": "up"}]})
+        path = "Assets/Tests/Reset.replay"
+        saved = client.call("input.record", {"action": "stop", "path": path})
+        self.assertTrue((root / path).exists())
+        self.assertEqual(saved["inputCheckTick"], 60)
+        self.assertEqual(len(saved["warnings"]), 1, saved["warnings"])
+        self.assertIn(path, saved["warnings"][0])
+        self.assertIn("does not depend on its input", saved["warnings"][0])
+        self.assertEqual(client.call("play.state")["tick"], 130)
+        client.call("play.stop")
+
+        add_key_mover(client)
+        client.call("scene.save")
+        client.call("input.record", {"action": "start"})
+        client.call("play.step", {"ticks": 130, "render": "none", "input": [
+            {"tick": 100, "type": "key", "key": "Space", "state": "down"}]})
+        plain = client.call("input.record", {"action": "stop", "path": "Assets/Tests/Plain.replay"})
+        self.assertEqual(plain["warnings"], [])
+        client.call("play.stop")
+
     def test_record_refuses_a_recording_changed_by_a_script_table_write(self) -> None:
         # Docs/Decisions/0027-m17-contract.md decision 3, A1 (M17 maps GTF-01, GDF-03, GAF-09): a script.eval that
         # writes only a script table during a recording calls no engine API, so nothing invalidates the recording, and

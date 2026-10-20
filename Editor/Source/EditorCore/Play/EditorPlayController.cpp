@@ -2,6 +2,7 @@
 #include "EditorCore/Play/EditorPlayController.h"
 
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Native/NativeModuleHost.h"
 #include "EditorCore/Scripting/EditorScriptService.h"
 #include "EditorCore/Viewport/EditorViewportState.h"
 #include "Engine/App/EngineContext.h"
@@ -308,12 +309,14 @@ namespace Engine {
 		specification.TestHook = hook;
 		specification.TestHost = testHost;
 		specification.Host = scratch ? nullptr : m_State.get();
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 28): every session runs the loaded native module, if any.
+		specification.Native = editor.GetNativeModule().GetLoadedTypes();
 		PreparedSession result;
 		result.FixedView = fixedView;
 		result.Header.Parameters = options.Parameters.Get().is_null() ? VariantValue(Json::object()) : options.Parameters;
 		result.Header.Seed = specification.Seed;
 		result.Header.FixedHz = project.Simulation.FixedHz;
-		result.Header.EngineVersion = std::string(EngineVersionString);
+		result.Header.EngineVersion = std::string(ReplayEngineVersionString);
 		// The run mode that recorded it, never the build configuration: a Debug and a Release editor record the same bytes
 		// (§9.1, ADR 0022 "Integration").
 		result.Header.Config = "Editor";

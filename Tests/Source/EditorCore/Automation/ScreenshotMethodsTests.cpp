@@ -15,7 +15,11 @@
 #include "Support/AutomationTestClient.h"
 #include "Support/EditorTestFixture.h"
 
+#include <array>
 #include <chrono>
+#include <cstddef>
+#include <filesystem>
+#include <span>
 #include <string>
 #include <utility>
 
@@ -395,6 +399,45 @@ namespace Engine {
 			CHECK(editor->Pending);
 			CHECK_FALSE(editor->Specification.SupportsDryRun);
 			CHECK_FALSE(editor->Specification.AllowedInBatch);
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 9 (A-SHOTS): keep writes the PNG below Library/Automation/Kept/ with the
+		// output directory's naming, which no server prunes: neither the first write's removal of a gone server's files nor a
+		// shutdown touches it, so a look screenshot outlives every later session. An ordinary screenshot still goes to Out/.
+		TEST_CASE("ScreenshotMethods: keep writes the screenshot below Library/Automation/Kept, which a later server keeps" * doctest::skip(true))
+		{
+			CaptureCounts counts;
+			Test::EditorTestFixture fixture("KeptScreenshots");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			const std::filesystem::path kept = fixture.GetProjectRoot() / "Library" / "Automation" / "Kept";
+			REQUIRE(FileSystem::CreateDirectories(kept).has_value());
+			// A kept screenshot of a server that is gone (a process id no process has), which Out/ would prune.
+			const std::filesystem::path earlier = kept / "2147483644-1700000000-00000001.png";
+			REQUIRE(FileSystem::WriteFileAtomic(earlier, std::as_bytes(std::span("png", 3))).has_value());
+
+			std::filesystem::path shotPath;
+			{
+				Test::AutomationTestClient client(fixture.GetEditor(), MakeScreenshotServerSpecification(counts));
+				const Result<Json> shot = client.Call("viewport.screenshot", Json{ { "view", "scene" }, { "keep", true } });
+				REQUIRE_MESSAGE(shot.has_value(), shot.error().ToString());
+				const std::string path = ReadString((*shot)["path"]);
+				CHECK(path.contains("Library/Automation/Kept/"));
+				shotPath = FileSystem::PathFromUtf8(path);
+				CHECK(FileSystem::Exists(shotPath));
+				const Result<Json> plain = client.Call("viewport.screenshot", Json{ { "view", "scene" } });
+				REQUIRE_MESSAGE(plain.has_value(), plain.error().ToString());
+				CHECK(ReadString((*plain)["path"]).contains("Library/Automation/Out/"));
+				CHECK(FileSystem::Exists(earlier));
+			}
+			// A later server's first write prunes Out/, never Kept/.
+			{
+				Test::AutomationTestClient later(fixture.GetEditor(), MakeScreenshotServerSpecification(counts));
+				const std::array<std::byte, 3> bytes = { std::byte{ 1 }, std::byte{ 2 }, std::byte{ 3 } };
+				REQUIRE(later.GetServer().WriteOutputFile("png", bytes).has_value());
+			}
+			CHECK(FileSystem::Exists(shotPath));
+			CHECK(FileSystem::Exists(earlier));
 		}
 	}
 

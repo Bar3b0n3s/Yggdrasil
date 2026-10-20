@@ -566,6 +566,12 @@ namespace Engine {
 		return State::GetOutputPath(*m_Editor, m_Specification, file);
 	}
 
+	Result<std::string> AutomationServer::WriteKeptFile(std::string_view extension, std::span<const std::byte> /*bytes*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "keeping a .{} output file below Library/Automation/Kept (Docs/Decisions/0030-m19-contract.md decision 9, stream E)", extension);
+	}
+
 	void AutomationServer::State::RemoveClient(ClientId client, EditorContext& editor)
 	{
 		const auto record = Clients.find(client);

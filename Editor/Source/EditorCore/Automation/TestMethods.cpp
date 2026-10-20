@@ -26,6 +26,15 @@ namespace Engine {
 
 	namespace {
 
+		// test.run {record, expect} (Docs/Decisions/0030-m19-contract.md decision 6, A-RECEXPECT, stream A): the expectations
+		// checked and compiled for FeatureTestRunOptions::RecordExpect and RecordExpectBytecode.
+		Status PrepareRecordExpectations(const TestRunParams& params)
+		{
+			ENGINE_CONTRACT_STUB();
+			return std::unexpected(Error(ErrorCode::Unsupported, std::format("test.run {{record, expect}} with {} expectation(s) (Docs/Decisions/0030-m19-contract.md decision 6, stream A)", params.Expect.size()))
+					.WithLocation({ .File = {}, .JsonPointer = "/expect", .Entity = {} }));
+		}
+
 		// The host owns the editor lease. Keep it alive until the runner has unpublished and destroyed its sessions,
 		// including failure and disconnect paths that will not be polled again.
 		class TestRunOperation final : public PendingOperation
@@ -236,6 +245,8 @@ namespace Engine {
 				if (!checked)
 					return std::unexpected(Error(checked.error().GetCode(), checked.error().GetMessageText()).WithLocation({ .File = {}, .JsonPointer = "/record", .Entity = {} }));
 			}
+			if (context.HasParam("expect"))
+				ENGINE_TRY(PrepareRecordExpectations(params));
 			auto host = CreateScope<EditorFeatureTestHost>(context);
 			ENGINE_TRY(host->Preflight());
 			EditorFeatureTestHost* adapter = host.get();
@@ -280,7 +291,8 @@ namespace Engine {
 			.Field("filter", &TestRunParams::Filter, "Case-insensitive substring of suite/case or replay path.")
 			.Field("timeoutTicks", &TestRunParams::TimeoutTicks, "Optional positive run-wide tick cap; omitted means no additional limit.")
 			.Field("record", &TestRunParams::Record, "Optional project Assets .replay output; requires one selected suite and strict reproduction in ordinary play (every state-hash checkpoint, one every 60 ticks, and the final hash). A recording with input events is also replayed without them and refused when that run reproduces every checkpoint and the final hash too, whatever script errors it raises: its outcome does not depend on its input. The result's recording block describes the replay written.")
-			.Field("coverage", &TestRunParams::Coverage, "Return coverage.counters in the result; without it they are left out unless the project sets Testing.CoverageGates. The JSON report at jsonPath always holds them.");
+			.Field("coverage", &TestRunParams::Coverage, "Return coverage.counters in the result; without it they are left out unless the project sets Testing.CoverageGates. The JSON report at jsonPath always holds them.")
+			.Field("expect", &TestRunParams::Expect, "With record only: expectations ({tick, luau}, as input.record's stop takes them) written into the recorded replay; each must hold when the recording is verified with its input, before anything is written.");
 	}
 
 	void RegisterTestMethods(MethodRegistry& methods)

@@ -39,6 +39,13 @@ namespace Engine {
 		void SetUnavailable();
 		// The window has a usable framebuffer again: the next render publishes the views' extents.
 		void SetAvailable();
+		// M19 --headless-game-view (EditorLaunchOptions::HeadlessGameView; Docs/Decisions/0030-m19-contract.md decision 11,
+		// R-SOAK): from the next Render on, the Game view renders every frame as if its panel were displayed, at the project's
+		// Window.Width x Window.Height (or the viewport state's game resolution when one is set), and publishes its extent and
+		// statistics as a displayed view does (stats.get's "game"); it follows the shown scene (the play scene while playing)
+		// and recreates its renderer like any view. EditorApp calls it once, after construction, for a headless editor started
+		// with the option. Errors: InvalidState without a headless window (a windowed editor's panels decide).
+		[[nodiscard]] Status ForceGameView();
 		[[nodiscard]] bool IsLayoutReady() const;
 		// How many times registered view images were withdrawn outside a render (minimizing, retiring). A UI frame whose
 		// draw data was built before the latest withdrawal references removed textures and must not be captured.

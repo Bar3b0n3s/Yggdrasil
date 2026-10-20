@@ -5,6 +5,7 @@
 #include "EditorCore/Commands/CompositeCommand.h"
 #include "EditorCore/Commands/SceneEditCommand.h"
 #include "EditorCore/EngineAssetGenerators.h"
+#include "EditorCore/Native/NativeModuleHost.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Private/EditorFileError.h"
 #include "EditorCore/Private/PrefabInstances.h"
@@ -389,6 +390,9 @@ namespace Engine {
 		// M12: the asset browser's audio preview, when the engine context has an audio engine.
 		if (AudioEngine* audio = engine.GetAudioEngine(); audio != nullptr)
 			m_AudioPreview = CreateScope<AudioPreview>(*audio, *m_Assets);
+		// M19 (Docs/Decisions/0030-m19-contract.md decisions 29 to 31): the native module host. Stream N-C reads the
+		// preference here and wires the project's open, close and frame into it.
+		m_Native = CreateScope<NativeModuleHost>(MakeEditorNativeModuleHostSpecification(specification.NativeBuild, specification.NativeLoader));
 
 		// Provenance for every write of the manager's AssetWriter, the editor's own and the manager's .meta writes alike
 		// (§13.12 rule 1); never during a dry run, and not for read-only projects (no provenance). A write an import's

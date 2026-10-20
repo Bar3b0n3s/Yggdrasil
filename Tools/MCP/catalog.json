@@ -363,7 +363,11 @@
 									"type": "string"
 								},
 								"params": {
-									"description": "The method's params (an object); {\"$ref\": \"<op index>.<path>\"} stands for a value of an earlier op's result."
+									"description": "The method's params (an object); {\"$ref\": \"<op index>.<path>\"} stands for a value of an earlier op's result, and {\"$ref\": \"<op name>.<path>\"} for one of the earlier op with that name."
+								},
+								"name": {
+									"description": "Optional: a name later ops' $ref may use instead of this op's index, which does not shift when an op is inserted. An identifier (letters, digits and _, not starting with a digit, at most 64 characters), unique within the batch.",
+									"type": "string"
 								}
 							},
 							"additionalProperties": false
@@ -457,6 +461,10 @@
 						"type": "integer",
 						"minimum": 1,
 						"maximum": 8192
+					},
+					"keep": {
+						"description": "Write the PNG into Library/Automation/Kept/ (user://Automation/Kept/ without a writable project), which no later editor session prunes, instead of Library/Automation/Out/.",
+						"type": "boolean"
 					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
@@ -905,6 +913,43 @@
 			"timeoutSeconds": 60
 		},
 		{
+			"name": "input_read_replay",
+			"method": "input.readReplay",
+			"description": "Reads a replay back: its header, its input events a page at a time in play.step's input form with absolute ticks, its expectations and checkpoints. So a replay made with input.record can be re-recorded from its own events: start a recording of the header's scene, seed and parameters, play.step {ticks: finalTick, input: events}, and stop with its expectations.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "InputReadReplayParams",
+				"description": "Read a replay back, its input events a page at a time.",
+				"type": "object",
+				"properties": {
+					"path": {
+						"description": "Required: the project's .replay source, project-relative or project://.",
+						"type": "string"
+					},
+					"cursor": {
+						"description": "Opaque cursor of the next page of events; empty for the first.",
+						"type": "string"
+					},
+					"limit": {
+						"description": "Events per page, 1 to 1000.",
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 1000
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["path"]
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
 			"name": "input_record",
 			"method": "input.record",
 			"description": "Starts a tick-zero recording or saves its validated applied inputs, expectations and state-hash checkpoints (one every 60 ticks). Stop checks output write permission. A recording with input events is first replayed with them (the verification, which replaces the play session as input.replay does): unless that run reproduces every checkpoint, the final hash and every expectation and raises no script error, Stop refuses to write it (Validation naming the first divergence, the run's outcome in error data verification), which catches a script.eval that wrote script state during the recording; the run is not torn down, so an error raised only at teardown (OnDestroy) is not counted, while test.run counts it when it plays the replay. It is then replayed without them (the input check); when that run also reproduces every checkpoint, the final hash and every expectation, whatever script errors it raises, the recording's outcome does not depend on its input and Stop refuses to write it (Validation, the check's outcome in error data inputCheck). Either way the play session is the last run's, paused where it ended. End such a recording while the played state is still in the scene. A recording without input events is written as recorded, without either run, so verify it with input.replay {verify: true, strictHash: true}.",
@@ -999,6 +1044,10 @@
 						"description": "Apply none of the replay's input events: the check that its outcome depends on its input; requires verify. A replay whose verification still passes this way proves nothing about its input.",
 						"type": "boolean"
 					},
+					"continuePastCheckpoint": {
+						"description": "Play on past every checkpoint whose hash differs, to the final tick, and compare the final hash too; requires strictHash. The replay still fails when any checkpoint differed (checkpointsFailed, firstFailedCheckpointTick). With withoutInput it tells a replay whose final hash alone does not depend on its input.",
+						"type": "boolean"
+					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
@@ -1057,6 +1106,205 @@
 			},
 			"mutates": false,
 			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "native_build",
+			"method": "native.build",
+			"description": "Builds the native module in the editor's configuration (Windows; needs the user's Allow native code preference); resolves with the build's diagnostics. native.load then loads it.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NoParams",
+				"description": "The params of a method that takes none: an empty object.",
+				"type": "object",
+				"properties": {
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 900
+		},
+		{
+			"name": "native_get_components",
+			"method": "native.getComponents",
+			"description": "Reads an entity's native components (Native.<Name>) as the loaded module writes them, and those it does not register as written.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NativeGetComponentsParams",
+				"description": "Read an entity's native components.",
+				"type": "object",
+				"properties": {
+					"entity": {
+						"description": "The entity: its id, a unique id prefix or its path.",
+						"type": "string"
+					},
+					"target": {
+						"description": "The scene to read; omitted: the play scene while playing, else the edit scene.",
+						"enum": ["Edit", "Play"]
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["entity"]
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "native_load",
+			"method": "native.load",
+			"description": "Loads the newest current build of the native module, or hot-reloads it, migrating the open scene's native components to a changed layout (Windows; needs the user's Allow native code preference; not while playing).",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NoParams",
+				"description": "The params of a method that takes none: an empty object.",
+				"type": "object",
+				"properties": {
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "native_read",
+			"method": "native.read",
+			"description": "Reads a source file of the native module (below Native/) exactly.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NativeReadParams",
+				"description": "Read a source of the native module.",
+				"type": "object",
+				"properties": {
+					"path": {
+						"description": "A .cpp or .h file below Native/.",
+						"type": "string"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["path"]
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "native_set_components",
+			"method": "native.setComponents",
+			"description": "Adds, changes (a merge patch) or removes (null) an entity's native components through the loaded module, as one undoable edit.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NativeSetComponentsParams",
+				"description": "Add, change or remove an entity's native components.",
+				"type": "object",
+				"properties": {
+					"entity": {
+						"description": "The entity: its id, a unique id prefix or its path.",
+						"type": "string"
+					},
+					"components": {
+						"description": "By registry name (Native.<Name>): a merge patch of the component's fields, a missing component starting from its defaults, or null to remove it.",
+						"type": "object",
+						"additionalProperties": {}
+					},
+					"target": {
+						"description": "The scene to change; play changes are transient.",
+						"enum": ["Edit", "Play"]
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["entity", "components"]
+			},
+			"mutates": true,
+			"supportsDryRun": true,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "native_status",
+			"method": "native.status",
+			"description": "Reports the open project's native module: whether the user allows native code, its sources, its builds, the loaded module's types and systems, and in play its resources.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NoParams",
+				"description": "The params of a method that takes none: an empty object.",
+				"type": "object",
+				"properties": {
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "native_write",
+			"method": "native.write",
+			"description": "Writes a .cpp or .h source of the native module below Native/ as one undoable edit, recorded in provenance; it builds nothing (native.build).",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NativeWriteParams",
+				"description": "Create or replace a source of the native module.",
+				"type": "object",
+				"properties": {
+					"path": {
+						"description": "A .cpp or .h file below Native/; missing folders are created.",
+						"type": "string"
+					},
+					"source": {
+						"description": "Exact UTF-8 text; empty is written as is.",
+						"type": "string"
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["path", "source"]
+			},
+			"mutates": true,
+			"supportsDryRun": true,
 			"timeoutSeconds": 60
 		},
 		{
@@ -1466,6 +1714,10 @@
 					},
 					"testing": {
 						"description": "A testing export: Game.json says Testing true, so the exported game runs --feature-test; Assets/Tests/** and every Testing.Suites script and scene and Testing.Replays match are packaged whatever Export.Exclude says; invalid suites (TEST_SUITE_INVALID) and replays that do not import fail validation. Its default output directory is Build/<Platform>-<Config>-Testing/<Name>.",
+						"type": "boolean"
+					},
+					"featureTest": {
+						"description": "With testing: run the staged game's --feature-test before it replaces the output directory and report its replays' state hashes in featureTest, the hashes the games suite's Dist half compares with the editors'. A failing run does not fail the export; the report says so.",
 						"type": "boolean"
 					},
 					"ifRevision": {
@@ -2114,6 +2366,27 @@
 						"description": "Return coverage.counters in the result; without it they are left out unless the project sets Testing.CoverageGates. The JSON report at jsonPath always holds them.",
 						"type": "boolean"
 					},
+					"expect": {
+						"description": "With record only: expectations ({tick, luau}, as input.record's stop takes them) written into the recorded replay; each must hold when the recording is verified with its input, before anything is written.",
+						"type": "array",
+						"items": {
+							"description": "An authored replay assertion at a completed-tick boundary.",
+							"type": "object",
+							"properties": {
+								"tick": {
+									"description": "Completed ticks, including zero.",
+									"type": "integer",
+									"minimum": 0,
+									"maximum": 4294967295
+								},
+								"luau": {
+									"description": "Luau expression or chunk returning a truthy value.",
+									"type": "string"
+								}
+							},
+							"additionalProperties": false
+						}
+					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
@@ -2175,6 +2448,10 @@
 					},
 					"inline": {
 						"description": "Also return the PNG as base64 in \"data\" when it is at most 30 KB; a larger one is only written (inlineOmitted).",
+						"type": "boolean"
+					},
+					"keep": {
+						"description": "Write the PNG into Library/Automation/Kept/ (user://Automation/Kept/ without a writable project and in the Runtime), which no later editor session prunes, instead of Library/Automation/Out/.",
 						"type": "boolean"
 					},
 					"ifRevision": {

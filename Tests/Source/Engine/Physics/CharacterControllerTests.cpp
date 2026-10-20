@@ -9,6 +9,7 @@
 #include "Support/ExpectLog.h"
 
 #include <algorithm>
+#include <cmath>
 #include <format>
 #include <limits>
 #include <string>
@@ -409,6 +410,45 @@ namespace Engine {
 			CHECK(character->GetPose().Position.y >= -MaxPhysicsCoordinate);
 			CHECK(IsPlaceablePhysicsPose(world->GetPose(character->GetInnerBody())));
 			CHECK(character->GetVelocity().y > -MaxCharacterSpeed);
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 36 (P-CARRY, stream K; Roadmap M19's acceptance "a carried character
+		// moves v·t"): with InheritGroundVelocity a character standing on a kinematic platform that moves at v is carried
+		// v * t; without it the platform slides under the character, as before.
+		TEST_CASE("CharacterController: with InheritGroundVelocity a character on a moving platform moves v * t" * doctest::skip(true))
+		{
+			const glm::vec3 platformVelocity(2.0f, 0.0f, 0.0f);
+			constexpr uint32_t Steps = 120; // two seconds
+			for (const bool inherit : { true, false })
+			{
+				CAPTURE(inherit);
+				Scope<PhysicsWorld> world = CreateCharacterWorld();
+				Result<Ref<const PhysicsShape>> shape = PhysicsShape::Create({ .Colliders = { ColliderShapeDescription{ .Geometry = BoxShapeGeometry{ .HalfExtents = glm::vec3(20.0f, 0.5f, 20.0f) } } } });
+				REQUIRE(shape.has_value());
+				PhysicsPose platformPose{ .Position = glm::vec3(0.0f, -0.5f, 0.0f) };
+				Result<BodyHandle> platform = world->CreateBody({ .Shape = *shape, .MotionType = PhysicsMotionType::Kinematic, .Pose = platformPose });
+				REQUIRE(platform.has_value());
+				Result<Scope<CharacterController>> character =
+					CharacterController::Create(*world, { .Pose = { .Position = glm::vec3(0.0f, 0.05f, 0.0f) }, .InheritGroundVelocity = inherit });
+				REQUIRE_MESSAGE(character.has_value(), character.error().ToString());
+				Walk(*world, **character, glm::vec3(0.0f), 30);
+				REQUIRE((*character)->GetGroundState().IsGrounded);
+
+				const float start = (*character)->GetPose().Position.x;
+				for (uint32_t step = 0; step < Steps; ++step)
+				{
+					platformPose.Position += platformVelocity * FixedDelta;
+					world->MoveKinematic(*platform, platformPose, FixedDelta);
+					(*character)->Update(FixedDelta, glm::vec3(0.0f), Gravity);
+					REQUIRE(world->Step(FixedDelta, 1).has_value());
+				}
+				const float moved = (*character)->GetPose().Position.x - start;
+				if (inherit)
+					CHECK(moved == doctest::Approx(platformVelocity.x * static_cast<float>(Steps) * FixedDelta).epsilon(0.02));
+				else
+					CHECK(std::abs(moved) < 0.05f);
+				CHECK((*character)->GetGroundState().IsGrounded);
+			}
 		}
 	}
 

@@ -927,6 +927,67 @@ namespace Engine {
 			REQUIRE_FALSE(rejected.has_value());
 			CHECK(rejected.error().GetCode() == ErrorCode::Validation);
 		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 27 (stream N-B; SceneSerializer.cpp is M20's in phase 1, so the change
+		// waits for the ledger's amendment): a "Native." component is kept as written like an unknown one, but it is never
+		// reported as unknown, so --strict loads it; whether the loaded module registers it is the native layer's check.
+		TEST_CASE("SceneSerializer: a native component is kept as written and never reported as unknown, also under --strict" * doctest::skip(true))
+		{
+			const std::string text = R"({
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Native",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Native.Spinner": 1
+	},
+	"Entities": [
+		{
+			"ID": "5000000000000001",
+			"Name": "Spinner",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Native.Spinner": {
+					"DegreesPerSecond": 90
+				}
+			}
+		}
+	]
+}
+)";
+			for (const bool strictUnknowns : { false, true })
+			{
+				CAPTURE(strictUnknowns);
+				Test::SceneTestFixture setup;
+				LoadOptions options;
+				options.StrictUnknowns = strictUnknowns;
+				LoadReport report;
+				const Status loaded = SceneSerializer::LoadFromString(setup.GetScene(), text, options, report);
+				REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
+				CHECK(std::none_of(report.Diagnostics.begin(), report.Diagnostics.end(), [](const LoadDiagnostic& diagnostic)
+				{
+					return diagnostic.Code == SceneUnknownComponentCode;
+				}));
+				const Entity spinner = setup.GetScene().FindEntityByID(UUID(0x5000000000000001));
+				REQUIRE(spinner.IsValid());
+				REQUIRE(spinner.HasComponent<UnknownComponentsComponent>());
+				const UnknownComponentsComponent& preserved = spinner.GetComponent<UnknownComponentsComponent>();
+				REQUIRE(preserved.Components.size() == 1);
+				CHECK(preserved.Components[0].Name == "Native.Spinner");
+				CHECK(preserved.Components[0].Version == 1);
+				const Result<std::string> saved = SceneSerializer::SaveToString(setup.GetScene());
+				REQUIRE(saved.has_value());
+				CHECK(*saved == text);
+			}
+		}
 	}
 
 }

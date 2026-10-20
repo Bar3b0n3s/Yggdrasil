@@ -52,6 +52,7 @@ import statistics
 import xml.etree.ElementTree as ElementTree
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from Lib import paths, vendor_cache
 
@@ -118,6 +119,9 @@ FUZZ_REPORT_PATTERN = re.compile(
 # The soak's length in ticks (editor) and frames (Runtime): Hardening.py --soak-frames, at least this default and a
 # multiple of SOAK_SAMPLE_INTERVAL. A longer soak confirms a scene whose script heap rule was inconclusive.
 SOAK_FRAMES = 10_000
+# M19 (Docs/Decisions/0030-m19-contract.md decision 11, R-SOAK): the option every editor soak subject's editor starts
+# with, so the headless editor renders the Game view (the game camera and its post-processing) while the scene plays.
+SOAK_EDITOR_GAME_VIEW_OPTION = "--headless-game-view"
 SOAK_SAMPLE_INTERVAL = 250  # ticks between the samples of an editor scene soak
 # What an inconclusive script heap result suggests: the same subject soaked longer.
 SOAK_LONGER_COMMAND = "Hardening.py --steps soak --soak-only <subject> --soak-frames <n>"
@@ -585,6 +589,16 @@ def evaluate_fuzz_logs(targets: list[FuzzTarget], lines: list[str]) -> list[str]
 # --------------------------------------------------------------------------------------------------------------------
 # Soak
 # --------------------------------------------------------------------------------------------------------------------
+
+
+def soak_game_view_errors(stats: Mapping[str, Any], tick: int) -> list[str]:
+    """M19 (Docs/Decisions/0030-m19-contract.md decision 11, R-SOAK): the failure of one editor soak sample's stats.get
+    result `stats`, taken after the play.step that reached `tick`: none when its "views" list holds the view named
+    "game" with available true and a positive width and height, else one line: "the game view did not render at tick
+    <tick> (stats.get's game view: <the entry as JSON, or 'missing'>): the editor soak starts its editor with
+    --headless-game-view, which renders it". Hardening.py's soak_editor_scene adds the first such line to the
+    subject's errors, so a subject whose game view never rendered, or stopped rendering, fails."""
+    raise NotImplementedError("contract stub: hardening (ADR 0030 decision 11, R-SOAK, stream E)")
 
 
 def soak_projects(repository_root: Path) -> list[Path]:

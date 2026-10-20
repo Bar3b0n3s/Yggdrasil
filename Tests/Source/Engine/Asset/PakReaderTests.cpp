@@ -4,10 +4,13 @@
 
 #include "Engine/Asset/BuiltinMeshes.h"
 #include "Engine/Asset/MeshData.h"
+#include "Engine/Asset/PakMount.h"
 #include "Engine/AssetPipeline/PakWriter.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Random.h"
+#include "Engine/Core/VirtualFileSystem.h"
+#include "Support/AssetTestFixture.h"
 #include "Support/Fuzz.h"
 #include "Support/TempDirectory.h"
 
@@ -206,6 +209,62 @@ namespace Engine {
 			Result<Ref<const PakReader>> directoryPak = PakReader::Open(directory.GetPath());
 			REQUIRE_FALSE(directoryPak.has_value());
 			CHECK(directoryPak.error().GetCode() == ErrorCode::Io);
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 17 (B-PAKZ, stream G): a deflated entry reads back as its own bytes,
+		// verified against its XXH64 after inflating, from a memory and from a file pak, and a mount serves the inflated
+		// file with its inflated size; a damaged stream is the entry's Validation error, naming it, and the other entries
+		// still read.
+		TEST_CASE("PakReader: a deflated entry reads back inflated and verified, also through a mount, and a damaged stream is refused" * doctest::skip(true))
+		{
+			const std::string text(8192, 'z');
+			PakWriter writer;
+			REQUIRE(writer.Add({ .Handle = AssetHandle(0x101), .Type = "Mesh", .Path = "engine://Meshes/Cube", .Data = CookMesh(GenerateBuiltinMesh(BuiltinMesh::Cube), 1) })
+					.has_value());
+			REQUIRE(writer.Add({ .Handle = AssetHandle(), .Type = "File", .Path = "Shaders/Long.txt", .Data = Buffer(AsBytes(text).begin(), AsBytes(text).end()) })
+					.has_value());
+			Buffer pak = writer.Build();
+
+			Test::TempDirectory directory("PakReaderDeflated");
+			REQUIRE(FileSystem::WriteFileAtomic(directory / "Deflated.pak", pak).has_value());
+			Result<Ref<const PakReader>> fromMemory = PakReader::OpenMemory(pak, "Deflated.pak");
+			Result<Ref<const PakReader>> fromFile = PakReader::Open(directory / "Deflated.pak");
+			for (const Result<Ref<const PakReader>>* reader : { &fromMemory, &fromFile })
+			{
+				REQUIRE_MESSAGE(reader->has_value(), reader->error().ToString());
+				const PakEntry* entry = (**reader)->FindByPath("Shaders/Long.txt");
+				REQUIRE(entry != nullptr);
+				REQUIRE(entry->Compression == PakCompression::Deflate);
+				CHECK(entry->Size == text.size());
+				for (int read = 0; read < 2; ++read)
+				{
+					Result<Buffer> bytes = (**reader)->ReadEntry(*entry);
+					REQUIRE_MESSAGE(bytes.has_value(), bytes.error().ToString());
+					CHECK(AsStringView(*bytes) == text);
+				}
+			}
+
+			Result<Scope<PakMount>> mount = PakMount::Create(*fromMemory);
+			REQUIRE_MESSAGE(mount.has_value(), mount.error().ToString());
+			VirtualFileSystem vfs;
+			REQUIRE(vfs.Mount("engine", std::move(*mount)).has_value());
+			Result<std::string> mounted = vfs.ReadText(Test::ParseVfsPath("engine://Shaders/Long.txt"));
+			REQUIRE(mounted.has_value());
+			CHECK(*mounted == text);
+			Result<FileInfo> info = vfs.GetInfo(Test::ParseVfsPath("engine://Shaders/Long.txt"));
+			REQUIRE(info.has_value());
+			CHECK(info->Size == text.size());
+
+			// A damaged byte in the middle of the stream: it no longer inflates to the entry's bytes.
+			const PakEntry& stored = *(*fromMemory)->FindByPath("Shaders/Long.txt");
+			pak[stored.Offset + stored.StoredSize / 2] ^= std::byte{ 0x5a };
+			Result<Ref<const PakReader>> damaged = PakReader::OpenMemory(pak, "Damaged.pak");
+			REQUIRE(damaged.has_value());
+			Result<Buffer> refused = (*damaged)->ReadEntry(*(*damaged)->FindByPath("Shaders/Long.txt"));
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::Validation);
+			CHECK(refused.error().ToString().contains("Shaders/Long.txt"));
+			CHECK((*damaged)->ReadEntry(*(*damaged)->FindByHandle(AssetHandle(0x101))).has_value());
 		}
 	}
 

@@ -252,7 +252,19 @@
 				"Core",
 				"Reflection",
 				"Platform"
-			]
+			],
+			"Notes": "M19 (Docs/Decisions/0030-m19-contract.md decision 17): the pak entry codec (Asset/PakCompression.cpp) is the module's one third-party user, private: stb_image.h's inflate and stb_image_write.h's deflate, whose implementation is Graphics' (Docs/Decisions/0009-m5-decisions.md decision 11), so the Runtime's PakReader and the editor's PakWriter share one pair.",
+			"ThirdParty": {
+				"Public": [],
+				"Private": [
+					"stb"
+				]
+			},
+			"RestrictedThirdParty": {
+				"stb": [
+					"Engine/Source/Engine/Asset/PakCompression.cpp"
+				]
+			}
 		},
 		{
 			"Name": "Project",
@@ -341,6 +353,13 @@
 					"Luau"
 				]
 			}
+		},
+		{
+			"Name": "Native",
+			"Layer": 4,
+			"Includes": [],
+			"MaxLayer": 3,
+			"Notes": "M19 (Docs/Decisions/0030-m19-contract.md decisions 26 and 27): a game's native module's interface, NativeApi.h, which the module's sources include and which therefore includes only the standard library and glm, and the engine's side of it (the registration, the native values' JSON and hash, the native components in scenes). Beside Scripting at layer 4, below Session, whose NativeWorld runs the module's systems."
 		},
 		{
 			"Name": "Session",
@@ -639,7 +658,8 @@
 			"Scene",
 			"Physics",
 			"Scripting",
-			"Session"
+			"Session",
+			"Native"
 		],
 		"SimulationPathExceptions": [],
 		"TryCatchFiles": [
@@ -650,7 +670,9 @@
 			"Editor/Source/EditorCore/Autosave/Autosave.cpp",
 			"Engine/Source/Engine/Automation/Protocol/Dispatcher.cpp",
 			"Engine/Source/Engine/Core/Jobs/JobSystem.cpp",
-			"Engine/Source/Engine/App/EntryPoint.cpp"
+			"Engine/Source/Engine/App/EntryPoint.cpp",
+			"Engine/Source/Engine/Session/NativeWorld.cpp",
+			"Engine/Source/Engine/Native/NativeModule.cpp"
 		],
 		"JsonAccessFiles": [
 			"Engine/Source/Engine/Core/Json/**",

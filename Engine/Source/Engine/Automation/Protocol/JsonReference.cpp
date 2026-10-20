@@ -175,4 +175,10 @@ namespace Engine {
 		return {};
 	}
 
+	Status SubstituteReferences(Json& /*value*/, std::span<const Json> /*results*/, size_t /*indexBase*/, std::span<const std::string> names)
+	{
+		ENGINE_CONTRACT_STUB();
+		return std::unexpected(Error(ErrorCode::Unsupported, std::format("$ref by op name ({} names; Docs/Decisions/0030-m19-contract.md decision 8, stream C)", names.size())));
+	}
+
 }

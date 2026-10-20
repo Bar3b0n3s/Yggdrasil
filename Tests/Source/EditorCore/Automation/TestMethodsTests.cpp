@@ -535,6 +535,51 @@ namespace Engine {
 			CHECK((*reportDocument)["recording"] == recording);
 		}
 
+		// Docs/Decisions/0030-m19-contract.md decision 6 (A-RECEXPECT; ADR 0026 friction F10): test.run {record, expect}
+		// writes the expectations into the recorded replay and verifies them with the recording's input before writing: a
+		// false one refuses the recording and writes nothing, a satisfied one is written and counted in the recording block;
+		// expect needs record.
+		TEST_CASE("TestMethods: test.run {record, expect} writes the expectations and verifies them with the recording's input" * doctest::skip(true))
+		{
+			Test::AutomationFixture fixture("TestRecordExpect");
+			CallTestMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Paddle.luau" }, { "source", "local Paddle = {}\n"
+																												"function Paddle.OnFixedUpdate(self: any, dt: number)\n"
+																												"\tif Input.IsKeyDown(\"Space\") then self.Entity.Transform:Translate(vector.create(1, 0, 0)) end\n"
+																												"end\n"
+																												"return Script.Define(\"Paddle\", Paddle)\n" } });
+			CallTestMethod(fixture, "entity.create", Json{ { "name", "Paddle" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Paddle.luau" } } } } } });
+			CallTestMethod(fixture, "scene.save", Json::object());
+			WriteSuite(fixture, "return Test.Suite('Record.Paddle', function()\n"
+								"Test.Case('move', function()\n"
+								"Test.InjectKey('Space', 'Down'); Test.WaitTicks(70)\n"
+								"Test.InjectKey('Space', 'Up'); Test.WaitTicks(9)\n"
+								"end)\nend)");
+			CallTestMethod(fixture, "project.setSettings", Json{ { "patch", Json{ { "Testing", Json{ { "Suites", Json::array({ Json{ { "Script", "Assets/Tests/Contract.test.luau" }, { "Scene", "Assets/Scenes/Main.scene" } } }) } } } } } });
+
+			const std::string path = "Assets/Tests/Replays/Paddle.replay";
+			const Json falseExpectation = fixture.Request("test.run", Json{ { "record", path }, { "expect", Json::array({ Json{ { "tick", 40 }, { "luau", "Scene.FindByName('Paddle').Transform.Translation.x < 1" } } }) } });
+			REQUIRE_MESSAGE(falseExpectation.contains("error"), falseExpectation.dump());
+			CHECK(falseExpectation["error"]["data"]["errorCode"] == Json("Validation"));
+			CHECK_FALSE(FileSystem::Exists(fixture.GetEditorFixture().GetProjectRoot() / path));
+
+			const Json result = CallTestMethod(fixture, "test.run", Json{ { "record", path }, { "expect", Json::array({ Json{ { "tick", 40 }, { "luau", "Scene.FindByName('Paddle').Transform.Translation.x > 30" } } }) } });
+			REQUIRE(result["passed"] == Json(true));
+			CHECK(result["recording"]["expectations"] == Json(1));
+			const auto text = FileSystem::ReadText(fixture.GetEditorFixture().GetProjectRoot() / path);
+			REQUIRE_MESSAGE(text.has_value(), (text ? "" : text.error().ToString()));
+			const auto document = JsonReader::Parse(*text);
+			REQUIRE(document.has_value());
+			REQUIRE((*document)["Expect"].size() == 1);
+			CHECK((*document)["Expect"][0]["Tick"] == Json(40));
+			CHECK(CallTestMethod(fixture, "input.replay", Json{ { "path", path }, { "verify", true }, { "strictHash", true } })["passed"] == Json(true));
+
+			const Json withoutRecord = fixture.Request("test.run", Json{ { "expect", Json::array({ Json{ { "tick", 1 }, { "luau", "true" } } }) } });
+			REQUIRE_MESSAGE(withoutRecord.contains("error"), withoutRecord.dump());
+			CHECK(withoutRecord["error"]["data"]["errorCode"] == Json("InvalidArgument"));
+			REQUIRE(withoutRecord["error"]["data"].contains("location"));
+			CHECK(withoutRecord["error"]["data"]["location"]["pointer"] == Json("/expect"));
+		}
+
 		// M16 friction S2-01 (FX-4): Breakout's autopilot pressed keys and then restarted the game in place, so its recording's
 		// outcome did not depend on its input. test.run's record refuses such a recording, names the replay it did not
 		// write, keeps the case rows and reports, and writes the replay once the run ends with the played state in the scene.

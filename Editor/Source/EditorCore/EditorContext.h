@@ -51,7 +51,10 @@ namespace Engine {
 	class EngineContext;
 	class IEnvironmentBaker;
 	class IMount;
+	class INativeBuildBackend;
+	class INativeLibraryLoader;
 	class ImporterRegistry;
+	class NativeModuleHost;
 	class ProjectSettingsCommand;
 	class SceneEdit;
 	class TypeRegistry;
@@ -104,6 +107,11 @@ namespace Engine {
 		// (§13.12 rule 2). Until then the asset manager has no project, and nothing but that request is served. Off (the
 		// default): OpenProject opens the assets at once.
 		bool DeferAssetScan = false;
+		// M19 (Docs/Decisions/0030-m19-contract.md decisions 30 and 31): the native module host's build backend and library
+		// loader (GetNativeModule); null: the platform's (MakeEditorNativeModuleHostSpecification). Tests inject fakes, so the
+		// host's rules run without a toolchain or a library.
+		Ref<INativeBuildBackend> NativeBuild{};
+		Ref<INativeLibraryLoader> NativeLoader{};
 	};
 
 	// The editor state of one editor process (or one test). Not copyable or movable; main thread only (§4.11), like the scene.
@@ -424,6 +432,14 @@ namespace Engine {
 		[[nodiscard]] EditorPlayController& GetPlay() { return *m_Play; }
 		[[nodiscard]] const EditorPlayController& GetPlay() const { return *m_Play; }
 
+		// --- Native module (M19, Docs/Decisions/0030-m19-contract.md decisions 29 to 31) ---------------------------------
+
+		// The open project's native module: the user's "Allow native code" preference, the module's builds and the loaded
+		// module, which every play session the editor starts runs (EditorCore/Native/NativeModuleHost.h). Valid for the
+		// editor's lifetime.
+		[[nodiscard]] NativeModuleHost& GetNativeModule() { return *m_Native; }
+		[[nodiscard]] const NativeModuleHost& GetNativeModule() const { return *m_Native; }
+
 		// Shared CPU state of the UI and viewport methods. Main thread; valid for this context's lifetime. View changes
 		// are session preferences, never a scene mutation or undo step. Existing screenshot camera access is preserved.
 		[[nodiscard]] EditorViewportState& GetViewportState() { return m_ViewportState; }
@@ -525,6 +541,9 @@ namespace Engine {
 		// run newest first when the dry run ends or the transaction rolls back, dropped when the outermost transaction commits
 		// outside a dry run. SceneEdit::Commit appends them.
 		std::vector<UniqueFunction<void()>> m_TransientPlayUndos;
+		// M19: the native module host, before the play controller, so a play session (which holds the loaded module's types)
+		// ends before the host releases them.
+		Scope<NativeModuleHost> m_Native;
 		// Last, so it is destroyed first: a play session refers to the asset manager and the type registry (M7).
 		Scope<EditorPlayController> m_Play;
 	private:

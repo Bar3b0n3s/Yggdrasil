@@ -19,7 +19,9 @@ namespace Engine {
 	public:
 		static constexpr std::string_view Id = "Replay";
 		// 2: the cooked replay carries the state-hash checkpoints (ReplayData::FormatVersion 2); the version is part of the
-		// cache key, so artifacts cooked by version 1 are rebuilt instead of failing to load.
+		// cache key, so artifacts cooked by version 1 are rebuilt instead of failing to load. 3, reserved by the phase 1 ledger
+		// and set by stream B with the format (Docs/Decisions/0030-m19-contract.md decision 2): the cooked replay carries the
+		// start fingerprint (ReplayData::FormatVersion 3).
 		static constexpr uint32_t Version = 2;
 
 		[[nodiscard]] std::string_view GetId() const override { return Id; }

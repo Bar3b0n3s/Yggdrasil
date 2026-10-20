@@ -2069,7 +2069,11 @@
 								"type": "string"
 							},
 							"params": {
-								"description": "The method's params (an object); {\"$ref\": \"<op index>.<path>\"} stands for a value of an earlier op's result."
+								"description": "The method's params (an object); {\"$ref\": \"<op index>.<path>\"} stands for a value of an earlier op's result, and {\"$ref\": \"<op name>.<path>\"} for one of the earlier op with that name."
+							},
+							"name": {
+								"description": "Optional: a name later ops' $ref may use instead of this op's index, which does not shift when an op is inserted. An identifier (letters, digits and _, not starting with a digit, at most 64 characters), unique within the batch.",
+								"type": "string"
 							}
 						},
 						"additionalProperties": false
@@ -2593,6 +2597,10 @@
 						"type": "integer",
 						"minimum": 1,
 						"maximum": 8192
+					},
+					"keep": {
+						"description": "Write the PNG into Library/Automation/Kept/ (user://Automation/Kept/ without a writable project), which no later editor session prunes, instead of Library/Automation/Out/.",
+						"type": "boolean"
 					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
@@ -6457,6 +6465,166 @@
 			]
 		},
 		{
+			"name": "input.readReplay",
+			"domain": "input",
+			"description": "Reads a replay back: its header, its input events a page at a time in play.step's input form with absolute ticks, its expectations and checkpoints. So a replay made with input.record can be re-recorded from its own events: start a recording of the header's scene, seed and parameters, play.step {ticks: finalTick, input: events}, and stop with its expectations.",
+			"exposeAsTool": true,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["path"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "InputReadReplayParams",
+				"description": "Read a replay back, its input events a page at a time.",
+				"type": "object",
+				"properties": {
+					"path": {
+						"description": "Required: the project's .replay source, project-relative or project://.",
+						"type": "string"
+					},
+					"cursor": {
+						"description": "Opaque cursor of the next page of events; empty for the first.",
+						"type": "string"
+					},
+					"limit": {
+						"description": "Events per page, 1 to 1000.",
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 1000
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["path"],
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "InputReadReplayResult",
+				"description": "A replay read back: its header, a page of its input events in play.step's input form, its expectations and checkpoints.",
+				"type": "object",
+				"properties": {
+					"path": {
+						"description": "Canonical project-relative path.",
+						"type": "string"
+					},
+					"formatVersion": {
+						"description": "The file's own format version, before migration.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"header": {
+						"description": "The header as the file writes it: Scene {Handle, Path}, Parameters, Seed, FixedHz, EngineVersion and Config."
+					},
+					"finalTick": {
+						"description": "Completed ticks the replay runs.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"finalStateHash": {
+						"description": "The recorded state hash at finalTick.",
+						"type": "string"
+					},
+					"eventCount": {
+						"description": "Every input event of the replay.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"events": {
+						"description": "This page of events, in play.step's input form (camelCase, only the members each type reads) with each tick the replay's absolute tick: play.step {ticks: finalTick, input: events} from tick 0 of the header's session applies them when they fit one page.",
+						"type": "array",
+						"items": {}
+					},
+					"nextCursor": {
+						"description": "Cursor of the next page; empty after the last event.",
+						"type": "string"
+					},
+					"expect": {
+						"description": "The replay's expectations, in the form input.record's and test.run's expect take.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/InputRecordExpectation"
+						}
+					},
+					"checkpoints": {
+						"description": "The replay's state-hash checkpoints.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/InputReadReplayCheckpoint"
+						}
+					},
+					"hasFingerprint": {
+						"description": "The replay carries a start fingerprint, so a failed replay names what changed since its recording.",
+						"type": "boolean"
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"InputRecordExpectation": {
+						"description": "An authored replay assertion at a completed-tick boundary.",
+						"type": "object",
+						"properties": {
+							"tick": {
+								"description": "Completed ticks, including zero.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"luau": {
+								"description": "Luau expression or chunk returning a truthy value.",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					},
+					"InputReadReplayCheckpoint": {
+						"description": "One state-hash checkpoint of a replay.",
+						"type": "object",
+						"properties": {
+							"tick": {
+								"description": "Completed-tick boundary.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"stateHash": {
+								"description": "The recorded state hash there.",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Read the first page of a replay.",
+					"params": {
+						"path": "Assets/Tests/Replays/Opening.replay"
+					}
+				}
+			]
+		},
+		{
 			"name": "input.record",
 			"domain": "input",
 			"description": "Starts a tick-zero recording or saves its validated applied inputs, expectations and state-hash checkpoints (one every 60 ticks). Stop checks output write permission. A recording with input events is first replayed with them (the verification, which replaces the play session as input.replay does): unless that run reproduces every checkpoint, the final hash and every expectation and raises no script error, Stop refuses to write it (Validation naming the first divergence, the run's outcome in error data verification), which catches a script.eval that wrote script state during the recording; the run is not torn down, so an error raised only at teardown (OnDestroy) is not counted, while test.run counts it when it plays the replay. It is then replayed without them (the input check); when that run also reproduces every checkpoint, the final hash and every expectation, whatever script errors it raises, the recording's outcome does not depend on its input and Stop refuses to write it (Validation, the check's outcome in error data inputCheck). Either way the play session is the last run's, paused where it ended. End such a recording while the played state is still in the scene. A recording without input events is written as recorded, without either run, so verify it with input.replay {verify: true, strictHash: true}.",
@@ -6576,6 +6744,13 @@
 						"minimum": 0,
 						"maximum": 4294967295
 					},
+					"warnings": {
+						"description": "Stop: notes on the written replay; empty on Start. The input check warns when its run without input differed only at checkpoints but reached the recorded final state hash: the final hash then proves only the end state, and only the checkpoints prove the play.",
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
@@ -6636,6 +6811,10 @@
 					},
 					"withoutInput": {
 						"description": "Apply none of the replay's input events: the check that its outcome depends on its input; requires verify. A replay whose verification still passes this way proves nothing about its input.",
+						"type": "boolean"
+					},
+					"continuePastCheckpoint": {
+						"description": "Play on past every checkpoint whose hash differs, to the final tick, and compare the final hash too; requires strictHash. The replay still fails when any checkpoint differed (checkpointsFailed, firstFailedCheckpointTick). With withoutInput it tells a replay whose final hash alone does not depend on its input.",
 						"type": "boolean"
 					},
 					"ifRevision": {
@@ -6701,6 +6880,25 @@
 					"withoutInput": {
 						"description": "None of the replay's input events were applied.",
 						"type": "boolean"
+					},
+					"checkpointsFailed": {
+						"description": "continuePastCheckpoint: the checkpoints whose hash differed; 0 otherwise.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"firstFailedCheckpointTick": {
+						"description": "continuePastCheckpoint: the tick of the first checkpoint whose hash differed; 0 when none differed or without continuePastCheckpoint.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"changes": {
+						"description": "When a hash differed in a playback with the replay's input: what changed since the recording, by the replay's start fingerprint (an entity, a component of an entity, a script, a material or another referenced asset), one line each; empty for a replay recorded without a fingerprint.",
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
 					},
 					"expect": {
 						"description": "Every expectation outcome in authored order.",
@@ -6934,6 +7132,876 @@
 						"cursor": "",
 						"minLevel": "Warn",
 						"limit": 50
+					}
+				}
+			]
+		},
+		{
+			"name": "native.build",
+			"domain": "native",
+			"description": "Builds the native module in the editor's configuration (Windows; needs the user's Allow native code preference); resolves with the build's diagnostics. native.load then loads it.",
+			"exposeAsTool": true,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": true,
+			"timeoutSeconds": 900,
+			"requiredParams": [],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NoParams",
+				"description": "The params of a method that takes none: an empty object.",
+				"type": "object",
+				"properties": {
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NativeBuildResult",
+				"description": "A build of the native module in the editor's configuration.",
+				"type": "object",
+				"properties": {
+					"succeeded": {
+						"description": "It compiled and linked; native.load can then load it.",
+						"type": "boolean"
+					},
+					"library": {
+						"description": "The built library, project-relative below Library/Native/Builds/; empty when it failed.",
+						"type": "string"
+					},
+					"sourceHash": {
+						"description": "The hash of the sources it was built from.",
+						"type": "string"
+					},
+					"diagnostics": {
+						"description": "The lint's, compiler's and linker's findings, in the order found.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/NativeBuildDiagnostic"
+						}
+					},
+					"log": {
+						"description": "The build's whole output, project-relative.",
+						"type": "string"
+					},
+					"seconds": {
+						"description": "How long it took (wall-clock time, for information).",
+						"type": "number"
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"NativeBuildDiagnostic": {
+						"description": "One finding of a native build: the lint, the compiler or the linker.",
+						"type": "object",
+						"properties": {
+							"severity": {
+								"description": "Error or Warning.",
+								"enum": ["Warning", "Error"]
+							},
+							"code": {
+								"description": "NATIVE_LINT_ERROR, NATIVE_COMPILE_ERROR, NATIVE_COMPILE_WARNING (an error, since warnings are errors), NATIVE_LINK_ERROR or NATIVE_BUILD_ERROR.",
+								"type": "string"
+							},
+							"file": {
+								"description": "The source it is in, project-relative (Native/Spin.cpp); empty without a location.",
+								"type": "string"
+							},
+							"line": {
+								"description": "One-based line; zero without a location.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"column": {
+								"description": "One-based column; zero without one.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"message": {
+								"description": "What the tool reported.",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Build the native module.",
+					"params": {}
+				}
+			]
+		},
+		{
+			"name": "native.getComponents",
+			"domain": "native",
+			"description": "Reads an entity's native components (Native.<Name>) as the loaded module writes them, and those it does not register as written.",
+			"exposeAsTool": true,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["entity"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NativeGetComponentsParams",
+				"description": "Read an entity's native components.",
+				"type": "object",
+				"properties": {
+					"entity": {
+						"description": "The entity: its id, a unique id prefix or its path.",
+						"type": "string"
+					},
+					"target": {
+						"description": "The scene to read; omitted: the play scene while playing, else the edit scene.",
+						"enum": ["Edit", "Play"]
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["entity"],
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NativeGetComponentsResult",
+				"description": "An entity's native components.",
+				"type": "object",
+				"properties": {
+					"entity": {
+						"description": "The entity.",
+						"$ref": "#/$defs/EntitySummary"
+					},
+					"components": {
+						"description": "Its components the loaded module registers, by registry name, every field written.",
+						"type": "object",
+						"additionalProperties": {}
+					},
+					"unregistered": {
+						"description": "Its other Native.<Name> components, as written: all of them while no module is loaded.",
+						"type": "object",
+						"additionalProperties": {}
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"EntitySummary": {
+						"description": "An entity's canonical id with its readable name and path.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The entity's id: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"name": {
+								"description": "The entity's name.",
+								"type": "string"
+							},
+							"path": {
+								"description": "The entity's path from the scene root, such as \"/Game/Board\".",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Read the spinner's native components.",
+					"params": {
+						"entity": "/Spinner"
+					}
+				}
+			]
+		},
+		{
+			"name": "native.load",
+			"domain": "native",
+			"description": "Loads the newest current build of the native module, or hot-reloads it, migrating the open scene's native components to a changed layout (Windows; needs the user's Allow native code preference; not while playing).",
+			"exposeAsTool": true,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": [],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NoParams",
+				"description": "The params of a method that takes none: an empty object.",
+				"type": "object",
+				"properties": {
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NativeLoadResult",
+				"description": "The native module loaded, or reloaded in place of the previous one.",
+				"type": "object",
+				"properties": {
+					"reloaded": {
+						"description": "A loaded module was replaced (hot reload).",
+						"type": "boolean"
+					},
+					"layoutChanged": {
+						"description": "Its types' layout changed; true for a first load.",
+						"type": "boolean"
+					},
+					"sceneChanged": {
+						"description": "The open scene's native components were migrated to the new layout; the scene is now modified.",
+						"type": "boolean"
+					},
+					"undoCleared": {
+						"description": "A reload whose layout changed cleared the undo history, whose snapshots hold the previous layout's values.",
+						"type": "boolean"
+					},
+					"componentCount": {
+						"description": "Native components in the open scene.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"diagnostics": {
+						"description": "What the migration reported per component and field.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/NativeComponentDiagnostic"
+						}
+					},
+					"components": {
+						"description": "The module's component types, in registration order.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/NativeTypeSummary"
+						}
+					},
+					"resources": {
+						"description": "The module's resource types, in registration order.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/NativeTypeSummary"
+						}
+					},
+					"systems": {
+						"description": "The module's systems, in run order.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/NativeSystemSummary"
+						}
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"NativeComponentDiagnostic": {
+						"description": "A finding about a native component of the open scene.",
+						"type": "object",
+						"properties": {
+							"severity": {
+								"description": "Error or Warning.",
+								"enum": ["Warning", "Error"]
+							},
+							"code": {
+								"description": "NATIVE_COMPONENT_UNREGISTERED, NATIVE_COMPONENT_INVALID, NATIVE_FIELD_DROPPED or NATIVE_FIELD_RESET.",
+								"type": "string"
+							},
+							"message": {
+								"description": "What was found and what was done.",
+								"type": "string"
+							},
+							"entity": {
+								"description": "The entity that holds the component.",
+								"$ref": "#/$defs/EntitySummary"
+							},
+							"pointer": {
+								"description": "The JSON pointer below the entity: /Components/Native.<Name>[/<Field>].",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					},
+					"NativeTypeSummary": {
+						"description": "One type of the loaded native module.",
+						"type": "object",
+						"properties": {
+							"name": {
+								"description": "The name the module registers.",
+								"type": "string"
+							},
+							"registryName": {
+								"description": "A component's name in files and automation (Native.<Name>); a resource's name.",
+								"type": "string"
+							},
+							"role": {
+								"description": "Component or Resource.",
+								"enum": ["Component", "Resource"]
+							},
+							"description": {
+								"description": "What the module says it is.",
+								"type": "string"
+							},
+							"schema": {
+								"description": "The JSON Schema of its value: every field with its kind, bounds, unit and enum names."
+							}
+						},
+						"additionalProperties": false
+					},
+					"NativeSystemSummary": {
+						"description": "One system of the loaded native module.",
+						"type": "object",
+						"properties": {
+							"name": {
+								"description": "The name the module registers.",
+								"type": "string"
+							},
+							"description": {
+								"description": "What the module says it does.",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					},
+					"EntitySummary": {
+						"description": "An entity's canonical id with its readable name and path.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The entity's id: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"name": {
+								"description": "The entity's name.",
+								"type": "string"
+							},
+							"path": {
+								"description": "The entity's path from the scene root, such as \"/Game/Board\".",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Load the built module.",
+					"params": {}
+				}
+			]
+		},
+		{
+			"name": "native.read",
+			"domain": "native",
+			"description": "Reads a source file of the native module (below Native/) exactly.",
+			"exposeAsTool": true,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["path"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NativeReadParams",
+				"description": "Read a source of the native module.",
+				"type": "object",
+				"properties": {
+					"path": {
+						"description": "A .cpp or .h file below Native/.",
+						"type": "string"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["path"],
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NativeReadResult",
+				"description": "A native source's exact text.",
+				"type": "object",
+				"properties": {
+					"path": {
+						"description": "Canonical project-relative path.",
+						"type": "string"
+					},
+					"source": {
+						"description": "Exact UTF-8 text.",
+						"type": "string"
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {}
+			},
+			"examples": [
+				{
+					"description": "Read a source.",
+					"params": {
+						"path": "Native/Spinner.cpp"
+					}
+				}
+			]
+		},
+		{
+			"name": "native.setComponents",
+			"domain": "native",
+			"description": "Adds, changes (a merge patch) or removes (null) an entity's native components through the loaded module, as one undoable edit.",
+			"exposeAsTool": true,
+			"mutates": true,
+			"supportsDryRun": true,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["entity", "components"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NativeSetComponentsParams",
+				"description": "Add, change or remove an entity's native components.",
+				"type": "object",
+				"properties": {
+					"entity": {
+						"description": "The entity: its id, a unique id prefix or its path.",
+						"type": "string"
+					},
+					"components": {
+						"description": "By registry name (Native.<Name>): a merge patch of the component's fields, a missing component starting from its defaults, or null to remove it.",
+						"type": "object",
+						"additionalProperties": {}
+					},
+					"target": {
+						"description": "The scene to change; play changes are transient.",
+						"enum": ["Edit", "Play"]
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["entity", "components"],
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NativeSetComponentsResult",
+				"description": "The entity's native components after the change.",
+				"type": "object",
+				"properties": {
+					"entity": {
+						"description": "The entity.",
+						"$ref": "#/$defs/EntitySummary"
+					},
+					"components": {
+						"description": "Its native components the loaded module registers, every field written.",
+						"type": "object",
+						"additionalProperties": {}
+					},
+					"undoIndex": {
+						"description": "Undo step; zero for the play scene and for a dry run.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"EntitySummary": {
+						"description": "An entity's canonical id with its readable name and path.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The entity's id: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"name": {
+								"description": "The entity's name.",
+								"type": "string"
+							},
+							"path": {
+								"description": "The entity's path from the scene root, such as \"/Game/Board\".",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Make the spinner turn faster.",
+					"params": {
+						"entity": "/Spinner",
+						"components": {
+							"Native.Spinner": {
+								"DegreesPerSecond": 180
+							}
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "native.status",
+			"domain": "native",
+			"description": "Reports the open project's native module: whether the user allows native code, its sources, its builds, the loaded module's types and systems, and in play its resources.",
+			"exposeAsTool": true,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": [],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NoParams",
+				"description": "The params of a method that takes none: an empty object.",
+				"type": "object",
+				"properties": {
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NativeStatusResult",
+				"description": "The open project's native module: the user's permission, its sources, builds and loaded types.",
+				"type": "object",
+				"properties": {
+					"allowed": {
+						"description": "The user's Allow native code preference, which only the user changes, in the editor's Native panel; while it is off native.build and native.load are refused.",
+						"type": "boolean"
+					},
+					"supported": {
+						"description": "Whether this platform builds, loads and exports native modules (Windows).",
+						"type": "boolean"
+					},
+					"sources": {
+						"description": "Every .cpp and .h file below Native/, sorted; empty for a game without a native module.",
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"sourceHash": {
+						"description": "The hash of the sources as they are now, which a current build records.",
+						"type": "string"
+					},
+					"building": {
+						"description": "A native.build runs.",
+						"type": "boolean"
+					},
+					"latestBuild": {
+						"description": "The newest successful build's library, project-relative; empty when there is none.",
+						"type": "string"
+					},
+					"latestBuildCurrent": {
+						"description": "The newest build was made from the sources as they are now, so native.load takes it.",
+						"type": "boolean"
+					},
+					"lastBuildRan": {
+						"description": "This editor ran a build for the project.",
+						"type": "boolean"
+					},
+					"lastBuildSucceeded": {
+						"description": "That build succeeded.",
+						"type": "boolean"
+					},
+					"lastBuildDiagnostics": {
+						"description": "That build's findings.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/NativeBuildDiagnostic"
+						}
+					},
+					"loaded": {
+						"description": "A module is loaded, so play sessions run its systems.",
+						"type": "boolean"
+					},
+					"loadedCurrent": {
+						"description": "The loaded module was built from the sources as they are now.",
+						"type": "boolean"
+					},
+					"components": {
+						"description": "The loaded module's component types, in registration order.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/NativeTypeSummary"
+						}
+					},
+					"resources": {
+						"description": "The loaded module's resource types, in registration order.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/NativeTypeSummary"
+						}
+					},
+					"systems": {
+						"description": "The loaded module's systems, in the order they run each tick.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/NativeSystemSummary"
+						}
+					},
+					"playResources": {
+						"description": "The running Play session's resource values by name; null when no Play session runs the module."
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"NativeBuildDiagnostic": {
+						"description": "One finding of a native build: the lint, the compiler or the linker.",
+						"type": "object",
+						"properties": {
+							"severity": {
+								"description": "Error or Warning.",
+								"enum": ["Warning", "Error"]
+							},
+							"code": {
+								"description": "NATIVE_LINT_ERROR, NATIVE_COMPILE_ERROR, NATIVE_COMPILE_WARNING (an error, since warnings are errors), NATIVE_LINK_ERROR or NATIVE_BUILD_ERROR.",
+								"type": "string"
+							},
+							"file": {
+								"description": "The source it is in, project-relative (Native/Spin.cpp); empty without a location.",
+								"type": "string"
+							},
+							"line": {
+								"description": "One-based line; zero without a location.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"column": {
+								"description": "One-based column; zero without one.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"message": {
+								"description": "What the tool reported.",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					},
+					"NativeTypeSummary": {
+						"description": "One type of the loaded native module.",
+						"type": "object",
+						"properties": {
+							"name": {
+								"description": "The name the module registers.",
+								"type": "string"
+							},
+							"registryName": {
+								"description": "A component's name in files and automation (Native.<Name>); a resource's name.",
+								"type": "string"
+							},
+							"role": {
+								"description": "Component or Resource.",
+								"enum": ["Component", "Resource"]
+							},
+							"description": {
+								"description": "What the module says it is.",
+								"type": "string"
+							},
+							"schema": {
+								"description": "The JSON Schema of its value: every field with its kind, bounds, unit and enum names."
+							}
+						},
+						"additionalProperties": false
+					},
+					"NativeSystemSummary": {
+						"description": "One system of the loaded native module.",
+						"type": "object",
+						"properties": {
+							"name": {
+								"description": "The name the module registers.",
+								"type": "string"
+							},
+							"description": {
+								"description": "What the module says it does.",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Read the native module's state.",
+					"params": {}
+				}
+			]
+		},
+		{
+			"name": "native.write",
+			"domain": "native",
+			"description": "Writes a .cpp or .h source of the native module below Native/ as one undoable edit, recorded in provenance; it builds nothing (native.build).",
+			"exposeAsTool": true,
+			"mutates": true,
+			"supportsDryRun": true,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["path", "source"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NativeWriteParams",
+				"description": "Create or replace a source of the native module.",
+				"type": "object",
+				"properties": {
+					"path": {
+						"description": "A .cpp or .h file below Native/; missing folders are created.",
+						"type": "string"
+					},
+					"source": {
+						"description": "Exact UTF-8 text; empty is written as is.",
+						"type": "string"
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["path", "source"],
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NativeWriteResult",
+				"description": "The written source and its undo step.",
+				"type": "object",
+				"properties": {
+					"path": {
+						"description": "Canonical project-relative path.",
+						"type": "string"
+					},
+					"created": {
+						"description": "The file did not exist before.",
+						"type": "boolean"
+					},
+					"undoIndex": {
+						"description": "Undo step; zero for unchanged bytes or a dry run.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {}
+			},
+			"examples": [
+				{
+					"description": "Write a source.",
+					"params": {
+						"path": "Native/Spinner.cpp",
+						"source": "#include \"Engine/Native/NativeApi.h\"\n"
 					}
 				}
 			]
@@ -10362,6 +11430,10 @@
 						"description": "A testing export: Game.json says Testing true, so the exported game runs --feature-test; Assets/Tests/** and every Testing.Suites script and scene and Testing.Replays match are packaged whatever Export.Exclude says; invalid suites (TEST_SUITE_INVALID) and replays that do not import fail validation. Its default output directory is Build/<Platform>-<Config>-Testing/<Name>.",
 						"type": "boolean"
 					},
+					"featureTest": {
+						"description": "With testing: run the staged game's --feature-test before it replaces the output directory and report its replays' state hashes in featureTest, the hashes the games suite's Dist half compares with the editors'. A failing run does not fail the export; the report says so.",
+						"type": "boolean"
+					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
@@ -10448,11 +11520,23 @@
 						"type": "boolean"
 					},
 					"phaseTimings": {
-						"description": "The time of every phase the export entered, in phase order; SmokeTest only when the smoke test ran (its time otherwise counts toward MoveToOutput).",
+						"description": "The time of every phase the export entered, in phase order; SmokeTest only when the smoke test ran, FeatureTest only when the feature test ran and NativeBuild only for a game with a Native/ folder (their time otherwise counts toward the next phase).",
 						"type": "array",
 						"items": {
 							"$ref": "#/$defs/ExportPhaseTimingSummary"
 						}
+					},
+					"featureTest": {
+						"description": "The featureTest run of a testing export; ran false without featureTest.",
+						"$ref": "#/$defs/ExportFeatureTestSummary"
+					},
+					"reachability": {
+						"description": "What the paks hold and why: the built-ins Data/Engine.pak kept and left out, the scripts' computed Assets.Load calls, and with Export.PruneUnreferenced the assets Data/Game.pak kept and left out.",
+						"$ref": "#/$defs/ExportReachability"
+					},
+					"nativeModule": {
+						"description": "Whether the executable links the project's native module: true for a game with a Native/ folder, whose Runtime the export built.",
+						"type": "boolean"
 					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
@@ -10492,11 +11576,153 @@
 						"properties": {
 							"phase": {
 								"description": "The phase.",
-								"enum": ["Validate", "Cook", "WritePaks", "CopyRuntime", "PatchResources", "WriteManifest", "Sign", "SmokeTest", "MoveToOutput", "Done"]
+								"enum": ["Validate", "Cook", "WritePaks", "NativeBuild", "CopyRuntime", "PatchResources", "WriteManifest", "Sign", "SmokeTest", "FeatureTest", "MoveToOutput", "Done"]
 							},
 							"seconds": {
 								"description": "Its wall-clock time, for information.",
 								"type": "number"
+							}
+						},
+						"additionalProperties": false
+					},
+					"ExportFeatureTestSummary": {
+						"description": "The --feature-test run of a testing export (featureTest).",
+						"type": "object",
+						"properties": {
+							"ran": {
+								"description": "Whether it ran: false without featureTest, and for a Dist export from an editor without a graphics device.",
+								"type": "boolean"
+							},
+							"exitCode": {
+								"description": "The run's exit code, an integer; null when it did not run."
+							},
+							"passed": {
+								"description": "Exit code 0 and every row passed.",
+								"type": "boolean"
+							},
+							"reportPath": {
+								"description": "The run's JSON report, inside the exported game's folder; empty when it did not run.",
+								"type": "string"
+							},
+							"replays": {
+								"description": "Every replay's observed final state hash, sorted by path.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/ExportFeatureTestReplaySummary"
+								}
+							}
+						},
+						"additionalProperties": false
+					},
+					"ExportReachability": {
+						"description": "What an export put into its paks and why.",
+						"type": "object",
+						"properties": {
+							"pruned": {
+								"description": "Export.PruneUnreferenced was on: Data/Game.pak holds only what StartScene and Export.BuildScenes reach (and a testing export's testing content). Off, gameAssets and prunedAssets are empty and Data/Game.pak holds every asset below Assets/ that Export.Exclude leaves in.",
+								"type": "boolean"
+							},
+							"gameAssets": {
+								"description": "Every asset of a pruned Data/Game.pak with its reason, sorted by path.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/ExportReachedAsset"
+								}
+							},
+							"prunedAssets": {
+								"description": "The assets an unpruned export would have packaged but nothing reaches, sorted.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"engineBuiltins": {
+								"description": "Every built-in of Data/Engine.pak with its reason, sorted by path: the ones the game asks for by handle and the ones its assets reach (procedural built-ins are generated by the game and never packaged).",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/ExportReachedAsset"
+								}
+							},
+							"prunedBuiltins": {
+								"description": "The file and generated built-ins Data/Engine.pak leaves out, sorted.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"computedLoads": {
+								"description": "Every Assets.Load of a packaged script whose reference is computed, sorted by script, line and column; such a load makes Data/Engine.pak keep every built-in.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/ExportComputedLoad"
+								}
+							}
+						},
+						"additionalProperties": false
+					},
+					"ExportFeatureTestReplaySummary": {
+						"description": "One replay of an exported game's --feature-test run.",
+						"type": "object",
+						"properties": {
+							"path": {
+								"description": "The replay's project-relative path.",
+								"type": "string"
+							},
+							"stateHash": {
+								"description": "The state hash the exported game observed at the replay's final tick.",
+								"type": "string"
+							},
+							"passed": {
+								"description": "Every row of the replay passed.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"ExportReachedAsset": {
+						"description": "One asset of an exported game's paks, and why the export packaged it.",
+						"type": "object",
+						"properties": {
+							"path": {
+								"description": "The asset's project path, or the built-in's engine:// path.",
+								"type": "string"
+							},
+							"reason": {
+								"description": "The first reason the export's walk found for it.",
+								"enum": ["StartScene", "BuildScene", "Testing", "Dependency", "LiteralLoad", "Required", "ComputedLoad"]
+							},
+							"from": {
+								"description": "The path of the asset that reached it (Dependency, LiteralLoad, ComputedLoad); empty otherwise.",
+								"type": "string"
+							},
+							"line": {
+								"description": "The 1-based line of from's Assets.Load (LiteralLoad, ComputedLoad); 0 otherwise.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							}
+						},
+						"additionalProperties": false
+					},
+					"ExportComputedLoad": {
+						"description": "An Assets.Load whose reference a packaged script computes, which the export cannot follow.",
+						"type": "object",
+						"properties": {
+							"script": {
+								"description": "The script's project path.",
+								"type": "string"
+							},
+							"line": {
+								"description": "The 1-based line.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"column": {
+								"description": "The 1-based column.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
 							}
 						},
 						"additionalProperties": false
@@ -14982,6 +16208,13 @@
 						"description": "Return coverage.counters in the result; without it they are left out unless the project sets Testing.CoverageGates. The JSON report at jsonPath always holds them.",
 						"type": "boolean"
 					},
+					"expect": {
+						"description": "With record only: expectations ({tick, luau}, as input.record's stop takes them) written into the recorded replay; each must hold when the recording is verified with its input, before anything is written.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/InputRecordExpectation"
+						}
+					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
@@ -14989,7 +16222,25 @@
 					}
 				},
 				"additionalProperties": false,
-				"$defs": {}
+				"$defs": {
+					"InputRecordExpectation": {
+						"description": "An authored replay assertion at a completed-tick boundary.",
+						"type": "object",
+						"properties": {
+							"tick": {
+								"description": "Completed ticks, including zero.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"luau": {
+								"description": "Luau expression or chunk returning a truthy value.",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					}
+				}
 			},
 			"result": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -15051,7 +16302,7 @@
 						"type": "string"
 					},
 					"recording": {
-						"description": "The replay test.run {record} wrote: {path, formatVersion, ticks, events, checkpoints, finalStateHash, inputCheck: {ran, divergedAtTick}} (TestRecordingResult); null for every other run."
+						"description": "The replay test.run {record} wrote: {path, formatVersion, ticks, events, checkpoints, finalStateHash, inputCheck: {ran, divergedAtTick}, expectations, warnings} (TestRecordingResult); null for every other run."
 					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
@@ -15909,6 +17160,10 @@
 					},
 					"inline": {
 						"description": "Also return the PNG as base64 in \"data\" when it is at most 30 KB; a larger one is only written (inlineOmitted).",
+						"type": "boolean"
+					},
+					"keep": {
+						"description": "Write the PNG into Library/Automation/Kept/ (user://Automation/Kept/ without a writable project and in the Runtime), which no later editor session prunes, instead of Library/Automation/Out/.",
 						"type": "boolean"
 					},
 					"ifRevision": {

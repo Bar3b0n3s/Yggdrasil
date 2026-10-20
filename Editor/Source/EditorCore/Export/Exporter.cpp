@@ -5,6 +5,8 @@
 #include "EditorCore/EngineAssetGenerators.h"
 #include "EditorCore/Export/AppBundle.h"
 #include "EditorCore/Export/ExecutableResources.h"
+#include "EditorCore/Export/ExportFeatureTest.h"
+#include "EditorCore/Export/NativeExport.h"
 #include "EditorCore/Export/Private/ExportPaths.h"
 #include "EditorCore/Export/TestingExport.h"
 #include "EditorCore/Project/ProjectManager.h"
@@ -454,6 +456,15 @@ namespace Engine {
 		// SmokeTest.
 		std::optional<Process> SmokeTest{};
 		std::chrono::steady_clock::time_point SmokeTestDeadline{};
+		// FeatureTest (M19, decision 10): step 6a's running --feature-test run (ExportFeatureTest.h).
+		Scope<IExportFeatureTestJob> FeatureTest{};
+
+		// NativeBuild (M19, decision 33): whether the project has a Native/ directory, the running build, its output directory
+		// beside the staging directory and the executable it built, which CopyRuntime copies instead of RuntimeExecutable.
+		bool NativeModule = false;
+		Scope<INativeBuildJob> NativeBuild{};
+		std::filesystem::path NativeBuildDirectory{};
+		std::filesystem::path NativeRuntimeExecutable{};
 
 		ExportReport Report{};
 
@@ -468,11 +479,13 @@ namespace Engine {
 				case ExportPhase::Validate:       return Validate();
 				case ExportPhase::Cook:           return Cook();
 				case ExportPhase::WritePaks:      return WritePakFiles();
+				case ExportPhase::NativeBuild:    return BuildNativeRuntime();
 				case ExportPhase::CopyRuntime:    return CopyRuntime();
 				case ExportPhase::PatchResources: return PatchResources();
 				case ExportPhase::WriteManifest:  return WriteManifest();
 				case ExportPhase::Sign:           return Sign();
 				case ExportPhase::SmokeTest:      return RunSmokeTest();
+				case ExportPhase::FeatureTest:    return RunFeatureTest();
 				case ExportPhase::MoveToOutput:   return MoveToOutput();
 				case ExportPhase::Done:           return true;
 			}
@@ -523,6 +536,11 @@ namespace Engine {
 			// The registry and the asset diagnostics reflect the files on disk, which is what the export packages.
 			ENGINE_TRY(WithContext(assets.Refresh(), "while refreshing the assets"));
 			Settings = Editor->GetProject().GetSettings();
+			// M19 (decision 33): a game with Native/ is refused first, before anything is cooked, where the platform or the
+			// user's preference does not allow its native build (NativeExport.h).
+			NativeModule = HasNativeModuleDirectory(ProjectRoot);
+			if (NativeModule)
+				ENGINE_TRY(CheckNativeExport(*Editor));
 
 			std::vector<ErrorIssue> issues;
 			// Static errors block export even when ordinary editor play permits them (§11.9).
@@ -1240,19 +1258,59 @@ namespace Engine {
 			return {};
 		}
 
+		// --- 3a. Build the Runtime with the native module (M19) ------------------------------------------------------------
+
+		// Step 3a (decision 33): nothing to do for a game without Native/; otherwise the build of NativeExport.h, polled once
+		// per frame like the other background steps.
+		[[nodiscard]] Result<bool> BuildNativeRuntime()
+		{
+			if (!NativeModule)
+				return true;
+			if (NativeBuild == nullptr)
+			{
+				NativeBuildDirectory = StagingDirectory;
+				NativeBuildDirectory += ".native";
+				ENGINE_TRY_ASSIGN(NativeBuild, StartNativeRuntimeBuild(*Editor, Specification.Configuration, NativeBuildDirectory));
+				return false;
+			}
+			std::optional<Result<NativeBuildOutcome>> polled = NativeBuild->Poll();
+			if (!polled.has_value())
+				return false;
+			NativeBuild.reset();
+			ENGINE_TRY_ASSIGN(const NativeBuildOutcome outcome, std::move(*polled));
+			if (!outcome.Succeeded)
+				return std::unexpected(MakeNativeBuildError(outcome, Settings.Name));
+			NativeRuntimeExecutable = outcome.Output;
+			Report.NativeModule = true;
+			return true;
+		}
+
+		// The native build's directory, once its executable is copied or the export ends.
+		void RemoveNativeBuildDirectory()
+		{
+			if (NativeBuildDirectory.empty() || !FileSystem::Exists(NativeBuildDirectory))
+				return;
+			if (Status removed = FileSystem::Remove(NativeBuildDirectory); !removed.has_value())
+				ENGINE_WARN("Cannot remove the export's native build directory '{}': {}", FileSystem::PathToUtf8(NativeBuildDirectory), removed.error());
+		}
+
 		// --- 4. Copy the Runtime -----------------------------------------------------------------------------------------
 
 		[[nodiscard]] Result<bool> CopyRuntime()
 		{
 #if defined(ENGINE_PLATFORM_MACOS)
-			// The bundle's executable, frameworks and ICD manifest (AppBundle.h).
+			// The bundle's executable, frameworks and ICD manifest (AppBundle.h). A native game never gets here on macOS
+			// (CheckNativeExport, decision 34).
 			ENGINE_TRY(WithContext(CopyAppBundleBinaries(GetBundle(StagingDirectory), Settings.Name, RuntimeExecutable, RuntimeDirectory),
 				"while assembling the application bundle"));
 #else
-			ENGINE_TRY(WithContext(CopyFile(RuntimeExecutable, GetPackageExecutable(StagingDirectory)), "while copying the Runtime"));
+			// A game with Native/ packages the Runtime step 3a linked with its module (decision 33).
+			const std::filesystem::path& runtime = NativeRuntimeExecutable.empty() ? RuntimeExecutable : NativeRuntimeExecutable;
+			ENGINE_TRY(WithContext(CopyFile(runtime, GetPackageExecutable(StagingDirectory)), "while copying the Runtime"));
 			for (const std::filesystem::path& library : Redist)
 				ENGINE_TRY(WithContext(CopyFile(library, StagingDirectory / library.filename()), "while copying the app-local CRT"));
 #endif
+			RemoveNativeBuildDirectory();
 			return true;
 		}
 
@@ -1362,6 +1420,34 @@ namespace Engine {
 		}
 
 		// --- 6. Smoke test -----------------------------------------------------------------------------------------------
+
+		// Step 6a (M19, Docs/Decisions/0030-m19-contract.md decision 10): nothing to do without FeatureTest; otherwise the run of
+		// ExportFeatureTest.h, polled once per frame like the other background steps.
+		[[nodiscard]] Result<bool> RunFeatureTest()
+		{
+			if (!Specification.FeatureTest)
+				return true;
+			if (FeatureTest == nullptr)
+			{
+				const ExportFeatureTestRun run{ .Executable = GetPackageExecutable(StagingDirectory),
+					.StagedManifest = GetPackageResources(StagingDirectory) / GameManifest::FileName,
+					.OutputDirectory = OutputDirectory,
+					.Name = Settings.Name,
+					.Configuration = Specification.Configuration,
+					.HasGraphicsDevice = Editor->GetEngine().GetGraphicsDevice() != nullptr };
+				ENGINE_TRY_ASSIGN(FeatureTest, StartExportFeatureTest(run));
+				return false;
+			}
+			std::optional<Result<ExportFeatureTestOutcome>> polled = FeatureTest->Poll();
+			if (!polled.has_value())
+				return false;
+			FeatureTest.reset();
+			ENGINE_TRY_ASSIGN(ExportFeatureTestOutcome outcome, std::move(*polled));
+			Report.FeatureTest = std::move(outcome.Report);
+			for (std::string& warning : outcome.Warnings)
+				Report.Warnings.push_back(std::move(warning));
+			return true;
+		}
 
 		[[nodiscard]] Result<bool> RunSmokeTest()
 		{
@@ -1506,6 +1592,9 @@ namespace Engine {
 		{
 			Signing.reset();
 			SmokeTest.reset();
+			FeatureTest.reset();
+			NativeBuild.reset();
+			RemoveNativeBuildDirectory();
 			for (const JobHandle<AssetRef<Asset>>& load : Loads)
 			{
 				if (load.IsValid())
@@ -1560,6 +1649,8 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidArgument, "the export needs the directory of the build outputs (BinaryRoot, <repository>/bin)");
 		if (specification.SmokeTestFrames == 0)
 			return MakeError(ErrorCode::InvalidArgument, "the smoke test needs at least one frame");
+		if (specification.FeatureTest && !specification.Testing)
+			return MakeError(ErrorCode::InvalidArgument, "the feature test runs the suites and replays of a testing export: export with Testing");
 		ENGINE_TRY(CheckOutputPath(specification, editor.GetProject().GetRoot()));
 
 		Scope<Exporter> exporter = CreateScope<Exporter>(ConstructionKey());
@@ -1591,7 +1682,8 @@ namespace Engine {
 			return std::nullopt;
 		// The phase's time runs from the previous listed phase's end, so the timings add up to the export's (§14.2 step 8). A
 		// smoke test that did not run is not listed (M16 friction S2-06): its time counts toward the next phase.
-		if (phase != ExportPhase::SmokeTest || state.Report.SmokeTestRan)
+		if ((phase != ExportPhase::SmokeTest || state.Report.SmokeTestRan) && (phase != ExportPhase::FeatureTest || state.Report.FeatureTest.Ran)
+			&& (phase != ExportPhase::NativeBuild || state.Report.NativeModule))
 		{
 			const auto completed = std::chrono::steady_clock::now();
 			state.Report.PhaseTimings.push_back({ .Phase = phase, .Seconds = std::chrono::duration<double>(completed - state.PhaseStarted).count() });
@@ -1681,11 +1773,13 @@ namespace Engine {
 			case ExportPhase::Validate:       return "Validate";
 			case ExportPhase::Cook:           return "Cook";
 			case ExportPhase::WritePaks:      return "WritePaks";
+			case ExportPhase::NativeBuild:    return "NativeBuild";
 			case ExportPhase::CopyRuntime:    return "CopyRuntime";
 			case ExportPhase::PatchResources: return "PatchResources";
 			case ExportPhase::WriteManifest:  return "WriteManifest";
 			case ExportPhase::Sign:           return "Sign";
 			case ExportPhase::SmokeTest:      return "SmokeTest";
+			case ExportPhase::FeatureTest:    return "FeatureTest";
 			case ExportPhase::MoveToOutput:   return "MoveToOutput";
 			case ExportPhase::Done:           return "Done";
 		}

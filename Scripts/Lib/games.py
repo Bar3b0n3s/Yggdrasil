@@ -384,6 +384,53 @@ def evaluate_input_check(replay: str, events: int, result: dict[str, Any] | None
     return []
 
 
+def input_check_warning(replay: str, outcome: dict[str, Any] | None) -> str | None:
+    """M19 (Docs/Decisions/0030-m19-contract.md decision 3, A-F29; ADR 0026 friction F29): the warning of one committed
+    replay's input check, which the editor halves run with continuePastCheckpoint (input.replay {verify: true,
+    strictHash: true, withoutInput: true, continuePastCheckpoint: true}), so the run without input plays on past the
+    checkpoints that differ. `outcome` is that check's InputReplayResult: its error data's "replay" when it failed, as
+    it must for evaluate_input_check to pass. When the outcome's checkpointsFailed is positive, its hashMatched is true
+    and every expectation was satisfied, the run without input differed at checkpoints yet reached the recorded final
+    state hash: the final hash then proves only the end state, and only the checkpoints prove the play. The line is
+    then exactly the engine's MakeFinalHashIndependentWarning (Engine/Session/ReplayPlayer.h) for `replay`, the
+    outcome's firstFailedCheckpointTick and its expectedStateHash: "'<replay>': its final state hash does not depend on
+    its input: without its input events the run first differed from the recording at checkpoint tick <tick>, then
+    reached the recorded final state hash <hash>, so only its checkpoints prove the play; end the recording while the
+    played state is still in the scene". None otherwise, an outcome that is not an object included. A warning never
+    fails the half: the games step stays passed and prints it."""
+    raise NotImplementedError("contract stub: games (ADR 0030 decision 3, A-F29, stream B)")
+
+
+def check_distinct_projects(projects: Iterable[GameProject]) -> list[str]:
+    """M19 (Docs/Decisions/0030-m19-contract.md decision 12, AL-STEMS; the accepted limit of ADR 0027 decision 12): the
+    failures of the discovered game projects that would collide in the games suite, one line per pair in discovery
+    order, each naming both project files by their repository-relative paths (paths.display_path):
+      - two .eproj files that share a file stem (their games steps and reports, "games <stem> ..." and
+        "Games-<stem>-...", would collide): "the game projects <first> and <second> share the file stem '<stem>':
+        rename one .eproj, since the games steps and reports are named after it";
+      - two projects whose Name (read_game_name of the .eproj) is equal (their Dist packages would share
+        bin/Exports/Dist/<Name>): "the game projects <first> and <second> share the Name '<Name>': rename one
+        (ProjectSettings Name), since the Dist half installs each package as bin/Exports/Dist/<Name>".
+    A project whose Name cannot be read is one line naming its file and read_game_name's ValueError. Empty when every
+    stem and Name is distinct. The games suite runs it on the projects it discovered and, when it returns lines, fails
+    its "games" step with them before any project runs."""
+    raise NotImplementedError("contract stub: games (ADR 0030 decision 12, AL-STEMS, stream B)")
+
+
+def prepare_native_editor(project_directory: Path, user_data: Path, config: str) -> list[str]:
+    """M19 (Docs/Decisions/0030-m19-contract.md decision 35, stream N-E): what the games suite does for a game with a
+    Native/ directory before it starts one of its editors on `project_directory` (the copy of the staged blobs) with
+    `user_data` as --user-data-dir: it writes "AllowNativeCode": true into that root's user://Editor.json
+    (<user_data>/<application name>/Editor.json, keeping every other member), the test harness's own user data, never a
+    method (decision 29); and it builds the module of the editor's configuration `config` ("Debug" or "Release") into
+    the copy's Library/Native/Builds/00000001/ with Scripts/BuildNative.py --kind module, so the strict editor opens the
+    project with its module loaded (NativeModuleHost loads the newest current build and never builds while a project
+    opens, decision 31). One failure line per problem (the build's first error diagnostic among them), empty when the
+    editor may start; a game without Native/ needs nothing and returns no line. The Dist half's export builds its
+    Runtime itself (decision 33), after the same preference write into the exporting editor's user data."""
+    raise NotImplementedError("contract stub: games (ADR 0030 decision 35, stream N-E)")
+
+
 def check_replay_acceptance(events: dict[str, int]) -> list[str]:
     """The failures of a game's committed replays against the demo acceptance (DEMO_ACCEPTANCE: the suites and a
     replay recorded from tick 0 pass, and the replay's final hash is identical in the editor and the Dist export):

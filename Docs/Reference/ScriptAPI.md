@@ -3472,6 +3472,8 @@ A step of an export (§14.2), in the order the steps run.
 
 - `WritePaks`: Data/Engine.pak and Data/Game.pak are written and verified.
 
+- `NativeBuild`: A game with a Native/ folder gets a Runtime built with its native module linked in; other games skip it.
+
 - `CopyRuntime`: The configuration's Runtime is copied, renamed after the project, with what it needs.
 
 - `PatchResources`: The executable's icon and version (Windows) or Info.plist (macOS) are written.
@@ -3482,9 +3484,29 @@ A step of an export (§14.2), in the order the steps run.
 
 - `SmokeTest`: The staged game runs headless when smokeTest asks for it.
 
+- `FeatureTest`: The staged testing export runs --feature-test when featureTest asks for it, and its replays' hashes are read.
+
 - `MoveToOutput`: The staged package replaces the output directory.
 
 - `Done`: The export finished.
+
+## ExportReachReason
+
+Why an export put an asset into its paks (the first reason its walk found).
+
+- `StartScene`: Game.pak: the project's StartScene.
+
+- `BuildScene`: Game.pak: an Export.BuildScenes entry.
+
+- `Testing`: Game.pak: content a testing export packages whatever Export.Exclude says.
+
+- `Dependency`: Another packaged asset (from) references it or one of its sub-assets: an import dependency or a Script field value.
+
+- `LiteralLoad`: A packaged script (from) loads it with Assets.Load and a string literal (at line).
+
+- `Required`: Engine.pak: the exported game asks for this built-in by handle, so every export holds it.
+
+- `ComputedLoad`: Engine.pak: kept with every built-in, because a packaged script (from) computes an Assets.Load reference (at line).
 
 ## FieldType
 
@@ -3921,6 +3943,14 @@ Mouse button names.
 - `Button7`: The Button7 input value.
 
 - `Button8`: The Button8 input value.
+
+## NativeTypeRole
+
+What a type of a game's native module is.
+
+- `Component`: Data on entities, saved in scenes and prefabs as Native.<Name>.
+
+- `Resource`: One value per play session, part of the state hash, never saved.
 
 ## PhysicsBodyOrigin
 

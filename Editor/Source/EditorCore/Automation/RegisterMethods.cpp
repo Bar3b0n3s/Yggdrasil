@@ -9,6 +9,7 @@
 #include "EditorCore/Automation/EditorMethods.h"
 #include "EditorCore/Automation/EntityMethods.h"
 #include "EditorCore/Automation/ExportMethods.h"
+#include "EditorCore/Automation/NativeMethods.h"
 #include "EditorCore/Automation/ObserveMethods.h"
 #include "EditorCore/Automation/PrefabMethods.h"
 #include "EditorCore/Automation/ProjectMethods.h"
@@ -51,6 +52,8 @@ namespace Engine {
 		RegisterDebugMethodTypes(registry);
 		RegisterEditorScriptMethodTypes(registry);
 		RegisterTestMethodTypes(registry);
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 32): the native module's methods.
+		RegisterNativeMethodTypes(registry);
 	}
 
 	void RegisterEditorMethods(MethodRegistry& methods, const EditorMethodOptions& options)
@@ -71,6 +74,7 @@ namespace Engine {
 		RegisterSharedMethods(methods, AutomationHost::Editor);
 		RegisterEditorScriptMethods(methods);
 		RegisterTestMethods(methods);
+		RegisterNativeMethods(methods);
 		if (options.TestHooks)
 			RegisterDebugMethods(methods);
 	}

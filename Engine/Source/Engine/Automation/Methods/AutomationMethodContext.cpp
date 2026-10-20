@@ -4,6 +4,7 @@
 #include "Engine/Scripting/Sandbox.h"
 #include "Engine/Session/PlaySession.h"
 
+#include <format>
 #include <utility>
 
 namespace Engine {
@@ -58,6 +59,17 @@ namespace Engine {
 	Result<std::string> AutomationMethodContext::WriteReplay(std::string_view /*path*/, const ReplayDocument& /*document*/)
 	{
 		return MakeError(ErrorCode::Unsupported, "replay output is unavailable in this host");
+	}
+
+	Result<ReplayDocument> AutomationMethodContext::ReadReplayDocument(std::string_view /*path*/, ReplayLoadReport& /*report*/, std::string& /*canonicalPath*/) const
+	{
+		return std::unexpected(Error(ErrorCode::Unsupported, "the Runtime holds no replay sources: read the replay in the editor").WithLocation({ .File = {}, .JsonPointer = "/path", .Entity = {} }));
+	}
+
+	Result<std::string> AutomationMethodContext::WriteKeptFile(std::string_view extension, std::span<const std::byte> /*bytes*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return std::unexpected(Error(ErrorCode::Unsupported, std::format("keeping a .{} output file (Docs/Decisions/0030-m19-contract.md decision 9, stream E)", extension)));
 	}
 
 	bool AutomationMethodContext::IsHostType(TypeKey key) const

@@ -98,6 +98,10 @@ namespace Engine {
 		[[nodiscard]] Result<Image> CaptureView(const RenderSnapshot& snapshot, const ViewportScreenshotRequest& request) override;
 		[[nodiscard]] std::optional<ExplicitRenderCamera> GetSceneViewCamera() const override;
 		[[nodiscard]] Result<std::string> WriteOutputFile(std::string_view extension, std::span<const std::byte> bytes) override;
+		// M19 (Docs/Decisions/0030-m19-contract.md decisions 9 and 14): kept files through AutomationServer::WriteKeptFile, and
+		// the project's source replays through Utils::ReadProjectReplay (Private/ProjectReplaySource.h).
+		[[nodiscard]] Result<std::string> WriteKeptFile(std::string_view extension, std::span<const std::byte> bytes) override;
+		[[nodiscard]] Result<ReplayDocument> ReadReplayDocument(std::string_view path, ReplayLoadReport& report, std::string& canonicalPath) const override;
 
 		// The services of the moved M4 to M6 domains (Docs/Decisions/0012-m7-decisions.md decision 12) over the editor:
 		// DescribeSession reports the server's capabilities, clients, renderer and headless flag, the open project and the

@@ -82,7 +82,8 @@ namespace Engine {
 			uint32_t Height = 0;
 		};
 
-		static Result<WrittenEditorScreenshot> WriteEditorScreenshot(EditorMethodContext& context, const Image& captured, uint32_t maxDimension)
+		// `keep` (M19 decision 9) writes into the kept-files directory instead of the output directory.
+		static Result<WrittenEditorScreenshot> WriteEditorScreenshot(EditorMethodContext& context, const Image& captured, uint32_t maxDimension, bool keep)
 		{
 			// A capture that already fits is encoded as it is; only a larger one is copied, downscaled.
 			std::optional<Image> downscaled;
@@ -93,7 +94,7 @@ namespace Engine {
 			const Image& image = downscaled.has_value() ? *downscaled : captured;
 			ENGINE_TRY_ASSIGN(const Buffer png, EncodePng(image));
 			WrittenEditorScreenshot written;
-			ENGINE_TRY_ASSIGN(written.Path, context.GetServer().WriteOutputFile(EditorScreenshotPngExtension, png));
+			ENGINE_TRY_ASSIGN(written.Path, keep ? context.WriteKeptFile(EditorScreenshotPngExtension, png) : context.GetServer().WriteOutputFile(EditorScreenshotPngExtension, png));
 			written.Width = image.Width;
 			written.Height = image.Height;
 			return written;
@@ -111,7 +112,7 @@ namespace Engine {
 
 			context.SetPhase("Rendering the editor UI");
 			ENGINE_TRY_ASSIGN(const Image captured, WithContext(captures.EditorUi(), "while rendering the editor UI"));
-			ENGINE_TRY_ASSIGN(const Utils::WrittenEditorScreenshot written, Utils::WriteEditorScreenshot(context, captured, params.MaxDimension));
+			ENGINE_TRY_ASSIGN(const Utils::WrittenEditorScreenshot written, Utils::WriteEditorScreenshot(context, captured, params.MaxDimension, params.Keep));
 			return EditorScreenshotResult{ .Path = written.Path, .Width = written.Width, .Height = written.Height };
 		}
 
@@ -122,7 +123,9 @@ namespace Engine {
 		const FieldMeta dimensionMeta{ .Min = 1.0, .Max = static_cast<double>(MaxViewportScreenshotDimension) };
 
 		registry.Struct<EditorScreenshotParams>("EditorScreenshotParams", "The params of editor.screenshot: the whole editor UI as a PNG.")
-			.Field("maxDimension", &EditorScreenshotParams::MaxDimension, "The larger side of the PNG at most this many pixels.", dimensionMeta);
+			.Field("maxDimension", &EditorScreenshotParams::MaxDimension, "The larger side of the PNG at most this many pixels.", dimensionMeta)
+			.Field("keep", &EditorScreenshotParams::Keep,
+				"Write the PNG into Library/Automation/Kept/ (user://Automation/Kept/ without a writable project), which no later editor session prunes, instead of Library/Automation/Out/.");
 
 		registry.Struct<EditorScreenshotResult>("EditorScreenshotResult", "An editor UI screenshot written as a PNG.")
 			.Field("path", &EditorScreenshotResult::Path, "The PNG's absolute path.")

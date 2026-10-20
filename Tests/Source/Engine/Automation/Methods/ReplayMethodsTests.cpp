@@ -15,8 +15,11 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <format>
+#include <string>
+#include <string_view>
 
 namespace Engine {
 
@@ -1134,6 +1137,253 @@ namespace Engine {
 				CHECK(started.GetMatchCount() == 4);
 				CHECK(second.GetMatchCount() == 2);
 			}
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 2 (A-FPRINT; ADR 0027 friction F13): a replay records its start
+		// fingerprint, so a playback whose hash differs names what changed since the recording: a serialized component (the
+		// look's PostProcess), a material its MeshRenderer references, a script. The first change ends the error's message.
+		TEST_CASE("ReplayMethods: input.replay names the component, script and material that changed since the recording" * doctest::skip(true))
+		{
+			Test::AutomationFixture fixture("ReplayFingerprintChanges");
+			SaveInputScene(fixture);
+			CallReplayMethod(fixture, "asset.create", Json{ { "type", "Material" }, { "path", "Assets/Materials/Red.material" }, { "values", Json{ { "Roughness", 0.45 } } } });
+			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Look" }, { "components", Json{ { "PostProcess", Json{ { "SsaoRadius", 0.5 } } } } } });
+			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Box" }, { "components", Json{ { "MeshRenderer", Json{ { "Mesh", "engine://Meshes/Cube" }, { "Materials", Json::array({ "Assets/Materials/Red.material" }) } } } } } });
+			CallReplayMethod(fixture, "scene.save");
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 70 }, { "render", "none" }, { "input", Json::array({ Json{ { "tick", 3 }, { "type", "key" }, { "key", "A" }, { "state", "down" } } }) } });
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Look.replay" } });
+			CallReplayMethod(fixture, "play.stop");
+			const ReplayDocument recorded = ReadRecordedReplay(fixture.GetEditor(), "Assets/Tests/Look.replay");
+			REQUIRE(recorded.Fingerprint.has_value());
+			const Json verify = Json{ { "path", "Assets/Tests/Look.replay" }, { "verify", true }, { "strictHash", true } };
+			const auto changeStarting = [](const Json& changes, std::string_view prefix)
+			{
+				return std::ranges::any_of(changes, [prefix](const Json& line)
+				{
+					return line.is_string() && JsonReader(line).ReadString().value_or("").starts_with(prefix);
+				});
+			};
+
+			// The look and a material change: the replay fails at its first checkpoint, naming both.
+			CallReplayMethod(fixture, "entity.update", Json{ { "entity", "/Look" }, { "components", Json{ { "PostProcess", Json{ { "SsaoRadius", 1.5 } } } } } });
+			CallReplayMethod(fixture, "scene.save");
+			CallReplayMethod(fixture, "asset.setProperties", Json{ { "asset", "Assets/Materials/Red.material" }, { "values", Json{ { "Roughness", 0.9 } } } });
+			const Json changed = fixture.Request("input.replay", verify);
+			REQUIRE_MESSAGE(changed.contains("error"), changed.dump());
+			REQUIRE(changed["error"]["data"].contains("replay"));
+			const Json& changes = changed["error"]["data"]["replay"]["changes"];
+			CHECK(changeStarting(changes, "component PostProcess of /Look ("));
+			CHECK(changeStarting(changes, "Material Assets/Materials/Red.material ("));
+			CHECK_FALSE(changeStarting(changes, "Script "));
+			const std::string detail = JsonReader(changed["error"]["data"]).ReadMember<std::string>("detail").value_or("");
+			CHECK(detail.find("; changed since the recording: ") != std::string::npos);
+			CallReplayMethod(fixture, "play.stop");
+
+			// Back to the recorded look, a script change is named.
+			CallReplayMethod(fixture, "entity.update", Json{ { "entity", "/Look" }, { "components", Json{ { "PostProcess", Json{ { "SsaoRadius", 0.5 } } } } } });
+			CallReplayMethod(fixture, "scene.save");
+			CallReplayMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/KeyMover.luau" }, { "source", "local KeyMover = {}\n"
+																													"function KeyMover.OnFixedUpdate(self: any, dt: number)\n"
+																													"\tif Input.IsKeyDown(\"A\") then\n"
+																													"\t\tself.Entity.Transform:Translate(vector.create(2, 0, 0))\n"
+																													"\tend\n"
+																													"end\n"
+																													"return Script.Define(\"KeyMover\", KeyMover)\n" } });
+			const Json scripted = fixture.Request("input.replay", verify);
+			REQUIRE_MESSAGE(scripted.contains("error"), scripted.dump());
+			REQUIRE(scripted["error"]["data"].contains("replay"));
+			const Json& scriptChanges = scripted["error"]["data"]["replay"]["changes"];
+			CHECK(changeStarting(scriptChanges, "Script Assets/Scripts/KeyMover.luau ("));
+			CHECK_FALSE(changeStarting(scriptChanges, "component PostProcess"));
+			CallReplayMethod(fixture, "play.stop");
+
+			// The input check names nothing: failing is its expected outcome.
+			const Json withoutInput = fixture.Request("input.replay", Json{ { "path", "Assets/Tests/Look.replay" }, { "verify", true }, { "strictHash", true }, { "withoutInput", true } });
+			REQUIRE_MESSAGE(withoutInput.contains("error"), withoutInput.dump());
+			REQUIRE(withoutInput["error"]["data"].contains("replay"));
+			CHECK(withoutInput["error"]["data"]["replay"]["changes"].empty());
+		}
+
+		// Decision 3 (A-F29): continuePastCheckpoint plays on past every checkpoint whose hash differs to the final tick and
+		// compares the final hash too; the replay still fails, counting the failed checkpoints and naming the first. It
+		// needs strictHash.
+		TEST_CASE("ReplayMethods: input.replay continuePastCheckpoint plays on to the final tick and counts every failed checkpoint" * doctest::skip(true))
+		{
+			Test::AutomationFixture fixture("ReplayContinuePastCheckpoint");
+			SaveInputScene(fixture);
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
+			// A is held from tick 50: checkpoints 60 and 120 and the final hash differ from an input-free run.
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 130 }, { "render", "none" }, { "input", Json::array({ Json{ { "tick", 50 }, { "type", "key" }, { "key", "A" }, { "state", "down" } } }) } });
+			const Json saved = CallReplayMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Held.replay" } });
+			REQUIRE(saved["checkpoints"] == Json(2));
+
+			const Json response = fixture.Request("input.replay", Json{ { "path", "Assets/Tests/Held.replay" }, { "verify", true }, { "strictHash", true }, { "withoutInput", true }, { "continuePastCheckpoint", true } });
+			REQUIRE_MESSAGE(response.contains("error"), response.dump());
+			REQUIRE_MESSAGE(response["error"]["data"].contains("replay"), response.dump());
+			const Json& outcome = response["error"]["data"]["replay"];
+			CHECK(outcome["passed"] == Json(false));
+			CHECK(outcome["checkpointFailed"] == Json(true));
+			CHECK(outcome["checkpointsChecked"] == Json(2));
+			CHECK(outcome["checkpointsFailed"] == Json(2));
+			CHECK(outcome["firstFailedCheckpointTick"] == Json(60));
+			CHECK(outcome["finalTick"] == Json(130));
+			CHECK(outcome["hashMatched"] == Json(false));
+			CHECK(outcome["stopReason"] == Json(""));
+			CHECK(CallReplayMethod(fixture, "play.state")["tick"] == Json(130));
+
+			const Json noStrict = fixture.Request("input.replay", Json{ { "path", "Assets/Tests/Held.replay" }, { "verify", true }, { "continuePastCheckpoint", true } });
+			REQUIRE_MESSAGE(noStrict.contains("error"), noStrict.dump());
+			CHECK(noStrict["error"]["data"]["errorCode"] == Json("InvalidArgument"));
+			REQUIRE(noStrict["error"]["data"].contains("location"));
+			CHECK(noStrict["error"]["data"]["location"]["pointer"] == Json("/continuePastCheckpoint"));
+		}
+
+		// Decision 3 (A-F29; ADR 0026 friction F29): a recording whose input shows at its checkpoints but whose end state a
+		// reset restores passes the input check and is written, with one warning that its final hash alone does not depend on
+		// its input (MakeFinalHashIndependentWarning); the check then ends at the final tick.
+		TEST_CASE("ReplayMethods: input.record stop warns when only its final state hash does not depend on its input" * doctest::skip(true))
+		{
+			Test::AutomationFixture fixture("RecordFinalHashWarning");
+			CallReplayMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Resetter.luau" }, { "source", "local Resetter = {}\n"
+																													"function Resetter.OnFixedUpdate(self: any, dt: number)\n"
+																													"\tif Input.IsKeyDown(\"A\") then self.Entity.Transform:Translate(vector.create(1, 0, 0)) end\n"
+																													"\tif Time.GetTick() == 125 then self.Entity.Transform.Translation = vector.create(0, 0, 0) end\n"
+																													"end\n"
+																													"return Script.Define(\"Resetter\", Resetter)\n" } });
+			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Mover" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Resetter.luau" } } } } } });
+			CallReplayMethod(fixture, "scene.save");
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 130 }, { "render", "none" }, { "input", Json::array({ Json{ { "tick", 10 }, { "type", "key" }, { "key", "A" }, { "state", "down" } }, Json{ { "tick", 70 }, { "type", "key" }, { "key", "A" }, { "state", "up" } } }) } });
+			const Json saved = CallReplayMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Reset.replay" } });
+			CHECK(ProjectFileExists(fixture, "Assets/Tests/Reset.replay"));
+			CHECK(saved["inputCheckTick"] == Json(60));
+			REQUIRE(saved["warnings"].size() == 1);
+			CHECK(saved["warnings"][0] == Json(MakeFinalHashIndependentWarning("Assets/Tests/Reset.replay", 60, JsonReader(saved).ReadMember<std::string>("stateHash").value_or(""))));
+			// The check played on to the final tick.
+			CHECK(CallReplayMethod(fixture, "play.state")["tick"] == Json(130));
+
+			// A recording whose final state shows its input gets no warning.
+			CallReplayMethod(fixture, "play.stop");
+			SaveInputScene(fixture);
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" }, { "restart", true } });
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 130 }, { "render", "none" }, { "input", Json::array({ Json{ { "tick", 100 }, { "type", "key" }, { "key", "B" }, { "state", "down" } } }) } });
+			const Json plain = CallReplayMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Plain.replay" } });
+			CHECK(plain["warnings"].empty());
+		}
+
+		// Decision 4 (AL-EVFREE): a recording without input events is verified with its (empty) input too, so a false
+		// expectation refuses it and nothing is written; a satisfied one is written, and the play session is then the
+		// verification's, at its final tick.
+		TEST_CASE("ReplayMethods: input.record stop verifies a recording without input events before writing it" * doctest::skip(true))
+		{
+			Test::AutomationFixture fixture("RecordEventFreeVerified");
+			CallReplayMethod(fixture, "scene.save");
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 70 }, { "render", "none" } });
+			const Json refused = fixture.Request("input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/False.replay" }, { "expect", Json::array({ Json{ { "tick", 30 }, { "luau", "false" } } }) } });
+			REQUIRE_MESSAGE(refused.contains("error"), refused.dump());
+			CHECK(refused["error"]["data"]["errorCode"] == Json("Validation"));
+			CHECK(refused["error"]["data"].contains("verification"));
+			CHECK_FALSE(ProjectFileExists(fixture, "Assets/Tests/False.replay"));
+			CHECK(CallReplayMethod(fixture, "play.state")["recording"] == Json(false));
+
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" }, { "restart", true } });
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 70 }, { "render", "none" } });
+			const uint64_t recordedSerial = fixture.GetEditor().GetPlay().GetSession()->GetSerial();
+			const Json written = CallReplayMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Pure.replay" }, { "expect", Json::array({ Json{ { "tick", 70 }, { "luau", "Time.GetTick() == 70" } } }) } });
+			CHECK(written["events"] == Json(0));
+			CHECK(written["inputCheckTick"] == Json(0));
+			CHECK(ProjectFileExists(fixture, "Assets/Tests/Pure.replay"));
+			REQUIRE(fixture.GetEditor().GetPlay().GetSession() != nullptr);
+			CHECK(fixture.GetEditor().GetPlay().GetSession()->GetSerial() != recordedSerial);
+			CHECK(fixture.GetEditor().GetPlay().GetSession()->GetTick() == 70);
+		}
+
+		// Decision 5 (AL-TEARDOWN): once the verification's playback reached its final tick, its scripts are stopped and an
+		// error their OnDestroy raises refuses the recording like any other script error, named "at teardown"; nothing is
+		// written, and the session stays the verification's with its scripts stopped.
+		TEST_CASE("ReplayMethods: input.record stop counts the errors its verification's scripts raise at teardown" * doctest::skip(true))
+		{
+			// Declared before the fixture: every session that ran the Leaver raises it when it ends, the fixture's last one too.
+			Test::ExpectLog teardown(LogLevel::Error, "teardown fault");
+			Test::AutomationFixture fixture("RecordTeardownError");
+			SaveInputScene(fixture);
+			CallReplayMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Leaver.luau" }, { "source", "local Leaver = {}\n"
+																												  "function Leaver.OnDestroy(self: any)\n"
+																												  "\terror(\"teardown fault\")\n"
+																												  "end\n"
+																												  "return Script.Define(\"Leaver\", Leaver)\n" } });
+			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Leaver" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Leaver.luau" } } } } } });
+			CallReplayMethod(fixture, "scene.save");
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 70 }, { "render", "none" }, { "input", Json::array({ Json{ { "tick", 3 }, { "type", "key" }, { "key", "A" }, { "state", "down" } } }) } });
+			const Json refused = fixture.Request("input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Teardown.replay" } });
+			REQUIRE_MESSAGE(refused.contains("error"), refused.dump());
+			const Json& data = refused["error"]["data"];
+			CHECK(data["errorCode"] == Json("Validation"));
+			const std::string detail = JsonReader(data).ReadMember<std::string>("detail").value_or("");
+			CHECK(detail.find("teardown fault") != std::string::npos);
+			CHECK(detail.find("at teardown") != std::string::npos);
+			REQUIRE(data.contains("verification"));
+			CHECK(data["verification"]["passed"] == Json(true));
+			CHECK_FALSE(ProjectFileExists(fixture, "Assets/Tests/Teardown.replay"));
+			const PlaySession* session = fixture.GetEditor().GetPlay().GetSession();
+			REQUIRE(session != nullptr);
+			CHECK(session->GetTick() == 70);
+			CHECK(fixture.Request("script.eval", Json{ { "code", "return 1" }, { "context", "play" } }).contains("error"));
+		}
+
+		// Decision 14 (A-RREAD): input.readReplay returns a replay's header as its file writes it, its events in play.step's
+		// input form with absolute ticks, a page at a time, its expectations and checkpoints; play.step with those events
+		// from tick 0 of the header's session reproduces the recording's final hash.
+		TEST_CASE("ReplayMethods: input.readReplay reads a replay's header, events, expectations and checkpoints back" * doctest::skip(true))
+		{
+			Test::AutomationFixture fixture("ReadReplay");
+			SaveInputScene(fixture);
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 130 }, { "render", "none" }, { "input", Json::array({ Json{ { "tick", 100 }, { "type", "key" }, { "key", "A" }, { "state", "down" } }, Json{ { "tick", 110 }, { "type", "key" }, { "key", "A" }, { "state", "up" } } }) } });
+			const Json saved = CallReplayMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Read.replay" }, { "expect", Json::array({ Json{ { "tick", 130 }, { "luau", "Time.GetTick() == 130" } } }) } });
+			CallReplayMethod(fixture, "play.stop");
+
+			const Json read = CallReplayMethod(fixture, "input.readReplay", Json{ { "path", "Assets/Tests/Read.replay" } });
+			CHECK(read["path"] == Json("Assets/Tests/Read.replay"));
+			CHECK(read["formatVersion"] == Json(ReplayFormatVersion));
+			REQUIRE(read["header"].contains("Scene"));
+			CHECK(read["header"]["Scene"]["Path"] == Json("Assets/Scenes/Main.scene"));
+			CHECK(read["header"].contains("Seed"));
+			CHECK(read["finalTick"] == Json(130));
+			CHECK(read["finalStateHash"] == saved["stateHash"]);
+			CHECK(read["eventCount"] == Json(2));
+			REQUIRE(read["events"].size() == 2);
+			const Json& pressed = read["events"][0];
+			CHECK(pressed.size() == 4);
+			CHECK(pressed["tick"] == Json(100));
+			CHECK(pressed["type"] == Json("Key"));
+			CHECK(pressed["key"] == Json("A"));
+			CHECK(pressed["state"] == Json("Down"));
+			CHECK(read["nextCursor"] == Json(""));
+			REQUIRE(read["expect"].size() == 1);
+			CHECK(read["expect"][0]["tick"] == Json(130));
+			CHECK(read["expect"][0]["luau"] == Json("Time.GetTick() == 130"));
+			CHECK(read["checkpoints"].size() == 2);
+			CHECK(read["hasFingerprint"] == Json(true));
+
+			// One event per page.
+			const Json first = CallReplayMethod(fixture, "input.readReplay", Json{ { "path", "Assets/Tests/Read.replay" }, { "limit", 1 } });
+			REQUIRE(first["events"].size() == 1);
+			const std::string cursor = JsonReader(first).ReadMember<std::string>("nextCursor").value_or("");
+			REQUIRE_FALSE(cursor.empty());
+			const Json second = CallReplayMethod(fixture, "input.readReplay", Json{ { "path", "Assets/Tests/Read.replay" }, { "limit", 1 }, { "cursor", cursor } });
+			REQUIRE(second["events"].size() == 1);
+			CHECK(second["events"][0] == read["events"][1]);
+			CHECK(second["nextCursor"] == Json(""));
+
+			// The events replay through play.step from tick 0: a re-recording reproduces the final hash.
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 130 }, { "render", "none" }, { "input", read["events"] } });
+			const Json again = CallReplayMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Again.replay" }, { "expect", read["expect"] } });
+			CHECK(again["stateHash"] == saved["stateHash"]);
 		}
 	}
 

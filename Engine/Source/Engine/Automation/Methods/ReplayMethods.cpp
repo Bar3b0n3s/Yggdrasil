@@ -489,6 +489,9 @@ namespace Engine {
 				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/withoutInput", "withoutInput requires verify:true",
 					"the input check is {\"verify\": true, \"strictHash\": true, \"withoutInput\": true}, and it must fail"));
 			}
+			// Docs/Decisions/0030-m19-contract.md decision 3: only compared checkpoints can be continued past.
+			if (params.ContinuePastCheckpoint && !params.StrictHash)
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/continuePastCheckpoint", "continuePastCheckpoint requires strictHash:true", {}));
 			ENGINE_TRY_ASSIGN(AssetRef<ReplayData> replay, context.LoadReplay(params.Path));
 			const ProjectSettings* settings = context.GetProjectSettings();
 			if (settings == nullptr)
@@ -500,7 +503,7 @@ namespace Engine {
 				static_cast<void>(event);
 			}
 			auto operation = CreateScope<ReplayMethodOperation>(replay);
-			ENGINE_TRY(operation->Restart(context, { .Verify = params.Verify, .StrictHash = params.StrictHash, .WithoutInput = params.WithoutInput }));
+			ENGINE_TRY(operation->Restart(context, { .Verify = params.Verify, .StrictHash = params.StrictHash, .WithoutInput = params.WithoutInput, .NameDivergenceCauses = true, .ContinuePastCheckpoint = params.ContinuePastCheckpoint }));
 			return Scope<PendingOperation>(std::move(operation));
 		}
 
@@ -529,12 +532,14 @@ namespace Engine {
 			.Field("path", &InputRecordResult::Path, "Canonical saved path; empty on Start.")
 			.Field("stateHash", &InputRecordResult::StateHash, "Observed terminal state hash, written as FinalStateHash; empty on Start. It covers the simulated world only (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input.")
 			.Field("checkpoints", &InputRecordResult::Checkpoints, "State-hash checkpoints written, one every 60 ticks before the final tick; 0 on Start.")
-			.Field("inputCheckTick", &InputRecordResult::InputCheckTick, "Stop with input events: the tick where the input check (the recording replayed without its input) ended, at the first checkpoint that differed or at the final tick; the play session waits paused there. 0 when no check ran.");
+			.Field("inputCheckTick", &InputRecordResult::InputCheckTick, "Stop with input events: the tick where the input check (the recording replayed without its input) ended, at the first checkpoint that differed or at the final tick; the play session waits paused there. 0 when no check ran.")
+			.Field("warnings", &InputRecordResult::Warnings, "Stop: notes on the written replay; empty on Start. The input check warns when its run without input differed only at checkpoints but reached the recorded final state hash: the final hash then proves only the end state, and only the checkpoints prove the play.");
 		registry.Struct<InputReplayParams>("InputReplayParams", "Replay an asset in a fresh deterministic session.")
 			.Field("path", &InputReplayParams::Path, "Replay asset path, or a Runtime recording's returned user://Replays identity.")
 			.Field("verify", &InputReplayParams::Verify, "Evaluate cooked expectations.")
 			.Field("strictHash", &InputReplayParams::StrictHash, "Compare the recorded state hash at every checkpoint and at the final tick; requires verify. The first checkpoint that differs ends the playback there.")
-			.Field("withoutInput", &InputReplayParams::WithoutInput, "Apply none of the replay's input events: the check that its outcome depends on its input; requires verify. A replay whose verification still passes this way proves nothing about its input.");
+			.Field("withoutInput", &InputReplayParams::WithoutInput, "Apply none of the replay's input events: the check that its outcome depends on its input; requires verify. A replay whose verification still passes this way proves nothing about its input.")
+			.Field("continuePastCheckpoint", &InputReplayParams::ContinuePastCheckpoint, "Play on past every checkpoint whose hash differs, to the final tick, and compare the final hash too; requires strictHash. The replay still fails when any checkpoint differed (checkpointsFailed, firstFailedCheckpointTick). With withoutInput it tells a replay whose final hash alone does not depend on its input.");
 		registry.Struct<InputReplayResult::Expectation>("InputReplayExpectationResult", "One replay expectation and its authored location.")
 			.Field("tick", &InputReplayResult::Expectation::Tick, "Completed-tick boundary.")
 			.Field("evaluated", &InputReplayResult::Expectation::Evaluated, "The expectation executed.")
@@ -556,7 +561,29 @@ namespace Engine {
 			.Field("checkpointsChecked", &InputReplayResult::CheckpointsChecked, "State-hash checkpoints compared (strictHash), the failed one included.")
 			.Field("checkpointFailed", &InputReplayResult::CheckpointFailed, "A checkpoint's hash differed: playback stopped at its tick (finalTick), and stateHash and expectedStateHash are the observed and recorded hashes there.")
 			.Field("withoutInput", &InputReplayResult::WithoutInput, "None of the replay's input events were applied.")
+			.Field("checkpointsFailed", &InputReplayResult::CheckpointsFailed, "continuePastCheckpoint: the checkpoints whose hash differed; 0 otherwise.")
+			.Field("firstFailedCheckpointTick", &InputReplayResult::FirstFailedCheckpointTick, "continuePastCheckpoint: the tick of the first checkpoint whose hash differed; 0 when none differed or without continuePastCheckpoint.")
+			.Field("changes", &InputReplayResult::Changes, "When a hash differed in a playback with the replay's input: what changed since the recording, by the replay's start fingerprint (an entity, a component of an entity, a script, a material or another referenced asset), one line each; empty for a replay recorded without a fingerprint.")
 			.Field("expect", &InputReplayResult::Expect, "Every expectation outcome in authored order.");
+		registry.Struct<InputReadReplayParams>("InputReadReplayParams", "Read a replay back, its input events a page at a time.")
+			.Field("path", &InputReadReplayParams::Path, "Required: the project's .replay source, project-relative or project://.")
+			.Field("cursor", &InputReadReplayParams::Cursor, "Opaque cursor of the next page of events; empty for the first.")
+			.Field("limit", &InputReadReplayParams::Limit, "Events per page, 1 to 1000.", FieldMeta{ .Min = 1.0, .Max = 1000.0 });
+		registry.Struct<InputReadReplayCheckpoint>("InputReadReplayCheckpoint", "One state-hash checkpoint of a replay.")
+			.Field("tick", &InputReadReplayCheckpoint::Tick, "Completed-tick boundary.")
+			.Field("stateHash", &InputReadReplayCheckpoint::StateHash, "The recorded state hash there.");
+		registry.Struct<InputReadReplayResult>("InputReadReplayResult", "A replay read back: its header, a page of its input events in play.step's input form, its expectations and checkpoints.")
+			.Field("path", &InputReadReplayResult::Path, "Canonical project-relative path.")
+			.Field("formatVersion", &InputReadReplayResult::FormatVersion, "The file's own format version, before migration.")
+			.Field("header", &InputReadReplayResult::Header, "The header as the file writes it: Scene {Handle, Path}, Parameters, Seed, FixedHz, EngineVersion and Config.")
+			.Field("finalTick", &InputReadReplayResult::FinalTick, "Completed ticks the replay runs.")
+			.Field("finalStateHash", &InputReadReplayResult::FinalStateHash, "The recorded state hash at finalTick.")
+			.Field("eventCount", &InputReadReplayResult::EventCount, "Every input event of the replay.")
+			.Field("events", &InputReadReplayResult::Events, "This page of events, in play.step's input form (camelCase, only the members each type reads) with each tick the replay's absolute tick: play.step {ticks: finalTick, input: events} from tick 0 of the header's session applies them when they fit one page.")
+			.Field("nextCursor", &InputReadReplayResult::NextCursor, "Cursor of the next page; empty after the last event.")
+			.Field("expect", &InputReadReplayResult::Expect, "The replay's expectations, in the form input.record's and test.run's expect take.")
+			.Field("checkpoints", &InputReadReplayResult::Checkpoints, "The replay's state-hash checkpoints.")
+			.Field("hasFingerprint", &InputReadReplayResult::HasFingerprint, "The replay carries a start fingerprint, so a failed replay names what changed since its recording.");
 	}
 
 	void RegisterReplayMethods(MethodRegistry& methods)
@@ -565,6 +592,8 @@ namespace Engine {
 			{ .Name = "input.record", .Description = "Starts a tick-zero recording or saves its validated applied inputs, expectations and state-hash checkpoints (one every 60 ticks). Stop checks output write permission. A recording with input events is first replayed with them (the verification, which replaces the play session as input.replay does): unless that run reproduces every checkpoint, the final hash and every expectation and raises no script error, Stop refuses to write it (Validation naming the first divergence, the run's outcome in error data verification), which catches a script.eval that wrote script state during the recording; the run is not torn down, so an error raised only at teardown (OnDestroy) is not counted, while test.run counts it when it plays the replay. It is then replayed without them (the input check); when that run also reproduces every checkpoint, the final hash and every expectation, whatever script errors it raises, the recording's outcome does not depend on its input and Stop refuses to write it (Validation, the check's outcome in error data inputCheck). Either way the play session is the last run's, paused where it ended. End such a recording while the played state is still in the scene. A recording without input events is written as recorded, without either run, so verify it with input.replay {verify: true, strictHash: true}.", .RequiredParams = { "action" }, .ExposeAsTool = true, .AvailableInRuntime = true, .TimeoutSeconds = 600, .Examples = { { .Description = "Start a fresh recording.", .Params = Json{ { "action", "Start" } } }, { .Description = "Save the recording.", .Params = Json{ { "action", "Stop" }, { "path", "Assets/Tests/Recorded.replay" } } } } }, &Automation::InputRecord);
 		methods.AddPending<AutomationMethodContext, InputReplayParams, InputReplayResult>(
 			{ .Name = "input.replay", .Description = "Replays recorded inputs in a fresh session; verification failures retain every expectation and hash outcome in error data. strictHash compares the state hash at each checkpoint and at the final tick and stops at the first checkpoint that differs. The state hash covers the simulated world (entities and their serialized components, the tick, Random, id draws, physics), never script tables, so expectations observe script state. withoutInput replays without the input events, the check that the replay depends on its input. Afterwards the session stays paused at the replay's last tick (or where playback stopped), so script.eval, scene.query and entity.get read its final state; play.stop ends it.", .RequiredParams = { "path" }, .ExposeAsTool = true, .AvailableInRuntime = true, .TimeoutSeconds = 600, .Examples = { { .Description = "Verify a replay.", .Params = Json{ { "path", "Assets/Tests/Recorded.replay" }, { "verify", true }, { "strictHash", true } } }, { .Description = "Check that a replay's verification fails without its input.", .Params = Json{ { "path", "Assets/Tests/Recorded.replay" }, { "verify", true }, { "strictHash", true }, { "withoutInput", true } } } } }, &Automation::InputReplay);
+		methods.Add(
+			{ .Name = "input.readReplay", .Description = "Reads a replay back: its header, its input events a page at a time in play.step's input form with absolute ticks, its expectations and checkpoints. So a replay made with input.record can be re-recorded from its own events: start a recording of the header's scene, seed and parameters, play.step {ticks: finalTick, input: events}, and stop with its expectations.", .RequiredParams = { "path" }, .ExposeAsTool = true, .Examples = { { .Description = "Read the first page of a replay.", .Params = Json{ { "path", "Assets/Tests/Replays/Opening.replay" } } } } }, &Automation::InputReadReplay);
 	}
 
 }

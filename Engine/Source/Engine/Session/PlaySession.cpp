@@ -89,6 +89,14 @@ namespace Engine {
 			return {};
 		}
 
+		// M19 (Docs/Decisions/0030-m19-contract.md decisions 27 and 28): the start of a session with a native module (its
+		// scene's native components canonicalized, its NativeWorld created), which stream N-B implements in Prepare.
+		static Status PrepareNativeModule(const PlaySessionSpecification& /*specification*/)
+		{
+			ENGINE_CONTRACT_STUB();
+			return MakeError(ErrorCode::Unsupported, "a play session with a native module (Docs/Decisions/0030-m19-contract.md decision 28, stream N-B)");
+		}
+
 		// The entity cap's error (§5.7).
 		static std::unexpected<Error> MakeEntityLimitError(uint32_t limit, size_t count, size_t additional)
 		{
@@ -743,6 +751,7 @@ namespace Engine {
 			case PlaySessionPhase::StartFlush:              return "StartFlush";
 			case PlaySessionPhase::FixedUpdate:             return "FixedUpdate";
 			case PlaySessionPhase::Tasks:                   return "Tasks";
+			case PlaySessionPhase::NativeStep:              return "NativeStep";
 			case PlaySessionPhase::PreStepTransformUpdate:  return "PreStepTransformUpdate";
 			case PlaySessionPhase::PhysicsPreStep:          return "PhysicsPreStep";
 			case PlaySessionPhase::PhysicsStep:             return "PhysicsStep";
@@ -814,6 +823,8 @@ namespace Engine {
 	Result<Scope<PlaySession>> PlaySession::Prepare(const PlaySessionSpecification& specification, const Json& sceneDocument)
 	{
 		ENGINE_TRY(Utils::ValidateSpecification(specification));
+		if (specification.Native != nullptr)
+			ENGINE_TRY(WithContext(Utils::PrepareNativeModule(specification), "while starting the play session"));
 		const uint32_t maxEntities = specification.Project.Simulation.MaxEntities;
 
 		// A document over the cap does not start (§5.7); counted before anything is loaded.
@@ -1037,6 +1048,16 @@ namespace Engine {
 		return m_State->Project;
 	}
 
+	AssetManager* PlaySession::GetAssets() const
+	{
+		return m_State->Assets;
+	}
+
+	const ScriptFieldSchemaSource* PlaySession::GetScriptSchemas() const
+	{
+		return m_State->Schemas.get();
+	}
+
 	uint64_t PlaySession::GetSeed() const
 	{
 		return m_State->Seed;
@@ -1130,6 +1151,18 @@ namespace Engine {
 	const PhysicsSystem& PlaySession::GetPhysics() const
 	{
 		return *m_State->Physics;
+	}
+
+	NativeWorld* PlaySession::GetNative()
+	{
+		ENGINE_CONTRACT_STUB();
+		return nullptr;
+	}
+
+	const NativeWorld* PlaySession::GetNative() const
+	{
+		ENGINE_CONTRACT_STUB();
+		return nullptr;
 	}
 
 	AudioSystem* PlaySession::GetAudioSystem()

@@ -4,6 +4,7 @@
 
 #include "Engine/Asset/FontData.h"
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Core/Hash.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/Fuzz.h"
 #include "Support/TestData.h"
@@ -17,6 +18,11 @@
 namespace Engine {
 
 	namespace {
+
+		// The XXH64 of the atlas pixels of version 2 (imstb_truetype.h) for Inter at 48 pixels per em with spread 8: the
+		// committed TrueType font and the pinned CFF fixture (decision 23).
+		constexpr uint64_t InterTrueTypeAtlasHash = 0x66f83cc4b7cca3c8ull;
+		constexpr uint64_t InterCffAtlasHash = 0x1c5d3945b145bec0ull;
 
 		// The committed Inter-Regular.ttf (Resources/Fonts, SIL OFL).
 		Buffer ReadInter()
@@ -790,6 +796,25 @@ namespace Engine {
 				ring = std::max(ring, SampleGlyph(*font, *letter, glm::vec2(letter->PlaneMin.x + (centre - letter->PlaneMin.x) * static_cast<float>(step) / Samples, middle)));
 			CHECK(ring > 128.0f);
 			CHECK(SampleGlyph(*font, *letter, glm::vec2(centre, middle)) < 128.0f);
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 23 (A-STBTT, stream J): version 3 rasterizes through stb_truetype.h of
+		// the vendored stb (Vendor/stb, commit 2c980bb) instead of Dear ImGui's imstb_truetype.h, and keeps the atlases of
+		// version 2: the Inter TrueType and CFF atlases at the default settings hash as they did. Should the switch change
+		// them, stream J updates these values in the same reviewed change that regenerates the Text golden.
+		TEST_CASE("FontImporter: version 3 rasterizes through the vendored stb_truetype.h with the atlases of version 2" * doctest::skip(true))
+		{
+			CHECK(FontImporter::Version == 3);
+			Test::AssetTestFixture fixture;
+			Json settings = Json::object();
+			settings["PixelSize"] = 48.0;
+			settings["Spread"] = 8.0;
+			Result<ImportResult> truetype = ImportInter(fixture);
+			REQUIRE_MESSAGE(truetype.has_value(), truetype.error().ToString());
+			CHECK(XXH64(LoadFont(*truetype)->AtlasPixels) == InterTrueTypeAtlasHash);
+			Result<ImportResult> cff = ImportFont(fixture, "Inter-Regular.otf", ReadFontFixture("Inter-Regular.otf"), settings);
+			REQUIRE_MESSAGE(cff.has_value(), cff.error().ToString());
+			CHECK(XXH64(LoadFont(*cff)->AtlasPixels) == InterCffAtlasHash);
 		}
 	}
 

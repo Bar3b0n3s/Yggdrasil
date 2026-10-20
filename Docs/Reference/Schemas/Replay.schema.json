@@ -45,7 +45,7 @@
 			"maximum": 100000
 		},
 		"EngineVersion": {
-			"description": "The engine version that recorded the replay (informational).",
+			"description": "The replay format's engine version, which every recorder writes as \"0.1.0\" (ReplayEngineVersionString) whatever the build, so neither a version bump nor a commit rewrites a replay (informational).",
 			"type": "string"
 		},
 		"Config": {

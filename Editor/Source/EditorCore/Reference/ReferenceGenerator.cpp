@@ -1010,7 +1010,9 @@ namespace Engine {
 			properties["Parameters"] = Described(Json{ { "type", "object" } }, "The Scene.Load parameters the scene starts with (free-form).");
 			properties["Seed"] = IntegerSchema("The session seed.", 0, std::nullopt);
 			properties["FixedHz"] = IntegerSchema("The fixed simulation rate the replay was recorded at.", 1, FrameLoopConfig::MaxFixedHz);
-			properties["EngineVersion"] = StringSchema("The engine version that recorded the replay (informational).");
+			properties["EngineVersion"] = StringSchema(
+				"The replay format's engine version, which every recorder writes as \"0.1.0\" (ReplayEngineVersionString) whatever the build, so neither "
+				"a version bump nor a commit rewrites a replay (informational).");
 			properties["Config"] = StringSchema("The run mode that recorded the replay (Editor, Release or Dist), never the build configuration; informational.");
 			properties["Events"] = Described(Json{ { "type", "array" }, { "items", ObjectSchema("One input event.", std::move(event), { "Tick", "Type" }) } },
 				"The applied input events, ordered by tick.");

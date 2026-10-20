@@ -179,6 +179,34 @@ class ScreenshotRenderingTests(AutomationTestCase):
         client.call("scene.save")
         self.shut_down(client)
 
+    @unittest.skip("contract stub: screenshot keep (Docs/Decisions/0030-m19-contract.md decision 9, A-SHOTS, stream E)")
+    def test_kept_screenshot_outlives_the_next_session(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 9 (A-SHOTS; ADR 0027 decision 12's deferral): keep writes the PNG
+        # below Library/Automation/Kept/, which no later editor session prunes, so a look screenshot no longer needs
+        # copying before the next launch (ADR 0027 decision 9).
+        if not self.require_gpu():
+            return
+        client, root = self.open_editor_with_scene(renderer="vulkan")
+        kept = root / "Library" / "Automation" / "Kept"
+        shot = client.call("viewport.screenshot", {"view": "scene", "width": 160, "height": 90, "keep": True})
+        view_path = Path(shot["path"])
+        self.assertEqual(view_path.parent, kept)
+        editor_shot = client.call("editor.screenshot", {"maxDimension": 256, "keep": True})
+        editor_path = Path(editor_shot["path"])
+        self.assertEqual(editor_path.parent, kept)
+        plain = client.call("viewport.screenshot", {"view": "scene", "width": 160, "height": 90})
+        self.assertEqual(Path(plain["path"]).parent, root / "Library" / "Automation" / "Out")
+        client.call("scene.save")
+        self.shut_down(client)
+
+        # The next session on the project, whose first write prunes what earlier servers left in Out/, keeps Kept/.
+        later = self.connect(self.start_editor(project=root, renderer="vulkan"))
+        later.call("viewport.screenshot", {"view": "scene", "width": 160, "height": 90})
+        self.assertTrue(view_path.is_file())
+        self.assertTrue(editor_path.is_file())
+        self.assertEqual(png_size(view_path), (160, 90))
+        self.shut_down(later)
+
     def test_viewport_screenshot_renders_debug_views(self) -> None:
         # M8 (§8.5; ADR 0009 decision 33 deferred debugView here; Docs/Decisions/0013-m8-decisions.md decision 12): each
         # debug view renders, the names ignore case, an empty name is Lit, and an unknown one is InvalidParams.

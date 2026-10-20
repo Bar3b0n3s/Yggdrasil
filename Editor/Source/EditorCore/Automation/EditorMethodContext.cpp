@@ -4,6 +4,7 @@
 #include "EditorCore/Automation/AutomationServer.h"
 #include "EditorCore/Automation/Private/AssetMethodSupport.h"
 #include "EditorCore/Automation/Private/MethodSupport.h"
+#include "EditorCore/Automation/Private/ProjectReplaySource.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Project/ProjectManager.h"
@@ -454,6 +455,16 @@ namespace Engine {
 	Result<std::string> EditorMethodContext::WriteOutputFile(std::string_view extension, std::span<const std::byte> bytes)
 	{
 		return m_Server->WriteOutputFile(extension, bytes);
+	}
+
+	Result<std::string> EditorMethodContext::WriteKeptFile(std::string_view extension, std::span<const std::byte> bytes)
+	{
+		return m_Server->WriteKeptFile(extension, bytes);
+	}
+
+	Result<ReplayDocument> EditorMethodContext::ReadReplayDocument(std::string_view path, ReplayLoadReport& report, std::string& canonicalPath) const
+	{
+		return Utils::ReadProjectReplay(*m_Editor, path, report, canonicalPath);
 	}
 
 	SessionHostDescription EditorMethodContext::DescribeSession() const

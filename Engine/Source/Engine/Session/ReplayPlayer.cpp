@@ -28,6 +28,13 @@ namespace Engine {
 		// whose verification depends on its input, never a reason to re-record it, so the causes are not named there.
 		constexpr std::string_view ReplayWithoutInputNote = "the replay ran without its input events, which a replay that depends on its input is expected to fail";
 
+		// A playback that continues past a checkpoint whose hash differs (ReplayPlaybackOptions::ContinuePastCheckpoint).
+		Status CheckContinuePastCheckpoint(const ReplayPlaybackOptions& options)
+		{
+			ENGINE_CONTRACT_STUB();
+			return std::unexpected(Error(ErrorCode::Unsupported, std::format("a replay playback that continues past a failed checkpoint (strictHash {}; Docs/Decisions/0030-m19-contract.md decision 3, stream B)", options.StrictHash)));
+		}
+
 	}
 
 	std::string_view GetReplayDivergenceCauses()
@@ -38,6 +45,15 @@ namespace Engine {
 	std::string_view GetReplayDivergenceHint()
 	{
 		return ReplayDivergenceHint;
+	}
+
+	std::string MakeFinalHashIndependentWarning(std::string_view replay, uint64_t checkpointTick, std::string_view finalStateHash)
+	{
+		ENGINE_CONTRACT_STUB();
+		static_cast<void>(replay);
+		static_cast<void>(checkpointTick);
+		static_cast<void>(finalStateHash);
+		return {};
 	}
 
 	struct ReplayPlayer::State
@@ -173,6 +189,8 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidArgument, "replay needs data and a fresh session at tick zero");
 		if (options.StrictHash && !options.Verify)
 			return MakeError(ErrorCode::InvalidArgument, "strictHash requires verify");
+		if (options.ContinuePastCheckpoint)
+			ENGINE_TRY(CheckContinuePastCheckpoint(options));
 		ReplayDocument document;
 		document.Header = replay->Header;
 		document.Events = replay->Events;

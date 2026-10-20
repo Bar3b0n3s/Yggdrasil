@@ -33,8 +33,31 @@
 // "Metadata" is an object the exporter fills (the project settings and the asset registry data the runtime needs ride in
 // the TOC, §14.1; M7 and M15 define its members); readers keep it verbatim. Integrity (§14.1): the TOC hash is verified at
 // open; each entry's XXH64 is verified on its first read in every configuration.
+//
+// Version 2 (M19, Docs/Decisions/0030-m19-contract.md decision 17, B-PAKZ; PakCompressionFormatVersion, reserved by the
+// phase 1 ledger): an entry may be stored deflated. The header keeps its layout; the TOC's Version and the header's both
+// become 2, and every entry gains two members after "XXH64", "Compression" ("None" or "Deflate", PakCompression) and
+// "StoredSize" (the bytes it takes at Offset). "Size" and "XXH64" keep meaning the entry's own bytes, the ones ReadEntry
+// returns (a cooked artifact, whose XXH64 AssetManager::GetCookedHash shares with the editor's cache), so a deflated
+// entry is verified after it is inflated; the byte-range rules apply to [Offset, Offset + StoredSize). A "None" entry has
+// StoredSize == Size; a "Deflate" entry holds a zlib stream (RFC 1950, Asset/PakCompression.h) with
+// 0 < StoredSize < Size and 8 × (Size − StoredSize) >= Size, which the writer guarantees. Readers read exactly the
+// current version (a pak is a build output, never committed, so there is no migration). Until stream G lands the version 2
+// reader and writer, PakHeader::CurrentVersion and PakToc::CurrentVersion stay 1 and the members below stay at their
+// defaults, unread.
 
 namespace Engine {
+
+	// The first pak version with per-entry compression (decision 17), reserved by the phase 1 ledger: PakHeader::CurrentVersion
+	// and PakToc::CurrentVersion become it with stream G's reader and writer.
+	inline constexpr uint32_t PakCompressionFormatVersion = 2;
+
+	// How an entry's bytes are stored (version 2's "Compression" TOC member, spelled as the enumerator).
+	enum class PakCompression : uint8_t
+	{
+		None,   // stored as they are: StoredSize == Size
+		Deflate // a zlib stream (RFC 1950) that inflates to exactly Size bytes (InflatePakEntry, Asset/PakCompression.h)
+	};
 
 	struct PakHeader
 	{
@@ -64,6 +87,10 @@ namespace Engine {
 		uint64_t Offset = 0; // from the start of the pak, a multiple of PakEntryAlignment, after the header
 		uint64_t Size = 0;
 		uint64_t Hash = 0; // XXH64 (seed 0) of the entry's bytes ("XXH64" in the TOC)
+		// Version 2 (decision 17): how the bytes are stored, and how many bytes they take at Offset ("StoredSize"; equal to
+		// Size for None). Size and Hash stay those of the entry's own bytes, before compression.
+		PakCompression Compression = PakCompression::None;
+		uint64_t StoredSize = 0;
 
 		bool operator==(const PakEntry&) const = default;
 	};
@@ -95,7 +122,8 @@ namespace Engine {
 	// with unique paths and, among cooked assets, unique handles; each Type an AssetType name other than None or "File"
 	// (with a null handle exactly for "File"); offsets aligned, after the header and before `dataEnd`, ranges inside
 	// [PakHeader::Size, dataEnd) and not overlapping. Never asserts on data. Errors: Parse; Validation (located);
-	// UnsupportedVersion.
+	// UnsupportedVersion. Version 2 (decision 17): Compression and StoredSize are required, the ranges are those of
+	// StoredSize, and a StoredSize that breaks the file comment's rules for its Compression is Validation.
 	[[nodiscard]] Result<PakToc> ParsePakToc(std::string_view text, uint64_t dataEnd);
 
 }

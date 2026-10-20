@@ -153,6 +153,19 @@ namespace Engine {
 				"give 16 hex digits, a unique id prefix of at least 6 hex digits, or a path starting with '/' such as \"/Game/Board\""));
 		}
 
+		SceneEntityReferenceResolver::SceneEntityReferenceResolver(Scene& scene)
+			: m_Scene(&scene)
+		{
+		}
+
+		Result<UUID> SceneEntityReferenceResolver::ResolveEntityReference(std::string_view reference, std::string_view pointer)
+		{
+			ENGINE_CONTRACT_STUB();
+			static_cast<void>(m_Scene);
+			return std::unexpected(Error(ErrorCode::Unsupported, std::format("resolving the entity reference '{}' in component data (Docs/Decisions/0030-m19-contract.md decision 7, stream C)", reference))
+					.WithLocation({ .File = {}, .JsonPointer = std::string(pointer), .Entity = {} }));
+		}
+
 		EntitySummary SummarizeEntity(ConstEntity entity)
 		{
 			ENGINE_ASSERT(entity.IsValid(), "SummarizeEntity needs a valid entity");

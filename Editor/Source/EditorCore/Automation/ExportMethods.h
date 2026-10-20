@@ -21,7 +21,7 @@ namespace Engine {
 	class PendingOperation;
 	class TypeRegistry;
 
-	// project.export {config, outDir?, smokeTest?, testing?} (§13.5).
+	// project.export {config, outDir?, smokeTest?, testing?, featureTest?} (§13.5).
 	struct ProjectExportParams
 	{
 		ExportConfiguration Config = ExportConfiguration::Release; // required; registry enum "ExportConfiguration"
@@ -36,6 +36,29 @@ namespace Engine {
 		// Export.Exclude says, and validation also refuses invalid suites and replays that do not import. The default output
 		// directory becomes Build/<Platform>-<Config>-Testing/<Name>, so it never replaces the plain export.
 		bool Testing = false;
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 10, A-DISTSELF): run the staged package's --feature-test
+		// (ExportSpecification::FeatureTest, Exporter.h step 6a) and report its replays' hashes in the result's featureTest, so a
+		// builder sees the hashes the games suite's Dist half compares. Requires testing: InvalidParams at /featureTest
+		// otherwise.
+		bool FeatureTest = false;
+	};
+
+	// One replay of the --feature-test run (ExportFeatureTestReplay).
+	struct ExportFeatureTestReplaySummary
+	{
+		std::string Path{};      // project-relative
+		std::string StateHash{}; // observed at its final tick
+		bool Passed = false;
+	};
+
+	// The --feature-test run of a testing export (ExportFeatureTestReport).
+	struct ExportFeatureTestSummary
+	{
+		bool Ran = false;
+		VariantValue ExitCode{}; // an integer, null when it did not run (as smokeTestExitCode)
+		bool Passed = false;
+		std::string ReportPath{}; // absolute native path; empty when it did not run
+		std::vector<ExportFeatureTestReplaySummary> Replays{};
 	};
 
 	// One file of the package (ExportedFile).
@@ -74,6 +97,13 @@ namespace Engine {
 		uint32_t ReplayCount = 0;
 		bool ResourcesPatched = false;
 		std::vector<ExportPhaseTimingSummary> PhaseTimings{};
+		// M19 (decision 10): the featureTest run; Ran false without featureTest.
+		ExportFeatureTestSummary FeatureTest{};
+		// M19 (Docs/Decisions/0030-m19-contract.md decisions 20 and 21): ExportReport::Reachability as it is, the registry
+		// structs "ExportReachability", "ExportReachedAsset" and "ExportComputedLoad".
+		ExportReachability Reachability{};
+		// M19 (decision 33): ExportReport::NativeModule.
+		bool NativeModule = false;
 	};
 
 	// project.export's result for `report` (§14.2 step 8): the same document the method returns, which `Editor --export
@@ -91,8 +121,9 @@ namespace Engine {
 
 	}
 
-	// Registers ExportConfiguration, ExportPhase, ProjectExportParams, ExportedFileSummary, ExportPhaseTimingSummary and
-	// ProjectExportResult.
+	// Registers ExportConfiguration, ExportPhase, ProjectExportParams, ExportedFileSummary, ExportPhaseTimingSummary,
+	// ExportFeatureTestReplaySummary, ExportFeatureTestSummary, ExportReachReason, ExportReachedAsset, ExportComputedLoad,
+	// ExportReachability and ProjectExportResult.
 	void RegisterExportMethodTypes(TypeRegistry& registry);
 
 	// Registers project.export: a tool (§13.8 project_export), Mutates (it writes under the project's Build/, which read-only

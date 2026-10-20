@@ -15,6 +15,10 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <string>
+#include <vector>
+
 namespace Engine {
 
 	namespace Utils {
@@ -153,6 +157,16 @@ namespace Engine {
 				}
 			}
 
+			// M19 (Docs/Decisions/0030-m19-contract.md decision 8): the ops' names, for "$ref" by name.
+			std::vector<std::string> names;
+			names.reserve(params.Ops.size());
+			for (const EditBatchOp& op : params.Ops)
+				names.push_back(op.Name);
+			const bool named = std::ranges::any_of(names, [](const std::string& name)
+			{
+				return !name.empty();
+			});
+
 			EditorTransaction transaction(context.GetEditor(), params.Label);
 			std::vector<Json> results;
 			results.reserve(params.Ops.size());
@@ -161,7 +175,7 @@ namespace Engine {
 				const EditBatchOp& op = params.Ops[index];
 				Json opParams = op.Params.IsNull() ? Json::object() : op.Params.Get();
 				context.SetPhase(std::format("Automation:edit.batch {}/{} {}", index + 1, params.Ops.size(), op.Method));
-				Status substituted = SubstituteReferences(opParams, results, 0);
+				Status substituted = named ? SubstituteReferences(opParams, results, 0, names) : SubstituteReferences(opParams, results, 0);
 				Result<Json> opResult = substituted ? registry.InvokeNested(context, op.Method, opParams) : Result<Json>(std::unexpected(substituted.error()));
 				if (!opResult)
 				{
@@ -292,7 +306,9 @@ namespace Engine {
 		registry.Struct<EditBatchOp>("EditBatchOp", "One op of edit.batch: a method and its params.")
 			.Field("method", &EditBatchOp::Method, "The method, such as \"entity.create\"; it must be allowed in batches.")
 			.Field("params", &EditBatchOp::Params,
-				"The method's params (an object); {\"$ref\": \"<op index>.<path>\"} stands for a value of an earlier op's result.");
+				"The method's params (an object); {\"$ref\": \"<op index>.<path>\"} stands for a value of an earlier op's result, and {\"$ref\": \"<op name>.<path>\"} for one of the earlier op with that name.")
+			.Field("name", &EditBatchOp::Name,
+				"Optional: a name later ops' $ref may use instead of this op's index, which does not shift when an op is inserted. An identifier (letters, digits and _, not starting with a digit, at most 64 characters), unique within the batch.");
 
 		registry.Struct<EditBatchParams>("EditBatchParams", "The params of edit.batch: ops run atomically as one undo step.")
 			.Field("label", &EditBatchParams::Label, "The undo label of the batch.")

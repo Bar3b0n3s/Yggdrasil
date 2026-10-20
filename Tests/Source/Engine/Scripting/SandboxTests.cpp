@@ -22,6 +22,7 @@
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <format>
@@ -637,6 +638,46 @@ namespace Engine {
 			REQUIRE(retry.has_value());
 			CHECK(retry->Value.Get() == Json(13));
 			CHECK(reader.Reads == std::vector<std::string>{ "project://Assets/Nil.luau", "project://Assets/Failure.luau", "project://Assets/Failure.luau" });
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 22 (B-LUAU): the yield behaviour the first-party require keeps. A
+		// module's evaluation cannot yield: its require fails with a yield error and leaves nothing cached, so a fixed module
+		// loads later; and a require inside a coroutine returns at once, the coroutine yielding and resuming around it as
+		// around any call.
+		TEST_CASE("Sandbox: a required module that yields fails its require and stays retryable, and a coroutine may require")
+		{
+			Random random(41);
+			SandboxModuleReader reader;
+			reader.Sources.emplace("project://Assets/Yielding.luau", "coroutine.yield(); return 1");
+			reader.Sources.emplace("project://Assets/Plain.luau", "return 7");
+			SandboxSpecification specification{};
+			specification.RandomStream = &random;
+			specification.SourceModules = &reader;
+			auto sandbox = Sandbox::Create(specification);
+			REQUIRE_MESSAGE(sandbox.has_value(), (sandbox ? "" : sandbox.error().ToString()));
+			const auto path = VfsPath::Parse("project://Assets/Root.luau");
+			REQUIRE(path.has_value());
+
+			CHECK_FALSE((*sandbox)->Evaluate("return require('./Yielding')", *path).has_value());
+			// The module runs below the require's C call, so its yield is Luau's "attempt to yield across metamethod/C-call
+			// boundary" error.
+			REQUIRE((*sandbox)->GetLastError().has_value());
+			CAPTURE((*sandbox)->GetLastError()->Message);
+			CHECK((*sandbox)->GetLastError()->Message.find("yield") != std::string::npos);
+			reader.Sources["project://Assets/Yielding.luau"] = "return 2";
+			const auto retried = (*sandbox)->Evaluate("return require('./Yielding')", *path);
+			REQUIRE_MESSAGE(retried.has_value(), retried.error().ToString());
+			CHECK(retried->Value.Get() == Json(2));
+
+			const auto resumed = (*sandbox)->Evaluate(
+				"local co = coroutine.create(function() local value = require('./Plain'); coroutine.yield(value); return value + 1 end)\n"
+				"local _, first = coroutine.resume(co)\n"
+				"local _, second = coroutine.resume(co)\n"
+				"return first * 100 + second",
+				*path);
+			REQUIRE_MESSAGE(resumed.has_value(), resumed.error().ToString());
+			CHECK(resumed->Value.Get() == Json(708));
+			CHECK(std::ranges::count(reader.Reads, std::string("project://Assets/Plain.luau")) == 1);
 		}
 
 		TEST_CASE("Sandbox: a required module rejects multiple return values")

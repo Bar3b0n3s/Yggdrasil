@@ -117,6 +117,12 @@ namespace Engine {
 		std::string Icon;
 		std::string Version = "1.0.0";
 		std::string Company;
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 21, B-PRUNE-GAME): Game.pak packages only what StartScene and
+		// Export.BuildScenes (and a testing export's testing content) reach through references and literal Assets.Load
+		// paths, instead of every asset below Assets/ that Export.Exclude leaves in. Opt-in, off by default. Stream R
+		// registers it as the field "PruneUnreferenced" after Company, with its gate 8 observation, the canonical project
+		// templates and fixtures and the demos' recorded upgrade; until then it is neither serialized nor read.
+		bool PruneUnreferenced = false;
 	};
 
 	// The rule of every text an exported executable's resources carry (Export.Company, and the strings of the macOS

@@ -70,6 +70,23 @@ namespace Engine {
 			CHECK_FALSE(GetPlaceholderHandle(AssetType::Script).IsValid());
 		}
 
+		// Docs/Decisions/0030-m19-contract.md decision 20 (B-PRUNE-ENG, stream D): the built-ins every Engine.pak holds, since
+		// the Runtime asks for them by handle with no asset referencing them, are the tonemap's blue noise and the Font
+		// placeholder; each is a File or Generated entry of the catalogue, never a procedural one (those are generated, not
+		// packaged).
+		TEST_CASE("BuiltinAssets: every Engine.pak holds the blue-noise texture and the font placeholder" * doctest::skip(true))
+		{
+			const std::span<const AssetHandle> required = GetRuntimeRequiredBuiltinHandles();
+			CHECK(std::vector<AssetHandle>(required.begin(), required.end()) == std::vector<AssetHandle>{ BuiltinAssetHandles::BlueNoiseTexture, BuiltinAssetHandles::DefaultFont });
+			CHECK(std::ranges::find(required, GetPlaceholderHandle(AssetType::Font)) != required.end());
+			const std::span<const BuiltinAssetEntry> procedural = GetProceduralBuiltinEntries();
+			for (const AssetHandle handle : required)
+			{
+				CAPTURE(handle.ToString());
+				CHECK(std::ranges::find(procedural, handle, &BuiltinAssetEntry::Handle) == procedural.end());
+			}
+		}
+
 		TEST_CASE("BuiltinAssets: the procedural entries are the compiled-in meshes, materials, textures and the silent clip")
 		{
 			const std::span<const BuiltinAssetEntry> entries = GetProceduralBuiltinEntries();

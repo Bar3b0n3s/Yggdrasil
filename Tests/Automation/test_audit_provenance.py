@@ -178,6 +178,20 @@ class ReaderTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             provenance.enumerate_engine_files(project, "git")
 
+    @unittest.skip("contract stub: the audit of Native/ (Docs/Decisions/0030-m19-contract.md decision 35, stream N-D)")
+    def test_native_sources_are_engine_consumed(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 35 (the milestone's acceptance: "the provenance audit covers the
+        # module's sources"): every file below Native/ is engine-consumed like every file below Assets/, so a source the
+        # editor did not write (native.write) is a finding; the builds below Library/Native/ are never read.
+        project = self.directory / "Game"
+        for relative in ("Game.eproj", "Assets/Scenes/Main.scene", "Native/Spinner.cpp", "Native/Systems/Move.h",
+                         "Native/Notes.txt", "Library/Native/Builds/00000001/NativeBuild.json"):
+            (project / relative).parent.mkdir(parents=True, exist_ok=True)
+            (project / relative).write_bytes(b"x")
+        self.assertEqual(provenance.enumerate_engine_files(project, "disk"),
+                         ["Assets/Scenes/Main.scene", "Game.eproj", "Native/Notes.txt", "Native/Spinner.cpp",
+                          "Native/Systems/Move.h"])
+
 
 class FixtureTests(unittest.TestCase):
     def setUp(self) -> None:

@@ -47,6 +47,18 @@ namespace Engine {
 		result.PhaseTimings.reserve(report.PhaseTimings.size());
 		for (const ExportPhaseTiming& timing : report.PhaseTimings)
 			result.PhaseTimings.push_back({ .Phase = timing.Phase, .Seconds = static_cast<float>(timing.Seconds) });
+		result.FeatureTest.Ran = report.FeatureTest.Ran;
+		if (report.FeatureTest.Ran)
+		{
+			result.FeatureTest.ExitCode = VariantValue(Json(report.FeatureTest.ExitCode));
+			result.FeatureTest.ReportPath = FileSystem::PathToUtf8(report.FeatureTest.ReportPath);
+		}
+		result.FeatureTest.Passed = report.FeatureTest.Passed;
+		result.FeatureTest.Replays.reserve(report.FeatureTest.Replays.size());
+		for (const ExportFeatureTestReplay& replay : report.FeatureTest.Replays)
+			result.FeatureTest.Replays.push_back({ .Path = replay.Path, .StateHash = replay.StateHash, .Passed = replay.Passed });
+		result.Reachability = report.Reachability;
+		result.NativeModule = report.NativeModule;
 		return result;
 	}
 
@@ -100,6 +112,8 @@ namespace Engine {
 			if (binaryRoot.empty())
 				return MakeError(ErrorCode::Unsupported, "this editor exports nothing: it was started without the directory of the build outputs");
 
+			if (params.FeatureTest && !params.Testing)
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/featureTest", "featureTest requires testing:true", "a feature test runs a testing export's suites and replays"));
 			// The smoke test runs ExportSpecification's default of 300 frames (§14.2 step 7).
 			ExportSpecification specification;
 			specification.Configuration = params.Config;
@@ -110,6 +124,7 @@ namespace Engine {
 			specification.ExportRoot = context.GetServer().GetSpecification().ExportRoot;
 			specification.SmokeTest = params.SmokeTest;
 			specification.Testing = params.Testing;
+			specification.FeatureTest = params.FeatureTest;
 			ENGINE_TRY_ASSIGN(Scope<Exporter> exporter, Exporter::Start(context.GetEditor(), specification));
 			return Scope<PendingOperation>(CreateScope<ProjectExportOperation>(std::move(exporter)));
 		}
@@ -127,11 +142,13 @@ namespace Engine {
 			.Entry(ExportPhase::Validate, "Validate", "The project, its scenes, scripts and settings and the build outputs are checked; nothing is written.")
 			.Entry(ExportPhase::Cook, "Cook", "Every included asset is cooked through the asset manager.")
 			.Entry(ExportPhase::WritePaks, "WritePaks", "Data/Engine.pak and Data/Game.pak are written and verified.")
+			.Entry(ExportPhase::NativeBuild, "NativeBuild", "A game with a Native/ folder gets a Runtime built with its native module linked in; other games skip it.")
 			.Entry(ExportPhase::CopyRuntime, "CopyRuntime", "The configuration's Runtime is copied, renamed after the project, with what it needs.")
 			.Entry(ExportPhase::PatchResources, "PatchResources", "The executable's icon and version (Windows) or Info.plist (macOS) are written.")
 			.Entry(ExportPhase::WriteManifest, "WriteManifest", "Game.json and THIRD_PARTY_NOTICES.txt are written.")
 			.Entry(ExportPhase::Sign, "Sign", "The macOS bundle is signed; nothing happens elsewhere.")
 			.Entry(ExportPhase::SmokeTest, "SmokeTest", "The staged game runs headless when smokeTest asks for it.")
+			.Entry(ExportPhase::FeatureTest, "FeatureTest", "The staged testing export runs --feature-test when featureTest asks for it, and its replays' hashes are read.")
 			.Entry(ExportPhase::MoveToOutput, "MoveToOutput", "The staged package replaces the output directory.")
 			.Entry(ExportPhase::Done, "Done", "The export finished.");
 
@@ -147,7 +164,60 @@ namespace Engine {
 				"A testing export: Game.json says Testing true, so the exported game runs --feature-test; Assets/Tests/** and every "
 				"Testing.Suites script and scene and Testing.Replays match are packaged whatever Export.Exclude says; invalid suites "
 				"(TEST_SUITE_INVALID) and replays that do not import fail validation. Its default output directory is "
-				"Build/<Platform>-<Config>-Testing/<Name>.");
+				"Build/<Platform>-<Config>-Testing/<Name>.")
+			.Field("featureTest", &ProjectExportParams::FeatureTest,
+				"With testing: run the staged game's --feature-test before it replaces the output directory and report its replays' state "
+				"hashes in featureTest, the hashes the games suite's Dist half compares with the editors'. A failing run does not fail the "
+				"export; the report says so.");
+
+		registry.Struct<ExportFeatureTestReplaySummary>("ExportFeatureTestReplaySummary", "One replay of an exported game's --feature-test run.")
+			.Field("path", &ExportFeatureTestReplaySummary::Path, "The replay's project-relative path.")
+			.Field("stateHash", &ExportFeatureTestReplaySummary::StateHash, "The state hash the exported game observed at the replay's final tick.")
+			.Field("passed", &ExportFeatureTestReplaySummary::Passed, "Every row of the replay passed.");
+
+		registry.Struct<ExportFeatureTestSummary>("ExportFeatureTestSummary", "The --feature-test run of a testing export (featureTest).")
+			.Field("ran", &ExportFeatureTestSummary::Ran, "Whether it ran: false without featureTest, and for a Dist export from an editor without a graphics device.")
+			.Field("exitCode", &ExportFeatureTestSummary::ExitCode, "The run's exit code, an integer; null when it did not run.")
+			.Field("passed", &ExportFeatureTestSummary::Passed, "Exit code 0 and every row passed.")
+			.Field("reportPath", &ExportFeatureTestSummary::ReportPath, "The run's JSON report, inside the exported game's folder; empty when it did not run.")
+			.Field("replays", &ExportFeatureTestSummary::Replays, "Every replay's observed final state hash, sorted by path.");
+
+		registry.Enum<ExportReachReason>("ExportReachReason", "Why an export put an asset into its paks (the first reason its walk found).")
+			.Entry(ExportReachReason::StartScene, "StartScene", "Game.pak: the project's StartScene.")
+			.Entry(ExportReachReason::BuildScene, "BuildScene", "Game.pak: an Export.BuildScenes entry.")
+			.Entry(ExportReachReason::Testing, "Testing", "Game.pak: content a testing export packages whatever Export.Exclude says.")
+			.Entry(ExportReachReason::Dependency, "Dependency",
+				"Another packaged asset (from) references it or one of its sub-assets: an import dependency or a Script field value.")
+			.Entry(ExportReachReason::LiteralLoad, "LiteralLoad", "A packaged script (from) loads it with Assets.Load and a string literal (at line).")
+			.Entry(ExportReachReason::Required, "Required", "Engine.pak: the exported game asks for this built-in by handle, so every export holds it.")
+			.Entry(ExportReachReason::ComputedLoad, "ComputedLoad",
+				"Engine.pak: kept with every built-in, because a packaged script (from) computes an Assets.Load reference (at line).");
+
+		registry.Struct<ExportReachedAsset>("ExportReachedAsset", "One asset of an exported game's paks, and why the export packaged it.")
+			.Field("path", &ExportReachedAsset::Path, "The asset's project path, or the built-in's engine:// path.")
+			.Field("reason", &ExportReachedAsset::Reason, "The first reason the export's walk found for it.")
+			.Field("from", &ExportReachedAsset::From, "The path of the asset that reached it (Dependency, LiteralLoad, ComputedLoad); empty otherwise.")
+			.Field("line", &ExportReachedAsset::Line, "The 1-based line of from's Assets.Load (LiteralLoad, ComputedLoad); 0 otherwise.");
+
+		registry.Struct<ExportComputedLoad>("ExportComputedLoad", "An Assets.Load whose reference a packaged script computes, which the export cannot follow.")
+			.Field("script", &ExportComputedLoad::Script, "The script's project path.")
+			.Field("line", &ExportComputedLoad::Line, "The 1-based line.")
+			.Field("column", &ExportComputedLoad::Column, "The 1-based column.");
+
+		registry.Struct<ExportReachability>("ExportReachability", "What an export put into its paks and why.")
+			.Field("pruned", &ExportReachability::Pruned,
+				"Export.PruneUnreferenced was on: Data/Game.pak holds only what StartScene and Export.BuildScenes reach (and a testing export's "
+				"testing content). Off, gameAssets and prunedAssets are empty and Data/Game.pak holds every asset below Assets/ that "
+				"Export.Exclude leaves in.")
+			.Field("gameAssets", &ExportReachability::GameAssets, "Every asset of a pruned Data/Game.pak with its reason, sorted by path.")
+			.Field("prunedAssets", &ExportReachability::PrunedAssets, "The assets an unpruned export would have packaged but nothing reaches, sorted.")
+			.Field("engineBuiltins", &ExportReachability::EngineBuiltins,
+				"Every built-in of Data/Engine.pak with its reason, sorted by path: the ones the game asks for by handle and the ones its assets "
+				"reach (procedural built-ins are generated by the game and never packaged).")
+			.Field("prunedBuiltins", &ExportReachability::PrunedBuiltins, "The file and generated built-ins Data/Engine.pak leaves out, sorted.")
+			.Field("computedLoads", &ExportReachability::ComputedLoads,
+				"Every Assets.Load of a packaged script whose reference is computed, sorted by script, line and column; such a load makes "
+				"Data/Engine.pak keep every built-in.");
 
 		registry.Struct<ExportPhaseTimingSummary>("ExportPhaseTimingSummary", "How long one phase of an export took.")
 			.Field("phase", &ExportPhaseTimingSummary::Phase, "The phase.")
@@ -177,7 +247,13 @@ namespace Engine {
 			.Field("resourcesPatched", &ProjectExportResult::ResourcesPatched,
 				"Whether the executable's resources were written: its icon and version on Windows, Info.plist on macOS.")
 			.Field("phaseTimings", &ProjectExportResult::PhaseTimings,
-				"The time of every phase the export entered, in phase order; SmokeTest only when the smoke test ran (its time otherwise counts toward MoveToOutput).");
+				"The time of every phase the export entered, in phase order; SmokeTest only when the smoke test ran, FeatureTest only when the feature test ran and NativeBuild only for a game with a Native/ folder (their time otherwise counts toward the next phase).")
+			.Field("featureTest", &ProjectExportResult::FeatureTest, "The featureTest run of a testing export; ran false without featureTest.")
+			.Field("reachability", &ProjectExportResult::Reachability,
+				"What the paks hold and why: the built-ins Data/Engine.pak kept and left out, the scripts' computed Assets.Load calls, and with "
+				"Export.PruneUnreferenced the assets Data/Game.pak kept and left out.")
+			.Field("nativeModule", &ProjectExportResult::NativeModule,
+				"Whether the executable links the project's native module: true for a game with a Native/ folder, whose Runtime the export built.");
 	}
 
 	void RegisterExportMethods(MethodRegistry& methods)

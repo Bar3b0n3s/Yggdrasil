@@ -32,6 +32,16 @@ namespace Engine {
 		// an argument that would need escaping; Io when it cannot be started.
 		[[nodiscard]] Status StartProcessInheritingOutput(const std::filesystem::path& executable, std::span<const std::string> arguments);
 
+		// A shared library the host always has and a function it exports, for SharedLibrary's tests (Docs/Decisions/
+		// 0030-m19-contract.md decision 37): on Windows kernel32.dll in the system directory (GetSystemDirectoryW) and
+		// "GetTickCount64"; on Linux and macOS, where SharedLibrary has no backend, an empty path and name.
+		struct SystemLibraryProbe
+		{
+			std::filesystem::path Library{};
+			std::string Symbol{};
+		};
+		[[nodiscard]] SystemLibraryProbe GetSystemLibraryProbe();
+
 #if defined(ENGINE_PLATFORM_WINDOWS)
 		// Takes the lock of the process heap (HeapLock(GetProcessHeap())) and keeps it: every other thread that allocates
 		// from the process heap blocks, as after an access violation inside HeapAlloc on a corrupt heap. The calling thread

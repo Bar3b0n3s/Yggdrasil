@@ -206,7 +206,9 @@ namespace Engine {
 			.Field("events", &TestRecordingResult::Events, "The input events written.")
 			.Field("checkpoints", &TestRecordingResult::Checkpoints, "The state-hash checkpoints written, one every 60 ticks before the final tick (none at a tick inside a frame where the suite's scripted clock ran several steps).")
 			.Field("finalStateHash", &TestRecordingResult::FinalStateHash, "The state hash at the final tick (FinalStateHash).")
-			.Field("inputCheck", &TestRecordingResult::InputCheck, "The input check that let the recording through.");
+			.Field("inputCheck", &TestRecordingResult::InputCheck, "The input check that let the recording through.")
+			.Field("expectations", &TestRecordingResult::Expectations, "The expectations written (test.run's expect), each verified with the recording's input before it was written.")
+			.Field("warnings", &TestRecordingResult::Warnings, "Notes on the written replay: the input check warns when its run without input differed only at checkpoints but reached the recorded final state hash, which then proves only the end state.");
 		registry.Struct<TestRunResult>("TestRunResult", "TestRunResult shared test report.")
 			.Field("mode", &TestRunResult::Mode, "Mode of the test report.")
 			.Field("passed", &TestRunResult::Passed, "Passed of the test report.")
@@ -219,7 +221,7 @@ namespace Engine {
 			.Field("jsonPath", &TestRunResult::JsonPath, "JsonPath of the test report.")
 			.Field("junitPath", &TestRunResult::JunitPath, "JunitPath of the test report.")
 			.Field("recordingPath", &TestRunResult::RecordingPath, "RecordingPath of the test report.")
-			.Field("recording", &TestRunResult::Recording, "The replay test.run {record} wrote: {path, formatVersion, ticks, events, checkpoints, finalStateHash, inputCheck: {ran, divergedAtTick}} (TestRecordingResult); null for every other run.");
+			.Field("recording", &TestRunResult::Recording, "The replay test.run {record} wrote: {path, formatVersion, ticks, events, checkpoints, finalStateHash, inputCheck: {ran, divergedAtTick}, expectations, warnings} (TestRecordingResult); null for every other run.");
 	}
 
 	Result<Json> TestRunResultToJson(const TestRunResult& result, const TypeRegistry& registry)

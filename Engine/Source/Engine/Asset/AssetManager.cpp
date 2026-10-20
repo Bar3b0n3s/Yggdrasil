@@ -193,6 +193,12 @@ namespace Engine {
 
 	AssetManager::~AssetManager() = default;
 
+	Result<uint64_t> AssetManager::GetCookedHash(AssetHandle handle)
+	{
+		ENGINE_CONTRACT_STUB();
+		return std::unexpected(Error(ErrorCode::Unsupported, std::format("the cooked hash of asset {} (Docs/Decisions/0030-m19-contract.md decision 2, stream B)", handle)));
+	}
+
 	AssetRef<Asset> AssetManager::GetPlaceholder(AssetType type)
 	{
 		const AssetHandle handle = GetPlaceholderHandle(type);

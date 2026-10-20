@@ -31,8 +31,18 @@
 // --feature-test runner over cooked suites and replays. Both boolean values round-trip; the exporter writes true for a
 // testing export (ExportSpecification::Testing, M15; Docs/Decisions/0024-m15-contract.md decision 6). The flag does not
 // expose automation or a source compiler in Dist.
+//
+// Version 2 (M19, Docs/Decisions/0030-m19-contract.md decision 18, B-BVER; GameManifestBuildVersion, reserved by the
+// phase 1 ledger) adds "Build" after "EngineVersion": the exporting build's id as FormatBuildId writes it
+// ("0.2.0+3f2a9c1d4e5b.dirty", Core/BuildId.h), which ParseBuildId must read back and whose version must equal
+// EngineVersion. The readers then accept versions 1 and 2: a version 1 manifest has no Build (one is an unknown key there)
+// and reads with an empty Build; SaveToString always writes version 2 and needs a valid Build. Until stream D lands them,
+// CurrentVersion stays 1 and Build is neither written nor read.
 
 namespace Engine {
+
+	// The first manifest version with Build (decision 18): GameManifest::CurrentVersion becomes it with stream D.
+	inline constexpr uint32_t GameManifestBuildVersion = 2;
 
 	// One pak the game mounts, with the XXH64 (seed 0) of its whole file.
 	struct GameManifestPak
@@ -52,7 +62,9 @@ namespace Engine {
 
 		std::string Name{};          // the project's Name: non-empty, a valid file name (the executable's and the user-data folder's)
 		std::string EngineVersion{}; // the exporting engine's version (EngineVersionString)
-		UUID StartScene{};           // the Scene asset the game starts with (in Game.pak)
+		// Version 2 (decision 18): the exporting build's id, FormatBuildId(GetBuildId()); empty when read from version 1.
+		std::string Build{};
+		UUID StartScene{}; // the Scene asset the game starts with (in Game.pak)
 		std::vector<GameManifestPak> Paks{};
 		WindowSettings Window{};
 		SimulationSettings Simulation{};
@@ -66,7 +78,8 @@ namespace Engine {
 	{
 	public:
 		// The canonical text. Errors: Validation for a manifest that LoadFromString would reject (located at
-		// its JSON pointer), so a written manifest always reads back equal.
+		// its JSON pointer), so a written manifest always reads back equal. From version 2 (decision 18, stream D): an empty
+		// or invalid Build, or one whose version differs from EngineVersion, is Validation at /Build.
 		[[nodiscard]] static Result<std::string> SaveToString(const GameManifest& manifest);
 
 		// Reads a manifest strictly: unknown keys, wrong types and out-of-range values are Validation errors located at their

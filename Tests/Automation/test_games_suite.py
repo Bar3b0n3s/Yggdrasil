@@ -26,7 +26,7 @@ from typing import Any
 from unittest import mock
 from xml.etree import ElementTree
 
-from harness import REPOSITORY_ROOT, AutomationTestCase, automation_config
+from harness import REPOSITORY_ROOT, AutomationTestCase, app_name, automation_config
 from lock_holder import isolated_lock_directory
 from tiny_game import TINY_SCENE, build_tiny_game
 
@@ -457,6 +457,96 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual(len(refused), 1)
         self.assertIn("could not run", refused[0])
         self.assertIn("NotFound", refused[0])
+
+    @unittest.skip("contract stub: games.input_check_warning (Docs/Decisions/0030-m19-contract.md decision 3, "
+                   "A-F29, stream B)")
+    def test_the_input_check_warns_when_only_the_final_hash_does_not_depend_on_the_input(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 3 (A-F29; ADR 0026 friction F29): the editor halves run the
+        # input check with continuePastCheckpoint, so a run without input that differed at checkpoints but reached the
+        # recorded final hash is seen: the check still passes (the replay failed without its input), and the half
+        # prints the engine's MakeFinalHashIndependentWarning word for word.
+        final_hash = "3e0c91a2b4d5f607"
+        restored = {"passed": False, "checkpointFailed": True, "checkpointsFailed": 2, "firstFailedCheckpointTick": 60,
+                    "hashMatched": True, "expectedStateHash": final_hash, "stateHash": final_hash,
+                    "expect": [{"tick": 30, "evaluated": True, "satisfied": True}]}
+        expected = (f"'{REPLAY}': its final state hash does not depend on its input: without its input events the "
+                    f"run first differed from the recording at checkpoint tick 60, then reached the recorded final "
+                    f"state hash {final_hash}, so only its checkpoints prove the play; end the recording while the "
+                    f"played state is still in the scene")
+        self.assertEqual(games.input_check_warning(REPLAY, restored), expected)
+        self.assertEqual(games.evaluate_input_check(REPLAY, 4, None, ("Validation", "replay verification failed")), [])
+        # The final hash differs too, no checkpoint failed, an expectation failed, or no outcome: no warning.
+        self.assertIsNone(games.input_check_warning(REPLAY, {**restored, "hashMatched": False}))
+        unchecked = {**restored, "checkpointsFailed": 0, "checkpointFailed": False}
+        self.assertIsNone(games.input_check_warning(REPLAY, unchecked))
+        self.assertIsNone(games.input_check_warning(REPLAY, {**restored, "expect": [{"tick": 30, "evaluated": True,
+                                                                                    "satisfied": False}]}))
+        self.assertIsNone(games.input_check_warning(REPLAY, None))
+
+    @unittest.skip("contract stub: games.check_distinct_projects (Docs/Decisions/0030-m19-contract.md decision 12, "
+                   "AL-STEMS, stream B)")
+    def test_projects_that_share_a_stem_or_a_name_are_refused(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 12 (AL-STEMS; ADR 0027 decision 12's accepted limit): two staged
+        # games whose .eproj files share a stem would share their games steps and reports, and two whose Names are equal
+        # their Dist package directory; the suite refuses both, naming both project files.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first_file = write_project(root, "Projects/Rally")
+            second_file = write_project(root, "Tests/Projects/Rally")
+            other_file = write_project(root, "Projects/Racer")
+            first = games.GameProject(first_file.parent, first_file, "Rally")
+            second = games.GameProject(second_file.parent, second_file, "Rally")
+            other = games.GameProject(other_file.parent, other_file, "Racer")
+            self.assertEqual(games.check_distinct_projects([first, other]), [])
+            stems = games.check_distinct_projects([first, second, other])
+            self.assertEqual(len(stems), 2)  # the shared stem, and the shared Name "Rally" both write
+            self.assertTrue(any("share the file stem 'Rally'" in line for line in stems))
+            self.assertTrue(any("share the Name 'Rally'" in line for line in stems))
+            for line in stems:
+                self.assertIn(paths.display_path(first_file), line)
+                self.assertIn(paths.display_path(second_file), line)
+
+            # Distinct stems with one Name collide in the Dist package directory only.
+            renamed_file = write_project(root, "Projects/Rally2")
+            document = json.loads(renamed_file.read_text(encoding="utf-8"))
+            document["Name"] = "Racer"
+            renamed_file.write_text(json.dumps(document, indent="\t") + "\n", encoding="utf-8")
+            renamed = games.GameProject(renamed_file.parent, renamed_file, "Rally2")
+            names = games.check_distinct_projects([other, renamed])
+            self.assertEqual(len(names), 1)
+            self.assertIn("share the Name 'Racer'", names[0])
+            self.assertIn("bin/Exports/Dist/Racer", names[0])
+
+            # A Name that cannot be read is named.
+            broken_file = write_project(root, "Projects/Broken")
+            broken_file.write_text("{", encoding="utf-8")
+            broken = games.GameProject(broken_file.parent, broken_file, "Broken")
+            unreadable = games.check_distinct_projects([other, broken])
+            self.assertEqual(len(unreadable), 1)
+            self.assertIn(paths.display_path(broken_file), unreadable[0])
+
+    @unittest.skip("contract stub: games.prepare_native_editor (Docs/Decisions/0030-m19-contract.md decision 35, "
+                   "stream N-E)")
+    def test_a_native_game_gets_the_preference_and_its_module_before_its_editor_starts(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 35 (N-E): the editor halves of a game with Native/ start an
+        # editor whose user data allows native code (the harness's own file, never a method) and whose project copy
+        # holds a current build of the module, since a project opening loads a build and never builds; a game without
+        # Native/ gets neither, and a module that does not build fails the half with its first error.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project_file = write_project(root, "Tests/Projects/Natives")
+            user_data = root / "UserData"
+            self.assertEqual(games.prepare_native_editor(project_file.parent, user_data, "Debug"), [])
+            self.assertFalse((user_data / app_name() / "Editor.json").exists())
+
+            native = project_file.parent / "Native"
+            native.mkdir()
+            (native / "Broken.cpp").write_text("this is not C++\n", encoding="utf-8")
+            failures = games.prepare_native_editor(project_file.parent, user_data, "Debug")
+            preferences = json.loads((user_data / app_name() / "Editor.json").read_text(encoding="utf-8"))
+            self.assertIs(preferences["AllowNativeCode"], True)
+            self.assertTrue(failures)
+            self.assertTrue(any("Native/Broken.cpp" in line or "Unsupported" in line for line in failures), failures)
 
     def test_a_game_needs_a_committed_replay_with_input_events(self) -> None:
         # The milestone review's R09: the demo acceptance (Roadmap M16, M17, M25 and M27) accepts a demo by its suites
@@ -996,6 +1086,32 @@ class SuiteTests(unittest.TestCase):
         self.assertIn(REPLAY, drifted.detail)
         self.assertTrue(any(line.startswith(f"{REPLAY}: Exported Dist: fedcba9876543210")
                             for line in drifted.data["failures"]), drifted.data["failures"])
+
+    @unittest.skip("contract stub: project.export {featureTest} in the games suite's Dist half (Docs/Decisions/"
+                   "0030-m19-contract.md decision 10, A-DISTSELF; the integration of streams B and F)")
+    def test_the_dist_half_compares_the_testing_exports_feature_test_hashes_with_its_own_run(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 10 (A-DISTSELF; Roadmap M19's acceptance "the hashes the builder
+        # sees from the testing Dist export equal the games suite's Dist half"): the Dist half's testing export passes
+        # featureTest, and the featureTest.replays hashes it reports must equal those the half's own --feature-test run
+        # of the package reads; a difference fails the Dist step, naming the replay.
+        ran = {"smokeTestRan": True, "smokeTestExitCode": 0, "warnings": []}
+
+        def reporting(state_hash: str) -> Callable[[dict[str, Any]], object]:
+            def edit(result: dict[str, Any]) -> None:
+                result["featureTest"] = {"ran": True, "exitCode": 0, "passed": True, "reportPath": "",
+                                         "replays": [{"path": REPLAY, "stateHash": state_hash, "passed": True}]}
+            return edit
+
+        session = EditedExportSession(ran, reporting(REPLAY_HASH))
+        steps = self.run_dist_half(["Dist"], session, FakeFeatureTestRun(REPLAY_HASH))
+        self.assertEqual(steps["games Game Dist"].status, Status.PASSED, steps["games Game Dist"].detail)
+        self.assertEqual(session.exports[0], {"config": "Dist", "testing": True, "featureTest": True})
+
+        differing = self.run_dist_half(["Dist"], EditedExportSession(ran, reporting("fedcba9876543210")),
+                                       FakeFeatureTestRun(REPLAY_HASH))["games Game Dist"]
+        self.assertEqual(differing.status, Status.FAILED)
+        self.assertIn(REPLAY, differing.detail)
+        self.assertIn("fedcba9876543210", differing.detail)
 
     def test_a_dist_smoke_test_that_did_not_run_warns_or_fails_with_require_gpu(self) -> None:
         not_run = {"smokeTestRan": False, "smokeTestExitCode": None, "warnings": ["no graphics device"]}

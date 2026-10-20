@@ -40,6 +40,27 @@ class BatchTests(AutomationTestCase):
             ]})
         self.assert_engine_error(raised.exception, engine_client.INVALID_PARAMS)
 
+    @unittest.skip("contract stub: named $ref (Docs/Decisions/0030-m19-contract.md decision 8, A-NREF, stream C)")
+    def test_ref_names_an_earlier_op(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 8 (A-NREF; ADR 0027 decision 12's deferral): an op's name stands
+        # for its index in a later op's $ref, so inserting an op does not shift the reference; a duplicate name refuses
+        # the batch before any op runs, at the op's name.
+        client, _ = self.open_editor_with_scene()
+        result = client.call("edit.batch", {"label": "Scaffold", "ops": [
+            {"method": "entity.create", "params": {"name": "Game"}, "name": "game"},
+            {"method": "entity.create", "params": {"name": "Hud"}},
+            {"method": "entity.create", "params": {"name": "Board", "parent": {"$ref": "game.entity.id"}}},
+        ]})
+        self.assertEqual(result["results"][2]["entity"]["path"], "/Game/Board")
+        with self.assertRaises(engine_client.EngineError) as raised:
+            client.call("edit.batch", {"ops": [
+                {"method": "entity.create", "params": {"name": "A"}, "name": "twin"},
+                {"method": "entity.create", "params": {"name": "B"}, "name": "twin"},
+            ]})
+        self.assert_engine_error(raised.exception, engine_client.INVALID_PARAMS)
+        self.assertEqual(raised.exception.data["failedOp"], 1)
+        self.assertEqual(raised.exception.data["issues"][0]["pointer"], "/ops/1/name")
+
     def test_batch_file_scaffolds_a_project_and_names_its_failing_line(self) -> None:
         # Editor --batch <file.jsonl> (§13.12): one request per line, "$ref" naming an earlier line's result by its
         # 1-based line number, exit code 0, or 1 at the first failing line, which stderr names.
