@@ -244,6 +244,12 @@ namespace Engine {
 
 		[[nodiscard]] const ApplicationSpecification& GetSpecification() const { return m_Specification; }
 	protected:
+		// Makes the run end with `exitCode`, a failure (not ExitCode::Success, asserted): from the frame loop it ends the loop
+		// after the current frame as RequestExit does, and unlike RequestExit it also replaces a Success that an earlier request
+		// or MaxFrames chose, so a failure found after the loop decided to end still fails the run (M18's milestone review: the
+		// editor's final screenshots taken in OnDeviceRecovered after a device loss on the run's last frame; also usable from
+		// OnShutdown). A failure requested earlier, by either call, keeps its code. Main thread, while Run runs.
+		void FailRun(int exitCode = ExitCode::Failed);
 		// The process's context, for what an application adds at process level: its fatal-error hook
 		// (ProcessContext::SetFatalErrorHook, the editor's autosave) and the user-data folders. Only while Run runs, from the
 		// start of initialization to the end of OnShutdown (asserted).
@@ -350,6 +356,7 @@ namespace Engine {
 #endif
 		Scope<LoggedErrorCounter> m_LoggedErrors; // with ExpectNoErrors, from the start of Run to its end
 		std::optional<int> m_PendingExitCode;     // an exit requested before the frame loop exists (during OnInitialize)
+		std::optional<int> m_FailedExitCode;      // FailRun's first failure, which replaces a Success that ended the run
 		double m_AudioClockSeconds = 0.0;         // the frame clock's accumulated unscaled time for AudioEngine::Update (M12)
 		bool m_HasRun = false;
 	};

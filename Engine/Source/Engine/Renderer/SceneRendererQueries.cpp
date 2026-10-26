@@ -48,10 +48,12 @@ namespace Engine {
 			scene.Y = pixel->y;
 			return state.Picker->Request(*state.Targets.EntityId, state.ImagePickTable, state.Generation, scene);
 		}
-		// A letterbox pixel shows no scene: it picks the background, through the texel every picking render clears to 0.
-		ENGINE_CORE_ASSERT(state.OutputTargets.LetterboxEntityId != nullptr, "a picking render at a scaled output has a letterbox texel");
+		// A letterbox pixel shows no scene: it picks the background, through the texel every picking render clears to 0. A
+		// render whose output targets could not be created (out of memory, decision 44) keeps an earlier render's texel; the
+		// first such render at a scaled output has none, which is an external failure, not a programmer error (M18's
+		// milestone review): the pick fails alone.
 		if (state.OutputTargets.LetterboxEntityId == nullptr)
-			return MakeError(ErrorCode::InvalidState, "picking requires a submitted picking image");
+			return MakeError(ErrorCode::InvalidState, "the letterbox of this view has no picking texel: its output targets could not be created; pick again after the next render");
 		scene.X = 0;
 		scene.Y = 0;
 		return state.Picker->Request(*state.OutputTargets.LetterboxEntityId, state.ImagePickTable, state.Generation, scene);

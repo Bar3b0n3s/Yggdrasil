@@ -150,21 +150,35 @@ namespace Engine {
 		m_GameForced = true;
 		return {};
 	}
-	bool EditorHostViewports::IsLayoutReady() const
+	std::optional<glm::uvec2> EditorHostViewports::GetTargetSize(size_t index) const
 	{
 		if (!m_Editor.HasProject())
-			return true;
+			return std::nullopt;
+		// A forced Game view (--headless-game-view) renders at the size lockstep and replay sessions use as view coordinates,
+		// or at the fixed game resolution when one is set, whatever its panel does; at most 8192 pixels a side, as a panel.
+		if (index == 1 && m_GameForced)
+		{
+			const glm::uvec2 resolution = m_Editor.GetViewportState().GetGameResolution();
+			return glm::min(resolution.x != 0 ? resolution : GetDeterministicViewSize(m_Editor.GetProject().GetSettings().Window), glm::uvec2(8192));
+		}
+		const auto panel = index == 0 ? EditorPanel::SceneViewport : EditorPanel::GameViewport;
+		const auto panels = m_Editor.GetUiState().GetOpenPanels();
+		if (std::ranges::find(panels, panel) == panels.end())
+			return std::nullopt;
+		return m_Views[index].RequestedSize;
+	}
+	bool EditorHostViewports::IsLayoutReady() const
+	{
 		for (size_t i = 0; i < m_Views.size(); ++i)
 		{
-			const auto panel = i == 0 ? EditorPanel::SceneViewport : EditorPanel::GameViewport;
-			const auto panels = m_Editor.GetUiState().GetOpenPanels();
-			if (std::ranges::find(panels, panel) == panels.end())
+			const std::optional<glm::uvec2> size = GetTargetSize(i);
+			if (!size.has_value())
 				continue;
 			const View& view = m_Views[i];
 			// A size that ran out of memory renders at the size the view stays at (M18, C18.4 decision 44).
-			const bool atFailedSize = view.FailedSize == view.RequestedSize && view.Renderer != nullptr
-				&& view.Image.Width == view.Renderer->GetWidth() && view.Image.Height == view.Renderer->GetHeight();
-			if (!atFailedSize && (view.RequestedSize.x != view.Image.Width || view.RequestedSize.y != view.Image.Height))
+			const bool atFailedSize = view.FailedSize == *size && view.Renderer != nullptr && view.Image.Width == view.Renderer->GetWidth()
+				&& view.Image.Height == view.Renderer->GetHeight();
+			if (!atFailedSize && (size->x != view.Image.Width || size->y != view.Image.Height))
 				return false;
 		}
 		return true;
@@ -344,15 +358,7 @@ namespace Engine {
 	{
 		View& view = m_Views[index];
 		const ViewportView kind = index == 0 ? ViewportView::Scene : ViewportView::Game;
-		const auto panel = index == 0 ? EditorPanel::SceneViewport : EditorPanel::GameViewport;
-		glm::uvec2 size = m_Editor.HasProject() && std::ranges::find(m_Editor.GetUiState().GetOpenPanels(), panel) != m_Editor.GetUiState().GetOpenPanels().end() ? view.RequestedSize : glm::uvec2(0);
-		// A forced Game view (--headless-game-view) renders at the size lockstep and replay sessions use as view coordinates,
-		// or at the fixed game resolution when one is set, whatever its panel does; at most 8192 pixels a side, as a panel.
-		if (kind == ViewportView::Game && m_GameForced && m_Editor.HasProject())
-		{
-			const glm::uvec2 resolution = m_Editor.GetViewportState().GetGameResolution();
-			size = glm::min(resolution.x != 0 ? resolution : GetDeterministicViewSize(m_Editor.GetProject().GetSettings().Window), glm::uvec2(8192));
-		}
+		const glm::uvec2 size = GetTargetSize(index).value_or(glm::uvec2(0));
 		if (size.x == 0 || size.y == 0)
 		{
 			if (view.Image.Texture != 0)

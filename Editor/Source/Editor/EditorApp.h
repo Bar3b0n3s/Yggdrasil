@@ -93,8 +93,10 @@ namespace Engine {
 		// The editor UI's last frame re-rendered at its framebuffer size (CaptureImGuiScreenshot). Errors: Unsupported without
 		// a device or ImGui (--renderer none); those of CaptureImGuiScreenshot.
 		[[nodiscard]] Result<Image> CaptureEditorUi();
-		// Writes the screenshots the options ask for; false when one failed (logged).
-		[[nodiscard]] bool WriteScreenshots();
+		// Writes the screenshots the options ask for; false when one failed (logged). `afterDeviceRecovery`: called from
+		// OnDeviceRecovered after a device loss on the run's last frame, where the viewport is captured afresh on the recovered
+		// device and the editor UI capture fails, since no UI frame was drawn on it (M18's milestone review).
+		[[nodiscard]] bool WriteScreenshots(bool afterDeviceRecovery = false);
 	private:
 		// The launch options, the EditorContext, the AutomationServer, a batch or upgrade run and an --export run, whose
 		// Exporter is polled once per safe point and whose outcome writes --export-report and sets the exit code

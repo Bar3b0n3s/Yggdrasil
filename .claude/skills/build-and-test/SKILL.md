@@ -59,7 +59,7 @@ python Scripts/CI.py  # all stages; --stages build,unit for a subset; --gpu-opti
 - bake: Release, `Editor --headless --renderer vulkan --bake-engine-assets` fills the configuration-independent `bin/EngineCache` (the engine cooked cache, ADR 0010 decision 13; incremental), the built-in environments with the GPU environment baker (ADR 0013 decision 9). It exits 1 when an entry fails; entries this build has no importer or generator for are warnings. Without a usable Vulkan device the stage fails, unless `--gpu-optional` is given: it then reruns with `--renderer none`, leaves the environments out with a warning and ends as a warning;
 - unit: Debug and Release, each failing on a test case skipped outside the child-process targets;
 - gpu: Debug and Release, each under API 1.4 and capped with `--vulkan-api=1.3`, with validation and synchronization validation and `--require-gpu` (`--gpu-optional` drops it on a machine without a device);
-- golden: Release, compared with `Tests/Golden/<DeviceClass>/`; smoke mode (a warning) on a device class without goldens;
+- golden: Release, compared with `Tests/Golden/<DeviceClass>/`; smoke mode (a warning) on a device class without goldens, a failure instead when a class of the same vendor has them (the driver changed; golden-images skill);
 - feature: Debug and Release, `Editor --headless --project Projects/FeatureTest --run-tests` with `--require-gpu` (an `.hdr` import needs the GPU baker); see "The feature and determinism suites" below;
 - automation: Release, with `--require-gpu` like gpu (its screenshot tests start rendering editors); see "The automation suite" below;
 - export: Release and Dist testing exports of FeatureTest, with `--require-gpu`; see "The export and hardening stages" below;

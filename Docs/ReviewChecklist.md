@@ -92,6 +92,7 @@ Section references (§) point to `Docs/Architecture.md` unless marked CodeStyle 
 - [ ] `std::string_view` and `std::span` are not stored beyond the call unless the lifetime is documented.
 - [ ] Stored or deferred lambdas list their captures, and every capture outlives the lambda.
 - [ ] Each GPU object has exactly one owner, and teardown order matches §8.14. Live-object counters return to zero.
+- [ ] The recreation protocol (M18; §8.14 items 7 and 10; ADR 0029 decisions 27, 32 and 42): every new GPU object lives in one of the placement rule's places (`SceneRendererPipelines` as a declared pass, a `SceneRenderer`'s state, `GpuResourceCache`), or its owner registers with the device's recreation registry (`Release`, `Recreate`, and `TrimUnused` for what it can rebuild); every new owner has one loss test through `Test::RunDeviceLossTest` (a windowed child when it presents); a command list recorded outside the application frame records through `CommandListRecording`; a creation after startup is an atomic request through `RetryAfterTrim`, and a `Gpu` error on a lost device is the loss, never read as out-of-memory.
 
 ## 6. Determinism (§1.3, §4.12, §9.1)
 

@@ -282,7 +282,11 @@ namespace Engine {
 			AssetManager& assets, const SceneRendererSpecification& specification);
 
 		// Recreates the size-dependent targets for `width` x `height` (both >= 1, asserted) and clears the renderer's binding
-		// sets (which reference the old targets); no effect at the current size. Errors: InvalidState while a Render awaits its
+		// sets (which reference the old targets); no effect at the current size. The scene-resolution targets are created at
+		// the scene size that the last Render's RenderOutputSettings give the new size (ComputeRenderOutputMapping; the new
+		// size itself before the first Render and for the default settings), so the next Render with the same settings keeps
+		// them; the output stage's view-size targets follow at that Render (M18's milestone review: a scaled view resized, or
+		// recovered after a device loss, never creates a view-size scene set it does not use). Errors: InvalidState while a Render awaits its
 		// OnSubmitted (also asserted); those of the target creation (M18, C18.4: OutOfMemory after its trim and retry, below;
 		// on a lost device Gpu, the loss).
 		// M18 (C18.4, decisions 42 and 44): a view's new size after startup. Resize creates the new size's targets aside and
@@ -333,6 +337,11 @@ namespace Engine {
 		// that asks for the view tries again. A partial Gpu error of a lazily created target or binding set on a device that
 		// is not lost is out-of-memory too: returned as now, never fatal, and its host trims after the frame
 		// (GraphicsDevice::TrimUnused) and renders again at the next frame.
+		// M18's milestone review (decision 39): a vk::SystemError that NVRHI throws in the middle of the recording (on a really
+		// lost device, an upload's first write asks the queue's timeline what completed) unwinds Render to the frame boundary
+		// or an automation method's handler, which report the loss. The render is abandoned on the way: its recording
+		// context ends with its stage and pass open (RenderStats.h), the renderer awaits no OnSubmitted for it, and its GPU
+		// profiler, whose scopes stay open, is replaced, so a Render before the recovery runs as any Render on the lost device.
 		[[nodiscard]] Status Render(nvrhi::ICommandList& commandList, const RenderSnapshot& snapshot);
 
 		// The LDR target holding the last Render's image (RGBA8_UNORM, display-encoded values, §8.9), at the renderer's size:
@@ -370,7 +379,9 @@ namespace Engine {
 		// pixels, not logical ImGui coordinates. The UI suppresses requests while ImGuizmo is hovered/active.
 		// M18 (decision 6): X and Y are view pixels of GetFinalTexture; the pick reads EntityId at MapViewPixelToScenePixel
 		// of the submitted image's output mapping, and a view pixel in the letterbox picks nothing (a PickResult with the
-		// invalid UUID and PickId 0, like the background).
+		// invalid UUID and PickId 0, like the background). M18's milestone review: a render whose output targets ran out of
+		// memory keeps the letterbox texel of an earlier picking render; at the first scaled picking render, which has none,
+		// a letterbox pixel's request fails alone with InvalidState.
 		[[nodiscard]] Result<PickTicket> RequestPick(const PickRequest& request);
 		[[nodiscard]] Result<std::optional<PickResult>> PollPick(PickTicket ticket, uint64_t currentFrameIndex);
 		void CancelPicks();

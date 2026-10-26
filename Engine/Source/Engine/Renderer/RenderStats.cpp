@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <exception>
 #include <limits>
 #include <optional>
 #include <utility>
@@ -162,6 +163,8 @@ namespace Engine {
 		std::optional<ProfileScope> StageZone{};
 		RenderStage Stage = RenderStage::Prepare;
 		bool IsStageOpen = false;
+		// std::uncaught_exceptions() when the context was made: more at its destruction means an exception unwinds the recording.
+		int UncaughtExceptions = 0;
 	};
 
 	RenderRecordingContext::RenderRecordingContext(RenderStats& stats, std::function<double()> nowSeconds, GpuProfiler* profiler)
@@ -171,12 +174,25 @@ namespace Engine {
 		m_State->Stats = &stats;
 		m_State->NowSeconds = std::move(nowSeconds);
 		m_State->Profiler = profiler;
+		m_State->UncaughtExceptions = std::uncaught_exceptions();
 	}
 
 	RenderRecordingContext::~RenderRecordingContext()
 	{
-		ENGINE_CORE_VERIFY(!m_State->IsOpen, "RenderRecordingContext destroyed with an open pass");
-		ENGINE_CORE_VERIFY(!m_State->IsStageOpen, "RenderRecordingContext destroyed with stage {} open", RenderStageToString(m_State->Stage));
+		State& state = *m_State;
+		// M18 (the milestone review; Docs/Decisions/0029-m18-contract.md decision 39): a vk::SystemError thrown out of NVRHI in
+		// the middle of a pass or a stage (a device loss that an upload's first write meets) unwinds the recording on its way to
+		// the frame boundary or an automation method's handler, which recover the device. The open stage's CPU zone ends here;
+		// its GPU scopes stay open on the profiler, which the device-loss release replaces (SceneRenderer::ReleaseGpuObjects),
+		// and on the list, which is retired without being submitted (CommandListRecording). Only then may a pass or a stage
+		// still be open.
+		if (std::uncaught_exceptions() > state.UncaughtExceptions)
+		{
+			state.StageZone.reset();
+			return;
+		}
+		ENGINE_CORE_VERIFY(!state.IsOpen, "RenderRecordingContext destroyed with an open pass");
+		ENGINE_CORE_VERIFY(!state.IsStageOpen, "RenderRecordingContext destroyed with stage {} open", RenderStageToString(state.Stage));
 	}
 
 	void RenderRecordingContext::BeginPass(std::string_view name, nvrhi::ICommandList* commandList)

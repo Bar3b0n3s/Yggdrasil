@@ -2,6 +2,7 @@
 
 #include "EditorCore/EngineAssetGenerators.h"
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Graphics/GpuResourceTracker.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Image.h"
 #include "Engine/Graphics/Readback.h"
@@ -119,8 +120,9 @@ namespace Engine {
 				return snapshot;
 			}
 
-			// Records `snapshot`, executes it and notifies the renderer.
-			void Submit(const RenderSnapshot& snapshot)
+			// Records `snapshot`, executes it and notifies the renderer, also when Render returns an error (a partial error still
+			// recorded the view); returns Render's status.
+			[[nodiscard]] Status TrySubmit(const RenderSnapshot& snapshot)
 			{
 				Result<nvrhi::CommandListHandle> list = m_Device->CreateCommandList();
 				REQUIRE_MESSAGE(list.has_value(), list.error().ToString());
@@ -128,6 +130,13 @@ namespace Engine {
 				const Status rendered = m_Renderer->Render(**list, snapshot);
 				(*list)->close();
 				m_Renderer->OnSubmitted(snapshot.FrameIndex, m_Device->ExecuteCommandList(**list));
+				return rendered;
+			}
+
+			// Records `snapshot`, executes it and notifies the renderer; Render must succeed.
+			void Submit(const RenderSnapshot& snapshot)
+			{
+				const Status rendered = TrySubmit(snapshot);
 				REQUIRE_MESSAGE(rendered.has_value(), rendered.error().ToString());
 			}
 
@@ -582,6 +591,62 @@ namespace Engine {
 			const RenderStats stats = setup.GetRenderer().GetRenderStats();
 			for (const RenderPassStats& pass : stats.Passes)
 				CHECK(pass.Name != "Letterbox");
+		}
+
+		TEST_CASE("OutputStage: a letterbox pick after the output targets ran out of memory picks the background")
+		{
+			// M18's milestone review (decisions 6 and 44): at scale 3, a picking render whose editor overlays (a debug line) first
+			// need OutputDepth runs out of memory creating it under oom-rendertarget, so its output stage drops its targets and
+			// returns the partial Gpu error. The letterbox's EntityId texel, which the earlier picking render cleared to 0, is
+			// kept, so a click in the letterbox of that submitted image picks the background. Before the fix the texel went
+			// with the other targets and the pick hit an assert.
+			Test::HeadlessGpuFixture gpu({ .InjectFault = GpuFault::OomRenderTarget });
+			ENGINE_REQUIRE_GPU(gpu);
+			OutputStageSetup setup(gpu);
+			RenderSnapshot picking = setup.Snapshot(MakeScale3Output());
+			picking.Flags = RenderViewFlags::Picking;
+			setup.Submit(picking);
+			gpu.GetDevice().RunGarbageCollection(); // the first frame's collection arms the fault
+
+			RenderSnapshot overlaid = setup.Snapshot(MakeScale3Output());
+			overlaid.Flags = RenderViewFlags::Picking;
+			overlaid.DebugDraw.AddLine(glm::vec3(-4.0f, 0.0f, -1.0f), glm::vec3(4.0f, 0.0f, -1.0f), glm::vec4(0.0f, 1.0f, 0.0f, 1.0f), 0.0f,
+				DebugDepthMode::OnTop);
+			const Status failed = setup.TrySubmit(overlaid);
+			REQUIRE_FALSE(failed.has_value());
+			CHECK(failed.error().GetCode() == ErrorCode::Gpu);
+			CHECK_FALSE(gpu.GetDevice().IsLost());
+			const std::optional<PickResult> letterbox = Pick(setup, overlaid.FrameIndex, 1, ViewHeight / 2);
+			REQUIRE(letterbox.has_value());
+			CHECK_FALSE(letterbox->Entity.IsValid());
+			CHECK(letterbox->PickId == 0);
+		}
+
+		TEST_CASE("OutputStage: a resize at a scaled output creates scene-size targets, which the next render keeps")
+		{
+			// M18's milestone review: Resize creates the scene-resolution targets at the scene size of the last render's output
+			// settings, not at the view's size, so a scaled view resized to 240 x 150 holds 64 x 36 targets and its next render
+			// at the same settings creates only the output stage's new view-size image. Before the fix the resize created a
+			// view-size scene set (six targets) that the render replaced at once.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			OutputStageSetup setup(gpu);
+			setup.Submit(setup.Snapshot(MakeScale3Output()));
+			device.WaitForIdle();
+			REQUIRE(setup.GetRenderer().Resize(240, 150).has_value());
+			// Until the next render the final texture is the scene image's target, at the scene size.
+			const nvrhi::ITexture* sceneImage = setup.GetRenderer().GetFinalTexture();
+			REQUIRE(sceneImage != nullptr);
+			CHECK(sceneImage->getDesc().width == SceneWidth);
+			CHECK(sceneImage->getDesc().height == SceneHeight);
+
+			const uint64_t createdBefore = device.GetResourceTracker().GetCounts(GpuResourceType::Texture).Created;
+			const Image view = setup.Render(setup.Snapshot(MakeScale3Output()));
+			CHECK(view.Width == 240);
+			CHECK(view.Height == 150);
+			if (GpuResourceTracker::IsEnabled())
+				CHECK(device.GetResourceTracker().GetCounts(GpuResourceType::Texture).Created - createdBefore == 1); // OutputColor alone
 		}
 
 		TEST_CASE("OutputStage: a capture at scale 3 maps its pixels to scene pixels")

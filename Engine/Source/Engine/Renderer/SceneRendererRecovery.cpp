@@ -75,6 +75,8 @@ namespace Engine {
 		// M18 (C18.4, decision 44): the mode a failed debug-view switch falls back to, and its once-per-view log flags.
 		state.RenderedDebugView = released.RenderedDebugView;
 		state.DebugViewFailureLogged = released.DebugViewFailureLogged;
+		// M18's milestone review: the scene resolution Recreate creates the targets at.
+		state.OutputSettings = released.OutputSettings;
 		// The released image and its picks are gone: the next generation, as CancelPicks makes it, never reused.
 		state.Generation = released.Generation + 1;
 
@@ -99,7 +101,9 @@ namespace Engine {
 		// again first (GpuRecreationRegistry::RecreateAll's order), as they exist when Create calls this.
 		ENGINE_CORE_ASSERT(state.Pipelines->Bloom != nullptr, "SceneRenderer's per-view objects are created after its pipeline set's passes");
 		// The per-view buffers and the targets of the renderer's size (Create makes them through this too), made aside and
-		// kept only when every creation succeeded.
+		// kept only when every creation succeeded. The targets are at the scene resolution of the last Render's output settings
+		// (the view's size for Create and the default settings), so a recovered view rendering at a scaled output does not
+		// first create, and possibly run out of memory for, a view-size set its next Render replaces (M18's milestone review).
 		ENGINE_TRY_ASSIGN(nvrhi::BufferHandle viewConstants,
 			Utils::CreateViewBuffer(device, sizeof(ViewConstants), 0, "SceneRenderer.ViewConstants"));
 		ENGINE_TRY_ASSIGN(nvrhi::BufferHandle environmentConstants,
@@ -109,7 +113,8 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(nvrhi::BufferHandle shadowConstants,
 			Utils::CreateViewBuffer(device, sizeof(ShadowConstants), 0, "SceneRenderer.ShadowConstants"));
 		ENGINE_TRY_ASSIGN(nvrhi::BufferHandle casterConstants, device.CreateBuffer(ShadowPass::GetCasterConstantsDesc()));
-		ENGINE_TRY_ASSIGN(Detail::SceneRendererTargets targets, state.CreateTargets(state.ViewWidth, state.ViewHeight));
+		const RenderOutputMapping mapping = ComputeRenderOutputMapping(state.ViewWidth, state.ViewHeight, state.OutputSettings);
+		ENGINE_TRY_ASSIGN(Detail::SceneRendererTargets targets, state.CreateTargets(mapping.SceneWidth, mapping.SceneHeight));
 		state.ViewConstantsBuffer = std::move(viewConstants);
 		state.EnvironmentConstantsBuffer = std::move(environmentConstants);
 		state.LightBuffer = std::move(lights);

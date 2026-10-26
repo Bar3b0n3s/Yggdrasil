@@ -12,7 +12,9 @@
 #include "Engine/Core/Log.h"
 #include "Engine/Graphics/FramePacer.h"
 #include "Engine/Graphics/GraphicsDevice.h"
+#include "Engine/Graphics/Image.h"
 #include "Engine/Platform/Process.h"
+#include "Engine/Renderer/ViewportCapture.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Support/ChildOutput.h"
@@ -23,8 +25,10 @@
 #include "Support/TestOptions.h"
 #include "Support/Utf8Path.h"
 
+#include <filesystem>
 #include <span>
 #include <string>
+#include <system_error>
 
 // The editor rendering through the engine's frame, and the GPU fault paths of Architecture §8.14 item 8, as whole
 // processes (Roadmap M5 "Fault injection"). Every run is headless, so no error dialog can block it, and gets
@@ -250,6 +254,50 @@ namespace Engine {
 			const std::vector<std::filesystem::path> reports = Test::ListCrashFiles(userData / ENGINE_PRODUCT_NAME / "Crashes", ".txt");
 			CHECK(reports.empty());
 			CHECK(Test::FindGpuMessageLines(result->StandardError).empty());
+		}
+
+		TEST_CASE("EditorApp: a device loss on the last frame of a --frames run writes the viewport screenshot after the recovery, and fails an editor screenshot"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18's milestone review: hang-reset arms at the end of frame 0 and strikes the first bounded wait after it, frame
+			// 2's wait for its frame slot (two frames in flight), so the last frame of a three-frame run renders nothing and its
+			// frame boundary recovers the device after the frame loop decided to end with Success. The viewport screenshot is
+			// rendered afresh on the recovered device and written, and the run exits 0. The editor UI screenshot re-renders a UI
+			// frame drawn before the loss, which is not current on the recovered device, so the run fails with exit code 1.
+			// Before the fix both runs ended with exit code 0 and wrote nothing.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			{
+				Test::TempDirectory userData("EditorLastFrameLossViewport");
+				const std::filesystem::path png = userData / "Viewport.png";
+				const Result<ProcessResult> result = RunRenderingEditor(userData,
+					{ "--headless", "--frames", "3", "--gpu-inject-fault", "hang-reset", "--viewport-screenshot", Test::PathToUtf8(png) });
+				REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+				INFO("editor stderr: ", result->StandardError);
+				CHECK(result->StandardError.contains("GPU device recovered"));
+				CHECK(result->ExitCode == ExitCode::Success);
+				const Result<Image> image = ReadPng(png);
+				REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
+				CHECK(image->Width == DefaultViewportScreenshotWidth);
+				CHECK(image->Height == DefaultViewportScreenshotHeight);
+				CHECK(Test::ListCrashFiles(userData / ENGINE_PRODUCT_NAME / "Crashes", ".txt").empty());
+				CHECK(Test::FindGpuMessageLines(result->StandardError).empty());
+			}
+			{
+				Test::TempDirectory userData("EditorLastFrameLossEditorUi");
+				const std::filesystem::path png = userData / "Editor.png";
+				const Result<ProcessResult> result = RunRenderingEditor(userData,
+					{ "--headless", "--frames", "3", "--gpu-inject-fault", "hang-reset", "--editor-screenshot", Test::PathToUtf8(png) });
+				REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+				INFO("editor stderr: ", result->StandardError);
+				CHECK(result->StandardError.contains("GPU device recovered"));
+				CHECK(result->ExitCode == ExitCode::Failed);
+				CHECK(result->StandardError.contains("Cannot capture the editor screenshot"));
+				std::error_code error;
+				CHECK_FALSE(std::filesystem::exists(png, error));
+				CHECK(Test::ListCrashFiles(userData / ENGINE_PRODUCT_NAME / "Crashes", ".txt").empty());
+				CHECK(Test::FindGpuMessageLines(result->StandardError).empty());
+			}
 		}
 
 		TEST_CASE("EditorApp: --gpu-inject-fault=oom-rendertarget-persistent fails only its requests and runs to the end"

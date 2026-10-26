@@ -1097,6 +1097,161 @@ end)
 			const WindowSettings& window = editor.GetProject().GetSettings().Window;
 			CHECK(editor.GetViewportState().GetPixelSize(ViewportView::Game).value() == glm::uvec2(window.Width, window.Height));
 		}
+
+		// M18's adaptation of the forced Game view at its merge with M19 (Docs/Decisions/0029-m18-contract.md "Merge with main"
+		// and the milestone review). A headless editor's default layout keeps the Game panel open but tabbed behind the Scene
+		// view, so the panel asks for no size (an empty rectangle), while the forced view renders at the project's window
+		// size: the layout counts as ready once the forced view rendered that size, so editor.screenshot's fresh UI frame
+		// completes. Before the fix IsLayoutReady compared the image with the panel's 0 x 0 and never became ready.
+		TEST_CASE("EditorHostViewports: a forced game view whose Game panel is open but not drawn counts as laid out once it rendered"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::EditorTestFixture fixture("HostForcedGameLayout");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			editor.GetScene().CreateEntity("Camera").AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::SceneViewport, false).has_value());
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::GameViewport, true).has_value());
+			HostGpuHarness harness(gpu, editor);
+			harness.GetHost().SetRectangle(ViewportView::Game, {}); // open, but not drawn: no size
+			REQUIRE(harness.GetHost().ForceGameView().has_value());
+			REQUIRE(editor.GetViewportState().SetGameResolution(glm::uvec2(320, 180)).has_value());
+			CHECK_FALSE(harness.GetHost().IsLayoutReady()); // not rendered yet
+			REQUIRE(harness.Frame(0).has_value());
+			CHECK(harness.GetHost().GetImage(ViewportView::Game).Width == 320);
+			CHECK(harness.GetHost().GetImage(ViewportView::Game).Height == 180);
+			CHECK(harness.GetHost().IsLayoutReady());
+			// A new game resolution is a new size to render.
+			REQUIRE(editor.GetViewportState().SetGameResolution(glm::uvec2(400, 224)).has_value());
+			CHECK_FALSE(harness.GetHost().IsLayoutReady());
+			REQUIRE(harness.Frame(1).has_value());
+			CHECK(harness.GetHost().IsLayoutReady());
+		}
+
+		TEST_CASE("EditorHostViewports: a forced game view whose new size runs out of memory stays at its previous size until the game resolution changes"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.4, decision 44) through the forced view's size: a game resolution whose targets keep running out of memory
+			// leaves the forced view at its previous size, without a trim per frame, and the layout counts as ready, until the
+			// resolution changes again, which is a new request with its own trim.
+			Test::HeadlessGpuFixture gpu({ .InjectFault = GpuFault::OomRenderTargetPersistent });
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::EditorTestFixture fixture("HostForcedGameOutOfMemory");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			editor.GetScene().CreateEntity("Camera").AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::SceneViewport, false).has_value());
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::GameViewport, true).has_value());
+			HostGpuHarness harness(gpu, editor);
+			harness.GetHost().SetRectangle(ViewportView::Game, {});
+			REQUIRE(harness.GetHost().ForceGameView().has_value());
+			REQUIRE(editor.GetViewportState().SetGameResolution(glm::uvec2(320, 180)).has_value());
+			REQUIRE(harness.Frame(0).has_value());
+			gpu.GetDevice().RunGarbageCollection(); // the first frame's collection arms the fault
+			const Test::TrimCounter counter(gpu.GetDevice().GetRecreation());
+
+			REQUIRE(editor.GetViewportState().SetGameResolution(glm::uvec2(384, 216)).has_value());
+			REQUIRE(harness.Frame(1).has_value());
+			CHECK(counter.GetTrims() == 1);
+			CHECK(harness.GetHost().GetImage(ViewportView::Game).FrameIndex == 1);
+			CHECK(harness.GetHost().GetImage(ViewportView::Game).Width == 320);
+			CHECK(harness.GetHost().GetImage(ViewportView::Game).Height == 180);
+			CHECK(editor.GetViewportState().GetPixelSize(ViewportView::Game).value() == glm::uvec2(320, 180));
+			CHECK(harness.GetHost().IsLayoutReady());
+			// The size that failed is not tried again.
+			REQUIRE(harness.Frame(2).has_value());
+			CHECK(counter.GetTrims() == 1);
+			CHECK(harness.GetHost().GetImage(ViewportView::Game).Width == 320);
+			CHECK(harness.GetHost().IsLayoutReady());
+			// Another resolution is a new request.
+			REQUIRE(editor.GetViewportState().SetGameResolution(glm::uvec2(400, 224)).has_value());
+			REQUIRE(harness.Frame(3).has_value());
+			CHECK(counter.GetTrims() == 2);
+			CHECK(harness.GetHost().GetImage(ViewportView::Game).Width == 320);
+			CHECK_FALSE(gpu.GetDevice().IsLost());
+		}
+
+		TEST_CASE("EditorHostViewports: a device loss registers the forced game view's recreated image and renders the same image"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.3, decisions 32 and 33) through the forced view: with its panel closed, the forced Game view's renderer
+			// is released and recreated by the recovery like a displayed view's, the host's release removes its ImGui key, and
+			// the first frame after the recovery registers the recreated image and renders what the view rendered before.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			struct UiContext
+			{
+				ImGuiContext* Context = ImGui::CreateContext();
+				~UiContext() { ImGui::DestroyContext(Context); }
+			} ui;
+			ImGui::GetIO().IniFilename = nullptr;
+			ImGui::GetIO().DisplayFramebufferScale = ImVec2(1, 1);
+			Test::EditorTestFixture fixture("HostForcedGameDeviceLoss");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			const Entity mesh = editor.GetScene().CreateEntity("Mesh");
+			mesh.AddComponent<MeshRendererComponent>(MeshRendererComponent{ .Mesh = TypedAssetHandle<AssetType::Mesh>(BuiltinAssetHandles::CubeMesh), .Materials = {} });
+			editor.GetScene().CreateEntity("Camera").AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::SceneViewport, false).has_value());
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::GameViewport, false).has_value());
+			REQUIRE(editor.GetViewportState().SetGameResolution(glm::uvec2(160, 96)).has_value());
+			GraphicsDevice& device = gpu.GetDevice();
+			GpuResourceCache cache(device, editor.GetAssets());
+			auto pipelines = SceneRendererPipelines::Create(device, gpu.GetPipelines());
+			REQUIRE(pipelines.has_value());
+			auto renderer = ImGuiRenderer::Create(device, gpu.GetPipelines(), {});
+			REQUIRE(renderer.has_value());
+			GizmoController gizmos(editor);
+			EditorHostViewports host(editor, gizmos);
+			struct WaitForHostGpu
+			{
+				GraphicsDevice& Device;
+				~WaitForHostGpu() { Device.WaitForIdle(); }
+			} idle{ device };
+			REQUIRE(host.Initialize(device, **pipelines, cache, **renderer).has_value());
+			REQUIRE(host.ForceGameView().has_value());
+
+			// One frame of the forced view in a command list of its own, then its final image read back; every error is
+			// returned, so it also runs on the lost device.
+			uint64_t frame = 0;
+			Test::DeviceLossTest test;
+			test.Owners = { "EditorHostViewports" };
+			test.Use = [&device, &renderer, &host, &frame]() -> Result<std::vector<std::byte>>
+			{
+				ENGINE_TRY_ASSIGN(nvrhi::CommandListHandle list, device.CreateCommandList());
+				device.WaitForIdle();
+				(*renderer)->BeginFrame(static_cast<uint32_t>(frame % 2));
+				list->open();
+				RenderContext context{ .Device = &device, .CommandList = list, .FrameIndex = frame };
+				const Status rendered = host.Render(context);
+				list->close();
+				ENGINE_TRY(host.Submitted(frame, device.ExecuteCommandList(*list)));
+				++frame;
+				ENGINE_TRY(rendered);
+				device.WaitForIdle();
+				const SceneRenderer* viewRenderer = host.GetRenderer(ViewportView::Game);
+				if (viewRenderer == nullptr || viewRenderer->GetFinalTexture() == nullptr || host.GetImage(ViewportView::Game).Texture == 0)
+					return MakeError(ErrorCode::InvalidState, "the forced game view has no registered image after its frame");
+				if (host.GetImage(ViewportView::Game).Width != 160 || host.GetImage(ViewportView::Game).Height != 96)
+					return MakeError(ErrorCode::InvalidState, "the forced game view did not render at the game resolution");
+				Readback readback(device);
+				ENGINE_TRY_ASSIGN(const Image image, readback.ReadTexture(*viewRenderer->GetFinalTexture()));
+				return image.Pixels;
+			};
+			const uint64_t withdrawals = host.GetTextureWithdrawalCount();
+			const Result<Test::DeviceLossReport> report = Test::RunDeviceLossTest(gpu, test);
+			REQUIRE_MESSAGE(report.has_value(), (report.has_value() ? std::string() : report.error().ToString()));
+			CHECK(host.GetTextureWithdrawalCount() == withdrawals + 1);
+			CHECK(host.IsLayoutReady());
+			device.WaitForIdle();
+			host.Retire();
+			(*renderer)->DestroyTextures();
+		}
 	}
 
 }

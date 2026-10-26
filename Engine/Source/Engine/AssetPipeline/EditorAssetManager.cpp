@@ -4,6 +4,7 @@
 #include "Engine/Asset/AssetLoaderRegistry.h"
 #include "Engine/Asset/AssetReference.h"
 #include "Engine/Asset/CookedFormat.h"
+#include "Engine/Asset/IEnvironmentBaker.h"
 #include "Engine/AssetPipeline/AssetCache.h"
 #include "Engine/AssetPipeline/AssetHotReloader.h"
 #include "Engine/AssetPipeline/IAssetImporter.h"
@@ -105,6 +106,9 @@ namespace Engine {
 			// as well, so the exporter and later sessions find it under the source's own handle.
 			bool ReusedBake = false;
 			std::optional<std::string> CacheWarning{}; // a cache that could not be read
+			// M18's milestone review: the importer failed with Gpu while its environment baker's device was lost, so the failure
+			// is the loss's, not the source's (IEnvironmentBaker::IsDeviceLost): ApplyImport does not remember it.
+			bool FailedOnLostDevice = false;
 		};
 
 		// A cooked bake an import may reuse (ImportRequest::ReuseBakes), and whether it is the source's own cache entry.
@@ -432,7 +436,13 @@ namespace Engine {
 			output.Import.Lookups = context.GetLookups();
 			output.Import.ScriptCheck = context.GetScriptCheck();
 			if (!imported.has_value())
+			{
+				// A GPU bake runs on the main thread (RequiresMainThread), where the baker's device state is read; a Gpu error
+				// while that device is lost is the loss (M18's milestone review; decision 28).
+				output.FailedOnLostDevice = imported.error().GetCode() == ErrorCode::Gpu && request.EnvironmentBaker != nullptr
+					&& request.Importer->RequiresMainThread() && request.EnvironmentBaker->IsDeviceLost();
 				return fail(std::move(imported).error());
+			}
 			if (Status valid = ValidateImportResult(*imported, request.Metadata, request.Importer->GetId()); !valid.has_value())
 				return fail(std::move(valid).error());
 			if (Status owners = CheckDependencyOwners(output.Import.Reads, request.Assets, request.Metadata.Handle); !owners.has_value())
@@ -1156,6 +1166,21 @@ namespace Engine {
 			AppendEvent(EngineEventType::AssetImportFailed, source, sourcePath, error.ToString());
 		}
 
+		// M18's milestone review (Docs/Decisions/0029-m18-contract.md decision 28: on a lost device a Gpu error is the loss, as
+		// GpuResourceCache's uploads treat it): an import whose GPU bake failed while the device was lost failed because of the
+		// loss, not its source. Nothing is remembered: no failure, no AssetImportFailed diagnostic or event, so the next Load
+		// imports the source again once the frame boundary recovered the device; an earlier import's record is marked for a
+		// re-check (RecheckPending), so the next refresh imports it again while its previous version stays loaded meanwhile.
+		void ForgetLostDeviceFailure(AssetHandle source, const Error& error, const VfsPath& sourcePath)
+		{
+			ENGINE_CORE_WARN("The import of '{}' met a GPU device loss and runs again after the recovery: {}", Utils::RelativeText(sourcePath), error);
+			if (const auto import = Imports.find(source); import != Imports.end())
+			{
+				import->second.Failure.reset();
+				import->second.RecheckPending = true;
+			}
+		}
+
 		// Publishes a finished import of `source` on the main thread: dependency metas, the .meta's sub-assets, the cache, the
 		// artifacts (a new version of each that changed), diagnostics, graph edges and path dependents. Returns the outcome,
 		// or the import's error (recorded as a remembered failure). `reload`: a reimport of something already published,
@@ -1176,7 +1201,10 @@ namespace Engine {
 				LogCacheWarning(*output.CacheWarning);
 			if (output.Failure.has_value())
 			{
-				RecordFailure(source, *output.Failure, sourcePath, std::move(output.Import));
+				if (output.FailedOnLostDevice)
+					ForgetLostDeviceFailure(source, *output.Failure, sourcePath);
+				else
+					RecordFailure(source, *output.Failure, sourcePath, std::move(output.Import));
 				return std::unexpected(std::move(*output.Failure));
 			}
 
@@ -1469,7 +1497,11 @@ namespace Engine {
 			if (!loaded.has_value())
 			{
 				Error error = std::move(loaded).error().WithContext(std::format("while loading the built-in '{}'", entry.Path));
-				BuiltinFailures.emplace(entry.Handle, error);
+				// A built-in environment's bake that failed while the device was lost is the loss, not a failure of the built-in
+				// (M18's milestone review): it is not remembered, so the next load bakes it again after the recovery.
+				const bool lostDevice = error.GetCode() == ErrorCode::Gpu && Specification.EnvironmentBaker != nullptr && Specification.EnvironmentBaker->IsDeviceLost();
+				if (!lostDevice)
+					BuiltinFailures.emplace(entry.Handle, error);
 				return std::unexpected(std::move(error));
 			}
 			Self->BumpVersion(entry.Handle);

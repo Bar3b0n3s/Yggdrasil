@@ -1011,6 +1011,16 @@ namespace Engine {
 	{
 		if (const Status requested = RequestFreshUiFrame(); !requested)
 			ENGINE_WARN("Cannot request a fresh editor UI frame after the GPU device recovery: {}", requested.error());
+		// M18's milestone review: a run whose last frame lost the device has not written its final screenshots
+		// (OnRenderSubmitted takes none on a lost device, and a frame on a lost device does not call it), and its frame loop
+		// already decided to end with Success. They are taken here, on the recovered device, and a screenshot that cannot be
+		// written fails the run (FailRun) instead of letting it end with exit code 0.
+		State& state = *m_State;
+		if (!state.FinalFrame || state.ScreenshotsWritten)
+			return;
+		state.ScreenshotsWritten = true;
+		if (!WriteScreenshots(true))
+			FailRun(ExitCode::Failed);
 	}
 	Status EditorApp::UpdateHostServices()
 	{
@@ -1408,7 +1418,10 @@ namespace Engine {
 			}
 			m_State->UiConstructed = false;
 		}
-		if (m_State->FinalFrame && !m_State->ScreenshotsWritten)
+		// Never on a lost device (the submission reported the loss): OnDeviceRecovered takes them on the recovered device
+		// (M18's milestone review).
+		const GraphicsDevice* device = GetContext().GetGraphicsDevice();
+		if (m_State->FinalFrame && !m_State->ScreenshotsWritten && (device == nullptr || !device->IsLost()))
 		{
 			m_State->ScreenshotsWritten = true;
 			if (!WriteScreenshots())
@@ -1457,7 +1470,7 @@ namespace Engine {
 		return CaptureImGuiScreenshot(*device, *imgui, {});
 	}
 
-	bool EditorApp::WriteScreenshots()
+	bool EditorApp::WriteScreenshots(bool afterDeviceRecovery)
 	{
 		const auto write = [](std::string_view what, const std::filesystem::path& path, const Result<Image>& image)
 		{
@@ -1483,7 +1496,20 @@ namespace Engine {
 			succeeded = write("viewport", m_Options.ViewportScreenshotPath, image) && succeeded;
 		}
 		if (!m_Options.EditorScreenshotPath.empty())
-			succeeded = write("editor", m_Options.EditorScreenshotPath, CaptureEditorUi()) && succeeded;
+		{
+			// The editor UI capture re-renders the last UI frame, which was drawn before the loss: the recovery withdrew the
+			// views' images it shows and recreated ImGui's textures, and the run ends with this frame, so no current UI frame
+			// follows (M18's milestone review).
+			if (afterDeviceRecovery)
+			{
+				ENGINE_ERROR("Cannot capture the editor screenshot: the GPU device was lost on the run's last frame, and no editor UI frame was drawn on the recovered device");
+				succeeded = false;
+			}
+			else
+			{
+				succeeded = write("editor", m_Options.EditorScreenshotPath, CaptureEditorUi()) && succeeded;
+			}
+		}
 		return succeeded;
 	}
 

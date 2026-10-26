@@ -178,6 +178,7 @@ The milestone end runs `python Scripts/CI.py` instead of PreCommit (`--milestone
 - Raw pointers and references never own, and are never stored beyond the call, except for documented back-references. No naked `new`/`delete`.
 - Entities are referenced by `UUID` and assets by `AssetHandle`. Never keep a component reference across a structural change.
 - Lambdas that are stored or run later list their captures explicitly.
+- A new GPU object lives in `SceneRendererPipelines`, a `SceneRenderer`'s state or `GpuResourceCache`, or its owner registers with the device's recreation registry (Release, Recreate, and TrimUnused for what it can rebuild) and has a loss test through `Test::RunDeviceLossTest`. Command lists recorded outside the application frame use `CommandListRecording`, and creations after startup go through `RetryAfterTrim` (§8.14 items 7 and 10).
 
 **Determinism (§1.3, §4.12, §9.1)**
 The same inputs and seed must give the same state hash in Debug, Release and Dist. A result that depends on the configuration is a bug, never a reason for per-configuration expectations.

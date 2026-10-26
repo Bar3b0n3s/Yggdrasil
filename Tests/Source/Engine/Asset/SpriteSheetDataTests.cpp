@@ -13,6 +13,7 @@
 
 #include <bit>
 #include <limits>
+#include <string>
 
 // Sprite sheets (M18, C18.1, R-2D-SHEET; Docs/Decisions/0029-m18-contract.md decisions 14 to 16): the .spritesheet
 // document, its rules and its cooked payload.
@@ -255,6 +256,17 @@ namespace Engine {
 			{
 				sheet.Frames[1].Name = "Tab\tName";
 			});
+			// M18's milestone review: a C1 control character (U+0085 NEL, C2 85) is a control character too; U+00A0, the
+			// no-break space right after the C1 range (C2 A0), is not.
+			CheckInvalid("/Clips/0/Name", [](SpriteSheetData& sheet)
+			{
+				sheet.Clips[0].Name = "Run\xC2\x85";
+			});
+			{
+				SpriteSheetData spaced = MakeHeroSheet();
+				spaced.Clips[0].Name = std::string("Run\xC2\xA0") + "Fast";
+				CHECK(ValidateSpriteSheet(spaced).has_value());
+			}
 			CheckInvalid("/Clips/0/Name", [](SpriteSheetData& sheet)
 			{
 				sheet.Clips[0].Name.clear();

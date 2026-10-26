@@ -305,6 +305,10 @@ namespace Engine {
 		Detail::SceneRendererOutputTargets OutputTargets{};
 		PassBindingCache UpscaleBindings{};
 		RenderOutputMapping OutputMapping{};
+		// M18's milestone review: the last Render's output settings (the defaults before the first), at whose scene resolution
+		// Resize and the device-loss recovery create the targets, so the next Render with the same settings keeps them. CPU
+		// state that a device loss's release keeps (SceneRendererRecovery.cpp).
+		RenderOutputSettings OutputSettings{};
 		uint64_t PipelineGeneration = 0;
 		nvrhi::BufferHandle ViewConstantsBuffer{};
 		nvrhi::BufferHandle EnvironmentConstantsBuffer{};

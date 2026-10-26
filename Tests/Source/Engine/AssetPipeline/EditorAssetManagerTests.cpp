@@ -6,6 +6,7 @@
 #include "Engine/Asset/CookedFormat.h"
 #include "Engine/Asset/DocumentData.h"
 #include "Engine/Asset/EnvironmentData.h"
+#include "Engine/Asset/IEnvironmentBaker.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/TextureData.h"
@@ -312,6 +313,26 @@ namespace Engine {
 				environment.IrradianceSH9[index] = glm::vec3(0.25f * static_cast<float>(index), 0.5f, 1.0f);
 			return environment;
 		}
+
+		// M18's milestone review: a baker whose device the test loses and recovers. While Lost, every bake fails with Gpu, as
+		// EnvironmentBaker's creations fail on a lost device, and IsDeviceLost answers true; otherwise it bakes
+		// MakeBakedEnvironment. Counts its bakes.
+		class LosableBaker final : public IEnvironmentBaker
+		{
+		public:
+			Result<EnvironmentData> Bake(const EnvironmentBakeInput& /*input*/) override
+			{
+				++Bakes;
+				if (Lost)
+					return MakeError(ErrorCode::Gpu, "the bake's command list cannot be created: the GPU device is lost");
+				return MakeBakedEnvironment(0x3C00);
+			}
+
+			[[nodiscard]] bool IsDeviceLost() const override { return Lost; }
+		public:
+			bool Lost = false;
+			uint32_t Bakes = 0;
+		};
 
 		// The cache key (§7.5) the manager gives an environment source of `bytes` with the default settings.
 		uint64_t ComputeEnvironmentKey(Test::AssetTestFixture& fixture, std::span<const std::byte> bytes)
@@ -1409,6 +1430,43 @@ namespace Engine {
 			const Result<AssetImportOutcome> reimported = fixture.GetManager().Reimport(handle);
 			REQUIRE_MESSAGE(reimported.has_value(), reimported.error().ToString());
 			CHECK(reimported->FromCache);
+			CHECK(CountDiagnostics(fixture.GetManager(), AssetImportFailedCode, handle) == 0);
+		}
+
+		TEST_CASE("EditorAssetManager: an environment bake that fails while the device is lost is not remembered, and imports after the recovery")
+		{
+			// M18's milestone review (Docs/Decisions/0029-m18-contract.md decision 28: on a lost device a Gpu error is the loss):
+			// the import fails with the bake's Gpu error, without an ASSET_IMPORT_FAILED diagnostic or event and without a
+			// remembered failure, so every Load imports again, and the first one after the recovery bakes and loads. Before the
+			// fix the failure was remembered and the environment stayed failed for the session.
+			LosableBaker baker;
+			Test::AssetTestFixture fixture(Test::AssetTestFixtureOptions{ .EnvironmentBaker = &baker });
+			fixture.WriteProjectFile("Assets/Environments/Orange.hdr", MakeFlatHdr(16, glm::vec3(2.0f, 0.5f, 0.125f)));
+			fixture.OpenProject(false);
+			const AssetHandle handle = fixture.GetManager().Resolve("Assets/Environments/Orange.hdr").value_or(AssetHandle());
+			REQUIRE(handle.IsValid());
+
+			baker.Lost = true;
+			for (int attempt = 0; attempt < 2; ++attempt)
+			{
+				CAPTURE(attempt);
+				const Result<AssetRef<Asset>> lost = fixture.GetManager().Load(handle);
+				REQUIRE_FALSE(lost.has_value());
+				CHECK(lost.error().GetCode() == ErrorCode::Gpu);
+			}
+			CHECK(baker.Bakes == 2);
+			CHECK(fixture.GetManager().GetState(handle) != AssetState::Failed);
+			CHECK(CountDiagnostics(fixture.GetManager(), AssetImportFailedCode, handle) == 0);
+			const std::array failedEvents = { EngineEventType::AssetImportFailed };
+			CHECK(fixture.GetEventLog().Read(0, failedEvents).Events.empty());
+
+			// The frame boundary recovered the device.
+			baker.Lost = false;
+			const Result<AssetRef<Asset>> loaded = fixture.GetManager().Load(handle);
+			REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
+			CHECK(baker.Bakes == 3);
+			CHECK(fixture.GetManager().GetState(handle) == AssetState::Loaded);
+			CHECK(AssetCast<EnvironmentData>(*loaded) != nullptr);
 			CHECK(CountDiagnostics(fixture.GetManager(), AssetImportFailedCode, handle) == 0);
 		}
 

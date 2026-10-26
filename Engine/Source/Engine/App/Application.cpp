@@ -554,9 +554,13 @@ namespace Engine {
 
 		// 3. Shutdown in reverse order. The GPU services go before the rest of the context, so a run that expects no GPU
 		// messages fails when its device reported any error or warning in its whole life, its teardown included (leaks, the
-		// validation layer's reports at vkDestroyDevice, §15.3); an earlier failure keeps its code.
+		// validation layer's reports at vkDestroyDevice, §15.3); an earlier failure keeps its code. A failure FailRun reported
+		// after the loop decided to end with Success (OnDeviceRecovered after the last frame, OnShutdown) replaces it.
 		OnShutdown();
 		m_PendingExitCode.reset();
+		if (exitCode == ExitCode::Success && m_FailedExitCode.has_value())
+			exitCode = *m_FailedExitCode;
+		m_FailedExitCode.reset();
 		ShutdownRendering();
 		const bool hadDevice = m_Context->GetGraphicsDevice() != nullptr;
 		const GpuMessageCounts gpuMessages = m_Context->DestroyGraphics();
@@ -580,6 +584,14 @@ namespace Engine {
 			m_FrameLoop->RequestExit(exitCode);
 		else if (!m_PendingExitCode.has_value())
 			m_PendingExitCode = exitCode;
+	}
+
+	void Application::FailRun(int exitCode)
+	{
+		ENGINE_CORE_ASSERT(exitCode != ExitCode::Success, "FailRun needs a failure's exit code");
+		if (!m_FailedExitCode.has_value())
+			m_FailedExitCode = exitCode;
+		RequestExit(exitCode);
 	}
 
 	EngineContext& Application::GetContext()

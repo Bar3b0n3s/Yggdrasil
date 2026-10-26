@@ -269,8 +269,15 @@ namespace Engine {
 		const Result<bool> ensured = Utils::EnsureOutputTargets(*Device, *TargetPool, OutputTargets, mapping, overlays, overlays && frame.Selection, frame.Picking);
 		if (!ensured)
 		{
-			// No output image this render: targets of an earlier size go back to the pool rather than stand in for it.
-			OutputTargets = {};
+			// No output image this render: targets of an earlier size go back to the pool rather than stand in for it. The
+			// targets of no size are kept, as EnsureOutputTargets keeps them (M18's milestone review): the overlay constants,
+			// the letterbox repaint's texel and the letterbox's EntityId texel, which an earlier picking render cleared to 0, so
+			// a pick of a letterbox pixel of this render still reads the background (SceneRenderer::RequestPick).
+			Detail::SceneRendererOutputTargets kept;
+			kept.OverlayViewConstants = std::move(OutputTargets.OverlayViewConstants);
+			kept.LetterboxTexel = std::move(OutputTargets.LetterboxTexel);
+			kept.LetterboxEntityId = std::move(OutputTargets.LetterboxEntityId);
+			OutputTargets = std::move(kept);
 			UpscaleBindings.Clear();
 			frame.KeepFirstError(std::unexpected(ensured.error()));
 			return;

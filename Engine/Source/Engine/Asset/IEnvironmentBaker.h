@@ -38,6 +38,12 @@ namespace Engine {
 		// The skybox cube, the prefiltered specular cube and the SH9 irradiance of `input` (§8.6 steps 2 to 4). Errors:
 		// InvalidArgument for a malformed input (sizes, non-finite texels); Gpu for a device failure (naming the resource).
 		[[nodiscard]] virtual Result<EnvironmentData> Bake(const EnvironmentBakeInput& input) = 0;
+
+		// Whether the device the bakes run on is lost (M18's milestone review; Docs/Decisions/0029-m18-contract.md decision
+		// 28): reported and not yet recovered at the frame boundary. A Bake that failed with Gpu meanwhile failed because of
+		// the loss, not its input, so the EditorAssetManager does not remember that import's failure: the next Load imports
+		// the source again, after the recovery. False by default (a baker without a device). Main thread.
+		[[nodiscard]] virtual bool IsDeviceLost() const { return false; }
 	};
 
 }

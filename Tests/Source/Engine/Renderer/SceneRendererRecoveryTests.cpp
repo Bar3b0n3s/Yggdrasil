@@ -2,20 +2,33 @@
 
 #include "Engine/Renderer/SceneRenderer.h"
 
+#include "Engine/App/EngineContext.h"
+#include "Engine/App/FrameLoop.h"
+#include "Engine/Asset/MaterialData.h"
+#include "Engine/Asset/MeshData.h"
+#include "Engine/Graphics/CommandListRecording.h"
 #include "Engine/Graphics/GpuDiagnostics.h"
 #include "Engine/Graphics/GpuResourceTracker.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Readback.h"
+#include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Engine/Renderer/RenderPassDeclaration.h"
 #include "Support/DeviceLossTest.h"
 #include "Support/HeadlessGpuFixture.h"
+#include "Support/InMemoryAssetManager.h"
+#include "Support/TestOptions.h"
+#include "Support/TimelineReportsDeviceLost.h"
+
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <format>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 // A scene renderer's recovery from a device loss (M18, C18.3; Docs/Decisions/0029-m18-contract.md decisions 26 and 27):
@@ -98,6 +111,77 @@ namespace Engine {
 			std::array<uint64_t, GpuResourceTypeCount> ByType{};
 			uint64_t Total = 0;
 			std::string Description{};
+		};
+
+		// M18's milestone review: renders a lit quad with a SceneRenderer of the test in every frame's OnFrameRender, into a
+		// command list of its own, as an application's frame does. In frame 0 the queue's timeline reports the device lost from
+		// the moment the GpuResourceCache loads the quad's mesh, inside the Prepare stage's "Prepare" pass and after Render's
+		// own timeline query: the mesh's first upload write throws vk::DeviceLostError out of NVRHI with that stage and pass
+		// open, which unwinds Render to the frame-boundary catch. The client recovers the device when the loop asks, as
+		// Application does, and records each frame's render result.
+		class StageLosingClient final : public IFrameLoopClient
+		{
+		public:
+			StageLosingClient(EngineContext& context, InMemoryAssetManager& assets, SceneRenderer& renderer, RenderSnapshot snapshot)
+				: m_Context(&context), m_Assets(&assets), m_Renderer(&renderer), m_Snapshot(std::move(snapshot))
+			{
+				m_Assets->SetLoadObserver([this](AssetHandle handle)
+				{
+					if (m_LoseAtMeshLoad && handle == m_Snapshot.Meshes.front().Mesh)
+					{
+						m_LoseAtMeshLoad = false;
+						m_Lost.emplace();
+					}
+				});
+			}
+
+			~StageLosingClient() override { m_Assets->SetLoadObserver({}); }
+
+			StageLosingClient(const StageLosingClient&) = delete;
+			StageLosingClient& operator=(const StageLosingClient&) = delete;
+
+			void OnFrameEvent(Event& /*event*/) override {}
+
+			void OnFrameFixedStep(const SimStep& /*step*/) override {}
+
+			void OnFrameUpdate(const FrameTime& /*frame*/) override {}
+
+			void OnFrameRender(const FrameTime& frame) override
+			{
+				GraphicsDevice& device = *m_Context->GetGraphicsDevice();
+				Result<nvrhi::CommandListHandle> list = device.CreateCommandList();
+				if (!list.has_value())
+				{
+					Rendered.push_back(list.error().ToString());
+					return;
+				}
+				m_LoseAtMeshLoad = frame.FrameIndex == 0;
+				m_Snapshot.FrameIndex = frame.FrameIndex + 1;
+				CommandListRecording recording(device, **list);
+				const Status rendered = m_Renderer->Render(**list, m_Snapshot);
+				m_Renderer->OnSubmitted(m_Snapshot.FrameIndex, recording.Execute());
+				m_Lost.reset();
+				Rendered.push_back(rendered.has_value() ? std::format("frame {} rendered", frame.FrameIndex) : rendered.error().ToString());
+			}
+
+			void OnFrameDeviceLost() override
+			{
+				// The timeline answers again before the recovery waits for the device.
+				m_Lost.reset();
+				++Recoveries;
+				Recovery = m_Context->RecoverGraphics();
+			}
+		public:
+			std::vector<std::string> Rendered{};
+			uint32_t Recoveries = 0;
+			Status Recovery{};
+		private:
+			EngineContext* m_Context = nullptr; // documented back-references: the test's objects outlive the client
+			InMemoryAssetManager* m_Assets = nullptr;
+			SceneRenderer* m_Renderer = nullptr;
+			RenderSnapshot m_Snapshot{};
+			std::optional<TimelineReportsDeviceLost> m_Lost{};
+			bool m_LoseAtMeshLoad = false;
 		};
 
 		[[nodiscard]] static LiveCounts ReadLiveCounts(GraphicsDevice& device)
@@ -345,6 +429,80 @@ namespace Engine {
 			const Result<std::vector<std::byte>> image = Test::RenderAndRead(device, setup, albedo);
 			REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
 			CHECK(setup.Pipelines().GetPipelineCount() == GetDeclaredPipelineCount() + SceneRendererPipelines::DebugViewPipelineCount);
+		}
+
+		TEST_CASE("SceneRenderer: a device loss thrown out of NVRHI in the middle of a stage is recovered at the frame boundary"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18's milestone review (decisions 25, 29 and 39): a real loss that Render's own timeline query has not seen yet
+			// surfaces as a vk::DeviceLostError out of the Prepare stage's first upload. The recording context ends with its
+			// stage and pass open while the error unwinds Render, and the renderer abandons the render, so the frame-boundary
+			// catch reports the loss, the recovery releases and recreates the renderer, and the next frame renders. Before the
+			// fix the recording context's destructor verified that no stage or pass was open and ended the process with
+			// FatalError(Assert).
+			if (!Test::ProbeGpuForProcess())
+				return;
+			GraphicsSpecification graphics;
+			graphics.Validation = true;
+			graphics.SynchronizationValidation = true;
+			graphics.MaxApiVersion = Test::GetTestOptions().VulkanApi;
+			Result<Scope<EngineContext>> created = EngineContext::Create({ .WorkerCount = 0, .Graphics = graphics });
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			EngineContext& context = **created;
+			GraphicsDevice& device = *context.GetGraphicsDevice();
+			{
+				Test::InMemoryAssetManager assets;
+				auto mesh = CreateRef<MeshData>();
+				mesh->Vertices = {
+					{ .Position = { -1, -1, 0 }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 0, 1 } },
+					{ .Position = { 1, -1, 0 }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 1, 1 } },
+					{ .Position = { 1, 1, 0 }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 1, 0 } },
+					{ .Position = { -1, 1, 0 }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 0, 0 } },
+				};
+				mesh->Indices = { 0, 1, 2, 0, 2, 3 };
+				mesh->Bounds = { { -1, -1, 0 }, { 1, 1, 0 } };
+				mesh->Submeshes = { { .IndexCount = 6, .Bounds = mesh->Bounds } };
+				mesh->Slots = { {} };
+				assets.Publish(UUID(8910), mesh);
+				assets.Publish(UUID(8911), CreateRef<MaterialData>());
+				GpuResourceCache cache(device, assets);
+				Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(device, *context.GetPipelineFactory());
+				REQUIRE_MESSAGE(pipelines.has_value(), pipelines.error().ToString());
+				Result<Scope<SceneRenderer>> renderer = SceneRenderer::Create(device, **pipelines, cache, assets, { 64, 64 });
+				REQUIRE_MESSAGE(renderer.has_value(), renderer.error().ToString());
+
+				RenderSnapshot snapshot;
+				snapshot.HasCamera = true;
+				snapshot.Camera.ViewportWidth = 64;
+				snapshot.Camera.ViewportHeight = 64;
+				snapshot.Camera.NearClip = 0.1f;
+				snapshot.Camera.FarClip = 20;
+				snapshot.Camera.Projection = ComputeReverseZProjection(RenderProjection::Perspective, 60, 2, 0.1f, 20, 64, 64);
+				snapshot.Camera.ClearColor = glm::vec3(0);
+				snapshot.Camera.ClearToSkybox = false;
+				snapshot.Post.BloomEnabled = false;
+				snapshot.Post.FxaaEnabled = false;
+				snapshot.Post.SsaoEnabled = false;
+				snapshot.Post.Tonemap = RenderTonemapper::Linear;
+				snapshot.Quality.ShadowMapSize = 256;
+				snapshot.Meshes = { { .World = glm::translate(glm::mat4(1), glm::vec3(0, 0, -3)), .Mesh = UUID(8910), .Materials = { UUID(8911) }, .Entity = UUID(900), .PickId = 1 } };
+				{
+					Test::StageLosingClient client(context, assets, **renderer, std::move(snapshot));
+					FrameLoop loop(context, client, CreateScope<ManualClock>(1.0 / 60.0), {});
+					loop.RunFrame();
+					loop.RunFrame();
+					CHECK(client.Recoveries == 1);
+					CHECK_MESSAGE(client.Recovery.has_value(), (client.Recovery.has_value() ? std::string() : client.Recovery.error().ToString()));
+					CHECK_FALSE(device.IsLost());
+					CHECK(device.GetRecoveryCount() == 1);
+					CHECK(client.Rendered == std::vector<std::string>{ "frame 1 rendered" });
+					CHECK((*renderer)->GetRenderStats().FrameIndex == 2);
+				}
+				device.WaitForIdle();
+			}
+			const GpuMessageCounts counts = context.DestroyGraphics();
+			CHECK(counts.Errors == 0);
+			CHECK(counts.Warnings == 0);
 		}
 	}
 

@@ -440,6 +440,11 @@ namespace Engine {
 		return BakeWithOptions(input, EnvironmentBakeOptions{});
 	}
 
+	bool EnvironmentBaker::IsDeviceLost() const
+	{
+		return m_State->Device->IsLost();
+	}
+
 	Result<EnvironmentData> EnvironmentBaker::BakeWithOptions(const EnvironmentBakeInput& input, const EnvironmentBakeOptions& options)
 	{
 		ENGINE_TRY(Utils::ValidateInput(input));

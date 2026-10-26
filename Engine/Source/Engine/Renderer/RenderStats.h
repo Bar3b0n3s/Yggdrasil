@@ -81,7 +81,11 @@ namespace Engine {
 		// also a CPU zone of the same name in the process profiler (Profiler::RecordZone), so profiler.capture shows the
 		// stages on both timelines. A stage is never a stats row (no pass is named "Stage:..."). Stages do not nest, and
 		// BeginPass and EndPass stay valid outside any stage (the context's CPU-only users). Asserted: no BeginStage while a
-		// stage or a pass is open; EndStage only for an open stage without an open pass. No stage may be open at destruction.
+		// stage or a pass is open; EndStage only for an open stage without an open pass. No stage may be open at destruction,
+		// unless an exception unwinds the recording (M18's milestone review): a vk::SystemError thrown out of NVRHI in the
+		// middle of a pass or a stage (a device loss that an upload's first write meets) on its way to the frame boundary,
+		// which recovers the device. The destructor then ends the open stage's CPU zone and leaves its GPU scopes open: the
+		// device-loss release replaces the renderer's GpuProfiler, and the list is retired without being submitted.
 		void BeginStage(RenderStage stage, nvrhi::ICommandList* commandList = nullptr);
 		void EndStage();
 	private:

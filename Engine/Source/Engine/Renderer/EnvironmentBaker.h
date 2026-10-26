@@ -94,6 +94,8 @@ namespace Engine {
 
 		// BakeWithOptions with the default options (§8.6). Errors: as BakeWithOptions.
 		[[nodiscard]] Result<EnvironmentData> Bake(const EnvironmentBakeInput& input) override;
+		// GraphicsDevice::IsLost of the baker's device (IEnvironmentBaker::IsDeviceLost; M18's milestone review).
+		[[nodiscard]] bool IsDeviceLost() const override;
 
 		// The skybox cube, the prefiltered specular cube and the SH9 irradiance of `input` (steps 2 to 4), read back into an
 		// EnvironmentData. Blocks until the GPU work is done (Readback, WaitForSubmission bounded like every engine wait).

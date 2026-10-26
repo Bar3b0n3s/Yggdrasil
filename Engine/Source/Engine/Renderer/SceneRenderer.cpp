@@ -8,6 +8,7 @@
 #include "Engine/Core/Log.h"
 #include "Engine/Graphics/CommandListRecording.h"
 #include "Engine/Graphics/GpuOutOfMemory.h"
+#include "Engine/Graphics/GpuProfiler.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Renderer/BloomPass.h"
 #include "Engine/Renderer/BrdfLut.h"
@@ -41,6 +42,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <exception>
 #include <format>
 #include <iterator>
 #include <limits>
@@ -815,10 +817,14 @@ namespace Engine {
 		// (C18.4, decisions 42 and 44): a new size after startup is a request; an out-of-memory creation is trimmed for and
 		// retried once (the targets a failed attempt acquired are free in the pool again, and its retry reuses them), and a
 		// second one returns OutOfMemory with the renderer as it was. Nothing records meanwhile: no Render awaits OnSubmitted.
+		// The targets are at the scene resolution the last Render's output settings give the new size (the view's size for the
+		// default settings), so the next Render with the same settings keeps them instead of replacing a set it never used (M18's
+		// milestone review).
+		const RenderOutputMapping mapping = ComputeRenderOutputMapping(width, height, state.OutputSettings);
 		Detail::SceneRendererTargets targets;
-		const Status created = RetryAfterTrim(*state.Device, std::format("a scene view's resize to {}x{}", width, height), [&state, &targets, width, height]() -> Status
+		const Status created = RetryAfterTrim(*state.Device, std::format("a scene view's resize to {}x{}", width, height), [&state, &targets, &mapping]() -> Status
 		{
-			ENGINE_TRY_ASSIGN(targets, state.CreateTargets(width, height));
+			ENGINE_TRY_ASSIGN(targets, state.CreateTargets(mapping.SceneWidth, mapping.SceneHeight));
 			return {};
 		});
 		ENGINE_TRY(created);
@@ -920,6 +926,7 @@ namespace Engine {
 		frame.Snapshot = &snapshot;
 		frame.CommandList = &commandList;
 		frame.Output = ComputeRenderOutputMapping(state.ViewWidth, state.ViewHeight, snapshot.Output);
+		state.OutputSettings = snapshot.Output;
 		frame.DebugView = debugView;
 		frame.IsLit = debugView == RenderDebugView::Lit;
 		frame.IsDataView = debugView >= RenderDebugView::AO;
@@ -945,6 +952,27 @@ namespace Engine {
 			profiler = state.Profiler.get();
 			state.PendingTimingSlot = slot;
 		}
+		// M18 (the milestone review; decision 39): a render that an exception unwinds (a vk::SystemError thrown out of NVRHI, a
+		// device loss that an upload's first write meets, on its way to the frame boundary or an automation method's handler,
+		// which report the loss) is abandoned: the renderer awaits no OnSubmitted for it, and the profiler whose scopes the
+		// unwinding left open (RenderRecordingContext leaves them, RenderStats.h) is replaced, as the device-loss release
+		// replaces it, so a render or a capture before the recovery finds the renderer as after any render on the lost device.
+		// Declared before the recording context, so it runs after that context's destructor.
+		struct AbandonOnUnwind
+		{
+			State* Renderer = nullptr;
+			int UncaughtExceptions = std::uncaught_exceptions();
+
+			~AbandonOnUnwind()
+			{
+				if (std::uncaught_exceptions() <= UncaughtExceptions)
+					return;
+				Renderer->PendingSubmission = false;
+				Renderer->PendingTimingSlot.reset();
+				Renderer->Profiler = CreateScope<GpuProfiler>(*Renderer->Device, Renderer->Device->GetFramesInFlight());
+			}
+		};
+		const AbandonOnUnwind abandonOnUnwind{ .Renderer = &state };
 		RenderRecordingContext recording(stats, Utils::SceneRendererNowSeconds, profiler);
 		frame.Recording = &recording;
 

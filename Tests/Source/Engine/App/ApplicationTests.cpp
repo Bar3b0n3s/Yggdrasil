@@ -53,7 +53,8 @@ namespace Engine {
 			std::vector<std::string> Calls;
 			bool FailInitialize = false;
 			std::optional<int> ExitDuringInitialize;
-			std::optional<uint64_t> ExitAtFrame; // RequestExit(ExitCode::Timeout) from the OnUpdate of this frame, twice
+			std::optional<uint64_t> ExitAtFrame;  // RequestExit(ExitCode::Timeout) from the OnUpdate of this frame, twice
+			std::optional<int> FailRunAtShutdown; // FailRun with this code from OnShutdown, after the frame loop ended
 			bool ProcessContextWasCurrent = false;
 		protected:
 			Status OnInitialize() override
@@ -73,6 +74,8 @@ namespace Engine {
 			void OnShutdown() override
 			{
 				Calls.push_back("shutdown");
+				if (FailRunAtShutdown.has_value())
+					FailRun(*FailRunAtShutdown);
 			}
 
 			void OnFixedStep(const SimStep& step) override
@@ -759,6 +762,21 @@ namespace Engine {
 				"shutdown",
 			};
 			CHECK(application.Calls == expected);
+		}
+
+		TEST_CASE("Application: FailRun fails a run that the frame loop ended with Success, and keeps an earlier failure")
+		{
+			// M18's milestone review: a failure found after the frame loop decided to end with Success (MaxFrames), such as the
+			// editor's final screenshots taken in OnDeviceRecovered after a device loss on the run's last frame, fails the run,
+			// which RequestExit cannot do: its first request wins.
+			RecordingApplication succeeding(MakeHeadlessSpecification(2));
+			succeeding.FailRunAtShutdown = ExitCode::Failed;
+			CHECK(succeeding.Run() == ExitCode::Failed);
+
+			RecordingApplication failing(MakeHeadlessSpecification(std::nullopt));
+			failing.ExitAtFrame = 0;
+			failing.FailRunAtShutdown = ExitCode::Failed;
+			CHECK(failing.Run() == ExitCode::Timeout);
 		}
 
 		TEST_CASE("Application: --expect-no-gpu-errors fails a run whose device reported an error"

@@ -10,8 +10,7 @@
 #include "Support/DeathTest.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/TestOptions.h"
-
-#include <vulkan/vulkan.hpp>
+#include "Support/TimelineReportsDeviceLost.h"
 
 // A command list's recording (M18, C18.3; Docs/Decisions/0029-m18-contract.md decision 39): executed by its owner, or
 // retired without a submission when a vk::SystemError unwinds it, so no opened list outlives its owner and keeps itself and
@@ -20,37 +19,6 @@
 namespace Engine {
 
 	namespace {
-
-		// While alive, the dispatcher's vkGetSemaphoreCounterValue answers VK_ERROR_DEVICE_LOST, as a really lost device's
-		// does, without reaching Vulkan: NVRHI's upload manager asks the queue's timeline what completed at the first write
-		// of a recording, so its vulkan.hpp call throws vk::DeviceLostError out of the middle of the recording. The Vulkan
-		// device stays healthy, so the validation layer checks everything that follows. Main thread, around the calls under
-		// test.
-		class TimelineReportsDeviceLost
-		{
-		public:
-			TimelineReportsDeviceLost()
-				: m_GetSemaphoreCounterValue(VULKAN_HPP_DEFAULT_DISPATCHER.vkGetSemaphoreCounterValue)
-			{
-				VULKAN_HPP_DEFAULT_DISPATCHER.vkGetSemaphoreCounterValue = &ReportDeviceLost;
-			}
-
-			~TimelineReportsDeviceLost()
-			{
-				VULKAN_HPP_DEFAULT_DISPATCHER.vkGetSemaphoreCounterValue = m_GetSemaphoreCounterValue;
-			}
-
-			TimelineReportsDeviceLost(const TimelineReportsDeviceLost&) = delete;
-			TimelineReportsDeviceLost& operator=(const TimelineReportsDeviceLost&) = delete;
-		private:
-			static VKAPI_ATTR VkResult VKAPI_CALL ReportDeviceLost(VkDevice /*device*/, VkSemaphore /*semaphore*/, uint64_t* value)
-			{
-				*value = 0;
-				return VK_ERROR_DEVICE_LOST;
-			}
-
-			PFN_vkGetSemaphoreCounterValue m_GetSemaphoreCounterValue = nullptr;
-		};
 
 		// In the update of frame 0, uploads a texture through HostImageUpload's staged path while the queue's timeline reports
 		// the device lost, so its recording is unwound by the vk::DeviceLostError that the frame-boundary catch reports; then
@@ -78,7 +46,7 @@ namespace Engine {
 				desc.debugName = "UnwoundUpload";
 				const std::array<std::byte, 4 * 4 * 4> pixels{};
 				const std::array<TextureSubresourceData, 1> data{ { { .Data = pixels } } };
-				const TimelineReportsDeviceLost lost;
+				const Test::TimelineReportsDeviceLost lost;
 				const Result<TextureUpload> upload = m_Context->GetGraphicsDevice()->GetHostImageUpload().CreateTexture(desc, data,
 					TextureUploadPath::Staging);
 				UploadReturned = upload.has_value() ? "the texture" : upload.error().ToString();

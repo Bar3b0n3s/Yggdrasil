@@ -178,7 +178,9 @@ namespace Engine {
 		// (on the calling thread for Load; RequiresMainThread importers always on the main thread), stores the result in the
 		// cache and loads the cooked bytes. File and Generated built-ins come from the engine cooked cache
 		// (GetOrBakeEngineAsset). A failure is remembered as AssetManager::Load describes: the source is not imported again
-		// until it, a dependency file, its settings or its importer changes.
+		// until it, a dependency file, its settings or its importer changes. M18's milestone review: except a GPU bake's Gpu
+		// error while the baker's device is lost (IEnvironmentBaker::IsDeviceLost), which is the loss's: it is returned with
+		// a Warn line and no diagnostic or event, and the next Load (a refresh, for a source imported before) imports again.
 		[[nodiscard]] Result<AssetRef<Asset>> Load(AssetHandle handle) override;
 		[[nodiscard]] JobHandle<AssetRef<Asset>> LoadAsync(AssetHandle handle) override;
 		[[nodiscard]] AssetState GetState(AssetHandle handle) const override;

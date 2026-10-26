@@ -66,8 +66,10 @@ namespace Engine {
 		// and recreates its renderer like any view. EditorApp calls it once, after construction, for a headless editor started
 		// with the option. Errors: InvalidState without a headless window (a windowed editor's panels decide).
 		[[nodiscard]] Status ForceGameView();
-		// Whether every open view's image has the size its panel asked for, or (M18, C18.4) the size it stays at because the
-		// asked size ran out of memory.
+		// Whether every shown view's image has the size it renders at (GetTargetSize: its panel's, or the forced Game view's
+		// whatever its panel does, M18's merge with M19), or (M18, C18.4) the size it stays at because that size ran out of
+		// memory. A forced Game view counts once it has rendered, also when its panel is open but not drawn (a headless
+		// editor's default layout keeps the Game tab behind the Scene view), so editor.screenshot's fresh UI frame completes.
 		[[nodiscard]] bool IsLayoutReady() const;
 		// How many times registered view images were withdrawn outside a render (minimizing, retiring). A UI frame whose
 		// draw data was built before the latest withdrawal references removed textures and must not be captured.
@@ -114,6 +116,11 @@ namespace Engine {
 			glm::uvec2 FailedSize = glm::uvec2(0);
 		};
 		[[nodiscard]] static size_t Index(ViewportView view);
+		// The size view `index` (0 the Scene view, 1 the Game view) renders at: the forced Game view's (ForceGameView: the game
+		// resolution, or the project's deterministic window size) whatever its panel does; otherwise the size its open panel
+		// asked for (0 x 0 for an open panel that is not drawn); nullopt for a view that is not shown (its panel closed, or no
+		// project). RenderView and IsLayoutReady share it (M18's milestone review).
+		[[nodiscard]] std::optional<glm::uvec2> GetTargetSize(size_t index) const;
 		void Cancel(View& view);
 		// The recreation owner's Release (see the class comment): no GPU call.
 		void ReleaseGpuObjects();

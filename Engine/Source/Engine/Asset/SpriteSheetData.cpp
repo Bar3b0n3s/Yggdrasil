@@ -43,14 +43,24 @@ namespace Engine {
 			context.AddIssue(std::move(issue));
 		}
 
-		// Whether `text` holds a C0 control character or DEL (the rule of every sheet name; VfsPath's too).
+		// Whether `text` holds a control character: a C0 control, DEL, or a C1 control (U+0080 to U+009F, encoded as C2 80 to
+		// C2 9F), the rule of every sheet name and of the FileDialog API's text (M18's milestone review: C1 controls such as
+		// U+0085 NEL are control characters too).
 		[[nodiscard]] static bool HasControlCharacter(std::string_view text)
 		{
-			return std::ranges::any_of(text, [](char character)
+			for (size_t index = 0; index < text.size(); ++index)
 			{
-				const auto value = static_cast<unsigned char>(character);
-				return value < 0x20 || value == 0x7f;
-			});
+				const auto byte = static_cast<unsigned char>(text[index]);
+				if (byte < 0x20 || byte == 0x7f)
+					return true;
+				if (byte == 0xc2 && index + 1 < text.size())
+				{
+					const auto next = static_cast<unsigned char>(text[index + 1]);
+					if (next >= 0x80 && next <= 0x9f)
+						return true;
+				}
+			}
+			return false;
 		}
 
 		// A frame's or a clip's Name (`what`: "frame 3", "clip 0"): at most MaxSpriteSheetNameBytes bytes of valid UTF-8
