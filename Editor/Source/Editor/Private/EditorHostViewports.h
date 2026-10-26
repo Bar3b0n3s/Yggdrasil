@@ -25,6 +25,15 @@ namespace Engine {
 	// renderers, so a recovery releases it first). Its Release removes both keys (counted as withdrawals) and forgets the
 	// images, the queued and pending picks and the recorded frame, which never completes; the renderers release and recreate
 	// themselves (SceneRenderer, the placement rule's place 2), and the next Render registers the recreated images again.
+	//
+	// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decisions 42 and 44): out-of-memory after startup fails only its request.
+	// A view whose new size runs out of memory after its renderer's trim and retry (SceneRenderer::Resize's OutOfMemory) goes
+	// on rendering at its previous size, which its panel shows scaled into the view's area and maps clicks through (the
+	// image's size is the rendered size), with one Warn line per failed size; the size is asked for again only once the
+	// view's size changes. A debug-view switch whose pipelines run out of memory (Render's OutOfMemory) sets the scene view's
+	// debug-view setting back to the mode its renderer stayed on (SceneRenderer::GetRenderedDebugView), so the next frames do
+	// not try again. A view's per-frame render that runs out of memory (a lazily created target or binding set) is trimmed
+	// for once after the frame's submission (Submitted), and the next frame renders again.
 	class EditorHostViewports final : public EditorViewportHost
 	{
 	public:
@@ -32,10 +41,15 @@ namespace Engine {
 		~EditorHostViewports() override;
 		[[nodiscard]] Status Initialize(GraphicsDevice& device, SceneRendererPipelines& pipelines, GpuResourceCache& cache, ImGuiRenderer& imgui);
 		// Renders every displayed view and notifies its renderer, even when another view fails: the first error is returned
-		// after both views ran (a Gpu error at once, since the host ends the process for it). A view that is not displayed
+		// after both views ran, a Gpu error before any other (M18, C18.4: out-of-memory of a lazily created target or binding
+		// set, for which Submitted trims after the frame, never fatal; on a lost device the loss). A view that is not displayed
 		// withdraws its image; when the shown scene changes while it is hidden, it also releases its renderer, whose binding
 		// caches would otherwise keep the previous scene's GPU textures alive, and gets a new one when displayed again.
 		[[nodiscard]] Status Render(RenderContext& context);
+		// Notifies every view recorded in the frame of its submission and requests its queued pick. M18 (C18.4, decision 44):
+		// then, when the frame's Render returned an out-of-memory error (IsGpuOutOfMemory: a Gpu error on a device that is
+		// not lost), runs GraphicsDevice::TrimUnused once, which waits for that submission before any owner drops what it can
+		// rebuild; a later frame whose Render succeeds trims nothing.
 		[[nodiscard]] Status Submitted(uint64_t frameIndex, uint64_t submissionId);
 		void Retire();
 		void Invalidate();
@@ -45,6 +59,8 @@ namespace Engine {
 		void SetUnavailable();
 		// The window has a usable framebuffer again: the next render publishes the views' extents.
 		void SetAvailable();
+		// Whether every open view's image has the size its panel asked for, or (M18, C18.4) the size it stays at because the
+		// asked size ran out of memory.
 		[[nodiscard]] bool IsLayoutReady() const;
 		// How many times registered view images were withdrawn outside a render (minimizing, retiring). A UI frame whose
 		// draw data was built before the latest withdrawal references removed textures and must not be captured.
@@ -86,6 +102,9 @@ namespace Engine {
 			uint64_t LatestSequence = 0;
 			bool Recorded = false;
 			bool HoldsSceneResources = false; // rendered since its renderer was created
+			// M18 (C18.4, decision 44): the requested size whose Resize ran out of memory (0x0: none), not asked for again
+			// until the requested size changes.
+			glm::uvec2 FailedSize = glm::uvec2(0);
 		};
 		[[nodiscard]] static size_t Index(ViewportView view);
 		void Cancel(View& view);
@@ -108,6 +127,7 @@ namespace Engine {
 		uint64_t m_Withdrawals = 0;
 		bool m_Unavailable = false;
 		bool m_GameFocused = false;
+		bool m_TrimAfterSubmission = false;       // the last Render ran out of memory: Submitted trims (M18, C18.4 decision 44)
 		GpuRecreationRegistration m_Recreation{}; // from Initialize until Retire
 	};
 

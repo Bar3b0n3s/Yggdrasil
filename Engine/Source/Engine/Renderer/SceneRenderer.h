@@ -283,7 +283,8 @@ namespace Engine {
 
 		// Recreates the size-dependent targets for `width` x `height` (both >= 1, asserted) and clears the renderer's binding
 		// sets (which reference the old targets); no effect at the current size. Errors: InvalidState while a Render awaits its
-		// OnSubmitted (also asserted); those of the target creation (Gpu: FatalError(OutOfMemory) for the caller, §8.14 item 7).
+		// OnSubmitted (also asserted); those of the target creation (M18, C18.4: OutOfMemory after its trim and retry, below;
+		// on a lost device Gpu, the loss).
 		// M18 (C18.4, decisions 42 and 44): a view's new size after startup. Resize creates the new size's targets aside and
 		// replaces the current ones only when every creation succeeded, through RetryAfterTrim: an out-of-memory creation
 		// trims and retries once, and a second one returns OutOfMemory with the renderer unchanged (its size, targets,
@@ -310,8 +311,8 @@ namespace Engine {
 		// match the scene resolution (M18: RenderOutputSettings, the renderer's size by default); a different one renders at
 		// the scene resolution with the snapshot's projection. Uploads
 		// the assets it needs through the GpuResourceCache first, and creates a debug view's pipelines the first time it is
-		// asked for (SceneRendererPipelines::EnsureDebugView; a Gpu error there is FatalError(OutOfMemory), §8.14 item 7,
-		// except on a lost device, where it is the loss and returned, M18 C18.3 decision 28).
+		// asked for (SceneRendererPipelines::EnsureDebugView: a debug-view switch, M18 C18.4 below; on a lost device a Gpu
+		// error there is the loss and returned, M18 C18.3 decision 28).
 		// Afterwards GetFinalTexture holds the image.
 		// Errors returned before recording (nothing recorded, no OnSubmitted needed): InvalidState while the previous Render
 		// awaits its OnSubmitted (also asserted), or between the pipeline set's ReleaseGpuObjects and its CreatePipelines (a
@@ -325,12 +326,13 @@ namespace Engine {
 		// shadows (warned once per renderer).
 		// M18 (C18.4, decisions 42 and 44): a debug-view switch after startup. The debug view's first pipelines are created
 		// through RetryAfterTrim, before anything is recorded; when they run out of memory again after the trim, the view is
-		// recorded with the debug view the renderer last rendered (Lit before its first Render) and Render returns
+		// recorded with the debug view the renderer last rendered (Lit before its first Render, and Lit when that view's
+		// pipelines are gone too: a CreatePipelines since, by a shader reload or a recovery, dropped them) and Render returns
 		// OutOfMemory as a partial error naming the view that stayed (one Warn line per renderer and view), so the image
-		// stays on its previous mode and the host keeps or reverts its setting (decision 44); the next Render that asks for
-		// the view tries again. A partial Gpu error of a lazily created target or binding set on a device that is not lost is
-		// out-of-memory too: returned as now, never fatal, and its host trims after the frame (GraphicsDevice::TrimUnused) and
-		// renders again at the next frame.
+		// stays on its previous mode and the host reverts its setting to GetRenderedDebugView (decision 44); the next Render
+		// that asks for the view tries again. A partial Gpu error of a lazily created target or binding set on a device that
+		// is not lost is out-of-memory too: returned as now, never fatal, and its host trims after the frame
+		// (GraphicsDevice::TrimUnused) and renders again at the next frame.
 		[[nodiscard]] Status Render(nvrhi::ICommandList& commandList, const RenderSnapshot& snapshot);
 
 		// The LDR target holding the last Render's image (RGBA8_UNORM, display-encoded values, §8.9), at the renderer's size:
@@ -346,6 +348,10 @@ namespace Engine {
 		// identity at the renderer's size before the first Render and after Resize.
 		[[nodiscard]] RenderOutputMapping GetOutputMapping() const;
 		[[nodiscard]] const SceneRenderStats& GetLastStats() const;
+		// M18 (C18.4, decision 44): the debug view the last recorded Render drew in (Lit before the first): the snapshot's,
+		// or, after a debug-view switch that ran out of memory, the view Render stayed on. A device loss's release and
+		// recreation keep it. A host whose switch failed sets its setting back to it, so the next frames do not try again.
+		[[nodiscard]] RenderDebugView GetRenderedDebugView() const;
 
 		// M9: borrowed R32_UINT target of the last view with Flags::Picking, otherwise null. Valid until Resize/destruction.
 		// Transparent geometry and text do not write EntityId; Opaque/Mask use the same discard and cull rules as depth.

@@ -97,8 +97,7 @@ namespace Engine {
 			CHECK(registry.GetOwnerCount() == 0);
 		}
 
-		TEST_CASE("GpuRecreationRegistry: TrimUnused calls every trim hook, last registered first, and skips owners without one"
-			* doctest::skip(true))
+		TEST_CASE("GpuRecreationRegistry: TrimUnused calls every trim hook, last registered first, and skips owners without one")
 		{
 			// M18 acceptance (C18.4, Docs/Decisions/0029-m18-contract.md decision 43): an owner trims before the owners it
 			// uses, as Release runs, an owner without a TrimUnused hook is skipped, and trimming releases nothing else.

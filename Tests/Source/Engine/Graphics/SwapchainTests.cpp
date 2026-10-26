@@ -385,7 +385,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("Swapchain: a recreation out of memory is retried after a trim, or skips frames until the size changes"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.4, decisions 42 and 44): "a resize keeps the previous swapchain and targets and retries at the
 			// next resize", through a real window in a child process.

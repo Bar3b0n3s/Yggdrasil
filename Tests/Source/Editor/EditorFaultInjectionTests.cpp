@@ -23,6 +23,9 @@
 #include "Support/TestOptions.h"
 #include "Support/Utf8Path.h"
 
+#include <span>
+#include <string>
+
 // The editor rendering through the engine's frame, and the GPU fault paths of Architecture §8.14 item 8, as whole
 // processes (Roadmap M5 "Fault injection"). Every run is headless, so no error dialog can block it, and gets
 // --user-data-dir, so logs and crash reports land in the test's temporary directory.
@@ -70,6 +73,8 @@ namespace Engine {
 		device.RunGarbageCollection();
 		process->SetFatalErrorHook(MakeEditorAutosaveFatalHook(saves));
 		const uint64_t submission = device.ExecuteCommandList(*commandList);
+		// A hang spends the wait's budget and then its reset wait without a loss report, which stays FatalError(GpuHang)
+		// (decision 40).
 		WaitForSubmission(device, submission, "Editor autosave fault probe");
 		// The loss is reported and returns; its recovery fails after the one retry, which ends the process as an
 		// application's frame boundary does (decision 29).
@@ -228,7 +233,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("EditorApp: --gpu-inject-fault=hang-reset recovers the device and runs to the end"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.4, Docs/Decisions/0029-m18-contract.md decisions 40 and 46): the first bounded wait after the
 			// first frame spends its budget, its reset wait reports the loss, the frame boundary recovers it like any loss, and
@@ -248,7 +253,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("EditorApp: --gpu-inject-fault=oom-rendertarget-persistent fails only its requests and runs to the end"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.4, decisions 42, 44 and 46): every render target created after the first frame runs out of
 			// memory, the views' new sizes among them, so each such request fails alone after its trim and retry; the editor
@@ -277,8 +282,49 @@ namespace Engine {
 			CHECK(Test::FindGpuMessageLines(result->StandardError).empty());
 		}
 
+		TEST_CASE("EditorApp: a view render that runs out of memory logs one warning and the run ends without errors"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 acceptance (C18.4, decisions 44 and 46): a view's per-frame render fails alone. After the first frame armed
+			// oom-rendertarget-persistent, a batch selects a cube, so every later frame's scene view needs its selection targets
+			// and runs out of memory: the editor logs one warning for the run of failing frames (never an error, which
+			// --expect-no-errors would turn into exit code 1), the views trim after each such frame's submission
+			// (EditorHostViewports, tested in process), and the batch ends with exit code 0, without a crash report.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			Test::EditorTestFixture fixture("EditorOomViewRender");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			const std::filesystem::path projectFile = fixture.GetEditor().GetProject().GetProjectFile();
+			REQUIRE(fixture.GetEditor().CloseProject().has_value());
+			std::string requests = std::string(R"({"method":"scene.open","params":{"path":"Assets/Scenes/Main.scene"}})") + "\n"
+				+ R"({"method":"entity.create","params":{"name":"Cube","components":{"MeshRenderer":{"Mesh":"engine://Meshes/Cube"}}}})" + "\n"
+				+ R"({"method":"edit.select","params":{"entities":["/Cube"]}})" + "\n";
+			// Frames after the selection: one request each at least.
+			for (int frame = 0; frame < 4; ++frame)
+				requests += std::string(R"({"method":"edit.getSelection","params":{}})") + "\n";
+			const std::filesystem::path batch = fixture.GetDirectory() / "Select.jsonl";
+			REQUIRE(FileSystem::WriteFileAtomic(batch, std::as_bytes(std::span(requests.data(), requests.size()))).has_value());
+			const Result<ProcessResult> result = RunRenderingEditor(fixture.GetDirectory(),
+				{ "--headless", "--project", Test::PathToUtf8(projectFile), "--batch", Test::PathToUtf8(batch), "--expect-no-errors", "--gpu-inject-fault",
+					"oom-rendertarget-persistent", "--engine-cache-dir=" + Test::PathToUtf8(fixture.GetDirectory() / "EngineCache") });
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			INFO("editor stderr: ", result->StandardError);
+			CHECK(result->ExitCode == ExitCode::Success);
+			size_t warnings = 0;
+			for (size_t at = result->StandardError.find("Editor views ran out of GPU memory"); at != std::string::npos;
+				at = result->StandardError.find("Editor views ran out of GPU memory", at + 1))
+				++warnings;
+			CHECK(warnings == 1);
+			CHECK_FALSE(result->StandardError.contains("Cannot render editor views"));
+			const std::vector<std::filesystem::path> reports =
+				Test::ListCrashFiles(fixture.GetDirectory() / ENGINE_PRODUCT_NAME / "Crashes", ".txt");
+			CHECK(reports.empty());
+			CHECK(Test::FindGpuMessageLines(result->StandardError).empty());
+		}
+
 		TEST_CASE("EditorApp: out-of-memory at startup still exits 4 with a crash report"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.4, decisions 42 and 46): "out-of-memory at startup still exits 4". ENGINE_GPU_FAULT_AT_STARTUP
 			// arms oom-rendertarget-persistent at the device's creation, so the editor's startup targets run out of memory, which
@@ -308,8 +354,10 @@ namespace Engine {
 			* doctest::test_suite(Test::GpuSuite))
 		{
 			// The first bounded wait, the frame pacer's at the first frame whose slot has a submission, skips its early-outs and
-			// spends its whole budget of timed-out slices (FramePacer.h), however fast the GPU finished: the process ends with
-			// GpuHang during the run's third frame, without waiting the budget's 10 s of wall time.
+			// spends its whole budget of timed-out slices and then its reset wait's, since no loss report arrives (FramePacer.h;
+			// Docs/Decisions/0029-m18-contract.md decision 40: the hang that stays fatal), however fast the GPU finished: the
+			// process ends with GpuHang during the run's third frame, without waiting the budget's 10 s or the reset wait in wall
+			// time.
 			if (!Test::ProbeGpuForProcess())
 				return;
 			Test::TempDirectory userData("EditorHang");

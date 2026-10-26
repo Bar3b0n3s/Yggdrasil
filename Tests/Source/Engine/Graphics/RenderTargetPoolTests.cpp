@@ -195,7 +195,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("RenderTargetPool: TrimUnused releases every free target an EndFrame stamped and keeps the acquired and the new ones"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.4, Docs/Decisions/0029-m18-contract.md decision 43): "unused pooled targets" are trimmed when
 			// a request ran out of GPU memory, whatever their age or keepFrames, while a target someone holds stays, and so does
@@ -233,7 +233,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("RenderTargetPool: TrimUnused keeps a free target whose last submission has not completed"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 (C18.4, decision 43): the pool's own rule, whoever calls it; GraphicsDevice::TrimUnused waits for the
 			// device's last submission before it runs the hooks, so there every stamped free target goes. A target cleared by a

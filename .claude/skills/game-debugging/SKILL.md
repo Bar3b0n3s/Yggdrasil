@@ -74,7 +74,7 @@ Every error response carries `error.data.errorCode` (the engine `ErrorCode` belo
 | `ImportFailed` | An asset failed to import. | Fix the source file; `asset.info` shows its diagnostics. |
 | `CompileFailed` | Luau source did not compile. | Fix the syntax at the reported location (`script.check`). |
 | `Script` | A script raised, or a reload was refused for its errors. | Fix the script at the reported location. |
-| `Gpu` | The GPU device failed or is missing, or was lost during the call. | Use `renderer: "none"` for logic-only work, or check the Vulkan driver. A lost device is recovered at the next frame boundary, play going on as if nothing happened: wait for the `GpuDeviceLost` event (`events.read {types: ["GpuDeviceLost"]}`), then repeat the request. |
+| `Gpu` | The GPU device failed or is missing, or was lost during the call (a GPU hang that the driver reset is a loss too). | Use `renderer: "none"` for logic-only work, or check the Vulkan driver. A lost device is recovered at the next frame boundary, play going on as if nothing happened: wait for the `GpuDeviceLost` event (`events.read {types: ["GpuDeviceLost"]}`), then repeat the request. |
 | `Timeout` | An operation exceeded its budget. | Bound the work or raise the budget the message names. |
 | `PermissionDenied` | A write to a read-only project or mount. | Open the project writable; never write under `engine://`. |
 | `Unsupported` | Not available in this host or configuration. | Use a host that supports it (an editor with a renderer, a non-Dist build). |

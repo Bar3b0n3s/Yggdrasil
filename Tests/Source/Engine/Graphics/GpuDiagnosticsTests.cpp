@@ -113,7 +113,7 @@ namespace Engine {
 
 			GpuDiagnostics fault(GpuFault::DeviceLostUnrecoverable);
 			CHECK(fault.ShouldFailDeviceRecreation());
-			CHECK_FALSE(fault.ShouldInjectHang());
+			CHECK_FALSE(fault.HasBoundedWaitFault());
 			GpuDiagnostics recoverable(GpuFault::DeviceLost);
 			CHECK_FALSE(recoverable.ShouldFailDeviceRecreation());
 			recoverable.SetDeviceLost(true);
@@ -194,7 +194,7 @@ namespace Engine {
 			CHECK(deviceLost.IsDeviceLossInjected());
 			deviceLost.SetDeviceLost();
 			CHECK(deviceLost.IsDeviceLossInjected());
-			CHECK_FALSE(deviceLost.ShouldInjectHang());
+			CHECK_FALSE(deviceLost.HasBoundedWaitFault());
 
 			// oom-texture: sampled-only textures fail, render targets and storage images do not.
 			GpuDiagnostics oom(GpuFault::OomTexture);
@@ -212,7 +212,6 @@ namespace Engine {
 
 			// hang: every bounded wait slice times out, from the start (M5), its reset wait's too (M18, C18.4).
 			GpuDiagnostics hang(GpuFault::Hang);
-			CHECK(hang.ShouldInjectHang());
 			CHECK(hang.HasBoundedWaitFault());
 			CHECK(hang.TakeBoundedWaitFault() == GpuInjectedHang::Hang);
 			CHECK(hang.TakeBoundedWaitFault() == GpuInjectedHang::Hang);
@@ -229,7 +228,7 @@ namespace Engine {
 			GpuDiagnostics specialization(GpuFault::OomSpecialization);
 			CHECK(specialization.ShouldFailShaderSpecialization());
 			CHECK_FALSE(specialization.ShouldFailTextureCreation(sampled));
-			CHECK_FALSE(specialization.ShouldInjectHang());
+			CHECK_FALSE(specialization.HasBoundedWaitFault());
 			CHECK_FALSE(oom.ShouldFailShaderSpecialization());
 
 			// No fault: nothing is forced.
@@ -237,7 +236,7 @@ namespace Engine {
 			none.OnSubmitted();
 			CHECK_FALSE(none.IsDeviceLost());
 			CHECK_FALSE(none.ShouldFailTextureCreation(sampled));
-			CHECK_FALSE(none.ShouldInjectHang());
+			CHECK_FALSE(none.HasBoundedWaitFault());
 			CHECK_FALSE(none.ShouldFailShaderSpecialization());
 			none.OnGarbageCollected();
 			CHECK_FALSE(none.HasBoundedWaitFault());
@@ -303,7 +302,7 @@ namespace Engine {
 				// faults fail.
 				diagnostics.OnSubmitted();
 				CHECK_FALSE(diagnostics.IsDeviceLost());
-				CHECK_FALSE(diagnostics.ShouldInjectHang());
+				CHECK(diagnostics.TakeBoundedWaitFault() != GpuInjectedHang::Hang);
 				CHECK_FALSE(diagnostics.ShouldFailTextureCreation(sampled));
 				CHECK_FALSE(diagnostics.ShouldFailShaderSpecialization());
 				CHECK_FALSE(diagnostics.ShouldFailDeviceRecreation());

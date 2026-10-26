@@ -21,12 +21,13 @@
 // created again on the recovered device.
 //
 // Release replaces the whole state with a new one that receives only what survives a loss (the back-references, the
-// registration, the size, the stats of the last render, the once-per-renderer log flags and the view generation), so a
-// per-view object a later milestone adds to SceneRenderer::State is released without code of its own (the placement rule's
-// "resets every member but"). The RenderTargetPool keeps its object and drops its targets (RenderTargetPool::ReleaseAll),
-// and the picker keeps its object and its ticket counter and drops its GPU objects (AsyncPicker::ReleaseGpuObjects), so a
-// pending pick resolves as cancelled and no ticket is reused; the profiler, which creates its GPU objects on use, is made
-// new as Create makes it. The renderer answers CancelPicks, PollPick and RequestPick between Release and Recreate.
+// registration, the size, the stats of the last render, the once-per-renderer log flags, the debug view the last render
+// recorded and the view generation), so a per-view object a later milestone adds to SceneRenderer::State is released
+// without code of its own (the placement rule's "resets every member but"). The RenderTargetPool keeps its object and
+// drops its targets (RenderTargetPool::ReleaseAll), and the picker keeps its object and its ticket counter and drops its
+// GPU objects (AsyncPicker::ReleaseGpuObjects), so a pending pick resolves as cancelled and no ticket is reused; the
+// profiler, which creates its GPU objects on use, is made new as Create makes it. The renderer answers CancelPicks,
+// PollPick and RequestPick between Release and Recreate.
 
 namespace Engine {
 
@@ -71,6 +72,9 @@ namespace Engine {
 		state.WireframeBudgetLogged = released.WireframeBudgetLogged;
 		state.AllocationLimitLogged = released.AllocationLimitLogged;
 		state.LightLimitLogged = released.LightLimitLogged;
+		// M18 (C18.4, decision 44): the mode a failed debug-view switch falls back to, and its once-per-view log flags.
+		state.RenderedDebugView = released.RenderedDebugView;
+		state.DebugViewFailureLogged = released.DebugViewFailureLogged;
 		// The released image and its picks are gone: the next generation, as CancelPicks makes it, never reused.
 		state.Generation = released.Generation + 1;
 

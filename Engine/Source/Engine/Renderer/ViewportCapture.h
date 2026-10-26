@@ -131,6 +131,8 @@ namespace Engine {
 		nvrhi::CommandListHandle m_CommandList;
 		uint64_t m_FrameIndex = 0;
 		RenderOutputMapping m_LastOutputMapping{}; // GetLastOutputMapping
+		// M18 (C18.4, decision 43): a Capture is running, so the trim hook leaves the targets to it.
+		bool m_IsCapturing = false;
 		// The registration with the device's recreation registry (CreateForScenes); declared last, so it is dropped first.
 		GpuRecreationRegistration m_Recreation{};
 	};

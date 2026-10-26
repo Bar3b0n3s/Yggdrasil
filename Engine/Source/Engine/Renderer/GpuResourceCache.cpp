@@ -58,6 +58,17 @@ namespace Engine {
 			size_t* UploadFailures = nullptr;
 		};
 
+		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 43): whether GpuResourceCache::TrimUnused releases the mirror
+		// `key`: a replaced version (as CollectStale), or the mirror of an asset the manager no longer has loaded (released or
+		// unknown), unless it is a built-in (the placeholders among them) or a stand-in sharing its placeholder's objects
+		// (`isPlaceholder`), which frees nothing. A loaded, current asset's mirror stays: the next Render would upload it again.
+		[[nodiscard]] bool IsTrimmable(const AssetManager& assets, const MirrorKey& key, bool isPlaceholder)
+		{
+			if (assets.GetVersion(key.Handle) != key.Version)
+				return true;
+			return !IsBuiltinAssetHandle(key.Handle) && !isPlaceholder && assets.GetState(key.Handle) == AssetState::Unloaded;
+		}
+
 	}
 
 	namespace Utils {
@@ -325,6 +336,16 @@ namespace Engine {
 				});
 				for (auto& [key, entry] : m_Entries)
 					entry.IsUsed = false;
+			}
+
+			// M18 (C18.4): GpuResourceCache::TrimUnused for this table (IsTrimmable); the use flags of CollectStale's period
+			// stay as they are.
+			void TrimUnused(const AssetManager& assets)
+			{
+				std::erase_if(m_Entries, [&assets](const auto& item)
+				{
+					return IsTrimmable(assets, item.first, item.second.Value.IsPlaceholder);
+				});
 			}
 
 			void Clear() { m_Entries.clear(); }
@@ -735,7 +756,19 @@ namespace Engine {
 
 	void GpuResourceCache::TrimUnused()
 	{
-		ENGINE_CONTRACT_STUB();
+		// Only what nothing current needs; the use flags of the host's CollectStale period, the material generation counter
+		// and UploadFailures stay (GpuResourceCache.h).
+		const AssetManager& assets = *m_State->Assets;
+		std::erase_if(m_State->Materials, [&assets](const auto& item)
+		{
+			return IsTrimmable(assets, item.first, item.second.Value.IsPlaceholder);
+		});
+		std::erase_if(m_State->Environments, [&assets](const auto& item)
+		{
+			return IsTrimmable(assets, item.first, false);
+		});
+		m_State->Meshes.TrimUnused(assets);
+		m_State->Textures.TrimUnused(assets);
 	}
 
 	GpuResourceCacheStats GpuResourceCache::GetStats() const

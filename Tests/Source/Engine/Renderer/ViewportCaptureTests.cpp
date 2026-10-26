@@ -231,7 +231,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("ViewportCapture: a capture that runs out of memory is retried after a trim and is byte-identical to one without the fault"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.4, Docs/Decisions/0029-m18-contract.md decisions 42 and 46; Roadmap M18: "an injected
 			// out-of-memory recovers with a byte-identical screenshot"). Under oom-rendertarget the capture's first target after the
@@ -258,7 +258,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("ViewportCapture: a capture that keeps running out of memory fails alone with OutOfMemory, after one trim"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.4, decisions 42, 43, 44, 45 and 46; Roadmap M18: "a persistent one fails only its request"):
 			// the capture's new size runs out of memory again after its one trim, so the capture fails alone with OutOfMemory,
@@ -293,7 +293,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("ViewportCapture: a trim between captures releases the last capture's targets, and the next capture renders the same image"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.4, decision 43): a capture keeps no image on display, so its renderer's targets are rebuilt on
 			// demand: a trim that another request runs releases them (the capture's TrimUnused hook, SceneRenderer::
@@ -331,7 +331,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("ViewportCapture: a debug-view capture whose pipelines keep running out of memory returns OutOfMemory"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.4, decisions 42, 44 and 46): a capture never returns an image of another debug view than the
 			// one asked for; its pipelines run out of memory again after the trim, so the capture fails alone, and a Lit

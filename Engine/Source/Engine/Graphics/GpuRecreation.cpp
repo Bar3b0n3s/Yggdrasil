@@ -78,7 +78,7 @@ namespace Engine {
 
 	GpuRecreationRegistration GpuRecreationRegistry::Register(GpuRecreationHooks hooks)
 	{
-		ENGINE_CORE_ASSERT(!m_Running, "GpuRecreationRegistry::Register of '{}' while the owners are released or recreated", hooks.Name);
+		ENGINE_CORE_ASSERT(!m_Running, "GpuRecreationRegistry::Register of '{}' while the owners are released, recreated or trimmed", hooks.Name);
 		ENGINE_CORE_ASSERT(!hooks.Name.empty(), "GpuRecreationRegistry::Register needs the owner's name");
 		ENGINE_CORE_ASSERT(hooks.Release != nullptr, "GpuRecreationRegistry::Register of '{}' needs a Release hook", hooks.Name);
 		const uint64_t id = ++m_LastOwnerId;
@@ -112,8 +112,18 @@ namespace Engine {
 
 	size_t GpuRecreationRegistry::TrimUnused()
 	{
-		ENGINE_CONTRACT_STUB();
-		return 0;
+		ENGINE_CORE_ASSERT(!m_Running, "GpuRecreationRegistry::TrimUnused while the owners are released, recreated or trimmed");
+		// No hook registers or unregisters (asserted there), so the owners stay where they are while the loop runs.
+		const Utils::RunningScope running(m_Running);
+		size_t trimmed = 0;
+		for (auto owner = m_Owners.rbegin(); owner != m_Owners.rend(); ++owner)
+		{
+			if (!owner->Hooks.TrimUnused)
+				continue;
+			owner->Hooks.TrimUnused();
+			++trimmed;
+		}
+		return trimmed;
 	}
 
 	std::vector<std::string> GpuRecreationRegistry::GetOwnerNames() const
@@ -132,7 +142,7 @@ namespace Engine {
 
 	void GpuRecreationRegistry::Unregister(uint64_t id)
 	{
-		ENGINE_CORE_ASSERT(!m_Running, "GpuRecreationRegistry: an owner unregistered while the owners are released or recreated");
+		ENGINE_CORE_ASSERT(!m_Running, "GpuRecreationRegistry: an owner unregistered while the owners are released, recreated or trimmed");
 		const auto owner = std::ranges::find(m_Owners, id, &Owner::Id);
 		ENGINE_CORE_ASSERT(owner != m_Owners.end(), "GpuRecreationRegistry: owner {} is not registered", id);
 		if (owner != m_Owners.end())

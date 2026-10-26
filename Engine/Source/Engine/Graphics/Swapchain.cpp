@@ -6,6 +6,7 @@
 #include "Engine/Core/Log.h"
 #include "Engine/Graphics/FramePacer.h"
 #include "Engine/Graphics/GpuDiagnostics.h"
+#include "Engine/Graphics/GpuOutOfMemory.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Platform/Window.h"
 
@@ -124,6 +125,12 @@ namespace Engine {
 			return Error(ErrorCode::Gpu, std::format("{} failed with {}", call, VkResultToString(result)));
 		}
 
+		// M18 (C18.4, decision 42): the Vulkan results that make a swapchain's creation out of memory.
+		[[nodiscard]] static bool IsOutOfMemoryResult(VkResult result)
+		{
+			return result == VK_ERROR_OUT_OF_HOST_MEMORY || result == VK_ERROR_OUT_OF_DEVICE_MEMORY;
+		}
+
 	}
 
 	SwapchainAction ClassifyAcquireResult(VkResult result)
@@ -238,6 +245,9 @@ namespace Engine {
 		const uint32_t height = m_Window->GetFramebufferHeight();
 		if (m_Window->IsMinimized() || width == 0 || height == 0)
 		{
+			// A minimized window forgets the size whose recreation ran out of memory, so restoring it retries (decision 44).
+			m_FailedWidth = 0;
+			m_FailedHeight = 0;
 			if (m_Swapchain != VK_NULL_HANDLE)
 			{
 				m_Device->WaitForIdle();
@@ -248,13 +258,48 @@ namespace Engine {
 			return SwapchainAcquireStatus::Skipped;
 		}
 
+		// M18 (C18.4, decision 44): the size whose recreation ran out of memory renders nothing, without a creation or a
+		// trim, until the size changes (or the window is minimized and restored): a new size is a new request.
+		if (width == m_FailedWidth && height == m_FailedHeight)
+			return SwapchainAcquireStatus::Skipped;
+
+		// A recreation after startup is a request (decisions 42 and 44): an out-of-memory creation is trimmed for and retried
+		// once, and a second one fails it alone with OutOfMemory, after which this size is skipped. Only what the attempt
+		// recorded as out-of-memory (m_IsCreationOutOfMemory) is, so any other failure stays Gpu, untrimmed.
+		const auto recreate = [this, width, height]() -> Result<SwapchainAcquireStatus>
+		{
+			const Status recreated = RetryAfterTrim(*m_Device, std::format("the swapchain's recreation at {}x{}", width, height),
+				[this, width, height]()
+			{
+				m_IsCreationOutOfMemory = false;
+				return Recreate(width, height);
+			},
+				[this](const Error& /*error*/)
+			{
+				return m_IsCreationOutOfMemory;
+			});
+			if (!recreated.has_value())
+			{
+				if (recreated.error().GetCode() == ErrorCode::OutOfMemory)
+				{
+					// Nothing of the failed creation may be acquired: a swapchain whose images could not all be wrapped goes
+					// too. The GPU is idle (Recreate waited, and nothing was submitted since).
+					ReleaseImages();
+					DestroySwapchain();
+					m_FailedWidth = width;
+					m_FailedHeight = height;
+				}
+				return std::unexpected(recreated.error());
+			}
+			m_FailedWidth = 0;
+			m_FailedHeight = 0;
+			return SwapchainAcquireStatus::Skipped;
+		};
+
 		// Resize events, out-of-date and suboptimal results only mark a recreation; it happens here, once, at the size the
 		// framebuffer has now, however many of them arrived since the last frame.
 		if (m_Swapchain == VK_NULL_HANDLE || m_IsRecreatePending || m_IsSurfaceLost || width != m_RequestedWidth || height != m_RequestedHeight)
-		{
-			ENGINE_TRY(Recreate(width, height));
-			return SwapchainAcquireStatus::Skipped;
-		}
+			return recreate();
 
 		VkResult result = VK_SUCCESS;
 		uint32_t imageIndex = 0;
@@ -294,15 +339,13 @@ namespace Engine {
 			case SwapchainAction::Recreate:
 			{
 				m_IsRecreatePending = true;
-				ENGINE_TRY(Recreate(width, height));
-				return SwapchainAcquireStatus::Skipped;
+				return recreate();
 			}
 			case SwapchainAction::RecreateSurface:
 			{
 				ENGINE_CORE_WARN("vkAcquireNextImageKHR reported the window's surface lost; recreating the surface and the swapchain");
 				m_IsSurfaceLost = true;
-				ENGINE_TRY(Recreate(width, height));
-				return SwapchainAcquireStatus::Skipped;
+				return recreate();
 			}
 			case SwapchainAction::Retry:
 			{
@@ -581,11 +624,24 @@ namespace Engine {
 			.oldSwapchain = m_Swapchain,
 		};
 		VkSwapchainKHR created = VK_NULL_HANDLE;
-		result = VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateSwapchainKHR(device, &createInfo, nullptr, &created);
+		// M18 (C18.4, decision 46): an injected oom-swapchain answers out of device memory without calling Vulkan.
+		const bool isInjected = m_Device->GetDiagnostics().TakeSwapchainCreationFault();
+		if (isInjected)
+			result = VK_ERROR_OUT_OF_DEVICE_MEMORY;
+		else
+			result = VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateSwapchainKHR(device, &createInfo, nullptr, &created);
 		// The old swapchain is retired by the call whether or not it succeeded, and its images are released already.
 		DestroySwapchain();
 		if (result != VK_SUCCESS)
-			return std::unexpected(Utils::MakeSwapchainCallError(*m_Device, result, std::format("vkCreateSwapchainKHR ({}x{})", extent.width, extent.height)));
+		{
+			// Only its out-of-memory results make the recreation a request that fails alone (decision 42).
+			m_IsCreationOutOfMemory = Utils::IsOutOfMemoryResult(result);
+			const std::string call = isInjected
+				? std::format("vkCreateSwapchainKHR ({}x{}, injected by --gpu-inject-fault={})", extent.width, extent.height,
+					  GpuFaultToString(m_Device->GetDiagnostics().GetInjectedFault()))
+				: std::format("vkCreateSwapchainKHR ({}x{})", extent.width, extent.height);
+			return std::unexpected(Utils::MakeSwapchainCallError(*m_Device, result, call));
+		}
 		m_Swapchain = created;
 		m_Width = extent.width;
 		m_Height = extent.height;
@@ -619,12 +675,29 @@ namespace Engine {
 				.setInitialState(nvrhi::ResourceStates::Present)
 				.setKeepInitialState(true)
 				.setDebugName(std::format("Swapchain image {}", index));
-			ENGINE_TRY_ASSIGN(image.Texture, WithContext(m_Device->CreateHandleForNativeTexture(image.Handle, desc), "while wrapping the swapchain images"));
-			ENGINE_TRY_ASSIGN(image.Framebuffer,
-				WithContext(m_Device->CreateFramebuffer(nvrhi::FramebufferDesc().addColorAttachment(image.Texture)),
-					"while creating the swapchain's framebuffers"));
-			ENGINE_TRY_ASSIGN(image.PresentSemaphore,
-				WithContext(Utils::CreateBinarySemaphore(device), "while creating the swapchain's present semaphores"));
+			// A failed image wrapping (the handle, the framebuffer or the present semaphore, whose creation fails only out of
+			// memory) is out of memory on a device that is not lost (decision 42).
+			Result<nvrhi::TextureHandle> texture = m_Device->CreateHandleForNativeTexture(image.Handle, desc);
+			if (!texture.has_value())
+			{
+				m_IsCreationOutOfMemory = !m_Device->IsLost();
+				return std::unexpected(std::move(texture).error().WithContext("while wrapping the swapchain images"));
+			}
+			image.Texture = std::move(*texture);
+			Result<nvrhi::FramebufferHandle> framebuffer = m_Device->CreateFramebuffer(nvrhi::FramebufferDesc().addColorAttachment(image.Texture));
+			if (!framebuffer.has_value())
+			{
+				m_IsCreationOutOfMemory = !m_Device->IsLost();
+				return std::unexpected(std::move(framebuffer).error().WithContext("while creating the swapchain's framebuffers"));
+			}
+			image.Framebuffer = std::move(*framebuffer);
+			Result<VkSemaphore> semaphore = Utils::CreateBinarySemaphore(device);
+			if (!semaphore.has_value())
+			{
+				m_IsCreationOutOfMemory = !m_Device->IsLost();
+				return std::unexpected(std::move(semaphore).error().WithContext("while creating the swapchain's present semaphores"));
+			}
+			image.PresentSemaphore = *semaphore;
 		}
 		return {};
 	}

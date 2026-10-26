@@ -61,7 +61,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("GraphicsDevice: TrimUnused runs every owner's trim hook and frees what they dropped"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.4, decision 43): the device first waits for its last submission, so nothing a hook drops is
 			// still used by a submitted command list in any configuration (in Dist no tracker reference delays a destruction,
@@ -114,8 +114,46 @@ namespace Engine {
 			commandList->Reset();
 		}
 
+		TEST_CASE("GraphicsDevice: TrimUnused trims nothing on a lost device or after a loss its wait meets"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.4, decision 43): the recovery releases everything, so a trim on a lost device runs no hook; and a hang the
+			// driver resets during the trim's own wait (hang-reset strikes the first bounded wait after the arming) reports the
+			// loss and ends the trim before any hook ran. Either way the device recovers afterwards.
+			for (const GpuFault fault : { GpuFault::None, GpuFault::HangReset })
+			{
+				CAPTURE(GpuFaultToString(fault));
+				Test::HeadlessGpuFixture gpu({ .InjectFault = fault });
+				ENGINE_REQUIRE_GPU(gpu);
+				GraphicsDevice& device = gpu.GetDevice();
+				{
+					const Test::TrimCounter counter(device.GetRecreation());
+					Result<nvrhi::CommandListHandle> commandList = device.CreateCommandList();
+					REQUIRE_MESSAGE(commandList.has_value(), commandList.error().ToString());
+					(*commandList)->open();
+					(*commandList)->close();
+					// A submission for the trim's wait, then the first garbage collection, which arms hang-reset.
+					static_cast<void>(device.ExecuteCommandList(**commandList));
+					device.RunGarbageCollection();
+					commandList->Reset();
+					if (fault == GpuFault::None)
+					{
+						device.GetDiagnostics().SetDeviceLost(true);
+						device.ReportDeviceLost("GpuOutOfMemoryTests");
+					}
+					device.TrimUnused();
+					CHECK(device.IsLost());
+					CHECK(counter.GetTrims() == 0);
+				}
+				const Status recovered = device.Recover(nullptr);
+				REQUIRE_MESSAGE(recovered.has_value(), recovered.error().ToString());
+				CHECK(device.GetRecoveryCount() == 1);
+				CHECK_FALSE(device.IsLost());
+			}
+		}
+
 		TEST_CASE("GraphicsDevice: oom-rendertarget fails render-target creations after the first garbage collection, once or every time"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.4, decision 46): render targets and storage images created after the first frame fail as if
 			// the device were out of memory, the first one or every one; sampled-only and staging textures are not targets.
@@ -155,7 +193,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("GraphicsDevice: oom-pipeline fails pipeline creations after the first garbage collection, once or every time"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.4, decision 46): a pipeline created after the first frame (a debug view's, ImGui's for a new
 			// format) fails as if the device were out of memory, the first one or every one.
@@ -180,7 +218,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("RetryAfterTrim: an out-of-memory attempt is retried once after a trim, and a second failure is OutOfMemory"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.4, decision 42): "trim what can be rebuilt, retry once, then fail only the request".
 			for (const GpuFault fault : { GpuFault::OomRenderTarget, GpuFault::OomRenderTargetPersistent })
@@ -218,7 +256,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("RetryAfterTrim: success, other errors, a lost device's errors and a recovery's errors are returned at once without a trim"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.4, decision 42): only an out-of-memory creation is trimmed for, at most once per call (an
 			// OutOfMemory error already failed alone after its own trim); a request's classification keeps a Gpu error that is

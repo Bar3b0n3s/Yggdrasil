@@ -5,9 +5,9 @@
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Core/Assert.h"
-#include "Engine/Core/FatalError.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Graphics/CommandListRecording.h"
+#include "Engine/Graphics/GpuOutOfMemory.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Renderer/BloomPass.h"
 #include "Engine/Renderer/BrdfLut.h"
@@ -811,8 +811,17 @@ namespace Engine {
 		if (state.PendingSubmission)
 			return MakeError(ErrorCode::InvalidState, "Resize requires OnSubmitted for the prior Render");
 		// Built aside first, so a failure keeps the current targets. The previous ones stay alive while a submitted command
-		// list still references them (their framebuffers and binding sets are referenced by every list that used them).
-		ENGINE_TRY_ASSIGN(Detail::SceneRendererTargets targets, state.CreateTargets(width, height));
+		// list still references them (their framebuffers and binding sets are referenced by every list that used them). M18
+		// (C18.4, decisions 42 and 44): a new size after startup is a request; an out-of-memory creation is trimmed for and
+		// retried once (the targets a failed attempt acquired are free in the pool again, and its retry reuses them), and a
+		// second one returns OutOfMemory with the renderer as it was. Nothing records meanwhile: no Render awaits OnSubmitted.
+		Detail::SceneRendererTargets targets;
+		const Status created = RetryAfterTrim(*state.Device, std::format("a scene view's resize to {}x{}", width, height), [&state, &targets, width, height]() -> Status
+		{
+			ENGINE_TRY_ASSIGN(targets, state.CreateTargets(width, height));
+			return {};
+		});
+		ENGINE_TRY(created);
 		state.Targets = std::move(targets);
 		state.ViewWidth = width;
 		state.ViewHeight = height;
@@ -828,7 +837,23 @@ namespace Engine {
 
 	void SceneRenderer::ReleaseTargets()
 	{
-		ENGINE_CONTRACT_STUB();
+		State& state = *m_State;
+		ENGINE_CORE_ASSERT(!state.PendingSubmission, "ReleaseTargets requires OnSubmitted for the prior Render");
+		if (state.PendingSubmission)
+			return;
+		// The size-dependent targets go, with every binding set that references them; the size, the pipelines, the per-view
+		// buffers and the material sets stay. A zero-sized Targets makes the next Render's Prepare stage create the targets of
+		// its scene resolution again (RecordPrepareStage), and the output stage creates its own on demand.
+		state.Targets = {};
+		state.OutputTargets = {};
+		state.UpscaleBindings.Clear();
+		state.FinalTarget = 0;
+		state.ClearTargetBindings();
+		// What the pool holds that nothing pending uses goes at once: the released targets are free now, and those an
+		// EndFrame stamped with a completed submission are released (no wait).
+		state.TargetPool->ReleaseFree();
+		CancelPicks();
+		state.RecordedPicking = false;
 	}
 
 	Status SceneRenderer::Render(nvrhi::ICommandList& commandList, const RenderSnapshot& snapshot)
@@ -843,21 +868,40 @@ namespace Engine {
 		if (state.Pipelines->PipelineCount == 0)
 			return MakeError(ErrorCode::InvalidState, "the renderer's pipeline set was released by a device loss and not created again");
 		const double started = Utils::SceneRendererNowSeconds();
-		const RenderDebugView debugView = snapshot.DebugView;
+		RenderDebugView debugView = snapshot.DebugView;
 		if (static_cast<size_t>(debugView) >= RenderDebugViewCount)
 			return MakeError(ErrorCode::InvalidArgument, "debug view {} has no pipelines", std::to_underlying(debugView));
-		// A debug view's pipelines are created the first time it is asked for. A Gpu error there is an out-of-memory pipeline
-		// creation, fatal like every pipeline creation failure (§8.14 item 7), unless the device is lost: then it is the loss
-		// (M18, C18.3 decision 28), returned like any other error, and the device's recovery at the frame boundary leaves the
-		// view to be created on the next render. Any other error (an invalid shader) is returned.
-		if (const Status ensured = state.PipelineSet->EnsureDebugView(debugView); !ensured.has_value())
+		// A debug view's pipelines are created the first time it is asked for, before anything is recorded or uploaded. M18
+		// (C18.4, decisions 42 and 44): after startup that is a debug-view switch, a request: an out-of-memory creation is
+		// trimmed for and retried once, and when it runs out of memory again the view is recorded in the debug view this
+		// renderer last rendered (Lit when that one's pipelines are gone too), and Render returns OutOfMemory as a partial
+		// error naming the view that stayed, never FatalError(OutOfMemory). On a lost device a Gpu error is the loss (C18.3,
+		// decision 28), returned before recording like any other error (an invalid shader), and the device's recovery at the
+		// frame boundary leaves the view to be created on the next render.
+		Status debugViewError{};
+		if (!state.Pipelines->HasView[static_cast<size_t>(debugView)])
 		{
-			if (ensured.error().GetCode() == ErrorCode::Gpu && !state.Device->IsLost())
+			const Status ensured = RetryAfterTrim(*state.Device, std::format("the {} debug view's pipelines", RenderDebugViewToString(debugView)),
+				[&state, debugView]()
 			{
-				FatalError(FatalErrorKind::OutOfMemory,
-					std::format("Cannot create the {} debug view's pipelines: {}", RenderDebugViewToString(debugView), ensured.error().ToString()));
+				return state.PipelineSet->EnsureDebugView(debugView);
+			});
+			if (!ensured.has_value())
+			{
+				if (ensured.error().GetCode() != ErrorCode::OutOfMemory)
+					return std::unexpected(ensured.error());
+				const RenderDebugView requested = debugView;
+				debugView = state.Pipelines->HasView[static_cast<size_t>(state.RenderedDebugView)] ? state.RenderedDebugView : RenderDebugView::Lit;
+				bool& logged = state.DebugViewFailureLogged[static_cast<size_t>(requested)];
+				if (!logged)
+				{
+					logged = true;
+					ENGINE_CORE_WARN("The {} debug view could not be created and the view stays on the {} debug view (logged once per view): {}",
+						RenderDebugViewToString(requested), RenderDebugViewToString(debugView), ensured.error());
+				}
+				Error kept = Error(ensured.error()).WithContext(std::format("the view was rendered in the {} debug view instead", RenderDebugViewToString(debugView)));
+				debugViewError = std::unexpected(std::move(kept));
 			}
-			return std::unexpected(ensured.error());
 		}
 		if (snapshot.Quality.ShadowMapSize < 256 || snapshot.Quality.ShadowMapSize > 8192
 			|| (snapshot.Quality.ShadowMapSize & (snapshot.Quality.ShadowMapSize - 1)) != 0)
@@ -885,6 +929,8 @@ namespace Engine {
 		frame.Selection = !frame.IsDataView && snapshot.HasCamera && HasFlag(snapshot.Flags, RenderViewFlags::EditorOverlays)
 			&& HasFlag(snapshot.Flags, RenderViewFlags::Selection) && !snapshot.SelectedEntities.empty();
 		frame.PixelArt = snapshot.Output.PixelArt;
+		// A debug-view switch that failed alone is the render's first partial error (decision 44).
+		frame.FirstError = std::move(debugViewError);
 
 		RenderStats stats{ .Available = true, .FrameIndex = snapshot.FrameIndex, .Width = state.ViewWidth, .Height = state.ViewHeight, .ShadowMapSize = snapshot.Quality.ShadowMapSize, .SsaoHalfResolution = snapshot.Quality.SsaoHalfResolution };
 		GpuProfiler* profiler = nullptr;
@@ -910,6 +956,7 @@ namespace Engine {
 		if (!prepared.has_value())
 			return prepared;
 		state.PendingSubmission = true;
+		state.RenderedDebugView = debugView;
 		state.ImageFrame = snapshot.FrameIndex;
 		state.ImageRevision = snapshot.SceneRevision;
 		state.ImageGeneration = state.Generation;
@@ -991,6 +1038,11 @@ namespace Engine {
 	const SceneRenderStats& SceneRenderer::GetLastStats() const
 	{
 		return m_State->Stats;
+	}
+
+	RenderDebugView SceneRenderer::GetRenderedDebugView() const
+	{
+		return m_State->RenderedDebugView;
 	}
 
 	void SceneRenderer::State::RecordViewSetup(Detail::SceneRendererFrame& frame)

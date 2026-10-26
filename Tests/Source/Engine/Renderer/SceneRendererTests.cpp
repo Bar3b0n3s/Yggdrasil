@@ -19,7 +19,6 @@
 #include "Engine/Renderer/SpotShadowAtlas.h"
 #include "Engine/Renderer/ViewportCapture.h"
 #include "Support/AssetTestFixture.h"
-#include "Support/DeathTest.h"
 #include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/InMemoryAssetManager.h"
@@ -1484,49 +1483,8 @@ namespace Engine {
 		}
 	}
 
-	// The child of "SceneRenderer: an out-of-memory debug-view pipeline is fatal": the first Albedo render creates the view's
-	// pipelines, whose shader specializations fail as if the device were out of memory.
-	ENGINE_DEATH_TEST("Renderer/DebugViewPipelineOutOfMemory")
-	{
-		Test::HeadlessGpuFixture gpu({ .InjectFault = GpuFault::OomSpecialization });
-		if (!gpu.IsAvailable())
-		{
-			ENGINE_CORE_ERROR("The death test needs a GPU");
-			return;
-		}
-		Test::InMemoryAssetManager assets;
-		GpuResourceCache cache(gpu.GetDevice(), assets);
-		Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());
-		if (!pipelines.has_value())
-		{
-			ENGINE_CORE_ERROR("Cannot create the pipelines: {}", pipelines.error());
-			return;
-		}
-		Result<Scope<SceneRenderer>> renderer = SceneRenderer::Create(gpu.GetDevice(), **pipelines, cache, assets, { .Width = 8, .Height = 8 });
-		Result<nvrhi::CommandListHandle> commandList = gpu.GetDevice().CreateCommandList();
-		if (!renderer.has_value() || !commandList.has_value())
-		{
-			ENGINE_CORE_ERROR("Cannot create the renderer or a command list");
-			return;
-		}
-		RenderSnapshot snapshot;
-		snapshot.DebugView = RenderDebugView::Albedo;
-		(*commandList)->open();
-		const Status rendered = (*renderer)->Render(**commandList, snapshot);
-		ENGINE_CORE_ERROR("Render returned instead of failing: {}", rendered.has_value() ? std::string("success") : rendered.error().ToString());
-	}
-
 	TEST_SUITE(Test::GpuSuite)
 	{
-		TEST_CASE("SceneRenderer: an out-of-memory debug-view pipeline is fatal")
-		{
-			// §8.14 item 7: a pipeline creation failure is FatalError(OutOfMemory), including the debug views' lazily created
-			// pipelines (M9-F39: M9 had turned it into an ordinary error, which the Runtime's screenshot path only returned).
-			if (!Test::ProbeGpuForProcess())
-				return;
-			ENGINE_CHECK_DEATH("Renderer/DebugViewPipelineOutOfMemory", "Cannot create the Albedo debug view's pipelines");
-		}
-
 		TEST_CASE("SceneRenderer: an out-of-range debug view is an invalid argument")
 		{
 			Test::HeadlessGpuFixture gpu;

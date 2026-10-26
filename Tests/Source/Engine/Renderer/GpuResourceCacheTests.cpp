@@ -797,7 +797,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("GpuResourceCache: TrimUnused releases the mirrors of replaced versions and unloaded assets and keeps the current ones"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.4, Docs/Decisions/0029-m18-contract.md decision 43): "unreferenced uploads" are trimmed when a
 			// request ran out of GPU memory: a replaced version and an asset the manager no longer holds, never the mirror of a
@@ -834,9 +834,11 @@ namespace Engine {
 				CHECK_FALSE(cache.GetTexture(removed).IsPlaceholder);
 				CHECK(cache.GetStats().TextureCount == 3);
 
-				// The device's trim reaches the cache through its registration, and keeps what is current.
+				// The device's trim reaches the cache through its registration: the mirror of an asset unloaded again goes, and
+				// what is current stays.
+				assets.Remove(removed);
 				gpu.GetDevice().TrimUnused();
-				CHECK(cache.GetStats().TextureCount == 3);
+				CHECK(cache.GetStats().TextureCount == 2);
 				CHECK(cache.GetTexture(kept).Texture == current);
 			}
 			gpu.GetDevice().RunGarbageCollection();

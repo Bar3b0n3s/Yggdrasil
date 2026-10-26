@@ -45,8 +45,9 @@ namespace Engine {
 		// (dimension, size, depth, array size, mips, sample count and quality, format, the usage flags, the initial state,
 		// keepInitialState, and the clear value), otherwise a new one created through GraphicsDevice::CreateTexture. The
 		// debug name does not take part in matching, and a reused target keeps the name it was created with. Errors: Gpu
-		// when the creation fails (render targets are created at startup or resize, so callers treat it as
-		// FatalError(OutOfMemory), §8.14 item 7).
+		// when the creation fails (render targets are created at startup or resize: at startup the caller treats it as
+		// FatalError(OutOfMemory), §8.14 item 7; M18, C18.4: after startup the request that acquires it trims and retries
+		// once, RetryAfterTrim, Graphics/GpuOutOfMemory.h, and then fails alone with OutOfMemory).
 		[[nodiscard]] Result<nvrhi::TextureHandle> Acquire(const nvrhi::TextureDesc& desc);
 
 		// Once per frame after the frame's submission: stamps the targets acquired during the frame, or still held, with

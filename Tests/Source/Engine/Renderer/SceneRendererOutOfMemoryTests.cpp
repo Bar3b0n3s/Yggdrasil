@@ -22,7 +22,7 @@ namespace Engine {
 	TEST_SUITE("Renderer")
 	{
 		TEST_CASE("SceneRenderer: a Resize that runs out of memory is retried after a trim and renders the same image"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.4, decisions 42 and 46): under oom-rendertarget the first target of the new size fails, the
 			// Resize trims and creates the size again, and the view renders exactly as on a device without the fault.
@@ -48,7 +48,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("SceneRenderer: a Resize that keeps running out of memory returns OutOfMemory and keeps the previous size and targets"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.4, decisions 42, 44 and 46): "a resize keeps the previous ... targets"; the renderer is as
 			// before the request, its final texture and pick generation included, and a target is never made smaller than asked.
@@ -76,7 +76,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("SceneRenderer: ReleaseTargets drops the size-dependent targets, and the next Render creates them again with the same image"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.4, decision 43): for an owner whose image nothing displays between renders (ViewportCapture's
 			// trim hook and its release before a new size): the renderer keeps its size, its final texture is gone until the
@@ -113,7 +113,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("SceneRenderer: a debug view whose pipelines run out of memory once is retried after a trim and renders"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.4, decisions 42 and 46): a debug-view switch is a request; under oom-pipeline its first
 			// pipeline fails, the view's pipelines are created again after the trim, and the view renders exactly as on a
@@ -139,7 +139,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("SceneRenderer: a debug view whose pipelines keep running out of memory renders the previous mode and returns OutOfMemory"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.4, decisions 42, 44 and 46; plan §3.8: "a debug view stays on its previous mode with a
 			// diagnostic"): the view is recorded in the mode the renderer last rendered, and Render returns OutOfMemory as a
@@ -170,8 +170,69 @@ namespace Engine {
 			device.RunGarbageCollection();
 		}
 
+		TEST_CASE("SceneRenderer: a debug view that keeps running out of memory renders the view last rendered, or Lit once its pipelines are dropped"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.4, decision 44): Render falls back to the debug view this renderer last rendered, not to a fixed Lit: a
+			// data view, whose pipelines exist from startup, stays. A material view's pipelines are created on first use and
+			// dropped by CreatePipelines (a shader reload or a recovery), so a renderer that last rendered one falls back to
+			// Lit. GetRenderedDebugView names the view the image shows, which a host sets its setting back to.
+			Test::HeadlessGpuFixture gpu({ .InjectFault = GpuFault::OomPipelinePersistent });
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu);
+				// Records `snapshot` and returns Render's status (an OutOfMemory partial error records the view).
+				const auto record = [&device, &fixture](const RenderSnapshot& snapshot)
+				{
+					Result<nvrhi::CommandListHandle> commandList = device.CreateCommandList();
+					REQUIRE_MESSAGE(commandList.has_value(), commandList.error().ToString());
+					(*commandList)->open();
+					const Status rendered = fixture.Renderer().Render(**commandList, snapshot);
+					(*commandList)->close();
+					fixture.Renderer().OnSubmitted(snapshot.FrameIndex, device.ExecuteCommandList(**commandList));
+					return rendered;
+				};
+				RenderSnapshot snapshot = fixture.Snapshot();
+				const Image lit = fixture.Render(snapshot);
+				CHECK(fixture.Renderer().GetRenderedDebugView() == RenderDebugView::Lit);
+				// Before the arming: Albedo's pipelines are created by its first render, then a reload's CreatePipelines drops them.
+				snapshot.DebugView = RenderDebugView::Albedo;
+				++snapshot.FrameIndex;
+				static_cast<void>(fixture.Render(snapshot));
+				CHECK(fixture.Renderer().GetRenderedDebugView() == RenderDebugView::Albedo);
+				device.WaitForIdle();
+				const Status reloaded = fixture.Pipelines().CreatePipelines();
+				REQUIRE_MESSAGE(reloaded.has_value(), reloaded.error().ToString());
+				device.RunGarbageCollection();
+
+				// The view last rendered has no pipelines any more: Lit.
+				++snapshot.FrameIndex;
+				const Status dropped = record(snapshot);
+				REQUIRE_FALSE(dropped.has_value());
+				CHECK(dropped.error().GetCode() == ErrorCode::OutOfMemory);
+				CHECK(fixture.Renderer().GetRenderedDebugView() == RenderDebugView::Lit);
+				CHECK(fixture.Read().Pixels == lit.Pixels);
+
+				// A data view rendered last: the failed switch stays on it.
+				snapshot.DebugView = RenderDebugView::Overdraw;
+				++snapshot.FrameIndex;
+				const Image overdraw = fixture.Render(snapshot);
+				CHECK(overdraw.Pixels != lit.Pixels);
+				snapshot.DebugView = RenderDebugView::Emissive;
+				++snapshot.FrameIndex;
+				const Status stayed = record(snapshot);
+				REQUIRE_FALSE(stayed.has_value());
+				CHECK(stayed.error().GetCode() == ErrorCode::OutOfMemory);
+				CHECK(fixture.Renderer().GetRenderedDebugView() == RenderDebugView::Overdraw);
+				CHECK(fixture.Read().Pixels == overdraw.Pixels);
+				CHECK_FALSE(device.IsLost());
+			}
+			device.RunGarbageCollection();
+		}
+
 		TEST_CASE("SceneRenderer: under oom-specialization a debug view renders the previous mode and returns OutOfMemory"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 (C18.4, decision 49): the retarget of "SceneRenderer: an out-of-memory debug-view pipeline is fatal" (M9-F39),
 			// which W18.4's stream B removes with its death child: a debug view's out-of-memory after startup fails only the

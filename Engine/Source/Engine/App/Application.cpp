@@ -11,6 +11,7 @@
 #include "Engine/Core/Utf8.h"
 #include "Engine/Graphics/FramePacer.h"
 #include "Engine/Graphics/GpuDiagnostics.h"
+#include "Engine/Graphics/GpuOutOfMemory.h"
 #include "Engine/Graphics/GpuProfiler.h"
 #include "Engine/Graphics/GpuRecreation.h"
 #include "Engine/Graphics/GraphicsDevice.h"
@@ -190,9 +191,11 @@ namespace Engine {
 			return WithContext(std::move(result), std::move(context));
 		}
 
-		// A rendering object recreated during the frame loop (a recreated swapchain, a resized offscreen target) that fails
-		// ends the process: OutOfMemory for a Gpu error (§8.14 item 7), Gpu for anything else. Never called on a lost device,
-		// whose failures are the loss (decision 28): the frame renders nothing, and the frame boundary recovers the device.
+		// A frame target created or resized during the frame loop that fails otherwise than out of memory ends the process:
+		// OutOfMemory for a Gpu error (§8.14 item 7), Gpu for anything else. M18 (C18.4, decision 44): the frame's resize is a
+		// request (RetryAfterTrim), whose out-of-memory failure skips its frames instead, so a Gpu error no longer reaches
+		// here on a healthy device. Never called on a lost device, whose failures are the loss (decision 28): the frame
+		// renders nothing, and the frame boundary recovers the device.
 		[[noreturn]] static void EndRenderingObjectFailure(const Error& error, std::string_view message)
 		{
 			const FatalErrorKind kind = error.GetCode() == ErrorCode::Gpu ? FatalErrorKind::OutOfMemory : FatalErrorKind::Gpu;
@@ -288,6 +291,12 @@ namespace Engine {
 		// the last frame that began), so the frames' indices keep growing (Utils::GetRecoveredFrameIndexOffset).
 		uint64_t FrameIndexOffset = 0;
 		uint64_t NextFrameIndex = 0;
+		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 44): the size at which the offscreen frame target (headless,
+		// or the forced UI target) ran out of memory after its trim and retry (0x0: none). Frames at that size render nothing,
+		// without a creation or a trim, until the size changes or a frame sees the window minimized, as the swapchain skips the
+		// size its recreation failed at (headless equals windowed).
+		uint32_t FailedWidth = 0;
+		uint32_t FailedHeight = 0;
 		// The "Application frame" owner of the device's recreation registry: its Release destroys the objects above, its
 		// Recreate creates them again (Application::ReleaseFrameObjects, CreateFrameObjects). Registered by
 		// InitializeRendering once they exist, before the ImGui layer's renderer.
@@ -675,9 +684,17 @@ namespace Engine {
 		{
 			Swapchain& swapchain = *rendering.WindowSwapchain;
 			const Result<SwapchainAcquireStatus> status = swapchain.AcquireNextImage(frameSlot);
-			// A failure on a lost device (one the acquire met included) is the loss: the frame is skipped.
+			// A failure on a lost device (one the acquire met included) is the loss: the frame is skipped. M18 (C18.4,
+			// decision 44): a recreation that ran out of memory after its trim and retry fails this frame alone, and the
+			// swapchain skips the frames at that size until it changes; any other failure of the recreation stays fatal, as Gpu
+			// (Swapchain.h: it is not out of memory).
 			if (!status.has_value() && !device.IsLost())
-				Utils::EndRenderingObjectFailure(status.error(), "Cannot recreate the swapchain");
+			{
+				if (status.error().GetCode() != ErrorCode::OutOfMemory)
+					FatalError(FatalErrorKind::Gpu, std::format("Cannot recreate the swapchain: {}", status.error().ToString()));
+				ENGINE_CORE_WARN("Skipping the frames at the window's framebuffer size {}x{} until it changes: {}", window.GetFramebufferWidth(),
+					window.GetFramebufferHeight(), status.error());
+			}
 			if (status.has_value() && *status == SwapchainAcquireStatus::Acquired)
 			{
 				acquiredSwapchain = true;
@@ -687,42 +704,66 @@ namespace Engine {
 				height = swapchain.GetHeight();
 			}
 		}
+		// M18 (C18.4, decision 44): a frame that sees the window minimized, and so renders no target of the window's size,
+		// forgets the size that failed, so restoring the window to it retries, as the swapchain does.
+		if (minimized && !rendering.UiFrameRequested)
+		{
+			rendering.FailedWidth = 0;
+			rendering.FailedHeight = 0;
+		}
 		if (framebuffer == nullptr && !device.IsLost() && ((rendering.WindowSwapchain == nullptr && !minimized) || rendering.UiFrameRequested))
 		{
 			// A forced frame also works before a windowed swapchain has ever acquired an image. Keep its resources
 			// per slot, just like headless targets; minimized frames retain the last rendered nonzero extent.
 			width = minimized ? rendering.LastWidth : window.GetFramebufferWidth();
 			height = minimized ? rendering.LastHeight : window.GetFramebufferHeight();
-			if (rendering.OffscreenFrame == nullptr)
+			// After startup the target's creation and resize are a request (decisions 42 and 44): an out-of-memory creation is
+			// trimmed for and retried once, and a second one skips this frame and every later one at this size, without a
+			// creation or a trim, until the size changes. Nothing records meanwhile: the frame's list is not open yet.
+			const auto isCurrent = [&rendering, width, height]()
 			{
-				Result<OffscreenTarget> created = OffscreenTarget::Create(device, {
-																					  .Width = width,
-																					  .Height = height,
-																					  .ColorFormat = nvrhi::Format::RGBA8_UNORM,
-																					  .Depth = false,
-																					  .DebugName = "ForcedUiFrame",
-																				  });
-				if (created.has_value())
-					rendering.OffscreenFrame = CreateScope<OffscreenTarget>(std::move(*created));
+				return rendering.OffscreenFrame != nullptr && rendering.OffscreenFrame->GetWidth() == width && rendering.OffscreenFrame->GetHeight() == height;
+			};
+			if (!isCurrent() && (width != rendering.FailedWidth || height != rendering.FailedHeight))
+			{
+				const Status prepared = RetryAfterTrim(device, std::format("the frame's {}x{} target", width, height),
+					[&rendering, &device, width, height]() -> Status
+				{
+					if (rendering.OffscreenFrame == nullptr)
+					{
+						ENGINE_TRY_ASSIGN(OffscreenTarget created, OffscreenTarget::Create(device, {
+																									   .Width = width,
+																									   .Height = height,
+																									   .ColorFormat = nvrhi::Format::RGBA8_UNORM,
+																									   .Depth = false,
+																									   .DebugName = "ForcedUiFrame",
+																								   }));
+						rendering.OffscreenFrame = CreateScope<OffscreenTarget>(std::move(created));
+						return {};
+					}
+					// Created aside: a failed resize keeps the previous textures (OffscreenTarget::Resize).
+					return rendering.OffscreenFrame->Resize(device, width, height);
+				});
+				if (prepared.has_value())
+				{
+					rendering.FailedWidth = 0;
+					rendering.FailedHeight = 0;
+				}
 				else if (!device.IsLost())
-					Utils::EndRenderingObjectFailure(created.error(), "Cannot create the forced UI target");
+				{
+					if (prepared.error().GetCode() != ErrorCode::OutOfMemory)
+						Utils::EndRenderingObjectFailure(prepared.error(), "Cannot create or resize the frame's offscreen target");
+					ENGINE_CORE_WARN("Skipping the frames at the size {}x{} until it changes: {}", width, height, prepared.error());
+					rendering.FailedWidth = width;
+					rendering.FailedHeight = height;
+				}
 			}
-			if (rendering.OffscreenFrame != nullptr)
+			if (isCurrent())
 			{
 				OffscreenTarget& offscreen = *rendering.OffscreenFrame;
-				const Status resized = offscreen.Resize(device, width, height);
-				if (resized.has_value())
-				{
-					framebuffer = offscreen.GetFramebuffer();
-					target = offscreen.GetColorTexture();
-					width = offscreen.GetWidth();
-					height = offscreen.GetHeight();
-					rendering.SlotTargets[frameSlot] = framebuffer;
-				}
-				else if (!device.IsLost())
-				{
-					Utils::EndRenderingObjectFailure(resized.error(), "Cannot resize the frame's offscreen target");
-				}
+				framebuffer = offscreen.GetFramebuffer();
+				target = offscreen.GetColorTexture();
+				rendering.SlotTargets[frameSlot] = framebuffer;
 			}
 		}
 

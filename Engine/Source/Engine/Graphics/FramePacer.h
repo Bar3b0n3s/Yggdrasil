@@ -101,12 +101,14 @@ namespace Engine {
 	// submission <id> did not complete within the 10 s budget, and the device was reset during the reset wait")) and
 	// returns, the frame boundary recovering the device like any loss; a Hang (no loss report after the reset wait) ends the
 	// process through FatalError(GpuHang) naming both waits, as before: the editor's autosave, a crash report, exit code 4.
+	// Without a reset wait (--gpu-reset-wait 0) the budget's hang is fatal at once, and the message says the reset wait is
+	// off instead of naming one that did not run.
 	//
-	// Under --gpu-inject-fault=hang (GpuDiagnostics::ShouldInjectHang) the wait skips the completed-submission early return
-	// and goes straight to RunBoundedGpuWait, whose every slice reports Timeout without calling vkWaitSemaphores, so the
-	// process ends with FatalError(GpuHang) after the budget's GpuWaitMaxSlices slices however fast the GPU is (§8.14 item 8:
-	// "a timeline wait that always reports VK_TIMEOUT"). The injected slices do not wait, so the fault test does not take
-	// 10 s of wall time; the budget's length is RunBoundedGpuWait's unit-tested slice count. M18 (C18.4, decision 46): the
+	// Under --gpu-inject-fault=hang the wait skips the completed-submission early return and goes straight to its slices,
+	// every one of which reports Timeout without calling vkWaitSemaphores, so the process ends with FatalError(GpuHang) after
+	// the budget's GpuWaitMaxSlices slices (and, from M18, the reset wait's) however fast the GPU is (§8.14 item 8, the
+	// `hang` spelling). The injected slices do not wait, so the fault test takes neither wait in
+	// wall time; their lengths are RunGpuWaitWithReset's unit-tested slice counts. M18 (C18.4, decision 46): the
 	// wait takes its injected fault from GpuDiagnostics::TakeBoundedWaitFault once, at its start: Hang times out every slice
 	// of the budget and of the reset wait without waiting (the M5 fault, now through both waits); HangReset times out the
 	// budget's slices without waiting, then marks the device lost as an injected loss (GpuDiagnostics::SetDeviceLost(true),

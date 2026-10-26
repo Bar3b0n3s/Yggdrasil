@@ -180,7 +180,8 @@ namespace Engine {
 		// VK_PRESENT_MODE_FIFO_KHR, MAILBOX or IMMEDIATE.
 		[[nodiscard]] VkPresentModeKHR GetPresentMode() const;
 		// True while no VkSwapchainKHR exists because the window is minimized (iconified, or a framebuffer with a zero
-		// dimension) or its surface reports a zero extent.
+		// dimension) or its surface reports a zero extent, and (M18, C18.4) after a recreation that ran out of memory, until a
+		// recreation succeeds.
 		[[nodiscard]] bool IsMinimized() const;
 		// The number of recreations since Create (resize, out-of-date, suboptimal, surface loss); for tests.
 		[[nodiscard]] uint32_t GetRecreationCount() const;
@@ -234,6 +235,12 @@ namespace Engine {
 		bool m_IsRecreatePending = false;
 		bool m_IsSurfaceLost = false;
 		bool m_IsAcquireTimingOut = false; // the last acquire timed out, so the next timeout is not logged again
+		// M18 (C18.4, decisions 42 and 44): the framebuffer size whose recreation ran out of memory after its trim and retry
+		// (0x0: none), at which AcquireNextImage skips without a creation or a trim until the size changes or the window is
+		// minimized; and whether the last recreation attempt failed out of memory (its RetryAfterTrim classification).
+		uint32_t m_FailedWidth = 0;
+		uint32_t m_FailedHeight = 0;
+		bool m_IsCreationOutOfMemory = false;
 	};
 
 	// The enumerator name ("Continue", "Recreate", ...).

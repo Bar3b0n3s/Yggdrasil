@@ -318,6 +318,12 @@ namespace Engine {
 		std::vector<ShaderLight> Lights{};
 		bool LightLimitLogged = false; // RENDER_LIGHT_LIMIT_EXCEEDED is logged once per renderer
 		SceneRenderStats Stats{};
+		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 44): the debug view the last Render recorded (Lit before the
+		// first), which a Render records instead of a debug view whose first pipelines ran out of memory after their trim and
+		// retry (SceneRenderer::GetRenderedDebugView); and the views whose switch failed that way, logged once per renderer and
+		// view. CPU state that a device loss's release keeps (SceneRendererRecovery.cpp).
+		RenderDebugView RenderedDebugView = RenderDebugView::Lit;
+		std::array<bool, RenderDebugViewCount> DebugViewFailureLogged{};
 
 		// The targets of `width` x `height` with their framebuffers.
 		[[nodiscard]] Result<Detail::SceneRendererTargets> CreateTargets(uint32_t width, uint32_t height) const;

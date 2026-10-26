@@ -20,10 +20,8 @@ namespace Engine {
 			CHECK(registry.GetOwnerCount() == 0);
 		}
 
-		TEST_CASE("TrimCounter: counts every TrimUnused call of its registry" * doctest::skip(true))
+		TEST_CASE("TrimCounter: counts every TrimUnused call of its registry")
 		{
-			// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 43): skipped until W18.4's stream B implements
-			// GpuRecreationRegistry::TrimUnused.
 			GpuRecreationRegistry registry;
 			const Test::TrimCounter counter(registry);
 			CHECK(registry.TrimUnused() == 1);

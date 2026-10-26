@@ -6,12 +6,14 @@
 #include "EditorCore/Viewport/GizmoController.h"
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/Graphics/GpuOutOfMemory.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Readback.h"
 #include "Engine/Graphics/RenderContext.h"
 #include "Engine/ImGui/ImGuiRenderer.h"
 #include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Scene/Components/CameraComponent.h"
+#include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
@@ -19,6 +21,7 @@
 #include "Support/DeviceLossTest.h"
 #include "Support/EditorTestFixture.h"
 #include "Support/HeadlessGpuFixture.h"
+#include "Support/TrimCounter.h"
 #include "Support/WaitUntil.h"
 
 #include <algorithm>
@@ -26,6 +29,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <string>
@@ -68,8 +72,9 @@ namespace Engine {
 			HostGpuHarness(const HostGpuHarness&) = delete;
 			HostGpuHarness& operator=(const HostGpuHarness&) = delete;
 
-			// One frame: records both views, submits them and notifies the host. Returns Render's status.
-			Status Frame(uint64_t frame, std::optional<EditorViewportClick> click = {})
+			// One frame: records both views, submits them and notifies the host. Returns Render's status. `beforeSubmission`,
+			// when set, runs after the recording and before the submission.
+			Status Frame(uint64_t frame, std::optional<EditorViewportClick> click = {}, const std::function<void()>& beforeSubmission = {})
 			{
 				m_Device.WaitForIdle();
 				m_Renderer->BeginFrame(static_cast<uint32_t>(frame % 2));
@@ -79,12 +84,16 @@ namespace Engine {
 				if (click)
 					REQUIRE(m_Host.RequestPick(*click).has_value());
 				m_Command->close();
+				if (beforeSubmission)
+					beforeSubmission();
 				const uint64_t submission = m_Device.ExecuteCommandList(*m_Command);
 				m_Submitted = m_Host.Submitted(frame, submission);
 				return rendered;
 			}
 
 			[[nodiscard]] EditorHostViewports& GetHost() { return m_Host; }
+			// The views' shared pipeline set (a shader reload calls its CreatePipelines).
+			[[nodiscard]] SceneRendererPipelines& GetPipelines() { return *m_Pipelines; }
 			// The status of the last frame's Submitted notification.
 			[[nodiscard]] const Status& GetSubmitted() const { return m_Submitted; }
 		private:
@@ -772,6 +781,255 @@ end)
 			device.WaitForIdle();
 			host.Retire();
 			(*renderer)->DestroyTextures();
+		}
+
+		TEST_CASE("EditorHostViewports: a view whose new size runs out of memory stays at its previous size until its size changes"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decisions 42 and 44): the scene view's new size runs out of memory
+			// after its renderer's trim and retry, so the view goes on rendering at its previous size, which its image and its
+			// published extent report (the panel shows the image scaled and maps clicks through it), the layout counts as ready,
+			// and the failed size is not asked for again, without another trim, until the requested size changes.
+			Test::HeadlessGpuFixture gpu({ .InjectFault = GpuFault::OomRenderTargetPersistent });
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::EditorTestFixture fixture("HostOutOfMemorySize");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			editor.GetViewportState().SetOptions({ .Grid = false, .Icons = false });
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::SceneViewport, true).has_value());
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::GameViewport, true).has_value());
+			HostGpuHarness harness(gpu, editor);
+			harness.GetHost().SetRectangle(ViewportView::Scene, { .Size = glm::vec2(96, 64) });
+			harness.GetHost().SetRectangle(ViewportView::Game, { .Size = glm::vec2(80, 80) });
+			REQUIRE(harness.Frame(0).has_value());
+			gpu.GetDevice().RunGarbageCollection(); // the first frame's collection arms the fault
+			const Test::TrimCounter counter(gpu.GetDevice().GetRecreation());
+
+			harness.GetHost().SetRectangle(ViewportView::Scene, { .Size = glm::vec2(128, 72) });
+			REQUIRE(harness.Frame(1).has_value());
+			CHECK(counter.GetTrims() == 1);
+			const EditorViewportImage image = harness.GetHost().GetImage(ViewportView::Scene);
+			CHECK(image.Texture != 0);
+			CHECK(image.FrameIndex == 1);
+			CHECK(image.Width == 96);
+			CHECK(image.Height == 64);
+			CHECK(harness.GetHost().GetRenderer(ViewportView::Scene)->GetWidth() == 96);
+			CHECK(editor.GetViewportState().GetPixelSize(ViewportView::Scene).value() == glm::uvec2(96, 64));
+			CHECK(harness.GetHost().IsLayoutReady());
+
+			// The size that failed is not tried again.
+			REQUIRE(harness.Frame(2).has_value());
+			CHECK(counter.GetTrims() == 1);
+			CHECK(harness.GetHost().GetImage(ViewportView::Scene).Width == 96);
+			// Another size is a new request.
+			harness.GetHost().SetRectangle(ViewportView::Scene, { .Size = glm::vec2(120, 70) });
+			REQUIRE(harness.Frame(3).has_value());
+			CHECK(counter.GetTrims() == 2);
+			CHECK(harness.GetHost().GetImage(ViewportView::Scene).Width == 96);
+			CHECK_FALSE(gpu.GetDevice().IsLost());
+		}
+
+		TEST_CASE("EditorHostViewports: a debug-view switch that runs out of memory sets the setting back to the mode that rendered"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.4, decisions 42 and 44): the Albedo view's pipelines run out of memory again after their trim, so the scene
+			// view renders in the mode it last rendered (Lit) and the host sets the scene view's debug-view setting back to it,
+			// so the next frames do not try again; without the fault the switch stays.
+			for (const GpuFault fault : { GpuFault::None, GpuFault::OomPipelinePersistent })
+			{
+				CAPTURE(GpuFaultToString(fault));
+				Test::HeadlessGpuFixture gpu({ .InjectFault = fault });
+				ENGINE_REQUIRE_GPU(gpu);
+				Test::EditorTestFixture fixture("HostOutOfMemoryDebugView");
+				fixture.CreateAndOpenProject();
+				fixture.CreateAndOpenScene();
+				auto& editor = fixture.GetEditor();
+				editor.GetViewportState().SetOptions({ .Grid = false, .Icons = false });
+				REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::SceneViewport, true).has_value());
+				REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::GameViewport, true).has_value());
+				HostGpuHarness harness(gpu, editor);
+				harness.GetHost().SetRectangle(ViewportView::Scene, { .Size = glm::vec2(96, 64) });
+				harness.GetHost().SetRectangle(ViewportView::Game, { .Size = glm::vec2(80, 80) });
+				REQUIRE(harness.Frame(0).has_value());
+				gpu.GetDevice().RunGarbageCollection();
+
+				REQUIRE(editor.GetViewportState().SetDebugView(RenderDebugView::Albedo).has_value());
+				REQUIRE(harness.Frame(1).has_value());
+				CHECK(harness.GetHost().GetImage(ViewportView::Scene).FrameIndex == 1);
+				const RenderDebugView expected = fault == GpuFault::None ? RenderDebugView::Albedo : RenderDebugView::Lit;
+				CHECK(editor.GetViewportState().GetDebugView() == expected);
+				REQUIRE(harness.Frame(2).has_value());
+				CHECK(editor.GetViewportState().GetDebugView() == expected);
+				CHECK_FALSE(gpu.GetDevice().IsLost());
+			}
+		}
+
+		TEST_CASE("EditorHostViewports: a debug-view switch that runs out of memory sets the setting to the view its renderer stayed on"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.4, decision 44): the setting goes back to the debug view the scene view's renderer drew instead
+			// (SceneRenderer::GetRenderedDebugView), so the next frames do not try again. After a shader reload, whose
+			// CreatePipelines drops the material views' pipelines, a view last rendered in Albedo falls back to Lit, not to
+			// Albedo; and a view last rendered in a data view (Overdraw, whose pipelines exist from startup) stays on it, not
+			// on Lit. Each failed switch trims once, and the frames after it trim no more.
+			Test::HeadlessGpuFixture gpu({ .InjectFault = GpuFault::OomPipelinePersistent });
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::EditorTestFixture fixture("HostOutOfMemoryStayedView");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			editor.GetViewportState().SetOptions({ .Grid = false, .Icons = false });
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::SceneViewport, true).has_value());
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::GameViewport, true).has_value());
+			HostGpuHarness harness(gpu, editor);
+			harness.GetHost().SetRectangle(ViewportView::Scene, { .Size = glm::vec2(96, 64) });
+			harness.GetHost().SetRectangle(ViewportView::Game, { .Size = glm::vec2(80, 80) });
+			REQUIRE(harness.Frame(0).has_value());
+			// Before the arming: Albedo renders, creating its pipelines, and a shader reload drops them again.
+			REQUIRE(editor.GetViewportState().SetDebugView(RenderDebugView::Albedo).has_value());
+			REQUIRE(harness.Frame(1).has_value());
+			REQUIRE(harness.GetHost().GetRenderer(ViewportView::Scene)->GetRenderedDebugView() == RenderDebugView::Albedo);
+			gpu.GetDevice().WaitForIdle();
+			const Status reloaded = harness.GetPipelines().CreatePipelines();
+			REQUIRE_MESSAGE(reloaded.has_value(), reloaded.error().ToString());
+			gpu.GetDevice().RunGarbageCollection(); // arms the fault
+			const Test::TrimCounter counter(gpu.GetDevice().GetRecreation());
+
+			REQUIRE(harness.Frame(2).has_value());
+			CHECK(counter.GetTrims() == 1);
+			CHECK(editor.GetViewportState().GetDebugView() == RenderDebugView::Lit);
+			REQUIRE(harness.Frame(3).has_value());
+			CHECK(counter.GetTrims() == 1);
+			CHECK(editor.GetViewportState().GetDebugView() == RenderDebugView::Lit);
+
+			REQUIRE(editor.GetViewportState().SetDebugView(RenderDebugView::Overdraw).has_value());
+			REQUIRE(harness.Frame(4).has_value());
+			REQUIRE(editor.GetViewportState().SetDebugView(RenderDebugView::Emissive).has_value());
+			REQUIRE(harness.Frame(5).has_value());
+			CHECK(counter.GetTrims() == 2);
+			CHECK(editor.GetViewportState().GetDebugView() == RenderDebugView::Overdraw);
+			REQUIRE(harness.Frame(6).has_value());
+			CHECK(counter.GetTrims() == 2);
+			CHECK(editor.GetViewportState().GetDebugView() == RenderDebugView::Overdraw);
+			CHECK(harness.GetHost().GetImage(ViewportView::Scene).FrameIndex == 6);
+			CHECK_FALSE(gpu.GetDevice().IsLost());
+		}
+
+		TEST_CASE("EditorHostViewports: a view render that runs out of memory is trimmed for after the frame's submission, and the next frame renders again"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.4, decision 44): selecting an entity after the arming makes the scene view create its selection targets,
+			// which run out of memory: Render returns the out-of-memory Gpu error (never fatal), nothing is trimmed while the
+			// frame's list is open, and Submitted trims once after the frame's submission. Under oom-rendertarget the next frame
+			// creates them and renders, without another trim; under oom-rendertarget-persistent every failing frame trims once,
+			// and a frame that renders again trims no more.
+			for (const GpuFault fault : { GpuFault::OomRenderTarget, GpuFault::OomRenderTargetPersistent })
+			{
+				CAPTURE(GpuFaultToString(fault));
+				Test::HeadlessGpuFixture gpu({ .InjectFault = fault });
+				ENGINE_REQUIRE_GPU(gpu);
+				Test::EditorTestFixture fixture("HostOutOfMemoryFrame");
+				fixture.CreateAndOpenProject();
+				fixture.CreateAndOpenScene();
+				auto& editor = fixture.GetEditor();
+				const Entity mesh = editor.GetScene().CreateEntity("Mesh");
+				mesh.AddComponent<MeshRendererComponent>(MeshRendererComponent{ .Mesh = TypedAssetHandle<AssetType::Mesh>(BuiltinAssetHandles::CubeMesh), .Materials = {} });
+				editor.GetScene().CreateEntity("Camera").AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+				editor.GetViewportState().SetOptions({ .Grid = false, .Icons = false });
+				REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::SceneViewport, true).has_value());
+				REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::GameViewport, true).has_value());
+				HostGpuHarness harness(gpu, editor);
+				harness.GetHost().SetRectangle(ViewportView::Scene, { .Size = glm::vec2(96, 64) });
+				harness.GetHost().SetRectangle(ViewportView::Game, { .Size = glm::vec2(80, 80) });
+				REQUIRE(harness.Frame(0).has_value());
+				gpu.GetDevice().RunGarbageCollection(); // arms the fault
+				const Test::TrimCounter counter(gpu.GetDevice().GetRecreation());
+
+				REQUIRE(editor.SetSelection({ mesh.GetUUID() }, SceneTarget::Edit).has_value());
+				uint32_t trimsBeforeSubmission = 0;
+				const Status failed = harness.Frame(1, {}, [&counter, &trimsBeforeSubmission]()
+				{
+					trimsBeforeSubmission = counter.GetTrims();
+				});
+				REQUIRE_FALSE(failed.has_value());
+				CHECK(failed.error().GetCode() == ErrorCode::Gpu);
+				CHECK(IsGpuOutOfMemory(failed.error(), gpu.GetDevice()));
+				CHECK(trimsBeforeSubmission == 0);
+				CHECK(counter.GetTrims() == 1);
+				CHECK(harness.GetHost().GetImage(ViewportView::Scene).FrameIndex == 1);
+				CHECK(harness.GetHost().GetImage(ViewportView::Game).FrameIndex == 1);
+				CHECK(harness.GetSubmitted().has_value());
+
+				const Status next = harness.Frame(2);
+				if (fault == GpuFault::OomRenderTarget)
+				{
+					REQUIRE_MESSAGE(next.has_value(), next.error().ToString());
+					CHECK(counter.GetTrims() == 1);
+					CHECK(harness.GetHost().GetRenderer(ViewportView::Scene)->GetRenderStats().FrameIndex == 2);
+				}
+				else
+				{
+					REQUIRE_FALSE(next.has_value());
+					CHECK(next.error().GetCode() == ErrorCode::Gpu);
+					CHECK(counter.GetTrims() == 2);
+					REQUIRE(editor.SetSelection({}, SceneTarget::Edit).has_value());
+					const Status deselected = harness.Frame(3);
+					REQUIRE_MESSAGE(deselected.has_value(), deselected.error().ToString());
+					CHECK(counter.GetTrims() == 2);
+					CHECK(harness.GetHost().GetRenderer(ViewportView::Scene)->GetRenderStats().FrameIndex == 3);
+				}
+				CHECK_FALSE(gpu.GetDevice().IsLost());
+			}
+		}
+
+		TEST_CASE("EditorHostViewports: a view's Gpu error is returned before another view's error, after both views rendered"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.4, decision 44): the scene view (index 0, in the Overdraw data view, which shadows nothing) fails first
+			// with a partial InvalidArgument error (a mesh with a non-finite world matrix), and the game view after it with the
+			// Gpu error of its shadow cascades, which a sun added after the arming makes it create and which run out of memory.
+			// Render returns the Gpu error, the one the host trims for after the frame, and both views rendered the frame.
+			Test::HeadlessGpuFixture gpu({ .InjectFault = GpuFault::OomRenderTargetPersistent });
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::EditorTestFixture fixture("HostGpuErrorFirst");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			const Entity mesh = editor.GetScene().CreateEntity("Mesh");
+			mesh.AddComponent<MeshRendererComponent>(MeshRendererComponent{ .Mesh = TypedAssetHandle<AssetType::Mesh>(BuiltinAssetHandles::CubeMesh), .Materials = {} });
+			Entity camera = editor.GetScene().CreateEntity("Camera");
+			camera.AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			camera.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.0f, 1.5f, 5.0f);
+			});
+			editor.GetViewportState().SetOptions({ .Grid = false, .Icons = false });
+			REQUIRE(editor.GetViewportState().SetDebugView(RenderDebugView::Overdraw).has_value());
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::SceneViewport, true).has_value());
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::GameViewport, true).has_value());
+			HostGpuHarness harness(gpu, editor);
+			harness.GetHost().SetRectangle(ViewportView::Scene, { .Size = glm::vec2(96, 64) });
+			harness.GetHost().SetRectangle(ViewportView::Game, { .Size = glm::vec2(80, 80) });
+			REQUIRE(harness.Frame(0).has_value());
+			gpu.GetDevice().RunGarbageCollection(); // arms the fault
+			const Test::TrimCounter counter(gpu.GetDevice().GetRecreation());
+
+			Entity broken = editor.GetScene().CreateEntity("Broken");
+			broken.AddComponent<MeshRendererComponent>().Mesh.SetHandle(BuiltinAssetHandles::CubeMesh);
+			broken.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation.x = std::numeric_limits<float>::quiet_NaN();
+			});
+			editor.GetScene().CreateEntity("Sun").AddComponent<DirectionalLightComponent>();
+			const Status rendered = harness.Frame(1);
+			REQUIRE_FALSE(rendered.has_value());
+			CHECK(rendered.error().GetCode() == ErrorCode::Gpu);
+			CHECK(harness.GetHost().GetImage(ViewportView::Scene).FrameIndex == 1);
+			CHECK(harness.GetHost().GetImage(ViewportView::Game).FrameIndex == 1);
+			CHECK(harness.GetHost().GetRenderer(ViewportView::Scene)->GetRenderStats().FrameIndex == 1);
+			CHECK(counter.GetTrims() == 1);
+			CHECK_FALSE(gpu.GetDevice().IsLost());
 		}
 	}
 

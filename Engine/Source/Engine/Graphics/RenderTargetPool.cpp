@@ -88,7 +88,10 @@ namespace Engine {
 
 	void RenderTargetPool::TrimUnused()
 	{
-		ENGINE_CONTRACT_STUB();
+		// ReleaseFree's rule, which ignores the targets' age: a free target goes once every submission that may have used it
+		// has completed, and a target acquired since the last EndFrame (PendingSubmission) stays, since an open command list
+		// may still clear it without NVRHI referencing it.
+		ReleaseFree();
 	}
 
 	size_t RenderTargetPool::GetTargetCount() const

@@ -150,12 +150,6 @@ namespace Engine {
 		// view's first render reaches its pipeline-creation failure path (§8.14 items 7 and 8).
 		[[nodiscard]] bool ShouldFailShaderSpecialization() const { return m_InjectedFault == GpuFault::OomSpecialization; }
 
-		// GpuFault::Hang: whether bounded GPU waits must hang (FramePacer.h): WaitForSubmission skips its completed-submission
-		// early return, FramePacer::BeginFrame skips pollEventQuery once its slot has a recorded submission, and every wait
-		// slice reports VK_TIMEOUT without waiting, so the first wait ends the process with FatalError(GpuHang) whatever the
-		// GPU's progress. M18 (C18.4, decision 40): every slice of its reset wait too, so no loss report arrives.
-		[[nodiscard]] bool ShouldInjectHang() const { return m_InjectedFault == GpuFault::Hang; }
-
 		// M18 (C18.4, decision 46): whether the next TakeBoundedWaitFault would return anything but None, without taking it:
 		// FramePacer::BeginFrame waits through WaitForSubmission instead of polling its slot's event query when it would.
 		[[nodiscard]] bool HasBoundedWaitFault() const;

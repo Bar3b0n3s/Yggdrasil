@@ -13,8 +13,9 @@
 
 namespace Engine {
 
-	// Paces empty frames on a headless device with the hang fault until a bounded wait ends the process: the child of the
-	// hang test. Without a device there is nothing to wait for, which the parent reports as a skip.
+	// Paces empty frames on a headless device with the hang fault until a bounded wait ends the process, after its budget and
+	// its reset wait: the child of the hang test. Without a device there is nothing to wait for, which the parent reports as a
+	// skip.
 	ENGINE_DEATH_TEST("Graphics/FramePacerInjectedHang")
 	{
 		Test::HeadlessGpuFixture gpu({ .InjectFault = GpuFault::Hang });
@@ -40,6 +41,33 @@ namespace Engine {
 			pacer.EndFrame(device.ExecuteCommandList(**commandList));
 		}
 		ENGINE_CORE_ERROR("Every frame began under the hang fault");
+	}
+
+	// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 41): waits for a submission on a headless device under the
+	// hang-reset fault without a reset wait (--gpu-reset-wait 0), whose budget then ends the process before the injected reset
+	// could be reported: the child of the reset-wait-off test. Without a device there is nothing to wait for, which the parent
+	// reports as a skip.
+	ENGINE_DEATH_TEST("Graphics/FramePacerHangResetWithoutResetWait")
+	{
+		Test::HeadlessGpuFixture gpu({ .InjectFault = GpuFault::HangReset, .ResetWaitMilliseconds = 0 });
+		if (!gpu.IsAvailable())
+		{
+			ENGINE_CORE_WARN("No GPU in the frame-pacer child: {}", gpu.GetUnavailableReason());
+			return;
+		}
+		GraphicsDevice& device = gpu.GetDevice();
+		Result<nvrhi::CommandListHandle> commandList = device.CreateCommandList();
+		if (!commandList.has_value())
+		{
+			ENGINE_CORE_ERROR("The frame-pacer child cannot create a command list: {}", commandList.error());
+			return;
+		}
+		(*commandList)->open();
+		(*commandList)->close();
+		// The first garbage collection arms the fault, as at the end of an application's first frame.
+		device.RunGarbageCollection();
+		WaitForSubmission(device, device.ExecuteCommandList(**commandList), "FramePacer reset-wait child");
+		ENGINE_CORE_ERROR("The wait returned under the hang-reset fault without a reset wait (device lost: {})", device.IsLost());
 	}
 
 	TEST_SUITE("Graphics")
@@ -108,8 +136,7 @@ namespace Engine {
 			CHECK(GetGpuResetWaitSliceCount(std::numeric_limits<uint32_t>::max()) == 42'949'673);
 		}
 
-		TEST_CASE("FramePacer: the reset wait runs only after the budget timed out, and only both timing out is a hang"
-			* doctest::skip(true))
+		TEST_CASE("FramePacer: the reset wait runs only after the budget timed out, and only both timing out is a hang")
 		{
 			// M18 acceptance (C18.4, decision 40, R-HANG), the state machine without a GPU or a clock: after the 10 s budget a
 			// wait goes on for the reset wait, a loss report there is a device loss (recovered like any loss), a completion
@@ -262,7 +289,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("FramePacer: a hang reset in the reset wait reports an injected loss once, and the device recovers"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.4, Docs/Decisions/0029-m18-contract.md decisions 40 and 46): "a driver-reset hang recovers like
 			// a loss". Under hang-reset the first bounded wait after the device's first garbage collection spends its budget
@@ -315,7 +342,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("FramePacer: under hang-reset-persistent a device that hangs again after its recovery is recovered again"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.4, decisions 40 and 46): a recovery is not once per process; a hang after it (never during it:
 			// a recovery waits through no bounded wait) is reset and recovered again.
@@ -342,11 +369,75 @@ namespace Engine {
 			}
 		}
 
+		TEST_CASE("FramePacer: under hang-reset the first frame wait after the arming is reset even when the GPU finished"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 46): while GpuDiagnostics::HasBoundedWaitFault, BeginFrame
+			// waits for its slot's submission instead of polling the slot's event query, so the injected reset strikes an
+			// application's third frame (the first whose slot has a submission, with two frames in flight) however fast the GPU
+			// finished the first one, and the frame boundary recovers it.
+			Test::HeadlessGpuFixture gpu({ .InjectFault = GpuFault::HangReset });
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				FramePacer pacer(device, 2);
+				Result<nvrhi::CommandListHandle> commandList = device.CreateCommandList();
+				REQUIRE_MESSAGE(commandList.has_value(), commandList.error().ToString());
+				for (uint64_t frame = 0; frame < 2; ++frame)
+				{
+					pacer.BeginFrame();
+					(*commandList)->open();
+					(*commandList)->close();
+					pacer.EndFrame(device.ExecuteCommandList(**commandList));
+					// The first collection, at the end of the first frame, arms the fault.
+					device.RunGarbageCollection();
+				}
+				// Both frames completed, so the third frame's slot query has signaled.
+				device.WaitForIdle();
+				REQUIRE_FALSE(device.IsLost());
+
+				pacer.BeginFrame();
+				REQUIRE(device.IsLost());
+				const std::optional<GpuDeviceLossReport> report = device.GetLossReport();
+				REQUIRE(report.has_value());
+				CHECK(report->Injected);
+				CHECK(report->Context.contains("FramePacer::BeginFrame"));
+				pacer.EndFrame(device.GetLastSubmissionID());
+				device.RunGarbageCollection();
+			}
+
+			const Status recovered = device.Recover(nullptr);
+			REQUIRE_MESSAGE(recovered.has_value(), recovered.error().ToString());
+			CHECK(device.GetRecoveryCount() == 1);
+		}
+
+		TEST_CASE("FramePacer: without a reset wait an injected hang reset ends the wait with GpuHang" * doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.4, decision 41): a reset wait of 0 (--gpu-reset-wait 0) waits for no reset, so a hang is fatal when its
+			// budget is spent, as before M18: the reset that hang-reset injects in the reset wait's first slice never comes. The
+			// fatal error says the reset wait is off rather than naming one that never ran.
+			const Result<Test::DeathTestResult> child =
+				Test::RunDeathTest("Graphics/FramePacerHangResetWithoutResetWait", std::chrono::seconds(60));
+			REQUIRE_MESSAGE(child.has_value(), child.error().ToString());
+			INFO("child stderr: ", child->StandardError);
+			if (child->StandardError.contains("No GPU in the frame-pacer child"))
+			{
+				Test::ReportGpuUnavailable("no GPU device in the child process");
+				return;
+			}
+			CHECK(child->ExitCode == ExitCode::Crash);
+			CHECK(child->StandardError.contains("Fatal error (GpuHang)"));
+			CHECK(child->StandardError.contains("--gpu-reset-wait 0"));
+			CHECK_FALSE(child->StandardError.contains("ms reset wait"));
+			CHECK_FALSE(child->StandardError.contains("The wait returned"));
+		}
+
 		TEST_CASE("FramePacer: the hang fault ends the first wait for a frame slot with GpuHang" * doctest::test_suite(Test::GpuSuite))
 		{
-			// §8.14 item 8: under --gpu-inject-fault=hang every wait slice times out, so the third frame (the first whose slot
-			// has a submission, with two frames in flight) spends the whole budget and ends the process, however fast the GPU
-			// finished the first frame.
+			// §8.14 item 8: under --gpu-inject-fault=hang every wait slice times out, the 10 s budget's and, from M18 (C18.4,
+			// Docs/Decisions/0029-m18-contract.md decision 40), the reset wait's, since no loss report arrives, so the third
+			// frame (the first whose slot has a submission, with two frames in flight) spends both waits and ends the process,
+			// however fast the GPU finished the first frame. The injected slices do not wait, so neither costs wall time.
 			const Result<Test::DeathTestResult> child = Test::RunDeathTest("Graphics/FramePacerInjectedHang", std::chrono::seconds(60));
 			REQUIRE_MESSAGE(child.has_value(), child.error().ToString());
 			INFO("child stderr: ", child->StandardError);

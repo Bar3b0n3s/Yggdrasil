@@ -19,8 +19,10 @@
 #include "Support/TestOptions.h"
 #include "Support/TrimCounter.h"
 #include "Support/Utf8Path.h"
+#include "Support/WaitUntil.h"
 #include "Support/WindowedChild.h"
 
+#include <glm/glm.hpp>
 #include <imgui.h>
 #include <vulkan/vulkan.hpp>
 
@@ -443,6 +445,84 @@ namespace Engine {
 			Scope<Test::TrimCounter> m_TrimCounter;
 		};
 
+		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decisions 42 and 44): a windowed application on a swapchain whose
+		// recreations may run out of memory (oom-swapchain, oom-swapchain-persistent). It resizes its window in the updates
+		// of frames 3 and 6, each waited for until the framebuffer reports a new size (recorded in Sizes), minimizes it in
+		// the update of frame 9 and restores it in the update of frame 12, so frames 9 to 11 render minimized; it records
+		// the index and size of every frame it renders, and the device's trims (Test::TrimCounter).
+		class SwapchainOutOfMemoryApplication final : public Application
+		{
+		public:
+			explicit SwapchainOutOfMemoryApplication(ApplicationSpecification specification)
+				: Application(std::move(specification))
+			{
+			}
+		public:
+			struct Frame
+			{
+				uint64_t Index = 0;
+				uint32_t Width = 0;
+				uint32_t Height = 0;
+			};
+			std::vector<Frame> Rendered;
+			// The framebuffer sizes after the startup and after each resize.
+			std::vector<glm::uvec2> Sizes;
+			uint32_t Trims = 0;
+			bool WindowChangesArrived = true;
+		protected:
+			Status OnInitialize() override
+			{
+				m_TrimCounter = CreateScope<Test::TrimCounter>(GetContext().GetGraphicsDevice()->GetRecreation());
+				const Window& window = *GetContext().GetWindow();
+				Sizes.emplace_back(window.GetFramebufferWidth(), window.GetFramebufferHeight());
+				return {};
+			}
+
+			void OnShutdown() override
+			{
+				if (m_TrimCounter)
+					Trims = m_TrimCounter->GetTrims();
+				m_TrimCounter.reset();
+			}
+
+			void OnUpdate(const FrameTime& frame) override
+			{
+				Window& window = *GetContext().GetWindow();
+				if (frame.FrameIndex == 3 || frame.FrameIndex == 6)
+				{
+					const glm::uvec2 before(window.GetFramebufferWidth(), window.GetFramebufferHeight());
+					if (frame.FrameIndex == 3)
+						window.SetSize(480, 300);
+					else
+						window.SetSize(400, 260);
+					// Resizing is asynchronous on X11 and macOS: wait for the new framebuffer size, so the frame sees it.
+					WindowChangesArrived = Test::WaitUntil([&window, before]()
+					{
+						window.WaitEventsTimeout(0.025);
+						return glm::uvec2(window.GetFramebufferWidth(), window.GetFramebufferHeight()) != before;
+					}) && WindowChangesArrived;
+					Sizes.emplace_back(window.GetFramebufferWidth(), window.GetFramebufferHeight());
+				}
+				if (frame.FrameIndex == 9)
+				{
+					window.Minimize();
+					WindowChangesArrived = Test::WaitUntilMinimized(window, true) && WindowChangesArrived;
+				}
+				if (frame.FrameIndex == 12)
+				{
+					window.Restore();
+					WindowChangesArrived = Test::WaitUntilMinimized(window, false) && WindowChangesArrived;
+				}
+			}
+
+			void OnRender(RenderContext& context) override
+			{
+				Rendered.push_back({ .Index = context.FrameIndex, .Width = context.Width, .Height = context.Height });
+			}
+		private:
+			Scope<Test::TrimCounter> m_TrimCounter;
+		};
+
 	}
 
 	// A headless application, which the headless Tests process can run in place.
@@ -741,7 +821,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("Application: a headless frame resize out of memory is retried after a trim, or skips its frames until the next size"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.4, Docs/Decisions/0029-m18-contract.md decisions 42, 44 and 46): under oom-rendertarget the resized
 			// frame target fails once, is created again after the trim and the frames render at the new size; under
@@ -1049,6 +1129,84 @@ namespace Engine {
 			// creation across the recreated VkInstance, and Recover(window).
 			std::vector<std::string> arguments = {
 				"--windowed-child=Application: a windowed run loses its device and presents again after the recovery",
+			};
+			const std::vector<std::string> gpuArguments = Test::GetGpuTestsChildArguments();
+			arguments.insert(arguments.end(), gpuArguments.begin(), gpuArguments.end());
+			const Result<ProcessResult> child = Process::Run(Test::MakeTestsChildSpecification(std::move(arguments)), std::chrono::seconds(60));
+			REQUIRE_MESSAGE(child.has_value(), child.error().ToString());
+			INFO("child stdout: ", child->StandardOutput);
+			INFO("child stderr: ", child->StandardError);
+			CHECK(child->ExitCode == 0);
+		}
+
+		// Runs only in a windowed child process (Support/WindowedChild.h), M18 (C18.4, Docs/Decisions/0029-m18-contract.md
+		// decisions 42 and 44): the windowed frame's swapchain recreation at a resize runs out of memory. Under oom-swapchain it
+		// is retried after one trim and the frames present at each new size; under oom-swapchain-persistent the frame is
+		// skipped with a warning, no later frame renders (the failed recreation retired the old swapchain) or tries the failed
+		// size again, each new size is tried once (one trim each), and a minimize forgets the failed size, so restoring the
+		// window to it tries again. Both runs end with exit code 0 and no GPU message (ExpectNoGpuErrors).
+		TEST_CASE("Application: a windowed run whose swapchain recreation runs out of memory skips that size until it changes"
+			* doctest::test_suite(Test::ChildTargetSuite) * doctest::skip(true))
+		{
+			if (!Test::ProbeGpuForProcess())
+				return;
+			for (const GpuFault fault : { GpuFault::OomSwapchain, GpuFault::OomSwapchainPersistent })
+			{
+				CAPTURE(GpuFaultToString(fault));
+				ApplicationSpecification specification;
+				specification.Name = "ApplicationTests";
+				specification.Window = WindowMode::Windowed;
+				specification.WindowSettings = { .Title = "Application test", .Width = 320, .Height = 240 };
+				specification.Clock = ClockKind::Manual;
+				specification.MaxFrames = 16;
+				specification.WorkerCount = 0;
+				specification.EnableImGui = true;
+				// No test touches the machine's audio device (§15.1 T1).
+				specification.Audio = AudioEngineSpecification{};
+				UseTestRenderer(specification);
+				specification.Graphics.InjectFault = fault;
+				SwapchainOutOfMemoryApplication application(std::move(specification));
+				CHECK(application.Run() == ExitCode::Success);
+				CHECK(application.WindowChangesArrived);
+				REQUIRE(application.Sizes.size() == 3);
+				CHECK(application.Sizes[1] != application.Sizes[0]);
+				CHECK(application.Sizes[2] != application.Sizes[1]);
+				// The frames rendered in [first, end) at `size`.
+				const auto renderedAt = [&application](const glm::uvec2& size, uint64_t first, uint64_t end)
+				{
+					return std::ranges::count_if(application.Rendered, [&size, first, end](const SwapchainOutOfMemoryApplication::Frame& frame)
+					{
+						return frame.Index >= first && frame.Index < end && frame.Width == size.x && frame.Height == size.y;
+					});
+				};
+				CHECK(renderedAt(application.Sizes[0], 0, 3) == 3);
+				if (fault == GpuFault::OomSwapchain)
+				{
+					// The first recreation after the arming fails once and is retried after the trim; the later ones succeed.
+					CHECK(application.Trims == 1);
+					CHECK(renderedAt(application.Sizes[1], 3, 6) > 0);
+					CHECK(renderedAt(application.Sizes[2], 6, 9) > 0);
+					CHECK(renderedAt(application.Sizes[2], 12, 16) > 0);
+				}
+				else
+				{
+					// Frame 3's size, frame 6's and the restore to frame 6's size after the minimize: one trim each.
+					CHECK(application.Trims == 3);
+					CHECK(std::ranges::count_if(application.Rendered, [](const SwapchainOutOfMemoryApplication::Frame& frame)
+					{
+						return frame.Index >= 3;
+					}) == 0);
+				}
+			}
+		}
+
+		TEST_CASE("Application: a windowed swapchain recreation out of memory is retried after a trim, or its size is skipped until it changes"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 acceptance (C18.4): the windowed half of "a persistent one fails only its request", through the Application's
+			// frame (Application.h step 2c), which the headless cases and the Swapchain children cannot reach.
+			std::vector<std::string> arguments = {
+				"--windowed-child=Application: a windowed run whose swapchain recreation runs out of memory skips that size until it changes",
 			};
 			const std::vector<std::string> gpuArguments = Test::GetGpuTestsChildArguments();
 			arguments.insert(arguments.end(), gpuArguments.begin(), gpuArguments.end());

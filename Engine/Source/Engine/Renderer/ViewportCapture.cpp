@@ -3,11 +3,13 @@
 
 #include "Engine/Core/Assert.h"
 #include "Engine/Graphics/CommandListRecording.h"
+#include "Engine/Graphics/GpuOutOfMemory.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Readback.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/SceneRenderer.h"
 
+#include <format>
 #include <limits>
 #include <utility>
 
@@ -21,6 +23,28 @@ namespace Engine {
 		{
 			return device.CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false));
 		}
+
+		// Sets ViewportCapture's capturing flag for its lifetime, so the flag drops however a capture ends (a vk::SystemError
+		// thrown out of NVRHI unwinds through it too).
+		class CapturingScope
+		{
+		public:
+			explicit CapturingScope(bool& capturing)
+				: m_Capturing(&capturing)
+			{
+				*m_Capturing = true;
+			}
+
+			~CapturingScope()
+			{
+				*m_Capturing = false;
+			}
+
+			CapturingScope(const CapturingScope&) = delete;
+			CapturingScope& operator=(const CapturingScope&) = delete;
+		private:
+			bool* m_Capturing = nullptr; // the capture's m_IsCapturing, which outlives the scope
+		};
 
 	}
 
@@ -79,7 +103,11 @@ namespace Engine {
 
 	void ViewportCapture::TrimUnused()
 	{
-		ENGINE_CONTRACT_STUB();
+		// Inside a capture, its own requests' trims leave the targets to it (the class comment); between captures nothing
+		// displays the last capture's image, so its targets go, and its renderer's own hook then trims the pool.
+		if (m_IsCapturing)
+			return;
+		m_SceneRenderer->ReleaseTargets();
 	}
 
 	Result<Image> ViewportCapture::Capture(const ViewportScreenshotRequest& request, const RenderSnapshot& snapshot)
@@ -94,24 +122,42 @@ namespace Engine {
 				MaxViewportScreenshotDimension, MaxViewportScreenshotDimension, request.Width, request.Height);
 		}
 
-		ENGINE_TRY(m_SceneRenderer->Resize(request.Width, request.Height));
-		ENGINE_CORE_VERIFY(m_FrameIndex < std::numeric_limits<uint64_t>::max(), "capture frame identity exhausted");
-		RenderSnapshot captured = snapshot;
-		captured.FrameIndex = ++m_FrameIndex;
-		// The list is executed whatever Render reports (an error names a skipped draw; the rest rendered).
-		CommandListRecording recording(*m_Device, *m_CommandList);
-		const Status rendered = m_SceneRenderer->Render(*m_CommandList, captured);
-		const uint64_t submission = recording.Execute();
-		m_SceneRenderer->OnSubmitted(captured.FrameIndex, submission);
-		ENGINE_TRY(rendered);
-
-		// The view-resolution image: the upscaled scene image in its letterbox when the snapshot's output stage scales it.
-		ENGINE_TRY_ASSIGN(Image image, m_Readback->ReadTexture(*m_SceneRenderer->GetFinalTexture()));
-		if (request.MaxDimension > 0)
+		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decisions 42 to 45): the capture is one request. Its attempt is
+		// submitted (and its read-back waited for) before it returns, so the trim of its retry runs between recordings; the
+		// renderer's own requests (Resize, a debug view's first pipelines) trim and retry inside it, and an OutOfMemory they
+		// return is not trimmed for again. A failed capture keeps GetLastOutputMapping.
+		const Utils::CapturingScope capturing(m_IsCapturing);
+		Image image;
+		const Status captured = RetryAfterTrim(*m_Device, std::format("a {}x{} viewport capture", request.Width, request.Height),
+			[this, &request, &snapshot, &image]() -> Status
 		{
-			ENGINE_TRY_ASSIGN(image, DownscaleImage(image, request.MaxDimension));
-		}
-		m_LastOutputMapping = m_SceneRenderer->GetOutputMapping();
+			// A capture at another size first releases the previous size's targets, so it does not hold them while it creates
+			// the new ones (decision 43).
+			if (m_SceneRenderer->GetWidth() != request.Width || m_SceneRenderer->GetHeight() != request.Height)
+				m_SceneRenderer->ReleaseTargets();
+			ENGINE_TRY(m_SceneRenderer->Resize(request.Width, request.Height));
+			ENGINE_CORE_VERIFY(m_FrameIndex < std::numeric_limits<uint64_t>::max(), "capture frame identity exhausted");
+			RenderSnapshot captured = snapshot;
+			captured.FrameIndex = ++m_FrameIndex;
+			// The list is executed whatever Render reports (an error names a skipped draw; the rest rendered).
+			CommandListRecording recording(*m_Device, *m_CommandList);
+			const Status rendered = m_SceneRenderer->Render(*m_CommandList, captured);
+			const uint64_t submission = recording.Execute();
+			m_SceneRenderer->OnSubmitted(captured.FrameIndex, submission);
+			// A debug view that stayed on another mode is OutOfMemory: never an image of another debug view (decision 44).
+			ENGINE_TRY(rendered);
+
+			// The view-resolution image: the upscaled scene image in its letterbox when the snapshot's output stage scales it.
+			ENGINE_TRY_ASSIGN(Image read, m_Readback->ReadTexture(*m_SceneRenderer->GetFinalTexture()));
+			if (request.MaxDimension > 0)
+			{
+				ENGINE_TRY_ASSIGN(read, DownscaleImage(read, request.MaxDimension));
+			}
+			m_LastOutputMapping = m_SceneRenderer->GetOutputMapping();
+			image = std::move(read);
+			return {};
+		});
+		ENGINE_TRY(captured);
 		return image;
 	}
 

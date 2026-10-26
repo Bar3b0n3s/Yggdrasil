@@ -4,6 +4,7 @@
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/FatalError.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Graphics/FramePacer.h"
 #include "Engine/Graphics/GpuProfiler.h"
 #include "Engine/Graphics/HostImageUpload.h"
 #include "Engine/Graphics/VulkanDispatch.h"
@@ -556,6 +557,13 @@ namespace Engine {
 		Scope<GraphicsDevice> device = CreateScope<GraphicsDevice>(ConstructionKey(), graphics);
 		VulkanDispatch::RegisterDevice();
 		device->m_IsRegistered = true;
+		// The startup arming of the injected faults (decision 46), before the device's first creation, so they strike an
+		// application's startup, whose failures stay fatal. Recover runs Create's steps without this: it never arms again.
+		if constexpr (GpuTestHooksEnabled)
+		{
+			if (ReadEnvironmentVariable(GpuFaultAtStartupVariable) == "1")
+				device->m_Diagnostics.ArmInjectedFault();
+		}
 		ENGINE_TRY(device->CreateInstance(specification));
 		ENGINE_TRY(device->CreateLogicalDevice(specification));
 		ENGINE_TRY(device->CreateNvrhiDevice());
@@ -967,6 +975,12 @@ namespace Engine {
 			return MakeError(ErrorCode::Gpu, "cannot create texture {}: out of device memory (injected by --gpu-inject-fault={})",
 				Utils::DescribeTexture(desc), GpuFaultToString(GpuFault::OomTexture));
 		}
+		// A render-target or storage texture takes C18.4's injected fault, which strikes once armed (decision 46).
+		if ((desc.isRenderTarget || desc.isUAV) && m_Diagnostics.TakeRenderTargetCreationFault())
+		{
+			return MakeError(ErrorCode::Gpu, "cannot create texture {}: out of device memory (injected by --gpu-inject-fault={})",
+				Utils::DescribeTexture(desc), GpuFaultToString(m_Diagnostics.GetInjectedFault()));
+		}
 		nvrhi::TextureHandle texture = m_NvrhiDevice->createTexture(desc);
 		if (!texture)
 			return MakeError(ErrorCode::Gpu, "cannot create texture {}", Utils::DescribeTexture(desc));
@@ -1110,6 +1124,11 @@ namespace Engine {
 	{
 		if (IsLost())
 			return std::unexpected(Utils::MakeLostDeviceError("graphics pipeline", Utils::GetShaderName(desc.VS.Get())));
+		if (m_Diagnostics.TakePipelineCreationFault())
+		{
+			return MakeError(ErrorCode::Gpu, "cannot create the graphics pipeline of shaders '{}' and '{}': out of device memory (injected by --gpu-inject-fault={})",
+				Utils::GetShaderName(desc.VS.Get()), Utils::GetShaderName(desc.PS.Get()), GpuFaultToString(m_Diagnostics.GetInjectedFault()));
+		}
 		nvrhi::GraphicsPipelineHandle pipeline = m_NvrhiDevice->createGraphicsPipeline(desc, framebufferInfo);
 		if (!pipeline)
 		{
@@ -1124,6 +1143,11 @@ namespace Engine {
 	{
 		if (IsLost())
 			return std::unexpected(Utils::MakeLostDeviceError("compute pipeline", Utils::GetShaderName(desc.CS.Get())));
+		if (m_Diagnostics.TakePipelineCreationFault())
+		{
+			return MakeError(ErrorCode::Gpu, "cannot create the compute pipeline of shader '{}': out of device memory (injected by --gpu-inject-fault={})",
+				Utils::GetShaderName(desc.CS.Get()), GpuFaultToString(m_Diagnostics.GetInjectedFault()));
+		}
 		nvrhi::ComputePipelineHandle pipeline = m_NvrhiDevice->createComputePipeline(desc);
 		if (!pipeline)
 			return MakeError(ErrorCode::Gpu, "cannot create the compute pipeline of shader '{}'", Utils::GetShaderName(desc.CS.Get()));
@@ -1554,7 +1578,24 @@ namespace Engine {
 
 	void GraphicsDevice::TrimUnused()
 	{
-		ENGINE_CONTRACT_STUB();
+		ENGINE_CORE_ASSERT(!m_Recreation.IsRunning(), "GraphicsDevice::TrimUnused while the owners are released, recreated or trimmed");
+		// A lost device: the recovery releases everything (decision 43).
+		if (IsLost() || m_Recreation.IsRunning())
+			return;
+		// 1. Every submission that may have used what the owners drop completes first, in every configuration: in Dist no
+		// tracker reference delays a destruction, and NVRHI does not reference a texture used only by a clear (ADR 0009
+		// decision 31). A hang here is a hang, and a loss the loss, after which nothing more is done.
+		WaitForSubmission(*this, m_LastSubmissionID, "GraphicsDevice::TrimUnused");
+		if (IsLost())
+			return;
+		// 2. The owners' hooks, last registered first.
+		static_cast<void>(m_Recreation.TrimUnused());
+		// 3. RunGarbageCollection's order without arming an injected fault (OnGarbageCollected is not called): NVRHI retires
+		// the completed submissions, so the sweep sees the references they dropped, and the host images' release the sweep's.
+		m_NvrhiDevice->runGarbageCollection();
+		m_ResourceTracker.Sweep();
+		if (m_HostImageUpload != nullptr)
+			m_HostImageUpload->CollectGarbage();
 	}
 
 }
