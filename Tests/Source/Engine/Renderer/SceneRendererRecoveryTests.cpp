@@ -117,8 +117,13 @@ namespace Engine {
 		// command list of its own, as an application's frame does. In frame 0 the queue's timeline reports the device lost from
 		// the moment the GpuResourceCache loads the quad's mesh, inside the Prepare stage's "Prepare" pass and after Render's
 		// own timeline query: the mesh's first upload write throws vk::DeviceLostError out of NVRHI with that stage and pass
-		// open, which unwinds Render to the frame-boundary catch. The client recovers the device when the loop asks, as
-		// Application does, and records each frame's render result.
+		// open, which unwinds Render to the frame-boundary catch. The mesh's vertices exceed vkCmdUpdateBuffer's 64 KiB, so
+		// NVRHI writes them through its upload manager, whose first write in a list asks the timeline what completed, under
+		// both API caps (a smaller mesh is written inline, and the loss would surface at a later upload that host image copy
+		// skips under API 1.4). The timeline answers again once Render returns or unwinds, before the frame boundary reports
+		// the loss: the Vulkan device is healthy, and a timeline that reports it lost sends the report to query the fault
+		// (GraphicsDevice::DescribeDeviceFault), which validation refuses on a device that Vulkan never lost. The client
+		// recovers the device when the loop asks, as Application does, and records each frame's render result.
 		class StageLosingClient final : public IFrameLoopClient
 		{
 		public:
@@ -158,16 +163,13 @@ namespace Engine {
 				m_LoseAtMeshLoad = frame.FrameIndex == 0;
 				m_Snapshot.FrameIndex = frame.FrameIndex + 1;
 				CommandListRecording recording(device, **list);
-				const Status rendered = m_Renderer->Render(**list, m_Snapshot);
+				const Status rendered = RenderUntilReturned(**list);
 				m_Renderer->OnSubmitted(m_Snapshot.FrameIndex, recording.Execute());
-				m_Lost.reset();
 				Rendered.push_back(rendered.has_value() ? std::format("frame {} rendered", frame.FrameIndex) : rendered.error().ToString());
 			}
 
 			void OnFrameDeviceLost() override
 			{
-				// The timeline answers again before the recovery waits for the device.
-				m_Lost.reset();
 				++Recoveries;
 				Recovery = m_Context->RecoverGraphics();
 			}
@@ -175,6 +177,19 @@ namespace Engine {
 			std::vector<std::string> Rendered{};
 			uint32_t Recoveries = 0;
 			Status Recovery{};
+		private:
+			// The renderer's Render of the snapshot into `list`; the loss's timeline, if the mesh's load started it, ends when
+			// Render returns or unwinds.
+			[[nodiscard]] Status RenderUntilReturned(nvrhi::ICommandList& list)
+			{
+				struct EndLossOnExit
+				{
+					std::optional<TimelineReportsDeviceLost>* Lost = nullptr;
+					~EndLossOnExit() { Lost->reset(); }
+				};
+				const EndLossOnExit endLoss{ .Lost = &m_Lost };
+				return m_Renderer->Render(list, m_Snapshot);
+			}
 		private:
 			EngineContext* m_Context = nullptr; // documented back-references: the test's objects outlive the client
 			InMemoryAssetManager* m_Assets = nullptr;
@@ -459,6 +474,9 @@ namespace Engine {
 					{ .Position = { 1, 1, 0 }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 1, 0 } },
 					{ .Position = { -1, 1, 0 }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 0, 0 } },
 				};
+				// 96 KiB of vertices, past vkCmdUpdateBuffer's 64 KiB, so the mesh's upload goes through NVRHI's upload manager
+				// (StageLosingClient); the copies of the first corner are never indexed.
+				mesh->Vertices.resize(2048, mesh->Vertices.front());
 				mesh->Indices = { 0, 1, 2, 0, 2, 3 };
 				mesh->Bounds = { { -1, -1, 0 }, { 1, 1, 0 } };
 				mesh->Submeshes = { { .IndexCount = 6, .Bounds = mesh->Bounds } };

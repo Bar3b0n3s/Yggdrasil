@@ -1102,7 +1102,9 @@ end)
 		// and the milestone review). A headless editor's default layout keeps the Game panel open but tabbed behind the Scene
 		// view, so the panel asks for no size (an empty rectangle), while the forced view renders at the project's window
 		// size: the layout counts as ready once the forced view rendered that size, so editor.screenshot's fresh UI frame
-		// completes. Before the fix IsLayoutReady compared the image with the panel's 0 x 0 and never became ready.
+		// completes, and not before. Before the fix IsLayoutReady compared the image with the panel's 0 x 0, which matched both
+		// the missing image and the out-of-memory rule's unset failed size, so the view counted as laid out before it rendered
+		// and before it rendered a new game resolution.
 		TEST_CASE("EditorHostViewports: a forced game view whose Game panel is open but not drawn counts as laid out once it rendered"
 			* doctest::test_suite(Test::GpuSuite))
 		{
@@ -1199,7 +1201,11 @@ end)
 			editor.GetScene().CreateEntity("Camera").AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
 			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::SceneViewport, false).has_value());
 			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::GameViewport, false).has_value());
-			REQUIRE(editor.GetViewportState().SetGameResolution(glm::uvec2(160, 96)).has_value());
+			// The game resolution is the size the views' renderers are created with (640 x 360), so the forced view's first
+			// frame resizes nothing and no target of an earlier size waits in its renderer's pool when the live counts are read
+			// before the loss. A frame more before the loss would not help: it creates the objects of a second frame slot (the
+			// GPU profiler's timer queries), which the one frame after the recovery does not.
+			REQUIRE(editor.GetViewportState().SetGameResolution(glm::uvec2(640, 360)).has_value());
 			GraphicsDevice& device = gpu.GetDevice();
 			GpuResourceCache cache(device, editor.GetAssets());
 			auto pipelines = SceneRendererPipelines::Create(device, gpu.GetPipelines());
@@ -1237,7 +1243,7 @@ end)
 				const SceneRenderer* viewRenderer = host.GetRenderer(ViewportView::Game);
 				if (viewRenderer == nullptr || viewRenderer->GetFinalTexture() == nullptr || host.GetImage(ViewportView::Game).Texture == 0)
 					return MakeError(ErrorCode::InvalidState, "the forced game view has no registered image after its frame");
-				if (host.GetImage(ViewportView::Game).Width != 160 || host.GetImage(ViewportView::Game).Height != 96)
+				if (host.GetImage(ViewportView::Game).Width != 640 || host.GetImage(ViewportView::Game).Height != 360)
 					return MakeError(ErrorCode::InvalidState, "the forced game view did not render at the game resolution");
 				Readback readback(device);
 				ENGINE_TRY_ASSIGN(const Image image, readback.ReadTexture(*viewRenderer->GetFinalTexture()));
