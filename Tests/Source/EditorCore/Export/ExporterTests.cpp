@@ -1751,6 +1751,71 @@ namespace Engine {
 			CHECK(full.GameAssetCount == 7);
 		}
 
+		// The phase 1 ledger's importer-dependency rule (Docs/Decisions/0030-m19-contract.md decision 21) on M18's sprite sheet
+		// (Docs/Decisions/0029-m18-contract.md decision 17 and "Merge with main"): a pruned export follows a reached sheet's
+		// Import.Dependencies, so Game.pak keeps the sheet's texture, and a texture that only an unreached sheet names is left
+		// out with that sheet.
+		TEST_CASE("Exporter: Export.PruneUnreferenced keeps a reached sprite sheet's texture")
+		{
+			Test::EditorTestFixture fixture("ExportPrunedSheet");
+			MakeExportableProject(fixture);
+			EditorContext& editor = fixture.GetEditor();
+			const Result<Buffer> png = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Textures/Rgb.png"));
+			REQUIRE_MESSAGE(png.has_value(), png.error().ToString());
+			REQUIRE(FileSystem::CreateDirectories(fixture.GetProjectRoot() / "Assets/Textures").has_value());
+			for (const std::string_view name : { "Used", "Unused" })
+				REQUIRE(FileSystem::WriteFileAtomic(fixture.GetProjectRoot() / std::format("Assets/Textures/{}.png", name), *png, { .KeepBackup = false }).has_value());
+			WriteTestFile(fixture.GetProjectRoot() / "Assets/Scripts/Holder.luau",
+				"local Holder = {Fields = {Sheet = Field.Asset(\"SpriteSheet\")}}\n"
+				"return Script.Define(\"Holder\", Holder)\n");
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			const auto handleOf = [&editor](std::string_view path)
+			{
+				const std::optional<AssetHandle> handle = editor.GetAssets().Resolve(path);
+				REQUIRE_MESSAGE(handle.has_value(), path);
+				return *handle;
+			};
+			for (const std::string_view name : { "Used", "Unused" })
+			{
+				WriteTestFile(fixture.GetProjectRoot() / std::format("Assets/SpriteSheets/{}.spritesheet", name),
+					std::format(R"({{"Format": "SpriteSheet", "Version": 1, "Texture": "{}", "Frames": [{{"Name": "Tile", "Rect": {{"X": 0, "Y": 0, "Width": 1, "Height": 1}}}}]}})",
+						handleOf(std::format("Assets/Textures/{}.png", name)).ToString()));
+			}
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			const Entity cube = editor.GetScene().FindEntityByPath("/Cube");
+			REQUIRE(cube.IsValid());
+			ScriptComponent& holder = cube.AddComponent<ScriptComponent>();
+			holder.Script = TypedAssetHandle<AssetType::Script>(handleOf("Assets/Scripts/Holder.luau"));
+			holder.Fields["Sheet"] = VariantValue(Json(handleOf("Assets/SpriteSheets/Used.spritesheet").ToString()));
+			SaveScene(editor);
+			ApplySettings(editor, R"({"Export":{"PruneUnreferenced":true}})");
+
+			const Test::TempDirectory binaries("ExportBinaries");
+			Result<Scope<Exporter>> exporter = Exporter::Start(editor, MakeSpecification(MakeRealBinaryRoot(binaries)));
+			REQUIRE_MESSAGE(exporter.has_value(), exporter.error().ToString());
+			std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+			REQUIRE(outcome.has_value());
+			REQUIRE_MESSAGE(outcome->has_value(), outcome->error().ToString());
+			const ExportReachability& reach = (*outcome)->Reachability;
+			CHECK(reach.Pruned);
+			std::vector<std::string> packaged;
+			for (const ExportReachedAsset& asset : reach.GameAssets)
+				packaged.push_back(asset.Path);
+			CHECK(packaged
+				== std::vector<std::string>{ "Assets/Scenes/Main.scene", "Assets/Scripts/Holder.luau", "Assets/SpriteSheets/Used.spritesheet", "Assets/Textures/Used.png" });
+			CHECK(reach.PrunedAssets == std::vector<std::string>{ "Assets/SpriteSheets/Unused.spritesheet", "Assets/Textures/Unused.png" });
+			const auto texture = std::ranges::find(reach.GameAssets, std::string_view("Assets/Textures/Used.png"), &ExportReachedAsset::Path);
+			REQUIRE(texture != reach.GameAssets.end());
+			CHECK(texture->Reason == ExportReachReason::Dependency);
+			CHECK(texture->From == "Assets/SpriteSheets/Used.spritesheet");
+			const Result<Ref<const PakReader>> gamePak = PakReader::Open(PackageResources((*outcome)->OutputDirectory, "TestProject") / "Data" / "Game.pak");
+			REQUIRE_MESSAGE(gamePak.has_value(), gamePak.error().ToString());
+			CHECK((*gamePak)->FindByHandle(handleOf("Assets/SpriteSheets/Used.spritesheet")) != nullptr);
+			CHECK((*gamePak)->FindByHandle(handleOf("Assets/Textures/Used.png")) != nullptr);
+			CHECK((*gamePak)->FindByHandle(handleOf("Assets/SpriteSheets/Unused.spritesheet")) == nullptr);
+			CHECK((*gamePak)->FindByHandle(handleOf("Assets/Textures/Unused.png")) == nullptr);
+		}
+
 		// Docs/Decisions/0030-m19-contract.md decision 21 (stream R): a pruned export checks only the references of what it
 		// packages, so a scene no root reaches may name a missing asset, which fails an unpruned export; Export.Exclude still
 		// decides what may ship, so an excluded asset a reference reaches fails a plain pruned export with the glob in the hint;
