@@ -8,8 +8,10 @@ Tools:
     session.info, a launch right after its project.open or project.create, whose result it reports as "session" with
     the open scene; a launch waits for a running gate and a rendering editor holds the machine-wide GPU lock until it
     exits, LockUnavailable naming the holder after the wait: launcher.py),
-    editor_status, editor_shutdown, engine_methods {domain?}, engine_call {method, params} (the escape hatch to every
-    method, such as project.refreshAssets, each bounded by its own timeoutSeconds: Bridge.method_timeout), result_read
+    editor_status (without a connection: "editors", the editors running with automation, each with its pid, project and
+    renderer, for editor_attach {pid}; Launcher.running_editors), editor_shutdown, engine_methods {domain?},
+    engine_call {method, params} (the escape hatch to every method, such as project.refreshAssets, each bounded by its
+    own timeoutSeconds: Bridge.method_timeout), result_read
     {path, pointer?, offset?, length?} (reads a file the editor wrote to an offload folder, the connected project's
     Library/Automation/Out/ or the user-data Automation/Out/, so an agent with only these tools can read an offloaded
     result or a test report: one page of its text, or the JSON value at a pointer; the location is checked as text
@@ -247,7 +249,9 @@ _LOCAL_TOOL_DESCRIPTIONS = {
                      "none); after 30 min it fails with LockUnavailable, naming the holder.",
     "editor_attach": "Attaches to a running editor with automation, by project or process id; reports its session, the "
                      "open scene included.",
-    "editor_status": "Reports the connected editor: process, project, open scene, versions and whether it crashed.",
+    "editor_status": "Reports the connected editor: process, project, open scene, versions and whether it crashed. "
+                     "Without a connection it lists the editors running with automation (pid, project, renderer), "
+                     "which editor_attach {pid} connects to.",
     "editor_shutdown": "Shuts down an editor this bridge launched (an attached editor is only disconnected).",
     "engine_methods": "Lists the editor's automation methods with their flags (all of them, not only the tools).",
     "engine_call": "Calls any automation method by name with raw params (for example project.refreshAssets).",
@@ -269,6 +273,18 @@ def describe_scene(session: dict[str, Any]) -> str:
         return "; no scene is open: scene_open {path} opens one, such as the project's StartScene"
     path = scene.get("path") if isinstance(scene.get("path"), str) and scene.get("path") else "an unsaved scene"
     return f"; scene {path}" + (" (unsaved changes)" if scene.get("dirty") is True else "")
+
+
+def describe_running_editors(editors: list[dict[str, Any]]) -> str:
+    """editor_status's text without a connection (the native test game's friction NT-04): NOT_CONNECTED, then each
+    editor running with automation (Launcher.running_editors) with its pid, project and renderer, and how to attach to
+    one."""
+    if not editors:
+        return f"{NOT_CONNECTED}; no editor with automation is running"
+    described = [f"pid {editor['pid']} ({editor['project'] or 'no project open'}, renderer "
+                 f"{editor['renderer'] or 'unknown'})" for editor in editors]
+    return (f"{NOT_CONNECTED}. Running with automation: {'; '.join(described)}. editor_attach {{pid}} connects to one "
+            f"of them as it is, with its project and renderer")
 
 
 def coerce_arguments(arguments: dict[str, Any], input_schema: dict[str, Any]) -> dict[str, Any]:
@@ -668,7 +684,8 @@ class Bridge:
 
     def editor_status(self, arguments: dict[str, Any]) -> tuple[dict[str, Any], str, bool]:
         if self.connection is None:
-            return {"connected": False}, NOT_CONNECTED, False
+            editors = self.launcher.running_editors()
+            return {"connected": False, "editors": editors}, describe_running_editors(editors), False
         status = self.connection.describe()
         if self.connection.is_alive():
             response = self.connection.call("session.info", {})

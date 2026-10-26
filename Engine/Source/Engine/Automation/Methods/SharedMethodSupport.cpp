@@ -6,6 +6,7 @@
 #include "Engine/Reflection/ComponentInfo.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/ComponentHostOps.h"
+#include "Engine/Scene/Components/UnknownComponentsComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Session/PlaySession.h"
@@ -186,6 +187,29 @@ namespace Engine {
 				}
 			}
 			return components;
+		}
+
+		std::vector<std::string> GetEntityNativeComponents(ConstEntity entity)
+		{
+			std::vector<std::string> names;
+			if (const UnknownComponentsComponent* preserved = entity.TryGetComponent<UnknownComponentsComponent>())
+			{
+				for (const UnknownComponentData& data : preserved->Components)
+				{
+					if (IsNativeComponentName(data.Name))
+						names.push_back(data.Name);
+				}
+			}
+			return names;
+		}
+
+		const VariantValue* FindEntityNativeComponent(ConstEntity entity, std::string_view name)
+		{
+			const UnknownComponentsComponent* preserved = IsNativeComponentName(name) ? entity.TryGetComponent<UnknownComponentsComponent>() : nullptr;
+			if (preserved == nullptr)
+				return nullptr;
+			const auto found = std::ranges::find(preserved->Components, name, &UnknownComponentData::Name);
+			return found == preserved->Components.end() ? nullptr : &found->Data;
 		}
 
 		Result<std::optional<uint64_t>> ParseSequenceCursor(std::string_view cursor)

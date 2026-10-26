@@ -8,6 +8,8 @@
 #include "Engine/Scripting/ScriptReference.h"
 #include "Engine/Scripting/ScriptTestHost.h"
 
+#include <string_view>
+
 namespace Engine {
 
 	class AssetManager;
@@ -27,6 +29,12 @@ namespace Engine {
 			ForwardedError = 8,
 			ComponentBegin = 16
 		};
+
+		// The hint of a script's lookup of a game's native component ("Native.<Name>", IsNativeComponentName), which has no
+		// script proxy (Docs/Decisions/0030-m19-contract.md decision 26; the native test game's friction NT-05): Entity's
+		// component lookups (ScriptProxy::GetComponent) and Scene.FindAllWithComponent give it instead of built-in names.
+		inline constexpr std::string_view NativeComponentScriptHint = "a script or test suite checks the built-in components a native system writes; automation "
+																	  "reads native components with native.getComponents";
 
 		// Registers every built-in binding without freezing, so fixtures can append probes. The public entry freezes.
 		[[nodiscard]] Status RegisterBuiltinBindings(ScriptApiRegistry& api, const TypeRegistry& types);

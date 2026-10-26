@@ -2949,7 +2949,7 @@
 					},
 					"components": {
 						"type": "object",
-						"description": "Component values by registry name, each an object of field values (missing fields keep their values); an Entity value takes 16 hex digits, a unique id prefix of at least 6 or a path such as \"/Game/ScoreText\", resolved in the target scene; see component.schema.",
+						"description": "Component values by registry name, each an object of field values (missing fields keep their values); an Entity value takes 16 hex digits, a unique id prefix of at least 6 or a path such as \"/Game/ScoreText\", resolved in the target scene; see component.schema. Native components (Native.<Name>) are written with native.setComponents.",
 						"properties": {
 							"Transform": {
 								"$ref": "#/$defs/Transform"
@@ -4502,7 +4502,7 @@
 						"type": "string"
 					},
 					"components": {
-						"description": "An array of component names, or \"all\" (the default)."
+						"description": "An array of component names (Native.<Name> for a native component, as the scene holds it), or \"all\" (the default: native components included)."
 					},
 					"children": {
 						"description": "Also list the children.",
@@ -4579,7 +4579,7 @@
 								}
 							},
 							"components": {
-								"description": "The selected components' JSON, by registry name.",
+								"description": "The selected components' JSON, by registry name; native ones (Native.<Name>) as the scene holds them.",
 								"type": "object",
 								"additionalProperties": {}
 							},
@@ -4777,7 +4777,7 @@
 					},
 					"components": {
 						"type": "object",
-						"description": "Component values by registry name, merged into the existing components; missing components are added. An Entity value takes 16 hex digits, a unique id prefix of at least 6 or a path such as \"/Game/ScoreText\", resolved in the target scene.",
+						"description": "Component values by registry name, merged into the existing components; missing components are added. An Entity value takes 16 hex digits, a unique id prefix of at least 6 or a path such as \"/Game/ScoreText\", resolved in the target scene. Native components (Native.<Name>) are written with native.setComponents.",
 						"properties": {
 							"Transform": {
 								"$ref": "#/$defs/Transform"
@@ -4843,7 +4843,7 @@
 						"additionalProperties": false
 					},
 					"removeComponents": {
-						"description": "Components to remove (before the components are written).",
+						"description": "Components to remove (before the components are written); native.setComponents removes a native one (null).",
 						"type": "array",
 						"items": {
 							"type": "string"
@@ -6124,7 +6124,7 @@
 								}
 							},
 							"components": {
-								"description": "The selected components' JSON, by registry name.",
+								"description": "The selected components' JSON, by registry name; native ones (Native.<Name>) as the scene holds them.",
 								"type": "object",
 								"additionalProperties": {}
 							},
@@ -7190,7 +7190,7 @@
 						"type": "string"
 					},
 					"diagnostics": {
-						"description": "The lint's, compiler's and linker's findings, in the order found.",
+						"description": "The lint's, the format check's, the compiler's and the linker's findings, in the order found.",
 						"type": "array",
 						"items": {
 							"$ref": "#/$defs/NativeBuildDiagnostic"
@@ -7216,7 +7216,7 @@
 				"additionalProperties": false,
 				"$defs": {
 					"NativeBuildDiagnostic": {
-						"description": "One finding of a native build: the lint, the compiler or the linker.",
+						"description": "One finding of a native build: the lint, the format check, the compiler or the linker.",
 						"type": "object",
 						"properties": {
 							"severity": {
@@ -7224,7 +7224,7 @@
 								"enum": ["Warning", "Error"]
 							},
 							"code": {
-								"description": "NATIVE_LINT_ERROR, NATIVE_COMPILE_ERROR, NATIVE_COMPILE_WARNING (an error, since warnings are errors), NATIVE_LINK_ERROR or NATIVE_BUILD_ERROR.",
+								"description": "NATIVE_LINT_ERROR, NATIVE_FORMAT_WARNING (a warning that fails nothing: a source that is not clang-format clean, located at its first differing line, which the repository's format check refuses; rewrite it formatted with native.write; or, at line 0, a format check that could not run: no clang-format 22 found, without a file, or a source it could not check), NATIVE_COMPILE_ERROR, NATIVE_COMPILE_WARNING (an error, since warnings are errors), NATIVE_LINK_ERROR or NATIVE_BUILD_ERROR.",
 								"type": "string"
 							},
 							"file": {
@@ -7848,7 +7848,7 @@
 				"additionalProperties": false,
 				"$defs": {
 					"NativeBuildDiagnostic": {
-						"description": "One finding of a native build: the lint, the compiler or the linker.",
+						"description": "One finding of a native build: the lint, the format check, the compiler or the linker.",
 						"type": "object",
 						"properties": {
 							"severity": {
@@ -7856,7 +7856,7 @@
 								"enum": ["Warning", "Error"]
 							},
 							"code": {
-								"description": "NATIVE_LINT_ERROR, NATIVE_COMPILE_ERROR, NATIVE_COMPILE_WARNING (an error, since warnings are errors), NATIVE_LINK_ERROR or NATIVE_BUILD_ERROR.",
+								"description": "NATIVE_LINT_ERROR, NATIVE_FORMAT_WARNING (a warning that fails nothing: a source that is not clang-format clean, located at its first differing line, which the repository's format check refuses; rewrite it formatted with native.write; or, at line 0, a format check that could not run: no clang-format 22 found, without a file, or a source it could not check), NATIVE_COMPILE_ERROR, NATIVE_COMPILE_WARNING (an error, since warnings are errors), NATIVE_LINK_ERROR or NATIVE_BUILD_ERROR.",
 								"type": "string"
 							},
 							"file": {
@@ -11616,6 +11616,10 @@
 								"description": "The run's JSON report, inside the exported game's folder; empty when it did not run.",
 								"type": "string"
 							},
+							"counts": {
+								"description": "The report's rows by status, so the outcome reads without the report; zero when it did not run.",
+								"$ref": "#/$defs/ExportFeatureTestCounts"
+							},
 							"replays": {
 								"description": "Every replay's observed final state hash, sorted by path.",
 								"type": "array",
@@ -11668,6 +11672,55 @@
 								"items": {
 									"$ref": "#/$defs/ExportComputedLoad"
 								}
+							}
+						},
+						"additionalProperties": false
+					},
+					"ExportFeatureTestCounts": {
+						"description": "The rows of an exported game's --feature-test report by status, as the report counts them.",
+						"type": "object",
+						"properties": {
+							"total": {
+								"description": "Every row.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"passed": {
+								"description": "Rows with status passed.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"failed": {
+								"description": "Rows with status failed.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"error": {
+								"description": "Rows with status error.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"timeout": {
+								"description": "Rows with status timeout.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"skipped": {
+								"description": "Rows with status skipped.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"quit": {
+								"description": "Rows with status quit.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
 							}
 						},
 						"additionalProperties": false
@@ -13961,7 +14014,7 @@
 						"$ref": "#/$defs/SceneQueryWhere"
 					},
 					"select": {
-						"description": "The components whose JSON each match carries; \"all\" for every one.",
+						"description": "The components whose JSON each match carries (Native.<Name> for a native component, as the scene holds it); \"all\" for every one, native ones included.",
 						"type": "array",
 						"items": {
 							"type": "string"
@@ -14003,7 +14056,7 @@
 								"type": "string"
 							},
 							"component": {
-								"description": "A component the entity has.",
+								"description": "A component the entity has (Native.<Name> for a native component).",
 								"type": "string"
 							},
 							"path": {
@@ -14066,7 +14119,7 @@
 								"type": "string"
 							},
 							"components": {
-								"description": "The selected components' JSON, by registry name.",
+								"description": "The selected components' JSON, by registry name; native ones (Native.<Name>) as the scene holds them.",
 								"type": "object",
 								"additionalProperties": {}
 							}
@@ -14529,7 +14582,7 @@
 								"type": "boolean"
 							},
 							"components": {
-								"description": "The entity's components in registry order.",
+								"description": "The entity's components in registry order, then its native components (Native.<Name>).",
 								"type": "array",
 								"items": {
 									"type": "string"

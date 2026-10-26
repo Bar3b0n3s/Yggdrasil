@@ -167,8 +167,16 @@ namespace Engine {
 	// The VariantSchemaResolver of params members that map component registry names to component values (convention 10):
 	// resolves context.Key through context.Registry->FindComponent to that component's self field (StructInfo::
 	// GetSelfField), so the value is read as the component's JSON with every member optional. Errors: NotFound with "did you
-	// mean" suggestions for an unknown component name; InvalidArgument for an empty key or a missing registry.
+	// mean" suggestions for an unknown component name; MakeNativeComponentWriteError for a native component's name;
+	// InvalidArgument for an empty key or a missing registry.
 	[[nodiscard]] Result<const FieldInfo*> ResolveComponentValue(const ResolveContext& context);
+
+	// The refusal of a game's native component ("Native.<Name>", IsNativeComponentName) where automation writes registry
+	// components: a component value (convention 10, ResolveComponentValue) or entity.update's removeComponents. Native
+	// components live outside the type registry (Docs/Decisions/0030-m19-contract.md decision 27), and entity.get reports
+	// them (the native test game's friction NT-07), so its components map may come back here: InvalidArgument naming
+	// `name`, whose hint names native.setComponents, which writes them, instead of "did you mean" names of built-in ones.
+	[[nodiscard]] Error MakeNativeComponentWriteError(std::string_view name);
 
 	// The registry. Lifecycle: built on the main thread with a TypeRegistry that holds every params and result struct
 	// (registered before that registry froze, EngineContextSpecification::RegisterTypes), filled by Add/AddPending, then

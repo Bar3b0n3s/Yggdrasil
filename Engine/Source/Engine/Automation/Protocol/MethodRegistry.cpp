@@ -6,6 +6,7 @@
 #include "Engine/Reflection/EnumInfo.h"
 #include "Engine/Reflection/FuzzySuggest.h"
 #include "Engine/Reflection/JsonSchema.h"
+#include "Engine/Reflection/NativeComponentName.h"
 #include "Engine/Reflection/StructInfo.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Reflection/ValidationContext.h"
@@ -645,6 +646,8 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidArgument, "resolving a component value needs the type registry");
 		if (context.Key.empty())
 			return MakeError(ErrorCode::InvalidArgument, "a component value needs a component name as its key");
+		if (IsNativeComponentName(context.Key))
+			return std::unexpected(MakeNativeComponentWriteError(context.Key));
 		const ComponentInfo* component = context.Registry->FindComponent(context.Key);
 		if (component == nullptr)
 		{
@@ -655,6 +658,13 @@ namespace Engine {
 					.WithIssue(ErrorIssue{ .JsonPointer = {}, .Message = std::format("unknown component '{}'", context.Key), .Hint = hint, .Suggestions = std::move(suggestions) }));
 		}
 		return &component->GetSelfField();
+	}
+
+	Error MakeNativeComponentWriteError(std::string_view name)
+	{
+		return Error(ErrorCode::InvalidArgument, std::format("'{}' is a native component, which only native.setComponents writes", name))
+			.WithHint("native.setComponents adds, changes (a merge patch of its fields) or removes (null) an entity's native components; "
+					  "native.getComponents reads them");
 	}
 
 	MethodRegistry::MethodRegistry(const TypeRegistry& types)

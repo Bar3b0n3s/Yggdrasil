@@ -67,17 +67,34 @@ namespace Engine {
 			return replays;
 		}
 
+		// The report's "counts" (TestRunCounts, as TestRunResultToJson writes them).
+		static Result<ExportFeatureTestCounts> ReadCounts(const JsonReader& root)
+		{
+			ENGINE_TRY_ASSIGN(const JsonReader counts, root.GetMember("counts"));
+			ExportFeatureTestCounts read;
+			ENGINE_TRY_ASSIGN(read.Total, counts.ReadMember<uint32_t>("total"));
+			ENGINE_TRY_ASSIGN(read.Passed, counts.ReadMember<uint32_t>("passed"));
+			ENGINE_TRY_ASSIGN(read.Failed, counts.ReadMember<uint32_t>("failed"));
+			ENGINE_TRY_ASSIGN(read.Error, counts.ReadMember<uint32_t>("error"));
+			ENGINE_TRY_ASSIGN(read.Timeout, counts.ReadMember<uint32_t>("timeout"));
+			ENGINE_TRY_ASSIGN(read.Skipped, counts.ReadMember<uint32_t>("skipped"));
+			ENGINE_TRY_ASSIGN(read.Quit, counts.ReadMember<uint32_t>("quit"));
+			return read;
+		}
+
 		Result<ExportFeatureTestReport> ReadExportFeatureTestReport(std::string_view text, int exitCode)
 		{
 			ENGINE_TRY_ASSIGN(const Json document, JsonReader::Parse(text));
 			const JsonReader root(document);
 			ENGINE_TRY(root.ExpectType(JsonType::Object));
 			ENGINE_TRY_ASSIGN(const bool passed, root.ReadMember<bool>("passed"));
+			ENGINE_TRY_ASSIGN(const ExportFeatureTestCounts counts, ReadCounts(root));
 			ENGINE_TRY_ASSIGN(ReplayRowMap rows, ReadReplayRows(root));
 			ExportFeatureTestReport report;
 			report.Ran = true;
 			report.ExitCode = exitCode;
 			report.Passed = exitCode == 0 && passed;
+			report.Counts = counts;
 			report.Replays.reserve(rows.size());
 			for (auto& [path, replay] : rows)
 				report.Replays.push_back({ .Path = path, .StateHash = std::move(replay.StateHash), .Passed = replay.HasSuiteRow && replay.Passed });

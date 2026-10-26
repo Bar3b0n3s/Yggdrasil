@@ -63,6 +63,12 @@ RENAMED_SOURCE = SPINNER_SOURCE.replace(
     '.Field("DegreesPerSecond", &Spinner::DegreesPerSecond, "How fast it turns.", { .Unit = "deg/s" })',
     '.Field("Speed", &Spinner::Speed, "How fast it turns.", { .Unit = "deg/s", .RenamedFrom = "DegreesPerSecond" })')
 
+# The module with one line indented a tab too far, so it is not clang-format clean (SPINNER_SOURCE is).
+MISINDENTED_TEXT = "\t\tregistrar.AddSystem("
+MISINDENTED_SOURCE = SPINNER_SOURCE.replace(MISINDENTED_TEXT, "\t" + MISINDENTED_TEXT)
+MISINDENTED_LINE = next(number for number, line in enumerate(SPINNER_SOURCE.splitlines(), 1)
+                        if line.startswith(MISINDENTED_TEXT))
+
 
 class NativeModuleTests(AutomationTestCase):
     def allow_native_code(self) -> None:
@@ -134,6 +140,25 @@ class NativeModuleTests(AutomationTestCase):
         self.assertNotEqual(before, after)
         client.call("play.stop")
 
+    def test_build_reports_a_source_that_is_not_clang_format_clean_as_a_warning(self) -> None:
+        # Decision 35 and the native test game's friction NT-02: the repository's format check fails the gate on a
+        # native source that is not clang-format clean, which a builder working through automation cannot run, so
+        # native.build reports it as a NATIVE_FORMAT_WARNING at its first differing line, in the repository's style
+        # although the test's project lies outside the repository, and the build still succeeds; native.status keeps it
+        # with the build's other findings.
+        self.allow_native_code()
+        client, _ = self.open_editor_with_scene("NativeGame")
+        client.call("native.write", {"path": "Native/Spinners.cpp", "source": MISINDENTED_SOURCE})
+        built = self.build(client)
+
+        def format_warnings(diagnostics: list[dict]) -> list[tuple[str, str, int]]:
+            return [(diagnostic["severity"], diagnostic["file"], diagnostic["line"]) for diagnostic in diagnostics
+                    if diagnostic["code"] == native_build.FORMAT_WARNING]
+
+        expected = [("Warning", "Native/Spinners.cpp", MISINDENTED_LINE)]
+        self.assertEqual(format_warnings(built["diagnostics"]), expected)
+        self.assertEqual(format_warnings(client.call("native.status")["lastBuildDiagnostics"]), expected)
+
     def test_reload_keeps_an_unchanged_scene_and_migrates_a_changed_layout(self) -> None:
         # Decision 31 (the milestone's acceptance): reloading an unchanged module leaves the scene byte-identical, and a
         # reload with a changed layout migrates its native components by field name.
@@ -161,6 +186,45 @@ class NativeModuleTests(AutomationTestCase):
         self.assertTrue(changed["sceneChanged"])
         components = client.call("native.getComponents", {"entity": "/Wheel"})["components"]
         self.assertEqual(components["Native.Spinner"]["Speed"], 30)
+
+    def test_scene_reads_report_native_components_as_the_scene_holds_them(self) -> None:
+        # The native test game's friction NT-07: scene.tree lists an entity's Native.<Name> components after its
+        # built-ins, in the entries and the outline; entity.get ("all", the default) and scene.query's select carry
+        # their JSON as native.getComponents reads it; and a Native.<Name> names one in entity.get's components and in
+        # scene.query's where.component and select, in the edit scene and in play.
+        self.allow_native_code()
+        client, _ = self.open_native_project()
+        self.build(client)
+        client.call("native.load")
+        client.call("entity.create", {"name": "Wheel"})
+        client.call("entity.create", {"name": "Plain"})
+        client.call("native.setComponents",
+                    {"entity": "/Wheel", "components": {"Native.Spinner": {"DegreesPerSecond": 45}}})
+        spinner = client.call("native.getComponents", {"entity": "/Wheel"})["components"]["Native.Spinner"]
+        self.assertEqual(spinner["DegreesPerSecond"], 45)
+
+        entries = client.call("scene.tree", {"format": "Json"})["entities"]
+        self.assertEqual({entry["name"]: entry["components"] for entry in entries},
+                         {"Wheel": ["Transform", "Native.Spinner"], "Plain": ["Transform"]})
+        self.assertRegex(client.call("scene.tree")["text"], r"Wheel  [0-9a-f]{8}  Transform Native\.Spinner  ")
+        wheel = client.call("entity.get", {"entity": "/Wheel"})["entity"]["components"]
+        self.assertEqual(sorted(wheel), ["Native.Spinner", "Transform"])
+        self.assertEqual(wheel["Native.Spinner"], spinner)
+        selected = client.call("entity.get", {"entity": "/Wheel", "components": ["Native.Spinner"]})
+        self.assertEqual(selected["entity"]["components"], {"Native.Spinner": spinner})
+        query = client.call("scene.query", {"where": {"component": "Native.Spinner"}, "select": ["Native.Spinner"]})
+        self.assertEqual([(match["name"], match["components"]) for match in query["entities"]],
+                         [("Wheel", {"Native.Spinner": spinner})])
+        everything = client.call("scene.query", {"where": {"name": "Wheel"}, "select": ["all"]})
+        self.assertEqual(everything["entities"][0]["components"], wheel)
+
+        # In play the reads see the play scene's native data as native.getComponents does.
+        client.call("play.start", {"mode": "Play", "lockstep": True})
+        client.call("play.step", {"ticks": 2})
+        played = client.call("native.getComponents", {"entity": "/Wheel", "target": "Play"})["components"]
+        read = client.call("entity.get", {"entity": "/Wheel", "components": ["Native.Spinner"], "target": "Play"})
+        self.assertEqual(read["entity"]["components"], played)
+        client.call("play.stop")
 
     def test_native_sources_are_written_with_provenance_and_read_back(self) -> None:
         # Decisions 32 and 35: a builder writes the module's sources through automation, so the provenance audit covers

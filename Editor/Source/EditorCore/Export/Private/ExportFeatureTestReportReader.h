@@ -15,10 +15,11 @@ namespace Engine {
 
 		// Step 6a's report from `text`, the run's FeatureTest report (a TestRunResult as TestRunResultToJson writes it,
 		// Testing/TestResults.h), and `exitCode`, the run's: Ran true; Passed when the exit code is 0 and the report's
-		// "passed" is true; every replay, from the "replay:<path>" rows, sorted by path, with its suite row's finalStateHash
-		// and Passed when its suite row and each of its case rows passed. A replay with case rows but no suite row has no hash
-		// and has not passed. ReportPath stays empty: the caller names the report's place. Errors: Parse for text that is not
-		// JSON; Validation, located at the offending value, for a document that is not such a report.
+		// "passed" is true; Counts the report's "counts"; every replay, from the "replay:<path>" rows, sorted by path, with
+		// its suite row's finalStateHash and Passed when its suite row and each of its case rows passed. A replay with case
+		// rows but no suite row has no hash and has not passed. ReportPath stays empty: the caller names the report's place.
+		// Errors: Parse for text that is not JSON; Validation, located at the offending value, for a document that is not
+		// such a report (one without counts included).
 		[[nodiscard]] Result<ExportFeatureTestReport> ReadExportFeatureTestReport(std::string_view text, int exitCode);
 
 	}

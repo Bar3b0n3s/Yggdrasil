@@ -58,6 +58,9 @@ namespace Engine {
 		VariantValue ExitCode{}; // an integer, null when it did not run (as smokeTestExitCode)
 		bool Passed = false;
 		std::string ReportPath{}; // absolute native path; empty when it did not run
+		// The report's rows by status (ExportFeatureTestReport::Counts, registry struct "ExportFeatureTestCounts"); zero when it
+		// did not run.
+		ExportFeatureTestCounts Counts{};
 		std::vector<ExportFeatureTestReplaySummary> Replays{};
 	};
 
@@ -122,8 +125,8 @@ namespace Engine {
 	}
 
 	// Registers ExportConfiguration, ExportPhase, ProjectExportParams, ExportedFileSummary, ExportPhaseTimingSummary,
-	// ExportFeatureTestReplaySummary, ExportFeatureTestSummary, ExportReachReason, ExportReachedAsset, ExportComputedLoad,
-	// ExportReachability and ProjectExportResult.
+	// ExportFeatureTestReplaySummary, ExportFeatureTestCounts, ExportFeatureTestSummary, ExportReachReason, ExportReachedAsset,
+	// ExportComputedLoad, ExportReachability and ProjectExportResult.
 	void RegisterExportMethodTypes(TypeRegistry& registry);
 
 	// Registers project.export: a tool (§13.8 project_export), Mutates (it writes under the project's Build/, which read-only

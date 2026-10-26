@@ -29,6 +29,7 @@ namespace Engine {
 	class Entity;
 	class PlaySession;
 	class Scene;
+	class VariantValue;
 
 	namespace Utils {
 
@@ -80,6 +81,17 @@ namespace Engine {
 		// The components of `entity` that results report (serializable and not entity-level, Hidden ones included because
 		// they are readable), in registry order, which is the order scene files use.
 		[[nodiscard]] std::vector<const ComponentInfo*> GetEntityComponents(ConstEntity entity);
+
+		// The registry names of the native components `entity` holds ("Native.<Name>", IsNativeComponentName;
+		// Docs/Decisions/0030-m19-contract.md decision 27), in the entity's order, which is by name once a module made them
+		// canonical (Native/NativeComponents.h). They live among the entity's preserved components, outside the type
+		// registry, so results list them after GetEntityComponents' (the native test game's friction NT-07). A name is not
+		// checked against a loaded module: native.getComponents reads them through it.
+		[[nodiscard]] std::vector<std::string> GetEntityNativeComponents(ConstEntity entity);
+
+		// The JSON of `entity`'s native component `name` as the scene holds it, borrowed until the entity's components change;
+		// null when the entity has no native component of that name.
+		[[nodiscard]] const VariantValue* FindEntityNativeComponent(ConstEntity entity, std::string_view name);
 
 		// The decimal 64-bit cursor of log.read and events.read: "" is 0 (the oldest held entry), digits are the sequence
 		// number, and "end" is nullopt (read nothing; the caller answers with the next sequence number). Errors:

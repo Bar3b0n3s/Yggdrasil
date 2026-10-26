@@ -146,6 +146,34 @@ return Script.Define("References", References)
 			CHECK(setup.GetEditor().GetScene().GetEntityCount() == 0);
 		}
 
+		// entity.get reports an entity's native components (the native test game's friction NT-07), so a builder may send its
+		// components map back. A "Native.<Name>" there, or in removeComponents, is refused at its member with a hint naming
+		// native.setComponents, which writes native components, never with did-you-mean names of built-in components.
+		TEST_CASE("EntityMethods: a native component in entity.create or entity.update is refused with a hint naming native.setComponents")
+		{
+			Test::AutomationFixture setup("EntityNativeComponent");
+			REQUIRE(setup.Call("entity.create", ParseEntityMethodJson(R"({"name":"Wheel"})")).has_value());
+			const auto checkRefusal = [](Json response, std::string_view pointer)
+			{
+				CAPTURE(response.dump());
+				CHECK(response["error"]["code"] == Json(-32602));
+				Json& issue = response["error"]["data"]["issues"][0];
+				CHECK(issue["pointer"] == Json(pointer));
+				const std::string hint = JsonReader(issue["hint"]).ReadString().value_or(std::string());
+				CHECK(hint.contains("native.setComponents"));
+				CHECK_FALSE(hint.contains("did you mean"));
+				CHECK((!issue.contains("suggestions") || issue["suggestions"].empty()));
+			};
+			checkRefusal(setup.Request("entity.update", ParseEntityMethodJson(R"({"entity":"/Wheel","components":{"Native.Spinner":{"Speed":90}}})")),
+				"/components/Native.Spinner");
+			checkRefusal(setup.Request("entity.create",
+							 ParseEntityMethodJson(R"({"name":"Copy","components":{"Transform":{},"Native.Spinner":{"Speed":90}}})")),
+				"/components/Native.Spinner");
+			checkRefusal(setup.Request("entity.update", ParseEntityMethodJson(R"({"entity":"/Wheel","removeComponents":["Native.Spinner"]})")),
+				"/removeComponents/0");
+			CHECK(setup.GetEditor().GetScene().GetEntityCount() == 1);
+		}
+
 		TEST_CASE("EntityMethods: entity.update changes only what is given and adds missing components")
 		{
 			Test::AutomationFixture setup("EntityUpdate");

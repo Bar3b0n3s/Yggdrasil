@@ -12,8 +12,12 @@ namespace Engine {
 
 	namespace {
 
+		// A report's "counts" member with no row.
+		constexpr std::string_view ZeroCounts = R"("counts":{"total":0,"passed":0,"failed":0,"error":0,"timeout":0,"skipped":0,"quit":0})";
+
 		// A report that passed, with one script suite and no replay.
 		constexpr std::string_view PassingReport = R"({"mode":"Release","passed":true,"cases":[{"suite":"Smoke","case":"passes","status":"passed"}],)"
+												   R"("counts":{"total":1,"passed":1,"failed":0,"error":0,"timeout":0,"skipped":0,"quit":0},)"
 												   R"("suites":[{"suite":"Smoke","finalStateHash":"","passed":true}]})";
 
 	}
@@ -25,6 +29,7 @@ namespace Engine {
 			// Z passes; A's suite row passed but one of its case rows failed; M's suite row failed; Orphan has only a case
 			// row, so no hash. The script suite Smoke is no replay, whatever its rows say.
 			constexpr std::string_view Text = R"({"mode":"Release","passed":false,)"
+											  R"("counts":{"total":5,"passed":2,"failed":2,"error":1,"timeout":0,"skipped":0,"quit":0},)"
 											  R"("suites":[{"suite":"Smoke","finalStateHash":"","passed":false},)"
 											  R"({"suite":"replay:Assets/Z.replay","finalStateHash":"00000000000000aa","passed":true},)"
 											  R"({"suite":"replay:Assets/A.replay","finalStateHash":"00000000000000bb","passed":true},)"
@@ -68,7 +73,7 @@ namespace Engine {
 			CHECK_FALSE(failedExit->Passed);
 
 			const Result<ExportFeatureTestReport> failedReport =
-				Utils::ReadExportFeatureTestReport(R"({"mode":"Release","passed":false,"cases":[],"suites":[]})", 0);
+				Utils::ReadExportFeatureTestReport(R"({"mode":"Release","passed":false,"cases":[],"suites":[],"counts":{"total":0,"passed":0,"failed":0,"error":0,"timeout":0,"skipped":0,"quit":0}})", 0);
 			REQUIRE_MESSAGE(failedReport.has_value(), failedReport.error().ToString());
 			CHECK_FALSE(failedReport->Passed);
 		}
@@ -83,22 +88,54 @@ namespace Engine {
 			REQUIRE_FALSE(notObject.has_value());
 			CHECK(notObject.error().GetCode() == ErrorCode::Validation);
 
-			const Result<ExportFeatureTestReport> noSuites = Utils::ReadExportFeatureTestReport(R"({"passed":true,"cases":[]})", 0);
+			const Result<ExportFeatureTestReport> noSuites = Utils::ReadExportFeatureTestReport(R"({"passed":true,"cases":[],)" + std::string(ZeroCounts) + "}", 0);
 			REQUIRE_FALSE(noSuites.has_value());
 			CHECK(noSuites.error().GetCode() == ErrorCode::Validation);
 			CHECK(noSuites.error().GetLocation().JsonPointer == std::string());
 
 			const Result<ExportFeatureTestReport> numericHash = Utils::ReadExportFeatureTestReport(
-				R"({"passed":true,"cases":[],"suites":[{"suite":"replay:Assets/A.replay","finalStateHash":7,"passed":true}]})", 0);
+				R"({"passed":true,"cases":[],"suites":[{"suite":"replay:Assets/A.replay","finalStateHash":7,"passed":true}],)" + std::string(ZeroCounts) + "}", 0);
 			REQUIRE_FALSE(numericHash.has_value());
 			CHECK(numericHash.error().GetCode() == ErrorCode::Validation);
 			CHECK(numericHash.error().GetLocation().JsonPointer == std::string("/suites/0/finalStateHash"));
 
 			const Result<ExportFeatureTestReport> caseWithoutStatus =
-				Utils::ReadExportFeatureTestReport(R"({"passed":true,"suites":[],"cases":[{"suite":"replay:Assets/A.replay","case":"FinalStateHash"}]})", 0);
+				Utils::ReadExportFeatureTestReport(R"({"passed":true,"suites":[],"cases":[{"suite":"replay:Assets/A.replay","case":"FinalStateHash"}],)" + std::string(ZeroCounts) + "}", 0);
 			REQUIRE_FALSE(caseWithoutStatus.has_value());
 			CHECK(caseWithoutStatus.error().GetCode() == ErrorCode::Validation);
 			CHECK(caseWithoutStatus.error().GetLocation().JsonPointer == std::string("/cases/0"));
+		}
+
+		// The native test game's friction NT-10: project.export {featureTest} reports the report's counts, so a builder sees
+		// how many rows passed without reading the report; a report without them is not a FeatureTest result.
+		TEST_CASE("ExportFeatureTestReportReader: the run's counts are its report's rows by status")
+		{
+			constexpr std::string_view Text = R"({"passed":false,"suites":[],"cases":[],)"
+											  R"("counts":{"total":28,"passed":21,"failed":2,"error":1,"timeout":3,"skipped":0,"quit":1}})";
+			const Result<ExportFeatureTestReport> report = Utils::ReadExportFeatureTestReport(Text, 1);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			CHECK(report->Counts.Total == 28);
+			CHECK(report->Counts.Passed == 21);
+			CHECK(report->Counts.Failed == 2);
+			CHECK(report->Counts.Error == 1);
+			CHECK(report->Counts.Timeout == 3);
+			CHECK(report->Counts.Skipped == 0);
+			CHECK(report->Counts.Quit == 1);
+
+			const Result<ExportFeatureTestReport> passing = Utils::ReadExportFeatureTestReport(PassingReport, 0);
+			REQUIRE_MESSAGE(passing.has_value(), passing.error().ToString());
+			CHECK(passing->Counts.Total == 1);
+			CHECK(passing->Counts.Passed == 1);
+
+			const Result<ExportFeatureTestReport> noCounts = Utils::ReadExportFeatureTestReport(R"({"passed":true,"suites":[],"cases":[]})", 0);
+			REQUIRE_FALSE(noCounts.has_value());
+			CHECK(noCounts.error().GetCode() == ErrorCode::Validation);
+
+			const Result<ExportFeatureTestReport> negative = Utils::ReadExportFeatureTestReport(
+				R"({"passed":true,"suites":[],"cases":[],"counts":{"total":-1,"passed":0,"failed":0,"error":0,"timeout":0,"skipped":0,"quit":0}})", 0);
+			REQUIRE_FALSE(negative.has_value());
+			CHECK(negative.error().GetCode() == ErrorCode::Validation);
+			CHECK(negative.error().GetLocation().JsonPointer == std::string("/counts/total"));
 		}
 	}
 

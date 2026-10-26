@@ -130,26 +130,32 @@ def first_difference(original: bytes, formatted: bytes) -> int:
     return min(len(original_lines), len(formatted_lines))
 
 
-def format_file(clang_format: Path, root: Path, relative: str, write: bool) -> FileResult:
-    """Run clang-format on one file (its output goes to stdout) and compare; in format mode, replace the file."""
-    path = root / relative
-    original = path.read_bytes()
+def formatted_text(clang_format: Path, path: Path, name: str, style_file: Path | None = None) -> bytes:
+    """clang-format's output for the file at `path` (`name` in errors): formatted in the style of the .clang-format
+    found above it, or with `style_file` given, in that file's style (a file outside the repository has none above it,
+    and --fallback-style=none would then leave it as it is). Raises ToolFailure or ToolTimeout."""
+    style = f"--style=file:{style_file.as_posix()}" if style_file is not None else "--style=file"
     try:
         result = subprocess.run(
-            [str(clang_format), "--style=file", "--fallback-style=none", str(path)],
+            [str(clang_format), style, "--fallback-style=none", str(path)],
             capture_output=True,
             timeout=TOOL_TIMEOUT_SECONDS,
             check=False,
         )
     except subprocess.TimeoutExpired as error:
-        raise ToolTimeout(f"clang-format timed out after {TOOL_TIMEOUT_SECONDS:.0f} s on {relative}") from error
+        raise ToolTimeout(f"clang-format timed out after {TOOL_TIMEOUT_SECONDS:.0f} s on {name}") from error
     except OSError as error:
-        raise ToolFailure(f"clang-format failed on {relative}: {error}") from error
+        raise ToolFailure(f"clang-format failed on {name}: {error}") from error
     if result.returncode != 0:
-        raise ToolFailure(
-            f"clang-format failed on {relative}: {result.stderr.decode('utf-8', errors='replace').strip()}"
-        )
-    formatted = result.stdout
+        raise ToolFailure(f"clang-format failed on {name}: {result.stderr.decode('utf-8', errors='replace').strip()}")
+    return result.stdout
+
+
+def format_file(clang_format: Path, root: Path, relative: str, write: bool) -> FileResult:
+    """Run clang-format on one file (its output goes to stdout) and compare; in format mode, replace the file."""
+    path = root / relative
+    original = path.read_bytes()
+    formatted = formatted_text(clang_format, path, relative)
     if formatted == original:
         return FileResult(relative, False, 0)
     if write:

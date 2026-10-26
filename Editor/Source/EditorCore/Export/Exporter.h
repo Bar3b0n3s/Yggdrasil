@@ -121,11 +121,11 @@
 //      smoke test), no argument a request supplies. A testing export keeps its user data inside the package
 //      (bin/TestUserData/<Name>/, GetTestingUserDataRoot); the run works there, so its JSON report
 //      (bin/TestResults/FeatureTest-<Mode>.json below that folder) moves with the package. Step 6a reads it into ExportReport::FeatureTest: whether the run passed, its exit code, the report's path
-//      after the move, and every replay row's path and observed state hash, the hashes a builder compares with the games
-//      suite's Dist half. A Dist export from an editor without a graphics device cannot run it (as for the smoke test): it
-//      is not run, FeatureTest.Ran stays false and a warning says why. A failed run does not fail the export: the report
-//      says so (Passed false, its exit code), so the builder sees which rows failed; a run that cannot start or whose
-//      report cannot be read fails the export, naming why.
+//      after the move, its rows counted by status (the report's counts), and every replay row's path and observed state
+//      hash, the hashes a builder compares with the games suite's Dist half. A Dist export from an editor without a
+//      graphics device cannot run it (as for the smoke test): it is not run, FeatureTest.Ran stays false and a warning
+//      says why. A failed run does not fail the export: the report says so (Passed false, its exit code), so the builder
+//      sees which rows failed; a run that cannot start or whose report cannot be read fails the export, naming why.
 //   7. Move the staging directory into OutputDirectory, replacing an earlier export there; step 1's output directory rule
 //      is checked again first, since the directory may have changed during the cook.
 //   8. Return the report, with the time of every phase entered (ExportReport::PhaseTimings; SmokeTest only when it ran).
@@ -204,6 +204,20 @@ namespace Engine {
 		bool Passed = false;     // every row of that replay passed
 	};
 
+	// The rows of an exported package's --feature-test report by status, as its "counts" member holds them (TestRunCounts,
+	// Testing/TestResults.h; the native test game's friction NT-10): registry struct "ExportFeatureTestCounts", so a builder
+	// sees how many rows passed without reading the report, which lies outside the folders result_read reads.
+	struct ExportFeatureTestCounts
+	{
+		uint32_t Total = 0;
+		uint32_t Passed = 0;
+		uint32_t Failed = 0;
+		uint32_t Error = 0;
+		uint32_t Timeout = 0;
+		uint32_t Skipped = 0;
+		uint32_t Quit = 0;
+	};
+
 	// What step 6a found (ExportReport::FeatureTest).
 	struct ExportFeatureTestReport
 	{
@@ -211,6 +225,7 @@ namespace Engine {
 		int ExitCode = 0;                               // meaningful only when Ran
 		bool Passed = false;                            // exit code 0 and every row passed
 		std::filesystem::path ReportPath{};             // the JSON report, below OutputDirectory after the move
+		ExportFeatureTestCounts Counts{};               // the report's counts; zero when it did not run
 		std::vector<ExportFeatureTestReplay> Replays{}; // sorted by Path
 	};
 

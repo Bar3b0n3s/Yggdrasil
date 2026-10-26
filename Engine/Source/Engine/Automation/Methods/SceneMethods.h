@@ -44,7 +44,8 @@ namespace Engine {
 	// scene.tree {root?, depth?, format?, target?}: the hierarchy below `root` (an EntityRef; empty: every root), at most
 	// `depth` levels deep (0: unlimited). Text (§13.7): a header line "<file name>  rev <n>  [dirty  ]<count> entities", then
 	// one line per entity with box-drawing indentation, its name, the first 8 hex digits of its id, its components (a short
-	// form such as "Camera(Ortho 11)" or "Script(Scripts/Game.luau)" where one exists) and its local translation, and
+	// form such as "Camera(Ortho 11)" or "Script(Scripts/Game.luau)" where one exists, then its native components'
+	// "Native.<Name>" names; the native test game's friction NT-07) and its local translation, and
 	// "… <n> children (depth limit)" where the depth limit cuts a subtree.
 	struct SceneTreeParams
 	{
@@ -60,10 +61,12 @@ namespace Engine {
 		std::string Id{};
 		std::string Name{};
 		std::string Path{};
-		std::string Parent{};                  // the parent's id; empty for a root
-		uint32_t Depth = 0;                    // 0 for a root (or for `root` itself)
-		bool Active = true;                    // the entity's own active flag
-		std::vector<std::string> Components{}; // registry names in registry order, entity-level ones excluded
+		std::string Parent{}; // the parent's id; empty for a root
+		uint32_t Depth = 0;   // 0 for a root (or for `root` itself)
+		bool Active = true;   // the entity's own active flag
+		// Registry names in registry order, entity-level ones excluded, then the native components' ("Native.<Name>") in the
+		// entity's order (Utils::GetEntityNativeComponents).
+		std::vector<std::string> Components{};
 		uint32_t ChildCount = 0;
 		bool ChildrenOmitted = false; // the depth limit cut its children
 	};
@@ -77,7 +80,8 @@ namespace Engine {
 
 	// Registry struct "SceneQueryWhere": every given criterion must hold. name: the entity name, '*' matching any run of
 	// characters and '?' one character (no wildcard: exact, case-sensitive); tag: the entity has the tag; component: the
-	// entity has the component (registry name); path: an entity path whose entity and descendants match.
+	// entity has the component (registry name; a native component's "Native.<Name>" as the scene holds it, unchecked against a
+	// loaded module); path: an entity path whose entity and descendants match.
 	struct SceneQueryWhere
 	{
 		std::string Name{};
@@ -87,7 +91,8 @@ namespace Engine {
 	};
 
 	// scene.query {where, select?, limit?, cursor?, target?}: matching entities in canonical order, paginated. `select` names
-	// components whose JSON each result carries ("all" selects every one).
+	// components whose JSON each result carries ("all" selects every one, native components included; a native component's
+	// "Native.<Name>" selects it as the scene holds it).
 	struct SceneQueryParams
 	{
 		SceneQueryWhere Where{};
@@ -103,7 +108,7 @@ namespace Engine {
 		std::string Id{};
 		std::string Name{};
 		std::string Path{};
-		std::map<std::string, VariantValue> Components{}; // the selected components' canonical JSON, by registry name
+		std::map<std::string, VariantValue> Components{}; // the selected components' JSON, by registry name (EntityDetails')
 	};
 
 	struct SceneQueryResult

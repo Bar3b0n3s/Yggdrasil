@@ -667,7 +667,7 @@
 						"type": "string"
 					},
 					"components": {
-						"description": "An array of component names, or \"all\" (the default)."
+						"description": "An array of component names (Native.<Name> for a native component, as the scene holds it), or \"all\" (the default: native components included)."
 					},
 					"children": {
 						"description": "Also list the children.",
@@ -773,7 +773,7 @@
 						"description": "Field values by registry name; see component_schema."
 					},
 					"removeComponents": {
-						"description": "Components to remove (before the components are written).",
+						"description": "Components to remove (before the components are written); native.setComponents removes a native one (null).",
 						"type": "array",
 						"items": {
 							"type": "string"
@@ -2035,7 +2035,7 @@
 								"type": "string"
 							},
 							"component": {
-								"description": "A component the entity has.",
+								"description": "A component the entity has (Native.<Name> for a native component).",
 								"type": "string"
 							},
 							"path": {
@@ -2046,7 +2046,7 @@
 						"additionalProperties": false
 					},
 					"select": {
-						"description": "The components whose JSON each match carries; \"all\" for every one.",
+						"description": "The components whose JSON each match carries (Native.<Name> for a native component, as the scene holds it); \"all\" for every one, native ones included.",
 						"type": "array",
 						"items": {
 							"type": "string"

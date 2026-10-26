@@ -162,6 +162,11 @@ class ExportTests(AutomationTestCase):
         # Docs/Decisions/0026-m16-contract.md, friction S2-06: neither an exit code nor a SmokeTest timing without one.
         self.assertIsNone(report["smokeTestExitCode"])
         self.assertNotIn("SmokeTest", [timing["phase"] for timing in report["phaseTimings"]])
+        # No feature test ran (Docs/Decisions/0030-m19-contract.md decision 10): its row counts are all zero (the native
+        # test game's friction NT-10).
+        self.assertFalse(report["featureTest"]["ran"])
+        self.assertEqual(report["featureTest"]["counts"], {"total": 0, "passed": 0, "failed": 0, "error": 0,
+                                                           "timeout": 0, "skipped": 0, "quit": 0})
         # Nothing but the output directory is left beside it: the staging directory became the output.
         self.assertEqual([entry.name for entry in output.parent.iterdir()], [TINY_GAME_NAME])
 

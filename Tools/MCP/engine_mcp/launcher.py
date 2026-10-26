@@ -25,6 +25,8 @@ editor_attach {project? | pid?}: attaches explicitly to a live session. The brid
 it attached to; editor_shutdown on an attached editor only disconnects. Every attach, step 1's too, sends a transcribed
 session.info first (Launcher.attach_session; Docs/Decisions/0026-m16-contract.md, friction S2-10), so the transcript
 shows where each attached session begins: its first line names the editor's pid, project and renderer.
+editor_status without a connection lists the editors that editor_attach {pid} can reach (Launcher.running_editors): one
+per live session file, with its pid, project and renderer (the native test game's friction NT-04).
 
 A relative project path names a path below the repository root ("Tests/Projects/Breakout"), whatever the bridge's
 working directory (Launcher.resolve_project; Docs/Decisions/0026-m16-contract.md, friction S1-16 and prediction P09).
@@ -62,6 +64,8 @@ PROJECT_FILE_EXTENSION = ".eproj"
 RENDERERS = ("vulkan", "none")
 # How long editor_launch waits for a running gate or GPU run before it fails naming the holder.
 LOCK_WAIT_SECONDS = 1800.0
+# How long editor_status waits for each running editor's connection and session.info (Launcher.running_editors).
+PROBE_TIMEOUT_SECONDS = 5.0
 LOGGER = logging.getLogger("engine_mcp")
 
 
@@ -213,6 +217,32 @@ class Launcher:
             if session is None:
                 raise LookupError(f"no editor with automation runs as pid {pid} (session files in {sessions})")
         return self.attach_session(session)
+
+    def running_editors(self) -> list[dict[str, Any]]:
+        """The editors with automation running for this user (editor_status without a connection): one entry per live
+        session file, by pid (engine_client.list_sessions, which leaves out the file of a pid that is gone), each
+        {pid, project, headless, renderer}, `project` being the file's projectPath ("" in the launcher state). A session
+        file does not hold the renderer, so each editor is asked for its session.info over a connection of its own,
+        closed at once and never transcribed: it attaches nothing, and session.info writes nothing. An editor that
+        cannot be reached or does not answer within PROBE_TIMEOUT_SECONDS has renderer None and probeError saying
+        why."""
+        editors: list[dict[str, Any]] = []
+        for session in engine_client.list_sessions(self.sessions_directory()):
+            entry: dict[str, Any] = {"pid": session.pid, "project": session.project_path, "headless": session.headless,
+                                     "renderer": None}
+            try:
+                with engine_client.EngineClient.connect(session.port, session.token, client_name=CLIENT_NAME,
+                                                        timeout=PROBE_TIMEOUT_SECONDS) as client:
+                    info = client.call("session.info", {}, timeout=PROBE_TIMEOUT_SECONDS)
+            except (OSError, engine_client.ConnectionClosed, engine_client.EngineError,
+                    engine_client.ProtocolError) as error:
+                entry["probeError"] = f"session.info failed: {error}"
+            else:
+                renderer = info.get("renderer")
+                if isinstance(renderer, str):
+                    entry["renderer"] = renderer
+            editors.append(entry)
+        return editors
 
     def attach_session(self, session: engine_client.SessionInfo) -> EditorConnection:
         """An attach (editor_attach, or editor_launch finding the editor that serves the project): the connection, then

@@ -164,6 +164,12 @@ class TestingExportTests(AutomationTestCase):
         self.assertTrue(run["passed"])
         self.assertTrue(Path(run["reportPath"]).is_relative_to(Path(report["outputDirectory"])), run["reportPath"])
         self.assertEqual(run["replays"], [{"path": replay, "stateHash": recorded["stateHash"], "passed": True}])
+        # The run's rows by status, as its report counts them, so the builder needs no read of the report (the native
+        # test game's friction NT-10): the Smoke suite's case and the replay's rows, all passed.
+        counts = json.loads(Path(run["reportPath"]).read_text(encoding="utf-8"))["counts"]
+        self.assertEqual(run["counts"], counts)
+        self.assertGreater(counts["total"], 1)
+        self.assertEqual(counts["passed"], counts["total"])
         self.assertIn("FeatureTest", [timing["phase"] for timing in report["phaseTimings"]])
         with tempfile.TemporaryDirectory(prefix="FeatureTestHashes-") as working:
             code, stderr = self.run_exported(Path(report["executable"]), Path(working))

@@ -8,7 +8,13 @@ The module is every .cpp and .h file below <root>/Native/ (Lib/native_build.py l
 (Docs/Decisions/0028-backlog-program.md decision 10): elsewhere the script exits 3 naming the platform. A build:
   1. checks the sources with Scripts/Lint.py's native-module rules (lint_native_module, decision 35: the banned APIs,
      the simulation path's included, the include rule, the file rule, no mutable state and naming); each finding is a
-     NATIVE_LINT_ERROR diagnostic, and nothing compiles;
+     NATIVE_LINT_ERROR diagnostic, and nothing compiles; then, whatever the lint found, checks that each source is
+     clang-format clean, as Format.py --check does (decision 35), with the clang-format 22 Format.py finds and the
+     repository's .clang-format named explicitly (a project outside the repository has none above it): each source
+     that is not is a NATIVE_FORMAT_WARNING diagnostic at its first differing line, which names the line clang-format
+     writes there, and a clang-format that is missing or fails is one too. These warnings fail nothing, so a build still
+     succeeds, but Format.py --check fails the gate on such a source, and only native.write can rewrite it
+     (provenance);
   2. takes the machine-wide build lock in a capped slot, as Build.py --jobs N does (Lib/locks.py), at most half the
      logical CPUs as jobs;
   3. for --kind runtime, finds what the Runtime links: the configuration's RuntimeCore and Engine libraries in
@@ -46,12 +52,14 @@ if sys.version_info < (3, 10):
     sys.exit(f"BuildNative.py requires Python 3.10 or newer (this is Python {platform.python_version()})")
 
 import argparse
+import json
 import os
 import time
 from pathlib import Path
 from typing import TextIO
 
 import Build  # the MSBuild runner Build.py builds the workspace with (Scripts/ is this script's directory)
+import Format  # the format check of decision 35
 import Lint  # decision 35's native-module rules
 from Lib import locks, native_build, paths, premake, toolchain, vendor_cache, workspace
 from Lib.process import ToolNotFoundError
@@ -64,6 +72,10 @@ NATIVE_WORKSPACE_FILE = "NativeModule.slnx"
 RUNTIME_PROJECT = "Runtime"
 # The configuration's first-party libraries a native Runtime links (Runtime/premake5.lua), below bin/<OutputDir>/.
 RUNTIME_LIBRARIES = ("RuntimeCore", "Engine")
+# The style the format check formats the sources with: the repository's, named explicitly (format_diagnostics).
+FORMAT_STYLE_FILE = paths.REPOSITORY_ROOT / ".clang-format"
+# The most characters of clang-format's line a NATIVE_FORMAT_WARNING quotes.
+FORMAT_QUOTED_CHARACTERS = 160
 
 
 class BuildFailure(Exception):
@@ -145,6 +157,14 @@ class NativeBuild:
             self.console.print(f"{finding.file}:{finding.line}: {finding.code}: {finding.message}")
         self.console.print(f"lint: {len(findings)} finding(s)")
         return not findings
+
+    def check_format(self) -> None:
+        """Step 1's format check (format_diagnostics); its NATIVE_FORMAT_WARNING diagnostics fail nothing."""
+        diagnostics = format_diagnostics(self.project, self.sources)
+        for diagnostic in diagnostics:
+            self.diagnostics.append(diagnostic)
+            self.console.print(diagnostic.describe())
+        self.console.print(f"format: {len(diagnostics)} warning(s)")
 
     def runtime_library_directories(self, visual_studio: toolchain.VisualStudio, deadline: float) -> list[str]:
         """The directories of every library the native Runtime links (step 3); raises BuildFailure (exit code 3) for
@@ -285,7 +305,9 @@ class NativeBuild:
         started = time.monotonic()
         deadline = started + self.arguments.timeout
         self.find_sources()
-        if not self.lint():
+        linted = self.lint()
+        self.check_format()
+        if not linted:
             return EXIT_FAILED
         try:
             visual_studio = toolchain.find_visual_studio()
@@ -307,6 +329,60 @@ class NativeBuild:
         self.console.print(f"native build: {'built ' + self.output if exit_code == EXIT_SUCCESS else 'failed'} in "
                            f"{time.monotonic() - started:.1f} s")
         return exit_code
+
+
+def format_diagnostics(project: Path, sources: list[str]) -> list[native_build.Diagnostic]:
+    """Step 1's format check of `sources` (project-relative, as list_sources lists them), each formatted by the
+    clang-format 22 that Format.py finds (Format.find_clang_format without --clang-format: $CLANG_FORMAT first) with the
+    repository's .clang-format named explicitly, since `project` may lie outside the repository, and compared with its
+    bytes as Format.py --check compares them. One NATIVE_FORMAT_WARNING for each source that differs, at its first
+    differing line, whose message quotes the line clang-format writes there, or says that the line differs only by its
+    CRLF ending (the repository's style writes LF), and counts the source's lines that end in CRLF; one for a source
+    clang-format fails on; one without a location when no clang-format 22 is found, so no source is checked.
+    Every diagnostic is a Warning."""
+
+    def warning(file: str, line: int, message: str) -> native_build.Diagnostic:
+        return native_build.Diagnostic("Warning", native_build.FORMAT_WARNING, file, line, 0, message)
+
+    try:
+        clang_format, version = Format.find_clang_format(None)
+    except toolchain.ToolchainError as error:
+        return [warning("", 0, f"the format check did not run: {error}")]
+    diagnostics: list[native_build.Diagnostic] = []
+    for source in sources:
+        path = project / source
+        try:
+            original = path.read_bytes()
+            formatted = Format.formatted_text(clang_format, path, source, FORMAT_STYLE_FILE)
+        except (Format.ToolFailure, Format.ToolTimeout, OSError) as error:
+            diagnostics.append(warning(source, 0, f"the format check did not run on it: {error}"))
+            continue
+        if formatted == original:
+            continue
+        line = Format.first_difference(original, formatted)
+        original_lines = original.split(b"\n")
+        formatted_lines = formatted.split(b"\n")
+        shared = min(len(original_lines), len(formatted_lines))
+        # The repository's .clang-format writes LF line endings: a CRLF line differs by its invisible carriage return.
+        crlf_lines = original.count(b"\r\n") if b"\r\n" not in formatted else 0
+        if line <= shared and original_lines[line - 1] != formatted_lines[line - 1]:
+            if crlf_lines > 0 and original_lines[line - 1].removesuffix(b"\r") == formatted_lines[line - 1]:
+                others = f" and {crlf_lines - 1} other line(s)" if crlf_lines > 1 else ""
+                detail = f"line {line}{others} end in CRLF (\\r\\n), which clang-format writes as LF (\\n)"
+                crlf_lines = 0
+            else:
+                text = formatted_lines[line - 1].decode("utf-8", errors="replace")
+                if len(text) > FORMAT_QUOTED_CHARACTERS:
+                    text = text[:FORMAT_QUOTED_CHARACTERS] + "..."
+                detail = f"clang-format writes line {line} as {json.dumps(text, ensure_ascii=False)}"
+        else:
+            detail = f"clang-format ends the file differently after line {line} (its final newline or blank lines)"
+        if crlf_lines > 0:
+            detail += f"; {crlf_lines} line(s) also end in CRLF (\\r\\n), which clang-format writes as LF (\\n)"
+        diagnostics.append(warning(source, line, f"not clang-format clean: {detail} (clang-format {version} with the "
+                                                 f"repository's .clang-format), so Format.py --check fails on it; "
+                                                 f"write it formatted with native.write"))
+    return diagnostics
 
 
 def take_build_lock(arguments: argparse.Namespace, console: Console) -> locks.Hold:

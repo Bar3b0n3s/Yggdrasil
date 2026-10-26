@@ -8,6 +8,7 @@
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/Automation/Methods/AutomationMethodContext.h"
 #include "Engine/Automation/Methods/SceneMethods.h"
+#include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
@@ -17,6 +18,7 @@
 #include "Engine/Reflection/EnumInfo.h"
 #include "Engine/Reflection/FieldInfo.h"
 #include "Engine/Reflection/FuzzySuggest.h"
+#include "Engine/Reflection/NativeComponentName.h"
 #include "Engine/Reflection/StructInfo.h"
 #include "Engine/Reflection/TypeInfo.h"
 #include "Engine/Reflection/TypeRegistry.h"
@@ -221,6 +223,11 @@ namespace Engine {
 
 		Result<const ComponentInfo*> FindWritableComponent(const TypeRegistry& registry, std::string_view name, std::string_view pointer)
 		{
+			if (IsNativeComponentName(name))
+			{
+				const Error refusal = MakeNativeComponentWriteError(name);
+				return std::unexpected(MakeParamError(refusal.GetCode(), pointer, refusal.GetMessageText(), refusal.GetHint()));
+			}
 			const ComponentInfo* info = registry.FindComponent(name);
 			if (info == nullptr || info->GetHostOps() == nullptr || !info->HasFlag(ComponentFlags::Serializable))
 			{

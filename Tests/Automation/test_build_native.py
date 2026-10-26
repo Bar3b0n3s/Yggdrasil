@@ -1,19 +1,21 @@
 """Scripts/BuildNative.py, the native build of a game's module (Docs/Decisions/0030-m19-contract.md decisions 30, 34 and
 35; stream N-A), and Scripts/Lib/native_build.py, which it shares with the games suite.
 
-The pure cases (the sources, the source hash the editor computes too, the record, the diagnostics of tool output) run
-everywhere. The script's cases run it as the editor does, as a process: those that stop before compiling (usage, no
-source, the lint) run everywhere, and the builds compile real modules with MSBuild on Windows (one of the build lock's
-capped slots each), proving that a module is compiled with the first-party settings, that the editor's library exports
-the two entry functions, that a compile error or warning fails the build located in its source, and that the Runtime of
-an export links the module instead of NoNativeModule.cpp. On Linux and macOS a build exits 3 naming the platform
-(decision 34), which the same cases check there.
+The pure cases (the sources, the source hash the editor computes too, the record, the diagnostics of tool output, the
+format check with the pinned clang-format) run everywhere. The script's cases run it as the editor does, as a process:
+those that stop before compiling (usage, no source, the lint) run everywhere, and the builds compile real modules with
+MSBuild on Windows (one of the build lock's capped slots each), proving that a module is compiled with the first-party
+settings, that the editor's library exports the two entry functions, that a compile error or warning fails the build
+located in its source, that a source that is not clang-format clean is a warning that fails nothing, and that the
+Runtime of an export links the module instead of NoNativeModule.cpp. On Linux and macOS a build exits 3 naming the
+platform (decision 34), which the same cases check there.
 """
 
 from __future__ import annotations
 
 import ctypes
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -22,12 +24,14 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from harness import REPOSITORY_ROOT, automation_config
 
 sys.path.insert(0, str(REPOSITORY_ROOT / "Scripts"))
 
-import Format  # noqa: E402  (Scripts/ is on sys.path above)
+import BuildNative  # noqa: E402  (Scripts/ is on sys.path above)
+import Format  # noqa: E402
 import Lint  # noqa: E402
 from Lib import native_build, paths  # noqa: E402
 
@@ -94,6 +98,20 @@ SPINNER_SOURCE = textwrap.dedent("""\
 
     ENGINE_NATIVE_MODULE(Spinners::Register)
     """)
+# SPINNER_SOURCE, which is clang-format clean, with one line indented a tab too far: the registration of its system.
+MISINDENTED_TEXT = "\t\tregistrar.AddSystem("
+MISINDENTED_SOURCE = SPINNER_SOURCE.replace(MISINDENTED_TEXT, "\t" + MISINDENTED_TEXT)
+MISINDENTED_LINE = next(number for number, line in enumerate(SPINNER_SOURCE.splitlines(), 1)
+                        if line.startswith(MISINDENTED_TEXT))
+
+
+def outside_repository(test: unittest.TestCase) -> Path:
+    """A new directory in the system's temporary directory, removed after the test: outside the repository, so no
+    .clang-format lies above it."""
+    directory = Path(tempfile.mkdtemp(prefix="BuildNative-")).resolve()
+    test.addCleanup(shutil.rmtree, directory, True)
+    test.assertFalse(directory.is_relative_to(REPOSITORY_ROOT.resolve()), directory)
+    return directory
 
 
 def write_files(root: Path, files: dict[str, str]) -> None:
@@ -139,6 +157,69 @@ class FormatTests(unittest.TestCase):
                                 "Projects/Game/Assets/Notes.txt": "", "Vendor/Lib/Lib.cpp": ""})
         self.assertEqual(sorted(Format.first_party_files(directory, None)),
                          ["Projects/Game/Native/Spinner.cpp", "Tests/Projects/Game/Native/Systems/Move.h"])
+
+
+class FormatCheckTests(unittest.TestCase):
+    # The native test game's friction NT-02: Format.py --check fails the gate on a native source that is not
+    # clang-format clean, which a builder working through automation alone could not learn before the gate. The build's
+    # format check reports each such source as a warning, in the repository's style also for a project outside the
+    # repository, where clang-format --style=file finds no .clang-format and would pass every source as it is.
+    def setUp(self) -> None:
+        self.project = outside_repository(self)
+        write_files(self.project, {"Native/Spinner.h": SPINNER_HEADER, "Native/Spinner.cpp": MISINDENTED_SOURCE})
+        self.sources = native_build.list_sources(self.project)
+
+    def test_a_source_that_is_not_clang_format_clean_is_one_warning_at_its_first_differing_line(self) -> None:
+        diagnostics = BuildNative.format_diagnostics(self.project, self.sources)
+        self.assertEqual([(diagnostic.severity, diagnostic.code, diagnostic.file, diagnostic.line)
+                          for diagnostic in diagnostics],
+                         [("Warning", native_build.FORMAT_WARNING, "Native/Spinner.cpp", MISINDENTED_LINE)])
+        # The warning quotes the line as clang-format writes it, which is how the source must read there.
+        expected = SPINNER_SOURCE.splitlines()[MISINDENTED_LINE - 1]
+        self.assertIn(json.dumps(expected, ensure_ascii=False), diagnostics[0].message)
+        write_files(self.project, {"Native/Spinner.cpp": SPINNER_SOURCE})
+        self.assertEqual(BuildNative.format_diagnostics(self.project, self.sources), [])
+
+    def test_a_source_with_crlf_line_endings_is_told_so_instead_of_quoting_its_own_line(self) -> None:
+        # The repository's .clang-format writes LF line endings, so every line of a CRLF source differs from
+        # clang-format's by its invisible carriage return alone: quoting clang-format's line 1 would show the builder
+        # the text it wrote, and rewriting the same bytes would never clear the warning.
+        write_files(self.project, {"Native/Spinner.cpp": SPINNER_SOURCE.replace("\n", "\r\n")})
+        diagnostics = BuildNative.format_diagnostics(self.project, self.sources)
+        self.assertEqual([(diagnostic.severity, diagnostic.code, diagnostic.file, diagnostic.line)
+                          for diagnostic in diagnostics],
+                         [("Warning", native_build.FORMAT_WARNING, "Native/Spinner.cpp", 1)])
+        self.assertIn("CRLF", diagnostics[0].message)
+        self.assertNotIn(json.dumps(SPINNER_SOURCE.splitlines()[0], ensure_ascii=False), diagnostics[0].message)
+        # A source whose first differing line differs in its text, and that ends a later line in CRLF, quotes that line
+        # and names the line endings too, so one rewrite clears both.
+        last_line = "ENGINE_NATIVE_MODULE(Spinners::Register)\n"
+        self.assertTrue(MISINDENTED_SOURCE.endswith(last_line))
+        crlf_last_line = MISINDENTED_SOURCE.replace(last_line, last_line[:-1] + "\r\n")
+        write_files(self.project, {"Native/Spinner.cpp": crlf_last_line})
+        diagnostics = BuildNative.format_diagnostics(self.project, self.sources)
+        self.assertEqual([diagnostic.line for diagnostic in diagnostics], [MISINDENTED_LINE])
+        self.assertIn(json.dumps(SPINNER_SOURCE.splitlines()[MISINDENTED_LINE - 1], ensure_ascii=False),
+                      diagnostics[0].message)
+        self.assertIn("CRLF", diagnostics[0].message)
+
+    def test_a_differing_end_and_an_unreadable_source_are_warnings_too(self) -> None:
+        # A source whose lines all match clang-format's but whose end differs (no final newline) is located at its last
+        # line, and a source the check cannot read is a warning without a line: the check never stops the build.
+        header = SPINNER_HEADER.rstrip("\n")
+        write_files(self.project, {"Native/Spinner.h": header, "Native/Spinner.cpp": SPINNER_SOURCE})
+        diagnostics = BuildNative.format_diagnostics(self.project, ["Native/Gone.cpp", *self.sources])
+        self.assertEqual([(diagnostic.severity, diagnostic.code, diagnostic.file, diagnostic.line)
+                          for diagnostic in diagnostics],
+                         [("Warning", native_build.FORMAT_WARNING, "Native/Gone.cpp", 0),
+                          ("Warning", native_build.FORMAT_WARNING, "Native/Spinner.h", len(header.splitlines()))])
+
+    def test_without_clang_format_the_check_is_one_warning_without_a_location(self) -> None:
+        missing = self.project / "Missing" / "clang-format.exe"
+        with mock.patch.dict(os.environ, {"CLANG_FORMAT": str(missing)}):
+            diagnostics = BuildNative.format_diagnostics(self.project, self.sources)
+        self.assertEqual([(diagnostic.severity, diagnostic.code, diagnostic.file, diagnostic.line)
+                          for diagnostic in diagnostics], [("Warning", native_build.FORMAT_WARNING, "", 0)])
 
 
 class LintTests(unittest.TestCase):
@@ -270,10 +351,14 @@ class ScriptTests(unittest.TestCase):
         self.assertTrue((out / record.log).is_file())
 
     def test_lint_findings_fail_the_build_before_anything_compiles(self) -> None:
+        # The format check runs whatever the lint found (the native test game's friction NT-02), so a source that is not
+        # clang-format clean is reported beside the lint's findings, not one build later.
         write_files(self.project, {
             "Native/Counter.cpp": '#include "Engine/Native/NativeApi.h"\n#include <windows.h>\n\nnamespace Game {\n\n'
                                   "\tstatic int s_Count = 0;\n\n}\n",
             "Native/Readme.md": "a note\n",
+            "Native/Spinner.h": SPINNER_HEADER,
+            "Native/Spinner.cpp": MISINDENTED_SOURCE,
         })
         code, record, out, output = self.build("module", "Debug", "Lint")
         assert record is not None
@@ -283,10 +368,13 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(code, 1, output)
         self.assertFalse(record.succeeded)
         found = sorted((diagnostic.code, diagnostic.file, diagnostic.line, diagnostic.message.split(":", 1)[0])
-                       for diagnostic in record.diagnostics)
+                       for diagnostic in record.diagnostics if diagnostic.code == native_build.LINT_ERROR)
         self.assertEqual(found, [(native_build.LINT_ERROR, "Native/Counter.cpp", 2, "native-include"),
                                  (native_build.LINT_ERROR, "Native/Counter.cpp", 6, "native-mutable-state"),
                                  (native_build.LINT_ERROR, "Native/Readme.md", 1, "native-file")])
+        self.assertEqual([(diagnostic.severity, diagnostic.code, diagnostic.file, diagnostic.line)
+                          for diagnostic in record.diagnostics if diagnostic.code != native_build.LINT_ERROR],
+                         [("Warning", native_build.FORMAT_WARNING, "Native/Spinner.cpp", MISINDENTED_LINE)])
         self.assertFalse((out / native_build.WORKSPACE_DIRECTORY).exists(), "nothing was generated or compiled")
 
     def test_the_editors_library_is_compiled_like_engine_code_and_exports_the_entry_functions(self) -> None:
@@ -339,6 +427,24 @@ class ScriptTests(unittest.TestCase):
         located = {(diagnostic.code, diagnostic.file, diagnostic.line) for diagnostic in record.diagnostics}
         self.assertIn((native_build.COMPILE_ERROR, "Native/Broken.cpp", 5), located)
         self.assertIn((native_build.COMPILE_WARNING, "Native/Unused.cpp", 5), located)
+
+    def test_a_source_that_is_not_clang_format_clean_builds_with_one_format_warning(self) -> None:
+        # The friction NT-02 (FormatCheckTests): the record carries the format check's warning, located in the source of
+        # a project outside the repository, and the build still succeeds. Its output stays below bin-int (setUp), so
+        # MSBuild adds no warning of its own.
+        self.project = outside_repository(self) / "Game"
+        write_files(self.project, {"Native/Spinner.h": SPINNER_HEADER, "Native/Spinner.cpp": MISINDENTED_SOURCE})
+        code, record, out, output = self.build("module", "Debug", "Unformatted")
+        assert record is not None
+        if not IS_WINDOWS:
+            self.assert_not_built_here(code, record, output)
+            return
+        self.assertEqual(code, 0, output)
+        self.assertTrue(record.succeeded, record.diagnostics)
+        self.assertTrue((out / record.output).is_file())
+        self.assertEqual([(diagnostic.severity, diagnostic.code, diagnostic.file, diagnostic.line)
+                          for diagnostic in record.diagnostics],
+                         [("Warning", native_build.FORMAT_WARNING, "Native/Spinner.cpp", MISINDENTED_LINE)])
 
     def test_an_exports_runtime_links_the_module_instead_of_no_native_module(self) -> None:
         write_files(self.project, {"Native/Spinner.h": SPINNER_HEADER, "Native/Spinner.cpp": SPINNER_SOURCE})

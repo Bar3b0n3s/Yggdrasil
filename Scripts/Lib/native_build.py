@@ -44,13 +44,15 @@ WORKSPACE_DIRECTORY = "Workspace"
 INTERMEDIATE_DIRECTORY = "Intermediate"
 WORKSPACE_INPUTS_FILE = "Inputs.json"
 
-# The diagnostic codes of a build (NativeBuildDiagnostic::Code, EditorCore/Native/NativeBuild.h).
+# The diagnostic codes of a build (NativeBuildDiagnostic::Code, EditorCore/Native/NativeBuild.h). FORMAT_WARNING is
+# always of severity Warning: a source that is not clang-format clean, which fails nothing (Scripts/BuildNative.py).
 LINT_ERROR = "NATIVE_LINT_ERROR"
+FORMAT_WARNING = "NATIVE_FORMAT_WARNING"
 COMPILE_ERROR = "NATIVE_COMPILE_ERROR"
 COMPILE_WARNING = "NATIVE_COMPILE_WARNING"
 LINK_ERROR = "NATIVE_LINK_ERROR"
 BUILD_ERROR = "NATIVE_BUILD_ERROR"
-CODES = (LINT_ERROR, COMPILE_ERROR, COMPILE_WARNING, LINK_ERROR, BUILD_ERROR)
+CODES = (LINT_ERROR, FORMAT_WARNING, COMPILE_ERROR, COMPILE_WARNING, LINK_ERROR, BUILD_ERROR)
 
 RECORD_KEYS = ("Format", "Version", "Kind", "Configuration", "SourceHash", "Sources", "Succeeded", "Output", "Log",
                "Diagnostics")

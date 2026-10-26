@@ -320,6 +320,29 @@ end)
 			CHECK(ran.PhaseTimings[1].Phase == ExportPhase::SmokeTest);
 		}
 
+		// The native test game's friction NT-10: featureTest carries its report's rows by status, so a builder sees the outcome
+		// without reading the report, and every count is zero when the run did not start.
+		TEST_CASE("ExportMethods: the export result reports the feature test's counts, zero when it did not run")
+		{
+			ExportReport report;
+			const ProjectExportResult notRun = MakeProjectExportResult(report);
+			CHECK_FALSE(notRun.FeatureTest.Ran);
+			CHECK(notRun.FeatureTest.Counts.Total == 0);
+			CHECK(notRun.FeatureTest.Counts.Passed == 0);
+
+			report.FeatureTest.Ran = true;
+			report.FeatureTest.Counts = { .Total = 9, .Passed = 6, .Failed = 1, .Error = 1, .Timeout = 0, .Skipped = 0, .Quit = 1 };
+			const ProjectExportResult ran = MakeProjectExportResult(report);
+			CHECK(ran.FeatureTest.Ran);
+			CHECK(ran.FeatureTest.Counts.Total == 9);
+			CHECK(ran.FeatureTest.Counts.Passed == 6);
+			CHECK(ran.FeatureTest.Counts.Failed == 1);
+			CHECK(ran.FeatureTest.Counts.Error == 1);
+			CHECK(ran.FeatureTest.Counts.Timeout == 0);
+			CHECK(ran.FeatureTest.Counts.Skipped == 0);
+			CHECK(ran.FeatureTest.Counts.Quit == 1);
+		}
+
 		TEST_CASE("ExportMethods: a disconnect cancels project.export and removes what it wrote")
 		{
 			Test::EditorTestFixture fixture("ExportMethods");
@@ -392,6 +415,14 @@ end)
 			const std::string outputDirectory = JsonReader(exported["outputDirectory"]).ReadString().value_or("");
 			CHECK(reportPath.starts_with(outputDirectory));
 			CHECK(FileSystem::Exists(FileSystem::PathFromUtf8(reportPath)));
+			// The run's rows by status, as its report counts them (the native test game's friction NT-10).
+			const Result<std::string> reportText = FileSystem::ReadText(FileSystem::PathFromUtf8(reportPath));
+			REQUIRE_MESSAGE(reportText.has_value(), reportText.error().ToString());
+			const Result<Json> reportJson = JsonReader::Parse(*reportText);
+			REQUIRE_MESSAGE(reportJson.has_value(), reportJson.error().ToString());
+			CHECK(run["counts"] == (*reportJson)["counts"]);
+			CHECK(JsonReader(run["counts"]["total"]).ReadUInt32().value_or(0) > 0);
+			CHECK(run["counts"]["passed"] == run["counts"]["total"]);
 			REQUIRE(run["replays"].size() == 1);
 			CHECK(run["replays"][0]["path"] == Json("Assets/Tests/Idle.replay"));
 			CHECK(run["replays"][0]["stateHash"] == (*recorded)["stateHash"]);

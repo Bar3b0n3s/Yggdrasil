@@ -427,10 +427,10 @@ namespace Engine {
 		registry.Struct<NativeSystemSummary>("NativeSystemSummary", "One system of the loaded native module.")
 			.Field("name", &NativeSystemSummary::Name, "The name the module registers.")
 			.Field("description", &NativeSystemSummary::Description, "What the module says it does.");
-		registry.Struct<NativeBuildDiagnostic>("NativeBuildDiagnostic", "One finding of a native build: the lint, the compiler or the linker.")
+		registry.Struct<NativeBuildDiagnostic>("NativeBuildDiagnostic", "One finding of a native build: the lint, the format check, the compiler or the linker.")
 			.Field("severity", &NativeBuildDiagnostic::Severity, "Error or Warning.")
 			.Field("code", &NativeBuildDiagnostic::Code,
-				"NATIVE_LINT_ERROR, NATIVE_COMPILE_ERROR, NATIVE_COMPILE_WARNING (an error, since warnings are errors), NATIVE_LINK_ERROR or NATIVE_BUILD_ERROR.")
+				"NATIVE_LINT_ERROR, NATIVE_FORMAT_WARNING (a warning that fails nothing: a source that is not clang-format clean, located at its first differing line, which the repository's format check refuses; rewrite it formatted with native.write; or, at line 0, a format check that could not run: no clang-format 22 found, without a file, or a source it could not check), NATIVE_COMPILE_ERROR, NATIVE_COMPILE_WARNING (an error, since warnings are errors), NATIVE_LINK_ERROR or NATIVE_BUILD_ERROR.")
 			.Field("file", &NativeBuildDiagnostic::File, "The source it is in, project-relative (Native/Spin.cpp); empty without a location.")
 			.Field("line", &NativeBuildDiagnostic::Line, "One-based line; zero without a location.")
 			.Field("column", &NativeBuildDiagnostic::Column, "One-based column; zero without one.")
@@ -477,7 +477,7 @@ namespace Engine {
 			.Field("succeeded", &NativeBuildResult::Succeeded, "It compiled and linked; native.load can then load it.")
 			.Field("library", &NativeBuildResult::Library, "The built library, project-relative below Library/Native/Builds/; empty when it failed.")
 			.Field("sourceHash", &NativeBuildResult::SourceHash, "The hash of the sources it was built from.")
-			.Field("diagnostics", &NativeBuildResult::Diagnostics, "The lint's, compiler's and linker's findings, in the order found.")
+			.Field("diagnostics", &NativeBuildResult::Diagnostics, "The lint's, the format check's, the compiler's and the linker's findings, in the order found.")
 			.Field("log", &NativeBuildResult::Log, "The build's whole output, project-relative.")
 			.Field("seconds", &NativeBuildResult::Seconds, "How long it took (wall-clock time, for information).", { .Unit = "s" });
 		registry.Struct<NativeLoadResult>("NativeLoadResult", "The native module loaded, or reloaded in place of the previous one.")

@@ -180,6 +180,25 @@ return Scene.GetEntityCount() == 0
 			CHECK(fixture.ExternalMutations.empty());
 		}
 
+		// The native test game's friction NT-05: a game's native components ("Native.<Name>") have no script proxy
+		// (Docs/Decisions/0030-m19-contract.md decision 26), so Scene.FindAllWithComponent of one fails with a hint naming
+		// native.getComponents instead of suggesting a built-in name; a misspelt built-in name keeps its suggestion.
+		TEST_CASE("SceneBindings: FindAllWithComponent of a native component fails with a hint naming native.getComponents")
+		{
+			Test::ScriptTestFixture fixture;
+			REQUIRE(fixture.Start().has_value());
+			const auto result = fixture.Evaluate(R"(
+local ok, message = pcall(Scene.FindAllWithComponent, "Native.Spinner")
+assert(not ok and string.find(tostring(message), "native.getComponents", 1, true) ~= nil, tostring(message))
+ok, message = pcall(Scene.FindAllWithComponent, "Transfom")
+assert(not ok and string.find(tostring(message), "Transform", 1, true) ~= nil, tostring(message))
+assert(string.find(tostring(message), "native.getComponents", 1, true) == nil, tostring(message))
+return true
+)");
+			REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
+			CHECK(result->Value.Get() == Json(true));
+		}
+
 		TEST_CASE("SceneBindings: an instantiation position that the parent cannot represent fails before anything is created")
 		{
 			Test::ScriptTestFixture fixture;

@@ -695,7 +695,7 @@ Creates an entity with a name, parent, position among its siblings, active flag,
 | `index` | `UInt32` |  | `0` | The position among its siblings; omitted: last. |
 | `active` | `Bool` |  | `true` | Whether the entity starts active. |
 | `tags` | `Array<String>` |  | `[]` | The entity's tags. |
-| `components` | `Map<Variant>` |  | `{}` | Component values by registry name, each an object of field values (missing fields keep their values); an Entity value takes 16 hex digits, a unique id prefix of at least 6 or a path such as "/Game/ScoreText", resolved in the target scene; see component.schema. |
+| `components` | `Map<Variant>` |  | `{}` | Component values by registry name, each an object of field values (missing fields keep their values); an Entity value takes 16 hex digits, a unique id prefix of at least 6 or a path such as "/Game/ScoreText", resolved in the target scene; see component.schema. Native components (Native.\<Name>) are written with native.setComponents. |
 | `target` | `SceneTarget` |  | `"Edit"` | The scene to change; omitted: the edit scene. "play" changes the play scene transiently. |
 
 | Result | Type | Description |
@@ -768,7 +768,7 @@ Returns one entity: id, name, path, parent, active state, tags, the JSON of all 
 | Param | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `entity` | `String` | yes | `""` | The entity: 16 hex digits, a unique id prefix of at least 6, or a path. |
-| `components` | `Variant` |  | `null` | An array of component names, or "all" (the default). |
+| `components` | `Variant` |  | `null` | An array of component names (Native.\<Name> for a native component, as the scene holds it), or "all" (the default: native components included). |
 | `children` | `Bool` |  | `false` | Also list the children. |
 | `target` | `SceneTarget` |  | `"Edit"` | The scene to read; omitted: the play scene while playing, else the edit scene. |
 
@@ -823,8 +823,8 @@ Changes only what is given: name, active flag, tags, component fields (merged; m
 | `name` | `String` |  | `""` | The new name. |
 | `active` | `Bool` |  | `true` | The new active flag. |
 | `tags` | `Array<String>` |  | `[]` | The new tag list (replaces the old one). |
-| `components` | `Map<Variant>` |  | `{}` | Component values by registry name, merged into the existing components; missing components are added. An Entity value takes 16 hex digits, a unique id prefix of at least 6 or a path such as "/Game/ScoreText", resolved in the target scene. |
-| `removeComponents` | `Array<String>` |  | `[]` | Components to remove (before the components are written). |
+| `components` | `Map<Variant>` |  | `{}` | Component values by registry name, merged into the existing components; missing components are added. An Entity value takes 16 hex digits, a unique id prefix of at least 6 or a path such as "/Game/ScoreText", resolved in the target scene. Native components (Native.\<Name>) are written with native.setComponents. |
+| `removeComponents` | `Array<String>` |  | `[]` | Components to remove (before the components are written); native.setComponents removes a native one (null). |
 | `target` | `SceneTarget` |  | `"Edit"` | The scene to change; omitted: the edit scene. "play" changes the play scene transiently. |
 
 | Result | Type | Description |
@@ -1057,7 +1057,7 @@ Param: none.
 | `succeeded` | `Bool` | It compiled and linked; native.load can then load it. |
 | `library` | `String` | The built library, project-relative below Library/Native/Builds/; empty when it failed. |
 | `sourceHash` | `String` | The hash of the sources it was built from. |
-| `diagnostics` | `Array<NativeBuildDiagnostic>` | The lint's, compiler's and linker's findings, in the order found. |
+| `diagnostics` | `Array<NativeBuildDiagnostic>` | The lint's, the format check's, the compiler's and the linker's findings, in the order found. |
 | `log` | `String` | The build's whole output, project-relative. |
 | `seconds` | `Float` | How long it took (wall-clock time, for information). |
 
@@ -2063,7 +2063,7 @@ Finds entities by name pattern, tag, component and subtree, in canonical order a
 | Param | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `where` | `SceneQueryWhere` | yes | `{"name":"","tag":"","component":"","path":""}` | What to match. |
-| `select` | `Array<String>` |  | `[]` | The components whose JSON each match carries; "all" for every one. |
+| `select` | `Array<String>` |  | `[]` | The components whose JSON each match carries (Native.\<Name> for a native component, as the scene holds it); "all" for every one, native ones included. |
 | `limit` | `UInt32` |  | `100` | The most matches in one page. |
 | `cursor` | `String` |  | `""` | The nextCursor of the previous page; empty for the first. |
 | `target` | `SceneTarget` |  | `"Edit"` | The scene to read; omitted: the play scene while playing, else the edit scene. |

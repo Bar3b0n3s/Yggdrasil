@@ -54,6 +54,7 @@ namespace Engine {
 			result.FeatureTest.ReportPath = FileSystem::PathToUtf8(report.FeatureTest.ReportPath);
 		}
 		result.FeatureTest.Passed = report.FeatureTest.Passed;
+		result.FeatureTest.Counts = report.FeatureTest.Counts;
 		result.FeatureTest.Replays.reserve(report.FeatureTest.Replays.size());
 		for (const ExportFeatureTestReplay& replay : report.FeatureTest.Replays)
 			result.FeatureTest.Replays.push_back({ .Path = replay.Path, .StateHash = replay.StateHash, .Passed = replay.Passed });
@@ -175,11 +176,21 @@ namespace Engine {
 			.Field("stateHash", &ExportFeatureTestReplaySummary::StateHash, "The state hash the exported game observed at the replay's final tick.")
 			.Field("passed", &ExportFeatureTestReplaySummary::Passed, "Every row of the replay passed.");
 
+		registry.Struct<ExportFeatureTestCounts>("ExportFeatureTestCounts", "The rows of an exported game's --feature-test report by status, as the report counts them.")
+			.Field("total", &ExportFeatureTestCounts::Total, "Every row.")
+			.Field("passed", &ExportFeatureTestCounts::Passed, "Rows with status passed.")
+			.Field("failed", &ExportFeatureTestCounts::Failed, "Rows with status failed.")
+			.Field("error", &ExportFeatureTestCounts::Error, "Rows with status error.")
+			.Field("timeout", &ExportFeatureTestCounts::Timeout, "Rows with status timeout.")
+			.Field("skipped", &ExportFeatureTestCounts::Skipped, "Rows with status skipped.")
+			.Field("quit", &ExportFeatureTestCounts::Quit, "Rows with status quit.");
+
 		registry.Struct<ExportFeatureTestSummary>("ExportFeatureTestSummary", "The --feature-test run of a testing export (featureTest).")
 			.Field("ran", &ExportFeatureTestSummary::Ran, "Whether it ran: false without featureTest, and for a Dist export from an editor without a graphics device.")
 			.Field("exitCode", &ExportFeatureTestSummary::ExitCode, "The run's exit code, an integer; null when it did not run.")
 			.Field("passed", &ExportFeatureTestSummary::Passed, "Exit code 0 and every row passed.")
 			.Field("reportPath", &ExportFeatureTestSummary::ReportPath, "The run's JSON report, inside the exported game's folder; empty when it did not run.")
+			.Field("counts", &ExportFeatureTestSummary::Counts, "The report's rows by status, so the outcome reads without the report; zero when it did not run.")
 			.Field("replays", &ExportFeatureTestSummary::Replays, "Every replay's observed final state hash, sorted by path.");
 
 		registry.Enum<ExportReachReason>("ExportReachReason", "Why an export put an asset into its paks (the first reason its walk found).")

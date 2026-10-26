@@ -53,9 +53,11 @@ namespace Engine {
 	struct NativeBuildDiagnostic
 	{
 		DiagnosticSeverity Severity = DiagnosticSeverity::Error;
-		// "NATIVE_LINT_ERROR" (the determinism lint or the include rule, decision 35), "NATIVE_COMPILE_ERROR",
-		// "NATIVE_COMPILE_WARNING" (an error under warnings-as-errors, reported as found), "NATIVE_LINK_ERROR" or
-		// "NATIVE_BUILD_ERROR" (anything else: the toolchain or the build outputs missing, the build lock not taken).
+		// "NATIVE_LINT_ERROR" (the determinism lint or the include rule, decision 35), "NATIVE_FORMAT_WARNING" (a Warning that
+		// fails nothing: a source that is not clang-format clean, at its first differing line, or a format check that could not
+		// run; Format.py --check fails the gate on such a source), "NATIVE_COMPILE_ERROR", "NATIVE_COMPILE_WARNING" (an error
+		// under warnings-as-errors, reported as found), "NATIVE_LINK_ERROR" or "NATIVE_BUILD_ERROR" (anything else: the
+		// toolchain or the build outputs missing, the build lock not taken).
 		std::string Code{};
 		std::string File{};  // project-relative ("Native/Spin.cpp"); empty without a location
 		uint32_t Line = 0;   // 1-based; 0 without a location
