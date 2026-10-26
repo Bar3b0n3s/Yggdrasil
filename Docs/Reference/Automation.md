@@ -951,7 +951,7 @@ Starts a tick-zero recording or saves its validated applied inputs, expectations
 | `path` | `String` | Canonical saved path; empty on Start. |
 | `stateHash` | `String` | Observed terminal state hash, written as FinalStateHash; empty on Start. It covers the simulated world only (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input. |
 | `checkpoints` | `UInt32` | State-hash checkpoints written, one every 60 ticks before the final tick; 0 on Start. |
-| `inputCheckTick` | `UInt32` | Stop with input events: the tick where the input check (the recording replayed without its input) ended, at the first checkpoint that differed or at the final tick; the play session waits paused there. 0 when no check ran. |
+| `inputCheckTick` | `UInt32` | Stop with input events: the tick of the first checkpoint at which the input check (the recording replayed without its input events, continuing past checkpoints that differ) differed, else the tick where that run ended; the play session waits paused where the check ended, the replay's final tick unless it stopped early. 0 when no check ran. |
 | `warnings` | `Array<String>` | Stop: notes on the written replay; empty on Start. The input check warns when its run without input differed only at checkpoints but reached the recorded final state hash: the final hash then proves only the end state, and only the checkpoints prove the play. |
 
 Example: Start a fresh recording.
@@ -1083,7 +1083,7 @@ Reads an entity's native components (Native.\<Name>) as the loaded module writes
 | Result | Type | Description |
 |---|---|---|
 | `entity` | `EntitySummary` | The entity. |
-| `components` | `Map<Variant>` | Its components the loaded module registers, by registry name, every field written. |
+| `components` | `Map<Variant>` | Its components the loaded module registers, by registry name, as the scene holds them: every field written once the editor canonicalized or wrote them, but as stored for those it did not (a scene Scene.Load loaded during play, a prefab instance member from a prefab saved under an older layout). |
 | `unregistered` | `Map<Variant>` | Its other Native.\<Name> components, as written: all of them while no module is loaded. |
 
 Example: Read the spinner's native components.
@@ -1159,7 +1159,7 @@ Adds, changes (a merge patch) or removes (null) an entity's native components th
 | Result | Type | Description |
 |---|---|---|
 | `entity` | `EntitySummary` | The entity. |
-| `components` | `Map<Variant>` | Its native components the loaded module registers, every field written. |
+| `components` | `Map<Variant>` | Its native components the loaded module registers, as the scene holds them: the changed ones with every field written, the others as native.getComponents reads them. |
 | `undoIndex` | `UInt32` | Undo step; zero for the play scene and for a dry run. |
 
 Example: Make the spinner turn faster.
@@ -1204,7 +1204,7 @@ Example: Read the native module's state.
 
 ### native.write
 
-Writes a .cpp or .h source of the native module below Native/ as one undoable edit, recorded in provenance; it builds nothing (native.build).
+Writes a .cpp or .h source of the native module below Native/ as one undoable edit, recorded in provenance; it builds nothing (native.build), and is refused while a build runs, an export's included.
 
 - Flags: tool `native_write`, mutates, dry run, batch
 - Timeout: 60 s

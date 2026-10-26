@@ -97,6 +97,15 @@ namespace Engine {
 		{
 			++m_StartCount;
 			m_LastRequest = request;
+			// Scripts/BuildNative.py refuses an output directory that exists and is not empty, writing no record (exit code 2),
+			// which the real backend reports as an Io error when the build resolves.
+			std::error_code status;
+			if (std::filesystem::exists(request.OutputDirectory, status) && !std::filesystem::is_empty(request.OutputDirectory, status))
+			{
+				return CreateScope<Utils::FakeNativeBuildJob>(Result<NativeBuildOutcome>(MakeError(ErrorCode::Io,
+					"the fake native build exited with code 2 without a build record: --out {} must be a missing or empty directory",
+					FileSystem::PathToUtf8(request.OutputDirectory))));
+			}
 			ENGINE_TRY_ASSIGN(const std::vector<std::string> sources, ListNativeSources(request.ProjectRoot));
 			ENGINE_TRY_ASSIGN(const std::string hash, ComputeNativeSourceHash(request.ProjectRoot, request.Configuration, m_ApiHeader));
 			ENGINE_TRY(FileSystem::CreateDirectories(request.OutputDirectory));
@@ -118,6 +127,13 @@ namespace Engine {
 				std::error_code error;
 				if (!std::filesystem::copy_file(m_RuntimeExecutable, outcome.Output, std::filesystem::copy_options::overwrite_existing, error) || error)
 					return MakeError(ErrorCode::Io, "cannot copy '{}' as the fake build's Runtime: {}", FileSystem::PathToUtf8(m_RuntimeExecutable), error.message());
+				// The symbols the linker writes beside it (Scripts/Premake/NativeModule.lua), which an export archives.
+				for (const std::string_view extension : { ".pdb", ".map" })
+				{
+					std::filesystem::path symbols = outcome.Output;
+					symbols.replace_extension(FileSystem::PathFromUtf8(extension));
+					ENGINE_TRY(Utils::WriteText(symbols, std::format("fake symbols ({})\n", extension)));
+				}
 			}
 			else if (succeeded)
 			{

@@ -100,7 +100,8 @@ class Diagnostic:
 
 @dataclasses.dataclass
 class BuildRecord:
-    """NativeBuild.json (decision 30; NativeBuildRecord in EditorCore/Native/NativeBuild.h)."""
+    """NativeBuild.json (decision 30; NativeBuildRecord in EditorCore/Native/NativeBuild.h). `source_hash` is empty
+    when the build failed before it could hash the sources."""
 
     kind: str
     configuration: str
@@ -219,7 +220,9 @@ def _is_plain_file_name(name: str) -> bool:
 
 def parse_record(text: str) -> BuildRecord:
     """Reads a build record strictly, as ParseNativeBuildRecord does (EditorCore/Native/NativeBuild.h): exactly the
-    members write_record writes, of their types. Raises RecordError (a ValueError) naming the JSON pointer of the first
+    members write_record writes, of their types. SourceHash and Output are empty only in the record of a failed build:
+    SourceHash when the build failed before it could hash the sources (not Windows, or a source it could not read), so
+    the editor still reads why it failed. Raises RecordError (a ValueError) naming the JSON pointer of the first
     problem, or for text that is not JSON."""
     try:
         document = json.loads(text)
@@ -236,12 +239,14 @@ def parse_record(text: str) -> BuildRecord:
     _require(document["Kind"] in KINDS, "/Kind", f"expected one of {', '.join(KINDS)}")
     _require(document["Configuration"] in CONFIGURATIONS, "/Configuration",
              f"expected one of {', '.join(CONFIGURATIONS)}")
-    _require(isinstance(document["SourceHash"], str) and bool(_HASH_PATTERN.match(document["SourceHash"])),
-             "/SourceHash", "expected 16 lowercase hex digits")
+    _require(isinstance(document["Succeeded"], bool), "/Succeeded", "expected a boolean")
+    hash_text = document["SourceHash"]
+    _require(isinstance(hash_text, str) and (bool(_HASH_PATTERN.match(hash_text))
+                                             or (hash_text == "" and not document["Succeeded"])),
+             "/SourceHash", "expected 16 lowercase hex digits (empty only for a failed build)")
     sources = document["Sources"]
     _require(isinstance(sources, list) and all(isinstance(source, str) for source in sources), "/Sources",
              "expected an array of strings")
-    _require(isinstance(document["Succeeded"], bool), "/Succeeded", "expected a boolean")
     for key in ("Output", "Log"):
         _require(isinstance(document[key], str), f"/{key}", "expected a string")
     succeeded = document["Succeeded"]

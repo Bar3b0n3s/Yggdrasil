@@ -170,10 +170,14 @@ namespace Engine {
 		void CancelBuild();
 		// An export's build (decision 33; NativeExport.h StartNativeRuntimeBuild): the open project's Runtime of
 		// `configuration` with its module linked, into `outputDirectory`, through the host's backend. The job is the caller's:
-		// Building stays false and the outcome becomes neither LatestBuild nor LastBuild. Errors: StartBuild's refusals
-		// (Unsupported, PermissionDenied, InvalidState without a project, NotFound without sources) and the backend's.
+		// Building stays false and the outcome becomes neither LatestBuild nor LastBuild, but IsRuntimeBuildRunning is true
+		// until the job resolves or is destroyed. Errors: StartBuild's refusals (Unsupported, PermissionDenied, InvalidState
+		// without a project, NotFound without sources) and the backend's.
 		[[nodiscard]] Result<Scope<INativeBuildJob>> StartRuntimeBuild(EditorContext& editor, ExportConfiguration configuration,
 			const std::filesystem::path& outputDirectory);
+		// Whether a job StartRuntimeBuild returned still runs: native.write refuses then, as while a module build runs
+		// (decision 32), since the build compiles the sources it linted.
+		[[nodiscard]] bool IsRuntimeBuildRunning() const;
 		// Loads, or reloads, the newest current build (see the file comment). Errors: Unsupported on Linux and macOS;
 		// PermissionDenied while the preference is off; InvalidState without a project, while a play session or a build runs,
 		// or without a current successful build (hint: native.build); the loader's and BuildNativeModuleTypes' (the previous

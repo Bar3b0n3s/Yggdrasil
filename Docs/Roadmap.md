@@ -400,7 +400,7 @@ Tests support (`Tests/Source/Support/`): recording assert handler, death-test re
 
 ## M19 — Automation, export, Luau and the native module
 
-**Scope.** Phase 1. The automation the builders need, replay v3, export pruning and compression, the Luau compiler out of Dist, `stb_truetype.h`, the per-game native module on Windows and the carried character (`Docs/Decisions/0028-backlog-program.md` decisions 4, 6 and 10; waves W19.1 and W19.2, one contract). This lifts the §1.2 non-goal on native gameplay modules, on Windows. Its milestone end runs `CI.py --require-clang-cl`; M20's gate hardens phase 1 (ADR 0028 decision 12).
+**Scope.** Phase 1. The automation the builders need, replay v3, export pruning and compression, the Luau compiler out of Dist, `stb_truetype.h`, the per-game native module on Windows and the carried character (`Docs/Decisions/0028-backlog-program.md` decisions 4, 6 and 10; waves W19.1 to W19.3, one contract). This lifts the §1.2 non-goal on native gameplay modules, on Windows. Its milestone end runs `CI.py --require-clang-cl`; M20's gate hardens phase 1 (ADR 0028 decision 12).
 
 **Deliverables**
 - Replays at format v3 with a start fingerprint; verification of event-free `input.record` recordings and of teardown errors; `test.run {record, expect}`; the input check's final-hash warning; duplicate `.eproj` stems and Names refused; reading a replay's events through automation; entity paths in component data; named `$ref`; kept screenshots; the builder-side Dist hash check (`project.export {featureTest}`); the soak renders each scene's game view; build versioning.
@@ -415,7 +415,7 @@ Tests support (`Tests/Source/Support/`): recording assert handler, death-test re
 - A native component hashes identically in Debug, Release and Dist; the provenance audit covers the module's sources; an export with the module passes the games suite's three halves; native build and load are refused while the preference is off, and on Linux and macOS with `ErrorCode::Unsupported`.
 - A carried character moves v·t.
 
-**Parallelization**: W19.1 has the contract (replay v3, the resolver and the entity-path text shared with M20, export, the first-party require, `stb_truetype.h`, the native API, InheritGroundVelocity) and streams for recording verification, replay v3 and `games.py`, batch addressing, export, screenshots and soak, the Dist self-check, the carried character, the native build and the native registration; W19.2 adds pak compression, pruning, the first-party require, `stb_truetype.h`, hot reload and the native coverage.
+**Parallelization**: W19.1 has the contract (replay v3, the resolver and the entity-path text shared with M20, export, the first-party require, `stb_truetype.h`, the native API, InheritGroundVelocity) and streams for recording verification, replay v3 and `games.py`, batch addressing, export, screenshots and soak, the Dist self-check, the carried character, the native build and the native registration; W19.2 adds pak compression, pruning, the first-party require, `stb_truetype.h`, hot reload and the native coverage. After W19.2 the native test game is built in one bridge session, and W19.3 fixes its friction (`Docs/Decisions/0030-m19-contract.md`, "Integration of W19.3").
 
 ---
 

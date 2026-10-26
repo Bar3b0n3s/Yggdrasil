@@ -10,6 +10,7 @@
 #include "Support/AutomationTestClient.h"
 #include "Support/FakeNativeBackends.h"
 #include "Support/NativeTestModule.h"
+#include "Support/TempDirectory.h"
 
 #include <nlohmann/json.hpp>
 
@@ -291,6 +292,38 @@ namespace Engine {
 			CHECK(read["components"].empty());
 			CHECK(read["unregistered"]["Native.TestSpinner"] == written);
 			CHECK(setup.CallError("native.setComponents", Json{ { "entity", "/Spinner" }, { "components", Json{ { "Native.TestSpinner", nullptr } } } }) == "\"InvalidState\"");
+		}
+
+		// Decision 32: native.write is refused while a build runs, an export's Runtime build too, which compiles the sources
+		// its lint read (Scripts/BuildNative.py also fails a build whose sources changed while it ran).
+		TEST_CASE("NativeMethods: native.write waits for an export's Runtime build")
+		{
+#if defined(ENGINE_PLATFORM_WINDOWS)
+			NativeMethodSetup setup;
+			setup.Allow();
+			static_cast<void>(setup.Call("native.write", Json{ { "path", "Native/Spinner.cpp" }, { "source", std::string(SpinnerSource) } }));
+			EditorContext& editor = setup.Fixture.GetEditor();
+			setup.Builds->SetPending(true);
+			const Test::TempDirectory output("NativeRuntimeBuild");
+			Result<Scope<INativeBuildJob>> job = editor.GetNativeModule().StartRuntimeBuild(editor, ExportConfiguration::Release, output.GetPath() / "Build");
+			REQUIRE_MESSAGE(job.has_value(), job.error().ToString());
+			CHECK(editor.GetNativeModule().IsRuntimeBuildRunning());
+			CHECK(setup.Call("native.status", Json::object())["building"] == Json(false));
+			const Json refused = setup.CallErrorData("native.write", Json{ { "path", "Native/Spinner.cpp" }, { "source", "// changed\n" } });
+			CHECK(refused["errorCode"] == Json("InvalidState"));
+			CHECK(refused.dump().contains("project.export"));
+
+			// A cancelled job counts until it resolves; a destroyed one no longer counts.
+			(*job)->Cancel();
+			CHECK((*job)->Poll().has_value());
+			CHECK_FALSE(editor.GetNativeModule().IsRuntimeBuildRunning());
+			CHECK(setup.Call("native.write", Json{ { "path", "Native/Spinner.cpp" }, { "source", "// changed\n" } })["created"] == Json(false));
+			Result<Scope<INativeBuildJob>> abandoned = editor.GetNativeModule().StartRuntimeBuild(editor, ExportConfiguration::Release, output.GetPath() / "Again");
+			REQUIRE(abandoned.has_value());
+			CHECK(editor.GetNativeModule().IsRuntimeBuildRunning());
+			abandoned->reset();
+			CHECK_FALSE(editor.GetNativeModule().IsRuntimeBuildRunning());
+#endif
 		}
 
 		// Decision 32 (N-D; the review of W19.2): native.build stays pending while its build runs, and whatever abandons the

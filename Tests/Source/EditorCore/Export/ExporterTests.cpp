@@ -5,6 +5,7 @@
 #include "EditorCore/Automation/RegisterMethods.h"
 #include "EditorCore/Commands/ProjectSettingsCommand.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Export/NativeExport.h"
 #include "EditorCore/Native/NativeModuleHost.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "EditorCore/Scripting/EditorScriptService.h"
@@ -51,6 +52,7 @@
 #include <array>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <optional>
 #include <span>
 #include <string>
@@ -1826,11 +1828,24 @@ namespace Engine {
 			CHECK(error.GetIssues().front().Hint.find("Assets/Tests/**") != std::string::npos);
 		}
 
+		// The names beside the output directory `output` that start with ".export-native-": the roots of step 3a's builds.
+		std::vector<std::string> ListNativeBuildRoots(const std::filesystem::path& output)
+		{
+			std::vector<std::string> roots;
+			for (std::string& name : ListNames(output.parent_path()))
+			{
+				if (name.starts_with(".export-native-"))
+					roots.push_back(std::move(name));
+			}
+			return roots;
+		}
+
 		// Docs/Decisions/0030-m19-contract.md decision 33 (C-NATIVE-STATIC, stream N-A): a game with Native/ is refused first,
 		// before anything is written, while the user's preference is off (Unsupported on Linux and macOS); allowed, step 3a
-		// builds its Runtime of the export's configuration with the module linked, the package holds that executable, and a
-		// build that does not succeed fails the export with CompileFailed and its diagnostics. A game without Native/ never
-		// enters the step (the timing test above).
+		// builds its Runtime of the export's configuration with the module linked, the package holds that executable, its
+		// symbols are archived below Library/ and the build's directory is gone, and a build that does not succeed fails the
+		// export with CompileFailed and its diagnostics, its hint naming a copy of the build's log that outlives the export.
+		// A game without Native/ never enters the step (the timing test above).
 		TEST_CASE("Exporter: a game with Native/ packages a Runtime linked with its module, and is refused first while native code is not allowed")
 		{
 			const Ref<Test::FakeNativeBuildBackend> builds = CreateRef<Test::FakeNativeBuildBackend>();
@@ -1881,6 +1896,10 @@ namespace Engine {
 			CHECK(*(native - 1) == ExportPhase::WritePaks);
 			CHECK(*(native + 1) == ExportPhase::CopyRuntime);
 			CHECK(std::filesystem::is_regular_file(report.Executable, exists));
+			CHECK(report.Warnings.empty());
+			const std::filesystem::path symbols = GetNativeExportSymbolsDirectory(fixture.GetProjectRoot(), ExportConfiguration::Release);
+			CHECK(ListNames(symbols) == std::vector<std::string>{ "Runtime.map", "Runtime.pdb" });
+			CHECK(ListNativeBuildRoots(report.OutputDirectory).empty());
 
 			builds->SetDiagnostics({ NativeBuildDiagnostic{ .Severity = DiagnosticSeverity::Error, .Code = "NATIVE_COMPILE_ERROR", .File = "Native/Spinner.cpp", .Line = 1, .Column = 1, .Message = "an error" } });
 			Result<Scope<Exporter>> failing = Exporter::Start(editor, specification);
@@ -1890,6 +1909,77 @@ namespace Engine {
 			REQUIRE_FALSE(failed->has_value());
 			CHECK(failed->error().GetCode() == ErrorCode::CompileFailed);
 			CHECK_FALSE(failed->error().GetIssues().empty());
+			// The build's directory went with the export, but the log the hint names is a copy below Library/.
+			const std::filesystem::path log = GetNativeExportLogPath(fixture.GetProjectRoot(), ExportConfiguration::Release);
+			CHECK(failed->error().GetHint().contains(FileSystem::PathToUtf8(log)));
+			CHECK(std::filesystem::is_regular_file(log, exists));
+			CHECK_FALSE(FileSystem::Exists(builds->GetLastRequest().OutputDirectory));
+			CHECK(ListNativeBuildRoots(report.OutputDirectory).empty());
+#endif
+		}
+
+		// A cancelled export's native build can leave its directory behind, still being written by the MSBuild that cancelling
+		// does not stop (decision 30), and Scripts/BuildNative.py refuses an output directory that is not empty (as the fake
+		// build does). The next export of the same output, in the same editor, builds into a directory no build wrote,
+		// skipping a leftover it cannot remove, and the leftover goes once it can.
+		TEST_CASE("Exporter: a native build directory a cancelled export left behind does not stop the next export of the same output")
+		{
+#if defined(ENGINE_PLATFORM_WINDOWS)
+			const Ref<Test::FakeNativeBuildBackend> builds = CreateRef<Test::FakeNativeBuildBackend>();
+			Test::EditorTestFixture fixture("ExportNativeLeftover", {}, nullptr, std::nullopt, false,
+				Test::EditorTestNativeBackends{ .Build = builds, .Loader = CreateRef<Test::FakeNativeLibraryLoader>() });
+			MakeExportableProject(fixture);
+			EditorContext& editor = fixture.GetEditor();
+			WriteTestFile(fixture.GetProjectRoot() / "Native" / "Spinner.cpp", "#include \"Engine/Native/NativeApi.h\"\n");
+			builds->SetApiHeader(MakeEditorNativeModuleHostSpecification(nullptr, nullptr).ApiHeader);
+			const Result<std::filesystem::path> runtime = Test::GetBuiltExecutablePath("Runtime");
+			REQUIRE_MESSAGE(runtime.has_value(), runtime.error().ToString());
+			builds->SetRuntimeExecutable(*runtime);
+			editor.GetNativeModule().QueuePreferenceChange(true);
+			editor.GetNativeModule().Update(editor);
+			const Test::TempDirectory binaries("ExportBinaries");
+			const ExportSpecification specification = MakeSpecification(MakeRealBinaryRoot(binaries));
+			const auto exportGame = [&editor, &specification]()
+			{
+				Result<Scope<Exporter>> exporter = Exporter::Start(editor, specification);
+				REQUIRE_MESSAGE(exporter.has_value(), exporter.error().ToString());
+				std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+				REQUIRE(outcome.has_value());
+				return std::move(*outcome);
+			};
+
+			// The first export is cancelled while its build runs; the build's MSBuild then writes on into its directory.
+			builds->SetPending(true);
+			std::filesystem::path cancelled;
+			{
+				Result<Scope<Exporter>> exporter = Exporter::Start(editor, specification);
+				REQUIRE(exporter.has_value());
+				REQUIRE(RunUntilPhase(**exporter, ExportPhase::NativeBuild));
+				REQUIRE_FALSE((*exporter)->Poll().has_value());
+				REQUIRE(builds->GetStartCount() == 1);
+				cancelled = builds->GetLastRequest().OutputDirectory;
+				(*exporter)->Cancel();
+			}
+			REQUIRE(FileSystem::CreateDirectories(cancelled / "Intermediate").has_value());
+			std::optional<std::ofstream> writing(std::in_place, cancelled / "Intermediate" / "Spinner.obj", std::ios::binary);
+			REQUIRE(writing->is_open());
+			*writing << "still being written";
+			writing->flush();
+
+			// The retry builds into a directory no build wrote, whatever became of the leftover, and succeeds.
+			builds->SetPending(false);
+			const Result<ExportReport> retried = exportGame();
+			REQUIRE_MESSAGE(retried.has_value(), retried.error().ToString());
+			CHECK(retried->NativeModule);
+			CHECK(builds->GetStartCount() == 2);
+			CHECK_FALSE(FileSystem::Exists(builds->GetLastRequest().OutputDirectory));
+
+			// Once nothing writes there any more, the next export removes the leftover, and nothing stays beside the output.
+			writing.reset();
+			const Result<ExportReport> again = exportGame();
+			REQUIRE_MESSAGE(again.has_value(), again.error().ToString());
+			CHECK_FALSE(FileSystem::Exists(cancelled));
+			CHECK(ListNativeBuildRoots(again->OutputDirectory).empty());
 #endif
 		}
 	}

@@ -13,9 +13,12 @@
 // Fake native backends for the editor's native module host (Docs/Decisions/0030-m19-contract.md decision 37), so the host's
 // and the native methods' tests run without a toolchain or a shared library. The fake build succeeds at its first Poll
 // (or fails with the diagnostics it was given): it writes into the request's output directory a "library", a text file
-// that names one of the test modules of Support/NativeTestModule.h, and the build record NativeBuild.json of decision 30
-// with the real ComputeNativeSourceHash; the fake loader reads that file back and returns the named module's entry point.
-// A pending build (SetPending) instead runs until it is cancelled, as a real build that its caller abandons does.
+// that names one of the test modules of Support/NativeTestModule.h (for a Runtime build, a copy of a real Runtime with a
+// stand-in PDB and linker map beside it), and the build record NativeBuild.json of decision 30 with the real
+// ComputeNativeSourceHash; the fake loader reads that file back and returns the named module's entry point. Like
+// Scripts/BuildNative.py, it refuses an output directory that exists and is not empty: the build resolves to an Io error
+// and writes nothing. A pending build (SetPending) instead runs until it is cancelled, as a real build that its caller
+// abandons does.
 
 namespace Engine {
 

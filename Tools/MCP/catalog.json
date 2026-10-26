@@ -1275,7 +1275,7 @@
 		{
 			"name": "native_write",
 			"method": "native.write",
-			"description": "Writes a .cpp or .h source of the native module below Native/ as one undoable edit, recorded in provenance; it builds nothing (native.build).",
+			"description": "Writes a .cpp or .h source of the native module below Native/ as one undoable edit, recorded in provenance; it builds nothing (native.build), and is refused while a build runs, an export's included.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "NativeWriteParams",

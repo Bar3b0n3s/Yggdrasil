@@ -25,7 +25,11 @@
 //      session fatally, like an exception that escapes a system: PlaySession::GetFatalError names the entity (its path and
 //      id), the component and the first issue, and no later system or phase runs. A value read with notes
 //      (NATIVE_FIELD_DROPPED, NATIVE_FIELD_RESET) is used migrated and written back canonical at the phase's end like a
-//      changed one, and each note is logged as a warning once per session, component and field, never failing the step;
+//      changed one, and each note is logged as a warning once per session, component and field, never failing the step.
+//      After each system, every component and resource value it changed must be one its type accepts: a rejected one is
+//      put back as the system found it, so the world never holds it, and the first stops the session fatally
+//      (PlaySession::GetFatalError, naming the system, the entity and the component, or the resource), and no later
+//      system or phase runs;
 //   2. then every component whose bytes a system changed, or whose read migrated it, is written back to the scene as
 //      canonical JSON (NativeValueToJson), and every component a system added or removed is added to or removed from its
 //      entity's preserved components, so when NativeStep ends the scene holds the native data, scene.get, entity reads and

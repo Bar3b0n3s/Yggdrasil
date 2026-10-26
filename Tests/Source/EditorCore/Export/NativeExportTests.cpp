@@ -5,9 +5,12 @@
 #include "Engine/Core/FileSystem.h"
 #include "Support/EditorTestFixture.h"
 #include "Support/FakeNativeBackends.h"
+#include "Support/TempDirectory.h"
 
 #include <filesystem>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Engine {
@@ -46,6 +49,63 @@ namespace Engine {
 			const Error bare = MakeNativeBuildError(NativeBuildOutcome{}, "Spinners");
 			CHECK(bare.GetCode() == ErrorCode::CompileFailed);
 			CHECK(bare.GetIssues().empty());
+		}
+
+		// What outlives step 3a's build directory, which the export removes when it ends: a failed build's log, copied below the
+		// project's Library/ so the error's hint names a file that exists, and the exported executable's PDB and linker map,
+		// archived there (Architecture §2.2: archived, never shipped), each replacing the configuration's previous one.
+		TEST_CASE("NativeExport: a failed build's log and an exported Runtime's symbols are kept below Library/, replacing the previous ones")
+		{
+			const Test::TempDirectory temporary("NativeExportKeep");
+			const std::filesystem::path project = temporary.GetPath() / "Game";
+			const std::filesystem::path build = temporary.GetPath() / "Build";
+			REQUIRE(FileSystem::CreateDirectories(project).has_value());
+			REQUIRE(FileSystem::CreateDirectories(build).has_value());
+			const auto write = [](const std::filesystem::path& path, std::string_view text)
+			{
+				REQUIRE(FileSystem::WriteFileAtomic(path, std::as_bytes(std::span(text.data(), text.size()))).has_value());
+			};
+			const auto read = [](const std::filesystem::path& path)
+			{
+				const Result<std::string> text = FileSystem::ReadText(path);
+				REQUIRE(text.has_value());
+				return *text;
+			};
+
+			NativeBuildOutcome outcome;
+			outcome.Log = build / "Build.log";
+			write(outcome.Log, "the whole output\n");
+			const NativeBuildOutcome kept = KeepNativeBuildLog(project, ExportConfiguration::Dist, outcome);
+			CHECK(kept.Log == GetNativeExportLogPath(project, ExportConfiguration::Dist));
+			CHECK(kept.Log.parent_path().parent_path().parent_path() == project / "Library");
+			CHECK(read(kept.Log) == "the whole output\n");
+			CHECK(MakeNativeBuildError(kept, "Spinners").GetHint().contains(FileSystem::PathToUtf8(kept.Log)));
+			// An outcome without a log, as a build that never ran gives, is returned as it is.
+			CHECK(KeepNativeBuildLog(project, ExportConfiguration::Dist, NativeBuildOutcome{}).Log.empty());
+
+			const std::filesystem::path executable = build / "Runtime.exe";
+			write(executable, "executable");
+			write(build / "Runtime.pdb", "first symbols");
+			const Result<std::filesystem::path> missing = ArchiveNativeRuntimeSymbols(project, ExportConfiguration::Dist, executable);
+			REQUIRE_FALSE(missing.has_value());
+			CHECK(missing.error().GetCode() == ErrorCode::NotFound);
+			CHECK(missing.error().GetMessageText().contains("Runtime.map"));
+
+			write(build / "Runtime.map", "first map");
+			const Result<std::filesystem::path> archived = ArchiveNativeRuntimeSymbols(project, ExportConfiguration::Dist, executable);
+			REQUIRE_MESSAGE(archived.has_value(), archived.error().ToString());
+			CHECK(*archived == GetNativeExportSymbolsDirectory(project, ExportConfiguration::Dist));
+			CHECK(read(*archived / "Runtime.pdb") == "first symbols");
+			CHECK(read(*archived / "Runtime.map") == "first map");
+			CHECK_FALSE(FileSystem::Exists(*archived / "Runtime.exe"));
+
+			// The next export's symbols replace them; another configuration's are its own.
+			write(*archived / "Stale.pdb", "stale");
+			write(build / "Runtime.pdb", "second symbols");
+			REQUIRE(ArchiveNativeRuntimeSymbols(project, ExportConfiguration::Dist, executable).has_value());
+			CHECK(read(*archived / "Runtime.pdb") == "second symbols");
+			CHECK_FALSE(FileSystem::Exists(*archived / "Stale.pdb"));
+			CHECK(GetNativeExportSymbolsDirectory(project, ExportConfiguration::Release) != *archived);
 		}
 
 		// Decision 33 (N-A): step 1's refusal of a game with Native/ comes before anything else is checked: Unsupported on Linux

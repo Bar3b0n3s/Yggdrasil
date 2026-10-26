@@ -48,8 +48,10 @@ namespace Engine {
 		uint32_t Events = 0;
 		std::string Path{};
 		std::string StateHash{};
-		uint32_t Checkpoints = 0;    // the state-hash checkpoints written (ReplayCheckpointInterval); 0 on Start
-		uint32_t InputCheckTick = 0; // where the input check ended (Stop with input events); 0 when none ran
+		uint32_t Checkpoints = 0; // the state-hash checkpoints written (ReplayCheckpointInterval); 0 on Start
+		// Stop with input events: the tick of the first checkpoint at which the input check differed, else the tick where it
+		// ended; the session waits where the check ended (the replay's final tick unless it stopped early). 0 when none ran.
+		uint32_t InputCheckTick = 0;
 		// Stop: notes on a written replay, none on Start (M19 decision 3, A-F29): the input check's
 		// MakeFinalHashIndependentWarning when its run without input differed only at checkpoints and reproduced the
 		// recorded final hash.

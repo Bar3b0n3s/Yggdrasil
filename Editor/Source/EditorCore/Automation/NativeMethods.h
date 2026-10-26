@@ -137,7 +137,10 @@ namespace Engine {
 	struct NativeGetComponentsResult
 	{
 		EntitySummary Entity{};
-		// The entity's native components the loaded module registers, canonical, by registry name ("Native.Spinner").
+		// The entity's native components the loaded module registers, by registry name ("Native.Spinner"), as the scene
+		// holds them: canonical (every field written) once the editor canonicalized or wrote them, but as stored for those it
+		// did not (a scene Scene.Load loaded during play, a prefab instance member from a prefab saved under an older layout;
+		// decisions 27 and 28).
 		std::map<std::string, VariantValue> Components{};
 		// Its other "Native." components, as written (all of them while no module is loaded).
 		std::map<std::string, VariantValue> Unregistered{};
@@ -155,8 +158,10 @@ namespace Engine {
 	struct NativeSetComponentsResult
 	{
 		EntitySummary Entity{};
-		std::map<std::string, VariantValue> Components{}; // the entity's native components after the change, canonical
-		uint32_t UndoIndex = 0;                           // 0 for the play scene (transient) and for a dry run
+		// The entity's native components after the change, as the scene holds them: the patched ones canonical, the others as
+		// NativeGetComponentsResult::Components reads them.
+		std::map<std::string, VariantValue> Components{};
+		uint32_t UndoIndex = 0; // 0 for the play scene (transient) and for a dry run
 	};
 
 	namespace Automation {
@@ -164,8 +169,9 @@ namespace Engine {
 		// The handlers (decision 32; stream N-D). Paths below Native/ resolve like script.read's below Assets/ (ResolveProjectPath,
 		// then the Native/ confinement: InvalidArgument at /path for another folder, an extension other than .cpp or .h, or a
 		// path that escapes). native.write goes through AssetEditCommand (one undo step) and EditorContext's write path, so
-		// provenance records it (decision 35); it is refused while a build runs (InvalidState). native.build and native.load
-		// are NativeModuleHost's StartBuild/PollBuild and Load, with their errors; a client's disconnect cancels a build.
+		// provenance records it (decision 35); it is refused while a build runs, an export's Runtime build included
+		// (NativeModuleHost::IsRuntimeBuildRunning), with InvalidState. native.build and native.load are NativeModuleHost's
+		// StartBuild/PollBuild and Load, with their errors; a client's disconnect cancels a build.
 		// native.setComponents is one SceneEdit (one undo step) for the edit scene, a transient change for the play scene
 		// (target Play), and needs a loaded module (InvalidState otherwise); its errors are PatchNativeComponents' located
 		// below /components. In the edit scene it refuses a member of a prefab instance (an entity with a PrefabLink) with

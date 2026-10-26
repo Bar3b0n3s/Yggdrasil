@@ -5,9 +5,15 @@ from __future__ import annotations
 
 import json
 import math
+import re
+import sys
 import unittest
 
-from harness import DEFAULT_PROJECT_NAME, REPOSITORY_ROOT, AutomationTestCase, engine_client
+from harness import DEFAULT_PROJECT_NAME, REPOSITORY_ROOT, AutomationTestCase, automation_config, engine_client
+
+sys.path.insert(0, str(REPOSITORY_ROOT / "Scripts"))
+
+import Build  # noqa: E402  (Scripts/ is on sys.path above: the stamp path Build.py writes)
 
 
 def euler_degrees_to_quaternion(x: float, y: float, z: float) -> tuple[float, float, float, float]:
@@ -292,12 +298,22 @@ class MethodTests(AutomationTestCase):
 
     def test_session_reports_the_build_id(self) -> None:
         # Docs/Decisions/0030-m19-contract.md decision 13 (B-BVER): session.hello, session.info and the session file
-        # name the build that answers, as semantic-versioning build metadata whose version is the engine's.
+        # name the build that answers, as semantic-versioning build metadata whose version is the engine's. A build by
+        # Scripts/Build.py in a git checkout names its commit: Build.py writes the stamp header where premake's Engine
+        # objdir names it (ENGINE_BUILD_STAMP_HEADER), and BuildId.cpp compiles without it when the two paths drift
+        # apart, so a stamp with a commit beside the build means the build must carry one (the milestone review).
         editor = self.start_editor()
         client = self.connect(editor)
         build = client.hello["build"]
         self.assertRegex(build, r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\+[0-9a-f]{12}(\.dirty)?)?$")
         self.assertEqual(build.split("+", 1)[0], client.hello["engineVersion"])
+        stamp = Build.build_stamp_path(REPOSITORY_ROOT, automation_config())
+        if stamp.is_file():
+            commit = re.search(r'^#define ENGINE_BUILD_COMMIT "([0-9a-f]*)"$', stamp.read_text(encoding="utf-8"),
+                               re.MULTILINE)
+            self.assertIsNotNone(commit, stamp)
+            if commit is not None and commit.group(1):
+                self.assertRegex(build, r"\+[0-9a-f]{12}(\.dirty)?$", f"{stamp} names commit {commit.group(1)}")
         self.assertEqual(client.call("session.info")["build"], build)
         self.assertIsNotNone(editor.session)
         session_file = json.loads(editor.session.path.read_text(encoding="utf-8"))

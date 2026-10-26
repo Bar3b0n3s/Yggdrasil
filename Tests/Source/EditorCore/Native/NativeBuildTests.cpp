@@ -154,6 +154,21 @@ namespace Engine {
 			succeeded.replace(succeeded.find("false"), 5, "true");
 			CHECK_FALSE(ParseNativeBuildRecord(succeeded).has_value());
 			CHECK(ParseNativeBuildRecord("{").error().GetCode() == ErrorCode::Parse);
+
+			// A build that failed before it could hash the sources records an empty SourceHash, which reads back (the milestone
+			// review: the editor reports why the build failed, not that its record is malformed); a successful one never does.
+			std::string unhashed(RecordText);
+			unhashed.replace(unhashed.find("0123456789abcdef"), 16, "");
+			const Result<NativeBuildRecord> failed = ParseNativeBuildRecord(unhashed);
+			REQUIRE_MESSAGE(failed.has_value(), failed.error().ToString());
+			CHECK(failed->SourceHash.empty());
+			CHECK_FALSE(failed->Succeeded);
+			std::string unhashedSuccess(unhashed);
+			unhashedSuccess.replace(unhashedSuccess.find("false"), 5, "true");
+			unhashedSuccess.replace(unhashedSuccess.find("\"Output\": \"\""), 12, "\"Output\": \"NativeModule.dll\"");
+			const Result<NativeBuildRecord> refusedSuccess = ParseNativeBuildRecord(unhashedSuccess);
+			REQUIRE_FALSE(refusedSuccess.has_value());
+			CHECK(refusedSuccess.error().GetLocation().JsonPointer == std::optional<std::string>("/SourceHash"));
 		}
 
 		// Decision 30 (N-A): the editor's backend runs Scripts/BuildNative.py by fixed paths with fixed arguments and resolves

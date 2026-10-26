@@ -6747,7 +6747,7 @@
 						"maximum": 4294967295
 					},
 					"inputCheckTick": {
-						"description": "Stop with input events: the tick where the input check (the recording replayed without its input) ended, at the first checkpoint that differed or at the final tick; the play session waits paused there. 0 when no check ran.",
+						"description": "Stop with input events: the tick of the first checkpoint at which the input check (the recording replayed without its input events, continuing past checkpoints that differ) differed, else the tick where that run ended; the play session waits paused where the check ended, the replay's final tick unless it stopped early. 0 when no check ran.",
 						"type": "integer",
 						"minimum": 0,
 						"maximum": 4294967295
@@ -7306,7 +7306,7 @@
 						"$ref": "#/$defs/EntitySummary"
 					},
 					"components": {
-						"description": "Its components the loaded module registers, by registry name, every field written.",
+						"description": "Its components the loaded module registers, by registry name, as the scene holds them: every field written once the editor canonicalized or wrote them, but as stored for those it did not (a scene Scene.Load loaded during play, a prefab instance member from a prefab saved under an older layout).",
 						"type": "object",
 						"additionalProperties": {}
 					},
@@ -7669,7 +7669,7 @@
 						"$ref": "#/$defs/EntitySummary"
 					},
 					"components": {
-						"description": "Its native components the loaded module registers, every field written.",
+						"description": "Its native components the loaded module registers, as the scene holds them: the changed ones with every field written, the others as native.getComponents reads them.",
 						"type": "object",
 						"additionalProperties": {}
 					},
@@ -7935,7 +7935,7 @@
 		{
 			"name": "native.write",
 			"domain": "native",
-			"description": "Writes a .cpp or .h source of the native module below Native/ as one undoable edit, recorded in provenance; it builds nothing (native.build).",
+			"description": "Writes a .cpp or .h source of the native module below Native/ as one undoable edit, recorded in provenance; it builds nothing (native.build), and is refused while a build runs, an export's included.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": true,

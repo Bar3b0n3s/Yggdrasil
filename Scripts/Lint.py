@@ -48,9 +48,6 @@ Steps, selected with --steps (default: all, in this order):
             functions, data members, statics, globals and macros. The mode that ran is reported. C++ file and
             directory names are checked in both modes. Native module sources have no compile commands and always
             take the regex checker.
-
-lint_native_module(project) applies the includes, banned and naming rules of native modules to a game project's
-Native/ anywhere on disk: Scripts/BuildNative.py's check before it compiles (decision 35).
   headers   header self-containment: every first-party header is compiled on its own, syntax-only, with the include
             paths and defines of its project from compile_commands.json, in a temporary directory. It is included
             twice, which also proves its include guard. Headers also start with #pragma once.
@@ -58,6 +55,9 @@ Native/ anywhere on disk: Scripts/BuildNative.py's check before it compiles (dec
             limit (python-line-length: characters, a tab counting to the next multiple of 4; CodeStyle section 15)
             for Scripts/, Tools/ and Tests/.
   json      strict JSON validity (UTF-8 without BOM, no NaN or Infinity, no duplicate keys) of project and data files.
+
+lint_native_module(project) applies the includes, banned and naming rules of native modules to a game project's
+Native/ anywhere on disk: Scripts/BuildNative.py's check before it compiles (decision 35).
 
 compile_commands.json is generated into a temporary directory with `premake5 compile-commands`
 (Scripts/Premake/CompileCommands.lua) unless --compile-commands names an existing one. Nothing is built and nothing

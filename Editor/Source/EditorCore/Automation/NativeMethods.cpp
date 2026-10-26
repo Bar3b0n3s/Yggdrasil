@@ -286,6 +286,12 @@ namespace Engine {
 				return std::unexpected(Error(ErrorCode::InvalidState, std::format("'{}' cannot be written while the native module builds", Utils::ToProjectRelative(path)))
 						.WithHint("wait for native.build to resolve (native.status reports building), then write the source"));
 			}
+			if (editor.GetNativeModule().IsRuntimeBuildRunning())
+			{
+				return std::unexpected(Error(ErrorCode::InvalidState,
+					std::format("'{}' cannot be written while an export builds the game's Runtime with the native module", Utils::ToProjectRelative(path)))
+						.WithHint("wait for project.export to finish its NativeBuild step, then write the source"));
+			}
 
 			// The missing folders, outermost first, then the file: one AssetEditCommand, so one undo step removes them all.
 			VirtualFileSystem& vfs = editor.GetVfs();
@@ -495,7 +501,8 @@ namespace Engine {
 			.Field("target", &NativeGetComponentsParams::Target, "The scene to read; omitted: the play scene while playing, else the edit scene.");
 		registry.Struct<NativeGetComponentsResult>("NativeGetComponentsResult", "An entity's native components.")
 			.Field("entity", &NativeGetComponentsResult::Entity, "The entity.")
-			.Field("components", &NativeGetComponentsResult::Components, "Its components the loaded module registers, by registry name, every field written.")
+			.Field("components", &NativeGetComponentsResult::Components,
+				"Its components the loaded module registers, by registry name, as the scene holds them: every field written once the editor canonicalized or wrote them, but as stored for those it did not (a scene Scene.Load loaded during play, a prefab instance member from a prefab saved under an older layout).")
 			.Field("unregistered", &NativeGetComponentsResult::Unregistered,
 				"Its other Native.<Name> components, as written: all of them while no module is loaded.");
 		registry.Struct<NativeSetComponentsParams>("NativeSetComponentsParams", "Add, change or remove an entity's native components.")
@@ -505,7 +512,7 @@ namespace Engine {
 			.Field("target", &NativeSetComponentsParams::Target, "The scene to change; play changes are transient.");
 		registry.Struct<NativeSetComponentsResult>("NativeSetComponentsResult", "The entity's native components after the change.")
 			.Field("entity", &NativeSetComponentsResult::Entity, "The entity.")
-			.Field("components", &NativeSetComponentsResult::Components, "Its native components the loaded module registers, every field written.")
+			.Field("components", &NativeSetComponentsResult::Components, "Its native components the loaded module registers, as the scene holds them: the changed ones with every field written, the others as native.getComponents reads them.")
 			.Field("undoIndex", &NativeSetComponentsResult::UndoIndex, "Undo step; zero for the play scene and for a dry run.");
 	}
 
@@ -526,7 +533,7 @@ namespace Engine {
 						.Examples = { { .Description = "Read a source.", .Params = Json{ { "path", "Native/Spinner.cpp" } } } } },
 			&Automation::NativeRead);
 		methods.Add({ .Name = "native.write",
-						.Description = "Writes a .cpp or .h source of the native module below Native/ as one undoable edit, recorded in provenance; it builds nothing (native.build).",
+						.Description = "Writes a .cpp or .h source of the native module below Native/ as one undoable edit, recorded in provenance; it builds nothing (native.build), and is refused while a build runs, an export's included.",
 						.RequiredParams = { "path", "source" },
 						.ExposeAsTool = true,
 						.Mutates = true,

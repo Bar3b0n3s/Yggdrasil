@@ -25,7 +25,9 @@
 // backend that runs BuildNative.py as one process by fixed paths with fixed arguments. The process code is portable (the
 // Process API), but Start refuses first with SharedLibrary::CheckSupported, so Linux and macOS never start a build
 // (decision 34). Cancelling a build kills its Python process; the MSBuild it started then finishes on its own, writing
-// only below the build's own output directory, which no later build reuses.
+// only below the build's own output directory, which no later build reuses: the editor numbers its builds' directories
+// anew, and an export builds into a new numbered directory beside its staging directory, skipping a cancelled build's
+// leftover it cannot remove yet (Exporter.cpp's PrepareNativeBuildDirectory).
 
 namespace Engine {
 
@@ -102,9 +104,13 @@ namespace Engine {
 			return std::unexpected(MakeRecordError(reader.GetPointer(), std::format("expected \"Debug\", \"Release\" or \"Dist\", got '{}'", text)));
 		}
 
-		[[nodiscard]] static Result<std::string> ReadSourceHash(const JsonReader& reader)
+		// 16 lowercase hex digits, or with `allowEmpty` (a failed build's record) also "": a build that failed before it could
+		// hash the sources (not Windows, or a source it could not read) records why without a hash.
+		[[nodiscard]] static Result<std::string> ReadSourceHash(const JsonReader& reader, bool allowEmpty)
 		{
 			ENGINE_TRY_ASSIGN(std::string hash, reader.ReadString());
+			if (allowEmpty && hash.empty())
+				return hash;
 			const bool lowercaseHex = std::ranges::all_of(hash, [](char character)
 			{
 				return (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f');
@@ -152,8 +158,9 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(record.Kind, ReadBuildKind(kind));
 			ENGINE_TRY_ASSIGN(const JsonReader configuration, root.GetMember("Configuration"));
 			ENGINE_TRY_ASSIGN(record.Configuration, ReadConfiguration(configuration));
+			ENGINE_TRY_ASSIGN(record.Succeeded, root.ReadMember<bool>("Succeeded"));
 			ENGINE_TRY_ASSIGN(const JsonReader sourceHash, root.GetMember("SourceHash"));
-			ENGINE_TRY_ASSIGN(record.SourceHash, ReadSourceHash(sourceHash));
+			ENGINE_TRY_ASSIGN(record.SourceHash, ReadSourceHash(sourceHash, !record.Succeeded));
 			ENGINE_TRY_ASSIGN(const JsonReader sources, root.GetMember("Sources"));
 			ENGINE_TRY_ASSIGN(const size_t sourceCount, sources.GetArraySize());
 			for (size_t index = 0; index < sourceCount; ++index)
@@ -162,7 +169,6 @@ namespace Engine {
 				ENGINE_TRY_ASSIGN(std::string path, source.ReadString());
 				record.Sources.push_back(std::move(path));
 			}
-			ENGINE_TRY_ASSIGN(record.Succeeded, root.ReadMember<bool>("Succeeded"));
 			ENGINE_TRY_ASSIGN(const JsonReader output, root.GetMember("Output"));
 			ENGINE_TRY_ASSIGN(record.Output, ReadPlainFileName(output, !record.Succeeded));
 			ENGINE_TRY_ASSIGN(const JsonReader log, root.GetMember("Log"));

@@ -45,7 +45,7 @@ namespace Engine {
 		NativeBuildKind Kind = NativeBuildKind::Module;
 		ExportConfiguration Configuration = ExportConfiguration::Debug;
 		// Absolute, missing or empty: the build writes its output and NativeBuild.json there (the editor: a new
-		// <Project>/Library/Native/Builds/<sequence>/; an export: a directory beside its staging directory).
+		// <Project>/Library/Native/Builds/<sequence>/; an export: a new numbered directory beside its staging directory).
 		std::filesystem::path OutputDirectory{};
 	};
 
@@ -70,7 +70,7 @@ namespace Engine {
 	{
 		bool Succeeded = false;
 		std::filesystem::path Output{};                   // the library or the executable; empty when the build failed
-		std::string SourceHash{};                         // ComputeNativeSourceHash of the sources it compiled
+		std::string SourceHash{};                         // ComputeNativeSourceHash of the sources it compiled; empty when it failed before hashing them
 		std::vector<NativeBuildDiagnostic> Diagnostics{}; // in the order the build found them
 		std::filesystem::path Log{};                      // the build's whole output, beside Output
 		double Seconds = 0.0;                             // wall-clock, for the report only
@@ -78,7 +78,8 @@ namespace Engine {
 
 	// A build record, NativeBuild.json in a build's output directory (decision 30), as the host and the backend read it:
 	//     { "Format": "NativeBuild", "Version": 1, "Kind": "Module" | "Runtime", "Configuration": "Debug" | "Release" | "Dist",
-	//       "SourceHash": <16 hex>, "Sources": [<project-relative path>, ...], "Succeeded": <bool>,
+	//       "SourceHash": <16 hex, "" when a failed build could not hash the sources>, "Sources": [<project-relative path>, ...],
+	//       "Succeeded": <bool>,
 	//       "Output": <file name in the directory, "" when it failed>, "Log": <file name>,
 	//       "Diagnostics": [ { "Severity": "Error" | "Warning", "Code", "File", "Line", "Column", "Message" }, ... ] }
 	// written canonically by Scripts/BuildNative.py.
@@ -96,8 +97,9 @@ namespace Engine {
 
 	// Reads a build record. The record is written by the build, never by hand, so its reader is strict like a .meta file's:
 	// errors are Parse (line and column) for invalid JSON, and Validation located at its pointer for anything else than the
-	// layout above (a missing or unknown member, a value of the wrong type, a SourceHash that is not 16 lowercase hex digits,
-	// a Version other than 1, an Output that is not a plain file name or is empty for a successful build). Pure; fuzzed.
+	// layout above (a missing or unknown member, a value of the wrong type, a SourceHash that is not 16 lowercase hex digits
+	// or is empty for a successful build, a Version other than 1, an Output that is not a plain file name or is empty for a
+	// successful build). Pure; fuzzed.
 	[[nodiscard]] Result<NativeBuildRecord> ParseNativeBuildRecord(std::string_view text);
 
 	// One running build. Main thread; Poll once per frame (a pending operation's Poll). Destroying a job that still runs

@@ -77,6 +77,54 @@ namespace Engine {
 			}
 		};
 
+		// An export's Runtime build (StartRuntimeBuild), counted in `running` from its start until it resolves or its owner
+		// destroys it, so native.write refuses while one runs (decision 32). Main thread only, like the host, which outlives
+		// every job it starts (the exporter's EditorContext owns the host; ~NativeModuleHost asserts it).
+		class CountedNativeBuildJob final : public INativeBuildJob
+		{
+		public:
+			CountedNativeBuildJob(Scope<INativeBuildJob> job, uint32_t& running)
+				: m_Job(std::move(job)), m_Running(&running)
+			{
+				++*m_Running;
+			}
+
+			~CountedNativeBuildJob() override
+			{
+				Release();
+			}
+
+			CountedNativeBuildJob(const CountedNativeBuildJob&) = delete;
+			CountedNativeBuildJob& operator=(const CountedNativeBuildJob&) = delete;
+			CountedNativeBuildJob(CountedNativeBuildJob&&) = delete;
+			CountedNativeBuildJob& operator=(CountedNativeBuildJob&&) = delete;
+
+			[[nodiscard]] std::optional<Result<NativeBuildOutcome>> Poll() override
+			{
+				std::optional<Result<NativeBuildOutcome>> polled = m_Job->Poll();
+				if (polled.has_value())
+					Release();
+				return polled;
+			}
+
+			void Cancel() override
+			{
+				m_Job->Cancel();
+			}
+		private:
+			void Release()
+			{
+				if (!m_Counted)
+					return;
+				m_Counted = false;
+				--*m_Running;
+			}
+		private:
+			Scope<INativeBuildJob> m_Job;
+			uint32_t* m_Running = nullptr; // documented back-reference: the host's count, the host outliving the job
+			bool m_Counted = true;
+		};
+
 	}
 
 	namespace Utils {
@@ -223,6 +271,7 @@ namespace Engine {
 		bool Allowed = false;                                    // the user's preference as last read or applied
 		std::optional<bool> QueuedPreference{};                  // the Native panel's change, applied by Update
 		Scope<INativeBuildJob> Build{};                          // the module build StartBuild started, until it resolved
+		uint32_t RuntimeBuilds = 0;                              // the exports' Runtime builds that run (CountedNativeBuildJob)
 		std::optional<Result<NativeBuildOutcome>> BuildResult{}; // how that build resolved, for PollBuild after it did
 		std::optional<NativeBuildOutcome> LastBuild{};
 		Ref<const NativeModuleTypes> Loaded{};
@@ -406,6 +455,7 @@ namespace Engine {
 	NativeModuleHost::~NativeModuleHost()
 	{
 		CancelBuild();
+		ENGINE_ASSERT(m_State->RuntimeBuilds == 0, "{} Runtime build(s) of an export outlive the native module host that started them", m_State->RuntimeBuilds);
 	}
 
 	bool NativeModuleHost::IsAllowed() const
@@ -610,7 +660,12 @@ namespace Engine {
 		Result<Scope<INativeBuildJob>> job = state.Specification.Build->Start(request);
 		if (!job.has_value())
 			return std::unexpected(std::move(job).error().WithContext(std::format("starting the {} Runtime build with the native module", ExportConfigurationToString(configuration))));
-		return job;
+		return Scope<INativeBuildJob>(CreateScope<CountedNativeBuildJob>(std::move(*job), state.RuntimeBuilds));
+	}
+
+	bool NativeModuleHost::IsRuntimeBuildRunning() const
+	{
+		return m_State->RuntimeBuilds > 0;
 	}
 
 	Result<NativeLoadReport> NativeModuleHost::Load(EditorContext& editor)

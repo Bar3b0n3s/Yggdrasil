@@ -243,9 +243,10 @@ class NativeModuleTests(AutomationTestCase):
         # Decision 33: the export of a game with Native/ builds its Runtime with the module linked; the smoke test then
         # runs the exported game, and in the exported game's own session the module's system turns the Wheel, with no
         # library loaded (the Runtime's automation subset reads its rotation, as test_runtime.py reads an exported
-        # game).
+        # game). The export runs in the configuration the suite's editor was built in, whose RuntimeCore and Engine
+        # libraries the native Runtime links, and archives that executable's PDB and linker map below Library/.
         self.allow_native_code()
-        client, _ = self.open_native_project()
+        client, root = self.open_native_project()
         client.call("native.build")
         client.call("native.load")
         client.call("entity.create", {"name": "Wheel"})
@@ -253,10 +254,14 @@ class NativeModuleTests(AutomationTestCase):
         client.call("scene.save")
         client.call("project.setSettings", {"patch": {"StartScene": "Assets/Scenes/Main.scene",
                                                       "Export": {"BuildScenes": ["Assets/Scenes/Main.scene"]}}})
-        exported = client.call("project.export", {"config": "Release", "smokeTest": True})
+        config = automation_config()
+        exported = client.call("project.export", {"config": config, "smokeTest": True})
         self.assertTrue(exported["nativeModule"])
         self.assertIn("NativeBuild", [timing["phase"] for timing in exported["phaseTimings"]])
         self.assertEqual(exported["smokeTestExitCode"], 0)
+        self.assertEqual(exported["warnings"], [])
+        symbols = root / "Library" / "Native" / "Symbols" / config
+        self.assertEqual(sorted(path.name for path in symbols.iterdir()), ["Runtime.map", "Runtime.pdb"])
 
         arguments = ["--headless", "--automation", "--paused", "--renderer", "none"]
         game = engine_client.launch_editor(Path(exported["executable"]), arguments, self.directory / "ExportedGame",

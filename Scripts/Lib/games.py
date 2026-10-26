@@ -22,9 +22,9 @@ verify is refused, since it would check nothing) in the editor halves, and that 
 (evaluate_input_check), because a replay whose outcome does not depend on its input proves nothing about the gameplay
 it recorded. Since the run plays on past the checkpoints that differ (M19, Docs/Decisions/0030-m19-contract.md decision
 3), a replay whose run without input differed only at checkpoints and still reached its recorded final hash gets a
-warning (input_check_warning) that never fails the half. Two staged games that share an .eproj stem or a Name would
-collide in the suite's steps, reports or Dist package directory, so the suite refuses them first
-(check_distinct_projects, decision 12). One rule
+warning (input_check_warning) that never fails the half. Two staged games that share an .eproj stem or a Name (the
+staged one, read_staged_game_name) would collide in the suite's steps, reports or Dist package directory, so the suite
+refuses them first (check_distinct_projects, decision 12). One rule
 decides input independence everywhere (Docs/Architecture.md §13.6; the recording guards of input.record and test.run
 {record} apply it too): a replay is input-independent when its input-free run passes verification (every checkpoint,
 the final state hash, every expectation), whatever script errors that run raised. A game also needs at least one test
@@ -227,9 +227,16 @@ def _staged_project_files(base: Path) -> dict[str, list[str]]:
 def _read_json_object(path: Path, what: str) -> dict[str, Any]:
     """The JSON object in the UTF-8 file `path`; ValueError naming `what` otherwise."""
     try:
-        document = json.loads(path.read_bytes().decode("utf-8"))
+        data = path.read_bytes()
     except OSError as error:
         raise ValueError(f"{what}: cannot be read: {error}") from error
+    return _parse_json_object(data, what)
+
+
+def _parse_json_object(data: bytes, what: str) -> dict[str, Any]:
+    """The JSON object `data` holds as UTF-8; ValueError naming `what` otherwise."""
+    try:
+        document = json.loads(data.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise ValueError(f"{what}: not UTF-8 JSON: {error}") from error
     if not isinstance(document, dict):
@@ -341,7 +348,30 @@ def read_game_name(path: Path) -> str:
     FORBIDDEN_NAME_CHARACTERS, or "." or "..", which Paths::ValidateAppName refuses and the exporter never writes) also
     raises ValueError naming the file."""
     name = paths.display_path(path)
-    document = _read_json_object(path, name)
+    return _game_name(_read_json_object(path, name), name)
+
+
+def read_staged_game_name(project_file: Path) -> str:
+    """read_game_name of the staged blob of the .eproj `project_file` (`git -C <its directory> cat-file blob
+    :./<its name>`): the Name of the project the games suite's halves run, from the index as they do, whatever the
+    working tree holds. Raises ValueError naming the file when git is missing or fails (the file is not staged, say), or
+    for a blob read_game_name would refuse."""
+    name = f"{paths.display_path(project_file)} (staged)"
+    command = ["git", "-C", str(project_file.parent), "cat-file", "blob", f":./{project_file.name}"]
+    try:
+        completed = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, timeout=GIT_TIMEOUT_SECONDS,
+                                   check=False)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ValueError(f"{name}: cannot be read: {format_command(command)} could not run: {error}") from error
+    if completed.returncode != 0:
+        output = completed.stderr.decode("utf-8", errors="replace").strip() or "no output"
+        raise ValueError(f"{name}: cannot be read: {format_command(command)} exited with code "
+                         f"{completed.returncode}: {output}")
+    return _game_name(_parse_json_object(completed.stdout, name), name)
+
+
+def _game_name(document: dict[str, Any], name: str) -> str:
+    """read_game_name's checks of `document`, the file `name` holds."""
     formats = (GAME_MANIFEST_FORMAT, PROJECT_FORMAT)
     if document.get("Format") not in formats:
         raise ValueError(f"{name}: neither a game manifest nor a project file (its Format is "
@@ -454,21 +484,27 @@ def _is_count(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def check_distinct_projects(projects: Iterable[GameProject]) -> list[str]:
+def check_distinct_projects(projects: Iterable[GameProject], files: str = "disk") -> list[str]:
     """M19 (Docs/Decisions/0030-m19-contract.md decision 12, AL-STEMS; the accepted limit of ADR 0027 decision 12): the
     failures of the discovered game projects that would collide in the games suite, one line per pair in discovery
     order, each naming both project files by their repository-relative paths (paths.display_path):
       - two .eproj files that share a file stem (their games steps and reports, "games <stem> ..." and
         "Games-<stem>-...", would collide): "the game projects <first> and <second> share the file stem '<stem>':
         rename one .eproj, since the games steps and reports are named after it";
-      - two projects whose Name (read_game_name of the .eproj) is equal (their Dist packages would share
-        bin/Exports/Dist/<Name>): "the game projects <first> and <second> share the Name '<Name>': rename one
-        (ProjectSettings Name), since the Dist half installs each package as bin/Exports/Dist/<Name>".
-    A project whose Name cannot be read is one line naming its file and read_game_name's ValueError. Empty when every
-    stem and Name is distinct. The games suite runs it on the projects it discovered and, when it returns lines, fails
-    its "games" step with them before any project runs. Stems and Names are compared ignoring letter case, since the
-    steps' report files and the package directories collide on a file system that ignores it (Windows); a pair that
-    differs only in case names both spellings. A single project collides with nothing, so its Name is not read."""
+      - two projects whose Name is equal (their Dist packages would share bin/Exports/Dist/<Name>): "the game projects
+        <first> and <second> share the Name '<Name>': rename one (ProjectSettings Name), since the Dist half installs
+        each package as bin/Exports/Dist/<Name>".
+    `files` is the discovery's file source (Lib/provenance.py's FILE_MODES): with "disk" each Name is read_game_name of
+    the .eproj in the working tree, with "index" read_staged_game_name of its staged blob, the Name the suite's halves
+    run with (the games suite discovers and runs staged projects). A project whose Name cannot be read is one line
+    naming its file and the ValueError. Empty when every stem and Name is distinct. The games suite runs it on the
+    projects it discovered and, when it returns lines, fails its "games" step with them before any project runs. Stems
+    and Names are compared ignoring letter case, since the steps' report files and the package directories collide on a
+    file system that ignores it (Windows); a pair that differs only in case names both spellings. A single project
+    collides with nothing, so its Name is not read. Raises ValueError for a `files` value outside FILE_MODES."""
+    if files not in provenance.FILE_MODES:
+        raise ValueError(f"unknown file source '{files}' (expected {' or '.join(provenance.FILE_MODES)})")
+    read_name = read_staged_game_name if files == "index" else read_game_name
     listed = list(projects)
     failures: list[str] = []
     if len(listed) < 2:
@@ -476,7 +512,7 @@ def check_distinct_projects(projects: Iterable[GameProject]) -> list[str]:
     names: list[str | None] = []
     for project in listed:
         try:
-            names.append(read_game_name(project.project_file))
+            names.append(read_name(project.project_file))
         except ValueError as error:
             names.append(None)
             failures.append(f"the game project {paths.display_path(project.project_file)} has no readable Name, so the "

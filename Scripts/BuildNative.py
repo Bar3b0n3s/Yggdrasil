@@ -30,13 +30,18 @@ The module is every .cpp and .h file below <root>/Native/ (Lib/native_build.py l
        runtime  <out>/Runtime.exe, the game's Runtime of the configuration with the module linked in;
      a compiler or linker warning fails the build like an error (warnings as errors), while an MSBuild warning about
      the build itself (MSB8029: an output directory below %TEMP%) is recorded with severity Warning and fails nothing;
+     then hashes the sources again: MSBuild read them from disk after step 1 linted and hashed them, so a build whose
+     sources changed while it ran (a native.write, or an edit.undo of one) fails with a NATIVE_BUILD_ERROR, since it
+     may have compiled code the lint never saw under a source hash it was not built from;
   5. writes the record <out>/NativeBuild.json (Lib/native_build.py; NativeBuildRecord in
      Editor/Source/EditorCore/Native/NativeBuild.h): the kind, configuration, source hash, sources, success, the
      output's and the log's file names and every diagnostic; the whole output goes to <out>/Build.log. With --json the
      record is also printed on standard output.
 <out> must be missing or empty. Once the arguments are valid, the record is written for every outcome, a failure to
-start the build included (a NATIVE_BUILD_ERROR diagnostic), so the editor reads why a build failed from it. The editor
-runs this script by fixed paths with fixed arguments (EditorCore/Native/NativeBuild.h CreateNativeBuildBackend, §13.2).
+start the build included (a NATIVE_BUILD_ERROR diagnostic), so the editor reads why a build failed from it; its
+SourceHash is empty when the build failed before it could hash the sources (not Windows, or a source it could not
+read), which both readers accept in the record of a failed build. The editor runs this script by fixed paths with
+fixed arguments (EditorCore/Native/NativeBuild.h CreateNativeBuildBackend, §13.2).
 
 Exit codes: 0 built, 1 a lint, compile or link failure (the record says which), 2 usage error, 3 no Native/ or no
 source, not Windows, the toolchain or premake missing, the build outputs it links missing (bin/<OutputDir>/...), or
@@ -300,6 +305,24 @@ class NativeBuild:
                                                             message=f"MSBuild failed ({reason}); see {log}"))
         return EXIT_FAILED
 
+    def check_sources_unchanged(self) -> bool:
+        """Step 4's last check: the sources hashed again, as find_sources hashed them before the lint. False, with a
+        NATIVE_BUILD_ERROR, when the hash differs or the sources cannot be read again."""
+        try:
+            current = native_build.source_hash(self.project, self.config,
+                                               paths.REPOSITORY_ROOT / native_build.API_HEADER)
+        except OSError as error:
+            reason = f"they cannot be read again: {error}"
+        else:
+            if current == self.source_hash:
+                return True
+            reason = f"their source hash is {current} after the build, {self.source_hash} when they were linted"
+        self.diagnostics.append(native_build.Diagnostic(
+            "Error", native_build.BUILD_ERROR,
+            message=f"the sources changed during the build ({reason}), so it may have compiled code the lint did not "
+                    f"check: build again once nothing writes them"))
+        return False
+
     def run(self) -> int:
         """Steps 1 to 4; the exit code. Raises BuildFailure."""
         started = time.monotonic()
@@ -326,6 +349,9 @@ class NativeBuild:
             exit_code = self.compile(visual_studio, solution, deadline)
         finally:
             hold.release()
+        if exit_code == EXIT_SUCCESS and not self.check_sources_unchanged():
+            self.output = ""
+            exit_code = EXIT_FAILED
         self.console.print(f"native build: {'built ' + self.output if exit_code == EXIT_SUCCESS else 'failed'} in "
                            f"{time.monotonic() - started:.1f} s")
         return exit_code

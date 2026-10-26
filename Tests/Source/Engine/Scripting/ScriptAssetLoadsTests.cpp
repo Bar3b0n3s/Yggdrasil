@@ -1,23 +1,24 @@
 #include "TestsPCH.h"
 #include "Engine/Scripting/ScriptAssetLoads.h"
 
+#include "Support/Fuzz.h"
+
+#include <array>
+#include <cstdint>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 // The literal Assets.Load scan (Docs/Decisions/0030-m19-contract.md decision 19, stream D).
 
 namespace Engine {
 
-	TEST_SUITE("Scripting")
-	{
-		// Decision 19: a call of the global Assets.Load with one string literal is a literal load, in source order with
-		// its location; every other use of Assets.Load, or of the global Assets other than by a field name, is a computed
-		// load; a local named Assets and type annotations are not loads; a source that does not parse is CompileFailed at
-		// its line.
-		TEST_CASE("ScriptAssetLoads: literal Assets.Load references are found with their locations and every other use is computed")
-		{
-			constexpr std::string_view Source = R"(local Loader = {}
+	namespace {
+
+		// The literal and computed loads of the first case, the globals table's uses and the scan's other constructs: the
+		// fuzz case's seed corpus.
+		constexpr std::string_view LoaderSource = R"(local Loader = {}
 local clip = Assets.Load("Assets/Audio/Beep.sfx")
 local mesh = (Assets.Load("Assets/Models/Ship.glb#mesh:0:Hull") :: AssetRef)
 local coin = Assets.Load([[engine://Audio/Coin]])
@@ -34,7 +35,41 @@ do
 end
 return Loader
 )";
-			const Result<std::vector<ScriptAssetLoad>> loads = FindScriptAssetLoads(Source, "Assets/Scripts/Loader.luau");
+
+		constexpr std::string_view GlobalsSource = R"(local a = _G.Assets.Load("engine://Audio/Coin")
+local b = _G["Assets"].Load("Assets/Audio/Beep.sfx")
+local c = _G.Assets
+local d = _G["Ass" .. "ets"]
+local e = rawget(_G, "Assets")
+local f = _G
+_G.print("x")
+local g = _G["print"]
+local h = _G.Assets:Load()
+)";
+
+		constexpr std::string_view OtherSource = R"(local name = "Beep"
+local a = Assets:Load()
+local b = Assets.Load()
+local c = Assets["Load"]("x")
+local d = Assets.Load(`Assets/Audio/{name}.sfx`)
+local e = Assets.Load("Assets/Audio/Beep.sfx", 2)
+local f = if name then Assets.Load("a") else Assets.Load(name)
+local t: { Load: typeof(Assets.Load) } = { Load = Assets.Load }
+type Loader = typeof(Assets)
+return { a, b, c, d, e, f, t }
+)";
+
+	}
+
+	TEST_SUITE("Scripting")
+	{
+		// Decision 19: a call of the global Assets.Load with one string literal is a literal load, in source order with
+		// its location; every other use of Assets.Load, or of the global Assets other than by a field name, is a computed
+		// load; a local named Assets and type annotations are not loads; a source that does not parse is CompileFailed at
+		// its line.
+		TEST_CASE("ScriptAssetLoads: literal Assets.Load references are found with their locations and every other use is computed")
+		{
+			const Result<std::vector<ScriptAssetLoad>> loads = FindScriptAssetLoads(LoaderSource, "Assets/Scripts/Loader.luau");
 			REQUIRE_MESSAGE(loads.has_value(), loads.error().ToString());
 			const std::vector<ScriptAssetLoad> expected = {
 				{ .Reference = "Assets/Audio/Beep.sfx", .Literal = true, .Line = 2, .Column = 14 },
@@ -66,17 +101,7 @@ return Loader
 			// The sandbox keeps _G: _G.Assets and _G["Assets"] are the global Assets, so their literal loads are found; _G used
 			// any other way may reach Assets, so it is computed, while another field of _G is no use (the review of W19.1: a
 			// load through _G was neither, so the export pruned what it named).
-			constexpr std::string_view Globals = R"(local a = _G.Assets.Load("engine://Audio/Coin")
-local b = _G["Assets"].Load("Assets/Audio/Beep.sfx")
-local c = _G.Assets
-local d = _G["Ass" .. "ets"]
-local e = rawget(_G, "Assets")
-local f = _G
-_G.print("x")
-local g = _G["print"]
-local h = _G.Assets:Load()
-)";
-			const Result<std::vector<ScriptAssetLoad>> globals = FindScriptAssetLoads(Globals, "Assets/Scripts/Globals.luau");
+			const Result<std::vector<ScriptAssetLoad>> globals = FindScriptAssetLoads(GlobalsSource, "Assets/Scripts/Globals.luau");
 			REQUIRE_MESSAGE(globals.has_value(), globals.error().ToString());
 			const std::vector<ScriptAssetLoad> expectedGlobals = {
 				{ .Reference = "engine://Audio/Coin", .Literal = true, .Line = 1, .Column = 11 },
@@ -103,6 +128,48 @@ local h = _G.Assets:Load()
 			REQUIRE_FALSE(loads.has_value());
 			CHECK(loads.error().GetCode() == ErrorCode::Validation);
 			CHECK(loads.error().GetLocation().File == "Assets/Scripts/Bytes.luau");
+		}
+
+		// Decision 19's scan reads every packaged script of an export and, with PruneUnreferenced, of project.validate: a
+		// reader of external input (ReviewChecklist), whose visitor of Luau's tree (literal and interpolated strings, _G,
+		// index expressions, a tree the parser recovered from errors) is fuzzed here and in the hardening stage
+		// (Tests/Data/Fuzz/Targets.json, ScriptAssetLoads). The oracle: an error is CompileFailed located at a line, or
+		// Validation; a result lists loads located at line and column 1 or later, in source order, a literal one with its
+		// reference and a computed one without.
+		TEST_CASE("ScriptAssetLoads: 10,000 seeded mutations of Luau source never crash and always return Result" * doctest::test_suite(Test::FuzzSuite))
+		{
+			const std::array<std::string_view, 3> seeds = { LoaderSource, GlobalsSource, OtherSource };
+			const Test::FuzzRun run = Test::RunFuzzCase(0x5A1D, 10000, [&seeds](Random& random, uint64_t /*index*/)
+			{
+				std::string mutated(seeds[static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(seeds.size()) - 1))]);
+				Test::MutateText(mutated, random);
+				const Result<std::vector<ScriptAssetLoad>> loads = FindScriptAssetLoads(mutated, "Assets/Scripts/Fuzz.luau");
+				if (!loads.has_value())
+				{
+					const ErrorCode code = loads.error().GetCode();
+					CHECK((code == ErrorCode::CompileFailed || code == ErrorCode::Validation));
+					if (code == ErrorCode::CompileFailed)
+						CHECK(loads.error().GetLocation().Line >= 1);
+					return false;
+				}
+				for (size_t index = 0; index < loads->size(); ++index)
+				{
+					const ScriptAssetLoad& load = (*loads)[index];
+					CAPTURE(index);
+					CHECK(load.Line >= 1);
+					CHECK(load.Column >= 1);
+					if (!load.Literal)
+						CHECK(load.Reference.empty());
+					if (index > 0)
+						CHECK(std::tie((*loads)[index - 1].Line, (*loads)[index - 1].Column) <= std::tie(load.Line, load.Column));
+				}
+				return true;
+			});
+			if (Test::IsFuzzSample(run.Range))
+			{
+				CHECK(run.Counts.Accepted > 0);
+				CHECK(run.Counts.Rejected > 0);
+			}
 		}
 	}
 

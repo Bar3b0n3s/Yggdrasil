@@ -3,10 +3,14 @@
 
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Native/NativeModuleHost.h"
+#include "Engine/Core/Buffer.h"
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Core/Log.h"
 #include "Engine/Platform/SharedLibrary.h"
 
 #include <format>
+#include <string_view>
+#include <vector>
 
 namespace Engine {
 
@@ -26,6 +30,17 @@ namespace Engine {
 		{
 			const std::string location = DescribeNativeLocation(diagnostic);
 			return location.empty() ? std::format("{}: {}", diagnostic.Code, diagnostic.Message) : std::format("{}: {}: {}", location, diagnostic.Code, diagnostic.Message);
+		}
+
+		// Below the project: what an export keeps of its native builds (GetNativeExportLogPath, GetNativeExportSymbolsDirectory).
+		constexpr std::string_view NativeExportLogsDirectory = "Library/Native/ExportLogs";
+		constexpr std::string_view NativeExportSymbolsDirectory = "Library/Native/Symbols";
+
+		// Copies `source` to `target` through a temporary file, replacing it.
+		[[nodiscard]] static Status CopyNativeExportFile(const std::filesystem::path& source, const std::filesystem::path& target)
+		{
+			ENGINE_TRY_ASSIGN(const Buffer bytes, FileSystem::ReadFile(source));
+			return FileSystem::WriteFileAtomic(target, bytes, { .KeepBackup = false });
 		}
 
 	}
@@ -90,6 +105,54 @@ namespace Engine {
 								  "build's whole output",
 				log))
 			.WithIssues(std::move(issues));
+	}
+
+	std::filesystem::path GetNativeExportLogPath(const std::filesystem::path& projectRoot, ExportConfiguration configuration)
+	{
+		return projectRoot / FileSystem::PathFromUtf8(Utils::NativeExportLogsDirectory) / FileSystem::PathFromUtf8(std::format("{}.log", ExportConfigurationToString(configuration)));
+	}
+
+	std::filesystem::path GetNativeExportSymbolsDirectory(const std::filesystem::path& projectRoot, ExportConfiguration configuration)
+	{
+		return projectRoot / FileSystem::PathFromUtf8(Utils::NativeExportSymbolsDirectory) / FileSystem::PathFromUtf8(ExportConfigurationToString(configuration));
+	}
+
+	NativeBuildOutcome KeepNativeBuildLog(const std::filesystem::path& projectRoot, ExportConfiguration configuration, NativeBuildOutcome outcome)
+	{
+		if (outcome.Log.empty() || !FileSystem::Exists(outcome.Log))
+			return outcome;
+		const std::filesystem::path kept = GetNativeExportLogPath(projectRoot, configuration);
+		Status copied = FileSystem::CreateDirectories(kept.parent_path());
+		if (copied.has_value())
+			copied = Utils::CopyNativeExportFile(outcome.Log, kept);
+		if (!copied.has_value())
+		{
+			ENGINE_WARN("Cannot keep the log '{}' of the export's failed native build: {}", FileSystem::PathToUtf8(outcome.Log), copied.error());
+			return outcome;
+		}
+		outcome.Log = kept;
+		return outcome;
+	}
+
+	Result<std::filesystem::path> ArchiveNativeRuntimeSymbols(const std::filesystem::path& projectRoot, ExportConfiguration configuration,
+		const std::filesystem::path& executable)
+	{
+		std::vector<std::filesystem::path> files;
+		for (const std::string_view extension : { ".pdb", ".map" })
+		{
+			std::filesystem::path file = executable;
+			file.replace_extension(FileSystem::PathFromUtf8(extension));
+			if (!FileSystem::Exists(file))
+				return MakeError(ErrorCode::NotFound, "the linker wrote no '{}' beside '{}'", FileSystem::PathToUtf8(file.filename()), FileSystem::PathToUtf8(executable));
+			files.push_back(std::move(file));
+		}
+		const std::filesystem::path directory = GetNativeExportSymbolsDirectory(projectRoot, configuration);
+		if (FileSystem::Exists(directory))
+			ENGINE_TRY(FileSystem::Remove(directory));
+		ENGINE_TRY(FileSystem::CreateDirectories(directory));
+		for (const std::filesystem::path& file : files)
+			ENGINE_TRY(Utils::CopyNativeExportFile(file, directory / file.filename()));
+		return directory;
 	}
 
 }

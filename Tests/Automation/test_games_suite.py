@@ -1105,12 +1105,25 @@ class SuiteTests(unittest.TestCase):
 
     def test_staged_projects_that_share_a_stem_fail_the_games_step_before_any_project_runs(self) -> None:
         # Docs/Decisions/0030-m19-contract.md decision 12 (AL-STEMS): two staged games named Rally would share their
-        # steps and reports, so the suite fails its "games" step naming both and audits or runs neither.
+        # steps and reports, so the suite fails its "games" step naming both and audits or runs neither. The Names are
+        # the staged ones the halves run with (the milestone review): two staged games named Shared collide although
+        # an unstaged edit renames one in the working tree, and a project file broken only in the working tree is
+        # still read from its staged blob.
         with tempfile.TemporaryDirectory(prefix="GamesStems-") as directory:
             root = Path(directory)
             write_project(root, "Projects/Rally")
             write_project(root, "Tests/Projects/Rally")
+            shared = [write_project(root, f"Projects/{name}") for name in ("Alpha", "Beta")]
+            for project_file in shared:
+                document = json.loads(project_file.read_text(encoding="utf-8"))
+                document["Name"] = "Shared"
+                project_file.write_text(json.dumps(document, indent="\t") + "\n", encoding="utf-8")
+            intact = write_project(root, "Projects/Gamma")
             git_stage(root, initialize=True)
+            renamed = json.loads(shared[1].read_text(encoding="utf-8"))
+            renamed["Name"] = "Other"
+            shared[1].write_text(json.dumps(renamed, indent="\t") + "\n", encoding="utf-8")
+            intact.write_text("{", encoding="utf-8")
             discover = games.discover_projects
 
             def discover_in_repository(_: Path, files: str = "disk") -> list[games.GameProject]:
@@ -1128,6 +1141,10 @@ class SuiteTests(unittest.TestCase):
         self.assertIn("share the file stem 'Rally'", steps[0].detail)
         self.assertIn("Projects/Rally/Rally.eproj", steps[0].detail)
         self.assertIn("Tests/Projects/Rally/Rally.eproj", steps[0].detail)
+        failures = steps[0].data["failures"]
+        self.assertTrue(any("Projects/Alpha/Alpha.eproj" in line and "Projects/Beta/Beta.eproj" in line
+                            and "share the Name 'Shared'" in line for line in failures), failures)
+        self.assertFalse(any("Gamma" in line for line in failures), failures)
 
     def test_the_editor_half_checks_a_strict_editor_on_an_index_copy(self) -> None:
         with tempfile.TemporaryDirectory(prefix="GamesEditorHalf-") as directory:

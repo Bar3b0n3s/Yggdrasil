@@ -124,8 +124,8 @@ The games suite (Docs/Decisions/0026-m16-contract.md decisions 7 and 8; Docs/Dec
 below Projects/ or Tests/Projects/ whose root holds one staged *.eproj, Projects/FeatureTest excluded); a project found
 on disk but not staged gets one passed step, "games <Name>", and nothing else, and without any project the suite passes
 with one step, "games". <Name> in the names of the steps and reports is the .eproj's file stem, so staged projects that
-share a stem or a Name (whose Dist packages would share a directory) fail the "games" step before any project runs
-(games.check_distinct_projects, Docs/Decisions/0030-m19-contract.md decision 12). Per project:
+share a stem or a Name (the staged .eproj's, whose Dist packages would share a directory) fail the "games" step before
+any project runs (games.check_distinct_projects, Docs/Decisions/0030-m19-contract.md decision 12). Per project:
   - "games <Name> audit": Scripts/Lib/provenance.py's audit of the staged files (the acceptance mode, as
     Scripts/AuditProvenance.py --project runs it), failing with each finding's code and path;
   - "games <Name> Editor <Config>" for Debug and Release: the project's staged blobs materialized into a temporary
@@ -2272,7 +2272,7 @@ def run_games(configs: list[str], arguments: argparse.Namespace, console: Consol
         assigned.append((first, Step(GAMES_STEP_NAME, Status.FAILED, f"cannot list the staged game projects: {error}",
                                      exit_code=EXIT_INIT_FAILED, data={"suite": "games"})))
     else:
-        collisions = games.check_distinct_projects(staged)
+        collisions = games.check_distinct_projects(staged, "index")
         if collisions:
             # Their steps, reports or Dist packages would collide (Docs/Decisions/0030-m19-contract.md decision 12), so
             # no project is audited, probed, copied or named below.

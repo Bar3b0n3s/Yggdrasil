@@ -92,11 +92,14 @@
 //      hash.
 //   3a. M19 NativeBuild (Docs/Decisions/0030-m19-contract.md decision 33, C-NATIVE-STATIC): a project with a Native/ directory
 //      (HasNativeModuleDirectory) gets a Runtime executable that links its module, built by Scripts/BuildNative.py --kind
-//      runtime of the target configuration into a directory beside the staging directory (NativeExport.h,
-//      StartNativeRuntimeBuild); a build that does not succeed fails the export with CompileFailed and its diagnostics
-//      (MakeNativeBuildError). Step 1 refuses such a project first, before anything is cooked: Unsupported on Linux and
-//      macOS, PermissionDenied while the user's "Allow native code" preference is off (CheckNativeExport). A project without
-//      Native/ skips the step and packages the prebuilt Runtime unchanged.
+//      runtime of the target configuration into a new numbered directory below the output directory's sibling
+//      ".export-native-<pid>-<tag>", never one another build wrote (NativeExport.h, StartNativeRuntimeBuild); a build that
+//      does not succeed fails the export with CompileFailed and its diagnostics, the hint naming a copy of its log below
+//      Library/Native/ExportLogs/ (MakeNativeBuildError, KeepNativeBuildLog). Once the package is in place the
+//      executable's PDB and linker map are archived below Library/Native/Symbols/ (ArchiveNativeRuntimeSymbols; step 7)
+//      and the build's directory is removed. Step 1 refuses such a project first, before anything is cooked: Unsupported
+//      on Linux and macOS, PermissionDenied while the user's "Allow native code" preference is off (CheckNativeExport). A
+//      project without Native/ skips the step and packages the prebuilt Runtime unchanged.
 //   4. Copy the Runtime executable of the target configuration, renamed, and on Windows its Redist/*.dll. A missing binary
 //      is NotFound naming "python Scripts/Build.py --config <Config> --project Runtime"; the editor never builds the engine
 //      (M19: it builds only a native game's Runtime, step 3a, whose executable this step copies instead). M15: on macOS the

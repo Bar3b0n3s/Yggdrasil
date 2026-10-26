@@ -78,7 +78,7 @@ namespace Engine {
 		constexpr std::string_view RuntimeProjectName = "Runtime";
 		constexpr std::string_view CacheScheme = "cache";
 		constexpr std::string_view ProjectScheme = "project";
-		// The staging, earlier-export and smoke-test directories beside the output directory:
+		// The staging, earlier-export, smoke-test and native-build directories beside the output directory:
 		// ".export-<kind>-<pid>-<tag>", where <tag> is the 8 hex digits of the low 32 bits of the XXH64 of the output
 		// directory's name (SiblingTag). The pid tells a crashed editor's leftovers from a running one's (Process::IsRunning),
 		// the tag the leftovers of this output from another's, and the length does not grow with the game's name: the staged
@@ -88,6 +88,9 @@ namespace Engine {
 		constexpr std::string_view StagingKind = "staging";
 		constexpr std::string_view PreviousKind = "previous";
 		constexpr std::string_view SmokeTestKind = "smoke";
+		// The root of step 3a's build directories (M19, decision 33): each native build of an export gets a new numbered
+		// directory below it (State::PrepareNativeBuildDirectory).
+		constexpr std::string_view NativeKind = "native";
 		// The bound of the smoke test's run, a failure bound only: a game that runs SmokeTestFrames headless frames at its
 		// FixedHz takes seconds, and one that hangs is killed after it.
 		constexpr std::chrono::seconds SmokeTestTimeout{ 300 };
@@ -369,7 +372,7 @@ namespace Engine {
 			if (!name.ends_with(suffix))
 				return std::nullopt;
 			name.remove_suffix(suffix.size());
-			for (const std::string_view kind : { StagingKind, PreviousKind, SmokeTestKind })
+			for (const std::string_view kind : { StagingKind, PreviousKind, SmokeTestKind, NativeKind })
 			{
 				if (!name.starts_with(kind) || name.size() <= kind.size() + 1 || name[kind.size()] != '-')
 					continue;
@@ -533,10 +536,13 @@ namespace Engine {
 		// FeatureTest (M19, decision 10): step 6a's running --feature-test run (ExportFeatureTest.h).
 		Scope<IExportFeatureTestJob> FeatureTest{};
 
-		// NativeBuild (M19, decision 33): whether the project has a Native/ directory, the running build, its output directory
-		// beside the staging directory and the executable it built, which CopyRuntime copies instead of RuntimeExecutable.
+		// NativeBuild (M19, decision 33): whether the project has a Native/ directory, the running build, the sibling below
+		// which this process's native builds of the output go (NativeKind), the build's own directory below it and the
+		// executable it built, which CopyRuntime copies instead of RuntimeExecutable. The build's directory, with the
+		// executable's symbols, stays until the package is in place (MoveToOutput archives the symbols) or the export ends.
 		bool NativeModule = false;
 		Scope<INativeBuildJob> NativeBuild{};
+		std::filesystem::path NativeBuildRoot{};
 		std::filesystem::path NativeBuildDirectory{};
 		std::filesystem::path NativeRuntimeExecutable{};
 
@@ -980,6 +986,7 @@ namespace Engine {
 			StagingDirectory = parent / FileSystem::PathFromUtf8(SiblingName(StagingKind, processId, name));
 			PreviousDirectory = parent / FileSystem::PathFromUtf8(SiblingName(PreviousKind, processId, name));
 			SmokeTestUserData = parent / FileSystem::PathFromUtf8(SiblingName(SmokeTestKind, processId, name));
+			NativeBuildRoot = parent / FileSystem::PathFromUtf8(SiblingName(NativeKind, processId, name));
 			return {};
 		}
 
@@ -1624,8 +1631,7 @@ namespace Engine {
 				return true;
 			if (NativeBuild == nullptr)
 			{
-				NativeBuildDirectory = StagingDirectory;
-				NativeBuildDirectory += ".native";
+				ENGINE_TRY_ASSIGN(NativeBuildDirectory, PrepareNativeBuildDirectory());
 				ENGINE_TRY_ASSIGN(NativeBuild, StartNativeRuntimeBuild(*Editor, Specification.Configuration, NativeBuildDirectory));
 				return false;
 			}
@@ -1634,20 +1640,53 @@ namespace Engine {
 				return false;
 			NativeBuild.reset();
 			ENGINE_TRY_ASSIGN(const NativeBuildOutcome outcome, std::move(*polled));
+			// The build's directory goes with the failed export, so the error names a copy of its log (KeepNativeBuildLog).
 			if (!outcome.Succeeded)
-				return std::unexpected(MakeNativeBuildError(outcome, Settings.Name));
+				return std::unexpected(MakeNativeBuildError(KeepNativeBuildLog(ProjectRoot, Specification.Configuration, outcome), Settings.Name));
 			NativeRuntimeExecutable = outcome.Output;
 			Report.NativeModule = true;
 			return true;
 		}
 
-		// The native build's directory, once its executable is copied or the export ends.
+		// Step 3a's build directory: a new numbered directory below NativeBuildRoot, which BuildNative.py requires missing or
+		// empty. A cancelled build's MSBuild can still be writing below an earlier export's directory there (cancelling stops
+		// only BuildNative.py, decision 30), so every leftover is removed where it can be and skipped where it cannot, and the
+		// build takes the first number that names nothing: never a directory another build wrote. A dead editor's root goes
+		// with its other siblings (CreateStaging).
+		[[nodiscard]] Result<std::filesystem::path> PrepareNativeBuildDirectory() const
+		{
+			std::vector<std::filesystem::path> leftovers;
+			if (FileSystem::Exists(NativeBuildRoot))
+			{
+				ENGINE_TRY_ASSIGN(leftovers, FileSystem::ListDirectory(NativeBuildRoot, false));
+			}
+			for (const std::filesystem::path& leftover : leftovers)
+			{
+				if (Status removed = FileSystem::Remove(leftover); !removed.has_value())
+					ENGINE_WARN("Cannot remove '{}', left by an earlier export's native build: {}", FileSystem::PathToUtf8(leftover), removed.error());
+			}
+			// Among one more number than there were leftovers, one names nothing.
+			for (size_t index = 0; index <= leftovers.size(); ++index)
+			{
+				std::filesystem::path directory = NativeBuildRoot / FileSystem::PathFromUtf8(std::format("{}", index));
+				if (!FileSystem::Exists(directory))
+					return directory;
+			}
+			return MakeError(ErrorCode::InvalidState, "no new native build directory is free below '{}'", FileSystem::PathToUtf8(NativeBuildRoot));
+		}
+
+		// The native build's directory, once the package is in place or the export ends, and its root once nothing else is
+		// below it.
 		void RemoveNativeBuildDirectory()
 		{
-			if (NativeBuildDirectory.empty() || !FileSystem::Exists(NativeBuildDirectory))
-				return;
-			if (Status removed = FileSystem::Remove(NativeBuildDirectory); !removed.has_value())
-				ENGINE_WARN("Cannot remove the export's native build directory '{}': {}", FileSystem::PathToUtf8(NativeBuildDirectory), removed.error());
+			if (!NativeBuildDirectory.empty() && FileSystem::Exists(NativeBuildDirectory))
+			{
+				if (Status removed = FileSystem::Remove(NativeBuildDirectory); !removed.has_value())
+					ENGINE_WARN("Cannot remove the export's native build directory '{}': {}", FileSystem::PathToUtf8(NativeBuildDirectory), removed.error());
+			}
+			NativeBuildDirectory.clear();
+			if (!NativeBuildRoot.empty() && FileSystem::Exists(NativeBuildRoot))
+				static_cast<void>(FileSystem::RemoveEmptyDirectory(NativeBuildRoot));
 		}
 
 		// --- 4. Copy the Runtime -----------------------------------------------------------------------------------------
@@ -1666,7 +1705,6 @@ namespace Engine {
 			for (const std::filesystem::path& library : Redist)
 				ENGINE_TRY(WithContext(CopyFile(library, StagingDirectory / library.filename()), "while copying the app-local CRT"));
 #endif
-			RemoveNativeBuildDirectory();
 			return true;
 		}
 
@@ -1916,6 +1954,20 @@ namespace Engine {
 			CreatedDirectories.clear();
 			Report.OutputDirectory = OutputDirectory;
 			Report.Executable = GetPackageExecutable(OutputDirectory);
+			// A native game's executable was linked by step 3a, so its symbols exist only in the build's directory: archived
+			// now that the package they belong to is in place, never shipped (§2.2; ArchiveNativeRuntimeSymbols).
+			if (!NativeRuntimeExecutable.empty())
+			{
+				if (Result<std::filesystem::path> archived = ArchiveNativeRuntimeSymbols(ProjectRoot, Specification.Configuration, NativeRuntimeExecutable); archived.has_value())
+				{
+					ENGINE_INFO("Archived the symbols of '{}' in '{}'", FileSystem::PathToUtf8(Report.Executable), FileSystem::PathToUtf8(*archived));
+				}
+				else
+				{
+					Report.Warnings.push_back(std::format("the symbols of the executable step 3a linked could not be archived: {}", archived.error().ToString()));
+				}
+			}
+			RemoveNativeBuildDirectory();
 			return true;
 		}
 

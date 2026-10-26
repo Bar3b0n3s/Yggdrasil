@@ -13,7 +13,10 @@ platform (decision 34), which the same cases check there.
 
 from __future__ import annotations
 
+import contextlib
 import ctypes
+import dataclasses
+import io
 import json
 import os
 import re
@@ -150,13 +153,47 @@ class SourceTests(unittest.TestCase):
 
 class FormatTests(unittest.TestCase):
     def test_native_modules_are_formatted_like_first_party_code(self) -> None:
-        # Decision 35: Format.py formats the C++ below Projects/*/Native/ and Tests/Projects/*/Native/.
+        # Decision 35: Format.py checks the C++ below Projects/*/Native/ and Tests/Projects/*/Native/.
         directory = Path(tempfile.mkdtemp(prefix="BuildNative-"))
         self.addCleanup(shutil.rmtree, directory, True)
         write_files(directory, {"Projects/Game/Native/Spinner.cpp": "", "Tests/Projects/Game/Native/Systems/Move.h": "",
                                 "Projects/Game/Assets/Notes.txt": "", "Vendor/Lib/Lib.cpp": ""})
         self.assertEqual(sorted(Format.first_party_files(directory, None)),
                          ["Projects/Game/Native/Spinner.cpp", "Tests/Projects/Game/Native/Systems/Move.h"])
+        for relative, native in (("Projects/Game/Native/Spinner.cpp", True),
+                                 ("Tests/Projects/Game/Native/Systems/Move.h", True),
+                                 ("Projects/Game/Spinner.cpp", False), ("Projects/Native/Spinner.cpp", False),
+                                 ("Engine/Source/Engine/Native/NativeApi.h", False),
+                                 ("Tests/Source/Native/Spinner.cpp", False)):
+            self.assertEqual(Format.is_native_module_source(relative), native, relative)
+
+    def test_a_format_run_leaves_a_native_source_unchanged_and_fails_naming_native_write(self) -> None:
+        # The milestone review: every file below a game's Native/ is provenance-audited at the hash native.write
+        # recorded, so a format run that rewrote one would break the game's provenance. It reports the source instead,
+        # and fails, while it still formats every other file. The gate's clang-format 22 (Setup.py checks it) runs it.
+        clang_format, _ = Format.find_clang_format(None)
+        # Outside any work tree, so Format.py walks the directory (git would list nothing below the ignored bin-int/),
+        # with the repository's style copied to its top.
+        directory = outside_repository(self)
+        write_files(directory, {"Projects/Game/Native/Spinner.cpp": MISINDENTED_SOURCE,
+                                "Engine/Spinner.cpp": MISINDENTED_SOURCE})
+        shutil.copyfile(REPOSITORY_ROOT / ".clang-format", directory / ".clang-format")
+        native = directory / "Projects" / "Game" / "Native" / "Spinner.cpp"
+        engine = directory / "Engine" / "Spinner.cpp"
+        output = io.StringIO()
+        with mock.patch.object(Format, "REPOSITORY_ROOT", directory), \
+                mock.patch.object(Format, "find_clang_format", return_value=(clang_format, "22")), \
+                contextlib.redirect_stdout(output):
+            code = Format.main(["--jobs", "1"])
+        self.assertEqual(code, Format.EXIT_NEEDS_FORMATTING, output.getvalue())
+        self.assertEqual(native.read_bytes(), MISINDENTED_SOURCE.encode("utf-8"))
+        self.assertEqual(engine.read_bytes(), SPINNER_SOURCE.encode("utf-8"))
+        reported = [line for line in output.getvalue().splitlines() if line.startswith("Projects/Game/Native/")]
+        self.assertEqual(len(reported), 1, output.getvalue())
+        self.assertTrue(reported[0].startswith(f"Projects/Game/Native/Spinner.cpp:{MISINDENTED_LINE}:"), reported)
+        self.assertIn("native.write", reported[0])
+        self.assertIn("[FAILED] format: 1 file(s) need formatting, first: Projects/Game/Native/Spinner.cpp",
+                      output.getvalue())
 
 
 class FormatCheckTests(unittest.TestCase):
@@ -260,6 +297,14 @@ class RecordTests(unittest.TestCase):
                 native_build.parse_record(json.dumps(changed))
         with self.assertRaises(native_build.RecordError):
             native_build.parse_record("{")
+        # A build that failed before it could hash the sources records an empty SourceHash, which reads back; a
+        # successful build's record never has one.
+        unhashed = dataclasses.replace(record, source_hash="")
+        self.assertEqual(native_build.parse_record(native_build.record_text(unhashed)), unhashed)
+        succeeded = dict(json.loads(native_build.record_text(unhashed)), Succeeded=True, Output="NativeModule.dll")
+        with self.assertRaises(native_build.RecordError) as raised:
+            native_build.parse_record(json.dumps(succeeded))
+        self.assertIn("/SourceHash", str(raised.exception))
 
     def test_tool_output_becomes_located_diagnostics(self) -> None:
         project = Path(tempfile.gettempdir()).resolve() / "Game"
@@ -296,6 +341,76 @@ class RecordTests(unittest.TestCase):
         assert temporary is not None
         self.assertEqual((temporary.code, temporary.severity), (native_build.BUILD_ERROR, "Warning"))
         self.assertIsNone(native_build.parse_tool_diagnostic("Build succeeded.", project, REPOSITORY_ROOT))
+
+
+class RunTests(unittest.TestCase):
+    """BuildNative.main in this process, with the toolchain, the build lock, premake and MSBuild stood in for, so its
+    record is checked for what happens around the compile, on every platform."""
+
+    def setUp(self) -> None:
+        self.directory = Path(tempfile.mkdtemp(prefix="BuildNative-"))
+        self.addCleanup(shutil.rmtree, self.directory, True)
+        self.project = self.directory / "Game"
+        write_files(self.project, {"Native/Spinner.h": SPINNER_HEADER, "Native/Spinner.cpp": SPINNER_SOURCE})
+        self.out = self.directory / "Out"
+        for patch in (mock.patch.object(BuildNative.paths, "host", return_value=mock.Mock(is_windows=True)),
+                      mock.patch.object(BuildNative, "configure_stdio"),
+                      mock.patch.object(BuildNative, "format_diagnostics", return_value=[]),
+                      mock.patch.object(BuildNative.toolchain, "find_visual_studio", return_value=mock.Mock()),
+                      mock.patch.object(BuildNative, "take_build_lock", return_value=mock.Mock()),
+                      mock.patch.object(BuildNative.NativeBuild, "generate", return_value=self.directory / "X.slnx")):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def main(self) -> tuple[int, native_build.BuildRecord]:
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = BuildNative.main(["--project", str(self.project), "--kind", "module", "--config", "Debug", "--out",
+                                     str(self.out)])
+        return code, native_build.read_record(self.out)
+
+    def test_a_build_whose_sources_change_while_it_compiles_fails(self) -> None:
+        # The milestone review: MSBuild reads the sources after the lint, so a native.write (or an edit.undo of one)
+        # while the build waits for the build lock or compiles would put code the lint never saw under the linted hash.
+        def compile_after_a_write(build: BuildNative.NativeBuild, *_: object) -> int:
+            (build.project / "Native" / "Spinner.cpp").write_bytes(b"static int s_Count = 0;\n")
+            build.output = native_build.MODULE_LIBRARY
+            return BuildNative.EXIT_SUCCESS
+
+        with mock.patch.object(BuildNative.NativeBuild, "compile", compile_after_a_write):
+            code, record = self.main()
+        self.assertEqual(code, 1)
+        self.assertFalse(record.succeeded)
+        self.assertEqual(record.output, "")
+        self.assertEqual([(diagnostic.code, diagnostic.severity) for diagnostic in record.diagnostics],
+                         [(native_build.BUILD_ERROR, "Error")])
+        self.assertIn("the sources changed during the build", record.diagnostics[0].message)
+
+        # The same build whose sources stay as they were succeeds.
+        write_files(self.project, {"Native/Spinner.cpp": SPINNER_SOURCE})
+        shutil.rmtree(self.out)
+
+        def compile_unchanged(build: BuildNative.NativeBuild, *_: object) -> int:
+            build.output = native_build.MODULE_LIBRARY
+            return BuildNative.EXIT_SUCCESS
+
+        with mock.patch.object(BuildNative.NativeBuild, "compile", compile_unchanged):
+            code, record = self.main()
+        self.assertEqual(code, 0, record.diagnostics)
+        self.assertTrue(record.succeeded)
+        self.assertEqual(record.source_hash, native_build.source_hash(self.project, "Debug", API_HEADER))
+
+    def test_sources_that_cannot_be_read_fail_with_a_record_that_says_why(self) -> None:
+        # The milestone review: the record is written for every outcome, so its readers must accept the empty
+        # SourceHash of a build that could not hash the sources, and report the build's own reason.
+        locked = PermissionError("Spinner.cpp is locked")
+        with mock.patch.object(BuildNative.native_build, "source_hash", side_effect=locked):
+            code, record = self.main()
+        self.assertEqual(code, 3)
+        self.assertFalse(record.succeeded)
+        self.assertEqual(record.source_hash, "")
+        self.assertEqual([diagnostic.code for diagnostic in record.diagnostics], [native_build.BUILD_ERROR])
+        self.assertIn("cannot read the native module's sources", record.diagnostics[0].message)
+        self.assertIn("Spinner.cpp is locked", record.diagnostics[0].message)
 
 
 class ScriptTests(unittest.TestCase):
