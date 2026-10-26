@@ -8,6 +8,9 @@
 #include "Support/DeathTest.h"
 #include "Support/HeadlessGpuFixture.h"
 
+#include <cstdint>
+#include <limits>
+
 namespace Engine {
 
 	// Paces empty frames on a headless device with the hang fault until a bounded wait ends the process: the child of the
@@ -90,6 +93,66 @@ namespace Engine {
 				== GpuWaitResult::Hang);
 			CHECK(smallBudget == 3);
 			CHECK(GpuWaitResultToString(GpuWaitResult::Hang) == "Hang");
+		}
+
+		TEST_CASE("FramePacer: the reset wait is whole slices, rounded up")
+		{
+			// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decisions 40 and 41): a number of slices, never wall time.
+			static_assert(GetGpuResetWaitSliceCount(DefaultGpuResetWaitMilliseconds) == 150);
+			CHECK(GetGpuResetWaitSliceCount(0) == 0);
+			CHECK(GetGpuResetWaitSliceCount(1) == 1);
+			CHECK(GetGpuResetWaitSliceCount(100) == 1);
+			CHECK(GetGpuResetWaitSliceCount(101) == 2);
+			CHECK(GetGpuResetWaitSliceCount(MaxGpuResetWaitMilliseconds) == 1'200);
+			// A specification set in code may exceed the option's range (GraphicsSpecification::ResetWaitMilliseconds).
+			CHECK(GetGpuResetWaitSliceCount(std::numeric_limits<uint32_t>::max()) == 42'949'673);
+		}
+
+		TEST_CASE("FramePacer: the reset wait runs only after the budget timed out, and only both timing out is a hang"
+			* doctest::skip(true))
+		{
+			// M18 acceptance (C18.4, decision 40, R-HANG), the state machine without a GPU or a clock: after the 10 s budget a
+			// wait goes on for the reset wait, a loss report there is a device loss (recovered like any loss), a completion
+			// there was a slow GPU, and only a reset wait that times out too is the fatal hang. Slices are counted, never
+			// timed; a row's last slice repeats.
+			const auto afterBudget = [](std::vector<GpuWaitSliceResult> tail)
+			{
+				std::vector<GpuWaitSliceResult> slices(GpuWaitMaxSlices, GpuWaitSliceResult::Timeout);
+				slices.insert(slices.end(), tail.begin(), tail.end());
+				return slices;
+			};
+			struct Row
+			{
+				std::vector<GpuWaitSliceResult> Slices{};
+				uint32_t ResetSlices = 0;
+				GpuWaitResult Expected = GpuWaitResult::Signaled;
+				bool InResetWait = false;
+				size_t ExpectedCalls = 0;
+			};
+			const std::vector<Row> rows = {
+				{ { GpuWaitSliceResult::Timeout, GpuWaitSliceResult::Signaled }, 150, GpuWaitResult::Signaled, false, 2 },
+				{ { GpuWaitSliceResult::Timeout, GpuWaitSliceResult::DeviceLost }, 150, GpuWaitResult::DeviceLost, false, 2 },
+				{ afterBudget({ GpuWaitSliceResult::Timeout, GpuWaitSliceResult::DeviceLost }), 150, GpuWaitResult::DeviceLost, true, GpuWaitMaxSlices + 2 },
+				{ afterBudget({ GpuWaitSliceResult::Timeout, GpuWaitSliceResult::Timeout, GpuWaitSliceResult::Signaled }), 150, GpuWaitResult::Signaled, true,
+					GpuWaitMaxSlices + 3 },
+				{ afterBudget({ GpuWaitSliceResult::Failed }), 150, GpuWaitResult::Failed, true, GpuWaitMaxSlices + 1 },
+				{ afterBudget({ GpuWaitSliceResult::Timeout }), 150, GpuWaitResult::Hang, true, GpuWaitMaxSlices + 150 },
+				// No reset wait (--gpu-reset-wait 0): the budget alone, as before M18.
+				{ afterBudget({ GpuWaitSliceResult::DeviceLost }), 0, GpuWaitResult::Hang, false, GpuWaitMaxSlices },
+			};
+			for (const Row& row : rows)
+			{
+				CAPTURE(row.ResetSlices);
+				CAPTURE(row.ExpectedCalls);
+				size_t calls = 0;
+				const GpuWaitOutcome outcome = RunGpuWaitWithReset([&row, &calls]()
+				{
+					return row.Slices[std::min(calls++, row.Slices.size() - 1)];
+				}, GpuWaitMaxSlices, row.ResetSlices);
+				CHECK(outcome.Result == row.Expected);
+				CHECK(outcome.InResetWait == row.InResetWait);
+				CHECK(calls == row.ExpectedCalls);
+			}
 		}
 
 		TEST_CASE("FramePacer: frame N waits for the submission of frame N - FramesInFlight"
@@ -196,6 +259,87 @@ namespace Engine {
 				pacer.EndFrame(submissions.back());
 			}
 			device.WaitForIdle();
+		}
+
+		TEST_CASE("FramePacer: a hang reset in the reset wait reports an injected loss once, and the device recovers"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 acceptance (C18.4, Docs/Decisions/0029-m18-contract.md decisions 40 and 46): "a driver-reset hang recovers like
+			// a loss". Under hang-reset the first bounded wait after the device's first garbage collection spends its budget
+			// without waiting, the reset wait's first slice reports the device lost, and the wait returns instead of ending the
+			// process; the device recovers like any loss, and the fault never strikes again.
+			Test::HeadlessGpuFixture gpu({ .InjectFault = GpuFault::HangReset });
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Result<nvrhi::CommandListHandle> commandList = device.CreateCommandList();
+				REQUIRE_MESSAGE(commandList.has_value(), commandList.error().ToString());
+				(*commandList)->open();
+				(*commandList)->close();
+				// Before the first garbage collection (an application's startup and first frame) a wait waits for the GPU.
+				const uint64_t startup = device.ExecuteCommandList(**commandList);
+				WaitForSubmission(device, startup, "FramePacer test");
+				CHECK_FALSE(device.IsLost());
+				device.RunGarbageCollection();
+
+				(*commandList)->open();
+				(*commandList)->close();
+				const uint64_t hung = device.ExecuteCommandList(**commandList);
+				WaitForSubmission(device, hung, "FramePacer test");
+				REQUIRE(device.IsLost());
+				const std::optional<GpuDeviceLossReport> report = device.GetLossReport();
+				REQUIRE(report.has_value());
+				CHECK(report->Injected);
+				CHECK(report->Context.contains("FramePacer test"));
+				device.RunGarbageCollection();
+			}
+
+			const Status recovered = device.Recover(nullptr);
+			REQUIRE_MESSAGE(recovered.has_value(), recovered.error().ToString());
+			CHECK(device.GetRecoveryCount() == 1);
+			// Once per process: the recovered device's frames pace and wait for the GPU again.
+			FramePacer pacer(device, 2);
+			Result<nvrhi::CommandListHandle> commandList = device.CreateCommandList();
+			REQUIRE_MESSAGE(commandList.has_value(), commandList.error().ToString());
+			for (uint64_t frame = 0; frame < 4; ++frame)
+			{
+				pacer.BeginFrame();
+				(*commandList)->open();
+				(*commandList)->close();
+				pacer.EndFrame(device.ExecuteCommandList(**commandList));
+				device.RunGarbageCollection();
+			}
+			CHECK_FALSE(device.IsLost());
+			CHECK(device.GetRecoveryCount() == 1);
+			device.WaitForIdle();
+		}
+
+		TEST_CASE("FramePacer: under hang-reset-persistent a device that hangs again after its recovery is recovered again"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 acceptance (C18.4, decisions 40 and 46): a recovery is not once per process; a hang after it (never during it:
+			// a recovery waits through no bounded wait) is reset and recovered again.
+			Test::HeadlessGpuFixture gpu({ .InjectFault = GpuFault::HangResetPersistent });
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			device.RunGarbageCollection();
+			for (uint32_t hang = 1; hang <= 2; ++hang)
+			{
+				CAPTURE(hang);
+				{
+					Result<nvrhi::CommandListHandle> commandList = device.CreateCommandList();
+					REQUIRE_MESSAGE(commandList.has_value(), commandList.error().ToString());
+					(*commandList)->open();
+					(*commandList)->close();
+					WaitForSubmission(device, device.ExecuteCommandList(**commandList), "FramePacer test");
+					REQUIRE(device.IsLost());
+					device.RunGarbageCollection();
+				}
+				const Status recovered = device.Recover(nullptr);
+				REQUIRE_MESSAGE(recovered.has_value(), recovered.error().ToString());
+				CHECK(device.GetRecoveryCount() == hang);
+				device.RunGarbageCollection();
+			}
 		}
 
 		TEST_CASE("FramePacer: the hang fault ends the first wait for a frame slot with GpuHang" * doctest::test_suite(Test::GpuSuite))

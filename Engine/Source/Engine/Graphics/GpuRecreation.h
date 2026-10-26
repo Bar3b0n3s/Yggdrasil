@@ -32,13 +32,20 @@
 // owner (a renderer's pool, a capture's private renderer, a pass of the set) is covered by its own class or its owner's
 // hooks, never by a second registration of the same object. The device's recovery (GraphicsDevice::Recover) checks that
 // nothing escaped: once every owner released, no GPU object the device tracks may still be alive (GpuResourceTracker).
+//
+// M18 (C18.4, decision 43): the same registry serves out-of-memory after startup. An owner that keeps GPU objects it can
+// create again on demand (a pool's free targets, a cache's stale mirrors) also sets GpuRecreationHooks::TrimUnused, which
+// GraphicsDevice::TrimUnused calls before a request that ran out of memory retries (Graphics/GpuOutOfMemory.h).
 
 namespace Engine {
 
 	class GpuRecreationRegistry;
 
 	// What one owner does when the device is lost and when it exists again (decision 26). Both hooks run on the main thread,
-	// between frames, from GraphicsDevice::Recover; neither may register or unregister an owner.
+	// between frames, from GraphicsDevice::Recover; neither may register or unregister an owner. M18 (C18.4,
+	// Docs/Decisions/0029-m18-contract.md decision 43): an optional third hook, TrimUnused, runs when a request after startup
+	// runs out of GPU memory (GraphicsDevice::TrimUnused), on a healthy device; it may not register or unregister an owner
+	// either.
 	struct GpuRecreationHooks
 	{
 		// The owner's name in logs, errors and GpuRecreationRegistry::GetOwnerNames ("SceneRendererPipelines", "Swapchain",
@@ -54,6 +61,20 @@ namespace Engine {
 		// own creation (pipelines, the size-dependent targets, a swapchain); what it creates lazily is created by its next
 		// use. Returns the first error; an error makes the recovery fail (GraphicsDevice::Recover). Empty: nothing to create.
 		std::function<Status()> Recreate{};
+		// M18 (C18.4, decision 43): drops what the owner holds that it can create again and that nothing uses now, so a
+		// request that ran out of GPU memory can retry: free pooled targets (RenderTargetPool::TrimUnused), mirrors of
+		// replaced versions and unloaded assets (GpuResourceCache::TrimUnused), a capture's targets between captures
+		// (ViewportCapture), any other cache of GPU objects the owner rebuilds on demand. It runs on a healthy device, between
+		// recordings (never while the owner or anyone else records with what it drops, or holds a reference into its tables),
+		// possibly from inside the owner's own request that ran out of memory (a renderer's Resize trims before its retry),
+		// so it drops only what that request does not use and leaves the owner usable. GraphicsDevice::TrimUnused has waited
+		// for the device's last submission before it runs the hooks, so a submitted use of what a hook drops has completed,
+		// but no wait covers a command list that is still open: a hook keeps what an open list may record into without NVRHI
+		// referencing it (a pool keeps the targets acquired since its last EndFrame). It calls nothing on the device but the
+		// release of handles (GraphicsDevice::TrimUnused then collects them) and GraphicsDevice::GetCompletedSubmissionID,
+		// which does not wait; it never waits, and cannot fail. Empty: nothing to trim. Every owner of a pool, a cache or
+		// targets it can rebuild sets it, later milestones' included.
+		std::function<void()> TrimUnused{};
 	};
 
 	// One registration: unregisters its owner when destroyed or reset. Movable, not copyable; an empty registration (the
@@ -109,11 +130,16 @@ namespace Engine {
 		// owner's name as context ("while recreating '<Name>'"); the owners after it stay released, and the caller's recovery
 		// fails. Not reentrant (asserted).
 		[[nodiscard]] Status RecreateAll();
+		// M18 (C18.4, decision 43): calls every owner's TrimUnused, last registered first (an owner trims before the owners
+		// it uses, as Release runs), skipping owners without one; returns how many owners trimmed. For
+		// GraphicsDevice::TrimUnused, after its wait for the device's last submission. Not reentrant and not during ReleaseAll
+		// or RecreateAll (asserted: IsRunning; RetryAfterTrim never trims while the registry runs).
+		[[nodiscard]] size_t TrimUnused();
 
 		// The registered owners' names, in registration order (for logs, errors and the loss tests).
 		[[nodiscard]] std::vector<std::string> GetOwnerNames() const;
 		[[nodiscard]] size_t GetOwnerCount() const;
-		// Whether ReleaseAll or RecreateAll is running.
+		// Whether ReleaseAll, RecreateAll or (M18, C18.4) TrimUnused is running.
 		[[nodiscard]] bool IsRunning() const { return m_Running; }
 	private:
 		friend class GpuRecreationRegistration;

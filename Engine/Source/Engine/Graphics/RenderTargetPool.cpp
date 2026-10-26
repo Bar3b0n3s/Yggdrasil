@@ -86,6 +86,11 @@ namespace Engine {
 		m_Targets.clear();
 	}
 
+	void RenderTargetPool::TrimUnused()
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
 	size_t RenderTargetPool::GetTargetCount() const
 	{
 		return m_Targets.size();

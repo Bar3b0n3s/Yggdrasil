@@ -795,6 +795,52 @@ namespace Engine {
 			CHECK(uploaded.IndexBuffer != nullptr);
 			device.RunGarbageCollection();
 		}
+
+		TEST_CASE("GpuResourceCache: TrimUnused releases the mirrors of replaced versions and unloaded assets and keeps the current ones"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 acceptance (C18.4, Docs/Decisions/0029-m18-contract.md decision 43): "unreferenced uploads" are trimmed when a
+			// request ran out of GPU memory: a replaced version and an asset the manager no longer holds, never the mirror of a
+			// loaded, current asset, which the next Render would upload again at once, nor a placeholder. The device's trim
+			// reaches the cache through its registration.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::InMemoryAssetManager assets;
+			const AssetHandle kept(0x7e57'0000'0000'0011);
+			const AssetHandle replaced(0x7e57'0000'0000'0012);
+			const AssetHandle removed(0x7e57'0000'0000'0013);
+			assets.Publish(kept, MakeTexture(10));
+			assets.Publish(replaced, MakeTexture(20));
+			assets.Publish(removed, MakeTexture(30));
+			{
+				GpuResourceCache cache(gpu.GetDevice(), assets);
+				REQUIRE(cache.GetTexture(kept).Texture != nullptr);
+				REQUIRE(cache.GetTexture(replaced).Texture != nullptr);
+				REQUIRE(cache.GetTexture(removed).Texture != nullptr);
+				static_cast<void>(cache.GetMesh(AssetHandle())); // the placeholder (Cube) mirror
+				assets.Publish(replaced, MakeTexture(21));
+				REQUIRE(cache.GetTexture(replaced).Version == 2);
+				assets.Remove(removed);
+				REQUIRE(cache.GetStats().TextureCount == 4);
+
+				const nvrhi::TextureHandle current = cache.GetTexture(kept).Texture;
+				cache.TrimUnused();
+				CHECK(cache.GetStats().TextureCount == 2); // the kept asset and the replaced asset's current version
+				CHECK(cache.GetStats().MeshCount == 1);    // the placeholder stays
+				CHECK(cache.GetTexture(kept).Texture == current);
+
+				// A dropped mirror is uploaded again by its next Get.
+				assets.Publish(removed, MakeTexture(31));
+				CHECK_FALSE(cache.GetTexture(removed).IsPlaceholder);
+				CHECK(cache.GetStats().TextureCount == 3);
+
+				// The device's trim reaches the cache through its registration, and keeps what is current.
+				gpu.GetDevice().TrimUnused();
+				CHECK(cache.GetStats().TextureCount == 3);
+				CHECK(cache.GetTexture(kept).Texture == current);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
 	}
 
 }

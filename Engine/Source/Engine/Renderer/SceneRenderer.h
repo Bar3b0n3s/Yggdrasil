@@ -103,6 +103,15 @@
 // creates its size-dependent ones again. They are two of the placement rule's three places: a later milestone's pass is
 // declared (RenderPassDeclaration.h) and owned by the set, and a later per-view object lives in SceneRenderer::State, so
 // neither needs a registration of its own.
+//
+// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decisions 42 to 44): out-of-memory after startup. A renderer's
+// registration trims its pool's free targets (GpuRecreationHooks::TrimUnused, RenderTargetPool::TrimUnused). Resize and a
+// debug-view switch (the debug view's first pipelines) trim and retry once (RetryAfterTrim, Graphics/GpuOutOfMemory.h), and
+// then fail alone with ErrorCode::OutOfMemory: Resize keeps the previous size and targets, and Render renders the previous
+// debug view. A Render whose lazily created target or binding set runs out of memory returns the error as before, and its
+// host trims after the frame and renders again at the next frame (decision 44). The set's CreatePipelines at startup and in
+// a recovery stays fatal on out-of-memory; ReloadShaders keeps returning it. ReleaseTargets drops a renderer's
+// size-dependent targets for an owner whose image nothing displays between renders (ViewportCapture, decision 43).
 
 namespace Engine {
 
@@ -180,7 +189,9 @@ namespace Engine {
 		// pipelines for (not below RenderDebugViewCount); InvalidState between ReleaseGpuObjects and CreatePipelines (a
 		// programmer error, also asserted); those of PipelineFactory, where a Gpu error is an out-of-memory creation, which
 		// the caller turns into FatalError(OutOfMemory) (§8.14 item 7), or on a lost device the loss (M18, C18.3 decision 28).
-		// Nothing is kept on failure, so a later call tries again.
+		// Nothing is kept on failure, so a later call tries again. M18 (C18.4, decisions 42 and 44): after startup the caller
+		// runs it through RetryAfterTrim (SceneRenderer::Render does), so an out-of-memory failure is trimmed and retried once
+		// and then returned as OutOfMemory, never fatal.
 		[[nodiscard]] Status EnsureDebugView(RenderDebugView view);
 
 		// Actual pipelines created so far: startup plus each lazily created material-view family, counted once.
@@ -273,7 +284,27 @@ namespace Engine {
 		// Recreates the size-dependent targets for `width` x `height` (both >= 1, asserted) and clears the renderer's binding
 		// sets (which reference the old targets); no effect at the current size. Errors: InvalidState while a Render awaits its
 		// OnSubmitted (also asserted); those of the target creation (Gpu: FatalError(OutOfMemory) for the caller, §8.14 item 7).
+		// M18 (C18.4, decisions 42 and 44): a view's new size after startup. Resize creates the new size's targets aside and
+		// replaces the current ones only when every creation succeeded, through RetryAfterTrim: an out-of-memory creation
+		// trims and retries once, and a second one returns OutOfMemory with the renderer unchanged (its size, targets,
+		// binding sets, final texture and pick generation), never fatal. Every call tries again; a host that resizes a view
+		// every frame asks for a size that failed only once its view's size changed (decision 44), and a capture tries at
+		// every request. A target is never made smaller than asked.
 		[[nodiscard]] Status Resize(uint32_t width, uint32_t height);
+		// M18 (C18.4, decision 43): drops the renderer's size-dependent targets (the scene-resolution targets and their
+		// framebuffers, the output stage's targets, the entity-id target, the frame targets it holds from its pool) and the
+		// binding sets that reference them, keeping its size, pipelines, per-view buffers and material sets; the pooled ones
+		// become free in its RenderTargetPool, and it releases the pool's free targets whose last submission has completed
+		// (RenderTargetPool::ReleaseFree), so what nothing pending uses goes at once (its memory with its last reference: at
+		// once in Dist, at the next garbage collection where the resource tracker counts). For an owner whose image nothing
+		// displays between renders (ViewportCapture, before it resizes to another size and from its trim hook): it calls
+		// nothing on the device but the release of handles and GetCompletedSubmissionID, never waits and cannot fail, so a
+		// TrimUnused hook may call it.
+		// Pending picks resolve as cancelled (CancelPicks), and GetFinalTexture and GetEntityIdTexture return null until the
+		// next Render, which creates the targets of its size again (a Resize to the current size has no effect, and one to
+		// another size creates that size's). Between Renders: not while a Render awaits its OnSubmitted (asserted). Main
+		// thread.
+		void ReleaseTargets();
 
 		// Records the pass list for `snapshot` into `commandList` (open, asserted). The snapshot's camera viewport should
 		// match the scene resolution (M18: RenderOutputSettings, the renderer's size by default); a different one renders at
@@ -292,6 +323,14 @@ namespace Engine {
 		// target cannot be created. Data the schemas accept is never a render error: a missing asset draws its placeholder, a
 		// missing environment the fallback ambient, and a shadow-casting light the shadow planners reject stays lit without
 		// shadows (warned once per renderer).
+		// M18 (C18.4, decisions 42 and 44): a debug-view switch after startup. The debug view's first pipelines are created
+		// through RetryAfterTrim, before anything is recorded; when they run out of memory again after the trim, the view is
+		// recorded with the debug view the renderer last rendered (Lit before its first Render) and Render returns
+		// OutOfMemory as a partial error naming the view that stayed (one Warn line per renderer and view), so the image
+		// stays on its previous mode and the host keeps or reverts its setting (decision 44); the next Render that asks for
+		// the view tries again. A partial Gpu error of a lazily created target or binding set on a device that is not lost is
+		// out-of-memory too: returned as now, never fatal, and its host trims after the frame (GraphicsDevice::TrimUnused) and
+		// renders again at the next frame.
 		[[nodiscard]] Status Render(nvrhi::ICommandList& commandList, const RenderSnapshot& snapshot);
 
 		// The LDR target holding the last Render's image (RGBA8_UNORM, display-encoded values, §8.9), at the renderer's size:
@@ -350,7 +389,8 @@ namespace Engine {
 		// cancelled), and GetFinalTexture and GetEntityIdTexture return null until the next Render. A per-view object a later
 		// milestone adds to the state is released without code of its own. Recreate creates the per-view buffers and the
 		// targets of the renderer's size again, as Create does, so GetFinalTexture is valid again; everything else is created
-		// by the next Render. Errors: those of the creation (Gpu). Main thread, from GraphicsDevice::Recover.
+		// by the next Render. Errors: those of the creation (Gpu). Main thread, from GraphicsDevice::Recover. M18 (C18.4,
+		// decision 43): the registration's TrimUnused hook trims the renderer's RenderTargetPool (its free targets).
 		void ReleaseGpuObjects();
 		[[nodiscard]] Status RecreateGpuObjects();
 	private:

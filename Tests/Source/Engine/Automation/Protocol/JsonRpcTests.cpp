@@ -123,6 +123,7 @@ namespace Engine {
 			CHECK(ToRpcErrorCode(ErrorCode::Cancelled) == RpcErrorCode::Cancelled);
 			CHECK(ToRpcErrorCode(ErrorCode::Io) == RpcErrorCode::Internal);
 			CHECK(ToRpcErrorCode(ErrorCode::Gpu) == RpcErrorCode::Internal);
+			CHECK(ToRpcErrorCode(ErrorCode::OutOfMemory) == RpcErrorCode::Internal); // M18 (C18.4): no new protocol code
 			CHECK(ToRpcErrorCode(ErrorCode::Unknown) == RpcErrorCode::Internal);
 			CHECK(RpcErrorCodeToString(RpcErrorCode::Busy) == "Busy");
 			CHECK(RpcErrorCodeToString(RpcErrorCode::InvalidParams) == "InvalidParams");

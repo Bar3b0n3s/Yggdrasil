@@ -35,6 +35,19 @@ namespace Engine {
 		uint64_t Warnings = 0; // Warning messages
 	};
 
+	// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 46): what an injected fault does to one bounded GPU wait
+	// (GpuDiagnostics::TakeBoundedWaitFault, WaitForSubmission in FramePacer.h).
+	enum class GpuInjectedHang : uint8_t
+	{
+		// The wait waits for the GPU.
+		None,
+		// Every slice of the 10 s budget and of the reset wait times out without waiting: GpuHang (GpuFault::Hang).
+		Hang,
+		// Every slice of the 10 s budget times out without waiting, then the reset wait's first slice reports the device
+		// lost, an injected loss (GpuFault::HangReset, HangResetPersistent).
+		HangReset
+	};
+
 	// The NVRHI message callback (nvrhi::IMessageCallback) and the debug messenger's sink.
 	//
 	// Thread safety: every member may be called from any thread. Messages arrive on whichever thread the validation layer
@@ -118,8 +131,15 @@ namespace Engine {
 		// the first OnGarbageCollected leaves the fault armed for later, and no call strikes again after the one that did.
 		void OnSubmitted();
 		// M18 (C18.3, decision 30): called by GraphicsDevice::RunGarbageCollection, once per frame; the first call arms
-		// OnSubmitted's injected device-lost faults.
+		// OnSubmitted's injected device-lost faults (ArmInjectedFault). M18 (C18.4, decision 46): it arms C18.4's faults the
+		// same way (hang-reset, oom-rendertarget, oom-pipeline and oom-swapchain, each also -persistent), so an application's
+		// startup and first frame run without them.
 		void OnGarbageCollected();
+		// M18 (C18.4, decision 46): arms the injected faults that the first garbage collection arms (the device-lost faults
+		// and C18.4's), as OnGarbageCollected's first call does; arming again changes nothing, and no fault that struck once
+		// strikes again. GraphicsDevice::Create calls it when the environment variable GpuFaultAtStartupVariable is "1"
+		// (non-Dist), so those faults strike an application's startup, whose failures stay fatal.
+		void ArmInjectedFault();
 
 		// GpuFault::OomTexture: whether creating a texture with `desc` must fail as if out of device memory. True for
 		// sampled-only textures (neither isRenderTarget nor isUAV), so render targets, the swapchain and storage images keep
@@ -133,8 +153,37 @@ namespace Engine {
 		// GpuFault::Hang: whether bounded GPU waits must hang (FramePacer.h): WaitForSubmission skips its completed-submission
 		// early return, FramePacer::BeginFrame skips pollEventQuery once its slot has a recorded submission, and every wait
 		// slice reports VK_TIMEOUT without waiting, so the first wait ends the process with FatalError(GpuHang) whatever the
-		// GPU's progress.
+		// GPU's progress. M18 (C18.4, decision 40): every slice of its reset wait too, so no loss report arrives.
 		[[nodiscard]] bool ShouldInjectHang() const { return m_InjectedFault == GpuFault::Hang; }
+
+		// M18 (C18.4, decision 46): whether the next TakeBoundedWaitFault would return anything but None, without taking it:
+		// FramePacer::BeginFrame waits through WaitForSubmission instead of polling its slot's event query when it would.
+		[[nodiscard]] bool HasBoundedWaitFault() const;
+		// M18 (C18.4, decision 46): what an injected fault does to the bounded wait that is starting (WaitForSubmission calls
+		// it once per wait): Hang under GpuFault::Hang, at every wait from the start (M5's fault, unarmed); HangReset under
+		// GpuFault::HangReset at the first wait after OnGarbageCollected armed it, once per process (the struck bit of
+		// m_InjectedFaultArming, which ClearDeviceLost leaves alone), and under GpuFault::HangResetPersistent at every wait
+		// after the first OnGarbageCollected; otherwise None. A wait whose fault is not None skips its completed-submission
+		// early return. Takes the once-per-process strike.
+		[[nodiscard]] GpuInjectedHang TakeBoundedWaitFault();
+
+		// M18 (C18.4, decision 46): whether this creation of a render-target or storage texture (isRenderTarget or isUAV) must
+		// fail as if the device were out of memory: under GpuFault::OomRenderTarget the first such creation after the faults
+		// were armed (ArmInjectedFault), once per process, and under GpuFault::OomRenderTargetPersistent every one after.
+		// GraphicsDevice::CreateTexture calls it once per creation of a render-target or storage texture (sampled-only and
+		// staging textures are not render targets: GpuFault::OomTexture covers the former). Takes the once-per-process strike.
+		[[nodiscard]] bool TakeRenderTargetCreationFault();
+		// M18 (C18.4, decision 46): the same for the creation of a graphics or compute pipeline (GraphicsDevice::
+		// CreateGraphicsPipeline, CreateComputePipeline) under GpuFault::OomPipeline and OomPipelinePersistent.
+		[[nodiscard]] bool TakePipelineCreationFault();
+		// M18 (C18.4, decision 46): the same for the creation of a swapchain (Swapchain's vkCreateSwapchainKHR, which then
+		// reports VK_ERROR_OUT_OF_DEVICE_MEMORY without calling Vulkan) under GpuFault::OomSwapchain and
+		// OomSwapchainPersistent.
+		[[nodiscard]] bool TakeSwapchainCreationFault();
+	private:
+		// M18 (C18.4): the shared rule of the Take functions: whether a fault of `onceFault` or `persistentFault` strikes now,
+		// once armed (ArmInjectedFault), the once fault only at its first call.
+		[[nodiscard]] bool TakeArmedFault(GpuFault onceFault, GpuFault persistentFault);
 	private:
 		GpuFault m_InjectedFault = GpuFault::None;
 		std::atomic<uint64_t> m_ErrorCount{ 0 };
@@ -144,7 +193,9 @@ namespace Engine {
 		std::atomic<bool> m_FailDeviceRecreation{ false };
 		// M18 (C18.3, decision 30): the injected device-lost faults' once-per-process state, apart from m_DeviceLossState so
 		// that ClearDeviceLost never re-arms them: an armed bit (OnGarbageCollected's first call) and a struck bit (the
-		// OnSubmitted call that set the flag; no later call strikes again).
+		// OnSubmitted call that set the flag; no later call strikes again). M18 (C18.4, decision 46): C18.4's faults share it
+		// (a process injects one fault): their once spellings strike at the first Take call after the arming, which sets the
+		// struck bit, and their -persistent spellings need only the armed bit.
 		std::atomic<uint8_t> m_InjectedFaultArming{ 0 };
 	};
 

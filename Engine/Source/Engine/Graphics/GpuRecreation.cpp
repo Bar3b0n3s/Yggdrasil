@@ -110,6 +110,12 @@ namespace Engine {
 		return {};
 	}
 
+	size_t GpuRecreationRegistry::TrimUnused()
+	{
+		ENGINE_CONTRACT_STUB();
+		return 0;
+	}
+
 	std::vector<std::string> GpuRecreationRegistry::GetOwnerNames() const
 	{
 		std::vector<std::string> names;

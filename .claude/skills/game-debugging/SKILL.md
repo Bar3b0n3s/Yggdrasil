@@ -47,7 +47,7 @@ Every error response carries `error.data.errorCode` (the engine `ErrorCode` belo
 | -32700 / -32600 | Parse error / Invalid request | Send one well-formed JSON-RPC 2.0 object per message. |
 | -32601 | Method not found | Use a method `rpc.discover` lists; the hint suggests close names. |
 | -32602 | Invalid params | Correct each `issues[]` pointer (unknown field, wrong type, out of range, missing required param). |
-| -32000 | Internal | An engine bug: read `log.read` and the crash report, then report it with the request. |
+| -32000 | Internal | An engine bug: read `log.read` and the crash report, then report it with the request. When `error.data.errorCode` is `Io`, `Gpu` or `OutOfMemory`, the environment failed instead: see the engine `ErrorCode` table. |
 | -32001 | NotFound | The entity, asset, component, file or topic does not exist: check the path or id; follow the suggestions. |
 | -32002 | InvalidState | Not allowed now (no project or scene open, a test run owns the editor, another client owns lockstep, not playing): reach the needed state first. |
 | -32003 | ValidationFailed | The input breaks a rule: fix each issue, then retry. |
@@ -80,6 +80,7 @@ Every error response carries `error.data.errorCode` (the engine `ErrorCode` belo
 | `Unsupported` | Not available in this host or configuration. | Use a host that supports it (an editor with a renderer, a non-Dist build). |
 | `Conflict` | An optimistic-concurrency mismatch. | Re-read and retry with the current revision. |
 | `Cancelled` | The operation was cancelled. | Repeat it if it is still wanted. |
+| `OutOfMemory` | The request (a screenshot, a resize, a debug view) ran out of GPU memory again after the engine freed what it could rebuild and retried once; only it failed, and the editor goes on (JSON-RPC Internal). | Ask for less (a smaller `width` and `height`, no `debugView`), or repeat it later; a debug view that ran out of memory stays on its previous mode (`viewport.setOptions {}` reads it). |
 
 ### Script error kinds (`script.errors` rows, §11.7)
 

@@ -65,6 +65,17 @@ namespace Engine {
 		// Acquire creates new targets. Main thread.
 		void ReleaseAll();
 
+		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 43): its owner's TrimUnused hook, when a request ran out of
+		// GPU memory (the renderer's registration calls it). Releases every free target whose last submission has completed,
+		// whatever its age (keepFrames does not apply), and keeps the acquired ones and every target acquired since the last
+		// EndFrame (LastSubmission PendingSubmission), free or not: an open command list may still record into one, and
+		// NVRHI's lists do not reference a texture used only by a clear (ADR 0009 decision 31), so dropping the pool's handle
+		// would destroy the image at once in Dist, where the tracker holds no reference. GraphicsDevice::TrimUnused waits for
+		// the device's last submission before it runs the hooks, so there it releases every free target an EndFrame stamped;
+		// called on its own it keeps a target whose submission is still pending, as ReleaseFree does. Afterwards Acquire
+		// creates what it needs again. Main thread.
+		void TrimUnused();
+
 		// Targets the pool holds, free or acquired.
 		[[nodiscard]] size_t GetTargetCount() const;
 		// Targets someone besides the pool references (HasOtherReferences).

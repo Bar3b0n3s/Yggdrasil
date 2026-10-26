@@ -119,6 +119,11 @@ namespace Engine {
 	// it, survive the recovery. Only a failed recovery ends the process (RaiseDeviceLost): a device creation that fails
 	// again after one retry, a loss reported during the recovery, an owner whose Recreate fails, or a GPU object that an
 	// unregistered owner still holds.
+	//
+	// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decisions 40 to 46): a hang that the driver or the operating system
+	// resets is recovered like a loss (WaitForSubmission's reset wait, FramePacer.h), and out-of-memory after startup is
+	// recovered by a trim and one retry, or fails only its request with ErrorCode::OutOfMemory (TrimUnused, RetryAfterTrim in
+	// GpuOutOfMemory.h). Out-of-memory at startup, and in a recovery's Recreate (a second startup), stay fatal.
 	class GraphicsDevice
 	{
 	public:
@@ -165,6 +170,10 @@ namespace Engine {
 		// below 1.3, a missing validation layer while Validation is on, or no acceptable device (SelectDevice); NotFound
 		// for an override matching no device; Gpu for a failed Vulkan call or a null NVRHI device. Nothing stays created on
 		// failure.
+		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 46): in non-Dist builds (GpuTestHooksEnabled), when the
+		// environment variable GpuFaultAtStartupVariable (ENGINE_GPU_FAULT_AT_STARTUP) is "1", Create arms the injected fault
+		// at once (GpuDiagnostics::ArmInjectedFault, before its own first creation), so the faults that otherwise arm at the
+		// first garbage collection strike an application's startup; a Recover does not arm again.
 		[[nodiscard]] static Result<Scope<GraphicsDevice>> Create(const GraphicsDeviceSpecification& specification);
 
 		// Destroys `device` (the destructor's teardown) and returns its GpuDiagnostics counts afterwards, which include the
@@ -199,6 +208,13 @@ namespace Engine {
 		// M18 (C18.3, decision 28): on a lost device (IsLost) every wrapper, CreateHandleForNativeTexture included, fails with
 		// Gpu ("cannot create <type> '<name>': the device is lost") without calling NVRHI, and no caller treats a Gpu error on
 		// a lost device as out-of-memory: it is the loss, which the frame boundary recovers.
+		// M18 (C18.4, decision 46): CreateTexture of a render-target or storage texture (isRenderTarget or isUAV) also fails
+		// with Gpu, without calling NVRHI, when GpuDiagnostics::TakeRenderTargetCreationFault (--gpu-inject-fault=
+		// oom-rendertarget and oom-rendertarget-persistent), and CreateGraphicsPipeline and CreateComputePipeline when
+		// GpuDiagnostics::TakePipelineCreationFault (oom-pipeline, oom-pipeline-persistent), each "... out of device memory
+		// (injected by --gpu-inject-fault=<fault>)" as oom-texture's. After startup a Gpu error of a wrapper on a device that
+		// is not lost is out-of-memory (IsGpuOutOfMemory, GpuOutOfMemory.h): the request that met it trims and retries once
+		// (RetryAfterTrim) and then fails alone with ErrorCode::OutOfMemory; at startup it stays FatalError(OutOfMemory).
 		[[nodiscard]] Result<nvrhi::TextureHandle> CreateTexture(const nvrhi::TextureDesc& desc);
 		[[nodiscard]] Result<nvrhi::StagingTextureHandle> CreateStagingTexture(const nvrhi::TextureDesc& desc, nvrhi::CpuAccessMode cpuAccess);
 		[[nodiscard]] Result<nvrhi::BufferHandle> CreateBuffer(const nvrhi::BufferDesc& desc);
@@ -336,6 +352,27 @@ namespace Engine {
 		// M18 (C18.3, decision 26): the owners of this device's GPU objects (GpuRecreation.h). Valid for the device's
 		// lifetime; main thread.
 		[[nodiscard]] GpuRecreationRegistry& GetRecreation();
+
+		// M18 (C18.4, decision 43): frees the GPU memory that what can be rebuilt holds, before a request that ran out of
+		// memory retries (RetryAfterTrim, GpuOutOfMemory.h). In order: first WaitForSubmission of GetLastSubmissionID
+		// (bounded, so a hang there is a hang, and a loss there the loss, after which it does nothing more), so every
+		// submission that may have used what the owners are about to drop has completed before any handle drops, in every
+		// configuration (in Dist no tracker reference delays a destruction, and NVRHI's command lists do not reference a
+		// texture used only by a clear, ADR 0009 decision 31); then every registered owner's TrimUnused hook, last registered
+		// first (GpuRecreationRegistry::TrimUnused: free pooled targets, stale and unloaded mirrors, a capture's targets
+		// between captures, and later owners' caches); then the garbage collection RunGarbageCollection does (NVRHI's garbage
+		// collection, which destroys what retired command lists alone still referenced, the tracker's Sweep and the host
+		// images' collection) without arming an injected fault (GpuDiagnostics::OnGarbageCollected is not called). It logs
+		// nothing itself: the request's Warn line names the trim (RetryAfterTrim; a host whose per-frame render failed logs
+		// once per run of failing frames), so a trim every frame never floods the log. Main thread, between recordings: never
+		// while a command list records with an object an owner may drop, and never while a caller holds a reference an
+		// owner's documented accessors handed out (a GpuResourceCache mirror reference). A command list open with earlier
+		// recordings (another view of the frame) is covered by no wait: NVRHI keeps alive what such a list references (the
+		// framebuffers, binding sets and buffers of its draws, the destinations of its writes and copies), and the pools keep
+		// every target acquired since their last EndFrame (RenderTargetPool::TrimUnused), so the trim may run between two
+		// views of one frame. On a lost device it does nothing (the recovery releases everything), and not during
+		// GetRecreation's ReleaseAll or RecreateAll (asserted; RetryAfterTrim never trims then).
+		void TrimUnused();
 		// vkGetDeviceFaultInfoEXT as text (description, address infos, vendor infos); "VK_EXT_device_fault is not
 		// available" when the extension is not enabled (or the device has no Vulkan objects after a failed recovery), "no
 		// fault information" when the driver reports none. The query is valid only on a device that is really lost (the

@@ -59,6 +59,12 @@ namespace Engine {
 		return GpuWaitResult::Hang;
 	}
 
+	GpuWaitOutcome RunGpuWaitWithReset(const std::function<GpuWaitSliceResult()>& /*slice*/, uint32_t /*maxSlices*/, uint32_t /*resetSlices*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return GpuWaitOutcome{ .Result = GpuWaitResult::Failed };
+	}
+
 	void WaitForSubmission(GraphicsDevice& device, uint64_t submissionID, std::string_view context)
 	{
 		// Submission 0 is "nothing submitted": the timeline starts there, so there is never anything to wait for. A lost

@@ -509,6 +509,11 @@ namespace Engine {
 		{
 			owner->ReleaseGpuObjects();
 		};
+		// M18 (C18.4, decision 43): stale and unloaded mirrors, when a request ran out of GPU memory.
+		hooks.TrimUnused = [owner]()
+		{
+			owner->TrimUnused();
+		};
 		m_State->Recreation = device.GetRecreation().Register(std::move(hooks));
 	}
 
@@ -726,6 +731,11 @@ namespace Engine {
 		// host images of HostImageUpload are the device's, which GraphicsDevice::Recover releases. NextGeneration and
 		// UploadFailures stay, so no material generation from before the loss is ever made again.
 		Clear();
+	}
+
+	void GpuResourceCache::TrimUnused()
+	{
+		ENGINE_CONTRACT_STUB();
 	}
 
 	GpuResourceCacheStats GpuResourceCache::GetStats() const

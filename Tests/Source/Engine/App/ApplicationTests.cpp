@@ -17,6 +17,7 @@
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/TempDirectory.h"
 #include "Support/TestOptions.h"
+#include "Support/TrimCounter.h"
 #include "Support/Utf8Path.h"
 #include "Support/WindowedChild.h"
 
@@ -398,6 +399,50 @@ namespace Engine {
 			Scope<Test::GpuSubmissionGate> m_Gate;
 		};
 
+		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decisions 42 and 44): resizes its headless window in frames 1 and 3,
+		// and records the width of every frame it renders and how many times the device trimmed (an owner of its own that
+		// counts its TrimUnused calls).
+		class OutOfMemoryResizeApplication final : public Application
+		{
+		public:
+			explicit OutOfMemoryResizeApplication(ApplicationSpecification specification)
+				: Application(std::move(specification))
+			{
+			}
+		public:
+			std::vector<uint32_t> FrameWidths;
+			// The device's trims in the run (Test::TrimCounter), read at the shutdown.
+			uint32_t Trims = 0;
+		protected:
+			Status OnInitialize() override
+			{
+				m_TrimCounter = CreateScope<Test::TrimCounter>(GetContext().GetGraphicsDevice()->GetRecreation());
+				return {};
+			}
+
+			void OnShutdown() override
+			{
+				if (m_TrimCounter)
+					Trims = m_TrimCounter->GetTrims();
+				m_TrimCounter.reset();
+			}
+
+			void OnUpdate(const FrameTime& frame) override
+			{
+				if (frame.FrameIndex == 1)
+					GetContext().GetWindow()->SetSize(96, 80);
+				if (frame.FrameIndex == 3)
+					GetContext().GetWindow()->SetSize(112, 72);
+			}
+
+			void OnRender(RenderContext& context) override
+			{
+				FrameWidths.push_back(context.Width);
+			}
+		private:
+			Scope<Test::TrimCounter> m_TrimCounter;
+		};
+
 	}
 
 	// A headless application, which the headless Tests process can run in place.
@@ -693,6 +738,36 @@ namespace Engine {
 			CHECK(application.Run() == ExitCode::Success);
 			const std::vector<uint32_t> widths = { 64, 96, 96, 96 };
 			CHECK(application.FrameWidths == widths);
+		}
+
+		TEST_CASE("Application: a headless frame resize out of memory is retried after a trim, or skips its frames until the next size"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 acceptance (C18.4, Docs/Decisions/0029-m18-contract.md decisions 42, 44 and 46): under oom-rendertarget the resized
+			// frame target fails once, is created again after the trim and the frames render at the new size; under
+			// oom-rendertarget-persistent every frame at a size that failed renders nothing, each new size is tried again (one trim
+			// each), and the run goes on to its end without a GPU message (--expect-no-gpu-errors) and without a fatal error.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			for (const GpuFault fault : { GpuFault::OomRenderTarget, GpuFault::OomRenderTargetPersistent })
+			{
+				CAPTURE(GpuFaultToString(fault));
+				ApplicationSpecification specification = MakeHeadlessSpecification(5);
+				UseTestRenderer(specification);
+				specification.Graphics.InjectFault = fault;
+				OutOfMemoryResizeApplication application(std::move(specification));
+				CHECK(application.Run() == ExitCode::Success);
+				if (fault == GpuFault::OomRenderTarget)
+				{
+					CHECK(application.FrameWidths == std::vector<uint32_t>{ 64, 96, 96, 112, 112 });
+					CHECK(application.Trims == 1);
+				}
+				else
+				{
+					CHECK(application.FrameWidths == std::vector<uint32_t>{ 64 });
+					CHECK(application.Trims == 2);
+				}
+			}
 		}
 
 		TEST_CASE("Application: a headless Vulkan application renders every frame into its offscreen target"
@@ -1234,7 +1309,9 @@ namespace Engine {
 			const auto option = std::ranges::find(options, std::string_view("--gpu-inject-fault"), &CommandLineOption::Name);
 			REQUIRE(option != options.end());
 			for (const GpuFault fault : { GpuFault::DeviceLost, GpuFault::OomTexture, GpuFault::Hang, GpuFault::OomSpecialization,
-					 GpuFault::DeviceLostUnrecoverable })
+					 GpuFault::DeviceLostUnrecoverable, GpuFault::HangReset, GpuFault::HangResetPersistent, GpuFault::OomRenderTarget,
+					 GpuFault::OomRenderTargetPersistent, GpuFault::OomPipeline, GpuFault::OomPipelinePersistent, GpuFault::OomSwapchain,
+					 GpuFault::OomSwapchainPersistent })
 			{
 				const std::string spelled(GpuFaultToString(fault));
 				CAPTURE(spelled);
@@ -1255,6 +1332,49 @@ namespace Engine {
 			const Status applied = ApplyEngineCommandLine(*commandLine, specification);
 			REQUIRE_FALSE(applied.has_value());
 			CHECK(applied.error().GetMessageText().contains("'oom-specialization'"));
+			CHECK(applied.error().GetMessageText().contains("'oom-swapchain-persistent'"));
+		}
+
+		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 41): the machine's GPU reset window, an engine setting.
+		TEST_CASE("ApplyEngineCommandLine: --gpu-reset-wait sets the reset wait and refuses values outside 0 to 120000")
+		{
+			const std::span<const CommandLineOption> options = GetEngineCommandLineOptions();
+			REQUIRE(std::ranges::any_of(options, [](const CommandLineOption& option)
+			{
+				return option.Name == "--gpu-reset-wait";
+			}));
+			for (const auto& [text, milliseconds] : std::vector<std::pair<std::string, uint32_t>>{
+					 { "0", 0u }, { "2500", 2'500u }, { "120000", MaxGpuResetWaitMilliseconds } })
+			{
+				CAPTURE(text);
+				const std::vector<std::string> arguments = { "--headless", "--gpu-reset-wait", text };
+				const Result<CommandLine> commandLine = CommandLine::Parse(arguments, options);
+				REQUIRE_MESSAGE(commandLine.has_value(), commandLine.error().ToString());
+				ApplicationSpecification specification;
+				REQUIRE(ApplyEngineCommandLine(*commandLine, specification).has_value());
+				CHECK(specification.Graphics.ResetWaitMilliseconds == milliseconds);
+			}
+
+			// Absent: the default, long enough for a Windows TDR and a Linux GPU reset.
+			const Result<CommandLine> none = CommandLine::Parse({}, options);
+			REQUIRE(none.has_value());
+			ApplicationSpecification defaults;
+			REQUIRE(ApplyEngineCommandLine(*none, defaults).has_value());
+			CHECK(defaults.Graphics.ResetWaitMilliseconds == DefaultGpuResetWaitMilliseconds);
+
+			for (const std::string text : { "120001", "-1", "15s", "1.5" })
+			{
+				CAPTURE(text);
+				const std::vector<std::string> arguments = { "--gpu-reset-wait=" + text };
+				const Result<CommandLine> commandLine = CommandLine::Parse(arguments, options);
+				REQUIRE_MESSAGE(commandLine.has_value(), commandLine.error().ToString());
+				ApplicationSpecification specification;
+				const Status applied = ApplyEngineCommandLine(*commandLine, specification);
+				REQUIRE_FALSE(applied.has_value());
+				CHECK(applied.error().GetCode() == ErrorCode::InvalidArgument);
+				CHECK(applied.error().GetMessageText().contains("--gpu-reset-wait"));
+				CHECK(specification.Graphics.ResetWaitMilliseconds == DefaultGpuResetWaitMilliseconds);
+			}
 		}
 
 		TEST_CASE("ApplyEngineCommandLine: --user-data-dir sets an absolute user-data root")

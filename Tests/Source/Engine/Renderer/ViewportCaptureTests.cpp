@@ -3,6 +3,7 @@
 #include "Engine/Renderer/ViewportCapture.h"
 
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Graphics/GpuResourceTracker.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Image.h"
 #include "Engine/Graphics/RenderTargetPool.h"
@@ -12,6 +13,7 @@
 #include "Support/AssetTestFixture.h"
 #include "Support/DeviceLossTest.h"
 #include "Support/HeadlessGpuFixture.h"
+#include "Support/TrimCounter.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -224,6 +226,129 @@ namespace Engine {
 				};
 				const Result<Test::DeviceLossReport> report = Test::RunDeviceLossTest(gpu, test);
 				REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		TEST_CASE("ViewportCapture: a capture that runs out of memory is retried after a trim and is byte-identical to one without the fault"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 acceptance (C18.4, Docs/Decisions/0029-m18-contract.md decisions 42 and 46; Roadmap M18: "an injected
+			// out-of-memory recovers with a byte-identical screenshot"). Under oom-rendertarget the capture's first target after the
+			// device's first garbage collection fails; the capture trims and captures again, and its image equals the same
+			// capture on a device without the fault.
+			std::vector<std::vector<std::byte>> images;
+			for (const GpuFault fault : { GpuFault::None, GpuFault::OomRenderTarget })
+			{
+				CAPTURE(GpuFaultToString(fault));
+				Test::HeadlessGpuFixture gpu({ .InjectFault = fault });
+				ENGINE_REQUIRE_GPU(gpu);
+				Test::AssetTestFixture assets;
+				{
+					CaptureSetup setup(gpu, assets);
+					gpu.GetDevice().RunGarbageCollection(); // the application's first frame: the fault is armed from here
+					const Result<Image> image = setup.GetCapture().Capture({ .Width = 320, .Height = 200 }, MakeCubeSnapshot(320, 200));
+					REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
+					images.push_back(image->Pixels);
+				}
+				gpu.GetDevice().RunGarbageCollection();
+			}
+			REQUIRE(images.size() == 2);
+			CHECK(images[1] == images[0]);
+		}
+
+		TEST_CASE("ViewportCapture: a capture that keeps running out of memory fails alone with OutOfMemory, after one trim"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 acceptance (C18.4, decisions 42, 43, 44, 45 and 46; Roadmap M18: "a persistent one fails only its request"):
+			// the capture's new size runs out of memory again after its one trim, so the capture fails alone with OutOfMemory,
+			// never with an image of another size, GetLastOutputMapping stays the last successful capture's, the device stays
+			// usable, and the next request is tried again.
+			Test::HeadlessGpuFixture gpu({ .InjectFault = GpuFault::OomRenderTargetPersistent });
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::AssetTestFixture assets;
+			{
+				CaptureSetup setup(gpu, assets);
+				ViewportCapture& capture = setup.GetCapture();
+				// Before the first garbage collection (the startup), a capture creates its targets.
+				const Result<Image> before = capture.Capture({ .Width = 320, .Height = 200 }, MakeCubeSnapshot(320, 200));
+				REQUIRE_MESSAGE(before.has_value(), before.error().ToString());
+				const RenderOutputMapping rendered = capture.GetLastOutputMapping();
+				gpu.GetDevice().RunGarbageCollection();
+
+				const Test::TrimCounter counter(gpu.GetDevice().GetRecreation());
+				for (uint32_t request = 1; request <= 2; ++request)
+				{
+					CAPTURE(request);
+					const Result<Image> failed = capture.Capture({ .Width = 640, .Height = 360 }, MakeCubeSnapshot(640, 360));
+					REQUIRE_FALSE(failed.has_value());
+					CHECK(failed.error().GetCode() == ErrorCode::OutOfMemory);
+					// One trim: the renderer's Resize trimmed and failed alone, and the capture does not trim for its OutOfMemory.
+					CHECK(counter.GetTrims() == request);
+					CHECK(capture.GetLastOutputMapping() == rendered);
+					CHECK_FALSE(gpu.GetDevice().IsLost());
+				}
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		TEST_CASE("ViewportCapture: a trim between captures releases the last capture's targets, and the next capture renders the same image"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 acceptance (C18.4, decision 43): a capture keeps no image on display, so its renderer's targets are rebuilt on
+			// demand: a trim that another request runs releases them (the capture's TrimUnused hook, SceneRenderer::
+			// ReleaseTargets, then its renderer's pool), and the next capture creates them again and reads back the same bytes,
+			// at its size and after a capture at another size, which releases the previous size's targets before it resizes.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::AssetTestFixture assets;
+			{
+				CaptureSetup setup(gpu, assets);
+				ViewportCapture& capture = setup.GetCapture();
+				const GpuResourceTracker& tracker = gpu.GetDevice().GetResourceTracker();
+				const Result<Image> first = capture.Capture({ .Width = 320, .Height = 200 }, MakeCubeSnapshot(320, 200));
+				REQUIRE_MESSAGE(first.has_value(), first.error().ToString());
+				// Sweeps what the capture dropped, so only what it holds stays alive.
+				gpu.GetDevice().RunGarbageCollection();
+				const uint64_t heldTextures = tracker.GetLiveCount(GpuResourceType::Texture);
+
+				gpu.GetDevice().TrimUnused();
+				if (GpuResourceTracker::IsEnabled())
+					CHECK(tracker.GetLiveCount(GpuResourceType::Texture) < heldTextures);
+				const Result<Image> again = capture.Capture({ .Width = 320, .Height = 200 }, MakeCubeSnapshot(320, 200));
+				REQUIRE_MESSAGE(again.has_value(), again.error().ToString());
+				CHECK(again->Pixels == first->Pixels);
+
+				const Result<Image> larger = capture.Capture({ .Width = 640, .Height = 360 }, MakeCubeSnapshot(640, 360));
+				REQUIRE_MESSAGE(larger.has_value(), larger.error().ToString());
+				gpu.GetDevice().TrimUnused();
+				const Result<Image> back = capture.Capture({ .Width = 320, .Height = 200 }, MakeCubeSnapshot(320, 200));
+				REQUIRE_MESSAGE(back.has_value(), back.error().ToString());
+				CHECK(back->Pixels == first->Pixels);
+				CHECK_FALSE(gpu.GetDevice().IsLost());
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		TEST_CASE("ViewportCapture: a debug-view capture whose pipelines keep running out of memory returns OutOfMemory"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 acceptance (C18.4, decisions 42, 44 and 46): a capture never returns an image of another debug view than the
+			// one asked for; its pipelines run out of memory again after the trim, so the capture fails alone, and a Lit
+			// capture, whose pipelines exist, still succeeds.
+			Test::HeadlessGpuFixture gpu({ .InjectFault = GpuFault::OomPipelinePersistent });
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::AssetTestFixture assets;
+			{
+				CaptureSetup setup(gpu, assets);
+				gpu.GetDevice().RunGarbageCollection();
+				RenderSnapshot albedo = MakeCubeSnapshot(320, 200);
+				albedo.DebugView = RenderDebugView::Albedo;
+				const Result<Image> failed = setup.GetCapture().Capture({ .Width = 320, .Height = 200 }, albedo);
+				REQUIRE_FALSE(failed.has_value());
+				CHECK(failed.error().GetCode() == ErrorCode::OutOfMemory);
+				const Result<Image> lit = setup.GetCapture().Capture({ .Width = 320, .Height = 200 }, MakeCubeSnapshot(320, 200));
+				REQUIRE_MESSAGE(lit.has_value(), lit.error().ToString());
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}

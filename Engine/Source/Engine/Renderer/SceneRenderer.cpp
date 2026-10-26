@@ -791,6 +791,12 @@ namespace Engine {
 		{
 			return owner->RecreateGpuObjects();
 		};
+		// M18 (C18.4, decision 43): its pool's free targets, when a request ran out of GPU memory. Through the renderer's
+		// current state, which a device loss's Release replaces.
+		hooks.TrimUnused = [owner]()
+		{
+			owner->m_State->TargetPool->TrimUnused();
+		};
 		state.Recreation = device.GetRecreation().Register(std::move(hooks));
 		return renderer;
 	}
@@ -818,6 +824,11 @@ namespace Engine {
 		CancelPicks();
 		state.RecordedPicking = false;
 		return {};
+	}
+
+	void SceneRenderer::ReleaseTargets()
+	{
+		ENGINE_CONTRACT_STUB();
 	}
 
 	Status SceneRenderer::Render(nvrhi::ICommandList& commandList, const RenderSnapshot& snapshot)

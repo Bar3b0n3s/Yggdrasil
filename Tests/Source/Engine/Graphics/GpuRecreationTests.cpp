@@ -96,6 +96,41 @@ namespace Engine {
 			after.Reset();
 			CHECK(registry.GetOwnerCount() == 0);
 		}
+
+		TEST_CASE("GpuRecreationRegistry: TrimUnused calls every trim hook, last registered first, and skips owners without one"
+			* doctest::skip(true))
+		{
+			// M18 acceptance (C18.4, Docs/Decisions/0029-m18-contract.md decision 43): an owner trims before the owners it
+			// uses, as Release runs, an owner without a TrimUnused hook is skipped, and trimming releases nothing else.
+			GpuRecreationRegistry registry;
+			std::vector<std::string> calls;
+			std::vector<std::string>* log = &calls;
+			const auto withTrim = [log](GpuRecreationHooks hooks)
+			{
+				const std::string name = hooks.Name;
+				hooks.TrimUnused = [log, name]()
+				{
+					log->push_back("trim " + name);
+				};
+				return hooks;
+			};
+			GpuRecreationRegistration cache = registry.Register(withTrim(MakeLoggingHooks(calls, "GpuResourceCache")));
+			GpuRecreationRegistration pipelines = registry.Register(MakeLoggingHooks(calls, "SceneRendererPipelines"));
+			GpuRecreationRegistration renderer = registry.Register(withTrim(MakeLoggingHooks(calls, "SceneRenderer")));
+
+			CHECK(registry.TrimUnused() == 2);
+			CHECK(calls == std::vector<std::string>{ "trim SceneRenderer", "trim GpuResourceCache" });
+			CHECK_FALSE(registry.IsRunning());
+
+			// A dropped owner is never trimmed.
+			renderer.Reset();
+			calls.clear();
+			CHECK(registry.TrimUnused() == 1);
+			CHECK(calls == std::vector<std::string>{ "trim GpuResourceCache" });
+			cache.Reset();
+			pipelines.Reset();
+			CHECK(registry.TrimUnused() == 0);
+		}
 	}
 
 }

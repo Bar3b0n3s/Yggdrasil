@@ -43,6 +43,8 @@ namespace Engine {
 		constexpr std::string_view FramesOption = "--frames";
 		constexpr std::string_view ExpectNoErrorsOption = "--expect-no-errors";
 		constexpr std::string_view LogLevelOption = "--log-level";
+		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 41): every configuration, Dist included.
+		constexpr std::string_view GpuResetWaitOption = "--gpu-reset-wait";
 #if !defined(ENGINE_DIST)
 		constexpr std::string_view UserDataDirectoryOption = "--user-data-dir";
 		constexpr std::string_view RendererOption = "--renderer";
@@ -78,6 +80,13 @@ namespace Engine {
 				.ValueName = "trace|info|warn|error|critical",
 				.Description = "Write only entries of this level and above to the console and the log file (--expect-no-errors "
 							   "still counts every error).",
+			},
+			CommandLineOption{
+				.Name = GpuResetWaitOption,
+				.Value = CommandLineValue::Required,
+				.ValueName = "milliseconds",
+				.Description = "Wait this long (0 to 120000, default 15000) for the driver or the operating system to reset a hung "
+							   "GPU before the hang is fatal, and before retrying the device after a device loss.",
 			},
 #if !defined(ENGINE_DIST)
 			CommandLineOption{
@@ -119,9 +128,13 @@ namespace Engine {
 			CommandLineOption{
 				.Name = GpuInjectFaultOption,
 				.Value = CommandLineValue::Required,
-				.ValueName = "device-lost|oom-texture|hang|oom-specialization|device-lost-unrecoverable",
+				.ValueName = "device-lost|oom-texture|hang|oom-specialization|device-lost-unrecoverable|hang-reset|"
+							 "hang-reset-persistent|oom-rendertarget|oom-rendertarget-persistent|oom-pipeline|oom-pipeline-persistent|"
+							 "oom-swapchain|oom-swapchain-persistent",
 				.Description = "Force a GPU fault path for tests: device loss, texture out-of-memory, a GPU hang, "
-							   "shader-specialization out-of-memory or a device loss whose recovery fails.",
+							   "shader-specialization out-of-memory, a device loss whose recovery fails, a hang the driver resets "
+							   "(once, or every time), or render-target, pipeline or swapchain out-of-memory after startup (once, "
+							   "or every time).",
 			},
 			CommandLineOption{
 				.Name = AudioDeviceOption,
@@ -391,7 +404,9 @@ namespace Engine {
 			if (!injected.has_value() || *injected == GpuFault::None)
 			{
 				return MakeError(ErrorCode::InvalidArgument,
-					"option '{}' takes 'device-lost', 'oom-texture', 'hang', 'oom-specialization' or 'device-lost-unrecoverable', got '{}'",
+					"option '{}' takes 'device-lost', 'oom-texture', 'hang', 'oom-specialization', 'device-lost-unrecoverable', "
+					"'hang-reset', 'hang-reset-persistent', 'oom-rendertarget', 'oom-rendertarget-persistent', 'oom-pipeline', "
+					"'oom-pipeline-persistent', 'oom-swapchain' or 'oom-swapchain-persistent', got '{}'",
 					Utils::GpuInjectFaultOption, *fault);
 			}
 			specification.Graphics.InjectFault = *injected;
@@ -425,6 +440,11 @@ namespace Engine {
 			}
 			specification.MinimumLogLevel = *minimum;
 		}
+
+		// M18 (C18.4, decision 41): the machine's GPU reset window, in every configuration.
+		ENGINE_TRY_ASSIGN(const std::optional<uint64_t> resetWait, commandLine.GetUnsigned(Utils::GpuResetWaitOption, MaxGpuResetWaitMilliseconds));
+		if (resetWait.has_value())
+			specification.Graphics.ResetWaitMilliseconds = static_cast<uint32_t>(*resetWait);
 
 		specification.Args = commandLine;
 		return {};

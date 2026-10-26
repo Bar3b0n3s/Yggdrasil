@@ -175,6 +175,15 @@ namespace Engine {
 		// GraphicsDevice::Recover.
 		void ReleaseGpuObjects();
 
+		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 43): the cache's TrimUnused hook (its registration calls
+		// it) when a request ran out of GPU memory: releases what CollectStale() releases (the mirrors of replaced versions)
+		// and the mirrors of assets the asset manager no longer has loaded (AssetManager::GetState is Unloaded: released or
+		// unknown), placeholders and built-in assets excepted. A mirror of a loaded, current asset stays, since the next
+		// Render would upload it again at once; a dropped one is uploaded again by its next Get. Keeps the material
+		// generation counter and GetStats().UploadFailures, as ReleaseGpuObjects does. Like CollectStale it ends the validity
+		// of the references Get handed out, so it runs only between recordings (GraphicsDevice::TrimUnused). Main thread.
+		void TrimUnused();
+
 		[[nodiscard]] GpuResourceCacheStats GetStats() const;
 	private:
 		// The device and asset-manager back-references and the mirror tables (GpuResourceCache.cpp).

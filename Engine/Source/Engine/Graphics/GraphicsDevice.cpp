@@ -1552,4 +1552,9 @@ namespace Engine {
 		return m_Recreation;
 	}
 
+	void GraphicsDevice::TrimUnused()
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
 }

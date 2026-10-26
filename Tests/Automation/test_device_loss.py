@@ -15,17 +15,14 @@ through these non-Dist test hooks, so FeatureTest has no coverage of it (decisio
 from __future__ import annotations
 
 import json
-import time
 import unittest
 from pathlib import Path
 from typing import Any
 
-from harness import EXIT_SUCCESS, GPU_EDITOR_ARGUMENTS, AutomationTestCase, engine_client
+from harness import EXIT_SUCCESS, GPU_EDITOR_ARGUMENTS, GpuRecoveryTestCase, engine_client
 from tiny_game import (TINY_GAME_NAME, WINDOW_HEIGHT, WINDOW_WIDTH, build_tiny_game, export_tiny_game,
                        exported_executable)
 
-# A bound on the waits for the other process's state, never a timing a test passes by (ADR 0008 decision 15).
-WAIT_SECONDS = 60.0
 # A bound on the steps and the replay of the recorded play, which no passing outcome depends on.
 REPLAY_TIMEOUT_SECONDS = 600.0
 # The recorded play's ticks, the tick boundary at which it loses the device, and its state-hash checkpoints' interval
@@ -43,45 +40,9 @@ return Script.Define("Drifter", Drifter)
 """
 
 
-class DeviceLossTests(AutomationTestCase):
+class DeviceLossTests(GpuRecoveryTestCase):
     """Recoverable device losses in a rendering editor and an exported game: recovered, with the image, the autosave and
     the simulation kept."""
-
-    def shoot(self, client: engine_client.EngineClient, params: dict[str, Any] | None = None) -> bytes:
-        """The PNG bytes of a 64 x 36 screenshot of the scene view, with `params` added."""
-        result = client.call("viewport.screenshot", {"view": "scene", "width": 64, "height": 36, **(params or {})})
-        return Path(result["path"]).read_bytes()
-
-    def device_loss_events(self, client: engine_client.EngineClient, cursor: str) -> list[dict[str, Any]]:
-        """The GpuDeviceLost events after `cursor` ("" for the oldest event the log holds)."""
-        return client.call("events.read", {"cursor": cursor, "types": ["GpuDeviceLost"]})["events"]
-
-    def wait_for_device_loss_events(self, client: engine_client.EngineClient, cursor: str,
-                                    count: int) -> list[dict[str, Any]]:
-        """The GpuDeviceLost events after `cursor`, once there are `count` of them (bounded by WAIT_SECONDS)."""
-        deadline = time.monotonic() + WAIT_SECONDS
-        while True:
-            events = self.device_loss_events(client, cursor)
-            if len(events) >= count or time.monotonic() > deadline:
-                return events
-
-    def wait_for_rendered_frame(self, client: engine_client.EngineClient, after: int) -> int:
-        """The scene view's frame index once a frame after `after` rendered (bounded by WAIT_SECONDS)."""
-        deadline = time.monotonic() + WAIT_SECONDS
-        while True:
-            view = client.call("stats.get")["views"][0]
-            if view["available"] and int(view["frame"]) > after:
-                return int(view["frame"])
-            if time.monotonic() > deadline:
-                self.fail(f"the scene view rendered no frame after frame {after} within {WAIT_SECONDS:.0f} s: {view}")
-
-    def assert_clean_exit(self, process: engine_client.EditorProcess) -> None:
-        """`process` exits 0 (it runs with --expect-no-gpu-errors) and printed no GPU warning or error."""
-        self.assertEqual(process.wait(), EXIT_SUCCESS, process.output())
-        gpu_messages = [line for line in process.output().splitlines()
-                        if ("Vulkan validation:" in line or "NVRHI:" in line)
-                        and any(level in line for level in ("[warning]", "[error]", "[critical]"))]
-        self.assertFalse(gpu_messages, process.output())
 
     def newest_autosave(self, root: Path) -> str:
         """The scene payload of the newest autosave generation of the project at `root`."""

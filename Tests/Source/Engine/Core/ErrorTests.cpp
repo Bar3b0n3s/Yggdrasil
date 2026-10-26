@@ -242,6 +242,7 @@ namespace Engine {
 			CHECK(ErrorCodeToString(ErrorCode::Unsupported) == "Unsupported");
 			CHECK(ErrorCodeToString(ErrorCode::Conflict) == "Conflict");
 			CHECK(ErrorCodeToString(ErrorCode::Cancelled) == "Cancelled");
+			CHECK(ErrorCodeToString(ErrorCode::OutOfMemory) == "OutOfMemory"); // M18 (C18.4)
 			CHECK(ErrorCodeToString(static_cast<ErrorCode>(0xffff)) == "Unknown");
 		}
 
@@ -256,7 +257,7 @@ namespace Engine {
 				CAPTURE(value);
 				CHECK(ErrorCodeFromString(ErrorCodeToString(code)) == code);
 			}
-			CHECK(value == static_cast<uint16_t>(ErrorCode::Cancelled) + 1);
+			CHECK(value == static_cast<uint16_t>(ErrorCode::OutOfMemory) + 1);
 			CHECK_FALSE(ErrorCodeFromString("notfound").has_value()); // case-sensitive
 			CHECK_FALSE(ErrorCodeFromString("").has_value());
 			CHECK_FALSE(ErrorCodeFromString("Busy").has_value());

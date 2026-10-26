@@ -51,8 +51,11 @@ namespace Engine {
 		// GraphicsDevice::ReportDeviceLost, and the frame gets no image (acquire) or is not presented (present); the frame
 		// boundary recovers the device, and the application destroys this swapchain and creates a new one (decision 33).
 		DeviceLost,
-		OutOfMemory, // VK_ERROR_OUT_OF_HOST_MEMORY / VK_ERROR_OUT_OF_DEVICE_MEMORY: FatalError(OutOfMemory)
-		Fail         // anything else: FatalError(Gpu)
+		// VK_ERROR_OUT_OF_HOST_MEMORY / VK_ERROR_OUT_OF_DEVICE_MEMORY of the acquire or the present: FatalError(OutOfMemory).
+		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 44): still fatal; only the swapchain's creation at a resize
+		// is a request that fails alone (AcquireNextImage).
+		OutOfMemory,
+		Fail // anything else: FatalError(Gpu)
 	};
 
 	// The action for vkAcquireNextImageKHR's result.
@@ -117,6 +120,20 @@ namespace Engine {
 		// (GraphicsDevice::ReportDeviceLost) and returns Skipped; on a lost device, and when a recreation finds the device
 		// lost, it returns Skipped without another Vulkan call, the recreation left pending. Errors: Gpu when a recreation
 		// fails on a device that is not lost.
+		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decisions 42 and 44): a recreation after startup whose creation runs
+		// out of memory is trimmed and retried once (RetryAfterTrim), and a second such failure returns OutOfMemory. Only
+		// vkCreateSwapchainKHR's VK_ERROR_OUT_OF_HOST_MEMORY and VK_ERROR_OUT_OF_DEVICE_MEMORY (an injected oom-swapchain
+		// fault through GpuDiagnostics::TakeSwapchainCreationFault answers the latter without calling Vulkan) and a failed
+		// image wrapping (a GraphicsDevice wrapper's out-of-memory) are out-of-memory: the recreation passes RetryAfterTrim a
+		// classification that names only those, recording which result its attempt met. Any other failure of the recreation
+		// (another vkCreateSwapchainKHR result such as VK_ERROR_INITIALIZATION_FAILED or VK_ERROR_NATIVE_WINDOW_IN_USE_KHR, a
+		// failed surface query or surface creation) returns Gpu at once, without a trim, as before C18.4. After OutOfMemory,
+		// every later call returns Skipped without recreating or trimming while the window's framebuffer size is the size
+		// that failed; a different size retries as a new request, and so does the same size after the window was minimized
+		// (a minimized window forgets the size that failed, so restoring it retries). The previous swapchain cannot be kept:
+		// Vulkan retires the old swapchain a recreation names even when the creation fails, so nothing is presented until a
+		// recreation succeeds, and a window whose size neither changes nor is minimized stays black (an accepted limit,
+		// decision 44).
 		[[nodiscard]] Result<SwapchainAcquireStatus> AcquireNextImage(uint32_t frameSlot);
 
 		// Queues the current slot's acquire-semaphore wait and the current image's present-semaphore signal, which NVRHI

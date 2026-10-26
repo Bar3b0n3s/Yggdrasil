@@ -74,7 +74,7 @@ namespace Engine {
 		// no loader, no device, screenshot capabilities Unsupported, §13.9). --renderer.
 		RendererMode Renderer = RendererMode::Vulkan;
 		// The device's settings (§4.1: validation, GPU override, frames in flight, API cap): --gpu-validation, --gpu,
-		// --vulkan-api and --gpu-inject-fault. Ignored with RendererMode::None.
+		// --vulkan-api and --gpu-inject-fault, and (M18) --gpu-reset-wait. Ignored with RendererMode::None.
 		GraphicsSpecification Graphics{};
 		// --expect-no-gpu-errors: a run whose device reported any error or warning in its whole life (GpuDiagnostics:
 		// validation and synchronization-validation messages, NVRHI messages, and the leak report and validation-layer
@@ -135,25 +135,30 @@ namespace Engine {
 	//   --expect-no-gpu-errors  ExpectNoGpuErrors = true
 	//   --vulkan-api <version>  Graphics.MaxApiVersion: "1.3" or "1.4" (§8.1)
 	//   --gpu <index|name>      Graphics.GpuOverride (§8.1; ENGINE_GPU when absent)
-	//   --gpu-inject-fault <f>  Graphics.InjectFault: "device-lost", "oom-texture", "hang", "oom-specialization" or
+	//   --gpu-inject-fault <f>  Graphics.InjectFault: "device-lost", "oom-texture", "hang", "oom-specialization",
 	//                           "device-lost-unrecoverable" (§8.14 item 8; M18, Docs/Decisions/0029-m18-contract.md
-	//                           decision 30)
+	//                           decision 30), "hang-reset", "hang-reset-persistent", "oom-rendertarget",
+	//                           "oom-rendertarget-persistent", "oom-pipeline", "oom-pipeline-persistent", "oom-swapchain" or
+	//                           "oom-swapchain-persistent" (M18, decision 46)
+	//   --gpu-reset-wait <ms>   Graphics.ResetWaitMilliseconds: 0 to MaxGpuResetWaitMilliseconds (120000), the GPU reset
+	//                           window a hang's reset wait and a device-loss recovery's retry wait (M18, decision 41; also in
+	//                           Dist)
 	//   --audio-device <kind>   Audio = GetDefaultAudioSpecification(Window) with Device System for "system", Null for
 	//                           "null" or None for "none" (M12: windowed processes that tests start never open the
 	//                           machine's audio device, §15.1 T1); the decoding mode stays the window mode's
 	//   --log-level <level>     MinimumLogLevel: "trace", "info", "warn", "error" or "critical", the output sinks' minimum
 	//                           (M15, stream D; also in Dist, where "trace" stores Info)
-	// Every option except --headless, --frames, --expect-no-errors and --log-level is absent from Dist builds, where it is an
-	// unknown option (§13.9 lists the options Dist honours).
+	// Every option except --headless, --frames, --expect-no-errors, --log-level and --gpu-reset-wait is absent from Dist
+	// builds, where it is an unknown option (§13.9 lists the options Dist honours).
 	// An application parses its command line with these plus its own options (CommandLine::Parse). The returned options
 	// refer to static storage.
 	[[nodiscard]] std::span<const CommandLineOption> GetEngineCommandLineOptions();
 
 	// Applies the engine options of `commandLine` to `specification` (see GetEngineCommandLineOptions) and stores the
 	// command line in specification.Args. Errors: InvalidArgument naming the option for a --frames value that is not an
-	// integer >= 1, a --user-data-dir value that is not an absolute path in valid UTF-8, or a --renderer, --gpu-validation,
-	// --vulkan-api, --gpu-inject-fault, --audio-device or --log-level value other than the spellings listed above (the
-	// message lists them).
+	// integer >= 1, a --user-data-dir value that is not an absolute path in valid UTF-8, a --gpu-reset-wait value that is
+	// not an integer from 0 to MaxGpuResetWaitMilliseconds, or a --renderer, --gpu-validation, --vulkan-api,
+	// --gpu-inject-fault, --audio-device or --log-level value other than the spellings listed above (the message lists them).
 	[[nodiscard]] Status ApplyEngineCommandLine(const CommandLine& commandLine, ApplicationSpecification& specification);
 
 	// The base of the editor and runtime applications. Not copyable or movable.
@@ -201,6 +206,16 @@ namespace Engine {
 	//      recovered frame's objects are new (a FramePacer counts its frames from 0), but RenderContext::FrameIndex
 	//      keeps growing: the first frame after a recovery takes the first multiple of the frames in flight after the
 	//      last frame's index, so FrameSlot stays FrameIndex modulo the frames in flight.
+	//   2c. M18 (C18.4, Docs/Decisions/0029-m18-contract.md decisions 40, 42 and 44): hangs and out-of-memory. A hang that
+	//      the driver or the operating system resets during a bounded wait's reset wait (FramePacer.h) is a loss that step
+	//      2b recovers. The frame's resize after startup (the swapchain's recreation, the headless offscreen target's and the
+	//      forced UI target's Resize) is a request: an out-of-memory creation is trimmed and retried once (RetryAfterTrim),
+	//      and a second one skips the frame, logs one Warn line, and skips every later frame at that framebuffer size,
+	//      windowed and headless alike (headless must equal windowed), until the size changes (a minimized window's
+	//      included, so restoring it retries) and the resize is tried again; the run goes on. A swapchain recreation that
+	//      fails otherwise stays FatalError(Gpu) (Swapchain.h). ImGuiLayer::Render's out-of-memory in the frame (a geometry
+	//      buffer, a binding set) stays FatalError(OutOfMemory), as do the rendering objects of step 1 and their recreation
+	//      in a recovery.
 	//   3. OnShutdown, GraphicsDevice::WaitForIdle, the rendering objects (ImGuiLayer, GpuProfiler, swapchain or offscreen
 	//      target, pacer), then the GPU services (EngineContext::DestroyGraphics) with the ExpectNoGpuErrors check (see the
 	//      field), then the rest of the context (reverse order), then the ExpectNoErrors check, which so counts the errors

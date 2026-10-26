@@ -227,6 +227,83 @@ namespace Engine {
 			CHECK(Test::FindGpuMessageLines(result->StandardError).empty());
 		}
 
+		TEST_CASE("EditorApp: --gpu-inject-fault=hang-reset recovers the device and runs to the end"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 acceptance (C18.4, Docs/Decisions/0029-m18-contract.md decisions 40 and 46): the first bounded wait after the
+			// first frame spends its budget, its reset wait reports the loss, the frame boundary recovers it like any loss, and
+			// the editor renders its remaining frames and exits 0, with no crash report and no GPU message.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			Test::TempDirectory userData("EditorHangReset");
+			const Result<ProcessResult> result =
+				RunRenderingEditor(userData, { "--headless", "--frames", "10", "--gpu-inject-fault", "hang-reset" });
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			INFO("editor stderr: ", result->StandardError);
+			CHECK(result->ExitCode == ExitCode::Success);
+			CHECK(result->StandardError.contains("GPU device recovered"));
+			const std::vector<std::filesystem::path> reports = Test::ListCrashFiles(userData / ENGINE_PRODUCT_NAME / "Crashes", ".txt");
+			CHECK(reports.empty());
+			CHECK(Test::FindGpuMessageLines(result->StandardError).empty());
+		}
+
+		TEST_CASE("EditorApp: --gpu-inject-fault=oom-rendertarget-persistent fails only its requests and runs to the end"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 acceptance (C18.4, decisions 42, 44 and 46): every render target created after the first frame runs out of
+			// memory, the views' new sizes among them, so each such request fails alone after its trim and retry; the editor
+			// keeps running to its last frame and exits 0, with no crash report and no GPU message. The editor opens a project:
+			// without one its views render nothing, and every target it creates exists before the fault is armed (the views'
+			// renderers and the frame target at startup), so nothing would strike. With one, the first frame renders the views
+			// at their startup size (640 x 360) before its UI lays out their panels (OnRender runs before OnImGuiRender), and a
+			// later frame resizes them to the panels' sizes, after the first garbage collection armed the fault.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			Test::EditorTestFixture fixture("EditorOomRenderTargetPersistent");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			const std::filesystem::path projectFile = fixture.GetEditor().GetProject().GetProjectFile();
+			REQUIRE(fixture.GetEditor().CloseProject().has_value());
+			const Result<ProcessResult> result = RunRenderingEditor(fixture.GetDirectory(),
+				{ "--headless", "--project", Test::PathToUtf8(projectFile), "--frames", "10", "--gpu-inject-fault", "oom-rendertarget-persistent",
+					"--engine-cache-dir=" + Test::PathToUtf8(fixture.GetDirectory() / "EngineCache") });
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			INFO("editor stderr: ", result->StandardError);
+			CHECK(result->ExitCode == ExitCode::Success);
+			CHECK(result->StandardError.contains("injected by --gpu-inject-fault=oom-rendertarget-persistent"));
+			const std::vector<std::filesystem::path> reports =
+				Test::ListCrashFiles(fixture.GetDirectory() / ENGINE_PRODUCT_NAME / "Crashes", ".txt");
+			CHECK(reports.empty());
+			CHECK(Test::FindGpuMessageLines(result->StandardError).empty());
+		}
+
+		TEST_CASE("EditorApp: out-of-memory at startup still exits 4 with a crash report"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 acceptance (C18.4, decisions 42 and 46): "out-of-memory at startup still exits 4". ENGINE_GPU_FAULT_AT_STARTUP
+			// arms oom-rendertarget-persistent at the device's creation, so the editor's startup targets run out of memory, which
+			// stays FatalError(OutOfMemory) with the editor's fatal hook: nothing has rendered, and nothing is retried as a
+			// request.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			Test::TempDirectory userData("EditorOomAtStartup");
+			const Result<std::filesystem::path> editor = Test::GetBuiltExecutablePath("Editor");
+			REQUIRE_MESSAGE(editor.has_value(), editor.error().ToString());
+			std::vector<std::string> arguments = { "--headless", "--frames", "10", "--gpu-inject-fault", "oom-rendertarget-persistent" };
+			const std::vector<std::string> gpuArguments = Test::GetGpuApplicationArguments();
+			arguments.insert(arguments.end(), gpuArguments.begin(), gpuArguments.end());
+			arguments.push_back("--user-data-dir=" + Test::PathToUtf8(userData.GetPath()));
+			const Result<ProcessResult> result = Process::Run({ .Executable = *editor, .Arguments = std::move(arguments), .Environment = { { std::string(GpuFaultAtStartupVariable), "1" } } },
+				std::chrono::seconds(60));
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			INFO("editor stderr: ", result->StandardError);
+			CHECK(result->ExitCode == ExitCode::Crash);
+			const Result<std::string> report = Test::ReadOnlyCrashReport(userData.GetPath());
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			CHECK(report->contains("Reason: Fatal error (OutOfMemory)"));
+			CHECK(Test::FindGpuMessageLines(result->StandardError).empty());
+		}
+
 		TEST_CASE("EditorApp: --gpu-inject-fault=hang exits 4 with a crash report after the bounded wait"
 			* doctest::test_suite(Test::GpuSuite))
 		{

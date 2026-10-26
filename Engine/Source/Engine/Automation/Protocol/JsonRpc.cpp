@@ -179,7 +179,8 @@ namespace Engine {
 			case ErrorCode::Cancelled:          return RpcErrorCode::Cancelled;
 			case ErrorCode::Unknown:
 			case ErrorCode::Io:
-			case ErrorCode::Gpu:                return RpcErrorCode::Internal;
+			case ErrorCode::Gpu:
+			case ErrorCode::OutOfMemory:        return RpcErrorCode::Internal;
 		}
 		return RpcErrorCode::Internal;
 	}

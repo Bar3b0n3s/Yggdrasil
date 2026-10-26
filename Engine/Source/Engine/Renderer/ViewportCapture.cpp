@@ -55,6 +55,11 @@ namespace Engine {
 		{
 			return owner->RecreateGpuObjects();
 		};
+		// M18 (C18.4, decision 43): the last capture's targets, when another request ran out of GPU memory.
+		hooks.TrimUnused = [owner]()
+		{
+			owner->TrimUnused();
+		};
 		capture->m_Recreation = device.GetRecreation().Register(std::move(hooks));
 		return capture;
 	}
@@ -70,6 +75,11 @@ namespace Engine {
 	{
 		ENGINE_TRY_ASSIGN(m_CommandList, Utils::CreateCaptureCommandList(*m_Device));
 		return {};
+	}
+
+	void ViewportCapture::TrimUnused()
+	{
+		ENGINE_CONTRACT_STUB();
 	}
 
 	Result<Image> ViewportCapture::Capture(const ViewportScreenshotRequest& request, const RenderSnapshot& snapshot)

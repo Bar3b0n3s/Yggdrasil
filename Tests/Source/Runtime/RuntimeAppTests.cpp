@@ -5,6 +5,7 @@
 #include "Engine/Automation/Protocol/SessionFile.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Graphics/GraphicsSpecification.h"
 #include "Engine/Graphics/Image.h"
 #include "Engine/Platform/Process.h"
 #include "Engine/Platform/Socket.h"
@@ -55,6 +56,29 @@ namespace Engine {
 		std::string ManifestArgument(const std::filesystem::path& manifest)
 		{
 			return "--manifest=" + Test::PathToUtf8(manifest);
+		}
+
+		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decisions 40 to 46): the pixels of the tick-10 screenshot of a
+		// headless run of the game at `manifest` with --gpu-inject-fault=`fault` (no fault when empty), written to
+		// <userData>/Shot-<fault or "none">.png; the run must exit 0 with --expect-no-errors. Its standard error goes to
+		// `standardError`.
+		std::vector<std::byte> RunFaultScreenshot(const Test::TempDirectory& userData, const std::filesystem::path& manifest, std::string_view fault,
+			std::string& standardError)
+		{
+			CAPTURE(fault);
+			const std::filesystem::path png = userData / std::format("Shot-{}.png", fault.empty() ? "none" : fault);
+			std::vector<std::string> arguments = { "--headless", "--frames", "12", "--expect-no-errors",
+				"--screenshot-at=10:" + Test::PathToUtf8(png), ManifestArgument(manifest) };
+			if (!fault.empty())
+				arguments.push_back(std::format("--gpu-inject-fault={}", fault));
+			const Result<ProcessResult> result = RunRenderingRuntime(userData, std::move(arguments));
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			INFO("runtime stderr: ", result->StandardError);
+			CHECK(result->ExitCode == ExitCode::Success);
+			standardError = result->StandardError;
+			const Result<Image> image = ReadPng(png);
+			REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
+			return image->Pixels;
 		}
 
 		// The text of the one crash report of the game `name` (<userData>/<name>/Crashes: the manifest names the user-data
@@ -491,6 +515,122 @@ namespace Engine {
 				images.push_back(image->Pixels);
 			}
 			CHECK(images[1] == images[0]);
+		}
+
+		TEST_CASE("RuntimeApp: --gpu-inject-fault=hang-reset recovers and writes the same screenshot"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 acceptance (C18.4, Docs/Decisions/0029-m18-contract.md decisions 40 and 46): a hang the driver resets is
+			// recovered like a loss, and the screenshot of tick 10 equals a run's without the fault; --expect-no-errors holds,
+			// since the recovered hang logs warnings only.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			Test::TempDirectory userData("RuntimeHangReset");
+			const Result<std::filesystem::path> manifest = Test::WriteTestGame(userData / "Game", { .Name = "HangResetGame", .Shaders = true });
+			REQUIRE_MESSAGE(manifest.has_value(), manifest.error().ToString());
+			std::string plainOutput;
+			const std::vector<std::byte> plain = RunFaultScreenshot(userData, *manifest, "", plainOutput);
+			std::string resetOutput;
+			const std::vector<std::byte> reset = RunFaultScreenshot(userData, *manifest, "hang-reset", resetOutput);
+			CHECK_FALSE(plainOutput.contains("GPU device recovered"));
+			CHECK(resetOutput.contains("GPU device recovered"));
+			CHECK(reset == plain);
+		}
+
+		TEST_CASE("RuntimeApp: --gpu-inject-fault=oom-rendertarget recovers and writes the same screenshot"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 acceptance (C18.4, decisions 42, 44 and 46): an out-of-memory request after startup (the capture's new size)
+			// is retried after a trim, and the screenshot of tick 10 equals a run's without the fault; --expect-no-errors holds,
+			// since the recovered request logs warnings only.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			Test::TempDirectory userData("RuntimeOomRenderTarget");
+			const Result<std::filesystem::path> manifest = Test::WriteTestGame(userData / "Game", { .Name = "OomRetriedGame", .Shaders = true });
+			REQUIRE_MESSAGE(manifest.has_value(), manifest.error().ToString());
+			std::string plainOutput;
+			const std::vector<std::byte> plain = RunFaultScreenshot(userData, *manifest, "", plainOutput);
+			std::string retriedOutput;
+			const std::vector<std::byte> retried = RunFaultScreenshot(userData, *manifest, "oom-rendertarget", retriedOutput);
+			CHECK_FALSE(plainOutput.contains("injected by --gpu-inject-fault"));
+			// The fault struck a request after startup, whose retry after its trim succeeded.
+			CHECK(retriedOutput.contains("injected by --gpu-inject-fault=oom-rendertarget"));
+			CHECK_FALSE(retriedOutput.contains("GPU device recovered"));
+			CHECK(retried == plain);
+		}
+
+		TEST_CASE("RuntimeApp: --gpu-inject-fault=hang-reset-persistent recovers every hang and runs to the end"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 acceptance (C18.4, decisions 40 and 46): every bounded wait after the first frame hangs and is reset, the
+			// recovered device's included, and every loss is recovered: the run reaches its last frame and exits 0.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			Test::TempDirectory userData("RuntimeHangResetPersistent");
+			const Result<std::filesystem::path> manifest = Test::WriteTestGame(userData / "Game", { .Name = "HangResetGame", .Shaders = true });
+			REQUIRE_MESSAGE(manifest.has_value(), manifest.error().ToString());
+			const Result<ProcessResult> result = RunRenderingRuntime(userData,
+				{ "--headless", "--frames", "20", "--expect-no-errors", "--gpu-inject-fault", "hang-reset-persistent", ManifestArgument(*manifest) });
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			INFO("runtime stderr: ", result->StandardError);
+			CHECK(result->ExitCode == ExitCode::Success);
+			size_t recoveries = 0;
+			for (size_t at = result->StandardError.find("GPU device recovered"); at != std::string::npos;
+				at = result->StandardError.find("GPU device recovered", at + 1))
+				++recoveries;
+			CHECK(recoveries >= 2);
+			CHECK(Test::FindGpuMessageLines(result->StandardError).empty());
+		}
+
+		TEST_CASE("RuntimeApp: --gpu-inject-fault=oom-rendertarget-persistent fails only the screenshot, with exit code 1"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 acceptance (C18.4, decisions 42, 44 and 45): "a persistent one fails only its request". The capture's
+			// targets run out of memory again after the trim, so --screenshot-at writes nothing and fails the run with
+			// OutOfMemory (exit code 1), while the game runs to its last frame: no crash, no crash report.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			Test::TempDirectory userData("RuntimeOomRenderTargetPersistent");
+			const Result<std::filesystem::path> manifest = Test::WriteTestGame(userData / "Game", { .Name = "OomGame", .Shaders = true });
+			REQUIRE_MESSAGE(manifest.has_value(), manifest.error().ToString());
+			const std::filesystem::path png = userData / "Shots/Tick10.png";
+			const Result<ProcessResult> result = RunRenderingRuntime(userData, { "--headless", "--frames", "12", "--screenshot-at=10:" + Test::PathToUtf8(png), "--gpu-inject-fault", "oom-rendertarget-persistent", ManifestArgument(*manifest) });
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			INFO("runtime stderr: ", result->StandardError);
+			CHECK(result->ExitCode == ExitCode::Failed);
+			CHECK(result->StandardError.contains("OutOfMemory"));
+			std::error_code error;
+			CHECK_FALSE(std::filesystem::exists(png, error));
+			CHECK_FALSE(ReadGameCrashReport(userData, "OomGame").has_value());
+			CHECK(Test::FindGpuMessageLines(result->StandardError).empty());
+		}
+
+		TEST_CASE("RuntimeApp: out-of-memory at startup still exits 4 with a crash report"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// M18 acceptance (C18.4, decisions 42 and 46): ENGINE_GPU_FAULT_AT_STARTUP arms oom-pipeline-persistent at the
+			// device's creation, so the game's startup pipelines run out of memory, which stays FatalError(OutOfMemory).
+			if (!Test::ProbeGpuForProcess())
+				return;
+			Test::TempDirectory userData("RuntimeOomAtStartup");
+			const Result<std::filesystem::path> manifest = Test::WriteTestGame(userData / "Game", { .Name = "OomStartupGame", .Shaders = true });
+			REQUIRE_MESSAGE(manifest.has_value(), manifest.error().ToString());
+			const Result<std::filesystem::path> runtime = Test::GetBuiltExecutablePath("Runtime");
+			REQUIRE_MESSAGE(runtime.has_value(), runtime.error().ToString());
+			std::vector<std::string> arguments = { "--headless", "--frames", "10", "--gpu-inject-fault", "oom-pipeline-persistent", ManifestArgument(*manifest) };
+			const std::vector<std::string> gpuArguments = Test::GetGpuApplicationArguments();
+			arguments.insert(arguments.end(), gpuArguments.begin(), gpuArguments.end());
+			arguments = Test::WithoutAudioDevice(std::move(arguments));
+			arguments.push_back("--user-data-dir=" + Test::PathToUtf8(userData.GetPath()));
+			const Result<ProcessResult> result = Process::Run({ .Executable = *runtime, .Arguments = std::move(arguments), .Environment = { { std::string(GpuFaultAtStartupVariable), "1" } } },
+				std::chrono::seconds(120));
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			INFO("runtime stderr: ", result->StandardError);
+			CHECK(result->ExitCode == ExitCode::Crash);
+			const Result<std::string> report = ReadGameCrashReport(userData, "OomStartupGame");
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			CHECK(report->contains("Reason: Fatal error (OutOfMemory)"));
+			CHECK(Test::FindGpuMessageLines(result->StandardError).empty());
 		}
 
 		TEST_CASE("RuntimeApp: F1 toggles the stats overlay in a windowed run and the game still receives F1"
