@@ -87,7 +87,7 @@ namespace Engine {
 				// Every open scene.
 				{ "asset.reimport", SceneRelation::AllScenes },          // a changed prefab's instances in every open scene
 				{ "asset.setImportSettings", SceneRelation::AllScenes }, // the same
-				{ "project.export", SceneRelation::AllScenes },          // refuses an unsaved open build scene
+				{ "project.export", SceneRelation::AllScenes },          // warns about every unsaved open scene
 				{ "project.open", SceneRelation::AllScenes },            // recover opens every recovered scene
 				{ "project.refreshAssets", SceneRelation::AllScenes },   // SceneChangedOnDisk for every open scene
 				{ "project.save", SceneRelation::AllScenes },            // writes every dirty open scene
@@ -149,11 +149,34 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
+		// Decision 16: "scene" is reserved only for the scene-addressing methods; any other refuses it as an unknown member,
+		// and an op of edit.batch cannot carry one (every op runs in the batch's scene), both before anything runs.
+		TEST_CASE("SceneTarget: a method without the scene target and an op of a batch refuse scene")
+		{
+			Test::AutomationFixture setup("SceneTargetRefused");
+			const Result<Json> listed = setup.Call("asset.list", Json{ { "scene", "Assets/Scenes/Main.scene" } });
+			REQUIRE_FALSE(listed.has_value());
+			CHECK(listed.error().GetCode() == ErrorCode::InvalidArgument);
+			REQUIRE_FALSE(listed.error().GetIssues().empty());
+			CHECK(listed.error().GetIssues().front().JsonPointer == "/scene");
+
+			const uint64_t revision = setup.GetEditor().GetRevision();
+			Json batch{ { "label", "Stray" } };
+			batch["ops"] = Json::array({ Json{ { "method", "entity.create" }, { "params", Json{ { "name", "First" } } } },
+				Json{ { "method", "entity.create" }, { "params", Json{ { "name", "Stray" }, { "scene", "Assets/Scenes/Main.scene" } } } } });
+			const Json refused = setup.Request("edit.batch", batch);
+			REQUIRE(refused.contains("error"));
+			CHECK(refused["error"]["data"]["failedOp"] == Json(1));
+			CHECK(refused["error"]["data"]["issues"][0]["pointer"] == Json("/ops/1/params/scene"));
+			CHECK(setup.GetEditor().GetScene().GetEntityCount() == 0);
+			CHECK(setup.GetEditor().GetRevision() == revision);
+		}
+
 		// Decision 16 (Roadmap M20 "an optional scene target on every scene-addressing method, with an inventory test"):
 		// every registered method is classified, and exactly the scene-addressing ones accept the reserved "scene" member,
 		// which their schemas list and PrepareParams moves into the request options. play.start keeps its own "scene" (a
 		// scene file to play).
-		TEST_CASE("SceneTarget: every scene-addressing method takes the optional scene target" * doctest::skip(true))
+		TEST_CASE("SceneTarget: every scene-addressing method takes the optional scene target")
 		{
 			Test::EditorTestFixture fixture("SceneTargetInventory");
 			MethodRegistry methods(fixture.GetEngine().GetTypeRegistry());
@@ -240,7 +263,7 @@ namespace Engine {
 		// Decision 16 (Roadmap M20 acceptance "transcripts without scene targets behave as before"): without "scene" a
 		// request addresses the active scene; with one it addresses that open scene, its revision, "_meta", history and
 		// ifRevision included, while the active scene stays. The play scene belongs to the scene the session plays.
-		TEST_CASE("SceneTarget: a request addresses the active scene without a target and the named open scene with one" * doctest::skip(true))
+		TEST_CASE("SceneTarget: a request addresses the active scene without a target and the named open scene with one")
 		{
 			Test::AutomationFixture setup("SceneTargetRequests");
 			const Result<Json> second = setup.Call("scene.new", Json{ { "path", "Assets/Scenes/Second.scene" }, { "keepOpen", true } });
@@ -330,12 +353,77 @@ namespace Engine {
 			REQUIRE(setup.Call("play.stop", Json::object()).has_value());
 		}
 
+		// Decision 13: a play selection belongs to the played scene, also when edit.select makes it from another tab, where
+		// a request without a scene target reaches the session (decision 16). The result lists the selection it stored, in
+		// the played scene's document, which edit.getSelection with that scene as target reads back; the active scene keeps
+		// its own selection.
+		TEST_CASE("SceneTarget: edit.select during play from another tab reports the selection it stores in the played scene")
+		{
+			Test::AutomationFixture setup("SceneTargetPlaySelection");
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Ball" } }).has_value());
+			const Result<Json> second = setup.Call("scene.new", Json{ { "path", "Assets/Scenes/Second.scene" }, { "keepOpen", true } });
+			REQUIRE_MESSAGE(second.has_value(), second.error().ToString());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Kept" } }).has_value());
+			REQUIRE(setup.Call("edit.select", Json{ { "entities", Json::array({ "/Kept" }) } }).has_value());
+			const Json inMain{ { "scene", "Assets/Scenes/Main.scene" } };
+			REQUIRE(setup.Call("scene.activate", inMain).has_value());
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true } }).has_value());
+			REQUIRE(setup.Call("scene.activate", Json{ { "scene", (*second)["id"] } }).has_value());
+
+			const Result<Json> selected = setup.Call("edit.select", Json{ { "entities", Json::array({ "/Ball" }) } });
+			REQUIRE_MESSAGE(selected.has_value(), selected.error().ToString());
+			REQUIRE((*selected)["selection"].size() == 1);
+			CHECK(SceneTargetName((*selected)["selection"][0]) == "Ball");
+			const Result<Json> played = setup.Call("edit.getSelection", inMain);
+			REQUIRE(played.has_value());
+			REQUIRE((*played)["selection"].size() == 1);
+			CHECK(SceneTargetName((*played)["selection"][0]) == "Ball");
+			const Result<Json> active = setup.Call("edit.getSelection", Json::object());
+			REQUIRE(active.has_value());
+			REQUIRE((*active)["selection"].size() == 1);
+			CHECK(SceneTargetName((*active)["selection"][0]) == "Kept");
+			REQUIRE(setup.Call("play.stop", Json::object()).has_value());
+		}
+
+		// Decision 16's play rules for script.eval: context "play" reaches the play VM without a scene target, whatever tab
+		// is active, and with a target naming the played scene; a target naming another open scene leaves the session out of
+		// reach, so "play" is refused at /scene there, as "target": "play" is, while "edit" evaluates over that scene.
+		TEST_CASE("SceneTarget: script.eval in Play reaches the play VM only through the played scene")
+		{
+			Test::AutomationFixture setup("SceneTargetEvalPlay");
+			const Result<Json> second = setup.Call("scene.new", Json{ { "path", "Assets/Scenes/Second.scene" }, { "keepOpen", true } });
+			REQUIRE_MESSAGE(second.has_value(), second.error().ToString());
+			REQUIRE(setup.Call("play.start", Json{ { "mode", "play" }, { "lockstep", true } }).has_value());
+			const Json code{ { "context", "play" }, { "code", "return 1 + 2" } };
+			const Result<Json> untargeted = setup.Call("script.eval", code);
+			REQUIRE_MESSAGE(untargeted.has_value(), untargeted.error().ToString());
+			CHECK((*untargeted)["value"] == Json(3));
+			Json played = code;
+			played["scene"] = "Assets/Scenes/Second.scene";
+			const Result<Json> inPlayed = setup.Call("script.eval", played);
+			REQUIRE_MESSAGE(inPlayed.has_value(), inPlayed.error().ToString());
+			CHECK((*inPlayed)["value"] == Json(3));
+
+			Json other = code;
+			other["scene"] = "Assets/Scenes/Main.scene";
+			const Result<Json> refused = setup.Call("script.eval", other);
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
+			REQUIRE_FALSE(refused.error().GetIssues().empty());
+			CHECK(refused.error().GetIssues().front().JsonPointer == "/scene");
+			Json edit = other;
+			edit["context"] = "edit";
+			const Result<Json> inEdit = setup.Call("script.eval", edit);
+			CHECK_MESSAGE(inEdit.has_value(), (inEdit ? std::string() : inEdit.error().ToString()));
+			REQUIRE(setup.Call("play.stop", Json::object()).has_value());
+		}
+
 		// Decision 14 (the deny-mutations policy, EditorAutomationPolicy): discarding unsaved changes writes no file and runs
 		// no command, so the server refuses every request that would drop an open scene's changes, not only the active
 		// scene's: scene.close {discardChanges} of a dirty tab, scene.open {reload, discardChanges} of a dirty open scene that
 		// is not active, and session.shutdown {force} while a tab that is not active is dirty. Each is PermissionDenied and
 		// changes nothing; closing a clean tab discards nothing and stays allowed.
-		TEST_CASE("SceneTarget: deny-mutations refuses discarding the unsaved changes of any open scene" * doctest::skip(true))
+		TEST_CASE("SceneTarget: deny-mutations refuses discarding the unsaved changes of any open scene")
 		{
 			Test::AutomationFixture setup("SceneTargetDenyDiscard");
 			EditorContext& editor = setup.GetEditor();
@@ -375,7 +463,7 @@ namespace Engine {
 		// Decision 16 and ADR 0028's ledger ("a path or $ref resolves in the batch's target scene, the active scene when the
 		// batch names none"; Roadmap M20 acceptance "a batch $ref and an entity path resolve in the targeted scene"): a batch
 		// with a target runs every op there, as one undo step of that scene's history; an op cannot carry its own target.
-		TEST_CASE("SceneTarget: a batch resolves entity paths and $ref in its target scene" * doctest::skip(true))
+		TEST_CASE("SceneTarget: a batch resolves entity paths and $ref in its target scene")
 		{
 			Test::AutomationFixture setup("SceneTargetBatch");
 			REQUIRE(setup.Call("entity.create", Json{ { "name", "Board" } }).has_value());

@@ -51,8 +51,9 @@ namespace Engine {
 		// Pending, main-thread adapter over FeatureTestRunner. Preflight validates scripts, all requested paths, filter
 		// selection and recording destination before acquiring the exclusive run lease or replacing any session. After a
 		// successful FeatureTestRunner::Begin and before the lease, it refuses (InvalidState, nothing run) an open scene with
-		// unsaved changes that a selected suite or replay plays, since the run plays the saved file (the runner's
-		// GetSelection; Docs/Decisions/0027-m17-contract.md decision 3, A2); the errors of Preflight and Begin come first.
+		// unsaved changes, among every open scene (Docs/Decisions/0031-m20-contract.md decision 14), that a selected suite or
+		// replay plays, since the run plays the saved file (the runner's GetSelection; Docs/Decisions/0027-m17-contract.md
+		// decision 3, A2); the errors of Preflight and Begin come first.
 		// Each Poll advances at least one bounded runner unit and then stops when the 50 ms wall budget is consumed;
 		// simulated clocks, tick deadlines and outcomes never depend on this partition. OwnsAudioTime is set on every
 		// suite session, including ScriptedClock suites. The regular editor frame loop must not also advance it.

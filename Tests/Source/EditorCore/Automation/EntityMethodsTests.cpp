@@ -26,6 +26,12 @@ namespace Engine {
 		return JsonReader(result["entity"]["id"]).ReadString().value_or(std::string());
 	}
 
+	// A Script component value of one slot (Script version 2, Docs/Decisions/0031-m20-contract.md decision 17).
+	static Json ScriptSlots(Json slot)
+	{
+		return Json{ { "Scripts", Json::array({ std::move(slot) }) } };
+	}
+
 	TEST_SUITE("EditorCore")
 	{
 		TEST_CASE("EntityMethods: script assignment rejects modules and suites without changing the entity or history")
@@ -38,11 +44,11 @@ namespace Engine {
 				const auto created = setup.Call("script.create", Json{ { "path", path }, { "template", kind } });
 				REQUIRE_MESSAGE(created, (created ? "" : created.error().ToString()));
 				const uint64_t sequence = setup.GetEditor().GetHistory().GetCurrentSequence();
-				const Json components{ { "Script", Json{ { "Script", path } } } };
+				const Json components{ { "Script", ScriptSlots(Json{ { "Script", path } }) } };
 				const Json response = setup.Request("entity.update", Json{ { "entity", "/Target" }, { "name", "Changed" }, { "components", components } });
 				CHECK(response["error"]["data"]["errorCode"] == Json("Validation"));
 				CHECK(response["error"]["data"].dump().contains("SCRIPT_NOT_A_BEHAVIOUR"));
-				CHECK(response["error"]["data"]["issues"][0]["pointer"] == Json("/components/Script/Script"));
+				CHECK(response["error"]["data"]["issues"][0]["pointer"] == Json("/components/Script/Scripts/0/Script"));
 				CHECK(setup.GetEditor().GetHistory().GetCurrentSequence() == sequence);
 				const auto target = setup.Call("entity.get", Json{ { "entity", "/Target" } });
 				REQUIRE(target.has_value());
@@ -74,23 +80,26 @@ return Script.Define("References", References)
 			const std::string outsideID = ReadEntityId(*outside);
 			const Json fields{ { "Target", childID }, { "Targets", Json::array({ Json::array({ childID, outsideID }) }) },
 				{ "External", outsideID }, { "Label", childID }, { "Amount", 3 } };
-			const auto assigned = setup.Call("entity.update", Json{ { "entity", "/Root" }, { "components", Json{ { "Script", Json{ { "Script", path }, { "Fields", fields } } } } } });
+			const auto assigned = setup.Call("entity.update", Json{ { "entity", "/Root" }, { "components", Json{ { "Script", ScriptSlots(Json{ { "Script", path }, { "Fields", fields } }) } } } });
 			REQUIRE_MESSAGE(assigned.has_value(), assigned.error().ToString());
-			const auto patched = setup.Call("entity.update", Json{ { "entity", "/Root" }, { "components", Json{ { "Script", Json{ { "Fields", Json{ { "Amount", 4 } } } } } } } });
+			// A slot given Fields alone borrows the slot's Script handle; a list write replaces the slot's Fields whole.
+			Json patchedFields = fields;
+			patchedFields["Amount"] = 4;
+			const auto patched = setup.Call("entity.update", Json{ { "entity", "/Root" }, { "components", Json{ { "Script", ScriptSlots(Json{ { "Fields", patchedFields } }) } } } });
 			REQUIRE_MESSAGE(patched, (patched ? "" : patched.error().ToString()));
-			CHECK((*patched)["entity"]["components"]["Script"]["Fields"]["Amount"] == Json(4));
-			const auto invalid = setup.Call("entity.update", Json{ { "entity", "/Root" }, { "components", Json{ { "Script", Json{ { "Fields", Json{ { "Amount", 6 } } } } } } } });
+			CHECK((*patched)["entity"]["components"]["Script"]["Scripts"][0]["Fields"]["Amount"] == Json(4));
+			const auto invalid = setup.Call("entity.update", Json{ { "entity", "/Root" }, { "components", Json{ { "Script", ScriptSlots(Json{ { "Fields", Json{ { "Amount", 6 } } } }) } } } });
 			REQUIRE_FALSE(invalid.has_value());
 			CHECK(invalid.error().GetCode() == ErrorCode::InvalidArgument);
 			REQUIRE(invalid.error().GetIssues().size() == 1);
-			CHECK(invalid.error().GetIssues()[0].JsonPointer == "/components/Script/Fields/Amount");
+			CHECK(invalid.error().GetIssues()[0].JsonPointer == "/components/Script/Scripts/0/Fields/Amount");
 			CHECK_FALSE(invalid.error().GetMessageText().contains("no script is assigned"));
 			auto copies = setup.Call("entity.duplicate", Json{ { "entities", Json::array({ "/Root" }) } });
 			REQUIRE_MESSAGE(copies.has_value(), copies.error().ToString());
 			const Json copyID = (*copies)["entities"][0]["id"];
 			const auto copy = setup.Call("entity.get", Json{ { "entity", copyID } });
 			REQUIRE(copy.has_value());
-			const Json& copiedFields = (*copy)["entity"]["components"]["Script"]["Fields"];
+			const Json& copiedFields = (*copy)["entity"]["components"]["Script"]["Scripts"][0]["Fields"];
 			CHECK(copiedFields["Target"] != Json(childID));
 			CHECK(copiedFields["Targets"][0][0] == copiedFields["Target"]);
 			CHECK(copiedFields["Targets"][0][1] == Json(outsideID));
@@ -102,7 +111,7 @@ return Script.Define("References", References)
 			REQUIRE(setup.Call("edit.redo", Json::object()).has_value());
 			const auto restored = setup.Call("entity.get", Json{ { "entity", copyID } });
 			REQUIRE(restored.has_value());
-			CHECK((*restored)["entity"]["components"]["Script"]["Fields"] == copiedFields);
+			CHECK((*restored)["entity"]["components"]["Script"]["Scripts"][0]["Fields"] == copiedFields);
 		}
 
 		TEST_CASE("EntityMethods: entity.create adds an entity with components as one undo step")
@@ -143,6 +152,19 @@ return Script.Define("References", References)
 			CHECK(response["error"]["data"]["issues"][0]["hint"].dump().contains("Mass"));
 			Json unknownComponent = setup.Request("entity.create", ParseEntityMethodJson(R"({"name":"Ball","components":{"RigidBdy":{}}})"));
 			CHECK(unknownComponent["error"]["data"]["issues"][0]["hint"].dump().contains("RigidBody"));
+			CHECK(setup.GetEditor().GetScene().GetEntityCount() == 0);
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 17: no compatibility shim. A Script component given its version 1 shape
+		// is refused as any unknown field is, the hint naming the list of slots.
+		TEST_CASE("EntityMethods: a Script component in its version 1 shape is refused with a hint naming Scripts")
+		{
+			Test::AutomationFixture setup("EntityScriptVersion1");
+			Json response = setup.Request("entity.create",
+				ParseEntityMethodJson(R"({"name":"Turret","components":{"Script":{"Script":"Assets/Scripts/Turret.luau"}}})"));
+			CHECK(response["error"]["code"] == Json(-32602));
+			CHECK(response["error"]["data"]["issues"][0]["pointer"] == Json("/components/Script/Script"));
+			CHECK(response["error"]["data"]["issues"][0]["hint"].dump().contains("Scripts"));
 			CHECK(setup.GetEditor().GetScene().GetEntityCount() == 0);
 		}
 

@@ -1,0 +1,582 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "MultiScript",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Prefab": 2,
+		"PrefabLink": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"RigidBody": 1,
+		"BoxCollider": 1,
+		"SphereCollider": 1,
+		"AudioListener": 1,
+		"Script": 2
+	},
+	"Entities": [
+		{
+			"ID": "195edc3357abc458",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 6, 14],
+					"Rotation": [-0.17364818, 0, 0, 0.9848077],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 55,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Skybox",
+					"ClearColor": [0.05, 0.05, 0.06]
+				},
+				"AudioListener": {
+					"Primary": true
+				}
+			}
+		},
+		{
+			"ID": "d17e4bbcfff9db6f",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [-0.4030582, 0.27253202, 0.12708376, 0.8643611],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 3,
+					"CastShadows": false,
+					"ShadowDistance": 100,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 1,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "dbe7cd7cce7f8b02",
+			"Name": "Ground",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, -0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [24, 1, 24]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "cd1b960855644311",
+			"Name": "Hero",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-6, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "08329da5e1d2e5df",
+							"Fields": {
+								"Label": "A"
+							},
+							"ExecutionOrder": 0
+						},
+						{
+							"Script": "08329da5e1d2e5df",
+							"Fields": {
+								"Label": "B",
+								"Step": 10
+							},
+							"ExecutionOrder": 0
+						},
+						{
+							"Script": "baa5ea4151fba553",
+							"Fields": {},
+							"ExecutionOrder": 0
+						},
+						{
+							"Script": "a495909a675e2a9e",
+							"Fields": {
+								"Label": "Hero"
+							},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "8e54123d72df838a",
+			"Name": "Alpha",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-4, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "a495909a675e2a9e",
+							"Fields": {
+								"Label": "Order.Alpha.0"
+							},
+							"ExecutionOrder": 5
+						},
+						{
+							"Script": "a495909a675e2a9e",
+							"Fields": {
+								"Label": "Order.Alpha.1"
+							},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "247b639641fc61dd",
+			"Name": "Beta",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-2, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "a495909a675e2a9e",
+							"Fields": {
+								"Label": "Order.Beta.0"
+							},
+							"ExecutionOrder": 0
+						},
+						{
+							"Script": "a495909a675e2a9e",
+							"Fields": {
+								"Label": "Order.Beta.1"
+							},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "5c26b9c956c9bb0d",
+			"Name": "Faller",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [4, 2, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.5, 0.5, 0.5]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 1,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": false,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"SphereCollider": {
+					"Radius": 0.5,
+					"Offset": [0, 0, 0],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "a495909a675e2a9e",
+							"Fields": {
+								"Label": "Faller.0"
+							},
+							"ExecutionOrder": 0
+						},
+						{
+							"Script": "a495909a675e2a9e",
+							"Fields": {
+								"Label": "Faller.1"
+							},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "cd0da480ae5170f2",
+			"Name": "Swapper",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.5, -3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "08329da5e1d2e5df",
+							"Fields": {
+								"Label": "Swap"
+							},
+							"ExecutionOrder": 0
+						},
+						{
+							"Script": "a495909a675e2a9e",
+							"Fields": {
+								"Label": "Swapper"
+							},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "ea43a8a0126819c6",
+			"Name": "Hollow",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [2, 0.5, -3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": null,
+							"Fields": {},
+							"ExecutionOrder": 0
+						},
+						{
+							"Script": "08329da5e1d2e5df",
+							"Fields": {
+								"Label": "Hollow"
+							},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "ca15c92610660977",
+			"Name": "Pilot",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.5, 3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "0c86727f04e23066",
+							"Fields": {
+								"Speed": 3
+							},
+							"ExecutionOrder": 0
+						},
+						{
+							"Script": "8e603aa567bec4bf",
+							"Fields": {
+								"Gain": 0.25
+							},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "434744dcff716753",
+			"Name": "Walker",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-4, 0.5, -3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Prefab": {
+					"Prefab": "165ed710ba719718",
+					"Overrides": []
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "434744dcff716753",
+					"InstanceRoot": "434744dcff716753",
+					"OuterPrefabEntityID": null
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "08329da5e1d2e5df",
+							"Fields": {
+								"Label": "Walker",
+								"Step": 5
+							},
+							"ExecutionOrder": 0
+						},
+						{
+							"Script": "a495909a675e2a9e",
+							"Fields": {
+								"Label": "Walker.T"
+							},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "310860e331ff8326",
+			"Name": "WalkerA",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [4, 0.5, -3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Prefab": {
+					"Prefab": "165ed710ba719718",
+					"Overrides": [
+						{
+							"Path": ["434744dcff716753"],
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Scripts/0/Fields",
+							"Value": {
+								"Step": 3
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "434744dcff716753",
+					"InstanceRoot": "310860e331ff8326",
+					"OuterPrefabEntityID": null
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "08329da5e1d2e5df",
+							"Fields": {
+								"Label": "Walker",
+								"Step": 3
+							},
+							"ExecutionOrder": 0
+						},
+						{
+							"Script": "a495909a675e2a9e",
+							"Fields": {
+								"Label": "Walker.T"
+							},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "fdc99d11df75029d",
+			"Name": "WalkerB",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [6, 0.5, -3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Prefab": {
+					"Prefab": "165ed710ba719718",
+					"Overrides": [
+						{
+							"Path": ["434744dcff716753"],
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Scripts/0/Fields",
+							"Value": {
+								"Label": "WalkerB"
+							}
+						},
+						{
+							"Path": ["434744dcff716753"],
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Scripts/1/ExecutionOrder",
+							"Value": 4
+						},
+						{
+							"Path": ["434744dcff716753"],
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Scripts/1/Fields",
+							"Value": {
+								"Label": "WalkerB.T"
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "434744dcff716753",
+					"InstanceRoot": "fdc99d11df75029d",
+					"OuterPrefabEntityID": null
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "08329da5e1d2e5df",
+							"Fields": {
+								"Label": "WalkerB",
+								"Step": 5
+							},
+							"ExecutionOrder": 0
+						},
+						{
+							"Script": "a495909a675e2a9e",
+							"Fields": {
+								"Label": "WalkerB.T"
+							},
+							"ExecutionOrder": 4
+						}
+					]
+				}
+			}
+		}
+	]
+}

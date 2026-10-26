@@ -8,12 +8,13 @@
 #include <utility>
 #include <vector>
 
-// The one lookup of the prefab instances of a scene, shared by EditorContext's prefab updates and the asset and prefab
-// methods (§5.5).
+// The one lookup of the prefab instances of a scene, and of the open scenes, shared by EditorContext's prefab updates, the
+// asset and prefab methods and the inspector (§5.5).
 
 namespace Engine {
 
 	class ConstEntity;
+	class EditorContext;
 	class Scene;
 
 	namespace Utils {
@@ -34,6 +35,11 @@ namespace Engine {
 		// `prefabs` (sorted; every outermost instance of a valid prefab handle when empty), each with its prefab's handle, in
 		// canonical order. A nested instance is never listed: an update rebuilds it with its outermost instance.
 		[[nodiscard]] std::vector<std::pair<UUID, AssetHandle>> FindPrefabInstances(const Scene& scene, std::span<const AssetHandle> prefabs);
+
+		// Whether an open scene of `editor`, the addressed one or another (Docs/Decisions/0031-m20-contract.md decision 15),
+		// has an outermost instance of one of `prefabs` (sorted; FindPrefabInstances), so a new version of them must update
+		// instances. False without an open scene.
+		[[nodiscard]] bool IsInstancedInOpenScenes(const EditorContext& editor, std::span<const AssetHandle> prefabs);
 
 	}
 

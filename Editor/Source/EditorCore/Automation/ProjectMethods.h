@@ -70,12 +70,13 @@ namespace Engine {
 		bool Recovered = false;
 	};
 
-	// project.save {}: writes the open scene when it is dirty (to its path; an unsaved scene needs scene.save {path}).
-	// Settings and native assets are already on disk: ProjectSettingsCommand and the asset commands write through (ADR 0010),
-	// so there are no dirty native assets.
+	// project.save {}: writes every dirty open scene to its path, in tab order (M20, Docs/Decisions/0031-m20-contract.md
+	// decision 14: Utils::SaveDirtyOpenScenes; a scene never saved needs scene.save {path} first, and refuses the call
+	// before anything is written). Settings and native assets are already on disk: ProjectSettingsCommand and the asset
+	// commands write through (ADR 0010), so there are no dirty native assets.
 	struct ProjectSaveResult
 	{
-		std::vector<std::string> SavedFiles{}; // project-relative
+		std::vector<std::string> SavedFiles{}; // project-relative, in tab order
 	};
 
 	// Registry struct "OpenSceneSummary": the open scene, or open = false.
@@ -151,10 +152,11 @@ namespace Engine {
 	// canonical writer (§6, §13.5, §13.12; Docs/Decisions/0026-m16-contract.md decision 12); .material, .sfx and .replay files
 	// are read with unknown members refused, as their importers read them, so such a member fails the upgrade at its file and
 	// pointer instead of being dropped by the rewrite. A file is written only when its canonical bytes differ, through
-	// EditorContext::WriteProjectFile, so provenance records each rewrite with the method "project.upgrade". The open scene
-	// must not be dirty (InvalidState); it is reloaded afterwards when its file changed; no scene needs to be open.
-	// Supports dry runs: changedFiles then lists what a real upgrade would rewrite, and nothing is written. Not undoable (it
-	// is a file-format operation); the history is cleared when the open scene reloads.
+	// EditorContext::WriteProjectFile, so provenance records each rewrite with the method "project.upgrade". No open scene
+	// may be dirty (InvalidState naming every dirty one; decision 14); every open scene whose file changed is reloaded
+	// afterwards in its tab position, the active scene staying active; no scene needs to be open. Supports dry runs:
+	// changedFiles then lists what a real upgrade would rewrite, and nothing is written. Not undoable (it is a file-format
+	// operation); a reloaded scene's history is cleared.
 	struct ProjectUpgradeResult
 	{
 		std::vector<std::string> ChangedFiles{}; // project-relative, sorted
@@ -188,7 +190,8 @@ namespace Engine {
 		// project.open. Errors: InvalidState with a project open; NotFound; AlreadyExists for a locked project ("locked by
 		// process <pid>"); Parse, Validation or UnsupportedVersion for the .eproj.
 		[[nodiscard]] Result<ProjectOpenResult> ProjectOpen(EditorMethodContext& context, const ProjectOpenParams& params);
-		// project.save. Errors: InvalidState for a dirty scene that has no path; PermissionDenied (read-only); write errors.
+		// project.save. Errors: InvalidState for a dirty open scene that has no path; PermissionDenied (read-only); those of
+		// addressing an open scene; write errors (the scenes written before stay saved).
 		[[nodiscard]] Result<ProjectSaveResult> ProjectSave(EditorMethodContext& context, const NoParams& params);
 		[[nodiscard]] Result<ProjectInfoResult> ProjectInfo(EditorMethodContext& context, const NoParams& params);
 		[[nodiscard]] Result<ProjectGetSettingsResult> ProjectGetSettings(EditorMethodContext& context, const NoParams& params);
@@ -198,7 +201,7 @@ namespace Engine {
 		// "scene" without an open scene; PermissionDenied for fixes in a read-only editor.
 		[[nodiscard]] Result<ProjectValidateResult> ProjectValidate(EditorMethodContext& context, const ProjectValidateParams& params);
 		// project.upgrade. Errors: InvalidState for a dirty open scene; the first file that fails to load or write (files
-		// rewritten before it stay rewritten and recorded).
+		// rewritten before it stay rewritten and recorded); those of reloading an open scene.
 		[[nodiscard]] Result<ProjectUpgradeResult> ProjectUpgrade(EditorMethodContext& context, const NoParams& params);
 		// project.refreshAssets. Errors: those of EditorContext::OpenDeferredAssets while the scan is deferred, then those of
 		// EditorAssetManager::Refresh (the scan of Assets/).

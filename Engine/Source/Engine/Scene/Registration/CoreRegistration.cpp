@@ -6,6 +6,7 @@
 #include "Engine/Reflection/FuzzySuggest.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/ComponentRegistration.h"
+#include "Engine/Scene/PrefabInstantiator.h"
 #include "Engine/Scene/TransformSystem.h"
 
 #include <glm/gtc/matrix_inverse.hpp>
@@ -235,21 +236,21 @@ namespace Engine {
 		}
 
 		// The schema-only field describing the Value of a Field override whose target field resolves its values against the
-		// component that holds them (Script.Fields, against the component's Script handle).
+		// object that holds them (a script slot's Fields, against the slot's Script handle).
 		static FieldInfo::Specification MakeComponentResolvedValueField(const TypeInfo& type)
 		{
 			FieldInfo::Specification specification;
 			specification.Name = "Value";
-			specification.Description = "The overridden values of a field whose values resolve against their component (Script.Fields): checked on the "
-										"instance member's own component when the override is applied.";
+			specification.Description = "The overridden values of a field whose values resolve against their owner (a script slot's Fields): checked on "
+										"the instance member's own slot when the override is applied.";
 			specification.Type = &type;
 			return specification;
 		}
 
-		// The schema of such a Field override's Value: free-form JSON. An override has no component to resolve it against
-		// (its owner is the PrefabOverride), so it is checked where it is applied: PrefabInstantiator applies it to the
-		// member's own component, whose read resolves each value and reports an unknown or mismatching one there, and the
-		// member's flattened component in a scene file is read the same way (ADR 0026, amending ADR 0006 decision 6).
+		// The schema of such a Field override's Value: free-form JSON. An override has no slot to resolve it against (its
+		// owner is the PrefabOverride), so it is checked where it is applied: PrefabInstantiator applies it to the member's
+		// own slot, whose read resolves each value and reports an unknown or mismatching one there, and the member's
+		// flattened component in a scene file is read the same way (ADR 0026, amending ADR 0006 decision 6).
 		// Immutable constants after their thread-safe first-use initialization; they outlive every resolution.
 		static const FieldInfo& GetComponentResolvedValueSchema()
 		{
@@ -323,10 +324,22 @@ namespace Engine {
 			return component;
 		}
 
+		// The member of one script slot that a Field override of the Script component names, "Scripts/<slot>/<member>"
+		// (Docs/Decisions/0031-m20-contract.md decision 19): the ScriptSlot field; null for every other component and field.
+		static const FieldInfo* FindScriptSlotMember(const TypeRegistry& registry, const ComponentInfo& component, std::string_view field)
+		{
+			if (&component != registry.FindComponent<ScriptComponent>())
+				return nullptr;
+			const std::optional<ScriptSlotField> slot = PrefabInstantiator::ParseScriptSlotField(field);
+			const StructInfo* slotType = slot.has_value() ? registry.FindStruct<ScriptSlot>() : nullptr;
+			return slotType != nullptr ? slotType->FindField(slot->Member) : nullptr;
+		}
+
 		// The VariantSchemaResolver of PrefabOverride.Value (§5.4): the overridden field's schema for Field (free-form JSON
-		// for a field whose own values resolve against their component, GetComponentResolvedValueSchema), the component's
-		// whole schema for AddComponent, null for RemoveComponent (of a component that exists) and RemoveEntity, the
-		// PrefabEntityKeys field for EntityKey.
+		// for a field whose own values resolve against their owner, GetComponentResolvedValueSchema; a script slot's member
+		// for "Scripts/<slot>/<member>", its Fields free-form as Script.Fields was, and the list's schema for "Scripts"), the
+		// component's whole schema for AddComponent, null for RemoveComponent (of a component that exists) and RemoveEntity,
+		// the PrefabEntityKeys field for EntityKey.
 		static Result<const FieldInfo*> ResolvePrefabOverrideValue(const ResolveContext& context)
 		{
 			if (context.OwnerType == nullptr || context.OwnerType->GetType().GetKey() != TypeKeyOf<PrefabOverride>())
@@ -342,6 +355,8 @@ namespace Engine {
 				case PrefabOverrideKind::Field:
 				{
 					ENGINE_TRY_ASSIGN(const ComponentInfo* component, FindOverridableComponent(registry, target.Component));
+					if (const FieldInfo* slotMember = FindScriptSlotMember(registry, *component, target.Field); slotMember != nullptr)
+						return slotMember->GetResolver() != nullptr ? &GetComponentResolvedValueSchema() : slotMember;
 					const FieldInfo* field = component->FindField(target.Field);
 					if (field != nullptr && field->IsStored() && field->GetMeta().Serialized)
 						return field->GetResolver() != nullptr ? &GetComponentResolvedValueSchema() : field;

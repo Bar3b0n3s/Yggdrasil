@@ -174,12 +174,12 @@ namespace Engine {
 	// A turret whose script field "Goal" (an EntityRef in the fixture schema) names the prefab-local ID of its barrel.
 	constexpr std::string_view TurretPrefab = R"({
 		"Format": "Prefab", "Version": 1, "Name": "Turret", "Root": "00000000000d0001",
-		"ComponentVersions": { "Transform": 1, "Script": 1 },
+		"ComponentVersions": { "Transform": 1, "Script": 2 },
 		"Entities": [
 			{ "ID": "00000000000d0001", "Name": "Turret", "Parent": null, "Active": true, "Tags": [],
 			  "Components": {
 				"Transform": { "Translation": [0, 0, 0], "Rotation": [0, 0, 0, 1], "Scale": [1, 1, 1] },
-				"Script": { "Script": "00000000c0ffee01", "Fields": { "Goal": "00000000000d0002" }, "ExecutionOrder": 0 } } },
+				"Script": { "Scripts": [ { "Script": "00000000c0ffee01", "Fields": { "Goal": "00000000000d0002" }, "ExecutionOrder": 0 } ] } } },
 			{ "ID": "00000000000d0002", "Name": "Barrel", "Parent": "00000000000d0001", "Active": true, "Tags": [],
 			  "Components": { "Transform": { "Translation": [0, 0, 0], "Rotation": [0, 0, 0, 1], "Scale": [1, 1, 1] } } }
 		]
@@ -306,7 +306,7 @@ namespace Engine {
 
 			// An entity outside the instance references the member through a script field (an Entity-kind Variant).
 			const Entity watcher = setup.GetScene().CreateEntity("Watcher");
-			ScriptComponent& script = watcher.AddComponent<ScriptComponent>();
+			ScriptSlot& script = watcher.AddComponent<ScriptComponent>().Scripts.emplace_back();
 			script.Fields["Target"] = VariantValue(Json(target.ToString()));
 
 			const Prefab edited = EditBlockPrefab(setup.GetRegistry(), prefab);
@@ -314,7 +314,7 @@ namespace Engine {
 			const Entity resolved = setup.GetScene().FindEntityByID(target);
 			REQUIRE(resolved.IsValid());
 			CHECK(resolved.GetName() == "Visual");
-			CHECK(watcher.GetComponent<ScriptComponent>().Fields.at("Target").Get() == Json(target.ToString()));
+			CHECK(watcher.GetComponent<ScriptComponent>().Scripts.front().Fields.at("Target").Get() == Json(target.ToString()));
 		}
 
 		TEST_CASE("Prefab: user-added children are preserved")
@@ -421,7 +421,7 @@ namespace Engine {
 			LoadReport report;
 			const Result<Entity> root = PrefabInstantiator::Instantiate(setup.GetScene(), prefab, MakeOptions(rootID), options, report);
 			REQUIRE(root.has_value());
-			CHECK(root->GetComponent<ScriptComponent>().Fields.at("Goal").Get() == barrel);
+			CHECK(root->GetComponent<ScriptComponent>().Scripts.front().Fields.at("Goal").Get() == barrel);
 
 			// A fresh instance has no overrides: the prefab side is remapped before the comparison.
 			const Result<std::vector<PrefabOverride>> overrides = PrefabInstantiator::ComputeOverrides(*root, prefab, options);
@@ -432,7 +432,7 @@ namespace Engine {
 			REQUIRE(PrefabInstantiator::UpdateInstance(setup.GetScene(), *root, prefab, options, report).has_value());
 			const Entity rebuilt = setup.GetScene().FindEntityByID(rootID);
 			REQUIRE(rebuilt.IsValid());
-			CHECK(rebuilt.GetComponent<ScriptComponent>().Fields.at("Goal").Get() == barrel);
+			CHECK(rebuilt.GetComponent<ScriptComponent>().Scripts.front().Fields.at("Goal").Get() == barrel);
 		}
 
 		TEST_CASE("PrefabInstantiator: unpack removes the links and keeps the entities")
@@ -896,13 +896,13 @@ namespace Engine {
 			// The barrel gets a script aiming at the turret root (inside the instance); the root now aims at a user child
 			// (outside it).
 			const Entity muzzle = scene.CreateEntity("Muzzle", scene.FindEntityByID(barrelID));
-			ScriptComponent aim;
+			ScriptSlot aim;
 			aim.Script = TypedAssetHandle<AssetType::Script>(AssetHandle(Test::FixtureSchemaSource::DefaultOwner.GetValue()));
 			aim.Fields["Goal"] = VariantValue(Json(rootID.ToString()));
-			static_cast<void>(scene.FindEntityByID(barrelID).AddComponent<ScriptComponent>(aim));
+			static_cast<void>(scene.FindEntityByID(barrelID).AddComponent<ScriptComponent>(ScriptComponent{ { aim } }));
 			root->Patch<ScriptComponent>([&muzzle](ScriptComponent& script)
 			{
-				script.Fields["Goal"] = VariantValue(Json(muzzle.GetUUID().ToString()));
+				script.Scripts.front().Fields["Goal"] = VariantValue(Json(muzzle.GetUUID().ToString()));
 			});
 
 			// Overrides store prefab-local IDs for members and keep references to other entities as they are.
@@ -912,11 +912,11 @@ namespace Engine {
 			CHECK(recorded[0].Path == std::vector<UUID>{ UUID(0x00000000000d0001) });
 			CHECK(recorded[0].Kind == PrefabOverrideKind::Field);
 			CHECK(recorded[0].Component == "Script");
-			CHECK(recorded[0].Field == "Fields");
+			CHECK(recorded[0].Field == "Scripts/0/Fields");
 			CHECK(recorded[0].Value.Get()["Goal"] == Json(muzzle.GetUUID().ToString()));
 			CHECK(recorded[1].Path == std::vector<UUID>{ UUID(0x00000000000d0002) });
 			CHECK(recorded[1].Kind == PrefabOverrideKind::AddComponent);
-			CHECK(recorded[1].Value.Get()["Fields"]["Goal"] == "00000000000d0001");
+			CHECK(recorded[1].Value.Get()["Scripts"][0]["Fields"]["Goal"] == "00000000000d0001");
 
 			const Result<Prefab> applied = PrefabInstantiator::ApplyOverrides(*root, turret, options);
 			REQUIRE(applied.has_value());
@@ -925,8 +925,8 @@ namespace Engine {
 			const Json* appliedBarrel = applied->FindEntity(UUID(0x00000000000d0002));
 			REQUIRE(appliedRoot != nullptr);
 			REQUIRE(appliedBarrel != nullptr);
-			CHECK((*appliedRoot)["Components"]["Script"]["Fields"]["Goal"] == Json(muzzle.GetUUID().ToString()));
-			CHECK((*appliedBarrel)["Components"]["Script"]["Fields"]["Goal"] == "00000000000d0001");
+			CHECK((*appliedRoot)["Components"]["Script"]["Scripts"][0]["Fields"]["Goal"] == Json(muzzle.GetUUID().ToString()));
+			CHECK((*appliedBarrel)["Components"]["Script"]["Scripts"][0]["Fields"]["Goal"] == "00000000000d0001");
 
 			// The caller saves the asset and updates its instances; the applied instance reverts to it: no overrides remain,
 			// nothing changes and the user child stays.
@@ -934,8 +934,8 @@ namespace Engine {
 			CHECK(root->GetComponent<PrefabInstanceComponent>().Overrides.empty());
 			const Entity barrel = scene.FindEntityByID(barrelID);
 			REQUIRE(barrel.IsValid());
-			CHECK(barrel.GetComponent<ScriptComponent>().Fields.at("Goal").Get() == Json(rootID.ToString()));
-			CHECK(root->GetComponent<ScriptComponent>().Fields.at("Goal").Get() == Json(muzzle.GetUUID().ToString()));
+			CHECK(barrel.GetComponent<ScriptComponent>().Scripts.front().Fields.at("Goal").Get() == Json(rootID.ToString()));
+			CHECK(root->GetComponent<ScriptComponent>().Scripts.front().Fields.at("Goal").Get() == Json(muzzle.GetUUID().ToString()));
 			REQUIRE(muzzle.IsValid());
 			CHECK(muzzle.GetParent() == barrel);
 			const Result<std::vector<PrefabOverride>> remaining = PrefabInstantiator::ComputeOverrides(*root, *applied, options);
@@ -1553,12 +1553,12 @@ namespace Engine {
 			CHECK(applied->GetEntityIDs() == std::vector<UUID>{ UUID(0x00000000000d0001) });
 			const Json* appliedRoot = applied->FindEntity(UUID(0x00000000000d0001));
 			REQUIRE(appliedRoot != nullptr);
-			CHECK((*appliedRoot)["Components"]["Script"]["Fields"]["Goal"] == "00000000000d0002");
+			CHECK((*appliedRoot)["Components"]["Script"]["Scripts"][0]["Fields"]["Goal"] == "00000000000d0002");
 
 			// Reverting to the applied prefab leaves nothing to override.
 			REQUIRE(PrefabInstantiator::Revert(scene, *root, *applied, options, report).has_value());
 			CHECK(root->GetComponent<PrefabInstanceComponent>().Overrides.empty());
-			CHECK(root->GetComponent<ScriptComponent>().Fields.at("Goal").Get() == Json("00000000000d0002"));
+			CHECK(root->GetComponent<ScriptComponent>().Scripts.front().Fields.at("Goal").Get() == Json("00000000000d0002"));
 			const Result<std::vector<PrefabOverride>> remaining = PrefabInstantiator::ComputeOverrides(*root, *applied, options);
 			REQUIRE(remaining.has_value());
 			CHECK(remaining->empty());
@@ -1574,7 +1574,7 @@ namespace Engine {
 			CHECK(kept->GetEntityIDs() == std::vector<UUID>{ UUID(0x00000000000d0001) });
 			const Json* keptRoot = kept->FindEntity(UUID(0x00000000000d0001));
 			REQUIRE(keptRoot != nullptr);
-			CHECK((*keptRoot)["Components"]["Script"]["Fields"]["Goal"] == Json(secondBarrelID.ToString()));
+			CHECK((*keptRoot)["Components"]["Script"]["Scripts"][0]["Fields"]["Goal"] == Json(secondBarrelID.ToString()));
 		}
 
 		TEST_CASE("PrefabInstantiator: updates and unpack leave an instance placed inside another alone")
@@ -1671,10 +1671,10 @@ namespace Engine {
 			// The prefab is created from entities that stay in the scene, so its prefab-local IDs are their IDs.
 			const Entity turret = scene.CreateEntity("Turret");
 			const Entity barrel = scene.CreateEntity("Barrel", turret);
-			ScriptComponent aim;
+			ScriptSlot aim;
 			aim.Script = TypedAssetHandle<AssetType::Script>(AssetHandle(Test::FixtureSchemaSource::DefaultOwner.GetValue()));
 			aim.Fields["Goal"] = VariantValue(Json(barrel.GetUUID().ToString()));
-			static_cast<void>(turret.AddComponent<ScriptComponent>(aim));
+			static_cast<void>(turret.AddComponent<ScriptComponent>(ScriptComponent{ { aim } }));
 			const Result<Prefab> prefab = Prefab::CreateFromEntity(turret, "Turret");
 			REQUIRE(prefab.has_value());
 
@@ -1683,7 +1683,7 @@ namespace Engine {
 			const Result<Entity> root = PrefabInstantiator::Instantiate(scene, *prefab, MakeOptions(rootID), options, report);
 			REQUIRE(root.has_value());
 			const UUID memberBarrel = PrefabInstantiator::DeriveInstanceID(rootID, barrel.GetUUID());
-			CHECK(root->GetComponent<ScriptComponent>().Fields.at("Goal").Get() == Json(memberBarrel.ToString()));
+			CHECK(root->GetComponent<ScriptComponent>().Scripts.front().Fields.at("Goal").Get() == Json(memberBarrel.ToString()));
 
 			// Aiming the instance at the original barrel: an override would store its ID, which is also the prefab-local ID of
 			// the instance's own barrel, so the next update would aim at the member instead. Nothing is recorded or applied.
@@ -1691,7 +1691,7 @@ namespace Engine {
 			{
 				root->Patch<ScriptComponent>([target](ScriptComponent& script)
 				{
-					script.Fields["Goal"] = VariantValue(Json(target.ToString()));
+					script.Scripts.front().Fields["Goal"] = VariantValue(Json(target.ToString()));
 				});
 			};
 			aimAt(barrel.GetUUID());
@@ -1711,12 +1711,12 @@ namespace Engine {
 			REQUIRE(recorded.size() == 1);
 			CHECK(recorded[0].Value.Get() == Json{ { "Goal", other.GetUUID().ToString() } });
 			REQUIRE(PrefabInstantiator::UpdateInstance(scene, *root, *prefab, options, report).has_value());
-			CHECK(root->GetComponent<ScriptComponent>().Fields.at("Goal").Get() == Json(other.GetUUID().ToString()));
+			CHECK(root->GetComponent<ScriptComponent>().Scripts.front().Fields.at("Goal").Get() == Json(other.GetUUID().ToString()));
 			const Result<Prefab> applied = PrefabInstantiator::ApplyOverrides(*root, *prefab, options);
 			REQUIRE(applied.has_value());
 			const Json* appliedRoot = applied->FindEntity(turret.GetUUID());
 			REQUIRE(appliedRoot != nullptr);
-			CHECK((*appliedRoot)["Components"]["Script"]["Fields"]["Goal"] == Json(other.GetUUID().ToString()));
+			CHECK((*appliedRoot)["Components"]["Script"]["Scripts"][0]["Fields"]["Goal"] == Json(other.GetUUID().ToString()));
 		}
 
 		TEST_CASE("PrefabInstantiator: unknown components keep the prefab's data and version through instantiation, updates and apply")
@@ -1801,7 +1801,7 @@ namespace Engine {
 			options.Schemas = &schemas;
 			Result<Json> document = JsonReader::Parse(TurretPrefab);
 			REQUIRE(document.has_value());
-			Json& fields = (*document)["Entities"][0]["Components"]["Script"]["Fields"];
+			Json& fields = (*document)["Entities"][0]["Components"]["Script"]["Scripts"][0]["Fields"];
 			fields["Torque"] = 10;
 			fields["Label"] = "Turret";
 			LoadOptions loadOptions;
@@ -1818,15 +1818,15 @@ namespace Engine {
 			// The instance changes Torque and clears Label: the override names those keys only (Label as null, RFC 7386).
 			root->Patch<ScriptComponent>([](ScriptComponent& script)
 			{
-				script.Fields["Torque"] = VariantValue(Json(50));
-				script.Fields.erase("Label");
+				script.Scripts.front().Fields["Torque"] = VariantValue(Json(50));
+				script.Scripts.front().Fields.erase("Label");
 			});
 			REQUIRE(PrefabInstantiator::RefreshOverrides(*root, *prefab, options).has_value());
 			const std::vector<PrefabOverride> recorded = root->GetComponent<PrefabInstanceComponent>().Overrides;
 			REQUIRE(recorded.size() == 1);
 			CHECK(recorded[0].Kind == PrefabOverrideKind::Field);
 			CHECK(recorded[0].Component == "Script");
-			CHECK(recorded[0].Field == "Fields");
+			CHECK(recorded[0].Field == "Scripts/0/Fields");
 			CHECK(recorded[0].Value.Get() == Json{ { "Label", nullptr }, { "Torque", 50 } });
 
 			// The prefab edits Torque and adds Count: the instance keeps its Torque, gains Count and still has no Label.
@@ -1837,7 +1837,7 @@ namespace Engine {
 			LoadReport updateReport;
 			REQUIRE(PrefabInstantiator::UpdateInstance(scene, *root, *edited, options, updateReport).has_value());
 			CHECK(CountDiagnostics(updateReport, PrefabStaleOverrideCode) == 0);
-			const std::map<std::string, VariantValue>& updated = root->GetComponent<ScriptComponent>().Fields;
+			const std::map<std::string, VariantValue>& updated = root->GetComponent<ScriptComponent>().Scripts.front().Fields;
 			CHECK(updated.at("Torque").Get() == Json(50));
 			REQUIRE(updated.contains("Count"));
 			CHECK(updated.at("Count").Get() == Json(3));
@@ -1853,7 +1853,7 @@ namespace Engine {
 		// entity, an instance's change to one slot is recorded as that slot's own override ("Scripts/<slot>/<member>"), so the
 		// prefab's edits of the other slots still reach it; a list of another length is recorded whole; and a slot override
 		// whose slot the prefab no longer has is dropped as stale.
-		TEST_CASE("PrefabInstantiator: an override of one script slot is recorded and applied per slot" * doctest::skip(true))
+		TEST_CASE("PrefabInstantiator: an override of one script slot is recorded and applied per slot")
 		{
 			Test::SceneTestFixture setup;
 			Scene& scene = setup.GetScene();
@@ -1925,6 +1925,81 @@ namespace Engine {
 			REQUIRE(PrefabInstantiator::UpdateInstance(scene, *root, *shortened, options, staleReport).has_value());
 			CHECK(CountDiagnostics(staleReport, PrefabStaleOverrideCode) == 1);
 			CHECK(root->GetComponent<PrefabInstanceComponent>().Overrides.empty());
+		}
+
+		// Decisions 9 and 19: applying an instance writes its edits of a nested instance into the nested instance's record in
+		// the prefab nesting it, slot by slot: a slot override joins the record's overrides of the other slots, and one of a
+		// slot that the record replaces with a whole list is written into that list.
+		TEST_CASE("PrefabInstantiator: apply composes a nested instance's script slot edits with its record")
+		{
+			Test::SceneTestFixture setup;
+			const Test::FixtureSchemaSource schemas = Test::FixtureSchemaSource::CreateStandard();
+			PrefabOptions options;
+			options.Schemas = &schemas;
+			const Prefab turret = ParsePrefab(setup.GetRegistry(), TwoSlotTurretPrefab, &schemas);
+			const auto makeRack = [&setup, &turret, &options](const Json& nestedScript)
+			{
+				const Scope<Scene> source = setup.CreateEmptyScene();
+				const Entity rackRoot = source->CreateEntityWithID(UUID(0x8181), "Rack");
+				PrefabInstantiateOptions nestedOptions;
+				nestedOptions.PrefabHandle = AssetHandle(0x2510cafe0001);
+				nestedOptions.RootID = UUID(0x8282);
+				nestedOptions.Parent = rackRoot;
+				LoadReport report;
+				const Result<Entity> nested = PrefabInstantiator::Instantiate(*source, turret, nestedOptions, options, report);
+				REQUIRE(nested.has_value());
+				REQUIRE(ComponentAccess::SetComponentJson(*nested, "Script", nestedScript, options.Schemas).has_value());
+				REQUIRE(PrefabInstantiator::RefreshOverrides(*nested, turret, options).has_value());
+				Result<Prefab> rack = Prefab::CreateFromEntity(rackRoot, "Rack");
+				REQUIRE_MESSAGE(rack.has_value(), (rack ? std::string() : rack.error().ToString()));
+				return std::move(*rack);
+			};
+			const auto parse = [](std::string_view text)
+			{
+				Result<Json> json = JsonReader::Parse(text);
+				REQUIRE(json.has_value());
+				return std::move(*json);
+			};
+			// The scene's rack instance changes the nested turret's slot 0 Torque to 20, its other values as the rack has them.
+			const auto applyTorque = [&setup, &options](const Prefab& rack, Json script)
+			{
+				const Scope<Scene> scene = setup.CreateEmptyScene();
+				LoadReport report;
+				PrefabInstantiateOptions rackOptions;
+				rackOptions.PrefabHandle = AssetHandle(0x2510cafe0002);
+				rackOptions.RootID = UUID(0x9191);
+				const Result<Entity> root = PrefabInstantiator::Instantiate(*scene, rack, rackOptions, options, report);
+				REQUIRE(root.has_value());
+				const Entity nested = scene->FindEntityByID(PrefabInstantiator::DeriveInstanceID(UUID(0x9191), UUID(0x8282)));
+				REQUIRE(nested.IsValid());
+				script["Scripts"][0]["Fields"]["Torque"] = 20;
+				REQUIRE(ComponentAccess::SetComponentJson(nested, "Script", script, options.Schemas).has_value());
+				Result<Prefab> applied = PrefabInstantiator::ApplyOverrides(*root, rack, options);
+				REQUIRE_MESSAGE(applied.has_value(), (applied ? std::string() : applied.error().ToString()));
+				return GetDocumentInstance(*applied, UUID(0x8282))["Overrides"];
+			};
+
+			// The rack records slot 1's Count; the scene's edit of slot 0 joins it as its own slot override.
+			const Json counted = parse(R"({ "Scripts": [
+				{ "Script": "00000000c0ffee01", "Fields": { "Torque": 10 }, "ExecutionOrder": 0 },
+				{ "Script": "00000000c0ffee02", "Fields": { "Count": 7 }, "ExecutionOrder": 5 } ] })");
+			const Json slots = applyTorque(makeRack(counted), counted);
+			REQUIRE(slots.size() == 2);
+			CHECK(slots[0]["Field"] == Json("Scripts/0/Fields"));
+			CHECK(slots[0]["Value"] == Json{ { "Torque", 20 } });
+			CHECK(slots[1]["Field"] == Json("Scripts/1/Fields"));
+			CHECK(slots[1]["Value"] == Json{ { "Count", 7 } });
+
+			// The rack gives the turret a third slot, a whole list; the scene's edit of slot 0 is written into that list.
+			Json extended = counted;
+			extended["Scripts"].push_back(Json{ { "Script", "00000000c0ffee03" }, { "Fields", Json::object() }, { "ExecutionOrder", 0 } });
+			const Json list = applyTorque(makeRack(extended), extended);
+			REQUIRE(list.size() == 1);
+			CHECK(list[0]["Field"] == Json("Scripts"));
+			REQUIRE(list[0]["Value"].size() == 3);
+			CHECK(list[0]["Value"][0]["Fields"]["Torque"] == Json(20));
+			CHECK(list[0]["Value"][1]["Fields"]["Count"] == Json(7));
+			CHECK(list[0]["Value"][2]["Script"] == Json("00000000c0ffee03"));
 		}
 	}
 

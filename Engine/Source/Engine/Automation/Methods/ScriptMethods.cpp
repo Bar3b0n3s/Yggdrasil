@@ -60,6 +60,7 @@ namespace Engine {
 				entry.Callback = error.Callback;
 				entry.Entity.Id = Utils::FormatOptionalUUID(error.Entity);
 				entry.Entity.Name = error.EntityName;
+				entry.Slot = error.Slot;
 				if (scene && error.Entity.IsValid())
 				{
 					if (const ConstEntity owner = (*scene)->FindEntityByID(error.Entity); owner.IsValid())
@@ -81,14 +82,37 @@ namespace Engine {
 		{
 			if (context.HasParam("entity") && params.Entity.empty())
 				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/entity", "entity must name a behaviour instance when present", {}));
+			if (context.HasParam("script") && (params.Script.empty() || !context.HasParam("entity")))
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/script", "script must be a behaviour's Script.Define name, given with entity",
+					"name the entity whose script slot self binds to"));
 			const ScriptErrorStream* stream = context.GetScriptErrors();
 			const uint64_t before = stream == nullptr ? 0 : stream->GetCursor();
+			// A behaviour name that no slot of the entity has is located at /script: the engine refuses it, unlocated, before
+			// running anything (an unresolved entity is already located at /entity).
+			const auto locateScript = [&params](Result<ScriptEvaluation> evaluated) -> Result<ScriptEvaluation>
+			{
+				if (evaluated || params.Script.empty() || evaluated.error().GetCode() != ErrorCode::NotFound || evaluated.error().GetLocation().JsonPointer.has_value())
+					return evaluated;
+				return std::unexpected(Utils::MakeParamError(ErrorCode::NotFound, "/script", evaluated.error().GetMessageText(), evaluated.error().GetHint()));
+			};
 			Result<ScriptEvaluation> result = MakeError(ErrorCode::InvalidArgument, "unknown script evaluation context");
 			if (params.Context == ScriptEvaluationContext::Edit)
-				result = context.EvalInEdit(params.Code, params.Entity);
+				result = locateScript(context.EvalInEdit(params.Code, params.Entity, params.Script));
 			else if (params.Context == ScriptEvaluationContext::Play)
 			{
 				ENGINE_TRY_ASSIGN(PlaySession * session, Utils::RequirePlaySession(context));
+				// A scene target reaches the play VM only when it names the scene the session plays: with another open scene
+				// there is no play VM, as "target": "play" is refused there (Docs/Decisions/0031-m20-contract.md decision 16).
+				if (context.GetOptions().Scene.has_value())
+				{
+					if (const Result<Scene*> played = context.ResolveTargetScene(SceneTarget::Play, true, false); !played)
+					{
+						if (played.error().GetCode() != ErrorCode::InvalidArgument)
+							return std::unexpected(played.error());
+						return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/scene", played.error().GetMessageText(),
+							"name the played scene, or omit scene to reach the play VM from any tab, or use context Edit to read this scene"));
+					}
+				}
 				ENGINE_TRY(Utils::CheckLockstepOwner(context, *session));
 				ScriptEngine* scripts = session->GetScripts();
 				if (scripts == nullptr || session->GetMode() != PlayMode::Play || scripts->IsStopped())
@@ -104,8 +128,15 @@ namespace Engine {
 						return instance.Entity == *entity;
 					}))
 						return std::unexpected(Utils::MakeParamError(ErrorCode::NotFound, "/entity", "entity has no behaviour instance", {}));
+					// Without script, self is the first slot's instance (decision 18).
+					if (params.Script.empty() && std::ranges::none_of(instances, [entity](const ScriptInstanceInfo& instance)
+					{
+						return instance.Entity == *entity && instance.Slot == 0;
+					}))
+						return std::unexpected(Utils::MakeParamError(ErrorCode::NotFound, "/entity", "entity has no behaviour instance in its first script slot",
+							"name the behaviour self binds to with script"));
 				}
-				result = scripts->Evaluate(params.Code, VfsPath{}, entity);
+				result = locateScript(scripts->Evaluate(params.Code, VfsPath{}, entity, params.Script));
 			}
 			if (!result && (result.error().GetCode() == ErrorCode::Script || result.error().GetCode() == ErrorCode::CompileFailed || result.error().GetCode() == ErrorCode::Timeout))
 			{
@@ -152,6 +183,7 @@ namespace Engine {
 			.Field("message", &ScriptErrorSummary::Message, std::format("Error message of at most {} bytes; longer text is cut and ends with [truncated: <n> bytes].", MaxScriptLogMessageBytes))
 			.Field("callback", &ScriptErrorSummary::Callback, "Callback that failed.")
 			.Field("entity", &ScriptErrorSummary::Entity, "The entity whose script raised the error: its id and name at the latest occurrence, and its path read now in the scene reads address by default (the play scene while playing, else the edit scene), empty when that scene no longer holds the entity (destroyed, or spawned by a play session that ended) and for an error raised outside an entity.")
+			.Field("slot", &ScriptErrorSummary::Slot, "The faulting behaviour's slot in its entity's Script list.")
 			.Field("tick", &ScriptErrorSummary::Tick, "Simulation tick of the latest occurrence.")
 			.Field("count", &ScriptErrorSummary::Count, "Number of occurrences.")
 			.Field("traceback", &ScriptErrorSummary::Traceback, std::format("Authored traceback frames, innermost first: at most {}, the last a [truncated: <n> more frames] function without a script when deeper frames were left out.", MaxScriptErrorTracebackFrames))
@@ -166,7 +198,8 @@ namespace Engine {
 		registry.Struct<ScriptEvalParams>("ScriptEvalParams", "Evaluate Luau in an explicitly selected context.")
 			.Field("code", &ScriptEvalParams::Code, "UTF-8 Luau expression or chunk.")
 			.Field("context", &ScriptEvalParams::Context, "Edit or Play.")
-			.Field("entity", &ScriptEvalParams::Entity, "Optional behaviour entity bound as self.");
+			.Field("entity", &ScriptEvalParams::Entity, "Optional behaviour entity bound as self.")
+			.Field("script", &ScriptEvalParams::Script, "The behaviour self binds to when entity has several scripts: its Script.Define name; absent, the entity's first script.");
 		registry.Struct<ScriptEvalResult>("ScriptEvalResult", "Detached evaluation result.")
 			.Field("value", &ScriptEvalResult::Value, "First returned finite, acyclic JSON value.")
 			.Field("prints", &ScriptEvalResult::Prints, "Printed messages in call order.");
@@ -174,8 +207,8 @@ namespace Engine {
 
 	void RegisterSharedScriptMethods(MethodRegistry& methods)
 	{
-		methods.Add({ .Name = "script.errors", .Description = "Reads retained script errors without clearing them, including updated repeat counts.", .ExposeAsTool = true, .AvailableInRuntime = true, .AllowedInBatch = true, .Examples = { { .Description = "Read errors from the beginning.", .Params = Json::object() } } }, &Automation::ScriptErrors);
-		methods.Add({ .Name = "script.eval", .Description = "Evaluates Luau in Edit (read-only, editor only) or the live Play VM; Play obeys lockstep ownership.", .RequiredParams = { "code", "context" }, .ExposeAsTool = true, .AvailableInRuntime = true, .Examples = { { .Description = "Evaluate an expression during play.", .Params = Json{ { "code", "1 + 2" }, { "context", "Play" } } } } }, &Automation::ScriptEval);
+		methods.Add({ .Name = "script.errors", .Description = "Reads retained script errors without clearing them, including updated repeat counts.", .ExposeAsTool = true, .SupportsSceneTarget = true, .AvailableInRuntime = true, .AllowedInBatch = true, .Examples = { { .Description = "Read errors from the beginning.", .Params = Json::object() } } }, &Automation::ScriptErrors);
+		methods.Add({ .Name = "script.eval", .Description = "Evaluates Luau in Edit (read-only, editor only) or the live Play VM; Play obeys lockstep ownership.", .RequiredParams = { "code", "context" }, .ExposeAsTool = true, .SupportsSceneTarget = true, .AvailableInRuntime = true, .Examples = { { .Description = "Evaluate an expression during play.", .Params = Json{ { "code", "1 + 2" }, { "context", "Play" } } } } }, &Automation::ScriptEval);
 	}
 
 }

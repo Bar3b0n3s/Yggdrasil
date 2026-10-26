@@ -33,19 +33,21 @@ namespace Engine {
 		Json traceback = Json::array();
 		for (const ScriptTraceFrame& frame : error.Traceback)
 			traceback.push_back({ { "script", frame.Script }, { "line", frame.Line }, { "function", frame.Function } });
-		Json result = {
-			{ "id", error.ID },
-			{ "kind", ScriptErrorKindToString(error.Kind) },
-			{ "script", error.Script },
-			{ "line", error.Line },
-			{ "column", error.Column },
-			{ "message", error.Message },
-			{ "callback", error.Callback },
-			{ "entity", { { "id", error.Entity.ToString() }, { "name", error.EntityName } } },
-			{ "tick", error.Tick },
-			{ "count", error.Count },
-			{ "traceback", std::move(traceback) },
-		};
+		Json result = Json::object();
+		result["id"] = error.ID;
+		result["kind"] = ScriptErrorKindToString(error.Kind);
+		result["script"] = error.Script;
+		result["line"] = error.Line;
+		result["column"] = error.Column;
+		result["message"] = error.Message;
+		result["callback"] = error.Callback;
+		result["entity"] = { { "id", error.Entity.ToString() }, { "name", error.EntityName } };
+		// The faulting behaviour's slot, after the entity it belongs to (Docs/Decisions/0031-m20-contract.md decision 17).
+		if (error.Entity.IsValid())
+			result["slot"] = error.Slot;
+		result["tick"] = error.Tick;
+		result["count"] = error.Count;
+		result["traceback"] = std::move(traceback);
 		if (!error.JsonPointer.empty())
 			result["jsonPointer"] = error.JsonPointer;
 		return result;

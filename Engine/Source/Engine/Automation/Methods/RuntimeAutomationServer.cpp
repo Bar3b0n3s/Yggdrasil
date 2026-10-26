@@ -379,6 +379,13 @@ namespace Engine {
 			// None of the Runtime's methods supports a dry run (they read, or they advance time).
 			if (context.IsDryRun())
 				return MakeError(ErrorCode::Unsupported, "the Runtime has no dry runs ('{}')", context.GetMethod().Specification.Name);
+			// The Runtime has no open scenes, only its play scene (M20, Docs/Decisions/0031-m20-contract.md decision 16), as it
+			// has no edit scene for target "Edit".
+			if (context.GetOptions().Scene.has_value())
+			{
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidState, "/scene", "the Runtime has no open scenes to name",
+					"omit scene: the Runtime's requests address its play scene"));
+			}
 			if (const std::optional<uint64_t> expected = context.GetOptions().IfRevision)
 			{
 				const uint64_t current = Host.Session->GetScene().GetRevision();

@@ -1,0 +1,65 @@
+{
+	"Format": "Replay",
+	"Version": 2,
+	"Scene": {
+		"Handle": "084938f9b9014150",
+		"Path": "Assets/Scenes/MultiScript.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.1.0",
+	"Config": "Editor",
+	"Events": [
+		{
+			"Tick": 5,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 1
+		},
+		{
+			"Tick": 45,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 70,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.5
+		},
+		{
+			"Tick": 100,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 60,
+			"Luau": "local p = Scene.FindByName(\"Pilot\")\nlocal s = p:GetScripts()\nreturn #s == 2 and s[1] == p:GetScript(\"Mover\") and s[2] == p:GetScript(\"Trail\") and p.Transform.Translation.x > 1"
+		},
+		{
+			"Tick": 130,
+			"Luau": "local p = Scene.FindByName(\"Pilot\")\nlocal trail = p:GetScript(\"Trail\")\nlocal x = p.Transform.Translation.x\nreturn trail.Samples > 120 and x > 1 and x < 1.8 and math.abs(p.Transform.Scale.x - (1 + math.abs(x) * trail.Gain)) < 0.0001"
+		},
+		{
+			"Tick": 130,
+			"Luau": "local hero = Scene.FindByName(\"Hero\")\nlocal a, b = hero:GetScript(\"Counter\"), hero:GetScripts()[2]\nreturn a.Label == \"A\" and b.Label == \"B\" and b.Total == 10 * a.Total"
+		}
+	],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "5cb8971aa5395c85"
+		},
+		{
+			"Tick": 120,
+			"StateHash": "c87764879d86e13b"
+		}
+	],
+	"FinalTick": 130,
+	"FinalStateHash": "fd76d22e2d3780ec"
+}

@@ -7,6 +7,7 @@
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/ComponentHostOps.h"
 #include "Engine/Scene/Components/PrefabLinkComponent.h"
+#include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Private/EntityDocument.h"
 #include "Engine/Scene/Private/PrefabNesting.h"
 #include "Engine/Scene/Scene.h"
@@ -16,6 +17,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <format>
@@ -38,6 +40,12 @@ namespace Engine {
 		constexpr std::string_view ComponentsKey = "Components";
 		constexpr std::string_view OverridesKey = "Overrides";
 		constexpr std::array<std::string_view, 3> EntityKeyNames = { "Name", "Active", "Tags" };
+
+		// Per-slot overrides of the Script component (Docs/Decisions/0031-m20-contract.md decision 19): its list of slots and
+		// the Field of an override of one slot's member, "Scripts/<slot>/<member>".
+		constexpr std::string_view ScriptSlotsFieldName = "Scripts";
+		constexpr std::string_view ScriptSlotFieldPrefix = "Scripts/";
+		constexpr std::array<std::string_view, 3> ScriptSlotMemberNames = { "Script", "Fields", "ExecutionOrder" };
 
 		// A mapping between IDs of two spaces (prefab-local, instance, document), in either direction. Lookup only, never
 		// iterated to produce output (§5.1).
@@ -562,7 +570,7 @@ namespace Engine {
 				.WithHint("reference the instance's own member instead, or unpack the instance");
 		}
 
-		// True for a Map of Variants (Script.Fields): its keys are authored independently (§11.2), so an override records and
+		// True for a Map of Variants (a script slot's Fields): its keys are authored independently (§11.2), so an override records and
 		// applies only the keys that differ, as an RFC 7386 patch whose null removes a key.
 		static bool IsKeyedVariantMap(const FieldInfo& field)
 		{
@@ -611,6 +619,57 @@ namespace Engine {
 				else
 					map[entry.key()] = *entry;
 			}
+		}
+
+		// A Field override's target inside one slot of the Script component (Docs/Decisions/0031-m20-contract.md decision
+		// 19): the slot's index, the registered ScriptSlot type and the slot member's field.
+		struct ScriptSlotTarget
+		{
+			uint32_t Slot = 0;
+			const StructInfo* SlotType = nullptr;
+			const FieldInfo* Member = nullptr;
+		};
+
+		// True when `field` of `info` is the Script component's list of slots, whose overrides target one slot's member
+		// while the list keeps its length.
+		static bool IsScriptSlotList(const TypeRegistry& registry, const ComponentInfo& info, const FieldInfo& field)
+		{
+			return &info == registry.FindComponent<ScriptComponent>() && field.GetName() == ScriptSlotsFieldName;
+		}
+
+		// The slot and member that a Field override of `info` whose Field is `field` targets ("Scripts/<slot>/<member>",
+		// PrefabInstantiator::ParseScriptSlotField); nullopt for every other component and field.
+		static std::optional<ScriptSlotTarget> FindScriptSlotTarget(const TypeRegistry& registry, const ComponentInfo& info, std::string_view field)
+		{
+			if (&info != registry.FindComponent<ScriptComponent>())
+				return std::nullopt;
+			const std::optional<ScriptSlotField> parsed = PrefabInstantiator::ParseScriptSlotField(field);
+			const StructInfo* slotType = parsed.has_value() ? registry.FindStruct<ScriptSlot>() : nullptr;
+			const FieldInfo* member = slotType != nullptr ? slotType->FindField(parsed->Member) : nullptr;
+			if (member == nullptr)
+				return std::nullopt;
+			return ScriptSlotTarget{ parsed->Slot, slotType, member };
+		}
+
+		// The slot `slot` of the Script component JSON `component` ({"Scripts": [...]}); null when it has no such slot.
+		static Json* FindScriptSlot(Json& component, uint32_t slot)
+		{
+			if (!component.is_object())
+				return nullptr;
+			const auto slots = component.find(ScriptSlotsFieldName);
+			if (slots == component.end() || !slots->is_array() || slot >= slots->size())
+				return nullptr;
+			return &(*slots)[slot];
+		}
+
+		static const Json* FindScriptSlot(const Json& component, uint32_t slot)
+		{
+			if (!component.is_object())
+				return nullptr;
+			const auto slots = component.find(ScriptSlotsFieldName);
+			if (slots == component.end() || !slots->is_array() || slot >= slots->size())
+				return nullptr;
+			return &(*slots)[slot];
 		}
 
 		// The ID `map` gives `id`; the invalid UUID when it has none.
@@ -747,6 +806,7 @@ namespace Engine {
 			}
 
 			const ComponentInfo* transform = registry.FindComponent<TransformComponent>();
+			const StructInfo* slotType = registry.FindStruct<ScriptSlot>();
 			const Json& actualComponents = GetMember(actual, ComponentsKey);
 			const Json& expectedComponents = GetMember(expected, ComponentsKey);
 			for (const ComponentInfo* info : registry.GetComponents())
@@ -779,6 +839,33 @@ namespace Engine {
 						const Json& prefabValue = GetMember(*original, field->GetName());
 						if (value == prefabValue)
 							continue;
+						if (IsScriptSlotList(registry, *info, *field) && slotType != nullptr && value.is_array() && prefabValue.is_array()
+							&& value.size() == prefabValue.size())
+						{
+							// As many slots as the prefab entity: one override per differing member of a slot, a slot's Fields as
+							// the key patch of a Map of Variants (Docs/Decisions/0031-m20-contract.md decision 19).
+							for (uint32_t slot = 0; slot < static_cast<uint32_t>(value.size()); ++slot)
+							{
+								const Json& actualSlot = value[slot];
+								const Json& expectedSlot = prefabValue[slot];
+								for (const Scope<FieldInfo>& member : slotType->GetFields())
+								{
+									if (!member->IsStored() || !member->GetMeta().Serialized)
+										continue;
+									const Json& memberValue = GetMember(actualSlot, member->GetName());
+									const Json& prefabMember = GetMember(expectedSlot, member->GetName());
+									if (memberValue == prefabMember)
+										continue;
+									Json mapped = IsKeyedVariantMap(*member) ? DiffKeyedVariantMap(prefabMember, memberValue) : memberValue;
+									toPrefab.RemapField(mapped, *member, *slotType, actualSlot);
+									const std::string slotPointer = JsonReader::AppendPointer(
+										JsonReader::AppendPointer(JsonReader::AppendPointer("/Components", name), field->GetName()), slot);
+									ENGINE_TRY(checkMapped(JsonReader::AppendPointer(slotPointer, member->GetName())));
+									record(PrefabOverrideKind::Field, name, PrefabInstantiator::MakeScriptSlotField(slot, member->GetName()), std::move(mapped));
+								}
+							}
+							continue;
+						}
 						Json mapped = IsKeyedVariantMap(*field) ? DiffKeyedVariantMap(prefabValue, value) : value;
 						toPrefab.RemapField(mapped, *field, *info, *present);
 						ENGINE_TRY(checkMapped(JsonReader::AppendPointer(JsonReader::AppendPointer("/Components", name), field->GetName())));
@@ -804,6 +891,12 @@ namespace Engine {
 			if (entry.Kind == PrefabOverrideKind::AddComponent)
 			{
 				remapper.RemapStruct(value, *info);
+			}
+			else if (const std::optional<ScriptSlotTarget> slot = FindScriptSlotTarget(registry, *info, entry.Field))
+			{
+				// A slot member's values resolve against the slot (its Fields against its own Script handle).
+				const Json* slotOwner = owner != nullptr ? FindScriptSlot(*owner, slot->Slot) : nullptr;
+				remapper.RemapField(value, *slot->Member, *slot->SlotType, slotOwner != nullptr ? *slotOwner : NoOwner);
 			}
 			else if (const FieldInfo* field = info->FindField(entry.Field); field != nullptr)
 			{
@@ -915,11 +1008,27 @@ namespace Engine {
 					return entry.Path == path && entry.Kind == kind && entry.Component == component && entry.Field == field;
 				});
 			};
-			const auto keyedMap = [&registry](std::string_view component, std::string_view field)
+			const auto slotTarget = [&registry](std::string_view component, std::string_view field) -> std::optional<ScriptSlotTarget>
 			{
+				const ComponentInfo* info = registry.FindComponent(component);
+				return info != nullptr ? FindScriptSlotTarget(registry, *info, field) : std::nullopt;
+			};
+			const auto keyedMap = [&registry, &slotTarget](std::string_view component, std::string_view field)
+			{
+				if (const std::optional<ScriptSlotTarget> slot = slotTarget(component, field))
+					return IsKeyedVariantMap(*slot->Member);
 				const ComponentInfo* info = registry.FindComponent(component);
 				const FieldInfo* fieldInfo = info != nullptr ? info->FindField(field) : nullptr;
 				return fieldInfo != nullptr && IsKeyedVariantMap(*fieldInfo);
+			};
+			// Writes the Field change `change` into `target`, the value it changes: a key patch merged into a Map of Variants,
+			// any other value replaced.
+			const auto writeChange = [&keyedMap](Json& target, const PrefabOverride& change)
+			{
+				if (keyedMap(change.Component, change.Field) && change.Value.Get().is_object())
+					ApplyKeyPatch(target, change.Value.Get());
+				else
+					target = change.Value.Get();
 			};
 
 			for (const PrefabOverride& change : changes)
@@ -964,14 +1073,41 @@ namespace Engine {
 					case PrefabOverrideKind::Field:
 					{
 						const bool keyed = keyedMap(change.Component, change.Field);
+						const std::optional<ScriptSlotTarget> slot = slotTarget(change.Component, change.Field);
+						const ComponentInfo* changed = registry.FindComponent(change.Component);
+						if (changed != nullptr && changed == registry.FindComponent<ScriptComponent>() && change.Field == ScriptSlotsFieldName)
+						{
+							// A whole Script list replaces the slots the record's slot overrides changed.
+							std::erase_if(record, [&change](const PrefabOverride& entry)
+							{
+								return entry.Path == change.Path && entry.Component == change.Component && entry.Kind == PrefabOverrideKind::Field
+									&& PrefabInstantiator::ParseScriptSlotField(entry.Field).has_value();
+							});
+						}
+						const auto list = slot.has_value() ? find(change.Path, PrefabOverrideKind::Field, change.Component, ScriptSlotsFieldName) : record.end();
 						if (const auto added = find(change.Path, PrefabOverrideKind::AddComponent, change.Component, {}); added != record.end())
 						{
 							Json value = added->Value.Get();
-							if (keyed && change.Value.Get().is_object())
+							if (slot.has_value())
+							{
+								// A slot the added component lacks would be stale once applied, so the change goes.
+								if (Json* addedSlot = FindScriptSlot(value, slot->Slot); addedSlot != nullptr)
+									writeChange((*addedSlot)[slot->Member->GetName()], change);
+							}
+							else if (keyed && change.Value.Get().is_object())
 								ApplyKeyPatch(value[change.Field], change.Value.Get());
 							else
 								value[change.Field] = change.Value.Get();
 							added->Value = VariantValue(std::move(value));
+						}
+						else if (list != record.end())
+						{
+							// A slot of the record's whole list: written into it (a slot it lacks would be stale, so the change goes).
+							Json component = Json::object();
+							component[ScriptSlotsFieldName] = list->Value.Get();
+							if (Json* listed = FindScriptSlot(component, slot->Slot); listed != nullptr)
+								writeChange((*listed)[slot->Member->GetName()], change);
+							list->Value = VariantValue(std::move(component[ScriptSlotsFieldName]));
 						}
 						else if (const auto existing = find(change.Path, change.Kind, change.Component, change.Field); existing != record.end())
 						{
@@ -1286,6 +1422,8 @@ namespace Engine {
 
 			[[nodiscard]] std::string SetField(const ComponentInfo& info, const PrefabOverride& prefabOverride, Json& components) const
 			{
+				if (const std::optional<ScriptSlotTarget> slot = FindScriptSlotTarget(m_Registry, info, prefabOverride.Field))
+					return SetScriptSlotMember(info, *slot, prefabOverride, components);
 				const FieldInfo* field = info.FindField(prefabOverride.Field);
 				if (field == nullptr || !field->IsStored() || !field->GetMeta().Serialized)
 					return std::format("'{}' has no serialized field '{}'", info.GetName(), prefabOverride.Field);
@@ -1305,6 +1443,32 @@ namespace Engine {
 				{
 					candidate[field->GetName()] = std::move(value);
 				}
+				Result<Json> canonical = Canonicalize(info, candidate, m_Options.Schemas);
+				if (!canonical)
+					return canonical.error().ToString();
+				*component = std::move(*canonical);
+				return {};
+			}
+
+			// A per-slot override (Docs/Decisions/0031-m20-contract.md decision 19): the member of the prefab entity's slot at
+			// that index, a Fields key patch applied key by key; stale when the prefab entity has no such slot.
+			[[nodiscard]] std::string SetScriptSlotMember(const ComponentInfo& info, const ScriptSlotTarget& slot, const PrefabOverride& prefabOverride,
+				Json& components) const
+			{
+				const auto component = components.find(info.GetName());
+				if (component == components.end())
+					return std::format("the prefab entity no longer has '{}'", info.GetName());
+
+				Json candidate = *component;
+				Json* target = FindScriptSlot(candidate, slot.Slot);
+				if (target == nullptr)
+					return std::format("the prefab entity's '{}' has no slot {}", info.GetName(), slot.Slot);
+				Json value = prefabOverride.Value.Get();
+				m_ToInstance.RemapField(value, *slot.Member, *slot.SlotType, *target);
+				if (IsKeyedVariantMap(*slot.Member) && value.is_object())
+					ApplyKeyPatch((*target)[slot.Member->GetName()], value);
+				else
+					(*target)[slot.Member->GetName()] = std::move(value);
 				Result<Json> canonical = Canonicalize(info, candidate, m_Options.Schemas);
 				if (!canonical)
 					return canonical.error().ToString();
@@ -2236,17 +2400,33 @@ namespace Engine {
 		return Utils::WriteOverridesToDocument(registry, levelPrefab, rebased, options, report);
 	}
 
-	std::optional<ScriptSlotField> PrefabInstantiator::ParseScriptSlotField(std::string_view /*field*/)
+	std::optional<ScriptSlotField> PrefabInstantiator::ParseScriptSlotField(std::string_view field)
 	{
-		ENGINE_CONTRACT_STUB();
-		// M20 per-slot overrides (Docs/Decisions/0031-m20-contract.md decision 19, stream M-B).
-		return std::nullopt;
+		if (!field.starts_with(ScriptSlotFieldPrefix))
+			return std::nullopt;
+		field.remove_prefix(ScriptSlotFieldPrefix.size());
+		const size_t separator = field.find('/');
+		if (separator == std::string_view::npos)
+			return std::nullopt;
+		const std::string_view index = field.substr(0, separator);
+		const std::string_view member = field.substr(separator + 1);
+		// A decimal index without sign or leading zeros: "0", or a nonzero digit followed by digits.
+		if (index.empty() || (index.size() > 1 && index.front() == '0'))
+			return std::nullopt;
+		uint32_t slot = 0;
+		const auto [end, error] = std::from_chars(index.data(), index.data() + index.size(), slot);
+		if (error != std::errc{} || end != index.data() + index.size())
+			return std::nullopt;
+		if (std::ranges::find(ScriptSlotMemberNames, member) == ScriptSlotMemberNames.end())
+			return std::nullopt;
+		return ScriptSlotField{ slot, std::string(member) };
 	}
 
-	std::string PrefabInstantiator::MakeScriptSlotField(uint32_t /*slot*/, std::string_view /*member*/)
+	std::string PrefabInstantiator::MakeScriptSlotField(uint32_t slot, std::string_view member)
 	{
-		ENGINE_CONTRACT_STUB();
-		return {};
+		ENGINE_CORE_ASSERT(std::ranges::find(ScriptSlotMemberNames, member) != ScriptSlotMemberNames.end(), "'{}' is not a member of a script slot",
+			member);
+		return std::format("{}{}/{}", ScriptSlotFieldPrefix, slot, member);
 	}
 
 }

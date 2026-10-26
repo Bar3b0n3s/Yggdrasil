@@ -246,10 +246,11 @@ namespace Engine {
 
 			CHECK(AudioListenerComponent{}.Primary);
 
-			const ScriptComponent script;
-			CHECK_FALSE(script.Script.IsValid());
-			CHECK(script.Fields.empty());
-			CHECK(script.ExecutionOrder == 0);
+			CHECK(ScriptComponent{}.Scripts.empty());
+			const ScriptSlot slot;
+			CHECK_FALSE(slot.Script.IsValid());
+			CHECK(slot.Fields.empty());
+			CHECK(slot.ExecutionOrder == 0);
 		}
 
 		TEST_CASE("BuiltinComponents: every listed type is registered in list order")
@@ -331,9 +332,9 @@ namespace Engine {
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			const std::vector<std::string> categories = { "Core", "Rendering", "Physics", "Audio", "Scripting" };
-			// The components that migrated since their first version: Prefab's override paths (M20,
-			// Docs/Decisions/0031-m20-contract.md decision 10). Every other component is at version 1.
-			const std::map<std::string, uint32_t> migrated = { { "Prefab", 2 } };
+			// The components that migrated since their first version: Prefab's override paths and Script's list of slots (M20,
+			// Docs/Decisions/0031-m20-contract.md decisions 10 and 17). Every other component is at version 1.
+			const std::map<std::string, uint32_t> migrated = { { "Prefab", 2 }, { "Script", 2 } };
 			for (const ComponentInfo* component : registry->GetComponents())
 			{
 				INFO(component->GetName());

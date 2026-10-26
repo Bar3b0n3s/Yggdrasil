@@ -6,7 +6,7 @@
 namespace Engine {
 
 	// The C++ storage of a FieldType::Variant value (Architecture §5.4): one JSON value kept verbatim, whose schema is
-	// resolved at run time by the field's VariantSchemaResolver (ScriptComponent.Fields values, PrefabOverride.Value) or
+	// resolved at run time by the field's VariantSchemaResolver (ScriptSlot.Fields values, PrefabOverride.Value) or
 	// that is free-form JSON when the field has no resolver (TestSuiteSettings.Parameters). A value that cannot be resolved
 	// or does not match its resolved schema is still kept exactly as read, so data is never dropped.
 	//

@@ -1,0 +1,127 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "MultiSceneSecond",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Prefab": 2,
+		"PrefabLink": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"PointLight": 1,
+		"AudioListener": 1
+	},
+	"Entities": [
+		{
+			"ID": "cf52d5ed7acc4e7c",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 6, 14],
+					"Rotation": [-0.17364818, 0, 0, 0.9848077],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 55,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Skybox",
+					"ClearColor": [0.05, 0.05, 0.06]
+				},
+				"AudioListener": {
+					"Primary": true
+				}
+			}
+		},
+		{
+			"ID": "a1e4fdd0f9876ecd",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [-0.4030582, 0.27253202, 0.12708376, 0.8643611],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 3,
+					"CastShadows": false,
+					"ShadowDistance": 100,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 1,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "54c3dd6b436a30dc",
+			"Name": "Beacon",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1, -2],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Prefab": {
+					"Prefab": "9b628206f6a12764",
+					"Overrides": []
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "dd92fa90a01cff3e",
+					"InstanceRoot": "54c3dd6b436a30dc",
+					"OuterPrefabEntityID": null
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"PointLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 6,
+					"Range": 6,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "221acb236d2627c3",
+			"Name": "Marker",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-2, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		}
+	]
+}

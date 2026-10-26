@@ -1,5 +1,6 @@
 #pragma once
 
+#include "EditorCore/Inspector/PrefabInstanceView.h"
 #include "EditorCore/Inspector/ReflectedEditController.h"
 #include "Engine/Asset/AssetHandle.h"
 #include "Engine/Core/Json/Json.h"
@@ -12,6 +13,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Engine {
@@ -20,6 +22,14 @@ namespace Engine {
 	struct EditorPanelContext;
 
 	// Registry-driven components/categories, multi-edit, add/remove, prefab override highlighting and per-field revert.
+	// One selected entity of a prefab instance in the edit scene shows its instance (Docs/Decisions/0031-m20-contract.md
+	// decisions 7 to 9): Apply with the levels it offers (prefab.apply {instance, level}: the entity's innermost instance,
+	// the outermost level first and selected by default) and the list of the overrides it would write, RemoveEntity rows
+	// included, each with its Revert (prefab.revert {overrides}); a member of a nested instance highlights and reverts the
+	// overrides its outermost instance records for it (PrefabInstantiator::GetOverridePath). The Script component shows
+	// its slots in order (decision 17), each with Up, Down and Remove and its per-slot overrides (decision 19), and Add
+	// script appends an empty slot: one edit.batch of entity.update per change (MakeScriptSlotChange), applied by index
+	// to every selected entity; a slot moves or goes only when every selected entity has it and the slot it swaps with.
 	// Uses ReflectedEditController/DrawReflectedValue including Map/Variant; asset selection shows native properties and
 	// import settings. Begin on activation, commit on release, cancel ESC. Read-only controls remain visible and disabled.
 	// A field released in the same frame another one activates is never dropped: its commit runs at the next safe point,
@@ -61,8 +71,23 @@ namespace Engine {
 			Json Values{};
 			std::string Error{};
 		};
+		// The inspected entity's prefab instance (DescribePrefabInstance), re-read when the entity, the inspected owner, the
+		// editor revision or the outermost prefab's version changes, so an override list is never rebuilt every frame.
+		struct PrefabViewCache
+		{
+			UUID Entity{};
+			std::string Owner{};
+			uint64_t Revision = 0;
+			uint64_t PrefabVersion = 0;
+			std::optional<PrefabInstanceView> View{};
+			std::string Error{};
+		};
 
 		void ReportFailure(const Error& error);
+		void QueueAction(EditorPanelContext& context, std::string_view method, const Json& params);
+		[[nodiscard]] const PrefabViewCache& ReadPrefabView(EditorPanelContext& context, Entity entity);
+		// Apply with its level picker and the override list of `view` (one selected entity of an instance, edit scene).
+		void DrawPrefabInstance(EditorPanelContext& context, const PrefabInstanceView& view);
 		[[nodiscard]] Status ApplyQueuedEdit(EditorPanelContext& context);
 		// Cancels the active gesture and any pending one (selection, owner or project changes, Escape, structural actions).
 		void CancelEdit(EditorPanelContext& context);
@@ -83,6 +108,9 @@ namespace Engine {
 		std::vector<uint64_t> m_Tickets{};
 		std::string m_ComponentSearch{};
 		std::optional<AssetProperties> m_AssetProperties{};
+		std::optional<PrefabViewCache> m_PrefabView{};
+		UUID m_ApplyInstance{}; // the instance the level picker belongs to
+		UUID m_ApplyLevel{};    // the picked level's root; reset to the outermost for another instance
 		bool m_CommitQueued = false;
 		friend class EditorLayer;
 	};

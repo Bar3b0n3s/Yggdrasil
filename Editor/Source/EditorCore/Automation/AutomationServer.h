@@ -100,16 +100,25 @@ namespace Engine {
 	//   - in CheckAvailability refuses every method but those AvailableInLauncher while no project is open (InvalidState
 	//     "no project open; call project.create or project.open", §12.1), before the params are read;
 	//   - creates EditorMethodContexts;
-	//   - in AdmitRequest refuses, in this order: Mutates methods in a read-only editor unless the call is a dry run
-	//     (PermissionDenied "the editor is read-only (--read-only)"); with the DenyMutations policy, Mutates methods and
-	//     the requests that would discard the open scene's unsaved changes (scene.open {discardChanges}, session.shutdown
-	//     {force} without save), unless the call is a dry run (PermissionDenied); a stale ifRevision, compared with
-	//     EditorContext::GetRevision (Conflict, data.currentRevision); then, for a dry run, opens an EditorDryRunScope that
-	//     the context holds;
+	//   - in AdmitRequest refuses, in this order: what a running test run does not admit (EditorContext::
+	//     CheckTestRunAdmission); then, for a request with a scene target (M20, Docs/Decisions/0031-m20-contract.md decision
+	//     16; RequestOptions::Scene), resolves it (EditorMethodContext::ResolveSceneTarget, whose error is the response) and
+	//     opens an EditorSceneTargetScope on it, so every check below, the handler, its commands and "_meta" address that
+	//     scene; Mutates methods in a read-only editor unless the call is a dry run (PermissionDenied "the editor is
+	//     read-only (--read-only)"); with the DenyMutations policy, Mutates methods and the requests that would discard an
+	//     open scene's unsaved changes, unless the call is a dry run (PermissionDenied): scene.close {discardChanges} of a
+	//     dirty addressed scene, scene.open {discardChanges} without keepOpen that replaces a dirty active scene or, with
+	//     reload, reads a dirty open scene again, and session.shutdown {force} without save while any open scene is dirty; a
+	//     stale ifRevision, compared with EditorContext::GetRevision of the addressed scene (Conflict, data.currentRevision);
+	//     then, for a dry run, opens an EditorDryRunScope (a copy of the addressed scene) that the context holds;
 	//   - in EnterInvocation sets the write attribution {method, request id, client name, transcript line} on the
 	//     EditorContext, and in LeaveInvocation clears it;
-	//   - in FinishRequest closes the request's dry run;
-	//   - reports MetaState from EditorContext::GetRevision, the dirty flag and the history;
+	//   - in FinishRequest closes the request's dry run, records the response's MetaState while the request's scene target
+	//     scope is still open, then closes the scope; a request that closed the scene it addressed (scene.close) records it
+	//     after the scope closes, so "_meta" reports the now active scene;
+	//   - reports MetaState from EditorContext::GetRevision, the dirty flag and the history of the addressed scene: the
+	//     record of the last FinishRequest until the next request starts (the Dispatcher's Started event), the live state
+	//     otherwise, so a response refused before admission reports the active scene;
 	//   - writes offloaded results to project://Library/Automation/Out/ (user://Automation/Out/ without a project or when
 	//     read-only), named with its server tag (its process id and start time) and the next number of its one file
 	//     sequence (ResultOffload.h), and removes them, and only them, when it is destroyed.

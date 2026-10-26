@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/Automation/Methods/SceneMethods.h"
 
+#include "Engine/Asset/AssetManager.h"
 #include "Engine/Automation/Methods/AutomationMethodContext.h"
 #include "Engine/Automation/Methods/SharedMethodSupport.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
@@ -22,6 +23,8 @@
 #include <format>
 #include <optional>
 #include <span>
+#include <string>
+#include <string_view>
 #include <utility>
 
 namespace Engine {
@@ -32,7 +35,8 @@ namespace Engine {
 		struct TreeWalk
 		{
 			const Scene* Target = nullptr;
-			uint32_t DepthLimit = 0; // 0: unlimited
+			const AssetManager* Assets = nullptr; // names the scripts of the outline's Script components; may be null
+			uint32_t DepthLimit = 0;              // 0: unlimited
 			std::vector<SceneTreeEntry>* Entries = nullptr;
 			std::string* Text = nullptr;
 		};
@@ -61,9 +65,27 @@ namespace Engine {
 			return std::format("\"{}…\"", text.substr(0, cut));
 		}
 
-		// The short form of one component in the outline (§13.7): "Camera(Ortho 11)", "Script(<8 hex digits>)",
+		// How the outline names the script of one slot of a Script component: its project path without "Assets/"
+		// ("Scripts/Aim.luau"), the first 8 hex digits of its handle when `assets` cannot name it, and "none" for a slot
+		// without a script.
+		static std::string FormatOutlineScript(const Json& slot, const AssetManager* assets)
+		{
+			const auto member = slot.is_object() ? slot.find("Script") : slot.end();
+			if (!slot.is_object() || member == slot.end() || !member->is_string())
+				return "none";
+			const std::string handle = JsonReader(*member).ReadString().value_or(std::string());
+			const Result<UUID> id = JsonReader(*member).ReadUUID();
+			const std::string path = assets != nullptr && id.has_value() && id->IsValid() ? assets->GetReferencePath(*id) : std::string();
+			if (path.empty())
+				return handle.substr(0, 8);
+			constexpr std::string_view AssetsFolder = "Assets/";
+			return path.starts_with(AssetsFolder) ? path.substr(AssetsFolder.size()) : path;
+		}
+
+		// The short form of one component in the outline (§13.7): "Camera(Ortho 11)", "Script(Scripts/Aim.luau,
+		// Scripts/Fire.luau)" (every slot's script in slot order, Docs/Decisions/0031-m20-contract.md decision 17),
 		// "Text(\"Score 0\")", or its name.
-		static std::string FormatOutlineComponent(ConstEntity entity, const ComponentInfo& info)
+		static std::string FormatOutlineComponent(ConstEntity entity, const ComponentInfo& info, const AssetManager* assets)
 		{
 			if (info.GetName() == "Camera")
 			{
@@ -73,17 +95,24 @@ namespace Engine {
 																			  : std::format("Camera(Persp {})", FormatOutlineNumber(camera->VerticalFov));
 				}
 			}
-			if (info.GetName() == "Script" || info.GetName() == "Text")
+			if (info.GetName() == "Script")
+			{
+				const Result<Json> json = ComponentAccess::GetComponentJson(entity, info.GetName());
+				const auto slots = json.has_value() ? json->find("Scripts") : Json::const_iterator();
+				if (json.has_value() && slots != json->end() && slots->is_array() && !slots->empty())
+				{
+					std::string scripts;
+					for (const Json& slot : *slots)
+						scripts += (scripts.empty() ? "" : ", ") + FormatOutlineScript(slot, assets);
+					return std::format("Script({})", scripts);
+				}
+			}
+			if (info.GetName() == "Text")
 			{
 				const Result<Json> json = ComponentAccess::GetComponentJson(entity, info.GetName());
 				const auto member = json.has_value() ? json->find(info.GetName()) : Json::const_iterator();
 				if (json.has_value() && member != json->end() && member->is_string())
-				{
-					const std::string text = JsonReader(*member).ReadString().value_or(std::string());
-					if (info.GetName() == "Text")
-						return std::format("Text({})", FormatOutlineText(text));
-					return std::format("Script({})", text.substr(0, 8));
-				}
+					return std::format("Text({})", FormatOutlineText(JsonReader(*member).ReadString().value_or(std::string())));
 			}
 			return info.GetName();
 		}
@@ -158,7 +187,7 @@ namespace Engine {
 					const std::string branch = current.Top ? std::string() : current.Prefix + (current.Last ? "└─ " : "├─ ");
 					std::string components;
 					for (const ComponentInfo* info : GetEntityComponents(entity))
-						components += (components.empty() ? "" : " ") + FormatOutlineComponent(entity, *info);
+						components += (components.empty() ? "" : " ") + FormatOutlineComponent(entity, *info, walk.Assets);
 					*walk.Text += std::format("{}{}  {}  {}  {}\n", branch, entity.GetName(), entity.GetUUID().ToString().substr(0, 8), components,
 						FormatOutlineTranslation(entity));
 					if (cut)
@@ -254,6 +283,7 @@ namespace Engine {
 			result.Scene = context.MakeSceneSummary(*scene);
 			TreeWalk walk;
 			walk.Target = scene;
+			walk.Assets = context.GetAssets();
 			walk.DepthLimit = params.Depth;
 			if (params.Format == SceneTreeFormat::JsonList)
 			{
@@ -459,6 +489,7 @@ namespace Engine {
 				.Description = "Shows the scene hierarchy: a compact text outline (names, short ids, components, translations) or a flat JSON "
 							   "list, optionally below one entity and to a depth.",
 				.ExposeAsTool = true,
+				.SupportsSceneTarget = true,
 				.AvailableInRuntime = true,
 				.AllowedInBatch = true,
 				.Examples = { { .Description = "Outline the top two levels.", .Params = treeExample } },
@@ -478,6 +509,7 @@ namespace Engine {
 							   "the JSON of selected components.",
 				.RequiredParams = { "where" },
 				.ExposeAsTool = true,
+				.SupportsSceneTarget = true,
 				.AvailableInRuntime = true,
 				.AllowedInBatch = true,
 				.Examples = { { .Description = "Find the cells with their transforms.", .Params = queryExample } },
@@ -488,6 +520,7 @@ namespace Engine {
 			{
 				.Name = "scene.get",
 				.Description = "Returns the scene's whole canonical document, as its file holds it (written to a file when large).",
+				.SupportsSceneTarget = true,
 				.AvailableInRuntime = true,
 				.AllowedInBatch = true,
 				.Examples = { { .Description = "Read the open scene.", .Params = Json::object() } },

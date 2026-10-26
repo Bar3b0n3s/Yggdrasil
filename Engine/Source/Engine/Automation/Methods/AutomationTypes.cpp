@@ -41,7 +41,9 @@ namespace Engine {
 			.Entry(EngineEventType::AssetImportFailed, "AssetImportFailed", "Importing an asset failed.")
 			.Entry(EngineEventType::ScriptErrorRaised, "ScriptErrorRaised", "A script raised an error.")
 			.Entry(EngineEventType::DiagnosticsChanged, "DiagnosticsChanged", "The project's diagnostics changed.")
-			.Entry(EngineEventType::AutomationClientDisconnected, "AutomationClientDisconnected", "An automation client disconnected.");
+			.Entry(EngineEventType::AutomationClientDisconnected, "AutomationClientDisconnected", "An automation client disconnected.")
+			.Entry(EngineEventType::SceneActivated, "SceneActivated", "The editor's active scene changed.")
+			.Entry(EngineEventType::SceneClosed, "SceneClosed", "The editor closed an open scene.");
 
 		registry.Struct<EntitySummary>("EntitySummary", "An entity's canonical id with its readable name and path.")
 			.Field("id", &EntitySummary::Id, "The entity's id: 16 lowercase hex digits.")

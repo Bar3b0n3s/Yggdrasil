@@ -6,6 +6,7 @@
 #include "Editor/Ui/EditorStyle.h"
 #include "EditorCore/EditorActions.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Inspector/ScriptSlotList.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Scripting/EditorScriptService.h"
 #include "EditorCore/Thumbnails/ThumbnailCache.h"
@@ -24,14 +25,18 @@
 #include "Engine/Scene/Components/PrefabLinkComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/PrefabInstantiator.h"
 #include "Engine/Session/PlaySession.h"
 
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>
 
 #include <algorithm>
+#include <format>
+#include <string_view>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 namespace Engine {
 
@@ -236,6 +241,103 @@ namespace Engine {
 		if (m_Error != message)
 			ENGINE_ERROR("InspectorPanel: {}", error.ToString());
 		m_Error = message;
+	}
+
+	void InspectorPanel::QueueAction(EditorPanelContext& context, std::string_view method, const Json& params)
+	{
+		auto submitted = context.Actions.Submit(method, params);
+		if (submitted)
+			m_Tickets.push_back(*submitted);
+		else
+			ReportFailure(submitted.error());
+	}
+
+	const InspectorPanel::PrefabViewCache& InspectorPanel::ReadPrefabView(EditorPanelContext& context, Entity entity)
+	{
+		EditorContext& editor = context.Editor;
+		const uint64_t revision = editor.GetRevision();
+		if (m_PrefabView && m_PrefabView->Entity == entity.GetUUID() && m_PrefabView->Owner == m_OwnerIdentity && m_PrefabView->Revision == revision
+			&& (!m_PrefabView->View || editor.GetAssets().GetVersion(m_PrefabView->View->OutermostPrefab) == m_PrefabView->PrefabVersion))
+			return *m_PrefabView;
+		PrefabViewCache cache{ .Entity = entity.GetUUID(), .Owner = m_OwnerIdentity, .Revision = revision };
+		auto view = DescribePrefabInstance(editor, entity);
+		if (view)
+		{
+			cache.PrefabVersion = editor.GetAssets().GetVersion(view->OutermostPrefab);
+			cache.View = std::move(*view);
+		}
+		else
+			cache.Error = view.error().GetMessageText();
+		m_PrefabView = std::move(cache);
+		return *m_PrefabView;
+	}
+
+	void InspectorPanel::DrawPrefabInstance(EditorPanelContext& context, const PrefabInstanceView& view)
+	{
+		EditorContext& editor = context.Editor;
+		ImGui::PushID("PrefabInstance");
+		const auto picked = [this](const PrefabLevelView& level)
+		{
+			return level.Root == m_ApplyLevel;
+		};
+		// The outermost level is the default, and picks reset whenever another instance is inspected (decision 9).
+		if (m_ApplyInstance != view.Instance || std::none_of(view.Levels.begin(), view.Levels.end(), picked))
+		{
+			m_ApplyInstance = view.Instance;
+			m_ApplyLevel = view.Levels.front().Root;
+		}
+		const auto level = std::find_if(view.Levels.begin(), view.Levels.end(), picked);
+		ImGui::BeginDisabled(editor.IsReadOnly() || view.Overrides.empty());
+		if (ImGui::Button("Apply"))
+		{
+			CancelEdit(context);
+			QueueAction(context, "prefab.apply", Json{ { "instance", view.Instance.ToString() }, { "level", m_ApplyLevel.ToString() } });
+		}
+		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+			ImGui::SetTooltip("Write this instance's overrides into the picked prefab and update every instance of it");
+		ImGui::EndDisabled();
+		ImGui::SameLine();
+		if (view.Levels.size() > 1)
+		{
+			ImGui::SetNextItemWidth(-1.0f);
+			if (ImGui::BeginCombo("##ApplyLevel", level->Label.c_str()))
+			{
+				for (size_t index = 0; index < view.Levels.size(); ++index)
+				{
+					ImGui::PushID(static_cast<int>(index));
+					if (ImGui::Selectable(view.Levels[index].Label.c_str(), view.Levels[index].Root == m_ApplyLevel))
+						m_ApplyLevel = view.Levels[index].Root;
+					ImGui::PopID();
+				}
+				ImGui::EndCombo();
+			}
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("The prefab Apply writes to: the outermost instance's, or a prefab nested in it");
+		}
+		else
+			ImGui::TextUnformatted(level->Label.c_str());
+		if (view.Overrides.empty())
+			ImGui::TextDisabled("No overrides");
+		else if (ImGui::TreeNodeEx("Overrides", ImGuiTreeNodeFlags_DefaultOpen, "Overrides (%zu)", view.Overrides.size()))
+		{
+			for (size_t index = 0; index < view.Overrides.size(); ++index)
+			{
+				const PrefabOverrideRow& row = view.Overrides[index];
+				ImGui::PushID(static_cast<int>(index));
+				ImGui::BeginDisabled(editor.IsReadOnly());
+				if (ImGui::SmallButton("Revert"))
+				{
+					CancelEdit(context);
+					QueueAction(context, "prefab.revert", Json{ { "instance", view.Outermost.ToString() }, { "overrides", Json::array({ row.RevertKey }) } });
+				}
+				ImGui::EndDisabled();
+				ImGui::SameLine();
+				ImGui::TextWrapped("%s: %s", row.Target.c_str(), row.Description.c_str());
+				ImGui::PopID();
+			}
+			ImGui::TreePop();
+		}
+		ImGui::PopID();
 	}
 
 	Status InspectorPanel::CommitActiveEdit(EditorPanelContext& context)
@@ -448,11 +550,7 @@ namespace Engine {
 		bool pendingFieldDrawn = false;
 		auto queue = [this, &context](std::string_view method, const Json& params)
 		{
-			auto submitted = context.Actions.Submit(method, params);
-			if (submitted)
-				m_Tickets.push_back(*submitted);
-			else
-				ReportFailure(submitted.error());
+			QueueAction(context, method, params);
 		};
 		auto drawField = [this, &context, &editor, &activeFieldDrawn, &pendingFieldDrawn, escape](const FieldInfo& field, Value value,
 							 InspectorEditTarget target, const ResolveContext& resolve, bool mixed, uint32_t mixedComponents,
@@ -627,6 +725,15 @@ namespace Engine {
 		// Runtime content carries the play accent, so transient edits never look like edit-scene ones (§5.6).
 		if (runtime)
 			Utils::BeginEditorPlayTint();
+		// One entity of a prefab instance in the edit scene: its instance, its levels and the overrides recorded for it.
+		const PrefabInstanceView* prefabView = nullptr;
+		const PrefabViewCache* prefabCache = nullptr;
+		if (selection.size() == 1 && sceneTarget == SceneTarget::Edit && first.HasComponent<PrefabLinkComponent>())
+		{
+			prefabCache = &ReadPrefabView(context, first);
+			if (prefabCache->View)
+				prefabView = &*prefabCache->View;
+		}
 		ImGui::BeginDisabled(editor.IsReadOnly());
 		if (selection.size() == 1)
 		{
@@ -646,6 +753,10 @@ namespace Engine {
 				ImGui::SetTooltip("Object name - Enter to rename");
 			ImGui::PopID();
 			ImGui::TextDisabled("%s", first.HasComponent<PrefabLinkComponent>() ? "Prefab instance" : "Scene object");
+			if (prefabView != nullptr)
+				DrawPrefabInstance(context, *prefabView);
+			else if (prefabCache != nullptr)
+				ImGui::TextWrapped("Prefab instance: %s", prefabCache->Error.c_str());
 		}
 		else
 		{
@@ -654,6 +765,43 @@ namespace Engine {
 		}
 		ImGui::EndDisabled();
 		ImGui::Spacing();
+		// The Field override of `prefabField` that the outermost instance records for the inspected entity (matched by its
+		// override path), marked with its Revert under the ImGui id `id`; nothing outside an instance or without one.
+		const auto drawPrefabOverride = [this, &context, &editor, &queue, prefabView, scene](std::string_view componentName, std::string_view prefabField,
+											std::string_view id)
+		{
+			const ConstEntity root = prefabView == nullptr ? ConstEntity() : std::as_const(*scene).FindEntityByID(prefabView->Outermost);
+			if (!root.IsValid() || !root.HasComponent<PrefabInstanceComponent>())
+				return;
+			const auto& overrides = root.GetComponent<PrefabInstanceComponent>().Overrides;
+			const auto overridden = std::find_if(overrides.begin(), overrides.end(), [prefabView, componentName, prefabField](const PrefabOverride& item)
+			{
+				return item.Kind == PrefabOverrideKind::Field && item.Path == prefabView->EntityPath && item.Component == componentName && item.Field == prefabField;
+			});
+			if (overridden == overrides.end())
+				return;
+			ImGui::PushID(id.data(), id.data() + id.size());
+			ImGui::TextColored(ImVec4(0.4f, 0.7f, 1.0f, 1.0f), "Prefab override");
+			ImGui::SameLine();
+			ImGui::BeginDisabled(editor.IsReadOnly());
+			if (ImGui::SmallButton("Revert"))
+			{
+				CancelEdit(context);
+				queue("prefab.revert", Json{ { "instance", prefabView->Outermost.ToString() }, { "overrides", Json::array({ MakePrefabOverrideKey(editor, *overridden) }) } });
+			}
+			ImGui::EndDisabled();
+			ImGui::PopID();
+		};
+		// A change of the Script slot lists of the selection, one edit.batch whatever the selection's size (ScriptSlotList).
+		const auto changeScriptSlots = [this, &context, &queue, scene, &selection, sceneTarget](ScriptSlotChange change, size_t slot)
+		{
+			CancelEdit(context);
+			const Result<Json> batch = MakeScriptSlotChange(*scene, selection, change, slot, sceneTarget);
+			if (batch)
+				queue("edit.batch", *batch);
+			else
+				ReportFailure(batch.error());
+		};
 		for (const ComponentInfo* component : editor.GetTypeRegistry().GetComponents())
 		{
 			const ComponentHostOps* ops = component->GetHostOps();
@@ -729,80 +877,179 @@ namespace Engine {
 					const FieldInfo* field = fields[fieldIndex];
 					if (field->GetMeta().Hidden)
 						continue;
-					if (component->GetName() == "Script" && field->GetName() == "Fields")
+					if (component->GetName() == "Script" && field->GetName() == "Scripts")
 					{
-						const auto& attached = first.GetComponent<ScriptComponent>();
-						EditorScriptService* service = editor.GetScriptService();
-						const auto script = service == nullptr ? Result<AssetRef<ScriptData>>(MakeError(ErrorCode::InvalidState, "script schemas are unavailable"))
-															   : service->GetFields(attached.Script.GetHandle());
-						if (!script)
-						{
-							ImGui::TextWrapped("Script fields: %s", script.error().GetMessageText().c_str());
-							continue;
-						}
-						if ((*script)->Kind != ScriptKind::Behaviour)
-						{
-							ImGui::TextWrapped("Assign a Behaviour script to edit its exposed properties.");
-							continue;
-						}
-						auto schemas = ScriptFieldSchemaSource::Create({ { attached.Script.GetHandle(), *script } });
-						if (!schemas)
-						{
-							ImGui::TextWrapped("Script fields: %s", schemas.error().GetMessageText().c_str());
-							continue;
-						}
-						bool sameScript = true;
+						// Each slot of the list (Docs/Decisions/0031-m20-contract.md decision 17): a header with its order and
+						// remove actions, its script and order as fields, then its script's declared fields, each at
+						// "Scripts[<slot>]...", and the per-slot prefab overrides (decision 19) beside what they override.
+						const StructInfo* slotType = editor.GetTypeRegistry().FindStruct<ScriptSlot>();
+						const FieldInfo* fieldsField = slotType != nullptr ? slotType->FindField("Fields") : nullptr;
+						const std::vector<ScriptSlot>& attachedSlots = first.GetComponent<ScriptComponent>().Scripts;
+						// A slot change applies by index to every selected entity, so a slot moves or goes only when every
+						// selected entity has it and the slot it swaps with.
+						size_t sharedSlots = attachedSlots.size();
 						for (const UUID id : selection)
-							sameScript &= scene->FindEntityByID(id).GetComponent<ScriptComponent>().Script == attached.Script;
-						if (!sameScript)
+							sharedSlots = std::min(sharedSlots, scene->FindEntityByID(id).GetComponent<ScriptComponent>().Scripts.size());
+						for (size_t slotIndex = 0; fieldsField != nullptr && slotIndex < attachedSlots.size(); ++slotIndex)
 						{
-							ImGui::TextWrapped("Select objects with the same Behaviour to edit script fields together.");
-							continue;
-						}
-						ResolveContext scriptResolve = resolve;
-						scriptResolve.Schemas = schemas->get();
-						for (const auto& declaration : (*script)->Fields)
-						{
-							if (declaration.Meta.Hidden)
-								continue;
-							const auto descriptor = (*schemas)->FindField(attached.Script.GetHandle(), declaration.Name);
-							if (!descriptor)
-								continue;
-							bool invalid = false;
-							const auto effective = [&declaration, &descriptor](const ScriptComponent& instance, bool& mismatch)
+							const ScriptSlot& attached = attachedSlots[slotIndex];
+							const std::string slotPath = std::format("Scripts[{}]", slotIndex);
+							ImGui::PushID("ScriptSlot");
+							ImGui::PushID(static_cast<int>(slotIndex));
+							ImGui::Separator();
+							ImGui::AlignTextToFramePadding();
+							ImGui::TextDisabled("Slot %zu", slotIndex);
+							ImGui::BeginDisabled(editor.IsReadOnly());
+							ImGui::SameLine();
+							ImGui::BeginDisabled(slotIndex == 0 || slotIndex >= sharedSlots);
+							if (ImGui::ArrowButton("Up", ImGuiDir_Up))
+								changeScriptSlots(ScriptSlotChange::MoveUp, slotIndex);
+							if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+								ImGui::SetTooltip("Move this script before the one above (callbacks of equal ExecutionOrder run in slot order)");
+							ImGui::EndDisabled();
+							ImGui::SameLine();
+							ImGui::BeginDisabled(slotIndex + 1 >= sharedSlots);
+							if (ImGui::ArrowButton("Down", ImGuiDir_Down))
+								changeScriptSlots(ScriptSlotChange::MoveDown, slotIndex);
+							if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+								ImGui::SetTooltip("Move this script after the one below");
+							ImGui::EndDisabled();
+							ImGui::SameLine();
+							ImGui::BeginDisabled(slotIndex >= sharedSlots);
+							if (ImGui::SmallButton("Remove"))
+								changeScriptSlots(ScriptSlotChange::Remove, slotIndex);
+							if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+								ImGui::SetTooltip("Remove this script from the object");
+							ImGui::EndDisabled();
+							ImGui::EndDisabled();
+							ImGui::PopID();
+							ImGui::PopID();
+							// The selected entity's slot at this index, or null when its list is shorter.
+							const auto selectedSlot = [&scene, slotIndex](UUID id) -> const ScriptSlot*
 							{
-								const auto found = instance.Fields.find(declaration.Name);
-								if (found == instance.Fields.end())
-									return declaration.DefaultValue;
-								ValidationContext validation;
-								(*descriptor)->ValidateJson(JsonReader(found->second.Get()), {}, validation);
-								mismatch |= validation.HasErrors();
-								return validation.HasErrors() ? declaration.DefaultValue : found->second;
+								const auto& slots = scene->FindEntityByID(id).GetComponent<ScriptComponent>().Scripts;
+								return slotIndex < slots.size() ? &slots[slotIndex] : nullptr;
 							};
-							const VariantValue initial = effective(attached, invalid);
-							bool mixed = false;
-							uint32_t mixedComponents = 0;
-							for (const UUID id : selection)
+							for (const std::string_view memberName : { std::string_view("Script"), std::string_view("ExecutionOrder") })
 							{
-								const VariantValue other = effective(scene->FindEntityByID(id).GetComponent<ScriptComponent>(), invalid);
-								if (other.Get() != initial.Get())
+								const FieldInfo* member = slotType->FindField(memberName);
+								if (member == nullptr)
+									continue;
+								const auto memberValue = [&memberName](const ScriptSlot& slot)
 								{
-									mixed = true;
-									mixedComponents |= Utils::InspectorComponentDifferences(Value::FromVariant(initial), Value::FromVariant(other));
+									return memberName == "Script" ? Value::FromAssetRef(slot.Script.GetHandle()) : Value::FromInt32(slot.ExecutionOrder);
+								};
+								const Value value = memberValue(attached);
+								bool mixed = false;
+								uint32_t mixedComponents = 0;
+								for (const UUID id : selection)
+								{
+									const ScriptSlot* other = selectedSlot(id);
+									if (other == nullptr || memberValue(*other) != value)
+									{
+										mixed = true;
+										mixedComponents |= other != nullptr ? Utils::InspectorComponentDifferences(value, memberValue(*other)) : Utils::AllInspectorComponents;
+									}
 								}
+								drawField(*member, value, { .Entities = selection, .Component = "Script", .FieldPath = slotPath + "." + std::string(memberName), .Target = sceneTarget },
+									resolve, mixed, mixedComponents);
+								const std::string slotField = PrefabInstantiator::MakeScriptSlotField(static_cast<uint32_t>(slotIndex), memberName);
+								drawPrefabOverride("Script", slotField, slotField);
 							}
-							if (invalid)
-								ImGui::TextWrapped("%s uses its default until its saved value is corrected.", Utils::EditorLabel(declaration.Name).c_str());
-							FieldInfo variant({ .Name = declaration.Name, .Description = (*descriptor)->GetDescription(), .Type = field->GetType().GetElement(), .Meta = declaration.Meta, .Accessor = {}, .Resolver = field->GetResolver() });
-							scriptResolve.Key = declaration.Name;
-							drawField(variant, Value::FromVariant(initial), { .Entities = selection, .Component = "Script", .FieldPath = "Fields[" + declaration.Name + "]", .Target = sceneTarget },
-								scriptResolve, mixed, mixedComponents, &declaration);
+
+							// The script's declared fields; a script that cannot show them says why.
+							const auto drawSlotFields = [&]()
+							{
+								EditorScriptService* service = editor.GetScriptService();
+								const auto script = service == nullptr ? Result<AssetRef<ScriptData>>(MakeError(ErrorCode::InvalidState, "script schemas are unavailable"))
+																	   : service->GetFields(attached.Script.GetHandle());
+								if (!script)
+								{
+									ImGui::TextWrapped("Script fields: %s", script.error().GetMessageText().c_str());
+									return;
+								}
+								if ((*script)->Kind != ScriptKind::Behaviour)
+								{
+									ImGui::TextWrapped("Assign a Behaviour script to edit its exposed properties.");
+									return;
+								}
+								auto schemas = ScriptFieldSchemaSource::Create({ { attached.Script.GetHandle(), *script } });
+								if (!schemas)
+								{
+									ImGui::TextWrapped("Script fields: %s", schemas.error().GetMessageText().c_str());
+									return;
+								}
+								bool sameScript = true;
+								for (const UUID id : selection)
+								{
+									const ScriptSlot* other = selectedSlot(id);
+									sameScript &= other != nullptr && other->Script == attached.Script;
+								}
+								if (!sameScript)
+								{
+									ImGui::TextWrapped("Select objects with the same Behaviour to edit script fields together.");
+									return;
+								}
+								ResolveContext scriptResolve = resolve;
+								scriptResolve.Owner = &attached;
+								scriptResolve.OwnerType = slotType;
+								scriptResolve.Schemas = schemas->get();
+								for (const auto& declaration : (*script)->Fields)
+								{
+									if (declaration.Meta.Hidden)
+										continue;
+									const auto descriptor = (*schemas)->FindField(attached.Script.GetHandle(), declaration.Name);
+									if (!descriptor)
+										continue;
+									bool invalid = false;
+									const auto effective = [&declaration, &descriptor](const ScriptSlot& instance, bool& mismatch)
+									{
+										const auto found = instance.Fields.find(declaration.Name);
+										if (found == instance.Fields.end())
+											return declaration.DefaultValue;
+										ValidationContext validation;
+										(*descriptor)->ValidateJson(JsonReader(found->second.Get()), {}, validation);
+										mismatch |= validation.HasErrors();
+										return validation.HasErrors() ? declaration.DefaultValue : found->second;
+									};
+									const VariantValue initial = effective(attached, invalid);
+									bool mixed = false;
+									uint32_t mixedComponents = 0;
+									for (const UUID id : selection)
+									{
+										const VariantValue other = effective(*selectedSlot(id), invalid);
+										if (other.Get() != initial.Get())
+										{
+											mixed = true;
+											mixedComponents |= Utils::InspectorComponentDifferences(Value::FromVariant(initial), Value::FromVariant(other));
+										}
+									}
+									if (invalid)
+										ImGui::TextWrapped("%s uses its default until its saved value is corrected.", Utils::EditorLabel(declaration.Name).c_str());
+									FieldInfo variant({ .Name = declaration.Name, .Description = (*descriptor)->GetDescription(), .Type = fieldsField->GetType().GetElement(), .Meta = declaration.Meta, .Accessor = {}, .Resolver = fieldsField->GetResolver() });
+									scriptResolve.Key = declaration.Name;
+									drawField(variant, Value::FromVariant(initial), { .Entities = selection, .Component = "Script", .FieldPath = slotPath + ".Fields[" + declaration.Name + "]", .Target = sceneTarget },
+										scriptResolve, mixed, mixedComponents, &declaration);
+								}
+								for (const auto& [name, value] : attached.Fields)
+								{
+									if (!(*schemas)->FindField(attached.Script.GetHandle(), name))
+										ImGui::TextWrapped("Saved field not in this script: %s = %s (preserved)", name.c_str(), value.Get().dump().c_str());
+								}
+							};
+							drawSlotFields();
+							const std::string fieldsOverride = PrefabInstantiator::MakeScriptSlotField(static_cast<uint32_t>(slotIndex), "Fields");
+							drawPrefabOverride("Script", fieldsOverride, fieldsOverride);
 						}
-						for (const auto& [name, value] : attached.Fields)
-						{
-							if (!(*schemas)->FindField(attached.Script.GetHandle(), name))
-								ImGui::TextWrapped("Saved field not in this script: %s = %s (preserved)", name.c_str(), value.Get().dump().c_str());
-						}
+						ImGui::PushID("ScriptSlot");
+						ImGui::Separator();
+						ImGui::BeginDisabled(editor.IsReadOnly());
+						if (ImGui::Button("Add script", ImVec2(-1.0f, 0.0f)))
+							changeScriptSlots(ScriptSlotChange::Append, 0);
+						if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+							ImGui::SetTooltip("Add an empty slot after the last one, then pick its script");
+						ImGui::EndDisabled();
+						ImGui::PopID();
 					}
 					else
 					{
@@ -822,34 +1069,9 @@ namespace Engine {
 						}
 						drawField(*field, std::move(*value), { .Entities = selection, .Component = component->GetName(), .FieldPath = field->GetName(), .Target = sceneTarget }, resolve, mixed, mixedComponents);
 					}
-					if (selection.size() == 1 && first.HasComponent<PrefabLinkComponent>() && sceneTarget == SceneTarget::Edit)
-					{
-						const auto link = first.GetComponent<PrefabLinkComponent>();
-						const ConstEntity root = scene->FindEntityByID(link.InstanceRoot);
-						if (root.IsValid() && root.HasComponent<PrefabInstanceComponent>())
-						{
-							const auto& overrides = root.GetComponent<PrefabInstanceComponent>().Overrides;
-							const std::string prefabField = transform && field->GetName() == "EulerAngles" ? "Rotation" : field->GetName();
-							const bool overridden = std::any_of(overrides.begin(), overrides.end(), [&link, component, &prefabField](const PrefabOverride& item)
-							{
-								return item.Path == std::vector<UUID>{ link.PrefabEntityID } && item.Component == component->GetName() && item.Field == prefabField;
-							});
-							if (overridden)
-							{
-								ImGui::PushID(field->GetName().c_str());
-								ImGui::TextColored(ImVec4(0.4f, 0.7f, 1.0f, 1.0f), "Prefab override");
-								ImGui::SameLine();
-								ImGui::BeginDisabled(editor.IsReadOnly());
-								if (ImGui::SmallButton("Revert"))
-								{
-									CancelEdit(context);
-									queue("prefab.revert", Json{ { "instance", link.InstanceRoot.ToString() }, { "overrides", Json::array({ Json{ { "path", Json::array({ link.PrefabEntityID.ToString() }) }, { "kind", "Field" }, { "component", component->GetName() }, { "field", prefabField } } }) } });
-								}
-								ImGui::EndDisabled();
-								ImGui::PopID();
-							}
-						}
-					}
+					// The outermost instance records the overrides of every entity in it, nested instances' included, by path
+					// (a Script list that changed length is one override of Scripts).
+					drawPrefabOverride(component->GetName(), transform && field->GetName() == "EulerAngles" ? "Rotation" : field->GetName(), field->GetName());
 				}
 			}
 			ImGui::PopID();

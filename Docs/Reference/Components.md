@@ -29,7 +29,7 @@ Every component of the type registry, in canonical component order: the order of
 | `CharacterController` | Physics | Serializable, ScriptVisible, EditorVisible, Removable | Moves the entity as a walking character that climbs steps and slopes and collides with the world. |
 | `AudioSource` | Audio | Serializable, ScriptVisible, EditorVisible, Removable | Plays an audio clip, optionally positioned at the entity. |
 | `AudioListener` | Audio | Serializable, ScriptVisible, EditorVisible, Removable | Hears the scene from the entity's position and orientation. |
-| `Script` | Scripting | Serializable, ScriptVisible, EditorVisible, Removable, NoShortcut | Attaches a Behaviour script to the entity (one per entity). |
+| `Script` | Scripting | Serializable, ScriptVisible, EditorVisible, Removable, NoShortcut | Attaches Behaviour scripts to the entity, an ordered list of slots. |
 
 ## ID
 
@@ -701,27 +701,23 @@ Script members of `AudioListener`:
 
 ## Script
 
-Attaches a Behaviour script to the entity (one per entity).
+Attaches Behaviour scripts to the entity, an ordered list of slots.
 
 - Category: Scripting
-- Version: 1
+- Version: 2
 - Flags: Serializable, ScriptVisible, EditorVisible, Removable, NoShortcut
 - Requires: none
 - Excludes: none
 
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
-| `Script` | `AssetRef(Script)` | `null` |  |  |  | The Behaviour script to run. |
-| `Fields` | `Map<Variant>` | `{}` |  |  |  | Overrides of the script's declared fields by name, each checked against the field's declared type; an unknown or mismatching override is kept and reported, and the field uses its declared default. |
-| `ExecutionOrder` | `Int32` | `0` |  |  |  | The script's place in callback order: lower values run first, ties in canonical entity order. |
+| `Scripts` | `Array<ScriptSlot>` | `[]` |  |  |  | The behaviours of the entity, in slot order; each slot is its own instance. |
 
 Script members of `Script`:
 
 | Member | Kind | Signature | Access | Modes | Description |
 |---|---|---|---|---|---|
-| `ExecutionOrder` | proxy field | `number` | read/write | All | The script's place in callback order: lower values run first, ties in canonical entity order. |
-| `Fields` | proxy field | `{[string]: any}` | read/write | All | Overrides of the script's declared fields by name, each checked against the field's declared type; an unknown or mismatching override is kept and reported, and the field uses its declared default. A value a script writes holds at most 4096 bytes of text. |
-| `Script` | proxy field | `AssetRef?` | read/write | All | The Behaviour script to run. |
+| `Scripts` | proxy field | `{{Script: AssetRef?, Fields: {[string]: any}, ExecutionOrder: number}}` | read/write | All | The behaviours of the entity, in slot order; each slot is its own instance. A value a script writes holds at most 4096 bytes of text. |
 
 ## Structs
 
@@ -738,6 +734,16 @@ One recorded difference between an outermost prefab instance and its prefab.
 | `Component` | `String` | `""` |  |  |  | The registry name of the component for Field, AddComponent and RemoveComponent; empty for EntityKey and RemoveEntity. |
 | `Field` | `String` | `""` |  |  |  | The field name for Field; Name, Active or Tags for EntityKey; empty otherwise. |
 | `Value` | `Variant` | `null` |  |  |  | The overriding value, checked against the schema of its target: the field, the whole component, or the entity key. |
+
+### ScriptSlot
+
+One behaviour of a Script component.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Script` | `AssetRef(Script)` | `null` |  |  |  | The Behaviour script. |
+| `Fields` | `Map<Variant>` | `{}` |  |  |  | Overrides of the script's declared fields, by name. |
+| `ExecutionOrder` | `Int32` | `0` |  |  |  | Callbacks run in (ExecutionOrder, canonical entity order, slot) order. |
 
 ## Enums
 

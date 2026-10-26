@@ -175,7 +175,7 @@ return Script.Define("StartupError", {
 })
 '''})
         client.call("entity.create", {"name": "Fault", "components": {
-            "Script": {"Script": "Assets/Scripts/StartupError.luau"}}})
+            "Script": {"Scripts": [{"Script": "Assets/Scripts/StartupError.luau"}]}}})
         parameters = {"level": 7, "options": {"enabled": True}}
         for pause in (False, True):
             with self.subTest(pause_on_error=pause):

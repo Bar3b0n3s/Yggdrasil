@@ -469,6 +469,61 @@ namespace Engine {
 			CHECK(unresolved.error().GetCode() == ErrorCode::NotFound);
 		}
 
+		// Docs/Decisions/0031-m20-contract.md decision 19: a Field override of the Script component names one slot's member,
+		// "Scripts/<slot>/<member>", whose value is that member's (Fields free-form, as every component-resolved value is);
+		// "Scripts" is the whole list; any other Field of Script names no serialized field.
+		TEST_CASE("CoreRegistration: a script slot override's value resolves to the slot member's schema")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			const StructInfo* overrideType = registry->FindStruct<PrefabOverride>();
+			REQUIRE(overrideType != nullptr);
+			const FieldInfo* value = overrideType->FindField("Value");
+			REQUIRE(value != nullptr);
+			const StructInfo* slot = registry->FindStruct<ScriptSlot>();
+			REQUIRE(slot != nullptr);
+
+			PrefabOverride slotOverride;
+			slotOverride.Kind = PrefabOverrideKind::Field;
+			slotOverride.Component = "Script";
+			ResolveContext resolve;
+			resolve.Registry = registry.get();
+			resolve.Owner = &slotOverride;
+			resolve.OwnerType = overrideType;
+
+			slotOverride.Field = "Scripts/1/Script";
+			const Result<const FieldInfo*> script = value->ResolveVariant(resolve);
+			REQUIRE(script.has_value());
+			CHECK(*script == slot->FindField("Script"));
+			CHECK((*script)->GetKind() == FieldType::AssetRef);
+
+			slotOverride.Field = "Scripts/0/ExecutionOrder";
+			const Result<const FieldInfo*> order = value->ResolveVariant(resolve);
+			REQUIRE(order.has_value());
+			CHECK((*order)->GetKind() == FieldType::Int32);
+			ValidationContext notAnOrder;
+			(*order)->ValidateJson(JsonReader(Json("first")), resolve, notAnOrder);
+			CHECK(notAnOrder.HasErrors());
+
+			// A slot's Fields resolve against the member's own slot when the override is applied: free-form here.
+			slotOverride.Field = "Scripts/2/Fields";
+			const Result<const FieldInfo*> fields = value->ResolveVariant(resolve);
+			REQUIRE(fields.has_value());
+			CHECK((*fields)->GetKind() == FieldType::Variant);
+			CHECK((*fields)->GetResolver() == nullptr);
+
+			slotOverride.Field = "Scripts";
+			const Result<const FieldInfo*> list = value->ResolveVariant(resolve);
+			REQUIRE(list.has_value());
+			CHECK(*list == registry->FindComponent("Script")->FindField("Scripts"));
+
+			for (const std::string_view field : { "Fields", "Script", "Scripts/01/Fields", "Scripts/0/Name", "Scripts/0" })
+			{
+				CAPTURE(field);
+				slotOverride.Field = std::string(field);
+				CHECK(ResolveFailure(*value, resolve) == ErrorCode::NotFound);
+			}
+		}
+
 		TEST_CASE("CoreRegistration: prefab override values resolve from JSON and reject other owners")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();

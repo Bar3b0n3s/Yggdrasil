@@ -59,10 +59,10 @@ namespace Engine {
 
 		static void AttachLifecycleScript(Entity entity, AssetHandle handle, int32_t order = 0)
 		{
-			ScriptComponent script{};
+			ScriptSlot script{};
 			script.Script.SetHandle(handle);
 			script.ExecutionOrder = order;
-			entity.AddComponent<ScriptComponent>(script);
+			entity.AddComponent<ScriptComponent>(ScriptComponent{ { script } });
 		}
 
 		static constexpr std::string_view LifecycleSource = R"(
@@ -190,7 +190,7 @@ function T:OnFixedUpdate(dt)
 	record(self, "fixed")
 	if self.Label == "Spawner" and self.Fixed == 1 then
 		local spawned = Scene.CreateEntity("Spawned")
-		spawned:AddComponent("Script", {Script = Assets.Load("Assets/Scripts/SessionLifecycle.luau")})
+		spawned:AddComponent("Script", {Scripts = {{Script = Assets.Load("Assets/Scripts/SessionLifecycle.luau"), Fields = {}, ExecutionOrder = 0}}})
 	elseif self.Label == "Survivor" and self.Fixed == 2 then
 		Scene.Destroy(Scene.FindByName("Doomed") :: Entity)
 	end
@@ -227,7 +227,7 @@ function T:OnFixedUpdate()
 		coin.Transform.Translation = vector.create(10, 0, 0)
 		coin:AddComponent("BoxCollider", {HalfExtents = vector.create(1, 1, 1), IsTrigger = true})
 		coin:AddComponent("RigidBody", {Type = "Static"})
-		coin:AddComponent("Script", {Script = Assets.Load("Assets/Scripts/ContactProbe.luau")})
+		coin:AddComponent("Script", {Scripts = {{Script = Assets.Load("Assets/Scripts/ContactProbe.luau"), Fields = {}, ExecutionOrder = 0}}})
 	end
 end
 function T:OnTriggerEnter(other)
@@ -880,7 +880,7 @@ function T:OnFixedUpdate()
 		local spawned = Scene.CreateEntity("Ephemeral")
 		-- The add succeeds; the new instance's OnCreate destroys its entity before the call returns.
 		pcall(function()
-			spawned:AddComponent("Script", {Script = Assets.Load("Assets/Scripts/Ephemeral.luau")})
+			spawned:AddComponent("Script", {Scripts = {{Script = Assets.Load("Assets/Scripts/Ephemeral.luau"), Fields = {}, ExecutionOrder = 0}}})
 		end)
 	end
 end

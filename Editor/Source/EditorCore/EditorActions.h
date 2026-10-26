@@ -20,6 +20,11 @@ namespace Engine {
 	// Pending methods retain their own MethodContext and are polled once per Pump; Cancel invokes their cancellation.
 	// Agent pause/deny switches do not deny user actions. Read-only, launcher, revision, dry-run and param rules still hold,
 	// and so does a test run's lease (EditorContext::CheckTestRunAdmission), at Submit and again when the action runs.
+	// A request's scene target ("scene", M20: Docs/Decisions/0031-m20-contract.md decision 16; the scene tabs submit
+	// scene.activate and scene.close with one) is resolved as the automation server resolves it
+	// (EditorMethodContext::ResolveSceneTarget), after the project and test-run checks, and an EditorSceneTargetScope on it
+	// encloses the read-only and revision checks, the dry-run sandbox and the handler, so they address that open scene: at
+	// Submit, and again when the action runs, which refuses a target closed in between with NotFound.
 	class EditorActions
 	{
 	public:

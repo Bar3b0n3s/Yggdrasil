@@ -7,9 +7,28 @@
 #include "Engine/Core/Assert.h"
 
 #include <limits>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace Engine {
+
+	namespace Utils {
+
+		// Every open scene with its revision, in tab order: what a recovery offer is bound to (decision 15), since Accept
+		// replaces any open scene the offer names, the active one or not.
+		static std::vector<std::pair<OpenSceneId, uint64_t>> ListOpenSceneRevisions(const EditorContext& editor)
+		{
+			std::vector<std::pair<OpenSceneId, uint64_t>> revisions;
+			for (const OpenSceneId id : editor.GetOpenScenes())
+			{
+				const Result<OpenSceneInfo> info = editor.DescribeOpenScene(id);
+				revisions.emplace_back(id, info.has_value() ? info->Revision : 0);
+			}
+			return revisions;
+		}
+
+	}
 
 	EditorHostRecovery::EditorHostRecovery(EditorContext& editor, Autosave& saves)
 		: m_Editor(editor), m_Saves(saves)
@@ -31,16 +50,23 @@ namespace Engine {
 		Reset();
 		m_ProjectEpoch = projectEpoch;
 		m_Project = &m_Editor.GetProject();
-		// Opening with recover=true has already adopted the scene through this long-lived autosave service.
-		if (m_Editor.IsSceneDirty())
+		// Opening with recover=true has already adopted the scenes through this long-lived autosave service.
+		if (m_Editor.IsAnySceneDirty())
 			return {};
-		ENGINE_TRY_ASSIGN(auto recovery, m_Saves.FindRecovery());
-		if (!recovery)
+		// Every scene with a recoverable generation (M20, Docs/Decisions/0031-m20-contract.md decision 15): the offer names
+		// them all, oldest first, and holds the newest.
+		ENGINE_TRY_ASSIGN(std::vector<AutosaveRecoveryInfo> recoveries, m_Saves.FindRecoveries());
+		if (recoveries.empty())
 			return {};
 		ENGINE_VERIFY(m_NextOffer < std::numeric_limits<uint64_t>::max(), "recovery offer IDs exhausted");
-		m_Offer = EditorRecoveryOffer{ .Id = ++m_NextOffer, .Recovery = std::move(*recovery) };
+		std::vector<std::string> names;
+		names.reserve(recoveries.size());
+		for (const AutosaveRecoveryInfo& recovery : recoveries)
+			names.push_back(recovery.SceneName);
+		m_Offer = EditorRecoveryOffer{ .Id = ++m_NextOffer, .Recovery = recoveries.back(), .SceneNames = std::move(names) };
+		m_Recoveries = std::move(recoveries);
 		m_OfferEpoch = m_ProjectEpoch;
-		m_Revision = m_Editor.GetRevision();
+		m_Revisions = Utils::ListOpenSceneRevisions(m_Editor);
 		return {};
 	}
 
@@ -52,8 +78,8 @@ namespace Engine {
 	Status EditorHostRecovery::CheckBinding() const
 	{
 		if (!m_Editor.HasProject() || m_Project != &m_Editor.GetProject() || m_ProjectEpoch == 0
-			|| m_ProjectEpoch != m_OfferEpoch || m_Revision != m_Editor.GetRevision())
-			return MakeError(ErrorCode::Conflict, "The project or scene changed after recovery was offered");
+			|| m_ProjectEpoch != m_OfferEpoch || m_Revisions != Utils::ListOpenSceneRevisions(m_Editor))
+			return MakeError(ErrorCode::Conflict, "The project or an open scene changed after recovery was offered");
 		// A test run leaves the binding intact but owns the edit scene until it finishes.
 		if (m_Editor.GetPlay().IsTestRunActive())
 			return MakeError(ErrorCode::InvalidState, "A test run owns the editor; recover after it finishes");
@@ -98,9 +124,20 @@ namespace Engine {
 		Status applied;
 		if (decision == EditorRecoveryDecision::Accept)
 		{
+			// Each offered scene in its order, then the first of them active, as a recovering project.open leaves them. A
+			// failure stops there: the scenes recovered before it stay recovered (each recovery is whole on its own).
 			applied = CheckBinding();
-			if (applied)
-				applied = m_Saves.Recover(m_Offer->Recovery);
+			OpenSceneId first = NoOpenScene;
+			for (const AutosaveRecoveryInfo& recovery : m_Recoveries)
+			{
+				if (!applied)
+					break;
+				applied = m_Saves.Recover(recovery);
+				if (applied && first == NoOpenScene)
+					first = m_Editor.GetActiveSceneId();
+			}
+			if (applied && first != NoOpenScene && m_Recoveries.size() > 1)
+				applied = m_Editor.ActivateScene(first);
 		}
 		if (!applied)
 		{
@@ -114,11 +151,12 @@ namespace Engine {
 	void EditorHostRecovery::Reset()
 	{
 		m_Offer.reset();
+		m_Recoveries.clear();
 		m_Decision.reset();
 		m_Project = nullptr;
 		m_ProjectEpoch = 0;
 		m_OfferEpoch = 0;
-		m_Revision = 0;
+		m_Revisions.clear();
 	}
 
 }

@@ -5,10 +5,15 @@
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Reflection/JsonSchema.h"
+#include "Support/DeathTest.h"
 #include "Support/ProtocolTestTypes.h"
 
 #include <array>
+#include <cstdint>
+#include <string>
 #include <utility>
+#include <variant>
+#include <vector>
 
 namespace Engine {
 
@@ -231,13 +236,187 @@ namespace Engine {
 		});
 	}
 
+	namespace {
+
+		// The scene target (M20, Docs/Decisions/0031-m20-contract.md decision 16): "scene.read" takes it, "scene.pick"
+		// requires it, and the protocol test methods take none.
+		struct SceneTargetSetup
+		{
+			Scope<TypeRegistry> Types = Test::CreateProtocolTestTypes();
+			MethodRegistry Methods{ *Types };
+
+			SceneTargetSetup()
+			{
+				const auto handler = [](Test::TestHostContext& /*context*/, const Test::LargeParams& params) -> Result<Test::LargeResult>
+				{
+					return Test::LargeResult{ .Items = std::vector<std::string>(params.Count, "item") };
+				};
+				Methods.Add<Test::TestHostContext, Test::LargeParams, Test::LargeResult>(
+					{ .Name = "scene.read", .Description = "Reads the addressed scene.", .SupportsSceneTarget = true, .AllowedInBatch = true, .Examples = { MethodExample{ .Description = "Read.", .Params = Json::object() } } },
+					handler);
+				Methods.Add<Test::TestHostContext, Test::LargeParams, Test::LargeResult>(
+					{ .Name = "scene.pick",
+						.Description = "Picks the scene the target names.",
+						.RequiredParams = { "count" },
+						.SupportsSceneTarget = true,
+						.RequiresSceneTarget = true,
+						.Examples = { MethodExample{ .Description = "Pick.", .Params = Json{ { "count", 1 }, { "scene", "Assets/Scenes/Main.scene" } } } } },
+					handler);
+				Test::RegisterProtocolTestMethods(Methods);
+				Methods.Freeze();
+			}
+		};
+
+		// A params struct that declares its own "scene" member, which a method with the scene target cannot have.
+		struct SceneMemberParams
+		{
+			std::string Scene{};
+		};
+
+	}
+
+	ENGINE_DEATH_TEST("Automation/MethodRegistryPendingSceneTargetAsserts")
+	{
+		Scope<TypeRegistry> types = Test::CreateProtocolTestTypes();
+		MethodRegistry methods(*types);
+		methods.AddPending<Test::TestHostContext, Test::PendParams, Test::PendResult>(
+			{ .Name = "scene.wait", .Description = "Waits.", .SupportsSceneTarget = true, .Examples = { MethodExample{ .Description = "Wait.", .Params = Json::object() } } },
+			[](Test::TestHostContext& /*context*/, const Test::PendParams& /*params*/) -> Result<Scope<PendingOperation>>
+		{
+			return MakeError(ErrorCode::Unsupported, "never runs");
+		});
+	}
+
+	ENGINE_DEATH_TEST("Automation/MethodRegistryRequiredSceneTargetWithoutTargetAsserts")
+	{
+		Scope<TypeRegistry> types = Test::CreateProtocolTestTypes();
+		MethodRegistry methods(*types);
+		methods.Add<Test::TestHostContext, Test::LargeParams, Test::LargeResult>(
+			{ .Name = "scene.pick", .Description = "Picks.", .RequiresSceneTarget = true, .Examples = { MethodExample{ .Description = "Pick.", .Params = Json::object() } } },
+			[](Test::TestHostContext& /*context*/, const Test::LargeParams& /*params*/) -> Result<Test::LargeResult>
+		{
+			return Test::LargeResult{};
+		});
+	}
+
+	ENGINE_DEATH_TEST("Automation/MethodRegistrySceneTargetWithOwnSceneMemberAsserts")
+	{
+		TypeRegistry types;
+		types.Struct<SceneMemberParams>("SceneMemberParams", "Params with a scene file.").Field("scene", &SceneMemberParams::Scene, "A scene file.");
+		types.Freeze();
+		MethodRegistry methods(types);
+		methods.Add<Test::TestHostContext, SceneMemberParams, SceneMemberParams>(
+			{ .Name = "scene.play", .Description = "Plays a scene file.", .SupportsSceneTarget = true, .Examples = { MethodExample{ .Description = "Play.", .Params = Json::object() } } },
+			[](Test::TestHostContext& /*context*/, const SceneMemberParams& params) -> Result<SceneMemberParams>
+		{
+			return params;
+		});
+	}
+
 	TEST_SUITE("Automation")
 	{
+		// Decision 16: the registration rules of the scene target are programmer errors (MethodRegistry::Add).
+		TEST_CASE("MethodRegistry: a scene target on a pending method, without its flag or beside a params member named scene asserts")
+		{
+			ENGINE_CHECK_DEATH("Automation/MethodRegistryPendingSceneTargetAsserts", "cannot take a scene target");
+			ENGINE_CHECK_DEATH("Automation/MethodRegistryRequiredSceneTargetWithoutTargetAsserts", "requires a scene target it does not accept");
+			ENGINE_CHECK_DEATH("Automation/MethodRegistrySceneTargetWithOwnSceneMemberAsserts", "cannot declare 'scene'");
+		}
+
+		// Decision 16: "scene" is a reserved member of the methods with the scene target, a path or an open scene's uint32 id,
+		// which PrepareParams moves into the request options; every other method keeps it in its params.
+		TEST_CASE("MethodRegistry: PrepareParams moves a scene target into the options of the methods that take one")
+		{
+			SceneTargetSetup setup;
+			const MethodDescriptor& read = RequireMethod(setup.Methods, "scene.read");
+			const Result<PreparedParams> byPath = setup.Methods.PrepareParams(read, Json{ { "count", 2 }, { "scene", "Assets/Scenes/Level.scene" } });
+			REQUIRE_MESSAGE(byPath.has_value(), byPath.error().ToString());
+			CHECK(byPath->Params == Json{ { "count", 2 } });
+			REQUIRE(byPath->Options.Scene.has_value());
+			CHECK(byPath->Options.Scene->Path == "Assets/Scenes/Level.scene");
+			CHECK(byPath->Options.Scene->Id == 0);
+			const Result<PreparedParams> byId = setup.Methods.PrepareParams(read, Json{ { "scene", 4294967295u } });
+			REQUIRE(byId.has_value());
+			REQUIRE(byId->Options.Scene.has_value());
+			CHECK(byId->Options.Scene->Id == 4294967295u);
+			CHECK(byId->Options.Scene->Path.empty());
+			const Result<PreparedParams> absent = setup.Methods.PrepareParams(read, Json::object());
+			REQUIRE(absent.has_value());
+			CHECK_FALSE(absent->Options.Scene.has_value());
+
+			for (const Json& invalid : { Json(""), Json(0), Json(-1), Json(uint64_t{ 1 } << 32), Json(2.5), Json(true), Json(nullptr), Json::object(), Json::array() })
+			{
+				CAPTURE(invalid.dump());
+				const Result<PreparedParams> refused = setup.Methods.PrepareParams(read, Json{ { "scene", invalid } });
+				REQUIRE_FALSE(refused.has_value());
+				CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
+				REQUIRE(refused.error().GetIssues().size() == 1);
+				CHECK(refused.error().GetIssues().front().JsonPointer == "/scene");
+			}
+
+			// A required target is reported like a missing required param, beside the others.
+			const MethodDescriptor& pick = RequireMethod(setup.Methods, "scene.pick");
+			const Result<PreparedParams> missing = setup.Methods.PrepareParams(pick, Json::object());
+			REQUIRE_FALSE(missing.has_value());
+			CHECK(missing.error().GetCode() == ErrorCode::InvalidArgument);
+			REQUIRE(missing.error().GetIssues().size() == 2);
+			CHECK(missing.error().GetIssues()[0].JsonPointer == "/scene");
+			CHECK(missing.error().GetIssues()[1].JsonPointer == "/count");
+			CHECK(setup.Methods.PrepareParams(pick, Json{ { "count", 1 }, { "scene", 7 } }).has_value());
+
+			// A method without the scene target keeps "scene" in its params, where its strict read refuses an unknown one.
+			const MethodDescriptor& echo = RequireMethod(setup.Methods, "test.echo");
+			const Result<PreparedParams> kept = setup.Methods.PrepareParams(echo, Json{ { "text", "a" }, { "scene", "Assets/Scenes/Level.scene" } });
+			REQUIRE(kept.has_value());
+			CHECK(kept->Params.contains("scene"));
+			CHECK_FALSE(kept->Options.Scene.has_value());
+			Test::TestHostState state;
+			Test::TestMethodHost host(state);
+			Scope<MethodContext> context = host.CreateContext(MethodRequest{
+				.Info = { .Client = 1, .ClientName = "test", .Id = Json(1), .Method = "test.echo", .TranscriptLine = std::nullopt },
+				.Options = kept->Options,
+				.Method = &echo,
+				.Params = kept->Params,
+				.Registry = &setup.Methods,
+				.PhaseMarker = nullptr,
+				.NestingDepth = 0,
+			});
+			const MethodResult unknown = setup.Methods.Invoke(*context);
+			REQUIRE(std::holds_alternative<Error>(unknown));
+			CHECK(std::get<Error>(unknown).GetCode() == ErrorCode::InvalidArgument);
+			REQUIRE_FALSE(std::get<Error>(unknown).GetIssues().empty());
+			CHECK(std::get<Error>(unknown).GetIssues().front().JsonPointer == "/scene");
+		}
+
+		// Decision 16: the schemas list "scene" for the methods with the scene target, as they list dryRun, and "required"
+		// names it for the methods that require it.
+		TEST_CASE("MethodRegistry: params schemas list the scene target and require it where the method does")
+		{
+			SceneTargetSetup setup;
+			for (const SchemaStyle style : { SchemaStyle::Full, SchemaStyle::Compact })
+			{
+				const Json read = setup.Methods.GetParamsSchema(RequireMethod(setup.Methods, "scene.read"), style);
+				REQUIRE(read["properties"].contains("scene"));
+				CHECK(read["properties"]["scene"]["type"] == Json::array({ "string", "integer" }));
+				CHECK_FALSE(read.contains("required"));
+				CHECK(JsonSchema::Validate(read, Json{ { "scene", "Assets/Scenes/Level.scene" } }).has_value());
+				CHECK(JsonSchema::Validate(read, Json{ { "scene", 3 } }).has_value());
+				CHECK_FALSE(JsonSchema::Validate(read, Json{ { "scene", 0 } }).has_value());
+				CHECK_FALSE(JsonSchema::Validate(read, Json{ { "scene", true } }).has_value());
+
+				const Json pick = setup.Methods.GetParamsSchema(RequireMethod(setup.Methods, "scene.pick"), style);
+				CHECK(pick["required"] == Json::array({ "count", "scene" }));
+				CHECK_FALSE(JsonSchema::Validate(pick, Json{ { "count", 1 } }).has_value());
+
+				const Json echo = setup.Methods.GetParamsSchema(RequireMethod(setup.Methods, "test.echo"), style);
+				CHECK_FALSE(echo["properties"].contains("scene"));
+			}
+		}
 		TEST_CASE("MethodRegistry: script schemas are pinned after asset resolution through canonicalization and typed reads")
 		{
 			SchemaRegistrySetup setup;
-			auto context = setup.Context(ParseRegistryJson(R"({"text":"fields","components":{"Script":{"Script":"Assets/Fields.luau",
-				"Fields":{"Modes":["mOvInG"],"Assets":["Assets/Red.material"],"Weights":[0.25]}}}})"));
+			auto context = setup.Context(ParseRegistryJson(R"({"text":"fields","components":{"Script":{"Scripts":[{"Script":"Assets/Fields.luau",
+				"Fields":{"Modes":["mOvInG"],"Assets":["Assets/Red.material"],"Weights":[0.25]}}]}}})"));
 			const MethodResult result = setup.Methods.Invoke(*context);
 			REQUIRE_MESSAGE(std::holds_alternative<Json>(result), (std::holds_alternative<Error>(result) ? std::get<Error>(result).ToString() : std::string()));
 			CHECK(setup.State.SnapshotRequests == 1);
@@ -245,9 +424,9 @@ namespace Engine {
 			CHECK(setup.State.Assets.Calls == std::vector<std::string>{ "Assets/Fields.luau", "Assets/Red.material" });
 			CHECK(setup.State.Published == nullptr); // the request owns the only remaining published reference
 			CHECK(setup.State.HandlerCalls == 1);
-			CHECK(setup.State.ReadScript["Script"] == Json("0000000000000515"));
-			CHECK(setup.State.ReadScript["Fields"]["Modes"] == Json::array({ "Moving" }));
-			CHECK(setup.State.ReadScript["Fields"]["Assets"] == Json::array({ "0000000000abcdef" }));
+			CHECK(setup.State.ReadScript["Scripts"][0]["Script"] == Json("0000000000000515"));
+			CHECK(setup.State.ReadScript["Scripts"][0]["Fields"]["Modes"] == Json::array({ "Moving" }));
+			CHECK(setup.State.ReadScript["Scripts"][0]["Fields"]["Assets"] == Json::array({ "0000000000abcdef" }));
 			CHECK(setup.State.ReadScript == context->GetParams()["components"]["Script"]);
 			const auto retained = context->GetFieldSchemaSnapshot();
 			REQUIRE(retained.has_value());
@@ -259,7 +438,7 @@ namespace Engine {
 		{
 			SchemaRegistrySetup setup;
 			setup.State.FailSnapshot = true;
-			auto context = setup.Context(ParseRegistryJson(R"({"text":"fields","components":{"Script":{"Script":"Assets/Fields.luau","Fields":{"Weights":[0.25]}}}})"));
+			auto context = setup.Context(ParseRegistryJson(R"({"text":"fields","components":{"Script":{"Scripts":[{"Script":"Assets/Fields.luau","Fields":{"Weights":[0.25]}}]}}})"));
 			const MethodResult result = setup.Methods.Invoke(*context);
 			REQUIRE(std::holds_alternative<Error>(result));
 			CHECK(std::get<Error>(result).GetCode() == ErrorCode::Io);
@@ -271,13 +450,13 @@ namespace Engine {
 		TEST_CASE("MethodRegistry: script array element bounds are validated at their complete parameter pointer")
 		{
 			SchemaRegistrySetup setup;
-			auto context = setup.Context(ParseRegistryJson(R"({"text":"fields","components":{"Script":{"Script":"0000000000000515","Fields":{"Weights":[2]}}}})"));
+			auto context = setup.Context(ParseRegistryJson(R"({"text":"fields","components":{"Script":{"Scripts":[{"Script":"0000000000000515","Fields":{"Weights":[2]}}]}}})"));
 			const MethodResult result = setup.Methods.Invoke(*context);
 			REQUIRE(std::holds_alternative<Error>(result));
 			CHECK(std::get<Error>(result).GetCode() == ErrorCode::InvalidArgument);
 			const auto& issues = std::get<Error>(result).GetIssues();
 			REQUIRE_FALSE(issues.empty());
-			CHECK(issues[0].JsonPointer == "/components/Script/Fields/Weights/0");
+			CHECK(issues[0].JsonPointer == "/components/Script/Scripts/0/Fields/Weights/0");
 			CHECK(setup.State.HandlerCalls == 0);
 		}
 
@@ -290,8 +469,8 @@ namespace Engine {
 			const std::string hint = "an Entity value in component data takes the entity's 16-hex id; use {\"$ref\": \"<op>.entity.id\"} in a batch or the id entity.get returns";
 			SchemaRegistrySetup setup;
 			setup.State.Published = MakeEntityFieldSchemas();
-			auto context = setup.Context(ParseRegistryJson(R"({"text":"fields","components":{"Script":{"Script":"Assets/Fields.luau",
-				"Fields":{"Target":"/Game/ScoreText","Targets":["0000000000000abc","4f2a"]}}}})"));
+			auto context = setup.Context(ParseRegistryJson(R"({"text":"fields","components":{"Script":{"Scripts":[{"Script":"Assets/Fields.luau",
+				"Fields":{"Target":"/Game/ScoreText","Targets":["0000000000000abc","4f2a"]}}]}}})"));
 			const MethodResult result = setup.Methods.Invoke(*context);
 			REQUIRE(std::holds_alternative<Error>(result));
 			const Error& error = std::get<Error>(result);
@@ -300,21 +479,21 @@ namespace Engine {
 			CHECK(error.GetHint() == hint);
 			const std::vector<ErrorIssue>& issues = error.GetIssues();
 			REQUIRE(issues.size() == 2);
-			CHECK(issues[0].JsonPointer == "/components/Script/Fields/Target");
+			CHECK(issues[0].JsonPointer == "/components/Script/Scripts/0/Fields/Target");
 			CHECK(issues[0].Hint == hint);
-			CHECK(issues[1].JsonPointer == "/components/Script/Fields/Targets/1");
+			CHECK(issues[1].JsonPointer == "/components/Script/Scripts/0/Fields/Targets/1");
 			CHECK(issues[1].Hint == hint);
 			CHECK(setup.State.HandlerCalls == 0);
 
 			// A 16-hex id is accepted as before, in a field and in an array.
 			SchemaRegistrySetup valid;
 			valid.State.Published = MakeEntityFieldSchemas();
-			auto accepted = valid.Context(ParseRegistryJson(R"({"text":"fields","components":{"Script":{"Script":"Assets/Fields.luau",
-				"Fields":{"Target":"0000000000000abc","Targets":["0000000000000def"]}}}})"));
+			auto accepted = valid.Context(ParseRegistryJson(R"({"text":"fields","components":{"Script":{"Scripts":[{"Script":"Assets/Fields.luau",
+				"Fields":{"Target":"0000000000000abc","Targets":["0000000000000def"]}}]}}})"));
 			const MethodResult passed = valid.Methods.Invoke(*accepted);
 			REQUIRE_MESSAGE(std::holds_alternative<Json>(passed), (std::holds_alternative<Error>(passed) ? std::get<Error>(passed).ToString() : std::string()));
 			CHECK(valid.State.HandlerCalls == 1);
-			CHECK(valid.State.ReadScript["Fields"]["Target"] == Json("0000000000000abc"));
+			CHECK(valid.State.ReadScript["Scripts"][0]["Fields"]["Target"] == Json("0000000000000abc"));
 		}
 
 		// A4's precedence (Docs/Decisions/0027-m17-contract.md "Frozen interfaces / A4"): an EntityRef issue is never NotFound,
@@ -339,8 +518,8 @@ namespace Engine {
 
 			SchemaRegistrySetup setup;
 			setup.State.Published = *schemas;
-			auto context = setup.Context(ParseRegistryJson(R"({"text":"fields","components":{"Script":{"Script":"Assets/Fields.luau",
-				"Fields":{"Skin":"Assets/Missing.material","Target":"/Game/ScoreText"}}}})"));
+			auto context = setup.Context(ParseRegistryJson(R"({"text":"fields","components":{"Script":{"Scripts":[{"Script":"Assets/Fields.luau",
+				"Fields":{"Skin":"Assets/Missing.material","Target":"/Game/ScoreText"}}]}}})"));
 			const MethodResult result = setup.Methods.Invoke(*context);
 			REQUIRE(std::holds_alternative<Error>(result));
 			const Error& error = std::get<Error>(result);
@@ -349,9 +528,9 @@ namespace Engine {
 			CHECK(error.GetHint().empty());
 			const std::vector<ErrorIssue>& issues = error.GetIssues();
 			REQUIRE(issues.size() == 2);
-			CHECK(issues[0].JsonPointer == "/components/Script/Fields/Skin");
+			CHECK(issues[0].JsonPointer == "/components/Script/Scripts/0/Fields/Skin");
 			CHECK(issues[0].Message == "no asset 'Assets/Missing.material'");
-			CHECK(issues[1].JsonPointer == "/components/Script/Fields/Target");
+			CHECK(issues[1].JsonPointer == "/components/Script/Scripts/0/Fields/Target");
 			CHECK(issues[1].Message == "expected a 16-digit hex UUID string");
 			CHECK(issues[1].Hint.starts_with("an Entity value in component data takes the entity's 16-hex id"));
 			CHECK(setup.State.HandlerCalls == 0);
@@ -689,10 +868,16 @@ namespace Engine {
 			Test::TestMethodHost host(state);
 			Scope<MethodContext> batch = MakeRegistryContext(*setup.Methods, host, "test.echo");
 
-			for (const std::string_view member : { "dryRun", "ifRevision", "_meta" })
+			// The scene target too (M20, decision 16): every op runs in the batch's scene.
+			for (const std::string_view member : { "dryRun", "ifRevision", "_meta", "scene" })
 			{
 				Json params{ { "text", "a" } };
-				params[std::string(member)] = member == "_meta" ? Json::object() : Json(true);
+				Json value = Json(true);
+				if (member == "_meta")
+					value = Json::object();
+				else if (member == "scene")
+					value = Json("Assets/Scenes/Main.scene");
+				params[std::string(member)] = std::move(value);
 				const Result<Json> refused = setup.Methods->InvokeNested(*batch, "test.echo", params);
 				REQUIRE_FALSE(refused.has_value());
 				CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);

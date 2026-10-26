@@ -336,7 +336,7 @@ end
 return Script.Define("FuzzKeeper", T)
 )" } });
 			REQUIRE_MESSAGE(written, (written ? "" : written.error().ToString()));
-			REQUIRE(fixture.Call("entity.create", Json{ { "name", "Keeper" }, { "components", { { "Script", { { "Script", "Assets/Scripts/FuzzKeeper.luau" } } } } } }));
+			REQUIRE(fixture.Call("entity.create", Json{ { "name", "Keeper" }, { "components", { { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/FuzzKeeper.luau" } } }) } } } } } }));
 			REQUIRE(fixture.Call("play.start", Json{ { "mode", "play" }, { "paused", true }, { "seed", 0x13f022 } }));
 			auto* session = fixture.GetEditor().GetPlay().GetSession();
 			REQUIRE(session != nullptr);

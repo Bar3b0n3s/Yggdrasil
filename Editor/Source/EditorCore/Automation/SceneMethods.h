@@ -62,22 +62,25 @@ namespace Engine {
 	// settings naming it validate) and makes it the open scene. With a dirty open scene exactly one of save and
 	// discardChanges is required, as for scene.open (ADR 0008 decision 13 adds the two flags to §13.5's list). Errors:
 	// AlreadyExists when `path` exists.
-	// M20 (decision 14): keepOpen (bool, default false; added with its registry entry by stream S-D) keeps every open scene
-	// open and adds the new one at the end of the tab order as the active scene, so save and discardChanges are then not
-	// needed (giving either is InvalidArgument); InvalidState when MaxOpenScenes scenes are open. The result's `id` (uint32)
-	// is the new scene's open-scene id.
+	// M20 (decision 14): keepOpen (bool, default false) keeps every open scene open and adds the new one at the end of the tab
+	// order as the active scene, so save and discardChanges are then not needed (giving either is InvalidArgument);
+	// InvalidState when MaxOpenScenes scenes are open. Without keepOpen the new scene replaces the active scene in its tab
+	// position. `path` cannot be the path of an open scene that the call keeps open (InvalidState naming it). The result's
+	// `id` (uint32) is the new scene's open-scene id.
 	struct SceneNewParams
 	{
 		std::string Path{};
 		SceneTemplate Template = SceneTemplate::Empty;
 		bool Save = false;
 		bool DiscardChanges = false;
+		bool KeepOpen = false;
 	};
 
 	struct SceneNewResult
 	{
 		SceneSummary Scene{};
 		uint32_t UndoIndex = 0; // always 0: opening a scene starts a new history
+		uint32_t Id = 0;        // the new scene's open-scene id (M20)
 	};
 
 	// scene.open {path, save?, discardChanges?, reload?, repair?} (§13.5): with a dirty open scene exactly one of save
@@ -88,12 +91,13 @@ namespace Engine {
 	// (EditorContext::UpdatePrefabInstances, §5.5), so an externally changed prefab is adopted too; the scene then opens
 	// dirty when that changed it.
 	// M20 (decision 14): without keepOpen the loaded scene replaces the active scene in its tab position, the other open
-	// scenes untouched. keepOpen (bool, default false; added with its registry entry by stream S-D) keeps every open scene
-	// open and adds the loaded one at the end of the tab order as the active scene (save and discardChanges are then not
-	// needed, and giving either is InvalidArgument; InvalidState when MaxOpenScenes scenes are open). A path that is
-	// already open, active or not, needs reload, as the open scene's own path needs it before M20 (InvalidState naming
-	// it, with the hint to use scene.activate); reload re-reads that open scene in its tab position, needs save or
-	// discardChanges when it is dirty, and makes it active. The result's `id` (uint32) is the opened scene's open-scene id.
+	// scenes untouched. keepOpen (bool, default false) keeps every open scene open and adds the loaded one at the end of the
+	// tab order as the active scene (save and discardChanges are then not needed, and giving either is InvalidArgument;
+	// InvalidState when MaxOpenScenes scenes are open). A path that is already open, active or not, needs reload, as the
+	// open scene's own path needs it before M20 (InvalidState naming it, with the hint to use scene.activate); reload
+	// re-reads that open scene in its tab position, needs save or discardChanges when it is dirty (its own unsaved changes,
+	// not the active scene's), and makes it active. keepOpen and reload together are InvalidArgument: one adds a tab, the
+	// other re-reads one in place. The result's `id` (uint32) is the opened scene's open-scene id.
 	struct SceneOpenParams
 	{
 		std::string Path{};
@@ -101,6 +105,7 @@ namespace Engine {
 		bool DiscardChanges = false;
 		bool Reload = false;
 		bool Repair = false;
+		bool KeepOpen = false;
 	};
 
 	struct SceneOpenResult
@@ -109,12 +114,13 @@ namespace Engine {
 		bool Migrated = false; // the file was in an older format (save it, or run project.upgrade, to rewrite it)
 		std::vector<SceneLoadIssue> Diagnostics{};
 		std::vector<SceneLoadRepair> Repairs{};
+		uint32_t Id = 0; // the opened scene's open-scene id (M20)
 	};
 
 	// scene.save {path?}: writes the open scene to `path` (empty: its own path; required for a scene never saved) through
 	// EditorContext::WriteProjectFile (provenance) and marks it saved. Saving to another path makes that the scene's path.
 	// M20: the open scene is the addressed one (scene target); saving to the path of another open scene is InvalidState
-	// naming it (close that scene first).
+	// naming it (close that scene first), so no two open scenes share a path.
 	struct SceneSaveParams
 	{
 		std::string Path{};
@@ -167,8 +173,8 @@ namespace Engine {
 	};
 
 	// --- Open scenes (M20, E-SCENES; Docs/Decisions/0031-m20-contract.md decision 14) ------------------------------------
-	// Frozen by the contract; stream S-D registers the structs (registry names as below, keys camelCase) and the three
-	// methods with RegisterEditorSceneMethods, together with the regenerated references.
+	// Registered by RegisterEditorSceneMethodTypes (registry names as below, keys camelCase) for the three methods that
+	// RegisterEditorSceneMethods adds.
 
 	// Registry struct "OpenSceneEntry": one open scene as scene.list reports it.
 	struct OpenSceneEntry
@@ -196,8 +202,9 @@ namespace Engine {
 
 	// scene.close {scene?, save?, discardChanges?}: closes the addressed scene (the active one without a target), discarding
 	// its history. A dirty scene needs exactly one of save (write it to its path first; InvalidState for a scene never
-	// saved, which needs scene.save {path}) and discardChanges, as scene.open does; giving both is InvalidArgument. When
-	// the closed scene was active, the next one in tab order becomes active (the previous one when it was the last).
+	// saved, which needs scene.save {path}) and discardChanges, as scene.open does; giving both is InvalidArgument. save
+	// writes only a dirty scene. When the closed scene was active, the next one in tab order becomes active (the previous
+	// one when it was the last). Allowed while playing, the played scene included (the session plays on).
 	struct SceneCloseParams
 	{
 		bool Save = false;
@@ -229,7 +236,8 @@ namespace Engine {
 		// and EditorContext::ActivateScene.
 		[[nodiscard]] Result<SceneActivateResult> SceneActivate(EditorMethodContext& context, const NoParams& params);
 		// scene.close (M20). Errors: InvalidState "no scene open", for a dirty scene without save or discardChanges, and for
-		// save of a scene never saved; InvalidArgument for both flags; those of ResolveSceneTarget and the save's write.
+		// save of a dirty scene never saved; InvalidArgument for both flags; those of ResolveSceneTarget, the save's write and
+		// EditorContext::CloseScene.
 		[[nodiscard]] Result<SceneCloseResult> SceneClose(EditorMethodContext& context, const SceneCloseParams& params);
 
 	}
@@ -237,13 +245,13 @@ namespace Engine {
 	// Registers the enums and structs above (after RegisterSceneMethodTypes, whose SceneSummary they use).
 	void RegisterEditorSceneMethodTypes(TypeRegistry& registry);
 
-	// Registers the four methods, all tools (§13.8 lists scene_new, scene_open, scene_save and scene_diff); new and save
-	// mutate (open changes only what the editor shows, so read-only editors may open scenes; its save flag writes through
-	// EditorContext); diff is AllowedInBatch (new, open and save replace or write the scene outside a command).
-	// M20 (decision 14, stream S-D): also scene.list, scene.activate and scene.close, all three tools (scene_list,
-	// scene_activate, scene_close), none Mutates (they change what the editor holds open, and close's save writes through
-	// EditorContext, as scene.open's does), none AllowedInBatch (activate and close change the scene a batch addresses), none
-	// in the Runtime; SupportsSceneTarget on scene.save, scene.diff, scene.activate and scene.close.
+	// Registers the seven methods, all tools (§13.8 lists scene_new, scene_open, scene_save, scene_diff, scene_list,
+	// scene_activate and scene_close); new and save mutate (open changes only what the editor shows, so read-only editors may
+	// open scenes; its save flag writes through EditorContext); diff is AllowedInBatch (new, open and save replace or write
+	// the scene outside a command). M20 (decision 14): list, activate and close do not mutate (they change what the editor
+	// holds open, and close's save writes through EditorContext, as scene.open's does), none is AllowedInBatch (activate and
+	// close change the scene a batch addresses), none is in the Runtime; SupportsSceneTarget on scene.save, scene.diff,
+	// scene.activate (which also RequiresSceneTarget: its target is its subject) and scene.close.
 	void RegisterEditorSceneMethods(MethodRegistry& methods);
 
 }

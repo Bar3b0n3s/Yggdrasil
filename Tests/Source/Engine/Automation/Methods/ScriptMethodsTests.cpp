@@ -100,11 +100,47 @@ namespace Engine {
 		{
 			Test::AutomationFixture fixture("ScriptEvalSelf");
 			CallScriptMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/State.luau" }, { "source", "local State = {}; function State.OnCreate(self: any) self.Score = 7 end; return Script.Define('State', State)" } });
-			CallScriptMethod(fixture, "entity.create", Json{ { "name", "Game" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/State.luau" } } } } } });
+			CallScriptMethod(fixture, "entity.create", Json{ { "name", "Game" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/State.luau" } } }) } } } } } });
 			CallScriptMethod(fixture, "play.start", Json{ { "mode", "play" }, { "lockstep", true } });
 			const Json result = CallScriptMethod(fixture, "script.eval",
 				Json{ { "context", "play" }, { "entity", "/Game" }, { "code", "return self.Score" } });
 			CHECK(result["value"] == Json(7));
+			CallScriptMethod(fixture, "play.stop", Json::object());
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 18: script names the behaviour whose slot self binds to, in both
+		// contexts; a name no slot of the entity has is NotFound at /script before anything runs, and script needs entity.
+		// The entities with several slots are ScriptSlotTests' and test_script_slots.py's.
+		TEST_CASE("ScriptMethods: eval binds self to the named behaviour's slot and locates a name no slot has")
+		{
+			Test::AutomationFixture fixture("ScriptEvalBehaviour");
+			CallScriptMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/State.luau" }, { "source", "local State = {}; function State.OnCreate(self: any) self.Score = 7 end; return Script.Define('State', State)" } });
+			CallScriptMethod(fixture, "entity.create", Json{ { "name", "Game" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/State.luau" } } }) } } } } } });
+			const auto checkRefusals = [&fixture](std::string_view context)
+			{
+				CAPTURE(context);
+				const Json missing = fixture.Request("script.eval", Json{ { "context", context }, { "entity", "/Game" }, { "script", "Missing" }, { "code", "Scene.CreateEntity('Ran') return 1" } });
+				CHECK(missing["error"]["data"]["errorCode"] == Json("NotFound"));
+				CHECK(missing["error"]["data"]["issues"][0]["pointer"] == Json("/script"));
+				// An entity that does not resolve stays located at /entity.
+				const Json noEntity = fixture.Request("script.eval", Json{ { "context", context }, { "entity", "/Nobody" }, { "script", "State" }, { "code", "return 1" } });
+				CHECK(noEntity["error"]["data"]["errorCode"] == Json("NotFound"));
+				CHECK(noEntity["error"]["data"]["issues"][0]["pointer"] == Json("/entity"));
+				for (const Json& params : { Json{ { "context", context }, { "script", "State" }, { "code", "return 1" } },
+						 Json{ { "context", context }, { "entity", "/Game" }, { "script", "" }, { "code", "return 1" } } })
+				{
+					const Json refused = fixture.Request("script.eval", params);
+					CHECK(refused["error"]["data"]["errorCode"] == Json("InvalidArgument"));
+					CHECK(refused["error"]["data"]["issues"][0]["pointer"] == Json("/script"));
+				}
+			};
+			// Edit: the read-only VM builds the slot's table from its fields without running OnCreate.
+			CHECK(CallScriptMethod(fixture, "script.eval", Json{ { "context", "edit" }, { "entity", "/Game" }, { "script", "State" }, { "code", "return self ~= nil and self.Entity.Name" } })["value"] == Json("Game"));
+			checkRefusals("edit");
+			CallScriptMethod(fixture, "play.start", Json{ { "mode", "play" }, { "lockstep", true } });
+			CHECK(CallScriptMethod(fixture, "script.eval", Json{ { "context", "play" }, { "entity", "/Game" }, { "script", "State" }, { "code", "return self.Score" } })["value"] == Json(7));
+			checkRefusals("play");
+			CHECK(CallScriptMethod(fixture, "scene.query", Json{ { "where", Json{ { "name", "Ran" } } }, { "target", "play" } })["total"] == Json(0));
 			CallScriptMethod(fixture, "play.stop", Json::object());
 		}
 
@@ -148,7 +184,7 @@ namespace Engine {
 																												  "end\n"
 																												  "return Script.Define('Faulty', Faulty)\n" } });
 			CallScriptMethod(fixture, "entity.create", Json{ { "name", "Game" } });
-			const Json board = CallScriptMethod(fixture, "entity.create", Json{ { "name", "Board" }, { "parent", "/Game" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Faulty.luau" } } } } } });
+			const Json board = CallScriptMethod(fixture, "entity.create", Json{ { "name", "Board" }, { "parent", "/Game" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/Faulty.luau" } } }) } } } } } });
 			const Json id = board["entity"]["id"];
 			const auto readEntity = [&fixture]()
 			{
@@ -164,6 +200,8 @@ namespace Engine {
 				CHECK(expected.GetMatchCount() == 1);
 			}
 			CHECK(readEntity() == Json{ { "id", id }, { "name", "Board" }, { "path", "/Game/Board" } });
+			// The entry names the faulting behaviour's slot (Docs/Decisions/0031-m20-contract.md decision 17).
+			CHECK(CallScriptMethod(fixture, "script.errors", Json::object())["errors"][0]["slot"] == Json(0));
 			// Destroyed in the play scene: the id and name stay, the path is empty.
 			CallScriptMethod(fixture, "entity.destroy", Json{ { "entities", Json::array({ "/Game/Board" }) }, { "target", "play" } });
 			CHECK(readEntity() == Json{ { "id", id }, { "name", "Board" }, { "path", "" } });

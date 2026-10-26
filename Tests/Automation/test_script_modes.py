@@ -62,7 +62,7 @@ class ScriptModeTests(AutomationTestCase):
         build_tiny_game(client)
         client.call("script.write", {"path": "Assets/Scripts/Powers.luau", "source": POWER_BEHAVIOUR})
         client.call("entity.update", {"entity": "/Cube", "components": {
-            "Script": {"Script": "Assets/Scripts/Powers.luau"}}})
+            "Script": {"Scripts": [{"Script": "Assets/Scripts/Powers.luau"}]}}})
         client.call("script.write", {"path": "Assets/Tests/Cooked.test.luau", "source": POWER_SUITE})
         client.call("project.setSettings", {"patch": {"Testing": {"Suites": [{
             "Script": "Assets/Tests/Cooked.test.luau", "Scene": TINY_SCENE,

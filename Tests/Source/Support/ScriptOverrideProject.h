@@ -24,7 +24,7 @@ namespace Engine {
 		inline constexpr UUID ScriptOverridePrefabHandle = UUID(0x5c0a1e0000000002ull);
 		inline constexpr UUID ScriptOverrideInstanceID = UUID(0x5c0a1e0000000003ull); // the instance root, the scene's only entity
 		// The JSON pointer of the instance root's script field values in the scene (entity 0), without the field name.
-		inline constexpr std::string_view ScriptOverrideFieldsPointer = "/Entities/0/Components/Script/Fields/";
+		inline constexpr std::string_view ScriptOverrideFieldsPointer = "/Entities/0/Components/Script/Scripts/0/Fields/";
 
 		// Writes the script, the prefab and the scene, each with its .meta, into the project at `root` (one made from the
 		// Empty template, before or while it is open: an open editor registers them at its next asset refresh). The instance
@@ -41,6 +41,12 @@ namespace Engine {
 		// Replaces the project's script (ScriptOverrideScript) with `source`. Fails the running test case when it cannot be
 		// written.
 		void WriteScriptOverrideScript(const std::filesystem::path& root, std::string_view source);
+
+		// Rewrites the project's scene and prefab at Script component version 1, as a project saved before M20 holds them
+		// until project.upgrade (Docs/Decisions/0031-m20-contract.md decision 17): each Script component's one slot becomes
+		// the component, and the instance's override of "Scripts/0/Fields" names "Fields". Loading migrates both back. Fails
+		// the running test case when a file cannot be read or written.
+		void RewriteScriptOverrideProjectAtScriptVersion1(const std::filesystem::path& root);
 
 	}
 

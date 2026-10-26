@@ -44,6 +44,7 @@
 #include <algorithm>
 #include <format>
 #include <functional>
+#include <limits>
 #include <map>
 #include <set>
 #include <utility>
@@ -250,13 +251,11 @@ namespace Engine {
 			return parent.IsValid() ? parent.GetUUID() : UUID();
 		}
 
-		// EditorContext::UpdatePrefabInstances without its atomicity: every outermost instance of `prefabs` (any prefab when
-		// empty), or of a prefab nesting one of them (Docs/Decisions/0031-m20-contract.md decision 8), rebuilt from the
-		// prefab's current version, its overrides refreshed afterwards; nested instances follow their outermost ones.
-		// Returns whether anything changed. Errors: Validation PREFAB_CYCLE when the propagation from `prefabs` meets a nesting
-		// cycle (EditorContext::GetNestingPrefabs); those of the rebuild.
-		static Result<bool> RebuildPrefabInstances(EditorContext& context, Scene& scene,
-			std::span<const AssetHandle> prefabs)
+		// `prefabs` with every prefab nesting one of them (Docs/Decisions/0031-m20-contract.md decision 8), sorted without
+		// duplicates: the prefabs whose outermost instances an update of `prefabs` rebuilds. Empty for empty `prefabs`.
+		// Errors: Validation PREFAB_CYCLE when the propagation from `prefabs` meets a nesting cycle
+		// (EditorContext::GetNestingPrefabs).
+		static Result<std::vector<AssetHandle>> AddNestingPrefabs(const EditorContext& context, std::span<const AssetHandle> prefabs)
 		{
 			std::vector<AssetHandle> rebuilt(prefabs.begin(), prefabs.end());
 			if (!prefabs.empty() && context.HasProject())
@@ -271,10 +270,22 @@ namespace Engine {
 				});
 				ENGINE_TRY_ASSIGN(const std::vector<AssetHandle> nesting, context.GetNestingPrefabs(registered));
 				rebuilt.insert(rebuilt.end(), nesting.begin(), nesting.end());
-				std::ranges::sort(rebuilt);
-				const auto [first, last] = std::ranges::unique(rebuilt);
-				rebuilt.erase(first, last);
 			}
+			std::ranges::sort(rebuilt);
+			const auto [first, last] = std::ranges::unique(rebuilt);
+			rebuilt.erase(first, last);
+			return rebuilt;
+		}
+
+		// EditorContext::UpdatePrefabInstances without its atomicity: every outermost instance of `prefabs` (any prefab when
+		// empty), or of a prefab nesting one of them (Docs/Decisions/0031-m20-contract.md decision 8), rebuilt from the
+		// prefab's current version, its overrides refreshed afterwards; nested instances follow their outermost ones.
+		// Returns whether anything changed. Errors: Validation PREFAB_CYCLE when the propagation from `prefabs` meets a nesting
+		// cycle (EditorContext::GetNestingPrefabs); those of the rebuild.
+		static Result<bool> RebuildPrefabInstances(EditorContext& context, Scene& scene,
+			std::span<const AssetHandle> prefabs)
+		{
+			ENGINE_TRY_ASSIGN(const std::vector<AssetHandle> rebuilt, AddNestingPrefabs(context, prefabs));
 			const std::vector<std::pair<UUID, AssetHandle>> instances = Utils::FindPrefabInstances(scene, rebuilt);
 			if (instances.empty())
 				return false;
@@ -553,16 +564,39 @@ namespace Engine {
 		{
 			m_Play->OnAssetReload(source);
 		});
+		// Open scenes (M20, Docs/Decisions/0031-m20-contract.md decision 15): every open scene the change concerns is flagged
+		// and reported on its own, in tab order.
 		m_Assets->SetExternalChangeListener([this](const AssetExternalChange& change)
 		{
-			if (m_Scene == nullptr || !Utils::AffectsOpenScene(*m_Scene, m_ScenePath, change))
-				return;
-			m_SceneChangedOnDisk = true;
-			const bool dirty = IsSceneDirty();
 			const std::string path(change.Path.GetPath());
-			AppendEvent(EngineEvent{ .Seq = 0, .Tick = std::nullopt, .Type = EngineEventType::SceneChangedOnDisk, .Id = change.Handle, .Path = path, .Name = {}, .Message = {}, .Dirty = dirty });
-			ENGINE_WARN("'{}' changed on disk; the open scene '{}' was left as it is{} (scene.open {{reload: true}} adopts the disk version)", path,
-				m_Scene->GetName(), dirty ? " with its unsaved changes" : "");
+			const auto report = [this, &change, &path](const Scene& scene, bool dirty)
+			{
+				AppendEvent(EngineEvent{ .Seq = 0, .Tick = std::nullopt, .Type = EngineEventType::SceneChangedOnDisk, .Id = change.Handle, .Path = path, .Name = {}, .Message = {}, .Dirty = dirty });
+				ENGINE_WARN("'{}' changed on disk; the open scene '{}' was left as it is{} (scene.open {{reload: true}} adopts the disk version)", path,
+					scene.GetName(), dirty ? " with its unsaved changes" : "");
+			};
+			const auto reportMembers = [this, &change, &report]()
+			{
+				if (m_Scene == nullptr || !Utils::AffectsOpenScene(*m_Scene, m_ScenePath, change))
+					return;
+				m_SceneChangedOnDisk = true;
+				report(*m_Scene, IsSceneDirty());
+			};
+			for (OpenSceneDocument& document : m_OpenScenes)
+			{
+				if (document.Id == m_AddressedScene)
+				{
+					reportMembers();
+					continue;
+				}
+				if (document.SceneObject == nullptr || !Utils::AffectsOpenScene(*document.SceneObject, document.Path, change))
+					continue;
+				document.ChangedOnDisk = true;
+				report(*document.SceneObject, document.Dirty || document.History.IsDirty());
+			}
+			// The members can hold a scene that is no open scene: a dry run's scene.new while none is open.
+			if (m_AddressedScene == NoOpenScene)
+				reportMembers();
 		});
 
 		// The UI's write context, so an import the UI starts before any request keeps "ui" (decision 10).
@@ -856,12 +890,12 @@ namespace Engine {
 
 	Result<Scope<Command>> EditorContext::CreatePrefabUpdateCommand(std::span<const AssetHandle> prefabs)
 	{
-		if (m_Scene == nullptr)
+		if (!HasScene())
 		{
 			return std::unexpected(Error(ErrorCode::InvalidState, "the prefab instances cannot be updated: no scene is open")
 					.WithHint("open a scene with scene.open first"));
 		}
-		Scene& scene = *m_Scene;
+		Scene& scene = GetScene();
 		ENGINE_ASSERT(!scene.GetChangeTracker().IsTracking(), "EditorContext::CreatePrefabUpdateCommand while a SceneEdit is active");
 
 		// The update runs once under the change tracker to find what it changes, and is then rolled back: the command applies
@@ -913,6 +947,67 @@ namespace Engine {
 		if (changes.empty())
 			return Scope<Command>();
 		return Scope<Command>(CreateScope<Utils::PrefabUpdateCommand>("Update Prefab Instances", std::move(changes)));
+	}
+
+	void EditorContext::PropagatePrefabUpdate(std::span<const AssetHandle> prefabs)
+	{
+		if (IsDryRun() || !HasProject() || prefabs.empty())
+			return;
+		const OpenSceneId addressed = GetAddressedSceneId();
+		std::vector<OpenSceneId> others;
+		for (const OpenSceneId id : GetOpenScenes())
+		{
+			if (id != addressed)
+				others.push_back(id);
+		}
+		if (others.empty())
+			return;
+		std::vector<AssetHandle> changed(prefabs.begin(), prefabs.end());
+		std::ranges::sort(changed);
+		changed.erase(std::ranges::unique(changed).begin(), changed.end());
+		const Result<std::vector<AssetHandle>> rebuilt = Utils::AddNestingPrefabs(*this, changed);
+		if (!rebuilt)
+		{
+			ENGINE_ERROR("The other open scenes keep their prefab instances: {}", rebuilt.error().ToString());
+			return;
+		}
+		// The other open scenes that instantiate a changed prefab, directly or through nesting, in tab order.
+		std::vector<OpenSceneId> following;
+		for (const OpenSceneId id : others)
+		{
+			const Scene* scene = std::as_const(*this).FindScene(id);
+			if (scene != nullptr && !Utils::FindPrefabInstances(*scene, *rebuilt).empty())
+				following.push_back(id);
+		}
+		if (following.empty())
+			return;
+
+		// Each scene's rebuild is an entry of that scene's own history, never part of the transaction of the action that
+		// changed the prefabs, so undo stays isolated per scene. Each scene is addressed for its rebuild and the scene
+		// addressed before comes back after it, directly rather than through an EditorSceneTargetScope: a targeted request's
+		// own scope may be open, and the addressed scene's history may be undoing or redoing the step that propagates
+		// (CommandHistory keeps its state behind a pointer, which parking moves out and unparking brings back unchanged).
+		EditorTransaction* const transaction = std::exchange(m_Transaction, nullptr);
+		for (const OpenSceneId id : following)
+		{
+			ParkAddressedScene();
+			UnparkScene(id);
+			const Status followed = [this, &changed]() -> Status
+			{
+				ENGINE_TRY_ASSIGN(Scope<Command> update, CreatePrefabUpdateCommand(changed));
+				if (update == nullptr)
+					return {};
+				ENGINE_TRY_ASSIGN(const uint64_t index, Execute(std::move(update)));
+				static_cast<void>(index);
+				return {};
+			}();
+			if (!followed)
+				ENGINE_ERROR("The open scene '{}' keeps its prefab instances after a prefab update: {}", m_Scene->GetName(), followed.error().ToString());
+			ParkAddressedScene();
+			if (addressed != NoOpenScene)
+				UnparkScene(addressed);
+		}
+		m_Transaction = transaction;
 	}
 
 	Result<Scope<EditorContext>> EditorContext::Create(EngineContext& engine, const EditorContextSpecification& specification)
@@ -1031,7 +1126,16 @@ namespace Engine {
 	{
 		// During a dry run the base may have wrapped around (EditorDryRunScope::Begin); unsigned arithmetic makes the sum the
 		// real revision plus the sandbox's mutations all the same.
-		return m_RevisionBase + (m_Scene != nullptr ? m_Scene->GetRevision() : 0);
+		const uint64_t sceneRevision = m_Scene != nullptr ? m_Scene->GetRevision() : 0;
+		// A scene unparked behind a newer revision of another open scene keeps its own until it changes (UnparkScene).
+		if (m_KeptRevision.has_value() && sceneRevision == m_KeptSceneRevision)
+			return *m_KeptRevision;
+		return m_RevisionBase + sceneRevision;
+	}
+
+	uint64_t EditorContext::GetRevisionHighWater() const
+	{
+		return std::max(m_RevisionHighWater, GetRevision());
 	}
 
 	uint64_t EditorContext::GetRevisionBeforeCommand() const
@@ -1107,7 +1211,12 @@ namespace Engine {
 
 		m_Project = std::move(project);
 		m_Provenance = std::move(provenance);
+		m_OpenScenes.clear();
+		m_ActiveScene = NoOpenScene;
+		m_AddressedScene = NoOpenScene;
+		m_PlayedScene = NoOpenScene;
 		m_Scene.reset();
+		m_KeptRevision.reset();
 		m_ScenePath.reset();
 		m_SceneDirty = false;
 		m_SceneChangedOnDisk = false;
@@ -1306,7 +1415,13 @@ namespace Engine {
 			const Status stopped = m_Play->Stop();
 			ENGINE_ASSERT(stopped.has_value(), "stopping the play session of a closing project failed: {}", stopped ? std::string() : stopped.error().ToString());
 		}
-		CloseScene();
+		// Every open scene closes with the project, which says so itself: no SceneClosed events.
+		if (m_Scene != nullptr || !m_OpenScenes.empty())
+			ClearAddressedScene();
+		m_OpenScenes.clear();
+		m_ActiveScene = NoOpenScene;
+		m_AddressedScene = NoOpenScene;
+		m_PlayedScene = NoOpenScene;
 		// M12: a preview plays a clip of the closing project.
 		if (m_AudioPreview != nullptr)
 			m_AudioPreview->Stop();
@@ -1344,6 +1459,9 @@ namespace Engine {
 		if (!existing || *existing != text)
 			ENGINE_TRY(WriteProjectFile(path, std::as_bytes(std::span(text.data(), text.size()))));
 		m_Project->SetSettings(std::move(settings));
+		// A change of the addressed scene's revision: one it kept since it was unparked continues past every revision
+		// reported meanwhile (UnparkScene).
+		m_KeptRevision.reset();
 		++m_RevisionBase;
 		return {};
 	}
@@ -1375,12 +1493,35 @@ namespace Engine {
 			"EditorContext::SetScene: scene '{}' was not created with EditorContext::CreateScene", scene->GetName());
 		ENGINE_ASSERT(m_Transaction == nullptr, "EditorContext::SetScene inside a transaction");
 
-		// Past every value reported so far, so a revision of the previous scene never matches this one (ADR 0008 decision 28).
-		const uint64_t nextBase = GetRevision() + 1;
+		// A dry run replaces only its sandbox scene: the open scenes, their ids and the active one stay as they are.
+		if (IsDryRun())
+		{
+			InstallScene(std::move(scene), std::move(path), dirty);
+			return;
+		}
+		// The addressed scene is replaced in its tab position with a new id (the first open scene when none is addressed),
+		// and becomes the active one.
+		const OpenSceneId id = AllocateOpenSceneId();
+		if (OpenSceneDocument* replaced = FindDocument(m_AddressedScene); replaced != nullptr)
+			replaced->Id = id;
+		else
+			m_OpenScenes.push_back(OpenSceneDocument{ .Id = id });
+		m_AddressedScene = id;
+		m_ActiveScene = id;
+		InstallScene(std::move(scene), std::move(path), dirty);
+	}
+
+	void EditorContext::InstallScene(Scope<Scene> scene, std::optional<VfsPath> path, bool dirty)
+	{
+		// Past every value reported so far, in any open scene, so a revision of another scene never matches this one (ADR
+		// 0008 decision 28; with one open scene: past the previous scene's).
+		const uint64_t nextBase = GetRevisionHighWater() + 1;
+		m_RevisionHighWater = nextBase - 1;
 		m_Scene = std::move(scene);
+		m_KeptRevision.reset();
 		m_RevisionBase = nextBase;
 		if (!IsDryRun())
-			++m_SceneDocumentEpoch;
+			m_SceneDocumentEpoch = ++m_LastDocumentEpoch;
 		m_ScenePath = std::move(path);
 		m_SceneDirty = dirty;
 		m_SceneChangedOnDisk = false;
@@ -1397,18 +1538,16 @@ namespace Engine {
 			pathText.empty() ? std::string(", not saved yet") : std::format(" from '{}'", pathText), dirty ? ", with unsaved repairs" : "");
 	}
 
-	void EditorContext::CloseScene()
+	void EditorContext::ClearAddressedScene()
 	{
-		if (m_Play->IsTestRunActive())
-			return;
-		if (m_Scene == nullptr)
-			return;
-		ENGINE_ASSERT(m_Transaction == nullptr, "EditorContext::CloseScene inside a transaction");
-		const uint64_t nextBase = GetRevision() + 1;
+		// Past every value reported so far, so the next scene's revisions never repeat this one's.
+		const uint64_t nextBase = GetRevisionHighWater() + 1;
+		m_RevisionHighWater = nextBase - 1;
 		m_Scene.reset();
+		m_KeptRevision.reset();
 		m_RevisionBase = nextBase;
 		if (!IsDryRun())
-			++m_SceneDocumentEpoch;
+			m_SceneDocumentEpoch = ++m_LastDocumentEpoch;
 		m_ScenePath.reset();
 		m_SceneDirty = false;
 		m_SceneChangedOnDisk = false;
@@ -1420,71 +1559,341 @@ namespace Engine {
 		m_UiState.SetSelectedAsset({});
 	}
 
+	void EditorContext::CloseScene()
+	{
+		if (m_Play->IsTestRunActive())
+			return;
+		if (m_Scene == nullptr)
+			return;
+		ENGINE_ASSERT(m_Transaction == nullptr, "EditorContext::CloseScene inside a transaction");
+		// A dry run closes only its sandbox scene; so does a scene that is no open scene (a dry run's scene.new).
+		if (IsDryRun() || m_AddressedScene == NoOpenScene)
+		{
+			ClearAddressedScene();
+			return;
+		}
+		RemoveOpenScene(m_AddressedScene);
+	}
+
+	void EditorContext::RemoveOpenScene(OpenSceneId id)
+	{
+		const auto document = std::ranges::find(m_OpenScenes, id, &OpenSceneDocument::Id);
+		ENGINE_ASSERT(document != m_OpenScenes.end(), "EditorContext::RemoveOpenScene of a scene that is not open");
+		const size_t position = static_cast<size_t>(document - m_OpenScenes.begin());
+		const bool active = id == m_ActiveScene;
+		std::optional<VfsPath> path;
+		if (id == m_AddressedScene)
+		{
+			path = m_ScenePath;
+			ClearAddressedScene();
+			m_AddressedScene = NoOpenScene;
+		}
+		else
+		{
+			path = document->Path; // its revision is already in the high-water mark (ParkAddressedScene)
+		}
+		m_OpenScenes.erase(document);
+		if (active)
+		{
+			// The next tab becomes active, the previous one when the closed tab was the last.
+			if (position < m_OpenScenes.size())
+				m_ActiveScene = m_OpenScenes[position].Id;
+			else
+				m_ActiveScene = position > 0 ? m_OpenScenes[position - 1].Id : NoOpenScene;
+		}
+		// Inside a target scope the closed scene leaves the scope addressing no scene until it ends.
+		if (m_TargetScope == nullptr && m_AddressedScene == NoOpenScene && m_ActiveScene != NoOpenScene)
+			UnparkScene(m_ActiveScene);
+		AppendOpenSceneEvent(EngineEventType::SceneClosed, path);
+	}
+
 	std::vector<OpenSceneId> EditorContext::GetOpenScenes() const
 	{
-		ENGINE_CONTRACT_STUB();
-		// M20 open scenes (Docs/Decisions/0031-m20-contract.md decision 13, stream S-A).
-		return {};
+		std::vector<OpenSceneId> ids;
+		ids.reserve(m_OpenScenes.size());
+		for (const OpenSceneDocument& document : m_OpenScenes)
+			ids.push_back(document.Id);
+		return ids;
 	}
 
 	OpenSceneId EditorContext::GetActiveSceneId() const
 	{
-		ENGINE_CONTRACT_STUB();
-		return NoOpenScene;
+		return m_ActiveScene;
 	}
 
 	OpenSceneId EditorContext::GetAddressedSceneId() const
 	{
-		ENGINE_CONTRACT_STUB();
+		return m_AddressedScene;
+	}
+
+	OpenSceneId EditorContext::FindOpenScene(const VfsPath& path) const
+	{
+		for (const OpenSceneDocument& document : m_OpenScenes)
+		{
+			const std::optional<VfsPath>& scenePath = document.Id == m_AddressedScene ? m_ScenePath : document.Path;
+			if (scenePath.has_value() && *scenePath == path)
+				return document.Id;
+		}
 		return NoOpenScene;
 	}
 
-	OpenSceneId EditorContext::FindOpenScene(const VfsPath& /*path*/) const
+	Scene* EditorContext::FindScene(OpenSceneId id)
 	{
-		ENGINE_CONTRACT_STUB();
-		return NoOpenScene;
+		OpenSceneDocument* document = FindDocument(id);
+		if (document == nullptr)
+			return nullptr;
+		return id == m_AddressedScene ? m_Scene.get() : document->SceneObject.get();
 	}
 
-	Scene* EditorContext::FindScene(OpenSceneId /*id*/)
+	const Scene* EditorContext::FindScene(OpenSceneId id) const
 	{
-		ENGINE_CONTRACT_STUB();
-		return nullptr;
+		const OpenSceneDocument* document = FindDocument(id);
+		if (document == nullptr)
+			return nullptr;
+		return id == m_AddressedScene ? m_Scene.get() : document->SceneObject.get();
 	}
 
-	const Scene* EditorContext::FindScene(OpenSceneId /*id*/) const
+	Result<OpenSceneInfo> EditorContext::DescribeOpenScene(OpenSceneId id) const
 	{
-		ENGINE_CONTRACT_STUB();
-		return nullptr;
-	}
-
-	Result<OpenSceneInfo> EditorContext::DescribeOpenScene(OpenSceneId /*id*/) const
-	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "M20 open scenes contract (Docs/Decisions/0031-m20-contract.md decision 13, stream S-A)");
+		const OpenSceneDocument* document = FindDocument(id);
+		if (document == nullptr)
+		{
+			return std::unexpected(Error(ErrorCode::NotFound, std::format("no open scene has the id {}", id))
+					.WithHint("scene.list lists the open scenes with their ids"));
+		}
+		OpenSceneInfo info;
+		info.Id = id;
+		info.Active = id == m_ActiveScene;
+		const Scene* scene = nullptr;
+		if (id == m_AddressedScene)
+		{
+			scene = m_Scene.get();
+			info.Path = m_ScenePath;
+			info.Revision = GetRevision();
+			info.Dirty = IsSceneDirty();
+			info.ChangedOnDisk = m_SceneChangedOnDisk;
+		}
+		else
+		{
+			scene = document->SceneObject.get();
+			info.Path = document->Path;
+			info.Revision = document->Revision;
+			info.Dirty = document->Dirty || document->History.IsDirty();
+			info.ChangedOnDisk = document->ChangedOnDisk;
+		}
+		info.Name = scene != nullptr ? scene->GetName() : std::string();
+		info.EntityCount = scene != nullptr ? scene->GetEntityCount() : 0;
+		return info;
 	}
 
 	bool EditorContext::IsAnySceneDirty() const
 	{
-		ENGINE_CONTRACT_STUB();
-		return false;
+		if (IsSceneDirty())
+			return true;
+		return std::ranges::any_of(m_OpenScenes, [this](const OpenSceneDocument& document)
+		{
+			return document.Id != m_AddressedScene && (document.Dirty || document.History.IsDirty());
+		});
 	}
 
-	Result<OpenSceneId> EditorContext::AddScene(Scope<Scene> /*scene*/, std::optional<VfsPath> /*path*/, bool /*dirty*/)
+	Status EditorContext::CheckOpenScenesChange(std::string_view action) const
 	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "M20 open scenes contract (Docs/Decisions/0031-m20-contract.md decision 14, stream S-A)");
+		if (m_Play->IsTestRunActive())
+			return MakeError(ErrorCode::InvalidState, "cannot {}: a test run owns the editor", action);
+		if (m_Transaction != nullptr)
+			return MakeError(ErrorCode::InvalidState, "cannot {} inside a transaction", action);
+		if (IsDryRun())
+			return MakeError(ErrorCode::InvalidState, "cannot {} in a dry run", action);
+		return {};
 	}
 
-	Status EditorContext::ActivateScene(OpenSceneId /*id*/)
+	Result<OpenSceneId> EditorContext::AddScene(Scope<Scene> scene, std::optional<VfsPath> path, bool dirty)
 	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "M20 open scenes contract (Docs/Decisions/0031-m20-contract.md decision 14, stream S-A)");
+		ENGINE_TRY(CheckOpenScenesChange("open another scene"));
+		ENGINE_ASSERT(HasProject(), "EditorContext::AddScene needs an open project");
+		ENGINE_ASSERT(scene != nullptr, "EditorContext::AddScene needs a scene");
+		ENGINE_ASSERT(&scene->GetTypeRegistry() == &GetTypeRegistry() && &scene->GetUUIDGenerator() == &m_IdGenerator,
+			"EditorContext::AddScene: scene '{}' was not created with EditorContext::CreateScene", scene->GetName());
+		if (m_OpenScenes.size() >= MaxOpenScenes)
+		{
+			return std::unexpected(Error(ErrorCode::InvalidState, std::format("cannot open '{}': {} scenes are open, the most the editor holds", scene->GetName(), MaxOpenScenes))
+					.WithHint("close an open scene first (scene.close)"));
+		}
+		if (path.has_value())
+		{
+			if (const OpenSceneId open = FindOpenScene(*path); open != NoOpenScene)
+			{
+				return std::unexpected(Error(ErrorCode::AlreadyExists, std::format("'{}' is already open (open scene {})", path->GetPath(), open))
+						.WithHint("scene.activate makes it the active scene"));
+			}
+		}
+		// Inside a target scope the scope keeps addressing its scene; the new scene is active all the same.
+		const OpenSceneId scoped = m_TargetScope != nullptr ? m_AddressedScene : NoOpenScene;
+		ParkAddressedScene();
+		const OpenSceneId id = AllocateOpenSceneId();
+		m_OpenScenes.push_back(OpenSceneDocument{ .Id = id });
+		m_AddressedScene = id;
+		m_ActiveScene = id;
+		InstallScene(std::move(scene), std::move(path), dirty);
+		if (m_TargetScope != nullptr)
+		{
+			ParkAddressedScene();
+			if (scoped != NoOpenScene)
+				UnparkScene(scoped);
+		}
+		return id;
 	}
 
-	Status EditorContext::CloseScene(OpenSceneId /*id*/)
+	Status EditorContext::ActivateScene(OpenSceneId id)
 	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "M20 open scenes contract (Docs/Decisions/0031-m20-contract.md decision 14, stream S-A)");
+		ENGINE_TRY(CheckOpenScenesChange(std::format("activate open scene {}", id)));
+		if (FindDocument(id) == nullptr)
+		{
+			return std::unexpected(Error(ErrorCode::NotFound, std::format("no open scene has the id {}", id))
+					.WithHint("scene.list lists the open scenes with their ids"));
+		}
+		if (m_TargetScope != nullptr && id != m_AddressedScene)
+			return MakeError(ErrorCode::InvalidState, "cannot activate open scene {} while a request addresses another open scene", id);
+		if (id == m_ActiveScene)
+			return {};
+		// Inside the scope of `id` that scene is already the addressed one; otherwise the active document is parked.
+		if (m_TargetScope == nullptr)
+		{
+			ParkAddressedScene();
+			UnparkScene(id);
+		}
+		m_ActiveScene = id;
+		const std::optional<VfsPath> path = id == m_AddressedScene ? m_ScenePath : FindDocument(id)->Path;
+		AppendOpenSceneEvent(EngineEventType::SceneActivated, path);
+		return {};
+	}
+
+	Status EditorContext::CloseScene(OpenSceneId id)
+	{
+		ENGINE_TRY(CheckOpenScenesChange(std::format("close open scene {}", id)));
+		if (FindDocument(id) == nullptr)
+		{
+			return std::unexpected(Error(ErrorCode::NotFound, std::format("no open scene has the id {}", id))
+					.WithHint("scene.list lists the open scenes with their ids"));
+		}
+		if (m_TargetScope != nullptr && id != m_AddressedScene)
+			return MakeError(ErrorCode::InvalidState, "cannot close open scene {} while a request addresses another open scene", id);
+		RemoveOpenScene(id);
+		return {};
+	}
+
+	EditorContext::OpenSceneDocument* EditorContext::FindDocument(OpenSceneId id)
+	{
+		if (id == NoOpenScene)
+			return nullptr;
+		const auto document = std::ranges::find(m_OpenScenes, id, &OpenSceneDocument::Id);
+		return document != m_OpenScenes.end() ? &*document : nullptr;
+	}
+
+	const EditorContext::OpenSceneDocument* EditorContext::FindDocument(OpenSceneId id) const
+	{
+		if (id == NoOpenScene)
+			return nullptr;
+		const auto document = std::ranges::find(m_OpenScenes, id, &OpenSceneDocument::Id);
+		return document != m_OpenScenes.end() ? &*document : nullptr;
+	}
+
+	OpenSceneId EditorContext::AllocateOpenSceneId()
+	{
+		ENGINE_VERIFY(m_LastOpenSceneId < std::numeric_limits<OpenSceneId>::max(), "EditorContext: the open-scene ids are exhausted");
+		return ++m_LastOpenSceneId;
+	}
+
+	void EditorContext::ParkAddressedScene()
+	{
+		OpenSceneDocument* document = FindDocument(m_AddressedScene);
+		if (document == nullptr)
+			return;
+		ENGINE_ASSERT(!IsDryRun() && m_Transaction == nullptr, "EditorContext: an open scene is parked inside a dry run or a transaction");
+		document->Revision = GetRevision();
+		m_RevisionHighWater = std::max(m_RevisionHighWater, document->Revision);
+		document->SceneObject = std::move(m_Scene);
+		document->Path = std::exchange(m_ScenePath, std::nullopt);
+		document->DocumentEpoch = m_SceneDocumentEpoch;
+		document->Dirty = std::exchange(m_SceneDirty, false);
+		document->ChangedOnDisk = std::exchange(m_SceneChangedOnDisk, false);
+		document->History = std::exchange(m_History, CommandHistory(m_Specification.HistoryLimits));
+		document->Selection = std::exchange(m_Selection, {});
+		document->SelectionTarget = std::exchange(m_SelectionTarget, SceneTarget::Edit);
+		document->SelectionSession = std::exchange(m_SelectionSession, 0);
+		document->SelectionSceneGeneration = std::exchange(m_SelectionSceneGeneration, 0);
+		// No scene is addressed until the next one is unparked: the revision then stays the newest reported.
+		m_KeptRevision.reset();
+		m_RevisionBase = m_RevisionHighWater;
+		m_AddressedScene = NoOpenScene;
+	}
+
+	void EditorContext::UnparkScene(OpenSceneId id)
+	{
+		ENGINE_ASSERT(m_AddressedScene == NoOpenScene, "EditorContext::UnparkScene while another scene is addressed");
+		OpenSceneDocument* document = FindDocument(id);
+		ENGINE_ASSERT(document != nullptr, "EditorContext::UnparkScene of a scene that is not open");
+		const uint64_t floor = GetRevisionHighWater();
+		m_RevisionHighWater = floor;
+		m_Scene = std::move(document->SceneObject);
+		m_ScenePath = std::exchange(document->Path, std::nullopt);
+		m_SceneDocumentEpoch = document->DocumentEpoch;
+		m_SceneDirty = document->Dirty;
+		m_SceneChangedOnDisk = document->ChangedOnDisk;
+		m_History = std::move(document->History);
+		m_Selection = std::exchange(document->Selection, {});
+		m_SelectionTarget = document->SelectionTarget;
+		m_SelectionSession = document->SelectionSession;
+		m_SelectionSceneGeneration = document->SelectionSceneGeneration;
+		m_AddressedScene = id;
+
+		// Its revision stays what it was parked with until its scene changes. When another scene reported a newer one
+		// meanwhile, the first change continues past that one, so a revision never names two states (decision 13).
+		const uint64_t sceneRevision = m_Scene != nullptr ? m_Scene->GetRevision() : 0;
+		if (document->Revision >= floor)
+		{
+			m_KeptRevision.reset();
+			m_RevisionBase = document->Revision - sceneRevision;
+		}
+		else
+		{
+			m_KeptRevision = document->Revision;
+			m_KeptSceneRevision = sceneRevision;
+			m_RevisionBase = floor - sceneRevision;
+		}
+
+		// A selection made in a play session that ended while this scene was parked comes back to its edit scene when this is
+		// the scene that session played, as Stop carries it back, and is dropped otherwise (one made after the played tab
+		// closed: decision 13); one of a session that replaced it is dropped by PruneSelection as before.
+		if (m_SelectionTarget == SceneTarget::Play && m_Play->GetSession() == nullptr)
+		{
+			const bool played = id == m_PlayedScene;
+			std::erase_if(m_Selection, [this, played](UUID entity)
+			{
+				return !played || m_Scene == nullptr || !std::as_const(*m_Scene).FindEntityByID(entity).IsValid();
+			});
+			m_SelectionTarget = SceneTarget::Edit;
+			m_SelectionSession = 0;
+			m_SelectionSceneGeneration = 0;
+		}
+	}
+
+	void EditorContext::AppendOpenSceneEvent(EngineEventType type, const std::optional<VfsPath>& path)
+	{
+		const std::string pathText = path.has_value() ? std::string(path->GetPath()) : std::string();
+		AppendEvent(EngineEvent{ .Seq = 0, .Tick = std::nullopt, .Type = type, .Id = UUID(), .Path = pathText, .Name = {}, .Message = {}, .Dirty = false });
+	}
+
+	bool EditorContext::ShowsPlaySession(const PlaySession* session) const
+	{
+		return session != nullptr && (session->GetSerial() != m_PlayedSession || m_PlayedScene == m_AddressedScene);
+	}
+
+	bool EditorContext::ShowsPlayScene() const
+	{
+		if (m_Play->GetSession() == nullptr)
+			return false;
+		return m_Play->IsTestRunActive() || m_Play->GetPlayedScene() == m_ActiveScene;
 	}
 
 	bool EditorContext::IsSceneDirty() const
@@ -1539,8 +1948,9 @@ namespace Engine {
 
 	void EditorContext::SetSelection(std::vector<UUID> selection)
 	{
-		// Legacy callers address the shown scene. After Stop the same UUIDs are filtered against the edit scene.
-		const PlaySession* session = m_Play->GetSession();
+		// Legacy callers address the shown scene. After Stop the same UUIDs are filtered against the edit scene. With several
+		// open scenes the play scene is shown only in the tab of the scene the session plays (decision 13).
+		const PlaySession* session = ShowsPlaySession(m_Play->GetSession()) ? m_Play->GetSession() : nullptr;
 		const Scene* scene = session != nullptr ? &session->GetScene() : m_Scene.get();
 		std::vector<UUID> kept;
 		kept.reserve(selection.size());
@@ -1818,6 +2228,11 @@ namespace Engine {
 		CommandHistory RealHistory{};
 		std::optional<UUIDGenerator> RealIdGenerator{};
 		uint64_t RealRevisionBase = 0;
+		std::optional<uint64_t> RealKeptRevision{};
+		uint64_t RealKeptSceneRevision = 0;
+		uint64_t RealRevisionHighWater = 0;
+		OpenSceneId RealPlayedScene = NoOpenScene;
+		uint64_t RealPlayedSession = 0;
 		std::vector<UUID> RealSelection{};
 		SceneTarget RealSelectionTarget = SceneTarget::Edit;
 		uint64_t RealSelectionSession = 0;
@@ -1875,10 +2290,18 @@ namespace Engine {
 		State& state = *scope->m_State;
 		state.Overlay = overlayMount;
 		const uint64_t realRevision = context.GetRevision();
+		const uint64_t realSceneRevision = context.m_Scene != nullptr ? context.m_Scene->GetRevision() : 0;
+		// The real scene still keeps the revision it was unparked with (UnparkScene): the copy keeps it until it changes.
+		const bool keptRevision = context.m_KeptRevision.has_value() && realSceneRevision == context.m_KeptSceneRevision;
 		state.RealScenePath = context.m_ScenePath;
 		state.RealSceneDirty = context.m_SceneDirty;
 		state.RealIdGenerator = context.m_IdGenerator;
 		state.RealRevisionBase = context.m_RevisionBase;
+		state.RealKeptRevision = context.m_KeptRevision;
+		state.RealKeptSceneRevision = context.m_KeptSceneRevision;
+		state.RealRevisionHighWater = context.m_RevisionHighWater;
+		state.RealPlayedScene = context.m_PlayedScene;
+		state.RealPlayedSession = context.m_PlayedSession;
 		state.RealSelection = context.m_Selection;
 		state.RealSelectionTarget = context.m_SelectionTarget;
 		state.RealSelectionSession = context.m_SelectionSession;
@@ -1893,8 +2316,19 @@ namespace Engine {
 		context.m_Scene = std::move(copy);
 		context.m_SceneDirty = realDirty; // the sandbox history starts clean; a dirty real scene stays dirty
 		// GetRevision must report the real revision plus the sandbox's mutations. Loading the copy counted mutations of its
-		// own, possibly more than the real revision, so the base may wrap around; the unsigned sum is still exact.
-		context.m_RevisionBase = realRevision - (context.m_Scene != nullptr ? context.m_Scene->GetRevision() : 0);
+		// own, possibly more than the real revision, so the base may wrap around; the unsigned sum is still exact. A kept
+		// revision (UnparkScene) stays kept until the copy changes, and then continues as the real scene's would.
+		const uint64_t copyRevision = context.m_Scene != nullptr ? context.m_Scene->GetRevision() : 0;
+		context.m_RevisionBase = context.m_RevisionBase + realSceneRevision - copyRevision;
+		if (keptRevision)
+		{
+			context.m_KeptRevision = realRevision;
+			context.m_KeptSceneRevision = copyRevision;
+		}
+		else
+		{
+			context.m_KeptRevision.reset();
+		}
 		context.m_DryRun = scope.get();
 		state.Active = true;
 		// The asset manager writes into the overlay and keeps a snapshot to restore (M6): registry updates, imports and
@@ -1921,6 +2355,11 @@ namespace Engine {
 		context.m_History = std::move(state.RealHistory);
 		context.m_IdGenerator = *state.RealIdGenerator;
 		context.m_RevisionBase = state.RealRevisionBase;
+		context.m_KeptRevision = state.RealKeptRevision;
+		context.m_KeptSceneRevision = state.RealKeptSceneRevision;
+		context.m_RevisionHighWater = state.RealRevisionHighWater;
+		context.m_PlayedScene = state.RealPlayedScene;
+		context.m_PlayedSession = state.RealPlayedSession;
 		context.m_Selection = std::move(state.RealSelection);
 		context.m_SelectionTarget = state.RealSelectionTarget;
 		context.m_SelectionSession = state.RealSelectionSession;
@@ -1950,10 +2389,13 @@ namespace Engine {
 		return m_State->Overlay != nullptr ? m_State->Overlay->GetChangedPaths() : std::vector<std::string>{};
 	}
 
+	// --- EditorSceneTargetScope ------------------------------------------------------------------------------------------
+
 	struct EditorSceneTargetScope::State
 	{
 		EditorContext* Context = nullptr; // documented back-reference: outlives the scope
 		OpenSceneId Scene = NoOpenScene;
+		bool Active = false; // Begin made it the context's scope
 	};
 
 	EditorSceneTargetScope::EditorSceneTargetScope(ConstructionKey /*key*/, EditorContext& context, OpenSceneId scene)
@@ -1961,17 +2403,52 @@ namespace Engine {
 	{
 	}
 
-	Result<Scope<EditorSceneTargetScope>> EditorSceneTargetScope::Begin(EditorContext& /*context*/, OpenSceneId /*scene*/)
+	Result<Scope<EditorSceneTargetScope>> EditorSceneTargetScope::Begin(EditorContext& context, OpenSceneId scene)
 	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "M20 scene target scope contract (Docs/Decisions/0031-m20-contract.md decision 13, stream S-A)");
+		if (context.IsDryRun() || context.m_Transaction != nullptr)
+			return MakeError(ErrorCode::InvalidState, "a request cannot address open scene {} inside a dry run or a transaction", scene);
+		if (context.m_TargetScope != nullptr)
+			return MakeError(ErrorCode::InvalidState, "a request cannot address open scene {} while another request addresses an open scene", scene);
+		if (context.FindDocument(scene) == nullptr)
+		{
+			return std::unexpected(Error(ErrorCode::NotFound, std::format("no open scene has the id {}", scene))
+					.WithHint("scene.list lists the open scenes with their ids"));
+		}
+		Scope<EditorSceneTargetScope> scope = CreateScope<EditorSceneTargetScope>(ConstructionKey(), context, scene);
+		if (scene != context.m_AddressedScene)
+		{
+			context.ParkAddressedScene();
+			context.UnparkScene(scene);
+		}
+		context.m_TargetScope = scope.get();
+		scope->m_State->Active = true;
+		return scope;
 	}
 
-	EditorSceneTargetScope::~EditorSceneTargetScope() = default;
+	EditorSceneTargetScope::~EditorSceneTargetScope()
+	{
+		State& state = *m_State;
+		if (!state.Active)
+			return;
+		EditorContext& context = *state.Context;
+		ENGINE_ASSERT(context.m_TargetScope == this, "EditorSceneTargetScope: scopes do not nest");
+		ENGINE_ASSERT(context.m_DryRun == nullptr && context.m_Transaction == nullptr,
+			"EditorSceneTargetScope closed while a dry run or a transaction opened in it is still open");
+		context.m_TargetScope = nullptr;
+		// The active scene is the addressed one again; the scope's scene, still open or not, keeps its document.
+		if (context.m_AddressedScene != context.m_ActiveScene)
+		{
+			context.ParkAddressedScene();
+			if (context.m_ActiveScene != NoOpenScene)
+				context.UnparkScene(context.m_ActiveScene);
+		}
+	}
 
 	OpenSceneId EditorSceneTargetScope::GetScene() const
 	{
-		return m_State->Scene;
+		// While it is open, the scene it addresses now: SetScene's replacement of it has a new id, and it addresses no scene
+		// once its scene closed.
+		return m_State->Active ? m_State->Context->m_AddressedScene : m_State->Scene;
 	}
 
 }

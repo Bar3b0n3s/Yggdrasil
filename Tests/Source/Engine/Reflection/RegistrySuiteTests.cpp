@@ -125,16 +125,42 @@ namespace Engine {
 		});
 	}
 
+	// Whether the script slot JSON `slot` names a script, so its Fields have a schema (§11.2).
+	static bool NamesScript(const Json& slot)
+	{
+		const auto script = slot.is_object() ? slot.find("Script") : slot.end();
+		return slot.is_object() && script != slot.end() && !script->is_null();
+	}
+
 	// Whether every Variant value in `json`, a value of `type`, has a schema to resolve against: not when random values
-	// name random override targets, nor for a Script component without a script, whose Fields have no schema (§11.2).
+	// name random override targets, nor for a script slot without a script, whose Fields have no schema (§11.2), alone or
+	// in a Script component's list.
 	static bool CanResolveEveryVariant(const StructInfo& type, const Json& json)
 	{
 		if (HasUnresolvableRandomTargets(type.GetType()))
 			return false;
+		if (type.GetType().GetKey() == TypeKeyOf<ScriptSlot>())
+			return NamesScript(json);
 		if (type.GetType().GetKey() != TypeKeyOf<ScriptComponent>())
 			return true;
-		const auto script = json.find("Script");
-		return script != json.end() && !script->is_null();
+		const auto slots = json.find("Scripts");
+		return slots == json.end() || !slots->is_array() || std::all_of(slots->begin(), slots->end(), &NamesScript);
+	}
+
+	// Whether `json`, a value of the component `type`, gives field values to a script slot without a script: they have no
+	// schema to resolve against (§11.2), so a strict write such as entity.update's refuses them.
+	static bool HasFieldsWithoutScript(const StructInfo& type, const Json& json)
+	{
+		if (type.GetType().GetKey() != TypeKeyOf<ScriptComponent>())
+			return false;
+		const auto slots = json.find("Scripts");
+		if (slots == json.end() || !slots->is_array())
+			return false;
+		return std::any_of(slots->begin(), slots->end(), [](const Json& slot)
+		{
+			const auto fields = slot.is_object() ? slot.find("Fields") : slot.end();
+			return !NamesScript(slot) && fields != slot.end() && fields->is_object() && !fields->empty();
+		});
 	}
 
 	static void CheckRandomRoundTrips(const TypeRegistry& registry, int iterations)
@@ -250,7 +276,7 @@ namespace Engine {
 					if (!field->IsStored() || !field->GetMeta().Serialized)
 						continue;
 					INFO(field->GetName());
-					// A Field override of a Map of Variants (Script.Fields) resolves without the member's ScriptComponent, so
+					// A Field override of a Map of Variants (a script slot's Fields) resolves without the member's slot, so
 					// its values stay unresolved until PrefabInstantiator applies them.
 					const bool resolvesWithoutOwner = !ContainsVariant(field->GetType());
 					const Json value = generator.RandomJson(*field, owner);
@@ -486,25 +512,18 @@ namespace Engine {
 		return ComponentAccess::AddComponent(entity, component.GetName(), nullptr, schemas);
 	}
 
-	// True when `json` holds a null as the value of an object member at any depth, which an RFC 7386 merge patch cannot
-	// set (null deletes the member), so entity.update cannot write it either.
+	// True when `json` holds a null as the value of an object member that a merge patch reaches member by member, which an
+	// RFC 7386 merge patch cannot set (null deletes the member), so entity.update cannot write it either. A patch replaces
+	// an array whole, so the members of the objects inside an array (the slots of a Script component's list) are written as
+	// they are, nulls included.
 	static bool HasNullMember(const Json& json)
 	{
-		if (json.is_object())
+		if (!json.is_object())
+			return false;
+		for (auto member = json.begin(); member != json.end(); ++member)
 		{
-			for (auto member = json.begin(); member != json.end(); ++member)
-			{
-				if (member->is_null() || HasNullMember(*member))
-					return true;
-			}
-		}
-		else if (json.is_array())
-		{
-			for (const Json& element : json)
-			{
-				if (HasNullMember(element))
-					return true;
-			}
+			if (member->is_null() || HasNullMember(*member))
+				return true;
 		}
 		return false;
 	}
@@ -657,7 +676,7 @@ namespace Engine {
 			{
 				CAPTURE(iteration);
 				const Json target = generator.RandomJson(component->GetSelfField(), owner);
-				if (HasNullMember(target))
+				if (HasNullMember(target) || HasFieldsWithoutScript(*component, target))
 					continue;
 				const Result<Json> current = ComponentAccess::GetComponentJson(entity, name);
 				REQUIRE(current.has_value());
@@ -669,7 +688,8 @@ namespace Engine {
 				CHECK(WriteCanonical(*read) == WriteCanonical(target));
 				++writtenValues;
 			}
-			// A value an RFC 7386 patch cannot express is rare; most of the values reach the component.
+			// A value an RFC 7386 patch cannot express, or that a strict write refuses, is rare; most of the values reach the
+			// component.
 			CHECK(writtenValues * 2 > iterations);
 		}
 		CHECK(components > 0);

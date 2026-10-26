@@ -53,7 +53,7 @@ namespace Engine {
 																													"\tend\n"
 																													"end\n"
 																													"return Script.Define(\"KeyMover\", KeyMover)\n" } });
-			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Mover" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/KeyMover.luau" } } } } } });
+			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Mover" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/KeyMover.luau" } } }) } } } } } });
 			CallReplayMethod(fixture, "scene.save");
 		}
 
@@ -279,7 +279,7 @@ namespace Engine {
 																											  "end\n"
 																											  "return Script.Define(\"KeyMover\", KeyMover)\n" } })
 					.has_value());
-			REQUIRE(client.Call("entity.create", Json{ { "name", "Mover" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/KeyMover.luau" } } } } } }).has_value());
+			REQUIRE(client.Call("entity.create", Json{ { "name", "Mover" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/KeyMover.luau" } } }) } } } } } }).has_value());
 			REQUIRE(client.Call("scene.save", Json::object()).has_value());
 			REQUIRE(client.Call("input.record", Json{ { "action", "start" } }).has_value());
 			REQUIRE(client.Call("input.inject", Json{ { "events", Json::array({ Json{ { "tick", 50 }, { "type", "key" }, { "key", "A" }, { "state", "down" } }, Json{ { "tick", 51 }, { "type", "key" }, { "key", "A" }, { "state", "up" } }, Json{ { "tick", 60 }, { "type", "key" }, { "key", "B" }, { "state", "tap" } } }) } }).has_value());
@@ -320,7 +320,7 @@ namespace Engine {
 		{
 			Test::AutomationFixture fixture("RecordParameterForm");
 			CallReplayMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Namer.luau" }, { "source", "local Namer = {}\nfunction Namer:OnCreate() self.Entity.Name = \"ratio=\" .. tostring(Scene.GetLoadParameters().ratio) end\nreturn Script.Define(\"Namer\", Namer)\n" } });
-			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Namer" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Namer.luau" } } } } } });
+			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Namer" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/Namer.luau" } } }) } } } } } });
 			CallReplayMethod(fixture, "scene.save");
 			// 0.123456789 is not a float; the header stores the float form, which the recorded session must use too.
 			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" }, { "parameters", Json{ { "ratio", 0.123456789 } } } });
@@ -493,7 +493,7 @@ namespace Engine {
 																												   "\tif Time.GetTick() == 10 and not self.Pressed then error(\"idle fault\") end\n"
 																												   "end\n"
 																												   "return Script.Define(\"Watcher\", Watcher)\n" } });
-			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Watcher" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Watcher.luau" } } } } } });
+			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Watcher" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/Watcher.luau" } } }) } } } } } });
 			CallReplayMethod(fixture, "scene.save");
 			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
 			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 70 }, { "render", "none" }, { "input", Json::array({ Json{ { "tick", 3 }, { "type", "key" }, { "key", "Space" }, { "state", "tap" } } }) } });
@@ -744,7 +744,7 @@ namespace Engine {
 																												   "\tif Time.GetTick() == 10 and not self.Pressed then Application.Quit(3) end\n"
 																												   "end\n"
 																												   "return Script.Define(\"Quitter\", Quitter)\n" } });
-			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Quitter" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Quitter.luau" } } } } } });
+			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Quitter" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/Quitter.luau" } } }) } } } } } });
 			CallReplayMethod(fixture, "scene.save");
 			record("Assets/Tests/Quits.replay", 20, "C");
 			const Json stopped = replayWithoutInput("Assets/Tests/Quits.replay");
@@ -828,7 +828,7 @@ namespace Engine {
 																												   "\tend\n"
 																												   "end\n"
 																												   "return Script.Define(\"Booster\", Booster)\n" } });
-			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Booster" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Booster.luau" } } } } } });
+			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Booster" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/Booster.luau" } } }) } } } } } });
 			CallReplayMethod(fixture, "scene.save");
 
 			// Recorded, the Booster moves once for the tap and on every tick after the evaluation; replayed with its input,
@@ -921,7 +921,7 @@ namespace Engine {
 																												  "\tend\n"
 																												  "end\n"
 																												  "return Script.Define(\"Faulty\", Faulty)\n" } });
-			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Faulty" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Faulty.luau" } } } } } });
+			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Faulty" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/Faulty.luau" } } }) } } } } } });
 			CallReplayMethod(fixture, "scene.save");
 			Test::ExpectLog raised(LogLevel::Error, "pressed too hard");
 			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
@@ -1018,7 +1018,7 @@ namespace Engine {
 																												  "end\n"
 																												  "return Script.Define(\"Faulty\", Faulty)\n" } });
 			for (const int at : { 3, 4, 5 })
-				CallReplayMethod(fixture, "entity.create", Json{ { "name", std::format("Faulty{}", at) }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Faulty.luau" }, { "Fields", Json{ { "At", at } } } } } } } });
+				CallReplayMethod(fixture, "entity.create", Json{ { "name", std::format("Faulty{}", at) }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/Faulty.luau" }, { "Fields", Json{ { "At", at } } } } }) } } } } } });
 			CallReplayMethod(fixture, "scene.save");
 			{
 				Test::ExpectLog pressed(LogLevel::Error, "pressed too hard");
@@ -1043,7 +1043,7 @@ namespace Engine {
 																												   "\terror(\"bad start\")\n"
 																												   "end\n"
 																												   "return Script.Define(\"Starter\", Starter)\n" } });
-			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Starter" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Starter.luau" } } } } } });
+			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Starter" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/Starter.luau" } } }) } } } } } });
 			CallReplayMethod(fixture, "scene.save");
 			{
 				Test::ExpectLog started(LogLevel::Error, "bad start");
@@ -1086,7 +1086,7 @@ namespace Engine {
 			{
 				// Root entities keep their creation order, which is the canonical order their callbacks run in.
 				for (const auto& [name, script] : entities)
-					CallReplayMethod(fixture, "entity.create", Json{ { "name", name }, { "components", Json{ { "Script", Json{ { "Script", std::format("Assets/Scripts/{}.luau", script) } } } } } });
+					CallReplayMethod(fixture, "entity.create", Json{ { "name", name }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", std::format("Assets/Scripts/{}.luau", script) } } }) } } } } } });
 				CallReplayMethod(fixture, "scene.save");
 			};
 

@@ -115,12 +115,12 @@ namespace Engine {
 		return {};
 	}
 
-	void TaskScheduler::CancelEntity(UUID entity)
+	void TaskScheduler::CancelInstance(UUID entity, uint32_t slot)
 	{
 		m_State->AssertOwner();
 		for (auto current = m_State->Tasks.begin(); current != m_State->Tasks.end();)
 		{
-			if (current->second.Owner.Entity != entity)
+			if (current->second.Owner.Entity != entity || current->second.Owner.Slot != slot)
 			{
 				++current;
 				continue;

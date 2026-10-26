@@ -17,6 +17,7 @@
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/VfsPath.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Physics/PhysicsDiagnostics.h"
 #include "Engine/Reflection/TypeRegistry.h"
@@ -35,6 +36,7 @@
 #include "Engine/Scene/RenderAnnotations.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Support/AssetTestFixture.h"
+#include "Support/AutomationTestClient.h"
 #include "Support/EditorTestFixture.h"
 #include "Support/ExpectLog.h"
 #include "Support/ScriptOverrideProject.h"
@@ -48,7 +50,9 @@
 #include <format>
 #include <limits>
 #include <map>
+#include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace Engine {
@@ -136,6 +140,21 @@ namespace Engine {
 		return std::move(*camera);
 	}
 
+	// Writes an empty scene at `path` (project-relative) and opens it as an additional open scene (EditorContext::AddScene,
+	// M20); returns its id.
+	static OpenSceneId AddValidatorOpenScene(EditorContext& editor, std::string_view path)
+	{
+		const Result<VfsPath> file = VfsPath::Create("project", path);
+		REQUIRE(file.has_value());
+		Scope<Scene> scene = editor.CreateScene(std::string(file->GetStem()));
+		const Result<std::string> text = SceneSerializer::SaveToString(*scene);
+		REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+		WriteValidatorFile(editor, path, *text);
+		const Result<OpenSceneId> added = editor.AddScene(std::move(scene), *file);
+		REQUIRE_MESSAGE(added.has_value(), added.error().ToString());
+		return *added;
+	}
+
 	TEST_SUITE("EditorCore")
 	{
 		TEST_CASE("ProjectValidator: script overrides and non-Behaviour assignments are diagnosed without changing stored values")
@@ -155,14 +174,14 @@ namespace Engine {
 			REQUIRE(script);
 			REQUIRE(module);
 			const Entity entity = editor.GetScene().CreateEntity("Fields");
-			ScriptComponent legacy;
+			ScriptSlot legacy;
 			legacy.Script = TypedAssetHandle<AssetType::Script>(script->Script);
 			legacy.Fields.emplace("Speed", VariantValue(Json("bad")));
 			legacy.Fields.emplace("Rows", VariantValue(Json::array({ 0 })));
 			legacy.Fields.emplace("Obsolete", VariantValue(Json(7)));
-			entity.AddComponent<ScriptComponent>(std::move(legacy));
+			entity.AddComponent<ScriptComponent>(ScriptComponent{ { std::move(legacy) } });
 			const Entity wrongKind = editor.GetScene().CreateEntity("Module");
-			const Json wrong{ { "Script", module->Script.ToString() } };
+			const Json wrong{ { "Scripts", Json::array({ Json{ { "Script", module->Script.ToString() } } }) } };
 			REQUIRE(ComponentAccess::AddComponent(wrongKind, "Script", &wrong));
 			const auto before = ComponentAccess::GetComponentJson(entity, "Script");
 			REQUIRE(before);
@@ -177,13 +196,13 @@ namespace Engine {
 			REQUIRE(mismatch != nullptr);
 			REQUIRE(kind != nullptr);
 			CHECK(unknown->Entity == entity.GetUUID().ToString());
-			CHECK(unknown->Field == "Fields.Obsolete");
+			CHECK(unknown->Field == "Scripts[0].Fields.Obsolete");
 			CHECK(kind->Entity == wrongKind.GetUUID().ToString());
 			CHECK_FALSE(unknown->AutoFixable);
 			CHECK_FALSE(mismatch->AutoFixable);
 			CHECK(std::ranges::any_of(report->Diagnostics, [](const ProjectDiagnostic& diagnostic)
 			{
-				return diagnostic.Code == "SCRIPT_FIELD_TYPE_MISMATCH" && diagnostic.Field == "Fields.Rows" && diagnostic.Message.contains("/0");
+				return diagnostic.Code == "SCRIPT_FIELD_TYPE_MISMATCH" && diagnostic.Field == "Scripts[0].Fields.Rows" && diagnostic.Message.contains("/0");
 			}));
 			const auto after = ComponentAccess::GetComponentJson(entity, "Script");
 			REQUIRE(after);
@@ -193,18 +212,21 @@ namespace Engine {
 
 		TEST_CASE("ProjectValidator: script field load diagnostics map to the script override codes only at an entity's own Script component")
 		{
-			CHECK(ProjectValidator::MapScriptFieldLoadCode(VariantUnresolvedCode, "/Entities/3/Components/Script/Fields/Pointz") == "SCRIPT_UNKNOWN_FIELD_OVERRIDE");
-			CHECK(ProjectValidator::MapScriptFieldLoadCode(VariantSchemaMismatchCode, "/Entities/0/Components/Script/Fields/Rows/1") == "SCRIPT_FIELD_TYPE_MISMATCH");
+			CHECK(ProjectValidator::MapScriptFieldLoadCode(VariantUnresolvedCode, "/Entities/3/Components/Script/Scripts/0/Fields/Pointz") == "SCRIPT_UNKNOWN_FIELD_OVERRIDE");
+			CHECK(ProjectValidator::MapScriptFieldLoadCode(VariantSchemaMismatchCode, "/Entities/0/Components/Script/Scripts/0/Fields/Rows/1") == "SCRIPT_FIELD_TYPE_MISMATCH");
+			// Every slot's values (Script version 2, Docs/Decisions/0031-m20-contract.md decision 17).
+			CHECK(ProjectValidator::MapScriptFieldLoadCode(VariantUnresolvedCode, "/Entities/2/Components/Script/Scripts/12/Fields/Pointz") == "SCRIPT_UNKNOWN_FIELD_OVERRIDE");
 			// An override's value is checked on the member it applies to, which reports it; other codes and places map to nothing.
 			CHECK(ProjectValidator::MapScriptFieldLoadCode(VariantUnresolvedCode, "/Entities/0/Components/Prefab/Overrides/1/Value/Points").empty());
-			CHECK(ProjectValidator::MapScriptFieldLoadCode(VariantUnresolvedCode, "/Entities/0/Components/Prefab/Overrides/0/Value/Components/Script/Fields/X").empty());
-			CHECK(ProjectValidator::MapScriptFieldLoadCode(UnknownFieldCode, "/Entities/0/Components/Script/Fields/Pointz").empty());
-			CHECK(ProjectValidator::MapScriptFieldLoadCode(VariantUnresolvedCode, "/Entities/0/Components/Script/Script").empty());
-			CHECK(ProjectValidator::MapScriptFieldLoadCode(VariantUnresolvedCode, "/Components/Script/Fields/Pointz").empty());
+			CHECK(ProjectValidator::MapScriptFieldLoadCode(VariantUnresolvedCode, "/Entities/0/Components/Prefab/Overrides/0/Value/Components/Script/Scripts/0/Fields/X").empty());
+			CHECK(ProjectValidator::MapScriptFieldLoadCode(UnknownFieldCode, "/Entities/0/Components/Script/Scripts/0/Fields/Pointz").empty());
+			CHECK(ProjectValidator::MapScriptFieldLoadCode(VariantUnresolvedCode, "/Entities/0/Components/Script/Scripts/0/Script").empty());
+			CHECK(ProjectValidator::MapScriptFieldLoadCode(VariantUnresolvedCode, "/Components/Script/Scripts/0/Fields/Pointz").empty());
+			CHECK(ProjectValidator::MapScriptFieldLoadCode(VariantUnresolvedCode, "/Entities/0/Components/Script/Fields/Pointz").empty());
 		}
 
 		// S1-04: one invalid override, one code and one place, whichever reports it. project.validate names the instance
-		// member's entity and "Fields.<name>"; FindScriptFieldProblems, which the strict open and the exporter's strict load
+		// member's entity and "Scripts[<slot>].Fields.<name>"; FindScriptFieldProblems, which the strict open and the exporter's strict load
 		// report, names the same code for the same entity at that field's JSON pointer. A valid override is reported by none.
 		TEST_CASE("ProjectValidator: an invalid script field override of a prefab instance has the same code and place in validate and in the strict readers")
 		{
@@ -242,7 +264,7 @@ namespace Engine {
 			CHECK(validated[0].File == Test::ScriptOverrideScene);
 			CHECK(validated[0].Entity == Test::ScriptOverrideInstanceID.ToString());
 			CHECK(validated[0].Component == "Script");
-			CHECK(validated[0].Field == "Fields.Pointz");
+			CHECK(validated[0].Field == "Scripts[0].Fields.Pointz");
 
 			const Result<std::vector<LoadDiagnostic>> problems = ProjectValidator::FindScriptFieldProblems(editor, *scene);
 			REQUIRE_MESSAGE(problems.has_value(), problems.error().ToString());
@@ -255,7 +277,7 @@ namespace Engine {
 
 		// S1-04, the prefab half: an invalid script field value inside a .prefab file, which the strict open and the exporter
 		// name (FindScriptFieldProblems), is reported by project.validate too, under the same code for the same prefab entity,
-		// with the file, component "Script" and field "Fields.<name>" a scene's value gets.
+		// with the file, component "Script" and field "Scripts[<slot>].Fields.<name>" a scene's value gets.
 		TEST_CASE("ProjectValidator: an invalid script field value in a prefab file has the same code and place in validate and in the strict readers")
 		{
 			Test::EditorTestFixture fixture("ValidatorPrefabScriptFields");
@@ -304,14 +326,76 @@ namespace Engine {
 				REQUIRE(match != validated.end());
 				CHECK(match->Entity == problem.Entity.ToString());
 				CHECK(match->Component == "Script");
-				CHECK(match->Field == "Fields." + name);
+				CHECK(match->Field == "Scripts[0].Fields." + name);
 				CHECK(match->Message.contains(name));
 			}
 			CHECK(std::ranges::count(validated, std::string("SCRIPT_UNKNOWN_FIELD_OVERRIDE"), &ProjectDiagnostic::Code) == 1);
 			CHECK(std::ranges::count(validated, std::string("SCRIPT_FIELD_TYPE_MISMATCH"), &ProjectDiagnostic::Code) == 1);
-			const auto unknown = std::ranges::find(validated, std::string("Fields.Pointz"), &ProjectDiagnostic::Field);
+			const auto unknown = std::ranges::find(validated, std::string("Scripts[0].Fields.Pointz"), &ProjectDiagnostic::Field);
 			REQUIRE(unknown != validated.end());
 			CHECK(unknown->Code == "SCRIPT_UNKNOWN_FIELD_OVERRIDE");
+		}
+
+		// S1-04 and Docs/Decisions/0031-m20-contract.md decision 17: the strict readers report a value's pointer in the
+		// migrated document, where Script version 2 holds a list of slots, so a file still at version 1 (every project saved
+		// before M20, until project.upgrade) is read migrated too, and validate, the strict readers and the exporter name the
+		// same code for it, in a prefab file and in a scene file alike.
+		TEST_CASE("ProjectValidator: a script field value of a file still at Script version 1 has the validator code in validate and in the strict readers")
+		{
+			Test::EditorTestFixture fixture("ValidatorScriptFieldsVersion1");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			Test::WriteScriptOverrideProject(fixture.GetProjectRoot(), "Pointz");
+			// The prefab root's Points becomes a string, and it gains a field the script does not declare.
+			const std::filesystem::path prefabFile = fixture.GetProjectRoot() / FileSystem::PathFromUtf8(Test::ScriptOverridePrefab);
+			Result<std::string> text = FileSystem::ReadText(prefabFile);
+			REQUIRE(text.has_value());
+			const size_t points = text->find("\"Points\": 1");
+			REQUIRE(points != std::string::npos);
+			text->replace(points, std::string_view("\"Points\": 1").size(), "\"Points\": \"five\", \"Pointz\": 2");
+			REQUIRE(FileSystem::WriteFileAtomic(prefabFile, AsBytes(*text), { .KeepBackup = false }).has_value());
+			Test::RewriteScriptOverrideProjectAtScriptVersion1(fixture.GetProjectRoot());
+			REQUIRE(FileSystem::ReadText(prefabFile).value_or(std::string()).contains("\"Script\": 1"));
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			const Result<VfsPath> scene = VfsPath::Create("project", Test::ScriptOverrideScene);
+			const Result<VfsPath> prefab = VfsPath::Create("project", Test::ScriptOverridePrefab);
+			REQUIRE(scene.has_value());
+			REQUIRE(prefab.has_value());
+
+			const Result<std::vector<LoadDiagnostic>> sceneProblems = ProjectValidator::FindScriptFieldProblems(editor, *scene);
+			REQUIRE_MESSAGE(sceneProblems.has_value(), sceneProblems.error().ToString());
+			REQUIRE(sceneProblems->size() == 1);
+			CHECK((*sceneProblems)[0].Code == "SCRIPT_UNKNOWN_FIELD_OVERRIDE");
+			CHECK((*sceneProblems)[0].JsonPointer == std::string(Test::ScriptOverrideFieldsPointer) + "Pointz");
+			const Result<std::vector<LoadDiagnostic>> prefabProblems = ProjectValidator::FindScriptFieldProblems(editor, *prefab);
+			REQUIRE_MESSAGE(prefabProblems.has_value(), prefabProblems.error().ToString());
+			REQUIRE(prefabProblems->size() == 2);
+
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Project);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			INFO(DescribeDiagnostics(*report));
+			const auto codesIn = [&report](std::string_view file)
+			{
+				std::vector<std::string> codes;
+				for (const ProjectDiagnostic& diagnostic : report->Diagnostics)
+				{
+					if (diagnostic.File == file && diagnostic.Code.starts_with("SCRIPT_"))
+						codes.push_back(diagnostic.Code);
+				}
+				std::ranges::sort(codes);
+				return codes;
+			};
+			CHECK(codesIn(Test::ScriptOverridePrefab) == std::vector<std::string>{ "SCRIPT_FIELD_TYPE_MISMATCH", "SCRIPT_UNKNOWN_FIELD_OVERRIDE" });
+			CHECK(std::ranges::count(codesIn(Test::ScriptOverrideScene), std::string("SCRIPT_UNKNOWN_FIELD_OVERRIDE")) == 1);
+			for (const LoadDiagnostic& problem : *prefabProblems)
+			{
+				CAPTURE(problem.JsonPointer);
+				const std::string name = problem.JsonPointer.substr(problem.JsonPointer.rfind('/') + 1);
+				CHECK(std::ranges::any_of(report->Diagnostics, [&problem, &name](const ProjectDiagnostic& diagnostic)
+				{
+					return diagnostic.File == Test::ScriptOverridePrefab && diagnostic.Code == problem.Code && diagnostic.Field == "Scripts[0].Fields." + name;
+				}));
+			}
 		}
 
 		// M16 review R24: the strict readers labelled every unresolved Script.Fields value SCRIPT_UNKNOWN_FIELD_OVERRIDE, also
@@ -424,7 +508,7 @@ namespace Engine {
 			const UUID existing = editor.GetScene().CreateEntity("Target").GetUUID();
 			const Entity entity = editor.GetScene().CreateEntity("References");
 			const UUID id = entity.GetUUID();
-			ScriptComponent component;
+			ScriptSlot component;
 			component.Script = TypedAssetHandle<AssetType::Script>(written->Script);
 			component.Fields = {
 				{ "Asset", VariantValue(Json(missing.ToString())) },
@@ -436,7 +520,7 @@ namespace Engine {
 				{ "BrokenEntities", VariantValue(Json::array({ Json::array({ missing.ToString(), 42 }) })) },
 				{ "Unknown", VariantValue(Json(missing.ToString())) },
 			};
-			entity.AddComponent<ScriptComponent>(std::move(component));
+			entity.AddComponent<ScriptComponent>(ScriptComponent{ { std::move(component) } });
 			const auto before = ComponentAccess::GetComponentJson(entity, "Script");
 			REQUIRE(before);
 			const auto sourceBefore = editor.GetScriptService()->Read(path);
@@ -447,12 +531,12 @@ namespace Engine {
 			REQUIRE_MESSAGE(report, (report ? "" : report.error().ToString()));
 			INFO(DescribeDiagnostics(*report));
 			const std::map<std::string, std::string> expected{
-				{ "Fields.Asset", std::string(AssetMissingCode) },
-				{ "Fields.Assets[0][1]", std::string(AssetMissingCode) },
-				{ "Fields.Target", std::string(EntityDanglingReferenceCode) },
-				{ "Fields.Entities[0][0]", std::string(EntityDanglingReferenceCode) },
-				{ "Fields.Entities[0][3]", std::string(EntityDanglingReferenceCode) },
-				{ "Fields.Wrong[0][0]", std::string(AssetTypeMismatchCode) },
+				{ "Scripts[0].Fields.Asset", std::string(AssetMissingCode) },
+				{ "Scripts[0].Fields.Assets[0][1]", std::string(AssetMissingCode) },
+				{ "Scripts[0].Fields.Target", std::string(EntityDanglingReferenceCode) },
+				{ "Scripts[0].Fields.Entities[0][0]", std::string(EntityDanglingReferenceCode) },
+				{ "Scripts[0].Fields.Entities[0][3]", std::string(EntityDanglingReferenceCode) },
+				{ "Scripts[0].Fields.Wrong[0][0]", std::string(AssetTypeMismatchCode) },
 			};
 			std::map<std::string, std::string> actual;
 			std::vector<std::string> ids;
@@ -539,7 +623,7 @@ namespace Engine {
 			const UUID missing(0xffffffffffffff02ull);
 			const Entity entity = editor.GetScene().CreateEntity("References");
 			const UUID id = entity.GetUUID();
-			ScriptComponent component;
+			ScriptSlot component;
 			component.Script = TypedAssetHandle<AssetType::Script>(written->Script);
 			component.Fields = {
 				{ "Targets", VariantValue(Json::array({ Json::array({ missing.ToString(), existing.ToString() }), Json::array({ missing.ToString() }) })) },
@@ -547,7 +631,7 @@ namespace Engine {
 				{ "Unknown", VariantValue(Json{ { "Legacy", Json::array({ missing.ToString(), 7 }) } }) },
 			};
 			const auto original = component.Fields;
-			entity.AddComponent<ScriptComponent>(std::move(component));
+			entity.AddComponent<ScriptComponent>(ScriptComponent{ { std::move(component) } });
 			const auto report = ProjectValidator::Validate(editor, ValidationScope::Scene);
 			REQUIRE(report);
 			std::map<std::string, std::string> dangling;
@@ -557,42 +641,115 @@ namespace Engine {
 					dangling.emplace(diagnostic.Field, diagnostic.Id);
 			}
 			REQUIRE(dangling.size() == 2);
-			REQUIRE(dangling.contains("Fields.Targets[0][0]"));
-			REQUIRE(dangling.contains("Fields.Targets[1][0]"));
+			REQUIRE(dangling.contains("Scripts[0].Fields.Targets[0][0]"));
+			REQUIRE(dangling.contains("Scripts[0].Fields.Targets[1][0]"));
 			const size_t undoCount = editor.GetHistory().GetUndoCount();
 			const auto selected = ProjectValidator::Fix(editor, ValidationScope::Scene,
-				{ .All = false, .IdsOrCodes = { dangling.find("Fields.Targets[0][0]")->second } });
+				{ .All = false, .IdsOrCodes = { dangling.find("Scripts[0].Fields.Targets[0][0]")->second } });
 			REQUIRE_MESSAGE(selected, (selected ? "" : selected.error().ToString()));
-			CHECK(selected->Fixed == std::vector<std::string>{ dangling.find("Fields.Targets[0][0]")->second });
+			CHECK(selected->Fixed == std::vector<std::string>{ dangling.find("Scripts[0].Fields.Targets[0][0]")->second });
 			const auto* remaining = FindDiagnostic(selected->After, EntityDanglingReferenceCode);
 			REQUIRE(remaining != nullptr);
-			CHECK(remaining->Id == dangling.find("Fields.Targets[1][0]")->second);
+			CHECK(remaining->Id == dangling.find("Scripts[0].Fields.Targets[1][0]")->second);
 			auto expected = original;
 			expected.find("Targets")->second.Set(Json::array({ Json::array({ nullptr, existing.ToString() }), Json::array({ missing.ToString() }) }));
-			CHECK(editor.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Fields == expected);
+			CHECK(editor.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Scripts.front().Fields == expected);
 			CHECK(editor.GetHistory().GetUndoCount() == undoCount + 1);
 			REQUIRE(editor.GetHistory().Undo(editor));
-			CHECK(editor.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Fields == original);
+			CHECK(editor.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Scripts.front().Fields == original);
 			REQUIRE(editor.GetHistory().Redo(editor));
-			CHECK(editor.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Fields == expected);
+			CHECK(editor.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Scripts.front().Fields == expected);
 			const auto all = ProjectValidator::Fix(editor, ValidationScope::Scene,
 				{ .All = false, .IdsOrCodes = { std::string(EntityDanglingReferenceCode) } });
 			REQUIRE_MESSAGE(all, (all ? "" : all.error().ToString()));
-			CHECK(all->Fixed == std::vector<std::string>{ dangling.find("Fields.Targets[1][0]")->second });
+			CHECK(all->Fixed == std::vector<std::string>{ dangling.find("Scripts[0].Fields.Targets[1][0]")->second });
 			CHECK(FindDiagnostic(all->After, EntityDanglingReferenceCode) == nullptr);
 			expected.find("Targets")->second.Set(Json::array({ Json::array({ nullptr, existing.ToString() }), Json::array({ nullptr }) }));
-			CHECK(editor.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Fields == expected);
+			CHECK(editor.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Scripts.front().Fields == expected);
 			REQUIRE(editor.GetHistory().Undo(editor));
 			REQUIRE(editor.GetHistory().Undo(editor));
-			CHECK(editor.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Fields == original);
+			CHECK(editor.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Scripts.front().Fields == original);
 			const auto together = ProjectValidator::Fix(editor, ValidationScope::Scene,
 				{ .All = false, .IdsOrCodes = { std::string(EntityDanglingReferenceCode) } });
 			REQUIRE_MESSAGE(together, (together ? "" : together.error().ToString()));
 			CHECK(together->Fixed.size() == 2);
-			CHECK(editor.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Fields == expected);
+			CHECK(editor.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Scripts.front().Fields == expected);
 			CHECK(editor.GetHistory().GetUndoCount() == undoCount + 1);
 			REQUIRE(editor.GetHistory().Undo(editor));
-			CHECK(editor.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Fields == original);
+			CHECK(editor.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Scripts.front().Fields == original);
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 17: every slot of a Script component is checked against its own
+		// script, each diagnostic naming its slot, and a reference fix clears the reference in its own slot only.
+		TEST_CASE("ProjectValidator: every script slot is checked against its own script and a fix changes only its slot")
+		{
+			Test::EditorTestFixture fixture("ValidatorScriptSlots");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			REQUIRE(editor.GetScriptService() != nullptr);
+			const auto speed = editor.GetScriptService()->Write(Test::ParseVfsPath("project://Assets/Speed.luau"),
+				"return Script.Define(\"Speed\", {Fields = {Speed = Field.Number(1)}})");
+			const auto aim = editor.GetScriptService()->Write(Test::ParseVfsPath("project://Assets/Aim.luau"),
+				"return Script.Define(\"Aim\", {Fields = {Target = Field.Entity(), Count = Field.Number(1)}})");
+			const auto module = editor.GetScriptService()->Write(Test::ParseVfsPath("project://Assets/Shared.luau"), "return {}");
+			REQUIRE(speed);
+			REQUIRE(aim);
+			REQUIRE(module);
+			const UUID missing(0xffffffffffffff03ull);
+			const auto slot = [](AssetHandle script, std::map<std::string, VariantValue> fields)
+			{
+				ScriptSlot made;
+				made.Script = TypedAssetHandle<AssetType::Script>(script);
+				made.Fields = std::move(fields);
+				return made;
+			};
+			const Entity entity = editor.GetScene().CreateEntity("Turret");
+			const UUID id = entity.GetUUID();
+			entity.AddComponent<ScriptComponent>(ScriptComponent{ {
+				slot(speed->Script, { { "Speed", VariantValue(Json(2)) } }),
+				slot(aim->Script, { { "Target", VariantValue(Json(missing.ToString())) }, { "Count", VariantValue(Json("bad")) }, { "Obsolete", VariantValue(Json(1)) } }),
+				slot(speed->Script, { { "Speed", VariantValue(Json("bad")) } }),
+				slot(module->Script, {}),
+			} });
+			const std::vector<ScriptSlot> original = entity.GetComponent<ScriptComponent>().Scripts;
+
+			const auto report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE(report);
+			INFO(DescribeDiagnostics(*report));
+			std::set<std::pair<std::string, std::string>> found;
+			std::string danglingId;
+			for (const ProjectDiagnostic& diagnostic : report->Diagnostics)
+			{
+				if (diagnostic.Entity != id.ToString() || diagnostic.Component != "Script")
+					continue;
+				found.emplace(diagnostic.Field, diagnostic.Code);
+				if (diagnostic.Code == EntityDanglingReferenceCode)
+					danglingId = diagnostic.Id;
+			}
+			const std::set<std::pair<std::string, std::string>> expected{
+				{ "Scripts[1].Fields.Target", std::string(EntityDanglingReferenceCode) },
+				{ "Scripts[1].Fields.Count", "SCRIPT_FIELD_TYPE_MISMATCH" },
+				{ "Scripts[1].Fields.Obsolete", "SCRIPT_UNKNOWN_FIELD_OVERRIDE" },
+				{ "Scripts[2].Fields.Speed", "SCRIPT_FIELD_TYPE_MISMATCH" },
+				{ "Scripts[3].Script", "SCRIPT_NOT_A_BEHAVIOUR" },
+			};
+			CHECK(found == expected);
+
+			const size_t undoCount = editor.GetHistory().GetUndoCount();
+			const auto fixed = ProjectValidator::Fix(editor, ValidationScope::Scene, { .All = false, .IdsOrCodes = { danglingId } });
+			REQUIRE_MESSAGE(fixed, (fixed ? "" : fixed.error().ToString()));
+			CHECK(fixed->Fixed == std::vector<std::string>{ danglingId });
+			const std::vector<ScriptSlot>& after = editor.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Scripts;
+			REQUIRE(after.size() == original.size());
+			CHECK(after[0].Fields == original[0].Fields);
+			CHECK(after[2].Fields == original[2].Fields);
+			CHECK(after[1].Fields.at("Target").Get().is_null());
+			CHECK(after[1].Fields.at("Count") == original[1].Fields.at("Count"));
+			CHECK(after[1].Fields.at("Obsolete") == original[1].Fields.at("Obsolete"));
+			CHECK(editor.GetHistory().GetUndoCount() == undoCount + 1);
+			REQUIRE(editor.GetHistory().Undo(editor));
+			CHECK(editor.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Scripts[1].Fields == original[1].Fields);
 		}
 
 		TEST_CASE("ProjectValidator: input actions are found by AST scan excluding comments dynamic names and local shadows")
@@ -1873,6 +2030,74 @@ end
 			{
 				return diagnostic.Code == "TEST_SUITE_INVALID";
 			}) == 2);
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 16: project.validate's project scope checks every open scene as it is in
+		// memory instead of its file; a problem of a scene other than the addressed one is reported against that scene's file
+		// and is not auto-fixable, since the fixes edit the addressed scene. Its hint names a fix that works for that kind of
+		// scene: the scene target for another open scene (scene.open refuses a path that is already open), scene.open for a
+		// scene file no tab holds, and the fix itself once the scene target addresses the scene.
+		TEST_CASE("ProjectValidator: the project scope reads every open scene in memory")
+		{
+			Test::AutomationFixture setup("OpenScenesValidate");
+			EditorContext& editor = setup.GetEditor();
+			const OpenSceneId main = editor.GetActiveSceneId();
+			static_cast<void>(AddValidatorOpenScene(editor, "Assets/Scenes/Second.scene"));
+			const Json camera{ { "Camera", Json{ { "Primary", true } } } };
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "First" }, { "components", camera } }));
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Other" }, { "components", camera } }));
+			REQUIRE(editor.ActivateScene(main).has_value());
+			// The diagnostic of Second's two Primary cameras in a report of project.validate with `params`.
+			const auto cameras = [&setup](const Json& params)
+			{
+				const Result<Json> report = setup.Call("project.validate", params);
+				REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+				for (const Json& diagnostic : (*report)["diagnostics"])
+				{
+					if (diagnostic["code"] == Json("SCENE_MULTIPLE_PRIMARY_CAMERAS") && diagnostic["file"] == Json("Assets/Scenes/Second.scene"))
+						return diagnostic;
+				}
+				FAIL("project.validate reports Second's two Primary cameras");
+				return Json();
+			};
+			const auto hint = [](const Json& diagnostic)
+			{
+				return JsonReader(diagnostic["hint"]).ReadString().value_or(std::string());
+			};
+
+			const Json open = cameras(Json{ { "scope", "Project" } });
+			CHECK(open["autoFixable"] == Json(false));
+			CHECK(hint(open).contains("Assets/Scenes/Second.scene"));
+			CHECK_FALSE(hint(open).contains("scene.open"));
+			// The file itself holds no camera: the report came from the scene in memory.
+			const Result<std::string> file = FileSystem::ReadText(setup.GetEditorFixture().GetProjectRoot() / "Assets/Scenes/Second.scene");
+			REQUIRE(file.has_value());
+			CHECK_FALSE(file->contains("Camera"));
+
+			// The scene target makes the scene the addressed one, where the problem is fixable.
+			const Json target{ { "scope", "Project" }, { "scene", "Assets/Scenes/Second.scene" } };
+			const Json addressed = cameras(target);
+			CHECK(addressed["autoFixable"] == Json(true));
+			CHECK(hint(addressed) != hint(open));
+
+			// Saved and closed, the scene is a file no tab holds, which scene.open opens to fix it.
+			REQUIRE(setup.Call("scene.save", Json{ { "scene", "Assets/Scenes/Second.scene" } }));
+			REQUIRE(setup.Call("scene.close", Json{ { "scene", "Assets/Scenes/Second.scene" } }));
+			const Json closed = cameras(Json{ { "scope", "Project" } });
+			CHECK(closed["autoFixable"] == Json(false));
+			CHECK(hint(closed).contains("scene.open"));
+			CHECK(hint(closed) != hint(open));
+
+			// Open again beside Main, the fix the hint names applies there.
+			REQUIRE(setup.Call("scene.open", Json{ { "path", "Assets/Scenes/Second.scene" }, { "keepOpen", true } }));
+			REQUIRE(editor.ActivateScene(main).has_value());
+			const Json reopened = cameras(Json{ { "scope", "Project" } });
+			Json fix = target;
+			fix["fix"] = Json::array({ reopened["id"] });
+			const Result<Json> fixed = setup.Call("project.validate", fix);
+			REQUIRE_MESSAGE(fixed.has_value(), fixed.error().ToString());
+			CHECK((*fixed)["fixed"] == Json::array({ reopened["id"] }));
+			CHECK(editor.GetActiveSceneId() == main);
 		}
 	}
 

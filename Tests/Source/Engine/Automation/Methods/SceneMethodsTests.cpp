@@ -9,6 +9,7 @@
 
 #include <format>
 #include <string>
+#include <string_view>
 
 // The scene reads both hosts serve (scene.tree, scene.query, scene.get; Docs/Decisions/0012-m7-decisions.md decision 21),
 // in process through the editor's AutomationFixture (§15.2). The editor-only scene methods are tested in
@@ -55,6 +56,29 @@ namespace Engine {
 			REQUIRE(subtree.has_value());
 			CHECK((*subtree)["entities"][0]["name"] == Json("Game"));
 			CHECK((*subtree)["entities"][0]["depth"] == Json(0));
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 17: the outline names the script of every slot, in slot order, by its
+		// path below Assets/, and a slot without a script as "none".
+		TEST_CASE("SceneMethods: scene.tree names the script of every script slot")
+		{
+			Test::AutomationFixture setup("SceneTreeSlots");
+			for (const std::string_view name : { std::string_view("Aim"), std::string_view("Fire") })
+			{
+				REQUIRE(setup.Call("script.write", Json{ { "path", std::format("Assets/Scripts/{}.luau", name) }, { "source", std::format("return Script.Define(\"{}\", {{}})", name) } })
+						.has_value());
+			}
+			REQUIRE(setup.Call("entity.create", ParseSceneMethodJson(R"({"name":"Turret","components":{"Script":{"Scripts":[
+				{"Script":"Assets/Scripts/Aim.luau"},{"Script":"Assets/Scripts/Fire.luau"},{}]}}})"))
+					.has_value());
+			REQUIRE(setup.Call("entity.create", ParseSceneMethodJson(R"({"name":"Idle","components":{"Script":{"Scripts":[]}}})")).has_value());
+
+			Result<Json> text = setup.Call("scene.tree", Json::object());
+			REQUIRE(text.has_value());
+			const std::string outline = JsonReader((*text)["text"]).ReadString().value_or(std::string());
+			INFO(outline);
+			CHECK(outline.contains("Script(Scripts/Aim.luau, Scripts/Fire.luau, none)"));
+			CHECK(outline.contains(" Script  (0, 0, 0)"));
 		}
 
 		TEST_CASE("SceneMethods: scene.query filters and paginates in canonical order")

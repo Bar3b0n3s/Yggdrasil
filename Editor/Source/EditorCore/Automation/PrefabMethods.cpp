@@ -127,36 +127,6 @@ namespace Engine {
 			return PrefabInstantiator::ApplyOverrides(root, level, levelPrefab, options);
 		}
 
-		// Whether the canonical document of `prefab` holds a prefab instance (a Prefab component on one of its entities).
-		bool NestsPrefabInstances(const Prefab& prefab)
-		{
-			return std::ranges::any_of(prefab.GetEntities(), [](const Json& entity)
-			{
-				const auto components = entity.find("Components");
-				return components != entity.end() && components->is_object() && components->contains("Prefab");
-			});
-		}
-
-		// The prefab assets nesting `handle` that a new version of it rewrites, in their order (EditorContext::
-		// GetNestingPrefabs; Validation PREFAB_CYCLE when the propagation meets a nesting cycle, through `handle` or among the
-		// prefabs nesting it). Only a prefab that another prefab asset references (its import dependencies list every prefab
-		// it nests) can be nested, and only one that nests a prefab itself (`current`, its current version) can be on a
-		// nesting cycle; any other rewrites no prefab, so the nesting graph is not walked for it.
-		Result<std::vector<AssetHandle>> FindNestingPrefabs(const EditorContext& editor, AssetHandle handle, const Prefab& current)
-		{
-			const EditorAssetManager& assets = editor.GetAssets();
-			const AssetRegistry& registry = assets.GetRegistry();
-			const bool referenced = std::ranges::any_of(assets.GetDependencyGraph().GetDependents(handle), [&registry](AssetHandle dependent)
-			{
-				const std::optional<AssetRegistry::Location> location = registry.Locate(dependent);
-				return location.has_value() && location->Type == AssetType::Prefab;
-			});
-			if (!referenced && !NestsPrefabInstances(current))
-				return std::vector<AssetHandle>{};
-			const AssetHandle prefabs[] = { handle };
-			return editor.GetNestingPrefabs(prefabs);
-		}
-
 		// `created`, a prefab Prefab::CreateFromEntity wrote, with the record of every instance it keeps live recomputed against
 		// the current version of that instance's prefab (RefreshNestedPrefabOverrides; decision 8): CreateFromEntity moves onto
 		// it only the overrides its enclosing instance recorded for it, while the document of the prefab that nested it may
@@ -455,51 +425,27 @@ namespace Engine {
 			if (!before)
 				return std::unexpected(Utils::ToEditorFileError(std::move(before).error()));
 			// Before anything is written, so that a nesting cycle refuses the whole update.
-			ENGINE_TRY_ASSIGN(const std::vector<AssetHandle> nesting, FindNestingPrefabs(editor, handle, current));
-			std::vector<AssetHandle> rebuilt = nesting;
-			rebuilt.push_back(handle);
-			std::ranges::sort(rebuilt);
+			ENGINE_TRY_ASSIGN(const std::vector<AssetHandle> nesting, Utils::FindNestingPrefabs(editor, handle, current));
 
 			// One undo step (§5.5 "Update"): the overrides of every instance recorded against the current versions, the .prefab
-			// written and imported, the prefabs nesting it rewritten, and every instance of them rebuilt from the new versions.
+			// written and imported, the prefabs nesting it rewritten, and every instance of them rebuilt from the new versions,
+			// the other open scenes' in their own histories (decision 15).
 			const std::string label = std::format("Apply Prefab '{}'", Utils::ToProjectRelative(source));
-			EditorTransaction transaction(editor, label);
-			ENGINE_TRY(Utils::RecordPrefabOverrides(editor, handle, current));
-			for (const AssetHandle nestingPrefab : nesting)
-			{
-				LoadReport report;
-				ENGINE_TRY_ASSIGN(const Prefab nestingCurrent, LoadPrefabAsset(assets, nestingPrefab, editor.GetTypeRegistry(), schemas.get(), report));
-				ENGINE_TRY(Utils::RecordPrefabOverrides(editor, nestingPrefab, nestingCurrent));
-			}
+			Scope<Command> write;
 			if (text != *before)
 			{
 				ENGINE_TRY_ASSIGN(Scope<AssetEditCommand> command, AssetEditCommand::CreateForWrite(editor, source, AsBytes(text), label));
-				ENGINE_TRY(editor.Execute(std::move(command)));
-				ENGINE_TRY_ASSIGN(const AssetImportOutcome outcome, assets.Reimport(handle));
-				static_cast<void>(outcome);
+				write = std::move(command);
 			}
-			// The prefabs nesting it whose documents the rewrite changes: only those are written, and only those are reported.
-			std::vector<AssetHandle> rewritten;
-			if (!nesting.empty())
-			{
-				const AssetHandle prefabs[] = { handle };
-				ENGINE_TRY_ASSIGN(NestingPrefabUpdate rewrite, editor.CreateNestingPrefabUpdateCommand(prefabs));
-				if (rewrite.Rewrite != nullptr)
-					ENGINE_TRY(editor.Execute(std::move(rewrite.Rewrite)));
-				rewritten = std::move(rewrite.Prefabs);
-			}
-			const size_t instances = Utils::FindPrefabInstances(editor.GetScene(), rebuilt).size();
-			ENGINE_TRY_ASSIGN(Scope<Command> update, editor.CreatePrefabUpdateCommand(rebuilt));
-			if (update != nullptr)
-				ENGINE_TRY(editor.Execute(std::move(update)));
+			ENGINE_TRY_ASSIGN(const Utils::PrefabVersionUpdate update, Utils::UpdatePrefabVersion(editor, handle, current, std::move(write), nesting, label));
 
 			PrefabApplyResult result;
 			result.Prefab = Utils::MakeAssetSummary(assets, handle);
-			result.UpdatedInstances = ToAutomationCounter(instances);
-			result.UpdatedPrefabs.reserve(rewritten.size());
-			for (const AssetHandle nestingPrefab : rewritten)
+			result.UpdatedInstances = ToAutomationCounter(update.UpdatedInstances);
+			result.UpdatedPrefabs.reserve(update.UpdatedPrefabs.size());
+			for (const AssetHandle nestingPrefab : update.UpdatedPrefabs)
 				result.UpdatedPrefabs.push_back(Utils::MakeAssetSummary(assets, nestingPrefab));
-			result.UndoIndex = ToAutomationCounter(transaction.Commit());
+			result.UndoIndex = ToAutomationCounter(update.UndoIndex);
 			return result;
 		}
 
@@ -619,8 +565,9 @@ namespace Engine {
 			.Field("name", &PrefabInstantiateParams::Name, "The instance root's name; the prefab root's when absent.")
 			.VariantField("components", &PrefabInstantiateParams::Components,
 				"Per-instance component values for the instance root by registry name, merged into the prefab's as entity.update merges them "
-				"(missing components are added) and recorded as the instance's overrides; script fields go in {\"Script\": {\"Fields\": "
-				"{...}}}, the Script handle defaulting to the prefab root's.",
+				"(missing components are added) and recorded as the instance's overrides; script fields go in {\"Script\": {\"Scripts\": "
+				"[{\"Fields\": {...}}]}}: an entry that gives Fields without Script takes the Script handle of the prefab root's slot at its "
+				"index, every other member an entry omits takes its default (repeat a non-zero ExecutionOrder), and the list replaces the root's.",
 				&ResolveComponentValue);
 
 		registry.Struct<PrefabInstantiateResult>("PrefabInstantiateResult", "The new instance.")
@@ -639,7 +586,7 @@ namespace Engine {
 		registry.Struct<PrefabApplyResult>("PrefabApplyResult", "The applied prefab.")
 			.Field("prefab", &PrefabApplyResult::Prefab, "The prefab asset written: the level's.")
 			.Field("updatedInstances", &PrefabApplyResult::UpdatedInstances,
-				"The outermost instances in the open scene rebuilt from it or from a prefab nesting it, this one's included.")
+				"The outermost instances rebuilt in the scene the request addresses from it or from a prefab nesting it, this one's included.")
 			.Field("updatedPrefabs", &PrefabApplyResult::UpdatedPrefabs, "The prefab assets nesting the applied prefab that were rewritten, in nesting order.")
 			.Field("undoIndex", &PrefabApplyResult::UndoIndex, "The undo index; 0 in a batch.");
 
@@ -679,6 +626,7 @@ namespace Engine {
 				.ExposeAsTool = true,
 				.Mutates = true,
 				.SupportsDryRun = true,
+				.SupportsSceneTarget = true,
 				.AllowedInBatch = true,
 				.Examples = { { .Description = "Turn the cell into a prefab and an instance of it.", .Params = createExample } },
 			},
@@ -704,6 +652,7 @@ namespace Engine {
 				.ExposeAsTool = true,
 				.Mutates = true,
 				.SupportsDryRun = true,
+				.SupportsSceneTarget = true,
 				.AllowedInBatch = true,
 				.Examples = { { .Description = "Place a cell on the board.", .Params = instantiateExample },
 					{ .Description = "Place a named cell that casts no shadow (an override of the instance).", .Params = overridesExample } },
@@ -720,10 +669,12 @@ namespace Engine {
 				.Name = "prefab.apply",
 				.Description = "Writes an instance's overrides into a .prefab asset, by default its outermost instance's prefab, or with level the "
 							   "prefab of a nested instance on the way down; then rewrites the prefabs nesting it (updatedPrefabs) and rebuilds "
-							   "their instances in the open scene, as one undoable step.",
+							   "their instances in the scene it addresses, as one undoable step, and in every other open scene, as a step of "
+							   "that scene's own undo history.",
 				.RequiredParams = { "instance" },
 				.ExposeAsTool = true,
 				.Mutates = true,
+				.SupportsSceneTarget = true,
 				.AllowedInBatch = true,
 				.Examples = { { .Description = "Make the cell's edits the prefab's.", .Params = applyExample },
 					{ .Description = "Make the edits of a lamp inside a room the Lamp prefab's, so every room's lamps follow.", .Params = levelExample } },
@@ -740,6 +691,7 @@ namespace Engine {
 				.RequiredParams = { "instance" },
 				.Mutates = true,
 				.SupportsDryRun = true,
+				.SupportsSceneTarget = true,
 				.AllowedInBatch = true,
 				.Examples = { { .Description = "Drop every edit of the cell.", .Params = revertExample } },
 			},
@@ -755,6 +707,7 @@ namespace Engine {
 				.RequiredParams = { "instance" },
 				.Mutates = true,
 				.SupportsDryRun = true,
+				.SupportsSceneTarget = true,
 				.AllowedInBatch = true,
 				.Examples = { { .Description = "Make the cell an ordinary entity.", .Params = unpackExample } },
 			},

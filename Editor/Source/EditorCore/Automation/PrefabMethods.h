@@ -58,10 +58,11 @@ namespace Engine {
 	// partial Transform component value (registry PascalCase, virtual fields such as EulerAngles allowed, ADR 0008 decision
 	// 35) over the prefab root's; `name` renames the root (absent: the prefab root's name). `components` are per-instance
 	// values for the root, written as entity.update writes them after `transform` (merged into the prefab's components,
-	// missing ones added; script fields through {"Script": {"Fields": {...}}}, whose Script handle defaults to the prefab
-	// root's) and recorded as the instance's overrides when the step commits, so one call equals prefab.instantiate
-	// followed by entity.update of the new root. Supports dry runs and batches. The result names the new root `entity`
-	// (prefab.create names its instance `instance`).
+	// missing ones added; script fields through {"Script": {"Scripts": [{"Fields": {...}}]}}, where an entry that gives
+	// Fields without Script takes the Script handle of the prefab root's slot at its index, every other member an entry
+	// omits takes its default and the list replaces the root's) and recorded as the instance's overrides when the step
+	// commits, so one call equals prefab.instantiate followed by entity.update of the new root. Supports dry runs and
+	// batches. The result names the new root `entity` (prefab.create names its instance `instance`).
 	struct PrefabInstantiateParams
 	{
 		std::string Prefab{};
@@ -87,12 +88,13 @@ namespace Engine {
 	// outermost (decision 9: PrefabInstantiator::ApplyOverrides re-bases their paths onto that prefab and keeps the level
 	// root's own Name, Transform and Parent recorded on the outermost root). Then the prefab assets nesting the written one
 	// are rewritten in nesting order (EditorContext::GetNestingPrefabs and CreateNestingPrefabUpdateCommand), and every
-	// outermost instance in the open scene of a prefab written or rewritten is rebuilt (EditorContext::
-	// CreatePrefabUpdateCommand), all in the same undo step. The other ways a prefab gets a new version (EditorContext.h
-	// "Prefab updates"): asset.setImportSettings and asset.reimport of an instanced glTF rebuild its outermost instances and
-	// those of the prefabs nesting it in the same undo step, but rewrite the nesting prefab documents only from W20.2
-	// (Docs/Decisions/0031-m20-contract.md decisions 8 and 15, stream S-B); an external change raises SceneChangedOnDisk,
-	// adopted by scene.open {reload: true}, which rebuilds the instances.
+	// outermost instance in the addressed scene of a prefab written or rewritten is rebuilt (EditorContext::
+	// CreatePrefabUpdateCommand), all in the same undo step (Utils::UpdatePrefabVersion). Every other open scene that
+	// instantiates one of them is rebuilt as an entry of its own history, after the step and after its undo and redo
+	// (EditorContext::PropagatePrefabUpdate; decision 15). The other ways a prefab gets a new version (EditorContext.h
+	// "Prefab updates"): asset.setImportSettings, asset.reimport and the inspector's import settings of a glTF that an open
+	// scene instantiates or a prefab nests rewrite the nesting prefabs and rebuild the instances the same way; an external
+	// change raises SceneChangedOnDisk, adopted by scene.open {reload: true}, which rebuilds the instances.
 	struct PrefabApplyParams
 	{
 		std::string Instance{};
@@ -102,7 +104,7 @@ namespace Engine {
 	struct PrefabApplyResult
 	{
 		AssetSummary Prefab{};                      // the level's prefab asset, written
-		uint32_t UpdatedInstances = 0;              // outermost instances in the open scene rebuilt, this one's included
+		uint32_t UpdatedInstances = 0;              // outermost instances in the addressed scene rebuilt, this one's included
 		std::vector<AssetSummary> UpdatedPrefabs{}; // the prefab assets nesting it that were rewritten, in nesting order
 		uint32_t UndoIndex = 0;
 	};
@@ -181,7 +183,9 @@ namespace Engine {
 
 	// Registers the five methods. Tools (§13.8): prefab.create, prefab.instantiate, prefab.apply. All mutate and are
 	// AllowedInBatch (every effect goes through EditorContext::Execute). SupportsDryRun: create, instantiate, revert, unpack
-	// (apply rewrites the prefab and every instance and is not dry-runnable, §13.4's list).
+	// (apply rewrites the prefab and every instance and is not dry-runnable, §13.4's list). All take the scene target
+	// (SupportsSceneTarget; Docs/Decisions/0031-m20-contract.md decision 16): their instances, entity references and undo
+	// step are the addressed open scene's.
 	void RegisterPrefabMethods(MethodRegistry& methods);
 
 }

@@ -28,20 +28,24 @@ namespace Engine {
 		void RunEntityBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots)
 		{
 			ScriptTestFixture fixture({ .Mode = mode, .TestMode = true });
-			// Script.Define and every Field constructor are covered by Bindings/ScriptTests.cpp; this behaviour serves GetScript.
+			// Script.Define and every Field constructor are covered by Bindings/ScriptTests.cpp; this behaviour serves GetScript
+			// and GetScripts (an entity with several script slots: Engine/Scripting/ScriptSlotTests.cpp).
 			REQUIRE(fixture.AddScript(AssetHandle(200), "Assets/Coverage.luau", R"(
 local T = {}
 function T:OnCreate() self.Ready = true end
 return Script.Define("Coverage", T)
 )"));
 			const Entity bound = fixture.GetScene().CreateEntity("Bound");
-			ScriptComponent script;
+			ScriptSlot script;
 			script.Script.SetHandle(AssetHandle(200));
-			bound.AddComponent<ScriptComponent>(script);
+			bound.AddComponent<ScriptComponent>(ScriptComponent{ { script } });
 			REQUIRE(fixture.Start());
 			CheckEntityScript(fixture, R"(
 local bound = Scene.FindByName("Bound")
 assert(bound:GetScript().Ready)
+assert(bound:GetScript("Coverage") == bound:GetScript() and bound:GetScript("Missing") == nil)
+local scripts = bound:GetScripts()
+assert(#scripts == 1 and scripts[1] == bound:GetScript())
 local parent = Scene.CreateEntity("Parent")
 local child = Scene.CreateEntity("Child", parent)
 assert(parent:IsValid() and child:IsActive() and child:IsActiveSelf())
@@ -152,11 +156,12 @@ refused(function() text.Text = long end)
 assert(text.Text == string.rep("t", limit))
 -- Strings and map keys of one value count together.
 local holder = Scene.CreateEntity("Holder")
-local script = holder:AddComponent("Script", {{Script = Assets.Load("Assets/Scripts/Holder.luau")}})
-refused(function() script.Fields = {{Names = {{string.rep("a", limit / 2), string.rep("b", limit / 2)}}}} end)
-assert(next(script.Fields) == nil)
-script.Fields = {{Names = {{string.rep("a", limit / 4), "b"}}}}
-assert(script.Fields.Names[2] == "b")
+local script = holder:AddComponent("Script", {{Scripts = {{{{Script = Assets.Load("Assets/Scripts/Holder.luau"), Fields = {{}}, ExecutionOrder = 0}}}}}})
+local function setFields(fields) script.Scripts = {{{{Script = script.Scripts[1].Script, Fields = fields, ExecutionOrder = 0}}}} end
+refused(function() setFields({{Names = {{string.rep("a", limit / 2), string.rep("b", limit / 2)}}}}) end)
+assert(next(script.Scripts[1].Fields) == nil)
+setFields({{Names = {{string.rep("a", limit / 4), "b"}}}})
+assert(script.Scripts[1].Fields.Names[2] == "b")
 return true
 )",
 										   MaxScriptComponentStringBytes));
@@ -171,10 +176,10 @@ return true
 			REQUIRE(fixture.Start());
 			CheckEntityScript(fixture, R"(
 local doomed = Scene.CreateEntity("Doomed")
-local proxy = doomed:AddComponent("Script", {Script = Assets.Load("Assets/Scripts/OneShot.luau")})
+local proxy = doomed:AddComponent("Script", {Scripts = {{Script = Assets.Load("Assets/Scripts/OneShot.luau"), Fields = {}, ExecutionOrder = 0}}})
 assert(proxy == nil and not doomed:IsValid())
 local kept = Scene.CreateEntity("Kept")
-local script = kept:AddComponent("Script", {Script = Assets.Load("Assets/Scripts/Keeper.luau")})
+local script = kept:AddComponent("Script", {Scripts = {{Script = Assets.Load("Assets/Scripts/Keeper.luau"), Fields = {}, ExecutionOrder = 0}}})
 assert(script ~= nil and kept:GetScript().Created == true)
 return true
 )");

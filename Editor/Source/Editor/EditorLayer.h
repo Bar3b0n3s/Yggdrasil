@@ -32,6 +32,12 @@ namespace Engine {
 		// First-run docking initializes once per ini path. ImGui 1.92.6+ keeps the original IDs with friendly ### titles,
 		// so saved window geometry and selected tabs remain intact without migration.
 		// Scene browsing reads the whole project on opening/refresh; create/open/save choices queue existing user actions.
+		// Open scenes (M20, Docs/Decisions/0031-m20-contract.md decision 20): with a project open, a bar of scene tabs under the
+		// toolbar lists the open scenes in tab order (name, " *" for unsaved changes, the active one highlighted); a click
+		// queues scene.activate and a tab's close button scene.close, asking to save or discard a dirty scene first, each
+		// naming its scene by the scene target. The New and Open scene dialogs offer "Open in a new tab" (keepOpen), and
+		// choosing a scene that is already open switches to its tab. The panels follow the active scene (GetScene()); when it
+		// changes, the inspector's gesture ends unwritten.
 		// The already-open project recovery modal reads EditorPanelContext::Recovery.GetOffer and queues Accept/Decline;
 		// it remains available after ProjectLauncher closes. Errors propagate to the host. No file writes or destructive
 		// scene iteration from a drawing callback.

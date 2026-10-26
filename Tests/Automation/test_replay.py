@@ -41,7 +41,7 @@ def add_key_mover(client: engine_client.EngineClient) -> None:
     """Adds the KeyMover script and its "Mover" entity to the open scene (unsaved)."""
     client.call("script.write", {"path": "Assets/Scripts/KeyMover.luau", "source": KEY_MOVER})
     client.call("entity.create", {"name": "Mover",
-                                   "components": {"Script": {"Script": "Assets/Scripts/KeyMover.luau"}}})
+                                   "components": {"Script": {"Scripts": [{"Script": "Assets/Scripts/KeyMover.luau"}]}}})
 
 
 class ReplayTests(AutomationTestCase):
@@ -259,8 +259,8 @@ class ReplayTests(AutomationTestCase):
         # input does not reproduce. Stop now replays the recording with its input first and refuses it there.
         client, root = self.open_editor_with_scene()
         client.call("script.write", {"path": "Assets/Scripts/Booster.luau", "source": BOOSTER})
-        client.call("entity.create", {"name": "Booster",
-                                       "components": {"Script": {"Script": "Assets/Scripts/Booster.luau"}}})
+        client.call("entity.create", {"name": "Booster", "components": {
+            "Script": {"Scripts": [{"Script": "Assets/Scripts/Booster.luau"}]}}})
         client.call("scene.save")
         client.call("input.record", {"action": "start"})
         client.call("play.step", {"ticks": 10, "render": "none", "input": [

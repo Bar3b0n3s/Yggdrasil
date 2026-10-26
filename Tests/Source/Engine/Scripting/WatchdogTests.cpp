@@ -61,7 +61,7 @@ namespace Engine {
 			};
 			Test::ScriptTestFixture fixture(specification);
 			REQUIRE(fixture.AddScript(AssetHandle(211), "Assets/Scripts/Board.luau", "local Board = {}\nfunction Board:OnFixedUpdate()\n\twhile true do end\nend\nreturn Script.Define(\"Board\", Board)"));
-			fixture.GetScene().CreateEntity("Board").AddComponent<ScriptComponent>().Script = TypedAssetHandle<AssetType::Script>(AssetHandle(211));
+			fixture.GetScene().CreateEntity("Board").AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = TypedAssetHandle<AssetType::Script>(AssetHandle(211)), .Fields = {}, .ExecutionOrder = 0 });
 			REQUIRE(fixture.Start());
 			armed = true;
 			Test::ExpectLog expected(LogLevel::Error, "script exceeded 1000 ms in Board.OnFixedUpdate (possible infinite loop)");
@@ -179,7 +179,7 @@ return Script.Define("Child", Child))"));
 			{
 				Test::SceneTestFixture source;
 				const Entity root = source.GetScene().CreateEntity("ChildRoot");
-				root.AddComponent<ScriptComponent>().Script = TypedAssetHandle<AssetType::Script>(AssetHandle(201));
+				root.AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = TypedAssetHandle<AssetType::Script>(AssetHandle(201)), .Fields = {}, .ExecutionOrder = 0 });
 				const auto prefab = Prefab::CreateFromEntity(root, "ChildPrefab");
 				REQUIRE(prefab.has_value());
 				const auto document = prefab->ToJson();
@@ -197,7 +197,7 @@ function Spawner:OnFixedUpdate()
 end
 return Script.Define("Spawner", Spawner))"));
 			const UUID spawner = fixture.GetScene().CreateEntity("Spawner").GetUUID();
-			fixture.GetScene().FindEntityByID(spawner).AddComponent<ScriptComponent>().Script = TypedAssetHandle<AssetType::Script>(AssetHandle(203));
+			fixture.GetScene().FindEntityByID(spawner).AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = TypedAssetHandle<AssetType::Script>(AssetHandle(203)), .Fields = {}, .ExecutionOrder = 0 });
 			REQUIRE(fixture.Start());
 			// The callback enters at 0 s (deadline 1 s). Instantiate's host request moves the clock to 0.6 s before the
 			// child's OnCreate enters; its own request then moves it to 1.2 s. A fresh nested deadline (1.6 s) would let

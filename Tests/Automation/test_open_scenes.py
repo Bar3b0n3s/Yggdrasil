@@ -6,8 +6,6 @@ import unittest
 
 from harness import AutomationTestCase, engine_client
 
-SKIP_OPEN_SCENES = ("contract stub: multiple open scenes and the scene target "
-                    "(ADR 0031 decisions 13 to 16, streams S-A, S-B and S-D)")
 MAIN = "Assets/Scenes/Main.scene"
 SECOND = "Assets/Scenes/Second.scene"
 
@@ -18,7 +16,6 @@ def entity_names(tree: dict) -> list[str]:
 
 
 class OpenSceneTests(AutomationTestCase):
-    @unittest.skip(SKIP_OPEN_SCENES)
     def test_list_activate_and_close_the_open_scenes(self) -> None:
         # Decision 14: scene.new and scene.open with keepOpen add an open scene and make it active; scene.list reports
         # them in tab order; scene.activate switches by path or id; scene.close needs save or discardChanges for a dirty
@@ -50,7 +47,28 @@ class OpenSceneTests(AutomationTestCase):
         self.assertEqual(closed["activeId"], second["id"])
         self.assertEqual([entry["scene"]["path"] for entry in client.call("scene.list")["scenes"]], [SECOND])
 
-    @unittest.skip(SKIP_OPEN_SCENES)
+        # scene.open with keepOpen opens the saved Main in a new tab at the end, the active one; Second keeps its
+        # unsaved changes.
+        client.call("entity.create", {"name": "InSecond"})
+        reopened = client.call("scene.open", {"path": MAIN, "keepOpen": True})
+        self.assertEqual(reopened["scene"]["path"], MAIN)
+        scenes = client.call("scene.list")["scenes"]
+        self.assertEqual([entry["scene"]["path"] for entry in scenes], [SECOND, MAIN])
+        self.assertEqual([entry["active"] for entry in scenes], [False, True])
+        self.assertEqual(scenes[1]["id"], reopened["id"])
+        self.assertTrue(scenes[0]["scene"]["dirty"])
+        self.assertEqual(entity_names(client.call("scene.tree", {"format": "json"})), ["InMain"])
+
+        # reload reads the open Second again in its own tab, dropping its changes, and makes it active.
+        reloaded = client.call("scene.open", {"path": SECOND, "reload": True, "discardChanges": True})
+        self.assertEqual(reloaded["scene"]["path"], SECOND)
+        scenes = client.call("scene.list")["scenes"]
+        self.assertEqual([entry["scene"]["path"] for entry in scenes], [SECOND, MAIN])
+        self.assertEqual([entry["active"] for entry in scenes], [True, False])
+        self.assertEqual(scenes[0]["id"], reloaded["id"])
+        self.assertFalse(scenes[0]["scene"]["dirty"])
+        self.assertEqual(entity_names(client.call("scene.tree", {"format": "json"})), [])
+
     def test_requests_without_a_scene_target_address_the_active_scene(self) -> None:
         # Decision 16 (Roadmap M20 acceptance "transcripts without scene targets behave as before"): with another scene
         # open, an M17-style transcript without targets edits, undoes and saves the active scene; a request with a
@@ -74,7 +92,6 @@ class OpenSceneTests(AutomationTestCase):
             client.call("asset.list", {"scene": MAIN})
         self.assert_engine_error(untargeted.exception, engine_client.INVALID_PARAMS, "InvalidArgument")
 
-    @unittest.skip(SKIP_OPEN_SCENES)
     def test_a_batch_resolves_its_references_in_its_target_scene(self) -> None:
         # Decision 16 and ADR 0028's ledger (Roadmap M20 acceptance "a batch $ref and an entity path resolve in the
         # targeted scene"): every op of a batch with a target runs in that scene; an op cannot carry its own target.
@@ -95,7 +112,6 @@ class OpenSceneTests(AutomationTestCase):
             ]})
         self.assert_engine_error(op_target.exception, engine_client.INVALID_PARAMS, "InvalidArgument")
 
-    @unittest.skip(SKIP_OPEN_SCENES)
     def test_a_prefab_update_rebuilds_every_open_scene(self) -> None:
         # Decision 15 (Roadmap M20 acceptance "a prefab update rebuilds every open scene"): an applied edit reaches the
         # instances of another open scene through an entry of that scene's own history, so undo there reverts only it.
@@ -119,7 +135,6 @@ class OpenSceneTests(AutomationTestCase):
         self.assertEqual(entity_names(client.call("scene.tree", {"format": "json", "scene": SECOND})), ["Copy", "Bulb"])
         self.assertEqual(entity_names(client.call("scene.tree", {"format": "json"})), ["Lamp", "Globe"])
 
-    @unittest.skip(SKIP_OPEN_SCENES)
     def test_autosave_recovers_every_open_scene(self) -> None:
         # Decision 15 (Roadmap M20 acceptance "autosave is isolated per open scene"): the autosave before play writes
         # one generation per dirty open scene, and after a crash project.open {recover} opens each of them again,

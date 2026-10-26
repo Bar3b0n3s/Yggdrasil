@@ -118,6 +118,9 @@ namespace Engine {
 		bool TestDefersReloads = false;
 		std::vector<UUID> SavedSelection{};
 		SceneTarget SavedSelectionTarget = SceneTarget::Edit;
+		// The open scene Session was started from (GetPlayedScene; Docs/Decisions/0031-m20-contract.md decision 13): the
+		// addressed scene when Start or ReplaceSession made it, whose selection followed into it.
+		OpenSceneId PlayedScene = NoOpenScene;
 		Watchdog* PhaseMarker = nullptr; // documented back-reference: the automation server's watchdog, cleared before it goes
 		std::string PhaseText{};         // reused for every script phase, so reporting one does not allocate
 
@@ -203,8 +206,34 @@ namespace Engine {
 
 	void EditorPlayController::State::EndSession()
 	{
+		// The play selection belongs to the played scene (Docs/Decisions/0031-m20-contract.md decision 13), addressed while the
+		// session ends so that it goes back into that scene's edit selection; a played scene that is no longer open (closed,
+		// or replaced by scene.open) took it with it.
+		const OpenSceneId played = std::exchange(PlayedScene, NoOpenScene);
+		Scope<EditorSceneTargetScope> playedScope;
+		bool carriesSelection = true;
+		if (played != NoOpenScene && played != Editor->GetAddressedSceneId())
+		{
+			if (Editor->FindScene(played) == nullptr)
+			{
+				carriesSelection = false;
+			}
+			else if (Result<Scope<EditorSceneTargetScope>> scope = EditorSceneTargetScope::Begin(*Editor, played); scope)
+			{
+				playedScope = std::move(*scope);
+			}
+			else
+			{
+				ENGINE_WARN("The play selection was dropped: the played open scene {} could not be addressed: {}", played, scope.error().ToString());
+				carriesSelection = false;
+			}
+		}
 		// A selection of a runtime scene that Scene.Load replaced is cleared while the session can still tell.
-		Editor->PruneSelection();
+		if (carriesSelection)
+			Editor->PruneSelection();
+		// A play selection with no played scene to go back to (one made after the played tab closed, which the addressed scene
+		// holds) is dropped; a parked scene's is dropped when it is next addressed (EditorContext::UnparkScene).
+		const bool dropsSelection = !carriesSelection && Editor->GetSelectionTarget() == SceneTarget::Play;
 		Session.reset();
 		if (CursorBaseline)
 		{
@@ -230,8 +259,15 @@ namespace Engine {
 			// Releasing deferral schedules imports. Publish the whole dependency chain before a new Play can snapshot it.
 			Editor->GetAssets().WaitIdle();
 		}
-		const std::span<const UUID> selection = Editor->GetSelection();
-		Editor->SetSelection(std::vector<UUID>(selection.begin(), selection.end()));
+		if (carriesSelection)
+		{
+			const std::span<const UUID> selection = Editor->GetSelection();
+			Editor->SetSelection(std::vector<UUID>(selection.begin(), selection.end()));
+		}
+		else if (dropsSelection)
+		{
+			Editor->RestoreSelection({}, SceneTarget::Edit);
+		}
 	}
 
 	EditorPlayController::EditorPlayController(EditorContext& editor)
@@ -415,8 +451,10 @@ namespace Engine {
 			editor.GetAssets().SetReloadsDeferred(true);
 			state.DefersReloads = true;
 		}
-		// The selection follows into the runtime copy by UUID, so panels inspect and edit the running scene (§5.6).
+		// The selection follows into the runtime copy by UUID, so panels inspect and edit the running scene (§5.6); the
+		// session belongs to the scene it was played from.
 		editor.RetargetSelectionToPlay();
+		state.PlayedScene = editor.GetAddressedSceneId();
 		state.AppendStateChanged();
 		return {};
 	}
@@ -438,6 +476,14 @@ namespace Engine {
 	bool EditorPlayController::IsPlaying() const
 	{
 		return GetSession() != nullptr;
+	}
+
+	OpenSceneId EditorPlayController::GetPlayedScene() const
+	{
+		const State& state = *m_State;
+		if (state.TestOwner != nullptr || state.Session == nullptr || state.Editor->FindScene(state.PlayedScene) == nullptr)
+			return NoOpenScene;
+		return state.PlayedScene;
 	}
 
 	PlaySession* EditorPlayController::GetSession() const
@@ -938,8 +984,10 @@ namespace Engine {
 			editor.GetAssets().SetReloadsDeferred(true);
 			state.DefersReloads = true;
 		}
-		// An edit selection follows into the new runtime scene; the replaced runtime scene's selection is cleared.
+		// An edit selection follows into the new runtime scene; the replaced runtime scene's selection is cleared. The new
+		// session belongs to the scene its selection came from.
 		editor.RetargetSelectionToPlay();
+		state.PlayedScene = editor.GetAddressedSceneId();
 		state.AppendStateChanged();
 		return {};
 	}

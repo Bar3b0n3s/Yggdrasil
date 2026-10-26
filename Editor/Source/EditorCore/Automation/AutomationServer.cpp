@@ -19,6 +19,7 @@
 #include "Engine/Core/VfsPath.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Platform/Process.h"
+#include "Engine/Session/PlaySession.h"
 
 #include <nlohmann/json.hpp>
 
@@ -27,6 +28,7 @@
 #include <filesystem>
 #include <format>
 #include <map>
+#include <optional>
 
 // Client ids. The Dispatcher keys its clients by id, and TCP connections (numbered by the ProtocolServer) and in-process
 // callers (numbered here) must never collide, so the server gives every client its own id and maps TCP connections onto
@@ -67,23 +69,57 @@ namespace Engine {
 			return {};
 		}
 
-		// Whether a request that is not flagged Mutates would still drop the open scene's unsaved changes and its undo
-		// history: scene.open {discardChanges} and session.shutdown {force} without save. Only those booleans are read;
-		// malformed params are left to the handler's validation.
-		[[nodiscard]] static bool DiscardsUnsavedScene(const EditorContext& editor, std::string_view method, const Json& params)
+		// Whether a request that is not flagged Mutates would still drop an open scene's unsaved changes and its undo history
+		// (M20, Docs/Decisions/0031-m20-contract.md decision 14: the scene each request would discard, not the active scene
+		// alone): scene.close {discardChanges} of the addressed scene (its scene target's, else the active one), scene.open
+		// {discardChanges} without keepOpen of the scene it replaces (the active one, or with reload the open scene at its
+		// path), and session.shutdown {force} without save of every open scene. Only the params it needs are read; malformed
+		// ones are left to the handler's validation.
+		[[nodiscard]] static bool DiscardsUnsavedScene(const EditorContext& editor, const EditorMethodContext& context)
 		{
-			if (!editor.HasScene() || !editor.IsSceneDirty())
-				return false;
-			const JsonReader reader(params);
+			const JsonReader reader(context.GetParams());
 			const auto flag = [&reader](std::string_view name)
 			{
 				return reader.ReadMember<bool>(name).value_or(false);
 			};
+			const bool addressedDirty = editor.HasScene() && editor.IsSceneDirty();
+			const std::string& method = context.GetMethod().Specification.Name;
+			if (method == "scene.close")
+				return flag("discardChanges") && addressedDirty;
 			if (method == "scene.open")
-				return flag("discardChanges");
+			{
+				if (!flag("discardChanges") || flag("keepOpen"))
+					return false;
+				std::optional<VfsPath> path;
+				if (const Result<std::string> text = reader.ReadMember<std::string>("path"); text.has_value())
+				{
+					if (Result<VfsPath> resolved = context.ResolveProjectPath(*text, "/path", ".scene"); resolved.has_value())
+						path = std::move(*resolved);
+				}
+				const bool isActivePath = path.has_value() && editor.HasScene() && editor.GetScenePath() == path;
+				const OpenSceneId reloaded = flag("reload") && path.has_value() && !isActivePath ? editor.FindOpenScene(*path) : NoOpenScene;
+				if (reloaded == NoOpenScene)
+					return addressedDirty;
+				const Result<OpenSceneInfo> info = editor.DescribeOpenScene(reloaded);
+				return info.has_value() && info->Dirty;
+			}
 			if (method == "session.shutdown")
-				return flag("force") && !flag("save");
+				return flag("force") && !flag("save") && (addressedDirty || editor.IsAnySceneDirty());
 			return false;
+		}
+
+		// The state "_meta" reports (§13.4): the addressed scene's revision, dirty flag, undo label and SceneChangedOnDisk, never
+		// the play copy's, with the play session's state and tick.
+		[[nodiscard]] static MetaState ReadMetaState(const EditorContext& editor)
+		{
+			MetaState state;
+			state.Revision = editor.GetRevision();
+			state.Dirty = editor.HasScene() && editor.IsSceneDirty();
+			state.UndoLabel = editor.HasScene() ? editor.GetHistory().GetUndoLabel() : std::string();
+			state.PlayState = editor.GetPlay().GetPlayStateName();
+			state.Tick = editor.GetPlay().GetTick();
+			state.SceneChangedOnDisk = editor.IsSceneChangedOnDisk();
+			return state;
 		}
 
 		// Removes the files of `directory` whose names `selects` accepts, logging failures (a file another process removed
@@ -152,6 +188,13 @@ namespace Engine {
 		// FinishRequest of the request that opened it.
 		Scope<EditorDryRunScope> DryRun;
 		const MethodContext* DryRunRequest = nullptr;
+		// The scene target of the request being served (M20, decision 16): a method that takes one is never pending, so at
+		// most one is open, from AdmitRequest to FinishRequest of the request that opened it.
+		Scope<EditorSceneTargetScope> SceneTarget;
+		const MethodContext* SceneTargetRequest = nullptr;
+		// "_meta" of the request that finished last, recorded while its scene target was still open; cleared when the next
+		// request starts (GetMetaState).
+		std::optional<MetaState> FinishedMeta{};
 
 		// Removes `client` like a disconnect: its pending operations are cancelled and one AutomationClientDisconnected
 		// event is appended (§13.2 "Disconnect").
@@ -224,6 +267,8 @@ namespace Engine {
 			const auto now = owner->m_Specification.WallClock ? owner->m_Specification.WallClock() : std::chrono::steady_clock::now();
 			if (event.Phase == DispatcherRequestPhase::Started)
 			{
+				// The previous request's "_meta" record ends here: a response refused before admission reports the live state.
+				current.FinishedMeta.reset();
 				current.Activity.push_front(State::RequestActivity{
 					.Sequence = event.Sequence,
 					.Started = now,
@@ -459,15 +504,29 @@ namespace Engine {
 	Status AutomationServer::AdmitRequest(MethodContext& context)
 	{
 		const MethodSpecification& specification = context.GetMethod().Specification;
+		// CreateContext makes every context of this server an EditorMethodContext.
+		ENGINE_ASSERT(context.IsHostType(TypeKeyOf<EditorMethodContext>()), "'{}' runs without an editor method context", specification.Name);
+		if (!context.IsHostType(TypeKeyOf<EditorMethodContext>()))
+			return MakeError(ErrorCode::Unknown, "'{}' runs without an editor method context", specification.Name);
+		const EditorMethodContext& editorContext = static_cast<const EditorMethodContext&>(context);
 		// The rule UI actions share (EditorActions): while a test run owns the editor, only its observation subset.
 		ENGINE_TRY(m_Editor->CheckTestRunAdmission(specification.Name, context.IsDryRun()));
+		// M20 (decision 16): a scene target is addressed from here to FinishRequest, so the permission checks (the discard rule
+		// reads the scene each request would discard), ifRevision, the dry run's copy, the handler and "_meta" all read it.
+		if (context.GetOptions().Scene.has_value())
+		{
+			ENGINE_TRY_ASSIGN(const OpenSceneId scene, editorContext.ResolveSceneTarget());
+			ENGINE_ASSERT(m_State->SceneTarget == nullptr, "A scene target is already open for another request");
+			ENGINE_TRY_ASSIGN(m_State->SceneTarget, EditorSceneTargetScope::Begin(*m_Editor, scene));
+			m_State->SceneTargetRequest = &context;
+		}
 		if (specification.Mutates && !context.IsDryRun() && m_Editor->IsReadOnly())
 			return MakeError(ErrorCode::PermissionDenied, "the editor is read-only (--read-only): '{}' changes the project", specification.Name);
 		if (specification.Mutates && !context.IsDryRun() && m_State->Policy.DenyMutations)
 			return MakeError(ErrorCode::PermissionDenied, "agent mutations are disabled: '{}' changes the project", specification.Name);
 		// Discarding the human's unsaved edits writes no file and runs no command, so no write boundary sees it.
-		if (!context.IsDryRun() && m_State->Policy.DenyMutations && Utils::DiscardsUnsavedScene(*m_Editor, specification.Name, context.GetParams()))
-			return MakeError(ErrorCode::PermissionDenied, "agent mutations are disabled: '{}' would discard the open scene's unsaved changes", specification.Name);
+		if (!context.IsDryRun() && m_State->Policy.DenyMutations && Utils::DiscardsUnsavedScene(*m_Editor, editorContext))
+			return MakeError(ErrorCode::PermissionDenied, "agent mutations are disabled: '{}' would discard an open scene's unsaved changes", specification.Name);
 
 		if (const std::optional<uint64_t> expected = context.GetOptions().IfRevision)
 		{
@@ -507,24 +566,29 @@ namespace Engine {
 
 	void AutomationServer::FinishRequest(MethodContext& context)
 	{
-		if (m_State->DryRunRequest == &context)
+		State& state = *m_State;
+		if (state.DryRunRequest == &context)
 		{
-			m_State->DryRun.reset();
-			m_State->DryRunRequest = nullptr;
+			state.DryRun.reset();
+			state.DryRunRequest = nullptr;
+		}
+		const bool targeted = state.SceneTargetRequest == &context;
+		// A request that closed the scene it addressed (scene.close) reports the now active scene in "_meta".
+		if (targeted && m_Editor->FindScene(state.SceneTarget->GetScene()) == nullptr)
+			state.SceneTarget.reset();
+		state.FinishedMeta = Utils::ReadMetaState(*m_Editor);
+		if (targeted)
+		{
+			state.SceneTarget.reset();
+			state.SceneTargetRequest = nullptr;
 		}
 	}
 
 	MetaState AutomationServer::GetMetaState() const
 	{
-		const EditorContext& editor = *m_Editor;
-		MetaState state;
-		state.Revision = editor.GetRevision();
-		state.Dirty = editor.HasScene() && editor.IsSceneDirty();
-		state.UndoLabel = editor.HasScene() ? editor.GetHistory().GetUndoLabel() : std::string();
-		state.PlayState = editor.GetPlay().GetPlayStateName();
-		state.Tick = editor.GetPlay().GetTick();
-		state.SceneChangedOnDisk = editor.IsSceneChangedOnDisk();
-		return state;
+		if (m_State->FinishedMeta.has_value())
+			return *m_State->FinishedMeta;
+		return Utils::ReadMetaState(*m_Editor);
 	}
 
 	Result<std::string> AutomationServer::WriteOffloadedResult(std::string_view text)

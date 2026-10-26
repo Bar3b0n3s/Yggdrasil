@@ -482,7 +482,7 @@ return true
 			REQUIRE(fixture.Start());
 			const auto definitions = fixture.GetApi().GenerateDefinitions();
 			REQUIRE(definitions);
-			for (const char* text : { "<T>(name: string, class: T) -> T", "name: \"Transform\"", "GetScript: (self: Entity) -> any", "WorldPosition: vector", "Pi: number", "declare extern type Quat" })
+			for (const char* text : { "<T>(name: string, class: T) -> T", "name: \"Transform\"", "GetScript: (self: Entity, name: string?) -> any", "GetScripts: (self: Entity) -> {any}", "WorldPosition: vector", "Pi: number", "declare extern type Quat" })
 				CHECK(definitions->find(text) != std::string::npos);
 			for (const char* text : { "export type ScriptInstance =", "export type Key =", "export type FieldOptions =" })
 				CHECK(definitions->find(text) != std::string::npos);
@@ -626,9 +626,9 @@ return true
 				Test::ScriptTestFixture fixture({ .Mode = mode, .TestMode = true });
 				REQUIRE(fixture.AddScript(AssetHandle(77), "Assets/Counter.luau", "local T = {}; function T:OnStart() self.Started = true end; return Script.Define('Counter', T)"));
 				const auto owner = fixture.GetScene().CreateEntity("Counter");
-				ScriptComponent script;
+				ScriptSlot script;
 				script.Script.SetHandle(AssetHandle(77));
-				owner.AddComponent<ScriptComponent>(script);
+				owner.AddComponent<ScriptComponent>(ScriptComponent{ { script } });
 				REQUIRE(fixture.Start());
 				CheckRegistryScript(fixture, R"(local e = Scene.FindByName("Counter"); assert(e:GetScript().Started); local t = e.Transform; t:Translate(vector.one); local p = t.Translation; t.Translation = p; return true)");
 				const auto coverage = fixture.GetApi().GetCoverage(mode);

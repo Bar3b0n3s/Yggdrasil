@@ -113,8 +113,11 @@ namespace Engine {
 
 	// asset.reimport {asset}: EditorAssetManager::ReimportAsync of a main asset, bypassing the cache; a pending operation.
 	// Not undoable itself (derived data; a changed sub-asset list rewrites the .meta through the AssetWriter). When the asset
-	// is a Prefab the open scene instantiates and its content changed, the operation then executes
-	// EditorContext::CreatePrefabUpdateCommand (an undo step of its own, "Update Prefab Instances") before it resolves.
+	// is a Prefab that an open scene instantiates or another prefab may nest (Docs/Decisions/0031-m20-contract.md decisions 8
+	// and 15), the operation then, before it resolves, rewrites the prefabs nesting it from its new version
+	// (EditorContext::CreateNestingPrefabUpdateCommand) and rebuilds the addressed scene's instances of them and of it
+	// (CreatePrefabUpdateCommand), as an undo step of its own ("Update Prefab Instances"), and every other open scene's in
+	// that scene's own history (EditorContext::PropagatePrefabUpdate). Not a scene-target method: it acts on every open scene.
 	struct AssetReimportParams
 	{
 		std::string Asset{};
@@ -209,10 +212,13 @@ namespace Engine {
 
 	// asset.setImportSettings {asset, settings}: an RFC 7386 merge patch of the import settings, validated against the
 	// importer's settings struct, written to the .meta as one AssetEditCommand; the asset reimports (asynchronously, like
-	// any write: the result does not wait for the import). Exception, §5.5 "Update": when the asset is a Prefab the open
-	// scene instantiates (a glTF), the reimport runs before the method returns and the AssetEditCommand is composed with
-	// EditorContext::CreatePrefabUpdateCommand into one undo step (a CompositeCommand), so the instances follow the new
-	// settings (Scale, MergeMeshes) and one undo restores both.
+	// any write: the result does not wait for the import). Exception, §5.5 "Update": when the asset is a Prefab (a glTF) that
+	// an open scene instantiates or another prefab may nest (Docs/Decisions/0031-m20-contract.md decisions 8 and 15), the
+	// reimport runs before the method returns and the AssetEditCommand is composed with the rewrite of the prefabs nesting
+	// it (EditorContext::CreateNestingPrefabUpdateCommand) and EditorContext::CreatePrefabUpdateCommand into one undo step (a
+	// CompositeCommand; Utils::UpdatePrefabVersion), so the nesting prefabs and the addressed scene's instances follow the
+	// new settings (Scale, MergeMeshes) and one undo restores all of it; every other open scene's instances follow it, and
+	// its undo and redo, in that scene's own history (EditorContext::PropagatePrefabUpdate).
 	struct AssetSetImportSettingsParams
 	{
 		std::string Asset{};
@@ -278,8 +284,9 @@ namespace Engine {
 		// closure; PermissionDenied for a symbolic link, a reparse point or a closure file outside the source's directory;
 		// AlreadyExists when a destination file exists. Errors (when the operation resolves): the import's.
 		[[nodiscard]] Result<Scope<PendingOperation>> AssetImport(EditorMethodContext& context, const AssetImportParams& params);
-		// asset.reimport. Errors: as asset.info; InvalidArgument for a sub-asset, dependency or built-in; the import's errors
-		// when the operation resolves.
+		// asset.reimport. Errors: as asset.info; InvalidArgument for a sub-asset, dependency or built-in; when the operation
+		// resolves, the import's errors, and for a Prefab Validation PREFAB_CYCLE for a nesting cycle and those of the nesting
+		// rewrite and of EditorContext::CreatePrefabUpdateCommand (the new version stays imported; nothing else changed).
 		[[nodiscard]] Result<Scope<PendingOperation>> AssetReimport(EditorMethodContext& context, const AssetReimportParams& params);
 		// asset.create. Errors: InvalidArgument for a path outside Assets/, a wrong extension, values given for a type that
 		// takes none, and a Material's or SoundEffect's values that are not an object or that set "Format" or "Version";
@@ -296,8 +303,9 @@ namespace Engine {
 		[[nodiscard]] Result<AssetGetImportSettingsResult> AssetGetImportSettings(EditorMethodContext& context,
 			const AssetGetImportSettingsParams& params);
 		// asset.setImportSettings. Errors: as asset.getImportSettings; InvalidArgument for settings that are not an object or
-		// an importer without settings; Validation (located under /settings); for an instanced Prefab, the import's errors
-		// and those of EditorContext::CreatePrefabUpdateCommand (nothing changed then).
+		// an importer without settings; Validation (located under /settings); for an instanced or nested Prefab, the import's
+		// errors, Validation PREFAB_CYCLE for a nesting cycle (nothing written) and those of the nesting rewrite and
+		// EditorContext::CreatePrefabUpdateCommand (nothing changed then).
 		[[nodiscard]] Result<AssetSetImportSettingsResult> AssetSetImportSettings(EditorMethodContext& context,
 			const AssetSetImportSettingsParams& params);
 		// asset.move. Errors: as asset.info; those of AssetMoveCommand::Create (InvalidState naming the assets that found it by

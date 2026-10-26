@@ -466,6 +466,42 @@ namespace Engine {
 			}
 		}
 
+		// True when a member of `type` resolves its Variant values against its owner (a script slot's Fields, §5.4).
+		static bool HasResolvedMembers(const StructInfo& type)
+		{
+			return std::ranges::any_of(type.GetFields(), [](const Scope<FieldInfo>& member)
+			{
+				return member->GetResolver() != nullptr;
+			});
+		}
+
+		// The owner a nested struct's Variant members resolve against (Docs/Decisions/0031-m20-contract.md decision 17: a
+		// script slot inside the Script component's list resolves its Fields against its own Script): its JSON, as a file read
+		// resolves them (ResolveContext). Heap-held, so the reader stays valid while frames move.
+		struct StructOwner
+		{
+			Scope<Json> Object{};
+			Scope<JsonReader> Reader{};
+		};
+
+		static StructOwner MakeStructOwner(Json object)
+		{
+			StructOwner owner;
+			owner.Object = CreateScope<Json>(std::move(object));
+			owner.Reader = CreateScope<JsonReader>(*owner.Object);
+			return owner;
+		}
+
+		// `resolve` with the struct `type` whose JSON `owner` holds as the owner of its members' Variant values.
+		static ResolveContext WithStructOwner(ResolveContext resolve, const StructInfo& type, const StructOwner& owner)
+		{
+			resolve.Owner = nullptr;
+			resolve.OwnerType = &type;
+			resolve.OwnerJson = owner.Reader.get();
+			resolve.Key = {};
+			return resolve;
+		}
+
 		struct ValueReadFrame
 		{
 			const TypeInfo* Type = nullptr;
@@ -477,6 +513,7 @@ namespace Engine {
 			bool Variant = false;
 			std::vector<Value> Values{};
 			std::vector<std::string> Keys{};
+			StructOwner Owner{}; // a struct with resolved members: the members read so far
 		};
 
 		static ValueReadFrame BeginValueTable(ScriptCall& call, int index, const TypeInfo& type, const FieldInfo* field,
@@ -530,6 +567,8 @@ namespace Engine {
 					budget.Check(member->GetName().size(), Detail::NativeConversionBudget::StringByteCopies);
 					frame.Keys.push_back(member->GetName());
 				}
+				if (HasResolvedMembers(*type.GetStruct()))
+					frame.Owner = MakeStructOwner(Json::object());
 			}
 			frame.Count = frame.Keys.size();
 			return frame;
@@ -655,6 +694,18 @@ namespace Engine {
 					nextType = kind == FieldType::Struct ? &field->GetType() : frame.Type->GetElement();
 					if (kind == FieldType::Map)
 						resolve.Key = frame.Keys[element];
+					if (kind == FieldType::Struct && frame.Owner.Object != nullptr)
+					{
+						// The members declared before this one, which a resolver may read (ResolveContext).
+						const auto& members = frame.Type->GetStruct()->GetFields();
+						*frame.Owner.Object = Json::object();
+						for (size_t member = 0; member < frame.Values.size(); ++member)
+						{
+							if (auto json = ValueToJson(frame.Values[member], members[member]->GetType()))
+								(*frame.Owner.Object)[members[member]->GetName()] = std::move(*json);
+						}
+						resolve = WithStructOwner(resolve, *frame.Type->GetStruct(), frame.Owner);
+					}
 				}
 				index = lua_gettop(state);
 			}
@@ -715,6 +766,7 @@ namespace Engine {
 			size_t Next = 0;
 			size_t Depth = 0;
 			bool Variant = false;
+			StructOwner Owner{}; // a struct with resolved members: its JSON
 		};
 
 		static void PushValue(ScriptCall& call, const Value& value, const TypeInfo& type, size_t depth = 0, const FieldInfo* field = nullptr, ResolveContext resolve = {})
@@ -760,7 +812,17 @@ namespace Engine {
 					else
 					{
 						lua_newtable(call.State);
-						frames.push_back({ .Source = next, .Type = nextType, .Field = field, .Resolve = resolve, .TableIndex = lua_gettop(call.State), .Depth = depth });
+						ValuePushFrame frame{ .Source = next, .Type = nextType, .Field = field, .Resolve = resolve, .TableIndex = lua_gettop(call.State), .Depth = depth };
+						if (next->GetKind() == FieldType::Struct && nextType->GetStruct() != nullptr && HasResolvedMembers(*nextType->GetStruct()))
+						{
+							auto json = ValueToJson(*next, *nextType);
+							budget.CheckDeadline();
+							if (!json)
+								Lua::RaiseError(call, json.error());
+							frame.Owner = MakeStructOwner(std::move(*json));
+							frame.Resolve = WithStructOwner(resolve, *nextType->GetStruct(), frame.Owner);
+						}
+						frames.push_back(std::move(frame));
 					}
 				}
 				if (completed)

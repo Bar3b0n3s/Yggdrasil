@@ -58,6 +58,7 @@ namespace Engine {
 						.Description = "Finds the nearest visible mesh triangle on a CPU ray, including both faces and Mask/Blend geometry without texture alpha testing. Does not step physics or change selection.",
 						.RequiredParams = { "origin", "direction", "maxDistance" },
 						.SupportsDryRun = true,
+						.SupportsSceneTarget = true,
 						.AvailableInRuntime = true,
 						.AllowedInBatch = true,
 						.Examples = { { .Description = "Query forward from the camera.", .Params = Json{ { "origin", { 0, 0, 10 } }, { "direction", { 0, 0, -1 } }, { "maxDistance", 100 } } } } },

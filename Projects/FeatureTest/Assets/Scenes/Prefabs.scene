@@ -15,7 +15,7 @@
 		"RigidBody": 1,
 		"BoxCollider": 1,
 		"AudioListener": 1,
-		"Script": 1
+		"Script": 2
 	},
 	"Entities": [
 		{
@@ -218,12 +218,16 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "cdca1d8d3f05d703",
-					"Fields": {
-						"Lid": "1d9d503850ff6365",
-						"Tag": "Crate"
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "cdca1d8d3f05d703",
+							"Fields": {
+								"Lid": "1d9d503850ff6365",
+								"Tag": "Crate"
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -258,11 +262,15 @@
 					"SourceRadius": 0.05
 				},
 				"Script": {
-					"Script": "cdca1d8d3f05d703",
-					"Fields": {
-						"Tag": "Lid"
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "cdca1d8d3f05d703",
+							"Fields": {
+								"Tag": "Lid"
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -500,12 +508,16 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "cdca1d8d3f05d703",
-					"Fields": {
-						"Lid": "19fcb5ddee48a19e",
-						"Tag": "Crate"
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "cdca1d8d3f05d703",
+							"Fields": {
+								"Lid": "19fcb5ddee48a19e",
+								"Tag": "Crate"
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -534,11 +546,15 @@
 					"Visible": true
 				},
 				"Script": {
-					"Script": "cdca1d8d3f05d703",
-					"Fields": {
-						"Tag": "Lid"
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "cdca1d8d3f05d703",
+							"Fields": {
+								"Tag": "Lid"
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -612,13 +628,17 @@
 					"Scale": [1, 1, 1]
 				},
 				"Script": {
-					"Script": "4e82919435a15290",
-					"Fields": {
-						"Crate": "d98a5219589e9568",
-						"Spawnable": "8ebde7a44d12e739",
-						"Target": "19fcb5ddee48a19e"
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "4e82919435a15290",
+							"Fields": {
+								"Crate": "d98a5219589e9568",
+								"Spawnable": "8ebde7a44d12e739",
+								"Target": "19fcb5ddee48a19e"
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		}

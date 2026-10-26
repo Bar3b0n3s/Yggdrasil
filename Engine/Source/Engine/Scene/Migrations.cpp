@@ -3,8 +3,18 @@
 
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Scene/Components/PrefabInstanceComponent.h"
+#include "Engine/Scene/Components/ScriptComponent.h"
+#include "Engine/Scene/PrefabInstantiator.h"
 
 #include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <array>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace Engine {
 
@@ -193,6 +203,83 @@ namespace Engine {
 			return {};
 		}
 
+		// The prefab overrides that target the Script component, in the upgrade that migrates it from version 1
+		// (Docs/Decisions/0031-m20-contract.md decision 17), whatever the version of the Prefab component holding them: a
+		// Field override of Script, Fields or ExecutionOrder names slot 0's member ("Scripts/0/<member>", decision 19), and an
+		// AddComponent override's value, a whole version 1 component, migrates as the component does. Overrides of other
+		// shapes stay as they are for the reader to report. Errors: the component migration's, located at the value.
+		static Status MigrateScriptOverrides(Json& document, const ComponentInfo& script, const ComponentInfo& prefab)
+		{
+			constexpr std::array<std::string_view, 3> SlotMembers = { "Script", "Fields", "ExecutionOrder" };
+			const auto entities = document.find("Entities");
+			if (entities == document.end() || !entities->is_array())
+				return {};
+			for (size_t index = 0; index < entities->size(); ++index)
+			{
+				Json& entity = (*entities)[index];
+				const auto components = entity.is_object() ? entity.find("Components") : entity.end();
+				if (!entity.is_object() || components == entity.end() || !components->is_object())
+					continue;
+				const auto component = components->find(prefab.GetName());
+				if (component == components->end() || !component->is_object())
+					continue;
+				const auto overrides = component->find("Overrides");
+				if (overrides == component->end() || !overrides->is_array())
+					continue;
+				for (size_t entry = 0; entry < overrides->size(); ++entry)
+				{
+					Json& prefabOverride = (*overrides)[entry];
+					if (!prefabOverride.is_object())
+						continue;
+					const auto target = prefabOverride.find("Component");
+					if (target == prefabOverride.end() || *target != Json(script.GetName()))
+						continue;
+					// An absent Kind reads as Field, its default.
+					const auto kind = prefabOverride.find("Kind");
+					if (kind == prefabOverride.end() || *kind == Json("Field"))
+					{
+						const auto field = prefabOverride.find("Field");
+						const auto member = std::ranges::find_if(SlotMembers, [&field, &prefabOverride](std::string_view name)
+						{
+							return field != prefabOverride.end() && *field == Json(std::string(name));
+						});
+						if (member != SlotMembers.end())
+							*field = PrefabInstantiator::MakeScriptSlotField(0, *member);
+					}
+					else if (*kind == Json("AddComponent"))
+					{
+						const auto value = prefabOverride.find("Value");
+						if (value == prefabOverride.end() || !value->is_object())
+							continue;
+						if (Status migrated = script.Migrate(1, *value); !migrated)
+						{
+							const std::string componentPointer =
+								JsonReader::AppendPointer(JsonReader::AppendPointer(JsonReader::AppendPointer("/Entities", index), "Components"), prefab.GetName());
+							const std::string valuePointer =
+								JsonReader::AppendPointer(JsonReader::AppendPointer(JsonReader::AppendPointer(componentPointer, "Overrides"), entry), "Value");
+							return std::unexpected(PrefixPointers(migrated.error(), valuePointer));
+						}
+					}
+				}
+			}
+			return {};
+		}
+
+		// Runs the document-level follow-ups of `steps`: MigrateScriptOverrides when the Script component migrates from
+		// version 1.
+		static Status ApplyMigrationFollowUps(Json& document, std::span<const ComponentMigrationStep> steps, const TypeRegistry& registry)
+		{
+			const ComponentInfo* script = registry.FindComponent<ScriptComponent>();
+			const ComponentInfo* prefab = registry.FindComponent<PrefabInstanceComponent>();
+			const bool scriptFromVersion1 = std::ranges::any_of(steps, [script](const ComponentMigrationStep& step)
+			{
+				return step.Component == script && step.FromVersion == 1;
+			});
+			if (scriptFromVersion1 && prefab != nullptr)
+				ENGINE_TRY(MigrateScriptOverrides(document, *script, *prefab));
+			return {};
+		}
+
 	}
 
 	Status Migrations::UpgradeDocument(Json& document, DocumentKind kind, const TypeRegistry& registry, LoadReport& report)
@@ -229,6 +316,7 @@ namespace Engine {
 			if (!changed)
 				upgraded = document;
 			ENGINE_TRY(Utils::ApplyComponentMigrations(upgraded, steps));
+			ENGINE_TRY(Utils::ApplyMigrationFollowUps(upgraded, steps, registry));
 			changed = true;
 		}
 

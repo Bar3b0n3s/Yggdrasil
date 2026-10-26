@@ -10,6 +10,8 @@ namespace Engine {
 	// Errors: normal open errors; PermissionDenied read-only; Parse/Validation corrupt recovery; Conflict stale identity.
 	// Unsupported when a newer recovery exists but the host has not supplied its long-lived Autosave service.
 	// Without a newer recovery, open normally with recovered=false. No dry run, batch, Runtime or new tool.
+	// M20 (Docs/Decisions/0031-m20-contract.md decision 15): every scene with a recoverable generation opens again
+	// (Autosave::FindRecoveries' offers, Autosave::OpenRecoveredProject), dirty, the oldest offer active.
 	// Like project.open without recover, requires the launcher state. UI acceptance after recover=false goes directly
 	// through the host-injected already-open service, which holds the original lock and calls Autosave::Recover.
 	[[nodiscard]] Result<ProjectOpenResult> OpenProjectWithRecovery(EditorMethodContext& context, const ProjectOpenParams& params);

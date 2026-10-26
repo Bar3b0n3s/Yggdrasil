@@ -497,7 +497,7 @@ namespace Engine {
 																												"\tif Input.IsKeyDown(\"Space\") then self.Entity.Transform:Translate(vector.create(1, 0, 0)) end\n"
 																												"end\n"
 																												"return Script.Define(\"Paddle\", Paddle)\n" } });
-			CallTestMethod(fixture, "entity.create", Json{ { "name", "Paddle" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Paddle.luau" } } } } } });
+			CallTestMethod(fixture, "entity.create", Json{ { "name", "Paddle" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/Paddle.luau" } } }) } } } } } });
 			CallTestMethod(fixture, "scene.save", Json::object());
 			WriteSuite(fixture, "return Test.Suite('Autopilot', function()\n"
 								"Test.Case('play across a checkpoint', function()\n"
@@ -547,7 +547,7 @@ namespace Engine {
 																												"\tif Input.IsKeyDown(\"Space\") then self.Entity.Transform:Translate(vector.create(1, 0, 0)) end\n"
 																												"end\n"
 																												"return Script.Define(\"Paddle\", Paddle)\n" } });
-			CallTestMethod(fixture, "entity.create", Json{ { "name", "Paddle" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Paddle.luau" } } } } } });
+			CallTestMethod(fixture, "entity.create", Json{ { "name", "Paddle" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/Paddle.luau" } } }) } } } } } });
 			CallTestMethod(fixture, "scene.save", Json::object());
 			WriteSuite(fixture, "return Test.Suite('Autopilot', function()\n"
 								"Test.Case('play then restart', function()\n"
@@ -650,7 +650,7 @@ namespace Engine {
 			std::string broken = clean;
 			broken.replace(broken.find("return 1"), std::string_view("return 1").size(), "return \"two\"");
 			CallTestMethod(fixture, "script.write", Json{ { "path", path }, { "source", clean } });
-			CallTestMethod(fixture, "entity.create", Json{ { "name", "Typed" }, { "components", Json{ { "Script", Json{ { "Script", path } } } } } });
+			CallTestMethod(fixture, "entity.create", Json{ { "name", "Typed" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", path } } }) } } } } } });
 			CallTestMethod(fixture, "scene.save", Json::object());
 			CallTestMethod(fixture, "script.write", Json{ { "path", "Assets/Tests/Reload.test.luau" }, { "source", "return Test.Suite(\"Reload\", function()\n"
 																												   "\tTest.Case(\"refused\", function()\n"

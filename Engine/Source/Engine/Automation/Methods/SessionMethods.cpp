@@ -166,12 +166,12 @@ namespace Engine {
 				"The Runtime reports its game scene.");
 
 		registry.Struct<SessionShutdownParams>("SessionShutdownParams", "The params of session.shutdown.")
-			.Field("save", &SessionShutdownParams::Save, "The editor saves the open scene first when it has unsaved changes (the Runtime has none to save).")
-			.Field("force", &SessionShutdownParams::Force, "The editor exits even when the open scene has unsaved changes, discarding them.");
+			.Field("save", &SessionShutdownParams::Save, "The editor saves every open scene with unsaved changes first (the Runtime has none to save).")
+			.Field("force", &SessionShutdownParams::Force, "The editor exits even when open scenes have unsaved changes, discarding them.");
 
 		registry.Struct<SessionShutdownResult>("SessionShutdownResult", "What session.shutdown saved before the host exits (always nothing in the Runtime).")
-			.Field("saved", &SessionShutdownResult::Saved, "Whether the open scene was written.")
-			.Field("savedFiles", &SessionShutdownResult::SavedFiles, "The project-relative files written.");
+			.Field("saved", &SessionShutdownResult::Saved, "Whether an open scene was written.")
+			.Field("savedFiles", &SessionShutdownResult::SavedFiles, "The project-relative files written, in tab order.");
 	}
 
 	void RegisterSessionMethods(MethodRegistry& methods)
@@ -211,11 +211,11 @@ namespace Engine {
 		methods.Add(
 			{
 				.Name = "session.shutdown",
-				.Description = "Exits the host after the response. The editor with unsaved changes in the open scene needs save (write them "
-							   "first) or force (discard them); the Runtime saves nothing and needs neither.",
+				.Description = "Exits the host after the response. The editor with unsaved changes in an open scene needs save (write every "
+							   "dirty open scene first) or force (discard the changes); the Runtime saves nothing and needs neither.",
 				.AvailableInRuntime = true,
 				.AvailableInLauncher = true,
-				.Examples = { { .Description = "Save the open scene, then exit.", .Params = saveExample } },
+				.Examples = { { .Description = "Save the open scenes, then exit.", .Params = saveExample } },
 			},
 			&Automation::SessionShutdown);
 	}

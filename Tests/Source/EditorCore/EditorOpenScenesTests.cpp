@@ -3,6 +3,9 @@
 
 #include "EditorCore/Commands/CommandHistory.h"
 #include "EditorCore/Commands/SceneEdit.h"
+#include "EditorCore/Play/EditorPlayController.h"
+#include "Engine/Core/EventLog.h"
+#include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VfsPath.h"
 #include "Engine/Scene/Entity.h"
@@ -13,6 +16,10 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <chrono>
+#include <filesystem>
+#include <format>
 #include <optional>
 #include <span>
 #include <string>
@@ -64,7 +71,7 @@ namespace Engine {
 		// Docs/Decisions/0031-m20-contract.md decision 13 (E-SCENES; Roadmap M20 acceptance "undo is isolated per open scene"):
 		// every open scene is its own document. Edits, undo, the dirty flag, the selection and the revision of one never
 		// touch another, switching the active scene keeps each scene's state, and revisions never repeat across them.
-		TEST_CASE("EditorContext: each open scene keeps its own history, dirty flag, selection and revision" * doctest::skip(true))
+		TEST_CASE("EditorContext: each open scene keeps its own history, dirty flag, selection and revision")
 		{
 			Test::EditorTestFixture fixture("OpenScenesIsolated");
 			fixture.CreateAndOpenProject();
@@ -125,7 +132,7 @@ namespace Engine {
 		// Decision 13: GetScene() is the active scene for every caller outside a targeted request; an EditorSceneTargetScope
 		// makes another open scene the addressed one, and commands executed inside it land in that scene and its history,
 		// without changing the active scene.
-		TEST_CASE("EditorContext: a scene target scope addresses another open scene and leaves the active one" * doctest::skip(true))
+		TEST_CASE("EditorContext: a scene target scope addresses another open scene and leaves the active one")
 		{
 			Test::EditorTestFixture fixture("OpenScenesTargetScope");
 			fixture.CreateAndOpenProject();
@@ -160,10 +167,279 @@ namespace Engine {
 			CHECK(EditorSceneTargetScope::Begin(editor, OpenSceneId(9999)).error().GetCode() == ErrorCode::NotFound);
 		}
 
+		// Decision 13: inside a target scope only the scope's own scene can be activated or closed; closing it leaves the
+		// scope addressing no scene until it ends, and the active scene is the addressed one again afterwards.
+		TEST_CASE("EditorContext: a scene target scope can activate or close its own scene only")
+		{
+			Test::EditorTestFixture fixture("OpenScenesScopeOwnScene");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene("Assets/Scenes/Main.scene");
+			EditorContext& editor = fixture.GetEditor();
+			const OpenSceneId main = editor.GetActiveSceneId();
+			const OpenSceneId second = AddOpenScene(editor, "project://Assets/Scenes/Second.scene");
+			const OpenSceneId third = AddOpenScene(editor, "project://Assets/Scenes/Third.scene");
+			{
+				Result<Scope<EditorSceneTargetScope>> scope = EditorSceneTargetScope::Begin(editor, second);
+				REQUIRE(scope.has_value());
+				CHECK(editor.CloseScene(main).error().GetCode() == ErrorCode::InvalidState);
+				REQUIRE(editor.ActivateScene(second).has_value());
+				CHECK(editor.GetActiveSceneId() == second);
+				CHECK(editor.GetAddressedSceneId() == second);
+			}
+			CHECK(editor.GetAddressedSceneId() == second);
+			CHECK(editor.GetScene().GetName() == "Second");
+			{
+				Result<Scope<EditorSceneTargetScope>> scope = EditorSceneTargetScope::Begin(editor, main);
+				REQUIRE(scope.has_value());
+				REQUIRE(editor.CloseScene(main).has_value());
+				CHECK((*scope)->GetScene() == NoOpenScene);
+				CHECK(editor.GetAddressedSceneId() == NoOpenScene);
+				CHECK_FALSE(editor.HasScene());
+				CHECK(editor.GetActiveSceneId() == second);
+				CHECK(editor.CloseScene(third).error().GetCode() == ErrorCode::InvalidState);
+			}
+			CHECK(editor.GetOpenScenes() == std::vector<OpenSceneId>{ second, third });
+			CHECK(editor.GetAddressedSceneId() == second);
+			CHECK(editor.GetScene().GetName() == "Second");
+		}
+
+		// Decision 13: at most MaxOpenScenes open scenes, one per path; the open scenes change only outside dry runs and
+		// transactions.
+		TEST_CASE("EditorContext: AddScene refuses a seventeenth open scene, an open path, a dry run and a transaction")
+		{
+			Test::EditorTestFixture fixture("OpenScenesLimits");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene("Assets/Scenes/Main.scene");
+			EditorContext& editor = fixture.GetEditor();
+			for (size_t index = 1; index < MaxOpenScenes; ++index)
+				static_cast<void>(AddOpenScene(editor, std::format("project://Assets/Scenes/Scene{}.scene", index)));
+			REQUIRE(editor.GetOpenScenes().size() == MaxOpenScenes);
+			const OpenSceneId last = editor.GetActiveSceneId();
+			CHECK(editor.AddScene(editor.CreateScene("Extra"), std::nullopt).error().GetCode() == ErrorCode::InvalidState);
+			CHECK(editor.GetOpenScenes().size() == MaxOpenScenes);
+			CHECK(editor.GetActiveSceneId() == last);
+
+			REQUIRE(editor.CloseScene(last).has_value());
+			CHECK(editor.AddScene(editor.CreateScene("Main"), OpenScenesPath("project://Assets/Scenes/Main.scene")).error().GetCode() == ErrorCode::AlreadyExists);
+			const OpenSceneId active = editor.GetActiveSceneId();
+			const OpenSceneId other = editor.GetOpenScenes().front();
+			{
+				Result<Scope<EditorDryRunScope>> dryRun = EditorDryRunScope::Begin(editor);
+				REQUIRE(dryRun.has_value());
+				CHECK(editor.AddScene(editor.CreateScene("DryRun"), std::nullopt).error().GetCode() == ErrorCode::InvalidState);
+				CHECK(editor.ActivateScene(other).error().GetCode() == ErrorCode::InvalidState);
+				CHECK(editor.CloseScene(other).error().GetCode() == ErrorCode::InvalidState);
+			}
+			{
+				EditorTransaction transaction(editor, "Open scenes");
+				CHECK(editor.AddScene(editor.CreateScene("Transaction"), std::nullopt).error().GetCode() == ErrorCode::InvalidState);
+				CHECK(editor.ActivateScene(other).error().GetCode() == ErrorCode::InvalidState);
+				CHECK(editor.CloseScene(other).error().GetCode() == ErrorCode::InvalidState);
+			}
+			CHECK(editor.GetOpenScenes().size() == MaxOpenScenes - 1);
+			CHECK(editor.GetActiveSceneId() == active);
+		}
+
+		// Decision 13: a test run owns the editor's scenes, so none opens, activates or closes until it finishes.
+		TEST_CASE("EditorContext: the open scenes do not change while a test run owns the editor")
+		{
+			Test::EditorTestFixture fixture("OpenScenesTestRun");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene("Assets/Scenes/Main.scene");
+			EditorContext& editor = fixture.GetEditor();
+			const OpenSceneId main = editor.GetActiveSceneId();
+			const OpenSceneId second = AddOpenScene(editor, "project://Assets/Scenes/Second.scene");
+			// Every clock reading advances 100 ms, past TestRunFrameBudget, so one Pump advances the run by exactly one runner
+			// step in every configuration: the run is still pending after the Pump below however fast the build is.
+			auto now = std::chrono::steady_clock::time_point{};
+			auto specification = Test::MakeTestServerSpecification();
+			specification.WallClock = [&now]()
+			{
+				now += std::chrono::milliseconds(100);
+				return now;
+			};
+			Test::AutomationTestClient client(editor, std::move(specification));
+			REQUIRE(client.Call("script.write", Json{ { "path", "Assets/Tests/Long.test.luau" }, { "source", "return Test.Suite('Long', function() Test.Case('waits', function() Test.WaitTicks(100000) end) end)" } }));
+			REQUIRE(client.Call("project.setSettings", Json{ { "patch", Json{ { "Testing", Json{ { "Suites", Json::array({ Json{ { "Script", "Assets/Tests/Long.test.luau" }, { "Modes", Json::array({ "Editor" }) } } }) } } } } } }));
+			static_cast<void>(client.Submit("test.run", Json::object()));
+			client.GetServer().Pump();
+			REQUIRE(editor.GetPlay().IsTestRunActive());
+			CHECK(editor.AddScene(editor.CreateScene("DuringRun"), std::nullopt).error().GetCode() == ErrorCode::InvalidState);
+			CHECK(editor.ActivateScene(main).error().GetCode() == ErrorCode::InvalidState);
+			CHECK(editor.CloseScene(main).error().GetCode() == ErrorCode::InvalidState);
+			CHECK(editor.GetOpenScenes() == std::vector<OpenSceneId>{ main, second });
+			CHECK(editor.GetActiveSceneId() == second);
+			client.GetServer().DisconnectInProcess(client.GetClient());
+			REQUIRE_FALSE(editor.GetPlay().IsTestRunActive());
+			CHECK(editor.ActivateScene(main).has_value());
+		}
+
+		// Decision 13: closing the active tab activates the next one, the previous one when it was the last; SetScene
+		// replaces the active scene in its tab position with a new id; activating and closing append their events.
+		TEST_CASE("EditorContext: closing the active scene activates its next tab, the previous one after the last")
+		{
+			Test::EditorTestFixture fixture("OpenScenesTabs");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene("Assets/Scenes/Main.scene");
+			EditorContext& editor = fixture.GetEditor();
+			const OpenSceneId main = editor.GetActiveSceneId();
+			const OpenSceneId second = AddOpenScene(editor, "project://Assets/Scenes/Second.scene");
+			const OpenSceneId third = AddOpenScene(editor, "project://Assets/Scenes/Third.scene");
+			const uint64_t cursor = editor.GetEngine().GetEventLog().GetNextSeq();
+
+			REQUIRE(editor.ActivateScene(second).has_value());
+			REQUIRE(editor.CloseScene(second).has_value());
+			CHECK(editor.GetOpenScenes() == std::vector<OpenSceneId>{ main, third });
+			CHECK(editor.GetActiveSceneId() == third);
+			CHECK(editor.GetScene().GetName() == "Third");
+			REQUIRE(editor.CloseScene(third).has_value());
+			CHECK(editor.GetActiveSceneId() == main);
+			CHECK(editor.GetScene().GetName() == "Main");
+
+			const EngineEventType types[] = { EngineEventType::SceneActivated, EngineEventType::SceneClosed };
+			const EventReadResult events = editor.GetEngine().GetEventLog().Read(cursor, types, 10);
+			REQUIRE(events.Events.size() == 3);
+			CHECK(events.Events[0].Type == EngineEventType::SceneActivated);
+			CHECK(events.Events[0].Path == "Assets/Scenes/Second.scene");
+			CHECK(events.Events[1].Type == EngineEventType::SceneClosed);
+			CHECK(events.Events[1].Path == "Assets/Scenes/Second.scene");
+			CHECK(events.Events[2].Type == EngineEventType::SceneClosed);
+			CHECK(events.Events[2].Path == "Assets/Scenes/Third.scene");
+
+			// SetScene replaces the addressed scene in its tab with a new id, which the old one never names again.
+			const OpenSceneId fourth = AddOpenScene(editor, "project://Assets/Scenes/Fourth.scene");
+			REQUIRE(editor.ActivateScene(main).has_value());
+			editor.SetScene(editor.CreateScene("Replacement"), std::nullopt);
+			const std::vector<OpenSceneId> open = editor.GetOpenScenes();
+			REQUIRE(open.size() == 2);
+			CHECK(open[0] != main);
+			CHECK(open[1] == fourth);
+			CHECK(editor.GetActiveSceneId() == open[0]);
+			CHECK(editor.FindScene(main) == nullptr);
+			CHECK(editor.GetScene().GetName() == "Replacement");
+
+			// Closing the last open scene leaves none.
+			REQUIRE(editor.CloseScene(fourth).has_value());
+			REQUIRE(editor.CloseScene(open[0]).has_value());
+			CHECK(editor.GetOpenScenes().empty());
+			CHECK(editor.GetActiveSceneId() == NoOpenScene);
+			CHECK_FALSE(editor.HasScene());
+		}
+
+		// Decision 13 (ADR 0008 decision 28 kept): an open scene keeps its revision while it is not changed, also across
+		// activations and dry runs, and its next change continues past every revision another open scene reported.
+		TEST_CASE("EditorContext: a revision of one open scene never repeats another's and an unchanged scene keeps its own")
+		{
+			Test::EditorTestFixture fixture("OpenScenesRevisions");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene("Assets/Scenes/Main.scene");
+			EditorContext& editor = fixture.GetEditor();
+			const OpenSceneId main = editor.GetActiveSceneId();
+			static_cast<void>(CreateEdited(editor, "First"));
+			const uint64_t mainRevision = editor.GetRevision();
+			const OpenSceneId second = AddOpenScene(editor, "project://Assets/Scenes/Second.scene");
+			static_cast<void>(CreateEdited(editor, "Second"));
+			static_cast<void>(CreateEdited(editor, "Third"));
+			const uint64_t secondRevision = editor.GetRevision();
+			REQUIRE(secondRevision > mainRevision);
+
+			REQUIRE(editor.ActivateScene(main).has_value());
+			CHECK(editor.GetRevision() == mainRevision);
+			// A dry run reports what the real edit then reports.
+			uint64_t dryRunRevision = 0;
+			{
+				Result<Scope<EditorDryRunScope>> dryRun = EditorDryRunScope::Begin(editor);
+				REQUIRE(dryRun.has_value());
+				CHECK(editor.GetRevision() == mainRevision);
+				static_cast<void>(CreateEdited(editor, "DryRun"));
+				dryRunRevision = editor.GetRevision();
+			}
+			CHECK(editor.GetRevision() == mainRevision);
+			static_cast<void>(CreateEdited(editor, "Fourth"));
+			const uint64_t mainChanged = editor.GetRevision();
+			CHECK(mainChanged > secondRevision);
+			CHECK(mainChanged == dryRunRevision);
+
+			REQUIRE(editor.ActivateScene(second).has_value());
+			CHECK(editor.GetRevision() == secondRevision);
+			CHECK(editor.DescribeOpenScene(main)->Revision == mainChanged);
+			static_cast<void>(CreateEdited(editor, "Fifth"));
+			CHECK(editor.GetRevision() > mainChanged);
+		}
+
+		// Decision 15 (external changes per open scene): a changed file flags and reports only the open scene it concerns.
+		TEST_CASE("EditorContext: an external change raises SceneChangedOnDisk on the open scene it concerns only")
+		{
+			Test::EditorTestFixture fixture("OpenScenesChangedOnDisk");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene("Assets/Scenes/Main.scene");
+			EditorContext& editor = fixture.GetEditor();
+			const OpenSceneId main = editor.GetActiveSceneId();
+			const OpenSceneId second = AddOpenScene(editor, "project://Assets/Scenes/Second.scene");
+			REQUIRE(editor.ActivateScene(main).has_value());
+			editor.Update(0.0);
+			const uint64_t cursor = editor.GetEngine().GetEventLog().GetNextSeq();
+			// Another program rewrites the parked scene's file; its size differs from what the editor wrote.
+			Scope<Scene> external = editor.CreateScene("SecondChangedOutside");
+			static_cast<void>(external->CreateEntity("Outside"));
+			const Result<std::string> text = SceneSerializer::SaveToString(*external);
+			REQUIRE(text.has_value());
+			REQUIRE(FileSystem::WriteFileAtomic(editor.GetProject().GetRoot() / "Assets/Scenes/Second.scene", std::as_bytes(std::span(text->data(), text->size()))).has_value());
+			for (double seconds = 0.5; seconds <= 2.0; seconds += 0.5)
+			{
+				editor.Update(seconds);
+				static_cast<void>(editor.GetEngine().GetMainThreadQueue().Drain());
+			}
+			CHECK_FALSE(editor.IsSceneChangedOnDisk());
+			CHECK_FALSE(editor.DescribeOpenScene(main)->ChangedOnDisk);
+			CHECK(editor.DescribeOpenScene(second)->ChangedOnDisk);
+			const EngineEventType types[] = { EngineEventType::SceneChangedOnDisk };
+			const EventReadResult events = editor.GetEngine().GetEventLog().Read(cursor, types, 10);
+			REQUIRE(events.Events.size() == 1);
+			CHECK(events.Events.front().Path == "Assets/Scenes/Second.scene");
+			CHECK_FALSE(events.Events.front().Dirty);
+			REQUIRE(editor.ActivateScene(second).has_value());
+			CHECK(editor.IsSceneChangedOnDisk());
+			CHECK(editor.GetScene().GetName() == "Second");
+		}
+
+		// Decision 13 (play): the play scene shows in the played scene's tab only; another tab selects in its edit scene, and
+		// the played scene's play selection comes back to its edit scene once play stopped.
+		TEST_CASE("EditorContext: the play selection belongs to the played scene and comes back to its edit scene after Stop")
+		{
+			Test::EditorTestFixture fixture("OpenScenesPlaySelection");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene("Assets/Scenes/Main.scene");
+			EditorContext& editor = fixture.GetEditor();
+			const OpenSceneId main = editor.GetActiveSceneId();
+			const UUID played = CreateEdited(editor, "Played");
+			const OpenSceneId second = AddOpenScene(editor, "project://Assets/Scenes/Second.scene");
+			const UUID other = CreateEdited(editor, "Other");
+			REQUIRE(editor.ActivateScene(main).has_value());
+			editor.SetSelection({ played });
+			REQUIRE(editor.GetPlay().Start(PlayStartOptions{ .Lockstep = true }).has_value());
+			CHECK(editor.GetSelectionTarget() == SceneTarget::Play);
+
+			// Another tab shows its edit scene: selections there address it, not the session.
+			REQUIRE(editor.ActivateScene(second).has_value());
+			CHECK(editor.GetSelectionTarget() == SceneTarget::Edit);
+			editor.SetSelection({ played, other });
+			CHECK(editor.GetSelectionTarget() == SceneTarget::Edit);
+			CHECK(std::vector<UUID>(editor.GetSelection().begin(), editor.GetSelection().end()) == std::vector<UUID>{ other });
+			// A play selection still belongs to the played scene.
+			REQUIRE(editor.SetSelection({ played }, SceneTarget::Play).has_value());
+			CHECK(std::vector<UUID>(editor.GetSelection().begin(), editor.GetSelection().end()) == std::vector<UUID>{ other });
+
+			REQUIRE(editor.GetPlay().Stop().has_value());
+			REQUIRE(editor.ActivateScene(main).has_value());
+			CHECK(editor.GetSelectionTarget() == SceneTarget::Edit);
+			CHECK(std::vector<UUID>(editor.GetSelection().begin(), editor.GetSelection().end()) == std::vector<UUID>{ played });
+		}
+
 		// Decision 15 (Roadmap M20 acceptance "a prefab update rebuilds every open scene"): applying an edit of an instance
 		// in one open scene rebuilds the prefab's instances in another, as an entry of that scene's own history, so undo
 		// there reverts only that scene; requests address the second scene through the scene target "scene".
-		TEST_CASE("EditorContext: a prefab update rebuilds its instances in every open scene, each in its own history" * doctest::skip(true))
+		TEST_CASE("EditorContext: a prefab update rebuilds its instances in every open scene, each in its own history")
 		{
 			Test::AutomationFixture setup("OpenScenesPrefabUpdate");
 			REQUIRE(setup.Call("entity.create", Json{ { "name", "Lamp" } }).has_value());
@@ -204,6 +480,55 @@ namespace Engine {
 			REQUIRE(undone.has_value());
 			CHECK(OpenScenesName((*undone)["entities"][1]) == "Bulb");
 			CHECK(setup.GetEditor().GetScene().FindEntityByPath("/Lamp/Globe").IsValid());
+		}
+
+		// Decision 15 under decision 16's scene target: a prefab update made by a request that targets an open scene other
+		// than the active one still reaches every other open scene, the active one included, while the request's scope keeps
+		// addressing its target; and the undo of that update, run inside the targeted scene's own history, makes them follow
+		// again, each in an entry of its own history.
+		TEST_CASE("EditorContext: a prefab update of a targeted request rebuilds the other open scenes, also when it is undone")
+		{
+			Test::AutomationFixture setup("OpenScenesTargetedPrefabUpdate");
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Lamp" } }).has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Bulb" }, { "parent", "/Lamp" } }).has_value());
+			REQUIRE(setup.Call("prefab.create", Json{ { "entity", "/Lamp" }, { "path", "Assets/Prefabs/Lamp.prefab" }, { "replaceWithInstance", true } }).has_value());
+			REQUIRE(setup.Call("scene.new", Json{ { "path", "Assets/Scenes/Second.scene" }, { "keepOpen", true } }).has_value());
+			REQUIRE(setup.Call("prefab.instantiate", Json{ { "prefab", "Assets/Prefabs/Lamp.prefab" }, { "name", "Copy" } }).has_value());
+			EditorContext& editor = setup.GetEditor();
+			const OpenSceneId second = editor.GetActiveSceneId();
+			const size_t secondEntries = editor.GetHistory().GetUndoCount();
+			const auto bulbName = [&editor]()
+			{
+				const Entity copy = editor.GetScene().FindEntityByPath("/Copy");
+				REQUIRE(copy.IsValid());
+				REQUIRE(copy.GetChildren().size() == 1);
+				return editor.GetScene().FindEntityByID(copy.GetChildren().front()).GetName();
+			};
+
+			// Second stays active while Main's requests rename its bulb and apply the rename to the prefab.
+			const Json inMain{ { "scene", "Assets/Scenes/Main.scene" } };
+			Json rename = inMain;
+			rename["entity"] = "/Lamp/Bulb";
+			rename["name"] = "Globe";
+			REQUIRE(setup.Call("entity.update", rename).has_value());
+			Json apply = inMain;
+			apply["instance"] = "/Lamp";
+			const Result<Json> applied = setup.Call("prefab.apply", apply);
+			REQUIRE_MESSAGE(applied.has_value(), applied.error().ToString());
+			REQUIRE(editor.GetActiveSceneId() == second);
+			CHECK(bulbName() == "Globe");
+			CHECK(editor.GetHistory().GetUndoCount() == secondEntries + 1);
+			CHECK(editor.GetHistory().GetUndoLabel().contains("Update Prefab Instances"));
+
+			// Undoing the apply in Main restores the prefab, and Second follows it back in a further entry of its own.
+			const Result<Json> undone = setup.Call("edit.undo", inMain);
+			REQUIRE_MESSAGE(undone.has_value(), undone.error().ToString());
+			REQUIRE(editor.GetActiveSceneId() == second);
+			CHECK(bulbName() == "Bulb");
+			CHECK(editor.GetHistory().GetUndoCount() == secondEntries + 2);
+			const Scene* main = std::as_const(editor).FindScene(editor.FindOpenScene(OpenScenesPath("project://Assets/Scenes/Main.scene")));
+			REQUIRE(main != nullptr);
+			CHECK(main->FindEntityByPath("/Lamp/Globe").IsValid());
 		}
 	}
 

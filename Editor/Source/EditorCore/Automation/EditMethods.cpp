@@ -15,6 +15,10 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <utility>
+#include <vector>
+
 namespace Engine {
 
 	namespace Utils {
@@ -30,8 +34,9 @@ namespace Engine {
 				return std::unexpected(MakeParamError(ErrorCode::InvalidArgument, "/steps", std::format("steps must be 1 to {} (got {})", MaxSteps, steps)));
 			return {};
 		}
-		// The params members a batch op never carries: they are given once, on the batch (MethodRegistry::InvokeNested).
-		constexpr std::array<std::string_view, 3> ReservedOpMembers = { "dryRun", "ifRevision", "_meta" };
+		// The params members a batch op never carries: they are given once, on the batch (MethodRegistry::InvokeNested), the
+		// scene target included (M20, Docs/Decisions/0031-m20-contract.md decision 16: every op runs in the batch's scene).
+		constexpr std::array<std::string_view, 4> ReservedOpMembers = { "dryRun", "ifRevision", "_meta", "scene" };
 
 		// `error` of op `index` relocated into the batch's params: pointers relative to the op's params gain
 		// "/ops/<index>/params", and those InvokeNested already made relative to the op ("/params/...") gain "/ops/<index>".
@@ -97,7 +102,7 @@ namespace Engine {
 					ErrorLocation location;
 					location.JsonPointer = issues.front().JsonPointer;
 					return std::unexpected(Error(ErrorCode::InvalidArgument, std::format("op {} carries a reserved member", index))
-							.WithHint("give dryRun and ifRevision on edit.batch itself")
+							.WithHint("give dryRun, ifRevision and scene on edit.batch itself")
 							.WithLocation(std::move(location))
 							.WithIssues(std::move(issues)));
 				}
@@ -265,10 +270,18 @@ namespace Engine {
 				for (size_t index = 0; index < params.Entities.size(); ++index)
 				{
 					ENGINE_TRY_ASSIGN(const Entity entity, context.ResolveEntity(*scene, params.Entities[index], std::format("/entities/{}", index)));
-					selection.push_back(entity.GetUUID());
+					if (std::find(selection.begin(), selection.end(), entity.GetUUID()) == selection.end())
+						selection.push_back(entity.GetUUID());
 				}
 				const SceneTarget target = session != nullptr && scene == &session->GetScene() ? SceneTarget::Play : SceneTarget::Edit;
-				ENGINE_TRY(editor.SetSelection(std::move(selection), target));
+				ENGINE_TRY(editor.SetSelection(selection, target));
+				// The selection just made, in the scene it was resolved in: a play selection made from another tab than the
+				// played one is stored in the played scene's document (decision 13), not in the addressed scene's that
+				// MakeSelection reads.
+				EditSelectResult result;
+				for (const UUID id : selection)
+					result.Selection.push_back(context.MakeEntitySummary(std::as_const(*scene).FindEntityByID(id)));
+				return result;
 			}
 
 			EditSelectResult result;
@@ -370,6 +383,7 @@ namespace Engine {
 				.ExposeAsTool = true,
 				.Mutates = true,
 				.SupportsDryRun = true,
+				.SupportsSceneTarget = true,
 				.Examples = { { .Description = "Create a game root with a board under it.", .Params = batchExample } },
 			},
 			&Automation::EditBatch);
@@ -380,6 +394,7 @@ namespace Engine {
 				.Description = "Undoes the newest commands of the open scene's history.",
 				.ExposeAsTool = true,
 				.Mutates = true,
+				.SupportsSceneTarget = true,
 				.Examples = { { .Description = "Undo the last command.", .Params = Json::object() } },
 			},
 			&Automation::EditUndo);
@@ -390,6 +405,7 @@ namespace Engine {
 				.Description = "Redoes the oldest undone commands of the open scene's history.",
 				.ExposeAsTool = true,
 				.Mutates = true,
+				.SupportsSceneTarget = true,
 				.Examples = { { .Description = "Redo the last undone command.", .Params = Json::object() } },
 			},
 			&Automation::EditRedo);
@@ -400,6 +416,7 @@ namespace Engine {
 			{
 				.Name = "edit.history",
 				.Description = "Lists the undo history of the open scene: labels, origins, revisions and which commands are undone.",
+				.SupportsSceneTarget = true,
 				.AllowedInBatch = true,
 				.Examples = { { .Description = "Read the last 20 commands.", .Params = historyExample } },
 			},
@@ -410,8 +427,11 @@ namespace Engine {
 		methods.Add(
 			{
 				.Name = "edit.select",
-				.Description = "Replaces the editor's selection (editor state, not an undoable command).",
+				.Description = "Replaces the editor's selection (editor state, not an undoable command). While playing, a selection "
+							   "of the play scene belongs to the played scene, also when made from another tab: the result lists it, and "
+							   "edit.getSelection with that scene as target reads it back.",
 				.RequiredParams = { "entities" },
+				.SupportsSceneTarget = true,
 				.Examples = { { .Description = "Select the board.", .Params = selectExample } },
 			},
 			&Automation::EditSelect);
@@ -420,6 +440,7 @@ namespace Engine {
 			{
 				.Name = "edit.getSelection",
 				.Description = "Returns the editor's selection.",
+				.SupportsSceneTarget = true,
 				.AllowedInBatch = true,
 				.Examples = { { .Description = "Read the selection.", .Params = Json::object() } },
 			},

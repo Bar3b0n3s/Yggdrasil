@@ -78,20 +78,21 @@ class PrefabTests(AutomationTestCase):
         client, root = self.open_editor_with_scene()
         client.call("script.write", {"path": "Assets/Scripts/Brick.luau", "source": BRICK_SCRIPT})
         client.call("entity.create", {"name": "Brick", "components": {
-            "Script": {"Script": "Assets/Scripts/Brick.luau", "Fields": {"Points": 1}},
+            "Script": {"Scripts": [{"Script": "Assets/Scripts/Brick.luau", "Fields": {"Points": 1}}]},
             "MeshRenderer": {"Mesh": "engine://Meshes/Cube"}}})
         client.call("prefab.create", {"entity": "/Brick", "path": BRICK_PREFAB})
         client.call("entity.destroy", {"entities": ["/Brick"]})
         ops = [{"method": "prefab.instantiate", "params": {
             "prefab": BRICK_PREFAB, "name": f"Row{points}", "transform": {"Translation": [0, points, 0]},
-            "components": {"Script": {"Fields": {"Points": points}}, "MeshRenderer": {"CastShadows": points == 2}}}}
+            "components": {"Script": {"Scripts": [{"Fields": {"Points": points}}]},
+                           "MeshRenderer": {"CastShadows": points == 2}}}}
             for points in (2, 3)]
         client.call("edit.batch", {"label": "Rows", "ops": ops})
         row = client.call("entity.get", {"entity": "/Row3"})["entity"]["components"]
-        self.assertEqual(row["Script"]["Fields"], {"Points": 3})
+        self.assertEqual(row["Script"]["Scripts"][0]["Fields"], {"Points": 3})
         self.assertFalse(row["MeshRenderer"]["CastShadows"])
         overrides = row["Prefab"]["Overrides"]
-        self.assertIn({"Points": 3}, [entry["Value"] for entry in overrides if entry["Field"] == "Fields"])
+        self.assertIn({"Points": 3}, [entry["Value"] for entry in overrides if entry["Field"] == "Scripts/0/Fields"])
         self.assertIn("CastShadows", [entry["Field"] for entry in overrides])
 
         # A $ref to a member the result does not have names the members it has (S1-07): prefab.instantiate's root is

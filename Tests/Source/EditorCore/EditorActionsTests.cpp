@@ -249,6 +249,82 @@ namespace Engine {
 			CHECK(editor.GetScene().GetRootEntities().size() == 1);
 		}
 
+		// Docs/Decisions/0031-m20-contract.md decisions 16 and 20: the scene tabs submit scene.activate and scene.close with a
+		// scene target, so a UI action resolves and scopes its target as the automation server does. The target's open scene
+		// is the one its revision check, dry-run copy, handler and history address, at Submit and again at the safe point,
+		// and the active scene never changes under it.
+		TEST_CASE("EditorActions: a scene target addresses its open scene for admission, the handler and its history")
+		{
+			Test::AutomationFixture fixture("PanelSceneTarget");
+			EditorContext& editor = fixture.GetEditor();
+			EditorActions actions(editor, fixture.GetClient().GetServer());
+			REQUIRE(fixture.Call("scene.new", Json{ { "path", "Assets/Scenes/Second.scene" }, { "keepOpen", true } }));
+			const Result<VfsPath> mainPath = VfsPath::Parse("project://Assets/Scenes/Main.scene");
+			REQUIRE(mainPath);
+			const OpenSceneId main = editor.FindOpenScene(*mainPath);
+			REQUIRE(main != NoOpenScene);
+			const OpenSceneId second = editor.GetActiveSceneId();
+			REQUIRE(second != main);
+			const auto inMain = [](Json params)
+			{
+				params["scene"] = "Assets/Scenes/Main.scene";
+				return params;
+			};
+
+			// The action lands in the target and its history, as the user's; the active scene and its history stay as they were.
+			REQUIRE(CompletePanelAction(actions, "entity.create", inMain(Json{ { "name", "Targeted" } })));
+			CHECK(editor.GetActiveSceneId() == second);
+			CHECK_FALSE(editor.GetHistory().CanUndo());
+			REQUIRE(editor.FindScene(main) != nullptr);
+			CHECK(editor.FindScene(main)->FindEntityByPath("/Targeted").IsValid());
+			const Result<OpenSceneInfo> targeted = editor.DescribeOpenScene(main);
+			REQUIRE(targeted);
+			CHECK(targeted->Dirty);
+
+			// ifRevision is the target's: the active scene's revision is refused at Submit, the target's is accepted.
+			const auto stale = actions.Submit("entity.create", inMain(Json{ { "name", "Stale" }, { "ifRevision", editor.GetRevision() } }));
+			REQUIRE_FALSE(stale);
+			CHECK(stale.error().GetCode() == ErrorCode::Conflict);
+			REQUIRE(CompletePanelAction(actions, "entity.create", inMain(Json{ { "name", "Current" }, { "ifRevision", targeted->Revision } })));
+			CHECK(editor.FindScene(main)->FindEntityByPath("/Current").IsValid());
+
+			// A dry run copies the target and leaves it alone; undo moves the target's history only.
+			REQUIRE(CompletePanelAction(actions, "entity.create", inMain(Json{ { "name", "Dry" }, { "dryRun", true } })));
+			CHECK_FALSE(editor.FindScene(main)->FindEntityByPath("/Dry").IsValid());
+			REQUIRE(CompletePanelAction(actions, "edit.undo", inMain(Json::object())));
+			CHECK_FALSE(editor.FindScene(main)->FindEntityByPath("/Current").IsValid());
+			CHECK(editor.FindScene(main)->FindEntityByPath("/Targeted").IsValid());
+			CHECK(editor.GetActiveSceneId() == second);
+			REQUIRE(editor.ActivateScene(main));
+			const auto entries = editor.GetHistory().GetEntries(10);
+			REQUIRE(entries.size() == 2);
+			CHECK(entries[0].Origin == CommandOrigin::User);
+			REQUIRE(editor.ActivateScene(second));
+
+			// A target that names no open scene is refused at Submit, one closed after Submit at the safe point; a method
+			// without the scene target refuses the member when it reads its params, as it refuses any unknown member.
+			const auto missing = actions.Submit("scene.tree", Json{ { "scene", "Assets/Scenes/Missing.scene" } });
+			REQUIRE_FALSE(missing);
+			CHECK(missing.error().GetCode() == ErrorCode::NotFound);
+			const auto queued = actions.Submit("scene.tree", inMain(Json::object()));
+			REQUIRE(queued);
+			REQUIRE(fixture.Call("scene.close", inMain(Json{ { "discardChanges", true } })));
+			actions.Pump();
+			const auto closed = actions.TakeResult(*queued);
+			REQUIRE(closed);
+			REQUIRE(closed->has_value());
+			REQUIRE_FALSE(**closed);
+			CHECK((**closed).error().GetCode() == ErrorCode::NotFound);
+			const auto untargeted = actions.Submit("asset.list", Json{ { "scene", second } });
+			REQUIRE(untargeted);
+			actions.Pump();
+			const auto refused = actions.TakeResult(*untargeted);
+			REQUIRE(refused);
+			REQUIRE(refused->has_value());
+			REQUIRE_FALSE(**refused);
+			CHECK((**refused).error().GetCode() == ErrorCode::InvalidArgument);
+		}
+
 		TEST_CASE("EditorActions: admission is rechecked and dry runs leave no history")
 		{
 			Test::AutomationFixture fixture("PanelQueueRevision");

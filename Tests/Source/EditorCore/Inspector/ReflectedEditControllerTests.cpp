@@ -7,6 +7,7 @@
 #include "EditorCore/Scripting/EditorScriptService.h"
 #include "Engine/Asset/TypedAssetHandle.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/Core/FileSystem.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/ComponentAccess.h"
@@ -19,12 +20,16 @@
 #include "Support/AssetTestFixture.h"
 #include "Support/AutomationTestClient.h"
 #include "Support/EditorTestFixture.h"
+#include "Support/TestData.h"
 
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <limits>
 #include <map>
+#include <optional>
+#include <string>
 
 namespace Engine {
 
@@ -138,14 +143,14 @@ namespace Engine {
 			const Entity entity = editor.GetScene().CreateEntity("Scripted");
 			const UUID id = entity.GetUUID();
 			const Json original{ { "Other", "preserve wrong neighbour" }, { "Speed", "wrong" }, { "Unknown", Json{ { "Legacy", 7 } } } };
-			ScriptComponent legacy;
+			ScriptSlot legacy;
 			legacy.Script = TypedAssetHandle<AssetType::Script>(written->Script);
 			for (auto entry = original.begin(); entry != original.end(); ++entry)
 				legacy.Fields.emplace(entry.key(), VariantValue(entry.value()));
-			entity.AddComponent<ScriptComponent>(std::move(legacy));
+			entity.AddComponent<ScriptComponent>(ScriptComponent{ { std::move(legacy) } });
 			ReflectedEditController edits(editor);
 			const auto history = editor.GetHistory().GetUndoCount();
-			REQUIRE(edits.Begin({ .Entities = { id }, .Component = "Script", .FieldPath = "Fields[Speed]" }));
+			REQUIRE(edits.Begin({ .Entities = { id }, .Component = "Script", .FieldPath = "Scripts[0].Fields[Speed]" }));
 			const auto initial = edits.GetPreview();
 			REQUIRE(initial);
 			CHECK(initial->AsVariant().Get() == Json(3));
@@ -155,20 +160,83 @@ namespace Engine {
 			REQUIRE(changed);
 			Json expected = original;
 			expected["Speed"] = 3;
-			CHECK((*changed)["Fields"] == expected);
+			CHECK((*changed)["Scripts"][0]["Fields"] == expected);
 			CHECK(editor.GetHistory().GetUndoCount() == history + 1);
 			REQUIRE(editor.GetHistory().Undo(editor));
 			const auto undone = ComponentAccess::GetComponentJson(editor.GetScene().FindEntityByID(id), "Script");
 			REQUIRE(undone);
-			CHECK((*undone)["Fields"] == original);
+			CHECK((*undone)["Scripts"][0]["Fields"] == original);
 			REQUIRE(editor.GetHistory().Redo(editor));
-			REQUIRE(edits.Begin({ .Entities = { id }, .Component = "Script", .FieldPath = "Fields[Enabled]" }));
+			REQUIRE(edits.Begin({ .Entities = { id }, .Component = "Script", .FieldPath = "Scripts[0].Fields[Enabled]" }));
 			REQUIRE(edits.Preview(Value::FromVariant(VariantValue(Json(true)))));
 			REQUIRE(edits.Commit());
 			const auto enabled = ComponentAccess::GetComponentJson(editor.GetScene().FindEntityByID(id), "Script");
 			REQUIRE(enabled);
 			const Json expectedEnabled{ { "Enabled", true }, { "Other", original["Other"] }, { "Speed", 3 }, { "Unknown", original["Unknown"] } };
-			CHECK((*enabled)["Fields"] == expectedEnabled);
+			CHECK((*enabled)["Scripts"][0]["Fields"] == expectedEnabled);
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 17: each slot's values resolve against its own script, so an edit of one
+		// slot validates against that slot's script and keeps every other slot's values, those their scripts reject included.
+		TEST_CASE("ReflectedEditController: a script field edit of one slot keeps the values other slots' scripts reject")
+		{
+			Test::EditorTestFixture fixture("InspectorScriptSlots");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			REQUIRE(editor.GetScriptService() != nullptr);
+			const auto aim = editor.GetScriptService()->Write(Test::ParseVfsPath("project://Assets/Aim.luau"),
+				"return Script.Define(\"Aim\", {Fields = {Speed = Field.Number(3)}})");
+			const auto fire = editor.GetScriptService()->Write(Test::ParseVfsPath("project://Assets/Fire.luau"),
+				"return Script.Define(\"Fire\", {Fields = {Burst = Field.Bool()}})");
+			REQUIRE(aim);
+			REQUIRE(fire);
+			const Entity entity = editor.GetScene().CreateEntity("Turret");
+			const UUID id = entity.GetUUID();
+			ScriptSlot first;
+			first.Script = TypedAssetHandle<AssetType::Script>(aim->Script);
+			first.Fields.emplace("Speed", VariantValue(Json("wrong")));
+			first.Fields.emplace("Legacy", VariantValue(Json(7)));
+			ScriptSlot second;
+			second.Script = TypedAssetHandle<AssetType::Script>(fire->Script);
+			second.Fields.emplace("Obsolete", VariantValue(Json("kept")));
+			entity.AddComponent<ScriptComponent>(ScriptComponent{ { first, second } });
+			const auto original = ComponentAccess::GetComponentJson(entity, "Script");
+			REQUIRE(original);
+			ReflectedEditController edits(editor);
+
+			REQUIRE(edits.Begin({ .Entities = { id }, .Component = "Script", .FieldPath = "Scripts[1].Fields[Burst]" }));
+			const auto burst = edits.Preview(Value::FromVariant(VariantValue(Json(true))));
+			REQUIRE_MESSAGE(burst.has_value(), burst.error().ToString());
+			const Result<uint64_t> committed = edits.Commit();
+			REQUIRE_MESSAGE(committed.has_value(), committed.error().ToString());
+			const auto changed = ComponentAccess::GetComponentJson(editor.GetScene().FindEntityByID(id), "Script");
+			REQUIRE(changed);
+			CHECK((*changed)["Scripts"][0] == (*original)["Scripts"][0]);
+			CHECK((*changed)["Scripts"][1]["Fields"] == Json{ { "Burst", true }, { "Obsolete", "kept" } });
+
+			// Slot 0's script declares Speed but not Burst: a slot's field is never checked against another slot's script.
+			REQUIRE(edits.Begin({ .Entities = { id }, .Component = "Script", .FieldPath = "Scripts[0].Fields[Speed]" }));
+			const auto five = edits.Preview(Value::FromVariant(VariantValue(Json(5))));
+			REQUIRE_MESSAGE(five.has_value(), five.error().ToString());
+			const Result<uint64_t> speed = edits.Commit();
+			REQUIRE_MESSAGE(speed.has_value(), speed.error().ToString());
+			const auto edited = ComponentAccess::GetComponentJson(editor.GetScene().FindEntityByID(id), "Script");
+			REQUIRE(edited);
+			CHECK((*edited)["Scripts"][0]["Fields"] == Json{ { "Legacy", 7 }, { "Speed", 5 } });
+			CHECK((*edited)["Scripts"][1]["Fields"] == Json{ { "Burst", true }, { "Obsolete", "kept" } });
+
+			// An edit of a slot's own member keeps every slot's values as they are.
+			REQUIRE(edits.Begin({ .Entities = { id }, .Component = "Script", .FieldPath = "Scripts[1].ExecutionOrder" }));
+			const auto order = edits.Preview(Value::FromInt32(4));
+			REQUIRE_MESSAGE(order.has_value(), order.error().ToString());
+			const Result<uint64_t> ordered = edits.Commit();
+			REQUIRE_MESSAGE(ordered.has_value(), ordered.error().ToString());
+			const auto reordered = ComponentAccess::GetComponentJson(editor.GetScene().FindEntityByID(id), "Script");
+			REQUIRE(reordered);
+			CHECK((*reordered)["Scripts"][1]["ExecutionOrder"] == Json(4));
+			CHECK((*reordered)["Scripts"][0]["Fields"] == (*edited)["Scripts"][0]["Fields"]);
+			CHECK((*reordered)["Scripts"][1]["Fields"] == (*edited)["Scripts"][1]["Fields"]);
 		}
 
 		TEST_CASE("ReflectedEditController: nested script arrays validate their element schema before committing")
@@ -185,22 +253,22 @@ namespace Engine {
 			REQUIRE(written);
 			const Entity entity = editor.GetScene().CreateEntity("Rows");
 			const UUID id = entity.GetUUID();
-			const Json component{ { "Script", written->Script.ToString() } };
+			const Json component{ { "Scripts", Json::array({ Json{ { "Script", written->Script.ToString() } } }) } };
 			REQUIRE(ComponentAccess::AddComponent(entity, "Script", &component));
 			ReflectedEditController edits(editor);
-			REQUIRE(edits.Begin({ .Entities = { id }, .Component = "Script", .FieldPath = "Fields[Rows]" }));
+			REQUIRE(edits.Begin({ .Entities = { id }, .Component = "Script", .FieldPath = "Scripts[0].Fields[Rows]" }));
 			const auto bad = edits.Preview(Value::FromVariant(VariantValue(Json::array({ Json::array({ 6 }) }))));
 			REQUIRE_FALSE(bad);
 			CHECK(bad.error().GetCode() == ErrorCode::Validation);
-			CHECK(entity.GetComponent<ScriptComponent>().Fields.empty());
+			CHECK(entity.GetComponent<ScriptComponent>().Scripts.front().Fields.empty());
 			REQUIRE(edits.Preview(Value::FromVariant(VariantValue(Json::array({ Json::array({ 4 }) })))));
 			REQUIRE(edits.Commit());
-			CHECK(entity.GetComponent<ScriptComponent>().Fields.size() == 1);
-			REQUIRE(edits.Begin({ .Entities = { id }, .Component = "Script", .FieldPath = "Fields[Rows][0][0]" }));
+			CHECK(entity.GetComponent<ScriptComponent>().Scripts.front().Fields.size() == 1);
+			REQUIRE(edits.Begin({ .Entities = { id }, .Component = "Script", .FieldPath = "Scripts[0].Fields[Rows][0][0]" }));
 			CHECK_FALSE(edits.Preview(Value::FromFloat(0.0f)));
 			REQUIRE(edits.Preview(Value::FromFloat(2.0f)));
 			REQUIRE(edits.Commit());
-			CHECK(entity.GetComponent<ScriptComponent>().Fields.find("Rows")->second.Get() == Json::array({ Json::array({ 2 }) }));
+			CHECK(entity.GetComponent<ScriptComponent>().Scripts.front().Fields.find("Rows")->second.Get() == Json::array({ Json::array({ 2 }) }));
 		}
 
 		TEST_CASE("ReflectedEditController: script assignment rejects modules and a schema reload rejects a stale gesture")
@@ -220,22 +288,22 @@ namespace Engine {
 			REQUIRE(module);
 			const Entity entity = editor.GetScene().CreateEntity("Scripted");
 			const UUID id = entity.GetUUID();
-			const Json component{ { "Script", behaviour->Script.ToString() } };
+			const Json component{ { "Scripts", Json::array({ Json{ { "Script", behaviour->Script.ToString() } } }) } };
 			REQUIRE(ComponentAccess::AddComponent(entity, "Script", &component));
 			ReflectedEditController edits(editor);
-			REQUIRE(edits.Begin({ .Entities = { id }, .Component = "Script", .FieldPath = "Script" }));
+			REQUIRE(edits.Begin({ .Entities = { id }, .Component = "Script", .FieldPath = "Scripts[0].Script" }));
 			const auto rejected = edits.Preview(Value::FromAssetRef(module->Script));
 			REQUIRE_FALSE(rejected);
 			CHECK(rejected.error().GetMessageText().contains("SCRIPT_NOT_A_BEHAVIOUR"));
 			edits.Cancel();
-			REQUIRE(edits.Begin({ .Entities = { id }, .Component = "Script", .FieldPath = "Fields[Speed]" }));
+			REQUIRE(edits.Begin({ .Entities = { id }, .Component = "Script", .FieldPath = "Scripts[0].Fields[Speed]" }));
 			REQUIRE(edits.Preview(Value::FromVariant(VariantValue(Json(2)))));
 			REQUIRE(editor.GetVfs().WriteFileAtomic(*path, AsBytes("return Script.Define(\"Changed\", {Fields = {Speed = Field.Number(5, {Max = 5})}})")));
 			REQUIRE(editor.GetAssets().Reimport(behaviour->Script));
 			const auto stale = edits.Commit();
 			REQUIRE_FALSE(stale);
 			CHECK(stale.error().GetCode() == ErrorCode::Conflict);
-			CHECK(entity.GetComponent<ScriptComponent>().Fields.empty());
+			CHECK(entity.GetComponent<ScriptComponent>().Scripts.front().Fields.empty());
 		}
 
 		TEST_CASE("ReflectedEditController: a continuous edit commits once on release")
@@ -485,6 +553,45 @@ namespace Engine {
 			REQUIRE(edits.Preview(Value::FromUInt32(120)));
 			REQUIRE(edits.Commit());
 			CHECK(editor.GetProject().GetSettings().Simulation.FixedHz == 120);
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 8: an import setting edited in the inspector gives a glTF a new version
+		// like asset.setImportSettings, so the prefab nesting it is rewritten and its instance in the scene follows, in the
+		// same undo step. The scene's room nests the glTF, which has no outermost instance there.
+		TEST_CASE("ReflectedEditController: an import setting of a glTF a prefab nests rewrites that prefab and its instances")
+		{
+			Test::AutomationFixture fixture("InspectorNestedGltf");
+			auto& editor = fixture.GetEditor();
+			const Result<Buffer> gltf = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Gltf/Hierarchy.gltf"));
+			REQUIRE(gltf.has_value());
+			REQUIRE(editor.CreateProjectDirectory(VfsPath::Create("project", "Assets/Models").value()));
+			REQUIRE(editor.WriteProjectFile(VfsPath::Create("project", "Assets/Models/Hierarchy.gltf").value(), *gltf));
+			REQUIRE(fixture.Call("project.refreshAssets", Json::object()));
+			REQUIRE(fixture.Call("entity.create", Json{ { "name", "Room" } }));
+			REQUIRE(fixture.Call("prefab.instantiate", Json{ { "prefab", "Assets/Models/Hierarchy.gltf" }, { "parent", "/Room" } }));
+			REQUIRE(fixture.Call("prefab.create", Json{ { "entity", "/Room" }, { "path", "Assets/Prefabs/Room.prefab" }, { "replaceWithInstance", true } }));
+			const std::filesystem::path roomFile = fixture.GetEditorFixture().GetProjectRoot() / "Assets/Prefabs/Room.prefab";
+			const Result<std::string> roomBefore = FileSystem::ReadText(roomFile);
+			REQUIRE(roomBefore.has_value());
+			const auto baseHeight = [&editor]()
+			{
+				return editor.GetScene().FindEntityByPath("/Room/Hierarchy/Base").GetComponent<TransformComponent>().Translation.y;
+			};
+			CHECK(baseHeight() == doctest::Approx(1.0f));
+			const std::optional<AssetHandle> handle = editor.GetAssets().Resolve("Assets/Models/Hierarchy.gltf");
+			REQUIRE(handle.has_value());
+
+			ReflectedEditController edits(editor);
+			REQUIRE(edits.Begin({ .Kind = InspectorTargetKind::AssetImportSettings, .Asset = *handle, .FieldPath = "Scale" }));
+			REQUIRE(edits.Preview(Value::FromFloat(0.5f)));
+			const size_t before = editor.GetHistory().GetUndoCount();
+			REQUIRE(edits.Commit());
+			CHECK(editor.GetHistory().GetUndoCount() == before + 1);
+			CHECK(FileSystem::ReadText(roomFile).value_or(std::string()) != *roomBefore);
+			CHECK(baseHeight() == doctest::Approx(0.5f));
+			REQUIRE(editor.GetHistory().Undo(editor));
+			CHECK(FileSystem::ReadText(roomFile).value_or(std::string()) == *roomBefore);
+			CHECK(baseHeight() == doctest::Approx(1.0f));
 		}
 
 		TEST_CASE("ReflectedEditController: concurrent revisions and asset versions reject stale edits")

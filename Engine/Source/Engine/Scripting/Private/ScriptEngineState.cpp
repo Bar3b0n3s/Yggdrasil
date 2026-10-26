@@ -27,9 +27,9 @@ namespace Engine {
 		if (Vm == nullptr)
 			return;
 		lua_State* state = Detail::SandboxAccess::MainCall(*Vm).State;
-		for (const auto& [id, instance] : Instances)
+		for (const auto& [key, instance] : Instances)
 		{
-			static_cast<void>(id);
+			static_cast<void>(key);
 			if (instance.Table != LUA_NOREF)
 				lua_unref(state, instance.Table);
 		}
@@ -61,50 +61,53 @@ namespace Engine {
 		if (!LifecycleDirty && revision == LifecycleRevision)
 			return;
 		const std::vector<UUID> members = SortedInstanceIDs();
-		std::vector<UUID> alive;
+		// Every instance of an entity of the scene, in canonical entity order and slot order (the map's order per entity).
+		std::vector<InstanceKey> alive;
 		for (const UUID id : scene.GetCanonicalOrder())
 		{
-			if (std::binary_search(members.begin(), members.end(), id))
-				alive.push_back(id);
+			if (!std::binary_search(members.begin(), members.end(), id))
+				continue;
+			for (auto instance = Instances.lower_bound({ id, 0 }); instance != Instances.end() && instance->first.Entity == id; ++instance)
+				alive.push_back(instance->first);
 		}
-		std::vector<UUID> aliveSorted = alive;
+		std::vector<InstanceKey> aliveSorted = alive;
 		std::sort(aliveSorted.begin(), aliveSorted.end());
 		// Scene destruction removes lookup/hierarchy entries immediately. Keep each removed instance at its last anchor
 		// (the next surviving instance after it in the previous order, or the end), preserving their relative order.
-		std::map<UUID, std::vector<UUID>> anchored;
-		std::set<UUID> placed;
-		UUID anchor{};
+		std::map<InstanceKey, std::vector<InstanceKey>> anchored;
+		std::set<InstanceKey> placed;
+		InstanceKey anchor{}; // the null entity, which no instance has: the end
 		for (auto current = LifecycleOrder.rbegin(); current != LifecycleOrder.rend(); ++current)
 		{
 			if (std::binary_search(aliveSorted.begin(), aliveSorted.end(), *current))
 				anchor = *current;
-			else if (std::binary_search(members.begin(), members.end(), *current) && placed.insert(*current).second)
+			else if (Instances.contains(*current) && placed.insert(*current).second)
 				anchored[anchor].push_back(*current);
 		}
-		std::vector<std::pair<uint64_t, UUID>> unanchored;
-		for (const auto& [id, instance] : Instances)
+		std::vector<std::pair<uint64_t, InstanceKey>> unanchored;
+		for (const auto& [key, instance] : Instances)
 		{
-			if (!std::binary_search(aliveSorted.begin(), aliveSorted.end(), id) && !placed.contains(id))
-				unanchored.emplace_back(instance.Serial, id);
+			if (!std::binary_search(aliveSorted.begin(), aliveSorted.end(), key) && !placed.contains(key))
+				unanchored.emplace_back(instance.Serial, key);
 		}
 		std::sort(unanchored.begin(), unanchored.end());
 		LifecycleOrder.clear();
-		const auto emitAnchored = [this, &anchored](UUID key)
+		const auto emitAnchored = [this, &anchored](InstanceKey key)
 		{
 			const auto found = anchored.find(key);
 			if (found != anchored.end())
 				LifecycleOrder.insert(LifecycleOrder.end(), found->second.rbegin(), found->second.rend());
 		};
-		for (const UUID id : alive)
+		for (const InstanceKey key : alive)
 		{
-			emitAnchored(id);
-			LifecycleOrder.push_back(id);
+			emitAnchored(key);
+			LifecycleOrder.push_back(key);
 		}
-		emitAnchored(UUID{});
-		for (const auto& [serial, id] : unanchored)
+		emitAnchored(InstanceKey{});
+		for (const auto& [serial, key] : unanchored)
 		{
 			static_cast<void>(serial);
-			LifecycleOrder.push_back(id);
+			LifecycleOrder.push_back(key);
 		}
 		LifecycleRevision = revision;
 		LifecycleDirty = false;
@@ -114,42 +117,68 @@ namespace Engine {
 	{
 		std::vector<UUID> result;
 		result.reserve(Instances.size());
-		for (const auto& [id, instance] : Instances)
+		for (const auto& [key, instance] : Instances)
 		{
 			static_cast<void>(instance);
-			result.push_back(id); // std::map iterates in key order
+			// std::map iterates in key order, so an entity's slots are adjacent.
+			if (result.empty() || result.back() != key.Entity)
+				result.push_back(key.Entity);
 		}
 		return result;
 	}
 
-	std::vector<UUID> ScriptEngine::State::OrderedInstances(bool startedOnly)
+	std::vector<ScriptEngine::State::InstanceKey> ScriptEngine::State::InstancesOf(UUID entity) const
+	{
+		std::vector<InstanceKey> result;
+		for (auto instance = Instances.lower_bound({ entity, 0 }); instance != Instances.end() && instance->first.Entity == entity; ++instance)
+			result.push_back(instance->first);
+		return result;
+	}
+
+	int ScriptEngine::State::FindLiveTable(InstanceKey key) const
+	{
+		const auto found = Instances.find(key);
+		return found == Instances.end() || found->second.DestroyPrepared ? LUA_NOREF : found->second.Table;
+	}
+
+	std::vector<ScriptEngine::State::InstanceKey> ScriptEngine::State::OrderedInstances(bool startedOnly)
 	{
 		RefreshLifecycleOrder();
 		Scene& scene = Engine.GetHost().GetScene();
-		std::vector<std::pair<int32_t, UUID>> eligible;
-		for (const UUID id : LifecycleOrder)
+		std::vector<std::pair<int32_t, InstanceKey>> eligible;
+		for (const InstanceKey key : LifecycleOrder)
 		{
-			const auto instance = Instances.find(id);
+			const auto instance = Instances.find(key);
 			if (instance == Instances.end() || instance->second.FaultDisabled || instance->second.DestroyPrepared || !instance->second.Active
 				|| (startedOnly && !instance->second.Started))
 				continue;
-			const Entity entity = scene.FindEntityByID(id);
+			const Entity entity = scene.FindEntityByID(key.Entity);
 			if (entity && entity.IsActive())
-				eligible.emplace_back(instance->second.Order, id);
+				eligible.emplace_back(instance->second.Order, key);
 		}
-		// LifecycleOrder lists surviving instances in canonical order, so a stable sort gives (ExecutionOrder, canonical).
+		// LifecycleOrder lists surviving instances in canonical entity order and slot order, so a stable sort gives
+		// (ExecutionOrder, canonical entity, slot).
 		std::stable_sort(eligible.begin(), eligible.end(), [](const auto& left, const auto& right)
 		{
 			return left.first < right.first;
 		});
-		std::vector<UUID> result;
+		std::vector<InstanceKey> result;
 		result.reserve(eligible.size());
-		for (const auto& [order, id] : eligible)
+		for (const auto& [order, key] : eligible)
 		{
 			static_cast<void>(order);
-			result.push_back(id);
+			result.push_back(key);
 		}
 		return result;
+	}
+
+	std::map<ScriptEngine::State::InstanceKey, ScriptEngine::State::Instance>::iterator ScriptEngine::State::EraseInstance(
+		std::map<InstanceKey, Instance>::iterator instance)
+	{
+		if (instance->second.Table != LUA_NOREF)
+			lua_unref(Detail::SandboxAccess::MainCall(*Vm).State, instance->second.Table);
+		LifecycleDirty = true;
+		return Instances.erase(instance);
 	}
 
 	int ScriptEngine::State::InvokeNative(ScriptCall& call)
@@ -189,7 +218,7 @@ namespace Engine {
 		context.Callback = std::string(callback);
 		context.Entity = owner.Entity;
 		context.Tick = Engine.GetHost().GetFrameState().Tick;
-		const auto instance = Instances.find(owner.Entity);
+		const auto instance = Instances.find({ owner.Entity, owner.Slot });
 		if (instance != Instances.end())
 		{
 			context.Script = instance->second.Script != nullptr ? instance->second.Script->SourceMap.Path : std::string();
@@ -224,8 +253,12 @@ namespace Engine {
 		}
 		if (!error.Entity.IsValid())
 			error.Entity = owner.Entity;
+		// The owner is the instance whose callback, task or evaluation raised the error, so an error of the owner's entity
+		// names the owner's slot; an error naming another entity keeps the slot it carries.
+		if (error.Entity.IsValid() && error.Entity == owner.Entity)
+			error.Slot = owner.Slot;
 		error.Tick = Engine.GetHost().GetFrameState().Tick;
-		const auto instance = Instances.find(error.Entity);
+		const auto instance = error.Entity.IsValid() ? Instances.find({ error.Entity, error.Slot }) : Instances.end();
 		if (instance != Instances.end())
 		{
 			if (error.EntityName.empty())
@@ -240,7 +273,7 @@ namespace Engine {
 			instance->second.FaultDisabled = true;
 			instance->second.PendingPhysics.clear();
 			if (Scheduler != nullptr)
-				Scheduler->CancelEntity(error.Entity);
+				Scheduler->CancelInstance(error.Entity, error.Slot);
 			if (error.Kind == ScriptErrorKind::Memory && instance->second.Table != LUA_NOREF && !nested)
 			{
 				lua_unref(Detail::SandboxAccess::MainCall(*Vm).State, instance->second.Table);
@@ -290,21 +323,22 @@ namespace Engine {
 		}
 	}
 
-	void ScriptEngine::State::Publish(const Error& error, UUID entity, std::string_view callback)
+	void ScriptEngine::State::Publish(const Error& error, InstanceKey instance, std::string_view callback)
 	{
 		ScriptError report{};
 		report.Kind = error.GetCode() == ErrorCode::CompileFailed ? ScriptErrorKind::Compile
 			: error.GetCode() == ErrorCode::Timeout               ? ScriptErrorKind::Timeout
 																  : ScriptErrorKind::Runtime;
 		report.Message = error.ToString();
-		report.Entity = entity;
+		report.Entity = instance.Entity;
+		report.Slot = instance.Slot;
 		report.Callback = std::string(callback);
 		const ErrorLocation& location = error.GetLocation();
 		report.Script = location.File;
 		report.Line = location.Line;
 		report.Column = location.Column;
 		report.JsonPointer = location.JsonPointer.value_or("");
-		Publish(std::move(report), { .Entity = entity, .Case = CurrentOwner.Case });
+		Publish(std::move(report), { .Entity = instance.Entity, .Case = CurrentOwner.Case, .Slot = instance.Slot });
 	}
 
 	void ScriptEngine::State::Recover()

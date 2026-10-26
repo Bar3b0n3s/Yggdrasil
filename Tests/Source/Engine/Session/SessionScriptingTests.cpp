@@ -30,9 +30,9 @@ namespace Engine {
 
 		static void AttachSessionScript(Entity entity, AssetHandle script)
 		{
-			ScriptComponent component{};
+			ScriptSlot component{};
 			component.Script.SetHandle(script);
-			entity.AddComponent<ScriptComponent>(component);
+			entity.AddComponent<ScriptComponent>(ScriptComponent{ { component } });
 		}
 
 		static PlaySessionSpecification ScriptSessionSpecification(ScriptTestFixture& fixture)

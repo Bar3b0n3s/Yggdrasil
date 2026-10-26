@@ -64,7 +64,7 @@ COMPONENT_ORDER = [
 ]
 
 # The registered version of each component above 1 ("ComponentVersions"); every other component is at version 1.
-COMPONENT_VERSIONS = {"Prefab": 2}
+COMPONENT_VERSIONS = {"Prefab": 2, "Script": 2}
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Canonical JSON (the JsonWriter form of Architecture §6: tabs, LF, scalar arrays on one line, final newline)
@@ -502,19 +502,20 @@ def validation_fixtures() -> list[Fixture]:
     item = fixture("SCRIPT_NOT_A_BEHAVIOUR")
     item.add_script("Project/Assets/Scripts/Helpers.luau", "5c41000000000003", MODULE)
     item.entities.append(entity("e000000000000003", "Helper", {
-        "Transform": transform(), "Script": {"Script": "5c41000000000003", "Fields": {}, "ExecutionOrder": 0}}))
+        "Transform": transform(),
+        "Script": {"Scripts": [{"Script": "5c41000000000003", "Fields": {}, "ExecutionOrder": 0}]}}))
 
     item = fixture("SCRIPT_UNKNOWN_FIELD_OVERRIDE")
     item.add_script("Project/Assets/Scripts/Mover.luau", "5c41000000000004", BEHAVIOUR)
     item.entities.append(entity("e000000000000003", "Mover", {
         "Transform": transform(),
-        "Script": {"Script": "5c41000000000004", "Fields": {"Sped": 2}, "ExecutionOrder": 0}}))
+        "Script": {"Scripts": [{"Script": "5c41000000000004", "Fields": {"Sped": 2}, "ExecutionOrder": 0}]}}))
 
     item = fixture("SCRIPT_FIELD_TYPE_MISMATCH")
     item.add_script("Project/Assets/Scripts/Mover.luau", "5c41000000000004", BEHAVIOUR)
     item.entities.append(entity("e000000000000003", "Mover", {
         "Transform": transform(),
-        "Script": {"Script": "5c41000000000004", "Fields": {"Speed": "fast"}, "ExecutionOrder": 0}}))
+        "Script": {"Scripts": [{"Script": "5c41000000000004", "Fields": {"Speed": "fast"}, "ExecutionOrder": 0}]}}))
 
     item = fixture("INPUT_UNKNOWN_ACTION")
     item.add_script("Project/Assets/Scripts/Jumper.luau", "5c41000000000005", '''--!strict
@@ -677,7 +678,8 @@ def observation_files() -> dict[str, bytes]:
             "Transform": transform(0, 5, 0), "RigidBody": {"Type": "Dynamic", "Layer": "Ball"},
             "SphereCollider": {"Radius": 0.5}}),
         entity("0b5e000000000004", "Probe", {
-            "Transform": transform(), "Script": {"Script": "0b5e0000000000a3", "Fields": {}, "ExecutionOrder": 0}}),
+            "Transform": transform(),
+            "Script": {"Scripts": [{"Script": "0b5e0000000000a3", "Fields": {}, "ExecutionOrder": 0}]}}),
     ], seed=7)
     add_json("Assets/Scenes/Main.scene", main)
     add_json("Assets/Scenes/Main.scene.meta", meta("0b5e0000000000a1", "Scene", "Scene"))

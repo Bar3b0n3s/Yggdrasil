@@ -30,17 +30,28 @@ namespace Engine {
 			std::optional<WriteAttribution> m_Previous{};
 		};
 
-		static Status CheckPanelAdmission(const EditorContext& editor, const MethodDescriptor& method, const RequestOptions& options)
+		// Admits a UI action in AutomationServer::AdmitRequest's order: the project and the test run's lease, then the scene
+		// target, whose scope the read-only and revision checks already address (the revision is the target's). Returns the
+		// open scope, null without a target; the caller keeps it around the dry-run sandbox and the handler.
+		static Result<Scope<EditorSceneTargetScope>> AdmitPanelAction(EditorContext& editor, const EditorMethodContext& context)
 		{
+			const MethodDescriptor& method = context.GetMethod();
+			const RequestOptions& options = context.GetOptions();
 			if (!editor.HasProject() && !method.Specification.AvailableInLauncher)
 				return MakeError(ErrorCode::InvalidState, "no project open; call project.create or project.open");
 			// A test run owns the editor for humans as well as agents (AutomationServer::AdmitRequest uses the same rule).
 			ENGINE_TRY(editor.CheckTestRunAdmission(method.Specification.Name, options.DryRun));
+			Scope<EditorSceneTargetScope> target;
+			if (options.Scene)
+			{
+				ENGINE_TRY_ASSIGN(const OpenSceneId scene, context.ResolveSceneTarget());
+				ENGINE_TRY_ASSIGN(target, EditorSceneTargetScope::Begin(editor, scene));
+			}
 			if (method.Specification.Mutates && !options.DryRun && editor.IsReadOnly())
 				return MakeError(ErrorCode::PermissionDenied, "the editor is read-only (--read-only)");
 			if (options.IfRevision && *options.IfRevision != editor.GetRevision())
 				return MakeError(ErrorCode::Conflict, "the editor revision changed; read the current state and retry");
-			return {};
+			return target;
 		}
 
 	}
@@ -84,8 +95,7 @@ namespace Engine {
 		if (!m_State->Editor.HasProject() && !descriptor->Specification.AvailableInLauncher)
 			return MakeError(ErrorCode::InvalidState, "no project open; call project.create or project.open");
 		ENGINE_TRY_ASSIGN(PreparedParams prepared, registry.PrepareParams(*descriptor, params));
-		ENGINE_TRY(Utils::CheckPanelAdmission(m_State->Editor, *descriptor, prepared.Options));
-		const uint64_t ticket = m_State->NextTicket++;
+		const uint64_t ticket = m_State->NextTicket;
 		MethodRequest request{
 			.Info = { .ClientName = "ui", .Id = ticket, .Method = std::string(method) },
 			.Options = prepared.Options,
@@ -96,6 +106,9 @@ namespace Engine {
 		};
 		State::Action action;
 		action.Context = CreateScope<EditorMethodContext>(m_State->Editor, m_State->Server, std::move(request));
+		// Checked now and again when the action runs; the scope this opens on a scene target ends with the check.
+		ENGINE_TRY(Utils::AdmitPanelAction(m_State->Editor, *action.Context));
+		++m_State->NextTicket;
 		m_State->Actions.emplace(ticket, std::move(action));
 		return ticket;
 	}
@@ -115,12 +128,15 @@ namespace Engine {
 					action.Pending.reset();
 				continue;
 			}
-			Status admitted = Utils::CheckPanelAdmission(m_State->Editor, action.Context->GetMethod(), action.Context->GetOptions());
+			// The target's scope stays open through the dry-run sandbox and the handler; a flagged method is never pending
+			// (MethodSpecification::SupportsSceneTarget), so it never spans a Pump.
+			Result<Scope<EditorSceneTargetScope>> admitted = Utils::AdmitPanelAction(m_State->Editor, *action.Context);
 			if (!admitted)
 			{
 				action.Completion.emplace(std::unexpected(std::move(admitted).error()));
 				continue;
 			}
+			const Scope<EditorSceneTargetScope> target = std::move(*admitted);
 			Scope<EditorDryRunScope> dryRun;
 			if (action.Context->IsDryRun())
 			{

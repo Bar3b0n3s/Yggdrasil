@@ -4,6 +4,7 @@
 #include "EditorCore/Automation/EditorMethodContext.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Play/EditorFeatureTestHost.h"
+#include "EditorCore/Private/OpenScenes.h"
 #include "Engine/Asset/Asset.h"
 #include "Engine/Asset/AssetRegistry.h"
 #include "Engine/Asset/ReplayData.h"
@@ -18,6 +19,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <format>
 #include <string>
 #include <vector>
@@ -177,20 +179,30 @@ namespace Engine {
 		}
 
 		// Docs/Decisions/0027-m17-contract.md "Frozen interfaces / A2": a test run plays the saved file of every scene it uses,
-		// so it refuses an open scene with unsaved changes that a selected suite is bound to (its Scene resolved as play.start
-		// resolves it) or that a selected replay plays (the registry's source path of its scene asset, as the replay session
-		// loads it). The first such selection is named: suites in Testing.Suites order, then replays in canonical path order.
-		// A suite Scene that does not resolve, or a replay whose scene asset is missing, matches nothing: the run reports it.
+		// so it refuses an open scene with unsaved changes, among every open scene (Docs/Decisions/0031-m20-contract.md
+		// decision 14), that a selected suite is bound to (its Scene resolved as play.start resolves it) or that a selected
+		// replay plays (the registry's source path of its scene asset, as the replay session loads it). The first such
+		// selection is named: suites in Testing.Suites order, then replays in canonical path order. A suite Scene that does
+		// not resolve, or a replay whose scene asset is missing, matches nothing: the run reports it.
 		[[nodiscard]] Status CheckDirtyScene(EditorMethodContext& context, EditorFeatureTestHost& host, const FeatureTestSelection& selection)
 		{
 			EditorContext& editor = context.GetEditor();
-			if (!editor.HasScene() || !editor.IsSceneDirty() || !editor.GetScenePath().has_value())
+			std::vector<VfsPath> dirty;
+			for (const Utils::OpenSceneState& open : Utils::ListDirtyOpenScenes(editor))
+			{
+				if (open.Path.has_value())
+					dirty.push_back(*open.Path);
+			}
+			if (dirty.empty())
 				return {};
-			const VfsPath& open = *editor.GetScenePath();
-			const auto refuse = [&open](std::string selected)
+			const auto refuse = [](const VfsPath& open, std::string selected)
 			{
 				return std::unexpected(Error(ErrorCode::InvalidState, std::format("'{}' is open with unsaved changes, and the selected {} plays its saved file", open.GetPath(), selected))
 						.WithHint("scene.save first; test runs play the saved scene file"));
+			};
+			const auto findDirty = [&dirty](const VfsPath& path)
+			{
+				return std::ranges::find(dirty, path);
 			};
 			const std::vector<TestSuiteSettings>& suites = host.GetProjectSettings().Testing.Suites;
 			for (const size_t index : selection.Suites)
@@ -198,8 +210,8 @@ namespace Engine {
 				if (index >= suites.size() || suites[index].Scene.empty())
 					continue;
 				const Result<VfsPath> scene = context.ResolveProjectPath(suites[index].Scene, "/scene", ".scene");
-				if (scene && *scene == open)
-					return refuse(std::format("suite '{}'", DescribeSuite(editor, host, suites[index])));
+				if (scene && findDirty(*scene) != dirty.end())
+					return refuse(*scene, std::format("suite '{}'", DescribeSuite(editor, host, suites[index])));
 			}
 			for (const std::string& path : selection.Replays)
 			{
@@ -207,8 +219,8 @@ namespace Engine {
 				if (!replay)
 					continue;
 				const AssetRecord* scene = editor.GetAssets().GetRegistry().Find((*replay)->Header.Scene.Handle);
-				if (scene != nullptr && scene->Metadata.Type == AssetType::Scene && scene->SourcePath == open)
-					return refuse(std::format("replay '{}'", path));
+				if (scene != nullptr && scene->Metadata.Type == AssetType::Scene && findDirty(scene->SourcePath) != dirty.end())
+					return refuse(scene->SourcePath, std::format("replay '{}'", path));
 			}
 			return {};
 		}
@@ -287,7 +299,7 @@ namespace Engine {
 	{
 		methods.Add({ .Name = "test.list", .Description = "Collects test suite and case names and source locations without running case bodies.", .Examples = { { .Description = "List configured tests.", .Params = Json::object() } } }, &Automation::TestList);
 		methods.AddPending<EditorMethodContext, TestRunParams, TestRunMethodResult>(
-			{ .Name = "test.run", .Description = "Runs configured tests and returns every outcome (counts, failedCases and the case rows; a replay's suite entry counts the checkpoints it compared) plus JSON/JUnit reports. The coverage object always keeps its registryFingerprint and gates; its counters are returned only with coverage: true or Testing.CoverageGates. Optional recording is published only after strict replay verification and, with input events, the input check (§13.6: refused when a run without them still passes that verification, whatever script errors it raises), and reported in the recording block (format version, ticks, events, checkpoints, final hash, where the input check diverged); a refused recording names the selected rows that did not pass. Runs play saved scene files, so test.run refuses (InvalidState, nothing run) while the open scene has unsaved changes and a selected suite or replay plays it: scene.save first.", .ExposeAsTool = true, .TimeoutSeconds = 900, .Examples = { { .Description = "Run every configured test.", .Params = Json::object() }, { .Description = "Run every test and return the script API coverage counters.", .Params = Json{ { "coverage", true } } } } }, &Automation::TestRun);
+			{ .Name = "test.run", .Description = "Runs configured tests and returns every outcome (counts, failedCases and the case rows; a replay's suite entry counts the checkpoints it compared) plus JSON/JUnit reports. The coverage object always keeps its registryFingerprint and gates; its counters are returned only with coverage: true or Testing.CoverageGates. Optional recording is published only after strict replay verification and, with input events, the input check (§13.6: refused when a run without them still passes that verification, whatever script errors it raises), and reported in the recording block (format version, ticks, events, checkpoints, final hash, where the input check diverged); a refused recording names the selected rows that did not pass. Runs play saved scene files, so test.run refuses (InvalidState, nothing run) while an open scene has unsaved changes and a selected suite or replay plays it: scene.save first.", .ExposeAsTool = true, .TimeoutSeconds = 900, .Examples = { { .Description = "Run every configured test.", .Params = Json::object() }, { .Description = "Run every test and return the script API coverage counters.", .Params = Json{ { "coverage", true } } } } }, &Automation::TestRun);
 	}
 
 }

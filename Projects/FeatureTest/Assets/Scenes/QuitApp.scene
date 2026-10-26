@@ -9,7 +9,7 @@
 		"Camera": 1,
 		"DirectionalLight": 1,
 		"AudioListener": 1,
-		"Script": 1
+		"Script": 2
 	},
 	"Entities": [
 		{
@@ -84,11 +84,15 @@
 					"Visible": true
 				},
 				"Script": {
-					"Script": "aea6d256d30ef369",
-					"Fields": {
-						"ExitCode": 3
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "aea6d256d30ef369",
+							"Fields": {
+								"ExitCode": 3
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		}

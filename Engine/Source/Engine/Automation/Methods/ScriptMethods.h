@@ -41,6 +41,7 @@ namespace Engine {
 		std::string Message{};
 		std::string Callback{};
 		EntitySummary Entity{};
+		uint32_t Slot = 0; // the faulting behaviour's slot in its entity's Script list (ScriptError::Slot)
 		uint32_t Tick = 0;
 		uint32_t Count = 0;
 		std::vector<ScriptTraceFrameSummary> Traceback{};
@@ -69,6 +70,7 @@ namespace Engine {
 		std::string Code{};                                              // Required UTF-8 Luau chunk; the first returned value is reported.
 		ScriptEvaluationContext Context = ScriptEvaluationContext::Edit; // Required, case-insensitive registry enum.
 		std::string Entity{};                                            // Optional EntityRef; binds self to the selected entity's behaviour instance.
+		std::string Script{};                                            // Optional Script.Define name of the slot self binds to; needs entity.
 	};
 
 	// Reuses the detached VM result exactly; its Value is VariantValue and Prints retains call order. Registered once
@@ -89,7 +91,10 @@ namespace Engine {
 		// audio, input, shared randomness and application controls are rejected before side effects; local values may
 		// change. Edit self exposes resolved fields without running lifecycle callbacks. Play uses the session VM and
 		// checks the requesting lockstep owner before executing anything. Entity
-		// resolves in the requested scene; NotFound at /entity for an absent entity/instance. Runtime supports Play only.
+		// resolves in the requested scene; NotFound at /entity for an absent entity/instance. Self is the instance of the
+		// entity's first script slot, or, with script, of its first slot whose behaviour has that Script.Define name
+		// (Docs/Decisions/0031-m20-contract.md decision 18): NotFound at /script when no slot has it, InvalidArgument at
+		// /script for an empty name or one without entity. Runtime supports Play only.
 		// Errors: InvalidState without the requested scene/VM, for Simulate, or another owner's lockstep; Unsupported at
 		// /context for Runtime Edit; Script with a structured §11.7 error in context.SetErrorData on evaluation failure.
 		// A successful mutating Play eval marks recording/replay state modified through the session's normal write path.

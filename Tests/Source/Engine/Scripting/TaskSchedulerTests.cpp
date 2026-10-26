@@ -27,9 +27,9 @@ namespace Engine {
 				INFO(compiled.error().ToString());
 			REQUIRE(compiled);
 			const Entity entity = fixture.GetScene().CreateEntity("TaskOwner");
-			ScriptComponent component{};
+			ScriptSlot component{};
 			component.Script.SetHandle(handle);
-			entity.AddComponent<ScriptComponent>(component);
+			entity.AddComponent<ScriptComponent>(ScriptComponent{ { component } });
 			return entity.GetUUID();
 		}
 
@@ -298,9 +298,9 @@ return Script.Define("Tasks", T)
 			const AssetHandle innerScript(0x210001);
 			REQUIRE(fixture.AddScript(innerScript, "Assets/Scripts/Inner.luau", "return Script.Define('Inner', {})"));
 			const Entity inner = fixture.GetScene().CreateEntity("Inner");
-			ScriptComponent component{};
+			ScriptSlot component{};
 			component.Script.SetHandle(innerScript);
-			inner.AddComponent<ScriptComponent>(component);
+			inner.AddComponent<ScriptComponent>(ScriptComponent{ { component } });
 			const UUID outer = Test::MakeTaskOwner(fixture, R"(
 local T = {}
 function T:OnStart()
@@ -400,9 +400,9 @@ end
 return Script.Define("Game", T)
 )"));
 			const Entity game = fixture.GetScene().CreateEntity("Game");
-			ScriptComponent component{};
+			ScriptSlot component{};
 			component.Script.SetHandle(AssetHandle(0x210001));
-			game.AddComponent<ScriptComponent>(component);
+			game.AddComponent<ScriptComponent>(ScriptComponent{ { component } });
 			// Suite isolation: both cases share this scene, so gameplay continuations must cross the case boundary.
 			const auto suite = Test::CollectTaskCases(fixture, host, R"(
 return Test.Suite("Cases", function()
@@ -462,9 +462,9 @@ end
 return Script.Define("Shooter", T)
 )"));
 			const Entity shooter = fixture.GetScene().CreateEntity("Shooter");
-			ScriptComponent component{};
+			ScriptSlot component{};
 			component.Script.SetHandle(AssetHandle(0x210002));
-			shooter.AddComponent<ScriptComponent>(component);
+			shooter.AddComponent<ScriptComponent>(ScriptComponent{ { component } });
 			const auto suite = Test::CollectTaskCases(fixture, host, R"(
 return Test.Suite("Cases", function()
 	Test.Case("Helper", function()

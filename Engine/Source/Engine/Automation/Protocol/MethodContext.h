@@ -165,7 +165,7 @@ namespace Engine {
 
 		// A context of the same host for one op of edit.batch (MethodRegistry::InvokeNested): the host copies what it needs
 		// from this context (attribution, dry-run state) into the new one. `request.Options` already holds this context's
-		// options (an op never carries its own dryRun or ifRevision).
+		// options (an op never carries its own dryRun, ifRevision or scene).
 		[[nodiscard]] virtual Scope<MethodContext> CreateNested(MethodRequest request) const = 0;
 
 		// The host's asset reference resolver, through which MethodRegistry::Invoke rewrites the asset references in the

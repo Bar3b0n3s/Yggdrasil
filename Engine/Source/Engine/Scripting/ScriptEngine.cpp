@@ -8,9 +8,12 @@
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scripting/Private/SandboxAccess.h"
 #include "Engine/Scripting/Private/ScriptEngineState.h"
+#include "Engine/Scripting/Private/ScriptSlots.h"
 #include "Engine/Scripting/ScriptApiRegistry.h"
 
 #include <algorithm>
+#include <format>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -95,9 +98,7 @@ namespace Engine {
 		if (m_State->Initialized || IsStopped())
 			return MakeError(ErrorCode::InvalidState, "Script instances are already initialized or the engine stopped");
 		m_State->Initialized = true;
-		const auto order = GetHost().GetScene().GetCanonicalOrder();
-		const std::vector<UUID> snapshot(order.begin(), order.end());
-		return m_State->CreateInstances(snapshot);
+		return m_State->CreateInstances(m_State->MissingInstances(GetHost().GetScene().GetCanonicalOrder()));
 	}
 
 	Status ScriptEngine::SynchronizeInstances()
@@ -110,20 +111,42 @@ namespace Engine {
 		// Only entities with a Script component and existing instances can change, so only those are visited, in canonical
 		// order. The refreshed lifecycle order already lists every instance canonically; a scene walk is needed only when
 		// a scripted entity may need a new instance. Large scenes with few scripts therefore cost no per-entity work.
+		using InstanceKey = State::InstanceKey;
+		const auto mayCreate = [this](Entity entity, InstanceKey key)
+		{
+			return entity.IsActive() || !m_State->DisabledHistory.contains(key);
+		};
 		entt::registry& registry = scene.GetRegistry();
 		std::vector<UUID> unplaced;
 		for (const entt::entity handle : registry.view<const ScriptComponent>())
 		{
 			const UUID id = registry.get<const IDComponent>(handle).ID;
-			if (m_State->Instances.contains(id) || !registry.get<const ScriptComponent>(handle).Script.IsValid())
-				continue;
-			const Entity entity = scene.FindEntityByID(id);
-			if (entity && (entity.IsActive() || !m_State->DisabledHistory.contains(id)))
-				unplaced.push_back(id);
+			const ScriptComponent& component = registry.get<const ScriptComponent>(handle);
+			for (uint32_t slot = 0; slot < Detail::GetScriptSlotCount(component); ++slot)
+			{
+				const InstanceKey key{ id, slot };
+				if (!Detail::GetScriptSlot(component, slot).Script.IsValid() || m_State->Instances.contains(key))
+					continue;
+				const Entity entity = scene.FindEntityByID(id);
+				if (!entity)
+					break;
+				if (mayCreate(entity, key))
+				{
+					unplaced.push_back(id);
+					break;
+				}
+			}
 		}
 		std::vector<UUID> snapshot;
 		if (unplaced.empty())
-			snapshot = m_State->LifecycleOrder; // removed instances in it are skipped below, as before
+		{
+			// The refreshed lifecycle order keeps an entity's slots together; removed instances in it are skipped below.
+			for (const InstanceKey key : m_State->LifecycleOrder)
+			{
+				if (snapshot.empty() || snapshot.back() != key.Entity)
+					snapshot.push_back(key.Entity);
+			}
+		}
 		else
 		{
 			std::vector<UUID> candidates = m_State->SortedInstanceIDs();
@@ -138,87 +161,125 @@ namespace Engine {
 		}
 		struct ActiveTransition
 		{
-			UUID Entity{};
+			InstanceKey Key{};
 			bool Active = false;
 			int32_t Order = 0;
 			int Table = LUA_NOREF;
 		};
-		std::vector<UUID> missing;
-		std::vector<UUID> enabled;
+		std::vector<InstanceKey> missing;
+		std::vector<InstanceKey> enabled;
 		std::vector<ActiveTransition> transitions;
 		for (const UUID id : snapshot)
 		{
-			const Entity entity = scene.FindEntityByID(id);
+			Entity entity = scene.FindEntityByID(id);
 			if (!entity)
 				continue;
-			const ScriptComponent* component = entity.TryGetComponent<ScriptComponent>();
-			const AssetHandle handle = component != nullptr ? component->Script.GetHandle() : AssetHandle{};
-			auto found = m_State->Instances.find(id);
-			// A disable already observed owns a teardown even if the entity was enabled again before the flush.
-			// Its replacement receives OnCreate/OnEnable after FinishDestroyFlush removes the old instance.
-			if (found != m_State->Instances.end() && (found->second.DestroyPrepared || m_State->DisabledHistory.contains(id)))
-				continue;
-			if (found != m_State->Instances.end() && found->second.Handle != handle)
+			// A write of the Script list keeps an instance whose slot still holds the same script; the others are destroyed,
+			// in reverse slot order as a removed component's, and recreated below (decision 17's list writes).
+			const std::vector<InstanceKey> existing = m_State->InstancesOf(id);
+			for (auto current = existing.rbegin(); current != existing.rend(); ++current)
 			{
+				auto found = m_State->Instances.find(*current);
+				// A disable already observed owns a teardown even if the entity was enabled again before the flush.
+				// Its replacement receives OnCreate/OnEnable after FinishDestroyFlush removes the old instance.
+				if (found == m_State->Instances.end() || found->second.DestroyPrepared || m_State->DisabledHistory.contains(*current))
+					continue;
+				// An earlier slot's OnDestroy may have destroyed the entity: its remaining instances belong to the flush.
+				entity = scene.FindEntityByID(id);
+				if (!entity)
+					break;
+				const ScriptComponent* component = entity.TryGetComponent<ScriptComponent>();
+				const AssetHandle handle = component != nullptr && current->Slot < Detail::GetScriptSlotCount(*component)
+					? Detail::GetScriptSlot(*component, current->Slot).Script
+					: AssetHandle{};
+				if (found->second.Handle == handle)
+					continue;
 				found->second.DestroyPrepared = true;
 				if (!IsReadOnly())
-					m_State->Invoke(id, "OnDestroy", nullptr, true);
-				m_State->Scheduler->CancelEntity(id);
-				found = m_State->Instances.find(id);
+					m_State->Invoke(*current, "OnDestroy", nullptr, true);
+				m_State->Scheduler->CancelInstance(current->Entity, current->Slot);
+				found = m_State->Instances.find(*current);
 				if (found != m_State->Instances.end())
-				{
-					if (found->second.Table != LUA_NOREF)
-						lua_unref(Detail::SandboxAccess::MainCall(*m_State->Vm).State, found->second.Table);
-					m_State->Instances.erase(found);
-					m_State->LifecycleDirty = true;
-				}
-				found = m_State->Instances.end();
+					m_State->EraseInstance(found);
 			}
-			if (found == m_State->Instances.end())
-			{
-				if (handle.IsValid() && (entity.IsActive() || !m_State->DisabledHistory.contains(id)))
-				{
-					missing.push_back(id);
-					if (m_State->DisabledHistory.contains(id))
-						enabled.push_back(id);
-				}
-				continue;
-			}
+			// OnDestroy may have destroyed the entity or changed its component.
+			entity = scene.FindEntityByID(id);
+			const ScriptComponent* component = entity ? entity.TryGetComponent<ScriptComponent>() : nullptr;
 			if (component == nullptr)
 				continue;
-			found->second.Order = component->ExecutionOrder;
-			found->second.Name = entity.GetName();
 			const bool active = entity.IsActive();
-			if (found->second.Active == active)
-				continue;
-			found->second.Active = active;
-			if (!active)
-				m_State->DisabledHistory.insert(id);
-			transitions.push_back({ id, active, found->second.Order, found->second.Table });
+			for (uint32_t slot = 0; slot < Detail::GetScriptSlotCount(*component); ++slot)
+			{
+				const InstanceKey key{ id, slot };
+				const auto found = m_State->Instances.find(key);
+				if (found != m_State->Instances.end() && (found->second.DestroyPrepared || m_State->DisabledHistory.contains(key)))
+					continue;
+				const Detail::ScriptSlotView view = Detail::GetScriptSlot(*component, slot);
+				if (found == m_State->Instances.end())
+				{
+					if (view.Script.IsValid() && mayCreate(entity, key))
+					{
+						missing.push_back(key);
+						if (m_State->DisabledHistory.contains(key))
+							enabled.push_back(key);
+					}
+					continue;
+				}
+				found->second.Order = view.ExecutionOrder;
+				found->second.Name = entity.GetName();
+				if (found->second.Active == active)
+					continue;
+				found->second.Active = active;
+				if (!active)
+					m_State->DisabledHistory.insert(key);
+				transitions.push_back({ key, active, found->second.Order, found->second.Table });
+			}
 		}
 		// Observe the entire hierarchy before callbacks can change it again. A parent's OnDisable may
 		// re-enable its subtree; every descendant must still complete the disable already observed.
-		std::stable_sort(transitions.begin(), transitions.end(), [](const ActiveTransition& left, const ActiveTransition& right)
+		// OnEnable and OnDisable are addressed to an entity: they reach its instances together, in slot order, at the turn
+		// of its slot that comes first in (ExecutionOrder, canonical entity) order (decision 17), which for one slot per
+		// entity is (ExecutionOrder, canonical entity) order. `transitions` lists an entity's slots together, in canonical
+		// entity order and slot order.
+		struct TransitionGroup
+		{
+			size_t Begin = 0;
+			size_t End = 0;
+			int32_t Order = 0; // the lowest ExecutionOrder of the group's slots
+		};
+		std::vector<TransitionGroup> groups;
+		for (size_t index = 0; index < transitions.size(); ++index)
+		{
+			if (groups.empty() || transitions[groups.back().Begin].Key.Entity != transitions[index].Key.Entity)
+				groups.push_back({ index, index, transitions[index].Order });
+			groups.back().End = index + 1;
+			groups.back().Order = std::min(groups.back().Order, transitions[index].Order);
+		}
+		std::stable_sort(groups.begin(), groups.end(), [](const TransitionGroup& left, const TransitionGroup& right)
 		{
 			return left.Order < right.Order;
 		});
 		if (!IsReadOnly())
 		{
-			for (const auto& transition : transitions)
+			for (const TransitionGroup& group : groups)
 			{
-				const auto current = m_State->Instances.find(transition.Entity);
-				if (current != m_State->Instances.end() && current->second.Table == transition.Table && !current->second.DestroyPrepared)
-					m_State->Invoke(transition.Entity, transition.Active ? "OnEnable" : "OnDisable", nullptr, true);
+				for (size_t index = group.Begin; index < group.End; ++index)
+				{
+					const ActiveTransition& transition = transitions[index];
+					const auto current = m_State->Instances.find(transition.Key);
+					if (current != m_State->Instances.end() && current->second.Table == transition.Table && !current->second.DestroyPrepared)
+						m_State->Invoke(transition.Key, transition.Active ? "OnEnable" : "OnDisable", nullptr, true);
+				}
 			}
 		}
 		// OnCreate callbacks a faulted slice deferred run first, as members of the earlier batch they belong to.
 		m_State->InvokeDeferredCreates();
 		ENGINE_TRY(m_State->CreateInstances(missing));
-		for (const UUID id : enabled)
+		for (const InstanceKey key : enabled)
 		{
-			m_State->DisabledHistory.erase(id);
+			m_State->DisabledHistory.erase(key);
 			if (!IsReadOnly())
-				m_State->Invoke(id, "OnEnable");
+				m_State->Invoke(key, "OnEnable");
 		}
 		return {};
 	}
@@ -245,7 +306,7 @@ namespace Engine {
 			}
 			~DepthScope() { --Depth; }
 		} depth(m_State->CreationDepth);
-		return m_State->CreateInstances(entities);
+		return m_State->CreateInstances(m_State->MissingInstances(entities));
 	}
 
 	void ScriptEngine::StartPending()
@@ -260,16 +321,16 @@ namespace Engine {
 			return;
 		}
 		const auto snapshot = m_State->OrderedInstances(false);
-		for (const UUID id : snapshot)
+		for (const State::InstanceKey key : snapshot)
 		{
-			const auto found = m_State->Instances.find(id);
+			const auto found = m_State->Instances.find(key);
 			if (found == m_State->Instances.end() || found->second.Started || found->second.FaultDisabled || found->second.DestroyPrepared)
 				continue;
-			const Entity entity = GetHost().GetScene().FindEntityByID(id);
+			const Entity entity = GetHost().GetScene().FindEntityByID(key.Entity);
 			if (!entity || !entity.IsActive())
 				continue;
 			found->second.Started = true;
-			m_State->Invoke(id, "OnStart");
+			m_State->Invoke(key, "OnStart");
 		}
 		// Physics callbacks belong to the fixed step. Contacts that began before an instance's OnStart follow the whole
 		// start flush of the next fixed step (frame-rate independent), before FixedUpdate, so each side sees its enter
@@ -308,21 +369,22 @@ namespace Engine {
 				m_State->Publish(synchronized.error());
 		}
 		m_State->RefreshLifecycleOrder();
-		const std::vector<UUID> snapshot = m_State->LifecycleOrder;
+		// Reverse canonical entity order and reverse slot order: children first, and an entity's slots last to first.
+		const std::vector<State::InstanceKey> snapshot = m_State->LifecycleOrder;
 		uint32_t handled = 0;
 		for (auto current = snapshot.rbegin(); current != snapshot.rend(); ++current)
 		{
 			const auto found = m_State->Instances.find(*current);
 			if (found == m_State->Instances.end() || found->second.DestroyPrepared)
 				continue;
-			const Entity entity = GetHost().GetScene().FindEntityByID(*current);
+			const Entity entity = GetHost().GetScene().FindEntityByID(current->Entity);
 			if (entity && !m_State->DisabledHistory.contains(*current))
 				continue;
 			found->second.DestroyPrepared = true;
 			++handled;
 			if (!IsReadOnly() && !IsStopped())
 				m_State->Invoke(*current, "OnDestroy", nullptr, true);
-			m_State->Scheduler->CancelEntity(*current);
+			m_State->Scheduler->CancelInstance(current->Entity, current->Slot);
 		}
 		return handled;
 	}
@@ -338,38 +400,40 @@ namespace Engine {
 				continue;
 			}
 			// A script fault cannot be cured by toggling Active. Preserve its disabled record until explicit reload.
-			if (current->second.FaultDisabled && GetHost().GetScene().FindEntityByID(current->first))
+			if (current->second.FaultDisabled && GetHost().GetScene().FindEntityByID(current->first.Entity))
 			{
 				current->second.DestroyPrepared = false;
 				m_State->DisabledHistory.erase(current->first);
 				++current;
 				continue;
 			}
-			if (current->second.Table != LUA_NOREF)
-				lua_unref(Detail::SandboxAccess::MainCall(*m_State->Vm).State, current->second.Table);
-			if (!GetHost().GetScene().FindEntityByID(current->first))
+			if (!GetHost().GetScene().FindEntityByID(current->first.Entity))
 				m_State->DisabledHistory.erase(current->first);
-			current = m_State->Instances.erase(current);
-			m_State->LifecycleDirty = true;
+			current = m_State->EraseInstance(current);
 		}
 	}
 
 	void ScriptEngine::OnPhysicsEvent(const PhysicsEvent& event)
 	{
 		m_State->AssertOwner();
-		const auto found = m_State->Instances.find(event.Self);
-		if (found == m_State->Instances.end())
-			return;
-		if (!found->second.Started || !found->second.PendingPhysics.empty())
+		// Every instance of the receiving entity, in slot order; each holds or discards its own events. A callback may
+		// remove a later slot's instance, which then receives nothing.
+		for (const State::InstanceKey key : m_State->InstancesOf(event.Self))
 		{
-			// Physics marks this side entered whether or not a script observes it, so dropping the event would leave a
-			// later exit unpaired. Hold it (behind any earlier held event) until the instance has started; a removed or
-			// faulted instance discards its queue.
-			if (!IsStopped() && !IsReadOnly() && !found->second.FaultDisabled && !found->second.DestroyPrepared && found->second.Table != LUA_NOREF)
-				found->second.PendingPhysics.push_back(event);
-			return;
+			const auto found = m_State->Instances.find(key);
+			if (found == m_State->Instances.end())
+				continue;
+			if (!found->second.Started || !found->second.PendingPhysics.empty())
+			{
+				// Physics marks this side entered whether or not a script observes it, so dropping the event would leave a
+				// later exit unpaired. Hold it (behind any earlier held event) until the instance has started; a removed or
+				// faulted instance discards its queue.
+				if (!IsStopped() && !IsReadOnly() && !found->second.FaultDisabled && !found->second.DestroyPrepared && found->second.Table != LUA_NOREF)
+					found->second.PendingPhysics.push_back(event);
+				continue;
+			}
+			m_State->InvokePhysics(key, event);
 		}
-		m_State->InvokePhysics(event);
 	}
 
 	void ScriptEngine::OnPhysicsDiagnostic(const PhysicsDiagnostic& diagnostic)
@@ -382,8 +446,10 @@ namespace Engine {
 		error.Message = diagnostic.Code + ": " + diagnostic.Message;
 		error.Callback = "Physics";
 		error.Entity = diagnostic.Entity;
-		// Physics already logged this diagnostic; retain script observability and policy without a second log entry.
-		m_State->Publish(std::move(error), { .Entity = diagnostic.Entity, .Case = m_State->CurrentOwner.Case }, false, true);
+		// Physics already logged this diagnostic; retain script observability and policy without a second log entry. The
+		// diagnostic belongs to the entity, not to one of its behaviours, so it names the entity's first slot, as an
+		// entity-addressed evaluation does.
+		m_State->Publish(std::move(error), { .Entity = diagnostic.Entity, .Case = m_State->CurrentOwner.Case, .Slot = 0 }, false, true);
 	}
 
 	void ScriptEngine::Stop()
@@ -393,7 +459,7 @@ namespace Engine {
 		m_State->AssertOwner();
 		m_State->Stopping = true;
 		m_State->RefreshLifecycleOrder();
-		const std::vector<UUID> snapshot = m_State->LifecycleOrder;
+		const std::vector<State::InstanceKey> snapshot = m_State->LifecycleOrder;
 		for (auto current = snapshot.rbegin(); current != snapshot.rend(); ++current)
 		{
 			const auto found = m_State->Instances.find(*current);
@@ -408,19 +474,44 @@ namespace Engine {
 		m_State->Stopped = true;
 	}
 
-	Result<ScriptEvaluation> ScriptEngine::Evaluate(std::string_view source, const VfsPath& path, std::optional<UUID> entity)
+	Result<ScriptEvaluation> ScriptEngine::Evaluate(std::string_view source, const VfsPath& path, std::optional<UUID> entity,
+		std::string_view behaviour)
 	{
 		m_State->AssertOwner();
 		if (IsStopped())
 			return MakeError(ErrorCode::InvalidState, "The script engine has stopped");
-		// Tasks the evaluation spawns belong to its entity, and to a case only when evaluated from that case's work.
-		Utils::ScriptEvaluationOwnerScope owner(m_State->CurrentOwner, { entity.value_or(UUID{}), m_State->CurrentOwner.Case });
+		uint32_t slot = 0;
+		if (entity.has_value() && !behaviour.empty())
+		{
+			const std::vector<State::InstanceKey> instances = m_State->InstancesOf(*entity);
+			const auto named = std::ranges::find_if(instances, [this, behaviour](State::InstanceKey key)
+			{
+				const State::Instance& instance = m_State->Instances.find(key)->second;
+				return instance.Script != nullptr && instance.Script->Name == behaviour;
+			});
+			if (named == instances.end())
+			{
+				std::string names;
+				for (const State::InstanceKey key : instances)
+				{
+					const State::Instance& instance = m_State->Instances.find(key)->second;
+					if (instance.Script != nullptr)
+						names += std::format("{}{} (slot {})", names.empty() ? "" : ", ", instance.Script->Name, key.Slot);
+				}
+				return std::unexpected(Error(ErrorCode::NotFound, std::format("entity {} has no script slot whose behaviour is named '{}'", *entity, behaviour))
+						.WithHint(names.empty() ? std::string("the entity has no behaviour instance") : "its behaviours: " + names));
+			}
+			slot = named->Slot;
+		}
+		// Tasks the evaluation spawns belong to its instance, and to a case only when evaluated from that case's work. The
+		// owner's slot is also the instance `self` binds to (ScriptEngineAccess::PushInstance).
+		Utils::ScriptEvaluationOwnerScope owner(m_State->CurrentOwner, { entity.value_or(UUID{}), m_State->CurrentOwner.Case, slot });
 		auto result = m_State->Vm->Evaluate(source, path, entity);
 		if (!result)
 		{
 			const auto failure = m_State->Vm->GetLastError();
 			if (failure)
-				m_State->Publish(*failure, { .Entity = entity.value_or(UUID{}), .Case = m_State->ActiveCase }, false, false, State::FaultPolicy::ReportOnly);
+				m_State->Publish(*failure, { .Entity = entity.value_or(UUID{}), .Case = m_State->ActiveCase, .Slot = slot }, false, false, State::FaultPolicy::ReportOnly);
 		}
 		return result;
 	}
@@ -493,10 +584,12 @@ namespace Engine {
 		std::vector<ScriptInstanceInfo> result;
 		for (const UUID id : GetHost().GetScene().GetCanonicalOrder())
 		{
-			const auto found = m_State->Instances.find(id);
-			if (found != m_State->Instances.end())
-				result.push_back({ id, found->second.Handle, found->second.Started,
-					found->second.FaultDisabled || !found->second.Active || found->second.DestroyPrepared, found->second.Order });
+			for (const State::InstanceKey key : m_State->InstancesOf(id))
+			{
+				const State::Instance& instance = m_State->Instances.find(key)->second;
+				result.push_back({ id, instance.Handle, instance.Started, instance.FaultDisabled || !instance.Active || instance.DestroyPrepared,
+					instance.Order, key.Slot });
+			}
 		}
 		return result;
 	}

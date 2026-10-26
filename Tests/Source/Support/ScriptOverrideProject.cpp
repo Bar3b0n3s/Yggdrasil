@@ -2,6 +2,10 @@
 #include "Support/ScriptOverrideProject.h"
 
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/Json/JsonWriter.h"
+
+#include <nlohmann/json.hpp>
 
 #include <format>
 #include <string>
@@ -67,7 +71,7 @@ return Script.Define("Brick", Brick)
 	"Root": "{0}",
 	"ComponentVersions": {{
 		"Transform": 1,
-		"Script": 1
+		"Script": 2
 	}},
 	"Entities": [
 		{{
@@ -83,11 +87,15 @@ return Script.Define("Brick", Brick)
 					"Scale": [1, 1, 1]
 				}},
 				"Script": {{
-					"Script": "{1}",
-					"Fields": {{
-						"Points": 1
-					}},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{{
+							"Script": "{1}",
+							"Fields": {{
+								"Points": 1
+							}},
+							"ExecutionOrder": 0
+						}}
+					]
 				}}
 			}}
 		}}
@@ -98,7 +106,7 @@ return Script.Define("Brick", Brick)
 			WriteProjectText(root, std::string(ScriptOverridePrefab) + ".meta", MakeMeta(ScriptOverridePrefabHandle, "Prefab"));
 
 			// The member's flattened values: the prefab's Points with the override applied, as PrefabInstantiator applies it.
-			const std::string memberFields = field == "Points" ? std::format("\"Points\": {}", value) : std::format("\"Points\": 1,\n\t\t\t\t\t\t\"{}\": {}", field, value);
+			const std::string memberFields = field == "Points" ? std::format("\"Points\": {}", value) : std::format("\"Points\": 1,\n\t\t\t\t\t\t\t\t\"{}\": {}", field, value);
 
 			WriteProjectText(root, ScriptOverrideScene, std::format(R"({{
 	"Format": "Scene",
@@ -109,7 +117,7 @@ return Script.Define("Brick", Brick)
 		"Transform": 1,
 		"Prefab": 2,
 		"PrefabLink": 1,
-		"Script": 1
+		"Script": 2
 	}},
 	"Entities": [
 		{{
@@ -131,7 +139,7 @@ return Script.Define("Brick", Brick)
 							"Path": ["{2}"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {{
 								"{4}": {6}
 							}}
@@ -144,11 +152,15 @@ return Script.Define("Brick", Brick)
 					"OuterPrefabEntityID": null
 				}},
 				"Script": {{
-					"Script": "{3}",
-					"Fields": {{
-						{5}
-					}},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{{
+							"Script": "{3}",
+							"Fields": {{
+								{5}
+							}},
+							"ExecutionOrder": 0
+						}}
+					]
 				}}
 			}}
 		}}
@@ -157,6 +169,37 @@ return Script.Define("Brick", Brick)
 )",
 															instance, prefab, PrefabRoot, script, field, memberFields, value));
 			WriteProjectText(root, std::string(ScriptOverrideScene) + ".meta", MakeMeta(UUID(0x5c0a1e0000000004ull), "Scene"));
+		}
+
+		void RewriteScriptOverrideProjectAtScriptVersion1(const std::filesystem::path& root)
+		{
+			for (const std::string_view relative : { ScriptOverrideScene, ScriptOverridePrefab })
+			{
+				const Result<std::string> text = FileSystem::ReadText(root / FileSystem::PathFromUtf8(relative));
+				REQUIRE_MESSAGE(text.has_value(), (text ? std::string() : text.error().ToString()));
+				Result<Json> document = JsonReader::Parse(*text);
+				REQUIRE(document.has_value());
+				(*document)["ComponentVersions"]["Script"] = 1;
+				for (Json& entity : (*document)["Entities"])
+				{
+					Json& components = entity["Components"];
+					if (components.contains("Script"))
+					{
+						Json slot = components["Script"]["Scripts"][0];
+						components["Script"] = std::move(slot);
+					}
+					if (!components.contains("Prefab"))
+						continue;
+					for (Json& entry : components["Prefab"]["Overrides"])
+					{
+						if (entry["Component"] == Json("Script") && entry["Field"] == Json("Scripts/0/Fields"))
+							entry["Field"] = "Fields";
+					}
+				}
+				const Result<std::string> written = JsonWriter::Write(*document);
+				REQUIRE(written.has_value());
+				WriteProjectText(root, relative, *written);
+			}
 		}
 
 	}

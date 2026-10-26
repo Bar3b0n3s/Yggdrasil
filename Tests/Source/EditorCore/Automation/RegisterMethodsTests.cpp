@@ -19,7 +19,8 @@ namespace Engine {
 	// The M4 method set (Roadmap M4), M5's screenshot methods (registered at the M4/M5 merge, ADR 0009 decision 33), M6's
 	// asset.*, prefab.*, entity.bounds and project.refreshAssets (ADR 0010 decision 20), M7's play.*, input.inject and
 	// project.export (ADR 0012 decisions 4, 8 and 14), M11's physics.bodyInfo (ADR 0014 decision 18) and M12's audio.stats
-	// (ADR 0015 decision 15), test hooks excluded.
+	// (ADR 0015 decision 15), and M20's scene.list, scene.activate and scene.close (Docs/Decisions/0031-m20-contract.md
+	// decision 14), test hooks excluded.
 	static const std::vector<std::string>& GetExpectedMethodNames()
 	{
 		static const std::vector<std::string> ExpectedNames = { "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
@@ -29,8 +30,8 @@ namespace Engine {
 			"entity.reparent", "entity.update", "events.read", "input.inject", "input.record", "input.replay", "log.read", "physics.bodyInfo", "play.pause", "play.resume",
 			"play.setTimeScale", "play.start", "play.state", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "prefab.revert",
 			"prefab.unpack", "project.create", "project.export", "project.getSettings", "project.info", "project.open", "project.refreshAssets",
-			"project.save", "project.setSettings", "project.upgrade", "project.validate", "rpc.discover", "scene.diff", "scene.get", "scene.new", "scene.open",
-			"scene.query", "scene.raycast", "scene.save", "scene.tree", "script.check", "script.create", "script.errors", "script.eval", "script.fields", "script.read", "script.write",
+			"project.save", "project.setSettings", "project.upgrade", "project.validate", "rpc.discover", "scene.activate", "scene.close", "scene.diff", "scene.get",
+			"scene.list", "scene.new", "scene.open", "scene.query", "scene.raycast", "scene.save", "scene.tree", "script.check", "script.create", "script.errors", "script.eval", "script.fields", "script.read", "script.write",
 			"session.hello", "session.info", "session.shutdown", "stats.get", "test.list", "test.run", "viewport.camera", "viewport.frame",
 			"viewport.pick", "viewport.screenshot", "viewport.setOptions" };
 		return ExpectedNames;
@@ -112,8 +113,8 @@ namespace Engine {
 				"asset.setProperties", "component.list", "component.schema", "docs.get", "edit.batch", "edit.redo", "edit.undo", "editor.screenshot",
 				"entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get", "entity.reparent", "entity.update", "input.inject",
 				"input.record", "input.replay", "log.read", "play.start", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "project.create",
-				"project.export", "project.getSettings", "project.open", "project.save", "project.setSettings", "project.upgrade", "project.validate", "scene.diff",
-				"scene.new", "scene.open", "scene.query", "scene.save", "scene.tree",
+				"project.export", "project.getSettings", "project.open", "project.save", "project.setSettings", "project.upgrade", "project.validate",
+				"scene.activate", "scene.close", "scene.diff", "scene.list", "scene.new", "scene.open", "scene.query", "scene.save", "scene.tree",
 				"script.check", "script.create", "script.errors", "script.eval", "script.read", "script.write", "test.run", "viewport.screenshot" };
 			// The edit.batch ops (ADR 0008 decision 8): pure reads and methods whose effects all go through Execute. asset.import and
 			// asset.reimport are pending operations; project.refreshAssets writes outside a command (ADR 0010 decision 20).
@@ -257,7 +258,8 @@ namespace Engine {
 			CHECK(format->FindByNameIgnoreCase("JSON")->Name == "Json");
 			const EnumInfo* events = types.FindEnum("EngineEventType");
 			REQUIRE(events != nullptr);
-			CHECK(events->GetEntries().size() == 11);
+			// M20 appends SceneActivated and SceneClosed (Docs/Decisions/0031-m20-contract.md decision 22).
+			CHECK(events->GetEntries().size() == 13);
 		}
 
 		TEST_CASE("RegisterMethods: the tool catalogue's input schemas are compact")
@@ -270,8 +272,9 @@ namespace Engine {
 			// The 25 M4 tools, viewport_screenshot and editor_screenshot, and M6's asset_list, asset_import, asset_create,
 			// asset_set_properties, asset_move, asset_delete, prefab_create, prefab_instantiate, prefab_apply and entity_bounds, and
 			// M7's play_start, play_stop, play_step, input_inject and project_export, plus M13's ten script/replay/test tools, and
-			// M16's project_upgrade (friction S3-09), and M17's asset_get_properties (friction F11).
-			CHECK(catalog["Tools"].size() == 54);
+			// M16's project_upgrade (friction S3-09), and M17's asset_get_properties (friction F11), and M20's scene_list,
+			// scene_activate and scene_close (Docs/Decisions/0031-m20-contract.md decision 14).
+			CHECK(catalog["Tools"].size() == 57);
 			for (Json& tool : catalog["Tools"])
 			{
 				INFO(tool["name"].dump());

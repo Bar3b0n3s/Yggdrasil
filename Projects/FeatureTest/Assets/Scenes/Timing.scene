@@ -11,7 +11,7 @@
 		"RigidBody": 1,
 		"SphereCollider": 1,
 		"AudioListener": 1,
-		"Script": 1
+		"Script": 2
 	},
 	"Entities": [
 		{
@@ -79,15 +79,19 @@
 					"Scale": [1, 1, 1]
 				},
 				"Script": {
-					"Script": "ac7f20055209dd8d",
-					"Fields": {
-						"Drifter": "84dc15990cf491e6",
-						"Jumper": "f6fc8bccc462821c",
-						"Slider": "f7e983b7309c3aa0",
-						"TeleportFrames": [3, 10],
-						"TeleportTarget": [4, 2, -1]
-					},
-					"ExecutionOrder": -1
+					"Scripts": [
+						{
+							"Script": "ac7f20055209dd8d",
+							"Fields": {
+								"Drifter": "84dc15990cf491e6",
+								"Jumper": "f6fc8bccc462821c",
+								"Slider": "f7e983b7309c3aa0",
+								"TeleportFrames": [3, 10],
+								"TeleportTarget": [4, 2, -1]
+							},
+							"ExecutionOrder": -1
+						}
+					]
 				}
 			}
 		},
@@ -111,11 +115,15 @@
 					"Visible": true
 				},
 				"Script": {
-					"Script": "f2beeb2442aeb959",
-					"Fields": {
-						"Velocity": [2, 0, 0]
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "f2beeb2442aeb959",
+							"Fields": {
+								"Velocity": [2, 0, 0]
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -184,11 +192,15 @@
 					"Visible": true
 				},
 				"Script": {
-					"Script": "f2beeb2442aeb959",
-					"Fields": {
-						"Velocity": [0, 0, 3]
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "f2beeb2442aeb959",
+							"Fields": {
+								"Velocity": [0, 0, 3]
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		}

@@ -10,6 +10,7 @@
 #include "EditorCore/Commands/ProjectSettingsCommand.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Private/EditorFileError.h"
+#include "EditorCore/Private/OpenScenes.h"
 #include "Engine/Asset/AssetMetadata.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/ReplayData.h"
@@ -31,6 +32,8 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <span>
+#include <vector>
 
 namespace Engine {
 
@@ -244,6 +247,32 @@ namespace Engine {
 			return result;
 		}
 
+		// project.upgrade's reload of every open scene whose file it rewrote, `rewritten` (Docs/Decisions/0031-m20-contract.md
+		// decision 14): each read again in its tab position, in tab order (EditorContext::SetScene, with the scene addressed),
+		// and the tab active before is active again (SetScene gives the scene it reads a new id and makes it active). Errors:
+		// those of loading a file (LoadSceneFile, strict) and of addressing a scene; the scenes reloaded before stay reloaded.
+		static Status ReloadRewrittenOpenScenes(EditorContext& editor, std::span<const VfsPath> rewritten)
+		{
+			const std::vector<OpenSceneId> tabs = editor.GetOpenScenes();
+			const size_t activeTab = static_cast<size_t>(std::ranges::find(tabs, editor.GetActiveSceneId()) - tabs.begin());
+			for (const OpenSceneState& open : ListOpenScenes(editor))
+			{
+				if (!open.Path.has_value() || std::ranges::find(rewritten, *open.Path) == rewritten.end())
+					continue;
+				ENGINE_TRY_ASSIGN(const Scope<EditorSceneTargetScope> addressed, AddressOpenScene(editor, open));
+				const VfsPath& path = *open.Path;
+				Scope<Scene> scene = editor.CreateScene(std::string(path.GetStem()));
+				LoadReport report;
+				ENGINE_TRY(LoadSceneFile(editor, *scene, path, LoadMode::Strict, nullptr, report));
+				LogLoadDiagnostics(ToProjectRelative(path), report);
+				editor.SetScene(std::move(scene), path, false);
+			}
+			const std::vector<OpenSceneId> reloaded = editor.GetOpenScenes();
+			if (activeTab < reloaded.size() && editor.GetActiveSceneId() != reloaded[activeTab])
+				ENGINE_TRY(editor.ActivateScene(reloaded[activeTab]));
+			return {};
+		}
+
 		// The project files project.upgrade rewrites: the .eproj, then every .scene, .prefab, .meta, .material, .sfx and .replay
 		// file under Assets/ (IsUpgradedAssetExtension), sorted.
 		static Result<std::vector<VfsPath>> ListUpgradeFiles(const EditorContext& editor)
@@ -338,14 +367,8 @@ namespace Engine {
 
 		Result<ProjectSaveResult> ProjectSave(EditorMethodContext& context, const NoParams& /*params*/)
 		{
-			EditorContext& editor = context.GetEditor();
 			ProjectSaveResult result;
-			if (editor.HasScene() && editor.IsSceneDirty())
-			{
-				ENGINE_TRY_ASSIGN(const VfsPath path, Utils::GetOwnScenePath(editor));
-				ENGINE_TRY(Utils::SaveOpenScene(editor, path));
-				result.SavedFiles.push_back(Utils::ToProjectRelative(path));
-			}
+			ENGINE_TRY_ASSIGN(result.SavedFiles, Utils::SaveDirtyOpenScenes(context.GetEditor()));
 			return result;
 		}
 
@@ -456,15 +479,12 @@ namespace Engine {
 		Result<ProjectUpgradeResult> ProjectUpgrade(EditorMethodContext& context, const NoParams& /*params*/)
 		{
 			EditorContext& editor = context.GetEditor();
-			if (editor.HasScene() && editor.IsSceneDirty())
-			{
-				return std::unexpected(Error(ErrorCode::InvalidState, "the open scene has unsaved changes")
-						.WithHint("save them with scene.save (or drop them with scene.open {discardChanges: true}) before project.upgrade"));
-			}
+			ENGINE_TRY(Utils::CheckNoDirtyOpenScenes(editor,
+				"save the changes with project.save (or drop them with scene.close or scene.open {discardChanges: true}) before project.upgrade"));
 
 			ENGINE_TRY_ASSIGN(const std::vector<VfsPath> files, Utils::ListUpgradeFiles(editor));
 			ProjectUpgradeResult result;
-			bool openSceneChanged = false;
+			std::vector<VfsPath> rewritten;
 			for (const VfsPath& file : files)
 			{
 				const std::string relative = Utils::ToProjectRelative(file);
@@ -483,7 +503,7 @@ namespace Engine {
 					std::format("while upgrading '{}'", relative)));
 				result.ChangedFiles.push_back(relative);
 				result.Changes.push_back(ProjectUpgradeChange{ .Path = relative, .Reason = canonical->Reason });
-				openSceneChanged = openSceneChanged || (editor.GetScenePath().has_value() && *editor.GetScenePath() == file);
+				rewritten.push_back(file);
 			}
 			std::sort(result.ChangedFiles.begin(), result.ChangedFiles.end());
 			std::sort(result.Changes.begin(), result.Changes.end(), [](const ProjectUpgradeChange& left, const ProjectUpgradeChange& right)
@@ -491,16 +511,10 @@ namespace Engine {
 				return left.Path < right.Path;
 			});
 
-			// The open scene's file changed: reload it (a dry run changed nothing on disk, and its sandbox holds the scene).
-			if (openSceneChanged && !context.IsDryRun())
-			{
-				const VfsPath path = *editor.GetScenePath();
-				Scope<Scene> scene = editor.CreateScene(std::string(path.GetStem()));
-				LoadReport report;
-				ENGINE_TRY(Utils::LoadSceneFile(editor, *scene, path, LoadMode::Strict, nullptr, report));
-				Utils::LogLoadDiagnostics(Utils::ToProjectRelative(path), report);
-				editor.SetScene(std::move(scene), path, false);
-			}
+			// The open scenes whose files changed are reloaded (a dry run changed nothing on disk, and its sandbox holds the
+			// addressed scene).
+			if (!context.IsDryRun())
+				ENGINE_TRY(Utils::ReloadRewrittenOpenScenes(editor, rewritten));
 			if (!result.ChangedFiles.empty() && !context.IsDryRun())
 				ENGINE_INFO("project.upgrade rewrote {} file(s)", result.ChangedFiles.size());
 			return result;
@@ -594,7 +608,7 @@ namespace Engine {
 			.Field("recovered", &ProjectOpenResult::Recovered, "The recovery was installed as a dirty scene with empty undo history.");
 
 		registry.Struct<ProjectSaveResult>("ProjectSaveResult", "What project.save wrote.")
-			.Field("savedFiles", &ProjectSaveResult::SavedFiles, "The project-relative files written.");
+			.Field("savedFiles", &ProjectSaveResult::SavedFiles, "The project-relative files written, in tab order.");
 
 		registry.Struct<ProjectInfoResult>("ProjectInfoResult", "The open project, its open scene and its provenance.")
 			.Field("project", &ProjectInfoResult::Project, "The open project.")
@@ -679,7 +693,7 @@ namespace Engine {
 		methods.Add(
 			{
 				.Name = "project.save",
-				.Description = "Saves the open scene when it has unsaved changes. Settings are saved as they change.",
+				.Description = "Saves every open scene that has unsaved changes, in tab order. Settings are saved as they change.",
 				.ExposeAsTool = true,
 				.Mutates = true,
 				.Examples = { { .Description = "Save everything unsaved.", .Params = Json::object() } },
@@ -733,6 +747,7 @@ namespace Engine {
 							   "fixes every auto-fixable one, fix: [ids or codes] only those, as one undoable command.",
 				.ExposeAsTool = true,
 				.SupportsDryRun = true,
+				.SupportsSceneTarget = true,
 				.AllowedInBatch = true,
 				.Examples = { { .Description = "Remove the build scenes that do not exist.", .Params = validateExample } },
 			},
@@ -745,8 +760,8 @@ namespace Engine {
 							   "material, sound effect and replay under Assets/), records each rewrite in provenance and reports the changed "
 							   "files, each with its reason (changes: \"format version 1 to 2\", \"canonical form\"). Run it after an engine change "
 							   "to canonical output; dryRun: true lists what it would rewrite. An unknown member in a material, sound effect or "
-							   "replay fails the upgrade at its file and pointer, as its importer refuses it. Not undoable; refuses an open "
-							   "scene with unsaved changes (save it first).",
+							   "replay fails the upgrade at its file and pointer, as its importer refuses it. Not undoable; refuses while an "
+							   "open scene has unsaved changes (save them first), and reloads every open scene whose file it rewrote.",
 				.ExposeAsTool = true,
 				.Mutates = true,
 				.SupportsDryRun = true,

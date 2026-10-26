@@ -1,5 +1,6 @@
 #pragma once
 
+#include "EditorCore/OpenSceneId.h"
 #include "Engine/Asset/ReplayData.h"
 #include "Engine/Automation/Protocol/JsonRpc.h"
 #include "Engine/Core/Base.h"
@@ -14,10 +15,10 @@
 #include <string>
 
 // The editor's play mode (Architecture §5.6, §12.4, §13.5 play.start/play.stop): at most one PlaySession at a time, made
-// from the open edit scene through the serializer copy, never touching the edit scene. Owned by EditorContext
-// (EditorContext::GetPlay); automation reaches it through EditorMethodContext (AutomationMethodContext::StartPlay,
-// StopPlay, GetPlaySession), EditorApp's frame hooks drive it, and AutomationServer reports its state in "_meta" and
-// releases a disconnected client's lockstep through it (§13.2).
+// from the active edit scene (M20: one of the open scenes, GetPlayedScene) through the serializer copy, never touching the
+// edit scene. Owned by EditorContext (EditorContext::GetPlay); automation reaches it through EditorMethodContext
+// (AutomationMethodContext::StartPlay, StopPlay, GetPlaySession), EditorApp's frame hooks drive it, and AutomationServer
+// reports its state in "_meta" and releases a disconnected client's lockstep through it (§13.2).
 //
 // Frozen by the M7 contract (Docs/Decisions/0012-m7-decisions.md decision 11). Main thread only; not copyable.
 
@@ -56,8 +57,9 @@ namespace Engine {
 		// PlaySession::Create. Nothing changes on error.
 		[[nodiscard]] Status Start(const PlayStartOptions& options);
 
-		// Stops the session (§5.6 Stop): destroys it, applies the reloads deferred while it was in lockstep, and appends
-		// PlayStateChanged ("Edit"). The edit scene was never touched. Errors: InvalidState "not playing".
+		// Stops the session (§5.6 Stop): destroys it, applies the reloads deferred while it was in lockstep, carries the play
+		// selection back into the played scene (GetPlayedScene), and appends PlayStateChanged ("Edit"). The edit scene was
+		// never touched. Errors: InvalidState "not playing".
 		[[nodiscard]] Status Stop();
 
 		// M13 host state outlives every VM and is retained across Stop/Scene.Load.
@@ -89,6 +91,14 @@ namespace Engine {
 		[[nodiscard]] bool IsPlaying() const;
 		// The running session; nullptr in Edit mode. Valid until Stop.
 		[[nodiscard]] PlaySession* GetSession() const;
+		// M20 (Docs/Decisions/0031-m20-contract.md decisions 13 and 16): the open scene the running session belongs to, the
+		// played scene: the scene play.start, input.record or input.replay started it from (the addressed scene then, the
+		// active one, whose selection followed into the session; also when play.start {scene} plays a scene file), while that
+		// scene stays open. NoOpenScene in Edit mode, while a test run owns the editor, and once the played scene closed or was
+		// replaced (scene.open, project.upgrade's reload): the session then plays on and belongs to no open scene. Stop
+		// carries the play selection back into the played scene's edit selection, that scene addressed meanwhile, or drops it
+		// when the scene is no longer open.
+		[[nodiscard]] OpenSceneId GetPlayedScene() const;
 
 		// EditorApp's frame hooks (§4.2 steps 5 to 7): OnFixedStep once per loop step (PlaySession::AdvanceLoopStep),
 		// OnUpdate once per frame (PlaySession::AdvanceLoopFrame) after the steps. No effect in Edit mode.

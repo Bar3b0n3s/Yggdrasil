@@ -296,17 +296,19 @@ end)
 			const auto projectFile = editor.GetProject().GetProjectFile();
 			const auto recoveryRoot = fixture.GetProjectRoot() / "Library/Autosave";
 			Autosave saves(editor);
-			editor.SetScene(editor.CreateScene("PreserveUntitled"), std::nullopt, true);
-			const auto first = saves.Save(AutosaveReason::BeforePlay);
-			REQUIRE(first.has_value());
-			REQUIRE(first->Written);
-			const auto preservedPath = recoveryRoot / first->Generation / "Scene.json";
-			const auto preserved = FileSystem::ReadText(preservedPath);
-			REQUIRE(preserved.has_value());
+			// Every recovered scene opens again with the oldest active (Docs/Decisions/0031-m20-contract.md decision 15), so
+			// the scene the batch saves is the one autosaved first.
 			editor.SetScene(editor.CreateScene("RecoverUntitled"), std::nullopt, true);
+			const auto recovered = saves.Save(AutosaveReason::BeforePlay);
+			REQUIRE(recovered.has_value());
+			REQUIRE(recovered->Written);
+			editor.SetScene(editor.CreateScene("PreserveUntitled"), std::nullopt, true);
 			const auto second = saves.Save(AutosaveReason::BeforePlay);
 			REQUIRE(second.has_value());
 			REQUIRE(second->Written);
+			const auto preservedPath = recoveryRoot / second->Generation / "Scene.json";
+			const auto preserved = FileSystem::ReadText(preservedPath);
+			REQUIRE(preserved.has_value());
 			REQUIRE(saves.Reset());
 			REQUIRE(editor.CloseProject().has_value());
 
@@ -319,7 +321,7 @@ end)
 			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
 			INFO(result->StandardError);
 			REQUIRE(result->ExitCode == ExitCode::Success);
-			CHECK_FALSE(FileSystem::Exists(recoveryRoot / second->Generation));
+			CHECK_FALSE(FileSystem::Exists(recoveryRoot / recovered->Generation));
 			CHECK(FileSystem::ReadText(preservedPath).value_or("") == *preserved);
 			const auto saved = FileSystem::ReadText(fixture.GetProjectRoot() / "Assets/Scenes/FirstSave.scene");
 			REQUIRE(saved.has_value());

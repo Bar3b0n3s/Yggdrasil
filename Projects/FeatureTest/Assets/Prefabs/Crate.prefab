@@ -9,7 +9,7 @@
 		"Text": 1,
 		"RigidBody": 1,
 		"BoxCollider": 1,
-		"Script": 1
+		"Script": 2
 	},
 	"Entities": [
 		{
@@ -57,12 +57,16 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "cdca1d8d3f05d703",
-					"Fields": {
-						"Lid": "6d8e2bb074da88d3",
-						"Tag": "Crate"
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "cdca1d8d3f05d703",
+							"Fields": {
+								"Lid": "6d8e2bb074da88d3",
+								"Tag": "Crate"
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -86,11 +90,15 @@
 					"Visible": true
 				},
 				"Script": {
-					"Script": "cdca1d8d3f05d703",
-					"Fields": {
-						"Tag": "Lid"
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "cdca1d8d3f05d703",
+							"Fields": {
+								"Tag": "Lid"
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},

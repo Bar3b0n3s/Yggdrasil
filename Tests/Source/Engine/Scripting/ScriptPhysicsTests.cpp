@@ -76,7 +76,7 @@ return Script.Define("CollisionTrace", T)
 			Test::ScriptTestFixture fixture;
 			const AssetHandle handle(0x2b0001);
 			REQUIRE(fixture.AddScript(handle, "Assets/Scripts/CollisionTrace.luau", std::string(CollisionTraceSource)));
-			ScriptComponent script{};
+			ScriptSlot script{};
 			script.Script.SetHandle(handle);
 
 			// A level root with a Static RigidBody gathers its three pieces into one compound; only the brick at x = 2 and the
@@ -84,10 +84,10 @@ return Script.Define("CollisionTrace", T)
 			Scene& editScene = fixture.GetScene();
 			Entity level = editScene.CreateEntity("Level");
 			level.AddComponent<RigidBodyComponent>(RigidBodyComponent{ .Type = BodyType::Static });
-			level.AddComponent<ScriptComponent>(script);
+			level.AddComponent<ScriptComponent>(ScriptComponent{ { script } });
 			for (const auto& [name, x] : { std::pair{ "Piece", 0.0f }, std::pair{ "Piece", 1.0f }, std::pair{ "Brick", 2.0f } })
 				static_cast<void>(Test::AddBoxBody(editScene, name, glm::vec3(x, 0.0f, 0.0f), glm::vec3(0.5f), std::nullopt, level));
-			editScene.FindEntityByPath("/Level/Brick").AddComponent<ScriptComponent>(script);
+			editScene.FindEntityByPath("/Level/Brick").AddComponent<ScriptComponent>(ScriptComponent{ { script } });
 			Entity ball = Test::AddSphereBody(editScene, "Ball", glm::vec3(2.0f, 3.0f, 0.0f), 0.25f, BodyType::Dynamic);
 			Test::PatchRigidBody(ball, [](RigidBodyComponent& body)
 			{

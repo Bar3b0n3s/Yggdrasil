@@ -837,8 +837,12 @@ namespace Engine {
 		const ConstEntity found = std::as_const(*Specification.RuntimeScene).FindEntityByID(entity);
 		if (!found.IsValid() || found.HasComponent<HierarchyDisabledTag>())
 			return false;
+		// A Script component names a script when one of its slots has one (Docs/Decisions/0031-m20-contract.md decision 17).
 		const ScriptComponent* script = found.TryGetComponent<ScriptComponent>();
-		return script != nullptr && script->Script.IsValid();
+		return script != nullptr && std::ranges::any_of(script->Scripts, [](const ScriptSlot& slot)
+		{
+			return slot.Script.IsValid();
+		});
 	}
 
 	void PhysicsSystem::State::CollectPartners(UUID owner, std::set<UUID>& partners) const

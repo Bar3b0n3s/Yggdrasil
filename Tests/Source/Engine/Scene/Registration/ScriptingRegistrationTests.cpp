@@ -12,7 +12,9 @@ namespace Engine {
 
 	TEST_SUITE("Scene")
 	{
-		TEST_CASE("ScriptingRegistration: Script has no shortcut and a Variant map of field overrides")
+		// Docs/Decisions/0031-m20-contract.md decision 17: Script version 2 is an ordered list of ScriptSlot, each slot with
+		// its script, its Variant map of field overrides and its execution order.
+		TEST_CASE("ScriptingRegistration: Script has no shortcut and a list of slots, each with a Variant map of field overrides")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			const ComponentInfo* script = registry->FindComponent("Script");
@@ -20,24 +22,35 @@ namespace Engine {
 			CHECK(script->HasFlag(ComponentFlags::NoShortcut));
 			CHECK_FALSE(script->HasFlag(ComponentFlags::EntityLevel));
 			CHECK(script->GetCategory() == "Scripting");
+			CHECK(script->GetVersion() == 2);
+			CHECK(script->FindField("Script") == nullptr);
+			CHECK(script->FindField("Fields") == nullptr);
 
-			const FieldInfo* fields = script->FindField("Fields");
+			const FieldInfo* slots = script->FindField("Scripts");
+			REQUIRE(slots != nullptr);
+			CHECK(slots->GetKind() == FieldType::Array);
+			REQUIRE(slots->GetType().GetElement() != nullptr);
+			const StructInfo* slot = slots->GetType().GetElement()->GetStruct();
+			REQUIRE(slot != nullptr);
+			CHECK(slot == registry->FindStruct("ScriptSlot"));
+
+			const FieldInfo* fields = slot->FindField("Fields");
 			REQUIRE(fields != nullptr);
 			CHECK(fields->GetKind() == FieldType::Map);
 			CHECK(fields->GetType().GetElement()->GetKind() == FieldType::Variant);
 			CHECK(fields->GetResolver() != nullptr);
-			CHECK(script->FindField("Script")->GetMeta().AssetFilter == "Script");
-			CHECK(script->FindField("ExecutionOrder")->GetKind() == FieldType::Int32);
+			CHECK(slot->FindField("Script")->GetMeta().AssetFilter == "Script");
+			CHECK(slot->FindField("ExecutionOrder")->GetKind() == FieldType::Int32);
 		}
 
 		TEST_CASE("ScriptingRegistration: field overrides resolve against the script's schema")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
-			const ComponentInfo* script = registry->FindComponent("Script");
+			const StructInfo* script = registry->FindStruct("ScriptSlot");
 			REQUIRE(script != nullptr);
 			const Test::FixtureSchemaSource schemas = Test::FixtureSchemaSource::CreateStandard();
 
-			ScriptComponent component;
+			ScriptSlot component;
 			component.Script = TypedAssetHandle<AssetType::Script>(Test::FixtureSchemaSource::DefaultOwner);
 			ResolveContext resolve;
 			resolve.Registry = registry.get();
@@ -50,7 +63,7 @@ namespace Engine {
 			REQUIRE(torque.has_value());
 			CHECK((*torque)->GetKind() == FieldType::Float);
 
-			// A Script component object without a C++ object (an AddComponent prefab override): the handle comes from its JSON.
+			// A script slot without a C++ object (an AddComponent prefab override's list): the handle comes from its JSON.
 			const Result<Json> componentJson = JsonReader::Parse(R"({ "Script": "00000000c0ffee01", "Fields": {}, "ExecutionOrder": 0 })");
 			REQUIRE(componentJson.has_value());
 			const JsonReader componentReader(*componentJson);
@@ -61,7 +74,7 @@ namespace Engine {
 			REQUIRE(fromJson.has_value());
 			CHECK(*fromJson == *torque);
 
-			// The owner of a Field override is a PrefabOverride, not a ScriptComponent: no handle, so no schema.
+			// The owner of a Field override is a PrefabOverride, not a script slot: no handle, so no schema.
 			ResolveContext otherOwner = resolve;
 			otherOwner.Owner = nullptr;
 			otherOwner.OwnerType = registry->FindStruct("PrefabOverride");
@@ -80,7 +93,7 @@ namespace Engine {
 		TEST_CASE("ScriptingRegistration: overrides without an assigned script stay unresolved")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
-			const ComponentInfo* script = registry->FindComponent("Script");
+			const StructInfo* script = registry->FindStruct("ScriptSlot");
 			REQUIRE(script != nullptr);
 			const FieldInfo* fields = script->FindField("Fields");
 			REQUIRE(fields != nullptr);
@@ -92,7 +105,7 @@ namespace Engine {
 			resolve.Schemas = &schemas;
 			resolve.Key = "Torque";
 
-			const ScriptComponent unassigned;
+			const ScriptSlot unassigned;
 			resolve.Owner = &unassigned;
 			const Result<const FieldInfo*> fromObject = fields->ResolveVariant(resolve);
 			REQUIRE_FALSE(fromObject.has_value());

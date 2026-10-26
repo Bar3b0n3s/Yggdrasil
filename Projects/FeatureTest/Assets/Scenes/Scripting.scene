@@ -21,7 +21,7 @@
 		"CharacterController": 1,
 		"AudioSource": 1,
 		"AudioListener": 1,
-		"Script": 1
+		"Script": 2
 	},
 	"Entities": [
 		{
@@ -271,21 +271,25 @@
 					"Scale": [1, 1, 1]
 				},
 				"Script": {
-					"Script": "e18c51687267cd78",
-					"Fields": {
-						"Clip": "57e9754aa8546eed",
-						"Count": 7,
-						"Enabled": true,
-						"Facing": [0, 0.70710677, 0, 0.70710677],
-						"Mode": "Chase",
-						"Offset": [1, 2, 3],
-						"Speed": 4,
-						"Target": "0b4c04c277b616ab",
-						"Tint": [0.1, 0.2, 0.3, 1],
-						"Title": "Scripted",
-						"Waypoints": [1, 2.5, 4]
-					},
-					"ExecutionOrder": 3
+					"Scripts": [
+						{
+							"Script": "e18c51687267cd78",
+							"Fields": {
+								"Clip": "57e9754aa8546eed",
+								"Count": 7,
+								"Enabled": true,
+								"Facing": [0, 0.70710677, 0, 0.70710677],
+								"Mode": "Chase",
+								"Offset": [1, 2, 3],
+								"Speed": 4,
+								"Target": "0b4c04c277b616ab",
+								"Tint": [0.1, 0.2, 0.3, 1],
+								"Title": "Scripted",
+								"Waypoints": [1, 2.5, 4]
+							},
+							"ExecutionOrder": 3
+						}
+					]
 				}
 			}
 		},

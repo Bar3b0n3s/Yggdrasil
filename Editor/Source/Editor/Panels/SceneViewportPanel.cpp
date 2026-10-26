@@ -99,7 +99,8 @@ namespace Engine {
 			return {};
 		if (context.Editor.IsReadOnly())
 			return MakeError(ErrorCode::PermissionDenied, "Assets cannot be dropped into a read-only scene");
-		PlaySession* session = context.Editor.GetPlay().GetSession();
+		// The shown scene, as the hierarchy shows it: the play scene only while the active tab is the played one (decision 13).
+		PlaySession* session = context.Editor.ShowsPlayScene() ? context.Editor.GetPlay().GetSession() : nullptr;
 		const Scene* scene = session ? &session->GetScene() : context.Editor.HasScene() ? &context.Editor.GetScene()
 																						: nullptr;
 		if (!scene)

@@ -1131,25 +1131,15 @@
 			"additionalProperties": false
 		},
 		"Script": {
-			"description": "Attaches a Behaviour script to the entity (one per entity).",
+			"description": "Attaches Behaviour scripts to the entity, an ordered list of slots.",
 			"type": "object",
 			"properties": {
-				"Script": {
-					"description": "The Behaviour script to run.",
-					"type": ["string", "null"],
-					"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
-					"x-assetType": "Script"
-				},
-				"Fields": {
-					"description": "Overrides of the script's declared fields by name, each checked against the field's declared type; an unknown or mismatching override is kept and reported, and the field uses its declared default.",
-					"type": "object",
-					"additionalProperties": {}
-				},
-				"ExecutionOrder": {
-					"description": "The script's place in callback order: lower values run first, ties in canonical entity order.",
-					"type": "integer",
-					"minimum": -2147483648,
-					"maximum": 2147483647
+				"Scripts": {
+					"description": "The behaviours of the entity, in slot order; each slot is its own instance.",
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/ScriptSlot"
+					}
 				}
 			},
 			"additionalProperties": false
@@ -1180,6 +1170,30 @@
 				},
 				"Value": {
 					"description": "The overriding value, checked against the schema of its target: the field, the whole component, or the entity key."
+				}
+			},
+			"additionalProperties": false
+		},
+		"ScriptSlot": {
+			"description": "One behaviour of a Script component.",
+			"type": "object",
+			"properties": {
+				"Script": {
+					"description": "The Behaviour script.",
+					"type": ["string", "null"],
+					"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+					"x-assetType": "Script"
+				},
+				"Fields": {
+					"description": "Overrides of the script's declared fields, by name.",
+					"type": "object",
+					"additionalProperties": {}
+				},
+				"ExecutionOrder": {
+					"description": "Callbacks run in (ExecutionOrder, canonical entity order, slot) order.",
+					"type": "integer",
+					"minimum": -2147483648,
+					"maximum": 2147483647
 				}
 			},
 			"additionalProperties": false

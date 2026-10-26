@@ -135,9 +135,11 @@ namespace Engine {
 		// replacement. The pointer is borrowed for this request only; null means no installed script-error service.
 		[[nodiscard]] virtual ScriptErrorStream* GetScriptErrors() const;
 		// Editor-only, fresh read-only VM over the edit scene, with fields/class links but no lifecycle callbacks.
-		// Entity is an optional EntityRef, resolved at /entity. Runtime returns Unsupported at /context before trying
-		// to resolve a nonexistent edit scene. Returns owned value/prints; errors retain full script error data.
-		[[nodiscard]] virtual Result<ScriptEvaluation> EvalInEdit(std::string_view code, std::string_view entity);
+		// Entity is an optional EntityRef, resolved at /entity. Behaviour names the Script.Define name of the entity's slot
+		// self binds to, empty for its first slot (ScriptEngine::Evaluate: NotFound when no slot has it). Runtime returns
+		// Unsupported at /context before trying to resolve a nonexistent edit scene. Returns owned value/prints; errors
+		// retain full script error data.
+		[[nodiscard]] virtual Result<ScriptEvaluation> EvalInEdit(std::string_view code, std::string_view entity, std::string_view behaviour);
 
 		// The display name of `client` (session.hello's client.name, or "batch", "cli", "test" for in-process clients); empty
 		// for NoClient or a client that is gone. play.state reports the lockstep owner by it.

@@ -138,8 +138,9 @@ namespace Engine {
 	// Registers the params and result structs above (after RegisterEntityMethodTypes, whose EntityDetails they use).
 	void RegisterEditorEntityMethodTypes(TypeRegistry& registry);
 
-	// Registers the five methods: all are tools, AllowedInBatch (every effect goes through EditorContext::Execute), mutate
-	// and support dry runs.
+	// Registers the five methods: all are tools, AllowedInBatch (every effect goes through EditorContext::Execute), mutate,
+	// support dry runs and take the scene target (SupportsSceneTarget; Docs/Decisions/0031-m20-contract.md decision 16),
+	// so an edit, its entity references and its undo step belong to the addressed open scene.
 	void RegisterEditorEntityMethods(MethodRegistry& methods);
 
 }

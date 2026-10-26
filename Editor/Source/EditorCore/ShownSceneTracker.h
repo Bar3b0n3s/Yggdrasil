@@ -5,11 +5,11 @@
 #include <cstdint>
 
 // Notices when the scene the editor shows changes, for the stale-mirror collections (Renderer/StaleMirrorSchedule.h;
-// Docs/Decisions/0013-m8-decisions.md decision 7): a scene opened, closed or swapped, and play mode started or stopped. Each
-// call compares the edit scene and the play session's scene with those of the previous call; the SceneOpened and
-// PlayStateChanged events appended since then count as well, which catches a scene or a session replaced between two calls
-// by one at the same address, and so does any event the log dropped before it was read. Pure; main thread only (the
-// EventLog's).
+// Docs/Decisions/0013-m8-decisions.md decision 7): a scene opened, closed or swapped, another open scene activated (M20), and
+// play mode started or stopped. Each call compares the edit scene and the play session's scene with those of the previous
+// call; the SceneOpened, SceneActivated, SceneClosed and PlayStateChanged events appended since then count as well, which
+// catches a scene or a session replaced between two calls by one at the same address, and so does any event the log
+// dropped before it was read. Pure; main thread only (the EventLog's).
 
 namespace Engine {
 

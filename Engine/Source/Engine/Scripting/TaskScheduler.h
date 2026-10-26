@@ -30,7 +30,8 @@ namespace Engine {
 		// Cancelling a stale/completed task succeeds without touching another task. A live non-task/foreign-VM value
 		// is InvalidArgument. Cancellation never resumes code. An executing task terminates at its next safe boundary.
 		[[nodiscard]] Status Cancel(ScriptReference task);
-		void CancelEntity(UUID entity);
+		// Cancels the tasks of one behaviour instance: those whose owner is (entity, slot) (ScriptTaskOwner).
+		void CancelInstance(UUID entity, uint32_t slot);
 		void CancelCase(ScriptReference caseThread);
 		void CancelAll();
 		// Stable due-task snapshot, ordered by due tick then creation sequence. Spawned tasks already ran their first

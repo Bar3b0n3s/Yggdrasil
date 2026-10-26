@@ -27,7 +27,9 @@ namespace Engine {
 		AssetImportFailed,
 		ScriptErrorRaised,
 		DiagnosticsChanged,
-		AutomationClientDisconnected
+		AutomationClientDisconnected,
+		SceneActivated, // M20 (Docs/Decisions/0031-m20-contract.md decision 13)
+		SceneClosed
 	};
 
 	// The enumerator name ("EntityCreated").
@@ -47,6 +49,8 @@ namespace Engine {
 	//   ScriptErrorRaised             Id = entity (invalid for module-level errors), Path = script path, Message = error
 	//   DiagnosticsChanged            Message = summary ("2 errors, 1 warning")
 	//   AutomationClientDisconnected  Name = client name
+	//   SceneActivated                Path = the editor's newly active open scene's path (empty for an unsaved scene)
+	//   SceneClosed                   Path = the closed open scene's path (empty for an unsaved scene)
 	struct EngineEvent
 	{
 		uint64_t Seq = 0;             // assigned by EventLog::Append: 1, 2, 3 ... never reused

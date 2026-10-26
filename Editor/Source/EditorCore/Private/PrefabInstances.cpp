@@ -1,6 +1,7 @@
 #include "EditorPCH.h"
 #include "EditorCore/Private/PrefabInstances.h"
 
+#include "EditorCore/EditorContext.h"
 #include "Engine/Scene/Components/PrefabInstanceComponent.h"
 #include "Engine/Scene/Components/PrefabLinkComponent.h"
 #include "Engine/Scene/Entity.h"
@@ -46,6 +47,18 @@ namespace Engine {
 					instances.emplace_back(entity.GetUUID(), handle);
 			});
 			return instances;
+		}
+
+		bool IsInstancedInOpenScenes(const EditorContext& editor, std::span<const AssetHandle> prefabs)
+		{
+			if (editor.HasScene() && !FindPrefabInstances(editor.GetScene(), prefabs).empty())
+				return true;
+			const OpenSceneId addressed = editor.GetAddressedSceneId();
+			return std::ranges::any_of(editor.GetOpenScenes(), [&editor, addressed, prefabs](OpenSceneId id)
+			{
+				const Scene* scene = id != addressed ? editor.FindScene(id) : nullptr;
+				return scene != nullptr && !FindPrefabInstances(*scene, prefabs).empty();
+			});
 		}
 
 	}

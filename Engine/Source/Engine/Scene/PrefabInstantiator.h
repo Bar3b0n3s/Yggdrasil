@@ -25,7 +25,7 @@ namespace Engine {
 	// caller cannot silently lose script field remapping.
 	struct PrefabOptions
 	{
-		// Script field schemas (M13; Test::FixtureSchemaSource in tests). They say which ScriptComponent.Fields values are
+		// Script field schemas (M13; Test::FixtureSchemaSource in tests). They say which ScriptSlot.Fields values are
 		// Entity references, which are remapped, diffed and mapped back like EntityRef fields, and they resolve Variant
 		// values when member JSON is read. May be null: script field values are then copied verbatim (never remapped) and
 		// kept with REFLECTION_VARIANT_UNRESOLVED.
@@ -79,7 +79,7 @@ namespace Engine {
 	// and ApplyOverrides reject a reference to it (InvalidState) instead of storing a value the next update would redirect
 	// to the instance's own member.
 	//
-	// A Map of Variants (Script.Fields) holds independently authored values (§11.2), so its Field override records only the
+	// A Map of Variants (a script slot's Fields) holds independently authored values (§11.2), so its Field override records only the
 	// keys that differ from the prefab, as an RFC 7386 patch (null for a key the instance removed), and applying it changes
 	// only those keys: the prefab's edits to the other keys still reach the instance.
 	//
@@ -135,7 +135,7 @@ namespace Engine {
 		// user children move to the nearest surviving ancestor), and another entity may hold a removed entity's derived ID;
 		// new prefab entities appear; Field, component and EntityKey overrides are applied, each validated against the
 		// registry on its own as ComponentAccess validates a write (relations, uniqueness, field metadata, type-level rules),
-		// with script field overrides resolved against the member's own ScriptComponent and, as in a file read, unresolvable
+		// with script field overrides resolved against the member's own script slot and, as in a file read, unresolvable
 		// Variant values kept; overrides that no longer match a field, component or entity key, or whose value is no longer
 		// valid there, overrides of a removed entity, and RemoveEntity overrides of an entity the prefab no longer has, of
 		// its root or of an entity below another removed one, are dropped with a PREFAB_STALE_OVERRIDE warning appended to

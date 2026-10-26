@@ -9,7 +9,7 @@
 		"Camera": 1,
 		"DirectionalLight": 1,
 		"AudioListener": 1,
-		"Script": 1
+		"Script": 2
 	},
 	"Entities": [
 		{
@@ -84,11 +84,15 @@
 					"Visible": true
 				},
 				"Script": {
-					"Script": "cb4d3fa1e478368d",
-					"Fields": {
-						"Greeting": "From A"
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "cb4d3fa1e478368d",
+							"Fields": {
+								"Greeting": "From A"
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},

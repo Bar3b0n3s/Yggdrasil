@@ -18,6 +18,7 @@
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
 #include "Engine/Session/PlaySession.h"
 #include "Support/AssetTestFixture.h"
@@ -26,8 +27,12 @@
 #include <imgui_internal.h>
 
 #include <cmath>
+#include <filesystem>
+#include <format>
 #include <functional>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace Engine {
 
@@ -213,6 +218,27 @@ namespace Engine {
 		}, Utils::EditorWindowTitle(EditorPanel::Inspector), id);
 	}
 
+	// The item's rectangle once the inspector shows it: a long inspector is scrolled down with the mouse wheel, as a user
+	// would, until the item lies inside the window's visible area.
+	static ImRect InspectorLayerScrolledItem(InspectorLayerHarness& test, ImGuiID id)
+	{
+		const char* title = Utils::EditorWindowTitle(EditorPanel::Inspector);
+		for (int step = 0; step < 40; ++step)
+		{
+			const ImRect item = InspectorLayerItem(test, id);
+			const ImGuiWindow* window = ImGui::FindWindowByName(title);
+			REQUIRE(window != nullptr);
+			if (window->InnerClipRect.Contains(item))
+				return item;
+			const ImVec2 center = window->InnerClipRect.GetCenter();
+			ImGui::GetIO().AddMousePosEvent(center.x, center.y);
+			ImGui::GetIO().AddMouseWheelEvent(0.0f, item.Min.y > center.y ? -1.0f : 1.0f);
+			REQUIRE(test.Frame());
+		}
+		FAIL("the inspector never scrolled the item into view");
+		return {};
+	}
+
 	static ImGuiWindow* InspectorLayerPopup(std::string_view child = {})
 	{
 		for (ImGuiWindow* window : ImGui::GetCurrentContext()->Windows)
@@ -288,6 +314,27 @@ namespace Engine {
 		return false;
 	}
 
+	// A Room prefab nesting a live Lamp instance with a Bulb, instantiated as /Room (Docs/Decisions/0031-m20-contract.md
+	// decision 8).
+	static void InspectorLayerNestedRoom(Test::AutomationFixture& automation)
+	{
+		REQUIRE(automation.Call("entity.create", Json{ { "name", "Room" } }));
+		REQUIRE(automation.Call("entity.create", Json{ { "name", "Lamp" }, { "parent", "/Room" } }));
+		REQUIRE(automation.Call("entity.create", Json{ { "name", "Bulb" }, { "parent", "/Room/Lamp" }, { "components", Json{ { "MeshRenderer", Json{ { "Mesh", "engine://Meshes/Sphere" } } } } } }));
+		REQUIRE(automation.Call("prefab.create", Json{ { "entity", "/Room/Lamp" }, { "path", "Assets/Prefabs/Lamp.prefab" }, { "replaceWithInstance", true } }));
+		REQUIRE(automation.Call("prefab.create", Json{ { "entity", "/Room" }, { "path", "Assets/Prefabs/Room.prefab" }, { "replaceWithInstance", true } }));
+	}
+
+	// Two Behaviour scripts, Assets/Scripts/Aim.luau and Fire.luau, each declaring Amount (Docs/Decisions/0031-m20-contract.md
+	// decision 17).
+	static void InspectorLayerScripts(Test::AutomationFixture& automation)
+	{
+		for (const std::string_view name : { std::string_view("Aim"), std::string_view("Fire") })
+		{
+			REQUIRE(automation.Call("script.write", Json{ { "path", std::format("Assets/Scripts/{}.luau", name) }, { "source", std::format("return Script.Define(\"{}\", {{Fields = {{Amount = Field.Number(1)}}}})", name) } }));
+		}
+	}
+
 	TEST_SUITE("Editor")
 	{
 		TEST_CASE("InspectorPanel: an absent script field displays its default and commits one override at the safe point")
@@ -302,7 +349,7 @@ namespace Engine {
 			REQUIRE(written);
 			const Entity entity = context.Editor.GetScene().CreateEntity("Toggle");
 			const UUID id = entity.GetUUID();
-			const Json component{ { "Script", written->Script.ToString() } };
+			const Json component{ { "Scripts", Json::array({ Json{ { "Script", written->Script.ToString() } } }) } };
 			REQUIRE(ComponentAccess::AddComponent(entity, "Script", &component));
 			REQUIRE(context.Editor.SetSelection({ id }, SceneTarget::Edit));
 			EditorLayer layer(context);
@@ -316,18 +363,18 @@ namespace Engine {
 			};
 			REQUIRE(ui.Frame(draw));
 			REQUIRE(ui.Frame(draw));
-			CHECK(entity.GetComponent<ScriptComponent>().Fields.empty());
+			CHECK(entity.GetComponent<ScriptComponent>().Scripts.front().Fields.empty());
 			const auto history = context.Editor.GetHistory().GetUndoCount();
-			REQUIRE(ui.Click(draw, InspectorPanelTestItem(ui, draw, Utils::EditorWindowTitle(EditorPanel::Inspector), InspectorPanelTestField(context, "Script", "Fields[Enabled]", true))));
-			CHECK(entity.GetComponent<ScriptComponent>().Fields.empty());
+			REQUIRE(ui.Click(draw, InspectorPanelTestItem(ui, draw, Utils::EditorWindowTitle(EditorPanel::Inspector), InspectorPanelTestField(context, "Script", "Scripts[0].Fields[Enabled]", true))));
+			CHECK(entity.GetComponent<ScriptComponent>().Scripts.front().Fields.empty());
 			REQUIRE(context.InspectorEdits.IsEditing());
 			REQUIRE(layer.OnSafePoint(0.0));
-			const auto& fields = context.Editor.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Fields;
+			const auto& fields = context.Editor.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Scripts.front().Fields;
 			REQUIRE(fields.size() == 1);
 			CHECK(fields.find("Enabled")->second.Get() == Json(true));
 			CHECK(context.Editor.GetHistory().GetUndoCount() == history + 1);
 			REQUIRE(fixture.GetAutomation().Call("edit.undo", Json::object()));
-			CHECK(context.Editor.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Fields.empty());
+			CHECK(context.Editor.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Scripts.front().Fields.empty());
 		}
 
 		TEST_CASE("InspectorPanel: a mixed checkbox commits once for all selected entities at the layer safe point")
@@ -883,10 +930,10 @@ namespace Engine {
 			REQUIRE(written);
 			const UUID id = context.Editor.GetScene().CreateEntity("Script object").GetUUID();
 			// Model a legacy scene load: an unrelated unknown override must survive a supported field edit.
-			ScriptComponent legacy;
+			ScriptSlot legacy;
 			legacy.Script = TypedAssetHandle<AssetType::Script>(written->Script);
 			legacy.Fields.emplace("Legacy", VariantValue(Json::array({ 1, 2 })));
-			context.Editor.GetScene().FindEntityByID(id).AddComponent<ScriptComponent>(std::move(legacy));
+			context.Editor.GetScene().FindEntityByID(id).AddComponent<ScriptComponent>(ScriptComponent{ { std::move(legacy) } });
 			REQUIRE(context.Editor.SetSelection({ id }, SceneTarget::Edit));
 			const auto historyBefore = context.Editor.GetHistory().GetUndoCount();
 			REQUIRE(test.Frame());
@@ -895,19 +942,19 @@ namespace Engine {
 			{
 				return test.Draw();
 			};
-			const ImGuiID checkbox = ImHashStr("##Value", 0, InspectorLayerPropertyId(context, "Script", "Fields[Enabled]", true));
+			const ImGuiID checkbox = ImHashStr("##Value", 0, InspectorLayerPropertyId(context, "Script", "Scripts[0].Fields[Enabled]", true));
 			REQUIRE(test.Ui.Click(draw, InspectorLayerItem(test, checkbox).GetCenter()));
-			CHECK(context.Editor.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Fields.size() == 1);
+			CHECK(context.Editor.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Scripts.front().Fields.size() == 1);
 			CHECK(context.Editor.GetHistory().GetUndoCount() == historyBefore);
 			REQUIRE(test.Layer.OnSafePoint(0.0));
-			const auto& fields = context.Editor.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Fields;
+			const auto& fields = context.Editor.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Scripts.front().Fields;
 			REQUIRE(fields.size() == 2);
 			CHECK(fields.find("Enabled")->second.Get() == Json(true));
 			CHECK(fields.find("Legacy")->second.Get() == Json::array({ 1, 2 }));
 			CHECK(context.Editor.GetHistory().GetUndoCount() == historyBefore + 1);
 			REQUIRE(test.Fixture.GetAutomation().Call("edit.undo", Json::object()));
 			CHECK(context.Editor.GetHistory().GetUndoCount() == historyBefore);
-			const auto& restored = context.Editor.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Fields;
+			const auto& restored = context.Editor.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Scripts.front().Fields;
 			REQUIRE(restored.size() == 1);
 			CHECK(restored.find("Enabled") == restored.end());
 			REQUIRE(restored.find("Legacy") != restored.end());
@@ -1021,6 +1068,241 @@ namespace Engine {
 			REQUIRE(restoredOverrides.size() == 1);
 			CHECK(restoredOverrides.front().Field == "Rotation");
 			CHECK(restoredOverrides.front().Value.Get() == overrides.front().Value.Get());
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 8: only the outermost instance records overrides, so a member of a
+		// nested instance is highlighted by its override path on the outermost root, and its Revert removes that override.
+		TEST_CASE("InspectorPanel: a member of a nested instance highlights and reverts the override its outermost instance records")
+		{
+			InspectorLayerHarness test;
+			auto& context = test.Fixture.GetContext();
+			auto& automation = test.Fixture.GetAutomation();
+			InspectorLayerNestedRoom(automation);
+			REQUIRE(automation.Call("entity.update", Json{ { "entity", "/Room/Lamp/Bulb" }, { "components", Json{ { "MeshRenderer", Json{ { "Visible", false } } } } } }));
+			Scene& scene = context.Editor.GetScene();
+			REQUIRE(scene.FindEntityByPath("/Room").GetComponent<PrefabInstanceComponent>().Overrides.size() == 1);
+			CHECK(scene.FindEntityByPath("/Room/Lamp").GetComponent<PrefabInstanceComponent>().Overrides.empty());
+			const UUID bulb = scene.FindEntityByPath("/Room/Lamp/Bulb").GetUUID();
+			REQUIRE(context.Editor.SetSelection({ bulb }, SceneTarget::Edit));
+			REQUIRE(test.Frame());
+			REQUIRE(test.Frame());
+			const auto draw = [&test]()
+			{
+				return test.Draw();
+			};
+			const auto before = context.Editor.GetHistory().GetUndoCount();
+			const ImGuiID revert = ImHashStr("Revert", 0, ImHashStr("Visible", 0, InspectorLayerComponentId("MeshRenderer")));
+			REQUIRE(test.Ui.Click(draw, InspectorLayerItem(test, revert).GetCenter()));
+			REQUIRE(test.Layer.OnSafePoint(0.0));
+			CHECK(scene.FindEntityByID(bulb).GetComponent<MeshRendererComponent>().Visible);
+			CHECK(scene.FindEntityByPath("/Room").GetComponent<PrefabInstanceComponent>().Overrides.empty());
+			CHECK(context.Editor.GetHistory().GetUndoCount() == before + 1);
+			REQUIRE(automation.Call("edit.undo", Json::object()));
+			CHECK_FALSE(scene.FindEntityByID(bulb).GetComponent<MeshRendererComponent>().Visible);
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 9: Apply writes the selected entity's innermost instance at the level
+		// the user picks, offering the levels outermost first with the outermost picked by default.
+		TEST_CASE("InspectorPanel: Apply writes the outermost prefab by default and the level picked from the instance's levels")
+		{
+			InspectorLayerHarness test;
+			auto& context = test.Fixture.GetContext();
+			auto& automation = test.Fixture.GetAutomation();
+			InspectorLayerNestedRoom(automation);
+			REQUIRE(automation.Call("prefab.instantiate", Json{ { "prefab", "Assets/Prefabs/Room.prefab" }, { "name", "Room2" } }));
+			REQUIRE(automation.Call("entity.update", Json{ { "entity", "/Room/Lamp/Bulb" }, { "components", Json{ { "MeshRenderer", Json{ { "CastShadows", false } } } } } }));
+			Scene& scene = context.Editor.GetScene();
+			REQUIRE(context.Editor.SetSelection({ scene.FindEntityByPath("/Room/Lamp/Bulb").GetUUID() }, SceneTarget::Edit));
+			test.CaptureText = true;
+			REQUIRE(test.Frame());
+			REQUIRE(test.Frame());
+			CHECK(test.Text.contains("/Room/Lamp/Bulb: MeshRenderer.CastShadows"));
+			const auto draw = [&test]()
+			{
+				return test.Draw();
+			};
+			const std::filesystem::path root = automation.GetEditorFixture().GetProjectRoot();
+			const auto read = [&root](std::string_view path)
+			{
+				const Result<std::string> text = FileSystem::ReadText(root / path);
+				REQUIRE(text.has_value());
+				return *text;
+			};
+			const std::string lamp = read("Assets/Prefabs/Lamp.prefab");
+			const auto* inspector = ImGui::FindWindowByName(Utils::EditorWindowTitle(EditorPanel::Inspector));
+			REQUIRE(inspector != nullptr);
+			const ImGuiID prefab = ImHashStr("PrefabInstance", 0, inspector->ID);
+			const auto castShadows = [&scene]()
+			{
+				return scene.FindEntityByPath("/Room2/Lamp/Bulb").GetComponent<MeshRendererComponent>().CastShadows;
+			};
+
+			// The default level, the room: Room.prefab receives the bulb's override, Lamp.prefab stays as it was.
+			const auto before = context.Editor.GetHistory().GetUndoCount();
+			REQUIRE(test.Ui.Click(draw, InspectorLayerItem(test, ImHashStr("Apply", 0, prefab)).GetCenter()));
+			REQUIRE(test.Layer.OnSafePoint(0.0));
+			CHECK(context.Editor.GetHistory().GetUndoCount() == before + 1);
+			CHECK_FALSE(castShadows());
+			CHECK(read("Assets/Prefabs/Lamp.prefab") == lamp);
+			REQUIRE(automation.Call("edit.undo", Json::object()));
+			CHECK(castShadows());
+
+			// The lamp, picked second in the list: Lamp.prefab receives it, and the room nesting it follows.
+			REQUIRE(test.Ui.Click(draw, InspectorLayerItem(test, ImHashStr("##ApplyLevel", 0, prefab)).GetCenter()));
+			REQUIRE(test.Frame());
+			ImGuiWindow* levels = InspectorLayerPopup();
+			REQUIRE(levels != nullptr);
+			CHECK(test.Text.contains("Room.prefab (/Room)"));
+			CHECK(test.Text.contains("Lamp.prefab (/Room/Lamp)"));
+			const ImGuiID lampLevel = ImHashStr("Lamp.prefab (/Room/Lamp)", 0, InspectorLayerIntId(levels->ID, 1));
+			REQUIRE(test.Ui.Click(draw, InspectorLayerItem(test.Ui, draw, levels->Name, lampLevel).GetCenter()));
+			REQUIRE(test.Ui.Click(draw, InspectorLayerItem(test, ImHashStr("Apply", 0, prefab)).GetCenter()));
+			REQUIRE(test.Layer.OnSafePoint(0.0));
+			CHECK_FALSE(castShadows());
+			CHECK(read("Assets/Prefabs/Lamp.prefab").contains("\"CastShadows\": false"));
+			CHECK(scene.FindEntityByPath("/Room").GetComponent<PrefabInstanceComponent>().Overrides.empty());
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 7: the override list names a deleted member, which has no entity to
+		// select, and its Revert brings it back.
+		TEST_CASE("InspectorPanel: the override list shows a deleted member and its Revert restores it")
+		{
+			InspectorLayerHarness test;
+			auto& context = test.Fixture.GetContext();
+			auto& automation = test.Fixture.GetAutomation();
+			REQUIRE(automation.Call("entity.create", Json{ { "name", "Lamp" } }));
+			REQUIRE(automation.Call("entity.create", Json{ { "name", "Strap" }, { "parent", "/Lamp" } }));
+			REQUIRE(automation.Call("prefab.create", Json{ { "entity", "/Lamp" }, { "path", "Assets/Prefabs/Lamp.prefab" }, { "replaceWithInstance", true } }));
+			REQUIRE(automation.Call("entity.destroy", Json{ { "entities", Json::array({ "/Lamp/Strap" }) } }));
+			Scene& scene = context.Editor.GetScene();
+			REQUIRE(context.Editor.SetSelection({ scene.FindEntityByPath("/Lamp").GetUUID() }, SceneTarget::Edit));
+			test.CaptureText = true;
+			REQUIRE(test.Frame());
+			REQUIRE(test.Frame());
+			CHECK(test.Text.contains("Overrides (1)"));
+			CHECK(test.Text.contains("Strap: Removed"));
+			const auto draw = [&test]()
+			{
+				return test.Draw();
+			};
+			const auto* inspector = ImGui::FindWindowByName(Utils::EditorWindowTitle(EditorPanel::Inspector));
+			REQUIRE(inspector != nullptr);
+			const ImGuiID list = ImHashStr("Overrides", 0, ImHashStr("PrefabInstance", 0, inspector->ID));
+			const auto before = context.Editor.GetHistory().GetUndoCount();
+			REQUIRE(test.Ui.Click(draw, InspectorLayerItem(test, ImHashStr("Revert", 0, InspectorLayerIntId(list, 0))).GetCenter()));
+			REQUIRE(test.Layer.OnSafePoint(0.0));
+			CHECK(scene.FindEntityByPath("/Lamp/Strap").IsValid());
+			CHECK(scene.FindEntityByPath("/Lamp").GetComponent<PrefabInstanceComponent>().Overrides.empty());
+			CHECK(context.Editor.GetHistory().GetUndoCount() == before + 1);
+			REQUIRE(test.Frame());
+			CHECK(test.Text.contains("No overrides"));
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 17: each slot action submits one edit.batch, applied by index to every
+		// selected entity, so each is one undo step and the slots keep their own fields.
+		TEST_CASE("InspectorPanel: script slots are moved, removed and added for every selected entity in one undo step each")
+		{
+			InspectorLayerHarness test;
+			auto& context = test.Fixture.GetContext();
+			auto& automation = test.Fixture.GetAutomation();
+			InspectorLayerScripts(automation);
+			const Json slots = Json::array({ Json{ { "Script", "Assets/Scripts/Aim.luau" }, { "Fields", Json{ { "Amount", 2 } } } }, Json{ { "Script", "Assets/Scripts/Fire.luau" } } });
+			REQUIRE(automation.Call("entity.create", Json{ { "name", "Turret" }, { "components", Json{ { "Script", Json{ { "Scripts", slots } } } } } }));
+			REQUIRE(automation.Call("entity.create", Json{ { "name", "Tower" }, { "components", Json{ { "Script", Json{ { "Scripts", slots } } } } } }));
+			Scene& scene = context.Editor.GetScene();
+			const UUID turret = scene.FindEntityByPath("/Turret").GetUUID();
+			const UUID tower = scene.FindEntityByPath("/Tower").GetUUID();
+			const auto scripts = [&scene](UUID id)
+			{
+				std::vector<AssetHandle> handles;
+				for (const ScriptSlot& slot : scene.FindEntityByID(id).GetComponent<ScriptComponent>().Scripts)
+					handles.push_back(slot.Script.GetHandle());
+				return handles;
+			};
+			const AssetHandle aim = scripts(turret)[0];
+			const AssetHandle fire = scripts(turret)[1];
+			REQUIRE(context.Editor.SetSelection({ turret, tower }, SceneTarget::Edit));
+			REQUIRE(test.Frame());
+			REQUIRE(test.Frame());
+			const auto draw = [&test]()
+			{
+				return test.Draw();
+			};
+			const ImGuiID slotScope = ImHashStr("ScriptSlot", 0, InspectorLayerComponentId("Script"));
+			const auto slotButton = [slotScope](int slot, const char* name)
+			{
+				return ImHashStr(name, 0, InspectorLayerIntId(slotScope, slot));
+			};
+			const auto press = [&test, &draw](ImGuiID id)
+			{
+				REQUIRE(test.Ui.Click(draw, InspectorLayerScrolledItem(test, id).GetCenter()));
+				REQUIRE(test.Layer.OnSafePoint(0.0));
+				REQUIRE(test.Frame());
+			};
+			const auto before = context.Editor.GetHistory().GetUndoCount();
+
+			press(slotButton(0, "Down"));
+			CHECK(scripts(turret) == std::vector<AssetHandle>{ fire, aim });
+			CHECK(scripts(tower) == std::vector<AssetHandle>{ fire, aim });
+			CHECK(scene.FindEntityByID(turret).GetComponent<ScriptComponent>().Scripts[1].Fields.at("Amount").Get() == Json(2));
+			CHECK(context.Editor.GetHistory().GetUndoCount() == before + 1);
+			press(slotButton(1, "Up"));
+			CHECK(scripts(turret) == std::vector<AssetHandle>{ aim, fire });
+			press(slotButton(0, "Remove"));
+			CHECK(scripts(turret) == std::vector<AssetHandle>{ fire });
+			CHECK(scripts(tower) == std::vector<AssetHandle>{ fire });
+			press(ImHashStr("Add script", 0, slotScope));
+			CHECK(scripts(turret) == std::vector<AssetHandle>{ fire, AssetHandle() });
+			CHECK(scripts(tower) == std::vector<AssetHandle>{ fire, AssetHandle() });
+			CHECK(context.Editor.GetHistory().GetUndoCount() == before + 4);
+			REQUIRE(automation.Call("edit.undo", Json{ { "steps", 4 } }));
+			CHECK(scripts(turret) == std::vector<AssetHandle>{ aim, fire });
+			CHECK(scripts(tower) == std::vector<AssetHandle>{ aim, fire });
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 19: an override of one slot shows beside that slot's member and in
+		// the instance's override list, named by its slot and script, and its Revert removes it alone.
+		TEST_CASE("InspectorPanel: a script slot's prefab override shows beside its slot and reverts alone")
+		{
+			InspectorLayerHarness test;
+			auto& context = test.Fixture.GetContext();
+			auto& automation = test.Fixture.GetAutomation();
+			InspectorLayerScripts(automation);
+			Json slots = Json::array({ Json{ { "Script", "Assets/Scripts/Aim.luau" } }, Json{ { "Script", "Assets/Scripts/Fire.luau" } } });
+			REQUIRE(automation.Call("entity.create", Json{ { "name", "Turret" }, { "components", Json{ { "Script", Json{ { "Scripts", slots } } } } } }));
+			REQUIRE(automation.Call("prefab.create", Json{ { "entity", "/Turret" }, { "path", "Assets/Prefabs/Turret.prefab" }, { "replaceWithInstance", true } }));
+			slots[0]["ExecutionOrder"] = 3;
+			slots[1]["Fields"] = Json{ { "Amount", 4 } };
+			REQUIRE(automation.Call("entity.update", Json{ { "entity", "/Turret" }, { "components", Json{ { "Script", Json{ { "Scripts", slots } } } } } }));
+			Scene& scene = context.Editor.GetScene();
+			const UUID turret = scene.FindEntityByPath("/Turret").GetUUID();
+			const auto overrideFields = [&scene, turret]()
+			{
+				std::vector<std::string> fields;
+				for (const PrefabOverride& item : scene.FindEntityByID(turret).GetComponent<PrefabInstanceComponent>().Overrides)
+					fields.push_back(item.Field);
+				return fields;
+			};
+			REQUIRE(overrideFields() == std::vector<std::string>{ "Scripts/0/ExecutionOrder", "Scripts/1/Fields" });
+			REQUIRE(context.Editor.SetSelection({ turret }, SceneTarget::Edit));
+			test.CaptureText = true;
+			REQUIRE(test.Frame());
+			REQUIRE(test.Frame());
+			CHECK(test.Text.contains("slot 1 (Fire.luau)"));
+			CHECK(test.Text.contains("Prefab override"));
+			const auto draw = [&test]()
+			{
+				return test.Draw();
+			};
+			const auto before = context.Editor.GetHistory().GetUndoCount();
+			const ImGuiID revert = ImHashStr("Revert", 0, ImHashStr("Scripts/1/Fields", 0, InspectorLayerComponentId("Script")));
+			REQUIRE(test.Ui.Click(draw, InspectorLayerScrolledItem(test, revert).GetCenter()));
+			REQUIRE(test.Layer.OnSafePoint(0.0));
+			CHECK(overrideFields() == std::vector<std::string>{ "Scripts/0/ExecutionOrder" });
+			const auto& reverted = scene.FindEntityByID(turret).GetComponent<ScriptComponent>().Scripts;
+			CHECK(reverted[1].Fields.empty());
+			CHECK(reverted[0].ExecutionOrder == 3);
+			CHECK(context.Editor.GetHistory().GetUndoCount() == before + 1);
 		}
 
 		TEST_CASE("InspectorPanel: a text entry released by activating another field commits before that field's gesture")

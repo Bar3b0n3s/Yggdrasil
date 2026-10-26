@@ -50,7 +50,7 @@ namespace Engine {
 	};
 
 	// One behaviour instance. M20 (S-MULTI; Docs/Decisions/0031-m20-contract.md decision 17): an instance is identified by
-	// (Entity, Slot), Slot being the index of its script in the entity's Script list; 0 until stream M-A lands the list.
+	// (Entity, Slot), Slot being the index of its script in the entity's Script list.
 	struct ScriptInstanceInfo
 	{
 		UUID Entity{};
@@ -81,6 +81,12 @@ namespace Engine {
 	// Script component (its list) keeps an instance whose slot index still holds the same script asset and destroys and
 	// creates the others, as removing and adding the component would. Evaluate and ExecuteBytecode address an entity's
 	// first slot, or the slot whose behaviour is named by the caller (script.eval's `script`).
+	//
+	// Bubbling is defined per behaviour (decision 18), for the bubbling callbacks later milestones add (M22's UI events; no
+	// callback bubbles before them): a bubbling event visits its target entity, then each ancestor; at each entity every
+	// behaviour that defines the callback receives it, in slot order; propagation to the next ancestor stops after an
+	// entity where any behaviour's callback returned true, and that entity's other behaviours still receive it.
+	// Non-bubbling callbacks ignore return values, so no slot can keep another from receiving one.
 	class ScriptEngine final : public IPhysicsEventListener
 	{
 	public:
@@ -134,12 +140,15 @@ namespace Engine {
 		// Idempotent. OnDestroy for all remaining instances and cancellation while host/scene/services still exist.
 		void Stop();
 
-		// A failed evaluation is published to the error stream and log, but it is not a callback of the entity's instance:
-		// the behaviour stays enabled, keeps its tasks and is not paused on (§11.7). Spawned tasks belong to the entity.
+		// `self` is the instance of the entity's slot whose behaviour's Script.Define name is `behaviour` (the first such
+		// slot), or of its first slot when `behaviour` is empty; NotFound, before anything runs, when no slot of the entity
+		// has that behaviour (its hint lists the entity's behaviours). A failed evaluation is published to the error stream
+		// and log, but it is not a callback of that instance: the behaviour stays enabled, keeps its tasks and is not
+		// paused on (§11.7). Spawned tasks belong to that instance.
 		[[nodiscard]] Result<ScriptEvaluation> Evaluate(std::string_view source, const VfsPath& path,
-			std::optional<UUID> entity = std::nullopt);
-		// Trusted engine-produced replay predicates, including Dist. Never compiles source or creates a second VM.
-		// Failures follow Evaluate's reporting policy.
+			std::optional<UUID> entity = std::nullopt, std::string_view behaviour = {});
+		// Trusted engine-produced replay predicates, including Dist. Never compiles source or creates a second VM. `self` is
+		// the instance of the entity's first slot. Failures follow Evaluate's reporting policy.
 		[[nodiscard]] Result<ScriptEvaluation> ExecuteBytecode(const ScriptData& script,
 			std::optional<UUID> entity = std::nullopt);
 		// EditorOnly: resolve the complete dependency closure, execute candidates in isolation, then atomically patch

@@ -29,7 +29,11 @@ namespace Engine {
 
 		// Upgrades `document` in place to CurrentVersion: the file-level steps from its "Version", then each known
 		// component whose "ComponentVersions" entry is older than its registered version (unknown components are left
-		// untouched for the serializer to preserve). Sets "Version" and the migrated "ComponentVersions" entries, and
+		// untouched for the serializer to preserve), then what those component migrations change elsewhere in the
+		// document: the prefab overrides that target a Script component migrated from version 1 follow it, whatever the
+		// Prefab component's version (Docs/Decisions/0031-m20-contract.md decision 17: a Field override of Script, Fields
+		// or ExecutionOrder names slot 0's member, an AddComponent override's value migrates as the component does). Sets
+		// "Version" and the migrated "ComponentVersions" entries, and
 		// report.FileVersion and report.Migrated. Errors: UnsupportedVersion naming both versions when the document, or a
 		// component's entry, is newer than this build supports; Validation (located) when "Version" is missing, below
 		// MinimumVersion or not an integer, or when the document does not have the shape of its version. Atomic: on error

@@ -40,7 +40,8 @@
 //      missing one). Where absence means "leave unchanged" (entity.update's name, active, tags) the handler asks
 //      MethodContext::HasParam.
 //   4. Reserved members. "dryRun", "ifRevision" and "_meta" are never declared: PrepareParams moves them into
-//      RequestOptions and RequestInfo (MethodContext.h).
+//      RequestOptions and RequestInfo (MethodContext.h). From M20 "scene", the scene target, is reserved too for the methods
+//      with MethodSpecification::SupportsSceneTarget, whose params structs never declare it.
 //   5. Strictness. Unknown members are InvalidParams with "did you mean" hints (§13.3 example: "/components/RigidBody/Mas:
 //      unknown field 'Mas' on 'RigidBody'"); floats are finite and within their FieldMeta range.
 //   6. Enums. Registered enums, parsed case-insensitively anywhere in the params (embedded component data included) and
@@ -206,8 +207,9 @@ namespace Engine {
 		// (EditorMethodContext), or a base of it that several hosts share (MethodContext::IsHostType). Params and Result are
 		// registered structs (asserted, naming the method). The registration is a programmer error and asserted when the
 		// name is malformed or taken, the description is empty, a required param is not a field of Params, the flags
-		// contradict each other (TestHook with ExposeAsTool, AllowedInBatch on a pending method, SupportsDryRun on a pending
-		// method), or the registry is frozen.
+		// contradict each other (TestHook with ExposeAsTool, AllowedInBatch, SupportsDryRun or SupportsSceneTarget on a
+		// pending method, RequiresSceneTarget without SupportsSceneTarget), Params declares "scene" for a method with
+		// SupportsSceneTarget, or the registry is frozen.
 		//     methods.Add<EditorMethodContext, EntityCreateParams, EntityCreateResult>({ .Name = "entity.create", ... },
 		//         &Automation::EntityCreate);
 		template<typename Host, typename Params, typename ResultType>
@@ -263,9 +265,12 @@ namespace Engine {
 
 		// Prepares `params` (null reads as {}) for `method`, in this order: params must be an object; the reserved members
 		// are taken out (dryRun must be a boolean and requires SupportsDryRun, ifRevision a non-negative integer, accepted by
-		// every method); every RequiredParams member must be present; every enum spelling recognized by the params struct's schema
+		// every method; for a method with SupportsSceneTarget, "scene" a non-empty string (RequestOptions::Scene's Path) or an
+		// integer from 1 to 2^32 - 1 (its Id), and required with RequiresSceneTarget; any other method keeps "scene" in its
+		// params); every RequiredParams member must be present; every enum spelling recognized by the params struct's schema
 		// (resolved Variant values included) is rewritten to its canonical name. Errors: InvalidArgument (InvalidParams) with
-		// one issue per problem, located at its pointer; Unsupported (dryRun on a method without SupportsDryRun). Pure.
+		// one issue per problem, located at its pointer ("/scene" for a malformed or missing scene target); Unsupported
+		// (dryRun on a method without SupportsDryRun). Pure.
 		[[nodiscard]] Result<PreparedParams> PrepareParams(const MethodDescriptor& method, const Json& params) const;
 
 		// Runs `context`'s method: checks context.IsHostType(the handler's Host key) (asserted: a host registers only handlers
@@ -284,18 +289,19 @@ namespace Engine {
 
 		// One op of edit.batch (§13.4). Before anything runs it checks, in order: `method` exists (NotFound with
 		// suggestions); it is AllowedInBatch (InvalidArgument "<method> cannot be an op of edit.batch", which also covers
-		// edit.batch itself and every pending method); `params` holds none of the reserved members dryRun, ifRevision and
-		// _meta (InvalidArgument with one issue per member, located at "/params/<member>" relative to the op, which
+		// edit.batch itself and every pending method); `params` holds none of the reserved members dryRun, ifRevision, _meta
+		// and scene (InvalidArgument with one issue per member, located at "/params/<member>" relative to the op, which
 		// edit.batch prefixes with "/ops/<k>"); in a dry-run batch, the method has SupportsDryRun (Unsupported; edit.batch
 		// checks every op this way before running the first). It then prepares `params` like PrepareParams, creates the
 		// nested context with parent.CreateNested from a request that carries the parent's RequestOptions (so the batch's
-		// dryRun and the attribution apply to every op, and IsDryRun agrees with the host's sandbox), invokes it and returns
-		// the op's result JSON. Errors: those above; the op's own error otherwise.
+		// dryRun, scene target and attribution apply to every op, and IsDryRun agrees with the host's sandbox), invokes it and
+		// returns the op's result JSON. Errors: those above; the op's own error otherwise.
 		[[nodiscard]] Result<Json> InvokeNested(MethodContext& parent, std::string_view method, const Json& params) const;
 
 		// The JSON Schema (2020-12) of `method`'s params: the params struct's object schema with "required" set from
-		// RequiredParams, the reserved members dryRun (SupportsDryRun only) and ifRevision (every method but the session.hello
-		// handshake) added, and, in Full
+		// RequiredParams, the reserved members dryRun (SupportsDryRun only), ifRevision (every method but the session.hello
+		// handshake) and scene (SupportsSceneTarget only, a string or an integer, listed in "required" with
+		// RequiresSceneTarget) added, and, in Full
 		// style, "$defs" for every referenced struct and component. Compact style replaces component maps and Variant members
 		// with {"type": "object"} or {} plus a description pointing at component_schema, and drops "$defs" (§13.8).
 		[[nodiscard]] Json GetParamsSchema(const MethodDescriptor& method, SchemaStyle style) const;

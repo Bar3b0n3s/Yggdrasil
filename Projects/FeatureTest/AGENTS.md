@@ -24,7 +24,9 @@ serves its skills and generated reference through automation (`docs.get {}` list
   `Scaffold/Scaffolds.json` lists them in run order, each with its id seed (`Editor --id-seed`) and renderer:
   `Settings.jsonl` writes the project settings, the stream scaffolds write the scenes, scripts, suites and test assets
   under `Assets/Scenes/`, `Assets/Scripts/`, `Assets/Prefabs/`, `Assets/Formats/` and `Assets/Tests/<Area>/`,
-  `Suites.jsonl` writes `Testing.Suites` and `Testing.Replays`, and `Replays.jsonl` records `Assets/Tests/Replays/` last.
+  `Suites.jsonl` writes `Testing.Suites` and `Testing.Replays`, and `Replays.jsonl` records `Input.replay` and
+  `Determinism.replay` last (`PhysicsSemantics.jsonl` and `MultiScript.jsonl` record their scenes' replays in
+  `Assets/Tests/Replays/` themselves).
   `python Scripts/Scaffold.py`, run from the engine repository's root with every editor on the project closed, restores
   `Scaffold/Baseline/` and runs them all; `python Scripts/Scaffold.py --check` proves that they reproduce the project byte
   for byte. To change the content, change a scaffold and regenerate; a changed setting, scene or id re-records the replays.

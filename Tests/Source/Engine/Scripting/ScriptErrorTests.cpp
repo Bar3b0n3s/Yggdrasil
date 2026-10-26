@@ -7,10 +7,13 @@
 #include <doctest/doctest.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
 #include <format>
+#include <iterator>
 #include <limits>
 #include <string>
+#include <vector>
 
 namespace Engine {
 
@@ -50,6 +53,7 @@ namespace Engine {
 				.Callback = "OnFixedUpdate",
 				.Entity = UUID(0x8f3a2c1d9e4b7a60),
 				.EntityName = "Game",
+				.Slot = 2,
 				.Tick = 412,
 				.Count = 2,
 				.Traceback = { { "Assets/Scripts/Board.luau", 88, "LockPiece" } },
@@ -64,6 +68,7 @@ namespace Engine {
 				{ "message", "bad field" },
 				{ "callback", "OnFixedUpdate" },
 				{ "entity", { { "id", "8f3a2c1d9e4b7a60" }, { "name", "Game" } } },
+				{ "slot", 2 },
 				{ "tick", 412 },
 				{ "count", 2 },
 				{ "traceback", Json::array({ { { "script", "Assets/Scripts/Board.luau" }, { "line", 88 }, { "function", "LockPiece" } } }) },
@@ -77,6 +82,24 @@ namespace Engine {
 			const std::array<std::string_view, 5> names = { "compile", "type", "runtime", "timeout", "memory" };
 			for (size_t index = 0; index < kinds.size(); ++index)
 				CHECK(ScriptErrorKindToString(kinds[index]) == names[index]);
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 17: "slot" follows "entity" for an error raised by an entity's
+		// behaviour, and an error outside an entity has none.
+		TEST_CASE("ScriptError: JSON names the slot only for an error with an entity")
+		{
+			const ScriptError owned{ .Message = "owned", .Entity = UUID(0x41), .EntityName = "Turret", .Slot = 1 };
+			const Json withEntity = ScriptErrorToJson(owned);
+			REQUIRE(withEntity.contains("slot"));
+			CHECK(withEntity["slot"] == 1);
+			std::vector<std::string> keys;
+			for (const auto& [key, value] : withEntity.items())
+				keys.push_back(key);
+			const auto entity = std::ranges::find(keys, "entity");
+			REQUIRE(entity != keys.end());
+			CHECK(*std::next(entity) == "slot");
+			const ScriptError suite{ .Message = "suite body", .Slot = 1 };
+			CHECK_FALSE(ScriptErrorToJson(suite).contains("slot"));
 		}
 
 		TEST_CASE("ScriptError: separate embedded replay expectations retain distinct cursors and authored locations")

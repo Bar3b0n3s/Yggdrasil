@@ -87,16 +87,21 @@ namespace Engine {
 	//
 	// Open scenes (M20, E-SCENES; Docs/Decisions/0031-m20-contract.md decision 15; stream S-A). Autosave is isolated per open
 	// scene: every member above that names "the scene" applies to each open scene on its own. Publish keeps one immutable
-	// snapshot slot per open scene (at most MaxOpenScenes, so the fatal path's slots stay fixed and bounded), each keyed by
-	// its scene document (path plus EditorContext's document epoch for that scene); a clean scene withdraws only its own.
-	// One generation holds one scene, as before M20: Save, and WriteFatalSnapshot from every published slot, write one
-	// generation per dirty open scene, in tab order, and publish the manifest once, last; retention keeps
-	// RetainedGenerations per scene. AutosaveWriteResult::Files lists every scene written, in tab order, and Generation is
-	// the last generation written. FindRecovery keeps offering the newest recoverable generation (the last of
-	// FindRecoveries, which offers one per scene); Recover installs its scene as the open scene of that source (replacing it
-	// when it is open, else as an additional open scene, EditorContext::AddScene), dirty with an empty history;
-	// DiscardSavedRecovery after an explicit save discards only the saved scene's generations. The generation and manifest
-	// formats are unchanged.
+	// snapshot per dirty open scene (at most MaxOpenScenes), each keyed by its scene document (its OpenSceneId, which a
+	// replacement or a recovery renews, plus its path), and publishes them together, in tab order, in one of the fixed
+	// publication slots, so the fatal path's slots stay fixed and bounded; a clean scene withdraws only its own, and a scene
+	// whose publication fails (a Conflict) keeps its failure while the others publish. One generation holds one scene, as
+	// before M20: Save, and WriteFatalSnapshot from the claimed publication, write one generation per published dirty open
+	// scene, in tab order, and publish the manifest once, last; a scene that cannot be written (its source changed) is left
+	// out with its failure, which Save returns (and WriteFatalSnapshot reports as IoFailure) after the others were
+	// published. Save, and Update when it is time, also write the other scenes when one scene's publication failed, and
+	// then return that failure. Retention keeps RetainedGenerations per scene, for the MaxOpenScenes scenes with the newest
+	// generations. AutosaveWriteResult::Files lists every scene written, in tab order, and Generation is the last generation
+	// written. FindRecovery keeps offering the newest recoverable generation (the last of FindRecoveries, which offers one
+	// per scene); Recover installs its scene as the open scene of that source (replacing it when it is open, by its path or
+	// its untitled document, and making it active, else as an additional open scene, EditorContext::AddScene), dirty with
+	// an empty history; DiscardSavedRecovery after an explicit save discards only the saved (addressed) scene's generations.
+	// The generation and manifest formats are unchanged.
 	class Autosave
 	{
 	public:
@@ -116,7 +121,7 @@ namespace Engine {
 		// flags plus the project and source files' size and opaque write time key the last outcome (success or Conflict),
 		// which is returned again without canonicalizing paths, serializing or reading file bytes. A file whose size and
 		// write time are unchanged since its last read keeps its hash; each generation write verifies the bytes once.
-		// The document is EditorContext::GetSceneDocumentEpoch plus the scene path: settings changes keep its baseline. A
+		// The document is the open scene's OpenSceneId plus its path: settings changes keep its baseline. A
 		// new document's baseline is the source as it is now, unless the scene already changed on disk (dirty: Conflict).
 		// The project's captured fingerprint follows any .eproj whose bytes equal the canonical serialization of the loaded
 		// settings (the editor's own writes); other changes are Conflict until the project is reopened.
@@ -149,12 +154,17 @@ namespace Engine {
 		// M20 (decision 15): FindRecovery's offer for every scene with a recoverable generation, one per scene source (its
 		// canonical path, or the untitled token), each the newest of its scene, ordered by the persisted manifest sequence of
 		// that newest generation (oldest first, so the scenes of one save come back in the tab order they were written in).
-		// Empty when nothing is recoverable. Errors: those of FindRecovery.
+		// Empty when nothing is recoverable. Errors: those of FindRecovery, for any generation it reads: newest first, the
+		// metadata of every generation and the whole of each one whose scene has no offer yet, so an unreadable generation
+		// fails the inspection as it fails FindRecovery when that one reaches it. A stale generation (Conflict: the project
+		// or its source changed after it was captured, as for a scene closed with its changes discarded) is the exception:
+		// its scene has no offer, older generations of that scene included, a warning names it, and the other scenes are
+		// still offered; the conflict is returned only when no scene has an offer.
 		[[nodiscard]] Result<std::vector<AutosaveRecoveryInfo>> FindRecoveries() const;
 		// Validate all bytes into temporary CPU objects first, then install the recovered scene once, dirty, empty history.
 		// Never overwrite source Assets files. A failure leaves current scene/project data untouched. Requires the held
-		// writer lock: PermissionDenied read-only; InvalidState while a test run owns the editor; NotFound stale
-		// generation; Conflict source changed since offer.
+		// writer lock: PermissionDenied read-only; InvalidState while a test run owns the editor, or when MaxOpenScenes
+		// scenes are open and none is the recovery's source; NotFound stale generation; Conflict source changed since offer.
 		[[nodiscard]] Status Recover(const AutosaveRecoveryInfo& recovery);
 		// Main-thread launcher operation. Takes the already-locked project and preflights the recovery into temporary
 		// CPU objects, including its original source fingerprint/untitled token, before opening any editor mounts.

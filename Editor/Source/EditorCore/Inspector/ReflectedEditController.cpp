@@ -60,6 +60,7 @@ namespace Engine {
 			AssetMetadata Metadata{};
 			Ref<const ScriptFieldSchemaSource> Schemas{};
 			AssetHandle Script{};
+			size_t ScriptSlot = 0; // the edited slot of a Script component's list (Docs/Decisions/0031-m20-contract.md decision 17)
 			uint64_t ScriptVersion = 0;
 			Json StoredFields{};
 			Json EffectiveFields{};
@@ -176,6 +177,21 @@ namespace Engine {
 			return MakeError(ErrorCode::NotFound, "field '{}' has no child '{}'", field.GetName(), key);
 		}
 
+		// The slot whose script field values the Script component path `fieldPath` edits ("Scripts[<slot>].Fields" or below);
+		// nullopt for any other path.
+		static std::optional<size_t> FindInspectorScriptSlot(std::string_view fieldPath)
+		{
+			const Result<std::vector<std::string>> parts = SplitInspectorPath(fieldPath);
+			if (!parts || parts->size() < 3 || (*parts)[0] != "Scripts" || (*parts)[2] != "Fields")
+				return std::nullopt;
+			const std::string& index = (*parts)[1];
+			size_t slot = 0;
+			const auto parsed = std::from_chars(index.data(), index.data() + index.size(), slot);
+			if (parsed.ec != std::errc{} || parsed.ptr != index.data() + index.size())
+				return std::nullopt;
+			return slot;
+		}
+
 		static Result<Scene*> InspectorScene(EditorContext& editor, SceneTarget target)
 		{
 			if (target == SceneTarget::Edit && editor.HasScene())
@@ -202,9 +218,14 @@ namespace Engine {
 					return MakeError(ErrorCode::Unsupported, "component is maintained by the engine");
 				result.Type = component;
 				ENGINE_TRY_ASSIGN(result.Object, ComponentAccess::GetComponentJson(entity, target.Component));
-				if (target.Component == "Script" && (target.FieldPath == "Fields" || target.FieldPath.starts_with("Fields[") || target.FieldPath.starts_with("Fields.")))
+				const std::optional<size_t> scriptSlot = target.Component == "Script" ? FindInspectorScriptSlot(target.FieldPath) : std::nullopt;
+				if (scriptSlot.has_value())
 				{
-					result.Script = entity.GetComponent<ScriptComponent>().Script.GetHandle();
+					const std::vector<ScriptSlot>& slots = entity.GetComponent<ScriptComponent>().Scripts;
+					if (*scriptSlot >= slots.size())
+						return MakeError(ErrorCode::NotFound, "the Script component has no slot {}", *scriptSlot);
+					result.ScriptSlot = *scriptSlot;
+					result.Script = slots[*scriptSlot].Script.GetHandle();
 					EditorScriptService* service = editor.GetScriptService();
 					if (service == nullptr)
 						return MakeError(ErrorCode::InvalidState, "script schemas are unavailable");
@@ -213,18 +234,19 @@ namespace Engine {
 						return MakeError(ErrorCode::Validation, "SCRIPT_NOT_A_BEHAVIOUR: only Behaviour scripts expose component fields");
 					result.ScriptVersion = editor.GetAssets().GetVersion(result.Script);
 					ENGINE_TRY_ASSIGN(result.Schemas, ScriptFieldSchemaSource::Create({ { result.Script, script } }));
-					result.StoredFields = result.Object["Fields"];
+					Json& fields = result.Object["Scripts"][*scriptSlot]["Fields"];
+					result.StoredFields = fields;
 					for (const auto& declaration : script->Fields)
 					{
 						ENGINE_TRY_ASSIGN(const FieldInfo* descriptor, result.Schemas->FindField(result.Script, declaration.Name));
-						auto stored = result.Object["Fields"].find(declaration.Name);
+						auto stored = fields.find(declaration.Name);
 						ValidationContext validation;
-						if (stored != result.Object["Fields"].end())
+						if (stored != fields.end())
 							descriptor->ValidateJson(JsonReader(*stored), {}, validation);
-						if (stored == result.Object["Fields"].end() || validation.HasErrors())
-							result.Object["Fields"][declaration.Name] = declaration.DefaultValue.Get();
+						if (stored == fields.end() || validation.HasErrors())
+							fields[declaration.Name] = declaration.DefaultValue.Get();
 					}
-					result.EffectiveFields = result.Object["Fields"];
+					result.EffectiveFields = fields;
 				}
 				for (const auto& field : component->GetFields())
 				{
@@ -281,13 +303,22 @@ namespace Engine {
 			return result;
 		}
 
-		// Only the edited effective values become overrides. In particular, displaying defaults must never persist them,
-		// and editing one field must preserve unrelated unknown or malformed authored values verbatim.
-		static Json StoredInspectorField(const InspectorValueSnapshot& snapshot, std::string_view field)
+		// The member `member` of slot `slot` of the Script component object `component`; null when it has none.
+		static const Json& FindScriptSlotMember(const Json& component, size_t slot, std::string_view member)
 		{
-			const Json& proposed = snapshot.Object.find(std::string(field)).value();
-			if (field != "Fields" || snapshot.Schemas == nullptr)
-				return proposed;
+			static const Json Null; // immutable after its thread-safe initialization
+			const auto slots = component.is_object() ? component.find("Scripts") : component.end();
+			if (!component.is_object() || slots == component.end() || !slots->is_array() || slot >= slots->size() || !(*slots)[slot].is_object())
+				return Null;
+			const Json& entry = (*slots)[slot];
+			const auto found = entry.find(member);
+			return found != entry.end() ? *found : Null;
+		}
+
+		// The edited script slot's Fields as they are stored (StoredInspectorField).
+		static Json StoredInspectorScriptFields(const InspectorValueSnapshot& snapshot)
+		{
+			const Json& proposed = FindScriptSlotMember(snapshot.Object, snapshot.ScriptSlot, "Fields");
 			Json stored = snapshot.StoredFields;
 			for (auto entry = proposed.begin(); entry != proposed.end(); ++entry)
 			{
@@ -305,33 +336,63 @@ namespace Engine {
 			return stored;
 		}
 
-		static bool InspectorSnapshotChanged(const InspectorValueSnapshot& before, const InspectorValueSnapshot& after)
+		// Only the edited effective values become overrides. In particular, displaying defaults must never persist them,
+		// and editing one field must preserve unrelated unknown or malformed authored values verbatim. A script slot's
+		// Fields are stored inside the Script component's list of slots.
+		static Json StoredInspectorField(const InspectorValueSnapshot& snapshot, std::string_view field)
 		{
-			return before.Object != after.Object || (after.Schemas != nullptr && StoredInspectorField(after, "Fields") != before.StoredFields);
+			const Json& proposed = snapshot.Object.find(std::string(field)).value();
+			if (field != "Scripts" || snapshot.Schemas == nullptr)
+				return proposed;
+			Json stored = proposed;
+			if (stored.is_array() && snapshot.ScriptSlot < stored.size() && stored[snapshot.ScriptSlot].is_object())
+				stored[snapshot.ScriptSlot]["Fields"] = StoredInspectorScriptFields(snapshot);
+			return stored;
 		}
 
-		// Existing invalid and unknown overrides survive an unrelated edit. Only identical stored entries receive the
-		// free-form descriptor; every new or changed entry still resolves against the pinned authored schema.
+		static bool InspectorSnapshotChanged(const InspectorValueSnapshot& before, const InspectorValueSnapshot& after)
+		{
+			return before.Object != after.Object || (after.Schemas != nullptr && StoredInspectorScriptFields(after) != before.StoredFields);
+		}
+
+		// The element type of a script slot's Fields map (a Variant), whose free-form descriptor keeps unchanged values.
+		static const TypeInfo* FindScriptFieldsElementType(const InspectorValueSnapshot& snapshot)
+		{
+			const StructInfo* slot = snapshot.Type->GetRegistry().FindStruct<ScriptSlot>();
+			const FieldInfo* fields = slot != nullptr ? slot->FindField("Fields") : nullptr;
+			return fields != nullptr ? fields->GetType().GetElement() : nullptr;
+		}
+
+		// Existing invalid and unknown overrides survive an unrelated edit. An edit of a Script component changes at most
+		// one slot's field (Docs/Decisions/0031-m20-contract.md decision 17), so only the edited slot's new or changed
+		// entries (`fields`, as they would be stored) resolve against the pinned authored schema of its script; every other
+		// entry, the other slots' included, keeps what it holds through the free-form descriptor. A schema source cannot
+		// tell slots apart, so another slot holding the edited slot's script resolves an entry of a changed name against
+		// the authored schema too. Without a pinned schema (an edit of a slot's Script or ExecutionOrder) every entry keeps
+		// what it holds.
 		class InspectorPreservedSchemas final : public IFieldSchemaSource
 		{
 		public:
 			InspectorPreservedSchemas(const InspectorValueSnapshot& snapshot, const Json& fields)
-				: m_Snapshot(snapshot), m_Fields(fields), m_Preserved({ .Name = "Fields", .Description = "Unchanged stored script override.", .Type = snapshot.Type->FindField("Fields")->GetType().GetElement(), .Meta = {}, .Accessor = {}, .Getter = nullptr, .Setter = nullptr, .Resolver = nullptr })
+				: m_Snapshot(snapshot), m_Fields(fields), m_Preserved({ .Name = "Fields", .Description = "Unchanged stored script override.", .Type = FindScriptFieldsElementType(snapshot), .Meta = {}, .Accessor = {}, .Getter = nullptr, .Setter = nullptr, .Resolver = nullptr })
 			{
 			}
 
 			Result<const FieldInfo*> FindField(UUID owner, std::string_view name) const override
 			{
-				const auto previous = m_Snapshot.StoredFields.find(name);
-				const auto proposed = m_Fields.find(name);
-				if (owner == m_Snapshot.Script && previous != m_Snapshot.StoredFields.end() && proposed != m_Fields.end() && *previous == *proposed)
-					return &m_Preserved;
-				return m_Snapshot.Schemas->FindField(owner, name);
+				if (m_Snapshot.Schemas != nullptr && owner == m_Snapshot.Script)
+				{
+					const auto previous = m_Snapshot.StoredFields.find(name);
+					const auto proposed = m_Fields.find(name);
+					if (previous == m_Snapshot.StoredFields.end() || proposed == m_Fields.end() || *previous != *proposed)
+						return m_Snapshot.Schemas->FindField(owner, name);
+				}
+				return &m_Preserved;
 			}
 
 			std::vector<std::string> GetFieldNames(UUID owner) const override
 			{
-				return m_Snapshot.Schemas->GetFieldNames(owner);
+				return m_Snapshot.Schemas != nullptr ? m_Snapshot.Schemas->GetFieldNames(owner) : std::vector<std::string>{};
 			}
 		private:
 			const InspectorValueSnapshot& m_Snapshot; // Borrowed for one synchronous component write.
@@ -344,9 +405,10 @@ namespace Engine {
 		{
 			const Json stored = StoredInspectorField(snapshot, field.GetName());
 			ENGINE_TRY_ASSIGN(Value value, ValueFromJson(JsonReader(stored), field.GetType()));
-			if (snapshot.Schemas != nullptr && field.GetName() == "Fields")
+			if (component == "Script" && field.GetName() == "Scripts")
 			{
-				const InspectorPreservedSchemas schemas(snapshot, stored);
+				const Json fields = snapshot.Schemas != nullptr ? StoredInspectorScriptFields(snapshot) : Json::object();
+				const InspectorPreservedSchemas schemas(snapshot, fields);
 				return ComponentAccess::SetFieldValue(entity, component, field.GetName(), value, &schemas);
 			}
 			return ComponentAccess::SetFieldValue(entity, component, field.GetName(), value, snapshot.Schemas.get());
@@ -366,10 +428,17 @@ namespace Engine {
 			ENGINE_TRY(WalkInspectorValue(*field, *found, path.subspan(1), resolve, replacement, selected, schema));
 			if (replacement != nullptr)
 			{
-				if (snapshot.Schemas != nullptr && path.front() == "Fields" && path.size() > 1)
-					snapshot.EditedScriptField = path[1];
+				if (snapshot.Schemas != nullptr && path.size() > 3 && path.front() == "Scripts" && path[2] == "Fields")
+					snapshot.EditedScriptField = path[3];
+				// A Script list's entries other than the edited slot's changed ones keep what they hold.
+				const bool scriptList = snapshot.Type->GetName() == "Script" && path.front() == "Scripts";
+				const Json fields = scriptList && snapshot.Schemas != nullptr ? StoredInspectorScriptFields(snapshot) : Json::object();
+				const InspectorPreservedSchemas preserved(snapshot, fields);
+				ResolveContext checked = resolve;
+				if (scriptList)
+					checked.Schemas = &preserved;
 				ValidationContext validation;
-				field->ValidateJson(JsonReader(*found), resolve, validation);
+				field->ValidateJson(JsonReader(*found), checked, validation);
 				ENGINE_TRY(validation.ToStatus(field->GetName()));
 				if (!field->IsVirtual())
 				{
@@ -380,28 +449,34 @@ namespace Engine {
 							stored.erase(member->GetName());
 					}
 					ObjectPtr object = snapshot.Type->CreateDefault();
-					ENGINE_TRY(snapshot.Type->FromJson(object.get(), JsonReader(stored), { .Schemas = snapshot.Schemas.get() }));
+					ENGINE_TRY(snapshot.Type->FromJson(object.get(), JsonReader(stored), { .Schemas = checked.Schemas }));
 				}
 			}
 			return {};
 		}
 
-		// A Script component accepts only a Behaviour asset.
+		// A Script component accepts only Behaviour assets: each slot whose script the edit changes is checked.
 		static Status CheckInspectorScriptAssignment(EditorContext& editor, const InspectorEditTarget& target, std::string_view fieldName,
-			const InspectorValueSnapshot& snapshot)
+			const InspectorValueSnapshot& snapshot, const InspectorValueSnapshot& before)
 		{
-			if (target.Component != "Script" || fieldName != "Script")
+			if (target.Component != "Script" || fieldName != "Scripts")
 				return {};
-			const FieldInfo* field = snapshot.Type->FindField(fieldName);
-			ENGINE_TRY_ASSIGN(Value value, ValueFromJson(JsonReader(StoredInspectorField(snapshot, field->GetName())), field->GetType()));
-			if (!value.AsUUID().IsValid())
-				return {};
-			EditorScriptService* service = editor.GetScriptService();
-			if (service == nullptr)
-				return MakeError(ErrorCode::InvalidState, "script schemas are unavailable");
-			ENGINE_TRY_ASSIGN(auto script, service->GetFields(value.AsUUID()));
-			if (script->Kind != ScriptKind::Behaviour)
-				return MakeError(ErrorCode::Validation, "SCRIPT_NOT_A_BEHAVIOUR: Script requires a Behaviour asset");
+			Json stored = Json::object();
+			stored["Scripts"] = StoredInspectorField(snapshot, fieldName);
+			for (size_t slot = 0; stored["Scripts"].is_array() && slot < stored["Scripts"].size(); ++slot)
+			{
+				const Json& handle = FindScriptSlotMember(stored, slot, "Script");
+				const bool unchanged = FindScriptSlotMember(before.Object, slot, "Script") == handle;
+				const Result<UUID> script = handle.is_null() ? Result<UUID>(UUID()) : JsonReader(handle).ReadUUID();
+				if (unchanged || !script || !script->IsValid())
+					continue;
+				EditorScriptService* service = editor.GetScriptService();
+				if (service == nullptr)
+					return MakeError(ErrorCode::InvalidState, "script schemas are unavailable");
+				ENGINE_TRY_ASSIGN(auto data, service->GetFields(*script));
+				if (data->Kind != ScriptKind::Behaviour)
+					return MakeError(ErrorCode::Validation, "SCRIPT_NOT_A_BEHAVIOUR: Script requires a Behaviour asset");
+			}
 			return {};
 		}
 
@@ -462,7 +537,7 @@ namespace Engine {
 				const auto& snapshot = snapshots[i];
 				if (!InspectorSnapshotChanged(before[i], snapshot))
 					continue;
-				ENGINE_TRY(CheckInspectorScriptAssignment(editor, target, fieldName, snapshot));
+				ENGINE_TRY(CheckInspectorScriptAssignment(editor, target, fieldName, snapshot, before[i]));
 				const FieldInfo* field = snapshot.Type->FindField(fieldName);
 				ENGINE_TRY(SetInspectorComponentField(copy->FindEntityByID(target.Entities[i]), target.Component, *field, snapshot));
 			}
@@ -699,21 +774,11 @@ namespace Engine {
 					ENGINE_TRY_ASSIGN(text, SoundEffectToText(sound, editor.GetTypeRegistry()));
 				}
 				ENGINE_TRY_ASSIGN(auto command, AssetEditCommand::CreateForWrite(editor, after.Path, AsBytes(text), label));
-				const AssetHandle prefabs[] = { target.Asset };
-				if (target.Kind == InspectorTargetKind::AssetImportSettings && editor.HasScene()
-					&& !Utils::FindPrefabInstances(editor.GetScene(), prefabs).empty())
+				// Import settings of a prefab-producing asset (a glTF) update its instances and the prefabs nesting it, as
+				// asset.setImportSettings does (§5.5 "Update"; Docs/Decisions/0031-m20-contract.md decisions 8 and 15).
+				if (target.Kind == InspectorTargetKind::AssetImportSettings)
 				{
-					LoadReport report;
-					ENGINE_TRY_ASSIGN(const auto schemas, editor.GetScriptSchemaSnapshot());
-					ENGINE_TRY_ASSIGN(const Prefab current, LoadPrefabAsset(editor.GetAssets(), target.Asset, editor.GetTypeRegistry(), schemas.get(), report));
-					EditorTransaction transaction(editor, label);
-					ENGINE_TRY(Utils::RecordPrefabOverrides(editor, target.Asset, current));
-					ENGINE_TRY(editor.Execute(std::move(command)));
-					ENGINE_TRY(editor.GetAssets().Reimport(target.Asset));
-					ENGINE_TRY_ASSIGN(Scope<Command> update, editor.CreatePrefabUpdateCommand(prefabs));
-					if (update != nullptr)
-						ENGINE_TRY(editor.Execute(std::move(update)));
-					index = transaction.Commit();
+					ENGINE_TRY_ASSIGN(index, Utils::ExecuteImportSettingsWrite(editor, target.Asset, std::move(command), label));
 				}
 				else
 				{

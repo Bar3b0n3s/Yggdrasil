@@ -24,9 +24,9 @@ namespace Engine {
 		// standard fixture schema, and sets its Torque field.
 		constexpr std::string_view ScriptedPrefab = R"({
 	"Format": "Prefab", "Version": 1, "Name": "Turret", "Root": "00000000000c0001",
-	"ComponentVersions": { "Transform": 1, "Script": 1 },
+	"ComponentVersions": { "Transform": 1, "Script": 2 },
 	"Entities": [ { "ID": "00000000000c0001", "Name": "Turret", "Parent": null, "Active": true, "Tags": [],
-		"Components": { "Transform": {}, "Script": { "Script": "00000000c0ffee01", "Fields": { "Torque": 50 }, "ExecutionOrder": 0 } } } ]
+		"Components": { "Transform": {}, "Script": { "Scripts": [ { "Script": "00000000c0ffee01", "Fields": { "Torque": 50 }, "ExecutionOrder": 0 } ] } } } ]
 })";
 
 		AssetHandle WriteScriptedPrefab(Test::AssetTestFixture& assets)
@@ -101,7 +101,7 @@ namespace Engine {
 			REQUIRE(LoadPrefabAsset(assets.GetManager(), handle, assets.GetRegistry(), nullptr, unresolved).has_value());
 			const bool warned = std::ranges::any_of(unresolved.Diagnostics, [](const LoadDiagnostic& diagnostic)
 			{
-				return diagnostic.Code == VariantUnresolvedCode && diagnostic.JsonPointer == "/Entities/0/Components/Script/Fields/Torque";
+				return diagnostic.Code == VariantUnresolvedCode && diagnostic.JsonPointer == "/Entities/0/Components/Script/Scripts/0/Fields/Torque";
 			});
 			CHECK_MESSAGE(warned, DescribeDiagnostics(unresolved));
 		}
@@ -124,7 +124,7 @@ namespace Engine {
 			REQUIRE_MESSAGE(instance.has_value(), instance.error().ToString());
 			CHECK_MESSAGE(report.Diagnostics.empty(), DescribeDiagnostics(report));
 			REQUIRE(instance->HasComponent<ScriptComponent>());
-			CHECK(instance->GetComponent<ScriptComponent>().Fields.at("Torque").Get() == Json(50));
+			CHECK(instance->GetComponent<ScriptComponent>().Scripts.front().Fields.at("Torque").Get() == Json(50));
 		}
 
 		TEST_CASE("PrefabAsset: a handle of another type, an unknown handle and a null handle are errors")

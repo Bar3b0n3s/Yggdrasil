@@ -409,10 +409,54 @@ namespace Engine {
 			return result;
 		}
 
-		// Whether the open scene instantiates `prefab`, so a new version of it must update the instances (§5.5).
-		bool IsInstancedInOpenScene(EditorContext& editor, AssetHandle prefab)
+		// asset.reimport's §5.5 "Update" after `handle`, a Prefab whose new version updates instances (Utils::
+		// UpdatesPrefabInstances), got that version from its import: the prefabs nesting it are rewritten from it
+		// (EditorContext::CreateNestingPrefabUpdateCommand) and the addressed scene's instances of it and of them rebuilt
+		// (CreatePrefabUpdateCommand), as one undo step "Update Prefab Instances" of their own (the import itself is not
+		// undoable), and the other open scenes follow in their own histories, after the step, and after its undo and redo
+		// when it rewrote a prefab (Docs/Decisions/0031-m20-contract.md decisions 8 and 15). Errors: those of loading the new
+		// version, of Utils::FindNestingPrefabs (PREFAB_CYCLE) and of the update; the step rolls back then.
+		Status UpdateReimportedPrefab(EditorContext& editor, AssetHandle handle)
 		{
-			return editor.HasScene() && !Utils::FindPrefabInstances(editor.GetScene(), std::span<const AssetHandle>(&prefab, 1)).empty();
+			EditorAssetManager& assets = editor.GetAssets();
+			LoadReport report;
+			ENGINE_TRY_ASSIGN(const auto schemas, editor.GetScriptSchemaSnapshot());
+			ENGINE_TRY_ASSIGN(const Prefab current, LoadPrefabAsset(assets, handle, editor.GetTypeRegistry(), schemas.get(), report));
+			ENGINE_TRY_ASSIGN(std::vector<AssetHandle> rebuilt, Utils::FindNestingPrefabs(editor, handle, current));
+			const bool nested = !rebuilt.empty();
+			rebuilt.push_back(handle);
+			std::ranges::sort(rebuilt);
+			const AssetHandle prefabs[] = { handle };
+			Scope<Command> rewrite;
+			if (nested)
+			{
+				ENGINE_TRY_ASSIGN(NestingPrefabUpdate nesting, editor.CreateNestingPrefabUpdateCommand(prefabs));
+				rewrite = std::move(nesting.Rewrite);
+			}
+			if (rewrite == nullptr)
+			{
+				if (editor.HasScene())
+				{
+					ENGINE_TRY_ASSIGN(Scope<Command> update, editor.CreatePrefabUpdateCommand(rebuilt));
+					if (update != nullptr)
+						ENGINE_TRY(editor.Execute(std::move(update)));
+				}
+				editor.PropagatePrefabUpdate(prefabs);
+				return {};
+			}
+			// The rewritten prefabs' files and their restore on undo reach the other open scenes like any prefab write.
+			EditorTransaction transaction(editor, "Update Prefab Instances");
+			ENGINE_TRY(editor.Execute(Utils::CreatePrefabPropagationCommand({ handle }, true)));
+			ENGINE_TRY(editor.Execute(std::move(rewrite)));
+			if (editor.HasScene())
+			{
+				ENGINE_TRY_ASSIGN(Scope<Command> update, editor.CreatePrefabUpdateCommand(rebuilt));
+				if (update != nullptr)
+					ENGINE_TRY(editor.Execute(std::move(update)));
+			}
+			ENGINE_TRY(editor.Execute(Utils::CreatePrefabPropagationCommand({ handle }, false)));
+			static_cast<void>(transaction.Commit());
+			return {};
 		}
 
 		std::vector<AssetSummary> MakeSubAssetSummaries(const EditorAssetManager& assets, std::span<const SubAssetEntry> subAssets)
@@ -465,8 +509,8 @@ namespace Engine {
 			AssetImportResult m_Result;
 		};
 
-		// asset.reimport's operation: the reimport, then (for a Prefab the open scene instantiates) the update of its
-		// instances as an undo step of its own (§5.5).
+		// asset.reimport's operation: the reimport, then (for a Prefab an open scene instantiates or another prefab may nest)
+		// the update of the prefabs nesting it and of the instances, as an undo step of its own (UpdateReimportedPrefab).
 		class AssetReimportOperation final : public PendingOperation
 		{
 		public:
@@ -484,18 +528,10 @@ namespace Engine {
 				Result<AssetImportOutcome> outcome = m_Reimport.Take();
 				if (!outcome)
 					return std::unexpected(std::move(outcome).error().WithContext(std::format("reimporting '{}'", assets.GetReferencePath(m_Handle))));
-				if (IsInstancedInOpenScene(*m_Editor, m_Handle))
+				if (Utils::UpdatesPrefabInstances(*m_Editor, m_Handle))
 				{
-					const AssetHandle prefabs[] = { m_Handle };
-					Result<Scope<Command>> update = m_Editor->CreatePrefabUpdateCommand(prefabs);
-					if (!update)
-						return std::unexpected(std::move(update).error());
-					if (*update != nullptr)
-					{
-						Result<uint64_t> executed = m_Editor->Execute(std::move(*update));
-						if (!executed)
-							return std::unexpected(std::move(executed).error());
-					}
+					if (Status updated = UpdateReimportedPrefab(*m_Editor, m_Handle); !updated)
+						return std::unexpected(std::move(updated).error());
 				}
 				AssetReimportResult result;
 				result.Asset = Utils::MakeAssetSummary(assets, m_Handle);
@@ -1018,30 +1054,9 @@ namespace Engine {
 			const std::string label = std::format("Set Import Settings '{}'", Utils::ToProjectRelative(record->SourcePath));
 			ENGINE_TRY_ASSIGN(Scope<AssetEditCommand> command, AssetEditCommand::CreateForWrite(editor, metaPath, AsBytes(text), label));
 
-			if (!IsInstancedInOpenScene(editor, handle))
-			{
-				// The write schedules the reimport; the result does not wait for it.
-				ENGINE_TRY_ASSIGN(const uint64_t undoIndex, editor.Execute(std::move(command)));
-				result.UndoIndex = ToAutomationCounter(undoIndex);
-				result.Asset = Utils::MakeAssetSummary(assets, handle);
-				return result;
-			}
-
-			// §5.5 "Update": the instances follow the new settings in the same undo step. The overrides are recorded against the
-			// version the instances were built from, the settings written, the asset reimported now, and the instances rebuilt.
-			LoadReport report;
-			ENGINE_TRY_ASSIGN(const auto schemas, editor.GetScriptSchemaSnapshot());
-			ENGINE_TRY_ASSIGN(const Prefab current, LoadPrefabAsset(assets, handle, editor.GetTypeRegistry(), schemas.get(), report));
-			EditorTransaction transaction(editor, label);
-			ENGINE_TRY(Utils::RecordPrefabOverrides(editor, handle, current));
-			ENGINE_TRY(editor.Execute(std::move(command)));
-			ENGINE_TRY_ASSIGN(const AssetImportOutcome outcome, assets.Reimport(handle));
-			static_cast<void>(outcome);
-			const AssetHandle prefabs[] = { handle };
-			ENGINE_TRY_ASSIGN(Scope<Command> update, editor.CreatePrefabUpdateCommand(prefabs));
-			if (update != nullptr)
-				ENGINE_TRY(editor.Execute(std::move(update)));
-			result.UndoIndex = ToAutomationCounter(transaction.Commit());
+			// A Prefab's instances and the prefabs nesting it follow the new settings in the same undo step (§5.5 "Update").
+			ENGINE_TRY_ASSIGN(const uint64_t undoIndex, Utils::ExecuteImportSettingsWrite(editor, handle, std::move(command), label));
+			result.UndoIndex = ToAutomationCounter(undoIndex);
 			result.Asset = Utils::MakeAssetSummary(assets, handle);
 			return result;
 		}
@@ -1287,8 +1302,8 @@ namespace Engine {
 		methods.AddPending<EditorMethodContext, AssetReimportParams, AssetReimportResult>(
 			{
 				.Name = "asset.reimport",
-				.Description = "Imports an asset again, bypassing the cache, and updates the open scene's instances of a changed prefab; "
-							   "resolves when the import completed.",
+				.Description = "Imports an asset again, bypassing the cache; for a changed prefab, rewrites the prefabs nesting it and updates "
+							   "the instances of every open scene, each scene's as an undo step of its own; resolves when the import completed.",
 				.RequiredParams = { "asset" },
 				.Mutates = true,
 				.TimeoutSeconds = 300,
@@ -1377,7 +1392,8 @@ namespace Engine {
 			{
 				.Name = "asset.setImportSettings",
 				.Description = "Applies an RFC 7386 merge patch to an asset's import settings as one undoable command; the asset reimports. "
-							   "For a glTF the open scene instantiates, the instances follow in the same undo step.",
+							   "For a glTF that an open scene instantiates or a prefab nests, the prefabs nesting it and the instances follow in the "
+							   "same undo step, and the instances of the other open scenes in their own undo histories.",
 				.RequiredParams = { "asset", "settings" },
 				.Mutates = true,
 				.AllowedInBatch = true,

@@ -39,13 +39,21 @@ namespace Engine {
 	Status SceneHierarchyPanel::Draw(EditorPanelContext& context)
 	{
 		EditorContext& editor = context.Editor;
-		PlaySession* session = editor.GetPlay().GetSession();
+		// The shown session: the play scene replaces the active scene's edit scene only while the active tab is the played
+		// one (or a test run owns the editor); another tab shows its edit scene while the session plays on (decision 13).
+		PlaySession* session = editor.ShowsPlayScene() ? editor.GetPlay().GetSession() : nullptr;
 		Scene* scene = session != nullptr ? &session->GetScene() : editor.HasScene() ? &editor.GetScene()
 																					 : nullptr;
-		// An error describes the shown scene; replacing the scene, or starting or stopping play, starts afresh. Edits,
-		// undo/redo and project-settings installations keep the edit scene's document epoch.
+		// edit.select without a scene target reads the play scene from any tab (decision 16), so a click on this tab's edit
+		// scene while another scene plays names this tab.
+		const std::optional<OpenSceneId> selectScene = session == nullptr && editor.GetPlay().GetSession() != nullptr
+			? std::optional<OpenSceneId>(editor.GetActiveSceneId())
+			: std::nullopt;
+		// An error describes the shown scene; replacing the scene, activating another open scene (each keeps its own document
+		// epoch, so the open scene's id tells them apart), or starting or stopping play, starts afresh. Edits, undo/redo and
+		// project-settings installations keep the edit scene's document epoch.
 		const std::string sceneIdentity = session != nullptr ? std::format("Play:{}:{}", session->GetSerial(), session->GetSceneGeneration())
-			: scene != nullptr                               ? std::format("Edit:{}", editor.GetSceneDocumentEpoch())
+			: scene != nullptr                               ? std::format("Edit:{}:{}", editor.GetActiveSceneId(), editor.GetSceneDocumentEpoch())
 															 : std::string();
 		if (sceneIdentity != m_ErrorScene)
 		{
@@ -147,7 +155,7 @@ namespace Engine {
 			}
 			ImGui::EndDragDropTarget();
 		};
-		std::function<void(UUID, uint32_t)> draw = [this, &context, &queue, &drop, &matching, &draw, scene, target, selectionShown](UUID id, uint32_t sibling)
+		std::function<void(UUID, uint32_t)> draw = [this, &context, &queue, &drop, &matching, &draw, scene, session, target, selectionShown, selectScene](UUID id, uint32_t sibling)
 		{
 			if (!matching.contains(id))
 				return;
@@ -198,7 +206,10 @@ namespace Engine {
 				}
 				if (!selected || !ImGui::GetIO().KeyCtrl)
 					entities.push_back(id.ToString());
-				queue("edit.select", Json{ { "entities", std::move(entities) } });
+				Json select{ { "entities", std::move(entities) } };
+				if (selectScene)
+					select["scene"] = *selectScene;
+				queue("edit.select", select);
 			}
 			if (!context.Editor.IsReadOnly() && ImGui::BeginDragDropSource())
 			{
@@ -217,10 +228,9 @@ namespace Engine {
 					m_RenameEntity = id;
 					m_Rename = entity.GetName();
 					m_RenameRevision = context.Editor.GetRevision();
-					const auto* renameSession = context.Editor.GetPlay().GetSession();
-					m_RenamePlay = renameSession != nullptr;
-					m_RenameSessionSerial = renameSession != nullptr ? renameSession->GetSerial() : 0;
-					m_RenameSceneGeneration = renameSession != nullptr ? renameSession->GetSceneGeneration() : 0;
+					m_RenamePlay = session != nullptr;
+					m_RenameSessionSerial = session != nullptr ? session->GetSerial() : 0;
+					m_RenameSceneGeneration = session != nullptr ? session->GetSceneGeneration() : 0;
 					m_ShowRename = true;
 				}
 				if (ImGui::MenuItem("Duplicate"))

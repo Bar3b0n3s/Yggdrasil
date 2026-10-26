@@ -76,7 +76,7 @@ namespace Engine {
 
 	// Immutable once published through AssetRef. This is CPU data only: no VM, Luau analysis or registry pointers.
 	// Module and TestSuite have no Fields. Name is Script.Define's name or Test.Suite's name, empty for Module.
-	// A Module is a valid asset but cannot be attached to ScriptComponent.Script.
+	// A Module is a valid asset but cannot be attached to a script slot (ScriptSlot.Script).
 	struct ScriptData : Asset
 	{
 		static constexpr AssetType StaticType = AssetType::Script;

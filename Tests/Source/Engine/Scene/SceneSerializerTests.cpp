@@ -352,11 +352,11 @@ namespace Engine {
 
 			ball.Patch<ScriptComponent>([](ScriptComponent& script)
 			{
-				script.ExecutionOrder = 99;
+				script.Scripts.front().ExecutionOrder = 99;
 			});
 			ball.RemoveComponent<RigidBodyComponent>();
 			REQUIRE(SceneSerializer::ApplyEntityJson(ball, JsonReader(*snapshot), LoadOptions{}, report).has_value());
-			CHECK(ball.GetComponent<ScriptComponent>().ExecutionOrder == -5);
+			CHECK(ball.GetComponent<ScriptComponent>().Scripts.front().ExecutionOrder == -5);
 			CHECK(ball.HasComponent<RigidBodyComponent>());
 
 			const Scope<Scene> other = setup.CreateEmptyScene();
@@ -886,20 +886,20 @@ namespace Engine {
 			CHECK(reloadReport.Repairs.empty());
 		}
 
-		TEST_CASE("SceneSerializer: a prefab instance's Script.Fields override loads strictly without a diagnostic")
+		TEST_CASE("SceneSerializer: a prefab instance's script slot Fields override loads strictly without a diagnostic")
 		{
 			// An instance of a one-entity prefab whose script field Torque the instance overrides: the override and the
 			// member's flattened Script component both hold the value, as prefab.instantiate and entity.update write them.
 			constexpr std::string_view Text = R"({
 				"Format": "Scene", "Version": 1, "Name": "Turrets", "Seed": 0,
-				"ComponentVersions": { "Transform": 1, "Script": 1, "Prefab": 2, "PrefabLink": 1 },
+				"ComponentVersions": { "Transform": 1, "Script": 2, "Prefab": 2, "PrefabLink": 1 },
 				"Entities": [
 					{ "ID": "4f00000000000001", "Name": "Turret", "Parent": null, "Active": true, "Tags": [],
 					  "Components": {
 						"Transform": {},
-						"Script": { "Script": "00000000c0ffee01", "Fields": { "Torque": 60 }, "ExecutionOrder": 0 },
+						"Script": { "Scripts": [ { "Script": "00000000c0ffee01", "Fields": { "Torque": 60 }, "ExecutionOrder": 0 } ] },
 						"Prefab": { "Prefab": null, "Overrides": [
-							{ "Path": ["00000000000c0001"], "Kind": "Field", "Component": "Script", "Field": "Fields", "Value": { "Torque": 60 } } ] },
+							{ "Path": ["00000000000c0001"], "Kind": "Field", "Component": "Script", "Field": "Scripts/0/Fields", "Value": { "Torque": 60 } } ] },
 						"PrefabLink": { "PrefabEntityID": "00000000000c0001", "InstanceRoot": "4f00000000000001", "OuterPrefabEntityID": null } } }
 				]
 			})";
@@ -928,7 +928,7 @@ namespace Engine {
 			const Status rejected = SceneSerializer::LoadFromString(*rejectedScene, invalid, strict, rejectedReport);
 			REQUIRE_FALSE(rejected.has_value());
 			CHECK(rejected.error().GetCode() == ErrorCode::Validation);
-			CHECK(rejected.error().GetLocation().JsonPointer == std::optional<std::string>("/Entities/0/Components/Script/Fields/Torq"));
+			CHECK(rejected.error().GetLocation().JsonPointer == std::optional<std::string>("/Entities/0/Components/Script/Scripts/0/Fields/Torq"));
 			for (const ErrorIssue& issue : rejected.error().GetIssues())
 				CHECK_FALSE(issue.JsonPointer.starts_with("/Entities/0/Components/Prefab"));
 
@@ -940,7 +940,7 @@ namespace Engine {
 			REQUIRE(SceneSerializer::LoadFromString(*lenientScene, invalid, lenient, lenientReport).has_value());
 			REQUIRE(lenientReport.Diagnostics.size() == 1);
 			CHECK(lenientReport.Diagnostics[0].Code == VariantUnresolvedCode);
-			CHECK(lenientReport.Diagnostics[0].JsonPointer == "/Entities/0/Components/Script/Fields/Torq");
+			CHECK(lenientReport.Diagnostics[0].JsonPointer == "/Entities/0/Components/Script/Scripts/0/Fields/Torq");
 			CHECK(lenientReport.Diagnostics[0].Entity == UUID(0x4f00000000000001));
 		}
 

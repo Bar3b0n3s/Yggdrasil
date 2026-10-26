@@ -141,9 +141,9 @@ namespace Engine {
 		const auto asset = fixture.AddScript(handle, std::move(path), std::move(source));
 		REQUIRE_MESSAGE(asset.has_value(), (asset ? "" : asset.error().ToString()));
 		const Entity entity = fixture.GetScene().CreateEntity(name);
-		ScriptComponent script;
+		ScriptSlot script;
 		script.Script.SetHandle(handle);
-		entity.AddComponent<ScriptComponent>(script);
+		entity.AddComponent<ScriptComponent>(ScriptComponent{ { script } });
 		return entity.GetUUID();
 	}
 
@@ -530,15 +530,17 @@ return Script.Define("Fields", T)
 			REQUIRE(fixture.Start());
 			CheckHelperScript(fixture, R"(
 local script = self.Entity:GetComponent("Script")
-script.Fields = {Number = 3, Mode = "Two", Tint = Color.New(0.25,0.5,0.75), Rotation = Quat.Identity(), Points = {vector.one}, Values = {{1,2},{3}}, Target = self.Entity, Clip = Probe.Asset()}
-local fields = script.Fields
+-- The entity's one script slot (Script version 2): its Fields are written with the whole list.
+local function setFields(fields) script.Scripts = {{Script = script.Scripts[1].Script, Fields = fields, ExecutionOrder = 0}} end
+setFields({Number = 3, Mode = "Two", Tint = Color.New(0.25,0.5,0.75), Rotation = Quat.Identity(), Points = {vector.one}, Values = {{1,2},{3}}, Target = self.Entity, Clip = Probe.Asset()})
+local fields = script.Scripts[1].Fields
 assert(fields.Number == 3 and fields.Mode == "Two" and fields.Tint.r == 0.25)
 assert(fields.Rotation.w == 1 and fields.Points[1] == vector.one and fields.Values[1][2] == 2)
 assert(fields.Target == self.Entity and Probe.AssetText(fields.Clip) == "0000000000001234")
 local cycle = {}; cycle[1] = cycle
-assert(not pcall(function() script.Fields = {Values = cycle} end))
-assert(not pcall(function() script.Fields = {Number = function() end} end))
-assert(script.Fields.Number == 3)
+assert(not pcall(function() setFields({Values = cycle}) end))
+assert(not pcall(function() setFields({Number = function() end}) end))
+assert(script.Scripts[1].Fields.Number == 3)
 return true
 )",
 				id);
@@ -560,11 +562,13 @@ return Script.Define("BoundedFields", {Fields = {
 }})
 )");
 			REQUIRE(fixture.Start());
-			const auto before = fixture.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Fields;
+			const auto before = fixture.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Scripts.front().Fields;
 			CheckHelperScript(fixture, R"(
 local script = self.Entity:GetComponent("Script")
+-- The entity's one script slot (Script version 2): its Fields are written with the whole list.
+local function setFields(fields) script.Scripts = {{Script = script.Scripts[1].Script, Fields = fields, ExecutionOrder = 0}} end
 local function refused(fields, reason)
-	local ok, message = pcall(function() script.Fields = fields end)
+	local ok, message = pcall(function() setFields(fields) end)
 	assert(not ok and string.find(tostring(message), reason, 1, true), tostring(message))
 end
 local value = 1
@@ -583,25 +587,27 @@ refused({Data = left}, "cyclic")
 return true
 )",
 				id);
-			CHECK(fixture.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Fields == before);
+			CHECK(fixture.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Scripts.front().Fields == before);
 			CHECK(fixture.ExternalMutations.empty());
 			CHECK(fixture.Errors.empty());
 			CheckHelperScript(fixture, R"(
 local script = self.Entity:GetComponent("Script")
+-- The entity's one script slot (Script version 2): its Fields are written with the whole list.
+local function setFields(fields) script.Scripts = {{Script = script.Scripts[1].Script, Fields = fields, ExecutionOrder = 0}} end
 local dag = 1
 for i = 1,11 do dag = {dag,dag} end
-script.Fields = {A = dag}
-assert(script.Fields.A[1] ~= nil)
+setFields({A = dag})
+assert(script.Scripts[1].Fields.A[1] ~= nil)
 local value = {7,8}
 for i = 1,11 do value = {value} end
-script.Fields = {Data = {value,value}, Text = {"a\0b", "normal"}}
+setFields({Data = {value,value}, Text = {"a\0b", "normal"}})
 value[1] = nil
-local copy = script.Fields.Data
+local copy = script.Scripts[1].Fields.Data
 assert(copy[1] ~= copy[2])
 local leaf = copy[2]
 for i = 1,11 do leaf = leaf[1] end
 assert(leaf[1] == 7 and leaf[2] == 8)
-assert(script.Fields.Text[1] == "a\0b")
+assert(script.Scripts[1].Fields.Text[1] == "a\0b")
 return true
 )",
 				id);
@@ -703,8 +709,10 @@ return true
 local value = 9
 for i = 1,63 do value = {value} end
 local script = self.Entity:GetComponent("Script")
-script.Fields = {Data = value}
-local copy = script.Fields.Data
+-- The entity's one script slot (Script version 2): its Fields are written with the whole list.
+local function setFields(fields) script.Scripts = {{Script = script.Scripts[1].Script, Fields = fields, ExecutionOrder = 0}} end
+setFields({Data = value})
+local copy = script.Scripts[1].Fields.Data
 for i = 1,63 do copy = copy[1] end
 assert(copy == 9)
 return true
@@ -730,20 +738,22 @@ return true
 return Script.Define("DeadlineFields", {Fields = {Data = Field.Array(Field.Integer())}})
 )");
 			REQUIRE(fixture.Start());
-			const auto before = fixture.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Fields;
+			const auto before = fixture.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Scripts.front().Fields;
 			armed = true;
 			{
 				Test::ExpectLog expected(LogLevel::Error, "script exceeded");
 				CHECK_FALSE(fixture.Evaluate(R"(
 local script = self.Entity:GetComponent("Script")
+-- The entity's one script slot (Script version 2): its Fields are written with the whole list.
+local function setFields(fields) script.Scripts = {{Script = script.Scripts[1].Script, Fields = fields, ExecutionOrder = 0}} end
 local data = table.create(512, 1)
-return pcall(function() script.Fields = {Data = data} end)
+return pcall(function() setFields({Data = data}) end)
 )",
 					id));
 				CHECK(expected.GetMatchCount() == 1);
 			}
 			armed = false;
-			CHECK(fixture.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Fields == before);
+			CHECK(fixture.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Scripts.front().Fields == before);
 			CHECK(fixture.ExternalMutations.empty());
 			REQUIRE_FALSE(fixture.Errors.empty());
 			CHECK(fixture.Errors.back().Kind == ScriptErrorKind::Timeout);
@@ -751,8 +761,10 @@ return pcall(function() script.Fields = {Data = data} end)
 			CHECK_FALSE(fixture.Errors.back().Script.empty());
 			CheckHelperScript(fixture, R"(
 local script = self.Entity:GetComponent("Script")
-script.Fields = {Data = table.create(512, 1)}
-assert(#script.Fields.Data == 512 and script.Fields.Data[512] == 1)
+-- The entity's one script slot (Script version 2): its Fields are written with the whole list.
+local function setFields(fields) script.Scripts = {{Script = script.Scripts[1].Script, Fields = fields, ExecutionOrder = 0}} end
+setFields({Data = table.create(512, 1)})
+assert(#script.Scripts[1].Fields.Data == 512 and script.Scripts[1].Fields.Data[512] == 1)
 return true
 )",
 				id);

@@ -1,0 +1,147 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "MultiSceneFirst",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Prefab": 2,
+		"PrefabLink": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"PointLight": 1,
+		"AudioListener": 1
+	},
+	"Entities": [
+		{
+			"ID": "ffe48c11ffb860ac",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 6, 14],
+					"Rotation": [-0.17364818, 0, 0, 0.9848077],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 55,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Skybox",
+					"ClearColor": [0.05, 0.05, 0.06]
+				},
+				"AudioListener": {
+					"Primary": true
+				}
+			}
+		},
+		{
+			"ID": "7517ef8af899d530",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [-0.4030582, 0.27253202, 0.12708376, 0.8643611],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 3,
+					"CastShadows": false,
+					"ShadowDistance": 100,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 1,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "dd92fa90a01cff3e",
+			"Name": "Beacon",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1, -2],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Prefab": {
+					"Prefab": "9b628206f6a12764",
+					"Overrides": []
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "dd92fa90a01cff3e",
+					"InstanceRoot": "dd92fa90a01cff3e",
+					"OuterPrefabEntityID": null
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"PointLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 6,
+					"Range": 6,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "ac275a25c0525945",
+			"Name": "Gate",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [2, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "0308893837f99049",
+			"Name": "Post",
+			"Parent": "ac275a25c0525945",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 4,
+					"Range": 10,
+					"SourceRadius": 0.05
+				}
+			}
+		}
+	]
+}

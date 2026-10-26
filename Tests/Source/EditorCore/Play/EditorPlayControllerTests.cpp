@@ -3,6 +3,7 @@
 #include "EditorCore/Automation/AutomationServer.h"
 #include "EditorCore/Automation/RegisterMethods.h"
 #include "EditorCore/Commands/ProjectSettingsCommand.h"
+#include "EditorCore/Commands/SceneEdit.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Scripting/EditorScriptService.h"
@@ -21,6 +22,7 @@
 #include "Engine/Platform/Window.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/LoadReport.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Scripting/ScriptError.h"
@@ -64,6 +66,33 @@ namespace Engine {
 		return std::move(*result);
 	}
 
+	// Writes `scene` (a new empty one named after the file when null) to `path` (project-relative) and opens what the file
+	// holds as an additional open scene (EditorContext::AddScene, M20), so a copy keeps the entity ids of `scene`.
+	static OpenSceneId AddPlayOpenScene(EditorContext& editor, std::string_view path, const Scene* scene = nullptr)
+	{
+		const Result<VfsPath> file = VfsPath::Create("project", path);
+		REQUIRE(file.has_value());
+		const Scope<Scene> empty = editor.CreateScene(std::string(file->GetStem()));
+		const Result<std::string> text = SceneSerializer::SaveToString(scene != nullptr ? *scene : *empty);
+		REQUIRE_MESSAGE(text.has_value(), (text ? std::string() : text.error().ToString()));
+		REQUIRE(editor.WriteProjectFile(*file, std::as_bytes(std::span(text->data(), text->size()))).has_value());
+		Scope<Scene> opened = editor.CreateScene(std::string(file->GetStem()));
+		LoadReport report;
+		REQUIRE(SceneSerializer::LoadFromString(*opened, *text, {}, report).has_value());
+		const Result<OpenSceneId> added = editor.AddScene(std::move(opened), *file);
+		REQUIRE_MESSAGE(added.has_value(), (added ? std::string() : added.error().ToString()));
+		return *added;
+	}
+
+	// Creates an entity named `name` in the addressed scene as one undoable edit; returns its id.
+	static UUID CreatePlayEdit(EditorContext& editor, std::string name)
+	{
+		SceneEdit edit(editor, "Create " + name);
+		const UUID id = editor.GetScene().CreateEntity(std::move(name)).GetUUID();
+		REQUIRE(edit.Commit().has_value());
+		return id;
+	}
+
 	static UUID AttachStartupScript(EditorContext& editor, std::string_view callback, std::string_view body)
 	{
 		const auto path = VfsPath::Create("project", "Assets/Startup.luau");
@@ -76,9 +105,9 @@ namespace Engine {
 		REQUIRE_MESSAGE(loaded.has_value(), (loaded ? std::string() : loaded.error().ToString()));
 		REQUIRE((*loaded)->Kind == ScriptKind::Behaviour);
 		const Entity entity = editor.GetScene().CreateEntity("Startup");
-		ScriptComponent script;
+		ScriptSlot script;
 		script.Script.SetHandle(written->Script);
-		entity.AddComponent<ScriptComponent>(script);
+		entity.AddComponent<ScriptComponent>(ScriptComponent{ { script } });
 		// A recording starts from the saved scene its replay names (§13.6), so the attached script is saved with it.
 		if (const std::optional<VfsPath>& scenePath = editor.GetScenePath())
 		{
@@ -288,7 +317,7 @@ return Script.Define("Host", Host)
 			};
 			write(module, "return {Value = 1}");
 			write(behaviour, original);
-			CallEditorHost(fixture, "entity.create", Json{ { "name", "Host" }, { "components", Json{ { "Script", Json{ { "Script", behaviour } } } } } });
+			CallEditorHost(fixture, "entity.create", Json{ { "name", "Host" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", behaviour } } }) } } } } } });
 			CallEditorHost(fixture, "play.start", Json{ { "paused", true } });
 			play.GetSession()->Tick();
 			CHECK(state() == Json::array({ 1, 0 }));
@@ -423,7 +452,7 @@ return Script.Define("Host", Host)
 			const Json module{ { "path", "Assets/Scripts/BadType.luau" }, { "source", "--!strict\nlocal value: number = \"wrong\"\nreturn {Value = value}" } };
 			CallEditorHost(fixture, "script.write", module);
 			CallEditorHost(fixture, "script.write", Json{ { "path", "Assets/Scripts/TypedHost.luau" }, { "source", "local M = require('./BadType'); return Script.Define('TypedHost', {})" } });
-			CallEditorHost(fixture, "entity.create", Json{ { "name", "TypedHost" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/TypedHost.luau" } } } } } });
+			CallEditorHost(fixture, "entity.create", Json{ { "name", "TypedHost" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/TypedHost.luau" } } }) } } } } } });
 			CallEditorHost(fixture, "scene.save"); // a recording starts from the saved scene
 			CallEditorHost(fixture, "project.setSettings", Json{ { "patch", Json{ { "Scripting", Json{ { "BlockPlayOnTypeErrors", false } } } } } });
 			CallEditorHost(fixture, "play.start", Json{ { "paused", true } });
@@ -784,7 +813,7 @@ return Script.Define("Host", Host)
 			// §13.2: a Busy answer names "Script:<Script>.<Callback>". The probe reads the phase marker while the callback runs.
 			Test::AutomationFixture fixture("ScriptWatchdogPhase");
 			CallEditorHost(fixture, "script.write", Json{ { "path", "Assets/Scripts/Probe.luau" }, { "source", "local Probe = {}\nfunction Probe:OnFixedUpdate() Log.Info(\"phase probe\") end\nreturn Script.Define(\"Probe\", Probe)\n" } });
-			CallEditorHost(fixture, "entity.create", Json{ { "name", "Probe" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Probe.luau" } } } } } });
+			CallEditorHost(fixture, "entity.create", Json{ { "name", "Probe" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/Probe.luau" } } }) } } } } } });
 			CallEditorHost(fixture, "play.start", Json{ { "paused", true } });
 			Watchdog& watchdog = fixture.GetClient().GetServer().GetWatchdog();
 			std::vector<std::string> observed;
@@ -1159,7 +1188,7 @@ return Script.Define("Host", Host)
 				CallEditorHost(fixture, "project.setSettings", Json{ { "patch", Json{ { "Scripting", Json{ { "BlockPlayOnTypeErrors", block } } } } } });
 			};
 			write(clean);
-			CallEditorHost(fixture, "entity.create", Json{ { "name", "Typed" }, { "components", Json{ { "Script", Json{ { "Script", path } } } } } });
+			CallEditorHost(fixture, "entity.create", Json{ { "name", "Typed" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", path } } }) } } } } } });
 			const std::optional<AssetHandle> script = editor.GetAssets().Resolve(path);
 			REQUIRE(script.has_value());
 			// Without a session there is nothing to keep.
@@ -1238,6 +1267,76 @@ return Script.Define("Host", Host)
 			CHECK(testErrors.front().Callback == "Reload");
 			client.GetServer().DisconnectInProcess(client.GetClient());
 			CHECK_FALSE(play.IsTestRunActive());
+		}
+
+		// Decision 13: the play selection belongs to the played scene. Stop carries it back into that scene's edit selection
+		// while another tab is active, and a played scene closed during play leaves the session belonging to no open scene.
+		TEST_CASE("EditorPlayController: Stop carries the play selection back into the played scene from another tab")
+		{
+			Test::AutomationFixture setup("OpenScenesPlaySelection");
+			EditorContext& editor = setup.GetEditor();
+			const OpenSceneId main = editor.GetActiveSceneId();
+			const UUID inMain = CreatePlayEdit(editor, "InMain");
+			editor.SetSelection({ inMain });
+			const OpenSceneId second = AddPlayOpenScene(editor, "Assets/Scenes/Second.scene");
+			REQUIRE(editor.ActivateScene(main).has_value());
+
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true } }));
+			CHECK(editor.GetPlay().GetPlayedScene() == main);
+			REQUIRE(editor.ActivateScene(second).has_value());
+			CHECK(editor.GetPlay().GetPlayedScene() == main);
+			CHECK(editor.GetSelection().empty());
+			REQUIRE(setup.Call("play.stop", Json::object()));
+			CHECK(editor.GetSelection().empty());
+			REQUIRE(editor.ActivateScene(main).has_value());
+			CHECK(std::vector<UUID>(editor.GetSelection().begin(), editor.GetSelection().end()) == std::vector<UUID>{ inMain });
+			CHECK(editor.GetSelectionTarget() == SceneTarget::Edit);
+
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true } }));
+			REQUIRE(editor.ActivateScene(second).has_value());
+			REQUIRE(editor.CloseScene(main).has_value());
+			CHECK(editor.GetPlay().GetPlayedScene() == NoOpenScene);
+			CHECK(editor.GetPlay().IsPlaying());
+			REQUIRE(setup.Call("play.stop", Json::object()));
+			CHECK(editor.GetSelection().empty());
+		}
+
+		// Decision 13: a play selection made after the played scene's tab closed has no played scene to go back to, so Stop
+		// drops it, also from a scene parked before Stop: the scene's selection is empty and on its edit scene again, even
+		// where that edit scene holds entities of the same ids (a copy of the played scene).
+		TEST_CASE("EditorPlayController: Stop drops a play selection made after the played scene closed")
+		{
+			Test::AutomationFixture setup("PlaySelectionWithoutPlayedScene");
+			EditorContext& editor = setup.GetEditor();
+			const OpenSceneId main = editor.GetActiveSceneId();
+			const UUID inMain = CreatePlayEdit(editor, "InMain");
+			const OpenSceneId copy = AddPlayOpenScene(editor, "Assets/Scenes/Copy.scene", &editor.GetScene());
+			const OpenSceneId other = AddPlayOpenScene(editor, "Assets/Scenes/Other.scene");
+			REQUIRE(editor.ActivateScene(main).has_value());
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true } }));
+			REQUIRE(editor.CloseScene(main).has_value());
+			REQUIRE(editor.GetActiveSceneId() == copy);
+			REQUIRE(editor.GetPlay().GetPlayedScene() == NoOpenScene);
+			// Without a scene target edit.select reads the session's scene, from any tab.
+			const Result<Json> selected = setup.Call("edit.select", Json{ { "entities", Json::array({ inMain.ToString() }) } });
+			REQUIRE_MESSAGE(selected.has_value(), (selected ? std::string() : selected.error().ToString()));
+			REQUIRE((*selected)["selection"].size() == 1);
+			CHECK((*selected)["selection"][0]["id"] == Json(inMain.ToString()));
+			SUBCASE("the active scene holds it at Stop")
+			{
+				REQUIRE(setup.Call("play.stop", Json::object()));
+			}
+			SUBCASE("a parked scene holds it at Stop")
+			{
+				REQUIRE(editor.ActivateScene(other).has_value());
+				REQUIRE(setup.Call("play.stop", Json::object()));
+				REQUIRE(editor.ActivateScene(copy).has_value());
+			}
+			CHECK(editor.GetSelection().empty());
+			CHECK(editor.GetSelectionTarget() == SceneTarget::Edit);
+			const Result<Json> read = setup.Call("edit.getSelection", Json::object());
+			REQUIRE(read.has_value());
+			CHECK((*read)["selection"].empty());
 		}
 	}
 

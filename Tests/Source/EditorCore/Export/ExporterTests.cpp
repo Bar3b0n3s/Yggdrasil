@@ -4,6 +4,7 @@
 
 #include "EditorCore/Automation/RegisterMethods.h"
 #include "EditorCore/Commands/ProjectSettingsCommand.h"
+#include "EditorCore/Commands/SceneEdit.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "EditorCore/Scripting/EditorScriptService.h"
@@ -23,6 +24,7 @@
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Platform/Paths.h"
 #include "Engine/Project/GameManifest.h"
+#include "Engine/Reflection/FieldInfo.h"
 #include "Engine/Renderer/EnvironmentBaker.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
@@ -502,6 +504,80 @@ namespace Engine {
 			CHECK(mentions(invalid, "SCRIPT_UNKNOWN_FIELD_OVERRIDE") == 1);
 			CHECK(mentions(invalid, Test::ScriptOverrideInstanceID.ToString()) == 1);
 			CHECK(mentions(invalid, "/Components/Prefab/") == 0);
+		}
+
+		// S1-04 and Docs/Decisions/0031-m20-contract.md decision 17: a build scene still at Script version 1 (a project saved
+		// before M20, until project.upgrade) loads migrated, and its invalid script field value is warned about under the code
+		// project.validate reports, never under the load's code.
+		TEST_CASE("Exporter: a script field value of a build scene still at Script version 1 is named as project.validate names it")
+		{
+			Test::EditorTestFixture fixture("ExportScriptOverrideVersion1");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			Test::WriteScriptOverrideProject(fixture.GetProjectRoot(), "Pointz");
+			Test::RewriteScriptOverrideProjectAtScriptVersion1(fixture.GetProjectRoot());
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			ApplySettings(editor, R"({"StartScene":"Assets/Scenes/Main.scene","Export":{"BuildScenes":["Assets/Scenes/Main.scene"]}})");
+			const Test::TempDirectory binaries("ExportScriptOverrideVersion1Binaries");
+			Result<Scope<Exporter>> exporter = Exporter::Start(editor, MakeSpecification(MakeRealBinaryRoot(binaries)));
+			REQUIRE_MESSAGE(exporter.has_value(), exporter.error().ToString());
+			const std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+			REQUIRE(outcome.has_value());
+			REQUIRE_MESSAGE(outcome->has_value(), outcome->error().ToString());
+			const std::vector<std::string>& warnings = (*outcome)->Warnings;
+			const auto mentions = [&warnings](std::string_view text)
+			{
+				return std::ranges::count_if(warnings, [text](const std::string& warning)
+				{
+					return warning.contains(text);
+				});
+			};
+			std::string described;
+			for (const std::string& warning : warnings)
+				described += warning + "\n";
+			INFO(described);
+			CHECK(mentions("SCRIPT_UNKNOWN_FIELD_OVERRIDE") == 1);
+			CHECK(mentions(std::string(Test::ScriptOverrideFieldsPointer) + "Pointz") == 1);
+			CHECK(mentions(VariantUnresolvedCode) == 0);
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 14: the export packages the saved files, so it warns about every open
+		// scene with unsaved changes, the active one or not, and names each by its path.
+		TEST_CASE("Exporter: warns about every open scene with unsaved changes, also one that is not active")
+		{
+			Test::EditorTestFixture fixture("ExportUnsavedOpenScenes");
+			MakeExportableProject(fixture);
+			EditorContext& editor = fixture.GetEditor();
+			const OpenSceneId main = editor.GetActiveSceneId();
+			const Result<VfsPath> secondPath = VfsPath::Create("project", "Assets/Scenes/Second.scene");
+			REQUIRE(secondPath.has_value());
+			Scope<Scene> second = editor.CreateScene("Second");
+			const Result<std::string> text = SceneSerializer::SaveToString(*second);
+			REQUIRE(text.has_value());
+			REQUIRE(editor.WriteProjectFile(*secondPath, AsBytes(*text)).has_value());
+			REQUIRE(editor.AddScene(std::move(second), *secondPath).has_value());
+			{
+				SceneEdit edit(editor, "Unsaved");
+				static_cast<void>(editor.GetScene().CreateEntity("Unsaved"));
+				REQUIRE(edit.Commit().has_value());
+			}
+			REQUIRE(editor.ActivateScene(main).has_value());
+			REQUIRE_FALSE(editor.IsSceneDirty());
+			const Test::TempDirectory binaries("ExportUnsavedOpenScenesBinaries");
+			Result<Scope<Exporter>> exporter = Exporter::Start(editor, MakeSpecification(MakeRealBinaryRoot(binaries)));
+			REQUIRE_MESSAGE(exporter.has_value(), exporter.error().ToString());
+			const std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+			REQUIRE(outcome.has_value());
+			REQUIRE_MESSAGE(outcome->has_value(), outcome->error().ToString());
+			const std::vector<std::string>& warnings = (*outcome)->Warnings;
+			CHECK(std::ranges::count_if(warnings, [](const std::string& warning)
+			{
+				return warning.contains("Assets/Scenes/Second.scene") && warning.contains("unsaved changes");
+			}) == 1);
+			CHECK(std::ranges::none_of(warnings, [](const std::string& warning)
+			{
+				return warning.contains("Assets/Scenes/Main.scene") && warning.contains("unsaved changes");
+			}));
 		}
 
 		// M16 review R24: the exporter named every unresolved Script.Fields value SCRIPT_UNKNOWN_FIELD_OVERRIDE, also the values

@@ -146,6 +146,34 @@ class AssetTests(AutomationTestCase):
         restored = client.call("asset.getImportSettings", {"asset": "Assets/Checker.png"})
         self.assertEqual(restored["settings"]["Usage"], "Color")
 
+    def test_import_settings_of_a_nested_gltf_rewrite_the_prefab_nesting_it(self) -> None:
+        # Docs/Decisions/0031-m20-contract.md decision 8: a glTF that the scene holds only nested in a Room instance
+        # follows a new Scale (node translations are scaled) through Room.prefab, which the same undo step rewrites;
+        # one undo restores the prefab and the room.
+        client, root = self.open_editor_with_scene()
+        models = root / "Assets" / "Models"
+        models.mkdir(parents=True, exist_ok=True)
+        shutil.copy(GLTF_FIXTURES / "Hierarchy.gltf", models / "Hierarchy.gltf")
+        client.call("project.refreshAssets")
+        client.call("entity.create", {"name": "Room"})
+        client.call("prefab.instantiate", {"prefab": "Assets/Models/Hierarchy.gltf", "parent": "/Room"})
+        client.call("prefab.create", {"entity": "/Room", "path": "Assets/Prefabs/Room.prefab",
+                                      "replaceWithInstance": True})
+        room_file = root / "Assets" / "Prefabs" / "Room.prefab"
+        room_before = room_file.read_text(encoding="utf-8")
+
+        def base_height() -> float:
+            base = client.call("entity.get", {"entity": "/Room/Hierarchy/Base", "components": ["Transform"]})
+            return base["entity"]["components"]["Transform"]["Translation"][1]
+
+        self.assertAlmostEqual(base_height(), 1.0, places=6)
+        client.call("asset.setImportSettings", {"asset": "Assets/Models/Hierarchy.gltf", "settings": {"Scale": 0.5}})
+        self.assertNotEqual(room_file.read_text(encoding="utf-8"), room_before)
+        self.assertAlmostEqual(base_height(), 0.5, places=6)
+        client.call("edit.undo")
+        self.assertEqual(room_file.read_text(encoding="utf-8"), room_before)
+        self.assertAlmostEqual(base_height(), 1.0, places=6)
+
     def test_asset_create_dry_run_writes_nothing(self) -> None:
         client, root = self.open_editor_with_scene()
         result = client.call("asset.create", {"type": "Material", "path": "Assets/Dry.material", "dryRun": True})

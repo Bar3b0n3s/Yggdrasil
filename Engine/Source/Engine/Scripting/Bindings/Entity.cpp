@@ -10,6 +10,7 @@
 #include "Engine/Scene/EntityBounds.h"
 #include "Engine/Scene/TransformSystem.h"
 #include "Engine/Scripting/Private/ScriptEngineAccess.h"
+#include "Engine/Scripting/Private/ScriptSlots.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Scripting/ScriptLimits.h"
 
@@ -17,7 +18,10 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <format>
+#include <optional>
+#include <string>
 
 namespace Engine {
 
@@ -237,11 +241,14 @@ namespace Engine {
 			EntityChecked(call, info.FromJson(checked.get(), JsonReader(*json), context));
 			if (name == "Script")
 			{
-				// Loading the script asset (an import when it is not cached) is host time (Detail::LoadAssetAsHost).
-				const AssetHandle script = static_cast<const ScriptComponent*>(checked.get())->Script.GetHandle();
-				EntityChecked(call, call.Engine->RunHostOperation([&call, script]()
+				// Every slot's script must be a Behaviour. Loading a script asset (an import when it is not cached) is host
+				// time (Detail::LoadAssetAsHost).
+				const ScriptComponent& component = *static_cast<const ScriptComponent*>(checked.get());
+				EntityChecked(call, call.Engine->RunHostOperation([&call, &component]() -> Status
 				{
-					return Detail::ValidateBehaviourAssignment(call.Engine->GetHost(), script);
+					for (uint32_t slot = 0; slot < Detail::GetScriptSlotCount(component); ++slot)
+						ENGINE_TRY(Detail::ValidateBehaviourAssignment(call.Engine->GetHost(), Detail::GetScriptSlot(component, slot).Script));
+					return {};
 				}));
 			}
 			EntityMutation(call);
@@ -284,7 +291,16 @@ namespace Engine {
 		static int EntityScript(ScriptCall& call)
 		{
 			const Entity entity = EntityReadSelf(call);
-			EntityChecked(call, Detail::ScriptEngineAccess::PushInstance(call, entity.GetUUID()));
+			std::optional<std::string> name;
+			if (!Lua::IsNoneOrNil(call, 2))
+				name = Lua::Check<std::string>(call, 2);
+			EntityChecked(call, Detail::ScriptEngineAccess::PushScript(call, entity.GetUUID(), name));
+			return 1;
+		}
+		static int EntityScripts(ScriptCall& call)
+		{
+			const Entity entity = EntityReadSelf(call);
+			EntityChecked(call, Detail::ScriptEngineAccess::PushScripts(call, entity.GetUUID()));
 			return 1;
 		}
 		static int EntityParent(ScriptCall& call)
@@ -427,7 +443,8 @@ namespace Engine {
 				.Method("GetComponent", Utils::EntityComponent, "(self: Entity, name: string) -> any", "Get a component proxy, or nil when absent.", read)
 				.Method("AddComponent", Utils::EntityAddComponent, "(self: Entity, name: string, values: {[string]: any}?) -> any", addComponent, write)
 				.Method("RemoveComponent", Utils::EntityRemoveComponent, "(self: Entity, name: string) -> ()", "Remove a removable component when no present component requires it.", write)
-				.Method("GetScript", Utils::EntityScript, "(self: Entity) -> any", "Get the existing behaviour instance or nil; cast to the module's exported instance type.", read)
+				.Method("GetScript", Utils::EntityScript, "(self: Entity, name: string?) -> any", "Get the instance of the first script slot whose behaviour has this name, or of the first slot without a name; nil when there is none.", read)
+				.Method("GetScripts", Utils::EntityScripts, "(self: Entity) -> {any}", "Get the live instances of the entity's script slots, in slot order.", read)
 				.Method("GetParent", Utils::EntityParent, "(self: Entity) -> Entity?", "Get the parent, or nil for a root.", read)
 				.Method("SetParent", Utils::EntitySetParent, "(self: Entity, parent: Entity?, keepWorld: boolean?) -> ()", "Reparent to the last sibling, preserving world pose by default; synchronize effective lifecycle transitions.", write)
 				.Method("GetChildren", Utils::EntityChildren, "(self: Entity) -> {Entity}", "Copy the children in sibling order.", read)

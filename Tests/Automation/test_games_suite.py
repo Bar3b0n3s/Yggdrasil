@@ -1305,10 +1305,10 @@ class GamesSuiteEndToEndTests(AutomationTestCase):
                                      "return Script.Define(\"Brick\", Brick)\n"})
         client.call("entity.create", {"name": "Brick", "components": {
             "Transform": {"Translation": [0, 3, -4]},
-            "Script": {"Script": "Assets/Scripts/Brick.luau", "Fields": {"Points": 1}}}})
+            "Script": {"Scripts": [{"Script": "Assets/Scripts/Brick.luau", "Fields": {"Points": 1}}]}}})
         client.call("prefab.create", {"entity": "/Brick", "path": brick, "replaceWithInstance": True})
         client.call("prefab.instantiate", {"prefab": brick, "name": "Brick2",
-                                           "components": {"Script": {"Fields": {"Points": 5}}}})
+                                           "components": {"Script": {"Scripts": [{"Fields": {"Points": 5}}]}}})
         # A game needs a replay whose input plays it (games.check_replay_acceptance): the suite taps a key the Hopper
         # moves on, so the recording carries input events and fails the input check's run without them.
         client.call("script.write", {"path": "Assets/Scripts/Hopper.luau", "source": "--!strict\nlocal Hopper = {}\n"
@@ -1316,8 +1316,8 @@ class GamesSuiteEndToEndTests(AutomationTestCase):
                                      "\tif Input.IsKeyDown(\"A\") then\n"
                                      "\t\tself.Entity.Transform:Translate(vector.create(0, 1, 0))\n\tend\nend\n"
                                      "return Script.Define(\"Hopper\", Hopper)\n"})
-        client.call("entity.create", {"name": "Hopper",
-                                      "components": {"Script": {"Script": "Assets/Scripts/Hopper.luau"}}})
+        client.call("entity.create", {"name": "Hopper", "components": {
+            "Script": {"Scripts": [{"Script": "Assets/Scripts/Hopper.luau"}]}}})
         client.call("script.write", {"path": SMOKE_SUITE, "source": "--!strict\nreturn Test.Suite(\"Smoke\", "
                                      "function()\n\tTest.Case(\"passes\", function()\n\t\tTest.InjectKey(\"A\", "
                                      "\"Tap\")\n\t\tTest.WaitTicks(4)\n\t\tTest.Expect(true, \"true\")\n\tend)\n"

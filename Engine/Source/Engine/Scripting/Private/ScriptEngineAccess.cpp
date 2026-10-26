@@ -12,8 +12,21 @@
 #include <algorithm>
 #include <limits>
 #include <utility>
+#include <vector>
 
 namespace Engine {
+
+	namespace Utils {
+
+		static void PushTable(ScriptCall& call, int table)
+		{
+			if (table == LUA_NOREF)
+				lua_pushnil(call.State);
+			else
+				lua_getref(call.State, table);
+		}
+
+	}
 
 	namespace Detail {
 
@@ -28,11 +41,50 @@ namespace Engine {
 		{
 			if (call.Engine == nullptr)
 				return MakeError(ErrorCode::InvalidState, "An instance requires an active script engine");
-			const auto found = call.Engine->m_State->Instances.find(entity);
-			if (found == call.Engine->m_State->Instances.end() || found->second.Table == LUA_NOREF || found->second.DestroyPrepared)
-				lua_pushnil(call.State);
-			else
-				lua_getref(call.State, found->second.Table);
+			const ScriptTaskOwner owner = GetOwner(call);
+			Utils::PushTable(call, call.Engine->m_State->FindLiveTable({ entity, owner.Entity == entity ? owner.Slot : 0 }));
+			return {};
+		}
+
+		Status ScriptEngineAccess::PushScript(ScriptCall& call, UUID entity, std::optional<std::string_view> behaviour)
+		{
+			if (call.Engine == nullptr)
+				return MakeError(ErrorCode::InvalidState, "An instance requires an active script engine");
+			const ScriptEngine::State& state = *call.Engine->m_State;
+			if (!behaviour.has_value())
+			{
+				Utils::PushTable(call, state.FindLiveTable({ entity, 0 }));
+				return {};
+			}
+			for (const ScriptEngine::State::InstanceKey key : state.InstancesOf(entity))
+			{
+				const ScriptEngine::State::Instance& instance = state.Instances.find(key)->second;
+				if (instance.Script != nullptr && instance.Script->Name == *behaviour)
+				{
+					Utils::PushTable(call, state.FindLiveTable(key));
+					return {};
+				}
+			}
+			lua_pushnil(call.State);
+			return {};
+		}
+
+		Status ScriptEngineAccess::PushScripts(ScriptCall& call, UUID entity)
+		{
+			if (call.Engine == nullptr)
+				return MakeError(ErrorCode::InvalidState, "An instance requires an active script engine");
+			const ScriptEngine::State& state = *call.Engine->m_State;
+			const std::vector<ScriptEngine::State::InstanceKey> keys = state.InstancesOf(entity);
+			lua_createtable(call.State, static_cast<int>(keys.size()), 0);
+			int index = 0;
+			for (const ScriptEngine::State::InstanceKey key : keys)
+			{
+				const int table = state.FindLiveTable(key);
+				if (table == LUA_NOREF)
+					continue;
+				lua_getref(call.State, table);
+				lua_rawseti(call.State, -2, ++index);
+			}
 			return {};
 		}
 

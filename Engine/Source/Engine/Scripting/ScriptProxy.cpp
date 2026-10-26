@@ -139,8 +139,15 @@ namespace Engine {
 		ValidationContext validation;
 		descriptor->ValidateValue(value, resolve, validation);
 		ENGINE_TRY(Utils::StrictValidation(validation));
-		if (info.GetName() == "Script" && field == "Script")
-			ENGINE_TRY(Detail::ValidateBehaviourAssignment(host, value.AsUUID()));
+		if (info.GetName() == "Script" && field == "Scripts")
+		{
+			// Every slot's script must be a Behaviour (Docs/Decisions/0031-m20-contract.md decision 17).
+			for (const Value& slot : value.GetElements())
+			{
+				if (const Value* script = slot.FindMember("Script"); script != nullptr)
+					ENGINE_TRY(Detail::ValidateBehaviourAssignment(host, script->AsUUID()));
+			}
+		}
 		// The reflection setter also checks this, but validation must precede recording invalidation.
 		if (info.GetName() == "Transform" && field == "WorldPosition")
 			ENGINE_TRY(ValidateWorldPosition(entity.GetParent(), value.AsVec3()));

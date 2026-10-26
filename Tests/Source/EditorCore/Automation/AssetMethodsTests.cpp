@@ -19,7 +19,9 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <format>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <vector>
 
@@ -50,6 +52,26 @@ namespace Engine {
 			const VfsPath path = VfsPath::Create("project", "Assets/Models/" + std::string(file)).value_or(VfsPath());
 			REQUIRE(setup.GetEditor().CreateProjectDirectory(path.GetParent()).has_value());
 			REQUIRE(setup.GetEditor().WriteProjectFile(path, *bytes).has_value());
+		}
+
+		// The scene's /Room: an entity holding an instance of Assets/Models/Hierarchy.gltf, saved as Assets/Prefabs/Room.prefab
+		// and replaced by an instance of it, so the glTF's instance is nested in the room's and Room.prefab nests the glTF
+		// (Docs/Decisions/0031-m20-contract.md decision 8). Returns Room.prefab's file.
+		std::filesystem::path CreateRoomNestingHierarchy(Test::AutomationFixture& setup)
+		{
+			WriteGltfFixture(setup, "Hierarchy.gltf");
+			CallOrFail(setup, "project.refreshAssets", Json::object());
+			CallOrFail(setup, "entity.create", Json{ { "name", "Room" } });
+			CallOrFail(setup, "prefab.instantiate", Json{ { "prefab", "Assets/Models/Hierarchy.gltf" }, { "parent", "/Room" } });
+			CallOrFail(setup, "prefab.create", Json{ { "entity", "/Room" }, { "path", "Assets/Prefabs/Room.prefab" }, { "replaceWithInstance", true } });
+			return setup.GetEditorFixture().GetProjectRoot() / "Assets/Prefabs/Room.prefab";
+		}
+
+		// The height of the glTF's Base node in the room `room` (its Transform's Translation y; Hierarchy.gltf places it at 1).
+		float ReadBaseHeight(Test::AutomationFixture& setup, std::string_view room)
+		{
+			const Json base = CallOrFail(setup, "entity.get", Json{ { "entity", std::format("{}/Hierarchy/Base", room) }, { "components", Json::array({ "Transform" }) } });
+			return JsonReader(base["entity"]["components"]["Transform"]["Translation"][1]).ReadFloat().value_or(-1.0f);
 		}
 
 	}
@@ -415,6 +437,55 @@ namespace Engine {
 			REQUIRE(setup.Call("edit.undo", Json{ { "steps", 1 } }).has_value());
 			CHECK(CallOrFail(setup, "asset.getImportSettings", Json{ { "asset", "Assets/Models/Box.glb" } })["settings"]["Scale"] == Json(1.0f));
 			CHECK(CallOrFail(setup, "entity.bounds", boundsParams)["bounds"][0]["size"] == before["bounds"][0]["size"]);
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 8 (W20.1's integration left it to W20.2's stream S-B): a new version of
+		// a prefab rewrites every prefab nesting it, also when an import setting gives it that version. The scene holds the glTF
+		// only nested in a Room instance, so it has no outermost instance of it; Room.prefab and the room still follow its new
+		// Scale (node translations are scaled, GltfImporter.h) in the same undo step, and one undo restores both.
+		TEST_CASE("AssetMethods: asset.setImportSettings of a glTF a prefab nests rewrites that prefab and its instances in one undo step")
+		{
+			Test::AutomationFixture setup("AssetSettingsNestedGltf");
+			EditorContext& editor = setup.GetEditor();
+			const std::filesystem::path roomFile = CreateRoomNestingHierarchy(setup);
+			const Result<std::string> roomBefore = FileSystem::ReadText(roomFile);
+			REQUIRE(roomBefore.has_value());
+			CHECK(ReadBaseHeight(setup, "/Room") == doctest::Approx(1.0f));
+
+			const size_t steps = editor.GetHistory().GetUndoCount();
+			CallOrFail(setup, "asset.setImportSettings", ParseAssetMethodJson(R"({"asset": "Assets/Models/Hierarchy.gltf", "settings": {"Scale": 0.5}})"));
+			CHECK(editor.GetHistory().GetUndoCount() == steps + 1);
+			CHECK(FileSystem::ReadText(roomFile).value_or(std::string()) != *roomBefore);
+			CHECK(ReadBaseHeight(setup, "/Room") == doctest::Approx(0.5f));
+
+			REQUIRE(setup.Call("edit.undo", Json{ { "steps", 1 } }).has_value());
+			CHECK(FileSystem::ReadText(roomFile).value_or(std::string()) == *roomBefore);
+			CHECK(ReadBaseHeight(setup, "/Room") == doctest::Approx(1.0f));
+		}
+
+		// Decision 8 for asset.reimport: a glTF changed by another program and imported again rewrites the prefab nesting it,
+		// and the scene's instance of that prefab follows, as an undo step of its own ("Update Prefab Instances").
+		TEST_CASE("AssetMethods: asset.reimport of a glTF a prefab nests rewrites that prefab and its instances")
+		{
+			Test::AutomationFixture setup("AssetReimportNestedGltf");
+			const std::filesystem::path roomFile = CreateRoomNestingHierarchy(setup);
+			const Result<std::string> roomBefore = FileSystem::ReadText(roomFile);
+			REQUIRE(roomBefore.has_value());
+
+			// Another program moves the glTF's Base node up.
+			const std::filesystem::path gltfFile = setup.GetEditorFixture().GetProjectRoot() / "Assets/Models/Hierarchy.gltf";
+			const Result<std::string> gltfText = FileSystem::ReadText(gltfFile);
+			REQUIRE(gltfText.has_value());
+			Json gltf = ParseAssetMethodJson(*gltfText);
+			REQUIRE(gltf["nodes"][0]["name"] == Json("Base"));
+			gltf["nodes"][0]["translation"][1] = 2.0;
+			const std::string changed = gltf.dump(2);
+			REQUIRE(FileSystem::WriteFileAtomic(gltfFile, AsBytes(changed), {}).has_value());
+
+			CallOrFail(setup, "asset.reimport", Json{ { "asset", "Assets/Models/Hierarchy.gltf" } });
+			CHECK(FileSystem::ReadText(roomFile).value_or(std::string()) != *roomBefore);
+			CHECK(ReadBaseHeight(setup, "/Room") == doctest::Approx(2.0f));
+			CHECK(setup.GetEditor().GetHistory().GetUndoLabel().contains("Update Prefab Instances"));
 		}
 
 		TEST_CASE("AssetMethods: asset.move refuses a standalone texture that a glTF finds by path")

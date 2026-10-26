@@ -26,7 +26,7 @@ namespace Engine {
 			const AssetHandle script(100);
 			REQUIRE(fixture.AddScript(script, "Assets/Logger.luau", "return Script.Define(\"Logger\", {})").has_value());
 			const Entity entity = fixture.GetScene().CreateEntity("Logger");
-			entity.AddComponent<ScriptComponent>().Script = TypedAssetHandle<AssetType::Script>(script);
+			entity.AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = TypedAssetHandle<AssetType::Script>(script), .Fields = {}, .ExecutionOrder = 0 });
 			fixture.Frame.Tick = 47;
 			REQUIRE(fixture.Start().has_value());
 			const auto path = VfsPath::Parse("project://Assets/LogProbe.luau");

@@ -280,9 +280,9 @@ function T:OnFixedUpdate() Test.Fail("callback ended the case") end
 return Script.Define("CaseFailure", T)
 )"));
 			const Entity entity = fixture.GetScene().CreateEntity("Driver");
-			ScriptComponent component{};
+			ScriptSlot component{};
 			component.Script.SetHandle(behaviour);
-			entity.AddComponent<ScriptComponent>(component);
+			entity.AddComponent<ScriptComponent>(ScriptComponent{ { component } });
 			const auto suite = Test::CollectCaseFixture(fixture, host,
 				"return Test.Suite('Cases', function() Test.Case('Callback', function() Test.WaitTicks(2) end) end)");
 			const auto thread = fixture.GetEngine()->StartCase(suite.Cases[0].Function);
@@ -326,9 +326,9 @@ end
 return Script.Define("TaskFailure", T)
 )"));
 			const Entity entity = fixture.GetScene().CreateEntity("Driver");
-			ScriptComponent component{};
+			ScriptSlot component{};
 			component.Script.SetHandle(behaviour);
-			entity.AddComponent<ScriptComponent>(component);
+			entity.AddComponent<ScriptComponent>(ScriptComponent{ { component } });
 			const auto suite = Test::CollectCaseFixture(fixture, host,
 				"return Test.Suite('Cases', function() Test.Case('Task', function() Test.WaitTicks(10) end) end)");
 			const auto thread = fixture.GetEngine()->StartCase(suite.Cases[0].Function);

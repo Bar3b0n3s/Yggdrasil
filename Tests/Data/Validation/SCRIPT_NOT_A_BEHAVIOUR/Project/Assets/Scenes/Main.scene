@@ -8,7 +8,7 @@
 		"Camera": 1,
 		"DirectionalLight": 1,
 		"AudioListener": 1,
-		"Script": 1
+		"Script": 2
 	},
 	"Entities": [
 		{
@@ -61,9 +61,13 @@
 					"Scale": [1, 1, 1]
 				},
 				"Script": {
-					"Script": "5c41000000000003",
-					"Fields": {},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "5c41000000000003",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		}

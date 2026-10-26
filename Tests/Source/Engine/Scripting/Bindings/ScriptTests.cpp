@@ -69,9 +69,9 @@ end
 return Script.Define("Fields", T)
 )"));
 			const Entity bound = fixture.GetScene().CreateEntity("Bound");
-			ScriptComponent script;
+			ScriptSlot script;
 			script.Script.SetHandle(AssetHandle(210));
-			bound.AddComponent<ScriptComponent>(script);
+			bound.AddComponent<ScriptComponent>(ScriptComponent{ { script } });
 			REQUIRE(fixture.Start());
 			CheckScriptBindings(fixture, R"(
 assert(Scene.FindByName("Bound"):GetScript().Ready)

@@ -12,7 +12,7 @@
 		"BoxCollider": 1,
 		"SphereCollider": 1,
 		"AudioListener": 1,
-		"Script": 1
+		"Script": 2
 	},
 	"Entities": [
 		{
@@ -2738,16 +2738,20 @@
 					"Scale": [1, 1, 1]
 				},
 				"Script": {
-					"Script": "a7e11af237584da5",
-					"Fields": {
-						"Ball": "6b7f6084f0997e04",
-						"Exponent": 1.7,
-						"Frequency": 0.75,
-						"Paddle": "6a10f6b4ecaf4a1e",
-						"Strength": 1.2,
-						"Targets": ["8b16099b93157970", "dcdecb2c8ea19f31", "1df451e6b51f61db", "2d673bca7ec62955", "3905b249a64faac9", "0538ee3941c637e4", "08e1384b08875422", "4d846987dc353f15", "cf665bebc01ef6c8", "d5aeb6c7c401ef67"]
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "a7e11af237584da5",
+							"Fields": {
+								"Ball": "6b7f6084f0997e04",
+								"Exponent": 1.7,
+								"Frequency": 0.75,
+								"Paddle": "6a10f6b4ecaf4a1e",
+								"Strength": 1.2,
+								"Targets": ["8b16099b93157970", "dcdecb2c8ea19f31", "1df451e6b51f61db", "2d673bca7ec62955", "3905b249a64faac9", "0538ee3941c637e4", "08e1384b08875422", "4d846987dc353f15", "cf665bebc01ef6c8", "d5aeb6c7c401ef67"]
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		}

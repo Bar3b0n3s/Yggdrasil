@@ -10,6 +10,8 @@ from pathlib import Path
 from harness import (AutomationTestCase, GPU_EDITOR_ARGUMENTS, app_name, editor_executable,
                      engine_client)
 
+DEFAULT_PANELS = ["SceneHierarchy", "Inspector", "SceneViewport", "GameViewport", "ContentBrowser", "Console"]
+
 
 class EditorUiTests(AutomationTestCase):
     """All child processes disable audio; windowed coverage requires the platform display."""
@@ -135,8 +137,7 @@ class EditorUiTests(AutomationTestCase):
         client.call("edit.select", {"entities": [created["entity"]["id"]]})
         state = client.call("editor.state")
         # The default layout of an open project, in stable panel order; the launcher closed when the project opened.
-        default_panels = ["SceneHierarchy", "Inspector", "SceneViewport", "GameViewport", "ContentBrowser", "Console"]
-        self.assertEqual(state["openPanels"], default_panels)
+        self.assertEqual(state["openPanels"], DEFAULT_PANELS)
         self.assertEqual(state["selection"][0]["name"], "Selected")
         self.assertEqual(state["selectionTarget"], "Edit")
         self.assertEqual(state["uiFrame"], 0)
@@ -145,7 +146,7 @@ class EditorUiTests(AutomationTestCase):
         playing = client.call("editor.state")
         self.assertEqual(playing["mode"], "Play")
         self.assertTrue(playing["lockstepOwner"])
-        self.assertEqual(playing["openPanels"], default_panels)
+        self.assertEqual(playing["openPanels"], DEFAULT_PANELS)
         client.call("play.stop")
         before = client.call("viewport.camera")
         changed = client.call("viewport.camera", {"position": [6, 4, 8]})
@@ -216,6 +217,42 @@ class EditorUiTests(AutomationTestCase):
         self.assertNotEqual(client.call("project.info")["scene"]["name"], "ChangedExternally")
         client.call("scene.open", {"path": "Assets/Scenes/Main.scene", "discardChanges": True, "reload": True})
         self.assertFalse(client.call("editor.state")["sceneChangedOnDisk"])
+
+    def test_editor_state_describes_the_active_scene_tab(self) -> None:
+        """The panels show the active scene tab (ADR 0031 decision 20), and so does editor.state, the UI state agents
+        read: each open scene keeps its selection and its changed-on-disk flag, which editor.state reports while its tab
+        is active; the open panels do not change with the tab."""
+        client, root = self.open_editor_with_scene()
+        main = "Assets/Scenes/Main.scene"
+        second = "Assets/Scenes/Second.scene"
+        created = client.call("entity.create", {"name": "SelectedInMain"})
+        client.call("edit.select", {"entities": [created["entity"]["id"]]})
+        client.call("scene.new", {"path": second, "keepOpen": True})
+        state = client.call("editor.state")
+        self.assertEqual(state["selection"], [])
+        self.assertEqual(state["openPanels"], DEFAULT_PANELS)
+        client.call("scene.activate", {"scene": main})
+        state = client.call("editor.state")
+        self.assertEqual([entity["name"] for entity in state["selection"]], ["SelectedInMain"])
+        self.assertEqual(state["selectionTarget"], "Edit")
+        self.assertEqual(state["openPanels"], DEFAULT_PANELS)
+
+        # Second's file changes on disk while Main's tab is active: only Second's tab carries the flag.
+        source = root / second
+        document = json.loads(source.read_text(encoding="utf-8"))
+        document["Name"] = "ChangedExternally"
+        source.write_text(json.dumps(document), encoding="utf-8")
+        # Bounded state wait, not an elapsed-time assertion; detection may happen on any subsequent safe point.
+        deadline = time.monotonic() + 30
+        while True:
+            scenes = {entry["scene"]["path"]: entry for entry in client.call("scene.list")["scenes"]}
+            if scenes[second]["changedOnDisk"] or time.monotonic() >= deadline:
+                break
+        self.assertTrue(scenes[second]["changedOnDisk"])
+        self.assertFalse(client.call("editor.state")["sceneChangedOnDisk"])
+        client.call("scene.activate", {"scene": second})
+        self.assertTrue(client.call("editor.state")["sceneChangedOnDisk"])
+        self.assertEqual(client.call("editor.state")["selection"], [])
 
 
 if __name__ == "__main__":

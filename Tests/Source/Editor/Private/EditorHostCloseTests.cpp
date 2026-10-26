@@ -9,6 +9,7 @@
 #include "EditorCore/Project/ProjectManager.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/VfsPath.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Support/AutomationTestClient.h"
@@ -19,6 +20,7 @@
 #include <nlohmann/json.hpp>
 
 #include <string>
+#include <vector>
 
 namespace Engine {
 
@@ -97,6 +99,82 @@ namespace Engine {
 			CHECK_FALSE(setup.GetEditor().IsSceneDirty());
 			CHECK(setup.ReadSource().contains("SavedOnClose"));
 			CHECK_FALSE(FileSystem::Exists(setup.Automation.GetEditorFixture().GetProjectRoot() / "Library/Autosave/Manifest.json"));
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 15: the prompt lists every open scene with unsaved changes, in tab
+		// order, and Don't save keeps each of them recoverable.
+		TEST_CASE("EditorHostClose: the prompt lists every dirty open scene and Don't save keeps each recoverable")
+		{
+			HostCloseSetup setup;
+			EditorContext& editor = setup.GetEditor();
+			setup.Dirty("InMain");
+			const Result<VfsPath> second = VfsPath::Parse("project://Assets/Scenes/Second.scene");
+			REQUIRE(second.has_value());
+			REQUIRE(editor.AddScene(editor.CreateScene("Second"), *second).has_value());
+			setup.Dirty("InSecond");
+			const Result<VfsPath> clean = VfsPath::Parse("project://Assets/Scenes/Clean.scene");
+			REQUIRE(clean.has_value());
+			REQUIRE(editor.AddScene(editor.CreateScene("Clean"), *clean).has_value());
+			REQUIRE(setup.Close.RequestClose(true));
+			const auto prompt = setup.Close.GetPrompt();
+			REQUIRE(prompt.has_value());
+			CHECK(prompt->SceneNames == std::vector<std::string>{ "Main", "Second" });
+			CHECK(prompt->SceneName == "Main, Second");
+			CHECK(prompt->CanSave);
+			REQUIRE(setup.Close.Choose(EditorCloseChoice::Discard).has_value());
+			REQUIRE(setup.SafePoint());
+			const auto offers = setup.Saves.FindRecoveries();
+			REQUIRE_MESSAGE(offers.has_value(), offers.error().ToString());
+			REQUIRE(offers->size() == 2);
+			const auto root = setup.Automation.GetEditorFixture().GetProjectRoot() / "Library/Autosave";
+			CHECK(FileSystem::ReadText(root / (*offers)[0].Generation / "Scene.json").value_or("").contains("InMain"));
+			CHECK(FileSystem::ReadText(root / (*offers)[1].Generation / "Scene.json").value_or("").contains("InSecond"));
+		}
+
+		// Decision 15: Save writes every dirty open scene (project.save) when several are dirty, and the editor closes once
+		// they are written.
+		TEST_CASE("EditorHostClose: Save writes every dirty open scene and then closes")
+		{
+			HostCloseSetup setup;
+			EditorContext& editor = setup.GetEditor();
+			setup.Dirty("InMain");
+			const Result<VfsPath> second = VfsPath::Parse("project://Assets/Scenes/Second.scene");
+			REQUIRE(second.has_value());
+			REQUIRE(editor.AddScene(editor.CreateScene("Second"), *second).has_value());
+			setup.Dirty("InSecond");
+			REQUIRE(setup.Close.RequestClose(true));
+			REQUIRE(setup.Close.GetPrompt()->SceneNames == std::vector<std::string>{ "Main", "Second" });
+			REQUIRE(setup.Close.Choose(EditorCloseChoice::Save).has_value());
+			REQUIRE(setup.SafePoint());
+			CHECK_FALSE(setup.Close.GetPrompt());
+			CHECK_FALSE(editor.IsAnySceneDirty());
+			CHECK(setup.ReadSource().contains("InMain"));
+			const auto root = setup.Automation.GetEditorFixture().GetProjectRoot();
+			CHECK(FileSystem::ReadText(root / "Assets/Scenes/Second.scene").value_or("").contains("InSecond"));
+		}
+
+		// Decision 15: the one dirty open scene is saved also when it is not the active one, whose scene.save would write
+		// the clean active scene instead, and the editor then closes.
+		TEST_CASE("EditorHostClose: Save writes the one dirty open scene that is not active and then closes")
+		{
+			HostCloseSetup setup;
+			EditorContext& editor = setup.GetEditor();
+			const OpenSceneId main = editor.GetActiveSceneId();
+			const std::string before = setup.ReadSource();
+			const Result<VfsPath> second = VfsPath::Parse("project://Assets/Scenes/Second.scene");
+			REQUIRE(second.has_value());
+			REQUIRE(editor.AddScene(editor.CreateScene("Second"), *second).has_value());
+			setup.Dirty("InSecond");
+			REQUIRE(editor.ActivateScene(main).has_value());
+			REQUIRE(setup.Close.RequestClose(true));
+			REQUIRE(setup.Close.GetPrompt()->SceneNames == std::vector<std::string>{ "Second" });
+			REQUIRE(setup.Close.Choose(EditorCloseChoice::Save).has_value());
+			REQUIRE(setup.SafePoint());
+			CHECK_FALSE(setup.Close.GetPrompt());
+			CHECK_FALSE(editor.IsAnySceneDirty());
+			CHECK(setup.ReadSource() == before);
+			const auto root = setup.Automation.GetEditorFixture().GetProjectRoot();
+			CHECK(FileSystem::ReadText(root / "Assets/Scenes/Second.scene").value_or("").contains("InSecond"));
 		}
 
 		TEST_CASE("EditorHostClose: Don't save keeps a final recovery generation and closes")

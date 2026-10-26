@@ -23,7 +23,7 @@
 		"CharacterController": 1,
 		"AudioSource": 1,
 		"AudioListener": 1,
-		"Script": 1
+		"Script": 2
 	},
 	"Entities": [
 		{
@@ -198,12 +198,16 @@
 					"Group": "Music"
 				},
 				"Script": {
-					"Script": "c0ffee0000000001",
-					"Fields": {
-						"Goal": "2b00000000000007",
-						"Torque": 30
-					},
-					"ExecutionOrder": -5
+					"Scripts": [
+						{
+							"Script": "c0ffee0000000001",
+							"Fields": {
+								"Goal": "2b00000000000007",
+								"Torque": 30
+							},
+							"ExecutionOrder": -5
+						}
+					]
 				}
 			}
 		},

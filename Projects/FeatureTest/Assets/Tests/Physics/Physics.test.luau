@@ -43,7 +43,7 @@ return Test.Suite("Physics", function()
 		assert(script, "ContactProbe.luau loads")
 		for _, name in { "Compound", "Zone", "Scanner" } do
 			local entity = find(name)
-			Test.Expect(entity:AddComponent("Script", { Script = script }) ~= nil, `{name} takes a Script component`)
+			Test.Expect(entity:AddComponent("Script", { Scripts = { { Script = script, Fields = {}, ExecutionOrder = 0 } } }) ~= nil, `{name} takes a Script component`)
 			Test.ExpectEqual(#probe(name).Collisions, 0, `{name}'s probe starts empty`)
 		end
 	end)

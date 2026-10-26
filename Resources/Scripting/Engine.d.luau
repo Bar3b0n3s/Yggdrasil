@@ -42,7 +42,7 @@ export type CursorMode = "Normal" | "Hidden" | "Locked"
 export type DiagnosticSeverity = "Warning" | "Error"
 
 -- The kind of an engine event (§4.9).
-export type EngineEventType = "EntityCreated" | "EntityDestroyed" | "ComponentChanged" | "SceneOpened" | "SceneChangedOnDisk" | "PlayStateChanged" | "AssetReloaded" | "AssetImportFailed" | "ScriptErrorRaised" | "DiagnosticsChanged" | "AutomationClientDisconnected"
+export type EngineEventType = "EntityCreated" | "EntityDestroyed" | "ComponentChanged" | "SceneOpened" | "SceneChangedOnDisk" | "PlayStateChanged" | "AssetReloaded" | "AssetImportFailed" | "ScriptErrorRaised" | "DiagnosticsChanged" | "AutomationClientDisconnected" | "SceneActivated" | "SceneClosed"
 
 -- The build configuration an export targets (§2.2).
 export type ExportConfiguration = "Debug" | "Release" | "Dist"
@@ -447,8 +447,10 @@ declare extern type Entity with
 	function GetComponent(self, name: "Script"): Script?
 	-- Get the parent, or nil for a root. [All modes; Runtime|Test; pure/read]
 	GetParent: (self: Entity) -> Entity?
-	-- Get the existing behaviour instance or nil; cast to the module's exported instance type. [All modes; Runtime|Test; pure/read]
-	GetScript: (self: Entity) -> any
+	-- Get the instance of the first script slot whose behaviour has this name, or of the first slot without a name; nil when there is none. [All modes; Runtime|Test; pure/read]
+	GetScript: (self: Entity, name: string?) -> any
+	-- Get the live instances of the entity's script slots, in slot order. [All modes; Runtime|Test; pure/read]
+	GetScripts: (self: Entity) -> {any}
 	-- Copy tags in insertion order. [All modes; Runtime|Test; pure/read]
 	GetTags: (self: Entity) -> {string}
 	-- Get this entity's render mesh world AABB; nil without a mesh. [All modes; Runtime|Test; pure/read]
@@ -703,14 +705,10 @@ declare extern type RigidBody with
 	WakeUp: (self: RigidBody) -> ()
 end
 
--- Attaches a Behaviour script to the entity (one per entity).
+-- Attaches Behaviour scripts to the entity, an ordered list of slots.
 declare extern type Script with
-	-- The script's place in callback order: lower values run first, ties in canonical entity order. [All modes; Runtime|Test; pure/read; setter mutates]
-	ExecutionOrder: number
-	-- Overrides of the script's declared fields by name, each checked against the field's declared type; an unknown or mismatching override is kept and reported, and the field uses its declared default. A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
-	Fields: {[string]: any}
-	-- The Behaviour script to run. [All modes; Runtime|Test; pure/read; setter mutates]
-	Script: AssetRef?
+	-- The behaviours of the entity, in slot order; each slot is its own instance. A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
+	Scripts: {{Script: AssetRef?, Fields: {[string]: any}, ExecutionOrder: number}}
 end
 
 -- A sphere-shaped collider in the entity's space.

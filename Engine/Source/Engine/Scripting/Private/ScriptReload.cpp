@@ -76,6 +76,7 @@ namespace Engine {
 		struct ReloadInstance
 		{
 			UUID Entity{};
+			uint32_t Slot = 0;
 			Ref<const ScriptData> Data{};
 			int Table = LUA_NOREF;
 			bool Recreated = false;
@@ -423,9 +424,9 @@ namespace Engine {
 		for (const auto& path : loadedModules)
 			if (const auto handle = assets->Resolve(path))
 				ENGINE_TRY(add(*handle));
-		for (const auto& [entity, instance] : Instances)
+		for (const auto& [key, instance] : Instances)
 		{
-			static_cast<void>(entity);
+			static_cast<void>(key);
 			ENGINE_TRY(add(instance.Handle));
 		}
 		std::map<AssetHandle, std::set<AssetHandle>> dependencies;
@@ -724,7 +725,8 @@ namespace Engine {
 					lua_pop(call.State, 1);
 				}
 
-				for (const auto& [id, instance] : m_State->Instances)
+				// Every instance of a reloaded behaviour, whatever its slot.
+				for (const auto& [key, instance] : m_State->Instances)
 				{
 					const auto module = std::ranges::find_if(reloadModules, [&instance](const auto& item)
 					{
@@ -738,7 +740,7 @@ namespace Engine {
 					if (recreated)
 					{
 						lua_newtable(call.State);
-						Lua::Push(call, ScriptEntityIdentity{ id, GetHost().GetSceneGeneration() });
+						Lua::Push(call, ScriptEntityIdentity{ key.Entity, GetHost().GetSceneGeneration() });
 						lua_rawsetfield(call.State, -2, "Entity");
 					}
 					else
@@ -783,7 +785,7 @@ namespace Engine {
 					lua_pop(call.State, 1);
 					if (!recreated)
 						ENGINE_TRY(AddPatch(call.State, roots, patches, instance.Table, candidateReference));
-					instances.push_back({ id, module->Data, recreated ? candidateReference : instance.Table, recreated });
+					instances.push_back({ key.Entity, key.Slot, module->Data, recreated ? candidateReference : instance.Table, recreated });
 				}
 				ENGINE_TRY(call.PrepareHostMutation());
 				ReserveAndPatch(call, patches);
@@ -833,12 +835,12 @@ namespace Engine {
 			}
 		for (const auto& update : instances)
 		{
-			const auto found = m_State->Instances.find(update.Entity);
+			const auto found = m_State->Instances.find({ update.Entity, update.Slot });
 			if (found == m_State->Instances.end())
 				continue;
 			found->second.Script = update.Data;
 			found->second.FaultDisabled = false;
-			m_State->DisabledHistory.erase(update.Entity);
+			m_State->DisabledHistory.erase(found->first);
 			if (update.Recreated)
 			{
 				found->second.Table = update.Table;
@@ -853,28 +855,28 @@ namespace Engine {
 			}
 		}
 		roots.Release();
-		const auto reloaded = [&instances](UUID id, bool recreated)
+		const auto reloaded = [&instances](State::InstanceKey key, bool recreated)
 		{
-			return std::ranges::any_of(instances, [id, recreated](const auto& item)
+			return std::ranges::any_of(instances, [key, recreated](const auto& item)
 			{
-				return item.Entity == id && item.Recreated == recreated;
+				return item.Entity == key.Entity && item.Slot == key.Slot && item.Recreated == recreated;
 			});
 		};
-		// Recreated instances receive OnCreate in (ExecutionOrder, canonical) order, inactive ones included, exactly as
-		// at creation; surviving instances then receive OnHotReload with every recreated peer already initialized.
+		// Recreated instances receive OnCreate in (ExecutionOrder, canonical entity, slot) order, inactive ones included,
+		// exactly as at creation; surviving instances then receive OnHotReload with every recreated peer already initialized.
 		m_State->RefreshLifecycleOrder();
 		struct Recreated
 		{
 			int32_t Order = 0;
-			UUID Entity{};
+			State::InstanceKey Key{};
 			uint64_t Serial = 0;
 		};
 		std::vector<Recreated> recreated;
-		for (const UUID id : m_State->LifecycleOrder)
+		for (const State::InstanceKey key : m_State->LifecycleOrder)
 		{
-			const auto found = m_State->Instances.find(id);
-			if (found != m_State->Instances.end() && reloaded(id, true) && GetHost().GetScene().FindEntityByID(id))
-				recreated.push_back({ found->second.Order, id, found->second.Serial });
+			const auto found = m_State->Instances.find(key);
+			if (found != m_State->Instances.end() && reloaded(key, true) && GetHost().GetScene().FindEntityByID(key.Entity))
+				recreated.push_back({ found->second.Order, key, found->second.Serial });
 		}
 		std::stable_sort(recreated.begin(), recreated.end(), [](const Recreated& left, const Recreated& right)
 		{
@@ -882,13 +884,13 @@ namespace Engine {
 		});
 		for (const Recreated& entry : recreated)
 		{
-			const auto found = m_State->Instances.find(entry.Entity);
+			const auto found = m_State->Instances.find(entry.Key);
 			if (found != m_State->Instances.end() && found->second.Serial == entry.Serial)
-				m_State->Invoke(entry.Entity, "OnCreate", nullptr, true);
+				m_State->Invoke(entry.Key, "OnCreate", nullptr, true);
 		}
-		for (UUID id : m_State->OrderedInstances(false))
-			if (reloaded(id, false))
-				m_State->Invoke(id, "OnHotReload");
+		for (const State::InstanceKey key : m_State->OrderedInstances(false))
+			if (reloaded(key, false))
+				m_State->Invoke(key, "OnHotReload");
 		return ScriptReloadResult{ .Scripts = std::move(ordered) };
 #endif
 	}

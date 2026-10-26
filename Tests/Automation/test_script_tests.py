@@ -145,8 +145,8 @@ class ScriptTestRunnerTests(AutomationTestCase):
                     "local Hopper = {}\nfunction Hopper.OnFixedUpdate(self: any, dt: number)\n"
                     "\tif Input.IsKeyDown(\"A\") then\n\t\tself.Entity.Transform:Translate(vector.create(0, 1, 0))\n"
                     "\tend\nend\nreturn Script.Define(\"Hopper\", Hopper)\n"})
-        client.call("entity.create", {"name": "Hopper",
-                                      "components": {"Script": {"Script": "Assets/Scripts/Hopper.luau"}}})
+        client.call("entity.create", {"name": "Hopper", "components": {
+            "Script": {"Scripts": [{"Script": "Assets/Scripts/Hopper.luau"}]}}})
         self.configure_suite(client, 'return Test.Suite("Inputs", function()\n'
                              'Test.Case("inject", function()\n'
                              'Test.ExpectEqual(Scene.GetLoadParameters().level, 3)\n'

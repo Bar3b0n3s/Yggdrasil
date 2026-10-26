@@ -9,6 +9,8 @@
 #include "EditorCore/Project/ProjectManager.h"
 #include "Engine/Core/FileSystem.h"
 
+#include <vector>
+
 namespace Engine {
 
 	Result<ProjectOpenResult> OpenProjectWithRecovery(EditorMethodContext& context, const ProjectOpenParams& params)
@@ -25,9 +27,10 @@ namespace Engine {
 		if (error)
 			return MakeError(ErrorCode::Io, "cannot resolve project path: {}", error.message());
 		ENGINE_TRY_ASSIGN(Scope<LoadedProject> project, ProjectManager::OpenProject(path.lexically_normal(), { .StrictUnknowns = editor.GetSpecification().StrictUnknowns }, editor.GetTypeRegistry()));
-		ENGINE_TRY_ASSIGN(const auto recovery, Utils::ReadAutosaveRecovery(*project));
+		// Every scene with a recoverable generation (M20, Docs/Decisions/0031-m20-contract.md decision 15).
+		ENGINE_TRY_ASSIGN(const std::vector<Utils::AutosaveRecoveryData> recoveries, Utils::ReadAutosaveRecoveries(*project));
 		Autosave* service = context.GetServer().GetSpecification().AutosaveService;
-		if (recovery && service == nullptr)
+		if (!recoveries.empty() && service == nullptr)
 			return MakeError(ErrorCode::Unsupported, "project.open recovery needs the host's long-lived autosave service");
 		ProjectOpenResult result;
 		for (const ValidationIssue& issue : project->GetLoadReport().Diagnostics)
@@ -35,17 +38,21 @@ namespace Engine {
 			Utils::LogLoadDiagnostic(FileSystem::PathToUtf8(project->GetProjectFile()), issue.Severity, issue.JsonPointer, issue.Message, issue.Code);
 			result.Warnings.push_back(issue.JsonPointer.empty() ? issue.Message : std::format("{}: {}", issue.JsonPointer, issue.Message));
 		}
-		if (recovery)
+		if (!recoveries.empty())
 		{
-			ENGINE_TRY(service->OpenRecoveredProject(std::move(project), recovery->Info));
+			std::vector<AutosaveRecoveryInfo> offers;
+			offers.reserve(recoveries.size());
+			for (const Utils::AutosaveRecoveryData& recovery : recoveries)
+				offers.push_back(recovery.Info);
+			ENGINE_TRY(service->OpenRecoveredProject(std::move(project), offers));
 		}
 		else
 		{
 			ENGINE_TRY(editor.OpenProject(std::move(project)));
 		}
 		result.Project = Utils::MakeProjectSummary(editor);
-		result.RecoveryAvailable = recovery.has_value();
-		result.Recovered = recovery.has_value();
+		result.RecoveryAvailable = !recoveries.empty();
+		result.Recovered = !recoveries.empty();
 		return result;
 	}
 

@@ -33,6 +33,7 @@
 #include <cctype>
 #include <cmath>
 #include <filesystem>
+#include <format>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -185,6 +186,10 @@ namespace Engine {
 		bool CreateScene = true;
 		bool DiscardForNewScene = false;
 		bool SaveForNewScene = false;
+		bool KeepOpen = false;                     // the scene dialog's "Open in a new tab", kept between dialogs
+		OpenSceneId ActiveScene = NoOpenScene;     // the active scene the panels last followed (FollowActiveScene)
+		std::optional<OpenSceneId> CloseRequest{}; // a dirty tab's close button, which opens the close prompt
+		OpenSceneId ClosingScene = NoOpenScene;    // the open scene the close prompt asks about
 		bool LayoutInitialized = false;
 		std::string LayoutIniFile{};
 		bool ResetLayout = false;
@@ -255,12 +260,184 @@ namespace Engine {
 				ENGINE_ERROR("Editor action: {}", error.ToString());
 			ErrorMessage = message;
 		}
+
+		// Submits a user action; `cancelGesture` also ends the inspector's gesture at the next safe point.
+		void Queue(std::string_view method, const Json& params, bool cancelGesture = false)
+		{
+			auto submitted = Context.Actions.Submit(method, params);
+			if (submitted)
+			{
+				Tickets.push_back(*submitted);
+				CancelGesture |= cancelGesture;
+			}
+			else
+				ReportFailure(submitted.error());
+		}
+
+		// The panels show the active scene (Docs/Decisions/0031-m20-contract.md decision 20). When another tab becomes active,
+		// or the active scene is replaced, the inspector's gesture belonged to the scene it left, so it ends unwritten.
+		void FollowActiveScene()
+		{
+			const OpenSceneId active = Context.Editor.GetActiveSceneId();
+			if (active == ActiveScene)
+				return;
+			Inspector.CancelEdit(Context);
+			ActiveScene = active;
+		}
+
+		// The scene tabs (decision 20): one per open scene in tab order, each showing its scene's name with " *" while it has
+		// unsaved changes, the active one highlighted. A click on another tab submits scene.activate, a close button
+		// scene.close, both naming the tab's scene by its open-scene id (the scene target); a dirty tab's close button opens
+		// the close prompt instead (DrawClosePrompt). Drawn as items of their own rather than a Dear ImGui tab bar, whose new
+		// tabs first show a frame after they are submitted and whose labels end at "##": a frame drawn right after scene.new
+		// shows the new tab, and every scene name shows in full.
+		void DrawSceneTabs(bool interactive)
+		{
+			const EditorContext& editor = Context.Editor;
+			struct SceneTab
+			{
+				OpenSceneInfo Scene{};
+				std::string Label{};
+				float Width = 0.0f;
+			};
+			std::vector<SceneTab> tabs;
+			for (const OpenSceneId id : editor.GetOpenScenes())
+			{
+				Result<OpenSceneInfo> scene = editor.DescribeOpenScene(id);
+				ENGINE_VERIFY(scene.has_value(), "GetOpenScenes lists open scenes only");
+				std::string label = scene->Name + (scene->Dirty ? " *" : "");
+				tabs.push_back({ std::move(*scene), std::move(label) });
+			}
+			if (tabs.empty())
+			{
+				ImGui::AlignTextToFramePadding();
+				ImGui::TextDisabled("No scene open");
+				return;
+			}
+			const ImGuiStyle& style = ImGui::GetStyle();
+			const float closeSize = ImGui::GetFontSize();
+			const float spacing = style.ItemInnerSpacing.x;
+			const float chrome = style.FramePadding.x * 2.0f + spacing + closeSize;
+			float total = 0.0f;
+			for (SceneTab& tab : tabs)
+			{
+				tab.Width = chrome + ImGui::CalcTextSize(tab.Label.data(), tab.Label.data() + tab.Label.size()).x;
+				total += tab.Width;
+			}
+			// Tabs that do not fit share the width; their names end in an ellipsis and show in full in the tooltip.
+			const float available = ImGui::GetContentRegionAvail().x - spacing * static_cast<float>(tabs.size() - 1);
+			if (total > available)
+			{
+				const float share = std::max(chrome + ImGui::CalcTextSize("...").x, available / static_cast<float>(tabs.size()));
+				for (SceneTab& tab : tabs)
+					tab.Width = std::min(tab.Width, share);
+			}
+			ImGui::BeginDisabled(!interactive);
+			for (size_t index = 0; index < tabs.size(); ++index)
+			{
+				const SceneTab& tab = tabs[index];
+				const OpenSceneId id = tab.Scene.Id;
+				if (index != 0)
+					ImGui::SameLine(0.0f, spacing);
+				ImGui::SetNextItemAllowOverlap();
+				// Keyboard navigation reaches the tabs like any button, and shows its focus on them.
+				const bool clicked = ImGui::InvisibleButton(std::format("##SceneTab{}", id).c_str(), ImVec2(tab.Width, ImGui::GetFrameHeight()),
+					ImGuiButtonFlags_EnableNav);
+				const bool hovered = ImGui::IsItemHovered();
+				const ImRect bounds(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+				ImDrawList& draw = *ImGui::GetWindowDrawList();
+				ImGuiCol color = tab.Scene.Active ? ImGuiCol_TabSelected : ImGuiCol_Tab;
+				if (hovered || ImGui::IsItemActive())
+					color = ImGuiCol_TabHovered;
+				ImGui::TabItemBackground(&draw, bounds, ImGuiTabItemFlags_None, ImGui::GetColorU32(color));
+				if (tab.Scene.Active && style.TabBarOverlineSize > 0.0f)
+					draw.AddLine(ImVec2(bounds.Min.x, bounds.Min.y + 1.0f), ImVec2(bounds.Max.x, bounds.Min.y + 1.0f),
+						ImGui::GetColorU32(ImGuiCol_TabSelectedOverline), style.TabBarOverlineSize);
+				ImGui::RenderNavCursor(bounds, ImGui::GetItemID());
+				const ImVec2 closePosition(bounds.Max.x - style.FramePadding.x - closeSize, bounds.Min.y + style.FramePadding.y);
+				const float textEnd = closePosition.x - spacing;
+				ImGui::RenderTextEllipsis(&draw, ImVec2(bounds.Min.x + style.FramePadding.x, bounds.Min.y + style.FramePadding.y),
+					ImVec2(textEnd, bounds.Max.y), textEnd, tab.Label.data(), tab.Label.data() + tab.Label.size(), nullptr);
+				if (hovered)
+				{
+					const std::string where = tab.Scene.Path ? tab.Scene.Path->ToString() : "Not saved to a file yet";
+					ImGui::SetTooltip("%s\n%s%s", tab.Scene.Name.c_str(), where.c_str(), tab.Scene.ChangedOnDisk ? "\nChanged on disk" : "");
+				}
+				const bool closed = ImGui::CloseButton(ImGui::GetID(std::format("##CloseSceneTab{}", id).c_str()), closePosition);
+				if (closed && tab.Scene.Dirty)
+					CloseRequest = id;
+				else if (closed)
+					Queue("scene.close", Json{ { "scene", id } }, true);
+				else if (clicked && !tab.Scene.Active)
+					Queue("scene.activate", Json{ { "scene", id } }, true);
+			}
+			ImGui::EndDisabled();
+		}
+
+		// The prompt of a dirty tab's close button: save and close (the scene's file; a scene never saved can only be
+		// discarded), discard its changes and close, or cancel. Closes itself when the scene is no longer open.
+		void DrawClosePrompt(const ImGuiViewport& viewport)
+		{
+			const EditorContext& editor = Context.Editor;
+			if (CloseRequest)
+			{
+				ClosingScene = *std::exchange(CloseRequest, std::nullopt);
+				ImGui::OpenPopup("Close scene");
+			}
+			ImGui::SetNextWindowPos(viewport.GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+			if (!ImGui::BeginPopupModal("Close scene", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+				return;
+			const Result<OpenSceneInfo> scene = editor.DescribeOpenScene(ClosingScene);
+			if (!scene)
+			{
+				ImGui::CloseCurrentPopup();
+				ImGui::EndPopup();
+				return;
+			}
+			const Json target{ { "scene", ClosingScene } };
+			const std::string question = scene->Dirty ? std::format("{} has unsaved changes.", scene->Name) : std::format("Close {}?", scene->Name);
+			ImGui::TextUnformatted(question.c_str());
+			if (scene->Dirty && !scene->Path)
+				ImGui::TextWrapped("It was never saved to a file, so its changes can only be discarded.");
+			ImGui::Separator();
+			if (scene->Dirty)
+			{
+				ImGui::BeginDisabled(editor.IsReadOnly() || !scene->Path);
+				if (ImGui::Button("Save and close"))
+				{
+					Json params = target;
+					params["save"] = true;
+					Queue("scene.close", params, true);
+					ImGui::CloseCurrentPopup();
+				}
+				ImGui::EndDisabled();
+				ImGui::SameLine();
+				if (ImGui::Button("Discard changes"))
+				{
+					Json params = target;
+					params["discardChanges"] = true;
+					Queue("scene.close", params, true);
+					ImGui::CloseCurrentPopup();
+				}
+			}
+			else if (ImGui::Button("Close scene"))
+			{
+				Queue("scene.close", target, true);
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel"))
+				ImGui::CloseCurrentPopup();
+			ImGui::EndPopup();
+		}
 	};
 
 	EditorLayer::EditorLayer(EditorPanelContext& context)
 		: m_State(CreateScope<State>(context))
 	{
 		m_State->HadProject = context.Editor.HasProject();
+		// The panels show the scene active now; only a later change of the active scene ends a gesture (FollowActiveScene).
+		m_State->ActiveScene = context.Editor.GetActiveSceneId();
 		if (context.Editor.GetUiState().GetOpenPanels().empty())
 			context.Editor.GetUiState().ResetLayout(context.Editor.HasProject());
 		m_State->PanelSettings.Ui = &context.Editor.GetUiState();
@@ -292,8 +469,12 @@ namespace Engine {
 			m_State->Inspector.CancelEdit(context);
 			m_State->CancelGesture = false;
 		}
+		// Before a queued edit commits (an agent may have activated another scene since the last frame) and again after the
+		// queued actions ran (the scene tabs' own activations), so the panels draw the active scene.
+		m_State->FollowActiveScene();
 		ENGINE_TRY(m_State->Inspector.ApplyQueuedEdit(context));
 		context.Actions.Pump();
+		m_State->FollowActiveScene();
 		// Destroyed entities and replaced runtime scenes leave the selection before panels draw it.
 		context.Editor.PruneSelection();
 		for (auto ticket = m_State->Tickets.begin(); ticket != m_State->Tickets.end();)
@@ -362,16 +543,9 @@ namespace Engine {
 		const bool canSave = editor.HasScene() && !editor.IsReadOnly() && !testRun;
 		const bool canUndo = !editor.IsReadOnly() && !testRun && editor.GetHistory().CanUndo();
 		const bool canRedo = !editor.IsReadOnly() && !testRun && editor.GetHistory().CanRedo();
-		auto queue = [this, &context](std::string_view method, const Json& params, bool cancelGesture = false)
+		auto queue = [this](std::string_view method, const Json& params, bool cancelGesture = false)
 		{
-			auto submitted = context.Actions.Submit(method, params);
-			if (submitted)
-			{
-				m_State->Tickets.push_back(*submitted);
-				m_State->CancelGesture |= cancelGesture;
-			}
-			else
-				m_State->ReportFailure(submitted.error());
+			m_State->Queue(method, params, cancelGesture);
 		};
 		if (ImGui::BeginMainMenuBar())
 		{
@@ -482,6 +656,18 @@ namespace Engine {
 		}
 		ImGui::End();
 		ImGui::PopStyleVar();
+		// The scene tabs, under the toolbar and above the dock space, so above the scene viewport and every panel that follows
+		// the active scene. A test run's lease refuses activating and closing scenes, so the tabs wait for it.
+		const float tabsPadding = 3.0f * scale;
+		const float tabsHeight = editor.HasProject() ? ImGui::GetFrameHeight() + tabsPadding * 2.0f : 0.0f;
+		if (editor.HasProject())
+		{
+			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f * scale, tabsPadding));
+			if (ImGui::BeginViewportSideBar("##EditorSceneTabs", viewport, ImGuiDir_Up, tabsHeight, barFlags))
+				m_State->DrawSceneTabs(!testRun);
+			ImGui::End();
+			ImGui::PopStyleVar();
+		}
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f * scale, ImGui::GetStyle().FramePadding.y));
 		if (ImGui::BeginViewportSideBar("##EditorStatus", viewport, ImGuiDir_Down, ImGui::GetFrameHeight(), barFlags))
 		{
@@ -530,7 +716,8 @@ namespace Engine {
 			const float rightWidth = std::min(360.0f * scale, work.GetWidth() * 0.30f);
 			const ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, leftWidth / work.GetWidth(), nullptr, &center);
 			const ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, rightWidth / (work.GetWidth() - leftWidth), nullptr, &center);
-			const float bottomHeight = std::min(270.0f * scale, work.GetHeight() * 0.32f);
+			// The scene tabs' row comes out of the scene viewport's column: the bottom panels keep the share they had without it.
+			const float bottomHeight = std::min(270.0f * scale, (work.GetHeight() + tabsHeight) * 0.32f);
 			const ImGuiID bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, bottomHeight / work.GetHeight(), nullptr, &center);
 			ImGui::DockBuilderDockWindow(Utils::EditorWindowTitle(EditorPanel::SceneHierarchy), left);
 			ImGui::DockBuilderDockWindow(Utils::EditorWindowTitle(EditorPanel::Inspector), right);
@@ -669,7 +856,33 @@ namespace Engine {
 				scenePath = m_State->SelectedScene;
 				valid = !scenePath.empty();
 			}
-			if (editor.IsSceneDirty())
+			// A scene that is already open in a tab is shown rather than opened again (scene.open refuses its path).
+			OpenSceneId openTab = NoOpenScene;
+			if (!m_State->CreateScene && valid)
+			{
+				if (const auto path = VfsPath::Create("project", scenePath))
+					openTab = editor.FindOpenScene(*path);
+			}
+			// Open in a new tab (scene.new and scene.open keepOpen): every open scene stays open, so none needs saving first.
+			const bool canKeepOpen = editor.GetOpenScenes().size() < MaxOpenScenes;
+			const bool keepOpen = editor.HasScene() && openTab == NoOpenScene && canKeepOpen && m_State->KeepOpen;
+			if (editor.HasScene() && openTab == NoOpenScene)
+			{
+				ImGui::Spacing();
+				bool shown = keepOpen;
+				ImGui::BeginDisabled(!canKeepOpen);
+				if (ImGui::Checkbox("Open in a new tab", &shown))
+					m_State->KeepOpen = shown;
+				ImGui::EndDisabled();
+				if (!canKeepOpen && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+					ImGui::SetTooltip("The editor keeps up to %zu scenes open. Close a scene tab first.", MaxOpenScenes);
+			}
+			if (openTab != NoOpenScene)
+			{
+				ImGui::Separator();
+				ImGui::TextWrapped("This scene is already open in a tab.");
+			}
+			else if (editor.IsSceneDirty() && !keepOpen)
 			{
 				ImGui::Separator();
 				ImGui::TextWrapped("The current scene has unsaved changes.");
@@ -692,11 +905,9 @@ namespace Engine {
 			if (session != nullptr)
 				ImGui::TextWrapped("Stop the preview before changing scenes.");
 			ImGui::Separator();
-			ImGui::BeginDisabled(!valid || (m_State->CreateScene && editor.IsReadOnly()));
-			if (ImGui::Button(m_State->CreateScene ? "Create scene" : "Open scene"))
+			const auto submitScene = [this, &context](std::string_view method, const Json& params)
 			{
-				const auto submitted = context.Actions.Submit(m_State->CreateScene ? "scene.new" : "scene.open",
-					Json{ { "path", scenePath }, { "save", m_State->SaveForNewScene }, { "discardChanges", m_State->DiscardForNewScene } });
+				const auto submitted = context.Actions.Submit(method, params);
 				if (submitted)
 				{
 					m_State->Tickets.push_back(*submitted);
@@ -706,8 +917,29 @@ namespace Engine {
 				}
 				else
 					m_State->SceneDialogError = submitted.error().GetMessageText();
+			};
+			if (openTab != NoOpenScene)
+			{
+				if (ImGui::Button("Switch to scene"))
+					submitScene("scene.activate", Json{ { "scene", openTab } });
 			}
-			ImGui::EndDisabled();
+			else
+			{
+				ImGui::BeginDisabled(!valid || (m_State->CreateScene && editor.IsReadOnly()));
+				if (ImGui::Button(m_State->CreateScene ? "Create scene" : "Open scene"))
+				{
+					Json params{ { "path", scenePath } };
+					if (keepOpen)
+						params["keepOpen"] = true;
+					else
+					{
+						params["save"] = m_State->SaveForNewScene;
+						params["discardChanges"] = m_State->DiscardForNewScene;
+					}
+					submitScene(m_State->CreateScene ? "scene.new" : "scene.open", params);
+				}
+				ImGui::EndDisabled();
+			}
 			ImGui::EndDisabled();
 			ImGui::SameLine();
 			ImGui::BeginDisabled(m_State->SceneTicket.has_value());
@@ -716,6 +948,7 @@ namespace Engine {
 			ImGui::EndDisabled();
 			ImGui::EndPopup();
 		}
+		m_State->DrawClosePrompt(*viewport);
 		// These run outside every panel window, so they route globally: they work whichever panel has focus, while an active
 		// text field keeps its own Ctrl+Z and Ctrl+Y (InputText claims them through a higher-priority focused route).
 		// A modal dialog owns the keyboard, so they wait until it closes.
@@ -842,7 +1075,16 @@ namespace Engine {
 			{
 				if (offer)
 				{
-					ImGui::TextWrapped("An unsaved version of %s is available.", offer->Recovery.SceneName.c_str());
+					// One offer covers every scene with unsaved changes, and Recover recovers them all (decision 15).
+					if (offer->SceneNames.size() > 1)
+					{
+						std::string names;
+						for (const std::string& name : offer->SceneNames)
+							names += std::format("{}{}", names.empty() ? "" : ", ", name);
+						ImGui::TextWrapped("Unsaved versions of %zu scenes are available: %s.", offer->SceneNames.size(), names.c_str());
+					}
+					else
+						ImGui::TextWrapped("An unsaved version of %s is available.", offer->Recovery.SceneName.c_str());
 					if (offer->Failure)
 						ImGui::TextWrapped("%s", offer->Failure->GetMessageText().c_str());
 					if (!context.Recovery.QueueDecision)

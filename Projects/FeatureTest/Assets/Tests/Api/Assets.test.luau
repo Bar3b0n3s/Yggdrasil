@@ -21,7 +21,7 @@ return Test.Suite("Api.Assets", function()
 		local clip = (speaker.AudioSource :: AudioSource).Clip :: AssetRef
 		Test.ExpectEqual(Assets.GetPath(clip), "Assets/Audio/Beep.sfx")
 		local probe = (Scene.FindByName("Probe") :: Entity):GetComponent("Script") :: Script
-		local script = probe.Script :: AssetRef
+		local script = probe.Scripts[1].Script :: AssetRef
 		local byPath = Assets.Load(Assets.GetPath(script))
 		Test.ExpectEqual(byPath, script)
 	end)

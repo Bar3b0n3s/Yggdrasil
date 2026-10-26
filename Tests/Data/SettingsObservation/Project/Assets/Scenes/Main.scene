@@ -10,7 +10,7 @@
 		"RigidBody": 1,
 		"SphereCollider": 1,
 		"AudioListener": 1,
-		"Script": 1
+		"Script": 2
 	},
 	"Entities": [
 		{
@@ -84,9 +84,13 @@
 					"Scale": [1, 1, 1]
 				},
 				"Script": {
-					"Script": "0b5e0000000000a3",
-					"Fields": {},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "0b5e0000000000a3",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		}

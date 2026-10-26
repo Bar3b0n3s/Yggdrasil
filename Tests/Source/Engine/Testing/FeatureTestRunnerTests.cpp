@@ -111,9 +111,9 @@ namespace Engine {
 			void Behaviour(std::string source)
 			{
 				const auto handle = Script("Assets/Scripts/Driver.luau", std::move(source));
-				ScriptComponent component;
+				ScriptSlot component;
 				component.Script.SetHandle(handle);
-				Compiler.GetScene().CreateEntity("Driver").AddComponent<ScriptComponent>(component);
+				Compiler.GetScene().CreateEntity("Driver").AddComponent<ScriptComponent>(ScriptComponent{ { component } });
 				RefreshScene();
 			}
 

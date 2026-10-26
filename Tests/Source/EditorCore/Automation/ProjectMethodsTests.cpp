@@ -4,13 +4,30 @@
 
 #include "EditorCore/Automation/ProvenanceRecorder.h"
 #include "EditorCore/Automation/RegisterMethods.h"
+#include "EditorCore/Commands/SceneEdit.h"
+#include "EditorCore/EditorContext.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/VfsPath.h"
+#include "Engine/Scene/Entity.h"
+#include "Engine/Scene/Scene.h"
+#include "Engine/Scene/SceneSerializer.h"
 #include "Support/AutomationTestClient.h"
+#include "Support/EditorTestFixture.h"
 #include "Support/ExpectLog.h"
 #include "Support/TestData.h"
 #include "Support/Utf8Path.h"
+
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <filesystem>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace Engine {
 
@@ -19,6 +36,35 @@ namespace Engine {
 		Result<Json> json = JsonReader::Parse(text);
 		REQUIRE(json.has_value());
 		return std::move(*json);
+	}
+
+	static VfsPath ProjectScenePath(std::string_view text)
+	{
+		Result<VfsPath> path = VfsPath::Parse(text);
+		REQUIRE_MESSAGE(path.has_value(), path.error().ToString());
+		return *path;
+	}
+
+	// Writes an empty scene named after `path` and opens it as an additional open scene (EditorContext::AddScene, M20).
+	static OpenSceneId AddProjectOpenScene(EditorContext& editor, std::string_view path)
+	{
+		const VfsPath file = ProjectScenePath(path);
+		Scope<Scene> scene = editor.CreateScene(std::string(file.GetStem()));
+		const Result<std::string> text = SceneSerializer::SaveToString(*scene);
+		REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+		REQUIRE(editor.WriteProjectFile(file, std::as_bytes(std::span(text->data(), text->size()))).has_value());
+		const Result<OpenSceneId> added = editor.AddScene(std::move(scene), file);
+		REQUIRE_MESSAGE(added.has_value(), added.error().ToString());
+		return *added;
+	}
+
+	// Creates an entity named `name` in the addressed scene as one undoable edit; returns its id.
+	static UUID CreateProjectEdit(EditorContext& editor, std::string name)
+	{
+		SceneEdit edit(editor, "Create " + name);
+		const UUID id = editor.GetScene().CreateEntity(std::move(name)).GetUUID();
+		REQUIRE(edit.Commit().has_value());
+		return id;
 	}
 
 	TEST_SUITE("EditorCore")
@@ -411,6 +457,121 @@ namespace Engine {
 			Result<Json> saved = setup.Call("project.save", Json::object());
 			REQUIRE(saved.has_value());
 			CHECK((*saved)["savedFiles"] == Json::array({ "Assets/Scenes/Main.scene" }));
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 14 (E-SCENES): the methods that act on every open scene.
+
+		// Decision 14: project.save and session.shutdown {save} write every dirty open scene, in tab order, whichever tab is
+		// active, and savedFiles lists them in that order.
+		TEST_CASE("ProjectMethods: project.save and session.shutdown save write every dirty open scene in tab order")
+		{
+			Test::AutomationFixture setup("OpenScenesSaveAll");
+			EditorContext& editor = setup.GetEditor();
+			const OpenSceneId main = editor.GetActiveSceneId();
+			REQUIRE(main != NoOpenScene);
+			CreateProjectEdit(editor, "InMain");
+			const OpenSceneId second = AddProjectOpenScene(editor, "project://Assets/Scenes/Second.scene");
+			CreateProjectEdit(editor, "InSecond");
+			REQUIRE(editor.ActivateScene(main).has_value());
+
+			const Json inTabOrder = Json::array({ "Assets/Scenes/Main.scene", "Assets/Scenes/Second.scene" });
+			const Result<Json> saved = setup.Call("project.save", Json::object());
+			REQUIRE_MESSAGE(saved.has_value(), saved.error().ToString());
+			CHECK((*saved)["savedFiles"] == inTabOrder);
+			CHECK_FALSE(editor.IsAnySceneDirty());
+			const std::filesystem::path root = setup.GetEditorFixture().GetProjectRoot();
+			CHECK(FileSystem::ReadText(root / "Assets/Scenes/Main.scene").value_or(std::string()).contains("InMain"));
+			CHECK(FileSystem::ReadText(root / "Assets/Scenes/Second.scene").value_or(std::string()).contains("InSecond"));
+
+			{
+				Result<Scope<EditorSceneTargetScope>> scope = EditorSceneTargetScope::Begin(editor, second);
+				REQUIRE(scope.has_value());
+				CreateProjectEdit(editor, "LaterInSecond");
+			}
+			CreateProjectEdit(editor, "LaterInMain");
+			const Result<Json> shutdown = setup.Call("session.shutdown", Json{ { "save", true } });
+			REQUIRE_MESSAGE(shutdown.has_value(), shutdown.error().ToString());
+			CHECK((*shutdown)["saved"] == Json(true));
+			CHECK((*shutdown)["savedFiles"] == inTabOrder);
+			CHECK_FALSE(editor.IsAnySceneDirty());
+			CHECK(editor.GetShutdownRequest() == std::optional<int>(0));
+		}
+
+		// Decision 14: a dirty open scene refuses what would lose or ignore its changes even when it is not the active one
+		// (project.upgrade, test.run of a suite that plays it, session.shutdown without save or force), and project.save
+		// refuses a dirty scene that was never saved before it writes anything.
+		TEST_CASE("ProjectMethods: a dirty open scene that is not active refuses project.upgrade, test.run and a shutdown without save")
+		{
+			Test::AutomationFixture setup("OpenScenesRefusals");
+			EditorContext& editor = setup.GetEditor();
+			const Json suite{ { "Script", "Assets/Tests/Bound.test.luau" }, { "Scene", "Assets/Scenes/Main.scene" }, { "Modes", Json::array({ "Editor" }) } };
+			REQUIRE(setup.Call("script.write", Json{ { "path", "Assets/Tests/Bound.test.luau" }, { "source", "return Test.Suite('Bound', function()\nTest.Case('runs', function() Test.Expect(true) end)\nend)" } }));
+			REQUIRE(setup.Call("project.setSettings", Json{ { "patch", Json{ { "Testing", Json{ { "Suites", Json::array({ suite }) } } } } } }));
+			const OpenSceneId main = editor.GetActiveSceneId();
+			CreateProjectEdit(editor, "InMain");
+			AddProjectOpenScene(editor, "project://Assets/Scenes/Second.scene");
+			REQUIRE_FALSE(editor.IsSceneDirty());
+			REQUIRE(editor.IsAnySceneDirty());
+
+			const auto refusal = [&setup](std::string_view method, const Json& params)
+			{
+				const Json response = setup.Request(method, params);
+				REQUIRE_MESSAGE(response.contains("error"), response.dump());
+				CHECK(response["error"]["data"]["errorCode"] == Json("InvalidState"));
+				return JsonReader(response["error"]["data"]).ReadMember<std::string>("detail").value_or(std::string());
+			};
+			CHECK(refusal("project.upgrade", Json::object()).contains("'Main'"));
+			CHECK(refusal("session.shutdown", Json::object()).contains("'Main'"));
+			CHECK(refusal("test.run", Json::object()).contains("'Assets/Scenes/Main.scene' is open with unsaved changes"));
+			CHECK_FALSE(editor.GetShutdownRequest().has_value());
+
+			// A dirty scene never saved refuses project.save before any scene is written.
+			const Result<OpenSceneId> untitled = editor.AddScene(editor.CreateScene("Untitled"), std::nullopt);
+			REQUIRE(untitled.has_value());
+			CreateProjectEdit(editor, "Unsaved");
+			const std::filesystem::path mainFile = setup.GetEditorFixture().GetProjectRoot() / "Assets/Scenes/Main.scene";
+			const Result<std::string> mainBefore = FileSystem::ReadText(mainFile);
+			REQUIRE(mainBefore.has_value());
+			CHECK(refusal("project.save", Json::object()).contains("'Untitled'"));
+			CHECK(FileSystem::ReadText(mainFile).value_or(std::string()) == *mainBefore);
+			CHECK(editor.DescribeOpenScene(main)->Dirty);
+		}
+
+		// Decision 14: project.upgrade reloads every open scene whose file it rewrote, each in its tab position, and the scene
+		// active before stays active.
+		TEST_CASE("ProjectMethods: project.upgrade reloads every open scene whose file it rewrote and keeps the active scene")
+		{
+			Test::AutomationFixture setup("OpenScenesUpgradeReload");
+			EditorContext& editor = setup.GetEditor();
+			const OpenSceneId main = editor.GetActiveSceneId();
+			const OpenSceneId second = AddProjectOpenScene(editor, "project://Assets/Scenes/Second.scene");
+			REQUIRE(editor.ActivateScene(main).has_value());
+			// Another program writes both files out of their canonical form.
+			const std::filesystem::path root = setup.GetEditorFixture().GetProjectRoot();
+			for (const std::string_view file : { "Assets/Scenes/Main.scene", "Assets/Scenes/Second.scene" })
+			{
+				const Result<std::string> text = FileSystem::ReadText(root / file);
+				REQUIRE(text.has_value());
+				const Result<Json> document = JsonReader::Parse(*text);
+				REQUIRE(document.has_value());
+				const std::string reformatted = document->dump(4);
+				REQUIRE(FileSystem::WriteFileAtomic(root / file, AsBytes(reformatted), {}).has_value());
+			}
+
+			const Result<Json> upgraded = setup.Call("project.upgrade", Json::object());
+			REQUIRE_MESSAGE(upgraded.has_value(), upgraded.error().ToString());
+			const Json& changed = (*upgraded)["changedFiles"];
+			CHECK(std::find(changed.begin(), changed.end(), Json("Assets/Scenes/Main.scene")) != changed.end());
+			CHECK(std::find(changed.begin(), changed.end(), Json("Assets/Scenes/Second.scene")) != changed.end());
+			// Both were read again (a scene read again gets a new id) in their places, and Main is still active.
+			const std::vector<OpenSceneId> open = editor.GetOpenScenes();
+			REQUIRE(open.size() == 2);
+			CHECK(open[0] != main);
+			CHECK(open[1] != second);
+			CHECK(editor.GetActiveSceneId() == open[0]);
+			CHECK(editor.GetScene().GetName() == "Main");
+			CHECK(editor.DescribeOpenScene(open[1])->Path == std::optional<VfsPath>(ProjectScenePath("project://Assets/Scenes/Second.scene")));
+			CHECK_FALSE(editor.IsAnySceneDirty());
 		}
 	}
 

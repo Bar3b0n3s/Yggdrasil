@@ -7,6 +7,7 @@
 #include "EditorCore/Export/ExecutableResources.h"
 #include "EditorCore/Export/Private/ExportPaths.h"
 #include "EditorCore/Export/TestingExport.h"
+#include "EditorCore/Private/OpenScenes.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "EditorCore/Project/ProjectValidator.h"
 #include "EditorCore/Scripting/EditorScriptService.h"
@@ -646,11 +647,14 @@ namespace Engine {
 			if (!issues.empty())
 				return std::unexpected(ValidationFailure(std::move(issues)));
 
-			if (Editor->HasScene() && Editor->IsSceneDirty() && Editor->GetScenePath().has_value())
+			// Every open scene's (Docs/Decisions/0031-m20-contract.md decision 14), in tab order.
+			for (const Utils::OpenSceneState& open : Utils::ListDirtyOpenScenes(*Editor))
 			{
+				if (!open.Path.has_value())
+					continue;
 				Report.Warnings.push_back(std::format("the open scene '{}' has unsaved changes, which the export leaves out: it packages the saved file "
 													  "(scene.save first)",
-					Editor->GetScenePath()->GetPath()));
+					open.Path->GetPath()));
 			}
 
 			CollectSources();

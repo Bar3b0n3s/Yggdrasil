@@ -9,11 +9,16 @@
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Json/JsonWriter.h"
 #include "Engine/Core/Mounts/MemoryMount.h"
+#include "Engine/Core/VfsPath.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Platform/ProjectLock.h"
 #include "Engine/Scene/Entity.h"
 #include "Support/AutomationTestClient.h"
 #include "Support/EditorTestFixture.h"
+
+#include <filesystem>
+#include <string>
+#include <vector>
 
 namespace Engine {
 
@@ -158,6 +163,11 @@ namespace Engine {
 			const auto opened = setup.Open(true);
 			REQUIRE_MESSAGE(opened.has_value(), opened.error().ToString());
 			REQUIRE((*opened)["recovered"] == true);
+			// Every scene with a recovery opens again, the oldest active (decision 15): the untitled scene recovered last is
+			// the third open scene.
+			EditorContext& editor = setup.Fixture.GetEditor();
+			REQUIRE(editor.GetOpenScenes().size() == 3);
+			REQUIRE(editor.ActivateScene(editor.GetOpenScenes().back()).has_value());
 			CHECK_FALSE(setup.Fixture.GetEditor().GetScenePath().has_value());
 			CHECK(setup.Fixture.GetEditor().GetScene().GetName() == "RecoveredUntitled");
 			CHECK(setup.Service->WriteFatalSnapshot() == AutosaveFatalResult::Disabled);
@@ -178,6 +188,62 @@ namespace Engine {
 			REQUIRE(remaining.has_value());
 			REQUIRE(remaining->has_value());
 			CHECK((**remaining).SceneName == "OtherUntitled");
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 15: project.open {recover} opens every scene with a recoverable
+		// generation, dirty with an empty history, the oldest of them active, and leaves every source file as it was.
+		TEST_CASE("RecoveryMethods: project.open recover opens every recovered scene with the oldest active")
+		{
+			Test::EditorTestFixture fixture("RecoveryMethodsScenes");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			const std::filesystem::path projectFile = editor.GetProject().GetProjectFile();
+			const auto source = fixture.GetProjectRoot() / "Assets/Scenes/Main.scene";
+			const auto before = FileSystem::ReadText(source);
+			REQUIRE(before.has_value());
+			{
+				Autosave service(editor);
+				REQUIRE(service.Publish().has_value());
+				const auto edit = [&editor](std::string name)
+				{
+					SceneEdit change(editor, "Recover");
+					static_cast<void>(editor.GetScene().CreateEntity(std::move(name)));
+					REQUIRE(change.Commit().has_value());
+				};
+				edit("InMain");
+				const Result<VfsPath> second = VfsPath::Parse("project://Assets/Scenes/Second.scene");
+				REQUIRE(second.has_value());
+				REQUIRE(editor.AddScene(editor.CreateScene("Second"), *second).has_value());
+				edit("InSecond");
+				const auto saved = service.Save(AutosaveReason::BeforePlay);
+				REQUIRE_MESSAGE(saved.has_value(), saved.error().ToString());
+				CHECK(saved->Files == std::vector<std::string>{ "Assets/Scenes/Main.scene", "Assets/Scenes/Second.scene" });
+				REQUIRE(service.Reset());
+			}
+			REQUIRE(editor.CloseProject().has_value());
+
+			Autosave service(editor);
+			auto specification = Test::MakeTestServerSpecification();
+			specification.AutosaveService = &service;
+			Test::AutomationTestClient client(editor, specification);
+			const auto opened = client.Call("project.open", Json{ { "path", FileSystem::PathToUtf8(projectFile) }, { "recover", true } });
+			REQUIRE_MESSAGE(opened.has_value(), opened.error().ToString());
+			CHECK((*opened)["recovered"] == true);
+			const std::vector<OpenSceneId> scenes = editor.GetOpenScenes();
+			REQUIRE(scenes.size() == 2);
+			CHECK(editor.GetActiveSceneId() == scenes[0]);
+			CHECK(editor.GetScene().FindEntityByPath("/InMain").IsValid());
+			CHECK(editor.IsSceneDirty());
+			CHECK_FALSE(editor.GetHistory().CanUndo());
+			const Result<OpenSceneInfo> second = editor.DescribeOpenScene(scenes[1]);
+			REQUIRE(second.has_value());
+			CHECK(second->Dirty);
+			CHECK(second->Name == "Second");
+			REQUIRE(editor.FindScene(scenes[1]) != nullptr);
+			CHECK(editor.FindScene(scenes[1])->FindEntityByPath("/InSecond").IsValid());
+			CHECK(*FileSystem::ReadText(source) == *before);
+			CHECK_FALSE(FileSystem::Exists(fixture.GetProjectRoot() / "Assets/Scenes/Second.scene"));
 		}
 
 		TEST_CASE("RecoveryMethods: an available recovery requires the host service before opening mounts")

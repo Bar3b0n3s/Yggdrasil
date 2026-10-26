@@ -22,7 +22,7 @@ namespace Engine {
 	// Tasks inherit the calling behaviour and case. Null Entity means suite/eval-owned work; null Case means ordinary
 	// play. Cancel an owner's work when its entity is destroyed/disabled or its case ends, before releasing the owner.
 	// M20 (S-MULTI; Docs/Decisions/0031-m20-contract.md decision 17): a behaviour is (Entity, Slot), so a task belongs to
-	// the slot whose callback spawned it and a fault of that slot cancels only its tasks; Slot is 0 until stream M-A.
+	// the slot whose callback (or bound evaluation) spawned it, and a fault or teardown of that slot cancels only its tasks.
 	struct ScriptTaskOwner
 	{
 		UUID Entity{};

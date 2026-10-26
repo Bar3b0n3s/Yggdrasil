@@ -242,6 +242,8 @@ namespace Engine {
 				EngineEventType::ScriptErrorRaised,
 				EngineEventType::DiagnosticsChanged,
 				EngineEventType::AutomationClientDisconnected,
+				EngineEventType::SceneActivated,
+				EngineEventType::SceneClosed,
 			};
 			for (const EngineEventType type : types)
 				CHECK(EngineEventTypeFromString(EngineEventTypeToString(type)) == type);

@@ -139,7 +139,7 @@ namespace Engine {
 					{
 						Entity piece = Test::AddBoxBody(scene, "Piece", glm::vec3(static_cast<float>(column) * 2.0f, -0.5f, static_cast<float>(row) * 2.0f),
 							glm::vec3(1.0f, 0.5f, 1.0f), std::nullopt, floor);
-						piece.AddComponent<ScriptComponent>().Script = TypedAssetHandle<AssetType::Script>(AssetHandle(0x5c0de02));
+						piece.AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = TypedAssetHandle<AssetType::Script>(AssetHandle(0x5c0de02)), .Fields = {}, .ExecutionOrder = 0 });
 					}
 				}
 				for (int box = 0; box < 40; ++box)

@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <format>
+#include <limits>
 #include <map>
 #include <optional>
 
@@ -52,7 +53,15 @@ namespace Engine {
 		// reserved member.
 		constexpr std::string_view HelloMethodName = "session.hello";
 		constexpr std::string_view MetaMember = "_meta";
-		constexpr std::array<std::string_view, 3> ReservedMembers = { DryRunMember, IfRevisionMember, MetaMember };
+		// The scene target (M20, Docs/Decisions/0031-m20-contract.md decision 16), reserved only for the methods with
+		// SupportsSceneTarget: every other method keeps a "scene" member for its own params (play.start's scene file) or
+		// refuses it as unknown.
+		constexpr std::string_view SceneMember = "scene";
+		// The members an op of edit.batch never carries (InvokeNested): the batch's own apply to every op.
+		constexpr std::array<std::string_view, 4> ReservedOpMembers = { DryRunMember, IfRevisionMember, MetaMember, SceneMember };
+		constexpr std::string_view SceneTargetDescription = "The open scene this request addresses: its project path or its id from scene.list; absent, the active "
+															"scene.";
+		constexpr std::string_view SceneTargetMessage = "scene must be an open scene's project path (a string ending with \".scene\") or its id from 1 to 4294967295";
 		// How many Variant values PrepareParams resolves inside each other before it stops looking for enums (as
 		// Reflection's own walks bound it).
 		constexpr uint32_t MaxCanonicalVariantDepth = 16;
@@ -597,6 +606,23 @@ namespace Engine {
 			return result;
 		}
 
+		// The scene target "scene" of a request (decision 16): a non-empty string is a scene path and an integer from 1 to
+		// 2^32 - 1 an open scene's id; nullopt for anything else. The host resolves the path or the id against its open scenes.
+		[[nodiscard]] static std::optional<SceneTargetReference> ReadSceneTarget(const Json& value)
+		{
+			if (value.is_string())
+			{
+				Result<std::string> path = JsonReader(value).ReadString();
+				if (!path || path->empty())
+					return std::nullopt;
+				return SceneTargetReference{ .Path = std::move(*path), .Id = 0 };
+			}
+			const Result<uint32_t> id = JsonReader(value).ReadUInt32();
+			if (!id || *id == 0)
+				return std::nullopt;
+			return SceneTargetReference{ .Path = {}, .Id = *id };
+		}
+
 	}
 
 	Result<const FieldInfo*> ResolveComponentValue(const ResolveContext& context)
@@ -721,6 +747,34 @@ namespace Engine {
 			if (!meta->is_object())
 				issues.push_back(ErrorIssue{ .JsonPointer = "/_meta", .Message = "_meta must be an object", .Hint = {}, .Suggestions = {} });
 			prepared.Params.erase(meta);
+		}
+		// The scene target, a reserved member of the scene-addressing methods only; another method's "scene" stays in its
+		// params, as its own member or as an unknown one that the strict read refuses.
+		if (specification.SupportsSceneTarget)
+		{
+			if (const auto scene = prepared.Params.find(Utils::SceneMember); scene != prepared.Params.end())
+			{
+				std::optional<SceneTargetReference> target = Utils::ReadSceneTarget(*scene);
+				if (!target)
+				{
+					issues.push_back(ErrorIssue{ .JsonPointer = "/scene",
+						.Message = std::string(Utils::SceneTargetMessage),
+						.Hint = "scene.list lists the open scenes with their paths and ids",
+						.Suggestions = {} });
+				}
+				else
+				{
+					prepared.Options.Scene = std::move(*target);
+				}
+				prepared.Params.erase(scene);
+			}
+			else if (specification.RequiresSceneTarget)
+			{
+				issues.push_back(ErrorIssue{ .JsonPointer = "/scene",
+					.Message = "missing required param 'scene'",
+					.Hint = "name the open scene by its path or its id from scene.list",
+					.Suggestions = {} });
+			}
 		}
 
 		for (const std::string& required : specification.RequiredParams)
@@ -893,7 +947,7 @@ namespace Engine {
 		std::vector<ErrorIssue> reserved;
 		if (params.is_object())
 		{
-			for (const std::string_view member : Utils::ReservedMembers)
+			for (const std::string_view member : Utils::ReservedOpMembers)
 			{
 				if (params.contains(member))
 				{
@@ -998,10 +1052,23 @@ namespace Engine {
 		if (specification.Name != Utils::HelloMethodName)
 		{
 			Json revision = Json::object();
-			revision["description"] = "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.";
+			revision["description"] = "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses "
+									  "(in the editor, the open scene its scene target names, else the active one) still equals this value.";
 			revision["type"] = "integer";
 			revision["minimum"] = 0;
 			properties[std::string(Utils::IfRevisionMember)] = std::move(revision);
+		}
+		std::vector<std::string> required = specification.RequiredParams;
+		if (specification.SupportsSceneTarget)
+		{
+			Json scene = Json::object();
+			scene["description"] = std::string(Utils::SceneTargetDescription);
+			scene["type"] = Json::array({ "string", "integer" });
+			scene["minimum"] = 1;
+			scene["maximum"] = std::numeric_limits<uint32_t>::max();
+			properties[std::string(Utils::SceneMember)] = std::move(scene);
+			if (specification.RequiresSceneTarget)
+				required.emplace_back(Utils::SceneMember);
 		}
 
 		if (style == SchemaStyle::Full)
@@ -1026,7 +1093,7 @@ namespace Engine {
 			schema.erase("$defs");
 			Utils::InlineDefinitions(schema, allDefinitions, 0);
 		}
-		return Utils::AddRequired(schema, specification.RequiredParams);
+		return Utils::AddRequired(schema, required);
 	}
 
 	Json MethodRegistry::GetResultSchema(const MethodDescriptor& method, SchemaStyle style) const
@@ -1142,6 +1209,10 @@ namespace Engine {
 		ENGINE_CORE_ASSERT(!(specification.TestHook && specification.ExposeAsTool), "Test hook '{}' cannot be a tool", name);
 		ENGINE_CORE_ASSERT(!(pending && specification.AllowedInBatch), "Pending method '{}' cannot be an op of edit.batch", name);
 		ENGINE_CORE_ASSERT(!(pending && specification.SupportsDryRun), "Pending method '{}' cannot support dry runs", name);
+		ENGINE_CORE_ASSERT(!specification.RequiresSceneTarget || specification.SupportsSceneTarget, "Method '{}' requires a scene target it does not accept",
+			name);
+		// The host holds a scene target's scope for the request's one stretch on the main thread, which polls would outlast.
+		ENGINE_CORE_ASSERT(!(pending && specification.SupportsSceneTarget), "Pending method '{}' cannot take a scene target", name);
 		if (m_IsFrozen || m_Storage->Entries.contains(name))
 			return;
 
@@ -1149,6 +1220,8 @@ namespace Engine {
 		const StructInfo* resultType = m_Types->FindStructByKey(result);
 		ENGINE_CORE_ASSERT(paramsType != nullptr, "The params struct of method '{}' is not registered", name);
 		ENGINE_CORE_ASSERT(resultType != nullptr, "The result struct of method '{}' is not registered", name);
+		ENGINE_CORE_ASSERT(!specification.SupportsSceneTarget || paramsType == nullptr || paramsType->FindField(Utils::SceneMember) == nullptr,
+			"Method '{}' takes the scene target, so its params struct cannot declare 'scene'", name);
 		for ([[maybe_unused]] const std::string& required : specification.RequiredParams)
 		{
 			ENGINE_CORE_ASSERT(paramsType != nullptr && paramsType->FindField(required) != nullptr,

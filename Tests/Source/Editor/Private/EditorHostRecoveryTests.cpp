@@ -3,9 +3,11 @@
 #include "Editor/Private/EditorHostRecovery.h"
 #include "EditorCore/Autosave/Autosave.h"
 #include "EditorCore/Commands/SceneEdit.h"
+#include "EditorCore/EditorContext.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Core/VfsPath.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Support/AutomationTestClient.h"
@@ -14,6 +16,8 @@
 #include <nlohmann/json.hpp>
 
 #include <chrono>
+#include <string>
+#include <vector>
 
 namespace Engine {
 
@@ -55,6 +59,119 @@ namespace Engine {
 
 	TEST_SUITE("Editor")
 	{
+		// Docs/Decisions/0031-m20-contract.md decision 15: one offer covers every scene with a recoverable generation;
+		// accepting it recovers each of them, the first active, on the existing project.
+		TEST_CASE("EditorHostRecovery: an accepted offer recovers every offered scene with the first active")
+		{
+			Test::EditorTestFixture fixture("HostRecoveryScenes");
+			Autosave saves(fixture.GetEditor());
+			EditorHostRecovery host(fixture.GetEditor(), saves);
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			const auto edit = [&editor](std::string name)
+			{
+				SceneEdit change(editor, "Recover");
+				static_cast<void>(editor.GetScene().CreateEntity(std::move(name)));
+				REQUIRE(change.Commit().has_value());
+			};
+			edit("InMain");
+			const Result<VfsPath> secondPath = VfsPath::Parse("project://Assets/Scenes/Second.scene");
+			REQUIRE(secondPath.has_value());
+			REQUIRE(editor.AddScene(editor.CreateScene("Second"), *secondPath).has_value());
+			edit("InSecond");
+			const auto saved = saves.Save(AutosaveReason::BeforePlay);
+			REQUIRE_MESSAGE(saved.has_value(), saved.error().ToString());
+			REQUIRE(saves.Reset());
+			// The editor holds only its first scene again, clean, as after a crash and a reopen.
+			const OpenSceneId second = editor.GetActiveSceneId();
+			REQUIRE(editor.CloseScene(second).has_value());
+			editor.SetScene(editor.CreateScene("Main"), editor.GetScenePath());
+			REQUIRE(editor.GetOpenScenes().size() == 1);
+			REQUIRE_FALSE(editor.IsAnySceneDirty());
+			CHECK(editor.FindScene(second) == nullptr);
+
+			REQUIRE(host.Inspect(1).has_value());
+			const auto offer = host.GetOffer();
+			REQUIRE(offer.has_value());
+			CHECK(offer->Recovery.ScenePath == "Assets/Scenes/Second.scene");
+			// The offer names every scene it recovers, oldest first, as the recovery prompt lists them.
+			CHECK(offer->SceneNames == std::vector<std::string>{ "Main", "Second" });
+			REQUIRE(host.QueueDecision(*offer, EditorRecoveryDecision::Accept).has_value());
+			REQUIRE(host.Pump().has_value());
+			const std::vector<OpenSceneId> scenes = editor.GetOpenScenes();
+			REQUIRE(scenes.size() == 2);
+			CHECK(editor.GetActiveSceneId() == scenes[0]);
+			CHECK(editor.GetScene().FindEntityByPath("/InMain").IsValid());
+			CHECK(editor.IsSceneDirty());
+			REQUIRE(editor.FindScene(scenes[1]) != nullptr);
+			CHECK(editor.FindScene(scenes[1])->FindEntityByPath("/InSecond").IsValid());
+			CHECK(editor.DescribeOpenScene(scenes[1])->Dirty);
+			CHECK_FALSE(host.GetOffer());
+		}
+
+		// Decision 15: Accept replaces every open scene the offer names, so the offer is bound to every open scene, not only
+		// the active one. An edit of an open scene that is not active, made through a scene target after the decision was
+		// queued, refuses the recovery before any scene is replaced, and the edit is kept.
+		TEST_CASE("EditorHostRecovery: an edit of an open scene that is not active refuses recovery and keeps the edit")
+		{
+			Test::EditorTestFixture fixture("HostRecoveryBinding");
+			Autosave saves(fixture.GetEditor());
+			EditorHostRecovery host(fixture.GetEditor(), saves);
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			const auto edit = [&editor](std::string name)
+			{
+				SceneEdit change(editor, "Recover");
+				static_cast<void>(editor.GetScene().CreateEntity(std::move(name)));
+				REQUIRE(change.Commit().has_value());
+			};
+			edit("InMain");
+			const Result<VfsPath> secondPath = VfsPath::Parse("project://Assets/Scenes/Second.scene");
+			REQUIRE(secondPath.has_value());
+			REQUIRE(editor.AddScene(editor.CreateScene("Second"), *secondPath).has_value());
+			edit("InSecond");
+			const auto saved = saves.Save(AutosaveReason::BeforePlay);
+			REQUIRE_MESSAGE(saved.has_value(), saved.error().ToString());
+			REQUIRE(saves.Reset());
+			// The editor holds both scenes again, clean, as after a crash and a reopen, with Main active.
+			REQUIRE(editor.CloseScene(editor.GetActiveSceneId()).has_value());
+			editor.SetScene(editor.CreateScene("Main"), editor.GetScenePath());
+			const OpenSceneId main = editor.GetActiveSceneId();
+			const Result<OpenSceneId> second = editor.AddScene(editor.CreateScene("Second"), *secondPath);
+			REQUIRE(second.has_value());
+			REQUIRE(editor.ActivateScene(main).has_value());
+			REQUIRE_FALSE(editor.IsAnySceneDirty());
+			REQUIRE(host.Inspect(1).has_value());
+			const auto offer = host.GetOffer();
+			REQUIRE(offer.has_value());
+			REQUIRE(offer->SceneNames == std::vector<std::string>{ "Main", "Second" });
+			REQUIRE(host.QueueDecision(*offer, EditorRecoveryDecision::Accept).has_value());
+
+			// Second changes while Main, the active scene, keeps its revision.
+			const uint64_t revision = editor.GetRevision();
+			{
+				Result<Scope<EditorSceneTargetScope>> scope = EditorSceneTargetScope::Begin(editor, *second);
+				REQUIRE(scope.has_value());
+				edit("Kept");
+			}
+			REQUIRE(editor.GetRevision() == revision);
+			const Status applied = host.Pump();
+			REQUIRE_FALSE(applied.has_value());
+			CHECK(applied.error().GetCode() == ErrorCode::Conflict);
+			REQUIRE(host.GetOffer().has_value());
+			REQUIRE(host.GetOffer()->Failure.has_value());
+			CHECK(host.GetOffer()->Failure->GetCode() == ErrorCode::Conflict);
+			CHECK(editor.GetActiveSceneId() == main);
+			CHECK_FALSE(editor.IsSceneDirty());
+			CHECK(editor.GetOpenScenes() == std::vector<OpenSceneId>{ main, *second });
+			REQUIRE(editor.FindScene(*second) != nullptr);
+			CHECK(editor.FindScene(*second)->FindEntityByPath("/Kept").IsValid());
+			CHECK_FALSE(editor.FindScene(*second)->FindEntityByPath("/InSecond").IsValid());
+			CHECK(editor.DescribeOpenScene(*second)->Dirty);
+		}
+
 		TEST_CASE("EditorHostRecovery: queued acceptance uses the owned offer on the existing project")
 		{
 			HostRecoverySetup setup;

@@ -10,6 +10,7 @@
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Json/JsonWriter.h"
+#include "Engine/Core/Log.h"
 #include "Engine/Core/Utf8.h"
 #include "Engine/Core/VfsPath.h"
 #include "Engine/Platform/SecureRandom.h"
@@ -26,10 +27,13 @@
 #include <format>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <optional>
 #include <span>
+#include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace Engine {
 
@@ -37,12 +41,16 @@ namespace Engine {
 
 		constexpr uint64_t MaxAutosavePayloadBytes = 256ull * 1024 * 1024;
 		constexpr uint64_t MaxAutosaveMetadataBytes = 1024 * 1024;
-		constexpr uint32_t MaxAutosaveGenerations = 32;
+		// AutosaveSpecification::RetainedGenerations' bound, per scene.
+		constexpr uint32_t MaxAutosaveRetainedGenerations = 32;
+		// Retention keeps the generations of at most MaxOpenScenes scenes (M20, decision 15), so a manifest holds at most
+		// this many.
+		constexpr uint32_t MaxAutosaveGenerations = MaxAutosaveRetainedGenerations * static_cast<uint32_t>(MaxOpenScenes);
 		constexpr uint32_t AutosaveWriterBit = 1;
 		constexpr uint32_t AutosaveClosedBit = 2;
 		constexpr int32_t NoAutosaveSlot = -1;
-		// The project file and the open scene's source: the fingerprints Publish keeps between generation writes.
-		constexpr size_t MaxCachedAutosaveFingerprints = 4;
+		// The project file and each open scene's source: the fingerprints Publish keeps between generation writes.
+		constexpr size_t MaxCachedAutosaveFingerprints = MaxOpenScenes + 1;
 		static_assert(std::atomic<uint32_t>::is_always_lock_free && std::atomic<int32_t>::is_always_lock_free);
 
 		using AutosaveReadObserver = std::function<void(const std::filesystem::path&)>;
@@ -90,15 +98,24 @@ namespace Engine {
 			AutosaveFingerprint ProjectFingerprint{};
 			AutosaveFingerprint SourceFingerprint{};
 			uint64_t Revision = 0;
-			uint64_t Epoch = 0;
+			uint64_t Epoch = 0; // the open scene's document: its OpenSceneId, never reused (M20)
 		};
 
-		// A completed generation write: the result and the manifest it committed.
+		// A completed write of one or more generations: the result, the manifest it committed, the generation each snapshot
+		// became, and the first failure of a scene that was left out.
 		struct AutosaveGenerationWrite
 		{
 			AutosaveWriteResult Result{};
 			AutosaveManifest Manifest{};
+			std::vector<std::pair<const AutosaveSnapshot*, std::string>> Generations{};
+			std::optional<Error> Failure{};
 		};
+
+		// The scene a generation belongs to (M20, decision 15): its project-relative path, or its untitled document's token.
+		static std::string AutosaveSceneKey(const AutosaveSnapshot& snapshot)
+		{
+			return snapshot.ScenePath.empty() ? std::format("untitled:{}", snapshot.UntitledToken) : std::format("scene:{}", snapshot.ScenePath);
+		}
 
 		static AutosaveFileStamp StampOf(const AutosaveFingerprint& fingerprint)
 		{
@@ -295,11 +312,10 @@ namespace Engine {
 				{ "Generations", std::move(entries) } });
 		}
 
-		// The full verification: the project and source bytes still hash to the snapshot's fingerprints.
-		static Status ValidateAutosaveSource(const AutosaveSnapshot& snapshot, const AutosaveReadObserver& observe)
+		// The full verification of a snapshot against `project`, the project file's current fingerprint: the project and
+		// source bytes still hash to the snapshot's fingerprints.
+		static Status ValidateAutosaveSource(const AutosaveSnapshot& snapshot, const AutosaveFingerprint& project, const AutosaveReadObserver& observe)
 		{
-			ENGINE_TRY(CheckAutosavePath(snapshot.Root, snapshot.ProjectFile));
-			ENGINE_TRY_ASSIGN(const AutosaveFingerprint project, ReadAutosaveFingerprint(snapshot.ProjectFile, observe));
 			if (project != snapshot.ProjectFingerprint)
 				return MakeError(ErrorCode::Conflict, "the project changed after the autosave snapshot was captured");
 			if (!snapshot.ScenePath.empty())
@@ -310,6 +326,19 @@ namespace Engine {
 					return MakeError(ErrorCode::Conflict, "scene '{}' changed after the autosave snapshot was captured", snapshot.ScenePath);
 			}
 			return {};
+		}
+
+		// The current fingerprint of `snapshot`'s project file, for the verification of its snapshots.
+		static Result<AutosaveFingerprint> ReadAutosaveProjectFingerprint(const AutosaveSnapshot& snapshot, const AutosaveReadObserver& observe)
+		{
+			ENGINE_TRY(CheckAutosavePath(snapshot.Root, snapshot.ProjectFile));
+			return ReadAutosaveFingerprint(snapshot.ProjectFile, observe);
+		}
+
+		static Status ValidateAutosaveSource(const AutosaveSnapshot& snapshot, const AutosaveReadObserver& observe)
+		{
+			ENGINE_TRY_ASSIGN(const AutosaveFingerprint project, ReadAutosaveProjectFingerprint(snapshot, observe));
+			return ValidateAutosaveSource(snapshot, project, observe);
 		}
 
 		// The cheap check before a generation write: the files' sizes and opaque write times. The write verifies the bytes
@@ -396,17 +425,24 @@ namespace Engine {
 			return {};
 		}
 
+		// The generation `entry`'s Metadata.json alone, without its payload or a verification of its source.
+		static Result<AutosaveGenerationMetadata> ReadAutosaveGenerationMetadata(const std::filesystem::path& projectFile,
+			const AutosaveManifestEntry& entry, const AutosaveReadObserver& observe)
+		{
+			const std::filesystem::path root = projectFile.parent_path();
+			const std::filesystem::path metadataPath = root / "Library" / "Autosave" / FileSystem::PathFromUtf8(entry.Generation) / "Metadata.json";
+			ENGINE_TRY(CheckAutosavePath(root, metadataPath));
+			ENGINE_TRY_ASSIGN(const std::string text, ReadAutosaveText(metadataPath, MaxAutosaveMetadataBytes, observe));
+			return ParseAutosaveGenerationMetadata(projectFile, entry, text);
+		}
+
 		static Result<AutosaveSnapshot> ReadAutosaveGeneration(const std::filesystem::path& projectFile, const AutosaveManifestEntry& entry,
 			const AutosaveReadObserver& observe, bool verifySource = true)
 		{
 			const std::filesystem::path root = projectFile.parent_path();
-			const std::filesystem::path directory = root / "Library" / "Autosave" / FileSystem::PathFromUtf8(entry.Generation);
-			const std::filesystem::path metadataPath = directory / "Metadata.json";
-			const std::filesystem::path payload = directory / "Scene.json";
-			ENGINE_TRY(CheckAutosavePath(root, metadataPath));
+			const std::filesystem::path payload = root / "Library" / "Autosave" / FileSystem::PathFromUtf8(entry.Generation) / "Scene.json";
 			ENGINE_TRY(CheckAutosavePath(root, payload));
-			ENGINE_TRY_ASSIGN(const std::string text, ReadAutosaveText(metadataPath, MaxAutosaveMetadataBytes, observe));
-			ENGINE_TRY_ASSIGN(AutosaveGenerationMetadata metadata, ParseAutosaveGenerationMetadata(projectFile, entry, text));
+			ENGINE_TRY_ASSIGN(AutosaveGenerationMetadata metadata, ReadAutosaveGenerationMetadata(projectFile, entry, observe));
 			AutosaveSnapshot& snapshot = metadata.Snapshot;
 			ENGINE_TRY_ASSIGN(snapshot.Text, ReadAutosaveText(payload, MaxAutosavePayloadBytes, observe));
 			ENGINE_TRY(CheckAutosavePayload(metadata, snapshot.Text));
@@ -448,6 +484,51 @@ namespace Engine {
 			return std::optional<AutosaveRecoveryData>{};
 		}
 
+		Result<std::vector<AutosaveRecoveryData>> ReadAutosaveRecoveries(const LoadedProject& project)
+		{
+			ENGINE_TRY_ASSIGN(const std::filesystem::path projectFile, CanonicalAutosaveProject(project));
+			ENGINE_TRY_ASSIGN(const AutosaveManifest manifest, ReadAutosaveManifest(projectFile.parent_path(), {}));
+			// The scenes that have their offer, or whose newest generation is stale.
+			std::vector<std::string> settled;
+			std::vector<AutosaveRecoveryData> recoveries;
+			std::optional<Error> stale; // the conflict of the newest stale generation
+			// Newest first: each scene's first generation that differs from its source is its offer.
+			for (const AutosaveManifestEntry& entry : manifest.Generations)
+			{
+				ENGINE_TRY_ASSIGN(const AutosaveGenerationMetadata metadata, ReadAutosaveGenerationMetadata(projectFile, entry, {}));
+				const std::string key = AutosaveSceneKey(metadata.Snapshot);
+				if (std::ranges::find(settled, key) != settled.end())
+					continue;
+				ENGINE_TRY_ASSIGN(AutosaveSnapshot snapshot, ReadAutosaveGeneration(projectFile, entry, {}, false));
+				// A generation whose project or source changed after it was captured (a scene closed with its changes
+				// discarded, its file changed since) is stale, and so are that scene's older generations: the scene has no
+				// offer, and the other scenes are still offered. With no offer at all, the conflict is the answer, as it is
+				// FindRecovery's. Every other error fails the listing.
+				Status source = ValidateAutosaveSource(snapshot, {});
+				if (!source)
+				{
+					if (source.error().GetCode() != ErrorCode::Conflict)
+						return std::unexpected(std::move(source).error());
+					const std::string_view scene = snapshot.ScenePath.empty() ? std::string_view(snapshot.SceneName) : std::string_view(snapshot.ScenePath);
+					ENGINE_WARN("Autosave: the unsaved changes of '{}' are not offered for recovery: {}", scene, source.error().ToString());
+					if (!stale)
+						stale = std::move(source).error();
+					settled.push_back(key);
+					continue;
+				}
+				AutosaveRecoveryInfo info = MakeAutosaveRecoveryInfo(snapshot, entry.Generation);
+				if (!info.NewerThanSource)
+					continue;
+				settled.push_back(key);
+				recoveries.push_back(AutosaveRecoveryData{ .Info = std::move(info), .SceneText = std::move(snapshot.Text) });
+			}
+			if (recoveries.empty() && stale)
+				return std::unexpected(std::move(*stale));
+			// Oldest first, so the scenes of one save come back in the tab order they were written in.
+			std::ranges::reverse(recoveries);
+			return recoveries;
+		}
+
 		Result<std::optional<AutosaveRecoveryData>> ParseAutosaveRecovery(const std::filesystem::path& projectFile,
 			const AutosaveRecoveryDocuments& documents, std::string_view generation)
 		{
@@ -485,6 +566,7 @@ namespace Engine {
 			Scope<Scene> RecoveredScene{};
 			std::optional<VfsPath> ScenePath{};
 			std::filesystem::path ProjectIdentity{};
+			std::string SceneKey{}; // AutosaveSceneKey of the recovered scene
 		};
 
 		// Every fallible native read, identity check and scene load finishes before the host's state is changed.
@@ -531,6 +613,7 @@ namespace Engine {
 			if (checked.ProjectFingerprint != baseline.ProjectFingerprint || checked.SourceFingerprint != baseline.SourceFingerprint || checked.ScenePath != baseline.ScenePath || checked.SceneName != baseline.SceneName || checked.UntitledToken != baseline.UntitledToken || checked.Revision != baseline.Revision || checked.Text != baseline.Text)
 				return MakeError(ErrorCode::Conflict, "the offered recovery changed while it was validated");
 			prepared.Baseline.Text.clear();
+			prepared.SceneKey = AutosaveSceneKey(prepared.Baseline);
 			return prepared;
 		}
 
@@ -569,61 +652,162 @@ namespace Engine {
 			}
 		}
 
-		static Result<AutosaveGenerationWrite> WriteAutosaveGeneration(const AutosaveSnapshot& snapshot, const AutosaveSpecification& specification, AutosaveReason reason)
+		// Retention (M20, decision 15): keeps the newest `retained` generations of each scene, for the MaxOpenScenes scenes
+		// whose newest generations are the newest, and returns the entries it retired. `keys` caches each generation's scene
+		// (AutosaveSceneKey); a generation not in it has its metadata read, and one whose metadata cannot be read counts as a
+		// scene of its own, so it is retired once enough newer scenes were written.
+		static std::vector<AutosaveManifestEntry> RetainAutosaveGenerations(AutosaveManifest& manifest, const std::filesystem::path& projectFile,
+			uint32_t retained, std::map<std::string, std::string, std::less<>>& keys, const AutosaveReadObserver& observe)
 		{
-			ENGINE_TRY(CheckAutosaveStamps(snapshot));
-			ENGINE_TRY_ASSIGN(AutosaveManifest manifest, ReadAutosaveManifest(snapshot.Root, specification.ReadObserver));
-			if (manifest.Sequence == std::numeric_limits<uint64_t>::max())
-				return MakeError(ErrorCode::InvalidState, "autosave generation sequence is exhausted");
-			const uint64_t sequence = manifest.Sequence + 1;
-			const std::string generation = std::format("g-{:016x}", sequence);
-			const std::filesystem::path directory = snapshot.AutosaveRoot / FileSystem::PathFromUtf8(generation);
-			const std::filesystem::path payload = directory / "Scene.json";
-			const std::filesystem::path metadata = directory / "Metadata.json";
-			const std::filesystem::path manifestPath = snapshot.AutosaveRoot / "Manifest.json";
-			ENGINE_TRY(CheckAutosavePath(snapshot.Root, payload));
-			ENGINE_TRY(FileSystem::CreateDirectories(directory));
-			ENGINE_TRY(CheckAutosavePath(snapshot.Root, payload));
-			ENGINE_TRY(WriteAutosaveBytes(specification, payload, snapshot.Text));
-			const Json document = {
-				{ "Format", "AutosaveGeneration" },
-				{ "Version", 1 },
-				{ "Sequence", sequence },
-				{ "ProjectFile", FileSystem::PathToUtf8(snapshot.ProjectFile) },
-				{ "ProjectFingerprint", AutosaveFingerprintJson(snapshot.ProjectFingerprint) },
-				{ "SourceFingerprint", AutosaveFingerprintJson(snapshot.SourceFingerprint) },
-				{ "ScenePath", snapshot.ScenePath },
-				{ "SceneName", snapshot.SceneName },
-				{ "UntitledToken", snapshot.UntitledToken },
-				{ "DirtyRevision", snapshot.Revision },
-				{ "Dirty", true },
-				{ "Reason", static_cast<uint32_t>(reason) },
-				{ "PayloadSize", snapshot.Text.size() },
-				{ "PayloadHash", XXH64(snapshot.Text) },
-			};
-			ENGINE_TRY_ASSIGN(const std::string metadataText, JsonWriter::Write(document));
-			ENGINE_TRY(CheckAutosavePath(snapshot.Root, metadata));
-			ENGINE_TRY(WriteAutosaveBytes(specification, metadata, metadataText));
-			manifest.Sequence = sequence;
-			manifest.Generations.insert(manifest.Generations.begin(), { .Generation = generation, .Sequence = sequence });
-			std::vector<AutosaveManifestEntry> removed;
-			if (manifest.Generations.size() > specification.RetainedGenerations)
+			std::vector<std::pair<std::string, uint32_t>> scenes; // each scene's key and kept generations, newest scene first
+			std::vector<AutosaveManifestEntry> kept;
+			std::vector<AutosaveManifestEntry> retired;
+			for (const AutosaveManifestEntry& entry : manifest.Generations)
 			{
-				removed.assign(manifest.Generations.begin() + specification.RetainedGenerations, manifest.Generations.end());
-				manifest.Generations.resize(specification.RetainedGenerations);
+				auto key = keys.find(entry.Generation);
+				if (key == keys.end())
+				{
+					const Result<AutosaveGenerationMetadata> metadata = ReadAutosaveGenerationMetadata(projectFile, entry, observe);
+					key = keys.emplace(entry.Generation, metadata ? AutosaveSceneKey(metadata->Snapshot) : std::format("generation:{}", entry.Generation)).first;
+				}
+				auto scene = std::ranges::find(scenes, key->second, &std::pair<std::string, uint32_t>::first);
+				if (scene == scenes.end())
+				{
+					if (scenes.size() == MaxOpenScenes)
+					{
+						retired.push_back(entry);
+						continue;
+					}
+					scenes.emplace_back(key->second, 0);
+					scene = scenes.end() - 1;
+				}
+				if (scene->second == retained)
+				{
+					retired.push_back(entry);
+					continue;
+				}
+				++scene->second;
+				kept.push_back(entry);
 			}
+			manifest.Generations = std::move(kept);
+			return retired;
+		}
+
+		// Writes one generation per snapshot (one scene each, in the given order, so their sequences follow it) on top of
+		// `manifest`, the committed manifest, then publishes the manifest once, LAST, with retention per scene. A scene that
+		// cannot be written (a changed project or source, a failed payload write) is left out with its failure, its
+		// directory swept later; the others are published. Errors: the first scene's failure when none could be written;
+		// an exhausted sequence; the manifest's write.
+		static Result<AutosaveGenerationWrite> WriteAutosaveGenerations(std::span<const AutosaveSnapshot* const> snapshots, AutosaveManifest manifest,
+			const AutosaveSpecification& specification, AutosaveReason reason, std::map<std::string, std::string, std::less<>>& keys)
+		{
+			ENGINE_ASSERT(!snapshots.empty(), "WriteAutosaveGenerations needs a snapshot");
+			const AutosaveSnapshot& first = *snapshots.front();
+			AutosaveGenerationWrite result;
+			const auto fail = [&result](Error error)
+			{
+				if (!result.Failure.has_value())
+					result.Failure = std::move(error);
+			};
+			const auto writeGeneration = [&specification, reason](const AutosaveSnapshot& snapshot, uint64_t sequence, const std::string& generation) -> Status
+			{
+				const std::filesystem::path directory = snapshot.AutosaveRoot / FileSystem::PathFromUtf8(generation);
+				const std::filesystem::path payload = directory / "Scene.json";
+				const std::filesystem::path metadata = directory / "Metadata.json";
+				ENGINE_TRY(CheckAutosavePath(snapshot.Root, payload));
+				ENGINE_TRY(FileSystem::CreateDirectories(directory));
+				ENGINE_TRY(CheckAutosavePath(snapshot.Root, payload));
+				ENGINE_TRY(WriteAutosaveBytes(specification, payload, snapshot.Text));
+				const Json document = {
+					{ "Format", "AutosaveGeneration" },
+					{ "Version", 1 },
+					{ "Sequence", sequence },
+					{ "ProjectFile", FileSystem::PathToUtf8(snapshot.ProjectFile) },
+					{ "ProjectFingerprint", AutosaveFingerprintJson(snapshot.ProjectFingerprint) },
+					{ "SourceFingerprint", AutosaveFingerprintJson(snapshot.SourceFingerprint) },
+					{ "ScenePath", snapshot.ScenePath },
+					{ "SceneName", snapshot.SceneName },
+					{ "UntitledToken", snapshot.UntitledToken },
+					{ "DirtyRevision", snapshot.Revision },
+					{ "Dirty", true },
+					{ "Reason", static_cast<uint32_t>(reason) },
+					{ "PayloadSize", snapshot.Text.size() },
+					{ "PayloadHash", XXH64(snapshot.Text) },
+				};
+				ENGINE_TRY_ASSIGN(const std::string metadataText, JsonWriter::Write(document));
+				ENGINE_TRY(CheckAutosavePath(snapshot.Root, metadata));
+				return WriteAutosaveBytes(specification, metadata, metadataText);
+			};
+
+			// Each scene's payload and metadata, in the snapshots' order.
+			std::vector<std::pair<const AutosaveSnapshot*, AutosaveManifestEntry>> written;
+			for (const AutosaveSnapshot* snapshot : snapshots)
+			{
+				if (Status stamps = CheckAutosaveStamps(*snapshot); !stamps)
+				{
+					fail(std::move(stamps).error());
+					continue;
+				}
+				if (manifest.Sequence == std::numeric_limits<uint64_t>::max())
+					return MakeError(ErrorCode::InvalidState, "autosave generation sequence is exhausted");
+				const uint64_t sequence = ++manifest.Sequence;
+				AutosaveManifestEntry entry{ .Generation = std::format("g-{:016x}", sequence), .Sequence = sequence };
+				if (Status generation = writeGeneration(*snapshot, sequence, entry.Generation); !generation)
+				{
+					fail(std::move(generation).error());
+					continue;
+				}
+				written.emplace_back(snapshot, std::move(entry));
+			}
+
+			// The one full verification of the write, after its payloads, the project file read once: a scene whose source
+			// changed meanwhile publishes nothing.
+			if (!written.empty())
+			{
+				const Result<AutosaveFingerprint> project = ReadAutosaveProjectFingerprint(first, specification.ReadObserver);
+				std::erase_if(written, [&project, &specification, &fail](const auto& entry)
+				{
+					Status valid = project ? ValidateAutosaveSource(*entry.first, *project, specification.ReadObserver) : Status(std::unexpected(project.error()));
+					if (valid)
+						return false;
+					fail(std::move(valid).error());
+					return true;
+				});
+			}
+			if (written.empty())
+			{
+				ENGINE_ASSERT(result.Failure.has_value(), "an autosave write without a generation names its failure");
+				return std::unexpected(std::move(*result.Failure));
+			}
+
+			// Newest first, as the manifest holds them.
+			for (const auto& [snapshot, entry] : written)
+			{
+				manifest.Generations.insert(manifest.Generations.begin(), entry);
+				keys.insert_or_assign(entry.Generation, AutosaveSceneKey(*snapshot));
+			}
+			const std::vector<AutosaveManifestEntry> retired = RetainAutosaveGenerations(manifest, first.ProjectFile, specification.RetainedGenerations, keys,
+				specification.ReadObserver);
 			ENGINE_TRY_ASSIGN(const std::string manifestText, AutosaveManifestText(manifest));
-			// The one full verification of the write, after its payload: a source changed meanwhile publishes nothing.
-			ENGINE_TRY(ValidateAutosaveSource(snapshot, specification.ReadObserver));
-			ENGINE_TRY(CheckAutosavePath(snapshot.Root, manifestPath));
+			const std::filesystem::path manifestPath = first.AutosaveRoot / "Manifest.json";
+			ENGINE_TRY(CheckAutosavePath(first.Root, manifestPath));
 			ENGINE_TRY(WriteAutosaveBytes(specification, manifestPath, manifestText));
 			// Retirement happens only after publication; a failed new write never removes the previous manifest's payloads.
-			for (const AutosaveManifestEntry& entry : removed)
-				RemoveRetiredAutosaveGeneration(snapshot.Root, snapshot.AutosaveRoot / FileSystem::PathFromUtf8(entry.Generation));
-			AutosaveGenerationWrite result;
-			result.Result = AutosaveWriteResult{ .Written = true, .Generation = generation };
-			if (!snapshot.ScenePath.empty())
-				result.Result.Files.push_back(snapshot.ScenePath);
+			for (const AutosaveManifestEntry& entry : retired)
+				RemoveRetiredAutosaveGeneration(first.Root, first.AutosaveRoot / FileSystem::PathFromUtf8(entry.Generation));
+			std::erase_if(keys, [&manifest](const auto& key)
+			{
+				return std::ranges::find(manifest.Generations, key.first, &AutosaveManifestEntry::Generation) == manifest.Generations.end();
+			});
+
+			result.Result.Written = true;
+			for (const auto& [snapshot, entry] : written)
+			{
+				if (!snapshot->ScenePath.empty())
+					result.Result.Files.push_back(snapshot->ScenePath);
+				result.Generations.emplace_back(snapshot, entry.Generation);
+			}
+			result.Result.Generation = written.back().second.Generation;
 			result.Manifest = std::move(manifest);
 			return result;
 		}
@@ -639,18 +823,21 @@ namespace Engine {
 			Published,
 			Claimed
 		};
+		// One publication: the immutable snapshots of every dirty open scene, in tab order (M20, decision 15). A snapshot is
+		// shared by the publications that hold it, never changed after it was published, and freed on the main thread once
+		// no publication holds it; the fatal path only reads the publication it claimed.
 		struct Slot
 		{
 			std::atomic<SlotState> Status{ SlotState::Free };
-			Utils::AutosaveSnapshot Snapshot{};
+			std::vector<Ref<const Utils::AutosaveSnapshot>> Snapshots{};
 		};
 		static_assert(std::atomic<SlotState>::is_always_lock_free);
 
-		// What decides Publish's outcome besides file bytes: equal keys give the same outcome (Publish's comment).
+		// What decides a scene's Publish outcome besides file bytes: equal keys give the same outcome (Publish's comment).
 		struct PublishKey
 		{
 			const LoadedProject* Project = nullptr; // identity only
-			uint64_t SceneEpoch = 0;
+			OpenSceneId SceneId = NoOpenScene;
 			uint64_t Revision = 0;
 			bool Dirty = false;
 			bool ChangedOnDisk = false;
@@ -659,14 +846,25 @@ namespace Engine {
 			Utils::AutosaveFileStamp SourceStamp{};
 			bool operator==(const PublishKey&) const = default;
 		};
+		// The main thread's state of one open scene.
+		struct SceneState
+		{
+			OpenSceneId Id = NoOpenScene;
+			std::optional<Utils::AutosaveSnapshot> Base{}; // identity and source baseline; never owns scene bytes
+			std::optional<PublishKey> LastKey{};           // the key of LastResult
+			Status LastResult{};                           // the scene's last Publish outcome
+			Ref<const Utils::AutosaveSnapshot> Snapshot{}; // its published snapshot, null when it has none (clean)
+		};
 		struct CachedFingerprint
 		{
 			std::filesystem::path Path{};
 			Utils::AutosaveFingerprint Fingerprint{};
 		};
-		// The newest generation this service wrote and the snapshot it holds; touched only under the writer lease.
+		// The newest generation this service wrote for one scene and the snapshot it holds; touched only under the writer
+		// lease.
 		struct WrittenGeneration
 		{
+			std::string Key{}; // Utils::AutosaveSceneKey
 			std::string Generation{};
 			std::filesystem::path ProjectFile{};
 			std::string ScenePath{};
@@ -675,6 +873,12 @@ namespace Engine {
 			Utils::AutosaveFingerprint SourceFingerprint{};
 			uint64_t Revision = 0;
 			uint64_t Epoch = 0;
+		};
+		// The project-level part of a publication, captured once per Publish that needs it.
+		struct ProjectCapture
+		{
+			std::filesystem::path ProjectFile{};
+			Utils::AutosaveFingerprint Fingerprint{};
 		};
 
 		EditorContext* Editor = nullptr; // back-reference: the host keeps the context and its project lock alive through Reset
@@ -691,21 +895,26 @@ namespace Engine {
 		double LastAttempt = 0;
 		std::optional<std::filesystem::path> ProjectIdentity{};
 		std::optional<Utils::AutosaveFingerprint> ProjectFingerprint{};
-		std::optional<Utils::AutosaveSnapshot> Base{}; // main-thread identity and source baseline; never owns scene bytes
-		std::optional<PublishKey> LastPublishKey{};    // main thread: the key of the outcome below
-		Status LastPublishResult{};
+		std::vector<SceneState> Scenes{};              // main thread: the open scenes of the last Publish, in tab order
 		std::vector<CachedFingerprint> Fingerprints{}; // main thread, Publish only; the fatal path always reads the bytes
-		std::optional<WrittenGeneration> LastWritten{};
+		// Under the writer lease: the newest generation written per scene, and the scene of each generation the writes and
+		// the retention read (Utils::AutosaveSceneKey by generation).
+		std::vector<WrittenGeneration> LastWritten{};
+		std::map<std::string, std::string, std::less<>> GenerationKeys{};
 
 		void AssertMain() const { ENGINE_ASSERT(MainThread == std::this_thread::get_id(), "Autosave requires the main thread"); }
+		// Main thread: frees the publication `index` unless the fatal path claimed it meanwhile, then drops its snapshots.
+		void FreeSlot(size_t index)
+		{
+			SlotState expected = SlotState::Published;
+			if (Slots[index].Status.compare_exchange_strong(expected, SlotState::Free, std::memory_order_acq_rel))
+				Slots[index].Snapshots.clear();
+		}
 		void Withdraw()
 		{
 			const int32_t old = Published.exchange(Utils::NoAutosaveSlot, std::memory_order_acq_rel);
 			if (old != Utils::NoAutosaveSlot)
-			{
-				SlotState expected = SlotState::Published;
-				Slots[static_cast<size_t>(old)].Status.compare_exchange_strong(expected, SlotState::Free, std::memory_order_acq_rel);
-			}
+				FreeSlot(static_cast<size_t>(old));
 		}
 		void Release(int32_t index) noexcept
 		{
@@ -733,39 +942,120 @@ namespace Engine {
 				return Utils::NoAutosaveSlot;
 			return index;
 		}
-		// Forgets Publish's cached outcome, so the next call recomputes it (the publication or baseline changed elsewhere).
+
+		SceneState* FindScene(OpenSceneId id)
+		{
+			const auto scene = std::ranges::find(Scenes, id, &SceneState::Id);
+			return scene != Scenes.end() ? &*scene : nullptr;
+		}
+		SceneState& GetScene(OpenSceneId id)
+		{
+			if (SceneState* scene = FindScene(id); scene != nullptr)
+				return *scene;
+			return Scenes.emplace_back(SceneState{ .Id = id });
+		}
+		// Forgets every scene's cached Publish outcome, so the next call recomputes it.
 		void ForgetPublication()
 		{
-			LastPublishKey.reset();
-			LastPublishResult = {};
+			for (SceneState& scene : Scenes)
+			{
+				scene.LastKey.reset();
+				scene.LastResult = {};
+			}
 		}
-		void AdoptRecovery(Utils::PreparedAutosaveRecovery prepared)
+		// Withdraws every scene's snapshot and the publication.
+		void WithdrawAll()
 		{
-			Editor->SetScene(std::move(prepared.RecoveredScene), std::move(prepared.ScenePath), true);
-			prepared.Baseline.Epoch = Editor->GetSceneDocumentEpoch();
+			for (SceneState& scene : Scenes)
+				scene.Snapshot.reset();
 			Withdraw();
-			ForgetPublication();
+		}
+		// Brings the scene states in step with the editor's open scenes (their tab order; a closed scene's state goes) and
+		// publishes their snapshots as one publication, unless it holds exactly those already.
+		Status UpdatePublication()
+		{
+			const std::vector<OpenSceneId> open = Editor->GetOpenScenes();
+			std::vector<SceneState> ordered;
+			ordered.reserve(open.size());
+			for (const OpenSceneId id : open)
+			{
+				if (SceneState* scene = FindScene(id); scene != nullptr)
+					ordered.push_back(std::move(*scene));
+			}
+			Scenes = std::move(ordered);
+			std::vector<Ref<const Utils::AutosaveSnapshot>> snapshots;
+			for (const SceneState& scene : Scenes)
+			{
+				if (scene.Snapshot != nullptr)
+					snapshots.push_back(scene.Snapshot);
+			}
+			const int32_t current = Published.load(std::memory_order_acquire);
+			if (current != Utils::NoAutosaveSlot && Slots[static_cast<size_t>(current)].Snapshots == snapshots)
+				return {};
+			if (snapshots.empty())
+			{
+				Withdraw();
+				return {};
+			}
+			for (size_t index = 0; index < Slots.size(); ++index)
+			{
+				Slot& slot = Slots[index];
+				// A publication that a finished fatal writer released after it was replaced is reclaimed here.
+				if (static_cast<int32_t>(index) != Published.load(std::memory_order_acquire))
+					FreeSlot(index);
+				SlotState expected = SlotState::Free;
+				if (!slot.Status.compare_exchange_strong(expected, SlotState::Preparing, std::memory_order_acq_rel))
+					continue;
+				slot.Snapshots = std::move(snapshots);
+				slot.Status.store(SlotState::Published, std::memory_order_release);
+				const int32_t old = Published.exchange(static_cast<int32_t>(index), std::memory_order_acq_rel);
+				if (old != Utils::NoAutosaveSlot)
+					FreeSlot(static_cast<size_t>(old));
+				return {};
+			}
+			return MakeError(ErrorCode::InvalidState, "autosave has no free publication slot");
+		}
+		// Whether the scene `id` (a snapshot's Epoch) published without error at the last Publish.
+		bool IsPublishedWithoutError(uint64_t id) const
+		{
+			const auto scene = std::ranges::find(Scenes, static_cast<OpenSceneId>(id), &SceneState::Id);
+			return scene != Scenes.end() && scene->LastResult.has_value() && scene->Snapshot != nullptr;
+		}
+		bool HasPublishedWithoutError() const
+		{
+			return std::ranges::any_of(Scenes, [](const SceneState& scene)
+			{
+				return scene.LastResult.has_value() && scene.Snapshot != nullptr;
+			});
+		}
+		void AdoptRecovery(Utils::PreparedAutosaveRecovery prepared, OpenSceneId id)
+		{
+			SceneState& scene = GetScene(id);
+			prepared.Baseline.Epoch = id;
+			scene.Snapshot.reset();
+			scene.LastKey.reset();
+			scene.LastResult = {};
 			ProjectIdentity = std::move(prepared.ProjectIdentity);
 			ProjectFingerprint = prepared.Baseline.ProjectFingerprint;
-			Base = std::move(prepared.Baseline);
+			scene.Base = std::move(prepared.Baseline);
+			static_cast<void>(UpdatePublication());
 		}
 
-		// The key of the current editor state, or nullopt when a file cannot be inspected (the slow path reports why).
-		std::optional<PublishKey> MakePublishKey() const
+		// The key of the open scene `info`, or nullopt when a file cannot be inspected (the slow path reports why).
+		std::optional<PublishKey> MakePublishKey(const OpenSceneInfo& info, const std::optional<Utils::AutosaveFileStamp>& projectStamp) const
 		{
+			if (!projectStamp.has_value())
+				return std::nullopt;
 			const EditorContext& editor = *Editor;
 			PublishKey key;
 			key.Project = &editor.GetProject();
-			key.SceneEpoch = editor.GetSceneDocumentEpoch();
-			key.Revision = editor.GetRevision();
-			key.Dirty = editor.IsSceneDirty();
-			key.ChangedOnDisk = editor.IsSceneChangedOnDisk();
-			if (editor.GetScenePath())
-				key.ScenePath = editor.GetScenePath()->GetPath();
-			const Result<Utils::AutosaveFileStamp> project = Utils::ReadAutosaveStamp(editor.GetProject().GetProjectFile());
-			if (!project)
-				return std::nullopt;
-			key.ProjectStamp = *project;
+			key.SceneId = info.Id;
+			key.Revision = info.Revision;
+			key.Dirty = info.Dirty;
+			key.ChangedOnDisk = info.ChangedOnDisk;
+			key.ProjectStamp = *projectStamp;
+			if (info.Path)
+				key.ScenePath = info.Path->GetPath();
 			if (!key.ScenePath.empty())
 			{
 				const Result<Utils::AutosaveFileStamp> source = Utils::ReadAutosaveStamp(editor.GetProject().GetRoot() / FileSystem::PathFromUtf8(key.ScenePath));
@@ -798,84 +1088,146 @@ namespace Engine {
 			return fingerprint;
 		}
 
-		// Whether `snapshot` is already the manifest's newest generation, written by this service, and still recoverable as
-		// far as a stat can tell (unchanged project and source). Under the writer lease.
-		bool IsNewestWritten(const Utils::AutosaveSnapshot& snapshot) const
+		// Whether `snapshot` is already the newest generation of its scene in `manifest`, written by this service, and still
+		// recoverable as far as a stat can tell (unchanged project and source). Under the writer lease.
+		bool IsNewestWritten(const Utils::AutosaveSnapshot& snapshot, const Utils::AutosaveManifest& manifest) const
 		{
-			if (!LastWritten || LastWritten->ProjectFile != snapshot.ProjectFile || LastWritten->ScenePath != snapshot.ScenePath
-				|| LastWritten->UntitledToken != snapshot.UntitledToken || LastWritten->ProjectFingerprint != snapshot.ProjectFingerprint
-				|| LastWritten->SourceFingerprint != snapshot.SourceFingerprint || LastWritten->Revision != snapshot.Revision || LastWritten->Epoch != snapshot.Epoch)
+			const std::string key = Utils::AutosaveSceneKey(snapshot);
+			const auto written = std::ranges::find_if(LastWritten, [&snapshot, &key](const WrittenGeneration& candidate)
+			{
+				return candidate.Key == key && candidate.ProjectFile == snapshot.ProjectFile;
+			});
+			if (written == LastWritten.end() || written->ScenePath != snapshot.ScenePath || written->UntitledToken != snapshot.UntitledToken
+				|| written->ProjectFingerprint != snapshot.ProjectFingerprint || written->SourceFingerprint != snapshot.SourceFingerprint
+				|| written->Revision != snapshot.Revision || written->Epoch != snapshot.Epoch)
 				return false;
 			if (!Utils::CheckAutosaveStamps(snapshot))
 				return false;
-			const Result<Utils::AutosaveManifest> manifest = Utils::ReadAutosaveManifest(snapshot.Root, Specification.ReadObserver);
-			return manifest && !manifest->Generations.empty() && manifest->Generations.front().Generation == LastWritten->Generation;
+			// Still in the manifest, and no newer generation there belongs to the same scene, or to one this service cannot
+			// name.
+			for (const Utils::AutosaveManifestEntry& entry : manifest.Generations)
+			{
+				if (entry.Generation == written->Generation)
+					return true;
+				const auto known = GenerationKeys.find(entry.Generation);
+				if (known == GenerationKeys.end() || known->second == key)
+					return false;
+			}
+			return false;
 		}
-		void RecordWritten(const Utils::AutosaveSnapshot& snapshot, std::string generation)
+		// Under the writer lease, after a write: each written scene's newest generation, and only those the manifest names.
+		void RecordWritten(const Utils::AutosaveGenerationWrite& written)
 		{
-			LastWritten = WrittenGeneration{ .Generation = std::move(generation),
-				.ProjectFile = snapshot.ProjectFile,
-				.ScenePath = snapshot.ScenePath,
-				.UntitledToken = snapshot.UntitledToken,
-				.ProjectFingerprint = snapshot.ProjectFingerprint,
-				.SourceFingerprint = snapshot.SourceFingerprint,
-				.Revision = snapshot.Revision,
-				.Epoch = snapshot.Epoch };
+			for (const auto& [snapshot, generation] : written.Generations)
+			{
+				const std::string key = Utils::AutosaveSceneKey(*snapshot);
+				std::erase_if(LastWritten, [&key, snapshot](const WrittenGeneration& entry)
+				{
+					return entry.Key == key && entry.ProjectFile == snapshot->ProjectFile;
+				});
+				LastWritten.push_back(WrittenGeneration{ .Key = key,
+					.Generation = generation,
+					.ProjectFile = snapshot->ProjectFile,
+					.ScenePath = snapshot->ScenePath,
+					.UntitledToken = snapshot->UntitledToken,
+					.ProjectFingerprint = snapshot->ProjectFingerprint,
+					.SourceFingerprint = snapshot->SourceFingerprint,
+					.Revision = snapshot->Revision,
+					.Epoch = snapshot->Epoch });
+			}
+			ForgetRetiredWrites(written.Manifest);
+		}
+		void ForgetRetiredWrites(const Utils::AutosaveManifest& manifest)
+		{
+			std::erase_if(LastWritten, [&manifest](const WrittenGeneration& entry)
+			{
+				return std::ranges::find(manifest.Generations, entry.Generation, &Utils::AutosaveManifestEntry::Generation) == manifest.Generations.end();
+			});
+		}
+		// Under the writer lease: writes `snapshots` in their order, one generation each, and publishes the manifest once.
+		// With `skipWritten`, a snapshot that is already the newest generation of its scene this service wrote is not
+		// written again. Nothing to write: Written is false.
+		Result<Utils::AutosaveGenerationWrite> WriteSnapshots(std::span<const Ref<const Utils::AutosaveSnapshot>> snapshots, AutosaveReason reason, bool skipWritten)
+		{
+			if (snapshots.empty())
+				return Utils::AutosaveGenerationWrite{};
+			ENGINE_TRY_ASSIGN(Utils::AutosaveManifest manifest, Utils::ReadAutosaveManifest(snapshots.front()->Root, Specification.ReadObserver));
+			std::vector<const Utils::AutosaveSnapshot*> pending;
+			for (const Ref<const Utils::AutosaveSnapshot>& snapshot : snapshots)
+			{
+				if (!skipWritten || !IsNewestWritten(*snapshot, manifest))
+					pending.push_back(snapshot.get());
+			}
+			if (pending.empty())
+				return Utils::AutosaveGenerationWrite{};
+			ENGINE_TRY_ASSIGN(Utils::AutosaveGenerationWrite written, Utils::WriteAutosaveGenerations(pending, std::move(manifest), Specification, reason, GenerationKeys));
+			RecordWritten(written);
+			return written;
 		}
 
-		// Publish's work when its key changed (or could not be computed).
-		Status PublishChanged()
+		// The project-level part of a publication: the canonical identity and the admitted fingerprint of the project file.
+		Result<ProjectCapture> CaptureProject()
 		{
 			EditorContext& editor = *Editor;
-			Utils::AutosaveSnapshot snapshot;
-			ENGINE_TRY_ASSIGN(snapshot.ProjectFile, Utils::CanonicalAutosaveProject(editor.GetProject()));
-			if (ProjectIdentity && *ProjectIdentity != snapshot.ProjectFile)
+			ProjectCapture capture;
+			ENGINE_TRY_ASSIGN(capture.ProjectFile, Utils::CanonicalAutosaveProject(editor.GetProject()));
+			if (ProjectIdentity && *ProjectIdentity != capture.ProjectFile)
 				return MakeError(ErrorCode::Conflict, "the open project's canonical identity changed without a completed reset");
-			ProjectIdentity = snapshot.ProjectFile;
-			snapshot.Root = snapshot.ProjectFile.parent_path();
-			snapshot.AutosaveRoot = snapshot.Root / "Library" / "Autosave";
-			snapshot.Epoch = editor.GetSceneDocumentEpoch();
-			snapshot.Revision = editor.GetRevision();
-			snapshot.SceneName = editor.GetScene().GetName();
-			ENGINE_TRY_ASSIGN(snapshot.ProjectFingerprint, ReadCachedFingerprint(snapshot.ProjectFile));
-			if (!snapshot.ProjectFingerprint.Exists)
+			ProjectIdentity = capture.ProjectFile;
+			ENGINE_TRY_ASSIGN(capture.Fingerprint, ReadCachedFingerprint(capture.ProjectFile));
+			if (!capture.Fingerprint.Exists)
 				return MakeError(ErrorCode::Conflict, "the autosave project no longer exists");
-			if (ProjectFingerprint && *ProjectFingerprint != snapshot.ProjectFingerprint)
+			if (ProjectFingerprint && *ProjectFingerprint != capture.Fingerprint)
 			{
 				// The editor's own .eproj writes (settings commands with their undo, redo and batch rollback, project.upgrade)
 				// leave the file holding exactly the canonical serialization of the loaded settings, even when several
 				// happened since the last publication. Admit any changed identity with those bytes; an external rewrite to
 				// anything else cannot silently replace the identity captured when this project was opened.
 				ENGINE_TRY_ASSIGN(const std::string settingsText, ProjectSerializer::SaveToString(editor.GetProject().GetSettings(), editor.GetTypeRegistry()));
-				if (snapshot.ProjectFingerprint.Size != settingsText.size() || snapshot.ProjectFingerprint.Hash != XXH64(settingsText))
+				if (capture.Fingerprint.Size != settingsText.size() || capture.Fingerprint.Hash != XXH64(settingsText))
 					return MakeError(ErrorCode::Conflict, "the project file changed outside the editor's settings writes");
 			}
-			ProjectFingerprint = snapshot.ProjectFingerprint;
-			if (editor.GetScenePath())
+			ProjectFingerprint = capture.Fingerprint;
+			Enabled.store(true, std::memory_order_release);
+			return capture;
+		}
+
+		// One open scene's publication when its key changed (or could not be computed): its baseline, and its snapshot when
+		// it is dirty and differs from its source.
+		Status PublishScene(SceneState& state, const Scene& scene, const OpenSceneInfo& info, const ProjectCapture& project)
+		{
+			Utils::AutosaveSnapshot snapshot;
+			snapshot.ProjectFile = project.ProjectFile;
+			snapshot.Root = snapshot.ProjectFile.parent_path();
+			snapshot.AutosaveRoot = snapshot.Root / "Library" / "Autosave";
+			snapshot.Epoch = info.Id;
+			snapshot.Revision = info.Revision;
+			snapshot.SceneName = scene.GetName();
+			snapshot.ProjectFingerprint = project.Fingerprint;
+			if (info.Path)
 			{
-				snapshot.ScenePath = editor.GetScenePath()->GetPath();
+				snapshot.ScenePath = info.Path->GetPath();
 				snapshot.Source = snapshot.Root / FileSystem::PathFromUtf8(snapshot.ScenePath);
 				ENGINE_TRY(Utils::CheckAutosavePath(snapshot.Root, snapshot.Source));
 			}
-			const bool dirty = editor.IsSceneDirty();
-			const bool sameDocument = Base && Base->ProjectFile == snapshot.ProjectFile && Base->Epoch == snapshot.Epoch && Base->ScenePath == snapshot.ScenePath;
+			const bool dirty = info.Dirty;
+			std::optional<Utils::AutosaveSnapshot>& base = state.Base;
+			const bool sameDocument = base && base->ProjectFile == snapshot.ProjectFile && base->Epoch == snapshot.Epoch && base->ScenePath == snapshot.ScenePath;
 			if (sameDocument && !dirty)
 			{
 				// A clean open scene can still be stale on disk. Keep its loaded baseline until explicit save or reload;
 				// adopting external bytes here would incorrectly call later edits derived from the changed source.
-				Enabled.store(true, std::memory_order_release);
-				Base->ProjectFingerprint = snapshot.ProjectFingerprint;
-				Withdraw();
+				base->ProjectFingerprint = snapshot.ProjectFingerprint;
+				state.Snapshot.reset();
 				return {};
 			}
 			if (!sameDocument)
 			{
-				if (editor.IsSceneChangedOnDisk())
+				if (info.ChangedOnDisk)
 				{
 					// The file no longer holds what the open scene was loaded from: it cannot become this document's baseline.
-					Enabled.store(true, std::memory_order_release);
-					Base.reset();
-					Withdraw();
+					base.reset();
+					state.Snapshot.reset();
 					if (!dirty)
 						return {};
 					return MakeError(ErrorCode::Conflict, "scene '{}' changed on disk after it was opened; reload or save it to resume autosave", snapshot.ScenePath);
@@ -894,8 +1246,8 @@ namespace Engine {
 			}
 			else
 			{
-				snapshot.SourceFingerprint = Base->SourceFingerprint;
-				snapshot.UntitledToken = Base->UntitledToken;
+				snapshot.SourceFingerprint = base->SourceFingerprint;
+				snapshot.UntitledToken = base->UntitledToken;
 				if (!snapshot.Source.empty())
 				{
 					ENGINE_TRY_ASSIGN(const Utils::AutosaveFingerprint current, ReadCachedFingerprint(snapshot.Source));
@@ -903,50 +1255,55 @@ namespace Engine {
 						return MakeError(ErrorCode::Conflict, "scene '{}' changed after the autosave snapshot was captured", snapshot.ScenePath);
 				}
 			}
-			Base = snapshot;
-			Enabled.store(true, std::memory_order_release);
+			base = snapshot;
 			if (!dirty)
 			{
-				Withdraw();
+				state.Snapshot.reset();
 				return {};
 			}
-			const int32_t published = Published.load(std::memory_order_acquire);
-			if (published != Utils::NoAutosaveSlot)
+			if (const Utils::AutosaveSnapshot* previous = state.Snapshot.get(); previous != nullptr)
 			{
-				const auto& previous = Slots[static_cast<size_t>(published)].Snapshot;
-				if (previous.Revision == snapshot.Revision && previous.Epoch == snapshot.Epoch && previous.ScenePath == snapshot.ScenePath && previous.ProjectFingerprint == snapshot.ProjectFingerprint && previous.SourceFingerprint == snapshot.SourceFingerprint)
+				if (previous->Revision == snapshot.Revision && previous->Epoch == snapshot.Epoch && previous->ScenePath == snapshot.ScenePath
+					&& previous->ProjectFingerprint == snapshot.ProjectFingerprint && previous->SourceFingerprint == snapshot.SourceFingerprint)
 					return {};
 			}
-			ENGINE_TRY_ASSIGN(snapshot.Text, SceneSerializer::SaveToString(editor.GetScene()));
+			ENGINE_TRY_ASSIGN(snapshot.Text, SceneSerializer::SaveToString(scene));
 			if (snapshot.Text.size() > Utils::MaxAutosavePayloadBytes)
 				return MakeError(ErrorCode::Validation, "autosave scene exceeds the 256 MiB recovery limit");
 			if (snapshot.SourceFingerprint.Exists && snapshot.SourceFingerprint.Size == snapshot.Text.size() && snapshot.SourceFingerprint.Hash == XXH64(snapshot.Text))
 			{
-				Withdraw();
+				state.Snapshot.reset();
 				return {};
 			}
-			for (size_t index = 0; index < Slots.size(); ++index)
+			state.Snapshot = CreateRef<const Utils::AutosaveSnapshot>(std::move(snapshot));
+			return {};
+		}
+
+		// Installs a prepared recovery as the open scene of its source: replacing that open scene (by path, or an untitled
+		// scene by its document token) and making it active, otherwise as an additional open scene. Returns its new id.
+		Result<OpenSceneId> InstallRecovery(Utils::PreparedAutosaveRecovery& prepared)
+		{
+			EditorContext& editor = *Editor;
+			OpenSceneId source = NoOpenScene;
+			if (prepared.ScenePath.has_value())
 			{
-				Slot& slot = Slots[index];
-				if (static_cast<int32_t>(index) != Published.load(std::memory_order_acquire))
-				{
-					SlotState stale = SlotState::Published;
-					slot.Status.compare_exchange_strong(stale, SlotState::Free, std::memory_order_acq_rel);
-				}
-				SlotState expected = SlotState::Free;
-				if (!slot.Status.compare_exchange_strong(expected, SlotState::Preparing, std::memory_order_acq_rel))
-					continue;
-				slot.Snapshot = std::move(snapshot);
-				slot.Status.store(SlotState::Published, std::memory_order_release);
-				const int32_t old = Published.exchange(static_cast<int32_t>(index), std::memory_order_acq_rel);
-				if (old != Utils::NoAutosaveSlot)
-				{
-					expected = SlotState::Published;
-					Slots[static_cast<size_t>(old)].Status.compare_exchange_strong(expected, SlotState::Free, std::memory_order_acq_rel);
-				}
-				return {};
+				source = editor.FindOpenScene(*prepared.ScenePath);
 			}
-			return MakeError(ErrorCode::InvalidState, "autosave has no free publication slot");
+			else
+			{
+				for (const OpenSceneId id : editor.GetOpenScenes())
+				{
+					const SceneState* scene = FindScene(id);
+					const Result<OpenSceneInfo> info = editor.DescribeOpenScene(id);
+					if (scene != nullptr && scene->Base && info && !info->Path && scene->Base->ScenePath.empty() && scene->Base->UntitledToken == prepared.Baseline.UntitledToken)
+						source = id;
+				}
+			}
+			if (source == NoOpenScene)
+				return editor.AddScene(std::move(prepared.RecoveredScene), std::move(prepared.ScenePath), true);
+			ENGINE_TRY(editor.ActivateScene(source));
+			editor.SetScene(std::move(prepared.RecoveredScene), std::move(prepared.ScenePath), true);
+			return editor.GetActiveSceneId();
 		}
 	};
 
@@ -974,33 +1331,54 @@ namespace Engine {
 			state.CanReopen = false;
 		}
 		EditorContext& editor = *state.Editor;
-		if (!editor.HasProject() || editor.IsReadOnly() || editor.IsDryRun() || !editor.HasScene())
+		const std::vector<OpenSceneId> open = editor.HasProject() ? editor.GetOpenScenes() : std::vector<OpenSceneId>{};
+		if (!editor.HasProject() || editor.IsReadOnly() || editor.IsDryRun() || open.empty())
 		{
 			state.Enabled.store(false, std::memory_order_release);
-			state.Withdraw();
+			state.WithdrawAll();
 			state.ForgetPublication();
 			return {};
 		}
-		if (!std::isfinite(state.Specification.IntervalSeconds) || state.Specification.IntervalSeconds <= 0 || state.Specification.RetainedGenerations == 0 || state.Specification.RetainedGenerations > Utils::MaxAutosaveGenerations)
+		if (!std::isfinite(state.Specification.IntervalSeconds) || state.Specification.IntervalSeconds <= 0 || state.Specification.RetainedGenerations == 0
+			|| state.Specification.RetainedGenerations > Utils::MaxAutosaveRetainedGenerations)
 			return MakeError(ErrorCode::Validation, "autosave requires a positive finite interval and 1 to 32 retained generations");
-		// An unfinished gesture owns live preview changes. Preserve the preceding committed snapshot until it finishes.
-		if (editor.GetTransaction() != nullptr || editor.GetScene().GetChangeTracker().IsTracking())
+		// An unfinished gesture owns live preview changes. Preserve the preceding committed snapshots until it finishes.
+		if (editor.GetTransaction() != nullptr)
 			return {};
 
-		// Nothing that decides the outcome changed since the last publication: keep it (or its Conflict) without touching
-		// any file's bytes, path canonicalization or serialization.
-		std::optional<State::PublishKey> key = state.MakePublishKey();
-		if (key && state.LastPublishKey == key)
-			return state.LastPublishResult;
-		state.ForgetPublication();
-		Status published = state.PublishChanged();
-		if (key && (published || published.error().GetCode() == ErrorCode::Conflict))
+		// Each open scene on its own (decision 15). A scene whose key did not change keeps its outcome (or its Conflict)
+		// without touching any file's bytes, path canonicalization or serialization; the project is captured once, and only
+		// for a scene whose key changed.
+		const Result<Utils::AutosaveFileStamp> projectFile = Utils::ReadAutosaveStamp(editor.GetProject().GetProjectFile());
+		const std::optional<Utils::AutosaveFileStamp> projectStamp = projectFile ? std::optional(*projectFile) : std::nullopt;
+		std::optional<Result<State::ProjectCapture>> capture;
+		Status first;
+		for (const OpenSceneId id : open)
 		{
-			// A conflict lasts until a file or the editor state changes, which changes the key; other failures retry.
-			state.LastPublishKey = std::move(key);
-			state.LastPublishResult = published;
+			const Scene* scene = editor.FindScene(id);
+			Result<OpenSceneInfo> info = editor.DescribeOpenScene(id);
+			ENGINE_ASSERT(scene != nullptr && info.has_value(), "Autosave: open scene {} has no document", id);
+			State::SceneState& sceneState = state.GetScene(id);
+			// An unfinished gesture in this scene keeps its preceding committed snapshot.
+			if (scene == nullptr || !info || scene->GetChangeTracker().IsTracking())
+				continue;
+			std::optional<State::PublishKey> key = state.MakePublishKey(*info, projectStamp);
+			if (!key || sceneState.LastKey != key)
+			{
+				sceneState.LastKey.reset();
+				if (!capture)
+					capture = state.CaptureProject();
+				Status published = *capture ? state.PublishScene(sceneState, *scene, *info, **capture) : Status(std::unexpected(capture->error()));
+				sceneState.LastResult = published;
+				// A conflict lasts until a file or the editor state changes, which changes the key; other failures retry.
+				if (key && (published || published.error().GetCode() == ErrorCode::Conflict))
+					sceneState.LastKey = std::move(key);
+			}
+			if (!sceneState.LastResult && first)
+				first = sceneState.LastResult;
 		}
-		return published;
+		ENGINE_TRY(state.UpdatePublication());
+		return first;
 	}
 
 	Result<AutosaveWriteResult> Autosave::Update(double nowSeconds)
@@ -1011,14 +1389,23 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidArgument, "autosave clock must be finite, nonnegative and monotonic");
 		state.HasClock = true;
 		state.LastNow = nowSeconds;
-		ENGINE_TRY(Publish());
+		// A scene that cannot be published reports its failure; the other open scenes are still written when it is time.
+		const Status published = Publish();
+		if (!published && !state.HasPublishedWithoutError())
+			return std::unexpected(published.error());
+		const auto idle = [&published]() -> Result<AutosaveWriteResult>
+		{
+			if (!published)
+				return std::unexpected(published.error());
+			return AutosaveWriteResult{};
+		};
 		if (!state.Enabled.load(std::memory_order_acquire))
-			return AutosaveWriteResult{};
+			return idle();
 		if (nowSeconds - state.LastAttempt < state.Specification.IntervalSeconds)
-			return AutosaveWriteResult{};
+			return idle();
 		const EditorContext& editor = *state.Editor;
 		if (editor.HasScene() && (editor.GetTransaction() != nullptr || editor.GetScene().GetChangeTracker().IsTracking()))
-			return AutosaveWriteResult{};
+			return idle();
 		state.LastAttempt = nowSeconds;
 		return Save(AutosaveReason::Periodic);
 	}
@@ -1034,20 +1421,35 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidState, "dry runs cannot write autosaves");
 		if (editor.HasScene() && (editor.GetTransaction() != nullptr || editor.GetScene().GetChangeTracker().IsTracking()))
 			return MakeError(ErrorCode::InvalidState, "finish the active edit before saving a recovery");
-		ENGINE_TRY(Publish());
+		// Every open scene that published is written; a scene that could not be published reports its failure afterwards.
+		const Status published = Publish();
+		if (!published && !state.HasPublishedWithoutError())
+			return std::unexpected(published.error());
 		uint32_t expected = 0;
 		if (!state.Gate.compare_exchange_strong(expected, Utils::AutosaveWriterBit, std::memory_order_acq_rel))
 			return MakeError(ErrorCode::InvalidState, "autosave is closing or another writer owns the recovery files");
 		State::WriterLease lease{ state, state.ClaimSlot() };
 		if (lease.Index == Utils::NoAutosaveSlot)
+		{
+			if (!published)
+				return std::unexpected(published.error());
 			return AutosaveWriteResult{};
-		const Utils::AutosaveSnapshot& snapshot = state.Slots[static_cast<size_t>(lease.Index)].Snapshot;
-		// A final snapshot of what the newest generation already holds would only evict an older (another scene's) one.
-		if ((reason == AutosaveReason::FatalError || reason == AutosaveReason::Exit) && state.IsNewestWritten(snapshot))
-			return AutosaveWriteResult{};
-		ENGINE_TRY_ASSIGN(Utils::AutosaveGenerationWrite written, Utils::WriteAutosaveGeneration(snapshot, state.Specification, reason));
-		state.RecordWritten(snapshot, written.Result.Generation);
-		Utils::SweepAutosaveGenerations(snapshot.Root, written.Manifest);
+		}
+		std::vector<Ref<const Utils::AutosaveSnapshot>> snapshots;
+		for (const Ref<const Utils::AutosaveSnapshot>& snapshot : state.Slots[static_cast<size_t>(lease.Index)].Snapshots)
+		{
+			if (state.IsPublishedWithoutError(snapshot->Epoch))
+				snapshots.push_back(snapshot);
+		}
+		// A final snapshot of what the newest generation of a scene already holds would only evict an older one.
+		const bool skipWritten = reason == AutosaveReason::FatalError || reason == AutosaveReason::Exit;
+		ENGINE_TRY_ASSIGN(Utils::AutosaveGenerationWrite written, state.WriteSnapshots(snapshots, reason, skipWritten));
+		if (written.Result.Written)
+			Utils::SweepAutosaveGenerations(snapshots.front()->Root, written.Manifest);
+		if (written.Failure.has_value())
+			return std::unexpected(std::move(*written.Failure));
+		if (!published)
+			return std::unexpected(published.error());
 		return std::move(written.Result);
 	}
 
@@ -1067,13 +1469,12 @@ namespace Engine {
 		// non-allocating destructor releases closing admission even when native I/O runs out of memory.
 		try
 		{
-			const Utils::AutosaveSnapshot& snapshot = state.Slots[static_cast<size_t>(lease.Index)].Snapshot;
-			if (state.IsNewestWritten(snapshot))
-				return AutosaveFatalResult::Saved;
-			const Result<Utils::AutosaveGenerationWrite> written = Utils::WriteAutosaveGeneration(snapshot, state.Specification, AutosaveReason::FatalError);
-			if (!written)
+			// Every published dirty open scene, from the claimed publication only (decision 15), with one manifest
+			// publication; a scene already written as the newest generation of its scene is not written again.
+			const std::vector<Ref<const Utils::AutosaveSnapshot>>& snapshots = state.Slots[static_cast<size_t>(lease.Index)].Snapshots;
+			const Result<Utils::AutosaveGenerationWrite> written = state.WriteSnapshots(snapshots, AutosaveReason::FatalError, true);
+			if (!written || written->Failure.has_value())
 				return AutosaveFatalResult::IoFailure;
-			state.RecordWritten(snapshot, written->Result.Generation);
 			return AutosaveFatalResult::Saved;
 		}
 		catch (...)
@@ -1101,14 +1502,23 @@ namespace Engine {
 
 	Result<std::vector<AutosaveRecoveryInfo>> Autosave::FindRecoveries() const
 	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "M20 per-scene recovery contract (Docs/Decisions/0031-m20-contract.md decision 15, stream S-A)");
-	}
-
-	Status Autosave::OpenRecoveredProject(Scope<LoadedProject> /*project*/, std::span<const AutosaveRecoveryInfo> /*recoveries*/)
-	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "M20 per-scene recovery contract (Docs/Decisions/0031-m20-contract.md decision 15, stream S-A)");
+		m_State->AssertMain();
+		EditorContext& editor = *m_State->Editor;
+		if (!editor.HasProject())
+			return std::vector<AutosaveRecoveryInfo>{};
+		ENGINE_TRY_ASSIGN(const std::vector<Utils::AutosaveRecoveryData> recoveries, Utils::ReadAutosaveRecoveries(editor.GetProject()));
+		std::vector<AutosaveRecoveryInfo> offers;
+		offers.reserve(recoveries.size());
+		for (const Utils::AutosaveRecoveryData& recovery : recoveries)
+		{
+			const Scope<Scene> scene = editor.CreateScene(recovery.Info.SceneName);
+			LoadReport report;
+			ENGINE_TRY(SceneSerializer::LoadFromString(*scene, recovery.SceneText, {}, report));
+			if (scene->GetName() != recovery.Info.SceneName)
+				return MakeError(ErrorCode::Validation, "autosave scene identity disagrees with its payload");
+			offers.push_back(recovery.Info);
+		}
+		return offers;
 	}
 
 	Status Autosave::Recover(const AutosaveRecoveryInfo& recovery)
@@ -1130,12 +1540,18 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidState, "another autosave writer owns the recovery files");
 		State::WriterLease lease{ state };
 		ENGINE_TRY_ASSIGN(auto prepared, Utils::PrepareAutosaveRecovery(editor, editor.GetProject(), recovery, state.Specification.ReadObserver));
-		state.AdoptRecovery(std::move(prepared));
-		state.LastWritten.reset();
+		ENGINE_TRY_ASSIGN(const OpenSceneId id, state.InstallRecovery(prepared));
+		state.AdoptRecovery(std::move(prepared), id);
+		state.LastWritten.clear();
 		return {};
 	}
 
 	Status Autosave::OpenRecoveredProject(Scope<LoadedProject> project, const AutosaveRecoveryInfo& recovery)
+	{
+		return OpenRecoveredProject(std::move(project), std::span<const AutosaveRecoveryInfo>(&recovery, 1));
+	}
+
+	Status Autosave::OpenRecoveredProject(Scope<LoadedProject> project, std::span<const AutosaveRecoveryInfo> recoveries)
 	{
 		State& state = *m_State;
 		state.AssertMain();
@@ -1144,18 +1560,53 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidArgument, "recovery needs an already-locked project");
 		if (project->IsReadOnly())
 			return MakeError(ErrorCode::PermissionDenied, "read-only projects cannot adopt a recovery");
-		if (editor.HasProject() || editor.IsDryRun() || editor.GetTransaction() != nullptr || state.Closing || state.Base || state.ProjectIdentity || state.Published.load(std::memory_order_acquire) != Utils::NoAutosaveSlot || state.Enabled.load(std::memory_order_acquire))
+		const bool bound = std::ranges::any_of(state.Scenes, [](const State::SceneState& scene)
+		{
+			return scene.Base.has_value();
+		});
+		if (editor.HasProject() || editor.IsDryRun() || editor.GetTransaction() != nullptr || state.Closing || bound || state.ProjectIdentity || state.Published.load(std::memory_order_acquire) != Utils::NoAutosaveSlot || state.Enabled.load(std::memory_order_acquire))
 			return MakeError(ErrorCode::InvalidState, "launcher recovery requires a quiescent service after its prior project was reset");
+		if (recoveries.empty())
+			return MakeError(ErrorCode::InvalidArgument, "launcher recovery needs at least one recovery offer");
+		if (recoveries.size() > MaxOpenScenes)
+			return MakeError(ErrorCode::InvalidArgument, "launcher recovery takes at most {} offers, the scenes the editor holds open", MaxOpenScenes);
 		uint32_t expected = state.Gate.load(std::memory_order_acquire);
 		if ((expected & Utils::AutosaveWriterBit) != 0 || !state.Gate.compare_exchange_strong(expected, expected | Utils::AutosaveWriterBit, std::memory_order_acq_rel))
 			return MakeError(ErrorCode::InvalidState, "another autosave writer owns the recovery files");
 		// The lease also prevents a fatal claim from observing partial adoption. Closed admission stays closed until
 		// the host's later Publish, and all expected failures precede the scene/baseline installation below.
 		State::WriterLease lease{ state };
-		ENGINE_TRY_ASSIGN(auto prepared, Utils::PrepareAutosaveRecovery(editor, *project, recovery, state.Specification.ReadObserver));
+		std::vector<Utils::PreparedAutosaveRecovery> prepared;
+		prepared.reserve(recoveries.size());
+		for (const AutosaveRecoveryInfo& recovery : recoveries)
+		{
+			ENGINE_TRY_ASSIGN(Utils::PreparedAutosaveRecovery scene, Utils::PrepareAutosaveRecovery(editor, *project, recovery, state.Specification.ReadObserver));
+			const bool repeated = std::ranges::any_of(prepared, [&scene](const Utils::PreparedAutosaveRecovery& other)
+			{
+				return other.SceneKey == scene.SceneKey;
+			});
+			if (repeated)
+			{
+				const std::string_view name = scene.Baseline.ScenePath.empty() ? std::string_view(scene.Baseline.SceneName) : std::string_view(scene.Baseline.ScenePath);
+				return MakeError(ErrorCode::InvalidArgument, "two recovery offers name the scene '{}'", name);
+			}
+			prepared.push_back(std::move(scene));
+		}
 		ENGINE_TRY(editor.OpenProject(std::move(project)));
-		state.AdoptRecovery(std::move(prepared));
-		state.LastWritten.reset();
+		// Every scene opens dirty with an empty history, in the given order; the first is active. None of these can fail:
+		// the project was just opened with no scene, and the offers are fewer than MaxOpenScenes and name distinct sources.
+		std::vector<OpenSceneId> ids;
+		for (Utils::PreparedAutosaveRecovery& scene : prepared)
+		{
+			const Result<OpenSceneId> added = editor.AddScene(std::move(scene.RecoveredScene), scene.ScenePath, true);
+			ENGINE_VERIFY(added.has_value(), "installing a recovered scene into a just-opened project failed: {}", added ? std::string() : added.error().ToString());
+			ids.push_back(*added);
+		}
+		const Status activated = editor.ActivateScene(ids.front());
+		ENGINE_VERIFY(activated.has_value(), "activating the first recovered scene failed: {}", activated ? std::string() : activated.error().ToString());
+		for (size_t index = 0; index < prepared.size(); ++index)
+			state.AdoptRecovery(std::move(prepared[index]), ids[index]);
+		state.LastWritten.clear();
 		return {};
 	}
 
@@ -1168,7 +1619,12 @@ namespace Engine {
 			return MakeError(ErrorCode::PermissionDenied, "read-only projects cannot discard recoveries");
 		if (editor.IsDryRun() || state.Closing || editor.GetTransaction() != nullptr)
 			return MakeError(ErrorCode::InvalidState, "cannot discard recoveries during a dry run, reset or transaction");
-		if (!editor.HasProject() || !editor.HasScene() || !editor.GetScenePath() || editor.IsSceneDirty() || !state.Base)
+		if (!editor.HasProject() || !editor.HasScene() || !editor.GetScenePath() || editor.IsSceneDirty())
+			return {};
+		// The scene just saved: the addressed one (decision 15).
+		const OpenSceneId saved = editor.GetAddressedSceneId();
+		State::SceneState* scene = state.FindScene(saved);
+		if (scene == nullptr || !scene->Base)
 			return {};
 		uint32_t expected = 0;
 		if (!state.Gate.compare_exchange_strong(expected, Utils::AutosaveWriterBit, std::memory_order_acq_rel))
@@ -1184,9 +1640,17 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(const std::string current, SceneSerializer::SaveToString(editor.GetScene()));
 		if (actual != current)
 			return MakeError(ErrorCode::Conflict, "the source file does not contain the explicitly saved scene");
-		const uint64_t epoch = editor.GetSceneDocumentEpoch();
-		if (state.Base->ProjectFile != projectFile || state.Base->Epoch != epoch)
+		const Utils::AutosaveSnapshot& base = *scene->Base;
+		if (base.ProjectFile != projectFile || base.Epoch != saved)
 			return {};
+		const auto forget = [&state, scene]()
+		{
+			scene->Snapshot.reset();
+			scene->LastKey.reset();
+			scene->LastResult = {};
+			scene->Base.reset();
+			static_cast<void>(state.UpdatePublication());
+		};
 		ENGINE_TRY_ASSIGN(Utils::AutosaveManifest manifest, Utils::ReadAutosaveManifest(root, observe));
 		std::vector<Utils::AutosaveManifestEntry> removed;
 		std::vector<Utils::AutosaveManifestEntry> kept;
@@ -1195,15 +1659,13 @@ namespace Engine {
 			// A generation that cannot be read or belongs to another canonical project (a moved or renamed one) cannot
 			// match the saved source: it is kept for its own owner or for retention, never a reason to fail the save.
 			const Result<Utils::AutosaveSnapshot> snapshot = Utils::ReadAutosaveGeneration(projectFile, entry, observe, false);
-			const bool sameSource = snapshot && snapshot->ScenePath == savedPath && state.Base->ScenePath == savedPath && snapshot->SourceFingerprint == state.Base->SourceFingerprint;
-			const bool sameUntitled = snapshot && snapshot->ScenePath.empty() && state.Base->ScenePath.empty() && !state.Base->UntitledToken.empty() && snapshot->UntitledToken == state.Base->UntitledToken;
+			const bool sameSource = snapshot && snapshot->ScenePath == savedPath && base.ScenePath == savedPath && snapshot->SourceFingerprint == base.SourceFingerprint;
+			const bool sameUntitled = snapshot && snapshot->ScenePath.empty() && base.ScenePath.empty() && !base.UntitledToken.empty() && snapshot->UntitledToken == base.UntitledToken;
 			(sameSource || sameUntitled ? removed : kept).push_back(entry);
 		}
 		if (removed.empty())
 		{
-			state.Withdraw();
-			state.ForgetPublication();
-			state.Base.reset();
+			forget();
 			return {};
 		}
 		manifest.Generations = std::move(kept);
@@ -1211,13 +1673,11 @@ namespace Engine {
 		const std::filesystem::path manifestPath = root / "Library" / "Autosave" / "Manifest.json";
 		ENGINE_TRY(Utils::CheckAutosavePath(root, manifestPath));
 		ENGINE_TRY(Utils::WriteAutosaveBytes(state.Specification, manifestPath, text));
-		state.LastWritten.reset();
+		state.ForgetRetiredWrites(manifest);
 		for (const auto& entry : removed)
 			Utils::RemoveRetiredAutosaveGeneration(root, manifestPath.parent_path() / FileSystem::PathFromUtf8(entry.Generation));
 		Utils::SweepAutosaveGenerations(root, manifest);
-		state.Withdraw();
-		state.ForgetPublication();
-		state.Base.reset();
+		forget();
 		return {};
 	}
 
@@ -1228,20 +1688,21 @@ namespace Engine {
 		state.Closing = true;
 		state.Gate.fetch_or(Utils::AutosaveClosedBit, std::memory_order_acq_rel);
 		state.Enabled.store(false, std::memory_order_release);
-		state.Withdraw();
+		state.WithdrawAll();
 		state.ForgetPublication();
 		if ((state.Gate.load(std::memory_order_acquire) & Utils::AutosaveWriterBit) != 0)
 			return false;
 		for (State::Slot& slot : state.Slots)
 		{
 			slot.Status.store(State::SlotState::Free, std::memory_order_relaxed);
-			slot.Snapshot = {};
+			slot.Snapshots.clear();
 		}
-		state.Base.reset();
+		state.Scenes.clear();
 		state.ProjectIdentity.reset();
 		state.ProjectFingerprint.reset();
 		state.Fingerprints.clear();
-		state.LastWritten.reset();
+		state.LastWritten.clear();
+		state.GenerationKeys.clear();
 		state.HasClock = false;
 		state.LastNow = 0;
 		state.LastAttempt = 0;

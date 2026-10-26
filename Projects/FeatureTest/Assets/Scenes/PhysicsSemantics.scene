@@ -12,7 +12,7 @@
 		"BoxCollider": 1,
 		"SphereCollider": 1,
 		"AudioListener": 1,
-		"Script": 1
+		"Script": 2
 	},
 	"Entities": [
 		{
@@ -199,9 +199,13 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "271b19875531f0e3",
-					"Fields": {},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "271b19875531f0e3",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -276,9 +280,13 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "271b19875531f0e3",
-					"Fields": {},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "271b19875531f0e3",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -326,9 +334,13 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "433f5f61ba7a7ebe",
-					"Fields": {},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "433f5f61ba7a7ebe",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -377,9 +389,13 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "271b19875531f0e3",
-					"Fields": {},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "271b19875531f0e3",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -427,9 +443,13 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "271b19875531f0e3",
-					"Fields": {},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "271b19875531f0e3",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -512,9 +532,13 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "271b19875531f0e3",
-					"Fields": {},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "271b19875531f0e3",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -563,11 +587,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "70ba9c0f09cd7ef7",
-					"Fields": {
-						"Partner": "Hammer"
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "70ba9c0f09cd7ef7",
+							"Fields": {
+								"Partner": "Hammer"
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -615,11 +643,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "70ba9c0f09cd7ef7",
-					"Fields": {
-						"Partner": "Anvil"
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "70ba9c0f09cd7ef7",
+							"Fields": {
+								"Partner": "Anvil"
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		}

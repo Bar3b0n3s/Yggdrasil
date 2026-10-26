@@ -72,6 +72,22 @@ namespace Engine {
 		// its effect), so a call can refuse before it changes anything.
 		[[nodiscard]] Status CheckDirtyScene(const EditorContext& editor, bool save, bool discard, std::string_view discardFlag);
 
+		// The methods that act on every open scene (M20, Docs/Decisions/0031-m20-contract.md decision 14). The helpers above
+		// keep addressing the addressed scene (scene.save, scene.open, scene.new); these read every open scene in tab order
+		// (Utils::ListOpenScenes).
+		//
+		// project.save and session.shutdown {save}: writes every open scene with unsaved changes to its own path, in tab order,
+		// each one addressed while it is written (Utils::AddressOpenScene, then SaveOpenScene), after checking that none of
+		// them was never saved, before anything is written: InvalidState naming the first such scene, with the hint to save it
+		// with scene.save {path} (and its scene target when it is not the addressed scene). Returns the project-relative files
+		// written, in tab order; empty when no open scene is dirty. Errors: that check's; those of addressing a scene and of
+		// SaveOpenScene (the scenes written before stay saved).
+		[[nodiscard]] Result<std::vector<std::string>> SaveDirtyOpenScenes(EditorContext& editor);
+
+		// InvalidState naming every open scene with unsaved changes, with `hint`; success when none has any (session.shutdown
+		// without save or force, project.upgrade).
+		[[nodiscard]] Status CheckNoDirtyOpenScenes(const EditorContext& editor, std::string_view hint);
+
 		// Reads `path` into `scene` (empty) with `mode`: options.SourcePath is the project-relative path, Repair loads draw
 		// their fresh ids from `repairIds`, script field values resolve against the editor's script field schemas, and an
 		// editor with --strict reads with LoadOptions::StrictUnknowns. Errors: the VFS read errors (an operating-system access

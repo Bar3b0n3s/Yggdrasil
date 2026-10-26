@@ -92,15 +92,16 @@ namespace Engine {
 	// whole component, §5.4) replaces Owner, OwnerType and OwnerJson with that nested object (its C++ object when one
 	// exists, otherwise null, and its JSON object) and clears Key. A Field override's value resolves to the field itself
 	// without its owning component, so a resolver below it would get OwnerType = that component and neither Owner nor
-	// OwnerJson. The one such field, ScriptComponent.Fields, is therefore not resolved inside an override: the override
+	// OwnerJson. The one such field, ScriptSlot.Fields, is therefore not resolved inside an override: the override
 	// resolver reads its value as free-form JSON, checked when PrefabInstantiator applies it to a real entity, where the
-	// member's ScriptComponent is the owner (Docs/Decisions/0026-m16-contract.md, amending ADR 0006 decision 6).
+	// member's script slot is the owner (Docs/Decisions/0026-m16-contract.md, amending ADR 0006 decision 6; the slot since
+	// Docs/Decisions/0031-m20-contract.md decision 17).
 	struct ResolveContext
 	{
 		const TypeRegistry* Registry = nullptr;
 		// The C++ object that holds the Variant field (a ScriptComponent, a PrefabOverride), or null when the value is
 		// checked without one (JSON-only validation). Fields declared before the Variant field have already been read into
-		// it, so a resolver may read exactly those (ScriptComponent.Script precedes Fields; PrefabOverride's Kind,
+		// it, so a resolver may read exactly those (ScriptSlot.Script precedes Fields; PrefabOverride's Kind,
 		// Component and Field precede Value).
 		const void* Owner = nullptr;
 		// The registered type of the owner (of Owner, or of the object OwnerJson holds). A resolver checks that it is its
@@ -111,7 +112,7 @@ namespace Engine {
 		// is checked on a C++ object. With Owner null a resolver reads the preceding fields from it (the "Script" handle of a
 		// Script component object, in the same spelling as the file).
 		const JsonReader* OwnerJson = nullptr;
-		// The map key when the Variant is a value of a Map field (ScriptComponent.Fields); empty otherwise.
+		// The map key when the Variant is a value of a Map field (ScriptSlot.Fields); empty otherwise.
 		std::string_view Key;
 		// External schemas (script field schemas); may be null, in which case script fields cannot be resolved.
 		const IFieldSchemaSource* Schemas = nullptr;

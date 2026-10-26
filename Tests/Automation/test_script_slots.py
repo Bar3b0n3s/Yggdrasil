@@ -6,9 +6,6 @@ import unittest
 
 from harness import AutomationTestCase, engine_client
 
-SKIP_SCRIPT_SLOTS = ("contract stub: the Script component as an ordered list of slots "
-                     "(ADR 0031 decisions 17 to 19, streams M-A, M-B and M-C)")
-
 
 def behaviour(name: str) -> str:
     """A behaviour named `name` that records each fixed step as an entity "Trace:<entity>:<name>" and keeps Kind."""
@@ -24,7 +21,6 @@ class ScriptSlotTests(AutomationTestCase):
         for name in names:
             client.call("script.write", {"path": f"Assets/Scripts/{name}.luau", "source": behaviour(name)})
 
-    @unittest.skip(SKIP_SCRIPT_SLOTS)
     def test_an_entity_runs_its_scripts_in_slot_order(self) -> None:
         # Decision 17 (Roadmap M20 acceptance "script callback order, slot included"): one entity holds several
         # scripts, each slot its own instance, called in (ExecutionOrder, canonical entity, slot) order; entity.get
@@ -51,7 +47,6 @@ class ScriptSlotTests(AutomationTestCase):
         self.assertEqual(kinds["value"], ["Aim", "Fire"])
         client.call("play.stop")
 
-    @unittest.skip(SKIP_SCRIPT_SLOTS)
     def test_a_fault_names_its_slot_and_eval_addresses_a_slot(self) -> None:
         # Decisions 17 and 18 (Roadmap M20 acceptance "a fault stays in its instance"): a faulting slot is disabled
         # alone, script.errors names its slot, and script.eval {entity, script} binds self to the named behaviour's
@@ -80,6 +75,40 @@ class ScriptSlotTests(AutomationTestCase):
         with self.assertRaises(engine_client.EngineError) as missing:
             client.call("script.eval", {"context": "play", "entity": "/Both", "script": "Missing", "code": "return 1"})
         self.assert_engine_error(missing.exception, engine_client.NOT_FOUND, "NotFound")
+        client.call("play.stop")
+
+    def test_eval_binds_the_named_behaviour_and_errors_name_their_slot(self) -> None:
+        # Decisions 17 and 18 on an entity whose one script fills slot 0: script.eval {entity, script} binds self to
+        # the slot whose behaviour has the Script.Define name, in Edit and Play; a name no slot has is NotFound at
+        # /script and runs nothing; script needs entity; script.errors names the faulting slot.
+        client, _ = self.open_editor_with_scene()
+        client.call("script.write", {"path": "Assets/Scripts/Faulty.luau", "source": (
+            'local T = {}\n'
+            'function T:OnCreate() self.Kind = "Faulty" end\n'
+            'function T:OnFixedUpdate() error("slot fault") end\n'
+            'return Script.Define("Faulty", T)\n')})
+        client.call("entity.create", {"name": "Single", "components": {"Script": {"Scripts": [
+            {"Script": "Assets/Scripts/Faulty.luau"},
+        ]}}})
+        for context in ("edit", "play"):
+            with self.subTest(context=context):
+                if context == "play":
+                    cursor = client.call("script.errors", {"since": "end"})["nextCursor"]
+                    client.call("play.start", {"lockstep": True, "pauseOnError": False})
+                    client.call("play.step", {"ticks": 1})
+                    errors = client.call("script.errors", {"since": cursor})["errors"]
+                    self.assertEqual([error["slot"] for error in errors], [0], errors)
+                bound = client.call("script.eval", {"context": context, "entity": "/Single", "script": "Faulty",
+                                                    "code": "return self.Entity.Name"})
+                self.assertEqual(bound["value"], "Single")
+                with self.assertRaises(engine_client.EngineError) as missing:
+                    client.call("script.eval", {"context": context, "entity": "/Single", "script": "Aim",
+                                                "code": "return 1"})
+                self.assert_engine_error(missing.exception, engine_client.NOT_FOUND, "NotFound")
+                self.assertEqual(missing.exception.issues[0]["pointer"], "/script")
+                with self.assertRaises(engine_client.EngineError) as alone:
+                    client.call("script.eval", {"context": context, "script": "Faulty", "code": "return 1"})
+                self.assertEqual(alone.exception.error_code, "InvalidArgument")
         client.call("play.stop")
 
 

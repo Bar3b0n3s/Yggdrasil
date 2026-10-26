@@ -530,6 +530,10 @@ namespace Engine {
 				flags.emplace_back("launcher");
 			if (specification.AllowedInBatch)
 				flags.emplace_back("batch");
+			if (specification.RequiresSceneTarget)
+				flags.emplace_back("scene target (required)");
+			else if (specification.SupportsSceneTarget)
+				flags.emplace_back("scene target");
 			if (method.Pending)
 				flags.emplace_back("pending");
 			return flags.empty() ? std::string("none") : Join(flags, ", ");
@@ -582,7 +586,9 @@ namespace Engine {
 				"member is optional unless marked required, and defaults to the value shown.\n\n"
 				"Flags: **tool** (proxied by the MCP bridge as the named tool), **mutates** (changes project files or the open scene), "
 				"**dry run** (accepts `dryRun: true`), **runtime** (also served by the Runtime), **launcher** (callable before a project "
-				"is open), **batch** (allowed as an op of `edit.batch`), **pending** (resolves later).\n\n",
+				"is open), **batch** (allowed as an op of `edit.batch`), **scene target** (accepts `scene`, the path or the `scene.list` id "
+				"of the open scene the request addresses; absent, the active scene; **scene target (required)** requires it), **pending** "
+				"(resolves later).\n\n",
 				methods.GetMethods().size(), domains.size());
 
 			out += "| Domain | Methods |\n|---|---|\n";
@@ -608,13 +614,14 @@ namespace Engine {
 					const MethodSpecification& specification = method->Specification;
 					out += std::format("### {}\n\n{}\n\n- Flags: {}\n- Timeout: {} s\n", specification.Name, EscapeText(specification.Description),
 						DescribeMethodFlags(*method), specification.TimeoutSeconds);
-					if (!specification.RequiredParams.empty())
-					{
-						std::vector<std::string> required;
-						for (const std::string& name : specification.RequiredParams)
-							required.push_back(Code(name));
+					std::vector<std::string> required;
+					for (const std::string& name : specification.RequiredParams)
+						required.push_back(Code(name));
+					// The reserved scene target is no member of the params type, so its requirement is named here.
+					if (specification.RequiresSceneTarget)
+						required.push_back(Code("scene"));
+					if (!required.empty())
 						out += std::format("- Required params: {}\n", Join(required, ", "));
-					}
 					out += "\n";
 					ENGINE_TRY(AppendMethodFields(out, method->Params, "Param", specification.RequiredParams, true));
 					ENGINE_TRY(AppendMethodFields(out, method->Result, "Result", {}, false));

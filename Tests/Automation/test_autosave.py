@@ -66,25 +66,27 @@ class AutosaveTests(AutomationTestCase):
         client.call("play.start", {"lockstep": True})
         client.call("play.stop")
         manifest = root / "Library/Autosave/Manifest.json"
-        first = json.loads(manifest.read_text(encoding="utf-8"))["Generations"][0]["Generation"]
         client.call("scene.new", {"path": "Assets/Scenes/Other.scene", "discardChanges": True})
         client.call("entity.create", {"name": "OtherRecovery"})
         client.call("play.start", {"lockstep": True})
+        other = json.loads(manifest.read_text(encoding="utf-8"))["Generations"][0]["Generation"]
         client.close()
         self.editors[-1].kill()
+        # Every scene with a recoverable generation opens again, the oldest (Main) active (ADR 0031 decision 15).
         recovered, result = self.open_recovery(root)
         self.assertTrue(result["recovered"])
-        self.assertEqual(recovered.call("scene.query", {"where": {"name": "OtherRecovery"}})["total"], 1)
+        self.assertEqual(recovered.call("scene.query", {"where": {"name": "FirstRecovery"}})["total"], 1)
         recovered.call("scene.save")
         self.assertFalse(recovered.call("session.info")["_meta"]["dirty"])
         retained = json.loads(manifest.read_text(encoding="utf-8"))["Generations"]
-        self.assertEqual([entry["Generation"] for entry in retained], [first])
-        self.assertIn("OtherRecovery", (root / "Assets/Scenes/Other.scene").read_text(encoding="utf-8"))
-        recovered.call("session.shutdown")
+        self.assertEqual([entry["Generation"] for entry in retained], [other])
+        self.assertIn("FirstRecovery", (root / "Assets/Scenes/Main.scene").read_text(encoding="utf-8"))
+        # The recovered Other scene stays unsaved: closing without saving keeps its recovery for the next launch.
+        recovered.call("session.shutdown", {"force": True})
         self.assertEqual(self.editors[-1].wait(), 0)
         reopened, result = self.open_recovery(root)
         self.assertTrue(result["recovered"])
-        self.assertEqual(reopened.call("scene.query", {"where": {"name": "FirstRecovery"}})["total"], 1)
+        self.assertEqual(reopened.call("scene.query", {"where": {"name": "OtherRecovery"}})["total"], 1)
 
     def test_malformed_recovery_does_not_block_normal_project_launch(self) -> None:
         client, root = self.open_editor_with_scene()

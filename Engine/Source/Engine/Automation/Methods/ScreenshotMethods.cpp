@@ -304,6 +304,7 @@ namespace Engine {
 							   "result names. Needs a renderer (not --renderer none).",
 				.RequiredParams = { "view" },
 				.ExposeAsTool = true,
+				.SupportsSceneTarget = true,
 				.AvailableInRuntime = true,
 				.Examples = {
 					{ .Description = "A 512-pixel screenshot of the game view.", .Params = gameExample },

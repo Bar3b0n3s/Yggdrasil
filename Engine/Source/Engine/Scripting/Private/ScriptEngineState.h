@@ -6,6 +6,8 @@
 
 #include <lua.h>
 
+#include <compare>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <optional>
@@ -17,16 +19,32 @@
 
 namespace Engine {
 
+	namespace Detail {
+
+		// A behaviour instance's identity (Docs/Decisions/0031-m20-contract.md decision 17): its entity and the index of its
+		// script in the entity's Script list. Ordered by entity, then slot.
+		struct ScriptInstanceKey
+		{
+			UUID Entity{};
+			uint32_t Slot = 0;
+
+			constexpr auto operator<=>(const ScriptInstanceKey&) const = default;
+		};
+
+	}
+
 	struct ScriptEngine::State
 	{
+		using InstanceKey = Detail::ScriptInstanceKey;
+
 		struct Instance
 		{
 			AssetHandle Handle{};
 			AssetRef<ScriptData> Script{};
 			int Table = LUA_NOREF;
-			std::string Name{};
+			std::string Name{}; // the entity's name, for diagnostics; the behaviour's Script.Define name is Script->Name
 			int32_t Order = 0;
-			// Unique per created instance, so a replacement under the same entity ID is never mistaken for its predecessor.
+			// Unique per created instance, so a replacement under the same key is never mistaken for its predecessor.
 			uint64_t Serial = 0;
 			bool Active = false;
 			// OnCreate was entered. No other callback (including OnDestroy) reaches a table before its OnCreate, even when
@@ -43,7 +61,7 @@ namespace Engine {
 			std::vector<PhysicsEvent> PendingPhysics{};
 		};
 
-		// Evaluation and replay-predicate failures are reported without disabling the addressed entity's behaviour.
+		// Evaluation and replay-predicate failures are reported without disabling the addressed instance.
 		enum class FaultPolicy : uint8_t
 		{
 			DisableInstance,
@@ -96,32 +114,48 @@ namespace Engine {
 		explicit State(ScriptEngine& engine);
 		~State();
 		void AssertOwner() const;
-		// Instance IDs in canonical order, keeping removed instances at their last canonical anchor until teardown. Linear
-		// in the scene with no per-entity allocation; a no-op while the scene revision and instance membership are unchanged.
+		// Instance keys in canonical entity order and slot order, keeping removed instances at their last canonical anchor
+		// until teardown. Linear in the scene with no per-entity allocation; a no-op while the scene revision and instance
+		// membership are unchanged.
 		void RefreshLifecycleOrder();
-		// Sorted IDs of every live instance, for allocation-free membership tests during canonical walks.
+		// Sorted IDs of every entity with an instance, for allocation-free membership tests during canonical walks.
 		[[nodiscard]] std::vector<UUID> SortedInstanceIDs() const;
-		[[nodiscard]] std::vector<UUID> OrderedInstances(bool startedOnly);
-		// Makes the instances, then runs their OnCreate in (ExecutionOrder, canonical) order. Once a nested entry has latched
-		// a memory or timeout fault of the current slice, the batch stops: remaining entities stay uncreated and created
-		// instances defer their OnCreate, so no innocent instance is left half initialized by the inherited fault.
-		[[nodiscard]] Status CreateInstances(std::span<const UUID> entities);
+		// The keys of the entity's instances, in slot order.
+		[[nodiscard]] std::vector<InstanceKey> InstancesOf(UUID entity) const;
+		// The instance's table when a script can address it (it has its table and is not being torn down; a fault-disabled
+		// instance still can), else LUA_NOREF.
+		[[nodiscard]] int FindLiveTable(InstanceKey key) const;
+		// (ExecutionOrder, canonical entity, slot) order.
+		[[nodiscard]] std::vector<InstanceKey> OrderedInstances(bool startedOnly);
+		// The keys of every slot of `entities` whose script is set and that has no instance, in canonical entity order and
+		// slot order.
+		[[nodiscard]] std::vector<InstanceKey> MissingInstances(std::span<const UUID> entities) const;
+		// Makes the instances (`instances` in canonical entity order and slot order), then runs their OnCreate in
+		// (ExecutionOrder, canonical entity, slot) order. Once a nested entry has latched a memory or timeout fault of the
+		// current slice, the batch stops: remaining instances stay uncreated and created instances defer their OnCreate, so
+		// no innocent instance is left half initialized by the inherited fault.
+		[[nodiscard]] Status CreateInstances(std::span<const InstanceKey> instances);
 		// True when the instance exists with its table; false when its failure was already published or it vanished.
-		[[nodiscard]] Result<bool> CreateInstance(UUID entity);
+		[[nodiscard]] Result<bool> CreateInstance(InstanceKey key);
 		// A nested entry of the current slice inherits a latched memory or timeout fault, so every later entry would fail
 		// with it. Never true at the outermost level, where each entry recovers before the next one starts.
 		[[nodiscard]] bool IsSliceFaulted() const;
-		// Runs the deferred OnCreate callbacks in (ExecutionOrder, canonical) order; a no-op inside a faulted slice.
+		// Runs the deferred OnCreate callbacks in (ExecutionOrder, canonical entity, slot) order; a no-op inside a faulted
+		// slice.
 		void InvokeDeferredCreates();
-		void Invoke(UUID entity, std::string_view callback, const PhysicsEvent* event = nullptr, bool destroying = false);
-		void InvokePhysics(const PhysicsEvent& event);
-		// Delivers physics callbacks held for started instances, in (ExecutionOrder, canonical) order and dispatch order
-		// per instance; an instance removed or faulted by a callback discards the rest of its held events.
+		void Invoke(InstanceKey key, std::string_view callback, const PhysicsEvent* event = nullptr, bool destroying = false);
+		void InvokePhysics(InstanceKey key, const PhysicsEvent& event);
+		// Delivers physics callbacks held for started instances, in (ExecutionOrder, canonical entity, slot) order and
+		// dispatch order per instance; an instance removed or faulted by a callback discards the rest of its held events.
 		void DeliverPendingPhysics();
+		// Unreferences the instance's table, erases it and marks the lifecycle order for a refresh. Returns the next one.
+		std::map<InstanceKey, Instance>::iterator EraseInstance(std::map<InstanceKey, Instance>::iterator instance);
 		void Phase(std::string_view callback);
+		// An error without an entity takes the owner's; an error of the owner's entity names the owner's slot
+		// (ScriptError::Slot). The instance the error names is the one the DisableInstance policy disables.
 		void Publish(ScriptError error, ScriptTaskOwner owner = {}, bool caseBody = false, bool alreadyLogged = false,
 			FaultPolicy policy = FaultPolicy::DisableInstance);
-		void Publish(const Error& error, UUID entity = {}, std::string_view callback = {});
+		void Publish(const Error& error, InstanceKey instance = {}, std::string_view callback = {});
 		// Not in Dist. The changed script plus the loaded modules and attached behaviours that transitively require it,
 		// in dependency order. Loads published assets only; executes no script code and publishes nothing.
 		[[nodiscard]] Result<ReloadPlan> PlanReload(AssetHandle changed, std::span<const std::string> loadedModules);
@@ -143,13 +177,16 @@ namespace Engine {
 		std::thread::id OwnerThread = std::this_thread::get_id();
 		Scope<Sandbox> Vm{};
 		Scope<TaskScheduler> Scheduler{};
-		std::map<UUID, Instance> Instances{};
-		// Instance IDs in last canonical order, retaining removed IDs until their pending script teardown has completed.
-		// A new instance is appended until the next refresh places it, so one destroyed before then still tears down.
-		std::vector<UUID> LifecycleOrder{};
+		std::map<InstanceKey, Instance> Instances{};
+		// Instance keys in last canonical entity order and slot order, retaining removed keys until their pending script
+		// teardown has completed. A new instance is appended until the next refresh places it, so one destroyed before
+		// then still tears down.
+		std::vector<InstanceKey> LifecycleOrder{};
 		uint64_t LifecycleRevision = 0;
 		bool LifecycleDirty = true; // instance membership changed since the last refresh
-		std::set<UUID> DisabledHistory{};
+		// Instances whose entity was observed inactive and that were not enabled since. Kept per slot, so a slot torn down
+		// while its entity is inactive is recreated only when the entity is enabled again, whatever its other slots did.
+		std::set<InstanceKey> DisabledHistory{};
 		std::map<uint64_t, Reference> References{};
 		uint64_t NextReference = 1;
 		uint64_t NextInstanceSerial = 1;

@@ -188,10 +188,10 @@ function T:OnUpdate()
 		tostring(Input.IsActionReleased("Jump"))))
 end
 return Script.Define("ActionProbe", T))"));
-			ScriptComponent component;
+			ScriptSlot component;
 			component.Script.SetHandle(script);
 			const UUID probe = compiler.GetScene().CreateEntity("Probe").GetUUID();
-			compiler.GetScene().FindEntityByID(probe).AddComponent<ScriptComponent>(component);
+			compiler.GetScene().FindEntityByID(probe).AddComponent<ScriptComponent>(ScriptComponent{ { component } });
 			const auto document = SceneSerializer::ToJson(compiler.GetScene());
 			REQUIRE(document.has_value());
 			PlaySessionSpecification specification;

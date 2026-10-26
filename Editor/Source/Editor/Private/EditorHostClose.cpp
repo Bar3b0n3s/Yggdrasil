@@ -9,6 +9,8 @@
 
 #include <imgui.h>
 
+#include <format>
+
 namespace Engine {
 
 	namespace Utils {
@@ -24,7 +26,23 @@ namespace Engine {
 
 	bool EditorHostClose::NeedsConfirmation() const
 	{
-		return m_Editor.HasProject() && m_Editor.HasScene() && m_Editor.IsSceneDirty() && !m_Editor.IsReadOnly() && !m_Editor.IsDryRun();
+		return m_Editor.HasProject() && m_Editor.IsAnySceneDirty() && !m_Editor.IsReadOnly() && !m_Editor.IsDryRun();
+	}
+
+	EditorClosePrompt EditorHostClose::MakePrompt() const
+	{
+		EditorClosePrompt prompt;
+		prompt.CanSave = true;
+		for (const OpenSceneId id : m_Editor.GetOpenScenes())
+		{
+			const Result<OpenSceneInfo> scene = m_Editor.DescribeOpenScene(id);
+			if (!scene || !scene->Dirty)
+				continue;
+			prompt.SceneName += std::format("{}{}", prompt.SceneNames.empty() ? "" : ", ", scene->Name);
+			prompt.SceneNames.push_back(scene->Name);
+			prompt.CanSave = prompt.CanSave && scene->Path.has_value();
+		}
+		return prompt;
 	}
 
 	void EditorHostClose::Fail(const Error& error)
@@ -49,12 +67,12 @@ namespace Engine {
 		m_Prompt.reset();
 	}
 
-	void EditorHostClose::WriteExitRecovery(std::string_view sceneName)
+	void EditorHostClose::WriteExitRecovery(std::string_view sceneNames)
 	{
-		// The final recovery holds the committed scene the user is discarding; the editor closes whatever it reports.
+		// The final recovery holds every committed scene the user is discarding; the editor closes whatever it reports.
 		const Result<AutosaveWriteResult> written = m_Saves.Save(AutosaveReason::Exit);
 		if (!written)
-			ENGINE_WARN("The editor closes without a final recovery of '{}': {}", sceneName, written.error());
+			ENGINE_WARN("The editor closes without a final recovery of '{}': {}", sceneNames, written.error());
 	}
 
 	bool EditorHostClose::RequestClose(bool canPrompt)
@@ -63,7 +81,7 @@ namespace Engine {
 		{
 			// Nobody could ever answer a held close, so the editor closes now, as after Don't save.
 			const bool unsaved = NeedsConfirmation();
-			const std::string sceneName = unsaved ? m_Editor.GetScene().GetName() : std::string();
+			const std::string sceneName = unsaved ? MakePrompt().SceneName : std::string();
 			Dismiss();
 			if (unsaved)
 			{
@@ -78,7 +96,7 @@ namespace Engine {
 			return true;
 		if (!NeedsConfirmation())
 			return false;
-		m_Prompt = EditorClosePrompt{ .SceneName = m_Editor.GetScene().GetName(), .CanSave = m_Editor.GetScenePath().has_value() };
+		m_Prompt = MakePrompt();
 		return true;
 	}
 
@@ -104,11 +122,14 @@ namespace Engine {
 		{
 			if (!m_Prompt->CanSave)
 			{
-				Status refused = MakeError(ErrorCode::InvalidState, "This scene has never been saved: choose Don't save to keep it recoverable, or Cancel");
+				Status refused = MakeError(ErrorCode::InvalidState, "A scene with unsaved changes has never been saved: choose Don't save to keep it recoverable, or Cancel");
 				m_Prompt->Failure = refused.error();
 				return refused;
 			}
-			const Result<uint64_t> ticket = m_Actions.Submit("scene.save", Json::object());
+			// The active scene alone through scene.save, as before M20; several dirty scenes through project.save, which
+			// writes every dirty open scene.
+			const bool onlyActive = m_Editor.HasScene() && m_Editor.IsSceneDirty() && m_Prompt->SceneNames.size() == 1;
+			const Result<uint64_t> ticket = m_Actions.Submit(onlyActive ? "scene.save" : "project.save", Json::object());
 			if (!ticket)
 			{
 				m_Prompt->Failure = ticket.error();
@@ -177,7 +198,7 @@ namespace Engine {
 		const EditorClosePrompt prompt = *m_Prompt;
 		ImGui::TextWrapped("Save changes to %s before closing?", prompt.SceneName.c_str());
 		if (!prompt.CanSave)
-			ImGui::TextWrapped("This scene has never been saved.");
+			ImGui::TextWrapped("%s", prompt.SceneNames.size() == 1 ? "This scene has never been saved." : "A scene with unsaved changes has never been saved.");
 		if (prompt.Failure)
 			ImGui::TextWrapped("%s", prompt.Failure->GetMessageText().c_str());
 		std::optional<EditorCloseChoice> choice;

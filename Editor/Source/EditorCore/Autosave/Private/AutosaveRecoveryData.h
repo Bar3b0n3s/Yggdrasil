@@ -8,6 +8,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace Engine {
 
@@ -24,6 +25,15 @@ namespace Engine {
 
 		[[nodiscard]] Result<std::optional<AutosaveRecoveryData>> ReadAutosaveRecovery(const LoadedProject& project,
 			std::string_view generation = {});
+
+		// M20 (Docs/Decisions/0031-m20-contract.md decision 15): ReadAutosaveRecovery's offer for every scene, one per scene
+		// source (its path, or its untitled document's token), each the newest generation of that scene that differs from its
+		// source, ordered by the manifest sequence of those generations, oldest first (Autosave::FindRecoveries). Reads, newest
+		// first, the metadata of every generation until each of its scenes has its offer, and the whole generation of each
+		// scene still without one. Errors: as ReadAutosaveRecovery's, for any generation it reads, but for a stale generation
+		// (Conflict from the project or source verification): its scene has no offer and is logged at Warn, and the conflict
+		// is returned only when no scene has an offer.
+		[[nodiscard]] Result<std::vector<AutosaveRecoveryData>> ReadAutosaveRecoveries(const LoadedProject& project);
 
 		// One generation's documents: the text of its Metadata.json and of its Scene.json.
 		struct AutosaveGenerationDocuments

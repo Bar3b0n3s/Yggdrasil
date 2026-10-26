@@ -798,7 +798,7 @@ return nil
 								   "local C = {}\nfunction C:Fail()\nerror('old body')\nend\nreturn Script.Define('C', C)")
 						.has_value());
 				const auto entity = fixture.GetScene().CreateEntity("Versioned");
-				entity.AddComponent<ScriptComponent>().Script.SetHandle(handle);
+				entity.AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = TypedAssetHandle<AssetType::Script>(handle), .Fields = {}, .ExecutionOrder = 0 });
 				REQUIRE(fixture.Start().has_value());
 				REQUIRE(fixture.Evaluate("self.Saved = self.Fail", entity.GetUUID()).has_value());
 				REQUIRE(fixture.AddScript(handle, "Assets/Versioned.luau",

@@ -1,0 +1,40 @@
+{
+	"Format": "Prefab",
+	"Version": 1,
+	"Name": "Beacon",
+	"Root": "dd92fa90a01cff3e",
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"PointLight": 1
+	},
+	"Entities": [
+		{
+			"ID": "dd92fa90a01cff3e",
+			"Name": "Beacon",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1, -2],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"PointLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 6,
+					"Range": 6,
+					"SourceRadius": 0.05
+				}
+			}
+		}
+	]
+}

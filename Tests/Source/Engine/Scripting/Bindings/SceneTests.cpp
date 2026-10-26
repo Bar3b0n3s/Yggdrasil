@@ -23,8 +23,8 @@ namespace Engine {
 		const Entity child = source.GetScene().CreateEntity("PrefabChild", root);
 		if (script.IsValid())
 		{
-			root.AddComponent<ScriptComponent>().Script = TypedAssetHandle<AssetType::Script>(script);
-			child.AddComponent<ScriptComponent>().Script = TypedAssetHandle<AssetType::Script>(script);
+			root.AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = TypedAssetHandle<AssetType::Script>(script), .Fields = {}, .ExecutionOrder = 0 });
+			child.AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = TypedAssetHandle<AssetType::Script>(script), .Fields = {}, .ExecutionOrder = 0 });
 		}
 		const auto prefab = Prefab::CreateFromEntity(root, "ScriptPrefab");
 		REQUIRE(prefab.has_value());

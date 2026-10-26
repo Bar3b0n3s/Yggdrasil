@@ -34,13 +34,16 @@ namespace Engine {
 	struct EditorRecoveryOffer
 	{
 		uint64_t Id = 0;
-		AutosaveRecoveryInfo Recovery{};
+		AutosaveRecoveryInfo Recovery{}; // the newest offered scene
+		// Every offered scene's name, oldest first: one offer covers every scene with a recoverable generation, and Accept
+		// recovers them all (Docs/Decisions/0031-m20-contract.md decision 15).
+		std::vector<std::string> SceneNames{};
 		bool DecisionPending = false;
 		std::optional<Error> Failure{}; // last application failure, retained for the modal until retried/dismissed
 	};
 
 	// Explicit UI/CPU service injection, owned by the host; captures outlive EditorLayer. No second project.open call.
-	// The host inspects with Autosave::FindRecovery at the safe point after open, while holding the project's lock.
+	// The host inspects with Autosave::FindRecoveries at the safe point after open, while holding the project's lock.
 	// The modal belongs to EditorLayer after the launcher disappears. Missing callbacks mean Unsupported recovery UI.
 	struct EditorRecoveryServices
 	{
@@ -49,7 +52,7 @@ namespace Engine {
 		// Queue only: owns offer/decision, applies at the next safe point. InvalidArgument unknown decision/zero Id;
 		// NotFound withdrawn/unknown offer; Conflict changed project/scene/revision; PermissionDenied read-only acceptance.
 		// InvalidState when another decision is pending. The host, not caller-provided Recovery bytes, owns the offer record.
-		// Repeat all identity/revision checks at execution before calling Autosave::Recover. Accept installs the scene once;
+		// Repeat all identity/revision checks at execution before calling Autosave::Recover. Accept installs each scene once;
 		// Decline only dismisses this offer for this open epoch, with no scene/history/source/autosave file change.
 		// Pending decisions cancel on close; completion/failure appears in the modal/Console and never silently dismisses it.
 		std::function<Status(const EditorRecoveryOffer&, EditorRecoveryDecision)> QueueDecision{};

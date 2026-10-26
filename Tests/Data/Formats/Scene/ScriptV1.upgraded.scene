@@ -1,0 +1,131 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "ScriptV1",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Prefab": 2,
+		"PrefabLink": 1,
+		"Script": 2
+	},
+	"Entities": [
+		{
+			"ID": "6b2d4f8a10c3e507",
+			"Name": "Turret",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Prefab": {
+					"Prefab": "3c9f2e7a11d04b88",
+					"Overrides": [
+						{
+							"Path": ["00000000000b0001"],
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Scripts/0/ExecutionOrder",
+							"Value": 2
+						},
+						{
+							"Path": ["00000000000b0001"],
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Scripts/0/Fields",
+							"Value": {
+								"Torque": 60
+							}
+						},
+						{
+							"Path": ["00000000000b0002"],
+							"Kind": "AddComponent",
+							"Component": "Script",
+							"Field": "",
+							"Value": {
+								"Scripts": [
+									{
+										"Script": "c0ffee0000000002",
+										"Fields": {},
+										"ExecutionOrder": 0
+									}
+								]
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "00000000000b0001",
+					"InstanceRoot": "6b2d4f8a10c3e507",
+					"OuterPrefabEntityID": null
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "c0ffee0000000001",
+							"Fields": {
+								"Torque": 60
+							},
+							"ExecutionOrder": 2
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "ec685b183765f2e5",
+			"Name": "Barrel",
+			"Parent": "6b2d4f8a10c3e507",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "00000000000b0002",
+					"InstanceRoot": "6b2d4f8a10c3e507",
+					"OuterPrefabEntityID": null
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "c0ffee0000000002",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "5c71000000000003",
+			"Name": "Spinner",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "c0ffee0000000003",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		}
+	]
+}

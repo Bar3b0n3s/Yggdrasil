@@ -310,7 +310,7 @@ namespace Engine {
 			const std::string spinSource = "--!strict\nlocal Spin = {}\n\nfunction Spin.OnFixedUpdate(self: ScriptInstance, dt: number)\n"
 										   "\twhile true do\n\tend\nend\n\nreturn Script.Define(\"Spin\", Spin)\n";
 			CallOrFail(client, "script.write", Json{ { "path", "Assets/Scripts/Spin.luau" }, { "source", spinSource } });
-			CallOrFail(client, "entity.create", Json{ { "name", "Spin" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Spin.luau" } } } } } });
+			CallOrFail(client, "entity.create", Json{ { "name", "Spin" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/Spin.luau" } } }) } } } } } });
 			editor.GetAssets().WaitIdle();
 			CallOrFail(client, "play.start", Json::object());
 			const uint64_t cursor = editor.GetPlay().GetScriptErrors().GetCursor();

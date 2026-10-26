@@ -6,6 +6,7 @@
 #include "Engine/Scripting/ScriptTestHost.h"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -43,8 +44,16 @@ namespace Engine {
 		struct ScriptEngineAccess
 		{
 			[[nodiscard]] static Sandbox& GetSandbox(ScriptEngine& engine);
-			// Pushes the existing instance or nil, without creating an instance or running lifecycle callbacks.
+			// Each pushes existing instances (a table, or nil for an instance that does not exist or is being torn down),
+			// without creating an instance or running lifecycle callbacks.
+			// The instance an evaluation of `entity` binds as self: the executing owner's slot when the owner is that
+			// entity (ScriptEngine::Evaluate binds the slot it resolved), else the entity's first slot.
 			[[nodiscard]] static Status PushInstance(ScriptCall& call, UUID entity);
+			// Entity:GetScript(name?): the instance of the entity's first slot without a behaviour name, else of the first
+			// slot, in slot order, whose behaviour's Script.Define name is `behaviour`; nil when there is no such slot.
+			[[nodiscard]] static Status PushScript(ScriptCall& call, UUID entity, std::optional<std::string_view> behaviour);
+			// Entity:GetScripts(): an array of the entity's live instances, in slot order.
+			[[nodiscard]] static Status PushScripts(ScriptCall& call, UUID entity);
 			[[nodiscard]] static Result<ScriptReference> RetainFunction(ScriptCall& call, int index);
 			[[nodiscard]] static Status PushFunction(ScriptCall& call, ScriptReference reference);
 			// The executing caller's ownership, never the receiver of an Entity/Component method.

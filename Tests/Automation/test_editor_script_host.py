@@ -43,7 +43,7 @@ return Script.Define("Host", Host)
 '''
         client.call("script.write", {"path": module, "source": "return {Value = 1}"})
         client.call("script.write", {"path": path, "source": source})
-        client.call("entity.create", {"name": "Host", "components": {"Script": {"Script": path}}})
+        client.call("entity.create", {"name": "Host", "components": {"Script": {"Scripts": [{"Script": path}]}}})
         client.call("play.start", {"paused": True})
         self.eval_play(client, 'Scene.FindByName("Host"):GetScript().Count = 91')
         probe = 'local s = Scene.FindByName("Host"):GetScript(); return {s.Count, s:Value(), s.Reloads}'
@@ -92,7 +92,8 @@ return Script.Define("Host", Host)
                 source = (f"local Quit = {{}}; function Quit:{callback}() Application.Quit(0) end; "
                           'return Script.Define("Quit", Quit)')
                 client.call("script.write", {"path": path, "source": source})
-                client.call("entity.create", {"name": callback, "components": {"Script": {"Script": path}}})
+                client.call("entity.create", {"name": callback,
+                                              "components": {"Script": {"Scripts": [{"Script": path}]}}})
                 client.call("play.start")
                 self.wait_for_edit(client)
                 client.call("entity.destroy", {"entities": [f"/{callback}"]})
@@ -104,7 +105,7 @@ return Script.Define("Host", Host)
         client.call("script.write", {"path": "Assets/Scripts/Consumer.luau", "source":
                     'local M = require("./BadType"); return Script.Define("Consumer", {})'})
         client.call("entity.create", {"name": "Consumer", "components": {
-            "Script": {"Script": "Assets/Scripts/Consumer.luau"}}})
+            "Script": {"Scripts": [{"Script": "Assets/Scripts/Consumer.luau"}]}}})
         client.call("project.setSettings", {"patch": {"Scripting": {"BlockPlayOnTypeErrors": False}}})
         client.call("play.start", {"paused": True})
         client.call("play.stop")
@@ -130,7 +131,7 @@ return Script.Define("Host", Host)
         source = ('--!strict\nlocal Typed = {}\nfunction Typed:Value(): number return 1 end\n'
                   'return Script.Define("Typed", Typed)')
         client.call("script.write", {"path": path, "source": source})
-        client.call("entity.create", {"name": "Typed", "components": {"Script": {"Script": path}}})
+        client.call("entity.create", {"name": "Typed", "components": {"Script": {"Scripts": [{"Script": path}]}}})
         client.call("project.setSettings", {"patch": {"Scripting": {"BlockPlayOnTypeErrors": True}}})
         client.call("play.start", {"paused": True})
         probe = 'return Scene.FindByName("Typed"):GetScript():Value()'

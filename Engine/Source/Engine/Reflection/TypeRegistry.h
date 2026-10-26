@@ -236,7 +236,7 @@ namespace Engine {
 		}
 
 		// A stored field holding Variant values (VariantValue, or a std::vector/std::map of them) whose schema `resolver`
-		// resolves at run time (§5.4: ScriptComponent.Fields, PrefabOverride.Value).
+		// resolves at run time (§5.4: ScriptSlot.Fields, PrefabOverride.Value).
 		template<typename M>
 		Derived& VariantField(std::string_view name, M T::* member, std::string_view description, VariantSchemaResolver resolver,
 			FieldMeta meta = {})

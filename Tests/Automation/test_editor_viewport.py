@@ -213,7 +213,7 @@ class EditorViewportTests(AutomationTestCase):
         written = editor.call("script.write", {"path": "Assets/Scripts/Pointer.luau", "source": POINTER_SCRIPT})
         self.assertEqual(written["diagnostics"], [], written)
         editor.call("entity.update", {"entity": "/Cube", "components": {
-            "Script": {"Script": "Assets/Scripts/Pointer.luau"}}})
+            "Script": {"Scripts": [{"Script": "Assets/Scripts/Pointer.luau"}]}}})
         editor.call("scene.save")
         editor.call("input.record", {"action": "start"})
         editor.call("input.inject", {"events": [{"type": "mouseMove", "position": [80, 45]}]})

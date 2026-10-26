@@ -20,6 +20,7 @@ namespace Engine {
 			result.Message = error.ToString();
 			result.Callback = callback;
 			result.Entity = owner.Entity;
+			result.Slot = owner.Slot;
 			const auto& location = error.GetLocation();
 			result.Script = location.File;
 			result.Line = location.Line;
@@ -385,7 +386,7 @@ namespace Engine {
 			context.Callback = caseBody ? "Test.Case" : "Task";
 			context.Entity = owner.Entity;
 			context.Tick = Engine.GetHost().GetFrameState().Tick;
-			const auto instance = Instances.find(owner.Entity);
+			const auto instance = Instances.find({ owner.Entity, owner.Slot });
 			if (instance != Instances.end())
 			{
 				context.EntityName = instance->second.Name;

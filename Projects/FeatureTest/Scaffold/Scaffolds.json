@@ -83,6 +83,16 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "MultiScene.jsonl",
+			"IdSeed": 1803,
+			"Renderer": "none"
+		},
+		{
+			"File": "MultiScript.jsonl",
+			"IdSeed": 1804,
+			"Renderer": "none"
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

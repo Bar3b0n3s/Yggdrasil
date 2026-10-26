@@ -111,10 +111,11 @@ namespace Engine {
 		std::optional<SceneSummary> Scene{};         // the open scene (AutomationMethodContext::MakeSceneSummary); none without one
 	};
 
-	// session.shutdown {save?, force?}: the editor saves the open scene first when `save`; with a dirty scene and neither
-	// flag the call fails with InvalidState (nothing is lost silently); `force` exits discarding unsaved changes. The
-	// Runtime has no scene file to save, so it saves nothing whatever the flags. The response is sent, then the host exits
-	// with code 0 at its next frame (AutomationMethodContext::Shutdown).
+	// session.shutdown {save?, force?}: the editor saves every open scene with unsaved changes first when `save` (in tab order,
+	// refusing before it writes anything when one was never saved; Docs/Decisions/0031-m20-contract.md decision 14); with a
+	// dirty open scene and neither flag the call fails with InvalidState naming every dirty one (nothing is lost silently);
+	// `force` exits discarding unsaved changes. The Runtime has no scene file to save, so it saves nothing whatever the flags.
+	// The response is sent, then the host exits with code 0 at its next frame (AutomationMethodContext::Shutdown).
 	struct SessionShutdownParams
 	{
 		bool Save = false;
@@ -123,8 +124,8 @@ namespace Engine {
 
 	struct SessionShutdownResult
 	{
-		bool Saved = false;                    // the open scene was written
-		std::vector<std::string> SavedFiles{}; // project-relative
+		bool Saved = false;                    // an open scene was written
+		std::vector<std::string> SavedFiles{}; // project-relative, in tab order
 	};
 
 	namespace Automation {

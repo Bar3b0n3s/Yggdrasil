@@ -223,7 +223,8 @@ return true
 				{ "Entity.GetTags", "assert(d:GetTags()[1] == \"Tagged\")" },
 				{ "Entity.HasComponent", "assert(d:HasComponent(\"Camera\"))" },
 				{ "Entity.GetComponent", "assert(d:GetComponent(\"Camera\") ~= nil)" },
-				{ "Entity.GetScript", "assert(d:GetScript() ~= nil)" },
+				{ "Entity.GetScript", "assert(d:GetScript() ~= nil and d:GetScript(\"Kept\") == d:GetScript())" },
+				{ "Entity.GetScripts", "assert(#d:GetScripts() == 1)" },
 				{ "Entity.GetParent", "assert(d:GetParent() == Scene.FindByName(\"Parent\") and child:GetParent() == d)" },
 				{ "Entity.GetChildren", "assert(d:GetChildren()[1] == child)" },
 				{ "Entity.FindChild", "assert(d:FindChild(\"Child\") == child)" },
@@ -302,9 +303,9 @@ return true
 			MeshRendererComponent renderer;
 			renderer.Mesh.SetHandle(BuiltinAssetHandles::CubeMesh);
 			doomed.AddComponent<MeshRendererComponent>(renderer);
-			ScriptComponent script;
+			ScriptSlot script;
 			script.Script.SetHandle(AssetHandle(94));
-			doomed.AddComponent<ScriptComponent>(script);
+			doomed.AddComponent<ScriptComponent>(ScriptComponent{ { script } });
 			const Entity child = scene.CreateEntity("Child", doomed);
 			child.Patch<TransformComponent>([](TransformComponent& transform)
 			{
@@ -565,17 +566,20 @@ return true
 			fixture.Generation = 2;
 			REQUIRE(fixture.AddScript(AssetHandle(86), "Assets/Target.luau", "return Script.Define(\"Target\", {Fields = {Target = Field.Entity()}})"));
 			const auto entity = fixture.GetScene().CreateEntity("Same");
-			ScriptComponent script;
+			ScriptSlot script;
 			script.Script.SetHandle(AssetHandle(86));
-			entity.AddComponent<ScriptComponent>(script);
+			entity.AddComponent<ScriptComponent>(ScriptComponent{ { script } });
 			REQUIRE(fixture.Start());
 			CheckProxyScript(fixture, R"(
 local current = Scene.FindByName("Same")
 local old = Probe.PreviousGeneration(current)
 assert(old == current and not old:IsValid() and current:IsValid())
 assert(not pcall(function() old.Name = "changed" end))
-assert(not pcall(function() current:GetComponent("Script").Fields = {Target = old} end))
-assert(current:GetComponent("Script").Fields.Target == nil)
+assert(not pcall(function() current:GetComponent("Script").Scripts = {{Script = current:GetComponent("Script").Scripts[1].Script, Fields = {Target = old}, ExecutionOrder = 0}} end))
+assert(current:GetComponent("Script").Scripts[1].Fields.Target == nil)
+-- The same slot naming the current identity is written: only the stale identity was refused.
+current:GetComponent("Script").Scripts = {{Script = current:GetComponent("Script").Scripts[1].Script, Fields = {Target = current}, ExecutionOrder = 0}}
+assert(current:GetComponent("Script").Scripts[1].Fields.Target == current)
 assert(current.Name == "Same")
 return true
 )");
@@ -616,7 +620,7 @@ return true
 			CheckProxyScript(fixture, R"(
 local entity = Scene.FindByName("Root")
 for _, path in {"Assets/Module.luau", "Assets/Suite.luau"} do
-	assert(not pcall(function() entity:AddComponent("Script", {Script = Assets.Load(path)}) end))
+	assert(not pcall(function() entity:AddComponent("Script", {Scripts = {{Script = Assets.Load(path), Fields = {}, ExecutionOrder = 0}}}) end))
 	assert(not entity:HasComponent("Script"))
 end
 return true
@@ -626,7 +630,7 @@ return true
 			for (const char* path : { "Assets/Module.luau", "Assets/Suite.luau" })
 			{
 				Test::ExpectLog expected(LogLevel::Error, "a Script component requires a Behaviour asset");
-				const auto rejected = fixture.Evaluate(std::format("local entity = Scene.FindByName(\"Root\")\nentity:AddComponent(\"Script\", {{Script = Assets.Load(\"{}\")}})", path));
+				const auto rejected = fixture.Evaluate(std::format("local entity = Scene.FindByName(\"Root\")\nentity:AddComponent(\"Script\", {{Scripts = {{{{Script = Assets.Load(\"{}\"), Fields = {{}}, ExecutionOrder = 0}}}}}})", path));
 				CHECK_FALSE(rejected);
 				CHECK(expected.GetMatchCount() == 1);
 				REQUIRE_FALSE(fixture.Errors.empty());
@@ -639,9 +643,9 @@ return true
 			CheckProxyScript(fixture, R"(
 local entity = Scene.FindByName("Root")
 local behaviour = Assets.Load("Assets/Behaviour.luau")
-local script = entity:AddComponent("Script", {Script = behaviour})
+local script = entity:AddComponent("Script", {Scripts = {{Script = behaviour, Fields = {}, ExecutionOrder = 0}}})
 assert(entity:GetScript() ~= nil)
-assert(Assets.GetPath(script.Script) == Assets.GetPath(behaviour))
+assert(Assets.GetPath(script.Scripts[1].Script) == Assets.GetPath(behaviour))
 return true
 )");
 			fixture.ExternalMutations.clear();
@@ -649,7 +653,7 @@ return true
 			for (const char* path : { "Assets/Module.luau", "Assets/Suite.luau" })
 			{
 				Test::ExpectLog expected(LogLevel::Error, "a Script component requires a Behaviour asset");
-				const auto rejected = fixture.Evaluate(std::format("local script = Scene.FindByName(\"Root\"):GetComponent(\"Script\")\nscript.Script = Assets.Load(\"{}\")", path));
+				const auto rejected = fixture.Evaluate(std::format("local script = Scene.FindByName(\"Root\"):GetComponent(\"Script\")\nscript.Scripts = {{{{Script = Assets.Load(\"{}\"), Fields = {{}}, ExecutionOrder = 0}}}}", path));
 				CHECK_FALSE(rejected);
 				CHECK(expected.GetMatchCount() == 1);
 				REQUIRE_FALSE(fixture.Errors.empty());
@@ -658,7 +662,7 @@ return true
 				CHECK(fixture.Errors.back().Message.find("Behaviour") != std::string::npos);
 				CHECK(fixture.GetScene().GetRevision() == attachedRevision);
 				CHECK(fixture.ExternalMutations.empty());
-				CHECK(root.GetComponent<ScriptComponent>().Script.GetHandle() == AssetHandle(93));
+				CHECK(root.GetComponent<ScriptComponent>().Scripts.front().Script.GetHandle() == AssetHandle(93));
 			}
 		}
 	}

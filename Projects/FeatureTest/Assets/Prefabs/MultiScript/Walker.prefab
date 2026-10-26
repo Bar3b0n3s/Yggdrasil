@@ -1,0 +1,53 @@
+{
+	"Format": "Prefab",
+	"Version": 1,
+	"Name": "Walker",
+	"Root": "434744dcff716753",
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"Script": 2
+	},
+	"Entities": [
+		{
+			"ID": "434744dcff716753",
+			"Name": "Walker",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-4, 0.5, -3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "08329da5e1d2e5df",
+							"Fields": {
+								"Label": "Walker",
+								"Step": 5
+							},
+							"ExecutionOrder": 0
+						},
+						{
+							"Script": "a495909a675e2a9e",
+							"Fields": {
+								"Label": "Walker.T"
+							},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		}
+	]
+}

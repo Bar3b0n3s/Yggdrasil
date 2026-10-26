@@ -37,7 +37,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -154,7 +154,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -261,7 +261,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -351,7 +351,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -444,7 +444,7 @@
 						"description": "Import settings merged over the importer's defaults; null for the defaults."
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -582,7 +582,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -776,7 +776,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -882,7 +882,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -959,7 +959,7 @@
 		{
 			"name": "asset.reimport",
 			"domain": "asset",
-			"description": "Imports an asset again, bypassing the cache, and updates the open scene's instances of a changed prefab; resolves when the import completed.",
+			"description": "Imports an asset again, bypassing the cache; for a changed prefab, rewrites the prefabs nesting it and updates the instances of every open scene, each scene's as an undo step of its own; resolves when the import completed.",
 			"exposeAsTool": false,
 			"mutates": true,
 			"supportsDryRun": false,
@@ -979,7 +979,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1083,7 +1083,7 @@
 		{
 			"name": "asset.setImportSettings",
 			"domain": "asset",
-			"description": "Applies an RFC 7386 merge patch to an asset's import settings as one undoable command; the asset reimports. For a glTF the open scene instantiates, the instances follow in the same undo step.",
+			"description": "Applies an RFC 7386 merge patch to an asset's import settings as one undoable command; the asset reimports. For a glTF that an open scene instantiates or a prefab nests, the prefabs nesting it and the instances follow in the same undo step, and the instances of the other open scenes in their own undo histories.",
 			"exposeAsTool": false,
 			"mutates": true,
 			"supportsDryRun": false,
@@ -1106,7 +1106,7 @@
 						"description": "An RFC 7386 merge patch of the import settings."
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1212,7 +1212,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1303,7 +1303,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1547,7 +1547,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1660,7 +1660,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1858,7 +1858,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -2052,9 +2052,15 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -2150,9 +2156,15 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -2235,9 +2247,15 @@
 						"maximum": 1000
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -2350,9 +2368,15 @@
 						"maximum": 1000
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -2406,7 +2430,7 @@
 		{
 			"name": "edit.select",
 			"domain": "edit",
-			"description": "Replaces the editor's selection (editor state, not an undoable command).",
+			"description": "Replaces the editor's selection (editor state, not an undoable command). While playing, a selection of the play scene belongs to the played scene, also when made from another tab: the result lists it, and edit.getSelection with that scene as target reads it back.",
 			"exposeAsTool": false,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -2429,9 +2453,15 @@
 						}
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -2517,9 +2547,15 @@
 						"maximum": 1000
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -2595,7 +2631,7 @@
 						"maximum": 8192
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -2667,7 +2703,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -2790,9 +2826,15 @@
 						"enum": ["Edit", "Play"]
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -3015,9 +3057,15 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -4167,25 +4215,15 @@
 						"additionalProperties": false
 					},
 					"Script": {
-						"description": "Attaches a Behaviour script to the entity (one per entity).",
+						"description": "Attaches Behaviour scripts to the entity, an ordered list of slots.",
 						"type": "object",
 						"properties": {
-							"Script": {
-								"description": "The Behaviour script to run.",
-								"type": ["string", "null"],
-								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
-								"x-assetType": "Script"
-							},
-							"Fields": {
-								"description": "Overrides of the script's declared fields by name, each checked against the field's declared type; an unknown or mismatching override is kept and reported, and the field uses its declared default.",
-								"type": "object",
-								"additionalProperties": {}
-							},
-							"ExecutionOrder": {
-								"description": "The script's place in callback order: lower values run first, ties in canonical entity order.",
-								"type": "integer",
-								"minimum": -2147483648,
-								"maximum": 2147483647
+							"Scripts": {
+								"description": "The behaviours of the entity, in slot order; each slot is its own instance.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/ScriptSlot"
+								}
 							}
 						},
 						"additionalProperties": false
@@ -4216,6 +4254,30 @@
 							},
 							"Value": {
 								"description": "The overriding value, checked against the schema of its target: the field, the whole component, or the entity key."
+							}
+						},
+						"additionalProperties": false
+					},
+					"ScriptSlot": {
+						"description": "One behaviour of a Script component.",
+						"type": "object",
+						"properties": {
+							"Script": {
+								"description": "The Behaviour script.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Script"
+							},
+							"Fields": {
+								"description": "Overrides of the script's declared fields, by name.",
+								"type": "object",
+								"additionalProperties": {}
+							},
+							"ExecutionOrder": {
+								"description": "Callbacks run in (ExecutionOrder, canonical entity order, slot) order.",
+								"type": "integer",
+								"minimum": -2147483648,
+								"maximum": 2147483647
 							}
 						},
 						"additionalProperties": false
@@ -4323,9 +4385,15 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -4406,9 +4474,15 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -4509,9 +4583,15 @@
 						"enum": ["Edit", "Play"]
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -4666,9 +4746,15 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -4854,9 +4940,15 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -6006,25 +6098,15 @@
 						"additionalProperties": false
 					},
 					"Script": {
-						"description": "Attaches a Behaviour script to the entity (one per entity).",
+						"description": "Attaches Behaviour scripts to the entity, an ordered list of slots.",
 						"type": "object",
 						"properties": {
-							"Script": {
-								"description": "The Behaviour script to run.",
-								"type": ["string", "null"],
-								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
-								"x-assetType": "Script"
-							},
-							"Fields": {
-								"description": "Overrides of the script's declared fields by name, each checked against the field's declared type; an unknown or mismatching override is kept and reported, and the field uses its declared default.",
-								"type": "object",
-								"additionalProperties": {}
-							},
-							"ExecutionOrder": {
-								"description": "The script's place in callback order: lower values run first, ties in canonical entity order.",
-								"type": "integer",
-								"minimum": -2147483648,
-								"maximum": 2147483647
+							"Scripts": {
+								"description": "The behaviours of the entity, in slot order; each slot is its own instance.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/ScriptSlot"
+								}
 							}
 						},
 						"additionalProperties": false
@@ -6055,6 +6137,30 @@
 							},
 							"Value": {
 								"description": "The overriding value, checked against the schema of its target: the field, the whole component, or the entity key."
+							}
+						},
+						"additionalProperties": false
+					},
+					"ScriptSlot": {
+						"description": "One behaviour of a Script component.",
+						"type": "object",
+						"properties": {
+							"Script": {
+								"description": "The Behaviour script.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Script"
+							},
+							"Fields": {
+								"description": "Overrides of the script's declared fields, by name.",
+								"type": "object",
+								"additionalProperties": {}
+							},
+							"ExecutionOrder": {
+								"description": "Callbacks run in (ExecutionOrder, canonical entity order, slot) order.",
+								"type": "integer",
+								"minimum": -2147483648,
+								"maximum": 2147483647
 							}
 						},
 						"additionalProperties": false
@@ -6199,7 +6305,7 @@
 						"description": "Only these event types; empty for every type.",
 						"type": "array",
 						"items": {
-							"enum": ["EntityCreated", "EntityDestroyed", "ComponentChanged", "SceneOpened", "SceneChangedOnDisk", "PlayStateChanged", "AssetReloaded", "AssetImportFailed", "ScriptErrorRaised", "DiagnosticsChanged", "AutomationClientDisconnected"]
+							"enum": ["EntityCreated", "EntityDestroyed", "ComponentChanged", "SceneOpened", "SceneChangedOnDisk", "PlayStateChanged", "AssetReloaded", "AssetImportFailed", "ScriptErrorRaised", "DiagnosticsChanged", "AutomationClientDisconnected", "SceneActivated", "SceneClosed"]
 						}
 					},
 					"limit": {
@@ -6209,7 +6315,7 @@
 						"maximum": 1000
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -6263,7 +6369,7 @@
 							},
 							"type": {
 								"description": "The event's type.",
-								"enum": ["EntityCreated", "EntityDestroyed", "ComponentChanged", "SceneOpened", "SceneChangedOnDisk", "PlayStateChanged", "AssetReloaded", "AssetImportFailed", "ScriptErrorRaised", "DiagnosticsChanged", "AutomationClientDisconnected"]
+								"enum": ["EntityCreated", "EntityDestroyed", "ComponentChanged", "SceneOpened", "SceneChangedOnDisk", "PlayStateChanged", "AssetReloaded", "AssetImportFailed", "ScriptErrorRaised", "DiagnosticsChanged", "AutomationClientDisconnected", "SceneActivated", "SceneClosed"]
 							},
 							"tick": {
 								"description": "The simulation tick; -1 outside play.",
@@ -6335,7 +6441,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -6523,7 +6629,7 @@
 						}
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -6655,7 +6761,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -6844,7 +6950,7 @@
 						"maximum": 1000
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -6977,7 +7083,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -7255,7 +7361,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -7408,7 +7514,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -7567,7 +7673,7 @@
 						"maximum": 100
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -7758,7 +7864,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -7914,7 +8020,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -8084,7 +8190,7 @@
 						"enum": ["Every", "Last", "None"]
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -8264,7 +8370,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -8336,7 +8442,7 @@
 						"maximum": 1000000
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -8389,7 +8495,7 @@
 		{
 			"name": "prefab.apply",
 			"domain": "prefab",
-			"description": "Writes an instance's overrides into a .prefab asset, by default its outermost instance's prefab, or with level the prefab of a nested instance on the way down; then rewrites the prefabs nesting it (updatedPrefabs) and rebuilds their instances in the open scene, as one undoable step.",
+			"description": "Writes an instance's overrides into a .prefab asset, by default its outermost instance's prefab, or with level the prefab of a nested instance on the way down; then rewrites the prefabs nesting it (updatedPrefabs) and rebuilds their instances in the scene it addresses, as one undoable step, and in every other open scene, as a step of that scene's own undo history.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": false,
@@ -8413,9 +8519,15 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -8433,7 +8545,7 @@
 						"$ref": "#/$defs/AssetSummary"
 					},
 					"updatedInstances": {
-						"description": "The outermost instances in the open scene rebuilt from it or from a prefab nesting it, this one's included.",
+						"description": "The outermost instances rebuilt in the scene the request addresses from it or from a prefab nesting it, this one's included.",
 						"type": "integer",
 						"minimum": 0,
 						"maximum": 4294967295
@@ -8534,9 +8646,15 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -8666,7 +8784,7 @@
 					},
 					"components": {
 						"type": "object",
-						"description": "Per-instance component values for the instance root by registry name, merged into the prefab's as entity.update merges them (missing components are added) and recorded as the instance's overrides; script fields go in {\"Script\": {\"Fields\": {...}}}, the Script handle defaulting to the prefab root's.",
+						"description": "Per-instance component values for the instance root by registry name, merged into the prefab's as entity.update merges them (missing components are added) and recorded as the instance's overrides; script fields go in {\"Script\": {\"Scripts\": [{\"Fields\": {...}}]}}: an entry that gives Fields without Script takes the Script handle of the prefab root's slot at its index, every other member an entry omits takes its default (repeat a non-zero ExecutionOrder), and the list replaces the root's.",
 						"properties": {
 							"Transform": {
 								"$ref": "#/$defs/Transform"
@@ -8736,9 +8854,15 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -9888,25 +10012,15 @@
 						"additionalProperties": false
 					},
 					"Script": {
-						"description": "Attaches a Behaviour script to the entity (one per entity).",
+						"description": "Attaches Behaviour scripts to the entity, an ordered list of slots.",
 						"type": "object",
 						"properties": {
-							"Script": {
-								"description": "The Behaviour script to run.",
-								"type": ["string", "null"],
-								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
-								"x-assetType": "Script"
-							},
-							"Fields": {
-								"description": "Overrides of the script's declared fields by name, each checked against the field's declared type; an unknown or mismatching override is kept and reported, and the field uses its declared default.",
-								"type": "object",
-								"additionalProperties": {}
-							},
-							"ExecutionOrder": {
-								"description": "The script's place in callback order: lower values run first, ties in canonical entity order.",
-								"type": "integer",
-								"minimum": -2147483648,
-								"maximum": 2147483647
+							"Scripts": {
+								"description": "The behaviours of the entity, in slot order; each slot is its own instance.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/ScriptSlot"
+								}
 							}
 						},
 						"additionalProperties": false
@@ -9937,6 +10051,30 @@
 							},
 							"Value": {
 								"description": "The overriding value, checked against the schema of its target: the field, the whole component, or the entity key."
+							}
+						},
+						"additionalProperties": false
+					},
+					"ScriptSlot": {
+						"description": "One behaviour of a Script component.",
+						"type": "object",
+						"properties": {
+							"Script": {
+								"description": "The Behaviour script.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Script"
+							},
+							"Fields": {
+								"description": "Overrides of the script's declared fields, by name.",
+								"type": "object",
+								"additionalProperties": {}
+							},
+							"ExecutionOrder": {
+								"description": "Callbacks run in (ExecutionOrder, canonical entity order, slot) order.",
+								"type": "integer",
+								"minimum": -2147483648,
+								"maximum": 2147483647
 							}
 						},
 						"additionalProperties": false
@@ -10077,9 +10215,15 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -10203,9 +10347,15 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -10300,7 +10450,7 @@
 						"enum": ["Empty", "Basic3D"]
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -10408,7 +10558,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -10584,7 +10734,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -11038,7 +11188,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -11171,7 +11321,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -11269,7 +11419,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -11404,7 +11554,7 @@
 		{
 			"name": "project.save",
 			"domain": "project",
-			"description": "Saves the open scene when it has unsaved changes. Settings are saved as they change.",
+			"description": "Saves every open scene that has unsaved changes, in tab order. Settings are saved as they change.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": false,
@@ -11420,7 +11570,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -11435,7 +11585,7 @@
 				"type": "object",
 				"properties": {
 					"savedFiles": {
-						"description": "The project-relative files written.",
+						"description": "The project-relative files written, in tab order.",
 						"type": "array",
 						"items": {
 							"type": "string"
@@ -11486,7 +11636,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -11938,7 +12088,7 @@
 		{
 			"name": "project.upgrade",
 			"domain": "project",
-			"description": "Applies migrations and canonical re-saves to every project file (the .eproj, and every scene, prefab, .meta, material, sound effect and replay under Assets/), records each rewrite in provenance and reports the changed files, each with its reason (changes: \"format version 1 to 2\", \"canonical form\"). Run it after an engine change to canonical output; dryRun: true lists what it would rewrite. An unknown member in a material, sound effect or replay fails the upgrade at its file and pointer, as its importer refuses it. Not undoable; refuses an open scene with unsaved changes (save it first).",
+			"description": "Applies migrations and canonical re-saves to every project file (the .eproj, and every scene, prefab, .meta, material, sound effect and replay under Assets/), records each rewrite in provenance and reports the changed files, each with its reason (changes: \"format version 1 to 2\", \"canonical form\"). Run it after an engine change to canonical output; dryRun: true lists what it would rewrite. An unknown member in a material, sound effect or replay fails the upgrade at its file and pointer, as its importer refuses it. Not undoable; refuses while an open scene has unsaved changes (save them first), and reloads every open scene whose file it rewrote.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": true,
@@ -11958,7 +12108,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -12063,9 +12213,15 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -12215,7 +12371,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -12267,6 +12423,242 @@
 			]
 		},
 		{
+			"name": "scene.activate",
+			"domain": "scene",
+			"description": "Makes the open scene the scene target names the active scene.",
+			"exposeAsTool": true,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": [],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NoParams",
+				"description": "The params of a method that takes none: an empty object.",
+				"type": "object",
+				"properties": {
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
+					}
+				},
+				"additionalProperties": false,
+				"required": ["scene"],
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "SceneActivateResult",
+				"description": "The scene scene.activate made active.",
+				"type": "object",
+				"properties": {
+					"scene": {
+						"description": "The now active scene.",
+						"$ref": "#/$defs/OpenSceneEntry"
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"OpenSceneEntry": {
+						"description": "One open scene as scene.list reports it.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "Its open-scene id, which the scene target accepts.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"scene": {
+								"description": "Its path (empty for a scene never saved), name, revision, dirty flag and entity count.",
+								"$ref": "#/$defs/SceneSummary"
+							},
+							"active": {
+								"description": "Whether it is the active scene.",
+								"type": "boolean"
+							},
+							"changedOnDisk": {
+								"description": "Its file or a prefab it instantiates changed on disk (SceneChangedOnDisk).",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"SceneSummary": {
+						"description": "The open scene.",
+						"type": "object",
+						"properties": {
+							"path": {
+								"description": "The project-relative path of its file; empty for a scene never saved.",
+								"type": "string"
+							},
+							"name": {
+								"description": "The scene's name.",
+								"type": "string"
+							},
+							"revision": {
+								"description": "The host's revision (_meta.revision; the play scene's in the Runtime): it grows with every change to the open scene or the project settings; writing an asset or script file alone leaves it unchanged.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"dirty": {
+								"description": "Whether the scene has unsaved changes.",
+								"type": "boolean"
+							},
+							"entityCount": {
+								"description": "The number of entities.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Switch to the open Level1 scene.",
+					"params": {
+						"scene": "Assets/Scenes/Level1.scene"
+					}
+				}
+			]
+		},
+		{
+			"name": "scene.close",
+			"domain": "scene",
+			"description": "Closes an open scene; with unsaved changes, save or discardChanges is required.",
+			"exposeAsTool": true,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": [],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "SceneCloseParams",
+				"description": "The params of scene.close.",
+				"type": "object",
+				"properties": {
+					"save": {
+						"description": "Write the scene to its file first when it has unsaved changes.",
+						"type": "boolean"
+					},
+					"discardChanges": {
+						"description": "Drop the scene's unsaved changes.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "SceneCloseResult",
+				"description": "The closed scene and the now active one.",
+				"type": "object",
+				"properties": {
+					"closed": {
+						"description": "The closed scene as it was when it closed (after the save, when save wrote it).",
+						"$ref": "#/$defs/SceneSummary"
+					},
+					"file": {
+						"description": "The project-relative file save wrote; empty when nothing was written.",
+						"type": "string"
+					},
+					"activeId": {
+						"description": "The open-scene id of the now active scene; 0 when no scene is open.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"SceneSummary": {
+						"description": "The open scene.",
+						"type": "object",
+						"properties": {
+							"path": {
+								"description": "The project-relative path of its file; empty for a scene never saved.",
+								"type": "string"
+							},
+							"name": {
+								"description": "The scene's name.",
+								"type": "string"
+							},
+							"revision": {
+								"description": "The host's revision (_meta.revision; the play scene's in the Runtime): it grows with every change to the open scene or the project settings; writing an asset or script file alone leaves it unchanged.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"dirty": {
+								"description": "Whether the scene has unsaved changes.",
+								"type": "boolean"
+							},
+							"entityCount": {
+								"description": "The number of entities.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Save the active scene, then close it.",
+					"params": {
+						"save": true
+					}
+				}
+			]
+		},
+		{
 			"name": "scene.diff",
 			"domain": "scene",
 			"description": "Reports what changed per entity, as RFC 6902 patches, against the saved file or an earlier revision.",
@@ -12295,9 +12687,15 @@
 						"maximum": 4294967295
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -12398,9 +12796,15 @@
 						"enum": ["Edit", "Play"]
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -12435,9 +12839,125 @@
 			]
 		},
 		{
+			"name": "scene.list",
+			"domain": "scene",
+			"description": "Lists the open scenes in tab order, with the active one marked.",
+			"exposeAsTool": true,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": [],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NoParams",
+				"description": "The params of a method that takes none: an empty object.",
+				"type": "object",
+				"properties": {
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "SceneListResult",
+				"description": "The editor's open scenes.",
+				"type": "object",
+				"properties": {
+					"scenes": {
+						"description": "The open scenes in tab order; empty without an open scene.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/OpenSceneEntry"
+						}
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"OpenSceneEntry": {
+						"description": "One open scene as scene.list reports it.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "Its open-scene id, which the scene target accepts.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"scene": {
+								"description": "Its path (empty for a scene never saved), name, revision, dirty flag and entity count.",
+								"$ref": "#/$defs/SceneSummary"
+							},
+							"active": {
+								"description": "Whether it is the active scene.",
+								"type": "boolean"
+							},
+							"changedOnDisk": {
+								"description": "Its file or a prefab it instantiates changed on disk (SceneChangedOnDisk).",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"SceneSummary": {
+						"description": "The open scene.",
+						"type": "object",
+						"properties": {
+							"path": {
+								"description": "The project-relative path of its file; empty for a scene never saved.",
+								"type": "string"
+							},
+							"name": {
+								"description": "The scene's name.",
+								"type": "string"
+							},
+							"revision": {
+								"description": "The host's revision (_meta.revision; the play scene's in the Runtime): it grows with every change to the open scene or the project settings; writing an asset or script file alone leaves it unchanged.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"dirty": {
+								"description": "Whether the scene has unsaved changes.",
+								"type": "boolean"
+							},
+							"entityCount": {
+								"description": "The number of entities.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "List the open scenes.",
+					"params": {}
+				}
+			]
+		},
+		{
 			"name": "scene.new",
 			"domain": "scene",
-			"description": "Creates a scene file at path and makes it the open scene. With unsaved changes in the open scene it needs save or discardChanges.",
+			"description": "Creates a scene file at path and opens it in place of the active scene, which needs save or discardChanges when it has unsaved changes; keepOpen adds it as another open scene instead.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": false,
@@ -12461,15 +12981,19 @@
 						"enum": ["Empty"]
 					},
 					"save": {
-						"description": "Save the open scene first when it has unsaved changes.",
+						"description": "Save the active scene, which the new one replaces, first when it has unsaved changes.",
 						"type": "boolean"
 					},
 					"discardChanges": {
-						"description": "Drop the open scene's unsaved changes.",
+						"description": "Drop the unsaved changes of the active scene, which the new one replaces.",
+						"type": "boolean"
+					},
+					"keepOpen": {
+						"description": "Keep every open scene open and add this one as the active scene.",
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -12490,6 +13014,12 @@
 					},
 					"undoIndex": {
 						"description": "Always 0: opening a scene starts a new history.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"id": {
+						"description": "The scene's open-scene id, which the scene target accepts.",
 						"type": "integer",
 						"minimum": 0,
 						"maximum": 4294967295
@@ -12550,7 +13080,7 @@
 		{
 			"name": "scene.open",
 			"domain": "scene",
-			"description": "Opens the scene at path (one scene is open at a time). With unsaved changes in the open scene it needs save or discardChanges; reload reads the open scene again; repair loads a damaged file with reported repairs.",
+			"description": "Opens the scene at path in place of the active scene, which needs save or discardChanges when it has unsaved changes; keepOpen adds it as another open scene instead. reload reads an open scene again; repair loads a damaged file with reported repairs.",
 			"exposeAsTool": true,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -12570,23 +13100,27 @@
 						"type": "string"
 					},
 					"save": {
-						"description": "Save the open scene first when it has unsaved changes.",
+						"description": "Save the scene this one replaces (the active one, or the open scene reload reads again) first when it has unsaved changes.",
 						"type": "boolean"
 					},
 					"discardChanges": {
-						"description": "Drop the open scene's unsaved changes.",
+						"description": "Drop the unsaved changes of the scene this one replaces.",
 						"type": "boolean"
 					},
 					"reload": {
-						"description": "Read the open scene's own file again (a version changed on disk).",
+						"description": "Read an open scene's file again in its tab (a version changed on disk) and make it the active scene.",
 						"type": "boolean"
 					},
 					"repair": {
 						"description": "Load with structural repairs and report them; the scene is then unsaved.",
 						"type": "boolean"
 					},
+					"keepOpen": {
+						"description": "Keep every open scene open and add this one as the active scene.",
+						"type": "boolean"
+					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -12622,6 +13156,12 @@
 						"items": {
 							"$ref": "#/$defs/SceneLoadRepair"
 						}
+					},
+					"id": {
+						"description": "The scene's open-scene id, which the scene target accepts.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
 					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
@@ -12774,9 +13314,15 @@
 						"enum": ["Edit", "Play"]
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -12953,9 +13499,15 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -13109,9 +13661,15 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -13219,9 +13777,15 @@
 						"enum": ["Edit", "Play"]
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -13378,7 +13942,7 @@
 						}
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -13508,7 +14072,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -13658,9 +14222,15 @@
 						"maximum": 1000
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -13739,6 +14309,12 @@
 							"entity": {
 								"description": "The entity whose script raised the error: its id and name at the latest occurrence, and its path read now in the scene reads address by default (the play scene while playing, else the edit scene), empty when that scene no longer holds the entity (destroyed, or spawned by a play session that ended) and for an error raised outside an entity.",
 								"$ref": "#/$defs/EntitySummary"
+							},
+							"slot": {
+								"description": "The faulting behaviour's slot in its entity's Script list.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
 							},
 							"tick": {
 								"description": "Simulation tick of the latest occurrence.",
@@ -13845,10 +14421,20 @@
 						"description": "Optional behaviour entity bound as self.",
 						"type": "string"
 					},
+					"script": {
+						"description": "The behaviour self binds to when entity has several scripts: its Script.Define name; absent, the entity's first script.",
+						"type": "string"
+					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -13916,7 +14502,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -14039,7 +14625,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -14134,7 +14720,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -14406,7 +14992,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -14553,7 +15139,7 @@
 		{
 			"name": "session.shutdown",
 			"domain": "session",
-			"description": "Exits the host after the response. The editor with unsaved changes in the open scene needs save (write them first) or force (discard them); the Runtime saves nothing and needs neither.",
+			"description": "Exits the host after the response. The editor with unsaved changes in an open scene needs save (write every dirty open scene first) or force (discard the changes); the Runtime saves nothing and needs neither.",
 			"exposeAsTool": false,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -14569,15 +15155,15 @@
 				"type": "object",
 				"properties": {
 					"save": {
-						"description": "The editor saves the open scene first when it has unsaved changes (the Runtime has none to save).",
+						"description": "The editor saves every open scene with unsaved changes first (the Runtime has none to save).",
 						"type": "boolean"
 					},
 					"force": {
-						"description": "The editor exits even when the open scene has unsaved changes, discarding them.",
+						"description": "The editor exits even when open scenes have unsaved changes, discarding them.",
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -14592,11 +15178,11 @@
 				"type": "object",
 				"properties": {
 					"saved": {
-						"description": "Whether the open scene was written.",
+						"description": "Whether an open scene was written.",
 						"type": "boolean"
 					},
 					"savedFiles": {
-						"description": "The project-relative files written.",
+						"description": "The project-relative files written, in tab order.",
 						"type": "array",
 						"items": {
 							"type": "string"
@@ -14616,7 +15202,7 @@
 			},
 			"examples": [
 				{
-					"description": "Save the open scene, then exit.",
+					"description": "Save the open scenes, then exit.",
 					"params": {
 						"save": true
 					}
@@ -14646,7 +15232,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -14883,7 +15469,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -14994,7 +15580,7 @@
 		{
 			"name": "test.run",
 			"domain": "test",
-			"description": "Runs configured tests and returns every outcome (counts, failedCases and the case rows; a replay's suite entry counts the checkpoints it compared) plus JSON/JUnit reports. The coverage object always keeps its registryFingerprint and gates; its counters are returned only with coverage: true or Testing.CoverageGates. Optional recording is published only after strict replay verification and, with input events, the input check (§13.6: refused when a run without them still passes that verification, whatever script errors it raises), and reported in the recording block (format version, ticks, events, checkpoints, final hash, where the input check diverged); a refused recording names the selected rows that did not pass. Runs play saved scene files, so test.run refuses (InvalidState, nothing run) while the open scene has unsaved changes and a selected suite or replay plays it: scene.save first.",
+			"description": "Runs configured tests and returns every outcome (counts, failedCases and the case rows; a replay's suite entry counts the checkpoints it compared) plus JSON/JUnit reports. The coverage object always keeps its registryFingerprint and gates; its counters are returned only with coverage: true or Testing.CoverageGates. Optional recording is published only after strict replay verification and, with input events, the input check (§13.6: refused when a run without them still passes that verification, whatever script errors it raises), and reported in the recording block (format version, ticks, events, checkpoints, final hash, where the input check diverged); a refused recording names the selected rows that did not pass. Runs play saved scene files, so test.run refuses (InvalidState, nothing run) while an open scene has unsaved changes and a selected suite or replay plays it: scene.save first.",
 			"exposeAsTool": true,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -15028,7 +15614,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -15475,7 +16061,7 @@
 						"type": "number"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -15597,7 +16183,7 @@
 						}
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -15737,7 +16323,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -15957,9 +16543,15 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -16115,7 +16707,7 @@
 						}
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}

@@ -12,7 +12,7 @@
 		"BoxCollider": 1,
 		"SphereCollider": 1,
 		"AudioListener": 1,
-		"Script": 1
+		"Script": 2
 	},
 	"Entities": [
 		{
@@ -80,11 +80,15 @@
 					"Scale": [1, 1, 1]
 				},
 				"Script": {
-					"Script": "1ed2134b6205f2b6",
-					"Fields": {
-						"Label": "Early"
-					},
-					"ExecutionOrder": -5
+					"Scripts": [
+						{
+							"Script": "1ed2134b6205f2b6",
+							"Fields": {
+								"Label": "Early"
+							},
+							"ExecutionOrder": -5
+						}
+					]
 				}
 			}
 		},
@@ -101,11 +105,15 @@
 					"Scale": [1, 1, 1]
 				},
 				"Script": {
-					"Script": "1ed2134b6205f2b6",
-					"Fields": {
-						"Label": "Root"
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "1ed2134b6205f2b6",
+							"Fields": {
+								"Label": "Root"
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -122,11 +130,15 @@
 					"Scale": [1, 1, 1]
 				},
 				"Script": {
-					"Script": "1ed2134b6205f2b6",
-					"Fields": {
-						"Label": "Child"
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "1ed2134b6205f2b6",
+							"Fields": {
+								"Label": "Child"
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -143,11 +155,15 @@
 					"Scale": [1, 1, 1]
 				},
 				"Script": {
-					"Script": "1ed2134b6205f2b6",
-					"Fields": {
-						"Label": "Late"
-					},
-					"ExecutionOrder": 7
+					"Scripts": [
+						{
+							"Script": "1ed2134b6205f2b6",
+							"Fields": {
+								"Label": "Late"
+							},
+							"ExecutionOrder": 7
+						}
+					]
 				}
 			}
 		},
@@ -196,11 +212,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "1ed2134b6205f2b6",
-					"Fields": {
-						"Label": "Floor"
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "1ed2134b6205f2b6",
+							"Fields": {
+								"Label": "Floor"
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -241,11 +261,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "1ed2134b6205f2b6",
-					"Fields": {
-						"Label": "Dropper"
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "1ed2134b6205f2b6",
+							"Fields": {
+								"Label": "Dropper"
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -286,11 +310,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "1ed2134b6205f2b6",
-					"Fields": {
-						"Label": "Faller"
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "1ed2134b6205f2b6",
+							"Fields": {
+								"Label": "Faller"
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -313,11 +341,15 @@
 					"IsTrigger": true
 				},
 				"Script": {
-					"Script": "1ed2134b6205f2b6",
-					"Fields": {
-						"Label": "Zone"
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "1ed2134b6205f2b6",
+							"Fields": {
+								"Label": "Zone"
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -358,11 +390,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "1ed2134b6205f2b6",
-					"Fields": {
-						"Label": "Visitor"
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "1ed2134b6205f2b6",
+							"Fields": {
+								"Label": "Visitor"
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -403,11 +439,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "1ed2134b6205f2b6",
-					"Fields": {
-						"Label": "Lingerer"
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "1ed2134b6205f2b6",
+							"Fields": {
+								"Label": "Lingerer"
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -424,11 +464,15 @@
 					"Scale": [1, 1, 1]
 				},
 				"Script": {
-					"Script": "f4897e80234babf5",
-					"Fields": {
-						"Step": 2
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "f4897e80234babf5",
+							"Fields": {
+								"Step": 2
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		}

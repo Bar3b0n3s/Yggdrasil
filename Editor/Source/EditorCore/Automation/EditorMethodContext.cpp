@@ -32,8 +32,31 @@
 #include "Engine/Session/PlaySession.h"
 
 #include <map>
+#include <vector>
 
 namespace Engine {
+
+	namespace Utils {
+
+		// The indices of the slots of the Script component params `script` that give a non-empty Fields object without a
+		// Script member: their values resolve against the Script handle they borrow (CompleteParameterOwners).
+		static std::vector<size_t> FindBorrowingScriptSlots(const Json& script)
+		{
+			std::vector<size_t> borrowing;
+			const auto slots = script.find("Scripts");
+			if (slots == script.end() || !slots->is_array())
+				return borrowing;
+			for (size_t slot = 0; slot < slots->size(); ++slot)
+			{
+				const Json& entry = (*slots)[slot];
+				const auto fields = entry.is_object() ? entry.find("Fields") : entry.end();
+				if (entry.is_object() && !entry.contains("Script") && fields != entry.end() && fields->is_object() && !fields->empty())
+					borrowing.push_back(slot);
+			}
+			return borrowing;
+		}
+
+	}
 
 	namespace {
 
@@ -50,14 +73,18 @@ namespace Engine {
 				for (UUID id : GetScene().GetCanonicalOrder())
 				{
 					const auto* component = GetScene().FindEntityByID(id).TryGetComponent<ScriptComponent>();
-					if (component && component->Script.IsValid())
+					if (component == nullptr)
+						continue;
+					for (const ScriptSlot& slot : component->Scripts)
 					{
+						if (!slot.Script.IsValid())
+							continue;
 						// A dangling, failed or non-script reference must not make every evaluation fail: leave it out of the
 						// schema snapshot, and its instance creation reports the problem for that entity only.
-						const auto asset = m_Editor.GetAssets().Load(component->Script.GetHandle());
+						const auto asset = m_Editor.GetAssets().Load(slot.Script.GetHandle());
 						const auto script = asset ? AssetCast<ScriptData>(*asset) : AssetRef<ScriptData>{};
 						if (script)
-							scripts.emplace(component->Script.GetHandle(), script);
+							scripts.emplace(slot.Script.GetHandle(), script);
 					}
 				}
 				ENGINE_TRY_ASSIGN(m_Schemas, ScriptFieldSchemaSource::Create(std::move(scripts)));
@@ -200,10 +227,12 @@ namespace Engine {
 		if (components == params.end() || !components->is_object())
 			return {};
 		const auto script = components->find("Script");
-		if (script == components->end() || !script->is_object() || script->contains("Script"))
+		if (script == components->end() || !script->is_object())
 			return {};
-		const auto fields = script->find("Fields");
-		if (fields == script->end() || !fields->is_object() || fields->empty())
+		// The slots that give Fields without a Script handle borrow the handle of the slot at their index
+		// (Docs/Decisions/0031-m20-contract.md decision 17).
+		const std::vector<size_t> borrowing = Utils::FindBorrowingScriptSlots(*script);
+		if (borrowing.empty())
 			return {};
 		if (method == "prefab.instantiate")
 			return CompletePrefabScriptOwner(params, *script);
@@ -237,8 +266,12 @@ namespace Engine {
 		}
 		ENGINE_TRY_ASSIGN(Scene * scene, ResolveTargetScene(target, targetJson.has_value(), true));
 		ENGINE_TRY_ASSIGN(const Entity owner, ResolveEntity(*scene, *reference, "/entity"));
-		if (const auto* existing = owner.TryGetComponent<ScriptComponent>(); existing != nullptr && existing->Script.IsValid())
-			(*script)["Script"] = existing->Script.GetHandle().ToString();
+		const auto* existing = owner.TryGetComponent<ScriptComponent>();
+		for (const size_t slot : borrowing)
+		{
+			if (existing != nullptr && slot < existing->Scripts.size() && existing->Scripts[slot].Script.IsValid())
+				(*script)["Scripts"][slot]["Script"] = existing->Scripts[slot].Script.GetHandle().ToString();
+		}
 		return {};
 	}
 
@@ -270,11 +303,16 @@ namespace Engine {
 				if (const auto found = components->find("Script"); found != components->end() && found->is_object())
 					component = &*found;
 			}
-			if (component == nullptr)
+			const auto slots = component != nullptr ? component->find("Scripts") : Json::const_iterator();
+			if (component == nullptr || slots == component->end() || !slots->is_array())
 				return {};
-			const auto handleJson = component->find("Script");
-			if (handleJson != component->end() && handleJson->is_string())
-				script["Script"] = *handleJson;
+			for (const size_t slot : Utils::FindBorrowingScriptSlots(script))
+			{
+				const Json* rootSlot = slot < slots->size() && (*slots)[slot].is_object() ? &(*slots)[slot] : nullptr;
+				const auto handleJson = rootSlot != nullptr ? rootSlot->find("Script") : Json::const_iterator();
+				if (rootSlot != nullptr && handleJson != rootSlot->end() && handleJson->is_string())
+					script["Scripts"][slot]["Script"] = *handleJson;
+			}
 			return {};
 		}
 		return {};
@@ -283,8 +321,11 @@ namespace Engine {
 	Result<Scene*> EditorMethodContext::ResolveTargetScene(SceneTarget target, bool given, bool mutation) const
 	{
 		// Reads default to the play scene while playing and mutations to the edit scene (§13.4); an explicit "play" needs a
-		// running session.
+		// running session. M20 (decision 16): a scene target naming an open scene the session did not start from leaves the
+		// session out, since that scene is not playing; without a scene target the session is reached whatever tab is active.
 		PlaySession* session = m_Editor->GetPlay().GetSession();
+		const OpenSceneId played = m_Editor->GetPlay().GetPlayedScene();
+		const bool targetsAnotherScene = GetOptions().Scene.has_value() && (played == NoOpenScene || played != m_Editor->GetAddressedSceneId());
 		if (given && target == SceneTarget::Play)
 		{
 			if (session == nullptr)
@@ -292,9 +333,14 @@ namespace Engine {
 				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidState, "/target", "not playing: there is no play scene",
 					"start play mode first, or omit target to use the edit scene"));
 			}
+			if (targetsAnotherScene)
+			{
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/scene", "the scene this request names is not the scene being played",
+					"name the played scene, or omit scene to reach the play session from any tab, or omit target to read this scene's edit scene"));
+			}
 			return &session->GetScene();
 		}
-		if (!given && !mutation && session != nullptr)
+		if (!given && !mutation && session != nullptr && !targetsAnotherScene)
 			return &session->GetScene();
 		if (!m_Editor->HasScene())
 		{
@@ -305,8 +351,47 @@ namespace Engine {
 
 	Result<OpenSceneId> EditorMethodContext::ResolveSceneTarget() const
 	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "M20 scene target contract (Docs/Decisions/0031-m20-contract.md decision 16, stream S-D)");
+		const std::optional<SceneTargetReference>& target = GetOptions().Scene;
+		if (!target.has_value())
+		{
+			const OpenSceneId active = m_Editor->GetActiveSceneId();
+			if (active == NoOpenScene)
+				return std::unexpected(Error(ErrorCode::InvalidState, "no scene open").WithHint("open one with scene.open {path} or create one with scene.new {path}"));
+			return active;
+		}
+
+		OpenSceneId id = NoOpenScene;
+		std::string named;
+		if (!target->Path.empty())
+		{
+			ENGINE_TRY_ASSIGN(const VfsPath path, ResolveProjectPath(target->Path, "/scene", ".scene"));
+			id = m_Editor->FindOpenScene(path);
+			named = std::format("'{}'", target->Path);
+		}
+		else if (m_Editor->FindScene(target->Id) != nullptr)
+		{
+			id = target->Id;
+		}
+		else
+		{
+			named = std::format("the id {}", target->Id);
+		}
+		if (id != NoOpenScene)
+			return id;
+
+		// The hint lists what the request could have named, as scene.list reports it.
+		std::string open;
+		for (const OpenSceneId scene : m_Editor->GetOpenScenes())
+		{
+			const Result<OpenSceneInfo> info = m_Editor->DescribeOpenScene(scene);
+			if (!info.has_value())
+				continue;
+			const std::string path = info->Path.has_value() ? Utils::ToProjectRelative(*info->Path) : std::format("unsaved '{}'", info->Name);
+			open += std::format("{}{} ({})", open.empty() ? "" : ", ", path, scene);
+		}
+		std::string hint = open.empty() ? std::string("no scene is open: open one with scene.open {path} or scene.new {path}")
+										: std::format("the open scenes, by path and id: {}", open);
+		return std::unexpected(Utils::MakeParamError(ErrorCode::NotFound, "/scene", std::format("{} names no open scene", named), std::move(hint)));
 	}
 
 	Result<Entity> EditorMethodContext::ResolveEntity(Scene& scene, std::string_view reference, std::string_view pointer) const
@@ -422,7 +507,7 @@ namespace Engine {
 		return std::string(output.GetPath());
 	}
 
-	Result<ScriptEvaluation> EditorMethodContext::EvalInEdit(std::string_view code, std::string_view reference)
+	Result<ScriptEvaluation> EditorMethodContext::EvalInEdit(std::string_view code, std::string_view reference, std::string_view behaviour)
 	{
 		if (!m_Editor->HasScene())
 			return MakeError(ErrorCode::InvalidState, "no edit scene is open");
@@ -437,7 +522,7 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(ScriptApiRegistry * api, m_Editor->GetPlay().GetScriptApi());
 		ENGINE_TRY_ASSIGN(auto engine, ScriptEngine::Create({ .Host = &host, .Api = api, .Settings = m_Editor->GetProject().GetSettings().Scripting, .Mode = RunModes::Editor, .ReadOnly = true }));
 		ENGINE_TRY(engine->InitializeInstances());
-		return engine->Evaluate(code, VfsPath{}, entity);
+		return engine->Evaluate(code, VfsPath{}, entity, behaviour);
 	}
 
 	std::string EditorMethodContext::GetClientName(ClientId client) const
@@ -503,16 +588,18 @@ namespace Engine {
 
 	Result<SessionShutdownResult> EditorMethodContext::Shutdown(const SessionShutdownParams& params)
 	{
+		// Every open scene with unsaved changes is saved, or its changes dropped with force, or the request is refused naming
+		// each one (Docs/Decisions/0031-m20-contract.md decision 14).
 		EditorContext& editor = *m_Editor;
 		SessionShutdownResult result;
-		const bool mustSave = params.Save && editor.HasScene() && editor.IsSceneDirty();
-		ENGINE_TRY(Utils::CheckDirtyScene(editor, params.Save, params.Force && !params.Save, "force"));
-		if (mustSave)
+		if (params.Save)
 		{
-			ENGINE_TRY_ASSIGN(const VfsPath path, Utils::GetOwnScenePath(editor));
-			ENGINE_TRY(Utils::SaveOpenScene(editor, path));
-			result.Saved = true;
-			result.SavedFiles.push_back(Utils::ToProjectRelative(path));
+			ENGINE_TRY_ASSIGN(result.SavedFiles, Utils::SaveDirtyOpenScenes(editor));
+			result.Saved = !result.SavedFiles.empty();
+		}
+		else if (!params.Force)
+		{
+			ENGINE_TRY(Utils::CheckNoDirtyOpenScenes(editor, "pass save: true to save the changes first, or force: true to drop them"));
 		}
 		editor.RequestShutdown(0);
 		return result;
@@ -522,12 +609,22 @@ namespace Engine {
 	{
 		if (m_Editor->HasScene() && &m_Editor->GetScene() == &scene)
 			return Utils::MakeSceneSummary(*m_Editor);
-		// The play scene, a copy of the edit scene: its file and name, the editor's revision, and never dirty, because it is
-		// never saved.
+		// The play scene, a copy of an edit scene: that scene's file and revision (the open scene it was played from, M20
+		// decision 16, else the addressed one, as before M20), its own name, and never dirty, because it is never saved.
 		SceneSummary summary;
-		summary.Path = m_Editor->GetScenePath().has_value() ? Utils::ToProjectRelative(*m_Editor->GetScenePath()) : std::string();
+		// NotFound for NoOpenScene, a session that belongs to no open scene.
+		const Result<OpenSceneInfo> source = m_Editor->DescribeOpenScene(m_Editor->GetPlay().GetPlayedScene());
+		if (source.has_value())
+		{
+			summary.Path = source->Path.has_value() ? Utils::ToProjectRelative(*source->Path) : std::string();
+			summary.Revision = ToAutomationCounter(source->Revision);
+		}
+		else
+		{
+			summary.Path = m_Editor->GetScenePath().has_value() ? Utils::ToProjectRelative(*m_Editor->GetScenePath()) : std::string();
+			summary.Revision = ToAutomationCounter(m_Editor->GetRevision());
+		}
 		summary.Name = scene.GetName();
-		summary.Revision = ToAutomationCounter(m_Editor->GetRevision());
 		summary.Dirty = false;
 		summary.EntityCount = ToAutomationCounter(scene.GetEntityCount());
 		return summary;

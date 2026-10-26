@@ -2,15 +2,21 @@
 
 #include "EditorCore/Automation/SceneMethods.h"
 
+#include "EditorCore/Automation/AutomationServer.h"
 #include "EditorCore/Automation/ProvenanceRecorder.h"
+#include "EditorCore/EditorContext.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Scene/Entity.h"
+#include "Engine/Scene/Scene.h"
 #include "Support/AutomationTestClient.h"
 #include "Support/ExpectLog.h"
 #include "Support/TestData.h"
 
+#include <filesystem>
 #include <map>
 #include <string>
+#include <string_view>
 
 namespace Engine {
 
@@ -165,7 +171,7 @@ namespace Engine {
 		// Docs/Decisions/0031-m20-contract.md decision 14 (E-SCENES): keepOpen opens a scene as an additional open scene and
 		// makes it active, so a dirty scene needs neither save nor discardChanges; a path that is already open, active or
 		// not, needs reload, which re-reads that scene in its tab position and makes it active.
-		TEST_CASE("SceneMethods: scene.open and scene.new with keepOpen add an open scene and make it active" * doctest::skip(true))
+		TEST_CASE("SceneMethods: scene.open and scene.new with keepOpen add an open scene and make it active")
 		{
 			Test::AutomationFixture setup("SceneKeepOpen");
 			REQUIRE(setup.Call("entity.create", Json{ { "name", "InMain" } }).has_value());
@@ -217,11 +223,25 @@ namespace Engine {
 			REQUIRE((*replaced)["scenes"].size() == 2);
 			CHECK((*replaced)["scenes"][0]["scene"]["path"] == Json("Assets/Scenes/Third.scene"));
 			CHECK((*replaced)["scenes"][1]["scene"]["path"] == Json("Assets/Scenes/Other.scene"));
+
+			// With keepOpen, scene.open opens a file no tab holds at the end of the tab order as the active scene, and every
+			// open scene keeps its changes.
+			const Result<Json> opened = setup.Call("scene.open", Json{ { "path", "Assets/Scenes/Main.scene" }, { "keepOpen", true } });
+			REQUIRE_MESSAGE(opened.has_value(), opened.error().ToString());
+			CHECK((*opened)["scene"]["path"] == Json("Assets/Scenes/Main.scene"));
+			CHECK(setup.GetEditor().GetScene().GetName() == "Main");
+			const Result<Json> appended = setup.Call("scene.list", Json::object());
+			REQUIRE(appended.has_value());
+			REQUIRE((*appended)["scenes"].size() == 3);
+			CHECK((*appended)["scenes"][1]["scene"]["dirty"] == Json(true));
+			CHECK((*appended)["scenes"][2]["scene"]["path"] == Json("Assets/Scenes/Main.scene"));
+			CHECK((*appended)["scenes"][2]["active"] == Json(true));
+			CHECK((*appended)["scenes"][2]["id"] == (*opened)["id"]);
 		}
 
 		// Decision 14: scene.activate switches the active scene by path or id, and scene.close closes the addressed scene with
 		// scene.open's save-or-discard rule, activating its neighbour. Unknown and malformed targets are refused at /scene.
-		TEST_CASE("SceneMethods: scene.activate and scene.close manage the open scenes" * doctest::skip(true))
+		TEST_CASE("SceneMethods: scene.activate and scene.close manage the open scenes")
 		{
 			Test::AutomationFixture setup("SceneActivateClose");
 			const Result<Json> second = setup.Call("scene.new", Json{ { "path", "Assets/Scenes/Second.scene" }, { "keepOpen", true } });
@@ -262,6 +282,147 @@ namespace Engine {
 			const Result<Json> empty = setup.Call("scene.list", Json::object());
 			REQUIRE(empty.has_value());
 			CHECK((*empty)["scenes"].empty());
+		}
+
+		// Decision 14: what the open-scene methods refuse before they change anything: keepOpen with save, discardChanges or
+		// reload (keepOpen keeps every scene open, reload reads one again in its own tab), scene.close with both flags, and a
+		// scene target that is malformed or names no open scene.
+		TEST_CASE("SceneMethods: the open-scene methods refuse contradictory flags and targets that name no open scene")
+		{
+			Test::AutomationFixture setup("SceneOpenRefusals");
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Unsaved" } }).has_value());
+			for (const std::string_view flag : { "save", "discardChanges" })
+			{
+				INFO(std::string(flag));
+				Json added{ { "path", "Assets/Scenes/Third.scene" }, { "keepOpen", true } };
+				added[std::string(flag)] = true;
+				CHECK(setup.Call("scene.new", added).error().GetCode() == ErrorCode::InvalidArgument);
+				added["path"] = "Assets/Scenes/Other.scene";
+				CHECK(setup.Call("scene.open", added).error().GetCode() == ErrorCode::InvalidArgument);
+			}
+			CHECK_FALSE(FileSystem::Exists(setup.GetEditorFixture().GetProjectRoot() / "Assets/Scenes/Third.scene"));
+			const Result<Json> reloadKeepOpen = setup.Call("scene.open", Json{ { "path", "Assets/Scenes/Main.scene" }, { "keepOpen", true }, { "reload", true } });
+			REQUIRE_FALSE(reloadKeepOpen.has_value());
+			CHECK(reloadKeepOpen.error().GetCode() == ErrorCode::InvalidArgument);
+			CHECK(setup.Call("scene.close", Json{ { "save", true }, { "discardChanges", true } }).error().GetCode() == ErrorCode::InvalidArgument);
+
+			const Result<Json> untargeted = setup.Call("scene.activate", Json::object());
+			REQUIRE_FALSE(untargeted.has_value());
+			CHECK(untargeted.error().GetCode() == ErrorCode::InvalidArgument);
+			REQUIRE_FALSE(untargeted.error().GetIssues().empty());
+			CHECK(untargeted.error().GetIssues().front().JsonPointer == "/scene");
+			for (const Json& malformed : { Json("../Escape.scene"), Json("Assets/Scenes/Main.txt"), Json(0), Json(true) })
+			{
+				CAPTURE(malformed.dump());
+				CHECK(setup.Call("scene.activate", Json{ { "scene", malformed } }).error().GetCode() == ErrorCode::InvalidArgument);
+			}
+			for (const Json& missing : { Json("Assets/Scenes/Missing.scene"), Json(4000) })
+			{
+				CAPTURE(missing.dump());
+				const Result<Json> notFound = setup.Call("scene.activate", Json{ { "scene", missing } });
+				REQUIRE_FALSE(notFound.has_value());
+				CHECK(notFound.error().GetCode() == ErrorCode::NotFound);
+				REQUIRE_FALSE(notFound.error().GetIssues().empty());
+				CHECK(notFound.error().GetIssues().front().JsonPointer == "/scene");
+				CHECK(setup.Call("scene.close", Json{ { "scene", missing }, { "discardChanges", true } }).error().GetCode() == ErrorCode::NotFound);
+				CHECK(setup.Call("scene.tree", Json{ { "scene", missing } }).error().GetCode() == ErrorCode::NotFound);
+			}
+			// Nothing changed: the active scene keeps its unsaved entity.
+			CHECK(setup.GetEditor().GetScene().GetName() == "Main");
+			CHECK(setup.GetEditor().IsSceneDirty());
+			CHECK(setup.GetEditor().GetScene().FindEntityByPath("/Unsaved").IsValid());
+		}
+
+		// Decision 14: no two open scenes share a path, and a scene never saved has no file for save to write. scene.save
+		// {path} and scene.new refuse the path of another open scene (scene.new also when that scene's file is gone), and
+		// scene.close {save} refuses a dirty scene that was never saved; none of them changes a file or the open scenes.
+		TEST_CASE("SceneMethods: scene.save and scene.new refuse the path of another open scene and scene.close save refuses a scene never saved")
+		{
+			Test::AutomationFixture setup("ScenePathRefusals");
+			EditorContext& editor = setup.GetEditor();
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "InMain" } }).has_value());
+			REQUIRE(setup.Call("scene.new", Json{ { "path", "Assets/Scenes/Second.scene" }, { "keepOpen", true } }).has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "InSecond" } }).has_value());
+			const std::filesystem::path root = setup.GetEditorFixture().GetProjectRoot();
+			const auto read = [&root](std::string_view file)
+			{
+				return FileSystem::ReadText(root / file).value_or(std::string());
+			};
+			// The open scenes as scene.list reports them, in tab order: id, path, active, dirty and entity count.
+			const auto listed = [&setup]()
+			{
+				const Result<Json> list = setup.Call("scene.list", Json::object());
+				REQUIRE(list.has_value());
+				Json scenes = Json::array();
+				for (const Json& entry : (*list)["scenes"])
+				{
+					scenes.push_back(Json::array({ entry["id"], entry["scene"]["path"], entry["active"], entry["scene"]["dirty"], entry["scene"]["entityCount"] }));
+				}
+				return scenes;
+			};
+			const std::string mainFile = read("Assets/Scenes/Main.scene");
+			const std::string secondFile = read("Assets/Scenes/Second.scene");
+			REQUIRE_FALSE(mainFile.empty());
+			const Json before = listed();
+			REQUIRE(before.size() == 2);
+
+			// Second, the active scene, saved to Main's path.
+			const Result<Json> savedAs = setup.Call("scene.save", Json{ { "path", "Assets/Scenes/Main.scene" } });
+			REQUIRE_FALSE(savedAs.has_value());
+			CHECK(savedAs.error().GetCode() == ErrorCode::InvalidState);
+			CHECK(read("Assets/Scenes/Main.scene") == mainFile);
+			CHECK(read("Assets/Scenes/Second.scene") == secondFile);
+			CHECK(listed() == before);
+
+			// Main's file is deleted while Main stays open with its path: a new scene there, replacing Second, is refused.
+			REQUIRE(FileSystem::Remove(root / "Assets/Scenes/Main.scene").has_value());
+			const Result<Json> created = setup.Call("scene.new", Json{ { "path", "Assets/Scenes/Main.scene" }, { "discardChanges", true } });
+			REQUIRE_FALSE(created.has_value());
+			CHECK(created.error().GetCode() == ErrorCode::InvalidState);
+			CHECK_FALSE(FileSystem::Exists(root / "Assets/Scenes/Main.scene"));
+			CHECK(read("Assets/Scenes/Second.scene") == secondFile);
+			CHECK(listed() == before);
+
+			// A dirty scene never saved.
+			const Result<OpenSceneId> untitled = editor.AddScene(editor.CreateScene("Untitled"), std::nullopt);
+			REQUIRE(untitled.has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Unsaved" } }).has_value());
+			const Json withUntitled = listed();
+			const Result<Json> closed = setup.Call("scene.close", Json{ { "save", true } });
+			REQUIRE_FALSE(closed.has_value());
+			CHECK(closed.error().GetCode() == ErrorCode::InvalidState);
+			CHECK(listed() == withUntitled);
+			CHECK(editor.GetActiveSceneId() == *untitled);
+			CHECK(editor.GetScene().FindEntityByPath("/Unsaved").IsValid());
+			CHECK(read("Assets/Scenes/Second.scene") == secondFile);
+		}
+
+		// Decision 14: without an open scene, scene.list lists none and scene.close has nothing to close.
+		TEST_CASE("SceneMethods: without an open scene scene.list is empty and scene.close is refused")
+		{
+			Test::AutomationFixture setup("SceneNoneOpen", false);
+			const Result<Json> listed = setup.Call("scene.list", Json::object());
+			REQUIRE_MESSAGE(listed.has_value(), listed.error().ToString());
+			CHECK((*listed)["scenes"].empty());
+			CHECK(setup.Call("scene.close", Json::object()).error().GetCode() == ErrorCode::InvalidState);
+			CHECK(setup.Call("scene.activate", Json{ { "scene", "Assets/Scenes/Main.scene" } }).error().GetCode() == ErrorCode::NotFound);
+		}
+
+		// Decision 14's deny-mutations rule: scene.close {discardChanges} of a dirty scene drops changes no write boundary sees,
+		// so the policy refuses it, and the scene keeps them.
+		TEST_CASE("SceneMethods: deny-mutations refuses scene.close discarding the active scene's unsaved changes")
+		{
+			Test::AutomationFixture setup("SceneCloseDenied");
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "HumanEdit" } }).has_value());
+			const uint64_t revision = setup.GetEditor().GetRevision();
+			setup.GetClient().GetServer().SetEditorPolicy({ .DenyMutations = true });
+			const Result<Json> denied = setup.Call("scene.close", Json{ { "discardChanges", true } });
+			REQUIRE_FALSE(denied.has_value());
+			CHECK(denied.error().GetCode() == ErrorCode::PermissionDenied);
+			CHECK(setup.GetEditor().HasScene());
+			CHECK(setup.GetEditor().IsSceneDirty());
+			CHECK(setup.GetEditor().GetRevision() == revision);
+			CHECK(setup.GetEditor().GetScene().FindEntityByPath("/HumanEdit").IsValid());
 		}
 	}
 

@@ -701,6 +701,22 @@ namespace Engine {
 			CHECK(RuntimeServerFixture::GetErrorCode(bounds) == static_cast<int64_t>(RpcErrorCode::Unsupported));
 		}
 
+		// M20 (Docs/Decisions/0031-m20-contract.md decision 16): the Runtime has no open scenes, so a scene target, a path or an
+		// id alike, is refused as target "edit" is, and nothing runs.
+		TEST_CASE("RuntimeAutomationServer: a scene target is refused with InvalidState at /scene")
+		{
+			RuntimeServerFixture fixture;
+			for (const Json& scene : { Json("Assets/Scenes/Main.scene"), Json(1) })
+			{
+				CAPTURE(scene.dump());
+				const Json tree = fixture.Call("scene.tree", Json{ { "format", "Json" }, { "scene", scene } });
+				CHECK(RuntimeServerFixture::GetErrorCode(tree) == static_cast<int64_t>(RpcErrorCode::InvalidState));
+				CHECK(tree["error"]["data"]["issues"][0]["pointer"] == Json("/scene"));
+			}
+			const Json untargeted = fixture.Call("scene.tree", Json{ { "format", "Json" } });
+			CHECK(RuntimeServerFixture::GetErrorCode(untargeted) == 0);
+		}
+
 		TEST_CASE("RuntimeAutomationServer: physics.bodyInfo answers for an entity of the Runtime's session")
 		{
 			// The ball has no collider, so no body (§13.5: physics.bodyInfo is in the Runtime subset).

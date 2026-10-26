@@ -2036,9 +2036,17 @@ All modes; Runtime|Test; pure/read.
 
 ### Entity.GetScript
 
-`(self: Entity) -> any`
+`(self: Entity, name: string?) -> any`
 
-Get the existing behaviour instance or nil; cast to the module's exported instance type.
+Get the instance of the first script slot whose behaviour has this name, or of the first slot without a name; nil when there is none.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.GetScripts
+
+`(self: Entity) -> {any}`
+
+Get the live instances of the entity's script slots, in slot order.
 
 All modes; Runtime|Test; pure/read.
 
@@ -2920,29 +2928,13 @@ All modes; Runtime|Test; mutates.
 
 ## Script (component)
 
-Attaches a Behaviour script to the entity (one per entity).
+Attaches Behaviour scripts to the entity, an ordered list of slots.
 
-### Script.ExecutionOrder
+### Script.Scripts
 
-`number`
+`{{Script: AssetRef?, Fields: {[string]: any}, ExecutionOrder: number}}`
 
-The script's place in callback order: lower values run first, ties in canonical entity order.
-
-All modes; Runtime|Test; pure/read; setter mutates.
-
-### Script.Fields
-
-`{[string]: any}`
-
-Overrides of the script's declared fields by name, each checked against the field's declared type; an unknown or mismatching override is kept and reported, and the field uses its declared default. A value a script writes holds at most 4096 bytes of text.
-
-All modes; Runtime|Test; pure/read; setter mutates.
-
-### Script.Script
-
-`AssetRef?`
-
-The Behaviour script to run.
+The behaviours of the entity, in slot order; each slot is its own instance. A value a script writes holds at most 4096 bytes of text.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -3467,6 +3459,10 @@ The kind of an engine event (§4.9).
 - `DiagnosticsChanged`: The project's diagnostics changed.
 
 - `AutomationClientDisconnected`: An automation client disconnected.
+
+- `SceneActivated`: The editor's active scene changed.
+
+- `SceneClosed`: The editor closed an open scene.
 
 ## ExportConfiguration
 
@@ -4182,9 +4178,9 @@ The curve that maps HDR scene colours to the display.
 
 What project.validate checks.
 
-- `Project`: The settings and every scene file under Assets/ (the open scene as it is in memory).
+- `Project`: The settings and every scene file under Assets/ (each open scene as it is in memory).
 
-- `Scene`: The open scene only.
+- `Scene`: The scene the request addresses only (the active scene without a scene target).
 
 ## ViewportView
 

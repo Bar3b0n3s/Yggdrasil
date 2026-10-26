@@ -91,8 +91,8 @@ namespace Engine {
 	// Registry enum "ValidationScope" (project.validate {scope}).
 	enum class ValidationScope : uint8_t
 	{
-		Project, // the settings, every scene file under Assets/ (the open scene's in-memory state instead of its file)
-		Scene    // the open scene only
+		Project, // the settings, every scene file under Assets/ (each open scene's in-memory state instead of its file)
+		Scene    // the addressed open scene only (EditorContext.h)
 	};
 
 	// Registry struct "ProjectDiagnostic" (§13.7: {id, severity, code, message, entity?, component?, field?, asset?, file?,
@@ -144,9 +144,10 @@ namespace Engine {
 	public:
 		ProjectValidator() = delete;
 
-		// Validates `scope`. Scene files are loaded in Repair mode into scratch scenes (the open scene's file is replaced by
-		// its in-memory state), their load diagnostics and repairs mapped through MapLoadCode, and the scene checks run on
-		// each. A scene file that cannot be loaded at all (Parse, UnsupportedVersion, an unrepairable structural defect) is
+		// Validates `scope`. Scene files are loaded in Repair mode into scratch scenes (the file of every open scene is
+		// replaced by its in-memory state; only the addressed scene's diagnostics are auto-fixable, since the fixes edit it
+		// alone: Docs/Decisions/0031-m20-contract.md decision 16), their load diagnostics and repairs mapped through
+		// MapLoadCode, and the scene checks run on each. A scene file that cannot be loaded at all (Parse, UnsupportedVersion, an unrepairable structural defect) is
 		// an Error under AssetImportFailedCode with the load error as message. Errors: InvalidState without an open project,
 		// or for ValidationScope::Scene without an open scene; InvalidArgument when nonfinite CPU asset or environment
 		// data prevents render illumination classification. Render lighting and spot-shadow warnings never have fixes.
@@ -180,12 +181,13 @@ namespace Engine {
 		// not report (unknown keys and components, which stay load warnings).
 		[[nodiscard]] static std::string_view MapLoadCode(std::string_view loadCode);
 
-		// The validator code ADR 0006 decision 35 gives a load diagnostic of a Script component's Fields value (located below
-		// "/Components/Script/Fields/" of an entity): SCRIPT_UNKNOWN_FIELD_OVERRIDE for REFLECTION_VARIANT_UNRESOLVED (no
-		// declared field checks the value), SCRIPT_FIELD_TYPE_MISMATCH for REFLECTION_VARIANT_MISMATCH; empty for any other.
-		// Validate reports these problems from the Script components of each scene, a prefab instance's members included, and
-		// of each prefab file (with the project scope; found through FindScriptFieldProblems) under the same codes (file,
-		// entity, component "Script", field "Fields.<name>"); the exporter and the strict open name the same code for the same
+		// The validator code ADR 0006 decision 35 gives a load diagnostic of a Script slot's Fields value (located below
+		// "/Components/Script/Scripts/<slot>/Fields/" of an entity): SCRIPT_UNKNOWN_FIELD_OVERRIDE for
+		// REFLECTION_VARIANT_UNRESOLVED (no declared field checks the value), SCRIPT_FIELD_TYPE_MISMATCH for
+		// REFLECTION_VARIANT_MISMATCH; empty for any other. Validate reports these problems from every slot of the Script
+		// components of each scene, a prefab instance's members included, and of each prefab file (with the project scope;
+		// found through FindScriptFieldProblems) under the same codes (file, entity, component "Script", field
+		// "Scripts[<slot>].Fields.<name>"); the exporter and the strict open name the same code for the same
 		// entity and field, by JSON pointer, so the three agree (ADR 0026). The mapping reads only the code and the pointer:
 		// which values validate checks at all is FindScriptFieldProblems' filter.
 		[[nodiscard]] static std::string_view MapScriptFieldLoadCode(std::string_view loadCode, std::string_view jsonPointer);

@@ -90,7 +90,7 @@ return Script.Define("Reload", C)
 )")
 					.has_value());
 			const Entity entity = fixture.GetScene().CreateEntity("Reload");
-			entity.AddComponent<ScriptComponent>().Script.SetHandle(handle);
+			entity.AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = TypedAssetHandle<AssetType::Script>(handle), .Fields = {}, .ExecutionOrder = 0 });
 			REQUIRE(fixture.Start().has_value());
 			REQUIRE(EvaluateReload(fixture, "self.Count = 41; self.NilState = nil; self.Saved = self.Value; self.Class = getmetatable(self)", entity.GetUUID()).has_value());
 			REQUIRE(fixture.AddScript(handle, "Assets/Reload.luau", R"(
@@ -134,7 +134,7 @@ return Script.Define("Dependent", C)
 )")
 					.has_value());
 			const Entity entity = fixture.GetScene().CreateEntity("Dependent");
-			entity.AddComponent<ScriptComponent>().Script.SetHandle(behaviour);
+			entity.AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = TypedAssetHandle<AssetType::Script>(behaviour), .Fields = {}, .ExecutionOrder = 0 });
 			REQUIRE(fixture.Start().has_value());
 			REQUIRE(EvaluateReload(fixture, "self.Leaf = require('./Leaf'); self.Middle = require('./Middle'); self.Old = self.Middle.Value", entity.GetUUID()).has_value());
 			REQUIRE(fixture.AddScript(leaf, "Assets/Leaf.luau", "return { Value = function() return 5 end }").has_value());
@@ -166,7 +166,7 @@ return Script.Define("Deferred", C)
 )")
 						.has_value());
 				const Entity entity = fixture.GetScene().CreateEntity("Deferred");
-				entity.AddComponent<ScriptComponent>().Script.SetHandle(handle);
+				entity.AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = TypedAssetHandle<AssetType::Script>(handle), .Fields = {}, .ExecutionOrder = 0 });
 				REQUIRE(fixture.Start().has_value());
 				REQUIRE(fixture.AddScript(handle, "Assets/Deferred.luau", R"(
 local C = {}
@@ -218,7 +218,7 @@ return Script.Define("Atomic", C)
 )");
 			REQUIRE(originalBehaviour.has_value());
 			const Entity entity = fixture.GetScene().CreateEntity("Atomic");
-			entity.AddComponent<ScriptComponent>().Script.SetHandle(behaviour);
+			entity.AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = TypedAssetHandle<AssetType::Script>(behaviour), .Fields = {}, .ExecutionOrder = 0 });
 			REQUIRE(fixture.Start().has_value());
 			REQUIRE(EvaluateReload(fixture, "self.Count = 91; self.Leaf = require('./AtomicLeaf'); self.Old = self.Leaf.Value; self.Class = getmetatable(self)", entity.GetUUID()).has_value());
 			REQUIRE(fixture.AddScript(leaf, "Assets/AtomicLeaf.luau", "return { Value = function() return 9 end }").has_value());
@@ -259,7 +259,7 @@ return Script.Define("Recover", C)
 )")
 					.has_value());
 			const Entity entity = fixture.GetScene().CreateEntity("Recover");
-			entity.AddComponent<ScriptComponent>().Script.SetHandle(handle);
+			entity.AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = TypedAssetHandle<AssetType::Script>(handle), .Fields = {}, .ExecutionOrder = 0 });
 			REQUIRE(fixture.Start().has_value());
 			Test::ExpectLog expectedFailure(LogLevel::Error, "disabled before reload");
 			fixture.GetEngine()->FixedUpdate();
@@ -303,7 +303,7 @@ return Script.Define("Isolated", C)
 )");
 			REQUIRE_MESSAGE(original.has_value(), (original ? "" : original.error().ToString()));
 			const Entity entity = fixture.GetScene().CreateEntity("Isolated");
-			entity.AddComponent<ScriptComponent>().Script.SetHandle(behaviour);
+			entity.AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = TypedAssetHandle<AssetType::Script>(behaviour), .Fields = {}, .ExecutionOrder = 0 });
 			REQUIRE(fixture.Start().has_value());
 			REQUIRE(EvaluateReload(fixture, R"(
 local D = require("./Stateful")
@@ -495,7 +495,7 @@ return Script.Define("MemoryReload", C)
 )");
 			REQUIRE_MESSAGE(original.has_value(), (original ? "" : original.error().ToString()));
 			const Entity entity = fixture.GetScene().CreateEntity("MemoryReload");
-			entity.AddComponent<ScriptComponent>().Script.SetHandle(handle);
+			entity.AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = TypedAssetHandle<AssetType::Script>(handle), .Fields = {}, .ExecutionOrder = 0 });
 			REQUIRE(fixture.Start().has_value());
 			REQUIRE(EvaluateReload(fixture, "self.Count = 99; self.Class = getmetatable(self)", entity.GetUUID()).has_value());
 			REQUIRE(PublishReloadBody(fixture, handle, **original, R"(
@@ -545,7 +545,7 @@ return Script.Define("Board", Board)
 			// Import succeeded, but the module top faults in the live VM: the instance never gets a table.
 			REQUIRE(PublishReloadBody(fixture, handle, **declaration, "error('runtime top fault')").has_value());
 			const Entity entity = fixture.GetScene().CreateEntity("Board");
-			entity.AddComponent<ScriptComponent>().Script.SetHandle(handle);
+			entity.AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = TypedAssetHandle<AssetType::Script>(handle), .Fields = {}, .ExecutionOrder = 0 });
 			{
 				Test::ExpectLog expectedFailure(LogLevel::Error, "runtime top fault");
 				REQUIRE(fixture.Start().has_value());
@@ -594,7 +594,7 @@ return Test.Suite("Chain", function() Test.Case("value", function() Test.Expect(
 					.has_value());
 			REQUIRE(fixture.AddScript(unrelated, "Assets/Unrelated.luau", "return {}").has_value());
 			const Entity entity = fixture.GetScene().CreateEntity("Chain");
-			entity.AddComponent<ScriptComponent>().Script.SetHandle(behaviour);
+			entity.AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = TypedAssetHandle<AssetType::Script>(behaviour), .Fields = {}, .ExecutionOrder = 0 });
 			REQUIRE(fixture.Start().has_value());
 			const auto chain = fixture.GetEngine()->GetReloadChain(leaf);
 			REQUIRE_MESSAGE(chain.has_value(), (chain ? "" : chain.error().ToString()));

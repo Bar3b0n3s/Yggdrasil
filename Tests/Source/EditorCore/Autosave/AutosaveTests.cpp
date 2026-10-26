@@ -17,6 +17,7 @@
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Support/EditorTestFixture.h"
+#include "Support/ExpectLog.h"
 #include "Support/Fuzz.h"
 
 #include <nlohmann/json.hpp>
@@ -28,6 +29,7 @@
 #include <limits>
 #include <map>
 #include <semaphore>
+#include <span>
 #include <string>
 #include <thread>
 #include <vector>
@@ -1048,7 +1050,7 @@ namespace Engine {
 		// Docs/Decisions/0031-m20-contract.md decision 15 (E-SCENES; Roadmap M20 acceptance "autosave is isolated per open
 		// scene"): a save writes one generation per dirty open scene, in tab order; each scene is offered and recovered on its
 		// own; an explicit save of one discards only that scene's generations.
-		TEST_CASE("Autosave: each dirty open scene is written and recovered on its own" * doctest::skip(true))
+		TEST_CASE("Autosave: each dirty open scene is written and recovered on its own")
 		{
 			AutosaveSetup setup;
 			EditorContext& editor = setup.Fixture.GetEditor();
@@ -1098,7 +1100,7 @@ namespace Engine {
 
 		// Decision 15 (Roadmap M20 acceptance "an injected device loss with two open scenes autosaves both"): the fatal path
 		// writes every published dirty open scene from its own fixed slot.
-		TEST_CASE("Autosave: a fatal snapshot writes every dirty open scene" * doctest::skip(true))
+		TEST_CASE("Autosave: a fatal snapshot writes every dirty open scene")
 		{
 			AutosaveSetup setup;
 			EditorContext& editor = setup.Fixture.GetEditor();
@@ -1125,6 +1127,204 @@ namespace Engine {
 			// The manifest was published once, after both generations.
 			const Json manifest = AutosaveReadJson(setup.Root() / "Manifest.json");
 			CHECK(manifest["Generations"].size() == 2);
+		}
+
+		// Decision 15 (isolation): a scene that cannot be autosaved (its source changed under its edits) reports its conflict,
+		// and the other open scenes are written all the same.
+		TEST_CASE("Autosave: a scene whose source conflicts does not keep the other open scenes from being written")
+		{
+			AutosaveSetup setup;
+			EditorContext& editor = setup.Fixture.GetEditor();
+			setup.Dirty("InMain");
+			const Result<VfsPath> secondPath = VfsPath::Parse("project://Assets/Scenes/Second.scene");
+			REQUIRE(secondPath.has_value());
+			REQUIRE(editor.AddScene(editor.CreateScene("Second"), *secondPath).has_value());
+			setup.Dirty("InSecond");
+			REQUIRE(setup.Service.Publish().has_value());
+			AutosaveWrite(setup.Source(), AutosaveRead(setup.Source()) + "\n");
+
+			const auto saved = setup.Service.Save(AutosaveReason::Periodic);
+			REQUIRE_FALSE(saved.has_value());
+			CHECK(saved.error().GetCode() == ErrorCode::Conflict);
+			const auto offers = setup.Service.FindRecoveries();
+			REQUIRE_MESSAGE(offers.has_value(), offers.error().ToString());
+			REQUIRE(offers->size() == 1);
+			CHECK((*offers)[0].ScenePath == "Assets/Scenes/Second.scene");
+			CHECK(AutosaveRead(setup.Root() / (*offers)[0].Generation / "Scene.json").contains("InSecond"));
+		}
+
+		// Decision 15: retention keeps RetainedGenerations of each scene, so another scene's writes never retire one.
+		TEST_CASE("Autosave: retention keeps the newest generations of each scene")
+		{
+			AutosaveSetup setup({ .RetainedGenerations = 1 });
+			EditorContext& editor = setup.Fixture.GetEditor();
+			setup.Dirty("MainFirst");
+			const auto first = setup.Save();
+			setup.Dirty("MainSecond");
+			const auto second = setup.Save();
+			CHECK_FALSE(FileSystem::Exists(setup.Root() / first.Generation));
+			const Result<VfsPath> secondPath = VfsPath::Parse("project://Assets/Scenes/Second.scene");
+			REQUIRE(secondPath.has_value());
+			REQUIRE(editor.AddScene(editor.CreateScene("Second"), *secondPath).has_value());
+			setup.Dirty("InSecond");
+			const auto both = setup.Save();
+			CHECK(both.Files == std::vector<std::string>{ "Assets/Scenes/Main.scene", "Assets/Scenes/Second.scene" });
+			CHECK_FALSE(FileSystem::Exists(setup.Root() / second.Generation));
+			const Json manifest = AutosaveReadJson(setup.Root() / "Manifest.json");
+			CHECK(manifest["Generations"].size() == 2);
+			const auto offers = setup.Service.FindRecoveries();
+			REQUIRE(offers.has_value());
+			REQUIRE(offers->size() == 2);
+			CHECK(AutosaveRead(setup.Root() / (*offers)[0].Generation / "Scene.json").contains("MainSecond"));
+			CHECK(AutosaveRead(setup.Root() / (*offers)[1].Generation / "Scene.json").contains("InSecond"));
+		}
+
+		// Decision 15: a recovery of a scene that is not open opens it as an additional open scene, the active one.
+		TEST_CASE("Autosave: recovering a scene that is not open adds it as the active open scene")
+		{
+			AutosaveSetup setup;
+			EditorContext& editor = setup.Fixture.GetEditor();
+			setup.Dirty("RecoverMain");
+			setup.Save();
+			const auto offer = setup.Offer();
+			setup.Fixture.CreateAndOpenScene("Assets/Scenes/Other.scene");
+			const OpenSceneId other = editor.GetActiveSceneId();
+			REQUIRE(setup.Service.Recover(offer).has_value());
+			REQUIRE(editor.GetOpenScenes().size() == 2);
+			CHECK(editor.GetOpenScenes().front() == other);
+			CHECK(editor.GetActiveSceneId() == editor.GetOpenScenes().back());
+			CHECK(editor.GetScene().GetName() == "Main");
+			CHECK(editor.IsSceneDirty());
+			CHECK(editor.GetScene().FindEntityByPath("/RecoverMain").IsValid());
+			CHECK_FALSE(editor.DescribeOpenScene(other)->Dirty);
+		}
+
+		// Decision 15: launcher recovery of several scenes preflights every offer, then opens them all dirty with empty
+		// histories, the first active; an empty list and two offers of one scene are refused before anything opens.
+		TEST_CASE("Autosave: launcher recovery opens every offered scene with the first active")
+		{
+			AutosaveSetup setup;
+			EditorContext& editor = setup.Fixture.GetEditor();
+			setup.Dirty("RecoverMain");
+			const Result<VfsPath> secondPath = VfsPath::Parse("project://Assets/Scenes/Second.scene");
+			REQUIRE(secondPath.has_value());
+			REQUIRE(editor.AddScene(editor.CreateScene("Second"), *secondPath).has_value());
+			setup.Dirty("RecoverSecond");
+			setup.Save();
+			const auto offers = setup.Service.FindRecoveries();
+			REQUIRE(offers.has_value());
+			REQUIRE(offers->size() == 2);
+			const auto projectFile = editor.GetProject().GetProjectFile();
+			REQUIRE(setup.Service.Reset());
+			REQUIRE(editor.CloseProject().has_value());
+			const auto open = [&editor, &projectFile]()
+			{
+				auto project = ProjectManager::OpenProject(projectFile, {}, editor.GetTypeRegistry());
+				REQUIRE_MESSAGE(project.has_value(), project.error().ToString());
+				return std::move(*project);
+			};
+
+			CHECK(setup.Service.OpenRecoveredProject(open(), std::span<const AutosaveRecoveryInfo>()).error().GetCode() == ErrorCode::InvalidArgument);
+			const std::vector<AutosaveRecoveryInfo> repeated{ (*offers)[0], (*offers)[0] };
+			CHECK(setup.Service.OpenRecoveredProject(open(), repeated).error().GetCode() == ErrorCode::InvalidArgument);
+			CHECK_FALSE(editor.HasProject());
+
+			REQUIRE(setup.Service.OpenRecoveredProject(open(), *offers).has_value());
+			const std::vector<OpenSceneId> scenes = editor.GetOpenScenes();
+			REQUIRE(scenes.size() == 2);
+			CHECK(editor.GetActiveSceneId() == scenes[0]);
+			CHECK(editor.GetScene().GetName() == "Main");
+			CHECK(editor.GetScene().FindEntityByPath("/RecoverMain").IsValid());
+			CHECK(editor.IsSceneDirty());
+			CHECK_FALSE(editor.GetHistory().CanUndo());
+			const Result<OpenSceneInfo> second = editor.DescribeOpenScene(scenes[1]);
+			REQUIRE(second.has_value());
+			CHECK(second->Dirty);
+			CHECK(second->Path == *secondPath);
+			REQUIRE(editor.FindScene(scenes[1]) != nullptr);
+			CHECK(editor.FindScene(scenes[1])->FindEntityByPath("/RecoverSecond").IsValid());
+		}
+
+		// Decision 15: FindRecoveries reads each scene's generations newest first until that scene has its offer; an older
+		// generation of a scene with an offer is read for its metadata only, and one whose metadata cannot be read fails the
+		// inspection, as an unreadable generation fails FindRecovery.
+		TEST_CASE("Autosave: FindRecoveries reads an older generation of an offered scene for its metadata only")
+		{
+			AutosaveSetup setup;
+			setup.Dirty("Older");
+			const auto older = setup.Save();
+			setup.Dirty("Newer");
+			const auto newer = setup.Save();
+			AutosaveWrite(setup.Root() / older.Generation / "Scene.json", "{}");
+			const auto offers = setup.Service.FindRecoveries();
+			REQUIRE_MESSAGE(offers.has_value(), offers.error().ToString());
+			REQUIRE(offers->size() == 1);
+			CHECK((*offers)[0].Generation == newer.Generation);
+			AutosaveWrite(setup.Root() / older.Generation / "Metadata.json", "{");
+			const auto broken = setup.Service.FindRecoveries();
+			REQUIRE_FALSE(broken.has_value());
+			CHECK(broken.error().GetCode() == ErrorCode::Parse);
+		}
+
+		// Decision 15: a scene whose newest generation went stale (its tab closed with its changes discarded, then the project
+		// or its file changed) has no offer, and the other scenes are still offered and recovered; the conflict is the
+		// answer only when no scene has an offer, as it is FindRecovery's.
+		TEST_CASE("Autosave: a stale generation of one scene leaves the other scenes recoverable")
+		{
+			AutosaveSetup setup;
+			EditorContext& editor = setup.Fixture.GetEditor();
+			const Result<VfsPath> secondPath = VfsPath::Parse("project://Assets/Scenes/Second.scene");
+			REQUIRE(secondPath.has_value());
+			const Result<OpenSceneId> second = editor.AddScene(editor.CreateScene("Second"), *secondPath);
+			REQUIRE_MESSAGE(second.has_value(), second.error().ToString());
+			setup.Dirty("InSecond");
+			REQUIRE(setup.Service.Publish().has_value());
+			const AutosaveWriteResult stale = setup.Save();
+			REQUIRE(editor.CloseScene(*second).has_value());
+			REQUIRE(setup.Service.Publish().has_value());
+			SUBCASE("a settings write after its generation")
+			{
+				auto command = ProjectSettingsCommand::CreateFromPatch(editor, Json{ { "Window", { { "Title", "Changed" } } } }, "Title");
+				REQUIRE(command.has_value());
+				REQUIRE(editor.Execute(std::move(*command)).has_value());
+				REQUIRE(setup.Service.Publish().has_value());
+			}
+			SUBCASE("a changed source")
+			{
+				AutosaveWrite(setup.Fixture.GetProjectRoot() / "Assets/Scenes/Second.scene", "{}");
+			}
+			{
+				Test::ExpectLog warned(LogLevel::Warn, "Assets/Scenes/Second.scene");
+				const auto alone = setup.Service.FindRecoveries();
+				REQUIRE_FALSE(alone.has_value());
+				CHECK(alone.error().GetCode() == ErrorCode::Conflict);
+				CHECK(warned.GetMatchCount() == 1);
+			}
+
+			setup.Dirty("InMain");
+			REQUIRE(setup.Service.Publish().has_value());
+			const AutosaveWriteResult valid = setup.Save();
+			CHECK(valid.Files == std::vector<std::string>{ "Assets/Scenes/Main.scene" });
+			Test::ExpectLog warned(LogLevel::Warn, "Assets/Scenes/Second.scene");
+			const auto offers = setup.Service.FindRecoveries();
+			REQUIRE_MESSAGE(offers.has_value(), offers.error().ToString());
+			REQUIRE(offers->size() == 1);
+			CHECK((*offers)[0].ScenePath == "Assets/Scenes/Main.scene");
+			CHECK((*offers)[0].Generation == valid.Generation);
+			CHECK(warned.GetMatchCount() == 1);
+			CHECK(FileSystem::Exists(setup.Root() / stale.Generation));
+
+			const auto projectFile = editor.GetProject().GetProjectFile();
+			REQUIRE(setup.Service.Reset());
+			REQUIRE(editor.CloseProject().has_value());
+			auto project = ProjectManager::OpenProject(projectFile, {}, editor.GetTypeRegistry());
+			REQUIRE_MESSAGE(project.has_value(), project.error().ToString());
+			const Status opened = setup.Service.OpenRecoveredProject(std::move(*project), *offers);
+			REQUIRE_MESSAGE(opened.has_value(), opened.error().ToString());
+			REQUIRE(editor.GetOpenScenes().size() == 1);
+			CHECK(editor.GetScene().GetName() == "Main");
+			CHECK(editor.GetScene().FindEntityByPath("/InMain").IsValid());
+			CHECK(editor.IsSceneDirty());
 		}
 	}
 

@@ -75,6 +75,22 @@ namespace Engine {
 			CHECK_FALSE(tracker.Update(&fixture.GetScene(), nullptr, events));
 		}
 
+		// M20 (Docs/Decisions/0031-m20-contract.md decision 13): activating or closing an open scene changes the shown scene,
+		// also when the scene shown next happens to sit at the address of the previous one.
+		TEST_CASE("ShownSceneTracker: SceneActivated and SceneClosed events are changes at the same addresses")
+		{
+			Test::SceneTestFixture fixture;
+			EventLog events;
+			ShownSceneTracker tracker;
+			CHECK(tracker.Update(&fixture.GetScene(), nullptr, events));
+			events.Append(MakeEvent(EngineEventType::SceneActivated));
+			CHECK(tracker.Update(&fixture.GetScene(), nullptr, events));
+			CHECK_FALSE(tracker.Update(&fixture.GetScene(), nullptr, events));
+			events.Append(MakeEvent(EngineEventType::SceneClosed));
+			CHECK(tracker.Update(&fixture.GetScene(), nullptr, events));
+			CHECK_FALSE(tracker.Update(&fixture.GetScene(), nullptr, events));
+		}
+
 		TEST_CASE("ShownSceneTracker: events the log dropped before they were read count as a change")
 		{
 			// The log keeps two events: three unrelated ones since the last call overwrite one the tracker never read, which

@@ -49,12 +49,12 @@ namespace Engine {
 		const Entity root = source->CreateEntity("Links");
 		const UUID first = source->CreateEntity("First", root).GetUUID();
 		const UUID second = source->CreateEntity("Second", root).GetUUID();
-		ScriptComponent script;
+		ScriptSlot script;
 		script.Script.SetHandle(written->Script);
 		script.Fields["Target"] = VariantValue(Json(first.ToString()));
 		script.Fields["Targets"] = VariantValue(Json::array({ first.ToString(), second.ToString() }));
 		script.Fields["Amount"] = VariantValue(Json(1.0f));
-		root.AddComponent<ScriptComponent>(script);
+		root.AddComponent<ScriptComponent>(ScriptComponent{ { script } });
 		const auto prefab = Prefab::CreateFromEntity(root, "Links");
 		REQUIRE(prefab.has_value());
 		const auto text = prefab->SaveToString();
@@ -76,7 +76,7 @@ namespace Engine {
 
 	static Json TrackedScriptField(ConstEntity entity, std::string_view name)
 	{
-		const auto& fields = entity.GetComponent<ScriptComponent>().Fields;
+		const auto& fields = entity.GetComponent<ScriptComponent>().Scripts.front().Fields;
 		const auto field = fields.find(std::string(name));
 		REQUIRE(field != fields.end());
 		return field->second.Get();
@@ -132,8 +132,8 @@ namespace Engine {
 				SceneEdit edit(editor, "Change script targets");
 				scene.FindEntityByID(rootID).Patch<ScriptComponent>([firstID, secondID](ScriptComponent& script)
 				{
-					script.Fields["Target"] = VariantValue(Json(secondID.ToString()));
-					script.Fields["Targets"] = VariantValue(Json::array({ secondID.ToString(), firstID.ToString(), secondID.ToString() }));
+					script.Scripts.front().Fields["Target"] = VariantValue(Json(secondID.ToString()));
+					script.Scripts.front().Fields["Targets"] = VariantValue(Json::array({ secondID.ToString(), firstID.ToString(), secondID.ToString() }));
 				});
 				REQUIRE(edit.Commit().has_value());
 			}
@@ -141,7 +141,7 @@ namespace Engine {
 			REQUIRE(overrides.size() == 1);
 			CHECK(overrides[0].Kind == PrefabOverrideKind::Field);
 			CHECK(overrides[0].Component == "Script");
-			CHECK(overrides[0].Field == "Fields");
+			CHECK(overrides[0].Field == "Scripts/0/Fields");
 			CHECK(overrides[0].Value.Get() == Json{ { "Target", prefabSecond.ToString() }, { "Targets", Json::array({ prefabSecond.ToString(), prefabFirst.ToString(), prefabSecond.ToString() }) } });
 			const std::string after = SaveTrackedScene(scene);
 			REQUIRE(editor.GetHistory().Undo(editor).has_value());
@@ -158,7 +158,7 @@ namespace Engine {
 					SceneEdit edit(editor, "Transient script target");
 					play.FindEntityByID(rootID).Patch<ScriptComponent>([secondID](ScriptComponent& script)
 					{
-						script.Fields["Target"] = VariantValue(Json(secondID.ToString()));
+						script.Scripts.front().Fields["Target"] = VariantValue(Json(secondID.ToString()));
 					});
 					const auto committed = edit.Commit();
 					REQUIRE(committed.has_value());
@@ -185,7 +185,7 @@ namespace Engine {
 				SceneEdit edit(editor, "Change amount");
 				scene.FindEntityByID(rootID).Patch<ScriptComponent>([](ScriptComponent& script)
 				{
-					script.Fields["Amount"] = VariantValue(Json(2.0f));
+					script.Scripts.front().Fields["Amount"] = VariantValue(Json(2.0f));
 				});
 				REQUIRE(edit.Commit().has_value());
 			}

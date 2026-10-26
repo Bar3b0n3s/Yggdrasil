@@ -10,6 +10,7 @@
 #include "Editor/Ui/EditorStyle.h"
 #include "Editor/WorkspaceTestUi.h"
 #include "EditorCore/Automation/EditorAutomationControls.h"
+#include "EditorCore/Autosave/Autosave.h"
 #include "EditorCore/EditorActions.h"
 #include "EditorCore/Inspector/ReflectedEditController.h"
 #include "EditorCore/Play/EditorPlayController.h"
@@ -56,6 +57,17 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(auto result, actions.TakeResult(ticket));
 		REQUIRE(result.has_value());
 		return std::move(*result);
+	}
+
+	// The text of the frame this call draws: WorkspaceTestUi::Text logs every frame it draws into one file, so this returns
+	// what follows `seen`, the length the previous call read.
+	static std::string NextFrameText(Test::WorkspaceTestUi& test, size_t& seen)
+	{
+		const std::string text = test.Text();
+		REQUIRE(text.size() >= seen);
+		std::string frame = text.substr(seen);
+		seen = text.size();
+		return frame;
 	}
 
 	// Concrete production services; only the frame clock and user input are driven by the test.
@@ -761,6 +773,7 @@ namespace Engine {
 			auto* scene = test.Window(Utils::EditorWindowTitle(EditorPanel::SceneViewport));
 			auto* assets = test.Window(Utils::EditorWindowTitle(EditorPanel::ContentBrowser));
 			auto* toolbar = test.Window("##EditorToolbar");
+			auto* tabs = test.Window("##EditorSceneTabs");
 			auto* menu = test.Window("##MainMenuBar");
 			auto* status = test.Window("##EditorStatus");
 			for (const auto panel : test.Environment.GetEditor().GetUiState().GetOpenPanels())
@@ -781,6 +794,10 @@ namespace Engine {
 			CHECK(scene->Pos.x == doctest::Approx(assets->Pos.x));
 			CHECK(scene->Size.x == doctest::Approx(assets->Size.x));
 			CHECK(scene->Pos.y >= toolbar->Pos.y + toolbar->Size.y);
+			// The scene tabs' row (Docs/Decisions/0031-m20-contract.md decision 20) sits between the toolbar and the dock space.
+			CHECK(tabs->Pos.y >= toolbar->Pos.y + toolbar->Size.y);
+			CHECK(scene->Pos.y >= tabs->Pos.y + tabs->Size.y);
+			CHECK(tabs->Size.x == doctest::Approx(toolbar->Size.x));
 			CHECK(toolbar->Pos.y >= menu->Pos.y + menu->Size.y);
 			CHECK(assets->Pos.y + assets->Size.y <= status->Pos.y);
 			CHECK(assets->DockNode->SelectedTabId == assets->TabId);
@@ -888,6 +905,9 @@ namespace Engine {
 			test.Draw();
 			test.Draw();
 			CHECK(test.Text().contains("Build your next world."));
+			// Without a project there are no scenes, so the launcher has no scene tabs' row.
+			const ImGuiWindow* launcherTabs = ImGui::FindWindowByName("##EditorSceneTabs");
+			CHECK((launcherTabs == nullptr || !launcherTabs->Active));
 			test.Environment.CreateAndOpenProject();
 			test.Environment.CreateAndOpenScene();
 			REQUIRE(test.Layer.OnSafePoint(0));
@@ -916,6 +936,7 @@ namespace Engine {
 			CHECK_FALSE(game->DockTabIsVisible);
 			CHECK(assets->DockTabIsVisible);
 			CHECK_FALSE(console->DockTabIsVisible);
+			CHECK(test.Window("##EditorSceneTabs")->Active);
 			CHECK(hierarchy->Pos.x + hierarchy->Size.x <= scene->Pos.x);
 			CHECK(scene->Pos.x + scene->Size.x <= inspector->Pos.x);
 			CHECK(scene->Pos.y + scene->Size.y <= assets->Pos.y);
@@ -1232,6 +1253,247 @@ namespace Engine {
 			CHECK_FALSE(editor.IsSceneChangedOnDisk());
 			CHECK(editor.GetHistory().GetUndoCount() == 0);
 		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 20 (E-SCENES): the scene tabs, over the open scenes (decision 13) and
+		// the methods they submit (scene.new and scene.open keepOpen, scene.activate, scene.close and the scene target).
+
+		// The tabs list the open scenes in tab order with a dirty marker, a click activates one through scene.activate at the
+		// next safe point, and the panels show the active scene.
+		TEST_CASE("EditorLayer: the scene tabs list the open scenes in tab order and a click activates one")
+		{
+			Test::WorkspaceTestUi test;
+			auto& editor = test.Environment.GetEditor();
+			REQUIRE(test.Client.Call("entity.create", Json{ { "name", "Only in Main" } }));
+			REQUIRE(test.Client.Call("scene.new", Json{ { "path", "Assets/Scenes/Second.scene" }, { "keepOpen", true } }));
+			const OpenSceneId second = editor.GetActiveSceneId();
+			const Result<VfsPath> mainPath = VfsPath::Parse("project://Assets/Scenes/Main.scene");
+			REQUIRE(mainPath);
+			const OpenSceneId main = editor.FindOpenScene(*mainPath);
+			REQUIRE(main != NoOpenScene);
+			REQUIRE(editor.GetOpenScenes() == std::vector<OpenSceneId>{ main, second });
+			REQUIRE(test.Layer.OnSafePoint(0));
+			test.Draw();
+			test.Draw();
+			// The toolbar names the active scene too, so the active tab's name shows twice.
+			size_t seen = 0;
+			const auto occurrences = [](std::string_view text, std::string_view part)
+			{
+				size_t count = 0;
+				for (size_t at = text.find(part); at != std::string_view::npos; at = text.find(part, at + part.size()))
+					++count;
+				return count;
+			};
+			const std::string before = NextFrameText(test, seen);
+			CHECK(occurrences(before, "Main *") == 1);
+			CHECK(occurrences(before, "Second") == 2);
+			CHECK_FALSE(before.contains("Second *"));
+			CHECK_FALSE(before.contains("Only in Main")); // the hierarchy shows the active scene, Second
+			const ImRect mainTab = test.Locate("##EditorSceneTabs", std::format("##SceneTab{}", main).c_str());
+			const ImRect secondTab = test.Locate("##EditorSceneTabs", std::format("##SceneTab{}", second).c_str());
+			CHECK(mainTab.Max.x <= secondTab.Min.x);
+			const ImGuiWindow* toolbar = test.Window("##EditorToolbar");
+			CHECK(mainTab.Min.y >= toolbar->Pos.y + toolbar->Size.y);
+
+			// The click queues scene.activate; the safe point runs it, and the panels follow.
+			test.Click(mainTab.GetCenter());
+			CHECK(editor.GetActiveSceneId() == second);
+			REQUIRE(test.Layer.OnSafePoint(0));
+			CHECK(editor.GetActiveSceneId() == main);
+			CHECK(editor.GetScene().GetName() == "Main");
+			CHECK(editor.GetOpenScenes() == std::vector<OpenSceneId>{ main, second });
+			CHECK(editor.IsSceneDirty());
+			test.Draw();
+			CHECK(NextFrameText(test, seen).contains("Only in Main"));
+
+			// An agent's activation shows in the next frame too, and without an open scene the row says so.
+			REQUIRE(test.Client.Call("scene.activate", Json{ { "scene", second } }));
+			REQUIRE(test.Layer.OnSafePoint(0));
+			CHECK_FALSE(NextFrameText(test, seen).contains("Only in Main"));
+			REQUIRE(test.Client.Call("scene.close", Json{ { "scene", main }, { "discardChanges", true } }));
+			REQUIRE(test.Client.Call("scene.close", Json::object()));
+			REQUIRE(test.Layer.OnSafePoint(0));
+			const std::string none = NextFrameText(test, seen);
+			CHECK(occurrences(none, "No scene open") == 2);
+			CHECK(occurrences(none, "Second") == 0);
+		}
+
+		// A tab's close button closes a scene without unsaved changes at once and asks first for one with them: Cancel keeps
+		// it, Save and close writes its file, Discard changes drops them. Each is scene.close with the tab's scene target.
+		TEST_CASE("EditorLayer: closing a scene tab asks to save or discard its unsaved changes first")
+		{
+			Test::WorkspaceTestUi test;
+			auto& editor = test.Environment.GetEditor();
+			const OpenSceneId main = editor.GetActiveSceneId();
+			REQUIRE(test.Client.Call("scene.new", Json{ { "path", "Assets/Scenes/Second.scene" }, { "keepOpen", true } }));
+			const OpenSceneId second = editor.GetActiveSceneId();
+			REQUIRE(test.Client.Call("scene.new", Json{ { "path", "Assets/Scenes/Third.scene" }, { "keepOpen", true } }));
+			const OpenSceneId third = editor.GetActiveSceneId();
+			REQUIRE(test.Client.Call("entity.create", Json{ { "name", "Kept" } }));
+			REQUIRE(test.Client.Call("scene.activate", Json{ { "scene", main } }));
+			REQUIRE(test.Layer.OnSafePoint(0));
+			test.Draw();
+			test.Draw();
+			const auto closeTab = [&test](OpenSceneId id)
+			{
+				test.Click("##EditorSceneTabs", std::format("##CloseSceneTab{}", id).c_str());
+				test.Draw();
+			};
+
+			// A scene without unsaved changes closes at once; the active scene stays active.
+			closeTab(second);
+			CHECK(editor.FindScene(second) != nullptr);
+			REQUIRE(test.Layer.OnSafePoint(0));
+			CHECK(editor.FindScene(second) == nullptr);
+			CHECK(editor.GetOpenScenes() == std::vector<OpenSceneId>{ main, third });
+			CHECK(editor.GetActiveSceneId() == main);
+
+			// A dirty scene asks first, and Cancel keeps it with its changes.
+			closeTab(third);
+			const ImGuiWindow* prompt = test.Window("Close scene");
+			CHECK(prompt->Active);
+			CHECK(test.Text().contains("Third has unsaved changes."));
+			test.Click("Close scene", "Cancel");
+			REQUIRE(test.Layer.OnSafePoint(0));
+			CHECK(editor.FindScene(third) != nullptr);
+			CHECK(editor.DescribeOpenScene(third)->Dirty);
+
+			// Save and close writes its file first.
+			closeTab(third);
+			test.Click("Close scene", "Save and close");
+			REQUIRE(test.Layer.OnSafePoint(0));
+			CHECK(editor.FindScene(third) == nullptr);
+			const auto saved = FileSystem::ReadText(editor.GetProject().GetRoot() / "Assets/Scenes/Third.scene");
+			REQUIRE(saved);
+			CHECK(saved->contains("Kept"));
+
+			// Discard changes drops them; closing the last scene leaves none open.
+			REQUIRE(test.Client.Call("entity.create", Json{ { "name", "Dropped" } }));
+			REQUIRE(test.Layer.OnSafePoint(0));
+			test.Draw();
+			closeTab(main);
+			test.Click("Close scene", "Discard changes");
+			REQUIRE(test.Layer.OnSafePoint(0));
+			CHECK_FALSE(editor.HasScene());
+			const auto discarded = FileSystem::ReadText(editor.GetProject().GetRoot() / "Assets/Scenes/Main.scene");
+			REQUIRE(discarded);
+			CHECK_FALSE(discarded->contains("Dropped"));
+			test.Draw();
+			CHECK_FALSE(test.Window("Close scene")->Active);
+		}
+
+		// The New and Open scene dialogs open a scene in a new tab (keepOpen), which needs no save-or-discard choice for the
+		// active scene's unsaved changes and remembers itself between dialogs; choosing a scene that is open switches to it.
+		TEST_CASE("EditorLayer: the scene dialogs open a scene in a new tab and switch to one already open")
+		{
+			Test::WorkspaceTestUi test;
+			auto& editor = test.Environment.GetEditor();
+			test.Environment.CreateAndOpenScene("Assets/Scenes/Another level.scene");
+			REQUIRE(test.Client.Call("scene.open", Json{ { "path", "Assets/Scenes/Main.scene" } }));
+			REQUIRE(test.Client.Call("entity.create", Json{ { "name", "Keep this edit" } }));
+			const OpenSceneId main = editor.GetActiveSceneId();
+			REQUIRE(editor.GetOpenScenes() == std::vector<OpenSceneId>{ main });
+			REQUIRE(test.Layer.OnSafePoint(0));
+			test.Draw();
+			test.Draw();
+			test.OpenSceneDialog(false);
+			test.SelectScene("Assets/Scenes/Another level.scene");
+			size_t seen = 0;
+			CHECK(NextFrameText(test, seen).contains("Save changes first"));
+			test.Click("Open scene", "Open in a new tab");
+			CHECK_FALSE(NextFrameText(test, seen).contains("Save changes first"));
+			test.Click("Open scene", "Open scene");
+			REQUIRE(test.Layer.OnSafePoint(0));
+			REQUIRE(editor.GetOpenScenes().size() == 2);
+			CHECK(editor.GetOpenScenes().front() == main);
+			CHECK(editor.GetScenePath()->GetFileName() == "Another level.scene");
+			CHECK(editor.DescribeOpenScene(main)->Dirty);
+			test.Draw();
+
+			// The choice stays for the New scene dialog.
+			test.OpenSceneDialog(true);
+			test.ReplaceText("New scene", "##SceneName", "Third");
+			test.Click("New scene", "Create scene");
+			REQUIRE(test.Layer.OnSafePoint(0));
+			REQUIRE(editor.GetOpenScenes().size() == 3);
+			CHECK(editor.GetScenePath()->GetPath() == "Assets/Scenes/Third.scene");
+			test.Draw();
+
+			// A scene that is already open switches to its tab, keeping its changes.
+			test.OpenSceneDialog(false);
+			test.SelectScene("Assets/Scenes/Main.scene");
+			CHECK(NextFrameText(test, seen).contains("This scene is already open in a tab."));
+			test.Click("Open scene", "Switch to scene");
+			REQUIRE(test.Layer.OnSafePoint(0));
+			CHECK(editor.GetActiveSceneId() == main);
+			CHECK(editor.GetOpenScenes().size() == 3);
+			CHECK(editor.IsSceneDirty());
+			CHECK(editor.GetScene().FindEntityByPath("/Keep this edit").IsValid());
+		}
+
+		// The panels follow the active scene: an inspector gesture begun in one scene ends unwritten when another becomes
+		// active, whoever activates it, before the gesture could commit into the other scene.
+		TEST_CASE("EditorLayer: activating another scene ends the inspector's gesture unwritten")
+		{
+			Test::WorkspaceTestUi test;
+			auto& editor = test.Environment.GetEditor();
+			const Result<Json> created = test.Client.Call("entity.create", Json{ { "name", "Edited" } });
+			REQUIRE(created);
+			const auto edited = JsonReader((*created)["entity"]["id"]).ReadUUID();
+			REQUIRE(edited);
+			REQUIRE(test.Layer.OnSafePoint(0));
+			REQUIRE(test.Edits.Begin({ .Kind = InspectorTargetKind::Component, .Entities = { *edited }, .Component = "Transform", .FieldPath = "Translation" }));
+			REQUIRE(test.Layer.OnSafePoint(0));
+			CHECK(test.Edits.IsEditing());
+			REQUIRE(test.Client.Call("scene.new", Json{ { "path", "Assets/Scenes/Second.scene" }, { "keepOpen", true } }));
+			REQUIRE(test.Layer.OnSafePoint(0));
+			CHECK_FALSE(test.Edits.IsEditing());
+			CHECK(editor.GetScene().GetName() == "Second");
+		}
+
+		// Decision 13: while another scene plays, a tab that is not the played one shows its edit scene in the hierarchy, and a
+		// click on a row selects in that scene; the played scene's tab shows the play scene.
+		TEST_CASE("EditorLayer: the hierarchy shows the active scene's edit scene while another open scene plays")
+		{
+			Test::WorkspaceTestUi test;
+			auto& editor = test.Environment.GetEditor();
+			const OpenSceneId main = editor.GetActiveSceneId();
+			REQUIRE(test.Client.Call("entity.create", Json{ { "name", "Played entity" } }));
+			REQUIRE(test.Client.Call("scene.new", Json{ { "path", "Assets/Scenes/Second.scene" }, { "keepOpen", true } }));
+			const OpenSceneId second = editor.GetActiveSceneId();
+			const Result<Json> created = test.Client.Call("entity.create", Json{ { "name", "Edited entity" } });
+			REQUIRE(created);
+			const auto edited = JsonReader((*created)["entity"]["id"]).ReadUUID();
+			REQUIRE(edited);
+			REQUIRE(test.Client.Call("scene.activate", Json{ { "scene", main } }));
+			REQUIRE(test.Client.Call("play.start", Json{ { "lockstep", true } }));
+			REQUIRE(test.Client.Call("scene.activate", Json{ { "scene", second } }));
+			REQUIRE(test.Layer.OnSafePoint(0));
+			test.Draw();
+			test.Draw();
+			size_t seen = 0;
+			const std::string shown = NextFrameText(test, seen);
+			CHECK(shown.contains("Edited entity"));
+			CHECK_FALSE(shown.contains("Played entity"));
+			CHECK_FALSE(shown.contains("Preview scene"));
+
+			auto* hierarchy = test.Window(Utils::EditorWindowTitle(EditorPanel::SceneHierarchy));
+			const ImGuiID row = ImHashStr("##Entity", 0, ImHashStr(edited->ToString().c_str(), 0, hierarchy->ID));
+			test.Click(test.Locate(hierarchy, row).GetCenter());
+			REQUIRE(test.Layer.OnSafePoint(0));
+			CHECK(editor.GetActiveSceneId() == second);
+			CHECK(editor.GetSelectionTarget() == SceneTarget::Edit);
+			CHECK(std::vector<UUID>(editor.GetSelection().begin(), editor.GetSelection().end()) == std::vector<UUID>{ *edited });
+
+			// The played scene's tab shows the play scene again.
+			REQUIRE(test.Client.Call("scene.activate", Json{ { "scene", main } }));
+			REQUIRE(test.Layer.OnSafePoint(0));
+			test.Draw();
+			const std::string played = NextFrameText(test, seen);
+			CHECK(played.contains("Played entity"));
+			CHECK(played.contains("Preview scene"));
+			REQUIRE(test.Client.Call("play.stop", Json::object()));
+		}
+
 		TEST_CASE("EditorLayer: the game panel shows the lockstep owner and its blur leaves agent input alone" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
@@ -1587,6 +1849,42 @@ namespace Engine {
 			CHECK(test.DurableFiles(editor.GetProject().GetProjectFile()) == currentDurable);
 			CHECK(test.QueuedDecisions == (cancelledByReset ? 1 : 2));
 			test.CheckLock();
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 15: one offer covers every scene with a recoverable generation, and
+		// Recover recovers each of them, so the prompt names them all.
+		TEST_CASE("EditorLayer: the recovery prompt names every scene the offer recovers")
+		{
+			LayerUiHarness ui;
+			EditorContext& editor = ui.Environment.GetEditor();
+			Autosave saves(editor);
+			EditorHostRecovery host(editor, saves);
+			REQUIRE(ui.Client.Call("entity.create", Json{ { "name", "InMain" } }));
+			REQUIRE(ui.Client.Call("scene.new", Json{ { "path", "Assets/Scenes/Second.scene" }, { "keepOpen", true } }));
+			REQUIRE(ui.Client.Call("entity.create", Json{ { "name", "InSecond" } }));
+			REQUIRE(saves.Publish());
+			const auto saved = saves.Save(AutosaveReason::Periodic);
+			REQUIRE_MESSAGE(saved.has_value(), saved.error().ToString());
+			REQUIRE(saved->Written);
+			// As after a crash and a reopen: Main is open again as its file holds it, and Second is not open.
+			REQUIRE(ui.Client.Call("scene.close", Json{ { "discardChanges", true } }));
+			REQUIRE(ui.Client.Call("scene.open", Json{ { "path", "Assets/Scenes/Main.scene" }, { "reload", true }, { "discardChanges", true } }));
+			REQUIRE_FALSE(editor.IsAnySceneDirty());
+			REQUIRE(host.Inspect(1));
+			REQUIRE(host.GetOffer().has_value());
+			REQUIRE(host.GetOffer()->SceneNames == std::vector<std::string>{ "Main", "Second" });
+			ui.Panels.Recovery.GetOffer = [&host]()
+			{
+				return host.GetOffer();
+			};
+			ui.OnlyPanel(EditorPanel::SceneHierarchy);
+			ui.Draw();
+			const std::string drawn = ui.Draw();
+			CHECK(drawn.contains("Unsaved versions of 2 scenes are available: Main, Second."));
+			CHECK_FALSE(drawn.contains("An unsaved version of"));
+			ui.Panels.Recovery = {};
+			host.Reset();
+			CHECK(saves.Reset());
 		}
 
 		TEST_CASE("EditorViewportHost: a superseded click cannot change selection" * doctest::test_suite(Test::GpuSuite))

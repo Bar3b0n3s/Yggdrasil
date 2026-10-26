@@ -22,34 +22,35 @@ return Script.Define("Owner", Owner)
 """
         script = client.call("script.write", {"path": path, "source": source})["script"]["id"]
         client.call("entity.create", {
-            "name": "Owner", "components": {"Script": {"Script": path}},
+            "name": "Owner", "components": {"Script": {"Scripts": [{"Script": path}]}},
         })
-        patch = {"entity": "/Owner", "components": {"Script": {"Fields": {
+        # A slot given Fields alone borrows the slot's Script handle (Script version 2: a list of slots).
+        patch = {"entity": "/Owner", "components": {"Script": {"Scripts": [{"Fields": {
             "Amount": 3, "Mode": "mOvInG", "References": [[path]],
-        }}}}
+        }}]}}}
         before = client.call("entity.get", {"entity": "/Owner"})["entity"]
         client.call("entity.update", dict(patch, dryRun=True))
         self.assertEqual(client.call("entity.get", {"entity": "/Owner"})["entity"], before)
         client.call("edit.batch", {"ops": [{"method": "entity.update", "params": patch}]})
         component = client.call("entity.get", {"entity": "/Owner"})["entity"]["components"]["Script"]
-        self.assertEqual(component["Script"], script)
-        self.assertEqual(component["Fields"], {
+        self.assertEqual(component["Scripts"][0]["Script"], script)
+        self.assertEqual(component["Scripts"][0]["Fields"], {
             "Amount": 3, "Mode": "Moving", "References": [[script]],
         })
         with self.assertRaises(engine_client.EngineError) as invalid:
             client.call("entity.update", {"entity": "/Owner", "components": {
-                "Script": {"Fields": {"Amount": 6}},
+                "Script": {"Scripts": [{"Fields": {"Amount": 6}}]},
             }})
         self.assert_engine_error(invalid.exception, engine_client.INVALID_PARAMS, "InvalidArgument")
         self.assertEqual(invalid.exception.data["issues"][0]["pointer"],
-                         "/components/Script/Fields/Amount")
+                         "/components/Script/Scripts/0/Fields/Amount")
         with self.assertRaises(engine_client.EngineError) as malformed:
             client.call("entity.update", {"entity": "/Owner", "components": {
-                "Script": {"Fields": [1]},
+                "Script": {"Scripts": [{"Fields": [1]}]},
             }})
         self.assert_engine_error(malformed.exception, engine_client.INVALID_PARAMS, "InvalidArgument")
         self.assertEqual(malformed.exception.data["issues"][0]["pointer"],
-                         "/components/Script/Fields")
+                         "/components/Script/Scripts/0/Fields")
         self.assertEqual(client.call("entity.get", {"entity": "/Owner"})["entity"]["components"]["Script"],
                          component)
 
@@ -124,7 +125,8 @@ return Script.Define("Owner", Owner)
             'return Script.Define("Fault", Fault)\n')})
         # More distinct errors than the editor's history keeps (MaxScriptErrorEntries, 256), each far over 8 KiB.
         client.call("edit.batch", {"label": "Faults", "ops": [
-            {"method": "entity.create", "params": {"name": f"Fault{index}", "components": {"Script": {"Script": path}}}}
+            {"method": "entity.create", "params": {"name": f"Fault{index}",
+                                                   "components": {"Script": {"Scripts": [{"Script": path}]}}}}
             for index in range(300)]})
         cursor = client.call("script.errors", {"since": "end"})["nextCursor"]
         client.call("play.start", {"lockstep": True, "pauseOnError": False})
@@ -153,7 +155,7 @@ return Script.Define("Owner", Owner)
             'return Script.Define("Faulty", Faulty)\n')})
         client.call("entity.create", {"name": "Game"})
         board = client.call("entity.create", {"name": "Board", "parent": "/Game",
-                                              "components": {"Script": {"Script": path}}})["entity"]
+                                              "components": {"Script": {"Scripts": [{"Script": path}]}}})["entity"]
         cursor = client.call("script.errors", {"since": "end"})["nextCursor"]
 
         def read_entity() -> dict:
@@ -219,7 +221,7 @@ return Script.Define("Owner", Owner)
         client.call("script.write", {"path": "Assets/Scripts/Library.luau", "source": "return { value = 1 }"})
         with self.assertRaises(engine_client.EngineError) as rejected:
             client.call("entity.update", {"entity": "/Target", "components": {
-                "Script": {"Script": "Assets/Scripts/Library.luau"}}})
+                "Script": {"Scripts": [{"Script": "Assets/Scripts/Library.luau"}]}}})
         self.assert_engine_error(rejected.exception, engine_client.VALIDATION_FAILED, "Validation")
         self.assertIn("SCRIPT_NOT_A_BEHAVIOUR", str(rejected.exception.data))
         self.assertNotIn("Script", client.call("entity.get", {"entity": "/Target"})["entity"]["components"])
@@ -271,7 +273,7 @@ return Script.Define("Owner", Owner)
         client, _ = self.open_editor_with_scene()
         path = "Assets/Scripts/Ball.luau"
         client.call("script.write", {"path": path, "source": 'return Script.Define("Ball", {})'})
-        client.call("entity.create", {"name": "Ball", "components": {"Script": {"Script": path}}})
+        client.call("entity.create", {"name": "Ball", "components": {"Script": {"Scripts": [{"Script": path}]}}})
         client.call("asset.delete", {"asset": path})
         # The trashed behaviour only affects its own entity; every other evaluation still runs.
         self.assertEqual(client.call("script.eval", {"context": "edit", "code": "1 + 2"})["value"], 3)
@@ -296,7 +298,7 @@ return Script.Define("Game", Game)
         client.call("script.write", {"path": module, "source": "return {Value = 1}"})
         client.call("script.write", {"path": path, "source": source})
         client.call("script.write", {"path": suite, "source": suite_source})
-        client.call("entity.create", {"name": "Game", "components": {"Script": {"Script": path}}})
+        client.call("entity.create", {"name": "Game", "components": {"Script": {"Scripts": [{"Script": path}]}}})
         client.call("play.start", {"paused": True})
         probe = 'local s = Scene.FindByName("Game"):GetScript(); return {s:Value(), s.Reloads}'
         self.assertEqual(self.eval_play(client, probe), [1, 0])
@@ -373,7 +375,7 @@ return Script.Define("Game", Game)
                                      "local Spin = {}\nfunction Spin:OnFixedUpdate() while true do end end\n"
                                      "return Script.Define(\"Spin\", Spin)\n"})
         client.call("entity.create", {"name": "Spinner", "components": {
-            "Script": {"Script": "Assets/Scripts/Spin.luau"}}})
+            "Script": {"Scripts": [{"Script": "Assets/Scripts/Spin.luau"}]}}})
         observer = self.connect(self.editors[-1], "watchdog-observer")
         # Ordinary play: the editor's own loop runs OnFixedUpdate after this request returns.
         client.call("play.start")

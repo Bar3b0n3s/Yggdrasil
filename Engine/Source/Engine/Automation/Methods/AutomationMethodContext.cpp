@@ -25,7 +25,7 @@ namespace Engine {
 		return session ? &session->GetScriptErrors() : nullptr;
 	}
 
-	Result<ScriptEvaluation> AutomationMethodContext::EvalInEdit(std::string_view /*code*/, std::string_view /*entity*/)
+	Result<ScriptEvaluation> AutomationMethodContext::EvalInEdit(std::string_view /*code*/, std::string_view /*entity*/, std::string_view /*behaviour*/)
 	{
 		return std::unexpected(Error(ErrorCode::Unsupported, "Edit evaluation is unavailable in this host").WithLocation({ .File = {}, .JsonPointer = "/context", .Entity = {} }));
 	}

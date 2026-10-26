@@ -108,6 +108,83 @@ namespace Engine {
 			CHECK(*saved == *golden);
 		}
 
+		// Docs/Decisions/0031-m20-contract.md decision 17: the golden fixture of the Script component's migration to version 2.
+		// The file loads, migrated, and saves as the upgraded fixture: every Script component a one-slot list (a version 1
+		// component without its optional members gets their defaults written in its slot), and the instance's Script overrides
+		// with it, a Field override naming slot 0's member and an AddComponent override's value a one-slot list.
+		TEST_CASE("Migrations: ScriptV1 fixture upgrades to version 2")
+		{
+			const Result<std::string> legacy = Test::ReadTestDataText("Formats/Scene/ScriptV1.scene");
+			const Result<std::string> golden = Test::ReadTestDataText("Formats/Scene/ScriptV1.upgraded.scene");
+			REQUIRE(legacy.has_value());
+			REQUIRE(golden.has_value());
+
+			Test::SceneTestFixture setup;
+			LoadReport report;
+			const Status loaded = SceneSerializer::LoadFromString(setup.GetScene(), *legacy, LoadOptions{}, report);
+			REQUIRE_MESSAGE(loaded.has_value(), (loaded ? std::string() : loaded.error().ToString()));
+			CHECK(report.FileVersion == 1);
+			CHECK(report.Migrated);
+
+			const Result<std::string> saved = SceneSerializer::SaveToString(setup.GetScene());
+			REQUIRE(saved.has_value());
+			CHECK(*saved == *golden);
+		}
+
+		// The Script overrides follow only the upgrade of the Script component itself: a document whose Script component is
+		// at version 2 keeps its overrides as they are, whatever their Field.
+		TEST_CASE("Migrations: prefab overrides of a current Script component are not rewritten")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			Json document = ParseJson(R"({ "Format": "Scene", "Version": 1, "Name": "Slots", "Seed": 0,
+				"ComponentVersions": { "Prefab": 1, "PrefabLink": 1, "Script": 2 },
+				"Entities": [ { "ID": "5e00000000000001", "Name": "Brick", "Parent": null, "Active": true, "Tags": [],
+				                "Components": {
+				                  "Prefab": { "Prefab": "11d04163305d2e9f", "Overrides": [
+				                    { "PrefabEntityID": "55425a047af78945", "Kind": "Field", "Component": "Script", "Field": "Fields", "Value": { "Points": 3 } } ] },
+				                  "PrefabLink": { "PrefabEntityID": "55425a047af78945", "InstanceRoot": "5e00000000000001" },
+				                  "Script": { "Scripts": [] } } } ] })");
+			LoadReport report;
+			const Status upgraded = Migrations::UpgradeDocument(document, DocumentKind::Scene, *registry, report);
+			REQUIRE_MESSAGE(upgraded.has_value(), (upgraded ? std::string() : upgraded.error().ToString()));
+			const Json& overrides = document["Entities"][0]["Components"]["Prefab"]["Overrides"];
+			REQUIRE(overrides.size() == 1);
+			CHECK(overrides[0]["Field"] == Json("Fields"));
+			CHECK(document["Entities"][0]["Components"]["Script"] == ParseJson(R"({ "Scripts": [] })"));
+		}
+
+		// A version 1 Script component that is not an object fails its migration, located in the document; an AddComponent
+		// override's value that is not one stays for the reader to report.
+		TEST_CASE("Migrations: a version 1 Script component that is not an object is a located error")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			Json document = ParseJson(R"({ "Format": "Scene", "Version": 1, "Name": "Slots", "Seed": 0, "ComponentVersions": { "Script": 1 },
+				"Entities": [ { "ID": "5e00000000000001", "Components": { "Script": [ "44d04163305d2e9f" ] } } ] })");
+			const Json original = document;
+			LoadReport report;
+			const Status upgraded = Migrations::UpgradeDocument(document, DocumentKind::Scene, *registry, report);
+			REQUIRE_FALSE(upgraded.has_value());
+			CHECK(upgraded.error().GetCode() == ErrorCode::Validation);
+			CHECK(upgraded.error().GetLocation().JsonPointer == std::string("/Entities/0/Components/Script"));
+			CHECK(document == original);
+
+			// The same shape as an AddComponent override's value is left as written: the upgrade succeeds and the reader
+			// reports the value.
+			Json overridden = ParseJson(R"({ "Format": "Scene", "Version": 1, "Name": "Slots", "Seed": 0,
+				"ComponentVersions": { "Prefab": 2, "PrefabLink": 1, "Script": 1 },
+				"Entities": [ { "ID": "5e00000000000001", "Name": "Turret", "Parent": null, "Active": true, "Tags": [],
+				                "Components": {
+				                  "Prefab": { "Prefab": "11d04163305d2e9f", "Overrides": [
+				                    { "Path": ["55425a047af78945"], "Kind": "AddComponent", "Component": "Script", "Field": "", "Value": [ "44d04163305d2e9f" ] } ] },
+				                  "PrefabLink": { "PrefabEntityID": "55425a047af78945", "InstanceRoot": "5e00000000000001", "OuterPrefabEntityID": null },
+				                  "Script": { "Script": "44d04163305d2e9f" } } } ] })");
+			LoadReport overriddenReport;
+			const Status kept = Migrations::UpgradeDocument(overridden, DocumentKind::Scene, *registry, overriddenReport);
+			REQUIRE_MESSAGE(kept.has_value(), (kept ? std::string() : kept.error().ToString()));
+			CHECK(overridden["Entities"][0]["Components"]["Prefab"]["Overrides"][0]["Value"] == ParseJson(R"([ "44d04163305d2e9f" ])"));
+			CHECK(overridden["Entities"][0]["Components"]["Script"] == ParseJson(R"({ "Scripts": [ { "Script": "44d04163305d2e9f" } ] })"));
+		}
+
 		TEST_CASE("Migrations: the version 0 step renames Enabled and keys components by type")
 		{
 			Result<Json> document = JsonReader::Parse(R"({
@@ -230,7 +307,7 @@ namespace Engine {
 		// an ordered list of slots, so version 1's one script is the list's only slot, unchanged inside it; and the prefab
 		// overrides that target the Script component follow it in the same upgrade, whatever the Prefab component's version:
 		// a Field override names slot 0's member, and an AddComponent override's value becomes a one-slot list.
-		TEST_CASE("Migrations: a Script component at version 1 becomes a one-slot list, its prefab overrides with it" * doctest::skip(true))
+		TEST_CASE("Migrations: a Script component at version 1 becomes a one-slot list, its prefab overrides with it")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			Json document = ParseJson(R"({ "Format": "Scene", "Version": 1, "Name": "Slots", "Seed": 0,

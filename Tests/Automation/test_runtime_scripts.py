@@ -28,7 +28,7 @@ class RuntimeScriptTests(AutomationTestCase):
                     'self.Entity.Transform:Translate(vector.create(self.Speed * dt, 0, 0)) end; '
                     'return Script.Define("Mover", Mover)'})
         editor.call("entity.update", {"entity": "/Cube", "components": {
-            "Script": {"Script": "Assets/Scripts/Mover.luau", "Fields": {"Speed": 2}}}})
+            "Script": {"Scripts": [{"Script": "Assets/Scripts/Mover.luau", "Fields": {"Speed": 2}}]}}})
         editor.call("scene.save")
         editor.call("input.record", {"action": "start"})
         editor.call("play.step", {"ticks": 3, "render": "none"})
@@ -147,8 +147,8 @@ class RuntimeScriptTests(AutomationTestCase):
                     'local T = {Fields = {Amount = Field.Number(1)}}; '
                     'function T.OnCreate(self: any) assert(self.Amount == 9); self.Entity.Name = "Spawned9" end; '
                     'return Script.Define("Spawned", T)'})
-        editor.call("entity.create", {"name": "Template", "components": {"Script": {
-            "Script": "Assets/Scripts/Spawned.luau", "Fields": {"Amount": 9}}}})
+        editor.call("entity.create", {"name": "Template", "components": {"Script": {"Scripts": [{
+            "Script": "Assets/Scripts/Spawned.luau", "Fields": {"Amount": 9}}]}}})
         editor.call("prefab.create", {"entity": "/Template", "path": "Assets/Prefabs/Spawned.prefab"})
         editor.call("entity.destroy", {"entities": ["/Template"]})
         editor.call("script.write", {"path": "Assets/Scripts/Transition.luau", "source":
@@ -158,7 +158,7 @@ class RuntimeScriptTests(AutomationTestCase):
                     'Scene.Load(scene, {level = 7}) end; '
                     'return Script.Define("Transition", T)'})
         editor.call("entity.update", {"entity": "/Cube", "components": {
-            "Script": {"Script": "Assets/Scripts/Transition.luau"}}})
+            "Script": {"Scripts": [{"Script": "Assets/Scripts/Transition.luau"}]}}})
         editor.call("scene.save")
         editor.call("scene.new", {"path": "Assets/Scenes/Second.scene"})
         editor.call("script.write", {"path": "Assets/Scripts/Second.luau", "source":
@@ -169,8 +169,8 @@ class RuntimeScriptTests(AutomationTestCase):
                     'Scene.Instantiate(prefab) end; '
                     'function T.OnFixedUpdate(self: any) if Time.GetTick() >= 3 then Application.Quit(7) end end; '
                     'return Script.Define("Second", T)'})
-        editor.call("entity.create", {"name": "Receiver", "components": {"Script": {
-            "Script": "Assets/Scripts/Second.luau", "Fields": {"Amount": 11}}}})
+        editor.call("entity.create", {"name": "Receiver", "components": {"Script": {"Scripts": [{
+            "Script": "Assets/Scripts/Second.luau", "Fields": {"Amount": 11}}]}}})
         editor.call("scene.save")
         executable = exported_executable(export_tiny_game(editor))
         editor.call("session.shutdown")

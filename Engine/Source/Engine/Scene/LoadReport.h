@@ -35,7 +35,7 @@ namespace Engine {
 		// --strict (CI): unknown keys, fields and components, and unresolvable or mismatching Variant values, are errors
 		// instead of warnings (§6 "Strict reader").
 		bool StrictUnknowns = false;
-		// Script field schemas for ScriptComponent.Fields (M13); may be null (values are then kept with a warning).
+		// Script field schemas for ScriptSlot.Fields (M13); may be null (values are then kept with a warning).
 		const IFieldSchemaSource* Schemas = nullptr;
 		// The generator that supplies fresh IDs for repairs (duplicate or invalid IDs). Required in Repair mode (asserted);
 		// fixes are deterministic for a given generator state.

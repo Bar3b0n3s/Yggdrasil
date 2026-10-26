@@ -1364,7 +1364,7 @@ namespace Engine {
 			AddTrack(scene, 3, true);
 			// The third piece's Script component names a script, which alone decides: the session simulates without a VM
 			// (Simulate mode), so the handle needs no asset.
-			scene.FindEntityByPath("/Level/Piece[2]").AddComponent<ScriptComponent>().Script = TypedAssetHandle<AssetType::Script>(AssetHandle(0x5c0de01));
+			scene.FindEntityByPath("/Level/Piece[2]").AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = TypedAssetHandle<AssetType::Script>(AssetHandle(0x5c0de01)), .Fields = {}, .ExecutionOrder = 0 });
 			static_cast<void>(Test::AddSphereBody(scene, "Ball", glm::vec3(2.0f, 3.0f, 0.0f), 0.25f, BodyType::Dynamic));
 			Test::RecordingPhysicsListener listener;
 			Result<Scope<PlaySession>> started = Test::StartPhysicsSession(fixture, Test::MakePhysicsSessionSpecification(fixture, 42, PlayMode::Simulate));
@@ -1495,7 +1495,7 @@ namespace Engine {
 			Scene& scene = fixture.GetScene();
 			AddTrack(scene, 3, true);
 			for (const char* path : { "/Level/Piece[0]", "/Level/Piece[1]", "/Level/Piece[2]" })
-				scene.FindEntityByPath(path).AddComponent<ScriptComponent>().Script = ColliderScript;
+				scene.FindEntityByPath(path).AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = ColliderScript, .Fields = {}, .ExecutionOrder = 0 });
 			Entity ball = Test::AddSphereBody(scene, "Ball", glm::vec3(-2.0f, 0.76f, 0.0f), 0.25f, BodyType::Dynamic);
 			Test::PatchRigidBody(ball, [](RigidBodyComponent& body)
 			{
@@ -1519,8 +1519,9 @@ namespace Engine {
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
 			AddTrack(scene, 3, true);
-			// A Script component that names no script creates no instance: no collider events.
-			static_cast<void>(scene.FindEntityByPath("/Level/Piece[2]").AddComponent<ScriptComponent>());
+			// A Script component that names no script creates no instance: no collider events. Its one slot has no script
+			// (Script version 2, decision 17).
+			scene.FindEntityByPath("/Level/Piece[2]").AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{});
 			Entity ball = Test::AddSphereBody(scene, "Ball", glm::vec3(2.0f, 3.0f, 0.0f), 0.25f, BodyType::Dynamic);
 			Test::PatchRigidBody(ball, [](RigidBodyComponent& body)
 			{
@@ -1537,10 +1538,10 @@ namespace Engine {
 			REQUIRE(listener.Find(level, PhysicsEventType::CollisionEnter).size() == 1);
 			CHECK(listener.Find(pieceId, PhysicsEventType::CollisionEnter).empty());
 
-			// Naming a script while the ball rests on the piece: the next PostStep enters its collider pair, with the contact
-			// the ball rests on.
+			// Naming a script while the ball rests on the piece, in a second slot (any slot with a script names one): the next
+			// PostStep enters its collider pair, with the contact the ball rests on.
 			listener.Events.clear();
-			piece.GetComponent<ScriptComponent>().Script = ColliderScript;
+			piece.GetComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = ColliderScript, .Fields = {}, .ExecutionOrder = 0 });
 			session->Tick();
 			REQUIRE(listener.Events.size() == 1);
 			const PhysicsEvent& entered = listener.Events[0];
@@ -1566,7 +1567,7 @@ namespace Engine {
 
 			// Scripted again, then given a RigidBody of its own: no longer gathered, its collider pair ends with a synthesized
 			// exit, and its own body's pair with the ball begins.
-			piece.AddComponent<ScriptComponent>().Script = ColliderScript;
+			piece.AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = ColliderScript, .Fields = {}, .ExecutionOrder = 0 });
 			session->Tick();
 			REQUIRE(listener.Find(pieceId, PhysicsEventType::CollisionEnter).size() == 1);
 			listener.Events.clear();
@@ -1591,7 +1592,7 @@ namespace Engine {
 			Scene& scene = fixture.GetScene();
 			AddTrack(scene, 3, true);
 			for (const char* path : { "/Level/Piece[0]", "/Level/Piece[2]" })
-				scene.FindEntityByPath(path).AddComponent<ScriptComponent>().Script = ColliderScript;
+				scene.FindEntityByPath(path).AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = ColliderScript, .Fields = {}, .ExecutionOrder = 0 });
 			for (const auto& [name, x] : { std::pair{ "Left", 0.0f }, std::pair{ "Right", 2.0f } })
 			{
 				Entity ball = Test::AddSphereBody(scene, name, glm::vec3(x, 1.0f, 0.0f), 0.25f, BodyType::Dynamic);
@@ -1657,7 +1658,7 @@ namespace Engine {
 			cart.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, 3.0f, 0.0f);
 			cart.AddComponent<RigidBodyComponent>(RigidBodyComponent{ .Type = BodyType::Dynamic });
 			Entity seat = Test::AddBoxBody(scene, "Seat", glm::vec3(0.5f, 0.0f, 0.0f), glm::vec3(0.25f), std::nullopt, cart);
-			seat.AddComponent<ScriptComponent>().Script = ColliderScript;
+			seat.AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = ColliderScript, .Fields = {}, .ExecutionOrder = 0 });
 			Test::RecordingPhysicsListener listener;
 			Scope<PlaySession> session = StartSimulateSession(fixture, listener);
 			Test::RunTicks(*session, 90);
@@ -1698,7 +1699,7 @@ namespace Engine {
 				static_cast<void>(Test::AddBoxBody(scene, "Piece", glm::vec3(static_cast<float>(piece), 0.0f, 0.0f), glm::vec3(0.5f), std::nullopt, levelRoot));
 			static_cast<void>(Test::AddBoxBody(scene, "Step", glm::vec3(3.0f, 0.5f, 0.0f), glm::vec3(0.5f, 1.0f, 0.5f), std::nullopt, levelRoot));
 			for (const char* path : { "/Level/Piece[2]", "/Level/Step" })
-				scene.FindEntityByPath(path).AddComponent<ScriptComponent>().Script = ColliderScript;
+				scene.FindEntityByPath(path).AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = ColliderScript, .Fields = {}, .ExecutionOrder = 0 });
 			// A crate in the corner, on the third piece and against the step: two contacts whose normals differ, so Jolt keeps
 			// them in two manifolds (one per piece).
 			Entity crate = Test::AddBoxBody(scene, "Crate", glm::vec3(2.25f, 0.75f, 0.0f), glm::vec3(0.25f), BodyType::Dynamic);

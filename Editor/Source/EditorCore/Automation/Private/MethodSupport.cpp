@@ -4,6 +4,7 @@
 #include "EditorCore/Automation/ProjectMethods.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Private/EditorFileError.h"
+#include "EditorCore/Private/OpenScenes.h"
 #include "EditorCore/Scripting/EditorScriptService.h"
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/Automation/Methods/AutomationMethodContext.h"
@@ -31,6 +32,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <format>
 #include <map>
 #include <utility>
 #include <vector>
@@ -112,6 +114,38 @@ namespace Engine {
 				return {};
 			ENGINE_TRY_ASSIGN(const VfsPath path, GetOwnScenePath(editor));
 			return SaveOpenScene(editor, path);
+		}
+
+		Result<std::vector<std::string>> SaveDirtyOpenScenes(EditorContext& editor)
+		{
+			const std::vector<OpenSceneState> scenes = ListDirtyOpenScenes(editor);
+			for (const OpenSceneState& scene : scenes)
+			{
+				if (scene.Path.has_value())
+					continue;
+				if (scene.Addressed)
+					return std::unexpected(GetOwnScenePath(editor).error());
+				return std::unexpected(Error(ErrorCode::InvalidState, std::format("the open scene '{}' (open scene {}) was never saved", scene.Name, scene.Id))
+						.WithHint(std::format("save it first with scene.save {{scene: {}, path: \"Assets/Scenes/<Name>.scene\"}}", scene.Id)));
+			}
+			std::vector<std::string> saved;
+			for (const OpenSceneState& scene : scenes)
+			{
+				ENGINE_TRY_ASSIGN(const Scope<EditorSceneTargetScope> addressed, AddressOpenScene(editor, scene));
+				ENGINE_TRY(SaveOpenScene(editor, *scene.Path));
+				saved.push_back(ToProjectRelative(*scene.Path));
+			}
+			return saved;
+		}
+
+		Status CheckNoDirtyOpenScenes(const EditorContext& editor, std::string_view hint)
+		{
+			const std::vector<OpenSceneState> scenes = ListDirtyOpenScenes(editor);
+			if (scenes.empty())
+				return {};
+			const std::string message = scenes.size() == 1 ? std::format("the open scene {} has unsaved changes", FormatOpenSceneNames(scenes))
+														   : std::format("the open scenes {} have unsaved changes", FormatOpenSceneNames(scenes));
+			return std::unexpected(Error(ErrorCode::InvalidState, message).WithHint(std::string(hint)));
 		}
 
 		Status LoadSceneFile(const EditorContext& editor, Scene& scene, const VfsPath& path, LoadMode mode, UUIDGenerator* repairIds,
@@ -251,10 +285,16 @@ namespace Engine {
 				return std::unexpected(MakeParamError(ErrorCode::InvalidArgument, pointer, std::format("the value of '{}' must be an object of fields", info.GetName())));
 			if (info.GetName() == "Script")
 			{
-				const auto script = value.find("Script");
-				if (script != value.end() && !script->is_null())
+				// Every slot's script must be a Behaviour (Docs/Decisions/0031-m20-contract.md decision 17).
+				const auto slots = value.find("Scripts");
+				for (size_t slot = 0; slots != value.end() && slots->is_array() && slot < slots->size(); ++slot)
 				{
-					const std::string scriptPointer = JsonReader::AppendPointer(pointer, "Script");
+					const Json& entry = (*slots)[slot];
+					const auto script = entry.is_object() ? entry.find("Script") : entry.end();
+					if (!entry.is_object() || script == entry.end() || script->is_null())
+						continue;
+					const std::string scriptPointer =
+						JsonReader::AppendPointer(JsonReader::AppendPointer(JsonReader::AppendPointer(pointer, "Scripts"), slot), "Script");
 					const auto handle = UUID::FromString(JsonReader(*script).ReadString().value_or(std::string()));
 					if (!handle.has_value())
 						return std::unexpected(MakeParamError(ErrorCode::InvalidArgument, scriptPointer, "expected a script asset handle"));

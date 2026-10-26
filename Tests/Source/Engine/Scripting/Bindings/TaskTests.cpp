@@ -236,9 +236,9 @@ return Script.Define("Caller", Caller)
 )")
 						.has_value());
 				const Entity receiver = fixture.GetScene().CreateEntity("Receiver");
-				receiver.AddComponent<ScriptComponent>().Script = TypedAssetHandle<AssetType::Script>(receiverScript);
+				receiver.AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = TypedAssetHandle<AssetType::Script>(receiverScript), .Fields = {}, .ExecutionOrder = 0 });
 				const Entity caller = fixture.GetScene().CreateEntity("Caller");
-				caller.AddComponent<ScriptComponent>().Script = TypedAssetHandle<AssetType::Script>(callerScript);
+				caller.AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = TypedAssetHandle<AssetType::Script>(callerScript), .Fields = {}, .ExecutionOrder = 0 });
 				const Entity target = fixture.GetScene().CreateEntity("Target");
 				REQUIRE(fixture.Start().has_value());
 				REQUIRE(fixture.GetEngine()->GetTaskScheduler()->GetCount() == 1);

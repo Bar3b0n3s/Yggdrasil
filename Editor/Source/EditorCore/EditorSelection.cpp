@@ -49,11 +49,23 @@ namespace Engine {
 			if (std::find(unique.begin(), unique.end(), id) == unique.end())
 				unique.push_back(id);
 		}
+		m_UiState.SetSelectedAsset({});
+		// A play selection belongs to the open scene the session plays (decision 13), also while another tab is active.
+		if (target == SceneTarget::Play && !ShowsPlaySession(session))
+		{
+			if (OpenSceneDocument* played = FindDocument(m_PlayedScene); played != nullptr)
+			{
+				played->Selection = std::move(unique);
+				played->SelectionTarget = SceneTarget::Play;
+				played->SelectionSession = session->GetSerial();
+				played->SelectionSceneGeneration = session->GetSceneGeneration();
+				return {};
+			}
+		}
 		m_Selection = std::move(unique);
 		m_SelectionTarget = target;
 		m_SelectionSession = target == SceneTarget::Play ? session->GetSerial() : 0;
 		m_SelectionSceneGeneration = target == SceneTarget::Play ? session->GetSceneGeneration() : 0;
-		m_UiState.SetSelectedAsset({});
 		return {};
 	}
 
@@ -75,6 +87,9 @@ namespace Engine {
 		m_SelectionTarget = SceneTarget::Play;
 		m_SelectionSession = session->GetSerial();
 		m_SelectionSceneGeneration = session->GetSceneGeneration();
+		// The session plays the addressed (active) scene: the play selection, and the play scene in the UI, are that tab's.
+		m_PlayedScene = m_AddressedScene;
+		m_PlayedSession = session->GetSerial();
 	}
 
 	void EditorContext::RestoreSelection(std::vector<UUID> selection, SceneTarget target)

@@ -60,7 +60,7 @@ namespace Engine {
 			{
 				REQUIRE(fixture.AddScript(handle, "Assets/Scripts/" + name + ".luau", std::move(source)));
 				const Entity entity = fixture.GetScene().CreateEntity(name);
-				entity.AddComponent<ScriptComponent>().Script = TypedAssetHandle<AssetType::Script>(handle);
+				entity.AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = TypedAssetHandle<AssetType::Script>(handle), .Fields = {}, .ExecutionOrder = 0 });
 				return entity.GetUUID();
 			};
 			const UUID first = attach(AssetHandle(301), "First", R"(local T = {}
@@ -144,8 +144,8 @@ return Script.Define("Second", T))");
 				Test::SceneTestFixture source;
 				const Entity root = source.GetScene().CreateEntity("LeakyRoot");
 				const Entity child = source.GetScene().CreateEntity("InnocentChild", root);
-				root.AddComponent<ScriptComponent>().Script = TypedAssetHandle<AssetType::Script>(AssetHandle(311));
-				child.AddComponent<ScriptComponent>().Script = TypedAssetHandle<AssetType::Script>(AssetHandle(312));
+				root.AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = TypedAssetHandle<AssetType::Script>(AssetHandle(311)), .Fields = {}, .ExecutionOrder = 0 });
+				child.AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = TypedAssetHandle<AssetType::Script>(AssetHandle(312)), .Fields = {}, .ExecutionOrder = 0 });
 				const auto prefab = Prefab::CreateFromEntity(root, "LeakyPrefab");
 				REQUIRE(prefab.has_value());
 				const auto document = prefab->ToJson();

@@ -28,6 +28,8 @@ namespace Engine {
 				case EngineEventType::ScriptErrorRaised:            return "ScriptErrorRaised";
 				case EngineEventType::DiagnosticsChanged:           return "DiagnosticsChanged";
 				case EngineEventType::AutomationClientDisconnected: return "AutomationClientDisconnected";
+				case EngineEventType::SceneActivated:               return "SceneActivated";
+				case EngineEventType::SceneClosed:                  return "SceneClosed";
 			}
 			return {};
 		}

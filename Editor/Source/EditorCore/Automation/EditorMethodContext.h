@@ -49,15 +49,20 @@ namespace Engine {
 		// Lazily pins the editor's current script field snapshot for this request, after path resolution. No project is
 		// InvalidState; snapshot acquisition failures propagate. Methods without schema-dependent params never load it.
 		[[nodiscard]] Result<Ref<const IFieldSchemaSource>> GetFieldSchemaSnapshot() override;
-		// entity.update's Fields-only Script patch borrows its absent Script handle from the addressed entity, and
-		// prefab.instantiate's from the prefab's root (the component the per-instance values merge into). An explicit Script
-		// (including null), or removing/re-adding the component, never borrows the old handle. No scene writes. Errors:
-		// prefab.instantiate's for a prefab that does not resolve or load, located at /prefab.
+		// A Script slot that entity.update gives Fields without a Script borrows the absent handle of the addressed entity's
+		// slot at its index, and prefab.instantiate's that of the prefab root's slot at its index (the component the
+		// per-instance values merge into). An explicit Script (including null), or removing/re-adding the component, never
+		// borrows the old handle. No scene writes. Errors: prefab.instantiate's for a prefab that does not resolve or load,
+		// located at /prefab.
 		[[nodiscard]] Status CompleteParameterOwners(Json& params) override;
 
 		// The scene a request addresses (§13.4 "Target"): `target` as given when `given`, else the play scene for reads while
-		// playing (EditorPlayController) and the edit scene otherwise. Errors: InvalidState "no scene open" without an open
-		// edit scene, InvalidState "not playing" for the play scene without a session (located at /target). The pointer is
+		// playing (EditorPlayController) and the edit scene otherwise. The edit scene is the addressed open scene (the scene
+		// target's, else the active one). M20 (decision 16): with a scene target naming an open scene other than the one the
+		// play session started from (EditorPlayController::GetPlayedScene), the session is out of reach: reads address that
+		// scene's edit scene and "play" is InvalidArgument at /scene; without a scene target, or with one naming the played
+		// scene, the rules above apply whatever tab is active. Errors: InvalidState "no scene open" without an open edit
+		// scene, InvalidState "not playing" for the play scene without a session (located at /target). The pointer is
 		// non-owning and valid until the open scene or the play session changes.
 		[[nodiscard]] Result<Scene*> ResolveTargetScene(SceneTarget target, bool given, bool mutation) const override;
 
@@ -89,7 +94,8 @@ namespace Engine {
 		[[nodiscard]] EntitySummary MakeEntitySummary(ConstEntity entity) const override;
 
 		// The shared services of AutomationMethodContext over the editor: the play controller's session, StartPlay and StopPlay
-		// (EditorContext::GetPlay), the server's client names, the engine's event log, the server's view capture
+		// (EditorContext::GetPlay, which records the addressed open scene as the new session's played scene), the server's
+		// client names, the engine's event log, the server's view capture
 		// (ScreenshotCaptures::View; Unsupported without a device), the editor's scene-view camera
 		// (EditorContext::GetSceneViewCamera) and output files (AutomationServer::WriteOutputFile).
 		[[nodiscard]] PlaySession* GetPlaySession() const override;
@@ -103,7 +109,7 @@ namespace Engine {
 		[[nodiscard]] Result<std::string> ValidateReplayOutput(std::string_view path) const override;
 		[[nodiscard]] Result<std::string> WriteReplay(std::string_view path, const ReplayDocument& document) override;
 		[[nodiscard]] ScriptErrorStream* GetScriptErrors() const override;
-		[[nodiscard]] Result<ScriptEvaluation> EvalInEdit(std::string_view code, std::string_view entity) override;
+		[[nodiscard]] Result<ScriptEvaluation> EvalInEdit(std::string_view code, std::string_view entity, std::string_view behaviour) override;
 		[[nodiscard]] std::string GetClientName(ClientId client) const override;
 		[[nodiscard]] EventLog& GetEventLog() const override;
 		[[nodiscard]] Result<Image> CaptureView(const RenderSnapshot& snapshot, const ViewportScreenshotRequest& request) override;
@@ -115,8 +121,8 @@ namespace Engine {
 		// edit scene (none before scene.open or scene.new);
 		// Shutdown saves the open scene with save (InvalidState for a dirty scene without save or force, PermissionDenied for
 		// save in a read-only editor) and requests the exit (EditorContext::RequestShutdown); MakeSceneSummary reports the
-		// edit scene's file and dirty flag (Utils::MakeSceneSummary), and for the play scene the edit scene's file, never
-		// dirty; GetAssets is the EditorAssetManager; GetWallClockTime is the server's AutomationServerSpecification::WallClock.
+		// edit scene's file and dirty flag (Utils::MakeSceneSummary), and for the play scene the file and revision of the open
+		// scene it was played from (the addressed scene's when it belongs to none), never dirty; GetAssets is the EditorAssetManager; GetWallClockTime is the server's AutomationServerSpecification::WallClock.
 		[[nodiscard]] SessionHostDescription DescribeSession() const override;
 		[[nodiscard]] Result<SessionShutdownResult> Shutdown(const SessionShutdownParams& params) override;
 		[[nodiscard]] SceneSummary MakeSceneSummary(const Scene& scene) const override;
@@ -133,8 +139,8 @@ namespace Engine {
 		// InvalidState for an unavailable/minimized view; Unsupported only while this contract adapter is unimplemented.
 		[[nodiscard]] Result<ViewportPixelSize> GetViewportPixelSize(ViewportView view) const;
 	private:
-		// CompleteParameterOwners for prefab.instantiate: sets `script` (the Script object of params' components) to the
-		// Script handle of the prefab root's Script component, when it has one.
+		// CompleteParameterOwners for prefab.instantiate: sets the Script handle of each slot of `script` (the Script object
+		// of params' components) that gives Fields without one to that of the prefab root's slot at its index, when it has one.
 		[[nodiscard]] Status CompletePrefabScriptOwner(const Json& params, Json& script);
 	private:
 		Ref<const IFieldSchemaSource> m_FieldSchemas{};

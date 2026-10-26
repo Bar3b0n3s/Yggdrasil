@@ -167,7 +167,7 @@ namespace Engine {
 			{
 				const std::string path = std::format("Assets/Scripts/Leak{}.luau", name);
 				REQUIRE(fixture.Call("script.write", Json{ { "path", path }, { "source", leak } }).has_value());
-				REQUIRE(fixture.Call("entity.create", Json{ { "name", name }, { "components", Json{ { "Script", Json{ { "Script", path } } } } } }).has_value());
+				REQUIRE(fixture.Call("entity.create", Json{ { "name", name }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", path } } }) } } } } } }).has_value());
 			}
 			REQUIRE(fixture.Call("project.setSettings", Json{ { "patch", Json{ { "Scripting", Json{ { "MemoryLimitMB", 1 }, { "PauseOnError", false } } } } } }).has_value());
 			REQUIRE(fixture.Call("play.start", Json{ { "lockstep", true } }).has_value());
