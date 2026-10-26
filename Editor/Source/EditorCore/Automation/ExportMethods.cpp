@@ -5,6 +5,7 @@
 #include "EditorCore/Automation/EditorMethodContext.h"
 #include "EditorCore/Automation/Private/MethodSupport.h"
 #include "EditorCore/Export/Private/ExportPaths.h"
+#include "EditorCore/Native/NativeBuild.h"
 #include "Engine/Automation/Methods/AutomationTypes.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Automation/Protocol/PendingOperation.h"
@@ -269,6 +270,11 @@ namespace Engine {
 
 	void RegisterExportMethods(MethodRegistry& methods)
 	{
+		// The bounds project.export's timeout adds up (below): what cooking and writing the paks may take, and the smoke
+		// test's and the feature test's own bounds (SmokeTestTimeout in Exporter.cpp, RunTimeout in ExportFeatureTest.cpp).
+		constexpr uint32_t ExportPreparationSeconds = 1500;
+		constexpr uint32_t ExportSmokeTestSeconds = 300;
+		constexpr uint32_t ExportFeatureTestSeconds = 1800;
 		Json example = Json::object();
 		example["config"] = "Release";
 		example["smokeTest"] = true;
@@ -284,10 +290,12 @@ namespace Engine {
 				.RequiredParams = { "config" },
 				.ExposeAsTool = true,
 				.Mutates = true,
-				// The caller's bound, which the MCP bridge waits for: cooking, the native build and the paks, then the smoke
-				// test (at most 300 s, Exporter.cpp) and a testing export's feature test (at most 1800 s, ExportFeatureTest.cpp;
-				// Exporter.h steps 6 and 6a), which run one after the other.
-				.TimeoutSeconds = 3600,
+				// The caller's bound, which the MCP bridge waits for: the steps run one after the other, cooking and the paks
+				// (ExportPreparationSeconds), a game's native Runtime build (step 3a, at most NativeBuildBoundSeconds,
+				// NativeBuild.h: its wait for the machine-wide build lock and the build; the milestone review), the smoke test
+				// (at most ExportSmokeTestSeconds, Exporter.cpp) and a testing export's feature test (at most
+				// ExportFeatureTestSeconds, ExportFeatureTest.cpp; Exporter.h steps 6 and 6a).
+				.TimeoutSeconds = ExportPreparationSeconds + NativeBuildBoundSeconds + ExportSmokeTestSeconds + ExportFeatureTestSeconds,
 				.Examples = { { .Description = "Export a Release build and smoke-test it.", .Params = example },
 					{ .Description = "Export a Dist build that runs the project's test suites and replays.", .Params = testingExample } },
 			},

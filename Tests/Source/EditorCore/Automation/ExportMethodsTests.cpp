@@ -4,6 +4,7 @@
 
 #include "EditorCore/Commands/ProjectSettingsCommand.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Native/NativeBuild.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Core/FileSystem.h"
@@ -159,8 +160,9 @@ end)
 		// The review of W19.1 (Docs/Decisions/0030-m19-contract.md decision 10): the MCP bridge waits for a call as long as its
 		// method's timeoutSeconds, and after cooking a testing export runs the smoke test (at most 300 s, Exporter.cpp) and
 		// then the package's feature test (at most 1800 s, ExportFeatureTest.cpp), so the declared 900 s dropped the result of
-		// an export whose feature test ran long.
-		TEST_CASE("ExportMethods: project.export declares a timeout that outlasts its smoke test and its feature test")
+		// an export whose feature test ran long. The milestone review (decision 33): a game with Native/ first builds its
+		// Runtime (step 3a), bounded by NativeBuildBoundSeconds, which the declared 3600 s did not leave room for.
+		TEST_CASE("ExportMethods: project.export declares a timeout that outlasts its native build, its smoke test and its feature test")
 		{
 			constexpr uint32_t SmokeTestBoundSeconds = 300;
 			constexpr uint32_t FeatureTestBoundSeconds = 1800;
@@ -170,7 +172,7 @@ end)
 			methods.Freeze();
 			const MethodDescriptor* method = methods.Find("project.export");
 			REQUIRE(method != nullptr);
-			CHECK(method->Specification.TimeoutSeconds > SmokeTestBoundSeconds + FeatureTestBoundSeconds);
+			CHECK(method->Specification.TimeoutSeconds > NativeBuildBoundSeconds + SmokeTestBoundSeconds + FeatureTestBoundSeconds);
 		}
 
 		TEST_CASE("ExportMethods: project.export is Unsupported in an editor without build outputs")

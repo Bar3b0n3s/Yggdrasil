@@ -1048,7 +1048,7 @@ Example: Read the warnings and errors held in the log.
 Builds the native module in the editor's configuration (Windows; needs the user's Allow native code preference); resolves with the build's diagnostics. native.load then loads it.
 
 - Flags: tool `native_build`, pending
-- Timeout: 900 s
+- Timeout: 4260 s
 
 Param: none.
 
@@ -1693,7 +1693,7 @@ Example: Create the Tetris project.
 Exports the open project as a standalone game below Build/: the configuration's Runtime renamed after the project, the app-local CRT, Game.json, Data/Engine.pak and Data/Game.pak, optionally smoke-tested, or with testing a testing export whose game runs its suites and replays with --feature-test; resolves with the report.
 
 - Flags: tool `project_export`, mutates, pending
-- Timeout: 3600 s
+- Timeout: 7800 s
 - Required params: `config`
 
 | Param | Type | Required | Default | Description |

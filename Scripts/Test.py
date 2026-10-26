@@ -152,7 +152,8 @@ any project runs (games.check_distinct_projects, Docs/Decisions/0030-m19-contrac
     build fails the half with its first error, and the Dist half's editor gets the same preparation;
   - "games <Name> Dist", which the Release editor drives (in the Release half's session when Release runs too):
     project.export {config: Dist, testing: true, featureTest: true} (waited for --timeout plus the 1800 s bound of the
-    export's own feature-test run), whose result's executable must lie below its outputDirectory and whose manifest
+    export's own feature-test run, and for a game with Native/ plus the 4200 s bound of its native Runtime build, as is
+    the plain export below), whose result's executable must lie below its outputDirectory and whose manifest
     (Game.json, on macOS in the bundle's Contents/Resources) names the game (games.read_game_name), each a one-line
     failure otherwise, installed to bin/Exports/Dist/<Game>/, <Game> being that Name (ProjectSettings::Name, after which
     the exporter names the executable and the testing user data, whatever the file stem), without the testing user data
@@ -240,7 +241,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from Lib import coverage, exports, games, hardening, locks, paths, provenance
+from Lib import coverage, exports, games, hardening, locks, native_build, paths, provenance
 from Lib.process import (
     ToolNotFoundError,
     child_environment,
@@ -268,6 +269,10 @@ SUITE_TIMEOUT_SECONDS = 1800.0
 # Editor/Source/EditorCore/Export/ExportFeatureTest.cpp, Exporter.h step 6a): the games suite's Dist half waits that
 # much longer for such an export than --timeout, which bounds the export's other phases and the smoke test.
 EXPORT_FEATURE_TEST_RUN_SECONDS = 1800.0
+# The bound of a game's native Runtime build inside project.export (NativeBuildBoundSeconds in
+# Editor/Source/EditorCore/Native/NativeBuild.h, Exporter.h step 3a: its wait for the machine-wide build lock and the
+# build): the Dist half waits that much longer for each export of a game with Native/ (dist_export_timeout).
+EXPORT_NATIVE_BUILD_SECONDS = 4200.0
 # The doctest suites of the device-dependent stages (Tests/Source/Support/HeadlessGpuFixture.h: Test::GpuSuite and
 # Test::GoldenSuite). The unit stage runs every other suite (§15.8).
 GPU_TEST_SUITE = "GPU"
@@ -1941,13 +1946,26 @@ def locate_testing_package(result: dict[str, Any]) -> tuple[Path, Path, str]:
     return output_directory, relative, game
 
 
+def dist_export_timeout(arguments: argparse.Namespace, copy: GameCopy, feature_test: bool) -> float:
+    """How long the Dist half waits for a project.export of `copy`: --timeout, plus EXPORT_FEATURE_TEST_RUN_SECONDS for
+    an export that runs its own feature test (`feature_test`), plus EXPORT_NATIVE_BUILD_SECONDS for a game with Native/,
+    whose export builds its Runtime first (Docs/Decisions/0030-m19-contract.md decisions 10 and 33)."""
+    timeout = arguments.timeout
+    if feature_test:
+        timeout += EXPORT_FEATURE_TEST_RUN_SECONDS
+    if (copy.directory / native_build.NATIVE_DIRECTORY).is_dir():
+        timeout += EXPORT_NATIVE_BUILD_SECONDS
+    return timeout
+
+
 def check_game_export(client: Any, engine_client: Any, project: games.GameProject, copy: GameCopy,
                       hashes: dict[str, dict[str, str]], work: Path, data: dict[str, object],
                       arguments: argparse.Namespace, console: Console) -> Step:
     """The Dist half on the open session of the Release editor (decision 8 step 3): project.export {config: Dist,
-    testing: true, featureTest: true} (its call bounded by --timeout plus EXPORT_FEATURE_TEST_RUN_SECONDS, the bound of
-    the export's own feature-test run), located with locate_testing_package (its executable from the result, the game's
-    Name from its manifest, Docs/Decisions/0027-m17-contract.md decision 4, B2) and installed to
+    testing: true, featureTest: true} (its call bounded by dist_export_timeout: --timeout plus the bound of the export's
+    own feature-test run, and of its native Runtime build for a game with Native/), located with
+    locate_testing_package (its executable from the result, the game's Name from its manifest,
+    Docs/Decisions/0027-m17-contract.md decision 4, B2) and installed to
     bin/Exports/Dist/<Game>/ without the testing user data the export's own feature-test run left in it (so the check of
     the user data sees only this half's run), the package's --feature-test run from a temporary working directory (its
     reports copied to games.dist_report_path with --junit, so the export stage's FeatureTest-Dist reports are never
@@ -1963,7 +1981,7 @@ def check_game_export(client: Any, engine_client: Any, project: games.GameProjec
     console.heading(f"{name}: project.export {{config: {DIST_HALF}, testing: true, featureTest: true}}")
     try:
         result = client.call("project.export", {"config": DIST_HALF, "testing": True, "featureTest": True},
-                             timeout=arguments.timeout + EXPORT_FEATURE_TEST_RUN_SECONDS)
+                             timeout=dist_export_timeout(arguments, copy, feature_test=True))
     except engine_client.EngineError as error:
         return Step(name, Status.FAILED, f"the testing {DIST_HALF} export failed: {describe_export_error(error)}",
                     time.monotonic() - started, data=data)
@@ -2044,7 +2062,8 @@ def check_game_export(client: Any, engine_client: Any, project: games.GameProjec
 
     console.heading(f"{name}: project.export {{config: {DIST_HALF}, smokeTest: true}}")
     try:
-        smoke = client.call("project.export", {"config": DIST_HALF, "smokeTest": True}, timeout=arguments.timeout)
+        smoke = client.call("project.export", {"config": DIST_HALF, "smokeTest": True},
+                            timeout=dist_export_timeout(arguments, copy, feature_test=False))
         smoke_failures, smoke_warnings = games.check_smoke(smoke, arguments.require_gpu)
         failures += smoke_failures
         warnings += smoke_warnings
@@ -2425,8 +2444,9 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=SUITE_TIMEOUT_SECONDS,
                         help=f"seconds per Tests, automation or FeatureTest run, per export of the export suite, and "
                              f"per editor call and exported run of the games suite, whose testing Dist export waits "
-                             f"{EXPORT_FEATURE_TEST_RUN_SECONDS:.0f} s more for its own feature-test run (default: "
-                             f"{SUITE_TIMEOUT_SECONDS:.0f})")
+                             f"{EXPORT_FEATURE_TEST_RUN_SECONDS:.0f} s more for its own feature-test run and whose "
+                             f"Dist exports of a game with Native/ {EXPORT_NATIVE_BUILD_SECONDS:.0f} s more for its "
+                             f"native Runtime build (default: {SUITE_TIMEOUT_SECONDS:.0f})")
     parser.add_argument("--merge-coverage", nargs=3, metavar=("EDITOR_JSON", "RELEASE_JSON", "DIST_JSON"),
                         help="run only the cross-mode coverage merge of three FeatureTest reports (§15.6) and print "
                              "one 'merge: <rule>: <subject>' line per failure")

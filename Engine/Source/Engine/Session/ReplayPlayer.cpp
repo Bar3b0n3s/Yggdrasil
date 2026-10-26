@@ -19,11 +19,12 @@ namespace Engine {
 	namespace {
 
 		// M17 friction F03 (ReplayPlayer.h): the hint contains the causes word for word.
-		constexpr std::string_view ReplayDivergenceCauses = "a serialized component of the scene (the look's included), a script, an asset or the engine "
-															"changed since it was recorded, or the play is not deterministic";
+		constexpr std::string_view ReplayDivergenceCauses = "a serialized component of the scene (the look's included), a script, the game's native module, "
+															"an asset or the engine changed since it was recorded, or the play is not deterministic";
 		constexpr std::string_view ReplayDivergenceHint = "the world differs from the recording: a serialized component of the scene (the look's "
-														  "included), a script, an asset or the engine changed since it was recorded, or the play is not "
-														  "deterministic; re-record it with test.run {record} (the game-building skill, \"Re-recording replays\")";
+														  "included), a script, the game's native module, an asset or the engine changed since it was "
+														  "recorded, or the play is not deterministic; re-record it with test.run {record} (the "
+														  "game-building skill, \"Re-recording replays\")";
 		static_assert(ReplayDivergenceHint.find(ReplayDivergenceCauses) != std::string_view::npos);
 		// What a checkpoint that differs means in a playback WithoutInput, the input check: the expected outcome of a replay
 		// whose verification depends on its input, never a reason to re-record it, so the causes are not named there.

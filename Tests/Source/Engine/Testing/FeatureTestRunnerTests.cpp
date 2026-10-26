@@ -1979,7 +1979,7 @@ end))");
 			// M16 friction S3-01: the hint names the input check's real rule (no checkpoint and no ending showed the input),
 			// not a trailing restart as such, which a checkpoint that saw the play lets through (below).
 			CHECK(refused->GetHint().find("restart") != std::string::npos);
-			CHECK(refused->GetHint().find(std::format("never shows in the world at a checkpoint (one every {} ticks) or at its end", ReplayCheckpointInterval))
+			CHECK(refused->GetHint().find(std::format("never shows in the world at a checkpoint (one every {} ticks), at its end or in an expectation", ReplayCheckpointInterval))
 				!= std::string::npos);
 			CHECK_FALSE(runner.TakeRecording());
 			CHECK(host.ReplaySessions == 2); // the verification passed, then the input check reproduced it
@@ -2018,6 +2018,37 @@ end))");
 			CHECK(checkpointed.Candidate.Checkpoints[0].Tick == 60);
 			CHECK(checkpointed.Candidate.Checkpoints[1].Tick == 120);
 			CHECK(checkpointed.Candidate.FinalTick == passed.Suites[0].Ticks);
+		}
+
+		// The milestone review (Docs/Decisions/0030-m19-contract.md decision 6, Architecture §13.6): test.run {record, expect}'s
+		// input check plays the recording's expectations too, so its refusal says, as input.record's does, that the run without
+		// input also satisfied them, and that an expectation only the input satisfies makes the recording depend on its input.
+		TEST_CASE("TestRunner: an input-independent recording with expectations is refused naming them and suggesting one only the input satisfies")
+		{
+			RunnerHost host;
+			host.InputDriven();
+			// The play-then-restart autopilot ends idle at tick 30, so the run without input reproduces its final hash, and the
+			// expectation holds without the input too.
+			host.Suite(R"(return Test.Suite("Autopilot",function()
+	Test.Case("play then restart",function()
+		Test.InjectKey("Space","Down"); Test.WaitTicks(10)
+		Test.InjectKey("Space","Up"); Test.WaitTicks(4)
+		Test.InjectKey("R","Tap"); Test.WaitTicks(15)
+	end)
+end))");
+			FeatureTestRunOptions options{ .Record = true };
+			AddRecordExpectation(options, 2, "Scene.FindByName('Driver') ~= nil");
+			FeatureTestRunner runner;
+			REQUIRE(runner.Begin(host, options));
+			const std::optional<Error> refused = host.RunToEnd(runner);
+			REQUIRE(refused.has_value());
+			CHECK(refused->GetCode() == ErrorCode::Validation);
+			CHECK(refused->GetMessageText().find("does not depend on its input") != std::string::npos);
+			CHECK(refused->GetMessageText().find("its 1 expectation(s)") != std::string::npos);
+			CHECK(refused->GetHint().find("in an expectation") != std::string::npos);
+			CHECK(refused->GetHint().find("add an expectation (expect) that only the input satisfies") != std::string::npos);
+			CHECK_FALSE(runner.TakeRecording());
+			CHECK(host.ReplaySessions == 2); // the verification passed, then the input check reproduced it, the expectation included
 		}
 
 		// M16 friction S3-03: a recording's result said nothing about its input check. The runner keeps where the input-free

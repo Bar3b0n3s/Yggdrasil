@@ -104,7 +104,9 @@ namespace Engine {
 
 	// M17 friction F03: what a replay whose state hash differs from the recording's at a checkpoint or at its final tick
 	// means. The state hash covers every serialized component, the look's included (PostProcess, Environment, the lights,
-	// Camera, Text), so tuning the look after a recording fails its replay like any other change.
+	// Camera, Text), so tuning the look after a recording fails its replay like any other change. A game's native module is
+	// simulation code (Docs/Decisions/0030-m19-contract.md decision 28), which the start fingerprint does not record, so
+	// the causes name it (the milestone review).
 	// Both belong only to a playback with the replay's input, never to one WithoutInput (ReplayPlaybackOptions).
 	//   GetReplayDivergenceCauses: the causes, which ReplayPlaybackResult::StopReason names for a checkpoint that differs
 	//   unless ReplayPlaybackOptions::NameDivergenceCauses is false.

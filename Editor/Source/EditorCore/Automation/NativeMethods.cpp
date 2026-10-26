@@ -6,6 +6,7 @@
 #include "EditorCore/Commands/AssetEditCommand.h"
 #include "EditorCore/Commands/SceneEdit.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Native/NativeBuild.h"
 #include "EditorCore/Native/NativeModuleHost.h"
 #include "Engine/Automation/Methods/SharedMethodSupport.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
@@ -545,7 +546,9 @@ namespace Engine {
 			{ .Name = "native.build",
 				.Description = "Builds the native module in the editor's configuration (Windows; needs the user's Allow native code preference); resolves with the build's diagnostics. native.load then loads it.",
 				.ExposeAsTool = true,
-				.TimeoutSeconds = 900,
+				// The caller's bound, which the MCP bridge waits for: the build's own (NativeBuildBoundSeconds: its wait for the
+				// machine-wide build lock and the build, NativeBuild.h) and a minute to resolve (the milestone review).
+				.TimeoutSeconds = NativeBuildBoundSeconds + 60,
 				.Examples = { { .Description = "Build the native module.", .Params = Json::object() } } },
 			&Automation::NativeBuild);
 		methods.Add({ .Name = "native.load",

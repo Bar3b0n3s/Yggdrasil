@@ -1156,11 +1156,12 @@ namespace Engine {
 				if (playback.Passed)
 				{
 					return std::unexpected(Error(ErrorCode::Validation, std::format("the recording's outcome does not depend on its input: the same scene, seed and parameters run without its {} "
-																					"input event(s) reproduce its final state hash at tick {} and its {} checkpoint(s)",
-																			Recording->Events.size(), Recording->FinalTick, Recording->Checkpoints.size()))
+																					"input event(s) reproduce its final state hash at tick {}, its {} checkpoint(s) and its {} expectation(s)",
+																			Recording->Events.size(), Recording->FinalTick, Recording->Checkpoints.size(), Recording->Expect.size()))
 							.WithHint(std::format("end the recording while the played state is still in the scene: a recording is refused only when its input never shows in the "
-												  "world at a checkpoint (one every {0} ticks) or at its end, as in one shorter than {0} ticks that ends idle, input that "
-												  "changes only script state, or play after the last checkpoint that a restart undoes",
+												  "world at a checkpoint (one every {0} ticks), at its end or in an expectation, as in one shorter than {0} ticks that ends "
+												  "idle, input that changes only script state, or play after the last checkpoint that a restart undoes; or add an "
+												  "expectation (expect) that only the input satisfies",
 								ReplayCheckpointInterval)));
 				}
 				// Where the check first differed: a playback that continued past its failed checkpoints keeps the first.

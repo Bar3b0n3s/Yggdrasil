@@ -158,7 +158,7 @@ A replay is recorded by a test-only **recording suite** that plays like a player
 
 ## 9. Re-recording replays
 
-When an engine change legitimately alters simulation results (a physics fix, a new serialized field, a changed default), or the scene changes after recording (the look included: a `PostProcess`, light or `Camera` value), replay hashes change and their verification fails, its hint saying that the world differs from the recording:
+When an engine change legitimately alters simulation results (a physics fix, a new serialized field, a changed default), or the scene (the look included: a `PostProcess`, light or `Camera` value) or the game's native module changes after recording, replay hashes change and their verification fails, its hint saying that the world differs from the recording:
 - Re-run each recording suite with `test_run {filter, record}` through automation, so provenance and the transcript record the new replay; verify it twice and run the input check again (§7).
 - After a gameplay change, re-record a replay when it must cover the new behaviour: a matching hash only means the worlds matched at each checkpoint and at the end, and script state that never reached the world is not compared.
 - The review of the change states why the hashes changed. A verifier's hash never replaces a recorded one by hand.

@@ -299,21 +299,9 @@ namespace Engine {
 							.WithHint("run python Scripts/Generate.py, then build the editor again"));
 				}
 				const std::filesystem::path repository = FileSystem::PathFromUtf8(ENGINE_REPO_ROOT);
-				std::vector<std::string> arguments = {
-					FileSystem::PathToUtf8(repository / FileSystem::PathFromUtf8(NativeBuildScript)),
-					"--project",
-					FileSystem::PathToUtf8(request.ProjectRoot),
-					"--kind",
-					std::string(GetBuildKindArgument(request.Kind)),
-					"--config",
-					std::string(ExportConfigurationToString(request.Configuration)),
-					"--out",
-					FileSystem::PathToUtf8(request.OutputDirectory),
-					"--json",
-				};
 				ENGINE_TRY_ASSIGN(Process process, Process::Spawn({
 													   .Executable = FileSystem::PathFromUtf8(python),
-													   .Arguments = std::move(arguments),
+													   .Arguments = MakeNativeBuildArguments(request, repository),
 													   .WorkingDirectory = repository,
 													   .Environment = {},
 												   }));
@@ -338,6 +326,26 @@ namespace Engine {
 	Scope<INativeBuildBackend> CreateNativeBuildBackend()
 	{
 		return CreateScope<Utils::ProcessNativeBuildBackend>();
+	}
+
+	std::vector<std::string> MakeNativeBuildArguments(const NativeBuildRequest& request, const std::filesystem::path& repository)
+	{
+		return {
+			FileSystem::PathToUtf8(repository / FileSystem::PathFromUtf8(Utils::NativeBuildScript)),
+			"--project",
+			FileSystem::PathToUtf8(request.ProjectRoot),
+			"--kind",
+			std::string(Utils::GetBuildKindArgument(request.Kind)),
+			"--config",
+			std::string(ExportConfigurationToString(request.Configuration)),
+			"--out",
+			FileSystem::PathToUtf8(request.OutputDirectory),
+			"--timeout",
+			std::to_string(NativeBuildTimeoutSeconds),
+			"--lock-timeout",
+			std::to_string(NativeBuildLockTimeoutSeconds),
+			"--json",
+		};
 	}
 
 	bool HasNativeModuleDirectory(const std::filesystem::path& projectRoot)

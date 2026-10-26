@@ -4,10 +4,13 @@
 #include "EditorCore/Automation/ProvenanceRecorder.h"
 #include "EditorCore/EditorActions.h"
 #include "EditorCore/EditorPreferences.h"
+#include "EditorCore/Native/NativeBuild.h"
 #include "EditorCore/Native/NativeModuleHost.h"
+#include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Support/AutomationTestClient.h"
+#include "Support/EditorTestFixture.h"
 #include "Support/FakeNativeBackends.h"
 #include "Support/NativeTestModule.h"
 #include "Support/TempDirectory.h"
@@ -90,6 +93,20 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
+		// The milestone review (Docs/Decisions/0030-m19-contract.md decisions 30 and 32): the MCP bridge waits for a call as
+		// long as its method's timeoutSeconds, and every native build runs under NativeBuild.h's bounds (its wait for the
+		// machine-wide build lock and the build), so the declared 900 s gave up on a build that waited for the lock.
+		TEST_CASE("NativeMethods: native.build declares a timeout that outlasts its build's bound")
+		{
+			Test::EditorTestFixture fixture("NativeBuildTimeout");
+			MethodRegistry methods(fixture.GetEngine().GetTypeRegistry());
+			RegisterNativeMethods(methods);
+			methods.Freeze();
+			const MethodDescriptor* method = methods.Find("native.build");
+			REQUIRE(method != nullptr);
+			CHECK(method->Specification.TimeoutSeconds > NativeBuildBoundSeconds);
+		}
+
 		// Docs/Decisions/0030-m19-contract.md decisions 29 and 32 (N-D): the preference is the user's. While it is off,
 		// native.build and native.load are refused, native.status reports it, and no method takes it as a param or changes it.
 		TEST_CASE("NativeMethods: native.build and native.load are refused while the preference is off, and no method changes it")

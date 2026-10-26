@@ -13,6 +13,8 @@
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Scripting/ScriptLimits.h"
 #include "Engine/Session/PlaySession.h"
+#include "Engine/Session/ReplayPlayer.h"
+#include "Engine/Session/ReplayRecorder.h"
 #include "Support/ExpectLog.h"
 #include "Support/InMemoryAssetManager.h"
 #include "Support/NativeTestModule.h"
@@ -211,6 +213,16 @@ namespace Engine {
 			REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
 			return std::move(*session);
 		}
+
+		// Evaluates nothing: the replays below have no expectations.
+		class NoExpectations final : public IReplayEvaluator
+		{
+		public:
+			[[nodiscard]] Result<Json> Evaluate(PlaySession& /*session*/, const ReplayBytecodeExpectation& /*expectation*/) override
+			{
+				return MakeError(ErrorCode::InvalidState, "the replay has no expectations");
+			}
+		};
 
 		// A mover and a spinner with their native components, in `scene`.
 		void PopulateNativeScene(Scene& scene, const NativeModuleTypes& types, UUID& mover, UUID& spinner)
@@ -543,6 +555,72 @@ namespace Engine {
 			const NativeEntityComponents written = ReadNativeComponents(session->GetScene().FindEntityByPath("/Loaded"), types.get());
 			REQUIRE(written.Registered.size() == 1);
 			CHECK(written.Registered[0].second.Get() == ParseJson(R"({"DegreesPerSecond": 10, "Axis": [0, 1, 0], "Turns": 1})"));
+		}
+
+		// The milestone review (Docs/Decisions/0030-m19-contract.md decisions 2 and 28): a game's native module is simulation
+		// code that the start fingerprint does not record, so a replay recorded with one module and played with a changed one
+		// fails at its first checkpoint naming no change, and its divergence causes name the native module.
+		TEST_CASE("NativeWorld: a replay played with a changed native module names the module among its divergence causes")
+		{
+			Test::SceneTestFixture fixture;
+			const Ref<const NativeModuleTypes> recordedModule = RequireTestTypes(Test::GetNativeTestModule());
+			UUID mover{};
+			UUID spinner{};
+			PopulateNativeScene(fixture.GetScene(), *recordedModule, mover, spinner);
+			ReplayHeader header;
+			header.Scene = { UUID(0x4E570002), "Assets/Scenes/Native.scene" };
+			header.Seed = MakeNativeSpecification(fixture, recordedModule).Seed;
+			header.EngineVersion = "1";
+			header.Config = "Debug";
+
+			const Scope<PlaySession> recorded = RequireSession(MakeNativeSpecification(fixture, recordedModule), fixture.GetScene());
+			ReplayRecorder recorder;
+			REQUIRE(recorder.Begin(header, *recorded));
+			for (uint64_t tick = 0; tick < 70; ++tick)
+			{
+				recorder.CaptureCheckpoint(*recorded);
+				recorded->Tick();
+				REQUIRE(recorder.CaptureAppliedInput(tick, recorded->GetInput().GetLastAppliedEvents()));
+			}
+			const Result<ReplayDocument> document = recorder.Finish(*recorded);
+			REQUIRE_MESSAGE(document.has_value(), document.error().ToString());
+			REQUIRE(document->Fingerprint.has_value());
+			REQUIRE(document->Checkpoints.size() == 1);
+			auto replay = CreateRef<ReplayData>();
+			replay->Header = header;
+			replay->FinalTick = 70;
+			replay->FinalStateHash = document->FinalStateHash;
+			replay->Checkpoints = document->Checkpoints;
+			replay->Fingerprint = document->Fingerprint;
+
+			const auto play = [&fixture, &replay](Ref<const NativeModuleTypes> module)
+			{
+				const Scope<PlaySession> session = RequireSession(MakeNativeSpecification(fixture, std::move(module)), fixture.GetScene());
+				ReplayPlayer player;
+				REQUIRE(player.Begin(replay, *session, { .Verify = true, .StrictHash = true }));
+				NoExpectations evaluator;
+				bool complete = false;
+				for (uint32_t step = 0; step < 1000 && !complete; ++step)
+				{
+					const Result<bool> advanced = player.Advance(*session, evaluator);
+					REQUIRE_MESSAGE(advanced.has_value(), advanced.error().ToString());
+					complete = *advanced;
+				}
+				REQUIRE(complete);
+				Result<ReplayPlaybackResult> result = player.GetResult();
+				REQUIRE(result.has_value());
+				return std::move(*result);
+			};
+			CHECK(play(recordedModule).Passed);
+
+			// The same types without their systems: the module's code changed, its scene data did not.
+			const ReplayPlaybackResult changed = play(RequireTestTypes({ .ApiVersion = NativeApiVersion, .Register = &RegisterTestTypes }));
+			CHECK_FALSE(changed.Passed);
+			CHECK(changed.CheckpointFailed);
+			CHECK(changed.Changes.empty());
+			CHECK(changed.StopReason.find(GetReplayDivergenceCauses()) != std::string::npos);
+			CHECK(GetReplayDivergenceCauses().find("the game's native module") != std::string_view::npos);
+			CHECK(GetReplayDivergenceHint().find(GetReplayDivergenceCauses()) != std::string_view::npos);
 		}
 	}
 

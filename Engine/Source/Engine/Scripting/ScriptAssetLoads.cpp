@@ -17,9 +17,11 @@
 // AstExprGlobal, while a local or parameter named Assets is an AstExprLocal and a field named Assets an AstExprIndexName's
 // index, so neither counts. Type annotations are AstType nodes, which Luau's AstVisitor does not enter by default, so
 // typeof(Assets.Load) in an annotation is not a use either. The sandbox keeps the globals table _G (Sandbox.cpp removes
-// getfenv and setfenv, never _G), so _G.Assets and _G["Assets"] are the global Assets too, and _G reached any other way
-// (_G[<expression>], passed, stored, rawget(_G, ...)) may reach it. The visitor handles both globals where they appear
-// below a call, a field access or an index, and every other place they appear is a computed use.
+// getfenv and setfenv, never _G), and the base library's _G._G is _G again, so the globals table is _G or its field _G by
+// a constant name at any depth (_G._G, _G["_G"]): its field Assets is the global Assets too, and the table reached any
+// other way (_G[<expression>], _G._G on its own, passed, stored, rawget(_G, ...), a method call _G:rawget(...)) may reach
+// it. The visitor handles both globals where they appear below a call, a field access or an index, and every other place
+// they appear is a computed use.
 
 namespace Engine {
 
@@ -57,13 +59,10 @@ namespace Engine {
 			return std::nullopt;
 		}
 
-		[[nodiscard]] bool IsGlobalsTable(const Luau::AstExpr* expression)
-		{
-			const auto* global = expression->as<Luau::AstExprGlobal>();
-			return global != nullptr && global->name == GlobalsTable;
-		}
+		[[nodiscard]] bool IsGlobalsTable(const Luau::AstExpr* expression);
 
-		// The field of _G that `expression` reads by a constant name: _G.<name> or _G["<name>"]; nullopt for anything else.
+		// The field of the globals table that `expression` reads by a constant name: <globals>.<name> or
+		// <globals>["<name>"]; nullopt for anything else.
 		[[nodiscard]] std::optional<std::string_view> ReadGlobalsField(const Luau::AstExpr* expression)
 		{
 			if (const auto* field = expression->as<Luau::AstExprIndexName>(); field != nullptr && IsGlobalsTable(field->expr))
@@ -76,12 +75,32 @@ namespace Engine {
 			return std::nullopt;
 		}
 
-		// Whether `expression` is the global Assets: by its name, or as _G.Assets or _G["Assets"].
+		// Whether `expression`, possibly in parentheses or under a type assertion, is the globals table: the global _G, or
+		// its field _G read by a constant name, at any depth (_G._G, _G["_G"]), since the base library's _G._G is _G. The
+		// depth is bounded by the parser's recursion limit, which suffix chains count against.
+		[[nodiscard]] bool IsGlobalsTable(const Luau::AstExpr* expression)
+		{
+			expression = StripWrappers(expression);
+			if (const auto* global = expression->as<Luau::AstExprGlobal>())
+				return global->name == GlobalsTable;
+			return ReadGlobalsField(expression) == std::string_view(GlobalsTable);
+		}
+
+		// Whether `expression`, possibly in parentheses or under a type assertion, is the global Assets: by its name, or as
+		// the globals table's field Assets (_G.Assets, _G["Assets"], _G._G.Assets).
 		[[nodiscard]] bool IsAssetsGlobal(const Luau::AstExpr* expression)
 		{
+			expression = StripWrappers(expression);
 			if (const auto* global = expression->as<Luau::AstExprGlobal>())
 				return global->name == AssetsGlobal;
 			return ReadGlobalsField(expression) == std::string_view(AssetsGlobal);
+		}
+
+		// Whether a field of the globals table named `name`, reached by itself (not below a field access or a call), hands
+		// on a table that may reach Assets: Assets itself, or the globals table again (_G._G).
+		[[nodiscard]] bool IsHandedOnGlobalsField(std::string_view name)
+		{
+			return name == AssetsGlobal || name == GlobalsTable;
 		}
 
 		// Whether `expression` is Assets.Load or Assets:Load on the global Assets.
@@ -101,17 +120,25 @@ namespace Engine {
 
 			bool visit(Luau::AstExprCall* node) override
 			{
-				if (!IsAssetsLoad(node->func))
-					return true;
-				// Assets.Load(<literal>): a literal load. With another argument, none, more than one, or called as a method (which
-				// passes Assets itself), the reference is computed.
-				std::optional<std::string> literal;
-				if (!node->self && node->args.size == 1)
-					literal = ReadStringLiteral(node->args.data[0]);
-				Add(node->location, std::move(literal));
-				for (Luau::AstExpr* argument : node->args)
-					argument->visit(this);
-				return false;
+				if (IsAssetsLoad(node->func))
+				{
+					// Assets.Load(<literal>): a literal load. With another argument, none, more than one, or called as a method
+					// (which passes Assets itself), the reference is computed.
+					std::optional<std::string> literal;
+					if (!node->self && node->args.size == 1)
+						literal = ReadStringLiteral(node->args.data[0]);
+					Add(node->location, std::move(literal));
+					VisitArguments(*node);
+					return false;
+				}
+				// <globals>:<name>(...) passes the globals table to the function it reads, as _G:rawget("Assets") does.
+				if (const auto* method = node->func->as<Luau::AstExprIndexName>(); node->self && method != nullptr && IsGlobalsTable(method->expr))
+				{
+					Add(node->location, std::nullopt);
+					VisitArguments(*node);
+					return false;
+				}
+				return true;
 			}
 
 			bool visit(Luau::AstExprIndexName* node) override
@@ -124,11 +151,11 @@ namespace Engine {
 						Add(node->location, std::nullopt);
 					return false;
 				}
-				// _G.<name>: _G.Assets reached here (not below a field access or a call) is the global Assets used other than
-				// by a field name; any other field of _G is not Assets.
+				// <globals>.<name>: <globals>.Assets or <globals>._G reached here (not below a field access or a call) hands
+				// on the global Assets or the globals table; any other field of the globals table is not Assets.
 				if (IsGlobalsTable(node->expr))
 				{
-					if (node->index == AssetsGlobal)
+					if (IsHandedOnGlobalsField(node->index.value))
 						Add(node->location, std::nullopt);
 					return false;
 				}
@@ -146,9 +173,9 @@ namespace Engine {
 				}
 				if (IsGlobalsTable(node->expr))
 				{
-					// _G["<name>"] reads that field, as _G.<name> does; _G[<expression>] may read Assets.
+					// <globals>["<name>"] reads that field, as <globals>.<name> does; <globals>[<expression>] may read Assets.
 					const std::optional<std::string_view> name = ReadGlobalsField(node);
-					if (!name.has_value() || *name == AssetsGlobal)
+					if (!name.has_value() || IsHandedOnGlobalsField(*name))
 						Add(node->location, std::nullopt);
 					node->index->visit(this);
 					return false;
@@ -165,6 +192,12 @@ namespace Engine {
 				return false;
 			}
 		private:
+			void VisitArguments(Luau::AstExprCall& call)
+			{
+				for (Luau::AstExpr* argument : call.args)
+					argument->visit(this);
+			}
+
 			void Add(const Luau::Location& location, std::optional<std::string> literal)
 			{
 				ScriptAssetLoad load;

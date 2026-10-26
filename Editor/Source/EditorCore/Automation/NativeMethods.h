@@ -193,8 +193,8 @@ namespace Engine {
 	// Registers the enum "NativeTypeRole" and the structs above ("NativeBuildDiagnostic" included).
 	void RegisterNativeMethodTypes(TypeRegistry& registry);
 	// The seven editor-only methods, every one a tool. status, read and getComponents: pure reads, AllowedInBatch. write and
-	// setComponents: Mutates, SupportsDryRun, AllowedInBatch. build: pending (900 s). load: immediate, neither a batch op nor
-	// a dry run.
+	// setComponents: Mutates, SupportsDryRun, AllowedInBatch. build: pending (NativeBuildBoundSeconds and a minute,
+	// NativeBuild.h). load: immediate, neither a batch op nor a dry run.
 	void RegisterNativeMethods(MethodRegistry& methods);
 
 }

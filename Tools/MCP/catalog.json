@@ -1128,7 +1128,7 @@
 			},
 			"mutates": false,
 			"supportsDryRun": false,
-			"timeoutSeconds": 900
+			"timeoutSeconds": 4260
 		},
 		{
 			"name": "native_get_components",
@@ -1731,7 +1731,7 @@
 			},
 			"mutates": true,
 			"supportsDryRun": false,
-			"timeoutSeconds": 3600
+			"timeoutSeconds": 7800
 		},
 		{
 			"name": "project_get_settings",

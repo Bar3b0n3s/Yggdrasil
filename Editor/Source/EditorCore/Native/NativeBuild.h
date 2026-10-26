@@ -20,7 +20,8 @@
 // the engine, compiles and links with MSBuild and the vendor cache under the machine-wide build lock, and writes the build
 // record NativeBuild.json. The editor starts it as one process by fixed paths with fixed arguments (§13.2 as amended by
 // decision 33): the interpreter Scripts/Generate.py recorded (ENGINE_PYTHON_EXECUTABLE) running
-// <repository>/Scripts/BuildNative.py --project <root> --kind module|runtime --config <Debug|Release|Dist> --out <dir> --json,
+// <repository>/Scripts/BuildNative.py --project <root> --kind module|runtime --config <Debug|Release|Dist> --out <dir>
+// --timeout <NativeBuildTimeoutSeconds> --lock-timeout <NativeBuildLockTimeoutSeconds> --json (MakeNativeBuildArguments),
 // never an argument a request supplies. Windows backends only (ADR 0028 decision 10): on Linux and macOS
 // CreateNativeBuildBackend's Start refuses with SharedLibrary::CheckSupported's Unsupported, naming the platform, and no build
 // is written there.
@@ -30,6 +31,19 @@ namespace Engine {
 	// The project directory of a game's native module (decision 26), and the build records' file name.
 	inline constexpr std::string_view NativeSourceDirectoryName = "Native";
 	inline constexpr std::string_view NativeBuildRecordFileName = "NativeBuild.json";
+
+	// The bounds every build runs under (the milestone review), which the backend passes Scripts/BuildNative.py: it waits at
+	// most NativeBuildLockTimeoutSeconds for the machine-wide build lock (--lock-timeout), and its deadline
+	// (--timeout, NativeBuildTimeoutSeconds) starts before that wait, so it bounds the whole build. Past the deadline only
+	// premake's own bound (BuildNative.py's PREMAKE_TIMEOUT_SECONDS, 300 s) and the steps after the compile (the second hash of
+	// the sources, the record) still run, which NativeBuildMarginSeconds covers: a build's process ends within
+	// NativeBuildBoundSeconds, which the timeouts of native.build and of project.export (its NativeBuild step, Exporter.h step
+	// 3a) declare room for.
+	inline constexpr uint32_t NativeBuildLockTimeoutSeconds = 1800;
+	inline constexpr uint32_t NativeBuildTimeoutSeconds = 3600;
+	inline constexpr uint32_t NativeBuildMarginSeconds = 600;
+	inline constexpr uint32_t NativeBuildBoundSeconds = NativeBuildTimeoutSeconds + NativeBuildMarginSeconds;
+	static_assert(NativeBuildLockTimeoutSeconds < NativeBuildTimeoutSeconds, "the build's deadline covers its wait for the build lock, so it must outlast it");
 
 	// What a build produces.
 	enum class NativeBuildKind : uint8_t
@@ -129,6 +143,11 @@ namespace Engine {
 
 	// The platform's backend: the process of the file comment on Windows; Unsupported from Start on Linux and macOS.
 	[[nodiscard]] Scope<INativeBuildBackend> CreateNativeBuildBackend();
+
+	// The arguments the backend runs the interpreter with for `request` (the file comment): Scripts/BuildNative.py below
+	// `repository`, then --project, --kind, --config, --out, --timeout NativeBuildTimeoutSeconds, --lock-timeout
+	// NativeBuildLockTimeoutSeconds and --json. Pure.
+	[[nodiscard]] std::vector<std::string> MakeNativeBuildArguments(const NativeBuildRequest& request, const std::filesystem::path& repository);
 
 	// Whether the project at `projectRoot` is a game with a native module (decision 26): it has a Native/ directory, whatever
 	// it holds (a Native/ without sources is a module that does not build). A status that cannot be read counts as none.

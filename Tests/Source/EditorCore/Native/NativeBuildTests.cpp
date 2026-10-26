@@ -8,9 +8,12 @@
 #include "Support/TempDirectory.h"
 #include "Support/WaitUntil.h"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
+#include <filesystem>
 #include <format>
+#include <iterator>
 #include <optional>
 #include <span>
 #include <string>
@@ -229,6 +232,37 @@ namespace Engine {
 			REQUIRE_FALSE(unsupported.has_value());
 			CHECK(unsupported.error().GetCode() == ErrorCode::Unsupported);
 #endif
+		}
+
+		// The milestone review (decision 30): every build the editor starts is bounded, its wait for the machine-wide build lock
+		// and the whole build, so the timeouts native.build and project.export declare (NativeBuildBoundSeconds) hold; without
+		// them a build waited up to BuildNative.py's default 3 h for the lock.
+		TEST_CASE("NativeBuild: every build the editor starts bounds its wait for the build lock and the whole build")
+		{
+			const NativeBuildRequest request{
+				.ProjectRoot = FileSystem::PathFromUtf8("Projects/Game"),
+				.Kind = NativeBuildKind::Runtime,
+				.Configuration = ExportConfiguration::Dist,
+				.OutputDirectory = FileSystem::PathFromUtf8("Build/Native/00000001"),
+			};
+			const std::filesystem::path repository = FileSystem::PathFromUtf8("Repository");
+			const std::vector<std::string> arguments = MakeNativeBuildArguments(request, repository);
+			REQUIRE_FALSE(arguments.empty());
+			CHECK(arguments.front() == FileSystem::PathToUtf8(repository / FileSystem::PathFromUtf8("Scripts/BuildNative.py")));
+			const auto valueOf = [&arguments](std::string_view option) -> std::optional<std::string>
+			{
+				const auto found = std::ranges::find(arguments, option);
+				if (found == arguments.end() || std::next(found) == arguments.end())
+					return std::nullopt;
+				return *std::next(found);
+			};
+			CHECK(valueOf("--kind") == std::optional<std::string>("runtime"));
+			CHECK(valueOf("--config") == std::optional<std::string>("Dist"));
+			CHECK(valueOf("--timeout") == std::optional<std::string>(std::to_string(NativeBuildTimeoutSeconds)));
+			CHECK(valueOf("--lock-timeout") == std::optional<std::string>(std::to_string(NativeBuildLockTimeoutSeconds)));
+			CHECK(std::ranges::find(arguments, std::string_view("--no-wait")) == arguments.end());
+			CHECK(arguments.back() == "--json");
+			CHECK(NativeBuildBoundSeconds > NativeBuildTimeoutSeconds);
 		}
 
 		// Decision 30 (N-A): the record is a file the editor reads, so it has a fuzz target (NativeBuildRecord in

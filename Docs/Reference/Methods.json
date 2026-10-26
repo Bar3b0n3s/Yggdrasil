@@ -7154,7 +7154,7 @@
 			"availableInRuntime": false,
 			"availableInLauncher": false,
 			"pending": true,
-			"timeoutSeconds": 900,
+			"timeoutSeconds": 4260,
 			"requiredParams": [],
 			"params": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -11418,7 +11418,7 @@
 			"availableInRuntime": false,
 			"availableInLauncher": false,
 			"pending": true,
-			"timeoutSeconds": 3600,
+			"timeoutSeconds": 7800,
 			"requiredParams": ["config"],
 			"params": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",

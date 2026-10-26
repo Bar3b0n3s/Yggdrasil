@@ -45,6 +45,12 @@ local f = _G
 _G.print("x")
 local g = _G["print"]
 local h = _G.Assets:Load()
+local i = _G._G.Assets.Load("Assets/Audio/Again.sfx")
+local j = _G["_G"]["Assets"].Load("engine://Audio/Coin")
+local k = _G._G
+local l = _G:rawget("Assets")
+local m = (_G :: any)._G.print
+local n = (Assets).Load("Assets/Audio/Beep.sfx")
 )";
 
 		constexpr std::string_view OtherSource = R"(local name = "Beep"
@@ -100,7 +106,10 @@ return { a, b, c, d, e, f, t }
 
 			// The sandbox keeps _G: _G.Assets and _G["Assets"] are the global Assets, so their literal loads are found; _G used
 			// any other way may reach Assets, so it is computed, while another field of _G is no use (the review of W19.1: a
-			// load through _G was neither, so the export pruned what it named).
+			// load through _G was neither, so the export pruned what it named). _G._G is _G again, so the globals table is
+			// followed through it, and _G._G on its own or a method call on _G (passing it on) is computed (the milestone
+			// review: neither was a load, so an export left out what they named); parentheses and type assertions around
+			// either global change nothing.
 			const Result<std::vector<ScriptAssetLoad>> globals = FindScriptAssetLoads(GlobalsSource, "Assets/Scripts/Globals.luau");
 			REQUIRE_MESSAGE(globals.has_value(), globals.error().ToString());
 			const std::vector<ScriptAssetLoad> expectedGlobals = {
@@ -111,6 +120,11 @@ return { a, b, c, d, e, f, t }
 				{ .Reference = {}, .Literal = false, .Line = 5, .Column = 18 },
 				{ .Reference = {}, .Literal = false, .Line = 6, .Column = 11 },
 				{ .Reference = {}, .Literal = false, .Line = 9, .Column = 11 },
+				{ .Reference = "Assets/Audio/Again.sfx", .Literal = true, .Line = 10, .Column = 11 },
+				{ .Reference = "engine://Audio/Coin", .Literal = true, .Line = 11, .Column = 11 },
+				{ .Reference = {}, .Literal = false, .Line = 12, .Column = 11 },
+				{ .Reference = {}, .Literal = false, .Line = 13, .Column = 11 },
+				{ .Reference = "Assets/Audio/Beep.sfx", .Literal = true, .Line = 15, .Column = 11 },
 			};
 			CHECK(*globals == expectedGlobals);
 

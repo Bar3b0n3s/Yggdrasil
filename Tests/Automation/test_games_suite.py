@@ -14,6 +14,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -1316,13 +1317,20 @@ class SuiteTests(unittest.TestCase):
                 self.assertNotIn("Library", step.detail)
 
     def run_dist_half(self, configs: list[str], session: FakeExportingSession, run: FakeFeatureTestRun,
-                      require_gpu: bool = False, events: int = 2) -> dict[str, Step]:
+                      require_gpu: bool = False, events: int = 2, native: bool = False) -> dict[str, Step]:
         """run_games over `configs` on a staged game whose replay has `events` input events, with a device, `session`
         as the Release editor and `run` as the exported package's --feature-test run; bin/Exports goes to a temporary
-        directory. Its steps by name."""
-        with tempfile.TemporaryDirectory(prefix="GamesDistHalf-") as directory:
+        directory. With `native` the game has a staged Native/ source, and the native preparation of its editors
+        (games.prepare_native_editor) succeeds without building. Its steps by name."""
+        with tempfile.TemporaryDirectory(prefix="GamesDistHalf-") as directory, contextlib.ExitStack() as stack:
             root = Path(directory)
             project = make_game_repository(root / "Repository", events=events)
+            if native:
+                (project.directory / "Native").mkdir()
+                source = project.directory / "Native" / "Game.cpp"
+                source.write_text("// The game's native module.\n", encoding="utf-8")
+                git_stage(root / "Repository")
+                stack.enter_context(mock.patch.object(games, "prepare_native_editor", return_value=[]))
             session.output_root = root / "EditorExports"
             passing = provenance.ProjectAudit(project.directory, "index", {}, [], [])
             argv = ["--suite", "games", "--config", ",".join(configs), *(["--require-gpu"] if require_gpu else [])]
@@ -1368,6 +1376,25 @@ class SuiteTests(unittest.TestCase):
         self.assertIn(REPLAY, drifted.detail)
         self.assertTrue(any(line.startswith(f"{REPLAY}: Exported Dist: fedcba9876543210")
                             for line in drifted.data["failures"]), drifted.data["failures"])
+
+    def test_the_dist_half_waits_for_the_exports_of_a_native_game_beyond_their_runtime_build(self) -> None:
+        # The milestone review (Docs/Decisions/0030-m19-contract.md decisions 10 and 33): an export of a game with
+        # Native/ builds its Runtime first (Exporter.h step 3a), bounded by NativeBuildBoundSeconds (NativeBuild.h), so
+        # the Dist half waits that much longer for both its exports; a game without Native/ keeps the plain bounds.
+        header = REPOSITORY_ROOT / "Editor" / "Source" / "EditorCore" / "Native" / "NativeBuild.h"
+        pattern = r"constexpr uint32_t (NativeBuild\w+Seconds) = (\d+);"
+        declared = re.findall(pattern, header.read_text(encoding="utf-8"))
+        bounds = {name: int(value) for name, value in declared}
+        self.assertEqual(test_script.EXPORT_NATIVE_BUILD_SECONDS,
+                         bounds["NativeBuildTimeoutSeconds"] + bounds["NativeBuildMarginSeconds"])
+        ran = {"smokeTestRan": True, "smokeTestExitCode": 0, "warnings": []}
+        session = FakeExportingSession(ran)
+        steps = self.run_dist_half(["Release", "Dist"], session, FakeFeatureTestRun(REPLAY_HASH), native=True)
+        self.assertEqual(steps["games Game Dist"].status, Status.PASSED, steps["games Game Dist"].detail)
+        timeout = test_script.SUITE_TIMEOUT_SECONDS
+        native = test_script.EXPORT_NATIVE_BUILD_SECONDS
+        self.assertEqual(session.export_timeouts,
+                         [timeout + test_script.EXPORT_FEATURE_TEST_RUN_SECONDS + native, timeout + native])
 
     def test_the_dist_half_compares_the_testing_exports_feature_test_hashes_with_its_own_run(self) -> None:
         # Docs/Decisions/0030-m19-contract.md decision 10 (A-DISTSELF; Roadmap M19's acceptance "the hashes the builder

@@ -36,7 +36,7 @@ sys.path.insert(0, str(REPOSITORY_ROOT / "Scripts"))
 import BuildNative  # noqa: E402  (Scripts/ is on sys.path above)
 import Format  # noqa: E402
 import Lint  # noqa: E402
-from Lib import native_build, paths  # noqa: E402
+from Lib import locks, native_build, paths  # noqa: E402
 
 SCRIPT = REPOSITORY_ROOT / "Scripts" / "BuildNative.py"
 API_HEADER = REPOSITORY_ROOT / native_build.API_HEADER
@@ -122,6 +122,14 @@ def write_files(root: Path, files: dict[str, str]) -> None:
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(text.encode("utf-8"))
+
+
+def editor_build_bounds() -> dict[str, int]:
+    """The bounds NativeBuild.h declares with a number for every build the editor starts, by name:
+    NativeBuildLockTimeoutSeconds, NativeBuildTimeoutSeconds and NativeBuildMarginSeconds."""
+    header = REPOSITORY_ROOT / "Editor" / "Source" / "EditorCore" / "Native" / "NativeBuild.h"
+    pattern = r"constexpr uint32_t (NativeBuild\w+Seconds) = (\d+);"
+    return {name: int(value) for name, value in re.findall(pattern, header.read_text(encoding="utf-8"))}
 
 
 def native_api_version() -> int:
@@ -426,10 +434,12 @@ class ScriptTests(unittest.TestCase):
     def build(self, kind: str, config: str, name: str) -> tuple[int, native_build.BuildRecord | None, Path, str]:
         """Runs the script as the editor does; (exit code, the record or None, the output directory, its output)."""
         out = self.directory / name
+        bounds = editor_build_bounds()
         result = subprocess.run(
             [sys.executable, str(SCRIPT), "--project", str(self.project), "--kind", kind, "--config", config, "--out",
-             str(out), "--json"], capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=BUILD_TIMEOUT_SECONDS, check=False)
+             str(out), "--timeout", str(bounds["NativeBuildTimeoutSeconds"]), "--lock-timeout",
+             str(bounds["NativeBuildLockTimeoutSeconds"]), "--json"], capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=BUILD_TIMEOUT_SECONDS, check=False)
         record = native_build.read_record(out) if (out / native_build.RECORD_FILE).is_file() else None
         if record is not None:
             self.assertEqual(native_build.parse_record(result.stdout), record, "--json prints the record")
@@ -453,6 +463,21 @@ class ScriptTests(unittest.TestCase):
         code, record, _, output = self.build("module", "Debug", "Occupied")
         self.assertEqual(code, 2, output)
         self.assertEqual(sorted(path.name for path in occupied.iterdir()), ["Other.txt"])
+
+    def test_the_editors_bounds_parse_and_leave_room_for_what_runs_past_the_deadline(self) -> None:
+        # The milestone review (Docs/Decisions/0030-m19-contract.md decision 30): the editor passes every build
+        # --timeout and --lock-timeout (NativeBuild.h). The deadline starts before the wait for the build lock, so that
+        # wait ends before it, and past it only premake's own bound and the steps after the compile run, which the
+        # margin covers.
+        bounds = editor_build_bounds()
+        self.assertLess(bounds["NativeBuildLockTimeoutSeconds"], bounds["NativeBuildTimeoutSeconds"])
+        self.assertGreater(bounds["NativeBuildMarginSeconds"], BuildNative.PREMAKE_TIMEOUT_SECONDS)
+        arguments = BuildNative.parse_arguments(
+            ["--project", str(self.project), "--kind", "runtime", "--config", "Dist", "--out",
+             str(self.directory / "Bounded"), "--timeout", str(bounds["NativeBuildTimeoutSeconds"]), "--lock-timeout",
+             str(bounds["NativeBuildLockTimeoutSeconds"]), "--json"])
+        self.assertEqual(arguments.timeout, bounds["NativeBuildTimeoutSeconds"])
+        self.assertEqual(locks.wait_seconds(arguments), bounds["NativeBuildLockTimeoutSeconds"])
 
     def test_a_module_without_sources_exits_3_with_its_reason_in_the_record(self) -> None:
         code, record, out, output = self.build("module", "Debug", "Empty")
