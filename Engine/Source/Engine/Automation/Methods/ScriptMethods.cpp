@@ -183,7 +183,7 @@ namespace Engine {
 			.Field("message", &ScriptErrorSummary::Message, std::format("Error message of at most {} bytes; longer text is cut and ends with [truncated: <n> bytes].", MaxScriptLogMessageBytes))
 			.Field("callback", &ScriptErrorSummary::Callback, "Callback that failed.")
 			.Field("entity", &ScriptErrorSummary::Entity, "The entity whose script raised the error: its id and name at the latest occurrence, and its path read now in the scene reads address by default (the play scene while playing, else the edit scene), empty when that scene no longer holds the entity (destroyed, or spawned by a play session that ended) and for an error raised outside an entity.")
-			.Field("slot", &ScriptErrorSummary::Slot, "The faulting behaviour's slot in its entity's Script list.")
+			.Field("slot", &ScriptErrorSummary::Slot, "The faulting behaviour's slot in its entity's Script list; 0, naming no behaviour, for a native fault (callback NativeStep, script native:<System>).")
 			.Field("tick", &ScriptErrorSummary::Tick, "Simulation tick of the latest occurrence.")
 			.Field("count", &ScriptErrorSummary::Count, "Number of occurrences.")
 			.Field("traceback", &ScriptErrorSummary::Traceback, std::format("Authored traceback frames, innermost first: at most {}, the last a [truncated: <n> more frames] function without a script when deeper frames were left out.", MaxScriptErrorTracebackFrames))

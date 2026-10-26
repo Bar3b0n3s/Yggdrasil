@@ -27,20 +27,20 @@
 //
 // Loading (decision 31). A load takes the newest successful build of the editor's own configuration whose SourceHash is
 // current, loads its library (INativeLibraryLoader: SharedLibrary on Windows), registers the module
-// (BuildNativeModuleTypes, which keeps the library loaded) and only then replaces the loaded module: a load that fails at
-// any step leaves the previous module loaded and the scenes unchanged. It canonicalizes the native components of every open
-// scene (M20, Docs/Decisions/0031-m20-contract.md "Merge with M19"), in tab order, against the new types
-// (CanonicalizeNativeComponents, the migration by field name of decision 27), each checked first (CheckNativeComponents),
-// so that an error in any open scene leaves every one as it was: a reload whose layout hash equals the replaced module's
-// rewrites nothing, so the scenes stay byte-identical, and a load whose layout changed (every first load, one after an
-// unload included) migrates every component and marks each scene modified whose canonical form changed. A migration is
-// not an undo step, like a load's migrations, and a load whose layout changed clears every open scene's undo history
-// (CommandHistory, EditorContext::ApplySceneMigration), whose entity snapshots hold the previous layout's values or,
-// recorded without a module, the values as written, which undo would restore whole; a reload whose layout is unchanged
-// keeps them. The
-// previous module's types are released last, which unloads its library once nothing holds them. Loads happen only at
-// frame boundaries without a play session (Play or Simulate): native.load is refused while one runs, and so is a project
-// opening's load while one runs, which never happens.
+// (BuildNativeModuleTypes, which keeps the library loaded) and only then replaces the loaded module: a load that fails
+// at any step leaves the previous module loaded and the scenes unchanged. It canonicalizes the native components of
+// every open scene (M20, Docs/Decisions/0031-m20-contract.md "Merge with M19"), in tab order, against the new types
+// (CanonicalizeNativeComponents, the migration by field name of decision 27), each checked first
+// (CheckNativeComponents), so that an error in any open scene leaves every one as it was (the error names that scene by
+// its project path, or by its open-scene id when it was never saved, as the scene target takes it): a reload whose
+// layout hash equals the replaced module's rewrites nothing, so the scenes stay byte-identical, and a load whose layout
+// changed (every first load, one after an unload included) migrates every component and marks each scene modified whose
+// canonical form changed. A migration is not an undo step, like a load's migrations, and a load whose layout changed
+// clears every open scene's undo history (CommandHistory, EditorContext::ApplySceneMigration), whose entity snapshots
+// hold the previous layout's values or, recorded without a module, the values as written, which undo would restore
+// whole; a reload whose layout is unchanged keeps them. The previous module's types are released last, which unloads
+// its library once nothing holds them. Loads happen only at frame boundaries without a play session (Play or Simulate):
+// native.load is refused while one runs, and so is a project opening's load while one runs, which never happens.
 // A project opening loads the newest current build when the preference is on and the platform supported, and builds
 // nothing (decision 31: a project with Native/ and no current build opens without its module; native.build then
 // native.load load it, and a --strict editor refuses its scenes' native components through NATIVE_COMPONENT_UNREGISTERED,

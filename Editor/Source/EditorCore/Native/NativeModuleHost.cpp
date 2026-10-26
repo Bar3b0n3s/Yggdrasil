@@ -4,6 +4,7 @@
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/EditorPreferences.h"
 #include "EditorCore/Play/EditorPlayController.h"
+#include "EditorCore/Private/OpenScenes.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/Error.h"
 #include "Engine/Core/FileSystem.h"
@@ -244,24 +245,39 @@ namespace Engine {
 			});
 		}
 
-		// A canonicalization's errors in the open scene `sceneName` as one Validation error, each with its entity and pointer.
-		[[nodiscard]] static Error MakeNativeMigrationError(std::string_view sceneName, std::span<const LoadDiagnostic> diagnostics, bool reload)
+		// A canonicalization's errors in the open scene `scene` as one Validation error, each with its entity and pointer. The
+		// message, each issue and the hint name the scene as the scene target takes it (its project path, or its id for a
+		// scene never saved), since two open scenes may share a name (M20, Docs/Decisions/0031-m20-contract.md "Merge with
+		// M19").
+		[[nodiscard]] static Error MakeNativeMigrationError(const OpenSceneState& scene, std::span<const LoadDiagnostic> diagnostics, bool reload)
 		{
+			const std::string sceneName = NameOpenScene(scene);
 			std::vector<ErrorIssue> issues;
+			std::string first;
 			for (const LoadDiagnostic& diagnostic : diagnostics)
 			{
 				if (diagnostic.Severity != DiagnosticSeverity::Error)
 					continue;
+				std::string finding = std::format("entity {} {}: {} ({})", diagnostic.Entity.ToString(), diagnostic.JsonPointer, diagnostic.Message, diagnostic.Code);
+				if (first.empty())
+					first = finding;
 				issues.push_back(ErrorIssue{ .JsonPointer = diagnostic.JsonPointer,
-					.Message = std::format("entity {} {}: {} ({})", diagnostic.Entity.ToString(), diagnostic.JsonPointer, diagnostic.Message, diagnostic.Code),
+					.Message = std::format("{}, {}", sceneName, finding),
 					.Hint = {},
 					.Suggestions = {} });
 			}
-			std::string first = issues.empty() ? std::string("a native component does not convert") : issues.front().Message;
-			return Error(ErrorCode::Validation, std::format("the native components of the open scene '{}' do not take the module's types: {}", sceneName, first))
+			if (first.empty())
+				first = "a native component does not convert";
+			const std::string target = FormatSceneTarget(scene);
+			std::string hint = reload ? std::format("correct or remove the components named in that scene (native.setComponents {{scene: {}, entity, components}}), or "
+													"change the module so it accepts them; the loaded module stays loaded",
+											target)
+									  : std::format("correct or remove the components named in that scene (address it with the scene target {{scene: {}}}), or change "
+													"the module so it accepts them; no module was loaded",
+											target);
+			return Error(ErrorCode::Validation, std::format("the native components of the open scene {} do not take the module's types: {}", sceneName, first))
 				.WithIssues(std::move(issues))
-				.WithHint(reload ? "correct or remove the components named (native.setComponents), or change the module so it accepts them; the loaded module stays loaded"
-								 : "correct or remove the components named, or change the module so it accepts them; no module was loaded");
+				.WithHint(std::move(hint));
 		}
 
 		// Writes `allowed` as AllowNativeCode into user://Editor.json, keeping every other member (decision 29).
@@ -329,13 +345,13 @@ namespace Engine {
 			{
 				// The migration by field name (decision 27), checked in every open scene before any changes: an error leaves
 				// every open scene as it was, so the load fails here with the previous module still loaded.
-				for (const OpenSceneId id : scenes)
+				for (const Utils::OpenSceneState& open : Utils::ListOpenScenes(editor))
 				{
-					const Scene* scene = std::as_const(editor).FindScene(id);
-					ENGINE_ASSERT(scene != nullptr, "an open scene of EditorContext::GetOpenScenes has no scene");
+					const Scene* scene = std::as_const(editor).FindScene(open.Id);
+					ENGINE_ASSERT(scene != nullptr, "an open scene of Utils::ListOpenScenes has no scene");
 					const NativeSceneReport checked = CheckNativeComponents(*scene, types.get(), false);
 					if (Utils::HasErrorDiagnostic(checked.Diagnostics))
-						return std::unexpected(Utils::MakeNativeMigrationError(scene->GetName(), checked.Diagnostics, report.Reloaded));
+						return std::unexpected(Utils::MakeNativeMigrationError(open, checked.Diagnostics, report.Reloaded));
 				}
 				for (const OpenSceneId id : scenes)
 				{
@@ -378,13 +394,15 @@ namespace Engine {
 				editor.GetProject().GetSettings().Name, FileSystem::PathToUtf8(library), Loaded->GetComponents().size(), Loaded->GetResources().size(),
 				Loaded->GetSystems().size(), report.Reloaded && !report.LayoutChanged ? ", layout unchanged" : "",
 				report.Scene.Changed ? std::format(", the {} native components of the open scenes migrated", report.Scene.ComponentCount) : std::string());
+			const std::vector<Utils::OpenSceneState> named = Utils::ListOpenScenes(editor);
 			for (const NativeSceneMigration& migration : report.Scenes)
 			{
-				const Scene* scene = std::as_const(editor).FindScene(migration.Scene);
+				const auto open = std::ranges::find(named, migration.Scene, &Utils::OpenSceneState::Id);
+				const std::string sceneName = open != named.end() ? Utils::NameOpenScene(*open) : std::format("open scene {}", migration.Scene);
 				for (const LoadDiagnostic& diagnostic : migration.Report.Diagnostics)
 				{
-					ENGINE_WARN("Native module migration: scene '{}', entity {} {}: {} ({})", scene != nullptr ? scene->GetName() : std::string(),
-						diagnostic.Entity.ToString(), diagnostic.JsonPointer, diagnostic.Message, diagnostic.Code);
+					ENGINE_WARN("Native module migration: scene {}, entity {} {}: {} ({})", sceneName, diagnostic.Entity.ToString(), diagnostic.JsonPointer,
+						diagnostic.Message, diagnostic.Code);
 				}
 			}
 			// The previous types last: their library unloads once nothing else holds them (a play session cannot run now).

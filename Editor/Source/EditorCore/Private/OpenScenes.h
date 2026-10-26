@@ -41,6 +41,16 @@ namespace Engine {
 		// "'<name>'" for each of `scenes`, comma-separated: how an error names them.
 		[[nodiscard]] std::string FormatOpenSceneNames(std::span<const OpenSceneState> scenes);
 
+		// How an error or a finding names `scene` so that a request can address it again with the scene target (decision 16),
+		// by its path and its id like EditorMethodContext::ResolveSceneTarget's hint, never by its name alone, which two open
+		// scenes may share: "'Assets/Scenes/Main.scene' (open scene 2)", or "unsaved 'Main' (open scene 2)" for a scene
+		// never saved, whose id is the only target that names it.
+		[[nodiscard]] std::string NameOpenScene(const OpenSceneState& scene);
+
+		// The scene target that addresses `scene` as a request's "scene" member spells it in JSON: its project path
+		// ("\"Assets/Scenes/Main.scene\""), or its id ("2") for a scene never saved.
+		[[nodiscard]] std::string FormatSceneTarget(const OpenSceneState& scene);
+
 		// Makes `scene` the addressed scene until the returned scope ends: an EditorSceneTargetScope for an open scene other
 		// than the one addressed when it is called, none (null) for that scene itself, which needs none. Errors: those of
 		// EditorSceneTargetScope::Begin (NotFound when the scene closed; InvalidState inside a transaction, a dry run or

@@ -41,7 +41,7 @@ namespace Engine {
 		std::string Message{};
 		std::string Callback{};
 		EntitySummary Entity{};
-		uint32_t Slot = 0; // the faulting behaviour's slot in its entity's Script list (ScriptError::Slot)
+		uint32_t Slot = 0; // the faulting behaviour's slot in its entity's Script list; 0 for a native fault (ScriptError::Slot)
 		uint32_t Tick = 0;
 		uint32_t Count = 0;
 		std::vector<ScriptTraceFrameSummary> Traceback{};

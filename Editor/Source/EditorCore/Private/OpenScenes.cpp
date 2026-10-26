@@ -2,8 +2,12 @@
 #include "EditorCore/Private/OpenScenes.h"
 
 #include "EditorCore/EditorContext.h"
+#include "Engine/Core/Json/Json.h"
+
+#include <nlohmann/json.hpp>
 
 #include <format>
+#include <string>
 #include <vector>
 
 namespace Engine {
@@ -39,6 +43,20 @@ namespace Engine {
 			for (const OpenSceneState& scene : scenes)
 				names += std::format("{}'{}'", names.empty() ? "" : ", ", scene.Name);
 			return names;
+		}
+
+		std::string NameOpenScene(const OpenSceneState& scene)
+		{
+			if (scene.Path.has_value())
+				return std::format("'{}' (open scene {})", scene.Path->GetPath(), scene.Id);
+			return std::format("unsaved '{}' (open scene {})", scene.Name, scene.Id);
+		}
+
+		std::string FormatSceneTarget(const OpenSceneState& scene)
+		{
+			if (scene.Path.has_value())
+				return Json(std::string(scene.Path->GetPath())).dump();
+			return std::to_string(scene.Id);
 		}
 
 		Result<Scope<EditorSceneTargetScope>> AddressOpenScene(EditorContext& editor, const OpenSceneState& scene)

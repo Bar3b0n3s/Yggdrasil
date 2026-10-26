@@ -41,7 +41,9 @@ namespace Engine {
 		std::string EntityName{};
 		// M20 (S-MULTI; Docs/Decisions/0031-m20-contract.md decision 17): the faulting instance's slot in its entity's Script
 		// list (for an evaluation, the slot it bound self to). ScriptErrorToJson writes it as "slot" after "entity" for an
-		// error that has an entity. Not part of the deduplication key: a repeat from another slot updates the entry.
+		// error that has an entity. Not part of the deduplication key: a repeat from another slot updates the entry. A native
+		// fault (M19's NativeWorld: Callback "NativeStep", Script "native:<System>") has no behaviour: it carries slot 0,
+		// which names no Script slot, and its entity may have no Script component ("Merge with M19").
 		uint32_t Slot = 0;
 		uint64_t Tick = 0;
 		uint64_t Count = 1;

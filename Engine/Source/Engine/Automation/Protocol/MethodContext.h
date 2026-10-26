@@ -94,15 +94,17 @@ namespace Engine {
 
 	// Resolves an EntityRef value inside component data that is not a 16-hex id (a component field, a script's
 	// Field.Entity() value reached through Script.Fields, an element of an array or map of them) to the id of the entity it
-	// names, so component data takes the spellings an entity param takes (§13.4: a unique id prefix of 6 to 15 hex digits or
-	// an entity path; Docs/Decisions/0030-m19-contract.md decision 7, A-EREF). The protocol layer cannot know scenes (layer
-	// rules, §3), so a host implements this over the scene it resolves in (Utils::SceneEntityReferenceResolver,
-	// Automation/Methods/SharedMethodSupport.h) and returns it from its context's GetEntityReferenceResolver. Which scene is
-	// the phase 1 ledger's "Entity paths and scenes" text (Docs/Decisions/0028-backlog-program.md), shared with M20: a path
-	// or $ref resolves in the request's (for an op, its batch's) target scene, the active scene when it names none; until
-	// M20 adds scene targets the host passes its active scene. An entity path is the '/'-separated names from a scene root
-	// (Scene::FindEntityByPath) and continues through a prefab instance's members, nested instances included, as the scene
-	// holds them. Main thread only.
+	// names, so component data takes the spellings an entity param takes (§13.4: a unique id prefix of 6 to 15 hex digits
+	// or an entity path; Docs/Decisions/0030-m19-contract.md decision 7, A-EREF). The protocol layer cannot know scenes
+	// (layer rules, §3), so a host implements this over the scene it resolves in (Utils::SceneEntityReferenceResolver,
+	// Automation/Methods/SharedMethodSupport.h) and returns it from its context's GetEntityReferenceResolver. Which scene
+	// is the phase 1 ledger's "Entity paths and scenes" text (Docs/Decisions/0028-backlog-program.md), shared with M20: a
+	// path or $ref resolves in the request's (for an op, its batch's) target scene, the active scene when it names none.
+	// The editor resolves in the open scene the request's scene target addresses (EditorSceneTargetScope;
+	// Docs/Decisions/0031-m20-contract.md decision 16 and "Merge with M19"), or in the play scene for a request whose
+	// target is Play (§13.4 "Target"); a host without one returns null from GetEntityReferenceResolver. An entity path is
+	// the '/'-separated names from a scene root (Scene::FindEntityByPath) and continues through a prefab instance's members,
+	// nested instances included, as the scene holds them. Main thread only.
 	class IEntityReferenceResolver
 	{
 	public:

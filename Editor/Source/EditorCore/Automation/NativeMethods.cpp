@@ -114,6 +114,7 @@ namespace Engine {
 				.Code = diagnostic.Code,
 				.Message = diagnostic.Message,
 				.Scene = {},
+				.SceneId = scene,
 				.Entity = EntitySummary{ .Id = FormatOptionalUUID(diagnostic.Entity), .Name = {}, .Path = {} },
 				.Pointer = diagnostic.JsonPointer };
 			const EditorContext& editor = context.GetEditor();
@@ -454,7 +455,8 @@ namespace Engine {
 			.Field("code", &NativeComponentDiagnostic::Code,
 				"NATIVE_COMPONENT_UNREGISTERED, NATIVE_COMPONENT_INVALID, NATIVE_FIELD_DROPPED or NATIVE_FIELD_RESET.")
 			.Field("message", &NativeComponentDiagnostic::Message, "What was found and what was done.")
-			.Field("scene", &NativeComponentDiagnostic::Scene, "The open scene that holds the entity, as scene.list names it; empty for a scene never saved.")
+			.Field("scene", &NativeComponentDiagnostic::Scene, "The path of the open scene that holds the entity, as scene.list reports it; empty for a scene never saved.")
+			.Field("sceneId", &NativeComponentDiagnostic::SceneId, "The id of the open scene that holds the entity, as scene.list reports it, which the scene target accepts.")
 			.Field("entity", &NativeComponentDiagnostic::Entity, "The entity that holds the component.")
 			.Field("pointer", &NativeComponentDiagnostic::Pointer, "The JSON pointer below the entity: /Components/Native.<Name>[/<Field>].");
 		registry.Struct<NativeStatusResult>("NativeStatusResult", "The open project's native module: the user's permission, its sources, builds and loaded types.")

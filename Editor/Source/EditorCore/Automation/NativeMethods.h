@@ -50,8 +50,10 @@ namespace Engine {
 		std::string Code{};
 		std::string Message{};
 		// M20 (Docs/Decisions/0031-m20-contract.md, "Merge with M19"): the open scene that holds the entity, project-relative
-		// as scene.list reports it; empty for a scene never saved.
+		// as scene.list reports it (empty for a scene never saved), and its open-scene id, which the scene target accepts and
+		// which alone names a scene never saved.
 		std::string Scene{};
+		uint32_t SceneId = 0;
 		EntitySummary Entity{};
 		std::string Pointer{}; // below the entity: "/Components/Native.Spinner/Speed"
 	};

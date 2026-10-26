@@ -106,6 +106,31 @@ class OpenSceneTests(AutomationTestCase):
         main_tree = client.call("scene.tree", {"format": "json", "scene": MAIN})
         self.assertEqual(entity_names(main_tree), ["Board", "Renamed"])
         self.assertEqual(entity_names(client.call("scene.tree", {"format": "json"})), ["Board"])
+
+        # The merge with M19 (Docs/Decisions/0031-m20-contract.md, "Merge with M19"; Docs/Decisions/0030-m19-contract.md
+        # decisions 7 and 8): a named $ref and an entity path inside component data (a Field.Entity() value) resolve in
+        # the target scene too, never in the active scene, which holds the same path with another id.
+        script = "Assets/Scripts/Hud.luau"
+        client.call("script.write", {"path": script, "source": """
+local Hud = { Fields = { Score = Field.Entity() } }
+return Script.Define("Hud", Hud)
+"""})
+        client.call("entity.create", {"name": "Game"})
+        active_score = client.call("entity.create", {"name": "ScoreText", "parent": "/Game"})["entity"]["id"]
+        hud = client.call("edit.batch", {"scene": MAIN, "label": "Hud", "ops": [
+            {"method": "entity.create", "params": {"name": "Game"}, "name": "game"},
+            {"method": "entity.create", "params": {"name": "ScoreText", "parent": {"$ref": "game.entity.id"}}},
+            {"method": "entity.create", "params": {"name": "Hud", "components": {
+                "Script": {"Scripts": [{"Script": script, "Fields": {"Score": "/Game/ScoreText"}}]}}}},
+        ]})
+        main_score = hud["results"][1]["entity"]["id"]
+        self.assertEqual(hud["results"][1]["entity"]["path"], "/Game/ScoreText")
+        self.assertNotEqual(main_score, active_score)
+        hud_entity = client.call("entity.get", {"scene": MAIN, "entity": "/Hud"})["entity"]
+        self.assertEqual(hud_entity["components"]["Script"]["Scripts"][0]["Fields"]["Score"], main_score)
+        active_tree = client.call("scene.tree", {"format": "json"})
+        self.assertEqual(sorted(entity_names(active_tree)), ["Board", "Game", "ScoreText"])
+
         with self.assertRaises(engine_client.EngineError) as op_target:
             client.call("edit.batch", {"ops": [
                 {"method": "entity.create", "params": {"name": "Stray", "scene": MAIN}},

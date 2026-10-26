@@ -11,6 +11,7 @@
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Scripting/ScriptEngine.h"
+#include "Engine/Scripting/ScriptError.h"
 #include "Engine/Scripting/ScriptLimits.h"
 #include "Engine/Session/PlaySession.h"
 #include "Engine/Session/ReplayPlayer.h"
@@ -366,7 +367,9 @@ namespace Engine {
 		}
 
 		// Decision 28 (N-B): every value a system changed is checked against its type when it returns; a rejected one is put
-		// back as the system found it and stops the session, naming the system.
+		// back as the system found it and stops the session, naming the system. The review of M20's merge with M19: the fault
+		// is published as a runtime error of script "native:<System>" and callback "NativeStep" with its entity and slot 0,
+		// which names no behaviour (Architecture §11.7).
 		TEST_CASE("NativeWorld: a system that leaves a value its type rejects stops the session, and the value is put back")
 		{
 			Test::SceneTestFixture fixture;
@@ -379,6 +382,12 @@ namespace Engine {
 			REQUIRE(session->GetFatalError().has_value());
 			CHECK(session->GetFatalError()->Message.contains("Break"));
 			CHECK(session->GetFatalError()->Entity == mover);
+			CHECK(session->GetFatalError()->Kind == ScriptErrorKind::Runtime);
+			CHECK(session->GetFatalError()->Script == "native:Break");
+			CHECK(session->GetFatalError()->Callback == "NativeStep");
+			const Json reported = ScriptErrorToJson(*session->GetFatalError());
+			CHECK(reported["entity"]["id"] == Json(mover.ToString()));
+			CHECK(reported["slot"] == Json(0));
 			const NativeEntityComponents written = ReadNativeComponents(session->GetScene().FindEntityByID(mover), types.get());
 			REQUIRE(written.Registered.size() == 1);
 			CHECK(written.Registered[0].second.Get() == ParseJson(R"({"Speed": 6, "Follow": null})"));

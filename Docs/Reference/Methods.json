@@ -7595,8 +7595,14 @@
 								"type": "string"
 							},
 							"scene": {
-								"description": "The open scene that holds the entity, as scene.list names it; empty for a scene never saved.",
+								"description": "The path of the open scene that holds the entity, as scene.list reports it; empty for a scene never saved.",
 								"type": "string"
+							},
+							"sceneId": {
+								"description": "The id of the open scene that holds the entity, as scene.list reports it, which the scene target accepts.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
 							},
 							"entity": {
 								"description": "The entity that holds the component.",
@@ -15633,7 +15639,7 @@
 								"$ref": "#/$defs/EntitySummary"
 							},
 							"slot": {
-								"description": "The faulting behaviour's slot in its entity's Script list.",
+								"description": "The faulting behaviour's slot in its entity's Script list; 0, naming no behaviour, for a native fault (callback NativeStep, script native:<System>).",
 								"type": "integer",
 								"minimum": 0,
 								"maximum": 4294967295

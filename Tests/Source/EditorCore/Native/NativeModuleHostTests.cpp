@@ -490,7 +490,9 @@ namespace Engine {
 		}
 
 		// The merge with M19: every open scene is checked before any is migrated, so a value the new types reject in one open
-		// scene fails the load as a whole: the loaded module stays, and no open scene changes, the earlier tabs included.
+		// scene fails the load as a whole: the loaded module stays, and no open scene changes, the earlier tabs included. The
+		// review of the merge: the refusal names the failing scene as the scene target takes it (its project path, or its id
+		// for a scene never saved, since two open scenes may share a name) in its message, each issue and its hint.
 		TEST_CASE("NativeModuleHost: a load whose migration fails in one open scene changes no open scene")
 		{
 			NativeHostSetup setup;
@@ -502,10 +504,12 @@ namespace Engine {
 			EditorContext& editor = setup.GetEditor();
 			const OpenSceneId first = editor.GetActiveSceneId();
 			SetRawNativeComponent(editor.GetScene().CreateEntity("Spinner"), "Native.TestSpinner", R"({"DegreesPerSecond": 10})");
-			const Result<OpenSceneId> second = editor.AddScene(editor.CreateScene("Second"), std::nullopt);
+			// A scene never saved, of the same name as the first.
+			const Result<OpenSceneId> second = editor.AddScene(editor.CreateScene("Main"), std::nullopt);
 			REQUIRE_MESSAGE(second.has_value(), second.error().ToString());
 			// Beyond the next layout's range, as a scene file may hold it.
-			SetRawNativeComponent(editor.GetScene().CreateEntity("Rejected"), "Native.TestSpinner", R"({"DegreesPerSecond": -5000})");
+			const UUID rejected = editor.GetScene().CreateEntity("Rejected").GetUUID();
+			SetRawNativeComponent(editor.GetScene().FindEntityByID(rejected), "Native.TestSpinner", R"({"DegreesPerSecond": -5000})");
 			const auto save = [&editor](OpenSceneId scene)
 			{
 				const Scene* open = std::as_const(editor).FindScene(scene);
@@ -521,11 +525,28 @@ namespace Engine {
 			const Result<NativeLoadReport> reload = setup.GetHost().Load(editor);
 			REQUIRE_FALSE(reload.has_value());
 			CHECK(reload.error().GetCode() == ErrorCode::Validation);
-			CHECK(reload.error().GetMessageText().contains("Second"));
 			CHECK(setup.GetHost().GetLoadedTypes() == loaded);
 			CHECK(save(first) == firstBefore);
 			CHECK(save(*second) == secondBefore);
 			CHECK(editor.GetRevision() == revision);
+			const std::string unsaved = std::format("unsaved 'Main' (open scene {})", *second);
+			CHECK_MESSAGE(reload.error().GetMessageText().contains(unsaved), reload.error().ToString());
+			REQUIRE(reload.error().GetIssues().size() == 1);
+			CHECK(reload.error().GetIssues()[0].Message.starts_with(unsaved));
+			CHECK(reload.error().GetIssues()[0].Message.contains(rejected.ToString()));
+			CHECK_MESSAGE(reload.error().GetHint().contains(std::format("native.setComponents {{scene: {}, ", *second)), reload.error().GetHint());
+
+			// A saved scene is named by its project path; the first failing scene in tab order is the one named.
+			REQUIRE(editor.ActivateScene(first).has_value());
+			SetRawNativeComponent(editor.GetScene().CreateEntity("AlsoRejected"), "Native.TestSpinner", R"({"DegreesPerSecond": 5000})");
+			const Result<NativeLoadReport> saved = setup.GetHost().Load(editor);
+			REQUIRE_FALSE(saved.has_value());
+			const std::string path = std::format("'Assets/Scenes/Main.scene' (open scene {})", first);
+			CHECK_MESSAGE(saved.error().GetMessageText().contains(path), saved.error().ToString());
+			REQUIRE_FALSE(saved.error().GetIssues().empty());
+			CHECK(saved.error().GetIssues()[0].Message.starts_with(path));
+			CHECK_MESSAGE(saved.error().GetHint().contains(R"(native.setComponents {scene: "Assets/Scenes/Main.scene", )"), saved.error().GetHint());
+			CHECK(setup.GetHost().GetLoadedTypes() == loaded);
 		}
 
 		// Decision 31 (N-C): every build gets a new numbered directory, and the host keeps only the loaded build and the
@@ -609,6 +630,27 @@ namespace Engine {
 			Entity entity = canonical->CreateEntity("Spinner");
 			REQUIRE(PatchNativeComponents(entity, *setup.GetHost().GetLoadedTypes(), ParseJson(R"({"Native.TestSpinner": {}})"), "/components").has_value());
 			editor.SetScene(std::move(canonical), std::nullopt, false);
+			CHECK_FALSE(editor.IsSceneDirty());
+
+			// The merge with M19 (Docs/Decisions/0031-m20-contract.md, "Merge with M19"): a scene opened in a new tab
+			// (AddScene: scene.new and scene.open with keepOpen, a recovery) is canonicalized the same way, and a canonical one
+			// opens unmodified there too.
+			Scope<Scene> added = editor.CreateScene("Added");
+			const UUID addedId = added->CreateEntity("Spinner").GetUUID();
+			SetRawNativeComponent(added->FindEntityByID(addedId), "Native.TestSpinner", R"({"DegreesPerSecond": 45})");
+			const Result<OpenSceneId> tab = editor.AddScene(std::move(added), std::nullopt);
+			REQUIRE_MESSAGE(tab.has_value(), tab.error().ToString());
+			CHECK(editor.GetActiveSceneId() == *tab);
+			CHECK(editor.IsSceneDirty());
+			const NativeEntityComponents addedComponents = ReadNativeComponents(editor.GetScene().FindEntityByID(addedId), setup.GetHost().GetLoadedTypes().get());
+			REQUIRE(addedComponents.Registered.size() == 1);
+			CHECK(addedComponents.Registered[0].second.Get() == ParseJson(R"({"DegreesPerSecond": 45, "Axis": [0, 1, 0], "Turns": 0})"));
+
+			Scope<Scene> canonicalTab = editor.CreateScene("CanonicalTab");
+			Entity canonicalSpinner = canonicalTab->CreateEntity("Spinner");
+			REQUIRE(PatchNativeComponents(canonicalSpinner, *setup.GetHost().GetLoadedTypes(), ParseJson(R"({"Native.TestSpinner": {}})"), "/components").has_value());
+			const Result<OpenSceneId> cleanTab = editor.AddScene(std::move(canonicalTab), std::nullopt);
+			REQUIRE_MESSAGE(cleanTab.has_value(), cleanTab.error().ToString());
 			CHECK_FALSE(editor.IsSceneDirty());
 		}
 

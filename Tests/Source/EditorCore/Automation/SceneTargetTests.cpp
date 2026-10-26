@@ -512,7 +512,8 @@ namespace Engine {
 		// The merge with M19 (Docs/Decisions/0031-m20-contract.md, "Merge with M19"; ADR 0028's ledger, "Entity paths and
 		// scenes": M20 passes the target to M19's resolver): a named $ref and an entity path inside component data (a script's
 		// Field.Entity()) resolve in the batch's target scene, never in the active scene, which holds the same paths with
-		// other ids; a path that names an entity of the active scene only rolls the targeted batch back.
+		// other ids; a slot that gives only Fields borrows its script in the target scene; a path that names an entity of the
+		// active scene only rolls the targeted batch back, located at that path.
 		TEST_CASE("SceneTarget: a batch's named $ref and the entity paths in its component data resolve in the target scene")
 		{
 			Test::AutomationFixture setup("SceneTargetResolver");
@@ -546,6 +547,18 @@ namespace Engine {
 			CHECK(editor.GetScene().GetEntityCount() == activeCount);
 			CHECK(editor.GetScene().GetName() == "Second");
 
+			// The review of the merge: a slot that gives only Fields borrows its script from the entity's slot in the target
+			// scene (EditorMethodContext::CompleteParameterOwners), so a targeted update of an entity the active scene does not
+			// hold succeeds, and its path resolves in the target.
+			const Json gameMain = (*ran)["results"][0]["entity"]["id"];
+			const Json retarget{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Fields", Json{ { "Score", "/Game" } } } } }) } } } };
+			const Result<Json> updated = setup.Call("entity.update", Json{ { "scene", "Assets/Scenes/Main.scene" }, { "entity", "/Hud" }, { "components", retarget } });
+			REQUIRE_MESSAGE(updated.has_value(), updated.error().ToString());
+			const Json updatedSlot = (*updated)["entity"]["components"]["Script"]["Scripts"][0];
+			CHECK(updatedSlot["Script"] == (*hudEntity)["entity"]["components"]["Script"]["Scripts"][0]["Script"]);
+			CHECK(updatedSlot["Fields"]["Score"] == gameMain);
+			CHECK(editor.GetScene().GetEntityCount() == activeCount);
+
 			// A path that only the active scene holds names nothing in the target: the batch rolls back there.
 			const OpenSceneId mainId = editor.FindOpenScene(*VfsPath::Parse("project://Assets/Scenes/Main.scene"));
 			const Result<OpenSceneInfo> before = editor.DescribeOpenScene(mainId);
@@ -558,6 +571,9 @@ namespace Engine {
 			REQUIRE_MESSAGE(refused.contains("error"), refused.dump());
 			CHECK(refused["error"]["data"]["errorCode"] == Json("NotFound"));
 			CHECK(refused["error"]["data"]["failedOp"] == Json(1));
+			// At the field's path, not at the op's entity: /Hud resolved in the target, borrowing the slot's script there.
+			REQUIRE_MESSAGE(refused["error"]["data"].contains("issues"), refused.dump());
+			CHECK(refused["error"]["data"]["issues"][0]["pointer"] == Json("/ops/1/params/components/Script/Scripts/0/Fields/Score"));
 			CHECK(editor.DescribeOpenScene(mainId)->EntityCount == before->EntityCount);
 			const Scene* main = std::as_const(editor).FindScene(mainId);
 			REQUIRE(main != nullptr);

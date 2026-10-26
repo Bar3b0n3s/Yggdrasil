@@ -3,6 +3,7 @@
 
 #include "EditorCore/Automation/ProvenanceRecorder.h"
 #include "EditorCore/EditorActions.h"
+#include "EditorCore/EditorContext.h"
 #include "EditorCore/EditorPreferences.h"
 #include "EditorCore/Native/NativeBuild.h"
 #include "EditorCore/Native/NativeModuleHost.h"
@@ -443,7 +444,8 @@ namespace Engine {
 
 		// The merge with M19 (Docs/Decisions/0031-m20-contract.md, "Merge with M19"): native.getComponents and
 		// native.setComponents take the scene target, so they read and write an open scene that is not active, the edit
-		// recorded in that scene's history; native.load migrates every open scene and names the open scene of each finding.
+		// recorded in that scene's history; native.load migrates every open scene and names the open scene of each finding by
+		// its path and its id (the review of the merge: the id alone names a scene never saved).
 		TEST_CASE("NativeMethods: native component methods take the scene target and native.load names each finding's open scene")
 		{
 			NativeMethodSetup setup;
@@ -465,19 +467,51 @@ namespace Engine {
 			CHECK(setup.CallError("native.getComponents", Json{ { "entity", "/Mover" } }) == "\"NotFound\"");
 			CHECK(setup.Call("edit.history", Json::object())["entries"].empty());
 
+			// The review of the merge: a scene never saved (a recovered one) has no path, so its findings name it by its id,
+			// which alone addresses it.
+			EditorContext& editor = setup.Fixture.GetEditor();
+			const Result<OpenSceneId> untitled = editor.AddScene(editor.CreateScene("Untitled"), std::nullopt);
+			REQUIRE_MESSAGE(untitled.has_value(), untitled.error().ToString());
+			const Json inUntitled{ { "scene", *untitled } };
+			Json createDrifter = inUntitled;
+			createDrifter["name"] = "Drifter";
+			static_cast<void>(setup.Call("entity.create", createDrifter));
+			Json setDrifter = inUntitled;
+			setDrifter["entity"] = "/Drifter";
+			setDrifter["components"] = Json{ { "Native.TestMover", Json{ { "Speed", 2 } } } };
+			static_cast<void>(setup.Call("native.setComponents", setDrifter));
+			const Json scenes = setup.Call("scene.list", Json::object())["scenes"];
+			const auto mainEntry = std::ranges::find_if(scenes, [](const Json& entry)
+			{
+				return entry["scene"]["path"] == Json("Assets/Scenes/Main.scene");
+			});
+			REQUIRE(mainEntry != scenes.end());
+
 			setup.Builds->SetModule(Test::FakeNativeModule::Layout2);
 			static_cast<void>(setup.Call("native.write", Json{ { "path", "Native/Spinner.cpp" }, { "source", std::string(SpinnerSource) + "// layout 2\n" } }));
 			REQUIRE(setup.Call("native.build", Json::object())["succeeded"] == Json(true));
 			const Json reloaded = setup.Call("native.load", Json::object());
 			CHECK(reloaded["sceneChanged"] == Json(true));
-			CHECK(reloaded["componentCount"] == Json(1));
-			const auto dropped = std::ranges::find_if(reloaded["diagnostics"], [](const Json& diagnostic)
+			CHECK(reloaded["componentCount"] == Json(2));
+			const Json* mover = nullptr;
+			const Json* drifter = nullptr;
+			for (const Json& diagnostic : reloaded["diagnostics"])
 			{
-				return diagnostic["code"] == Json("NATIVE_FIELD_DROPPED");
-			});
-			REQUIRE(dropped != reloaded["diagnostics"].end());
-			CHECK((*dropped)["scene"] == Json("Assets/Scenes/Main.scene"));
-			CHECK((*dropped)["entity"]["path"] == Json("/Mover"));
+				if (diagnostic["code"] != Json("NATIVE_FIELD_DROPPED"))
+					continue;
+				if (diagnostic["entity"]["path"] == Json("/Mover"))
+					mover = &diagnostic;
+				else if (diagnostic["entity"]["path"] == Json("/Drifter"))
+					drifter = &diagnostic;
+			}
+			REQUIRE(mover != nullptr);
+			REQUIRE(drifter != nullptr);
+			REQUIRE(mover->contains("sceneId"));
+			REQUIRE(drifter->contains("sceneId"));
+			CHECK((*mover)["scene"] == Json("Assets/Scenes/Main.scene"));
+			CHECK((*mover)["sceneId"] == (*mainEntry)["id"]);
+			CHECK((*drifter)["scene"] == Json(""));
+			CHECK((*drifter)["sceneId"] == Json(*untitled));
 			CHECK(setup.Call("native.getComponents", get)["components"]["Native.TestMover"] == Json{ { "Speed", 3 } });
 		}
 	}

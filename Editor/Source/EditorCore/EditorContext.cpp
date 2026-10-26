@@ -497,9 +497,9 @@ namespace Engine {
 				.WithHint("remove a nested instance from one of the prefab files so that no prefab nests itself, directly or through others");
 		}
 
-		// SetScene's canonicalization of the opened scene's native components against the loaded module (decision 27), each
-		// finding logged; a component its type rejects or the module does not register stays as written. Returns whether the
-		// scene changed.
+		// The canonicalization of an opened scene's native components against the loaded module (decision 27), which
+		// InstallScene runs for every way a scene opens (SetScene, AddScene, a recovery or reload), each finding logged; a
+		// component its type rejects or the module does not register stays as written. Returns whether the scene changed.
 		static bool CanonicalizeOpenedSceneNatives(Scene& scene, const NativeModuleTypes& types)
 		{
 			Result<NativeSceneReport> report = CanonicalizeNativeComponents(scene, &types, false);
