@@ -140,7 +140,7 @@
 		},
 		{
 			"Path": "Assets/Formats/Fonts/Glyphs.ttf.meta",
-			"XXH64": "b196ceaf1c95d9bc",
+			"XXH64": "b9366683d1f7b4fb",
 			"Method": "asset.import",
 			"RequestId": 10,
 			"Client": "batch",
@@ -156,7 +156,7 @@
 		},
 		{
 			"Path": "Assets/Formats/Fonts/Inter-Regular.otf.meta",
-			"XXH64": "64607c9dbefad797",
+			"XXH64": "5a0586840534a3d3",
 			"Method": "asset.import",
 			"RequestId": 11,
 			"Client": "batch",
@@ -1396,7 +1396,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/Components.scene",
-			"XXH64": "e6e0a71fc3fdc031",
+			"XXH64": "05d9db31dd6f1901",
 			"Method": "scene.save",
 			"RequestId": 16,
 			"Client": "batch",
@@ -1780,9 +1780,9 @@
 		},
 		{
 			"Path": "Assets/Scenes/Physics.scene",
-			"XXH64": "24168ba2b29acd13",
+			"XXH64": "ccee29c1f251685b",
 			"Method": "scene.save",
-			"RequestId": 4,
+			"RequestId": 3,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -2420,7 +2420,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Api/CharacterController.test.luau",
-			"XXH64": "8aa864d23f60db61",
+			"XXH64": "9fc56fce2010052b",
 			"Method": "script.write",
 			"RequestId": 12,
 			"Client": "batch",
@@ -2948,7 +2948,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Components/AuthoredValues.luau",
-			"XXH64": "d89a84f8b2a75b63",
+			"XXH64": "599bc80b70756d5d",
 			"Method": "script.write",
 			"RequestId": 17,
 			"Client": "batch",
@@ -3180,7 +3180,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Determinism.replay.meta",
-			"XXH64": "36c64bbd65231455",
+			"XXH64": "74f77d3685fa898b",
 			"Method": "input.record",
 			"RequestId": 7,
 			"Client": "batch",
@@ -3196,7 +3196,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Input.replay.meta",
-			"XXH64": "a03772babd3b0b36",
+			"XXH64": "344d7fcf749183d9",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",

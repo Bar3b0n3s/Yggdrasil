@@ -13,6 +13,7 @@
 #include "Engine/Scene/ComponentHostOps.h"
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
+#include "Engine/Scene/Components/UnknownComponentsComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
@@ -21,6 +22,7 @@
 
 #include <algorithm>
 #include <format>
+#include <iterator>
 #include <optional>
 #include <span>
 #include <string>
@@ -176,6 +178,7 @@ namespace Engine {
 					entry.Active = entity.IsActiveSelf();
 					for (const ComponentInfo* info : GetEntityComponents(entity))
 						entry.Components.push_back(info->GetName());
+					std::ranges::move(GetEntityNativeComponents(entity), std::back_inserter(entry.Components));
 					entry.ChildCount = ToAutomationCounter(children.size());
 					entry.ChildrenOmitted = cut;
 					walk.Entries->push_back(std::move(entry));
@@ -188,6 +191,8 @@ namespace Engine {
 					std::string components;
 					for (const ComponentInfo* info : GetEntityComponents(entity))
 						components += (components.empty() ? "" : " ") + FormatOutlineComponent(entity, *info, walk.Assets);
+					for (const std::string& name : GetEntityNativeComponents(entity))
+						components += (components.empty() ? "" : " ") + name;
 					*walk.Text += std::format("{}{}  {}  {}  {}\n", branch, entity.GetName(), entity.GetUUID().ToString().substr(0, 8), components,
 						FormatOutlineTranslation(entity));
 					if (cut)
@@ -241,8 +246,9 @@ namespace Engine {
 			return p == pattern.size();
 		}
 
-		// A component name of scene.query, checked against the registry. Errors: InvalidArgument at `pointer` for an unknown,
-		// entity-level or unserialized component (with "did you mean" suggestions).
+		// A component name of scene.query, checked against the registry; a native component's name ("Native.<Name>",
+		// IsNativeComponentName), which no registry holds, is the caller's to check first. Errors: InvalidArgument at `pointer`
+		// for an unknown, entity-level or unserialized component (with "did you mean" suggestions).
 		static Result<const ComponentInfo*> FindQueryComponent(const TypeRegistry& registry, std::string_view name, std::string_view pointer)
 		{
 			const ComponentInfo* info = registry.FindComponent(name);
@@ -308,19 +314,28 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(Scene * scene, context.ResolveTargetScene(params.Target, context.HasParam("target"), false));
 			const TypeRegistry& registry = scene->GetTypeRegistry();
 
+			// A native component ("Native.<Name>") is matched and selected by its registry name as the scene holds it, unchecked
+			// against a loaded module (the native test game's friction NT-07, Docs/Decisions/0030-m19-contract.md decision 27).
 			const ComponentInfo* required = nullptr;
-			if (!params.Where.Component.empty())
+			const bool requiresNative = IsNativeComponentName(params.Where.Component);
+			if (!params.Where.Component.empty() && !requiresNative)
 			{
 				ENGINE_TRY_ASSIGN(required, Utils::FindQueryComponent(registry, params.Where.Component, "/where/component"));
 			}
 
 			bool selectAll = false;
 			std::vector<const ComponentInfo*> selected;
+			std::vector<std::string> selectedNative;
 			for (size_t index = 0; index < params.Select.size(); ++index)
 			{
 				if (params.Select[index] == "all")
 				{
 					selectAll = true;
+					continue;
+				}
+				if (IsNativeComponentName(params.Select[index]))
+				{
+					selectedNative.push_back(params.Select[index]);
 					continue;
 				}
 				ENGINE_TRY_ASSIGN(const ComponentInfo* info, Utils::FindQueryComponent(registry, params.Select[index], std::format("/select/{}", index)));
@@ -344,6 +359,8 @@ namespace Engine {
 				if (!params.Where.Tag.empty() && !entity.HasTag(params.Where.Tag))
 					return;
 				if (required != nullptr && !required->GetHostOps()->Has(entity))
+					return;
+				if (requiresNative && Utils::FindEntityNativeComponent(entity, params.Where.Component) == nullptr)
 					return;
 				if (under.has_value())
 				{
@@ -392,6 +409,12 @@ namespace Engine {
 					ENGINE_TRY_ASSIGN(Json json, ComponentAccess::GetComponentJson(entity, info->GetName()));
 					item.Components.emplace(info->GetName(), VariantValue(std::move(json)));
 				}
+				const std::vector<std::string> natives = selectAll ? Utils::GetEntityNativeComponents(entity) : selectedNative;
+				for (const std::string& name : natives)
+				{
+					if (const VariantValue* json = Utils::FindEntityNativeComponent(entity, name))
+						item.Components.emplace(name, *json);
+				}
 				result.Entities.push_back(std::move(item));
 			}
 			if (end < matches.size())
@@ -438,7 +461,7 @@ namespace Engine {
 			.Field("parent", &SceneTreeEntry::Parent, "The parent's id; empty for a root or for the requested root.")
 			.Field("depth", &SceneTreeEntry::Depth, "The depth below the listed roots, 0 for a root.")
 			.Field("active", &SceneTreeEntry::Active, "The entity's own active flag.")
-			.Field("components", &SceneTreeEntry::Components, "The entity's components in registry order.")
+			.Field("components", &SceneTreeEntry::Components, "The entity's components in registry order, then its native components (Native.<Name>).")
 			.Field("childCount", &SceneTreeEntry::ChildCount, "The number of children.")
 			.Field("childrenOmitted", &SceneTreeEntry::ChildrenOmitted, "The depth limit left out its children.");
 
@@ -450,12 +473,14 @@ namespace Engine {
 		registry.Struct<SceneQueryWhere>("SceneQueryWhere", "What scene.query matches: every given criterion holds.")
 			.Field("name", &SceneQueryWhere::Name, "The entity name; '*' matches any run of characters and '?' one character.")
 			.Field("tag", &SceneQueryWhere::Tag, "A tag the entity has.")
-			.Field("component", &SceneQueryWhere::Component, "A component the entity has.")
+			.Field("component", &SceneQueryWhere::Component, "A component the entity has (Native.<Name> for a native component).")
 			.Field("path", &SceneQueryWhere::Path, "An entity whose subtree (itself included) the matches are in.");
 
 		registry.Struct<SceneQueryParams>("SceneQueryParams", "The params of scene.query.")
 			.Field("where", &SceneQueryParams::Where, "What to match.")
-			.Field("select", &SceneQueryParams::Select, "The components whose JSON each match carries; \"all\" for every one.")
+			.Field("select", &SceneQueryParams::Select,
+				"The components whose JSON each match carries (Native.<Name> for a native component, as the scene holds it); \"all\" for every one, "
+				"native ones included.")
 			.Field("limit", &SceneQueryParams::Limit, "The most matches in one page.", { .Min = 1.0, .Max = 1000.0 })
 			.Field("cursor", &SceneQueryParams::Cursor, "The nextCursor of the previous page; empty for the first.")
 			.Field("target", &SceneQueryParams::Target, "The scene to read; omitted: the play scene while playing, else the edit scene.");
@@ -464,7 +489,7 @@ namespace Engine {
 			.Field("id", &SceneQueryEntity::Id, "The entity's id.")
 			.Field("name", &SceneQueryEntity::Name, "The entity's name.")
 			.Field("path", &SceneQueryEntity::Path, "The entity's path.")
-			.Field("components", &SceneQueryEntity::Components, "The selected components' JSON, by registry name.");
+			.Field("components", &SceneQueryEntity::Components, "The selected components' JSON, by registry name; native ones (Native.<Name>) as the scene holds them.");
 
 		registry.Struct<SceneQueryResult>("SceneQueryResult", "One page of scene.query matches, in canonical order.")
 			.Field("entities", &SceneQueryResult::Entities, "The matches of this page.")

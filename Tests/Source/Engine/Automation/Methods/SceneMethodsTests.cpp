@@ -2,7 +2,11 @@
 
 #include "Engine/Automation/Methods/SceneMethods.h"
 
+#include "EditorCore/EditorContext.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Scene/Components/UnknownComponentsComponent.h"
+#include "Engine/Scene/Entity.h"
+#include "Engine/Scene/Scene.h"
 #include "Support/AutomationTestClient.h"
 
 #include <nlohmann/json.hpp>
@@ -79,6 +83,51 @@ namespace Engine {
 			INFO(outline);
 			CHECK(outline.contains("Script(Scripts/Aim.luau, Scripts/Fire.luau, none)"));
 			CHECK(outline.contains(" Script  (0, 0, 0)"));
+		}
+
+		// The native test game's friction NT-07: scene.tree lists an entity's native components ("Native.<Name>") after its
+		// built-ins, in the entries and the outline; scene.query matches and selects them by name and with "all", as the scene
+		// holds them; an unknown component stays unreported.
+		TEST_CASE("SceneMethods: scene.tree and scene.query report native components as the scene holds them")
+		{
+			Test::AutomationFixture setup("SceneNative");
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Wheel" } }).has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Plain" } }).has_value());
+			{
+				Entity wheel = setup.GetEditor().GetScene().FindEntityByPath("/Wheel");
+				REQUIRE(wheel.IsValid());
+				UnknownComponentsComponent preserved;
+				preserved.Components.push_back({ .Name = "Native.Spinner", .Version = 1, .Data = VariantValue(Json{ { "Speed", 90 } }) });
+				preserved.Components.push_back({ .Name = "FutureComponent", .Version = 1, .Data = VariantValue(Json{ { "Size", 2 } }) });
+				wheel.AddComponent<UnknownComponentsComponent>(std::move(preserved));
+			}
+			const Json spinner = Json{ { "Speed", 90 } };
+
+			Result<Json> list = setup.Call("scene.tree", Json{ { "format", "Json" } });
+			REQUIRE_MESSAGE(list.has_value(), list.error().ToString());
+			REQUIRE((*list)["entities"].size() == 2);
+			CHECK((*list)["entities"][0]["name"] == Json("Wheel"));
+			CHECK((*list)["entities"][0]["components"] == Json::array({ "Transform", "Native.Spinner" }));
+			CHECK((*list)["entities"][1]["components"] == Json::array({ "Transform" }));
+			Result<Json> text = setup.Call("scene.tree", Json::object());
+			REQUIRE(text.has_value());
+			const std::string outline = JsonReader((*text)["text"]).ReadString().value_or(std::string());
+			CHECK(outline.contains("Transform Native.Spinner"));
+			CHECK_FALSE(outline.contains("FutureComponent"));
+
+			Result<Json> matched = setup.Call("scene.query", Json{ { "where", Json{ { "component", "Native.Spinner" } } }, { "select", Json::array({ "Native.Spinner" }) } });
+			REQUIRE_MESSAGE(matched.has_value(), matched.error().ToString());
+			CHECK((*matched)["total"] == Json(1));
+			CHECK((*matched)["entities"][0]["name"] == Json("Wheel"));
+			CHECK((*matched)["entities"][0]["components"] == Json{ { "Native.Spinner", spinner } });
+			Result<Json> all = setup.Call("scene.query", Json{ { "where", Json{ { "name", "Wheel" } } }, { "select", Json::array({ "all" }) } });
+			REQUIRE(all.has_value());
+			CHECK((*all)["entities"][0]["components"]["Native.Spinner"] == spinner);
+			CHECK((*all)["entities"][0]["components"].contains("Transform"));
+			CHECK_FALSE((*all)["entities"][0]["components"].contains("FutureComponent"));
+			Result<Json> none = setup.Call("scene.query", Json{ { "where", Json{ { "component", "Native.Missing" } } } });
+			REQUIRE_MESSAGE(none.has_value(), none.error().ToString());
+			CHECK((*none)["total"] == Json(0));
 		}
 
 		TEST_CASE("SceneMethods: scene.query filters and paginates in canonical order")

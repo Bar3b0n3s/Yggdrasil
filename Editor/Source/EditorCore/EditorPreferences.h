@@ -16,6 +16,10 @@ namespace Engine {
 	struct EditorPreferences
 	{
 		bool AllowAiAutomation = false;
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 29): "AllowNativeCode", the user's permission to build, load and
+		// export a game's native module (NativeModuleHost). Changed only by the Native panel's checkbox; no automation method
+		// writes it. Every writer of the file reads it first and writes it back as read.
+		bool AllowNativeCode = false;
 		std::string ExternalEditorExecutable{};
 		// Individual argv entries. {path} and {line} substituted without a shell.
 		std::vector<std::string> ExternalEditorArguments{};

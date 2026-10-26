@@ -1,6 +1,7 @@
-// The one translation unit that compiles stb_truetype (imstb_truetype.h of the vendored Dear ImGui, stb_truetype v1.26),
-// with STBTT_STATIC so its functions have internal linkage and never clash with Dear ImGui's copy (Architecture §7.4,
-// Appendix C). Compiled without the precompiled header (the ThirdParty filter of Engine/premake5.lua), because the
+// The one translation unit that compiles stb_truetype (stb_truetype.h v1.26 of the vendored stb, Vendor/stb at the
+// pinned commit 2c980bb), with STBTT_STATIC so its functions have internal linkage and never clash with Dear ImGui's own
+// copy, imstb_truetype.h, which its font atlas compiles (Architecture §7.4, Appendix C; Docs/Decisions/0030-m19-contract.md
+// decision 23). Compiled without the precompiled header (the ThirdParty filter of Engine/premake5.lua), because the
 // configuration macros below must precede the library. The cube root, cosine and arc cosine of its distance-field solver
 // come from DetMath (§4.12), so a glyph's field does not depend on the C runtime, the CPU or the configuration; sqrt,
 // fabs, fmod, floor and ceil are IEEE-exact already. stb_truetype reads fonts without bounds checks, so Open validates
@@ -10,8 +11,13 @@
 // quadratic curves and silently skips the cubic segments of CFF (OpenType) outlines, so every curved .otf glyph came out
 // garbled (ADR 0022 "Integration"). RenderGlyphSdf replaces each cubic by quadratics within a fraction of a font unit
 // (ReplaceCubics) and runs stb_truetype's own solver over the result (ComputeGlyphSdf, the body of stbtt_GetGlyphSDF with
-// the vertices passed in, calling its winding and cubic-root helpers), so a TrueType glyph's field is unchanged byte for
-// byte.
+// the vertices passed in, calling its winding and cubic-root helpers), so a TrueType glyph's field is stbtt_GetGlyphSDF's
+// byte for byte.
+//
+// Without stb_rect_pack.h, stb_truetype defines minimal stand-ins of stb_rect_pack's types for its packing API, which the
+// engine never calls, while imgui_draw.cpp defines Dear ImGui's real stb_rect_pack types (imstb_rectpack.h) under the same
+// names: two different definitions of one class type, which the one-definition rule forbids. The renames below give the
+// stand-ins names of their own, so no other unit defines them (Vendor/stb/VENDOR.md, "stb_truetype").
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #define STBTT_STATIC
@@ -19,6 +25,9 @@
 #define STBTT_pow(x, y) ::Engine::DetMath::Pow(x, y)
 #define STBTT_cos(x) ::Engine::DetMath::Cos(x)
 #define STBTT_acos(x) ::Engine::DetMath::ACos(x)
+#define stbrp_context stbtt_engine_stand_in_rp_context
+#define stbrp_node stbtt_engine_stand_in_rp_node
+#define stbrp_rect stbtt_engine_stand_in_rp_rect
 
 #include "Engine/AssetPipeline/Private/TrueTypeFont.h"
 
@@ -26,7 +35,7 @@
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/DetMath.h"
 
-#include <imstb_truetype.h>
+#include <stb_truetype.h>
 
 #include <algorithm>
 #include <climits>
@@ -62,6 +71,15 @@ namespace Engine {
 		constexpr double CubicToleranceUnits = 0.25;
 		// A cubic spanning a whole 2048-unit em needs about 15 pieces at that tolerance.
 		constexpr uint32_t MaxCubicPieces = 256;
+
+		// stbtt_GetGlyphSDF's distance from singular values, in pixels (its eps): a line shorter than this and a curve whose
+		// second difference is shorter are solved as degenerate, and a coefficient of the degenerate solve below its square
+		// counts as zero, so a near-singular segment is never divided by almost nothing. Vertices are whole font units, so a
+		// nonzero length is about the scale or more, and FontImporter's settings keep the scale at or above this distance (at
+		// least 16 pixels per em, at most 16,384 units per em): the thresholds act on the zero lengths that stb_truetype's
+		// earlier solver (Dear ImGui's copy) compared with 0, and at most on one-unit segments at the smallest scales.
+		constexpr float SingularDistance = 1.0f / 1024.0f;
+		constexpr float SingularDistanceSquared = SingularDistance * SingularDistance;
 
 		struct OutlinePoint
 		{
@@ -179,9 +197,9 @@ namespace Engine {
 
 		// stb_truetype v1.26's distance-field solver, the body of stbtt_GetGlyphSDF from its stbtt_GetGlyphShape call on,
 		// over `vertices` (lines and quadratic curves only, see ReplaceCubics) and the padded bitmap box [x0, x1) x
-		// [y0, y1). The arithmetic is stb_truetype's, in the same order and precision, and its winding test
-		// (stbtt__compute_crossings_x) and cubic solver (stbtt__solve_cubic) are called as they are, so for a TrueType
-		// outline the field equals stbtt_GetGlyphSDF's byte for byte.
+		// [y0, y1). The arithmetic is stb_truetype's, in the same order and precision and with its singular-value thresholds
+		// (SingularDistance), and its winding test (stbtt__compute_crossings_x) and cubic solver (stbtt__solve_cubic) are
+		// called as they are, so for a TrueType outline the field equals stbtt_GetGlyphSDF's byte for byte.
 		[[nodiscard]] static std::vector<unsigned char> ComputeGlyphSdf(std::vector<stbtt_vertex>& vertices, float scale, int x0Box, int y0Box, int x1Box,
 			int y1Box, unsigned char onEdgeValue, float pixelDistanceScale)
 		{
@@ -206,7 +224,7 @@ namespace Engine {
 					const float x0 = scaled(verts[i].x, scaleX), y0 = scaled(verts[i].y, scaleY);
 					const float x1 = scaled(verts[j].x, scaleX), y1 = scaled(verts[j].y, scaleY);
 					const float dist = std::sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
-					precompute[static_cast<size_t>(i)] = (dist == 0.0f) ? 0.0f : 1.0f / dist;
+					precompute[static_cast<size_t>(i)] = (dist < SingularDistance) ? 0.0f : 1.0f / dist;
 				}
 				else if (verts[i].type == STBTT_vcurve)
 				{
@@ -215,7 +233,7 @@ namespace Engine {
 					const float x0 = scaled(verts[i].x, scaleX), y0 = scaled(verts[i].y, scaleY);
 					const float bx = x0 - 2.0f * x1 + x2, by = y0 - 2.0f * y1 + y2;
 					const float len2 = bx * bx + by * by;
-					precompute[static_cast<size_t>(i)] = len2 != 0.0f ? 1.0f / (bx * bx + by * by) : 0.0f;
+					precompute[static_cast<size_t>(i)] = len2 >= SingularDistanceSquared ? 1.0f / len2 : 0.0f;
 				}
 			}
 
@@ -269,13 +287,13 @@ namespace Engine {
 								float res[3] = { 0.0f, 0.0f, 0.0f };
 								if (pre == 0.0f)
 								{
-									// A degenerate curve: the quadratic formula, or a line when a is 0 too.
+									// A degenerate curve: the quadratic formula, or a line when a is (nearly) 0 too.
 									const float a = 3.0f * (ax * bx + ay * by);
 									const float b = 2.0f * (ax * ax + ay * ay) + (mx * bx + my * by);
 									const float c = mx * ax + my * ay;
-									if (a == 0.0f)
+									if (std::fabs(a) < SingularDistanceSquared)
 									{
-										if (b != 0.0f)
+										if (std::fabs(b) >= SingularDistanceSquared)
 											res[num++] = -c / b;
 									}
 									else

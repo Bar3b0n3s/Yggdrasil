@@ -3,6 +3,7 @@
 #include "Engine/Automation/Methods/SessionMethods.h"
 
 #include "Engine/Automation/Protocol/JsonRpc.h"
+#include "Engine/Core/BuildId.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Platform/Process.h"
 #include "Support/AutomationTestClient.h"
@@ -49,6 +50,25 @@ namespace Engine {
 			CHECK((*info)["clients"][0]["inProcess"] == Json(true));
 			CHECK((*info)["stopped"] == Json(false));
 			CHECK((*info)["stopError"].is_null());
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 13 (B-BVER): session.hello and session.info name the build that answers,
+		// as FormatBuildId writes this binary's build id, beside the unchanged engine version.
+		TEST_CASE("SessionMethods: session.hello and session.info report this binary's build id")
+		{
+			Test::AutomationFixture setup("SessionBuild");
+			const std::string build = FormatBuildId(GetBuildId());
+			Result<Json> hello = setup.Call("session.hello",
+				Json{ { "token", "ignored-in-process" }, { "protocolVersion", "1.0" }, { "client", Json{ { "name", "engine-tests" }, { "version", "1" } } } });
+			REQUIRE_MESSAGE(hello.has_value(), hello.error().ToString());
+			CHECK((*hello)["build"] == Json(build));
+			CHECK((*hello)["engineVersion"] == Json(std::string(EngineVersionString)));
+			Result<Json> info = setup.Call("session.info", Json::object());
+			REQUIRE_MESSAGE(info.has_value(), info.error().ToString());
+			CHECK((*info)["build"] == Json(build));
+			const Result<BuildId> parsed = ParseBuildId(build);
+			REQUIRE_MESSAGE(parsed.has_value(), parsed.error().ToString());
+			CHECK(parsed->Version == EngineVersionString);
 		}
 
 		// Docs/Decisions/0026-m16-contract.md, friction S2-03: an opened or attached project has no open scene, and neither

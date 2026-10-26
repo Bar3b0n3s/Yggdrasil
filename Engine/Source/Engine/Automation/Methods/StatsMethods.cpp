@@ -124,7 +124,9 @@ namespace Engine {
 			.Field("maxMemoryAllocationCount", &StatsGetResult::MaxMemoryAllocationCount, "Vulkan device allocation limit, zero without a device.")
 			.Field("views", &StatsGetResult::Views,
 				"The scene then the game view, as the editor's displayed viewport panels: a view whose panel is not displayed is unavailable, and a "
-				"headless editor displays only the Scene view of its default layout, so game is unavailable there. The Runtime supplies game only.");
+				"headless editor displays only the Scene view of its default layout, so game is unavailable there unless the editor was started "
+				"with --headless-game-view, whose game view renders every frame at the project's window size (or viewport.setOptions' "
+				"gameResolution). The Runtime supplies game only.");
 	}
 
 	void RegisterStatsMethods(MethodRegistry& methods)

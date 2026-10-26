@@ -605,6 +605,72 @@ end)
 			CHECK_FALSE(editor.GetViewportState().GetPixelSize(ViewportView::Game).has_value());
 			CHECK(editor.GetViewportState().GetSceneSize() == glm::uvec2(800, 600));
 		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 11 (R-SOAK): --headless-game-view forces the Game view. With its panel
+		// closed (a headless editor displays none), the view still renders every frame at the project's window size,
+		// publishes its extent and statistics, and follows the play scene; without the force it stays withdrawn.
+		TEST_CASE("EditorHostViewports: a forced game view renders while no Game panel is displayed" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::EditorTestFixture fixture("HostForcedGame");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			const Entity mesh = editor.GetScene().CreateEntity("Mesh");
+			mesh.AddComponent<MeshRendererComponent>(MeshRendererComponent{ .Mesh = TypedAssetHandle<AssetType::Mesh>(BuiltinAssetHandles::CubeMesh), .Materials = {} });
+			editor.GetScene().CreateEntity("Camera").AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::GameViewport, false).has_value());
+			HostGpuHarness harness(gpu, editor);
+			REQUIRE(harness.Frame(0).has_value());
+			CHECK(harness.GetHost().GetImage(ViewportView::Game).Texture == 0);
+
+			REQUIRE(harness.GetHost().ForceGameView().has_value());
+			REQUIRE(harness.Frame(1).has_value());
+			const WindowSettings& window = editor.GetProject().GetSettings().Window;
+			CHECK(harness.GetHost().GetImage(ViewportView::Game).Texture != 0);
+			CHECK(harness.GetHost().GetImage(ViewportView::Game).Width == window.Width);
+			CHECK(harness.GetHost().GetImage(ViewportView::Game).Height == window.Height);
+			CHECK(editor.GetViewportState().GetPixelSize(ViewportView::Game).value() == glm::uvec2(window.Width, window.Height));
+			REQUIRE(harness.GetHost().GetRenderer(ViewportView::Game) != nullptr);
+
+			// It follows the play scene.
+			REQUIRE(editor.GetPlay().Start(PlayStartOptions{ .Lockstep = true }).has_value());
+			REQUIRE(harness.Frame(2).has_value());
+			CHECK(harness.GetHost().GetImage(ViewportView::Game).Texture != 0);
+			CHECK(harness.GetHost().GetImage(ViewportView::Game).FrameIndex == 2);
+			REQUIRE(editor.GetPlay().Stop().has_value());
+		}
+
+		// The forced view renders as a displayed Game panel with a fixed resolution would: at viewport.setOptions'
+		// gameResolution when one is set, and back at the project's window size once it is cleared.
+		TEST_CASE("EditorHostViewports: a forced game view takes the game resolution when one is set" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::EditorTestFixture fixture("HostForcedGameResolution");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			editor.GetScene().CreateEntity("Camera").AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::GameViewport, false).has_value());
+			HostGpuHarness harness(gpu, editor);
+			REQUIRE(harness.GetHost().ForceGameView().has_value());
+			REQUIRE(editor.GetViewportState().SetGameResolution(glm::uvec2(320, 180)).has_value());
+			REQUIRE(harness.Frame(0).has_value());
+			CHECK(harness.GetHost().GetImage(ViewportView::Game).Width == 320);
+			CHECK(harness.GetHost().GetImage(ViewportView::Game).Height == 180);
+			CHECK(editor.GetViewportState().GetPixelSize(ViewportView::Game).value() == glm::uvec2(320, 180));
+			const auto statistics = harness.GetHost().GetRenderer(ViewportView::Game)->GetRenderStats();
+			CHECK(statistics.Available);
+			CHECK(statistics.Width == 320);
+			CHECK(statistics.Height == 180);
+
+			REQUIRE(editor.GetViewportState().SetGameResolution(glm::uvec2(0)).has_value());
+			REQUIRE(harness.Frame(1).has_value());
+			const WindowSettings& window = editor.GetProject().GetSettings().Window;
+			CHECK(editor.GetViewportState().GetPixelSize(ViewportView::Game).value() == glm::uvec2(window.Width, window.Height));
+		}
 	}
 
 }

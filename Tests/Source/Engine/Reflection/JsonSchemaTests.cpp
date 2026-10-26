@@ -99,6 +99,41 @@ namespace Engine {
 			CHECK_FALSE(JsonSchema::Validate(schema, entity).has_value());
 		}
 
+		TEST_CASE("JsonSchema: with IdOrPath an EntityRef also accepts an id prefix and an entity path")
+		{
+			// ADR 0030 decision 7 (the review of W19.1): automation component data takes an EntityRef as the entity's id, an id
+			// prefix of 6 to 15 hex digits or an entity path, so the params schemas rpc.discover, component.schema and
+			// script.fields publish say so; files and results keep the id alone (Id, the default).
+			Scope<TypeRegistry> registry = CreateScope<TypeRegistry>();
+			Test::RegisterReflectionTestTypes(*registry);
+			registry->Freeze();
+			const StructInfo* type = registry->FindStruct<Test::TestAllFields>();
+			REQUIRE(type != nullptr);
+			const Json schema = JsonSchema::ForStruct(*type, EntityReferenceSchema::IdOrPath);
+			CHECK(schema["properties"]["Target"]["pattern"] == "^([0-9a-fA-F]{6,16}|/.+)$");
+			CHECK(schema["properties"]["Mesh"]["pattern"] == "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$");
+			CHECK(JsonSchema::ForField(*type->FindField("Target"), EntityReferenceSchema::IdOrPath)["pattern"] == schema["properties"]["Target"]["pattern"]);
+			CHECK(JsonSchema::ForField(*type->FindField("Target"))["pattern"] == "^[0-9a-fA-F]{16}$");
+
+			for (const std::string_view target : { "00000000000003FF", "a1b2c3", "a1b2c3d4e5f60", "/Game/ScoreText", "/Level/Ship" })
+			{
+				CAPTURE(std::string(target));
+				Json instance = type->MakeDefaultJson();
+				instance["Target"] = std::string(target);
+				CHECK(JsonSchema::Validate(schema, instance).has_value());
+			}
+			for (const std::string_view target : { "a1b2c", "00000000000003FF0", "/", "Game/ScoreText", "a1b2cz" })
+			{
+				CAPTURE(std::string(target));
+				Json instance = type->MakeDefaultJson();
+				instance["Target"] = std::string(target);
+				const Status status = JsonSchema::Validate(schema, instance);
+				REQUIRE_FALSE(status.has_value());
+				REQUIRE(status.error().GetIssues().size() == 1);
+				CHECK(status.error().GetIssues()[0].JsonPointer == "/Target");
+			}
+		}
+
 		TEST_CASE("JsonSchema: unsupported keywords are rejected as invalid schemas")
 		{
 			const Json schema = ParseSchemaJson(R"({ "type": "string", "format": "email" })");

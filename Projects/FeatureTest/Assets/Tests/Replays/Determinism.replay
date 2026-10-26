@@ -1,6 +1,6 @@
 {
 	"Format": "Replay",
-	"Version": 2,
+	"Version": 3,
 	"Scene": {
 		"Handle": "1913ebcc36a006ad",
 		"Path": "Assets/Scenes/Determinism.scene"
@@ -10,6 +10,714 @@
 	"FixedHz": 64,
 	"EngineVersion": "0.1.0",
 	"Config": "Editor",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "039c52a9f22673cd",
+				"Path": "/Box134",
+				"Hash": "b4127b27ee24b517",
+				"Components": {
+					"Transform": "93041dddd56a91bb",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "2d6c0ee492e0869b",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "0538ee3941c637e4",
+				"Path": "/Box100",
+				"Hash": "7403082927927b75",
+				"Components": {
+					"Transform": "5639f24ad66f4bda",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "8620514713b9a474",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "08e1384b08875422",
+				"Path": "/Box110",
+				"Hash": "06d3cea5d4baa9a7",
+				"Components": {
+					"Transform": "6817de45343d2b8a",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "8620514713b9a474",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "0cd17087b1f0b980",
+				"Path": "/Track/RailRight",
+				"Hash": "17a590b99dc20e09",
+				"Components": {
+					"Transform": "fd12b7dd1bace4c5",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "0d74f7a09db85b50",
+				"Path": "/Box012",
+				"Hash": "a2361ed45ef58dbe",
+				"Components": {
+					"Transform": "9b7d5d2a41d59840",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "73b1fc23de6ec3b9",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "0d99a14c804f692d",
+				"Path": "/Box022",
+				"Hash": "dc176456ac1faf21",
+				"Components": {
+					"Transform": "d087044a18dd601b",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "73b1fc23de6ec3b9",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "121fab23f645a13b",
+				"Path": "/Box131",
+				"Hash": "1c685d5850d42ddc",
+				"Components": {
+					"Transform": "bea18be17b32a975",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "a7b4928cc01961c4",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "13357b88fda13a81",
+				"Path": "/Box013",
+				"Hash": "f1bfab4e390d7486",
+				"Components": {
+					"Transform": "004ba61e9d694c44",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "10d3769c58f3be3b",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "1c20a28c4dbf1dcd",
+				"Path": "/Box103",
+				"Hash": "103586267de5ab31",
+				"Components": {
+					"Transform": "8034cbd0580338cb",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "10d3769c58f3be3b",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "1df451e6b51f61db",
+				"Path": "/Box020",
+				"Hash": "bc316b9157bcb0bf",
+				"Components": {
+					"Transform": "5e82f5d264b86b8e",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "8620514713b9a474",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "2160f3d97b8da1b1",
+				"Path": "/Box114",
+				"Hash": "c98c0bc6e5551d4b",
+				"Components": {
+					"Transform": "772beb9e6db7aaf8",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "2d6c0ee492e0869b",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "26064adaee454f2f",
+				"Path": "/Box111",
+				"Hash": "6fbe42cdb6f9cf8a",
+				"Components": {
+					"Transform": "e903f28a78782f55",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "a7b4928cc01961c4",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "2d673bca7ec62955",
+				"Path": "/Box030",
+				"Hash": "904cb0f45436b2ae",
+				"Components": {
+					"Transform": "400835c27ee3f51c",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "8620514713b9a474",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "30405029ee24fff8",
+				"Path": "/Box023",
+				"Hash": "de0021417bc793fa",
+				"Components": {
+					"Transform": "10827146576b55e2",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "10d3769c58f3be3b",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "3523f95271eb85f6",
+				"Path": "/Track/Runout",
+				"Hash": "388ffbde39c58e11",
+				"Components": {
+					"Transform": "af6df5edf7f9ad2b",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "3905b249a64faac9",
+				"Path": "/Box040",
+				"Hash": "3faa102de1d1fa28",
+				"Components": {
+					"Transform": "a95ff122a6030eb3",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "8620514713b9a474",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "3b1950e6532a153a",
+				"Path": "/Box001",
+				"Hash": "0fe3f8b94647b996",
+				"Components": {
+					"Transform": "13c01d4393d5c204",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "a7b4928cc01961c4",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "3c35d06095ea5433",
+				"Path": "/Box041",
+				"Hash": "1bf4807c58c7e0a2",
+				"Components": {
+					"Transform": "482b21ec42e0514a",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "a7b4928cc01961c4",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "3c93f269cddc5d5a",
+				"Path": "/Box024",
+				"Hash": "8123c60b82c4861f",
+				"Components": {
+					"Transform": "f6c66e62fd1195b3",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "2d6c0ee492e0869b",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "45b5202d750c3614",
+				"Path": "/Box004",
+				"Hash": "33062468256c3459",
+				"Components": {
+					"Transform": "f384d7b99ffe8021",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "2d6c0ee492e0869b",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "4d641c9c13cf37f8",
+				"Path": "/Floor",
+				"Hash": "9ea36237c2e90e3a",
+				"Components": {
+					"Transform": "ea712709ea9d5e96",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "73c79e2c68690cf6",
+					"BoxCollider": "806c77631484072b"
+				}
+			},
+			{
+				"Id": "4d846987dc353f15",
+				"Path": "/Box120",
+				"Hash": "ae295b5a73285a9f",
+				"Components": {
+					"Transform": "af720bc7b98addcc",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "8620514713b9a474",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "4e03becb1fef6d89",
+				"Path": "/Box003",
+				"Hash": "742d805cfcd78a07",
+				"Components": {
+					"Transform": "161cfe7dbbf12904",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "10d3769c58f3be3b",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "4f3d74cf39635bea",
+				"Path": "/Box142",
+				"Hash": "df4a049f72744476",
+				"Components": {
+					"Transform": "514249826ad7fedb",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "73b1fc23de6ec3b9",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "4fa5ad7899fed7a2",
+				"Path": "/Box101",
+				"Hash": "360c1055c2af5dd7",
+				"Components": {
+					"Transform": "309d7d643ea2e0a1",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "a7b4928cc01961c4",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "540725996aa79501",
+				"Path": "/Box112",
+				"Hash": "a1a389c41fcf1c03",
+				"Components": {
+					"Transform": "1e8a826c974f95e2",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "73b1fc23de6ec3b9",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "5699adc3da8f542d",
+				"Path": "/Box014",
+				"Hash": "46896b32904e50ba",
+				"Components": {
+					"Transform": "4eb211f15642ef25",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "2d6c0ee492e0869b",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "69268a21af76d5ed",
+				"Path": "/Box033",
+				"Hash": "3c5242d5a6a9bd3c",
+				"Components": {
+					"Transform": "86e5e9191a2043f3",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "10d3769c58f3be3b",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "6a10f6b4ecaf4a1e",
+				"Path": "/Paddle",
+				"Hash": "bc0376698dced7e8",
+				"Components": {
+					"Transform": "32da2f8349974d35",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "a8187a5daac10983",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "6b7f6084f0997e04",
+				"Path": "/Ball",
+				"Hash": "722217677732973e",
+				"Components": {
+					"Transform": "d65a81f314f70460",
+					"MeshRenderer": "f433c3ab9a1171d2",
+					"RigidBody": "f046410902fd4e7a",
+					"SphereCollider": "9cd09cbe54c4e3b3"
+				}
+			},
+			{
+				"Id": "6dd1b0555c755061",
+				"Path": "/Box102",
+				"Hash": "5b6dbe840c8b639c",
+				"Components": {
+					"Transform": "6fe23eb3afb2a956",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "73b1fc23de6ec3b9",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "7f8ee71b4e1adfc4",
+				"Path": "/Box132",
+				"Hash": "9cae4c3798af0024",
+				"Components": {
+					"Transform": "13e0d294d4671ce6",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "73b1fc23de6ec3b9",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "893aa3ec31a95145",
+				"Path": "/Camera",
+				"Hash": "a5428554fd257635",
+				"Components": {
+					"Transform": "23b5ecb8c824a9be",
+					"Camera": "ff6d33b1b7ef8196",
+					"AudioListener": "5364d8903ff7ab7d"
+				}
+			},
+			{
+				"Id": "8b16099b93157970",
+				"Path": "/Box000",
+				"Hash": "63cb415d42efda21",
+				"Components": {
+					"Transform": "5befd747c0f76ad7",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "8620514713b9a474",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "90fff8378dfa0b94",
+				"Path": "/Box032",
+				"Hash": "f9f660a924633df4",
+				"Components": {
+					"Transform": "4fa3f8b64ae71311",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "73b1fc23de6ec3b9",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "93a854ca0057d3f0",
+				"Path": "/Box141",
+				"Hash": "8e8a86cc6a6b745c",
+				"Components": {
+					"Transform": "51d917f2dd1e4dd7",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "a7b4928cc01961c4",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "956df76f4c3ff227",
+				"Path": "/Floor/WallSouth",
+				"Hash": "13cd09a2c5dd3c24",
+				"Components": {
+					"Transform": "bdb9ac680ef01a12",
+					"BoxCollider": "9c62ba29dbb79ebf"
+				}
+			},
+			{
+				"Id": "972196cc8f369903",
+				"Path": "/Box034",
+				"Hash": "34ac465c2064a38d",
+				"Components": {
+					"Transform": "f7b100f2d9cc2c9e",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "2d6c0ee492e0869b",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "9ee15175787a62c4",
+				"Path": "/Box122",
+				"Hash": "459fd87acb023f55",
+				"Components": {
+					"Transform": "f329e4aefc15dd4a",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "73b1fc23de6ec3b9",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "a304c42ac548fd77",
+				"Path": "/Box021",
+				"Hash": "433533b5b7ec9c7a",
+				"Components": {
+					"Transform": "16a37dfb9dce8fa3",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "a7b4928cc01961c4",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "a455658d9d9d3897",
+				"Path": "/Box104",
+				"Hash": "b7960e792ff41d7f",
+				"Components": {
+					"Transform": "b9abe04e14af4ad4",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "2d6c0ee492e0869b",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "a6e5021ac9eef155",
+				"Path": "/Track/RailLeft",
+				"Hash": "e4e87f9c745b034b",
+				"Components": {
+					"Transform": "54a57ffae1822617",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "a9adbd4afaaf3f1d",
+				"Path": "/Box043",
+				"Hash": "8a0cc8f51ce90143",
+				"Components": {
+					"Transform": "165a0560b23f4359",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "10d3769c58f3be3b",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "b44b9dc055310846",
+				"Path": "/Box143",
+				"Hash": "504efae516c6da37",
+				"Components": {
+					"Transform": "dd7ba8527ec494f5",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "10d3769c58f3be3b",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "b45ece8a85d88248",
+				"Path": "/Director",
+				"Hash": "ccc461ba9b6a4ce1",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Script": "215acad5778dc75b"
+				}
+			},
+			{
+				"Id": "b9d1183bbe86f875",
+				"Path": "/Box133",
+				"Hash": "9d4c9aa7961c817b",
+				"Components": {
+					"Transform": "6e39bb3ec617177b",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "10d3769c58f3be3b",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "bb2815db4298d406",
+				"Path": "/Box121",
+				"Hash": "05b54c46fda25f50",
+				"Components": {
+					"Transform": "4557a27372730a13",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "a7b4928cc01961c4",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "bf5c1828b12504b2",
+				"Path": "/Box123",
+				"Hash": "5077353365580e90",
+				"Components": {
+					"Transform": "48a0213677faafe4",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "10d3769c58f3be3b",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "c1ab0475abdbf5ba",
+				"Path": "/Box144",
+				"Hash": "4c770642193da858",
+				"Components": {
+					"Transform": "6e10e410a22bb3d1",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "2d6c0ee492e0869b",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "c28a4e527b833cab",
+				"Path": "/Box042",
+				"Hash": "eca82a5479116492",
+				"Components": {
+					"Transform": "f28cfdbfa08e17dd",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "73b1fc23de6ec3b9",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "cc83bd676f17d8e3",
+				"Path": "/Floor/WallNorth",
+				"Hash": "fc4f34015a8d908e",
+				"Components": {
+					"Transform": "60fba8b2a12cc570",
+					"BoxCollider": "9c62ba29dbb79ebf"
+				}
+			},
+			{
+				"Id": "cf665bebc01ef6c8",
+				"Path": "/Box130",
+				"Hash": "2a784c25693aa423",
+				"Components": {
+					"Transform": "31ef68858fed8dff",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "8620514713b9a474",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "cf7df7290f2e0fa9",
+				"Path": "/Sun",
+				"Hash": "93127ca8842631e4",
+				"Components": {
+					"Transform": "6d00e2e3cb0d7cff",
+					"DirectionalLight": "6c90c620fea1993b"
+				}
+			},
+			{
+				"Id": "d08f18dcb8b0526d",
+				"Path": "/Box011",
+				"Hash": "f0cf91ed627c2f9d",
+				"Components": {
+					"Transform": "9fb16f0558e9a09a",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "a7b4928cc01961c4",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "d159cda828b63eb5",
+				"Path": "/Box044",
+				"Hash": "8b801d6f0ad460e5",
+				"Components": {
+					"Transform": "3920644129da2a20",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "2d6c0ee492e0869b",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "d3cec9dd189f106a",
+				"Path": "/Box113",
+				"Hash": "49c5553bab5a9ba7",
+				"Components": {
+					"Transform": "79b04848d2f84213",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "10d3769c58f3be3b",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "d4f8e04013c68936",
+				"Path": "/Box031",
+				"Hash": "2a63d6701807aa81",
+				"Components": {
+					"Transform": "c1c447792ce54b7d",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "a7b4928cc01961c4",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "d5aeb6c7c401ef67",
+				"Path": "/Box140",
+				"Hash": "997ae4d9d9b10e2c",
+				"Components": {
+					"Transform": "003da92877b8f584",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "8620514713b9a474",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "dcdecb2c8ea19f31",
+				"Path": "/Box010",
+				"Hash": "d91415bed31cb6af",
+				"Components": {
+					"Transform": "f52e95e4265c9627",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "8620514713b9a474",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "dd196fefd8a48647",
+				"Path": "/Floor/WallEast",
+				"Hash": "acf311fd2b8fed88",
+				"Components": {
+					"Transform": "36562805af597e23",
+					"BoxCollider": "7a73e4214e08f807"
+				}
+			},
+			{
+				"Id": "de880aea69ada575",
+				"Path": "/Track/Ramp",
+				"Hash": "d4acd9ee81fb7d4f",
+				"Components": {
+					"Transform": "b704b94600ef840f",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "e44a9163b459bd18",
+				"Path": "/Floor/WallWest",
+				"Hash": "76fbb11eb8534a41",
+				"Components": {
+					"Transform": "cc2422edb6b3defd",
+					"BoxCollider": "7a73e4214e08f807"
+				}
+			},
+			{
+				"Id": "e547833263d99e47",
+				"Path": "/Track",
+				"Hash": "a031845ae54cecb3",
+				"Components": {
+					"Transform": "69d2f4f5deaf29a9",
+					"RigidBody": "3147371f579c6e68"
+				}
+			},
+			{
+				"Id": "eb5942bdc589be5b",
+				"Path": "/Box002",
+				"Hash": "29f3a54c88a00410",
+				"Components": {
+					"Transform": "23303ee8566c6141",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "73b1fc23de6ec3b9",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "f0eedf0afe3182e0",
+				"Path": "/Box124",
+				"Hash": "594cef2c9c47617b",
+				"Components": {
+					"Transform": "315deb8b99dacd97",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "2d6c0ee492e0869b",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "a7e11af237584da5",
+				"Path": "Assets/Scripts/Determinism/Pusher.luau",
+				"Type": "Script",
+				"Hash": "e13edec1e7b87f45"
+			}
+		]
+	},
 	"Events": [
 		{
 			"Tick": 30,

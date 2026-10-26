@@ -43,6 +43,8 @@
 // responses name their absolute native path, the parent of the sessions directory's "Out" (a server without a sessions
 // directory, in the Tests, names the user:// path). The first write removes the files of servers whose process is gone; the
 // destructor removes the offloaded results this server wrote and keeps its output files (screenshots), as the editor does.
+// Kept files (WriteKeptFile: the screenshots' keep, Docs/Decisions/0030-m19-contract.md decision 9) go to
+// user://Automation/Kept/, named from the same sequence and created exclusively, and no server ever removes them.
 
 namespace Engine {
 
@@ -78,10 +80,15 @@ namespace Engine {
 
 			// user://Automation/Out/, created and, on first use, pruned of the files of servers that are gone.
 			[[nodiscard]] Result<VfsPath> PrepareOutputDirectory();
-			// Creates the next file of the sequence with `extension` there and returns it; AlreadyExists when that name
-			// exists (it is never replaced). The number is used up even when the write fails.
+			// user://Automation/Kept/, created and never pruned.
+			[[nodiscard]] Result<VfsPath> PrepareKeptDirectory();
+			// Creates the next file of the sequence with `extension` in `directory` and returns it; AlreadyExists when that
+			// name exists (it is never replaced). The number is used up even when the write fails.
+			[[nodiscard]] Result<VfsPath> CreateSequencedFile(const VfsPath& directory, std::string_view extension, std::span<const std::byte> bytes);
+			// CreateSequencedFile in PrepareOutputDirectory's directory.
 			[[nodiscard]] Result<VfsPath> CreateOutputFile(std::string_view extension, std::span<const std::byte> bytes);
-			// The absolute native path of `file` (in PrepareOutputDirectory's directory), which responses name.
+			// The absolute native path of `file` (in PrepareOutputDirectory's or PrepareKeptDirectory's directory), which
+			// responses name.
 			[[nodiscard]] std::string GetOutputPath(const VfsPath& file) const;
 		};
 
@@ -219,12 +226,14 @@ namespace Engine {
 
 			[[nodiscard]] Result<std::string> WriteOutputFile(std::string_view extension, std::span<const std::byte> bytes) override
 			{
-				ENGINE_CORE_ASSERT(!extension.empty() && std::ranges::all_of(extension, [](char character)
-				{
-					return (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9');
-				}),
-					"output file extension '{}' must be lowercase letters and digits", extension);
 				ENGINE_TRY_ASSIGN(const VfsPath file, m_Host->CreateOutputFile(extension, bytes));
+				return m_Host->GetOutputPath(file);
+			}
+
+			[[nodiscard]] Result<std::string> WriteKeptFile(std::string_view extension, std::span<const std::byte> bytes) override
+			{
+				ENGINE_TRY_ASSIGN(const VfsPath directory, m_Host->PrepareKeptDirectory());
+				ENGINE_TRY_ASSIGN(const VfsPath file, m_Host->CreateSequencedFile(directory, extension, bytes));
 				return m_Host->GetOutputPath(file);
 			}
 
@@ -327,19 +336,38 @@ namespace Engine {
 			return directory;
 		}
 
-		Result<VfsPath> RuntimeHost::CreateOutputFile(std::string_view extension, std::span<const std::byte> bytes)
+		Result<VfsPath> RuntimeHost::PrepareKeptDirectory()
 		{
-			ENGINE_TRY_ASSIGN(const VfsPath directory, PrepareOutputDirectory());
+			ENGINE_TRY_ASSIGN(const VfsPath directory, VfsPath::Create("user", "Automation/Kept"));
+			ENGINE_TRY(Vfs->CreateDirectories(directory));
+			return directory;
+		}
+
+		Result<VfsPath> RuntimeHost::CreateSequencedFile(const VfsPath& directory, std::string_view extension, std::span<const std::byte> bytes)
+		{
+			ENGINE_CORE_ASSERT(!extension.empty() && std::ranges::all_of(extension, [](char character)
+			{
+				return (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9');
+			}),
+				"output file extension '{}' must be lowercase letters and digits", extension);
 			ENGINE_TRY_ASSIGN(const VfsPath file, directory.Join(MakeOffloadFileName(ServerTag, NextFileSequence++, extension)));
 			// Created exclusively: a name that exists, whoever created it and when, fails with AlreadyExists and stays as it is.
 			ENGINE_TRY(WithContext(Vfs->WriteNewFile(file, bytes), "while writing an automation output file, which is never replaced"));
 			return file;
 		}
 
+		Result<VfsPath> RuntimeHost::CreateOutputFile(std::string_view extension, std::span<const std::byte> bytes)
+		{
+			ENGINE_TRY_ASSIGN(const VfsPath directory, PrepareOutputDirectory());
+			return CreateSequencedFile(directory, extension, bytes);
+		}
+
 		std::string RuntimeHost::GetOutputPath(const VfsPath& file) const
 		{
+			// user://Automation/<Out or Kept>/<name> lies beside the sessions directory.
 			if (!Specification.SessionsDirectory.empty())
-				return FileSystem::PathToUtf8(Specification.SessionsDirectory.parent_path() / "Out" / FileSystem::PathFromUtf8(file.GetFileName()));
+				return FileSystem::PathToUtf8(Specification.SessionsDirectory.parent_path() / FileSystem::PathFromUtf8(file.GetParent().GetFileName())
+					/ FileSystem::PathFromUtf8(file.GetFileName()));
 			return file.ToString();
 		}
 

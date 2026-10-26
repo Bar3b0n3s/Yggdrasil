@@ -22,6 +22,7 @@ namespace Engine {
 			GameManifest manifest;
 			manifest.Name = "Tetris";
 			manifest.EngineVersion = "0.1.0";
+			manifest.Build = "0.1.0+3f2a9c1d4e5b";
 			manifest.StartScene = UUID(0x8a61c0d2e4f31b77ULL);
 			manifest.Paks = { GameManifestPak{ .Path = "Data/Engine.pak", .Hash = 0x0123456789abcdefULL },
 				GameManifestPak{ .Path = "Data/Game.pak", .Hash = 0xfedcba9876543210ULL } };
@@ -72,7 +73,7 @@ namespace Engine {
 			const Result<std::string> text = GameManifestSerializer::SaveToString(MakeManifest());
 			REQUIRE(text.has_value());
 			std::string newer = *text;
-			newer.replace(newer.find("\"Version\": 1"), 12, "\"Version\": 9");
+			newer.replace(newer.find("\"Version\": 2"), 12, "\"Version\": 9");
 			const Result<GameManifest> future = GameManifestSerializer::LoadFromString(newer);
 			REQUIRE_FALSE(future.has_value());
 			CHECK(future.error().GetCode() == ErrorCode::UnsupportedVersion);
@@ -86,6 +87,59 @@ namespace Engine {
 			REQUIRE_FALSE(missing.has_value());
 			CHECK(missing.error().GetCode() == ErrorCode::NotFound);
 			CHECK(missing.error().GetMessageText().contains("Game.json"));
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 18 (B-BVER, stream D): version 2 writes the exporting build's id as
+		// "Build" after "EngineVersion"; a Build that ParseBuildId refuses, or whose version is not EngineVersion, is refused
+		// at /Build, writing and reading; a version 1 manifest has no Build and reads with an empty one.
+		TEST_CASE("GameManifest: version 2 carries the build id, and version 1 reads without one")
+		{
+			CHECK(GameManifest::CurrentVersion == GameManifestBuildVersion);
+			GameManifest manifest = MakeManifest();
+			manifest.Build = "0.1.0+3f2a9c1d4e5b.dirty";
+			const Result<std::string> text = GameManifestSerializer::SaveToString(manifest);
+			REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+			CHECK(text->contains("\"Version\": 2"));
+			CHECK(text->find("\"EngineVersion\"") < text->find("\"Build\": \"0.1.0+3f2a9c1d4e5b.dirty\""));
+			CHECK(text->find("\"Build\"") < text->find("\"StartScene\""));
+			const Result<GameManifest> read = GameManifestSerializer::LoadFromString(*text);
+			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
+			CHECK(read->Build == manifest.Build);
+			const Result<std::string> again = GameManifestSerializer::SaveToString(*read);
+			REQUIRE(again.has_value());
+			CHECK(*again == *text);
+
+			for (const std::string_view build : { "", "0.1", "0.2.0+3f2a9c1d4e5b", "0.1.0+3F2A9C1D4E5B" })
+			{
+				CAPTURE(build);
+				GameManifest bad = manifest;
+				bad.Build = std::string(build);
+				const Result<std::string> refused = GameManifestSerializer::SaveToString(bad);
+				REQUIRE_FALSE(refused.has_value());
+				CHECK(refused.error().GetCode() == ErrorCode::Validation);
+				REQUIRE_FALSE(refused.error().GetIssues().empty());
+				CHECK(refused.error().GetIssues().front().JsonPointer == "/Build");
+
+				std::string edited = *text;
+				edited.replace(edited.find("0.1.0+3f2a9c1d4e5b.dirty"), std::string_view("0.1.0+3f2a9c1d4e5b.dirty").size(), std::string(build));
+				const Result<GameManifest> unread = GameManifestSerializer::LoadFromString(edited);
+				REQUIRE_FALSE(unread.has_value());
+				CHECK(unread.error().GetCode() == ErrorCode::Validation);
+			}
+
+			// Version 1 knows no Build: one there is an unknown key, and without it the manifest reads with an empty Build.
+			std::string version1 = *text;
+			version1.replace(version1.find("\"Version\": 2"), 12, "\"Version\": 1");
+			const Result<GameManifest> unknown = GameManifestSerializer::LoadFromString(version1);
+			REQUIRE_FALSE(unknown.has_value());
+			CHECK(unknown.error().GetCode() == ErrorCode::Validation);
+			const size_t begin = version1.find("\t\"Build\"");
+			REQUIRE(begin != std::string::npos);
+			version1.erase(begin, version1.find('\n', begin) + 1 - begin);
+			const Result<GameManifest> old = GameManifestSerializer::LoadFromString(version1);
+			REQUIRE_MESSAGE(old.has_value(), old.error().ToString());
+			CHECK(old->Build.empty());
+			CHECK(old->Name == manifest.Name);
 		}
 
 		TEST_CASE("GameManifest: Paks holds exactly Engine.pak and Game.pak")

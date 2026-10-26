@@ -133,7 +133,8 @@ namespace Engine {
 			Buffer Png{};
 		};
 
-		static Result<WrittenScreenshot> WriteScreenshot(AutomationMethodContext& context, const Image& captured, uint32_t maxDimension)
+		// `keep` (M19 decision 9) writes into the kept-files directory instead of the output directory.
+		static Result<WrittenScreenshot> WriteScreenshot(AutomationMethodContext& context, const Image& captured, uint32_t maxDimension, bool keep)
 		{
 			// A capture that already fits is encoded as it is; only a larger one is copied, downscaled. Screenshots may be up to
 			// MaxViewportScreenshotDimension square, so no full-size copy is made.
@@ -145,7 +146,7 @@ namespace Engine {
 			const Image& image = downscaled.has_value() ? *downscaled : captured;
 			WrittenScreenshot written;
 			ENGINE_TRY_ASSIGN(written.Png, EncodePng(image));
-			ENGINE_TRY_ASSIGN(written.Path, context.WriteOutputFile(ScreenshotPngExtension, written.Png));
+			ENGINE_TRY_ASSIGN(written.Path, keep ? context.WriteKeptFile(ScreenshotPngExtension, written.Png) : context.WriteOutputFile(ScreenshotPngExtension, written.Png));
 			written.Width = image.Width;
 			written.Height = image.Height;
 			return written;
@@ -226,7 +227,7 @@ namespace Engine {
 
 			const ViewportScreenshotRequest capture{ .Width = params.Width, .Height = params.Height, .MaxDimension = 0 };
 			ENGINE_TRY_ASSIGN(const Image captured, WithContext(context.CaptureView(snapshot, capture), "while rendering the viewport"));
-			ENGINE_TRY_ASSIGN(const Utils::WrittenScreenshot written, Utils::WriteScreenshot(context, captured, params.MaxDimension));
+			ENGINE_TRY_ASSIGN(const Utils::WrittenScreenshot written, Utils::WriteScreenshot(context, captured, params.MaxDimension, params.Keep));
 			// Inline data only while the result stays below the offload threshold (MaxInlineScreenshotPngBytes).
 			const bool fitsInline = written.Png.size() <= MaxInlineScreenshotPngBytes;
 			return ViewportScreenshotResult{
@@ -270,7 +271,9 @@ namespace Engine {
 				"Capture-only annotations: labels=all, selection (selected), none or an EntityRef array; colliders, bounds and axes are booleans. Unknown members and invalid references are rejected.")
 			.Field("maxDimension", &ViewportScreenshotParams::MaxDimension, "The larger side of the PNG at most this many pixels.", dimensionMeta)
 			.Field("inline", &ViewportScreenshotParams::Inline,
-				"Also return the PNG as base64 in \"data\" when it is at most 30 KB; a larger one is only written (inlineOmitted).");
+				"Also return the PNG as base64 in \"data\" when it is at most 30 KB; a larger one is only written (inlineOmitted).")
+			.Field("keep", &ViewportScreenshotParams::Keep,
+				"Write the PNG into Library/Automation/Kept/ (user://Automation/Kept/ without a writable project and in the Runtime), which no later editor session prunes, instead of Library/Automation/Out/.");
 
 		registry.Struct<ViewportScreenshotResult>("ViewportScreenshotResult", "A viewport screenshot written as a PNG.")
 			.Field("view", &ViewportScreenshotResult::View, "The view rendered.")

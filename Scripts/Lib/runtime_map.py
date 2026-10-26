@@ -34,14 +34,19 @@ nested types are covered by their enclosing type; declared_names):
   - ImGui: the ImGui namespace, any symbol whose origin is the ImGui library (or ImGuizmo, its extension), and every
     type and free function declared in Engine/Source/Engine/ImGui/**.h (ImGuiLayer, ImGuiRenderer,
     CaptureImGuiScreenshot, StatsOverlayToggle and their peers);
-  - AssetPipeline: every type and free function declared in Engine/Source/Engine/AssetPipeline/**.h.
-The acceptance step names exactly these four. If the Luau compiler leaves Dist (§14.4 "no Luau compiler"), the same
-change appends "LuauCompiler" (Luau::Compiler, Luau::Parser, luau_compile and any symbol whose origin is the
-Luau.Compiler or Luau.Ast library) to FORBIDDEN_FAMILIES with its fixtures, so the compiler cannot return unnoticed;
-that extension of the frozen API is approved by ADR 0024 decision 11. It has not: the Luau require library that the
-sandbox uses links Luau's configuration reader, which compiles .config.luau files (see the stream D record of ADR 0024).
-REQUIRED_SYMBOLS must be present, as a component of some symbol's qualified names, so the FeatureTest harness provably
-stays in Dist (§14.4).
+  - AssetPipeline: every type and free function declared in Engine/Source/Engine/AssetPipeline/**.h;
+  - LuauCompiler (M19, appended by Docs/Decisions/0030-m19-contract.md decision 22, the extension of the frozen API that
+    ADR 0024 decision 11 approved): Luau's compiler, its bytecode builder, its configuration reader (which compiles
+    .config.luau files) and its require library, which the sandbox's first-party require replaced in every
+    configuration, so Dist links none of them: Luau::compile, Luau::compileOrThrow, Luau::Compiler, Luau::Compile,
+    Luau::CompileOptions, Luau::CompileError, Luau::buildTypeMap (the compiler's type map), Luau::BytecodeBuilder,
+    Luau::BytecodeEncoder, Luau::Config, Luau::ConfigOptions, Luau::parseConfig, Luau::extractLuauConfig,
+    Luau::LintOptions, Luau::LintWarning (the configuration's lint rules), Luau::Require, luau_compile, luaopen_require
+    and every luarequire_* function, so each object of those four Luau modules shows. Names only: they share the Luau
+    library with the VM, which stays, and so do Luau's Parser, Ast and Lexer, which ScriptApiRegistry's signature
+    validation keeps in Dist.
+The acceptance step keeps its M15 name, which names the first four. REQUIRED_SYMBOLS must be present, as a component
+of some symbol's qualified names, so the FeatureTest harness provably stays in Dist (§14.4).
 """
 
 from __future__ import annotations
@@ -50,7 +55,7 @@ import dataclasses
 import re
 from pathlib import Path
 
-FORBIDDEN_FAMILIES = ("automation", "Analysis", "ImGui", "AssetPipeline")
+FORBIDDEN_FAMILIES = ("automation", "Analysis", "ImGui", "AssetPipeline", "LuauCompiler")
 # Types the Dist Runtime must still contain (§14.4: "the FeatureTest harness stays in Dist").
 REQUIRED_SYMBOLS = ("FeatureTestRunner", "ReplayPlayer")
 MAP_FORMATS = ("msvc", "lld", "gnu", "ld64")
@@ -92,6 +97,14 @@ _FAMILY_HEADER_ROOTS = {
 _FAMILY_FIXED_NAMES = {
     "Analysis": ("Luau::Frontend",),
     "ImGui": ("ImGui",),
+    "LuauCompiler": ("Luau::compile", "Luau::compileOrThrow", "Luau::Compiler", "Luau::Compile", "Luau::CompileOptions",
+                     "Luau::CompileError", "Luau::buildTypeMap", "Luau::BytecodeBuilder", "Luau::BytecodeEncoder",
+                     "Luau::Config", "Luau::ConfigOptions", "Luau::parseConfig", "Luau::extractLuauConfig",
+                     "Luau::LintOptions", "Luau::LintWarning", "Luau::Require", "luau_compile", "luaopen_require"),
+}
+# Name patterns (regular expressions, fullmatched like the names) that belong to a family whatever the headers say.
+_FAMILY_FIXED_EXPRESSIONS = {
+    "LuauCompiler": (r"luarequire_\w+",),
 }
 # Library components (file names without "lib" or the extension, case-insensitively) that belong to a family.
 _FAMILY_LIBRARIES = {
@@ -119,7 +132,9 @@ def family_patterns(repository_root: Path) -> dict[str, FamilyPatterns]:
             names.update(declared)
         libraries = tuple(re.compile(rf"(?:lib)?{re.escape(library)}(?:\.lib|\.a)?", re.IGNORECASE)
                           for library in _FAMILY_LIBRARIES.get(family, ()))
-        patterns[family] = FamilyPatterns(tuple(re.compile(re.escape(name)) for name in sorted(names)), libraries)
+        expressions = tuple(re.compile(expression) for expression in _FAMILY_FIXED_EXPRESSIONS.get(family, ()))
+        patterns[family] = FamilyPatterns(tuple(re.compile(re.escape(name)) for name in sorted(names)) + expressions,
+                                          libraries)
     return patterns
 
 

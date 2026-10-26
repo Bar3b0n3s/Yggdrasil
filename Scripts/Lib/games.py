@@ -11,14 +11,20 @@ dry run under Tests/Projects is not soaked, ADR 0025), so the soak never depends
 Discovery reads the working tree ("disk") or the staged files ("index", what a fresh clone of the commit about to be
 made holds; git ls-files): the games suite and AuditProvenance.py --demos in index mode (their default) audit and run
 only staged projects, and name each project found on disk but not staged in a passed step, so a half-built demo that
-is not part of a commit never fails it and is never skipped silently. Apart from index discovery, which runs git, the
-helpers are pure: they read files or the documents the editor and the Runtime return, start nothing, and return failure
-lines ("<what>: <why>"), an empty list meaning the check passed.
+is not part of a commit never fails it and is never skipped silently. Apart from index discovery, which runs git, and
+prepare_native_editor, which writes a test editor's preference and runs Scripts/BuildNative.py, the helpers are pure:
+they read files or the documents the editor and the Runtime return, start nothing, and return failure lines ("<what>:
+<why>"), an empty list meaning the check passed.
 
 The input check (M16 friction S2-01, FX-4): every committed replay with input events is also verified without them
-(input.replay {verify: true, strictHash: true, withoutInput: true}; withoutInput without verify is refused, since it
-would check nothing) in the editor halves, and that verification must fail (evaluate_input_check),
-because a replay whose outcome does not depend on its input proves nothing about the gameplay it recorded. One rule
+(input.replay {verify: true, strictHash: true, withoutInput: true, continuePastCheckpoint: true}; withoutInput without
+verify is refused, since it would check nothing) in the editor halves, and that verification must fail
+(evaluate_input_check), because a replay whose outcome does not depend on its input proves nothing about the gameplay
+it recorded. Since the run plays on past the checkpoints that differ (M19, Docs/Decisions/0030-m19-contract.md decision
+3), a replay whose run without input differed only at checkpoints and still reached its recorded final hash gets a
+warning (input_check_warning) that never fails the half. Two staged games that share an .eproj stem or a Name (the
+staged one, read_staged_game_name) would collide in the suite's steps, reports or Dist package directory, so the suite
+refuses them first (check_distinct_projects, decision 12). One rule
 decides input independence everywhere (Docs/Architecture.md §13.6; the recording guards of input.record and test.run
 {record} apply it too): a replay is input-independent when its input-free run passes verification (every checkpoint,
 the final state hash, every expectation), whatever script errors that run raised. A game also needs at least one test
@@ -32,19 +38,29 @@ package's executable and its testing user data after the project's Name (Project
 its log after the executable's stem (Docs/Architecture.md §4.4: Logs/<exe>.log), so the Dist half reads that Name from
 the testing export's manifest (read_game_name; ADR 0027 decision 4, B2) and takes the executable from project.export's
 result.
+
+A game with a native module (a Native/ directory, Docs/Decisions/0030-m19-contract.md decisions 26 and 35; Windows
+only) needs two things before a strict editor opens it, which prepare_native_editor gives the copy the editor opens: the
+user's "Allow native code" preference in the editor's own user data, written by this harness and never by a method
+(decision 29), and a current build of its module below the copy's Library/Native/Builds/, because a project's opening
+loads the newest current build and never builds (decision 31), while a strict editor refuses a scene's native
+component that no loaded module registers (NATIVE_COMPONENT_UNREGISTERED, decision 27). The Dist half's export builds
+the game's Runtime with its module linked in (decision 33) in the same editor, whose user data already allows it.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import re
 import subprocess
+import sys
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from Lib import exports, paths, provenance
+from Lib import exports, locks, native_build, paths, provenance
 from Lib.process import format_command
 
 GAME_PROJECT_ROOTS = ("Projects", "Tests/Projects")
@@ -91,9 +107,28 @@ START_SCENE_NOT_LISTED = ("Export.BuildScenes does not list the StartScene '{sce
 REPLAY_FILE_SUFFIX = ".replay"
 ASSETS_DIRECTORY = "Assets"
 GIT_TIMEOUT_SECONDS = 120.0
+# The input check's warning (input_check_warning): the engine's MakeFinalHashIndependentWarning
+# (Engine/Source/Engine/Session/ReplayPlayer.h; Docs/Decisions/0030-m19-contract.md decision 3), word for word.
+FINAL_HASH_INDEPENDENT_WARNING = ("'{replay}': its final state hash does not depend on its input: without its input "
+                                  "events the run first differed from the recording at checkpoint tick {tick}, then "
+                                  "reached the recorded final state hash {hash}, so only its checkpoints prove the "
+                                  "play; end the recording while the played state is still in the scene")
 # A committed FinalStateHash: 16 hexadecimal digits (Engine/Source/Engine/Asset/ReplayData.h: ReplayToText writes them
 # lowercase).
 STATE_HASH_PATTERN = re.compile(r"[0-9a-fA-F]{16}")
+# A native game's preparation (prepare_native_editor; Docs/Decisions/0030-m19-contract.md decisions 29 to 31 and 35):
+# the user's preference in user://Editor.json (EditorCore/EditorPreferences.h), the script that builds the module, and
+# the build directory a project's opening loads from (NativeModuleHost: Library/Native/Builds/<sequence>/, at least 8
+# digits, the newest current build of the editor's configuration).
+EDITOR_PREFERENCES_FILE = "Editor.json"
+EDITOR_PREFERENCES_HEADER = {"Format": "EditorPreferences", "Version": 1}
+ALLOW_NATIVE_CODE_KEY = "AllowNativeCode"
+BUILD_NATIVE_SCRIPT = paths.REPOSITORY_ROOT / "Scripts" / "BuildNative.py"
+NATIVE_BUILD_DIRECTORY = Path("Library") / "Native" / "Builds" / "00000001"
+# BuildNative.py's bound of the build itself (its --timeout); its wait for the machine-wide build lock keeps the default
+# bound, and the process gets both and a margin.
+NATIVE_BUILD_TIMEOUT_SECONDS = 1800.0
+NATIVE_BUILD_MARGIN_SECONDS = 300.0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -192,9 +227,16 @@ def _staged_project_files(base: Path) -> dict[str, list[str]]:
 def _read_json_object(path: Path, what: str) -> dict[str, Any]:
     """The JSON object in the UTF-8 file `path`; ValueError naming `what` otherwise."""
     try:
-        document = json.loads(path.read_bytes().decode("utf-8"))
+        data = path.read_bytes()
     except OSError as error:
         raise ValueError(f"{what}: cannot be read: {error}") from error
+    return _parse_json_object(data, what)
+
+
+def _parse_json_object(data: bytes, what: str) -> dict[str, Any]:
+    """The JSON object `data` holds as UTF-8; ValueError naming `what` otherwise."""
+    try:
+        document = json.loads(data.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise ValueError(f"{what}: not UTF-8 JSON: {error}") from error
     if not isinstance(document, dict):
@@ -306,7 +348,30 @@ def read_game_name(path: Path) -> str:
     FORBIDDEN_NAME_CHARACTERS, or "." or "..", which Paths::ValidateAppName refuses and the exporter never writes) also
     raises ValueError naming the file."""
     name = paths.display_path(path)
-    document = _read_json_object(path, name)
+    return _game_name(_read_json_object(path, name), name)
+
+
+def read_staged_game_name(project_file: Path) -> str:
+    """read_game_name of the staged blob of the .eproj `project_file` (`git -C <its directory> cat-file blob
+    :./<its name>`): the Name of the project the games suite's halves run, from the index as they do, whatever the
+    working tree holds. Raises ValueError naming the file when git is missing or fails (the file is not staged, say), or
+    for a blob read_game_name would refuse."""
+    name = f"{paths.display_path(project_file)} (staged)"
+    command = ["git", "-C", str(project_file.parent), "cat-file", "blob", f":./{project_file.name}"]
+    try:
+        completed = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, timeout=GIT_TIMEOUT_SECONDS,
+                                   check=False)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ValueError(f"{name}: cannot be read: {format_command(command)} could not run: {error}") from error
+    if completed.returncode != 0:
+        output = completed.stderr.decode("utf-8", errors="replace").strip() or "no output"
+        raise ValueError(f"{name}: cannot be read: {format_command(command)} exited with code "
+                         f"{completed.returncode}: {output}")
+    return _game_name(_parse_json_object(completed.stdout, name), name)
+
+
+def _game_name(document: dict[str, Any], name: str) -> str:
+    """read_game_name's checks of `document`, the file `name` holds."""
     formats = (GAME_MANIFEST_FORMAT, PROJECT_FORMAT)
     if document.get("Format") not in formats:
         raise ValueError(f"{name}: neither a game manifest nor a project file (its Format is "
@@ -382,6 +447,171 @@ def evaluate_input_check(replay: str, events: int, result: dict[str, Any] | None
         return [f"{replay}: the input check could not run (input.replay {{verify: true, strictHash: true, "
                 f"withoutInput: true}} failed with {code}: {detail})"]
     return []
+
+
+def input_check_warning(replay: str, outcome: dict[str, Any] | None) -> str | None:
+    """M19 (Docs/Decisions/0030-m19-contract.md decision 3, A-F29; ADR 0026 friction F29): the warning of one committed
+    replay's input check, which the editor halves run with continuePastCheckpoint (input.replay {verify: true,
+    strictHash: true, withoutInput: true, continuePastCheckpoint: true}), so the run without input plays on past the
+    checkpoints that differ. `outcome` is that check's InputReplayResult: its error data's "replay" when it failed, as
+    it must for evaluate_input_check to pass. When the outcome's checkpointsFailed is positive, its hashMatched is true
+    and every expectation was satisfied, the run without input differed at checkpoints yet reached the recorded final
+    state hash: the final hash then proves only the end state, and only the checkpoints prove the play. The line is
+    then exactly the engine's MakeFinalHashIndependentWarning (Engine/Session/ReplayPlayer.h) for `replay`, the
+    outcome's firstFailedCheckpointTick and its expectedStateHash: "'<replay>': its final state hash does not depend on
+    its input: without its input events the run first differed from the recording at checkpoint tick <tick>, then
+    reached the recorded final state hash <hash>, so only its checkpoints prove the play; end the recording while the
+    played state is still in the scene". None otherwise, an outcome that is not an object included. A warning never
+    fails the half: the games step stays passed and prints it."""
+    if not isinstance(outcome, dict):
+        return None
+    failed = outcome.get("checkpointsFailed")
+    if not _is_count(failed) or failed <= 0 or outcome.get("hashMatched") is not True:
+        return None
+    expectations = outcome.get("expect", [])
+    if not isinstance(expectations, list) or not all(isinstance(entry, dict) and entry.get("satisfied") is True
+                                                     for entry in expectations):
+        return None
+    tick = outcome.get("firstFailedCheckpointTick")
+    final_hash = outcome.get("expectedStateHash")
+    if not _is_count(tick) or not isinstance(final_hash, str):
+        return None
+    return FINAL_HASH_INDEPENDENT_WARNING.format(replay=replay, tick=tick, hash=final_hash)
+
+
+def _is_count(value: object) -> bool:
+    """Whether `value` is a JSON integer (never a bool, which Python counts as one)."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def check_distinct_projects(projects: Iterable[GameProject], files: str = "disk") -> list[str]:
+    """M19 (Docs/Decisions/0030-m19-contract.md decision 12, AL-STEMS; the accepted limit of ADR 0027 decision 12): the
+    failures of the discovered game projects that would collide in the games suite, one line per pair in discovery
+    order, each naming both project files by their repository-relative paths (paths.display_path):
+      - two .eproj files that share a file stem (their games steps and reports, "games <stem> ..." and
+        "Games-<stem>-...", would collide): "the game projects <first> and <second> share the file stem '<stem>':
+        rename one .eproj, since the games steps and reports are named after it";
+      - two projects whose Name is equal (their Dist packages would share bin/Exports/Dist/<Name>): "the game projects
+        <first> and <second> share the Name '<Name>': rename one (ProjectSettings Name), since the Dist half installs
+        each package as bin/Exports/Dist/<Name>".
+    `files` is the discovery's file source (Lib/provenance.py's FILE_MODES): with "disk" each Name is read_game_name of
+    the .eproj in the working tree, with "index" read_staged_game_name of its staged blob, the Name the suite's halves
+    run with (the games suite discovers and runs staged projects). A project whose Name cannot be read is one line
+    naming its file and the ValueError. Empty when every stem and Name is distinct. The games suite runs it on the
+    projects it discovered and, when it returns lines, fails its "games" step with them before any project runs. Stems
+    and Names are compared ignoring letter case, since the steps' report files and the package directories collide on a
+    file system that ignores it (Windows); a pair that differs only in case names both spellings. A single project
+    collides with nothing, so its Name is not read. Raises ValueError for a `files` value outside FILE_MODES."""
+    if files not in provenance.FILE_MODES:
+        raise ValueError(f"unknown file source '{files}' (expected {' or '.join(provenance.FILE_MODES)})")
+    read_name = read_staged_game_name if files == "index" else read_game_name
+    listed = list(projects)
+    failures: list[str] = []
+    if len(listed) < 2:
+        return failures
+    names: list[str | None] = []
+    for project in listed:
+        try:
+            names.append(read_name(project.project_file))
+        except ValueError as error:
+            names.append(None)
+            failures.append(f"the game project {paths.display_path(project.project_file)} has no readable Name, so the "
+                            f"games suite cannot compare it with the other projects: {error}")
+    for first_index, first in enumerate(listed):
+        for second_index in range(first_index + 1, len(listed)):
+            second = listed[second_index]
+            pair = f"the game projects {paths.display_path(first.project_file)} and " \
+                   f"{paths.display_path(second.project_file)}"
+            first_stem, second_stem = first.project_file.stem, second.project_file.stem
+            if first_stem.casefold() == second_stem.casefold():
+                failures.append(f"{pair} share the file stem {_spellings(first_stem, second_stem)}: rename one .eproj, "
+                                f"since the games steps and reports are named after it")
+            first_name, second_name = names[first_index], names[second_index]
+            if first_name is not None and second_name is not None and first_name.casefold() == second_name.casefold():
+                package = paths.display_path(exports.package_directory(EXPORTED_CONFIGURATION, first_name))
+                failures.append(f"{pair} share the Name {_spellings(first_name, second_name)}: rename one "
+                                f"(ProjectSettings Name), since the Dist half installs each package as {package}")
+    return failures
+
+
+def _spellings(first: str, second: str) -> str:
+    """'<first>', or both spellings when they differ only in letter case."""
+    if first == second:
+        return f"'{first}'"
+    return f"'{first}' (and '{second}', equal but for letter case)"
+
+
+def prepare_native_editor(project_directory: Path, user_data: Path, config: str) -> list[str]:
+    """M19 (Docs/Decisions/0030-m19-contract.md decision 35, stream N-E): what the games suite does for a game with a
+    Native/ directory before it starts one of its editors on `project_directory` (the copy of the staged blobs) with
+    `user_data` as --user-data-dir: it writes "AllowNativeCode": true into that root's user://Editor.json
+    (<user_data>/<application name>/Editor.json, keeping every other member), the test harness's own user data, never a
+    method (decision 29); and it builds the module of the editor's configuration `config` ("Debug" or "Release") into
+    the copy's Library/Native/Builds/00000001/ with Scripts/BuildNative.py --kind module, so the strict editor opens the
+    project with its module loaded (NativeModuleHost loads the newest current build and never builds while a project
+    opens, decision 31). One failure line per problem (the build's first error diagnostic among them), empty when the
+    editor may start; a game without Native/ needs nothing and returns no line. The Dist half's export builds its
+    Runtime itself (decision 33), after the same preference write into the exporting editor's user data."""
+    if not (project_directory / native_build.NATIVE_DIRECTORY).is_dir():
+        return []
+    failures = _allow_native_code(user_data / paths.workspace_name() / EDITOR_PREFERENCES_FILE)
+    if os.name != "nt":
+        # Windows backends only (Docs/Decisions/0028-backlog-program.md decision 10): no other platform builds a module.
+        return [*failures, f"Unsupported: {paths.display_path(project_directory)} has a native module, which only "
+                           f"Windows builds and loads (Docs/Decisions/0030-m19-contract.md decision 34)"]
+    output = project_directory / NATIVE_BUILD_DIRECTORY
+    command = [sys.executable, str(BUILD_NATIVE_SCRIPT), "--project", str(project_directory), "--kind", "module",
+               "--config", config, "--out", str(output), "--timeout", f"{NATIVE_BUILD_TIMEOUT_SECONDS:.0f}", "--json"]
+    bound = NATIVE_BUILD_TIMEOUT_SECONDS + locks.DEFAULT_WAIT_SECONDS + NATIVE_BUILD_MARGIN_SECONDS
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                   timeout=bound, check=False)
+    except subprocess.TimeoutExpired:
+        return [*failures, f"the native module's {config} build did not finish in {bound:.0f} s: "
+                           f"{format_command(command)}"]
+    except OSError as error:
+        return [*failures, f"the native module's {config} build could not start: {error}"]
+    if completed.returncode == 0:
+        return failures
+    return [*failures, _describe_native_build_failure(output, config, completed)]
+
+
+def _allow_native_code(path: Path) -> list[str]:
+    """Sets "AllowNativeCode": true in the user://Editor.json at `path`, keeping every other member (a missing file
+    starts with the header the editor's reader requires, EDITOR_PREFERENCES_HEADER), as tab-indented JSON like the
+    editor writes it; one failure line when it cannot be read or written."""
+    document: Any = dict(EDITOR_PREFERENCES_HEADER)
+    try:
+        if path.is_file():
+            document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        return [f"{paths.display_path(path)} cannot be read to allow native code: {error}"]
+    if not isinstance(document, dict):
+        return [f"{paths.display_path(path)} is not a JSON object, so native code cannot be allowed in it"]
+    document[ALLOW_NATIVE_CODE_KEY] = True
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(document, indent="\t", ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
+    except OSError as error:
+        return [f"{paths.display_path(path)} cannot be written to allow native code: {error}"]
+    return []
+
+
+def _describe_native_build_failure(output: Path, config: str, completed: subprocess.CompletedProcess[str]) -> str:
+    """The failure line of a module build that did not succeed: its first error diagnostic from the record it wrote
+    (the first diagnostic when none is an error), else its exit code and the last line it printed. The build's log
+    lies in the project copy, which the suite removes, so the line itself names the error."""
+    what = f"the native module's {config} build failed (Scripts/BuildNative.py exited with {completed.returncode})"
+    try:
+        record = native_build.read_record(output)
+    except (OSError, ValueError):
+        lines = [line.strip() for line in f"{completed.stdout}\n{completed.stderr}".splitlines() if line.strip()]
+        return f"{what}: {lines[-1] if lines else 'it printed nothing'}"
+    errors = [diagnostic for diagnostic in record.diagnostics if diagnostic.severity == "Error"]
+    first = (errors or record.diagnostics or [None])[0]
+    if first is None:
+        return f"{what} without a diagnostic"
+    return f"{what}: {first.describe()}"
 
 
 def check_replay_acceptance(events: dict[str, int]) -> list[str]:
@@ -558,6 +788,45 @@ def check_smoke(result: dict[str, Any], require_gpu: bool) -> tuple[list[str], l
     if require_gpu:
         return [f"the plain Dist export's smoke test did not run ({reason}) and --require-gpu is given"], []
     return [], [f"the plain Dist export's smoke test did not run ({reason}); --require-gpu fails instead"]
+
+
+def check_feature_test(result: dict[str, Any], exported: dict[str, str],
+                       require_gpu: bool) -> tuple[list[str], list[str]]:
+    """(failures, warnings) of a testing Dist project.export {featureTest: true} result (Docs/Decisions/
+    0030-m19-contract.md decision 10, A-DISTSELF: the builder-side Dist self-check), against `exported`, the replay
+    hashes of the Dist half's own --feature-test run of the same package (exports.read_replay_hashes): the stateHash its
+    featureTest.replays report for each replay must equal the run's, one failure line per replay that differs, naming
+    both; a replay that could not play (an empty stateHash, which read_replay_hashes leaves out) matches an absent one.
+    A result without a featureTest object, or with replays that are not {path, stateHash} rows, is a failure; ran false
+    (no device, Exporter.h step 6a) is a failure with `require_gpu`, else a warning naming the export's reasons. Whether
+    the rows passed is the half's own check of its run (evaluate_run), not this one."""
+    feature_test = result.get("featureTest")
+    if not isinstance(feature_test, dict):
+        return ["the testing Dist export's result has no featureTest object"], []
+    if feature_test.get("ran") is not True:
+        warnings = [str(warning) for warning in result.get("warnings", [])] \
+            if isinstance(result.get("warnings"), list) else []
+        reason = "; ".join(warnings) or "the export reported no reason"
+        if require_gpu:
+            return [f"the testing Dist export's feature test did not run ({reason}) and --require-gpu is given"], []
+        return [], [f"the testing Dist export's feature test did not run ({reason}); --require-gpu fails instead"]
+    replays = feature_test.get("replays")
+    if not isinstance(replays, list):
+        return ["the testing Dist export's featureTest has no replays array"], []
+    reported: dict[str, str] = {}
+    for index, row in enumerate(replays):
+        if not isinstance(row, dict) or not isinstance(row.get("path"), str) \
+                or not isinstance(row.get("stateHash"), str):
+            return [f"the testing Dist export's featureTest.replays[{index}] is not a {{path, stateHash}} row"], []
+        if row["stateHash"]:
+            reported[row["path"]] = row["stateHash"]
+    failures = []
+    for replay in sorted(set(reported) | set(exported)):
+        if reported.get(replay) != exported.get(replay):
+            failures.append(f"{replay}: the testing Dist export's featureTest reports "
+                            f"{reported.get(replay, 'no state hash')}, the package's own --feature-test run "
+                            f"{exported.get(replay, 'no state hash')}")
+    return failures, []
 
 
 def editor_report_path(project: GameProject, config: str) -> Path:

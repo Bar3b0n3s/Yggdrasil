@@ -550,7 +550,8 @@
 					"StepHeight": 0.4,
 					"Mass": 80,
 					"GravityFactor": 1.5,
-					"Layer": "Character"
+					"Layer": "Character",
+					"InheritGroundVelocity": true
 				}
 			}
 		},

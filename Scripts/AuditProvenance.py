@@ -2,8 +2,9 @@
 """Audit the provenance of the demo game projects (Docs/Architecture.md §13.12, §2.3; Roadmap M16, M17, M25 and M27;
 Docs/Decisions/0026-m16-contract.md decisions 3 and 4).
 
-A project passes when every engine-consumed file (its root *.eproj and .luaurc, and everything below Assets/) was
-written by the editor through automation, as its committed Automation/Provenance.json and Automation/BuildLog.jsonl
+A project passes when every engine-consumed file (its root *.eproj and .luaurc, everything below Assets/, and
+everything below Native/, the native module's sources: Docs/Decisions/0030-m19-contract.md decision 35) was written by
+the editor through automation, as its committed Automation/Provenance.json and Automation/BuildLog.jsonl
 prove: rule 1, each file has an entry whose XXH64 is the file's hash; rule 2, each entry was written by an automation
 method, never "ui", whose request is at the entry's transcript line with the same id, method and client (or by
 project.upgrade, itself in the transcript); rule 3, no entry names a file that does not exist unless the transcript

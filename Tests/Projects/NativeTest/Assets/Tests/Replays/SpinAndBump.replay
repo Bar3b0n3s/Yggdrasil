@@ -1,0 +1,185 @@
+{
+	"Format": "Replay",
+	"Version": 3,
+	"Scene": {
+		"Handle": "d747ccf09a95fa7b",
+		"Path": "Assets/Scenes/Main.scene"
+	},
+	"Parameters": {},
+	"Seed": 19,
+	"FixedHz": 60,
+	"EngineVersion": "0.1.0",
+	"Config": "Editor",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "3ea2f46da8b2572d",
+				"Path": "/Sun",
+				"Hash": "6a46d7171238380e",
+				"Components": {
+					"Transform": "c4f823074b9cb39f",
+					"DirectionalLight": "a097c37b57c06fa5"
+				}
+			},
+			{
+				"Id": "6de0430eb68eede6",
+				"Path": "/Ground",
+				"Hash": "c37be149ecc2e91b",
+				"Components": {
+					"Transform": "8cf8f7c9aa7606b1",
+					"MeshRenderer": "1756d1d3edac0e9d"
+				}
+			},
+			{
+				"Id": "7f2474275c2d1df9",
+				"Path": "/Bumper",
+				"Hash": "c6a29ad0e0ef30d5",
+				"Components": {
+					"Transform": "8df7fe25d7163644",
+					"MeshRenderer": "eee45e5d0e358602",
+					"Native.Bumper": "2ae39d96848038c8"
+				}
+			},
+			{
+				"Id": "8125d99a5870fe8b",
+				"Path": "/WheelMount",
+				"Hash": "9a9182e004de0112",
+				"Components": {
+					"Transform": "f17a1fb9e43c9b1a"
+				}
+			},
+			{
+				"Id": "b386f5ace6d62f33",
+				"Path": "/WheelMount/Wheel",
+				"Hash": "57bb8aa468d22678",
+				"Components": {
+					"Transform": "c8c2c98a12c584f7",
+					"MeshRenderer": "580e1d0b0282267a",
+					"Native.Spinner": "79ab72a180e85f91"
+				}
+			},
+			{
+				"Id": "d0ff2760c2629225",
+				"Path": "/Environment",
+				"Hash": "c7e5b99eb3bb2841",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Environment": "8ac051e5ca2b818e"
+				}
+			},
+			{
+				"Id": "d5caa4c8079d0e96",
+				"Path": "/Spinner",
+				"Hash": "577734e4d69603b3",
+				"Components": {
+					"Transform": "34c17e4ff7e8b87b",
+					"MeshRenderer": "580e1d0b0282267a",
+					"Native.Spinner": "573be938b293d6bf"
+				}
+			},
+			{
+				"Id": "ff2d10f5b3fab7dc",
+				"Path": "/Camera",
+				"Hash": "b6f7e4f1f5442056",
+				"Components": {
+					"Transform": "807b2701c8435abf",
+					"Camera": "06bc5d3b8e2a9794",
+					"AudioListener": "5364d8903ff7ab7d"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "0000000000000201",
+				"Path": "engine://Environments/Studio",
+				"Type": "Environment",
+				"Hash": "6a11c68afc2888f1"
+			},
+			{
+				"Handle": "28458de6191437d6",
+				"Path": "Assets/Materials/Spinner.material",
+				"Type": "Material",
+				"Hash": "4244ebf1efb18b40"
+			},
+			{
+				"Handle": "86275c6a570a3b2a",
+				"Path": "Assets/Materials/Bumper.material",
+				"Type": "Material",
+				"Hash": "37d7194b23f23c2c"
+			},
+			{
+				"Handle": "c6e2313a3533a6c9",
+				"Path": "Assets/Materials/Ground.material",
+				"Type": "Material",
+				"Hash": "e117d3d0469abf02"
+			}
+		]
+	},
+	"Events": [
+		{
+			"Tick": 11,
+			"Type": "Action",
+			"Name": "Spin",
+			"State": "Down"
+		},
+		{
+			"Tick": 41,
+			"Type": "Action",
+			"Name": "Bump",
+			"State": "Down"
+		},
+		{
+			"Tick": 42,
+			"Type": "Action",
+			"Name": "Bump",
+			"State": "Up"
+		},
+		{
+			"Tick": 71,
+			"Type": "Action",
+			"Name": "Bump",
+			"State": "Down"
+		},
+		{
+			"Tick": 72,
+			"Type": "Action",
+			"Name": "Bump",
+			"State": "Up"
+		},
+		{
+			"Tick": 101,
+			"Type": "Action",
+			"Name": "Spin",
+			"State": "Up"
+		},
+		{
+			"Tick": 131,
+			"Type": "Action",
+			"Name": "Bump",
+			"State": "Down"
+		},
+		{
+			"Tick": 132,
+			"Type": "Action",
+			"Name": "Bump",
+			"State": "Up"
+		}
+	],
+	"Expect": [],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "f4d9becabe6b6a4d"
+		},
+		{
+			"Tick": 120,
+			"StateHash": "2bf25e3a68f2f7dc"
+		},
+		{
+			"Tick": 180,
+			"StateHash": "fd8a62b2da806056"
+		}
+	],
+	"FinalTick": 191,
+	"FinalStateHash": "35a099dd25e3317c"
+}

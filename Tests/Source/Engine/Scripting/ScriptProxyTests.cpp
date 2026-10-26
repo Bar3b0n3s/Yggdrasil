@@ -9,6 +9,7 @@
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
+#include "Engine/Scene/Components/UnknownComponentsComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scripting/LuaHelpers.h"
 #include "Engine/Scripting/ScriptApiRegistry.h"
@@ -446,6 +447,39 @@ e:AddComponent("MeshRenderer")
 assert(old.Visible == true)
 old.Visible = false
 assert(e.MeshRenderer.Visible == false)
+return true
+)");
+		}
+		// The native test game's friction NT-05: a game's native components ("Native.<Name>") have no script proxy
+		// (Docs/Decisions/0030-m19-contract.md decision 26), so a script's lookup of one fails with NotFound whose hint names
+		// native.getComponents instead of suggesting built-in names, even for an entity that holds it; a misspelt built-in
+		// name keeps its suggestions.
+		TEST_CASE("ScriptProxy: a native component's lookup fails with a hint naming native.getComponents")
+		{
+			Test::ScriptTestFixture fixture;
+			Entity wheel = fixture.GetScene().CreateEntity("Wheel");
+			UnknownComponentsComponent preserved;
+			preserved.Components.push_back({ .Name = "Native.Spinner", .Version = 1, .Data = VariantValue(Json{ { "Speed", 90 } }) });
+			wheel.AddComponent<UnknownComponentsComponent>(std::move(preserved));
+			const ScriptEntityIdentity identity{ wheel.GetUUID(), fixture.Generation };
+
+			const auto native = ScriptProxy::GetComponent(fixture, identity, "Native.Spinner");
+			REQUIRE_FALSE(native.has_value());
+			CHECK(native.error().GetCode() == ErrorCode::NotFound);
+			CHECK(native.error().GetHint().contains("native.getComponents"));
+			const auto misspelt = ScriptProxy::GetComponent(fixture, identity, "Transfrm");
+			REQUIRE_FALSE(misspelt.has_value());
+			CHECK(misspelt.error().GetCode() == ErrorCode::NotFound);
+			CHECK(misspelt.error().GetHint().contains("Transform"));
+			CHECK_FALSE(misspelt.error().GetHint().contains("native.getComponents"));
+
+			REQUIRE(fixture.Start());
+			CheckProxyScript(fixture, R"(
+local e = Scene.FindByName("Wheel")
+for _, lookup in {function() return e:HasComponent("Native.Spinner") end, function() return e:GetComponent("Native.Spinner") end} do
+	local ok, message = pcall(lookup)
+	assert(not ok and string.find(tostring(message), "native.getComponents", 1, true) ~= nil, tostring(message))
+end
 return true
 )");
 		}

@@ -50,6 +50,28 @@ namespace Engine {
 			CHECK(state.GetOpenPanels().empty());
 		}
 
+		// Docs/Decisions/0030-m19-contract.md decision 29: the Native panel is named "Native" (editor.state's openPanels, docking
+		// ids, saved layouts), sits right before the launcher, so the loops that end with the launcher include it, and stays
+		// closed unless the user opens it.
+		TEST_CASE("EditorUiState: the Native panel is named, ordered before the launcher and closed by default")
+		{
+			CHECK(EditorPanelToString(EditorPanel::Native) == "Native");
+			CHECK(static_cast<uint8_t>(EditorPanel::Native) + 1 == static_cast<uint8_t>(EditorPanel::ProjectLauncher));
+			CHECK(EditorPanelToString(EditorPanel::ProjectLauncher) == "ProjectLauncher");
+			EditorUiState state;
+			for (const bool hasProject : { true, false })
+			{
+				state.ResetLayout(hasProject);
+				CHECK(std::find(state.GetOpenPanels().begin(), state.GetOpenPanels().end(), EditorPanel::Native) == state.GetOpenPanels().end());
+			}
+			REQUIRE(state.SetPanelOpen(EditorPanel::Native, true));
+			CHECK(std::is_sorted(state.GetOpenPanels().begin(), state.GetOpenPanels().end()));
+			CHECK(state.GetOpenPanels().back() == EditorPanel::ProjectLauncher);
+			const std::vector<EditorPanel> saved = { EditorPanel::Native, EditorPanel::Console };
+			state.SetOpenPanels(saved, true);
+			CHECK(std::vector<EditorPanel>(state.GetOpenPanels().begin(), state.GetOpenPanels().end()) == std::vector<EditorPanel>{ EditorPanel::Console, EditorPanel::Native });
+		}
+
 		TEST_CASE("EditorUiState: completed frames increase after UI construction")
 		{
 			EditorUiState state;

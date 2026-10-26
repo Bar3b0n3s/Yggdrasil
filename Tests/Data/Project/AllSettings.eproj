@@ -61,7 +61,8 @@
 		"Exclude": ["Assets/Tests/**", "Assets/Drafts/**"],
 		"Icon": "Assets/Icon.png",
 		"Version": "2.3.4",
-		"Company": "Fixture Studio"
+		"Company": "Fixture Studio",
+		"PruneUnreferenced": true
 	},
 	"Testing": {
 		"Suites": [

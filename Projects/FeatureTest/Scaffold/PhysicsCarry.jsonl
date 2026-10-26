@@ -1,0 +1,4 @@
+{"method": "scene.open", "params": {"path": "Assets/Scenes/Physics.scene"}}
+{"method": "edit.batch", "params": {"label": "Physics carry", "ops": [{"method": "entity.create", "params": {"name": "CarryPlatform", "components": {"Transform": {"Translation": [14, 0.5, 8], "Scale": [4, 0.5, 4]}, "MeshRenderer": {"Mesh": "engine://Meshes/Cube", "Materials": ["Assets/Scenes/Components/Materials/Metal.material"]}, "RigidBody": {"Type": "Kinematic", "Layer": "Track"}, "BoxCollider": {}}}}, {"method": "entity.create", "params": {"name": "Passenger", "components": {"Transform": {"Translation": [13, 0.75, 7]}, "CharacterController": {"Layer": "Character", "InheritGroundVelocity": true}}}}, {"method": "entity.create", "params": {"name": "Bystander", "components": {"Transform": {"Translation": [15, 0.75, 9]}, "CharacterController": {"Layer": "Character"}}}}]}}
+{"method": "scene.save", "params": {}}
+{"method": "project.refreshAssets", "params": {}}

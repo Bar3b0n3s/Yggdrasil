@@ -93,6 +93,7 @@ local fields: { Authored } = {
 	authored("Character", "CharacterController", "StepHeight", 0.4),
 	authored("Character", "CharacterController", "Mass", 80),
 	authored("Character", "CharacterController", "GravityFactor", 1.5),
+	authored("Character", "CharacterController", "InheritGroundVelocity", true),
 	authored("Character", "CharacterController", "Layer", "Character"),
 	authored("Lamp", "PointLight", "Color", Color.New(1, 0.6, 0.3)),
 	authored("Lamp", "PointLight", "Intensity", 25),

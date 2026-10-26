@@ -22,6 +22,14 @@ namespace Engine {
 		// The fixed generator state of every fixture, so entity ids are reproducible across runs.
 		inline constexpr Random::State EditorTestIdState{ 0x9e3779b97f4a7c15ull, 0xbf58476d1ce4e5b9ull, 0x94d049bb133111ebull, 1 };
 
+		// The native module host's backends of a fixture's editor (EditorContextSpecification::NativeBuild and NativeLoader;
+		// Docs/Decisions/0030-m19-contract.md decision 37); null members: the platform's.
+		struct EditorTestNativeBackends
+		{
+			Ref<INativeBuildBackend> Build{};
+			Ref<INativeLibraryLoader> Loader{};
+		};
+
 		// One editor of one test. Not copyable or movable (the editor points at the engine context).
 		class EditorTestFixture
 		{
@@ -32,9 +40,11 @@ namespace Engine {
 			// RegisterEditorMethodTypes and adds them. `audio` gives the engine context an AudioEngine (M12; tests pass a device-less,
 			// deterministic one), so the editor has an audio preview and its play sessions and audio.stats have audio; without it
 			// they have none. `engineResources` mounts the repository's read-only resources plus a per-test cooked cache,
-			// for tests using shipped templates or file-backed built-ins.
+			// for tests using shipped templates or file-backed built-ins. `native` gives the editor's native module host fake
+			// backends (M19), so its tests need no toolchain and no shared library.
 			explicit EditorTestFixture(std::string_view label = "Editor", CommandHistoryLimits historyLimits = {},
-				RegisterTypesFunction registerTypes = nullptr, std::optional<AudioEngineSpecification> audio = std::nullopt, bool engineResources = false);
+				RegisterTypesFunction registerTypes = nullptr, std::optional<AudioEngineSpecification> audio = std::nullopt, bool engineResources = false,
+				EditorTestNativeBackends native = {});
 			~EditorTestFixture();
 
 			EditorTestFixture(const EditorTestFixture&) = delete;

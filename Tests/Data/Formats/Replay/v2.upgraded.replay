@@ -1,0 +1,48 @@
+{
+	"Format": "Replay",
+	"Version": 3,
+	"Scene": {
+		"Handle": "8a61c0d2e4f31b77",
+		"Path": "Assets/Scenes/Level2.scene"
+	},
+	"Parameters": {
+		"Time": 61.25
+	},
+	"Seed": 7,
+	"FixedHz": 60,
+	"EngineVersion": "0.1.0",
+	"Config": "Editor",
+	"Fingerprint": null,
+	"Events": [
+		{
+			"Tick": 0,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 1
+		},
+		{
+			"Tick": 310,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Tap"
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 900,
+			"Luau": "return Scene.GetName() == 'Level3'"
+		}
+	],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "9b1d5e0c27a4f381"
+		},
+		{
+			"Tick": 120,
+			"StateHash": "51c7a0e9d2b64f18"
+		}
+	],
+	"FinalTick": 900,
+	"FinalStateHash": "3e0c91a2b4d5f607"
+}

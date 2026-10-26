@@ -60,6 +60,8 @@ namespace Engine {
 			writer.WriteString(content.ProtocolVersionText);
 			writer.WriteKey("engineVersion");
 			writer.WriteString(content.EngineVersionText);
+			writer.WriteKey("build");
+			writer.WriteString(content.BuildText);
 			writer.WriteKey("projectPath");
 			writer.WriteString(content.ProjectPath);
 			writer.WriteKey("headless");
@@ -111,6 +113,12 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(content.Token, reader.ReadMember<std::string>("token"));
 		ENGINE_TRY_ASSIGN(content.ProtocolVersionText, reader.ReadMember<std::string>("protocolVersion"));
 		ENGINE_TRY_ASSIGN(content.EngineVersionText, reader.ReadMember<std::string>("engineVersion"));
+		// An engine before M19 wrote no build id.
+		content.BuildText.clear();
+		if (const std::optional<JsonReader> build = reader.FindMember("build"))
+		{
+			ENGINE_TRY_ASSIGN(content.BuildText, build->ReadString());
+		}
 		ENGINE_TRY_ASSIGN(content.ProjectPath, reader.ReadMember<std::string>("projectPath"));
 		ENGINE_TRY_ASSIGN(content.Headless, reader.ReadMember<bool>("headless"));
 		ENGINE_TRY_ASSIGN(content.StartedAt, reader.ReadMember<std::string>("startedAt"));

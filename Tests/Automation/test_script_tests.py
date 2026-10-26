@@ -126,12 +126,13 @@ class ScriptTestRunnerTests(AutomationTestCase):
         playback = client.call("input.replay", {"path": path, "verify": True, "strictHash": True})
         self.assertTrue(playback["hashMatched"])
         self.assertEqual(playback["stateHash"], result["suites"][0]["finalStateHash"])
-        # M16 friction S3-03: the recording block describes the replay written; with no input there is nothing to check.
+        # M16 friction S3-03: the recording block describes the replay written; with no input there is nothing to check,
+        # and without expect it carries no expectations (Docs/Decisions/0030-m19-contract.md decision 6) and no warning.
         recorded = json.loads((root / path).read_text(encoding="utf-8"))
         self.assertEqual(result["recording"], {
             "path": path, "formatVersion": recorded["Version"], "ticks": recorded["FinalTick"], "events": 0,
             "checkpoints": 0, "finalStateHash": recorded["FinalStateHash"],
-            "inputCheck": {"ran": False, "divergedAtTick": 0}})
+            "inputCheck": {"ran": False, "divergedAtTick": 0}, "expectations": 0, "warnings": []})
         plain = engine_client.load_offloaded(client.call("test.run", {"filter": "Recorded"}, timeout=120.0))
         self.assertIsNone(plain["recording"])
 
@@ -173,6 +174,40 @@ class ScriptTestRunnerTests(AutomationTestCase):
                          (path, len(events), len(recorded["Checkpoints"]), recorded["FinalTick"]))
         self.assertEqual(recording["finalStateHash"], recorded["FinalStateHash"])
         self.assertEqual(recording["inputCheck"], {"ran": True, "divergedAtTick": recorded["FinalTick"]})
+
+    def test_test_run_record_writes_and_verifies_its_expectations(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 6 (A-RECEXPECT; ADR 0026 friction F10): test.run {record, expect}
+        # writes the expectations into the recorded replay and verifies them with the recording's input first: a false
+        # one refuses the recording and writes nothing, a satisfied one is written and counted in the recording block;
+        # expect needs record.
+        client, root = self.open_editor_with_scene()
+        client.call("script.write", {"path": "Assets/Scripts/Paddle.luau", "source":
+                    "local Paddle = {}\nfunction Paddle.OnFixedUpdate(self: any, dt: number)\n"
+                    "\tif Input.IsKeyDown(\"Space\") then self.Entity.Transform:Translate(vector.create(1, 0, 0)) end\n"
+                    "end\nreturn Script.Define(\"Paddle\", Paddle)\n"})
+        client.call("entity.create", {"name": "Paddle",
+                                      "components": {"Script": {"Script": "Assets/Scripts/Paddle.luau"}}})
+        self.configure_suite(client, 'return Test.Suite("Paddle", function()\n'
+                             'Test.Case("move", function()\n'
+                             'Test.InjectKey("Space", "Down"); Test.WaitTicks(70)\n'
+                             'Test.InjectKey("Space", "Up"); Test.WaitTicks(9)\nend)\nend)')
+        path = "Assets/Tests/Replays/Paddle.replay"
+        with self.assertRaises(engine_client.EngineError) as refused:
+            client.call("test.run", {"record": path, "expect": [
+                {"tick": 40, "luau": "Scene.FindByName('Paddle').Transform.Translation.x < 1"}]}, timeout=120.0)
+        self.assert_engine_error(refused.exception, engine_client.VALIDATION_FAILED, "Validation")
+        self.assertFalse((root / path).exists())
+        held = "Scene.FindByName('Paddle').Transform.Translation.x > 30"
+        result = engine_client.load_offloaded(client.call(
+            "test.run", {"record": path, "expect": [{"tick": 40, "luau": held}]}, timeout=120.0))
+        self.assertTrue(result["passed"], result)
+        self.assertEqual(result["recording"]["expectations"], 1)
+        recorded = json.loads((root / path).read_text(encoding="utf-8"))
+        self.assertEqual(recorded["Expect"], [{"Tick": 40, "Luau": held}])
+        self.assertTrue(client.call("input.replay", {"path": path, "verify": True, "strictHash": True})["passed"])
+        with self.assertRaises(engine_client.EngineError) as unrecorded:
+            client.call("test.run", {"expect": [{"tick": 1, "luau": "true"}]})
+        self.assert_engine_error(unrecorded.exception, engine_client.INVALID_PARAMS, "InvalidArgument")
 
     def test_test_run_rejects_missing_selection_without_writing(self) -> None:
         client, root = self.open_editor_with_scene()

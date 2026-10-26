@@ -58,28 +58,9 @@ workspace (WorkspaceName)
 		location (WorkspaceLocation)
 	end
 
-	filter "system:macosx"
-		architecture "ARM64"
-		-- Minimum macOS version (§16) for every project, vendored ones included, so that the linker never mixes
-		-- objects built for different deployment targets.
-		systemversion "14.0"
-
-	-- xcode4 applies MACOSX_DEPLOYMENT_TARGET to compiling and linking; the make-style generators pass systemversion
-	-- to the compiler only, so the linker gets the minimum version explicitly.
-	filter { "system:macosx", "action:not xcode4" }
-		linkoptions { "-mmacosx-version-min=14.0" }
-
-	filter "system:not macosx"
-		architecture "x86_64"
-
-	filter "system:windows"
-		-- The test executable exceeds the 32-bit linker's address space as subsystems accumulate.
-		preferredtoolarchitecture "x86_64"
-
-	-- Workspace scope only (ODR): NDEBUG changes the layout of vulkan.hpp's dispatcher, so NVRHI and every consumer
-	-- must agree on it (Vendor/NVRHI/VENDOR.md). Never define NDEBUG in a project script.
-	filter "configurations:Dist"
-		defines { "NDEBUG" }
+	-- The target, the macOS deployment target, the host tools and NDEBUG (Dependencies.lua), shared with the native
+	-- module's workspace (Scripts/Premake/NativeModule.lua). OutputDir and ShaderOutputDirectory are defined there too.
+	ApplyWorkspaceSettings()
 
 	-- Workspace scope only, like NDEBUG: MSVC's STL marks translation units that use its AddressSanitizer container
 	-- annotations, so instrumented and uninstrumented C++ must never be linked together (ADR 0024 decision 12;
@@ -88,13 +69,6 @@ workspace (WorkspaceName)
 		sanitize { "Address" }
 
 	filter {}
-
-OutputDir = "%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}"
--- The compiled SPIR-V of a configuration: the Shaders project's output (Engine/premake5.lua) and the directory
--- development builds mount as shaders:// (ENGINE_SHADER_DIRECTORY, Dependencies.lua). Always in the repository's bin/,
--- also for a workspace generated elsewhere with --to, so every workspace of this checkout shares one shader output per
--- configuration; the SPIR-V does not depend on the C++ toolset (Docs/Decisions/0009-m5-decisions.md decision 4).
-ShaderOutputDirectory = RepositoryRoot .. "/bin/" .. OutputDir .. "/Shaders"
 
 group "Dependencies"
 	include "Vendor/GLFW"

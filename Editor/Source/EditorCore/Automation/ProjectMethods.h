@@ -106,7 +106,11 @@ namespace Engine {
 
 	// project.setSettings {patch}: an RFC 7386 merge patch of the settings (null resets a field to its default, Input.Actions
 	// keys merge and null deletes one, arrays replace), applied as one undoable ProjectSettingsCommand that writes the .eproj.
-	// Supports dry runs (the .eproj then goes to the overlay).
+	// A member the settings do not have, a null one included, is dropped and named in the result's warnings
+	// ("/patch/Window/Titel: unknown field 'Titel' on 'WindowSettings' (did you mean 'Title'?)"), so a mistyped key or reset
+	// is never lost silently; a --strict editor refuses the patch instead (Validation at the member). The warnings also name
+	// a Variant value that does not resolve or match its schema, which is kept as written (see CreateFromPatch in
+	// ProjectSettingsCommand.h). Supports dry runs (the .eproj then goes to the overlay).
 	struct ProjectSetSettingsParams
 	{
 		VariantValue Patch{}; // an object (InvalidArgument otherwise)
@@ -116,6 +120,7 @@ namespace Engine {
 	{
 		ProjectSettings Settings{}; // the settings after the patch
 		uint32_t UndoIndex = 0;
+		std::vector<std::string> Warnings{}; // "<pointer>: <message>[ (<hint>)]", each warning of the patch's read (above)
 	};
 
 	// project.validate {scope?, fix?}: ProjectValidator::Validate, and with "fix" ProjectValidator::Fix: true fixes every

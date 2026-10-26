@@ -14,7 +14,10 @@
 
 #include <array>
 #include <latch>
+#include <optional>
+#include <string>
 #include <thread>
+#include <vector>
 
 namespace Engine {
 
@@ -126,6 +129,42 @@ namespace Engine {
 			const auto wrongType = Test::ImportReplayText(fixture, *text, wrong);
 			REQUIRE_FALSE(wrongType);
 			CHECK(wrongType.error().GetCode() == ErrorCode::Validation);
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decisions 2 and 27: a fingerprint lists an entity's components as its scene file
+		// writes them, the registered ones in registry order, so the importer, which holds the registry, refuses registered
+		// names out of that order; native and unknown names may stand anywhere. The cooked replay carries the fingerprint.
+		TEST_CASE("ReplayImporter: a fingerprint's registered components must follow the registry's order")
+		{
+			Test::AssetTestFixture fixture;
+			const auto assets = Test::ReplaySceneSnapshot();
+			auto document = Test::ImportReplayDocument();
+			const auto withComponents = [&document](std::vector<std::string> names)
+			{
+				ReplayFingerprint fingerprint;
+				ReplayEntityFingerprint entity{ .Entity = UUID(0x11), .Path = "/Camera", .Hash = "00000000000000a1", .Components = {} };
+				for (std::string& name : names)
+					entity.Components.push_back({ .Component = std::move(name), .Hash = "00000000000000b1" });
+				fingerprint.Entities.push_back(std::move(entity));
+				document.Fingerprint = std::move(fingerprint);
+				const Result<std::string> text = ReplayToText(document);
+				REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+				return *text;
+			};
+
+			const std::string ordered = withComponents({ "Native.Spin", "Transform", "FutureComponent", "Camera" });
+			const Result<ImportResult> imported = Test::ImportReplayText(fixture, ordered, assets);
+			REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+			REQUIRE(imported->Artifacts.size() == 1);
+			const Result<AssetRef<ReplayData>> cooked = LoadCookedReplay(imported->Artifacts[0].Cooked);
+			REQUIRE_MESSAGE(cooked.has_value(), cooked.error().ToString());
+			CHECK((*cooked)->Fingerprint == document.Fingerprint);
+
+			const Result<ImportResult> refused = Test::ImportReplayText(fixture, withComponents({ "Camera", "Transform" }), assets);
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::Validation);
+			CHECK(refused.error().GetLocation().JsonPointer == std::optional<std::string>("/Fingerprint/Entities/0/Components/Transform"));
+			CHECK(refused.error().GetLocation().File == "Assets/Probe.replay");
 		}
 
 		TEST_CASE("ReplayImporter: strict source validation reports precise pointers before cooking")

@@ -61,12 +61,13 @@ namespace Engine {
 
 		// The usual setup of a method test: an EditorTestFixture with a project open (and, unless `openScene` is false, the
 		// scene Assets/Scenes/Main.scene open), and an AutomationTestClient on its editor. `audio` is the EditorTestFixture's
-		// (M12: audio.stats and audible play sessions need an AudioEngine). Not copyable or movable.
+		// (M12: audio.stats and audible play sessions need an AudioEngine), and so is `native` (M19: the native module host's
+		// fake backends). Not copyable or movable.
 		class AutomationFixture
 		{
 		public:
 			explicit AutomationFixture(std::string_view label, bool openScene = true, std::optional<AudioEngineSpecification> audio = std::nullopt,
-				bool engineResources = false);
+				bool engineResources = false, EditorTestNativeBackends native = {});
 
 			AutomationFixture(const AutomationFixture&) = delete;
 			AutomationFixture& operator=(const AutomationFixture&) = delete;

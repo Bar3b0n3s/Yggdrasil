@@ -48,7 +48,10 @@ export type EngineEventType = "EntityCreated" | "EntityDestroyed" | "ComponentCh
 export type ExportConfiguration = "Debug" | "Release" | "Dist"
 
 -- A step of an export (§14.2), in the order the steps run.
-export type ExportPhase = "Validate" | "Cook" | "WritePaks" | "CopyRuntime" | "PatchResources" | "WriteManifest" | "Sign" | "SmokeTest" | "MoveToOutput" | "Done"
+export type ExportPhase = "Validate" | "Cook" | "WritePaks" | "NativeBuild" | "CopyRuntime" | "PatchResources" | "WriteManifest" | "Sign" | "SmokeTest" | "FeatureTest" | "MoveToOutput" | "Done"
+
+-- Why an export put an asset into its paks (the first reason its walk found).
+export type ExportReachReason = "StartScene" | "BuildScene" | "Testing" | "Dependency" | "LiteralLoad" | "Required" | "ComputedLoad"
 
 -- The underlying reflected value kind.
 export type FieldType = "Bool" | "Int32" | "UInt32" | "Float" | "Vec2" | "Vec3" | "Vec4" | "Quat" | "Color3" | "Color4" | "Bool3" | "String" | "EntityRef" | "AssetRef" | "Enum" | "Array" | "Struct" | "Map" | "Variant"
@@ -85,6 +88,9 @@ export type MotionQuality = "Discrete" | "LinearCast"
 
 -- Mouse button names.
 export type MouseButton = "Left" | "Right" | "Middle" | "Button4" | "Button5" | "Button6" | "Button7" | "Button8"
+
+-- What a type of a game's native module is.
+export type NativeTypeRole = "Component" | "Resource"
 
 -- Why a physics body exists (§5.3 composition rules).
 export type PhysicsBodyOrigin = "RigidBody" | "ImplicitStatic" | "ImplicitSensor" | "Character"
@@ -337,6 +343,8 @@ declare extern type CharacterController with
 	GravityFactor: number
 	-- The character's total height, in metres. [All modes; Runtime|Test; pure/read; setter mutates]
 	Height: number
+	-- While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it. [All modes; Runtime|Test; pure/read; setter mutates]
+	InheritGroundVelocity: boolean
 	-- Whether the last character update found supporting ground. [All modes; Runtime|Test; pure/read]
 	IsGrounded: (self: CharacterController) -> boolean
 	-- Physics layer name from project settings. A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]

@@ -60,6 +60,11 @@ namespace Engine {
 		// too: Update ignores every body of the same non-zero group. Scene/PhysicsSystem passes the owner's UUID, so the
 		// trigger colliders attached to the character (a pickup radius, §5.3) never report it.
 		uint64_t CollisionGroup = 0;
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 36, P-CARRY; CharacterControllerComponent::InheritGroundVelocity):
+		// while grounded, the character also moves with the horizontal velocity of what it stands on (see Update), so a
+		// platform moving at v carries it v * t in t seconds. Off by default: the character then keeps only the ground's
+		// vertical velocity, as before.
+		bool InheritGroundVelocity = false;
 	};
 
 	// The ground state after an update.
@@ -98,7 +103,10 @@ namespace Engine {
 		// One step of the character (§9.6, run in PreStep before the world steps): the velocity for the step is the
 		// horizontal part of `desiredVelocity` plus a vertical part, which is, while grounded, the ground's vertical velocity
 		// plus the desired vertical part (a jump when positive) and, in the air, the previous vertical velocity plus
-		// `gravity` * `deltaTime` (the desired vertical part is ignored); that velocity is clamped to MaxCharacterSpeed.
+		// `gravity` * `deltaTime` (the desired vertical part is ignored); M19 (Docs/Decisions/0030-m19-contract.md decision
+		// 36): with CharacterControllerDescription::InheritGroundVelocity and while grounded, plus the horizontal part of the
+		// ground's velocity (Jolt's ground velocity, updated first: a kinematic platform's velocity, a rotating body's surface
+		// velocity at the contact); that velocity is clamped to MaxCharacterSpeed.
 		// "Grounded" is Jolt's OnGround while the character does not move away from the ground faster than 0.1 m/s (else
 		// the step after a jump would cancel it). Then ExtendedUpdate with walk-stairs (up to StepHeight) and stick-to-floor
 		// (down to StepHeight) over `deltaTime` seconds, which moves the character and its inner body and records its
@@ -123,6 +131,9 @@ namespace Engine {
 		// The kinematic inner body (§9.6) that raycasts, overlaps and sensors see.
 		[[nodiscard]] BodyHandle GetInnerBody() const;
 		[[nodiscard]] uint64_t GetUserData() const;
+		// Sets CharacterControllerDescription::InheritGroundVelocity in place, for the next Update on: a per-update switch, so
+		// the character, its ground state and its inner body stay (Docs/Decisions/0030-m19-contract.md decision 36).
+		void SetInheritGroundVelocity(bool inherit);
 	private:
 		// The CharacterVirtual, its listener and the world back-reference (Physics/CharacterController.cpp).
 		struct State;

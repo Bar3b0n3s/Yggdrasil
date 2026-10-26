@@ -5,6 +5,7 @@
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/ComponentHostOps.h"
+#include "Engine/Scene/Components/UnknownComponentsComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/TransformSystem.h"
 #include "Engine/Scripting/Private/BindingRegistration.h"
@@ -99,6 +100,10 @@ namespace Engine {
 	{
 		ENGINE_TRY(ValidateEntityForRead(host, entity));
 		const auto* info = host.GetTypes().FindComponent(component);
+		// A game's native components live outside the type registry with no script proxy (Docs/Decisions/0030-m19-contract.md
+		// decision 26): the hint says so instead of suggesting built-in names (the native test game's friction NT-05).
+		if (!info && IsNativeComponentName(component))
+			return std::unexpected(Error(ErrorCode::NotFound, std::format("unknown script component '{}': a native component has no script proxy", component)).WithHint(std::string(Detail::NativeComponentScriptHint)));
 		if (!info || !Utils::VisibleComponent(*info))
 			return std::unexpected(Error(ErrorCode::NotFound, std::format("unknown script component '{}'", component)).WithHint(MakeDidYouMeanHint(host.GetTypes().SuggestComponentNames(component))));
 		if (!info->GetHostOps()->Has(host.GetScene().FindReadableEntityByID(entity.ID)))

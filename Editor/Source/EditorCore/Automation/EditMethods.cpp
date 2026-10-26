@@ -16,6 +16,9 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <span>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -116,6 +119,51 @@ namespace Engine {
 			return {};
 		}
 
+		// The longest op name (EditBatchOp::Name).
+		constexpr size_t MaxOpNameLength = 64;
+
+		// An op name: [A-Za-z_] followed by [A-Za-z0-9_], so a "$ref" never reads it as an index (JsonReference.h).
+		static bool IsOpName(std::string_view name)
+		{
+			const auto isLetter = [](char character)
+			{
+				return (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || character == '_';
+			};
+			if (name.empty() || !isLetter(name.front()))
+				return false;
+			return std::ranges::all_of(name, [&isLetter](char character)
+			{
+				return isLetter(character) || (character >= '0' && character <= '9');
+			});
+		}
+
+		// The name check of op `index` (Docs/Decisions/0030-m19-contract.md decision 8): no name, or an op name of at most
+		// MaxOpNameLength characters that no earlier op has. Errors are located at the op's name.
+		static Status CheckBatchOpName(std::span<const EditBatchOp> ops, size_t index)
+		{
+			const std::string& name = ops[index].Name;
+			if (name.empty())
+				return {};
+			const std::string pointer = std::format("/ops/{}/name", index);
+			constexpr std::string_view NameRule = "an op name is letters, digits and _, does not start with a digit and is unique within the batch";
+			if (name.size() > MaxOpNameLength)
+			{
+				return std::unexpected(MakeParamError(ErrorCode::InvalidArgument, pointer,
+					std::format("an op name has at most {} characters (got {})", MaxOpNameLength, name.size()), std::string(NameRule)));
+			}
+			if (!IsOpName(name))
+				return std::unexpected(MakeParamError(ErrorCode::InvalidArgument, pointer, std::format("'{}' is not an op name", name), std::string(NameRule)));
+			for (size_t earlier = 0; earlier < index; ++earlier)
+			{
+				if (ops[earlier].Name == name)
+				{
+					return std::unexpected(MakeParamError(ErrorCode::InvalidArgument, pointer, std::format("op {} already has the name '{}'", earlier, name),
+						"give every op of the batch its own name"));
+				}
+			}
+			return {};
+		}
+
 		static std::vector<EntitySummary> MakeSelection(const EditorMethodContext& context)
 		{
 			std::vector<EntitySummary> selection;
@@ -150,13 +198,21 @@ namespace Engine {
 
 			for (size_t index = 0; index < params.Ops.size(); ++index)
 			{
-				const Status checked = Utils::CheckBatchOp(registry, params.Ops[index], index, context.IsDryRun());
+				Status checked = Utils::CheckBatchOp(registry, params.Ops[index], index, context.IsDryRun());
+				if (checked)
+					checked = Utils::CheckBatchOpName(params.Ops, index);
 				if (!checked)
 				{
 					context.SetErrorData("failedOp", Json(index));
 					return std::unexpected(checked.error());
 				}
 			}
+
+			// The ops' names, for "$ref" by name (Docs/Decisions/0030-m19-contract.md decision 8).
+			std::vector<std::string> names;
+			names.reserve(params.Ops.size());
+			for (const EditBatchOp& op : params.Ops)
+				names.push_back(op.Name);
 
 			EditorTransaction transaction(context.GetEditor(), params.Label);
 			std::vector<Json> results;
@@ -166,7 +222,7 @@ namespace Engine {
 				const EditBatchOp& op = params.Ops[index];
 				Json opParams = op.Params.IsNull() ? Json::object() : op.Params.Get();
 				context.SetPhase(std::format("Automation:edit.batch {}/{} {}", index + 1, params.Ops.size(), op.Method));
-				Status substituted = SubstituteReferences(opParams, results, 0);
+				Status substituted = SubstituteReferences(opParams, results, 0, names);
 				Result<Json> opResult = substituted ? registry.InvokeNested(context, op.Method, opParams) : Result<Json>(std::unexpected(substituted.error()));
 				if (!opResult)
 				{
@@ -305,7 +361,9 @@ namespace Engine {
 		registry.Struct<EditBatchOp>("EditBatchOp", "One op of edit.batch: a method and its params.")
 			.Field("method", &EditBatchOp::Method, "The method, such as \"entity.create\"; it must be allowed in batches.")
 			.Field("params", &EditBatchOp::Params,
-				"The method's params (an object); {\"$ref\": \"<op index>.<path>\"} stands for a value of an earlier op's result.");
+				"The method's params (an object); {\"$ref\": \"<op index>.<path>\"} stands for a value of an earlier op's result, and {\"$ref\": \"<op name>.<path>\"} for one of the earlier op with that name.")
+			.Field("name", &EditBatchOp::Name,
+				"Optional: a name later ops' $ref may use instead of this op's index, which does not shift when an op is inserted. An identifier (letters, digits and _, not starting with a digit, at most 64 characters), unique within the batch.");
 
 		registry.Struct<EditBatchParams>("EditBatchParams", "The params of edit.batch: ops run atomically as one undo step.")
 			.Field("label", &EditBatchParams::Label, "The undo label of the batch.")

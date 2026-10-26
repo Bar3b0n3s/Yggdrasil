@@ -9,8 +9,9 @@ Two output roots, each owned whole by this generator (a file it does not write i
   or Clean, the baseline (a primary camera with the audio listener, and a sun) that reports nothing. Every fixture
   starts from that baseline, so incidental codes stay out; Codes lists every code the project reports, sorted.
 - Tests/Data/SettingsObservation/Project/: the files Tests/Data/Project/AllSettings.eproj names (Assets/Icon.png, the
-  start, build and suite scenes, the suite script and its replay), opened by "ProjectSettings: every AllSettings.eproj
-  value is observed by its consumer" together with that .eproj.
+  start, build and suite scenes, the suite script and its replay) and a module whose Assets.Load path is computed (for
+  Export.PruneUnreferenced), opened by "ProjectSettings: every AllSettings.eproj value is observed by its consumer"
+  together with that .eproj.
 
 Special cases (also in Tests/Data/Validation/README.md, which this generator writes):
 - COMPONENT_MISSING_REQUIREMENT and ENTITY_DANGLING_REFERENCE use the test components ValidatorTarget (an EntityRef
@@ -194,7 +195,8 @@ def default_project(name: str) -> dict[str, Any]:
         "Rendering": {"ShadowMapSize": 2048, "SsaoHalfResolution": False},
         "Scripting": {"MemoryLimitMB": 256, "CallbackBudgetMs": 1000, "PauseOnError": True,
                       "BlockPlayOnTypeErrors": False},
-        "Export": {"BuildScenes": [], "Exclude": ["Assets/Tests/**"], "Icon": "", "Version": "1.0.0", "Company": ""},
+        "Export": {"BuildScenes": [], "Exclude": ["Assets/Tests/**"], "Icon": "", "Version": "1.0.0", "Company": "",
+                   "PruneUnreferenced": False},
         "Testing": {"Suites": [], "Replays": [], "CaseTimeoutTicks": 600, "SuiteTickLimit": 36000,
                     "CoverageGates": False},
     }
@@ -318,6 +320,18 @@ function Helpers.Add(left: number, right: number): number
 end
 
 return Helpers
+'''
+
+# A module whose Assets.Load takes a path it computes (Docs/Decisions/0030-m19-contract.md decision 21): with
+# Export.PruneUnreferenced on, project.validate names the call (SCRIPT_COMPUTED_ASSET_LOAD).
+COMPUTED_LOADER = '''--!strict
+local Loader = {}
+
+function Loader.Load(name: string)
+\treturn Assets.Load("Assets/Textures/" .. name .. ".png")
+end
+
+return Loader
 '''
 
 
@@ -571,6 +585,10 @@ return Script.Define("Jumper", Jumper)
         "Overrides": {"CallbackBudgetMs": 0, "MemoryLimitMB": 0, "PauseOnError": "Inherit"}, "ExpectQuit": -1,
         "Modes": ["Editor", "Release", "Dist"]}]
 
+    item = fixture("SCRIPT_COMPUTED_ASSET_LOAD")
+    item.project["Export"]["PruneUnreferenced"] = True
+    item.add_script("Project/Assets/Scripts/Loader.luau", "5c41000000000006", COMPUTED_LOADER)
+
     return fixtures
 
 
@@ -692,13 +710,16 @@ def observation_files() -> dict[str, bytes]:
     add_json("Assets/Scenes/Level2.scene.meta", meta("0b5e0000000000a2", "Scene", "Scene"))
     files["Assets/Scripts/Probe.luau"] = OBSERVATION_BEHAVIOUR.encode("utf-8")
     add_json("Assets/Scripts/Probe.luau.meta", meta("0b5e0000000000a3", "Script", "Script"))
+    # The computed Assets.Load project.validate names while Export.PruneUnreferenced is on.
+    files["Assets/Scripts/Loader.luau"] = COMPUTED_LOADER.encode("utf-8")
+    add_json("Assets/Scripts/Loader.luau.meta", meta("0b5e0000000000a8", "Script", "Script"))
     files["Assets/Tests/Main.test.luau"] = OBSERVATION_SUITE.encode("utf-8")
     add_json("Assets/Tests/Main.test.luau.meta", meta("0b5e0000000000a4", "Script", "Script"))
     # The replay Testing.Replays' glob finds (the observation test lists it; a filtered run never verifies it).
     add_json("Assets/Tests/Replays/Main.replay", {
-        "Format": "Replay", "Version": 2, "Scene": {"Handle": "0b5e0000000000a1", "Path": "Assets/Scenes/Main.scene"},
-        "Parameters": {}, "Seed": 0, "FixedHz": 120, "EngineVersion": "0.1.0", "Config": "Editor", "Events": [],
-        "Expect": [], "Checkpoints": [], "FinalTick": 1, "FinalStateHash": "0000000000000001"})
+        "Format": "Replay", "Version": 3, "Scene": {"Handle": "0b5e0000000000a1", "Path": "Assets/Scenes/Main.scene"},
+        "Parameters": {}, "Seed": 0, "FixedHz": 120, "EngineVersion": "0.1.0", "Config": "Editor", "Fingerprint": None,
+        "Events": [], "Expect": [], "Checkpoints": [], "FinalTick": 1, "FinalStateHash": "0000000000000001"})
     add_json("Assets/Tests/Replays/Main.replay.meta", meta("0b5e0000000000a7", "Replay", "Replay"))
     files["Assets/Icon.png"] = checker_png(256)
     add_json("Assets/Icon.png.meta", meta("0b5e0000000000a5", "Texture", "Texture", TEXTURE_SETTINGS))

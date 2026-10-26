@@ -44,6 +44,9 @@ namespace Engine {
 		constexpr std::string_view DeclarationsExtension = ".d.luau";
 		constexpr std::string_view TemplatesDirectory = "Resources/Templates/Scripts";
 		constexpr std::string_view TemplateExtension = ".luau";
+		// The native module's interface (ADR 0030 decision 26): one fixed topic, since no other engine header is a module's.
+		constexpr std::string_view NativeApiTopic = "native/NativeApi.h";
+		constexpr std::string_view NativeApiPath = "Engine/Source/Engine/Native/NativeApi.h";
 
 		// How a topic's text divides into sections.
 		enum class DocsTextKind : uint8_t
@@ -191,6 +194,8 @@ namespace Engine {
 					return DocsTopicFile{ std::format("{}/{}{}", TemplatesDirectory, name, TemplateExtension), DocsTextKind::Plain };
 				return std::nullopt;
 			}
+			if (topic == NativeApiTopic)
+				return DocsTopicFile{ std::string(NativeApiPath), DocsTextKind::Plain };
 			return std::nullopt;
 		}
 
@@ -270,6 +275,13 @@ namespace Engine {
 					topics.push_back(DocsTopic{ std::format("{}{}", TemplatesTopicPrefix, stem),
 						std::format("The script.create template \"{}\"; {{{{Name}}}} becomes the script's name.", stem), ToByteCount(text->size()) });
 				}
+			}
+			if (const Result<std::string> text = FileSystem::ReadText(docsRoot / FileSystem::PathFromUtf8(NativeApiPath)))
+			{
+				topics.push_back(DocsTopic{ std::string(NativeApiTopic),
+					"The interface of a game's native C++ module: the one engine header the sources below Native/ include, with ENGINE_NATIVE_MODULE, "
+					"the component, resource and system builders and the step context.",
+					ToByteCount(text->size()) });
 			}
 
 			std::sort(topics.begin(), topics.end(), [](const DocsTopic& left, const DocsTopic& right)
@@ -738,7 +750,7 @@ namespace Engine {
 	void RegisterEditorObserveMethodTypes(TypeRegistry& registry)
 	{
 		registry.Struct<DocsGetParams>("DocsGetParams", "The params of docs.get.")
-			.Field("topic", &DocsGetParams::Topic, "The topic, such as \"skills/game-building\", \"reference/ScriptAPI\", \"reference/Schemas/Scene\", \"scripting/Engine.d.luau\" or \"templates/Scripts/Behaviour\"; a \"#<section>\" suffix selects a section like section; empty for the list of topics.")
+			.Field("topic", &DocsGetParams::Topic, "The topic, such as \"skills/game-building\", \"reference/ScriptAPI\", \"reference/Schemas/Scene\", \"scripting/Engine.d.luau\", \"templates/Scripts/Behaviour\" or \"native/NativeApi.h\"; a \"#<section>\" suffix selects a section like section; empty for the list of topics.")
 			.Field("section", &DocsGetParams::Section, "A section of the topic: a Markdown heading, or a top-level declaration of a .d.luau topic (\"Entity\"). Named by the heading's exact text (\"Test.Suite\"), by that text without a trailing parenthesized qualifier (\"TestSuite\" for \"TestSuite (type)\"), or by its anchor (the text lowercased, spaces as '-', other ASCII punctuation removed, \"-1\" added to a repeat: \"testsuite-type\"), tried in that order; a text several headings share is refused with their anchors. The result is the section with its subsections.")
 			.Field("offset", &DocsGetParams::Offset, "Where the page starts, in bytes of the topic's (or the section's) text: 0, or the previous page's nextOffset.")
 			.Field("length", &DocsGetParams::Length, "The most bytes of text to return (the default is the most). A page ends after a line break when one falls inside it.", { .Min = 1.0, .Max = static_cast<double>(DocsPageBytes) })
@@ -746,7 +758,7 @@ namespace Engine {
 
 		registry.Struct<DocsTopic>("DocsTopic", "One documentation topic.")
 			.Field("name", &DocsTopic::Name, "The topic's name, such as \"skills/game-building\" or \"reference/Validation\".")
-			.Field("title", &DocsTopic::Title, "A skill's description, a reference document's first heading or a schema's description.")
+			.Field("title", &DocsTopic::Title, "A skill's description, a reference document's first heading, a schema's description, or a summary of the script declarations, a script template or the native module's interface.")
 			.Field("bytes", &DocsTopic::Bytes, std::format("The size of the topic's text; a topic whose result would be over the offload threshold comes back in pages of at most {} bytes.", DocsPageBytes));
 
 		registry.Struct<DocsSection>("DocsSection", "One section of a topic, as a long text's first page or toc lists it.")
@@ -788,10 +800,10 @@ namespace Engine {
 			{
 				.Name = "docs.get",
 				.Description = "Serves the agent documentation: without a topic the list of topics (skills, the generated reference and JSON "
-							   "schemas, the script declarations and the script templates); with one its text, one section of it (section, or "
-							   "\"<topic>#<section>\", by heading text or anchor), one page (offset, length) or with toc only its section list "
-							   "with sizes. A text too large to return inline comes back as its first page with nextOffset and its list of "
-							   "sections.",
+							   "schemas, the script declarations, the script templates and the native module's interface); with one its text, "
+							   "one section of it (section, or \"<topic>#<section>\", by heading text or anchor), one page (offset, length) or "
+							   "with toc only its section list with sizes. A text too large to return inline comes back as its first page with "
+							   "nextOffset and its list of sections.",
 				.ExposeAsTool = true,
 				.AvailableInLauncher = true,
 				.AllowedInBatch = true,

@@ -115,6 +115,20 @@ namespace Engine {
 			CHECK((*read)[0].Path == ".luaurc");
 		}
 
+		// Docs/Decisions/0030-m19-contract.md decision 35: a game's native module is engine-consumed, so every file below Native/
+		// is recorded like a file below Assets/ ("the provenance audit covers the module's sources"); its builds below
+		// Library/Native/ are not.
+		TEST_CASE("ProvenanceRecorder: files below Native/ are recorded and the module's builds are not")
+		{
+			CHECK(ProvenanceRecorder::IsRecordedPath("Native/Spinner.cpp"));
+			CHECK(ProvenanceRecorder::IsRecordedPath("Native/Systems/Move.h"));
+			CHECK(ProvenanceRecorder::IsRecordedPath("Native/Notes.txt"));
+			CHECK_FALSE(ProvenanceRecorder::IsRecordedPath("Native"));
+			CHECK_FALSE(ProvenanceRecorder::IsRecordedPath("Native/"));
+			CHECK_FALSE(ProvenanceRecorder::IsRecordedPath("NativeX/Spinner.cpp"));
+			CHECK_FALSE(ProvenanceRecorder::IsRecordedPath("Library/Native/Builds/00000001/NativeBuild.json"));
+		}
+
 		TEST_CASE("ProvenanceRecorder: malformed files are located errors")
 		{
 			CHECK(ProvenanceRecorder::FromText("{").error().GetCode() == ErrorCode::Parse);

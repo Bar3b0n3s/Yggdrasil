@@ -1,6 +1,6 @@
 {
 	"Format": "Replay",
-	"Version": 2,
+	"Version": 3,
 	"Scene": {
 		"Handle": "6a795a5b2cab3e74",
 		"Path": "Assets/Scenes/Input.scene"
@@ -10,6 +10,47 @@
 	"FixedHz": 64,
 	"EngineVersion": "0.1.0",
 	"Config": "Editor",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "8f5feed3af28351e",
+				"Path": "/Camera",
+				"Hash": "4642115d4f9bcfe8",
+				"Components": {
+					"Transform": "10aedfbbcdcc121d",
+					"Camera": "ff6d33b1b7ef8196",
+					"AudioListener": "5364d8903ff7ab7d"
+				}
+			},
+			{
+				"Id": "a76203f92427e60f",
+				"Path": "/InputProbe",
+				"Hash": "ac69125fea501d09",
+				"Components": {
+					"Transform": "7c3c2f6e26ab4167",
+					"MeshRenderer": "f433c3ab9a1171d2",
+					"Script": "b4305494fe0cfbd4"
+				}
+			},
+			{
+				"Id": "e77af2bf5a5422ff",
+				"Path": "/Sun",
+				"Hash": "9235e082d5babd26",
+				"Components": {
+					"Transform": "6d00e2e3cb0d7cff",
+					"DirectionalLight": "6c90c620fea1993b"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "7eaa9b82c21f4b79",
+				"Path": "Assets/Scripts/Input/InputProbe.luau",
+				"Type": "Script",
+				"Hash": "e28486d99753737a"
+			}
+		]
+	},
 	"Events": [
 		{
 			"Tick": 2,

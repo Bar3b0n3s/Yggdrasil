@@ -46,6 +46,13 @@ namespace Engine {
 		// The server's resolver (AutomationServer::GetAssetReferenceResolver): requests and edit.batch's ops resolve asset references
 		// in their params through it (MethodRegistry.h convention 13).
 		[[nodiscard]] IAssetReferenceResolver* GetAssetReferenceResolver() const override;
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 7): this request's entity reference resolver, through which the
+		// EntityRef values of its component data resolve as its entity params do (MethodRegistry.h convention 7): by
+		// Utils::SceneEntityReferenceResolver's rule in ResolveRequestScene's scene, the one the phase 1 ledger's "Entity
+		// paths and scenes" names (for the methods that take component data, all mutations: the edit scene, or the play
+		// scene for a request whose target is Play, until M20 passes the request's scene target). Without that scene a
+		// reference fails with ResolveRequestScene's error (InvalidState), which the registry returns unchanged.
+		[[nodiscard]] IEntityReferenceResolver* GetEntityReferenceResolver() const override;
 		// Lazily pins the editor's current script field snapshot for this request, after path resolution. No project is
 		// InvalidState; snapshot acquisition failures propagate. Methods without schema-dependent params never load it.
 		[[nodiscard]] Result<Ref<const IFieldSchemaSource>> GetFieldSchemaSnapshot() override;
@@ -65,6 +72,10 @@ namespace Engine {
 		// scene, InvalidState "not playing" for the play scene without a session (located at /target). The pointer is
 		// non-owning and valid until the open scene or the play session changes.
 		[[nodiscard]] Result<Scene*> ResolveTargetScene(SceneTarget target, bool given, bool mutation) const override;
+		// The scene this request's own params address: ResolveTargetScene with its "target" param (given when the params hold
+		// a SceneTarget name; any other value counts as none and is left for the registry's validation) and its method's
+		// Mutates flag, as its handler resolves its entity params.
+		[[nodiscard]] Result<Scene*> ResolveRequestScene() const;
 
 		// The open scene the request addresses (M20, E-SCENES; Docs/Decisions/0031-m20-contract.md decision 16): the scene
 		// target (GetOptions().Scene) resolved against the open scenes, a path by EditorContext::FindOpenScene after
@@ -115,6 +126,10 @@ namespace Engine {
 		[[nodiscard]] Result<Image> CaptureView(const RenderSnapshot& snapshot, const ViewportScreenshotRequest& request) override;
 		[[nodiscard]] std::optional<ExplicitRenderCamera> GetSceneViewCamera() const override;
 		[[nodiscard]] Result<std::string> WriteOutputFile(std::string_view extension, std::span<const std::byte> bytes) override;
+		// M19 (Docs/Decisions/0030-m19-contract.md decisions 9 and 14): kept files through AutomationServer::WriteKeptFile, and
+		// the project's source replays through Utils::ReadProjectReplay (Private/ProjectReplaySource.h).
+		[[nodiscard]] Result<std::string> WriteKeptFile(std::string_view extension, std::span<const std::byte> bytes) override;
+		[[nodiscard]] Result<ReplayDocument> ReadReplayDocument(std::string_view path, ReplayLoadReport& report, std::string& canonicalPath) const override;
 
 		// The services of the moved M4 to M6 domains (Docs/Decisions/0012-m7-decisions.md decision 12) over the editor:
 		// DescribeSession reports the server's capabilities, clients, renderer and headless flag, the open project and the
@@ -142,10 +157,13 @@ namespace Engine {
 		// CompleteParameterOwners for prefab.instantiate: sets the Script handle of each slot of `script` (the Script object
 		// of params' components) that gives Fields without one to that of the prefab root's slot at its index, when it has one.
 		[[nodiscard]] Status CompletePrefabScriptOwner(const Json& params, Json& script);
+		// The SceneTarget the "target" member of `params` names, or nullopt when there is none or it is no SceneTarget name.
+		[[nodiscard]] std::optional<SceneTarget> ReadTargetParam(const Json& params) const;
 	private:
 		Ref<const IFieldSchemaSource> m_FieldSchemas{};
-		EditorContext* m_Editor = nullptr;    // documented back-reference
-		AutomationServer* m_Server = nullptr; // documented back-reference
+		EditorContext* m_Editor = nullptr;                    // documented back-reference
+		AutomationServer* m_Server = nullptr;                 // documented back-reference
+		Scope<IEntityReferenceResolver> m_EntityReferences{}; // over ResolveRequestScene (GetEntityReferenceResolver)
 	};
 
 }

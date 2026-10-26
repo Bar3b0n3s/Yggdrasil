@@ -7,6 +7,7 @@
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/ComponentHostOps.h"
 #include "Engine/Scene/Components/CameraComponent.h"
+#include "Engine/Scene/Components/UnknownComponentsComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scripting/ScriptEngine.h"
@@ -193,6 +194,9 @@ namespace Engine {
 			const auto name = SceneText(call, 1);
 			auto& host = call.Engine->GetHost();
 			const auto* component = host.GetTypes().FindComponent(name);
+			// A game's native components have no script proxy: the hint says so instead of suggesting a built-in name.
+			if (component == nullptr && IsNativeComponentName(name))
+				return Lua::RaiseError(call, Error(ErrorCode::NotFound, std::format("unknown script-visible component '{}': a native component has no script proxy", name)).WithHint(std::string(Detail::NativeComponentScriptHint)));
 			if (component == nullptr || !component->HasFlag(ComponentFlags::ScriptVisible) || component->HasFlag(ComponentFlags::Hidden))
 			{
 				std::string message = std::format("unknown script-visible component '{}'", name);

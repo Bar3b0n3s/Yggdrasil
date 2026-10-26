@@ -10,7 +10,7 @@
 		},
 		"Version": {
 			"description": "The format version this build writes; older versions are migrated when read.",
-			"enum": [1]
+			"enum": [2]
 		},
 		"Name": {
 			"description": "The game's name: the executable's and the user-data folder's name.",
@@ -18,6 +18,10 @@
 		},
 		"EngineVersion": {
 			"description": "The exporting engine's version.",
+			"type": "string"
+		},
+		"Build": {
+			"description": "The exporting build's id, semantic-versioning build metadata whose version is EngineVersion: <version>, then, for a build that knows its commit, +<its 12 lowercase hex digits> and .dirty for a working tree with changes.",
 			"type": "string"
 		},
 		"StartScene": {
@@ -59,7 +63,7 @@
 			"type": "boolean"
 		}
 	},
-	"required": ["Format", "Version", "Name", "EngineVersion", "StartScene", "Paks", "Window", "Simulation", "Testing"],
+	"required": ["Format", "Version", "Name", "EngineVersion", "Build", "StartScene", "Paks", "Window", "Simulation", "Testing"],
 	"additionalProperties": false,
 	"$defs": {
 		"WindowSettings": {

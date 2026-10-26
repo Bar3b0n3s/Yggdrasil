@@ -1,0 +1,87 @@
+Archive member included to satisfy reference by file (symbol)
+
+/build/bin/Dist-linux-x86_64/Engine/libEngine.a(Application.o)
+                              /build/bin-int/Dist-linux-x86_64/Runtime/RuntimeMain.o (_ZN6Engine14RunApplicationEiPPcPFNS_6ResultISt10unique_ptrINS_11ApplicationESt14default_deleteIS3_EEEESt4spanIKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEELm18446744073709551615EEE)
+/build/bin/Dist-linux-x86_64/Engine/libEngine.a(Watchdog.o)
+                              /build/bin/Dist-linux-x86_64/Engine/libEngine.a(Application.o) (_ZN6Engine8Watchdog4BeatEv)
+
+Discarded input sections
+
+ .text._ZN6Engine8Watchdog4BeatEv
+                0x0000000000000000       0x40 /build/bin/Dist-linux-x86_64/Engine/libEngine.a(Watchdog.o)
+ .text._ZN5ImGui5BeginEPKcPbi
+                0x0000000000000000       0x40 /build/bin/Dist-linux-x86_64/ImGui/libImGui.a(imgui.o)
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+*default*        0x0000000000000000 0xffffffffffffffff
+
+Linker script and memory map
+
+LOAD /build/bin-int/Dist-linux-x86_64/Runtime/RuntimeMain.o
+LOAD /build/bin/Dist-linux-x86_64/Engine/libEngine.a
+                [!provide]                        PROVIDE (__executable_start = SEGMENT_START ("text-segment", 0x400000))
+                0x0000000000400318                . = (SEGMENT_START ("text-segment", 0x400000) + SIZEOF_HEADERS)
+
+
+.text           0x0000000000401000     0x2000
+ *(.text .text.*)
+ .text.main     0x0000000000401000       0x40 /build/bin-int/Dist-linux-x86_64/Runtime/RuntimeMain.o
+                0x0000000000401000                main
+ .text._ZN6Engine11Application3RunEv
+                0x0000000000401040       0x40 /build/bin/Dist-linux-x86_64/Engine/libEngine.a(Application.o)
+                0x0000000000401040                _ZN6Engine11Application3RunEv
+ .text._ZN6Engine17FeatureTestRunner3RunEv
+                0x0000000000401080       0x40 /build/bin/Dist-linux-x86_64/Engine/libEngine.a(FeatureTestRunner.o)
+                0x0000000000401080                _ZN6Engine17FeatureTestRunner3RunEv
+ .text._ZN6Engine12ReplayPlayer4StepEv
+                0x00000000004010c0       0x40 /build/bin/Dist-linux-x86_64/Engine/libEngine.a(ReplayPlayer.o)
+                0x00000000004010c0                _ZN6Engine12ReplayPlayer4StepEv
+ .text._ZN6Engine14ScriptWatchdogD2Ev
+                0x0000000000401100       0x40 /build/bin/Dist-linux-x86_64/Engine/libEngine.a(Watchdog.o)
+                0x0000000000401100                _ZN6Engine14ScriptWatchdogD2Ev
+ .text._ZN6Engine5UtilsL14PrefixPointersERKNS_5ErrorESt17basic_string_viewIcSt11char_traitsIcEE
+                0x0000000000401140       0x40 /build/bin/Dist-linux-x86_64/Engine/libEngine.a(SceneSerializer.o)
+ .text.lua_pushnumber
+                0x0000000000401180       0x40 /build/bin/Dist-linux-x86_64/Luau/libLuau.a(lapi.o)
+                0x0000000000401180                lua_pushnumber
+ .text._ZN4Luau6Parser9parseTypeEPKcmRNS_12AstNameTableERNS_9AllocatorENS_12ParseOptionsE
+                0x00000000004011c0       0x40 /build/bin/Dist-linux-x86_64/Luau/libLuau.a(Parser.o)
+                0x00000000004011c0                _ZN4Luau6Parser9parseTypeEPKcmRNS_12AstNameTableERNS_9AllocatorENS_12ParseOptionsE
+ .text._ZN4Luau7compileERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEERKNS_14CompileOptionsERKNS_12ParseOptionsEPNS_15BytecodeEncoderE
+                0x0000000000401200       0x40 /build/bin/Dist-linux-x86_64/Luau/libLuau.a(Compiler.o)
+                0x0000000000401200                _ZN4Luau7compileERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEERKNS_14CompileOptionsERKNS_12ParseOptionsEPNS_15BytecodeEncoderE
+ .text._ZN4Luau15BytecodeBuilder14addConstantNilEv
+                0x0000000000401240       0x40 /build/bin/Dist-linux-x86_64/Luau/libLuau.a(BytecodeBuilder.o)
+                0x0000000000401240                _ZN4Luau15BytecodeBuilder14addConstantNilEv
+ .text._ZN4Luau11parseConfigERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEERNS_6ConfigERKNS_13ConfigOptionsE
+                0x0000000000401280       0x40 /build/bin/Dist-linux-x86_64/Luau/libLuau.a(Config.o)
+                0x0000000000401280                _ZN4Luau11parseConfigERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEERNS_6ConfigERKNS_13ConfigOptionsE
+ .text._ZN4Luau17extractLuauConfigERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEERNS_6ConfigESt8optionalINS_13ConfigOptions12AliasOptionsEENS_18InterruptCallbacksE
+                0x00000000004012c0       0x40 /build/bin/Dist-linux-x86_64/Luau/libLuau.a(LuauConfig.o)
+                0x00000000004012c0                _ZN4Luau17extractLuauConfigERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEERNS_6ConfigESt8optionalINS_13ConfigOptions12AliasOptionsEENS_18InterruptCallbacksE
+ .text._ZN4Luau7Require19lua_requireinternalEP9lua_StatePKc
+                0x0000000000401300       0x40 /build/bin/Dist-linux-x86_64/Luau/libLuau.a(RequireImpl.o)
+                0x0000000000401300                _ZN4Luau7Require19lua_requireinternalEP9lua_StatePKc
+ .text._Z27luarequire_pushproxyrequireP9lua_StatePFvP24luarequire_ConfigurationEPv
+                0x0000000000401340       0x40 /build/bin/Dist-linux-x86_64/Luau/libLuau.a(Require.o)
+                0x0000000000401340                _Z27luarequire_pushproxyrequireP9lua_StatePFvP24luarequire_ConfigurationEPv
+ .text._Z12luau_compilePKcmP18lua_CompileOptionsPm
+                0x0000000000401380       0x40 /build/bin/Dist-linux-x86_64/Luau/libLuau.a(lcode.o)
+                0x0000000000401380                _Z12luau_compilePKcmP18lua_CompileOptionsPm
+
+.rodata         0x0000000000403000     0x2000
+ *(.rodata .rodata.*)
+ .rodata.str1.1 0x0000000000403000       0x40 /build/bin/Dist-linux-x86_64/Engine/libEngine.a(Application.o)
+
+.data.rel.ro    0x0000000000405000     0x2000
+ *(.data.rel.ro .data.rel.ro.*)
+ .data.rel.ro._ZTVN6Engine15ComponentStoreE
+                0x0000000000405000       0x40 /build/bin/Dist-linux-x86_64/Engine/libEngine.a(CoreRegistration.o)
+                0x0000000000405000                _ZTVN6Engine15ComponentStoreE
+
+/DISCARD/
+ *(.note.GNU-stack)
+ *(.gnu_debuglink)
+OUTPUT(/build/bin/Dist-linux-x86_64/Runtime/Runtime elf64-x86-64)

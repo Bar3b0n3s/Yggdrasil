@@ -68,8 +68,9 @@ namespace Engine {
 		static constexpr std::string_view FilePath = "Automation/Provenance.json";
 
 		// Whether writes to `path` (project-relative) are recorded: a ".eproj" file at the project root, the root ".luaurc"
-		// (the type checker reads it; Docs/Decisions/0026-m16-contract.md decision 13, G5) and every file under "Assets/"
-		// (§13.4). Library/, Automation/ and anything else are not.
+		// (the type checker reads it; Docs/Decisions/0026-m16-contract.md decision 13, G5), every file under "Assets/"
+		// (§13.4) and every file under "Native/", the game's native module (Docs/Decisions/0030-m19-contract.md decision 35).
+		// Library/ (the module's builds included), Automation/ and anything else are not.
 		[[nodiscard]] static bool IsRecordedPath(std::string_view path);
 
 		// Reads project://Automation/Provenance.json; a missing file gives an empty recorder. Errors: Parse (line and column)

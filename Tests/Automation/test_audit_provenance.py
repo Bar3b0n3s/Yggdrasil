@@ -178,6 +178,19 @@ class ReaderTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             provenance.enumerate_engine_files(project, "git")
 
+    def test_native_sources_are_engine_consumed(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 35 (the milestone's acceptance: "the provenance audit covers the
+        # module's sources"): every file below Native/ is engine-consumed like every file below Assets/, so a source the
+        # editor did not write (native.write) is a finding; the builds below Library/Native/ are never read.
+        project = self.directory / "Game"
+        for relative in ("Game.eproj", "Assets/Scenes/Main.scene", "Native/Spinner.cpp", "Native/Systems/Move.h",
+                         "Native/Notes.txt", "Library/Native/Builds/00000001/NativeBuild.json"):
+            (project / relative).parent.mkdir(parents=True, exist_ok=True)
+            (project / relative).write_bytes(b"x")
+        self.assertEqual(provenance.enumerate_engine_files(project, "disk"),
+                         ["Assets/Scenes/Main.scene", "Game.eproj", "Native/Notes.txt", "Native/Spinner.cpp",
+                          "Native/Systems/Move.h"])
+
 
 class FixtureTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -328,6 +341,29 @@ class FixtureTests(unittest.TestCase):
             (project / relative).write_text(content, encoding="utf-8")
         exit_code, document = run_audit("--project", str(project), "--files", "disk")
         self.assertEqual((exit_code, document["projects"]), (baseline_code, baseline["projects"]))
+
+    def test_a_native_source_the_editor_did_not_write_is_a_finding(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 35 ("the provenance audit covers the module's sources"): a source
+        # below Native/ that native.write wrote passes like an asset, and one written by hand has no entry.
+        project = copy_fixture(CLEAN, self.directory)
+        written, hand = "Native/Spinner.cpp", "Native/Systems/Hand.h"
+        source = b'#include "Engine/Native/NativeApi.h"\n'
+        for relative, data in ((written, source), (hand, b"#pragma once\n")):
+            (project / relative).parent.mkdir(parents=True, exist_ok=True)
+            (project / relative).write_bytes(data)
+        transcript = project / provenance.TRANSCRIPT_FILE
+        request = {"type": "request", "time": "2026-01-01T00:00:00.000Z", "client": "engine-mcp", "id": 9,
+                   "method": "native.write", "params": {"path": written, "source": source.decode("utf-8")}}
+        transcript.write_bytes(transcript.read_bytes() + json.dumps(request).encode("utf-8") + b"\n")
+        line = len(provenance.load_transcript(transcript).lines)
+        document = json.loads((project / provenance.PROVENANCE_FILE).read_text(encoding="utf-8"))
+        document["Entries"].append({"Path": written, "XXH64": xxh64.xxh64_hex(source), "Method": "native.write",
+                                    "RequestId": 9, "Client": "engine-mcp", "TranscriptLine": line})
+        document["Entries"].sort(key=lambda entry: entry["Path"].encode("utf-8"))
+        (project / provenance.PROVENANCE_FILE).write_text(json.dumps(document, indent="\t") + "\n", encoding="utf-8")
+        audit = provenance.audit_project(project, "disk")
+        self.assertEqual(codes(audit.findings), [("entry-missing", hand)])
+        self.assertEqual(audit.warnings, [])
 
     def test_crlf_text_is_a_warning(self) -> None:
         project = copy_fixture(CLEAN, self.directory)

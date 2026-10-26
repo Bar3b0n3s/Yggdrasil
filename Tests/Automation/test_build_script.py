@@ -2,7 +2,8 @@
 decisions 14 and 22): every build that builds the Runtime, directly or as a dependency, copies it next to the Runtime,
 where project.export takes it from; a build that does not build the Runtime copies nothing. From M15 (Docs/Decisions/
 0024-m15-contract.md, stream A owns this file) the same builds also stage the notices file and, on macOS, the bundle's
-SDK files, and a Dist build archives the Runtime's symbols.
+SDK files, and a Dist build archives the Runtime's symbols. From M19 (Docs/Decisions/0030-m19-contract.md decision 13,
+stream D) every build first writes the build stamp of its configuration.
 
 The solution is a small .slnx written into a temporary directory with the shape premake writes (the Tests project
 depends on Runtime through a BuildDependency, Editor links EditorCore through a ProjectReference), so the test runs on
@@ -12,6 +13,7 @@ every system and needs no generated workspace.
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -179,6 +181,123 @@ class RuntimeStagingTests(unittest.TestCase):
                           "VK_MAKE_API_VERSION(0, 1, 3, VK_HEADER_VERSION)\n", encoding="utf-8")
         with self.assertRaises(toolchain.ToolchainError):
             Build.stage_macos_frameworks(self.root, "Release", sdk)
+
+
+class BuildStampTests(unittest.TestCase):
+    """The build stamp Build.py writes before each configuration's build (Docs/Decisions/0030-m19-contract.md decision
+    13, B-BVER, stream D): the commit a working tree has checked out and whether it differs from it, in the header below
+    the Engine project's intermediate directory that Core/BuildId.cpp reads. Each test makes its own repository in a
+    temporary directory, with git's search stopped above it."""
+
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory(prefix="EngineBuildStamp")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        ceiling = mock.patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": str(self.root)})
+        ceiling.start()
+        self.addCleanup(ceiling.stop)
+
+    def git(self, repository: Path, *arguments: str) -> str:
+        completed = subprocess.run(["git", "-C", str(repository), "-c", "user.name=Engine Tests",
+                                    "-c", "user.email=engine-tests@localhost", "-c", "core.autocrlf=false",
+                                    "-c", "commit.gpgsign=false", *arguments],
+                                   stdin=subprocess.DEVNULL, capture_output=True, text=True, check=True)
+        return completed.stdout
+
+    def make_repository(self) -> Path:
+        repository = self.root / "Checkout"
+        (repository / "Engine" / "Source").mkdir(parents=True)
+        (repository / "Engine" / "Source" / "Core.cpp").write_text("int core;\n", encoding="utf-8")
+        (repository / ".gitignore").write_text("/bin-int/\nEngine/Generated/\n", encoding="utf-8")
+        self.git(repository, "init", "--quiet")
+        self.git(repository, "add", "--all")
+        self.git(repository, "commit", "--quiet", "-m", "First")
+        return repository
+
+    def test_the_stamp_names_head_and_the_changes_that_make_a_build_dirty(self) -> None:
+        repository = self.make_repository()
+        head = self.git(repository, "rev-parse", "HEAD").strip()
+        clean = Build.read_build_stamp(repository)
+        self.assertEqual(clean, Build.BuildStamp(head[:12], False))
+        self.assertEqual(clean.describe(), head[:12])
+
+        source = repository / "Engine" / "Source" / "Core.cpp"
+        source.write_text("int core = 1;\n", encoding="utf-8")
+        self.assertTrue(Build.read_build_stamp(repository).dirty)  # a modified tracked file
+        self.git(repository, "add", "--all")
+        self.assertTrue(Build.read_build_stamp(repository).dirty)  # staged
+        self.git(repository, "checkout", "--quiet", "HEAD", "--", ".")
+        self.assertEqual(Build.read_build_stamp(repository), clean)
+
+        # A source premake compiles although git does not track it, and a resource the build copies, make it dirty; an
+        # untracked file outside those directories and an ignored one do not.
+        for directory in Build.BUILD_STAMP_SOURCE_DIRECTORIES:
+            with self.subTest(directory=directory):
+                added = repository / directory / "Added.cpp"
+                added.parent.mkdir(parents=True, exist_ok=True)
+                added.write_text("int added;\n", encoding="utf-8")
+                stamp = Build.read_build_stamp(repository)
+                self.assertEqual(stamp, Build.BuildStamp(head[:12], True))
+                self.assertEqual(stamp.describe(), f"{head[:12]}.dirty")
+                added.unlink()
+        (repository / "Notes.txt").write_text("notes\n", encoding="utf-8")
+        (repository / "Engine" / "Generated").mkdir()
+        (repository / "Engine" / "Generated" / "Stamp.h").write_text("#pragma once\n", encoding="utf-8")
+        self.assertEqual(Build.read_build_stamp(repository), clean)
+
+    def test_without_a_repository_the_stamp_has_no_commit_and_is_clean(self) -> None:
+        directory = self.root / "Unversioned"
+        (directory / "Engine").mkdir(parents=True)
+        (directory / "Engine" / "Core.cpp").write_text("int core;\n", encoding="utf-8")
+        stamp = Build.read_build_stamp(directory)
+        self.assertEqual(stamp, Build.BuildStamp("", False))
+        self.assertEqual(stamp.describe(), "no commit")
+        self.assertIn('#define ENGINE_BUILD_COMMIT ""\n', Build.build_stamp_text(stamp))
+
+    def test_the_stamp_header_is_written_per_configuration_and_only_when_it_changes(self) -> None:
+        repository = self.make_repository()
+        head = self.git(repository, "rev-parse", "HEAD").strip()
+        workspace_root = self.root / "Workspace"
+        first = Build.write_build_stamp(workspace_root, "Release", repository)
+        header = workspace_root / "bin-int" / paths.output_directory_name("Release") / "Engine" / "BuildStamp.h"
+        self.assertEqual(Path(str(first["path"])), header)
+        self.assertTrue(first["written"])
+        self.assertEqual((first["commit"], first["dirty"], first["description"]), (head[:12], False, head[:12]))
+        text = header.read_text(encoding="utf-8")
+        self.assertIn(f'#define ENGINE_BUILD_COMMIT "{head[:12]}"\n', text)
+        self.assertIn("#define ENGINE_BUILD_DIRTY 0\n", text)
+        self.assertFalse(Build.write_build_stamp(workspace_root, "Release", repository)["written"])
+        self.assertFalse((workspace_root / "bin-int" / paths.output_directory_name("Debug")).exists())
+
+        (repository / "Engine" / "Source" / "Core.cpp").write_text("int core = 2;\n", encoding="utf-8")
+        dirty = Build.write_build_stamp(workspace_root, "Release", repository)
+        self.assertTrue(dirty["written"])
+        self.assertIn("#define ENGINE_BUILD_DIRTY 1\n", header.read_text(encoding="utf-8"))
+
+    def test_a_first_stamp_removes_the_objects_a_build_without_one_compiled(self) -> None:
+        # A build without the stamp (the IDE's, before any Build.py run) compiled BuildId.cpp without reading the
+        # header, so no incremental build would recompile it: the first stamp removes its objects, and a rewrite keeps
+        # them.
+        repository = self.make_repository()
+        workspace_root = self.root / "Workspace"
+        intermediate = workspace_root / "bin-int" / paths.output_directory_name("Debug") / "Engine"
+        intermediate.mkdir(parents=True)
+        objects = [intermediate / name for name in Build.BUILD_STAMP_OBJECTS]
+        for stale in objects:
+            stale.write_bytes(b"object")
+        (intermediate / "Other.obj").write_bytes(b"object")
+        first = Build.write_build_stamp(workspace_root, "Debug", repository)
+        self.assertEqual(sorted(first["removedObjects"]), sorted(str(stale) for stale in objects))
+        self.assertFalse(any(stale.exists() for stale in objects))
+        self.assertTrue((intermediate / "Other.obj").is_file())
+
+        for stale in objects:
+            stale.write_bytes(b"object")
+        (repository / "Engine" / "Source" / "Core.cpp").write_text("int core = 3;\n", encoding="utf-8")
+        rewritten = Build.write_build_stamp(workspace_root, "Debug", repository)
+        self.assertTrue(rewritten["written"])
+        self.assertEqual(rewritten["removedObjects"], [])
+        self.assertTrue(all(stale.is_file() for stale in objects))
 
 
 if __name__ == "__main__":

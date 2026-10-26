@@ -36,6 +36,22 @@ namespace Engine {
 		// (Docs/Decisions/0027-m17-contract.md decision 3, A1), where nothing changed since the recording and its refusal's
 		// hint names the usual causes instead (M17 review C-01). Ignored WithoutInput, which never names them.
 		bool NameDivergenceCauses = true;
+		// Requires StrictHash (InvalidArgument from Begin otherwise; Docs/Decisions/0030-m19-contract.md decision 3, A-F29). A
+		// checkpoint whose hash differs no longer ends the playback: the first one is kept in
+		// ReplayPlaybackResult::FirstCheckpointFailure, every one counts in CheckpointsFailed, and the playback goes on to
+		// FinalTick and compares the final hash as usual (HashMatched), so the input check can tell a recording whose final
+		// hash alone does not depend on its input. Such a playback has failed whenever a checkpoint differed (Passed false,
+		// CheckpointFailed true), whatever the final hash; StopReason stays empty unless gameplay ended it early.
+		bool ContinuePastCheckpoint = false;
+	};
+
+	// The first checkpoint whose state hash differed in a playback that continued past it
+	// (ReplayPlaybackOptions::ContinuePastCheckpoint).
+	struct ReplayCheckpointFailure
+	{
+		uint64_t Tick = 0;
+		std::string StateHash{};         // observed
+		std::string ExpectedStateHash{}; // recorded
 	};
 
 	struct ReplayExpectationOutcome
@@ -70,11 +86,27 @@ namespace Engine {
 		// and both hashes. The failed checkpoint is ReplayData::Checkpoints[CheckpointsChecked - 1].
 		uint64_t CheckpointsChecked = 0;
 		bool CheckpointFailed = false;
+		// ContinuePastCheckpoint (decision 3): every checkpoint whose hash differed, and the first of them; 0 and nullopt
+		// otherwise (a playback that stopped at its failed checkpoint describes it in FinalTick, StateHash and
+		// ExpectedStateHash, as before).
+		uint64_t CheckpointsFailed = 0;
+		std::optional<ReplayCheckpointFailure> FirstCheckpointFailure{};
+		// What differs between the replay's start fingerprint (ReplayData::Fingerprint) and this playback's own, taken at
+		// Begin (ComputeReplayFingerprint; Docs/Decisions/0030-m19-contract.md decision 2, A-FPRINT): one line per change,
+		// DescribeReplayFingerprintChanges' lines, at most MaxReplayFingerprintChanges. Filled only when a hash differed (the
+		// failed checkpoint or the final hash) in a playback with the replay's input; empty for a replay without a fingerprint
+		// (one migrated from version 1 or 2), for a playback WithoutInput and when nothing differs. When the playback's own
+		// fingerprint could not be taken at Begin, the one line "not known, because the playback's start fingerprint could
+		// not be taken: <error>" instead. A checkpoint's StopReason and the errors of input.replay and test.run's
+		// Checkpoint@<tick> and FinalStateHash rows name the first of them.
+		std::vector<std::string> Changes{};
 	};
 
 	// M17 friction F03: what a replay whose state hash differs from the recording's at a checkpoint or at its final tick
 	// means. The state hash covers every serialized component, the look's included (PostProcess, Environment, the lights,
-	// Camera, Text), so tuning the look after a recording fails its replay like any other change.
+	// Camera, Text), so tuning the look after a recording fails its replay like any other change. A game's native module is
+	// simulation code (Docs/Decisions/0030-m19-contract.md decision 28), which the start fingerprint does not record, so
+	// the causes name it (the milestone review).
 	// Both belong only to a playback with the replay's input, never to one WithoutInput (ReplayPlaybackOptions).
 	//   GetReplayDivergenceCauses: the causes, which ReplayPlaybackResult::StopReason names for a checkpoint that differs
 	//   unless ReplayPlaybackOptions::NameDivergenceCauses is false.
@@ -82,6 +114,20 @@ namespace Engine {
 	//   the text test.run's Checkpoint@<tick> and FinalStateHash rows add to their messages.
 	[[nodiscard]] std::string_view GetReplayDivergenceCauses();
 	[[nodiscard]] std::string_view GetReplayDivergenceHint();
+
+	// M19 (Docs/Decisions/0030-m19-contract.md decision 3, A-F29; ADR 0026 friction F29): the warning of an input check
+	// (a playback WithoutInput with ContinuePastCheckpoint) whose run differed from the recording at checkpoints, so the
+	// recording passes the guard, but reproduced its final state hash: the final hash proves only the end state, not the
+	// play. Exactly: "'<replay>': its final state hash does not depend on its input: without its input events the run first
+	// differed from the recording at checkpoint tick <checkpointTick>, then reached the recorded final state hash
+	// <finalStateHash>, so only its checkpoints prove the play; end the recording while the played state is still in the
+	// scene". input.record's Warnings, test.run's recording block and the games and determinism suites' input checks give
+	// it word for word (the suites' Python spells the same text).
+	[[nodiscard]] std::string MakeFinalHashIndependentWarning(std::string_view replay, uint64_t checkpointTick, std::string_view finalStateHash);
+	// Whether an input check's `playback` is the one MakeFinalHashIndependentWarning describes: it continued past a
+	// checkpoint that differed (FirstCheckpointFailure) to the final tick, stopped for nothing else, satisfied every
+	// expectation and reproduced the recorded final state hash. input.record stop and test.run {record} both ask it.
+	[[nodiscard]] bool IsFinalHashIndependent(const ReplayPlaybackResult& playback);
 
 	// The adapter executes expectation.Script in the current play VM using ScriptEngine::ExecuteBytecode.
 	// Re-resolve that VM for each call, especially after Scene.Load. No compiler, Automation or Testing dependency.
@@ -105,11 +151,16 @@ namespace Engine {
 		// Session is fresh at tick 0 with the header's scene/parameters/seed/FixedHz; host validates scene identity and
 		// suppresses live input before calling. Checks the entire event stream against the action map before queueing
 		// anything (with options.WithoutInput too, which then queues none), stores immutable replay data and the session
-		// serial. Does not step or evaluate a chunk.
+		// serial. Does not step or evaluate a chunk. With the replay's input and a replay fingerprint, it also takes the
+		// session's own fingerprint (ComputeReplayFingerprint(session.GetScene(), session.GetScriptSchemas(),
+		// session.GetAssets()), decision 2), which ReplayPlaybackResult::Changes compares when a hash differs; an error taking
+		// it does not fail Begin (the fingerprint only explains a difference): the playback goes on, and Changes names that
+		// error if a hash differs. InvalidArgument for ContinuePastCheckpoint without StrictHash.
 		[[nodiscard]] Status Begin(AssetRef<ReplayData> replay, const PlaySession& session, const ReplayPlaybackOptions& options = {});
 		// Runs at most one Tick (fixed + frame), then evaluates all expectations at the resulting completed-tick boundary,
 		// then (StrictHash) compares the boundary's checkpoint, completing the playback as failed when it differs (see
-		// ReplayPlaybackResult::CheckpointFailed). Checks tick-0 expectations before the first Tick, including FinalTick=0.
+		// ReplayPlaybackResult::CheckpointFailed), or with ContinuePastCheckpoint recording it and going on (decision 3).
+		// Checks tick-0 expectations before the first Tick, including FinalTick=0.
 		// Returns true when complete. A gameplay
 		// quit request or a fatal stop (PlaySession::GetFatalError) that keeps the session from reaching FinalTick completes
 		// the playback as failed (ReplayPlaybackResult::StopReason), never an outer error. Any other changed serial or

@@ -168,6 +168,34 @@ return Script.Define("References", References)
 			CHECK(setup.GetEditor().GetScene().GetEntityCount() == 0);
 		}
 
+		// entity.get reports an entity's native components (the native test game's friction NT-07), so a builder may send its
+		// components map back. A "Native.<Name>" there, or in removeComponents, is refused at its member with a hint naming
+		// native.setComponents, which writes native components, never with did-you-mean names of built-in components.
+		TEST_CASE("EntityMethods: a native component in entity.create or entity.update is refused with a hint naming native.setComponents")
+		{
+			Test::AutomationFixture setup("EntityNativeComponent");
+			REQUIRE(setup.Call("entity.create", ParseEntityMethodJson(R"({"name":"Wheel"})")).has_value());
+			const auto checkRefusal = [](Json response, std::string_view pointer)
+			{
+				CAPTURE(response.dump());
+				CHECK(response["error"]["code"] == Json(-32602));
+				Json& issue = response["error"]["data"]["issues"][0];
+				CHECK(issue["pointer"] == Json(pointer));
+				const std::string hint = JsonReader(issue["hint"]).ReadString().value_or(std::string());
+				CHECK(hint.contains("native.setComponents"));
+				CHECK_FALSE(hint.contains("did you mean"));
+				CHECK((!issue.contains("suggestions") || issue["suggestions"].empty()));
+			};
+			checkRefusal(setup.Request("entity.update", ParseEntityMethodJson(R"({"entity":"/Wheel","components":{"Native.Spinner":{"Speed":90}}})")),
+				"/components/Native.Spinner");
+			checkRefusal(setup.Request("entity.create",
+							 ParseEntityMethodJson(R"({"name":"Copy","components":{"Transform":{},"Native.Spinner":{"Speed":90}}})")),
+				"/components/Native.Spinner");
+			checkRefusal(setup.Request("entity.update", ParseEntityMethodJson(R"({"entity":"/Wheel","removeComponents":["Native.Spinner"]})")),
+				"/removeComponents/0");
+			CHECK(setup.GetEditor().GetScene().GetEntityCount() == 1);
+		}
+
 		TEST_CASE("EntityMethods: entity.update changes only what is given and adds missing components")
 		{
 			Test::AutomationFixture setup("EntityUpdate");
@@ -476,6 +504,108 @@ return Script.Define("References", References)
 			fetched = setup.Call("entity.get", Json{ { "entity", "/Wall" } });
 			REQUIRE(fetched.has_value());
 			CHECK((*fetched)["entity"]["components"]["MeshRenderer"]["Mesh"] == Json("0000000000000102"));
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 7 (A-EREF): component data takes the spellings entity params take, an
+		// entity path or a unique id prefix, resolved in the scene the request addresses (the edit scene here; the ledger's
+		// "Entity paths and scenes"), and the component holds the entity's id; a path that names nothing is NotFound at its
+		// pointer, and nothing changes.
+		TEST_CASE("EntityMethods: entity.update resolves an entity path and a unique id prefix in component data in the edit scene")
+		{
+			Test::AutomationFixture setup("EntityComponentPaths");
+			const std::string path = "Assets/Scripts/Hud.luau";
+			REQUIRE(setup.Call("script.write", Json{ { "path", path }, { "source", R"(
+local Hud = { Fields = { Score = Field.Entity(), Lives = Field.Array(Field.Entity()) } }
+return Script.Define("Hud", Hud)
+)" } })
+					.has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Game" } }).has_value());
+			auto score = setup.Call("entity.create", Json{ { "name", "ScoreText" }, { "parent", "/Game" } });
+			REQUIRE(score.has_value());
+			auto lives = setup.Call("entity.create", Json{ { "name", "Lives" }, { "parent", "/Game" } });
+			REQUIRE(lives.has_value());
+			const std::string scoreID = ReadEntityId(*score);
+			const std::string livesID = ReadEntityId(*lives);
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Hud" } }).has_value());
+
+			const Json fields{ { "Score", "/Game/ScoreText" }, { "Lives", Json::array({ livesID.substr(0, 10) }) } };
+			const auto updated = setup.Call("entity.update", Json{ { "entity", "/Hud" }, { "components", Json{ { "Script", Json{ { "Script", path }, { "Fields", fields } } } } } });
+			REQUIRE_MESSAGE(updated.has_value(), updated.error().ToString());
+			CHECK((*updated)["entity"]["components"]["Script"]["Fields"]["Score"] == Json(scoreID));
+			CHECK((*updated)["entity"]["components"]["Script"]["Fields"]["Lives"][0] == Json(livesID));
+
+			const uint64_t revision = setup.GetEditor().GetRevision();
+			const auto missing = setup.Call("entity.update", Json{ { "entity", "/Hud" }, { "components", Json{ { "Script", Json{ { "Fields", Json{ { "Score", "/Game/Missing" } } } } } } } });
+			REQUIRE_FALSE(missing.has_value());
+			CHECK(missing.error().GetCode() == ErrorCode::NotFound);
+			CHECK(setup.GetEditor().GetRevision() == revision);
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 7 and the phase 1 ledger's "Entity paths and scenes": an entity path in
+		// component data continues through a prefab instance's members, nested instances included, as the scene holds them: a
+		// member a prefab flattened into its own (Row's Cell) and a member of an instance placed inside another (Extra).
+		TEST_CASE("EntityMethods: component data resolves an entity path through nested prefab instances")
+		{
+			Test::AutomationFixture setup("EntityComponentPrefabPaths");
+			const std::string path = "Assets/Scripts/Aim.luau";
+			REQUIRE(setup.Call("script.write", Json{ { "path", path }, { "source", R"(
+local Aim = { Fields = { Target = Field.Entity(), Others = Field.Array(Field.Entity()) } }
+return Script.Define("Aim", Aim)
+)" } })
+					.has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Cell" } }).has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Sprite" }, { "parent", "/Cell" } }).has_value());
+			REQUIRE(setup.Call("prefab.create", Json{ { "entity", "/Cell" }, { "path", "Assets/Prefabs/Cell.prefab" }, { "replaceWithInstance", true } }).has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Row" } }).has_value());
+			REQUIRE(setup.Call("entity.reparent", Json{ { "entity", "/Cell" }, { "parent", "/Row" } }).has_value());
+			REQUIRE(setup.Call("prefab.create", Json{ { "entity", "/Row" }, { "path", "Assets/Prefabs/Row.prefab" }, { "replaceWithInstance", true } }).has_value());
+			const auto extra = setup.Call("prefab.instantiate", Json{ { "prefab", "Assets/Prefabs/Cell.prefab" }, { "parent", "/Row" }, { "name", "Extra" } });
+			REQUIRE_MESSAGE(extra.has_value(), extra.error().ToString());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Aim" } }).has_value());
+
+			Scene& scene = setup.GetEditor().GetScene();
+			const Entity member = scene.FindEntityByPath("/Row/Cell/Sprite");
+			const Entity nested = scene.FindEntityByPath("/Row/Extra/Sprite");
+			REQUIRE(member.IsValid());
+			REQUIRE(nested.IsValid());
+			const Json fields{ { "Target", "/Row/Cell/Sprite" }, { "Others", Json::array({ "/Row/Extra/Sprite" }) } };
+			const auto updated = setup.Call("entity.update", Json{ { "entity", "/Aim" }, { "components", Json{ { "Script", Json{ { "Script", path }, { "Fields", fields } } } } } });
+			REQUIRE_MESSAGE(updated.has_value(), updated.error().ToString());
+			CHECK((*updated)["entity"]["components"]["Script"]["Fields"]["Target"] == Json(member.GetUUID().ToString()));
+			CHECK((*updated)["entity"]["components"]["Script"]["Fields"]["Others"][0] == Json(nested.GetUUID().ToString()));
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 7: a request whose target is play resolves the paths in its component
+		// data in the play scene, as it resolves its entity param; without target the same path resolves in the edit scene,
+		// which lacks the entity; and target play without a session is the host's InvalidState.
+		TEST_CASE("EntityMethods: component data of a request whose target is play resolves entity paths in the play scene")
+		{
+			Test::AutomationFixture setup("EntityComponentPlayPaths");
+			const std::string path = "Assets/Scripts/Hud.luau";
+			REQUIRE(setup.Call("script.write", Json{ { "path", path }, { "source", R"(
+local Hud = { Fields = { Score = Field.Entity() } }
+return Script.Define("Hud", Hud)
+)" } })
+					.has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Hud" }, { "components", Json{ { "Script", Json{ { "Script", path } } } } } }).has_value());
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true } }).has_value());
+			auto spawned = setup.Call("entity.create", Json{ { "name", "Spawned" }, { "target", "play" } });
+			REQUIRE_MESSAGE(spawned.has_value(), spawned.error().ToString());
+			const std::string spawnedID = ReadEntityId(*spawned);
+
+			const Json components{ { "Script", Json{ { "Script", path }, { "Fields", Json{ { "Score", "/Spawned" } } } } } };
+			const auto played = setup.Call("entity.update", Json{ { "entity", "/Hud" }, { "target", "play" }, { "components", components } });
+			REQUIRE_MESSAGE(played.has_value(), played.error().ToString());
+			CHECK((*played)["entity"]["components"]["Script"]["Fields"]["Score"] == Json(spawnedID));
+
+			const auto edited = setup.Call("entity.update", Json{ { "entity", "/Hud" }, { "components", components } });
+			REQUIRE_FALSE(edited.has_value());
+			CHECK(edited.error().GetCode() == ErrorCode::NotFound);
+
+			REQUIRE(setup.Call("play.stop", Json::object()).has_value());
+			const auto stopped = setup.Call("entity.update", Json{ { "entity", "/Hud" }, { "target", "play" }, { "components", components } });
+			REQUIRE_FALSE(stopped.has_value());
+			CHECK(stopped.error().GetCode() == ErrorCode::InvalidState);
 		}
 	}
 

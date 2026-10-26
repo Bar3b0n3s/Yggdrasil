@@ -500,6 +500,9 @@ namespace Engine {
 			return app.BeforeProjectClose();
 		} });
 		state.Views = CreateScope<EditorHostViewports>(*state.Editor, *state.Gizmos);
+		// M19 --headless-game-view (Docs/Decisions/0030-m19-contract.md decision 11): the soak's game view.
+		if (options.HeadlessGameView)
+			ENGINE_TRY(state.Views->ForceGameView());
 		state.Thumbnails = CreateScope<EditorHostThumbnails>(*state.Editor, [&app](const RenderSnapshot& snapshot, uint32_t size) -> Result<Image>
 		{
 			// Unlike CaptureView, a thumbnail never waits for every pending load and import (AssetManager::WaitIdle): the

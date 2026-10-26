@@ -2,7 +2,11 @@
 
 #include "Engine/Automation/Methods/EntityMethods.h"
 
+#include "EditorCore/EditorContext.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Scene/Components/UnknownComponentsComponent.h"
+#include "Engine/Scene/Entity.h"
+#include "Engine/Scene/Scene.h"
 #include "Support/AutomationTestClient.h"
 
 #include <nlohmann/json.hpp>
@@ -20,6 +24,19 @@ namespace Engine {
 		Result<Json> json = JsonReader::Parse(text);
 		REQUIRE(json.has_value());
 		return std::move(*json);
+	}
+
+	// Gives the edit scene's entity at `path` the preserved components a scene file's "Native.Spinner" and an unknown
+	// "FutureComponent" load into (Scene/Components/UnknownComponentsComponent.h; Docs/Decisions/0030-m19-contract.md
+	// decision 27), as an editor without the native module holds them.
+	static void AddPreservedEntityComponents(Test::AutomationFixture& setup, std::string_view path)
+	{
+		Entity entity = setup.GetEditor().GetScene().FindEntityByPath(path);
+		REQUIRE(entity.IsValid());
+		UnknownComponentsComponent preserved;
+		preserved.Components.push_back({ .Name = "Native.Spinner", .Version = 1, .Data = VariantValue(Json{ { "Speed", 90 } }) });
+		preserved.Components.push_back({ .Name = "FutureComponent", .Version = 1, .Data = VariantValue(Json{ { "Size", 2 } }) });
+		entity.AddComponent<UnknownComponentsComponent>(std::move(preserved));
 	}
 
 	TEST_SUITE("Automation")
@@ -40,6 +57,40 @@ namespace Engine {
 			CHECK((*byPrefix)["entity"]["name"] == Json("Game"));
 			CHECK(setup.Call("entity.get", Json{ { "entity", "/Nobody" } }).error().GetCode() == ErrorCode::NotFound);
 			CHECK(setup.Call("entity.get", Json{ { "entity", "/Game" }, { "components", 3 } }).error().GetCode() == ErrorCode::InvalidArgument);
+		}
+
+		// The native test game's friction NT-07: entity.get reports an entity's native components ("Native.<Name>") as the
+		// scene holds them, in "all" (the default) and by name, unchecked against a loaded module; an unknown component stays
+		// unreported.
+		TEST_CASE("EntityMethods: entity.get reports an entity's native components as the scene holds them")
+		{
+			Test::AutomationFixture setup("EntityGetNative");
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Wheel" } }).has_value());
+			AddPreservedEntityComponents(setup, "/Wheel");
+			const Json spinner = Json{ { "Speed", 90 } };
+
+			Result<Json> all = setup.Call("entity.get", Json{ { "entity", "/Wheel" } });
+			REQUIRE_MESSAGE(all.has_value(), all.error().ToString());
+			const Json& components = (*all)["entity"]["components"];
+			CHECK(components.contains("Transform"));
+			REQUIRE(components.contains("Native.Spinner"));
+			CHECK(components["Native.Spinner"] == spinner);
+			CHECK_FALSE(components.contains("FutureComponent"));
+			Result<Json> named = setup.Call("entity.get", Json{ { "entity", "/Wheel" }, { "components", "all" } });
+			REQUIRE(named.has_value());
+			CHECK((*named)["entity"]["components"] == components);
+
+			Result<Json> selected = setup.Call("entity.get", Json{ { "entity", "/Wheel" }, { "components", Json::array({ "Native.Spinner" }) } });
+			REQUIRE_MESSAGE(selected.has_value(), selected.error().ToString());
+			CHECK((*selected)["entity"]["components"] == Json{ { "Native.Spinner", spinner } });
+			// A native name the entity does not hold reports nothing, as a built-in component it lacks does.
+			Result<Json> absent = setup.Call("entity.get", Json{ { "entity", "/Wheel" }, { "components", Json::array({ "Native.Missing", "Camera" }) } });
+			REQUIRE_MESSAGE(absent.has_value(), absent.error().ToString());
+			CHECK((*absent)["entity"]["components"].empty());
+			// "Native." alone names no native component and is an unknown component.
+			const Result<Json> prefixOnly = setup.Call("entity.get", Json{ { "entity", "/Wheel" }, { "components", Json::array({ "Native." }) } });
+			REQUIRE_FALSE(prefixOnly.has_value());
+			CHECK(prefixOnly.error().GetCode() == ErrorCode::NotFound);
 		}
 
 		TEST_CASE("EntityMethods: entity.bounds reports world AABBs of meshes and their descendants")

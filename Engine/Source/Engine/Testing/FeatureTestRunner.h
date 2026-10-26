@@ -74,6 +74,16 @@ namespace Engine {
 		// The recorded suite runs with its Parameters in the replay header's form (CanonicalizeReplayParameters; Begin
 		// fails with its located Validation error for a float out of the float range).
 		bool Record = false;
+		// M19 (test.run {record, expect}; Docs/Decisions/0030-m19-contract.md decision 6, A-RECEXPECT), with Record only: the
+		// expectations the recorded replay carries, written in order as their sources (RecordExpect, its Expect) and evaluated,
+		// as the compiled bytecode at the same index (RecordExpectBytecode, which the adapter compiles: the runner never runs
+		// a compiler, which Dist lacks), by the recording's verification with its input, where each must be satisfied, and by
+		// its input check, where the rule of §13.6 applies as before (a run without input that satisfies every expectation and
+		// reproduces every hash refuses the recording). Begin: InvalidArgument when either is non-empty without Record, or
+		// when their sizes or ticks differ. An expectation whose tick lies after the concatenated recording's FinalTick fails
+		// the recording with Validation located at /expect/<index>/tick, nothing written.
+		std::vector<ReplayExpectation> RecordExpect{};
+		std::vector<ReplayBytecodeExpectation> RecordExpectBytecode{};
 	};
 
 	// Services of the owning Editor/Runtime/test harness. This host is a documented borrowed back-reference that
@@ -214,6 +224,11 @@ namespace Engine {
 		// events (nothing to check), or a run that failed or was cancelled before. Kept after TakeRecording, until the next
 		// Begin.
 		[[nodiscard]] std::optional<uint64_t> GetInputCheckTick() const;
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 3, A-F29): the checkpoint tick at which the input check of this
+		// run's verified recording first differed when that check then reproduced the recording's final state hash
+		// (IsFinalHashIndependent), so the adapter adds MakeFinalHashIndependentWarning to the recording block; nullopt
+		// otherwise, and whenever GetInputCheckTick is. Kept after TakeRecording, until the next Begin.
+		[[nodiscard]] std::optional<uint64_t> GetFinalHashIndependentTick() const;
 		// The selection of the last successful Begin (FeatureTestSelection), kept until the next Begin (through cancellation
 		// and completion), so an adapter can check what the run will play before its first Advance and before it acquires its
 		// lease: test.run refuses a dirty open scene that a selected suite or replay plays (Docs/Decisions/0027-m17-contract.md

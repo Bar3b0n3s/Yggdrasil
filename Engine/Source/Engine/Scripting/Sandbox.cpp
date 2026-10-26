@@ -27,7 +27,6 @@
 
 #include <Luau/Common.h>
 #include <Luau/ExperimentalFlags.h>
-#include <Luau/Require.h>
 #include <glm/glm.hpp>
 #include <lualib.h>
 #include <nlohmann/json.hpp>
@@ -233,8 +232,6 @@ namespace Engine {
 		bool ReloadCommitted = false;
 		uint32_t ReloadEvaluationDepth = 0;
 		std::vector<ReloadCandidate> Candidates{};
-		int RequireProxy = LUA_NOREF;
-		std::string Navigation{};
 		std::optional<ScriptErrorKind> SafetyFault{};
 		std::optional<ScriptError> LastError{};
 		ScriptExecutionContext Execution{};
@@ -414,81 +411,6 @@ namespace Engine {
 #endif
 		}
 
-		static luarequire_WriteResult WriteNavigation(lua_State* vm, void*, char* buffer, size_t size, size_t* written)
-		{
-			auto path = From(vm).Navigation;
-			if (!path.ends_with(".luau"))
-				path += ".luau";
-			*written = path.size();
-			if (size < path.size())
-				return WRITE_BUFFER_TOO_SMALL;
-			std::memcpy(buffer, path.data(), path.size());
-			return WRITE_SUCCESS;
-		}
-
-		static void RequireConfiguration(luarequire_Configuration* configuration)
-		{
-			configuration->is_require_allowed = [](lua_State* vm, void*, const char* name)
-			{
-				const auto location = Detail::SandboxAccess::Locate(*From(vm).Owner, name, 0);
-				return location.File.starts_with("Assets/") && location.File.ends_with(".luau");
-			};
-			configuration->reset = [](lua_State* vm, void*, const char* name)
-			{
-				From(vm).Navigation = Detail::SandboxAccess::Locate(*From(vm).Owner, name, 0).File;
-				return From(vm).Navigation.empty() ? NAVIGATE_NOT_FOUND : NAVIGATE_SUCCESS;
-			};
-			configuration->jump_to_alias = [](lua_State*, void*, const char*)
-			{
-				return NAVIGATE_NOT_FOUND;
-			};
-			configuration->to_parent = [](lua_State* vm, void*)
-			{
-				auto& path = From(vm).Navigation;
-				const size_t slash = path.rfind('/');
-				if (slash == std::string::npos)
-					return NAVIGATE_NOT_FOUND;
-				path.resize(slash);
-				return NAVIGATE_SUCCESS;
-			};
-			configuration->to_child = [](lua_State* vm, void*, const char* name)
-			{
-				auto& path = From(vm).Navigation;
-				path += '/';
-				path += name;
-				return NAVIGATE_SUCCESS;
-			};
-			configuration->is_module_present = [](lua_State*, void*)
-			{
-				return true;
-			};
-			configuration->get_chunkname = WriteNavigation;
-			configuration->get_loadname = WriteNavigation;
-			configuration->get_cache_key = WriteNavigation;
-			configuration->get_config_status = [](lua_State*, void*)
-			{
-				return CONFIG_ABSENT;
-			};
-			configuration->get_alias = [](lua_State*, void*, const char*, char*, size_t, size_t*)
-			{
-				return WRITE_FAILURE;
-			};
-			configuration->load = [](lua_State* vm, void*, const char*, const char*, const char* loadName)
-			{
-				auto& state = From(vm);
-				auto call = Detail::SandboxAccess::ThreadCall(*state.Owner, vm);
-				if (!call)
-					luaL_error(vm, "%s", call.error().GetMessageText().c_str());
-				auto path = VfsPath::Parse(std::string("project://") + loadName);
-				if (!path)
-					return Lua::RaiseError(*call, path.error());
-				const auto loaded = state.PushRequired(*call, *path);
-				if (!loaded)
-					return Lua::RaiseError(*call, loaded.error());
-				return 1;
-			};
-		}
-
 		static int Require(lua_State* vm)
 		{
 			auto& state = From(vm);
@@ -511,18 +433,16 @@ namespace Engine {
 			const auto resolved = state.ActiveResolver().Resolve(*importer, request);
 			if (!resolved)
 				return Lua::RaiseError(*call, resolved.error());
-			// Luau's public adapter handles navigation; the engine cache is authoritative, including nil and reload.
-			// Clear its disposable cache before every lookup, so even an earlier unwound call cannot expose stale data.
-			lua_pushcfunction(vm, luarequire_clearcacheentry, "require.clear");
-			lua_pushlstring(vm, resolved->GetPath().data(), resolved->GetPath().size());
-			lua_call(vm, 1, 0);
-			lua_getref(vm, state.RequireProxy);
-			lua_pushlstring(vm, request.data(), request.size());
-			lua_pushstring(vm, frame.source);
-			lua_call(vm, 2, 1);
-			lua_pushcfunction(vm, luarequire_clearcacheentry, "require.clear");
-			lua_pushlstring(vm, resolved->GetPath().data(), resolved->GetPath().size());
-			lua_call(vm, 1, 0);
+			// The first-party require (Docs/Decisions/0030-m19-contract.md decision 22): no Luau Require library call in any
+			// configuration. The engine's module cache is the only cache (a cached nil apart from an absent entry), the
+			// resolver's stack detects cycles, and the module runs below this C call, so a module whose evaluation yields fails
+			// this require and caches nothing. The module's own failures (reading, compiling or running it) are raised as they
+			// are, not as argument errors of require.
+			ScriptCall load = *call;
+			load.MemberName = {};
+			const auto loaded = state.PushRequired(load, *resolved);
+			if (!loaded)
+				return Lua::RaiseError(load, loaded.error());
 			return 1;
 		}
 
@@ -633,9 +553,6 @@ namespace Engine {
 			lua_pop(call.State, 1);
 			lua_pushcfunction(call.State, Print, "print");
 			lua_setglobal(call.State, "print");
-			luarequire_pushproxyrequire(call.State, RequireConfiguration, nullptr);
-			RequireProxy = lua_ref(call.State, -1);
-			lua_pop(call.State, 1);
 			lua_pushcfunction(call.State, Require, "require");
 			lua_setglobal(call.State, "require");
 			lua_newtable(call.State);

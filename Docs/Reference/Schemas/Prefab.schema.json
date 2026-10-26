@@ -1052,6 +1052,10 @@
 				"Layer": {
 					"description": "Physics layer name from project settings.",
 					"type": "string"
+				},
+				"InheritGroundVelocity": {
+					"description": "While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it.",
+					"type": "boolean"
 				}
 			},
 			"additionalProperties": false

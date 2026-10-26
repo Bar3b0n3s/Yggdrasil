@@ -249,20 +249,24 @@ namespace Engine {
 			CHECK(fixture.GetSession().GetRecorder()->IsRecording());
 			CHECK_FALSE(saved.has_value());
 			writable = true;
-			const Json stopped = fixture.Call("input.record", Json{ { "action", "stop" }, { "path", "Local.replay" } });
+			// Stop verifies the recording in a session restarted for it (Docs/Decisions/0030-m19-contract.md decision 4), whose
+			// replay input it releases once the verification ends.
+			const Json stopped = fixture.CallPending("input.record", Json{ { "action", "stop" }, { "path", "Local.replay" } });
 			REQUIRE_MESSAGE(stopped.contains("result"), stopped.dump());
 			REQUIRE(saved.has_value());
 			CHECK(saved->Header.Seed == 59);
 			CHECK(saved->FinalTick == 2);
-			const uint64_t recordedSerial = fixture.GetSession().GetSerial();
+			const uint64_t verifiedSerial = fixture.GetSession().GetSerial();
+			REQUIRE(released.size() == 1);
+			CHECK(released.front() == verifiedSerial);
 			const Json replayed = fixture.CallPending("input.replay", Json{ { "path", stopped["result"]["path"] }, { "verify", true }, { "strictHash", true } });
 			REQUIRE_MESSAGE(replayed.contains("result"), replayed.dump());
 			CHECK(replayed["result"]["stateHash"] == stopped["result"]["stateHash"]);
-			CHECK(fixture.GetSession().GetSerial() != recordedSerial);
+			CHECK(fixture.GetSession().GetSerial() != verifiedSerial);
 			CHECK(fixture.GetSession().IsPaused());
 			CHECK_FALSE(fixture.GetSession().IsLockstep());
-			REQUIRE(released.size() == 1);
-			CHECK(released.front() == fixture.GetSession().GetSerial());
+			REQUIRE(released.size() == 2);
+			CHECK(released.back() == fixture.GetSession().GetSerial());
 			CHECK(fixture.Call("script.errors")["result"]["errors"].size() == 1);
 		}
 

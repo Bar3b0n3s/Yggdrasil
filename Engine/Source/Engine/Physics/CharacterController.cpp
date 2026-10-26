@@ -153,6 +153,8 @@ namespace Engine {
 		uint64_t UserData = 0;
 		uint32_t Layer = 0;
 		float StepHeight = 0.0f;
+		// CharacterControllerDescription::InheritGroundVelocity: while grounded, Update adds the ground's horizontal velocity.
+		bool InheritGroundVelocity = false;
 		BodyHandle InnerBody{};
 		// The inner body's collision group as the world installed it.
 		JPH::CollisionGroup Group{};
@@ -266,6 +268,7 @@ namespace Engine {
 		state.UserData = description.UserData;
 		state.Layer = description.Layer;
 		state.StepHeight = description.StepHeight;
+		state.InheritGroundVelocity = description.InheritGroundVelocity;
 		state.InnerBody = *inner;
 		state.Shape = std::move(*shape);
 		{
@@ -301,17 +304,21 @@ namespace Engine {
 
 		// The velocity for the step (CharacterController.h, ADR 0014 decision 8): the desired horizontal velocity, plus on
 		// the ground its vertical velocity and the desired vertical part (a jump), else the previous vertical velocity plus
-		// gravity. The platform the character stands on may have moved since the last update.
+		// gravity; with InheritGroundVelocity, on the ground also the ground's horizontal velocity (ADR 0030 decision 36), so
+		// a platform moving at v carries the character v * t. The platform the character stands on may have moved since the
+		// last update, so its velocity is read first.
 		character.UpdateGroundVelocity();
 		const JPH::Vec3 up = character.GetUp();
 		const JPH::Vec3 desired = Detail::ToJolt(desiredVelocity);
 		const JPH::Vec3 desiredVertical = desired.Dot(up) * up;
 		const JPH::Vec3 currentVertical = character.GetLinearVelocity().Dot(up) * up;
-		const JPH::Vec3 groundVertical = character.GetGroundVelocity().Dot(up) * up;
+		const JPH::Vec3 groundVelocity = character.GetGroundVelocity();
+		const JPH::Vec3 groundVertical = groundVelocity.Dot(up) * up;
 		const bool grounded = character.GetGroundState() == JPH::CharacterBase::EGroundState::OnGround
 			&& (currentVertical - groundVertical).Dot(up) < Utils::LeavingGroundSpeed;
 		const JPH::Vec3 vertical = grounded ? groundVertical + desiredVertical : currentVertical + Detail::ToJolt(effectiveGravity) * deltaTime;
-		character.SetLinearVelocity(Utils::ClampSpeed(desired - desiredVertical + vertical));
+		const JPH::Vec3 carried = grounded && state.InheritGroundVelocity ? groundVelocity - groundVertical : JPH::Vec3::sZero();
+		character.SetLinearVelocity(Utils::ClampSpeed(desired - desiredVertical + carried + vertical));
 
 		// Walk stairs up to StepHeight, and stick to the floor over steps and slopes down to the same height.
 		JPH::CharacterVirtual::ExtendedUpdateSettings update;
@@ -404,6 +411,11 @@ namespace Engine {
 	uint64_t CharacterController::GetUserData() const
 	{
 		return m_State->UserData;
+	}
+
+	void CharacterController::SetInheritGroundVelocity(bool inherit)
+	{
+		m_State->InheritGroundVelocity = inherit;
 	}
 
 }

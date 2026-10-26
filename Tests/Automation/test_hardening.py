@@ -849,7 +849,8 @@ class FakeClient:
     """An engine client whose play.step takes `step_seconds` of the fake clock; a call whose timeout is shorter than its
     cost uses up the timeout and raises TimeoutError, as engine_client does. Its script.errors reports an empty error
     stream (ScriptErrorClient serves one with errors), which the soak reads before play.start and after its last step
-    (Docs/Decisions/0027-m17-contract.md decision 4, B4)."""
+    (Docs/Decisions/0027-m17-contract.md decision 4, B4); its stats.get reports the scene and game views rendered, as
+    the soak's --headless-game-view editor does (Docs/Decisions/0030-m19-contract.md decision 11)."""
 
     def __init__(self, clock: FakeClock, step_seconds: float) -> None:
         self.clock = clock
@@ -871,7 +872,9 @@ class FakeClient:
         self.clock.now += cost
         if method == "script.errors":
             return {"errors": [], "nextCursor": "0", "evicted": False}
-        return {"entities": 3, "bodies": 1, "voices": 0, "scriptHeapBytes": 500_000, "memoryAllocationCount": 9}
+        return {"entities": 3, "bodies": 1, "voices": 0, "scriptHeapBytes": 500_000, "memoryAllocationCount": 9,
+                "views": [{"name": "scene", "available": True, "width": 983, "height": 446},
+                          {"name": "game", "available": True, "width": 1600, "height": 900}]}
 
 
 class FakeEditorProcess:
@@ -1169,6 +1172,61 @@ class SoakDeadlineTests(unittest.TestCase):
                                                              self.directory / "Soak-Release.xml")
                 self.assertFalse(outcome.results[0].passed)
                 self.assertIn(error["message"], outcome.results[0].failures[0])
+
+    def test_a_soak_subject_whose_game_view_does_not_render_fails(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 11 (R-SOAK; ADR 0027 friction F08): the editor soak starts its
+        # editor with --headless-game-view, so the game camera's passes and post-processing run while the scene plays,
+        # and a subject whose stats.get reports no rendered game view fails, naming the tick.
+        game = {"name": "game", "available": True, "width": 1600, "height": 900}
+        scene = {"name": "scene", "available": True, "width": 983, "height": 446}
+        self.assertEqual(hardening.soak_game_view_errors({"views": [scene, game]}, 250), [])
+        hidden = hardening.soak_game_view_errors({"views": [scene, {"name": "game", "available": False, "width": 0,
+                                                                       "height": 0}]}, 250)
+        self.assertEqual(len(hidden), 1)
+        self.assertIn("the game view did not render at tick 250", hidden[0])
+        self.assertIn(hardening.SOAK_EDITOR_GAME_VIEW_OPTION, hidden[0])
+        self.assertEqual(len(hardening.soak_game_view_errors({"views": [scene]}, 500)), 1)
+
+        class HiddenGameClient(FakeClient):
+            def call(self, method: str, params: dict[str, Any], timeout: float) -> dict[str, Any]:
+                result = super().call(method, params, timeout)
+                if method == "stats.get":
+                    result = {**result, "views": [scene, {"name": "game", "available": False, "width": 0, "height": 0}]}
+                return result
+
+        for name, client_type in (("rendered", None), ("hidden", HiddenGameClient)):
+            with self.subTest(game_view=name):
+                clock = FakeClock()
+                client = FakeClient(clock, 0.0) if client_type is None else client_type(clock, 0.0)
+                if client_type is None:
+                    original = client.call
+
+                    def rendered(method: str, params: dict[str, Any], timeout: float,
+                                 original: Callable[..., dict[str, Any]] = original) -> dict[str, Any]:
+                        result = original(method, params, timeout)
+                        return {**result, "views": [scene, game]} if method == "stats.get" else result
+
+                    client.call = rendered  # type: ignore[method-assign]
+                editor = FakeEditorProcess(client)
+                launches: list[list[str]] = []
+                engine = fake_engine_client(editor)
+
+                def launch(executable: Path, arguments: list[str], *rest: object, editor: FakeEditorProcess = editor,
+                           launches: list[list[str]] = launches, **options: object) -> FakeEditorProcess:
+                    launches.append(list(arguments))
+                    return editor
+
+                engine.launch_editor = launch
+                samples, errors = hardening_script.soak_editor_scene(
+                    engine, self.directory / "Editor", self.directory / "P.eproj", "Assets/Scenes/Main.scene",
+                    self.directory / "UserData", self.console, hardening_script.SoakDeadline(1000.0, clock))
+                self.assertEqual(len(launches), 1)
+                self.assertIn(hardening.SOAK_EDITOR_GAME_VIEW_OPTION, launches[0])
+                if client_type is None:
+                    self.assertEqual(errors, [])
+                else:
+                    self.assertEqual(len(errors), 1, errors)
+                    self.assertIn("the game view did not render", errors[0])
 
     def test_the_soak_line_names_the_earliest_listed_error_with_its_latest_tick_and_count(self) -> None:
         # ADR 0027 Integration, stream B (review finding P-01): script.errors lists each distinct error once, at its

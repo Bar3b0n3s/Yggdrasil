@@ -133,6 +133,11 @@ namespace Engine {
 		uint32_t Checkpoints = 0;
 		std::string FinalStateHash{};
 		TestRecordingInputCheck InputCheck{};
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 6, A-RECEXPECT): the expectations written (test.run's expect).
+		uint32_t Expectations = 0;
+		// M19 (decision 3, A-F29): notes on the written replay: the input check's MakeFinalHashIndependentWarning when its run
+		// without input differed only at checkpoints and reproduced the recorded final hash.
+		std::vector<std::string> Warnings{};
 	};
 
 	struct TestRunResult

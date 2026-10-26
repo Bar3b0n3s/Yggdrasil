@@ -615,6 +615,7 @@ Moves the entity as a walking character that climbs steps and slopes and collide
 | `Mass` | `Float` | `70` | 0.001 to 1e+09 | kg |  | The character's mass in kilograms, used when it pushes bodies. |
 | `GravityFactor` | `Float` | `1` |  |  |  | The multiplier of the project's gravity for the character. |
 | `Layer` | `String` | `"Default"` |  |  |  | Physics layer name from project settings. |
+| `InheritGroundVelocity` | `Bool` | `false` |  |  |  | While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it. |
 
 Script members of `CharacterController`:
 
@@ -624,6 +625,7 @@ Script members of `CharacterController`:
 | `GetVelocity` | method | `(self: CharacterController) -> vector` |  | All | Velocity after the last update. |
 | `GravityFactor` | proxy field | `number` | read/write | All | The multiplier of the project's gravity for the character. |
 | `Height` | proxy field | `number` | read/write | All | The character's total height, in metres. |
+| `InheritGroundVelocity` | proxy field | `boolean` | read/write | All | While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it. |
 | `IsGrounded` | method | `(self: CharacterController) -> boolean` |  | All | Whether the last character update found supporting ground. |
 | `Layer` | proxy field | `string` | read/write | All | Physics layer name from project settings. A value a script writes holds at most 4096 bytes of text. |
 | `Mass` | proxy field | `number` | read/write | All | The character's mass in kilograms, used when it pushes bodies. |

@@ -32,9 +32,12 @@
 // scene are fixed by clearing their Primary. M9 adds RENDER_NO_LIGHTING (Scene/RenderAnnotations.h) and
 // RENDER_SPOT_SHADOW_BUDGET (Renderer/SpotShadowAtlas.h). M13 adds the script codes (SCRIPT_COMPILE_ERROR,
 // SCRIPT_TYPE_ERROR, SCRIPT_NOT_A_BEHAVIOUR, SCRIPT_UNKNOWN_FIELD_OVERRIDE, SCRIPT_FIELD_TYPE_MISMATCH),
-// INPUT_UNKNOWN_ACTION and TEST_SUITE_INVALID. M20 adds PREFAB_CYCLE (Scene/LoadReport.h) on every prefab file that
-// nests itself, directly or through other prefabs (Docs/Decisions/0031-m20-contract.md decision 8). GetCodes lists every
-// code in §13.7 order, later milestones' codes appended in landing order.
+// INPUT_UNKNOWN_ACTION and TEST_SUITE_INVALID. M19 adds SCRIPT_COMPUTED_ASSET_LOAD (Engine/Scripting/ScriptAssetLoads.h:
+// with Export.PruneUnreferenced on, each computed Assets.Load of a script below Assets/ that Export.Exclude leaves in, a
+// testing export's excluded test content unchecked; Docs/Decisions/0030-m19-contract.md decision 21). M20 adds
+// PREFAB_CYCLE (Scene/LoadReport.h) on every prefab file that nests itself, directly or through other prefabs
+// (Docs/Decisions/0031-m20-contract.md decision 8). GetCodes lists every code in §13.7 order, later milestones' codes
+// appended in landing order.
 
 namespace Engine {
 

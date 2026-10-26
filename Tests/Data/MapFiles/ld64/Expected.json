@@ -29,6 +29,22 @@
     "forbidden AssetPipeline: __ZN6Engine9PakWriter5WriteERKNSt3__14__fs10filesystem4pathE (/build/bin/Dist-macosx-AARCH64/Engine/libEngine.a[12](PakWriter.o))",
     "forbidden AssetPipeline: __ZNK6Engine15TextureImporter6ImportERNS_13ImportContextE (/build/bin/Dist-macosx-AARCH64/Engine/libEngine.a[11](TextureImporter.o))"
   ],
+  "LuauCompiler": [
+    "forbidden LuauCompiler: FDE for: __Z12luau_compilePKcmP18lua_CompileOptionsPm (/build/bin/Dist-macosx-AARCH64/Luau/libLuau.a[20](lcode.o))",
+    "forbidden LuauCompiler: FDE for: __Z27luarequire_pushproxyrequireP9lua_StatePFvP24luarequire_ConfigurationEPv (/build/bin/Dist-macosx-AARCH64/Luau/libLuau.a[19](Require.o))",
+    "forbidden LuauCompiler: FDE for: __ZN4Luau11parseConfigERKNSt3__112basic_stringIcNS0_11char_traitsIcEENS0_9allocatorIcEEEERNS_6ConfigERKNS_13ConfigOptionsE (/build/bin/Dist-macosx-AARCH64/Luau/libLuau.a[16](Config.o))",
+    "forbidden LuauCompiler: FDE for: __ZN4Luau15BytecodeBuilder14addConstantNilEv (/build/bin/Dist-macosx-AARCH64/Luau/libLuau.a[15](BytecodeBuilder.o))",
+    "forbidden LuauCompiler: FDE for: __ZN4Luau17extractLuauConfigERKNSt3__112basic_stringIcNS0_11char_traitsIcEENS0_9allocatorIcEEEERNS_6ConfigENS0_8optionalINS_13ConfigOptions12AliasOptionsEEENS_18InterruptCallbacksE (/build/bin/Dist-macosx-AARCH64/Luau/libLuau.a[17](LuauConfig.o))",
+    "forbidden LuauCompiler: FDE for: __ZN4Luau7Require19lua_requireinternalEP9lua_StatePKc (/build/bin/Dist-macosx-AARCH64/Luau/libLuau.a[18](RequireImpl.o))",
+    "forbidden LuauCompiler: FDE for: __ZN4Luau7compileERKNSt3__112basic_stringIcNS0_11char_traitsIcEENS0_9allocatorIcEEEERKNS_14CompileOptionsERKNS_12ParseOptionsEPNS_15BytecodeEncoderE (/build/bin/Dist-macosx-AARCH64/Luau/libLuau.a[14](Compiler.o))",
+    "forbidden LuauCompiler: __Z12luau_compilePKcmP18lua_CompileOptionsPm (/build/bin/Dist-macosx-AARCH64/Luau/libLuau.a[20](lcode.o))",
+    "forbidden LuauCompiler: __Z27luarequire_pushproxyrequireP9lua_StatePFvP24luarequire_ConfigurationEPv (/build/bin/Dist-macosx-AARCH64/Luau/libLuau.a[19](Require.o))",
+    "forbidden LuauCompiler: __ZN4Luau11parseConfigERKNSt3__112basic_stringIcNS0_11char_traitsIcEENS0_9allocatorIcEEEERNS_6ConfigERKNS_13ConfigOptionsE (/build/bin/Dist-macosx-AARCH64/Luau/libLuau.a[16](Config.o))",
+    "forbidden LuauCompiler: __ZN4Luau15BytecodeBuilder14addConstantNilEv (/build/bin/Dist-macosx-AARCH64/Luau/libLuau.a[15](BytecodeBuilder.o))",
+    "forbidden LuauCompiler: __ZN4Luau17extractLuauConfigERKNSt3__112basic_stringIcNS0_11char_traitsIcEENS0_9allocatorIcEEEERNS_6ConfigENS0_8optionalINS_13ConfigOptions12AliasOptionsEEENS_18InterruptCallbacksE (/build/bin/Dist-macosx-AARCH64/Luau/libLuau.a[17](LuauConfig.o))",
+    "forbidden LuauCompiler: __ZN4Luau7Require19lua_requireinternalEP9lua_StatePKc (/build/bin/Dist-macosx-AARCH64/Luau/libLuau.a[18](RequireImpl.o))",
+    "forbidden LuauCompiler: __ZN4Luau7compileERKNSt3__112basic_stringIcNS0_11char_traitsIcEENS0_9allocatorIcEEEERKNS_14CompileOptionsERKNS_12ParseOptionsEPNS_15BytecodeEncoderE (/build/bin/Dist-macosx-AARCH64/Luau/libLuau.a[14](Compiler.o))"
+  ],
   "MissingRequired": [
     "missing required symbol: FeatureTestRunner",
     "missing required symbol: ReplayPlayer"

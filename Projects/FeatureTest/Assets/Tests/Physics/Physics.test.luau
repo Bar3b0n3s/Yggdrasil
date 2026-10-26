@@ -1,9 +1,10 @@
 --!strict
 -- Physics.scene (Architecture §15.5, §9): dynamic, kinematic and static bodies, a compound whose contacts name the child
 -- collider, a shared static body of track segments with a ball rolling across their seams, implicit static and sensor
--- bodies, a kinematic platform carrying a rider, continuous collision detection, a character controller seen by a sensor
--- and by raycasts, a trigger sweeping over a sleeping body, queries and bounds, and the project's layer matrix
--- (Ball and Debris do not collide; both collide with Track). Gravity is the project's (0, -10, 0) at 64 Hz.
+-- bodies, a kinematic platform carrying a rider, a kinematic platform carrying a character with InheritGroundVelocity,
+-- continuous collision detection, a character controller seen by a sensor and by raycasts, a trigger sweeping over a
+-- sleeping body, queries and bounds, and the project's layer matrix (Ball and Debris do not collide; both collide with
+-- Track). Gravity is the project's (0, -10, 0) at 64 Hz.
 
 local ContactProbe = require("./ContactProbe")
 
@@ -196,6 +197,33 @@ return Test.Suite("Physics", function()
 		Test.ExpectNear(position("Platform"), start + vector.create(1, 0, 0), EPSILON)
 		Test.Expect(position("Rider").x - rider > 0.8, `the rider moved with the platform ({position("Rider").x - rider} m)`)
 		Test.ExpectNear(position("Rider").y, 1.25, 0.02, "the rider stays on top")
+	end)
+
+	Test.Case("a kinematic platform carries a character with InheritGroundVelocity v * t and slides under one without", function()
+		-- CarryPlatform (4 m square, its top at y 0.75) moves 2 m/s along +X for one second; Passenger stands on it with
+		-- InheritGroundVelocity, Bystander without (Architecture §9.6).
+		local passenger = find("Passenger").CharacterController
+		assert(passenger, "Passenger has a CharacterController")
+		local bystander = find("Bystander").CharacterController
+		assert(bystander, "Bystander has a CharacterController")
+		Test.Expect(passenger.InheritGroundVelocity, "the passenger opts in")
+		Test.Expect(not bystander.InheritGroundVelocity, "the bystander keeps the default")
+		Test.Expect(passenger:IsGrounded() and bystander:IsGrounded(), "both stand on the platform")
+		local platform = body("CarryPlatform")
+		local start = position("CarryPlatform")
+		local passengerStart = position("Passenger")
+		local bystanderStart = position("Bystander")
+		for tick = 1, 64 do
+			platform:MoveKinematic(start + vector.create(2 * tick / 64, 0, 0), Quat.Identity())
+			Test.WaitTicks(1)
+		end
+		Test.ExpectNear(passenger:GetVelocity(), vector.create(2, 0, 0), 0.01, "the passenger moves at the platform's velocity")
+		Test.ExpectNear(bystander:GetVelocity(), vector.zero, 0.01, "the bystander stands still")
+		Test.WaitTicks(1)
+		Test.ExpectNear(position("CarryPlatform"), start + vector.create(2, 0, 0), EPSILON)
+		Test.ExpectNear(position("Passenger"), passengerStart + vector.create(2, 0, 0), 0.05, "carried 2 m/s for one second")
+		Test.ExpectNear(position("Bystander"), bystanderStart, 0.05, "the platform slid under the bystander")
+		Test.Expect(passenger:IsGrounded() and bystander:IsGrounded(), "both still stand on the platform")
 	end)
 
 	Test.Case("continuous collision detection stops a fast ball at a thin wall", function()

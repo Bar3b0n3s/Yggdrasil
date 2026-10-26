@@ -7,6 +7,7 @@
 #include "Engine/Asset/TypedAssetHandle.h"
 #include "Engine/AssetPipeline/PakWriter.h"
 #include "Engine/Automation/Protocol/JsonRpc.h"
+#include "Engine/Core/BuildId.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Project/GameManifest.h"
@@ -134,6 +135,7 @@ namespace Engine {
 			GameManifest manifest;
 			manifest.Name = specification.Name;
 			manifest.EngineVersion = std::string(EngineVersionString);
+			manifest.Build = FormatBuildId(GetBuildId());
 			manifest.StartScene = TestGameStartScene;
 			ENGINE_TRY_ASSIGN(const uint64_t engineHash, HashFile(data / "Engine.pak"));
 			ENGINE_TRY_ASSIGN(const uint64_t gameHash, HashFile(data / "Game.pak"));

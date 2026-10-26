@@ -92,6 +92,30 @@ namespace Engine {
 		[[nodiscard]] virtual Result<UUID> ResolveAssetReference(std::string_view reference, std::string_view assetTypeName) = 0;
 	};
 
+	// Resolves an EntityRef value inside component data that is not a 16-hex id (a component field, a script's
+	// Field.Entity() value reached through Script.Fields, an element of an array or map of them) to the id of the entity it
+	// names, so component data takes the spellings an entity param takes (§13.4: a unique id prefix of 6 to 15 hex digits or
+	// an entity path; Docs/Decisions/0030-m19-contract.md decision 7, A-EREF). The protocol layer cannot know scenes (layer
+	// rules, §3), so a host implements this over the scene it resolves in (Utils::SceneEntityReferenceResolver,
+	// Automation/Methods/SharedMethodSupport.h) and returns it from its context's GetEntityReferenceResolver. Which scene is
+	// the phase 1 ledger's "Entity paths and scenes" text (Docs/Decisions/0028-backlog-program.md), shared with M20: a path
+	// or $ref resolves in the request's (for an op, its batch's) target scene, the active scene when it names none; until
+	// M20 adds scene targets the host passes its active scene. An entity path is the '/'-separated names from a scene root
+	// (Scene::FindEntityByPath) and continues through a prefab instance's members, nested instances included, as the scene
+	// holds them. Main thread only.
+	class IEntityReferenceResolver
+	{
+	public:
+		virtual ~IEntityReferenceResolver() = default;
+
+		// The id of the entity `reference` names. `pointer` locates the value in errors (its JSON pointer in the params).
+		// Errors, located at `pointer`: InvalidArgument for anything that is no id prefix or path, and for an ambiguous prefix
+		// or path (every candidate an ErrorIssue with its path); NotFound for a valid reference that names no entity (with
+		// "did you mean" suggestions for a path); any other code is the host's own (InvalidState without a scene), which
+		// MethodRegistry::Invoke returns unchanged.
+		[[nodiscard]] virtual Result<UUID> ResolveEntityReference(std::string_view reference, std::string_view pointer) = 0;
+	};
+
 	// Everything one invocation needs, assembled by the Dispatcher (or MethodRegistry::InvokeNested) and handed to the
 	// host's CreateContext.
 	struct MethodRequest
@@ -172,6 +196,13 @@ namespace Engine {
 		// params to handles (convention 13 of MethodRegistry.h) before it reads them; null (the default) for a host without
 		// assets, whose AssetRef values must then be handles. The pointer stays valid while the request lives.
 		[[nodiscard]] virtual IAssetReferenceResolver* GetAssetReferenceResolver() const { return nullptr; }
+
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 7): the host's entity reference resolver, through which
+		// MethodRegistry::Invoke rewrites every EntityRef value in component data that is not a 16-hex id to the id it names
+		// (convention 7 of MethodRegistry.h), over the scene the request resolves in; null (the default) for a host without
+		// one, whose component data then takes 16-hex ids only (Docs/Decisions/0027-m17-contract.md decision 3, A4's refusal
+		// with its hint). The pointer stays valid while the request lives.
+		[[nodiscard]] virtual IEntityReferenceResolver* GetEntityReferenceResolver() const { return nullptr; }
 
 		// Immutable external field schemas for this request; null by default for hosts without them. Invoke requests these
 		// only when a supplied Variant value cannot resolve from registry metadata alone, after ordinary asset paths have

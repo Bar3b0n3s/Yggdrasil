@@ -193,6 +193,11 @@ namespace Engine {
 
 	AssetManager::~AssetManager() = default;
 
+	Result<uint64_t> AssetManager::GetCookedHash(AssetHandle handle)
+	{
+		return std::unexpected(Error(ErrorCode::Unsupported, std::format("asset {} has no cooked artifact: this asset manager holds none", handle)));
+	}
+
 	AssetRef<Asset> AssetManager::GetPlaceholder(AssetType type)
 	{
 		const AssetHandle handle = GetPlaceholderHandle(type);

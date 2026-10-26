@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Core/Base.h"
+#include "Engine/Core/BuildId.h"
 #include "Engine/Core/Error.h"
 #include "Engine/Core/Json/Json.h"
 
@@ -54,12 +55,6 @@ namespace Engine {
 
 	// The protocol this build speaks.
 	inline constexpr ProtocolVersion CurrentProtocolVersion{ 1, 0 };
-
-	// The engine version reported by session.hello, session.info and session files (§13.2 "engineVersion"), and written into
-	// exported manifests, replay headers and session files. A constant in v1: per-commit build metadata would change every
-	// replay header and session file with each commit, so v1 defines no build versioning (ADR 0008 decision 5 deferred the
-	// question; the M15 completion review settled it).
-	inline constexpr std::string_view EngineVersionString = "0.1.0";
 
 	// A connection or in-process caller (batch runner, CLI, tests) of one automation server; unique for the server's
 	// lifetime and never reused. NoClient is none.

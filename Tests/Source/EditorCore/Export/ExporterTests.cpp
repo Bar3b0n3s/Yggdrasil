@@ -6,6 +6,8 @@
 #include "EditorCore/Commands/ProjectSettingsCommand.h"
 #include "EditorCore/Commands/SceneEdit.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Export/NativeExport.h"
+#include "EditorCore/Native/NativeModuleHost.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "EditorCore/Scripting/EditorScriptService.h"
 #include "Engine/App/EngineContext.h"
@@ -17,6 +19,7 @@
 #include "Engine/Asset/TextureData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/Importers/EnvironmentImporter.h"
+#include "Engine/Core/BuildId.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
@@ -26,19 +29,23 @@
 #include "Engine/Project/GameManifest.h"
 #include "Engine/Reflection/FieldInfo.h"
 #include "Engine/Renderer/EnvironmentBaker.h"
+#include "Engine/Scene/Components/AudioSourceComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
+#include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Support/EditorTestFixture.h"
 #include "Support/ExpectLog.h"
 #include "Support/ExportBinaryRoot.h"
+#include "Support/FakeNativeBackends.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/PlatformProbes.h"
 #include "Support/ScriptOverrideProject.h"
 #include "Support/TempDirectory.h"
 #include "Support/TestData.h"
+#include "Support/TestOptions.h"
 #include "Support/WaitUntil.h"
 
 #include <nlohmann/json.hpp>
@@ -46,8 +53,12 @@
 #include <algorithm>
 #include <array>
 #include <filesystem>
+#include <format>
+#include <fstream>
 #include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -197,6 +208,7 @@ namespace Engine {
 			GameManifest manifest;
 			manifest.Name = "TestProject";
 			manifest.EngineVersion = "0.1.0";
+			manifest.Build = "0.1.0+3f2a9c1d4e5b";
 			manifest.StartScene = UUID(0x8a61c0d2e4f31b77ull);
 			manifest.Paks = { GameManifestPak{ .Path = "Data/Engine.pak", .Hash = 1 }, GameManifestPak{ .Path = "Data/Game.pak", .Hash = 2 } };
 			const Result<std::string> text = GameManifestSerializer::SaveToString(manifest);
@@ -323,6 +335,21 @@ namespace Engine {
 			Scope<EditorContext> m_Editor;
 		};
 
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 20): a Behaviour of the project at `root` whose Assets.Load reference
+		// is computed, so Engine.pak keeps every File and Generated built-in the export can cook.
+		void WriteComputedLoadScript(const std::filesystem::path& root)
+		{
+			WriteTestFile(root / "Assets/Scripts/Jingle.luau",
+				"local Jingle = {}\n"
+				"function Jingle.OnStart(self: any)\n"
+				"\tlocal clip = Assets.Load(\"engine://Audio/\" .. \"Win\")\n"
+				"\tif clip ~= nil then\n"
+				"\t\tAudio.PlayOneShot(clip)\n"
+				"\tend\n"
+				"end\n"
+				"return Script.Define(\"Jingle\", Jingle)\n");
+		}
+
 		// The warnings of `report` that mention environments.
 		std::vector<std::string> EnvironmentWarnings(const ExportReport& report)
 		{
@@ -335,17 +362,24 @@ namespace Engine {
 			return warnings;
 		}
 
-		// M12's sound-effect presets (engine://Audio/*, File entries cooked by SoundEffectImporter, which needs no GPU) are in
-		// `enginePak` as AudioClips that load.
-		void CheckSoundPresets(const PakReader& enginePak)
+		// M12's sound-effect presets (engine://Audio/*, File entries cooked by SoundEffectImporter, which needs no GPU).
+		constexpr std::array SoundPresets = { BuiltinAssetHandles::ClickSound, BuiltinAssetHandles::BlipSound, BuiltinAssetHandles::CoinSound,
+			BuiltinAssetHandles::JumpSound, BuiltinAssetHandles::HitSound, BuiltinAssetHandles::ExplosionSound, BuiltinAssetHandles::PowerUpSound,
+			BuiltinAssetHandles::LineClearSound, BuiltinAssetHandles::WinSound, BuiltinAssetHandles::LoseSound };
+
+		// The presets the packaged game reaches (`reached`; M19, Docs/Decisions/0030-m19-contract.md decision 20) are in
+		// `enginePak` as AudioClips that load, and the others are not.
+		void CheckSoundPresets(const PakReader& enginePak, std::span<const AssetHandle> reached)
 		{
-			constexpr std::array Presets = { BuiltinAssetHandles::ClickSound, BuiltinAssetHandles::BlipSound, BuiltinAssetHandles::CoinSound,
-				BuiltinAssetHandles::JumpSound, BuiltinAssetHandles::HitSound, BuiltinAssetHandles::ExplosionSound, BuiltinAssetHandles::PowerUpSound,
-				BuiltinAssetHandles::LineClearSound, BuiltinAssetHandles::WinSound, BuiltinAssetHandles::LoseSound };
-			for (const AssetHandle handle : Presets)
+			for (const AssetHandle handle : SoundPresets)
 			{
 				CAPTURE(handle.ToString());
 				const PakEntry* entry = enginePak.FindByHandle(handle);
+				if (std::ranges::find(reached, handle) == reached.end())
+				{
+					CHECK(entry == nullptr);
+					continue;
+				}
 				REQUIRE(entry != nullptr);
 				CHECK(entry->Type == "AudioClip");
 				const Result<Buffer> bytes = enginePak.ReadEntry(*entry);
@@ -794,6 +828,79 @@ namespace Engine {
 			CHECK_FALSE(std::filesystem::exists(fixture.GetProjectRoot() / "Build", exists));
 		}
 
+		// Docs/Decisions/0030-m19-contract.md decision 20 (stream D): a scene's Script field values are references too, read
+		// with the editor's script field schemas, so one naming an asset Export.Exclude leaves out fails the export as a
+		// component's reference does, with the glob in the hint.
+		TEST_CASE("Exporter: a script field naming an asset the export leaves out fails the export")
+		{
+			Test::EditorTestFixture fixture("ExportScriptFieldReference");
+			MakeExportableProject(fixture);
+			EditorContext& editor = fixture.GetEditor();
+			const Result<std::string> material = Test::ReadTestDataText("Assets/Materials/Red.material");
+			REQUIRE(material.has_value());
+			WriteTestFile(fixture.GetProjectRoot() / "Assets/Tests/Look.material", *material);
+			WriteTestFile(fixture.GetProjectRoot() / "Assets/Scripts/Painter.luau",
+				"local Painter = {Fields = {Look = Field.Asset(\"Material\")}}\n"
+				"function Painter.OnStart(self: any)\n"
+				"\tif self.Look ~= nil then\n"
+				"\t\tLog.Info(\"painted\")\n"
+				"\tend\n"
+				"end\n"
+				"return Script.Define(\"Painter\", Painter)\n");
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			const std::optional<AssetHandle> script = editor.GetAssets().Resolve("Assets/Scripts/Painter.luau");
+			const std::optional<AssetHandle> look = editor.GetAssets().Resolve("Assets/Tests/Look.material");
+			REQUIRE(script.has_value());
+			REQUIRE(look.has_value());
+			const Entity cube = editor.GetScene().FindEntityByPath("/Cube");
+			REQUIRE(cube.IsValid());
+			ScriptComponent& painter = cube.AddComponent<ScriptComponent>();
+			painter.Script = TypedAssetHandle<AssetType::Script>(*script);
+			painter.Fields["Look"] = VariantValue(Json(look->ToString()));
+			SaveScene(editor);
+
+			const Test::TempDirectory binaries("ExportBinaries");
+			Result<Scope<Exporter>> exporter = Exporter::Start(editor, MakeSpecification(MakeRealBinaryRoot(binaries)));
+			REQUIRE(exporter.has_value());
+			const std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+			REQUIRE(outcome.has_value());
+			REQUIRE_FALSE(outcome->has_value());
+			const Error& error = outcome->error();
+			INFO(error.ToString());
+			CHECK(error.GetCode() == ErrorCode::Validation);
+			REQUIRE(error.GetIssues().size() == 1);
+			CHECK(error.GetIssues().front().Message.find("Assets/Tests/Look.material") != std::string::npos);
+			CHECK(error.GetIssues().front().Message.find(std::string(MainScene)) != std::string::npos);
+			CHECK(error.GetIssues().front().Hint.find("Assets/Tests/**") != std::string::npos);
+			std::error_code exists;
+			CHECK_FALSE(std::filesystem::exists(fixture.GetProjectRoot() / "Build", exists));
+		}
+
+		// Regression (M19 stream D): a binary glTF imports as a Prefab, but it is no prefab document, so the script field
+		// references are read only from the files of the Scene and Prefab importers, never from a .glb, which is not text.
+		TEST_CASE("Exporter: a binary glTF exports beside the scenes whose script fields it reads")
+		{
+			Test::EditorTestFixture fixture("ExportBinaryGltf");
+			MakeExportableProject(fixture);
+			EditorContext& editor = fixture.GetEditor();
+			const Result<Buffer> glb = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Gltf/Box.glb"));
+			REQUIRE_MESSAGE(glb.has_value(), glb.error().ToString());
+			const Result<VfsPath> path = VfsPath::Create("project", "Assets/Models/Box.glb");
+			REQUIRE(path.has_value());
+			REQUIRE(editor.WriteProjectFile(*path, *glb).has_value());
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			REQUIRE(editor.GetAssets().GetAssetType(editor.GetAssets().Resolve("Assets/Models/Box.glb").value_or(AssetHandle())) == AssetType::Prefab);
+			const Test::TempDirectory binaries("ExportBinaries");
+			Result<Scope<Exporter>> exporter = Exporter::Start(editor, MakeSpecification(MakeRealBinaryRoot(binaries)));
+			REQUIRE(exporter.has_value());
+			const std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+			REQUIRE(outcome.has_value());
+			REQUIRE_MESSAGE(outcome->has_value(), outcome->error().ToString());
+			const Result<Ref<const PakReader>> gamePak = PakReader::Open(PackageResources((*outcome)->OutputDirectory, "TestProject") / "Data" / "Game.pak");
+			REQUIRE_MESSAGE(gamePak.has_value(), gamePak.error().ToString());
+			CHECK((*gamePak)->FindByPath("Assets/Models/Box.glb") != nullptr);
+		}
+
 		TEST_CASE("Exporter: an export writes the renamed executable, the CRT, both paks and the manifest")
 		{
 			Test::EditorTestFixture fixture;
@@ -873,6 +980,8 @@ namespace Engine {
 			const Json& engineMetadata = (*enginePak)->GetMetadata().Get();
 			CHECK(engineMetadata["Configuration"] == Json("Release"));
 			CHECK(engineMetadata.contains("EngineVersion"));
+			// M19 (Docs/Decisions/0030-m19-contract.md decisions 13 and 18): the exporting build's id, in Engine.pak and Game.json.
+			CHECK(engineMetadata["Build"] == Json(FormatBuildId(GetBuildId())));
 
 			// Game.pak: every registered asset (here the scene), with the project settings in its metadata.
 			const Result<Ref<const PakReader>> gamePak = PakReader::Open(resources / "Data" / "Game.pak");
@@ -893,6 +1002,7 @@ namespace Engine {
 			const Result<GameManifest> manifest = GameManifestSerializer::LoadFromFile(resources / "Game.json");
 			REQUIRE_MESSAGE(manifest.has_value(), manifest.error().ToString());
 			CHECK(manifest->Name == "TestProject");
+			CHECK(manifest->Build == FormatBuildId(GetBuildId()));
 			CHECK(manifest->StartScene == *scene);
 			CHECK_FALSE(manifest->Testing);
 			REQUIRE(manifest->Paks.size() == 2);
@@ -1006,6 +1116,7 @@ namespace Engine {
 			CHECK(ExportConfigurationToString(ExportConfiguration::Release) == "Release");
 			CHECK(ExportConfigurationToString(ExportConfiguration::Dist) == "Dist");
 			CHECK(ExportPhaseToString(ExportPhase::Validate) == "Validate");
+			CHECK(ExportPhaseToString(ExportPhase::NativeBuild) == "NativeBuild");
 			CHECK(ExportPhaseToString(ExportPhase::PatchResources) == "PatchResources");
 			CHECK(ExportPhaseToString(ExportPhase::Sign) == "Sign");
 			CHECK(ExportPhaseToString(ExportPhase::SmokeTest) == "SmokeTest");
@@ -1017,7 +1128,11 @@ namespace Engine {
 
 		TEST_CASE("Exporter: without a bake or a GPU the built-in environments are left out of Engine.pak with a warning")
 		{
+			// M19 (decision 20): an environment nothing reaches is never cooked, so a computed Assets.Load, which keeps every
+			// built-in, is what asks for them here.
 			EngineResourcesEditor fixture;
+			WriteComputedLoadScript(fixture.GetProjectRoot());
+			REQUIRE(fixture.GetEditor().GetAssets().Refresh().has_value());
 			const Test::TempDirectory binaries("ExportBinaries");
 			Result<Scope<Exporter>> exporter = Exporter::Start(fixture.GetEditor(), MakeSpecification(MakeRealBinaryRoot(binaries)));
 			REQUIRE(exporter.has_value());
@@ -1038,7 +1153,7 @@ namespace Engine {
 			CHECK((*enginePak)->FindByHandle(BuiltinAssetHandles::BlueNoiseTexture) != nullptr);
 			CHECK((*enginePak)->FindByHandle(BuiltinAssetHandles::StudioEnvironment) == nullptr);
 			CHECK((*enginePak)->FindByHandle(BuiltinAssetHandles::SkyEnvironment) == nullptr);
-			CheckSoundPresets(**enginePak);
+			CheckSoundPresets(**enginePak, SoundPresets);
 		}
 
 		TEST_CASE("Exporter: a reference to a built-in environment that has no bake fails the export with the GPU hint")
@@ -1077,6 +1192,8 @@ namespace Engine {
 				EditorContext& editor = fixture.GetEditor();
 				const Entity world = editor.GetScene().CreateEntity("World");
 				world.AddComponent<EnvironmentComponent>().Environment = TypedAssetHandle<AssetType::Environment>(BuiltinAssetHandles::StudioEnvironment);
+				// M12's Coin preset, so one Engine.pak holds the built-ins of both milestones.
+				world.AddComponent<AudioSourceComponent>().Clip = TypedAssetHandle<AssetType::AudioClip>(BuiltinAssetHandles::CoinSound);
 				SaveScene(editor);
 				const Test::TempDirectory binaries("ExportBinaries");
 				Result<Scope<Exporter>> exporter = Exporter::Start(editor, MakeSpecification(MakeRealBinaryRoot(binaries)));
@@ -1088,16 +1205,15 @@ namespace Engine {
 
 				const Result<Ref<const PakReader>> enginePak = PakReader::Open(PackageResources((*outcome)->OutputDirectory, "TestProject") / "Data" / "Engine.pak");
 				REQUIRE_MESSAGE(enginePak.has_value(), enginePak.error().ToString());
-				for (const AssetHandle handle : { BuiltinAssetHandles::StudioEnvironment, BuiltinAssetHandles::SkyEnvironment })
-				{
-					CAPTURE(handle.ToString());
-					const PakEntry* entry = (*enginePak)->FindByHandle(handle);
-					REQUIRE(entry != nullptr);
-					CHECK(entry->Type == "Environment");
-					const Result<Buffer> bytes = (*enginePak)->ReadEntry(*entry);
-					REQUIRE(bytes.has_value());
-					CHECK(LoadCookedEnvironment(*bytes).has_value());
-				}
+				// The referenced Studio is baked and goes in; Sky, which nothing reaches, stays out (M19, decision 20).
+				const PakEntry* studio = (*enginePak)->FindByHandle(BuiltinAssetHandles::StudioEnvironment);
+				REQUIRE(studio != nullptr);
+				CHECK(studio->Type == "Environment");
+				const Result<Buffer> studioBytes = (*enginePak)->ReadEntry(*studio);
+				REQUIRE(studioBytes.has_value());
+				CHECK(LoadCookedEnvironment(*studioBytes).has_value());
+				CHECK((*enginePak)->FindByHandle(BuiltinAssetHandles::SkyEnvironment) == nullptr);
+				CHECK(std::ranges::find((*outcome)->Reachability.PrunedBuiltins, "engine://Environments/Sky") != (*outcome)->Reachability.PrunedBuiltins.end());
 				// With them, the blue noise of the tonemap's dither (a Generated built-in, decision 8): the 64x64 R8 texture.
 				const PakEntry* noise = (*enginePak)->FindByHandle(BuiltinAssetHandles::BlueNoiseTexture);
 				REQUIRE(noise != nullptr);
@@ -1109,8 +1225,8 @@ namespace Engine {
 				CHECK((*texture)->Format == TextureFormat::R8Unorm);
 				CHECK((*texture)->Width == 64);
 				CHECK((*texture)->Height == 64);
-				// And M12's sound-effect presets: one Engine.pak holds the built-ins of both milestones.
-				CheckSoundPresets(**enginePak);
+				// And M12's Coin preset: one Engine.pak holds the built-ins of both milestones.
+				CheckSoundPresets(**enginePak, std::array{ BuiltinAssetHandles::CoinSound });
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}
@@ -1491,6 +1607,456 @@ namespace Engine {
 			CHECK_FALSE((*outcome)->SmokeTestRan);
 			CHECK(phases == std::vector<ExportPhase>{ ExportPhase::Validate, ExportPhase::Cook, ExportPhase::WritePaks, ExportPhase::CopyRuntime, ExportPhase::PatchResources, ExportPhase::WriteManifest, ExportPhase::Sign, ExportPhase::MoveToOutput });
 			CHECK(total <= (*outcome)->Seconds + 1e-6);
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decisions 19 and 20 (B-PRUNE-ENG, stream D): Engine.pak holds the built-ins the
+		// Runtime asks for by handle and those the packaged game reaches: through a component's reference, a script field's
+		// value (read with the script's field schema) and a literal Assets.Load; no other built-in is cooked, so an
+		// unreferenced environment needs no bake and warns about none. The report gives each kept built-in's reason and
+		// lists the rest. A computed Assets.Load in a packaged script keeps every built-in the export can cook.
+		TEST_CASE("Exporter: Engine.pak holds the built-ins the game reaches or the Runtime asks for, and the report names the rest")
+		{
+			EngineResourcesEditor fixture;
+			EditorContext& editor = fixture.GetEditor();
+			const auto writeScript = [&fixture, &editor](std::string_view load)
+			{
+				WriteTestFile(fixture.GetProjectRoot() / "Assets/Scripts/Sounds.luau",
+					std::format("local Sounds = {{Fields = {{Clip = Field.Asset(\"AudioClip\")}}}}\n"
+								"function Sounds.OnStart(self: any)\n"
+								"\tlocal hit = Assets.Load({})\n"
+								"\tif hit ~= nil and self.Clip ~= nil then\n"
+								"\t\tAudio.PlayOneShot(hit)\n"
+								"\tend\n"
+								"end\n"
+								"return Script.Define(\"Sounds\", Sounds)\n",
+						load));
+				REQUIRE(editor.GetAssets().Refresh().has_value());
+			};
+			writeScript("\"engine://Audio/Hit\"");
+			const std::optional<AssetHandle> script = editor.GetAssets().Resolve("Assets/Scripts/Sounds.luau");
+			REQUIRE(script.has_value());
+			// The Coin preset through a component, Jump through the script's field, Hit through the literal load.
+			const Entity speaker = editor.GetScene().CreateEntity("Speaker");
+			speaker.AddComponent<AudioSourceComponent>().Clip = TypedAssetHandle<AssetType::AudioClip>(BuiltinAssetHandles::CoinSound);
+			ScriptComponent& sounds = speaker.AddComponent<ScriptComponent>();
+			sounds.Script = TypedAssetHandle<AssetType::Script>(*script);
+			sounds.Fields["Clip"] = VariantValue(Json(BuiltinAssetHandles::JumpSound.ToString()));
+			SaveScene(editor);
+
+			const Test::TempDirectory binaries("ExportBinaries");
+			const std::filesystem::path binaryRoot = MakeRealBinaryRoot(binaries);
+			const auto exportGame = [&editor, &binaryRoot]()
+			{
+				Result<Scope<Exporter>> exporter = Exporter::Start(editor, MakeSpecification(binaryRoot));
+				REQUIRE_MESSAGE(exporter.has_value(), exporter.error().ToString());
+				std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+				REQUIRE(outcome.has_value());
+				REQUIRE_MESSAGE(outcome->has_value(), outcome->error().ToString());
+				return std::move(**outcome);
+			};
+			const auto packagedBuiltins = [](const ExportReport& report)
+			{
+				const Result<Ref<const PakReader>> enginePak = PakReader::Open(PackageResources(report.OutputDirectory, "TestProject") / "Data" / "Engine.pak");
+				REQUIRE_MESSAGE(enginePak.has_value(), enginePak.error().ToString());
+				std::vector<AssetHandle> handles;
+				for (const PakEntry& entry : (*enginePak)->GetEntries())
+				{
+					if (entry.Handle.IsValid())
+						handles.push_back(entry.Handle);
+				}
+				return handles;
+			};
+			const auto findBuiltin = [](const ExportReport& report, std::string_view path) -> const ExportReachedAsset*
+			{
+				const auto found = std::ranges::find(report.Reachability.EngineBuiltins, path, &ExportReachedAsset::Path);
+				return found == report.Reachability.EngineBuiltins.end() ? nullptr : &*found;
+			};
+
+			const ExportReport referenced = exportGame();
+			CHECK(EnvironmentWarnings(referenced).empty());
+			CHECK(packagedBuiltins(referenced)
+				== std::vector<AssetHandle>{ BuiltinAssetHandles::BlueNoiseTexture, BuiltinAssetHandles::DefaultFont, BuiltinAssetHandles::CoinSound,
+					BuiltinAssetHandles::JumpSound, BuiltinAssetHandles::HitSound });
+			CHECK_FALSE(referenced.Reachability.Pruned);
+			CHECK(referenced.Reachability.ComputedLoads.empty());
+			CHECK(referenced.Reachability.EngineBuiltins.size() == 5);
+			CHECK(std::ranges::is_sorted(referenced.Reachability.EngineBuiltins, {}, &ExportReachedAsset::Path));
+			for (const std::string_view required : { "engine://Fonts/Default", "engine://Textures/BlueNoise" })
+			{
+				CAPTURE(required);
+				const ExportReachedAsset* builtin = findBuiltin(referenced, required);
+				REQUIRE(builtin != nullptr);
+				CHECK(builtin->Reason == ExportReachReason::Required);
+			}
+			for (const std::string_view dependency : { "engine://Audio/Coin", "engine://Audio/Jump" })
+			{
+				CAPTURE(dependency);
+				const ExportReachedAsset* builtin = findBuiltin(referenced, dependency);
+				REQUIRE(builtin != nullptr);
+				CHECK(builtin->Reason == ExportReachReason::Dependency);
+				CHECK(builtin->From == MainScene);
+			}
+			const ExportReachedAsset* hit = findBuiltin(referenced, "engine://Audio/Hit");
+			REQUIRE(hit != nullptr);
+			CHECK(hit->Reason == ExportReachReason::LiteralLoad);
+			CHECK(hit->From == "Assets/Scripts/Sounds.luau");
+			CHECK(hit->Line == 3);
+			for (const std::string_view pruned : { "engine://Audio/Click", "engine://Environments/Sky", "engine://Environments/Studio" })
+			{
+				CAPTURE(pruned);
+				CHECK(std::ranges::find(referenced.Reachability.PrunedBuiltins, pruned) != referenced.Reachability.PrunedBuiltins.end());
+			}
+
+			// A computed load may name any built-in: Engine.pak keeps every one this editor can cook, and the environments,
+			// which it cannot bake without a GPU, keep their warning.
+			writeScript("\"engine://Audio/\" .. \"Win\"");
+			const ExportReport computed = exportGame();
+			REQUIRE(computed.Reachability.ComputedLoads.size() == 1);
+			CHECK(computed.Reachability.ComputedLoads.front().Script == "Assets/Scripts/Sounds.luau");
+			CHECK(computed.Reachability.ComputedLoads.front().Line == 3);
+			CHECK(EnvironmentWarnings(computed).size() == 1);
+			const Result<Ref<const PakReader>> enginePak = PakReader::Open(PackageResources(computed.OutputDirectory, "TestProject") / "Data" / "Engine.pak");
+			REQUIRE_MESSAGE(enginePak.has_value(), enginePak.error().ToString());
+			CheckSoundPresets(**enginePak, SoundPresets);
+			const ExportReachedAsset* win = findBuiltin(computed, "engine://Audio/Win");
+			REQUIRE(win != nullptr);
+			CHECK(win->Reason == ExportReachReason::ComputedLoad);
+			CHECK(win->From == "Assets/Scripts/Sounds.luau");
+			CHECK(win->Line == 3);
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 21 (B-PRUNE-GAME, stream R): with Export.PruneUnreferenced, Game.pak holds
+		// only what StartScene and Export.BuildScenes reach: a component's reference, a script and its field's value, a scene
+		// a literal Assets.Load names; an unreferenced asset and one only a computed load names are left out, and the report
+		// gives each packaged asset's reason, the assets left out and the computed load. Off, everything ships again.
+		TEST_CASE("Exporter: Export.PruneUnreferenced packages only what the build scenes reach, and the report says why")
+		{
+			Test::EditorTestFixture fixture("ExportPruned");
+			MakeExportableProject(fixture);
+			EditorContext& editor = fixture.GetEditor();
+			const Result<std::string> material = Test::ReadTestDataText("Assets/Materials/Red.material");
+			REQUIRE(material.has_value());
+			for (const std::string_view name : { "Used", "Field", "Computed", "Unused" })
+				WriteTestFile(fixture.GetProjectRoot() / std::format("Assets/Materials/{}.material", name), *material);
+			const Result<std::string> second = SceneSerializer::SaveToString(*editor.CreateScene("Second"));
+			REQUIRE(second.has_value());
+			WriteTestFile(fixture.GetProjectRoot() / "Assets/Scenes/Second.scene", *second);
+			WriteTestFile(fixture.GetProjectRoot() / "Assets/Scripts/Loader.luau",
+				"local Loader = {Fields = {Look = Field.Asset(\"Material\")}}\n"
+				"function Loader.OnStart(self: any)\n"
+				"\tlocal second = Assets.Load(\"Assets/Scenes/Second.scene\")\n"
+				"\tlocal computed = Assets.Load(\"Assets/Materials/\" .. \"Computed.material\")\n"
+				"\tif second ~= nil and computed ~= nil and self.Look ~= nil then\n"
+				"\t\tScene.Load(second)\n"
+				"\tend\n"
+				"end\n"
+				"return Script.Define(\"Loader\", Loader)\n");
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			const auto handleOf = [&editor](std::string_view path)
+			{
+				const std::optional<AssetHandle> handle = editor.GetAssets().Resolve(path);
+				REQUIRE_MESSAGE(handle.has_value(), path);
+				return *handle;
+			};
+			const Entity cube = editor.GetScene().FindEntityByPath("/Cube");
+			REQUIRE(cube.IsValid());
+			cube.GetComponent<MeshRendererComponent>().Materials = { TypedAssetHandle<AssetType::Material>(handleOf("Assets/Materials/Used.material")) };
+			ScriptComponent& loader = cube.AddComponent<ScriptComponent>();
+			loader.Script = TypedAssetHandle<AssetType::Script>(handleOf("Assets/Scripts/Loader.luau"));
+			loader.Fields["Look"] = VariantValue(Json(handleOf("Assets/Materials/Field.material").ToString()));
+			SaveScene(editor);
+			ApplySettings(editor, R"({"Export":{"PruneUnreferenced":true}})");
+
+			const Test::TempDirectory binaries("ExportBinaries");
+			const std::filesystem::path binaryRoot = MakeRealBinaryRoot(binaries);
+			const auto exportGame = [&editor, &binaryRoot]()
+			{
+				Result<Scope<Exporter>> exporter = Exporter::Start(editor, MakeSpecification(binaryRoot));
+				REQUIRE_MESSAGE(exporter.has_value(), exporter.error().ToString());
+				std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+				REQUIRE(outcome.has_value());
+				REQUIRE_MESSAGE(outcome->has_value(), outcome->error().ToString());
+				return std::move(**outcome);
+			};
+			const ExportReport pruned = exportGame();
+			const ExportReachability& reach = pruned.Reachability;
+			CHECK(reach.Pruned);
+			const auto reasonOf = [&reach](std::string_view path) -> const ExportReachedAsset*
+			{
+				const auto found = std::ranges::find(reach.GameAssets, path, &ExportReachedAsset::Path);
+				return found == reach.GameAssets.end() ? nullptr : &*found;
+			};
+			std::vector<std::string> packaged;
+			for (const ExportReachedAsset& asset : reach.GameAssets)
+				packaged.push_back(asset.Path);
+			CHECK(packaged
+				== std::vector<std::string>{ "Assets/Materials/Field.material", "Assets/Materials/Used.material", "Assets/Scenes/Main.scene", "Assets/Scenes/Second.scene",
+					"Assets/Scripts/Loader.luau" });
+			CHECK(reach.PrunedAssets == std::vector<std::string>{ "Assets/Materials/Computed.material", "Assets/Materials/Unused.material" });
+			REQUIRE(reasonOf("Assets/Scenes/Main.scene") != nullptr);
+			CHECK(reasonOf("Assets/Scenes/Main.scene")->Reason == ExportReachReason::StartScene);
+			for (const std::string_view dependency : { "Assets/Materials/Used.material", "Assets/Materials/Field.material", "Assets/Scripts/Loader.luau" })
+			{
+				CAPTURE(dependency);
+				REQUIRE(reasonOf(dependency) != nullptr);
+				CHECK(reasonOf(dependency)->Reason == ExportReachReason::Dependency);
+				CHECK(reasonOf(dependency)->From == MainScene);
+			}
+			REQUIRE(reasonOf("Assets/Scenes/Second.scene") != nullptr);
+			CHECK(reasonOf("Assets/Scenes/Second.scene")->Reason == ExportReachReason::LiteralLoad);
+			CHECK(reasonOf("Assets/Scenes/Second.scene")->From == "Assets/Scripts/Loader.luau");
+			CHECK(reasonOf("Assets/Scenes/Second.scene")->Line == 3);
+			REQUIRE(reach.ComputedLoads.size() == 1);
+			CHECK(reach.ComputedLoads.front().Script == "Assets/Scripts/Loader.luau");
+			CHECK(reach.ComputedLoads.front().Line == 4);
+			CHECK(pruned.GameAssetCount == 5);
+			{
+				// Closed again before the next export replaces the package (an open file cannot be moved on Windows).
+				const Result<Ref<const PakReader>> gamePak = PakReader::Open(PackageResources(pruned.OutputDirectory, "TestProject") / "Data" / "Game.pak");
+				REQUIRE_MESSAGE(gamePak.has_value(), gamePak.error().ToString());
+				CHECK((*gamePak)->FindByHandle(handleOf("Assets/Materials/Unused.material")) == nullptr);
+				CHECK((*gamePak)->FindByHandle(handleOf("Assets/Materials/Computed.material")) == nullptr);
+				CHECK((*gamePak)->FindByHandle(handleOf("Assets/Scenes/Second.scene")) != nullptr);
+			}
+
+			ApplySettings(editor, R"({"Export":{"PruneUnreferenced":false}})");
+			const ExportReport full = exportGame();
+			CHECK_FALSE(full.Reachability.Pruned);
+			CHECK(full.Reachability.GameAssets.empty());
+			CHECK(full.Reachability.PrunedAssets.empty());
+			CHECK(full.GameAssetCount == 7);
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 21 (stream R): a pruned export checks only the references of what it
+		// packages, so a scene no root reaches may name a missing asset, which fails an unpruned export; Export.Exclude still
+		// decides what may ship, so an excluded asset a reference reaches fails a plain pruned export with the glob in the hint;
+		// and a testing export's forced content is a root, which packages that asset with the reason Testing.
+		TEST_CASE("Exporter: with Export.PruneUnreferenced only the packaged assets' references must resolve, and a testing export's content is a root")
+		{
+			Test::EditorTestFixture fixture("ExportPrunedRoots");
+			MakeExportableProject(fixture);
+			EditorContext& editor = fixture.GetEditor();
+			const Result<std::string> material = Test::ReadTestDataText("Assets/Materials/Red.material");
+			REQUIRE(material.has_value());
+			WriteTestFile(fixture.GetProjectRoot() / "Assets/Tests/Look.material", *material);
+			// A scene nothing reaches, whose cube names a mesh no asset has.
+			const AssetHandle missing(0x1234567890abcdefull);
+			const Scope<Scene> stray = editor.CreateScene("Stray");
+			stray->CreateEntity("Broken").AddComponent<MeshRendererComponent>().Mesh = TypedAssetHandle<AssetType::Mesh>(missing);
+			const Result<std::string> strayText = SceneSerializer::SaveToString(*stray);
+			REQUIRE(strayText.has_value());
+			WriteTestFile(fixture.GetProjectRoot() / "Assets/Scenes/Stray.scene", *strayText);
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			const std::optional<AssetHandle> look = editor.GetAssets().Resolve("Assets/Tests/Look.material");
+			REQUIRE(look.has_value());
+			const Entity cube = editor.GetScene().FindEntityByPath("/Cube");
+			REQUIRE(cube.IsValid());
+			cube.GetComponent<MeshRendererComponent>().Materials = { TypedAssetHandle<AssetType::Material>(*look) };
+			SaveScene(editor);
+
+			const Test::TempDirectory binaries("ExportBinaries");
+			const std::filesystem::path binaryRoot = MakeRealBinaryRoot(binaries);
+			const auto exportGame = [&editor, &binaryRoot](bool testing)
+			{
+				ExportSpecification specification = MakeSpecification(binaryRoot);
+				specification.Testing = testing;
+				Result<Scope<Exporter>> exporter = Exporter::Start(editor, specification);
+				REQUIRE_MESSAGE(exporter.has_value(), exporter.error().ToString());
+				std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+				REQUIRE(outcome.has_value());
+				return std::move(*outcome);
+			};
+			const auto namesIssue = [](const Error& error, std::string_view text)
+			{
+				return std::ranges::any_of(error.GetIssues(), [text](const ErrorIssue& issue)
+				{
+					return issue.Message.find(text) != std::string::npos;
+				});
+			};
+
+			// Unpruned, the testing export packages the stray scene and fails on its reference.
+			const Result<ExportReport> unpruned = exportGame(true);
+			REQUIRE_FALSE(unpruned.has_value());
+			CHECK(unpruned.error().GetCode() == ErrorCode::Validation);
+			CHECK(namesIssue(unpruned.error(), "Assets/Scenes/Stray.scene"));
+
+			ApplySettings(editor, R"({"Export":{"PruneUnreferenced":true}})");
+			const Result<ExportReport> testing = exportGame(true);
+			REQUIRE_MESSAGE(testing.has_value(), testing.error().ToString());
+			const ExportReachability& reach = testing->Reachability;
+			CHECK(reach.Pruned);
+			REQUIRE(reach.GameAssets.size() == 2);
+			CHECK(reach.GameAssets[0].Path == "Assets/Scenes/Main.scene");
+			CHECK(reach.GameAssets[0].Reason == ExportReachReason::StartScene);
+			CHECK(reach.GameAssets[1].Path == "Assets/Tests/Look.material");
+			CHECK(reach.GameAssets[1].Reason == ExportReachReason::Testing);
+			CHECK(reach.PrunedAssets == std::vector<std::string>{ "Assets/Scenes/Stray.scene" });
+
+			// A plain export leaves the material out by Export.Exclude, so the start scene's reference to it fails, alone.
+			const Result<ExportReport> plain = exportGame(false);
+			REQUIRE_FALSE(plain.has_value());
+			const Error& error = plain.error();
+			INFO(error.ToString());
+			CHECK(error.GetCode() == ErrorCode::Validation);
+			REQUIRE(error.GetIssues().size() == 1);
+			CHECK(error.GetIssues().front().Message.find("Assets/Tests/Look.material") != std::string::npos);
+			CHECK(error.GetIssues().front().Message.find(std::string(MainScene)) != std::string::npos);
+			CHECK(error.GetIssues().front().Hint.find("Assets/Tests/**") != std::string::npos);
+		}
+
+		// The names beside the output directory `output` that start with ".export-native-": the roots of step 3a's builds.
+		std::vector<std::string> ListNativeBuildRoots(const std::filesystem::path& output)
+		{
+			std::vector<std::string> roots;
+			for (std::string& name : ListNames(output.parent_path()))
+			{
+				if (name.starts_with(".export-native-"))
+					roots.push_back(std::move(name));
+			}
+			return roots;
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 33 (C-NATIVE-STATIC, stream N-A): a game with Native/ is refused first,
+		// before anything is written, while the user's preference is off (Unsupported on Linux and macOS); allowed, step 3a
+		// builds its Runtime of the export's configuration with the module linked, the package holds that executable, its
+		// symbols are archived below Library/ and the build's directory is gone, and a build that does not succeed fails the
+		// export with CompileFailed and its diagnostics, its hint naming a copy of the build's log that outlives the export.
+		// A game without Native/ never enters the step (the timing test above).
+		TEST_CASE("Exporter: a game with Native/ packages a Runtime linked with its module, and is refused first while native code is not allowed")
+		{
+			const Ref<Test::FakeNativeBuildBackend> builds = CreateRef<Test::FakeNativeBuildBackend>();
+			Test::EditorTestFixture fixture("ExportNative", {}, nullptr, std::nullopt, false,
+				Test::EditorTestNativeBackends{ .Build = builds, .Loader = CreateRef<Test::FakeNativeLibraryLoader>() });
+			MakeExportableProject(fixture);
+			EditorContext& editor = fixture.GetEditor();
+			WriteTestFile(fixture.GetProjectRoot() / "Native" / "Spinner.cpp", "#include \"Engine/Native/NativeApi.h\"\n");
+			builds->SetApiHeader(MakeEditorNativeModuleHostSpecification(nullptr, nullptr).ApiHeader);
+			const Result<std::filesystem::path> runtime = Test::GetBuiltExecutablePath("Runtime");
+			REQUIRE_MESSAGE(runtime.has_value(), runtime.error().ToString());
+			builds->SetRuntimeExecutable(*runtime);
+			const Test::TempDirectory binaries("ExportBinaries");
+			const ExportSpecification specification = MakeSpecification(MakeRealBinaryRoot(binaries));
+
+			Result<Scope<Exporter>> refused = Exporter::Start(editor, specification);
+			REQUIRE(refused.has_value());
+			const std::optional<Result<ExportReport>> refusal = RunToEnd(**refused);
+			REQUIRE(refusal.has_value());
+			REQUIRE_FALSE(refusal->has_value());
+#if defined(ENGINE_PLATFORM_WINDOWS)
+			CHECK(refusal->error().GetCode() == ErrorCode::PermissionDenied);
+#else
+			CHECK(refusal->error().GetCode() == ErrorCode::Unsupported);
+#endif
+			CHECK(builds->GetStartCount() == 0);
+			std::error_code exists;
+			CHECK_FALSE(std::filesystem::exists(fixture.GetProjectRoot() / "Build", exists));
+
+#if defined(ENGINE_PLATFORM_WINDOWS)
+			editor.GetNativeModule().QueuePreferenceChange(true);
+			editor.GetNativeModule().Update(editor);
+			Result<Scope<Exporter>> exporter = Exporter::Start(editor, specification);
+			REQUIRE(exporter.has_value());
+			const std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+			REQUIRE(outcome.has_value());
+			REQUIRE_MESSAGE(outcome->has_value(), outcome->error().ToString());
+			const ExportReport& report = **outcome;
+			CHECK(report.NativeModule);
+			CHECK(builds->GetStartCount() == 1);
+			CHECK(builds->GetLastRequest().Kind == NativeBuildKind::Runtime);
+			CHECK(builds->GetLastRequest().Configuration == ExportConfiguration::Release);
+			std::vector<ExportPhase> phases;
+			for (const ExportPhaseTiming& timing : report.PhaseTimings)
+				phases.push_back(timing.Phase);
+			const auto native = std::ranges::find(phases, ExportPhase::NativeBuild);
+			REQUIRE(native != phases.end());
+			CHECK(*(native - 1) == ExportPhase::WritePaks);
+			CHECK(*(native + 1) == ExportPhase::CopyRuntime);
+			CHECK(std::filesystem::is_regular_file(report.Executable, exists));
+			CHECK(report.Warnings.empty());
+			const std::filesystem::path symbols = GetNativeExportSymbolsDirectory(fixture.GetProjectRoot(), ExportConfiguration::Release);
+			CHECK(ListNames(symbols) == std::vector<std::string>{ "Runtime.map", "Runtime.pdb" });
+			CHECK(ListNativeBuildRoots(report.OutputDirectory).empty());
+
+			builds->SetDiagnostics({ NativeBuildDiagnostic{ .Severity = DiagnosticSeverity::Error, .Code = "NATIVE_COMPILE_ERROR", .File = "Native/Spinner.cpp", .Line = 1, .Column = 1, .Message = "an error" } });
+			Result<Scope<Exporter>> failing = Exporter::Start(editor, specification);
+			REQUIRE(failing.has_value());
+			const std::optional<Result<ExportReport>> failed = RunToEnd(**failing);
+			REQUIRE(failed.has_value());
+			REQUIRE_FALSE(failed->has_value());
+			CHECK(failed->error().GetCode() == ErrorCode::CompileFailed);
+			CHECK_FALSE(failed->error().GetIssues().empty());
+			// The build's directory went with the export, but the log the hint names is a copy below Library/.
+			const std::filesystem::path log = GetNativeExportLogPath(fixture.GetProjectRoot(), ExportConfiguration::Release);
+			CHECK(failed->error().GetHint().contains(FileSystem::PathToUtf8(log)));
+			CHECK(std::filesystem::is_regular_file(log, exists));
+			CHECK_FALSE(FileSystem::Exists(builds->GetLastRequest().OutputDirectory));
+			CHECK(ListNativeBuildRoots(report.OutputDirectory).empty());
+#endif
+		}
+
+		// A cancelled export's native build can leave its directory behind, still being written by the MSBuild that cancelling
+		// does not stop (decision 30), and Scripts/BuildNative.py refuses an output directory that is not empty (as the fake
+		// build does). The next export of the same output, in the same editor, builds into a directory no build wrote,
+		// skipping a leftover it cannot remove, and the leftover goes once it can.
+		TEST_CASE("Exporter: a native build directory a cancelled export left behind does not stop the next export of the same output")
+		{
+#if defined(ENGINE_PLATFORM_WINDOWS)
+			const Ref<Test::FakeNativeBuildBackend> builds = CreateRef<Test::FakeNativeBuildBackend>();
+			Test::EditorTestFixture fixture("ExportNativeLeftover", {}, nullptr, std::nullopt, false,
+				Test::EditorTestNativeBackends{ .Build = builds, .Loader = CreateRef<Test::FakeNativeLibraryLoader>() });
+			MakeExportableProject(fixture);
+			EditorContext& editor = fixture.GetEditor();
+			WriteTestFile(fixture.GetProjectRoot() / "Native" / "Spinner.cpp", "#include \"Engine/Native/NativeApi.h\"\n");
+			builds->SetApiHeader(MakeEditorNativeModuleHostSpecification(nullptr, nullptr).ApiHeader);
+			const Result<std::filesystem::path> runtime = Test::GetBuiltExecutablePath("Runtime");
+			REQUIRE_MESSAGE(runtime.has_value(), runtime.error().ToString());
+			builds->SetRuntimeExecutable(*runtime);
+			editor.GetNativeModule().QueuePreferenceChange(true);
+			editor.GetNativeModule().Update(editor);
+			const Test::TempDirectory binaries("ExportBinaries");
+			const ExportSpecification specification = MakeSpecification(MakeRealBinaryRoot(binaries));
+			const auto exportGame = [&editor, &specification]()
+			{
+				Result<Scope<Exporter>> exporter = Exporter::Start(editor, specification);
+				REQUIRE_MESSAGE(exporter.has_value(), exporter.error().ToString());
+				std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+				REQUIRE(outcome.has_value());
+				return std::move(*outcome);
+			};
+
+			// The first export is cancelled while its build runs; the build's MSBuild then writes on into its directory.
+			builds->SetPending(true);
+			std::filesystem::path cancelled;
+			{
+				Result<Scope<Exporter>> exporter = Exporter::Start(editor, specification);
+				REQUIRE(exporter.has_value());
+				REQUIRE(RunUntilPhase(**exporter, ExportPhase::NativeBuild));
+				REQUIRE_FALSE((*exporter)->Poll().has_value());
+				REQUIRE(builds->GetStartCount() == 1);
+				cancelled = builds->GetLastRequest().OutputDirectory;
+				(*exporter)->Cancel();
+			}
+			REQUIRE(FileSystem::CreateDirectories(cancelled / "Intermediate").has_value());
+			std::optional<std::ofstream> writing(std::in_place, cancelled / "Intermediate" / "Spinner.obj", std::ios::binary);
+			REQUIRE(writing->is_open());
+			*writing << "still being written";
+			writing->flush();
+
+			// The retry builds into a directory no build wrote, whatever became of the leftover, and succeeds.
+			builds->SetPending(false);
+			const Result<ExportReport> retried = exportGame();
+			REQUIRE_MESSAGE(retried.has_value(), retried.error().ToString());
+			CHECK(retried->NativeModule);
+			CHECK(builds->GetStartCount() == 2);
+			CHECK_FALSE(FileSystem::Exists(builds->GetLastRequest().OutputDirectory));
+
+			// Once nothing writes there any more, the next export removes the leftover, and nothing stays beside the output.
+			writing.reset();
+			const Result<ExportReport> again = exportGame();
+			REQUIRE_MESSAGE(again.has_value(), again.error().ToString());
+			CHECK_FALSE(FileSystem::Exists(cancelled));
+			CHECK(ListNativeBuildRoots(again->OutputDirectory).empty());
+#endif
 		}
 	}
 

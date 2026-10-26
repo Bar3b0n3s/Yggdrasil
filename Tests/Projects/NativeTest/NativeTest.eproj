@@ -1,0 +1,115 @@
+{
+	"Format": "Project",
+	"Version": 1,
+	"Name": "NativeTest",
+	"StartScene": "Assets/Scenes/Main.scene",
+	"Window": {
+		"Title": "NativeTest",
+		"Width": 1280,
+		"Height": 720,
+		"VSync": true,
+		"Fullscreen": false,
+		"Resizable": true
+	},
+	"Simulation": {
+		"FixedHz": 60,
+		"MaxStepsPerFrame": 5,
+		"Seed": 19,
+		"MaxEntities": 65536
+	},
+	"Physics": {
+		"Gravity": [0, -9.81, 0],
+		"Layers": ["Default"],
+		"Collisions": [
+			["Default", "Default"]
+		]
+	},
+	"Input": {
+		"Actions": {
+			"Bump": {
+				"Type": "Button",
+				"Bindings": ["Key.B", "Gamepad.East"],
+				"Positive": [],
+				"Negative": [],
+				"Gamepad": "",
+				"Invert": false
+			},
+			"Spin": {
+				"Type": "Button",
+				"Bindings": ["Key.Space", "Gamepad.South"],
+				"Positive": [],
+				"Negative": [],
+				"Gamepad": "",
+				"Invert": false
+			}
+		}
+	},
+	"Rendering": {
+		"ShadowMapSize": 2048,
+		"SsaoHalfResolution": false
+	},
+	"Scripting": {
+		"MemoryLimitMB": 256,
+		"CallbackBudgetMs": 1000,
+		"PauseOnError": true,
+		"BlockPlayOnTypeErrors": false
+	},
+	"Export": {
+		"BuildScenes": ["Assets/Scenes/Main.scene"],
+		"Exclude": ["Assets/Tests/**"],
+		"Icon": "",
+		"Version": "1.0.0",
+		"Company": "",
+		"PruneUnreferenced": false
+	},
+	"Testing": {
+		"Suites": [
+			{
+				"Script": "Assets/Tests/Spinner.test.luau",
+				"Scene": "Assets/Scenes/Main.scene",
+				"Parameters": null,
+				"Isolation": "Case",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
+				"Script": "Assets/Tests/Bumper.test.luau",
+				"Scene": "Assets/Scenes/Main.scene",
+				"Parameters": null,
+				"Isolation": "Case",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
+				"Script": "Assets/Tests/Record/SpinAndBump.test.luau",
+				"Scene": "Assets/Scenes/Main.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor"]
+			}
+		],
+		"Replays": ["Assets/Tests/Replays/*.replay"],
+		"CaseTimeoutTicks": 600,
+		"SuiteTickLimit": 36000,
+		"CoverageGates": false
+	}
+}

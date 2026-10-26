@@ -538,7 +538,8 @@
 					"StepHeight": 0.3,
 					"Mass": 70,
 					"GravityFactor": 1,
-					"Layer": "Character"
+					"Layer": "Character",
+					"InheritGroundVelocity": false
 				}
 			}
 		},
@@ -900,6 +901,100 @@
 					"Offset": [0, 0, 0],
 					"Rotation": [0, 0, 0, 1],
 					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "ad0459d83a29c1ac",
+			"Name": "CarryPlatform",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [14, 0.5, 8],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [4, 0.5, 4]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["103291d13c7ad4df"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Kinematic",
+					"Mass": 1,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Track",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "f8ae7f27222bc53c",
+			"Name": "Passenger",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [13, 0.75, 7],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"CharacterController": {
+					"Height": 1.8,
+					"Radius": 0.3,
+					"MaxSlopeAngle": 45,
+					"StepHeight": 0.3,
+					"Mass": 70,
+					"GravityFactor": 1,
+					"Layer": "Character",
+					"InheritGroundVelocity": true
+				}
+			}
+		},
+		{
+			"ID": "77fd57526c0fba44",
+			"Name": "Bystander",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [15, 0.75, 9],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"CharacterController": {
+					"Height": 1.8,
+					"Radius": 0.3,
+					"MaxSlopeAngle": 45,
+					"StepHeight": 0.3,
+					"Mass": 70,
+					"GravityFactor": 1,
+					"Layer": "Character",
+					"InheritGroundVelocity": false
 				}
 			}
 		}

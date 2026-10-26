@@ -737,8 +737,14 @@ namespace Engine {
 						LoadRepair{ std::string(SceneInvalidComponentCode), repair, component.GetPointer(), pending.ID, VariantValue(component.GetValue()) });
 					return;
 				}
-				ReportUnknown(SceneUnknownComponentCode, component.GetPointer(), std::format("unknown component '{}'; it is kept as written", name),
-					m_Registry.SuggestComponentNames(name), pending.WrittenID);
+				// A native component ("Native.<Name>") is kept as written like an unknown one but never reported as unknown, so
+				// --strict loads it too: whether the loaded module registers it is the native layer's check
+				// (Docs/Decisions/0030-m19-contract.md decision 27).
+				if (!IsNativeComponentName(name))
+				{
+					ReportUnknown(SceneUnknownComponentCode, component.GetPointer(), std::format("unknown component '{}'; it is kept as written", name),
+						m_Registry.SuggestComponentNames(name), pending.WrittenID);
+				}
 				pending.Unknown.push_back(UnknownComponentData{ name, 0, VariantValue(component.GetValue()) });
 				return;
 			}

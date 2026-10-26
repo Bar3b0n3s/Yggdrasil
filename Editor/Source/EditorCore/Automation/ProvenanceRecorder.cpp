@@ -88,10 +88,15 @@ namespace Engine {
 	bool ProvenanceRecorder::IsRecordedPath(std::string_view path)
 	{
 		constexpr std::string_view AssetsPrefix = "Assets/";
+		// The game's native module (Docs/Decisions/0030-m19-contract.md decision 35): its sources are engine-consumed too.
+		constexpr std::string_view NativePrefix = "Native/";
 		constexpr std::string_view ProjectExtension = ".eproj";
 		constexpr std::string_view TypeCheckerConfiguration = ".luaurc";
-		if (path.starts_with(AssetsPrefix))
-			return path.size() > AssetsPrefix.size();
+		for (const std::string_view prefix : { AssetsPrefix, NativePrefix })
+		{
+			if (path.starts_with(prefix))
+				return path.size() > prefix.size();
+		}
 		if (path == TypeCheckerConfiguration)
 			return true;
 		return path.find('/') == std::string_view::npos && path.size() > ProjectExtension.size() && path.ends_with(ProjectExtension);

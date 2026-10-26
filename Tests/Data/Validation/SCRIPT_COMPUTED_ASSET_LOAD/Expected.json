@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["SCRIPT_COMPUTED_ASSET_LOAD"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

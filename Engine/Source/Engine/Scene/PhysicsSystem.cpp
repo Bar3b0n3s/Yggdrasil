@@ -1183,6 +1183,7 @@ namespace Engine {
 		description.MaxSlopeAngle = component.MaxSlopeAngle;
 		description.StepHeight = component.StepHeight;
 		description.Mass = component.Mass;
+		description.InheritGroundVelocity = component.InheritGroundVelocity;
 		description.Layer = plan.Layer;
 		description.Pose = Utils::GetWorldPose(owner, Utils::GetWorldMatrix(owner));
 		description.UserData = plan.Owner.GetValue();
@@ -1280,6 +1281,8 @@ namespace Engine {
 				}
 				const CharacterControllerComponent& component = owner.GetComponent<CharacterControllerComponent>();
 				existing->second.GravityFactor = component.GravityFactor;
+				existing->second.Description.InheritGroundVelocity = component.InheritGroundVelocity;
+				existing->second.Controller->SetInheritGroundVelocity(component.InheritGroundVelocity);
 				CharacterControllerDescription wantedDescription = existing->second.Description;
 				wantedDescription.Height = component.Height;
 				wantedDescription.Radius = component.Radius;

@@ -19,11 +19,15 @@ namespace Engine {
 	class MethodRegistry;
 	class TypeRegistry;
 
-	// Registry struct "EditBatchOp": {method, params}.
+	// Registry struct "EditBatchOp": {method, params, name?}.
 	struct EditBatchOp
 	{
 		std::string Method{};
-		VariantValue Params{}; // an object (or null for {}); may hold {"$ref": "<op index>.<path>"} (JsonReference.h)
+		VariantValue Params{}; // an object (or null for {}); may hold {"$ref": "<op index or name>.<path>"} (JsonReference.h)
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 8, A-NREF): an optional name later ops' "$ref" may use instead of
+		// this op's index ({"$ref": "board.entity.id"}): an identifier ([A-Za-z_][A-Za-z0-9_]*, at most 64 characters),
+		// unique within the batch; empty for none.
+		std::string Name{};
 	};
 
 	// edit.batch {label?, ops, dryRun?} (§13.4 "Atomic batch"): runs the ops in order inside one EditorTransaction (one
@@ -32,13 +36,18 @@ namespace Engine {
 	// op k's error, whose data carries "failedOp": k; a rollback that cannot complete (EditorTransaction::Rollback) adds its
 	// error as a context and data.rollbackFailed: true.
 	//
+	// M19 (decision 8): "$ref" may name an earlier op by its name (EditBatchOp::Name) instead of its index, through
+	// SubstituteReferences' named form; the ops' names are checked with the others below.
+	//
 	// Before the first op runs, every op is checked and the batch is rejected with "failedOp" naming the first bad one:
 	//   - an unknown method (NotFound);
 	//   - a method that is not AllowedInBatch (InvalidArgument): edit.batch itself, every pending method, and the methods
 	//     that replace the open scene, write files outside a command or end the session (MethodRegistry.h);
 	//   - op params that are not an object, or that carry dryRun, ifRevision or _meta (InvalidArgument located at
 	//     "/ops/<k>/params/<member>": a batch's reserved members apply to all of its ops and are given once, on the batch);
-	//   - in a dry-run batch, an op without supportsDryRun (Unsupported).
+	//   - in a dry-run batch, an op without supportsDryRun (Unsupported);
+	//   - M19: a name that is no identifier or longer than 64 characters (InvalidArgument at "/ops/<k>/name"), or one an
+	//     earlier op already has (InvalidArgument at "/ops/<k>/name" naming that op's index).
 	// With dryRun the whole batch runs in the dry-run sandbox; every op sees the batch's options.
 	struct EditBatchParams
 	{

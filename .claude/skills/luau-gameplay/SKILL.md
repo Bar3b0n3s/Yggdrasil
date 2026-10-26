@@ -84,6 +84,7 @@ For a follow camera, use `OnLateUpdate` and the target's `Transform.RenderPositi
 - **Typing.** Annotate callbacks with the exported instance alias (`function Ball.OnStart(self: Ball)`), so strict mode checks `self` fields. An optional field (`Goal: Entity?`, `Field.Asset`) can be nil: test it (`if self.Goal then`) or cast after checking before using it.
 - **Constant-speed ball** (Breakout, Pong). Give the ball a `Dynamic` `RigidBody` with `GravityFactor` 0, `Restitution` 1, `Friction` 0, `LinearDamping` 0, `AngularDamping` 0, `AllowSleeping` false and `MotionQuality` `LinearCast` (continuous collision, so a fast ball cannot pass through a thin paddle or brick between ticks), and keep it in the play plane with `LockTranslation` `[false, false, true]` and every `LockRotation` axis locked. Contacts combine friction as the geometric mean of the two bodies' values and restitution as the larger, so these values on the ball hold against every surface. Bounces still gain or lose a little speed and the angle drifts, so renormalize the velocity every tick, keeping a minimum vertical share so the ball never travels flat between the side walls (example below).
 - **Player-driven paddles and platforms.** Make them `Kinematic` and move them with `RigidBody:MoveKinematic` in `OnFixedUpdate`. A kinematic body pushes dynamic bodies but is never stopped by `Static` ones, so clamp its target in the script (a paddle limit), or it slides through the walls. A `Dynamic` paddle would be knocked away by the ball.
+- **Characters on moving platforms.** Move a character with `CharacterController:Move` in every `OnFixedUpdate` (a jump is one `Move` with an upward part). A moving platform carries it only when its `CharacterController` has `InheritGroundVelocity` set: while grounded, the platform's horizontal velocity is added to the one `Move` gives, so the character walks relative to the platform and rides it v·t when standing still; without it the platform slides under the character. The carry ends when the character leaves the ground: in the air it moves only as `Move` tells it, so a jump off a moving platform does not keep the platform's speed unless the script adds it.
 - **Per-entity collisions.** `OnCollisionEnter` names the entity that owns the other body; colliders under an ancestor with a `RigidBody`, or in a tree of collider-only entities, form one compound body, whose owner receives the body's events. A child collider whose entity has a Script naming a script also receives its own `OnCollisionEnter` and `OnCollisionExit` (`self` its entity, `contact.Collider` itself), and its own `OnTriggerEnter` and `OnTriggerExit` when its body passes through a sensor, so pieces gathered into one body can report their own hits. Pieces of one body whose contacts share a normal report the event to one piece only (Jolt merges such contacts): a ball on the seam between two edge-to-edge bricks, or a body resting across two coplanar tiles, notifies one of them, so a piece that must get its own event at a seam, such as a Breakout brick, keeps its own `Static` body (`game-building`, "Scenes, assets and prefabs"). An enter arrives when the shapes touch, or at the step the solver bounces one off the other, never for a near miss that only came within Jolt's 2 cm speculative distance. Break it with `SetActive(false)` and bring it back with `SetActive(true)` on a restart rather than destroying and recreating it.
 - **Variants from one prefab.** Instances built with `prefab.instantiate {components}` differ only in their overrides (a material, a script field such as a brick's `Points`); a behaviour reads its own fields from `self` and another's through `GetScript()` (`GetScript("<Name>")` on an entity with several scripts) with its exported alias.
 
@@ -186,7 +187,7 @@ Log entries and `print` keep at most 8 KiB each (longer text is truncated and ma
 
 ## Testing and diagnosis
 
-Create test scripts with `Test.Suite` and register `Test.Case` inside the suite body; the body registers cases, while the cases perform runtime work (`templates/Scripts/Test` is the starting point). Use `Test.Inject*` and `Test.WaitTicks` for deterministic input. Type an input plan's state as `InputEventState` (`"Down" | "Up" | "Tap"`), which `Test.InjectAction` takes: strict mode refuses a `string` field there (`type Step = { Tick: number, Action: string, State: InputEventState }`). A button injected `Down` stays down until an `Up`, and an analog value (`Test.InjectAction("MoveX", nil, 0.5)`) holds on every later tick until another value replaces it: inject 0 to let go. `Test.Expect` records a failure and continues; `Test.Fail` ends the case. Pass the actual value first to `Test.ExpectEqual(actual, expected, message?)` and `Test.ExpectNear(actual, expected, epsilon?, message?)`: a failure row shows the message, then `(got <actual>, expected <expected>)`, with `, epsilon <e>` for `ExpectNear`. A case for a game-over rule (a lock-out, a kick above the well) also asserts that no next piece spawned (the piece and the next queue unchanged): otherwise another rule, such as a block-out by the next spawn, can end the game and pass the case without the rule under test, depending on what the seed deals next. Run a new rule's case against the code without the rule first; it must fail. Configure suites in `Testing.Suites` with their scene, parameters and supported modes. Run with `test.run` or `Editor --headless --project <project> --run-tests`; `--filter` selects a suite/case.
+Create test scripts with `Test.Suite` and register `Test.Case` inside the suite body; the body registers cases, while the cases perform runtime work (`templates/Scripts/Test` is the starting point). Use `Test.Inject*` and `Test.WaitTicks` for deterministic input. Type an input plan's state as `InputEventState` (`"Down" | "Up" | "Tap"`), which `Test.InjectAction` takes: strict mode refuses a `string` field there (`type Step = { Tick: number, Action: string, State: InputEventState }`). A button injected `Down` stays down until an `Up`, and an analog value (`Test.InjectAction("MoveX", nil, 0.5)`) holds on every later tick until another value replaces it: inject 0 to let go. `Test.Expect` records a failure and continues; `Test.Fail` ends the case. Pass the actual value first to `Test.ExpectEqual(actual, expected, message?)` and `Test.ExpectNear(actual, expected, epsilon?, message?)`: a failure row shows the message, then `(got <actual>, expected <expected>)`, with `, epsilon <e>` for `ExpectNear`. A case for a game-over rule (a lock-out, a kick above the well) also asserts that no next piece spawned (the piece and the next queue unchanged): otherwise another rule, such as a block-out by the next spawn, can end the game and pass the case without the rule under test, depending on what the seed deals next. Run a new rule's case against the code without the rule first; it must fail. Configure suites in `Testing.Suites` with their scene, parameters and supported modes. Scripts and suites cannot read a native module's `Native.*` components or resources, which have no script proxy (`Entity:HasComponent("Native.<Name>")` raises `NotFound`): a suite tests a native game through the built-in state its systems write, such as Transforms, and automation reads the module's own state (`game-debugging`, "Native module"). Run with `test.run` or `Editor --headless --project <project> --run-tests`; `--filter` selects a suite/case.
 
 ### Diagnosis
 
@@ -194,9 +195,40 @@ Use `script.errors`, diagnostics and the structured test results to find authore
 
 ### Recording
 
-Start input recording at tick zero. Record through a recording suite and `test.run`'s record option (game-building §8), or `input.record`, then verify with `input.replay` and strict hash checking, twice. **During a recording, evaluate only reads.** A `script.eval`, `play.waitFor` or test case that calls a mutating engine API (an entity or component write, `SetActive`, a session `Random` draw, or `Scene.CreateEntity`, `Instantiate`, `Destroy` or `Load`; `Scene.FindByName` and the other `Scene` queries only read) invalidates the recording at once. A write to script tables only (`self.Lines = 5`, a board array) is neither detected nor recorded, so once it shows in the world or an expectation the recording no longer reproduces itself: `input.record`'s `stop` replays a recording with input events with its input and refuses it ("does not reproduce itself"), and an event-free recording, written as recorded, fails its first `input.replay {verify: true, strictHash: true}`. A test-driven recording is published only after an ordinary fresh replay reproduces every state-hash checkpoint and its final hash, and, with input events, either recording path refuses it when a run without them reproduces it too (game-building §7).
+Start input recording at tick zero. Record through a recording suite and `test.run`'s record option (game-building §8), or `input.record`, then verify with `input.replay` and strict hash checking, twice. **During a recording, evaluate only reads.** A `script.eval`, `play.waitFor` or test case that calls a mutating engine API (an entity or component write, `SetActive`, a session `Random` draw, or `Scene.CreateEntity`, `Instantiate`, `Destroy` or `Load`; `Scene.FindByName` and the other `Scene` queries only read) invalidates the recording at once. A write to script tables only (`self.Lines = 5`, a board array) is neither detected nor recorded, so once it shows in the world or an expectation the recording no longer reproduces itself: `input.record`'s `stop` replays every recording, an event-free one included, with its input and refuses it ("does not reproduce itself"). A test-driven recording is published only after an ordinary fresh replay reproduces every state-hash checkpoint and its final hash, and, with input events, either recording path refuses it when a run without them reproduces it too (game-building §7).
 
-A replay is recorded from a `Modes: ["Editor"]` suite whose single case only reads the scene and injects input, named so that no replay path contains its name (game-building §8). A case that taps planned actions at fixed ticks suits a falling-block opening; an **autopilot** steers where hand-written input is impractical, such as a physics ball following a level's `PathNode` waypoints with a PD controller:
+A replay is recorded from a `Modes: ["Editor"]` suite whose single case only reads the scene and injects input, named so that no replay path contains its name (game-building §8). A case that taps planned actions at fixed ticks suits a falling-block opening, recorded with `test.run {filter: "Record.Opening", record: "Assets/Tests/Replays/Opening.replay"}`:
+
+```luau path=Assets/Tests/Record/Opening.test.luau
+--!strict
+local GameScript = require("../../Scripts/Game")
+
+-- The planned input: one tap of each action at its tick, ticks increasing.
+type Tap = { Tick: number, Action: string }
+local Plan: { Tap } = {
+	{ Tick = 12, Action = "MoveLeft" },
+	{ Tick = 30, Action = "RotateCW" },
+	{ Tick = 48, Action = "HardDrop" },
+}
+
+return Test.Suite("Record.Opening", function()
+	Test.Case("plays the opening", function()
+		local found = Scene.FindByName("Game")
+		Test.Expect(found ~= nil, "Main.scene has a Game entity")
+		local game = (found :: Entity):GetScript() :: GameScript.Game
+		local tick = 0
+		for _, tap in Plan do
+			Test.WaitTicks(tap.Tick - tick)
+			tick = tap.Tick
+			Test.InjectAction(tap.Action, "Tap")
+		end
+		Test.WaitTicks(60)
+		Test.Expect(game.LockedCount >= 1, "the input locked a piece")
+	end)
+end)
+```
+
+An **autopilot** steers where hand-written input is impractical, such as a physics ball following a level's `PathNode` waypoints with a PD controller:
 
 ```luau path=Assets/Tests/Autopilot/Level1.test.luau
 --!strict

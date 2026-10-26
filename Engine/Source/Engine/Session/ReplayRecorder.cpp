@@ -3,6 +3,7 @@
 
 #include "Engine/Session/PlayInputEventCodec.h"
 #include "Engine/Session/PlaySession.h"
+#include "Engine/Session/ReplayFingerprint.h"
 
 #include <nlohmann/json.hpp>
 
@@ -37,6 +38,9 @@ namespace Engine {
 		const Json parameters = header.Parameters.IsNull() ? Json::object() : header.Parameters.Get();
 		if (header.Seed != session.GetSeed() || header.FixedHz != session.GetProjectSettings().Simulation.FixedHz || parameters != session.GetLoadParameters())
 			return MakeError(ErrorCode::InvalidArgument, "recording header does not match the session parameters, seed or fixed rate");
+		// What the session holds at tick 0, so a playback whose hash differs names what changed (Docs/Decisions/0030-m19-contract.md
+		// decision 2).
+		ENGINE_TRY_ASSIGN(document.Fingerprint, WithContext(ComputeReplayFingerprint(session.GetScene(), session.GetScriptSchemas(), session.GetAssets()), "while taking the recording's start fingerprint"));
 		*m_State = {};
 		m_State->Recording = true;
 		m_State->Serial = session.GetSerial();

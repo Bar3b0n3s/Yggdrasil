@@ -94,9 +94,43 @@ namespace Engine {
 			std::vector<std::string> Calls;
 		};
 
+		// Docs/Decisions/0030-m19-contract.md decision 7: a host's entity reference resolver over a scene holding
+		// "/Game/ScoreText" (id 0xabc) and "/Game/Lives" (0xdef, whose id prefix "000000000de" is unique); "/Game/Missing" names
+		// nothing, and "/Game/Twin" is ambiguous. Records every call, so a test can see that 16-hex ids never reach it.
+		class FakeEntityReferences final : public IEntityReferenceResolver
+		{
+		public:
+			[[nodiscard]] Result<UUID> ResolveEntityReference(std::string_view reference, std::string_view pointer) override
+			{
+				Calls.emplace_back(reference);
+				const ErrorLocation location{ .File = {}, .JsonPointer = std::string(pointer), .Entity = {} };
+				if (reference == "/Game/ScoreText")
+					return UUID(0xabc);
+				if (reference == "/Game/Lives" || reference == "000000000de")
+					return UUID(0xdef);
+				if (reference == "/Game/Twin")
+					return std::unexpected(Error(ErrorCode::InvalidArgument, std::format("the entity path '{}' is ambiguous", reference)).WithLocation(location));
+				return std::unexpected(Error(ErrorCode::NotFound, std::format("no entity '{}'", reference)).WithLocation(location).WithHint("did you mean '/Game/ScoreText'?"));
+			}
+
+			std::vector<std::string> Calls;
+		};
+
+		// A host without the scene its references resolve in: every reference fails with the host's own InvalidState.
+		class UnavailableEntityReferences final : public IEntityReferenceResolver
+		{
+		public:
+			[[nodiscard]] Result<UUID> ResolveEntityReference(std::string_view /*reference*/, std::string_view /*pointer*/) override
+			{
+				return MakeError(ErrorCode::InvalidState, "no scene open");
+			}
+		};
+
 		struct SchemaRequestState
 		{
 			FakeAssetReferences Assets{};
+			// M19 (decision 7): the context's entity reference resolver; null (no resolver) unless a test sets it.
+			IEntityReferenceResolver* Entities = nullptr;
 			Ref<const IFieldSchemaSource> Published{};
 			std::vector<std::string> AssetsBeforeSnapshot{};
 			uint32_t SnapshotRequests = 0;
@@ -117,6 +151,7 @@ namespace Engine {
 				return CreateScope<SchemaRequestContext>(*m_State, std::move(request));
 			}
 			IAssetReferenceResolver* GetAssetReferenceResolver() const override { return &m_State->Assets; }
+			IEntityReferenceResolver* GetEntityReferenceResolver() const override { return m_State->Entities; }
 			Result<Ref<const IFieldSchemaSource>> GetFieldSchemaSnapshot() override
 			{
 				++m_State->SnapshotRequests;
@@ -494,6 +529,96 @@ namespace Engine {
 			REQUIRE_MESSAGE(std::holds_alternative<Json>(passed), (std::holds_alternative<Error>(passed) ? std::get<Error>(passed).ToString() : std::string()));
 			CHECK(valid.State.HandlerCalls == 1);
 			CHECK(valid.State.ReadScript["Scripts"][0]["Fields"]["Target"] == Json("0000000000000abc"));
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 7 (A-EREF): with the host's entity reference resolver, an EntityRef value
+		// in component data takes an entity path or a unique id prefix, as entity params do: Invoke rewrites each to the id the
+		// resolver names before strict validation, so the handler reads ids; a 16-hex id never reaches the resolver. Its
+		// NotFound is the request's NotFound and its InvalidArgument an issue at the value's pointer.
+		TEST_CASE("MethodRegistry: an entity path in an EntityRef component value resolves through the host's entity reference resolver")
+		{
+			FakeEntityReferences entities;
+			SchemaRegistrySetup setup;
+			setup.State.Published = MakeEntityFieldSchemas();
+			setup.State.Entities = &entities;
+			auto context = setup.Context(ParseRegistryJson(R"({"text":"fields","components":{"Script":{"Script":"Assets/Fields.luau",
+				"Fields":{"Target":"/Game/ScoreText","Targets":["0000000000000abc","000000000de"]}}}})"));
+			const MethodResult result = setup.Methods.Invoke(*context);
+			REQUIRE_MESSAGE(std::holds_alternative<Json>(result), (std::holds_alternative<Error>(result) ? std::get<Error>(result).ToString() : std::string()));
+			CHECK(setup.State.HandlerCalls == 1);
+			CHECK(setup.State.ReadScript["Fields"]["Target"] == Json("0000000000000abc"));
+			CHECK(setup.State.ReadScript["Fields"]["Targets"][0] == Json("0000000000000abc"));
+			CHECK(setup.State.ReadScript["Fields"]["Targets"][1] == Json("0000000000000def"));
+			CHECK(entities.Calls == std::vector<std::string>{ "/Game/ScoreText", "000000000de" });
+
+			// A path that names nothing is NotFound; an ambiguous one an InvalidArgument issue at its pointer. The handler
+			// does not run.
+			FakeEntityReferences missingEntities;
+			SchemaRegistrySetup missing;
+			missing.State.Published = MakeEntityFieldSchemas();
+			missing.State.Entities = &missingEntities;
+			auto absent = missing.Context(ParseRegistryJson(R"({"text":"fields","components":{"Script":{"Script":"Assets/Fields.luau",
+				"Fields":{"Target":"/Game/Missing"}}}})"));
+			const MethodResult notFound = missing.Methods.Invoke(*absent);
+			REQUIRE(std::holds_alternative<Error>(notFound));
+			CHECK(std::get<Error>(notFound).GetCode() == ErrorCode::NotFound);
+			CHECK(missing.State.HandlerCalls == 0);
+
+			FakeEntityReferences twinEntities;
+			SchemaRegistrySetup twin;
+			twin.State.Published = MakeEntityFieldSchemas();
+			twin.State.Entities = &twinEntities;
+			auto ambiguous = twin.Context(ParseRegistryJson(R"({"text":"fields","components":{"Script":{"Script":"Assets/Fields.luau",
+				"Fields":{"Target":"/Game/Twin"}}}})"));
+			const MethodResult refused = twin.Methods.Invoke(*ambiguous);
+			REQUIRE(std::holds_alternative<Error>(refused));
+			const Error& error = std::get<Error>(refused);
+			CHECK(error.GetCode() == ErrorCode::InvalidArgument);
+			REQUIRE(error.GetIssues().size() == 1);
+			CHECK(error.GetIssues()[0].JsonPointer == "/components/Script/Fields/Target");
+			CHECK(twin.State.HandlerCalls == 0);
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 7: an EntityRef field of a component itself (no script field) resolves in
+		// the pass without field schemas, so no snapshot is acquired; its NotFound counts with an asset reference's NotFound;
+		// and a resolver error of another code (the host has no scene) is returned with its code.
+		TEST_CASE("MethodRegistry: entity references in component fields resolve without field schemas and keep a host error's code")
+		{
+			FakeEntityReferences entities;
+			SchemaRegistrySetup setup;
+			setup.State.FailSnapshot = true;
+			setup.State.Entities = &entities;
+			auto context = setup.Context(ParseRegistryJson(R"({"text":"link","components":{"PrefabLink":{"InstanceRoot":"/Game/ScoreText"}}})"));
+			const MethodResult result = setup.Methods.Invoke(*context);
+			REQUIRE_MESSAGE(std::holds_alternative<Json>(result), (std::holds_alternative<Error>(result) ? std::get<Error>(result).ToString() : std::string()));
+			CHECK(setup.State.SnapshotRequests == 0);
+			CHECK(setup.State.HandlerCalls == 1);
+			CHECK(context->GetParams()["components"]["PrefabLink"]["InstanceRoot"] == Json("0000000000000abc"));
+			CHECK(entities.Calls == std::vector<std::string>{ "/Game/ScoreText" });
+
+			FakeEntityReferences missingEntities;
+			SchemaRegistrySetup missing;
+			missing.State.Entities = &missingEntities;
+			auto absent = missing.Context(ParseRegistryJson(R"({"text":"link","components":{"MeshRenderer":{"Mesh":"Assets/Missing.mesh"},
+				"PrefabLink":{"InstanceRoot":"/Game/Missing"}}})"));
+			const MethodResult notFound = missing.Methods.Invoke(*absent);
+			REQUIRE(std::holds_alternative<Error>(notFound));
+			CAPTURE(std::get<Error>(notFound).ToString());
+			CHECK(std::get<Error>(notFound).GetCode() == ErrorCode::NotFound);
+			const std::vector<ErrorIssue>& issues = std::get<Error>(notFound).GetIssues();
+			REQUIRE(issues.size() == 2);
+			CHECK(issues[0].JsonPointer == "/components/MeshRenderer/Mesh");
+			CHECK(issues[1].JsonPointer == "/components/PrefabLink/InstanceRoot");
+			CHECK(missing.State.HandlerCalls == 0);
+
+			UnavailableEntityReferences unavailable;
+			SchemaRegistrySetup closed;
+			closed.State.Entities = &unavailable;
+			auto sceneless = closed.Context(ParseRegistryJson(R"({"text":"link","components":{"PrefabLink":{"InstanceRoot":"/Game/ScoreText"}}})"));
+			const MethodResult refused = closed.Methods.Invoke(*sceneless);
+			REQUIRE(std::holds_alternative<Error>(refused));
+			CHECK(std::get<Error>(refused).GetCode() == ErrorCode::InvalidState);
+			CHECK(closed.State.HandlerCalls == 0);
 		}
 
 		// A4's precedence (Docs/Decisions/0027-m17-contract.md "Frozen interfaces / A4"): an EntityRef issue is never NotFound,

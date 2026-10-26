@@ -48,10 +48,20 @@
 // of the server tag; ParseOffloadFileProcessId), and the destructor removes the offloaded results this server wrote, and
 // only those: its output files stay, so a --batch run's screenshots and a test run's reports outlive it, until the first
 // write of a later server removes them like any other leftover.
+//
+// Kept files (WriteKeptFile: the screenshots' keep, Docs/Decisions/0030-m19-contract.md decision 9) go to
+// project://Library/Automation/Kept/ for a writable project and to user://Automation/Kept/ otherwise, named from the same
+// sequence and created exclusively like output files, and named in responses the same way. No server ever removes a
+// file there: neither the first write's pruning nor a destructor touches Kept/, so a kept screenshot outlives every later
+// session until the user removes it (the one automation output §13.4's bounded output does not bound).
 
 namespace Engine {
 
 	namespace Utils {
+
+		// The kept-files directory of a writable project (gitignored with Library/, §2.1), and its user:// counterpart.
+		constexpr std::string_view KeptDirectory = "Library/Automation/Kept";
+		constexpr std::string_view UserKeptDirectory = "Automation/Kept";
 
 		[[nodiscard]] static Status RemoveUtilityAutomationSession(const std::filesystem::path& directory)
 		{
@@ -210,12 +220,17 @@ namespace Engine {
 		// writable project, user://Automation/Out/ otherwise), pruned of the files of servers that are gone when this server
 		// first uses it, and created.
 		[[nodiscard]] Result<VfsPath> PrepareOutputDirectory(EditorContext& editor);
-		// Creates the next file of this server's sequence with `extension` in PrepareOutputDirectory's directory and
-		// returns it; AlreadyExists when that name exists (it is never replaced). The number is used up even when the write
-		// fails, so a later write never meets the same name.
+		// The kept-files directory for the editor's state (project://Library/Automation/Kept/ for a writable project,
+		// user://Automation/Kept/ otherwise), created and never pruned.
+		[[nodiscard]] static Result<VfsPath> PrepareKeptDirectory(EditorContext& editor);
+		// Creates the next file of this server's sequence with `extension` in `directory` and returns it; AlreadyExists when
+		// that name exists (it is never replaced). The number is used up even when the write fails, so a later write never
+		// meets the same name.
+		[[nodiscard]] Result<VfsPath> CreateSequencedFile(EditorContext& editor, const VfsPath& directory, std::string_view extension, std::span<const std::byte> bytes);
+		// CreateSequencedFile in PrepareOutputDirectory's directory.
 		[[nodiscard]] Result<VfsPath> CreateOutputFile(EditorContext& editor, std::string_view extension, std::span<const std::byte> bytes);
-		// The absolute native path of `file`, a file in PrepareOutputDirectory's directory, which responses name (see the file
-		// comment).
+		// The absolute native path of `file`, a file in PrepareOutputDirectory's or PrepareKeptDirectory's directory, which
+		// responses name (see the file comment).
 		[[nodiscard]] static std::string GetOutputPath(const EditorContext& editor, const AutomationServerSpecification& specification,
 			const VfsPath& file);
 	};
@@ -621,12 +636,15 @@ namespace Engine {
 	{
 		// Method output (screenshots, test reports) is not project content: like offloaded results, it stays available to
 		// agents whose mutations are denied (EditorAutomationPolicy).
-		ENGINE_ASSERT(!extension.empty() && std::ranges::all_of(extension, [](char character)
-		{
-			return (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9');
-		}),
-			"output file extension '{}' must be lowercase letters and digits", extension);
 		ENGINE_TRY_ASSIGN(const VfsPath file, m_State->CreateOutputFile(*m_Editor, extension, bytes));
+		return State::GetOutputPath(*m_Editor, m_Specification, file);
+	}
+
+	Result<std::string> AutomationServer::WriteKeptFile(std::string_view extension, std::span<const std::byte> bytes)
+	{
+		// Kept output is not project content either (see WriteOutputFile); only its directory differs (see the file comment).
+		ENGINE_TRY_ASSIGN(const VfsPath directory, State::PrepareKeptDirectory(*m_Editor));
+		ENGINE_TRY_ASSIGN(const VfsPath file, m_State->CreateSequencedFile(*m_Editor, directory, extension, bytes));
 		return State::GetOutputPath(*m_Editor, m_Specification, file);
 	}
 
@@ -661,13 +679,23 @@ namespace Engine {
 		}
 	}
 
-	Result<VfsPath> AutomationServer::State::CreateOutputFile(EditorContext& editor, std::string_view extension, std::span<const std::byte> bytes)
+	Result<VfsPath> AutomationServer::State::CreateSequencedFile(EditorContext& editor, const VfsPath& directory, std::string_view extension, std::span<const std::byte> bytes)
 	{
-		ENGINE_TRY_ASSIGN(const VfsPath directory, PrepareOutputDirectory(editor));
+		ENGINE_ASSERT(!extension.empty() && std::ranges::all_of(extension, [](char character)
+		{
+			return (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9');
+		}),
+			"output file extension '{}' must be lowercase letters and digits", extension);
 		ENGINE_TRY_ASSIGN(const VfsPath file, directory.Join(MakeOffloadFileName(ServerTag, NextFileSequence++, extension)));
 		// Created exclusively: a name that exists, whoever created it and when, fails with AlreadyExists and stays as it is.
 		ENGINE_TRY(WithContext(editor.GetVfs().WriteNewFile(file, bytes), "while writing an automation output file, which is never replaced"));
 		return file;
+	}
+
+	Result<VfsPath> AutomationServer::State::CreateOutputFile(EditorContext& editor, std::string_view extension, std::span<const std::byte> bytes)
+	{
+		ENGINE_TRY_ASSIGN(const VfsPath directory, PrepareOutputDirectory(editor));
+		return CreateSequencedFile(editor, directory, extension, bytes);
 	}
 
 	Result<VfsPath> AutomationServer::State::PrepareOutputDirectory(EditorContext& editor)
@@ -689,13 +717,24 @@ namespace Engine {
 		return directory;
 	}
 
+	Result<VfsPath> AutomationServer::State::PrepareKeptDirectory(EditorContext& editor)
+	{
+		const bool inProject = editor.HasProject() && !editor.IsReadOnly();
+		ENGINE_TRY_ASSIGN(const VfsPath directory, inProject ? VfsPath::Create("project", Utils::KeptDirectory) : VfsPath::Create("user", Utils::UserKeptDirectory));
+		ENGINE_TRY(editor.GetVfs().CreateDirectories(directory));
+		return directory;
+	}
+
 	std::string AutomationServer::State::GetOutputPath(const EditorContext& editor, const AutomationServerSpecification& specification,
 		const VfsPath& file)
 	{
+		// project://Library/Automation/<Out or Kept>/<name> lies below the project root, user://Automation/<Out or
+		// Kept>/<name> beside the sessions directory.
 		if (file.GetScheme() == "project")
-			return FileSystem::PathToUtf8(editor.GetProject().GetRoot() / OffloadDirectory / file.GetFileName());
+			return FileSystem::PathToUtf8(editor.GetProject().GetRoot() / FileSystem::PathFromUtf8(file.GetPath()));
 		if (!specification.SessionsDirectory.empty())
-			return FileSystem::PathToUtf8(specification.SessionsDirectory.parent_path() / "Out" / file.GetFileName());
+			return FileSystem::PathToUtf8(specification.SessionsDirectory.parent_path() / FileSystem::PathFromUtf8(file.GetParent().GetFileName())
+				/ FileSystem::PathFromUtf8(file.GetFileName()));
 		return file.ToString();
 	}
 

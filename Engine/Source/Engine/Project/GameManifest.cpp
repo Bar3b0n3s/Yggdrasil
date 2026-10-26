@@ -2,6 +2,7 @@
 #include "Engine/Project/GameManifest.h"
 
 #include "Engine/Core/Assert.h"
+#include "Engine/Core/BuildId.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Json/JsonWriter.h"
@@ -27,13 +28,15 @@ namespace Engine {
 
 	namespace Utils {
 
-		// The manifest's keys, in the order SaveToString writes them (§14.1).
-		constexpr std::array<std::string_view, 9> ManifestKeys = { "Format", "Version", "Name", "EngineVersion", "StartScene", "Paks", "Window",
+		// The manifest's keys, in the order SaveToString writes them (§14.1): version 2's, and version 1's without Build.
+		constexpr std::array<std::string_view, 10> ManifestKeys = { "Format", "Version", "Name", "EngineVersion", "Build", "StartScene", "Paks", "Window",
+			"Simulation", "Testing" };
+		constexpr std::array<std::string_view, 9> ManifestVersion1Keys = { "Format", "Version", "Name", "EngineVersion", "StartScene", "Paks", "Window",
 			"Simulation", "Testing" };
 		constexpr std::array<std::string_view, 2> ManifestPakKeys = { "Path", "XXH64" };
 		// The file names of the two paks, in their order (§14.1).
 		constexpr std::array<std::string_view, 2> ManifestPakFileNames = { "Engine.pak", "Game.pak" };
-		// The oldest readable manifest version (there has been no other yet).
+		// The oldest readable manifest version: version 1 (M7) reads with an empty Build (M19, decision 18).
 		constexpr uint32_t MinimumManifestVersion = 1;
 		constexpr size_t HashDigits = 16;
 
@@ -153,11 +156,27 @@ namespace Engine {
 			return pak;
 		}
 
+		// Version 2's Build (decision 18): what ParseBuildId reads, naming the build of the manifest's own EngineVersion.
+		[[nodiscard]] static Status CheckBuild(std::string_view build, std::string_view engineVersion, std::string_view pointer)
+		{
+			if (build.empty())
+				return std::unexpected(MakeManifestError(ErrorCode::Validation, pointer, "the build id is empty", "write the exporting build's id, such as \"0.2.0+3f2a9c1d4e5b\""));
+			const Result<BuildId> parsed = ParseBuildId(build);
+			if (!parsed)
+				return std::unexpected(MakeManifestError(ErrorCode::Validation, pointer, parsed.error().GetMessageText(), parsed.error().GetHint()));
+			if (parsed->Version != engineVersion)
+			{
+				return std::unexpected(MakeManifestError(ErrorCode::Validation, pointer,
+					std::format("the build id '{}' names version {}, but EngineVersion is '{}'", build, parsed->Version, engineVersion)));
+			}
+			return {};
+		}
+
 		[[nodiscard]] static Result<GameManifest> ReadManifest(const Json& document)
 		{
 			const JsonReader root(document);
-			ENGINE_TRY(root.ReadFormatHeader(GameManifest::FormatName, MinimumManifestVersion, GameManifest::CurrentVersion));
-			ENGINE_TRY(ExpectKnownMembers(root, ManifestKeys));
+			ENGINE_TRY_ASSIGN(const uint32_t version, root.ReadFormatHeader(GameManifest::FormatName, MinimumManifestVersion, GameManifest::CurrentVersion));
+			ENGINE_TRY(ExpectKnownMembers(root, version >= GameManifestBuildVersion ? std::span<const std::string_view>(ManifestKeys) : std::span<const std::string_view>(ManifestVersion1Keys)));
 
 			GameManifest manifest;
 			ENGINE_TRY_ASSIGN(const JsonReader name, root.GetMember("Name"));
@@ -173,6 +192,13 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(manifest.EngineVersion, engineVersion.ReadString());
 			if (manifest.EngineVersion.empty())
 				return std::unexpected(MakeManifestError(ErrorCode::Validation, engineVersion.GetPointer(), "the engine version is empty"));
+
+			if (version >= GameManifestBuildVersion)
+			{
+				ENGINE_TRY_ASSIGN(const JsonReader build, root.GetMember("Build"));
+				ENGINE_TRY_ASSIGN(manifest.Build, build.ReadString());
+				ENGINE_TRY(CheckBuild(manifest.Build, manifest.EngineVersion, build.GetPointer()));
+			}
 
 			ENGINE_TRY_ASSIGN(const JsonReader startScene, root.GetMember("StartScene"));
 			ENGINE_TRY_ASSIGN(const uint64_t startSceneValue, ReadHash(startScene));
@@ -211,6 +237,7 @@ namespace Engine {
 			document["Version"] = GameManifest::CurrentVersion;
 			document["Name"] = manifest.Name;
 			document["EngineVersion"] = manifest.EngineVersion;
+			document["Build"] = manifest.Build;
 			document["StartScene"] = manifest.StartScene.ToString();
 			Json paks = Json::array();
 			for (const GameManifestPak& pak : manifest.Paks)

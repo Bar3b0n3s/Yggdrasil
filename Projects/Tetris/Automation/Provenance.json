@@ -540,11 +540,11 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/LineClear.replay",
-			"XXH64": "c0944d841dc66745",
-			"Method": "test.run",
-			"RequestId": 65,
-			"Client": "engine-mcp",
-			"TranscriptLine": 429
+			"XXH64": "3d64662bed3ffc41",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 513
 		},
 		{
 			"Path": "Assets/Tests/Replays/LineClear.replay.meta",
@@ -556,11 +556,11 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Opening.replay",
-			"XXH64": "ec8809c6f096ce68",
-			"Method": "test.run",
-			"RequestId": 64,
-			"Client": "engine-mcp",
-			"TranscriptLine": 427
+			"XXH64": "70cb512e8a8b3591",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 513
 		},
 		{
 			"Path": "Assets/Tests/Replays/Opening.replay.meta",
@@ -588,11 +588,11 @@
 		},
 		{
 			"Path": "Tetris.eproj",
-			"XXH64": "6b264d055675aff5",
-			"Method": "project.setSettings",
-			"RequestId": 49,
-			"Client": "engine-mcp",
-			"TranscriptLine": 397
+			"XXH64": "d44f3fecdc82b79a",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 517
 		}
 	]
 }

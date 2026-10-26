@@ -204,6 +204,13 @@ namespace Engine {
 		// project content, so the DenyMutations policy allows it, as it does offloaded results. Errors: AlreadyExists, and
 		// those of the VFS writes.
 		[[nodiscard]] Result<std::string> WriteOutputFile(std::string_view extension, std::span<const std::byte> bytes);
+
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 9, A-SHOTS): as WriteOutputFile, into the kept-files directory
+		// (project://Library/Automation/Kept/, or user://Automation/Kept/ without a writable project), with the same naming and
+		// the same per-server sequence. No server removes a kept file: neither the first write's removal of the files of
+		// servers that are gone nor a shutdown touches Kept/ (the screenshot methods' keep: true). Errors: AlreadyExists, and
+		// those of the VFS writes.
+		[[nodiscard]] Result<std::string> WriteKeptFile(std::string_view extension, std::span<const std::byte> bytes);
 	private:
 		[[nodiscard]] Status CheckAvailability(const MethodDescriptor& method) const override;
 		[[nodiscard]] Scope<MethodContext> CreateContext(MethodRequest request) override;

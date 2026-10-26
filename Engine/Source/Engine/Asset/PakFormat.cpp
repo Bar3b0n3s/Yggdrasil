@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cstring>
 #include <format>
+#include <iterator>
 #include <set>
 #include <utility>
 
@@ -28,7 +29,10 @@ namespace Engine {
 
 		// The members of the TOC and of one entry, in canonical order (PakFormat.h).
 		constexpr std::string_view TocMembers[] = { "Format", "Version", "Entries", "Metadata" };
-		constexpr std::string_view EntryMembers[] = { "Handle", "Type", "Path", "Offset", "Size", "XXH64" };
+		constexpr std::string_view EntryMembers[] = { "Handle", "Type", "Path", "Offset", "Size", "XXH64", "Compression", "StoredSize" };
+
+		// The "Compression" spellings, indexed by PakCompression.
+		constexpr std::string_view CompressionNames[] = { "None", "Deflate" };
 
 	}
 
@@ -40,6 +44,13 @@ namespace Engine {
 			if (lhs.Handle != rhs.Handle)
 				return lhs.Handle < rhs.Handle;
 			return lhs.Path < rhs.Path;
+		}
+
+		static std::string_view PakCompressionToString(PakCompression compression)
+		{
+			const size_t index = std::to_underlying(compression);
+			ENGINE_CORE_ASSERT(index < std::size(CompressionNames), "Unknown PakCompression {}", index);
+			return CompressionNames[index];
 		}
 
 		// A located Validation error for an unknown member of `reader` (an engine-written document: an extra member is a
@@ -111,10 +122,34 @@ namespace Engine {
 			if (!hashValue.has_value())
 				return std::unexpected(hash.MakeLocatedError(ErrorCode::Validation, "expected 16 hex digits"));
 			entry.Hash = hashValue->GetValue();
+
+			ENGINE_TRY_ASSIGN(const JsonReader compression, reader.GetMember("Compression"));
+			ENGINE_TRY_ASSIGN(const std::string compressionText, compression.ReadString());
+			const auto* name = std::ranges::find(CompressionNames, compressionText);
+			if (name == std::end(CompressionNames))
+			{
+				return std::unexpected(compression.MakeLocatedError(ErrorCode::Validation,
+					std::format("unknown compression '{}' (None or Deflate)", compressionText)));
+			}
+			entry.Compression = static_cast<PakCompression>(name - std::begin(CompressionNames));
+
+			ENGINE_TRY_ASSIGN(const JsonReader storedSize, reader.GetMember("StoredSize"));
+			ENGINE_TRY_ASSIGN(entry.StoredSize, storedSize.ReadUInt64());
+			if (entry.Compression == PakCompression::None && entry.StoredSize != entry.Size)
+			{
+				return std::unexpected(storedSize.MakeLocatedError(ErrorCode::Validation,
+					std::format("a stored entry takes its {} bytes, not {}", entry.Size, entry.StoredSize)));
+			}
+			if (entry.Compression == PakCompression::Deflate && !IsValidPakDeflateSize(entry.Size, entry.StoredSize))
+			{
+				return std::unexpected(storedSize.MakeLocatedError(ErrorCode::Validation,
+					std::format("a deflated entry of {} bytes cannot take {}: its stream is not empty and saves at least an eighth", entry.Size,
+						entry.StoredSize)));
+			}
 			return entry;
 		}
 
-		// The byte-range rules of one entry against the data area [PakHeader::Size, dataEnd).
+		// The byte-range rules of one entry's stored bytes against the data area [PakHeader::Size, dataEnd).
 		static Status CheckEntryRange(const JsonReader& reader, const PakEntry& entry, uint64_t dataEnd)
 		{
 			if (entry.Offset % PakEntryAlignment != 0)
@@ -127,15 +162,24 @@ namespace Engine {
 				return std::unexpected(reader.MakeLocatedError(ErrorCode::Validation,
 					std::format("offset {} lies inside the {}-byte header", entry.Offset, PakHeader::Size)));
 			}
-			// Overflow-safe: Offset + Size <= dataEnd.
-			if (entry.Offset > dataEnd || entry.Size > dataEnd - entry.Offset)
+			// Overflow-safe: Offset + StoredSize <= dataEnd.
+			if (entry.Offset > dataEnd || entry.StoredSize > dataEnd - entry.Offset)
 			{
 				return std::unexpected(reader.MakeLocatedError(ErrorCode::Validation,
-					std::format("bytes [{}, {} + {}) leave the entry data, which ends at {}", entry.Offset, entry.Offset, entry.Size, dataEnd)));
+					std::format("bytes [{}, {} + {}) leave the entry data, which ends at {}", entry.Offset, entry.Offset, entry.StoredSize, dataEnd)));
 			}
 			return {};
 		}
 
+	}
+
+	bool IsValidPakDeflateSize(uint64_t size, uint64_t storedSize)
+	{
+		if (storedSize == 0 || storedSize >= size)
+			return false;
+		// 8 × (size − storedSize) >= size, without the product: the saving is at least ceil(size / 8).
+		const uint64_t eighth = size / 8 + (size % 8 != 0 ? 1 : 0);
+		return size - storedSize >= eighth;
 	}
 
 	std::array<std::byte, PakHeader::Size> WritePakHeader(const PakHeader& header)
@@ -216,6 +260,10 @@ namespace Engine {
 			writer.WriteUInt(entry.Size);
 			writer.WriteKey("XXH64");
 			writer.WriteString(std::format("{:016x}", entry.Hash));
+			writer.WriteKey("Compression");
+			writer.WriteString(Utils::PakCompressionToString(entry.Compression));
+			writer.WriteKey("StoredSize");
+			writer.WriteUInt(entry.StoredSize);
 			writer.EndObject();
 		}
 		writer.EndArray();
@@ -273,12 +321,12 @@ namespace Engine {
 			toc.Entries.push_back(std::move(entry));
 		}
 
-		// No two entries share a byte: compare each with its neighbour in offset order (empty entries overlap nothing).
+		// No two entries share a stored byte: compare each with its neighbour in offset order (empty entries overlap nothing).
 		std::vector<std::pair<uint64_t, size_t>> byOffset;
 		byOffset.reserve(toc.Entries.size());
 		for (size_t index = 0; index < toc.Entries.size(); ++index)
 		{
-			if (toc.Entries[index].Size != 0)
+			if (toc.Entries[index].StoredSize != 0)
 				byOffset.emplace_back(toc.Entries[index].Offset, index);
 		}
 		std::ranges::sort(byOffset);
@@ -286,7 +334,7 @@ namespace Engine {
 		{
 			const PakEntry& previous = toc.Entries[byOffset[position - 1].second];
 			const PakEntry& entry = toc.Entries[byOffset[position].second];
-			if (entry.Offset < previous.Offset + previous.Size)
+			if (entry.Offset < previous.Offset + previous.StoredSize)
 			{
 				ENGINE_TRY_ASSIGN(const JsonReader element, entries.GetElement(byOffset[position].second));
 				return std::unexpected(element.MakeLocatedError(ErrorCode::Validation,

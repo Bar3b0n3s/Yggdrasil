@@ -20,6 +20,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <exception>
@@ -28,6 +29,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 namespace Engine {
@@ -147,7 +149,78 @@ namespace Engine {
 			return std::string(text, length);
 		}
 
-		static Result<Json> ReadJsonScalar(ScriptCall& call, int index, Detail::NativeConversionBudget& budget)
+		struct JsonReadFrame
+		{
+			int TableIndex = 0;
+			std::map<std::string, Json> Object{};
+			std::map<uint32_t, Json> Array{};
+			std::string Key{};
+			uint32_t ArrayKey = 0;
+		};
+
+		// What a JSON conversion error's path shows: a key's first bytes, and the innermost segments.
+		constexpr size_t MaxJsonPathKeyBytes = 32;
+		constexpr size_t MaxJsonPathSegments = 8;
+
+		// Luau's reserved words, which are no field names: t.end does not parse, t["end"] does.
+		constexpr std::array<std::string_view, 21> LuauReservedWords = { "and", "break", "do", "else", "elseif", "end", "false", "for", "function",
+			"if", "in", "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while" };
+
+		// True for a key Luau indexes as a field (t.key): a name that is not a reserved word.
+		static bool IsLuauIdentifier(std::string_view key)
+		{
+			const auto letter = [](char character)
+			{
+				return (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || character == '_';
+			};
+			return !key.empty() && letter(key.front()) && std::ranges::all_of(key, [&letter](char character)
+			{
+				return letter(character) || (character >= '0' && character <= '9');
+			}) && std::ranges::find(LuauReservedWords, key) == LuauReservedWords.end();
+		}
+
+		// One segment of a conversion error's path, as Luau indexes the value: "[2]", ".name", or ["odd key"] with Luau's string
+		// escapes (a reserved word too, ["end"]); a key longer than MaxJsonPathKeyBytes is cut at a UTF-8 boundary and marked
+		// with "...".
+		static std::string FormatJsonPathSegment(const JsonReadFrame& frame)
+		{
+			if (frame.ArrayKey != 0)
+				return std::format("[{}]", frame.ArrayKey);
+			const std::string_view key = frame.Key;
+			const std::string_view shown = key.substr(0, CompleteUtf8Prefix(key.substr(0, MaxJsonPathKeyBytes)));
+			const std::string_view cut = shown.size() < key.size() ? "..." : "";
+			if (IsLuauIdentifier(key))
+				return std::format(".{}{}", shown, cut);
+			std::string quoted = "[\"";
+			for (const char character : shown)
+			{
+				if (character == '"' || character == '\\')
+					quoted += '\\';
+				if (static_cast<unsigned char>(character) < 0x20)
+					quoted += std::format("\\x{:02x}", static_cast<unsigned char>(character));
+				else
+					quoted += character;
+			}
+			return std::format("{}{}\"]", quoted, cut);
+		}
+
+		// Where in the converted value the entry being read lies, from the outermost table: "[2]", "pos[1].x", or "...[3].x"
+		// with only the innermost MaxJsonPathSegments when deeper; empty for the value itself.
+		static std::string FormatJsonReadPath(const std::vector<Scope<JsonReadFrame>>& frames)
+		{
+			const size_t first = frames.size() > MaxJsonPathSegments ? frames.size() - MaxJsonPathSegments : 0;
+			std::string path;
+			for (size_t index = first; index < frames.size(); ++index)
+				path += FormatJsonPathSegment(*frames[index]);
+			if (path.starts_with('.'))
+				path.erase(0, 1);
+			return first > 0 ? "..." + path : path;
+		}
+
+		// A nil, boolean, finite number or string at `index` as JSON. Errors: Script for any other value, naming its Luau type
+		// (luaL_typename: an engine value by its __type, such as "Quat") and its place in the converted value
+		// (FormatJsonReadPath of `frames`; the native test game's friction NT-08); Script for a non-finite number.
+		static Result<Json> ReadJsonScalar(ScriptCall& call, int index, Detail::NativeConversionBudget& budget, const std::vector<Scope<JsonReadFrame>>& frames)
 		{
 			lua_State* state = call.State;
 			switch (lua_type(state, index))
@@ -166,18 +239,14 @@ namespace Engine {
 					ENGINE_TRY_ASSIGN(auto text, ReadJsonString(call, index, budget));
 					return Json(std::move(text));
 				}
-				default: return MakeError(ErrorCode::Script, "value is not a JSON scalar or table");
+				default:
+				{
+					const std::string path = FormatJsonReadPath(frames);
+					return std::unexpected(Error(ErrorCode::Script, std::format("{} value{} is not a JSON scalar or table", luaL_typename(state, index), path.empty() ? std::string() : std::format(" at {}", path)))
+							.WithHint("JSON holds nil, booleans, numbers, strings and tables of them: convert the value first, such as a vector v to {v.x, v.y, v.z}"));
+				}
 			}
 		}
-
-		struct JsonReadFrame
-		{
-			int TableIndex = 0;
-			std::map<std::string, Json> Object{};
-			std::map<uint32_t, Json> Array{};
-			std::string Key{};
-			uint32_t ArrayKey = 0;
-		};
 
 		static Result<bool> NextJsonEntry(ScriptCall& call, JsonReadFrame& frame, Detail::NativeConversionBudget& budget)
 		{
@@ -281,7 +350,7 @@ namespace Engine {
 					}
 					else
 					{
-						ENGINE_TRY_ASSIGN(value, ReadJsonScalar(call, index, budget));
+						ENGINE_TRY_ASSIGN(value, ReadJsonScalar(call, index, budget, frames));
 						completed = true;
 					}
 				}
