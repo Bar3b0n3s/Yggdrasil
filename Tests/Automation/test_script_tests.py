@@ -185,8 +185,8 @@ class ScriptTestRunnerTests(AutomationTestCase):
                     "local Paddle = {}\nfunction Paddle.OnFixedUpdate(self: any, dt: number)\n"
                     "\tif Input.IsKeyDown(\"Space\") then self.Entity.Transform:Translate(vector.create(1, 0, 0)) end\n"
                     "end\nreturn Script.Define(\"Paddle\", Paddle)\n"})
-        client.call("entity.create", {"name": "Paddle",
-                                      "components": {"Script": {"Script": "Assets/Scripts/Paddle.luau"}}})
+        paddle = {"Script": {"Scripts": [{"Script": "Assets/Scripts/Paddle.luau"}]}}
+        client.call("entity.create", {"name": "Paddle", "components": paddle})
         self.configure_suite(client, 'return Test.Suite("Paddle", function()\n'
                              'Test.Case("move", function()\n'
                              'Test.InjectKey("Space", "Down"); Test.WaitTicks(70)\n'

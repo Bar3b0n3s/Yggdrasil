@@ -105,19 +105,23 @@ namespace Engine {
 				systems.push_back(NativeSystemSummary{ .Name = system.Name, .Description = system.Description });
 		}
 
-		// A canonicalization's finding (NativeSceneReport::Diagnostics) as native.load reports it, its entity summarized in the
-		// open scene.
-		[[nodiscard]] static NativeComponentDiagnostic MakeNativeComponentDiagnostic(const EditorMethodContext& context, const LoadDiagnostic& diagnostic)
+		// A canonicalization's finding (NativeSceneReport::Diagnostics) in the open scene `scene` as native.load reports it, its
+		// entity summarized in that scene (M20: a load migrates every open scene).
+		[[nodiscard]] static NativeComponentDiagnostic MakeNativeComponentDiagnostic(const EditorMethodContext& context, OpenSceneId scene,
+			const LoadDiagnostic& diagnostic)
 		{
 			NativeComponentDiagnostic result{ .Severity = diagnostic.Severity,
 				.Code = diagnostic.Code,
 				.Message = diagnostic.Message,
+				.Scene = {},
 				.Entity = EntitySummary{ .Id = FormatOptionalUUID(diagnostic.Entity), .Name = {}, .Path = {} },
 				.Pointer = diagnostic.JsonPointer };
 			const EditorContext& editor = context.GetEditor();
-			if (editor.HasScene())
+			if (const Result<OpenSceneInfo> info = editor.DescribeOpenScene(scene); info.has_value() && info->Path.has_value())
+				result.Scene = ToProjectRelative(*info->Path);
+			if (const Scene* holder = editor.FindScene(scene); holder != nullptr)
 			{
-				if (const ConstEntity entity = editor.GetScene().FindEntityByID(diagnostic.Entity); entity.IsValid())
+				if (const ConstEntity entity = holder->FindEntityByID(diagnostic.Entity); entity.IsValid())
 					result.Entity = context.MakeEntitySummary(entity);
 			}
 			return result;
@@ -348,8 +352,11 @@ namespace Engine {
 			result.UndoCleared = report.UndoCleared;
 			result.ComponentCount = report.Scene.ComponentCount;
 			result.Diagnostics.reserve(report.Scene.Diagnostics.size());
-			for (const LoadDiagnostic& diagnostic : report.Scene.Diagnostics)
-				result.Diagnostics.push_back(Utils::MakeNativeComponentDiagnostic(context, diagnostic));
+			for (const NativeSceneMigration& migration : report.Scenes)
+			{
+				for (const LoadDiagnostic& diagnostic : migration.Report.Diagnostics)
+					result.Diagnostics.push_back(Utils::MakeNativeComponentDiagnostic(context, migration.Scene, diagnostic));
+			}
 			if (const Ref<const NativeModuleTypes> types = host.GetLoadedTypes(); types != nullptr)
 				Utils::SummarizeNativeModule(*types, result.Components, result.Resources, result.Systems);
 			return result;
@@ -442,11 +449,12 @@ namespace Engine {
 			.Field("line", &NativeBuildDiagnostic::Line, "One-based line; zero without a location.")
 			.Field("column", &NativeBuildDiagnostic::Column, "One-based column; zero without one.")
 			.Field("message", &NativeBuildDiagnostic::Message, "What the tool reported.");
-		registry.Struct<NativeComponentDiagnostic>("NativeComponentDiagnostic", "A finding about a native component of the open scene.")
+		registry.Struct<NativeComponentDiagnostic>("NativeComponentDiagnostic", "A finding about a native component of an open scene.")
 			.Field("severity", &NativeComponentDiagnostic::Severity, "Error or Warning.")
 			.Field("code", &NativeComponentDiagnostic::Code,
 				"NATIVE_COMPONENT_UNREGISTERED, NATIVE_COMPONENT_INVALID, NATIVE_FIELD_DROPPED or NATIVE_FIELD_RESET.")
 			.Field("message", &NativeComponentDiagnostic::Message, "What was found and what was done.")
+			.Field("scene", &NativeComponentDiagnostic::Scene, "The open scene that holds the entity, as scene.list names it; empty for a scene never saved.")
 			.Field("entity", &NativeComponentDiagnostic::Entity, "The entity that holds the component.")
 			.Field("pointer", &NativeComponentDiagnostic::Pointer, "The JSON pointer below the entity: /Components/Native.<Name>[/<Field>].");
 		registry.Struct<NativeStatusResult>("NativeStatusResult", "The open project's native module: the user's permission, its sources, builds and loaded types.")
@@ -490,10 +498,10 @@ namespace Engine {
 		registry.Struct<NativeLoadResult>("NativeLoadResult", "The native module loaded, or reloaded in place of the previous one.")
 			.Field("reloaded", &NativeLoadResult::Reloaded, "A loaded module was replaced (hot reload).")
 			.Field("layoutChanged", &NativeLoadResult::LayoutChanged, "Its types' layout changed; true for a first load.")
-			.Field("sceneChanged", &NativeLoadResult::SceneChanged, "The open scene's native components were migrated to the new layout; the scene is now modified.")
-			.Field("undoCleared", &NativeLoadResult::UndoCleared, "A load whose layout changed, a first load included, cleared the open scene's undo history, whose snapshots hold the previous layout's values or, recorded without a module, the values as written.")
-			.Field("componentCount", &NativeLoadResult::ComponentCount, "Native components in the open scene.")
-			.Field("diagnostics", &NativeLoadResult::Diagnostics, "What the migration reported per component and field.")
+			.Field("sceneChanged", &NativeLoadResult::SceneChanged, "An open scene's native components were migrated to the new layout; each such scene is now modified.")
+			.Field("undoCleared", &NativeLoadResult::UndoCleared, "A load whose layout changed, a first load included, cleared the undo history of every open scene, whose snapshots hold the previous layout's values or, recorded without a module, the values as written.")
+			.Field("componentCount", &NativeLoadResult::ComponentCount, "Native components in the open scenes.")
+			.Field("diagnostics", &NativeLoadResult::Diagnostics, "What the migration reported per component and field, open scene by open scene in tab order.")
 			.Field("components", &NativeLoadResult::Components, "The module's component types, in registration order.")
 			.Field("resources", &NativeLoadResult::Resources, "The module's resource types, in registration order.")
 			.Field("systems", &NativeLoadResult::Systems, "The module's systems, in run order.");
@@ -552,7 +560,7 @@ namespace Engine {
 				.Examples = { { .Description = "Build the native module.", .Params = Json::object() } } },
 			&Automation::NativeBuild);
 		methods.Add({ .Name = "native.load",
-						.Description = "Loads the newest current build of the native module, or hot-reloads it, migrating the open scene's native components to a changed layout (Windows; needs the user's Allow native code preference; not while playing).",
+						.Description = "Loads the newest current build of the native module, or hot-reloads it, migrating the native components of every open scene to a changed layout (Windows; needs the user's Allow native code preference; not while playing).",
 						.ExposeAsTool = true,
 						.Examples = { { .Description = "Load the built module.", .Params = Json::object() } } },
 			&Automation::NativeLoad);
@@ -560,6 +568,7 @@ namespace Engine {
 						.Description = "Reads an entity's native components (Native.<Name>) as the loaded module writes them, and those it does not register as written.",
 						.RequiredParams = { "entity" },
 						.ExposeAsTool = true,
+						.SupportsSceneTarget = true,
 						.AllowedInBatch = true,
 						.Examples = { { .Description = "Read the spinner's native components.", .Params = Json{ { "entity", "/Spinner" } } } } },
 			&Automation::NativeGetComponents);
@@ -569,6 +578,7 @@ namespace Engine {
 						.ExposeAsTool = true,
 						.Mutates = true,
 						.SupportsDryRun = true,
+						.SupportsSceneTarget = true,
 						.AllowedInBatch = true,
 						.Examples = { { .Description = "Make the spinner turn faster.", .Params = setExample } } },
 			&Automation::NativeSetComponents);

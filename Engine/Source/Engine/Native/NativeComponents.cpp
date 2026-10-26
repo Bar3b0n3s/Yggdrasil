@@ -169,48 +169,70 @@ namespace Engine {
 
 	}
 
-	Result<NativeSceneReport> CanonicalizeNativeComponents(Scene& scene, const NativeModuleTypes* types, bool strictUnknowns)
-	{
-		NativeSceneReport report;
-		std::vector<std::pair<UUID, std::vector<UnknownComponentData>>> updates;
-		const std::span<const UUID> current = scene.GetCanonicalOrder();
-		const std::vector<UUID> order(current.begin(), current.end());
-		for (const UUID id : order)
+	namespace Utils {
+
+		// A scene's canonicalization (CanonicalizeNativeComponents, CheckNativeComponents): the report, its Changed not yet
+		// set, and the preserved components of each entity it would rewrite, in canonical entity order.
+		struct SceneCanonicalization
 		{
-			const Entity entity = scene.FindEntityByID(id);
-			const UnknownComponentsComponent* preserved = entity.IsValid() ? entity.TryGetComponent<UnknownComponentsComponent>() : nullptr;
-			if (preserved == nullptr)
-				continue;
+			NativeSceneReport Report{};
+			std::vector<std::pair<UUID, std::vector<UnknownComponentData>>> Updates{};
+		};
 
-			if (types == nullptr)
+		static SceneCanonicalization CanonicalizeScene(const Scene& scene, const NativeModuleTypes* types, bool strictUnknowns)
+		{
+			SceneCanonicalization result;
+			NativeSceneReport& report = result.Report;
+			for (const UUID id : scene.GetCanonicalOrder())
 			{
-				// Without a module nothing is rewritten or reordered: every native component is unregistered.
-				for (const UnknownComponentData& data : preserved->Components)
-				{
-					if (!IsNativeComponentName(data.Name))
-						continue;
-					++report.ComponentCount;
-					report.Diagnostics.push_back(Utils::MakeDiagnostic(strictUnknowns ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning,
-						NativeComponentUnregisteredCode, std::format("no native module is loaded; '{}' is kept as written", data.Name),
-						Utils::MakeComponentPointer(data.Name), id));
-				}
-				continue;
-			}
+				const ConstEntity entity = scene.FindEntityByID(id);
+				const UnknownComponentsComponent* preserved = entity.IsValid() ? entity.TryGetComponent<UnknownComponentsComponent>() : nullptr;
+				if (preserved == nullptr)
+					continue;
 
-			Utils::EntityCanonicalization canonical = Utils::CanonicalizeEntity(preserved->Components, *types, strictUnknowns, id);
-			report.ComponentCount += canonical.NativeCount;
-			std::ranges::move(canonical.Diagnostics, std::back_inserter(report.Diagnostics));
-			if (!Utils::AreSameComponents(canonical.Components, preserved->Components))
-				updates.emplace_back(id, std::move(canonical.Components));
+				if (types == nullptr)
+				{
+					// Without a module nothing is rewritten or reordered: every native component is unregistered.
+					for (const UnknownComponentData& data : preserved->Components)
+					{
+						if (!IsNativeComponentName(data.Name))
+							continue;
+						++report.ComponentCount;
+						report.Diagnostics.push_back(MakeDiagnostic(strictUnknowns ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning,
+							NativeComponentUnregisteredCode, std::format("no native module is loaded; '{}' is kept as written", data.Name),
+							MakeComponentPointer(data.Name), id));
+					}
+					continue;
+				}
+
+				EntityCanonicalization canonical = CanonicalizeEntity(preserved->Components, *types, strictUnknowns, id);
+				report.ComponentCount += canonical.NativeCount;
+				std::ranges::move(canonical.Diagnostics, std::back_inserter(report.Diagnostics));
+				if (!AreSameComponents(canonical.Components, preserved->Components))
+					result.Updates.emplace_back(id, std::move(canonical.Components));
+			}
+			return result;
 		}
 
+	}
+
+	Result<NativeSceneReport> CanonicalizeNativeComponents(Scene& scene, const NativeModuleTypes* types, bool strictUnknowns)
+	{
+		Utils::SceneCanonicalization canonical = Utils::CanonicalizeScene(scene, types, strictUnknowns);
 		// An error leaves the scene as it was: the session does not start, the strict document check refuses the project.
-		if (Utils::HasErrors(report.Diagnostics))
-			return report;
-		for (auto& [id, components] : updates)
+		if (Utils::HasErrors(canonical.Report.Diagnostics))
+			return std::move(canonical.Report);
+		for (auto& [id, components] : canonical.Updates)
 			Utils::StoreComponents(scene.FindEntityByID(id), std::move(components));
-		report.Changed = !updates.empty();
-		return report;
+		canonical.Report.Changed = !canonical.Updates.empty();
+		return std::move(canonical.Report);
+	}
+
+	NativeSceneReport CheckNativeComponents(const Scene& scene, const NativeModuleTypes* types, bool strictUnknowns)
+	{
+		Utils::SceneCanonicalization canonical = Utils::CanonicalizeScene(scene, types, strictUnknowns);
+		canonical.Report.Changed = !Utils::HasErrors(canonical.Report.Diagnostics) && !canonical.Updates.empty();
+		return std::move(canonical.Report);
 	}
 
 	NativeEntityComponents ReadNativeComponents(ConstEntity entity, const NativeModuleTypes* types)

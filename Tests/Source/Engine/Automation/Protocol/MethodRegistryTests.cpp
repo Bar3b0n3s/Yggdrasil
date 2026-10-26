@@ -541,14 +541,14 @@ namespace Engine {
 			SchemaRegistrySetup setup;
 			setup.State.Published = MakeEntityFieldSchemas();
 			setup.State.Entities = &entities;
-			auto context = setup.Context(ParseRegistryJson(R"({"text":"fields","components":{"Script":{"Script":"Assets/Fields.luau",
-				"Fields":{"Target":"/Game/ScoreText","Targets":["0000000000000abc","000000000de"]}}}})"));
+			auto context = setup.Context(ParseRegistryJson(R"({"text":"fields","components":{"Script":{"Scripts":[{"Script":"Assets/Fields.luau",
+				"Fields":{"Target":"/Game/ScoreText","Targets":["0000000000000abc","000000000de"]}}]}}})"));
 			const MethodResult result = setup.Methods.Invoke(*context);
 			REQUIRE_MESSAGE(std::holds_alternative<Json>(result), (std::holds_alternative<Error>(result) ? std::get<Error>(result).ToString() : std::string()));
 			CHECK(setup.State.HandlerCalls == 1);
-			CHECK(setup.State.ReadScript["Fields"]["Target"] == Json("0000000000000abc"));
-			CHECK(setup.State.ReadScript["Fields"]["Targets"][0] == Json("0000000000000abc"));
-			CHECK(setup.State.ReadScript["Fields"]["Targets"][1] == Json("0000000000000def"));
+			CHECK(setup.State.ReadScript["Scripts"][0]["Fields"]["Target"] == Json("0000000000000abc"));
+			CHECK(setup.State.ReadScript["Scripts"][0]["Fields"]["Targets"][0] == Json("0000000000000abc"));
+			CHECK(setup.State.ReadScript["Scripts"][0]["Fields"]["Targets"][1] == Json("0000000000000def"));
 			CHECK(entities.Calls == std::vector<std::string>{ "/Game/ScoreText", "000000000de" });
 
 			// A path that names nothing is NotFound; an ambiguous one an InvalidArgument issue at its pointer. The handler
@@ -557,8 +557,8 @@ namespace Engine {
 			SchemaRegistrySetup missing;
 			missing.State.Published = MakeEntityFieldSchemas();
 			missing.State.Entities = &missingEntities;
-			auto absent = missing.Context(ParseRegistryJson(R"({"text":"fields","components":{"Script":{"Script":"Assets/Fields.luau",
-				"Fields":{"Target":"/Game/Missing"}}}})"));
+			auto absent = missing.Context(ParseRegistryJson(R"({"text":"fields","components":{"Script":{"Scripts":[{"Script":"Assets/Fields.luau",
+				"Fields":{"Target":"/Game/Missing"}}]}}})"));
 			const MethodResult notFound = missing.Methods.Invoke(*absent);
 			REQUIRE(std::holds_alternative<Error>(notFound));
 			CHECK(std::get<Error>(notFound).GetCode() == ErrorCode::NotFound);
@@ -568,14 +568,14 @@ namespace Engine {
 			SchemaRegistrySetup twin;
 			twin.State.Published = MakeEntityFieldSchemas();
 			twin.State.Entities = &twinEntities;
-			auto ambiguous = twin.Context(ParseRegistryJson(R"({"text":"fields","components":{"Script":{"Script":"Assets/Fields.luau",
-				"Fields":{"Target":"/Game/Twin"}}}})"));
+			auto ambiguous = twin.Context(ParseRegistryJson(R"({"text":"fields","components":{"Script":{"Scripts":[{"Script":"Assets/Fields.luau",
+				"Fields":{"Target":"/Game/Twin"}}]}}})"));
 			const MethodResult refused = twin.Methods.Invoke(*ambiguous);
 			REQUIRE(std::holds_alternative<Error>(refused));
 			const Error& error = std::get<Error>(refused);
 			CHECK(error.GetCode() == ErrorCode::InvalidArgument);
 			REQUIRE(error.GetIssues().size() == 1);
-			CHECK(error.GetIssues()[0].JsonPointer == "/components/Script/Fields/Target");
+			CHECK(error.GetIssues()[0].JsonPointer == "/components/Script/Scripts/0/Fields/Target");
 			CHECK(twin.State.HandlerCalls == 0);
 		}
 

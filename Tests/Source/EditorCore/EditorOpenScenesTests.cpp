@@ -367,6 +367,44 @@ namespace Engine {
 			CHECK(editor.GetRevision() > mainChanged);
 		}
 
+		// The merge with M19 (Docs/Decisions/0031-m20-contract.md, "Merge with M19"): a native module load migrates every open
+		// scene through ApplySceneMigration, a change no tracked component records. Its revision then moves past every
+		// revision any open scene reported, also for a scene that keeps an older one until it changes (it used to advance
+		// only the base under that kept revision, so the revision stayed and an ifRevision taken before still matched), and
+		// a migration of a parked scene leaves the active scene addressed.
+		TEST_CASE("EditorContext: a scene migration moves the revision of any open scene past every revision reported")
+		{
+			Test::EditorTestFixture fixture("OpenScenesMigration");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene("Assets/Scenes/Main.scene");
+			EditorContext& editor = fixture.GetEditor();
+			const OpenSceneId main = editor.GetActiveSceneId();
+			const OpenSceneId second = AddOpenScene(editor, "project://Assets/Scenes/Second.scene");
+			static_cast<void>(CreateEdited(editor, "Second"));
+			const uint64_t secondRevision = editor.GetRevision();
+			REQUIRE(editor.ActivateScene(main).has_value());
+			const uint64_t mainRevision = editor.GetRevision();
+			REQUIRE(mainRevision < secondRevision);
+			REQUIRE_FALSE(editor.IsSceneDirty());
+
+			editor.ApplySceneMigration(main, true, false);
+			const uint64_t migrated = editor.GetRevision();
+			CHECK(migrated > secondRevision);
+			CHECK(editor.IsSceneDirty());
+			CHECK_FALSE(editor.GetHistory().CanUndo());
+
+			// A parked scene's migration: its revision moves on, its history goes, the active scene stays addressed.
+			REQUIRE(editor.DescribeOpenScene(second)->Dirty);
+			editor.ApplySceneMigration(second, true, true);
+			CHECK(editor.GetActiveSceneId() == main);
+			CHECK(editor.GetAddressedSceneId() == main);
+			CHECK(editor.GetRevision() == migrated);
+			CHECK(editor.DescribeOpenScene(second)->Revision > migrated);
+			CHECK(editor.DescribeOpenScene(second)->Dirty);
+			REQUIRE(editor.ActivateScene(second).has_value());
+			CHECK_FALSE(editor.GetHistory().CanUndo());
+		}
+
 		// Decision 15 (external changes per open scene): a changed file flags and reports only the open scene it concerns.
 		TEST_CASE("EditorContext: an external change raises SceneChangedOnDisk on the open scene it concerns only")
 		{

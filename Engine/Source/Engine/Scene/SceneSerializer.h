@@ -39,7 +39,10 @@ namespace Engine {
 	// components), then entity creation in canonical order: each component read with StructInfo::FromJson (unknown fields
 	// warn; values validated; Variant values resolved or preserved), unknown components preserved with
 	// SCENE_UNKNOWN_COMPONENT, unknown keys dropped with SCENE_UNKNOWN_KEY, Children rebuilt from file order. With
-	// LoadOptions::StrictUnknowns those warnings are errors. A known component whose value the registry rejects (wrong JSON
+	// LoadOptions::StrictUnknowns those warnings are errors. A native component ("Native.<Name>", IsNativeComponentName) is
+	// preserved as written like an unknown one but never reported as SCENE_UNKNOWN_COMPONENT, also under StrictUnknowns:
+	// whether the loaded native module registers it is the native layer's check (Docs/Decisions/0030-m19-contract.md
+	// decision 27; Engine/Native/NativeComponents.h). A known component whose value the registry rejects (wrong JSON
 	// type, out of range, non-finite, failed validator), or an unknown one holding a fractional number outside float's
 	// range (which JsonWriter could not write back), fails a Strict load with a located Validation error; a Repair load
 	// drops it instead, or resets it to its defaults when it is Required (Transform), records SCENE_INVALID_COMPONENT as a

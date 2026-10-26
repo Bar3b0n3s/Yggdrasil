@@ -440,6 +440,46 @@ namespace Engine {
 			CHECK((*dropped)["pointer"] == Json("/Components/Native.TestMover/Follow"));
 			CHECK(setup.Call("native.getComponents", Json{ { "entity", "/Mover" } })["components"]["Native.TestMover"] == Json{ { "Speed", 3 } });
 		}
+
+		// The merge with M19 (Docs/Decisions/0031-m20-contract.md, "Merge with M19"): native.getComponents and
+		// native.setComponents take the scene target, so they read and write an open scene that is not active, the edit
+		// recorded in that scene's history; native.load migrates every open scene and names the open scene of each finding.
+		TEST_CASE("NativeMethods: native component methods take the scene target and native.load names each finding's open scene")
+		{
+			NativeMethodSetup setup;
+			setup.LoadModule();
+			const Json inMain{ { "scene", "Assets/Scenes/Main.scene" } };
+			static_cast<void>(setup.Call("scene.new", Json{ { "path", "Assets/Scenes/Second.scene" }, { "keepOpen", true } }));
+			Json create = inMain;
+			create["name"] = "Mover";
+			static_cast<void>(setup.Call("entity.create", create));
+
+			Json set = inMain;
+			set["entity"] = "/Mover";
+			set["components"] = Json{ { "Native.TestMover", Json{ { "Speed", 3 } } } };
+			CHECK(setup.Call("native.setComponents", set)["undoIndex"] != Json(0));
+			Json get = inMain;
+			get["entity"] = "/Mover";
+			CHECK(setup.Call("native.getComponents", get)["components"]["Native.TestMover"]["Speed"] == Json(3));
+			// The active scene, Second, has no Mover, and its history did not change.
+			CHECK(setup.CallError("native.getComponents", Json{ { "entity", "/Mover" } }) == "\"NotFound\"");
+			CHECK(setup.Call("edit.history", Json::object())["entries"].empty());
+
+			setup.Builds->SetModule(Test::FakeNativeModule::Layout2);
+			static_cast<void>(setup.Call("native.write", Json{ { "path", "Native/Spinner.cpp" }, { "source", std::string(SpinnerSource) + "// layout 2\n" } }));
+			REQUIRE(setup.Call("native.build", Json::object())["succeeded"] == Json(true));
+			const Json reloaded = setup.Call("native.load", Json::object());
+			CHECK(reloaded["sceneChanged"] == Json(true));
+			CHECK(reloaded["componentCount"] == Json(1));
+			const auto dropped = std::ranges::find_if(reloaded["diagnostics"], [](const Json& diagnostic)
+			{
+				return diagnostic["code"] == Json("NATIVE_FIELD_DROPPED");
+			});
+			REQUIRE(dropped != reloaded["diagnostics"].end());
+			CHECK((*dropped)["scene"] == Json("Assets/Scenes/Main.scene"));
+			CHECK((*dropped)["entity"]["path"] == Json("/Mover"));
+			CHECK(setup.Call("native.getComponents", get)["components"]["Native.TestMover"] == Json{ { "Speed", 3 } });
+		}
 	}
 
 }

@@ -2,6 +2,7 @@
 
 #include "EditorCore/Export/ExportConfiguration.h"
 #include "EditorCore/Native/NativeBuild.h"
+#include "EditorCore/OpenSceneId.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
 #include "Engine/Native/NativeApi.h"
@@ -27,13 +28,16 @@
 // Loading (decision 31). A load takes the newest successful build of the editor's own configuration whose SourceHash is
 // current, loads its library (INativeLibraryLoader: SharedLibrary on Windows), registers the module
 // (BuildNativeModuleTypes, which keeps the library loaded) and only then replaces the loaded module: a load that fails at
-// any step leaves the previous module loaded and the scene unchanged. It canonicalizes the open scene's native components
-// against the new types (CanonicalizeNativeComponents, the migration by field name of decision 27): a reload whose layout
-// hash equals the replaced module's rewrites nothing, so the scene stays byte-identical, and a load whose layout changed
-// (every first load, one after an unload included) migrates every component and marks the scene modified when its
-// canonical form changed. A migration is not an undo step, like a load's migrations, and a load whose layout changed
-// clears the undo history (CommandHistory), whose entity snapshots hold the previous layout's values or, recorded without
-// a module, the values as written, which undo would restore whole; a reload whose layout is unchanged keeps it. The
+// any step leaves the previous module loaded and the scenes unchanged. It canonicalizes the native components of every open
+// scene (M20, Docs/Decisions/0031-m20-contract.md "Merge with M19"), in tab order, against the new types
+// (CanonicalizeNativeComponents, the migration by field name of decision 27), each checked first (CheckNativeComponents),
+// so that an error in any open scene leaves every one as it was: a reload whose layout hash equals the replaced module's
+// rewrites nothing, so the scenes stay byte-identical, and a load whose layout changed (every first load, one after an
+// unload included) migrates every component and marks each scene modified whose canonical form changed. A migration is
+// not an undo step, like a load's migrations, and a load whose layout changed clears every open scene's undo history
+// (CommandHistory, EditorContext::ApplySceneMigration), whose entity snapshots hold the previous layout's values or,
+// recorded without a module, the values as written, which undo would restore whole; a reload whose layout is unchanged
+// keeps them. The
 // previous module's types are released last, which unloads its library once nothing holds them. Loads happen only at
 // frame boundaries without a play session (Play or Simulate): native.load is refused while one runs, and so is a project
 // opening's load while one runs, which never happens.
@@ -99,13 +103,25 @@ namespace Engine {
 		std::string LoadedSourceHash{};        // the loaded build's SourceHash; empty when none is loaded
 	};
 
+	// One open scene's canonicalization in a load (M20: a load migrates every open scene).
+	struct NativeSceneMigration
+	{
+		OpenSceneId Scene = NoOpenScene;
+		NativeSceneReport Report{}; // Report.Changed: the scene is now modified
+	};
+
 	// What a load did (native.load, decision 31).
 	struct NativeLoadReport
 	{
 		bool Reloaded = false;      // a loaded module was replaced
 		bool LayoutChanged = false; // the layout hash differs from the replaced module's (true for a first load)
-		bool UndoCleared = false;   // a load whose layout changed (a first load included) cleared the open scene's undo history
-		NativeSceneReport Scene{};  // the open scene's canonicalization; Scene.Changed: the scene is now modified
+		// A load whose layout changed (a first load included) cleared the undo history of every open scene (false without an
+		// open scene).
+		bool UndoCleared = false;
+		// Every open scene's canonicalization together: Changed when any open scene changed, ComponentCount summed over them,
+		// their Diagnostics in tab order.
+		NativeSceneReport Scene{};
+		std::vector<NativeSceneMigration> Scenes{}; // each open scene's, in tab order
 	};
 
 	struct NativeModuleHostSpecification
@@ -181,8 +197,8 @@ namespace Engine {
 		// Loads, or reloads, the newest current build (see the file comment). Errors: Unsupported on Linux and macOS;
 		// PermissionDenied while the preference is off; InvalidState without a project, while a play session or a build runs,
 		// or without a current successful build (hint: native.build); the loader's and BuildNativeModuleTypes' (the previous
-		// module stays loaded); Validation from canonicalizing the open scene (an error there leaves the previous module
-		// loaded and the scene unchanged).
+		// module stays loaded); Validation from canonicalizing an open scene, naming it (an error in any open scene leaves the
+		// previous module loaded and every open scene unchanged).
 		[[nodiscard]] Result<NativeLoadReport> Load(EditorContext& editor);
 
 		// The loaded module's types, null when none is loaded: what every play session the editor starts runs.

@@ -321,7 +321,8 @@ class ExportTests(AutomationTestCase):
                     'if hit ~= nil and self.Clip ~= nil then Audio.PlayOneShot(hit) end end; '
                     'return Script.Define("Sounds", Sounds)'})
         client.call("entity.update", {"entity": "/Cube", "components": {
-            "Script": {"Script": "Assets/Scripts/Sounds.luau", "Fields": {"Clip": "engine://Audio/Coin"}}}})
+            "Script": {"Scripts": [{"Script": "Assets/Scripts/Sounds.luau",
+                                    "Fields": {"Clip": "engine://Audio/Coin"}}]}}})
         client.call("scene.save")
         report = export_tiny_game(client)
         reachability = report["reachability"]
@@ -357,7 +358,7 @@ class ExportTests(AutomationTestCase):
                     'if look ~= nil then Log.Info("loaded") end end; return Script.Define("Loader", Loader)'})
         client.call("entity.update", {"entity": "/Cube", "components": {
             "MeshRenderer": {"Materials": ["Assets/Materials/Used.material"]},
-            "Script": {"Script": "Assets/Scripts/Loader.luau"}}})
+            "Script": {"Scripts": [{"Script": "Assets/Scripts/Loader.luau"}]}}})
         client.call("scene.save")
 
         def computed_loads() -> list[dict[str, Any]]:

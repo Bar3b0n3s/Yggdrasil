@@ -61,9 +61,10 @@ namespace Engine {
 		// The IEntityReferenceResolver a host's context returns (MethodContext::GetEntityReferenceResolver;
 		// Docs/Decisions/0030-m19-contract.md decision 7, A-EREF): EntityRef values in component data resolved in `scene` by
 		// ResolveEntityReference's rule, so component data and entity params resolve alike. `scene` is the scene parameter of
-		// the phase 1 ledger's "Entity paths and scenes": the editor passes its active scene (the open edit scene, or the play
-		// scene for a request whose target is Play, §13.4 "Target") until M20 passes the request's scene target. A documented
-		// back-reference: the resolver lives no longer than the request, and the scene outlives it.
+		// the phase 1 ledger's "Entity paths and scenes": the editor passes the scene the request addresses, the edit scene
+		// of its scene target (M20, §13.4 "Scene target"; the active scene without one), or the play scene for a request whose
+		// target is Play (§13.4 "Target"). A documented back-reference: the resolver lives no longer than the request, and
+		// the scene outlives it.
 		class SceneEntityReferenceResolver final : public IEntityReferenceResolver
 		{
 		public:

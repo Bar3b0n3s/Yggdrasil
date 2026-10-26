@@ -1275,7 +1275,7 @@ namespace Engine {
 																													"\tif Time.GetTick() == 125 then self.Entity.Transform.Translation = vector.create(0, 0, 0) end\n"
 																													"end\n"
 																													"return Script.Define(\"Resetter\", Resetter)\n" } });
-			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Mover" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Resetter.luau" } } } } } });
+			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Mover" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/Resetter.luau" } } }) } } } } } });
 			CallReplayMethod(fixture, "scene.save");
 			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
 			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 130 }, { "render", "none" }, { "input", Json::array({ Json{ { "tick", 10 }, { "type", "key" }, { "key", "A" }, { "state", "down" } }, Json{ { "tick", 70 }, { "type", "key" }, { "key", "A" }, { "state", "up" } } }) } });
@@ -1338,7 +1338,7 @@ namespace Engine {
 																												  "\terror(\"teardown fault\")\n"
 																												  "end\n"
 																												  "return Script.Define(\"Leaver\", Leaver)\n" } });
-			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Leaver" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Leaver.luau" } } } } } });
+			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Leaver" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/Leaver.luau" } } }) } } } } } });
 			CallReplayMethod(fixture, "scene.save");
 			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
 			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 70 }, { "render", "none" }, { "input", Json::array({ Json{ { "tick", 3 }, { "type", "key" }, { "key", "A" }, { "state", "down" } } }) } });

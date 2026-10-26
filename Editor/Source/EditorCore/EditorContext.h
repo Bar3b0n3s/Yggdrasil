@@ -368,12 +368,15 @@ namespace Engine {
 		// (repairs) not saved since.
 		[[nodiscard]] bool IsSceneDirty() const;
 
-		// M19 (Docs/Decisions/0030-m19-contract.md decision 31): a migration of the open scene that is no undo step, the native
-		// module host's when a load or reload makes the scene's native components canonical against new types. With `changed`
-		// the scene changed: the revision advances and the scene is modified until saved, like a dirty SetScene. With
-		// `clearHistory` the undo history is dropped (its entity snapshots hold the previous layout's values), the scene staying
-		// modified when it was. Asserts an open scene, outside a dry run and a transaction.
-		void ApplySceneMigration(bool changed, bool clearHistory);
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 31): a migration of the open scene `scene` that is no undo step, the
+		// native module host's when a load or reload makes the scene's native components canonical against new types; M20
+		// (Docs/Decisions/0031-m20-contract.md, "Merge with M19"): a load migrates every open scene, each through this call,
+		// which addresses `scene` for the call when another open scene is addressed and brings that one back after it. With
+		// `changed` the scene changed: its revision moves past every revision any open scene reported (decision 13) and the
+		// scene is modified until saved, like a dirty SetScene. With `clearHistory` its undo history is dropped (its entity
+		// snapshots hold the previous layout's values), the scene staying modified when it was. Asserts that `scene` is open,
+		// outside a dry run and a transaction.
+		void ApplySceneMigration(OpenSceneId scene, bool changed, bool clearHistory);
 
 		// The open scene was written to `path` (scene.save, project.save): sets the scene path and the save point, and clears
 		// SceneChangedOnDisk, then calls AfterSceneSaved outside a dry run. Callback failure is returned with a hint

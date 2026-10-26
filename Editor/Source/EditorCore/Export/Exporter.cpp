@@ -47,6 +47,8 @@
 #include "Engine/Reflection/FieldInfo.h"
 #include "Engine/Reflection/StructInfo.h"
 #include "Engine/Reflection/TypeInfo.h"
+#include "Engine/Scene/LoadReport.h"
+#include "Engine/Scene/Migrations.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Scripting/ScriptAssetLoads.h"
@@ -267,8 +269,10 @@ namespace Engine {
 			};
 		}
 
-		// The component and the members of a Script component in a scene or prefab document (ScriptComponent's registration).
+		// The component and the members of a Script component in a scene or prefab document (ScriptComponent's registration,
+		// version 2: its list of slots, each with its own script and Fields; Docs/Decisions/0031-m20-contract.md decision 17).
 		constexpr std::string_view ScriptComponentName = "Script";
+		constexpr std::string_view ScriptSlotsMember = "Scripts";
 		constexpr std::string_view ScriptHandleMember = "Script";
 		constexpr std::string_view ScriptFieldsMember = "Fields";
 
@@ -306,10 +310,11 @@ namespace Engine {
 		}
 
 		// M19 (Docs/Decisions/0030-m19-contract.md decision 20): the asset handles the Script components of the scene or prefab
-		// document `document` name through their Fields, typed with `schemas` (the editor's script field schemas): the one kind
-		// of reference no importer can list, since a scene imports without its scripts' schemas. A prefab instance's members
-		// are written flattened, their Script fields with the instance's overrides applied, so the overrides' values are
-		// among them. A field its script does not declare names nothing. Sorted and unique.
+		// document `document` (at the current versions, Script version 2) name through their slots' Fields, each typed with
+		// `schemas` (the editor's script field schemas) as its own slot's script declares it: the one kind of reference no
+		// importer can list, since a scene imports without its scripts' schemas. A prefab instance's members are written
+		// flattened, their Script fields with the instance's overrides applied, so the overrides' values are among them. A
+		// field its script does not declare names nothing. Sorted and unique.
 		[[nodiscard]] std::vector<AssetHandle> CollectScriptFieldReferences(const Json& document, const IFieldSchemaSource& schemas)
 		{
 			std::vector<AssetHandle> handles;
@@ -325,17 +330,23 @@ namespace Engine {
 				const auto script = components->find(ScriptComponentName);
 				if (script == components->end())
 					continue;
-				const auto handle = script->find(ScriptHandleMember);
-				const auto fields = script->find(ScriptFieldsMember);
-				if (handle == script->end() || fields == script->end() || !fields->is_object())
+				const auto slots = script->find(ScriptSlotsMember);
+				if (slots == script->end() || !slots->is_array())
 					continue;
-				const Result<UUID> owner = JsonReader(*handle).ReadUUID();
-				if (!owner.has_value() || !owner->IsValid())
-					continue;
-				for (auto field = fields->begin(); field != fields->end(); ++field)
+				for (const Json& slot : *slots)
 				{
-					if (const Result<const FieldInfo*> schema = schemas.FindField(*owner, field.key()); schema.has_value())
-						CollectAssetHandles(field.value(), (*schema)->GetType(), handles);
+					const auto handle = slot.find(ScriptHandleMember);
+					const auto fields = slot.find(ScriptFieldsMember);
+					if (handle == slot.end() || fields == slot.end() || !fields->is_object())
+						continue;
+					const Result<UUID> owner = JsonReader(*handle).ReadUUID();
+					if (!owner.has_value() || !owner->IsValid())
+						continue;
+					for (auto field = fields->begin(); field != fields->end(); ++field)
+					{
+						if (const Result<const FieldInfo*> schema = schemas.FindField(*owner, field.key()); schema.has_value())
+							CollectAssetHandles(field.value(), (*schema)->GetType(), handles);
+					}
 				}
 			}
 			std::ranges::sort(handles);
@@ -1157,9 +1168,16 @@ namespace Engine {
 			if (record.Metadata.Importer == SceneImporter::Id || record.Metadata.Importer == PrefabImporter::Id)
 			{
 				ENGINE_TRY_ASSIGN(const std::string text, Editor->GetVfs().ReadText(record.SourcePath));
-				ENGINE_TRY_ASSIGN(const Json document, JsonReader::Parse(text));
-				const std::vector<AssetHandle> fields = CollectScriptFieldReferences(document, schemas);
-				dependencies.insert(dependencies.end(), fields.begin(), fields.end());
+				ENGINE_TRY_ASSIGN(Json document, JsonReader::Parse(text));
+				// The document as a load migrates it (M20): a file still at Script version 1 holds one script where version 2
+				// holds a list of slots. A file the migration refuses names nothing here; the export's strict load reports it.
+				LoadReport migration;
+				const DocumentKind kind = record.Metadata.Importer == SceneImporter::Id ? DocumentKind::Scene : DocumentKind::Prefab;
+				if (document.is_object() && Migrations::UpgradeDocument(document, kind, Editor->GetTypeRegistry(), migration).has_value())
+				{
+					const std::vector<AssetHandle> fields = CollectScriptFieldReferences(document, schemas);
+					dependencies.insert(dependencies.end(), fields.begin(), fields.end());
+				}
 			}
 			std::ranges::sort(dependencies);
 			const auto [first, last] = std::ranges::unique(dependencies);

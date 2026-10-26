@@ -49,9 +49,11 @@ namespace Engine {
 		// M19 (Docs/Decisions/0030-m19-contract.md decision 7): this request's entity reference resolver, through which the
 		// EntityRef values of its component data resolve as its entity params do (MethodRegistry.h convention 7): by
 		// Utils::SceneEntityReferenceResolver's rule in ResolveRequestScene's scene, the one the phase 1 ledger's "Entity
-		// paths and scenes" names (for the methods that take component data, all mutations: the edit scene, or the play
-		// scene for a request whose target is Play, until M20 passes the request's scene target). Without that scene a
-		// reference fails with ResolveRequestScene's error (InvalidState), which the registry returns unchanged.
+		// paths and scenes" names (for the methods that take component data, all mutations: the edit scene of the open scene
+		// the request addresses, which is its scene target's (M20, Docs/Decisions/0031-m20-contract.md decision 16 and
+		// "Merge with M19": the request's EditorSceneTargetScope makes ResolveTargetScene return it) or the active scene's,
+		// or the play scene for a request whose target is Play). Without that scene a reference fails with
+		// ResolveRequestScene's error (InvalidState), which the registry returns unchanged.
 		[[nodiscard]] IEntityReferenceResolver* GetEntityReferenceResolver() const override;
 		// Lazily pins the editor's current script field snapshot for this request, after path resolution. No project is
 		// InvalidState; snapshot acquisition failures propagate. Methods without schema-dependent params never load it.

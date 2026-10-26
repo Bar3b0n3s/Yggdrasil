@@ -3287,7 +3287,7 @@
 							"InstanceRoot": {
 								"description": "The root of the entity's innermost instance (an instance root names itself), which has the Prefab component.",
 								"type": ["string", "null"],
-								"pattern": "^[0-9a-fA-F]{16}$"
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
 							},
 							"OuterPrefabEntityID": {
 								"description": "On a nested instance root: its id in the prefab of the instance that encloses it; null on every other entity.",
@@ -4249,7 +4249,7 @@
 								"type": "array",
 								"items": {
 									"type": ["string", "null"],
-									"pattern": "^[0-9a-fA-F]{16}$"
+									"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
 								}
 							},
 							"Kind": {
@@ -5174,7 +5174,7 @@
 							"InstanceRoot": {
 								"description": "The root of the entity's innermost instance (an instance root names itself), which has the Prefab component.",
 								"type": ["string", "null"],
-								"pattern": "^[0-9a-fA-F]{16}$"
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
 							},
 							"OuterPrefabEntityID": {
 								"description": "On a nested instance root: its id in the prefab of the instance that encloses it; null on every other entity.",
@@ -6136,7 +6136,7 @@
 								"type": "array",
 								"items": {
 									"type": ["string", "null"],
-									"pattern": "^[0-9a-fA-F]{16}$"
+									"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
 								}
 							},
 							"Kind": {
@@ -6627,7 +6627,7 @@
 						"maximum": 1000
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -7285,7 +7285,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -7408,9 +7408,15 @@
 						"enum": ["Edit", "Play"]
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -7481,7 +7487,7 @@
 		{
 			"name": "native.load",
 			"domain": "native",
-			"description": "Loads the newest current build of the native module, or hot-reloads it, migrating the open scene's native components to a changed layout (Windows; needs the user's Allow native code preference; not while playing).",
+			"description": "Loads the newest current build of the native module, or hot-reloads it, migrating the native components of every open scene to a changed layout (Windows; needs the user's Allow native code preference; not while playing).",
 			"exposeAsTool": true,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -7497,7 +7503,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -7520,21 +7526,21 @@
 						"type": "boolean"
 					},
 					"sceneChanged": {
-						"description": "The open scene's native components were migrated to the new layout; the scene is now modified.",
+						"description": "An open scene's native components were migrated to the new layout; each such scene is now modified.",
 						"type": "boolean"
 					},
 					"undoCleared": {
-						"description": "A load whose layout changed, a first load included, cleared the open scene's undo history, whose snapshots hold the previous layout's values or, recorded without a module, the values as written.",
+						"description": "A load whose layout changed, a first load included, cleared the undo history of every open scene, whose snapshots hold the previous layout's values or, recorded without a module, the values as written.",
 						"type": "boolean"
 					},
 					"componentCount": {
-						"description": "Native components in the open scene.",
+						"description": "Native components in the open scenes.",
 						"type": "integer",
 						"minimum": 0,
 						"maximum": 4294967295
 					},
 					"diagnostics": {
-						"description": "What the migration reported per component and field.",
+						"description": "What the migration reported per component and field, open scene by open scene in tab order.",
 						"type": "array",
 						"items": {
 							"$ref": "#/$defs/NativeComponentDiagnostic"
@@ -7573,7 +7579,7 @@
 				"additionalProperties": false,
 				"$defs": {
 					"NativeComponentDiagnostic": {
-						"description": "A finding about a native component of the open scene.",
+						"description": "A finding about a native component of an open scene.",
 						"type": "object",
 						"properties": {
 							"severity": {
@@ -7586,6 +7592,10 @@
 							},
 							"message": {
 								"description": "What was found and what was done.",
+								"type": "string"
+							},
+							"scene": {
+								"description": "The open scene that holds the entity, as scene.list names it; empty for a scene never saved.",
 								"type": "string"
 							},
 							"entity": {
@@ -7691,7 +7701,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -7771,9 +7781,15 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -7866,7 +7882,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -8085,7 +8101,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -9860,7 +9876,7 @@
 					},
 					"components": {
 						"type": "object",
-						"description": "Per-instance component values for the instance root by registry name, merged into the prefab's as entity.update merges them (missing components are added) and recorded as the instance's overrides; script fields go in {\"Script\": {\"Scripts\": [{\"Fields\": {...}}]}}: an entry that gives Fields without Script takes the Script handle of the prefab root's slot at its index, every other member an entry omits takes its default (repeat a non-zero ExecutionOrder), and the list replaces the root's.",
+						"description": "Per-instance component values for the instance root by registry name, merged into the prefab's as entity.update merges them (missing components are added) and recorded as the instance's overrides; script fields go in {\"Script\": {\"Scripts\": [{\"Fields\": {...}}]}}: an entry that gives Fields without Script takes the Script handle of the prefab root's slot at its index, every other member an entry omits takes its default (repeat a non-zero ExecutionOrder), and the list replaces the root's. An Entity value takes 16 hex digits, a unique id prefix of at least 6 or a path such as \"/Game/ScoreText\", resolved in the edit scene the request addresses.",
 						"properties": {
 							"Transform": {
 								"$ref": "#/$defs/Transform"
@@ -10152,7 +10168,7 @@
 							"InstanceRoot": {
 								"description": "The root of the entity's innermost instance (an instance root names itself), which has the Prefab component.",
 								"type": ["string", "null"],
-								"pattern": "^[0-9a-fA-F]{16}$"
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
 							},
 							"OuterPrefabEntityID": {
 								"description": "On a nested instance root: its id in the prefab of the instance that encloses it; null on every other entity.",
@@ -11114,7 +11130,7 @@
 								"type": "array",
 								"items": {
 									"type": ["string", "null"],
-									"pattern": "^[0-9a-fA-F]{16}$"
+									"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
 								}
 							},
 							"Kind": {

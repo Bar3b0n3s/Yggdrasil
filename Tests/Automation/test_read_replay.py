@@ -25,7 +25,7 @@ def add_key_mover(client: engine_client.EngineClient) -> None:
     """Adds the KeyMover script and its "Mover" entity to the open scene (unsaved)."""
     client.call("script.write", {"path": "Assets/Scripts/KeyMover.luau", "source": KEY_MOVER})
     client.call("entity.create", {"name": "Mover",
-                                   "components": {"Script": {"Script": "Assets/Scripts/KeyMover.luau"}}})
+                                   "components": {"Script": {"Scripts": [{"Script": "Assets/Scripts/KeyMover.luau"}]}}})
 
 
 class ReadReplayTests(AutomationTestCase):

@@ -49,6 +49,9 @@ namespace Engine {
 		DiagnosticSeverity Severity = DiagnosticSeverity::Warning;
 		std::string Code{};
 		std::string Message{};
+		// M20 (Docs/Decisions/0031-m20-contract.md, "Merge with M19"): the open scene that holds the entity, project-relative
+		// as scene.list reports it; empty for a scene never saved.
+		std::string Scene{};
 		EntitySummary Entity{};
 		std::string Pointer{}; // below the entity: "/Components/Native.Spinner/Speed"
 	};
@@ -119,8 +122,8 @@ namespace Engine {
 	{
 		bool Reloaded = false;      // a loaded module was replaced (hot reload)
 		bool LayoutChanged = false; // its types' layout changed (always true for a first load)
-		bool SceneChanged = false;  // the open scene's native components were migrated: the scene is now modified
-		bool UndoCleared = false;   // a load whose layout changed (a first load included) cleared the open scene's undo history
+		bool SceneChanged = false;  // an open scene's native components were migrated: each such scene is now modified
+		bool UndoCleared = false;   // a load whose layout changed (a first load included) cleared every open scene's undo history
 		uint32_t ComponentCount = 0;
 		std::vector<NativeComponentDiagnostic> Diagnostics{};
 		std::vector<NativeTypeSummary> Components{};
@@ -194,7 +197,9 @@ namespace Engine {
 	void RegisterNativeMethodTypes(TypeRegistry& registry);
 	// The seven editor-only methods, every one a tool. status, read and getComponents: pure reads, AllowedInBatch. write and
 	// setComponents: Mutates, SupportsDryRun, AllowedInBatch. build: pending (NativeBuildBoundSeconds and a minute,
-	// NativeBuild.h). load: immediate, neither a batch op nor a dry run.
+	// NativeBuild.h). load: immediate, neither a batch op nor a dry run; it migrates every open scene. getComponents and
+	// setComponents address one open scene and take the scene target (M20, SupportsSceneTarget;
+	// Docs/Decisions/0031-m20-contract.md decision 16 and "Merge with M19").
 	void RegisterNativeMethods(MethodRegistry& methods);
 
 }

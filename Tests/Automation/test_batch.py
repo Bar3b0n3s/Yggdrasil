@@ -75,20 +75,20 @@ return Script.Define("Hud", Hud)
             {"method": "entity.create", "params": {"name": "Game"}, "name": "game"},
             {"method": "entity.create", "params": {"name": "ScoreText", "parent": {"$ref": "game.entity.id"}}},
             {"method": "entity.create", "params": {"name": "Hud", "components": {
-                "Script": {"Script": script, "Fields": {"Score": "/Game/ScoreText"}}}}},
+                "Script": {"Scripts": [{"Script": script, "Fields": {"Score": "/Game/ScoreText"}}]}}}},
         ]})
         score = result["results"][1]["entity"]["id"]
-        fields = client.call("entity.get", {"entity": "/Hud"})["entity"]["components"]["Script"]["Fields"]
+        fields = client.call("entity.get", {"entity": "/Hud"})["entity"]["components"]["Script"]["Scripts"][0]["Fields"]
         self.assertEqual(fields["Score"], score)
         updated = client.call("entity.update", {"entity": "/Hud", "components": {
-            "Script": {"Fields": {"Score": score[:10]}}}})
-        self.assertEqual(updated["entity"]["components"]["Script"]["Fields"]["Score"], score)
+            "Script": {"Scripts": [{"Fields": {"Score": score[:10]}}]}}})
+        self.assertEqual(updated["entity"]["components"]["Script"]["Scripts"][0]["Fields"]["Score"], score)
         before = client.call("scene.get")["scene"]
         with self.assertRaises(engine_client.EngineError) as missing:
             client.call("entity.update", {"entity": "/Hud", "components": {
-                "Script": {"Fields": {"Score": "/Game/Missing"}}}})
+                "Script": {"Scripts": [{"Fields": {"Score": "/Game/Missing"}}]}}})
         self.assert_engine_error(missing.exception, engine_client.NOT_FOUND)
-        self.assertEqual(missing.exception.data["issues"][0]["pointer"], "/components/Script/Fields/Score")
+        self.assertEqual(missing.exception.data["issues"][0]["pointer"], "/components/Script/Scripts/0/Fields/Score")
         self.assertEqual(client.call("scene.get")["scene"], before)
 
     def test_batch_file_scaffolds_a_project_and_names_its_failing_line(self) -> None:

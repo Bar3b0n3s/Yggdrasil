@@ -137,7 +137,7 @@ namespace Engine {
 			{
 				m_ActionMessage = Utils::ReadResultFlag(value, "reloaded") ? "Reloaded the module." : "Loaded the module.";
 				if (Utils::ReadResultFlag(value, "sceneChanged"))
-					m_ActionMessage += " The open scene's native components were migrated; save the scene to keep them.";
+					m_ActionMessage += " The native components of the open scenes were migrated; save the scenes to keep them.";
 			}
 		}
 		return resolved;

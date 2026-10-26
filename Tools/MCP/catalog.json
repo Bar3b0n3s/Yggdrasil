@@ -997,7 +997,7 @@
 						"maximum": 1000
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1179,7 +1179,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1209,9 +1209,15 @@
 						"enum": ["Edit", "Play"]
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -1224,7 +1230,7 @@
 		{
 			"name": "native_load",
 			"method": "native.load",
-			"description": "Loads the newest current build of the native module, or hot-reloads it, migrating the open scene's native components to a changed layout (Windows; needs the user's Allow native code preference; not while playing).",
+			"description": "Loads the newest current build of the native module, or hot-reloads it, migrating the native components of every open scene to a changed layout (Windows; needs the user's Allow native code preference; not while playing).",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "NoParams",
@@ -1232,7 +1238,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1258,7 +1264,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1298,9 +1304,15 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
 					}
 				},
 				"additionalProperties": false,
@@ -1321,7 +1333,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1355,7 +1367,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}

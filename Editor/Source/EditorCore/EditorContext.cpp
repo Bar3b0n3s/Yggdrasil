@@ -2071,10 +2071,18 @@ namespace Engine {
 		return m_Scene != nullptr && (m_SceneDirty || m_History.IsDirty());
 	}
 
-	void EditorContext::ApplySceneMigration(bool changed, bool clearHistory)
+	void EditorContext::ApplySceneMigration(OpenSceneId scene, bool changed, bool clearHistory)
 	{
-		ENGINE_ASSERT(m_Scene != nullptr, "EditorContext::ApplySceneMigration without an open scene");
+		ENGINE_ASSERT(FindDocument(scene) != nullptr, "EditorContext::ApplySceneMigration of a scene that is not open");
 		ENGINE_ASSERT(m_DryRun == nullptr && m_Transaction == nullptr, "EditorContext::ApplySceneMigration inside a dry run or a transaction");
+		// Another open scene is addressed for its migration and the scene addressed before comes back after it, as
+		// PropagatePrefabUpdate does.
+		const OpenSceneId addressed = m_AddressedScene;
+		if (scene != addressed)
+		{
+			ParkAddressedScene();
+			UnparkScene(scene);
+		}
 		if (clearHistory)
 		{
 			// Clearing moves the save point to the empty history, which would read as saved.
@@ -2084,7 +2092,19 @@ namespace Engine {
 		if (changed)
 		{
 			m_SceneDirty = true;
-			++m_RevisionBase;
+			// The rewrite of the preserved components is no tracked change of the scene's own revision, so the revision moves
+			// here: past every value any open scene reported (decision 13), also for a scene that keeps an older revision
+			// until it changes (UnparkScene).
+			const uint64_t sceneRevision = m_Scene != nullptr ? m_Scene->GetRevision() : 0;
+			const uint64_t next = GetRevisionHighWater() + 1;
+			m_KeptRevision.reset();
+			m_RevisionBase = next - sceneRevision;
+		}
+		if (scene != addressed)
+		{
+			ParkAddressedScene();
+			if (addressed != NoOpenScene)
+				UnparkScene(addressed);
 		}
 	}
 

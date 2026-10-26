@@ -169,6 +169,45 @@ namespace Engine {
 				== std::vector<std::string>{ "Zeta", "Native.TestSpinner", "Native.Ghost", "Native.TestMover" });
 		}
 
+		// The merge with M19 (Docs/Decisions/0031-m20-contract.md, "Merge with M19"): CheckNativeComponents reports what
+		// CanonicalizeNativeComponents would, Changed included, and leaves the scene as it is, so the editor checks every open
+		// scene before a module load migrates any of them; a value its type rejects is an error and nothing would change.
+		TEST_CASE("NativeComponents: a check reports what canonicalizing would and leaves the scene as it is")
+		{
+			const Ref<const NativeModuleTypes> types = RequireTestTypes(Test::GetNativeTestModule());
+			Test::SceneTestFixture setup;
+			LoadReport loadReport;
+			REQUIRE(SceneSerializer::LoadFromString(setup.GetScene(), NativeSceneText, LoadOptions{}, loadReport).has_value());
+			const Result<std::string> before = SceneSerializer::SaveToString(setup.GetScene());
+			REQUIRE(before.has_value());
+
+			const NativeSceneReport checked = CheckNativeComponents(setup.GetScene(), types.get(), false);
+			CHECK(checked.Changed);
+			CHECK(checked.ComponentCount == 3);
+			REQUIRE(checked.Diagnostics.size() == 1);
+			CHECK(checked.Diagnostics[0].Code == NativeComponentUnregisteredCode);
+			CHECK(SceneSerializer::SaveToString(setup.GetScene()).value_or(std::string()) == *before);
+
+			const Result<NativeSceneReport> canonicalized = CanonicalizeNativeComponents(setup.GetScene(), types.get(), false);
+			REQUIRE(canonicalized.has_value());
+			CHECK(canonicalized->Changed == checked.Changed);
+			CHECK(canonicalized->ComponentCount == checked.ComponentCount);
+			CHECK(canonicalized->Diagnostics.size() == checked.Diagnostics.size());
+			CHECK_FALSE(CheckNativeComponents(setup.GetScene(), types.get(), false).Changed);
+
+			// A rejected value: an error, and nothing would change.
+			Entity rejected = setup.GetScene().CreateEntity("Rejected");
+			rejected.AddComponent<UnknownComponentsComponent>(UnknownComponentsComponent{ {
+				UnknownComponentData{ .Name = "Native.TestMover", .Version = 1, .Data = VariantValue(ParseJson(R"({"Speed": -3})")) },
+			} });
+			const NativeSceneReport refused = CheckNativeComponents(setup.GetScene(), types.get(), false);
+			CHECK_FALSE(refused.Changed);
+			CHECK(std::ranges::any_of(refused.Diagnostics, [](const LoadDiagnostic& diagnostic)
+			{
+				return diagnostic.Code == NativeComponentInvalidCode && diagnostic.Severity == DiagnosticSeverity::Error;
+			}));
+		}
+
 		// Decision 27 (N-B; native.setComponents, decision 32): a patch adds a component from its defaults, merges into one the
 		// entity holds and removes one with null, all or nothing.
 		TEST_CASE("NativeComponents: a patch adds, changes and removes native components, all or nothing")

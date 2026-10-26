@@ -51,6 +51,12 @@ namespace Engine {
 	// (Validation, with every error diagnostic as an issue) are only for a scene whose value cannot be read at all.
 	[[nodiscard]] Result<NativeSceneReport> CanonicalizeNativeComponents(Scene& scene, const NativeModuleTypes* types, bool strictUnknowns);
 
+	// CanonicalizeNativeComponents' report for `scene`, which is left as it is: its diagnostics are the ones that call would
+	// report, and Changed says whether that call would change the scene (false when it reports an error). The editor checks
+	// every open scene with it before a module load migrates any of them, so that one scene's error leaves them all as they
+	// were (Docs/Decisions/0031-m20-contract.md, "Merge with M19").
+	[[nodiscard]] NativeSceneReport CheckNativeComponents(const Scene& scene, const NativeModuleTypes* types, bool strictUnknowns);
+
 	// An entity's "Native." components (native.getComponents, decision 32), each with its registry name and JSON, in the
 	// entity's order: Registered holds those `types` registers, Unregistered the others (all of them when `types` is null), as
 	// written.

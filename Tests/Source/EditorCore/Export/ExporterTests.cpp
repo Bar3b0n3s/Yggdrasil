@@ -23,6 +23,7 @@
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/Json/JsonWriter.h"
 #include "Engine/Core/VfsPath.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Platform/Paths.h"
@@ -854,9 +855,10 @@ namespace Engine {
 			REQUIRE(look.has_value());
 			const Entity cube = editor.GetScene().FindEntityByPath("/Cube");
 			REQUIRE(cube.IsValid());
-			ScriptComponent& painter = cube.AddComponent<ScriptComponent>();
+			ScriptSlot painter;
 			painter.Script = TypedAssetHandle<AssetType::Script>(*script);
 			painter.Fields["Look"] = VariantValue(Json(look->ToString()));
+			cube.AddComponent<ScriptComponent>(ScriptComponent{ { std::move(painter) } });
 			SaveScene(editor);
 
 			const Test::TempDirectory binaries("ExportBinaries");
@@ -1638,9 +1640,10 @@ namespace Engine {
 			// The Coin preset through a component, Jump through the script's field, Hit through the literal load.
 			const Entity speaker = editor.GetScene().CreateEntity("Speaker");
 			speaker.AddComponent<AudioSourceComponent>().Clip = TypedAssetHandle<AssetType::AudioClip>(BuiltinAssetHandles::CoinSound);
-			ScriptComponent& sounds = speaker.AddComponent<ScriptComponent>();
+			ScriptSlot sounds;
 			sounds.Script = TypedAssetHandle<AssetType::Script>(*script);
 			sounds.Fields["Clip"] = VariantValue(Json(BuiltinAssetHandles::JumpSound.ToString()));
+			speaker.AddComponent<ScriptComponent>(ScriptComponent{ { std::move(sounds) } });
 			SaveScene(editor);
 
 			const Test::TempDirectory binaries("ExportBinaries");
@@ -1725,6 +1728,72 @@ namespace Engine {
 			CHECK(win->Line == 3);
 		}
 
+		// The merge with M19 (Docs/Decisions/0031-m20-contract.md, "Merge with M19"): the pruned export reads the asset handles
+		// of a Script component's fields from each slot of the scene as a load migrates it, so a build scene still at Script
+		// version 1 (a project saved before M20, until project.upgrade) keeps the asset its script field names, as one at
+		// version 2 does.
+		TEST_CASE("Exporter: Export.PruneUnreferenced keeps an asset that a script field of a scene still at Script version 1 names")
+		{
+			Test::EditorTestFixture fixture("ExportPrunedScriptVersion1");
+			MakeExportableProject(fixture);
+			EditorContext& editor = fixture.GetEditor();
+			const Result<std::string> material = Test::ReadTestDataText("Assets/Materials/Red.material");
+			REQUIRE(material.has_value());
+			for (const std::string_view name : { "Field", "Unused" })
+				WriteTestFile(fixture.GetProjectRoot() / std::format("Assets/Materials/{}.material", name), *material);
+			WriteTestFile(fixture.GetProjectRoot() / "Assets/Scripts/Looker.luau",
+				"local Looker = {Fields = {Look = Field.Asset(\"Material\")}}\n"
+				"return Script.Define(\"Looker\", Looker)\n");
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			const auto handleOf = [&editor](std::string_view path)
+			{
+				const std::optional<AssetHandle> handle = editor.GetAssets().Resolve(path);
+				REQUIRE_MESSAGE(handle.has_value(), path);
+				return *handle;
+			};
+			const Entity cube = editor.GetScene().FindEntityByPath("/Cube");
+			REQUIRE(cube.IsValid());
+			ScriptSlot looker;
+			looker.Script = TypedAssetHandle<AssetType::Script>(handleOf("Assets/Scripts/Looker.luau"));
+			looker.Fields["Look"] = VariantValue(Json(handleOf("Assets/Materials/Field.material").ToString()));
+			cube.AddComponent<ScriptComponent>(ScriptComponent{ { std::move(looker) } });
+			SaveScene(editor);
+			ApplySettings(editor, R"({"Export":{"PruneUnreferenced":true}})");
+
+			// Main.scene as a project saved before M20 holds it: its Script component at version 1, one script.
+			const std::filesystem::path mainFile = fixture.GetProjectRoot() / "Assets/Scenes/Main.scene";
+			const Result<std::string> saved = FileSystem::ReadText(mainFile);
+			REQUIRE(saved.has_value());
+			Result<Json> document = JsonReader::Parse(*saved);
+			REQUIRE(document.has_value());
+			(*document)["ComponentVersions"]["Script"] = 1;
+			for (Json& entity : (*document)["Entities"])
+			{
+				Json& components = entity["Components"];
+				if (!components.contains("Script"))
+					continue;
+				Json slot = components["Script"]["Scripts"][0];
+				components["Script"] = std::move(slot);
+			}
+			const Result<std::string> version1 = JsonWriter::Write(*document);
+			REQUIRE(version1.has_value());
+			WriteTestFile(mainFile, *version1);
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+
+			const Test::TempDirectory binaries("ExportBinaries");
+			Result<Scope<Exporter>> exporter = Exporter::Start(editor, MakeSpecification(MakeRealBinaryRoot(binaries)));
+			REQUIRE_MESSAGE(exporter.has_value(), exporter.error().ToString());
+			const std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+			REQUIRE(outcome.has_value());
+			REQUIRE_MESSAGE(outcome->has_value(), outcome->error().ToString());
+			const ExportReachability& reach = (*outcome)->Reachability;
+			const auto field = std::ranges::find(reach.GameAssets, std::string_view("Assets/Materials/Field.material"), &ExportReachedAsset::Path);
+			REQUIRE(field != reach.GameAssets.end());
+			CHECK(field->Reason == ExportReachReason::Dependency);
+			CHECK(field->From == MainScene);
+			CHECK(reach.PrunedAssets == std::vector<std::string>{ "Assets/Materials/Unused.material" });
+		}
+
 		// Docs/Decisions/0030-m19-contract.md decision 21 (B-PRUNE-GAME, stream R): with Export.PruneUnreferenced, Game.pak holds
 		// only what StartScene and Export.BuildScenes reach: a component's reference, a script and its field's value, a scene
 		// a literal Assets.Load names; an unreferenced asset and one only a computed load names are left out, and the report
@@ -1761,9 +1830,10 @@ namespace Engine {
 			const Entity cube = editor.GetScene().FindEntityByPath("/Cube");
 			REQUIRE(cube.IsValid());
 			cube.GetComponent<MeshRendererComponent>().Materials = { TypedAssetHandle<AssetType::Material>(handleOf("Assets/Materials/Used.material")) };
-			ScriptComponent& loader = cube.AddComponent<ScriptComponent>();
+			ScriptSlot loader;
 			loader.Script = TypedAssetHandle<AssetType::Script>(handleOf("Assets/Scripts/Loader.luau"));
 			loader.Fields["Look"] = VariantValue(Json(handleOf("Assets/Materials/Field.material").ToString()));
+			cube.AddComponent<ScriptComponent>(ScriptComponent{ { std::move(loader) } });
 			SaveScene(editor);
 			ApplySettings(editor, R"({"Export":{"PruneUnreferenced":true}})");
 

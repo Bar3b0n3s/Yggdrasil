@@ -276,20 +276,20 @@ return Script.Define("Hud", Hud)
 			Json ops = ParseEditMethodJson(R"([
 				{"method":"entity.create","params":{"name":"Game"},"name":"game"},
 				{"method":"entity.create","params":{"name":"ScoreText","parent":{"$ref":"game.entity.id"}},"name":"score"},
-				{"method":"entity.create","params":{"name":"Hud","components":{"Script":{"Fields":{"Score":"/Game/ScoreText"}}}}}])");
-			ops[2]["params"]["components"]["Script"]["Script"] = path;
+				{"method":"entity.create","params":{"name":"Hud","components":{"Script":{"Scripts":[{"Fields":{"Score":"/Game/ScoreText"}}]}}}}])");
+			ops[2]["params"]["components"]["Script"]["Scripts"][0]["Script"] = path;
 			Result<Json> batch = setup.Call("edit.batch", Json{ { "label", "Hud" }, { "ops", ops } });
 			REQUIRE_MESSAGE(batch.has_value(), batch.error().ToString());
 			const Json score = (*batch)["results"][1]["entity"]["id"];
 			Result<Json> hud = setup.Call("entity.get", Json{ { "entity", "/Hud" } });
 			REQUIRE_MESSAGE(hud.has_value(), hud.error().ToString());
-			CHECK((*hud)["entity"]["components"]["Script"]["Fields"]["Score"] == score);
+			CHECK((*hud)["entity"]["components"]["Script"]["Scripts"][0]["Fields"]["Score"] == score);
 
 			const Result<std::string> before = SceneSerializer::SaveToString(setup.GetEditor().GetScene());
 			REQUIRE(before.has_value());
 			Json missing = ParseEditMethodJson(R"([
 				{"method":"entity.create","params":{"name":"Lives"}},
-				{"method":"entity.update","params":{"entity":"/Hud","components":{"Script":{"Fields":{"Score":"/Game/Lives"}}}}}])");
+				{"method":"entity.update","params":{"entity":"/Hud","components":{"Script":{"Scripts":[{"Fields":{"Score":"/Game/Lives"}}]}}}}])");
 			Json refused = setup.Request("edit.batch", Json{ { "ops", missing } });
 			REQUIRE_MESSAGE(refused.contains("error"), refused.dump());
 			CHECK(refused["error"]["data"]["errorCode"] == Json("NotFound"));

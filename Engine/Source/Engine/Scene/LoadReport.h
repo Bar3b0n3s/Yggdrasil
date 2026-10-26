@@ -106,7 +106,9 @@ namespace Engine {
 	inline constexpr std::string_view SceneInvalidComponentCode = "SCENE_INVALID_COMPONENT";
 	// Warning (an error with LoadOptions::StrictUnknowns): an unknown component, preserved on save with its numbers written
 	// as float like every authored number (§6). One holding a fractional number outside float's range, which JsonWriter
-	// could not write back, is SceneInvalidComponentCode instead.
+	// could not write back, is SceneInvalidComponentCode instead. A native component ("Native.<Name>",
+	// IsNativeComponentName) is preserved the same way but never reported with this code, also under StrictUnknowns: the
+	// native layer checks it against the loaded module (Docs/Decisions/0030-m19-contract.md decision 27).
 	inline constexpr std::string_view SceneUnknownComponentCode = "SCENE_UNKNOWN_COMPONENT";
 	// Warning: an unknown entity or document key, dropped.
 	inline constexpr std::string_view SceneUnknownKeyCode = "SCENE_UNKNOWN_KEY";

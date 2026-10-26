@@ -57,6 +57,9 @@ namespace Engine {
 				{ "entity.get", SceneRelation::Target },
 				{ "entity.reparent", SceneRelation::Target },
 				{ "entity.update", SceneRelation::Target },
+				// M19's native component reads and writes (Docs/Decisions/0031-m20-contract.md, "Merge with M19").
+				{ "native.getComponents", SceneRelation::Target },
+				{ "native.setComponents", SceneRelation::Target },
 				{ "prefab.apply", SceneRelation::Target }, // the other open scenes' instances follow in their own histories
 				{ "prefab.create", SceneRelation::Target },
 				{ "prefab.instantiate", SceneRelation::Target },
@@ -87,6 +90,7 @@ namespace Engine {
 				// Every open scene.
 				{ "asset.reimport", SceneRelation::AllScenes },          // a changed prefab's instances in every open scene
 				{ "asset.setImportSettings", SceneRelation::AllScenes }, // the same
+				{ "native.load", SceneRelation::AllScenes },             // migrates every open scene's native components (M19)
 				{ "project.export", SceneRelation::AllScenes },          // warns about every unsaved open scene
 				{ "project.open", SceneRelation::AllScenes },            // recover opens every recovered scene
 				{ "project.refreshAssets", SceneRelation::AllScenes },   // SceneChangedOnDisk for every open scene
@@ -111,9 +115,14 @@ namespace Engine {
 				{ "docs.get", SceneRelation::None },
 				{ "events.read", SceneRelation::None },
 				{ "input.inject", SceneRelation::None },
+				{ "input.readReplay", SceneRelation::None }, // M19: a replay file's events
 				{ "input.record", SceneRelation::None },
 				{ "input.replay", SceneRelation::None },
 				{ "log.read", SceneRelation::None },
+				{ "native.build", SceneRelation::None }, // M19: the module's sources and builds
+				{ "native.read", SceneRelation::None },
+				{ "native.status", SceneRelation::None },
+				{ "native.write", SceneRelation::None },
 				{ "physics.bodyInfo", SceneRelation::None }, // the play session's scene
 				{ "play.pause", SceneRelation::None },
 				{ "play.resume", SceneRelation::None },
@@ -498,6 +507,61 @@ namespace Engine {
 			const Result<Json> refused = setup.Call("edit.batch", opTarget);
 			REQUIRE_FALSE(refused.has_value());
 			CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
+		}
+
+		// The merge with M19 (Docs/Decisions/0031-m20-contract.md, "Merge with M19"; ADR 0028's ledger, "Entity paths and
+		// scenes": M20 passes the target to M19's resolver): a named $ref and an entity path inside component data (a script's
+		// Field.Entity()) resolve in the batch's target scene, never in the active scene, which holds the same paths with
+		// other ids; a path that names an entity of the active scene only rolls the targeted batch back.
+		TEST_CASE("SceneTarget: a batch's named $ref and the entity paths in its component data resolve in the target scene")
+		{
+			Test::AutomationFixture setup("SceneTargetResolver");
+			const std::string hud = "local Hud = { Fields = { Score = Field.Entity() } }\nreturn Script.Define(\"Hud\", Hud)\n";
+			REQUIRE(setup.Call("script.write", Json{ { "path", "Assets/Scripts/Hud.luau" }, { "source", hud } }).has_value());
+			const Result<Json> second = setup.Call("scene.new", Json{ { "path", "Assets/Scenes/Second.scene" }, { "keepOpen", true } });
+			REQUIRE_MESSAGE(second.has_value(), second.error().ToString());
+			// The active scene holds the same paths, and one more entity.
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Game" } }).has_value());
+			const Result<Json> activeScore = setup.Call("entity.create", Json{ { "name", "ScoreText" }, { "parent", "/Game" } });
+			REQUIRE(activeScore.has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "OnlyActive" } }).has_value());
+			EditorContext& editor = setup.GetEditor();
+			const size_t activeCount = editor.GetScene().GetEntityCount();
+
+			const Json slot{ { "Script", "Assets/Scripts/Hud.luau" }, { "Fields", Json{ { "Score", "/Game/ScoreText" } } } };
+			const Json hudComponents{ { "Script", Json{ { "Scripts", Json::array({ slot }) } } } };
+			Json batch{ { "scene", "Assets/Scenes/Main.scene" }, { "label", "Hud" } };
+			batch["ops"] = Json::array({ Json{ { "method", "entity.create" }, { "params", Json{ { "name", "Game" } } }, { "name", "game" } },
+				Json{ { "method", "entity.create" }, { "params", Json{ { "name", "ScoreText" }, { "parent", Json{ { "$ref", "game.entity.id" } } } } } },
+				Json{ { "method", "entity.create" }, { "params", Json{ { "name", "Hud" }, { "components", hudComponents } } } } });
+			const Result<Json> ran = setup.Call("edit.batch", batch);
+			REQUIRE_MESSAGE(ran.has_value(), ran.error().ToString());
+			const Json mainScore = (*ran)["results"][1]["entity"]["id"];
+			CHECK(mainScore != (*activeScore)["entity"]["id"]);
+			CHECK((*ran)["results"][1]["entity"]["path"] == Json("/Game/ScoreText"));
+
+			const Result<Json> hudEntity = setup.Call("entity.get", Json{ { "scene", "Assets/Scenes/Main.scene" }, { "entity", "/Hud" } });
+			REQUIRE_MESSAGE(hudEntity.has_value(), hudEntity.error().ToString());
+			CHECK((*hudEntity)["entity"]["components"]["Script"]["Scripts"][0]["Fields"]["Score"] == mainScore);
+			CHECK(editor.GetScene().GetEntityCount() == activeCount);
+			CHECK(editor.GetScene().GetName() == "Second");
+
+			// A path that only the active scene holds names nothing in the target: the batch rolls back there.
+			const OpenSceneId mainId = editor.FindOpenScene(*VfsPath::Parse("project://Assets/Scenes/Main.scene"));
+			const Result<OpenSceneInfo> before = editor.DescribeOpenScene(mainId);
+			REQUIRE(before.has_value());
+			const Json stray{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Fields", Json{ { "Score", "/OnlyActive" } } } } }) } } } };
+			Json missing{ { "scene", "Assets/Scenes/Main.scene" } };
+			missing["ops"] = Json::array({ Json{ { "method", "entity.create" }, { "params", Json{ { "name", "Lives" } } } },
+				Json{ { "method", "entity.update" }, { "params", Json{ { "entity", "/Hud" }, { "components", stray } } } } });
+			const Json refused = setup.Request("edit.batch", missing);
+			REQUIRE_MESSAGE(refused.contains("error"), refused.dump());
+			CHECK(refused["error"]["data"]["errorCode"] == Json("NotFound"));
+			CHECK(refused["error"]["data"]["failedOp"] == Json(1));
+			CHECK(editor.DescribeOpenScene(mainId)->EntityCount == before->EntityCount);
+			const Scene* main = std::as_const(editor).FindScene(mainId);
+			REQUIRE(main != nullptr);
+			CHECK_FALSE(main->FindEntityByPath("/Lives").IsValid());
 		}
 	}
 

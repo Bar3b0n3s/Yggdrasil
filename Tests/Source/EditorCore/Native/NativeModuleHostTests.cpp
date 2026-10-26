@@ -29,9 +29,11 @@
 #include <algorithm>
 #include <filesystem>
 #include <format>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace Engine {
@@ -433,6 +435,97 @@ namespace Engine {
 			CHECK(reload.error().GetCode() == ErrorCode::Validation);
 			CHECK(setup.GetHost().GetLoadedTypes() == loaded);
 			CHECK(SceneSerializer::SaveToString(setup.GetEditor().GetScene()).value_or(std::string()) == *written);
+		}
+
+		// The merge with M19 (Docs/Decisions/0031-m20-contract.md, "Merge with M19"): a load whose layout changed migrates the
+		// native components of every open scene, the parked ones included, marks each changed scene modified and clears every
+		// open scene's undo history; its report lists each scene's migration in tab order.
+		TEST_CASE("NativeModuleHost: a load migrates the native components of every open scene and clears every open scene's undo history")
+		{
+			NativeHostSetup setup;
+			setup.Allow(true);
+			REQUIRE(setup.Build().Succeeded);
+			EditorContext& editor = setup.GetEditor();
+			const OpenSceneId first = editor.GetActiveSceneId();
+			// A member the module's layout lacks, as a scene written for an earlier layout holds it, in each open scene, and one
+			// undoable edit in each.
+			const auto prepare = [&editor](std::string_view name, std::string_view json)
+			{
+				const UUID id = editor.GetScene().CreateEntity("Spinner").GetUUID();
+				SetRawNativeComponent(editor.GetScene().FindEntityByID(id), "Native.TestSpinner", json);
+				SceneEdit edit(editor, std::format("Rename to '{}'", name));
+				editor.GetScene().FindEntityByID(id).SetName(std::string(name));
+				REQUIRE(edit.Commit().has_value());
+				return id;
+			};
+			const UUID wheel = prepare("Wheel", R"({"DegreesPerSecond": 10, "OldField": 3})");
+			const Result<OpenSceneId> second = editor.AddScene(editor.CreateScene("Second"), std::nullopt);
+			REQUIRE_MESSAGE(second.has_value(), second.error().ToString());
+			const UUID rotor = prepare("Rotor", R"({"DegreesPerSecond": 20, "OldField": 4})");
+			REQUIRE(editor.GetActiveSceneId() == *second);
+
+			const NativeLoadReport report = setup.Load();
+			CHECK(report.LayoutChanged);
+			CHECK(report.Scene.Changed);
+			CHECK(report.UndoCleared);
+			CHECK(report.Scene.ComponentCount == 2);
+			REQUIRE(report.Scenes.size() == 2);
+			CHECK(report.Scenes[0].Scene == first);
+			CHECK(report.Scenes[1].Scene == *second);
+			CHECK(report.Scenes[0].Report.Changed);
+			CHECK(report.Scenes[1].Report.Changed);
+			CHECK(editor.GetActiveSceneId() == *second);
+
+			const Ref<const NativeModuleTypes> types = setup.GetHost().GetLoadedTypes();
+			for (const std::pair<OpenSceneId, UUID>& spinner : { std::pair(first, wheel), std::pair(*second, rotor) })
+			{
+				CAPTURE(spinner.first);
+				REQUIRE(editor.ActivateScene(spinner.first).has_value());
+				CHECK(editor.IsSceneDirty());
+				CHECK_FALSE(editor.GetHistory().CanUndo());
+				const NativeEntityComponents components = ReadNativeComponents(editor.GetScene().FindEntityByID(spinner.second), types.get());
+				REQUIRE(components.Registered.size() == 1);
+				CHECK_FALSE(components.Registered[0].second.Get().contains("OldField"));
+			}
+		}
+
+		// The merge with M19: every open scene is checked before any is migrated, so a value the new types reject in one open
+		// scene fails the load as a whole: the loaded module stays, and no open scene changes, the earlier tabs included.
+		TEST_CASE("NativeModuleHost: a load whose migration fails in one open scene changes no open scene")
+		{
+			NativeHostSetup setup;
+			setup.Allow(true);
+			REQUIRE(setup.Build().Succeeded);
+			static_cast<void>(setup.Load());
+			const Ref<const NativeModuleTypes> loaded = setup.GetHost().GetLoadedTypes();
+			REQUIRE(loaded != nullptr);
+			EditorContext& editor = setup.GetEditor();
+			const OpenSceneId first = editor.GetActiveSceneId();
+			SetRawNativeComponent(editor.GetScene().CreateEntity("Spinner"), "Native.TestSpinner", R"({"DegreesPerSecond": 10})");
+			const Result<OpenSceneId> second = editor.AddScene(editor.CreateScene("Second"), std::nullopt);
+			REQUIRE_MESSAGE(second.has_value(), second.error().ToString());
+			// Beyond the next layout's range, as a scene file may hold it.
+			SetRawNativeComponent(editor.GetScene().CreateEntity("Rejected"), "Native.TestSpinner", R"({"DegreesPerSecond": -5000})");
+			const auto save = [&editor](OpenSceneId scene)
+			{
+				const Scene* open = std::as_const(editor).FindScene(scene);
+				REQUIRE(open != nullptr);
+				return SceneSerializer::SaveToString(*open).value_or(std::string());
+			};
+			const std::string firstBefore = save(first);
+			const std::string secondBefore = save(*second);
+			const uint64_t revision = editor.GetRevision();
+
+			setup.Builds->SetModule(Test::FakeNativeModule::Layout2);
+			REQUIRE(setup.Build().Succeeded);
+			const Result<NativeLoadReport> reload = setup.GetHost().Load(editor);
+			REQUIRE_FALSE(reload.has_value());
+			CHECK(reload.error().GetCode() == ErrorCode::Validation);
+			CHECK(reload.error().GetMessageText().contains("Second"));
+			CHECK(setup.GetHost().GetLoadedTypes() == loaded);
+			CHECK(save(first) == firstBefore);
+			CHECK(save(*second) == secondBefore);
+			CHECK(editor.GetRevision() == revision);
 		}
 
 		// Decision 31 (N-C): every build gets a new numbered directory, and the host keeps only the loaded build and the

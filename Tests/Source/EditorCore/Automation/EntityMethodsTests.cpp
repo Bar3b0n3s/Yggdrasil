@@ -529,13 +529,13 @@ return Script.Define("Hud", Hud)
 			REQUIRE(setup.Call("entity.create", Json{ { "name", "Hud" } }).has_value());
 
 			const Json fields{ { "Score", "/Game/ScoreText" }, { "Lives", Json::array({ livesID.substr(0, 10) }) } };
-			const auto updated = setup.Call("entity.update", Json{ { "entity", "/Hud" }, { "components", Json{ { "Script", Json{ { "Script", path }, { "Fields", fields } } } } } });
+			const auto updated = setup.Call("entity.update", Json{ { "entity", "/Hud" }, { "components", Json{ { "Script", ScriptSlots(Json{ { "Script", path }, { "Fields", fields } }) } } } });
 			REQUIRE_MESSAGE(updated.has_value(), updated.error().ToString());
-			CHECK((*updated)["entity"]["components"]["Script"]["Fields"]["Score"] == Json(scoreID));
-			CHECK((*updated)["entity"]["components"]["Script"]["Fields"]["Lives"][0] == Json(livesID));
+			CHECK((*updated)["entity"]["components"]["Script"]["Scripts"][0]["Fields"]["Score"] == Json(scoreID));
+			CHECK((*updated)["entity"]["components"]["Script"]["Scripts"][0]["Fields"]["Lives"][0] == Json(livesID));
 
 			const uint64_t revision = setup.GetEditor().GetRevision();
-			const auto missing = setup.Call("entity.update", Json{ { "entity", "/Hud" }, { "components", Json{ { "Script", Json{ { "Fields", Json{ { "Score", "/Game/Missing" } } } } } } } });
+			const auto missing = setup.Call("entity.update", Json{ { "entity", "/Hud" }, { "components", Json{ { "Script", ScriptSlots(Json{ { "Fields", Json{ { "Score", "/Game/Missing" } } } }) } } } });
 			REQUIRE_FALSE(missing.has_value());
 			CHECK(missing.error().GetCode() == ErrorCode::NotFound);
 			CHECK(setup.GetEditor().GetRevision() == revision);
@@ -569,10 +569,10 @@ return Script.Define("Aim", Aim)
 			REQUIRE(member.IsValid());
 			REQUIRE(nested.IsValid());
 			const Json fields{ { "Target", "/Row/Cell/Sprite" }, { "Others", Json::array({ "/Row/Extra/Sprite" }) } };
-			const auto updated = setup.Call("entity.update", Json{ { "entity", "/Aim" }, { "components", Json{ { "Script", Json{ { "Script", path }, { "Fields", fields } } } } } });
+			const auto updated = setup.Call("entity.update", Json{ { "entity", "/Aim" }, { "components", Json{ { "Script", ScriptSlots(Json{ { "Script", path }, { "Fields", fields } }) } } } });
 			REQUIRE_MESSAGE(updated.has_value(), updated.error().ToString());
-			CHECK((*updated)["entity"]["components"]["Script"]["Fields"]["Target"] == Json(member.GetUUID().ToString()));
-			CHECK((*updated)["entity"]["components"]["Script"]["Fields"]["Others"][0] == Json(nested.GetUUID().ToString()));
+			CHECK((*updated)["entity"]["components"]["Script"]["Scripts"][0]["Fields"]["Target"] == Json(member.GetUUID().ToString()));
+			CHECK((*updated)["entity"]["components"]["Script"]["Scripts"][0]["Fields"]["Others"][0] == Json(nested.GetUUID().ToString()));
 		}
 
 		// Docs/Decisions/0030-m19-contract.md decision 7: a request whose target is play resolves the paths in its component
@@ -587,16 +587,16 @@ local Hud = { Fields = { Score = Field.Entity() } }
 return Script.Define("Hud", Hud)
 )" } })
 					.has_value());
-			REQUIRE(setup.Call("entity.create", Json{ { "name", "Hud" }, { "components", Json{ { "Script", Json{ { "Script", path } } } } } }).has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Hud" }, { "components", Json{ { "Script", ScriptSlots(Json{ { "Script", path } }) } } } }).has_value());
 			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true } }).has_value());
 			auto spawned = setup.Call("entity.create", Json{ { "name", "Spawned" }, { "target", "play" } });
 			REQUIRE_MESSAGE(spawned.has_value(), spawned.error().ToString());
 			const std::string spawnedID = ReadEntityId(*spawned);
 
-			const Json components{ { "Script", Json{ { "Script", path }, { "Fields", Json{ { "Score", "/Spawned" } } } } } };
+			const Json components{ { "Script", ScriptSlots(Json{ { "Script", path }, { "Fields", Json{ { "Score", "/Spawned" } } } }) } };
 			const auto played = setup.Call("entity.update", Json{ { "entity", "/Hud" }, { "target", "play" }, { "components", components } });
 			REQUIRE_MESSAGE(played.has_value(), played.error().ToString());
-			CHECK((*played)["entity"]["components"]["Script"]["Fields"]["Score"] == Json(spawnedID));
+			CHECK((*played)["entity"]["components"]["Script"]["Scripts"][0]["Fields"]["Score"] == Json(spawnedID));
 
 			const auto edited = setup.Call("entity.update", Json{ { "entity", "/Hud" }, { "components", components } });
 			REQUIRE_FALSE(edited.has_value());

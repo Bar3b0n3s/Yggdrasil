@@ -235,8 +235,17 @@ namespace Engine {
 			return count;
 		}
 
-		// A canonicalization's errors as one Validation error, each with its entity and pointer.
-		[[nodiscard]] static Error MakeNativeMigrationError(std::span<const LoadDiagnostic> diagnostics, bool reload)
+		// Whether `diagnostics` hold an error.
+		[[nodiscard]] static bool HasErrorDiagnostic(std::span<const LoadDiagnostic> diagnostics)
+		{
+			return std::ranges::any_of(diagnostics, [](const LoadDiagnostic& diagnostic)
+			{
+				return diagnostic.Severity == DiagnosticSeverity::Error;
+			});
+		}
+
+		// A canonicalization's errors in the open scene `sceneName` as one Validation error, each with its entity and pointer.
+		[[nodiscard]] static Error MakeNativeMigrationError(std::string_view sceneName, std::span<const LoadDiagnostic> diagnostics, bool reload)
 		{
 			std::vector<ErrorIssue> issues;
 			for (const LoadDiagnostic& diagnostic : diagnostics)
@@ -249,7 +258,7 @@ namespace Engine {
 					.Suggestions = {} });
 			}
 			std::string first = issues.empty() ? std::string("a native component does not convert") : issues.front().Message;
-			return Error(ErrorCode::Validation, std::format("the open scene's native components do not take the module's types: {}", first))
+			return Error(ErrorCode::Validation, std::format("the native components of the open scene '{}' do not take the module's types: {}", sceneName, first))
 				.WithIssues(std::move(issues))
 				.WithHint(reload ? "correct or remove the components named (native.setComponents), or change the module so it accepts them; the loaded module stays loaded"
 								 : "correct or remove the components named, or change the module so it accepts them; no module was loaded");
@@ -314,40 +323,70 @@ namespace Engine {
 			NativeLoadReport report;
 			report.Reloaded = Loaded != nullptr;
 			report.LayoutChanged = Loaded == nullptr || Loaded->GetLayoutHash() != types->GetLayoutHash();
-			if (editor.HasScene())
+			// M20 (Docs/Decisions/0031-m20-contract.md, "Merge with M19"): every open scene, in tab order.
+			const std::vector<OpenSceneId> scenes = editor.GetOpenScenes();
+			if (report.LayoutChanged)
 			{
-				if (report.LayoutChanged)
+				// The migration by field name (decision 27), checked in every open scene before any changes: an error leaves
+				// every open scene as it was, so the load fails here with the previous module still loaded.
+				for (const OpenSceneId id : scenes)
 				{
-					// The migration by field name (decision 27). Its errors leave the scene as it was, so the load fails here
-					// with the previous module still loaded.
-					ENGINE_TRY_ASSIGN(report.Scene, CanonicalizeNativeComponents(editor.GetScene(), types.get(), false));
-					if (std::ranges::any_of(report.Scene.Diagnostics, [](const LoadDiagnostic& diagnostic)
-					{
-						return diagnostic.Severity == DiagnosticSeverity::Error;
-					}))
-						return std::unexpected(Utils::MakeNativeMigrationError(report.Scene.Diagnostics, report.Reloaded));
+					const Scene* scene = std::as_const(editor).FindScene(id);
+					ENGINE_ASSERT(scene != nullptr, "an open scene of EditorContext::GetOpenScenes has no scene");
+					const NativeSceneReport checked = CheckNativeComponents(*scene, types.get(), false);
+					if (Utils::HasErrorDiagnostic(checked.Diagnostics))
+						return std::unexpected(Utils::MakeNativeMigrationError(scene->GetName(), checked.Diagnostics, report.Reloaded));
 				}
-				else
+				for (const OpenSceneId id : scenes)
 				{
-					// Equal layout hashes mean equal canonical JSON for every value: nothing is rewritten.
-					report.Scene.ComponentCount = Utils::CountNativeComponents(editor.GetScene());
+					ENGINE_TRY_ASSIGN(NativeSceneReport migrated, CanonicalizeNativeComponents(*editor.FindScene(id), types.get(), false));
+					report.Scenes.push_back(NativeSceneMigration{ .Scene = id, .Report = std::move(migrated) });
 				}
+			}
+			else
+			{
+				// Equal layout hashes mean equal canonical JSON for every value: nothing is rewritten.
+				for (const OpenSceneId id : scenes)
+				{
+					const Scene* scene = std::as_const(editor).FindScene(id);
+					ENGINE_ASSERT(scene != nullptr, "an open scene of EditorContext::GetOpenScenes has no scene");
+					NativeSceneReport counted;
+					counted.ComponentCount = Utils::CountNativeComponents(*scene);
+					report.Scenes.push_back(NativeSceneMigration{ .Scene = id, .Report = std::move(counted) });
+				}
+			}
+			for (const NativeSceneMigration& migration : report.Scenes)
+			{
+				report.Scene.Changed = report.Scene.Changed || migration.Report.Changed;
+				report.Scene.ComponentCount += migration.Report.ComponentCount;
+				report.Scene.Diagnostics.insert(report.Scene.Diagnostics.end(), migration.Report.Diagnostics.begin(), migration.Report.Diagnostics.end());
 			}
 
 			Ref<const NativeModuleTypes> previous = std::exchange(Loaded, std::move(types));
 			LoadedDirectory = build.Directory;
 			LoadedSourceHash = build.Record->SourceHash;
-			// Any load whose layout changed, a first load included, clears the undo history: its entity snapshots hold the
-			// previous layout's values or, recorded without a module, the values as written, which undo would put back whole.
-			report.UndoCleared = editor.HasScene() && report.LayoutChanged;
-			if (editor.HasScene() && (report.Scene.Changed || report.UndoCleared))
-				editor.ApplySceneMigration(report.Scene.Changed, report.UndoCleared);
+			// Any load whose layout changed, a first load included, clears the undo history of every open scene: its entity
+			// snapshots hold the previous layout's values or, recorded without a module, the values as written, which undo
+			// would put back whole.
+			report.UndoCleared = !scenes.empty() && report.LayoutChanged;
+			for (const NativeSceneMigration& migration : report.Scenes)
+			{
+				if (migration.Report.Changed || report.UndoCleared)
+					editor.ApplySceneMigration(migration.Scene, migration.Report.Changed, report.UndoCleared);
+			}
 			ENGINE_INFO("{} the native module of '{}' from '{}': {} components, {} resources, {} systems{}{}", report.Reloaded ? "Reloaded" : "Loaded",
 				editor.GetProject().GetSettings().Name, FileSystem::PathToUtf8(library), Loaded->GetComponents().size(), Loaded->GetResources().size(),
 				Loaded->GetSystems().size(), report.Reloaded && !report.LayoutChanged ? ", layout unchanged" : "",
-				report.Scene.Changed ? std::format(", the open scene's {} native components migrated", report.Scene.ComponentCount) : std::string());
-			for (const LoadDiagnostic& diagnostic : report.Scene.Diagnostics)
-				ENGINE_WARN("Native module migration: entity {} {}: {} ({})", diagnostic.Entity.ToString(), diagnostic.JsonPointer, diagnostic.Message, diagnostic.Code);
+				report.Scene.Changed ? std::format(", the {} native components of the open scenes migrated", report.Scene.ComponentCount) : std::string());
+			for (const NativeSceneMigration& migration : report.Scenes)
+			{
+				const Scene* scene = std::as_const(editor).FindScene(migration.Scene);
+				for (const LoadDiagnostic& diagnostic : migration.Report.Diagnostics)
+				{
+					ENGINE_WARN("Native module migration: scene '{}', entity {} {}: {} ({})", scene != nullptr ? scene->GetName() : std::string(),
+						diagnostic.Entity.ToString(), diagnostic.JsonPointer, diagnostic.Message, diagnostic.Code);
+				}
+			}
 			// The previous types last: their library unloads once nothing else holds them (a play session cannot run now).
 			previous.reset();
 			RemoveOldBuilds(editor);

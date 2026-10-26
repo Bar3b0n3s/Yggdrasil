@@ -324,8 +324,8 @@ class ReplayTests(AutomationTestCase):
                     "\tif Input.IsKeyDown(\"Space\") then self.Entity.Transform:Translate(vector.create(1, 0, 0)) end\n"
                     "\tif Time.GetTick() == 125 then self.Entity.Transform.Translation = vector.create(0, 0, 0) end\n"
                     "end\nreturn Script.Define(\"Resetter\", Resetter)\n"})
-        client.call("entity.create", {"name": "Resetter",
-                                       "components": {"Script": {"Script": "Assets/Scripts/Resetter.luau"}}})
+        resetter = {"Script": {"Scripts": [{"Script": "Assets/Scripts/Resetter.luau"}]}}
+        client.call("entity.create", {"name": "Resetter", "components": resetter})
         client.call("scene.save")
         client.call("input.record", {"action": "start"})
         client.call("play.step", {"ticks": 130, "render": "none", "input": [
@@ -516,8 +516,8 @@ class ReplayTests(AutomationTestCase):
         client.call("script.write", {"path": "Assets/Scripts/Leaver.luau", "source":
                     "local Leaver = {}\nfunction Leaver.OnDestroy(self: any)\n\terror(\"teardown fault\")\nend\n"
                     "return Script.Define(\"Leaver\", Leaver)\n"})
-        client.call("entity.create", {"name": "Leaver",
-                                      "components": {"Script": {"Script": "Assets/Scripts/Leaver.luau"}}})
+        leaver = {"Script": {"Scripts": [{"Script": "Assets/Scripts/Leaver.luau"}]}}
+        client.call("entity.create", {"name": "Leaver", "components": leaver})
         client.call("scene.save")
         client.call("input.record", {"action": "start"})
         client.call("play.step", {"ticks": 10, "render": "none"})

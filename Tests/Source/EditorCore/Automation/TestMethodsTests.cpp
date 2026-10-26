@@ -551,7 +551,7 @@ namespace Engine {
 																												  "\tif Time.GetTick() == 125 then self.Entity.Transform.Translation = vector.create(0, 0, 0) end\n"
 																												  "end\n"
 																												  "return Script.Define(\"Resetter\", Resetter)\n" } });
-			CallTestMethod(fixture, "entity.create", Json{ { "name", "Resetter" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Resetter.luau" } } } } } });
+			CallTestMethod(fixture, "entity.create", Json{ { "name", "Resetter" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/Resetter.luau" } } }) } } } } } });
 			CallTestMethod(fixture, "scene.save", Json::object());
 			WriteSuite(fixture, "return Test.Suite('Autopilot', function()\n"
 								"Test.Case('play, then reset', function()\n"
@@ -592,7 +592,7 @@ namespace Engine {
 																												"\tif Input.IsKeyDown(\"Space\") then self.Entity.Transform:Translate(vector.create(1, 0, 0)) end\n"
 																												"end\n"
 																												"return Script.Define(\"Paddle\", Paddle)\n" } });
-			CallTestMethod(fixture, "entity.create", Json{ { "name", "Paddle" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Paddle.luau" } } } } } });
+			CallTestMethod(fixture, "entity.create", Json{ { "name", "Paddle" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/Paddle.luau" } } }) } } } } } });
 			CallTestMethod(fixture, "scene.save", Json::object());
 			WriteSuite(fixture, "return Test.Suite('Record.Paddle', function()\n"
 								"Test.Case('move', function()\n"
@@ -637,7 +637,7 @@ namespace Engine {
 																												"\tif Input.IsKeyDown(\"Space\") then self.Entity.Transform:Translate(vector.create(1, 0, 0)) end\n"
 																												"end\n"
 																												"return Script.Define(\"Paddle\", Paddle)\n" } });
-			CallTestMethod(fixture, "entity.create", Json{ { "name", "Paddle" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Paddle.luau" } } } } } });
+			CallTestMethod(fixture, "entity.create", Json{ { "name", "Paddle" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/Paddle.luau" } } }) } } } } } });
 			CallTestMethod(fixture, "scene.save", Json::object());
 			WriteSuite(fixture, "return Test.Suite('Record.Paddle', function()\n"
 								"Test.Case('move', function()\n"
@@ -687,7 +687,7 @@ namespace Engine {
 																												"\tif Input.IsKeyDown(\"Space\") then self.Entity.Transform:Translate(vector.create(1, 0, 0)) end\n"
 																												"end\n"
 																												"return Script.Define(\"Paddle\", Paddle)\n" } });
-			CallTestMethod(fixture, "entity.create", Json{ { "name", "Paddle" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Paddle.luau" } } } } } });
+			CallTestMethod(fixture, "entity.create", Json{ { "name", "Paddle" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/Paddle.luau" } } }) } } } } } });
 			CallTestMethod(fixture, "scene.save", Json::object());
 			WriteSuite(fixture, "return Test.Suite('Record.Paddle', function()\n"
 								"Test.Case('move', function()\n"

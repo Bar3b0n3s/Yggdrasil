@@ -154,8 +154,8 @@ namespace Engine {
 			static_cast<void>(camera);
 			board.AddComponent<MeshRendererComponent>(MeshRendererComponent{ .Mesh = TypedAssetHandle<AssetType::Mesh>(UUID(0x101)),
 				.Materials = { TypedAssetHandle<AssetType::Material>(UUID(0x202)), TypedAssetHandle<AssetType::Material>(UUID(0x202)) } });
-			board.AddComponent<ScriptComponent>(ScriptComponent{ .Script = TypedAssetHandle<AssetType::Script>(UUID(0x515)),
-				.Fields = { { "Sound", VariantValue(Json("0000000000000303")) }, { "Target", VariantValue(Json("0000000000000011")) } } });
+			board.AddComponent<ScriptComponent>(ScriptComponent{ { ScriptSlot{ .Script = TypedAssetHandle<AssetType::Script>(UUID(0x515)),
+				.Fields = { { "Sound", VariantValue(Json("0000000000000303")) }, { "Target", VariantValue(Json("0000000000000011")) } } } } });
 			CookedHashAssetManager assets;
 			assets.Add(UUID(0x101), { .Type = AssetType::Mesh, .Path = "Assets/Models/Board.glb#mesh:0:Board", .CookedHash = 0xb0a7d });
 			assets.Add(UUID(0x202), { .Type = AssetType::Material, .Path = "Assets/Materials/Wood.material", .CookedHash = 0x3009 });
