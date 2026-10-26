@@ -30,7 +30,7 @@ namespace Engine {
 		// Copies mip `mipLevel` of array slice `arraySlice` of `texture` into an Image of the texture's format, rows top
 		// first and tightly packed (the staging texture's row pitch is removed). The texture's prior writes are submitted
 		// first: the copy goes into its own command list, executed with GraphicsDevice::ExecuteCommandList, and the call
-		// waits for it with WaitForSubmission (bounded; a hang or device loss is fatal, FramePacer.h). Blocks the caller
+		// waits for it with WaitForSubmission (bounded; a hang is fatal, FramePacer.h). Blocks the caller
 		// until the pixels are on the CPU, so it is for screenshots and tests, never for per-frame work. Errors:
 		// InvalidArgument for a depth or block-compressed format, a multisampled or 3D texture, or a mip or slice out of range;
 		// Gpu when the staging texture or command list cannot be created, or mapping fails. M18 (C18.3,

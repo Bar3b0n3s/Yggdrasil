@@ -15,6 +15,7 @@
 #include "Engine/Scene/TransformSystem.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/HeadlessGpuFixture.h"
+#include "Support/TempDirectory.h"
 #include "Support/TestData.h"
 #include "Support/Utf8Path.h"
 
@@ -25,6 +26,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <format>
 #include <map>
 #include <optional>
 #include <span>
@@ -33,16 +35,21 @@
 #include <utility>
 #include <vector>
 
-// The golden-scene support (Docs/Decisions/0013-m8-decisions.md decision 14): the image grid, the scenes the
-// scaffold wrote into Projects/FeatureTest (on the CPU, so a broken scene fails the unit suite and not only the golden
-// stage) and RenderGoldenScene's own contract on a device.
+// The golden-scene support (Docs/Decisions/0013-m8-decisions.md decision 14): the image grid, the golden scene list (the
+// kept scenes and the golden scaffolds' scenes, M18 W18.2), the scenes the scaffolds wrote into Projects/FeatureTest (on the
+// CPU, so a broken scene fails the unit suite and not only the golden stage) and RenderGoldenScene's own contract on a
+// device.
 
 namespace Engine {
 
-	// The golden scenes of Roadmap M8/M9, as Projects/FeatureTest/Scaffold/Golden.jsonl writes them.
-	static constexpr std::array<std::string_view, 17> GoldenSceneNames = { "AlphaModes", "AnnotatedScreenshot", "Bloom", "DebugDraw",
-		"GltfFixture", "GtaoOff", "GtaoOn", "GtaoOrtho", "IblOnly", "MaterialGrid", "SelectionOutline", "ShadowsFar", "ShadowsNear",
-		"ShadowsOrtho", "SpotShadows", "Text", "Tonemappers" };
+	// The golden scenes of Roadmap M8 that Projects/FeatureTest/Scaffold/Golden.jsonl keeps in Assets/Scenes/Golden.
+	static constexpr std::array<std::string_view, 8> KeptGoldenSceneNames = { "AlphaModes", "Bloom", "DebugDraw", "GltfFixture", "IblOnly",
+		"MaterialGrid", "Text", "Tonemappers" };
+	// The golden scenes of Roadmap M9, which the golden scaffold Scaffold/GoldenRendererII.jsonl writes (T-FTPROV moved them
+	// out of Golden.jsonl in M18).
+	static constexpr std::string_view RendererIIGoldenScaffold = "GoldenRendererII.jsonl";
+	static constexpr std::array<std::string_view, 9> RendererIIGoldenSceneNames = { "AnnotatedScreenshot", "GtaoOff", "GtaoOn", "GtaoOrtho",
+		"SelectionOutline", "ShadowsFar", "ShadowsNear", "ShadowsOrtho", "SpotShadows" };
 
 	static std::filesystem::path GetFeatureTestRoot()
 	{
@@ -145,29 +152,43 @@ namespace Engine {
 			REQUIRE_MESSAGE(refresh.has_value(), refresh.error().ToString());
 			CHECK(refresh->Diagnostics.empty());
 
-			// Exactly the scenes of Roadmap M8/M9 live in the folder.
+			// Exactly the scenes of Roadmap M8 stay in Golden.jsonl's kept folder; the scenes of Roadmap M9 are the golden
+			// scaffold GoldenRendererII.jsonl's, and the scene list holds both.
 			const Result<std::vector<std::filesystem::path>> files = FileSystem::ListDirectory(GetFeatureTestPath("Assets/Scenes/Golden"));
 			REQUIRE_MESSAGE(files.has_value(), files.error().ToString());
-			std::vector<std::string> scenes;
+			std::vector<std::string> kept;
 			for (const std::filesystem::path& file : *files)
 			{
 				if (file.extension() == ".scene")
-					scenes.push_back(Test::PathToUtf8(file.stem()));
+					kept.push_back(Test::PathToUtf8(file.stem()));
 			}
-			CHECK(scenes == std::vector<std::string>(GoldenSceneNames.begin(), GoldenSceneNames.end()));
+			CHECK(kept == std::vector<std::string>(KeptGoldenSceneNames.begin(), KeptGoldenSceneNames.end()));
+			const Result<std::vector<Test::GoldenSceneEntry>> scenes = Test::ListGoldenScenes(GetFeatureTestRoot());
+			REQUIRE_MESSAGE(scenes.has_value(), scenes.error().ToString());
+			std::vector<std::string> listedKept;
+			std::vector<std::string> rendererII;
+			for (const Test::GoldenSceneEntry& scene : *scenes)
+			{
+				if (scene.Scaffold == "Golden.jsonl")
+					listedKept.push_back(scene.Name);
+				if (scene.Scaffold == RendererIIGoldenScaffold)
+					rendererII.push_back(scene.Name);
+			}
+			CHECK(listedKept == kept);
+			CHECK(rendererII == std::vector<std::string>(RendererIIGoldenSceneNames.begin(), RendererIIGoldenSceneNames.end()));
 
 			const AssetManager& manager = assets.GetManager();
-			for (const std::string_view name : GoldenSceneNames)
+			for (const Test::GoldenSceneEntry& entry : *scenes)
 			{
-				CAPTURE(std::string(name));
+				CAPTURE(entry.Path);
 				SceneSpecification specification;
-				specification.Name = std::string(name);
+				specification.Name = entry.Name;
 				specification.Registry = &assets.GetRegistry();
 				specification.IdGenerator = &assets.GetGenerator();
 				const Scope<Scene> scene = Scene::Create(specification);
 				LoadReport report;
-				const std::string relative = "Assets/Scenes/Golden/" + std::string(name) + ".scene";
-				const Status loaded = SceneSerializer::LoadFromFile(*scene, vfs, assets.ProjectPath(relative), { .StrictUnknowns = true, .SourcePath = relative }, report);
+				const Status loaded = SceneSerializer::LoadFromFile(*scene, vfs, assets.ProjectPath(entry.Path), { .StrictUnknowns = true, .SourcePath = entry.Path },
+					report);
 				REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
 				CHECK(report.Diagnostics.empty());
 				TransformSystem::Update(*scene);
@@ -175,7 +196,6 @@ namespace Engine {
 				const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(*scene, { .Width = 640, .Height = 360 });
 				REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
 				CHECK(snapshot->HasCamera);
-				CHECK_FALSE(snapshot->Meshes.empty());
 				for (const MeshDrawItem& item : snapshot->Meshes)
 				{
 					CHECK(manager.GetAssetType(item.Mesh) == AssetType::Mesh);
@@ -184,9 +204,96 @@ namespace Engine {
 				}
 				if (snapshot->Environment.Environment.IsValid())
 					CHECK(manager.GetAssetType(snapshot->Environment.Environment) == AssetType::Environment);
-				// Only the two M9 GTAO-on fixtures enable AO; the M8 scenes keep it disabled.
-				CHECK(snapshot->Post.SsaoEnabled == (name == "GtaoOn" || name == "GtaoOrtho"));
+				if (entry.Scaffold == "Golden.jsonl" || entry.Scaffold == RendererIIGoldenScaffold)
+				{
+					// The M8 and M9 goldens draw meshes; only the two M9 GTAO-on fixtures enable AO, and the M8 scenes keep it
+					// disabled.
+					CHECK_FALSE(snapshot->Meshes.empty());
+					CHECK(snapshot->Post.SsaoEnabled == (entry.Name == "GtaoOn" || entry.Name == "GtaoOrtho"));
+				}
 			}
+		}
+
+		TEST_CASE("GoldenScene: the scene list holds the kept scenes and every golden scaffold's, and refuses a name twice")
+		{
+			// A project of its own: Golden.jsonl's kept folder (directly, not below it), a golden scaffold with two
+			// directories, one of them not created (it holds no scene), nested scenes, and a scaffold without
+			// GoldenDirectories, whose scenes are not golden.
+			Test::TempDirectory project("GoldenSceneList");
+			const auto write = [&project](std::string_view relative, std::string_view text)
+			{
+				const std::filesystem::path path = project.GetPath() / Test::PathFromUtf8(relative);
+				REQUIRE(FileSystem::CreateDirectories(path.parent_path()).has_value());
+				REQUIRE(FileSystem::WriteFileAtomic(path, std::as_bytes(std::span(text)), { .KeepBackup = false }).has_value());
+			};
+			const auto manifest = [&write](std::string_view goldenDirectories)
+			{
+				write("Scaffold/Scaffolds.json", std::format(R"({{"Format": "FeatureTestScaffolds", "Version": 1, "Scaffolds": [{{"File": "Settings.jsonl", "IdSeed": 1, "Renderer": "none"}}, {{"File": "GoldenA.jsonl", "IdSeed": 2, "Renderer": "none", "GoldenDirectories": [{}]}}]}})", goldenDirectories));
+			};
+			manifest(R"("Assets/Scenes/GoldenA", "Assets/Textures/GoldenA")");
+			write("Assets/Scenes/Golden/Bloom.scene", "{}");
+			write("Assets/Scenes/Golden/Bloom.scene.meta", "{}");
+			write("Assets/Scenes/Golden/Nested/Deeper.scene", "{}");
+			write("Assets/Scenes/GoldenA/Sprites.scene", "{}");
+			write("Assets/Scenes/GoldenA/More/Tiles.scene", "{}");
+			write("Assets/Scenes/Main.scene", "{}");
+
+			const Result<std::vector<Test::GoldenSceneEntry>> scenes = Test::ListGoldenScenes(project.GetPath());
+			REQUIRE_MESSAGE(scenes.has_value(), scenes.error().ToString());
+			REQUIRE(scenes->size() == 3);
+			CHECK((*scenes)[0].Name == "Bloom");
+			CHECK((*scenes)[0].Path == "Assets/Scenes/Golden/Bloom.scene");
+			CHECK((*scenes)[0].Scaffold == "Golden.jsonl");
+			CHECK((*scenes)[1].Name == "Sprites");
+			CHECK((*scenes)[1].Path == "Assets/Scenes/GoldenA/Sprites.scene");
+			CHECK((*scenes)[1].Scaffold == "GoldenA.jsonl");
+			CHECK((*scenes)[2].Name == "Tiles");
+			CHECK((*scenes)[2].Path == "Assets/Scenes/GoldenA/More/Tiles.scene");
+
+			// Two golden scenes with one name are refused, naming both.
+			write("Assets/Scenes/GoldenA/More/Bloom.scene", "{}");
+			const Result<std::vector<Test::GoldenSceneEntry>> twice = Test::ListGoldenScenes(project.GetPath());
+			REQUIRE_FALSE(twice.has_value());
+			CHECK(twice.error().GetCode() == ErrorCode::Validation);
+			CHECK(twice.error().ToString().contains("Assets/Scenes/Golden/Bloom.scene"));
+			CHECK(twice.error().ToString().contains("Assets/Scenes/GoldenA/More/Bloom.scene"));
+
+			// A golden directory outside Assets/, or one that climbs out of it, is refused at its entry.
+			for (const std::string_view directories : { R"("Scenes/GoldenA")", R"("Assets/../Escape")", R"("Assets/.Hidden")", R"("Assets/")" })
+			{
+				CAPTURE(std::string(directories));
+				manifest(directories);
+				const Result<std::vector<Test::GoldenSceneEntry>> refused = Test::ListGoldenScenes(project.GetPath());
+				REQUIRE_FALSE(refused.has_value());
+				CHECK(refused.error().GetCode() == ErrorCode::Validation);
+				CHECK(refused.error().ToString().contains("/Scaffolds/1/GoldenDirectories/0"));
+			}
+		}
+
+		TEST_CASE("GoldenScene: every golden scene has its golden image in every committed device class")
+		{
+			// A golden scaffold's scene without a committed reference would run in no comparison: each golden test checks the
+			// image named after its scene (Tests/Golden/<DeviceClass>/<Name>.png, the golden-images skill).
+			const Result<std::vector<Test::GoldenSceneEntry>> scenes = Test::ListGoldenScenes(GetFeatureTestRoot());
+			REQUIRE_MESSAGE(scenes.has_value(), scenes.error().ToString());
+			const Result<std::vector<std::filesystem::path>> classes = FileSystem::ListDirectory(Test::GetRepositoryRoot() / "Tests" / "Golden");
+			REQUIRE_MESSAGE(classes.has_value(), classes.error().ToString());
+			size_t checked = 0;
+			for (const std::filesystem::path& deviceClass : *classes)
+			{
+				const Result<FileInfo> info = FileSystem::GetInfo(deviceClass);
+				REQUIRE(info.has_value());
+				if (!info->IsDirectory)
+					continue;
+				for (const Test::GoldenSceneEntry& scene : *scenes)
+				{
+					CAPTURE(Test::PathToUtf8(deviceClass.filename()));
+					CAPTURE(scene.Path);
+					CHECK(FileSystem::Exists(deviceClass / Test::PathFromUtf8(scene.Name + ".png")));
+					++checked;
+				}
+			}
+			CHECK(checked >= scenes->size());
 		}
 
 		TEST_CASE("GoldenScene: the scaffold's sources and their imported copies are the Tests/Data fixtures")

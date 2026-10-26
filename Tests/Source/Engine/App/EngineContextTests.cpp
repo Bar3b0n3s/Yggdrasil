@@ -240,6 +240,16 @@ namespace Engine {
 			CHECK(counts.Warnings == 0);
 		}
 
+		TEST_CASE("EngineContext: RecoverGraphics without a device is InvalidState")
+		{
+			// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 29): only a context with a device recovers one.
+			Result<Scope<EngineContext>> created = EngineContext::Create({ .WorkerCount = 0 });
+			REQUIRE(created.has_value());
+			const Status recovered = (*created)->RecoverGraphics();
+			REQUIRE_FALSE(recovered.has_value());
+			CHECK(recovered.error().GetCode() == ErrorCode::InvalidState);
+		}
+
 		TEST_CASE("EngineContext: the Graphics step mounts shaders:// and creates the device and its services"
 			* doctest::test_suite(Test::GpuSuite))
 		{

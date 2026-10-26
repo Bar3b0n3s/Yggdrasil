@@ -76,6 +76,13 @@ namespace Engine {
 		// tombstones (oldest evicted): Poll returns Cancelled once while remembered, NotFound after eviction/consumption.
 		// Resize/scene replacement and camera changes call this through SceneRenderer::CancelPicks.
 		void CancelAll();
+
+		// M18 (Docs/Decisions/0029-m18-contract.md decision 27): SceneRenderer::ReleaseGpuObjects' part on a device loss.
+		// Marks every outstanding ticket cancelled as CancelAll does (Poll answers Cancelled once while remembered) and drops
+		// every slot's staging texture, command list and event query at once, calling nothing on the device (the lost device
+		// runs nothing more). Keeps the ticket counter, so no ticket is reused across the recovery; the next Request creates
+		// its slot's objects again.
+		void ReleaseGpuObjects();
 	private:
 		struct State;
 		Scope<State> m_State;

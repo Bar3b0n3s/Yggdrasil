@@ -159,6 +159,34 @@ namespace Engine {
 			CHECK_FALSE(FileExists(compare.OutputDirectory / "Board-diff.png"));
 		}
 
+		TEST_CASE("GoldenImage: a device class without goldens next to a same-vendor class that has them is reported, not silently smoke-tested")
+		{
+			// M18 W18.2 (Roadmap M18's acceptance; ADR 0028 decision 9): a driver update renames the device class, and its
+			// goldens must not silently drop to the smoke mode.
+			Test::TempDirectory directory("GoldenDeviceClass");
+			const Image image = MakeCheckerboard(16);
+			REQUIRE(Test::CheckGoldenImage("Board", image, "vendorffff-6x", {}, MakeTemporarySettings(directory, true)).Outcome
+				== Test::GoldenOutcome::Updated);
+			REQUIRE(Test::CheckGoldenImage("Board", image, "vendorffff-5x", {}, MakeTemporarySettings(directory, true)).Outcome
+				== Test::GoldenOutcome::Updated);
+			const Test::GoldenSettings compare = MakeTemporarySettings(directory, false);
+
+			const Test::GoldenCheckResult changed = Test::CheckGoldenImage("Board", image, "vendorffff-7x", {}, compare);
+			CHECK(changed.Outcome == Test::GoldenOutcome::DeviceClassChanged);
+			// The prefix and the event Scripts/Test.py parses (GOLDEN_PATTERN), and both classes that hold the golden.
+			CHECK(changed.Message.starts_with("Golden image 'Board' on device class 'vendorffff-7x': device class changed"));
+			CHECK(changed.Message.contains("'vendorffff-5x', 'vendorffff-6x'"));
+			CHECK_FALSE(FileExists(compare.OutputDirectory / "Board-actual.png"));
+
+			// Another vendor's class, and an image no class of the vendor has, keep the smoke mode.
+			CHECK(Test::CheckGoldenImage("Board", image, "vendoreeee-7x", {}, compare).Outcome == Test::GoldenOutcome::SmokePassed);
+			CHECK(Test::CheckGoldenImage("Other", image, "vendorffff-7x", {}, compare).Outcome == Test::GoldenOutcome::SmokePassed);
+			// A vendor whose name extends another's is another vendor.
+			CHECK(Test::CheckGoldenImage("Board", image, "vendorfffff-7x", {}, compare).Outcome == Test::GoldenOutcome::SmokePassed);
+			// The class that holds the golden compares as before.
+			CHECK(Test::CheckGoldenImage("Board", image, "vendorffff-6x", {}, compare).Outcome == Test::GoldenOutcome::Matched);
+		}
+
 		TEST_CASE("GoldenImage: a golden that cannot be decoded is an Error")
 		{
 			Test::TempDirectory directory("GoldenCorrupt");
@@ -180,6 +208,7 @@ namespace Engine {
 			CHECK(Test::GoldenOutcomeToString(Test::GoldenOutcome::SmokePassed) == "SmokePassed");
 			CHECK(Test::GoldenOutcomeToString(Test::GoldenOutcome::SmokeFailed) == "SmokeFailed");
 			CHECK(Test::GoldenOutcomeToString(Test::GoldenOutcome::Error) == "Error");
+			CHECK(Test::GoldenOutcomeToString(Test::GoldenOutcome::DeviceClassChanged) == "DeviceClassChanged");
 		}
 	}
 

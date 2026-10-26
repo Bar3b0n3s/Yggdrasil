@@ -7,6 +7,7 @@
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Graphics/GraphicsDevice.h"
+#include "Engine/Graphics/Readback.h"
 #include "Engine/Graphics/RenderContext.h"
 #include "Engine/ImGui/ImGuiRenderer.h"
 #include "Engine/Renderer/GpuResourceCache.h"
@@ -15,6 +16,7 @@
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Support/AutomationTestClient.h"
+#include "Support/DeviceLossTest.h"
 #include "Support/EditorTestFixture.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/WaitUntil.h"
@@ -537,6 +539,88 @@ end)
 			(*renderer)->DestroyTextures();
 		}
 
+		TEST_CASE("EditorHostViewports: a click queued in the frame that lost the device is dropped without a failure"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 28): a loss that strikes the frame's submission still
+			// notifies the host (Application::OnFrameRender). The click queued for that frame is dropped instead of asking
+			// for a pick, whose staging texture, command list and query a lost device cannot create: that refusal is the
+			// loss, which EditorApp would otherwise log at Error as a failed pick. The recovery then renders on.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			struct UiContext
+			{
+				ImGuiContext* Context = ImGui::CreateContext();
+				~UiContext() { ImGui::DestroyContext(Context); }
+			} ui;
+			ImGui::GetIO().IniFilename = nullptr;
+			ImGui::GetIO().DisplayFramebufferScale = ImVec2(1, 1);
+			Test::EditorTestFixture fixture("HostLostClick");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			const Entity mesh = editor.GetScene().CreateEntity("PickMe");
+			mesh.AddComponent<MeshRendererComponent>(MeshRendererComponent{ .Mesh = TypedAssetHandle<AssetType::Mesh>(BuiltinAssetHandles::CubeMesh), .Materials = {} });
+			editor.GetScene().CreateEntity("Camera").AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			editor.GetViewportState().SetOptions({ .Grid = false, .Icons = false });
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::SceneViewport, true).has_value());
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::GameViewport, true).has_value());
+			GraphicsDevice& device = gpu.GetDevice();
+			GpuResourceCache cache(device, editor.GetAssets());
+			auto pipelines = SceneRendererPipelines::Create(device, gpu.GetPipelines());
+			REQUIRE(pipelines.has_value());
+			auto renderer = ImGuiRenderer::Create(device, gpu.GetPipelines(), {});
+			REQUIRE(renderer.has_value());
+			GizmoController gizmos(editor);
+			EditorHostViewports host(editor, gizmos);
+			struct WaitForHostGpu
+			{
+				GraphicsDevice& Device;
+				~WaitForHostGpu() { Device.WaitForIdle(); }
+			} idle{ device };
+			REQUIRE(host.Initialize(device, **pipelines, cache, **renderer).has_value());
+			host.SetRectangle(ViewportView::Scene, { .Size = glm::vec2(96, 64) });
+			host.SetRectangle(ViewportView::Game, { .Size = glm::vec2(80, 80) });
+			// One frame in a command list of its own (a list kept across the loss would be an object no owner releases),
+			// with a click on the scene view's centre when `click` is not 0, the device lost before the submission when
+			// `loseDevice` is set; returns the host's Submitted status.
+			const auto frame = [&device, &renderer, &host](uint64_t index, uint64_t click, bool loseDevice) -> Status
+			{
+				Result<nvrhi::CommandListHandle> list = device.CreateCommandList();
+				REQUIRE_MESSAGE(list.has_value(), list.error().ToString());
+				device.WaitForIdle();
+				(*renderer)->BeginFrame(static_cast<uint32_t>(index % 2));
+				(*list)->open();
+				RenderContext context{ .Device = &device, .CommandList = *list, .FrameIndex = index };
+				REQUIRE(host.Render(context).has_value());
+				if (click != 0)
+				{
+					const auto image = host.GetImage(ViewportView::Scene);
+					REQUIRE(host.RequestPick({ .Pixel = { image.Width / 2, image.Height / 2 }, .FrameIndex = image.FrameIndex, .SceneRevision = image.SceneRevision, .Sequence = click, .ViewGeneration = image.Generation }).has_value());
+				}
+				(*list)->close();
+				if (loseDevice)
+				{
+					device.GetDiagnostics().SetDeviceLost(true);
+					device.ReportDeviceLost("EditorHostViewportsTests");
+				}
+				return host.Submitted(index, device.ExecuteCommandList(**list));
+			};
+			REQUIRE(frame(0, 0, false).has_value());
+			// The first click of the scene view: its picker slot has no staging texture yet.
+			const Status submitted = frame(1, 1, true);
+			CHECK_MESSAGE(submitted.has_value(), (submitted.has_value() ? std::string() : submitted.error().ToString()));
+
+			const Status recovered = device.Recover(nullptr);
+			REQUIRE_MESSAGE(recovered.has_value(), (recovered.has_value() ? std::string() : recovered.error().ToString()));
+			for (uint64_t index = 2; index < 5; ++index)
+				REQUIRE(frame(index, 0, false).has_value());
+			CHECK(editor.GetSelection().empty());
+			device.WaitForIdle();
+			host.Retire();
+			(*renderer)->DestroyTextures();
+		}
+
 		TEST_CASE("EditorHostViewports: scene and game extraction keep independent extents cameras and overlay flags")
 		{
 			Test::EditorTestFixture fixture("HostExtraction");
@@ -604,6 +688,90 @@ end)
 			CHECK_FALSE(editor.GetViewportState().GetPixelSize(ViewportView::Scene).has_value());
 			CHECK_FALSE(editor.GetViewportState().GetPixelSize(ViewportView::Game).has_value());
 			CHECK(editor.GetViewportState().GetSceneSize() == glm::uvec2(800, 600));
+		}
+
+		TEST_CASE("EditorHostViewports: a device loss registers the views' recreated images and renders the same images"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decisions 32 and 33; it recovers through the shared loss test and
+			// the SceneRendererPipelines and ImGuiRenderer owners). The host's release removes both views' ImGui keys
+			// (withdrawals, so no UI frame built before the loss is captured) and forgets their images; each view's renderer
+			// recovers itself, and the first frame after the recovery registers the recreated images and renders what the
+			// views rendered before.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			struct UiContext
+			{
+				ImGuiContext* Context = ImGui::CreateContext();
+				~UiContext() { ImGui::DestroyContext(Context); }
+			} ui;
+			ImGui::GetIO().IniFilename = nullptr;
+			ImGui::GetIO().DisplayFramebufferScale = ImVec2(1, 1);
+			Test::EditorTestFixture fixture("HostDeviceLoss");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			const Entity mesh = editor.GetScene().CreateEntity("Mesh");
+			mesh.AddComponent<MeshRendererComponent>(MeshRendererComponent{ .Mesh = TypedAssetHandle<AssetType::Mesh>(BuiltinAssetHandles::CubeMesh), .Materials = {} });
+			editor.GetScene().CreateEntity("Camera").AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			editor.GetViewportState().SetOptions({ .Grid = false, .Icons = false });
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::SceneViewport, true).has_value());
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::GameViewport, true).has_value());
+			GraphicsDevice& device = gpu.GetDevice();
+			GpuResourceCache cache(device, editor.GetAssets());
+			auto pipelines = SceneRendererPipelines::Create(device, gpu.GetPipelines());
+			REQUIRE(pipelines.has_value());
+			auto renderer = ImGuiRenderer::Create(device, gpu.GetPipelines(), {});
+			REQUIRE(renderer.has_value());
+			GizmoController gizmos(editor);
+			EditorHostViewports host(editor, gizmos);
+			struct WaitForHostGpu
+			{
+				GraphicsDevice& Device;
+				~WaitForHostGpu() { Device.WaitForIdle(); }
+			} idle{ device };
+			// The views keep the size their renderers were created with (640 x 360, no SetRectangle), so no target of an earlier
+			// size waits in a renderer's pool for its release when the live counts are read before the loss.
+			REQUIRE(host.Initialize(device, **pipelines, cache, **renderer).has_value());
+
+			// One frame of both views in a command list of its own (a list kept across the loss would be an object no owner
+			// releases), as EditorApp's frame records them, then both final images read back. Every error is returned, so it
+			// also runs on the lost device.
+			uint64_t frame = 0;
+			Test::DeviceLossTest test;
+			test.Owners = { "EditorHostViewports" };
+			test.Use = [&device, &renderer, &host, &frame]() -> Result<std::vector<std::byte>>
+			{
+				ENGINE_TRY_ASSIGN(nvrhi::CommandListHandle list, device.CreateCommandList());
+				device.WaitForIdle();
+				(*renderer)->BeginFrame(static_cast<uint32_t>(frame % 2));
+				list->open();
+				RenderContext context{ .Device = &device, .CommandList = list, .FrameIndex = frame };
+				const Status rendered = host.Render(context);
+				list->close();
+				ENGINE_TRY(host.Submitted(frame, device.ExecuteCommandList(*list)));
+				++frame;
+				ENGINE_TRY(rendered);
+				device.WaitForIdle();
+				std::vector<std::byte> pixels;
+				Readback readback(device);
+				for (const ViewportView view : { ViewportView::Scene, ViewportView::Game })
+				{
+					const SceneRenderer* viewRenderer = host.GetRenderer(view);
+					if (viewRenderer == nullptr || viewRenderer->GetFinalTexture() == nullptr || host.GetImage(view).Texture == 0)
+						return MakeError(ErrorCode::InvalidState, "a view has no registered image after its frame");
+					ENGINE_TRY_ASSIGN(const Image image, readback.ReadTexture(*viewRenderer->GetFinalTexture()));
+					pixels.insert(pixels.end(), image.Pixels.begin(), image.Pixels.end());
+				}
+				return pixels;
+			};
+			const uint64_t withdrawals = host.GetTextureWithdrawalCount();
+			const Result<Test::DeviceLossReport> report = Test::RunDeviceLossTest(gpu, test);
+			REQUIRE_MESSAGE(report.has_value(), (report.has_value() ? std::string() : report.error().ToString()));
+			CHECK(host.GetTextureWithdrawalCount() == withdrawals + 2);
+			device.WaitForIdle();
+			host.Retire();
+			(*renderer)->DestroyTextures();
 		}
 	}
 

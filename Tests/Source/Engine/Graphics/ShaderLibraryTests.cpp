@@ -354,7 +354,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("ShaderLibrary: a device loss drops the shaders, keeps every reflection and creates the shaders again"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.3, Docs/Decisions/0029-m18-contract.md decision 33): the library registers itself; a lost
 			// device's shader modules are dropped, the reflections (CPU data) stay at their addresses, and the next Get creates
@@ -384,7 +384,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("ShaderLibrary: after a device loss a shader is created again from the SPIR-V read before, not from a rebuilt file"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 (C18.3, decision 33): each created variant keeps its SPIR-V as CPU data, so a recovery never pairs a rebuilt
 			// file with the reflection read before it. The variant is copied from the build output into a memory mount and

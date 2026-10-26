@@ -460,7 +460,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("RuntimeApp: --gpu-inject-fault=device-lost recovers the device and writes the same screenshot"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.3, Docs/Decisions/0029-m18-contract.md decisions 29 and 30): the loss strikes the second
 			// frame and is recovered, the run goes on to its end, and the screenshot of tick 10 equals a run's without the loss.

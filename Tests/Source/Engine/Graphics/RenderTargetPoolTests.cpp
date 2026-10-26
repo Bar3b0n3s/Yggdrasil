@@ -130,7 +130,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("RenderTargetPool: ReleaseAll drops every target, acquired or free"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.3, decision 27): the pool of a renderer releases everything in the recovery, whatever the
 			// submissions that used its targets.
@@ -155,6 +155,43 @@ namespace Engine {
 			Result<nvrhi::TextureHandle> again = pool.Acquire(desc);
 			REQUIRE_MESSAGE(again.has_value(), again.error().ToString());
 			CHECK(pool.GetTargetCount() == 1);
+		}
+
+		TEST_CASE("RenderTargetPool: ReleaseAll drops a target whose last submission has not completed"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// The recovery's Release asks no submission about its targets (decision 28: a lost device answers nothing, and
+			// nothing in flight runs again), where ReleaseFree keeps a target until the submissions that used it completed.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			RenderTargetPool pool(device, 0);
+			Result<Scope<Test::GpuSubmissionGate>> gate = Test::GpuSubmissionGate::Create(device);
+			REQUIRE_MESSAGE(gate.has_value(), gate.error().ToString());
+			Result<nvrhi::CommandListHandle> commandList = device.CreateCommandList();
+			REQUIRE_MESSAGE(commandList.has_value(), commandList.error().ToString());
+			{
+				Result<nvrhi::TextureHandle> acquired = pool.Acquire(MakeTargetDesc(32, nvrhi::Format::RGBA8_UNORM, "Pending"));
+				REQUIRE_MESSAGE(acquired.has_value(), acquired.error().ToString());
+				(*commandList)->open();
+				(*commandList)->clearTextureFloat(*acquired, nvrhi::AllSubresources, nvrhi::Color(0.25f, 0.5f, 0.75f, 1.0f));
+				(*commandList)->close();
+				(*gate)->HoldNextSubmission();
+				device.ExecuteCommandList(**commandList);
+			}
+			pool.EndFrame();
+			pool.ReleaseFree();
+			REQUIRE(pool.GetTargetCount() == 1); // free, but its submission is held back on the GPU
+
+			pool.ReleaseAll();
+			CHECK(pool.GetTargetCount() == 0);
+			// The device's tracker still references the target, so it lives until the submission completed and a garbage
+			// collection swept it.
+			(*gate)->Open();
+			device.WaitForIdle();
+			device.RunGarbageCollection();
+			gate->reset();
+			commandList->Reset();
 		}
 	}
 

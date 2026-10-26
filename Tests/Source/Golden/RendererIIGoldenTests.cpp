@@ -4,6 +4,8 @@
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/Random.h"
+#include "Engine/Core/UUIDGenerator.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Renderer/ShadowCascades.h"
 #include "Support/AutomationTestClient.h"
@@ -37,11 +39,12 @@ namespace Engine {
 
 		constexpr uint32_t RendererIIGoldenWidth = 640;
 		constexpr uint32_t RendererIIGoldenHeight = 360;
-		// Pinned by the scaffold replay below, including its fixed EditorTestIdState and canonical entity order.
-		constexpr UUID RendererIIOutlineCube{ 0x9fccff8e11f046df };
-		constexpr UUID RendererIIOutlineSphere{ 0x3c34bab161152848 };
-		constexpr UUID RendererIIAnnotatedCube{ 0x6f73764e2c7305bf };
-		constexpr UUID RendererIIAnnotatedSphere{ 0xd2f498918b91281f };
+		// Pinned by the golden scaffold's seeded run (Scaffold/GoldenRendererII.jsonl and its IdSeed), which the scaffold
+		// replay below reproduces, including its canonical entity order.
+		constexpr UUID RendererIIOutlineCube{ 0x79d9ebb31925fad2 };
+		constexpr UUID RendererIIOutlineSphere{ 0x7f35b48ba1b06a04 };
+		constexpr UUID RendererIIAnnotatedCube{ 0xa48ee30d337285db };
+		constexpr UUID RendererIIAnnotatedSphere{ 0x32ab748bb9d4cfda };
 
 		class RendererIIGoldenFixture
 		{
@@ -210,6 +213,30 @@ namespace Engine {
 			fixture.Golden(actual);
 		}
 
+		// The IdSeed Projects/FeatureTest/Scaffold/Scaffolds.json gives the scaffold `file`; fails the test case when the manifest
+		// does not list it.
+		[[nodiscard]] uint64_t ReadScaffoldIdSeed(const std::filesystem::path& project, std::string_view file)
+		{
+			const auto text = FileSystem::ReadText(project / "Scaffold/Scaffolds.json");
+			REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+			const auto document = JsonReader::Parse(*text);
+			REQUIRE_MESSAGE(document.has_value(), document.error().ToString());
+			const auto scaffolds = JsonReader(*document).GetMember("Scaffolds");
+			REQUIRE_MESSAGE(scaffolds.has_value(), scaffolds.error().ToString());
+			for (size_t index = 0; index < scaffolds->GetArraySize().value_or(0); ++index)
+			{
+				const auto entry = scaffolds->GetElement(index);
+				REQUIRE(entry.has_value());
+				if (entry->ReadMember<std::string>("File").value_or("") != file)
+					continue;
+				const auto seed = entry->ReadMember<uint64_t>("IdSeed");
+				REQUIRE_MESSAGE(seed.has_value(), seed.error().ToString());
+				return *seed;
+			}
+			FAIL("Scaffolds.json does not list " << file);
+			return 0;
+		}
+
 		void RendererIICheckLabels(const RenderSnapshot& snapshot)
 		{
 			constexpr std::array<UUID, 2> Entities{ RendererIIAnnotatedCube, RendererIIAnnotatedSphere };
@@ -246,21 +273,17 @@ namespace Engine {
 
 		TEST_CASE("RendererIIGolden: scaffold reproduces the pinned scenes materials and metadata")
 		{
+			// The M9 golden content is the golden scaffold Scaffold/GoldenRendererII.jsonl (M18 W18.2, T-FTPROV moved it out
+			// of Golden.jsonl): replayed on its own in a fresh project from the id state its IdSeed gives `Editor --id-seed`
+			// (EditorApp: Random(IdSeed).GetState()), it writes exactly the 24 files Projects/FeatureTest holds, byte for byte,
+			// as Scaffold.py's regeneration does.
 			Test::AutomationFixture fixture("RendererIIScaffold", false);
 			const auto project = Test::GetRepositoryRoot() / "Projects/FeatureTest";
-			auto requests = BatchRunner::LoadFile(project / "Scaffold/Golden.jsonl");
+			fixture.GetEditor().GetIdGenerator() = UUIDGenerator::CreateRandom(Random(ReadScaffoldIdSeed(project, "GoldenRendererII.jsonl")).GetState());
+			auto requests = BatchRunner::LoadFile(project / "Scaffold/GoldenRendererII.jsonl");
 			REQUIRE_MESSAGE(requests.has_value(), requests.error().ToString());
-			// Replay the appended M9 section with EditorTestIdState; preceding M8 commands remain independent and unchanged.
-			const auto first = std::find_if(requests->begin(), requests->end(), [](const BatchRequest& request)
-			{
-				if (request.Method != "asset.create")
-					return false;
-				const auto path = JsonReader(request.Params.Get()).ReadMember<std::string>("path");
-				return path && *path == "Assets/Materials/Golden/RendererII/Grey.material";
-			});
-			REQUIRE(first != requests->end());
-			requests->erase(requests->begin(), first);
-			REQUIRE(requests->size() == 30);
+			// Golden.jsonl's last 30 requests up to M17, then the project.refreshAssets every scaffold ends with.
+			REQUIRE(requests->size() == 31);
 			BatchRunner runner(std::move(*requests), {});
 			auto& server = fixture.GetClient().GetServer();
 			REQUIRE(Test::WaitUntil([&runner, &server]()
@@ -270,7 +293,7 @@ namespace Engine {
 				return runner.IsFinished();
 			}));
 			REQUIRE_MESSAGE(!runner.GetFailure(), runner.GetFailedResponse().dump());
-			CHECK(runner.GetResults().size() == 30);
+			CHECK(runner.GetResults().size() == 31);
 			const auto refresh = fixture.GetEditor().GetAssets().Refresh();
 			REQUIRE(refresh);
 			CHECK(refresh->Diagnostics.empty());

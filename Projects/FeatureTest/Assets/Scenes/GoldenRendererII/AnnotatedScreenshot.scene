@@ -1,7 +1,7 @@
 {
 	"Format": "Scene",
 	"Version": 1,
-	"Name": "ShadowsOrtho",
+	"Name": "AnnotatedScreenshot",
 	"Seed": 0,
 	"ComponentVersions": {
 		"Transform": 1,
@@ -9,11 +9,12 @@
 		"Camera": 1,
 		"DirectionalLight": 1,
 		"Environment": 1,
-		"PostProcess": 1
+		"PostProcess": 1,
+		"BoxCollider": 1
 	},
 	"Entities": [
 		{
-			"ID": "eca386f3de5aa197",
+			"ID": "976d93007d99ae85",
 			"Name": "Rendering",
 			"Parent": null,
 			"Active": true,
@@ -46,7 +47,7 @@
 			}
 		},
 		{
-			"ID": "85bfb82dd54f3235",
+			"ID": "2424c46a591c7a41",
 			"Name": "Camera",
 			"Parent": null,
 			"Active": true,
@@ -58,7 +59,7 @@
 					"Scale": [1, 1, 1]
 				},
 				"Camera": {
-					"Projection": "Orthographic",
+					"Projection": "Perspective",
 					"VerticalFov": 45,
 					"OrthographicSize": 3.7,
 					"NearClip": 0.1,
@@ -70,7 +71,7 @@
 			}
 		},
 		{
-			"ID": "b7cf915cb27505f4",
+			"ID": "38a5388cb945e0e0",
 			"Name": "Ground",
 			"Parent": null,
 			"Active": true,
@@ -83,7 +84,7 @@
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000103",
-					"Materials": ["4247170a1e30c5ce"],
+					"Materials": ["7a0a28d33a10928c"],
 					"CastShadows": true,
 					"ReceiveShadows": true,
 					"Visible": true
@@ -91,7 +92,7 @@
 			}
 		},
 		{
-			"ID": "ffcc59f4957a39ab",
+			"ID": "a48ee30d337285db",
 			"Name": "Cube",
 			"Parent": null,
 			"Active": true,
@@ -104,15 +105,21 @@
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
-					"Materials": ["53ff4b66057a3ff6"],
+					"Materials": ["882b9e5527a6fe6e"],
 					"CastShadows": true,
 					"ReceiveShadows": true,
 					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
 				}
 			}
 		},
 		{
-			"ID": "b398132cca7ec9fc",
+			"ID": "32ab748bb9d4cfda",
 			"Name": "Sphere",
 			"Parent": null,
 			"Active": true,
@@ -125,7 +132,7 @@
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000102",
-					"Materials": ["da29e7d6f6e7c37a"],
+					"Materials": ["0835a2ca4545047c"],
 					"CastShadows": true,
 					"ReceiveShadows": true,
 					"Visible": true
@@ -133,7 +140,7 @@
 			}
 		},
 		{
-			"ID": "6757c6d27042e8a0",
+			"ID": "80dddff0b7aa6b12",
 			"Name": "Pillar",
 			"Parent": null,
 			"Active": true,
@@ -146,7 +153,7 @@
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
-					"Materials": ["4247170a1e30c5ce"],
+					"Materials": ["7a0a28d33a10928c"],
 					"CastShadows": true,
 					"ReceiveShadows": true,
 					"Visible": true
@@ -154,7 +161,7 @@
 			}
 		},
 		{
-			"ID": "7bda4ab4d90971a2",
+			"ID": "b489c575a93bd6ea",
 			"Name": "Sun",
 			"Parent": null,
 			"Active": true,

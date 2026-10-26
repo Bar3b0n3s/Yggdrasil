@@ -41,7 +41,10 @@ namespace Engine {
 			.Entry(EngineEventType::AssetImportFailed, "AssetImportFailed", "Importing an asset failed.")
 			.Entry(EngineEventType::ScriptErrorRaised, "ScriptErrorRaised", "A script raised an error.")
 			.Entry(EngineEventType::DiagnosticsChanged, "DiagnosticsChanged", "The project's diagnostics changed.")
-			.Entry(EngineEventType::AutomationClientDisconnected, "AutomationClientDisconnected", "An automation client disconnected.");
+			.Entry(EngineEventType::AutomationClientDisconnected, "AutomationClientDisconnected", "An automation client disconnected.")
+			.Entry(EngineEventType::GpuDeviceLost, "GpuDeviceLost",
+				"The GPU device was lost and has been recovered, so the frames after it render again (message: the loss's report). A failed "
+				"recovery ends the process, so it never appears.");
 
 		registry.Struct<EntitySummary>("EntitySummary", "An entity's canonical id with its readable name and path.")
 			.Field("id", &EntitySummary::Id, "The entity's id: 16 lowercase hex digits.")

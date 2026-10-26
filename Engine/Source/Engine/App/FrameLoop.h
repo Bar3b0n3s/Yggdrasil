@@ -100,8 +100,13 @@ namespace Engine {
 	//      M7), the scheduler's Alpha, and the frame index from 0.
 	//   5. OnFrameRender with the same FrameTime (§4.2 step 7).
 	//   6. The frame count grows by one; when it reaches MaxFrames the loop requests exit with ExitCode::Success (an
-	//      earlier request keeps its code). With ThrottleToFixedHz the loop then sleeps until the frame's wall-clock slot
-	//      ends, unless the throttle is suspended (SetThrottleSuspended, M7).
+	//      earlier request keeps its code). M18: also for a frame that a device loss ended after step 3 scheduled its steps,
+	//      whose steps ran: the frame index stays in step with the frames that stepped the simulation. Then, when the
+	//      context's device IsLost, OnFrameDeviceLost (inside the same catch, with the FramePhase breadcrumb
+	//      "DeviceRecovery"); a vk::SystemError thrown out of it fails the recovery and ends the process: a device loss,
+	//      or any Vulkan error while the device IsLost, is a second loss during the recovery (GraphicsDevice::
+	//      RaiseDeviceLost), and any other error goes to RaiseVulkanError. With ThrottleToFixedHz the loop then sleeps until
+	//      the frame's wall-clock slot ends, unless the throttle is suspended (SetThrottleSuspended, M7).
 	//
 	// Run logs one Info line before the first frame, "Frame loop started: <ClockKind> clock, <FixedHz> Hz" with the
 	// ClockKind enumerator name, so a process's output shows which clock it runs on.
@@ -162,8 +167,21 @@ namespace Engine {
 		// Read-only observations of completed frames. Hosts subtract the dropped-time baseline at session start.
 		[[nodiscard]] const FrameLoopStatistics& GetStatistics() const { return m_Statistics; }
 	private:
-		// Steps 1 to 6 of one frame; RunFrame calls it inside the frame-boundary catch of vk::SystemError.
-		void RunFrameSteps();
+		// What the steps of the current frame reached, which its end needs also when the frame-boundary catch ended it.
+		struct FrameProgress
+		{
+			std::chrono::steady_clock::time_point FrameStart{};      // for ThrottleToFixedHz
+			std::chrono::steady_clock::time_point DiagnosticStart{}; // FrameLoopStatistics
+			std::optional<FrameSteps> Steps{};                       // set once step 3 scheduled the frame's steps
+			FrameTime Frame{};                                       // valid with Steps
+		};
+	private:
+		// Steps 1 to 5 of one frame; RunFrame calls it inside the frame-boundary catch of vk::SystemError.
+		void RunFrameSteps(FrameProgress& progress);
+		// Step 6's frame count, statistics and exit request, for a frame whose steps were scheduled.
+		void CountFrame(const FrameProgress& progress);
+		// The frame boundary's recovery (M18): OnFrameDeviceLost when the context's device IsLost, inside the catch.
+		void RecoverLostDevice();
 		// Step 1 for one delivered event: the client, then the exit request of an unhandled close, then InputState.
 		void DispatchEvent(Event& event);
 		// Step 6's pacing: sleeps until the wall-clock slot of the frame that started at `frameStart` ends.

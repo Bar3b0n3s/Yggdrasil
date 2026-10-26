@@ -61,14 +61,15 @@ namespace Engine {
 
 	void WaitForSubmission(GraphicsDevice& device, uint64_t submissionID, std::string_view context)
 	{
-		// Submission 0 is "nothing submitted": the timeline starts there, so there is never anything to wait for.
-		if (submissionID == 0)
+		// Submission 0 is "nothing submitted": the timeline starts there, so there is never anything to wait for. A lost
+		// device runs nothing more (decision 28): nothing in flight will complete, so nothing is waited for.
+		if (submissionID == 0 || device.IsLost())
 			return;
 
 		const bool injectHang = device.GetDiagnostics().ShouldInjectHang();
 		if (injectHang)
 			ENGINE_CORE_WARN("Injected GPU fault (hang): {}: the wait for submission {} times out", context, submissionID);
-		else if (device.GetCompletedSubmissionID() >= submissionID)
+		else if (device.GetCompletedSubmissionID() >= submissionID || device.IsLost())
 			return;
 
 		const VkDevice vulkanDevice = device.GetVulkanDevice();
@@ -94,7 +95,9 @@ namespace Engine {
 			}
 			case GpuWaitResult::DeviceLost:
 			{
-				device.RaiseDeviceLost(std::format("{}: waiting for GPU submission {}", context, submissionID));
+				// Reported and recovered at the frame boundary; the caller finishes without the GPU (decision 28).
+				device.ReportDeviceLost(std::format("{}: waiting for GPU submission {}", context, submissionID));
+				return;
 			}
 			case GpuWaitResult::Failed:
 			{
@@ -116,8 +119,12 @@ namespace Engine {
 		m_Slots.resize(framesInFlight);
 		for (uint32_t slot = 0; slot < framesInFlight; ++slot)
 		{
-			// Objects created at startup: a failure means the device is out of memory (§8.14 item 7).
+			// Objects created at startup: a failure means the device is out of memory (§8.14 item 7), unless the device is
+			// lost, which a failed creation then is (decision 28): the slot stays without a query, and the pacer's owner
+			// replaces the pacer when it recovers the device.
 			Result<nvrhi::EventQueryHandle> query = device.CreateEventQuery();
+			if (!query.has_value() && device.IsLost())
+				continue;
 			if (!query.has_value())
 				FatalError(FatalErrorKind::OutOfMemory, std::format("Cannot create the frame pacer's event query {}: {}", slot, query.error().ToString()));
 			m_Slots[slot].EventQuery = std::move(*query);
@@ -134,12 +141,13 @@ namespace Engine {
 		m_IsInFrame = true;
 
 		// The frame that last used this slot must have completed before its resources are reused (frame N waits for frame
-		// N - FramesInFlight). The first FramesInFlight frames find no submission and never wait.
+		// N - FramesInFlight). The first FramesInFlight frames find no submission and never wait, and on a lost device no
+		// frame waits: it runs nothing more (decision 28).
 		const Slot& slot = m_Slots[m_FrameSlot];
-		if (slot.SubmissionID == 0)
+		if (slot.SubmissionID == 0 || m_Device->IsLost())
 			return;
 		const bool injectHang = m_Device->GetDiagnostics().ShouldInjectHang();
-		if (injectHang || !m_Device->GetNvrhiDevice()->pollEventQuery(slot.EventQuery))
+		if (injectHang || slot.EventQuery == nullptr || !m_Device->GetNvrhiDevice()->pollEventQuery(slot.EventQuery))
 			WaitForSubmission(*m_Device, slot.SubmissionID, "FramePacer::BeginFrame");
 	}
 
@@ -149,6 +157,10 @@ namespace Engine {
 		m_IsInFrame = false;
 		Slot& slot = m_Slots[m_FrameSlot];
 		slot.SubmissionID = lastSubmissionID;
+		// A lost device records no event (decision 28): its owner replaces the pacer when it recovers the device, and a slot
+		// created on a lost device has no query.
+		if (m_Device->IsLost() || slot.EventQuery == nullptr)
+			return;
 		// NVRHI asserts that an event query is reset before it is set again.
 		nvrhi::IDevice* nvrhiDevice = m_Device->GetNvrhiDevice();
 		nvrhiDevice->resetEventQuery(slot.EventQuery);

@@ -56,6 +56,8 @@ namespace Engine {
 			// GraphicsSpecification::DisableDepthClamp: turns shadow pancaking off (GraphicsDeviceInfo::DepthClamp false), so
 			// shadow casters take the extended-near fallback. No Vulkan device feature is involved.
 			bool DisableDepthClamp = false;
+			// GraphicsSpecification::ResetWaitMilliseconds, the wait of a recovery between its two device creations (M18).
+			uint32_t ResetWaitMilliseconds = DefaultGpuResetWaitMilliseconds;
 		};
 
 		// One headless GraphicsDevice (GraphicsSpecification with Validation, the options above and MaxApiVersion =

@@ -179,8 +179,11 @@ namespace Engine {
 
 	Status EngineContext::RecoverGraphics()
 	{
-		ENGINE_CONTRACT_STUB();
-		return std::unexpected(Error(ErrorCode::Unsupported, "M18 device-loss recovery contract (Docs/Decisions/0029-m18-contract.md decision 29, stream A)"));
+		if (m_GraphicsDevice == nullptr)
+			return MakeError(ErrorCode::InvalidState, "the engine context has no GPU device to recover");
+		// The window the Graphics step presented to (CreateGraphics): the device scores presentation support for it again.
+		Window* presentWindow = GlfwLibrary::GetMode() == WindowMode::Windowed ? GetWindow() : nullptr;
+		return m_GraphicsDevice->Recover(presentWindow);
 	}
 
 	std::string_view EngineContextStepToString(EngineContextStep step)

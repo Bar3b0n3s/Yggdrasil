@@ -114,7 +114,8 @@ namespace Engine {
 		// Called by GraphicsDevice after each executeCommandLists. With GpuFault::DeviceLost or DeviceLostUnrecoverable, one
 		// call sets the device-lost flag (injected), so the check that follows the submission takes the device-loss path
 		// (§8.14 item 8). M18 (C18.3, decision 30): the first call after OnGarbageCollected, once per process, so an
-		// application's startup submissions (the DFG LUT, the first uploads) and its first frame are unaffected.
+		// application's startup submissions (the DFG LUT, the first uploads) and its first frame are unaffected; a call before
+		// the first OnGarbageCollected leaves the fault armed for later, and no call strikes again after the one that did.
 		void OnSubmitted();
 		// M18 (C18.3, decision 30): called by GraphicsDevice::RunGarbageCollection, once per frame; the first call arms
 		// OnSubmitted's injected device-lost faults.
@@ -142,8 +143,8 @@ namespace Engine {
 		// M18 (C18.3): InjectUnrecoverableDeviceLoss's marker.
 		std::atomic<bool> m_FailDeviceRecreation{ false };
 		// M18 (C18.3, decision 30): the injected device-lost faults' once-per-process state, apart from m_DeviceLossState so
-		// that ClearDeviceLost never re-arms them: an armed bit (OnGarbageCollected's first call, stream A) and a struck bit
-		// (the OnSubmitted call that set the flag; no later call strikes again).
+		// that ClearDeviceLost never re-arms them: an armed bit (OnGarbageCollected's first call) and a struck bit (the
+		// OnSubmitted call that set the flag; no later call strikes again).
 		std::atomic<uint8_t> m_InjectedFaultArming{ 0 };
 	};
 

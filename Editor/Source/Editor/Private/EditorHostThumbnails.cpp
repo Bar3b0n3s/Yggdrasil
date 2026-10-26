@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <limits>
 #include <optional>
+#include <ranges>
 
 namespace Engine {
 
@@ -38,19 +39,40 @@ namespace Engine {
 	}
 	EditorHostThumbnails::~EditorHostThumbnails()
 	{
+		m_Recreation.Reset();
 		Reset();
 	}
 	void EditorHostThumbnails::SetGraphics(GraphicsDevice& device, ImGuiRenderer& renderer)
 	{
 		m_Device = &device;
 		m_Renderer = &renderer;
+		// After the ImGui renderer: released before it, so its keys are gone when it releases (GpuRecreation.h).
+		m_Recreation = device.GetRecreation().Register({
+			.Name = "EditorHostThumbnails",
+			.Release = [this]()
+		{
+			ReleaseGpuObjects();
+		},
+			.Recreate = {},
+		});
+	}
+	void EditorHostThumbnails::ReleaseGpuObjects()
+	{
+		for (Entry& entry : m_Entries | std::views::values)
+		{
+			if (m_Renderer && entry.Texture != 0)
+				m_Renderer->RemoveTexture(entry.Texture);
+			entry.Texture = 0;
+			entry.Path.clear();
+			entry.FailedPath.clear();
+		}
+		m_Cache.Revalidate();
 	}
 	void EditorHostThumbnails::Reset()
 	{
 		if (m_Renderer)
-			for (const auto& [key, entry] : m_Entries)
+			for (const Entry& entry : m_Entries | std::views::values)
 			{
-				(void)key;
 				if (entry.Texture != 0)
 					m_Renderer->RemoveTexture(entry.Texture);
 			}
@@ -86,7 +108,9 @@ namespace Engine {
 			else
 				++item;
 		}
-		if (!m_Device || !m_Renderer)
+		// A lost device creates nothing (its creations fail as the loss, decision 28): the uploads wait for the recovery,
+		// which forgets every image, so none is remembered as a failed upload.
+		if (!m_Device || !m_Renderer || m_Device->IsLost())
 			return {};
 		// Bounded registrations; evict outside Draw so the current frame never references a removed key.
 		if (m_Entries.size() >= 256)
@@ -101,9 +125,8 @@ namespace Engine {
 		}
 		std::optional<Error> failure;
 		bool uploaded = false;
-		for (auto& [key, entry] : m_Entries)
+		for (Entry& entry : m_Entries | std::views::values)
 		{
-			(void)key;
 			// The asset may have changed version since Draw asked; the cache answers for the version it has now.
 			ThumbnailRequest current = entry.Request;
 			current.Version = m_Editor.GetAssets().GetVersion(current.Asset);

@@ -28,6 +28,7 @@
 #include "Engine/Core/VfsPath.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Graphics/GpuProfiler.h"
+#include "Engine/Graphics/GpuRecreation.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Image.h"
 #include "Engine/Graphics/RenderContext.h"
@@ -186,14 +187,23 @@ namespace Engine {
 				&& left.MaxEntities == right.MaxEntities;
 		}
 
+		// Whether `error` means the device is out of memory, which ends the process (§8.14 item 7): a Gpu error, except on a
+		// lost device, where it is the loss itself, which the frame boundary recovers (M18, Docs/Decisions/0029-m18-contract.md
+		// decision 28).
+		[[nodiscard]] static bool IsGpuOutOfMemory(const Error& error, const GraphicsDevice& device)
+		{
+			return error.GetCode() == ErrorCode::Gpu && !device.IsLost();
+		}
+
 		// A startup creation's result: a Gpu error is the device out of memory at startup, which ends the process (§8.14
-		// item 7); other errors get the context `what`.
+		// item 7); other errors, a lost device's among them (Application ends a loss before the first frame, decision 25),
+		// get the context `what`.
 		template<typename T>
-		static Result<T> CheckStartupCreation(Result<T> created, std::string_view what)
+		static Result<T> CheckStartupCreation(Result<T> created, const GraphicsDevice& device, std::string_view what)
 		{
 			if (created.has_value())
 				return created;
-			if (created.error().GetCode() == ErrorCode::Gpu)
+			if (IsGpuOutOfMemory(created.error(), device))
 				FatalError(FatalErrorKind::OutOfMemory, std::format("Cannot create {}: {}", what, created.error().ToString()));
 			return std::unexpected(std::move(created).error().WithContext(std::format("while creating {}", what)));
 		}
@@ -262,6 +272,11 @@ namespace Engine {
 		Scope<BlitPass> Blit;
 		nvrhi::Format BlitFormat = nvrhi::Format::UNKNOWN;
 		Scope<ViewportCapture> Capture;
+		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 33): the blit is the one GPU object of the Runtime outside
+		// the placement rule's places (the renderer, the pipelines, the cache and the capture recover themselves), so the
+		// application registers it, "RuntimeApp", once the others exist (CreateRenderers): its Release drops the blit and the
+		// game view's pending submission, and the next rendered frame creates the blit again.
+		GpuRecreationRegistration Recreation;
 		bool RenderFailing = false; // the last frame's render or blit failed, so the next failure is not logged again
 		std::optional<uint64_t> PendingRenderFrame{};
 		// M8 stale mirrors (SceneRenderer.h): when the collections also release what the start scene's first frame did not
@@ -974,6 +989,8 @@ namespace Engine {
 				{
 					result.MemoryAllocationCount = device->GetMemoryAllocationCount();
 					result.MaxMemoryAllocationCount = device->GetInfo().MaxMemoryAllocationCount;
+					// M18 (decision 31): the device losses this run recovered from; 0 with renderer none.
+					result.DeviceLosses = device->GetRecoveryCount();
 				}
 				result.Views.push_back(MakeStatsViewSummary("game", m_State->Renderer != nullptr ? m_State->Renderer->GetRenderStats() : RenderStats{}));
 				return result;
@@ -1007,10 +1024,23 @@ namespace Engine {
 		// capture. The blit pass waits for the frame target's format (OnRender).
 		state.GpuCache = CreateScope<GpuResourceCache>(device, *m_Assets);
 		ENGINE_TRY_ASSIGN(state.Pipelines,
-			Utils::CheckStartupCreation(SceneRendererPipelines::Create(device, *context.GetPipelineFactory()), "the scene renderer's pipelines"));
-		ENGINE_TRY_ASSIGN(state.Renderer, Utils::CheckStartupCreation(SceneRenderer::Create(device, *state.Pipelines, *state.GpuCache, *m_Assets, { .Width = state.ViewWidth, .Height = state.ViewHeight }), "the game view's renderer"));
+			Utils::CheckStartupCreation(SceneRendererPipelines::Create(device, *context.GetPipelineFactory()), device, "the scene renderer's pipelines"));
+		ENGINE_TRY_ASSIGN(state.Renderer,
+			Utils::CheckStartupCreation(SceneRenderer::Create(device, *state.Pipelines, *state.GpuCache, *m_Assets, { .Width = state.ViewWidth, .Height = state.ViewHeight }),
+				device, "the game view's renderer"));
 		ENGINE_TRY_ASSIGN(state.Capture,
-			Utils::CheckStartupCreation(ViewportCapture::CreateForScenes(device, *state.Pipelines, *state.GpuCache, *m_Assets), "the screenshot capture"));
+			Utils::CheckStartupCreation(ViewportCapture::CreateForScenes(device, *state.Pipelines, *state.GpuCache, *m_Assets), device, "the screenshot capture"));
+		// After the objects it records with: released before them, and its blit created again by the next rendered frame.
+		state.Recreation = device.GetRecreation().Register({
+			.Name = "RuntimeApp",
+			.Release = [&state]()
+		{
+			state.Blit.reset();
+			state.BlitFormat = nvrhi::Format::UNKNOWN;
+			state.PendingRenderFrame.reset();
+		},
+			.Recreate = {},
+		});
 		state.Mirrors.NoteSceneChange();
 		return {};
 	}
@@ -1031,6 +1061,8 @@ namespace Engine {
 #endif
 		state.Runner.Cancel();
 		state.Player.Cancel();
+		// The registration goes with the objects it covers, before the device (GpuRecreationRegistration).
+		state.Recreation.Reset();
 		state.Capture.reset();
 		state.Blit.reset();
 		state.Renderer.reset();
@@ -1264,8 +1296,11 @@ namespace Engine {
 		GpuProfileScope scope(*context.Profiler, *context.CommandList, "GameView");
 
 		// Render targets are created at startup or resize, and one the device has no memory for is fatal (§8.14 item 7), as
-		// in the editor.
+		// in the editor. On a device lost during the frame a failure is the loss (decision 28): the view renders nothing, and
+		// the frame boundary recovers the device.
 		const Status resized = state.Renderer->Resize(context.Width, context.Height);
+		if (!resized.has_value() && context.Device->IsLost())
+			return;
 		if (!resized.has_value())
 			FatalError(FatalErrorKind::OutOfMemory, std::format("Cannot resize the game view's targets: {}", resized.error().ToString()));
 
@@ -1278,9 +1313,11 @@ namespace Engine {
 		{
 			state.Blit.reset();
 			Result<Scope<BlitPass>> blit = Utils::CheckStartupCreation(BlitPass::Create(*context.Device, *GetContext().GetPipelineFactory(), target),
-				"the game view's blit");
+				*context.Device, "the game view's blit");
 			if (!blit.has_value())
 			{
+				if (context.Device->IsLost())
+					return;
 				if (!state.RenderFailing)
 					ENGINE_ERROR("Cannot render the game view: {}", blit.error().ToString());
 				state.RenderFailing = true;
@@ -1303,9 +1340,12 @@ namespace Engine {
 		state.Mirrors.NoteRendered();
 		const Status blitted = state.Blit->Record(*context.CommandList, *state.Renderer->GetFinalTexture(), *context.Framebuffer);
 		// A binding set the device has no memory for is fatal like any GPU object (§8.14 item 7); anything else is logged
-		// once per run of failing frames.
-		if (!blitted.has_value() && blitted.error().GetCode() == ErrorCode::Gpu)
+		// once per run of failing frames. On a device lost during the frame a failure is the loss, which the frame boundary
+		// recovers (decision 28).
+		if (!blitted.has_value() && Utils::IsGpuOutOfMemory(blitted.error(), *context.Device))
 			FatalError(FatalErrorKind::OutOfMemory, std::format("Cannot present the game view: {}", blitted.error().ToString()));
+		if (context.Device->IsLost())
+			return;
 		const Status& drawn = blitted.has_value() ? rendered : blitted;
 		if (!drawn.has_value() && !state.RenderFailing)
 			ENGINE_ERROR("Cannot render the game view: {}", drawn.error().ToString());

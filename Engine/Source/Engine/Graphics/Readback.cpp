@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/Graphics/Readback.h"
 
+#include "Engine/Graphics/CommandListRecording.h"
 #include "Engine/Graphics/FramePacer.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 
@@ -53,6 +54,9 @@ namespace Engine {
 	{
 		const nvrhi::TextureDesc& desc = texture.getDesc();
 		ENGINE_TRY(Utils::ValidateReadback(desc, mipLevel, arraySlice));
+		// A lost device copies nothing (decision 28), and its command lists are not to be recorded.
+		if (m_Device->IsLost())
+			return MakeError(ErrorCode::Gpu, "cannot read back texture '{}': the device is lost", desc.debugName);
 
 		const uint32_t width = std::max(desc.width >> mipLevel, 1u);
 		const uint32_t height = std::max(desc.height >> mipLevel, 1u);
@@ -74,12 +78,15 @@ namespace Engine {
 
 		// NVRHI derives the texture's state in this command list from its keepInitialState or permanent state, as for every
 		// engine render target (OffscreenTarget, RenderTargetPool), and orders the copy after the prior submissions' writes.
-		m_CommandList->open();
+		CommandListRecording recording(*m_Device, *m_CommandList);
 		m_CommandList->copyTexture(staging, nvrhi::TextureSlice(), &texture, nvrhi::TextureSlice().setMipLevel(mipLevel).setArraySlice(arraySlice));
-		m_CommandList->close();
-		const uint64_t submission = m_Device->ExecuteCommandList(*m_CommandList);
-		// Bounded (a hang or device loss is fatal), so mapping, which waits for the copy without a timeout, never waits.
+		const uint64_t submission = recording.Execute();
+		// Bounded (a hang is fatal), so mapping, which waits for the copy without a timeout, never waits. A loss the
+		// submission or the wait meets is reported and leaves nothing to map: the copy never ran, and mapping would wait on a
+		// timeline that never gets there.
 		WaitForSubmission(*m_Device, submission, std::format("Readback of texture '{}'", desc.debugName));
+		if (m_Device->IsLost())
+			return MakeError(ErrorCode::Gpu, "cannot read back texture '{}': the device was lost during the copy", desc.debugName);
 
 		const size_t tightPitch = image.GetRowPitch();
 		size_t rowPitch = 0;

@@ -138,6 +138,66 @@ namespace Engine {
 			WaitForSubmission(device, 0, "FramePacer test");
 		}
 
+		TEST_CASE("FramePacer: a lost device's frames wait for nothing, and a pacer made on it has no event queries"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 28): a lost device runs nothing more, so its frames
+			// never wait for a submission, and a pacer its owner creates on it is no out-of-memory error.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Result<Scope<Test::GpuSubmissionGate>> gate = Test::GpuSubmissionGate::Create(device);
+				REQUIRE_MESSAGE(gate.has_value(), gate.error().ToString());
+				Result<nvrhi::CommandListHandle> commandList = device.CreateCommandList();
+				REQUIRE_MESSAGE(commandList.has_value(), commandList.error().ToString());
+				FramePacer pacer(device, 1);
+				pacer.BeginFrame();
+				(*commandList)->open();
+				(*commandList)->close();
+				(*gate)->HoldNextSubmission();
+				pacer.EndFrame(device.ExecuteCommandList(**commandList));
+
+				// The first frame's submission cannot complete before the gate opens, so on a working device the next frame
+				// of its slot would wait until its bounded wait ended the process with GpuHang.
+				device.GetDiagnostics().SetDeviceLost(true);
+				device.ReportDeviceLost("FramePacerTests");
+				pacer.BeginFrame();
+				CHECK(pacer.GetFrameIndex() == 1);
+				pacer.EndFrame(device.GetLastSubmissionID());
+
+				FramePacer lostPacer(device, 2);
+				lostPacer.BeginFrame();
+				lostPacer.EndFrame(device.GetLastSubmissionID());
+				lostPacer.BeginFrame();
+				lostPacer.EndFrame(device.GetLastSubmissionID());
+
+				// The lost device's collection waits for idle, so the opened gate's semaphore is free for its destructor.
+				(*gate)->Open();
+				device.RunGarbageCollection();
+			}
+
+			// A pacer on the recovered device paces again, on the new queue's timeline.
+			const Status recovered = device.Recover(nullptr);
+			REQUIRE_MESSAGE(recovered.has_value(), recovered.error().ToString());
+			CHECK(device.GetLastSubmissionID() == 0);
+			FramePacer pacer(device, 2);
+			Result<nvrhi::CommandListHandle> commandList = device.CreateCommandList();
+			REQUIRE_MESSAGE(commandList.has_value(), commandList.error().ToString());
+			std::vector<uint64_t> submissions;
+			for (uint64_t frame = 0; frame < 4; ++frame)
+			{
+				pacer.BeginFrame();
+				if (frame >= 2)
+					CHECK(device.GetCompletedSubmissionID() >= submissions[frame - 2]);
+				(*commandList)->open();
+				(*commandList)->close();
+				submissions.push_back(device.ExecuteCommandList(**commandList));
+				pacer.EndFrame(submissions.back());
+			}
+			device.WaitForIdle();
+		}
+
 		TEST_CASE("FramePacer: the hang fault ends the first wait for a frame slot with GpuHang" * doctest::test_suite(Test::GpuSuite))
 		{
 			// §8.14 item 8: under --gpu-inject-fault=hang every wait slice times out, so the third frame (the first whose slot

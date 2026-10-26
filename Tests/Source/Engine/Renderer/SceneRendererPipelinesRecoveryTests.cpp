@@ -2,12 +2,20 @@
 
 #include "Engine/Renderer/SceneRenderer.h"
 
+#include "Engine/Core/Log.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Readback.h"
+#include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Engine/Renderer/RenderPassDeclaration.h"
+#include "Support/DeathTest.h"
 #include "Support/DeviceLossTest.h"
 #include "Support/HeadlessGpuFixture.h"
+#include "Support/InMemoryAssetManager.h"
+
+#include <cstddef>
+#include <string>
+#include <vector>
 
 // The pipeline set's recovery from a device loss (M18, C18.3; Docs/Decisions/0029-m18-contract.md decisions 26 and 27):
 // every declared pass, the QuadBatcher and the output stage's UpscalePass included, is released with the set and created
@@ -38,10 +46,63 @@ namespace Engine {
 
 	}
 
+	// The child of "SceneRendererPipelines: a render between Release and CreatePipelines is a programmer error": a renderer
+	// renders after its set released its GPU objects, which only the device's recovery does, between its Release and its
+	// Recreate.
+	ENGINE_DEATH_TEST("Renderer/RenderAfterPipelineRelease")
+	{
+		Test::HeadlessGpuFixture gpu;
+		if (!gpu.IsAvailable())
+		{
+			ENGINE_CORE_ERROR("The death test needs a GPU");
+			return;
+		}
+		Test::InMemoryAssetManager assets;
+		GpuResourceCache cache(gpu.GetDevice(), assets);
+		Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());
+		if (!pipelines.has_value())
+		{
+			ENGINE_CORE_ERROR("Cannot create the pipelines: {}", pipelines.error());
+			return;
+		}
+		Result<Scope<SceneRenderer>> renderer = SceneRenderer::Create(gpu.GetDevice(), **pipelines, cache, assets, { .Width = 8, .Height = 8 });
+		Result<nvrhi::CommandListHandle> commandList = gpu.GetDevice().CreateCommandList();
+		if (!renderer.has_value() || !commandList.has_value())
+		{
+			ENGINE_CORE_ERROR("Cannot create the renderer or a command list");
+			return;
+		}
+		(*pipelines)->ReleaseGpuObjects();
+		RenderSnapshot snapshot;
+		(*commandList)->open();
+		const Status rendered = (*renderer)->Render(**commandList, snapshot);
+		ENGINE_CORE_ERROR("Render returned instead of asserting: {}", rendered.has_value() ? std::string("success") : rendered.error().ToString());
+	}
+
+	// The other child of the same test: a debug view's pipelines asked for after the set released its GPU objects.
+	ENGINE_DEATH_TEST("Renderer/EnsureDebugViewAfterPipelineRelease")
+	{
+		Test::HeadlessGpuFixture gpu;
+		if (!gpu.IsAvailable())
+		{
+			ENGINE_CORE_ERROR("The death test needs a GPU");
+			return;
+		}
+		Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());
+		if (!pipelines.has_value())
+		{
+			ENGINE_CORE_ERROR("Cannot create the pipelines: {}", pipelines.error());
+			return;
+		}
+		(*pipelines)->ReleaseGpuObjects();
+		const Status ensured = (*pipelines)->EnsureDebugView(RenderDebugView::Albedo);
+		ENGINE_CORE_ERROR("EnsureDebugView returned instead of asserting: {}", ensured.has_value() ? std::string("success") : ensured.error().ToString());
+	}
+
 	TEST_SUITE("Renderer")
 	{
 		TEST_CASE("SceneRendererPipelines: a device loss creates every declared pass again and draws the same images"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.3, decisions 26, 27 and 32): "Release and Recreate through CreatePipelines". A lit frame, a
 			// debug view (whose lazily created pipelines are created again on first use) and an upscaled frame at scale 3 (the
@@ -52,7 +113,9 @@ namespace Engine {
 			GraphicsDevice& device = gpu.GetDevice();
 			uint64_t frame = 40;
 			Test::DeviceLossTest test;
-			test.Owners = { "SceneRendererPipelines", "SceneRenderer" };
+			// The library's shader modules are created again from the SPIR-V it kept (decision 33), so it is one of the group's
+			// owners, as the cache is of the renderer's and the capture's loss tests.
+			test.Owners = { "ShaderLibrary", "SceneRendererPipelines", "SceneRenderer" };
 			test.Use = [&device, &setup, &frame]() -> Result<std::vector<std::byte>>
 			{
 				std::vector<std::byte> images;
@@ -80,7 +143,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("SceneRendererPipelines: Release drops every pass and keeps the generation, which CreatePipelines increases"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.3, decision 27): the set's Release hook, and its Recreate hook, CreatePipelines.
 			Test::HeadlessGpuFixture gpu;
@@ -95,6 +158,18 @@ namespace Engine {
 			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
 			CHECK(pipelines.GetPipelineCount() == GetDeclaredPipelineCount());
 			CHECK(pipelines.GetGeneration() == generation + 1);
+		}
+
+		TEST_CASE("SceneRendererPipelines: a render between Release and CreatePipelines is a programmer error"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.3, decision 27; SceneRenderer.h, ReleaseGpuObjects): only the device's recovery releases the set, and it
+			// creates the passes again before any renderer of the set renders or asks for a debug view's pipelines.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			ENGINE_CHECK_DEATH("Renderer/RenderAfterPipelineRelease", "Render with a pipeline set whose GPU objects were released by a device loss");
+			ENGINE_CHECK_DEATH("Renderer/EnsureDebugViewAfterPipelineRelease",
+				"EnsureDebugView on a pipeline set whose GPU objects were released by a device loss");
 		}
 	}
 

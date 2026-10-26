@@ -8,6 +8,7 @@
 
 #include <format>
 #include <optional>
+#include <string>
 
 namespace Engine {
 
@@ -18,8 +19,18 @@ namespace Engine {
 		{
 			if (error.code().category() != vk::errorCategory())
 				return std::nullopt;
-			RaiseVulkanError(owner->GetGraphicsDevice(), static_cast<VkResult>(error.code().value()),
-				std::format("Vulkan error in automation method '{}': {}", method, error.what()));
+			const VkResult result = static_cast<VkResult>(error.code().value());
+			const std::string message = std::format("Vulkan error in automation method '{}': {}", method, error.what());
+			// A device loss, and any Vulkan error on a lost device (NVRHI's calls fail with other codes there too, the loss's
+			// consequences), is recovered at the next frame boundary: the request fails, and the server keeps serving
+			// (decision 28). Every other Vulkan error still ends the process.
+			GraphicsDevice* device = owner->GetGraphicsDevice();
+			if (device != nullptr && (result == VK_ERROR_DEVICE_LOST || device->IsLost()))
+			{
+				device->ReportDeviceLost(message);
+				return Error(ErrorCode::Gpu, std::format("the GPU device was lost during '{}'; it is recovered at the next frame boundary", method));
+			}
+			RaiseVulkanError(device, result, message);
 		};
 	}
 

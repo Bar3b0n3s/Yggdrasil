@@ -229,9 +229,20 @@ namespace Engine {
 		// set, RaiseDeviceLost (§8.1: NVRHI reports device loss inside submit through its message callback). Every
 		// submission of the engine goes through these two functions.
 		// M18 (C18.3, decision 28): the flag leads to ReportDeviceLost("executeCommandLists"), which returns. On a device
-		// already lost nothing is submitted, and the result is GetLastSubmissionID.
+		// already lost nothing is submitted, and the result is GetLastSubmissionID: NVRHI records the lists as executed with
+		// the queue's submission answered on the host (vkQueueSubmit never reaches Vulkan), so each drops its recording, and
+		// what it references, when the lost device's submissions are retired (RunGarbageCollection, Recover); a closed list
+		// that never executes keeps itself alive through its own recording.
 		uint64_t ExecuteCommandList(nvrhi::ICommandList& commandList);
 		uint64_t ExecuteCommandLists(std::span<nvrhi::ICommandList* const> commandLists);
+		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 39): retires `commandList`, closed and never executed,
+		// without submitting it, on a lost or a healthy device: NVRHI records it as executed with the queue's submission
+		// answered on the host, as ExecuteCommandLists does on a lost device, so it drops the recording through which it
+		// keeps itself and everything it recorded alive, and NVRHI retires it with the queue's next completed submission (on
+		// a lost device, at the recovery). Nothing it recorded runs, and GetLastSubmissionID does not change. For a recording
+		// that a vk::SystemError unwound before its execution (CommandListRecording). After a failed recovery there is no
+		// NVRHI device, and nothing can have been recorded on one: it does nothing.
+		void RetireCommandList(nvrhi::ICommandList& commandList);
 		// The ID of the last submission; 0 before the first.
 		[[nodiscard]] uint64_t GetLastSubmissionID() const;
 		// The highest submission ID the GPU has completed (vkGetSemaphoreCounterValue on the graphics queue's timeline
@@ -243,8 +254,12 @@ namespace Engine {
 		// Once per frame, after the frame's last submission (§8.2): NVRHI's runGarbageCollection, which retires the
 		// completed command lists and their references, then the tracker's Sweep, which releases what only the tracker
 		// still holds, then HostImageUpload::CollectGarbage, the host images' deferred release.
-		// M18 (C18.3, decision 30): then GpuDiagnostics::OnGarbageCollected, which arms the injected device-lost faults. On
-		// a lost device it does nothing: Recover retires what the lost device held.
+		// M18 (C18.3, decision 30): then GpuDiagnostics::OnGarbageCollected, which arms the injected device-lost faults. On a
+		// lost device it does no GPU work and arms nothing, and it never queries the device for completed work: it waits for
+		// idle through the C entry point (Vulkan returns that in finite time on a lost device, where VK_ERROR_DEVICE_LOST
+		// counts as the completion of every submission, and an injected loss's real submissions complete), retires NVRHI's
+		// command lists as completed with the queue's timeline answered on the host, then sweeps the tracker and collects the
+		// host images, so what only the lost device's submissions held is released, as Recover's release does.
 		void RunGarbageCollection();
 
 		// vkDeviceWaitIdle, for shutdown and resize (§8.1), through the dispatcher's C entry point, so it never throws
@@ -255,9 +270,10 @@ namespace Engine {
 		// returns: a lost device waits for nothing.
 		void WaitForIdle();
 
-		// Ends the process through FatalError(DeviceLost) with "<context>: device lost" followed by DescribeDeviceFault()
-		// when VK_EXT_device_fault is enabled (§8.14 item 6). The fatal-error handler then writes the autosave and the
-		// crash report. Callable from any submission or wait path on the main thread.
+		// Ends the process through FatalError(DeviceLost) with "<context>: device lost" followed by the fault description:
+		// the current loss's report's (GetLossReport), else DescribeDeviceFault() when VK_EXT_device_fault is enabled (§8.14
+		// item 6). The fatal-error handler then writes the autosave and the crash report. Callable from any submission or
+		// wait path on the main thread.
 		// M18 (C18.3, decision 29): only the paths that cannot recover call it: an application after a failed Recover (its
 		// context names the loss and the recovery's error) and a loss before an application's first frame.
 		[[noreturn]] void RaiseDeviceLost(std::string_view context);
@@ -281,9 +297,11 @@ namespace Engine {
 		// Create's GraphicsDeviceSpecification::PresentWindow again (null for a headless device), whose title is the
 		// application name again; nothing else is read from outside the device. In order:
 		//   1. A loss whose flag alone was set is reported first (ReportDeviceLost("the frame boundary")).
-		//   2. Release: GetRecreation().ReleaseAll(), the owners in reverse registration order; then the device's own
-		//      objects: the HostImageUpload's host images and the references of NVRHI's in-flight command lists, retired as
-		//      completed (a lost device runs nothing more); then its garbage collection and the tracker's Sweep. A tracked
+		//   2. Release: GetRecreation().ReleaseAll(), the owners in reverse registration order, after an idle wait through the
+		//      C entry point, so an injected loss's real submissions completed before any owner destroys what they use (a
+		//      really lost device answers it in finite time); then the device's own objects: the HostImageUpload's host
+		//      images and the references of NVRHI's in-flight command lists, retired as completed without querying the
+		//      device (a lost device runs nothing more; RunGarbageCollection's lost path); then the tracker's Sweep. A tracked
 		//      object still alive is held by an owner outside the placement rule (GpuRecreation.h): InvalidState naming the
 		//      live counts (GpuResourceTracker::DescribeLiveCounts), checked where the tracker counts (not in Dist).
 		//   3. Teardown in §8.14 item 4's order: the NVRHI device, the VkDevice, the debug messenger, the VkInstance.
@@ -293,7 +311,8 @@ namespace Engine {
 		//      (MaxDeviceCreationAttempts); under GpuDiagnostics::ShouldFailDeviceRecreation every attempt fails with Gpu
 		//      without calling Vulkan and without the wait. A creation that fails both times is the loss continuing: the
 		//      device stays lost (IsLost, its report kept) without Vulkan objects. Once the device exists again,
-		//      GpuDiagnostics::ClearDeviceLost: from here a reported loss is a second one.
+		//      GetLastSubmissionID starts again from 0 with the new queue's timeline (every owner forgot its submissions in
+		//      its Release), and GpuDiagnostics::ClearDeviceLost: from here a reported loss is a second one.
 		//   5. Recreate: GetRecreation().RecreateAll(), the owners in registration order.
 		//   6. A loss reported after the clear, during step 5 (a second loss), fails the recovery; the device is lost again.
 		//   7. GetRecoveryCount grows by one, GetLossReport becomes nullopt, and one Warn line "GPU device recovered after a
@@ -318,10 +337,13 @@ namespace Engine {
 		// lifetime; main thread.
 		[[nodiscard]] GpuRecreationRegistry& GetRecreation();
 		// vkGetDeviceFaultInfoEXT as text (description, address infos, vendor infos); "VK_EXT_device_fault is not
-		// available" when the extension is not enabled, "no fault information" when the driver reports none. The query is
-		// valid only on a device that is really lost (the validation layer rejects it otherwise), so a healthy device, and
-		// one marked by SetDeviceLost(true) or the CLI injected device-lost faults, report "no fault information" without
-		// querying. Synthetic marking is sticky even when RaiseDeviceLost subsequently reports loss again (until Recover).
+		// available" when the extension is not enabled (or the device has no Vulkan objects after a failed recovery), "no
+		// fault information" when the driver reports none. The query is valid only on a device that is really lost (the
+		// validation layer rejects it otherwise), so a healthy device, and one marked by SetDeviceLost(true) or the CLI
+		// injected device-lost faults, report "no fault information" without querying; nor does one whose flag is set while
+		// Vulkan still answers it (vkGetSemaphoreCounterValue, which never waits, does not return VK_ERROR_DEVICE_LOST): a
+		// vk::DeviceLostError that did not come from Vulkan. Synthetic marking is sticky even when RaiseDeviceLost
+		// subsequently reports loss again (until Recover).
 		[[nodiscard]] std::string DescribeDeviceFault();
 
 		// Native handles for the code that calls Vulkan itself through the dispatcher's C entry points: Swapchain and
@@ -349,6 +371,19 @@ namespace Engine {
 		[[nodiscard]] Status CreateNvrhiDevice();
 		// Logs the Info line that names the device and its optional paths.
 		void LogDeviceInfo() const;
+		// M18 (C18.3): Create's three steps and the HostImageUpload, for Recover: fails with Gpu without calling Vulkan under
+		// GpuDiagnostics::ShouldFailDeviceRecreation, and leaves no Vulkan object behind when a step fails.
+		[[nodiscard]] Status CreateVulkanObjects(const GraphicsDeviceSpecification& specification);
+		// M18 (C18.3): RunGarbageCollection's lost path (see there), which Recover's release and the teardown of a lost device
+		// share.
+		void CollectLostDevice();
+		// M18 (C18.3): NVRHI's executeCommandLists with the queue's submission answered on the host: ExecuteCommandLists' lost
+		// path and RetireCommandList. Nothing without an NVRHI device.
+		void ExecuteOnHost(std::span<nvrhi::ICommandList* const> commandLists);
+		// §8.14 item 4's order for what the device owns, the NVRHI device, the VkDevice (with the memory tracker's leak
+		// report), the debug messenger and the VkInstance, then the extension lists; for the destructor and Recover. Every
+		// object created through the wrappers and the HostImageUpload must be gone.
+		void DestroyVulkanObjects();
 		// The destructor's teardown (see there); runs once, from the destructor or from Destroy.
 		void Shutdown();
 	private:

@@ -101,8 +101,9 @@ namespace Engine {
 		// InvalidArgument for a desc that is a render target, a UAV, has zero extent or a 1D texture whose height is not 1,
 		// for missing, duplicated or out-of-range subresources, for data smaller than the subresource and for pitches that
 		// cannot be addressed (TextureSubresourceData::RowPitch); Gpu when creation or the host copy fails (including
-		// --gpu-inject-fault=oom-texture, GpuDiagnostics::ShouldFailTextureCreation, on both paths), naming desc.debugName.
-		// Never crashes on a failed creation (§8.14 item 7).
+		// --gpu-inject-fault=oom-texture, GpuDiagnostics::ShouldFailTextureCreation, on both paths), naming desc.debugName,
+		// and on a lost device without a Vulkan call (M18, Docs/Decisions/0029-m18-contract.md decision 28). Never crashes on
+		// a failed creation (§8.14 item 7).
 		[[nodiscard]] Result<TextureUpload> CreateTexture(const nvrhi::TextureDesc& desc, std::span<const TextureSubresourceData> subresources,
 			TextureUploadPath preferredPath = TextureUploadPath::HostImageCopy);
 

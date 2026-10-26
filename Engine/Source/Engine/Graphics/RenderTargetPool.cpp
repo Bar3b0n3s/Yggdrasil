@@ -81,7 +81,9 @@ namespace Engine {
 
 	void RenderTargetPool::ReleaseAll()
 	{
-		ENGINE_CONTRACT_STUB();
+		// Only the pool's references go: no submission is asked about (a lost device answers nothing), and a holder's handle
+		// keeps its target alive until the holder drops it.
+		m_Targets.clear();
 	}
 
 	size_t RenderTargetPool::GetTargetCount() const

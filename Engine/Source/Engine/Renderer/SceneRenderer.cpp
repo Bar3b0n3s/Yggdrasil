@@ -7,6 +7,7 @@
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/FatalError.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Graphics/CommandListRecording.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Renderer/BloomPass.h"
 #include "Engine/Renderer/BrdfLut.h"
@@ -114,20 +115,6 @@ namespace Engine {
 			return std::isfinite(vector.x) && std::isfinite(vector.y) && std::isfinite(vector.z);
 		}
 
-		// A buffer of `size` bytes kept in `state` between command lists (keepInitialState): a constant buffer, or a
-		// structured buffer of `structStride`-byte elements.
-		static Result<nvrhi::BufferHandle> CreateViewBuffer(GraphicsDevice& device, size_t size, uint32_t structStride, std::string debugName)
-		{
-			nvrhi::BufferDesc desc;
-			desc.byteSize = size;
-			desc.isConstantBuffer = structStride == 0;
-			desc.structStride = structStride;
-			desc.initialState = structStride == 0 ? nvrhi::ResourceStates::ConstantBuffer : nvrhi::ResourceStates::ShaderResource;
-			desc.keepInitialState = true;
-			desc.debugName = std::move(debugName);
-			return device.CreateBuffer(desc);
-		}
-
 		// How a target is written.
 		enum class TargetUsage : uint8_t
 		{
@@ -232,10 +219,9 @@ namespace Engine {
 			// Not an immediate command list: a caller may have the frame's immediate list open (NVRHI's validation allows one).
 			ENGINE_TRY_ASSIGN(const nvrhi::CommandListHandle commandList,
 				device.CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false)));
-			commandList->open();
+			CommandListRecording recording(device, *commandList);
 			commandList->clearTextureFloat(texture, nvrhi::AllSubresources, nvrhi::Color(0.0f, 0.0f, 0.0f, 0.0f));
-			commandList->close();
-			device.ExecuteCommandList(*commandList);
+			recording.Execute();
 			return texture;
 		}
 
@@ -254,13 +240,12 @@ namespace Engine {
 			desc.debugName = "SceneRenderer.Neutral";
 			ENGINE_TRY_ASSIGN(nvrhi::TextureHandle texture, device.CreateTexture(desc));
 			ENGINE_TRY_ASSIGN(const nvrhi::CommandListHandle list, device.CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false)));
-			list->open();
+			CommandListRecording recording(device, *list);
 			if (format == ShadowDepthFormat)
 				list->clearDepthStencilTexture(texture, nvrhi::AllSubresources, true, value, false, 0);
 			else
 				list->clearTextureFloat(texture, nvrhi::AllSubresources, nvrhi::Color(value));
-			list->close();
-			device.ExecuteCommandList(*list);
+			recording.Execute();
 			return texture;
 		}
 
@@ -318,6 +303,11 @@ namespace Engine {
 	Status SceneRendererPipelines::EnsureDebugView(RenderDebugView view)
 	{
 		State& state = *m_State;
+		// Between the set's Release and its CreatePipelines (a device loss's recovery) the set has no binding layouts to
+		// create a view's pipelines with (SceneRenderer.h, ReleaseGpuObjects).
+		ENGINE_CORE_ASSERT(state.PipelineCount > 0, "EnsureDebugView on a pipeline set whose GPU objects were released by a device loss");
+		if (state.PipelineCount == 0)
+			return MakeError(ErrorCode::InvalidState, "the pipeline set's GPU objects were released by a device loss and not created again");
 		const auto index = static_cast<size_t>(view);
 		if (index >= RenderDebugViewCount)
 			return MakeError(ErrorCode::InvalidArgument, "debug view {} has no pipelines", index);
@@ -781,21 +771,14 @@ namespace Engine {
 		state.Cache = &cache;
 		state.Assets = &assets;
 
-		ENGINE_TRY_ASSIGN(state.ViewConstantsBuffer, Utils::CreateViewBuffer(device, sizeof(ViewConstants), 0, "SceneRenderer.ViewConstants"));
-		ENGINE_TRY_ASSIGN(state.EnvironmentConstantsBuffer,
-			Utils::CreateViewBuffer(device, sizeof(EnvironmentConstants), 0, "SceneRenderer.EnvironmentConstants"));
-		ENGINE_TRY_ASSIGN(state.LightBuffer,
-			Utils::CreateViewBuffer(device, sizeof(ShaderLight) * MaxVisibleLights, sizeof(ShaderLight), "SceneRenderer.Lights"));
-		state.Lights.reserve(MaxVisibleLights);
 		state.TargetPool = CreateScope<RenderTargetPool>(device);
 		state.Picker = CreateScope<AsyncPicker>(device);
 		state.Profiler = CreateScope<GpuProfiler>(device, device.GetFramesInFlight());
 		state.TimingSubmissions.resize(device.GetFramesInFlight(), 0);
-		ENGINE_TRY_ASSIGN(state.ShadowConstantsBuffer, Utils::CreateViewBuffer(device, sizeof(ShadowConstants), 0, "SceneRenderer.ShadowConstants"));
-		ENGINE_TRY_ASSIGN(state.ShadowCasterConstantsBuffer, device.CreateBuffer(ShadowPass::GetCasterConstantsDesc()));
-		ENGINE_TRY_ASSIGN(state.Targets, state.CreateTargets(specification.Width, specification.Height));
 		state.ViewWidth = specification.Width;
 		state.ViewHeight = specification.Height;
+		// The per-view buffers and the targets of the size, which the device's recovery creates again the same way.
+		ENGINE_TRY(renderer->RecreateGpuObjects());
 		// M18 (C18.3, decisions 26 and 27): released with its per-view objects, which it creates again.
 		SceneRenderer* owner = renderer.get();
 		GpuRecreationHooks hooks;
@@ -843,15 +826,22 @@ namespace Engine {
 		ENGINE_CORE_ASSERT(!state.PendingSubmission, "Render requires OnSubmitted for the prior Render");
 		if (state.PendingSubmission)
 			return MakeError(ErrorCode::InvalidState, "Render requires OnSubmitted for the prior Render");
+		// M18 (C18.3, decision 27): a render between the set's Release and its CreatePipelines is a programmer error: the
+		// device's recovery runs both (SceneRendererPipelines::ReleaseGpuObjects).
+		ENGINE_CORE_ASSERT(state.Pipelines->PipelineCount > 0, "Render with a pipeline set whose GPU objects were released by a device loss");
+		if (state.Pipelines->PipelineCount == 0)
+			return MakeError(ErrorCode::InvalidState, "the renderer's pipeline set was released by a device loss and not created again");
 		const double started = Utils::SceneRendererNowSeconds();
 		const RenderDebugView debugView = snapshot.DebugView;
 		if (static_cast<size_t>(debugView) >= RenderDebugViewCount)
 			return MakeError(ErrorCode::InvalidArgument, "debug view {} has no pipelines", std::to_underlying(debugView));
 		// A debug view's pipelines are created the first time it is asked for. A Gpu error there is an out-of-memory pipeline
-		// creation, fatal like every pipeline creation failure (§8.14 item 7); any other error (an invalid shader) is returned.
+		// creation, fatal like every pipeline creation failure (§8.14 item 7), unless the device is lost: then it is the loss
+		// (M18, C18.3 decision 28), returned like any other error, and the device's recovery at the frame boundary leaves the
+		// view to be created on the next render. Any other error (an invalid shader) is returned.
 		if (const Status ensured = state.PipelineSet->EnsureDebugView(debugView); !ensured.has_value())
 		{
-			if (ensured.error().GetCode() == ErrorCode::Gpu)
+			if (ensured.error().GetCode() == ErrorCode::Gpu && !state.Device->IsLost())
 			{
 				FatalError(FatalErrorKind::OutOfMemory,
 					std::format("Cannot create the {} debug view's pipelines: {}", RenderDebugViewToString(debugView), ensured.error().ToString()));

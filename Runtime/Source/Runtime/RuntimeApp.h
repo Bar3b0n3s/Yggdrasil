@@ -77,8 +77,11 @@ namespace Engine {
 	// ComputeSessionSeed(Simulation.Seed, the scene's Seed), from the TOC's ProjectSettings (PlaySessionSpecification::
 	// Project), paused at tick 0 with --paused. With a device it creates the GpuResourceCache, the SceneRendererPipelines
 	// (once), the SceneRenderer of the game view and, for --screenshot-at and viewport.screenshot, a ViewportCapture over the
-	// same pipelines (a Gpu error there is FatalError(OutOfMemory), §8.14 item 7); with --automation (non-Dist) the
-	// RuntimeAutomationServer.
+	// same pipelines (a Gpu error there is FatalError(OutOfMemory), §8.14 item 7, except on a lost device, whose loss before
+	// the first frame Application ends instead), and registers the game view's blit with the device's recreation registry
+	// ("RuntimeApp", M18: Docs/Decisions/0029-m18-contract.md decision 33); with --automation (non-Dist) the
+	// RuntimeAutomationServer. A device loss during the run is recovered at the frame boundary (Application.h step 2b): the
+	// session plays on, the GPU objects are created again, and stats.get's deviceLosses counts the recoveries.
 	//
 	// The frame: OnEvent queues the window's input events for the session's next tick (PlayInput::QueueDeviceEvent);
 	// OnSafePoint pumps the server and applies the session's time scale and stepping flag to the loop
@@ -93,8 +96,8 @@ namespace Engine {
 	// the F1 stats overlay (Engine/ImGui/StatsOverlay.h): OnEvent toggles it on each F1 press that is not a repeat, logging
 	// "Runtime: stats overlay shown (F1)" or "hidden", and still queues the key for the game; OnImGuiRender draws it while it
 	// is visible. Headless runs and Dist builds have neither (§14.4; Docs/Decisions/0024-m15-contract.md decision 17). OnShutdown releases, in order, the server, the
-	// capture, the renderer and blit pass, the pipelines, the session, the GPU cache, then removes and destroys the asset
-	// manager, while the context still exists.
+	// blit's recreation registration, the capture, the renderer and blit pass, the pipelines, the session, the GPU cache, then
+	// removes and destroys the asset manager, while the context still exists.
 	class RuntimeApp final : public Application
 	{
 	public:

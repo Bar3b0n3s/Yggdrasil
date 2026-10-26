@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/ImGui/ImGuiScreenshot.h"
 
+#include "Engine/Graphics/CommandListRecording.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/OffscreenTarget.h"
 #include "Engine/Graphics/Readback.h"
@@ -37,13 +38,13 @@ namespace Engine {
 		// Not an immediate command list: NVRHI's validation allows one open immediate list at a time.
 		ENGINE_TRY_ASSIGN(const nvrhi::CommandListHandle commandList,
 			device.CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false)));
-		commandList->open();
+		// The list is executed whatever Render reports, so a failed render leaves no recording behind (CommandListRecording).
+		CommandListRecording recording(device, *commandList);
 		target.Clear(*commandList);
 		const Status rendered = imgui.Render(*commandList, *target.GetFramebuffer());
-		commandList->close();
+		recording.Execute();
 		if (!rendered.has_value())
 			return std::unexpected(rendered.error());
-		device.ExecuteCommandList(*commandList);
 
 		Readback readback(device);
 		ENGINE_TRY_ASSIGN(Image image, readback.ReadTexture(*target.GetColorTexture()));

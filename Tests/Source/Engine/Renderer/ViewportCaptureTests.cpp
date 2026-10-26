@@ -5,6 +5,7 @@
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Image.h"
+#include "Engine/Graphics/RenderTargetPool.h"
 #include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/SceneRenderer.h"
@@ -17,6 +18,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <span>
 #include <utility>
@@ -188,7 +190,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("ViewportCapture: a capture after a device loss is byte-identical to one before"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.3, Docs/Decisions/0029-m18-contract.md decisions 32 and 33; Roadmap M18: "a screenshot after
 			// recovery is byte-identical to one taken before"): the capture registers itself for its own objects (its read-back
@@ -202,10 +204,23 @@ namespace Engine {
 				ViewportCapture& capture = setup.GetCapture();
 				Test::DeviceLossTest test;
 				test.Owners = { "GpuResourceCache", "SceneRendererPipelines", "ViewportCapture" };
-				test.Use = [&capture, &snapshot]() -> Result<std::vector<std::byte>>
+				// Each use captures as an editor's frames do, collecting the garbage after each capture, and as often as the
+				// capture's renderer takes to settle, from its creation as from the recovery, so the live GPU objects the loss test
+				// compares are those of a settled capture: its RenderTargetPool keeps a free target for DefaultKeepFrames frames
+				// (before the loss, the renderer's first 1 x 1 targets, free once the first collection destroyed their
+				// framebuffers), and its GPU profiler gets one slot of timer queries per frame in flight. The pixels of every
+				// capture are compared.
+				GraphicsDevice& device = gpu.GetDevice();
+				test.Use = [&device, &capture, &snapshot]() -> Result<std::vector<std::byte>>
 				{
-					ENGINE_TRY_ASSIGN(const Image image, capture.Capture({ .Width = 320, .Height = 200 }, snapshot));
-					return image.Pixels;
+					std::vector<std::byte> images;
+					for (uint32_t index = 0; index < 2 * RenderTargetPool::DefaultKeepFrames; ++index)
+					{
+						ENGINE_TRY_ASSIGN(const Image image, capture.Capture({ .Width = 320, .Height = 200 }, snapshot));
+						device.RunGarbageCollection();
+						images.insert(images.end(), image.Pixels.begin(), image.Pixels.end());
+					}
+					return images;
 				};
 				const Result<Test::DeviceLossReport> report = Test::RunDeviceLossTest(gpu, test);
 				REQUIRE_MESSAGE(report.has_value(), report.error().ToString());

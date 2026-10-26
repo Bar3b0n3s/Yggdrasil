@@ -122,14 +122,14 @@ namespace Engine {
 	private:
 		struct Owner
 		{
-			// GpuRecreationRegistration's. Register numbers the owners from 1 (0 is an empty registration's) with a counter of
-			// the registry that only grows, so an id is never reused and no two registrations ever name the same owner. The
-			// counter is a private member that Register's implementation adds with it (stream A): Clang's
-			// -Wunused-private-field refuses a member the contract's stub does not use.
+			// GpuRecreationRegistration's. Register numbers the owners from 1 (0 is an empty registration's) with
+			// m_LastOwnerId, a counter that only grows, so an id is never reused and no two registrations ever name the same
+			// owner.
 			uint64_t Id = 0;
 			GpuRecreationHooks Hooks{};
 		};
 		std::vector<Owner> m_Owners{}; // in registration order
+		uint64_t m_LastOwnerId = 0;    // the id Register gave last
 		bool m_Running = false;
 	};
 

@@ -11,6 +11,7 @@
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/RenderContext.h"
 #include "Engine/Platform/Process.h"
+#include "Support/ChildOutput.h"
 #include "Support/DeathTest.h"
 #include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
@@ -18,6 +19,9 @@
 #include "Support/TestOptions.h"
 #include "Support/Utf8Path.h"
 #include "Support/WindowedChild.h"
+
+#include <imgui.h>
+#include <vulkan/vulkan.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -204,6 +208,122 @@ namespace Engine {
 				const std::array types = { EngineEventType::GpuDeviceLost };
 				DeviceLostEvents = GetContext().GetEventLog().Read(0, types).Events.size();
 				RecoveryCount = GetContext().GetGraphicsDevice()->GetRecoveryCount();
+			}
+		};
+
+		// M18 (C18.3, decision 28): loses its device in the update of frame `LoseAtFrame` (the test hooks' flag) and clears the
+		// flag itself in the next frame's update (GpuDiagnostics::ClearDeviceLost), as the recovery at the frame boundary
+		// does, so what it records is the lost frame alone: the steps, updates and rendered frames, with the index and slot of
+		// each rendered frame. Where the frame boundary recovers the device, the clear finds the flag cleared already.
+		class LostFrameApplication final : public Application
+		{
+		public:
+			explicit LostFrameApplication(ApplicationSpecification specification)
+				: Application(std::move(specification))
+			{
+			}
+		public:
+			std::vector<std::string> Calls;
+			std::vector<RenderedFrame> Frames;
+			uint64_t LoseAtFrame = 1;
+		protected:
+			void OnFixedStep(const SimStep& step) override
+			{
+				Calls.push_back(std::format("step {}", step.Tick));
+			}
+
+			void OnUpdate(const FrameTime& frame) override
+			{
+				Calls.push_back(std::format("update {}", frame.FrameIndex));
+				GpuDiagnostics& diagnostics = GetContext().GetGraphicsDevice()->GetDiagnostics();
+				if (frame.FrameIndex == LoseAtFrame)
+					diagnostics.SetDeviceLost(true);
+				else if (frame.FrameIndex == LoseAtFrame + 1)
+					diagnostics.ClearDeviceLost();
+			}
+
+			void OnRender(RenderContext& context) override
+			{
+				Calls.push_back("render");
+				Frames.push_back({ .FrameIndex = context.FrameIndex, .FrameSlot = context.FrameSlot });
+			}
+		};
+
+		// M18 (C18.3, decision 26 and ADR 0029 risk 10): in the UI frame of frame `LoseAtFrame` opens a window and throws the
+		// vk::DeviceLostError NVRHI's internal calls throw on a lost device, so the frame-boundary catch ends the frame inside
+		// OnImGuiRender with its UI frame begun; records the hooks, the GpuDeviceLost events and the recoveries.
+		class UiLosingApplication final : public Application
+		{
+		public:
+			explicit UiLosingApplication(ApplicationSpecification specification)
+				: Application(std::move(specification))
+			{
+			}
+		public:
+			std::vector<std::string> Calls;
+			uint64_t LoseAtFrame = 1;
+			size_t DeviceLostEvents = 0;
+			uint32_t RecoveryCount = 0;
+		protected:
+			void OnUpdate(const FrameTime& frame) override
+			{
+				Calls.push_back(std::format("update {}", frame.FrameIndex));
+				m_Frame = frame.FrameIndex;
+			}
+
+			void OnRender(RenderContext& /*context*/) override
+			{
+				Calls.push_back("render");
+			}
+
+			void OnImGuiRender() override
+			{
+				Calls.push_back("imgui");
+				ImGui::Begin("Interrupted");
+				ImGui::TextUnformatted("A window the loss interrupts");
+				if (m_Frame == LoseAtFrame)
+					vk::detail::resultCheck(vk::Result::eErrorDeviceLost, "ApplicationTests: a device loss thrown out of NVRHI during the UI frame");
+				ImGui::End();
+			}
+
+			void OnDeviceLost(const GpuDeviceLossReport& /*report*/) override
+			{
+				Calls.push_back("lost");
+			}
+
+			void OnDeviceRecovered(const GpuDeviceLossReport& /*report*/) override
+			{
+				Calls.push_back("recovered");
+			}
+
+			void OnShutdown() override
+			{
+				const std::array types = { EngineEventType::GpuDeviceLost };
+				DeviceLostEvents = GetContext().GetEventLog().Read(0, types).Events.size();
+				RecoveryCount = GetContext().GetGraphicsDevice()->GetRecoveryCount();
+			}
+		private:
+			uint64_t m_Frame = 0;
+		};
+
+		// M18 (C18.3, decision 25): loses its device during OnInitialize, before its first frame; a frame that ran would log.
+		class InitializeLosingApplication final : public Application
+		{
+		public:
+			explicit InitializeLosingApplication(ApplicationSpecification specification)
+				: Application(std::move(specification))
+			{
+			}
+		protected:
+			Status OnInitialize() override
+			{
+				GetContext().GetGraphicsDevice()->GetDiagnostics().SetDeviceLost(true);
+				return {};
+			}
+
+			void OnUpdate(const FrameTime& frame) override
+			{
+				ENGINE_CORE_ERROR("ApplicationTests: frame {} ran after a device loss before the first frame", frame.FrameIndex);
 			}
 		};
 
@@ -448,6 +568,17 @@ namespace Engine {
 		ENGINE_CORE_ASSERT(false, "Log level report: {}", report);
 	}
 
+	// M18 (C18.3, decision 25): a device lost during OnInitialize ends the process before the first frame, through
+	// GraphicsDevice::RaiseDeviceLost. Reaching the end of the body (a recovered or ignored loss) fails the death test.
+	ENGINE_DEATH_TEST("App/DeviceLostBeforeFirstFrame")
+	{
+		ApplicationSpecification specification = MakeHeadlessSpecification(2);
+		UseTestRenderer(specification);
+		InitializeLosingApplication application(std::move(specification));
+		const int exitCode = application.Run();
+		ENGINE_CORE_ERROR("ApplicationTests: the application returned {} after a device loss before its first frame", exitCode);
+	}
+
 	TEST_SUITE("App")
 	{
 		TEST_CASE("Application: hooks run in order and --frames ends the run with Success")
@@ -594,7 +725,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("Application: a device loss is recovered at the frame boundary and the run goes on"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.3, Docs/Decisions/0029-m18-contract.md decision 29): the lost frame renders nothing, the
 			// recovery runs OnDeviceLost, recovers the device with the frame's objects and the ImGui renderer, appends one
@@ -609,6 +740,116 @@ namespace Engine {
 			CHECK(application.Calls == std::vector<std::string>{ "update 0", "render", "update 1", "lost (injected)", "recovered", "update 2", "render", "update 3", "render" });
 			CHECK(application.DeviceLostEvents == 1);
 			CHECK(application.RecoveryCount == 1);
+		}
+
+		TEST_CASE("Application: a frame on a lost device renders nothing while its steps and update run"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.3, decision 28): the simulation never needs the GPU, so a play session goes on through a loss; the lost
+			// frame calls no rendering hook and submits nothing, and the frames after it render again.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			ApplicationSpecification specification = MakeHeadlessSpecification(4);
+			UseTestRenderer(specification);
+			LostFrameApplication application(std::move(specification));
+			CHECK(application.Run() == ExitCode::Success);
+			const std::vector<std::string> expected = {
+				"step 0",
+				"update 0",
+				"render",
+				"step 1",
+				"update 1",
+				"step 2",
+				"update 2",
+				"render",
+				"step 3",
+				"update 3",
+				"render",
+			};
+			CHECK(application.Calls == expected);
+		}
+
+		TEST_CASE("Application: rendered frames keep growing indices that match their slots across a device loss"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.3, decision 33): a recovery at the frame boundary replaces the frame's FramePacer, which counts its
+			// frames from 0 again; the frames after it continue from the first multiple of the frames in flight after the last
+			// index, so renderers, whose GPU timing history ignores an older frame, keep their timings, and every frame's slot
+			// is its index modulo the frames in flight (2).
+			if (!Test::ProbeGpuForProcess())
+				return;
+			ApplicationSpecification specification = MakeHeadlessSpecification(5);
+			UseTestRenderer(specification);
+			LostFrameApplication application(std::move(specification));
+			application.LoseAtFrame = 2;
+			CHECK(application.Run() == ExitCode::Success);
+			REQUIRE(application.Frames.size() == 4);
+			for (size_t frame = 0; frame < application.Frames.size(); ++frame)
+			{
+				CAPTURE(frame);
+				CAPTURE(application.Frames[frame].FrameIndex);
+				CHECK(application.Frames[frame].FrameSlot == application.Frames[frame].FrameIndex % 2);
+				if (frame > 0)
+					CHECK(application.Frames[frame].FrameIndex > application.Frames[frame - 1].FrameIndex);
+			}
+		}
+
+		TEST_CASE("Application: a device loss thrown inside the UI frame is recovered, and the next UI frame begins"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.3, decision 26 and ADR 0029 risk 10; through the frame-boundary catch and recovery and the
+			// ImGuiRenderer owner): the frame-boundary catch reports the thrown loss and ends the frame inside OnImGuiRender,
+			// with the window it opened; the "Application frame" owner's release ends that UI frame (ImGuiLayer::
+			// EndInterruptedFrame), so the frames after the recovery draw their UI.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			ApplicationSpecification specification = MakeHeadlessSpecification(4);
+			UseTestRenderer(specification);
+			specification.EnableImGui = true;
+			UiLosingApplication application(std::move(specification));
+			CHECK(application.Run() == ExitCode::Success);
+			const std::vector<std::string> expected = {
+				"update 0",
+				"render",
+				"imgui",
+				"update 1",
+				"render",
+				"imgui",
+				"lost",
+				"recovered",
+				"update 2",
+				"render",
+				"imgui",
+				"update 3",
+				"render",
+				"imgui",
+			};
+			CHECK(application.Calls == expected);
+			CHECK(application.DeviceLostEvents == 1);
+			CHECK(application.RecoveryCount == 1);
+		}
+
+		TEST_CASE("Application: a device loss before the first frame exits 4 with a crash report"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.3, decision 25): the startup objects cannot be created on the lost device and nothing has rendered, so
+			// the loss is not recovered: the process ends through FatalError(DeviceLost) without running a frame.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			Test::TempDirectory userData("DeviceLostBeforeFirstFrame");
+			std::vector<std::string> arguments = Test::GetGpuTestsChildArguments();
+			arguments.push_back("--death-test=App/DeviceLostBeforeFirstFrame");
+			arguments.push_back("--user-data-dir=" + Test::PathToUtf8(userData.GetPath()));
+			const Result<ProcessResult> result = Process::Run(Test::MakeTestsChildSpecification(std::move(arguments)), std::chrono::seconds(60));
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			INFO("child stderr: ", result->StandardError);
+			CHECK(result->ExitCode == ExitCode::Crash);
+			// No frame ran: a loss left for the frames (or for the shutdown's idle wait) would run them first.
+			CHECK_FALSE(result->StandardError.contains("ran after a device loss before the first frame"));
+			const Result<std::string> report = Test::ReadOnlyCrashReport(userData.GetPath());
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			CHECK(report->contains("Reason: Fatal error (DeviceLost)"));
+			CHECK(Test::FindGpuMessageLines(result->StandardError).empty());
 		}
 
 		TEST_CASE("Application: with ImGui each rendered frame submits its UI after OnRender"
@@ -726,7 +967,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("Application: a windowed run recovers its swapchain after an injected loss and presents the next frame without a GPU message"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.3): the recovery of a presenting device, which the headless cases and the shared loss-test
 			// helper (Support/DeviceLossTest.h, Recover(nullptr)) cannot reach: the swapchain's and the surface's release and

@@ -44,8 +44,10 @@ format lacks the 1.4 path, §8.1); under the 1.3 cap those skips are expected an
 golden run reports the device class that rendered, read from the harness's log lines
 (Tests/Source/Support/GoldenImage.cpp), and ends with "warning" when goldens are missing for that device class (smoke
 mode) or when --update-golden wrote candidates into Tests/Golden/<DeviceClass>/, which must be reviewed (the git diff)
-before they are committed. A failed comparison writes <Name>-actual.png, <Name>-expected.png and <Name>-diff.png into
-bin/TestResults/Golden/.
+before they are committed. A device class without an image's golden while another class of the same vendor has it (the
+driver's major version changed; M18's device-class check) fails that test case, never smoke-tests it, and the step's
+detail names the images and points to the rename procedure (Tests/Golden/README.md). A failed comparison writes
+<Name>-actual.png, <Name>-expected.png and <Name>-diff.png into bin/TestResults/Golden/.
 
 Skipped test cases (Roadmap rule 3, Docs/Decisions/0004-contract-stub-gate.md): after every run of the Tests binary
 (unit, gpu, golden), it lists the test cases the run's filters select, skipped ones included (doctest --no-skip
@@ -281,10 +283,10 @@ NO_DEVICE_PATTERN = re.compile(r"GPU test without a device \(passes without runn
 # The log line of a host-image-copy case the device cannot run (HostImageUploadTests.cpp, ReportHostCopySkipped).
 HOST_COPY_SKIP_PATTERN = re.compile(r"Host image copy skipped for (?P<case>'[^']*' \([^)]*\)): (?P<skip_reason>.*)$")
 # The log lines of the golden harness (GoldenImage.cpp): "Golden image '<name>' on device class '<class>'" followed by
-# ": matched", ": goldens missing", ": wrote the candidate" or " does not match".
+# ": matched", ": goldens missing", ": wrote the candidate", ": device class changed" or " does not match".
 GOLDEN_PATTERN = re.compile(
     r"Golden image '(?P<name>[^']+)' on device class '(?P<device>[^']+)'"
-    r"(?::\s(?P<event>matched|goldens missing|wrote the candidate)|\s(?P<mismatch>does not match))"
+    r"(?::\s(?P<event>matched|goldens missing|wrote the candidate|device class changed)|\s(?P<mismatch>does not match))"
 )
 # The first line of every AddressSanitizer report ("==1234==ERROR: AddressSanitizer: heap-buffer-overflow on ...").
 SANITIZER_ERROR_PATTERN = re.compile(r"ERROR: AddressSanitizer: .*$")
@@ -502,6 +504,8 @@ class DeviceReport:
     goldens_missing: set[str] = dataclasses.field(default_factory=set)
     candidates_written: set[str] = dataclasses.field(default_factory=set)
     mismatched: set[str] = dataclasses.field(default_factory=set)
+    # The images whose device class has no golden while a class of the same vendor has one (the device-class check).
+    class_changed: set[str] = dataclasses.field(default_factory=set)
 
     @staticmethod
     def parse(lines: list[str]) -> DeviceReport:
@@ -528,6 +532,8 @@ class DeviceReport:
                 report.matched.add(name)
             elif golden.group("event") == "goldens missing":
                 report.goldens_missing.add(name)
+            elif golden.group("event") == "device class changed":
+                report.class_changed.add(name)
             else:
                 report.candidates_written.add(name)
         return report
@@ -541,6 +547,7 @@ class DeviceReport:
             "goldensMissing": sorted(self.goldens_missing),
             "candidatesWritten": sorted(self.candidates_written),
             "mismatched": sorted(self.mismatched),
+            "deviceClassChanged": sorted(self.class_changed),
         }
 
     def describe_host_copy_skips(self) -> str:
@@ -785,6 +792,10 @@ def run_tests(run: TestRun, arguments: argparse.Namespace, console: Console) -> 
             detail += f"; {describe_sanitizer_errors(sanitizer_errors)}"
         if device.mismatched:
             detail += f"; golden mismatches: {describe_names(device.mismatched)} (outputs in bin/TestResults/Golden/)"
+        if device.class_changed:
+            detail += (f"; device class {', '.join(sorted(device.device_classes))} has no goldens for "
+                       f"{describe_names(device.class_changed)}, but a class of the same vendor has them: the driver's "
+                       "major version changed (Tests/Golden/README.md, \"Renaming a device class\")")
         return Step(run.name, Status.FAILED, detail, result.duration, data=data)
     if counts is None:
         return Step(run.name, Status.FAILED, "Tests exited with code 0 but printed no doctest summary", result.duration,

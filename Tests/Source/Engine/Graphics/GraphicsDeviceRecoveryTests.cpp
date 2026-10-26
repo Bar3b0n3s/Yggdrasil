@@ -6,7 +6,10 @@
 #include "Engine/Graphics/GpuRecreation.h"
 #include "Engine/Graphics/OffscreenTarget.h"
 #include "Engine/Graphics/Readback.h"
+#include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
+
+#include <limits>
 
 // The device's recovery from a loss (M18, C18.3; Docs/Decisions/0029-m18-contract.md decisions 28 and 29). The losses are
 // injected (GpuDiagnostics::SetDeviceLost(true)): the Vulkan device is not really lost, so the validation layer checks the
@@ -77,7 +80,7 @@ namespace Engine {
 	TEST_SUITE("Graphics")
 	{
 		TEST_CASE("GraphicsDevice: a reported loss refuses creations and skips submissions and waits until the recovery"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.3, decision 28): a lost device does no GPU work, and every path returns to its caller.
 			Test::HeadlessGpuFixture gpu;
@@ -116,7 +119,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("GraphicsDevice: Recover releases every owner, creates the device again and recreates the owners in order"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.3, decisions 26 and 29): §8.14 item 4's order, the device object and every reference to it
 			// kept, the loss count grown, and the tracker's counts back where they were.
@@ -153,7 +156,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("GraphicsDevice: Recover refuses a GPU object that an unregistered owner still holds"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.3, decisions 27 and 29): the placement rule's check; a missed owner is found by its loss test
 			// rather than by a crash after a real loss.
@@ -172,26 +175,32 @@ namespace Engine {
 		}
 
 		TEST_CASE("GraphicsDevice: an unrecoverable loss fails Recover after its one retry"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.3, decisions 29 and 30): the device creation fails twice, without calling Vulkan and without
 			// the reset wait, and the caller ends the process (RaiseDeviceLost). The loss continues: the device stays lost,
-			// without Vulkan objects, so the fixture's destruction waits for nothing.
-			Test::HeadlessGpuFixture gpu;
+			// without Vulkan objects, so the fixture's destruction waits for nothing. The reset wait is the largest there is, so
+			// a recovery that waited it would end the run at the test's time limit instead of passing.
+			Test::HeadlessGpuFixture gpu({ .ResetWaitMilliseconds = std::numeric_limits<uint32_t>::max() });
 			ENGINE_REQUIRE_GPU(gpu);
 			GraphicsDevice& device = gpu.GetDevice();
 			device.GetDiagnostics().InjectUnrecoverableDeviceLoss();
 			device.ReportDeviceLost("GraphicsDeviceRecoveryTests");
+			Test::ExpectLog attempts(LogLevel::Warn, "creating the device again failed");
+			Test::ExpectLog last(LogLevel::Warn, std::format("(attempt {0} of {0})", GraphicsDevice::MaxDeviceCreationAttempts));
 			const Status recovered = device.Recover(nullptr);
 			REQUIRE_FALSE(recovered.has_value());
 			CHECK(recovered.error().GetCode() == ErrorCode::Gpu);
+			// One creation and its one retry (MaxDeviceCreationAttempts), no more and no fewer.
+			CHECK(attempts.GetMatchCount() == GraphicsDevice::MaxDeviceCreationAttempts);
+			CHECK(last.GetMatchCount() == 1);
 			CHECK(device.GetRecoveryCount() == 0);
 			CHECK(device.IsLost());
 			CHECK(device.GetLossReport().has_value());
 		}
 
 		TEST_CASE("GraphicsDevice: a loss reported while the owners are recreated fails the recovery"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.3, decision 29): a second loss during the recovery stays fatal.
 			Test::HeadlessGpuFixture gpu;

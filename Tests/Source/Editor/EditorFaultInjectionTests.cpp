@@ -65,9 +65,21 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(auto commandList, device.CreateCommandList());
 		commandList->open();
 		commandList->close();
+		// An injected device loss strikes the first submission after a garbage collection, as in an application's second
+		// frame (Docs/Decisions/0029-m18-contract.md decision 30).
+		device.RunGarbageCollection();
 		process->SetFatalErrorHook(MakeEditorAutosaveFatalHook(saves));
 		const uint64_t submission = device.ExecuteCommandList(*commandList);
 		WaitForSubmission(device, submission, "Editor autosave fault probe");
+		// The loss is reported and returns; its recovery fails after the one retry, which ends the process as an
+		// application's frame boundary does (decision 29).
+		if (device.IsLost())
+		{
+			commandList = nullptr;
+			const Status recovered = device.Recover(nullptr);
+			if (!recovered.has_value())
+				device.RaiseDeviceLost(std::format("Editor autosave fault probe: {}", recovered.error().ToString()));
+		}
 		// Only a broken fault injection reaches here; retain lifetime discipline even on that failed-test path.
 		process->SetFatalErrorHook({});
 		ENGINE_VERIFY(saves.Reset(), "fatal callback quiesced");
@@ -196,7 +208,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("EditorApp: --gpu-inject-fault=device-lost recovers the device and runs to the end"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.3, Docs/Decisions/0029-m18-contract.md decisions 29 and 30): the loss strikes the second
 			// frame, the frame boundary recovers it, and the editor renders its remaining frames and exits 0, with no crash

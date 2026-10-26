@@ -112,8 +112,11 @@ namespace Engine {
 		// Otherwise vkAcquireNextImageKHR with a timeout of GpuWaitSliceNanoseconds (FramePacer.h), acting on
 		// ClassifyAcquireResult: Continue returns Acquired; ContinueThenRecreate returns Acquired and marks a recreation for
 		// the next call; Recreate and RecreateSurface recreate and return Skipped; Retry returns Skipped (logged at Warn on
-		// the first of consecutive timed-out acquires, so an occluded window does not flood the log); DeviceLost,
-		// OutOfMemory and Fail end the process. Errors: Gpu when a recreation fails.
+		// the first of consecutive timed-out acquires, so an occluded window does not flood the log); OutOfMemory and Fail
+		// end the process. M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 28): DeviceLost reports the loss
+		// (GraphicsDevice::ReportDeviceLost) and returns Skipped; on a lost device, and when a recreation finds the device
+		// lost, it returns Skipped without another Vulkan call, the recreation left pending. Errors: Gpu when a recreation
+		// fails on a device that is not lost.
 		[[nodiscard]] Result<SwapchainAcquireStatus> AcquireNextImage(uint32_t frameSlot);
 
 		// Queues the current slot's acquire-semaphore wait and the current image's present-semaphore signal, which NVRHI
@@ -122,8 +125,10 @@ namespace Engine {
 		void QueueFrameSemaphores();
 
 		// vkQueuePresentKHR of the current image, waiting on its present semaphore, acting on ClassifyPresentResult:
-		// Recreate and RecreateSurface mark a recreation for the next AcquireNextImage; DeviceLost, OutOfMemory and Fail end
-		// the process. Call it after the frame's last submission.
+		// Recreate and RecreateSurface mark a recreation for the next AcquireNextImage; OutOfMemory and Fail end the process.
+		// M18 (decision 28): DeviceLost reports the loss and returns, and on a device lost since the acquire nothing is
+		// presented (the frame's submission never ran, so nothing signals the present semaphore). Call it after the frame's
+		// last submission.
 		void Present();
 
 		// Marks a recreation for the next AcquireNextImage, for a caller that knows of one the size check cannot see. A
@@ -185,9 +190,8 @@ namespace Engine {
 		void ReleaseImages();
 		void DestroySwapchain();
 		void DestroySurface();
-		// The fatal end of a swapchain call: GraphicsDevice::RaiseDeviceLost for VK_ERROR_DEVICE_LOST, otherwise
-		// FatalError with GetFatalErrorKind(result). M18 (C18.3, decision 28): VK_ERROR_DEVICE_LOST no longer ends the process
-		// (SwapchainAction::DeviceLost); the other results still do.
+		// The fatal end of a swapchain call: FatalError with GetFatalErrorKind(result). M18 (C18.3, decision 28):
+		// VK_ERROR_DEVICE_LOST no longer ends the process (SwapchainAction::DeviceLost, asserted); the other results still do.
 		[[noreturn]] void EndProcess(std::string_view call, VkResult result);
 	private:
 		GraphicsDevice* m_Device = nullptr; // documented back-reference: outlives the swapchain

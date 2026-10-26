@@ -115,6 +115,15 @@ namespace Engine {
 			return semaphore;
 		}
 
+		// The Gpu error of a failed swapchain or surface call; VK_ERROR_DEVICE_LOST also reports the loss, which the frame
+		// boundary recovers (decision 28).
+		static Error MakeSwapchainCallError(GraphicsDevice& device, VkResult result, std::string_view call)
+		{
+			if (result == VK_ERROR_DEVICE_LOST)
+				device.ReportDeviceLost(call);
+			return Error(ErrorCode::Gpu, std::format("{} failed with {}", call, VkResultToString(result)));
+		}
+
 	}
 
 	SwapchainAction ClassifyAcquireResult(VkResult result)
@@ -218,6 +227,11 @@ namespace Engine {
 		ENGINE_CORE_ASSERT(!m_HasAcquiredImage, "Swapchain::AcquireNextImage called again before Present");
 		m_HasAcquiredImage = false;
 
+		// A lost device renders and presents nothing (decision 28): no Vulkan call, and the swapchain's owner replaces it when
+		// it recovers the device (decision 33).
+		if (m_Device->IsLost())
+			return SwapchainAcquireStatus::Skipped;
+
 		// Minimized (iconified, or a framebuffer with a zero dimension): nothing to render or present (§4.2). The images
 		// are released while the window stays minimized and created again at the restored size.
 		const uint32_t width = m_Window->GetFramebufferWidth();
@@ -303,6 +317,11 @@ namespace Engine {
 				return SwapchainAcquireStatus::Skipped;
 			}
 			case SwapchainAction::DeviceLost:
+			{
+				// Reported and recovered at the frame boundary; this frame gets no image (decision 28).
+				m_Device->ReportDeviceLost("vkAcquireNextImageKHR");
+				return SwapchainAcquireStatus::Skipped;
+			}
 			case SwapchainAction::OutOfMemory:
 			case SwapchainAction::Fail:
 			{
@@ -327,6 +346,10 @@ namespace Engine {
 	{
 		ENGINE_CORE_VERIFY(m_HasAcquiredImage, "Swapchain::Present without an acquired image");
 		m_HasAcquiredImage = false;
+		// The device was lost after the acquire: the frame's submission never ran, so nothing signals the image's present
+		// semaphore, and the image is never presented (decision 28). The recovery replaces the swapchain.
+		if (m_Device->IsLost())
+			return;
 
 		const VkSemaphore waitSemaphore = m_Images[m_CurrentImage].PresentSemaphore;
 		const VkPresentInfoKHR presentInfo = {
@@ -365,9 +388,14 @@ namespace Engine {
 				m_IsSurfaceLost = true;
 				return;
 			}
+			case SwapchainAction::DeviceLost:
+			{
+				// Reported and recovered at the frame boundary (decision 28).
+				m_Device->ReportDeviceLost("vkQueuePresentKHR");
+				return;
+			}
 			case SwapchainAction::ContinueThenRecreate:
 			case SwapchainAction::Retry:
-			case SwapchainAction::DeviceLost:
 			case SwapchainAction::OutOfMemory:
 			case SwapchainAction::Fail:
 			{
@@ -452,7 +480,7 @@ namespace Engine {
 		VkSurfaceKHR surface = VK_NULL_HANDLE;
 		VkResult result = glfwCreateWindowSurface(m_Device->GetVulkanInstance(), static_cast<GLFWwindow*>(m_Window->GetNativeHandle()), nullptr, &surface);
 		if (result != VK_SUCCESS)
-			return MakeError(ErrorCode::Gpu, "glfwCreateWindowSurface failed with {}", VkResultToString(result));
+			return std::unexpected(Utils::MakeSwapchainCallError(*m_Device, result, "glfwCreateWindowSurface"));
 		m_Surface = surface;
 
 		// The device was chosen for a queue family that can present to this window (GraphicsDevice::Create); the surface
@@ -461,7 +489,7 @@ namespace Engine {
 		VkBool32 isSupported = VK_FALSE;
 		result = VULKAN_HPP_DEFAULT_DISPATCHER.vkGetPhysicalDeviceSurfaceSupportKHR(m_Device->GetVulkanPhysicalDevice(), queueFamily, m_Surface, &isSupported);
 		if (result != VK_SUCCESS)
-			return MakeError(ErrorCode::Gpu, "vkGetPhysicalDeviceSurfaceSupportKHR failed with {}", VkResultToString(result));
+			return std::unexpected(Utils::MakeSwapchainCallError(*m_Device, result, "vkGetPhysicalDeviceSurfaceSupportKHR"));
 		if (isSupported != VK_TRUE)
 			return MakeError(ErrorCode::Unsupported, "the graphics queue family {} cannot present to the window's surface", queueFamily);
 		return {};
@@ -484,7 +512,7 @@ namespace Engine {
 			return {};
 		}
 		if (result != VK_SUCCESS)
-			return MakeError(ErrorCode::Gpu, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR failed with {}", VkResultToString(result));
+			return std::unexpected(Utils::MakeSwapchainCallError(*m_Device, result, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR"));
 
 		// A surface with a fixed extent dictates it; otherwise the framebuffer size, within the surface's limits.
 		VkExtent2D extent = capabilities.currentExtent;
@@ -506,7 +534,7 @@ namespace Engine {
 			return VULKAN_HPP_DEFAULT_DISPATCHER.vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, m_Surface, count, items);
 		});
 		if (result != VK_SUCCESS)
-			return MakeError(ErrorCode::Gpu, "vkGetPhysicalDeviceSurfaceFormatsKHR failed with {}", VkResultToString(result));
+			return std::unexpected(Utils::MakeSwapchainCallError(*m_Device, result, "vkGetPhysicalDeviceSurfaceFormatsKHR"));
 		const std::optional<VkSurfaceFormatKHR> surfaceFormat = Utils::ChooseSurfaceFormat(formats);
 		if (!surfaceFormat.has_value())
 			return MakeError(ErrorCode::Unsupported, "the window's surface offers neither B8G8R8A8_UNORM nor R8G8B8A8_UNORM in the sRGB color space");
@@ -517,7 +545,7 @@ namespace Engine {
 			return VULKAN_HPP_DEFAULT_DISPATCHER.vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, m_Surface, count, items);
 		});
 		if (result != VK_SUCCESS)
-			return MakeError(ErrorCode::Gpu, "vkGetPhysicalDeviceSurfacePresentModesKHR failed with {}", VkResultToString(result));
+			return std::unexpected(Utils::MakeSwapchainCallError(*m_Device, result, "vkGetPhysicalDeviceSurfacePresentModesKHR"));
 		const VkPresentModeKHR presentMode = Utils::ChoosePresentMode(presentModes, m_Specification.VSync);
 
 		// Frames clear their target with a transfer (FrameClearColor) and render into it; reading it back is a bonus.
@@ -557,7 +585,7 @@ namespace Engine {
 		// The old swapchain is retired by the call whether or not it succeeded, and its images are released already.
 		DestroySwapchain();
 		if (result != VK_SUCCESS)
-			return MakeError(ErrorCode::Gpu, "vkCreateSwapchainKHR ({}x{}) failed with {}", extent.width, extent.height, VkResultToString(result));
+			return std::unexpected(Utils::MakeSwapchainCallError(*m_Device, result, std::format("vkCreateSwapchainKHR ({}x{})", extent.width, extent.height)));
 		m_Swapchain = created;
 		m_Width = extent.width;
 		m_Height = extent.height;
@@ -572,7 +600,7 @@ namespace Engine {
 			return VULKAN_HPP_DEFAULT_DISPATCHER.vkGetSwapchainImagesKHR(device, m_Swapchain, count, items);
 		});
 		if (result != VK_SUCCESS)
-			return MakeError(ErrorCode::Gpu, "vkGetSwapchainImagesKHR failed with {}", VkResultToString(result));
+			return std::unexpected(Utils::MakeSwapchainCallError(*m_Device, result, "vkGetSwapchainImagesKHR"));
 
 		m_Images.reserve(images.size());
 		for (size_t index = 0; index < images.size(); ++index)
@@ -605,6 +633,13 @@ namespace Engine {
 	{
 		// No image of the old swapchain, and no semaphore, may be in use by the GPU or the presentation engine.
 		m_Device->WaitForIdle();
+		// A lost device (also one this wait found lost) recreates nothing: the swapchain's owner replaces the swapchain when
+		// it recovers the device (decision 33), and the recreation stays pending until then.
+		if (m_Device->IsLost())
+		{
+			m_IsRecreatePending = true;
+			return {};
+		}
 		ReleaseImages();
 		m_HasAcquiredImage = false;
 		m_IsRecreatePending = false;
@@ -616,7 +651,14 @@ namespace Engine {
 			m_IsSurfaceLost = false;
 			ENGINE_TRY(WithContext(CreateSurface(), "while recreating the window's surface"));
 		}
-		ENGINE_TRY(WithContext(CreateSwapchain(width, height), "while recreating the swapchain"));
+		Status created = WithContext(CreateSwapchain(width, height), "while recreating the swapchain");
+		// A loss the creation met is reported (Utils::MakeSwapchainCallError) and recovered at the frame boundary.
+		if (!created.has_value() && m_Device->IsLost())
+		{
+			m_IsRecreatePending = true;
+			return {};
+		}
+		ENGINE_TRY(created);
 		if (m_Swapchain != VK_NULL_HANDLE)
 		{
 			++m_RecreationCount;
@@ -669,8 +711,8 @@ namespace Engine {
 
 	void Swapchain::EndProcess(std::string_view call, VkResult result)
 	{
-		if (result == VK_ERROR_DEVICE_LOST)
-			m_Device->RaiseDeviceLost(call);
+		// A device loss is recovered (SwapchainAction::DeviceLost), never ended here.
+		ENGINE_CORE_ASSERT(result != VK_ERROR_DEVICE_LOST, "Swapchain::EndProcess for a device loss of {}", call);
 		FatalError(GetFatalErrorKind(result), std::format("{} failed with {}", call, VkResultToString(result)));
 	}
 

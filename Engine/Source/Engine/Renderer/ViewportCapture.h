@@ -2,6 +2,7 @@
 
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
+#include "Engine/Graphics/GpuRecreation.h"
 #include "Engine/Graphics/Image.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 
@@ -44,6 +45,12 @@ namespace Engine {
 	// pipeline, and each Capture only resizes the renderer's targets to the requested size. The viewport.screenshot handler
 	// extracts the snapshot of the requested view, camera and size (Scene/RenderExtraction.h, PlaySession::ExtractView), and
 	// the Runtime's --screenshot-at does the same with its game view.
+	//
+	// Device loss (M18, C18.3; Docs/Decisions/0029-m18-contract.md decisions 26, 27 and 33): CreateForScenes registers the
+	// capture with its device's recreation registry as "ViewportCapture", after its private renderer, which is the placement
+	// rule's place 2 and registers itself ("SceneRenderer"). The capture's Release drops its own GPU objects, the read-back
+	// command list and its Readback's (a new Readback, which creates its command list on first use); its Recreate creates the
+	// command list again. A capture after the recovery renders the same snapshot into the same bytes as one before the loss.
 	// Not copyable or movable; main thread only (§4.11).
 	class ViewportCapture
 	{
@@ -64,9 +71,10 @@ namespace Engine {
 
 		// Creates the capture's SceneRenderer over the host's `pipelines` (at 1 x 1; Capture resizes it; no pipeline is
 		// created here, and a capture of a debug view extends `pipelines` through SceneRendererPipelines::EnsureDebugView),
-		// its command list and its Readback. `device`, `pipelines`, `cache` and `assets` are documented
-		// back-references that outlive the capture. Errors: those of SceneRenderer::Create (a Gpu error is an
-		// out-of-memory creation, FatalError(OutOfMemory) for a caller at startup, §8.14 item 7).
+		// its command list and its Readback, and registers the capture with the device's recreation registry (see the class
+		// comment). `device`, `pipelines`, `cache` and `assets` are documented back-references that outlive the capture.
+		// Errors: those of SceneRenderer::Create and GraphicsDevice::CreateCommandList (a Gpu error is an out-of-memory
+		// creation, FatalError(OutOfMemory) for a caller at startup, §8.14 item 7).
 		[[nodiscard]] static Result<Scope<ViewportCapture>> CreateForScenes(GraphicsDevice& device, SceneRendererPipelines& pipelines,
 			GpuResourceCache& cache, AssetManager& assets);
 
@@ -86,12 +94,19 @@ namespace Engine {
 		// a downscaled image scales them to the rendered size first. The identity at 1 x 1 before the first Capture.
 		[[nodiscard]] RenderOutputMapping GetLastOutputMapping() const;
 	private:
+		// The capture's hooks in the recreation protocol (see the class comment). Errors (Recreate): those of
+		// GraphicsDevice::CreateCommandList.
+		void ReleaseGpuObjects();
+		[[nodiscard]] Status RecreateGpuObjects();
+	private:
 		GraphicsDevice* m_Device = nullptr; // documented back-reference
 		Scope<SceneRenderer> m_SceneRenderer;
 		Scope<Readback> m_Readback;
 		nvrhi::CommandListHandle m_CommandList;
 		uint64_t m_FrameIndex = 0;
 		RenderOutputMapping m_LastOutputMapping{}; // GetLastOutputMapping
+		// The registration with the device's recreation registry (CreateForScenes); declared last, so it is dropped first.
+		GpuRecreationRegistration m_Recreation{};
 	};
 
 }

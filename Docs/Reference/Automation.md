@@ -848,7 +848,7 @@ Example: Give the ball a rigid body of 2 kg.
 
 ### events.read
 
-Reads engine events (entities, scenes, assets, scripts, clients) by cursor, filtered by type. Pass nextCursor to the next read; "end" returns only the cursor of the next event.
+Reads engine events (entities, scenes, assets, scripts, clients, recovered GPU device losses) by cursor, filtered by type. Pass nextCursor to the next read; "end" returns only the cursor of the next event.
 
 - Flags: runtime, batch
 - Timeout: 60 s
@@ -2269,6 +2269,7 @@ Param: none.
 | `memoryAllocationCount` | `UInt32` | Current Vulkan device memory allocation count. |
 | `maxMemoryAllocationCount` | `UInt32` | Vulkan device allocation limit, zero without a device. |
 | `views` | `Array<StatsViewSummary>` | The scene then the game view, as the editor's displayed viewport panels: a view whose panel is not displayed is unavailable, and a headless editor displays only the Scene view of its default layout, so game is unavailable there. The Runtime supplies game only. |
+| `deviceLosses` | `UInt32` | The GPU device losses this host recovered from since it started, each also a GpuDeviceLost event; 0 with renderer none. |
 
 Example: Inspect current host and renderer observations.
 

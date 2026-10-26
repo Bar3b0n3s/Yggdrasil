@@ -30,8 +30,7 @@ namespace Engine {
 
 	TEST_SUITE("Graphics")
 	{
-		TEST_CASE("GpuRecreationRegistry: Release runs last registered first, and Recreate first registered first"
-			* doctest::skip(true))
+		TEST_CASE("GpuRecreationRegistry: Release runs last registered first, and Recreate first registered first")
 		{
 			// M18 acceptance (C18.3, Docs/Decisions/0029-m18-contract.md decision 26): §8.14 item 4's teardown order, and
 			// creation again in construction order.
@@ -58,8 +57,7 @@ namespace Engine {
 			CHECK_FALSE(registry.IsRunning());
 		}
 
-		TEST_CASE("GpuRecreationRegistry: a dropped registration is never called, and Recreate stops at the first error"
-			* doctest::skip(true))
+		TEST_CASE("GpuRecreationRegistry: a dropped registration is never called, and Recreate stops at the first error")
 		{
 			// M18 acceptance (C18.3, decision 26): a registration lives as long as its owner, moves with it, and an owner's
 			// failed Recreate fails the recovery, naming the owner, with the owners after it left released.

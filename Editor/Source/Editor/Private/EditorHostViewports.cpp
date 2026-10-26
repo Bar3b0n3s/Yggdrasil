@@ -6,6 +6,7 @@
 #include "EditorCore/Viewport/GizmoController.h"
 #include "Engine/App/EngineContext.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/RenderContext.h"
 #include "Engine/ImGui/ImGuiRenderer.h"
 #include "Engine/Platform/Window.h"
@@ -43,7 +44,35 @@ namespace Engine {
 		m_Pipelines = &pipelines;
 		m_Cache = &cache;
 		m_ImGui = &imgui;
+		// After the ImGui renderer and the views' renderers: released before them (GpuRecreation.h).
+		m_Recreation = device.GetRecreation().Register({
+			.Name = "EditorHostViewports",
+			.Release = [this]()
+		{
+			ReleaseGpuObjects();
+		},
+			.Recreate = {},
+		});
 		return {};
+	}
+	void EditorHostViewports::ReleaseGpuObjects()
+	{
+		for (View& view : m_Views)
+		{
+			// The renderer resolves its own pending picks as cancelled in its release; the host's tickets, its queued click
+			// and its recorded frame name a submission that never completes.
+			view.Queued.reset();
+			view.Pending.clear();
+			view.Recorded = false;
+			if (m_ImGui && view.Image.Texture != 0)
+			{
+				m_ImGui->RemoveTexture(view.Image.Texture);
+				++m_Withdrawals;
+			}
+			view.Image = {};
+			view.RegisteredTexture = nullptr;
+			view.HoldsSceneResources = false;
+		}
 	}
 	void EditorHostViewports::Cancel(View& view)
 	{
@@ -64,6 +93,7 @@ namespace Engine {
 	}
 	void EditorHostViewports::Retire()
 	{
+		m_Recreation.Reset();
 		for (View& view : m_Views)
 		{
 			Cancel(view);
@@ -372,6 +402,11 @@ namespace Engine {
 			const EditorViewportClick click = *view.Queued;
 			view.Queued.reset();
 			if (click.FrameIndex != frameIndex || click.ViewGeneration != view.Renderer->GetViewGeneration())
+				continue;
+			// A frame that lost the device ran nothing a pick could read, and the recovery's release cancels the view's picks:
+			// the click is dropped, since a pick's objects cannot be created on the lost device, and that refusal is the loss,
+			// not a failure to report (decision 28).
+			if (m_Device != nullptr && m_Device->IsLost())
 				continue;
 			const auto ticket = view.Renderer->RequestPick({ .X = click.Pixel.X, .Y = click.Pixel.Y, .FrameIndex = click.FrameIndex, .SceneRevision = click.SceneRevision, .Sequence = click.Sequence, .ViewGeneration = click.ViewGeneration });
 			if (!ticket)

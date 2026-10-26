@@ -7,6 +7,7 @@
 #include "Engine/Asset/EnvironmentData.h"
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/TextureData.h"
+#include "Engine/Graphics/CommandListRecording.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Shared/MaterialConstants.h"
 
@@ -66,6 +67,15 @@ namespace Engine {
 		{
 			std::string path = assets.GetReferencePath(handle);
 			return path.empty() ? handle.ToString() : path;
+		}
+
+		// Whether an upload that just failed on `device` is the asset's own failure (§8.14 item 7: counted, reported once and
+		// not retried until the asset changes). On a lost device it is not (M18, Docs/Decisions/0029-m18-contract.md decision
+		// 28: a Gpu error on a lost device is the loss, never out-of-memory): it is neither counted nor reported, and the
+		// recovery's ReleaseGpuObjects drops the stand-in mirror, so the next Get uploads the asset again.
+		[[nodiscard]] static bool IsUploadFailure(const GraphicsDevice& device)
+		{
+			return !device.IsLost();
 		}
 
 		static Result<nvrhi::Format> ToNvrhiFormat(TextureFormat format)
@@ -128,10 +138,9 @@ namespace Engine {
 			// Not an immediate command list: the scene renderer resolves its materials while the frame's immediate list is open.
 			ENGINE_TRY_ASSIGN(const nvrhi::CommandListHandle commandList,
 				device.CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false)));
-			commandList->open();
+			CommandListRecording recording(device, *commandList);
 			commandList->writeBuffer(buffer, &constants, sizeof(constants));
-			commandList->close();
-			device.ExecuteCommandList(*commandList);
+			recording.Execute();
 			return buffer;
 		}
 
@@ -210,20 +219,21 @@ namespace Engine {
 				// frame's immediate list is open, and NVRHI's validation allows one open immediate list at a time.
 				ENGINE_TRY_ASSIGN(nvrhi::CommandListHandle commandList,
 					device.CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false)));
-				commandList->open();
+				CommandListRecording recording(device, *commandList);
 				Result<nvrhi::BufferHandle> vertices = Utils::CreateGeometryBuffer(device, *commandList, mesh.Vertices.data(),
 					mesh.Vertices.size() * sizeof(MeshVertex), false, std::format("{} (vertices)", name));
 				Result<nvrhi::BufferHandle> indices = vertices
 					? Utils::CreateGeometryBuffer(device, *commandList, mesh.Indices.data(), mesh.Indices.size() * sizeof(uint32_t), true,
 						  std::format("{} (indices)", name))
 					: Result<nvrhi::BufferHandle>(nvrhi::BufferHandle());
-				// The list is closed either way; it is executed only when both buffers exist.
-				commandList->close();
+				// The list is executed whatever the buffers' results: a list that never executes keeps itself, and the buffer
+				// it wrote, alive (CommandListRecording), which would fail the next device loss's recovery. Without both
+				// buffers its writes are discarded with them.
+				recording.Execute();
 				if (!vertices)
 					return std::unexpected(std::move(vertices).error());
 				if (!indices)
 					return std::unexpected(std::move(indices).error());
-				device.ExecuteCommandList(*commandList);
 
 				GpuMesh mirror;
 				mirror.VertexBuffer = std::move(*vertices);
@@ -368,8 +378,12 @@ namespace Engine {
 					else
 					{
 						// The placeholder's mirror stands in; when the placeholder's own upload failed, its GPU objects stay null.
-						++*context.UploadFailures;
-						entry.UploadError = uploaded.error().ToString();
+						// On a lost device the failure is the loss, not the asset's (Utils::IsUploadFailure).
+						if (Utils::IsUploadFailure(*context.Device))
+						{
+							++*context.UploadFailures;
+							entry.UploadError = uploaded.error().ToString();
+						}
 						if (!isPlaceholderAsset)
 							entry.Value = Resolve(context, placeholder, false);
 						entry.Value.IsPlaceholder = true;
@@ -608,7 +622,7 @@ namespace Engine {
 		{
 			entry.Value.Constants = std::move(*constants);
 		}
-		else
+		else if (Utils::IsUploadFailure(*state.Device))
 		{
 			++state.UploadFailures;
 			entry.UploadError = constants.error().ToString();
@@ -668,7 +682,7 @@ namespace Engine {
 				entry.Value = std::move(*uploaded);
 				entry.IsValid = true;
 			}
-			else
+			else if (Utils::IsUploadFailure(*state.Device))
 			{
 				++state.UploadFailures;
 				state.ReportEnvironmentFailure(handle, std::string(AssetUploadFailedCode),
@@ -708,7 +722,10 @@ namespace Engine {
 
 	void GpuResourceCache::ReleaseGpuObjects()
 	{
-		ENGINE_CONTRACT_STUB();
+		// The mirrors hold every GPU object of the cache: an upload's command list is executed at once and dropped, and the
+		// host images of HostImageUpload are the device's, which GraphicsDevice::Recover releases. NextGeneration and
+		// UploadFailures stay, so no material generation from before the loss is ever made again.
+		Clear();
 	}
 
 	GpuResourceCacheStats GpuResourceCache::GetStats() const

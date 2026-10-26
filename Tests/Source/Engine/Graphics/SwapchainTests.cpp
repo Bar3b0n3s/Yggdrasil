@@ -175,6 +175,42 @@ namespace Engine {
 			CHECK(PresentFrames(device, **swapchain, pacer, **commandList, window, 5) == 1);
 			CHECK((*swapchain)->GetRecreationCount() == recreations + 1);
 
+			// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decisions 28 and 29): a device lost between a frame's acquire and
+			// its submission. The submission and the present never reach Vulkan, the lost device's next frames acquire and
+			// present nothing, and none of it ends the process.
+			window.PollEvents();
+			pacer.BeginFrame();
+			const Result<SwapchainAcquireStatus> acquired = (*swapchain)->AcquireNextImage(pacer.GetFrameSlot());
+			REQUIRE_MESSAGE(acquired.has_value(), acquired.error().ToString());
+			REQUIRE(*acquired == SwapchainAcquireStatus::Acquired);
+			(*commandList)->open();
+			(*commandList)->clearTextureFloat((*swapchain)->GetCurrentTexture(), nvrhi::AllSubresources, nvrhi::Color(0.2f, 0.3f, 0.4f, 1.0f));
+			(*commandList)->close();
+			(*swapchain)->QueueFrameSemaphores();
+			device.GetDiagnostics().SetDeviceLost(true);
+			const uint64_t lostSubmission = device.ExecuteCommandList(**commandList);
+			CHECK(lostSubmission == device.GetLastSubmissionID());
+			(*swapchain)->Present();
+			pacer.EndFrame(lostSubmission);
+			device.RunGarbageCollection();
+			CHECK(PresentFrames(device, **swapchain, pacer, **commandList, window, 3) == 3);
+
+			// The recovery with the window (Recover(window)): the swapchain, no registered owner here, goes before it with its
+			// surface, the device and its VkInstance are created again with presentation support scored again, and a new
+			// swapchain presents on them.
+			commandList->Reset();
+			swapchain->reset();
+			framePacer.reset();
+			const Status recovered = context.RecoverGraphics();
+			REQUIRE_MESSAGE(recovered.has_value(), recovered.error().ToString());
+			CHECK(device.GetRecoveryCount() == 1);
+			swapchain = Swapchain::Create(device, window, { .VSync = true, .FramesInFlight = 2 });
+			REQUIRE_MESSAGE(swapchain.has_value(), swapchain.error().ToString());
+			framePacer = CreateScope<FramePacer>(device, 2);
+			commandList = device.CreateCommandList();
+			REQUIRE_MESSAGE(commandList.has_value(), commandList.error().ToString());
+			CHECK(PresentFrames(device, **swapchain, *framePacer, **commandList, window, 10) == 0);
+
 			// Zero validation messages and nothing left alive, like the GPU fixture checks (HeadlessGpuFixture.h): the counts are
 			// read after the device's teardown, which reports leaks too.
 			device.WaitForIdle();

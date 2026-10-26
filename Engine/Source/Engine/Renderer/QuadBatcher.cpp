@@ -3,6 +3,7 @@
 
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Graphics/CommandListRecording.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Renderer/RenderStats.h"
 #include "Engine/Renderer/SceneTargetFormats.h"
@@ -321,11 +322,10 @@ namespace Engine {
 		// Not an immediate command list: a caller may have the frame's immediate list open (NVRHI's validation allows one).
 		ENGINE_TRY_ASSIGN(const nvrhi::CommandListHandle commandList,
 			WithContext(device.CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false)), "while creating the quad batcher"));
-		commandList->open();
+		CommandListRecording recording(device, *commandList);
 		commandList->clearTextureFloat(state.White, nvrhi::AllSubresources, nvrhi::Color(1.0f));
 		state.WriteIndices(*commandList);
-		commandList->close();
-		device.ExecuteCommandList(*commandList);
+		recording.Execute();
 		return batcher;
 	}
 

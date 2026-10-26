@@ -184,18 +184,23 @@ namespace Engine {
 	//      replaced by a resize stays alive until every frame that cleared it has completed. A Gpu error from
 	//      ImGuiLayer::Render (a pipeline, buffer or binding set could not be created) ends the process through
 	//      FatalError(OutOfMemory) (§8.14 item 7); other Render errors are logged once per run of failing frames.
-	//   2b. M18 (C18.3, Docs/Decisions/0029-m18-contract.md decisions 28, 29 and 33): device loss. A frame on a lost device
-	//      (GraphicsDevice::IsLost) renders nothing: no BeginFrame wait, no OnRender, no OnImGuiRender, no submission or
-	//      Present, as for a frame the swapchain skips (the simulation, its scripts and its audio still run). A Gpu error on a
-	//      lost device is the loss, never FatalError(OutOfMemory). At the frame boundary (FrameLoop's OnFrameDeviceLost) the
-	//      application recovers the device: OnDeviceLost with the loss's report (the editor writes its autosave there), then
-	//      EngineContext::RecoverGraphics, which releases every registered owner (the rendering objects of step 1 register as
-	//      one owner, "Application frame", and the ImGuiLayer's renderer as another), creates the device again and creates
-	//      them again. On success it appends one EngineEventType::GpuDeviceLost event (Message: the report's context and fault
-	//      description) to the context's EventLog, calls OnDeviceRecovered, and the next frame renders; on failure it ends the
-	//      process through GraphicsDevice::RaiseDeviceLost with the report and the recovery's error (FatalError(DeviceLost):
-	//      the fatal hook's autosave, a crash report, exit code 4). A loss during initialization, before the first frame,
-	//      ends the process the same way (decision 25).
+	//   2b. M18 (C18.3, Docs/Decisions/0029-m18-contract.md decisions 28, 29 and 33): device loss. A frame on a lost
+	//      device (GraphicsDevice::IsLost) renders nothing: no BeginFrame wait, no OnRender, no OnImGuiRender, no
+	//      submission or Present, as for a frame the swapchain skips (the simulation, its scripts and its audio still
+	//      run). A Gpu error on a lost device is the loss, never FatalError(OutOfMemory). At the frame boundary
+	//      (FrameLoop's OnFrameDeviceLost) the application recovers the device (a frame the loss ended while it
+	//      recorded first has its command list closed and executed on the lost device, so NVRHI retires it):
+	//      OnDeviceLost with the loss's report (the editor writes its autosave there), then
+	//      EngineContext::RecoverGraphics, which releases every registered owner (the rendering objects of step 1
+	//      register as one owner, "Application frame", and the ImGuiLayer's renderer as another), creates the device
+	//      again and creates them again. On success it appends one EngineEventType::GpuDeviceLost event (Message: the
+	//      report's context and fault description) to the context's EventLog, calls OnDeviceRecovered, and the next
+	//      frame renders; on failure it ends the process through GraphicsDevice::RaiseDeviceLost with the report and
+	//      the recovery's error (FatalError(DeviceLost): the fatal hook's autosave, a crash report, exit code 4). A
+	//      loss during initialization, before the first frame, ends the process the same way (decision 25). The
+	//      recovered frame's objects are new (a FramePacer counts its frames from 0), but RenderContext::FrameIndex
+	//      keeps growing: the first frame after a recovery takes the first multiple of the frames in flight after the
+	//      last frame's index, so FrameSlot stays FrameIndex modulo the frames in flight.
 	//   3. OnShutdown, GraphicsDevice::WaitForIdle, the rendering objects (ImGuiLayer, GpuProfiler, swapchain or offscreen
 	//      target, pacer), then the GPU services (EngineContext::DestroyGraphics) with the ExpectNoGpuErrors check (see the
 	//      field), then the rest of the context (reverse order), then the ExpectNoErrors check, which so counts the errors
@@ -295,6 +300,13 @@ namespace Engine {
 
 		// Step 1's rendering objects (see the class comment); does nothing with RendererMode::None.
 		[[nodiscard]] Status InitializeRendering();
+		// M18 (C18.3, decision 33): the "Application frame" owner's two halves. CreateFrameObjects creates the swapchain or the
+		// headless offscreen target, the command list, the FramePacer and the GpuProfiler (InitializeRendering, and the
+		// owner's Recreate on the recreated device), returning the first error with its context; ReleaseFrameObjects (the
+		// owner's Release) ends a UI frame the loss interrupted (ImGuiLayer::EndInterruptedFrame) and drops them all, the
+		// forced UI target and the slot targets included, without a GPU call.
+		[[nodiscard]] Status CreateFrameObjects();
+		void ReleaseFrameObjects();
 		// Step 3's teardown of what InitializeRendering built, after GraphicsDevice::WaitForIdle.
 		void ShutdownRendering();
 		// Logs an initialization failure at Error level, and shows it in an error dialog when `process` has

@@ -35,7 +35,11 @@ namespace Engine {
 			SmokeFailed, // no golden for the device class, and the image failed the smoke checks
 			// The name or device class is not a plain file name (an invalid argument, checked before any file access), the
 			// golden could not be read or decoded, or an output could not be written.
-			Error
+			Error,
+			// No golden for the device class, but another device class of the same vendor has this image's: the driver's
+			// major version changed (ADR 0028 decision 9 holds it), so the comparison is reported, never smoke-tested
+			// (M18 W18.2, the device-class check; the rename procedure is in Tests/Golden/README.md).
+			DeviceClassChanged
 		};
 
 		// Where CheckGoldenImage reads and writes, and whether it updates the goldens. The repository's settings
@@ -66,6 +70,8 @@ namespace Engine {
 		//   - when that golden exists: CompareImages with `thresholds` (§15.4 defaults); on a match removes the outputs of
 		//     an earlier failure (Matched); on a mismatch writes <name>-actual.png, <name>-expected.png and, unless the sizes
 		//     differ, <name>-diff.png into GetGoldenOutputDirectory() (Mismatched); a golden that cannot be read is an Error;
+		//   - otherwise, when another device class of the same vendor (the class's text before its last '-', "nvidia" of
+		//     "nvidia-61x") has <name>.png: DeviceClassChanged, naming those classes, a failure;
 		//   - otherwise the smoke mode: the image is valid and non-empty, has at least 2 distinct colours and a mean
 		//     luminance in [0.01, 0.99] (SmokePassed or SmokeFailed), never a pass of the comparison.
 		// Every message but the invalid-name Error starts with "Golden image '<name>' on device class '<class>'", which

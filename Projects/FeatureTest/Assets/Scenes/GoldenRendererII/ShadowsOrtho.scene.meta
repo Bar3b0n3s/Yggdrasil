@@ -1,9 +1,9 @@
 {
 	"Format": "AssetMeta",
 	"Version": 1,
-	"Handle": "4247170a1e30c5ce",
-	"Type": "Material",
-	"Importer": "Material",
+	"Handle": "37f656ca96c3c004",
+	"Type": "Scene",
+	"Importer": "Scene",
 	"ImporterVersion": 1,
 	"Settings": null,
 	"SubAssets": []

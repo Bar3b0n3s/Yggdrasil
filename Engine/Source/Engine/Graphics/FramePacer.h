@@ -79,7 +79,8 @@ namespace Engine {
 	public:
 		// `device` is a documented back-reference and must outlive the pacer. `framesInFlight` >= 1 (asserted). Creates one
 		// event query per slot through GraphicsDevice::CreateEventQuery; a failure is FatalError(OutOfMemory) (§8.14 item 7:
-		// objects created at startup).
+		// objects created at startup), except on a lost device (M18, decision 28), where the slot stays without a query: its
+		// frames then wait for their submission without polling, and the pacer's owner replaces it in the recovery.
 		FramePacer(GraphicsDevice& device, uint32_t framesInFlight);
 		~FramePacer();
 
@@ -87,9 +88,10 @@ namespace Engine {
 		FramePacer& operator=(const FramePacer&) = delete;
 
 		// Advances to the next frame and waits until its slot is free: pollEventQuery on the slot's event query, and when it
-		// has not signaled, WaitForSubmission on the slot's recorded submission ID (a fatal error on hang or device loss, so
-		// this returns only when the slot is free). M18 (C18.3, decision 28): on a lost device it waits for nothing and
-		// returns; the pacer's owner destroys it in the recovery's release and creates a new one (decision 33). The first FramesInFlight frames never wait. Under
+		// has not signaled, WaitForSubmission on the slot's recorded submission ID (a fatal error on hang, so this returns
+		// only when the slot is free or the device is lost). M18 (C18.3, decision 28): on a lost device it waits for nothing and
+		// returns, and a loss its wait meets is reported (WaitForSubmission); the pacer's owner destroys it in the recovery's
+		// release and creates a new one (decision 33). The first FramesInFlight frames never wait. Under
 		// --gpu-inject-fault=hang, every frame whose slot has a recorded submission skips pollEventQuery and calls
 		// WaitForSubmission, which then never returns (see WaitForSubmission), so a headless run ends with
 		// FatalError(GpuHang) at its first such frame even when the GPU finished long ago.
@@ -97,8 +99,8 @@ namespace Engine {
 
 		// Records `lastSubmissionID` (the frame's last GraphicsDevice::ExecuteCommandList(s) result, or
 		// GraphicsDevice::GetLastSubmissionID for a frame that submitted nothing, such as one the swapchain skipped) for the
-		// current slot and sets the slot's event query on the graphics queue. Called once per BeginFrame, after the frame's
-		// submissions.
+		// current slot and sets the slot's event query on the graphics queue, which a lost device skips (M18). Called once per
+		// BeginFrame, after the frame's submissions.
 		void EndFrame(uint64_t lastSubmissionID);
 
 		// The slot of the current frame, in [0, FramesInFlight).

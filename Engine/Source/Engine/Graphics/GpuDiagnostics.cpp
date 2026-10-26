@@ -17,9 +17,16 @@ namespace Engine {
 		constexpr std::string_view LoaderMessageIdName = "Loader Message";
 		constexpr uint8_t DeviceLostFlag = 1;
 		constexpr uint8_t InjectedDeviceLossFlag = 2;
-		// GpuDiagnostics::m_InjectedFaultArming's bit of the injected device-lost fault that struck (bit 1 is the armed one,
-		// set by OnGarbageCollected).
+		// GpuDiagnostics::m_InjectedFaultArming's bits: the injected device-lost fault is armed (OnGarbageCollected), and it
+		// struck (the OnSubmitted call that set the flag).
+		constexpr uint8_t InjectedFaultArmedFlag = 1;
 		constexpr uint8_t InjectedFaultStruckFlag = 2;
+
+		// The injected faults that report the device lost after a submission (decision 30).
+		static bool IsDeviceLossFault(GpuFault fault)
+		{
+			return fault == GpuFault::DeviceLost || fault == GpuFault::DeviceLostUnrecoverable;
+		}
 
 		static GpuMessageSeverity FromNvrhiSeverity(nvrhi::MessageSeverity severity)
 		{
@@ -167,18 +174,24 @@ namespace Engine {
 
 	void GpuDiagnostics::OnGarbageCollected()
 	{
-		ENGINE_CONTRACT_STUB();
+		// The first garbage collection, at the end of an application's first frame (or a test's), arms the fault, so the
+		// startup submissions and the first frame run on a healthy device (decision 30). Arming again changes nothing.
+		if (Utils::IsDeviceLossFault(m_InjectedFault))
+			m_InjectedFaultArming.fetch_or(Utils::InjectedFaultArmedFlag, std::memory_order_acq_rel);
 	}
 
 	void GpuDiagnostics::OnSubmitted()
 	{
-		if (m_InjectedFault != GpuFault::DeviceLost && m_InjectedFault != GpuFault::DeviceLostUnrecoverable)
+		if (!Utils::IsDeviceLossFault(m_InjectedFault))
 			return;
-		// Once per process: the struck bit, which ClearDeviceLost leaves alone (stream A also requires the armed bit,
-		// decision 30).
+		// Only once armed, and once per process: the struck bit, which ClearDeviceLost leaves alone, so a recovered device is
+		// never lost again by the same fault.
+		const uint8_t arming = m_InjectedFaultArming.load(std::memory_order_acquire);
+		if ((arming & Utils::InjectedFaultArmedFlag) == 0 || (arming & Utils::InjectedFaultStruckFlag) != 0)
+			return;
 		if ((m_InjectedFaultArming.fetch_or(Utils::InjectedFaultStruckFlag, std::memory_order_acq_rel) & Utils::InjectedFaultStruckFlag) != 0)
 			return;
-		// The first submission sets the flag; the check after it (GraphicsDevice::ExecuteCommandList) ends the process.
+		// The flag after this submission; the check after it (GraphicsDevice::ExecuteCommandLists) reports the loss.
 		const uint8_t previous = m_DeviceLossState.fetch_or(Utils::DeviceLostFlag | Utils::InjectedDeviceLossFlag, std::memory_order_acq_rel);
 		if ((previous & Utils::DeviceLostFlag) == 0)
 			ENGINE_CORE_WARN("Injected GPU fault ({}): the device is reported lost after this submission", GpuFaultToString(m_InjectedFault));

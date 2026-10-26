@@ -6207,7 +6207,7 @@
 		{
 			"name": "events.read",
 			"domain": "events",
-			"description": "Reads engine events (entities, scenes, assets, scripts, clients) by cursor, filtered by type. Pass nextCursor to the next read; \"end\" returns only the cursor of the next event.",
+			"description": "Reads engine events (entities, scenes, assets, scripts, clients, recovered GPU device losses) by cursor, filtered by type. Pass nextCursor to the next read; \"end\" returns only the cursor of the next event.",
 			"exposeAsTool": false,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -6230,7 +6230,7 @@
 						"description": "Only these event types; empty for every type.",
 						"type": "array",
 						"items": {
-							"enum": ["EntityCreated", "EntityDestroyed", "ComponentChanged", "SceneOpened", "SceneChangedOnDisk", "PlayStateChanged", "AssetReloaded", "AssetImportFailed", "ScriptErrorRaised", "DiagnosticsChanged", "AutomationClientDisconnected"]
+							"enum": ["EntityCreated", "EntityDestroyed", "ComponentChanged", "SceneOpened", "SceneChangedOnDisk", "PlayStateChanged", "AssetReloaded", "AssetImportFailed", "ScriptErrorRaised", "DiagnosticsChanged", "AutomationClientDisconnected", "GpuDeviceLost"]
 						}
 					},
 					"limit": {
@@ -6294,7 +6294,7 @@
 							},
 							"type": {
 								"description": "The event's type.",
-								"enum": ["EntityCreated", "EntityDestroyed", "ComponentChanged", "SceneOpened", "SceneChangedOnDisk", "PlayStateChanged", "AssetReloaded", "AssetImportFailed", "ScriptErrorRaised", "DiagnosticsChanged", "AutomationClientDisconnected"]
+								"enum": ["EntityCreated", "EntityDestroyed", "ComponentChanged", "SceneOpened", "SceneChangedOnDisk", "PlayStateChanged", "AssetReloaded", "AssetImportFailed", "ScriptErrorRaised", "DiagnosticsChanged", "AutomationClientDisconnected", "GpuDeviceLost"]
 							},
 							"tick": {
 								"description": "The simulation tick; -1 outside play.",
@@ -14878,6 +14878,12 @@
 						"items": {
 							"$ref": "#/$defs/StatsViewSummary"
 						}
+					},
+					"deviceLosses": {
+						"description": "The GPU device losses this host recovered from since it started, each also a GpuDeviceLost event; 0 with renderer none.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
 					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",

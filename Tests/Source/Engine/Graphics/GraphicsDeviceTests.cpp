@@ -345,6 +345,30 @@ namespace Engine {
 			CHECK(counts.Warnings == 0);
 		}
 
+		TEST_CASE("GraphicsDevice: a reported loss that Vulkan does not report never queries native device-fault information"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 28): a vk::DeviceLostError that no Vulkan call returned
+			// (one thrown at the frame boundary by a test, or by NVRHI on a device that answers again) is reported as a loss,
+			// but the fault query, valid only on a device Vulkan reports lost, is never made, so the validation layer stays
+			// silent; the device recovers.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			device.ReportDeviceLost("GraphicsDeviceTests");
+			CHECK(device.IsLost());
+			CHECK_FALSE(device.GetDiagnostics().IsDeviceLossInjected());
+			REQUIRE(device.GetLossReport().has_value());
+			CHECK_FALSE(device.GetLossReport()->Injected);
+			// The fixture fails the test on the validation error a query of a device that is not lost would report.
+			if (device.GetInfo().DeviceFault)
+				CHECK(device.GetLossReport()->FaultDescription.starts_with("no fault information"));
+			else
+				CHECK(device.GetLossReport()->FaultDescription == "VK_EXT_device_fault is not available");
+			const Status recovered = device.Recover(nullptr);
+			REQUIRE_MESSAGE(recovered.has_value(), recovered.error().ToString());
+		}
+
 		TEST_CASE("GraphicsDevice: FramesInFlight 0 is InvalidArgument")
 		{
 			// Rejected before any Vulkan call, so it needs no GPU.

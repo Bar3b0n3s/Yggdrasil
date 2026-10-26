@@ -2,14 +2,27 @@
 #include "Engine/Renderer/ViewportCapture.h"
 
 #include "Engine/Core/Assert.h"
+#include "Engine/Graphics/CommandListRecording.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Readback.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/SceneRenderer.h"
 
 #include <limits>
+#include <utility>
 
 namespace Engine {
+
+	namespace Utils {
+
+		// The capture's command list. Not an immediate command list: NVRHI's validation allows one open immediate list at a
+		// time, and a capture may be requested while the caller's frame has its own list open.
+		static Result<nvrhi::CommandListHandle> CreateCaptureCommandList(GraphicsDevice& device)
+		{
+			return device.CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false));
+		}
+
+	}
 
 	ViewportCapture::ViewportCapture(ConstructionKey /*key*/)
 	{
@@ -21,17 +34,42 @@ namespace Engine {
 		GpuResourceCache& cache, AssetManager& assets)
 	{
 		ENGINE_TRY_ASSIGN(Scope<SceneRenderer> renderer, SceneRenderer::Create(device, pipelines, cache, assets, { .Width = 1, .Height = 1 }));
-		// Not an immediate command list: NVRHI's validation allows one open immediate list at a time, and a capture may be
-		// requested while the caller's frame has its own list open.
-		ENGINE_TRY_ASSIGN(nvrhi::CommandListHandle commandList,
-			device.CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false)));
+		ENGINE_TRY_ASSIGN(nvrhi::CommandListHandle commandList, Utils::CreateCaptureCommandList(device));
 
 		Scope<ViewportCapture> capture = CreateScope<ViewportCapture>(ConstructionKey());
 		capture->m_Device = &device;
 		capture->m_SceneRenderer = std::move(renderer);
 		capture->m_Readback = CreateScope<Readback>(device);
 		capture->m_CommandList = std::move(commandList);
+
+		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decisions 26 and 33): registered after its private renderer (which
+		// registered itself in SceneRenderer::Create), so it is released before the renderer and created again after it.
+		ViewportCapture* owner = capture.get();
+		GpuRecreationHooks hooks;
+		hooks.Name = "ViewportCapture";
+		hooks.Release = [owner]()
+		{
+			owner->ReleaseGpuObjects();
+		};
+		hooks.Recreate = [owner]()
+		{
+			return owner->RecreateGpuObjects();
+		};
+		capture->m_Recreation = device.GetRecreation().Register(std::move(hooks));
 		return capture;
+	}
+
+	void ViewportCapture::ReleaseGpuObjects()
+	{
+		// The read-back command list and the Readback's: a new Readback holds no GPU object until its first ReadTexture.
+		m_CommandList = nullptr;
+		m_Readback = CreateScope<Readback>(*m_Device);
+	}
+
+	Status ViewportCapture::RecreateGpuObjects()
+	{
+		ENGINE_TRY_ASSIGN(m_CommandList, Utils::CreateCaptureCommandList(*m_Device));
+		return {};
 	}
 
 	Result<Image> ViewportCapture::Capture(const ViewportScreenshotRequest& request, const RenderSnapshot& snapshot)
@@ -50,11 +88,10 @@ namespace Engine {
 		ENGINE_CORE_VERIFY(m_FrameIndex < std::numeric_limits<uint64_t>::max(), "capture frame identity exhausted");
 		RenderSnapshot captured = snapshot;
 		captured.FrameIndex = ++m_FrameIndex;
-		m_CommandList->open();
 		// The list is executed whatever Render reports (an error names a skipped draw; the rest rendered).
+		CommandListRecording recording(*m_Device, *m_CommandList);
 		const Status rendered = m_SceneRenderer->Render(*m_CommandList, captured);
-		m_CommandList->close();
-		const uint64_t submission = m_Device->ExecuteCommandList(*m_CommandList);
+		const uint64_t submission = recording.Execute();
 		m_SceneRenderer->OnSubmitted(captured.FrameIndex, submission);
 		ENGINE_TRY(rendered);
 

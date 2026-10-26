@@ -33,7 +33,9 @@ namespace Engine {
 		nvrhi::ITexture* Target = nullptr;
 		uint32_t Width = 0;
 		uint32_t Height = 0;
-		// FramePacer::GetFrameSlot and GetFrameIndex.
+		// FramePacer::GetFrameSlot, and the frame's index: FramePacer::GetFrameIndex until a device-loss recovery replaces the
+		// pacer, after which it keeps growing from the first multiple of the frames in flight after the last frame's index
+		// (M18, Application.h step 2b), so FrameSlot is always FrameIndex modulo the frames in flight.
 		uint32_t FrameSlot = 0;
 		uint64_t FrameIndex = 0;
 		// The application's GpuProfiler, already in this frame (GpuProfiler::BeginFrame ran): passes wrap their work in

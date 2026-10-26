@@ -1,7 +1,7 @@
 {
 	"Format": "Scene",
 	"Version": 1,
-	"Name": "GtaoOn",
+	"Name": "GtaoOrtho",
 	"Seed": 0,
 	"ComponentVersions": {
 		"Transform": 1,
@@ -12,7 +12,7 @@
 	},
 	"Entities": [
 		{
-			"ID": "64db852ab190fe6b",
+			"ID": "b9c29a3dd54d9bbe",
 			"Name": "Rendering",
 			"Parent": null,
 			"Active": true,
@@ -45,7 +45,7 @@
 			}
 		},
 		{
-			"ID": "9f0fb6e06723fa72",
+			"ID": "e1696f40eb41952e",
 			"Name": "Camera",
 			"Parent": null,
 			"Active": true,
@@ -57,7 +57,7 @@
 					"Scale": [1, 1, 1]
 				},
 				"Camera": {
-					"Projection": "Perspective",
+					"Projection": "Orthographic",
 					"VerticalFov": 45,
 					"OrthographicSize": 3.7,
 					"NearClip": 0.1,
@@ -69,7 +69,7 @@
 			}
 		},
 		{
-			"ID": "5d73abb14dc83b4e",
+			"ID": "01a8258e05ab0189",
 			"Name": "Ground",
 			"Parent": null,
 			"Active": true,
@@ -82,7 +82,7 @@
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000103",
-					"Materials": ["4247170a1e30c5ce"],
+					"Materials": ["7a0a28d33a10928c"],
 					"CastShadows": true,
 					"ReceiveShadows": true,
 					"Visible": true
@@ -90,7 +90,7 @@
 			}
 		},
 		{
-			"ID": "915ba4dd06148fc4",
+			"ID": "6b0ff91de54f425b",
 			"Name": "Cube",
 			"Parent": null,
 			"Active": true,
@@ -103,7 +103,7 @@
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
-					"Materials": ["53ff4b66057a3ff6"],
+					"Materials": ["882b9e5527a6fe6e"],
 					"CastShadows": true,
 					"ReceiveShadows": true,
 					"Visible": true
@@ -111,7 +111,7 @@
 			}
 		},
 		{
-			"ID": "8367ebc5a5296a2d",
+			"ID": "39aaaea0b76ba8a6",
 			"Name": "Sphere",
 			"Parent": null,
 			"Active": true,
@@ -124,7 +124,7 @@
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000102",
-					"Materials": ["da29e7d6f6e7c37a"],
+					"Materials": ["0835a2ca4545047c"],
 					"CastShadows": true,
 					"ReceiveShadows": true,
 					"Visible": true
@@ -132,7 +132,7 @@
 			}
 		},
 		{
-			"ID": "0f1daf5eff2582ae",
+			"ID": "f1a93f82455ad82a",
 			"Name": "Pillar",
 			"Parent": null,
 			"Active": true,
@@ -145,7 +145,7 @@
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
-					"Materials": ["4247170a1e30c5ce"],
+					"Materials": ["7a0a28d33a10928c"],
 					"CastShadows": true,
 					"ReceiveShadows": true,
 					"Visible": true
@@ -153,7 +153,7 @@
 			}
 		},
 		{
-			"ID": "488e4bdf2410c751",
+			"ID": "99584f8690cf0807",
 			"Name": "ContactStep",
 			"Parent": null,
 			"Active": true,
@@ -166,7 +166,7 @@
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
-					"Materials": ["4247170a1e30c5ce"],
+					"Materials": ["7a0a28d33a10928c"],
 					"CastShadows": true,
 					"ReceiveShadows": true,
 					"Visible": true

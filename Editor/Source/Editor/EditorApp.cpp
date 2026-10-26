@@ -179,11 +179,20 @@ namespace Engine {
 
 		constexpr std::string_view ViewportScreenshotOption = "--viewport-screenshot";
 
-		// Ends the process for a GPU object the editor creates at startup or resize that the device has no memory for
-		// (§8.14 item 7); other errors are returned with `context`.
-		[[nodiscard]] static Error CheckStartupGpuObject(Error error, std::string_view what)
+		// Whether `error` means the device is out of memory, which ends the process (§8.14 item 7): a Gpu error, except on a
+		// lost device, where it is the loss itself, which the frame boundary recovers (M18, Docs/Decisions/0029-m18-contract.md
+		// decision 28).
+		[[nodiscard]] static bool IsGpuOutOfMemory(const Error& error, const GraphicsDevice* device)
 		{
-			if (error.GetCode() == ErrorCode::Gpu)
+			return error.GetCode() == ErrorCode::Gpu && (device == nullptr || !device->IsLost());
+		}
+
+		// Ends the process for a GPU object the editor creates at startup or resize that the device has no memory for
+		// (§8.14 item 7); other errors, a lost device's among them, are returned with `context` (Application ends a loss
+		// before the first frame, decision 25).
+		[[nodiscard]] static Error CheckStartupGpuObject(Error error, std::string_view what, const GraphicsDevice& device)
+		{
+			if (IsGpuOutOfMemory(error, &device))
 				FatalError(FatalErrorKind::OutOfMemory, std::format("Cannot create {}: {}", what, error.ToString()));
 			return std::move(error).WithContext(std::format("while creating {}", what));
 		}
@@ -458,7 +467,7 @@ namespace Engine {
 		{
 			Result<Scope<EnvironmentBaker>> baker = EnvironmentBaker::Create(*device, *context.GetPipelineFactory());
 			if (!baker.has_value())
-				return std::unexpected(Utils::CheckStartupGpuObject(std::move(baker).error(), "the environment baker"));
+				return std::unexpected(Utils::CheckStartupGpuObject(std::move(baker).error(), "the environment baker", *device));
 			state.Baker = std::move(*baker);
 		}
 
@@ -510,7 +519,7 @@ namespace Engine {
 			if (app.m_Rendering == nullptr)
 				return MakeError(ErrorCode::Unsupported, "thumbnails need a renderer (not --renderer none)");
 			auto captured = app.m_Rendering->Capture->Capture(ViewportScreenshotRequest{ .Width = size, .Height = size }, snapshot);
-			if (!captured && captured.error().GetCode() == ErrorCode::Gpu)
+			if (!captured && Utils::IsGpuOutOfMemory(captured.error(), app.GetContext().GetGraphicsDevice()))
 			{
 				app.RefreshFatalSnapshot();
 				FatalError(FatalErrorKind::OutOfMemory, captured.error().ToString());
@@ -596,6 +605,9 @@ namespace Engine {
 					else
 						result.Views.push_back(StatsViewSummary{ .Name = name });
 				}
+				// M18 (decision 31): the device losses this editor recovered from; 0 with renderer none.
+				if (const GraphicsDevice* device = app.GetContext().GetGraphicsDevice())
+					result.DeviceLosses = device->GetRecoveryCount();
 				return result;
 			};
 			ENGINE_TRY_ASSIGN(state.Server, AutomationServer::Create(*state.Editor, serverSpecification));
@@ -729,10 +741,7 @@ namespace Engine {
 			};
 			captures.RequestUiFrame = [this]() -> Status
 			{
-				m_State->FreshUiRequested = true;
-				if (m_State->Layer)
-					m_State->Layer->RequestFrame();
-				return WithContext(RequestOffscreenUiFrame(), "while requesting a fresh editor UI frame");
+				return RequestFreshUiFrame();
 			};
 			captures.IsUiFrameCurrent = [this]()
 			{
@@ -742,8 +751,9 @@ namespace Engine {
 			{
 				return CaptureEditorUi();
 			};
-			// A Vulkan error thrown out of NVRHI inside a method (vk::SystemError, §4.6 item 2) ends the process like the
-			// frame-boundary catch (App/FrameLoop.cpp) would, instead of becoming an Internal response on a lost device.
+			// A Vulkan error thrown out of NVRHI inside a method (vk::SystemError, §4.6 item 2) is handled like the
+			// frame-boundary catch (App/FrameLoop.cpp) would handle it, instead of becoming an Internal response: a device loss
+			// fails the request with Gpu and is recovered at the next frame boundary (M18), any other error ends the process.
 			systemErrors = [this, handler = MakeVulkanSystemErrorHandler(GetContext())](const std::system_error& error, std::string_view phase)
 				-> std::optional<Error>
 			{
@@ -773,17 +783,19 @@ namespace Engine {
 		rendering->Cache = CreateScope<GpuResourceCache>(*device, assets);
 		Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(*device, *context.GetPipelineFactory());
 		if (!pipelines.has_value())
-			return std::unexpected(Utils::CheckStartupGpuObject(std::move(pipelines).error(), "the scene renderer's pipelines"));
+			return std::unexpected(Utils::CheckStartupGpuObject(std::move(pipelines).error(), "the scene renderer's pipelines", *device));
 		rendering->Pipelines = std::move(*pipelines);
 		Result<Scope<ViewportCapture>> capture = ViewportCapture::CreateForScenes(*device, *rendering->Pipelines, *rendering->Cache, assets);
 		if (!capture.has_value())
-			return std::unexpected(Utils::CheckStartupGpuObject(std::move(capture).error(), "the viewport capture"));
+			return std::unexpected(Utils::CheckStartupGpuObject(std::move(capture).error(), "the viewport capture", *device));
 		rendering->Capture = std::move(*capture);
 		m_Rendering = std::move(rendering);
-		// Adopt dependencies before constructing views: partial startup failure tears the views down first too.
+		// Adopt dependencies before constructing views: partial startup failure tears the views down first too. The views
+		// and the thumbnails register their ImGui texture keys with the device's recreation registry after the ImGui
+		// renderer (M18, decision 33), so a recovery releases them first.
 		const Status initialized = m_State->Views->Initialize(*device, *m_Rendering->Pipelines, *m_Rendering->Cache, GetImGuiLayer()->GetRenderer());
 		if (!initialized)
-			return std::unexpected(Utils::CheckStartupGpuObject(initialized.error(), "the editor views"));
+			return std::unexpected(Utils::CheckStartupGpuObject(initialized.error(), "the editor views", *device));
 		m_State->Thumbnails->SetGraphics(*device, GetImGuiLayer()->GetRenderer());
 		return {};
 	}
@@ -972,6 +984,41 @@ namespace Engine {
 		// Only the publication: the fatal hook that follows writes it once (Autosave::WriteFatalSnapshot). Writing here as
 		// well would duplicate the generation and evict an older one, possibly another scene's only recovery.
 		PublishAutosave();
+	}
+	Status EditorApp::RequestFreshUiFrame()
+	{
+		m_State->FreshUiRequested = true;
+		if (m_State->Layer)
+			m_State->Layer->RequestFrame();
+		return WithContext(RequestOffscreenUiFrame(), "while requesting a fresh editor UI frame");
+	}
+	void EditorApp::OnDeviceLost(const GpuDeviceLossReport& /*report*/)
+	{
+		// Decision 29: what the fatal hook would write, before the recovery. A recovery that then fails ends the process,
+		// and the hook finds this generation already written (Autosave::WriteFatalSnapshot writes a snapshot once).
+		if (!m_State->Saves)
+			return;
+		PublishAutosave();
+		switch (m_State->Saves->WriteFatalSnapshot())
+		{
+			case AutosaveFatalResult::Saved:
+				ENGINE_INFO("Autosaved the open scene before recovering the GPU device");
+				break;
+			case AutosaveFatalResult::Busy:
+				ENGINE_WARN("Cannot autosave the open scene before recovering the GPU device: another autosave is being written");
+				break;
+			case AutosaveFatalResult::IoFailure:
+				ENGINE_WARN("Cannot autosave the open scene before recovering the GPU device: the autosave could not be written");
+				break;
+			case AutosaveFatalResult::NothingDirty:
+			case AutosaveFatalResult::Disabled:
+				break;
+		}
+	}
+	void EditorApp::OnDeviceRecovered(const GpuDeviceLossReport& /*report*/)
+	{
+		if (const Status requested = RequestFreshUiFrame(); !requested)
+			ENGINE_WARN("Cannot request a fresh editor UI frame after the GPU device recovery: {}", requested.error());
 	}
 	Status EditorApp::UpdateHostServices()
 	{
@@ -1193,12 +1240,14 @@ namespace Engine {
 			state.Editor->GetPlay().OnSafePoint();
 
 		const Status services = UpdateHostServices();
-		if (!services && services.error().GetCode() == ErrorCode::Gpu)
+		if (!services && Utils::IsGpuOutOfMemory(services.error(), GetContext().GetGraphicsDevice()))
 		{
 			RefreshFatalSnapshot();
 			FatalError(FatalErrorKind::OutOfMemory, services.error().ToString());
 		}
-		state.HostErrors.Report("Editor host", services);
+		// A Gpu error of a lost device is the loss, which the frame boundary recovers (decision 28), not a host error.
+		if (services || services.error().GetCode() != ErrorCode::Gpu)
+			state.HostErrors.Report("Editor host", services);
 		// The safe point's one publication of the post-dispatch scene, then a periodic write when its interval elapsed
 		// (Autosave::Update publishes first). A failed content action must not starve periodic recovery publication.
 		if (state.Saves && state.Editor->HasProject())
@@ -1208,8 +1257,9 @@ namespace Engine {
 		}
 		else
 			PublishAutosave();
-		// Test-only fault intent is consumed after publishing the post-dispatch scene. The next real submission takes
-		// the normal device-loss path, so the fatal callback can recover this edit rather than a startup snapshot.
+		// Test-only fault intent is consumed after publishing the post-dispatch scene: the device is lost from here, this frame
+		// renders nothing, and its frame boundary recovers the device after OnDeviceLost wrote this edit's autosave, or, for
+		// an unrecoverable loss, ends the process with the fatal hook writing it (M18, decisions 29 and 30).
 		if (std::exchange(state.DeviceLostQueued, false))
 		{
 			if (GraphicsDevice* device = GetContext().GetGraphicsDevice())
@@ -1317,11 +1367,14 @@ namespace Engine {
 		// The frame's edit scene was published at its safe point; nothing between it and this GPU work commits edits.
 		const Status rendered = m_State->Views->Render(context);
 		m_Rendering->Mirrors.NoteRendered();
-		if (!rendered && rendered.error().GetCode() == ErrorCode::Gpu)
+		if (!rendered && Utils::IsGpuOutOfMemory(rendered.error(), context.Device))
 		{
 			RefreshFatalSnapshot();
 			FatalError(FatalErrorKind::OutOfMemory, rendered.error().ToString());
 		}
+		// On a device lost during the render, the failure is the loss, which the frame boundary recovers (decision 28).
+		if (context.Device->IsLost())
+			return;
 		if (!rendered && !m_Rendering->IsRenderFailing)
 			ENGINE_ERROR("Cannot render editor views: {}", rendered.error());
 		m_Rendering->IsRenderFailing = !rendered;
@@ -1383,8 +1436,10 @@ namespace Engine {
 		// §8.13: screenshots render after the asset manager has published every load and reload requested so far.
 		if (AssetManager* assets = GetContext().GetAssetManager())
 			assets->WaitIdle();
+		// On a lost device the capture's Gpu error is the loss: the request fails, and the client retries after the
+		// GpuDeviceLost event (decision 28).
 		auto captured = m_Rendering->Capture->Capture(request, snapshot);
-		if (!captured && captured.error().GetCode() == ErrorCode::Gpu)
+		if (!captured && Utils::IsGpuOutOfMemory(captured.error(), GetContext().GetGraphicsDevice()))
 		{
 			RefreshFatalSnapshot();
 			FatalError(FatalErrorKind::OutOfMemory, captured.error().ToString());
@@ -1408,7 +1463,7 @@ namespace Engine {
 		if (device == nullptr || imgui == nullptr)
 			return MakeError(ErrorCode::Unsupported, "screenshots need a renderer (not --renderer none)");
 		auto captured = CaptureImGuiScreenshot(*device, *imgui, {});
-		if (!captured && captured.error().GetCode() == ErrorCode::Gpu)
+		if (!captured && Utils::IsGpuOutOfMemory(captured.error(), device))
 		{
 			RefreshFatalSnapshot();
 			FatalError(FatalErrorKind::OutOfMemory, captured.error().ToString());

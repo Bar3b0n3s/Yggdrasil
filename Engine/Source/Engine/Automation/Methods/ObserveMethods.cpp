@@ -177,7 +177,7 @@ namespace Engine {
 		methods.Add(
 			{
 				.Name = "events.read",
-				.Description = "Reads engine events (entities, scenes, assets, scripts, clients) by cursor, filtered by type. Pass nextCursor to "
+				.Description = "Reads engine events (entities, scenes, assets, scripts, clients, recovered GPU device losses) by cursor, filtered by type. Pass nextCursor to "
 							   "the next read; \"end\" returns only the cursor of the next event.",
 				.AvailableInRuntime = true,
 				.AllowedInBatch = true,

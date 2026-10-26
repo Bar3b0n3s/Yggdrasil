@@ -112,7 +112,10 @@ namespace Engine {
 	// asset gets its placeholder's mirror. A failed upload (Gpu, also --gpu-inject-fault=oom-texture, ADR 0009 decision 8)
 	// never crashes: the placeholder's mirror is used and the AssetManager records an AssetUploadFailedCode diagnostic
 	// (§8.14 item 7), logged once per asset. Placeholder mirrors are created on first need; if even that fails, the texture
-	// mirror's handle is null and the caller skips draws using it.
+	// mirror's handle is null and the caller skips draws using it. M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision
+	// 28): an upload that fails while the device is lost (GraphicsDevice::IsLost) is the loss, not the asset's failure: the
+	// stand-in mirror is used as above, but nothing is counted in UploadFailures or reported, and the device's recovery
+	// drops the stand-in (ReleaseGpuObjects), so the next Get uploads the asset again.
 	//
 	// Main thread only (NVRHI command recording, §4.11). Destroyed before the device (§8.14 item 4: SceneRenderer, then
 	// GpuResourceCache). Not copyable.

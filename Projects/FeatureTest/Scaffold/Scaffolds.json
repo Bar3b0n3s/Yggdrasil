@@ -78,6 +78,15 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "GoldenRendererII.jsonl",
+			"IdSeed": 1610,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Materials/GoldenRendererII",
+				"Assets/Scenes/GoldenRendererII"
+			]
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

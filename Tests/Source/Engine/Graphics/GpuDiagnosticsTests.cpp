@@ -158,8 +158,7 @@ namespace Engine {
 			CHECK(diagnostics.IsDeviceLossInjected());
 		}
 
-		TEST_CASE("GpuDiagnostics: an injected device loss strikes once, at the first submission after a garbage collection"
-			* doctest::skip(true))
+		TEST_CASE("GpuDiagnostics: an injected device loss strikes once, at the first submission after a garbage collection")
 		{
 			// M18 acceptance (C18.3, decision 30): the startup submissions and the first frame are unaffected, the loss strikes
 			// the second frame, and the recovered device is not lost again.
@@ -185,10 +184,11 @@ namespace Engine {
 
 		TEST_CASE("GpuDiagnostics: injected faults follow --gpu-inject-fault")
 		{
-			// device-lost: the flag after the first submission.
+			// device-lost: the flag after the first submission once a garbage collection armed it (decision 30).
 			GpuDiagnostics deviceLost(GpuFault::DeviceLost);
 			CHECK_FALSE(deviceLost.IsDeviceLost());
 			CHECK_FALSE(deviceLost.IsDeviceLossInjected());
+			deviceLost.OnGarbageCollected();
 			deviceLost.OnSubmitted();
 			CHECK(deviceLost.IsDeviceLost());
 			CHECK(deviceLost.IsDeviceLossInjected());

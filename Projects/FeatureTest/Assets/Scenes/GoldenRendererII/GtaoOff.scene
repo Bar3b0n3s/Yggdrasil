@@ -1,19 +1,18 @@
 {
 	"Format": "Scene",
 	"Version": 1,
-	"Name": "SpotShadows",
+	"Name": "GtaoOff",
 	"Seed": 0,
 	"ComponentVersions": {
 		"Transform": 1,
 		"MeshRenderer": 1,
 		"Camera": 1,
-		"SpotLight": 1,
 		"Environment": 1,
 		"PostProcess": 1
 	},
 	"Entities": [
 		{
-			"ID": "273c3e9e1c9979b9",
+			"ID": "6133316e4a9f60a2",
 			"Name": "Rendering",
 			"Parent": null,
 			"Active": true,
@@ -30,7 +29,7 @@
 					"Rotation": 0,
 					"ShowSkybox": false,
 					"SkyboxBlur": 0,
-					"FallbackColor": [0.08, 0.08, 0.08]
+					"FallbackColor": [0.6, 0.6, 0.6]
 				},
 				"PostProcess": {
 					"ExposureEV": 0,
@@ -46,7 +45,7 @@
 			}
 		},
 		{
-			"ID": "dc8842d66a3f7207",
+			"ID": "5ebbe45976477dbc",
 			"Name": "Camera",
 			"Parent": null,
 			"Active": true,
@@ -70,7 +69,7 @@
 			}
 		},
 		{
-			"ID": "0e02c8b09cbe127a",
+			"ID": "1f574150f71dbcbc",
 			"Name": "Ground",
 			"Parent": null,
 			"Active": true,
@@ -83,7 +82,7 @@
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000103",
-					"Materials": ["4247170a1e30c5ce"],
+					"Materials": ["7a0a28d33a10928c"],
 					"CastShadows": true,
 					"ReceiveShadows": true,
 					"Visible": true
@@ -91,7 +90,7 @@
 			}
 		},
 		{
-			"ID": "86ab1ae1b63f38ff",
+			"ID": "abbec8b7da8a0762",
 			"Name": "Cube",
 			"Parent": null,
 			"Active": true,
@@ -104,7 +103,7 @@
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
-					"Materials": ["53ff4b66057a3ff6"],
+					"Materials": ["882b9e5527a6fe6e"],
 					"CastShadows": true,
 					"ReceiveShadows": true,
 					"Visible": true
@@ -112,7 +111,7 @@
 			}
 		},
 		{
-			"ID": "ac7f97f801de178b",
+			"ID": "655803780f56f6c0",
 			"Name": "Sphere",
 			"Parent": null,
 			"Active": true,
@@ -125,7 +124,7 @@
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000102",
-					"Materials": ["da29e7d6f6e7c37a"],
+					"Materials": ["0835a2ca4545047c"],
 					"CastShadows": true,
 					"ReceiveShadows": true,
 					"Visible": true
@@ -133,7 +132,7 @@
 			}
 		},
 		{
-			"ID": "534711f4daf4bae4",
+			"ID": "a7efba45d45a2091",
 			"Name": "Pillar",
 			"Parent": null,
 			"Active": true,
@@ -146,7 +145,7 @@
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
-					"Materials": ["4247170a1e30c5ce"],
+					"Materials": ["7a0a28d33a10928c"],
 					"CastShadows": true,
 					"ReceiveShadows": true,
 					"Visible": true
@@ -154,48 +153,23 @@
 			}
 		},
 		{
-			"ID": "b2c24804cbc81b5c",
-			"Name": "Spot",
+			"ID": "44ccb523546f4dec",
+			"Name": "ContactStep",
 			"Parent": null,
 			"Active": true,
 			"Tags": [],
 			"Components": {
 				"Transform": {
-					"Translation": [-3, 6, 3],
-					"Rotation": [-0.45757744, -0.28125328, -0.15522054, 0.82911164],
-					"Scale": [1, 1, 1]
+					"Translation": [-1.3, 0.2, 1.05],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [2.5, 0.4, 0.5]
 				},
-				"SpotLight": {
-					"Color": [1, 0.8, 0.6],
-					"Intensity": 45,
-					"Range": 25,
-					"InnerConeAngle": 25,
-					"OuterConeAngle": 40,
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7a0a28d33a10928c"],
 					"CastShadows": true,
-					"SourceRadius": 0.12
-				}
-			}
-		},
-		{
-			"ID": "1e8d3372a309387d",
-			"Name": "Spot",
-			"Parent": null,
-			"Active": true,
-			"Tags": [],
-			"Components": {
-				"Transform": {
-					"Translation": [4, 5, -2],
-					"Rotation": [-0.21644755, 0.7819733, 0.38427678, 0.44045383],
-					"Scale": [1, 1, 1]
-				},
-				"SpotLight": {
-					"Color": [0.6, 0.8, 1],
-					"Intensity": 45,
-					"Range": 25,
-					"InnerConeAngle": 25,
-					"OuterConeAngle": 40,
-					"CastShadows": true,
-					"SourceRadius": 0.12
+					"ReceiveShadows": true,
+					"Visible": true
 				}
 			}
 		}

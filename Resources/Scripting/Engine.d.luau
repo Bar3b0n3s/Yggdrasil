@@ -42,7 +42,7 @@ export type CursorMode = "Normal" | "Hidden" | "Locked"
 export type DiagnosticSeverity = "Warning" | "Error"
 
 -- The kind of an engine event (§4.9).
-export type EngineEventType = "EntityCreated" | "EntityDestroyed" | "ComponentChanged" | "SceneOpened" | "SceneChangedOnDisk" | "PlayStateChanged" | "AssetReloaded" | "AssetImportFailed" | "ScriptErrorRaised" | "DiagnosticsChanged" | "AutomationClientDisconnected"
+export type EngineEventType = "EntityCreated" | "EntityDestroyed" | "ComponentChanged" | "SceneOpened" | "SceneChangedOnDisk" | "PlayStateChanged" | "AssetReloaded" | "AssetImportFailed" | "ScriptErrorRaised" | "DiagnosticsChanged" | "AutomationClientDisconnected" | "GpuDeviceLost"
 
 -- The build configuration an export targets (§2.2).
 export type ExportConfiguration = "Debug" | "Release" | "Dist"

@@ -5,6 +5,7 @@
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/Automation/Methods/RegisterSharedMethods.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
+#include "Engine/Core/EventLog.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Reflection/EnumInfo.h"
 #include "Engine/Reflection/JsonSchema.h"
@@ -257,7 +258,12 @@ namespace Engine {
 			CHECK(format->FindByNameIgnoreCase("JSON")->Name == "Json");
 			const EnumInfo* events = types.FindEnum("EngineEventType");
 			REQUIRE(events != nullptr);
-			CHECK(events->GetEntries().size() == 11);
+			CHECK(events->GetEntries().size() == 12);
+			// M18 (Docs/Decisions/0029-m18-contract.md decision 31): appended, so events.read {types} takes it by name.
+			const EnumEntry* deviceLost = events->FindByNameIgnoreCase("gpudevicelost");
+			REQUIRE(deviceLost != nullptr);
+			CHECK(deviceLost->Name == "GpuDeviceLost");
+			CHECK(deviceLost->Value == static_cast<int64_t>(EngineEventType::GpuDeviceLost));
 		}
 
 		TEST_CASE("RegisterMethods: the tool catalogue's input schemas are compact")

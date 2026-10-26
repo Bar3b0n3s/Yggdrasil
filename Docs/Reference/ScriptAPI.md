@@ -3456,6 +3456,8 @@ The kind of an engine event (§4.9).
 
 - `AutomationClientDisconnected`: An automation client disconnected.
 
+- `GpuDeviceLost`: The GPU device was lost and has been recovered, so the frames after it render again (message: the loss's report). A failed recovery ends the process, so it never appears.
+
 ## ExportConfiguration
 
 The build configuration an export targets (§2.2).

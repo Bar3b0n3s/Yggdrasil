@@ -3,6 +3,7 @@
 #include "Editor/Viewport/EditorViewportHost.h"
 #include "EditorCore/ShownSceneTracker.h"
 #include "Engine/Core/Base.h"
+#include "Engine/Graphics/GpuRecreation.h"
 #include "Engine/Platform/Events.h"
 #include "Engine/Renderer/SceneRenderer.h"
 
@@ -19,6 +20,11 @@ namespace Engine {
 
 	// EditorApp-owned adapter. All services are borrowed, main-thread-only and outlive this adapter.
 	// Each view owns its renderer and ImGui registration; Retire withdraws registrations before GPU teardown.
+	// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decisions 26 and 33): the views' ImGui texture keys are one owner of
+	// the device's GPU objects ("EditorHostViewports", registered by Initialize after the ImGui renderer and the views'
+	// renderers, so a recovery releases it first). Its Release removes both keys (counted as withdrawals) and forgets the
+	// images, the queued and pending picks and the recorded frame, which never completes; the renderers release and recreate
+	// themselves (SceneRenderer, the placement rule's place 2), and the next Render registers the recreated images again.
 	class EditorHostViewports final : public EditorViewportHost
 	{
 	public:
@@ -83,6 +89,8 @@ namespace Engine {
 		};
 		[[nodiscard]] static size_t Index(ViewportView view);
 		void Cancel(View& view);
+		// The recreation owner's Release (see the class comment): no GPU call.
+		void ReleaseGpuObjects();
 		[[nodiscard]] Status Poll(View& view, uint64_t frameIndex);
 		[[nodiscard]] Status RenderView(size_t index, RenderContext& context, bool sceneChanged);
 		[[nodiscard]] bool IsCursorLocked() const;
@@ -100,6 +108,7 @@ namespace Engine {
 		uint64_t m_Withdrawals = 0;
 		bool m_Unavailable = false;
 		bool m_GameFocused = false;
+		GpuRecreationRegistration m_Recreation{}; // from Initialize until Retire
 	};
 
 }

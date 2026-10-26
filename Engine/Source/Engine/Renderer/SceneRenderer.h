@@ -177,9 +177,10 @@ namespace Engine {
 		// pass resources instead (ADR0017, integration). Variants are specialized with view unless they exist (Lit's are the
 		// startup pipelines: no effect); logs the new pipeline count at Info. SceneRenderer::Render calls it the first time a
 		// snapshot asks for a view, and a host may call it ahead of time. Errors: InvalidArgument for a view this build has no
-		// pipelines for (not below RenderDebugViewCount); those of PipelineFactory, where a Gpu error is an out-of-memory
-		// creation, which the caller turns into FatalError(OutOfMemory) (§8.14 item 7). Nothing is kept on failure, so a later
-		// call tries again.
+		// pipelines for (not below RenderDebugViewCount); InvalidState between ReleaseGpuObjects and CreatePipelines (a
+		// programmer error, also asserted); those of PipelineFactory, where a Gpu error is an out-of-memory creation, which
+		// the caller turns into FatalError(OutOfMemory) (§8.14 item 7), or on a lost device the loss (M18, C18.3 decision 28).
+		// Nothing is kept on failure, so a later call tries again.
 		[[nodiscard]] Status EnsureDebugView(RenderDebugView view);
 
 		// Actual pipelines created so far: startup plus each lazily created material-view family, counted once.
@@ -278,12 +279,14 @@ namespace Engine {
 		// match the scene resolution (M18: RenderOutputSettings, the renderer's size by default); a different one renders at
 		// the scene resolution with the snapshot's projection. Uploads
 		// the assets it needs through the GpuResourceCache first, and creates a debug view's pipelines the first time it is
-		// asked for (SceneRendererPipelines::EnsureDebugView; a Gpu error there is FatalError(OutOfMemory), §8.14 item 7).
+		// asked for (SceneRendererPipelines::EnsureDebugView; a Gpu error there is FatalError(OutOfMemory), §8.14 item 7,
+		// except on a lost device, where it is the loss and returned, M18 C18.3 decision 28).
 		// Afterwards GetFinalTexture holds the image.
 		// Errors returned before recording (nothing recorded, no OnSubmitted needed): InvalidState while the previous Render
-		// awaits its OnSubmitted (also asserted); InvalidArgument for a debug view outside RenderDebugView or a
+		// awaits its OnSubmitted (also asserted), or between the pipeline set's ReleaseGpuObjects and its CreatePipelines (a
+		// programmer error, also asserted); InvalidArgument for a debug view outside RenderDebugView or a
 		// Quality.ShadowMapSize that is not a power of two in [256, 8192]; a debug view's pipeline error other than Gpu (an
-		// invalid shader). Partial errors (the view is still recorded, the first error is returned): InvalidArgument for a
+		// invalid shader), or its Gpu error on a lost device. Partial errors (the view is still recorded, the first error is returned): InvalidArgument for a
 		// non-finite camera matrix (the view clears as without a camera) or world matrix (that draw is skipped, the error
 		// names the entity), or invalid wireframe, overlay or selection data; Gpu when a binding set or a lazily created
 		// target cannot be created. Data the schemas accept is never a render error: a missing asset draws its placeholder, a
