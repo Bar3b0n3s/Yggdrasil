@@ -95,9 +95,11 @@ namespace Engine {
 		// and fails, leaving the project closed, naming every file that does not load: one with an unknown key, field or
 		// component, and equally one with a structural defect, one that cannot be read or parsed, or one whose Version is
 		// newer than this build reads, since CI wants every committed scene and prefab to load strictly (the M15 fix review's
-		// C2); and the editor's own loads of scene files (scene.open and the methods that reopen a scene file, the exporter's
-		// scene loads) are strict too. Off: unknown keys, fields and components are warnings, and the scenes and prefabs are
-		// not loaded when the project opens.
+		// C2); the editor's own loads of scene files (scene.open and the methods that reopen a scene file, the exporter's
+		// scene loads) are strict too; and a settings patch (ProjectSettingsCommand::CreateFromPatch: project.setSettings, the
+		// inspector, the validator's fixes) naming a member the settings do not have is refused instead of dropped with a
+		// warning (M19). Off: unknown keys, fields and components are warnings, and the scenes and prefabs are not loaded when
+		// the project opens.
 		bool StrictUnknowns = false;
 		// --upgrade (Docs/Decisions/0026-m16-contract.md decision 11): OpenProject mounts project:// and cache://, loads the
 		// provenance and stops before the asset scan, so opening the project writes nothing. The script services, creating

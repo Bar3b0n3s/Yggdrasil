@@ -415,14 +415,14 @@ Example: Describe the RigidBody component.
 
 ### docs.get
 
-Serves the agent documentation: without a topic the list of topics (skills, the generated reference and JSON schemas, the script declarations and the script templates); with one its text, one section of it (section, or "\<topic>#\<section>", by heading text or anchor), one page (offset, length) or with toc only its section list with sizes. A text too large to return inline comes back as its first page with nextOffset and its list of sections.
+Serves the agent documentation: without a topic the list of topics (skills, the generated reference and JSON schemas, the script declarations, the script templates and the native module's interface); with one its text, one section of it (section, or "\<topic>#\<section>", by heading text or anchor), one page (offset, length) or with toc only its section list with sizes. A text too large to return inline comes back as its first page with nextOffset and its list of sections.
 
 - Flags: tool `docs_get`, launcher, batch
 - Timeout: 60 s
 
 | Param | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `topic` | `String` |  | `""` | The topic, such as "skills/game-building", "reference/ScriptAPI", "reference/Schemas/Scene", "scripting/Engine.d.luau" or "templates/Scripts/Behaviour"; a "#\<section>" suffix selects a section like section; empty for the list of topics. |
+| `topic` | `String` |  | `""` | The topic, such as "skills/game-building", "reference/ScriptAPI", "reference/Schemas/Scene", "scripting/Engine.d.luau", "templates/Scripts/Behaviour" or "native/NativeApi.h"; a "#\<section>" suffix selects a section like section; empty for the list of topics. |
 | `section` | `String` |  | `""` | A section of the topic: a Markdown heading, or a top-level declaration of a .d.luau topic ("Entity"). Named by the heading's exact text ("Test.Suite"), by that text without a trailing parenthesized qualifier ("TestSuite" for "TestSuite (type)"), or by its anchor (the text lowercased, spaces as '-', other ASCII punctuation removed, "-1" added to a repeat: "testsuite-type"), tried in that order; a text several headings share is refused with their anchors. The result is the section with its subsections. |
 | `offset` | `UInt32` |  | `0` | Where the page starts, in bytes of the topic's (or the section's) text: 0, or the previous page's nextOffset. |
 | `length` | `UInt32` |  | `32768` | The most bytes of text to return (the default is the most). A page ends after a line break when one falls inside it. |
@@ -1848,7 +1848,7 @@ Example: Save everything unsaved.
 
 ### project.setSettings
 
-Applies an RFC 7386 merge patch to the project settings as one undoable command, which writes the .eproj.
+Applies an RFC 7386 merge patch to the project settings as one undoable command, which writes the .eproj. A member the settings do not have is dropped and named in warnings; a --strict editor refuses it.
 
 - Flags: tool `project_set_settings`, mutates, dry run, batch
 - Timeout: 60 s
@@ -1862,6 +1862,7 @@ Applies an RFC 7386 merge patch to the project settings as one undoable command,
 |---|---|---|
 | `settings` | `ProjectSettings` | The settings after the patch. |
 | `undoIndex` | `UInt32` | The command's undo index; 0 in a dry run or a batch. |
+| `warnings` | `Array<String>` | Each warning of the patch's read, "\<pointer>: \<message>" with a did-you-mean hint when one is close: a member the settings do not have (a null one included), which was dropped, or a Variant value that does not resolve or match its schema, which was kept as written (a --strict editor refuses the patch instead). |
 
 Example: Name the window and set the start scene.
 

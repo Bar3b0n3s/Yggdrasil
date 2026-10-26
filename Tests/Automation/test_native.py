@@ -95,12 +95,11 @@ class NativeModuleTests(AutomationTestCase):
         discovered = json.dumps(client.call("rpc.discover", {}))
         self.assertNotIn("allowNativeCode", discovered)
         self.assertNotIn("AllowNativeCode", discovered)
-        # The .eproj has no such member: a non-strict editor drops it as an unknown member (a --strict one refuses it),
-        # and the project's settings never hold it.
-        try:
-            client.call("project.setSettings", {"patch": {"AllowNativeCode": True}})
-        except engine_client.EngineError:
-            pass
+        # The .eproj has no such member: a non-strict editor drops it and names it in its warnings (a --strict one
+        # refuses it), and the project's settings never hold it.
+        patched = client.call("project.setSettings", {"patch": {"AllowNativeCode": True}})
+        self.assertTrue(any(warning.startswith("/patch/AllowNativeCode: ") for warning in patched["warnings"]),
+                        patched["warnings"])
         self.assertNotIn("AllowNativeCode", json.dumps(client.call("project.getSettings")))
         self.assertFalse(client.call("native.status")["allowed"])
         # The editor's own writes of user://Editor.json (the recent projects) never add the preference.

@@ -15,6 +15,7 @@ Everything a builder reads is served by `docs_get`, which needs a connected edit
 - **Reference:** `reference/Automation` (every method with its params and results), `reference/Components` (every component field with its range and default), `reference/FileFormats`, `reference/Validation`, `reference/ScriptAPI` and `reference/BuiltinAssets` (every `engine://` asset).
 - **JSON schemas** of the file formats: `reference/Schemas/<Format>`, such as `reference/Schemas/Project` (every `.eproj` field) or `reference/Schemas/SoundEffect`.
 - **Scripting:** `scripting/Engine.d.luau` (the declarations the type checker uses) and the script templates `templates/Scripts/Behaviour`, `templates/Scripts/Module` and `templates/Scripts/Test`.
+- **Native module:** `native/NativeApi.h`, the C++ interface a game's module includes ("4. Scripts").
 - **Long topics:** a topic too large for one response comes back as its first page with `nextOffset` and its list of sections. `{topic, toc: true}` returns only the list, each section's `title`, `anchor`, `level`, `offset` and `bytes` (add `section` for its subsections). Ask for one section by its heading's exact text or its anchor (`{topic, section: "Input"}`, `"reference/ScriptAPI#input"`); a heading sharing its name with another carries its kind (`"Script (component)"` beside the `Script` global, `"TestSuite (type)"` beside `Test.Suite`), which the plain name finds when no heading is exactly that name (`"TestSuite"`). Page on with `{topic, offset: <nextOffset>, length?}`.
 - **One method's JSON schemas:** `engine_call {method: "rpc.discover", params: {method: "prefab.instantiate"}}`.
 
@@ -39,7 +40,7 @@ Architecture sections cited below (§13.12 is the demo acceptance rule) and the 
 
 ## 2. Project settings
 
-`project_set_settings {patch}` applies an RFC 7386 merge patch to the `.eproj` as one undoable command. Objects merge key by key; **arrays replace whole** (restate the full `Layers`, `Collisions`, `BuildScenes`, `Suites` or `Replays` list each time).
+`project_set_settings {patch}` applies an RFC 7386 merge patch to the `.eproj` as one undoable command; a member the settings lack is dropped and named in `warnings`. Objects merge key by key; **arrays replace whole** (restate the full `Layers`, `Collisions`, `BuildScenes`, `Suites` or `Replays` list each time).
 
 ```json
 {"patch": {
@@ -117,7 +118,7 @@ Each entry is `{Script, Scene?, Parameters?, Isolation?, Clock?, Overrides?, Exp
 - `script_write` replaces the whole file. Keep scripts small modules (rules in a Module, the behaviour that drives them in another) so each write stays short.
 - Attach a behaviour with `entity_update {entity, components: {Script: {Script: "Assets/Scripts/Game.luau", Fields: {...}}}}`. The call refuses an override that names no declared field or has the wrong type or range (InvalidParams at `/components/Script/Fields/<Name>`), so success means every override matched; `project_validate` reports such overrides already in files (`SCRIPT_UNKNOWN_FIELD_OVERRIDE`, `SCRIPT_FIELD_TYPE_MISMATCH`).
 - Keep pure logic (boards, scoring, kick tables, and the spawn rules: bag, hold, top-out, levels) in Modules without engine calls, so the empty-scene suites test it. The behaviour reads input, calls them and mirrors their state into components (cells' active flags and materials, HUD `Text`), which the state hash and the replays see.
-- **A native C++ module** (Windows, only while the user's "Allow native code" preference is on; no tool sets it): `native_write` its `.cpp` and `.h` files below `Native/` (one includes the engine's `NativeApi.h`, as `native.write`'s example in `rpc.discover` spells it, and names `ENGINE_NATIVE_MODULE`), `native_build`, `native_load`, then `native_set_components {entity, components: {"Native.<Name>": {...}}}`. `game-debugging` ("Native module") has the rules.
+- **A native C++ module** (Windows, only while the user's "Allow native code" preference is on; no tool sets it): `native_write` its `.cpp` and `.h` files below `Native/` (one includes the engine's `NativeApi.h`, the topic `native/NativeApi.h`, as `native.write`'s example in `rpc.discover` spells it, and names `ENGINE_NATIVE_MODULE`), `native_build`, `native_load`, then `native_set_components {entity, components: {"Native.<Name>": {...}}}`. `game-debugging` ("Native module") has the rules.
 
 ## 5. Verify deterministically
 

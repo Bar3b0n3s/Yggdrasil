@@ -36,7 +36,9 @@ namespace Engine {
 	//   - "reference/Schemas/<Name>": Docs/Reference/Schemas/<Name>.schema.json (the generated JSON schemas);
 	//   - "scripting/<name>.d.luau": Resources/Scripting/<name>.d.luau (the generated script declarations,
 	//     "scripting/Engine.d.luau");
-	//   - "templates/Scripts/<Name>": Resources/Templates/Scripts/<Name>.luau (the templates of script.create).
+	//   - "templates/Scripts/<Name>": Resources/Templates/Scripts/<Name>.luau (the templates of script.create);
+	//   - "native/NativeApi.h": Engine/Source/Engine/Native/NativeApi.h, the interface of a game's native module, the one
+	//     engine header its sources include (Docs/Decisions/0030-m19-contract.md decision 26), as plain text.
 	// Sections: the headings of a Markdown topic ("#" to "######" outside code fences), each with its text up to the next
 	// heading of the same or a higher level, and the top-level declarations of a .d.luau topic ("declare ..." with the
 	// comment lines above it, adjacent declarations of one name together; a name declared again further on titles its
@@ -65,9 +67,11 @@ namespace Engine {
 	// Registry struct "DocsTopic".
 	struct DocsTopic
 	{
-		std::string Name{};  // "skills/game-building"
-		std::string Title{}; // the skill's description, the document's first heading or the schema's description
-		uint32_t Bytes = 0;  // the size of the topic's file
+		std::string Name{}; // "skills/game-building"
+		// A skill's description, a reference document's first heading, a schema's description, or the summary of the script
+		// declarations, a script template or the native module's interface.
+		std::string Title{};
+		uint32_t Bytes = 0; // the size of the topic's file
 	};
 
 	// Registry struct "DocsSection": one section of a page's section list.

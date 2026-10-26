@@ -1818,7 +1818,7 @@
 		{
 			"name": "docs.get",
 			"domain": "docs",
-			"description": "Serves the agent documentation: without a topic the list of topics (skills, the generated reference and JSON schemas, the script declarations and the script templates); with one its text, one section of it (section, or \"<topic>#<section>\", by heading text or anchor), one page (offset, length) or with toc only its section list with sizes. A text too large to return inline comes back as its first page with nextOffset and its list of sections.",
+			"description": "Serves the agent documentation: without a topic the list of topics (skills, the generated reference and JSON schemas, the script declarations, the script templates and the native module's interface); with one its text, one section of it (section, or \"<topic>#<section>\", by heading text or anchor), one page (offset, length) or with toc only its section list with sizes. A text too large to return inline comes back as its first page with nextOffset and its list of sections.",
 			"exposeAsTool": true,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -1834,7 +1834,7 @@
 				"type": "object",
 				"properties": {
 					"topic": {
-						"description": "The topic, such as \"skills/game-building\", \"reference/ScriptAPI\", \"reference/Schemas/Scene\", \"scripting/Engine.d.luau\" or \"templates/Scripts/Behaviour\"; a \"#<section>\" suffix selects a section like section; empty for the list of topics.",
+						"description": "The topic, such as \"skills/game-building\", \"reference/ScriptAPI\", \"reference/Schemas/Scene\", \"scripting/Engine.d.luau\", \"templates/Scripts/Behaviour\" or \"native/NativeApi.h\"; a \"#<section>\" suffix selects a section like section; empty for the list of topics.",
 						"type": "string"
 					},
 					"section": {
@@ -1940,7 +1940,7 @@
 								"type": "string"
 							},
 							"title": {
-								"description": "A skill's description, a reference document's first heading or a schema's description.",
+								"description": "A skill's description, a reference document's first heading, a schema's description, or a summary of the script declarations, a script template or the native module's interface.",
 								"type": "string"
 							},
 							"bytes": {
@@ -12660,7 +12660,7 @@
 		{
 			"name": "project.setSettings",
 			"domain": "project",
-			"description": "Applies an RFC 7386 merge patch to the project settings as one undoable command, which writes the .eproj.",
+			"description": "Applies an RFC 7386 merge patch to the project settings as one undoable command, which writes the .eproj. A member the settings do not have is dropped and named in warnings; a --strict editor refuses it.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": true,
@@ -12707,6 +12707,13 @@
 						"type": "integer",
 						"minimum": 0,
 						"maximum": 4294967295
+					},
+					"warnings": {
+						"description": "Each warning of the patch's read, \"<pointer>: <message>\" with a did-you-mean hint when one is close: a member the settings do not have (a null one included), which was dropped, or a Variant value that does not resolve or match its schema, which was kept as written (a --strict editor refuses the patch instead).",
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
 					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",

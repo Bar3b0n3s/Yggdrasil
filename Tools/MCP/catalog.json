@@ -294,7 +294,7 @@
 		{
 			"name": "docs_get",
 			"method": "docs.get",
-			"description": "Serves the agent documentation: without a topic the list of topics (skills, the generated reference and JSON schemas, the script declarations and the script templates); with one its text, one section of it (section, or \"<topic>#<section>\", by heading text or anchor), one page (offset, length) or with toc only its section list with sizes. A text too large to return inline comes back as its first page with nextOffset and its list of sections.",
+			"description": "Serves the agent documentation: without a topic the list of topics (skills, the generated reference and JSON schemas, the script declarations, the script templates and the native module's interface); with one its text, one section of it (section, or \"<topic>#<section>\", by heading text or anchor), one page (offset, length) or with toc only its section list with sizes. A text too large to return inline comes back as its first page with nextOffset and its list of sections.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "DocsGetParams",
@@ -302,7 +302,7 @@
 				"type": "object",
 				"properties": {
 					"topic": {
-						"description": "The topic, such as \"skills/game-building\", \"reference/ScriptAPI\", \"reference/Schemas/Scene\", \"scripting/Engine.d.luau\" or \"templates/Scripts/Behaviour\"; a \"#<section>\" suffix selects a section like section; empty for the list of topics.",
+						"description": "The topic, such as \"skills/game-building\", \"reference/ScriptAPI\", \"reference/Schemas/Scene\", \"scripting/Engine.d.luau\", \"templates/Scripts/Behaviour\" or \"native/NativeApi.h\"; a \"#<section>\" suffix selects a section like section; empty for the list of topics.",
 						"type": "string"
 					},
 					"section": {
@@ -1811,7 +1811,7 @@
 		{
 			"name": "project_set_settings",
 			"method": "project.setSettings",
-			"description": "Applies an RFC 7386 merge patch to the project settings as one undoable command, which writes the .eproj.",
+			"description": "Applies an RFC 7386 merge patch to the project settings as one undoable command, which writes the .eproj. A member the settings do not have is dropped and named in warnings; a --strict editor refuses it.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "ProjectSetSettingsParams",

@@ -46,8 +46,10 @@ namespace Engine {
 		// --strict (§6 "Strict reader"; the M15 completion review's A024): every project this editor opens, through --project,
 		// project.open, project.create or recovery, is read strictly: unknown keys in the .eproj, and unknown keys, fields
 		// and components (and unresolvable or mismatching script field values) in its scenes and prefabs, are errors
-		// instead of warnings (EditorContextSpecification::StrictUnknowns). CI's feature, determinism and export runs pass
-		// it over the committed FeatureTest. Combines with every other option.
+		// instead of warnings (EditorContextSpecification::StrictUnknowns), and a settings patch
+		// (ProjectSettingsCommand::CreateFromPatch: project.setSettings, the inspector) naming a member the settings do not
+		// have is refused instead of dropped with a warning. CI's feature, determinism and export runs pass it over the
+		// committed FeatureTest. Combines with every other option.
 		bool Strict = false;
 		// M19 --headless-game-view (Docs/Decisions/0030-m19-contract.md decision 11, R-SOAK), only with the engine option
 		// --headless (InvalidArgument otherwise): the headless editor renders the Game view every frame as if its panel were

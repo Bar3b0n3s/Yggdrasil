@@ -13,6 +13,11 @@
 // (ReplaceCubics) and runs stb_truetype's own solver over the result (ComputeGlyphSdf, the body of stbtt_GetGlyphSDF with
 // the vertices passed in, calling its winding and cubic-root helpers), so a TrueType glyph's field is stbtt_GetGlyphSDF's
 // byte for byte.
+//
+// Without stb_rect_pack.h, stb_truetype defines minimal stand-ins of stb_rect_pack's types for its packing API, which the
+// engine never calls, while imgui_draw.cpp defines Dear ImGui's real stb_rect_pack types (imstb_rectpack.h) under the same
+// names: two different definitions of one class type, which the one-definition rule forbids. The renames below give the
+// stand-ins names of their own, so no other unit defines them (Vendor/stb/VENDOR.md, "stb_truetype").
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #define STBTT_STATIC
@@ -20,6 +25,9 @@
 #define STBTT_pow(x, y) ::Engine::DetMath::Pow(x, y)
 #define STBTT_cos(x) ::Engine::DetMath::Cos(x)
 #define STBTT_acos(x) ::Engine::DetMath::ACos(x)
+#define stbrp_context stbtt_engine_stand_in_rp_context
+#define stbrp_node stbtt_engine_stand_in_rp_node
+#define stbrp_rect stbtt_engine_stand_in_rp_rect
 
 #include "Engine/AssetPipeline/Private/TrueTypeFont.h"
 

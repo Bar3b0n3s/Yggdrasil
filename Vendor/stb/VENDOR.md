@@ -67,17 +67,24 @@ the `ThirdParty` filter of `Engine/premake5.lua`):
 #define STBTT_pow(x, y) ::Engine::DetMath::Pow(x, y)
 #define STBTT_cos(x) ::Engine::DetMath::Cos(x)
 #define STBTT_acos(x) ::Engine::DetMath::ACos(x)
+#define stbrp_context stbtt_engine_stand_in_rp_context
+#define stbrp_node stbtt_engine_stand_in_rp_node
+#define stbrp_rect stbtt_engine_stand_in_rp_rect
 #include <stb_truetype.h>
 ```
 
 - `STBTT_STATIC` gives every function internal linkage, so this copy never clashes with Dear ImGui's, which
   `imgui_draw.cpp` also compiles with `STBTT_STATIC`. Both copies define the same `stbtt_*` types (`stbtt_fontinfo`,
   `stbtt_vertex`, ...) in the global namespace, so their definitions must stay identical (the one-definition rule): they
-  are, at this commit and Dear ImGui 1.92.9b (see Updating). The rasterizer's unit includes no stb_rect_pack, so the
-  header also defines its minimal stand-ins for `stbrp_context`, `stbrp_node` and `stbrp_rect` (for the packing API,
-  which the engine never calls), while `imgui_draw.cpp` includes Dear ImGui's `imstb_rectpack.h` first and gets that
-  library's definitions under the same names. The two units have differed this way since M6, when the rasterizer
-  compiled Dear ImGui's copy; no function with external linkage takes those types.
+  are, at this commit and Dear ImGui 1.92.9b (see Updating).
+- The rasterizer's unit includes no stb_rect_pack, so the header also defines its minimal stand-ins for `stbrp_context`,
+  `stbrp_node` and `stbrp_rect` (for the packing API, which the engine never calls), while `imgui_draw.cpp` includes
+  Dear ImGui's `imstb_rectpack.h` first and defines that library's real types under the same names. Two different
+  definitions of one class type break the one-definition rule, as these did from M6, when the rasterizer compiled Dear
+  ImGui's copy, until M19, so the rasterizer's unit renames the three stand-ins before the include (the
+  `#define stbrp_...` lines above, which `.clang-tidy`'s macro-naming exception lists): their definitions take names no
+  other unit defines, and the header itself is unchanged. `stbrp_coord` (a typedef of `int`, whatever the unit) and the
+  stand-ins' functions (static, so internal to the unit) need no rename.
 - The `pow`, `cos` and `acos` of the distance-field solver go through DetMath (Architecture §4.12), so a glyph's field
   does not depend on the C runtime; `sqrt`, `fabs`, `fmod`, `floor` and `ceil` are IEEE-exact and keep their defaults.
 - `STBTT_assert` stays `assert`, active in Debug and Release. The library reads fonts without bounds checks and asserts
@@ -157,7 +164,8 @@ stb has no releases; pin a `master` commit.
 3. Replace `stb_image.h`, `stb_image_write.h`, `stb_image_resize2.h`, `stb_truetype.h`, `stb_vorbis.c`, `LICENSE`. Compare
    `stb_vorbis.c` with the `extras/stb_vorbis.c` of the vendored miniaudio release and record any difference here.
    Compare `stb_truetype.h` with the vendored Dear ImGui's `imstb_truetype.h`, whose type definitions it must keep (see
-   stb_truetype above), and follow any change to what the font validation guards (`TrueTypeTables.cpp`: the glyph
+   stb_truetype above), check that the class types its stb_rect_pack stand-ins define are still exactly the three the
+   rasterizer renames, and follow any change to what the font validation guards (`TrueTypeTables.cpp`: the glyph
    outlines, the CFF structures and the charstring interpreter) or to `stbtt_GetGlyphSDF` in the validation and the
    rasterizer.
 4. Ensure LF line endings (clone with `-c core.autocrlf=false`); note the new header version numbers from the first line of each header.

@@ -7,7 +7,7 @@ import json
 import math
 import unittest
 
-from harness import REPOSITORY_ROOT, AutomationTestCase, engine_client
+from harness import DEFAULT_PROJECT_NAME, REPOSITORY_ROOT, AutomationTestCase, engine_client
 
 
 def euler_degrees_to_quaternion(x: float, y: float, z: float) -> tuple[float, float, float, float]:
@@ -150,6 +150,31 @@ class MethodTests(AutomationTestCase):
         self.assertEqual(opened["project"]["root"], root.as_posix())
         self.assertEqual(reopened.call("scene.open", {"path": "Assets/Scenes/Main.scene"})["scene"]["entityCount"], 1)
 
+    def test_project_set_settings_names_a_dropped_member_and_a_strict_editor_refuses_it(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md "Integration of W19.2": a member the settings do not have was dropped
+        # with a warning nothing returned, so a mistyped key was lost without a word.
+        client, root = self.open_editor_with_scene()
+        patched = client.call("project.setSettings", {"patch": {"Window": {"Titel": "Tetris", "Width": 800}}})
+        self.assertEqual(patched["settings"]["Window"]["Width"], 800)
+        self.assertEqual(len(patched["warnings"]), 1, patched["warnings"])
+        self.assertTrue(patched["warnings"][0].startswith("/patch/Window/Titel: "), patched["warnings"])
+        self.assertIn("'Title'", patched["warnings"][0])
+        self.assertNotIn("Titel", (root / f"{DEFAULT_PROJECT_NAME}.eproj").read_text(encoding="utf-8"))
+        self.assertEqual(client.call("project.setSettings", {"patch": {"Window": {"Title": "Tetris"}}})["warnings"], [])
+        # A mistyped reset (a null member) is named too, although the merge itself would erase it unread.
+        reset = client.call("project.setSettings", {"patch": {"Window": {"Titel": None}}})
+        self.assertEqual(len(reset["warnings"]), 1, reset["warnings"])
+        self.assertTrue(reset["warnings"][0].startswith("/patch/Window/Titel: "), reset["warnings"])
+        self.assertEqual(reset["settings"]["Window"]["Title"], "Tetris")
+
+        strict = self.connect(self.start_editor(["--strict"]))
+        self.create_project(strict, "StrictProject")
+        with self.assertRaises(engine_client.EngineError) as refused:
+            strict.call("project.setSettings", {"patch": {"Window": {"Titel": "Tetris", "Width": 800}}})
+        self.assert_engine_error(refused.exception, engine_client.VALIDATION_FAILED, "Validation")
+        self.assertIn("/patch/Window/Titel", [issue.get("pointer") for issue in refused.exception.issues])
+        self.assertNotEqual(strict.call("project.getSettings")["settings"]["Window"]["Width"], 800)
+
     def test_rpc_discover_matches_the_dumped_catalogue(self) -> None:
         client, _ = self.open_editor_with_scene()
         discovered = {method["name"] for method in engine_client.load_offloaded(client.call("rpc.discover"))["methods"]}
@@ -200,6 +225,23 @@ class MethodTests(AutomationTestCase):
         with self.assertRaises(engine_client.EngineError) as missing:
             client.call("docs.get", {"topic": "reference/ScriptAPI", "section": "no such section"})
         self.assert_engine_error(missing.exception, engine_client.NOT_FOUND, "NotFound")
+
+    def test_docs_get_serves_the_native_module_interface(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 26: a builder reads only what docs.get serves, and a native
+        # module's sources include NativeApi.h, so the header is a topic of its own; no other engine header is one.
+        client = self.connect(self.start_editor())
+        topics = {topic["name"]: topic for topic in client.call("docs.get")["topics"]}
+        self.assertIn("native/NativeApi.h", topics)
+        header = (REPOSITORY_ROOT / "Engine" / "Source" / "Engine" / "Native" / "NativeApi.h").read_bytes()
+        self.assertEqual(topics["native/NativeApi.h"]["bytes"], len(header))
+        served = client.call("docs.get", {"topic": "native/NativeApi.h"})
+        self.assertEqual(served["path"], "Engine/Source/Engine/Native/NativeApi.h")
+        self.assertEqual(served["nextOffset"], 0)
+        self.assertEqual(served["content"].encode("utf-8"), header)
+        self.assertIn("ENGINE_NATIVE_MODULE", served["content"])
+        with self.assertRaises(engine_client.EngineError) as other:
+            client.call("docs.get", {"topic": "native/NativeModule.h"})
+        self.assert_engine_error(other.exception, engine_client.NOT_FOUND, "NotFound")
 
     def test_docs_get_lists_sections_with_toc_and_finds_them_by_heading_text(self) -> None:
         # Docs/Decisions/0026-m16-contract.md, friction S2-05: the section list cost a 32 KB first page, and a section

@@ -530,6 +530,42 @@ namespace Engine {
 				CHECK_MESSAGE(client.Call("docs.get", Json{ { "topic", topic } }).error().GetCode() == ErrorCode::NotFound, topic);
 		}
 
+		// Docs/Decisions/0030-m19-contract.md decision 26 and "Integration of W19.2": a builder reads only what docs.get serves,
+		// so the native module's interface is a topic; no other engine header is one.
+		TEST_CASE("ObserveMethods: docs.get serves the native module's interface and no other engine header")
+		{
+			Test::EditorTestFixture fixture("DocsNativeApi");
+			const std::filesystem::path root = fixture.GetDirectory() / "Docs";
+			constexpr std::string_view Interface = "#pragma once\n\n// The interface of a game's native gameplay module.\nnamespace Engine {}\n";
+			WriteDocsFile(root, "Engine/Source/Engine/Native/NativeApi.h", Interface);
+			WriteDocsFile(root, "Engine/Source/Engine/Native/NativeModule.h", "#pragma once\n");
+			{
+				Test::AutomationTestClient client(fixture.GetEditor(), MakeDocsSpecification(root));
+				const Json listed = CallDocs(client, Json::object());
+				REQUIRE(listed["topics"].size() == 1);
+				CHECK(listed["topics"][0]["name"] == Json("native/NativeApi.h"));
+				CHECK(listed["topics"][0]["bytes"] == Json(Interface.size()));
+				CHECK(JsonReader(listed["topics"][0]).ReadMember<std::string>("title").value_or(std::string()).contains("native"));
+
+				const Json topic = CallDocs(client, Json{ { "topic", "native/NativeApi.h" } });
+				CHECK(ReadContent(topic) == Interface);
+				CHECK(topic["path"] == Json("Engine/Source/Engine/Native/NativeApi.h"));
+				CHECK(topic["nextOffset"] == Json(0));
+				CHECK(CallDocs(client, Json{ { "topic", "native/NativeApi.h" }, { "toc", true } })["sections"].empty());
+				for (const std::string_view other : { "native/NativeModule.h", "native/../Native/NativeApi.h", "native/NativeApi", "native/nativeapi.h" })
+					CHECK_MESSAGE(client.Call("docs.get", Json{ { "topic", other } }).error().GetCode() == ErrorCode::NotFound, other);
+			}
+
+			// The repository's topic is the engine's header itself.
+			Test::AutomationTestClient repository(fixture.GetEditor());
+			const auto header = FileSystem::ReadText(Test::GetRepositoryRoot() / "Engine" / "Source" / "Engine" / "Native" / "NativeApi.h");
+			REQUIRE(header.has_value());
+			const Json served = CallDocs(repository, Json{ { "topic", "native/NativeApi.h" } });
+			CHECK(served["nextOffset"] == Json(0));
+			CHECK(ReadContent(served) == *header);
+			CHECK(ReadContent(served).contains("ENGINE_NATIVE_MODULE"));
+		}
+
 		// Friction S1-01: reference/Automation, reference/ScriptAPI and reference/Components were over the offload threshold
 		// and came back as one offloaded line. Every topic of the repository now comes back inline: whole, or as its first page
 		// with the next offset and its sections.
@@ -540,7 +576,7 @@ namespace Engine {
 			const Json listed = CallDocs(client, Json::object());
 			// reference/BuiltinAssets: M17 friction F02 (the built-in assets, generated from Resources/EngineAssets.json).
 			for (const std::string_view required : { "reference/Schemas/Scene", "scripting/Engine.d.luau", "templates/Scripts/Behaviour", "reference/ScriptAPI",
-					 "reference/BuiltinAssets" })
+					 "reference/BuiltinAssets", "native/NativeApi.h" })
 				CHECK_MESSAGE(listed["topics"].dump().contains(std::format("\"{}\"", required)), required);
 			for (const Json& topic : listed["topics"])
 			{
@@ -550,7 +586,8 @@ namespace Engine {
 				if (first["nextOffset"] != Json(0))
 				{
 					CHECK(first["offset"] == Json(0));
-					if (!name.starts_with("reference/Schemas/"))
+					// The plain-text topics (the schemas, the native module's interface) have no sections.
+					if (!name.starts_with("reference/Schemas/") && name != "native/NativeApi.h")
 						CHECK_FALSE(first["sections"].empty());
 				}
 			}
@@ -620,7 +657,7 @@ namespace Engine {
 					if (word.contains('<') || word.contains('>'))
 						continue;
 					const std::string_view first = std::string_view(word).substr(0, word.find('/'));
-					if (first == "skills" || first == "reference" || first == "scripting" || first == "templates")
+					if (first == "skills" || first == "reference" || first == "scripting" || first == "templates" || first == "native")
 					{
 						if (word.ends_with('/'))
 							continue; // a prefix of topic names

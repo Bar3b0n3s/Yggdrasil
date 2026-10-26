@@ -77,8 +77,9 @@ CheckOptions:
   readability-identifier-naming.MacroDefinitionPrefix: ENGINE_
   readability-identifier-naming.MacroDefinitionCase: UPPER_CASE
   # Per-translation-unit switches that third-party headers read and that are meant to be defined in source, right
-  # before the include: doctest's runner, the stb and cgltf implementation translation units, GLFW's native-handle
-  # declarations and Dear ImGui's vector operators. ABI-relevant configuration macros (JPH_*, SPDLOG_*, VULKAN_HPP_*,
+  # before the include: doctest's runner, the stb and cgltf implementation translation units (with the renames that give
+  # stb_truetype's stb_rect_pack stand-ins names of their own, Vendor/stb/VENDOR.md), GLFW's native-handle declarations
+  # and Dear ImGui's vector operators. ABI-relevant configuration macros (JPH_*, SPDLOG_*, VULKAN_HPP_*,
   # NDEBUG, GLM_*, JSON_*, ...) are not listed: they are set in premake only, and Scripts/Lint.py bans defining them
   # in source (banned-abi-macro, Architecture section 2.2).
-  readability-identifier-naming.MacroDefinitionIgnoredRegexp: '^(DOCTEST_CONFIG_[A-Z0-9_]+|STB_[A-Z0-9_]+_IMPLEMENTATION|STBTT_[A-Za-z0-9_]+|CGLTF_IMPLEMENTATION|CGLTF_WRITE_IMPLEMENTATION|GLFW_EXPOSE_NATIVE_[A-Z0-9_]+|IMGUI_DEFINE_MATH_OPERATORS)$'
+  readability-identifier-naming.MacroDefinitionIgnoredRegexp: '^(DOCTEST_CONFIG_[A-Z0-9_]+|STB_[A-Z0-9_]+_IMPLEMENTATION|STBTT_[A-Za-z0-9_]+|stbrp_(context|node|rect)|CGLTF_IMPLEMENTATION|CGLTF_WRITE_IMPLEMENTATION|GLFW_EXPOSE_NATIVE_[A-Z0-9_]+|IMGUI_DEFINE_MATH_OPERATORS)$'

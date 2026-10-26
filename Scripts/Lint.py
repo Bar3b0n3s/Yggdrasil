@@ -10,9 +10,10 @@ Steps, selected with --steps (default: all, in this order):
             from an include root, quotes only for repository headers, no .cpp except the vendored implementation
             sources ModuleRules.json's SourceIncludes grants one file each, no precompiled header in a header,
             never inside a namespace). For the native modules of game projects (Projects/*/Native/ and
-            Tests/Projects/*/Native/; Docs/Decisions/0030-m19-contract.md decision 35): only .cpp and .h files
-            (native-file), and a source includes only Engine/Native/NativeApi.h, its module's own headers by their
-            project-relative path ("Native/Spinner.h"), glm and the standard library (native-include).
+            Tests/Projects/*/Native/; Docs/Decisions/0030-m19-contract.md decision 35): only .cpp and .h files,
+            beside the .bak backups the editor's writes keep (native-file), and a source includes only
+            Engine/Native/NativeApi.h, its module's own headers by their project-relative path ("Native/Spinner.h"),
+            glm and the standard library (native-include).
   banned    banned APIs and constructs: throw and the std::rethrow/throw_with_nested family; try/catch outside the
             boundary files of section 4.6; std::filesystem calls without an std::error_code; nlohmann json
             at()/get<>() outside Core/Json; CRT transcendental functions (also through namespace aliases) and glm
