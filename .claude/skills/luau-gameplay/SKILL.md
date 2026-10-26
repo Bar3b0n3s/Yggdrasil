@@ -190,9 +190,40 @@ Use `script.errors`, diagnostics and the structured test results to find authore
 
 ### Recording
 
-Start input recording at tick zero. Record through a recording suite and `test.run`'s record option (game-building §8), or `input.record`, then verify with `input.replay` and strict hash checking, twice. **During a recording, evaluate only reads.** A `script.eval`, `play.waitFor` or test case that calls a mutating engine API (an entity or component write, `SetActive`, a session `Random` draw, or `Scene.CreateEntity`, `Instantiate`, `Destroy` or `Load`; `Scene.FindByName` and the other `Scene` queries only read) invalidates the recording at once. A write to script tables only (`self.Lines = 5`, a board array) is neither detected nor recorded, so once it shows in the world or an expectation the recording no longer reproduces itself: `input.record`'s `stop` replays a recording with input events with its input and refuses it ("does not reproduce itself"), and an event-free recording, written as recorded, fails its first `input.replay {verify: true, strictHash: true}`. A test-driven recording is published only after an ordinary fresh replay reproduces every state-hash checkpoint and its final hash, and, with input events, either recording path refuses it when a run without them reproduces it too (game-building §7).
+Start input recording at tick zero. Record through a recording suite and `test.run`'s record option (game-building §8), or `input.record`, then verify with `input.replay` and strict hash checking, twice. **During a recording, evaluate only reads.** A `script.eval`, `play.waitFor` or test case that calls a mutating engine API (an entity or component write, `SetActive`, a session `Random` draw, or `Scene.CreateEntity`, `Instantiate`, `Destroy` or `Load`; `Scene.FindByName` and the other `Scene` queries only read) invalidates the recording at once. A write to script tables only (`self.Lines = 5`, a board array) is neither detected nor recorded, so once it shows in the world or an expectation the recording no longer reproduces itself: `input.record`'s `stop` replays every recording, an event-free one included, with its input and refuses it ("does not reproduce itself"). A test-driven recording is published only after an ordinary fresh replay reproduces every state-hash checkpoint and its final hash, and, with input events, either recording path refuses it when a run without them reproduces it too (game-building §7).
 
-A replay is recorded from a `Modes: ["Editor"]` suite whose single case only reads the scene and injects input, named so that no replay path contains its name (game-building §8). A case that taps planned actions at fixed ticks suits a falling-block opening; an **autopilot** steers where hand-written input is impractical, such as a physics ball following a level's `PathNode` waypoints with a PD controller:
+A replay is recorded from a `Modes: ["Editor"]` suite whose single case only reads the scene and injects input, named so that no replay path contains its name (game-building §8). A case that taps planned actions at fixed ticks suits a falling-block opening, recorded with `test.run {filter: "Record.Opening", record: "Assets/Tests/Replays/Opening.replay"}`:
+
+```luau path=Assets/Tests/Record/Opening.test.luau
+--!strict
+local GameScript = require("../../Scripts/Game")
+
+-- The planned input: one tap of each action at its tick, ticks increasing.
+type Tap = { Tick: number, Action: string }
+local Plan: { Tap } = {
+	{ Tick = 12, Action = "MoveLeft" },
+	{ Tick = 30, Action = "RotateCW" },
+	{ Tick = 48, Action = "HardDrop" },
+}
+
+return Test.Suite("Record.Opening", function()
+	Test.Case("plays the opening", function()
+		local found = Scene.FindByName("Game")
+		Test.Expect(found ~= nil, "Main.scene has a Game entity")
+		local game = (found :: Entity):GetScript() :: GameScript.Game
+		local tick = 0
+		for _, tap in Plan do
+			Test.WaitTicks(tap.Tick - tick)
+			tick = tap.Tick
+			Test.InjectAction(tap.Action, "Tap")
+		end
+		Test.WaitTicks(60)
+		Test.Expect(game.LockedCount >= 1, "the input locked a piece")
+	end)
+end)
+```
+
+An **autopilot** steers where hand-written input is impractical, such as a physics ball following a level's `PathNode` waypoints with a PD controller:
 
 ```luau path=Assets/Tests/Autopilot/Level1.test.luau
 --!strict
