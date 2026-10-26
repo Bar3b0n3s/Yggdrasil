@@ -119,6 +119,14 @@ namespace Engine {
 		// repeats validation when it writes, so permission or filesystem changes cannot bypass publication checks.
 		[[nodiscard]] virtual Result<std::string> ValidateReplayOutput(std::string_view path) const;
 		[[nodiscard]] virtual Result<std::string> WriteReplay(std::string_view path, const ReplayDocument& document);
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 14, input.readReplay): the source replay at `path` (a confined
+		// project path, as LoadReplay takes it) read strictly and migrated to the current version (ReplayFromText with
+		// strictUnknowns), with its file's own version in `report` and its canonical project-relative path in `canonicalPath`.
+		// The editor reads its project's .replay files; the default, the Runtime's, is Unsupported at /path ("the Runtime
+		// holds no replay sources: read the replay in the editor"), since a pak holds cooked replays only. Errors: NotFound
+		// for a missing file, InvalidArgument for a path outside the project, the reader's located Parse, Validation and
+		// UnsupportedVersion.
+		[[nodiscard]] virtual Result<ReplayDocument> ReadReplayDocument(std::string_view path, ReplayLoadReport& report, std::string& canonicalPath) const;
 
 		// Host-owned diagnostics outlive individual play/scene/edit-eval VMs. Cursor IDs remain monotonic across their
 		// replacement. The pointer is borrowed for this request only; null means no installed script-error service.
@@ -152,6 +160,16 @@ namespace Engine {
 		// user://Automation/Out/ with the same naming). `extension` is lowercase letters and digits without the dot. Errors:
 		// those of the writes.
 		[[nodiscard]] virtual Result<std::string> WriteOutputFile(std::string_view extension, std::span<const std::byte> bytes) = 0;
+
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 9, A-SHOTS): as WriteOutputFile, into the host's kept-files
+		// directory instead: project://Library/Automation/Kept/ (gitignored with Library/), or user://Automation/Kept/ without a
+		// writable project and in the Runtime. Its files take the output directory's naming (<pid>-<startSeconds>-<seq>, one
+		// sequence per server shared with WriteOutputFile, created exclusively), and no server ever removes them: neither the
+		// first write's pruning of dead servers' files nor a shutdown touches Kept/, so a screenshot outlives every later
+		// editor session (screenshot methods' keep: true). Kept/ is therefore the one automation output §13.4's bounded-output
+		// rule does not bound: it grows with every kept file until the user removes them (an accepted limit, Backlog §6).
+		// Errors: those of the writes.
+		[[nodiscard]] virtual Result<std::string> WriteKeptFile(std::string_view extension, std::span<const std::byte> bytes);
 
 		// --- The moved M4 to M6 domains (ADR 0012 decisions 12 and 21: added with their handlers) -----------------------
 

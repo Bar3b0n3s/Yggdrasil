@@ -306,6 +306,18 @@ namespace Engine {
 		return served != m_State->Entries.end() ? served->second.Entry->Path : std::string();
 	}
 
+	Result<uint64_t> RuntimeAssetManager::GetCookedHash(AssetHandle handle)
+	{
+		if (!handle.IsValid())
+			return MakeError(ErrorCode::InvalidArgument, "the null handle names no asset");
+		if (const BuiltinAssetEntry* builtin = Utils::FindProceduralBuiltin(handle))
+			return MakeError(ErrorCode::InvalidArgument, "the built-in '{}' is procedural: it has no cooked artifact", builtin->Path);
+		const auto served = m_State->Entries.find(handle);
+		if (served == m_State->Entries.end())
+			return MakeError(ErrorCode::NotFound, "unknown asset {}: no pak added to the runtime holds it", handle);
+		return served->second.Entry->Hash;
+	}
+
 	void RuntimeAssetManager::WaitIdle()
 	{
 		State& state = *m_State;

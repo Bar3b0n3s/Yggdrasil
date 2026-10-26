@@ -9,6 +9,7 @@
 #include "EditorCore/Automation/EditorMethods.h"
 #include "EditorCore/Automation/EntityMethods.h"
 #include "EditorCore/Automation/ExportMethods.h"
+#include "EditorCore/Automation/NativeMethods.h"
 #include "EditorCore/Automation/ObserveMethods.h"
 #include "EditorCore/Automation/PrefabMethods.h"
 #include "EditorCore/Automation/ProfilerMethods.h"
@@ -53,6 +54,8 @@ namespace Engine {
 		RegisterDebugMethodTypes(registry);
 		RegisterEditorScriptMethodTypes(registry);
 		RegisterTestMethodTypes(registry);
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 32): the native module's methods.
+		RegisterNativeMethodTypes(registry);
 		// M18 (ADR 0029 decisions 3 and 11): the editor's shader hot reload and its Chrome trace capture.
 		RegisterShaderMethodTypes(registry);
 		RegisterProfilerMethodTypes(registry);
@@ -76,6 +79,7 @@ namespace Engine {
 		RegisterSharedMethods(methods, AutomationHost::Editor);
 		RegisterEditorScriptMethods(methods);
 		RegisterTestMethods(methods);
+		RegisterNativeMethods(methods);
 		RegisterShaderMethods(methods);
 		RegisterProfilerMethods(methods);
 		if (options.TestHooks)

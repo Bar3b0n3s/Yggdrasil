@@ -9,9 +9,10 @@
 #include <optional>
 #include <span>
 
-// FontImporter's interface to stb_truetype (imstb_truetype.h from the vendored Dear ImGui, stb_truetype v1.26). The one
-// translation unit that compiles it, AssetPipeline/ThirdParty/TrueTypeRasterizer.cpp, does so with STBTT_STATIC
-// (Architecture §7.4, Appendix C), so its symbols never clash with Dear ImGui's copy and no stb type appears outside it.
+// FontImporter's interface to stb_truetype (stb_truetype.h v1.26 of the vendored stb, Vendor/stb). The one translation
+// unit that compiles it, AssetPipeline/ThirdParty/TrueTypeRasterizer.cpp, does so with STBTT_STATIC (Architecture §7.4,
+// Appendix C), so its symbols never clash with Dear ImGui's own copy (imstb_truetype.h, for its font atlas) and no stb
+// type appears outside it.
 // Its transcendental functions are routed to DetMath, so a glyph's distance field does not depend on the C runtime, the
 // CPU or the configuration. Kerning is read by TrueTypeTables.h, not by stb_truetype.
 

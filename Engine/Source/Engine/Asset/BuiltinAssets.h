@@ -175,6 +175,14 @@ namespace Engine {
 	// clip, M12), sorted by handle. Both asset managers serve these without reading anything, so placeholders never fail.
 	[[nodiscard]] std::span<const BuiltinAssetEntry> GetProceduralBuiltinEntries();
 
+	// M19 (Docs/Decisions/0030-m19-contract.md decision 20, B-PRUNE-ENG): the File and Generated built-ins the Runtime asks
+	// for by handle although no asset references them, which every Engine.pak therefore holds: the tonemap's blue-noise
+	// texture (SceneRenderer) and the Font placeholder (GetPlaceholderHandle(AssetType::Font), with which a Text without a
+	// font draws). Sorted by handle. Every other File or Generated built-in goes into Engine.pak only when the packaged
+	// game reaches it. A change that makes the Runtime ask for another such built-in by handle appends it here (M22's
+	// fallback fonts, if they are built in).
+	[[nodiscard]] std::span<const AssetHandle> GetRuntimeRequiredBuiltinHandles();
+
 	// The procedural built-in `handle`, generated deterministically (identical bytes on every run and configuration).
 	// Errors: NotFound when `handle` is not a procedural built-in.
 	[[nodiscard]] Result<AssetRef<Asset>> CreateProceduralBuiltinAsset(AssetHandle handle);

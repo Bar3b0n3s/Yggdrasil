@@ -20,6 +20,7 @@
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Scene/PhysicsSystem.h"
+#include "Engine/Scripting/ScriptAssetLoads.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Scripting/ScriptError.h"
 #include "Engine/Scripting/TrackingAllocator.h"
@@ -146,8 +147,8 @@ namespace Engine {
 		// inventory and run, the play session (its fixed delta, seed, entity cap and view, its physics world's gravity and
 		// layers, its input actions, its extraction's quality, its ScriptEngine's limits and enforcement), the play
 		// controller's PauseOnError and BlockPlayOnTypeErrors behaviour, the suite overrides' application and the validator's
-		// StartScene and BuildScenes checks. The test ends by comparing the observed pointers with the reflected leaf walk and
-		// naming each unobserved one.
+		// StartScene and BuildScenes checks and its computed Assets.Load check (Export.PruneUnreferenced). The test ends by
+		// comparing the observed pointers with the reflected leaf walk and naming each unobserved one.
 		TEST_CASE("ProjectSettings: every AllSettings.eproj value is observed by its consumer")
 		{
 			Test::SetTestCaseTimeLimit(600.0);
@@ -359,6 +360,12 @@ namespace Engine {
 			CHECK(std::ranges::none_of(clean->Diagnostics, [](const ProjectDiagnostic& diagnostic)
 			{
 				return diagnostic.Code == BuildSceneMissingCode || diagnostic.Code == BuildStartSceneMissingCode;
+			}));
+			// With PruneUnreferenced on, the validator names the computed Assets.Load of the fixture's Loader module, which a
+			// pruned export cannot follow (M19, Docs/Decisions/0030-m19-contract.md decision 21); off, it names none.
+			observe("/Export/PruneUnreferenced", std::ranges::any_of(clean->Diagnostics, [](const ProjectDiagnostic& diagnostic)
+			{
+				return diagnostic.Code == ScriptComputedAssetLoadCode && diagnostic.File == "Assets/Scripts/Loader.luau";
 			}));
 			REQUIRE(FileSystem::Remove(project / "Assets" / "Scenes" / "Level2.scene").has_value());
 			REQUIRE(FileSystem::Remove(project / "Assets" / "Scenes" / "Main.scene").has_value());

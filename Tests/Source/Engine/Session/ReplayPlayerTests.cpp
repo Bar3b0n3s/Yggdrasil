@@ -2,10 +2,16 @@
 #include "Engine/Session/ReplayPlayer.h"
 
 #include "Engine/Asset/DocumentData.h"
+#include "Engine/Asset/MaterialData.h"
+#include "Engine/Asset/TypedAssetHandle.h"
+#include "Engine/Scene/Components/MeshRendererComponent.h"
+#include "Engine/Scene/Entity.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Scripting/ScriptCompiler.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Session/PlaySession.h"
+#include "Engine/Session/ReplayFingerprint.h"
+#include "Engine/Session/ReplayRecorder.h"
 #include "Support/ExpectLog.h"
 #include "Support/InMemoryAssetManager.h"
 #include "Support/SceneTestFixture.h"
@@ -548,6 +554,199 @@ namespace Engine {
 			CHECK(failed.CheckpointFailed);
 			CHECK(failed.FinalTick == 60);
 			CHECK(failed.ExpectedStateHash == source.Checkpoints[0].StateHash);
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 3 (A-F29): with ContinuePastCheckpoint a checkpoint whose hash differs
+		// no longer ends the playback. It plays on to FinalTick, counts every failed checkpoint, keeps the first one, and
+		// compares the final hash as usual; it has failed whenever a checkpoint differed, with no stop reason. It needs
+		// StrictHash.
+		TEST_CASE("ReplayPlayer: ContinuePastCheckpoint plays on to the final tick and counts every failed checkpoint")
+		{
+			PlaybackFixture f;
+			auto replay = f.Data(130);
+			const std::string at60 = f.HashAt(60);
+			const std::string at120 = f.HashAt(120);
+			const auto other = [](const std::string& hash)
+			{
+				return std::string(hash == "0000000000000000" ? "0000000000000001" : "0000000000000000");
+			};
+			replay->Checkpoints = { { .Tick = 60, .StateHash = other(at60) }, { .Tick = 120, .StateHash = other(at120) } };
+			replay->Expect = { f.Predicate(130, "true") };
+			const ReplayPlaybackOptions continuing{ .Verify = true, .StrictHash = true, .ContinuePastCheckpoint = true };
+			const auto result = f.Run(replay, continuing);
+			CHECK_FALSE(result.Passed);
+			CHECK(result.CheckpointFailed);
+			CHECK(result.CheckpointsChecked == 2);
+			CHECK(result.CheckpointsFailed == 2);
+			REQUIRE(result.FirstCheckpointFailure.has_value());
+			CHECK(result.FirstCheckpointFailure->Tick == 60);
+			CHECK(result.FirstCheckpointFailure->StateHash == at60);
+			CHECK(result.FirstCheckpointFailure->ExpectedStateHash == other(at60));
+			CHECK(result.FinalTick == 130);
+			CHECK(result.HashMatched);
+			CHECK(result.StateHash == replay->FinalStateHash);
+			CHECK(result.StopReason.empty());
+			REQUIRE(result.Expect.size() == 1);
+			CHECK(result.Expect[0].Satisfied);
+
+			// Only the second differs: it is the first failure, and the final hash still decides HashMatched.
+			replay->Checkpoints[0].StateHash = at60;
+			replay->FinalStateHash = other(replay->FinalStateHash);
+			const auto late = f.Run(replay, continuing);
+			CHECK_FALSE(late.Passed);
+			CHECK(late.CheckpointsFailed == 1);
+			REQUIRE(late.FirstCheckpointFailure.has_value());
+			CHECK(late.FirstCheckpointFailure->Tick == 120);
+			CHECK_FALSE(late.HashMatched);
+			CHECK(late.FinalTick == 130);
+
+			// Every checkpoint and the final hash reproduced: it passes, as without the option.
+			replay->Checkpoints[1].StateHash = at120;
+			replay->FinalStateHash = f.HashAt(130);
+			const auto matched = f.Run(replay, continuing);
+			CHECK(matched.Passed);
+			CHECK_FALSE(matched.CheckpointFailed);
+			CHECK(matched.CheckpointsFailed == 0);
+			CHECK_FALSE(matched.FirstCheckpointFailure.has_value());
+
+			auto session = f.Create();
+			ReplayPlayer player;
+			const Status refused = player.Begin(replay, *session, { .Verify = true, .StrictHash = false, .ContinuePastCheckpoint = true });
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
+		}
+
+		// Decision 3: the warning of an input check whose run reproduced the final hash after differing at a checkpoint names
+		// the replay, that checkpoint's tick and the final hash, in the words the suites' Python spells too
+		// (Scripts/Lib/games.py FINAL_HASH_INDEPENDENT_WARNING): a frozen text.
+		TEST_CASE("ReplayPlayer: the final-hash warning names the replay, the first failed checkpoint and the final hash")
+		{
+			CHECK(MakeFinalHashIndependentWarning("Assets/Tests/Reset.replay", 60, "3e0c91a2b4d5f607")
+				== "'Assets/Tests/Reset.replay': its final state hash does not depend on its input: without its input events the run first differed "
+				   "from the recording at checkpoint tick 60, then reached the recorded final state hash 3e0c91a2b4d5f607, so only its checkpoints prove "
+				   "the play; end the recording while the played state is still in the scene");
+		}
+
+		// Decision 2 (A-FPRINT): a recording keeps its session's start fingerprint, so a playback whose hash differs names
+		// what changed since the recording: at a failed checkpoint (whose stop reason ends with the first change) and at the
+		// final hash. A playback WithoutInput, an equal playback and a replay without a fingerprint name nothing.
+		TEST_CASE("ReplayPlayer: a playback whose state hash differs names what changed since the recording")
+		{
+			PlaybackFixture f;
+			auto recordedSession = f.Create();
+			ReplayRecorder recorder;
+			REQUIRE(recorder.Begin(f.Header, *recordedSession));
+			for (uint64_t tick = 0; tick < 70; ++tick)
+			{
+				REQUIRE(recordedSession->GetTick() == tick);
+				recorder.CaptureCheckpoint(*recordedSession);
+				recordedSession->Tick();
+				REQUIRE(recorder.CaptureAppliedInput(tick, recordedSession->GetInput().GetLastAppliedEvents()));
+			}
+			const Result<ReplayDocument> recorded = recorder.Finish(*recordedSession);
+			REQUIRE_MESSAGE(recorded.has_value(), recorded.error().ToString());
+			REQUIRE(recorded->Fingerprint.has_value());
+			const Result<ReplayFingerprint> expected = ComputeReplayFingerprint(f.Scene.GetScene(), nullptr, nullptr);
+			REQUIRE(expected.has_value());
+			CHECK(*recorded->Fingerprint == *expected);
+			REQUIRE(recorded->Checkpoints.size() == 1);
+			auto replay = f.Data(70);
+			replay->FinalStateHash = recorded->FinalStateHash;
+			replay->Checkpoints = recorded->Checkpoints;
+			replay->Fingerprint = recorded->Fingerprint;
+
+			const auto equal = f.Run(replay);
+			CHECK(equal.Passed);
+			CHECK(equal.Changes.empty());
+
+			// The scene gains an entity after the recording: the checkpoint at 60 differs and names it.
+			static_cast<void>(f.Scene.GetScene().CreateEntityWithID(UUID(0x77), "Added"));
+			const std::string added = "entity /Added (0000000000000077) was added";
+			const auto changed = f.Run(replay);
+			CHECK_FALSE(changed.Passed);
+			CHECK(changed.CheckpointFailed);
+			CHECK(changed.Changes == std::vector<std::string>{ added });
+			CHECK(changed.StopReason.ends_with("; changed since the recording: " + added));
+			// Playing on past the checkpoint, the final hash differs too; the changes are the same.
+			const auto continued = f.Run(replay, { .Verify = true, .StrictHash = true, .ContinuePastCheckpoint = true });
+			CHECK_FALSE(continued.HashMatched);
+			CHECK(continued.Changes == std::vector<std::string>{ added });
+			CHECK(continued.StopReason.empty());
+			// Without checkpoints, the final hash names it.
+			replay->Checkpoints.clear();
+			CHECK(f.Run(replay).Changes == std::vector<std::string>{ added });
+			// The input check's failure is its expected outcome: nothing is named.
+			CHECK(f.Run(replay, { .Verify = true, .StrictHash = true, .WithoutInput = true }).Changes.empty());
+			// A replay migrated from version 1 or 2 has no fingerprint, so it names nothing.
+			replay->Fingerprint.reset();
+			const auto unprinted = f.Run(replay);
+			CHECK_FALSE(unprinted.Passed);
+			CHECK(unprinted.Changes.empty());
+		}
+
+		// Decision 2 (the review of W19.1): the playback's own fingerprint only explains a hash that differs, so one that
+		// cannot be taken (a referenced asset whose import fails, which the simulation never loads) no longer refuses the
+		// playback: it plays to its verdict, and a hash that differs names that error as its one change.
+		TEST_CASE("ReplayPlayer: a fingerprinted replay whose referenced asset cannot be hashed still plays to its verdict")
+		{
+			PlaybackFixture f;
+			const AssetHandle material(0x515);
+			f.Assets.Publish(material, AssetRef<Asset>(CreateRef<MaterialData>()), "Assets/Materials/Broken.material");
+			Entity box = f.Scene.GetScene().CreateEntityWithID(UUID(0x66), "Box");
+			box.AddComponent<MeshRendererComponent>(MeshRendererComponent{ .Mesh = {}, .Materials = { TypedAssetHandle<AssetType::Material>(material) } });
+			const Result<ReplayFingerprint> recorded = ComputeReplayFingerprint(f.Scene.GetScene(), nullptr, &f.Assets);
+			REQUIRE_MESSAGE(recorded.has_value(), recorded.error().ToString());
+			auto replay = f.Data(70);
+			replay->Fingerprint = *recorded;
+			const std::string at60 = f.HashAt(60);
+			replay->Checkpoints = { { .Tick = 60, .StateHash = at60 } };
+			f.Assets.FailCookedHash(material, ErrorCode::ImportFailed);
+			REQUIRE_FALSE(ComputeReplayFingerprint(f.Scene.GetScene(), nullptr, &f.Assets).has_value());
+
+			const auto played = f.Run(replay);
+			CHECK(played.Passed);
+			CHECK(played.HashMatched);
+			CHECK(played.Changes.empty());
+
+			replay->Checkpoints[0].StateHash = at60 == "0000000000000000" ? "0000000000000001" : "0000000000000000";
+			const auto failed = f.Run(replay);
+			CHECK_FALSE(failed.Passed);
+			CHECK(failed.CheckpointFailed);
+			REQUIRE(failed.Changes.size() == 1);
+			CHECK(failed.Changes[0].starts_with("not known, because the playback's start fingerprint could not be taken: "));
+			CHECK(failed.Changes[0].find("Assets/Materials/Broken.material") != std::string::npos);
+			CHECK(failed.StopReason.ends_with("; changed since the recording: " + failed.Changes[0]));
+		}
+
+		// Decision 3 (A-F29): IsFinalHashIndependent holds only for an input check that continued past a checkpoint that
+		// differed (FirstCheckpointFailure) to the final tick (no StopReason), satisfied every expectation and reproduced the
+		// recorded final state hash; each clause alone makes it false (the suites' Python, games.input_check_warning, asks
+		// the same).
+		TEST_CASE("ReplayPlayer: an input check is final-hash independent only when every clause of the warning holds")
+		{
+			ReplayPlaybackResult independent;
+			independent.FinalTick = 130;
+			independent.CheckpointsChecked = 2;
+			independent.CheckpointFailed = true;
+			independent.CheckpointsFailed = 1;
+			independent.FirstCheckpointFailure = ReplayCheckpointFailure{ .Tick = 60, .StateHash = "0000000000000001", .ExpectedStateHash = "0000000000000002" };
+			independent.HashChecked = true;
+			independent.HashMatched = true;
+			independent.Expect = { ReplayExpectationOutcome{ .Tick = 130, .Evaluated = true, .Satisfied = true } };
+			CHECK(IsFinalHashIndependent(independent));
+
+			ReplayPlaybackResult noCheckpointFailed = independent;
+			noCheckpointFailed.FirstCheckpointFailure.reset();
+			CHECK_FALSE(IsFinalHashIndependent(noCheckpointFailed));
+			ReplayPlaybackResult finalHashDiffered = independent;
+			finalHashDiffered.HashMatched = false;
+			CHECK_FALSE(IsFinalHashIndependent(finalHashDiffered));
+			ReplayPlaybackResult stopped = independent;
+			stopped.StopReason = "the game quit with exit code 0 at tick 100, before the replay's final tick 130";
+			CHECK_FALSE(IsFinalHashIndependent(stopped));
+			ReplayPlaybackResult unsatisfied = independent;
+			unsatisfied.Expect.push_back(ReplayExpectationOutcome{ .Tick = 130, .Evaluated = true, .Satisfied = false });
+			CHECK_FALSE(IsFinalHashIndependent(unsatisfied));
 		}
 	}
 

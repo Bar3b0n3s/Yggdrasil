@@ -139,6 +139,44 @@ class TestingExportTests(AutomationTestCase):
             (exports.testing_user_data(package, TINY_GAME_NAME) / "Logs" / f"{TINY_GAME_NAME}.log").is_file())
         self.assertEqual(test_script.check_testing_user_data(package, TINY_GAME_NAME), [])
 
+    def test_feature_test_reports_the_hashes_the_packages_own_run_reads(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 10 (A-DISTSELF): a testing export with featureTest runs the
+        # staged package's --feature-test and reports every replay's observed state hash, the hashes
+        # exports.read_replay_hashes reads from the package's own run, as the games suite's Dist half reads them; the
+        # report lies inside the package, and phaseTimings lists FeatureTest. featureTest needs testing.
+        client = self.connect(self.start_editor())
+        self.create_project(client, TINY_GAME_NAME)
+        build_tiny_game(client)
+        add_smoke_suite(client)
+        replay = "Assets/Tests/Replays/Idle.replay"
+        client.call("input.record", {"action": "start"})
+        client.call("play.step", {"ticks": 70, "render": "none"})
+        recorded = client.call("input.record", {"action": "stop", "path": replay})
+        client.call("play.stop")
+        client.call("project.setSettings", {"patch": {"Testing": {"Replays": ["Assets/Tests/Replays/*.replay"]}}})
+        with self.assertRaises(engine_client.EngineError) as untested:
+            client.call("project.export", {"config": automation_config(), "featureTest": True})
+        self.assert_engine_error(untested.exception, engine_client.INVALID_PARAMS, "InvalidArgument")
+        report = client.call("project.export", {"config": automation_config(), "testing": True, "featureTest": True})
+        run = report["featureTest"]
+        self.assertTrue(run["ran"])
+        self.assertEqual(run["exitCode"], 0)
+        self.assertTrue(run["passed"])
+        self.assertTrue(Path(run["reportPath"]).is_relative_to(Path(report["outputDirectory"])), run["reportPath"])
+        self.assertEqual(run["replays"], [{"path": replay, "stateHash": recorded["stateHash"], "passed": True}])
+        # The run's rows by status, as its report counts them, so the builder needs no read of the report (the native
+        # test game's friction NT-10): the Smoke suite's case and the replay's rows, all passed.
+        counts = json.loads(Path(run["reportPath"]).read_text(encoding="utf-8"))["counts"]
+        self.assertEqual(run["counts"], counts)
+        self.assertGreater(counts["total"], 1)
+        self.assertEqual(counts["passed"], counts["total"])
+        self.assertIn("FeatureTest", [timing["phase"] for timing in report["phaseTimings"]])
+        with tempfile.TemporaryDirectory(prefix="FeatureTestHashes-") as working:
+            code, stderr = self.run_exported(Path(report["executable"]), Path(working))
+            self.assertEqual(code, 0, stderr)
+            own = exports.read_replay_hashes(Path(working) / "bin" / "TestResults" / "FeatureTest-Release.json")
+        self.assertEqual({row["path"]: row["stateHash"] for row in run["replays"]}, own)
+
     def run_exported(self, executable: Path, working: Path) -> tuple[int, str]:
         """Runs the exported executable's --feature-test headless without a device in `working`."""
         completed = subprocess.run([str(executable), "--headless", "--renderer", "none", "--feature-test"], cwd=working,

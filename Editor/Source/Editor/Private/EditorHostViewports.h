@@ -59,6 +59,13 @@ namespace Engine {
 		void SetUnavailable();
 		// The window has a usable framebuffer again: the next render publishes the views' extents.
 		void SetAvailable();
+		// M19 --headless-game-view (EditorLaunchOptions::HeadlessGameView; Docs/Decisions/0030-m19-contract.md decision 11,
+		// R-SOAK): from the next Render on, the Game view renders every frame as if its panel were displayed, at the project's
+		// Window.Width x Window.Height (or the viewport state's game resolution when one is set), and publishes its extent and
+		// statistics as a displayed view does (stats.get's "game"); it follows the shown scene (the play scene while playing)
+		// and recreates its renderer like any view. EditorApp calls it once, after construction, for a headless editor started
+		// with the option. Errors: InvalidState without a headless window (a windowed editor's panels decide).
+		[[nodiscard]] Status ForceGameView();
 		// Whether every open view's image has the size its panel asked for, or (M18, C18.4) the size it stays at because the
 		// asked size ran out of memory.
 		[[nodiscard]] bool IsLayoutReady() const;
@@ -128,6 +135,7 @@ namespace Engine {
 		bool m_Unavailable = false;
 		bool m_GameFocused = false;
 		bool m_TrimAfterSubmission = false;       // the last Render ran out of memory: Submitted trims (M18, C18.4 decision 44)
+		bool m_GameForced = false;                // ForceGameView: the Game view renders whether or not its panel is displayed
 		GpuRecreationRegistration m_Recreation{}; // from Initialize until Retire
 	};
 

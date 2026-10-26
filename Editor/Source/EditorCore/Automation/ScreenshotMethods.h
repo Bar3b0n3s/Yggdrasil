@@ -68,10 +68,13 @@ namespace Engine {
 	// MaxInlineScreenshotPngBytes live in Engine/Automation/Methods/ScreenshotMethods.h since the M7 contract, because the
 	// Editor and the Runtime share the method (ADR 0008 decision 26).
 
-	// editor.screenshot {maxDimension?} (§13.5): the whole editor UI after a fresh frame (see the file comment).
+	// editor.screenshot {maxDimension?, keep?} (§13.5): the whole editor UI after a fresh frame (see the file comment).
 	struct EditorScreenshotParams
 	{
 		uint32_t MaxDimension = 1024; // 1 to MaxViewportScreenshotDimension
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 9, A-SHOTS): as viewport.screenshot's keep, the PNG goes to
+		// Library/Automation/Kept/ (AutomationMethodContext::WriteKeptFile), which no later session prunes.
+		bool Keep = false;
 	};
 
 	struct EditorScreenshotResult

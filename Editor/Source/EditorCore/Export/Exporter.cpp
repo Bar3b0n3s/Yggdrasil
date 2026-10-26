@@ -5,7 +5,10 @@
 #include "EditorCore/EngineAssetGenerators.h"
 #include "EditorCore/Export/AppBundle.h"
 #include "EditorCore/Export/ExecutableResources.h"
+#include "EditorCore/Export/ExportFeatureTest.h"
+#include "EditorCore/Export/NativeExport.h"
 #include "EditorCore/Export/Private/ExportPaths.h"
+#include "EditorCore/Export/Private/ProcessOutput.h"
 #include "EditorCore/Export/TestingExport.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "EditorCore/Project/ProjectValidator.h"
@@ -17,17 +20,21 @@
 #include "Engine/Asset/CookedFormat.h"
 #include "Engine/Asset/PakFormat.h"
 #include "Engine/Asset/PakReader.h"
+#include "Engine/Asset/ScriptData.h"
 #include "Engine/AssetPipeline/AssetCache.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/EngineAssetBaker.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/AssetPipeline/Importers/EnvironmentImporter.h"
+#include "Engine/AssetPipeline/Importers/PrefabImporter.h"
+#include "Engine/AssetPipeline/Importers/SceneImporter.h"
 #include "Engine/AssetPipeline/PakWriter.h"
-#include "Engine/Automation/Protocol/JsonRpc.h"
 #include "Engine/Core/Assert.h"
+#include "Engine/Core/BuildId.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Jobs/JobSystem.h"
+#include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/UUIDGenerator.h"
 #include "Engine/Core/VirtualFileSystem.h"
@@ -36,8 +43,12 @@
 #include "Engine/Platform/ResourcePatcher.h"
 #include "Engine/Project/GameManifest.h"
 #include "Engine/Project/ProjectSerializer.h"
+#include "Engine/Reflection/FieldInfo.h"
+#include "Engine/Reflection/StructInfo.h"
+#include "Engine/Reflection/TypeInfo.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Scripting/ScriptAssetLoads.h"
 
 #include <nlohmann/json.hpp>
 
@@ -45,11 +56,14 @@
 #include <array>
 #include <charconv>
 #include <chrono>
+#include <deque>
 #include <filesystem>
 #include <format>
 #include <map>
 #include <set>
+#include <span>
 #include <system_error>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -64,7 +78,7 @@ namespace Engine {
 		constexpr std::string_view RuntimeProjectName = "Runtime";
 		constexpr std::string_view CacheScheme = "cache";
 		constexpr std::string_view ProjectScheme = "project";
-		// The staging, earlier-export and smoke-test directories beside the output directory:
+		// The staging, earlier-export, smoke-test and native-build directories beside the output directory:
 		// ".export-<kind>-<pid>-<tag>", where <tag> is the 8 hex digits of the low 32 bits of the XXH64 of the output
 		// directory's name (SiblingTag). The pid tells a crashed editor's leftovers from a running one's (Process::IsRunning),
 		// the tag the leftovers of this output from another's, and the length does not grow with the game's name: the staged
@@ -74,6 +88,9 @@ namespace Engine {
 		constexpr std::string_view StagingKind = "staging";
 		constexpr std::string_view PreviousKind = "previous";
 		constexpr std::string_view SmokeTestKind = "smoke";
+		// The root of step 3a's build directories (M19, decision 33): each native build of an export gets a new numbered
+		// directory below it (State::PrepareNativeBuildDirectory).
+		constexpr std::string_view NativeKind = "native";
 		// The bound of the smoke test's run, a failure bound only: a game that runs SmokeTestFrames headless frames at its
 		// FixedHz takes seconds, and one that hangs is killed after it.
 		constexpr std::chrono::seconds SmokeTestTimeout{ 300 };
@@ -112,6 +129,14 @@ namespace Engine {
 			uint32_t EngineEntryCount = 0;
 			uint32_t GameEntryCount = 0;
 		};
+
+		// What each included main asset references (step 2), sorted, and each included script's uses of Assets.Load (M19,
+		// decision 19), by source.
+		using AssetReferences = std::map<AssetHandle, std::vector<AssetHandle>>;
+		using ScriptLoads = std::map<AssetHandle, std::vector<ScriptAssetLoad>>;
+		// Every asset the reachability walk reached (M19, decisions 20 and 21), with the first reason the walk found; nullopt
+		// for an asset of Game.pak that no root reaches, walked only for the built-ins it reaches.
+		using ReachedAssets = std::map<AssetHandle, std::optional<ExportReachedAsset>>;
 
 		// Everything the WritePaks job needs, moved into it (jobs take values, §4.11).
 		struct PakJobInput
@@ -241,34 +266,87 @@ namespace Engine {
 			};
 		}
 
+		// The component and the members of a Script component in a scene or prefab document (ScriptComponent's registration).
+		constexpr std::string_view ScriptComponentName = "Script";
+		constexpr std::string_view ScriptHandleMember = "Script";
+		constexpr std::string_view ScriptFieldsMember = "Fields";
+
+		// Appends to `handles` the valid asset handles of `value`, a value of `type`: an AssetRef, or one at any depth of
+		// arrays, maps and structs of them (a script field's declared type or a part of it). A value of another shape adds
+		// nothing: loading the document reports it as a script field problem.
+		void CollectAssetHandles(const Json& value, const TypeInfo& type, std::vector<AssetHandle>& handles)
+		{
+			const FieldType kind = type.GetKind();
+			if (kind == FieldType::AssetRef)
+			{
+				if (!value.is_string())
+					return; // null: no asset
+				if (const Result<UUID> handle = JsonReader(value).ReadUUID(); handle.has_value() && handle->IsValid())
+					handles.push_back(*handle);
+				return;
+			}
+			if (kind == FieldType::Array || kind == FieldType::Map)
+			{
+				const TypeInfo* element = type.GetElementSchema() != nullptr ? &type.GetElementSchema()->GetType() : type.GetElement();
+				if (element == nullptr || (kind == FieldType::Array ? !value.is_array() : !value.is_object()))
+					return;
+				for (const Json& item : value)
+					CollectAssetHandles(item, *element, handles);
+				return;
+			}
+			if (kind == FieldType::Struct && type.GetStruct() != nullptr && value.is_object())
+			{
+				for (const Scope<FieldInfo>& field : type.GetStruct()->GetFields())
+				{
+					if (const auto member = value.find(field->GetName()); member != value.end())
+						CollectAssetHandles(*member, field->GetType(), handles);
+				}
+			}
+		}
+
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 20): the asset handles the Script components of the scene or prefab
+		// document `document` name through their Fields, typed with `schemas` (the editor's script field schemas): the one kind
+		// of reference no importer can list, since a scene imports without its scripts' schemas. A prefab instance's members
+		// are written flattened, their Script fields with the instance's overrides applied, so the overrides' values are
+		// among them. A field its script does not declare names nothing. Sorted and unique.
+		[[nodiscard]] std::vector<AssetHandle> CollectScriptFieldReferences(const Json& document, const IFieldSchemaSource& schemas)
+		{
+			std::vector<AssetHandle> handles;
+			// nlohmann's find gives end() on a value that is not an object.
+			const auto entities = document.find("Entities");
+			if (entities == document.end() || !entities->is_array())
+				return handles;
+			for (const Json& entity : *entities)
+			{
+				const auto components = entity.find("Components");
+				if (components == entity.end())
+					continue;
+				const auto script = components->find(ScriptComponentName);
+				if (script == components->end())
+					continue;
+				const auto handle = script->find(ScriptHandleMember);
+				const auto fields = script->find(ScriptFieldsMember);
+				if (handle == script->end() || fields == script->end() || !fields->is_object())
+					continue;
+				const Result<UUID> owner = JsonReader(*handle).ReadUUID();
+				if (!owner.has_value() || !owner->IsValid())
+					continue;
+				for (auto field = fields->begin(); field != fields->end(); ++field)
+				{
+					if (const Result<const FieldInfo*> schema = schemas.FindField(*owner, field.key()); schema.has_value())
+						CollectAssetHandles(field.value(), (*schema)->GetType(), handles);
+				}
+			}
+			std::ranges::sort(handles);
+			const auto [first, last] = std::ranges::unique(handles);
+			handles.erase(first, last);
+			return handles;
+		}
+
 		// The end of a process's output for an error message: its last SmokeTestOutputLines non-empty lines.
 		[[nodiscard]] std::string TailOfOutput(const ProcessResult& result)
 		{
-			std::vector<std::string_view> lines;
-			for (const std::string* stream : { &result.StandardOutput, &result.StandardError })
-			{
-				std::string_view text = *stream;
-				while (!text.empty())
-				{
-					const size_t end = text.find('\n');
-					std::string_view line = text.substr(0, end);
-					while (!line.empty() && (line.back() == '\r' || line.back() == ' '))
-						line.remove_suffix(1);
-					if (!line.empty())
-						lines.push_back(line);
-					if (end == std::string_view::npos)
-						break;
-					text.remove_prefix(end + 1);
-				}
-			}
-			const size_t first = lines.size() > SmokeTestOutputLines ? lines.size() - SmokeTestOutputLines : 0;
-			std::string tail;
-			for (size_t index = first; index < lines.size(); ++index)
-			{
-				tail += tail.empty() ? "" : "\n";
-				tail += lines[index];
-			}
-			return tail.empty() ? std::string("(no output)") : tail;
+			return Utils::TailOfProcessOutput(result, SmokeTestOutputLines);
 		}
 
 		// The <tag> of the sibling directories of the output directory named `outputName` (see SiblingPrefix).
@@ -294,7 +372,7 @@ namespace Engine {
 			if (!name.ends_with(suffix))
 				return std::nullopt;
 			name.remove_suffix(suffix.size());
-			for (const std::string_view kind : { StagingKind, PreviousKind, SmokeTestKind })
+			for (const std::string_view kind : { StagingKind, PreviousKind, SmokeTestKind, NativeKind })
 			{
 				if (!name.starts_with(kind) || name.size() <= kind.size() + 1 || name[kind.size()] != '-')
 					continue;
@@ -415,6 +493,7 @@ namespace Engine {
 		// Validate's results.
 		ProjectSettings Settings{};
 		AssetHandle StartScene{};
+		std::vector<AssetHandle> BuildScenes{}; // the Export.BuildScenes entries, in their order (M19: the reachability walk's roots)
 		// The executable's icon, version and company (ResolveExecutableResources), which M15's resource patcher writes into the
 		// copied Runtime.
 		ExecutableResources Resources{};
@@ -454,6 +533,18 @@ namespace Engine {
 		// SmokeTest.
 		std::optional<Process> SmokeTest{};
 		std::chrono::steady_clock::time_point SmokeTestDeadline{};
+		// FeatureTest (M19, decision 10): step 6a's running --feature-test run (ExportFeatureTest.h).
+		Scope<IExportFeatureTestJob> FeatureTest{};
+
+		// NativeBuild (M19, decision 33): whether the project has a Native/ directory, the running build, the sibling below
+		// which this process's native builds of the output go (NativeKind), the build's own directory below it and the
+		// executable it built, which CopyRuntime copies instead of RuntimeExecutable. The build's directory, with the
+		// executable's symbols, stays until the package is in place (MoveToOutput archives the symbols) or the export ends.
+		bool NativeModule = false;
+		Scope<INativeBuildJob> NativeBuild{};
+		std::filesystem::path NativeBuildRoot{};
+		std::filesystem::path NativeBuildDirectory{};
+		std::filesystem::path NativeRuntimeExecutable{};
 
 		ExportReport Report{};
 
@@ -468,11 +559,13 @@ namespace Engine {
 				case ExportPhase::Validate:       return Validate();
 				case ExportPhase::Cook:           return Cook();
 				case ExportPhase::WritePaks:      return WritePakFiles();
+				case ExportPhase::NativeBuild:    return BuildNativeRuntime();
 				case ExportPhase::CopyRuntime:    return CopyRuntime();
 				case ExportPhase::PatchResources: return PatchResources();
 				case ExportPhase::WriteManifest:  return WriteManifest();
 				case ExportPhase::Sign:           return Sign();
 				case ExportPhase::SmokeTest:      return RunSmokeTest();
+				case ExportPhase::FeatureTest:    return RunFeatureTest();
 				case ExportPhase::MoveToOutput:   return MoveToOutput();
 				case ExportPhase::Done:           return true;
 			}
@@ -523,6 +616,11 @@ namespace Engine {
 			// The registry and the asset diagnostics reflect the files on disk, which is what the export packages.
 			ENGINE_TRY(WithContext(assets.Refresh(), "while refreshing the assets"));
 			Settings = Editor->GetProject().GetSettings();
+			// M19 (decision 33): a game with Native/ is refused first, before anything is cooked, where the platform or the
+			// user's preference does not allow its native build (NativeExport.h).
+			NativeModule = HasNativeModuleDirectory(ProjectRoot);
+			if (NativeModule)
+				ENGINE_TRY(CheckNativeExport(*Editor));
 
 			std::vector<ErrorIssue> issues;
 			// Static errors block export even when ordinary editor play permits them (§11.9).
@@ -556,11 +654,15 @@ namespace Engine {
 				StartScene = *handle;
 				scenes.emplace_back(*handle, Settings.StartScene);
 			}
+			BuildScenes.clear();
 			for (size_t index = 0; index < Settings.Export.BuildScenes.size(); ++index)
 			{
 				const std::string& path = Settings.Export.BuildScenes[index];
 				if (std::optional<AssetHandle> handle = ResolveBuildScene(path, std::format("/Export/BuildScenes/{}", index), "the build scene", issues))
+				{
+					BuildScenes.push_back(*handle);
 					scenes.emplace_back(*handle, path);
+				}
 			}
 
 			for (const AssetDiagnostic& diagnostic : assets.GetDiagnostics())
@@ -884,6 +986,7 @@ namespace Engine {
 			StagingDirectory = parent / FileSystem::PathFromUtf8(SiblingName(StagingKind, processId, name));
 			PreviousDirectory = parent / FileSystem::PathFromUtf8(SiblingName(PreviousKind, processId, name));
 			SmokeTestUserData = parent / FileSystem::PathFromUtf8(SiblingName(SmokeTestKind, processId, name));
+			NativeBuildRoot = parent / FileSystem::PathFromUtf8(SiblingName(NativeKind, processId, name));
 			return {};
 		}
 
@@ -977,15 +1080,48 @@ namespace Engine {
 			ImporterRegistry importers;
 			RegisterBuiltinImporters(importers);
 			const std::vector<ImportAssetLookupEntry> lookups = MakeLookupSnapshot();
-			std::map<AssetHandle, std::vector<AssetHandle>> references; // what each included artifact references
-			std::set<AssetHandle> packaged;
+			ENGINE_TRY_ASSIGN(const Ref<const ScriptFieldSchemaSource> schemas, Editor->GetScriptSchemaSnapshot());
+			AssetReferences references; // what each included main asset references, sorted (step 2)
+			ScriptLoads loads;          // each included script's uses of Assets.Load (decision 19)
+			std::map<AssetHandle, std::vector<ImportedArtifact>> artifacts;
 			for (const AssetHandle source : Sources)
 			{
 				ENGINE_TRY_ASSIGN(CachedImport cooked, WithContext(ReadCooked(source, importers, lookups), std::format("while cooking '{}'", assets.GetReferencePath(source))));
 				const AssetRecord* record = assets.GetRegistry().Find(source);
 				ENGINE_ASSERT(record != nullptr, "A cooked source is registered");
-				references[source] = std::move(cooked.Import.Dependencies);
-				for (ImportedArtifact& artifact : cooked.Import.Artifacts)
+				ENGINE_TRY_ASSIGN(references[source], WithContext(CollectReferences(*record, std::move(cooked.Import.Dependencies), *schemas), std::format("while reading the references of '{}'", record->SourcePath.GetPath())));
+				if (record->Metadata.Type == AssetType::Script)
+				{
+					ENGINE_TRY_ASSIGN(loads[source], WithContext(ScanScriptLoads(*record), std::format("while scanning '{}' for Assets.Load", record->SourcePath.GetPath())));
+				}
+				artifacts[source] = std::move(cooked.Import.Artifacts);
+			}
+
+			// M19 (decision 21): with Export.PruneUnreferenced, Game.pak holds only the sources the roots reach; the others were
+			// cooked for their references only, which the walk needed, and neither their references (CheckReferences) nor their
+			// loads (Engine.pak's built-ins, the computed loads) count from here on.
+			std::set<AssetHandle> packagedSources(Sources.begin(), Sources.end());
+			if (Settings.Export.PruneUnreferenced)
+			{
+				packagedSources = PruneGameAssets(references, loads);
+				std::erase_if(references, [&packagedSources](const auto& entry)
+				{
+					return !packagedSources.contains(entry.first);
+				});
+				std::erase_if(loads, [&packagedSources](const auto& entry)
+				{
+					return !packagedSources.contains(entry.first);
+				});
+			}
+
+			std::set<AssetHandle> packaged;
+			for (auto& [source, cooked] : artifacts)
+			{
+				if (!packagedSources.contains(source))
+					continue;
+				const AssetRecord* record = assets.GetRegistry().Find(source);
+				ENGINE_ASSERT(record != nullptr, "A cooked source is registered");
+				for (ImportedArtifact& artifact : cooked)
 				{
 					AssetReference reference;
 					reference.Kind = AssetReferenceKind::ProjectPath;
@@ -1001,9 +1137,234 @@ namespace Engine {
 				}
 			}
 
-			ENGINE_TRY(CookEngineAssets(importers, packaged));
+			ENGINE_TRY(CookEngineAssets(importers, SelectEngineBuiltins(references, loads, packagedSources), packaged));
 			ENGINE_TRY(CheckReferences(references, packaged));
 			return true;
+		}
+
+		// What a packaged asset references (step 2; M19, decision 20): its importer's Import.Dependencies (every importer lists
+		// every asset its output references, IAssetImporter.h), and for a scene or a prefab document also the asset handles of
+		// its Script components' Fields, which only the editor's script field schemas type. A glTF source imports as a Prefab
+		// too, but it holds no Script component (and a .glb is no text), so only the files of the Scene and Prefab importers
+		// are read. Sorted and unique.
+		[[nodiscard]] Result<std::vector<AssetHandle>> CollectReferences(const AssetRecord& record, std::vector<AssetHandle> dependencies,
+			const IFieldSchemaSource& schemas) const
+		{
+			if (record.Metadata.Importer == SceneImporter::Id || record.Metadata.Importer == PrefabImporter::Id)
+			{
+				ENGINE_TRY_ASSIGN(const std::string text, Editor->GetVfs().ReadText(record.SourcePath));
+				ENGINE_TRY_ASSIGN(const Json document, JsonReader::Parse(text));
+				const std::vector<AssetHandle> fields = CollectScriptFieldReferences(document, schemas);
+				dependencies.insert(dependencies.end(), fields.begin(), fields.end());
+			}
+			std::ranges::sort(dependencies);
+			const auto [first, last] = std::ranges::unique(dependencies);
+			dependencies.erase(first, last);
+			return dependencies;
+		}
+
+		// A packaged script's uses of Assets.Load (decision 19), read from its source through the project file system, as the
+		// importer reads it; no cooked format carries them.
+		[[nodiscard]] Result<std::vector<ScriptAssetLoad>> ScanScriptLoads(const AssetRecord& record) const
+		{
+			ENGINE_TRY_ASSIGN(const std::string source, Editor->GetVfs().ReadText(record.SourcePath));
+			return FindScriptAssetLoads(source, record.SourcePath.GetPath());
+		}
+
+		// The project path of a packaged main asset, or the engine path of a built-in.
+		[[nodiscard]] std::string GetAssetPath(AssetHandle handle) const
+		{
+			const EditorAssetManager& assets = Editor->GetAssets();
+			if (const BuiltinAssetEntry* builtin = assets.GetBuiltins().Find(handle))
+				return builtin->Path;
+			const AssetRecord* record = assets.GetRegistry().Find(handle);
+			return record != nullptr ? std::string(record->SourcePath.GetPath()) : handle.ToString();
+		}
+
+		// The asset a reference to `handle` makes the export package: the main asset of a packaged source (a reference to a
+		// sub-asset reaches its source, which is packaged with all its artifacts) or a built-in of the catalogue; nullopt for
+		// anything else (an asset Export.Exclude leaves out, or no asset at all: CheckReferences reports a reference to one,
+		// and a literal load of one adds nothing, since Assets.Load returns nil for it).
+		[[nodiscard]] std::optional<AssetHandle> FindPackagedMain(AssetHandle handle, const std::set<AssetHandle>& sources) const
+		{
+			const EditorAssetManager& assets = Editor->GetAssets();
+			if (assets.GetBuiltins().Find(handle) != nullptr)
+				return handle;
+			const std::optional<AssetRegistry::Location> location = assets.GetRegistry().Locate(handle);
+			if (!location.has_value() || !sources.contains(location->Record->Metadata.Handle))
+				return std::nullopt;
+			return location->Record->Metadata.Handle;
+		}
+
+		// `handles` sorted by their paths (GetAssetPath).
+		[[nodiscard]] std::vector<AssetHandle> SortByPath(std::vector<AssetHandle> handles) const
+		{
+			std::ranges::sort(handles, {}, [this](AssetHandle handle)
+			{
+				return GetAssetPath(handle);
+			});
+			return handles;
+		}
+
+		// M19 (Docs/Decisions/0030-m19-contract.md decisions 20 and 21): the reachability walk of Exporter.h over the packaged
+		// sources `sources`, whose references and script loads `references` and `loads` hold. It starts from the roots in order
+		// (StartScene, the Export.BuildScenes entries, a testing export's forced content sorted by path, then, with
+		// `withRequired`, the built-ins the Runtime asks for by handle, sorted by path) and follows, breadth-first, each reached
+		// asset's references in handle order and then a script's literal loads in source order, each reaching the main asset
+		// of a source in `sources` or a built-in (FindPackagedMain); every reached asset keeps the first reason the walk found.
+		// With `everySource`, every source of `sources` no root reaches follows, sorted by path and without a reason, so the
+		// built-ins it reaches are reached too. Built-ins reference nothing (fonts, environments, sound effects and the blue
+		// noise), so a reached built-in ends its branch.
+		[[nodiscard]] ReachedAssets WalkReachability(const AssetReferences& references, const ScriptLoads& loads, const std::set<AssetHandle>& sources,
+			bool withRequired, bool everySource) const
+		{
+			const EditorAssetManager& assets = Editor->GetAssets();
+			const auto root = [](ExportReachReason reason)
+			{
+				return ExportReachedAsset{ .Path = {}, .Reason = reason, .From = {}, .Line = 0 };
+			};
+
+			ReachedAssets reached;
+			std::deque<AssetHandle> pending;
+			const auto reach = [&reached, &pending](AssetHandle handle, std::optional<ExportReachedAsset> reason)
+			{
+				if (reached.emplace(handle, std::move(reason)).second)
+					pending.push_back(handle);
+			};
+			const auto follow = [this, &assets, &sources, &references, &loads, &pending, &reach]()
+			{
+				while (!pending.empty())
+				{
+					const AssetHandle handle = pending.front();
+					pending.pop_front();
+					const auto referenced = references.find(handle);
+					if (referenced == references.end())
+						continue; // a built-in
+					const std::string from = GetAssetPath(handle);
+					for (const AssetHandle reference : referenced->second)
+					{
+						if (const std::optional<AssetHandle> target = FindPackagedMain(reference, sources))
+							reach(*target, ExportReachedAsset{ .Path = {}, .Reason = ExportReachReason::Dependency, .From = from, .Line = 0 });
+					}
+					const auto scanned = loads.find(handle);
+					if (scanned == loads.end())
+						continue;
+					for (const ScriptAssetLoad& load : scanned->second)
+					{
+						const std::optional<AssetHandle> resolved = load.Literal ? assets.Resolve(load.Reference) : std::nullopt;
+						if (const std::optional<AssetHandle> target = resolved.has_value() ? FindPackagedMain(*resolved, sources) : std::nullopt)
+							reach(*target, ExportReachedAsset{ .Path = {}, .Reason = ExportReachReason::LiteralLoad, .From = from, .Line = load.Line });
+					}
+				}
+			};
+
+			reach(StartScene, root(ExportReachReason::StartScene));
+			for (const AssetHandle scene : BuildScenes)
+				reach(scene, root(ExportReachReason::BuildScene));
+			if (Specification.Testing)
+			{
+				std::vector<AssetHandle> forced;
+				for (const AssetHandle source : sources)
+				{
+					if (IsForcedByTestingExport(GetAssetPath(source), TestingContent))
+						forced.push_back(source);
+				}
+				for (const AssetHandle source : SortByPath(std::move(forced)))
+					reach(source, root(ExportReachReason::Testing));
+			}
+			if (withRequired)
+			{
+				const std::span<const AssetHandle> required = GetRuntimeRequiredBuiltinHandles();
+				for (const AssetHandle builtin : SortByPath(std::vector<AssetHandle>(required.begin(), required.end())))
+					reach(builtin, root(ExportReachReason::Required));
+			}
+			follow();
+			if (everySource)
+			{
+				for (const AssetHandle source : SortByPath(std::vector<AssetHandle>(sources.begin(), sources.end())))
+					reach(source, std::nullopt);
+				follow();
+			}
+			return reached;
+		}
+
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 21, B-PRUNE-GAME): Export.PruneUnreferenced's Game.pak, the included
+		// sources the roots reach (WalkReachability over every included source, without the required built-ins, which
+		// reference nothing). Fills ExportReport::Reachability's Pruned, GameAssets (each with its first reason, sorted by path)
+		// and PrunedAssets (the included sources no root reaches, sorted).
+		[[nodiscard]] std::set<AssetHandle> PruneGameAssets(const AssetReferences& references, const ScriptLoads& loads)
+		{
+			const std::set<AssetHandle> sources(Sources.begin(), Sources.end());
+			const ReachedAssets reached = WalkReachability(references, loads, sources, false, false);
+			ExportReachability& reachability = Report.Reachability;
+			reachability.Pruned = true;
+			reachability.GameAssets.clear();
+			reachability.PrunedAssets.clear();
+			std::set<AssetHandle> packaged;
+			for (const AssetHandle source : Sources)
+			{
+				const auto found = reached.find(source);
+				if (found == reached.end())
+				{
+					reachability.PrunedAssets.push_back(GetAssetPath(source));
+					continue;
+				}
+				ENGINE_ASSERT(found->second.has_value(), "Every asset the roots reach has a reason");
+				ExportReachedAsset asset = *found->second;
+				asset.Path = GetAssetPath(source);
+				reachability.GameAssets.push_back(std::move(asset));
+				packaged.insert(source);
+			}
+			std::ranges::sort(reachability.GameAssets, {}, &ExportReachedAsset::Path);
+			std::ranges::sort(reachability.PrunedAssets);
+			return packaged;
+		}
+
+		// M19 (Docs/Decisions/0030-m19-contract.md decisions 19 to 21): the File and Generated built-ins Engine.pak holds, each
+		// with the first reason the walk found (Exporter.h, ExportReachedAsset): WalkReachability over Game.pak's sources
+		// `sources` (every included source, or with Export.PruneUnreferenced the ones the roots reach), with the required
+		// built-ins and every source of Game.pak, so the built-ins any of them reaches are kept. A packaged script that computes
+		// an Assets.Load keeps every File and Generated built-in of the catalogue, since the reference may name any of them:
+		// the ones nothing else reached take the reason ComputedLoad, naming the first computed load in (script, line, column)
+		// order. Fills ExportReport::Reachability's ComputedLoads.
+		[[nodiscard]] std::map<AssetHandle, ExportReachedAsset> SelectEngineBuiltins(const AssetReferences& references, const ScriptLoads& loads,
+			const std::set<AssetHandle>& sources)
+		{
+			const EditorAssetManager& assets = Editor->GetAssets();
+			const ReachedAssets reached = WalkReachability(references, loads, sources, true, true);
+
+			// Every computed load of a packaged script (ExportReport::Reachability); the first keeps every built-in.
+			std::vector<ExportComputedLoad>& computed = Report.Reachability.ComputedLoads;
+			computed.clear();
+			for (const auto& [script, uses] : loads)
+			{
+				for (const ScriptAssetLoad& use : uses)
+				{
+					if (!use.Literal)
+						computed.push_back({ .Script = GetAssetPath(script), .Line = use.Line, .Column = use.Column });
+				}
+			}
+			std::ranges::sort(computed, [](const ExportComputedLoad& left, const ExportComputedLoad& right)
+			{
+				return std::tie(left.Script, left.Line, left.Column) < std::tie(right.Script, right.Line, right.Column);
+			});
+
+			std::map<AssetHandle, ExportReachedAsset> selected;
+			for (const BuiltinAssetEntry& entry : assets.GetBuiltins().GetEntries())
+			{
+				if (entry.Source == BuiltinAssetSource::Procedural)
+					continue;
+				if (const auto found = reached.find(entry.Handle); found != reached.end() && found->second.has_value())
+				{
+					selected.emplace(entry.Handle, *found->second);
+				}
+				else if (!computed.empty())
+				{
+					selected.emplace(entry.Handle,
+						ExportReachedAsset{ .Path = {}, .Reason = ExportReachReason::ComputedLoad, .From = computed.front().Script, .Line = computed.front().Line });
+				}
+			}
+			return selected;
 		}
 
 		// The lookup snapshot of the registry, as the asset manager takes it for an import (every record, sorted by source
@@ -1071,12 +1432,14 @@ namespace Engine {
 			return cached;
 		}
 
-		// The File and Generated built-ins of the catalogue from the engine cooked cache (§7.6), baked on first use (the
-		// environments with the editor's GPU baker, M8). A built-in environment the cache holds no bake of, in an editor
-		// without a GPU, is left out with a warning, and CheckReferences fails the export when an included asset references
-		// it (Docs/Decisions/0013-m8-decisions.md decision 9). Procedural built-ins are generated by the Runtime's asset
-		// manager.
-		[[nodiscard]] Status CookEngineAssets(const ImporterRegistry& importers, std::set<AssetHandle>& packaged)
+		// The File and Generated built-ins of the catalogue that `selected` names (SelectEngineBuiltins; M19, decision 20) from
+		// the engine cooked cache (§7.6), baked on first use (the environments with the editor's GPU baker, M8); the others are
+		// neither cooked nor packaged. A selected built-in environment the cache holds no bake of, in an editor without a GPU,
+		// is left out with a warning, and CheckReferences fails the export when an included asset references it
+		// (Docs/Decisions/0013-m8-decisions.md decision 9). Procedural built-ins are generated by the Runtime's asset manager.
+		// Fills ExportReport::Reachability's EngineBuiltins and PrunedBuiltins.
+		[[nodiscard]] Status CookEngineAssets(const ImporterRegistry& importers, const std::map<AssetHandle, ExportReachedAsset>& selected,
+			std::set<AssetHandle>& packaged)
 		{
 			EditorAssetManager& assets = Editor->GetAssets();
 			const EngineBakeSpecification specification{
@@ -1088,14 +1451,25 @@ namespace Engine {
 				.Generators = GetEngineAssetGenerators(),
 			};
 			std::vector<std::string> environments;
+			std::vector<ExportReachedAsset>& kept = Report.Reachability.EngineBuiltins;
+			std::vector<std::string>& pruned = Report.Reachability.PrunedBuiltins;
+			kept.clear();
+			pruned.clear();
 			for (const BuiltinAssetEntry& entry : assets.GetBuiltins().GetEntries())
 			{
 				if (entry.Source == BuiltinAssetSource::Procedural)
 					continue;
+				const auto reason = selected.find(entry.Handle);
+				if (reason == selected.end())
+				{
+					pruned.push_back(entry.Path);
+					continue;
+				}
 				Result<std::vector<Buffer>> cooked = GetOrBakeEngineAsset(specification, entry);
 				if (!cooked.has_value() && entry.Type == AssetType::Environment && cooked.error().GetCode() == ErrorCode::Unsupported)
 				{
 					environments.push_back(entry.Path);
+					pruned.push_back(entry.Path);
 					continue;
 				}
 				ENGINE_TRY_ASSIGN(std::vector<Buffer> artifacts, WithContext(std::move(cooked), std::format("while cooking '{}'", entry.Path)));
@@ -1111,7 +1485,12 @@ namespace Engine {
 					.Path = entry.Path,
 					.Data = std::move(artifacts.front()),
 				});
+				ExportReachedAsset builtin = reason->second;
+				builtin.Path = entry.Path;
+				kept.push_back(std::move(builtin));
 			}
+			std::ranges::sort(kept, {}, &ExportReachedAsset::Path);
+			std::ranges::sort(pruned);
 			if (!environments.empty())
 			{
 				std::string list;
@@ -1124,10 +1503,11 @@ namespace Engine {
 			return {};
 		}
 
-		// Every handle an included asset references resolves in the package (§14.2 step 1): a Game.pak or Engine.pak entry,
-		// or a procedural built-in. A built-in environment CookEngineAssets left out (no bake, no GPU) is an issue with the
-		// hint to bake it once on a GPU (§7.5: the exports need no GPU "as long as the bakes exist").
-		[[nodiscard]] Status CheckReferences(const std::map<AssetHandle, std::vector<AssetHandle>>& references, const std::set<AssetHandle>& packaged)
+		// Every handle a packaged asset references (`references`: every included asset, or with Export.PruneUnreferenced the
+		// ones the roots reach) resolves in the package (§14.2 step 1): a Game.pak or Engine.pak entry, or a procedural
+		// built-in. A built-in environment CookEngineAssets left out (no bake, no GPU) is an issue with the hint to bake it
+		// once on a GPU (§7.5: the exports need no GPU "as long as the bakes exist").
+		[[nodiscard]] Status CheckReferences(const AssetReferences& references, const std::set<AssetHandle>& packaged)
 		{
 			const EditorAssetManager& assets = Editor->GetAssets();
 			const std::span<const BuiltinAssetEntry> procedural = GetProceduralBuiltinEntries();
@@ -1177,6 +1557,7 @@ namespace Engine {
 				Json engineMetadata = Json::object();
 				engineMetadata["Configuration"] = std::string(ExportConfigurationToString(Specification.Configuration));
 				engineMetadata["EngineVersion"] = std::string(EngineVersionString);
+				engineMetadata["Build"] = FormatBuildId(GetBuildId());
 				PakJobInput input{
 					.EngineEntries = std::move(EngineEntries),
 					.GameEntries = std::move(GameEntries),
@@ -1240,16 +1621,87 @@ namespace Engine {
 			return {};
 		}
 
+		// --- 3a. Build the Runtime with the native module (M19) ------------------------------------------------------------
+
+		// Step 3a (decision 33): nothing to do for a game without Native/; otherwise the build of NativeExport.h, polled once
+		// per frame like the other background steps.
+		[[nodiscard]] Result<bool> BuildNativeRuntime()
+		{
+			if (!NativeModule)
+				return true;
+			if (NativeBuild == nullptr)
+			{
+				ENGINE_TRY_ASSIGN(NativeBuildDirectory, PrepareNativeBuildDirectory());
+				ENGINE_TRY_ASSIGN(NativeBuild, StartNativeRuntimeBuild(*Editor, Specification.Configuration, NativeBuildDirectory));
+				return false;
+			}
+			std::optional<Result<NativeBuildOutcome>> polled = NativeBuild->Poll();
+			if (!polled.has_value())
+				return false;
+			NativeBuild.reset();
+			ENGINE_TRY_ASSIGN(const NativeBuildOutcome outcome, std::move(*polled));
+			// The build's directory goes with the failed export, so the error names a copy of its log (KeepNativeBuildLog).
+			if (!outcome.Succeeded)
+				return std::unexpected(MakeNativeBuildError(KeepNativeBuildLog(ProjectRoot, Specification.Configuration, outcome), Settings.Name));
+			NativeRuntimeExecutable = outcome.Output;
+			Report.NativeModule = true;
+			return true;
+		}
+
+		// Step 3a's build directory: a new numbered directory below NativeBuildRoot, which BuildNative.py requires missing or
+		// empty. A cancelled build's MSBuild can still be writing below an earlier export's directory there (cancelling stops
+		// only BuildNative.py, decision 30), so every leftover is removed where it can be and skipped where it cannot, and the
+		// build takes the first number that names nothing: never a directory another build wrote. A dead editor's root goes
+		// with its other siblings (CreateStaging).
+		[[nodiscard]] Result<std::filesystem::path> PrepareNativeBuildDirectory() const
+		{
+			std::vector<std::filesystem::path> leftovers;
+			if (FileSystem::Exists(NativeBuildRoot))
+			{
+				ENGINE_TRY_ASSIGN(leftovers, FileSystem::ListDirectory(NativeBuildRoot, false));
+			}
+			for (const std::filesystem::path& leftover : leftovers)
+			{
+				if (Status removed = FileSystem::Remove(leftover); !removed.has_value())
+					ENGINE_WARN("Cannot remove '{}', left by an earlier export's native build: {}", FileSystem::PathToUtf8(leftover), removed.error());
+			}
+			// Among one more number than there were leftovers, one names nothing.
+			for (size_t index = 0; index <= leftovers.size(); ++index)
+			{
+				std::filesystem::path directory = NativeBuildRoot / FileSystem::PathFromUtf8(std::format("{}", index));
+				if (!FileSystem::Exists(directory))
+					return directory;
+			}
+			return MakeError(ErrorCode::InvalidState, "no new native build directory is free below '{}'", FileSystem::PathToUtf8(NativeBuildRoot));
+		}
+
+		// The native build's directory, once the package is in place or the export ends, and its root once nothing else is
+		// below it.
+		void RemoveNativeBuildDirectory()
+		{
+			if (!NativeBuildDirectory.empty() && FileSystem::Exists(NativeBuildDirectory))
+			{
+				if (Status removed = FileSystem::Remove(NativeBuildDirectory); !removed.has_value())
+					ENGINE_WARN("Cannot remove the export's native build directory '{}': {}", FileSystem::PathToUtf8(NativeBuildDirectory), removed.error());
+			}
+			NativeBuildDirectory.clear();
+			if (!NativeBuildRoot.empty() && FileSystem::Exists(NativeBuildRoot))
+				static_cast<void>(FileSystem::RemoveEmptyDirectory(NativeBuildRoot));
+		}
+
 		// --- 4. Copy the Runtime -----------------------------------------------------------------------------------------
 
 		[[nodiscard]] Result<bool> CopyRuntime()
 		{
 #if defined(ENGINE_PLATFORM_MACOS)
-			// The bundle's executable, frameworks and ICD manifest (AppBundle.h).
+			// The bundle's executable, frameworks and ICD manifest (AppBundle.h). A native game never gets here on macOS
+			// (CheckNativeExport, decision 34).
 			ENGINE_TRY(WithContext(CopyAppBundleBinaries(GetBundle(StagingDirectory), Settings.Name, RuntimeExecutable, RuntimeDirectory),
 				"while assembling the application bundle"));
 #else
-			ENGINE_TRY(WithContext(CopyFile(RuntimeExecutable, GetPackageExecutable(StagingDirectory)), "while copying the Runtime"));
+			// A game with Native/ packages the Runtime step 3a linked with its module (decision 33).
+			const std::filesystem::path& runtime = NativeRuntimeExecutable.empty() ? RuntimeExecutable : NativeRuntimeExecutable;
+			ENGINE_TRY(WithContext(CopyFile(runtime, GetPackageExecutable(StagingDirectory)), "while copying the Runtime"));
 			for (const std::filesystem::path& library : Redist)
 				ENGINE_TRY(WithContext(CopyFile(library, StagingDirectory / library.filename()), "while copying the app-local CRT"));
 #endif
@@ -1289,6 +1741,7 @@ namespace Engine {
 			GameManifest manifest;
 			manifest.Name = Settings.Name;
 			manifest.EngineVersion = std::string(EngineVersionString);
+			manifest.Build = FormatBuildId(GetBuildId());
 			manifest.StartScene = StartScene;
 			manifest.Paks = {
 				GameManifestPak{ .Path = std::format("{}/{}", DataDirectoryName, EnginePakFileName), .Hash = Paks.EngineHash },
@@ -1362,6 +1815,34 @@ namespace Engine {
 		}
 
 		// --- 6. Smoke test -----------------------------------------------------------------------------------------------
+
+		// Step 6a (M19, Docs/Decisions/0030-m19-contract.md decision 10): nothing to do without FeatureTest; otherwise the run of
+		// ExportFeatureTest.h, polled once per frame like the other background steps.
+		[[nodiscard]] Result<bool> RunFeatureTest()
+		{
+			if (!Specification.FeatureTest)
+				return true;
+			if (FeatureTest == nullptr)
+			{
+				const ExportFeatureTestRun run{ .Executable = GetPackageExecutable(StagingDirectory),
+					.StagedManifest = GetPackageResources(StagingDirectory) / GameManifest::FileName,
+					.OutputDirectory = OutputDirectory,
+					.Name = Settings.Name,
+					.Configuration = Specification.Configuration,
+					.HasGraphicsDevice = Editor->GetEngine().GetGraphicsDevice() != nullptr };
+				ENGINE_TRY_ASSIGN(FeatureTest, StartExportFeatureTest(run));
+				return false;
+			}
+			std::optional<Result<ExportFeatureTestOutcome>> polled = FeatureTest->Poll();
+			if (!polled.has_value())
+				return false;
+			FeatureTest.reset();
+			ENGINE_TRY_ASSIGN(ExportFeatureTestOutcome outcome, std::move(*polled));
+			Report.FeatureTest = std::move(outcome.Report);
+			for (std::string& warning : outcome.Warnings)
+				Report.Warnings.push_back(std::move(warning));
+			return true;
+		}
 
 		[[nodiscard]] Result<bool> RunSmokeTest()
 		{
@@ -1473,6 +1954,20 @@ namespace Engine {
 			CreatedDirectories.clear();
 			Report.OutputDirectory = OutputDirectory;
 			Report.Executable = GetPackageExecutable(OutputDirectory);
+			// A native game's executable was linked by step 3a, so its symbols exist only in the build's directory: archived
+			// now that the package they belong to is in place, never shipped (§2.2; ArchiveNativeRuntimeSymbols).
+			if (!NativeRuntimeExecutable.empty())
+			{
+				if (Result<std::filesystem::path> archived = ArchiveNativeRuntimeSymbols(ProjectRoot, Specification.Configuration, NativeRuntimeExecutable); archived.has_value())
+				{
+					ENGINE_INFO("Archived the symbols of '{}' in '{}'", FileSystem::PathToUtf8(Report.Executable), FileSystem::PathToUtf8(*archived));
+				}
+				else
+				{
+					Report.Warnings.push_back(std::format("the symbols of the executable step 3a linked could not be archived: {}", archived.error().ToString()));
+				}
+			}
+			RemoveNativeBuildDirectory();
 			return true;
 		}
 
@@ -1506,6 +2001,9 @@ namespace Engine {
 		{
 			Signing.reset();
 			SmokeTest.reset();
+			FeatureTest.reset();
+			NativeBuild.reset();
+			RemoveNativeBuildDirectory();
 			for (const JobHandle<AssetRef<Asset>>& load : Loads)
 			{
 				if (load.IsValid())
@@ -1560,6 +2058,8 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidArgument, "the export needs the directory of the build outputs (BinaryRoot, <repository>/bin)");
 		if (specification.SmokeTestFrames == 0)
 			return MakeError(ErrorCode::InvalidArgument, "the smoke test needs at least one frame");
+		if (specification.FeatureTest && !specification.Testing)
+			return MakeError(ErrorCode::InvalidArgument, "the feature test runs the suites and replays of a testing export: export with Testing");
 		ENGINE_TRY(CheckOutputPath(specification, editor.GetProject().GetRoot()));
 
 		Scope<Exporter> exporter = CreateScope<Exporter>(ConstructionKey());
@@ -1591,7 +2091,8 @@ namespace Engine {
 			return std::nullopt;
 		// The phase's time runs from the previous listed phase's end, so the timings add up to the export's (§14.2 step 8). A
 		// smoke test that did not run is not listed (M16 friction S2-06): its time counts toward the next phase.
-		if (phase != ExportPhase::SmokeTest || state.Report.SmokeTestRan)
+		if ((phase != ExportPhase::SmokeTest || state.Report.SmokeTestRan) && (phase != ExportPhase::FeatureTest || state.Report.FeatureTest.Ran)
+			&& (phase != ExportPhase::NativeBuild || state.Report.NativeModule))
 		{
 			const auto completed = std::chrono::steady_clock::now();
 			state.Report.PhaseTimings.push_back({ .Phase = phase, .Seconds = std::chrono::duration<double>(completed - state.PhaseStarted).count() });
@@ -1681,11 +2182,13 @@ namespace Engine {
 			case ExportPhase::Validate:       return "Validate";
 			case ExportPhase::Cook:           return "Cook";
 			case ExportPhase::WritePaks:      return "WritePaks";
+			case ExportPhase::NativeBuild:    return "NativeBuild";
 			case ExportPhase::CopyRuntime:    return "CopyRuntime";
 			case ExportPhase::PatchResources: return "PatchResources";
 			case ExportPhase::WriteManifest:  return "WriteManifest";
 			case ExportPhase::Sign:           return "Sign";
 			case ExportPhase::SmokeTest:      return "SmokeTest";
+			case ExportPhase::FeatureTest:    return "FeatureTest";
 			case ExportPhase::MoveToOutput:   return "MoveToOutput";
 			case ExportPhase::Done:           return "Done";
 		}

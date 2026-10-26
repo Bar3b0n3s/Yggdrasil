@@ -40,9 +40,9 @@ LOAD /build/bin/Dist-linux-x86_64/Engine/libEngine.a
  .text.lua_pushnumber
                 0x0000000000401100       0x40 /build/bin/Dist-linux-x86_64/Luau/libLuau.a(lapi.o)
                 0x0000000000401100                lua_pushnumber
- .text._ZN4Luau7compileERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEERKNS_14CompileOptionsERKNS_12ParseOptionsEPNS_15BytecodeEncoderE
-                0x0000000000401140       0x40 /build/bin/Dist-linux-x86_64/Luau/libLuau.a(Compiler.o)
-                0x0000000000401140                _ZN4Luau7compileERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEERKNS_14CompileOptionsERKNS_12ParseOptionsEPNS_15BytecodeEncoderE
+ .text._ZN4Luau6Parser9parseTypeEPKcmRNS_12AstNameTableERNS_9AllocatorENS_12ParseOptionsE
+                0x0000000000401140       0x40 /build/bin/Dist-linux-x86_64/Luau/libLuau.a(Parser.o)
+                0x0000000000401140                _ZN4Luau6Parser9parseTypeEPKcmRNS_12AstNameTableERNS_9AllocatorENS_12ParseOptionsE
 
 .rodata         0x0000000000403000     0x2000
  *(.rodata .rodata.*)

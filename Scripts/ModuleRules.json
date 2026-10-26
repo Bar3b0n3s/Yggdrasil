@@ -74,8 +74,7 @@
 			"Vendor/Luau/Bytecode/include",
 			"Vendor/Luau/Compiler/include",
 			"Vendor/Luau/Config/include",
-			"Vendor/Luau/VM/include",
-			"Vendor/Luau/Require/include"
+			"Vendor/Luau/VM/include"
 		],
 		"LuauAnalysis": [
 			"Vendor/Luau/Analysis/include"
@@ -259,7 +258,19 @@
 				"Core",
 				"Reflection",
 				"Platform"
-			]
+			],
+			"Notes": "M19 (Docs/Decisions/0030-m19-contract.md decision 17): the pak entry codec (Asset/PakCompression.cpp) is the module's one third-party user, private: stb_image.h's inflate and stb_image_write.h's deflate, whose implementation is Graphics' (Docs/Decisions/0009-m5-decisions.md decision 11), so the Runtime's PakReader and the editor's PakWriter share one pair.",
+			"ThirdParty": {
+				"Public": [],
+				"Private": [
+					"stb"
+				]
+			},
+			"RestrictedThirdParty": {
+				"stb": [
+					"Engine/Source/Engine/Asset/PakCompression.cpp"
+				]
+			}
 		},
 		{
 			"Name": "Project",
@@ -350,6 +361,13 @@
 			}
 		},
 		{
+			"Name": "Native",
+			"Layer": 4,
+			"Includes": [],
+			"MaxLayer": 3,
+			"Notes": "M19 (Docs/Decisions/0030-m19-contract.md decisions 26 and 27): a game's native module's interface, NativeApi.h, which the module's sources include and which therefore includes only the standard library and glm, and the engine's side of it (the registration, the native values' JSON and hash, the native components in scenes). Beside Scripting at layer 4, below Session, whose NativeWorld runs the module's systems."
+		},
+		{
 			"Name": "Session",
 			"Layer": 5,
 			"Includes": [],
@@ -377,13 +395,12 @@
 			"Layer": 5,
 			"Includes": [],
 			"MaxLayer": 4,
-			"Notes": "The importers' third-party code, all private (section 3 rule 3): cgltf (GltfImporter, CgltfImplementation.cpp), stb_image and stb_image_resize2 (TextureImporter; stb_image's implementation is Graphics', Docs/Decisions/0009-m5-decisions.md decision 11), imstb_truetype.h from the vendored Dear ImGui (FontImporter, compiled with STBTT_STATIC in its own translation unit, Appendix C) and MikkTSpace, which only the glTF importer's tangent generator includes (Docs/Decisions/0010-m6-decisions.md).",
+			"Notes": "The importers' third-party code, all private (section 3 rule 3): cgltf (GltfImporter, CgltfImplementation.cpp), stb_image and stb_image_resize2 (TextureImporter; stb_image's implementation is Graphics', Docs/Decisions/0009-m5-decisions.md decision 11), stb_truetype.h (FontImporter, compiled with STBTT_STATIC in its own translation unit, Appendix C; Docs/Decisions/0030-m19-contract.md decision 23) and MikkTSpace, which only the glTF importer's tangent generator includes (Docs/Decisions/0010-m6-decisions.md).",
 			"ThirdParty": {
 				"Public": [],
 				"Private": [
 					"cgltf",
 					"stb",
-					"imgui:imstb_truetype.h",
 					"MikkTSpace"
 				]
 			},
@@ -646,7 +663,8 @@
 			"Scene",
 			"Physics",
 			"Scripting",
-			"Session"
+			"Session",
+			"Native"
 		],
 		"SimulationPathExceptions": [],
 		"TryCatchFiles": [
@@ -657,7 +675,9 @@
 			"Editor/Source/EditorCore/Autosave/Autosave.cpp",
 			"Engine/Source/Engine/Automation/Protocol/Dispatcher.cpp",
 			"Engine/Source/Engine/Core/Jobs/JobSystem.cpp",
-			"Engine/Source/Engine/App/EntryPoint.cpp"
+			"Engine/Source/Engine/App/EntryPoint.cpp",
+			"Engine/Source/Engine/Session/NativeWorld.cpp",
+			"Engine/Source/Engine/Native/NativeModule.cpp"
 		],
 		"JsonAccessFiles": [
 			"Engine/Source/Engine/Core/Json/**",

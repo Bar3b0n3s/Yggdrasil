@@ -107,7 +107,8 @@
 		"Exclude": ["Assets/Tests/**"],
 		"Icon": "",
 		"Version": "1.0.0",
-		"Company": "Engine Demos"
+		"Company": "Engine Demos",
+		"PruneUnreferenced": false
 	},
 	"Testing": {
 		"Suites": [

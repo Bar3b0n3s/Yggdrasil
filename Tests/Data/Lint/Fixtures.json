@@ -619,6 +619,56 @@
 					"Line": 21
 				}
 			]
+		},
+		{
+			"Name": "NativeModuleRules",
+			"Description": "A game's native module (Docs/Decisions/0030-m19-contract.md decision 35): a file that is not a .cpp or .h source, an engine header and an OS header included, a mutable global and a mutable static local, a clock and a CRT transcendental in native code.",
+			"Steps": [
+				"includes",
+				"banned",
+				"naming"
+			],
+			"Modes": [
+				"clang",
+				"regex"
+			],
+			"Expected": [
+				{
+					"Code": "native-file",
+					"File": "Projects/Game/Native/Notes.txt",
+					"Line": 1
+				},
+				{
+					"Code": "native-include",
+					"File": "Projects/Game/Native/Spinner.cpp",
+					"Line": 3
+				},
+				{
+					"Code": "native-include",
+					"File": "Projects/Game/Native/Spinner.cpp",
+					"Line": 6
+				},
+				{
+					"Code": "native-mutable-state",
+					"File": "Projects/Game/Native/Spinner.cpp",
+					"Line": 13
+				},
+				{
+					"Code": "native-mutable-state",
+					"File": "Projects/Game/Native/Spinner.cpp",
+					"Line": 17
+				},
+				{
+					"Code": "banned-nondeterminism",
+					"File": "Projects/Game/Native/Spinner.cpp",
+					"Line": 18
+				},
+				{
+					"Code": "banned-crt-math",
+					"File": "Projects/Game/Native/Spinner.cpp",
+					"Line": 19
+				}
+			]
 		}
 	]
 }

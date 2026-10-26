@@ -923,6 +923,43 @@ class LauncherTests(BridgeTestCase):
         self.assertEqual((refused[0]["method"], refused[1]["ok"]), ("session.info", False))
         connection.disconnect()
 
+    def test_editor_status_without_a_connection_lists_the_editors_running_with_automation(self) -> None:
+        # The native test game's friction NT-04: without a connection editor_status said only that no editor was
+        # connected, so a builder could not tell which running editor to attach to. It lists every live session file's
+        # editor with its pid, project and renderer, which it asks each for with an untranscribed session.info, and
+        # leaves out the file of a process that is gone.
+        launcher, sessions = self.make_launcher()
+        bridge = server.Bridge(REPOSITORY_ROOT, [], launcher)
+        structured, text, is_error = bridge.call_tool("editor_status", {})
+        self.assertFalse(is_error, text)
+        self.assertEqual(structured, {"connected": False, "editors": []})
+
+        root = self.make_project()
+        project_file = (root / "Game.eproj").as_posix()
+        rendering = self.start_server({"session.info": lambda params: {"pid": os.getpid(), "renderer": "vulkan"}})
+        rendering.write_session_file(sessions, project_path=project_file)
+        rendering.write_session_file(sessions, project_path=project_file, pid=finished_pid())
+        # A second live editor, in the launcher state, that refuses session.info: listed, its renderer unknown.
+        sleeper = subprocess.Popen([str(fake_editor.PYTHON), "-c", "import time\ntime.sleep(120)\n"])
+        self.addCleanup(sleeper.wait)
+        self.addCleanup(sleeper.kill)
+        self.start_server({}).write_session_file(sessions, pid=sleeper.pid)
+
+        structured, text, is_error = bridge.call_tool("editor_status", {})
+        self.assertFalse(is_error, text)
+        self.assertFalse(structured["connected"])
+        editors = {editor["pid"]: editor for editor in structured["editors"]}
+        self.assertEqual(sorted(editors), sorted([os.getpid(), sleeper.pid]))
+        self.assertEqual(editors[os.getpid()], {"pid": os.getpid(), "project": project_file, "headless": True,
+                                                "renderer": "vulkan"})
+        self.assertEqual((editors[sleeper.pid]["project"], editors[sleeper.pid]["renderer"]), ("", None))
+        self.assertIn("probeError", editors[sleeper.pid])
+        for part in (str(os.getpid()), str(sleeper.pid), "vulkan", "editor_attach"):
+            self.assertIn(part, text)
+        # Listing attaches nothing, so nothing is transcribed and the bridge stays unconnected.
+        self.assertFalse((root / transcript.TRANSCRIPT_RELATIVE_PATH).exists())
+        self.assertIsNone(bridge.connection)
+
     def test_editor_launch_transcribes_a_session_info_after_opening_the_project_and_reports_the_scene(self) -> None:
         # Docs/Decisions/0026-m16-contract.md, friction S3-06: a launch opened the project and sent no session.info, so
         # editor_launch said nothing about the open scene (none: opening a project opens none), unlike an attach.

@@ -61,7 +61,11 @@ namespace Engine {
 		// The bytes of `entry` (one of GetEntries()). Its XXH64 is verified on the first read of the entry in every
 		// configuration (§14.1, so script bytecode is always verified before luau_load), and the reader remembers entries
 		// that passed. Errors: Io; Validation "entry '<Path>' is corrupted (hash mismatch)", which the RuntimeAssetManager
-		// reports as an asset diagnostic.
+		// reports as an asset diagnostic. Pak version 2 (Docs/Decisions/0030-m19-contract.md decision 17, stream G): a
+		// Deflate entry's StoredSize bytes are inflated to its Size (InflatePakEntry) on every read, and the inflated bytes
+		// are what the first read verifies and every read returns; a stream that does not inflate is the same Validation
+		// error, naming the entry. PakMount's files and RuntimeAssetManager's assets read through here, so both see inflated
+		// bytes.
 		[[nodiscard]] Result<Buffer> ReadEntry(const PakEntry& entry) const;
 	private:
 		// The header, the TOC, the source (an open file and its lock, or the bytes) and the verified-entry set (PakReader.cpp).

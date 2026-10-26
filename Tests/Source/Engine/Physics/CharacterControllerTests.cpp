@@ -9,6 +9,7 @@
 #include "Support/ExpectLog.h"
 
 #include <algorithm>
+#include <cmath>
 #include <format>
 #include <limits>
 #include <string>
@@ -57,6 +58,49 @@ namespace Engine {
 				character.Update(FixedDelta, velocity, Gravity);
 				REQUIRE(world.Step(FixedDelta, 1).has_value());
 			}
+		}
+
+		// A kinematic platform, 40 m square with its top at y 0, moved at a constant velocity by MoveKinematic, as
+		// Scene/PhysicsSystem moves a kinematic body towards its entity's pose in PreStep, before the characters update.
+		class MovingPlatform
+		{
+		public:
+			MovingPlatform(PhysicsWorld& world, const glm::vec3& velocity)
+				: m_World(&world), m_Velocity(velocity)
+			{
+				Result<Ref<const PhysicsShape>> shape =
+					PhysicsShape::Create({ .Colliders = { ColliderShapeDescription{ .Geometry = BoxShapeGeometry{ .HalfExtents = glm::vec3(20.0f, 0.5f, 20.0f) } } } });
+				REQUIRE(shape.has_value());
+				Result<BodyHandle> body = world.CreateBody({ .Shape = *shape, .MotionType = PhysicsMotionType::Kinematic, .Pose = m_Pose });
+				REQUIRE(body.has_value());
+				m_Body = *body;
+			}
+
+			// One step: the platform starts its move, the character updates with `desired`, then the world steps.
+			void Step(CharacterController& character, const glm::vec3& desired)
+			{
+				m_Pose.Position += m_Velocity * FixedDelta;
+				m_World->MoveKinematic(m_Body, m_Pose, FixedDelta);
+				character.Update(FixedDelta, desired, Gravity);
+				REQUIRE(m_World->Step(FixedDelta, 1).has_value());
+			}
+		private:
+			// A documented back-reference: the world outlives the platform (both live in one test case).
+			PhysicsWorld* m_World = nullptr;
+			glm::vec3 m_Velocity = glm::vec3(0.0f);
+			PhysicsPose m_Pose{ .Position = glm::vec3(0.0f, -0.5f, 0.0f) };
+			BodyHandle m_Body{};
+		};
+
+		// A character created on a MovingPlatform that has not moved yet, standing on it after half a second at rest.
+		Scope<CharacterController> CreateCarriedCharacter(PhysicsWorld& world, bool inheritGroundVelocity)
+		{
+			Result<Scope<CharacterController>> character =
+				CharacterController::Create(world, { .Pose = { .Position = glm::vec3(0.0f, 0.05f, 0.0f) }, .InheritGroundVelocity = inheritGroundVelocity });
+			REQUIRE_MESSAGE(character.has_value(), character.error().ToString());
+			Walk(world, **character, glm::vec3(0.0f), 30);
+			REQUIRE((*character)->GetGroundState().IsGrounded);
+			return std::move(*character);
 		}
 
 	}
@@ -409,6 +453,61 @@ namespace Engine {
 			CHECK(character->GetPose().Position.y >= -MaxPhysicsCoordinate);
 			CHECK(IsPlaceablePhysicsPose(world->GetPose(character->GetInnerBody())));
 			CHECK(character->GetVelocity().y > -MaxCharacterSpeed);
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 36 (P-CARRY, stream K; Roadmap M19's acceptance "a carried character
+		// moves v·t"): with InheritGroundVelocity a character standing on a kinematic platform that moves at v is carried
+		// v * t; without it the platform slides under the character, as before.
+		TEST_CASE("CharacterController: with InheritGroundVelocity a character on a moving platform moves v * t")
+		{
+			const glm::vec3 platformVelocity(2.0f, 0.0f, 0.0f);
+			constexpr uint32_t Steps = 120; // two seconds
+			for (const bool inherit : { true, false })
+			{
+				CAPTURE(inherit);
+				Scope<PhysicsWorld> world = CreateCharacterWorld();
+				MovingPlatform platform(*world, platformVelocity);
+				const Scope<CharacterController> character = CreateCarriedCharacter(*world, inherit);
+
+				const float start = character->GetPose().Position.x;
+				for (uint32_t step = 0; step < Steps; ++step)
+					platform.Step(*character, glm::vec3(0.0f));
+				const float moved = character->GetPose().Position.x - start;
+				if (inherit)
+					CHECK(moved == doctest::Approx(platformVelocity.x * static_cast<float>(Steps) * FixedDelta).epsilon(0.02));
+				else
+					CHECK(std::abs(moved) < 0.05f);
+				CHECK(character->GetGroundState().IsGrounded);
+			}
+		}
+
+		// ADR 0030 decision 36: the ground's horizontal velocity is added to the desired one, and only while grounded, so a
+		// carried character walks relative to its platform and, once it jumps off, moves only as it is told.
+		TEST_CASE("CharacterController: a carried character walks relative to its ground and is carried only while grounded")
+		{
+			const glm::vec3 platformVelocity(2.0f, 0.0f, 0.0f);
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			MovingPlatform platform(*world, platformVelocity);
+			const Scope<CharacterController> character = CreateCarriedCharacter(*world, true);
+
+			const glm::vec3 start = character->GetPose().Position;
+			for (uint32_t step = 0; step < 60; ++step)
+				platform.Step(*character, glm::vec3(0.0f, 0.0f, 1.0f));
+			const glm::vec3 moved = character->GetPose().Position - start;
+			CHECK(moved.x == doctest::Approx(2.0f).epsilon(0.02));
+			CHECK(moved.z == doctest::Approx(1.0f).epsilon(0.02));
+			CHECK(character->GetGroundState().GroundVelocity.x == doctest::Approx(platformVelocity.x).epsilon(1.0e-3));
+			CHECK(character->GetVelocity().x == doctest::Approx(platformVelocity.x).epsilon(1.0e-3));
+			CHECK(character->GetVelocity().z == doctest::Approx(1.0f).epsilon(1.0e-3));
+
+			// The take-off step is still on the ground, so still carried; in the air the platform no longer carries it.
+			platform.Step(*character, glm::vec3(0.0f, 5.0f, 0.0f));
+			CHECK(character->GetVelocity().x == doctest::Approx(platformVelocity.x).epsilon(1.0e-3));
+			for (uint32_t step = 0; step < 3; ++step)
+				platform.Step(*character, glm::vec3(0.0f));
+			CHECK_FALSE(character->GetGroundState().IsGrounded);
+			CHECK(character->GetVelocity().y > 0.0f);
+			CHECK(std::abs(character->GetVelocity().x) < 1.0e-4f);
 		}
 	}
 

@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""Check the Runtime's linker map for code that must not ship (Docs/Architecture.md §14.4; Roadmap M15 acceptance "Dist:
-map file contains no automation, Analysis, ImGui or AssetPipeline symbols"; Docs/Decisions/0024-m15-contract.md
-decision 11).
+"""Check the Runtime's linker map for code that must not ship (Docs/Architecture.md §14.4; Roadmap M15 acceptance
+"Dist: map file contains no automation, Analysis, ImGui or AssetPipeline symbols"; Docs/Decisions/0024-m15-contract.md
+decision 11; Roadmap M19 acceptance "The Dist map holds no Luau::compile, BytecodeBuilder or extractLuauConfig
+symbol", Docs/Decisions/0030-m19-contract.md decision 22).
 
 Reads bin/<Config>-<system>-<arch>/Runtime/Runtime.map (or --map), in any format Lib/runtime_map.py reads (MSVC
 link.exe, LLVM lld, GNU ld, Apple ld64), and reports every symbol of the forbidden families (automation, Luau Analysis,
-ImGui, AssetPipeline, derived from their headers) and every required FeatureTest harness symbol that is missing. CI.py
-runs it right after its Dist build. --self-test checks the seeded fixtures of Tests/Data/MapFiles/<format>/ instead:
-Clean.map has no finding and every other map exactly the findings its Expected.json lists, in every format; the static
-checks run it.
+ImGui and AssetPipeline, derived from their headers, and LuauCompiler: Luau's compiler, bytecode builder,
+configuration reader and require library, by name) and every required FeatureTest harness symbol that is missing.
+CI.py runs it right after its Dist build. --self-test checks the seeded fixtures of Tests/Data/MapFiles/<format>/
+instead: Clean.map has no finding and every other map exactly the findings its Expected.json lists, in every format;
+the static checks run it.
 """
 
 from __future__ import annotations
@@ -64,7 +66,7 @@ def check(map_path: Path, console: Console) -> Step:
     duration = time.perf_counter() - started
     if not findings:
         return Step(name, Status.PASSED, f"{parsed.format} map, {len(parsed.symbols)} symbols: no automation, "
-                                         f"Analysis, ImGui or AssetPipeline symbol; "
+                                         f"Analysis, ImGui, AssetPipeline or Luau compiler symbol; "
                                          f"{', '.join(runtime_map.REQUIRED_SYMBOLS)} present", duration, data=data)
     shown: dict[str, int] = collections.Counter()
     for finding in findings:

@@ -2,9 +2,14 @@
 #include "Engine/Session/ReplayRecorder.h"
 
 #include "Engine/Asset/DocumentData.h"
+#include "Engine/Asset/MaterialData.h"
+#include "Engine/Asset/TypedAssetHandle.h"
+#include "Engine/Scene/Components/MeshRendererComponent.h"
+#include "Engine/Scene/Entity.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Session/PlaySession.h"
+#include "Engine/Session/ReplayFingerprint.h"
 #include "Support/InMemoryAssetManager.h"
 #include "Support/SceneTestFixture.h"
 
@@ -210,6 +215,56 @@ namespace Engine {
 			REQUIRE(result);
 			CHECK(result->FinalTick == 3);
 			CHECK(result->FinalStateHash == UUID(session->ComputeStateHash()).ToString());
+			CHECK_FALSE(recorder.IsRecording());
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 2 (A-FPRINT): Begin takes the session's start fingerprint at tick 0 and
+		// Finish writes it, whatever the play changed in the scene since.
+		TEST_CASE("ReplayRecorder: a recording keeps the start fingerprint its session held at tick zero")
+		{
+			RecordingFixture f;
+			static_cast<void>(f.Scene.GetScene().CreateEntityWithID(UUID(0x31), "Board"));
+			auto session = f.Create();
+			const Result<ReplayFingerprint> atStart = ComputeReplayFingerprint(session->GetScene(), session->GetScriptSchemas(), session->GetAssets());
+			REQUIRE_MESSAGE(atStart.has_value(), atStart.error().ToString());
+			ReplayRecorder recorder;
+			REQUIRE(recorder.Begin(f.Header, *session));
+			f.Step(recorder, *session);
+			REQUIRE(session->CreateEntity("Spawned").has_value());
+			f.Step(recorder, *session);
+			const auto document = recorder.Finish(*session);
+			REQUIRE_MESSAGE(document.has_value(), document.error().ToString());
+			REQUIRE(document->Fingerprint.has_value());
+			CHECK(*document->Fingerprint == *atStart);
+			const Result<ReplayFingerprint> atEnd = ComputeReplayFingerprint(session->GetScene(), session->GetScriptSchemas(), session->GetAssets());
+			REQUIRE(atEnd.has_value());
+			CHECK(atEnd->Entities.size() == atStart->Entities.size() + 1);
+			// The written replay carries it.
+			const auto text = ReplayToText(*document);
+			REQUIRE(text.has_value());
+			ReplayLoadReport report;
+			const auto read = ReplayFromText(*text, report, true);
+			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
+			CHECK(read->Fingerprint == document->Fingerprint);
+		}
+
+		// Decision 2 (the review of W19.1): a recording that cannot be fingerprinted is refused rather than written without the
+		// asset: Begin fails with the error of the referenced asset whose cooked hash cannot be taken (an import that failed),
+		// naming it, and records nothing.
+		TEST_CASE("ReplayRecorder: a session whose start fingerprint cannot be taken is refused, naming the asset")
+		{
+			RecordingFixture f;
+			const AssetHandle material(0x515);
+			f.Assets.Publish(material, AssetRef<Asset>(CreateRef<MaterialData>()), "Assets/Materials/Broken.material");
+			Entity box = f.Scene.GetScene().CreateEntityWithID(UUID(0x66), "Box");
+			box.AddComponent<MeshRendererComponent>(MeshRendererComponent{ .Mesh = {}, .Materials = { TypedAssetHandle<AssetType::Material>(material) } });
+			f.Assets.FailCookedHash(material, ErrorCode::ImportFailed);
+			auto session = f.Create();
+			ReplayRecorder recorder;
+			const Status refused = recorder.Begin(f.Header, *session);
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::ImportFailed);
+			CHECK(refused.error().ToString().find("Assets/Materials/Broken.material") != std::string::npos);
 			CHECK_FALSE(recorder.IsRecording());
 		}
 

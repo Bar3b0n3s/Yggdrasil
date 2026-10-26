@@ -20,7 +20,7 @@
 //          [--id-seed <n>]] [--upgrade] [--dump-reference <dir>] [--bake-engine-assets] [--engine-cache-dir <dir>]
 //          [--check-scripts] [--run-tests [--filter <pattern>] [--junit <file.xml>]]
 //          [--export <dir> --config Debug|Release|Dist [--testing] [--smoke-test] [--export-report <file.json>]]
-//          [--export-root <dir>]
+//          [--export-root <dir>] [--headless-game-view]
 // plus the engine options every application takes (GetEngineCommandLineOptions: --headless, --frames N,
 // --user-data-dir, --renderer vulkan|none and the graphics options) and the Editor executable's screenshot options
 // (Editor/EditorApp.h). --renderer is an engine option because the Runtime takes it too (§13.9; ADR 0009 decision 3:
@@ -46,9 +46,18 @@ namespace Engine {
 		// --strict (§6 "Strict reader"; the M15 completion review's A024): every project this editor opens, through --project,
 		// project.open, project.create or recovery, is read strictly: unknown keys in the .eproj, and unknown keys, fields
 		// and components (and unresolvable or mismatching script field values) in its scenes and prefabs, are errors
-		// instead of warnings (EditorContextSpecification::StrictUnknowns). CI's feature, determinism and export runs pass
-		// it over the committed FeatureTest. Combines with every other option.
+		// instead of warnings (EditorContextSpecification::StrictUnknowns), and a settings patch
+		// (ProjectSettingsCommand::CreateFromPatch: project.setSettings, the inspector) naming a member the settings do not
+		// have is refused instead of dropped with a warning. CI's feature, determinism and export runs pass it over the
+		// committed FeatureTest. Combines with every other option.
 		bool Strict = false;
+		// M19 --headless-game-view (Docs/Decisions/0030-m19-contract.md decision 11, R-SOAK), only with the engine option
+		// --headless (InvalidArgument otherwise): the headless editor renders the Game view every frame as if its panel were
+		// displayed, at the project's Window.Width x Window.Height (viewport.setOptions' gameResolution when one is set), the
+		// size lockstep and replay sessions use as view coordinates, so the game camera's passes and post-processing run
+		// while it plays and stats.get reports the "game" view. The hardening soak launches its editors with it, so the
+		// editor soak renders each scene's game view. Without it a headless editor renders only the views its panels display.
+		bool HeadlessGameView = false;
 		// --automation[=port]: start the automation server listening (§13.2). --headless listens too, except in one-shot
 		// runs (IsOneShot; EditorApp.h, AutomationServerSpecification::Listen).
 		bool Automation = false;

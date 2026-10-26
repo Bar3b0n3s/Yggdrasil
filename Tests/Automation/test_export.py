@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import struct
 import sys
 import unittest
 from pathlib import Path
@@ -77,6 +78,16 @@ def read_version_strings(executable: Path) -> dict[str, str]:
 def environment_warnings(report: dict[str, Any]) -> list[str]:
     """The warnings of an export report that mention environments."""
     return [warning for warning in report["warnings"] if "environment" in warning.lower()]
+
+
+def read_pak_toc(pak: Path) -> dict[str, Any]:
+    """The TOC of the pak at `pak` (Engine/Asset/PakFormat.h): the 64-byte little-endian header's TocOffset and TocSize
+    name the canonical JSON that ends the file."""
+    data = pak.read_bytes()
+    magic, _version, _count, toc_offset, toc_size, _toc_hash = struct.unpack_from("<8sIIQQQ", data, 0)
+    if magic != b"ENGPAK01":
+        raise ValueError(f"{pak} is not a pak")
+    return json.loads(data[toc_offset:toc_offset + toc_size].decode("utf-8"))
 
 
 class ExportTests(AutomationTestCase):
@@ -151,6 +162,11 @@ class ExportTests(AutomationTestCase):
         # Docs/Decisions/0026-m16-contract.md, friction S2-06: neither an exit code nor a SmokeTest timing without one.
         self.assertIsNone(report["smokeTestExitCode"])
         self.assertNotIn("SmokeTest", [timing["phase"] for timing in report["phaseTimings"]])
+        # No feature test ran (Docs/Decisions/0030-m19-contract.md decision 10): its row counts are all zero (the native
+        # test game's friction NT-10).
+        self.assertFalse(report["featureTest"]["ran"])
+        self.assertEqual(report["featureTest"]["counts"], {"total": 0, "passed": 0, "failed": 0, "error": 0,
+                                                           "timeout": 0, "skipped": 0, "quit": 0})
         # Nothing but the output directory is left beside it: the staging directory became the output.
         self.assertEqual([entry.name for entry in output.parent.iterdir()], [TINY_GAME_NAME])
 
@@ -252,14 +268,16 @@ class ExportTests(AutomationTestCase):
 
     def test_export_with_renderer_none_uses_prebaked_engine_cache(self) -> None:
         # §7.5, §7.6 (Roadmap M8; Docs/Decisions/0013-m8-decisions.md decision 9): without a device and without a bake,
-        # Engine.pak leaves the built-in environments out with a warning, and an export whose scenes reference one fails
-        # with the GPU hint; once a GPU run of --bake-engine-assets filled the engine cooked cache, an editor without a
-        # device exports them from it.
+        # an export whose scenes reference a built-in environment fails with the GPU hint; once a GPU run of
+        # --bake-engine-assets filled the engine cooked cache, an editor without a device exports it from it. Since M19
+        # (Docs/Decisions/0030-m19-contract.md decision 20) Engine.pak holds only the environments the game reaches, so
+        # the unreferenced ones are neither baked nor warned about.
         if not self.require_gpu():
             return
         client, root = self.open_tiny_game()  # --renderer none, this test's empty engine cache directory
         unbaked = export_tiny_game(client)
-        self.assertTrue(environment_warnings(unbaked), unbaked["warnings"])
+        self.assertEqual(environment_warnings(unbaked), [])
+        self.assertIn("engine://Environments/Studio", unbaked["reachability"]["prunedBuiltins"])
         client.call("entity.update", {"entity": "/Camera", "components": {"Camera": {"Clear": "Skybox"}}})
         client.call("entity.create", {"name": "World", "components": {
             "Environment": {"Environment": "engine://Environments/Studio"}}})
@@ -283,8 +301,91 @@ class ExportTests(AutomationTestCase):
         client = self.connect(self.start_editor(project=root))  # --renderer none, the same engine cache directory
         baked = export_tiny_game(client)
         self.assertFalse(environment_warnings(baked), baked["warnings"])
-        # Engine.pak holds the two built-in environments (Studio and Sky) besides what the unbaked export had.
-        self.assertEqual(baked["engineEntryCount"], unbaked["engineEntryCount"] + 2)
+        # Engine.pak holds the referenced Studio besides what the unbaked export had; Sky, which nothing reaches, stays
+        # out.
+        self.assertEqual(baked["engineEntryCount"], unbaked["engineEntryCount"] + 1)
+        builtins = {entry["path"]: entry for entry in baked["reachability"]["engineBuiltins"]}
+        studio = builtins["engine://Environments/Studio"]
+        self.assertEqual((studio["reason"], studio["from"]), ("Dependency", TINY_SCENE))
+        self.assertIn("engine://Environments/Sky", baked["reachability"]["prunedBuiltins"])
+
+    def test_engine_pak_holds_only_the_built_ins_the_game_reaches(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decisions 19 and 20 (B-PRUNE-ENG): Engine.pak holds the built-ins the
+        # exported game asks for by handle and those its assets reach, here the Coin preset through a script field and
+        # the Hit preset through a literal Assets.Load; the environments and the other presets stay out, and
+        # project.export's reachability says why each built-in is there.
+        client, _ = self.open_tiny_game()
+        client.call("script.write", {"path": "Assets/Scripts/Sounds.luau", "source":
+                    'local Sounds = {Fields = {Clip = Field.Asset("AudioClip")}}; '
+                    'function Sounds.OnStart(self: any) local hit = Assets.Load("engine://Audio/Hit"); '
+                    'if hit ~= nil and self.Clip ~= nil then Audio.PlayOneShot(hit) end end; '
+                    'return Script.Define("Sounds", Sounds)'})
+        client.call("entity.update", {"entity": "/Cube", "components": {
+            "Script": {"Script": "Assets/Scripts/Sounds.luau", "Fields": {"Clip": "engine://Audio/Coin"}}}})
+        client.call("scene.save")
+        report = export_tiny_game(client)
+        reachability = report["reachability"]
+        self.assertFalse(reachability["pruned"])
+        self.assertEqual(reachability["computedLoads"], [])
+        builtins = {entry["path"]: entry for entry in reachability["engineBuiltins"]}
+        self.assertEqual(list(builtins), ["engine://Audio/Coin", "engine://Audio/Hit", "engine://Fonts/Default",
+                                          "engine://Textures/BlueNoise"])
+        self.assertEqual(builtins["engine://Textures/BlueNoise"]["reason"], "Required")
+        self.assertEqual(builtins["engine://Fonts/Default"]["reason"], "Required")
+        self.assertEqual((builtins["engine://Audio/Coin"]["reason"], builtins["engine://Audio/Coin"]["from"]),
+                         ("Dependency", TINY_SCENE))
+        hit = builtins["engine://Audio/Hit"]
+        self.assertEqual((hit["reason"], hit["from"], hit["line"]), ("LiteralLoad", "Assets/Scripts/Sounds.luau", 1))
+        for pruned in ("engine://Audio/Win", "engine://Environments/Sky", "engine://Environments/Studio"):
+            self.assertIn(pruned, reachability["prunedBuiltins"])
+        self.assertEqual(environment_warnings(report), [])
+        toc = read_pak_toc(package_resources(Path(report["outputDirectory"])) / "Data" / "Engine.pak")
+        packaged = sorted(entry["Path"] for entry in toc["Entries"] if entry["Handle"] is not None)
+        self.assertEqual(packaged, list(builtins))
+
+    def test_pruned_export_packages_what_the_start_scene_reaches_and_runs(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 21 (B-PRUNE-GAME): with Export.PruneUnreferenced,
+        # project.validate names the computed Assets.Load, Game.pak holds only what the start scene reaches,
+        # project.export reports why each asset is there and what it left out, and the pruned game passes its smoke
+        # test.
+        client, _ = self.open_tiny_game()
+        for name in ("Used", "Unused"):
+            client.call("asset.create", {"type": "Material", "path": f"Assets/Materials/{name}.material"})
+        client.call("script.write", {"path": "Assets/Scripts/Loader.luau", "source":
+                    'local Loader = {}; function Loader.OnStart(self: any) local name = "Unused"; '
+                    'local look = Assets.Load("Assets/Materials/" .. name .. ".material"); '
+                    'if look ~= nil then Log.Info("loaded") end end; return Script.Define("Loader", Loader)'})
+        client.call("entity.update", {"entity": "/Cube", "components": {
+            "MeshRenderer": {"Materials": ["Assets/Materials/Used.material"]},
+            "Script": {"Script": "Assets/Scripts/Loader.luau"}}})
+        client.call("scene.save")
+
+        def computed_loads() -> list[dict[str, Any]]:
+            return [diagnostic for diagnostic in client.call("project.validate", {})["diagnostics"]
+                    if diagnostic["code"] == "SCRIPT_COMPUTED_ASSET_LOAD"]
+
+        self.assertEqual(computed_loads(), [])
+        client.call("project.setSettings", {"patch": {"Export": {"PruneUnreferenced": True}}})
+        found = computed_loads()
+        self.assertEqual(len(found), 1)
+        self.assertEqual((found[0]["file"], found[0]["line"], found[0]["severity"]),
+                         ("Assets/Scripts/Loader.luau", 1, "Warning"))
+
+        report = export_tiny_game(client, smoke_test=True)
+        reachability = report["reachability"]
+        self.assertTrue(reachability["pruned"])
+        packaged = {entry["path"]: entry for entry in reachability["gameAssets"]}
+        self.assertEqual(list(packaged), ["Assets/Materials/Used.material", "Assets/Scenes/Main.scene",
+                                          "Assets/Scripts/Loader.luau"])
+        self.assertEqual(packaged["Assets/Scenes/Main.scene"]["reason"], "StartScene")
+        for path in ("Assets/Materials/Used.material", "Assets/Scripts/Loader.luau"):
+            self.assertEqual((packaged[path]["reason"], packaged[path]["from"]), ("Dependency", TINY_SCENE), path)
+        self.assertEqual(reachability["prunedAssets"], ["Assets/Materials/Unused.material"])
+        self.assertEqual([(load["script"], load["line"]) for load in reachability["computedLoads"]],
+                         [("Assets/Scripts/Loader.luau", 1)])
+        self.assertEqual(report["gameAssetCount"], 3)
+        self.assertTrue(report["smokeTestRan"])
+        self.assertEqual(report["smokeTestExitCode"], EXIT_SUCCESS)
 
     def test_export_validates_the_project_and_its_params(self) -> None:
         client = self.connect(self.start_editor())

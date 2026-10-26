@@ -16,8 +16,8 @@
           201140           201140       40     1                 Engine::Utils::PrefixPointers(Engine::Error const&, std::basic_string_view<char, std::char_traits<char> >)
           201180           201180       40    16         /build/bin/Dist-linux-x86_64/Luau/libLuau.a(lapi.o):(.text.lua_pushnumber)
           201180           201180       40     1                 lua_pushnumber
-          2011c0           2011c0       40    16         /build/bin/Dist-linux-x86_64/Luau/libLuau.a(Compiler.o):(.text._ZN4Luau7compileERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEERKNS_14CompileOptionsERKNS_12ParseOptionsEPNS_15BytecodeEncoderE)
-          2011c0           2011c0       40     1                 Luau::compile(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, Luau::CompileOptions const&, Luau::ParseOptions const&, Luau::BytecodeEncoder*)
+          2011c0           2011c0       40    16         /build/bin/Dist-linux-x86_64/Luau/libLuau.a(Parser.o):(.text._ZN4Luau6Parser9parseTypeEPKcmRNS_12AstNameTableERNS_9AllocatorENS_12ParseOptionsE)
+          2011c0           2011c0       40     1                 Luau::Parser::parseType(char const*, unsigned long, Luau::AstNameTable&, Luau::Allocator&, Luau::ParseOptions)
           201200           201200       40    16         /build/bin/Dist-linux-x86_64/Engine/libEngine.a(TextureImporter.o):(.text._ZNK6Engine15TextureImporter6ImportERNS_13ImportContextE)
           201200           201200       40     1                 Engine::TextureImporter::Import(Engine::ImportContext&) const
           201240           201240       40    16         /build/bin/Dist-linux-x86_64/Engine/libEngine.a(PakWriter.o):(.text._ZN6Engine9PakWriter5WriteERKNSt10filesystem7__cxx114pathE)

@@ -801,7 +801,8 @@ namespace Engine {
 
 		// Each glyph's font dictionary as stbtt__cid_get_glyph_subrs finds it in the FDSelect at `offset`: format 0 (one
 		// font dictionary per glyph) or format 3 (ranges with increasing first glyphs, then a sentinel), inside the CFF table
-		// and naming only font dictionaries the FDArray has; -1 for a glyph no range covers.
+		// and naming only font dictionaries the FDArray has; -1 for a glyph no range covers, which CheckCharstring refuses
+		// once the glyph calls a local subroutine.
 		[[nodiscard]] static Result<std::vector<int32_t>> ReadCffGlyphFonts(const FontBytes& cff, uint64_t offset, uint16_t glyphCount, uint32_t fontCount)
 		{
 			std::vector<int32_t> fonts(glyphCount, -1);
@@ -863,9 +864,10 @@ namespace Engine {
 		// Runs glyph `glyph`'s charstring as stbtt__run_charstring runs it, without drawing: the same operand stack, hint
 		// counting, subroutine calls and returns, and the same points where it stops (an operator without enough operands, a
 		// missing subroutine, nesting deeper than 10, endchar, the end of the code). Errors: ImportFailed for a hint mask that
-		// would run past the end of its charstring or subroutine, which stb_truetype asserts on, for a line or curve before
-		// the first moveto (DrawsBeforeMove), and for a glyph that runs more than MaxCharstringOperations operators and
-		// operands, or pushes the font past MaxCffFontOperations.
+		// would run past the end of its charstring or subroutine, which stb_truetype asserts on, as it does on a CID font's
+		// local subroutine call from a glyph its FDSelect gives no font dictionary, for a line or curve before the first
+		// moveto (DrawsBeforeMove), and for a glyph that runs more than MaxCharstringOperations operators and operands, or
+		// pushes the font past MaxCffFontOperations.
 		[[nodiscard]] static Status CheckCharstring(const CffOutlines& cff, uint32_t glyph, uint64_t& fontOperations)
 		{
 			ENGINE_TRY_ASSIGN(const std::span<const std::byte> charstring, GetCffIndexElement(cff.CharStrings, glyph));
@@ -878,7 +880,6 @@ namespace Engine {
 			bool inHeader = true;
 			bool moved = false; // a moveto has started the outline
 			bool hasSubrs = false;
-			const CffIndex empty{};
 			const CffIndex* subrs = &cff.Subrs;
 			uint32_t operations = 0;
 			while (!code.AtEnd())
@@ -978,10 +979,18 @@ namespace Engine {
 					case 0x0A: // callsubr
 						if (!hasSubrs)
 						{
+							// A CID font's glyph takes its local subroutines from the font dictionary its FDSelect gives it,
+							// looked up before any operand is read. stb_truetype asserts on a glyph the FDSelect leaves without
+							// one (stbtt__cid_get_glyph_subrs reads FDArray element -1).
 							if (cff.IsCid)
 							{
 								const int32_t font = glyph < cff.GlyphFonts.size() ? cff.GlyphFonts[glyph] : -1;
-								subrs = font >= 0 ? &cff.FontSubrs[static_cast<size_t>(font)] : &empty;
+								if (font < 0)
+								{
+									return MakeError(ErrorCode::ImportFailed,
+										"the font's CFF FDSelect gives glyph {} no font dictionary, but its charstring calls a local subroutine", glyph);
+								}
+								subrs = &cff.FontSubrs[static_cast<size_t>(font)];
 							}
 							hasSubrs = true;
 						}
@@ -1051,8 +1060,9 @@ namespace Engine {
 		// CFF outlines as stbtt_InitFont reads them, and every glyph's charstring as its interpreter runs it: the header, the
 		// Name, Top DICT (at least one), String and Global Subr INDEXes in sequence, the first Top DICT with its CharStrings
 		// (Type 2, at least one per glyph), its Private DICT's local subroutines, and for a CID font (FDArray and FDSelect)
-		// each font dictionary's local subroutines and an FDSelect naming font dictionaries the FDArray has, every structure
-		// inside the table and every DICT operand stb_truetype reads an integer.
+		// each font dictionary's local subroutines and an FDSelect naming font dictionaries the FDArray has (and one for
+		// every glyph that calls a local subroutine, CheckCharstring), every structure inside the table and every DICT
+		// operand stb_truetype reads an integer.
 		[[nodiscard]] static Status ValidateCffOutlines(const FontBytes& cff, uint16_t glyphCount)
 		{
 			if (cff.GetSize() > CffMaxTableSize)

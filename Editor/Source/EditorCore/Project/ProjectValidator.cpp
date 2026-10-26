@@ -19,6 +19,7 @@
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Core/PathGlob.h"
 #include "Engine/Core/UUIDGenerator.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Physics/PhysicsDiagnostics.h"
@@ -44,6 +45,7 @@
 #include "Engine/Scene/RenderAnnotations.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Scripting/ScriptAssetLoads.h"
 
 #include <nlohmann/json.hpp>
 
@@ -122,6 +124,8 @@ namespace Engine {
 			BuildStartSceneMissingCode,
 			BuildSceneMissingCode,
 			TestSuiteInvalidCode,
+			// M19 (Engine/Scripting/ScriptAssetLoads.h, Docs/Decisions/0030-m19-contract.md decision 21).
+			ScriptComputedAssetLoadCode,
 		};
 
 		// The documentation of every code, in ValidatorCodes order (M14, ADR 0022 decision 10): Docs/Reference/Validation.md, the
@@ -270,6 +274,11 @@ namespace Engine {
 			ValidationCodeInfo{ TestSuiteInvalidCode, "Error", false,
 				"A Testing.Suites entry names a script that is not a TestSuite, or a scene that is not a registered Scene asset.",
 				"Assign a script that returns Test.Suite, and create the scene or leave Scene empty for an empty test scene." },
+			ValidationCodeInfo{ ScriptComputedAssetLoadCode, "Warning", false,
+				"With Export.PruneUnreferenced on, a script below Assets/ that Export.Exclude leaves in passes Assets.Load a reference it computes, "
+				"which a pruned export cannot follow, so an asset only that call names is left out of Game.pak. A script that Export.Exclude leaves "
+				"out is not checked, even when a testing export packages it as test content.",
+				"Pass the path as a string literal, reference the asset from a component or a script field, or turn Export.PruneUnreferenced off." },
 		};
 
 		// The code documentation lists exactly the codes, in order.
@@ -1636,6 +1645,56 @@ namespace Engine {
 			return {};
 		}
 
+		// SCRIPT_COMPUTED_ASSET_LOAD (M19, Docs/Decisions/0030-m19-contract.md decision 21): with Export.PruneUnreferenced on,
+		// every computed load (FindScriptAssetLoads) of a script below Assets/ (every .luau file there, as CheckScriptSources
+		// finds them, since an export refreshes the registry first) that Export.Exclude leaves in, at its line (subject
+		// "<line>:<column>"), since a pruned export cannot follow it. A script that does not parse adds nothing: its
+		// SCRIPT_COMPILE_ERROR says why.
+		static Status CheckComputedAssetLoads(const EditorContext& editor, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			const ExportSettings& exportSettings = editor.GetProject().GetSettings().Export;
+			if (!exportSettings.PruneUnreferenced)
+				return {};
+			ENGINE_TRY_ASSIGN(const VfsPath root, VfsPath::Create("project", "Assets"));
+			if (!editor.GetVfs().Exists(root))
+				return {};
+			ENGINE_TRY_ASSIGN(const auto entries, editor.GetVfs().List(root, true));
+			const EditorScriptService* service = editor.GetScriptService();
+			for (const auto& entry : entries)
+			{
+				if (entry.Info.IsDirectory || entry.Path.GetExtension() != ".luau")
+					continue;
+				const std::string path(entry.Path.GetPath());
+				const bool excluded = std::ranges::any_of(exportSettings.Exclude, [&path](const std::string& glob)
+				{
+					return MatchesPathGlob(glob, path);
+				});
+				if (excluded)
+					continue;
+				if (service == nullptr)
+					return MakeError(ErrorCode::InvalidState, "script validation service is unavailable");
+				ENGINE_TRY_ASSIGN(const std::string source, service->Read(entry.Path));
+				const Result<std::vector<ScriptAssetLoad>> loads = FindScriptAssetLoads(source, path);
+				if (!loads.has_value())
+					continue;
+				for (const ScriptAssetLoad& load : *loads)
+				{
+					if (load.Literal)
+						continue;
+					const DiagnosticSite site{ .File = path, .Subject = std::format("{}:{}", load.Line, load.Column) };
+					auto finding = MakeDiagnostic(ScriptComputedAssetLoadCode, DiagnosticSeverity::Warning,
+						std::format("Assets.Load is used at {}:{} with a reference the script computes, or in a way the export cannot follow, so a "
+									"pruned export (Export.PruneUnreferenced) leaves out an asset only this use names",
+							load.Line, load.Column),
+						site, "pass the path as a string literal, reference the asset from a component or a script field, or turn Export.PruneUnreferenced off",
+						false);
+					finding.Diagnostic.Line = load.Line;
+					diagnostics.push_back(std::move(finding));
+				}
+			}
+			return {};
+		}
+
 		// The project's physics layer table (PhysicsSettings), which the physics checks resolve layer names against; nullopt,
 		// logged, when the settings give none (a loaded project's always do: its settings passed the same rules).
 		static std::optional<PhysicsLayerTable> MakePhysicsLayers(const EditorContext& context)
@@ -1677,6 +1736,7 @@ namespace Engine {
 			if (scope == ValidationScope::Project)
 			{
 				CheckSettings(context, diagnostics);
+				ENGINE_TRY(CheckComputedAssetLoads(context, diagnostics));
 				ENGINE_TRY_ASSIGN(collection.Scanned, ScanAssets(context, diagnostics));
 				CollectImportDiagnostics(context, diagnostics);
 				CheckAssetFiles(context, diagnostics);

@@ -315,6 +315,64 @@ return true
 			CHECK(fixture.RequestedParameters == expected);
 			CHECK(fixture.ExternalMutations.size() == 1);
 		}
+		// The native test game's friction NT-08: a value that is not JSON (script.eval's result here, as for every Luau to JSON
+		// conversion) is refused with ErrorCode::Script naming its Luau type (an engine value by its type name) and where it
+		// lies in the returned value, so a builder sees what to unpack.
+		TEST_CASE("LuaHelpers: a value that is not JSON is refused naming its Luau type and its place in the value")
+		{
+			Test::ScriptTestFixture fixture;
+			REQUIRE(fixture.Start());
+			const auto refusal = [&fixture](std::string_view source)
+			{
+				Test::ExpectLog expected(LogLevel::Error, "is not a JSON scalar or table");
+				const auto result = fixture.Evaluate(source);
+				REQUIRE_FALSE(result.has_value());
+				CHECK(result.error().GetCode() == ErrorCode::Script);
+				return result.error().GetMessageText();
+			};
+			const std::string vector = refusal("return {1, vector.create(1, 2, 3)}");
+			CHECK(vector.contains("vector"));
+			CHECK(vector.contains("[2]"));
+			const std::string quat = refusal("return {Pose = {Speed = 1, Rotation = Quat.New(0, 0, 0, 1)}}");
+			CHECK(quat.contains("Quat"));
+			CHECK(quat.contains("Pose.Rotation"));
+			const std::string quoted = refusal("return {[\"two words\"] = {function() end}}");
+			CHECK(quoted.contains("function"));
+			CHECK(quoted.contains("[\"two words\"][1]"));
+			// A reserved word is no field name in Luau (Pose.end does not parse), so it is quoted like any other key.
+			const std::string reserved = refusal("return {Pose = {[\"end\"] = {vector.create(1, 2, 3)}}}");
+			CHECK(reserved.contains("Pose[\"end\"][1]"));
+			const std::string root = refusal("return vector.create(1, 2, 3)");
+			CHECK(root.contains("vector"));
+			CHECK_FALSE(root.contains("["));
+			const auto unpacked = fixture.Evaluate("local v = vector.create(1, 2, 3)\nreturn {1, {v.x, v.y, v.z}}");
+			REQUIRE_MESSAGE(unpacked.has_value(), (unpacked ? "" : unpacked.error().ToString()));
+			CHECK(unpacked->Value.Get() == Json::array({ 1, Json::array({ 1, 2, 3 }) }));
+		}
+		// The bounds of that path: a value deeper than 8 levels shows its innermost 8 after "...", a key longer than 32 bytes is
+		// cut at a UTF-8 boundary and marked "...", and a quoted key shows a control byte as a Luau "\xNN" escape.
+		TEST_CASE("LuaHelpers: a conversion error's path keeps the innermost levels, cuts long keys and escapes control bytes")
+		{
+			Test::ScriptTestFixture fixture;
+			REQUIRE(fixture.Start());
+			const auto refusal = [&fixture](std::string_view source)
+			{
+				Test::ExpectLog expected(LogLevel::Error, "is not a JSON scalar or table");
+				const auto result = fixture.Evaluate(source);
+				REQUIRE_FALSE(result.has_value());
+				CHECK(result.error().GetCode() == ErrorCode::Script);
+				return result.error().GetMessageText();
+			};
+			const std::string deep = refusal("return {{{{{{{{{{vector.create(1, 2, 3)}}}}}}}}}}");
+			CHECK(deep.contains("vector value at ...[1][1][1][1][1][1][1][1] is not"));
+			const std::string longKey = refusal("return {[string.rep(\"k\", 40) .. \" x\"] = vector.create(1, 2, 3)}");
+			CHECK(longKey.contains(std::format("at [\"{}...\"] is not", std::string(32, 'k'))));
+			// "\195\169" is the two bytes of U+00E9, whose second byte would be the 33rd: the cut keeps neither.
+			const std::string utf8Key = refusal("return {[string.rep(\"k\", 31) .. \"\\195\\169 x\"] = vector.create(1, 2, 3)}");
+			CHECK(utf8Key.contains(std::format("at [\"{}...\"] is not", std::string(31, 'k'))));
+			const std::string control = refusal("return {[\"a\\1b\"] = vector.create(1, 2, 3)}");
+			CHECK(control.contains(R"(at ["a\x01b"] is not)"));
+		}
 		TEST_CASE("LuaHelpers: scene JSON budgets reject expansion before host mutation and recover for valid aliases")
 		{
 			Test::ScriptTestFixtureSpecification specification{};

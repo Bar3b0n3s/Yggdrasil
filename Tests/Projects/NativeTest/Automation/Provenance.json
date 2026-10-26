@@ -1,0 +1,166 @@
+{
+	"Format": "Provenance",
+	"Version": 1,
+	"Entries": [
+		{
+			"Path": ".luaurc",
+			"XXH64": "56824d2dd3716720",
+			"Method": "project.create",
+			"RequestId": 2,
+			"Client": "engine-mcp",
+			"TranscriptLine": 1
+		},
+		{
+			"Path": "Assets/Materials/Bumper.material",
+			"XXH64": "5f711809017f5b31",
+			"Method": "edit.batch",
+			"RequestId": 44,
+			"Client": "engine-mcp",
+			"TranscriptLine": 81
+		},
+		{
+			"Path": "Assets/Materials/Bumper.material.meta",
+			"XXH64": "b956c38e3021452a",
+			"Method": "edit.batch",
+			"RequestId": 35,
+			"Client": "engine-mcp",
+			"TranscriptLine": 63
+		},
+		{
+			"Path": "Assets/Materials/Ground.material",
+			"XXH64": "1cac6f12035f8054",
+			"Method": "edit.batch",
+			"RequestId": 44,
+			"Client": "engine-mcp",
+			"TranscriptLine": 81
+		},
+		{
+			"Path": "Assets/Materials/Ground.material.meta",
+			"XXH64": "3b7b4142f984fcb1",
+			"Method": "edit.batch",
+			"RequestId": 35,
+			"Client": "engine-mcp",
+			"TranscriptLine": 63
+		},
+		{
+			"Path": "Assets/Materials/Spinner.material",
+			"XXH64": "8e42aea0a0af0842",
+			"Method": "edit.batch",
+			"RequestId": 44,
+			"Client": "engine-mcp",
+			"TranscriptLine": 81
+		},
+		{
+			"Path": "Assets/Materials/Spinner.material.meta",
+			"XXH64": "7e9e4f617acd905f",
+			"Method": "edit.batch",
+			"RequestId": 35,
+			"Client": "engine-mcp",
+			"TranscriptLine": 63
+		},
+		{
+			"Path": "Assets/Scenes/Main.scene",
+			"XXH64": "11b261dfa1a6101a",
+			"Method": "scene.save",
+			"RequestId": 46,
+			"Client": "engine-mcp",
+			"TranscriptLine": 85
+		},
+		{
+			"Path": "Assets/Scenes/Main.scene.meta",
+			"XXH64": "ce70d894429d1d1f",
+			"Method": "project.create",
+			"RequestId": 2,
+			"Client": "engine-mcp",
+			"TranscriptLine": 1
+		},
+		{
+			"Path": "Assets/Tests/Bumper.test.luau",
+			"XXH64": "d84dedb642d93d33",
+			"Method": "script.write",
+			"RequestId": 62,
+			"Client": "engine-mcp",
+			"TranscriptLine": 117
+		},
+		{
+			"Path": "Assets/Tests/Bumper.test.luau.meta",
+			"XXH64": "3055c5c536563a11",
+			"Method": "script.write",
+			"RequestId": 62,
+			"Client": "engine-mcp",
+			"TranscriptLine": 117
+		},
+		{
+			"Path": "Assets/Tests/Record/SpinAndBump.test.luau",
+			"XXH64": "3c21e57e4233c525",
+			"Method": "script.write",
+			"RequestId": 63,
+			"Client": "engine-mcp",
+			"TranscriptLine": 119
+		},
+		{
+			"Path": "Assets/Tests/Record/SpinAndBump.test.luau.meta",
+			"XXH64": "d38fc382856799f6",
+			"Method": "script.write",
+			"RequestId": 63,
+			"Client": "engine-mcp",
+			"TranscriptLine": 119
+		},
+		{
+			"Path": "Assets/Tests/Replays/SpinAndBump.replay",
+			"XXH64": "724dde3f7fad68c1",
+			"Method": "test.run",
+			"RequestId": 66,
+			"Client": "engine-mcp",
+			"TranscriptLine": 125
+		},
+		{
+			"Path": "Assets/Tests/Replays/SpinAndBump.replay.meta",
+			"XXH64": "38ea6fc4cc2efa5c",
+			"Method": "test.run",
+			"RequestId": 66,
+			"Client": "engine-mcp",
+			"TranscriptLine": 125
+		},
+		{
+			"Path": "Assets/Tests/Spinner.test.luau",
+			"XXH64": "f15a3428b5b8df3a",
+			"Method": "script.write",
+			"RequestId": 61,
+			"Client": "engine-mcp",
+			"TranscriptLine": 115
+		},
+		{
+			"Path": "Assets/Tests/Spinner.test.luau.meta",
+			"XXH64": "6e4362f8f4afb6f0",
+			"Method": "script.write",
+			"RequestId": 61,
+			"Client": "engine-mcp",
+			"TranscriptLine": 115
+		},
+		{
+			"Path": "Native/NativeTest.cpp",
+			"XXH64": "b6d991a3bb4e7ab1",
+			"Method": "native.write",
+			"RequestId": 30,
+			"Client": "engine-mcp",
+			"TranscriptLine": 53
+		},
+		{
+			"Path": "Native/NativeTest.h",
+			"XXH64": "afae0be0cc943a2e",
+			"Method": "native.write",
+			"RequestId": 26,
+			"Client": "engine-mcp",
+			"TranscriptLine": 45
+		},
+		{
+			"Path": "NativeTest.eproj",
+			"XXH64": "c48aa674116afb8c",
+			"Method": "project.setSettings",
+			"RequestId": 64,
+			"Client": "engine-mcp",
+			"TranscriptLine": 121
+		}
+	]
+}

@@ -16,6 +16,8 @@
 #include <array>
 #include <format>
 #include <limits>
+#include <set>
+#include <string_view>
 
 namespace Engine {
 
@@ -352,6 +354,198 @@ namespace Engine {
 			return e;
 		}
 
+		// --- The start fingerprint (version 3; Docs/Decisions/0030-m19-contract.md decision 2) --------------------------
+
+		Status ValidateFingerprint(const ReplayFingerprint& fingerprint)
+		{
+			if (fingerprint.Entities.size() > std::numeric_limits<uint32_t>::max() || fingerprint.Assets.size() > std::numeric_limits<uint32_t>::max())
+				return std::unexpected(Invalid("/Fingerprint", "fingerprint item count exceeds format limit"));
+			UUID previous{};
+			for (size_t i = 0; i < fingerprint.Entities.size(); ++i)
+			{
+				const ReplayEntityFingerprint& entity = fingerprint.Entities[i];
+				const std::string pointer = std::format("/Fingerprint/Entities/{}", i);
+				if (!entity.Entity.IsValid() || (i > 0 && entity.Entity.GetValue() <= previous.GetValue()))
+					return std::unexpected(Invalid(pointer + "/Id", "fingerprint entities need valid ids in strictly increasing order"));
+				previous = entity.Entity;
+				ENGINE_TRY(Text(entity.Path, pointer + "/Path"));
+				ENGINE_TRY(Hash(entity.Hash, pointer + "/Hash"));
+				if (entity.Components.size() > std::numeric_limits<uint32_t>::max())
+					return std::unexpected(Invalid(pointer + "/Components", "fingerprint component count exceeds format limit"));
+				std::set<std::string_view> names;
+				for (const ReplayComponentFingerprint& component : entity.Components)
+				{
+					const std::string componentPointer = JsonReader::AppendPointer(pointer + "/Components", component.Component);
+					ENGINE_TRY(Text(component.Component, pointer + "/Components", true));
+					if (!names.insert(component.Component).second)
+						return std::unexpected(Invalid(componentPointer, std::format("component '{}' is listed twice", component.Component)));
+					ENGINE_TRY(Hash(component.Hash, componentPointer));
+				}
+			}
+			AssetHandle previousHandle{};
+			for (size_t i = 0; i < fingerprint.Assets.size(); ++i)
+			{
+				const ReplayAssetFingerprint& asset = fingerprint.Assets[i];
+				const std::string pointer = std::format("/Fingerprint/Assets/{}", i);
+				if (!asset.Handle.IsValid() || (i > 0 && asset.Handle.GetValue() <= previousHandle.GetValue()))
+					return std::unexpected(Invalid(pointer + "/Handle", "fingerprint assets need valid handles in strictly increasing order"));
+				previousHandle = asset.Handle;
+				ENGINE_TRY(Text(asset.Path, pointer + "/Path"));
+				ENGINE_TRY(Text(asset.Type, pointer + "/Type", true));
+				ENGINE_TRY(Hash(asset.Hash, pointer + "/Hash"));
+			}
+			return {};
+		}
+
+		Json FingerprintJson(const ReplayFingerprint& fingerprint)
+		{
+			Json entities = Json::array();
+			for (const ReplayEntityFingerprint& entity : fingerprint.Entities)
+			{
+				Json components = Json::object();
+				for (const ReplayComponentFingerprint& component : entity.Components)
+					components[component.Component] = component.Hash;
+				entities.push_back({ { "Id", entity.Entity.ToString() }, { "Path", entity.Path }, { "Hash", entity.Hash }, { "Components", std::move(components) } });
+			}
+			Json assets = Json::array();
+			for (const ReplayAssetFingerprint& asset : fingerprint.Assets)
+				assets.push_back({ { "Handle", asset.Handle.ToString() }, { "Path", asset.Path }, { "Type", asset.Type }, { "Hash", asset.Hash } });
+			return { { "Entities", std::move(entities) }, { "Assets", std::move(assets) } };
+		}
+
+		Result<std::optional<ReplayFingerprint>> ReadFingerprint(const JsonReader& reader, ReplayLoadReport& report, bool strict)
+		{
+			if (reader.IsNull())
+				return std::optional<ReplayFingerprint>();
+			ENGINE_TRY(reader.ExpectType(JsonType::Object));
+			constexpr std::array<std::string_view, 2> Keys = { "Entities", "Assets" };
+			ENGINE_TRY(Unknown(reader, Keys, report, strict));
+			ReplayFingerprint fingerprint;
+			ENGINE_TRY_ASSIGN(const JsonReader entities, reader.GetMember("Entities"));
+			ENGINE_TRY_ASSIGN(const size_t entityCount, entities.GetArraySize());
+			constexpr std::array<std::string_view, 4> EntityKeys = { "Id", "Path", "Hash", "Components" };
+			for (size_t i = 0; i < entityCount; ++i)
+			{
+				ENGINE_TRY_ASSIGN(const JsonReader item, entities.GetElement(i));
+				ENGINE_TRY(Unknown(item, EntityKeys, report, strict));
+				ReplayEntityFingerprint entity;
+				ENGINE_TRY_ASSIGN(entity.Entity, item.ReadMember<UUID>("Id"));
+				ENGINE_TRY_ASSIGN(entity.Path, item.ReadMember<std::string>("Path"));
+				ENGINE_TRY_ASSIGN(entity.Hash, item.ReadMember<std::string>("Hash"));
+				ENGINE_TRY_ASSIGN(const JsonReader components, item.GetMember("Components"));
+				ENGINE_TRY(components.ExpectType(JsonType::Object));
+				// In the file's order, one pass: a member lookup by name would make a long list quadratic.
+				const Json& members = components.GetValue();
+				for (auto member = members.begin(); member != members.end(); ++member)
+				{
+					ReplayComponentFingerprint component;
+					component.Component = member.key();
+					ENGINE_TRY_ASSIGN(component.Hash, JsonReader(member.value(), JsonReader::AppendPointer(components.GetPointer(), member.key())).ReadString());
+					entity.Components.push_back(std::move(component));
+				}
+				fingerprint.Entities.push_back(std::move(entity));
+			}
+			ENGINE_TRY_ASSIGN(const JsonReader assets, reader.GetMember("Assets"));
+			ENGINE_TRY_ASSIGN(const size_t assetCount, assets.GetArraySize());
+			constexpr std::array<std::string_view, 4> AssetKeys = { "Handle", "Path", "Type", "Hash" };
+			for (size_t i = 0; i < assetCount; ++i)
+			{
+				ENGINE_TRY_ASSIGN(const JsonReader item, assets.GetElement(i));
+				ENGINE_TRY(Unknown(item, AssetKeys, report, strict));
+				ReplayAssetFingerprint asset;
+				ENGINE_TRY_ASSIGN(asset.Handle, item.ReadMember<UUID>("Handle"));
+				ENGINE_TRY_ASSIGN(asset.Path, item.ReadMember<std::string>("Path"));
+				ENGINE_TRY_ASSIGN(asset.Type, item.ReadMember<std::string>("Type"));
+				ENGINE_TRY_ASSIGN(asset.Hash, item.ReadMember<std::string>("Hash"));
+				fingerprint.Assets.push_back(std::move(asset));
+			}
+			return std::optional<ReplayFingerprint>(std::move(fingerprint));
+		}
+
+		// The state and fingerprint hashes are validated before cooking, so each parses.
+		uint64_t HashValue(std::string_view hash)
+		{
+			return UUID::FromString(hash).value_or(UUID()).GetValue();
+		}
+
+		void WriteFingerprint(BinaryWriter& w, const std::optional<ReplayFingerprint>& fingerprint)
+		{
+			w.WriteU8(fingerprint.has_value() ? 1 : 0);
+			if (!fingerprint)
+				return;
+			w.WriteU32(static_cast<uint32_t>(fingerprint->Entities.size()));
+			for (const ReplayEntityFingerprint& entity : fingerprint->Entities)
+			{
+				w.WriteU64(entity.Entity.GetValue());
+				w.WriteString(entity.Path);
+				w.WriteU64(HashValue(entity.Hash));
+				w.WriteU32(static_cast<uint32_t>(entity.Components.size()));
+				for (const ReplayComponentFingerprint& component : entity.Components)
+				{
+					w.WriteString(component.Component);
+					w.WriteU64(HashValue(component.Hash));
+				}
+			}
+			w.WriteU32(static_cast<uint32_t>(fingerprint->Assets.size()));
+			for (const ReplayAssetFingerprint& asset : fingerprint->Assets)
+			{
+				w.WriteU64(asset.Handle.GetValue());
+				w.WriteString(asset.Path);
+				w.WriteString(asset.Type);
+				w.WriteU64(HashValue(asset.Hash));
+			}
+		}
+
+		Result<std::optional<ReplayFingerprint>> ReadFingerprint(BinaryReader& r)
+		{
+			ENGINE_TRY_ASSIGN(const uint8_t present, r.ReadU8());
+			if (present > 1)
+				return std::unexpected(Invalid("/Fingerprint", "invalid fingerprint tag"));
+			if (present == 0)
+				return std::optional<ReplayFingerprint>();
+			ReplayFingerprint fingerprint;
+			// The smallest entity record is 24 bytes (id, empty path, hash, no component), a component 12 and an asset 24.
+			ENGINE_TRY_ASSIGN(const uint32_t entityCount, r.ReadU32());
+			if (entityCount > r.GetRemaining() / 24)
+				return std::unexpected(Invalid("/Fingerprint/Entities", "fingerprint entity count exceeds remaining payload"));
+			for (uint32_t i = 0; i < entityCount; ++i)
+			{
+				ReplayEntityFingerprint entity;
+				ENGINE_TRY_ASSIGN(const uint64_t id, r.ReadU64());
+				entity.Entity = UUID(id);
+				ENGINE_TRY_ASSIGN(entity.Path, r.ReadString());
+				ENGINE_TRY_ASSIGN(const uint64_t hash, r.ReadU64());
+				entity.Hash = UUID(hash).ToString();
+				ENGINE_TRY_ASSIGN(const uint32_t componentCount, r.ReadU32());
+				if (componentCount > r.GetRemaining() / 12)
+					return std::unexpected(Invalid("/Fingerprint/Entities", "fingerprint component count exceeds remaining payload"));
+				for (uint32_t c = 0; c < componentCount; ++c)
+				{
+					ReplayComponentFingerprint component;
+					ENGINE_TRY_ASSIGN(component.Component, r.ReadString());
+					ENGINE_TRY_ASSIGN(const uint64_t componentHash, r.ReadU64());
+					component.Hash = UUID(componentHash).ToString();
+					entity.Components.push_back(std::move(component));
+				}
+				fingerprint.Entities.push_back(std::move(entity));
+			}
+			ENGINE_TRY_ASSIGN(const uint32_t assetCount, r.ReadU32());
+			if (assetCount > r.GetRemaining() / 24)
+				return std::unexpected(Invalid("/Fingerprint/Assets", "fingerprint asset count exceeds remaining payload"));
+			for (uint32_t i = 0; i < assetCount; ++i)
+			{
+				ReplayAssetFingerprint asset;
+				ENGINE_TRY_ASSIGN(const uint64_t handle, r.ReadU64());
+				asset.Handle = UUID(handle);
+				ENGINE_TRY_ASSIGN(asset.Path, r.ReadString());
+				ENGINE_TRY_ASSIGN(asset.Type, r.ReadString());
+				ENGINE_TRY_ASSIGN(const uint64_t hash, r.ReadU64());
+				asset.Hash = UUID(hash).ToString();
+				fingerprint.Assets.push_back(std::move(asset));
+			}
+			return std::optional<ReplayFingerprint>(std::move(fingerprint));
+		}
+
 	}
 
 	ReplayData::ReplayData()
@@ -413,6 +607,8 @@ namespace Engine {
 			previous = checkpoint.Tick;
 			ENGINE_TRY(Hash(checkpoint.StateHash, pointer + "/StateHash"));
 		}
+		if (d.Fingerprint)
+			ENGINE_TRY(ValidateFingerprint(*d.Fingerprint));
 		return {};
 	}
 
@@ -423,12 +619,18 @@ namespace Engine {
 		ReplayDocument d;
 		ENGINE_TRY_ASSIGN(const uint32_t fileVersion, root.ReadFormatHeader(ReplayFormatName, 1, ReplayFormatVersion));
 		report.FileVersion = fileVersion;
-		// Version 1 had no Checkpoints: it migrates to the current version with none (a member of that name is unknown there).
+		// Version 1 had no Checkpoints and versions 1 and 2 no Fingerprint: they migrate to the current version with none
+		// (a member of either name is unknown where its version has none).
 		d.Version = ReplayFormatVersion;
 		const bool hasCheckpoints = fileVersion >= 2;
-		constexpr std::array<std::string_view, 13> Keys = { "Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "Events", "Expect", "Checkpoints", "FinalTick", "FinalStateHash" };
+		const bool hasFingerprint = fileVersion >= ReplayFingerprintFormatVersion;
+		constexpr std::array<std::string_view, 14> Keys = { "Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "Fingerprint", "Events", "Expect", "Checkpoints", "FinalTick", "FinalStateHash" };
+		constexpr std::array<std::string_view, 13> KeysVersion2 = { "Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "Events", "Expect", "Checkpoints", "FinalTick", "FinalStateHash" };
 		constexpr std::array<std::string_view, 12> KeysVersion1 = { "Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "Events", "Expect", "FinalTick", "FinalStateHash" };
-		ENGINE_TRY(Unknown(root, hasCheckpoints ? std::span<const std::string_view>(Keys) : std::span<const std::string_view>(KeysVersion1), report, strictUnknowns));
+		const std::span<const std::string_view> known = hasFingerprint ? std::span<const std::string_view>(Keys)
+			: hasCheckpoints                                           ? std::span<const std::string_view>(KeysVersion2)
+																	   : std::span<const std::string_view>(KeysVersion1);
+		ENGINE_TRY(Unknown(root, known, report, strictUnknowns));
 		ENGINE_TRY_ASSIGN(auto scene, root.GetMember("Scene"));
 		constexpr std::array<std::string_view, 2> SceneKeys = { "Handle", "Path" };
 		ENGINE_TRY(Unknown(scene, SceneKeys, report, strictUnknowns));
@@ -442,6 +644,11 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(d.Header.FixedHz, root.ReadMember<uint32_t>("FixedHz"));
 		ENGINE_TRY_ASSIGN(d.Header.EngineVersion, root.ReadMember<std::string>("EngineVersion"));
 		ENGINE_TRY_ASSIGN(d.Header.Config, root.ReadMember<std::string>("Config"));
+		if (hasFingerprint)
+		{
+			ENGINE_TRY_ASSIGN(const JsonReader fingerprint, root.GetMember("Fingerprint"));
+			ENGINE_TRY_ASSIGN(d.Fingerprint, ReadFingerprint(fingerprint, report, strictUnknowns));
+		}
 		ENGINE_TRY_ASSIGN(d.FinalTick, root.ReadMember<uint64_t>("FinalTick"));
 		ENGINE_TRY_ASSIGN(d.FinalStateHash, root.ReadMember<std::string>("FinalStateHash"));
 		ENGINE_TRY_ASSIGN(auto events, root.GetMember("Events"));
@@ -493,7 +700,7 @@ namespace Engine {
 	Result<Json> ReplayToJson(const ReplayDocument& d)
 	{
 		ENGINE_TRY(ValidateReplayDocument(d));
-		Json j = { { "Format", ReplayFormatName }, { "Version", d.Version }, { "Scene", { { "Handle", d.Header.Scene.Handle.ToString() }, { "Path", d.Header.Scene.Path } } }, { "Parameters", d.Header.Parameters.IsNull() ? Json::object() : d.Header.Parameters.Get() }, { "Seed", d.Header.Seed }, { "FixedHz", d.Header.FixedHz }, { "EngineVersion", d.Header.EngineVersion }, { "Config", d.Header.Config }, { "Events", Json::array() }, { "Expect", Json::array() }, { "Checkpoints", Json::array() }, { "FinalTick", d.FinalTick }, { "FinalStateHash", d.FinalStateHash } };
+		Json j = { { "Format", ReplayFormatName }, { "Version", d.Version }, { "Scene", { { "Handle", d.Header.Scene.Handle.ToString() }, { "Path", d.Header.Scene.Path } } }, { "Parameters", d.Header.Parameters.IsNull() ? Json::object() : d.Header.Parameters.Get() }, { "Seed", d.Header.Seed }, { "FixedHz", d.Header.FixedHz }, { "EngineVersion", d.Header.EngineVersion }, { "Config", d.Header.Config }, { "Fingerprint", d.Fingerprint ? FingerprintJson(*d.Fingerprint) : Json(nullptr) }, { "Events", Json::array() }, { "Expect", Json::array() }, { "Checkpoints", Json::array() }, { "FinalTick", d.FinalTick }, { "FinalStateHash", d.FinalStateHash } };
 		for (const auto& e : d.Events)
 			j["Events"].push_back(EventJson(e));
 		for (const auto& e : d.Expect)
@@ -559,6 +766,7 @@ namespace Engine {
 		}
 		w.WriteU64(d.FinalTick);
 		w.WriteU64(UUID::FromString(d.FinalStateHash)->GetValue());
+		WriteFingerprint(w, d.Fingerprint);
 		return WriteCookedArtifact(ReplayData::StaticType, ReplayData::FormatVersion, importerVersion, w.GetData());
 	}
 
@@ -616,6 +824,7 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(d.FinalTick, r.ReadU64());
 		ENGINE_TRY_ASSIGN(uint64_t hash, r.ReadU64());
 		d.FinalStateHash = UUID(hash).ToString();
+		ENGINE_TRY_ASSIGN(d.Fingerprint, ReadFingerprint(r));
 		if (!r.IsAtEnd())
 			return std::unexpected(Invalid("", "trailing replay payload bytes"));
 		ENGINE_TRY(ValidateReplayDocument(d));
@@ -624,6 +833,7 @@ namespace Engine {
 		result->Checkpoints = std::move(d.Checkpoints);
 		result->FinalTick = d.FinalTick;
 		result->FinalStateHash = std::move(d.FinalStateHash);
+		result->Fingerprint = std::move(d.Fingerprint);
 		return AssetRef<ReplayData>(std::move(result));
 	}
 

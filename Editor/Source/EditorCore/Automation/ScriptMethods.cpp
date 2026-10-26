@@ -114,7 +114,9 @@ namespace Engine {
 			for (const ScriptFieldSchema& field : script->Fields)
 			{
 				ENGINE_TRY_ASSIGN(const FieldInfo* reflected, schema->FindField(handle, field.Name));
-				Json valueSchema = JsonSchema::ForField(*reflected);
+				// A Script component's Fields value in params: an Entity field also takes an id prefix or an entity path (ADR 0030
+				// decision 7).
+				Json valueSchema = JsonSchema::ForField(*reflected, EntityReferenceSchema::IdOrPath);
 				AddScriptDefaults(valueSchema, field);
 				result.Fields.push_back({ .Name = field.Name, .Type = field.Type, .Default = field.DefaultValue, .Tooltip = field.Tooltip, .Schema = VariantValue(std::move(valueSchema)) });
 			}
@@ -179,7 +181,7 @@ namespace Engine {
 			.Field("type", &ScriptFieldSummary::Type, "Reflected value kind.")
 			.Field("default", &ScriptFieldSummary::Default, "Default reflected JSON value.")
 			.Field("tooltip", &ScriptFieldSummary::Tooltip, "Authored help text.")
-			.Field("schema", &ScriptFieldSummary::Schema, "Complete field JSON Schema, including nested defaults and metadata.");
+			.Field("schema", &ScriptFieldSummary::Schema, "Complete field JSON Schema, including nested defaults and metadata; an Entity field also takes an id prefix of 6 to 15 hex digits or an entity path in component data.");
 		registry.Struct<ScriptFieldsResult>("ScriptFieldsResult", "Current immutable script schema.")
 			.Field("script", &ScriptFieldsResult::Script, "Script identity.")
 			.Field("kind", &ScriptFieldsResult::Kind, "Behaviour, Module or TestSuite.")

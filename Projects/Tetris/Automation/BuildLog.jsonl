@@ -508,3 +508,11 @@
 {"type": "response", "time": "2026-10-19T12:34:46.658Z", "client": "engine-mcp", "id": 105, "requestLine": 507, "ok": true, "summary": "savedFiles 0; rev 77"}
 {"type": "request", "time": "2026-10-19T12:34:46.676Z", "client": "engine-mcp", "id": 106, "method": "session.shutdown", "params": {"save": true, "force": false}}
 {"type": "response", "time": "2026-10-19T12:34:46.693Z", "client": "engine-mcp", "id": 106, "requestLine": 509, "ok": true, "summary": "savedFiles 0; saved no; rev 77"}
+{"type":"request","time":"2026-10-20T12:22:25.147Z","client":"cli","id":1,"method":"project.refreshAssets","params":{}}
+{"type":"response","time":"2026-10-20T12:22:25.496Z","client":"cli","id":1,"requestLine":511,"ok":true,"summary":"ok"}
+{"type":"request","time":"2026-10-20T12:22:25.498Z","client":"cli","id":2,"method":"project.upgrade","params":{}}
+{"type":"response","time":"2026-10-20T12:22:25.541Z","client":"cli","id":2,"requestLine":513,"ok":true,"summary":"ok"}
+{"type":"request","time":"2026-10-26T05:35:28.548Z","client":"cli","id":1,"method":"project.refreshAssets","params":{}}
+{"type":"response","time":"2026-10-26T05:35:29.091Z","client":"cli","id":1,"requestLine":515,"ok":true,"summary":"ok"}
+{"type":"request","time":"2026-10-26T05:35:29.093Z","client":"cli","id":2,"method":"project.upgrade","params":{}}
+{"type":"response","time":"2026-10-26T05:35:29.124Z","client":"cli","id":2,"requestLine":517,"ok":true,"summary":"ok"}

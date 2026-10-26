@@ -4,6 +4,7 @@
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Session/PlayInputEventCodec.h"
 #include "Engine/Session/PlaySession.h"
+#include "Engine/Session/ReplayFingerprint.h"
 
 #include <nlohmann/json.hpp>
 
@@ -18,15 +19,22 @@ namespace Engine {
 	namespace {
 
 		// M17 friction F03 (ReplayPlayer.h): the hint contains the causes word for word.
-		constexpr std::string_view ReplayDivergenceCauses = "a serialized component of the scene (the look's included), a script, an asset or the engine "
-															"changed since it was recorded, or the play is not deterministic";
+		constexpr std::string_view ReplayDivergenceCauses = "a serialized component of the scene (the look's included), a script, the game's native module, "
+															"an asset or the engine changed since it was recorded, or the play is not deterministic";
 		constexpr std::string_view ReplayDivergenceHint = "the world differs from the recording: a serialized component of the scene (the look's "
-														  "included), a script, an asset or the engine changed since it was recorded, or the play is not "
-														  "deterministic; re-record it with test.run {record} (the game-building skill, \"Re-recording replays\")";
+														  "included), a script, the game's native module, an asset or the engine changed since it was "
+														  "recorded, or the play is not deterministic; re-record it with test.run {record} (the "
+														  "game-building skill, \"Re-recording replays\")";
 		static_assert(ReplayDivergenceHint.find(ReplayDivergenceCauses) != std::string_view::npos);
 		// What a checkpoint that differs means in a playback WithoutInput, the input check: the expected outcome of a replay
 		// whose verification depends on its input, never a reason to re-record it, so the causes are not named there.
 		constexpr std::string_view ReplayWithoutInputNote = "the replay ran without its input events, which a replay that depends on its input is expected to fail";
+
+		// What a failed checkpoint's stop reason ends with when the start fingerprints name a change (Docs/Decisions/
+		// 0030-m19-contract.md decision 2).
+		constexpr std::string_view ChangedSinceRecording = "; changed since the recording: ";
+		// The one change line of a playback whose own start fingerprint could not be taken at Begin, before that error.
+		constexpr std::string_view FingerprintNotTaken = "not known, because the playback's start fingerprint could not be taken: ";
 
 	}
 
@@ -40,11 +48,32 @@ namespace Engine {
 		return ReplayDivergenceHint;
 	}
 
+	std::string MakeFinalHashIndependentWarning(std::string_view replay, uint64_t checkpointTick, std::string_view finalStateHash)
+	{
+		return std::format("'{}': its final state hash does not depend on its input: without its input events the run first differed from the recording at "
+						   "checkpoint tick {}, then reached the recorded final state hash {}, so only its checkpoints prove the play; end the recording while "
+						   "the played state is still in the scene",
+			replay, checkpointTick, finalStateHash);
+	}
+
+	bool IsFinalHashIndependent(const ReplayPlaybackResult& playback)
+	{
+		return playback.FirstCheckpointFailure.has_value() && playback.HashMatched && playback.StopReason.empty() && std::ranges::all_of(playback.Expect, [](const ReplayExpectationOutcome& outcome)
+		{
+			return outcome.Satisfied;
+		});
+	}
+
 	struct ReplayPlayer::State
 	{
 		AssetRef<ReplayData> Replay{};
 		ReplayPlaybackOptions Options{};
 		ReplayPlaybackResult ReportData{};
+		// The playback's own start fingerprint (ComputeReplayFingerprint at Begin), taken only with the replay's input for a
+		// replay that has one: what ReplayPlaybackResult::Changes compares with the recording's when a hash differs.
+		std::optional<ReplayFingerprint> Observed{};
+		// Why Observed could not be taken (the error's text), which Changes then names instead; empty otherwise.
+		std::string FingerprintFailure{};
 		std::vector<StampedPlayInputEvent> Events{};
 		uint64_t Serial = 0;
 		uint64_t Tick = 0;
@@ -98,17 +127,29 @@ namespace Engine {
 
 		// The completed playback at the boundary reached (Tick). `stopReason` is empty at FinalTick; otherwise playback
 		// ended early and has failed, and every expectation it never reached is reported unevaluated. `failed` is the
-		// checkpoint whose hash differed (its observed hash is `observed`), when that ended it.
+		// checkpoint whose hash differed (its observed hash is `observed`), when that ended it. When a hash differed (that
+		// checkpoint, a checkpoint the playback continued past, or the final hash), the result names what changed since the
+		// recording by the start fingerprints, and a failed checkpoint's stop reason the first change.
 		void Finish(const PlaySession& session, std::string stopReason, const ReplayCheckpoint* failed = nullptr, std::string observed = {})
 		{
 			auto& result = ReportData;
 			result.FinalTick = Tick;
 			result.StateHash = failed != nullptr ? std::move(observed) : UUID(session.ComputeStateHash()).ToString();
 			result.ExpectedStateHash = failed != nullptr ? failed->StateHash : Replay->FinalStateHash;
-			result.CheckpointFailed = failed != nullptr;
+			result.CheckpointFailed = failed != nullptr || result.CheckpointsFailed > 0;
 			result.Verified = Options.Verify;
 			result.HashChecked = Options.StrictHash;
 			result.HashMatched = stopReason.empty() && result.StateHash == result.ExpectedStateHash;
+			const bool finalHashDiffered = stopReason.empty() && !result.HashMatched;
+			if (Replay->Fingerprint.has_value() && (result.CheckpointFailed || finalHashDiffered))
+			{
+				if (Observed.has_value())
+					result.Changes = DescribeReplayFingerprintChanges(*Replay->Fingerprint, *Observed);
+				else if (!FingerprintFailure.empty())
+					result.Changes = { std::format("{}{}", FingerprintNotTaken, FingerprintFailure) };
+				if (failed != nullptr && !result.Changes.empty() && Options.NameDivergenceCauses)
+					stopReason += std::format("{}{}", ChangedSinceRecording, result.Changes.front());
+			}
 			while (NextExpectation < Replay->Expect.size())
 			{
 				const auto& expectation = Replay->Expect[NextExpectation++];
@@ -119,7 +160,8 @@ namespace Engine {
 				result.Expect.push_back(std::move(outcome));
 			}
 			result.StopReason = std::move(stopReason);
-			result.Passed = result.StopReason.empty() && (!result.HashChecked || result.HashMatched) && (!result.Verified || std::all_of(result.Expect.begin(), result.Expect.end(), [](const auto& item)
+			result.Passed = result.StopReason.empty() && result.CheckpointsFailed == 0 && (!result.HashChecked || result.HashMatched)
+				&& (!result.Verified || std::all_of(result.Expect.begin(), result.Expect.end(), [](const auto& item)
 			{
 				return item.Satisfied;
 			}));
@@ -127,9 +169,10 @@ namespace Engine {
 		}
 
 		// StrictHash: compares the checkpoint of the boundary reached (Tick), if the replay has one there; a different hash
-		// completes the playback as failed (ReplayPlaybackResult::CheckpointFailed) and returns true. The stop reason names
-		// the divergence causes only for a playback with the replay's input that names them (NameDivergenceCauses);
-		// WithoutInput it says the input was left out.
+		// completes the playback as failed (ReplayPlaybackResult::CheckpointFailed) and returns true, or with
+		// ContinuePastCheckpoint is counted (the first one kept) while the playback goes on. The stop reason names the
+		// divergence causes only for a playback with the replay's input that names them (NameDivergenceCauses); WithoutInput
+		// it says the input was left out.
 		bool CheckCheckpoint(const PlaySession& session)
 		{
 			if (!Options.StrictHash || NextCheckpoint >= Replay->Checkpoints.size() || Replay->Checkpoints[NextCheckpoint].Tick != Tick)
@@ -139,6 +182,12 @@ namespace Engine {
 			std::string observed = UUID(session.ComputeStateHash()).ToString();
 			if (observed == checkpoint.StateHash)
 				return false;
+			if (Options.ContinuePastCheckpoint)
+			{
+				if (ReportData.CheckpointsFailed++ == 0)
+					ReportData.FirstCheckpointFailure = ReplayCheckpointFailure{ .Tick = Tick, .StateHash = std::move(observed), .ExpectedStateHash = checkpoint.StateHash };
+				return false;
+			}
 			std::string reason = std::format("the state hash at checkpoint tick {} is {}, but the recording's is {}", Tick, observed, checkpoint.StateHash);
 			if (Options.WithoutInput)
 				reason += std::format(": {}", ReplayWithoutInputNote);
@@ -173,12 +222,16 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidArgument, "replay needs data and a fresh session at tick zero");
 		if (options.StrictHash && !options.Verify)
 			return MakeError(ErrorCode::InvalidArgument, "strictHash requires verify");
+		// Docs/Decisions/0030-m19-contract.md decision 3: only compared checkpoints can be continued past.
+		if (options.ContinuePastCheckpoint && !options.StrictHash)
+			return MakeError(ErrorCode::InvalidArgument, "continuePastCheckpoint requires strictHash");
 		ReplayDocument document;
 		document.Header = replay->Header;
 		document.Events = replay->Events;
 		document.Checkpoints = replay->Checkpoints;
 		document.FinalTick = replay->FinalTick;
 		document.FinalStateHash = replay->FinalStateHash;
+		document.Fingerprint = replay->Fingerprint;
 		for (const auto& expectation : replay->Expect)
 		{
 			if (expectation.Script.Kind != ScriptKind::Module || expectation.Script.Bytecode.empty())
@@ -197,8 +250,23 @@ namespace Engine {
 		}
 		if (options.WithoutInput)
 			events.clear();
+		// A playback without its input is expected to differ, so it names no change and takes no fingerprint (decision 2).
+		// The fingerprint only explains a hash that differs, so a playback whose fingerprint cannot be taken (an asset the
+		// scene references whose import fails, which the simulation may never load) still plays, and names that error then.
+		std::optional<ReplayFingerprint> observed;
+		std::string fingerprintFailure;
+		if (!options.WithoutInput && replay->Fingerprint.has_value())
+		{
+			Result<ReplayFingerprint> fingerprint = ComputeReplayFingerprint(session.GetScene(), session.GetScriptSchemas(), session.GetAssets());
+			if (fingerprint.has_value())
+				observed = std::move(*fingerprint);
+			else
+				fingerprintFailure = fingerprint.error().ToString();
+		}
 		*m_State = {};
 		m_State->Replay = std::move(replay);
+		m_State->Observed = std::move(observed);
+		m_State->FingerprintFailure = std::move(fingerprintFailure);
 		m_State->Options = options;
 		m_State->Events = std::move(events);
 		m_State->Serial = session.GetSerial();

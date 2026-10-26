@@ -102,7 +102,7 @@ namespace Engine {
 	// Registry struct "ExportSettings" (§6.1 "Export", §7.6, §14.2). BuildScenes and Exclude are project-relative paths and
 	// globs; Icon is a project-relative square PNG (>= 256 x 256, checked at export); Version is "major.minor.patch";
 	// Company is free text under FindExportCompanyProblem's rule. Icon, Version and Company go into the exported
-	// executable's resources (M15).
+	// executable's resources (M15); PruneUnreferenced decides what Game.pak holds (M19).
 	struct ExportSettings
 	{
 		// The longest Company in bytes. Every exported executable must be able to carry it: Windows' VS_VERSIONINFO block
@@ -117,6 +117,12 @@ namespace Engine {
 		std::string Icon;
 		std::string Version = "1.0.0";
 		std::string Company;
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 21, B-PRUNE-GAME): Game.pak packages only what StartScene and
+		// Export.BuildScenes (and a testing export's testing content) reach through references and literal Assets.Load
+		// paths, instead of every asset below Assets/ that Export.Exclude leaves in (EditorCore/Export/Exporter.h), and
+		// project.validate names each computed Assets.Load (SCRIPT_COMPUTED_ASSET_LOAD). Opt-in, off by default; the field
+		// "PruneUnreferenced", registered after Company.
+		bool PruneUnreferenced = false;
 	};
 
 	// The rule of every text an exported executable's resources carry (Export.Company, and the strings of the macOS

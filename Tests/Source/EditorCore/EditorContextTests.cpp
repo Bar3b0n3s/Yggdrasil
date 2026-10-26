@@ -20,6 +20,7 @@
 #include "Support/EditorTestFixture.h"
 #include "Support/ExpectLog.h"
 #include "Support/ScriptOverrideProject.h"
+#include "Support/StrictnessEditor.h"
 #include "Support/TempDirectory.h"
 #include "Support/TestData.h"
 
@@ -85,53 +86,6 @@ namespace Engine {
 			std::string_view GetLabel() const override { return "Write Settings"; }
 			bool ChangesScene() const override { return false; }
 			size_t GetMemorySize() const override { return 16; }
-		};
-
-		// An editor of its own engine context, with or without --strict (EditorContextSpecification::StrictUnknowns), for
-		// the projects of `directory`.
-		class StrictnessEditor
-		{
-		public:
-			StrictnessEditor(const std::filesystem::path& directory, bool strict)
-			{
-				REQUIRE(FileSystem::CreateDirectories(directory / "UserData").has_value());
-				Result<Scope<EngineContext>> engine = EngineContext::Create({ .WorkerCount = 0, .UserDataDirectory = directory / "UserData", .RegisterTypes = &RegisterEditorMethodTypes });
-				REQUIRE_MESSAGE(engine.has_value(), engine.error().ToString());
-				m_Engine = std::move(*engine);
-				Result<Scope<EditorContext>> editor = EditorContext::Create(*m_Engine, {
-																						   .IdGeneratorState = Test::EditorTestIdState,
-																						   .TemplatesDirectory = Test::GetRepositoryRoot() / "Resources" / "Templates" / "Projects",
-																						   .ReadOnlyCacheRoot = directory / "ReadOnlyCache",
-																						   .HistoryLimits = {},
-																						   .EnvironmentBaker = nullptr,
-																						   .StrictUnknowns = strict,
-																					   });
-				REQUIRE_MESSAGE(editor.has_value(), editor.error().ToString());
-				m_Editor = std::move(*editor);
-			}
-
-			~StrictnessEditor()
-			{
-				// The editor holds the project lock and the project:// mount: release both before the engine context goes.
-				m_Editor.reset();
-				m_Engine.reset();
-			}
-
-			StrictnessEditor(const StrictnessEditor&) = delete;
-			StrictnessEditor& operator=(const StrictnessEditor&) = delete;
-
-			[[nodiscard]] EditorContext& GetEditor() { return *m_Editor; }
-
-			// ProjectManager::OpenProject with the editor's strictness, as every opener passes it, then OpenProject.
-			[[nodiscard]] Status Open(const std::filesystem::path& projectFile)
-			{
-				ENGINE_TRY_ASSIGN(Scope<LoadedProject> project,
-					ProjectManager::OpenProject(projectFile, { .StrictUnknowns = m_Editor->GetSpecification().StrictUnknowns }, m_Editor->GetTypeRegistry()));
-				return m_Editor->OpenProject(std::move(project));
-			}
-		private:
-			Scope<EngineContext> m_Engine;
-			Scope<EditorContext> m_Editor;
 		};
 
 		void WriteStrictnessFile(const std::filesystem::path& path, std::string_view text)
@@ -1269,7 +1223,7 @@ namespace Engine {
 			const Test::TempDirectory directory("EditorStrict");
 			std::filesystem::path projectFile;
 			{
-				StrictnessEditor creator(directory / "Creator", false);
+				Test::StrictnessEditor creator(directory / "Creator", false);
 				const Result<CreatedProject> created = ProjectManager::CreateProject(
 					{ .Directory = directory / "Game", .Name = "Game", .Template = ProjectTemplate::Empty, .TemplatesDirectory = creator.GetEditor().GetSpecification().TemplatesDirectory },
 					creator.GetEditor().GetTypeRegistry());
@@ -1290,7 +1244,7 @@ namespace Engine {
 
 			// Without --strict: the project opens, and scene.open's load reports the unknown key as a warning.
 			{
-				StrictnessEditor lenient(directory / "Lenient", false);
+				Test::StrictnessEditor lenient(directory / "Lenient", false);
 				const Status opened = lenient.Open(projectFile);
 				REQUIRE_MESSAGE(opened.has_value(), opened.error().ToString());
 				const Scope<Scene> scene = lenient.GetEditor().CreateScene("Main");
@@ -1305,7 +1259,7 @@ namespace Engine {
 
 			// With --strict: the open fails naming both files, and leaves the project closed and its lock released.
 			{
-				StrictnessEditor strict(directory / "Strict", true);
+				Test::StrictnessEditor strict(directory / "Strict", true);
 				const Status refused = strict.Open(projectFile);
 				REQUIRE_FALSE(refused.has_value());
 				INFO(refused.error().ToString());
@@ -1342,7 +1296,7 @@ namespace Engine {
 			projectText->insert(brace + 1, "\n\t\"Theme\": \"Dark\",");
 			WriteStrictnessFile(projectFile, *projectText);
 			{
-				StrictnessEditor lenient(directory / "LenientProject", false);
+				Test::StrictnessEditor lenient(directory / "LenientProject", false);
 				const Status opened = lenient.Open(projectFile);
 				REQUIRE_MESSAGE(opened.has_value(), opened.error().ToString());
 				const std::vector<ValidationIssue>& diagnostics = lenient.GetEditor().GetProject().GetLoadReport().Diagnostics;
@@ -1353,7 +1307,7 @@ namespace Engine {
 				REQUIRE(lenient.GetEditor().CloseProject().has_value());
 			}
 			{
-				StrictnessEditor strict(directory / "StrictProject", true);
+				Test::StrictnessEditor strict(directory / "StrictProject", true);
 				const Status refused = strict.Open(projectFile);
 				REQUIRE_FALSE(refused.has_value());
 				INFO(refused.error().ToString());
@@ -1372,7 +1326,7 @@ namespace Engine {
 			const Test::TempDirectory directory("EditorStrictLoad");
 			std::filesystem::path projectFile;
 			{
-				StrictnessEditor creator(directory / "Creator", false);
+				Test::StrictnessEditor creator(directory / "Creator", false);
 				const Result<CreatedProject> created = ProjectManager::CreateProject(
 					{ .Directory = directory / "Game", .Name = "Game", .Template = ProjectTemplate::Empty, .TemplatesDirectory = creator.GetEditor().GetSpecification().TemplatesDirectory },
 					creator.GetEditor().GetTypeRegistry());
@@ -1454,7 +1408,7 @@ namespace Engine {
 
 			// Without --strict: the project opens.
 			{
-				StrictnessEditor lenient(directory / "Lenient", false);
+				Test::StrictnessEditor lenient(directory / "Lenient", false);
 				const Status opened = lenient.Open(projectFile);
 				REQUIRE_MESSAGE(opened.has_value(), opened.error().ToString());
 				CHECK(lenient.GetEditor().HasProject());
@@ -1464,7 +1418,7 @@ namespace Engine {
 			// With --strict: the open fails with one issue per file, each naming its file and its problem, and leaves the
 			// project closed.
 			{
-				StrictnessEditor strict(directory / "Strict", true);
+				Test::StrictnessEditor strict(directory / "Strict", true);
 				const Status refused = strict.Open(projectFile);
 				REQUIRE_FALSE(refused.has_value());
 				INFO(refused.error().ToString());
@@ -1491,7 +1445,7 @@ namespace Engine {
 			const Test::TempDirectory directory("EditorStrictScriptOverride");
 			std::filesystem::path projectFile;
 			{
-				StrictnessEditor creator(directory / "Creator", false);
+				Test::StrictnessEditor creator(directory / "Creator", false);
 				const Result<CreatedProject> created = ProjectManager::CreateProject(
 					{ .Directory = directory / "Game", .Name = "Game", .Template = ProjectTemplate::Empty, .TemplatesDirectory = creator.GetEditor().GetSpecification().TemplatesDirectory },
 					creator.GetEditor().GetTypeRegistry());
@@ -1501,7 +1455,7 @@ namespace Engine {
 			const std::filesystem::path root = projectFile.parent_path();
 			Test::WriteScriptOverrideProject(root);
 			{
-				StrictnessEditor strict(directory / "Strict", true);
+				Test::StrictnessEditor strict(directory / "Strict", true);
 				const Status opened = strict.Open(projectFile);
 				REQUIRE_MESSAGE(opened.has_value(), opened.error().ToString());
 				REQUIRE(strict.GetEditor().CloseProject().has_value());
@@ -1509,7 +1463,7 @@ namespace Engine {
 
 			// An override of a field the script does not declare.
 			Test::WriteScriptOverrideProject(root, "Pointz");
-			StrictnessEditor strict(directory / "StrictInvalid", true);
+			Test::StrictnessEditor strict(directory / "StrictInvalid", true);
 			const Status refused = strict.Open(projectFile);
 			REQUIRE_FALSE(refused.has_value());
 			INFO(refused.error().ToString());
@@ -1536,7 +1490,7 @@ namespace Engine {
 			const Test::TempDirectory directory("EditorStrictScriptFieldCodes");
 			std::filesystem::path projectFile;
 			{
-				StrictnessEditor creator(directory / "Creator", false);
+				Test::StrictnessEditor creator(directory / "Creator", false);
 				const Result<CreatedProject> created = ProjectManager::CreateProject(
 					{ .Directory = directory / "Game", .Name = "Game", .Template = ProjectTemplate::Empty, .TemplatesDirectory = creator.GetEditor().GetSpecification().TemplatesDirectory },
 					creator.GetEditor().GetTypeRegistry());
@@ -1558,7 +1512,7 @@ namespace Engine {
 			Test::WriteScriptOverrideScript(root, Test::ScriptOverrideBrokenSource);
 			{
 				const Test::ExpectLog importFailure(LogLevel::Error, "ASSET_IMPORT_FAILED Assets/Scripts/Brick.luau");
-				StrictnessEditor strict(directory / "StrictBrokenScript", true);
+				Test::StrictnessEditor strict(directory / "StrictBrokenScript", true);
 				const Status refused = strict.Open(projectFile);
 				REQUIRE_FALSE(refused.has_value());
 				INFO(refused.error().ToString());
@@ -1576,7 +1530,7 @@ namespace Engine {
 
 			// A value of the wrong type is a type mismatch, at the member's field.
 			Test::WriteScriptOverrideProject(root, "Points", "\"five\"");
-			StrictnessEditor strict(directory / "StrictMismatch", true);
+			Test::StrictnessEditor strict(directory / "StrictMismatch", true);
 			const Status refused = strict.Open(projectFile);
 			REQUIRE_FALSE(refused.has_value());
 			INFO(refused.error().ToString());

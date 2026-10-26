@@ -3,8 +3,12 @@
 
 Every C and C++ file (.h, .cpp and the extensions CodeStyle §4.1 rules out, so that none escapes formatting) under
 Engine/, Editor/, Runtime/, Tests/, Tools/ and Projects/, plus the C++ headers that Resources/Shaders/ shares with the
-shaders, is formatted in place with the repository's .clang-format. Vendor/ and build outputs are never touched, and
-neither are Slang shaders: CodeStyle §15 keeps them out of clang-format.
+shaders, is formatted in place with the repository's .clang-format. That includes the native modules of game projects
+(Projects/*/Native/ and Tests/Projects/*/Native/, Docs/Decisions/0030-m19-contract.md decision 35), which are checked
+like first-party C++ but never rewritten: every file below a game's Native/ is provenance-audited, its XXH64 the one
+native.write recorded, so only native.write may rewrite it. Format mode leaves such a source unchanged and reports it
+as a failure naming native.write, as --check does, so the run exits 1. Vendor/ and build outputs are never touched,
+and neither are Slang shaders: CodeStyle §15 keeps them out of clang-format.
 
 --check changes nothing: it lists the files that need formatting, with the first line that differs, and exits 1 when
 there are any. It is equivalent to `clang-format --dry-run -Werror --style=file`.
@@ -14,9 +18,9 @@ as --clang-format, then $CLANG_FORMAT, then Visual Studio's bundled LLVM (VC/Too
 then clang-format-22 and clang-format on PATH (Scripts/Lib/toolchain.py). On Linux and macOS,
 `pip install "clang-format==22.1.*"` provides it.
 
-Exit codes: 0 nothing to change (or everything formatted), 1 --check found files that need formatting, or
-clang-format failed on a file, 2 usage error, 3 clang-format is missing or has the wrong version, 5 clang-format
-timed out.
+Exit codes: 0 nothing to change (or everything formatted), 1 --check found files that need formatting, a native
+module source needs formatting (in either mode), or clang-format failed on a file, 2 usage error, 3 clang-format is
+missing or has the wrong version, 5 clang-format timed out.
 """
 
 from __future__ import annotations
@@ -43,6 +47,8 @@ CXX_EXTENSIONS = (".h", ".hpp", ".hh", ".hxx", ".inl", ".c", ".cc", ".cpp", ".cx
 EXCLUDED_DIRECTORIES = ("Vendor", "bin", "bin-int")
 TOOL_TIMEOUT_SECONDS = 120.0
 EXIT_NEEDS_FORMATTING = 1
+# What a native module source that needs formatting is told: provenance lets only native.write rewrite it.
+NATIVE_MODULE_ADVICE = "a native module source, which only native.write may rewrite (provenance): write it formatted"
 
 
 class UsageError(Exception):
@@ -62,6 +68,7 @@ class FileResult:
     path: str  # relative to the repository root, with forward slashes
     changed: bool
     first_difference: int  # 1-based line of the first difference, 0 when unchanged
+    native_module: bool = False  # a game's native module source (is_native_module_source), never rewritten
 
 
 # --------------------------------------------------------------------------------------------------------------------
@@ -107,6 +114,15 @@ def is_under(relative: str, directory: str) -> bool:
     return relative == directory or relative.startswith(directory.rstrip("/") + "/")
 
 
+def is_native_module_source(relative: str) -> bool:
+    """Whether `relative` (repository-relative, forward slashes) lies below a game's Native/: Projects/<Game>/Native/ or
+    Tests/Projects/<Game>/Native/ (decision 35), whose files provenance lets only native.write rewrite."""
+    parts = relative.split("/")
+    if parts[0] == "Tests":
+        parts = parts[1:]
+    return len(parts) > 3 and parts[0] == "Projects" and parts[2] == "Native"
+
+
 def first_party_files(root: Path, selected: list[str] | None) -> list[str]:
     return [
         relative
@@ -128,29 +144,37 @@ def first_difference(original: bytes, formatted: bytes) -> int:
     return min(len(original_lines), len(formatted_lines))
 
 
-def format_file(clang_format: Path, root: Path, relative: str, write: bool) -> FileResult:
-    """Run clang-format on one file (its output goes to stdout) and compare; in format mode, replace the file."""
-    path = root / relative
-    original = path.read_bytes()
+def formatted_text(clang_format: Path, path: Path, name: str, style_file: Path | None = None) -> bytes:
+    """clang-format's output for the file at `path` (`name` in errors): formatted in the style of the .clang-format
+    found above it, or with `style_file` given, in that file's style (a file outside the repository has none above it,
+    and --fallback-style=none would then leave it as it is). Raises ToolFailure or ToolTimeout."""
+    style = f"--style=file:{style_file.as_posix()}" if style_file is not None else "--style=file"
     try:
         result = subprocess.run(
-            [str(clang_format), "--style=file", "--fallback-style=none", str(path)],
+            [str(clang_format), style, "--fallback-style=none", str(path)],
             capture_output=True,
             timeout=TOOL_TIMEOUT_SECONDS,
             check=False,
         )
     except subprocess.TimeoutExpired as error:
-        raise ToolTimeout(f"clang-format timed out after {TOOL_TIMEOUT_SECONDS:.0f} s on {relative}") from error
+        raise ToolTimeout(f"clang-format timed out after {TOOL_TIMEOUT_SECONDS:.0f} s on {name}") from error
     except OSError as error:
-        raise ToolFailure(f"clang-format failed on {relative}: {error}") from error
+        raise ToolFailure(f"clang-format failed on {name}: {error}") from error
     if result.returncode != 0:
-        raise ToolFailure(
-            f"clang-format failed on {relative}: {result.stderr.decode('utf-8', errors='replace').strip()}"
-        )
-    formatted = result.stdout
+        raise ToolFailure(f"clang-format failed on {name}: {result.stderr.decode('utf-8', errors='replace').strip()}")
+    return result.stdout
+
+
+def format_file(clang_format: Path, root: Path, relative: str, write: bool) -> FileResult:
+    """Run clang-format on one file (its output goes to stdout) and compare; in format mode, replace the file, unless
+    it is a native module source, which stays as it is (the module docstring)."""
+    path = root / relative
+    original = path.read_bytes()
+    formatted = formatted_text(clang_format, path, relative)
+    native_module = is_native_module_source(relative)
     if formatted == original:
-        return FileResult(relative, False, 0)
-    if write:
+        return FileResult(relative, False, 0, native_module)
+    if write and not native_module:
         # Write next to the file and replace it, so an interrupted run never leaves a truncated source file.
         handle, temporary = tempfile.mkstemp(prefix=".format-", dir=path.parent)
         try:
@@ -160,7 +184,7 @@ def format_file(clang_format: Path, root: Path, relative: str, write: bool) -> F
         except OSError:
             Path(temporary).unlink(missing_ok=True)
             raise
-    return FileResult(relative, True, first_difference(original, formatted))
+    return FileResult(relative, True, first_difference(original, formatted), native_module)
 
 
 # --------------------------------------------------------------------------------------------------------------------
@@ -227,13 +251,17 @@ def run(arguments: argparse.Namespace) -> dict:
         with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as executor:
             results = list(executor.map(process, files))
     changed = [result for result in results if result.changed]
+    # Format mode rewrote every other file; a native module source that needs formatting fails either mode.
+    failed = changed if arguments.check else [result for result in changed if result.native_module]
     return {
-        "success": not (arguments.check and changed),
+        "success": not failed,
         "mode": "check" if arguments.check else "format",
         "clangFormat": clang_format.as_posix(),
         "version": version,
         "files": len(files),
-        "changed": [{"file": result.path, "line": result.first_difference} for result in changed],
+        "changed": [{"file": result.path, "line": result.first_difference, "nativeModule": result.native_module}
+                    for result in changed],
+        "failed": [{"file": result.path, "line": result.first_difference} for result in failed],
     }
 
 
@@ -256,28 +284,28 @@ def main(argv: list[str] | None = None) -> int:
     if arguments.json:
         print(json.dumps(report, indent=2))
     else:
-        verb = "needs formatting" if arguments.check else "formatted"
         for entry in report["changed"]:
+            if entry["nativeModule"]:
+                verb = f"needs formatting, left unchanged: {NATIVE_MODULE_ADVICE}"
+            else:
+                verb = "needs formatting" if arguments.check else "formatted"
             print(f"{entry['file']}:{entry['line']}: format: {verb} (clang-format {report['version']})")
+        failed = len(report["failed"])
         if arguments.check:
-            state = (
-                "passed"
-                if report["success"]
-                else f"FAILED ({len(report['changed'])} file(s) need formatting; run Scripts/Format.py)"
-            )
+            state = ("passed" if report["success"]
+                     else f"FAILED ({failed} file(s) need formatting; run Scripts/Format.py)")
         else:
-            state = f"formatted {len(report['changed'])} file(s)"
+            state = f"formatted {len(report['changed']) - failed} file(s)"
+            if failed:
+                state = f"FAILED ({state}; {failed} native module source(s) need formatting through native.write)"
         print(
             f"Format: {state} [{report['files']} file(s); clang-format {report['version']} at {report['clangFormat']}]"
         )
         if not report["success"]:
             # The summary line CI.py and PreCommit.py quote for a failing step.
-            first = report["changed"][0]
-            print(f"[FAILED] format: {len(report['changed'])} file(s) need formatting, first: {first['file']}:"
-                  f"{first['line']}")
-    if arguments.check and report["changed"]:
-        return EXIT_NEEDS_FORMATTING
-    return EXIT_SUCCESS
+            first = report["failed"][0]
+            print(f"[FAILED] format: {failed} file(s) need formatting, first: {first['file']}:{first['line']}")
+    return EXIT_SUCCESS if report["success"] else EXIT_NEEDS_FORMATTING
 
 
 if __name__ == "__main__":

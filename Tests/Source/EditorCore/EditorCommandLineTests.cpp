@@ -85,7 +85,7 @@ namespace Engine {
 			}
 			const std::vector<std::string_view> expected = { "--help", "--project", "--read-only", "--automation", "--automation-test-hooks", "--batch",
 				"--upgrade", "--dump-reference", "--bake-engine-assets", "--engine-cache-dir", "--check-scripts", "--run-tests", "--filter", "--id-seed", "--junit",
-				"--export", "--config", "--testing", "--smoke-test", "--export-report", "--export-root", "--strict" };
+				"--export", "--config", "--testing", "--smoke-test", "--export-report", "--export-root", "--strict", "--headless-game-view" };
 			CHECK(names == expected);
 		}
 
@@ -349,6 +349,21 @@ namespace Engine {
 			const Result<EditorLaunchOptions> empty = ParseEditorArguments({ "--export-root=" });
 			REQUIRE_FALSE(empty.has_value());
 			CHECK(empty.error().GetCode() == ErrorCode::InvalidArgument);
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 11 (R-SOAK): --headless-game-view makes a headless editor render its
+		// Game view; a windowed editor's panels decide, so the option needs the engine option --headless.
+		TEST_CASE("EditorCommandLine: --headless-game-view needs --headless")
+		{
+			const auto forced = ParseEditorArguments({ "--headless", "--headless-game-view", "--project", "Game" });
+			REQUIRE_MESSAGE(forced.has_value(), forced.error().ToString());
+			CHECK(forced->HeadlessGameView);
+			const auto plain = ParseEditorArguments({ "--headless", "--project", "Game" });
+			REQUIRE(plain.has_value());
+			CHECK_FALSE(plain->HeadlessGameView);
+			const auto windowed = ParseEditorArguments({ "--headless-game-view", "--project", "Game" });
+			REQUIRE_FALSE(windowed.has_value());
+			CHECK(windowed.error().GetCode() == ErrorCode::InvalidArgument);
 		}
 	}
 

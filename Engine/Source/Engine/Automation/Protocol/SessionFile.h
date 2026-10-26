@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Core/Base.h"
+#include "Engine/Core/BuildId.h"
 #include "Engine/Core/Result.h"
 
 #include <chrono>
@@ -15,8 +16,11 @@
 //
 // Format (camelCase keys in this order, canonical JsonWriter, LF):
 //     {"pid": 1234, "port": 50123, "token": "<64 hex>", "protocolVersion": "1.0", "engineVersion": "0.1.0",
-//      "projectPath": "<absolute path of the open .eproj, '/' separators; empty in the launcher state>",
+//      "build": "0.1.0+3f2a9c1d4e5b", "projectPath": "<absolute path of the open .eproj, '/' separators; empty in the
+//      launcher state>",
 //      "headless": true, "startedAt": "2026-10-06T12:34:56Z"}
+// "build" (M19, Docs/Decisions/0030-m19-contract.md decision 13) is the writing server's build id (FormatBuildId,
+// Core/BuildId.h); a file without it, from an engine before M19, reads with an empty one.
 // The file holds the token, so only the user may read it: the directory is created with 0700 and the file with 0600 on
 // POSIX; on Windows the per-user %LOCALAPPDATA% ACL already restricts both.
 
@@ -29,7 +33,9 @@ namespace Engine {
 		std::string Token{};
 		std::string ProtocolVersionText{}; // "protocolVersion": ProtocolVersion::ToString()
 		std::string EngineVersionText{};   // "engineVersion"
-		std::string ProjectPath{};         // UTF-8, '/' separators; empty without a project
+		// "build": the writing process's build id, which the servers leave at this default.
+		std::string BuildText = FormatBuildId(GetBuildId());
+		std::string ProjectPath{}; // UTF-8, '/' separators; empty without a project
 		bool Headless = false;
 		std::string StartedAt{}; // FormatUtcTimestamp
 	};

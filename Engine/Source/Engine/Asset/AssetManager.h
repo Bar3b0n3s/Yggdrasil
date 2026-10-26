@@ -115,6 +115,15 @@ namespace Engine {
 		// main-thread work this manager posted), so screenshots and tests see a settled state (§8.13). Main thread.
 		virtual void WaitIdle() = 0;
 
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 2, the replay start fingerprint): the XXH64 (seed 0) of the cooked
+		// artifact `handle` loads from, equal for equal cooked bytes wherever they live: the editor's Library/Cache entry
+		// (cooking it first when the cache has no valid entry, as Load does) and the Runtime's pak entry (its TOC hash) give
+		// the same value for the same asset. Errors: InvalidArgument for the null handle, a dependency's and a procedural
+		// built-in's (it has no artifact: the fingerprint leaves those out); NotFound for an unknown handle; the cook's or the
+		// read's errors. The default is Unsupported (a host without cooked artifacts); the editor's and the Runtime's managers
+		// override it. Not const, since the editor's cooks on a cache miss. Main thread.
+		[[nodiscard]] virtual Result<uint64_t> GetCookedHash(AssetHandle handle);
+
 		// --- The shared failure policy (§7.2) --------------------------------------------------------------------------
 
 		// The asset `handle` as a T, or T's placeholder (never null) when it is missing, failed to load or is of another type.

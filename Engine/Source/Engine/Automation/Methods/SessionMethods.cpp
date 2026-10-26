@@ -6,6 +6,7 @@
 #include "Engine/Automation/Methods/SharedMethodSupport.h"
 #include "Engine/Automation/Protocol/JsonRpc.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
+#include "Engine/Core/BuildId.h"
 #include "Engine/Platform/Process.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scripting/ScriptError.h"
@@ -67,6 +68,7 @@ namespace Engine {
 			SessionHelloResult result;
 			result.Protocol = CurrentProtocolVersion.ToString();
 			result.EngineVersion = std::string(EngineVersionString);
+			result.Build = FormatBuildId(GetBuildId());
 			result.Client = context.GetRequest().Client;
 			result.Capabilities = std::move(host.Capabilities);
 			result.Project = std::move(host.Project);
@@ -79,6 +81,7 @@ namespace Engine {
 			SessionInfoResult result;
 			result.Protocol = CurrentProtocolVersion.ToString();
 			result.EngineVersion = std::string(EngineVersionString);
+			result.Build = FormatBuildId(GetBuildId());
 			result.ProcessId = Process::GetCurrentId();
 			result.Capabilities = std::move(host.Capabilities);
 			result.Project = std::move(host.Project);
@@ -135,6 +138,10 @@ namespace Engine {
 		registry.Struct<SessionHelloResult>("SessionHelloResult", "The session session.hello opened.")
 			.Field("protocolVersion", &SessionHelloResult::Protocol, "The protocol version the server speaks.")
 			.Field("engineVersion", &SessionHelloResult::EngineVersion, "The engine's version.")
+			.Field("build", &SessionHelloResult::Build,
+				"The server's build id, semantic-versioning build metadata: the engine's version, then \"+<commit>\" (12 lowercase hex digits of the "
+				"commit it was built from) and \".dirty\" when its working tree had uncommitted changes, such as \"0.2.0+3f2a9c1d4e5b.dirty\"; the "
+				"version alone for a build without a commit.")
 			.Field("clientId", &SessionHelloResult::Client, "This connection's client id, unique for the server's lifetime.")
 			.Field("capabilities", &SessionHelloResult::Capabilities,
 				"The optional protocol features the server offers: dryRun, ifRevision, batch, pendingOperations, offload, and testHooks.")
@@ -149,6 +156,7 @@ namespace Engine {
 		registry.Struct<SessionInfoResult>("SessionInfoResult", "The host's session (the editor's or the exported game's): versions, project, play state, renderer and clients.")
 			.Field("protocolVersion", &SessionInfoResult::Protocol, "The protocol version the server speaks.")
 			.Field("engineVersion", &SessionInfoResult::EngineVersion, "The engine's version.")
+			.Field("build", &SessionInfoResult::Build, "The host's build id, as session.hello's build.")
 			.Field("pid", &SessionInfoResult::ProcessId, "The host's process id.")
 			.Field("capabilities", &SessionInfoResult::Capabilities, "The optional protocol features the server offers.")
 			.Field("project", &SessionInfoResult::Project, "The open project.")
@@ -186,7 +194,8 @@ namespace Engine {
 			{
 				.Name = "session.hello",
 				.Description = "Opens the session: the first request of every connection, with the token from the server's session file. Reports "
-							   "the protocol and engine versions, the client id, the capabilities and the open project (the game in the Runtime).",
+							   "the protocol and engine versions, the build id, the client id, the capabilities and the open project (the game in the "
+							   "Runtime).",
 				.RequiredParams = { "token", "protocolVersion", "client" },
 				.AvailableInRuntime = true,
 				.AvailableInLauncher = true,

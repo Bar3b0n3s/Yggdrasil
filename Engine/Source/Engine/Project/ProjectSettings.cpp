@@ -351,12 +351,16 @@ namespace Engine {
 		registry.Struct<ExportSettings>("ExportSettings", "What an exported game contains and how its executable is labelled.")
 			.Field("BuildScenes", &ExportSettings::BuildScenes,
 				"Project-relative scenes the export loads strictly beside StartScene (each must be a registered scene file that loads strictly). "
-				"They do not decide what ships: Data/Game.pak holds every registered asset below Assets/ except the Export.Exclude globs.")
+				"With PruneUnreferenced, Data/Game.pak holds only what StartScene and these scenes reach.")
 			.Field("Exclude", &ExportSettings::Exclude, "Project-relative globs of assets left out of the export.")
 			.Field("Icon", &ExportSettings::Icon, "Project-relative square PNG used as the executable's icon, at least 256 x 256 pixels.")
 			.Field("Version", &ExportSettings::Version, "Version of the exported game, in the form major.minor.patch.")
 			.Field("Company", &ExportSettings::Company,
 				"Company name written into the executable's resources: valid UTF-8 without control characters, U+FFFE or U+FFFF, at most 32000 bytes.")
+			.Field("PruneUnreferenced", &ExportSettings::PruneUnreferenced,
+				"Packages only the assets that StartScene and Export.BuildScenes (and a testing export's testing content) reach through references "
+				"and literal Assets.Load paths, instead of every asset below Assets/ that Export.Exclude leaves in; project.validate names each "
+				"Assets.Load whose path is computed (SCRIPT_COMPUTED_ASSET_LOAD).")
 			.Validate(&Utils::ValidateExport)
 			.Generate(&Utils::GenerateExport);
 

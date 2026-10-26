@@ -19,7 +19,9 @@
 // "Reparent Entity '<name>'", and for the list methods "Destroy Entity '<name>'" / "Duplicate Entity '<name>'" for one
 // entity or "Destroy <n> Entities" / "Duplicate <n> Entities" for more. Entity references follow §13.4 (16 hex digits, a
 // unique prefix of at least 6, or a path). Component maps use ResolveComponentValue (convention 10 of MethodRegistry.h),
-// so "/components/RigidBody/Mas" is an unknown-field InvalidParams with the hint "did you mean 'Mass'?".
+// so "/components/RigidBody/Mas" is an unknown-field InvalidParams with the hint "did you mean 'Mass'?". A native
+// component ("Native.<Name>"), which entity.get reports, is refused in `components` and `removeComponents` with
+// MakeNativeComponentWriteError's hint, which names native.setComponents.
 
 namespace Engine {
 

@@ -19,7 +19,7 @@
  0001:00004000       ?Step@ReplayPlayer@Engine@@QEAA?AV?$expected@XVError@Engine@@@std@@XZ 0000000140005000 f   Engine:ReplayPlayer.obj
  0001:00005000       ??1ScriptWatchdog@Engine@@QEAA@XZ 0000000140006000 f   Engine:Watchdog1.obj
  0001:00006000       lua_pushnumber             0000000140007000 f   Luau:lapi.obj
- 0001:00007000       ?compile@Luau@@YA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@AEBV23@AEBUCompileOptions@1@AEBUParseOptions@1@PEAVBytecodeEncoder@1@@Z 0000000140008000 f   Luau:Compiler.obj
+ 0001:00007000       ?parseType@Parser@Luau@@SA?AU?$ParseNodeResult@VAstType@Luau@@@2@PEBD_KAEAVAstNameTable@2@AEAVAllocator@2@UParseOptions@2@@Z 0000000140008000 f   Luau:Parser.obj
  0001:0000a000       ?Beat@Watchdog@Engine@@QEAAXXZ 000000014000b000 f   Engine:Watchdog.obj
  0001:0000b000       ?ParseRpcRequest@Engine@@YA?AV?$expected@URpcRequest@Engine@@URpcParseFailure@2@@std@@V?$basic_string_view@DU?$char_traits@D@std@@@4@@Z 000000014000c000 f   Engine:JsonRpc.obj
  0002:00000100       ??_C@_0BL@KDJBPFAC@ImGui?5is?5not?5in?5Dist?5builds@ 00000001406e8100     Engine:Application.obj

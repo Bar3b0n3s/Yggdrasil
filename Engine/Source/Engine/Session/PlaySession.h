@@ -46,6 +46,8 @@ namespace Engine {
 	class ScriptEngine;
 	class ScriptFieldSchemaSource;
 	class IScriptTestHost;
+	class NativeModuleTypes;
+	class NativeWorld;
 	class TypeRegistry;
 	struct RenderExtractionRequest;
 
@@ -68,6 +70,8 @@ namespace Engine {
 		StartFlush,              // 2: OnStart of instances created since the last flush, canonical order (M13; empty)
 		FixedUpdate,             // 3: script OnFixedUpdate, (ExecutionOrder, canonical) order (M13; empty)
 		Tasks,                   // 4: Task.Wait*/Task.Delay threads due at this tick, then the test case thread (M13; empty)
+		NativeStep,              // 4a: the native module's systems (NativeWorld::Step; M19, Docs/Decisions/0030-m19-contract.md
+								 //     decision 28): only in Play with a native module (PlaySessionSpecification::Native)
 		PreStepTransformUpdate,  // 5: TransformSystem::Update, before PhysicsSystem::PreStep
 		PhysicsPreStep,          // 5: PhysicsSystem::PreStep: create, rebuild or remove bodies; teleports; MoveKinematic (M11)
 		PhysicsStep,             // 6: PhysicsSystem::Step: PhysicsWorld::Step(fixedDt) (M11)
@@ -145,7 +149,7 @@ namespace Engine {
 	// ("Interpolation: script-moved entities interpolate; frame-phase writes, teleports and new entities do not").
 	// Production code installs none. Simulate mode skips the script and audio
 	// phases (StartFlush, FixedUpdate, Tasks, FrameStartFlush, Update, LateUpdate, AudioUpdate) entirely, so they are not
-	// reported there.
+	// reported there. NativeStep (M19) runs, and is reported, only in Play mode with a native module.
 	class IPlaySessionObserver
 	{
 	public:
@@ -221,6 +225,14 @@ namespace Engine {
 		IPlaySessionTestHook* TestHook = nullptr;
 		IScriptTestHost* TestHost = nullptr; // test-mode reporting from setup until teardown; outlives the session
 		IPlaySessionHost* Host = nullptr;
+		// M19 (Docs/Decisions/0030-m19-contract.md decisions 27 and 28): the game's native module, or null for a game without
+		// one: the editor's loaded module (NativeModuleHost::GetLoadedTypes), the Runtime's linked one (GetLinkedNativeModule).
+		// Prepare canonicalizes the scene's native components against it (CanonicalizeNativeComponents; an error fails the
+		// session's start like any strict-load error, with the context "while starting the play session"), and a Play session
+		// owns a NativeWorld over it (GetNative) whose systems run in the NativeStep phase and whose resources the state hash's
+		// native block holds. Simulate ignores it, as it ignores scripts. Null: no NativeStep, no native block, every "Native."
+		// component kept as written.
+		Ref<const NativeModuleTypes> Native{};
 	};
 
 	// One play session. Not copyable or movable; main thread only (§4.11).
@@ -358,6 +370,14 @@ namespace Engine {
 		[[nodiscard]] double GetFixedDelta() const;
 		// The specification's copy of the project's settings.
 		[[nodiscard]] const ProjectSettings& GetProjectSettings() const;
+		// PlaySessionSpecification::Assets (null for a session without assets): the manager the replay start fingerprint
+		// reads cooked hashes through (ComputeReplayFingerprint; Docs/Decisions/0030-m19-contract.md decision 2). A
+		// documented back-reference that outlives the session.
+		[[nodiscard]] AssetManager* GetAssets() const;
+		// PlaySessionSpecification::ScriptSchemas (null for a session without them): the script field schemas the replay
+		// start fingerprint types a Script component's asset fields with (ComputeReplayFingerprint, decision 2). Valid for
+		// the session's lifetime.
+		[[nodiscard]] const ScriptFieldSchemaSource* GetScriptSchemas() const;
 		[[nodiscard]] uint64_t GetSeed() const;
 		// PlaySessionSpecification::Serial.
 		[[nodiscard]] uint64_t GetSerial() const;
@@ -410,6 +430,11 @@ namespace Engine {
 		[[nodiscard]] const PhysicsSystem& GetPhysics() const;
 		// --- End of the M11 additions ------------------------------------------------------------------------------------
 
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 28): the session's native runtime (NativeWorld.h), null in
+		// Simulate mode and without PlaySessionSpecification::Native. Valid for the session's lifetime.
+		[[nodiscard]] NativeWorld* GetNative();
+		[[nodiscard]] const NativeWorld* GetNative() const;
+
 		// The state hash (§13.7, §5.1): XXH64 (seed 0) over the scene's minified canonical serialization
 		// (SceneSerializer::SaveToString, JsonStyle::Minified), followed by the tick, the Random state and the UUIDGenerator's
 		// draw count as little-endian 64-bit values; M11 appends the physics state (§5.1 "+ physics velocities at runtime").
@@ -419,7 +444,9 @@ namespace Engine {
 		// input state and rendering are outside it, so two sessions with equal hashes have equal worlds but may hold different
 		// script state that has not reached the world yet (ReplayData.h, Architecture §5.1).
 		// Equal for equal sessions in every configuration (§1.3); play.state, play.step and input.replay report it as 16
-		// lowercase hex digits. Returns 0 only when the scene cannot be serialized (logged).
+		// lowercase hex digits. Returns 0 only when the scene cannot be serialized (logged). M19 (decision 28): the native
+		// block follows the physics block, NativeWorld::AppendStateHash (the module's resources; native components are in the
+		// scene's serialization), and is empty without a native module, so a session without one hashes as before.
 		[[nodiscard]] uint64_t ComputeStateHash() const;
 
 		// The entity cap (see the class comment).

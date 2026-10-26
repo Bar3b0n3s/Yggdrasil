@@ -19,6 +19,15 @@
     "forbidden AssetPipeline: ?Import@TextureImporter@Engine@@UEBA?AV?$expected@UImportResult@Engine@@VError@2@@std@@AEAVImportContext@2@@Z (Engine:TextureImporter.obj)",
     "forbidden AssetPipeline: ?Write@PakWriter@Engine@@QEAA?AV?$expected@XVError@Engine@@@std@@AEBVpath@filesystem@std@@@Z (Engine:PakWriter.obj)"
   ],
+  "LuauCompiler": [
+    "forbidden LuauCompiler: ?addConstantNil@BytecodeBuilder@Luau@@QEAAHXZ (Luau:BytecodeBuilder.obj)",
+    "forbidden LuauCompiler: ?compile@Luau@@YA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@AEBV23@AEBUCompileOptions@1@AEBUParseOptions@1@PEAVBytecodeEncoder@1@@Z (Luau:Compiler.obj)",
+    "forbidden LuauCompiler: ?extractLuauConfig@Luau@@YA?AV?$optional@V?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@std@@AEBV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@3@AEAUConfig@1@V?$optional@UAliasOptions@ConfigOptions@Luau@@@3@UInterruptCallbacks@1@@Z (Luau:LuauConfig.obj)",
+    "forbidden LuauCompiler: ?lua_requireinternal@Require@Luau@@YAHPEAUlua_State@@PEBD@Z (Luau:RequireImpl.obj)",
+    "forbidden LuauCompiler: ?luarequire_pushproxyrequire@@YAHPEAUlua_State@@P6AXPEAUluarequire_Configuration@@@ZPEAX@Z (Luau:Require.obj)",
+    "forbidden LuauCompiler: ?luau_compile@@YAPEADPEBD_KPEAUlua_CompileOptions@@PEA_K@Z (Luau:lcode.obj)",
+    "forbidden LuauCompiler: ?parseConfig@Luau@@YA?AV?$optional@V?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@std@@AEBV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@3@AEAUConfig@1@AEBUConfigOptions@1@@Z (Luau:Config.obj)"
+  ],
   "MissingRequired": [
     "missing required symbol: FeatureTestRunner",
     "missing required symbol: ReplayPlayer"

@@ -28,7 +28,8 @@ Suites and the configurations the §15.8 matrix runs them in when --config is no
                Dist             decisions 7 and 8): its provenance audit, the editor half of Debug and Release (checks
                                 and test.run in a strict editor on its staged files) and the exported Dist half (a
                                 testing Dist export run with --feature-test, its hashes compared with the editor
-                                halves', and a plain Dist export's smoke test)
+                                halves' and with those the export's own featureTest reported, and a plain Dist
+                                export's smoke test)
 --config takes Debug and Release for the doctest, feature and automation suites (test executables and the editor do not
 exist in Dist), Release and Dist for the export suite, and any of the three for the determinism and games suites. A
 suite named in --suite must take every configuration --config names (a usage error otherwise); with the default --suite
@@ -109,20 +110,24 @@ Debug selects Editor Debug, Release Editor Release and Exported Release, Dist Ex
 Projects/FeatureTest without Library/ into a temporary directory, starts `Editor --headless --renderer none
 --audio-device none --automation --strict` on it and runs input.replay {path, verify: true, strictHash: true} for every
 file Testing.Replays matches (the editor's glob rules), then the input check of each one with input events (it must
-fail input.replay {verify, strictHash, withoutInput}, M16 friction S2-01); it needs no GPU. An exported run reads the
-"replay:<path>" rows of bin/TestResults/FeatureTest-<Config>.json, which the export suite of the same tree wrote, and
-is never rerun: a report older than the <Config> Runtime, the Release editor or a FeatureTest file outside Library/ (or
-missing) fails the step with exit code 3 naming `Test.py --suite export --junit` under --require-gpu, and otherwise
-leaves that run out of the comparison with the reason, as a warning. A replay fails when an editor run's verification
-or input check fails, when a run has no hash, when a hash differs from the committed FinalStateHash, or when the runs
-disagree. With --junit it writes bin/TestResults/Determinism.xml, one test case per replay, whose failure lists each
-run's hash. A project whose Testing.Replays matches nothing ends as a warning.
+fail input.replay {verify, strictHash, withoutInput, continuePastCheckpoint}, M16 friction S2-01; a run without input
+that differed only at checkpoints and still reached the recorded final hash prints games.input_check_warning's line, a
+warning that never fails the step, Docs/Decisions/0030-m19-contract.md decision 3); it needs no GPU. An exported run
+reads the "replay:<path>" rows of bin/TestResults/FeatureTest-<Config>.json, which the export suite of the same tree
+wrote, and is never rerun: a report older than the <Config> Runtime, the Release editor or a FeatureTest file outside
+Library/ (or missing) fails the step with exit code 3 naming `Test.py --suite export --junit` under --require-gpu, and
+otherwise leaves that run out of the comparison with the reason, as a warning. A replay fails when an editor run's
+verification or input check fails, when a run has no hash, when a hash differs from the committed FinalStateHash, or
+when the runs disagree. With --junit it writes bin/TestResults/Determinism.xml, one test case per replay, whose failure
+lists each run's hash. A project whose Testing.Replays matches nothing ends as a warning.
 
 The games suite (Docs/Decisions/0026-m16-contract.md decisions 7 and 8; Docs/Decisions/0027-m17-contract.md decision
 4) runs over the staged game projects (Scripts/Lib/games.py discover_projects in index mode: every directory directly
 below Projects/ or Tests/Projects/ whose root holds one staged *.eproj, Projects/FeatureTest excluded); a project found
 on disk but not staged gets one passed step, "games <Name>", and nothing else, and without any project the suite passes
-with one step, "games". <Name> in the names of the steps and reports is the .eproj's file stem. Per project:
+with one step, "games". <Name> in the names of the steps and reports is the .eproj's file stem, so staged projects that
+share a stem or a Name (the staged .eproj's, whose Dist packages would share a directory) fail the "games" step before
+any project runs (games.check_distinct_projects, Docs/Decisions/0030-m19-contract.md decision 12). Per project:
   - "games <Name> audit": Scripts/Lib/provenance.py's audit of the staged files (the acceptance mode, as
     Scripts/AuditProvenance.py --project runs it), failing with each finding's code and path;
   - "games <Name> Editor <Config>" for Debug and Release: the project's staged blobs materialized into a temporary
@@ -137,19 +142,30 @@ with one step, "games". <Name> in the names of the steps and reports is the .epr
     committed FinalStateHash for every replay Testing.Replays matches; at least one of those replays must have input
     events (games.check_replay_acceptance: a game whose Testing.Replays matches no replay, or only replays without
     input, fails, as the demo acceptance of Roadmap M16, M17, M25 and M27 asks); every such replay with input events
-    must then fail input.replay {verify, strictHash, withoutInput} (the input check, M16 friction S2-01: a replay whose
-    verification passes without its input proves nothing); a .replay below Assets/ that Testing.Replays leaves out fails
-    it; after session.shutdown the editor must exit 0 and the copy must be unchanged outside Library/;
+    must then fail input.replay {verify, strictHash, withoutInput, continuePastCheckpoint} (the input check, M16
+    friction S2-01: a replay whose verification passes without its input proves nothing; one whose run without input
+    differed only at checkpoints and reached the recorded final hash is printed as games.input_check_warning's warning,
+    which never fails the half, Docs/Decisions/0030-m19-contract.md decision 3); a .replay below Assets/ that
+    Testing.Replays leaves out fails it; after session.shutdown the editor must exit 0 and the copy must be unchanged
+    outside Library/. For a game with a native module (a Native/ directory, Docs/Decisions/0030-m19-contract.md
+    decision 35; Windows only), games.prepare_native_editor first writes the user's "Allow native code" preference into
+    the editor's user data and builds the module of the editor's configuration into the copy's Library/Native/Builds/
+    with Scripts/BuildNative.py, so the strict editor opens the project with its module loaded; a module that does not
+    build fails the half with its first error, and the Dist half's editor gets the same preparation;
   - "games <Name> Dist", which the Release editor drives (in the Release half's session when Release runs too):
-    project.export {config: Dist, testing: true}, whose result's executable must lie below its outputDirectory and
-    whose manifest (Game.json, on macOS in the bundle's Contents/Resources) names the game (games.read_game_name), each
-    a one-line failure otherwise, installed to bin/Exports/Dist/<Game>/, <Game> being that Name (ProjectSettings::Name,
-    after which the exporter names the executable and the testing user data, whatever the file stem); the package's
-    executable run with `--headless --feature-test` in a temporary working directory (so the export suite's
-    FeatureTest-Dist reports are never touched), its exit code (printing the end of its log), its user data
-    (bin/TestUserData/<Game>/ in the package, holding Logs/<exe>.log, named after the executable's stem as the Runtime
-    names it, Architecture §4.4), its report in Dist mode, each replay's hash against the committed one
-    and every editor half of the run, and games.check_replay_acceptance; then a plain project.export {config: Dist,
+    project.export {config: Dist, testing: true, featureTest: true} (waited for --timeout plus the 1800 s bound of the
+    export's own feature-test run, and for a game with Native/ plus the 4200 s bound of its native Runtime build, as is
+    the plain export below), whose result's executable must lie below its outputDirectory and whose manifest
+    (Game.json, on macOS in the bundle's Contents/Resources) names the game (games.read_game_name), each a one-line
+    failure otherwise, installed to bin/Exports/Dist/<Game>/, <Game> being that Name (ProjectSettings::Name, after which
+    the exporter names the executable and the testing user data, whatever the file stem), without the testing user data
+    the export's own feature-test run left in the package; the package's executable run with `--headless
+    --feature-test` in a temporary working directory (so the export suite's FeatureTest-Dist reports are never
+    touched), its exit code (printing the end of its log), its user data (bin/TestUserData/<Game>/ in the package,
+    holding Logs/<exe>.log, named after the executable's stem as the Runtime names it, Architecture §4.4), its report in
+    Dist mode, each replay's hash against the committed one, every editor half of the run and the hashes the export's
+    featureTest reported (games.check_feature_test, Docs/Decisions/0030-m19-contract.md decision 10), and
+    games.check_replay_acceptance; then a plain project.export {config: Dist,
     smokeTest: true}, whose smoke test must exit 0 (one that did not run warns, and fails with --require-gpu). In a
     session of its own (a run without Release), whatever fails after these checks (a refused session.shutdown, a broken
     connection, a timeout, the editor's exit code) fails it too.
@@ -233,7 +249,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from Lib import coverage, debugheap, exports, games, hardening, locks, paths, provenance
+from Lib import coverage, debugheap, exports, games, hardening, locks, native_build, paths, provenance
 from Lib.process import (
     ToolNotFoundError,
     child_environment,
@@ -257,6 +273,14 @@ from Lib.report import (
 )
 
 SUITE_TIMEOUT_SECONDS = 1800.0
+# The bound of the package's --feature-test run inside project.export {featureTest: true} (RunTimeout in
+# Editor/Source/EditorCore/Export/ExportFeatureTest.cpp, Exporter.h step 6a): the games suite's Dist half waits that
+# much longer for such an export than --timeout, which bounds the export's other phases and the smoke test.
+EXPORT_FEATURE_TEST_RUN_SECONDS = 1800.0
+# The bound of a game's native Runtime build inside project.export (NativeBuildBoundSeconds in
+# Editor/Source/EditorCore/Native/NativeBuild.h, Exporter.h step 3a: its wait for the machine-wide build lock and the
+# build): the Dist half waits that much longer for each export of a game with Native/ (dist_export_timeout).
+EXPORT_NATIVE_BUILD_SECONDS = 4200.0
 # The doctest suites of the device-dependent stages (Tests/Source/Support/HeadlessGpuFixture.h: Test::GpuSuite and
 # Test::GoldenSuite). The unit stage runs every other suite (§15.8).
 GPU_TEST_SUITE = "GPU"
@@ -1450,11 +1474,22 @@ def expand_replay_globs(project: Path, globs: list[str]) -> list[str]:
 
 @dataclasses.dataclass
 class ReplayOutcome:
-    """One replay verified by one editor: its observed state hash (empty when none) and why it failed."""
+    """One replay verified by one editor: its observed state hash (empty when none), why it failed, and its input
+    check's warning (games.input_check_warning), which never fails it."""
 
     path: str
     state_hash: str = ""
     problems: list[str] = dataclasses.field(default_factory=list)
+    warnings: list[str] = dataclasses.field(default_factory=list)
+
+
+@dataclasses.dataclass
+class InputCheck:
+    """The input check of a project's replays with input events (input_check_failures), by replay: the failure lines
+    of those that fail it, and the warning of each that fails it only at its checkpoints (games.input_check_warning)."""
+
+    failures: dict[str, list[str]] = dataclasses.field(default_factory=dict)
+    warnings: dict[str, str] = dataclasses.field(default_factory=dict)
 
 
 def copy_project(source: Path, destination: Path, keep_cache: bool = False) -> Path:
@@ -1496,7 +1531,9 @@ def verify_replays(editor: Path, project_file: Path, replays: list[str], user_da
             outcomes = replay_outcomes(client, engine_client, replays, timeout)
             checked = input_check_failures(client, engine_client, events, timeout)
             for outcome in outcomes:
-                outcome.problems += checked.get(outcome.path, [])
+                outcome.problems += checked.failures.get(outcome.path, [])
+                if outcome.path in checked.warnings:
+                    outcome.warnings.append(checked.warnings[outcome.path])
             try:
                 client.call("session.shutdown", {"force": True}, timeout=EDITOR_SHUTDOWN_TIMEOUT_SECONDS)
             except (engine_client.EngineError, engine_client.ConnectionClosed, TimeoutError):
@@ -1532,31 +1569,36 @@ def replay_outcomes(client: Any, engine_client: Any, replays: list[str], timeout
     return outcomes
 
 
-def input_check_failures(client: Any, engine_client: Any, events: dict[str, int],
-                         timeout: float) -> dict[str, list[str]]:
+def input_check_failures(client: Any, engine_client: Any, events: dict[str, int], timeout: float) -> InputCheck:
     """The input check of the replays in `events` ({project-relative path: input event count}) that hold input events
-    (M16 friction S2-01): each is verified again with input.replay {verify: true, strictHash: true, withoutInput: true}
-    on the open session of `client`, and that verification must fail (games.evaluate_input_check), since a replay whose
-    outcome does not depend on its input proves nothing about its gameplay. Returns {replay: failure lines} for the
-    replays that fail it; afterwards no play session is left (play.stop, a failure naming the first replay checked when
-    it is refused). Connection errors propagate to the caller."""
-    failures: dict[str, list[str]] = {}
+    (M16 friction S2-01): each is verified again with input.replay {verify: true, strictHash: true, withoutInput: true,
+    continuePastCheckpoint: true} on the open session of `client`, and that verification must fail
+    (games.evaluate_input_check), since a replay whose outcome does not depend on its input proves nothing about its
+    gameplay. The run plays on past the checkpoints that differ (Docs/Decisions/0030-m19-contract.md decision 3), so a
+    failed check whose run reached the recorded final hash anyway gets games.input_check_warning's warning. Returns the
+    failure lines of the replays that fail it and those warnings; afterwards no play session is left (play.stop, a
+    failure naming the first replay checked when it is refused). Connection errors propagate to the caller."""
+    check = InputCheck()
     checked = [replay for replay, count in events.items() if count > 0]
     for replay in checked:
-        params = {"path": replay, "verify": True, "strictHash": True, "withoutInput": True}
+        params = {"path": replay, "verify": True, "strictHash": True, "withoutInput": True,
+                  "continuePastCheckpoint": True}
         try:
             result = client.call("input.replay", params, timeout=timeout)
             lines = games.evaluate_input_check(replay, events[replay], result, None)
         except engine_client.EngineError as error:
             lines = games.evaluate_input_check(replay, events[replay], None, (error.error_code, error.detail))
+            outcome = error.data.get("replay") if isinstance(error.data, dict) else None
+            if not lines and (warning := games.input_check_warning(replay, outcome)) is not None:
+                check.warnings[replay] = warning
         if lines:
-            failures[replay] = lines
+            check.failures[replay] = lines
     if checked and client.call("play.state", {}, timeout=timeout).get("state") != "Edit":
         try:
             client.call("play.stop", {}, timeout=timeout)
         except engine_client.EngineError as error:
-            failures.setdefault(checked[0], []).append(f"play.stop after the input check failed: {error.detail}")
-    return failures
+            check.failures.setdefault(checked[0], []).append(f"play.stop after the input check failed: {error.detail}")
+    return check
 
 
 def determinism_problems(committed: dict[str, str], outcomes: dict[str, list[ReplayOutcome]],
@@ -1685,12 +1727,18 @@ def run_determinism(configs: list[str], arguments: argparse.Namespace, console: 
         for outcome in outcomes[label]:
             console.print(f"  {label} {outcome.path}: {outcome.state_hash or '(no hash)'}"
                           + (f" ({'; '.join(outcome.problems)})" if outcome.problems else ""))
+            for warning in outcome.warnings:
+                console.print(f"  warning: {label}: {warning}")
     for label, hashes in exported.items():
         for replay in replays:
             console.print(f"  {label} {replay}: {hashes.get(replay) or '(no hash)'}")
     problems = determinism_problems(committed, outcomes, exported)
     data["hashes"] = {**{label: {outcome.path: outcome.state_hash for outcome in results}
                          for label, results in outcomes.items()}, **exported}
+    warnings = [f"{label}: {warning}" for label, results in outcomes.items() for outcome in results
+                for warning in outcome.warnings]
+    if warnings:
+        data["warnings"] = warnings
     if arguments.junit:
         report = junit_path(DETERMINISM_REPORT_STEM)
         write_determinism_junit(report, problems)
@@ -1832,7 +1880,9 @@ def check_game_in_editor(client: Any, engine_client: Any, project: games.GamePro
     in Editor mode (its replay hashes go into `hashes` as "Editor <config>", and with --junit the document into
     games.editor_report_path), at least one committed replay with input events (games.check_replay_acceptance), the
     input check of every committed replay with input events (input_check_failures: its verification without them must
-    fail, M16 friction S2-01), and no replay below Assets/ that Testing.Replays leaves out."""
+    fail, M16 friction S2-01; the warnings of those whose run without input differed only at checkpoints go into
+    `data` as "warnings" and to the console, never into the failure lines), and no replay below Assets/ that
+    Testing.Replays leaves out."""
     console.heading(f"games {project.name} Editor {config}: the build settings of {copy.project_file.name}")
     try:
         failures = games.check_build_settings(copy.project_file)
@@ -1876,12 +1926,16 @@ def check_game_in_editor(client: Any, engine_client: Any, project: games.GamePro
     failures += games.check_replay_acceptance(copy.events)
     with_events = sorted(replay for replay, count in copy.events.items() if count > 0)
     if with_events:
-        console.heading(f"games {project.name} Editor {config}: input.replay {{verify, strictHash, withoutInput}} of "
-                        f"{len(with_events)} replay(s) with input events, which must fail")
+        console.heading(f"games {project.name} Editor {config}: input.replay {{verify, strictHash, withoutInput, "
+                        f"continuePastCheckpoint}} of {len(with_events)} replay(s) with input events, which must fail")
         checked = input_check_failures(client, engine_client, copy.events, arguments.timeout)
         data["inputChecked"] = with_events
-        for replay in sorted(checked):
-            failures += checked[replay]
+        for replay in sorted(checked.failures):
+            failures += checked.failures[replay]
+        if checked.warnings:
+            data["warnings"] = [checked.warnings[replay] for replay in sorted(checked.warnings)]
+            for warning in data["warnings"]:
+                console.print(f"  warning: {warning}")
     failures += games.check_replays_matched(copy.directory, copy.matched)
     return failures
 
@@ -1919,24 +1973,42 @@ def locate_testing_package(result: dict[str, Any]) -> tuple[Path, Path, str]:
     return output_directory, relative, game
 
 
+def dist_export_timeout(arguments: argparse.Namespace, copy: GameCopy, feature_test: bool) -> float:
+    """How long the Dist half waits for a project.export of `copy`: --timeout, plus EXPORT_FEATURE_TEST_RUN_SECONDS for
+    an export that runs its own feature test (`feature_test`), plus EXPORT_NATIVE_BUILD_SECONDS for a game with Native/,
+    whose export builds its Runtime first (Docs/Decisions/0030-m19-contract.md decisions 10 and 33)."""
+    timeout = arguments.timeout
+    if feature_test:
+        timeout += EXPORT_FEATURE_TEST_RUN_SECONDS
+    if (copy.directory / native_build.NATIVE_DIRECTORY).is_dir():
+        timeout += EXPORT_NATIVE_BUILD_SECONDS
+    return timeout
+
+
 def check_game_export(client: Any, engine_client: Any, project: games.GameProject, copy: GameCopy,
                       hashes: dict[str, dict[str, str]], work: Path, data: dict[str, object],
                       arguments: argparse.Namespace, console: Console) -> Step:
     """The Dist half on the open session of the Release editor (decision 8 step 3): project.export {config: Dist,
-    testing: true}, located with locate_testing_package (its executable from the result, the game's Name from its
-    manifest, Docs/Decisions/0027-m17-contract.md decision 4, B2) and installed to bin/Exports/Dist/<Game>/, the
-    package's --feature-test run from a temporary working directory (its reports copied to games.dist_report_path with
-    --junit, so the export stage's FeatureTest-Dist reports are never touched), its exit code, testing user data and
-    games.evaluate_run in Dist mode, games.compare_game_hashes over the committed hashes, every editor half of this run
-    (`hashes`) and the exported run, games.check_replay_acceptance (a game whose determinism rests on no replay with
-    input fails here too), then a plain project.export {config: Dist, smokeTest: true} into the editor's export root,
-    checked with games.check_smoke. <Game> is the project's Name, whatever the .eproj's file stem (project.name), which
-    names only the step and its reports."""
+    testing: true, featureTest: true} (its call bounded by dist_export_timeout: --timeout plus the bound of the export's
+    own feature-test run, and of its native Runtime build for a game with Native/), located with
+    locate_testing_package (its executable from the result, the game's Name from its manifest,
+    Docs/Decisions/0027-m17-contract.md decision 4, B2) and installed to
+    bin/Exports/Dist/<Game>/ without the testing user data the export's own feature-test run left in it (so the check of
+    the user data sees only this half's run), the package's --feature-test run from a temporary working directory (its
+    reports copied to games.dist_report_path with --junit, so the export stage's FeatureTest-Dist reports are never
+    touched), its exit code, testing user data and games.evaluate_run in Dist mode, games.compare_game_hashes over the
+    committed hashes, every editor half of this run (`hashes`) and the exported run, games.check_replay_acceptance (a
+    game whose determinism rests on no replay with input fails here too), games.check_feature_test (the hashes the
+    export's own feature test reported, which a builder reads, must equal those of the package's run here:
+    Docs/Decisions/0030-m19-contract.md decision 10), then a plain project.export {config: Dist, smokeTest: true} into
+    the editor's export root, checked with games.check_smoke. <Game> is the project's Name, whatever the .eproj's file
+    stem (project.name), which names only the step and its reports."""
     name = f"games {project.name} Dist"
     started = time.monotonic()
-    console.heading(f"{name}: project.export {{config: {DIST_HALF}, testing: true}}")
+    console.heading(f"{name}: project.export {{config: {DIST_HALF}, testing: true, featureTest: true}}")
     try:
-        result = client.call("project.export", {"config": DIST_HALF, "testing": True}, timeout=arguments.timeout)
+        result = client.call("project.export", {"config": DIST_HALF, "testing": True, "featureTest": True},
+                             timeout=dist_export_timeout(arguments, copy, feature_test=True))
     except engine_client.EngineError as error:
         return Step(name, Status.FAILED, f"the testing {DIST_HALF} export failed: {describe_export_error(error)}",
                     time.monotonic() - started, data=data)
@@ -1956,6 +2028,17 @@ def check_game_export(client: Any, engine_client: Any, project: games.GameProjec
     if not executable.is_file():
         return Step(name, Status.FAILED, f"the package holds no {paths.display_path(executable)}",
                     time.monotonic() - started, data=data)
+    # The export's own feature-test run (Exporter.h step 6a) ran in the package's testing user data and left its log and
+    # reports there; its hashes are in `result`. They go, so check_testing_user_data sees only what the run below
+    # writes.
+    leftover = exports.testing_user_data(package, game)
+    try:
+        if leftover.exists():
+            shutil.rmtree(leftover)
+    except OSError as error:
+        return Step(name, Status.FAILED, f"cannot remove the export's own feature-test user data "
+                                         f"{paths.display_path(leftover)}: {error}", time.monotonic() - started,
+                    data=data)
 
     # The Runtime names its reports FeatureTest-Dist whatever the game (RuntimeApp.cpp), below its working directory.
     run_directory = work / "DistRun"
@@ -1982,10 +2065,13 @@ def check_game_export(client: Any, engine_client: Any, project: games.GameProjec
         console.print(tail_lines(log, LOG_TAIL_LINES))
     failures += check_testing_user_data(package, game, log_name)
     exported: dict[str, str] = {}
+    warnings: list[str] = []
     try:
         failures += games.evaluate_run(json.loads(report.read_text(encoding="utf-8")), DIST_HALF, copy.testing,
                                        copy.committed)
         exported = exports.read_replay_hashes(report)
+        feature_failures, warnings = games.check_feature_test(result, exported, arguments.require_gpu)
+        failures += feature_failures
     except (OSError, ValueError) as error:
         failures.append(f"no readable --feature-test report: {error}")
     if arguments.junit:
@@ -2002,11 +2088,12 @@ def check_game_export(client: Any, engine_client: Any, project: games.GameProjec
     failures += games.check_replay_acceptance(copy.events)
 
     console.heading(f"{name}: project.export {{config: {DIST_HALF}, smokeTest: true}}")
-    warnings: list[str] = []
     try:
-        smoke = client.call("project.export", {"config": DIST_HALF, "smokeTest": True}, timeout=arguments.timeout)
-        smoke_failures, warnings = games.check_smoke(smoke, arguments.require_gpu)
+        smoke = client.call("project.export", {"config": DIST_HALF, "smokeTest": True},
+                            timeout=dist_export_timeout(arguments, copy, feature_test=False))
+        smoke_failures, smoke_warnings = games.check_smoke(smoke, arguments.require_gpu)
         failures += smoke_failures
+        warnings += smoke_warnings
         data["smokeTestRan"] = smoke.get("smokeTestRan")
     except engine_client.EngineError as error:
         failures.append(f"the plain {DIST_HALF} export failed: {describe_export_error(error)}")
@@ -2083,6 +2170,10 @@ def drive_game_session(project: games.GameProject, config: str, editor_half: boo
         except (RuntimeError, ValueError, OSError) as error:
             return failed([f"the staged project cannot be prepared: {error}"])
         editor_data["replays"] = copy.committed
+        # A native game's editor opens the copy with its module loaded (ADR 0030 decision 35).
+        native_failures = games.prepare_native_editor(copy.directory, work / "UserData", config)
+        if native_failures:
+            return failed(native_failures)
         before = snapshot_project(copy.directory)
         command = [*GAMES_EDITOR_ARGUMENTS, "--export-root", str(work / "Exports"), "--project", str(project_file)]
         console.heading(f"games {project.name} ({config} editor on the staged files): "
@@ -2210,9 +2301,11 @@ def run_games(configs: list[str], arguments: argparse.Namespace, console: Consol
     """The games suite (ADR 0026 decision 8) over the requested configurations: Debug and Release select those editors'
     halves, Dist the exported half the Release editor drives. Every staged game project (games.discover_projects in
     index mode) gets "games <Name> audit", then its halves; a project found on disk but not staged gets one passed step,
-    "games <Name>", and nothing else. The builds the halves need are looked up after the audits, then the device is
-    probed once, and only then are the staged files copied. With --junit each requested configuration's steps go to
-    games.junit_path(<Config>), the audit and suite-level steps into the first requested configuration's file."""
+    "games <Name>", and nothing else. Staged projects that share an .eproj stem or a Name
+    (games.check_distinct_projects) fail the "games" step with one line per collision, and then no project runs. The
+    builds the halves need are looked up after the audits, then the device is probed once, and only then are the staged
+    files copied. With --junit each requested configuration's steps go to games.junit_path(<Config>), the audit and
+    suite-level steps into the first requested configuration's file."""
     configs = [config for config in paths.CONFIGURATIONS if config in configs]
     first = configs[0]
     assigned: list[tuple[str, Step]] = []  # (the configuration whose JUnit file holds the step, the step)
@@ -2225,9 +2318,18 @@ def run_games(configs: list[str], arguments: argparse.Namespace, console: Consol
         assigned.append((first, Step(GAMES_STEP_NAME, Status.FAILED, f"cannot list the staged game projects: {error}",
                                      exit_code=EXIT_INIT_FAILED, data={"suite": "games"})))
     else:
+        collisions = games.check_distinct_projects(staged, "index")
+        if collisions:
+            # Their steps, reports or Dist packages would collide (Docs/Decisions/0030-m19-contract.md decision 12), so
+            # no project is audited, probed, copied or named below.
+            for line in collisions:
+                console.print(f"FAILED: {line}")
+            staged, on_disk = [], []
+            assigned.append((first, Step(GAMES_STEP_NAME, Status.FAILED, "; ".join(collisions),
+                                         data={"suite": "games", "failures": collisions})))
         directories = {project.directory for project in staged}
         unstaged = [project for project in on_disk if project.directory not in directories]
-        if not staged and not unstaged:
+        if not staged and not unstaged and not collisions:
             assigned.append((first, Step(GAMES_STEP_NAME, Status.PASSED, NO_GAME_PROJECT_NOTE,
                                          data={"suite": "games"})))
         # The audits need neither a build nor a device.
@@ -2368,8 +2470,10 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
                              "instead of failing the run")
     parser.add_argument("--timeout", type=float, default=SUITE_TIMEOUT_SECONDS,
                         help=f"seconds per Tests, automation or FeatureTest run, per export of the export suite, and "
-                             f"per editor call and exported run of the games suite (default: "
-                             f"{SUITE_TIMEOUT_SECONDS:.0f})")
+                             f"per editor call and exported run of the games suite, whose testing Dist export waits "
+                             f"{EXPORT_FEATURE_TEST_RUN_SECONDS:.0f} s more for its own feature-test run and whose "
+                             f"Dist exports of a game with Native/ {EXPORT_NATIVE_BUILD_SECONDS:.0f} s more for its "
+                             f"native Runtime build (default: {SUITE_TIMEOUT_SECONDS:.0f})")
     parser.add_argument("--merge-coverage", nargs=3, metavar=("EDITOR_JSON", "RELEASE_JSON", "DIST_JSON"),
                         help="run only the cross-mode coverage merge of three FeatureTest reports (§15.6) and print "
                              "one 'merge: <rule>: <subject>' line per failure")

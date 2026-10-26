@@ -5,9 +5,14 @@
 #include "EditorCore/EditorContext.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Reflection/FieldInfo.h"
+#include "Engine/Reflection/ValidationContext.h"
 #include "Support/EditorTestFixture.h"
 
 #include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <span>
 
 namespace Engine {
 
@@ -120,6 +125,39 @@ namespace Engine {
 			CHECK(editor.GetProject().GetSettings().Simulation.FixedHz == 60);
 		}
 
+		TEST_CASE("ProjectSettingsCommand: the members a patch names that the settings do not have, null ones included, are its warnings")
+		{
+			Test::EditorTestFixture fixture("SettingsUnknownMembers");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+
+			Result<Scope<ProjectSettingsCommand>> command = ProjectSettingsCommand::CreateFromPatch(editor,
+				ParseSettingsJson(R"({"Window":{"Titel":"Tetris","Width":720},"Simulation":{"FixdHz":null}})"), "Set Project Settings");
+			REQUIRE_MESSAGE(command.has_value(), command.error().ToString());
+			const std::span<const ValidationIssue> warnings = (*command)->GetWarnings();
+			REQUIRE(warnings.size() == 2);
+			for (const ValidationIssue& warning : warnings)
+			{
+				CHECK(warning.Severity == DiagnosticSeverity::Warning);
+				CHECK(warning.Code == UnknownFieldCode);
+			}
+			CHECK(std::ranges::any_of(warnings, [](const ValidationIssue& issue)
+			{
+				return issue.JsonPointer == "/Window/Titel" && std::ranges::find(issue.Suggestions, "Title") != issue.Suggestions.end();
+			}));
+			CHECK(std::ranges::any_of(warnings, [](const ValidationIssue& issue)
+			{
+				return issue.JsonPointer == "/Simulation/FixdHz" && std::ranges::find(issue.Suggestions, "FixedHz") != issue.Suggestions.end();
+			}));
+			REQUIRE(editor.Execute(std::move(*command)).has_value());
+			CHECK(editor.GetProject().GetSettings().Window.Width == 720);
+			CHECK_FALSE(ReadProjectFile(fixture).contains("Titel"));
+
+			const Result<Scope<ProjectSettingsCommand>> known = ProjectSettingsCommand::CreateFromPatch(editor, ParseSettingsJson(R"({"Window":{"Title":null}})"), "Reset");
+			REQUIRE_MESSAGE(known.has_value(), known.error().ToString());
+			CHECK((*known)->GetWarnings().empty());
+		}
+
 		TEST_CASE("ProjectSettingsCommand: needs an open project")
 		{
 			Test::EditorTestFixture fixture("SettingsNoProject");
@@ -138,6 +176,7 @@ namespace Engine {
 			CHECK(command.GetBefore() == ParseSettingsJson(R"({"Name":"A"})"));
 			CHECK(command.GetAfter() == ParseSettingsJson(R"({"Name":"B"})"));
 			CHECK(command.GetMemorySize() > 0);
+			CHECK(command.GetWarnings().empty());
 		}
 	}
 

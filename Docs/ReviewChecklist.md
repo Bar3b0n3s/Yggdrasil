@@ -38,6 +38,7 @@ Section references (§) point to `Docs/Architecture.md` unless marked CodeStyle 
 - [ ] Integer arithmetic has no overflow, sign or narrowing bugs. Every narrowing conversion is an explicit `static_cast`, and the value is known to fit.
 - [ ] Floating-point code handles NaN and Inf from external input. Values are rejected before they reach Jolt, the renderer or serialized data (§5.4, §9.1).
 - [ ] Code that reads binary or JSON data is bounds-checked and returns a `Result`. Hostile input never crashes it.
+- [ ] A new or changed importer lists in `Import.Dependencies` every asset its cooked output references, with a test (Architecture §7.4; ADR 0030 decision 21): the exporter checks these lists and follows them to decide what `Engine.pak` and, with `Export.PruneUnreferenced`, `Game.pak` hold, so an omission ships a broken or pruned game. A scene's or prefab's Script field values are the one exception, which the exporter collects itself.
 
 ## 2. Style and naming (CodeStyle; `Format.py --check` and `Lint.py` catch most of it)
 
@@ -159,7 +160,7 @@ Section references (§) point to `Docs/Architecture.md` unless marked CodeStyle 
 
 - [ ] Automation stays loopback-only and token-authenticated, rejects HTTP probes and oversized frames, and is absent from Dist (§13.2, §14.4).
 - [ ] Every path from a request, script or asset is confined: `VfsPath` rejects `..`, absolute paths, NUL bytes and reserved names. Only `asset.import` reads an absolute source path, and only read-only.
-- [ ] No method or script API executes request-supplied processes, shell commands or arbitrary files; the only processes a method starts are `project.export`'s smoke test and, on macOS, `codesign`, each by a fixed path with fixed arguments (§13.2). Script sandbox escapes (§11.1) stay closed.
+- [ ] No method or script API runs a process, a shell command or code that a request names; the only processes a method starts are `project.export`'s smoke test, its feature test and, on macOS, `codesign`, each by a fixed path with fixed arguments. The one exception is a game's native module (Windows only, §13.2): only while the user's "Allow native code" preference is on, the open project's `Native/` sources, which `native.write` may author, are built by the fixed-path `Scripts/BuildNative.py` (`native.build`, and the export's NativeBuild step), loaded into the editor's process (`native.load` and the project's opening) and linked into the games the editor exports; no method can change that preference. Script sandbox escapes (§11.1) stay closed.
 - [ ] Responses are size-bounded, and offloaded results stay inside the project's `Library/`.
 - [ ] Downloads (`Setup.py`, `FetchAssets.py`) use allowlisted official hosts over HTTPS, pinned versions and verified checksums.
 - [ ] CI workflows use least-privilege `permissions`, actions pinned to a commit SHA, `persist-credentials: false`, and no untrusted input interpolated into `run:` scripts.

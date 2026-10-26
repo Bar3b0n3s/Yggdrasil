@@ -19,6 +19,15 @@
     "forbidden AssetPipeline: _ZN6Engine9PakWriter5WriteERKNSt10filesystem7__cxx114pathE (/build/bin/Dist-linux-x86_64/Engine/libEngine.a(PakWriter.o))",
     "forbidden AssetPipeline: _ZNK6Engine15TextureImporter6ImportERNS_13ImportContextE (/build/bin/Dist-linux-x86_64/Engine/libEngine.a(TextureImporter.o))"
   ],
+  "LuauCompiler": [
+    "forbidden LuauCompiler: _Z12luau_compilePKcmP18lua_CompileOptionsPm (/build/bin/Dist-linux-x86_64/Luau/libLuau.a(lcode.o))",
+    "forbidden LuauCompiler: _Z27luarequire_pushproxyrequireP9lua_StatePFvP24luarequire_ConfigurationEPv (/build/bin/Dist-linux-x86_64/Luau/libLuau.a(Require.o))",
+    "forbidden LuauCompiler: _ZN4Luau11parseConfigERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEERNS_6ConfigERKNS_13ConfigOptionsE (/build/bin/Dist-linux-x86_64/Luau/libLuau.a(Config.o))",
+    "forbidden LuauCompiler: _ZN4Luau15BytecodeBuilder14addConstantNilEv (/build/bin/Dist-linux-x86_64/Luau/libLuau.a(BytecodeBuilder.o))",
+    "forbidden LuauCompiler: _ZN4Luau17extractLuauConfigERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEERNS_6ConfigESt8optionalINS_13ConfigOptions12AliasOptionsEENS_18InterruptCallbacksE (/build/bin/Dist-linux-x86_64/Luau/libLuau.a(LuauConfig.o))",
+    "forbidden LuauCompiler: _ZN4Luau7Require19lua_requireinternalEP9lua_StatePKc (/build/bin/Dist-linux-x86_64/Luau/libLuau.a(RequireImpl.o))",
+    "forbidden LuauCompiler: _ZN4Luau7compileERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEERKNS_14CompileOptionsERKNS_12ParseOptionsEPNS_15BytecodeEncoderE (/build/bin/Dist-linux-x86_64/Luau/libLuau.a(Compiler.o))"
+  ],
   "MissingRequired": [
     "missing required symbol: FeatureTestRunner",
     "missing required symbol: ReplayPlayer"

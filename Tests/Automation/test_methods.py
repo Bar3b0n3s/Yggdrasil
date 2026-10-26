@@ -5,9 +5,15 @@ from __future__ import annotations
 
 import json
 import math
+import re
+import sys
 import unittest
 
-from harness import REPOSITORY_ROOT, AutomationTestCase, engine_client
+from harness import DEFAULT_PROJECT_NAME, REPOSITORY_ROOT, AutomationTestCase, automation_config, engine_client
+
+sys.path.insert(0, str(REPOSITORY_ROOT / "Scripts"))
+
+import Build  # noqa: E402  (Scripts/ is on sys.path above: the stamp path Build.py writes)
 
 
 def euler_degrees_to_quaternion(x: float, y: float, z: float) -> tuple[float, float, float, float]:
@@ -150,6 +156,31 @@ class MethodTests(AutomationTestCase):
         self.assertEqual(opened["project"]["root"], root.as_posix())
         self.assertEqual(reopened.call("scene.open", {"path": "Assets/Scenes/Main.scene"})["scene"]["entityCount"], 1)
 
+    def test_project_set_settings_names_a_dropped_member_and_a_strict_editor_refuses_it(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md "Integration of W19.2": a member the settings do not have was dropped
+        # with a warning nothing returned, so a mistyped key was lost without a word.
+        client, root = self.open_editor_with_scene()
+        patched = client.call("project.setSettings", {"patch": {"Window": {"Titel": "Tetris", "Width": 800}}})
+        self.assertEqual(patched["settings"]["Window"]["Width"], 800)
+        self.assertEqual(len(patched["warnings"]), 1, patched["warnings"])
+        self.assertTrue(patched["warnings"][0].startswith("/patch/Window/Titel: "), patched["warnings"])
+        self.assertIn("'Title'", patched["warnings"][0])
+        self.assertNotIn("Titel", (root / f"{DEFAULT_PROJECT_NAME}.eproj").read_text(encoding="utf-8"))
+        self.assertEqual(client.call("project.setSettings", {"patch": {"Window": {"Title": "Tetris"}}})["warnings"], [])
+        # A mistyped reset (a null member) is named too, although the merge itself would erase it unread.
+        reset = client.call("project.setSettings", {"patch": {"Window": {"Titel": None}}})
+        self.assertEqual(len(reset["warnings"]), 1, reset["warnings"])
+        self.assertTrue(reset["warnings"][0].startswith("/patch/Window/Titel: "), reset["warnings"])
+        self.assertEqual(reset["settings"]["Window"]["Title"], "Tetris")
+
+        strict = self.connect(self.start_editor(["--strict"]))
+        self.create_project(strict, "StrictProject")
+        with self.assertRaises(engine_client.EngineError) as refused:
+            strict.call("project.setSettings", {"patch": {"Window": {"Titel": "Tetris", "Width": 800}}})
+        self.assert_engine_error(refused.exception, engine_client.VALIDATION_FAILED, "Validation")
+        self.assertIn("/patch/Window/Titel", [issue.get("pointer") for issue in refused.exception.issues])
+        self.assertNotEqual(strict.call("project.getSettings")["settings"]["Window"]["Width"], 800)
+
     def test_rpc_discover_matches_the_dumped_catalogue(self) -> None:
         client, _ = self.open_editor_with_scene()
         discovered = {method["name"] for method in engine_client.load_offloaded(client.call("rpc.discover"))["methods"]}
@@ -201,6 +232,23 @@ class MethodTests(AutomationTestCase):
             client.call("docs.get", {"topic": "reference/ScriptAPI", "section": "no such section"})
         self.assert_engine_error(missing.exception, engine_client.NOT_FOUND, "NotFound")
 
+    def test_docs_get_serves_the_native_module_interface(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 26: a builder reads only what docs.get serves, and a native
+        # module's sources include NativeApi.h, so the header is a topic of its own; no other engine header is one.
+        client = self.connect(self.start_editor())
+        topics = {topic["name"]: topic for topic in client.call("docs.get")["topics"]}
+        self.assertIn("native/NativeApi.h", topics)
+        header = (REPOSITORY_ROOT / "Engine" / "Source" / "Engine" / "Native" / "NativeApi.h").read_bytes()
+        self.assertEqual(topics["native/NativeApi.h"]["bytes"], len(header))
+        served = client.call("docs.get", {"topic": "native/NativeApi.h"})
+        self.assertEqual(served["path"], "Engine/Source/Engine/Native/NativeApi.h")
+        self.assertEqual(served["nextOffset"], 0)
+        self.assertEqual(served["content"].encode("utf-8"), header)
+        self.assertIn("ENGINE_NATIVE_MODULE", served["content"])
+        with self.assertRaises(engine_client.EngineError) as other:
+            client.call("docs.get", {"topic": "native/NativeModule.h"})
+        self.assert_engine_error(other.exception, engine_client.NOT_FOUND, "NotFound")
+
     def test_docs_get_lists_sections_with_toc_and_finds_them_by_heading_text(self) -> None:
         # Docs/Decisions/0026-m16-contract.md, friction S2-05: the section list cost a 32 KB first page, and a section
         # asked for by its text resolved through a shared anchor to another heading ("TestSuite" gave Test.Suite).
@@ -247,6 +295,30 @@ class MethodTests(AutomationTestCase):
         self.assertEqual((scene["path"], scene["dirty"]), ("Assets/Scenes/Main.scene", False))
         reopened.call("entity.create", {"name": "Board"})
         self.assertTrue(reopened.call("session.info")["scene"]["dirty"])
+
+    def test_session_reports_the_build_id(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 13 (B-BVER): session.hello, session.info and the session file
+        # name the build that answers, as semantic-versioning build metadata whose version is the engine's. A build by
+        # Scripts/Build.py in a git checkout names its commit: Build.py writes the stamp header where premake's Engine
+        # objdir names it (ENGINE_BUILD_STAMP_HEADER), and BuildId.cpp compiles without it when the two paths drift
+        # apart, so a stamp with a commit beside the build means the build must carry one (the milestone review).
+        editor = self.start_editor()
+        client = self.connect(editor)
+        build = client.hello["build"]
+        self.assertRegex(build, r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\+[0-9a-f]{12}(\.dirty)?)?$")
+        self.assertEqual(build.split("+", 1)[0], client.hello["engineVersion"])
+        stamp = Build.build_stamp_path(REPOSITORY_ROOT, automation_config())
+        if stamp.is_file():
+            commit = re.search(r'^#define ENGINE_BUILD_COMMIT "([0-9a-f]*)"$', stamp.read_text(encoding="utf-8"),
+                               re.MULTILINE)
+            self.assertIsNotNone(commit, stamp)
+            if commit is not None and commit.group(1):
+                self.assertRegex(build, r"\+[0-9a-f]{12}(\.dirty)?$", f"{stamp} names commit {commit.group(1)}")
+        self.assertEqual(client.call("session.info")["build"], build)
+        self.assertIsNotNone(editor.session)
+        session_file = json.loads(editor.session.path.read_text(encoding="utf-8"))
+        self.assertEqual(session_file["build"], build)
+        self.assertEqual(list(session_file).index("build"), list(session_file).index("engineVersion") + 1)
 
 
 if __name__ == "__main__":

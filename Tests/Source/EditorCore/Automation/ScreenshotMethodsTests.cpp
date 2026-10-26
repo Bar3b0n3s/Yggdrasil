@@ -9,13 +9,20 @@
 #include "Engine/Automation/Protocol/PendingOperation.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/VfsPath.h"
+#include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Graphics/Image.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/ViewportCapture.h"
 #include "Support/AutomationTestClient.h"
 #include "Support/EditorTestFixture.h"
 
+#include <algorithm>
+#include <array>
 #include <chrono>
+#include <cstddef>
+#include <filesystem>
+#include <span>
 #include <string>
 #include <utility>
 
@@ -395,6 +402,103 @@ namespace Engine {
 			CHECK(editor->Pending);
 			CHECK_FALSE(editor->Specification.SupportsDryRun);
 			CHECK_FALSE(editor->Specification.AllowedInBatch);
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 9 (A-SHOTS): keep writes the PNG below Library/Automation/Kept/ with the
+		// output directory's naming, which no server prunes: neither the first write's removal of a gone server's files nor a
+		// shutdown touches it, so a look screenshot outlives every later session. An ordinary screenshot still goes to Out/.
+		TEST_CASE("ScreenshotMethods: keep writes the screenshot below Library/Automation/Kept, which a later server keeps")
+		{
+			CaptureCounts counts;
+			Test::EditorTestFixture fixture("KeptScreenshots");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			const std::filesystem::path kept = fixture.GetProjectRoot() / "Library" / "Automation" / "Kept";
+			REQUIRE(FileSystem::CreateDirectories(kept).has_value());
+			// A kept screenshot of a server that is gone (a process id no process has), which Out/ would prune.
+			const std::filesystem::path earlier = kept / "2147483644-1700000000-00000001.png";
+			REQUIRE(FileSystem::WriteFileAtomic(earlier, std::as_bytes(std::span("png", 3))).has_value());
+
+			std::filesystem::path shotPath;
+			{
+				Test::AutomationTestClient client(fixture.GetEditor(), MakeScreenshotServerSpecification(counts));
+				const Result<Json> shot = client.Call("viewport.screenshot", Json{ { "view", "scene" }, { "keep", true } });
+				REQUIRE_MESSAGE(shot.has_value(), shot.error().ToString());
+				const std::string path = ReadString((*shot)["path"]);
+				CHECK(path.contains("Library/Automation/Kept/"));
+				shotPath = FileSystem::PathFromUtf8(path);
+				CHECK(FileSystem::Exists(shotPath));
+				const Result<Json> plain = client.Call("viewport.screenshot", Json{ { "view", "scene" } });
+				REQUIRE_MESSAGE(plain.has_value(), plain.error().ToString());
+				CHECK(ReadString((*plain)["path"]).contains("Library/Automation/Out/"));
+				CHECK(FileSystem::Exists(earlier));
+			}
+			// A later server's first write prunes Out/, never Kept/.
+			{
+				Test::AutomationTestClient later(fixture.GetEditor(), MakeScreenshotServerSpecification(counts));
+				const std::array<std::byte, 3> bytes = { std::byte{ 1 }, std::byte{ 2 }, std::byte{ 3 } };
+				REQUIRE(later.GetServer().WriteOutputFile("png", bytes).has_value());
+			}
+			CHECK(FileSystem::Exists(shotPath));
+			CHECK(FileSystem::Exists(earlier));
+		}
+
+		TEST_CASE("ScreenshotMethods: editor.screenshot keep writes the editor UI below Library/Automation/Kept")
+		{
+			CaptureCounts counts;
+			ScreenshotSetup setup("KeptEditorScreenshot", counts);
+			const Result<Json> kept = setup.Call("editor.screenshot", Json{ { "maxDimension", 2000 }, { "keep", true } });
+			REQUIRE_MESSAGE(kept.has_value(), kept.error().ToString());
+			const std::string path = ReadString((*kept)["path"]);
+			CHECK(path.contains("Library/Automation/Kept/"));
+			const Result<Image> image = ReadPng(FileSystem::PathFromUtf8(path));
+			REQUIRE(image.has_value());
+			CHECK(image->Width == 1600);
+			const Result<Json> plain = setup.Call("editor.screenshot", Json::object());
+			REQUIRE_MESSAGE(plain.has_value(), plain.error().ToString());
+			CHECK(ReadString((*plain)["path"]).contains("Library/Automation/Out/"));
+		}
+
+		// Without a writable project (the launcher state, a read-only editor) kept files go below user://Automation/Kept/, as
+		// output files go below user://Automation/Out/; both take the server's one file sequence, and no server prunes Kept/.
+		TEST_CASE("ScreenshotMethods: without a writable project a kept file goes below user://Automation/Kept in the server's file sequence")
+		{
+			Test::EditorTestFixture fixture("KeptUserFiles");
+			VirtualFileSystem& vfs = fixture.GetEditor().GetVfs();
+			const VfsPath keptDirectory = VfsPath::Create("user", "Automation/Kept").value_or(VfsPath());
+			REQUIRE(vfs.CreateDirectories(keptDirectory).has_value());
+			// A kept file of a server that is gone (a process id no process has).
+			const VfsPath earlier = keptDirectory.Join("2147483644-1700000000-00000001.png").value_or(VfsPath());
+			REQUIRE(vfs.WriteNewFile(earlier, std::as_bytes(std::span("png", 3))).has_value());
+			const std::array<std::byte, 3> bytes = { std::byte{ 1 }, std::byte{ 2 }, std::byte{ 3 } };
+			std::string keptPath;
+			{
+				Test::AutomationTestClient client(fixture.GetEditor());
+				const Result<std::string> output = client.GetServer().WriteOutputFile("png", bytes);
+				REQUIRE_MESSAGE(output.has_value(), output.error().ToString());
+				const Result<std::string> kept = client.GetServer().WriteKeptFile("png", bytes);
+				REQUIRE_MESSAGE(kept.has_value(), kept.error().ToString());
+				keptPath = *kept;
+				// The in-process server has no sessions directory, so it names the user:// paths.
+				CHECK(output->starts_with("user://Automation/Out/"));
+				CHECK(output->ends_with("-00000001.png"));
+				CHECK(keptPath.starts_with("user://Automation/Kept/"));
+				CHECK(keptPath.ends_with("-00000002.png"));
+			}
+			{
+				// A later server of this process started in the same second has the same server tag, so its numbers must not
+				// meet the earlier server's names: its kept file takes 1 (the earlier one's kept file is 2) and its output
+				// file 2 (the earlier one's output file is 1), whatever the clock.
+				Test::AutomationTestClient later(fixture.GetEditor());
+				REQUIRE(later.GetServer().WriteKeptFile("png", bytes).has_value());
+				REQUIRE(later.GetServer().WriteOutputFile("png", bytes).has_value());
+			}
+			const Result<VfsPath> keptFile = VfsPath::Parse(keptPath);
+			REQUIRE(keptFile.has_value());
+			const Result<Buffer> read = vfs.ReadFile(*keptFile);
+			REQUIRE(read.has_value());
+			CHECK(std::ranges::equal(*read, bytes));
+			CHECK(vfs.Exists(earlier));
 		}
 	}
 

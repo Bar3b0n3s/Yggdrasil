@@ -107,7 +107,8 @@ namespace Engine {
 		[[nodiscard]] size_t CountSubtreeEntities(std::span<const Entity> roots);
 
 		// The registered component `name` that automation may write. Errors at `pointer`: NotFound with suggestions;
-		// InvalidArgument for an entity-level component (written through the entity's members) or a Hidden one.
+		// InvalidArgument for an entity-level component (written through the entity's members) or a Hidden one, and for a
+		// native component's name (IsNativeComponentName) with MakeNativeComponentWriteError's message and hint.
 		[[nodiscard]] Result<const ComponentInfo*> FindWritableComponent(const TypeRegistry& registry, std::string_view name, std::string_view pointer);
 
 		// Writes a "components" param (component values by registry name, convention 10 of MethodRegistry.h) onto `entity`,

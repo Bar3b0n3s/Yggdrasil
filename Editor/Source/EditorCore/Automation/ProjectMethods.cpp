@@ -24,6 +24,7 @@
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Project/ProjectSerializer.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Reflection/ValidationContext.h"
 #include "Engine/Scene/Migrations.h"
 #include "Engine/Scene/Prefab.h"
 #include "Engine/Scene/Scene.h"
@@ -406,9 +407,15 @@ namespace Engine {
 			Result<Scope<ProjectSettingsCommand>> command = ProjectSettingsCommand::CreateFromPatch(editor, patch, std::string(Utils::SettingsLabel));
 			if (!command)
 				return std::unexpected(Utils::PrefixPointers(command.error(), "/patch"));
+			ProjectSetSettingsResult result;
+			for (const ValidationIssue& warning : (*command)->GetWarnings())
+			{
+				const std::string pointer = std::format("/patch{}", warning.JsonPointer);
+				result.Warnings.push_back(warning.Hint.empty() ? std::format("{}: {}", pointer, warning.Message)
+															   : std::format("{}: {} ({})", pointer, warning.Message, warning.Hint));
+			}
 			ENGINE_TRY_ASSIGN(const uint64_t undoIndex, editor.Execute(std::move(*command)));
 
-			ProjectSetSettingsResult result;
 			result.Settings = editor.GetProject().GetSettings();
 			result.UndoIndex = ToAutomationCounter(undoIndex);
 			return result;
@@ -621,7 +628,11 @@ namespace Engine {
 
 		registry.Struct<ProjectSetSettingsResult>("ProjectSetSettingsResult", "The settings after the patch.")
 			.Field("settings", &ProjectSetSettingsResult::Settings, "The settings after the patch.")
-			.Field("undoIndex", &ProjectSetSettingsResult::UndoIndex, "The command's undo index; 0 in a dry run or a batch.");
+			.Field("undoIndex", &ProjectSetSettingsResult::UndoIndex, "The command's undo index; 0 in a dry run or a batch.")
+			.Field("warnings", &ProjectSetSettingsResult::Warnings,
+				"Each warning of the patch's read, \"<pointer>: <message>\" with a did-you-mean hint when one is close: a member the settings do "
+				"not have (a null one included), which was dropped, or a Variant value that does not resolve or match its schema, which was kept "
+				"as written (a --strict editor refuses the patch instead).");
 
 		registry.Struct<ProjectValidateParams>("ProjectValidateParams", "The params of project.validate.")
 			.Field("scope", &ProjectValidateParams::Scope, "What to check: the whole project or the open scene.")
@@ -725,7 +736,8 @@ namespace Engine {
 		methods.Add(
 			{
 				.Name = "project.setSettings",
-				.Description = "Applies an RFC 7386 merge patch to the project settings as one undoable command, which writes the .eproj.",
+				.Description = "Applies an RFC 7386 merge patch to the project settings as one undoable command, which writes the .eproj. A "
+							   "member the settings do not have is dropped and named in warnings; a --strict editor refuses it.",
 				.RequiredParams = { "patch" },
 				.ExposeAsTool = true,
 				.Mutates = true,

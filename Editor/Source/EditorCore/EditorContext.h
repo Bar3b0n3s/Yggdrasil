@@ -51,7 +51,10 @@ namespace Engine {
 	class EngineContext;
 	class IEnvironmentBaker;
 	class IMount;
+	class INativeBuildBackend;
+	class INativeLibraryLoader;
 	class ImporterRegistry;
+	class NativeModuleHost;
 	class ProjectSettingsCommand;
 	class SceneEdit;
 	class TypeRegistry;
@@ -92,9 +95,11 @@ namespace Engine {
 		// and fails, leaving the project closed, naming every file that does not load: one with an unknown key, field or
 		// component, and equally one with a structural defect, one that cannot be read or parsed, or one whose Version is
 		// newer than this build reads, since CI wants every committed scene and prefab to load strictly (the M15 fix review's
-		// C2); and the editor's own loads of scene files (scene.open and the methods that reopen a scene file, the exporter's
-		// scene loads) are strict too. Off: unknown keys, fields and components are warnings, and the scenes and prefabs are
-		// not loaded when the project opens.
+		// C2); the editor's own loads of scene files (scene.open and the methods that reopen a scene file, the exporter's
+		// scene loads) are strict too; and a settings patch (ProjectSettingsCommand::CreateFromPatch: project.setSettings, the
+		// inspector, the validator's fixes) naming a member the settings do not have is refused instead of dropped with a
+		// warning (M19). Off: unknown keys, fields and components are warnings, and the scenes and prefabs are not loaded when
+		// the project opens.
 		bool StrictUnknowns = false;
 		// --upgrade (Docs/Decisions/0026-m16-contract.md decision 11): OpenProject mounts project:// and cache://, loads the
 		// provenance and stops before the asset scan, so opening the project writes nothing. The script services, creating
@@ -104,6 +109,11 @@ namespace Engine {
 		// (§13.12 rule 2). Until then the asset manager has no project, and nothing but that request is served. Off (the
 		// default): OpenProject opens the assets at once.
 		bool DeferAssetScan = false;
+		// M19 (Docs/Decisions/0030-m19-contract.md decisions 30 and 31): the native module host's build backend and library
+		// loader (GetNativeModule); null: the platform's (MakeEditorNativeModuleHostSpecification). Tests inject fakes, so the
+		// host's rules run without a toolchain or a library.
+		Ref<INativeBuildBackend> NativeBuild{};
+		Ref<INativeLibraryLoader> NativeLoader{};
 	};
 
 	// The editor state of one editor process (or one test). Not copyable or movable; main thread only (§4.11), like the scene.
@@ -267,6 +277,13 @@ namespace Engine {
 		// (repairs) not saved since.
 		[[nodiscard]] bool IsSceneDirty() const;
 
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 31): a migration of the open scene that is no undo step, the native
+		// module host's when a load or reload makes the scene's native components canonical against new types. With `changed`
+		// the scene changed: the revision advances and the scene is modified until saved, like a dirty SetScene. With
+		// `clearHistory` the undo history is dropped (its entity snapshots hold the previous layout's values), the scene staying
+		// modified when it was. Asserts an open scene, outside a dry run and a transaction.
+		void ApplySceneMigration(bool changed, bool clearHistory);
+
 		// The open scene was written to `path` (scene.save, project.save): sets the scene path and the save point, and clears
 		// SceneChangedOnDisk, then calls AfterSceneSaved outside a dry run. Callback failure is returned with a hint
 		// explaining that the scene was saved but recovery cleanup failed; it never makes the durable save dirty again.
@@ -424,6 +441,14 @@ namespace Engine {
 		[[nodiscard]] EditorPlayController& GetPlay() { return *m_Play; }
 		[[nodiscard]] const EditorPlayController& GetPlay() const { return *m_Play; }
 
+		// --- Native module (M19, Docs/Decisions/0030-m19-contract.md decisions 29 to 31) ---------------------------------
+
+		// The open project's native module: the user's "Allow native code" preference, the module's builds and the loaded
+		// module, which every play session the editor starts runs (EditorCore/Native/NativeModuleHost.h). Valid for the
+		// editor's lifetime.
+		[[nodiscard]] NativeModuleHost& GetNativeModule() { return *m_Native; }
+		[[nodiscard]] const NativeModuleHost& GetNativeModule() const { return *m_Native; }
+
 		// Shared CPU state of the UI and viewport methods. Main thread; valid for this context's lifetime. View changes
 		// are session preferences, never a scene mutation or undo step. Existing screenshot camera access is preserved.
 		[[nodiscard]] EditorViewportState& GetViewportState() { return m_ViewportState; }
@@ -461,8 +486,10 @@ namespace Engine {
 		[[nodiscard]] Result<AssetRefreshReport> OpenProjectAssets();
 		// OpenProject's --strict check (EditorContextSpecification::StrictUnknowns): every .scene and .prefab under
 		// project://Assets, sorted by path, loaded strictly (LoadMode::Strict, LoadOptions::StrictUnknowns and the script field
-		// schemas). Errors: Validation with one issue per file that does not load, whatever the reason, naming the file.
-		[[nodiscard]] Status CheckProjectDocumentsStrictly() const;
+		// schemas), and their native components checked against the loaded module (M19). `nativeOpened` is what the native
+		// module host's OnProjectOpened returned, which the hint of a native component read without a module names.
+		// Errors: Validation with one issue per file that does not load, whatever the reason, naming the file.
+		[[nodiscard]] Status CheckProjectDocumentsStrictly(const Status& nativeOpened) const;
 		[[nodiscard]] Status RefreshScriptServices();
 		[[nodiscard]] Status ReimportScriptForTest(AssetHandle script);
 	private:
@@ -525,6 +552,9 @@ namespace Engine {
 		// run newest first when the dry run ends or the transaction rolls back, dropped when the outermost transaction commits
 		// outside a dry run. SceneEdit::Commit appends them.
 		std::vector<UniqueFunction<void()>> m_TransientPlayUndos;
+		// M19: the native module host, before the play controller, so a play session (which holds the loaded module's types)
+		// ends before the host releases them.
+		Scope<NativeModuleHost> m_Native;
 		// Last, so it is destroyed first: a play session refers to the asset manager and the type registry (M7).
 		Scope<EditorPlayController> m_Play;
 	private:

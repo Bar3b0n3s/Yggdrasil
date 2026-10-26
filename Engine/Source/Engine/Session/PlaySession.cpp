@@ -9,6 +9,7 @@
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Native/NativeComponents.h"
 #include "Engine/Reflection/FuzzySuggest.h"
 #include "Engine/Scene/AudioSystem.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
@@ -25,6 +26,7 @@
 #include "Engine/Scripting/ScriptApiRegistry.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Scripting/ScriptProxy.h"
+#include "Engine/Session/NativeWorld.h"
 #include "Engine/Session/ReplayRecorder.h"
 
 #include <algorithm>
@@ -87,6 +89,35 @@ namespace Engine {
 					std::format("the game view must be at least 1 x 1 pixels (got {} x {})", specification.ViewWidth, specification.ViewHeight));
 			}
 			return {};
+		}
+
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 27): the start of a Play session with a native module makes the
+		// scene's native components canonical against it. Its errors (a value its type rejects) fail the start like a strict
+		// load's, each one an issue naming its entity; its warnings (an unregistered component, a migrated field) are logged.
+		static Status CanonicalizeNativeScene(Scene& scene, const NativeModuleTypes& types)
+		{
+			Result<NativeSceneReport> report = CanonicalizeNativeComponents(scene, &types, false);
+			if (!report)
+				return std::unexpected(std::move(report).error().WithContext("while starting the play session"));
+			std::vector<ErrorIssue> issues;
+			for (const LoadDiagnostic& diagnostic : report->Diagnostics)
+			{
+				if (diagnostic.Severity != DiagnosticSeverity::Error)
+				{
+					ENGINE_CORE_WARN("Native component of the entity {} at {} ({}): {}", diagnostic.Entity, diagnostic.JsonPointer, diagnostic.Code, diagnostic.Message);
+					continue;
+				}
+				issues.push_back({ .JsonPointer = diagnostic.JsonPointer,
+					.Message = std::format("entity {}: {} ({})", diagnostic.Entity, diagnostic.Message, diagnostic.Code),
+					.Hint = {},
+					.Suggestions = {} });
+			}
+			if (issues.empty())
+				return {};
+			return std::unexpected(Error(ErrorCode::Validation, std::format("{} native component value(s) of the scene are invalid", issues.size()))
+					.WithIssues(std::move(issues))
+					.WithHint("fix the values (native.setComponents) or the module's types, then play again")
+					.WithContext("while starting the play session"));
 		}
 
 		// The entity cap's error (§5.7).
@@ -185,6 +216,8 @@ namespace Engine {
 		bool AudioTimeOwned = false;
 		uint64_t AudioTick = 0;
 		bool AudioHeld = false;
+		// M19: the native module's runtime (NativeWorld.h), in Play with PlaySessionSpecification::Native; null otherwise.
+		Scope<NativeWorld> Native{};
 		Scope<ScriptApiRegistry> OwnedApi{};
 		ScriptApiRegistry* Api = nullptr;
 		Ref<const ScriptFieldSchemaSource> Schemas{};
@@ -743,6 +776,7 @@ namespace Engine {
 			case PlaySessionPhase::StartFlush:              return "StartFlush";
 			case PlaySessionPhase::FixedUpdate:             return "FixedUpdate";
 			case PlaySessionPhase::Tasks:                   return "Tasks";
+			case PlaySessionPhase::NativeStep:              return "NativeStep";
 			case PlaySessionPhase::PreStepTransformUpdate:  return "PreStepTransformUpdate";
 			case PlaySessionPhase::PhysicsPreStep:          return "PhysicsPreStep";
 			case PlaySessionPhase::PhysicsStep:             return "PhysicsStep";
@@ -870,6 +904,12 @@ namespace Engine {
 		const size_t loadedCount = state.RuntimeScene->GetEntityCount();
 		if (loadedCount > maxEntities)
 			return Utils::MakeSceneOverLimitError(maxEntities, loadedCount);
+		// M19 (decisions 27 and 28): Play runs the module; Simulate ignores it, as it ignores scripts.
+		if (specification.Native != nullptr && specification.Mode == PlayMode::Play)
+		{
+			ENGINE_TRY(Utils::CanonicalizeNativeScene(*state.RuntimeScene, *specification.Native));
+			ENGINE_TRY_ASSIGN(state.Native, NativeWorld::Create(specification.Native));
+		}
 
 		state.UpdateTransforms();
 		// M11: the bodies, in canonical order (§5.6 "Session setup").
@@ -956,6 +996,15 @@ namespace Engine {
 			if (state.TestHook != nullptr)
 				state.TestHook->AfterTasks(*this, step);
 		}
+		// M19 (decision 28): the native module's systems, whose Transform writes the transform update below propagates
+		// before physics. A fault in native code stops the session at once: no later phase or tick runs (NativeWorld.h).
+		if (state.Native != nullptr && !state.FatalStop)
+		{
+			state.EnterPhase(*this, PlaySessionPhase::NativeStep, tick);
+			state.Native->Step(*this, step);
+			if (state.FatalStop)
+				return;
+		}
 		state.EnterPhase(*this, PlaySessionPhase::PreStepTransformUpdate, tick);
 		state.UpdateTransforms();
 		state.EnterPhase(*this, PlaySessionPhase::PhysicsPreStep, tick);
@@ -1035,6 +1084,16 @@ namespace Engine {
 	const ProjectSettings& PlaySession::GetProjectSettings() const
 	{
 		return m_State->Project;
+	}
+
+	AssetManager* PlaySession::GetAssets() const
+	{
+		return m_State->Assets;
+	}
+
+	const ScriptFieldSchemaSource* PlaySession::GetScriptSchemas() const
+	{
+		return m_State->Schemas.get();
 	}
 
 	uint64_t PlaySession::GetSeed() const
@@ -1132,6 +1191,16 @@ namespace Engine {
 		return *m_State->Physics;
 	}
 
+	NativeWorld* PlaySession::GetNative()
+	{
+		return m_State->Native.get();
+	}
+
+	const NativeWorld* PlaySession::GetNative() const
+	{
+		return m_State->Native.get();
+	}
+
 	AudioSystem* PlaySession::GetAudioSystem()
 	{
 		return m_State->SceneAudio.get();
@@ -1163,6 +1232,9 @@ namespace Engine {
 			hasher.UpdateU64(word);
 		hasher.UpdateU64(state.IdGenerator.GetDrawCount());
 		state.Physics->AppendStateHash(hasher);
+		// M19 (decision 28): the native block, the module's resources; nothing without a module.
+		if (state.Native != nullptr)
+			state.Native->AppendStateHash(hasher);
 		return hasher.Digest();
 	}
 

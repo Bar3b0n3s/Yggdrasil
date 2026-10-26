@@ -99,7 +99,8 @@ namespace Engine {
 			const Json defaults = info->MakeDefaultJson();
 			for (const Scope<FieldInfo>& field : info->GetFields())
 				result.Fields.push_back(Utils::MakeFieldSummary(*field, defaults));
-			result.Schema = VariantValue(JsonSchema::ForStruct(*info));
+			// Component data in params also takes an id prefix or an entity path for an EntityRef value (ADR 0030 decision 7).
+			result.Schema = VariantValue(JsonSchema::ForStruct(*info, EntityReferenceSchema::IdOrPath));
 			return result;
 		}
 
@@ -142,7 +143,9 @@ namespace Engine {
 		registry.Struct<ComponentSchemaResult>("ComponentSchemaResult", "A component type described for agents.")
 			.Field("component", &ComponentSchemaResult::Component, "The component type.")
 			.Field("fields", &ComponentSchemaResult::Fields, "Every field, in registry order.")
-			.Field("schema", &ComponentSchemaResult::Schema, "The JSON Schema (2020-12) of the component's serialized object.");
+			.Field("schema", &ComponentSchemaResult::Schema,
+				"The JSON Schema (2020-12) of the component's object as component data in params takes it: an Entity field takes the entity's "
+				"16-hex id (which files store), an id prefix of 6 to 15 hex digits or an entity path such as /Game/ScoreText.");
 	}
 
 	void RegisterComponentMethods(MethodRegistry& methods)

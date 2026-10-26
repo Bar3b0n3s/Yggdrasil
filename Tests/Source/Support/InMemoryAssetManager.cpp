@@ -34,6 +34,18 @@ namespace Engine {
 			BumpVersion(handle);
 		}
 
+		void InMemoryAssetManager::FailCookedHash(AssetHandle handle, ErrorCode code)
+		{
+			m_CookedHashFailures.insert_or_assign(handle, code);
+		}
+
+		Result<uint64_t> InMemoryAssetManager::GetCookedHash(AssetHandle handle)
+		{
+			if (const auto failure = m_CookedHashFailures.find(handle); failure != m_CookedHashFailures.end())
+				return MakeError(failure->second, "asset {} cannot be hashed: its import failed", handle);
+			return AssetManager::GetCookedHash(handle);
+		}
+
 		Result<AssetRef<Asset>> InMemoryAssetManager::Load(AssetHandle handle)
 		{
 			if (IsBuiltinAssetHandle(handle) && !m_Assets.contains(handle))

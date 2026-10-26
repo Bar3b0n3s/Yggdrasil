@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Automation/Methods/AutomationTypes.h"
+#include "Engine/Automation/Methods/ReplayMethods.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
 #include "Engine/Testing/FeatureTestRunner.h"
@@ -28,6 +29,12 @@ namespace Engine {
 		uint32_t TimeoutTicks = 0; // Omitted: no additional run limit; when present require 1..UINT32_MAX.
 		std::string Record{};      // Optional project://Assets/... .replay destination; exactly one selected suite required.
 		bool Coverage = false;     // Return Coverage.Counters (they are left out unless this or Testing.CoverageGates).
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 6, A-RECEXPECT; ADR 0026 friction F10): with record only, the
+		// expectations the recorded replay carries, as input.record's Stop takes them ({tick, luau}): compiled before the run
+		// starts (ScriptCompiler ExpressionOrChunk, chunk "=test.run", located at /expect/<index>/luau), written into the
+		// replay and verified with its input before it is written (FeatureTestRunOptions::RecordExpect). InvalidArgument at
+		// /expect without record.
+		std::vector<InputRecordExpectation> Expect{};
 	};
 
 	// The RPC returns the runner's exact schema (§11.10), without nesting it in a second result envelope. The alias

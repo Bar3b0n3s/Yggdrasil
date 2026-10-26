@@ -103,12 +103,14 @@ class RepositoryRulesTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.directory, ignore_errors=True)
 
     def test_demo_engine_files_are_stored_byte_for_byte(self) -> None:
-        # G7: the engine-consumed files of a game (the .eproj, the root .luaurc, everything below Assets/) are -text, so
-        # a fresh clone holds the bytes provenance hashed; the exempt files keep the repository's normalization.
+        # G7: the engine-consumed files of a game (the .eproj, the root .luaurc, everything below Assets/ and, since
+        # ADR 0030 decision 35, the native module's sources below Native/) are -text, so a fresh clone holds the bytes
+        # provenance hashed; the exempt files keep the repository's normalization.
         engine_files = ["Tests/Projects/Breakout/Breakout.eproj", "Tests/Projects/Breakout/.luaurc",
                         "Tests/Projects/Breakout/Assets/Scripts/Ball.luau",
                         "Tests/Projects/Breakout/Assets/Models/A.gltf", "Projects/Tetris/Tetris.eproj",
-                        "Projects/Tetris/.luaurc", "Projects/Tetris/Assets/Scenes/Main.scene.meta"]
+                        "Projects/Tetris/.luaurc", "Projects/Tetris/Assets/Scenes/Main.scene.meta",
+                        "Tests/Projects/NativeTest/Native/Spinner.cpp", "Projects/Tetris/Native/Systems/Move.h"]
         exempt_files = ["Tests/Projects/Breakout/AGENTS.md", "Tests/Projects/Breakout/Automation/BuildLog.jsonl",
                         "Tests/Projects/Breakout/Automation/Provenance.json", "Projects/Tetris/.gitignore"]
         output = run_git(["check-attr", "text", "--", *engine_files, *exempt_files], REPOSITORY_ROOT).decode("utf-8")

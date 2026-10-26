@@ -130,7 +130,9 @@ namespace Engine {
 			.Field("Mass", &CharacterControllerComponent::Mass, "The character's mass in kilograms, used when it pushes bodies.",
 				{ .Min = Utils::MinPhysicsMass, .Max = static_cast<double>(MaxPhysicsMass), .Unit = "kg" })
 			.Field("GravityFactor", &CharacterControllerComponent::GravityFactor, "The multiplier of the project's gravity for the character.")
-			.Field("Layer", &CharacterControllerComponent::Layer, "Physics layer name from project settings.");
+			.Field("Layer", &CharacterControllerComponent::Layer, "Physics layer name from project settings.")
+			.Field("InheritGroundVelocity", &CharacterControllerComponent::InheritGroundVelocity,
+				"While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it.");
 	}
 
 }

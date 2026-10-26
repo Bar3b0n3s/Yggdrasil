@@ -4,6 +4,7 @@
 
 #include "Engine/Asset/FontData.h"
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Core/Hash.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/Fuzz.h"
 #include "Support/TestData.h"
@@ -17,6 +18,12 @@
 namespace Engine {
 
 	namespace {
+
+		// The XXH64 of the atlas pixels of version 2 (imstb_truetype.h) for Inter at 48 pixels per em with spread 8: the
+		// committed TrueType font and the pinned CFF fixture (Docs/Decisions/0030-m19-contract.md decision 23). Version 3
+		// (stb_truetype.h) keeps both.
+		constexpr uint64_t InterTrueTypeAtlasHash = 0x66f83cc4b7cca3c8ull;
+		constexpr uint64_t InterCffAtlasHash = 0x1c5d3945b145bec0ull;
 
 		// The committed Inter-Regular.ttf (Resources/Fonts, SIL OFL).
 		Buffer ReadInter()
@@ -33,6 +40,65 @@ namespace Engine {
 			Result<Buffer> font = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Fonts") / std::string(name));
 			REQUIRE_MESSAGE(font.has_value(), font.error().ToString());
 			return std::move(*font);
+		}
+
+		// Big-endian reads of a fixture font's bytes, for the cases that damage one.
+		uint32_t ReadFontU8(std::span<const std::byte> font, size_t offset)
+		{
+			return std::to_integer<uint32_t>(font[offset]);
+		}
+
+		uint32_t ReadFontU16(std::span<const std::byte> font, size_t offset)
+		{
+			return (ReadFontU8(font, offset) << 8) | ReadFontU8(font, offset + 1);
+		}
+
+		uint32_t ReadFontU32(std::span<const std::byte> font, size_t offset)
+		{
+			return (ReadFontU16(font, offset) << 16) | ReadFontU16(font, offset + 2);
+		}
+
+		// Overwrites the bytes of `font` from `offset` on with `values`.
+		void WriteFontBytes(Buffer& font, size_t offset, std::initializer_list<uint8_t> values)
+		{
+			REQUIRE(offset + values.size() <= font.size());
+			std::ranges::transform(values, font.begin() + static_cast<std::ptrdiff_t>(offset), [](uint8_t value)
+			{
+				return std::byte{ value };
+			});
+		}
+
+		// The file offset of the table `tag` of the sfnt `font`.
+		size_t FindFontTable(std::span<const std::byte> font, std::string_view tag)
+		{
+			const uint32_t tableCount = ReadFontU16(font, 4);
+			for (uint32_t table = 0; table < tableCount; ++table)
+			{
+				const size_t record = 12 + 16 * table;
+				if (std::memcmp(font.data() + record, tag.data(), 4) == 0)
+					return ReadFontU32(font, record + 8);
+			}
+			FAIL("the font has no '", std::string(tag), "' table");
+			return 0;
+		}
+
+		// Element `element` of the CFF INDEX at `index` (relative to the CFF table at `cff` of `font`): its first byte in the
+		// file and its size.
+		std::pair<size_t, size_t> GetCffIndexElement(std::span<const std::byte> font, size_t cff, size_t index, uint32_t element)
+		{
+			const size_t at = cff + index;
+			const uint32_t count = ReadFontU16(font, at);
+			const uint32_t offsetSize = ReadFontU8(font, at + 2);
+			REQUIRE(element < count);
+			const auto offset = [font, at, offsetSize](uint32_t which)
+			{
+				size_t value = 0;
+				for (uint32_t digit = 0; digit < offsetSize; ++digit)
+					value = (value << 8) | ReadFontU8(font, at + 3 + which * offsetSize + digit);
+				return value;
+			};
+			const size_t data = at + 3 + (count + 1) * offsetSize - 1;
+			return { data + offset(element), offset(element + 1) - offset(element) };
 		}
 
 		// Imports the bytes `font` as project://Assets/Fonts/<name> with `settings` (a JSON object, or null for the
@@ -300,36 +366,17 @@ namespace Engine {
 			REQUIRE(FontImporter::ValidateSource(original).has_value());
 			// Glyphs.ttf: 5 glyphs with 16-bit locations; glyph 3 (two contours, 96 bytes) and glyph 4 (one contour, 44 bytes,
 			// the last) are simple glyphs.
-			const auto readU16 = [](std::span<const std::byte> bytes, size_t offset)
-			{
-				return static_cast<uint32_t>((std::to_integer<uint32_t>(bytes[offset]) << 8) | std::to_integer<uint32_t>(bytes[offset + 1]));
-			};
-			const auto findTable = [&original, &readU16](std::string_view tag)
-			{
-				const uint32_t tableCount = readU16(original, 4);
-				for (uint32_t table = 0; table < tableCount; ++table)
-				{
-					const size_t record = 12 + 16 * table;
-					if (std::memcmp(original.data() + record, tag.data(), 4) == 0)
-						return static_cast<size_t>((readU16(original, record + 8) << 16) | readU16(original, record + 10));
-				}
-				FAIL("Glyphs.ttf has no '", std::string(tag), "' table");
-				return size_t{ 0 };
-			};
-			const size_t glyf = findTable("glyf");
-			const size_t loca = findTable("loca");
-			const size_t head = findTable("head");
+			const size_t glyf = FindFontTable(original, "glyf");
+			const size_t loca = FindFontTable(original, "loca");
+			const size_t head = FindFontTable(original, "head");
 			// Glyphs.ttf with the start of glyph `glyph`'s description overwritten by `description` (its length stays).
-			const auto patchGlyph = [&original, &readU16, glyf, loca](uint32_t glyph, std::initializer_list<uint8_t> description)
+			const auto patchGlyph = [&original, glyf, loca](uint32_t glyph, std::initializer_list<uint8_t> description)
 			{
 				Buffer font = original;
-				const size_t begin = glyf + 2 * readU16(original, loca + 2 * glyph);
-				const size_t end = glyf + 2 * readU16(original, loca + 2 * glyph + 2);
+				const size_t begin = glyf + 2 * ReadFontU16(original, loca + 2 * glyph);
+				const size_t end = glyf + 2 * ReadFontU16(original, loca + 2 * glyph + 2);
 				REQUIRE(description.size() <= end - begin);
-				std::ranges::transform(description, font.begin() + static_cast<std::ptrdiff_t>(begin), [](uint8_t value)
-				{
-					return std::byte{ value };
-				});
+				WriteFontBytes(font, begin, description);
 				return font;
 			};
 			Test::AssetTestFixture fixture;
@@ -372,26 +419,11 @@ namespace Engine {
 			// 3 ('O', a box of 50,0 to 550,700 units) gets the box below: its field is ceil(xMax / 8) - floor(xMin / 8) + 2
 			// pixels wide and ceil(-yMin / 8) - floor(-yMax / 8) + 2 tall.
 			const Buffer original = ReadFontFixture("Glyphs.ttf");
-			const auto readU16 = [](std::span<const std::byte> bytes, size_t offset)
-			{
-				return static_cast<uint32_t>((std::to_integer<uint32_t>(bytes[offset]) << 8) | std::to_integer<uint32_t>(bytes[offset + 1]));
-			};
-			const auto findTable = [&original, &readU16](std::string_view tag)
-			{
-				for (uint32_t table = 0; table < readU16(original, 4); ++table)
-				{
-					const size_t record = 12 + 16 * table;
-					if (std::memcmp(original.data() + record, tag.data(), 4) == 0)
-						return static_cast<size_t>((readU16(original, record + 8) << 16) | readU16(original, record + 10));
-				}
-				FAIL("Glyphs.ttf has no '", std::string(tag), "' table");
-				return size_t{ 0 };
-			};
-			const size_t glyph3 = findTable("glyf") + 2 * readU16(original, findTable("loca") + 2 * 3);
-			const size_t head = findTable("head");
-			REQUIRE(readU16(original, glyph3 + 2) == 50);
-			REQUIRE(readU16(original, glyph3 + 6) == 550);
-			REQUIRE(readU16(original, glyph3 + 8) == 700);
+			const size_t glyph3 = FindFontTable(original, "glyf") + 2 * ReadFontU16(original, FindFontTable(original, "loca") + 2 * 3);
+			const size_t head = FindFontTable(original, "head");
+			REQUIRE(ReadFontU16(original, glyph3 + 2) == 50);
+			REQUIRE(ReadFontU16(original, glyph3 + 6) == 550);
+			REQUIRE(ReadFontU16(original, glyph3 + 8) == 700);
 			const auto withBox = [&original, glyph3, head](int16_t xMin, int16_t yMin, int16_t xMax, int16_t yMax)
 			{
 				Buffer font = original;
@@ -446,50 +478,7 @@ namespace Engine {
 			// so the import) refuses it, so stb_truetype never reads it.
 			const Buffer original = ReadFontFixture("Inter-Regular.otf");
 			REQUIRE(FontImporter::ValidateSource(original).has_value());
-			const auto byteAt = [](std::span<const std::byte> bytes, size_t offset)
-			{
-				return std::to_integer<uint32_t>(bytes[offset]);
-			};
-			const auto readU16 = [&byteAt](std::span<const std::byte> bytes, size_t offset)
-			{
-				return (byteAt(bytes, offset) << 8) | byteAt(bytes, offset + 1);
-			};
-			const auto readU32 = [&readU16](std::span<const std::byte> bytes, size_t offset)
-			{
-				return (readU16(bytes, offset) << 16) | readU16(bytes, offset + 2);
-			};
-			const auto writeBytes = [](Buffer& bytes, size_t offset, std::initializer_list<uint8_t> values)
-			{
-				std::ranges::transform(values, bytes.begin() + static_cast<std::ptrdiff_t>(offset), [](uint8_t value)
-				{
-					return std::byte{ value };
-				});
-			};
-			size_t cff = 0;
-			for (uint32_t table = 0; table < readU16(original, 4); ++table)
-			{
-				const size_t record = 12 + 16 * table;
-				if (std::memcmp(original.data() + record, "CFF ", 4) == 0)
-					cff = readU32(original, record + 8);
-			}
-			REQUIRE(cff != 0);
-			// Element `element` of the CFF INDEX at `index` (relative to the table): its first byte in the file and its size.
-			const auto indexElement = [&original, &byteAt, &readU16, cff](size_t index, uint32_t element)
-			{
-				const size_t at = cff + index;
-				const uint32_t count = readU16(original, at);
-				const uint32_t offsetSize = byteAt(original, at + 2);
-				REQUIRE(element < count);
-				const auto offset = [&](uint32_t which)
-				{
-					size_t value = 0;
-					for (uint32_t digit = 0; digit < offsetSize; ++digit)
-						value = (value << 8) | byteAt(original, at + 3 + which * offsetSize + digit);
-					return value;
-				};
-				const size_t data = at + 3 + (count + 1) * offsetSize - 1;
-				return std::pair{ data + offset(element), offset(element + 1) - offset(element) };
-			};
+			const size_t cff = FindFontTable(original, "CFF ");
 			Test::AssetTestFixture fixture;
 			// Each sub-case is checked on its own (a failed one does not stop the others), and a font that validation lets
 			// through is never imported, since stb_truetype would read past or assert on it.
@@ -514,71 +503,71 @@ namespace Engine {
 			// 48 and UnderlineThickness (the two-byte operand 247 32, operator 12 4) at 52, operands nothing but the DICT
 			// parser reads, and ends with Private (size 34 as one byte, a 32-bit offset, operator 18) at 98 and CharStrings (a
 			// 32-bit offset, operator 17) at 105; the Private DICT ends with Subrs (34 as one byte, operator 19).
-			REQUIRE(readU16(original, cff + 4) == 1);
-			REQUIRE(byteAt(original, cff + 6) == 1);
-			REQUIRE(byteAt(original, cff + 8) == 14);
-			REQUIRE(readU16(original, cff + 22) == 1);
-			REQUIRE(byteAt(original, cff + 48) == 251);
-			REQUIRE(byteAt(original, cff + 50) == 12);
-			REQUIRE(byteAt(original, cff + 51) == 3);
-			REQUIRE(byteAt(original, cff + 52) == 247);
-			REQUIRE(byteAt(original, cff + 54) == 12);
-			REQUIRE(byteAt(original, cff + 55) == 4);
-			REQUIRE(readU16(original, cff + 29945) == 490);
-			REQUIRE(byteAt(original, cff + 98) == 0xAD);
-			REQUIRE(byteAt(original, cff + 99) == 29);
-			REQUIRE(byteAt(original, cff + 104) == 18);
-			REQUIRE(byteAt(original, cff + 105) == 29);
-			REQUIRE(byteAt(original, cff + 110) == 17);
-			const size_t privateDict = cff + readU32(original, cff + 100);
-			REQUIRE(byteAt(original, privateDict + 32) == 0xAD);
-			REQUIRE(byteAt(original, privateDict + 33) == 19);
-			const size_t charStrings = readU32(original, cff + 106);
+			REQUIRE(ReadFontU16(original, cff + 4) == 1);
+			REQUIRE(ReadFontU8(original, cff + 6) == 1);
+			REQUIRE(ReadFontU8(original, cff + 8) == 14);
+			REQUIRE(ReadFontU16(original, cff + 22) == 1);
+			REQUIRE(ReadFontU8(original, cff + 48) == 251);
+			REQUIRE(ReadFontU8(original, cff + 50) == 12);
+			REQUIRE(ReadFontU8(original, cff + 51) == 3);
+			REQUIRE(ReadFontU8(original, cff + 52) == 247);
+			REQUIRE(ReadFontU8(original, cff + 54) == 12);
+			REQUIRE(ReadFontU8(original, cff + 55) == 4);
+			REQUIRE(ReadFontU16(original, cff + 29945) == 490);
+			REQUIRE(ReadFontU8(original, cff + 98) == 0xAD);
+			REQUIRE(ReadFontU8(original, cff + 99) == 29);
+			REQUIRE(ReadFontU8(original, cff + 104) == 18);
+			REQUIRE(ReadFontU8(original, cff + 105) == 29);
+			REQUIRE(ReadFontU8(original, cff + 110) == 17);
+			const size_t privateDict = cff + ReadFontU32(original, cff + 100);
+			REQUIRE(ReadFontU8(original, privateDict + 32) == 0xAD);
+			REQUIRE(ReadFontU8(original, privateDict + 33) == 19);
+			const size_t charStrings = ReadFontU32(original, cff + 106);
 
 			// No Top DICT: stb_truetype asserts on reading element 0 of an empty INDEX. The check gives the message; without it
 			// the empty Top DICT has no CharStrings and is refused all the same (defense in depth, TrueTypeTables.cpp).
 			Buffer noTopDict = original;
-			writeBytes(noTopDict, cff + 22, { 0, 0 });
+			WriteFontBytes(noTopDict, cff + 22, { 0, 0 });
 			expectRefused("no Top DICT", noTopDict, "no Top DICT");
 			// The Name INDEX rewritten with the offset size 5 and the same length (one 5-byte name, "Inter", between the 5-byte
 			// offsets 1 and 6), so the Top DICT INDEX stays at 22 and every other check passes: stb_truetype asserts on an offset
 			// size outside 1 to 4, and only the offset-size check refuses this font.
 			Buffer offsetSize = original;
-			writeBytes(offsetSize, cff + 4, { 0, 1, 5, 0, 0, 0, 0, 1, 0, 0, 0, 0, 6, 'I', 'n', 't', 'e', 'r' });
+			WriteFontBytes(offsetSize, cff + 4, { 0, 1, 5, 0, 0, 0, 0, 1, 0, 0, 0, 0, 6, 'I', 'n', 't', 'e', 'r' });
 			expectRefused("offset size", offsetSize, "Name INDEX has offset size 5");
 			// CharStrings given as a real number (30, nibbles ending in 0xF), which stb_truetype reads as an integer.
 			Buffer realOperand = original;
-			writeBytes(realOperand, cff + 105, { 30 });
-			writeBytes(realOperand, cff + 109, { 0x3F });
+			WriteFontBytes(realOperand, cff + 105, { 30 });
+			WriteFontBytes(realOperand, cff + 109, { 0x3F });
 			expectRefused("real operand", realOperand, "real number");
 			// CharStrings far outside the table, inside stb_truetype's 512 MiB view of it.
 			Buffer outside = original;
-			writeBytes(outside, cff + 106, { 0x07, 0xFF, 0xFF, 0xF0 });
+			WriteFontBytes(outside, cff + 106, { 0x07, 0xFF, 0xFF, 0xF0 });
 			expectRefused("CharStrings outside", outside, "offset 134217712");
 			// The reserved operand bytes in Top DICT operands that only the DICT parser reads, so every other check passes:
 			// stb_truetype asserts on either byte when it skips the operands before the entry it looks up, and only the
 			// reserved-byte check refuses these fonts. UnderlineThickness's operand becomes 31 (sized as one byte) and the
 			// one-byte operand 0; UnderlinePosition's two-byte operand starts with 255 (sized as two bytes).
 			Buffer reserved31 = original;
-			writeBytes(reserved31, cff + 52, { 31, 139 });
+			WriteFontBytes(reserved31, cff + 52, { 31, 139 });
 			expectRefused("reserved operand 31", reserved31, "reserved operand byte 31");
 			Buffer reserved255 = original;
-			writeBytes(reserved255, cff + 48, { 255 });
+			WriteFontBytes(reserved255, cff + 48, { 255 });
 			expectRefused("reserved operand 255", reserved255, "reserved operand byte 255");
 
 			// Glyph 0's charstring replaced by stem hints (two operands and hstem, over and over) and a hint mask as its last
 			// byte, whose mask bytes would lie past its end.
-			const auto [glyph0, glyph0Size] = indexElement(charStrings, 0);
+			const auto [glyph0, glyph0Size] = GetCffIndexElement(original, cff, charStrings, 0);
 			REQUIRE(glyph0Size > 4);
 			Buffer hintMask = original;
 			for (size_t index = 0; index + 1 < glyph0Size; ++index)
-				writeBytes(hintMask, glyph0 + index, { index % 3 == 2 ? uint8_t{ 0x01 } : uint8_t{ 0x8B } });
-			writeBytes(hintMask, glyph0 + glyph0Size - 1, { 0x13 });
+				WriteFontBytes(hintMask, glyph0 + index, { index % 3 == 2 ? uint8_t{ 0x01 } : uint8_t{ 0x8B } });
+			WriteFontBytes(hintMask, glyph0 + glyph0Size - 1, { 0x13 });
 			expectRefused("hint mask", hintMask, "hint mask");
 			// Glyph 0's charstring drawing a line (0 0 rlineto) before any moveto: its outline would start with a line, and
 			// stb_truetype's winding test reads the vertex before every line.
 			Buffer lineFirst = original;
-			writeBytes(lineFirst, glyph0, { 0x8B, 0x8B, 0x05, 0x0E });
+			WriteFontBytes(lineFirst, glyph0, { 0x8B, 0x8B, 0x05, 0x0E });
 			expectRefused("line before moveto", lineFirst, "draws before its first moveto");
 
 			// Nine global subroutines each calling the next four times (the last just returns), called by glyph 0: 4^9 calls
@@ -587,7 +576,7 @@ namespace Engine {
 			std::vector<uint32_t> chain;
 			for (uint32_t element = 0; element <= 214 && chain.size() < 9; ++element)
 			{
-				if (indexElement(29945, element).second >= 9)
+				if (GetCffIndexElement(original, cff, 29945, element).second >= 9)
 					chain.push_back(element);
 			}
 			REQUIRE(chain.size() == 9);
@@ -598,17 +587,135 @@ namespace Engine {
 			};
 			for (size_t link = 0; link < chain.size(); ++link)
 			{
-				const size_t subroutine = indexElement(29945, chain[link]).first;
+				const size_t subroutine = GetCffIndexElement(original, cff, 29945, chain[link]).first;
 				if (link + 1 == chain.size())
 				{
-					writeBytes(nested, subroutine, { 0x0B });
+					WriteFontBytes(nested, subroutine, { 0x0B });
 					continue;
 				}
 				const uint8_t next = pushSubroutine(chain[link + 1]);
-				writeBytes(nested, subroutine, { next, 0x1D, next, 0x1D, next, 0x1D, next, 0x1D, 0x0B });
+				WriteFontBytes(nested, subroutine, { next, 0x1D, next, 0x1D, next, 0x1D, next, 0x1D, 0x0B });
 			}
-			writeBytes(nested, glyph0, { pushSubroutine(chain.front()), 0x1D, 0x0E });
+			WriteFontBytes(nested, glyph0, { pushSubroutine(chain.front()), 0x1D, 0x0E });
 			expectRefused("nested subroutines", nested, "more than 65536 operators");
+		}
+
+		TEST_CASE("FontImporter: a CID-keyed CFF font imports through its FDSelect and is refused when a glyph it leaves without a font dictionary calls a local subroutine")
+		{
+			// Docs/Decisions/0030-m19-contract.md decision 23: a CID-keyed font takes each glyph's local subroutines from the
+			// font dictionary its FDSelect gives the glyph. stb_truetype.h asserts on a glyph that the FDSelect leaves without
+			// one once it calls a local subroutine (stbtt__cid_get_glyph_subrs reads FDArray element -1), where Dear ImGui's
+			// copy read no subroutines, so validation refuses that font. Inter's charstrings call no subroutine, so glyph 2
+			// ('A') is first made to call a local subroutine rewritten to draw a 100-unit square. That font is then made
+			// CID-keyed: the first 29 bytes of its Top DICT (the version, Notice, Copyright, FullName and FamilyName strings and
+			// the underline metrics, which neither stb_truetype nor validation reads) become FDArray and FDSelect entries padded
+			// with string entries, and the first 20 bytes of the String INDEX's data (glyph names) an FDArray of one font
+			// dictionary, whose Private DICT, and so whose local subroutines, are the Top DICT's, and a format 3 FDSelect of one
+			// range.
+			const Buffer original = ReadFontFixture("Inter-Regular.otf");
+			const size_t cff = FindFontTable(original, "CFF ");
+			const uint32_t glyphCount = ReadFontU16(original, FindFontTable(original, "maxp") + 4);
+			// The Top DICT spans 27 to 110 of the table (see the CFF case above): version (28 12 28, operator 0) first,
+			// UnderlineThickness (247 32, operator 12 4) last of those 29 bytes, Private (size 34 as one byte, a 32-bit offset,
+			// operator 18) at 98 and CharStrings (a 32-bit offset, operator 17) at 105; the Private DICT ends with Subrs (34 as
+			// one byte, operator 19). The String INDEX follows the Top DICT at 111, with 2-byte offsets from 1.
+			REQUIRE(ReadFontU8(original, cff + 27) == 28);
+			REQUIRE(ReadFontU8(original, cff + 30) == 0);
+			REQUIRE(ReadFontU8(original, cff + 52) == 247);
+			REQUIRE(ReadFontU8(original, cff + 54) == 12);
+			REQUIRE(ReadFontU8(original, cff + 55) == 4);
+			REQUIRE(ReadFontU8(original, cff + 98) == 0xAD);
+			REQUIRE(ReadFontU8(original, cff + 99) == 29);
+			REQUIRE(ReadFontU8(original, cff + 104) == 18);
+			REQUIRE(ReadFontU8(original, cff + 105) == 29);
+			REQUIRE(ReadFontU8(original, cff + 110) == 17);
+			const uint32_t privateDict = ReadFontU32(original, cff + 100);
+			const uint32_t charStrings = ReadFontU32(original, cff + 106);
+			REQUIRE(ReadFontU8(original, cff + privateDict + 32) == 0xAD);
+			REQUIRE(ReadFontU8(original, cff + privateDict + 33) == 19);
+			const uint32_t localSubrs = privateDict + 34;
+			// Fewer than 1240 local subroutines: the bias is 107.
+			REQUIRE(ReadFontU16(original, cff + localSubrs) < 1240);
+			const uint32_t stringCount = ReadFontU16(original, cff + 111);
+			REQUIRE(ReadFontU8(original, cff + 113) == 2);
+			REQUIRE(ReadFontU16(original, cff + 114) == 1);
+			REQUIRE(ReadFontU16(original, cff + 114 + 2 * stringCount) > 20);
+
+			// Glyph 2 calls the first local subroutine (of the first 215, numbered by a one-byte operand) long enough for the
+			// square: 0 0 rmoveto, 100 0 rlineto, 0 100 rlineto, -100 0 rlineto, endchar.
+			uint32_t subroutine = 0;
+			while (GetCffIndexElement(original, cff, localSubrs, subroutine).second < 13)
+			{
+				++subroutine;
+				REQUIRE(subroutine <= 214);
+			}
+			Buffer square = original;
+			WriteFontBytes(square, GetCffIndexElement(original, cff, localSubrs, subroutine).first, { 139, 139, 21, 239, 139, 5, 139, 239, 5, 39, 139, 5, 14 });
+			// The subroutine's number (its index less the bias) as a one-byte operand, then callsubr.
+			const auto [glyph2, glyph2Size] = GetCffIndexElement(original, cff, charStrings, 2);
+			REQUIRE(glyph2Size >= 2);
+			WriteFontBytes(square, glyph2, { static_cast<uint8_t>(139 + subroutine - 107), 0x0A });
+
+			// The FDArray at the String INDEX's first data byte, the FDSelect after its 12 bytes (offsets in the table).
+			const uint32_t fdArray = 114 + 2 * (stringCount + 1);
+			const uint32_t fdSelect = fdArray + 12;
+			const auto byteOf = [](uint32_t value, uint32_t shift)
+			{
+				return static_cast<uint8_t>((value >> shift) & 0xFF);
+			};
+			// That font, CID-keyed, with an FDSelect whose one range gives glyphs 0 to `coveredGlyphs` - 1 font dictionary 0.
+			const auto makeCid = [&square, cff, privateDict, fdArray, fdSelect, &byteOf](uint32_t coveredGlyphs)
+			{
+				Buffer font = square;
+				// FDArray and FDSelect (32-bit offsets, operators 12 36 and 12 37), then string 0 as version, Notice, Copyright and
+				// FullName to fill the 29 bytes.
+				WriteFontBytes(font, cff + 27, { 29, byteOf(fdArray, 24), byteOf(fdArray, 16), byteOf(fdArray, 8), byteOf(fdArray, 0), 12, 36 });
+				WriteFontBytes(font, cff + 34, { 29, byteOf(fdSelect, 24), byteOf(fdSelect, 16), byteOf(fdSelect, 8), byteOf(fdSelect, 0), 12, 37 });
+				WriteFontBytes(font, cff + 41, { 28, 0, 0, 0, 28, 0, 0, 1, 28, 0, 0, 12, 0, 139, 2 });
+				// One element of 7 bytes (offset size 1): Private, the Top DICT's.
+				WriteFontBytes(font, cff + fdArray,
+					{ 0, 1, 1, 1, 8, 0xAD, 29, byteOf(privateDict, 24), byteOf(privateDict, 16), byteOf(privateDict, 8), byteOf(privateDict, 0), 18 });
+				// Format 3: one range (first glyph 0, font dictionary 0), then the sentinel.
+				WriteFontBytes(font, cff + fdSelect, { 3, 0, 1, 0, 0, 0, byteOf(coveredGlyphs, 8), byteOf(coveredGlyphs, 0) });
+				return font;
+			};
+			Test::AssetTestFixture fixture;
+			Json settings = Json::object();
+			settings["PixelSize"] = 48.0;
+			settings["Spread"] = 8.0;
+
+			// Without the CID keys, the Top DICT's local subroutine draws 'A' as the square, narrower than Inter's 'A'.
+			REQUIRE(FontImporter::ValidateSource(square).has_value());
+			const Result<ImportResult> plain = ImportFontBytes(fixture, "Square.otf", square, settings);
+			REQUIRE_MESSAGE(plain.has_value(), plain.error().ToString());
+			const AssetRef<FontData> plainFont = LoadFont(*plain);
+			const Result<ImportResult> inter = ImportFontBytes(fixture, "Inter-Regular.otf", original, settings);
+			REQUIRE_MESSAGE(inter.has_value(), inter.error().ToString());
+			const AssetRef<FontData> interFont = LoadFont(*inter);
+			const FontGlyph* squareLetter = FindGlyph(*plainFont, 'A');
+			const FontGlyph* interLetter = FindGlyph(*interFont, 'A');
+			REQUIRE(squareLetter != nullptr);
+			REQUIRE(interLetter != nullptr);
+			CHECK(squareLetter->PlaneMax.x - squareLetter->PlaneMin.x < interLetter->PlaneMax.x - interLetter->PlaneMin.x);
+
+			// Every glyph in the FDSelect's range: the CID-keyed font imports, glyph 2 reading the same local subroutine through
+			// its font dictionary, so the atlas is the plain font's.
+			const Buffer covered = makeCid(glyphCount);
+			REQUIRE(FontImporter::ValidateSource(covered).has_value());
+			const Result<ImportResult> cid = ImportFontBytes(fixture, "Cid.otf", covered, settings);
+			REQUIRE_MESSAGE(cid.has_value(), cid.error().ToString());
+			CHECK(LoadFont(*cid)->AtlasPixels == plainFont->AtlasPixels);
+
+			// Only glyphs 0 and 1 in the range: glyph 2's local subroutine call is refused, by validation and so by the import,
+			// before stb_truetype reads it (REQUIRE: the import would assert otherwise).
+			const Buffer uncovered = makeCid(2);
+			const Status validated = FontImporter::ValidateSource(uncovered);
+			REQUIRE_FALSE(validated.has_value());
+			CHECK(validated.error().GetCode() == ErrorCode::ImportFailed);
+			CHECK_MESSAGE(validated.error().GetMessageText().contains("glyph 2 no font dictionary"), validated.error().ToString());
+			const Result<ImportResult> imported = ImportFontBytes(fixture, "Uncovered.otf", uncovered, settings);
+			REQUIRE_FALSE(imported.has_value());
+			CHECK(imported.error().GetMessageText().contains("glyph 2 no font dictionary"));
 		}
 
 		TEST_CASE("FontImporter: settings change the atlas resolution and spread")
@@ -790,6 +897,25 @@ namespace Engine {
 				ring = std::max(ring, SampleGlyph(*font, *letter, glm::vec2(letter->PlaneMin.x + (centre - letter->PlaneMin.x) * static_cast<float>(step) / Samples, middle)));
 			CHECK(ring > 128.0f);
 			CHECK(SampleGlyph(*font, *letter, glm::vec2(centre, middle)) < 128.0f);
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 23 (A-STBTT): version 3 rasterizes through stb_truetype.h of the
+		// vendored stb (Vendor/stb, commit 2c980bb) instead of Dear ImGui's imstb_truetype.h, and keeps the atlases of
+		// version 2: the Inter TrueType and CFF atlases at the default settings hash as they did, so the Text golden, drawn in
+		// the Default font (Inter's TrueType outlines at these settings), is unchanged.
+		TEST_CASE("FontImporter: version 3 rasterizes through the vendored stb_truetype.h with the atlases of version 2")
+		{
+			CHECK(FontImporter::Version == 3);
+			Test::AssetTestFixture fixture;
+			Json settings = Json::object();
+			settings["PixelSize"] = 48.0;
+			settings["Spread"] = 8.0;
+			Result<ImportResult> truetype = ImportInter(fixture);
+			REQUIRE_MESSAGE(truetype.has_value(), truetype.error().ToString());
+			CHECK(XXH64(LoadFont(*truetype)->AtlasPixels) == InterTrueTypeAtlasHash);
+			Result<ImportResult> cff = ImportFont(fixture, "Inter-Regular.otf", ReadFontFixture("Inter-Regular.otf"), settings);
+			REQUIRE_MESSAGE(cff.has_value(), cff.error().ToString());
+			CHECK(XXH64(LoadFont(*cff)->AtlasPixels) == InterCffAtlasHash);
 		}
 	}
 

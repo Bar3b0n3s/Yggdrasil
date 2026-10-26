@@ -1,6 +1,6 @@
 {
 	"Format": "Replay",
-	"Version": 2,
+	"Version": 3,
 	"Scene": {
 		"Handle": "725f899f01f732a0",
 		"Path": "Assets/Scenes/Main.scene"
@@ -10,6 +10,7 @@
 	"FixedHz": 60,
 	"EngineVersion": "0.1.0",
 	"Config": "Editor",
+	"Fingerprint": null,
 	"Events": [
 		{
 			"Tick": 11,

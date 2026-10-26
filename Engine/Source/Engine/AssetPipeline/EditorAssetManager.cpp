@@ -2146,6 +2146,44 @@ namespace Engine {
 		return m_State->Registry.GetReferencePath(handle);
 	}
 
+	Result<uint64_t> EditorAssetManager::GetCookedHash(AssetHandle handle)
+	{
+		if (!handle.IsValid())
+			return MakeError(ErrorCode::InvalidArgument, "the null handle names no asset");
+		if (const BuiltinAssetEntry* builtin = m_State->FindBuiltin(handle))
+		{
+			if (builtin->Source == BuiltinAssetSource::Procedural)
+				return MakeError(ErrorCode::InvalidArgument, "the built-in '{}' is procedural: it has no cooked artifact", builtin->Path);
+			ENGINE_TRY(m_State->LoadBuiltin(*builtin));
+		}
+		else
+		{
+			const std::optional<AssetRegistry::Location> location = m_State->Registry.Locate(handle);
+			if (!location.has_value())
+			{
+				if (const AssetRecord* record = m_State->Registry.Find(handle))
+				{
+					return MakeError(ErrorCode::InvalidArgument, "{} ('{}') is a dependency file of {}, which has no cooked artifact of its own", handle.ToString(),
+						Utils::RelativeText(record->SourcePath), record->Metadata.Owner.ToString());
+				}
+				return MakeError(ErrorCode::NotFound, "no asset has handle {}", handle.ToString());
+			}
+			if (const auto loaded = m_State->Loaded.find(handle); loaded == m_State->Loaded.end() || loaded->second.Value == nullptr)
+			{
+				const AssetHandle source = location->Record->Metadata.Handle;
+				const std::string path = GetReferencePath(handle);
+				if (const auto import = m_State->Imports.find(source); import != m_State->Imports.end() && import->second.Failure.has_value())
+					return std::unexpected(Error(*import->second.Failure).WithContext(std::format("while hashing asset {} ('{}')", handle.ToString(), path)));
+				if (Result<AssetImportOutcome> imported = m_State->ImportNow(source, true, false); !imported.has_value())
+					return std::unexpected(std::move(imported).error().WithContext(std::format("while hashing asset {} ('{}')", handle.ToString(), path)));
+			}
+		}
+		const auto loaded = m_State->Loaded.find(handle);
+		if (loaded == m_State->Loaded.end() || loaded->second.Value == nullptr)
+			return MakeError(ErrorCode::NotFound, "the import of '{}' no longer produces asset {}", GetReferencePath(handle), handle.ToString());
+		return loaded->second.ContentHash;
+	}
+
 	void EditorAssetManager::WaitIdle()
 	{
 		ENGINE_CORE_ASSERT(m_State->Specification.MainThread->IsMainThread(), "EditorAssetManager::WaitIdle runs on the main thread");

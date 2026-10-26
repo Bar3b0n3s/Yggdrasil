@@ -4,9 +4,11 @@
 #include "Engine/Asset/AssetHandle.h"
 #include "Engine/Asset/AssetManager.h"
 #include "Engine/Core/Base.h"
+#include "Engine/Core/Result.h"
 #include "Engine/Core/Jobs/JobSystem.h"
 #include "Engine/Core/Jobs/MainThreadQueue.h"
 
+#include <cstdint>
 #include <map>
 #include <optional>
 #include <string>
@@ -38,6 +40,10 @@ namespace Engine {
 			// Removes `handle`: later loads fail with NotFound, as for a deleted asset.
 			void Remove(AssetHandle handle);
 
+			// Makes GetCookedHash of `handle` fail with `code`, as the editor's does for an asset whose import failed. Every
+			// other handle keeps the base's Unsupported: this manager holds no cooked artifacts.
+			void FailCookedHash(AssetHandle handle, ErrorCode code);
+
 			// Load notifies the load observer (AssetManager::SetLoadObserver) for every published asset it returns, as the
 			// editor and runtime managers do; procedural built-ins and failures never.
 
@@ -50,11 +56,13 @@ namespace Engine {
 			// The procedural built-in's engine path, or "Assets/Test/<handle>".
 			[[nodiscard]] std::string GetReferencePath(AssetHandle handle) const override;
 			void WaitIdle() override {}
+			[[nodiscard]] Result<uint64_t> GetCookedHash(AssetHandle handle) override;
 		private:
 			MainThreadQueue m_MainThreadQueue;
 			JobSystem m_Jobs; // inline
 			std::map<AssetHandle, AssetRef<Asset>> m_Assets;
 			std::map<AssetHandle, std::string> m_Paths;
+			std::map<AssetHandle, ErrorCode> m_CookedHashFailures;
 		};
 
 	}

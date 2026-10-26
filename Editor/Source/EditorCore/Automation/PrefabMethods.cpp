@@ -464,7 +464,8 @@ namespace Engine {
 			.VariantField("components", &PrefabInstantiateParams::Components,
 				"Per-instance component values for the instance root by registry name, merged into the prefab's as entity.update merges them "
 				"(missing components are added) and recorded as the instance's overrides; script fields go in {\"Script\": {\"Fields\": "
-				"{...}}}, the Script handle defaulting to the prefab root's.",
+				"{...}}}, the Script handle defaulting to the prefab root's. An Entity value takes 16 hex digits, a unique id prefix of at least 6 "
+				"or a path such as \"/Game/ScoreText\", resolved in the edit scene.",
 				&ResolveComponentValue);
 
 		registry.Struct<PrefabInstantiateResult>("PrefabInstantiateResult", "The new instance.")

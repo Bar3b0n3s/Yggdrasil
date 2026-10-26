@@ -12,6 +12,7 @@
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/ComponentHostOps.h"
+#include "Engine/Scene/Components/UnknownComponentsComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/EntityBounds.h"
 #include "Engine/Scene/Scene.h"
@@ -26,29 +27,35 @@ namespace Engine {
 
 	namespace Utils {
 
-		// Which components entity.get reports: every one (nullopt) or the named ones. Errors: InvalidArgument at "/components"
-		// for a value that is neither "all" nor an array of names; NotFound or InvalidArgument for a name.
-		static Result<std::optional<std::vector<const ComponentInfo*>>> ReadComponentSelection(const TypeRegistry& registry, const VariantValue& value,
+		// Which components entity.get reports: every one (nullopt) or the named ones, a native component's name ("Native.<Name>",
+		// IsNativeComponentName) selecting it as the scene holds it. Errors: InvalidArgument at "/components" for a value that
+		// is neither "all" nor an array of names; NotFound or InvalidArgument for a name.
+		static Result<std::optional<Automation::EntityComponentSelection>> ReadComponentSelection(const TypeRegistry& registry, const VariantValue& value,
 			bool given)
 		{
 			const Json& json = value.Get();
 			if (!given || json.is_null())
-				return std::optional<std::vector<const ComponentInfo*>>();
+				return std::optional<Automation::EntityComponentSelection>();
 			if (json.is_string() && JsonReader(json).ReadString().value_or(std::string()) == "all")
-				return std::optional<std::vector<const ComponentInfo*>>();
+				return std::optional<Automation::EntityComponentSelection>();
 			if (!json.is_array())
 			{
 				return std::unexpected(MakeParamError(ErrorCode::InvalidArgument, "/components", "components must be \"all\" or an array of component names",
 					"pass [\"Transform\", \"Camera\"] or \"all\""));
 			}
 
-			std::vector<const ComponentInfo*> selected;
+			Automation::EntityComponentSelection selected;
 			for (size_t index = 0; index < json.size(); ++index)
 			{
 				const std::string pointer = std::format("/components/{}", index);
-				const Result<std::string> name = JsonReader(json[index]).ReadString();
+				Result<std::string> name = JsonReader(json[index]).ReadString();
 				if (!name)
 					return std::unexpected(MakeParamError(ErrorCode::InvalidArgument, pointer, "a component name must be a string"));
+				if (IsNativeComponentName(*name))
+				{
+					selected.NativeComponents.push_back(std::move(*name));
+					continue;
+				}
 				const ComponentInfo* info = registry.FindComponent(*name);
 				if (info == nullptr || !info->HasFlag(ComponentFlags::Serializable))
 				{
@@ -60,9 +67,9 @@ namespace Engine {
 					return std::unexpected(
 						MakeParamError(ErrorCode::InvalidArgument, pointer, std::format("'{}' is an entity member, reported as name, tags, parent and active", *name)));
 				}
-				selected.push_back(info);
+				selected.Components.push_back(info);
 			}
-			return std::optional<std::vector<const ComponentInfo*>>(std::move(selected));
+			return std::optional<Automation::EntityComponentSelection>(std::move(selected));
 		}
 
 	}
@@ -70,7 +77,7 @@ namespace Engine {
 	namespace Automation {
 
 		Result<EntityDetails> MakeEntityDetails(const AutomationMethodContext& context, ConstEntity entity,
-			const std::optional<std::vector<const ComponentInfo*>>& selection, bool children)
+			const std::optional<EntityComponentSelection>& selection, bool children)
 		{
 			const Scene& scene = *entity.GetScene();
 			EntityDetails details;
@@ -83,13 +90,19 @@ namespace Engine {
 			const std::span<const std::string> tags = entity.GetTags();
 			details.Tags.assign(tags.begin(), tags.end());
 
-			const std::vector<const ComponentInfo*> components = selection.has_value() ? *selection : Utils::GetEntityComponents(entity);
+			const std::vector<const ComponentInfo*> components = selection.has_value() ? selection->Components : Utils::GetEntityComponents(entity);
 			for (const ComponentInfo* info : components)
 			{
 				if (!info->GetHostOps()->Has(entity))
 					continue;
 				ENGINE_TRY_ASSIGN(Json json, ComponentAccess::GetComponentJson(entity, info->GetName()));
 				details.Components.emplace(info->GetName(), VariantValue(std::move(json)));
+			}
+			const std::vector<std::string> natives = selection.has_value() ? selection->NativeComponents : Utils::GetEntityNativeComponents(entity);
+			for (const std::string& name : natives)
+			{
+				if (const VariantValue* json = Utils::FindEntityNativeComponent(entity, name))
+					details.Components.emplace(name, *json);
 			}
 			if (children)
 			{
@@ -107,7 +120,7 @@ namespace Engine {
 		{
 			ENGINE_TRY_ASSIGN(Scene * scene, context.ResolveTargetScene(params.Target, context.HasParam("target"), false));
 			ENGINE_TRY_ASSIGN(const Entity entity, context.ResolveEntity(*scene, params.Entity, "/entity"));
-			ENGINE_TRY_ASSIGN(const std::optional<std::vector<const ComponentInfo*>> selection,
+			ENGINE_TRY_ASSIGN(const std::optional<EntityComponentSelection> selection,
 				Utils::ReadComponentSelection(scene->GetTypeRegistry(), params.Components, context.HasParam("components")));
 			EntityGetResult result;
 			ENGINE_TRY_ASSIGN(result.Entity, MakeEntityDetails(context, entity, selection, params.Children));
@@ -168,12 +181,14 @@ namespace Engine {
 			.Field("active", &EntityDetails::Active, "The entity's own active flag.")
 			.Field("activeInHierarchy", &EntityDetails::ActiveInHierarchy, "Whether the entity and every ancestor are active.")
 			.Field("tags", &EntityDetails::Tags, "The entity's tags.")
-			.Field("components", &EntityDetails::Components, "The selected components' JSON, by registry name.")
+			.Field("components", &EntityDetails::Components, "The selected components' JSON, by registry name; native ones (Native.<Name>) as the scene holds them.")
 			.Field("children", &EntityDetails::Children, "The children, when asked for.");
 
 		registry.Struct<EntityGetParams>("EntityGetParams", "The params of entity.get.")
 			.Field("entity", &EntityGetParams::Entity, "The entity: 16 hex digits, a unique id prefix of at least 6, or a path.")
-			.Field("components", &EntityGetParams::Components, "An array of component names, or \"all\" (the default).")
+			.Field("components", &EntityGetParams::Components,
+				"An array of component names (Native.<Name> for a native component, as the scene holds it), or \"all\" (the default: native "
+				"components included).")
 			.Field("children", &EntityGetParams::Children, "Also list the children.")
 			.Field("target", &EntityGetParams::Target, "The scene to read; omitted: the play scene while playing, else the edit scene.");
 

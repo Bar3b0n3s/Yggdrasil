@@ -25,7 +25,11 @@ namespace Engine {
 		ReplayRecorder& operator=(const ReplayRecorder&) = delete;
 
 		// InvalidState unless tick 0 and no recording is active; validates the header and binds GetSerial. The host must
-		// start/restart the correct scene, parameters and seed before Begin and ensure they match the header.
+		// start/restart the correct scene, parameters and seed before Begin and ensure they match the header. From replay
+		// version 3 (stream B; Docs/Decisions/0030-m19-contract.md decision 2) it also takes the start fingerprint,
+		// ComputeReplayFingerprint(session.GetScene(), session.GetScriptSchemas(), session.GetAssets()), whose errors fail
+		// Begin, and Finish writes it into the candidate's Fingerprint; the test runner's concatenated recording keeps its
+		// first segment's.
 		[[nodiscard]] Status Begin(const ReplayHeader& header, const PlaySession& session);
 		[[nodiscard]] Status CaptureAppliedInput(uint64_t tick, std::span<const PlayInputEvent> events);
 		// The state-hash checkpoint of the completed-tick boundary `session` (this recorder's own session) is at: when its

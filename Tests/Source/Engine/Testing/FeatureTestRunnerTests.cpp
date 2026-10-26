@@ -20,6 +20,7 @@
 #include "Engine/Scripting/ScriptCompiler.h"
 #include "Engine/Scripting/ScriptLimits.h"
 #include "Engine/Session/PlayInputEventCodec.h"
+#include "Engine/Session/ReplayFingerprint.h"
 #include "Engine/Testing/CoverageGates.h"
 #include "Support/AudioTestData.h"
 #include "Support/ExpectLog.h"
@@ -379,6 +380,21 @@ return Script.Define("Driver",Driver))");
 			uint64_t m_Next = 0x9000;
 			mutable uint64_t m_Queries = 0;
 		};
+
+		// test.run's expect as its adapter hands it to the runner (TestMethods.cpp; Docs/Decisions/0030-m19-contract.md decision
+		// 6): the source, and its bytecode compiled as an expression or chunk at the same index.
+		void AddRecordExpectation(FeatureTestRunOptions& options, uint64_t tick, std::string luau)
+		{
+			const std::string pointer = std::format("/expect/{}/luau", options.RecordExpect.size());
+			Result<ScriptCompilation> compiled = ScriptCompiler::Compile({ .Source = luau, .Mode = ScriptCompileMode::ExpressionOrChunk, .ChunkName = "=test.run", .JsonPointer = pointer });
+			REQUIRE_MESSAGE(compiled.has_value(), (compiled ? std::string() : compiled.error().ToString()));
+			ReplayBytecodeExpectation bytecode;
+			bytecode.Tick = tick;
+			bytecode.Script.Bytecode = std::move(compiled->Bytecode);
+			bytecode.Script.SourceMap = std::move(compiled->SourceMap);
+			options.RecordExpect.push_back({ .Tick = tick, .Luau = std::move(luau) });
+			options.RecordExpectBytecode.push_back(std::move(bytecode));
+		}
 
 		const TestCoverageCounter* FindCounter(const TestRunResult& result, std::string_view id)
 		{
@@ -1467,6 +1483,69 @@ end))");
 			CHECK(candidate->FinalStateHash == before->Suites[0].FinalStateHash);
 		}
 
+		// Docs/Decisions/0030-m19-contract.md decision 6 (A-RECEXPECT): the recording carries test.run's expectations, each
+		// satisfied when the recording is verified with its input before it is published; a false one refuses it at its
+		// source, and one after the recording's final tick at its tick, nothing published.
+		TEST_CASE("TestRunner: a recording carries its expectations, each verified with its input before it is published")
+		{
+			RunnerHost host;
+			host.InputDriven();
+			host.Suite(InputSuite);
+			// The Space tap and the Move axis applied at tick 1 have moved the Driver by the boundary of tick 2.
+			const std::string moved = "Scene.FindByName('Driver').Transform.Translation.x > 0";
+			FeatureTestRunOptions options{ .Record = true };
+			AddRecordExpectation(options, 2, moved);
+			const TestRunResult result = host.Run(options);
+			CHECK(result.Passed);
+			REQUIRE(host.Candidate.Expect.size() == 1);
+			CHECK(host.Candidate.Expect[0].Tick == 2);
+			CHECK(host.Candidate.Expect[0].Luau == moved);
+			// The verification, then the input check, which the expectation also fails without the input.
+			CHECK(host.ReplaySessions == 2);
+
+			FeatureTestRunOptions unsatisfied{ .Record = true };
+			AddRecordExpectation(unsatisfied, 2, "false");
+			FeatureTestRunner refused;
+			REQUIRE(refused.Begin(host, unsatisfied));
+			const std::optional<Error> falseError = host.RunToEnd(refused);
+			REQUIRE(falseError.has_value());
+			CHECK(falseError->GetCode() == ErrorCode::Validation);
+			CHECK(falseError->GetLocation().JsonPointer == std::optional<std::string>("/expect/0/luau"));
+			CHECK(falseError->GetMessageText().find("recording expectation 0 at tick 2") != std::string::npos);
+			CHECK_FALSE(refused.TakeRecording());
+
+			FeatureTestRunOptions late{ .Record = true };
+			AddRecordExpectation(late, 100000, "true");
+			FeatureTestRunner unreached;
+			REQUIRE(unreached.Begin(host, late));
+			const std::optional<Error> lateError = host.RunToEnd(unreached);
+			REQUIRE(lateError.has_value());
+			CHECK(lateError->GetCode() == ErrorCode::Validation);
+			CHECK(lateError->GetLocation().JsonPointer == std::optional<std::string>("/expect/0/tick"));
+			CHECK_FALSE(unreached.TakeRecording());
+		}
+
+		TEST_CASE("TestRunner: Begin refuses recording expectations without Record or without matching compiled forms")
+		{
+			RunnerHost host;
+			host.Suite(InputSuite);
+			FeatureTestRunOptions unrecorded;
+			AddRecordExpectation(unrecorded, 1, "true");
+			FeatureTestRunOptions uncompiled{ .Record = true };
+			uncompiled.RecordExpect.push_back({ .Tick = 1, .Luau = "true" });
+			FeatureTestRunOptions mismatched{ .Record = true };
+			AddRecordExpectation(mismatched, 1, "true");
+			mismatched.RecordExpectBytecode[0].Tick = 2;
+			for (const FeatureTestRunOptions* options : { &unrecorded, &uncompiled, &mismatched })
+			{
+				FeatureTestRunner runner;
+				const Status begun = runner.Begin(host, *options);
+				REQUIRE_FALSE(begun.has_value());
+				CHECK(begun.error().GetCode() == ErrorCode::InvalidArgument);
+				CHECK_FALSE(runner.IsRunning());
+			}
+		}
+
 		TEST_CASE("TestRunner: recording accepts a scripted clock when normal playback reproduces it")
 		{
 			RunnerHost host;
@@ -1900,7 +1979,7 @@ end))");
 			// M16 friction S3-01: the hint names the input check's real rule (no checkpoint and no ending showed the input),
 			// not a trailing restart as such, which a checkpoint that saw the play lets through (below).
 			CHECK(refused->GetHint().find("restart") != std::string::npos);
-			CHECK(refused->GetHint().find(std::format("never shows in the world at a checkpoint (one every {} ticks) or at its end", ReplayCheckpointInterval))
+			CHECK(refused->GetHint().find(std::format("never shows in the world at a checkpoint (one every {} ticks), at its end or in an expectation", ReplayCheckpointInterval))
 				!= std::string::npos);
 			CHECK_FALSE(runner.TakeRecording());
 			CHECK(host.ReplaySessions == 2); // the verification passed, then the input check reproduced it
@@ -1939,6 +2018,37 @@ end))");
 			CHECK(checkpointed.Candidate.Checkpoints[0].Tick == 60);
 			CHECK(checkpointed.Candidate.Checkpoints[1].Tick == 120);
 			CHECK(checkpointed.Candidate.FinalTick == passed.Suites[0].Ticks);
+		}
+
+		// The milestone review (Docs/Decisions/0030-m19-contract.md decision 6, Architecture §13.6): test.run {record, expect}'s
+		// input check plays the recording's expectations too, so its refusal says, as input.record's does, that the run without
+		// input also satisfied them, and that an expectation only the input satisfies makes the recording depend on its input.
+		TEST_CASE("TestRunner: an input-independent recording with expectations is refused naming them and suggesting one only the input satisfies")
+		{
+			RunnerHost host;
+			host.InputDriven();
+			// The play-then-restart autopilot ends idle at tick 30, so the run without input reproduces its final hash, and the
+			// expectation holds without the input too.
+			host.Suite(R"(return Test.Suite("Autopilot",function()
+	Test.Case("play then restart",function()
+		Test.InjectKey("Space","Down"); Test.WaitTicks(10)
+		Test.InjectKey("Space","Up"); Test.WaitTicks(4)
+		Test.InjectKey("R","Tap"); Test.WaitTicks(15)
+	end)
+end))");
+			FeatureTestRunOptions options{ .Record = true };
+			AddRecordExpectation(options, 2, "Scene.FindByName('Driver') ~= nil");
+			FeatureTestRunner runner;
+			REQUIRE(runner.Begin(host, options));
+			const std::optional<Error> refused = host.RunToEnd(runner);
+			REQUIRE(refused.has_value());
+			CHECK(refused->GetCode() == ErrorCode::Validation);
+			CHECK(refused->GetMessageText().find("does not depend on its input") != std::string::npos);
+			CHECK(refused->GetMessageText().find("its 1 expectation(s)") != std::string::npos);
+			CHECK(refused->GetHint().find("in an expectation") != std::string::npos);
+			CHECK(refused->GetHint().find("add an expectation (expect) that only the input satisfies") != std::string::npos);
+			CHECK_FALSE(runner.TakeRecording());
+			CHECK(host.ReplaySessions == 2); // the verification passed, then the input check reproduced it, the expectation included
 		}
 
 		// M16 friction S3-03: a recording's result said nothing about its input check. The runner keeps where the input-free
@@ -2128,6 +2238,64 @@ end))");
 			CHECK(result.Cases[1].Status == "failed");
 			CHECK(result.Cases[1].Message == std::format("expected {}, observed {}; {}", differing(at70), at70, GetReplayDivergenceHint()));
 			CHECK(result.Cases[1].JsonPointer == "/FinalStateHash");
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 2 (A-FPRINT): a replay recorded with a start fingerprint names, in its
+		// failed Checkpoint@<tick> and FinalStateHash rows, the first change since the recording before the divergence hint.
+		TEST_CASE("TestRunner: a fingerprinted replay's Checkpoint and FinalStateHash failures name the first change since the recording")
+		{
+			RunnerHost host;
+			ReplayHeader header;
+			header.Scene = { UUID(401), "Assets/Scenes/Start.scene" };
+			header.Seed = host.Settings.Simulation.Seed;
+			header.EngineVersion = "1";
+			header.Config = "Debug";
+			auto reference = host.CreateReplaySession(header, TestSuiteSettings::Mode::Editor);
+			REQUIRE(reference);
+			Result<ReplayFingerprint> observed = ComputeReplayFingerprint((*reference)->GetScene(), (*reference)->GetScriptSchemas(), (*reference)->GetAssets());
+			REQUIRE(observed);
+			std::string at60;
+			for (uint64_t tick = 1; tick <= 70; ++tick)
+			{
+				(*reference)->Tick();
+				if (tick == 60)
+					at60 = UUID((*reference)->ComputeStateHash()).ToString();
+			}
+			const std::string at70 = UUID((*reference)->ComputeStateHash()).ToString();
+			reference->reset();
+			const auto differing = [](const std::string& hash)
+			{
+				return std::string(hash == "0000000000000000" ? "0000000000000001" : "0000000000000000");
+			};
+			// The recording held one more entity than the scene holds now.
+			ReplayFingerprint recorded = *observed;
+			recorded.Entities.push_back({ .Entity = UUID(0x7fff'ffff'ffff'fff0ull), .Path = "/Gone", .Hash = "0123456789abcdef", .Components = {} });
+			const std::vector<std::string> changes = DescribeReplayFingerprintChanges(recorded, *observed);
+			REQUIRE_FALSE(changes.empty());
+			const std::string named = std::format("; changed since the recording: {}; {}", changes.front(), GetReplayDivergenceHint());
+
+			auto checkpoint = CreateRef<ReplayData>();
+			checkpoint->Header = header;
+			checkpoint->Fingerprint = recorded;
+			checkpoint->FinalTick = 70;
+			checkpoint->Checkpoints = { { .Tick = 60, .StateHash = differing(at60) } };
+			checkpoint->FinalStateHash = at70;
+			auto finalHash = CreateRef<ReplayData>();
+			finalHash->Header = header;
+			finalHash->Fingerprint = recorded;
+			finalHash->FinalTick = 70;
+			finalHash->Checkpoints = { { .Tick = 60, .StateHash = at60 } };
+			finalHash->FinalStateHash = differing(at70);
+			host.ReplayAssets["Assets/Checkpoint.replay"] = checkpoint;
+			host.ReplayAssets["Assets/Final.replay"] = finalHash;
+			host.ReplayGlobs = { "Assets/Checkpoint.replay", "Assets/Final.replay" };
+			const auto result = host.Run();
+			CHECK_FALSE(result.Passed);
+			REQUIRE(result.Cases.size() == 2);
+			CHECK(result.Cases[0].Case == "Checkpoint@60");
+			CHECK(result.Cases[0].Message.ends_with(named));
+			CHECK(result.Cases[1].Case == "FinalStateHash");
+			CHECK(result.Cases[1].Message.ends_with(named));
 		}
 
 		// Docs/Decisions/0027-m17-contract.md decision 3, A3 (M17 map GTF-07): a recording refused because a selected row did

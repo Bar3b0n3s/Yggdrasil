@@ -55,6 +55,11 @@ namespace Engine {
 		[[nodiscard]] std::optional<AssetHandle> Resolve(std::string_view reference) const override;
 		[[nodiscard]] std::string GetReferencePath(AssetHandle handle) const override;
 		void WaitIdle() override;
+		// The XXH64 its pak's TOC records for the entry of `handle`, the hash of the cooked artifact the entry holds, which the
+		// editor's cache entry of the same artifact shares (Docs/Decisions/0030-m19-contract.md decision 2); nothing is read.
+		// Errors: InvalidArgument for the null handle and a procedural built-in (no artifact); NotFound for a handle no pak
+		// holds.
+		[[nodiscard]] Result<uint64_t> GetCookedHash(AssetHandle handle) override;
 	private:
 		// The specification, the paks, the entry index and the loaded assets with their states (RuntimeAssetManager.cpp).
 		struct State;

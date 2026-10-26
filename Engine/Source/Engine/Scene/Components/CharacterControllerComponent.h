@@ -18,6 +18,11 @@ namespace Engine {
 		float Mass = 70.0f;
 		float GravityFactor = 1.0f;
 		std::string Layer = "Default";
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 36, P-CARRY): while grounded, the character moves with the
+		// horizontal velocity of what it stands on (CharacterControllerDescription::InheritGroundVelocity), so a moving platform
+		// carries it. Opt-in; a field added with its default, so the component stays at version 1 (no migration, the ledger's
+		// "v2 only if it needs a migration").
+		bool InheritGroundVelocity = false;
 	};
 
 }

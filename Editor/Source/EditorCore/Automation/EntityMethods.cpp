@@ -481,7 +481,9 @@ namespace Engine {
 	void RegisterEditorEntityMethodTypes(TypeRegistry& registry)
 	{
 		constexpr std::string_view ComponentsDescription =
-			"Component values by registry name, each an object of field values (missing fields keep their values); see component.schema.";
+			"Component values by registry name, each an object of field values (missing fields keep their values); an Entity value takes 16 hex "
+			"digits, a unique id prefix of at least 6 or a path such as \"/Game/ScoreText\", resolved in the target scene; see component.schema. "
+			"Native components (Native.<Name>) are written with native.setComponents.";
 		constexpr std::string_view TargetDescription = "The scene to change; omitted: the edit scene. \"play\" changes the play scene transiently.";
 
 		registry.Struct<EntityCreateParams>("EntityCreateParams", "The params of entity.create.")
@@ -503,8 +505,12 @@ namespace Engine {
 			.Field("active", &EntityUpdateParams::Active, "The new active flag.")
 			.Field("tags", &EntityUpdateParams::Tags, "The new tag list (replaces the old one).")
 			.VariantField("components", &EntityUpdateParams::Components,
-				"Component values by registry name, merged into the existing components; missing components are added.", &ResolveComponentValue)
-			.Field("removeComponents", &EntityUpdateParams::RemoveComponents, "Components to remove (before the components are written).")
+				"Component values by registry name, merged into the existing components; missing components are added. An Entity value takes 16 hex "
+				"digits, a unique id prefix of at least 6 or a path such as \"/Game/ScoreText\", resolved in the target scene. Native components "
+				"(Native.<Name>) are written with native.setComponents.",
+				&ResolveComponentValue)
+			.Field("removeComponents", &EntityUpdateParams::RemoveComponents,
+				"Components to remove (before the components are written); native.setComponents removes a native one (null).")
 			.Field("target", &EntityUpdateParams::Target, TargetDescription);
 
 		registry.Struct<EntityUpdateResult>("EntityUpdateResult", "The updated entity.")

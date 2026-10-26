@@ -4,13 +4,24 @@
 
 #include "EditorCore/Automation/ProvenanceRecorder.h"
 #include "EditorCore/Automation/RegisterMethods.h"
+#include "Engine/App/EngineContext.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Support/AutomationTestClient.h"
+#include "Support/EditorTestFixture.h"
 #include "Support/ExpectLog.h"
+#include "Support/StrictnessEditor.h"
+#include "Support/TempDirectory.h"
 #include "Support/TestData.h"
 #include "Support/Utf8Path.h"
+
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <filesystem>
+#include <string>
+#include <string_view>
 
 namespace Engine {
 
@@ -19,6 +30,22 @@ namespace Engine {
 		Result<Json> json = JsonReader::Parse(text);
 		REQUIRE(json.has_value());
 		return std::move(*json);
+	}
+
+	// The warnings of a method result; null when it has none.
+	static Json ReadWarnings(const Json& result)
+	{
+		return result.contains("warnings") ? result["warnings"] : Json();
+	}
+
+	// Whether one of `warnings` (a JSON array of strings) starts with `prefix` and contains `text`.
+	static bool HasWarning(const Json& warnings, std::string_view prefix, std::string_view text)
+	{
+		return std::ranges::any_of(warnings, [prefix, text](const Json& warning)
+		{
+			const std::string line = JsonReader(warning).ReadString().value_or(std::string());
+			return line.starts_with(prefix) && line.contains(text);
+		});
 	}
 
 	TEST_SUITE("EditorCore")
@@ -150,6 +177,101 @@ namespace Engine {
 			CHECK(invalid.error().GetCode() == ErrorCode::Validation);
 		}
 
+		// Docs/Decisions/0030-m19-contract.md "Integration of W19.2": a non-strict editor dropped a member the settings do not
+		// have with a warning nothing read, so a mistyped key was lost without a word.
+		TEST_CASE("ProjectMethods: project.setSettings drops a member the settings do not have and names it in its warnings")
+		{
+			Test::AutomationFixture setup("ProjectSetSettingsUnknown");
+			const Result<Json> patched = setup.Call("project.setSettings", ParseProjectJson(R"({"patch":{"Window":{"Titel":"Tetris","Width":800},"Bogus":true}})"));
+			REQUIRE_MESSAGE(patched.has_value(), patched.error().ToString());
+			CHECK((*patched)["settings"]["Window"]["Width"] == Json(800));
+			CHECK((*patched)["settings"]["Window"]["Title"] == Json("Game"));
+			const Json warnings = ReadWarnings(*patched);
+			REQUIRE(warnings.is_array());
+			CHECK(warnings.size() == 2);
+			CHECK(HasWarning(warnings, "/patch/Window/Titel: ", "'Title'"));
+			CHECK(HasWarning(warnings, "/patch/Bogus: ", "Bogus"));
+			const std::string written = FileSystem::ReadText(setup.GetEditorFixture().GetProjectRoot() / "TestProject.eproj").value_or("");
+			CHECK(written.contains("800"));
+			CHECK_FALSE(written.contains("Titel"));
+			CHECK_FALSE(written.contains("Bogus"));
+
+			// A dry run names them too; a patch of known members has none.
+			const Result<Json> dryRun = setup.Call("project.setSettings", ParseProjectJson(R"({"patch":{"Physics":{"Gravty":[0,-1,0]}},"dryRun":true})"));
+			REQUIRE_MESSAGE(dryRun.has_value(), dryRun.error().ToString());
+			CHECK(HasWarning(ReadWarnings(*dryRun), "/patch/Physics/Gravty: ", "'Gravity'"));
+			const Result<Json> known = setup.Call("project.setSettings", ParseProjectJson(R"({"patch":{"Window":{"Title":"Tetris"}}})"));
+			REQUIRE_MESSAGE(known.has_value(), known.error().ToString());
+			CHECK(ReadWarnings(*known) == Json::array());
+		}
+
+		TEST_CASE("ProjectMethods: a --strict editor's project.setSettings refuses a member the settings do not have")
+		{
+			Test::TempDirectory directory("ProjectSetSettingsStrict");
+			Test::StrictnessEditor strict(directory.GetPath(), true);
+			strict.CreateAndOpenProject("StrictProject");
+			Test::AutomationTestClient client(strict.GetEditor());
+			const uint32_t width = strict.GetEditor().GetProject().GetSettings().Window.Width;
+			REQUIRE(width != 800);
+			const Result<Json> refused = client.Call("project.setSettings", ParseProjectJson(R"({"patch":{"Window":{"Titel":"Tetris","Width":800}}})"));
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::Validation);
+			CHECK(std::ranges::any_of(refused.error().GetIssues(), [](const ErrorIssue& issue)
+			{
+				return issue.JsonPointer == "/patch/Window/Titel";
+			}));
+			CHECK(strict.GetEditor().GetProject().GetSettings().Window.Width == width);
+
+			const Result<Json> known = client.Call("project.setSettings", ParseProjectJson(R"({"patch":{"Window":{"Width":800}}})"));
+			REQUIRE_MESSAGE(known.has_value(), known.error().ToString());
+			CHECK(ReadWarnings(*known) == Json::array());
+			CHECK(strict.GetEditor().GetProject().GetSettings().Window.Width == 800);
+		}
+
+		// A null member resets a field, and the merge erased one that names no field before the read saw it, so a mistyped
+		// reset was dropped without a warning, and a --strict editor accepted it.
+		TEST_CASE("ProjectMethods: project.setSettings names a null member the settings do not have and a --strict editor refuses it")
+		{
+			{
+				Test::AutomationFixture setup("ProjectSetSettingsUnknownNull");
+				const Result<Json> patched =
+					setup.Call("project.setSettings", ParseProjectJson(R"({"patch":{"Window":{"Titel":null},"Input":{"Actions":{"Jump":{"Bindings":["Key.C"],"Bindngs":null}}},"Bogus":null}})"));
+				REQUIRE_MESSAGE(patched.has_value(), patched.error().ToString());
+				CHECK((*patched)["settings"]["Window"]["Title"] == Json("Game"));
+				CHECK((*patched)["settings"]["Input"]["Actions"]["Jump"]["Bindings"] == Json::array({ "Key.C" }));
+				const Json warnings = ReadWarnings(*patched);
+				REQUIRE(warnings.is_array());
+				CHECK(warnings.size() == 3);
+				CHECK(HasWarning(warnings, "/patch/Window/Titel: ", "'Title'"));
+				CHECK(HasWarning(warnings, "/patch/Input/Actions/Jump/Bindngs: ", "'Bindings'"));
+				CHECK(HasWarning(warnings, "/patch/Bogus: ", "Bogus"));
+				const std::string written = FileSystem::ReadText(setup.GetEditorFixture().GetProjectRoot() / "TestProject.eproj").value_or("");
+				CHECK_FALSE(written.contains("Titel"));
+				CHECK_FALSE(written.contains("Bindngs"));
+				CHECK_FALSE(written.contains("Bogus"));
+
+				// A null member that names a field still resets it, and one that names an action deletes it, without a warning.
+				const Result<Json> reset = setup.Call("project.setSettings", ParseProjectJson(R"({"patch":{"Window":{"Title":null},"Input":{"Actions":{"Jump":null}}}})"));
+				REQUIRE_MESSAGE(reset.has_value(), reset.error().ToString());
+				CHECK(ReadWarnings(*reset) == Json::array());
+				CHECK_FALSE((*reset)["settings"]["Input"]["Actions"].contains("Jump"));
+			}
+
+			Test::TempDirectory directory("ProjectSetSettingsStrictNull");
+			Test::StrictnessEditor strict(directory.GetPath(), true);
+			strict.CreateAndOpenProject("StrictProject");
+			Test::AutomationTestClient client(strict.GetEditor());
+			const std::string title = strict.GetEditor().GetProject().GetSettings().Window.Title;
+			const Result<Json> refused = client.Call("project.setSettings", ParseProjectJson(R"({"patch":{"Window":{"Titel":null,"Title":"Tetris"}}})"));
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::Validation);
+			CHECK(std::ranges::any_of(refused.error().GetIssues(), [](const ErrorIssue& issue)
+			{
+				return issue.JsonPointer == "/patch/Window/Titel";
+			}));
+			CHECK(strict.GetEditor().GetProject().GetSettings().Window.Title == title);
+		}
+
 		TEST_CASE("ProjectMethods: project.validate reports diagnostics and fixes only the selected ids")
 		{
 			Test::AutomationFixture setup("ProjectValidateMethod");
@@ -256,9 +378,11 @@ namespace Engine {
 			CHECK((*again)["changedFiles"] == Json::array());
 		}
 
-		// M16 FX-4: Replay version 2 adds the state-hash checkpoints. project.upgrade rewrites a version 1 replay as version 2
-		// with none (the bytes of Tests/Data/Formats/Replay/v1.upgraded.replay), records it, and then leaves it alone.
-		TEST_CASE("ProjectMethods: project.upgrade migrates a version 1 replay to version 2 and records it")
+		// M16 FX-4: Replay version 2 adds the state-hash checkpoints, version 3 the start fingerprint (Docs/Decisions/
+		// 0030-m19-contract.md decision 2). project.upgrade rewrites a version 1 replay in the current version with no
+		// checkpoints and a null fingerprint (the bytes of Tests/Data/Formats/Replay/v1.upgraded.replay), records it, and then
+		// leaves it alone.
+		TEST_CASE("ProjectMethods: project.upgrade migrates a version 1 replay to version 3 and records it")
 		{
 			Test::AutomationFixture setup("ProjectUpgradeReplay", false);
 			const Result<std::string> v1 = Test::ReadTestDataText("Formats/Replay/v1.replay");
@@ -312,7 +436,7 @@ namespace Engine {
 
 			const Json expected = ParseProjectJson(R"([
 				{"path": "Assets/Materials/Red.material", "reason": "canonical form"},
-				{"path": "Assets/Replays/Old.replay", "reason": "format version 1 to 2"},
+				{"path": "Assets/Replays/Old.replay", "reason": "format version 1 to 3"},
 				{"path": "Assets/Scenes/Old.scene", "reason": "format version 0 to 1"}])");
 			Result<Json> dryRun = setup.Call("project.upgrade", Json{ { "dryRun", true } });
 			REQUIRE_MESSAGE(dryRun.has_value(), dryRun.error().ToString());

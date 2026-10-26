@@ -54,6 +54,15 @@ namespace Engine {
 		}
 
 #if defined(ENGINE_PLATFORM_WINDOWS)
+		SystemLibraryProbe GetSystemLibraryProbe()
+		{
+			std::array<wchar_t, MAX_PATH> directory{};
+			const UINT length = GetSystemDirectoryW(directory.data(), static_cast<UINT>(directory.size()));
+			if (length == 0 || length >= directory.size())
+				return {};
+			return SystemLibraryProbe{ .Library = std::filesystem::path(std::wstring(directory.data(), length)) / L"kernel32.dll", .Symbol = "GetTickCount64" };
+		}
+
 		Status StartProcessInheritingOutput(const std::filesystem::path& executable, std::span<const std::string> arguments)
 		{
 			ENGINE_TRY(Utils::CheckArguments(arguments));
@@ -329,6 +338,11 @@ namespace Engine {
 			return {};
 		}
 #elif defined(ENGINE_PLATFORM_LINUX) || defined(ENGINE_PLATFORM_MACOS)
+		SystemLibraryProbe GetSystemLibraryProbe()
+		{
+			return {};
+		}
+
 		Status StartProcessInheritingOutput(const std::filesystem::path& executable, std::span<const std::string> arguments)
 		{
 			ENGINE_TRY(Utils::CheckArguments(arguments));

@@ -153,6 +153,11 @@ namespace Engine {
 		// The assets the main asset and its sub-assets reference (material -> textures, prefab -> meshes and materials;
 		// standalone textures a glTF reuses), sorted and unique, excluding its own sub-assets: edges of the
 		// AssetDependencyGraph (§7.5). The files read through ReadDependency are the source's dependency files (§6.4).
+		// The rule every importer follows (Docs/Decisions/0030-m19-contract.md decision 21, the phase 1 ledger's "Importer
+		// dependencies"): every asset the cooked output references is listed here, because the exporter checks these lists
+		// (a reference the package lacks fails the export) and follows them to decide what Engine.pak and, with
+		// Export.PruneUnreferenced, Game.pak hold. The one reference an importer cannot see is a scene's or prefab's Script
+		// field value, which it reads without the scripts' field schemas; the exporter collects those itself.
 		std::vector<AssetHandle> Dependencies{};
 		// Warnings found (ASSET_UNSUPPORTED_UV_SET, ASSET_VERTEX_COLORS_IGNORED, ASSET_TANGENTS_APPROXIMATED,
 		// ASSET_CONTENT_SKIPPED), in the order found; their Asset and Path are filled in by the importer. Stored in the cache

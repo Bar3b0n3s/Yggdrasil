@@ -34,7 +34,7 @@ namespace Engine {
 		}
 
 		EditorTestFixture::EditorTestFixture(std::string_view label, CommandHistoryLimits historyLimits, RegisterTypesFunction registerTypes,
-			std::optional<AudioEngineSpecification> audio, bool engineResources)
+			std::optional<AudioEngineSpecification> audio, bool engineResources, EditorTestNativeBackends native)
 			: m_Directory(label)
 		{
 			std::error_code error;
@@ -58,6 +58,8 @@ namespace Engine {
 																					   .TemplatesDirectory = GetRepositoryRoot() / "Resources" / "Templates" / "Projects",
 																					   .ReadOnlyCacheRoot = m_Directory / "ReadOnlyCache",
 																					   .HistoryLimits = historyLimits,
+																					   .NativeBuild = std::move(native.Build),
+																					   .NativeLoader = std::move(native.Loader),
 																				   });
 			Utils::RequireEditorStep(editor, "creating the editor context");
 			m_Editor = std::move(*editor);

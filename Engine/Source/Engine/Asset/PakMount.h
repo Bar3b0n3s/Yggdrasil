@@ -15,7 +15,9 @@ namespace Engine {
 	// at its Path; directories are implied by the paths. Cooked assets are not files of the mount: RuntimeAssetManager reads
 	// them by handle. Follows every IMount rule: the case policy (a path matching an entry only ignoring ASCII case is
 	// Validation "case mismatch"), sorted listings, and PermissionDenied for every mutating call (GetAccess is ReadOnly).
-	// Streams read from the reader, which never changes while mounted (IFileStream comment). Thread-safe.
+	// Streams read from the reader, which never changes while mounted (IFileStream comment). Thread-safe. A file stored
+	// deflated (pak version 2, Docs/Decisions/0030-m19-contract.md decision 17) reads, streams and reports its size as its
+	// inflated bytes, since every read goes through PakReader::ReadEntry.
 	class PakMount final : public IMount
 	{
 	public:

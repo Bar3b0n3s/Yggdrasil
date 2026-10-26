@@ -4,8 +4,10 @@
 
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Play/EditorPlayController.h"
+#include "Engine/Asset/ReplayData.h"
 #include "Engine/Core/EventLog.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Scripting/ScriptError.h"
 #include "Engine/Scripting/ScriptLimits.h"
 #include "Support/AutomationTestClient.h"
@@ -178,10 +180,23 @@ namespace Engine {
 		{
 			Test::AutomationFixture fixture("ScriptEmbeddedErrorCursor");
 			CallScriptMethod(fixture, "input.record", Json{ { "action", "start" } });
-			const Json expectation{ { "tick", 0 }, { "luau", "return error('embedded expectation error', 0)" } };
 			const std::string replayPath = "Assets/Tests/EmbeddedErrors.replay";
-			CallScriptMethod(fixture, "input.record",
-				Json{ { "action", "stop" }, { "path", replayPath }, { "expect", Json::array({ expectation, expectation }) } });
+			CallScriptMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", replayPath } });
+			// input.record's Stop verifies every expectation before it writes a recording (Docs/Decisions/0030-m19-contract.md
+			// decision 4), so the replay gets its failing expectations through the project's file system.
+			const auto file = VfsPath::Create("project", replayPath);
+			REQUIRE(file.has_value());
+			const auto source = fixture.GetEditor().GetVfs().ReadText(*file);
+			REQUIRE(source.has_value());
+			ReplayLoadReport report;
+			Result<ReplayDocument> replay = ReplayFromText(*source, report, true);
+			REQUIRE_MESSAGE(replay.has_value(), (replay ? "" : replay.error().ToString()));
+			const ReplayExpectation expectation{ .Tick = 0, .Luau = "return error('embedded expectation error', 0)" };
+			replay->Expect = { expectation, expectation };
+			const Result<std::string> text = ReplayToText(*replay);
+			REQUIRE_MESSAGE(text.has_value(), (text ? "" : text.error().ToString()));
+			REQUIRE(fixture.GetEditor().GetVfs().WriteFileAtomic(*file, AsBytes(*text)).has_value());
+			CallScriptMethod(fixture, "asset.reimport", Json{ { "asset", replayPath } });
 			const Json start = CallScriptMethod(fixture, "script.errors", Json{ { "since", "end" } });
 			REQUIRE(start["errors"].empty());
 			{

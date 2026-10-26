@@ -98,6 +98,11 @@ project "Engine"
 		IncludeDir.stb
 	}
 
+	-- The build id's stamp (Docs/Decisions/0030-m19-contract.md decision 13): Scripts/Build.py writes BuildStamp.h into
+	-- this project's intermediate directory before it builds, and Core/BuildId.cpp includes it by this name. The
+	-- absolute spelling (%{!cfg.objdir}) holds from every compiler's working directory.
+	defines { "ENGINE_BUILD_STAMP_HEADER=\"%{!cfg.objdir}/BuildStamp.h\"" }
+
 	UseImGui()
 	UseGLFW()
 	UseNVRHI()

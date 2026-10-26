@@ -5,11 +5,13 @@
 #include "Engine/Physics/CharacterController.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/CharacterControllerComponent.h"
+#include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Scene.h"
 #include "Support/PhysicsTestScene.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 // Characters in the play session (Architecture §9.6: CharacterController:Move, IsGrounded, GetGroundNormal, GetVelocity; the
@@ -60,6 +62,32 @@ namespace Engine {
 			uint64_t m_Tick = 0;
 			glm::vec3 m_Position = glm::vec3(0.0f);
 		};
+
+		// Moves "/Platform" 2 m/s along +X in every fixed update, as a script's RigidBody:MoveKinematic.
+		class PlatformMover final : public IPlaySessionObserver
+		{
+		public:
+			void OnPhase(PlaySession& session, PlaySessionPhase phase, uint64_t tick) override
+			{
+				if (phase != PlaySessionPhase::FixedUpdate)
+					return;
+				const UUID platform = Test::GetEntityId(session.GetScene(), "/Platform");
+				const float x = 2.0f * static_cast<float>(tick + 1) / 60.0f;
+				REQUIRE(session.GetPhysics().MoveKinematic(platform, glm::vec3(x, -0.5f, 0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f)).has_value());
+			}
+		};
+
+		// "/Platform": a kinematic box 40 m square with its top at y 0, which PlatformMover moves.
+		void AddPlatform(Scene& scene)
+		{
+			Entity platform = scene.CreateEntity("Platform");
+			platform.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.0f, -0.5f, 0.0f);
+			});
+			platform.AddComponent<RigidBodyComponent>(RigidBodyComponent{ .Type = BodyType::Kinematic });
+			platform.AddComponent<BoxColliderComponent>(BoxColliderComponent{ .HalfExtents = glm::vec3(20.0f, 0.5f, 20.0f) });
+		}
 
 		Entity AddPlayer(Scene& scene, const glm::vec3& position)
 		{
@@ -316,6 +344,101 @@ namespace Engine {
 			const Entity player = session->GetScene().FindEntityByPath("/Rig/Player");
 			REQUIRE(player.IsValid());
 			CHECK(player.GetComponent<TransformComponent>().Translation.x == doctest::Approx(1.5f).epsilon(1.0e-3));
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 36 (P-CARRY, stream K): PhysicsSystem gives the character the component's
+		// InheritGroundVelocity, so a kinematic platform moved with MoveKinematic carries an opted-in character and not
+		// another.
+		TEST_CASE("PhysicsSystem: a CharacterController's InheritGroundVelocity lets a moving platform carry the character")
+		{
+			for (const bool inherit : { true, false })
+			{
+				CAPTURE(inherit);
+				Test::SceneTestFixture fixture;
+				Scene& scene = fixture.GetScene();
+				AddPlatform(scene);
+				Entity player = AddPlayer(scene, glm::vec3(0.0f, 0.05f, 0.0f));
+				player.GetComponent<CharacterControllerComponent>().InheritGroundVelocity = inherit;
+
+				PlatformMover mover;
+				Scope<PlaySession> session = StartCharacterSession(fixture, &mover);
+				for (int tick = 0; tick < 120; ++tick)
+					session->Tick();
+				const float x = session->GetScene().FindEntityByPath("/Player").GetComponent<TransformComponent>().Translation.x;
+				if (inherit)
+					CHECK(x == doctest::Approx(4.0f).epsilon(0.05));
+				else
+					CHECK(std::abs(x) < 0.05f);
+			}
+		}
+
+		// ADR 0030 decision 36: a change of the field in play reaches the character, as every CharacterController field does.
+		TEST_CASE("PhysicsSystem: turning InheritGroundVelocity on in play lets the moving platform carry the character from then on")
+		{
+			Test::SceneTestFixture fixture;
+			AddPlatform(fixture.GetScene());
+			static_cast<void>(AddPlayer(fixture.GetScene(), glm::vec3(0.0f, 0.05f, 0.0f)));
+			PlatformMover mover;
+			Scope<PlaySession> session = StartCharacterSession(fixture, &mover);
+			Test::RunTicks(*session, 60);
+			const float before = Test::GetWorldPosition(*session, "/Player").x;
+			CHECK(std::abs(before) < 0.05f);
+
+			session->GetScene().FindEntityByPath("/Player").Patch<CharacterControllerComponent>([](CharacterControllerComponent& controller)
+			{
+				controller.InheritGroundVelocity = true;
+			});
+			Test::RunTicks(*session, 60);
+			// One second more at 2 m/s.
+			CHECK(Test::GetWorldPosition(*session, "/Player").x - before == doctest::Approx(2.0f).epsilon(0.05));
+			const Result<PhysicsCharacterState> state = session->GetPhysics().GetCharacterState(Test::GetEntityId(session->GetScene(), "/Player"));
+			REQUIRE(state.has_value());
+			CHECK(state->IsGrounded);
+			CHECK(state->Velocity.x == doctest::Approx(2.0f).epsilon(1.0e-3));
+		}
+
+		// ADR 0030 decision 36 (the review of W19.1): InheritGroundVelocity is a per-update switch, so a change in play applies
+		// in place, as GravityFactor does, instead of creating the character again: the step after the change sees it
+		// grounded, so it moves with the platform at once (a new character spends its first step in the air, with one step of
+		// gravity and no carry), and its inner body never leaves the trigger it stands in.
+		TEST_CASE("PhysicsSystem: a change of InheritGroundVelocity in play applies in place, keeping the character grounded and in its trigger")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			AddPlatform(scene);
+			static_cast<void>(AddPlayer(scene, glm::vec3(0.0f, 0.05f, 0.0f)));
+			Entity zone = Test::AddBoxBody(scene, "Zone", glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(5.0f, 2.0f, 5.0f), std::nullopt);
+			zone.Patch<BoxColliderComponent>([](BoxColliderComponent& collider)
+			{
+				collider.IsTrigger = true;
+			});
+			PlatformMover mover;
+			Test::RecordingPhysicsListener listener;
+			Scope<PlaySession> session = StartCharacterSession(fixture, &mover, &listener);
+			const UUID player = Test::GetEntityId(session->GetScene(), "/Player");
+			const auto zoneEvents = [&listener, &zone, player](PhysicsEventType type)
+			{
+				return std::ranges::count(listener.Find(zone.GetUUID(), type), player, &PhysicsEvent::Other);
+			};
+			Test::RunTicks(*session, 30);
+			REQUIRE(zoneEvents(PhysicsEventType::TriggerEnter) == 1);
+
+			for (const bool inherit : { true, false })
+			{
+				CAPTURE(inherit);
+				session->GetScene().FindEntityByPath("/Player").Patch<CharacterControllerComponent>([inherit](CharacterControllerComponent& controller)
+				{
+					controller.InheritGroundVelocity = inherit;
+				});
+				session->Tick();
+				const Result<PhysicsCharacterState> state = session->GetPhysics().GetCharacterState(player);
+				REQUIRE(state.has_value());
+				CHECK(state->IsGrounded);
+				CHECK(std::abs(state->Velocity.x - (inherit ? 2.0f : 0.0f)) < 1.0e-3f);
+				CHECK(std::abs(state->Velocity.y) < 1.0e-3f);
+			}
+			CHECK(zoneEvents(PhysicsEventType::TriggerEnter) == 1);
+			CHECK(zoneEvents(PhysicsEventType::TriggerExit) == 0);
 		}
 	}
 

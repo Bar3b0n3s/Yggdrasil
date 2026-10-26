@@ -1,5 +1,6 @@
--- Dependencies.lua: include directories, first-party project settings and one Use<Lib>() function per vendored
--- library (Docs/Architecture.md §2.2).
+-- Dependencies.lua: include directories, the settings every workspace applies (OutputDir, ApplyWorkspaceSettings()),
+-- first-party project settings, one Use<Lib>() function per vendored library and the Runtime executable's settings
+-- (UseRuntimeDependencies(), ApplyRuntimeExecutableSettings()) (Docs/Architecture.md §2.2).
 --
 -- The defines in every Use<Lib>() are copied verbatim from Vendor/<Lib>/VENDOR.md and must stay identical to what
 -- Vendor/<Lib>/premake5.lua defines for the library itself. A mismatch is an ODR/ABI violation (silent memory
@@ -13,6 +14,43 @@
 -- Absolute path of the repository root. premake writes paths relative to each generated project, so this also works
 -- when the projects are generated elsewhere with --to.
 RepositoryRoot = path.getdirectory(_SCRIPT)
+
+OutputDir = "%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}"
+-- The compiled SPIR-V of a configuration: the Shaders project's output (Engine/premake5.lua) and the directory
+-- development builds mount as shaders:// (ENGINE_SHADER_DIRECTORY, below). Always in the repository's bin/, also for a
+-- workspace generated elsewhere with --to, so every workspace of this checkout shares one shader output per
+-- configuration; the SPIR-V does not depend on the C++ toolset (Docs/Decisions/0009-m5-decisions.md decision 4).
+ShaderOutputDirectory = RepositoryRoot .. "/bin/" .. OutputDir .. "/Shaders"
+
+-- Settings of every workspace the repository generates, at workspace scope: premake5.lua's, and the one
+-- Scripts/Premake/NativeModule.lua generates for a game's native module (Docs/Decisions/0030-m19-contract.md decision
+-- 30), whose code links with the engine's libraries and so must agree with them on the target and NDEBUG.
+function ApplyWorkspaceSettings()
+	filter "system:macosx"
+		architecture "ARM64"
+		-- Minimum macOS version (§16) for every project, vendored ones included, so that the linker never mixes
+		-- objects built for different deployment targets.
+		systemversion "14.0"
+
+	-- xcode4 applies MACOSX_DEPLOYMENT_TARGET to compiling and linking; the make-style generators pass systemversion
+	-- to the compiler only, so the linker gets the minimum version explicitly.
+	filter { "system:macosx", "action:not xcode4" }
+		linkoptions { "-mmacosx-version-min=14.0" }
+
+	filter "system:not macosx"
+		architecture "x86_64"
+
+	filter "system:windows"
+		-- The test executable exceeds the 32-bit linker's address space as subsystems accumulate.
+		preferredtoolarchitecture "x86_64"
+
+	-- Workspace scope only (ODR): NDEBUG changes the layout of vulkan.hpp's dispatcher, so NVRHI and every consumer
+	-- must agree on it (Vendor/NVRHI/VENDOR.md). Never define NDEBUG in a project script.
+	filter "configurations:Dist"
+		defines { "NDEBUG" }
+
+	filter {}
+end
 
 IncludeDir = {}
 IncludeDir["GLFW"] = RepositoryRoot .. "/Vendor/GLFW/include"
@@ -28,8 +66,7 @@ IncludeDir["Luau"] =
 	RepositoryRoot .. "/Vendor/Luau/Bytecode/include",
 	RepositoryRoot .. "/Vendor/Luau/Compiler/include",
 	RepositoryRoot .. "/Vendor/Luau/Config/include",
-	RepositoryRoot .. "/Vendor/Luau/VM/include",
-	RepositoryRoot .. "/Vendor/Luau/Require/include"
+	RepositoryRoot .. "/Vendor/Luau/VM/include"
 }
 IncludeDir["LuauAnalysis"] = RepositoryRoot .. "/Vendor/Luau/Analysis/include"
 IncludeDir["ImGui"] = RepositoryRoot .. "/Vendor/imgui"
@@ -178,13 +215,17 @@ function ApplyFirstPartySettings()
 		xcodebuildsettings { ["LLVM_LTO"] = "YES" }
 
 	-- Development builds mount engine:// at <repo>/Resources (§2.2). Dist builds read Engine.pak instead.
-	-- ENGINE_SHADER_DIRECTORY is the compiled SPIR-V of the configuration being built, ShaderOutputDirectory (premake5.lua),
-	-- the Shaders project's output, which development builds mount as shaders:// (Docs/Decisions/0009-m5-decisions.md).
+	-- ENGINE_SHADER_DIRECTORY is the compiled SPIR-V of the configuration being built, ShaderOutputDirectory (above), the
+	-- Shaders project's output, which development builds mount as shaders:// (Docs/Decisions/0009-m5-decisions.md).
+	-- ENGINE_PYTHON_EXECUTABLE is the interpreter Scripts/Generate.py passed as --python, empty without one: the editor
+	-- runs Scripts/BuildNative.py with it to build a game's native module (Docs/Decisions/0030-m19-contract.md decision
+	-- 30), by a fixed path, as the Shaders rule runs CompileShaders.py.
 	filter "configurations:not Dist"
 		defines
 		{
 			"ENGINE_REPO_ROOT=\"" .. RepositoryRoot .. "\"",
-			"ENGINE_SHADER_DIRECTORY=\"" .. ShaderOutputDirectory .. "\""
+			"ENGINE_SHADER_DIRECTORY=\"" .. ShaderOutputDirectory .. "\"",
+			"ENGINE_PYTHON_EXECUTABLE=\"" .. (_OPTIONS["python"] or ""):gsub("\\", "/") .. "\""
 		}
 
 	filter {}
@@ -359,6 +400,75 @@ function UseImGui()
 
 	filter { LinkingKinds }
 		links { "ImGuizmo", "ImGui" }
+
+	filter {}
+end
+
+-- The libraries the Runtime's code is compiled against (and, in an executable, linked with): the RuntimeCore library
+-- and the Runtime executable (Runtime/premake5.lua), and a game's native module and the Runtime linked with it
+-- (Scripts/Premake/NativeModule.lua; Docs/Decisions/0030-m19-contract.md decision 30), so a module's code compiles with
+-- the settings of the code it runs beside, instruction set included.
+function UseRuntimeDependencies()
+	UseImGui()
+	UseGLFW()
+	UseNVRHI()
+	UseJoltPhysics()
+	UseSpdlog()
+	UseMiniaudio()
+	UseMikkTSpace()
+	UseLuau(false)
+end
+
+-- The Runtime executable (Docs/Architecture.md §2.2, §14.3): RuntimeMain.cpp linked with the RuntimeCore and Engine
+-- libraries, plus what decides GetLinkedNativeModule (NoNativeModule.cpp in the prebuilt Runtime, a game's native module
+-- in the Runtime Scripts/BuildNative.py links for its export; Docs/Decisions/0030-m19-contract.md decision 30). Called
+-- in a ConsoleApp project after ApplyFirstPartySettings(); `location` is the directory of the workspace (the linker map's
+-- on Linux and macOS).
+function ApplyRuntimeExecutableSettings(location)
+	files { RepositoryRoot .. "/Runtime/Source/Runtime/RuntimeMain.cpp" }
+
+	includedirs { RepositoryRoot .. "/Runtime/Source" }
+
+	links
+	{
+		"RuntimeCore",
+		"Engine"
+	}
+
+	UseRuntimeDependencies()
+
+	-- Shipping builds have no console window. The C++ main() stays the entry point on Windows.
+	filter "configurations:Dist"
+		kind "WindowedApp"
+
+	-- The shipped executable names its PDB by file name only, never by the build machine's path: the symbols are archived in
+	-- bin/Symbols and never shipped (§2.2, Docs/Decisions/0024-m15-contract.md decision 2). link.exe and lld-link both
+	-- expand %_PDB%.
+	filter { "configurations:Dist", "system:windows" }
+		entrypoint "mainCRTStartup"
+		linkoptions { "/PDBALTPATH:%_PDB%" }
+
+	-- Linker map in every configuration, next to the executable: crash-address lookup, and the Dist symbol test of
+	-- Architecture §14.4 (/MAP for link.exe and lld-link, -Wl,-Map for GNU ld and lld, -Wl,-map for ld64). The path is absolute, because make and ninja run the
+	-- linker from different directories.
+	filter "system:windows"
+		linkoptions { "/MAP" }
+
+	filter "system:linux"
+		linkoptions { "-Wl,-Map=" .. location .. "/bin/" .. OutputDir .. "/%{prj.name}/%{prj.name}.map" }
+
+	filter "system:macosx"
+		linkoptions { "-Wl,-map," .. location .. "/bin/" .. OutputDir .. "/%{prj.name}/%{prj.name}.map" }
+
+	-- Exported macOS games bundle the Vulkan loader and ICD in Contents/Frameworks (§16).
+	filter "system:macosx"
+		linkoptions { "-Wl,-rpath,@executable_path/../Frameworks" }
+
+	-- Exported Linux games look for shared libraries next to the executable first (§14.1, §16: RPATH $ORIGIN). The single
+	-- quotes keep the shell from expanding it; make and ninja both turn $$ into $ (the portability stage checks the
+	-- generated link lines, Docs/Decisions/0024-m15-contract.md decision 18).
+	filter "system:linux"
+		linkoptions { "-Wl,-rpath,'$$ORIGIN'" }
 
 	filter {}
 end

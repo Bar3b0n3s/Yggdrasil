@@ -310,7 +310,8 @@
 					"StepHeight": 0.25,
 					"Mass": 80,
 					"GravityFactor": 1.5,
-					"Layer": "Ball"
+					"Layer": "Ball",
+					"InheritGroundVelocity": true
 				}
 			}
 		},

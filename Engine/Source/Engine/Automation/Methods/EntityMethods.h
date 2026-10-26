@@ -34,12 +34,16 @@ namespace Engine {
 		bool Active = true;   // its own flag ("Active" in files)
 		bool ActiveInHierarchy = true;
 		std::vector<std::string> Tags{};
-		std::map<std::string, VariantValue> Components{}; // the selected components' canonical JSON, entity-level ones excluded
-		std::vector<EntitySummary> Children{};            // only with children: true
+		// The selected components' canonical JSON, entity-level ones excluded; a native component's ("Native.<Name>") as the
+		// scene holds it (Utils::FindEntityNativeComponent).
+		std::map<std::string, VariantValue> Components{};
+		std::vector<EntitySummary> Children{}; // only with children: true
 	};
 
 	// entity.get {entity, components?, children?, target?}: `components` is an array of registry names or "all" (absent:
-	// "all").
+	// "all": every component GetEntityComponents and GetEntityNativeComponents list, SharedMethodSupport.h). A native
+	// component's name ("Native.<Name>") selects it as the scene holds it, unchecked against a loaded module (the native test
+	// game's friction NT-07, Docs/Decisions/0030-m19-contract.md decision 27).
 	struct EntityGetParams
 	{
 		std::string Entity{};
@@ -89,11 +93,18 @@ namespace Engine {
 		// of the target; Unsupported on a host without an asset manager (AutomationMethodContext::GetAssets).
 		[[nodiscard]] Result<EntityBoundsResult> EntityBounds(AutomationMethodContext& context, const EntityBoundsParams& params);
 
+		// The components entity.get selects by name: built-in ones of the type registry, and native ones by registry name.
+		struct EntityComponentSelection
+		{
+			std::vector<const ComponentInfo*> Components{};
+			std::vector<std::string> NativeComponents{}; // "Native.<Name>" (IsNativeComponentName)
+		};
+
 		// `entity` (valid) as entity.get and entity.update report it: its members, the JSON of the `selection` components
-		// it has (nullopt: every component results report, Utils::GetEntityComponents) and, with `children`, its children's
-		// summaries. Errors: those of ComponentAccess::GetComponentJson.
+		// it has (nullopt: every component results report, Utils::GetEntityComponents and Utils::GetEntityNativeComponents)
+		// and, with `children`, its children's summaries. Errors: those of ComponentAccess::GetComponentJson.
 		[[nodiscard]] Result<EntityDetails> MakeEntityDetails(const AutomationMethodContext& context, ConstEntity entity,
-			const std::optional<std::vector<const ComponentInfo*>>& selection, bool children);
+			const std::optional<EntityComponentSelection>& selection, bool children);
 
 	}
 

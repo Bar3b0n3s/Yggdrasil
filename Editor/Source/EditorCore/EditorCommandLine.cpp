@@ -39,6 +39,9 @@ namespace Engine {
 		constexpr std::string_view ExportReportOption = "--export-report";
 		constexpr std::string_view ExportRootOption = "--export-root";
 		constexpr std::string_view StrictOption = "--strict";
+		constexpr std::string_view HeadlessGameViewOption = "--headless-game-view";
+		// The engine option (GetEngineCommandLineOptions) that --headless-game-view needs.
+		constexpr std::string_view HeadlessOption = "--headless";
 		constexpr std::string_view HelpOption = "--help";
 		// --help's short spelling, the editor's one single-dash option (ExpandEditorShortOptions).
 		constexpr std::string_view ShortHelpOption = "-h";
@@ -68,6 +71,7 @@ namespace Engine {
 			CommandLineOption{ .Name = ExportReportOption, .Value = CommandLineValue::Required, .ValueName = "file.json", .Description = "Write the --export result or error to this JSON file, whatever the outcome." },
 			CommandLineOption{ .Name = ExportRootOption, .Value = CommandLineValue::Required, .ValueName = "dir", .Description = "Make project.export write below this directory instead of the project's Build/." },
 			CommandLineOption{ .Name = StrictOption, .Value = CommandLineValue::None, .ValueName = {}, .Description = "Treat unknown keys, fields and components in the project's .eproj, scenes and prefabs as errors, and refuse the project when any scene or prefab does not load strictly (CI)." },
+			CommandLineOption{ .Name = HeadlessGameViewOption, .Value = CommandLineValue::None, .ValueName = {}, .Description = "With --headless: render the Game view every frame, at the project's window size, as a displayed Game panel would (the hardening soak)." },
 		};
 
 	}
@@ -223,6 +227,9 @@ namespace Engine {
 			options.ExportRoot = absolute.lexically_normal();
 		}
 		options.Strict = commandLine.Has(StrictOption);
+		options.HeadlessGameView = commandLine.Has(HeadlessGameViewOption);
+		if (options.HeadlessGameView && !commandLine.Has(HeadlessOption))
+			return MakeError(ErrorCode::InvalidArgument, "option '{}' needs '{}': a windowed editor renders the Game view its panel displays", HeadlessGameViewOption, HeadlessOption);
 		ENGINE_TRY(Utils::CheckExportOptions(options, commandLine));
 
 		if (options.ReadOnly && !options.Project.has_value())

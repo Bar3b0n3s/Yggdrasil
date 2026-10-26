@@ -8,11 +8,13 @@ Steps, in this order, failing fast (a step after a failed one is reported as not
                  metric or a fallback without a GPU is a warning, only a capture that cannot run fails
   soak           soak Release: every scene of every project below Projects/ (Lib/hardening.py soak_projects and
                  soak_scenes: FeatureTest and the demos built there, not those below Tests/Projects/, the golden scenes
-                 included) in one plain Release editor each (--headless --renderer vulkan --audio-device none
-                 --automation, on a temporary copy of the project with Library/): scene.open, script.errors {since:
+                 included) in one plain Release editor each (--headless --headless-game-view --renderer vulkan
+                 --audio-device none --automation, on a temporary copy of the project with Library/, so the editor
+                 renders the scene's game view every frame besides its Scene view): scene.open, script.errors {since:
                  "end"} (the error stream's cursor, taken before play.start runs OnStart), play.start {lockstep: true}
                  and N / 250 x play.step {ticks: 250, render: "Every"}, N rendered frames (N = --soak-frames, 10,000 by
-                 default), sampling the editor's process memory and stats.get after each step, then script.errors from
+                 default), sampling the editor's process memory and stats.get after each step (a sample whose game
+                 view did not render fails the subject, hardening.soak_game_view_errors), then script.errors from
                  that cursor, each page read from the file the editor offloads it to when it is over the 48 KB
                  bounded-output limit (Architecture §13.4): any new script error of the play session, OnStart's
                  included, fails the subject with one line counting them and naming the earliest listed, at its latest
@@ -502,14 +504,19 @@ def soak_editor_scene(engine_client: Any, editor: Path, project_file: Path, scen
     last step (all its ticks, or where an error ended it) it reads the errors after that cursor (new_script_errors), so
     any script error of the play session, OnStart's included, adds one line naming how many there were and the earliest
     listed one. play.step keeps ticking through a non-fatal script error (the editor disables the faulting instance), so
-    the soak runs all its ticks either way. Each call waits at most SOAK_CALL_TIMEOUT_SECONDS and never past `deadline`;
-    at the deadline the scene ends with an error naming it, and the editor is killed."""
+    the soak runs all its ticks either way. The editor starts with hardening.SOAK_EDITOR_GAME_VIEW_OPTION, so it renders
+    the scene's game view every frame; the first sample after a step whose stats.get reports no rendered game view adds
+    one line (hardening.soak_game_view_errors; Docs/Decisions/0030-m19-contract.md decision 11, R-SOAK), and the soak
+    goes on. Each call waits at most SOAK_CALL_TIMEOUT_SECONDS and never past `deadline`; at the deadline the scene ends
+    with an error naming it, and the editor is killed."""
     samples: list[hardening.SoakSample] = []
     errors: list[str] = []
+    game_view_failed = False  # only the first sample whose game view did not render adds a line
     try:
         editor_process = engine_client.launch_editor(
-            editor, ["--headless", "--renderer", "vulkan", "--audio-device", "none", "--automation", "--project",
-                     str(project_file)], user_data, paths.workspace_name(), environment=child_environment())
+            editor, ["--headless", hardening.SOAK_EDITOR_GAME_VIEW_OPTION, "--renderer", "vulkan", "--audio-device",
+                     "none", "--automation", "--project", str(project_file)], user_data, paths.workspace_name(),
+            environment=child_environment())
     except (RuntimeError, TimeoutError, OSError) as error:
         errors.append(f"the editor did not start: {error}")
         console.print(f"  {scene}: {errors[0].splitlines()[0]}")
@@ -537,6 +544,10 @@ def soak_editor_scene(engine_client: Any, editor: Path, project_file: Path, scen
                     tick += SOAK_STEP_TICKS
                     stats = client.call("stats.get", {}, timeout=deadline.limit(SOAK_CALL_TIMEOUT_SECONDS))
                     samples.append(stats_sample(tick / frames, pid, stats))
+                    if not game_view_failed:
+                        game_view_errors = hardening.soak_game_view_errors(stats, tick)
+                        errors += game_view_errors
+                        game_view_failed = bool(game_view_errors)
             except engine_client.EngineError as error:
                 errors.append(f"{error}")
             if cursor is not None:

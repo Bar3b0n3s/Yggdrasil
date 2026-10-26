@@ -47,8 +47,18 @@ on every generator (Docs/Decisions/0024-m15-contract.md decisions 2, 5 and 8):
     SHA-256 in the report;
   - a Dist build archives the Runtime's symbols (.pdb and .map on Windows, .map and any .dSYM on macOS, .map on Linux)
     in bin/Symbols/<OutputDir>/Runtime/ (archive_dist_symbols), which exports never package.
-Each step's --json result carries what it did ("notices", "macosFrameworks", "distSymbols", "vendorCache"), like
-"crtRedist".
+Each step's --json result carries what it did ("notices", "macosFrameworks", "distSymbols", "vendorCache",
+"buildStamp"), like "crtRedist".
+
+Before each configuration's build, on every generator, the build stamp (write_build_stamp; Docs/Decisions/
+0030-m19-contract.md decision 13): git (rev-parse, status and ls-files, without optional locks) gives HEAD's commit
+and a dirty flag, set when a tracked file differs from the commit, staged or not, or when a file git neither tracks nor
+ignores lies below Engine/, Editor/, Runtime/ or Resources/ (premake compiles every source there and the build copies
+the resources); without git, or outside a repository, the stamp has no commit. It is written into
+bin-int/<OutputDir>/Engine/BuildStamp.h, which Engine/Source/Engine/Core/BuildId.cpp includes, only when its content
+changes, so a commit recompiles that one translation unit; the first stamp of a configuration also removes the BuildId
+objects a build without one compiled. The step's detail ends with "; build stamp <commit>[.dirty]" and its --json result
+holds "buildStamp" (path, written, commit, dirty, description, removedObjects).
 
 The machine-wide build lock (Scripts/Lib/locks.py; Docs/Architecture.md §2.3, ADR 0028 decision 16) is taken after the
 workspace is read and held across every requested configuration: one uncapped build or two capped builds at a time,
@@ -88,6 +98,7 @@ import hashlib
 import os
 import re
 import shutil
+import subprocess
 import time
 from pathlib import Path
 
@@ -115,6 +126,18 @@ REPORTED_DIAGNOSTICS = 30
 # What a macOS bundle carries from the Vulkan SDK (EditorCore/Export/AppBundle.h).
 MACOS_FRAMEWORKS = ("libvulkan.1.dylib", "libMoltenVK.dylib")
 MOLTENVK_ICD = "MoltenVK_icd.json"
+# The build stamp (write_build_stamp; Docs/Decisions/0030-m19-contract.md decision 13): the header below the Engine
+# project's intermediate directory that Core/BuildId.cpp includes, the commit's length in a build id, the directories
+# whose untracked files make a build dirty (premake compiles every source there, added or not, and the build copies the
+# resources), and the bound of one git query, a failure bound only.
+BUILD_STAMP_PROJECT = "Engine"
+BUILD_STAMP_FILE_NAME = "BuildStamp.h"
+BUILD_STAMP_COMMIT_DIGITS = 12
+BUILD_STAMP_SOURCE_DIRECTORIES = ("Engine", "Editor", "Runtime", "Resources")
+BUILD_STAMP_GIT_TIMEOUT_SECONDS = 120.0
+# The objects of Engine/Source/Engine/Core/BuildId.cpp in the Engine project's intermediate directory: MSVC's and the
+# GCC/Clang generators' names.
+BUILD_STAMP_OBJECTS = ("BuildId.obj", "BuildId.o")
 
 # Diagnostics in GCC/Clang/ld/xcodebuild output ("file:line:col: warning: ...", "ld: warning: ...").
 POSIX_WARNING_PATTERN = re.compile(r"(^|: )warning: ", re.IGNORECASE)
@@ -546,6 +569,92 @@ def build_xcode(xcode: workspace.XcodeWorkspace, config: str, project: str | Non
 
 
 # --------------------------------------------------------------------------------------------------------------------
+# The build stamp (Docs/Decisions/0030-m19-contract.md decision 13)
+# --------------------------------------------------------------------------------------------------------------------
+
+
+@dataclasses.dataclass(frozen=True)
+class BuildStamp:
+    """The working tree a build compiles: the commit it has checked out and whether it differs from it."""
+
+    commit: str  # the first BUILD_STAMP_COMMIT_DIGITS of HEAD's object name, lowercase; empty without git
+    dirty: bool  # always False without a commit
+
+    def describe(self) -> str:
+        """The stamp as the build id's build metadata writes it: "<commit>", "<commit>.dirty" or "no commit"."""
+        if not self.commit:
+            return "no commit"
+        return self.commit + (".dirty" if self.dirty else "")
+
+
+def git_output(repository: Path, arguments: list[str]) -> str | None:
+    """The standard output of `git -C <repository> <arguments>`, or None when git is missing or the command fails. Git
+    takes no optional lock (the index refresh of git status), so a stamp never blocks or fails another git process."""
+    command = ["git", "--no-optional-locks", "-C", str(repository), *arguments]
+    try:
+        completed = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                   timeout=BUILD_STAMP_GIT_TIMEOUT_SECONDS, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if completed.returncode != 0:
+        return None
+    return completed.stdout.decode("utf-8", errors="replace")
+
+
+def read_build_stamp(repository: Path) -> BuildStamp:
+    """The stamp of the working tree at `repository` (decision 13): HEAD's commit, and dirty when tracked files differ
+    from it (staged or not) or when a file git neither tracks nor ignores lies below a directory the build compiles or
+    copies (BUILD_STAMP_SOURCE_DIRECTORIES), since premake compiles every source there, added or not. Without git, or
+    outside a repository, the stamp has no commit and is clean."""
+    head = git_output(repository, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"])
+    commit = (head or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commit):
+        return BuildStamp("", False)
+    modified = git_output(repository, ["status", "--porcelain=v1", "-z", "--untracked-files=no"])
+    untracked = git_output(repository, ["ls-files", "-z", "--others", "--exclude-standard", "--",
+                                        *BUILD_STAMP_SOURCE_DIRECTORIES])
+    # A query that fails cannot prove the tree clean.
+    dirty = modified is None or untracked is None or bool(modified) or bool(untracked)
+    return BuildStamp(commit[:BUILD_STAMP_COMMIT_DIGITS], dirty)
+
+
+def build_stamp_path(root: Path, config: str) -> Path:
+    """The stamp header of `config` in the workspace at `root`: the Engine project's intermediate directory
+    (<workspace>/bin-int/<OutputDir>/Engine, premake's objdir), which the build names with ENGINE_BUILD_STAMP_HEADER."""
+    return root / "bin-int" / paths.output_directory_name(config) / BUILD_STAMP_PROJECT / BUILD_STAMP_FILE_NAME
+
+
+def build_stamp_text(stamp: BuildStamp) -> str:
+    """The stamp header Engine/Source/Engine/Core/BuildId.cpp includes."""
+    return ("// Generated by Scripts/Build.py (Docs/Decisions/0030-m19-contract.md decision 13): the commit and the\n"
+            "// dirty flag of the working tree this configuration is built from, which\n"
+            "// Engine/Source/Engine/Core/BuildId.cpp reads. Do not edit.\n"
+            "#pragma once\n"
+            f'#define ENGINE_BUILD_COMMIT "{stamp.commit}"\n'
+            f"#define ENGINE_BUILD_DIRTY {1 if stamp.dirty else 0}\n")
+
+
+def write_build_stamp(root: Path, config: str, repository: Path) -> dict[str, object]:
+    """Writes the `config` stamp of the working tree at `repository` into the workspace at `root` before its build,
+    rewriting it only when its content changes, so a new commit recompiles one translation unit and an unchanged tree
+    none. A first stamp also removes the BuildId objects a build without one compiled (the IDE's, before any Build.py
+    run): the compiler read no header there, so incremental builds, which track only the headers a source read, would
+    never recompile it. Raises OSError when a file cannot be written or removed."""
+    stamp = read_build_stamp(repository)
+    target = build_stamp_path(root, config)
+    first = not target.is_file()
+    written = write_if_changed(target, build_stamp_text(stamp).encode("utf-8"))
+    removed: list[str] = []
+    if first:
+        for stale in BUILD_STAMP_OBJECTS:
+            if (target.parent / stale).is_file():
+                (target.parent / stale).unlink()
+                removed.append(str(target.parent / stale))
+    return {"path": str(target), "written": written, "commit": stamp.commit, "dirty": stamp.dirty,
+            "description": stamp.describe(), "removedObjects": removed}
+
+
+# --------------------------------------------------------------------------------------------------------------------
 # What every build of the Runtime stages beside it (Docs/Decisions/0024-m15-contract.md decisions 2, 5 and 8)
 # --------------------------------------------------------------------------------------------------------------------
 
@@ -819,6 +928,10 @@ def main(argv: list[str] | None = None) -> int:
         hold = take_build_lock(arguments, console)
         for config in arguments.configs:
             console.heading(f"Build {config} ({action})" + (f": {projects[config]}" if projects[config] else ""))
+            try:
+                stamp = write_build_stamp(generated.path.parent, config, paths.REPOSITORY_ROOT)
+            except OSError as error:
+                raise BuildSetupError(f"cannot write the build stamp of {config}: {error}") from error
             started = time.time()
             if isinstance(generated, workspace.Solution):
                 step = build_msbuild(generated, config, projects[config], arguments, console)
@@ -829,6 +942,8 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 assert isinstance(generated, workspace.XcodeWorkspace)
                 step = build_xcode(generated, config, projects[config], arguments, console)
+            step.data["buildStamp"] = stamp
+            step.detail += f"; build stamp {stamp['description']}"
             if not step.failed and builds_runtime_in(generated, config, projects[config], started,
                                                      generated.path.parent):
                 stage_runtime_outputs(step, generated.path.parent, config, host)

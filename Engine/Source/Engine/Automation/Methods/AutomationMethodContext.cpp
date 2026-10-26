@@ -60,6 +60,17 @@ namespace Engine {
 		return MakeError(ErrorCode::Unsupported, "replay output is unavailable in this host");
 	}
 
+	Result<ReplayDocument> AutomationMethodContext::ReadReplayDocument(std::string_view /*path*/, ReplayLoadReport& /*report*/, std::string& /*canonicalPath*/) const
+	{
+		return std::unexpected(Error(ErrorCode::Unsupported, "the Runtime holds no replay sources: read the replay in the editor").WithLocation({ .File = {}, .JsonPointer = "/path", .Entity = {} }));
+	}
+
+	Result<std::string> AutomationMethodContext::WriteKeptFile(std::string_view extension, std::span<const std::byte> /*bytes*/)
+	{
+		// The editor and the Runtime keep files (their overrides); a host without a kept-files directory keeps none.
+		return MakeError(ErrorCode::Unsupported, "kept output files (.{}) are unavailable in this host", extension);
+	}
+
 	bool AutomationMethodContext::IsHostType(TypeKey key) const
 	{
 		return key == TypeKeyOf<AutomationMethodContext>() || MethodContext::IsHostType(key);

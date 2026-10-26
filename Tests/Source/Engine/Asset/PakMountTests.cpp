@@ -7,6 +7,11 @@
 #include "Engine/AssetPipeline/PakWriter.h"
 #include "Support/AssetTestFixture.h"
 
+#include <array>
+#include <format>
+#include <string>
+#include <string_view>
+
 namespace Engine {
 
 	namespace {
@@ -168,6 +173,44 @@ namespace Engine {
 				CHECK(mount.error().GetCode() == ErrorCode::Validation);
 			}
 			CHECK(PakMount::Create(MakeFilePak({ "Shaders/A.spv", "Shaders/B.spv", "Textures/A.spv" })).has_value());
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 17: the mount reads through PakReader::ReadEntry, so a deflated plain
+		// file is served as its own bytes: read, streamed, and sized by its inflated length.
+		TEST_CASE("PakMount: a deflated file reads, streams and reports its size as its inflated bytes")
+		{
+			std::string text;
+			for (int line = 0; line < 64; ++line)
+				text += std::format("line {} of a shader listing that deflate shrinks\n", line);
+			PakWriter writer;
+			REQUIRE(writer.Add({ .Handle = AssetHandle(), .Type = "File", .Path = "Shaders/Listing.txt", .Data = Buffer(AsBytes(text).begin(), AsBytes(text).end()) })
+					.has_value());
+			Result<Ref<const PakReader>> reader = PakReader::OpenMemory(writer.Build(), "Engine.pak");
+			REQUIRE_MESSAGE(reader.has_value(), reader.error().ToString());
+			const PakEntry* entry = (*reader)->FindByPath("Shaders/Listing.txt");
+			REQUIRE(entry != nullptr);
+			REQUIRE(entry->Compression == PakCompression::Deflate);
+			CHECK(entry->StoredSize < text.size());
+
+			Result<Scope<PakMount>> mount = PakMount::Create(*reader);
+			REQUIRE(mount.has_value());
+			const VfsPath path = Test::ParseVfsPath("engine://Shaders/Listing.txt");
+			Result<Buffer> bytes = (*mount)->ReadFile(path);
+			REQUIRE(bytes.has_value());
+			CHECK(AsStringView(*bytes) == text);
+			Result<FileInfo> info = (*mount)->GetInfo(path);
+			REQUIRE(info.has_value());
+			CHECK(info->Size == text.size());
+
+			Result<Scope<IFileStream>> stream = (*mount)->Open(path);
+			REQUIRE_MESSAGE(stream.has_value(), stream.error().ToString());
+			CHECK((*stream)->GetSize() == text.size());
+			REQUIRE((*stream)->Seek(text.size() - 8).has_value());
+			std::array<std::byte, 16> tail{};
+			Result<size_t> read = (*stream)->Read(tail);
+			REQUIRE(read.has_value());
+			CHECK(*read == 8);
+			CHECK(AsStringView(std::span(tail).first(8)) == std::string_view(text).substr(text.size() - 8));
 		}
 
 		TEST_CASE("PakMount: a corrupted plain file fails its read with the hash error")

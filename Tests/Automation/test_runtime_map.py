@@ -150,6 +150,38 @@ class RuntimeMapTests(unittest.TestCase):
         self.assertNotIn("Engine::TypeRegistry", names["automation"])
         self.assertNotIn("Engine::Utils::PrefixPointers", names["automation"])
 
+    def test_the_luau_compiler_family_finds_the_compiler_and_the_require_library_but_not_the_parser(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 22 (B-LUAU; Roadmap M19 acceptance "The Dist map holds no
+        # Luau::compile, BytecodeBuilder or extractLuauConfig symbol"): once the first-party require replaces Luau's
+        # Require library, nothing in Dist reaches Luau's Compiler, Config or Require objects, so the family that
+        # names them joins the forbidden families; the Parser and Ast that ScriptApiRegistry's signature parsing keeps,
+        # and the VM, are no findings. The compiler shares the Luau library with the VM, so the family matches names
+        # only.
+        self.assertIn("LuauCompiler", runtime_map.FORBIDDEN_FAMILIES)
+        self.assertEqual(runtime_map.FORBIDDEN_FAMILIES[:4], ("automation", "Analysis", "ImGui", "AssetPipeline"))
+        text = "?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@"
+        forbidden = [
+            f"?compile@Luau@@YA?AV{text}AEBV23@AEBUCompileOptions@1@AEBUParseOptions@1@PEAVBytecodeEncoder@1@@Z",
+            f"?compileOrThrow@Luau@@YAXAEAVBytecodeBuilder@1@AEBV{text}AEBUCompileOptions@1@AEBUParseOptions@1@@Z",
+            "?addConstantNil@BytecodeBuilder@Luau@@QEAAHXZ",
+            f"?extractLuauConfig@Luau@@YA?AV?$optional@V{text}@std@@V?$basic_string_view@DU?$char_traits@D@std@@@3@"
+            "AEAUConfig@1@@Z",
+            "?lua_requireinternal@Require@Luau@@YAHPEAUlua_State@@PEBD@Z",
+            "luau_compile",
+            "luarequire_pushproxyrequire",
+        ]
+        kept = ["?parseType@Parser@Luau@@QEAAPEAVAstType@2@_N@Z", "luaV_execute",
+                "?Run@FeatureTestRunner@Engine@@QEAAXXZ", "?Step@ReplayPlayer@Engine@@QEAAXXZ"]
+        lines = ["Address  Size     Align Out     In      Symbol", "00001000 00002000  4096 .text"]
+        for index, name in enumerate([*forbidden, *kept]):
+            address = 0x1000 + index * 0x40
+            lines.append(f"{address:08x} 00000040    16         Luau.lib(Unit{index}.obj):(.text$mn)")
+            lines.append(f"{address:08x} 00000000     0                 {name}")
+        parsed = runtime_map.parse_map("\n".join(lines) + "\n")
+        findings = runtime_map.check_map(parsed, runtime_map.family_patterns(REPOSITORY_ROOT))
+        self.assertEqual(sorted(findings), sorted(f"forbidden LuauCompiler: {name} (Luau.lib(Unit{index}.obj))"
+                                                  for index, name in enumerate(forbidden)))
+
     def test_the_command_line_self_test_passes_and_a_missing_map_is_exit_code_3(self) -> None:
         result = subprocess.run([sys.executable, str(CHECK_SCRIPT), "--self-test", "--json"], cwd=REPOSITORY_ROOT,
                                 capture_output=True, text=True, timeout=300)

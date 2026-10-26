@@ -11,6 +11,7 @@
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/AssetPipeline/PakWriter.h"
+#include "Engine/Core/Hash.h"
 #include "Engine/Core/Jobs/JobSystem.h"
 #include "Engine/Core/Jobs/MainThreadQueue.h"
 #include "Engine/Core/RingBufferSink.h"
@@ -113,6 +114,35 @@ namespace Engine {
 			const Status added = manager.AddPak(*again);
 			REQUIRE_FALSE(added.has_value());
 			CHECK(added.error().GetCode() == ErrorCode::AlreadyExists);
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 2 (the replay start fingerprint): an asset's cooked hash is the XXH64 of
+		// the cooked artifact its pak entry holds, read from the TOC without loading it; a procedural built-in has no artifact
+		// and an unknown handle no entry.
+		TEST_CASE("RuntimeAssetManager: the cooked hash of an asset is the XXH64 of its pak entry's artifact")
+		{
+			RuntimeEnvironment environment;
+			RuntimeAssetManager manager(environment.GetSpecification());
+			const Buffer cooked = CookMesh(GenerateBuiltinMesh(BuiltinMesh::Plane), 1);
+			REQUIRE(manager.AddPak(MakePak("Game.pak", [&cooked](PakWriter& writer)
+			{
+				REQUIRE(writer.Add({ .Handle = TrackMesh, .Type = "Mesh", .Path = "Assets/Models/Track.glb#mesh:0:Straight", .Data = cooked }).has_value());
+			})).has_value());
+
+			const Result<uint64_t> hash = manager.GetCookedHash(TrackMesh);
+			REQUIRE_MESSAGE(hash.has_value(), hash.error().ToString());
+			CHECK(*hash == XXH64(cooked));
+			CHECK(manager.GetState(TrackMesh) == AssetState::Unloaded);
+
+			const Result<uint64_t> procedural = manager.GetCookedHash(BuiltinAssetHandles::CubeMesh);
+			REQUIRE_FALSE(procedural.has_value());
+			CHECK(procedural.error().GetCode() == ErrorCode::InvalidArgument);
+			const Result<uint64_t> null = manager.GetCookedHash(AssetHandle());
+			REQUIRE_FALSE(null.has_value());
+			CHECK(null.error().GetCode() == ErrorCode::InvalidArgument);
+			const Result<uint64_t> unknown = manager.GetCookedHash(TrackTexture);
+			REQUIRE_FALSE(unknown.has_value());
+			CHECK(unknown.error().GetCode() == ErrorCode::NotFound);
 		}
 
 		// ADR 0022 decision 5 (stream A): the Runtime notifies the load observer exactly as the editor does, so gate 9 counts
