@@ -44,8 +44,9 @@ namespace Engine {
 		// glyph, its Private DICT and local subroutines, and for a CID font every font dictionary's and an FDSelect naming
 		// only font dictionaries the FDArray has; every structure inside the table and every DICT operand stb_truetype reads
 		// an integer) and every glyph's charstring run as stb_truetype runs it, with no hint mask past the end of its code,
-		// no line or curve before its first moveto, and at most 65,536 operators and operands per glyph (2^26 for the whole
-		// font). Errors: ImportFailed naming the first problem.
+		// no line or curve before its first moveto, no local subroutine call from a CID glyph the FDSelect gives no font
+		// dictionary, and at most 65,536 operators and operands per glyph (2^26 for the whole font). Errors: ImportFailed
+		// naming the first problem.
 		[[nodiscard]] Status ValidateTrueTypeTables(std::span<const std::byte> font);
 
 		// The horizontal kerning between every ordered pair of `glyphs` (sorted by codepoint, unique): the pair adjustment

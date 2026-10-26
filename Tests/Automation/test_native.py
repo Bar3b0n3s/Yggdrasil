@@ -11,7 +11,7 @@ import sys
 import unittest
 from pathlib import Path
 
-from harness import REPOSITORY_ROOT, AutomationTestCase, app_name, automation_config, engine_client
+from harness import EXIT_SUCCESS, REPOSITORY_ROOT, AutomationTestCase, app_name, automation_config, engine_client
 
 sys.path.insert(0, str(REPOSITORY_ROOT / "Scripts"))
 
@@ -66,18 +66,24 @@ RENAMED_SOURCE = SPINNER_SOURCE.replace(
 
 class NativeModuleTests(AutomationTestCase):
     def allow_native_code(self) -> None:
-        """The user's preference, written into this test's user data before the editor starts (the harness's file)."""
+        """The user's preference, written into this test's user data before the editor starts (the harness's file, in
+        the format of user://Editor.json: EditorCore/EditorPreferences.h)."""
         path = self.user_data / app_name() / "Editor.json"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"AllowNativeCode": True}, indent="\t") + "\n", encoding="utf-8")
+        document = {"Format": "EditorPreferences", "Version": 1, "AllowNativeCode": True}
+        path.write_text(json.dumps(document, indent="\t") + "\n", encoding="utf-8")
+
+    def build(self, client: engine_client.EngineClient) -> dict:
+        """native.build, which must succeed; its result."""
+        built = client.call("native.build")
+        self.assertTrue(built["succeeded"], built["diagnostics"])
+        return built
 
     def open_native_project(self) -> tuple[engine_client.EngineClient, Path]:
         client, root = self.open_editor_with_scene("NativeGame")
         client.call("native.write", {"path": "Native/Spinners.cpp", "source": SPINNER_SOURCE})
         return client, root
 
-    @unittest.skip("contract stub: native.* (Docs/Decisions/0030-m19-contract.md decisions 29 and 32, "
-                   "stream N-D)")
     def test_build_and_load_are_refused_while_the_preference_is_off_and_no_method_sets_it(self) -> None:
         # Decision 29: native code runs only with the user's permission, which automation can neither give nor reach.
         client, _ = self.open_native_project()
@@ -89,13 +95,19 @@ class NativeModuleTests(AutomationTestCase):
         discovered = json.dumps(client.call("rpc.discover", {}))
         self.assertNotIn("allowNativeCode", discovered)
         self.assertNotIn("AllowNativeCode", discovered)
-        with self.assertRaises(engine_client.EngineError):
+        # The .eproj has no such member: a non-strict editor drops it as an unknown member (a --strict one refuses it),
+        # and the project's settings never hold it.
+        try:
             client.call("project.setSettings", {"patch": {"AllowNativeCode": True}})
+        except engine_client.EngineError:
+            pass
+        self.assertNotIn("AllowNativeCode", json.dumps(client.call("project.getSettings")))
         self.assertFalse(client.call("native.status")["allowed"])
-        self.assertFalse((self.user_data / app_name() / "Editor.json").exists())
+        # The editor's own writes of user://Editor.json (the recent projects) never add the preference.
+        preferences = self.user_data / app_name() / "Editor.json"
+        if preferences.exists():
+            self.assertNotIn("AllowNativeCode", preferences.read_text(encoding="utf-8"))
 
-    @unittest.skip("contract stub: native.* (Docs/Decisions/0030-m19-contract.md decisions 30 to 32, "
-                   "streams N-A to N-D)")
     def test_module_builds_loads_and_its_systems_run_in_play(self) -> None:
         # Decisions 30 to 32: with the preference on, native.build compiles the module with the first-party settings,
         # native.load registers it, native.setComponents puts its component on an entity, and in play its system turns
@@ -123,20 +135,19 @@ class NativeModuleTests(AutomationTestCase):
         self.assertNotEqual(before, after)
         client.call("play.stop")
 
-    @unittest.skip("contract stub: native hot reload (Docs/Decisions/0030-m19-contract.md decision 31, stream N-C)")
     def test_reload_keeps_an_unchanged_scene_and_migrates_a_changed_layout(self) -> None:
         # Decision 31 (the milestone's acceptance): reloading an unchanged module leaves the scene byte-identical, and a
         # reload with a changed layout migrates its native components by field name.
         self.allow_native_code()
         client, root = self.open_native_project()
-        client.call("native.build")
+        self.build(client)
         client.call("native.load")
         client.call("entity.create", {"name": "Wheel"})
         client.call("native.setComponents",
                     {"entity": "/Wheel", "components": {"Native.Spinner": {"DegreesPerSecond": 30}}})
         client.call("scene.save")
         saved = (root / "Assets/Scenes/Main.scene").read_bytes()
-        client.call("native.build")
+        self.build(client)
         unchanged = client.call("native.load")
         self.assertTrue(unchanged["reloaded"])
         self.assertFalse(unchanged["sceneChanged"])
@@ -145,15 +156,13 @@ class NativeModuleTests(AutomationTestCase):
 
         client.call("native.write", {"path": "Native/Spinners.cpp", "source": RENAMED_SOURCE})
         self.assertFalse(client.call("native.status")["loadedCurrent"])
-        client.call("native.build")
+        self.build(client)
         changed = client.call("native.load")
         self.assertTrue(changed["layoutChanged"])
         self.assertTrue(changed["sceneChanged"])
         components = client.call("native.getComponents", {"entity": "/Wheel"})["components"]
         self.assertEqual(components["Native.Spinner"]["Speed"], 30)
 
-    @unittest.skip("contract stub: native sources (Docs/Decisions/0030-m19-contract.md decisions 32 and 35, "
-                   "stream N-D)")
     def test_native_sources_are_written_with_provenance_and_read_back(self) -> None:
         # Decisions 32 and 35: a builder writes the module's sources through automation, so the provenance audit covers
         # them like every authored file.
@@ -167,10 +176,11 @@ class NativeModuleTests(AutomationTestCase):
                 client.call("native.write", {"path": refused, "source": ""})
             self.assertEqual(invalid.exception.error_code, "InvalidArgument", refused)
 
-    @unittest.skip("contract stub: native export (Docs/Decisions/0030-m19-contract.md decision 33, stream N-A)")
     def test_export_of_a_native_game_links_its_module_and_runs_it(self) -> None:
         # Decision 33: the export of a game with Native/ builds its Runtime with the module linked; the smoke test then
-        # runs the exported game, whose systems run without any library being loaded.
+        # runs the exported game, and in the exported game's own session the module's system turns the Wheel, with no
+        # library loaded (the Runtime's automation subset reads its rotation, as test_runtime.py reads an exported
+        # game).
         self.allow_native_code()
         client, _ = self.open_native_project()
         client.call("native.build")
@@ -184,6 +194,22 @@ class NativeModuleTests(AutomationTestCase):
         self.assertTrue(exported["nativeModule"])
         self.assertIn("NativeBuild", [timing["phase"] for timing in exported["phaseTimings"]])
         self.assertEqual(exported["smokeTestExitCode"], 0)
+
+        arguments = ["--headless", "--automation", "--paused", "--renderer", "none"]
+        game = engine_client.launch_editor(Path(exported["executable"]), arguments, self.directory / "ExportedGame",
+                                           "NativeGame")
+        self.editors.append(game)
+        played = self.connect(game)
+
+        def wheel_rotation() -> list[float]:
+            entity = played.call("entity.get", {"entity": "/Wheel", "components": ["Transform"]})["entity"]
+            return entity["components"]["Transform"]["Rotation"]
+
+        before = wheel_rotation()
+        played.call("play.step", {"ticks": 30, "render": "none"})
+        self.assertNotEqual(wheel_rotation(), before)
+        played.call("session.shutdown")
+        self.assertEqual(game.wait(), EXIT_SUCCESS, game.output())
 
 
 if __name__ == "__main__":

@@ -1651,7 +1651,7 @@ namespace Engine {
 		// only what StartScene and Export.BuildScenes reach: a component's reference, a script and its field's value, a scene
 		// a literal Assets.Load names; an unreferenced asset and one only a computed load names are left out, and the report
 		// gives each packaged asset's reason, the assets left out and the computed load. Off, everything ships again.
-		TEST_CASE("Exporter: Export.PruneUnreferenced packages only what the build scenes reach, and the report says why" * doctest::skip(true))
+		TEST_CASE("Exporter: Export.PruneUnreferenced packages only what the build scenes reach, and the report says why")
 		{
 			Test::EditorTestFixture fixture("ExportPruned");
 			MakeExportableProject(fixture);
@@ -1732,11 +1732,14 @@ namespace Engine {
 			CHECK(reach.ComputedLoads.front().Script == "Assets/Scripts/Loader.luau");
 			CHECK(reach.ComputedLoads.front().Line == 4);
 			CHECK(pruned.GameAssetCount == 5);
-			const Result<Ref<const PakReader>> gamePak = PakReader::Open(PackageResources(pruned.OutputDirectory, "TestProject") / "Data" / "Game.pak");
-			REQUIRE_MESSAGE(gamePak.has_value(), gamePak.error().ToString());
-			CHECK((*gamePak)->FindByHandle(handleOf("Assets/Materials/Unused.material")) == nullptr);
-			CHECK((*gamePak)->FindByHandle(handleOf("Assets/Materials/Computed.material")) == nullptr);
-			CHECK((*gamePak)->FindByHandle(handleOf("Assets/Scenes/Second.scene")) != nullptr);
+			{
+				// Closed again before the next export replaces the package (an open file cannot be moved on Windows).
+				const Result<Ref<const PakReader>> gamePak = PakReader::Open(PackageResources(pruned.OutputDirectory, "TestProject") / "Data" / "Game.pak");
+				REQUIRE_MESSAGE(gamePak.has_value(), gamePak.error().ToString());
+				CHECK((*gamePak)->FindByHandle(handleOf("Assets/Materials/Unused.material")) == nullptr);
+				CHECK((*gamePak)->FindByHandle(handleOf("Assets/Materials/Computed.material")) == nullptr);
+				CHECK((*gamePak)->FindByHandle(handleOf("Assets/Scenes/Second.scene")) != nullptr);
+			}
 
 			ApplySettings(editor, R"({"Export":{"PruneUnreferenced":false}})");
 			const ExportReport full = exportGame();
@@ -1746,12 +1749,89 @@ namespace Engine {
 			CHECK(full.GameAssetCount == 7);
 		}
 
+		// Docs/Decisions/0030-m19-contract.md decision 21 (stream R): a pruned export checks only the references of what it
+		// packages, so a scene no root reaches may name a missing asset, which fails an unpruned export; Export.Exclude still
+		// decides what may ship, so an excluded asset a reference reaches fails a plain pruned export with the glob in the hint;
+		// and a testing export's forced content is a root, which packages that asset with the reason Testing.
+		TEST_CASE("Exporter: with Export.PruneUnreferenced only the packaged assets' references must resolve, and a testing export's content is a root")
+		{
+			Test::EditorTestFixture fixture("ExportPrunedRoots");
+			MakeExportableProject(fixture);
+			EditorContext& editor = fixture.GetEditor();
+			const Result<std::string> material = Test::ReadTestDataText("Assets/Materials/Red.material");
+			REQUIRE(material.has_value());
+			WriteTestFile(fixture.GetProjectRoot() / "Assets/Tests/Look.material", *material);
+			// A scene nothing reaches, whose cube names a mesh no asset has.
+			const AssetHandle missing(0x1234567890abcdefull);
+			const Scope<Scene> stray = editor.CreateScene("Stray");
+			stray->CreateEntity("Broken").AddComponent<MeshRendererComponent>().Mesh = TypedAssetHandle<AssetType::Mesh>(missing);
+			const Result<std::string> strayText = SceneSerializer::SaveToString(*stray);
+			REQUIRE(strayText.has_value());
+			WriteTestFile(fixture.GetProjectRoot() / "Assets/Scenes/Stray.scene", *strayText);
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			const std::optional<AssetHandle> look = editor.GetAssets().Resolve("Assets/Tests/Look.material");
+			REQUIRE(look.has_value());
+			const Entity cube = editor.GetScene().FindEntityByPath("/Cube");
+			REQUIRE(cube.IsValid());
+			cube.GetComponent<MeshRendererComponent>().Materials = { TypedAssetHandle<AssetType::Material>(*look) };
+			SaveScene(editor);
+
+			const Test::TempDirectory binaries("ExportBinaries");
+			const std::filesystem::path binaryRoot = MakeRealBinaryRoot(binaries);
+			const auto exportGame = [&editor, &binaryRoot](bool testing)
+			{
+				ExportSpecification specification = MakeSpecification(binaryRoot);
+				specification.Testing = testing;
+				Result<Scope<Exporter>> exporter = Exporter::Start(editor, specification);
+				REQUIRE_MESSAGE(exporter.has_value(), exporter.error().ToString());
+				std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+				REQUIRE(outcome.has_value());
+				return std::move(*outcome);
+			};
+			const auto namesIssue = [](const Error& error, std::string_view text)
+			{
+				return std::ranges::any_of(error.GetIssues(), [text](const ErrorIssue& issue)
+				{
+					return issue.Message.find(text) != std::string::npos;
+				});
+			};
+
+			// Unpruned, the testing export packages the stray scene and fails on its reference.
+			const Result<ExportReport> unpruned = exportGame(true);
+			REQUIRE_FALSE(unpruned.has_value());
+			CHECK(unpruned.error().GetCode() == ErrorCode::Validation);
+			CHECK(namesIssue(unpruned.error(), "Assets/Scenes/Stray.scene"));
+
+			ApplySettings(editor, R"({"Export":{"PruneUnreferenced":true}})");
+			const Result<ExportReport> testing = exportGame(true);
+			REQUIRE_MESSAGE(testing.has_value(), testing.error().ToString());
+			const ExportReachability& reach = testing->Reachability;
+			CHECK(reach.Pruned);
+			REQUIRE(reach.GameAssets.size() == 2);
+			CHECK(reach.GameAssets[0].Path == "Assets/Scenes/Main.scene");
+			CHECK(reach.GameAssets[0].Reason == ExportReachReason::StartScene);
+			CHECK(reach.GameAssets[1].Path == "Assets/Tests/Look.material");
+			CHECK(reach.GameAssets[1].Reason == ExportReachReason::Testing);
+			CHECK(reach.PrunedAssets == std::vector<std::string>{ "Assets/Scenes/Stray.scene" });
+
+			// A plain export leaves the material out by Export.Exclude, so the start scene's reference to it fails, alone.
+			const Result<ExportReport> plain = exportGame(false);
+			REQUIRE_FALSE(plain.has_value());
+			const Error& error = plain.error();
+			INFO(error.ToString());
+			CHECK(error.GetCode() == ErrorCode::Validation);
+			REQUIRE(error.GetIssues().size() == 1);
+			CHECK(error.GetIssues().front().Message.find("Assets/Tests/Look.material") != std::string::npos);
+			CHECK(error.GetIssues().front().Message.find(std::string(MainScene)) != std::string::npos);
+			CHECK(error.GetIssues().front().Hint.find("Assets/Tests/**") != std::string::npos);
+		}
+
 		// Docs/Decisions/0030-m19-contract.md decision 33 (C-NATIVE-STATIC, stream N-A): a game with Native/ is refused first,
 		// before anything is written, while the user's preference is off (Unsupported on Linux and macOS); allowed, step 3a
 		// builds its Runtime of the export's configuration with the module linked, the package holds that executable, and a
 		// build that does not succeed fails the export with CompileFailed and its diagnostics. A game without Native/ never
 		// enters the step (the timing test above).
-		TEST_CASE("Exporter: a game with Native/ packages a Runtime linked with its module, and is refused first while native code is not allowed" * doctest::skip(true))
+		TEST_CASE("Exporter: a game with Native/ packages a Runtime linked with its module, and is refused first while native code is not allowed")
 		{
 			const Ref<Test::FakeNativeBuildBackend> builds = CreateRef<Test::FakeNativeBuildBackend>();
 			Test::EditorTestFixture fixture("ExportNative", {}, nullptr, std::nullopt, false,

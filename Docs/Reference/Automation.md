@@ -1106,7 +1106,7 @@ Param: none.
 | `reloaded` | `Bool` | A loaded module was replaced (hot reload). |
 | `layoutChanged` | `Bool` | Its types' layout changed; true for a first load. |
 | `sceneChanged` | `Bool` | The open scene's native components were migrated to the new layout; the scene is now modified. |
-| `undoCleared` | `Bool` | A reload whose layout changed cleared the undo history, whose snapshots hold the previous layout's values. |
+| `undoCleared` | `Bool` | A load whose layout changed, a first load included, cleared the open scene's undo history, whose snapshots hold the previous layout's values or, recorded without a module, the values as written. |
 | `componentCount` | `UInt32` | Native components in the open scene. |
 | `diagnostics` | `Array<NativeComponentDiagnostic>` | What the migration reported per component and field. |
 | `components` | `Array<NativeTypeSummary>` | The module's component types, in registration order. |

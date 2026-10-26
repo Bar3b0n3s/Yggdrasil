@@ -21,13 +21,14 @@ namespace Engine {
 	// exports of the same inputs are byte-identical (§7.6).
 	inline constexpr int PakDeflateQuality = 8;
 
-	// The largest entry, compressed or not, the codec takes: stb's lengths are int. The writer stores a larger entry
-	// uncompressed.
+	// The largest entry, compressed or not, the codec takes: stb's lengths are int. Its deflate takes at most 1 GiB
+	// (DeflatePakEntry), and the writer stores a larger entry uncompressed.
 	inline constexpr uint64_t MaxPakCompressedEntrySize = 0x7fffffffull;
 
 	// `bytes` as a zlib stream at PakDeflateQuality. Deterministic: the same bytes give the same stream in every
 	// configuration of one compiler (ADR 0028's encoder rule). Running out of memory is fatal, as for any engine allocation.
-	// Errors: InvalidArgument for more than MaxPakCompressedEntrySize bytes (PakWriter::Build stores such an entry instead).
+	// Errors: InvalidArgument for more than 1 GiB, the largest input stb's deflate takes without overflowing the int arithmetic
+	// that grows its output buffer (PakWriter::Build stores such an entry instead).
 	[[nodiscard]] Result<Buffer> DeflatePakEntry(std::span<const std::byte> bytes);
 
 	// Inflates the zlib stream `stored` into exactly `size` bytes. Never asserts on data: any byte sequence is a valid input,

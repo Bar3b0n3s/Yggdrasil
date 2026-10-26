@@ -680,6 +680,40 @@ namespace Engine {
 			CHECK(std::ranges::count(reader.Reads, std::string("project://Assets/Plain.luau")) == 1);
 		}
 
+		// Docs/Decisions/0030-m19-contract.md decision 22 (B-LUAU): the caller check that Luau's Require library repeated
+		// (its is_require_allowed) is the engine's own. A require whose calling chunk is no authored Assets .luau file, or
+		// which has no Luau caller at all, is refused before any module is read, while the same module loads for a caller
+		// below Assets.
+		TEST_CASE("Sandbox: require refuses a caller that is no authored Assets .luau chunk before reading a module")
+		{
+			Random random(42);
+			SandboxModuleReader reader;
+			reader.Sources.emplace("project://Assets/Board.luau", "return 5");
+			SandboxSpecification specification{};
+			specification.RandomStream = &random;
+			specification.SourceModules = &reader;
+			auto sandbox = Sandbox::Create(specification);
+			REQUIRE_MESSAGE(sandbox.has_value(), (sandbox ? "" : sandbox.error().ToString()));
+			const auto outside = VfsPath::Parse("project://Scratch.luau");
+			REQUIRE(outside.has_value());
+			CHECK_FALSE((*sandbox)->Evaluate("return require('./Assets/Board')", *outside).has_value());
+			REQUIRE((*sandbox)->GetLastError().has_value());
+			CHECK((*sandbox)->GetLastError()->Kind == ScriptErrorKind::Runtime);
+
+			const auto inside = VfsPath::Parse("project://Assets/Root.luau");
+			REQUIRE(inside.has_value());
+			// A coroutine whose body is require itself has no Luau frame to require from.
+			const auto orphan = (*sandbox)->Evaluate("local ok = coroutine.resume(coroutine.create(require), './Board')\nreturn ok", *inside);
+			REQUIRE_MESSAGE(orphan.has_value(), orphan.error().ToString());
+			CHECK(orphan->Value.Get() == Json(false));
+			CHECK(reader.Reads.empty());
+
+			const auto loaded = (*sandbox)->Evaluate("return require('./Board')", *inside);
+			REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
+			CHECK(loaded->Value.Get() == Json(5));
+			CHECK(reader.Reads == std::vector<std::string>{ "project://Assets/Board.luau" });
+		}
+
 		TEST_CASE("Sandbox: a required module rejects multiple return values")
 		{
 			Random random(40);

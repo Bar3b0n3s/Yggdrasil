@@ -576,8 +576,6 @@ class EvaluationTests(unittest.TestCase):
             missing = games.GameProject(root / "Projects/Missing", root / "Projects/Missing/Missing.eproj", "Missing")
             self.assertEqual(games.check_distinct_projects([missing]), [])
 
-    @unittest.skip("contract stub: games.prepare_native_editor (Docs/Decisions/0030-m19-contract.md decision 35, "
-                   "stream N-E)")
     def test_a_native_game_gets_the_preference_and_its_module_before_its_editor_starts(self) -> None:
         # Docs/Decisions/0030-m19-contract.md decision 35 (N-E): the editor halves of a game with Native/ start an
         # editor whose user data allows native code (the harness's own file, never a method) and whose project copy
@@ -596,8 +594,67 @@ class EvaluationTests(unittest.TestCase):
             failures = games.prepare_native_editor(project_file.parent, user_data, "Debug")
             preferences = json.loads((user_data / app_name() / "Editor.json").read_text(encoding="utf-8"))
             self.assertIs(preferences["AllowNativeCode"], True)
+            # The header the editor's reader requires (EditorCore/EditorPreferences.h), without which it reads the file
+            # as malformed and leaves native code off.
+            self.assertEqual((preferences["Format"], preferences["Version"]), ("EditorPreferences", 1))
             self.assertTrue(failures)
             self.assertTrue(any("Native/Broken.cpp" in line or "Unsupported" in line for line in failures), failures)
+
+            # An existing user://Editor.json keeps every other member.
+            kept = {"Format": "EditorPreferences", "Version": 1, "RecentProjects": ["C:/Games/Other/Other.eproj"],
+                    "AllowNativeCode": False}
+            (user_data / app_name() / "Editor.json").write_text(json.dumps(kept), encoding="utf-8")
+            shutil.rmtree(project_file.parent / "Library")
+            games.prepare_native_editor(project_file.parent, user_data, "Debug")
+            rewritten = json.loads((user_data / app_name() / "Editor.json").read_text(encoding="utf-8"))
+            self.assertEqual(rewritten, {**kept, "AllowNativeCode": True})
+
+    def test_the_native_preparation_names_each_problem_in_its_failure_lines(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decisions 34 and 35: a preference file that cannot take the preference, a
+        # build that cannot start, that times out or that ends without its record, and a platform without native
+        # builds each fail the editor half with a line naming it. The Windows cases run as on Windows on every
+        # platform (only Windows builds a module, so elsewhere the preparation would stop before its build).
+        windows = types.SimpleNamespace(name="nt")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = write_project(root, "Tests/Projects/Natives").parent
+            (project / "Native").mkdir()
+            user_data = root / "UserData"
+            preferences = user_data / app_name() / "Editor.json"
+            preferences.parent.mkdir(parents=True)
+            built = subprocess.CompletedProcess([], 0, "", "")
+            for text, problem in (("[1, 2]", "is not a JSON object"), ("{not json", "cannot be read")):
+                with self.subTest(preferences=text), mock.patch.object(games, "os", windows), \
+                        mock.patch.object(games.subprocess, "run", return_value=built):
+                    preferences.write_text(text, encoding="utf-8")
+                    lines = games.prepare_native_editor(project, user_data, "Debug")
+                    self.assertEqual(len(lines), 1, lines)
+                    self.assertIn(problem, lines[0])
+            preferences.unlink()
+
+            # Without a record (none was written), the line ends with the last line the build printed.
+            unrecorded = subprocess.CompletedProcess([], 1, "", "no MSBuild\nthe toolchain is missing\n")
+            failures: dict[str, Any] = {
+                "could not start": OSError("no interpreter"),
+                "did not finish": subprocess.TimeoutExpired(["BuildNative.py"], 1.0),
+                "exited with 1): the toolchain is missing": unrecorded,
+            }
+            for problem, outcome in failures.items():
+                raised = isinstance(outcome, BaseException)
+                options = {"side_effect": outcome} if raised else {"return_value": outcome}
+                with self.subTest(build=problem), mock.patch.object(games, "os", windows), \
+                        mock.patch.object(games.subprocess, "run", **options):
+                    lines = games.prepare_native_editor(project, user_data, "Release")
+                    self.assertEqual(len(lines), 1, lines)
+                    self.assertIn(problem, lines[0])
+                    self.assertIn("Release", lines[0])
+
+            with mock.patch.object(games, "os", types.SimpleNamespace(name="posix")), \
+                    mock.patch.object(games.subprocess, "run") as run:
+                lines = games.prepare_native_editor(project, user_data, "Debug")
+            run.assert_not_called()
+            self.assertEqual(len(lines), 1, lines)
+            self.assertTrue(lines[0].startswith("Unsupported"), lines)
 
     def test_a_game_needs_a_committed_replay_with_input_events(self) -> None:
         # The milestone review's R09: the demo acceptance (Roadmap M16, M17, M25 and M27) accepts a demo by its suites
@@ -948,6 +1005,51 @@ class SuiteTests(unittest.TestCase):
                 mock.patch.object(test_script, "import_engine_client", return_value=session.module()):
             steps = test_script.run_games(["Debug"], arguments, quiet_console())
         return next(step for step in steps if step.name == f"games {project.name} Editor Debug")
+
+    def test_the_editor_half_prepares_a_native_game_before_its_editor_starts_and_fails_on_its_lines(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 35: the editor half hands games.prepare_native_editor the copy it
+        # opens, the editor's user-data root and its configuration before the editor starts; a failure line fails the
+        # half without starting the editor.
+        class LaunchRecordingSession(FakeEditorSession):
+            """Records the user-data root the editor is launched with."""
+
+            user_data: Path | None = None
+
+            def launch_editor(self, editor: Path, arguments: list[str], *rest: object,
+                              **options: object) -> FakeEditorSession:
+                self.user_data = Path(str(rest[0]))
+                return super().launch_editor(editor, arguments, *rest, **options)
+
+        calls: list[tuple[Path, Path, str, bool, bool]] = []
+        lines: list[str] = []
+
+        def prepare(project_directory: Path, user_data: Path, config: str) -> list[str]:
+            calls.append((project_directory, user_data, config, any(project_directory.glob("*.eproj")),
+                          bool(session.arguments)))
+            return list(lines)
+
+        for failure in ("", "the native module's Debug build failed: Native/Broken.cpp:1:1: NATIVE_COMPILE_ERROR"):
+            lines[:] = [failure] if failure else []
+            calls.clear()
+            session = LaunchRecordingSession()
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory(prefix="GamesNative-") as directory, \
+                    mock.patch.object(games, "prepare_native_editor", side_effect=prepare):
+                project = make_game_repository(Path(directory))
+                step = self.run_editor_half(project, session)
+                self.assertEqual(len(calls), 1)
+                copy, user_data, config, holds_project, launched = calls[0]
+                self.assertEqual(config, "Debug")
+                self.assertTrue(holds_project, copy)
+                self.assertFalse(launched)
+                self.assertFalse(copy.is_relative_to(project.directory))
+                if failure:
+                    self.assertEqual(step.status, Status.FAILED)
+                    self.assertIn("Native/Broken.cpp", step.detail)
+                    self.assertEqual(session.arguments, [])
+                else:
+                    self.assertEqual(step.status, Status.PASSED, step.detail)
+                    self.assertEqual(session.project_directory(), copy)
+                    self.assertEqual(session.user_data, user_data)
 
     def test_the_editor_half_prints_the_input_checks_final_hash_warning_and_passes(self) -> None:
         # Docs/Decisions/0030-m19-contract.md decision 3 (A-F29): a replay whose run without input differed at its

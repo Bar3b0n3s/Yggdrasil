@@ -127,6 +127,14 @@ namespace Engine {
 			uint32_t GameEntryCount = 0;
 		};
 
+		// What each included main asset references (step 2), sorted, and each included script's uses of Assets.Load (M19,
+		// decision 19), by source.
+		using AssetReferences = std::map<AssetHandle, std::vector<AssetHandle>>;
+		using ScriptLoads = std::map<AssetHandle, std::vector<ScriptAssetLoad>>;
+		// Every asset the reachability walk reached (M19, decisions 20 and 21), with the first reason the walk found; nullopt
+		// for an asset of Game.pak that no root reaches, walked only for the built-ins it reaches.
+		using ReachedAssets = std::map<AssetHandle, std::optional<ExportReachedAsset>>;
+
 		// Everything the WritePaks job needs, moved into it (jobs take values, §4.11).
 		struct PakJobInput
 		{
@@ -1066,9 +1074,9 @@ namespace Engine {
 			RegisterBuiltinImporters(importers);
 			const std::vector<ImportAssetLookupEntry> lookups = MakeLookupSnapshot();
 			ENGINE_TRY_ASSIGN(const Ref<const ScriptFieldSchemaSource> schemas, Editor->GetScriptSchemaSnapshot());
-			std::map<AssetHandle, std::vector<AssetHandle>> references; // what each included main asset references, sorted (step 2)
-			std::map<AssetHandle, std::vector<ScriptAssetLoad>> loads;  // each included script's uses of Assets.Load (decision 19)
-			std::set<AssetHandle> packaged;
+			AssetReferences references; // what each included main asset references, sorted (step 2)
+			ScriptLoads loads;          // each included script's uses of Assets.Load (decision 19)
+			std::map<AssetHandle, std::vector<ImportedArtifact>> artifacts;
 			for (const AssetHandle source : Sources)
 			{
 				ENGINE_TRY_ASSIGN(CachedImport cooked, WithContext(ReadCooked(source, importers, lookups), std::format("while cooking '{}'", assets.GetReferencePath(source))));
@@ -1079,7 +1087,34 @@ namespace Engine {
 				{
 					ENGINE_TRY_ASSIGN(loads[source], WithContext(ScanScriptLoads(*record), std::format("while scanning '{}' for Assets.Load", record->SourcePath.GetPath())));
 				}
-				for (ImportedArtifact& artifact : cooked.Import.Artifacts)
+				artifacts[source] = std::move(cooked.Import.Artifacts);
+			}
+
+			// M19 (decision 21): with Export.PruneUnreferenced, Game.pak holds only the sources the roots reach; the others were
+			// cooked for their references only, which the walk needed, and neither their references (CheckReferences) nor their
+			// loads (Engine.pak's built-ins, the computed loads) count from here on.
+			std::set<AssetHandle> packagedSources(Sources.begin(), Sources.end());
+			if (Settings.Export.PruneUnreferenced)
+			{
+				packagedSources = PruneGameAssets(references, loads);
+				std::erase_if(references, [&packagedSources](const auto& entry)
+				{
+					return !packagedSources.contains(entry.first);
+				});
+				std::erase_if(loads, [&packagedSources](const auto& entry)
+				{
+					return !packagedSources.contains(entry.first);
+				});
+			}
+
+			std::set<AssetHandle> packaged;
+			for (auto& [source, cooked] : artifacts)
+			{
+				if (!packagedSources.contains(source))
+					continue;
+				const AssetRecord* record = assets.GetRegistry().Find(source);
+				ENGINE_ASSERT(record != nullptr, "A cooked source is registered");
+				for (ImportedArtifact& artifact : cooked)
 				{
 					AssetReference reference;
 					reference.Kind = AssetReferenceKind::ProjectPath;
@@ -1095,7 +1130,7 @@ namespace Engine {
 				}
 			}
 
-			ENGINE_TRY(CookEngineAssets(importers, SelectEngineBuiltins(references, loads), packaged));
+			ENGINE_TRY(CookEngineAssets(importers, SelectEngineBuiltins(references, loads, packagedSources), packaged));
 			ENGINE_TRY(CheckReferences(references, packaged));
 			return true;
 		}
@@ -1154,36 +1189,35 @@ namespace Engine {
 			return location->Record->Metadata.Handle;
 		}
 
-		// M19 (Docs/Decisions/0030-m19-contract.md decisions 19 and 20): the File and Generated built-ins Engine.pak holds, each
-		// with the first reason the walk found (Exporter.h, ExportReachedAsset). The walk starts from the roots in order
-		// (StartScene, the Export.BuildScenes entries, a testing export's forced content sorted by path, then the built-ins the
-		// Runtime asks for by handle, sorted by path) and follows, breadth-first, each reached asset's references in handle
-		// order and then a script's literal loads in source order; every other asset of Game.pak follows, sorted by path, so the
-		// built-ins it reaches are kept too. Built-ins reference nothing (fonts, environments, sound effects and the blue
-		// noise), so a reached built-in ends its branch. A packaged script that computes an Assets.Load keeps every File and
-		// Generated built-in of the catalogue, since the reference may name any of them: the ones nothing else reached take the
-		// reason ComputedLoad, naming the first computed load in (script, line, column) order. Fills
-		// ExportReport::Reachability's ComputedLoads.
-		[[nodiscard]] std::map<AssetHandle, ExportReachedAsset> SelectEngineBuiltins(const std::map<AssetHandle, std::vector<AssetHandle>>& references,
-			const std::map<AssetHandle, std::vector<ScriptAssetLoad>>& loads)
+		// `handles` sorted by their paths (GetAssetPath).
+		[[nodiscard]] std::vector<AssetHandle> SortByPath(std::vector<AssetHandle> handles) const
+		{
+			std::ranges::sort(handles, {}, [this](AssetHandle handle)
+			{
+				return GetAssetPath(handle);
+			});
+			return handles;
+		}
+
+		// M19 (Docs/Decisions/0030-m19-contract.md decisions 20 and 21): the reachability walk of Exporter.h over the packaged
+		// sources `sources`, whose references and script loads `references` and `loads` hold. It starts from the roots in order
+		// (StartScene, the Export.BuildScenes entries, a testing export's forced content sorted by path, then, with
+		// `withRequired`, the built-ins the Runtime asks for by handle, sorted by path) and follows, breadth-first, each reached
+		// asset's references in handle order and then a script's literal loads in source order, each reaching the main asset
+		// of a source in `sources` or a built-in (FindPackagedMain); every reached asset keeps the first reason the walk found.
+		// With `everySource`, every source of `sources` no root reaches follows, sorted by path and without a reason, so the
+		// built-ins it reaches are reached too. Built-ins reference nothing (fonts, environments, sound effects and the blue
+		// noise), so a reached built-in ends its branch.
+		[[nodiscard]] ReachedAssets WalkReachability(const AssetReferences& references, const ScriptLoads& loads, const std::set<AssetHandle>& sources,
+			bool withRequired, bool everySource) const
 		{
 			const EditorAssetManager& assets = Editor->GetAssets();
-			const std::set<AssetHandle> sources(Sources.begin(), Sources.end());
-			const auto byPath = [this](std::vector<AssetHandle> handles)
-			{
-				std::ranges::sort(handles, {}, [this](AssetHandle handle)
-				{
-					return GetAssetPath(handle);
-				});
-				return handles;
-			};
 			const auto root = [](ExportReachReason reason)
 			{
 				return ExportReachedAsset{ .Path = {}, .Reason = reason, .From = {}, .Line = 0 };
 			};
 
-			// nullopt: an asset of an unpruned Game.pak that no root reaches, which still reaches what it references.
-			std::map<AssetHandle, std::optional<ExportReachedAsset>> reached;
+			ReachedAssets reached;
 			std::deque<AssetHandle> pending;
 			const auto reach = [&reached, &pending](AssetHandle handle, std::optional<ExportReachedAsset> reason)
 			{
@@ -1223,21 +1257,74 @@ namespace Engine {
 			if (Specification.Testing)
 			{
 				std::vector<AssetHandle> forced;
-				for (const AssetHandle source : Sources)
+				for (const AssetHandle source : sources)
 				{
 					if (IsForcedByTestingExport(GetAssetPath(source), TestingContent))
 						forced.push_back(source);
 				}
-				for (const AssetHandle source : byPath(std::move(forced)))
+				for (const AssetHandle source : SortByPath(std::move(forced)))
 					reach(source, root(ExportReachReason::Testing));
 			}
-			const std::span<const AssetHandle> required = GetRuntimeRequiredBuiltinHandles();
-			for (const AssetHandle builtin : byPath(std::vector<AssetHandle>(required.begin(), required.end())))
-				reach(builtin, root(ExportReachReason::Required));
+			if (withRequired)
+			{
+				const std::span<const AssetHandle> required = GetRuntimeRequiredBuiltinHandles();
+				for (const AssetHandle builtin : SortByPath(std::vector<AssetHandle>(required.begin(), required.end())))
+					reach(builtin, root(ExportReachReason::Required));
+			}
 			follow();
-			for (const AssetHandle source : byPath(Sources))
-				reach(source, std::nullopt);
-			follow();
+			if (everySource)
+			{
+				for (const AssetHandle source : SortByPath(std::vector<AssetHandle>(sources.begin(), sources.end())))
+					reach(source, std::nullopt);
+				follow();
+			}
+			return reached;
+		}
+
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 21, B-PRUNE-GAME): Export.PruneUnreferenced's Game.pak, the included
+		// sources the roots reach (WalkReachability over every included source, without the required built-ins, which
+		// reference nothing). Fills ExportReport::Reachability's Pruned, GameAssets (each with its first reason, sorted by path)
+		// and PrunedAssets (the included sources no root reaches, sorted).
+		[[nodiscard]] std::set<AssetHandle> PruneGameAssets(const AssetReferences& references, const ScriptLoads& loads)
+		{
+			const std::set<AssetHandle> sources(Sources.begin(), Sources.end());
+			const ReachedAssets reached = WalkReachability(references, loads, sources, false, false);
+			ExportReachability& reachability = Report.Reachability;
+			reachability.Pruned = true;
+			reachability.GameAssets.clear();
+			reachability.PrunedAssets.clear();
+			std::set<AssetHandle> packaged;
+			for (const AssetHandle source : Sources)
+			{
+				const auto found = reached.find(source);
+				if (found == reached.end())
+				{
+					reachability.PrunedAssets.push_back(GetAssetPath(source));
+					continue;
+				}
+				ENGINE_ASSERT(found->second.has_value(), "Every asset the roots reach has a reason");
+				ExportReachedAsset asset = *found->second;
+				asset.Path = GetAssetPath(source);
+				reachability.GameAssets.push_back(std::move(asset));
+				packaged.insert(source);
+			}
+			std::ranges::sort(reachability.GameAssets, {}, &ExportReachedAsset::Path);
+			std::ranges::sort(reachability.PrunedAssets);
+			return packaged;
+		}
+
+		// M19 (Docs/Decisions/0030-m19-contract.md decisions 19 to 21): the File and Generated built-ins Engine.pak holds, each
+		// with the first reason the walk found (Exporter.h, ExportReachedAsset): WalkReachability over Game.pak's sources
+		// `sources` (every included source, or with Export.PruneUnreferenced the ones the roots reach), with the required
+		// built-ins and every source of Game.pak, so the built-ins any of them reaches are kept. A packaged script that computes
+		// an Assets.Load keeps every File and Generated built-in of the catalogue, since the reference may name any of them:
+		// the ones nothing else reached take the reason ComputedLoad, naming the first computed load in (script, line, column)
+		// order. Fills ExportReport::Reachability's ComputedLoads.
+		[[nodiscard]] std::map<AssetHandle, ExportReachedAsset> SelectEngineBuiltins(const AssetReferences& references, const ScriptLoads& loads,
+			const std::set<AssetHandle>& sources)
+		{
+			const EditorAssetManager& assets = Editor->GetAssets();
+			const ReachedAssets reached = WalkReachability(references, loads, sources, true, true);
 
 			// Every computed load of a packaged script (ExportReport::Reachability); the first keeps every built-in.
 			std::vector<ExportComputedLoad>& computed = Report.Reachability.ComputedLoads;
@@ -1409,10 +1496,11 @@ namespace Engine {
 			return {};
 		}
 
-		// Every handle an included asset references resolves in the package (§14.2 step 1): a Game.pak or Engine.pak entry,
-		// or a procedural built-in. A built-in environment CookEngineAssets left out (no bake, no GPU) is an issue with the
-		// hint to bake it once on a GPU (§7.5: the exports need no GPU "as long as the bakes exist").
-		[[nodiscard]] Status CheckReferences(const std::map<AssetHandle, std::vector<AssetHandle>>& references, const std::set<AssetHandle>& packaged)
+		// Every handle a packaged asset references (`references`: every included asset, or with Export.PruneUnreferenced the
+		// ones the roots reach) resolves in the package (§14.2 step 1): a Game.pak or Engine.pak entry, or a procedural
+		// built-in. A built-in environment CookEngineAssets left out (no bake, no GPU) is an issue with the hint to bake it
+		// once on a GPU (§7.5: the exports need no GPU "as long as the bakes exist").
+		[[nodiscard]] Status CheckReferences(const AssetReferences& references, const std::set<AssetHandle>& packaged)
 		{
 			const EditorAssetManager& assets = Editor->GetAssets();
 			const std::span<const BuiltinAssetEntry> procedural = GetProceduralBuiltinEntries();

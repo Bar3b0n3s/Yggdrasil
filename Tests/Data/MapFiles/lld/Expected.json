@@ -19,6 +19,15 @@
     "forbidden AssetPipeline: Engine::PakWriter::Write(std::filesystem::__cxx11::path const&) (/build/bin/Dist-linux-x86_64/Engine/libEngine.a(PakWriter.o))",
     "forbidden AssetPipeline: Engine::TextureImporter::Import(Engine::ImportContext&) const (/build/bin/Dist-linux-x86_64/Engine/libEngine.a(TextureImporter.o))"
   ],
+  "LuauCompiler": [
+    "forbidden LuauCompiler: Luau::BytecodeBuilder::addConstantNil() (/build/bin/Dist-linux-x86_64/Luau/libLuau.a(BytecodeBuilder.o))",
+    "forbidden LuauCompiler: Luau::Require::lua_requireinternal(lua_State*, char const*) (/build/bin/Dist-linux-x86_64/Luau/libLuau.a(RequireImpl.o))",
+    "forbidden LuauCompiler: Luau::compile(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, Luau::CompileOptions const&, Luau::ParseOptions const&, Luau::BytecodeEncoder*) (/build/bin/Dist-linux-x86_64/Luau/libLuau.a(Compiler.o))",
+    "forbidden LuauCompiler: Luau::extractLuauConfig(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, Luau::Config&, std::optional<Luau::ConfigOptions::AliasOptions>, Luau::InterruptCallbacks) (/build/bin/Dist-linux-x86_64/Luau/libLuau.a(LuauConfig.o))",
+    "forbidden LuauCompiler: Luau::parseConfig(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, Luau::Config&, Luau::ConfigOptions const&) (/build/bin/Dist-linux-x86_64/Luau/libLuau.a(Config.o))",
+    "forbidden LuauCompiler: luarequire_pushproxyrequire(lua_State*, void (*)(luarequire_Configuration*), void*) (/build/bin/Dist-linux-x86_64/Luau/libLuau.a(Require.o))",
+    "forbidden LuauCompiler: luau_compile(char const*, unsigned long, lua_CompileOptions*, unsigned long*) (/build/bin/Dist-linux-x86_64/Luau/libLuau.a(lcode.o))"
+  ],
   "MissingRequired": [
     "missing required symbol: FeatureTestRunner",
     "missing required symbol: ReplayPlayer"

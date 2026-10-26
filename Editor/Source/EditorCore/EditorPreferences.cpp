@@ -45,6 +45,10 @@ namespace Engine {
 			{
 				ENGINE_TRY_ASSIGN(preferences.AllowAiAutomation, allowed->ReadBool());
 			}
+			if (const auto native = reader.FindMember("AllowNativeCode"))
+			{
+				ENGINE_TRY_ASSIGN(preferences.AllowNativeCode, native->ReadBool());
+			}
 			if (const auto executable = reader.FindMember("ExternalEditorExecutable"))
 			{
 				ENGINE_TRY_ASSIGN(preferences.ExternalEditorExecutable, executable->ReadString());
@@ -129,6 +133,7 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(Json document, Utils::ReadUtilityPreferencesDocument(vfs));
 		ENGINE_TRY(Utils::DecodeUtilityPreferences(document));
 		document["AllowAiAutomation"] = preferences.AllowAiAutomation;
+		document["AllowNativeCode"] = preferences.AllowNativeCode;
 		document["ExternalEditorExecutable"] = preferences.ExternalEditorExecutable;
 		document["ExternalEditorArguments"] = preferences.ExternalEditorArguments;
 		ENGINE_TRY_ASSIGN(const std::string text, SerializeEditorPreferences(document));

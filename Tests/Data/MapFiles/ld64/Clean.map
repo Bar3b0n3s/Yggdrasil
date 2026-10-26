@@ -9,7 +9,7 @@
 [  5] /build/bin/Dist-macosx-AARCH64/Engine/libEngine.a[7](Watchdog.o)
 [  6] /build/bin/Dist-macosx-AARCH64/Engine/libEngine.a[8](SceneSerializer.o)
 [  7] /build/bin/Dist-macosx-AARCH64/Luau/libLuau.a[9](lapi.o)
-[  8] /build/bin/Dist-macosx-AARCH64/Luau/libLuau.a[10](Compiler.o)
+[  8] /build/bin/Dist-macosx-AARCH64/Luau/libLuau.a[10](Parser.o)
 [  9] /build/bin/Dist-macosx-AARCH64/Engine/libEngine.a[11](CoreRegistration.o)
 [ 10] /build/bin/Dist-macosx-AARCH64/Engine/libEngine.a[12](Dispatcher.o)
 [ 11] /build/bin/Dist-macosx-AARCH64/ImGui/libImGui.a[13](imgui.o)
@@ -32,8 +32,8 @@
 0x100004100	0x00000018	[  5] FDE for: __ZN6Engine14ScriptWatchdogD2Ev
 0x100003140	0x00000040	[  7] _lua_pushnumber
 0x100004140	0x00000018	[  7] FDE for: _lua_pushnumber
-0x100003180	0x00000040	[  8] __ZN4Luau7compileERKNSt3__112basic_stringIcSt11char_traitsIcESaIcEEERKNS_14CompileOptionsERKNS_12ParseOptionsEPNS_15BytecodeEncoderE
-0x100004180	0x00000018	[  8] FDE for: __ZN4Luau7compileERKNSt3__112basic_stringIcSt11char_traitsIcESaIcEEERKNS_14CompileOptionsERKNS_12ParseOptionsEPNS_15BytecodeEncoderE
+0x100003180	0x00000040	[  8] __ZN4Luau6Parser9parseTypeEPKcmRNS_12AstNameTableERNS_9AllocatorENS_12ParseOptionsE
+0x100004180	0x00000018	[  8] FDE for: __ZN4Luau6Parser9parseTypeEPKcmRNS_12AstNameTableERNS_9AllocatorENS_12ParseOptionsE
 0x100005000	0x00000006	[  2] literal string: ImGui
 0x1000081C0	0x00000040	[  9] __ZTVN6Engine15ComponentStoreE
 # Dead Stripped Symbols:

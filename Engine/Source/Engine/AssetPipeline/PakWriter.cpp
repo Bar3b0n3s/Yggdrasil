@@ -3,6 +3,7 @@
 
 #include "Engine/Asset/AssetType.h"
 #include "Engine/Asset/CookedFormat.h"
+#include "Engine/Asset/PakCompression.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/BinaryWriter.h"
 #include "Engine/Core/FileSystem.h"
@@ -16,6 +17,8 @@
 #include <algorithm>
 #include <format>
 #include <numeric>
+#include <optional>
+#include <span>
 #include <utility>
 
 namespace Engine {
@@ -65,6 +68,21 @@ namespace Engine {
 			return {};
 		}
 
+		// The deflated stream of `entry` when the writer's policy keeps one (PakWriter.h, Docs/Decisions/0030-m19-contract.md
+		// decision 17): Compress set, at most 1 GiB (DeflatePakEntry's limit), and a stream that saves at least an eighth.
+		// Otherwise nullopt, and the entry is stored. The decision depends only on the entry's bytes and its Compress, so
+		// equal entries give equal paks.
+		static std::optional<Buffer> DeflateIfWorthwhile(const PakWriterEntry& entry)
+		{
+			if (!entry.Compress || entry.Data.empty() || entry.Data.size() > MaxPakCompressedEntrySize)
+				return std::nullopt;
+			// The codec refuses only an entry above the size stb's deflate takes (1 GiB), which is stored too.
+			Result<Buffer> deflated = DeflatePakEntry(entry.Data);
+			if (!deflated.has_value() || !IsValidPakDeflateSize(entry.Data.size(), deflated->size()))
+				return std::nullopt;
+			return std::move(*deflated);
+		}
+
 	}
 
 	Status PakWriter::Add(PakWriterEntry entry)
@@ -111,6 +129,8 @@ namespace Engine {
 		for (const size_t index : order)
 		{
 			const PakWriterEntry& entry = m_Entries[index];
+			const std::optional<Buffer> deflated = Utils::DeflateIfWorthwhile(entry);
+			const std::span<const std::byte> stored = deflated.has_value() ? std::span<const std::byte>(*deflated) : std::span<const std::byte>(entry.Data);
 			writer.AlignTo(static_cast<size_t>(PakEntryAlignment));
 			toc.Entries.push_back(PakEntry{
 				.Handle = entry.Handle,
@@ -119,8 +139,10 @@ namespace Engine {
 				.Offset = writer.GetSize(),
 				.Size = entry.Data.size(),
 				.Hash = XXH64(entry.Data),
+				.Compression = deflated.has_value() ? PakCompression::Deflate : PakCompression::None,
+				.StoredSize = stored.size(),
 			});
-			writer.WriteBytes(entry.Data);
+			writer.WriteBytes(stored);
 		}
 		toc.Metadata = m_Metadata;
 

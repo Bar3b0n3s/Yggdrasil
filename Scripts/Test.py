@@ -145,7 +145,11 @@ share a stem or a Name (whose Dist packages would share a directory) fail the "g
     differed only at checkpoints and reached the recorded final hash is printed as games.input_check_warning's warning,
     which never fails the half, Docs/Decisions/0030-m19-contract.md decision 3); a .replay below Assets/ that
     Testing.Replays leaves out fails it; after session.shutdown the editor must exit 0 and the copy must be unchanged
-    outside Library/;
+    outside Library/. For a game with a native module (a Native/ directory, Docs/Decisions/0030-m19-contract.md
+    decision 35; Windows only), games.prepare_native_editor first writes the user's "Allow native code" preference into
+    the editor's user data and builds the module of the editor's configuration into the copy's Library/Native/Builds/
+    with Scripts/BuildNative.py, so the strict editor opens the project with its module loaded; a module that does not
+    build fails the half with its first error, and the Dist half's editor gets the same preparation;
   - "games <Name> Dist", which the Release editor drives (in the Release half's session when Release runs too):
     project.export {config: Dist, testing: true, featureTest: true} (waited for --timeout plus the 1800 s bound of the
     export's own feature-test run), whose result's executable must lie below its outputDirectory and whose manifest
@@ -2120,6 +2124,10 @@ def drive_game_session(project: games.GameProject, config: str, editor_half: boo
         except (RuntimeError, ValueError, OSError) as error:
             return failed([f"the staged project cannot be prepared: {error}"])
         editor_data["replays"] = copy.committed
+        # A native game's editor opens the copy with its module loaded (ADR 0030 decision 35).
+        native_failures = games.prepare_native_editor(copy.directory, work / "UserData", config)
+        if native_failures:
+            return failed(native_failures)
         before = snapshot_project(copy.directory)
         command = [*GAMES_EDITOR_ARGUMENTS, "--export-root", str(work / "Exports"), "--project", str(project_file)]
         console.heading(f"games {project.name} ({config} editor on the staged files): "

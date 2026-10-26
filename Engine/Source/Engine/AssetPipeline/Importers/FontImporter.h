@@ -21,20 +21,22 @@ namespace Engine {
 
 	// TTF and OTF (Architecture §7.4): an R8 signed-distance-field atlas of ASCII and Latin-1 (U+0020-U+007E and
 	// U+00A0-U+00FF; codepoints the font lacks are left out) with glyph metrics and kerning, rasterized through
-	// imstb_truetype.h from the vendored Dear ImGui (stb_truetype v1.26), compiled with STBTT_STATIC in the importer's own
-	// translation unit only (Appendix C), so it never clashes with Dear ImGui's copy. Glyphs are packed deterministically
-	// (sorted by codepoint, a fixed shelf packer into the smallest power-of-two square that fits). Cooked as one FontData
-	// (CookFont). A font stb_truetype cannot read, or one without any glyph of the character set, is ImportFailed.
-	// Version 2: CFF (.otf) outlines keep their cubic segments in the distance field (ADR 0022 "Integration"); TrueType
-	// atlases are byte-identical to version 1's. Version 3 (M19, Docs/Decisions/0030-m19-contract.md decision 23, A-STBTT;
-	// reserved by the phase 1 ledger): the rasterizer compiles stb_truetype.h of the vendored stb (Vendor/stb, the pinned
-	// commit 2c980bb) instead of Dear ImGui's imstb_truetype.h, so cached atlases are rebuilt once; stream J bumps Version
-	// with the switch and proves the atlases unchanged, or regenerates the Text golden as a reviewed change.
+	// stb_truetype.h v1.26 of the vendored stb (Vendor/stb), compiled with STBTT_STATIC in the importer's own translation
+	// unit only (Appendix C), so it never clashes with Dear ImGui's own copy for its font atlas. Glyphs are packed
+	// deterministically (sorted by codepoint, a fixed shelf packer into the smallest power-of-two square that fits). Cooked
+	// as one FontData (CookFont). A font stb_truetype cannot read, or one without any glyph of the character set, is
+	// ImportFailed. Version 2: CFF (.otf) outlines keep their cubic segments in the distance field (ADR 0022
+	// "Integration"); TrueType atlases are byte-identical to version 1's. Version 3 (M19, Docs/Decisions/0030-m19-contract.md
+	// decision 23, A-STBTT): the rasterizer compiles stb_truetype.h of the vendored stb (the pinned commit 2c980bb) instead
+	// of Dear ImGui's imstb_truetype.h, so cached atlases are rebuilt once. The distance field follows that header's solver,
+	// with its thresholds for near-singular segments, and Inter's atlases at the default settings are version 2's byte for
+	// byte; a CID-keyed CFF glyph that its FDSelect gives no font dictionary and that calls a local subroutine is refused,
+	// since that header asserts on it where Dear ImGui's copy reads no subroutines.
 	class FontImporter final : public IAssetImporter
 	{
 	public:
 		static constexpr std::string_view Id = "Font";
-		static constexpr uint32_t Version = 2;
+		static constexpr uint32_t Version = 3;
 
 		[[nodiscard]] std::string_view GetId() const override { return Id; }
 		[[nodiscard]] uint32_t GetVersion() const override { return Version; }

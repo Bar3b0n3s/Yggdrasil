@@ -46,9 +46,9 @@ LOAD /build/bin/Dist-linux-x86_64/Engine/libEngine.a
  .text.lua_pushnumber
                 0x0000000000401180       0x40 /build/bin/Dist-linux-x86_64/Luau/libLuau.a(lapi.o)
                 0x0000000000401180                lua_pushnumber
- .text._ZN4Luau7compileERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEERKNS_14CompileOptionsERKNS_12ParseOptionsEPNS_15BytecodeEncoderE
-                0x00000000004011c0       0x40 /build/bin/Dist-linux-x86_64/Luau/libLuau.a(Compiler.o)
-                0x00000000004011c0                _ZN4Luau7compileERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEERKNS_14CompileOptionsERKNS_12ParseOptionsEPNS_15BytecodeEncoderE
+ .text._ZN4Luau6Parser9parseTypeEPKcmRNS_12AstNameTableERNS_9AllocatorENS_12ParseOptionsE
+                0x00000000004011c0       0x40 /build/bin/Dist-linux-x86_64/Luau/libLuau.a(Parser.o)
+                0x00000000004011c0                _ZN4Luau6Parser9parseTypeEPKcmRNS_12AstNameTableERNS_9AllocatorENS_12ParseOptionsE
  .text._ZN5ImGui5BeginEPKcPbi
                 0x0000000000401200       0x40 /build/bin/Dist-linux-x86_64/ImGui/libImGui.a(imgui.o)
                 0x0000000000401200                _ZN5ImGui5BeginEPKcPbi

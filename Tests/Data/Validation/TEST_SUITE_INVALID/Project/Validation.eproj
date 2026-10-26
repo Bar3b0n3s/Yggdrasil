@@ -42,7 +42,8 @@
 		"Exclude": ["Assets/Tests/**"],
 		"Icon": "",
 		"Version": "1.0.0",
-		"Company": ""
+		"Company": "",
+		"PruneUnreferenced": false
 	},
 	"Testing": {
 		"Suites": [

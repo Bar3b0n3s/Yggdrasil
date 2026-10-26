@@ -11,9 +11,10 @@ dry run under Tests/Projects is not soaked, ADR 0025), so the soak never depends
 Discovery reads the working tree ("disk") or the staged files ("index", what a fresh clone of the commit about to be
 made holds; git ls-files): the games suite and AuditProvenance.py --demos in index mode (their default) audit and run
 only staged projects, and name each project found on disk but not staged in a passed step, so a half-built demo that
-is not part of a commit never fails it and is never skipped silently. Apart from index discovery, which runs git, the
-helpers are pure: they read files or the documents the editor and the Runtime return, start nothing, and return failure
-lines ("<what>: <why>"), an empty list meaning the check passed.
+is not part of a commit never fails it and is never skipped silently. Apart from index discovery, which runs git, and
+prepare_native_editor, which writes a test editor's preference and runs Scripts/BuildNative.py, the helpers are pure:
+they read files or the documents the editor and the Runtime return, start nothing, and return failure lines ("<what>:
+<why>"), an empty list meaning the check passed.
 
 The input check (M16 friction S2-01, FX-4): every committed replay with input events is also verified without them
 (input.replay {verify: true, strictHash: true, withoutInput: true, continuePastCheckpoint: true}; withoutInput without
@@ -37,19 +38,29 @@ package's executable and its testing user data after the project's Name (Project
 its log after the executable's stem (Docs/Architecture.md §4.4: Logs/<exe>.log), so the Dist half reads that Name from
 the testing export's manifest (read_game_name; ADR 0027 decision 4, B2) and takes the executable from project.export's
 result.
+
+A game with a native module (a Native/ directory, Docs/Decisions/0030-m19-contract.md decisions 26 and 35; Windows
+only) needs two things before a strict editor opens it, which prepare_native_editor gives the copy the editor opens: the
+user's "Allow native code" preference in the editor's own user data, written by this harness and never by a method
+(decision 29), and a current build of its module below the copy's Library/Native/Builds/, because a project's opening
+loads the newest current build and never builds (decision 31), while a strict editor refuses a scene's native
+component that no loaded module registers (NATIVE_COMPONENT_UNREGISTERED, decision 27). The Dist half's export builds
+the game's Runtime with its module linked in (decision 33) in the same editor, whose user data already allows it.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import re
 import subprocess
+import sys
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from Lib import exports, paths, provenance
+from Lib import exports, locks, native_build, paths, provenance
 from Lib.process import format_command
 
 GAME_PROJECT_ROOTS = ("Projects", "Tests/Projects")
@@ -105,6 +116,19 @@ FINAL_HASH_INDEPENDENT_WARNING = ("'{replay}': its final state hash does not dep
 # A committed FinalStateHash: 16 hexadecimal digits (Engine/Source/Engine/Asset/ReplayData.h: ReplayToText writes them
 # lowercase).
 STATE_HASH_PATTERN = re.compile(r"[0-9a-fA-F]{16}")
+# A native game's preparation (prepare_native_editor; Docs/Decisions/0030-m19-contract.md decisions 29 to 31 and 35):
+# the user's preference in user://Editor.json (EditorCore/EditorPreferences.h), the script that builds the module, and
+# the build directory a project's opening loads from (NativeModuleHost: Library/Native/Builds/<sequence>/, at least 8
+# digits, the newest current build of the editor's configuration).
+EDITOR_PREFERENCES_FILE = "Editor.json"
+EDITOR_PREFERENCES_HEADER = {"Format": "EditorPreferences", "Version": 1}
+ALLOW_NATIVE_CODE_KEY = "AllowNativeCode"
+BUILD_NATIVE_SCRIPT = paths.REPOSITORY_ROOT / "Scripts" / "BuildNative.py"
+NATIVE_BUILD_DIRECTORY = Path("Library") / "Native" / "Builds" / "00000001"
+# BuildNative.py's bound of the build itself (its --timeout); its wait for the machine-wide build lock keeps the default
+# bound, and the process gets both and a margin.
+NATIVE_BUILD_TIMEOUT_SECONDS = 1800.0
+NATIVE_BUILD_MARGIN_SECONDS = 300.0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -492,7 +516,66 @@ def prepare_native_editor(project_directory: Path, user_data: Path, config: str)
     opens, decision 31). One failure line per problem (the build's first error diagnostic among them), empty when the
     editor may start; a game without Native/ needs nothing and returns no line. The Dist half's export builds its
     Runtime itself (decision 33), after the same preference write into the exporting editor's user data."""
-    raise NotImplementedError("contract stub: games (ADR 0030 decision 35, stream N-E)")
+    if not (project_directory / native_build.NATIVE_DIRECTORY).is_dir():
+        return []
+    failures = _allow_native_code(user_data / paths.workspace_name() / EDITOR_PREFERENCES_FILE)
+    if os.name != "nt":
+        # Windows backends only (Docs/Decisions/0028-backlog-program.md decision 10): no other platform builds a module.
+        return [*failures, f"Unsupported: {paths.display_path(project_directory)} has a native module, which only "
+                           f"Windows builds and loads (Docs/Decisions/0030-m19-contract.md decision 34)"]
+    output = project_directory / NATIVE_BUILD_DIRECTORY
+    command = [sys.executable, str(BUILD_NATIVE_SCRIPT), "--project", str(project_directory), "--kind", "module",
+               "--config", config, "--out", str(output), "--timeout", f"{NATIVE_BUILD_TIMEOUT_SECONDS:.0f}", "--json"]
+    bound = NATIVE_BUILD_TIMEOUT_SECONDS + locks.DEFAULT_WAIT_SECONDS + NATIVE_BUILD_MARGIN_SECONDS
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                   timeout=bound, check=False)
+    except subprocess.TimeoutExpired:
+        return [*failures, f"the native module's {config} build did not finish in {bound:.0f} s: "
+                           f"{format_command(command)}"]
+    except OSError as error:
+        return [*failures, f"the native module's {config} build could not start: {error}"]
+    if completed.returncode == 0:
+        return failures
+    return [*failures, _describe_native_build_failure(output, config, completed)]
+
+
+def _allow_native_code(path: Path) -> list[str]:
+    """Sets "AllowNativeCode": true in the user://Editor.json at `path`, keeping every other member (a missing file
+    starts with the header the editor's reader requires, EDITOR_PREFERENCES_HEADER), as tab-indented JSON like the
+    editor writes it; one failure line when it cannot be read or written."""
+    document: Any = dict(EDITOR_PREFERENCES_HEADER)
+    try:
+        if path.is_file():
+            document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        return [f"{paths.display_path(path)} cannot be read to allow native code: {error}"]
+    if not isinstance(document, dict):
+        return [f"{paths.display_path(path)} is not a JSON object, so native code cannot be allowed in it"]
+    document[ALLOW_NATIVE_CODE_KEY] = True
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(document, indent="\t", ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
+    except OSError as error:
+        return [f"{paths.display_path(path)} cannot be written to allow native code: {error}"]
+    return []
+
+
+def _describe_native_build_failure(output: Path, config: str, completed: subprocess.CompletedProcess[str]) -> str:
+    """The failure line of a module build that did not succeed: its first error diagnostic from the record it wrote
+    (the first diagnostic when none is an error), else its exit code and the last line it printed. The build's log
+    lies in the project copy, which the suite removes, so the line itself names the error."""
+    what = f"the native module's {config} build failed (Scripts/BuildNative.py exited with {completed.returncode})"
+    try:
+        record = native_build.read_record(output)
+    except (OSError, ValueError):
+        lines = [line.strip() for line in f"{completed.stdout}\n{completed.stderr}".splitlines() if line.strip()]
+        return f"{what}: {lines[-1] if lines else 'it printed nothing'}"
+    errors = [diagnostic for diagnostic in record.diagnostics if diagnostic.severity == "Error"]
+    first = (errors or record.diagnostics or [None])[0]
+    if first is None:
+        return f"{what} without a diagnostic"
+    return f"{what}: {first.describe()}"
 
 
 def check_replay_acceptance(events: dict[str, int]) -> list[str]:

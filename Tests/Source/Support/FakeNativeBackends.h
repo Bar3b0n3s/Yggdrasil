@@ -15,6 +15,7 @@
 // (or fails with the diagnostics it was given): it writes into the request's output directory a "library", a text file
 // that names one of the test modules of Support/NativeTestModule.h, and the build record NativeBuild.json of decision 30
 // with the real ComputeNativeSourceHash; the fake loader reads that file back and returns the named module's entry point.
+// A pending build (SetPending) instead runs until it is cancelled, as a real build that its caller abandons does.
 
 namespace Engine {
 
@@ -35,7 +36,17 @@ namespace Engine {
 			void SetModule(FakeNativeModule module) { m_Module = module; }
 			// The diagnostics of the next builds; one of severity Error makes them fail.
 			void SetDiagnostics(std::vector<NativeBuildDiagnostic> diagnostics) { m_Diagnostics = std::move(diagnostics); }
+			// With `pending`, the next builds run until they are cancelled: Poll returns nullopt until Cancel, then the
+			// Cancelled error, or with `answersCancel` false still nullopt (a killed build whose end is not seen yet), and the
+			// build writes nothing below its output directory (no library, log or record).
+			void SetPending(bool pending, bool answersCancel = true)
+			{
+				m_Pending = pending;
+				m_AnswersCancel = answersCancel;
+			}
 			[[nodiscard]] uint32_t GetStartCount() const { return m_StartCount; }
+			// How many of this backend's builds were cancelled while they ran.
+			[[nodiscard]] uint32_t GetCancelCount() const { return *m_CancelCount; }
 			// The NativeApi.h the source hash of a fake build covers (NativeModuleHostSpecification::ApiHeader).
 			void SetApiHeader(std::filesystem::path header) { m_ApiHeader = std::move(header); }
 			// The executable a successful NativeBuildKind::Runtime build outputs (a copy, named after it): a real Runtime
@@ -52,6 +63,9 @@ namespace Engine {
 			std::filesystem::path m_RuntimeExecutable{};
 			NativeBuildRequest m_LastRequest{};
 			uint32_t m_StartCount = 0;
+			bool m_Pending = false;
+			bool m_AnswersCancel = true;
+			Ref<uint32_t> m_CancelCount = CreateRef<uint32_t>(0); // shared with the pending jobs, which may outlive the backend
 		};
 
 		class FakeNativeLibraryLoader final : public INativeLibraryLoader

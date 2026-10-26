@@ -275,6 +275,13 @@ namespace Engine {
 		// (repairs) not saved since.
 		[[nodiscard]] bool IsSceneDirty() const;
 
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 31): a migration of the open scene that is no undo step, the native
+		// module host's when a load or reload makes the scene's native components canonical against new types. With `changed`
+		// the scene changed: the revision advances and the scene is modified until saved, like a dirty SetScene. With
+		// `clearHistory` the undo history is dropped (its entity snapshots hold the previous layout's values), the scene staying
+		// modified when it was. Asserts an open scene, outside a dry run and a transaction.
+		void ApplySceneMigration(bool changed, bool clearHistory);
+
 		// The open scene was written to `path` (scene.save, project.save): sets the scene path and the save point, and clears
 		// SceneChangedOnDisk, then calls AfterSceneSaved outside a dry run. Callback failure is returned with a hint
 		// explaining that the scene was saved but recovery cleanup failed; it never makes the durable save dirty again.
@@ -477,8 +484,10 @@ namespace Engine {
 		[[nodiscard]] Result<AssetRefreshReport> OpenProjectAssets();
 		// OpenProject's --strict check (EditorContextSpecification::StrictUnknowns): every .scene and .prefab under
 		// project://Assets, sorted by path, loaded strictly (LoadMode::Strict, LoadOptions::StrictUnknowns and the script field
-		// schemas). Errors: Validation with one issue per file that does not load, whatever the reason, naming the file.
-		[[nodiscard]] Status CheckProjectDocumentsStrictly() const;
+		// schemas), and their native components checked against the loaded module (M19). `nativeOpened` is what the native
+		// module host's OnProjectOpened returned, which the hint of a native component read without a module names.
+		// Errors: Validation with one issue per file that does not load, whatever the reason, naming the file.
+		[[nodiscard]] Status CheckProjectDocumentsStrictly(const Status& nativeOpened) const;
 		[[nodiscard]] Status RefreshScriptServices();
 		[[nodiscard]] Status ReimportScriptForTest(AssetHandle script);
 	private:

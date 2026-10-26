@@ -57,6 +57,35 @@ namespace Engine {
 				Result<NativeBuildOutcome> m_Outcome;
 			};
 
+			// A build that runs until it is cancelled (FakeNativeBuildBackend::SetPending).
+			class PendingFakeNativeBuildJob final : public INativeBuildJob
+			{
+			public:
+				PendingFakeNativeBuildJob(Ref<uint32_t> cancelCount, bool answersCancel)
+					: m_CancelCount(std::move(cancelCount)), m_AnswersCancel(answersCancel)
+				{
+				}
+
+				[[nodiscard]] std::optional<Result<NativeBuildOutcome>> Poll() override
+				{
+					if (!m_Cancelled || !m_AnswersCancel)
+						return std::nullopt;
+					return Result<NativeBuildOutcome>(MakeError(ErrorCode::Cancelled, "the fake native build was cancelled"));
+				}
+
+				void Cancel() override
+				{
+					if (m_Cancelled)
+						return;
+					m_Cancelled = true;
+					++*m_CancelCount;
+				}
+			private:
+				Ref<uint32_t> m_CancelCount;
+				bool m_AnswersCancel = true;
+				bool m_Cancelled = false;
+			};
+
 			[[nodiscard]] static Status WriteText(const std::filesystem::path& path, std::string_view text)
 			{
 				return FileSystem::WriteFileAtomic(path, std::as_bytes(std::span(text.data(), text.size())));
@@ -71,6 +100,8 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(const std::vector<std::string> sources, ListNativeSources(request.ProjectRoot));
 			ENGINE_TRY_ASSIGN(const std::string hash, ComputeNativeSourceHash(request.ProjectRoot, request.Configuration, m_ApiHeader));
 			ENGINE_TRY(FileSystem::CreateDirectories(request.OutputDirectory));
+			if (m_Pending)
+				return CreateScope<Utils::PendingFakeNativeBuildJob>(m_CancelCount, m_AnswersCancel);
 			const bool succeeded = std::ranges::none_of(m_Diagnostics, [](const NativeBuildDiagnostic& diagnostic)
 			{
 				return diagnostic.Severity == DiagnosticSeverity::Error;

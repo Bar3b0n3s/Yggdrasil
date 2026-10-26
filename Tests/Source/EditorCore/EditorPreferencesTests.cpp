@@ -1,6 +1,7 @@
 #include "TestsPCH.h"
 #include "EditorCore/EditorPreferences.h"
 
+#include "EditorCore/Project/ProjectManager.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Json/JsonWriter.h"
 #include "Engine/Core/Log.h"
@@ -25,6 +26,7 @@ namespace Engine {
 			const auto preferences = ReadEditorPreferences(vfs);
 			REQUIRE(preferences);
 			CHECK_FALSE(preferences->AllowAiAutomation);
+			CHECK_FALSE(preferences->AllowNativeCode);
 			CHECK(preferences->ExternalEditorExecutable.empty());
 			CHECK(preferences->ExternalEditorArguments.empty());
 			const auto path = VfsPath::Parse("user://Editor.json");
@@ -71,6 +73,48 @@ namespace Engine {
 			}
 		}
 
+		// Docs/Decisions/0030-m19-contract.md decision 29 (N-C): the user's Allow native code preference is read and written with
+		// the others, absent means off, and the file's other writers (the AI automation preference, the recent projects) keep
+		// it as the file holds it.
+		TEST_CASE("EditorPreferences: Allow native code is read and written, and the file's other writers keep it")
+		{
+			VirtualFileSystem vfs;
+			REQUIRE(vfs.Mount("user", CreateScope<MemoryMount>()));
+			const auto path = VfsPath::Parse("user://Editor.json");
+			REQUIRE(path);
+			const std::string original = R"({"Format":"EditorPreferences","Version":1,"AllowNativeCode":true,"Future":{"Kept":[1,2]}})";
+			REQUIRE(vfs.WriteFileAtomic(*path, std::as_bytes(std::span(original.data(), original.size()))));
+			const auto read = ReadEditorPreferences(vfs);
+			REQUIRE(read);
+			CHECK(read->AllowNativeCode);
+			CHECK_FALSE(read->AllowAiAutomation);
+
+			// The AI automation preference's writer reads the file first, so the native preference survives it.
+			EditorPreferences automation = *read;
+			automation.AllowAiAutomation = true;
+			REQUIRE(WriteEditorPreferences(vfs, automation));
+			REQUIRE(ProjectManager::AddRecentProject(vfs, std::filesystem::path("D:/Games/Native/Native.eproj")));
+			const auto kept = ReadEditorPreferences(vfs);
+			REQUIRE(kept);
+			CHECK(kept->AllowNativeCode);
+			CHECK(kept->AllowAiAutomation);
+			const auto text = vfs.ReadText(*path);
+			REQUIRE(text);
+			const auto document = JsonReader::Parse(*text);
+			REQUIRE(document);
+			const auto future = JsonReader::Parse(R"({"Kept":[1,2]})");
+			REQUIRE(future);
+			CHECK((*document)["Future"] == *future);
+
+			EditorPreferences off = *kept;
+			off.AllowNativeCode = false;
+			REQUIRE(WriteEditorPreferences(vfs, off));
+			const auto stored = ReadEditorPreferences(vfs);
+			REQUIRE(stored);
+			CHECK_FALSE(stored->AllowNativeCode);
+			CHECK(stored->AllowAiAutomation);
+		}
+
 		TEST_CASE("EditorPreferences: the shared writer keeps every number exactly and rejects text that is not UTF-8")
 		{
 			const auto document = JsonReader::Parse(R"({"Format":"EditorPreferences","Version":1,"Future":{"Exact":9007199254740993,"Fraction":1.23456789012345,"Large":1e200,"Tiny":5e-324}})");
@@ -101,6 +145,7 @@ namespace Engine {
 			REQUIRE(path);
 			EditorPreferences full;
 			full.AllowAiAutomation = true;
+			full.AllowNativeCode = true;
 			full.ExternalEditorExecutable = "C:/Tools/Editor app.exe";
 			full.ExternalEditorArguments = { "--goto", "{path}:{line}" };
 			REQUIRE(WriteEditorPreferences(vfs, full));
@@ -126,6 +171,7 @@ namespace Engine {
 				const auto reread = ReadEditorPreferences(vfs);
 				REQUIRE(reread);
 				CHECK(reread->AllowAiAutomation == loaded->AllowAiAutomation);
+				CHECK(reread->AllowNativeCode == loaded->AllowNativeCode);
 				CHECK(reread->ExternalEditorExecutable == loaded->ExternalEditorExecutable);
 				CHECK(reread->ExternalEditorArguments == loaded->ExternalEditorArguments);
 				return true;
@@ -147,6 +193,7 @@ namespace Engine {
 					 "{broken", "[]", R"({"Format":"Other","Version":1})", R"({"Format":"EditorPreferences","Version":2})",
 					 R"({"Format":"EditorPreferences","Version":1,"RecentProjects":[1]})",
 					 R"({"Format":"EditorPreferences","Version":1,"AllowAiAutomation":"true"})",
+					 R"({"Format":"EditorPreferences","Version":1,"AllowNativeCode":1})",
 					 R"({"Format":"EditorPreferences","Version":1,"ExternalEditorExecutable":[]})",
 					 R"({"Format":"EditorPreferences","Version":1,"ExternalEditorArguments":[true]})",
 					 R"({"Format":"EditorPreferences","Version":1,"AllowAiAutomation":true,"AllowAiAutomation":false})" })

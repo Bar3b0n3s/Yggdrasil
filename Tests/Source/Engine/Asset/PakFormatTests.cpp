@@ -4,15 +4,18 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cstdint>
+#include <limits>
+
 namespace Engine {
 
 	namespace {
 
-		// A TOC text with `entries` (a JSON array) and an empty Metadata, spelled by hand so the reader's own checks are
-		// tested, not the writer's.
+		// A version 2 TOC text with `entries` (a JSON array) and an empty Metadata, spelled by hand so the reader's own checks
+		// are tested, not the writer's.
 		std::string MakeTocText(std::string_view entries, std::string_view extraMember = {})
 		{
-			return std::format(R"({{"Format": "PakToc", "Version": 1, "Entries": {}, "Metadata": {{}}{}}})", entries, extraMember);
+			return std::format(R"({{"Format": "PakToc", "Version": 2, "Entries": {}, "Metadata": {{}}{}}})", entries, extraMember);
 		}
 
 	}
@@ -31,7 +34,7 @@ namespace Engine {
 			std::array<std::byte, PakHeader::Size> reserved = bytes;
 			reserved[PakHeader::Size - 1] = std::byte{ 1 };
 			CHECK_FALSE(ReadPakHeader(reserved).has_value());
-			std::array<std::byte, PakHeader::Size> newer = WritePakHeader({ .Version = 2 });
+			std::array<std::byte, PakHeader::Size> newer = WritePakHeader({ .Version = PakHeader::CurrentVersion + 1 });
 			Result<PakHeader> newerRead = ReadPakHeader(newer);
 			REQUIRE_FALSE(newerRead.has_value());
 			CHECK(newerRead.error().GetCode() == ErrorCode::UnsupportedVersion);
@@ -69,8 +72,8 @@ namespace Engine {
 		{
 			PakToc toc;
 			toc.Entries = {
-				{ .Handle = AssetHandle(), .Type = std::string(PakFileEntryType), .Path = "Shaders/Forward_VSMain.spv", .Offset = 64, .Size = 100, .Hash = 1 },
-				{ .Handle = AssetHandle(0x101), .Type = "Mesh", .Path = "engine://Meshes/Cube", .Offset = 176, .Size = 32, .Hash = 2 },
+				{ .Handle = AssetHandle(), .Type = std::string(PakFileEntryType), .Path = "Shaders/Forward_VSMain.spv", .Offset = 64, .Size = 100, .Hash = 1, .StoredSize = 100 },
+				{ .Handle = AssetHandle(0x101), .Type = "Mesh", .Path = "engine://Meshes/Cube", .Offset = 176, .Size = 32, .Hash = 2, .StoredSize = 32 },
 			};
 			Json metadata = Json::object();
 			metadata["ProjectName"] = "Tetris";
@@ -87,15 +90,15 @@ namespace Engine {
 			PakToc toc;
 			toc.Entries = {
 				{ .Handle = AssetHandle(), .Type = std::string(PakFileEntryType), .Path = "Shaders/A.spv", .Offset = 64, .Size = 0, .Hash = 0xef46db3751d8e999ull },
-				{ .Handle = AssetHandle(0x77e1a0c4d2b95f01ull), .Type = "Mesh", .Path = "Assets/Models/Track.glb#mesh:0:Straight", .Offset = 64, .Size = 8, .Hash = 0xab },
+				{ .Handle = AssetHandle(0x77e1a0c4d2b95f01ull), .Type = "Mesh", .Path = "Assets/Models/Track.glb#mesh:0:Straight", .Offset = 64, .Size = 8, .Hash = 0xab, .StoredSize = 8 },
 			};
 			const std::string text = SerializePakToc(toc);
-			// Pretty canonical JSON: tab indentation, the null handle as null, handles and hashes as 16 hex digits, and a null
-			// Metadata written as {}.
-			CHECK(text.starts_with("{\n\t\"Format\": \"PakToc\",\n\t\"Version\": 1,\n\t\"Entries\": [\n"));
+			// Pretty canonical JSON: tab indentation, the null handle as null, handles and hashes as 16 hex digits, the
+			// compression by its name after the hash, then the stored size, and a null Metadata written as {}.
+			CHECK(text.starts_with("{\n\t\"Format\": \"PakToc\",\n\t\"Version\": 2,\n\t\"Entries\": [\n"));
 			CHECK(text.contains("\"Handle\": null"));
 			CHECK(text.contains("\"Handle\": \"77e1a0c4d2b95f01\""));
-			CHECK(text.contains("\"XXH64\": \"00000000000000ab\""));
+			CHECK(text.contains("\"XXH64\": \"00000000000000ab\",\n\t\t\t\"Compression\": \"None\",\n\t\t\t\"StoredSize\": 8\n"));
 			CHECK(text.ends_with("\t\"Metadata\": {}\n}\n"));
 			Result<PakToc> read = ParsePakToc(text, 128);
 			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
@@ -112,13 +115,14 @@ namespace Engine {
 				toc.Entries = std::move(entries);
 				return ParsePakToc(SerializePakToc(toc), 4096);
 			};
-			CHECK_FALSE(parse({ { .Handle = AssetHandle(1), .Type = "Mesh", .Path = "a", .Offset = 72, .Size = 8, .Hash = 0 } }).has_value());
-			CHECK_FALSE(parse({ { .Handle = AssetHandle(1), .Type = "Mesh", .Path = "a", .Offset = 64, .Size = 32, .Hash = 0 },
-								  { .Handle = AssetHandle(2), .Type = "Mesh", .Path = "b", .Offset = 80, .Size = 8, .Hash = 0 } })
+			REQUIRE(parse({ { .Handle = AssetHandle(1), .Type = "Mesh", .Path = "a", .Offset = 64, .Size = 8, .Hash = 0, .StoredSize = 8 } }).has_value());
+			CHECK_FALSE(parse({ { .Handle = AssetHandle(1), .Type = "Mesh", .Path = "a", .Offset = 72, .Size = 8, .Hash = 0, .StoredSize = 8 } }).has_value());
+			CHECK_FALSE(parse({ { .Handle = AssetHandle(1), .Type = "Mesh", .Path = "a", .Offset = 64, .Size = 32, .Hash = 0, .StoredSize = 32 },
+								  { .Handle = AssetHandle(2), .Type = "Mesh", .Path = "b", .Offset = 80, .Size = 8, .Hash = 0, .StoredSize = 8 } })
 					.has_value());
-			CHECK_FALSE(parse({ { .Handle = AssetHandle(1), .Type = "Mesh", .Path = "a", .Offset = 64, .Size = 8000, .Hash = 0 } }).has_value());
-			CHECK_FALSE(parse({ { .Handle = AssetHandle(1), .Type = "None", .Path = "a", .Offset = 64, .Size = 8, .Hash = 0 } }).has_value());
-			CHECK_FALSE(parse({ { .Handle = AssetHandle(1), .Type = "File", .Path = "a", .Offset = 64, .Size = 8, .Hash = 0 } }).has_value());
+			CHECK_FALSE(parse({ { .Handle = AssetHandle(1), .Type = "Mesh", .Path = "a", .Offset = 64, .Size = 8000, .Hash = 0, .StoredSize = 8000 } }).has_value());
+			CHECK_FALSE(parse({ { .Handle = AssetHandle(1), .Type = "None", .Path = "a", .Offset = 64, .Size = 8, .Hash = 0, .StoredSize = 8 } }).has_value());
+			CHECK_FALSE(parse({ { .Handle = AssetHandle(1), .Type = "File", .Path = "a", .Offset = 64, .Size = 8, .Hash = 0, .StoredSize = 8 } }).has_value());
 		}
 
 		TEST_CASE("PakFormat: the reader rejects what the writer never produces")
@@ -130,33 +134,37 @@ namespace Engine {
 				REQUIRE_FALSE(read.has_value());
 				CHECK(read.error().GetCode() == code);
 			};
-			const std::string file = R"({"Handle": null, "Type": "File", "Path": "a.spv", "Offset": 64, "Size": 4, "XXH64": "0000000000000001"})";
-			const std::string mesh = R"({"Handle": "0000000000000101", "Type": "Mesh", "Path": "engine://Meshes/Cube", "Offset": 80, "Size": 4, "XXH64": "0000000000000002"})";
+			const std::string file = R"({"Handle": null, "Type": "File", "Path": "a.spv", "Offset": 64, "Size": 4, "XXH64": "0000000000000001", "Compression": "None", "StoredSize": 4})";
+			const std::string mesh = R"({"Handle": "0000000000000101", "Type": "Mesh", "Path": "engine://Meshes/Cube", "Offset": 80, "Size": 4, "XXH64": "0000000000000002", "Compression": "None", "StoredSize": 4})";
 			REQUIRE(ParsePakToc(MakeTocText("[" + file + ", " + mesh + "]"), 4096).has_value());
 
 			rejects("not json", ErrorCode::Parse);
-			rejects(R"({"Format": "Other", "Version": 1, "Entries": [], "Metadata": {}})", ErrorCode::Validation);
-			rejects(R"({"Format": "PakToc", "Version": 2, "Entries": [], "Metadata": {}})", ErrorCode::UnsupportedVersion);
+			rejects(R"({"Format": "Other", "Version": 2, "Entries": [], "Metadata": {}})", ErrorCode::Validation);
+			rejects(R"({"Format": "PakToc", "Version": 3, "Entries": [], "Metadata": {}})", ErrorCode::UnsupportedVersion);
 			rejects(MakeTocText("[]", R"(, "Extra": 1)"), ErrorCode::Validation);
-			rejects(R"({"Format": "PakToc", "Version": 1, "Entries": [], "Metadata": null})", ErrorCode::Validation);
+			rejects(R"({"Format": "PakToc", "Version": 2, "Entries": [], "Metadata": null})", ErrorCode::Validation);
+			// Version 1, which readers no longer read, and a version 1 entry, without its Compression and StoredSize.
+			rejects(R"({"Format": "PakToc", "Version": 1, "Entries": [], "Metadata": {}})", ErrorCode::Validation);
+			rejects(MakeTocText(R"([{"Handle": null, "Type": "File", "Path": "a.spv", "Offset": 64, "Size": 4, "XXH64": "0000000000000001"}])"),
+				ErrorCode::Validation);
 			// Unsorted (the cooked asset before the plain file), a repeated path, a repeated handle.
 			rejects(MakeTocText("[" + mesh + ", " + file + "]"), ErrorCode::Validation);
-			rejects(MakeTocText("[" + file + R"(, {"Handle": "0000000000000101", "Type": "Mesh", "Path": "a.spv", "Offset": 80, "Size": 4, "XXH64": "0000000000000002"}])"),
+			rejects(MakeTocText("[" + file + R"(, {"Handle": "0000000000000101", "Type": "Mesh", "Path": "a.spv", "Offset": 80, "Size": 4, "XXH64": "0000000000000002", "Compression": "None", "StoredSize": 4}])"),
 				ErrorCode::Validation);
-			rejects(MakeTocText("[" + mesh + R"(, {"Handle": "0000000000000101", "Type": "Mesh", "Path": "engine://Meshes/Other", "Offset": 96, "Size": 4, "XXH64": "0000000000000003"}])"),
+			rejects(MakeTocText("[" + mesh + R"(, {"Handle": "0000000000000101", "Type": "Mesh", "Path": "engine://Meshes/Other", "Offset": 96, "Size": 4, "XXH64": "0000000000000003", "Compression": "None", "StoredSize": 4}])"),
 				ErrorCode::Validation);
 			// The null handle spelled as sixteen zeros, a plain file below a parent escape, an unknown entry member, a bad hash,
 			// an entry inside the header, an unknown type.
-			rejects(MakeTocText(R"([{"Handle": "0000000000000000", "Type": "File", "Path": "a.spv", "Offset": 64, "Size": 4, "XXH64": "0000000000000001"}])"),
+			rejects(MakeTocText(R"([{"Handle": "0000000000000000", "Type": "File", "Path": "a.spv", "Offset": 64, "Size": 4, "XXH64": "0000000000000001", "Compression": "None", "StoredSize": 4}])"),
 				ErrorCode::Validation);
-			rejects(MakeTocText(R"([{"Handle": null, "Type": "File", "Path": "../a.spv", "Offset": 64, "Size": 4, "XXH64": "0000000000000001"}])"),
+			rejects(MakeTocText(R"([{"Handle": null, "Type": "File", "Path": "../a.spv", "Offset": 64, "Size": 4, "XXH64": "0000000000000001", "Compression": "None", "StoredSize": 4}])"),
 				ErrorCode::Validation);
-			rejects(MakeTocText(R"([{"Handle": null, "Type": "File", "Path": "a.spv", "Offset": 64, "Size": 4, "XXH64": "0000000000000001", "Extra": true}])"),
+			rejects(MakeTocText(R"([{"Handle": null, "Type": "File", "Path": "a.spv", "Offset": 64, "Size": 4, "XXH64": "0000000000000001", "Compression": "None", "StoredSize": 4, "Extra": true}])"),
 				ErrorCode::Validation);
-			rejects(MakeTocText(R"([{"Handle": null, "Type": "File", "Path": "a.spv", "Offset": 64, "Size": 4, "XXH64": "xyz"}])"), ErrorCode::Validation);
-			rejects(MakeTocText(R"([{"Handle": null, "Type": "File", "Path": "a.spv", "Offset": 32, "Size": 4, "XXH64": "0000000000000001"}])"),
+			rejects(MakeTocText(R"([{"Handle": null, "Type": "File", "Path": "a.spv", "Offset": 64, "Size": 4, "XXH64": "xyz", "Compression": "None", "StoredSize": 4}])"), ErrorCode::Validation);
+			rejects(MakeTocText(R"([{"Handle": null, "Type": "File", "Path": "a.spv", "Offset": 32, "Size": 4, "XXH64": "0000000000000001", "Compression": "None", "StoredSize": 4}])"),
 				ErrorCode::Validation);
-			rejects(MakeTocText(R"([{"Handle": "0000000000000101", "Type": "Gizmo", "Path": "x", "Offset": 64, "Size": 4, "XXH64": "0000000000000001"}])"),
+			rejects(MakeTocText(R"([{"Handle": "0000000000000101", "Type": "Gizmo", "Path": "x", "Offset": 64, "Size": 4, "XXH64": "0000000000000001", "Compression": "None", "StoredSize": 4}])"),
 				ErrorCode::Validation);
 		}
 
@@ -166,7 +174,7 @@ namespace Engine {
 			PakToc toc;
 			toc.Entries = {
 				{ .Handle = AssetHandle(), .Type = std::string(PakFileEntryType), .Path = "Empty.txt", .Offset = 80, .Size = 0, .Hash = 0 },
-				{ .Handle = AssetHandle(), .Type = std::string(PakFileEntryType), .Path = "Full.txt", .Offset = 64, .Size = 16, .Hash = 0 },
+				{ .Handle = AssetHandle(), .Type = std::string(PakFileEntryType), .Path = "Full.txt", .Offset = 64, .Size = 16, .Hash = 0, .StoredSize = 16 },
 			};
 			Result<PakToc> read = ParsePakToc(SerializePakToc(toc), 80);
 			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
@@ -176,7 +184,7 @@ namespace Engine {
 		// Docs/Decisions/0030-m19-contract.md decision 17 (B-PAKZ): pak version 2 gives every entry its Compression and
 		// StoredSize after its XXH64; the byte ranges are those of the stored bytes, a None entry stores exactly its Size,
 		// and a Deflate entry saves at least an eighth of it. Readers read the current version only.
-		TEST_CASE("PakFormat: version 2 entries carry their compression and stored size, and the ranges cover the stored bytes" * doctest::skip(true))
+		TEST_CASE("PakFormat: version 2 entries carry their compression and stored size, and the ranges cover the stored bytes")
 		{
 			CHECK(PakHeader::CurrentVersion == PakCompressionFormatVersion);
 			CHECK(PakToc::CurrentVersion == PakCompressionFormatVersion);
@@ -189,6 +197,8 @@ namespace Engine {
 				{ .Handle = AssetHandle(), .Type = std::string(PakFileEntryType), .Path = "Shaders/A.spv", .Offset = 64, .Size = 100, .Hash = 1, .Compression = PakCompression::None, .StoredSize = 100 },
 				{ .Handle = AssetHandle(0x101), .Type = "Mesh", .Path = "engine://Meshes/Cube", .Offset = 176, .Size = 4096, .Hash = 2, .Compression = PakCompression::Deflate, .StoredSize = 512 },
 			};
+			// An object Metadata, so the TOC reads back equal (a null one is written, and read back, as {}).
+			toc.Metadata = VariantValue(Json::object());
 			const std::string text = SerializePakToc(toc);
 			CHECK(text.starts_with("{\n\t\"Format\": \"PakToc\",\n\t\"Version\": 2,\n"));
 			CHECK(text.contains("\"Compression\": \"None\""));
@@ -201,6 +211,20 @@ namespace Engine {
 			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
 			CHECK(*read == toc);
 			CHECK(SerializePakToc(*read) == text);
+
+			// Entries overlap only by their stored bytes: a file may start inside the deflated entry's Size but after its
+			// StoredSize, never inside the stored bytes [64, 576).
+			PakToc packed;
+			packed.Entries = {
+				{ .Handle = AssetHandle(), .Type = std::string(PakFileEntryType), .Path = "Shaders/B.spv", .Offset = 576, .Size = 16, .Hash = 3, .Compression = PakCompression::None, .StoredSize = 16 },
+				{ .Handle = AssetHandle(0x101), .Type = "Mesh", .Path = "engine://Meshes/Cube", .Offset = 64, .Size = 4096, .Hash = 2, .Compression = PakCompression::Deflate, .StoredSize = 512 },
+			};
+			const Result<PakToc> packedRead = ParsePakToc(SerializePakToc(packed), 1024);
+			REQUIRE_MESSAGE(packedRead.has_value(), packedRead.error().ToString());
+			packed.Entries[0].Offset = 560;
+			const Result<PakToc> overlapping = ParsePakToc(SerializePakToc(packed), 1024);
+			REQUIRE_FALSE(overlapping.has_value());
+			CHECK(overlapping.error().GetCode() == ErrorCode::Validation);
 
 			const auto rejects = [&toc](size_t index, PakCompression compression, uint64_t storedSize)
 			{
@@ -225,6 +249,28 @@ namespace Engine {
 			Result<PakToc> unknownRead = ParsePakToc(unknown, 1024);
 			REQUIRE_FALSE(unknownRead.has_value());
 			CHECK(unknownRead.error().GetCode() == ErrorCode::Validation);
+		}
+
+		// Decision 17's rule for a deflated entry, shared by the writer and the reader: a non-empty stream that saves at
+		// least an eighth (8 × (Size − StoredSize) >= Size), decided without overflow for any size.
+		TEST_CASE("PakFormat: a deflated size is valid exactly when the stream is not empty and saves at least an eighth")
+		{
+			CHECK(IsValidPakDeflateSize(8, 7));
+			CHECK_FALSE(IsValidPakDeflateSize(9, 8));
+			CHECK(IsValidPakDeflateSize(9, 7));
+			CHECK(IsValidPakDeflateSize(4096, 3584));
+			CHECK_FALSE(IsValidPakDeflateSize(4096, 3585));
+			CHECK(IsValidPakDeflateSize(4096, 1));
+			CHECK_FALSE(IsValidPakDeflateSize(4096, 0));
+			CHECK_FALSE(IsValidPakDeflateSize(4096, 4096));
+			CHECK_FALSE(IsValidPakDeflateSize(4096, 5000));
+			CHECK_FALSE(IsValidPakDeflateSize(0, 0));
+			CHECK_FALSE(IsValidPakDeflateSize(1, 0));
+			CHECK(IsValidPakDeflateSize(7, 6));
+			// The largest size: the saving must be at least 2^61 bytes, ceil((2^64 - 1) / 8).
+			constexpr uint64_t Largest = std::numeric_limits<uint64_t>::max();
+			CHECK(IsValidPakDeflateSize(Largest, Largest - (uint64_t{ 1 } << 61)));
+			CHECK_FALSE(IsValidPakDeflateSize(Largest, Largest - (uint64_t{ 1 } << 61) + 1));
 		}
 	}
 

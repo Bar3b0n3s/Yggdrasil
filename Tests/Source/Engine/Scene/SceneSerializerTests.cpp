@@ -8,6 +8,7 @@
 #include "Engine/Core/Random.h"
 #include "Engine/Core/UUIDGenerator.h"
 #include "Engine/Core/VirtualFileSystem.h"
+#include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/ChangeTracker.h"
 #include "Engine/Scene/Components/CharacterControllerComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
@@ -19,6 +20,7 @@
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Components/UnknownComponentsComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/Prefab.h"
 #include "Support/FixtureSchemaSource.h"
 #include "Support/Fuzz.h"
 #include "Support/GlmApprox.h"
@@ -928,10 +930,10 @@ namespace Engine {
 			CHECK(rejected.error().GetCode() == ErrorCode::Validation);
 		}
 
-		// Docs/Decisions/0030-m19-contract.md decision 27 (stream N-B; SceneSerializer.cpp is M20's in phase 1, so the change
-		// waits for the ledger's amendment): a "Native." component is kept as written like an unknown one, but it is never
+		// Docs/Decisions/0030-m19-contract.md decision 27 (SceneSerializer.cpp is M20's in phase 1; the ledger's amendment on main,
+		// 45f3358, gives M19 this one condition): a "Native." component is kept as written like an unknown one, but it is never
 		// reported as unknown, so --strict loads it; whether the loaded module registers it is the native layer's check.
-		TEST_CASE("SceneSerializer: a native component is kept as written and never reported as unknown, also under --strict" * doctest::skip(true))
+		TEST_CASE("SceneSerializer: a native component is kept as written and never reported as unknown, also under --strict")
 		{
 			const std::string text = R"({
 	"Format": "Scene",
@@ -987,6 +989,51 @@ namespace Engine {
 				REQUIRE(saved.has_value());
 				CHECK(*saved == text);
 			}
+
+			// A prefab's entities are read the same way, so a strict editor's check of every prefab keeps them as well.
+			const std::string prefabText = R"({
+	"Format": "Prefab",
+	"Version": 1,
+	"Name": "Spinner",
+	"Root": "5000000000000002",
+	"ComponentVersions": {
+		"Transform": 1,
+		"Native.Spinner": 1
+	},
+	"Entities": [
+		{
+			"ID": "5000000000000002",
+			"Name": "Spinner",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Native.Spinner": {
+					"DegreesPerSecond": 90
+				}
+			}
+		}
+	]
+}
+)";
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			LoadOptions strict;
+			strict.StrictUnknowns = true;
+			LoadReport prefabReport;
+			const Result<Prefab> prefab = Prefab::LoadFromString(prefabText, *registry, strict, prefabReport);
+			REQUIRE_MESSAGE(prefab.has_value(), prefab.error().ToString());
+			CHECK(std::none_of(prefabReport.Diagnostics.begin(), prefabReport.Diagnostics.end(), [](const LoadDiagnostic& diagnostic)
+			{
+				return diagnostic.Code == SceneUnknownComponentCode;
+			}));
+			const Result<std::string> savedPrefab = prefab->SaveToString();
+			REQUIRE(savedPrefab.has_value());
+			CHECK(*savedPrefab == prefabText);
 		}
 	}
 

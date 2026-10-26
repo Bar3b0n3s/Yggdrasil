@@ -588,11 +588,11 @@
 		},
 		{
 			"Path": "Tetris.eproj",
-			"XXH64": "6b264d055675aff5",
-			"Method": "project.setSettings",
-			"RequestId": 49,
-			"Client": "engine-mcp",
-			"TranscriptLine": 397
+			"XXH64": "d44f3fecdc82b79a",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 517
 		}
 	]
 }

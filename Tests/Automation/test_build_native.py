@@ -28,6 +28,7 @@ from harness import REPOSITORY_ROOT, automation_config
 sys.path.insert(0, str(REPOSITORY_ROOT / "Scripts"))
 
 import Format  # noqa: E402  (Scripts/ is on sys.path above)
+import Lint  # noqa: E402
 from Lib import native_build, paths  # noqa: E402
 
 SCRIPT = REPOSITORY_ROOT / "Scripts" / "BuildNative.py"
@@ -138,6 +139,22 @@ class FormatTests(unittest.TestCase):
                                 "Projects/Game/Assets/Notes.txt": "", "Vendor/Lib/Lib.cpp": ""})
         self.assertEqual(sorted(Format.first_party_files(directory, None)),
                          ["Projects/Game/Native/Spinner.cpp", "Tests/Projects/Game/Native/Systems/Move.h"])
+
+
+class LintTests(unittest.TestCase):
+    def test_the_editors_backups_beside_the_sources_are_not_module_files(self) -> None:
+        # Decision 35's file rule and the editor's own backups: every project write keeps the previous bytes as
+        # "<file>.bak" (NativeDirectoryMount), so native.write leaves one beside each source it overwrites. No build
+        # reads it and the project's .gitignore leaves it out, so the lint of a build does not refuse it, while any
+        # other file below Native/ still is a finding.
+        directory = Path(tempfile.mkdtemp(prefix="BuildNative-"))
+        self.addCleanup(shutil.rmtree, directory, True)
+        write_files(directory, {"Native/Spinner.cpp": '#include "Engine/Native/NativeApi.h"\n',
+                                "Native/Spinner.cpp.bak": "// the source before native.write replaced it\n",
+                                "Native/Notes.txt": "a note\n"})
+        findings = Lint.lint_native_module(directory)
+        self.assertEqual(sorted({(finding.file, finding.code) for finding in findings}),
+                         [("Native/Notes.txt", "native-file")])
 
 
 class RecordTests(unittest.TestCase):

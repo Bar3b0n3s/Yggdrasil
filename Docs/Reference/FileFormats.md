@@ -230,7 +230,8 @@ Header: `"Format": "Project", "Version": 1`. Schema: [Schemas/Project.schema.jso
 		"Exclude": ["Assets/Tests/**"],
 		"Icon": "",
 		"Version": "1.0.0",
-		"Company": ""
+		"Company": "",
+		"PruneUnreferenced": false
 	},
 	"Testing": {
 		"Suites": [
@@ -495,8 +496,8 @@ The files the editor imports from `Assets/`, by importer and extension (§7.4). 
 | Audio | `.wav` | AudioClip | 1 | `AudioImportSettings` | yes |
 | Environment | `.exr` | Environment | 1 | `EnvironmentImportSettings` | no |
 | Environment | `.hdr` | Environment | 1 | `EnvironmentImportSettings` | yes |
-| Font | `.otf` | Font | 2 | `FontImportSettings` | yes |
-| Font | `.ttf` | Font | 2 | `FontImportSettings` | yes |
+| Font | `.otf` | Font | 3 | `FontImportSettings` | yes |
+| Font | `.ttf` | Font | 3 | `FontImportSettings` | yes |
 | Gltf | `.glb` | Prefab | 1 | `GltfImportSettings` | yes |
 | Gltf | `.gltf` | Prefab | 1 | `GltfImportSettings` | yes |
 | Material | `.material` | Material | 1 | none | yes |

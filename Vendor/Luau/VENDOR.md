@@ -48,6 +48,13 @@ Why Config is in `Luau` and not in `LuauAnalysis`: upstream `Luau.Require` links
 layout without a dependency cycle (`LuauAnalysis` already depends on the runtime). Static linking only pulls in the object
 files that are actually referenced, so the Runtime executable does not pay for unused parts.
 
+The engine builds `Luau.Require` and `Luau.Config` into `Luau` unchanged, but nothing first-party calls `Luau.Require`:
+the sandbox's `require` is first-party (Docs/Decisions/0030-m19-contract.md decision 22), and consumers do not get
+`Require/include`. Only `LuauAnalysis` (the editor's type checker) uses `Luau.Config`. So the Dist Runtime, where
+`ScriptCompiler` is `Unsupported`, links no Require, Config, Compiler or Bytecode object (Parser and Ast stay for the
+script API registry's signature parsing), and `Scripts/CheckRuntimeMap.py`'s `LuauCompiler` family fails the Dist map
+check if one returns.
+
 Build settings mirrored from upstream `CMakeLists.txt` / `Makefile`:
 
 - Dialect C++17 for every module (upstream `Luau.Common` has `PUBLIC cxx_std_17`, which propagates to `Luau.VM`).
@@ -80,8 +87,12 @@ Build settings mirrored from upstream `CMakeLists.txt` / `Makefile`:
 Runtime (Engine, Runtime, Editor, Tests):
 
 ```
-Common/include  Ast/include  Bytecode/include  Compiler/include  Config/include  VM/include  Require/include
+Common/include  Ast/include  Bytecode/include  Compiler/include  Config/include  VM/include
 ```
+
+`Require/include` is not a consumer include directory: `require` is first-party (above), so including `Luau/Require.h`
+fails to compile and to lint (`Scripts/ModuleRules.json`). `Config/include` stays for the type checker (`Luau/Config.h`
+beside `LuauAnalysis`).
 
 Additionally for static analysis (Editor / tools only): `Analysis/include`.
 Never add `VM/src` (VM internals) to a consumer's include path.
@@ -93,7 +104,6 @@ Public headers:
 | `lua.h`, `lualib.h` (`luaconf.h`) | VM C API: `luaL_newstate`, `luaL_openlibs`, `luaL_sandbox`, `luaL_sandboxthread`, `luau_load`, `lua_pcall`, ... |
 | `luacode.h` | `luau_compile` (returns a `malloc`ed buffer - release it with `free`) |
 | `Luau/Compiler.h` | C++ compiler API (`Luau::compile`, `Luau::CompileOptions`) |
-| `Luau/Require.h` | require-by-string: `luaopen_require` + `luarequire_Configuration` callbacks |
 | `Luau/Common.h` | `LUAU_ASSERT`, `Luau::assertHandler()`, fast flags (`Luau::FValue`) |
 | `Luau/ExperimentalFlags.h` | `Luau::isAnalysisFlagExperimental` (see fast flags below) |
 | `Luau/Frontend.h`, `Luau/BuiltinDefinitions.h`, `Luau/Error.h`, `Luau/FileResolver.h`, `Luau/ConfigResolver.h`, `Luau/ToString.h` | type checking (`LuauAnalysis`) |

@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/Asset/PakReader.h"
 
+#include "Engine/Asset/PakCompression.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
@@ -225,17 +226,29 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidArgument, "the pak '{}' has no entry '{}'", state.Name, entry.Path);
 		const PakEntry& stored = entries[index];
 
-		// The TOC's ranges were checked at open (ParsePakToc: inside the entry data, so inside the pak).
+		// The TOC's ranges of stored bytes were checked at open (ParsePakToc: inside the entry data, so inside the pak).
 		Buffer bytes;
 		if (state.IsFile)
 		{
 			const std::scoped_lock lock(state.FileMutex);
-			ENGINE_TRY_ASSIGN(bytes, Utils::ReadFileRange(state.File, stored.Offset, stored.Size, state.Name));
+			ENGINE_TRY_ASSIGN(bytes, Utils::ReadFileRange(state.File, stored.Offset, stored.StoredSize, state.Name));
 		}
 		else
 		{
-			const std::span<const std::byte> range = std::span<const std::byte>(state.Bytes).subspan(static_cast<size_t>(stored.Offset), static_cast<size_t>(stored.Size));
+			const std::span<const std::byte> range = std::span<const std::byte>(state.Bytes).subspan(static_cast<size_t>(stored.Offset), static_cast<size_t>(stored.StoredSize));
 			bytes.assign(range.begin(), range.end());
+		}
+		// A deflated entry is inflated on every read (Docs/Decisions/0030-m19-contract.md decision 17); what follows sees
+		// the entry's own bytes either way.
+		if (stored.Compression == PakCompression::Deflate)
+		{
+			Result<Buffer> inflated = InflatePakEntry(bytes, stored.Size);
+			if (!inflated.has_value())
+			{
+				return MakeError(ErrorCode::Validation, "entry '{}' is corrupted (its stream does not inflate: {}) in the pak '{}'", stored.Path,
+					inflated.error().GetMessageText(), state.Name);
+			}
+			bytes = std::move(*inflated);
 		}
 
 		{

@@ -140,7 +140,7 @@
 		},
 		{
 			"Path": "Assets/Formats/Fonts/Glyphs.ttf.meta",
-			"XXH64": "b196ceaf1c95d9bc",
+			"XXH64": "b9366683d1f7b4fb",
 			"Method": "asset.import",
 			"RequestId": 10,
 			"Client": "batch",
@@ -156,7 +156,7 @@
 		},
 		{
 			"Path": "Assets/Formats/Fonts/Inter-Regular.otf.meta",
-			"XXH64": "64607c9dbefad797",
+			"XXH64": "5a0586840534a3d3",
 			"Method": "asset.import",
 			"RequestId": 11,
 			"Client": "batch",
@@ -2884,7 +2884,7 @@
 		},
 		{
 			"Path": "FeatureTest.eproj",
-			"XXH64": "d4714793aeb2f9ab",
+			"XXH64": "e3fcd41389919e4d",
 			"Method": "project.setSettings",
 			"RequestId": 1,
 			"Client": "batch",

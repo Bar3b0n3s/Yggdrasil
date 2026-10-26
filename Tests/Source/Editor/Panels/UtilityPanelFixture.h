@@ -50,12 +50,13 @@ namespace Engine {
 		};
 
 		// Real editor, server, queued human actions, the host's preference queue (EditorHostPreferences) and ImGui. Only the
-		// renderer is an injected boundary. Frames advance explicitly; no GPU, sleeps, or private ImGui inspection is involved.
+		// renderer is an injected boundary, and the native module host's backends when `native` gives fakes (M19). Frames
+		// advance explicitly; no GPU, sleeps, or private ImGui inspection is involved.
 		class UtilityPanelFixture
 		{
 		public:
-			explicit UtilityPanelFixture(UtilityPanelClock clock = UtilityPanelClock::Real)
-				: m_Clock(clock), m_Environment("UtilityPanels"), m_Client(m_Environment.GetEditor(), MakeSpecification()), m_Actions(m_Environment.GetEditor(), m_Client.GetServer()), m_Controls(m_Environment.GetEditor(), m_Client.GetServer()), m_Edits(m_Environment.GetEditor()), m_Thumbnails(m_Environment.GetEditor(), {}), m_Gizmos(m_Environment.GetEditor()), m_Context{ m_Environment.GetEditor(), m_Client.GetServer(), m_Actions, m_Controls, m_Viewports, m_Edits, m_Thumbnails, m_Gizmos }
+			explicit UtilityPanelFixture(UtilityPanelClock clock = UtilityPanelClock::Real, EditorTestNativeBackends native = {})
+				: m_Clock(clock), m_Environment("UtilityPanels", {}, nullptr, std::nullopt, false, std::move(native)), m_Client(m_Environment.GetEditor(), MakeSpecification()), m_Actions(m_Environment.GetEditor(), m_Client.GetServer()), m_Controls(m_Environment.GetEditor(), m_Client.GetServer()), m_Edits(m_Environment.GetEditor()), m_Thumbnails(m_Environment.GetEditor(), {}), m_Gizmos(m_Environment.GetEditor()), m_Context{ m_Environment.GetEditor(), m_Client.GetServer(), m_Actions, m_Controls, m_Viewports, m_Edits, m_Thumbnails, m_Gizmos }
 			{
 				m_ImGui = ImGui::CreateContext();
 				ImGuiIO& io = ImGui::GetIO();

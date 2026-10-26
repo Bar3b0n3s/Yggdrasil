@@ -66,8 +66,7 @@ IncludeDir["Luau"] =
 	RepositoryRoot .. "/Vendor/Luau/Bytecode/include",
 	RepositoryRoot .. "/Vendor/Luau/Compiler/include",
 	RepositoryRoot .. "/Vendor/Luau/Config/include",
-	RepositoryRoot .. "/Vendor/Luau/VM/include",
-	RepositoryRoot .. "/Vendor/Luau/Require/include"
+	RepositoryRoot .. "/Vendor/Luau/VM/include"
 }
 IncludeDir["LuauAnalysis"] = RepositoryRoot .. "/Vendor/Luau/Analysis/include"
 IncludeDir["ImGui"] = RepositoryRoot .. "/Vendor/imgui"

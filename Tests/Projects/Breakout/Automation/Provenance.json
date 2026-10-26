@@ -396,11 +396,11 @@
 		},
 		{
 			"Path": "Breakout.eproj",
-			"XXH64": "a3c6f5df749629b8",
-			"Method": "project.setSettings",
-			"RequestId": 87,
-			"Client": "engine-mcp",
-			"TranscriptLine": 171
+			"XXH64": "85e0dcb784b31346",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 399
 		}
 	]
 }

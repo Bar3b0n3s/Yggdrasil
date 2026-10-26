@@ -23,6 +23,10 @@ namespace Engine {
 		Stats,
 		Automation,
 		UndoHistory,
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 29): the game's native module and the user's Allow native code
+		// preference; closed by default.
+		Native,
+		// Last: the editor's loops over the panels end with it.
 		ProjectLauncher
 	};
 

@@ -1,10 +1,13 @@
 #include "TestsPCH.h"
 #include "Engine/Platform/SharedLibrary.h"
 
+#include "Engine/Core/FileSystem.h"
 #include "Support/PlatformProbes.h"
 #include "Support/TempDirectory.h"
 
 #include <filesystem>
+#include <span>
+#include <string_view>
 
 namespace Engine {
 
@@ -25,7 +28,7 @@ namespace Engine {
 
 		// Decision 31 (N-C): a library loads by its absolute path, resolves what it exports, refuses what it does not, and
 		// unloads with its object; on Linux and macOS every load is Unsupported.
-		TEST_CASE("SharedLibrary: a library loads, resolves an exported function, refuses a missing one and unloads" * doctest::skip(true))
+		TEST_CASE("SharedLibrary: a library loads, resolves an exported function, refuses a missing one and unloads")
 		{
 			const Test::SystemLibraryProbe probe = Test::GetSystemLibraryProbe();
 #if defined(ENGINE_PLATFORM_WINDOWS)
@@ -54,6 +57,25 @@ namespace Engine {
 			CHECK(refused.error().GetCode() == ErrorCode::Unsupported);
 			CHECK(probe.Library.empty());
 #endif
+		}
+
+		// Decision 31 (N-C): a file the system cannot load as a library is refused, naming it, and nothing stays loaded.
+		TEST_CASE("SharedLibrary: a file that is not a library is refused with Io, naming it")
+		{
+			const Test::TempDirectory directory("SharedLibraryNotALibrary");
+			const std::filesystem::path file = directory / "NotALibrary.dll";
+			const std::string_view text = "not a library\n";
+			REQUIRE(FileSystem::WriteFileAtomic(file, std::as_bytes(std::span(text.data(), text.size()))).has_value());
+			const Result<Scope<SharedLibrary>> refused = SharedLibrary::Load(file);
+			REQUIRE_FALSE(refused.has_value());
+#if defined(ENGINE_PLATFORM_WINDOWS)
+			CHECK(refused.error().GetCode() == ErrorCode::Io);
+			CHECK(refused.error().GetMessageText().contains("NotALibrary.dll"));
+#else
+			CHECK(refused.error().GetCode() == ErrorCode::Unsupported);
+#endif
+			// The file is not held: it can be removed at once.
+			CHECK(FileSystem::Remove(file).has_value());
 		}
 	}
 

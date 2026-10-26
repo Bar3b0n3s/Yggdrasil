@@ -14,6 +14,8 @@
 #include "Support/Fuzz.h"
 #include "Support/TempDirectory.h"
 
+#include <algorithm>
+
 namespace Engine {
 
 	namespace {
@@ -76,6 +78,14 @@ namespace Engine {
 		TEST_CASE("PakReader: 10,000 seeded mutations never crash and always return Result" * doctest::test_suite(Test::FuzzSuite))
 		{
 			const Buffer pak = MakeSmallPak();
+			// The seed holds a deflated entry (the cooked cube saves more than an eighth), so mutations of its stream reach
+			// the inflater through ReadEntry (Docs/Decisions/0030-m19-contract.md decision 17).
+			Result<Ref<const PakReader>> seed = PakReader::OpenMemory(pak, "Seed.pak");
+			REQUIRE(seed.has_value());
+			REQUIRE(std::ranges::any_of((*seed)->GetEntries(), [](const PakEntry& entry)
+			{
+				return entry.Compression == PakCompression::Deflate;
+			}));
 			const Test::FuzzRun run = Test::RunFuzzCase(0x9A4, 10000, [&pak](Random& random, uint64_t /*index*/)
 			{
 				Buffer mutated = pak;
@@ -215,7 +225,7 @@ namespace Engine {
 		// verified against its XXH64 after inflating, from a memory and from a file pak, and a mount serves the inflated
 		// file with its inflated size; a damaged stream is the entry's Validation error, naming it, and the other entries
 		// still read.
-		TEST_CASE("PakReader: a deflated entry reads back inflated and verified, also through a mount, and a damaged stream is refused" * doctest::skip(true))
+		TEST_CASE("PakReader: a deflated entry reads back inflated and verified, also through a mount, and a damaged stream is refused")
 		{
 			const std::string text(8192, 'z');
 			PakWriter writer;
@@ -255,9 +265,12 @@ namespace Engine {
 			REQUIRE(info.has_value());
 			CHECK(info->Size == text.size());
 
-			// A damaged byte in the middle of the stream: it no longer inflates to the entry's bytes.
+			// Damaged bytes in the middle of the stream: it no longer inflates to the entry's bytes. Every match of the stream
+			// copies 'z's, so a flipped distance would still inflate to them; zeroed bytes cannot, since stb writes one
+			// fixed-Huffman block, where seven zero bits are the end-of-block code, so the stream ends half-way.
 			const PakEntry& stored = *(*fromMemory)->FindByPath("Shaders/Long.txt");
-			pak[stored.Offset + stored.StoredSize / 2] ^= std::byte{ 0x5a };
+			REQUIRE(stored.StoredSize > 16);
+			std::fill_n(pak.begin() + static_cast<std::ptrdiff_t>(stored.Offset + stored.StoredSize / 2 - 4), 8, std::byte{ 0 });
 			Result<Ref<const PakReader>> damaged = PakReader::OpenMemory(pak, "Damaged.pak");
 			REQUIRE(damaged.has_value());
 			Result<Buffer> refused = (*damaged)->ReadEntry(*(*damaged)->FindByPath("Shaders/Long.txt"));

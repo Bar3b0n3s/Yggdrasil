@@ -323,8 +323,9 @@ class Runner:
                 if steps[-1].failed:
                     return steps
             if config == "Dist":
-                # Roadmap M15: the shipping Runtime links no automation, Luau Analysis, ImGui or AssetPipeline code and
-                # keeps the FeatureTest harness (§14.4; PreCommit builds no Dist, so the check lives here).
+                # Roadmap M15: the shipping Runtime links no automation, Luau Analysis, ImGui or AssetPipeline code and,
+                # since ADR 0030 decision 22, no Luau compiler code, and keeps the FeatureTest harness (§14.4; PreCommit
+                # builds no Dist, so the check lives here; the step keeps its M15 acceptance name).
                 steps.append(self.script(RUNTIME_MAP_ACCEPTANCE_NAME, "CheckRuntimeMap.py", ["--config", "Dist"],
                                          TIMEOUTS["runtime-map"]))
                 if steps[-1].failed:

@@ -8,6 +8,7 @@
 #include "Editor/Panels/DiagnosticsPanel.h"
 #include "Editor/Panels/GameViewportPanel.h"
 #include "Editor/Panels/InspectorPanel.h"
+#include "Editor/Panels/NativePanel.h"
 #include "Editor/Panels/ProjectSettingsPanel.h"
 #include "Editor/Panels/SceneHierarchyPanel.h"
 #include "Editor/Panels/SceneViewportPanel.h"
@@ -168,6 +169,7 @@ namespace Engine {
 		StatsPanel Stats{};
 		AutomationPanel Automation{};
 		UndoHistoryPanel History{};
+		NativePanel Native{};
 		ProjectLauncher Launcher{};
 		std::vector<uint64_t> Tickets{};
 		std::string ErrorMessage{};
@@ -537,7 +539,7 @@ namespace Engine {
 			ImGui::DockBuilderDockWindow(Utils::EditorWindowTitle(EditorPanel::SceneViewport), center);
 			ImGui::DockBuilderDockWindow(Utils::EditorWindowTitle(EditorPanel::GameViewport), center);
 			for (const EditorPanel panel : { EditorPanel::ContentBrowser, EditorPanel::Console, EditorPanel::Diagnostics,
-					 EditorPanel::Stats, EditorPanel::Automation, EditorPanel::UndoHistory })
+					 EditorPanel::Stats, EditorPanel::Automation, EditorPanel::UndoHistory, EditorPanel::Native })
 				ImGui::DockBuilderDockWindow(Utils::EditorWindowTitle(panel), bottom);
 			ImGui::DockBuilderDockWindow(Utils::EditorWindowTitle(EditorPanel::ProjectSettings), right);
 			ImGui::DockBuilderFinish(dock);
@@ -791,6 +793,7 @@ namespace Engine {
 					case EditorPanel::Stats:           drawn = m_State->Stats.Draw(context); break;
 					case EditorPanel::Automation:      drawn = m_State->Automation.Draw(context); break;
 					case EditorPanel::UndoHistory:     drawn = m_State->History.Draw(context); break;
+					case EditorPanel::Native:          drawn = m_State->Native.Draw(context); break;
 					case EditorPanel::ProjectLauncher:
 						if (!editor.HasProject())
 							drawn = m_State->Launcher.Draw(context);

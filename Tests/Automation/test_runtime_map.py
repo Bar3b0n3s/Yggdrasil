@@ -150,8 +150,6 @@ class RuntimeMapTests(unittest.TestCase):
         self.assertNotIn("Engine::TypeRegistry", names["automation"])
         self.assertNotIn("Engine::Utils::PrefixPointers", names["automation"])
 
-    @unittest.skip("contract stub: the LuauCompiler family (Docs/Decisions/0030-m19-contract.md decision 22, B-LUAU, "
-                   "stream H)")
     def test_the_luau_compiler_family_finds_the_compiler_and_the_require_library_but_not_the_parser(self) -> None:
         # Docs/Decisions/0030-m19-contract.md decision 22 (B-LUAU; Roadmap M19 acceptance "The Dist map holds no
         # Luau::compile, BytecodeBuilder or extractLuauConfig symbol"): once the first-party require replaces Luau's

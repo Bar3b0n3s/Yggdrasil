@@ -38,6 +38,7 @@ Section references (§) point to `Docs/Architecture.md` unless marked CodeStyle 
 - [ ] Integer arithmetic has no overflow, sign or narrowing bugs. Every narrowing conversion is an explicit `static_cast`, and the value is known to fit.
 - [ ] Floating-point code handles NaN and Inf from external input. Values are rejected before they reach Jolt, the renderer or serialized data (§5.4, §9.1).
 - [ ] Code that reads binary or JSON data is bounds-checked and returns a `Result`. Hostile input never crashes it.
+- [ ] A new or changed importer lists in `Import.Dependencies` every asset its cooked output references, with a test (Architecture §7.4; ADR 0030 decision 21): the exporter checks these lists and follows them to decide what `Engine.pak` and, with `Export.PruneUnreferenced`, `Game.pak` hold, so an omission ships a broken or pruned game. A scene's or prefab's Script field values are the one exception, which the exporter collects itself.
 
 ## 2. Style and naming (CodeStyle; `Format.py --check` and `Lint.py` catch most of it)
 

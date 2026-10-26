@@ -86,7 +86,7 @@ namespace Engine {
 "MoveX": {"Type": "Axis", "Positive": ["Key.D"], "Negative": ["Key.A"], "Gamepad": "Gamepad.LeftX", "Invert": false}}},
 "Rendering": {"ShadowMapSize": 2048, "SsaoHalfResolution": false},
 "Scripting": {"MemoryLimitMB": 256, "CallbackBudgetMs": 1000, "PauseOnError": true, "BlockPlayOnTypeErrors": false},
-"Export": {"BuildScenes": ["Assets/Scenes/Level1.scene"], "Exclude": ["Assets/Tests/**"], "Icon": "", "Version": "1.0.0", "Company": ""},
+"Export": {"BuildScenes": ["Assets/Scenes/Level1.scene"], "Exclude": ["Assets/Tests/**"], "Icon": "", "Version": "1.0.0", "Company": "", "PruneUnreferenced": false},
 "Testing": {"Suites": [{"Script": "Assets/Tests/Level1.test.luau", "Scene": "Assets/Scenes/Level1.scene"}], "Replays": ["Assets/Tests/Replays/*.replay"],
 "CaseTimeoutTicks": 600, "SuiteTickLimit": 36000, "CoverageGates": false}})";
 

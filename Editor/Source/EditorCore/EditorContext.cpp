@@ -22,14 +22,19 @@
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Jobs/JobSystem.h"
+#include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Mounts/NativeDirectoryMount.h"
 #include "Engine/Core/Mounts/OverlayMount.h"
 #include "Engine/Core/VirtualFileSystem.h"
+#include "Engine/Native/NativeComponents.h"
+#include "Engine/Native/NativeModule.h"
 #include "Engine/Platform/SecureRandom.h"
+#include "Engine/Platform/SharedLibrary.h"
 #include "Engine/Project/ProjectSerializer.h"
 #include "Engine/Scene/ChangeTracker.h"
 #include "Engine/Scene/Components/PrefabInstanceComponent.h"
+#include "Engine/Scene/Components/UnknownComponentsComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
 #include "Engine/Scene/Prefab.h"
@@ -45,6 +50,8 @@
 #include <functional>
 #include <map>
 #include <set>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -356,6 +363,125 @@ namespace Engine {
 			size_t m_MemorySize = 0;
 		};
 
+		// SetScene's canonicalization of the opened scene's native components against the loaded module (decision 27), each
+		// finding logged; a component its type rejects or the module does not register stays as written. Returns whether the
+		// scene changed.
+		static bool CanonicalizeOpenedSceneNatives(Scene& scene, const NativeModuleTypes& types)
+		{
+			Result<NativeSceneReport> report = CanonicalizeNativeComponents(scene, &types, false);
+			if (!report)
+			{
+				ENGINE_WARN("The native components of scene '{}' stay as written: {}", scene.GetName(), report.error());
+				return false;
+			}
+			for (const LoadDiagnostic& diagnostic : report->Diagnostics)
+			{
+				ENGINE_WARN("Scene '{}', entity {} {}: {} ({})", scene.GetName(), diagnostic.Entity.ToString(), diagnostic.JsonPointer, diagnostic.Message,
+					diagnostic.Code);
+			}
+			if (report->Changed)
+				ENGINE_INFO("Scene '{}': its native components were made canonical for the loaded native module; save the scene to keep them", scene.GetName());
+			return report->Changed;
+		}
+
+		// The --strict document check's native findings for one scene or prefab document (decision 27): every "Native."
+		// component of every entity checked as CanonicalizeNativeComponents checks it with StrictUnknowns, so a component the
+		// loaded module does not register (every one while none is loaded), one whose value its type rejects and one that
+		// would migrate (a member dropped or reset) are each an error, located in the file. Read from the document itself, so
+		// it holds whatever the serializer's own strict load reports.
+		static std::vector<LoadDiagnostic> FindNativeDocumentProblems(const Json& document, const NativeModuleTypes* types)
+		{
+			std::vector<LoadDiagnostic> problems;
+			const JsonReader reader(document);
+			const std::optional<JsonReader> entities = reader.FindMember("Entities");
+			const Result<size_t> count = entities.has_value() ? entities->GetArraySize() : Result<size_t>(0);
+			for (size_t index = 0; count.has_value() && index < *count; ++index)
+			{
+				// A document whose structure is broken is the strict load's finding, not this check's.
+				const Result<JsonReader> entity = entities->GetElement(index);
+				if (!entity.has_value() || !entity->IsObject())
+					continue;
+				const std::optional<JsonReader> components = entity->FindMember("Components");
+				if (!components.has_value() || !components->IsObject())
+					continue;
+				const Result<std::vector<std::string>> names = components->GetMemberNames();
+				if (!names.has_value())
+					continue;
+				const std::optional<JsonReader> idMember = entity->FindMember("ID");
+				const Result<UUID> read = idMember.has_value() ? idMember->ReadUUID() : Result<UUID>(UUID());
+				const UUID id = read.value_or(UUID());
+				for (const std::string& name : *names)
+				{
+					if (!IsNativeComponentName(name))
+						continue;
+					const Result<JsonReader> component = components->GetMember(name);
+					if (!component.has_value())
+						continue;
+					const NativeTypeInfo* type = types != nullptr ? types->FindComponent(name) : nullptr;
+					if (type == nullptr)
+					{
+						problems.push_back(LoadDiagnostic{ .Severity = DiagnosticSeverity::Error,
+							.Code = std::string(NativeComponentUnregisteredCode),
+							.Message = types == nullptr ? std::format("no native module is loaded to read '{}'", name)
+														: std::format("the loaded native module registers no component '{}'", name),
+							.JsonPointer = component->GetPointer(),
+							.Entity = id });
+						continue;
+					}
+					const Result<NativeCanonicalValue> canonical = CanonicalizeNativeValue(*type, component->GetValue(), component->GetPointer());
+					if (!canonical)
+					{
+						const std::vector<ErrorIssue>& issues = canonical.error().GetIssues();
+						if (issues.empty())
+						{
+							problems.push_back(LoadDiagnostic{ .Severity = DiagnosticSeverity::Error,
+								.Code = std::string(NativeComponentInvalidCode),
+								.Message = std::format("{} holds a value its type rejects: {}", name, canonical.error().GetMessageText()),
+								.JsonPointer = component->GetPointer(),
+								.Entity = id });
+						}
+						for (const ErrorIssue& issue : issues)
+						{
+							problems.push_back(LoadDiagnostic{ .Severity = DiagnosticSeverity::Error,
+								.Code = std::string(NativeComponentInvalidCode),
+								.Message = std::format("{} holds a value its type rejects: {}", name, issue.Message),
+								.JsonPointer = issue.JsonPointer,
+								.Entity = id });
+						}
+						continue;
+					}
+					for (const NativeValueNote& note : canonical->Report.Notes)
+					{
+						problems.push_back(LoadDiagnostic{ .Severity = DiagnosticSeverity::Error,
+							.Code = note.Code,
+							.Message = note.Message,
+							.JsonPointer = JsonReader::AppendPointer(component->GetPointer(), note.Field),
+							.Entity = id });
+					}
+				}
+			}
+			return problems;
+		}
+
+		// The hint of the --strict document check's native findings while no module is loaded (decision 27): why none is, as
+		// the host knows it (the platform, the user's preference, the project opening's failed load), else that no build of
+		// the sources as they are now exists (decision 31: a project's opening builds nothing).
+		[[nodiscard]] static std::string MakeUnloadedNativeHint(const NativeModuleHost& host, const Status& opened)
+		{
+			constexpr std::string_view Needs = "a --strict editor reads native components only with the project's native module loaded";
+			if (const Status supported = SharedLibrary::CheckSupported(); !supported)
+				return std::format("{}, which this platform cannot load ({}): open the project without --strict", Needs, supported.error().GetMessageText());
+			if (!host.IsAllowed())
+				return std::format("{}: turn on Allow native code, build the module (native.build) and open the project again", Needs);
+			if (!opened)
+			{
+				return std::format("{}, and it did not load when the project opened: {}; correct the module or the components named, build it again "
+								   "(native.build) and open the project again",
+					Needs, opened.error().ToString());
+			}
+			return std::format("{}, and no build of its sources as they are now exists: build the module (native.build) and open the project again", Needs);
+		}
+
 	}
 
 	// --- EditorContext ---------------------------------------------------------------------------------------------------
@@ -390,9 +516,11 @@ namespace Engine {
 		// M12: the asset browser's audio preview, when the engine context has an audio engine.
 		if (AudioEngine* audio = engine.GetAudioEngine(); audio != nullptr)
 			m_AudioPreview = CreateScope<AudioPreview>(*audio, *m_Assets);
-		// M19 (Docs/Decisions/0030-m19-contract.md decisions 29 to 31): the native module host. Stream N-C reads the
-		// preference here and wires the project's open, close and frame into it.
+		// M19 (Docs/Decisions/0030-m19-contract.md decisions 29 to 31): the native module host, which reads the user's Allow
+		// native code preference now and again when a project opens; the project's open and close and every frame reach it.
 		m_Native = CreateScope<NativeModuleHost>(MakeEditorNativeModuleHostSpecification(specification.NativeBuild, specification.NativeLoader));
+		if (Status preference = m_Native->ReadPreference(*this); !preference)
+			ENGINE_WARN("{}", preference.error());
 
 		// Provenance for every write of the manager's AssetWriter, the editor's own and the manager's .meta writes alike
 		// (§13.12 rule 1); never during a dry run, and not for read-only projects (no provenance). A write an import's
@@ -477,6 +605,8 @@ namespace Engine {
 		}
 		if (m_AudioPreview != nullptr)
 			m_AudioPreview->Update();
+		// M19 (decision 29): the Native panel's queued preference change, and the unload of a module it no longer allows.
+		m_Native->Update(*this);
 	}
 
 	Status EditorContext::CheckProjectWrite(const VfsPath& path, std::string_view action) const
@@ -876,11 +1006,20 @@ namespace Engine {
 			return std::unexpected(std::move(assets).error().WithContext("opening the project's assets"));
 		}
 
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 31): the project's native module, before its scenes load, with the
+		// preference as the user left it. A module that does not load leaves the project open without it.
+		if (Status preference = m_Native->ReadPreference(*this); !preference)
+			ENGINE_WARN("{}", preference.error());
+		const Status native = m_Native->OnProjectOpened(*this);
+		if (!native)
+			ENGINE_WARN("The project '{}' opens without its native module: {}", m_Project->GetSettings().Name, native.error());
+
 		// --strict (§6 "Strict reader"): the project's scenes and prefabs, read once now, whatever the asset cache holds.
 		if (m_Specification.StrictUnknowns)
 		{
-			if (Status strict = CheckProjectDocumentsStrictly(); !strict)
+			if (Status strict = CheckProjectDocumentsStrictly(native); !strict)
 			{
+				m_Native->OnProjectClosed();
 				m_Assets->CloseProject();
 				m_Assets->SetScriptDiagnosticsProvider(nullptr);
 				m_ScriptService.reset();
@@ -917,7 +1056,7 @@ namespace Engine {
 		});
 	}
 
-	Status EditorContext::CheckProjectDocumentsStrictly() const
+	Status EditorContext::CheckProjectDocumentsStrictly(const Status& nativeOpened) const
 	{
 		ENGINE_TRY_ASSIGN(const VfsPath assetsRoot, VfsPath::Create(Utils::ProjectScheme, "Assets"));
 		const VirtualFileSystem& vfs = GetVfs();
@@ -936,6 +1075,10 @@ namespace Engine {
 		// for an unknown key.
 		ENGINE_TRY_ASSIGN(const Ref<const ScriptFieldSchemaSource> schemas, GetScriptSchemaSnapshot());
 		const TypeRegistry& registry = GetTypeRegistry();
+		// M19 (decision 27): native components are checked against the module the project's opening loaded, if any; without
+		// one, each finding's hint says why none is loaded.
+		const Ref<const NativeModuleTypes> nativeTypes = m_Native->GetLoadedTypes();
+		const std::string unloadedHint = nativeTypes == nullptr ? Utils::MakeUnloadedNativeHint(*m_Native, nativeOpened) : std::string();
 		std::vector<ErrorIssue> issues;
 		size_t failedFiles = 0;
 		for (const VfsEntry& entry : entries)
@@ -979,6 +1122,21 @@ namespace Engine {
 						.Suggestions = {} });
 				}
 			}
+			// A document that cannot be read or parsed has its load's error above; its native components are not checked.
+			const Result<std::string> text = vfs.ReadText(entry.Path);
+			const Result<Json> document = text.has_value() ? JsonReader::Parse(*text) : Result<Json>(std::unexpected(text.error()));
+			if (!document.has_value())
+				continue;
+			const std::vector<LoadDiagnostic> natives = Utils::FindNativeDocumentProblems(*document, nativeTypes.get());
+			if (!natives.empty() && loaded)
+				++failedFiles;
+			for (const LoadDiagnostic& problem : natives)
+			{
+				issues.push_back(ErrorIssue{ .JsonPointer = problem.JsonPointer,
+					.Message = std::format("{} {}: {} ({}, entity {})", entry.Path.GetPath(), problem.JsonPointer, problem.Message, problem.Code, problem.Entity.ToString()),
+					.Hint = nativeTypes == nullptr ? unloadedHint : std::string("correct or remove the native component, or change the module so it registers and accepts it"),
+					.Suggestions = {} });
+			}
 		}
 		if (issues.empty())
 			return {};
@@ -1015,6 +1173,8 @@ namespace Engine {
 			ENGINE_ASSERT(stopped.has_value(), "stopping the play session of a closing project failed: {}", stopped ? std::string() : stopped.error().ToString());
 		}
 		CloseScene();
+		// M19 (decision 31): a running module build is cancelled and the module unloaded, after the session that ran it.
+		m_Native->OnProjectClosed();
 		// M12: a preview plays a clip of the closing project.
 		if (m_AudioPreview != nullptr)
 			m_AudioPreview->Stop();
@@ -1083,6 +1243,11 @@ namespace Engine {
 			"EditorContext::SetScene: scene '{}' was not created with EditorContext::CreateScene", scene->GetName());
 		ENGINE_ASSERT(m_Transaction == nullptr, "EditorContext::SetScene inside a transaction");
 
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 27): with a native module loaded, a scene opens with its native
+		// components canonical, migrated by field name; the scene is then modified until saved, like a repair.
+		if (const Ref<const NativeModuleTypes> types = m_Native->GetLoadedTypes(); types != nullptr)
+			dirty = Utils::CanonicalizeOpenedSceneNatives(*scene, *types) || dirty;
+
 		// Past every value reported so far, so a revision of the previous scene never matches this one (ADR 0008 decision 28).
 		const uint64_t nextBase = GetRevision() + 1;
 		m_Scene = std::move(scene);
@@ -1131,6 +1296,23 @@ namespace Engine {
 	bool EditorContext::IsSceneDirty() const
 	{
 		return m_Scene != nullptr && (m_SceneDirty || m_History.IsDirty());
+	}
+
+	void EditorContext::ApplySceneMigration(bool changed, bool clearHistory)
+	{
+		ENGINE_ASSERT(m_Scene != nullptr, "EditorContext::ApplySceneMigration without an open scene");
+		ENGINE_ASSERT(m_DryRun == nullptr && m_Transaction == nullptr, "EditorContext::ApplySceneMigration inside a dry run or a transaction");
+		if (clearHistory)
+		{
+			// Clearing moves the save point to the empty history, which would read as saved.
+			m_SceneDirty = IsSceneDirty();
+			m_History.Clear();
+		}
+		if (changed)
+		{
+			m_SceneDirty = true;
+			++m_RevisionBase;
+		}
 	}
 
 	Status EditorContext::MarkSceneSaved(const VfsPath& path)

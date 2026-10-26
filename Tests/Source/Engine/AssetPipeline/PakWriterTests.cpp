@@ -100,17 +100,47 @@ namespace Engine {
 			const Buffer pak = BuildPak(MakeEntries());
 			Result<Ref<const PakReader>> intact = PakReader::OpenMemory(pak, "Intact.pak");
 			REQUIRE(intact.has_value());
+			const PakEntry& readme = *(*intact)->FindByPath("Shaders/Readme.txt");
 			const PakEntry& cube = *(*intact)->FindByHandle(AssetHandle(0x101));
+			REQUIRE(readme.Compression == PakCompression::None);
+			REQUIRE(cube.Compression == PakCompression::Deflate);
+			const Result<Buffer> cubeBytes = (*intact)->ReadEntry(cube);
+			REQUIRE(cubeBytes.has_value());
+			// The first read of `path` in `pak` with the byte at `offset` flipped (the pak opens: its TOC is intact).
+			const auto readFlipped = [&pak](uint64_t offset, const std::string& path)
+			{
+				Buffer flipped = pak;
+				flipped[offset] ^= std::byte{ 0x20 };
+				Result<Ref<const PakReader>> reader = PakReader::OpenMemory(std::move(flipped), "EntryFlip.pak");
+				REQUIRE(reader.has_value());
+				return (*reader)->ReadEntry(*(*reader)->FindByPath(path));
+			};
 
-			// A flipped byte in an entry: the pak opens, the entry fails its hash check on first read.
-			Buffer entryFlip = pak;
-			entryFlip[cube.Offset + cube.Size / 2] ^= std::byte{ 0x20 };
-			Result<Ref<const PakReader>> reader = PakReader::OpenMemory(entryFlip, "EntryFlip.pak");
-			REQUIRE(reader.has_value());
-			Result<Buffer> read = (*reader)->ReadEntry(*(*reader)->FindByHandle(AssetHandle(0x101)));
-			REQUIRE_FALSE(read.has_value());
-			CHECK(read.error().GetCode() == ErrorCode::Validation);
-			CHECK(read.error().ToString().find("engine://Meshes/Cube") != std::string::npos);
+			// A flipped byte in a stored entry: the entry fails its hash check on first read.
+			const Result<Buffer> readmeRead = readFlipped(readme.Offset + readme.StoredSize / 2, readme.Path);
+			REQUIRE_FALSE(readmeRead.has_value());
+			CHECK(readmeRead.error().GetCode() == ErrorCode::Validation);
+			CHECK(readmeRead.error().ToString().find("Shaders/Readme.txt") != std::string::npos);
+
+			// A flipped byte anywhere in a deflated entry's stream: the first read fails (the stream no longer inflates, or
+			// inflates to bytes that fail the hash check) unless the flip leaves the inflated bytes intact, which a deflate
+			// stream allows (a match that copies equal bytes from another distance, or the Adler-32 that stb does not check),
+			// so whatever a read returns is the entry's own bytes (Docs/Decisions/0030-m19-contract.md decision 17).
+			uint64_t detected = 0;
+			for (uint64_t offset = cube.Offset; offset < cube.Offset + cube.StoredSize; ++offset)
+			{
+				CAPTURE(offset);
+				const Result<Buffer> read = readFlipped(offset, cube.Path);
+				if (read.has_value())
+				{
+					CHECK(*read == *cubeBytes);
+					continue;
+				}
+				++detected;
+				CHECK(read.error().GetCode() == ErrorCode::Validation);
+				CHECK(read.error().ToString().find("engine://Meshes/Cube") != std::string::npos);
+			}
+			CHECK(detected > 0);
 
 			// A flipped byte in the TOC: the pak does not open (the TOC hash is verified at mount).
 			Buffer tocFlip = pak;
@@ -184,10 +214,10 @@ namespace Engine {
 			CHECK(header->TocOffset % PakEntryAlignment == 0);
 			CHECK(header->TocOffset + header->TocSize == pak.size());
 			CHECK(header->TocHash == XXH64(std::span<const std::byte>(pak).subspan(header->TocOffset)));
-			// Zero padding between entries.
+			// Zero padding between entries, after each entry's stored bytes.
 			const PakEntry& first = (*reader)->GetEntries()[0];
 			const PakEntry& second = (*reader)->GetEntries()[1];
-			for (uint64_t offset = first.Offset + first.Size; offset < second.Offset; ++offset)
+			for (uint64_t offset = first.Offset + first.StoredSize; offset < second.Offset; ++offset)
 				CHECK(pak[offset] == std::byte{ 0 });
 			// An empty pak is a header and an empty TOC.
 			Result<Ref<const PakReader>> empty = PakReader::OpenMemory(PakWriter().Build(), "Empty.pak");
@@ -216,7 +246,7 @@ namespace Engine {
 		// Docs/Decisions/0030-m19-contract.md decision 17 (B-PAKZ, stream G): Build deflates an entry when that saves at least
 		// an eighth of it, and stores it otherwise, when it is empty, or when its Compress is false; the reader returns every
 		// entry's own bytes, and the pak stays independent of the order of Add.
-		TEST_CASE("PakWriter: an entry is deflated when that saves at least an eighth, and stored otherwise or when Compress is false" * doctest::skip(true))
+		TEST_CASE("PakWriter: an entry is deflated when that saves at least an eighth, and stored otherwise or when Compress is false")
 		{
 			const auto makeEntries = []()
 			{
@@ -265,11 +295,12 @@ namespace Engine {
 		// among them, has one XXH64 in every configuration, which the Debug and the Release unit runs both compare with the
 		// value pinned here. Two exports cannot prove it, since Game.json and Engine.pak's metadata carry the exporting
 		// build's id (decision 13).
-		TEST_CASE("PakWriter: a pak with deflated entries built from fixed entries has its pinned bytes in every configuration" * doctest::skip(true))
+		TEST_CASE("PakWriter: a pak with deflated entries built from fixed entries has its pinned bytes in every configuration")
 		{
-			// Stream G records the XXH64 its first run computes when it lifts the skip: the contract cannot, since neither the
-			// version 2 TOC nor the codec exists before it.
-			constexpr uint64_t PinnedPakHash = 0;
+			// Recorded by stream G from its first run (the Debug unit run), then checked by its Release unit run: the
+			// contract could not compute it, since neither the version 2 TOC nor the codec existed before. A change of the
+			// TOC text, the layout, the writer's policy or stb's deflate changes it, which is then a reviewed re-pin.
+			constexpr uint64_t PinnedPakHash = 0x981f84135b49a2f2ull;
 			const Buffer pak = BuildPak(MakeCompressionEntries());
 			Result<Ref<const PakReader>> reader = PakReader::OpenMemory(pak, "Pinned.pak");
 			REQUIRE_MESSAGE(reader.has_value(), reader.error().ToString());

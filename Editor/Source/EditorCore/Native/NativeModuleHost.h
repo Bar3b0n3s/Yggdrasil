@@ -29,12 +29,14 @@
 // (BuildNativeModuleTypes, which keeps the library loaded) and only then replaces the loaded module: a load that fails at
 // any step leaves the previous module loaded and the scene unchanged. It canonicalizes the open scene's native components
 // against the new types (CanonicalizeNativeComponents, the migration by field name of decision 27): a reload whose layout
-// hash equals the replaced module's rewrites nothing, so the scene stays byte-identical, and one whose layout changed
-// migrates every component and marks the scene modified when its canonical form changed. A migration is not an undo step,
-// like a load's migrations, and a reload whose layout changed clears the undo history (CommandHistory), whose entity
-// snapshots hold the previous layout's values; one whose layout is unchanged keeps it. The previous module's types are
-// released last, which unloads its library once nothing holds them. Loads happen only at frame boundaries without a play session (Play or
-// Simulate): native.load is refused while one runs, and so is a project opening's load while one runs, which never happens.
+// hash equals the replaced module's rewrites nothing, so the scene stays byte-identical, and a load whose layout changed
+// (every first load, one after an unload included) migrates every component and marks the scene modified when its
+// canonical form changed. A migration is not an undo step, like a load's migrations, and a load whose layout changed
+// clears the undo history (CommandHistory), whose entity snapshots hold the previous layout's values or, recorded without
+// a module, the values as written, which undo would restore whole; a reload whose layout is unchanged keeps it. The
+// previous module's types are released last, which unloads its library once nothing holds them. Loads happen only at
+// frame boundaries without a play session (Play or Simulate): native.load is refused while one runs, and so is a project
+// opening's load while one runs, which never happens.
 // A project opening loads the newest current build when the preference is on and the platform supported, and builds
 // nothing (decision 31: a project with Native/ and no current build opens without its module; native.build then
 // native.load load it, and a --strict editor refuses its scenes' native components through NATIVE_COMPONENT_UNREGISTERED,
@@ -102,7 +104,7 @@ namespace Engine {
 	{
 		bool Reloaded = false;      // a loaded module was replaced
 		bool LayoutChanged = false; // the layout hash differs from the replaced module's (true for a first load)
-		bool UndoCleared = false;   // a reload whose layout changed cleared the undo history (never a first load)
+		bool UndoCleared = false;   // a load whose layout changed (a first load included) cleared the open scene's undo history
 		NativeSceneReport Scene{};  // the open scene's canonicalization; Scene.Changed: the scene is now modified
 	};
 
@@ -161,7 +163,8 @@ namespace Engine {
 		// without native sources (hint: native.write); the backend's.
 		[[nodiscard]] Status StartBuild(EditorContext& editor);
 		// The running build's outcome once it resolved, nullopt before. A successful build becomes LatestBuild; builds older
-		// than LatestBuild and the loaded one are removed (a failure to remove one is logged). Every outcome becomes LastBuild.
+		// than LatestBuild and the loaded one are removed (a failure to remove one is logged). Every outcome but a
+		// cancellation becomes LastBuild.
 		[[nodiscard]] std::optional<Result<NativeBuildOutcome>> PollBuild(EditorContext& editor);
 		// Cancels a running build (its outcome is then Cancelled).
 		void CancelBuild();

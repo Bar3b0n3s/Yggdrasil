@@ -12,8 +12,11 @@ files prove; nothing under the gitignored Library/ is ever read:
     "method", "params"} and response lines {"type": "response", "time", "client", "id", "requestLine", "ok", "summary",
     "error"?}.
 
-Engine-consumed files (enumerate_engine_files): the project root's *.eproj and .luaurc, and every file under Assets/
-(.meta files included). AGENTS.md, README.md, .gitignore and Automation/** are exempt, and nothing else is audited.
+Engine-consumed files (enumerate_engine_files): the project root's *.eproj and .luaurc, every file under Assets/ (.meta
+files included) and every file under Native/, the game's native module (Docs/Decisions/0030-m19-contract.md decision
+35: "the provenance audit covers the module's sources", so a source native.write did not write is a finding). AGENTS.md,
+README.md, .gitignore and Automation/** are exempt, and nothing else is audited (the module's builds below
+Library/Native/ included).
 
 File sources (FILE_MODES):
   - "index" (the acceptance mode, "from a fresh clone", and the default): the project's staged blobs, materialized into
@@ -126,6 +129,8 @@ _UPGRADE_METHOD = "project.upgrade"
 _CLI_CLIENT = "cli"
 _UI = "ui"
 _ASSETS_DIRECTORY = "Assets"
+# The game's native module (ADR 0030 decision 35), engine-consumed like Assets/ (ProvenanceRecorder::IsRecordedPath).
+_NATIVE_DIRECTORY = "Native"
 _LUAURC = ".luaurc"
 _PROJECT_EXTENSION = ".eproj"
 _BACKUP_EXTENSION = ".bak"
@@ -320,15 +325,18 @@ def _materialize_index(repository: Path, project: Path, destination: Path) -> tu
 
 def enumerate_engine_files(project_copy: Path, files: str = DEFAULT_FILE_MODE) -> list[str]:
     """The project-relative paths ("/" separators) of the engine-consumed files of `project_copy`, sorted by their UTF-8
-    bytes: the root's *.eproj and .luaurc files and every file below Assets/. With `files` "disk" the *.bak files are
-    left out; with "index" (`project_copy` is materialize_index's copy) every file counts, so a committed backup is
-    audited. EXEMPT_FILES, .gitignore and Automation/** are never listed, and nothing below Library/ is ever read.
+    bytes: the root's *.eproj and .luaurc files and every file below Assets/ and below Native/ (the native module's
+    sources, ADR 0030 decision 35). With `files` "disk" the *.bak files are left out; with "index" (`project_copy` is
+    materialize_index's copy) every file counts, so a committed backup is audited. EXEMPT_FILES, .gitignore and
+    Automation/** are never listed, and nothing below Library/ (the native module's builds included) is ever read.
     Raises ValueError for a `files` value outside FILE_MODES, and OSError when a directory cannot be listed."""
     _check_file_mode(files)
     found = [entry.name for entry in project_copy.iterdir() if entry.is_file() and _is_root_engine_file(entry.name)]
-    assets = project_copy / _ASSETS_DIRECTORY
-    if assets.is_dir():
-        for directory, subdirectories, names in os.walk(assets, onerror=_raise_walk_error):
+    for top in (_ASSETS_DIRECTORY, _NATIVE_DIRECTORY):
+        base = project_copy / top
+        if not base.is_dir():
+            continue
+        for directory, subdirectories, names in os.walk(base, onerror=_raise_walk_error):
             subdirectories.sort()
             for name in names:
                 path = Path(directory) / name

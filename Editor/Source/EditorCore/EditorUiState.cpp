@@ -8,7 +8,7 @@ namespace Engine {
 
 	std::string_view EditorPanelToString(EditorPanel panel)
 	{
-		constexpr std::array Names{ "SceneHierarchy", "Inspector", "SceneViewport", "GameViewport", "ContentBrowser", "Console", "Diagnostics", "ProjectSettings", "Stats", "Automation", "UndoHistory", "ProjectLauncher" };
+		constexpr std::array Names{ "SceneHierarchy", "Inspector", "SceneViewport", "GameViewport", "ContentBrowser", "Console", "Diagnostics", "ProjectSettings", "Stats", "Automation", "UndoHistory", "Native", "ProjectLauncher" };
 		const size_t index = static_cast<size_t>(panel);
 		return index < Names.size() ? std::string_view(Names[index]) : std::string_view{};
 	}

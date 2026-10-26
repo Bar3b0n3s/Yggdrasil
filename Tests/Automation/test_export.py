@@ -338,8 +338,6 @@ class ExportTests(AutomationTestCase):
         packaged = sorted(entry["Path"] for entry in toc["Entries"] if entry["Handle"] is not None)
         self.assertEqual(packaged, list(builtins))
 
-    @unittest.skip("contract stub: Export.PruneUnreferenced and SCRIPT_COMPUTED_ASSET_LOAD (Docs/Decisions/"
-                   "0030-m19-contract.md decision 21, B-PRUNE-GAME, stream R)")
     def test_pruned_export_packages_what_the_start_scene_reaches_and_runs(self) -> None:
         # Docs/Decisions/0030-m19-contract.md decision 21 (B-PRUNE-GAME): with Export.PruneUnreferenced,
         # project.validate names the computed Assets.Load, Game.pak holds only what the start scene reaches,

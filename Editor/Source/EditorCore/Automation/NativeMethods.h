@@ -120,7 +120,7 @@ namespace Engine {
 		bool Reloaded = false;      // a loaded module was replaced (hot reload)
 		bool LayoutChanged = false; // its types' layout changed (always true for a first load)
 		bool SceneChanged = false;  // the open scene's native components were migrated: the scene is now modified
-		bool UndoCleared = false;   // a reload whose layout changed cleared the undo history
+		bool UndoCleared = false;   // a load whose layout changed (a first load included) cleared the open scene's undo history
 		uint32_t ComponentCount = 0;
 		std::vector<NativeComponentDiagnostic> Diagnostics{};
 		std::vector<NativeTypeSummary> Components{};

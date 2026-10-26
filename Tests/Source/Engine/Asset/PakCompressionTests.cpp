@@ -40,7 +40,7 @@ namespace Engine {
 	{
 		// Decision 17: an entry deflates to a zlib stream, the same bytes every time, which inflates back to exactly the
 		// entry's bytes; a stream that does not inflate to exactly the size asked for is Validation, never a crash.
-		TEST_CASE("PakCompression: deflate then inflate restores the bytes, and the stream is deterministic" * doctest::skip(true))
+		TEST_CASE("PakCompression: deflate then inflate restores the bytes, and the stream is deterministic")
 		{
 			const Buffer payload = MakeCompressiblePayload();
 			const Result<Buffer> deflated = DeflatePakEntry(payload);
@@ -64,18 +64,35 @@ namespace Engine {
 			CheckRefused(InflatePakEntry(std::span<const std::byte>(*deflated).first(deflated->size() / 2), payload.size()));
 			CheckRefused(InflatePakEntry(AsBytes("not a zlib stream"), 16));
 			CheckRefused(InflatePakEntry(*deflated, MaxPakCompressedEntrySize + 1));
+			// More bytes than any stream of its length holds (1032 per stream byte), refused before the output is allocated;
+			// an empty stream.
+			CheckRefused(InflatePakEntry(*deflated, deflated->size() * 1032 + 1));
+			CheckRefused(InflatePakEntry({}, 0));
 
-			// An empty entry deflates to a stream that inflates to nothing.
+			// An empty entry deflates to a stream that inflates to nothing, and to nothing else.
 			const Result<Buffer> empty = DeflatePakEntry({});
 			REQUIRE(empty.has_value());
 			const Result<Buffer> nothing = InflatePakEntry(*empty, 0);
-			REQUIRE(nothing.has_value());
+			REQUIRE_MESSAGE(nothing.has_value(), nothing.error().ToString());
 			CHECK(nothing->empty());
+			CheckRefused(InflatePakEntry(*empty, 1));
+
+			// Bytes deflate cannot shrink (seeded noise) still give a stream that inflates back to them.
+			Buffer noise(4096);
+			Random random(0x5EED);
+			for (std::byte& value : noise)
+				value = static_cast<std::byte>(random.NextU32() & 0xffu);
+			const Result<Buffer> stored = DeflatePakEntry(noise);
+			REQUIRE(stored.has_value());
+			CHECK(stored->size() >= noise.size());
+			const Result<Buffer> restored = InflatePakEntry(*stored, noise.size());
+			REQUIRE_MESSAGE(restored.has_value(), restored.error().ToString());
+			CHECK(*restored == noise);
 		}
 
 		// Decision 17's fuzz target (Tests/Data/Fuzz/Targets.json, reader PakInflate): the Runtime inflates entries of a pak
 		// it did not write, so any byte sequence, claimed to inflate to any size, is a value or a Validation error.
-		TEST_CASE("PakCompression: 10,000 seeded mutations of a deflate stream never crash and always return Result" * doctest::test_suite(Test::FuzzSuite) * doctest::skip(true))
+		TEST_CASE("PakCompression: 10,000 seeded mutations of a deflate stream never crash and always return Result" * doctest::test_suite(Test::FuzzSuite))
 		{
 			const Buffer payload = MakeCompressiblePayload();
 			const Result<Buffer> deflated = DeflatePakEntry(payload);

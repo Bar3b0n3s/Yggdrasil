@@ -684,6 +684,28 @@ namespace Engine {
 			CHECK(ui.Draw().contains("Build your next world."));
 		}
 
+		// Docs/Decisions/0030-m19-contract.md decision 29: the default workspace leaves the Native panel closed, so the editor
+		// looks as before; opened, it joins the bottom dock with the Console and draws the Allow native code preference.
+		TEST_CASE("EditorLayer: the Native panel is closed in the default workspace and docks with the bottom panels when opened")
+		{
+			LayerUiHarness ui;
+			ui.Draw();
+			ui.Draw();
+			EditorUiState& state = ui.Environment.GetEditor().GetUiState();
+			CHECK(std::ranges::find(state.GetOpenPanels(), EditorPanel::Native) == state.GetOpenPanels().end());
+			const ImGuiWindow* unopened = ImGui::FindWindowByName(Utils::EditorWindowTitle(EditorPanel::Native));
+			CHECK((unopened == nullptr || !unopened->Active));
+			REQUIRE(ui.Layer.RevealPanel(EditorPanel::Native));
+			ui.Draw();
+			CHECK(ui.Draw().contains("Allow native code"));
+			const ImGuiWindow* native = ImGui::FindWindowByName(Utils::EditorWindowTitle(EditorPanel::Native));
+			const ImGuiWindow* console = ImGui::FindWindowByName(Utils::EditorWindowTitle(EditorPanel::Console));
+			REQUIRE(native != nullptr);
+			REQUIRE(console != nullptr);
+			REQUIRE(native->DockNode != nullptr);
+			CHECK(native->DockNode == console->DockNode);
+		}
+
 		TEST_CASE("EditorLayer: the viewport windows use their panels' flags and never scroll")
 		{
 			LayerUiHarness ui;

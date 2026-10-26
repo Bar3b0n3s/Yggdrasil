@@ -140,6 +140,9 @@ NATIVE_MODULE_DIRECTORIES = ("Projects/*/Native", "Tests/Projects/*/Native")
 NATIVE_DIRECTORY = "Native"
 NATIVE_API_INCLUDE = "Engine/Native/NativeApi.h"
 NATIVE_SOURCE_EXTENSIONS = (CXX_SOURCE_EXTENSION, CXX_HEADER_EXTENSION)
+# The backup every project write keeps of the bytes it replaces (Core/FileSystem.h AtomicWriteOptions::KeepBackup),
+# which a build's lint leaves out (native_module_files).
+EDITOR_BACKUP_SUFFIX = ".bak"
 
 STANDARD_HEADERS = frozenset(
     """
@@ -3550,12 +3553,16 @@ def native_module_findings(tree: Tree, step: str) -> tuple[int, list[Finding]]:
 
 def native_module_files(project_root: Path) -> list[str]:
     """Every file below <project_root>/Native/ as a project-relative POSIX path, sorted: what a build of the module
-    reads or must refuse, whether git ignores it or not."""
+    reads or must refuse, whether git ignores it or not, except the editor's own backups. Every project write keeps
+    the previous bytes as "<file>.bak" (NativeDirectoryMount), so native.write leaves one beside each source it
+    overwrites; no build reads one, and the project's .gitignore leaves it out of every commit (ADR 0030 decision
+    35)."""
     native = project_root / NATIVE_DIRECTORY
     files: list[str] = []
     for directory, subdirectories, names in os.walk(native):
         subdirectories.sort()
-        files += [(Path(directory) / name).relative_to(project_root).as_posix() for name in names]
+        files += [(Path(directory) / name).relative_to(project_root).as_posix() for name in names
+                  if not name.endswith(EDITOR_BACKUP_SUFFIX)]
     return sorted(files)
 
 
