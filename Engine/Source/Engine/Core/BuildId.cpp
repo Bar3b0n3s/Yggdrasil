@@ -61,7 +61,7 @@ namespace Engine {
 			return IsVersionNumber(text);
 		}
 
-		[[nodiscard]] bool IsValidBuildId(const BuildId& id)
+		[[maybe_unused]] [[nodiscard]] bool IsValidBuildId(const BuildId& id)
 		{
 			return IsVersionText(id.Version) && (id.Commit.empty() || IsCommitText(id.Commit)) && (!id.Dirty || !id.Commit.empty());
 		}
