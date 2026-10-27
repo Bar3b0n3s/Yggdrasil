@@ -4,6 +4,7 @@
 #include "Engine/Core/Result.h"
 #include "Engine/Graphics/PipelineFactory.h"
 #include "Engine/Renderer/AsyncPicker.h"
+#include "Engine/Renderer/RenderPassDeclaration.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/RenderStats.h"
 
@@ -67,6 +68,10 @@
 // Binding sets. The passes the set owns keep none of their own: every SceneRenderer keeps one PassBindingCache per pass
 // with its per-view targets, clears them in Resize, releases the sets its last Render did not use at the end of every
 // Render, and destroys them with itself, so views never evict each other's sets and no view's old targets outlive it.
+// Material sets (set 1) are released the same way, except that a material whose every draw a Render culls keeps its set
+// while it stays in the snapshot and its mirror is current (M18, R-MATSET), so a material that leaves the view and returns
+// makes no new set. A renderer clears every binding set and material set before its first Render after a CreatePipelines
+// of its set (GetGeneration), whose binding layouts replaced those the sets were made for.
 //
 // Stale mirrors (§8.14 items 1 and 2; Docs/Decisions/0013-m8-decisions.md decision 7). Every host that renders (EditorApp,
 // RuntimeApp) calls GpuResourceCache::CollectStale() and SceneRendererPipelines::CollectStale(assets) once per frame after
@@ -77,6 +82,36 @@
 //
 // Main thread only (NVRHI recording, §4.11); not copyable or movable. Destroyed before the SceneRendererPipelines, the
 // GpuResourceCache and the device (§8.14 item 4).
+//
+// M18 (C18.1, Docs/Decisions/0029-m18-contract.md decisions 1 to 8). Stages: Render runs one stage function per RenderStage
+// (RenderStage.h) in order, each recording its passes in their declared order, between the GPU-zone hook's
+// RenderRecordingContext::BeginStage and EndStage; the passes above keep their order, except that game Text now draws in
+// the SceneOverlay stage, before the editor overlays (wireframe, selection, debug lines, annotations, grid, icons) of the
+// EditorOverlay stage, and the debug and annotation labels draw last of the overlays, in that stage (the "Labels" row),
+// followed at a scaled output by the letterbox repaint that clips the overlays to the scene image ("Letterbox"). Pass declarations:
+// RenderPassDeclaration.h declares every pass (name, pipeline count, programs, stats rows and position, targets); the stats
+// order is RenderStatsOrder; every pipeline is created by SceneRendererPipelines::CreatePipelines, which startup, shader
+// reload and device-loss recovery call. The output stage: the scene stages render at the snapshot's scene resolution
+// (RenderOutputSettings, the renderer's size by default), the Output stage upscales the scene image to the renderer's size
+// (UpscalePass.h; nothing is recorded when the sizes are equal, which renders exactly as before), and the EditorOverlay
+// stage draws at the renderer's size; GetOutputMapping maps view pixels to scene pixels. The 2D colour path:
+// RenderOutputSettings::PixelArt fixes the post chain to Linear at exposure 1 with the OETF, no dither, bloom or FXAA.
+//
+// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decisions 26 and 27): device-loss recovery. SceneRendererPipelines and
+// every SceneRenderer register themselves with their device's recreation registry (Graphics/GpuRecreation.h) at Create: the
+// set releases every pass and is created again through CreatePipelines; a renderer releases its per-view objects and
+// creates its size-dependent ones again. They are two of the placement rule's three places: a later milestone's pass is
+// declared (RenderPassDeclaration.h) and owned by the set, and a later per-view object lives in SceneRenderer::State, so
+// neither needs a registration of its own.
+//
+// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decisions 42 to 44): out-of-memory after startup. A renderer's
+// registration trims its pool's free targets (GpuRecreationHooks::TrimUnused, RenderTargetPool::TrimUnused). Resize and a
+// debug-view switch (the debug view's first pipelines) trim and retry once (RetryAfterTrim, Graphics/GpuOutOfMemory.h), and
+// then fail alone with ErrorCode::OutOfMemory: Resize keeps the previous size and targets, and Render renders the previous
+// debug view. A Render whose lazily created target or binding set runs out of memory returns the error as before, and its
+// host trims after the frame and renders again at the next frame (decision 44). The set's CreatePipelines at startup and in
+// a recovery stays fatal on out-of-memory; ReloadShaders keeps returning it. ReleaseTargets drops a renderer's
+// size-dependent targets for an owner whose image nothing displays between renders (ViewportCapture, decision 43).
 
 namespace Engine {
 
@@ -120,8 +155,9 @@ namespace Engine {
 		static constexpr uint32_t DebugViewPipelineCount = 9;
 		// Every pipeline Create makes: the mesh pipelines plus SkyboxPass (1), BloomPass (3), TonemapPass (1), FxaaPass (1),
 		// DebugRenderer (2), TextRenderer (2), BrdfLut (1), ShadowPass (6), DepthPyramid (2), GTAO (2), Selection (8),
-		// and the data-view composite (1). Each pass declares its own PipelineCount; this is their sum.
-		static constexpr uint32_t StartupPipelineCount = MeshPipelineCount + 1 + 3 + 1 + 1 + 2 + 2 + 1 + 6 + 2 + 2 + 8 + 1;
+		// the data-view composite (1), QuadBatcher (2) and UpscalePass (2): 58, the declarations' sum
+		// (GetDeclaredPipelineCount, RenderPassDeclaration.h), which SceneRenderer.cpp checks against each pass's PipelineCount.
+		static constexpr uint32_t StartupPipelineCount = GetDeclaredPipelineCount();
 
 		// Restricts construction to Create; CreateScope still reaches the constructor.
 		class ConstructionKey
@@ -150,13 +186,46 @@ namespace Engine {
 		// pass resources instead (ADR0017, integration). Variants are specialized with view unless they exist (Lit's are the
 		// startup pipelines: no effect); logs the new pipeline count at Info. SceneRenderer::Render calls it the first time a
 		// snapshot asks for a view, and a host may call it ahead of time. Errors: InvalidArgument for a view this build has no
-		// pipelines for (not below RenderDebugViewCount); those of PipelineFactory, where a Gpu error is an out-of-memory
-		// creation, which the caller turns into FatalError(OutOfMemory) (§8.14 item 7). Nothing is kept on failure, so a later
-		// call tries again.
+		// pipelines for (not below RenderDebugViewCount); InvalidState between ReleaseGpuObjects and CreatePipelines (a
+		// programmer error, also asserted); those of PipelineFactory, where a Gpu error is an out-of-memory creation, which
+		// the caller turns into FatalError(OutOfMemory) (§8.14 item 7), or on a lost device the loss (M18, C18.3 decision 28).
+		// Nothing is kept on failure, so a later call tries again. M18 (C18.4, decisions 42 and 44): after startup the caller
+		// runs it through RetryAfterTrim (SceneRenderer::Render does), so an out-of-memory failure is trimmed and retried once
+		// and then returned as OutOfMemory, never fatal.
 		[[nodiscard]] Status EnsureDebugView(RenderDebugView view);
 
 		// Actual pipelines created so far: startup plus each lazily created material-view family, counted once.
 		[[nodiscard]] uint32_t GetPipelineCount() const;
+
+		// M18 (C18.1, R-PASS; Docs/Decisions/0029-m18-contract.md decision 2): the one creation entry of the pass list's
+		// pipelines. Creates every pass ScenePassDeclarations declares (RenderPassDeclaration.h), each with its PipelineCount
+		// pipelines and its binding layouts, samplers and startup resources (the DFG LUT, the neutral textures, the
+		// QuadBatcher's white texture), through the set's PipelineFactory, aside from the current ones. Only when every
+		// creation succeeds do they replace the current passes: the lazily created debug-view pipelines are dropped
+		// (EnsureDebugView creates them again on first use), GetGeneration increases and the count is logged at Info. On any
+		// error nothing changes and the current pipelines stay in use. Create (startup), ReloadShaders (shader hot reload) and
+		// the device-loss recovery (C18.3) create pipelines through it, and nothing else creates the set's pipelines; command
+		// lists already recorded keep the replaced pipelines alive until they retire (§8.14 item 2). Main thread, with no
+		// Render of the set's renderers awaiting its command list's close. Errors: those of PipelineFactory and the passes'
+		// Create; a Gpu error is an out-of-memory creation, which a caller at startup turns into FatalError(OutOfMemory)
+		// (§8.14 item 7), while ReloadShaders returns it.
+		[[nodiscard]] Status CreatePipelines();
+
+		// M18 (C18.1): 1 after Create, increased by every successful CreatePipelines. A SceneRenderer that last recorded with
+		// an earlier generation clears its binding-set caches and its material sets before its next Render, since they were
+		// made for the replaced binding layouts.
+		[[nodiscard]] uint64_t GetGeneration() const;
+
+		// M18 (C18.1, R-SHR, shaders.reload; decision 3): the editor's shader hot reload. The factory's ShaderLibrary begins a
+		// reload (ShaderLibrary::BeginReload: every variant is read again from the compiled output, which CompileShaders.py or
+		// a build of the Shaders project rewrote), then CreatePipelines runs. On success the library keeps what it read
+		// (EndReload(true)) and the new pipelines are used from the next Render of every renderer of the set (ViewportCapture's
+		// included). On failure the library restores its earlier variants (EndReload(false)), the old pipelines stay in use,
+		// and the error is returned with the context "while reloading the shaders; the previous pipelines stay in use". It
+		// compiles nothing and starts no process (§13.2). Main thread, between frames. Errors: those of CreatePipelines
+		// (Validation for a layout that no longer matches its reflection, NotFound for a variant the build did not write, Gpu
+		// for a failed creation, which is not fatal here).
+		[[nodiscard]] Status ReloadShaders();
 
 		// The layout description of every pipeline Create makes, its passes' included, with the BloomPass pipelines for
 		// `bloomFormat` (R11G11B10_FLOAT or RGBA16_FLOAT, §8.1), for the CPU-only reflection test ("Shaders:
@@ -168,6 +237,15 @@ namespace Engine {
 		// GpuResourceCache::CollectStale; "GpuResourceCache: live counts return to baseline after unloading a scene"). Hosts
 		// call it as the file comment says.
 		void CollectStale(const AssetManager& assets, bool releaseUnused = false);
+
+		// M18 (C18.3, decisions 26 and 27): the set's Release hook in the recreation protocol (registered by Create, as
+		// "SceneRendererPipelines"): drops every pass, pipeline, binding layout, sampler and startup resource, the lazily
+		// created debug-view pipelines included, by resetting every member of the set's state except its back-references, its
+		// registration and its generation, so a pass a later milestone adds to the state is released without code of its own. GetPipelineCount
+		// is 0 afterwards. Its Recreate hook is CreatePipelines, which creates every declared pass again and increases
+		// GetGeneration, so every renderer of the set clears its binding sets before its next Render. Main thread, from
+		// GraphicsDevice::Recover; renders of the set's renderers in between are a programmer error (asserted).
+		void ReleaseGpuObjects();
 	private:
 		// SceneRenderer records with the set's pipelines, passes, binding layouts and samplers (State, SceneRenderer.cpp).
 		friend class SceneRenderer;
@@ -204,35 +282,89 @@ namespace Engine {
 			AssetManager& assets, const SceneRendererSpecification& specification);
 
 		// Recreates the size-dependent targets for `width` x `height` (both >= 1, asserted) and clears the renderer's binding
-		// sets (which reference the old targets); no effect at the current size. Errors: InvalidState while a Render awaits its
-		// OnSubmitted (also asserted); those of the target creation (Gpu: FatalError(OutOfMemory) for the caller, §8.14 item 7).
+		// sets (which reference the old targets); no effect at the current size. The scene-resolution targets are created at
+		// the scene size that the last Render's RenderOutputSettings give the new size (ComputeRenderOutputMapping; the new
+		// size itself before the first Render and for the default settings), so the next Render with the same settings keeps
+		// them; the output stage's view-size targets follow at that Render (M18's milestone review: a scaled view resized, or
+		// recovered after a device loss, never creates a view-size scene set it does not use). Errors: InvalidState while a Render awaits its
+		// OnSubmitted (also asserted); those of the target creation (M18, C18.4: OutOfMemory after its trim and retry, below;
+		// on a lost device Gpu, the loss).
+		// M18 (C18.4, decisions 42 and 44): a view's new size after startup. Resize creates the new size's targets aside and
+		// replaces the current ones only when every creation succeeded, through RetryAfterTrim: an out-of-memory creation
+		// trims and retries once, and a second one returns OutOfMemory with the renderer unchanged (its size, targets,
+		// binding sets, final texture and pick generation), never fatal. Every call tries again; a host that resizes a view
+		// every frame asks for a size that failed only once its view's size changed (decision 44), and a capture tries at
+		// every request. A target is never made smaller than asked.
 		[[nodiscard]] Status Resize(uint32_t width, uint32_t height);
+		// M18 (C18.4, decision 43): drops the renderer's size-dependent targets (the scene-resolution targets and their
+		// framebuffers, the output stage's targets, the entity-id target, the frame targets it holds from its pool) and the
+		// binding sets that reference them, keeping its size, pipelines, per-view buffers and material sets; the pooled ones
+		// become free in its RenderTargetPool, and it releases the pool's free targets whose last submission has completed
+		// (RenderTargetPool::ReleaseFree), so what nothing pending uses goes at once (its memory with its last reference: at
+		// once in Dist, at the next garbage collection where the resource tracker counts). For an owner whose image nothing
+		// displays between renders (ViewportCapture, before it resizes to another size and from its trim hook): it calls
+		// nothing on the device but the release of handles and GetCompletedSubmissionID, never waits and cannot fail, so a
+		// TrimUnused hook may call it.
+		// Pending picks resolve as cancelled (CancelPicks), and GetFinalTexture and GetEntityIdTexture return null until the
+		// next Render, which creates the targets of its size again (a Resize to the current size has no effect, and one to
+		// another size creates that size's). Between Renders: not while a Render awaits its OnSubmitted (asserted). Main
+		// thread.
+		void ReleaseTargets();
 
 		// Records the pass list for `snapshot` into `commandList` (open, asserted). The snapshot's camera viewport should
-		// match the renderer's size; a different one renders at the renderer's size with the snapshot's projection. Uploads
+		// match the scene resolution (M18: RenderOutputSettings, the renderer's size by default); a different one renders at
+		// the scene resolution with the snapshot's projection. Uploads
 		// the assets it needs through the GpuResourceCache first, and creates a debug view's pipelines the first time it is
-		// asked for (SceneRendererPipelines::EnsureDebugView; a Gpu error there is FatalError(OutOfMemory), §8.14 item 7).
+		// asked for (SceneRendererPipelines::EnsureDebugView: a debug-view switch, M18 C18.4 below; on a lost device a Gpu
+		// error there is the loss and returned, M18 C18.3 decision 28).
 		// Afterwards GetFinalTexture holds the image.
 		// Errors returned before recording (nothing recorded, no OnSubmitted needed): InvalidState while the previous Render
-		// awaits its OnSubmitted (also asserted); InvalidArgument for a debug view outside RenderDebugView or a
+		// awaits its OnSubmitted (also asserted), or between the pipeline set's ReleaseGpuObjects and its CreatePipelines (a
+		// programmer error, also asserted); InvalidArgument for a debug view outside RenderDebugView or a
 		// Quality.ShadowMapSize that is not a power of two in [256, 8192]; a debug view's pipeline error other than Gpu (an
-		// invalid shader). Partial errors (the view is still recorded, the first error is returned): InvalidArgument for a
+		// invalid shader), or its Gpu error on a lost device. Partial errors (the view is still recorded, the first error is returned): InvalidArgument for a
 		// non-finite camera matrix (the view clears as without a camera) or world matrix (that draw is skipped, the error
 		// names the entity), or invalid wireframe, overlay or selection data; Gpu when a binding set or a lazily created
 		// target cannot be created. Data the schemas accept is never a render error: a missing asset draws its placeholder, a
 		// missing environment the fallback ambient, and a shadow-casting light the shadow planners reject stays lit without
 		// shadows (warned once per renderer).
+		// M18 (C18.4, decisions 42 and 44): a debug-view switch after startup. The debug view's first pipelines are created
+		// through RetryAfterTrim, before anything is recorded; when they run out of memory again after the trim, the view is
+		// recorded with the debug view the renderer last rendered (Lit before its first Render, and Lit when that view's
+		// pipelines are gone too: a CreatePipelines since, by a shader reload or a recovery, dropped them) and Render returns
+		// OutOfMemory as a partial error naming the view that stayed (one Warn line per renderer and view), so the image
+		// stays on its previous mode and the host reverts its setting to GetRenderedDebugView (decision 44); the next Render
+		// that asks for the view tries again. A partial Gpu error of a lazily created target or binding set on a device that
+		// is not lost is out-of-memory too: returned as now, never fatal, and its host trims after the frame
+		// (GraphicsDevice::TrimUnused) and renders again at the next frame.
+		// M18's milestone review (decision 39): a vk::SystemError that NVRHI throws in the middle of the recording (on a really
+		// lost device, an upload's first write asks the queue's timeline what completed) unwinds Render to the frame boundary
+		// or an automation method's handler, which report the loss. The render is abandoned on the way: its recording
+		// context ends with its stage and pass open (RenderStats.h), the renderer awaits no OnSubmitted for it, and its GPU
+		// profiler, whose scopes stay open, is replaced, so a Render before the recovery runs as any Render on the lost device.
 		[[nodiscard]] Status Render(nvrhi::ICommandList& commandList, const RenderSnapshot& snapshot);
 
-		// The LDR target holding the last Render's image (RGBA8_UNORM, display-encoded values, §8.9): LdrColor, or its FXAA
-		// partner when FXAA ran. What BlitPass presents and ViewportCapture reads back.
+		// The LDR target holding the last Render's image (RGBA8_UNORM, display-encoded values, §8.9), at the renderer's size:
+		// LdrColor, or its FXAA partner when FXAA ran, when the output mapping is the identity; otherwise OutputColor, the
+		// upscaled scene image in its letterbox with the editor overlays (M18). What BlitPass presents and ViewportCapture reads
+		// back.
 		[[nodiscard]] nvrhi::ITexture* GetFinalTexture() const;
+		// The renderer's size: the view's (GetFinalTexture's). The scene resolution is the snapshot's (GetOutputMapping).
 		[[nodiscard]] uint32_t GetWidth() const;
 		[[nodiscard]] uint32_t GetHeight() const;
+		// M18 (C18.1, R-2D-PIXEL; decision 6): the output stage's mapping of the last Render, ComputeRenderOutputMapping of the
+		// renderer's size and the snapshot's Output: which view pixels of GetFinalTexture show which scene pixels. The
+		// identity at the renderer's size before the first Render and after Resize.
+		[[nodiscard]] RenderOutputMapping GetOutputMapping() const;
 		[[nodiscard]] const SceneRenderStats& GetLastStats() const;
+		// M18 (C18.4, decision 44): the debug view the last recorded Render drew in (Lit before the first): the snapshot's,
+		// or, after a debug-view switch that ran out of memory, the view Render stayed on. A device loss's release and
+		// recreation keep it. A host whose switch failed sets its setting back to it, so the next frames do not try again.
+		[[nodiscard]] RenderDebugView GetRenderedDebugView() const;
 
 		// M9: borrowed R32_UINT target of the last view with Flags::Picking, otherwise null. Valid until Resize/destruction.
 		// Transparent geometry and text do not write EntityId; Opaque/Mask use the same discard and cull rules as depth.
+		// M18: at the scene resolution (GetOutputMapping).
 		[[nodiscard]] nvrhi::ITexture* GetEntityIdTexture() const;
 		// Monotonic, nonzero; increments after actual resize or CancelPicks, never wraps/reuses a generation.
 		// Host calls CancelPicks on camera change, scene replacement, play target switch and hidden/minimized transition.
@@ -245,6 +377,11 @@ namespace Engine {
 		// when request FrameIndex/SceneRevision/ViewGeneration differs from that image. A rejected stale miss never clears
 		// selection. Other errors follow AsyncPicker::Request. Pixel coordinates are framebuffer
 		// pixels, not logical ImGui coordinates. The UI suppresses requests while ImGuizmo is hovered/active.
+		// M18 (decision 6): X and Y are view pixels of GetFinalTexture; the pick reads EntityId at MapViewPixelToScenePixel
+		// of the submitted image's output mapping, and a view pixel in the letterbox picks nothing (a PickResult with the
+		// invalid UUID and PickId 0, like the background). M18's milestone review: a render whose output targets ran out of
+		// memory keeps the letterbox texel of an earlier picking render; at the first scaled picking render, which has none,
+		// a letterbox pixel's request fails alone with InvalidState.
 		[[nodiscard]] Result<PickTicket> RequestPick(const PickRequest& request);
 		[[nodiscard]] Result<std::optional<PickResult>> PollPick(PickTicket ticket, uint64_t currentFrameIndex);
 		void CancelPicks();
@@ -259,6 +396,20 @@ namespace Engine {
 		// Skipped frames receive no notification. Captures notify directly.
 		// The application pacer covers GetLastSubmissionID AFTER its hook drains pick-copy submissions.
 		void OnSubmitted(uint64_t frameIndex, uint64_t submissionId);
+
+		// M18 (C18.3, decisions 26 and 27): the renderer's hooks in the recreation protocol (registered by Create, as
+		// "SceneRenderer"). Release drops every per-view GPU object of the state, by resetting every member except its
+		// back-references, its registration, its size, its stats history, its once-per-renderer log flags and its counters: the targets and the
+		// output stage's targets, every target of its RenderTargetPool (RenderTargetPool::ReleaseAll), its binding-set caches
+		// and material sets, its per-view buffers, its picker's staging copies and its profiler's queries; a pending Render
+		// (awaiting OnSubmitted) is forgotten, the view generation increases (CancelPicks: every pending pick resolves as
+		// cancelled), and GetFinalTexture and GetEntityIdTexture return null until the next Render. A per-view object a later
+		// milestone adds to the state is released without code of its own. Recreate creates the per-view buffers and the
+		// targets of the renderer's size again, as Create does, so GetFinalTexture is valid again; everything else is created
+		// by the next Render. Errors: those of the creation (Gpu). Main thread, from GraphicsDevice::Recover. M18 (C18.4,
+		// decision 43): the registration's TrimUnused hook trims the renderer's RenderTargetPool (its free targets).
+		void ReleaseGpuObjects();
+		[[nodiscard]] Status RecreateGpuObjects();
 	private:
 		// The back-references (the shared pipelines among them), the targets, the per-view and material buffers and the
 		// stats (SceneRenderer.cpp).

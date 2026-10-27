@@ -4,17 +4,24 @@
 
 #include "Engine/Core/Log.h"
 #include "Engine/Graphics/FramePacer.h"
+#include "Engine/Graphics/GpuRecreation.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Image.h"
 #include "Engine/Graphics/OffscreenTarget.h"
 #include "Engine/Graphics/Readback.h"
 #include "Shared/ImGuiConstants.h"
+#include "Support/DeviceLossTest.h"
 #include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
 
 #include <imgui.h>
 
+#include <cstddef>
 #include <cstdlib>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace Engine {
 
@@ -43,6 +50,64 @@ namespace Engine {
 			ImGuiTestContext& operator=(const ImGuiTestContext&) = delete;
 		private:
 			ImGuiContext* m_Context = nullptr;
+		};
+
+		// The frame objects an application's frame owner holds (a pacer, an offscreen target and a command list), registered
+		// with the device as that owner registers its own ("ImGuiRendererTests frame"), so a device loss releases them and the
+		// recovery creates them again. Registered after the renderer under test, so it is released before it and created
+		// again after it.
+		class RegisteredFrame
+		{
+		public:
+			explicit RegisteredFrame(GraphicsDevice& device)
+				: m_Device(&device)
+			{
+				const Status created = Create();
+				REQUIRE_MESSAGE(created.has_value(), (created.has_value() ? std::string() : created.error().ToString()));
+				GpuRecreationHooks hooks;
+				hooks.Name = "ImGuiRendererTests frame";
+				hooks.Release = [this]()
+				{
+					Release();
+				};
+				hooks.Recreate = [this]()
+				{
+					return Create();
+				};
+				m_Registration = device.GetRecreation().Register(std::move(hooks));
+			}
+
+			RegisteredFrame(const RegisteredFrame&) = delete;
+			RegisteredFrame& operator=(const RegisteredFrame&) = delete;
+
+			// Whether the frame's objects exist (not between a Release and the Recreate after it).
+			[[nodiscard]] bool IsCreated() const { return m_Pacer.has_value() && m_Target.has_value() && m_CommandList != nullptr; }
+			// The objects; only while IsCreated.
+			[[nodiscard]] FramePacer& GetPacer() { return *m_Pacer; }
+			[[nodiscard]] OffscreenTarget& GetTarget() { return *m_Target; }
+			[[nodiscard]] nvrhi::ICommandList& GetCommandList() { return *m_CommandList; }
+		private:
+			[[nodiscard]] Status Create()
+			{
+				m_Pacer.emplace(*m_Device, 1);
+				ENGINE_TRY_ASSIGN(OffscreenTarget target, OffscreenTarget::Create(*m_Device, { .Width = 256, .Height = 128 }));
+				m_Target.emplace(std::move(target));
+				ENGINE_TRY_ASSIGN(m_CommandList, m_Device->CreateCommandList());
+				return {};
+			}
+
+			void Release()
+			{
+				m_Pacer.reset();
+				m_Target.reset();
+				m_CommandList = nullptr;
+			}
+		private:
+			GraphicsDevice* m_Device = nullptr; // documented back-reference: the fixture's device outlives the frame
+			std::optional<FramePacer> m_Pacer{};
+			std::optional<OffscreenTarget> m_Target{};
+			nvrhi::CommandListHandle m_CommandList{};
+			GpuRecreationRegistration m_Registration{}; // declared last, so it is dropped first
 		};
 
 		// One RGBA8 pixel of a read-back image.
@@ -419,6 +484,94 @@ namespace Engine {
 			CHECK(layout.bindings[1].slot == 0);
 			CHECK(layout.bindings[2].type == nvrhi::ResourceType::PushConstants);
 			CHECK(layout.bindings[2].size == sizeof(ImGuiConstants));
+		}
+
+		TEST_CASE("ImGuiRenderer: a device loss uploads ImGui's textures again and draws the same image"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 acceptance (C18.3, Docs/Decisions/0029-m18-contract.md decisions 32 and 33): the renderer registers itself
+			// ("ImGuiRenderer"); its Release drops its pipelines, buffers, sampler, binding sets and texture handles and marks
+			// ImGui's textures for creation, so the font atlas is uploaded again from ImGui's own pixels and the same frame draws
+			// the same image. The frame's own objects stand for an application's frame owner, which registers them.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			ImGuiTestContext context;
+			Result<Scope<ImGuiRenderer>> created = ImGuiRenderer::Create(device, gpu.GetPipelines(), { .FramesInFlight = 1 });
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			ImGuiRenderer& renderer = **created;
+			RegisteredFrame frame(device);
+			// Dear ImGui fits a new window to its contents over its first two frames (hiding it on the first), so the frames the
+			// loss test compares come after two that settled the window.
+			for (int settling = 0; settling < 2; ++settling)
+				RenderFrame(renderer, device, frame.GetPacer(), frame.GetTarget(), frame.GetCommandList(), "ImGui after a device loss");
+
+			Test::DeviceLossTest test;
+			test.Owners = { "ImGuiRenderer" };
+			test.Use = [&device, &renderer, &frame]() -> Result<std::vector<std::byte>>
+			{
+				if (!frame.IsCreated())
+					return MakeError(ErrorCode::InvalidState, "the frame's objects were released");
+				BuildFrame(renderer, frame.GetPacer(), "ImGui after a device loss");
+				nvrhi::ICommandList& commandList = frame.GetCommandList();
+				commandList.open();
+				frame.GetTarget().Clear(commandList);
+				const Status rendered = renderer.RenderDrawData(commandList, *frame.GetTarget().GetFramebuffer(), *ImGui::GetDrawData());
+				commandList.close();
+				frame.GetPacer().EndFrame(device.ExecuteCommandList(commandList));
+				ENGINE_TRY(rendered);
+				Readback readback(device);
+				ENGINE_TRY_ASSIGN(const Image image, readback.ReadTexture(*frame.GetTarget().GetColorTexture()));
+				return image.Pixels;
+			};
+			const Result<Test::DeviceLossReport> report = Test::RunDeviceLossTest(gpu, test);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			device.WaitForIdle();
+			renderer.DestroyTextures();
+		}
+
+		TEST_CASE("ImGuiRenderer: a texture it cannot create on a lost device is created after the recovery, without an error"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.3, decision 28): "a Gpu error on a lost device is the loss, never out-of-memory". The font atlas that the
+			// first frame asks for cannot be created on the lost device: it stays WantCreate without an Error line (which would
+			// fail the test: Support/ExpectLog.h) instead of being logged and given up as a failed creation, and the first frame
+			// after the recovery creates it.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			ImGuiTestContext context;
+			Result<Scope<ImGuiRenderer>> created = ImGuiRenderer::Create(device, gpu.GetPipelines(), { .FramesInFlight = 1 });
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			ImGuiRenderer& renderer = **created;
+			RegisteredFrame frame(device);
+
+			device.GetDiagnostics().SetDeviceLost(true);
+			device.ReportDeviceLost("ImGuiRendererTests");
+			BuildFrame(renderer, frame.GetPacer(), "ImGui on a lost device");
+			ImTextureData* atlas = ImGui::GetIO().Fonts->TexData;
+			REQUIRE(atlas != nullptr);
+			CHECK(atlas->Status == ImTextureStatus_WantCreate);
+			nvrhi::ICommandList& commandList = frame.GetCommandList();
+			commandList.open();
+			frame.GetTarget().Clear(commandList);
+			// The frame's draws fail too (the pipeline for the target cannot be created), which a lost frame may.
+			static_cast<void>(renderer.RenderDrawData(commandList, *frame.GetTarget().GetFramebuffer(), *ImGui::GetDrawData()));
+			commandList.close();
+			frame.GetPacer().EndFrame(device.ExecuteCommandList(commandList));
+			CHECK(atlas->Status == ImTextureStatus_WantCreate);
+			CHECK(atlas->GetTexID() == ImTextureID_Invalid);
+			CHECK(renderer.GetTextureCount() == 0);
+
+			const Status recovered = device.Recover(nullptr);
+			REQUIRE_MESSAGE(recovered.has_value(), recovered.error().ToString());
+			REQUIRE(frame.IsCreated());
+			RenderFrame(renderer, device, frame.GetPacer(), frame.GetTarget(), frame.GetCommandList(), "ImGui on a lost device");
+			CHECK(atlas->Status == ImTextureStatus_OK);
+			CHECK(atlas->GetTexID() != ImTextureID_Invalid);
+			CHECK(renderer.GetTextureCount() == 1);
+			device.WaitForIdle();
+			renderer.DestroyTextures();
 		}
 	}
 

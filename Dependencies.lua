@@ -77,6 +77,7 @@ IncludeDir["json"] = RepositoryRoot .. "/Vendor/json/single_include"
 IncludeDir["cgltf"] = RepositoryRoot .. "/Vendor/cgltf"
 IncludeDir["stb"] = RepositoryRoot .. "/Vendor/stb"
 IncludeDir["MikkTSpace"] = RepositoryRoot .. "/Vendor/MikkTSpace"
+IncludeDir["nfd"] = RepositoryRoot .. "/Vendor/nativefiledialog-extended/src/include"
 IncludeDir["doctest"] = RepositoryRoot .. "/Vendor/doctest"
 
 -- Project kinds that produce a linked binary and therefore link libraries.
@@ -371,6 +372,23 @@ function UseMikkTSpace()
 
 	filter { LinkingKinds }
 		links { "MikkTSpace" }
+
+	filter {}
+end
+
+-- nativefiledialog-extended (Vendor/nativefiledialog-extended/VENDOR.md): the native file dialogs, Windows backend only
+-- (Docs/Decisions/0029-m18-contract.md decision 21). No defines. Engine takes the include directory: its
+-- Platform/Windows/NativeFileDialogWindows.cpp alone includes nfd.h (Scripts/ModuleRules.json). The Editor and Tests
+-- executables, which reference NativeFileDialog, link the library on Windows with the system libraries of nfd_win.cpp
+-- (ole32: COM; shell32: SHCreateItemFromParsingName; uuid: the dialog's class and interface identifiers) and of
+-- NativeFileDialogWindows.cpp (user32: finding and closing the dialog's window). Linux and macOS link nothing: there
+-- NativeFileDialog::Open is Unsupported (Platform/Posix/NativeFileDialogPosix.cpp). The Runtime never calls this function,
+-- so no exported game links the library.
+function UseNativeFileDialog()
+	externalincludedirs { IncludeDir.nfd }
+
+	filter { LinkingKinds, "system:windows" }
+		links { "nfd", "ole32", "shell32", "uuid", "user32" }
 
 	filter {}
 end

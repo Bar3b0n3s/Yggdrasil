@@ -518,8 +518,8 @@ class FreshCloneTests(unittest.TestCase):
 
     def test_the_cli_audits_the_index_by_default_and_takes_a_project_file(self) -> None:
         project_file = next(self.project.glob("*.eproj"))
-        self.assertEqual(AuditProvenance.resolve_project(str(project_file)), self.project.resolve())
-        self.assertEqual(AuditProvenance.resolve_project(str(self.project)), self.project.resolve())
+        self.assertEqual(AuditProvenance.resolve_project(project_file), self.project.resolve())
+        self.assertEqual(AuditProvenance.resolve_project(self.project), self.project.resolve())
         exit_code, document = run_audit("--project", str(project_file))
         self.assertEqual(exit_code, 0, document)
         self.assertEqual([project["files"] for project in document["projects"]], ["index"])

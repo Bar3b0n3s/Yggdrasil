@@ -12,7 +12,8 @@ and the GPU test options (GPU_EDITOR_ARGUMENTS: validation with synchronization 
 for any GPU error or warning, like the C++ GPU tests' processes). A test that needs one calls require_gpu() first: it
 probes once per run whether a headless editor can create its device here; without one the test prints NO_DEVICE_PREFIX
 with the reason and returns, passing without running (Scripts/Test.py counts those lines and ends the run as a warning),
-unless ENGINE_AUTOMATION_REQUIRE_GPU=1 (Test.py --require-gpu), which fails it instead.
+unless ENGINE_AUTOMATION_REQUIRE_GPU=1 (Test.py --require-gpu), which fails it instead. The tests that inject GPU faults
+(device losses, hangs, out-of-memory) derive from GpuRecoveryTestCase, which adds their shared waits and checks.
 
 The editor binary comes from ENGINE_AUTOMATION_CONFIG (Release by default, the configuration the CI automation stage
 uses, §15.8; Debug when only that one is built). Calls are recorded for method coverage (§15.6 gate 5) through
@@ -30,6 +31,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from typing import Any
@@ -50,6 +52,9 @@ EXIT_SUCCESS = 0
 EXIT_FAILED = 1
 EXIT_USAGE = 2
 EXIT_INIT_FAILED = 3
+# GpuRecoveryTestCase's bound on the waits for another process's state, never a timing a test passes by (ADR 0008
+# decision 15).
+GPU_RECOVERY_WAIT_SECONDS = 60.0
 
 
 def editor_executable() -> Path:
@@ -197,6 +202,51 @@ class AutomationTestCase(unittest.TestCase):
         self.assertEqual(error.code, code, quoted)
         if error_code is not None:
             self.assertEqual(error.error_code, error_code, quoted)
+
+
+class GpuRecoveryTestCase(AutomationTestCase):
+    """The shared helpers of the tests that inject GPU faults into rendering editors and exported games (M18,
+    Docs/Decisions/0029-m18-contract.md: test_device_loss and test_gpu_faults): scene-view screenshots, bounded waits
+    for rendered frames and GpuDeviceLost events, and the clean exit of a process that ran with --expect-no-gpu-errors.
+    It has no test of its own."""
+
+    def shoot(self, client: engine_client.EngineClient, params: dict[str, Any] | None = None) -> bytes:
+        """The PNG bytes of a 64 x 36 screenshot of the scene view, with `params` added."""
+        result = client.call("viewport.screenshot", {"view": "scene", "width": 64, "height": 36, **(params or {})})
+        return Path(result["path"]).read_bytes()
+
+    def device_loss_events(self, client: engine_client.EngineClient, cursor: str) -> list[dict[str, Any]]:
+        """The GpuDeviceLost events after `cursor` ("" for the oldest event the log holds)."""
+        return client.call("events.read", {"cursor": cursor, "types": ["GpuDeviceLost"]})["events"]
+
+    def wait_for_device_loss_events(self, client: engine_client.EngineClient, cursor: str,
+                                    count: int) -> list[dict[str, Any]]:
+        """The GpuDeviceLost events after `cursor`, once there are `count` of them (bounded by
+        GPU_RECOVERY_WAIT_SECONDS; the caller checks how many arrived)."""
+        deadline = time.monotonic() + GPU_RECOVERY_WAIT_SECONDS
+        while True:
+            events = self.device_loss_events(client, cursor)
+            if len(events) >= count or time.monotonic() > deadline:
+                return events
+
+    def wait_for_rendered_frame(self, client: engine_client.EngineClient, after: int) -> int:
+        """The scene view's frame index once a frame after `after` rendered (bounded by GPU_RECOVERY_WAIT_SECONDS)."""
+        deadline = time.monotonic() + GPU_RECOVERY_WAIT_SECONDS
+        while True:
+            view = client.call("stats.get")["views"][0]
+            if view["available"] and int(view["frame"]) > after:
+                return int(view["frame"])
+            if time.monotonic() > deadline:
+                self.fail(f"the scene view rendered no frame after frame {after} within "
+                          f"{GPU_RECOVERY_WAIT_SECONDS:.0f} s: {view}")
+
+    def assert_clean_exit(self, process: engine_client.EditorProcess) -> None:
+        """`process` exits 0 (it runs with --expect-no-gpu-errors) and printed no GPU warning or error."""
+        self.assertEqual(process.wait(), EXIT_SUCCESS, process.output())
+        gpu_messages = [line for line in process.output().splitlines()
+                        if ("Vulkan validation:" in line or "NVRHI:" in line)
+                        and any(level in line for level in ("[warning]", "[error]", "[critical]"))]
+        self.assertFalse(gpu_messages, process.output())
 
 
 def read_json(path: Path) -> Any:

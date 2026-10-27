@@ -12,15 +12,23 @@
 
 // Transient render targets keyed by their TextureDesc (Architecture §8.2: "Pass targets come from RenderTargetPool
 // keyed by TextureDesc"). The pool owns every target (§8.14 item 1); a pass holds the handle it acquired for as long as
-// it uses the target, and a target nobody besides the pool references (GpuResourceTracker::HasOtherReferences(target,
-// 1), which discounts the tracker's own reference, so reuse behaves the same in every configuration) is free for the
-// next Acquire with an equal key. Reusing a target while a frame that used it is still in flight is safe: the GPU
-// orders the work of one queue, and NVRHI's barriers order the accesses.
+// it uses the target, and a target nobody besides the pool references is free for the next Acquire with an equal key.
+// Reusing a target while a frame that used it is still in flight is safe: the GPU orders the work of one queue, and
+// NVRHI's barriers order the accesses.
 //
 // Releasing one is not: NVRHI's command lists do not reference textures used only by clears (ADR 0009 decision 31), so
 // an unretired submission that cleared a target does not count as a reference. The pool therefore stamps each target
 // with the last submission of the frames that acquired it (EndFrame) and releases a free target only once the GPU has
 // completed that submission (GraphicsDevice::GetCompletedSubmissionID), never one acquired since the last EndFrame.
+//
+// Reuse behaves the same in every configuration. The pool asks GpuResourceTracker::HasOtherReferences(target, 1), which
+// discounts the tracker's own reference to the target, and before it decides that a target is acquired (Acquire, when a
+// target with an equal key is not free; EndFrame, ReleaseFree, TrimUnused and GetAcquiredCount) it sweeps the device's
+// tracker (GpuResourceTracker::Sweep), which releases what only the tracker still holds: in Debug and Release a
+// framebuffer or binding set on a target, dropped before any command list recorded it, would otherwise keep the target
+// acquired until the next garbage collection, while Dist, which has no tracker, destroys it at its drop (M18's gate,
+// Docs/Decisions/0029-m18-contract.md "Milestone review"). What a submitted command list used stays referenced until
+// NVRHI's garbage collection retires the list, in every configuration.
 
 namespace Engine {
 
@@ -45,8 +53,9 @@ namespace Engine {
 		// (dimension, size, depth, array size, mips, sample count and quality, format, the usage flags, the initial state,
 		// keepInitialState, and the clear value), otherwise a new one created through GraphicsDevice::CreateTexture. The
 		// debug name does not take part in matching, and a reused target keeps the name it was created with. Errors: Gpu
-		// when the creation fails (render targets are created at startup or resize, so callers treat it as
-		// FatalError(OutOfMemory), §8.14 item 7).
+		// when the creation fails (render targets are created at startup or resize: at startup the caller treats it as
+		// FatalError(OutOfMemory), §8.14 item 7; M18, C18.4: after startup the request that acquires it trims and retries
+		// once, RetryAfterTrim, Graphics/GpuOutOfMemory.h, and then fails alone with OutOfMemory).
 		[[nodiscard]] Result<nvrhi::TextureHandle> Acquire(const nvrhi::TextureDesc& desc);
 
 		// Once per frame after the frame's submission: stamps the targets acquired during the frame, or still held, with
@@ -58,10 +67,29 @@ namespace Engine {
 		// acquired since the last EndFrame, or used by a frame still in flight, stays until a later EndFrame releases it.
 		void ReleaseFree();
 
+		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 27): releases every target the pool holds, free or
+		// acquired, whatever its last submission, for its owner's Release hook in the recreation protocol (a lost device runs
+		// no submission again, and the recovery retires them all). Handles acquired by others stay valid until they drop them
+		// (NVRHI reference counting); their holders are released in the same recovery. Afterwards GetTargetCount is 0, and
+		// Acquire creates new targets. Main thread.
+		void ReleaseAll();
+
+		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 43): its owner's TrimUnused hook, when a request ran out of
+		// GPU memory (the renderer's registration calls it). Releases every free target whose last submission has completed,
+		// whatever its age (keepFrames does not apply), and keeps the acquired ones and every target acquired since the last
+		// EndFrame (LastSubmission PendingSubmission), free or not: an open command list may still record into one, and
+		// NVRHI's lists do not reference a texture used only by a clear (ADR 0009 decision 31), so dropping the pool's handle
+		// would destroy the image at once in Dist, where the tracker holds no reference. GraphicsDevice::TrimUnused waits for
+		// the device's last submission before it runs the hooks, so there it releases every free target an EndFrame stamped;
+		// called on its own it keeps a target whose submission is still pending, as ReleaseFree does. Afterwards Acquire
+		// creates what it needs again. Main thread.
+		void TrimUnused();
+
 		// Targets the pool holds, free or acquired.
 		[[nodiscard]] size_t GetTargetCount() const;
-		// Targets someone besides the pool references (HasOtherReferences).
-		[[nodiscard]] size_t GetAcquiredCount() const;
+		// Targets someone besides the pool references (HasOtherReferences), after the tracker's sweep (the file comment), so
+		// not const.
+		[[nodiscard]] size_t GetAcquiredCount();
 	private:
 		// LastSubmission of a target acquired since the last EndFrame: its submission is not known yet.
 		static constexpr uint64_t PendingSubmission = std::numeric_limits<uint64_t>::max();
@@ -74,7 +102,10 @@ namespace Engine {
 			uint64_t LastSubmission = PendingSubmission;
 		};
 
-		// Whether nobody besides the pool references `target`.
+		// Releases what only the device's tracker still holds (GpuResourceTracker::Sweep; nothing in Dist), so IsFree then
+		// answers as in Dist (the file comment).
+		void SweepTracker();
+		// Whether nobody besides the pool references `target`; as in Dist after a SweepTracker.
 		[[nodiscard]] bool IsFree(const PooledTarget& target) const;
 		// Whether `target` may be released: free, and every submission that may have used it has completed.
 		[[nodiscard]] bool IsReleasable(const PooledTarget& target, uint64_t completedSubmission) const;

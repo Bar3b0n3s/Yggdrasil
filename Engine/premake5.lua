@@ -110,6 +110,7 @@ project "Engine"
 	UseSpdlog()
 	UseMiniaudio()
 	UseMikkTSpace()
+	UseNativeFileDialog()
 	UseLuau(false)
 
 	if UseShadersProject then

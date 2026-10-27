@@ -112,7 +112,10 @@ namespace Engine {
 	// asset gets its placeholder's mirror. A failed upload (Gpu, also --gpu-inject-fault=oom-texture, ADR 0009 decision 8)
 	// never crashes: the placeholder's mirror is used and the AssetManager records an AssetUploadFailedCode diagnostic
 	// (§8.14 item 7), logged once per asset. Placeholder mirrors are created on first need; if even that fails, the texture
-	// mirror's handle is null and the caller skips draws using it.
+	// mirror's handle is null and the caller skips draws using it. M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision
+	// 28): an upload that fails while the device is lost (GraphicsDevice::IsLost) is the loss, not the asset's failure: the
+	// stand-in mirror is used as above, but nothing is counted in UploadFailures or reported, and the device's recovery
+	// drops the stand-in (ReleaseGpuObjects), so the next Get uploads the asset again.
 	//
 	// Main thread only (NVRHI command recording, §4.11). Destroyed before the device (§8.14 item 4: SceneRenderer, then
 	// GpuResourceCache). Not copyable.
@@ -162,6 +165,24 @@ namespace Engine {
 
 		// Releases every mirror, placeholders included.
 		void Clear();
+
+		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decisions 26 and 27): the cache's Release hook in the recreation
+		// protocol; the constructor registers the cache with its device (as "GpuResourceCache"), the placement rule's place
+		// for asset mirrors. Drops every mirror, placeholders included (Clear), and every handle a mirror's upload still holds,
+		// while keeping the material generation counter (no GpuMaterial::Generation is ever reused, so no renderer's binding
+		// set from before the loss is ever found again) and GetStats().UploadFailures. There is no Recreate: the next Get
+		// uploads each mirror again from the asset manager's loaded data, as on first use. Main thread, from
+		// GraphicsDevice::Recover.
+		void ReleaseGpuObjects();
+
+		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 43): the cache's TrimUnused hook (its registration calls
+		// it) when a request ran out of GPU memory: releases what CollectStale() releases (the mirrors of replaced versions)
+		// and the mirrors of assets the asset manager no longer has loaded (AssetManager::GetState is Unloaded: released or
+		// unknown), placeholders and built-in assets excepted. A mirror of a loaded, current asset stays, since the next
+		// Render would upload it again at once; a dropped one is uploaded again by its next Get. Keeps the material
+		// generation counter and GetStats().UploadFailures, as ReleaseGpuObjects does. Like CollectStale it ends the validity
+		// of the references Get handed out, so it runs only between recordings (GraphicsDevice::TrimUnused). Main thread.
+		void TrimUnused();
 
 		[[nodiscard]] GpuResourceCacheStats GetStats() const;
 	private:

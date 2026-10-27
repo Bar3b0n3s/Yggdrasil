@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Editor/FolderPicker.h"
+#include "Editor/FileDialog.h"
 #include "Engine/Asset/AssetHandle.h"
 #include "Engine/Asset/AssetType.h"
 #include "Engine/Core/Result.h"
@@ -18,8 +18,10 @@ namespace Engine {
 	struct EditorPanelContext;
 
 	// Project folder tree/grid, type icons, cached thumbnails and import-error badges. Create folder/scene/material/
-	// prefab/sound effect through existing asset/prefab methods, and scripts through the registered templates.
+	// prefab/sound effect/sprite sheet through existing asset/prefab methods, and scripts through the registered templates.
 	// Rename/move preserve handles; delete uses undoable trash. OS drops use asset.import, preview audio uses AudioPreview.
+	// The import's source file is chosen through the FileDialog API (Editor/FileDialog.h: the native dialog when the panel
+	// context has a backend, the ImGui picker otherwise), which only fills the path asset.import takes (M18).
 	// Main thread inside ImGui. Retains only UI presentation state, no entity/component/asset pointers across frames.
 	//
 	// Draw never walks the project per frame: the folder listing (one VFS listing) and the current folder's tiles are
@@ -55,7 +57,7 @@ namespace Engine {
 		std::array<char, 256> m_CreateName{};
 		std::array<char, 4096> m_ImportSource{};
 		std::array<char, 4096> m_MovePath{};
-		FolderPicker m_ImportPicker{};
+		FileDialog m_ImportDialog{}; // the import source: the native dialog or the ImGui picker (Editor/FileDialog.h)
 		std::string m_ImportDirectory{};
 		std::string m_ActionDirectory{};
 		AssetHandle m_ActionAsset{};

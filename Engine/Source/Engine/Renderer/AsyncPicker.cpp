@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/Renderer/AsyncPicker.h"
 
+#include "Engine/Graphics/CommandListRecording.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Renderer/SceneTargetFormats.h"
 
@@ -129,11 +130,12 @@ namespace Engine {
 		}
 		slot.Table.assign(pickTable.begin(), pickTable.end());
 		slot.Request = request;
-		slot.Commands->open();
-		slot.Commands->copyTexture(slot.Staging, nvrhi::TextureSlice().setWidth(1).setHeight(1), &entityIds,
-			nvrhi::TextureSlice().setOrigin(request.X, request.Y).setWidth(1).setHeight(1));
-		slot.Commands->close();
-		slot.Submission = state.Device->ExecuteCommandList(*slot.Commands);
+		{
+			CommandListRecording recording(*state.Device, *slot.Commands);
+			slot.Commands->copyTexture(slot.Staging, nvrhi::TextureSlice().setWidth(1).setHeight(1), &entityIds,
+				nvrhi::TextureSlice().setOrigin(request.X, request.Y).setWidth(1).setHeight(1));
+			slot.Submission = recording.Execute();
+		}
 		state.Device->GetNvrhiDevice()->resetEventQuery(slot.Query);
 		state.Device->GetNvrhiDevice()->setEventQuery(slot.Query, nvrhi::CommandQueue::Graphics);
 		slot.Ticket = { state.NextTicket++ };
@@ -200,6 +202,21 @@ namespace Engine {
 			}
 		}
 		state.CollectCancelled();
+	}
+
+	void AsyncPicker::ReleaseGpuObjects()
+	{
+		State& state = *m_State;
+		// No CollectCancelled: it asks the device which submissions completed, and a released slot waits for none.
+		for (State::Slot& slot : state.Slots)
+		{
+			if (slot.Ticket.Value != 0 && !slot.Cancelled)
+				state.RememberCancellation(slot.Ticket.Value);
+			state.Release(slot);
+			slot.Staging = nullptr;
+			slot.Commands = nullptr;
+			slot.Query = nullptr;
+		}
 	}
 
 }

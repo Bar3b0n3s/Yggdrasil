@@ -45,6 +45,14 @@ namespace Engine {
 			return (indexCount + 1) & ~static_cast<size_t>(1);
 		}
 
+		// The renderer's linear-clamp sampler (Create, and Recreate after a device loss).
+		static Result<nvrhi::SamplerHandle> CreateImGuiSampler(GraphicsDevice& device)
+		{
+			nvrhi::SamplerDesc samplerDesc;
+			samplerDesc.setAllFilters(true).setAllAddressModes(nvrhi::SamplerAddressMode::Clamp);
+			return device.CreateSampler(samplerDesc);
+		}
+
 	}
 
 	ImGuiRenderer::ImGuiRenderer(ConstructionKey /*key*/)
@@ -82,9 +90,7 @@ namespace Engine {
 		ENGINE_TRY(WithContext(ValidatePipelineLayout(GetLayoutDescription(), pipelines.GetShaderLibrary()),
 			"while creating the ImGui renderer"));
 
-		nvrhi::SamplerDesc samplerDesc;
-		samplerDesc.setAllFilters(true).setAllAddressModes(nvrhi::SamplerAddressMode::Clamp);
-		ENGINE_TRY_ASSIGN(nvrhi::SamplerHandle sampler, device.CreateSampler(samplerDesc));
+		ENGINE_TRY_ASSIGN(nvrhi::SamplerHandle sampler, Utils::CreateImGuiSampler(device));
 
 		Scope<ImGuiRenderer> renderer = CreateScope<ImGuiRenderer>(ConstructionKey());
 		renderer->m_Device = &device;
@@ -97,6 +103,21 @@ namespace Engine {
 		io.BackendRendererName = RendererName;
 		io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures | ImGuiBackendFlags_RendererHasVtxOffset;
 		renderer->m_Context = context;
+
+		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decisions 26 and 33): released and created again through the
+		// device's recreation registry (see the class comment).
+		ImGuiRenderer* owner = renderer.get();
+		GpuRecreationHooks hooks;
+		hooks.Name = "ImGuiRenderer";
+		hooks.Release = [owner]()
+		{
+			owner->ReleaseGpuObjects();
+		};
+		hooks.Recreate = [owner]()
+		{
+			return owner->RecreateGpuObjects();
+		};
+		renderer->m_Recreation = device.GetRecreation().Register(std::move(hooks));
 		return renderer;
 	}
 
@@ -203,6 +224,30 @@ namespace Engine {
 		return liveCount + m_RetiredTextures.size();
 	}
 
+	void ImGuiRenderer::ReleaseGpuObjects()
+	{
+		// DestroyTextures marks ImGui's textures for creation again and drops every key and texture handle: nothing is
+		// retired, since a lost device runs nothing more. It reads ImGui's texture list, so the renderer's context is made
+		// current for the call (the recovery runs at the frame boundary, whichever context a host left current).
+		ImGuiContext* current = ImGui::GetCurrentContext();
+		ImGui::SetCurrentContext(m_Context);
+		DestroyTextures();
+		ImGui::SetCurrentContext(current);
+
+		// Then the objects the next use creates again: the pipelines with their binding layouts, the geometry buffers of
+		// every frame slot, and the sampler, which Recreate creates again.
+		m_TargetPipelines.clear();
+		for (GeometryBuffers& geometry : m_Geometry)
+			geometry = GeometryBuffers{};
+		m_Sampler = nullptr;
+	}
+
+	Status ImGuiRenderer::RecreateGpuObjects()
+	{
+		ENGINE_TRY_ASSIGN(m_Sampler, Utils::CreateImGuiSampler(*m_Device));
+		return {};
+	}
+
 	PipelineLayoutDescription ImGuiRenderer::GetLayoutDescription()
 	{
 		nvrhi::BindingLayoutDesc layout;
@@ -238,6 +283,12 @@ namespace Engine {
 		desc.debugName = std::format("ImGui.Texture{}", texture.UniqueID);
 
 		Result<nvrhi::TextureHandle> created = m_Device->CreateTexture(desc);
+		if (!created.has_value() && m_Device->IsLost())
+		{
+			// The loss, not out of memory (M18, C18.3 decision 28): the texture stays WantCreate, so the first frame after the
+			// recovery creates it, and this frame's draws that use it are skipped (its ImTextureID stays invalid).
+			return;
+		}
 		if (!created.has_value())
 		{
 			// Once per texture: the status becomes OK, so Dear ImGui does not ask again, and the invalid ImTextureID makes the

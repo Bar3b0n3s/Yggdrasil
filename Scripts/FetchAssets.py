@@ -30,6 +30,9 @@ recorded in Docs/Decisions/0001-approvals.md. Files are written to a temporary n
 verification, so a failed download leaves nothing behind. Poly Haven asks API clients to identify themselves, so every
 request carries the User-Agent below.
 
+It works from any directory (Docs/Architecture.md §2.3): a relative path given on its command line is resolved against
+the caller's directory, then main() makes the repository root of its own checkout the working directory.
+
 Exit codes: 0 success, 1 a download failed or did not verify, 2 usage error.
 """
 
@@ -199,9 +202,9 @@ def parse_arguments(arguments: list[str] | None) -> argparse.Namespace:
     hdri = commands.add_parser("hdri", help="a Poly Haven HDRI (md5-verified)")
     hdri.add_argument("id", help="the Poly Haven asset id, for example studio_small_09")
     hdri.add_argument("--res", choices=HDRI_RESOLUTIONS, default="1k", help="the resolution (default 1k)")
-    hdri.add_argument("--dest", type=Path, required=True, help="the destination directory")
+    hdri.add_argument("--dest", type=paths.argument_path, required=True, help="the destination directory")
     font = commands.add_parser("font", help="the pinned Inter release (SHA-256-verified)")
-    font.add_argument("--dest", type=Path, required=True, help="the destination directory")
+    font.add_argument("--dest", type=paths.argument_path, required=True, help="the destination directory")
     defaults = commands.add_parser("defaults", help="the committed engine resources under Resources/")
     defaults.add_argument(
         "--check", action="store_true", help="verify the committed files against their pins; download nothing"
@@ -514,6 +517,7 @@ def run_command(options: argparse.Namespace, console: Console) -> tuple[list[Ste
 def main(arguments: list[str] | None = None) -> int:
     configure_stdio()
     options = parse_arguments(sys.argv[1:] if arguments is None else arguments)
+    paths.enter_repository_root()
     console = Console(options.json)
     console.heading("Fetch assets")
     steps, files = run_command(options, console)

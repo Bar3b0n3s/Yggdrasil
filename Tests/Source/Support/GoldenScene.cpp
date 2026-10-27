@@ -6,6 +6,8 @@
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/Error.h"
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Core/Json/Json.h"
+#include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Mounts/NativeDirectoryMount.h"
 #include "Engine/Core/VfsPath.h"
 #include "Engine/Core/VirtualFileSystem.h"
@@ -26,11 +28,15 @@
 #include "Support/TempDirectory.h"
 #include "Support/TestData.h"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <format>
+#include <iterator>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -40,7 +46,9 @@
 // RenderGoldenScene (GoldenScene.h) renders a golden scene the way viewport.screenshot renders an edit scene's game view,
 // over a disposable copy of the FeatureTest project, so opening it (which may write .meta files and cooks into cache://)
 // never touches the repository. A golden scene must load and render cleanly: any load diagnostic, scan diagnostic or asset
-// diagnostic of Error severity fails the render instead of producing an image with placeholders in it.
+// diagnostic of Error severity fails the render instead of producing an image with placeholders in it. The scene list
+// (ListGoldenScenes) reads the golden scaffolds from the manifest Scripts/Scaffold.py runs, so a golden scene a later
+// milestone adds through a golden scaffold is found without a change here.
 
 namespace Engine {
 
@@ -48,8 +56,15 @@ namespace Engine {
 
 		namespace {
 
-			// The project's folder of golden scenes, project-relative.
-			constexpr std::string_view GoldenSceneFolder = "Assets/Scenes/Golden";
+			// The folder of Golden.jsonl's kept golden scenes and the scaffold that wrote them, project-relative.
+			constexpr std::string_view KeptGoldenSceneFolder = "Assets/Scenes/Golden";
+			constexpr std::string_view KeptGoldenScaffold = "Golden.jsonl";
+			// The scaffold manifest (Scripts/Scaffold.py) and its golden scaffolds' member.
+			constexpr std::string_view ScaffoldManifest = "Scaffold/Scaffolds.json";
+			constexpr std::string_view ScaffoldManifestFormat = "FeatureTestScaffolds";
+			constexpr uint32_t ScaffoldManifestVersion = 1;
+			constexpr std::string_view GoldenDirectoriesMember = "GoldenDirectories";
+			constexpr std::string_view SceneExtension = ".scene";
 
 			// A golden scene name is a plain file stem: letters, digits, '-' and '_'.
 			bool IsGoldenSceneName(std::string_view name)
@@ -59,6 +74,60 @@ namespace Engine {
 					return (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9')
 						|| character == '-' || character == '_';
 				});
+			}
+
+			// Whether `name` is a plain directory name: letters, digits, '_', '-' and '.', not starting with '.'.
+			bool IsPlainDirectoryName(std::string_view name)
+			{
+				return !name.empty() && name.front() != '.' && std::ranges::all_of(name, [](char character)
+				{
+					return (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9')
+						|| character == '_' || character == '-' || character == '.';
+				});
+			}
+
+			// Whether `directory` is "Assets/" followed by '/'-separated plain names, the golden directories Scripts/Scaffold.py
+			// accepts.
+			bool IsGoldenDirectory(std::string_view directory)
+			{
+				constexpr std::string_view Prefix = "Assets/";
+				if (!directory.starts_with(Prefix))
+					return false;
+				std::string_view rest = directory.substr(Prefix.size());
+				while (true)
+				{
+					const size_t slash = rest.find('/');
+					if (!IsPlainDirectoryName(rest.substr(0, slash)))
+						return false;
+					if (slash == std::string_view::npos)
+						return true;
+					rest = rest.substr(slash + 1);
+				}
+			}
+
+			// Appends a GoldenSceneEntry of `scaffold` for every .scene file in the project-relative `directory` of the project
+			// at `projectRoot` (and below it when `recursive`); a directory that does not exist holds none.
+			Status AppendGoldenScenes(const std::filesystem::path& projectRoot, std::string_view directory, bool recursive, std::string_view scaffold,
+				std::vector<GoldenSceneEntry>& scenes)
+			{
+				const std::filesystem::path folder = projectRoot / FileSystem::PathFromUtf8(directory);
+				if (!FileSystem::Exists(folder))
+					return {};
+				ENGINE_TRY_ASSIGN(const std::vector<std::filesystem::path> files, FileSystem::ListDirectory(folder, recursive));
+				for (const std::filesystem::path& file : files)
+				{
+					if (FileSystem::PathToUtf8(file.extension()) != SceneExtension)
+						continue;
+					ENGINE_TRY_ASSIGN(const FileInfo info, FileSystem::GetInfo(file));
+					if (info.IsDirectory)
+						continue;
+					scenes.push_back(GoldenSceneEntry{
+						.Name = FileSystem::PathToUtf8(file.stem()),
+						.Path = FileSystem::PathToUtf8(file.lexically_relative(projectRoot)),
+						.Scaffold = std::string(scaffold),
+					});
+				}
+				return {};
 			}
 
 			std::filesystem::path GetFeatureTestRoot()
@@ -111,10 +180,12 @@ namespace Engine {
 				return text;
 			}
 
-			// The render itself, over the project copy at `projectRoot`; every GPU object it creates is gone when it returns.
-			Result<Image> RenderProjectCopy(HeadlessGpuFixture& gpu, const std::filesystem::path& projectRoot, std::string_view name,
+			// The render itself of the golden scene `scene` over the project copy at `projectRoot`; every GPU object it creates
+			// is gone when it returns.
+			Result<Image> RenderProjectCopy(HeadlessGpuFixture& gpu, const std::filesystem::path& projectRoot, const GoldenSceneEntry& scene,
 				const GoldenSceneOptions& options)
 			{
+				const std::string_view name = scene.Name;
 				GraphicsDevice& device = gpu.GetDevice();
 				ENGINE_TRY_ASSIGN(const Scope<EnvironmentBaker> baker, EnvironmentBaker::Create(device, gpu.GetPipelines()));
 
@@ -139,20 +210,19 @@ namespace Engine {
 				}
 
 				// The scene, strictly: unknown keys, fields and components are errors, and so is any other diagnostic.
-				const std::string relative = std::format("{}/{}.scene", GoldenSceneFolder, name);
-				ENGINE_TRY_ASSIGN(const VfsPath scenePath, VfsPath::Create("project", relative));
+				ENGINE_TRY_ASSIGN(const VfsPath scenePath, VfsPath::Create("project", scene.Path));
 				SceneSpecification specification;
 				specification.Name = std::string(name);
 				specification.Registry = &assets.GetRegistry();
 				specification.IdGenerator = &assets.GetGenerator();
-				const Scope<Scene> scene = Scene::Create(specification);
+				const Scope<Scene> loaded = Scene::Create(specification);
 				LoadReport report;
-				ENGINE_TRY(WithContext(SceneSerializer::LoadFromFile(*scene, vfs, scenePath, { .StrictUnknowns = true, .SourcePath = relative }, report),
+				ENGINE_TRY(WithContext(SceneSerializer::LoadFromFile(*loaded, vfs, scenePath, { .StrictUnknowns = true, .SourcePath = scene.Path }, report),
 					std::format("loading the golden scene '{}'", name)));
 				if (!report.Diagnostics.empty())
 					return MakeError(ErrorCode::Validation, "the golden scene '{}' loads with diagnostics: {}", name, DescribeLoadDiagnostics(report));
-				TransformSystem::Update(*scene);
-				ENGINE_TRY_ASSIGN(const std::string sceneBefore, SceneSerializer::SaveToString(*scene));
+				TransformSystem::Update(*loaded);
+				ENGINE_TRY_ASSIGN(const std::string sceneBefore, SceneSerializer::SaveToString(*loaded));
 
 				GpuResourceCache cache(device, assets.GetManager());
 				ENGINE_TRY_ASSIGN(const Scope<SceneRendererPipelines> pipelines, SceneRendererPipelines::Create(device, gpu.GetPipelines()));
@@ -171,19 +241,19 @@ namespace Engine {
 					.Height = options.Height,
 					.Quality = { .ShadowMapSize = settings.Rendering.ShadowMapSize, .SsaoHalfResolution = settings.Rendering.SsaoHalfResolution },
 				};
-				ENGINE_TRY_ASSIGN(RenderSnapshot snapshot, ExtractRenderSnapshot(*scene, request));
+				ENGINE_TRY_ASSIGN(RenderSnapshot snapshot, ExtractRenderSnapshot(*loaded, request));
 				if (!snapshot.HasCamera)
 					return MakeError(ErrorCode::Validation, "the golden scene '{}' has no primary camera", name);
 				if (options.EditSnapshot)
 					options.EditSnapshot(snapshot);
 				// Use the actual loaded scene and assets, as the screenshot host does. No borrowed scene state escapes.
 				ENGINE_TRY_ASSIGN(const PhysicsLayerTable layers, PhysicsLayerTable::Create(settings.Physics.Layers, settings.Physics.Collisions));
-				ENGINE_TRY(AppendRenderAnnotations(*scene, assets.GetManager(), layers, nullptr, snapshot));
+				ENGINE_TRY(AppendRenderAnnotations(*loaded, assets.GetManager(), layers, nullptr, snapshot));
 				if (options.InspectSnapshot)
 					options.InspectSnapshot(snapshot);
 				assets.GetManager().WaitIdle();
 				ENGINE_TRY_ASSIGN(Image image, capture->Capture({ .Width = options.Width, .Height = options.Height }, snapshot));
-				ENGINE_TRY_ASSIGN(const std::string sceneAfter, SceneSerializer::SaveToString(*scene));
+				ENGINE_TRY_ASSIGN(const std::string sceneAfter, SceneSerializer::SaveToString(*loaded));
 				if (sceneBefore != sceneAfter)
 					return MakeError(ErrorCode::Validation, "the golden scene '{}' was mutated during rendering", name);
 
@@ -195,18 +265,65 @@ namespace Engine {
 
 		}
 
+		Result<std::vector<GoldenSceneEntry>> ListGoldenScenes(const std::filesystem::path& projectRoot)
+		{
+			std::vector<GoldenSceneEntry> scenes;
+			ENGINE_TRY(AppendGoldenScenes(projectRoot, KeptGoldenSceneFolder, false, KeptGoldenScaffold, scenes));
+
+			const std::filesystem::path manifestPath = projectRoot / FileSystem::PathFromUtf8(ScaffoldManifest);
+			ENGINE_TRY_ASSIGN(const std::string text, FileSystem::ReadText(manifestPath));
+			ENGINE_TRY_ASSIGN(const Json document, WithContext(JsonReader::Parse(text), std::format("reading '{}'", ScaffoldManifest)));
+			const JsonReader manifest(document);
+			ENGINE_TRY(WithContext(manifest.ReadFormatHeader(ScaffoldManifestFormat, ScaffoldManifestVersion, ScaffoldManifestVersion),
+				std::format("reading '{}'", ScaffoldManifest)));
+			ENGINE_TRY_ASSIGN(const JsonReader entries, manifest.GetMember("Scaffolds"));
+			ENGINE_TRY_ASSIGN(const size_t count, entries.GetArraySize());
+			for (size_t index = 0; index < count; ++index)
+			{
+				ENGINE_TRY_ASSIGN(const JsonReader entry, entries.GetElement(index));
+				ENGINE_TRY_ASSIGN(const std::string scaffold, entry.ReadMember<std::string>("File"));
+				const std::optional<JsonReader> directories = entry.FindMember(GoldenDirectoriesMember);
+				if (!directories)
+					continue;
+				ENGINE_TRY_ASSIGN(const size_t directoryCount, directories->GetArraySize());
+				for (size_t directoryIndex = 0; directoryIndex < directoryCount; ++directoryIndex)
+				{
+					ENGINE_TRY_ASSIGN(const JsonReader element, directories->GetElement(directoryIndex));
+					ENGINE_TRY_ASSIGN(const std::string directory, element.ReadString());
+					if (!IsGoldenDirectory(directory))
+					{
+						return std::unexpected(element.MakeLocatedError(ErrorCode::Validation,
+							std::format("'{}' is not a golden directory: 'Assets/' followed by plain names", directory)));
+					}
+					ENGINE_TRY(AppendGoldenScenes(projectRoot, directory, true, scaffold, scenes));
+				}
+			}
+
+			std::ranges::sort(scenes, {}, &GoldenSceneEntry::Name);
+			const auto duplicate = std::ranges::adjacent_find(scenes, {}, &GoldenSceneEntry::Name);
+			if (duplicate != scenes.end())
+			{
+				return MakeError(ErrorCode::Validation, "two golden scenes are named '{}': '{}' ({}) and '{}' ({})", duplicate->Name, duplicate->Path,
+					duplicate->Scaffold, std::next(duplicate)->Path, std::next(duplicate)->Scaffold);
+			}
+			return scenes;
+		}
+
 		Result<Image> RenderGoldenScene(HeadlessGpuFixture& gpu, std::string_view name, const GoldenSceneOptions& options)
 		{
 			const std::filesystem::path source = GetFeatureTestRoot();
-			if (!IsGoldenSceneName(name) || !FileSystem::Exists(source / FileSystem::PathFromUtf8(std::format("{}/{}.scene", GoldenSceneFolder, name))))
+			ENGINE_TRY_ASSIGN(const std::vector<GoldenSceneEntry> scenes, WithContext(ListGoldenScenes(source), "listing the golden scenes of Projects/FeatureTest"));
+			const auto scene = std::ranges::find(scenes, name, &GoldenSceneEntry::Name);
+			if (!IsGoldenSceneName(name) || scene == scenes.end())
 			{
-				return std::unexpected(Error(ErrorCode::NotFound, std::format("'{}' is not a golden scene of Projects/FeatureTest/{}", name, GoldenSceneFolder))
-						.WithHint("golden scenes are written by Projects/FeatureTest/Scaffold/Golden.jsonl"));
+				return std::unexpected(Error(ErrorCode::NotFound, std::format("'{}' is not a golden scene of Projects/FeatureTest", name))
+						.WithHint("golden scenes are Golden.jsonl's kept scenes in Assets/Scenes/Golden and the scenes of the golden scaffolds that "
+								  "Scaffold/Scaffolds.json lists with their GoldenDirectories"));
 			}
 
 			const TempDirectory copy("GoldenScene");
 			ENGINE_TRY(WithContext(CopyProject(source, copy.GetPath()), "copying Projects/FeatureTest"));
-			Result<Image> image = RenderProjectCopy(gpu, copy.GetPath(), name, options);
+			Result<Image> image = RenderProjectCopy(gpu, copy.GetPath(), *scene, options);
 			// The render's objects are released; let the device destroy them now rather than at its next collection.
 			gpu.GetDevice().RunGarbageCollection();
 			return image;

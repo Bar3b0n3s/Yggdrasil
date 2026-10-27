@@ -24,7 +24,8 @@ namespace Engine {
 		AudioClip,
 		Script,
 		Font,
-		Replay
+		Replay,
+		SpriteSheet // M18 (ADR 0028's phase-1 ledger; Docs/Decisions/0029-m18-contract.md decision 14)
 	};
 
 	// The PascalCase name of `type` ("AudioClip"), the spelling used in .meta files, reflected AssetFilter metadata, the
@@ -45,6 +46,7 @@ namespace Engine {
 			case AssetType::Script:      return "Script";
 			case AssetType::Font:        return "Font";
 			case AssetType::Replay:      return "Replay";
+			case AssetType::SpriteSheet: return "SpriteSheet";
 		}
 		return "None";
 	}
@@ -65,6 +67,7 @@ namespace Engine {
 			AssetType::Script,
 			AssetType::Font,
 			AssetType::Replay,
+			AssetType::SpriteSheet,
 		};
 		for (const AssetType type : Types)
 		{

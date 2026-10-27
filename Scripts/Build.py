@@ -79,6 +79,9 @@ under a capped hold. While the lock is held the build waits, reporting the holde
 --lock-timeout seconds (exit code 5), or fails at once with --no-wait (exit code 3). The --json document's "buildLock"
 says which mode and job count it ran with.
 
+It works from any directory (Docs/Architecture.md §2.3): a relative path given on its command line is resolved against
+the caller's directory, then main() makes the repository root of its own checkout the working directory.
+
 Exit codes: 0 success, 1 build failed (or produced warnings under MSBuild), 2 usage error (unknown project, a project
 absent from the configuration), 3 the toolchain or generated workspace is missing, or --no-wait found the build lock
 held, 5 timeout (of the build, or of the wait for the build lock).
@@ -867,7 +870,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
                                           "that exists in the configuration)")
     parser.add_argument("--action", choices=sorted({a for s in premake.ACTIONS_BY_SYSTEM.values() for a in s}),
                         help="generator whose output to build (default: detected; the host default wins)")
-    parser.add_argument("--workspace-dir", type=Path, default=paths.REPOSITORY_ROOT,
+    parser.add_argument("--workspace-dir", type=paths.argument_path, default=paths.REPOSITORY_ROOT,
                         help="directory of a workspace generated with Generate.py --to (default: the repository, "
                              "where Generate.py writes it in place)")
     parser.add_argument("--jobs", type=int,
@@ -885,7 +888,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--no-vendor-cache", dest="vendor_cache", action="store_false",
                         help="MSBuild: compile the vendored libraries in the workspace instead of linking them from "
                              "the shared vendor cache")
-    parser.add_argument("--vendor-cache-dir", type=Path,
+    parser.add_argument("--vendor-cache-dir", type=paths.argument_path,
                         help="MSBuild: the shared vendor cache's directory (default: <git common directory>/"
                              f"{vendor_cache.CACHE_DIRECTORY_NAME}, which every worktree of the repository shares)")
     parser.add_argument("--timeout", type=float, default=BUILD_TIMEOUT_SECONDS,
@@ -914,6 +917,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     configure_stdio()
     arguments = parse_arguments(sys.argv[1:] if argv is None else argv)
+    paths.enter_repository_root()
     console = Console(arguments.json)
     steps: list[Step] = []
     action = None

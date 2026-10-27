@@ -51,7 +51,7 @@ namespace Engine {
 			return MakeError(ErrorCode::Parse, "the header names a payload of {} bytes, but {} bytes follow it", view.Header.PayloadSize,
 				reader.GetRemaining());
 		}
-		if (type == std::to_underlying(AssetType::None) || type > std::to_underlying(AssetType::Replay))
+		if (type == std::to_underlying(AssetType::None) || type > std::to_underlying(AssetType::SpriteSheet))
 			return MakeError(ErrorCode::Validation, "cooked artifact of unknown asset type {}", type);
 		view.Header.Type = static_cast<AssetType>(type);
 

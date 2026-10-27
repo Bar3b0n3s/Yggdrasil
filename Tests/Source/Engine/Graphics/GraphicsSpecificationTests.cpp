@@ -23,12 +23,28 @@ namespace Engine {
 			CHECK_FALSE(VulkanApiVersionFromString("1.2").has_value());
 			CHECK_FALSE(VulkanApiVersionFromString("1.3.0").has_value());
 
-			for (const GpuFault fault : { GpuFault::None, GpuFault::DeviceLost, GpuFault::OomTexture, GpuFault::Hang, GpuFault::OomSpecialization })
+			for (const GpuFault fault : { GpuFault::None, GpuFault::DeviceLost, GpuFault::OomTexture, GpuFault::Hang, GpuFault::OomSpecialization,
+					 GpuFault::DeviceLostUnrecoverable, GpuFault::HangReset, GpuFault::HangResetPersistent, GpuFault::OomRenderTarget,
+					 GpuFault::OomRenderTargetPersistent, GpuFault::OomPipeline, GpuFault::OomPipelinePersistent, GpuFault::OomSwapchain,
+					 GpuFault::OomSwapchainPersistent })
 				CHECK(GpuFaultFromString(GpuFaultToString(fault)) == fault);
 			CHECK(GpuFaultToString(GpuFault::DeviceLost) == "device-lost");
+			CHECK(GpuFaultToString(GpuFault::DeviceLostUnrecoverable) == "device-lost-unrecoverable");
 			CHECK(GpuFaultToString(GpuFault::OomTexture) == "oom-texture");
 			CHECK(GpuFaultToString(GpuFault::OomSpecialization) == "oom-specialization");
+			// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 46).
+			CHECK(GpuFaultToString(GpuFault::HangReset) == "hang-reset");
+			CHECK(GpuFaultToString(GpuFault::HangResetPersistent) == "hang-reset-persistent");
+			CHECK(GpuFaultToString(GpuFault::OomRenderTarget) == "oom-rendertarget");
+			CHECK(GpuFaultToString(GpuFault::OomRenderTargetPersistent) == "oom-rendertarget-persistent");
+			CHECK(GpuFaultToString(GpuFault::OomPipeline) == "oom-pipeline");
+			CHECK(GpuFaultToString(GpuFault::OomPipelinePersistent) == "oom-pipeline-persistent");
+			CHECK(GpuFaultToString(GpuFault::OomSwapchain) == "oom-swapchain");
+			CHECK(GpuFaultToString(GpuFault::OomSwapchainPersistent) == "oom-swapchain-persistent");
+			CHECK(GpuFaultToString(static_cast<GpuFault>(std::to_underlying(GpuFault::OomSwapchainPersistent) + 1)) == "unknown");
 			CHECK_FALSE(GpuFaultFromString("Device-Lost").has_value());
+			CHECK_FALSE(GpuFaultFromString("oom-rendertarget-Persistent").has_value());
+			CHECK_FALSE(GpuFaultFromString("hang-persistent").has_value());
 		}
 
 		TEST_CASE("GraphicsSpecification: defaults follow the configuration table")
@@ -46,6 +62,10 @@ namespace Engine {
 			CHECK(defaults.FramesInFlight == 2);
 			CHECK(defaults.VSync);
 			CHECK(defaults.InjectFault == GpuFault::None);
+			CHECK(defaults.ResetWaitMilliseconds == DefaultGpuResetWaitMilliseconds);
+			// M18 (C18.4, decision 41): the default reset wait fits a Windows TDR and a Linux GPU reset, within the bound.
+			CHECK(DefaultGpuResetWaitMilliseconds >= 10'000);
+			CHECK(DefaultGpuResetWaitMilliseconds <= MaxGpuResetWaitMilliseconds);
 			CHECK(GpuTestHooksEnabled);
 		}
 	}

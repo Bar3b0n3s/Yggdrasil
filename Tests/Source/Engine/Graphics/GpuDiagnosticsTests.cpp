@@ -78,7 +78,7 @@ namespace Engine {
 			CHECK(diagnostics.GetWarningCount() == 2);
 		}
 
-		TEST_CASE("GpuDiagnostics: the device-lost flag is set by SetDeviceLost and never cleared")
+		TEST_CASE("GpuDiagnostics: the device-lost flag is set by SetDeviceLost and cleared only by ClearDeviceLost")
 		{
 			GpuDiagnostics diagnostics;
 			CHECK_FALSE(diagnostics.IsDeviceLost());
@@ -90,6 +90,34 @@ namespace Engine {
 			CHECK(diagnostics.IsDeviceLost());
 			CHECK(diagnostics.GetInjectedFault() == GpuFault::None);
 			CHECK(GpuMessageSeverityToString(GpuMessageSeverity::Fatal) == "Fatal");
+			// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 29): the recovery clears the flag and the injected marker
+			// once the device exists again.
+			diagnostics.SetDeviceLost(true);
+			diagnostics.ClearDeviceLost();
+			CHECK_FALSE(diagnostics.IsDeviceLost());
+			CHECK_FALSE(diagnostics.IsDeviceLossInjected());
+		}
+
+		TEST_CASE("GpuDiagnostics: an unrecoverable loss fails every device recreation, also after the flag is cleared")
+		{
+			// M18 (C18.3, decision 30): the test hooks' unrecoverable loss and --gpu-inject-fault=device-lost-unrecoverable.
+			GpuDiagnostics hook;
+			CHECK_FALSE(hook.ShouldFailDeviceRecreation());
+			hook.InjectUnrecoverableDeviceLoss();
+			CHECK(hook.IsDeviceLost());
+			CHECK(hook.IsDeviceLossInjected());
+			CHECK(hook.ShouldFailDeviceRecreation());
+			hook.ClearDeviceLost();
+			CHECK_FALSE(hook.IsDeviceLost());
+			CHECK(hook.ShouldFailDeviceRecreation());
+
+			GpuDiagnostics fault(GpuFault::DeviceLostUnrecoverable);
+			CHECK(fault.ShouldFailDeviceRecreation());
+			CHECK_FALSE(fault.HasBoundedWaitFault());
+			GpuDiagnostics recoverable(GpuFault::DeviceLost);
+			CHECK_FALSE(recoverable.ShouldFailDeviceRecreation());
+			recoverable.SetDeviceLost(true);
+			CHECK_FALSE(recoverable.ShouldFailDeviceRecreation());
 		}
 
 		TEST_CASE("GpuDiagnostics: injected device loss stays marked after native reports and resetting counts")
@@ -130,18 +158,43 @@ namespace Engine {
 			CHECK(diagnostics.IsDeviceLossInjected());
 		}
 
+		TEST_CASE("GpuDiagnostics: an injected device loss strikes once, at the first submission after a garbage collection")
+		{
+			// M18 acceptance (C18.3, decision 30): the startup submissions and the first frame are unaffected, the loss strikes
+			// the second frame, and the recovered device is not lost again.
+			for (const GpuFault fault : { GpuFault::DeviceLost, GpuFault::DeviceLostUnrecoverable })
+			{
+				CAPTURE(GpuFaultToString(fault));
+				GpuDiagnostics diagnostics(fault);
+				diagnostics.OnSubmitted();
+				CHECK_FALSE(diagnostics.IsDeviceLost());
+				diagnostics.OnGarbageCollected();
+				{
+					Test::ExpectLog injected(LogLevel::Warn, "Injected GPU fault");
+					diagnostics.OnSubmitted();
+				}
+				CHECK(diagnostics.IsDeviceLost());
+				CHECK(diagnostics.IsDeviceLossInjected());
+				diagnostics.ClearDeviceLost();
+				diagnostics.OnGarbageCollected();
+				diagnostics.OnSubmitted();
+				CHECK_FALSE(diagnostics.IsDeviceLost());
+			}
+		}
+
 		TEST_CASE("GpuDiagnostics: injected faults follow --gpu-inject-fault")
 		{
-			// device-lost: the flag after the first submission.
+			// device-lost: the flag after the first submission once a garbage collection armed it (decision 30).
 			GpuDiagnostics deviceLost(GpuFault::DeviceLost);
 			CHECK_FALSE(deviceLost.IsDeviceLost());
 			CHECK_FALSE(deviceLost.IsDeviceLossInjected());
+			deviceLost.OnGarbageCollected();
 			deviceLost.OnSubmitted();
 			CHECK(deviceLost.IsDeviceLost());
 			CHECK(deviceLost.IsDeviceLossInjected());
 			deviceLost.SetDeviceLost();
 			CHECK(deviceLost.IsDeviceLossInjected());
-			CHECK_FALSE(deviceLost.ShouldInjectHang());
+			CHECK_FALSE(deviceLost.HasBoundedWaitFault());
 
 			// oom-texture: sampled-only textures fail, render targets and storage images do not.
 			GpuDiagnostics oom(GpuFault::OomTexture);
@@ -157,17 +210,25 @@ namespace Engine {
 			oom.OnSubmitted();
 			CHECK_FALSE(oom.IsDeviceLost());
 
-			// hang: every bounded wait slice times out.
+			// hang: every bounded wait slice times out, from the start (M5), its reset wait's too (M18, C18.4).
 			GpuDiagnostics hang(GpuFault::Hang);
-			CHECK(hang.ShouldInjectHang());
+			CHECK(hang.HasBoundedWaitFault());
+			CHECK(hang.TakeBoundedWaitFault() == GpuInjectedHang::Hang);
+			CHECK(hang.TakeBoundedWaitFault() == GpuInjectedHang::Hang);
 			CHECK_FALSE(hang.ShouldFailTextureCreation(sampled));
 			CHECK_FALSE(hang.ShouldFailShaderSpecialization());
+			CHECK_FALSE(hang.TakeRenderTargetCreationFault());
+			CHECK_FALSE(hang.TakePipelineCreationFault());
+			CHECK_FALSE(deviceLost.HasBoundedWaitFault());
+			CHECK(deviceLost.TakeBoundedWaitFault() == GpuInjectedHang::None);
+			CHECK_FALSE(deviceLost.TakeRenderTargetCreationFault());
+			CHECK_FALSE(deviceLost.TakePipelineCreationFault());
 
 			// oom-specialization: only shader specializations (the lazily created debug-view pipelines) fail.
 			GpuDiagnostics specialization(GpuFault::OomSpecialization);
 			CHECK(specialization.ShouldFailShaderSpecialization());
 			CHECK_FALSE(specialization.ShouldFailTextureCreation(sampled));
-			CHECK_FALSE(specialization.ShouldInjectHang());
+			CHECK_FALSE(specialization.HasBoundedWaitFault());
 			CHECK_FALSE(oom.ShouldFailShaderSpecialization());
 
 			// No fault: nothing is forced.
@@ -175,8 +236,91 @@ namespace Engine {
 			none.OnSubmitted();
 			CHECK_FALSE(none.IsDeviceLost());
 			CHECK_FALSE(none.ShouldFailTextureCreation(sampled));
-			CHECK_FALSE(none.ShouldInjectHang());
+			CHECK_FALSE(none.HasBoundedWaitFault());
 			CHECK_FALSE(none.ShouldFailShaderSpecialization());
+			none.OnGarbageCollected();
+			CHECK_FALSE(none.HasBoundedWaitFault());
+			CHECK(none.TakeBoundedWaitFault() == GpuInjectedHang::None);
+			CHECK_FALSE(none.TakeRenderTargetCreationFault());
+			CHECK_FALSE(none.TakePipelineCreationFault());
+		}
+
+		TEST_CASE("GpuDiagnostics: hang resets and out-of-memory faults strike after the first garbage collection, once or every time")
+		{
+			// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 46): an application's startup and first frame run
+			// without them; the once spellings strike the first wait or creation of their kind after the device's first garbage
+			// collection, so a retried request or a recovered device is not struck again, and the -persistent spellings strike
+			// every one, the retry's included.
+			struct Row
+			{
+				GpuFault Fault = GpuFault::None;
+				GpuInjectedHang Wait = GpuInjectedHang::None;
+				bool Target = false;
+				bool Pipeline = false;
+				bool Swapchain = false;
+				bool Persistent = false;
+			};
+			const std::array<Row, 8> rows = { {
+				{ .Fault = GpuFault::HangReset, .Wait = GpuInjectedHang::HangReset },
+				{ .Fault = GpuFault::HangResetPersistent, .Wait = GpuInjectedHang::HangReset, .Persistent = true },
+				{ .Fault = GpuFault::OomRenderTarget, .Target = true },
+				{ .Fault = GpuFault::OomRenderTargetPersistent, .Target = true, .Persistent = true },
+				{ .Fault = GpuFault::OomPipeline, .Pipeline = true },
+				{ .Fault = GpuFault::OomPipelinePersistent, .Pipeline = true, .Persistent = true },
+				{ .Fault = GpuFault::OomSwapchain, .Swapchain = true },
+				{ .Fault = GpuFault::OomSwapchainPersistent, .Swapchain = true, .Persistent = true },
+			} };
+			nvrhi::TextureDesc sampled;
+			sampled.isShaderResource = true;
+			for (const Row& row : rows)
+			{
+				CAPTURE(GpuFaultToString(row.Fault));
+				GpuDiagnostics diagnostics(row.Fault);
+				CHECK_FALSE(diagnostics.HasBoundedWaitFault());
+				CHECK(diagnostics.TakeBoundedWaitFault() == GpuInjectedHang::None);
+				CHECK_FALSE(diagnostics.TakeRenderTargetCreationFault());
+				CHECK_FALSE(diagnostics.TakePipelineCreationFault());
+				CHECK_FALSE(diagnostics.TakeSwapchainCreationFault());
+
+				diagnostics.OnGarbageCollected();
+				CHECK(diagnostics.HasBoundedWaitFault() == (row.Wait != GpuInjectedHang::None));
+				CHECK(diagnostics.TakeBoundedWaitFault() == row.Wait);
+				CHECK(diagnostics.TakeRenderTargetCreationFault() == row.Target);
+				CHECK(diagnostics.TakePipelineCreationFault() == row.Pipeline);
+				CHECK(diagnostics.TakeSwapchainCreationFault() == row.Swapchain);
+
+				// After a recovery and the next frames: only the persistent spellings strike again.
+				diagnostics.ClearDeviceLost();
+				diagnostics.OnGarbageCollected();
+				CHECK(diagnostics.HasBoundedWaitFault() == (row.Persistent && row.Wait != GpuInjectedHang::None));
+				CHECK(diagnostics.TakeBoundedWaitFault() == (row.Persistent ? row.Wait : GpuInjectedHang::None));
+				CHECK(diagnostics.TakeRenderTargetCreationFault() == (row.Persistent && row.Target));
+				CHECK(diagnostics.TakePipelineCreationFault() == (row.Persistent && row.Pipeline));
+				CHECK(diagnostics.TakeSwapchainCreationFault() == (row.Persistent && row.Swapchain));
+
+				// None of them loses the device by itself (a hang reset's wait reports the loss), or fails what the older
+				// faults fail.
+				diagnostics.OnSubmitted();
+				CHECK_FALSE(diagnostics.IsDeviceLost());
+				CHECK(diagnostics.TakeBoundedWaitFault() != GpuInjectedHang::Hang);
+				CHECK_FALSE(diagnostics.ShouldFailTextureCreation(sampled));
+				CHECK_FALSE(diagnostics.ShouldFailShaderSpecialization());
+				CHECK_FALSE(diagnostics.ShouldFailDeviceRecreation());
+			}
+
+			// ENGINE_GPU_FAULT_AT_STARTUP's arming (GraphicsDevice::Create): the same faults strike before any garbage
+			// collection, an application's startup, and so do the device-lost faults; the unarmed faults are unchanged.
+			GpuDiagnostics startup(GpuFault::OomRenderTargetPersistent);
+			startup.ArmInjectedFault();
+			CHECK(startup.TakeRenderTargetCreationFault());
+			GpuDiagnostics startupLoss(GpuFault::DeviceLost);
+			startupLoss.ArmInjectedFault();
+			startupLoss.OnSubmitted();
+			CHECK(startupLoss.IsDeviceLost());
+			GpuDiagnostics hang(GpuFault::Hang);
+			hang.ArmInjectedFault();
+			CHECK(hang.TakeBoundedWaitFault() == GpuInjectedHang::Hang);
+			CHECK_FALSE(hang.TakeRenderTargetCreationFault());
 		}
 
 		TEST_CASE("GpuDiagnostics: Vulkan results map to fatal-error kinds")

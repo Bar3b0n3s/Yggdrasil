@@ -18,6 +18,10 @@ as --clang-format, then $CLANG_FORMAT, then Visual Studio's bundled LLVM (VC/Too
 then clang-format-22 and clang-format on PATH (Scripts/Lib/toolchain.py). On Linux and macOS,
 `pip install "clang-format==22.1.*"` provides it.
 
+It works from any directory (Docs/Architecture.md §2.3): a relative path given on its command line is resolved against
+the caller's directory (--paths excepted: they are relative to the repository root), then main() makes the
+repository root of its own checkout the working directory.
+
 Exit codes: 0 nothing to change (or everything formatted), 1 --check found files that need formatting, a native
 module source needs formatting (in either mode), or clang-format failed on a file, 2 usage error, 3 clang-format is
 missing or has the wrong version, 5 clang-format timed out.
@@ -208,7 +212,9 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
         help="only these files or directories (relative to the repository root, or absolute)",
     )
     parser.add_argument(
-        "--clang-format", help="path to clang-format 22.x (default: $CLANG_FORMAT, Visual Studio's LLVM, then PATH)"
+        "--clang-format",
+        type=paths.tool_argument,
+        help="path to clang-format 22.x, or its name on PATH (default: $CLANG_FORMAT, Visual Studio's LLVM, then PATH)",
     )
     parser.add_argument(
         "--jobs", type=int, default=os.cpu_count() or 1, help="parallel clang-format processes (default: CPU count)"
@@ -267,6 +273,7 @@ def run(arguments: argparse.Namespace) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     arguments = parse_arguments(sys.argv[1:] if argv is None else argv)
+    paths.enter_repository_root()
     try:
         report = run(arguments)
     except (UsageError, toolchain.ToolchainError, ToolFailure, ToolTimeout, OSError) as error:

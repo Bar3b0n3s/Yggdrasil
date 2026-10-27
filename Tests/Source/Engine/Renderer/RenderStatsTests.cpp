@@ -2,16 +2,23 @@
 
 #include "Engine/Renderer/RenderStats.h"
 
+#include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/FontData.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
+#include "Engine/Renderer/RenderPassDeclaration.h"
 #include "Engine/Renderer/ViewportCapture.h"
 #include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <limits>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace Engine {
 
@@ -396,6 +403,64 @@ namespace Engine {
 					for (const auto disabled : { "DirectionalShadows", "GTAO", "ForwardOpaque", "Bloom", "FXAA", "SelectionMask", "Wireframe", "Overlays", "Text" })
 						CHECK(Test::SceneRendererIntegrationFixture::FindPass(stats, disabled) == nullptr);
 				}
+			}
+		}
+
+		TEST_CASE("RenderStats: a render lists its rows in the declared stats order, whatever their recording order")
+		{
+			// M18 (C18.1, decision 2): the renderer sorts its rows by RenderStatsOrder (RenderPassDeclaration.h), not by the order
+			// it records them in: the wireframe, recorded before the selection composite, is listed after it, game Text is
+			// listed before the editor overlays, and the debug labels have their own row after them (decision 1: they drew in
+			// the Text row before M18).
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu);
+			constexpr AssetHandle FontHandle{ 0x8930 };
+			FontData font;
+			font.Ascent = 0.8f;
+			font.Descent = -0.2f;
+			font.AtlasWidth = 4;
+			font.AtlasHeight = 4;
+			font.AtlasPixels.assign(16, std::byte{ 255 });
+			font.Glyphs.push_back({ .Codepoint = 'A',
+				.Advance = 0.6f,
+				.PlaneMin = glm::vec2(0.0f, 0.0f),
+				.PlaneMax = glm::vec2(0.5f, 0.7f),
+				.AtlasMin = glm::vec2(0.0f),
+				.AtlasMax = glm::vec2(1.0f) });
+			// The debug label's font is the Default font (TextRenderer.h).
+			fixture.Assets().Publish(BuiltinAssetHandles::DefaultFont, CreateRef<FontData>(font));
+			fixture.Assets().Publish(FontHandle, CreateRef<FontData>(std::move(font)));
+			RenderSnapshot snapshot = fixture.Snapshot();
+			snapshot.Flags = RenderViewFlags::EditorOverlays | RenderViewFlags::Selection | RenderViewFlags::Wireframe;
+			snapshot.SelectedEntities = { UUID(900) };
+			snapshot.DebugDraw.AddLine({ -1, 0, -2 }, { 1, 0, -2 }, glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
+			snapshot.DebugDraw.AddText({ 0, 0, -2 }, "A", 32.0f, glm::vec4(1.0f));
+			snapshot.Texts.push_back(TextItem{ .Text = "A", .Font = FontHandle });
+			fixture.Submit(snapshot);
+			const RenderStats stats = fixture.Renderer().GetRenderStats();
+			std::vector<std::string_view> names;
+			for (const RenderPassStats& pass : stats.Passes)
+				names.push_back(pass.Name);
+			CHECK(names == std::vector<std::string_view>{ "Prepare", "DepthNormal", "Tonemap", "Text", "SelectionMask", "SelectionDilateHorizontal", "SelectionDilateVertical", "SelectionComposite", "Wireframe", "Overlays", "Labels" });
+			// The label draws in its own row, apart from the game text's.
+			const auto* labels = Test::SceneRendererIntegrationFixture::FindPass(stats, "Labels");
+			const auto* text = Test::SceneRendererIntegrationFixture::FindPass(stats, "Text");
+			REQUIRE(labels != nullptr);
+			REQUIRE(text != nullptr);
+			CHECK(labels->DrawCalls >= 1);
+			CHECK(text->DrawCalls >= 1);
+			// Every row is declared, and each comes after the one before it in the declared order.
+			size_t previous = 0;
+			for (size_t index = 0; index < names.size(); ++index)
+			{
+				CAPTURE(names[index]);
+				const auto found = std::find(RenderStatsOrder.begin(), RenderStatsOrder.end(), names[index]);
+				REQUIRE(found != RenderStatsOrder.end());
+				const auto position = static_cast<size_t>(found - RenderStatsOrder.begin());
+				if (index > 0)
+					CHECK(position > previous);
+				previous = position;
 			}
 		}
 	}

@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/Renderer/BrdfLut.h"
 
+#include "Engine/Graphics/CommandListRecording.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Shared/BrdfLutConstants.h"
 
@@ -87,13 +88,12 @@ namespace Engine {
 		compute.pipeline = state.Pipeline.Pipeline;
 		compute.bindings = { set };
 		constexpr uint32_t GroupCount = (Size + Utils::BrdfLutGroupSize - 1) / Utils::BrdfLutGroupSize;
-		commandList->open();
+		CommandListRecording recording(device, *commandList);
 		commandList->beginMarker("BrdfLut");
 		commandList->setComputeState(compute);
 		commandList->dispatch(GroupCount, GroupCount);
 		commandList->endMarker();
-		commandList->close();
-		device.ExecuteCommandList(*commandList);
+		recording.Execute();
 
 		state.Texture = std::move(texture);
 		return lut;

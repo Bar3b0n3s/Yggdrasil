@@ -32,7 +32,11 @@ namespace Engine {
 	// FrameClearColor, Graphics/RenderContext.h), submits it, reads it back (Readback::ReadTexture, which waits for the copy
 	// with WaitForSubmission) and applies MaxDimension. Blocks until the image is on the CPU. Main thread, between UI frames
 	// (not between ImGuiLayer::BeginFrame and EndFrame). Errors: InvalidState before the first UI frame; those of
-	// OffscreenTarget::Create, ImGuiLayer::Render, Readback::ReadTexture and DownscaleImage.
+	// OffscreenTarget::Create, ImGuiLayer::Render, Readback::ReadTexture and DownscaleImage. M18 (C18.4,
+	// Docs/Decisions/0029-m18-contract.md decisions 42, 44 and 45): a capture like ViewportCapture::Capture: an out-of-memory
+	// creation (the target, ImGui's pipeline for its format, a geometry buffer, the staging texture) is trimmed and the whole
+	// capture retried once (RetryAfterTrim), and a second one returns ErrorCode::OutOfMemory (editor.screenshot answers it);
+	// the editor never ends the process for it.
 	[[nodiscard]] Result<Image> CaptureImGuiScreenshot(GraphicsDevice& device, ImGuiLayer& imgui, const ImGuiScreenshotRequest& request);
 
 }

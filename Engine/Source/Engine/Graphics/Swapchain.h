@@ -47,9 +47,15 @@ namespace Engine {
 		Recreate,             // VK_ERROR_OUT_OF_DATE_KHR (acquire or present), VK_SUBOPTIMAL_KHR from present: recreate the swapchain
 		RecreateSurface,      // VK_ERROR_SURFACE_LOST_KHR: recreate the surface and the swapchain
 		Retry,                // VK_TIMEOUT or VK_NOT_READY from the bounded acquire: no image this frame; the next frame tries again
-		DeviceLost,           // VK_ERROR_DEVICE_LOST: GraphicsDevice::RaiseDeviceLost
-		OutOfMemory,          // VK_ERROR_OUT_OF_HOST_MEMORY / VK_ERROR_OUT_OF_DEVICE_MEMORY: FatalError(OutOfMemory)
-		Fail                  // anything else: FatalError(Gpu)
+		// VK_ERROR_DEVICE_LOST: GraphicsDevice::RaiseDeviceLost. M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 28):
+		// GraphicsDevice::ReportDeviceLost, and the frame gets no image (acquire) or is not presented (present); the frame
+		// boundary recovers the device, and the application destroys this swapchain and creates a new one (decision 33).
+		DeviceLost,
+		// VK_ERROR_OUT_OF_HOST_MEMORY / VK_ERROR_OUT_OF_DEVICE_MEMORY of the acquire or the present: FatalError(OutOfMemory).
+		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 44): still fatal; only the swapchain's creation at a resize
+		// is a request that fails alone (AcquireNextImage).
+		OutOfMemory,
+		Fail // anything else: FatalError(Gpu)
 	};
 
 	// The action for vkAcquireNextImageKHR's result.
@@ -109,8 +115,25 @@ namespace Engine {
 		// Otherwise vkAcquireNextImageKHR with a timeout of GpuWaitSliceNanoseconds (FramePacer.h), acting on
 		// ClassifyAcquireResult: Continue returns Acquired; ContinueThenRecreate returns Acquired and marks a recreation for
 		// the next call; Recreate and RecreateSurface recreate and return Skipped; Retry returns Skipped (logged at Warn on
-		// the first of consecutive timed-out acquires, so an occluded window does not flood the log); DeviceLost,
-		// OutOfMemory and Fail end the process. Errors: Gpu when a recreation fails.
+		// the first of consecutive timed-out acquires, so an occluded window does not flood the log); OutOfMemory and Fail
+		// end the process. M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 28): DeviceLost reports the loss
+		// (GraphicsDevice::ReportDeviceLost) and returns Skipped; on a lost device, and when a recreation finds the device
+		// lost, it returns Skipped without another Vulkan call, the recreation left pending. Errors: Gpu when a recreation
+		// fails on a device that is not lost.
+		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decisions 42 and 44): a recreation after startup whose creation runs
+		// out of memory is trimmed and retried once (RetryAfterTrim), and a second such failure returns OutOfMemory. Only
+		// vkCreateSwapchainKHR's VK_ERROR_OUT_OF_HOST_MEMORY and VK_ERROR_OUT_OF_DEVICE_MEMORY (an injected oom-swapchain
+		// fault through GpuDiagnostics::TakeSwapchainCreationFault answers the latter without calling Vulkan) and a failed
+		// image wrapping (a GraphicsDevice wrapper's out-of-memory) are out-of-memory: the recreation passes RetryAfterTrim a
+		// classification that names only those, recording which result its attempt met. Any other failure of the recreation
+		// (another vkCreateSwapchainKHR result such as VK_ERROR_INITIALIZATION_FAILED or VK_ERROR_NATIVE_WINDOW_IN_USE_KHR, a
+		// failed surface query or surface creation) returns Gpu at once, without a trim, as before C18.4. After OutOfMemory,
+		// every later call returns Skipped without recreating or trimming while the window's framebuffer size is the size
+		// that failed; a different size retries as a new request, and so does the same size after the window was minimized
+		// (a minimized window forgets the size that failed, so restoring it retries). The previous swapchain cannot be kept:
+		// Vulkan retires the old swapchain a recreation names even when the creation fails, so nothing is presented until a
+		// recreation succeeds, and a window whose size neither changes nor is minimized stays black (an accepted limit,
+		// decision 44).
 		[[nodiscard]] Result<SwapchainAcquireStatus> AcquireNextImage(uint32_t frameSlot);
 
 		// Queues the current slot's acquire-semaphore wait and the current image's present-semaphore signal, which NVRHI
@@ -119,8 +142,10 @@ namespace Engine {
 		void QueueFrameSemaphores();
 
 		// vkQueuePresentKHR of the current image, waiting on its present semaphore, acting on ClassifyPresentResult:
-		// Recreate and RecreateSurface mark a recreation for the next AcquireNextImage; DeviceLost, OutOfMemory and Fail end
-		// the process. Call it after the frame's last submission.
+		// Recreate and RecreateSurface mark a recreation for the next AcquireNextImage; OutOfMemory and Fail end the process.
+		// M18 (decision 28): DeviceLost reports the loss and returns, and on a device lost since the acquire nothing is
+		// presented (the frame's submission never ran, so nothing signals the present semaphore). Call it after the frame's
+		// last submission.
 		void Present();
 
 		// Marks a recreation for the next AcquireNextImage, for a caller that knows of one the size check cannot see. A
@@ -155,7 +180,8 @@ namespace Engine {
 		// VK_PRESENT_MODE_FIFO_KHR, MAILBOX or IMMEDIATE.
 		[[nodiscard]] VkPresentModeKHR GetPresentMode() const;
 		// True while no VkSwapchainKHR exists because the window is minimized (iconified, or a framebuffer with a zero
-		// dimension) or its surface reports a zero extent.
+		// dimension) or its surface reports a zero extent, and (M18, C18.4) after a recreation that ran out of memory, until a
+		// recreation succeeds.
 		[[nodiscard]] bool IsMinimized() const;
 		// The number of recreations since Create (resize, out-of-date, suboptimal, surface loss); for tests.
 		[[nodiscard]] uint32_t GetRecreationCount() const;
@@ -182,8 +208,8 @@ namespace Engine {
 		void ReleaseImages();
 		void DestroySwapchain();
 		void DestroySurface();
-		// The fatal end of a swapchain call: GraphicsDevice::RaiseDeviceLost for VK_ERROR_DEVICE_LOST, otherwise
-		// FatalError with GetFatalErrorKind(result).
+		// The fatal end of a swapchain call: FatalError with GetFatalErrorKind(result). M18 (C18.3, decision 28):
+		// VK_ERROR_DEVICE_LOST no longer ends the process (SwapchainAction::DeviceLost, asserted); the other results still do.
 		[[noreturn]] void EndProcess(std::string_view call, VkResult result);
 	private:
 		GraphicsDevice* m_Device = nullptr; // documented back-reference: outlives the swapchain
@@ -209,6 +235,12 @@ namespace Engine {
 		bool m_IsRecreatePending = false;
 		bool m_IsSurfaceLost = false;
 		bool m_IsAcquireTimingOut = false; // the last acquire timed out, so the next timeout is not logged again
+		// M18 (C18.4, decisions 42 and 44): the framebuffer size whose recreation ran out of memory after its trim and retry
+		// (0x0: none), at which AcquireNextImage skips without a creation or a trim until the size changes or the window is
+		// minimized; and whether the last recreation attempt failed out of memory (its RetryAfterTrim classification).
+		uint32_t m_FailedWidth = 0;
+		uint32_t m_FailedHeight = 0;
+		bool m_IsCreationOutOfMemory = false;
 	};
 
 	// The enumerator name ("Continue", "Recreate", ...).

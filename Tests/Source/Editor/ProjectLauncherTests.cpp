@@ -3,6 +3,7 @@
 
 #include "Editor/AssetDesignInteraction.h"
 #include "Editor/PanelInteractionFixture.h"
+#include "Editor/ScriptedFileDialog.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/VirtualFileSystem.h"
@@ -10,6 +11,8 @@
 #include "Support/TestData.h"
 
 #include <atomic>
+#include <filesystem>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -127,6 +130,94 @@ namespace Engine {
 			context.Actions.Pump();
 			REQUIRE(context.Editor.HasProject());
 			CHECK(context.Editor.GetProject().GetProjectFile() == projects[1]);
+		}
+
+		TEST_CASE("ProjectLauncher: Browse projects shows the injected native dialog and opens the chosen project")
+		{
+			// M18, E-DIALOGS (Docs/Decisions/0029-m18-contract.md decision 19, stream G): with a native backend in the panel
+			// context, the launcher's browser is the native dialog; its answer fills the path, which project.open takes.
+			Test::PanelInteractionFixture fixture("LauncherNativeDialog", false);
+			auto& context = fixture.GetContext();
+			REQUIRE(context.Editor.CloseProject());
+			const auto& directory = fixture.GetAutomation().GetEditorFixture().GetDirectory();
+			const auto created = ProjectManager::CreateProject({ .Directory = directory / "Native", .Name = "Demo", .Template = ProjectTemplate::Empty, .TemplatesDirectory = context.Editor.GetSpecification().TemplatesDirectory }, context.Editor.GetTypeRegistry());
+			REQUIRE(created);
+			const auto script = CreateRef<Test::ScriptedFileDialogScript>();
+			script->Outcome = FileDialogOutcome{ .State = FileDialogState::Accepted, .Path = created->ProjectFile };
+			context.FileDialogs = Test::MakeScriptedFileDialogBackend(script);
+			ProjectLauncher launcher;
+			Test::AssetDesignInteraction ui;
+			const auto draw = [&launcher, &context]()
+			{
+				return launcher.Draw(context);
+			};
+			REQUIRE(ui.Frame(draw));
+			auto* root = ui.Window("Panel interaction");
+			auto* landing = ui.Child(root, root->GetID("ProjectLanding"));
+			const ImGuiID tab = ImHashStr("Open project", 0, landing->GetID("ProjectChoices"));
+			ui.Click(draw, landing, tab);
+			ui.Click(draw, landing, ImHashStr("Browse projects...", 0, tab));
+			REQUIRE(script->Requests.size() == 1);
+			CHECK(script->Requests.front().Kind == FileDialogKind::OpenFile);
+			CHECK(script->Requests.front().Extensions == std::vector<std::string>{ ".eproj" });
+			for (int frame = 0; frame < 2; ++frame)
+				REQUIRE(ui.Frame(draw));
+			CHECK(script->LiveSessions == 0);
+			context.Actions.Pump();
+			REQUIRE(context.Editor.HasProject());
+			CHECK(context.Editor.GetProject().GetProjectFile() == created->ProjectFile);
+		}
+
+		TEST_CASE("ProjectLauncher: the location's Browse asks for a folder from the typed location made absolute and fills the location")
+		{
+			// M18, E-DIALOGS (Docs/Decisions/0029-m18-contract.md decision 19): the location's browser is a PickFolder request
+			// without extensions or a filter label, starting in the typed location, which a relative location reaches made
+			// absolute (the FileDialog API refuses a relative initial folder); the chosen folder becomes the location that
+			// project.create takes.
+			Test::PanelInteractionFixture fixture("LauncherLocationDialog", false);
+			auto& context = fixture.GetContext();
+			REQUIRE(context.Editor.CloseProject());
+			const auto directory = fixture.GetAutomation().GetEditorFixture().GetDirectory() / "Picked";
+			REQUIRE(FileSystem::CreateDirectories(directory).has_value());
+			const auto script = CreateRef<Test::ScriptedFileDialogScript>();
+			script->Outcome = FileDialogOutcome{ .State = FileDialogState::Accepted, .Path = directory };
+			context.FileDialogs = Test::MakeScriptedFileDialogBackend(script);
+			ProjectLauncher launcher;
+			Test::AssetDesignInteraction ui;
+			const auto draw = [&launcher, &context]()
+			{
+				return launcher.Draw(context);
+			};
+			REQUIRE(ui.Frame(draw));
+			auto* root = ui.Window("Panel interaction");
+			auto* landing = ui.Child(root, root->GetID("ProjectLanding"));
+			const ImGuiID tab = ImHashStr("New project", 0, landing->GetID("ProjectChoices"));
+			ui.Click(draw, landing, tab);
+			ui.Type(draw, landing, ImHashStr("##ProjectName", 0, tab), "FromDialog");
+			// The working directory, typed as a relative location.
+			ui.Type(draw, landing, ImHashStr("##ProjectLocation", 0, tab), ".");
+			ui.Click(draw, landing, ImHashStr("Browse...", 0, tab));
+			REQUIRE(script->Requests.size() == 1);
+			const FileDialogRequest& request = script->Requests.front();
+			CHECK(request.Kind == FileDialogKind::PickFolder);
+			CHECK(request.InitialDirectory.is_absolute());
+			std::error_code error;
+			const std::filesystem::path workingDirectory = std::filesystem::absolute(".", error);
+			REQUIRE_FALSE(error);
+			CHECK(request.InitialDirectory == workingDirectory);
+			CHECK(request.Extensions.empty());
+			CHECK(request.FilterName.empty());
+			for (int frame = 0; frame < 2; ++frame)
+				REQUIRE(ui.Frame(draw));
+			CHECK(script->LiveSessions == 0);
+			// The chosen folder is the location: Create project creates the project inside it.
+			const int emptyIndex = 1;
+			const ImGuiID templateScope = ImHashData(&emptyIndex, sizeof(emptyIndex), ImHashStr("Templates", 0, tab));
+			ui.Click(draw, landing, ImHashStr("Empty project", 0, templateScope));
+			ui.Click(draw, landing, ImHashStr("Create project", 0, tab));
+			context.Actions.Pump();
+			REQUIRE(context.Editor.HasProject());
+			CHECK(context.Editor.GetProject().GetProjectFile() == directory / "FromDialog" / "FromDialog.eproj");
 		}
 
 		TEST_CASE("ProjectLauncher: folder browsers start outside the engine's resources")

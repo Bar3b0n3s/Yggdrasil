@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <memory_resource>
 #include <utility>
 
 namespace Engine {
@@ -18,6 +19,18 @@ namespace Engine {
 			return std::isfinite(duration) && duration > 0.0f ? duration : 0.0f;
 		}
 
+		// `resource`, which must not be null (asserted; the default resource stands in for a null one).
+		[[nodiscard]] static std::pmr::memory_resource* CheckMemoryResource(std::pmr::memory_resource* resource)
+		{
+			ENGINE_CORE_ASSERT(resource != nullptr, "DebugDrawList needs a memory resource");
+			return resource != nullptr ? resource : std::pmr::get_default_resource();
+		}
+
+	}
+
+	DebugDrawList::DebugDrawList(std::pmr::memory_resource* resource)
+		: m_Commands(Utils::CheckMemoryResource(resource))
+	{
 	}
 
 	void DebugDrawList::AddLine(const glm::vec3& from, const glm::vec3& to, const glm::vec4& color, float duration, DebugDepthMode depth)

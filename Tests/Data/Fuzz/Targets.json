@@ -39,6 +39,7 @@
 		{ "Reader": "ScriptData", "Case": "ScriptData: 10,000 seeded mutations of a cooked script never crash", "Iterations": 1000000 },
 		{ "Reader": "ShaderReflection", "Case": "ShaderReflection: 2,000 seeded mutations of a compiled document are errors, never crashes", "Iterations": 1000000 },
 		{ "Reader": "SoundEffect", "Case": "SoundEffectImporter: 1,000 seeded mutations of a .sfx document never crash", "Iterations": 1000000 },
+		{ "Reader": "SpriteSheetData", "Case": "SpriteSheetData: 1,000 seeded mutations of a sprite sheet file and of its cooked form never crash", "Iterations": 1000000 },
 		{ "Reader": "TextureData", "Case": "TextureData: 10,000 seeded mutations of a payload never crash", "Iterations": 1000000 },
 		{ "Reader": "TextureImporter", "Case": "TextureImporter: 200 seeded mutations of PNG, JPEG, TGA and BMP files never crash", "Iterations": 1000000 }
 	]

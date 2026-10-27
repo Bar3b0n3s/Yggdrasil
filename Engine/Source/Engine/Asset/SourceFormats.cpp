@@ -28,6 +28,7 @@ namespace Engine {
 			{ .Importer = "Scene", .Extension = ".scene", .MainType = AssetType::Scene, .Importable = true },
 			{ .Importer = "Script", .Extension = ".luau", .MainType = AssetType::Script, .Importable = true },
 			{ .Importer = "SoundEffect", .Extension = ".sfx", .MainType = AssetType::AudioClip, .Importable = true },
+			{ .Importer = "SpriteSheet", .Extension = ".spritesheet", .MainType = AssetType::SpriteSheet, .Importable = true },
 			{ .Importer = "Texture", .Extension = ".bmp", .MainType = AssetType::Texture, .Importable = true },
 			{ .Importer = "Texture", .Extension = ".jpeg", .MainType = AssetType::Texture, .Importable = true },
 			{ .Importer = "Texture", .Extension = ".jpg", .MainType = AssetType::Texture, .Importable = true },

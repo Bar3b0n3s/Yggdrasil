@@ -9,6 +9,10 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace Engine {
 
@@ -19,6 +23,28 @@ namespace Engine {
 			for (char& character : text)
 				if (character >= 'A' && character <= 'Z')
 					character = static_cast<char>(character + ('a' - 'A'));
+			return text;
+		}
+
+		// Whether the folded file name `folded` ends with one of `extensions` (folded); with none, every name matches.
+		static bool PickerMatches(std::string_view folded, const std::vector<std::string>& extensions)
+		{
+			return extensions.empty() || std::ranges::any_of(extensions, [folded](const std::string& extension)
+			{
+				return folded.ends_with(extension);
+			});
+		}
+
+		// The extensions for a message: ".scene", ".luau or .test.luau", ".a, .b or .c".
+		static std::string PickerDescribe(const std::vector<std::string>& extensions)
+		{
+			std::string text;
+			for (size_t index = 0; index < extensions.size(); ++index)
+			{
+				if (index != 0)
+					text += index + 1 == extensions.size() ? " or " : ", ";
+				text += extensions[index];
+			}
 			return text;
 		}
 
@@ -68,8 +94,8 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(const FileInfo info, FileSystem::GetInfo(path));
 		if (info.IsDirectory)
 			return MakeError(ErrorCode::InvalidArgument, "Choose a file, or open the folder to browse its contents.");
-		if (!m_Extension.empty() && !Utils::PickerFold(FileSystem::PathToUtf8(path.filename())).ends_with(m_Extension))
-			return MakeError(ErrorCode::InvalidArgument, "Choose a {} file.", m_Extension);
+		if (!Utils::PickerMatches(Utils::PickerFold(FileSystem::PathToUtf8(path.filename())), m_Extensions))
+			return MakeError(ErrorCode::InvalidArgument, "Choose a {} file.", Utils::PickerDescribe(m_Extensions));
 		std::error_code error;
 		auto canonical = std::filesystem::canonical(path, error);
 		if (error)
@@ -84,7 +110,7 @@ namespace Engine {
 		ENGINE_TRY(Navigate(initialDirectory));
 		m_Title = title;
 		m_Filter.fill(0);
-		m_Extension.clear();
+		m_Extensions.clear();
 		m_FileMode = false;
 		m_Open = true;
 		m_Appearing = true;
@@ -93,10 +119,24 @@ namespace Engine {
 
 	Status FolderPicker::OpenFile(std::string_view title, const std::filesystem::path& initialDirectory, std::string_view extension)
 	{
-		if (!extension.empty() && (extension.front() != '.' || extension.size() == 1 || extension.find_first_of("/\\*?:") != std::string_view::npos))
-			return MakeError(ErrorCode::InvalidArgument, "File filter must be a dot-prefixed extension.");
+		if (extension.empty())
+			return OpenFile(title, initialDirectory, std::span<const std::string>());
+		const std::string single(extension);
+		return OpenFile(title, initialDirectory, std::span<const std::string>(&single, 1));
+	}
+
+	Status FolderPicker::OpenFile(std::string_view title, const std::filesystem::path& initialDirectory, std::span<const std::string> extensions)
+	{
+		std::vector<std::string> folded;
+		folded.reserve(extensions.size());
+		for (const std::string& extension : extensions)
+		{
+			if (extension.size() < 2 || extension.front() != '.' || extension.find_first_of("/\\*?:") != std::string::npos)
+				return MakeError(ErrorCode::InvalidArgument, "File filter must be a dot-prefixed extension.");
+			folded.push_back(Utils::PickerFold(extension));
+		}
 		ENGINE_TRY(Open(title, initialDirectory));
-		m_Extension = Utils::PickerFold(std::string(extension));
+		m_Extensions = std::move(folded);
 		m_FileMode = true;
 		return {};
 	}
@@ -191,7 +231,7 @@ namespace Engine {
 				{
 					const std::string name = FileSystem::PathToUtf8(path.filename());
 					const std::string folded = Utils::PickerFold(name);
-					if (!folded.contains(filter) || (!directory && !m_Extension.empty() && !folded.ends_with(m_Extension)))
+					if (!folded.contains(filter) || (!directory && !Utils::PickerMatches(folded, m_Extensions)))
 						return;
 					++visible;
 					ImGui::PushID(static_cast<int>(FNV1a32(name)));

@@ -1391,8 +1391,9 @@ namespace Engine {
 			}
 		}
 
-		// The asset references in the project's material and prefab files: the registered main assets of the Material and
-		// Prefab importers (a glTF's materials reference its own textures and are checked by its import).
+		// The asset references in the project's material, sprite sheet and prefab files: the registered main assets of the
+		// Material, SpriteSheet and Prefab importers (a glTF's materials reference its own textures and are checked by its
+		// import).
 		static void CheckAssetFiles(const EditorContext& editor, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			const TypeRegistry& registry = editor.GetTypeRegistry();
@@ -1400,8 +1401,9 @@ namespace Engine {
 			{
 				const AssetMetadata& metadata = record->Metadata;
 				const bool isMaterial = metadata.Kind == AssetMetaKind::Asset && metadata.Importer == "Material";
+				const bool isSpriteSheet = metadata.Kind == AssetMetaKind::Asset && metadata.Importer == "SpriteSheet";
 				const bool isPrefab = metadata.Kind == AssetMetaKind::Asset && metadata.Importer == "Prefab";
-				if (!isMaterial && !isPrefab)
+				if (!isMaterial && !isSpriteSheet && !isPrefab)
 					continue;
 				const Result<std::string> text = editor.GetVfs().ReadText(record->SourcePath);
 				// An unreadable file is the import's to report (ASSET_IMPORT_FAILED).
@@ -1411,24 +1413,26 @@ namespace Engine {
 				if (!document.has_value() || !document->is_object())
 					continue;
 				const std::string file(record->SourcePath.GetPath());
-				if (isMaterial)
+				if (isMaterial || isSpriteSheet)
 				{
-					const StructInfo* material = registry.FindStruct("Material");
-					if (material == nullptr)
+					// A sprite sheet's texture is checked as a material's (Docs/Decisions/0029-m18-contract.md decision 17).
+					const StructInfo* type = registry.FindStruct(isMaterial ? "Material" : "SpriteSheet");
+					if (type == nullptr)
 						continue;
+					const std::string_view what = isMaterial ? "material" : "sprite sheet";
 					const auto visit = [&](const EntityRefSite& reference, AssetHandle handle, std::string_view acceptedType)
 					{
 						DiagnosticSite site;
 						site.File = file;
 						site.Field = reference.Field;
 						site.Subject = MakeReferenceSubject(reference, handle);
-						const auto describe = [&reference]()
+						const auto describe = [&reference, what]()
 						{
-							return std::format("'{}' of the material", reference.Field);
+							return std::format("'{}' of the {}", reference.Field, what);
 						};
 						CheckAssetReference(editor, handle, acceptedType, site, describe, diagnostics);
 					};
-					VisitFieldAssetRefs(*document, material->GetFields(), visit);
+					VisitFieldAssetRefs(*document, type->GetFields(), visit);
 					continue;
 				}
 

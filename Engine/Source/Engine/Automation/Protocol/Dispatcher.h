@@ -30,6 +30,9 @@
 // out of NVRHI's internal calls, and a GPU error inside a method (viewport.screenshot) must end the process like the
 // frame-boundary catch (§4.6 item 2, App/FrameLoop.cpp), not leave the host running on a lost device
 // (Docs/Decisions/0009-m5-decisions.md decisions 5 and 33). First-party code never rethrows, so the handler does that work.
+// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 28): a device loss is recovered at the frame boundary, so the
+// handler may answer instead: it reports the loss and returns the error the request fails with, and the host keeps
+// serving.
 
 namespace Engine {
 
@@ -96,8 +99,12 @@ namespace Engine {
 	// Called with a std::system_error escaping method code (a handler, a Poll or a Cancel) and the method's name, before the
 	// exception is handled like any other. A host with a GPU device maps a Vulkan error (vk::SystemError's category) onto
 	// the fatal paths of the frame-boundary catch (RaiseVulkanError, Graphics/GraphicsDevice.h), which never returns; when
-	// the handler returns, the exception asserts in Debug builds and becomes an Internal response otherwise.
-	using SystemErrorHandler = std::function<void(const std::system_error& error, std::string_view method)>;
+	// the handler returns nullopt, the exception asserts in Debug builds and becomes an Internal response otherwise.
+	// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 28): an Error returned by the handler is the request's (or
+	// the pending operation's) error instead, with no assert: the host handled the exception, as MakeVulkanSystemErrorHandler
+	// does for a device loss (the loss is reported and recovered at the frame boundary; the request fails with Gpu). A
+	// Cancel's error is logged, as before.
+	using SystemErrorHandler = std::function<std::optional<Error>(const std::system_error& error, std::string_view method)>;
 
 	enum class DispatcherRequestPhase : uint8_t
 	{

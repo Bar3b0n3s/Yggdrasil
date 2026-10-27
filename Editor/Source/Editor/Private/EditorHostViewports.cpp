@@ -6,6 +6,9 @@
 #include "EditorCore/Viewport/GizmoController.h"
 #include "Engine/App/EngineContext.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/Core/Log.h"
+#include "Engine/Graphics/GpuOutOfMemory.h"
+#include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/RenderContext.h"
 #include "Engine/ImGui/ImGuiRenderer.h"
 #include "Engine/Platform/GlfwLibrary.h"
@@ -18,6 +21,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace Engine {
 
@@ -44,7 +48,37 @@ namespace Engine {
 		m_Pipelines = &pipelines;
 		m_Cache = &cache;
 		m_ImGui = &imgui;
+		// After the ImGui renderer and the views' renderers: released before them (GpuRecreation.h).
+		m_Recreation = device.GetRecreation().Register({
+			.Name = "EditorHostViewports",
+			.Release = [this]()
+		{
+			ReleaseGpuObjects();
+		},
+			.Recreate = {},
+		});
 		return {};
+	}
+	void EditorHostViewports::ReleaseGpuObjects()
+	{
+		// The recovery releases everything, so the lost frame's trim is not needed.
+		m_TrimAfterSubmission = false;
+		for (View& view : m_Views)
+		{
+			// The renderer resolves its own pending picks as cancelled in its release; the host's tickets, its queued click
+			// and its recorded frame name a submission that never completes.
+			view.Queued.reset();
+			view.Pending.clear();
+			view.Recorded = false;
+			if (m_ImGui && view.Image.Texture != 0)
+			{
+				m_ImGui->RemoveTexture(view.Image.Texture);
+				++m_Withdrawals;
+			}
+			view.Image = {};
+			view.RegisteredTexture = nullptr;
+			view.HoldsSceneResources = false;
+		}
 	}
 	void EditorHostViewports::Cancel(View& view)
 	{
@@ -65,6 +99,8 @@ namespace Engine {
 	}
 	void EditorHostViewports::Retire()
 	{
+		m_Recreation.Reset();
+		m_TrimAfterSubmission = false;
 		for (View& view : m_Views)
 		{
 			Cancel(view);
@@ -114,18 +150,35 @@ namespace Engine {
 		m_GameForced = true;
 		return {};
 	}
-	bool EditorHostViewports::IsLayoutReady() const
+	std::optional<glm::uvec2> EditorHostViewports::GetTargetSize(size_t index) const
 	{
 		if (!m_Editor.HasProject())
-			return true;
+			return std::nullopt;
+		// A forced Game view (--headless-game-view) renders at the size lockstep and replay sessions use as view coordinates,
+		// or at the fixed game resolution when one is set, whatever its panel does; at most 8192 pixels a side, as a panel.
+		if (index == 1 && m_GameForced)
+		{
+			const glm::uvec2 resolution = m_Editor.GetViewportState().GetGameResolution();
+			return glm::min(resolution.x != 0 ? resolution : GetDeterministicViewSize(m_Editor.GetProject().GetSettings().Window), glm::uvec2(8192));
+		}
+		const auto panel = index == 0 ? EditorPanel::SceneViewport : EditorPanel::GameViewport;
+		const auto panels = m_Editor.GetUiState().GetOpenPanels();
+		if (std::ranges::find(panels, panel) == panels.end())
+			return std::nullopt;
+		return m_Views[index].RequestedSize;
+	}
+	bool EditorHostViewports::IsLayoutReady() const
+	{
 		for (size_t i = 0; i < m_Views.size(); ++i)
 		{
-			const auto panel = i == 0 ? EditorPanel::SceneViewport : EditorPanel::GameViewport;
-			const auto panels = m_Editor.GetUiState().GetOpenPanels();
-			if (std::ranges::find(panels, panel) == panels.end())
+			const std::optional<glm::uvec2> size = GetTargetSize(i);
+			if (!size.has_value())
 				continue;
 			const View& view = m_Views[i];
-			if (view.RequestedSize.x != view.Image.Width || view.RequestedSize.y != view.Image.Height)
+			// A size that ran out of memory renders at the size the view stays at (M18, C18.4 decision 44).
+			const bool atFailedSize = view.FailedSize == *size && view.Renderer != nullptr && view.Image.Width == view.Renderer->GetWidth()
+				&& view.Image.Height == view.Renderer->GetHeight();
+			if (!atFailedSize && (size->x != view.Image.Width || size->y != view.Image.Height))
 				return false;
 		}
 		return true;
@@ -292,26 +345,20 @@ namespace Engine {
 			Status rendered = RenderView(i, context, sceneChanged);
 			if (rendered)
 				continue;
-			if (rendered.error().GetCode() == ErrorCode::Gpu)
-				return rendered;
-			if (!failure)
+			// A Gpu error comes first: the host trims for it after the frame (M18, C18.4 decision 44).
+			if (!failure || (failure->GetCode() != ErrorCode::Gpu && rendered.error().GetCode() == ErrorCode::Gpu))
 				failure = std::move(rendered).error();
 		}
+		// M18 (C18.4, decision 44): a view whose lazily created target or binding set ran out of memory (a Gpu error on a
+		// device that is not lost) asks for one trim after the frame's submission (Submitted), however many views failed.
+		m_TrimAfterSubmission = failure.has_value() && IsGpuOutOfMemory(*failure, *m_Device);
 		return failure ? Status(std::unexpected(std::move(*failure))) : Status{};
 	}
 	Status EditorHostViewports::RenderView(size_t index, RenderContext& context, bool sceneChanged)
 	{
 		View& view = m_Views[index];
 		const ViewportView kind = index == 0 ? ViewportView::Scene : ViewportView::Game;
-		const auto panel = index == 0 ? EditorPanel::SceneViewport : EditorPanel::GameViewport;
-		glm::uvec2 size = m_Editor.HasProject() && std::ranges::find(m_Editor.GetUiState().GetOpenPanels(), panel) != m_Editor.GetUiState().GetOpenPanels().end() ? view.RequestedSize : glm::uvec2(0);
-		// A forced Game view (--headless-game-view) renders at the size lockstep and replay sessions use as view coordinates,
-		// or at the fixed game resolution when one is set, whatever its panel does; at most 8192 pixels a side, as a panel.
-		if (kind == ViewportView::Game && m_GameForced && m_Editor.HasProject())
-		{
-			const glm::uvec2 resolution = m_Editor.GetViewportState().GetGameResolution();
-			size = glm::min(resolution.x != 0 ? resolution : GetDeterministicViewSize(m_Editor.GetProject().GetSettings().Window), glm::uvec2(8192));
-		}
+		const glm::uvec2 size = GetTargetSize(index).value_or(glm::uvec2(0));
 		if (size.x == 0 || size.y == 0)
 		{
 			if (view.Image.Texture != 0)
@@ -335,25 +382,56 @@ namespace Engine {
 		if (!view.Renderer)
 		{
 			ENGINE_TRY_ASSIGN(view.Renderer, SceneRenderer::Create(*m_Device, *m_Pipelines, *m_Cache, m_Editor.GetAssets(), { .Width = size.x, .Height = size.y }));
+			view.FailedSize = glm::uvec2(0);
 		}
-		ENGINE_TRY_ASSIGN(RenderSnapshot snapshot, Extract(kind, size.x, size.y));
+		// M18 (C18.4, decision 44): a new size is a request. When it runs out of memory after the renderer's trim and retry,
+		// the view goes on at its previous size, shown scaled into the panel, and the size is asked for again only once the
+		// requested size changes. Resizing cancels the renderer's picks (a new generation), as the size check below would.
+		if (size != view.FailedSize)
+		{
+			const Status resized = view.Renderer->Resize(size.x, size.y);
+			if (!resized)
+			{
+				if (resized.error().GetCode() != ErrorCode::OutOfMemory)
+					return resized;
+				ENGINE_WARN("The {} view stays at {}x{}: its {}x{} targets could not be created: {}", kind == ViewportView::Scene ? "scene" : "game",
+					view.Renderer->GetWidth(), view.Renderer->GetHeight(), size.x, size.y, resized.error());
+				view.FailedSize = size;
+			}
+			else
+			{
+				view.FailedSize = glm::uvec2(0);
+			}
+		}
+		const glm::uvec2 rendered(view.Renderer->GetWidth(), view.Renderer->GetHeight());
+		ENGINE_TRY_ASSIGN(RenderSnapshot snapshot, Extract(kind, rendered.x, rendered.y));
 		PlaySession* session = m_Editor.GetPlay().GetSession();
 		const Scene* source = session ? &session->GetScene() : m_Editor.HasScene() ? &m_Editor.GetScene()
 																				   : nullptr;
 		// Cancel before polling: a proportional resize keeps the camera matrices equal, but the old pixel no longer
-		// identifies the image about to be rendered. Resize increments the renderer generation only after this point.
-		if (view.Image.Width != size.x || view.Image.Height != size.y
+		// identifies the image about to be rendered. A Resize above has already cancelled the renderer's picks and
+		// incremented its generation; this cancels the view's queued and pending clicks too.
+		if (view.Image.Width != rendered.x || view.Image.Height != rendered.y
 			|| view.Source != source || view.Image.SceneRevision != snapshot.SceneRevision || view.Image.Camera.View != snapshot.Camera.View
 			|| view.Image.Camera.Projection != snapshot.Camera.Projection || view.Flags != snapshot.Flags || m_Gizmos.IsDragging())
 			Cancel(view);
 		view.Source = source;
 		view.Flags = snapshot.Flags;
 		ENGINE_TRY(Poll(view, context.FrameIndex));
-		ENGINE_TRY(view.Renderer->Resize(size.x, size.y));
 		snapshot.FrameIndex = context.FrameIndex;
 		view.Recorded = true;
 		view.HoldsSceneResources = true;
-		const Status rendered = view.Renderer->Render(*context.CommandList, snapshot);
+		Status recorded = view.Renderer->Render(*context.CommandList, snapshot);
+		// M18 (C18.4, decision 44): a debug-view switch that ran out of memory recorded the view in the debug view its renderer
+		// stayed on (the one it last rendered, or Lit when a shader reload or a recovery has dropped that one's pipelines),
+		// which the renderer reported once; the setting goes back to that view, so the next frames do not try again, and a
+		// later switch does.
+		if (!recorded && recorded.error().GetCode() == ErrorCode::OutOfMemory)
+		{
+			if (kind == ViewportView::Scene)
+				ENGINE_TRY(m_Editor.GetViewportState().SetDebugView(view.Renderer->GetRenderedDebugView()));
+			recorded = {};
+		}
 		nvrhi::ITexture* texture = view.Renderer->GetFinalTexture();
 		if (texture != view.RegisteredTexture)
 		{
@@ -362,8 +440,8 @@ namespace Engine {
 			view.Image.Texture = m_ImGui->AddTexture(*texture);
 			view.RegisteredTexture = texture;
 		}
-		view.Image.Width = size.x;
-		view.Image.Height = size.y;
+		view.Image.Width = rendered.x;
+		view.Image.Height = rendered.y;
 		view.Image.Generation = view.Renderer->GetViewGeneration();
 		view.Image.FrameIndex = context.FrameIndex;
 		view.Image.SceneRevision = snapshot.SceneRevision;
@@ -372,8 +450,8 @@ namespace Engine {
 		// A frame forced while minimized renders the images for the UI capture only (ADR 0018: screenshot captures do not
 		// publish viewport extents); the views stay unavailable until the window is restored.
 		if (!m_Unavailable)
-			ENGINE_TRY(m_Editor.GetViewportState().SetPixelSize(kind, size));
-		return rendered;
+			ENGINE_TRY(m_Editor.GetViewportState().SetPixelSize(kind, rendered));
+		return recorded;
 	}
 	Status EditorHostViewports::Submitted(uint64_t frameIndex, uint64_t submissionId)
 	{
@@ -390,6 +468,11 @@ namespace Engine {
 			view.Queued.reset();
 			if (click.FrameIndex != frameIndex || click.ViewGeneration != view.Renderer->GetViewGeneration())
 				continue;
+			// A frame that lost the device ran nothing a pick could read, and the recovery's release cancels the view's picks:
+			// the click is dropped, since a pick's objects cannot be created on the lost device, and that refusal is the loss,
+			// not a failure to report (decision 28).
+			if (m_Device != nullptr && m_Device->IsLost())
+				continue;
 			const auto ticket = view.Renderer->RequestPick({ .X = click.Pixel.X, .Y = click.Pixel.Y, .FrameIndex = click.FrameIndex, .SceneRevision = click.SceneRevision, .Sequence = click.Sequence, .ViewGeneration = click.ViewGeneration });
 			if (!ticket)
 			{
@@ -399,6 +482,11 @@ namespace Engine {
 			}
 			view.Pending.push_back({ .Ticket = *ticket, .Click = click });
 		}
+		// M18 (C18.4, decision 44): after the frame's submission and the views' notifications, the trim an out-of-memory view
+		// render asked for. It waits for the device's last submission before any owner drops what it can rebuild, and does
+		// nothing on a lost device.
+		if (std::exchange(m_TrimAfterSubmission, false) && m_Device != nullptr)
+			m_Device->TrimUnused();
 		return failure ? Status(std::unexpected(*failure)) : Status{};
 	}
 	bool EditorHostViewports::IsCursorLocked() const

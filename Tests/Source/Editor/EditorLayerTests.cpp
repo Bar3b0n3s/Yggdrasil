@@ -9,7 +9,9 @@
 #include "Editor/Private/EditorHostViewports.h"
 #include "Editor/Ui/EditorStyle.h"
 #include "Editor/WorkspaceTestUi.h"
+#include "EditorCore/Automation/AutomationServer.h"
 #include "EditorCore/Automation/EditorAutomationControls.h"
+#include "EditorCore/Automation/ShaderMethods.h"
 #include "EditorCore/Autosave/Autosave.h"
 #include "EditorCore/EditorActions.h"
 #include "EditorCore/Inspector/ReflectedEditController.h"
@@ -36,6 +38,7 @@
 #include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Session/PlaySession.h"
 #include "Support/AutomationTestClient.h"
+#include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/TestOptions.h"
 #include "Support/WindowedChild.h"
@@ -75,7 +78,7 @@ namespace Engine {
 	{
 		Test::PanelInteractionUi Ui{ false };
 		Test::EditorTestFixture Environment{ "LayerInteraction" };
-		Test::AutomationTestClient Client{ Environment.GetEditor() };
+		Test::AutomationTestClient Client; // the test server, with the constructor's specification
 		EditorActions Actions{ Environment.GetEditor(), Client.GetServer() };
 		EditorAutomationControls Controls{ Environment.GetEditor(), Client.GetServer() };
 		ReflectedEditController Edits{ Environment.GetEditor() };
@@ -87,7 +90,8 @@ namespace Engine {
 		uint64_t Frame = 0;
 		EditorHostPreferences Preferences{}; // the production host preference queue, applied by SafePoint
 
-		LayerUiHarness()
+		explicit LayerUiHarness(AutomationServerSpecification specification = Test::MakeTestServerSpecification())
+			: Client(Environment.GetEditor(), std::move(specification))
 		{
 			Environment.CreateAndOpenProject();
 			Environment.CreateAndOpenScene();
@@ -647,6 +651,56 @@ namespace Engine {
 				CHECK_FALSE(ui.IsVisible("Game###GameViewport"));
 				CHECK_FALSE(ui.IsVisible("Console###Console"));
 			}
+		}
+
+		TEST_CASE("EditorLayer: the Tools menu's Reload shaders runs the host's shader reload")
+		{
+			// M18 (R-SHR; Docs/Decisions/0029-m18-contract.md decision 3): the menu item submits shaders.reload, so it shares
+			// the host's reload with the method; a failed reload is reported and changes nothing.
+			uint32_t reloads = 0;
+			bool fail = false;
+			AutomationServerSpecification specification = Test::MakeTestServerSpecification();
+			specification.RendererName = "vulkan";
+			specification.ReloadShaders = [&reloads, &fail]() -> Result<ShadersReloadResult>
+			{
+				if (fail)
+					return MakeError(ErrorCode::Validation, "while reloading the shaders; the previous pipelines stay in use: Tonemap/CSMain no longer matches its layout");
+				++reloads;
+				return ShadersReloadResult{ .PipelineCount = 58, .Generation = 1 + reloads };
+			};
+			LayerUiHarness ui(std::move(specification));
+			ui.Draw();
+			ui.Draw();
+			// Open the real Tools menu, the main menu bar's last, and click its item. EndMenuBar leaves the bar's cursor after
+			// the last menu, and each menu advances its label's width plus twice the item spacing, its label starting half the
+			// spacing in.
+			auto clickReload = [&ui]()
+			{
+				const ImGuiWindow* bar = ImGui::FindWindowByName("##MainMenuBar");
+				REQUIRE(bar != nullptr);
+				const float spacing = ImGui::GetStyle().ItemSpacing.x;
+				const float label = ImGui::CalcTextSize("Tools").x;
+				const float x = bar->Pos.x + bar->DC.MenuBarOffset.x - 2 * spacing - label + spacing / 2 + label / 2;
+				ui.Click({ x, ImGui::GetFrameHeight() / 2 });
+				auto& popups = ImGui::GetCurrentContext()->OpenPopupStack;
+				REQUIRE_FALSE(popups.empty());
+				const ImGuiWindow* menu = popups.back().Window;
+				REQUIRE(menu != nullptr);
+				ui.Click({ menu->Pos.x + menu->Size.x / 2, menu->DC.CursorPosPrevLine.y + ImGui::GetTextLineHeight() / 2 });
+			};
+			clickReload();
+			// The action runs at the next safe point, outside the ImGui traversal.
+			CHECK(reloads == 0);
+			REQUIRE(ui.SafePoint());
+			CHECK(reloads == 1);
+
+			// A broken build output: the reload's error is the action's, logged.
+			fail = true;
+			Test::ExpectLog reported(LogLevel::Error, "previous pipelines stay in use");
+			clickReload();
+			REQUIRE(ui.SafePoint());
+			CHECK(reported.GetMatchCount() == 1);
+			CHECK(reloads == 1);
 		}
 
 		TEST_CASE("EditorLayer: first thumbnail load invalidates version zero and the next request succeeds")

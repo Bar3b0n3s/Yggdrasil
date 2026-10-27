@@ -133,7 +133,7 @@ namespace Engine {
 	// A host whose SystemErrorHandler ends the process, as the editor's does for a Vulkan error (RaiseVulkanError).
 	ENGINE_DEATH_TEST("Automation/DispatcherSystemErrorReachesTheHostHandler")
 	{
-		DispatcherSetup setup(DispatcherSpecification{ .SystemErrors = [](const std::system_error& /*error*/, std::string_view method)
+		DispatcherSetup setup(DispatcherSpecification{ .SystemErrors = [](const std::system_error& /*error*/, std::string_view method) -> std::optional<Error>
 		{
 			FatalError(FatalErrorKind::Gpu, std::format("the host saw a std::system_error escape '{}'", method));
 		} });
@@ -144,7 +144,10 @@ namespace Engine {
 	// A host whose SystemErrorHandler returns: the error is then handled like any other exception, which asserts in Debug.
 	ENGINE_DEATH_TEST("Automation/DispatcherReturningSystemErrorHandlerAsserts")
 	{
-		DispatcherSetup setup(DispatcherSpecification{ .SystemErrors = [](const std::system_error& /*error*/, std::string_view /*method*/) {} });
+		DispatcherSetup setup(DispatcherSpecification{ .SystemErrors = [](const std::system_error& /*error*/, std::string_view /*method*/) -> std::optional<Error>
+		{
+			return std::nullopt;
+		} });
 		setup.Calls->Enqueue(1, Test::MakeTestRequest(1, "test.systemError", Json::object()));
 		static_cast<void>(setup.Calls->Pump(std::chrono::microseconds(1000000)));
 	}
@@ -545,10 +548,11 @@ namespace Engine {
 			int* count = &handled;
 			std::string method;
 			std::string* seen = &method;
-			DispatcherSetup setup(DispatcherSpecification{ .SystemErrors = [count, seen](const std::system_error& /*error*/, std::string_view name)
+			DispatcherSetup setup(DispatcherSpecification{ .SystemErrors = [count, seen](const std::system_error& /*error*/, std::string_view name) -> std::optional<Error>
 			{
 				++*count;
 				*seen = std::string(name);
+				return std::nullopt;
 			} });
 			setup.Calls->Enqueue(1, Test::MakeTestRequest(1, "test.systemError", Json::object()));
 			setup.Calls->Enqueue(1, Test::MakeTestRequest(2, "test.read", Json::object()));
@@ -559,6 +563,27 @@ namespace Engine {
 			CHECK(messages[0].Message["error"]["code"] == Json(-32000));
 			CHECK(messages[1].Message.contains("result")); // the dispatcher keeps serving
 #endif
+		}
+
+		TEST_CASE("Dispatcher: a SystemErrorHandler's error answers the request, and the dispatcher keeps serving")
+		{
+			// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 28): a host that handled the exception (a device loss,
+			// recovered at the frame boundary) answers with its own error, in every configuration, without the assert.
+			int handled = 0;
+			int* count = &handled;
+			DispatcherSetup setup(DispatcherSpecification{ .SystemErrors = [count](const std::system_error& /*error*/, std::string_view name) -> std::optional<Error>
+			{
+				++*count;
+				return Error(ErrorCode::Gpu, std::format("the GPU device was lost during '{}'", name));
+			} });
+			setup.Calls->Enqueue(1, Test::MakeTestRequest(1, "test.systemError", Json::object()));
+			setup.Calls->Enqueue(1, Test::MakeTestRequest(2, "test.read", Json::object()));
+			std::vector<OutboundMessage> messages = setup.PumpAll();
+			REQUIRE(messages.size() == 2);
+			CHECK(handled == 1);
+			CHECK(messages[0].Message["error"]["data"]["errorCode"] == Json("Gpu"));
+			CHECK(messages[0].Message["error"]["data"]["detail"].dump().contains("test.systemError"));
+			CHECK(messages[1].Message.contains("result"));
 		}
 
 		TEST_CASE("Dispatcher: unknown methods, invalid params and host refusals are error responses")

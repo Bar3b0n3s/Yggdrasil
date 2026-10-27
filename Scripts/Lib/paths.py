@@ -49,6 +49,28 @@ WALK_SKIPPED_DIRECTORIES = frozenset(
 _WORKSPACE_NAME_PATTERN = re.compile(r'^WorkspaceName\s*=\s*"([^"\n]+)"', re.MULTILINE)
 
 
+def argument_path(value: str) -> Path:
+    """The argparse type of a path given on the command line: made absolute against the caller's directory, which is
+    still the working directory while the arguments are parsed (enter_repository_root comes after the parse)."""
+    return Path(value).absolute()
+
+
+def tool_argument(value: str) -> str:
+    """The argparse type of a tool given on the command line as a path or as a name looked up on PATH: a value with a
+    directory separator is a path, made absolute against the caller's directory like argument_path; a bare name is kept
+    as it is, so it stays a PATH lookup."""
+    return str(Path(value).absolute()) if any(separator in value for separator in {"/", os.sep}) else value
+
+
+def enter_repository_root() -> None:
+    """Make this checkout's repository root the process's working directory. Every entry script calls it in its main()
+    right after parsing its arguments, so it works from any directory (Docs/Architecture.md §2.3): a path given on its
+    command line has already been made absolute against the caller's directory (argument_path, tool_argument), and the
+    children it starts and the relative paths its tools print resolve in its own checkout's root, never in the
+    caller's directory or in another checkout it was started from."""
+    os.chdir(REPOSITORY_ROOT)
+
+
 class UnsupportedHostError(Exception):
     """The scripts do not support this operating system or CPU architecture."""
 
@@ -141,6 +163,21 @@ def display_path(path: Path) -> str:
         return path.resolve().relative_to(REPOSITORY_ROOT).as_posix()
     except ValueError:
         return path.resolve().as_posix()
+
+
+def tests_run_user_data(report: Path) -> Path:
+    """The user-data root (--user-data-dir) that Scripts/Test.py gives the Tests process of the run whose JUnit report
+    is `report` (bin/TestResults/<report stem>.xml): <report stem>/UserData beside it (Docs/Architecture.md §2.3). Every
+    run of that suite and configuration in the checkout shares it; Test.py and Hardening.py's debug-heap step read the
+    run's crash reports below it (crash_report_folder)."""
+    return report.with_suffix("") / "UserData"
+
+
+def crash_report_folder(user_data: Path) -> Path:
+    """Where a process of the workspace whose user-data root is `user_data` writes its crash reports (Architecture §4.4
+    and §4.13): <root>/<product>/Crashes/, each report crash-<epoch>-<pid>[-<attempt>].txt with a .dmp minidump beside
+    it on Windows."""
+    return user_data / workspace_name() / "Crashes"
 
 
 def parse_configurations(text: str, allowed: tuple[str, ...] = CONFIGURATIONS) -> list[str]:

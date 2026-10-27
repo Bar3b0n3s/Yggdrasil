@@ -22,7 +22,8 @@ namespace Engine {
 		Audio,
 		Script,
 		Font,
-		Replay
+		Replay,
+		SpriteSheet // M18: a texture cut into a grid of frames (Docs/Decisions/0029-m18-contract.md decision 18)
 	};
 
 	// First-party vector glyphs drawn with ImDrawList lines, no downloaded assets or icon licence. Main thread, inside an

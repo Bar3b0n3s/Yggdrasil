@@ -3,6 +3,7 @@
 #include "Engine/Renderer/EnvironmentBaker.h"
 
 #include "Engine/Graphics/GraphicsDevice.h"
+#include "Support/DeviceLossTest.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/RenderReference.h"
 
@@ -16,6 +17,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -324,6 +326,37 @@ namespace Engine {
 				const Result<EnvironmentData> baked = baker->Bake(input);
 				REQUIRE_MESSAGE(baked.has_value(), baked.error().ToString());
 				CHECK(ReadTexel(baked->Skybox, 0, 0, 3, 3).x == doctest::Approx(10.0).epsilon(0.01));
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		TEST_CASE("EnvironmentBaker: a device loss creates its pipelines again and bakes the same environment" * doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decisions 32 and 33): the baker registers itself
+			// ("EnvironmentBaker"); its Release drops its pipelines and its sampler and its Recreate creates them again, so the
+			// same input bakes to the same bytes after the recovery, and a bake on the lost device fails.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			{
+				Scope<EnvironmentBaker> baker = CreateBaker(gpu);
+				const EnvironmentBakeInput input = MakeGradientInput(64);
+				const EnvironmentBakeOptions options{ .SkyboxFaceSize = 16, .SpecularFaceSize = 16, .SpecularMipCount = 5, .MinSamples = 64, .MaxSamples = 256 };
+				Test::DeviceLossTest test;
+				test.Owners = { "EnvironmentBaker" };
+				test.Use = [&baker, &input, &options]() -> Result<std::vector<std::byte>>
+				{
+					ENGINE_TRY_ASSIGN(const EnvironmentData baked, baker->BakeWithOptions(input, options));
+					std::vector<std::byte> bytes(baked.Skybox.Texels.begin(), baked.Skybox.Texels.end());
+					bytes.insert(bytes.end(), baked.Specular.Texels.begin(), baked.Specular.Texels.end());
+					const std::span<const std::byte> irradiance = std::as_bytes(std::span(baked.IrradianceSH9));
+					bytes.insert(bytes.end(), irradiance.begin(), irradiance.end());
+					return bytes;
+				};
+				const Result<Test::DeviceLossReport> report = Test::RunDeviceLossTest(gpu, test);
+				REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+				REQUIRE_FALSE(report->OnLostDevice.has_value());
+				CHECK(report->OnLostDevice.error().GetCode() == ErrorCode::Gpu);
+				CHECK(baker->GetPipelineCount() == EnvironmentBaker::PipelineCount);
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}

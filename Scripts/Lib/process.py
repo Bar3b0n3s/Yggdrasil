@@ -21,6 +21,8 @@ import time
 from pathlib import Path
 from typing import Any, Mapping, Sequence, TextIO
 
+from . import debugheap
+
 # After the child exits, wait at most this long for the reader to drain the pipe. Grandchildren that inherited the
 # pipe (MSBuild worker nodes, mspdbsrv.exe) can keep it open long after the build finished.
 READER_GRACE_SECONDS = 5.0
@@ -40,6 +42,7 @@ class ProcessResult:
     duration: float
     output: str  # the full output for captured runs, the last lines for streamed runs
     collected: list[str] = dataclasses.field(default_factory=list)  # streamed lines matching `collect`, in order
+    process_id: int | None = None  # the started process's id; None in a result made without starting one
 
     @property
     def succeeded(self) -> bool:
@@ -171,6 +174,7 @@ def run_captured(
         timed_out,
         time.monotonic() - started,
         _decode(raw or b"").replace("\r\n", "\n"),
+        process_id=process.pid,
     )
 
 
@@ -182,23 +186,39 @@ def run_streamed(
     echo: TextIO | None = None,
     tail_lines: int = DEFAULT_TAIL_LINES,
     collect: re.Pattern[str] | None = None,
+    debug_heap: bool = False,
 ) -> ProcessResult:
     """Run a command, echoing each output line to `echo` (default stdout) and keeping the last `tail_lines` lines.
 
-    Lines matching `collect` (anywhere in the output, not only the tail) are returned in `collected`. Raises
-    ToolNotFoundError if the command cannot be started. Ctrl+C terminates the process tree and propagates.
+    Lines matching `collect` (anywhere in the output, not only the tail) are returned in `collected`. With `debug_heap`
+    (Windows only) the command runs on the Windows debug heap (Lib/debugheap.py: started under this thread as its
+    debugger, which detaches at the loader's initial breakpoint). Raises ToolNotFoundError if the command cannot be
+    started, or not on the debug heap. Ctrl+C terminates the process tree and propagates.
     """
     stream = echo if echo is not None else sys.stdout
     started = time.monotonic()
+    options = _popen_options()
+    environment = dict(env) if env is not None else None
+    if debug_heap:
+        if not debugheap.is_available():
+            raise ToolNotFoundError(f"cannot start '{command[0]}' on the debug heap: it is Windows only")
+        options["creationflags"] = options.get("creationflags", 0) | debugheap.start_flags()
+        environment = debugheap.child_environment(environment if environment is not None else os.environ)
     process = _start(
         command,
         cwd=cwd,
-        env=dict(env) if env is not None else None,
+        env=environment,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        **_popen_options(),
+        **options,
     )
+    if debug_heap:
+        try:
+            debugheap.detach_at_initial_breakpoint(process)
+        except OSError as error:
+            terminate_tree(process)
+            raise ToolNotFoundError(f"could not start '{command[0]}' on the debug heap: {error}") from None
     tail: collections.deque[str] = collections.deque(maxlen=tail_lines)
     collected: list[str] = []
 
@@ -235,6 +255,7 @@ def run_streamed(
         time.monotonic() - started,
         "\n".join(tail),
         collected,
+        process_id=process.pid,
     )
 
 

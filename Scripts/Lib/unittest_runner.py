@@ -6,16 +6,20 @@ Tools/MCP/.venv, where the MCP SDK is installed), once per suite run:
     <python> Scripts/Lib/unittest_runner.py --junit <file> --name <suite> [--filter <pattern>] <directory>...
 
 Each directory's test_*.py modules are discovered with the directory as their top level, one JUnit <testsuite> per
-directory named "<suite>.<directory path with dots>" ("Automation.Release.Tools.MCP.tests"). Progress (each test and
-its outcome) goes to standard error. Python tests never skip (Docs/Decisions/0008-m4-decisions.md decision 16):
-skipped tests, expected failures and unexpected successes are counted, and the exit code is 0 only when every test
-passed and none was skipped; 1 when a test failed or errored, a module failed to import, or nothing ran; 4 when the
-only problem is skipped tests (Test.py decides whether contract mode allows them).
+directory named "<suite>.<directory path below the repository root with dots>" ("Automation.Release.Tools.MCP.tests").
+Like every script it works from any directory (Docs/Architecture.md §2.3): a relative directory or --junit file is
+resolved against the caller's directory, then main() makes the repository root of its own checkout the working
+directory, where the tests run. Progress (each test and its outcome) goes to standard error. Python tests never skip
+(Docs/Decisions/0008-m4-decisions.md decision 16): skipped tests, expected failures and unexpected successes are
+counted, and the exit code is 0 only when every test passed and none was skipped; 1 when a test failed or errored, a
+module failed to import, or nothing ran; 4 when the only problem is skipped tests (Test.py decides whether contract
+mode allows them).
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 import traceback
@@ -28,6 +32,10 @@ from typing import Any
 # the modules the tests import.
 if sys.path and Path(sys.path[0]).resolve() == Path(__file__).resolve().parent:
     sys.path.pop(0)
+
+# The checkout this runner belongs to (Scripts/Lib/paths.py's REPOSITORY_ROOT, which the library modules removed from
+# sys.path above would give).
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 EXIT_PASSED = 0
 EXIT_FAILED = 1
@@ -111,9 +119,10 @@ def discover(directory: Path, patterns: str | None) -> unittest.TestSuite:
 
 
 def suite_label(directory: Path) -> str:
-    """The directory relative to the working directory with dots for slashes ("Tools.MCP.tests"), or its name."""
+    """The directory relative to the repository root with dots for slashes ("Tools.MCP.tests"), or its name outside
+    the root. The root, not the working directory, so the label never depends on where the runner was started."""
     try:
-        relative = directory.resolve().relative_to(Path.cwd().resolve())
+        relative = directory.resolve().relative_to(REPOSITORY_ROOT)
     except ValueError:
         return directory.name
     return ".".join(relative.parts) or directory.name
@@ -141,14 +150,21 @@ def write_junit(path: Path, groups: list[tuple[str, list[dict[str, Any]]]]) -> N
     ElementTree.ElementTree(root).write(path, encoding="utf-8", xml_declaration=True)
 
 
+def argument_path(value: str) -> Path:
+    """The argparse type of a path given on the command line, as Scripts/Lib/paths.py's argument_path: made absolute
+    against the caller's directory, which is still the working directory while the arguments are parsed."""
+    return Path(value).absolute()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run unittest suites and write a JUnit report.")
-    parser.add_argument("directories", nargs="+", type=Path, help="directories holding test_*.py modules")
-    parser.add_argument("--junit", type=Path, required=True, help="the JUnit XML file to write")
+    parser.add_argument("directories", nargs="+", type=argument_path, help="directories holding test_*.py modules")
+    parser.add_argument("--junit", type=argument_path, required=True, help="the JUnit XML file to write")
     parser.add_argument("--name", required=True, help="the suite name prefix of the JUnit test suites")
     parser.add_argument("--filter", help="run only tests whose id matches one of these comma-separated patterns "
                                          "(unittest -k semantics)")
     arguments = parser.parse_args()
+    os.chdir(REPOSITORY_ROOT)
     groups: list[tuple[str, list[dict[str, Any]]]] = []
     failed = skipped = ran = 0
     for directory in arguments.directories:

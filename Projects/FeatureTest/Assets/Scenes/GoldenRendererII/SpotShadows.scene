@@ -1,0 +1,203 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "SpotShadows",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"SpotLight": 1,
+		"Environment": 1,
+		"PostProcess": 1
+	},
+	"Entities": [
+		{
+			"ID": "9c5c338c1739cc13",
+			"Name": "Rendering",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Environment": {
+					"Environment": null,
+					"Intensity": 1,
+					"Rotation": 0,
+					"ShowSkybox": false,
+					"SkyboxBlur": 0,
+					"FallbackColor": [0.08, 0.08, 0.08]
+				},
+				"PostProcess": {
+					"ExposureEV": 0,
+					"Tonemap": "AgX",
+					"SsaoEnabled": false,
+					"SsaoRadius": 1,
+					"SsaoIntensity": 2,
+					"SsaoQuality": "High",
+					"BloomEnabled": false,
+					"BloomIntensity": 0.04,
+					"FxaaEnabled": true
+				}
+			}
+		},
+		{
+			"ID": "fb7459a025cd3ee6",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [6, 5, 10],
+					"Rotation": [-0.17645156, 0.26242113, 0.04887425, 0.9474236],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 45,
+					"OrthographicSize": 3.7,
+					"NearClip": 0.1,
+					"FarClip": 300,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.04, 0.055, 0.075]
+				}
+			}
+		},
+		{
+			"ID": "a6f2f7349ede8bf5",
+			"Name": "Ground",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [18, 1, 18]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000103",
+					"Materials": ["7a0a28d33a10928c"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "57605a4b2f0cd389",
+			"Name": "Cube",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1.3, 0.8, 0],
+					"Rotation": [0, 0.17364818, 0, 0.9848077],
+					"Scale": [1.6, 1.6, 1.6]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["882b9e5527a6fe6e"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "78861f6dd406b76f",
+			"Name": "Sphere",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1.1, 0.7, 0.8],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.4, 1.4, 1.4]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["0835a2ca4545047c"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "e4ed7b413a580912",
+			"Name": "Pillar",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1.6, -2.2],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.65, 3.2, 0.65]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7a0a28d33a10928c"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "845cedeca2ae7a10",
+			"Name": "Spot",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3, 6, 3],
+					"Rotation": [-0.45757744, -0.28125328, -0.15522054, 0.82911164],
+					"Scale": [1, 1, 1]
+				},
+				"SpotLight": {
+					"Color": [1, 0.8, 0.6],
+					"Intensity": 45,
+					"Range": 25,
+					"InnerConeAngle": 25,
+					"OuterConeAngle": 40,
+					"CastShadows": true,
+					"SourceRadius": 0.12
+				}
+			}
+		},
+		{
+			"ID": "da0648552f960feb",
+			"Name": "Spot",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [4, 5, -2],
+					"Rotation": [-0.21644755, 0.7819733, 0.38427678, 0.44045383],
+					"Scale": [1, 1, 1]
+				},
+				"SpotLight": {
+					"Color": [0.6, 0.8, 1],
+					"Intensity": 45,
+					"Range": 25,
+					"InnerConeAngle": 25,
+					"OuterConeAngle": 40,
+					"CastShadows": true,
+					"SourceRadius": 0.12
+				}
+			}
+		}
+	]
+}

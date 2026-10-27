@@ -69,7 +69,8 @@ namespace Engine {
 			// such a process writes.
 			bool ChildProcess = false;
 			// --user-data-dir=<absolute path>: the user-data root for this process (ProcessContextSpecification::
-			// UserDataRoot), so a child's logs and crash reports go to its parent's temporary directory. Empty: the OS's.
+			// UserDataRoot), so a child's logs and crash reports go to its parent's temporary directory, and those of a
+			// top-level run that Scripts/Test.py starts to the run's bin/TestResults/<report stem>/UserData. Empty: the OS's.
 			std::filesystem::path UserDataDirectory{};
 			// --child-argument=<text>: free text for the body a child mode runs, such as the lock file a child must hold.
 			std::string ChildArgument{};

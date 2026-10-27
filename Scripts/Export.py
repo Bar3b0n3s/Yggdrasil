@@ -18,6 +18,9 @@ the lock is held, unless the export runs inside that holder, reporting the holde
 --lock-timeout seconds (exit code 5); --no-wait fails at once instead (exit code 3). The --json document of such a
 failure carries "lock" (the lock and its holders).
 
+It works from any directory (Docs/Architecture.md §2.3): a relative path given on its command line is resolved against
+the caller's directory, then main() makes the repository root of its own checkout the working directory.
+
 Exit codes: the editor's (0 exported; 1 the export failed; 3 the project does not open, its lock is held, or a build
 output or the editor is missing), 2 usage error, 3 --no-wait found a machine lock held, 5 timeout (the editor is
 stopped, or the wait for a machine lock ran out).
@@ -68,9 +71,10 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
         epilog="Exit codes: 0 exported, 1 the export failed, 2 usage error, 3 the project does not open, a build "
                "output is missing or --no-wait found a machine lock held, 5 timeout.",
     )
-    parser.add_argument("--project", type=Path, required=True, help="the project (.eproj or its directory)")
+    parser.add_argument("--project", type=paths.argument_path, required=True,
+                        help="the project (.eproj or its directory)")
     parser.add_argument("--config", required=True, choices=EXPORT_CONFIGURATIONS, help="the configuration to export")
-    parser.add_argument("--out", type=Path, required=True,
+    parser.add_argument("--out", type=paths.argument_path, required=True,
                         help="the package directory: new, empty or holding an earlier export, which is replaced")
     parser.add_argument("--testing", action="store_true", help="a testing export (FeatureTest suites and replays)")
     parser.add_argument("--smoke-test", action="store_true", help="run the exported game headless before completing")
@@ -79,8 +83,9 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--renderer", default="vulkan", choices=("vulkan", "none"),
                         help="the editor's renderer; none exports environments only from cooked bakes "
                              "(default: vulkan)")
-    parser.add_argument("--user-data-dir", type=Path, help="the editor's user-data root (default: the platform's)")
-    parser.add_argument("--engine-cache-dir", type=Path,
+    parser.add_argument("--user-data-dir", type=paths.argument_path,
+                        help="the editor's user-data root (default: the platform's)")
+    parser.add_argument("--engine-cache-dir", type=paths.argument_path,
                         help="the engine cooked cache the editor bakes built-ins into (default: the checkout's "
                              "bin/EngineCache)")
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS,
@@ -135,6 +140,7 @@ def describe_report(document: dict[str, Any], console: Console) -> None:
 def main(argv: list[str] | None = None) -> int:
     configure_stdio()
     arguments = parse_arguments(sys.argv[1:] if argv is None else argv)
+    paths.enter_repository_root()
     console = Console(arguments.json)
     editor = editor_executable(arguments.editor_config)
 

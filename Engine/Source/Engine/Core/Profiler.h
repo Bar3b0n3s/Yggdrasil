@@ -7,6 +7,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 // CPU profiling (Architecture §4.13): ENGINE_PROFILE_SCOPE("Name") records a zone into the calling thread's ring buffer.
@@ -29,6 +30,36 @@ namespace Engine {
 	struct ProfilerSpecification
 	{
 		size_t ZonesPerThread = 65536; // capacity of each thread's ring buffer; the oldest zones are overwritten
+	};
+
+	// Where a capture of the timeline starts (Profiler::MarkCapture; M18, R-PROF: profiler.capture). Besides the clock it
+	// holds how many zones every held ring and the GPU timeline had recorded, so Profiler::ExportCapture can count the zones
+	// recorded after the mark that the trace lacks. Its counts are bookkeeping that only ExportCapture reads.
+	struct ProfilerCaptureMark
+	{
+		// The initialization the mark was taken in; 0 when the profiler was not initialized.
+		uint64_t Generation = 0;
+		// Profiler::GetTimeNs() when the mark was taken.
+		uint64_t TimeNs = 0;
+		// {ThreadIndex, zones recorded} of every held ring.
+		std::vector<std::pair<uint32_t, uint64_t>> ThreadZones{};
+		// The GPU zones submitted so far.
+		uint64_t GpuZones = 0;
+		// The zones of the rings freed so far: those of exited threads beyond the retired rings the profiler keeps.
+		uint64_t FreedZones = 0;
+	};
+
+	// One capture of the timeline (Profiler::ExportCapture).
+	struct ProfilerCapture
+	{
+		// The Chrome trace of every zone that ended at or after the mark's TimeNs (ExportChromeTrace), with the top-level
+		// "otherData": {"droppedZones": DroppedZones} (Chrome's metadata object).
+		std::string ChromeTrace{};
+		uint64_t CpuZones = 0; // the trace's complete events of CPU threads
+		uint64_t GpuZones = 0; // the trace's complete events of the GPU timeline (Profiler::GpuThreadIndex)
+		// The zones recorded after the mark that the trace lacks: those a thread's ring (or the GPU timeline's) overwrote
+		// before the export, and those of rings freed since the mark. 0 for a complete trace.
+		uint64_t DroppedZones = 0;
 	};
 
 	// The profiler's buffers are process-level state, like the logger registry: ENGINE_PROFILE_SCOPE takes no context
@@ -75,6 +106,16 @@ namespace Engine {
 		// The zones of CollectZones(sinceNs) as Chrome trace JSON ({"traceEvents": [...]} with "X" complete events in
 		// microseconds, plus "M" thread-name metadata), loadable in chrome://tracing and Perfetto.
 		[[nodiscard]] static std::string ExportChromeTrace(uint64_t sinceNs = 0);
+
+		// M18 (R-PROF): the start of a capture: the clock and the zone counts of every held ring and of the GPU timeline
+		// (ProfilerCaptureMark). An empty mark (Generation 0) when the profiler is not initialized.
+		[[nodiscard]] static ProfilerCaptureMark MarkCapture();
+		// The capture since `mark`: ExportChromeTrace(mark.TimeNs) with its zone counts and the zones recorded after the mark
+		// that the trace lacks (ProfilerCapture::DroppedZones), counted per ring from the zones each recorded since the mark,
+		// so a trace a ring truncated is never taken for a complete one. A mark of another initialization (Shutdown and
+		// Initialize ran since) counts from the start of the current one: the zones of the earlier one are gone and not
+		// counted. Not initialized: an empty trace and zero counts.
+		[[nodiscard]] static ProfilerCapture ExportCapture(const ProfilerCaptureMark& mark);
 
 		// Steady-clock nanoseconds since Initialize (0 when not initialized).
 		[[nodiscard]] static uint64_t GetTimeNs();

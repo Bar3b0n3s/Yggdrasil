@@ -2,7 +2,9 @@
 #include "Engine/Renderer/EnvironmentBaker.h"
 
 #include "Engine/Core/Error.h"
+#include "Engine/Graphics/CommandListRecording.h"
 #include "Engine/Graphics/FramePacer.h"
+#include "Engine/Graphics/GpuRecreation.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Image.h"
 #include "Engine/Graphics/Readback.h"
@@ -18,6 +20,7 @@
 #include <numbers>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 // The five compute pipelines of Passes/EnvironmentBake.slang and the bake that records them (EnvironmentBaker.h). One bake
@@ -336,9 +339,34 @@ namespace Engine {
 	struct EnvironmentBaker::State
 	{
 		GraphicsDevice* Device = nullptr;         // documented back-reference
+		PipelineFactory* Factory = nullptr;       // documented back-reference (CreateGpuObjects)
 		std::vector<ComputePipeline> Pipelines{}; // in BakeEntry order
 		nvrhi::SamplerHandle LinearClamp{};       // trilinear, for the prefilter's cube reads
+		// M18 (C18.3, decision 26): the baker's registration with its device's recreation registry (Create).
+		GpuRecreationRegistration Recreation{};
+
+		// The bake's pipelines and its sampler, kept only when every creation succeeds (Create, and Recreate after a device
+		// loss).
+		[[nodiscard]] Status CreateGpuObjects();
 	};
+
+	Status EnvironmentBaker::State::CreateGpuObjects()
+	{
+		std::vector<ComputePipeline> created;
+		for (PipelineLayoutDescription& description : GetLayoutDescriptions())
+		{
+			ENGINE_TRY_ASSIGN(ComputePipeline pipeline,
+				Factory->CreateComputePipeline({ .Layout = std::move(description), .Specializations = {}, .SharedBindingLayouts = {} }));
+			created.push_back(std::move(pipeline));
+		}
+		nvrhi::SamplerDesc sampler;
+		sampler.setAllFilters(true);
+		sampler.setAllAddressModes(nvrhi::SamplerAddressMode::Clamp);
+		ENGINE_TRY_ASSIGN(nvrhi::SamplerHandle linearClamp, Device->CreateSampler(sampler));
+		Pipelines = std::move(created);
+		LinearClamp = std::move(linearClamp);
+		return {};
+	}
 
 	EnvironmentBaker::EnvironmentBaker(ConstructionKey /*key*/)
 		: m_State(CreateScope<State>())
@@ -352,16 +380,35 @@ namespace Engine {
 		Scope<EnvironmentBaker> baker = CreateScope<EnvironmentBaker>(ConstructionKey());
 		State& state = *baker->m_State;
 		state.Device = &device;
-		for (PipelineLayoutDescription& description : GetLayoutDescriptions())
+		state.Factory = &pipelines;
+		ENGINE_TRY(state.CreateGpuObjects());
+		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decisions 26 and 33): released and created again through the
+		// device's recreation registry.
+		EnvironmentBaker* owner = baker.get();
+		GpuRecreationHooks hooks;
+		hooks.Name = "EnvironmentBaker";
+		hooks.Release = [owner]()
 		{
-			ENGINE_TRY_ASSIGN(ComputePipeline pipeline, pipelines.CreateComputePipeline({ .Layout = std::move(description), .Specializations = {}, .SharedBindingLayouts = {} }));
-			state.Pipelines.push_back(std::move(pipeline));
-		}
-		nvrhi::SamplerDesc sampler;
-		sampler.setAllFilters(true);
-		sampler.setAllAddressModes(nvrhi::SamplerAddressMode::Clamp);
-		ENGINE_TRY_ASSIGN(state.LinearClamp, device.CreateSampler(sampler));
+			owner->ReleaseGpuObjects();
+		};
+		hooks.Recreate = [owner]()
+		{
+			return owner->RecreateGpuObjects();
+		};
+		state.Recreation = device.GetRecreation().Register(std::move(hooks));
 		return baker;
+	}
+
+	void EnvironmentBaker::ReleaseGpuObjects()
+	{
+		State& state = *m_State;
+		state.Pipelines.clear();
+		state.LinearClamp = nullptr;
+	}
+
+	Status EnvironmentBaker::RecreateGpuObjects()
+	{
+		return m_State->CreateGpuObjects();
 	}
 
 	std::vector<PipelineLayoutDescription> EnvironmentBaker::GetLayoutDescriptions()
@@ -391,6 +438,11 @@ namespace Engine {
 	Result<EnvironmentData> EnvironmentBaker::Bake(const EnvironmentBakeInput& input)
 	{
 		return BakeWithOptions(input, EnvironmentBakeOptions{});
+	}
+
+	bool EnvironmentBaker::IsDeviceLost() const
+	{
+		return m_State->Device->IsLost();
 	}
 
 	Result<EnvironmentData> EnvironmentBaker::BakeWithOptions(const EnvironmentBakeInput& input, const EnvironmentBakeOptions& options)
@@ -513,7 +565,7 @@ namespace Engine {
 			dispatches.push_back(dispatch);
 		}
 
-		commandList->open();
+		CommandListRecording recording(device, *commandList);
 		commandList->beginMarker("EnvironmentBake");
 		commandList->writeTexture(equirect, 0, 0, equirectTexels.data(), static_cast<size_t>(input.Width) * 4 * sizeof(float));
 		for (const BakeDispatch& dispatch : dispatches)
@@ -527,9 +579,10 @@ namespace Engine {
 		}
 		commandList->copyBuffer(staging, 0, totals, 0, stagingDesc.byteSize);
 		commandList->endMarker();
-		commandList->close();
-		const uint64_t submission = device.ExecuteCommandList(*commandList);
-		// Bounded (a hang or device loss is fatal), so the readbacks and the map below never wait.
+		const uint64_t submission = recording.Execute();
+		// Bounded (a hang is fatal), so the readbacks and the map below never wait. A loss the submission or the wait meets is
+		// reported and returns (M18, C18.3 decision 28): the bake never ran, and the first readback fails with Gpu
+		// (Readback::ReadTexture on a lost device), before the map.
 		WaitForSubmission(device, submission, "EnvironmentBaker");
 
 		EnvironmentData environment;

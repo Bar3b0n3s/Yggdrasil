@@ -154,6 +154,30 @@ namespace Engine {
 		ImGui::Render();
 	}
 
+	void ImGuiLayer::EndInterruptedFrame()
+	{
+		ENGINE_CORE_ASSERT(ImGui::GetCurrentContext() == m_Context, "ImGuiLayer::EndInterruptedFrame with another Dear ImGui context current");
+		if (!m_Context->WithinFrameScope)
+			return;
+		// Dear ImGui's recovery after an exception (imgui.h, "Recovery after error/exception"): with assertions, the log
+		// and the tooltip off, EndFrame closes what the frame left open back to the state NewFrame recorded. The user's
+		// settings return afterwards.
+		ImGuiIO& io = ImGui::GetIO();
+		const bool recovery = io.ConfigErrorRecovery;
+		const bool asserts = io.ConfigErrorRecoveryEnableAssert;
+		const bool debugLog = io.ConfigErrorRecoveryEnableDebugLog;
+		const bool tooltip = io.ConfigErrorRecoveryEnableTooltip;
+		io.ConfigErrorRecovery = true;
+		io.ConfigErrorRecoveryEnableAssert = false;
+		io.ConfigErrorRecoveryEnableDebugLog = false;
+		io.ConfigErrorRecoveryEnableTooltip = false;
+		ImGui::EndFrame();
+		io.ConfigErrorRecovery = recovery;
+		io.ConfigErrorRecoveryEnableAssert = asserts;
+		io.ConfigErrorRecoveryEnableDebugLog = debugLog;
+		io.ConfigErrorRecoveryEnableTooltip = tooltip;
+	}
+
 	Status ImGuiLayer::Render(nvrhi::ICommandList& commandList, nvrhi::IFramebuffer& framebuffer)
 	{
 		ImDrawData* drawData = GetDrawData();

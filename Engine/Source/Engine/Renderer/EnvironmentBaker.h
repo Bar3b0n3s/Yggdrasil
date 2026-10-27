@@ -37,6 +37,11 @@
 // was made; bakes are not compared across devices. Main thread only (it records and submits GPU work and waits for its
 // readback, §4.11), so EnvironmentImporter runs on the main thread (IAssetImporter::RequiresMainThread). Not copyable or
 // movable. Frozen by the M8 contract (Docs/Decisions/0013-m8-decisions.md decision 9).
+//
+// Device loss (M18, C18.3; Docs/Decisions/0029-m18-contract.md decisions 26 and 33): Create registers the baker with its
+// device's recreation registry as "EnvironmentBaker". Its Release drops its pipelines and its sampler (a bake's transient
+// objects are gone when BakeWithOptions returns), and its Recreate creates them again through the PipelineFactory, so a
+// bake after the recovery gives the same result as one before the loss. A bake on a lost device fails with Gpu.
 
 namespace Engine {
 
@@ -77,9 +82,11 @@ namespace Engine {
 		EnvironmentBaker(const EnvironmentBaker&) = delete;
 		EnvironmentBaker& operator=(const EnvironmentBaker&) = delete;
 
-		// Creates the bake's pipelines and samplers (at editor startup, with the editor's other pipelines, §8.12). `device`
-		// is a documented back-reference that outlives the baker. Errors: those of PipelineFactory and the GraphicsDevice
-		// wrappers (Gpu: FatalError(OutOfMemory) for a caller at startup, §8.14 item 7).
+		// Creates the bake's pipelines and samplers (at editor startup, with the editor's other pipelines, §8.12) and registers
+		// the baker with the device's recreation registry (see the file comment). `device` and `pipelines` are documented
+		// back-references that outlive the baker (its Recreate creates the pipelines again through `pipelines`). Errors: those
+		// of PipelineFactory and the GraphicsDevice wrappers (Gpu: FatalError(OutOfMemory) for a caller at startup, §8.14
+		// item 7).
 		[[nodiscard]] static Result<Scope<EnvironmentBaker>> Create(GraphicsDevice& device, PipelineFactory& pipelines);
 
 		[[nodiscard]] static std::vector<PipelineLayoutDescription> GetLayoutDescriptions();
@@ -87,15 +94,22 @@ namespace Engine {
 
 		// BakeWithOptions with the default options (§8.6). Errors: as BakeWithOptions.
 		[[nodiscard]] Result<EnvironmentData> Bake(const EnvironmentBakeInput& input) override;
+		// GraphicsDevice::IsLost of the baker's device (IEnvironmentBaker::IsDeviceLost; M18's milestone review).
+		[[nodiscard]] bool IsDeviceLost() const override;
 
 		// The skybox cube, the prefiltered specular cube and the SH9 irradiance of `input` (steps 2 to 4), read back into an
 		// EnvironmentData. Blocks until the GPU work is done (Readback, WaitForSubmission bounded like every engine wait).
 		// The transient GPU objects are released before it returns. Errors: InvalidArgument for a malformed input (Width !=
 		// 2 * Height, a zero size, a texel count that does not match, a non-finite or negative value) or options outside their
-		// ranges; Gpu for a device failure, naming the resource.
+		// ranges; Gpu for a device failure, naming the resource, and for a device lost before or during the bake (M18).
 		[[nodiscard]] Result<EnvironmentData> BakeWithOptions(const EnvironmentBakeInput& input, const EnvironmentBakeOptions& options);
 	private:
-		// The back-reference, the pipelines and the samplers (EnvironmentBaker.cpp).
+		// The baker's hooks in the recreation protocol (see the file comment). Errors (Recreate): those of PipelineFactory and
+		// the GraphicsDevice wrappers.
+		void ReleaseGpuObjects();
+		[[nodiscard]] Status RecreateGpuObjects();
+	private:
+		// The back-references, the pipelines, the samplers and the registration (EnvironmentBaker.cpp).
 		struct State;
 	private:
 		Scope<State> m_State;

@@ -177,6 +177,15 @@ namespace Engine {
 		return GraphicsDevice::Destroy(std::move(m_GraphicsDevice));
 	}
 
+	Status EngineContext::RecoverGraphics()
+	{
+		if (m_GraphicsDevice == nullptr)
+			return MakeError(ErrorCode::InvalidState, "the engine context has no GPU device to recover");
+		// The window the Graphics step presented to (CreateGraphics): the device scores presentation support for it again.
+		Window* presentWindow = GlfwLibrary::GetMode() == WindowMode::Windowed ? GetWindow() : nullptr;
+		return m_GraphicsDevice->Recover(presentWindow);
+	}
+
 	std::string_view EngineContextStepToString(EngineContextStep step)
 	{
 		switch (step)

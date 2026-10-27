@@ -7,10 +7,16 @@
 #include "Support/TestOptions.h"
 #include "Support/Utf8Path.h"
 
+#include <filesystem>
+#include <string>
+#include <string_view>
+#include <vector>
+
 // Every check logs one line that starts with "Golden image '<name>' on device class '<class>'" and goes on with ": matched"
-// (Info), ": goldens missing", ": wrote the candidate" or " does not match" (Warn). Scripts/Test.py reads these lines from
-// the golden run's output, whatever reporter doctest used, to report the device class, the images without goldens, the
-// candidates written and the mismatches: keep the texts in step with its GOLDEN_PATTERN.
+// (Info), ": goldens missing", ": wrote the candidate", ": device class changed" or " does not match" (Warn).
+// Scripts/Test.py reads these lines from the golden run's output, whatever reporter doctest used, to report the device
+// class, the images without goldens, the candidates written, the changed device classes and the mismatches: keep the
+// texts in step with its GOLDEN_PATTERN.
 
 namespace Engine {
 
@@ -90,6 +96,32 @@ namespace Engine {
 			[[nodiscard]] static GoldenCheckResult MakeErrorResult(std::string message)
 			{
 				return GoldenCheckResult{ .Outcome = GoldenOutcome::Error, .Message = std::move(message) };
+			}
+
+			// The device classes of `deviceClass`'s vendor other than itself (the directories of `goldenRoot` whose names start
+			// with the class's text before its last '-', followed by '-') that hold the golden `fileName`, sorted. A root or
+			// a directory that cannot be listed holds none: the check then falls back to the smoke mode, as before it.
+			[[nodiscard]] static std::vector<std::string> FindSameVendorClasses(const std::filesystem::path& goldenRoot, std::string_view deviceClass,
+				const std::filesystem::path& fileName)
+			{
+				const size_t separator = deviceClass.rfind('-');
+				if (separator == std::string_view::npos || !FileSystem::Exists(goldenRoot))
+					return {};
+				const std::string vendorPrefix(deviceClass.substr(0, separator + 1));
+				const Result<std::vector<std::filesystem::path>> directories = FileSystem::ListDirectory(goldenRoot);
+				if (!directories.has_value())
+				{
+					ENGINE_CORE_WARN("Cannot list the golden device classes in '{}': {}", DisplayPath(goldenRoot), directories.error());
+					return {};
+				}
+				std::vector<std::string> classes;
+				for (const std::filesystem::path& directory : *directories)
+				{
+					const std::string name = FileSystem::PathToUtf8(directory.filename());
+					if (name != deviceClass && name.starts_with(vendorPrefix) && FileSystem::Exists(directory / fileName))
+						classes.push_back(name);
+				}
+				return classes;
 			}
 
 		}
@@ -186,6 +218,23 @@ namespace Engine {
 				return GoldenCheckResult{ .Outcome = GoldenOutcome::Mismatched, .Message = std::move(message) };
 			}
 
+			// The device-class check: a class without this golden next to a same-vendor class that has it is a driver whose
+			// major version changed, which the smoke mode would hide.
+			const std::vector<std::string> sameVendor = Utils::FindSameVendorClasses(settings.GoldenRoot, deviceClass, golden.filename());
+			if (!sameVendor.empty())
+			{
+				std::string classes;
+				for (const std::string& other : sameVendor)
+					classes += std::format("{}'{}'", classes.empty() ? "" : ", ", other);
+				std::string message = std::format(
+					"{}: device class changed: no '{}', but the same vendor's device class {} has this golden; the driver's major version changed "
+					"(the goldens' driver is held, ADR 0028 decision 9): go back to that driver, or rename the goldens to this device class "
+					"(Tests/Golden/README.md, \"Renaming a device class\")",
+					prefix, goldenText, classes);
+				ENGINE_CORE_WARN("{}", message);
+				return GoldenCheckResult{ .Outcome = GoldenOutcome::DeviceClassChanged, .Message = std::move(message) };
+			}
+
 			// Smoke mode: never a pass of the comparison, and visible as a warning.
 			ImageStatistics statistics;
 			const std::string problems = Utils::FindSmokeProblems(actual, statistics);
@@ -202,12 +251,13 @@ namespace Engine {
 		{
 			switch (outcome)
 			{
-				case GoldenOutcome::Matched:     return "Matched";
-				case GoldenOutcome::Mismatched:  return "Mismatched";
-				case GoldenOutcome::Updated:     return "Updated";
-				case GoldenOutcome::SmokePassed: return "SmokePassed";
-				case GoldenOutcome::SmokeFailed: return "SmokeFailed";
-				case GoldenOutcome::Error:       return "Error";
+				case GoldenOutcome::Matched:            return "Matched";
+				case GoldenOutcome::Mismatched:         return "Mismatched";
+				case GoldenOutcome::Updated:            return "Updated";
+				case GoldenOutcome::SmokePassed:        return "SmokePassed";
+				case GoldenOutcome::SmokeFailed:        return "SmokeFailed";
+				case GoldenOutcome::Error:              return "Error";
+				case GoldenOutcome::DeviceClassChanged: return "DeviceClassChanged";
 			}
 			return "Unknown";
 		}

@@ -80,6 +80,14 @@ namespace Engine {
 		// ImGui::Render: finishes the frame's draw data.
 		void EndFrame();
 
+		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 26 and risk 10): ends a UI frame that BeginFrame started
+		// and that never reached EndFrame, because a device loss ended the application's frame inside it (the frame-boundary
+		// catch). The windows and stacks the interrupted frame left open are closed with Dear ImGui's error recovery, without
+		// its assertions, debug log or error tooltip, and the frame ends without draw data (GetDrawData is null until the
+		// next EndFrame), so the next BeginFrame starts a new frame. CPU only: the application frame's release calls it on a
+		// lost device. Does nothing when no UI frame is open.
+		void EndInterruptedFrame();
+
 		// Records the draw data of the last EndFrame into `commandList` targeting `framebuffer` (ImGuiRenderer::RenderDrawData).
 		// It may be called again for the same draw data with another target of the same size, which is how an editor
 		// screenshot re-renders the last UI frame (§8.13). Errors: those of RenderDrawData; InvalidState before the first

@@ -172,6 +172,76 @@ namespace Engine {
 			CHECK(*launcherAfter == *saved);
 		}
 
+		TEST_CASE("ImGuiLayer: an interrupted UI frame ends without Dear ImGui's assertions, and the next frame renders"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 26 and risk 10): a device loss that the frame-boundary
+			// catch reports ends the application's frame where it was thrown, possibly inside OnImGuiRender with windows,
+			// pushed styles and IDs open; the application frame's release ends that UI frame, so the next one begins.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			Result<Scope<EngineContext>> created = CreateRenderingContext();
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			EngineContext& context = **created;
+			GraphicsDevice& device = *context.GetGraphicsDevice();
+			Result<Scope<ImGuiLayer>> layer = ImGuiLayer::Create(*context.GetWindow(), device, *context.GetPipelineFactory(), {});
+			REQUIRE_MESSAGE(layer.has_value(), layer.error().ToString());
+
+			// Without an open UI frame there is nothing to end.
+			(*layer)->EndInterruptedFrame();
+			CHECK((*layer)->GetDrawData() == nullptr);
+
+			// The user's error-recovery settings, each the opposite of what EndInterruptedFrame sets while it ends the frame
+			// (recovery on; its assertions, log and tooltip off), so every restored value shows.
+			ImGuiIO& io = ImGui::GetIO();
+			io.ConfigErrorRecovery = false;
+			io.ConfigErrorRecoveryEnableAssert = true;
+			io.ConfigErrorRecoveryEnableDebugLog = true;
+			io.ConfigErrorRecoveryEnableTooltip = true;
+			(*layer)->BeginFrame(1.0 / 60.0, 0);
+			ImGui::Begin("Interrupted");
+			ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.5f);
+			ImGui::PushID("Unfinished");
+			ImGui::BeginChild("Child");
+			ImGui::Text("The frame ends here");
+			(*layer)->EndInterruptedFrame();
+			// No draw data: the interrupted frame is never rendered. What it left open was closed, and the error recovery's
+			// settings are the user's again.
+			CHECK((*layer)->GetDrawData() == nullptr);
+			CHECK(ImGui::GetStyle().Alpha == 1.0f);
+			CHECK_FALSE(io.ConfigErrorRecovery);
+			CHECK(io.ConfigErrorRecoveryEnableAssert);
+			CHECK(io.ConfigErrorRecoveryEnableDebugLog);
+			CHECK(io.ConfigErrorRecoveryEnableTooltip);
+			// Dear ImGui's default again for the frames below.
+			io.ConfigErrorRecovery = true;
+
+			// The next UI frame begins, draws the same window and renders.
+			Result<OffscreenTarget> target = OffscreenTarget::Create(device, { .Width = 320, .Height = 200 });
+			REQUIRE_MESSAGE(target.has_value(), target.error().ToString());
+			FramePacer pacer(device, 2);
+			Result<nvrhi::CommandListHandle> commandList = device.CreateCommandList();
+			REQUIRE_MESSAGE(commandList.has_value(), commandList.error().ToString());
+			pacer.BeginFrame();
+			(*layer)->BeginFrame(1.0 / 60.0, pacer.GetFrameSlot());
+			ImGui::Begin("Interrupted");
+			ImGui::Text("The next frame");
+			ImGui::End();
+			(*layer)->EndFrame();
+			REQUIRE((*layer)->GetDrawData() != nullptr);
+			(*commandList)->open();
+			target->Clear(**commandList);
+			const Status rendered = (*layer)->Render(**commandList, *target->GetFramebuffer());
+			CHECK_MESSAGE(rendered.has_value(), (rendered.has_value() ? std::string() : rendered.error().ToString()));
+			(*commandList)->close();
+			pacer.EndFrame(device.ExecuteCommandList(**commandList));
+			device.RunGarbageCollection();
+
+			device.WaitForIdle();
+			layer->reset();
+			CHECK(device.GetDiagnostics().GetErrorCount() == 0);
+		}
+
 #if defined(ENGINE_PLATFORM_WINDOWS)
 		TEST_CASE("ImGuiLayer: an ini path with an unpaired UTF-16 surrogate does not stop the layer"
 			* doctest::test_suite(Test::GpuSuite))

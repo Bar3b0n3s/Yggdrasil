@@ -18,7 +18,7 @@ namespace Engine {
 		UnhandledException, // a catch-all boundary caught an exception (JobSystem worker, EntryPoint)
 		OutOfMemory,        // host (std::bad_alloc) or GPU memory exhausted
 		DeviceLost,         // VK_ERROR_DEVICE_LOST (§8.14)
-		GpuHang,            // a bounded GPU wait expired (§8.1)
+		GpuHang,            // a bounded GPU wait and its reset wait expired with no loss report (§8.1)
 		Gpu,                // any other unrecoverable GPU error
 		InitFailed          // a required environment capability is missing at startup (no Vulkan loader or device)
 	};

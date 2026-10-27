@@ -128,6 +128,203 @@ namespace Engine {
 			gate->reset();
 			commandList->Reset();
 		}
+
+		TEST_CASE("RenderTargetPool: ReleaseAll drops every target, acquired or free"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 acceptance (C18.3, decision 27): the pool of a renderer releases everything in the recovery, whatever the
+			// submissions that used its targets.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			RenderTargetPool pool(gpu.GetDevice());
+			const nvrhi::TextureDesc desc = MakeTargetDesc(16, nvrhi::Format::RGBA8_UNORM, "PoolTarget");
+			Result<nvrhi::TextureHandle> held = pool.Acquire(desc);
+			REQUIRE_MESSAGE(held.has_value(), held.error().ToString());
+			{
+				Result<nvrhi::TextureHandle> freed = pool.Acquire(desc);
+				REQUIRE_MESSAGE(freed.has_value(), freed.error().ToString());
+			}
+			pool.EndFrame();
+			CHECK(pool.GetTargetCount() == 2);
+
+			pool.ReleaseAll();
+			CHECK(pool.GetTargetCount() == 0);
+			CHECK(pool.GetAcquiredCount() == 0);
+			CHECK(*held != nullptr); // the holder's handle stays valid until it drops it
+			held->Reset();
+			Result<nvrhi::TextureHandle> again = pool.Acquire(desc);
+			REQUIRE_MESSAGE(again.has_value(), again.error().ToString());
+			CHECK(pool.GetTargetCount() == 1);
+		}
+
+		TEST_CASE("RenderTargetPool: ReleaseAll drops a target whose last submission has not completed"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// The recovery's Release asks no submission about its targets (decision 28: a lost device answers nothing, and
+			// nothing in flight runs again), where ReleaseFree keeps a target until the submissions that used it completed.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			RenderTargetPool pool(device, 0);
+			Result<Scope<Test::GpuSubmissionGate>> gate = Test::GpuSubmissionGate::Create(device);
+			REQUIRE_MESSAGE(gate.has_value(), gate.error().ToString());
+			Result<nvrhi::CommandListHandle> commandList = device.CreateCommandList();
+			REQUIRE_MESSAGE(commandList.has_value(), commandList.error().ToString());
+			{
+				Result<nvrhi::TextureHandle> acquired = pool.Acquire(MakeTargetDesc(32, nvrhi::Format::RGBA8_UNORM, "Pending"));
+				REQUIRE_MESSAGE(acquired.has_value(), acquired.error().ToString());
+				(*commandList)->open();
+				(*commandList)->clearTextureFloat(*acquired, nvrhi::AllSubresources, nvrhi::Color(0.25f, 0.5f, 0.75f, 1.0f));
+				(*commandList)->close();
+				(*gate)->HoldNextSubmission();
+				device.ExecuteCommandList(**commandList);
+			}
+			pool.EndFrame();
+			pool.ReleaseFree();
+			REQUIRE(pool.GetTargetCount() == 1); // free, but its submission is held back on the GPU
+
+			pool.ReleaseAll();
+			CHECK(pool.GetTargetCount() == 0);
+			// The device's tracker still references the target, so it lives until the submission completed and a garbage
+			// collection swept it.
+			(*gate)->Open();
+			device.WaitForIdle();
+			device.RunGarbageCollection();
+			gate->reset();
+			commandList->Reset();
+		}
+
+		TEST_CASE("RenderTargetPool: TrimUnused releases every free target an EndFrame stamped and keeps the acquired and the new ones"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 acceptance (C18.4, Docs/Decisions/0029-m18-contract.md decision 43): "unused pooled targets" are trimmed when
+			// a request ran out of GPU memory, whatever their age or keepFrames, while a target someone holds stays, and so does
+			// one acquired since the last EndFrame, which an open command list may still record into (a clear, which NVRHI does
+			// not reference: ADR 0009 decision 31); Acquire creates what it needs again afterwards.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			RenderTargetPool pool(gpu.GetDevice());
+			Result<nvrhi::TextureHandle> held = pool.Acquire(MakeTargetDesc(64, nvrhi::Format::RGBA16_FLOAT, "Held"));
+			REQUIRE_MESSAGE(held.has_value(), held.error().ToString());
+			{
+				Result<nvrhi::TextureHandle> dropped = pool.Acquire(MakeTargetDesc(32, nvrhi::Format::RGBA8_UNORM, "Dropped"));
+				REQUIRE_MESSAGE(dropped.has_value(), dropped.error().ToString());
+			}
+			pool.EndFrame();
+			REQUIRE(pool.GetTargetCount() == 2); // the free one is younger than keepFrames
+
+			pool.TrimUnused();
+			CHECK(pool.GetTargetCount() == 1);
+			CHECK(pool.GetAcquiredCount() == 1);
+
+			// Acquired and dropped since the last EndFrame: free, but kept until an EndFrame stamped it.
+			{
+				Result<nvrhi::TextureHandle> again = pool.Acquire(MakeTargetDesc(32, nvrhi::Format::RGBA8_UNORM, "Again"));
+				REQUIRE_MESSAGE(again.has_value(), again.error().ToString());
+				CHECK(pool.GetTargetCount() == 2);
+			}
+			held->Reset();
+			pool.TrimUnused();
+			CHECK(pool.GetTargetCount() == 1); // "Held" went; "Again" stays
+			CHECK(pool.GetAcquiredCount() == 0);
+			pool.EndFrame();
+			pool.TrimUnused();
+			CHECK(pool.GetTargetCount() == 0);
+		}
+
+		TEST_CASE("RenderTargetPool: TrimUnused keeps a free target whose last submission has not completed"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.4, decision 43): the pool's own rule, whoever calls it; GraphicsDevice::TrimUnused waits for the
+			// device's last submission before it runs the hooks, so there every stamped free target goes. A target cleared by a
+			// submission still running stays: dropping it would destroy the image the GPU writes (at once in Dist).
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			RenderTargetPool pool(device);
+			Result<Scope<Test::GpuSubmissionGate>> gate = Test::GpuSubmissionGate::Create(device);
+			REQUIRE_MESSAGE(gate.has_value(), gate.error().ToString());
+			Result<nvrhi::CommandListHandle> commandList = device.CreateCommandList();
+			REQUIRE_MESSAGE(commandList.has_value(), commandList.error().ToString());
+			{
+				Result<nvrhi::TextureHandle> acquired = pool.Acquire(MakeTargetDesc(32, nvrhi::Format::RGBA8_UNORM, "Pending"));
+				REQUIRE_MESSAGE(acquired.has_value(), acquired.error().ToString());
+				(*commandList)->open();
+				(*commandList)->clearTextureFloat(*acquired, nvrhi::AllSubresources, nvrhi::Color(0.75f, 0.5f, 0.25f, 1.0f));
+				(*commandList)->close();
+				(*gate)->HoldNextSubmission();
+				device.ExecuteCommandList(**commandList);
+			}
+			pool.EndFrame();
+			REQUIRE(pool.GetAcquiredCount() == 0);
+
+			pool.TrimUnused();
+			CHECK(pool.GetTargetCount() == 1); // free and stamped, but its submission is held back on the GPU
+
+			// Once the submission completed, the trim releases it.
+			(*gate)->Open();
+			device.WaitForIdle();
+			pool.TrimUnused();
+			CHECK(pool.GetTargetCount() == 0);
+			gate->reset();
+			commandList->Reset();
+		}
+
+		TEST_CASE("RenderTargetPool: a target whose framebuffer only the tracker still holds is free for the next Acquire, ReleaseFree and EndFrame"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18's gate (Docs/Decisions/0029-m18-contract.md, "Milestone review"): a framebuffer dropped before any command
+			// list recorded it is held by the device's tracker alone until a sweep in Debug and Release, while Dist destroys it
+			// at its drop. The pool sweeps the tracker before it decides that a target is acquired, so its attachment is free
+			// at once, as in Dist.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			const nvrhi::TextureDesc desc = MakeTargetDesc(32, nvrhi::Format::RGBA8_UNORM, "Attachment");
+			const auto dropFramebufferOn = [&device](const nvrhi::TextureHandle& target)
+			{
+				Result<nvrhi::FramebufferHandle> framebuffer = device.CreateFramebuffer(nvrhi::FramebufferDesc().addColorAttachment(target));
+				REQUIRE_MESSAGE(framebuffer.has_value(), framebuffer.error().ToString());
+			};
+
+			// Acquire reuses it, and GetAcquiredCount counts it as free.
+			RenderTargetPool pool(device);
+			nvrhi::ITexture* first = nullptr;
+			{
+				Result<nvrhi::TextureHandle> acquired = pool.Acquire(desc);
+				REQUIRE_MESSAGE(acquired.has_value(), acquired.error().ToString());
+				first = acquired->Get();
+				dropFramebufferOn(*acquired);
+			}
+			{
+				Result<nvrhi::TextureHandle> reused = pool.Acquire(desc);
+				REQUIRE_MESSAGE(reused.has_value(), reused.error().ToString());
+				CHECK(reused->Get() == first);
+				CHECK(pool.GetTargetCount() == 1);
+				dropFramebufferOn(*reused);
+			}
+			CHECK(pool.GetAcquiredCount() == 0);
+
+			// ReleaseFree releases it once an EndFrame stamped it.
+			{
+				Result<nvrhi::TextureHandle> held = pool.Acquire(desc);
+				REQUIRE_MESSAGE(held.has_value(), held.error().ToString());
+				pool.EndFrame();
+				dropFramebufferOn(*held);
+			}
+			pool.ReleaseFree();
+			CHECK(pool.GetTargetCount() == 0);
+
+			// EndFrame ages it as free, and releases it after keepFrames frames (0 here).
+			RenderTargetPool aging(device, 0);
+			{
+				Result<nvrhi::TextureHandle> acquired = aging.Acquire(desc);
+				REQUIRE_MESSAGE(acquired.has_value(), acquired.error().ToString());
+				dropFramebufferOn(*acquired);
+			}
+			aging.EndFrame();
+			CHECK(aging.GetTargetCount() == 0);
+		}
 	}
 
 }

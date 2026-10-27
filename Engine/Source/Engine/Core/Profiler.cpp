@@ -11,9 +11,11 @@
 #include <chrono>
 #include <deque>
 #include <format>
+#include <optional>
 #include <set>
 #include <tuple>
 #include <unordered_map>
+#include <utility>
 
 // Synchronization. Each thread records into its own ThreadRing without locking: the ring has a single writer, and the
 // collectors read it concurrently through a seqlock-style protocol on atomics (ThreadRing::Write, AppendZones). The
@@ -74,9 +76,10 @@ namespace Engine {
 				m_Published.store(index + 1, std::memory_order_release);
 			}
 
-			// Appends the held zones that ended at or after `sinceNs`, oldest first. Any thread; may run while the owner
-			// writes.
-			void AppendZones(uint64_t sinceNs, std::vector<ProfileZone>& zones) const
+			// Appends the held zones that ended at or after `sinceNs`, oldest first, and returns the number of the oldest zone
+			// that this collection found intact: every zone below it was overwritten (or never held). Any thread; may run while
+			// the owner writes.
+			uint64_t AppendZones(uint64_t sinceNs, std::vector<ProfileZone>& zones) const
 			{
 				// Zone n (0-based) lives in slot n % capacity. Every zone below `published` was completely written before
 				// the acquire load, so each copy holds zone n's values or, where the owner overwrote the slot meanwhile,
@@ -112,7 +115,11 @@ namespace Engine {
 					return zone.EndNs < sinceNs;
 				});
 				zones.erase(kept, zones.end());
+				return first + overwritten;
 			}
+
+			// The zones this ring has recorded completely. Any thread.
+			[[nodiscard]] uint64_t GetPublished() const { return m_Published.load(std::memory_order_acquire); }
 
 			[[nodiscard]] uint32_t GetThreadIndex() const { return m_ThreadIndex; }
 			[[nodiscard]] const std::string& GetName() const { return m_Name; }
@@ -140,6 +147,7 @@ namespace Engine {
 			std::deque<ThreadRing*> RetiredRings;        // rings in Rings whose thread exited, oldest first
 			std::vector<ProfileZone> GpuZones;           // a ring of ZonesPerThread zones
 			uint64_t GpuZonesWritten = 0;                // GpuZones[n % ZonesPerThread] holds GPU zone n
+			uint64_t FreedZones = 0;                     // the zones the rings freed in this initialization had recorded
 			std::set<std::string, std::less<>> GpuNames; // interned, so GPU zone names stay valid until Shutdown
 		};
 
@@ -187,6 +195,8 @@ namespace Engine {
 		{
 			const ThreadRing* oldest = state.RetiredRings.front();
 			state.RetiredRings.pop_front();
+			// Its thread has exited, so its count is final; a capture counts the zones it recorded as dropped.
+			state.FreedZones += oldest->GetPublished();
 			std::erase_if(state.Rings, [oldest](const Scope<ThreadRing>& ring)
 			{
 				return ring.get() == oldest;
@@ -246,15 +256,22 @@ namespace Engine {
 			}
 		}
 
-		// Every held zone that ended at or after `sinceNs`, in the documented order. Requires the profiler mutex.
-		static std::vector<ProfileZone> CollectZonesLocked(const ProfilerState& state, uint64_t sinceNs)
+		// Every held zone that ended at or after `sinceNs`, in the documented order. With `heldFrom`, also each held ring's
+		// thread index and the number of its oldest zone the collection found intact (ThreadRing::AppendZones), in ring
+		// order. Requires the profiler mutex.
+		static std::vector<ProfileZone> CollectZonesLocked(const ProfilerState& state, uint64_t sinceNs,
+			std::vector<std::pair<uint32_t, uint64_t>>* heldFrom = nullptr)
 		{
 			std::vector<ProfileZone> zones;
 			if (state.ActiveGeneration.load(std::memory_order_relaxed) == 0)
 				return zones;
 
 			for (const Scope<ThreadRing>& ring : state.Rings)
-				ring->AppendZones(sinceNs, zones);
+			{
+				const uint64_t oldestIntact = ring->AppendZones(sinceNs, zones);
+				if (heldFrom != nullptr)
+					heldFrom->emplace_back(ring->GetThreadIndex(), oldestIntact);
+			}
 			AppendGpuZones(state, sinceNs, zones);
 
 			// Stable, so zones that tie on every key keep their recording order.
@@ -278,6 +295,104 @@ namespace Engine {
 			return std::format("{}.{:03}", nanoseconds / 1000, nanoseconds % 1000);
 		}
 
+		// {ThreadIndex, name} of every held ring with a name. Requires the profiler mutex.
+		static std::vector<std::pair<uint32_t, std::string>> GetThreadNamesLocked(const ProfilerState& state)
+		{
+			std::vector<std::pair<uint32_t, std::string>> threadNames;
+			for (const Scope<ThreadRing>& ring : state.Rings)
+			{
+				if (!ring->GetName().empty())
+					threadNames.emplace_back(ring->GetThreadIndex(), ring->GetName());
+			}
+			return threadNames;
+		}
+
+		// The zones recorded after `mark` (of the active initialization) that a collection lacks whose rings kept their
+		// zones from `heldFrom` on (CollectZonesLocked): per held ring, those recorded after the mark below its oldest intact
+		// zone; every zone recorded after the mark by a ring freed since; and the GPU zones submitted after the mark that the
+		// GPU ring overwrote. Requires the profiler mutex.
+		static uint64_t CountDroppedZonesLocked(const ProfilerState& state, const ProfilerCaptureMark& mark,
+			const std::vector<std::pair<uint32_t, uint64_t>>& heldFrom)
+		{
+			const auto findThread = [](const std::vector<std::pair<uint32_t, uint64_t>>& counts, uint32_t threadIndex)
+			{
+				return std::ranges::find_if(counts, [threadIndex](const std::pair<uint32_t, uint64_t>& entry)
+				{
+					return entry.first == threadIndex;
+				});
+			};
+			uint64_t dropped = 0;
+			for (const auto& [threadIndex, oldestIntact] : heldFrom)
+			{
+				const auto atMark = findThread(mark.ThreadZones, threadIndex);
+				const uint64_t recordedBeforeMark = atMark != mark.ThreadZones.end() ? atMark->second : 0;
+				dropped += oldestIntact > recordedBeforeMark ? oldestIntact - recordedBeforeMark : 0;
+			}
+			// A freed ring's zones are all gone. Thread indices are never reused within an initialization, so a ring of the
+			// mark that is no longer held was freed since the mark, and the zones it recorded before the mark do not count.
+			uint64_t freedBeforeMark = 0;
+			for (const auto& [threadIndex, recordedBeforeMark] : mark.ThreadZones)
+			{
+				if (findThread(heldFrom, threadIndex) == heldFrom.end())
+					freedBeforeMark += recordedBeforeMark;
+			}
+			const uint64_t freedSinceMark = state.FreedZones - mark.FreedZones;
+			dropped += freedSinceMark > freedBeforeMark ? freedSinceMark - freedBeforeMark : 0;
+			// The GPU ring holds the GPU zones [written - capacity, written).
+			const uint64_t gpuOldestHeld = state.GpuZonesWritten > state.ZonesPerThread ? state.GpuZonesWritten - state.ZonesPerThread : 0;
+			dropped += gpuOldestHeld > mark.GpuZones ? gpuOldestHeld - mark.GpuZones : 0;
+			return dropped;
+		}
+
+		// `zones` as Chrome trace JSON: {"traceEvents": [...]} with "X" complete events in microseconds and "M" thread-name
+		// metadata for `threadNames` (and for the GPU timeline when a zone is on it), plus "otherData": {"droppedZones": n}
+		// when `droppedZones` is set.
+		static std::string FormatChromeTrace(const std::vector<ProfileZone>& zones, std::vector<std::pair<uint32_t, std::string>> threadNames,
+			std::optional<uint64_t> droppedZones)
+		{
+			const bool hasGpuZones = std::ranges::any_of(zones, [](const ProfileZone& zone)
+			{
+				return zone.ThreadIndex == Profiler::GpuThreadIndex;
+			});
+			if (hasGpuZones)
+				threadNames.emplace_back(Profiler::GpuThreadIndex, "GPU");
+
+			std::string trace = "{\"traceEvents\":[";
+			bool isFirstEvent = true;
+			const auto beginEvent = [&trace, &isFirstEvent]()
+			{
+				if (!isFirstEvent)
+					trace += ',';
+				isFirstEvent = false;
+			};
+
+			for (const auto& [threadIndex, name] : threadNames)
+			{
+				beginEvent();
+				trace += std::format("{{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":{},\"tid\":{},\"args\":{{\"name\":{}}}}}",
+					ChromeTraceProcessID, threadIndex, ToJsonString(name));
+			}
+
+			// Zone names repeat (every frame, every job), so each distinct name is escaped once.
+			std::unordered_map<std::string_view, std::string> escapedNames;
+			for (const ProfileZone& zone : zones)
+			{
+				auto escaped = escapedNames.find(zone.Name);
+				if (escaped == escapedNames.end())
+					escaped = escapedNames.emplace(zone.Name, ToJsonString(zone.Name)).first;
+
+				beginEvent();
+				trace += std::format("{{\"name\":{},\"cat\":\"{}\",\"ph\":\"X\",\"ts\":{},\"dur\":{},\"pid\":{},\"tid\":{}}}",
+					escaped->second, zone.ThreadIndex == Profiler::GpuThreadIndex ? "gpu" : "cpu", FormatMicroseconds(zone.BeginNs),
+					FormatMicroseconds(zone.EndNs - zone.BeginNs), ChromeTraceProcessID, zone.ThreadIndex);
+			}
+			trace += ']';
+			if (droppedZones.has_value())
+				trace += std::format(",\"otherData\":{{\"droppedZones\":{}}}", *droppedZones);
+			trace += '}';
+			return trace;
+		}
+
 	}
 
 	void Profiler::Initialize(const ProfilerSpecification& specification)
@@ -293,6 +408,7 @@ namespace Engine {
 		state.ZonesPerThread = std::max<size_t>(specification.ZonesPerThread, 1);
 		state.NextThreadIndex = 0;
 		state.GpuZonesWritten = 0;
+		state.FreedZones = 0;
 		state.StartTicks.store(std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_relaxed);
 		++state.LastGeneration;
 		state.ActiveGeneration.store(state.LastGeneration, std::memory_order_release);
@@ -308,6 +424,7 @@ namespace Engine {
 		state.RetiredRings.clear();
 		std::vector<ProfileZone>().swap(state.GpuZones);
 		state.GpuZonesWritten = 0;
+		state.FreedZones = 0;
 		state.GpuNames.clear();
 	}
 
@@ -383,50 +500,57 @@ namespace Engine {
 			ProfilerState& state = GetState();
 			std::scoped_lock lock(state.Mutex);
 			zones = Utils::CollectZonesLocked(state, sinceNs);
-			for (const Scope<ThreadRing>& ring : state.Rings)
-			{
-				if (!ring->GetName().empty())
-					threadNames.emplace_back(ring->GetThreadIndex(), ring->GetName());
-			}
+			threadNames = Utils::GetThreadNamesLocked(state);
 		}
-		const bool hasGpuZones = std::ranges::any_of(zones, [](const ProfileZone& zone)
-		{
-			return zone.ThreadIndex == GpuThreadIndex;
-		});
-		if (hasGpuZones)
-			threadNames.emplace_back(GpuThreadIndex, "GPU");
+		return Utils::FormatChromeTrace(zones, std::move(threadNames), std::nullopt);
+	}
 
-		std::string trace = "{\"traceEvents\":[";
-		bool isFirstEvent = true;
-		const auto beginEvent = [&trace, &isFirstEvent]()
-		{
-			if (!isFirstEvent)
-				trace += ',';
-			isFirstEvent = false;
-		};
+	ProfilerCaptureMark Profiler::MarkCapture()
+	{
+		ProfilerState& state = GetState();
+		std::scoped_lock lock(state.Mutex);
+		ProfilerCaptureMark mark;
+		mark.Generation = state.ActiveGeneration.load(std::memory_order_relaxed);
+		if (mark.Generation == 0)
+			return mark;
+		// Under the mutex, so no ring is registered or freed between the counts and the clock.
+		mark.TimeNs = GetTimeNs();
+		mark.ThreadZones.reserve(state.Rings.size());
+		for (const Scope<ThreadRing>& ring : state.Rings)
+			mark.ThreadZones.emplace_back(ring->GetThreadIndex(), ring->GetPublished());
+		mark.GpuZones = state.GpuZonesWritten;
+		mark.FreedZones = state.FreedZones;
+		return mark;
+	}
 
-		for (const auto& [threadIndex, name] : threadNames)
+	ProfilerCapture Profiler::ExportCapture(const ProfilerCaptureMark& mark)
+	{
+		std::vector<ProfileZone> zones;
+		std::vector<std::pair<uint32_t, std::string>> threadNames;
+		uint64_t dropped = 0;
 		{
-			beginEvent();
-			trace += std::format("{{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":{},\"tid\":{},\"args\":{{\"name\":{}}}}}",
-				ChromeTraceProcessID, threadIndex, Utils::ToJsonString(name));
+			ProfilerState& state = GetState();
+			std::scoped_lock lock(state.Mutex);
+			const uint64_t generation = state.ActiveGeneration.load(std::memory_order_relaxed);
+			// A mark of another initialization counts from the start of this one (Profiler.h).
+			const ProfilerCaptureMark start = mark.Generation == generation ? mark : ProfilerCaptureMark{ .Generation = generation };
+			std::vector<std::pair<uint32_t, uint64_t>> heldFrom;
+			zones = Utils::CollectZonesLocked(state, start.TimeNs, &heldFrom);
+			threadNames = Utils::GetThreadNamesLocked(state);
+			if (generation != 0)
+				dropped = Utils::CountDroppedZonesLocked(state, start, heldFrom);
 		}
-
-		// Zone names repeat (every frame, every job), so each distinct name is escaped once.
-		std::unordered_map<std::string_view, std::string> escapedNames;
+		ProfilerCapture capture;
 		for (const ProfileZone& zone : zones)
 		{
-			auto escaped = escapedNames.find(zone.Name);
-			if (escaped == escapedNames.end())
-				escaped = escapedNames.emplace(zone.Name, Utils::ToJsonString(zone.Name)).first;
-
-			beginEvent();
-			trace += std::format("{{\"name\":{},\"cat\":\"{}\",\"ph\":\"X\",\"ts\":{},\"dur\":{},\"pid\":{},\"tid\":{}}}",
-				escaped->second, zone.ThreadIndex == GpuThreadIndex ? "gpu" : "cpu", Utils::FormatMicroseconds(zone.BeginNs),
-				Utils::FormatMicroseconds(zone.EndNs - zone.BeginNs), ChromeTraceProcessID, zone.ThreadIndex);
+			if (zone.ThreadIndex == GpuThreadIndex)
+				++capture.GpuZones;
+			else
+				++capture.CpuZones;
 		}
-		trace += "]}";
-		return trace;
+		capture.DroppedZones = dropped;
+		capture.ChromeTrace = Utils::FormatChromeTrace(zones, std::move(threadNames), dropped);
+		return capture;
 	}
 
 	uint64_t Profiler::GetTimeNs()

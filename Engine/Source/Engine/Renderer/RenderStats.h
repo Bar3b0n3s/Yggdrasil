@@ -2,6 +2,7 @@
 
 #include "Engine/Core/Base.h"
 #include "Engine/Graphics/GpuProfiler.h"
+#include "Engine/Renderer/RenderStage.h"
 
 #include <cstdint>
 #include <functional>
@@ -72,6 +73,21 @@ namespace Engine {
 		// Ends GPU scope/marker and adds measured CPU duration plus saturating uint32 counters to the current CPU frame.
 		// Every success/error path closes a begun scope; counts describe work actually recorded, not candidate draws.
 		void EndPass(const RenderPassCounters& counters);
+		// M18 (C18.1, the GPU-zone hook; Docs/Decisions/0029-m18-contract.md decision 4). SceneRenderer::Render calls
+		// BeginStage before a stage's first pass and EndStage after its last, for every RenderStage in order, whether or not
+		// the stage records a pass, so a hook sees every boundary of every Render. With a non-null `commandList` (null for
+		// Prepare, which records no GPU work) and a profiler, the stage is one GPU zone named "Stage:<RenderStageToString>"
+		// that the stage's pass scopes nest in (depth 1); with a non-null list it always gets its debug marker. Every stage is
+		// also a CPU zone of the same name in the process profiler (Profiler::RecordZone), so profiler.capture shows the
+		// stages on both timelines. A stage is never a stats row (no pass is named "Stage:..."). Stages do not nest, and
+		// BeginPass and EndPass stay valid outside any stage (the context's CPU-only users). Asserted: no BeginStage while a
+		// stage or a pass is open; EndStage only for an open stage without an open pass. No stage may be open at destruction,
+		// unless an exception unwinds the recording (M18's milestone review): a vk::SystemError thrown out of NVRHI in the
+		// middle of a pass or a stage (a device loss that an upload's first write meets) on its way to the frame boundary,
+		// which recovers the device. The destructor then ends the open stage's CPU zone and leaves its GPU scopes open: the
+		// device-loss release replaces the renderer's GpuProfiler, and the list is retired without being submitted.
+		void BeginStage(RenderStage stage, nvrhi::ICommandList* commandList = nullptr);
+		void EndStage();
 	private:
 		struct State;
 		Scope<State> m_State{};
@@ -89,6 +105,10 @@ namespace Engine {
 		// Copies values, retains no reference. Unavailable clears GPU availability/timings (FrameIndex is then ignored);
 		// available older frames are ignored. Match by pass name, summing repeated scopes; absent names stay unavailable.
 		// PublishCpu retains source-tagged GPU values only for matching names, never invents timing for newly enabled passes.
+		// M18 (C18.1, R-PROF; decision 11): an available frame's samples (stages and passes) are also merged into the
+		// process profiler's timeline (Profiler::SubmitGpuZones), each at its frame's recording start on the profiler's clock
+		// plus its StartMilliseconds, with its Depth, so profiler.capture's Chrome trace shows them beside the CPU zones; a
+		// frame is merged once, however often it is published.
 		void PublishGpu(const GpuTimingFrame& frame);
 		// Owns this value; reference valid until the next Publish/Reset. A renderer keeps one history for its lifetime (a scene
 		// replacement does not reset it: rows carry their frame indices); Reset returns it to the unavailable state.

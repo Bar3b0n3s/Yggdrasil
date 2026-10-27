@@ -2,6 +2,7 @@
 
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
+#include "Engine/Graphics/GpuRecreation.h"
 #include "Engine/Graphics/PipelineFactory.h"
 
 #include <imgui.h>
@@ -36,7 +37,20 @@ namespace Engine {
 	// submission. Every texture is created through GraphicsDevice::CreateTexture and updated with writeTexture on the frame's
 	// command list. A failed creation (out of memory, or --gpu-inject-fault=oom-texture) never crashes: the texture keeps
 	// the invalid ImTextureID, its status becomes ImTextureStatus_OK so ImGui does not ask again every frame, the failure is
-	// logged once, and draw commands that reference it are skipped.
+	// logged once, and draw commands that reference it are skipped. On a lost device a failed creation is the loss, not out
+	// of memory (M18, C18.3 decision 28): the texture stays ImTextureStatus_WantCreate without a log line, and the frame's
+	// draws that use it are skipped until the recovery.
+	//
+	// Device loss (M18, C18.3; Docs/Decisions/0029-m18-contract.md decisions 26 and 33): Create registers the renderer with
+	// its device's recreation registry as "ImGuiRenderer". Its Release drops every GPU object it holds, on a lost device and
+	// possibly in the middle of a frame the loss ended (an ImGui frame begun, a command list open): the target pipelines and
+	// their binding layouts, the geometry buffers, the sampler, every texture handle and binding set (retired entries
+	// included, with no frame slot to wait for), and every key: ImGui's textures get the invalid ImTextureID and are marked
+	// for creation again (ImTextureStatus_WantCreate, since they keep their pixels; one whose creation failed too), so the
+	// next RenderDrawData uploads the font atlas again from ImGui's own pixels, and an AddTexture key no longer matches. The
+	// owners of AddTexture keys register after the renderer, so their Release runs first and removes their keys. Its
+	// Recreate creates the sampler again, as Create does; the pipelines, buffers and binding sets are created by their next
+	// use, as always.
 	class ImGuiRenderer
 	{
 	public:
@@ -57,7 +71,8 @@ namespace Engine {
 
 		// Sets the backend flags and renderer name on the current context's ImGuiIO (a current context is required,
 		// asserted), checks GetLayoutDescription against the ImGui program's reflection (ValidatePipelineLayout, so stale or
-		// missing shaders fail here) and creates the linear-clamp sampler. Pipelines, each with the binding layout
+		// missing shaders fail here), creates the linear-clamp sampler and registers the renderer with the device's recreation
+		// registry ("ImGuiRenderer", see the class comment). Pipelines, each with the binding layout
 		// PipelineFactory creates for it, are created per target format on first use in RenderDrawData, through
 		// `pipelines`; binding sets are cached per texture and pipeline. `device` and `pipelines` are documented
 		// back-references that must outlive the renderer. Errors: InvalidState without a current Dear ImGui context (also
@@ -133,6 +148,12 @@ namespace Engine {
 			size_t IndexCapacity = 0;
 		};
 
+		// The renderer's hooks in the recreation protocol (see the class comment): Release drops every GPU object and key,
+		// with the renderer's Dear ImGui context made current for the call; Recreate creates the sampler again. Errors
+		// (Recreate): those of GraphicsDevice::CreateSampler.
+		void ReleaseGpuObjects();
+		[[nodiscard]] Status RecreateGpuObjects();
+
 		// Texture requests (§8.11): WantCreate and WantUpdates before the draws, WantDestroy after them.
 		void CreateImGuiTexture(nvrhi::ICommandList& commandList, ImTextureData& texture);
 		void UpdateImGuiTexture(nvrhi::ICommandList& commandList, ImTextureData& texture);
@@ -177,6 +198,8 @@ namespace Engine {
 		std::vector<ImDrawVert> m_VertexStaging{};
 		std::vector<ImDrawIdx> m_IndexStaging{};
 		std::vector<uint32_t> m_PixelStaging{};
+		// The registration with the device's recreation registry (Create); declared last, so it is dropped first.
+		GpuRecreationRegistration m_Recreation{};
 	};
 
 }

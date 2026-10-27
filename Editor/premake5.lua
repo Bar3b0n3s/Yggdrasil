@@ -91,4 +91,5 @@ project "Editor"
 	UseSpdlog()
 	UseMiniaudio()
 	UseMikkTSpace()
+	UseNativeFileDialog()
 	UseLuau(true)

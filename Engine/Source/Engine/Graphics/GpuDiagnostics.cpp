@@ -17,6 +17,42 @@ namespace Engine {
 		constexpr std::string_view LoaderMessageIdName = "Loader Message";
 		constexpr uint8_t DeviceLostFlag = 1;
 		constexpr uint8_t InjectedDeviceLossFlag = 2;
+		// GpuDiagnostics::m_InjectedFaultArming's bits: the injected device-lost fault is armed (OnGarbageCollected), and it
+		// struck (the OnSubmitted call that set the flag).
+		constexpr uint8_t InjectedFaultArmedFlag = 1;
+		constexpr uint8_t InjectedFaultStruckFlag = 2;
+
+		// The injected faults that report the device lost after a submission (decision 30).
+		static bool IsDeviceLossFault(GpuFault fault)
+		{
+			return fault == GpuFault::DeviceLost || fault == GpuFault::DeviceLostUnrecoverable;
+		}
+
+		// The injected faults that the device's first garbage collection arms (decisions 30 and 46): the device-lost faults and
+		// C18.4's hang resets and out-of-memory faults, so an application's startup and first frame run without them.
+		static bool IsArmedFault(GpuFault fault)
+		{
+			switch (fault)
+			{
+				case GpuFault::DeviceLost:
+				case GpuFault::DeviceLostUnrecoverable:
+				case GpuFault::HangReset:
+				case GpuFault::HangResetPersistent:
+				case GpuFault::OomRenderTarget:
+				case GpuFault::OomRenderTargetPersistent:
+				case GpuFault::OomPipeline:
+				case GpuFault::OomPipelinePersistent:
+				case GpuFault::OomSwapchain:
+				case GpuFault::OomSwapchainPersistent:
+					return true;
+				case GpuFault::None:
+				case GpuFault::OomTexture:
+				case GpuFault::Hang:
+				case GpuFault::OomSpecialization:
+					return false;
+			}
+			return false;
+		}
 
 		static GpuMessageSeverity FromNvrhiSeverity(nvrhi::MessageSeverity severity)
 		{
@@ -146,19 +182,103 @@ namespace Engine {
 		return (m_DeviceLossState.load(std::memory_order_acquire) & Utils::InjectedDeviceLossFlag) != 0;
 	}
 
+	void GpuDiagnostics::ClearDeviceLost()
+	{
+		m_DeviceLossState.store(0, std::memory_order_release);
+	}
+
+	void GpuDiagnostics::InjectUnrecoverableDeviceLoss()
+	{
+		m_FailDeviceRecreation.store(true);
+		SetDeviceLost(true);
+	}
+
+	bool GpuDiagnostics::ShouldFailDeviceRecreation() const
+	{
+		return m_InjectedFault == GpuFault::DeviceLostUnrecoverable || m_FailDeviceRecreation.load();
+	}
+
+	void GpuDiagnostics::OnGarbageCollected()
+	{
+		// The first garbage collection, at the end of an application's first frame (or a test's), arms the fault, so the
+		// startup submissions and the first frame run on a healthy device (decision 30), and before C18.4's faults (decision
+		// 46). Arming again changes nothing.
+		ArmInjectedFault();
+	}
+
+	void GpuDiagnostics::ArmInjectedFault()
+	{
+		if (Utils::IsArmedFault(m_InjectedFault))
+			m_InjectedFaultArming.fetch_or(Utils::InjectedFaultArmedFlag, std::memory_order_acq_rel);
+	}
+
 	void GpuDiagnostics::OnSubmitted()
 	{
-		if (m_InjectedFault != GpuFault::DeviceLost)
+		if (!Utils::IsDeviceLossFault(m_InjectedFault))
 			return;
-		// The first submission sets the flag; the check after it (GraphicsDevice::ExecuteCommandList) ends the process.
+		// Only once armed, and once per process: the struck bit, which ClearDeviceLost leaves alone, so a recovered device is
+		// never lost again by the same fault.
+		const uint8_t arming = m_InjectedFaultArming.load(std::memory_order_acquire);
+		if ((arming & Utils::InjectedFaultArmedFlag) == 0 || (arming & Utils::InjectedFaultStruckFlag) != 0)
+			return;
+		if ((m_InjectedFaultArming.fetch_or(Utils::InjectedFaultStruckFlag, std::memory_order_acq_rel) & Utils::InjectedFaultStruckFlag) != 0)
+			return;
+		// The flag after this submission; the check after it (GraphicsDevice::ExecuteCommandLists) reports the loss.
 		const uint8_t previous = m_DeviceLossState.fetch_or(Utils::DeviceLostFlag | Utils::InjectedDeviceLossFlag, std::memory_order_acq_rel);
 		if ((previous & Utils::DeviceLostFlag) == 0)
-			ENGINE_CORE_WARN("Injected GPU fault (device-lost): the device is reported lost after this submission");
+			ENGINE_CORE_WARN("Injected GPU fault ({}): the device is reported lost after this submission", GpuFaultToString(m_InjectedFault));
 	}
 
 	bool GpuDiagnostics::ShouldFailTextureCreation(const nvrhi::TextureDesc& desc) const
 	{
 		return m_InjectedFault == GpuFault::OomTexture && !desc.isRenderTarget && !desc.isUAV;
+	}
+
+	bool GpuDiagnostics::HasBoundedWaitFault() const
+	{
+		if (m_InjectedFault == GpuFault::Hang)
+			return true;
+		const uint8_t arming = m_InjectedFaultArming.load(std::memory_order_acquire);
+		const bool armed = (arming & Utils::InjectedFaultArmedFlag) != 0;
+		if (m_InjectedFault == GpuFault::HangResetPersistent)
+			return armed;
+		return m_InjectedFault == GpuFault::HangReset && armed && (arming & Utils::InjectedFaultStruckFlag) == 0;
+	}
+
+	GpuInjectedHang GpuDiagnostics::TakeBoundedWaitFault()
+	{
+		// M5's hang strikes every wait from the start; the resets of C18.4 only once armed (decision 46).
+		if (m_InjectedFault == GpuFault::Hang)
+			return GpuInjectedHang::Hang;
+		return TakeArmedFault(GpuFault::HangReset, GpuFault::HangResetPersistent) ? GpuInjectedHang::HangReset : GpuInjectedHang::None;
+	}
+
+	bool GpuDiagnostics::TakeRenderTargetCreationFault()
+	{
+		return TakeArmedFault(GpuFault::OomRenderTarget, GpuFault::OomRenderTargetPersistent);
+	}
+
+	bool GpuDiagnostics::TakePipelineCreationFault()
+	{
+		return TakeArmedFault(GpuFault::OomPipeline, GpuFault::OomPipelinePersistent);
+	}
+
+	bool GpuDiagnostics::TakeSwapchainCreationFault()
+	{
+		return TakeArmedFault(GpuFault::OomSwapchain, GpuFault::OomSwapchainPersistent);
+	}
+
+	bool GpuDiagnostics::TakeArmedFault(GpuFault onceFault, GpuFault persistentFault)
+	{
+		if (m_InjectedFault != onceFault && m_InjectedFault != persistentFault)
+			return false;
+		if ((m_InjectedFaultArming.load(std::memory_order_acquire) & Utils::InjectedFaultArmedFlag) == 0)
+			return false;
+		if (m_InjectedFault == persistentFault)
+			return true;
+		// The once fault strikes at its first call after the arming, and never again: the struck bit, which ClearDeviceLost
+		// leaves alone, so a recovered device or a retried request is not struck by it again.
+		return (m_InjectedFaultArming.fetch_or(Utils::InjectedFaultStruckFlag, std::memory_order_acq_rel) & Utils::InjectedFaultStruckFlag) == 0;
 	}
 
 	FatalErrorKind GetFatalErrorKind(VkResult result)

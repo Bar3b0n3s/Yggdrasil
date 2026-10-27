@@ -31,6 +31,7 @@ namespace Engine {
 	class ImGuiLayer;
 #endif
 	class ProcessContext;
+	struct GpuDeviceLossReport;
 	struct RenderContext;
 
 	struct ApplicationSpecification
@@ -73,7 +74,7 @@ namespace Engine {
 		// no loader, no device, screenshot capabilities Unsupported, §13.9). --renderer.
 		RendererMode Renderer = RendererMode::Vulkan;
 		// The device's settings (§4.1: validation, GPU override, frames in flight, API cap): --gpu-validation, --gpu,
-		// --vulkan-api and --gpu-inject-fault. Ignored with RendererMode::None.
+		// --vulkan-api and --gpu-inject-fault, and (M18) --gpu-reset-wait. Ignored with RendererMode::None.
 		GraphicsSpecification Graphics{};
 		// --expect-no-gpu-errors: a run whose device reported any error or warning in its whole life (GpuDiagnostics:
 		// validation and synchronization-validation messages, NVRHI messages, and the leak report and validation-layer
@@ -134,24 +135,30 @@ namespace Engine {
 	//   --expect-no-gpu-errors  ExpectNoGpuErrors = true
 	//   --vulkan-api <version>  Graphics.MaxApiVersion: "1.3" or "1.4" (§8.1)
 	//   --gpu <index|name>      Graphics.GpuOverride (§8.1; ENGINE_GPU when absent)
-	//   --gpu-inject-fault <f>  Graphics.InjectFault: "device-lost", "oom-texture", "hang" or "oom-specialization" (§8.14
-	//                           item 8)
+	//   --gpu-inject-fault <f>  Graphics.InjectFault: "device-lost", "oom-texture", "hang", "oom-specialization",
+	//                           "device-lost-unrecoverable" (§8.14 item 8; M18, Docs/Decisions/0029-m18-contract.md
+	//                           decision 30), "hang-reset", "hang-reset-persistent", "oom-rendertarget",
+	//                           "oom-rendertarget-persistent", "oom-pipeline", "oom-pipeline-persistent", "oom-swapchain" or
+	//                           "oom-swapchain-persistent" (M18, decision 46)
+	//   --gpu-reset-wait <ms>   Graphics.ResetWaitMilliseconds: 0 to MaxGpuResetWaitMilliseconds (120000), the GPU reset
+	//                           window a hang's reset wait and a device-loss recovery's retry wait (M18, decision 41; also in
+	//                           Dist)
 	//   --audio-device <kind>   Audio = GetDefaultAudioSpecification(Window) with Device System for "system", Null for
 	//                           "null" or None for "none" (M12: windowed processes that tests start never open the
 	//                           machine's audio device, §15.1 T1); the decoding mode stays the window mode's
 	//   --log-level <level>     MinimumLogLevel: "trace", "info", "warn", "error" or "critical", the output sinks' minimum
 	//                           (M15, stream D; also in Dist, where "trace" stores Info)
-	// Every option except --headless, --frames, --expect-no-errors and --log-level is absent from Dist builds, where it is an
-	// unknown option (§13.9 lists the options Dist honours).
+	// Every option except --headless, --frames, --expect-no-errors, --log-level and --gpu-reset-wait is absent from Dist
+	// builds, where it is an unknown option (§13.9 lists the options Dist honours).
 	// An application parses its command line with these plus its own options (CommandLine::Parse). The returned options
 	// refer to static storage.
 	[[nodiscard]] std::span<const CommandLineOption> GetEngineCommandLineOptions();
 
 	// Applies the engine options of `commandLine` to `specification` (see GetEngineCommandLineOptions) and stores the
 	// command line in specification.Args. Errors: InvalidArgument naming the option for a --frames value that is not an
-	// integer >= 1, a --user-data-dir value that is not an absolute path in valid UTF-8, or a --renderer, --gpu-validation,
-	// --vulkan-api, --gpu-inject-fault, --audio-device or --log-level value other than the spellings listed above (the
-	// message lists them).
+	// integer >= 1, a --user-data-dir value that is not an absolute path in valid UTF-8, a --gpu-reset-wait value that is
+	// not an integer from 0 to MaxGpuResetWaitMilliseconds, or a --renderer, --gpu-validation, --vulkan-api,
+	// --gpu-inject-fault, --audio-device or --log-level value other than the spellings listed above (the message lists them).
 	[[nodiscard]] Status ApplyEngineCommandLine(const CommandLine& commandLine, ApplicationSpecification& specification);
 
 	// The base of the editor and runtime applications. Not copyable or movable.
@@ -182,6 +189,33 @@ namespace Engine {
 	//      replaced by a resize stays alive until every frame that cleared it has completed. A Gpu error from
 	//      ImGuiLayer::Render (a pipeline, buffer or binding set could not be created) ends the process through
 	//      FatalError(OutOfMemory) (§8.14 item 7); other Render errors are logged once per run of failing frames.
+	//   2b. M18 (C18.3, Docs/Decisions/0029-m18-contract.md decisions 28, 29 and 33): device loss. A frame on a lost
+	//      device (GraphicsDevice::IsLost) renders nothing: no BeginFrame wait, no OnRender, no OnImGuiRender, no
+	//      submission or Present, as for a frame the swapchain skips (the simulation, its scripts and its audio still
+	//      run). A Gpu error on a lost device is the loss, never FatalError(OutOfMemory). At the frame boundary
+	//      (FrameLoop's OnFrameDeviceLost) the application recovers the device (a frame the loss ended while it
+	//      recorded first has its command list closed and executed on the lost device, so NVRHI retires it):
+	//      OnDeviceLost with the loss's report (the editor writes its autosave there), then
+	//      EngineContext::RecoverGraphics, which releases every registered owner (the rendering objects of step 1
+	//      register as one owner, "Application frame", and the ImGuiLayer's renderer as another), creates the device
+	//      again and creates them again. On success it appends one EngineEventType::GpuDeviceLost event (Message: the
+	//      report's context and fault description) to the context's EventLog, calls OnDeviceRecovered, and the next
+	//      frame renders; on failure it ends the process through GraphicsDevice::RaiseDeviceLost with the report and
+	//      the recovery's error (FatalError(DeviceLost): the fatal hook's autosave, a crash report, exit code 4). A
+	//      loss during initialization, before the first frame, ends the process the same way (decision 25). The
+	//      recovered frame's objects are new (a FramePacer counts its frames from 0), but RenderContext::FrameIndex
+	//      keeps growing: the first frame after a recovery takes the first multiple of the frames in flight after the
+	//      last frame's index, so FrameSlot stays FrameIndex modulo the frames in flight.
+	//   2c. M18 (C18.4, Docs/Decisions/0029-m18-contract.md decisions 40, 42 and 44): hangs and out-of-memory. A hang that
+	//      the driver or the operating system resets during a bounded wait's reset wait (FramePacer.h) is a loss that step
+	//      2b recovers. The frame's resize after startup (the swapchain's recreation, the headless offscreen target's and the
+	//      forced UI target's Resize) is a request: an out-of-memory creation is trimmed and retried once (RetryAfterTrim),
+	//      and a second one skips the frame, logs one Warn line, and skips every later frame at that framebuffer size,
+	//      windowed and headless alike (headless must equal windowed), until the size changes (a minimized window's
+	//      included, so restoring it retries) and the resize is tried again; the run goes on. A swapchain recreation that
+	//      fails otherwise stays FatalError(Gpu) (Swapchain.h). ImGuiLayer::Render's out-of-memory in the frame (a geometry
+	//      buffer, a binding set) stays FatalError(OutOfMemory), as do the rendering objects of step 1 and their recreation
+	//      in a recovery.
 	//   3. OnShutdown, GraphicsDevice::WaitForIdle, the rendering objects (ImGuiLayer, GpuProfiler, swapchain or offscreen
 	//      target, pacer), then the GPU services (EngineContext::DestroyGraphics) with the ExpectNoGpuErrors check (see the
 	//      field), then the rest of the context (reverse order), then the ExpectNoErrors check, which so counts the errors
@@ -210,12 +244,24 @@ namespace Engine {
 
 		[[nodiscard]] const ApplicationSpecification& GetSpecification() const { return m_Specification; }
 	protected:
+		// Makes the run end with `exitCode`, a failure (not ExitCode::Success, asserted): from the frame loop it ends the loop
+		// after the current frame as RequestExit does, and unlike RequestExit it also replaces a Success that an earlier request
+		// or MaxFrames chose, so a failure found after the loop decided to end still fails the run (M18's milestone review: the
+		// editor's final screenshots taken in OnDeviceRecovered after a device loss on the run's last frame; also usable from
+		// OnShutdown). A failure requested earlier, by either call, keeps its code. Main thread, while Run runs.
+		void FailRun(int exitCode = ExitCode::Failed);
 		// The process's context, for what an application adds at process level: its fatal-error hook
 		// (ProcessContext::SetFatalErrorHook, the editor's autosave) and the user-data folders. Only while Run runs, from the
 		// start of initialization to the end of OnShutdown (asserted).
 		[[nodiscard]] ProcessContext& GetProcessContext();
 		// After the context exists and before the first frame. An error makes Run return ExitCode::InitFailed.
 		[[nodiscard]] virtual Status OnInitialize() { return {}; }
+		// M18 (C18.3, decision 29): at the frame boundary after a device loss, before the recovery releases anything: CPU work
+		// only, never the GPU (the editor publishes and writes its autosave, like its fatal hook). Does nothing by default.
+		virtual void OnDeviceLost(const GpuDeviceLossReport& /*report*/) {}
+		// M18 (C18.3, decision 29): after a successful recovery, before the next frame: what depends on the recreated GPU
+		// objects beyond its own registration (the editor asks for a fresh UI frame). Does nothing by default.
+		virtual void OnDeviceRecovered(const GpuDeviceLossReport& /*report*/) {}
 		// After the last frame, while the context still exists. Runs when OnInitialize succeeded.
 		virtual void OnShutdown() {}
 		// Every window or injected event, before InputState sees it; mark it handled to keep it from the game.
@@ -270,9 +316,18 @@ namespace Engine {
 		void OnFrameFixedStep(const SimStep& step) override;
 		void OnFrameUpdate(const FrameTime& frame) override;
 		void OnFrameRender(const FrameTime& frame) override;
+		// M18 (C18.3, decision 29): step 2b's recovery.
+		void OnFrameDeviceLost() override;
 
 		// Step 1's rendering objects (see the class comment); does nothing with RendererMode::None.
 		[[nodiscard]] Status InitializeRendering();
+		// M18 (C18.3, decision 33): the "Application frame" owner's two halves. CreateFrameObjects creates the swapchain or the
+		// headless offscreen target, the command list, the FramePacer and the GpuProfiler (InitializeRendering, and the
+		// owner's Recreate on the recreated device), returning the first error with its context; ReleaseFrameObjects (the
+		// owner's Release) ends a UI frame the loss interrupted (ImGuiLayer::EndInterruptedFrame) and drops them all, the
+		// forced UI target and the slot targets included, without a GPU call.
+		[[nodiscard]] Status CreateFrameObjects();
+		void ReleaseFrameObjects();
 		// Step 3's teardown of what InitializeRendering built, after GraphicsDevice::WaitForIdle.
 		void ShutdownRendering();
 		// Logs an initialization failure at Error level, and shows it in an error dialog when `process` has
@@ -301,6 +356,7 @@ namespace Engine {
 #endif
 		Scope<LoggedErrorCounter> m_LoggedErrors; // with ExpectNoErrors, from the start of Run to its end
 		std::optional<int> m_PendingExitCode;     // an exit requested before the frame loop exists (during OnInitialize)
+		std::optional<int> m_FailedExitCode;      // FailRun's first failure, which replaces a Success that ended the run
 		double m_AudioClockSeconds = 0.0;         // the frame clock's accumulated unscaled time for AudioEngine::Update (M12)
 		bool m_HasRun = false;
 	};

@@ -15,7 +15,8 @@
 // again (pollTimerQuery); a query that has not finished by then is dropped for that frame instead of stalling.
 //
 // The samples feed the observability surfaces of §4.13 and §13.7: stats.get's per-pass GPU timings read
-// GetLastFrameResult through RenderStatsHistory (Renderer/RenderStats.h), which tags each sample with its source frame.
+// GetLastFrameResult through RenderStatsHistory (Renderer/RenderStats.h), which tags each sample with its source frame and,
+// from M18 (R-PROF), merges the samples into the process profiler's timeline at the frame's CPU anchor (profiler.capture).
 
 namespace Engine {
 
@@ -40,6 +41,11 @@ namespace Engine {
 	{
 		bool Available = false;
 		uint64_t FrameIndex = 0; // the collected frame's supplied identity; meaningful only when Available
+		// M18 (R-PROF; Docs/Decisions/0029-m18-contract.md decision 11): the process profiler's clock (Profiler::GetTimeNs)
+		// when the frame's recording began (its BeginFrame), the CPU anchor RenderStatsHistory::PublishGpu places the samples
+		// at on the profiler's timeline (anchor + StartMilliseconds). 0 when the profiler was not initialized then; meaningful
+		// only when Available.
+		uint64_t CpuBeginNs = 0;
 		std::vector<GpuTimingSample> Samples{};
 	};
 
@@ -92,6 +98,7 @@ namespace Engine {
 		{
 			std::vector<TimedScope> Scopes{};
 			uint64_t FrameIndex = 0;
+			uint64_t CpuBeginNs = 0; // Profiler::GetTimeNs() at the frame's BeginFrame (GpuTimingFrame::CpuBeginNs)
 			uint32_t TimedScopeCount = 0;
 			bool IsRecorded = false; // a frame used the slot since the last collection
 		};

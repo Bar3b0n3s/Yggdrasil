@@ -7,6 +7,7 @@
 #include "Engine/Asset/EnvironmentData.h"
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/TextureData.h"
+#include "Engine/Graphics/CommandListRecording.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Shared/MaterialConstants.h"
 
@@ -57,6 +58,17 @@ namespace Engine {
 			size_t* UploadFailures = nullptr;
 		};
 
+		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 43): whether GpuResourceCache::TrimUnused releases the mirror
+		// `key`: a replaced version (as CollectStale), or the mirror of an asset the manager no longer has loaded (released or
+		// unknown), unless it is a built-in (the placeholders among them) or a stand-in sharing its placeholder's objects
+		// (`isPlaceholder`), which frees nothing. A loaded, current asset's mirror stays: the next Render would upload it again.
+		[[nodiscard]] bool IsTrimmable(const AssetManager& assets, const MirrorKey& key, bool isPlaceholder)
+		{
+			if (assets.GetVersion(key.Handle) != key.Version)
+				return true;
+			return !IsBuiltinAssetHandle(key.Handle) && !isPlaceholder && assets.GetState(key.Handle) == AssetState::Unloaded;
+		}
+
 	}
 
 	namespace Utils {
@@ -66,6 +78,15 @@ namespace Engine {
 		{
 			std::string path = assets.GetReferencePath(handle);
 			return path.empty() ? handle.ToString() : path;
+		}
+
+		// Whether an upload that just failed on `device` is the asset's own failure (§8.14 item 7: counted, reported once and
+		// not retried until the asset changes). On a lost device it is not (M18, Docs/Decisions/0029-m18-contract.md decision
+		// 28: a Gpu error on a lost device is the loss, never out-of-memory): it is neither counted nor reported, and the
+		// recovery's ReleaseGpuObjects drops the stand-in mirror, so the next Get uploads the asset again.
+		[[nodiscard]] static bool IsUploadFailure(const GraphicsDevice& device)
+		{
+			return !device.IsLost();
 		}
 
 		static Result<nvrhi::Format> ToNvrhiFormat(TextureFormat format)
@@ -128,10 +149,9 @@ namespace Engine {
 			// Not an immediate command list: the scene renderer resolves its materials while the frame's immediate list is open.
 			ENGINE_TRY_ASSIGN(const nvrhi::CommandListHandle commandList,
 				device.CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false)));
-			commandList->open();
+			CommandListRecording recording(device, *commandList);
 			commandList->writeBuffer(buffer, &constants, sizeof(constants));
-			commandList->close();
-			device.ExecuteCommandList(*commandList);
+			recording.Execute();
 			return buffer;
 		}
 
@@ -210,20 +230,21 @@ namespace Engine {
 				// frame's immediate list is open, and NVRHI's validation allows one open immediate list at a time.
 				ENGINE_TRY_ASSIGN(nvrhi::CommandListHandle commandList,
 					device.CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false)));
-				commandList->open();
+				CommandListRecording recording(device, *commandList);
 				Result<nvrhi::BufferHandle> vertices = Utils::CreateGeometryBuffer(device, *commandList, mesh.Vertices.data(),
 					mesh.Vertices.size() * sizeof(MeshVertex), false, std::format("{} (vertices)", name));
 				Result<nvrhi::BufferHandle> indices = vertices
 					? Utils::CreateGeometryBuffer(device, *commandList, mesh.Indices.data(), mesh.Indices.size() * sizeof(uint32_t), true,
 						  std::format("{} (indices)", name))
 					: Result<nvrhi::BufferHandle>(nvrhi::BufferHandle());
-				// The list is closed either way; it is executed only when both buffers exist.
-				commandList->close();
+				// The list is executed whatever the buffers' results: a list that never executes keeps itself, and the buffer
+				// it wrote, alive (CommandListRecording), which would fail the next device loss's recovery. Without both
+				// buffers its writes are discarded with them.
+				recording.Execute();
 				if (!vertices)
 					return std::unexpected(std::move(vertices).error());
 				if (!indices)
 					return std::unexpected(std::move(indices).error());
-				device.ExecuteCommandList(*commandList);
 
 				GpuMesh mirror;
 				mirror.VertexBuffer = std::move(*vertices);
@@ -317,6 +338,16 @@ namespace Engine {
 					entry.IsUsed = false;
 			}
 
+			// M18 (C18.4): GpuResourceCache::TrimUnused for this table (IsTrimmable); the use flags of CollectStale's period
+			// stay as they are.
+			void TrimUnused(const AssetManager& assets)
+			{
+				std::erase_if(m_Entries, [&assets](const auto& item)
+				{
+					return IsTrimmable(assets, item.first, item.second.Value.IsPlaceholder);
+				});
+			}
+
 			void Clear() { m_Entries.clear(); }
 
 			[[nodiscard]] size_t GetCount() const { return m_Entries.size(); }
@@ -368,8 +399,12 @@ namespace Engine {
 					else
 					{
 						// The placeholder's mirror stands in; when the placeholder's own upload failed, its GPU objects stay null.
-						++*context.UploadFailures;
-						entry.UploadError = uploaded.error().ToString();
+						// On a lost device the failure is the loss, not the asset's (Utils::IsUploadFailure).
+						if (Utils::IsUploadFailure(*context.Device))
+						{
+							++*context.UploadFailures;
+							entry.UploadError = uploaded.error().ToString();
+						}
 						if (!isPlaceholderAsset)
 							entry.Value = Resolve(context, placeholder, false);
 						entry.Value.IsPlaceholder = true;
@@ -470,6 +505,8 @@ namespace Engine {
 		std::map<MirrorKey, EnvironmentEntry> Environments;
 		size_t UploadFailures = 0;
 		uint64_t NextGeneration = 1; // GpuMaterial::Generation: only increases
+		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 26): the cache's registration with its device.
+		GpuRecreationRegistration Recreation{};
 
 		[[nodiscard]] UploadContext GetContext() { return { .Device = Device, .Assets = Assets, .UploadFailures = &UploadFailures }; }
 		// The texture of `slot`, or of the built-in `fallback` when the slot is empty, through the texture mirrors.
@@ -485,6 +522,20 @@ namespace Engine {
 	{
 		m_State->Device = &device;
 		m_State->Assets = &assets;
+		// M18 (C18.3, decisions 26 and 27): released with every mirror; the next Get uploads each one again.
+		GpuResourceCache* owner = this;
+		GpuRecreationHooks hooks;
+		hooks.Name = "GpuResourceCache";
+		hooks.Release = [owner]()
+		{
+			owner->ReleaseGpuObjects();
+		};
+		// M18 (C18.4, decision 43): stale and unloaded mirrors, when a request ran out of GPU memory.
+		hooks.TrimUnused = [owner]()
+		{
+			owner->TrimUnused();
+		};
+		m_State->Recreation = device.GetRecreation().Register(std::move(hooks));
 	}
 
 	GpuResourceCache::~GpuResourceCache() = default;
@@ -597,7 +648,7 @@ namespace Engine {
 		{
 			entry.Value.Constants = std::move(*constants);
 		}
-		else
+		else if (Utils::IsUploadFailure(*state.Device))
 		{
 			++state.UploadFailures;
 			entry.UploadError = constants.error().ToString();
@@ -657,7 +708,7 @@ namespace Engine {
 				entry.Value = std::move(*uploaded);
 				entry.IsValid = true;
 			}
-			else
+			else if (Utils::IsUploadFailure(*state.Device))
 			{
 				++state.UploadFailures;
 				state.ReportEnvironmentFailure(handle, std::string(AssetUploadFailedCode),
@@ -693,6 +744,31 @@ namespace Engine {
 		m_State->Environments.clear();
 		m_State->Meshes.Clear();
 		m_State->Textures.Clear();
+	}
+
+	void GpuResourceCache::ReleaseGpuObjects()
+	{
+		// The mirrors hold every GPU object of the cache: an upload's command list is executed at once and dropped, and the
+		// host images of HostImageUpload are the device's, which GraphicsDevice::Recover releases. NextGeneration and
+		// UploadFailures stay, so no material generation from before the loss is ever made again.
+		Clear();
+	}
+
+	void GpuResourceCache::TrimUnused()
+	{
+		// Only what nothing current needs; the use flags of the host's CollectStale period, the material generation counter
+		// and UploadFailures stay (GpuResourceCache.h).
+		const AssetManager& assets = *m_State->Assets;
+		std::erase_if(m_State->Materials, [&assets](const auto& item)
+		{
+			return IsTrimmable(assets, item.first, item.second.Value.IsPlaceholder);
+		});
+		std::erase_if(m_State->Environments, [&assets](const auto& item)
+		{
+			return IsTrimmable(assets, item.first, false);
+		});
+		m_State->Meshes.TrimUnused(assets);
+		m_State->Textures.TrimUnused(assets);
 	}
 
 	GpuResourceCacheStats GpuResourceCache::GetStats() const

@@ -97,6 +97,9 @@
 		"MikkTSpace": [
 			"Vendor/MikkTSpace"
 		],
+		"nfd": [
+			"Vendor/nativefiledialog-extended/src/include"
+		],
 		"doctest": [
 			"Vendor/doctest"
 		]
@@ -151,17 +154,21 @@
 				"MacOS",
 				"Posix"
 			],
-			"Notes": "GlfwLibrary.cpp alone may include the Vulkan headers: glfw3.h declares glfwInitVulkanLoader only after them, and GLFW must be handed the engine's loader before glfwInit (section 4.1; Docs/Decisions/0005-m2-decisions.md).",
+			"Notes": "GlfwLibrary.cpp alone may include the Vulkan headers: glfw3.h declares glfwInitVulkanLoader only after them, and GLFW must be handed the engine's loader before glfwInit (section 4.1; Docs/Decisions/0005-m2-decisions.md). nativefiledialog-extended only in the Windows native file dialog, the one backend of it ever compiled (Docs/Decisions/0029-m18-contract.md decision 21).",
 			"ThirdParty": {
 				"Public": [],
 				"Private": [
 					"GLFW",
-					"Vulkan"
+					"Vulkan",
+					"nfd"
 				]
 			},
 			"RestrictedThirdParty": {
 				"Vulkan": [
 					"Engine/Source/Engine/Platform/GlfwLibrary.cpp"
+				],
+				"nfd": [
+					"Engine/Source/Engine/Platform/Windows/NativeFileDialogWindows.cpp"
 				]
 			},
 			"SystemHeaders": [
@@ -740,7 +747,8 @@
 			".material",
 			".sfx",
 			".meta",
-			".replay"
+			".replay",
+			".spritesheet"
 		],
 		"LineDelimitedExtensions": [
 			".jsonl"

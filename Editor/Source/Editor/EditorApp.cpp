@@ -17,6 +17,7 @@
 #include "EditorCore/Automation/BatchRunner.h"
 #include "EditorCore/Automation/ExportMethods.h"
 #include "EditorCore/Automation/RegisterMethods.h"
+#include "EditorCore/Automation/ShaderMethods.h"
 #include "EditorCore/Autosave/Autosave.h"
 #include "EditorCore/EditorActions.h"
 #include "EditorCore/EditorCommandLine.h"
@@ -41,6 +42,7 @@
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/EngineAssetBaker.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
+#include "Engine/Automation/Methods/AutomationTypes.h"
 #include "Engine/Automation/Protocol/JsonRpc.h"
 #include "Engine/Core/EventLog.h"
 #include "Engine/Core/FatalError.h"
@@ -50,6 +52,7 @@
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Random.h"
 #include "Engine/Core/Utf8.h"
+#include "Engine/Graphics/GpuOutOfMemory.h"
 #include "Engine/Graphics/GpuProfiler.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/PipelineFactory.h"
@@ -118,6 +121,7 @@ namespace Engine {
 		Scope<EditorHostClose> Close; // the window-close confirmation; uses Actions and Saves
 		uint64_t ProjectGeneration = 0;
 		bool DeviceLostQueued = false;
+		bool DeviceLostUnrecoverable = false;        // debug.deviceLost {unrecoverable} (M18, C18.3)
 		const LoadedProject* BoundProject = nullptr; // identity only; cleared before project close
 		std::vector<std::filesystem::path> ContentDrops{};
 		std::optional<AssetHandle> AudioRequest{};
@@ -176,11 +180,12 @@ namespace Engine {
 
 		constexpr std::string_view ViewportScreenshotOption = "--viewport-screenshot";
 
-		// Ends the process for a GPU object the editor creates at startup or resize that the device has no memory for
-		// (§8.14 item 7); other errors are returned with `context`.
-		[[nodiscard]] static Error CheckStartupGpuObject(Error error, std::string_view what)
+		// Ends the process for a GPU object the editor creates at startup that the device has no memory for (§8.14 item 7;
+		// Graphics/GpuOutOfMemory.h's IsGpuOutOfMemory, the one out-of-memory rule, M18 C18.4 decision 44); other errors, a
+		// lost device's among them, are returned with `context` (Application ends a loss before the first frame, decision 25).
+		[[nodiscard]] static Error CheckStartupGpuObject(Error error, std::string_view what, const GraphicsDevice& device)
 		{
-			if (error.GetCode() == ErrorCode::Gpu)
+			if (IsGpuOutOfMemory(error, device))
 				FatalError(FatalErrorKind::OutOfMemory, std::format("Cannot create {}: {}", what, error.ToString()));
 			return std::move(error).WithContext(std::format("while creating {}", what));
 		}
@@ -455,7 +460,7 @@ namespace Engine {
 		{
 			Result<Scope<EnvironmentBaker>> baker = EnvironmentBaker::Create(*device, *context.GetPipelineFactory());
 			if (!baker.has_value())
-				return std::unexpected(Utils::CheckStartupGpuObject(std::move(baker).error(), "the environment baker"));
+				return std::unexpected(Utils::CheckStartupGpuObject(std::move(baker).error(), "the environment baker", *device));
 			state.Baker = std::move(*baker);
 		}
 
@@ -509,13 +514,9 @@ namespace Engine {
 			// cache renders only after its own inputs are loaded, and skips requests whose inputs are still loading.
 			if (app.m_Rendering == nullptr)
 				return MakeError(ErrorCode::Unsupported, "thumbnails need a renderer (not --renderer none)");
-			auto captured = app.m_Rendering->Capture->Capture(ViewportScreenshotRequest{ .Width = size, .Height = size }, snapshot);
-			if (!captured && captured.error().GetCode() == ErrorCode::Gpu)
-			{
-				app.RefreshFatalSnapshot();
-				FatalError(FatalErrorKind::OutOfMemory, captured.error().ToString());
-			}
-			return captured;
+			// M18 (C18.4, decision 44): a capture that runs out of memory again after its trim fails alone with OutOfMemory,
+			// which the thumbnail cache remembers until the thumbnail's inputs change, like any render failure.
+			return app.m_Rendering->Capture->Capture(ViewportScreenshotRequest{ .Width = size, .Height = size }, snapshot);
 		});
 		app.GetProcessContext().SetFatalErrorHook(MakeEditorAutosaveFatalHook(*state.Saves));
 
@@ -561,10 +562,22 @@ namespace Engine {
 			// --export-root (§13.4; ADR 0024 decision 3): project.export writes below it instead of <Project>/Build/.
 			serverSpecification.ExportRoot = options.ExportRoot.value_or(std::filesystem::path());
 			if (options.AutomationTestHooks && context.GetGraphicsDevice())
-				serverSpecification.QueueDeviceLost = [&app]() -> Status
+				serverSpecification.QueueDeviceLost = [&app](bool unrecoverable) -> Status
 				{
 					app.m_State->DeviceLostQueued = true;
+					app.m_State->DeviceLostUnrecoverable = unrecoverable;
 					return {};
+				};
+			// shaders.reload, which the menu item Tools > Reload shaders submits (Docs/Decisions/0029-m18-contract.md decision 3): the
+			// server pumps at the safe point, between frames, so no Render is recording with the pipelines it replaces.
+			if (context.GetGraphicsDevice())
+				serverSpecification.ReloadShaders = [&app]() -> Result<ShadersReloadResult>
+				{
+					if (app.m_Rendering == nullptr)
+						return MakeError(ErrorCode::Unsupported, "This editor renders no views whose shaders could be reloaded");
+					SceneRendererPipelines& pipelines = *app.m_Rendering->Pipelines;
+					ENGINE_TRY(pipelines.ReloadShaders());
+					return ShadersReloadResult{ .PipelineCount = pipelines.GetPipelineCount(), .Generation = ToAutomationCounter(pipelines.GetGeneration()) };
 				};
 			serverSpecification.ReadHostStatistics = [&app]()
 			{
@@ -584,6 +597,9 @@ namespace Engine {
 					else
 						result.Views.push_back(StatsViewSummary{ .Name = name });
 				}
+				// M18 (decision 31): the device losses this editor recovered from; 0 with renderer none.
+				if (const GraphicsDevice* device = app.GetContext().GetGraphicsDevice())
+					result.DeviceLosses = device->GetRecoveryCount();
 				return result;
 			};
 			ENGINE_TRY_ASSIGN(state.Server, AutomationServer::Create(*state.Editor, serverSpecification));
@@ -717,10 +733,7 @@ namespace Engine {
 			};
 			captures.RequestUiFrame = [this]() -> Status
 			{
-				m_State->FreshUiRequested = true;
-				if (m_State->Layer)
-					m_State->Layer->RequestFrame();
-				return WithContext(RequestOffscreenUiFrame(), "while requesting a fresh editor UI frame");
+				return RequestFreshUiFrame();
 			};
 			captures.IsUiFrameCurrent = [this]()
 			{
@@ -730,12 +743,14 @@ namespace Engine {
 			{
 				return CaptureEditorUi();
 			};
-			// A Vulkan error thrown out of NVRHI inside a method (vk::SystemError, §4.6 item 2) ends the process like the
-			// frame-boundary catch (App/FrameLoop.cpp) would, instead of becoming an Internal response on a lost device.
+			// A Vulkan error thrown out of NVRHI inside a method (vk::SystemError, §4.6 item 2) is handled like the
+			// frame-boundary catch (App/FrameLoop.cpp) would handle it, instead of becoming an Internal response: a device loss
+			// fails the request with Gpu and is recovered at the next frame boundary (M18), any other error ends the process.
 			systemErrors = [this, handler = MakeVulkanSystemErrorHandler(GetContext())](const std::system_error& error, std::string_view phase)
+				-> std::optional<Error>
 			{
 				RefreshFatalSnapshot();
-				handler(error, phase);
+				return handler(error, phase);
 			};
 		}
 
@@ -760,17 +775,19 @@ namespace Engine {
 		rendering->Cache = CreateScope<GpuResourceCache>(*device, assets);
 		Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(*device, *context.GetPipelineFactory());
 		if (!pipelines.has_value())
-			return std::unexpected(Utils::CheckStartupGpuObject(std::move(pipelines).error(), "the scene renderer's pipelines"));
+			return std::unexpected(Utils::CheckStartupGpuObject(std::move(pipelines).error(), "the scene renderer's pipelines", *device));
 		rendering->Pipelines = std::move(*pipelines);
 		Result<Scope<ViewportCapture>> capture = ViewportCapture::CreateForScenes(*device, *rendering->Pipelines, *rendering->Cache, assets);
 		if (!capture.has_value())
-			return std::unexpected(Utils::CheckStartupGpuObject(std::move(capture).error(), "the viewport capture"));
+			return std::unexpected(Utils::CheckStartupGpuObject(std::move(capture).error(), "the viewport capture", *device));
 		rendering->Capture = std::move(*capture);
 		m_Rendering = std::move(rendering);
-		// Adopt dependencies before constructing views: partial startup failure tears the views down first too.
+		// Adopt dependencies before constructing views: partial startup failure tears the views down first too. The views
+		// and the thumbnails register their ImGui texture keys with the device's recreation registry after the ImGui
+		// renderer (M18, decision 33), so a recovery releases them first.
 		const Status initialized = m_State->Views->Initialize(*device, *m_Rendering->Pipelines, *m_Rendering->Cache, GetImGuiLayer()->GetRenderer());
 		if (!initialized)
-			return std::unexpected(Utils::CheckStartupGpuObject(initialized.error(), "the editor views"));
+			return std::unexpected(Utils::CheckStartupGpuObject(initialized.error(), "the editor views", *device));
 		m_State->Thumbnails->SetGraphics(*device, GetImGuiLayer()->GetRenderer());
 		return {};
 	}
@@ -855,6 +872,12 @@ namespace Engine {
 				.PreferencesFile = GetProcessContext().GetUserDataPaths().Root / "Editor.json",
 			});
 		};
+		// The panels' file dialogs (Docs/Decisions/0029-m18-contract.md decision 19): a windowed editor offers each request
+		// to the operating system's dialog, owned by its main window, which outlives every dialog (Windows only: elsewhere
+		// NativeFileDialog::Open is Unsupported and the ImGui picker serves the request). A headless editor has no native
+		// dialog, so an agent never meets one.
+		if (GetSpecification().Window == WindowMode::Windowed && GetContext().GetWindow() != nullptr)
+			state.Panels->FileDialogs = MakeNativeFileDialogBackend(*GetContext().GetWindow());
 		// The layer's constructor registers its imgui.ini open-panel handler in the current Dear ImGui context (the
 		// ImGuiLayer's, before the first frame loads the ini; none with --renderer none) and otherwise builds CPU models only.
 		state.Layer = CreateScope<EditorLayer>(*state.Panels);
@@ -953,6 +976,51 @@ namespace Engine {
 		// Only the publication: the fatal hook that follows writes it once (Autosave::WriteFatalSnapshot). Writing here as
 		// well would duplicate the generation and evict an older one, possibly another scene's only recovery.
 		PublishAutosave();
+	}
+	Status EditorApp::RequestFreshUiFrame()
+	{
+		m_State->FreshUiRequested = true;
+		if (m_State->Layer)
+			m_State->Layer->RequestFrame();
+		return WithContext(RequestOffscreenUiFrame(), "while requesting a fresh editor UI frame");
+	}
+	void EditorApp::OnDeviceLost(const GpuDeviceLossReport& /*report*/)
+	{
+		// Decision 29: what the fatal hook would write, before the recovery. A recovery that then fails ends the process,
+		// and the hook finds this generation already written (Autosave::WriteFatalSnapshot writes a snapshot once).
+		if (!m_State->Saves)
+			return;
+		PublishAutosave();
+		switch (m_State->Saves->WriteFatalSnapshot())
+		{
+			case AutosaveFatalResult::Saved:
+				ENGINE_INFO("Autosaved the open scene before recovering the GPU device");
+				break;
+			case AutosaveFatalResult::Busy:
+				ENGINE_WARN("Cannot autosave the open scene before recovering the GPU device: another autosave is being written");
+				break;
+			case AutosaveFatalResult::IoFailure:
+				ENGINE_WARN("Cannot autosave the open scene before recovering the GPU device: the autosave could not be written");
+				break;
+			case AutosaveFatalResult::NothingDirty:
+			case AutosaveFatalResult::Disabled:
+				break;
+		}
+	}
+	void EditorApp::OnDeviceRecovered(const GpuDeviceLossReport& /*report*/)
+	{
+		if (const Status requested = RequestFreshUiFrame(); !requested)
+			ENGINE_WARN("Cannot request a fresh editor UI frame after the GPU device recovery: {}", requested.error());
+		// M18's milestone review: a run whose last frame lost the device has not written its final screenshots
+		// (OnRenderSubmitted takes none on a lost device, and a frame on a lost device does not call it), and its frame loop
+		// already decided to end with Success. They are taken here, on the recovered device, and a screenshot that cannot be
+		// written fails the run (FailRun) instead of letting it end with exit code 0.
+		State& state = *m_State;
+		if (!state.FinalFrame || state.ScreenshotsWritten)
+			return;
+		state.ScreenshotsWritten = true;
+		if (!WriteScreenshots(true))
+			FailRun(ExitCode::Failed);
 	}
 	Status EditorApp::UpdateHostServices()
 	{
@@ -1174,12 +1242,12 @@ namespace Engine {
 			state.Editor->GetPlay().OnSafePoint();
 
 		const Status services = UpdateHostServices();
-		if (!services && services.error().GetCode() == ErrorCode::Gpu)
-		{
-			RefreshFatalSnapshot();
-			FatalError(FatalErrorKind::OutOfMemory, services.error().ToString());
-		}
-		state.HostErrors.Report("Editor host", services);
+		// A Gpu error of a lost device is the loss, which the frame boundary recovers (decision 28), not a host error. M18
+		// (C18.4, decision 44): on a healthy device it fails only its request (a thumbnail's upload, remembered as failed
+		// until the thumbnail changes), reported like any host error, never FatalError(OutOfMemory).
+		const GraphicsDevice* graphics = GetContext().GetGraphicsDevice();
+		if (services || services.error().GetCode() != ErrorCode::Gpu || graphics == nullptr || !graphics->IsLost())
+			state.HostErrors.Report("Editor host", services);
 		// The safe point's one publication of the post-dispatch scene, then a periodic write when its interval elapsed
 		// (Autosave::Update publishes first). A failed content action must not starve periodic recovery publication.
 		if (state.Saves && state.Editor->HasProject())
@@ -1189,11 +1257,19 @@ namespace Engine {
 		}
 		else
 			PublishAutosave();
-		// Test-only fault intent is consumed after publishing the post-dispatch scene. The next real submission takes
-		// the normal device-loss path, so the fatal callback can recover this edit rather than a startup snapshot.
+		// Test-only fault intent is consumed after publishing the post-dispatch scene: the device is lost from here, this frame
+		// renders nothing, and its frame boundary recovers the device after OnDeviceLost wrote this edit's autosave, or, for
+		// an unrecoverable loss, ends the process with the fatal hook writing it (M18, decisions 29 and 30).
 		if (std::exchange(state.DeviceLostQueued, false))
+		{
 			if (GraphicsDevice* device = GetContext().GetGraphicsDevice())
-				device->GetDiagnostics().SetDeviceLost(true);
+			{
+				if (std::exchange(state.DeviceLostUnrecoverable, false))
+					device->GetDiagnostics().InjectUnrecoverableDeviceLoss();
+				else
+					device->GetDiagnostics().SetDeviceLost(true);
+			}
+		}
 
 		if (state.Editor != nullptr)
 		{
@@ -1291,13 +1367,21 @@ namespace Engine {
 		// The frame's edit scene was published at its safe point; nothing between it and this GPU work commits edits.
 		const Status rendered = m_State->Views->Render(context);
 		m_Rendering->Mirrors.NoteRendered();
-		if (!rendered && rendered.error().GetCode() == ErrorCode::Gpu)
-		{
-			RefreshFatalSnapshot();
-			FatalError(FatalErrorKind::OutOfMemory, rendered.error().ToString());
-		}
+		// On a device lost during the render, the failure is the loss, which the frame boundary recovers (decision 28).
+		if (context.Device->IsLost())
+			return;
+		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 44): a view whose lazily created target or binding set ran
+		// out of memory shows what its render recorded; the views trim after the frame's submission (EditorHostViewports::
+		// Submitted), and the next frame renders again. Logged once per run of failing frames, as a warning, never
+		// FatalError(OutOfMemory).
+		const bool outOfMemory = !rendered && IsGpuOutOfMemory(rendered.error(), *context.Device);
 		if (!rendered && !m_Rendering->IsRenderFailing)
-			ENGINE_ERROR("Cannot render editor views: {}", rendered.error());
+		{
+			if (outOfMemory)
+				ENGINE_WARN("Editor views ran out of GPU memory; the device trims what it can rebuild after the frame: {}", rendered.error());
+			else
+				ENGINE_ERROR("Cannot render editor views: {}", rendered.error());
+		}
 		m_Rendering->IsRenderFailing = !rendered;
 	}
 	void EditorApp::OnImGuiRender()
@@ -1334,7 +1418,10 @@ namespace Engine {
 			}
 			m_State->UiConstructed = false;
 		}
-		if (m_State->FinalFrame && !m_State->ScreenshotsWritten)
+		// Never on a lost device (the submission reported the loss): OnDeviceRecovered takes them on the recovered device
+		// (M18's milestone review).
+		const GraphicsDevice* device = GetContext().GetGraphicsDevice();
+		if (m_State->FinalFrame && !m_State->ScreenshotsWritten && (device == nullptr || !device->IsLost()))
 		{
 			m_State->ScreenshotsWritten = true;
 			if (!WriteScreenshots())
@@ -1357,13 +1444,10 @@ namespace Engine {
 		// §8.13: screenshots render after the asset manager has published every load and reload requested so far.
 		if (AssetManager* assets = GetContext().GetAssetManager())
 			assets->WaitIdle();
-		auto captured = m_Rendering->Capture->Capture(request, snapshot);
-		if (!captured && captured.error().GetCode() == ErrorCode::Gpu)
-		{
-			RefreshFatalSnapshot();
-			FatalError(FatalErrorKind::OutOfMemory, captured.error().ToString());
-		}
-		return captured;
+		// On a lost device the capture's Gpu error is the loss: the request fails, and the client retries after the
+		// GpuDeviceLost event (decision 28). M18 (C18.4, decisions 44 and 45): a capture that runs out of memory again after
+		// its trim fails alone with OutOfMemory, which viewport.screenshot answers; the editor goes on.
+		return m_Rendering->Capture->Capture(request, snapshot);
 	}
 
 	Result<Image> EditorApp::CaptureViewport(uint32_t width, uint32_t height)
@@ -1381,16 +1465,12 @@ namespace Engine {
 		ImGuiLayer* imgui = GetImGuiLayer();
 		if (device == nullptr || imgui == nullptr)
 			return MakeError(ErrorCode::Unsupported, "screenshots need a renderer (not --renderer none)");
-		auto captured = CaptureImGuiScreenshot(*device, *imgui, {});
-		if (!captured && captured.error().GetCode() == ErrorCode::Gpu)
-		{
-			RefreshFatalSnapshot();
-			FatalError(FatalErrorKind::OutOfMemory, captured.error().ToString());
-		}
-		return captured;
+		// M18 (C18.4, decisions 44 and 45): a capture that runs out of memory again after its trim fails alone with
+		// OutOfMemory, which editor.screenshot answers; the editor goes on.
+		return CaptureImGuiScreenshot(*device, *imgui, {});
 	}
 
-	bool EditorApp::WriteScreenshots()
+	bool EditorApp::WriteScreenshots(bool afterDeviceRecovery)
 	{
 		const auto write = [](std::string_view what, const std::filesystem::path& path, const Result<Image>& image)
 		{
@@ -1416,7 +1496,20 @@ namespace Engine {
 			succeeded = write("viewport", m_Options.ViewportScreenshotPath, image) && succeeded;
 		}
 		if (!m_Options.EditorScreenshotPath.empty())
-			succeeded = write("editor", m_Options.EditorScreenshotPath, CaptureEditorUi()) && succeeded;
+		{
+			// The editor UI capture re-renders the last UI frame, which was drawn before the loss: the recovery withdrew the
+			// views' images it shows and recreated ImGui's textures, and the run ends with this frame, so no current UI frame
+			// follows (M18's milestone review).
+			if (afterDeviceRecovery)
+			{
+				ENGINE_ERROR("Cannot capture the editor screenshot: the GPU device was lost on the run's last frame, and no editor UI frame was drawn on the recovered device");
+				succeeded = false;
+			}
+			else
+			{
+				succeeded = write("editor", m_Options.EditorScreenshotPath, CaptureEditorUi()) && succeeded;
+			}
+		}
 		return succeeded;
 	}
 

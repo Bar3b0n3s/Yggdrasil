@@ -546,6 +546,77 @@ namespace Engine {
 			}
 		}
 
+		// M18 (Docs/Decisions/0029-m18-contract.md decision 14): sprite sheets are canonical authored files, so project.upgrade
+		// rewrites them like the other asset formats (Docs/Decisions/0026-m16-contract.md decision 12) and the games suite's
+		// upgrade dry run checks them: a minified sheet gets the editor's bytes back, one that leaves members at their defaults
+		// gets every field written, both are recorded, and a sheet with an unknown member fails at its pointer, unchanged.
+		TEST_CASE("ProjectMethods: project.upgrade rewrites .spritesheet files canonically and fails at an unknown member of one")
+		{
+			Test::AutomationFixture setup("ProjectUpgradeSpriteSheets", false);
+			REQUIRE(setup.Call("asset.create", ParseProjectJson(R"({"type": "SpriteSheet", "path": "Assets/Sprites/Hero.spritesheet",
+				"values": {"Frames": [{"Name": "Idle0", "Rect": {"X": 0, "Y": 0, "Width": 8, "Height": 8}, "Pivot": [0.5, 1]}],
+				"Clips": [{"Name": "Idle", "Frames": [{"Frame": 0, "Ticks": 8}], "Loop": false}]}})"))
+					.has_value());
+			const std::filesystem::path root = setup.GetEditor().GetProject().GetRoot();
+			const Result<std::string> canonical = FileSystem::ReadText(root / "Assets/Sprites/Hero.spritesheet");
+			REQUIRE(canonical.has_value());
+			REQUIRE(FileSystem::WriteFileAtomic(root / "Assets/Sprites/Hero.spritesheet", AsBytes(ParseProjectJson(*canonical).dump()), { .KeepBackup = false })
+					.has_value());
+			// A valid sheet written by hand with its frame's Name, Pivot and Borders and the clip list's defaults left out.
+			const std::string sparse = R"({"Format": "SpriteSheet", "Version": 1, "Frames": [{"Rect": {"X": 0, "Y": 0, "Width": 4, "Height": 4}}]})";
+			REQUIRE(FileSystem::WriteFileAtomic(root / "Assets/Sprites/Sparse.spritesheet", AsBytes(sparse), { .KeepBackup = false }).has_value());
+
+			const Json expected = ParseProjectJson(R"([
+				{"path": "Assets/Sprites/Hero.spritesheet", "reason": "canonical form"},
+				{"path": "Assets/Sprites/Sparse.spritesheet", "reason": "canonical form"}])");
+			Result<Json> dryRun = setup.Call("project.upgrade", Json{ { "dryRun", true } });
+			REQUIRE_MESSAGE(dryRun.has_value(), dryRun.error().ToString());
+			CHECK((*dryRun)["changes"] == expected);
+			CHECK(FileSystem::ReadText(root / "Assets/Sprites/Sparse.spritesheet").value_or("") == sparse);
+			Result<Json> upgraded = setup.Call("project.upgrade", Json::object());
+			REQUIRE_MESSAGE(upgraded.has_value(), upgraded.error().ToString());
+			CHECK((*upgraded)["changes"] == expected);
+			CHECK(FileSystem::ReadText(root / "Assets/Sprites/Hero.spritesheet").value_or("") == *canonical);
+			const Json rewritten = ParseProjectJson(FileSystem::ReadText(root / "Assets/Sprites/Sparse.spritesheet").value_or("{}"));
+			REQUIRE(rewritten.contains("Frames"));
+			REQUIRE(rewritten["Frames"].size() == 1);
+			CHECK(rewritten["Frames"][0].contains("Name"));
+			CHECK(rewritten["Frames"][0].contains("Pivot"));
+			CHECK(rewritten["Frames"][0].contains("Borders"));
+			CHECK(rewritten.contains("Clips"));
+			const ProvenanceRecorder* provenance = setup.GetEditor().GetProvenance();
+			REQUIRE(provenance != nullptr);
+			for (const std::string_view file : { "Assets/Sprites/Hero.spritesheet", "Assets/Sprites/Sparse.spritesheet" })
+			{
+				CAPTURE(std::string(file));
+				const ProvenanceEntry* entry = provenance->Find(file);
+				REQUIRE(entry != nullptr);
+				CHECK(entry->Method == "project.upgrade");
+			}
+			Result<Json> again = setup.Call("project.upgrade", Json::object());
+			REQUIRE(again.has_value());
+			CHECK((*again)["changes"] == Json::array());
+
+			// An unknown member fails the upgrade at its pointer, as the importer refuses the sheet; nothing is rewritten.
+			Json typo = ParseProjectJson(*canonical);
+			typo["Framez"] = Json::array();
+			const std::string typoText = typo.dump(1, '\t');
+			REQUIRE(FileSystem::WriteFileAtomic(root / "Assets/Sprites/Typo.spritesheet", AsBytes(typoText), { .KeepBackup = false }).has_value());
+			for (const bool isDryRun : { true, false })
+			{
+				CAPTURE(isDryRun);
+				const Json response = setup.Request("project.upgrade", isDryRun ? Json{ { "dryRun", true } } : Json::object());
+				REQUIRE_MESSAGE(response.contains("error"), response.dump());
+				const Json& data = response["error"]["data"];
+				CAPTURE(data.dump());
+				CHECK(data["errorCode"] == Json("Validation"));
+				CHECK(data["location"]["file"] == Json("Assets/Sprites/Typo.spritesheet"));
+				CHECK(data["location"]["pointer"] == Json("/Framez"));
+			}
+			CHECK(FileSystem::ReadText(root / "Assets/Sprites/Typo.spritesheet").value_or(std::string()) == typoText);
+			CHECK(provenance->Find("Assets/Sprites/Typo.spritesheet") == nullptr);
+		}
+
 		TEST_CASE("ProjectMethods: project.refreshAssets registers an externally written file")
 		{
 			Test::AutomationFixture setup("ProjectRefreshAssets", false);

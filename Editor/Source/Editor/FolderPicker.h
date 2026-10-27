@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -23,6 +24,9 @@ namespace Engine {
 		// File mode; extension is empty for all files, or a dot-prefixed suffix such as .scene.
 		// Invalid arguments or an unreadable initial directory preserve the previous dialog and selection mode.
 		[[nodiscard]] Status OpenFile(std::string_view title, const std::filesystem::path& initialDirectory, std::string_view extension = {});
+		// File mode for several dot-prefixed suffixes (.luau and .test.luau), matched without regard to ASCII case; none lists
+		// all files. The FileDialog API's requests (Editor/FileDialog.h), so the picker serves what the native dialog does.
+		[[nodiscard]] Status OpenFile(std::string_view title, const std::filesystem::path& initialDirectory, std::span<const std::string> extensions);
 		// nullopt while pending/cancelled; on accept owns a revalidated canonical absolute folder/file. Errors stay visible.
 		[[nodiscard]] Result<std::optional<std::filesystem::path>> Draw();
 		void Cancel();
@@ -36,7 +40,7 @@ namespace Engine {
 		std::vector<std::filesystem::path> m_Directories{};
 		std::vector<std::filesystem::path> m_Files{};
 		std::filesystem::path m_SelectedFile{};
-		std::string m_Extension{};
+		std::vector<std::string> m_Extensions{}; // folded to ASCII lower case; empty: every file
 		std::array<char, 4096> m_PathInput{};
 		std::array<char, 256> m_Filter{};
 		std::string m_Error{};

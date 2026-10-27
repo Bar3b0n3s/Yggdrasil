@@ -42,6 +42,8 @@ namespace Engine {
 				{ ".sfx", "SoundEffect", AssetType::AudioClip },
 				{ ".luau", "Script", AssetType::Script },
 				{ ".replay", "Replay", AssetType::Replay },
+				// M18.
+				{ ".spritesheet", "SpriteSheet", AssetType::SpriteSheet },
 			};
 			for (const Expected& entry : expected)
 			{
@@ -56,7 +58,8 @@ namespace Engine {
 			CHECK(importers.FindForExtension(".GLB") == importers.FindById("Gltf"));
 			CHECK(importers.FindForExtension(".HDR") == importers.FindById("Environment"));
 			CHECK(importers.FindForExtension(".unknown") == nullptr);
-			CHECK(importers.GetImporters().size() == 11);
+			CHECK(importers.FindForExtension(".SpriteSheet") == importers.FindById("SpriteSheet"));
+			CHECK(importers.GetImporters().size() == 12);
 		}
 
 		TEST_CASE("ImporterRegistry: Describe lists ids, main types and extensions sorted by id")
@@ -64,7 +67,7 @@ namespace Engine {
 			ImporterRegistry importers;
 			RegisterBuiltinImporters(importers);
 			const std::vector<AssetImporterDescription> descriptions = importers.Describe();
-			REQUIRE(descriptions.size() == 11);
+			REQUIRE(descriptions.size() == 12);
 			CHECK(descriptions.front().Id == "Audio");
 			CHECK(descriptions.back().Id == "Texture");
 			for (size_t index = 1; index < descriptions.size(); ++index)
@@ -89,6 +92,9 @@ namespace Engine {
 			CHECK(registry->FindEnum("TextureUsage") != nullptr);
 			CHECK(registry->FindStruct("AudioImportSettings") != nullptr);
 			CHECK(registry->FindStruct("SoundEffect") != nullptr);
+			// M18: the sprite sheet importer has no settings; its document struct is the Asset module's (RegisterAssetTypes).
+			CHECK(importers.FindById("SpriteSheet")->GetSettingsTypeName().empty());
+			CHECK(registry->FindStruct("SpriteSheet") != nullptr);
 		}
 	}
 

@@ -286,7 +286,8 @@ namespace Engine {
 							excludedHandles.emplace(*subHandle, source);
 					}
 				}
-				else if ((extension == ".scene" || extension == ".prefab" || extension == ".material" || extension == ".sfx") && !excluded(relative))
+				else if ((extension == ".scene" || extension == ".prefab" || extension == ".material" || extension == ".sfx" || extension == ".spritesheet")
+					&& !excluded(relative))
 				{
 					documents.emplace_back(relative, file);
 				}

@@ -11,6 +11,9 @@ configuration reader and require library, by name) and every required FeatureTes
 CI.py runs it right after its Dist build. --self-test checks the seeded fixtures of Tests/Data/MapFiles/<format>/
 instead: Clean.map has no finding and every other map exactly the findings its Expected.json lists, in every format;
 the static checks run it.
+
+It works from any directory (Docs/Architecture.md §2.3): a relative path given on its command line is resolved against
+the caller's directory, then main() makes the repository root of its own checkout the working directory.
 """
 
 from __future__ import annotations
@@ -133,13 +136,15 @@ def main(argv: list[str] | None = None) -> int:
         epilog="Exit codes: 0 clean, 1 findings (or a map or fixture that cannot be read), 2 usage error, 3 the map is "
                "missing.",
     )
-    parser.add_argument("--map", type=Path, help="the map file to check (default: the --config Runtime's map)")
+    parser.add_argument("--map", type=paths.argument_path,
+                        help="the map file to check (default: the --config Runtime's map)")
     parser.add_argument("--config", choices=paths.CONFIGURATIONS, default="Dist",
                         help="the build configuration whose Runtime map is checked (default: Dist)")
     parser.add_argument("--self-test", action="store_true",
                         help="check the seeded fixtures of Tests/Data/MapFiles/ instead of a build's map")
     parser.add_argument("--json", action="store_true", help="emit a machine-readable result")
     options = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    paths.enter_repository_root()
     if options.self_test and options.map is not None:
         parser.error("--self-test checks the fixtures and takes no --map")
     console = Console(options.json)

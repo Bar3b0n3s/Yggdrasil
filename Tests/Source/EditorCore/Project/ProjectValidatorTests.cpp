@@ -1478,6 +1478,45 @@ end
 			CHECK(FindDiagnostic(*fixedReport, AssetMissingCode) == nullptr);
 		}
 
+		// M18 (Docs/Decisions/0029-m18-contract.md decision 17): a sprite sheet's texture reference is checked as a material's.
+		TEST_CASE("ProjectValidator: a sprite sheet's texture that is missing or not a texture is ASSET_MISSING or ASSET_TYPE_MISMATCH")
+		{
+			Test::EditorTestFixture fixture("ValidatorSpriteSheet");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			const auto meta = [](std::string_view handle, std::string_view type)
+			{
+				return std::format(R"({{"Format": "AssetMeta", "Version": 1, "Handle": "{}", "Type": "{}", "Importer": "{}", "ImporterVersion": 1, "Settings": null, "SubAssets": []}})",
+					handle, type, type);
+			};
+			const auto sheet = [](std::string_view texture)
+			{
+				return std::format(R"({{"Format": "SpriteSheet", "Version": 1, "Texture": "{}", "Frames": [{{"Rect": {{"Width": 4, "Height": 4}}}}], "Clips": []}})", texture);
+			};
+			WriteValidatorFile(editor, "Assets/Red.material", R"({"Format": "Material", "Version": 1})");
+			WriteValidatorFile(editor, "Assets/Red.material.meta", meta("5b5e0000000000a1", "Material"));
+			WriteValidatorFile(editor, "Assets/Missing.spritesheet", sheet("7777000077770001"));
+			WriteValidatorFile(editor, "Assets/Missing.spritesheet.meta", meta("5b5e0000000000a2", "SpriteSheet"));
+			WriteValidatorFile(editor, "Assets/Wrong.spritesheet", sheet("5b5e0000000000a1"));
+			WriteValidatorFile(editor, "Assets/Wrong.spritesheet.meta", meta("5b5e0000000000a3", "SpriteSheet"));
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+
+			Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Project);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			INFO(DescribeDiagnostics(*report));
+			const ProjectDiagnostic* missing = FindFileDiagnostic(*report, "Assets/Missing.spritesheet", AssetMissingCode);
+			REQUIRE(missing != nullptr);
+			CHECK(missing->Severity == DiagnosticSeverity::Error);
+			CHECK(missing->Field == "Texture");
+			CHECK(missing->Asset == "7777000077770001");
+			const ProjectDiagnostic* mismatch = FindFileDiagnostic(*report, "Assets/Wrong.spritesheet", AssetTypeMismatchCode);
+			REQUIRE(mismatch != nullptr);
+			CHECK(mismatch->Field == "Texture");
+			CHECK(mismatch->Asset == "5b5e0000000000a1");
+			CHECK(FindFileDiagnostic(*report, "Assets/Wrong.spritesheet", AssetMissingCode) == nullptr);
+			CHECK(FindFileDiagnostic(*report, "Assets/Missing.spritesheet", AssetTypeMismatchCode) == nullptr);
+		}
+
 		TEST_CASE("ProjectValidator: an instance of an unregistered prefab is PREFAB_MISSING_ASSET")
 		{
 			Test::EditorTestFixture fixture("ValidatorPrefabMissing");

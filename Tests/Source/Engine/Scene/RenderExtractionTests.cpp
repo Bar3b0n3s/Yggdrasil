@@ -19,7 +19,9 @@
 #include "Support/GlmApprox.h"
 #include "Support/SceneTestFixture.h"
 
+#include <algorithm>
 #include <limits>
+#include <memory_resource>
 
 // Render extraction (Architecture §5.2, §8.2): the snapshot of one view built from a scene, with the interpolation rule
 // shared with TransformSystem's render pose (Docs/Decisions/0012-m7-decisions.md decisions 5 and 6).
@@ -491,6 +493,43 @@ namespace Engine {
 			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
 			REQUIRE(snapshot->Texts.size() == 1);
 			CHECK(Test::ApproxEqual(glm::vec3(snapshot->Texts[0].World[3]), glm::vec3(1.0f, 0.0f, 0.0f), 1e-6f));
+		}
+
+		TEST_CASE("RenderExtraction: a snapshot extracted over a memory resource allocates from it and equals the default one")
+		{
+			// R-ARENA (Docs/Decisions/0029-m18-contract.md decision 9): a host extracts into a per-frame arena through the
+			// resource; the values are the same as over the global heap.
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			static_cast<void>(CreateCamera(scene, "Camera", true));
+			Entity mesh = scene.CreateEntity("Mesh");
+			mesh.AddComponent<MeshRendererComponent>().Mesh = TypedAssetHandle<AssetType::Mesh>(BuiltinAssetHandles::CubeMesh);
+			mesh.AddComponent<PointLightComponent>();
+			TextComponent& text = mesh.AddComponent<TextComponent>();
+			text.Text = "Arena";
+			TransformSystem::Update(scene);
+
+			std::pmr::monotonic_buffer_resource arena;
+			const Result<RenderSnapshot> overArena = ExtractRenderSnapshot(scene, { .Width = 64, .Height = 64 }, &arena);
+			REQUIRE_MESSAGE(overArena.has_value(), overArena.error().ToString());
+			CHECK(overArena->Meshes.get_allocator().resource() == &arena);
+			CHECK(overArena->Lights.get_allocator().resource() == &arena);
+			CHECK(overArena->Texts.get_allocator().resource() == &arena);
+			CHECK(overArena->PickTable.get_allocator().resource() == &arena);
+			CHECK(overArena->DebugDraw.GetMemoryResource() == &arena);
+			const Result<RenderSnapshot> overHeap = ExtractRenderSnapshot(scene, { .Width = 64, .Height = 64 });
+			REQUIRE_MESSAGE(overHeap.has_value(), overHeap.error().ToString());
+			CHECK(overHeap->Meshes.get_allocator().resource() == std::pmr::get_default_resource());
+			REQUIRE(overArena->Meshes.size() == 1);
+			REQUIRE(overHeap->Meshes.size() == 1);
+			CHECK(overArena->Meshes[0].Entity == overHeap->Meshes[0].Entity);
+			CHECK(overArena->Meshes[0].World == overHeap->Meshes[0].World);
+			CHECK(std::ranges::equal(overArena->PickTable, overHeap->PickTable));
+			REQUIRE(overArena->Lights.size() == 1);
+			CHECK(overArena->Lights[0].Position == overHeap->Lights[0].Position);
+			REQUIRE(overArena->Texts.size() == 1);
+			CHECK(overArena->Texts[0].Text == "Arena");
+			CHECK(overArena->Camera.View == overHeap->Camera.View);
 		}
 	}
 

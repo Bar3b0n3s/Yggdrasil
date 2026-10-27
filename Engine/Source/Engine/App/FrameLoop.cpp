@@ -44,6 +44,34 @@ namespace Engine {
 			return left.FixedHz == right.FixedHz && left.MaxStepsPerFrame == right.MaxStepsPerFrame && left.MaxFrameDelta == right.MaxFrameDelta;
 		}
 
+		// What the frame-boundary catch does with a Vulkan error that vulkan.hpp threw out of NVRHI (§4.6 item 2): a device
+		// loss, and any Vulkan error while `device` IsLost (the loss's consequences), is reported and recovered at the frame
+		// boundary (decision 28); every other error ends the process through RaiseVulkanError, which never returns.
+		static void HandleFrameBoundaryError(GraphicsDevice* device, const vk::SystemError& error)
+		{
+			const VkResult result = static_cast<VkResult>(error.code().value());
+			const std::string message = std::format("Vulkan error at the frame boundary: {}", error.what());
+			if (device != nullptr && (result == VK_ERROR_DEVICE_LOST || device->IsLost()))
+			{
+				device->ReportDeviceLost(message);
+				return;
+			}
+			RaiseVulkanError(device, result, message);
+		}
+
+		// What RecoverLostDevice does with a Vulkan error thrown out of the recovery (an owner's Recreate whose NVRHI call
+		// meets the recreated device lost again): the recovery failed, which ends the process. A device loss, and any error
+		// while the device IsLost, is a second loss during the recovery (decisions 25 and 29: FatalError(DeviceLost), the
+		// editor's autosave written again); every other error ends it as the frame-boundary catch's do.
+		[[noreturn]] static void EndFailedRecovery(GraphicsDevice& device, const vk::SystemError& error)
+		{
+			const VkResult result = static_cast<VkResult>(error.code().value());
+			const std::string message = std::format("Vulkan error during the GPU device recovery: {}", error.what());
+			if (result == VK_ERROR_DEVICE_LOST || device.IsLost())
+				device.RaiseDeviceLost(message);
+			RaiseVulkanError(&device, result, message);
+		}
+
 	}
 
 	FrameLoop::FrameLoop(EngineContext& context, IFrameLoopClient& client, Scope<Clock> clock,
@@ -68,26 +96,44 @@ namespace Engine {
 
 	void FrameLoop::RunFrame()
 	{
+		ENGINE_PROFILE_SCOPE("FrameLoop::RunFrame");
 		// The one allowlisted frame-boundary catch (§4.6 item 2, §8.14). vulkan.hpp's enhanced mode throws from calls NVRHI
-		// makes internally; first-party Vulkan calls never throw. The frame never resumes: the handler ends the process, and
-		// the FramePhase breadcrumb still names the step that threw.
+		// makes internally; first-party Vulkan calls never throw. The frame never resumes: a device loss is recovered at the
+		// boundary below, every other Vulkan error ends the process, and the FramePhase breadcrumb still names the step that
+		// threw.
+		FrameProgress progress;
 		try
 		{
-			RunFrameSteps();
+			RunFrameSteps(progress);
 		}
 		catch (const vk::SystemError& error)
 		{
-			RaiseVulkanError(m_Context->GetGraphicsDevice(), static_cast<VkResult>(error.code().value()),
-				std::format("Vulkan error at the frame boundary: {}", error.what()));
+			Utils::HandleFrameBoundaryError(m_Context->GetGraphicsDevice(), error);
+		}
+
+		// A frame whose steps ran counts, also when a device loss ended it (decision 29): its simulation advanced.
+		if (progress.Steps.has_value())
+			CountFrame(progress);
+		CrashHandler::SetBreadcrumb(CrashBreadcrumb::FramePhase, {});
+
+		// The frame boundary: the next frame starts on a recovered device (decision 29).
+		RecoverLostDevice();
+
+		// A frame that ends the loop does not wait for its slot. While the throttle is suspended (a running play.step), frames
+		// follow each other at once, and the next throttled frame starts a new slot when it starts.
+		if (progress.Steps.has_value() && m_Specification.ThrottleToFixedHz && !m_ExitRequested)
+		{
+			if (m_ThrottleSuspended)
+				m_FrameSlotEnd.reset();
+			else
+				WaitForFrameSlot(progress.FrameStart);
 		}
 	}
 
-	void FrameLoop::RunFrameSteps()
+	void FrameLoop::RunFrameSteps(FrameProgress& progress)
 	{
-		ENGINE_PROFILE_SCOPE("FrameLoop::RunFrame");
-		const std::chrono::steady_clock::time_point frameStart =
-			m_Specification.ThrottleToFixedHz ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
-		const auto diagnosticStart = m_Specification.DiagnosticClock ? m_Specification.DiagnosticClock() : std::chrono::steady_clock::now();
+		progress.FrameStart = m_Specification.ThrottleToFixedHz ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
+		progress.DiagnosticStart = m_Specification.DiagnosticClock ? m_Specification.DiagnosticClock() : std::chrono::steady_clock::now();
 
 		// 1. Events: the window delivers them to DispatchEvent. A minimized window waits for one instead of spinning (§4.2).
 		CrashHandler::SetBreadcrumb(CrashBreadcrumb::FramePhase, "Events");
@@ -117,6 +163,13 @@ namespace Engine {
 		const double delta = m_Clock->Delta();
 		const bool exactStep = m_Clock->GetKind() == ClockKind::Manual && m_TimeScale == 1.0;
 		const FrameSteps steps = exactStep ? m_Scheduler.StepExactly(1) : m_Scheduler.Advance(delta, m_TimeScale);
+		progress.Steps = steps;
+		progress.Frame = {
+			.DeltaTime = delta * m_TimeScale,
+			.UnscaledDeltaTime = delta,
+			.Alpha = steps.Alpha,
+			.FrameIndex = m_FrameCount,
+		};
 		{
 			ENGINE_PROFILE_SCOPE("FrameLoop::FixedSteps");
 			for (uint32_t step = 0; step < steps.StepCount; ++step)
@@ -125,51 +178,59 @@ namespace Engine {
 
 		// 6. The frame update, with the clock's delta scaled by the play session's time scale.
 		CrashHandler::SetBreadcrumb(CrashBreadcrumb::FramePhase, "Update");
-		const FrameTime frame = {
-			.DeltaTime = delta * m_TimeScale,
-			.UnscaledDeltaTime = delta,
-			.Alpha = steps.Alpha,
-			.FrameIndex = m_FrameCount,
-		};
 		{
 			ENGINE_PROFILE_SCOPE("FrameLoop::Update");
-			m_Client->OnFrameUpdate(frame);
+			m_Client->OnFrameUpdate(progress.Frame);
 		}
 
 		// 7. Rendering: OnRender, ImGui, present.
 		CrashHandler::SetBreadcrumb(CrashBreadcrumb::FramePhase, "Render");
 		{
 			ENGINE_PROFILE_SCOPE("FrameLoop::Render");
-			m_Client->OnFrameRender(frame);
+			m_Client->OnFrameRender(progress.Frame);
 		}
+	}
 
-		m_LastFrameTime = frame;
+	void FrameLoop::CountFrame(const FrameProgress& progress)
+	{
+		m_LastFrameTime = progress.Frame;
 		++m_FrameCount;
 		const auto diagnosticEnd = m_Specification.DiagnosticClock ? m_Specification.DiagnosticClock() : std::chrono::steady_clock::now();
-		ENGINE_CORE_ASSERT(diagnosticEnd >= diagnosticStart, "frame diagnostic clock moved backwards");
+		ENGINE_CORE_ASSERT(diagnosticEnd >= progress.DiagnosticStart, "frame diagnostic clock moved backwards");
 		m_Statistics.CompletedFrames = m_FrameCount;
-		m_Statistics.CpuMilliseconds = std::chrono::duration<double, std::milli>(diagnosticEnd - diagnosticStart).count();
-		m_Statistics.DroppedSeconds += steps.DroppedSeconds;
+		m_Statistics.CpuMilliseconds = std::chrono::duration<double, std::milli>(diagnosticEnd - progress.DiagnosticStart).count();
+		m_Statistics.DroppedSeconds += progress.Steps->DroppedSeconds;
 		if (m_PreviousDiagnosticStart)
 		{
-			const double seconds = std::chrono::duration<double>(diagnosticStart - *m_PreviousDiagnosticStart).count();
+			const double seconds = std::chrono::duration<double>(progress.DiagnosticStart - *m_PreviousDiagnosticStart).count();
 			ENGINE_CORE_ASSERT(seconds >= 0.0, "frame diagnostic clock moved backwards between frames");
 			m_Statistics.Fps = seconds > 0.0 ? 1.0 / seconds : 0.0;
 		}
-		m_PreviousDiagnosticStart = diagnosticStart;
+		m_PreviousDiagnosticStart = progress.DiagnosticStart;
 		if (m_Specification.MaxFrames.has_value() && m_FrameCount >= *m_Specification.MaxFrames)
 			RequestExit(ExitCode::Success);
-		CrashHandler::SetBreadcrumb(CrashBreadcrumb::FramePhase, {});
+	}
 
-		// A frame that ends the loop does not wait for its slot. While the throttle is suspended (a running play.step), frames
-		// follow each other at once, and the next throttled frame starts a new slot when it starts.
-		if (m_Specification.ThrottleToFixedHz && !m_ExitRequested)
+	void FrameLoop::RecoverLostDevice()
+	{
+		// However the loss surfaced during the frame (a submission, a wait, the swapchain, an automation method, a test hook,
+		// the catch above), the client recovers the device before the next frame. The recovery runs inside the same catch:
+		// a Vulkan error thrown out of it fails the recovery, which ends the process (Utils::EndFailedRecovery), as a recovery
+		// that reports its failure does (Application::OnFrameDeviceLost).
+		GraphicsDevice* device = m_Context->GetGraphicsDevice();
+		if (device == nullptr || !device->IsLost())
+			return;
+		ENGINE_PROFILE_SCOPE("FrameLoop::DeviceRecovery");
+		CrashHandler::SetBreadcrumb(CrashBreadcrumb::FramePhase, "DeviceRecovery");
+		try
 		{
-			if (m_ThrottleSuspended)
-				m_FrameSlotEnd.reset();
-			else
-				WaitForFrameSlot(frameStart);
+			m_Client->OnFrameDeviceLost();
 		}
+		catch (const vk::SystemError& error)
+		{
+			Utils::EndFailedRecovery(*device, error);
+		}
+		CrashHandler::SetBreadcrumb(CrashBreadcrumb::FramePhase, {});
 	}
 
 	int FrameLoop::Run()

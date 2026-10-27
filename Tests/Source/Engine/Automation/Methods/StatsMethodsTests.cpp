@@ -104,6 +104,7 @@ namespace Engine {
 			CHECK((*result)["voices"] == Json(0));
 			CHECK((*result)["scriptAvailable"] == Json(false));
 			CHECK((*result)["memoryAllocationCount"] == Json(0));
+			CHECK((*result)["deviceLosses"] == Json(0)); // M18: no device, so no loss to recover from
 			REQUIRE((*result)["views"].size() == 2);
 			for (const auto& view : (*result)["views"])
 			{
@@ -175,6 +176,30 @@ namespace Engine {
 			const auto absent = Automation::StatsGet(context, {});
 			REQUIRE_FALSE(absent);
 			CHECK(absent.error().GetCode() == ErrorCode::Unsupported);
+		}
+		TEST_CASE("StatsGet: deviceLosses reports the device losses the host recovered from")
+		{
+			// M18 (Docs/Decisions/0029-m18-contract.md decision 31): the host's GraphicsDevice::GetRecoveryCount, passed through.
+			Test::SceneTestFixture fixture;
+			Test::InMemoryAssetManager assets;
+			ProjectSettings settings;
+			TypeRegistry types;
+			RegisterAutomationSharedTypes(types);
+			RegisterStatsMethodTypes(types);
+			types.Freeze();
+			MethodRegistry methods(types);
+			RegisterStatsMethods(methods);
+			methods.Freeze();
+			const auto* method = methods.Find("stats.get");
+			REQUIRE(method != nullptr);
+			Test::RenderQueryTestContext context(fixture.GetScene(), assets, settings, { .Method = method, .Params = Json::object(), .Registry = &methods });
+			const auto none = methods.Invoke(context);
+			REQUIRE(std::holds_alternative<Json>(none));
+			CHECK(std::get<Json>(none)["deviceLosses"] == Json(0));
+			context.Statistics.DeviceLosses = 2;
+			const auto recovered = methods.Invoke(context);
+			REQUIRE(std::holds_alternative<Json>(recovered));
+			CHECK(std::get<Json>(recovered)["deviceLosses"] == Json(2));
 		}
 	}
 

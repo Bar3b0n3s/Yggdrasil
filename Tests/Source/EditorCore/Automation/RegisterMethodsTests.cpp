@@ -5,6 +5,7 @@
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/Automation/Methods/RegisterSharedMethods.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
+#include "Engine/Core/EventLog.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Reflection/EnumInfo.h"
 #include "Engine/Reflection/JsonSchema.h"
@@ -18,9 +19,10 @@ namespace Engine {
 
 	// The M4 method set (Roadmap M4), M5's screenshot methods (registered at the M4/M5 merge, ADR 0009 decision 33), M6's
 	// asset.*, prefab.*, entity.bounds and project.refreshAssets (ADR 0010 decision 20), M7's play.*, input.inject and
-	// project.export (ADR 0012 decisions 4, 8 and 14), M11's physics.bodyInfo (ADR 0014 decision 18) and M12's audio.stats
-	// (ADR 0015 decision 15), M19's input.readReplay and native.* (ADR 0030 decisions 14 and 32), and M20's scene.list,
-	// scene.activate and scene.close (Docs/Decisions/0031-m20-contract.md decision 14), test hooks excluded.
+	// project.export (ADR 0012 decisions 4, 8 and 14), M11's physics.bodyInfo (ADR 0014 decision 18), M12's audio.stats
+	// (ADR 0015 decision 15), M19's input.readReplay and native.* (ADR 0030 decisions 14 and 32), M18's shaders.reload and
+	// profiler.capture (ADR 0029 decisions 3 and 11), and M20's scene.list, scene.activate and scene.close
+	// (Docs/Decisions/0031-m20-contract.md decision 14), test hooks excluded.
 	static const std::vector<std::string>& GetExpectedMethodNames()
 	{
 		static const std::vector<std::string> ExpectedNames = { "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
@@ -31,10 +33,10 @@ namespace Engine {
 			"native.build", "native.getComponents", "native.load", "native.read", "native.setComponents", "native.status", "native.write",
 			"physics.bodyInfo", "play.pause", "play.resume",
 			"play.setTimeScale", "play.start", "play.state", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "prefab.revert",
-			"prefab.unpack", "project.create", "project.export", "project.getSettings", "project.info", "project.open", "project.refreshAssets",
+			"prefab.unpack", "profiler.capture", "project.create", "project.export", "project.getSettings", "project.info", "project.open", "project.refreshAssets",
 			"project.save", "project.setSettings", "project.upgrade", "project.validate", "rpc.discover", "scene.activate", "scene.close", "scene.diff", "scene.get",
 			"scene.list", "scene.new", "scene.open", "scene.query", "scene.raycast", "scene.save", "scene.tree", "script.check", "script.create", "script.errors", "script.eval", "script.fields", "script.read", "script.write",
-			"session.hello", "session.info", "session.shutdown", "stats.get", "test.list", "test.run", "viewport.camera", "viewport.frame",
+			"session.hello", "session.info", "session.shutdown", "shaders.reload", "stats.get", "test.list", "test.run", "viewport.camera", "viewport.frame",
 			"viewport.pick", "viewport.screenshot", "viewport.setOptions" };
 		return ExpectedNames;
 	}
@@ -262,8 +264,13 @@ namespace Engine {
 			CHECK(format->FindByNameIgnoreCase("JSON")->Name == "Json");
 			const EnumInfo* events = types.FindEnum("EngineEventType");
 			REQUIRE(events != nullptr);
-			// M20 appends SceneActivated and SceneClosed (Docs/Decisions/0031-m20-contract.md decision 22).
-			CHECK(events->GetEntries().size() == 13);
+			// M18 appends GpuDeviceLost, then M20 SceneActivated and SceneClosed (Docs/Decisions/0031-m20-contract.md decision 22).
+			CHECK(events->GetEntries().size() == 14);
+			// M18 (Docs/Decisions/0029-m18-contract.md decision 31): appended, so events.read {types} takes it by name.
+			const EnumEntry* deviceLost = events->FindByNameIgnoreCase("gpudevicelost");
+			REQUIRE(deviceLost != nullptr);
+			CHECK(deviceLost->Name == "GpuDeviceLost");
+			CHECK(deviceLost->Value == static_cast<int64_t>(EngineEventType::GpuDeviceLost));
 		}
 
 		TEST_CASE("RegisterMethods: the tool catalogue's input schemas are compact")

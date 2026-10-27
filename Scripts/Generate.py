@@ -12,6 +12,9 @@ with AddressSanitizer (premake5.lua; the hardening stage's workspace, Docs/Decis
 It needs --to, so the sanitized workspace never replaces the plain one: Generate.py --sanitize address --to
 bin-int/Asan --no-compile-commands (Scripts/Hardening.py runs exactly this). Debug and Dist are never sanitized.
 
+It works from any directory (Docs/Architecture.md §2.3): a relative path given on its command line is resolved against
+the caller's directory, then main() makes the repository root of its own checkout the working directory.
+
 Exit codes: 0 success, 1 premake failed, 2 usage error, 3 premake is not installed (run Scripts/Setup.py),
 5 premake timed out.
 """
@@ -114,7 +117,8 @@ def parse_arguments(argv: list[str], host: paths.Host) -> argparse.Namespace:
     parser.add_argument("--toolset", choices=("msc", "gcc", "clang"),
                         help="compiler toolset: msc or clang (clang-cl) for vs2026, gcc or clang for gmake/ninja "
                              "(default: premake's, gcc on Linux), clang for xcode4")
-    parser.add_argument("--to", type=Path, help="write the generated files to this directory instead of in place")
+    parser.add_argument("--to", type=paths.argument_path,
+                        help="write the generated files to this directory instead of in place")
     parser.add_argument("--no-compile-commands", action="store_true",
                         help="do not run the compile-commands action after generating")
     parser.add_argument("--sanitize", choices=SANITIZERS,
@@ -150,6 +154,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Generate.py: error: {error}", file=sys.stderr)
         return EXIT_USAGE
     arguments = parse_arguments(sys.argv[1:] if argv is None else argv, host)
+    paths.enter_repository_root()
     console = Console(arguments.json)
 
     try:

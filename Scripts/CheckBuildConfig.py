@@ -52,6 +52,9 @@ and configuration:
 --workspace runs the check on another workspace, such as the fixtures in Tests/Data/BuildConfig/, each of which is
 the real workspace with one defect and must fail.
 
+It works from any directory (Docs/Architecture.md §2.3): a relative path given on its command line is resolved against
+the caller's directory, then main() makes the repository root of its own checkout the working directory.
+
 Exit codes: 0 no findings, 1 findings or project generation failed, 2 usage error, 3 premake is missing or not the
 pinned version, 5 premake timed out.
 """
@@ -134,6 +137,9 @@ VENDOR_ABI_FAMILIES: dict[str, DefineFamily] = {
     "GLFW": DefineFamily(prefixes=("_GLFW_",), names=("GLFW_DLL",)),
     # MikkTSpace has no configuration macros (Vendor/MikkTSpace/VENDOR.md): only NDEBUG is compared for it.
     "MikkTSpace": DefineFamily(),
+    # nativefiledialog-extended is built without configuration macros (its defaults, Windows backend only;
+    # Vendor/nativefiledialog-extended/VENDOR.md): only NDEBUG is compared for it.
+    "nfd": DefineFamily(),
 }
 GLOBAL_ABI_DEFINES = ("NDEBUG",)
 
@@ -1290,7 +1296,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--workspace",
-        type=Path,
+        type=paths.argument_path,
         default=REPOSITORY_ROOT,
         help="directory containing the premake5.lua to check (default: the repository root)",
     )
@@ -1300,9 +1306,11 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
         help=f"comma-separated targets (default: all of {names}); windows is always included",
     )
     parser.add_argument(
-        "--premake", type=Path, help="premake5 to use; it must be the pinned version (default: Vendor/premake/bin)"
+        "--premake",
+        type=paths.argument_path,
+        help="premake5 to use; it must be the pinned version (default: Vendor/premake/bin)",
     )
-    parser.add_argument("--vendor-cache-dir", type=Path,
+    parser.add_argument("--vendor-cache-dir", type=paths.argument_path,
                         help="rule 9: the shared vendor cache to check (default: <git common directory>/"
                              f"{vendor_cache.CACHE_DIRECTORY_NAME}, the one Scripts/Build.py links from)")
     parser.add_argument("--no-vendor-cache", action="store_true", help="leave out rule 9 (the vendor cache entries)")
@@ -1364,6 +1372,7 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     arguments = parse_arguments(sys.argv[1:] if argv is None else argv)
+    paths.enter_repository_root()
     try:
         report = run(arguments)
     except (

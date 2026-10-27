@@ -21,6 +21,9 @@ The capture holds the machine-wide GPU lock (Scripts/Lib/locks.py; Docs/Architec
 shared by every checkout of the repository, for its whole run: it waits while another GPU run or a gate (CI.py) holds
 it, unless it runs inside that run (Hardening.py's perf step), reporting the holder (pid, worktree, command), at most
 --lock-timeout seconds (exit code 5); --no-wait fails at once instead (exit code 3).
+
+It works from any directory (Docs/Architecture.md §2.3): a relative path given on its command line is resolved against
+the caller's directory, then main() makes the repository root of its own checkout the working directory.
 """
 
 from __future__ import annotations
@@ -391,7 +394,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", choices=("Debug", "Release"), default="Release",
                         help="the editor configuration to measure (default: Release, the configuration the numbers "
                              "mean something in)")
-    parser.add_argument("--output", type=Path, default=paths.TEST_RESULTS_ROOT / perf.PERF_REPORT_NAME,
+    parser.add_argument("--output", type=paths.argument_path, default=paths.TEST_RESULTS_ROOT / perf.PERF_REPORT_NAME,
                         help="the report to write (default: bin/TestResults/Perf.json)")
     parser.add_argument("--gpu-optional", action="store_true",
                         help="without a usable Vulkan device, capture the CPU numbers with a warning instead of "
@@ -399,6 +402,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", help="emit a machine-readable result")
     locks.add_wait_arguments(parser)
     options = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    paths.enter_repository_root()
     locks.check_wait_arguments(parser, options)
     console = Console(options.json)
     try:

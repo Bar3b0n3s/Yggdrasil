@@ -1,0 +1,287 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "ShadowsFar",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"Environment": 1,
+		"PostProcess": 1
+	},
+	"Entities": [
+		{
+			"ID": "d3fee8adddd5b9db",
+			"Name": "Rendering",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Environment": {
+					"Environment": null,
+					"Intensity": 1,
+					"Rotation": 0,
+					"ShowSkybox": false,
+					"SkyboxBlur": 0,
+					"FallbackColor": [0.08, 0.08, 0.08]
+				},
+				"PostProcess": {
+					"ExposureEV": 0,
+					"Tonemap": "AgX",
+					"SsaoEnabled": false,
+					"SsaoRadius": 1,
+					"SsaoIntensity": 2,
+					"SsaoQuality": "High",
+					"BloomEnabled": false,
+					"BloomIntensity": 0.04,
+					"FxaaEnabled": true
+				}
+			}
+		},
+		{
+			"ID": "88bcd50f64eabf62",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [35, 32, 60],
+					"Rotation": [-0.15010288, 0.17352737, 0.026770996, 0.97295463],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 45,
+					"OrthographicSize": 4,
+					"NearClip": 0.1,
+					"FarClip": 300,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.04, 0.055, 0.075]
+				}
+			}
+		},
+		{
+			"ID": "ffccc645f3ead596",
+			"Name": "Ground",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, -35],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [220, 1, 220]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000103",
+					"Materials": ["7a0a28d33a10928c"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "3c7e1a6ba6fd6080",
+			"Name": "Tower0--1",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-10, 5, 10],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [5, 10, 5]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["882b9e5527a6fe6e"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "a5e4ae9f04e27ed2",
+			"Name": "Tower0-1",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [10, 5, 10],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [5, 10, 5]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["0835a2ca4545047c"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "0fdd8d38d29cae92",
+			"Name": "Tower1--1",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-10, 5, -18],
+					"Rotation": [0, 0.13052619, 0, 0.9914449],
+					"Scale": [5, 10, 5]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["882b9e5527a6fe6e"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "1bded459b8b9e332",
+			"Name": "Tower1-1",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [10, 5, -18],
+					"Rotation": [0, 0.13052619, 0, 0.9914449],
+					"Scale": [5, 10, 5]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["0835a2ca4545047c"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "ac19cee8b55256d7",
+			"Name": "Tower2--1",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-10, 5, -46],
+					"Rotation": [0, 0.25881904, 0, 0.9659258],
+					"Scale": [5, 10, 5]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["882b9e5527a6fe6e"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "87bcc63b3057e4b1",
+			"Name": "Tower2-1",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [10, 5, -46],
+					"Rotation": [0, 0.25881904, 0, 0.9659258],
+					"Scale": [5, 10, 5]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["0835a2ca4545047c"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "bf53748a23c10b31",
+			"Name": "Tower3--1",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-10, 5, -74],
+					"Rotation": [0, 0.38268343, 0, 0.9238795],
+					"Scale": [5, 10, 5]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["882b9e5527a6fe6e"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "274e08bfab0825a2",
+			"Name": "Tower3-1",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [10, 5, -74],
+					"Rotation": [0, 0.38268343, 0, 0.9238795],
+					"Scale": [5, 10, 5]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["0835a2ca4545047c"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "c5e199dd2fa12347",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3, 3, -2],
+					"Rotation": [-0.4460149, -0.22957529, -0.11950933, 0.85678667],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 2,
+					"CastShadows": true,
+					"ShadowDistance": 180,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.65,
+					"LightAngle": 2,
+					"DepthBias": 0.5,
+					"NormalBias": 0.5
+				}
+			}
+		}
+	]
+}

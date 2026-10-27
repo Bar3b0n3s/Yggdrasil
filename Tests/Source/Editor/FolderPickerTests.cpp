@@ -13,7 +13,9 @@
 
 #include <algorithm>
 #include <optional>
+#include <span>
 #include <string>
+#include <vector>
 
 namespace Engine {
 
@@ -198,6 +200,47 @@ namespace Engine {
 			CHECK_FALSE(picker.IsOpen());
 			CHECK(window->Size.x <= ImGui::GetIO().DisplaySize.x);
 			CHECK(window->Size.y <= ImGui::GetIO().DisplaySize.y);
+		}
+
+		TEST_CASE("FolderPicker: file browsing accepts any of several extensions")
+		{
+			// M18 (Docs/Decisions/0029-m18-contract.md decision 19): the picker serves the FileDialog API's requests, which
+			// may list several extensions.
+			Test::TempDirectory directory("AssetPickerExtensions");
+			REQUIRE(FileSystem::WriteFileAtomic(directory / "Ship.glb", AsBytes("model")));
+			REQUIRE(FileSystem::WriteFileAtomic(directory / "Tree.GLTF", AsBytes("model")));
+			REQUIRE(FileSystem::WriteFileAtomic(directory / "Notes.txt", AsBytes("text")));
+			Test::AssetDesignInteraction ui(false);
+			ImGui::GetIO().DisplaySize = ImVec2(800.0f, 600.0f);
+			FolderPicker picker;
+			const std::vector<std::string> extensions = { ".glb", ".gltf" };
+			REQUIRE(picker.OpenFile("Choose a model", directory.GetPath(), std::span<const std::string>(extensions)));
+			// One malformed extension refuses the whole list and keeps the open picker.
+			const std::vector<std::string> malformed = { ".glb", "gltf" };
+			const Status refused = picker.OpenFile("Choose a model", directory.GetPath(), std::span<const std::string>(malformed));
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
+			CHECK(picker.IsOpen());
+			Result<std::optional<std::filesystem::path>> result;
+			const auto draw = [&picker, &result]() -> Status
+			{
+				result = picker.Draw();
+				return result ? Status{} : std::unexpected(result.error());
+			};
+			REQUIRE(ui.Frame(draw));
+			auto* window = ui.Window("###FolderPicker");
+			auto* entries = ui.Child(window, window->GetID("Entries"));
+			// Both extensions are listed, the second one in another case.
+			const ImRect first = ui.Locate(draw, entries, ImHashStr("##Entry", 0, Test::AssetDesignInteraction::AuthoredScope(entries->ID, "Ship.glb")));
+			CHECK(first.GetWidth() > 0.0f);
+			ui.Click(draw, entries, ImHashStr("##Entry", 0, Test::AssetDesignInteraction::AuthoredScope(entries->ID, "Tree.GLTF")));
+			ui.Click(draw, window, "Open file");
+			REQUIRE(result);
+			REQUIRE(result->has_value());
+			std::error_code error;
+			CHECK(**result == std::filesystem::canonical(directory / "Tree.GLTF", error));
+			CHECK_FALSE(error);
+			CHECK_FALSE(picker.IsOpen());
 		}
 
 		TEST_CASE("FolderPicker: double clicking the same file accepts its canonical path")

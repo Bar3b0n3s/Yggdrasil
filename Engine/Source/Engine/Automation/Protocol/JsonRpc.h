@@ -91,7 +91,10 @@ namespace Engine {
 	//   InvalidArgument -> InvalidParams; NotFound -> NotFound; InvalidState -> InvalidState; Validation, Parse,
 	//   UnsupportedVersion, ImportFailed -> ValidationFailed; AlreadyExists, Conflict -> Conflict; Timeout -> Timeout;
 	//   Script, CompileFailed -> ScriptError; PermissionDenied -> Unauthorized; Unsupported -> Unsupported;
-	//   Cancelled -> Cancelled; Unknown, Io, Gpu -> Internal.
+	//   Cancelled -> Cancelled; Unknown, Io, Gpu, OutOfMemory -> Internal.
+	// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 45): OutOfMemory, a request that ran out of GPU memory after
+	// its trim and retry, keeps the protocol's code set (no new JSON-RPC code, so CurrentProtocolVersion is unchanged):
+	// error.data.errorCode names it, and the client may repeat the request smaller or later.
 	// Parameter parsing failures are always InvalidParams, whatever their ErrorCode (the registry reports them so).
 	// PermissionDenied is reserved for the protocol's own refusals (a bad token, a read-only editor, deny-mutations). An
 	// operating-system access failure (EACCES, EPERM, a Windows sharing violation) that FileSystem reports as

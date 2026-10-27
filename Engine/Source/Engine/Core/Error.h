@@ -37,7 +37,11 @@ namespace Engine {
 		PermissionDenied, // includes writes to a read-only mount
 		Unsupported,      // the operation exists but is not available here (also what contract stubs return)
 		Conflict,         // optimistic-concurrency mismatch (ifRevision)
-		Cancelled
+		Cancelled,
+		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 45): a request after startup that ran out of GPU memory
+		// again after the engine trimmed what it could rebuild and retried once (RetryAfterTrim, Graphics/GpuOutOfMemory.h);
+		// only that request failed (a capture, a resize, a debug view), and the process goes on.
+		OutOfMemory
 	};
 
 	// The enumerator name ("NotFound"); "Unknown" for a value outside the enumeration.

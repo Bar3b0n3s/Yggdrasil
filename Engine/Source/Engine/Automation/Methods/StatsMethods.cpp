@@ -126,7 +126,9 @@ namespace Engine {
 				"The scene then the game view, as the editor's displayed viewport panels: a view whose panel is not displayed is unavailable, and a "
 				"headless editor displays only the Scene view of its default layout, so game is unavailable there unless the editor was started "
 				"with --headless-game-view, whose game view renders every frame at the project's window size (or viewport.setOptions' "
-				"gameResolution). The Runtime supplies game only.");
+				"gameResolution). The Runtime supplies game only.")
+			.Field("deviceLosses", &StatsGetResult::DeviceLosses,
+				"The GPU device losses this host recovered from since it started, each also a GpuDeviceLost event; 0 with renderer none.");
 	}
 
 	void RegisterStatsMethods(MethodRegistry& methods)

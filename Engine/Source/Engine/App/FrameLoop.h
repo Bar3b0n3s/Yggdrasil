@@ -38,6 +38,12 @@ namespace Engine {
 		virtual void OnFrameUpdate(const FrameTime& frame) = 0;
 		// Once per frame, after the update: render, ImGui, present (§4.2 step 7, §8.2). `frame` is the update's FrameTime.
 		virtual void OnFrameRender(const FrameTime& frame) = 0;
+		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 29): at the frame boundary, after a frame (finished, or
+		// ended by the frame-boundary catch) during which the context's device was lost (GraphicsDevice::IsLost), before the
+		// next frame: the client recovers the device (Application: the autosave hook, EngineContext::RecoverGraphics, then
+		// the GpuDeviceLost event, or the fatal end of a failed recovery). Does nothing by default; a client that leaves the
+		// device lost gets the call again after every frame.
+		virtual void OnFrameDeviceLost() {}
 	};
 
 	struct FrameLoopSpecification
@@ -72,6 +78,14 @@ namespace Engine {
 	// FatalError(Gpu); the crash report's FramePhase breadcrumb names the step that threw. The frame never resumes. Automation
 	// methods run inside the Dispatcher's own catch boundary, which hands Vulkan errors to the same function through the
 	// host's SystemErrorHandler (Automation/Protocol/Dispatcher.h).
+	// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decisions 28 and 29): a device loss is recovered. The catch takes a
+	// vk::SystemError with VK_ERROR_DEVICE_LOST, and any Vulkan error thrown while the context's device IsLost, to
+	// GraphicsDevice::ReportDeviceLost("Vulkan error at the frame boundary: <what>") instead of RaiseVulkanError; the frame
+	// still never resumes. After every frame, finished or ended by the catch, RunFrame calls the client's OnFrameDeviceLost
+	// when the context's device IsLost (however the loss surfaced: a submission, a wait, the swapchain, an automation method,
+	// a test hook), so the next frame starts on a recovered device. Steps 1 to 4 run whether the device is lost or not: the
+	// simulation, its scripts and its audio never need the GPU, so a play session goes on through a loss and a replay
+	// keeps its checkpoint hashes.
 	//   1. Events: when the context has a window, Window::PollEvents, or Window::WaitEventsTimeout(FixedDelta) while it
 	//      is minimized (§4.2: the loop idles instead of spinning). Each delivered event goes to OnFrameEvent; an unhandled
 	//      WindowCloseEvent requests exit with ExitCode::Success; every unhandled event is then injected into the
@@ -86,8 +100,13 @@ namespace Engine {
 	//      M7), the scheduler's Alpha, and the frame index from 0.
 	//   5. OnFrameRender with the same FrameTime (§4.2 step 7).
 	//   6. The frame count grows by one; when it reaches MaxFrames the loop requests exit with ExitCode::Success (an
-	//      earlier request keeps its code). With ThrottleToFixedHz the loop then sleeps until the frame's wall-clock slot
-	//      ends, unless the throttle is suspended (SetThrottleSuspended, M7).
+	//      earlier request keeps its code). M18: also for a frame that a device loss ended after step 3 scheduled its steps,
+	//      whose steps ran: the frame index stays in step with the frames that stepped the simulation. Then, when the
+	//      context's device IsLost, OnFrameDeviceLost (inside the same catch, with the FramePhase breadcrumb
+	//      "DeviceRecovery"); a vk::SystemError thrown out of it fails the recovery and ends the process: a device loss,
+	//      or any Vulkan error while the device IsLost, is a second loss during the recovery (GraphicsDevice::
+	//      RaiseDeviceLost), and any other error goes to RaiseVulkanError. With ThrottleToFixedHz the loop then sleeps until
+	//      the frame's wall-clock slot ends, unless the throttle is suspended (SetThrottleSuspended, M7).
 	//
 	// Run logs one Info line before the first frame, "Frame loop started: <ClockKind> clock, <FixedHz> Hz" with the
 	// ClockKind enumerator name, so a process's output shows which clock it runs on.
@@ -102,7 +121,8 @@ namespace Engine {
 		FrameLoop(const FrameLoop&) = delete;
 		FrameLoop& operator=(const FrameLoop&) = delete;
 
-		// Runs one frame (see the class comment) inside the frame-boundary catch, also after an exit request.
+		// Runs one frame (see the class comment) inside the frame-boundary catch, also after an exit request; M18 (C18.3):
+		// then the client's OnFrameDeviceLost when the context's device is lost.
 		void RunFrame();
 
 		// Runs frames until exit is requested and returns the requested exit code. An exit requested before Run (by the
@@ -147,8 +167,21 @@ namespace Engine {
 		// Read-only observations of completed frames. Hosts subtract the dropped-time baseline at session start.
 		[[nodiscard]] const FrameLoopStatistics& GetStatistics() const { return m_Statistics; }
 	private:
-		// Steps 1 to 6 of one frame; RunFrame calls it inside the frame-boundary catch of vk::SystemError.
-		void RunFrameSteps();
+		// What the steps of the current frame reached, which its end needs also when the frame-boundary catch ended it.
+		struct FrameProgress
+		{
+			std::chrono::steady_clock::time_point FrameStart{};      // for ThrottleToFixedHz
+			std::chrono::steady_clock::time_point DiagnosticStart{}; // FrameLoopStatistics
+			std::optional<FrameSteps> Steps{};                       // set once step 3 scheduled the frame's steps
+			FrameTime Frame{};                                       // valid with Steps
+		};
+	private:
+		// Steps 1 to 5 of one frame; RunFrame calls it inside the frame-boundary catch of vk::SystemError.
+		void RunFrameSteps(FrameProgress& progress);
+		// Step 6's frame count, statistics and exit request, for a frame whose steps were scheduled.
+		void CountFrame(const FrameProgress& progress);
+		// The frame boundary's recovery (M18): OnFrameDeviceLost when the context's device IsLost, inside the catch.
+		void RecoverLostDevice();
 		// Step 1 for one delivered event: the client, then the exit request of an unhandled close, then InputState.
 		void DispatchEvent(Event& event);
 		// Step 6's pacing: sleeps until the wall-clock slot of the frame that started at `frameStart` ends.

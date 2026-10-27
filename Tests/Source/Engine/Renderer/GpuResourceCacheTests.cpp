@@ -17,6 +17,7 @@
 #include "Engine/Graphics/GpuResourceTracker.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Readback.h"
+#include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/SceneRenderer.h"
 #include "Support/AssetTestFixture.h"
@@ -26,16 +27,55 @@
 #include "Support/TestOptions.h"
 
 #include <glm/gtc/matrix_transform.hpp>
+#include <vulkan/vulkan.hpp>
 
 #include <algorithm>
 #include <array>
 #include <format>
 #include <map>
+#include <numeric>
 #include <optional>
 #include <span>
 #include <string>
 
 namespace Engine {
+
+	namespace {
+
+		// While alive, the device's index buffer creations fail as out-of-memory without reaching Vulkan (NVRHI's
+		// createBuffer then returns null without a message), and every other buffer is created: the dispatcher's
+		// vkCreateBuffer, which NVRHI calls through, is replaced. Main thread, around the calls under test.
+		class IndexBufferCreationFails
+		{
+		public:
+			IndexBufferCreationFails()
+			{
+				s_CreateBuffer = VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateBuffer;
+				VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateBuffer = &CreateBuffer;
+			}
+
+			~IndexBufferCreationFails()
+			{
+				VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateBuffer = s_CreateBuffer;
+				s_CreateBuffer = nullptr;
+			}
+
+			IndexBufferCreationFails(const IndexBufferCreationFails&) = delete;
+			IndexBufferCreationFails& operator=(const IndexBufferCreationFails&) = delete;
+		private:
+			static VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(VkDevice device, const VkBufferCreateInfo* info, const VkAllocationCallbacks* allocator,
+				VkBuffer* buffer)
+			{
+				if ((info->usage & VK_BUFFER_USAGE_INDEX_BUFFER_BIT) != 0)
+					return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+				return s_CreateBuffer(device, info, allocator, buffer);
+			}
+
+			// The dispatcher's entry point while one is alive, which CreateBuffer, a C function pointer, cannot capture.
+			static inline PFN_vkCreateBuffer s_CreateBuffer = nullptr;
+		};
+
+	}
 
 	// A 2x1 RGBA8 texture whose two texels are `value`.
 	static AssetRef<Asset> MakeTexture(uint8_t value)
@@ -587,6 +627,219 @@ namespace Engine {
 					Test::ExpectLog mismatch(LogLevel::Error, "ASSET_TYPE_MISMATCH");
 					CHECK(cache.GetEnvironment(BuiltinAssetHandles::CubeMesh) == nullptr);
 				}
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		TEST_CASE("GpuResourceCache: a device loss drops every mirror, and the next Get uploads it again"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 acceptance (C18.3, decision 27): the asset mirrors are uploaded again from the loaded assets, and a material's
+			// mirror gets a generation never used before, so no binding set from before the loss is found again.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu);
+			GpuResourceCache& cache = setup.Cache();
+			const uint64_t generation = cache.GetMaterial(UUID(8911)).Generation;
+			CHECK(cache.GetMesh(UUID(8910)).VertexBuffer != nullptr);
+			CHECK(cache.GetStats().MeshCount == 1);
+
+			cache.ReleaseGpuObjects();
+			CHECK(cache.GetStats().MeshCount == 0);
+			CHECK(cache.GetStats().MaterialCount == 0);
+			const GpuMesh& mesh = cache.GetMesh(UUID(8910));
+			CHECK(mesh.VertexBuffer != nullptr);
+			CHECK_FALSE(mesh.IsPlaceholder);
+			CHECK(cache.GetMaterial(UUID(8911)).Generation > generation);
+		}
+
+		TEST_CASE("GpuResourceCache: Release leaves none of its mirrors' GPU objects alive" * doctest::test_suite(Test::GpuSuite))
+		{
+			// The placement rule's place 3 (C18.3, decision 27): once the cache released, the recovery finds no tracked object
+			// of it alive, so nothing the cache's destruction would free outlives its Release: meshes, textures, materials'
+			// constants and environments' cubes, placeholders included.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			Test::InMemoryAssetManager assets;
+			assets.Publish(AssetHandle(0x9301), MakeTexture(60));
+			assets.Publish(AssetHandle(0x9302), MakeEnvironment());
+			const auto countLive = [&device]()
+			{
+				device.WaitForIdle();
+				device.RunGarbageCollection();
+				std::array<uint64_t, GpuResourceTypeCount> counts{};
+				for (size_t type = 0; type < GpuResourceTypeCount; ++type)
+					counts[type] = device.GetResourceTracker().GetLiveCount(static_cast<GpuResourceType>(type));
+				return counts;
+			};
+			Scope<GpuResourceCache> cache = CreateScope<GpuResourceCache>(device, assets);
+			CHECK(cache->GetMesh(AssetHandle()).VertexBuffer != nullptr);
+			CHECK(cache->GetTexture(AssetHandle(0x9301)).Texture != nullptr);
+			CHECK(cache->GetMaterial(AssetHandle()).Constants != nullptr);
+			CHECK(cache->GetEnvironment(AssetHandle(0x9302)) != nullptr);
+			const std::array<uint64_t, GpuResourceTypeCount> loaded = countLive();
+
+			cache->ReleaseGpuObjects();
+			const GpuResourceCacheStats stats = cache->GetStats();
+			CHECK(stats.MeshCount == 0);
+			CHECK(stats.TextureCount == 0);
+			CHECK(stats.MaterialCount == 0);
+			CHECK(stats.EnvironmentCount == 0);
+			const std::array<uint64_t, GpuResourceTypeCount> released = countLive();
+			const std::string releasedCounts = device.GetResourceTracker().DescribeLiveCounts();
+			INFO("live after the release: ", releasedCounts);
+			CHECK(std::accumulate(released.begin(), released.end(), uint64_t{ 0 }) < std::accumulate(loaded.begin(), loaded.end(), uint64_t{ 0 }));
+			cache.reset();
+			const std::array<uint64_t, GpuResourceTypeCount> destroyed = countLive();
+			const std::string destroyedCounts = device.GetResourceTracker().DescribeLiveCounts();
+			INFO("live after the destruction: ", destroyedCounts);
+			CHECK(released == destroyed);
+		}
+
+		TEST_CASE("GpuResourceCache: an upload that fails on a lost device is neither counted nor reported, and is tried again after the release"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.3, decision 28): a Gpu error on a lost device is the loss, never the asset's out-of-memory, so the cache
+			// records no ASSET_UPLOAD_FAILED (an undeclared Error would fail this case) and keeps no failure for the recovered
+			// device. The injected texture OOM stands in for the lost device's refused creations; on the device again, the same
+			// failure is the asset's own, counted and reported, and Release keeps the count.
+			Test::HeadlessGpuFixture gpu({ .SynchronizationValidation = true, .InjectFault = GpuFault::OomTexture, .FramesInFlight = 2 });
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			Test::InMemoryAssetManager assets;
+			const AssetHandle texture(0x7e57'0000'0000'0031);
+			const AssetHandle environment(0x7e57'0000'0000'0032);
+			const AssetHandle material(0x7e57'0000'0000'0033);
+			assets.Publish(texture, MakeTexture(70));
+			assets.Publish(environment, MakeEnvironment());
+			assets.Publish(material, CreateRef<MaterialData>());
+			{
+				GpuResourceCache cache(device, assets);
+				device.GetDiagnostics().SetDeviceLost(true);
+				REQUIRE(device.IsLost());
+				const GpuTexture& lost = cache.GetTexture(texture);
+				CHECK(lost.IsPlaceholder);
+				CHECK(lost.Texture == nullptr);
+				CHECK(cache.GetEnvironment(environment) == nullptr);
+				// The material's constants buffer, refused like the textures.
+				CHECK(cache.GetMaterial(material).Constants == nullptr);
+				CHECK(cache.GetStats().UploadFailures == 0);
+				CHECK(assets.GetDiagnostics().empty());
+				// The recovery: the device exists again, and the cache released its stand-ins.
+				device.GetDiagnostics().ClearDeviceLost();
+				cache.ReleaseGpuObjects();
+				CHECK(cache.GetStats().TextureCount == 0);
+				CHECK(cache.GetStats().EnvironmentCount == 0);
+				CHECK(cache.GetStats().MaterialCount == 0);
+
+				Test::ExpectLog failed(LogLevel::Error, std::string(AssetUploadFailedCode));
+				CHECK(cache.GetTexture(texture).IsPlaceholder);
+				CHECK(cache.GetEnvironment(environment) == nullptr);
+				CHECK(cache.GetStats().UploadFailures == 3); // the texture, its placeholder and the environment
+				CHECK(failed.GetMatchCount() == 2);
+				CHECK(std::ranges::count_if(assets.GetDiagnostics(), [](const AssetDiagnostic& diagnostic)
+				{
+					return diagnostic.Code == AssetUploadFailedCode;
+				}) == 2);
+				cache.ReleaseGpuObjects();
+				CHECK(cache.GetStats().UploadFailures == 3);
+
+				// On the device again the material's constants upload; its slots' textures fail with the injected
+				// out-of-memory as the texture did, reported under the declared ASSET_UPLOAD_FAILED.
+				CHECK(cache.GetMaterial(material).Constants != nullptr);
+			}
+			device.RunGarbageCollection();
+		}
+
+		TEST_CASE("GpuResourceCache: a mesh whose buffer creation fails leaves no command list alive, and the next device loss recovers"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.3; Docs/Decisions/0029-m18-contract.md decision 39): an upload's command list is executed whatever its
+			// buffers' creations returned. Closed and never executed, it kept itself and the vertex buffer it wrote alive, an
+			// out-of-memory upload (§8.14 item 7: a placeholder and a diagnostic) poisoned every later recovery, whose live
+			// check refused it. The index buffers fail as out-of-memory without reaching Vulkan (IndexBufferCreationFails).
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			Test::InMemoryAssetManager assets;
+			GpuResourceCache cache(device, assets);
+			const auto countLive = [&device]()
+			{
+				device.WaitForIdle();
+				device.RunGarbageCollection();
+				std::array<uint64_t, GpuResourceTypeCount> counts{};
+				for (size_t type = 0; type < GpuResourceTypeCount; ++type)
+					counts[type] = device.GetResourceTracker().GetLiveCount(static_cast<GpuResourceType>(type));
+				return counts;
+			};
+			const std::array<uint64_t, GpuResourceTypeCount> before = countLive();
+			{
+				Test::ExpectLog failed(LogLevel::Error, std::string(AssetUploadFailedCode));
+				const IndexBufferCreationFails failing;
+				const GpuMesh& mesh = cache.GetMesh(BuiltinAssetHandles::CubeMesh);
+				CHECK(mesh.IsPlaceholder);
+				CHECK(mesh.IndexBuffer == nullptr);
+				CHECK(cache.GetStats().UploadFailures > 0);
+			}
+			const std::array<uint64_t, GpuResourceTypeCount> after = countLive();
+			INFO("live after the failed upload: ", device.GetResourceTracker().DescribeLiveCounts());
+			CHECK(after == before);
+
+			device.GetDiagnostics().SetDeviceLost(true);
+			device.ReportDeviceLost("GpuResourceCacheTests");
+			const Status recovered = device.Recover(nullptr);
+			REQUIRE_MESSAGE(recovered.has_value(), recovered.error().ToString());
+			const GpuMesh& uploaded = cache.GetMesh(BuiltinAssetHandles::CubeMesh);
+			CHECK_FALSE(uploaded.IsPlaceholder);
+			CHECK(uploaded.IndexBuffer != nullptr);
+			device.RunGarbageCollection();
+		}
+
+		TEST_CASE("GpuResourceCache: TrimUnused releases the mirrors of replaced versions and unloaded assets and keeps the current ones"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 acceptance (C18.4, Docs/Decisions/0029-m18-contract.md decision 43): "unreferenced uploads" are trimmed when a
+			// request ran out of GPU memory: a replaced version and an asset the manager no longer holds, never the mirror of a
+			// loaded, current asset, which the next Render would upload again at once, nor a placeholder. The device's trim
+			// reaches the cache through its registration.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::InMemoryAssetManager assets;
+			const AssetHandle kept(0x7e57'0000'0000'0011);
+			const AssetHandle replaced(0x7e57'0000'0000'0012);
+			const AssetHandle removed(0x7e57'0000'0000'0013);
+			assets.Publish(kept, MakeTexture(10));
+			assets.Publish(replaced, MakeTexture(20));
+			assets.Publish(removed, MakeTexture(30));
+			{
+				GpuResourceCache cache(gpu.GetDevice(), assets);
+				REQUIRE(cache.GetTexture(kept).Texture != nullptr);
+				REQUIRE(cache.GetTexture(replaced).Texture != nullptr);
+				REQUIRE(cache.GetTexture(removed).Texture != nullptr);
+				static_cast<void>(cache.GetMesh(AssetHandle())); // the placeholder (Cube) mirror
+				assets.Publish(replaced, MakeTexture(21));
+				REQUIRE(cache.GetTexture(replaced).Version == 2);
+				assets.Remove(removed);
+				REQUIRE(cache.GetStats().TextureCount == 4);
+
+				const nvrhi::TextureHandle current = cache.GetTexture(kept).Texture;
+				cache.TrimUnused();
+				CHECK(cache.GetStats().TextureCount == 2); // the kept asset and the replaced asset's current version
+				CHECK(cache.GetStats().MeshCount == 1);    // the placeholder stays
+				CHECK(cache.GetTexture(kept).Texture == current);
+
+				// A dropped mirror is uploaded again by its next Get.
+				assets.Publish(removed, MakeTexture(31));
+				CHECK_FALSE(cache.GetTexture(removed).IsPlaceholder);
+				CHECK(cache.GetStats().TextureCount == 3);
+
+				// The device's trim reaches the cache through its registration: the mirror of an asset unloaded again goes, and
+				// what is current stays.
+				assets.Remove(removed);
+				gpu.GetDevice().TrimUnused();
+				CHECK(cache.GetStats().TextureCount == 2);
+				CHECK(cache.GetTexture(kept).Texture == current);
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}

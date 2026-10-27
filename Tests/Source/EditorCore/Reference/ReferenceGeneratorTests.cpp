@@ -7,6 +7,8 @@
 #include "Engine/App/EngineContext.h"
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/ReplayData.h"
+#include "Engine/Asset/SpriteSheetData.h"
+#include "Engine/Asset/TextureData.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/Audio/SoundSynth.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
@@ -135,12 +137,13 @@ namespace Engine {
 			for (const std::string_view path : { "Automation.md", "BuiltinAssets.md", "catalog.json", "Components.md", "Engine.d.luau", "FileFormats.md", "Methods.json",
 					 "ScriptAPI.md", "Validation.md", "Schemas/AssetMeta.schema.json", "Schemas/BatchRequest.schema.json",
 					 "Schemas/GameManifest.schema.json", "Schemas/Material.schema.json", "Schemas/Prefab.schema.json", "Schemas/Project.schema.json",
-					 "Schemas/Provenance.schema.json", "Schemas/Replay.schema.json", "Schemas/Scene.schema.json", "Schemas/SoundEffect.schema.json" })
+					 "Schemas/Provenance.schema.json", "Schemas/Replay.schema.json", "Schemas/Scene.schema.json", "Schemas/SoundEffect.schema.json",
+					 "Schemas/SpriteSheet.schema.json" })
 			{
 				CAPTURE(path);
 				CHECK(FindFile(*files, path) != nullptr);
 			}
-			CHECK(files->size() == 19);
+			CHECK(files->size() == 20);
 			for (const GeneratedReferenceFile& file : *files)
 			{
 				CAPTURE(file.Path);
@@ -312,8 +315,8 @@ namespace Engine {
 				CHECK_MESSAGE(text.find(placeholder, placeholders) != std::string::npos, placeholder);
 		}
 
-		// The schemas describe the files authors and agents write: every .eproj, .scene, .prefab, .material, .sfx, .meta and
-		// .replay under Projects/FeatureTest and Tests/Data validates against its format's schema, except the deliberately
+		// The schemas describe the files authors and agents write: every .eproj, .scene, .prefab, .material, .sfx, .meta,
+		// .replay and .spritesheet under Projects/FeatureTest and Tests/Data validates against its format's schema, except the deliberately
 		// invalid or other-version fixtures: Scenes/Invalid/, Formats/ (v0.scene, NewerVersion.scene), Validation/,
 		// CoverageGaps/ and Lint/. The project's Automation/Provenance.json files and every line of its batch scaffolds
 		// validate against the Provenance and BatchRequest schemas too.
@@ -324,9 +327,10 @@ namespace Engine {
 			const auto files = GenerateReferences(registries.GetSources());
 			REQUIRE_MESSAGE(files.has_value(), files.error().ToString());
 			const std::map<std::string, std::string> formats = { { ".eproj", "Project" }, { ".scene", "Scene" }, { ".prefab", "Prefab" },
-				{ ".material", "Material" }, { ".sfx", "SoundEffect" }, { ".meta", "AssetMeta" }, { ".replay", "Replay" } };
+				{ ".material", "Material" }, { ".sfx", "SoundEffect" }, { ".meta", "AssetMeta" }, { ".replay", "Replay" }, { ".spritesheet", "SpriteSheet" } };
 			std::map<std::string, Json> schemas;
-			for (const std::string_view format : { "Project", "Scene", "Prefab", "Material", "SoundEffect", "AssetMeta", "Replay", "Provenance", "BatchRequest" })
+			for (const std::string_view format :
+				{ "Project", "Scene", "Prefab", "Material", "SoundEffect", "AssetMeta", "Replay", "Provenance", "BatchRequest", "SpriteSheet" })
 				schemas.emplace(std::string(format), ParseSchema(*files, format));
 
 			// (label, text, format) of every document to validate.
@@ -403,7 +407,7 @@ namespace Engine {
 				++checked;
 			}
 			CHECK(checked >= 100);
-			for (const std::string_view format : { "Project", "Scene", "Prefab", "Material", "AssetMeta", "Provenance", "BatchRequest" })
+			for (const std::string_view format : { "Project", "Scene", "Prefab", "Material", "AssetMeta", "Provenance", "BatchRequest", "SpriteSheet" })
 			{
 				CAPTURE(format);
 				CHECK(checkedFormats.contains(std::string(format)));
@@ -450,6 +454,49 @@ namespace Engine {
 					 std::string("for a rest"), std::string("at most 7 digits before and 8 after the point"),
 					 std::format("At most {} notes", MaxSoundNotesPerLayer), std::format("1 to {} layers", MaxSoundLayers),
 					 std::format("at most {} seconds", MaxSoundEffectSeconds) })
+			{
+				CAPTURE(text);
+				CHECK(section.find(text) != std::string::npos);
+				CHECK(schemaText.find(text) != std::string::npos);
+			}
+		}
+
+		// M18 (Docs/Decisions/0029-m18-contract.md decision 18): FileFormats.md documents the .spritesheet format with the fields
+		// of the sheet and of every struct it uses, and its schema and section state the limits a builder must respect.
+		TEST_CASE("ReferenceGenerator: the SpriteSheet section lists every field of the sheet, its frames and clips, and the limits")
+		{
+			Test::EditorTestFixture fixture("ReferenceSpriteSheet");
+			const ReferenceRegistries registries(fixture);
+			const auto files = GenerateReferences(registries.GetSources());
+			REQUIRE_MESSAGE(files.has_value(), files.error().ToString());
+			const std::string& formats = FindFile(*files, "FileFormats.md")->Content;
+			CHECK(formats.find("| SpriteSheet | `.spritesheet` | 1 | [Schemas/SpriteSheet.schema.json](Schemas/SpriteSheet.schema.json) |") != std::string::npos);
+			CHECK(formats.find("| SpriteSheet | `.spritesheet` | SpriteSheet | 1 | none | yes |") != std::string::npos);
+			const size_t begin = formats.find("### SpriteSheet (`.spritesheet`)");
+			const size_t end = formats.find("## Source formats");
+			REQUIRE(begin != std::string::npos);
+			REQUIRE(end != std::string::npos);
+			REQUIRE(begin < end);
+			const std::string section = formats.substr(begin, end - begin);
+			const TypeRegistry& types = fixture.GetEngine().GetTypeRegistry();
+			for (const std::string_view name : { "SpriteSheet", "SpriteFrame", "SpriteRect", "SpriteBorders", "SpriteClip", "SpriteClipFrame" })
+			{
+				CAPTURE(name);
+				const StructInfo* type = types.FindStruct(name);
+				REQUIRE(type != nullptr);
+				CHECK(section.find(std::format("#### Fields of {}\n", name)) != std::string::npos);
+				for (const auto& field : type->GetFields())
+				{
+					CAPTURE(field->GetName());
+					CHECK(section.find(std::format("| `{}` |", field->GetName())) != std::string::npos);
+				}
+			}
+
+			const Json schema = ParseSchema(*files, "SpriteSheet");
+			const std::string schemaText = schema.dump();
+			for (const std::string& text : { std::format("At most {} frames", MaxSpriteSheetFrames), std::format("At most {} clips", MaxSpriteSheetClips),
+					 std::format("1 to {} steps", MaxSpriteClipFrames), std::format("at most {} bytes", MaxSpriteSheetNameBytes),
+					 std::format("X + Width is at most {}", MaxTextureDimension) })
 			{
 				CAPTURE(text);
 				CHECK(section.find(text) != std::string::npos);

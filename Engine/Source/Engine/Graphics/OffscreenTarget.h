@@ -49,7 +49,10 @@ namespace Engine {
 		// previous textures and framebuffer. NVRHI keeps an object alive while an unretired submission references it, but
 		// its command lists do not reference textures used only by clears (Clear), so whoever submitted work that may
 		// still run on the previous textures keeps a reference until it completes (Application keeps each frame slot's
-		// target) or waits for idle first. Errors: those of Create.
+		// target) or waits for idle first. Errors: those of Create. M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision
+		// 42): it creates the new textures and framebuffer aside and replaces the current ones only when every creation
+		// succeeded, so on any error the target keeps its previous size, textures and framebuffer (a request's retry after a
+		// trim, RetryAfterTrim, starts from the same state).
 		[[nodiscard]] Status Resize(GraphicsDevice& device, uint32_t width, uint32_t height);
 
 		// Records clears of the color attachment to ClearColor and of the depth attachment to 0 into `commandList`.

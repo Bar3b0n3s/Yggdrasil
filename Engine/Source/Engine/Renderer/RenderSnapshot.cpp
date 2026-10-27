@@ -1,10 +1,12 @@
 #include "EnginePCH.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 
+#include "Engine/Core/Assert.h"
 #include "Engine/Core/DetMath.h"
 
 #include <array>
 #include <cstddef>
+#include <memory_resource>
 #include <utility>
 
 // The reverse-Z projection of §8.3 through Core/DetMath (RenderSnapshot.h): Scene's render extraction calls it on the
@@ -44,6 +46,13 @@ namespace Engine {
 
 		static_assert(AreDebugViewNamesComplete(), "every RenderDebugView needs its name, in enumerator order");
 
+		// `resource`, which must not be null (asserted; the default resource stands in for a null one).
+		[[nodiscard]] static std::pmr::memory_resource* CheckMemoryResource(std::pmr::memory_resource* resource)
+		{
+			ENGINE_CORE_ASSERT(resource != nullptr, "RenderSnapshot needs a memory resource");
+			return resource != nullptr ? resource : std::pmr::get_default_resource();
+		}
+
 		[[nodiscard]] static constexpr char ToLowerAscii(char character)
 		{
 			return character >= 'A' && character <= 'Z' ? static_cast<char>(character - 'A' + 'a') : character;
@@ -81,6 +90,12 @@ namespace Engine {
 				return value;
 		}
 		return std::nullopt;
+	}
+
+	RenderSnapshot::RenderSnapshot(std::pmr::memory_resource* resource)
+		: Meshes(Utils::CheckMemoryResource(resource)), Lights(Meshes.get_allocator().resource()), Texts(Meshes.get_allocator().resource()), DebugDraw(Meshes.get_allocator().resource()), AnnotationDraw(Meshes.get_allocator().resource()), PickTable(Meshes.get_allocator().resource()), Icons(Meshes.get_allocator().resource())
+	{
+		// Meshes is declared first, so every later container takes its checked resource.
 	}
 
 	glm::mat4 ComputeReverseZProjection(RenderProjection projection, float verticalFovDegrees, float orthographicSize, float nearClip, float farClip,

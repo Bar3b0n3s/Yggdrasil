@@ -64,7 +64,8 @@ namespace Engine {
 		if (!snapshot.HasCamera)
 			return {};
 		DebugDrawList debug = snapshot.AnnotationDraw;
-		std::vector<RenderIcon> icons = snapshot.Icons;
+		// A copy from the snapshot's memory resource (RenderSnapshot.h), so the assignment below moves it back without copying.
+		std::pmr::vector<RenderIcon> icons(snapshot.Icons, snapshot.Icons.get_allocator());
 		const bool addIcons = HasFlag(snapshot.Flags, RenderViewFlags::EditorOverlays) && HasFlag(snapshot.Flags, RenderViewFlags::Icons);
 		for (const UUID id : scene.GetCanonicalOrder())
 		{

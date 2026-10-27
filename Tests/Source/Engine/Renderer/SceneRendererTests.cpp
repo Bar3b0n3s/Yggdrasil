@@ -19,7 +19,6 @@
 #include "Engine/Renderer/SpotShadowAtlas.h"
 #include "Engine/Renderer/ViewportCapture.h"
 #include "Support/AssetTestFixture.h"
-#include "Support/DeathTest.h"
 #include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/InMemoryAssetManager.h"
@@ -30,13 +29,16 @@
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <limits>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -457,9 +459,10 @@ namespace Engine {
 		TEST_CASE("Pipelines: count matches the expected total" * doctest::test_suite(Test::GpuSuite))
 		{
 			// §8.5: "The total pipeline count is logged and asserted by a test." Mesh 24 + Skybox 1 + Bloom 3 + Tonemap 1 +
-			// FXAA 1 + debug lines 2 + text 2 + DFG LUT 1 + shadows 6 + depth pyramid 2 + GTAO 2 + selection 8 + data views 1.
+			// FXAA 1 + debug lines 2 + text 2 + DFG LUT 1 + shadows 6 + depth pyramid 2 + GTAO 2 + selection 8 + data views 1 +
+			// quads 2 + upscale 2 (M18: the QuadBatcher and the output stage's UpscalePass, ADR 0029 decision 2).
 			// Each material debug view adds its 9 forward variants the first time it renders, 45 for the five.
-			static_assert(SceneRendererPipelines::StartupPipelineCount == 54);
+			static_assert(SceneRendererPipelines::StartupPipelineCount == 58);
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			Test::AssetTestFixture assets;
@@ -467,8 +470,8 @@ namespace Engine {
 				GpuResourceCache cache(gpu.GetDevice(), assets.GetManager());
 				Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());
 				REQUIRE_MESSAGE(pipelines.has_value(), pipelines.error().ToString());
-				CHECK((*pipelines)->GetPipelineCount() == 54);
-				CHECK(SceneRendererPipelines::GetLayoutDescriptions().size() == 54);
+				CHECK((*pipelines)->GetPipelineCount() == 58);
+				CHECK(SceneRendererPipelines::GetLayoutDescriptions().size() == 58);
 				Result<Scope<SceneRenderer>> renderer = SceneRenderer::Create(gpu.GetDevice(), **pipelines, cache, assets.GetManager(),
 					{ .Width = 16, .Height = 16 });
 				REQUIRE_MESSAGE(renderer.has_value(), renderer.error().ToString());
@@ -479,13 +482,13 @@ namespace Engine {
 					snapshot.DebugView = view;
 					static_cast<void>(RenderToImage(gpu.GetDevice(), **renderer, snapshot));
 				}
-				CHECK((*pipelines)->GetPipelineCount() == 54 + 5 * SceneRendererPipelines::DebugViewPipelineCount);
+				CHECK((*pipelines)->GetPipelineCount() == 58 + 5 * SceneRendererPipelines::DebugViewPipelineCount);
 				// EnsureDebugView, which Render called, has no effect for Lit or for a view that exists.
 				const Status lit = (*pipelines)->EnsureDebugView(RenderDebugView::Lit);
 				const Status existing = (*pipelines)->EnsureDebugView(RenderDebugView::Albedo);
 				CHECK(lit.has_value());
 				CHECK(existing.has_value());
-				CHECK((*pipelines)->GetPipelineCount() == 54 + 5 * SceneRendererPipelines::DebugViewPipelineCount);
+				CHECK((*pipelines)->GetPipelineCount() == 58 + 5 * SceneRendererPipelines::DebugViewPipelineCount);
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}
@@ -938,6 +941,205 @@ namespace Engine {
 			gpu.GetDevice().RunGarbageCollection();
 		}
 
+		TEST_CASE("SceneRenderer: a material that leaves and re-enters the view makes no new binding set" * doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 acceptance (C18.1, R-MATSET; Docs/Decisions/0029-m18-contract.md decision 13; Backlog's "a material that
+			// leaves the view and returns gets a new binding set"): a material's set outlives a frame in which every draw of
+			// the material is culled, so the material reuses it when it returns. A second material stays in view throughout,
+			// so every pass records in every frame and only the returning material's set could be new. Before the fix the
+			// culled frame's ReleaseUnused drops the set, and the last frame creates it again.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::InMemoryAssetManager assets;
+			constexpr AssetHandle StayingHandle{ 0x9341 };
+			constexpr AssetHandle ReturningHandle{ 0x9342 };
+			assets.Publish(StayingHandle, CreateRef<MaterialData>());
+			MaterialData returning;
+			returning.BaseColor = glm::vec4(0.5f, 1.0f, 0.5f, 1.0f);
+			assets.Publish(ReturningHandle, CreateRef<MaterialData>(std::move(returning)));
+			{
+				GpuResourceCache cache(gpu.GetDevice(), assets);
+				Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());
+				REQUIRE_MESSAGE(pipelines.has_value(), pipelines.error().ToString());
+				Result<Scope<SceneRenderer>> renderer = SceneRenderer::Create(gpu.GetDevice(), **pipelines, cache, assets, { .Width = 32, .Height = 32 });
+				REQUIRE_MESSAGE(renderer.has_value(), renderer.error().ToString());
+				RenderSnapshot snapshot = MakeCubeSnapshot(32, 32, 1.0f);
+				const MeshDrawItem staying{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(-1.0f, 0.0f, 0.0f)),
+					.Mesh = BuiltinAssetHandles::CubeMesh,
+					.Materials = { StayingHandle } };
+				// In view beside the staying cube, or at z = 50, behind the camera (at z = 5, looking down -Z), where it is culled.
+				const glm::mat4 inView = glm::translate(glm::mat4(1.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+				const glm::mat4 behindCamera = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 50.0f));
+				const auto render = [&](const glm::mat4& world)
+				{
+					snapshot.Meshes = { staying, MeshDrawItem{ .World = world, .Mesh = BuiltinAssetHandles::CubeMesh, .Materials = { ReturningHandle } } };
+					++snapshot.FrameIndex;
+					const Status rendered = Render(gpu.GetDevice(), **renderer, snapshot);
+					REQUIRE_MESSAGE(rendered.has_value(), rendered.error().ToString());
+				};
+				render(inView);
+				render(inView);
+				render(behindCamera);
+				CHECK((*renderer)->GetRenderStats().CulledSubmeshes >= 1);
+				const GpuResourceTracker& tracker = gpu.GetDevice().GetResourceTracker();
+				const uint64_t before = tracker.GetCounts(GpuResourceType::BindingSet).Created;
+				render(inView);
+				if (GpuResourceTracker::IsEnabled())
+					CHECK(tracker.GetCounts(GpuResourceType::BindingSet).Created == before);
+				gpu.GetDevice().WaitForIdle();
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		TEST_CASE("SceneRenderer: a culled material keeps its binding set only while it stays in the snapshot and its mirror is current"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (R-MATSET): the set a culled material keeps is no leak. It is released once its material leaves the snapshot,
+			// and once the material's mirror is rebuilt for a new version (the set holds the replaced constants and textures),
+			// after which the material makes a new set when it returns.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			Test::InMemoryAssetManager assets;
+			constexpr AssetHandle StayingHandle{ 0x9361 };
+			constexpr AssetHandle ReturningHandle{ 0x9362 };
+			assets.Publish(StayingHandle, CreateRef<MaterialData>());
+			assets.Publish(ReturningHandle, CreateRef<MaterialData>());
+			{
+				GpuResourceCache cache(device, assets);
+				Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(device, gpu.GetPipelines());
+				REQUIRE_MESSAGE(pipelines.has_value(), pipelines.error().ToString());
+				Result<Scope<SceneRenderer>> renderer = SceneRenderer::Create(device, **pipelines, cache, assets, { .Width = 32, .Height = 32 });
+				REQUIRE_MESSAGE(renderer.has_value(), renderer.error().ToString());
+				RenderSnapshot snapshot = MakeCubeSnapshot(32, 32, 1.0f);
+				const MeshDrawItem staying{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(-1.0f, 0.0f, 0.0f)),
+					.Mesh = BuiltinAssetHandles::CubeMesh,
+					.Materials = { StayingHandle } };
+				const MeshDrawItem inView{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(1.0f, 0.0f, 0.0f)),
+					.Mesh = BuiltinAssetHandles::CubeMesh,
+					.Materials = { ReturningHandle } };
+				// At z = 50, behind the camera (at z = 5, looking down -Z), where it is culled.
+				MeshDrawItem behindCamera = inView;
+				behindCamera.World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 50.0f));
+				const GpuResourceTracker& tracker = device.GetResourceTracker();
+				// Renders `meshes` and returns the number of binding sets alive once the render retired.
+				const auto render = [&](std::initializer_list<MeshDrawItem> meshes)
+				{
+					snapshot.Meshes = meshes;
+					++snapshot.FrameIndex;
+					const Status rendered = Render(device, **renderer, snapshot);
+					REQUIRE_MESSAGE(rendered.has_value(), rendered.error().ToString());
+					device.WaitForIdle();
+					device.RunGarbageCollection();
+					return tracker.GetCounts(GpuResourceType::BindingSet).GetLive();
+				};
+				static_cast<void>(render({ staying, inView }));
+				const uint64_t kept = render({ staying, behindCamera });
+				// A new version while the material is culled: the kept set holds the old mirror's resources, so it goes.
+				MaterialData changed;
+				changed.BaseColor = glm::vec4(0.25f, 0.5f, 1.0f, 1.0f);
+				assets.Publish(ReturningHandle, CreateRef<MaterialData>(std::move(changed)));
+				const uint64_t rebuilt = render({ staying, behindCamera });
+				const uint64_t returned = render({ staying, inView });
+				const uint64_t culledAgain = render({ staying, behindCamera });
+				// The material leaves the snapshot: its set goes with the render after.
+				const uint64_t removed = render({ staying });
+				if (GpuResourceTracker::IsEnabled())
+				{
+					CHECK(rebuilt == kept - 1);
+					CHECK(returned == kept);
+					CHECK(culledAgain == kept);
+					CHECK(removed == kept - 1);
+				}
+			}
+			device.RunGarbageCollection();
+		}
+
+		TEST_CASE("SceneRenderer: the pixel-art colour path leaves texels unchanged at the view's size" * doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.1, R-2D-PIXEL; Docs/Decisions/0029-m18-contract.md decision 7) at the identity output mapping (the
+			// scale-3 case is in OutputStageTests.cpp): with RenderOutputSettings::PixelArt a Lit view runs the Linear
+			// tonemapper at exposure 1 with the sRGB OETF and without the dither, bloom and FXAA, whatever Post says, so the
+			// linear value of an 8-bit sRGB texel drawn into SceneColor reaches the output unchanged. An unlit emissive cube on
+			// the clear colour gives bloom and FXAA edges to change, and a blue-noise texture gives the tonemapper a dither.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::InMemoryAssetManager assets;
+			const auto toLinear = [](int value)
+			{
+				return static_cast<float>(Test::SrgbToLinear(value / 255.0));
+			};
+			constexpr AssetHandle EmissiveHandle{ 0x9371 };
+			MaterialData emissive;
+			emissive.BaseColor = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+			emissive.Emissive = glm::vec3(toLinear(30), toLinear(160), toLinear(220));
+			assets.Publish(EmissiveHandle, CreateRef<MaterialData>(std::move(emissive)));
+			constexpr uint32_t NoiseSize = 64;
+			TextureData noise;
+			noise.Format = TextureFormat::R8Unorm;
+			noise.Width = NoiseSize;
+			noise.Height = NoiseSize;
+			noise.Mips.push_back({ .Width = NoiseSize, .Height = NoiseSize, .Offset = 0, .Size = NoiseSize * NoiseSize });
+			noise.Pixels = Buffer(NoiseSize * NoiseSize);
+			for (size_t index = 0; index < noise.Pixels.size(); ++index)
+				noise.Pixels[index] = static_cast<std::byte>((index * 37 + index / NoiseSize * 91) % 256);
+			assets.Publish(BuiltinAssetHandles::BlueNoiseTexture, CreateRef<TextureData>(std::move(noise)));
+			{
+				GpuResourceCache cache(gpu.GetDevice(), assets);
+				Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());
+				REQUIRE_MESSAGE(pipelines.has_value(), pipelines.error().ToString());
+				Result<Scope<SceneRenderer>> renderer = SceneRenderer::Create(gpu.GetDevice(), **pipelines, cache, assets, { .Width = 48, .Height = 48 });
+				REQUIRE_MESSAGE(renderer.has_value(), renderer.error().ToString());
+				RenderSnapshot snapshot = MakeCubeSnapshot(48, 48, 0.0f);
+				snapshot.Lights.clear();
+				snapshot.Meshes[0].Materials = { EmissiveHandle };
+				snapshot.Environment.FallbackColor = glm::vec3(0.0f);
+				snapshot.Camera.ClearColor = glm::vec3(toLinear(200), toLinear(100), toLinear(50));
+				snapshot.Post = PostProcessSettings{ .ExposureEV = 2.0f,
+					.Tonemap = RenderTonemapper::AgX,
+					.SsaoEnabled = true,
+					.BloomEnabled = true,
+					.BloomIntensity = 1.0f,
+					.FxaaEnabled = true };
+				snapshot.Output.PixelArt = true;
+				const Image pixelArt = RenderToImage(gpu.GetDevice(), **renderer, snapshot);
+				const std::vector<std::string> pixelArtPasses = GetPassNames((*renderer)->GetRenderStats());
+				const auto getColor = [](const Image& image, uint32_t x, uint32_t y)
+				{
+					return std::array<int, 3>{ GetChannel(image, x, y, 0), GetChannel(image, x, y, 1), GetChannel(image, x, y, 2) };
+				};
+				constexpr std::array<int, 3> Background = { 200, 100, 50 };
+				constexpr std::array<int, 3> Emitted = { 30, 160, 220 };
+				uint32_t backgroundPixels = 0;
+				uint32_t emittedPixels = 0;
+				for (uint32_t y = 0; y < pixelArt.Height; ++y)
+				{
+					for (uint32_t x = 0; x < pixelArt.Width; ++x)
+					{
+						const std::array<int, 3> color = getColor(pixelArt, x, y);
+						backgroundPixels += color == Background ? 1U : 0U;
+						emittedPixels += color == Emitted ? 1U : 0U;
+					}
+				}
+				CHECK(emittedPixels > 0);
+				CHECK(backgroundPixels > 0);
+				CHECK(backgroundPixels + emittedPixels == pixelArt.Width * pixelArt.Height);
+				CHECK(std::find(pixelArtPasses.begin(), pixelArtPasses.end(), "Bloom") == pixelArtPasses.end());
+				CHECK(std::find(pixelArtPasses.begin(), pixelArtPasses.end(), "FXAA") == pixelArtPasses.end());
+
+				// Without the 2D colour path the same snapshot is exposed, tonemapped, bloomed, anti-aliased and dithered.
+				snapshot.Output.PixelArt = false;
+				++snapshot.FrameIndex;
+				const Image tonemapped = RenderToImage(gpu.GetDevice(), **renderer, snapshot);
+				const std::vector<std::string> tonemappedPasses = GetPassNames((*renderer)->GetRenderStats());
+				CHECK(getColor(tonemapped, 24, 24) != Emitted);
+				CHECK(std::find(tonemappedPasses.begin(), tonemappedPasses.end(), "Bloom") != tonemappedPasses.end());
+				CHECK(std::find(tonemappedPasses.begin(), tonemappedPasses.end(), "FXAA") != tonemappedPasses.end());
+				gpu.GetDevice().WaitForIdle();
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
 		TEST_CASE("SceneRenderer: an emissive map multiplies the emissive factor, which emits alone without a map" * doctest::test_suite(Test::GpuSuite))
 		{
 			// An empty emissive slot binds Black (§8.4), so the shader takes the factor alone then (MaterialFlagEmissiveMap).
@@ -1281,49 +1483,8 @@ namespace Engine {
 		}
 	}
 
-	// The child of "SceneRenderer: an out-of-memory debug-view pipeline is fatal": the first Albedo render creates the view's
-	// pipelines, whose shader specializations fail as if the device were out of memory.
-	ENGINE_DEATH_TEST("Renderer/DebugViewPipelineOutOfMemory")
-	{
-		Test::HeadlessGpuFixture gpu({ .InjectFault = GpuFault::OomSpecialization });
-		if (!gpu.IsAvailable())
-		{
-			ENGINE_CORE_ERROR("The death test needs a GPU");
-			return;
-		}
-		Test::InMemoryAssetManager assets;
-		GpuResourceCache cache(gpu.GetDevice(), assets);
-		Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());
-		if (!pipelines.has_value())
-		{
-			ENGINE_CORE_ERROR("Cannot create the pipelines: {}", pipelines.error());
-			return;
-		}
-		Result<Scope<SceneRenderer>> renderer = SceneRenderer::Create(gpu.GetDevice(), **pipelines, cache, assets, { .Width = 8, .Height = 8 });
-		Result<nvrhi::CommandListHandle> commandList = gpu.GetDevice().CreateCommandList();
-		if (!renderer.has_value() || !commandList.has_value())
-		{
-			ENGINE_CORE_ERROR("Cannot create the renderer or a command list");
-			return;
-		}
-		RenderSnapshot snapshot;
-		snapshot.DebugView = RenderDebugView::Albedo;
-		(*commandList)->open();
-		const Status rendered = (*renderer)->Render(**commandList, snapshot);
-		ENGINE_CORE_ERROR("Render returned instead of failing: {}", rendered.has_value() ? std::string("success") : rendered.error().ToString());
-	}
-
 	TEST_SUITE(Test::GpuSuite)
 	{
-		TEST_CASE("SceneRenderer: an out-of-memory debug-view pipeline is fatal")
-		{
-			// §8.14 item 7: a pipeline creation failure is FatalError(OutOfMemory), including the debug views' lazily created
-			// pipelines (M9-F39: M9 had turned it into an ordinary error, which the Runtime's screenshot path only returned).
-			if (!Test::ProbeGpuForProcess())
-				return;
-			ENGINE_CHECK_DEATH("Renderer/DebugViewPipelineOutOfMemory", "Cannot create the Albedo debug view's pipelines");
-		}
-
 		TEST_CASE("SceneRenderer: an out-of-range debug view is an invalid argument")
 		{
 			Test::HeadlessGpuFixture gpu;

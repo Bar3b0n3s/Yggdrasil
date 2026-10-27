@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Editor/FolderPicker.h"
+#include "Editor/FileDialog.h"
 #include "Engine/Core/Result.h"
 
 #include <array>
@@ -22,7 +22,10 @@ namespace Engine {
 	// Recent projects, New Empty/Basic3D, Open, and recovery offers; shown only without an open project. The recent list
 	// is the host's memory snapshot (EditorPanelContext::GetRecentProjects), taken again each time the launcher reappears;
 	// drawing never reads user://Editor.json.
-	// Main thread in ImGui. Native paths come from the ImGui folder picker, no per-OS dialog library.
+	// Main thread in ImGui. Paths come from the FileDialog API (Editor/FileDialog.h): the operating system's dialog when
+	// the panel context has a native backend (a windowed editor; Windows only, Docs/Decisions/0029-m18-contract.md
+	// decision 19), otherwise the ImGui folder picker. The location is a folder dialog; the project file an open-file dialog
+	// for .eproj. Either dialog only fills the path that project.create and project.open take.
 	// Opens once with recover=false. After open, EditorLayer shows the injected recovery offer for that held project;
 	// acceptance uses Autosave::Recover at a safe point, not another project.open. Decline only dismisses the offer.
 	// Automation may instead choose recover=true on its initial project.open; the launcher never retries an open.
@@ -32,7 +35,7 @@ namespace Engine {
 	public:
 		[[nodiscard]] Status Draw(EditorPanelContext& context);
 	private:
-		FolderPicker m_Picker{};
+		FileDialog m_Dialog{};
 		std::array<char, 4096> m_Path{};
 		std::array<char, 4096> m_Location{};
 		std::array<char, 256> m_Name{};

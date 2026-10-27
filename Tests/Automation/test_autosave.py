@@ -148,7 +148,10 @@ class AutosaveTests(AutomationTestCase):
         self.assertTrue(client.call("session.info")["_meta"]["dirty"])
         self.assertFalse((root / "Library/Autosave/Manifest.json").exists())
         try:
-            queued = client.call("debug.deviceLost")
+            # An unrecoverable loss: the recovery's device creation fails too, so the editor ends with its autosave
+            # and exit code 4 (Docs/Decisions/0029-m18-contract.md decision 30); a plain debug.deviceLost is
+            # recovered from M18 on.
+            queued = client.call("debug.deviceLost", {"unrecoverable": True})
             self.assertTrue(queued["queued"])
         except engine_client.ConnectionClosed:
             # The fatal submission can precede the I/O thread flushing the queued response. The process exit and

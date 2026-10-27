@@ -1,0 +1,177 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "GtaoOrtho",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"Environment": 1,
+		"PostProcess": 1
+	},
+	"Entities": [
+		{
+			"ID": "b9c29a3dd54d9bbe",
+			"Name": "Rendering",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Environment": {
+					"Environment": null,
+					"Intensity": 1,
+					"Rotation": 0,
+					"ShowSkybox": false,
+					"SkyboxBlur": 0,
+					"FallbackColor": [0.6, 0.6, 0.6]
+				},
+				"PostProcess": {
+					"ExposureEV": 0,
+					"Tonemap": "AgX",
+					"SsaoEnabled": true,
+					"SsaoRadius": 1,
+					"SsaoIntensity": 2,
+					"SsaoQuality": "High",
+					"BloomEnabled": false,
+					"BloomIntensity": 0.04,
+					"FxaaEnabled": true
+				}
+			}
+		},
+		{
+			"ID": "e1696f40eb41952e",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [6, 5, 10],
+					"Rotation": [-0.17645156, 0.26242113, 0.04887425, 0.9474236],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Orthographic",
+					"VerticalFov": 45,
+					"OrthographicSize": 3.7,
+					"NearClip": 0.1,
+					"FarClip": 300,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.04, 0.055, 0.075]
+				}
+			}
+		},
+		{
+			"ID": "01a8258e05ab0189",
+			"Name": "Ground",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [18, 1, 18]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000103",
+					"Materials": ["7a0a28d33a10928c"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "6b0ff91de54f425b",
+			"Name": "Cube",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1.3, 0.8, 0],
+					"Rotation": [0, 0.17364818, 0, 0.9848077],
+					"Scale": [1.6, 1.6, 1.6]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["882b9e5527a6fe6e"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "39aaaea0b76ba8a6",
+			"Name": "Sphere",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1.1, 0.7, 0.8],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.4, 1.4, 1.4]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["0835a2ca4545047c"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "f1a93f82455ad82a",
+			"Name": "Pillar",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1.6, -2.2],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.65, 3.2, 0.65]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7a0a28d33a10928c"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "99584f8690cf0807",
+			"Name": "ContactStep",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1.3, 0.2, 1.05],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [2.5, 0.4, 0.5]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7a0a28d33a10928c"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		}
+	]
+}

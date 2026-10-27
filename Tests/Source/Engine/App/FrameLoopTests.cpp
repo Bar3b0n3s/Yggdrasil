@@ -7,6 +7,8 @@
 #include "Engine/App/ProcessContext.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Graphics/GpuRecreation.h"
+#include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Platform/CrashHandler.h"
 #include "Engine/Platform/Process.h"
 #include "Support/ChildOutput.h"
@@ -128,6 +130,62 @@ namespace Engine {
 			bool m_ThrowInUpdate = false;
 		};
 
+		// How RecoveringClient loses the device.
+		enum class DeviceLoss
+		{
+			Flag,            // the test hooks' flag (GpuDiagnostics::SetDeviceLost)
+			Thrown,          // a vk::DeviceLostError thrown as NVRHI's internal calls throw it
+			ThrownWhileLost, // the flag, then another Vulkan error (out of device memory) thrown on the lost device: a consequence
+		};
+
+		// M18 (C18.3): loses the context's device in the update of frame `LoseInFrame` as `Loss` says, and recovers it when
+		// the loop asks.
+		class RecoveringClient final : public IFrameLoopClient
+		{
+		public:
+			explicit RecoveringClient(EngineContext& context)
+				: m_Context(&context)
+			{
+			}
+
+			void OnFrameEvent(Event& /*event*/) override {}
+
+			void OnFrameFixedStep(const SimStep& step) override
+			{
+				Calls.push_back(std::format("step {}", step.Tick));
+			}
+
+			void OnFrameUpdate(const FrameTime& frame) override
+			{
+				Calls.push_back(std::format("update {}", frame.FrameIndex));
+				if (frame.FrameIndex != LoseInFrame)
+					return;
+				if (Loss == DeviceLoss::Thrown)
+					vk::detail::resultCheck(vk::Result::eErrorDeviceLost, "FrameLoopTests: a device loss thrown out of NVRHI");
+				m_Context->GetGraphicsDevice()->GetDiagnostics().SetDeviceLost(true);
+				if (Loss == DeviceLoss::ThrownWhileLost)
+					vk::detail::resultCheck(vk::Result::eErrorOutOfDeviceMemory, "FrameLoopTests: NVRHI's call on the lost device");
+			}
+
+			void OnFrameRender(const FrameTime& frame) override
+			{
+				Calls.push_back(std::format("render {}", frame.FrameIndex));
+			}
+
+			void OnFrameDeviceLost() override
+			{
+				Calls.push_back("device lost");
+				Recovery = m_Context->RecoverGraphics();
+			}
+		public:
+			std::vector<std::string> Calls;
+			uint64_t LoseInFrame = 0;
+			DeviceLoss Loss = DeviceLoss::Flag;
+			Status Recovery{};
+		private:
+			EngineContext* m_Context = nullptr; // documented back-reference
+		};
+
 		// Crashes in its fixed step once told to.
 		class CrashingClient final : public IFrameLoopClient
 		{
@@ -206,6 +264,42 @@ namespace Engine {
 	ENGINE_DEATH_TEST("App/FrameLoopUpdateThrowsSystemError")
 	{
 		RunThrowingFrame(true);
+	}
+
+	// M18 (C18.3, decisions 25 and 29): the child of "FrameLoop: a device loss thrown out of the recovery ends the process
+	// through FatalError(DeviceLost)": the update loses the device, and at the frame boundary an owner's Recreate throws a
+	// vk::DeviceLostError, as an NVRHI call on a recreated device lost again does.
+	ENGINE_DEATH_TEST("App/FrameLoopRecoveryThrowsDeviceLost")
+	{
+		const ProcessContext* process = ProcessContext::GetCurrent();
+		if (process == nullptr || !process->IsVulkanLoaderAvailable())
+		{
+			ENGINE_CORE_WARN("No Vulkan loader in the frame-loop child");
+			return;
+		}
+		GraphicsSpecification graphics;
+		graphics.Validation = true;
+		graphics.MaxApiVersion = Test::GetTestOptions().VulkanApi;
+		Result<Scope<EngineContext>> context = EngineContext::Create({ .WorkerCount = 0, .Graphics = graphics });
+		if (!context.has_value())
+		{
+			ENGINE_CORE_ERROR("The frame-loop child cannot create its engine context: {}", context.error());
+			return;
+		}
+		GpuRecreationHooks hooks;
+		hooks.Name = "LostAgainInNvrhi";
+		hooks.Release = []() {};
+		hooks.Recreate = []() -> Status
+		{
+			vk::detail::resultCheck(vk::Result::eErrorDeviceLost, "FrameLoopTests: the recreated device lost again inside an NVRHI call");
+			return {};
+		};
+		GpuRecreationRegistration registration = (*context)->GetGraphicsDevice()->GetRecreation().Register(std::move(hooks));
+		RecoveringClient client(**context);
+		FrameLoop loop(**context, client, CreateScope<ManualClock>(FixedDelta), {});
+		loop.RunFrame();
+		ENGINE_CORE_ERROR("The frame loop went on after an owner's Recreate threw a device loss: {}",
+			client.Recovery.has_value() ? std::string("recovered") : client.Recovery.error().ToString());
 	}
 
 	// Runs the death-test child `name` and checks that the frame-boundary catch ended it through FatalError(Gpu) with a crash
@@ -513,6 +607,58 @@ namespace Engine {
 			// The catch covers the whole frame (§4.2 step 7), not only rendering: NVRHI work outside the render step (a
 			// screenshot read back during an update, an asset swap's upload) is guarded the same way.
 			CheckFrameBoundaryCatch("App/FrameLoopUpdateThrowsSystemError", "Update");
+		}
+
+		TEST_CASE("FrameLoop: a frame that lost the device ends with the client's recovery, and the next frame steps on"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 acceptance (C18.3, Docs/Decisions/0029-m18-contract.md decisions 28 and 29): the loss is recovered at the
+			// frame boundary, the frame's steps, update and render still run, and the next frame starts on the recovered
+			// device; the same for a vk::DeviceLostError thrown out of the frame, which ends that frame instead, and for any
+			// other Vulkan error thrown while the device is lost (the loss's consequence, never out-of-memory: decision 28's
+			// vk::SystemError rule).
+			if (!Test::ProbeGpuForProcess())
+				return;
+			for (const DeviceLoss loss : { DeviceLoss::Flag, DeviceLoss::Thrown, DeviceLoss::ThrownWhileLost })
+			{
+				CAPTURE(static_cast<int>(loss));
+				const bool thrown = loss != DeviceLoss::Flag;
+				GraphicsSpecification graphics;
+				graphics.Validation = true;
+				graphics.SynchronizationValidation = true;
+				graphics.MaxApiVersion = Test::GetTestOptions().VulkanApi;
+				Result<Scope<EngineContext>> created = EngineContext::Create({ .WorkerCount = 0, .Graphics = graphics });
+				REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+				EngineContext& context = **created;
+				RecoveringClient client(context);
+				client.Loss = loss;
+				FrameLoop loop(context, client, CreateScope<ManualClock>(FixedDelta), {});
+				loop.RunFrame();
+				loop.RunFrame();
+				const std::vector<std::string> expected = thrown
+					? std::vector<std::string>{ "step 0", "update 0", "device lost", "step 1", "update 1", "render 1" }
+					: std::vector<std::string>{ "step 0", "update 0", "render 0", "device lost", "step 1", "update 1", "render 1" };
+				CHECK(client.Calls == expected);
+				CHECK_MESSAGE(client.Recovery.has_value(), (client.Recovery.has_value() ? std::string() : client.Recovery.error().ToString()));
+				CHECK_FALSE(context.GetGraphicsDevice()->IsLost());
+				CHECK(context.GetGraphicsDevice()->GetRecoveryCount() == 1);
+				CHECK(loop.GetFrameCount() == 2);
+				const GpuMessageCounts counts = context.DestroyGraphics();
+				CHECK(counts.Errors == 0);
+				CHECK(counts.Warnings == 0);
+			}
+		}
+
+		TEST_CASE("FrameLoop: a device loss thrown out of the recovery ends the process through FatalError(DeviceLost)"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.3, decisions 25 and 29 step 5): a second loss during the recovery is fatal also when it is thrown out of
+			// an owner's NVRHI call instead of reported: the process ends with exit code 4 through FatalError(DeviceLost),
+			// whose editor hook writes the autosave, never a retry at the next frame boundary with the recreation registry
+			// left running.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			ENGINE_CHECK_DEATH("App/FrameLoopRecoveryThrowsDeviceLost", "Fatal error (DeviceLost)");
 		}
 
 		TEST_CASE("FrameLoop: the time scale scales the steps and the frame delta")

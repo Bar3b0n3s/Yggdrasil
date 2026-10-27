@@ -44,9 +44,17 @@ namespace Engine {
 		uint32_t Frames = 0; // the polls it took
 	};
 
-	// debug.deviceLost {}: queue a real device-loss path for the next submission after the host publishes its CPU
-	// autosave snapshot. Test hooks only; needs an open project and a rendering host with QueueDeviceLost installed.
+	// debug.deviceLost {unrecoverable?}: queue a real device-loss path for the next submission after the host publishes its
+	// CPU autosave snapshot. Test hooks only; needs an open project and a rendering host with QueueDeviceLost installed.
 	// Unsupported without that callback or with renderer none; otherwise propagates callback errors unchanged.
+	// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 30): the loss is recovered at the frame boundary and the
+	// editor keeps running (GpuDeviceLost event, stats.get deviceLosses); with `unrecoverable` the recovery's device creations
+	// fail too (GpuDiagnostics::InjectUnrecoverableDeviceLoss), so the editor autosaves and exits 4 with a crash report.
+	struct DebugDeviceLostParams
+	{
+		bool Unrecoverable = false;
+	};
+
 	struct DebugDeviceLostResult
 	{
 		bool Queued = false;
@@ -56,7 +64,7 @@ namespace Engine {
 
 		[[nodiscard]] Result<DebugStallResult> DebugStall(EditorMethodContext& context, const DebugStallParams& params);
 		[[nodiscard]] Result<Scope<PendingOperation>> DebugPend(EditorMethodContext& context, const DebugPendParams& params);
-		[[nodiscard]] Result<DebugDeviceLostResult> DebugDeviceLost(EditorMethodContext& context, const NoParams& params);
+		[[nodiscard]] Result<DebugDeviceLostResult> DebugDeviceLost(EditorMethodContext& context, const DebugDeviceLostParams& params);
 
 	}
 

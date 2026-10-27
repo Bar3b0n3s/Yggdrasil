@@ -91,6 +91,15 @@ namespace Engine {
 					circle({ 0.5f, 0.5f }, 0.35f);
 					path({ { 0.41f, 0.31f }, { 0.7f, 0.5f }, { 0.41f, 0.69f }, { 0.41f, 0.31f } });
 					break;
+				case EditorIcon::SpriteSheet:
+					// A texture cut into a three by three grid of frames, one frame marked.
+					path({ { 0.15f, 0.15f }, { 0.85f, 0.15f }, { 0.85f, 0.85f }, { 0.15f, 0.85f }, { 0.15f, 0.15f } });
+					path({ { 0.38f, 0.15f }, { 0.38f, 0.85f } });
+					path({ { 0.62f, 0.15f }, { 0.62f, 0.85f } });
+					path({ { 0.15f, 0.38f }, { 0.85f, 0.38f } });
+					path({ { 0.15f, 0.62f }, { 0.85f, 0.62f } });
+					path({ { 0.15f, 0.15f }, { 0.38f, 0.38f } });
+					break;
 			}
 			return segments;
 		}
@@ -124,6 +133,7 @@ namespace Engine {
 			case AssetType::Script:      return EditorIcon::Script;
 			case AssetType::Font:        return EditorIcon::Font;
 			case AssetType::Replay:      return EditorIcon::Replay;
+			case AssetType::SpriteSheet: return EditorIcon::SpriteSheet;
 		}
 		return EditorIcon::Folder;
 	}

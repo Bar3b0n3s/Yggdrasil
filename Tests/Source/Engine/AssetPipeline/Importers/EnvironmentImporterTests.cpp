@@ -2,10 +2,12 @@
 
 #include "Engine/AssetPipeline/Importers/EnvironmentImporter.h"
 
+#include "Engine/Asset/AssetDiagnostic.h"
 #include "Engine/Asset/CookedFormat.h"
 #include "Engine/Asset/EnvironmentData.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Graphics/GpuDiagnostics.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Renderer/EnvironmentBaker.h"
 #include "Support/AssetTestFixture.h"
@@ -277,6 +279,53 @@ namespace Engine {
 				CHECK((*environment)->IrradianceSH9[1].z > (*environment)->IrradianceSH9[1].x);
 			}
 			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		TEST_CASE("EnvironmentImporter: an import whose bake meets a device loss is not remembered, and imports after the recovery"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18's milestone review (Docs/Decisions/0029-m18-contract.md decision 28): the editor's asset manager with the
+			// Renderer's baker on a lost device. The bake fails with Gpu, which is the loss: no ASSET_IMPORT_FAILED diagnostic
+			// and no remembered failure, so the Load after the recovery bakes and loads the environment.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Result<Scope<EnvironmentBaker>> baker = EnvironmentBaker::Create(device, gpu.GetPipelines());
+				REQUIRE_MESSAGE(baker.has_value(), baker.error().ToString());
+				Test::AssetTestFixture fixture(Test::AssetTestFixtureOptions{ .EnvironmentBaker = baker->get() });
+				Result<Buffer> gradient = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Environments/Gradient.hdr"));
+				REQUIRE_MESSAGE(gradient.has_value(), gradient.error().ToString());
+				fixture.WriteProjectFile("Assets/Environments/Gradient.hdr", *gradient);
+				fixture.OpenProject(false);
+				const AssetHandle handle = fixture.GetManager().Resolve("Assets/Environments/Gradient.hdr").value_or(AssetHandle());
+				REQUIRE(handle.IsValid());
+				const auto countFailures = [&fixture, handle]()
+				{
+					return std::ranges::count_if(fixture.GetManager().GetDiagnostics(), [handle](const AssetDiagnostic& diagnostic)
+					{
+						return diagnostic.Asset == handle && diagnostic.Code == AssetImportFailedCode;
+					});
+				};
+
+				device.GetDiagnostics().SetDeviceLost(true);
+				device.ReportDeviceLost("EnvironmentImporter test");
+				CHECK((*baker)->IsDeviceLost());
+				const Result<AssetRef<Asset>> lost = fixture.GetManager().Load(handle);
+				REQUIRE_FALSE(lost.has_value());
+				CHECK(lost.error().GetCode() == ErrorCode::Gpu);
+				CHECK(fixture.GetManager().GetState(handle) != AssetState::Failed);
+				CHECK(countFailures() == 0);
+
+				const Status recovered = device.Recover(nullptr);
+				REQUIRE_MESSAGE(recovered.has_value(), recovered.error().ToString());
+				CHECK_FALSE((*baker)->IsDeviceLost());
+				const Result<AssetRef<Asset>> loaded = fixture.GetManager().Load(handle);
+				REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
+				CHECK(fixture.GetManager().GetState(handle) == AssetState::Loaded);
+				CHECK(countFailures() == 0);
+			}
+			device.RunGarbageCollection();
 		}
 	}
 

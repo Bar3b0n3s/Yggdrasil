@@ -20,6 +20,9 @@ passed step (it is not part of the commit), and in disk mode every project on di
 when there is none, and a directory holding several *.eproj files fails its "provenance demos" step (exit code 1).
 --self-test audits the seeded fixtures of Tests/Data/Provenance/<Case>/Project/ in disk mode and compares each with its
 Expected.json; the static checks run it. The games suite audits the demos in index mode (ADR 0026 decision 9).
+
+It works from any directory (Docs/Architecture.md §2.3): a relative path given on its command line is resolved against
+the caller's directory, then main() makes the repository root of its own checkout the working directory.
 """
 
 from __future__ import annotations
@@ -48,10 +51,11 @@ EXPECTED_EXIT_CODES = (provenance.EXIT_PASSED, provenance.EXIT_FINDINGS, provena
 SHOWN_FINDINGS = 20
 
 
-def resolve_project(argument: str) -> Path:
-    """The project directory an --project argument names: the directory itself, or the parent of a *.eproj file; made
-    absolute against the working directory. Whether it exists is the audit's question (project-missing)."""
-    path = Path(argument).resolve()
+def resolve_project(argument: Path) -> Path:
+    """The project directory an --project argument names: the directory itself, or the parent of a *.eproj file. The
+    argument is already absolute (paths.argument_path made it so against the caller's directory while the command line
+    was parsed); it is only normalized here. Whether it exists is the audit's question (project-missing)."""
+    path = argument.resolve()
     return path.parent if path.suffix == ".eproj" else path
 
 
@@ -207,7 +211,7 @@ def main(argv: list[str] | None = None) -> int:
                "failing project's code.",
     )
     selection = parser.add_mutually_exclusive_group(required=True)
-    selection.add_argument("--project", action="append", metavar="P",
+    selection.add_argument("--project", action="append", type=paths.argument_path, metavar="P",
                            help="a game project to audit: its directory or its .eproj file (repeatable)")
     selection.add_argument("--demos", action="store_true",
                            help="audit every game project below Projects/ and Tests/Projects/ (not FeatureTest)")
@@ -218,6 +222,7 @@ def main(argv: list[str] | None = None) -> int:
                              "disk, the working tree without *.bak files")
     parser.add_argument("--json", action="store_true", help="emit a machine-readable result")
     options = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    paths.enter_repository_root()
     if options.self_test and options.files is not None:
         parser.error("--self-test audits its fixtures in disk mode and takes no --files")
     console = Console(options.json)

@@ -39,6 +39,21 @@ Steps, in this order, failing fast (a step after a failed one is reported as not
                  left to the fuzz step, which runs its cases over a superset of the same iterations
   asan-feature   feature Release (ASan): the same for the feature suite (Feature-Release-Asan.{xml,json}), with
                  --require-gpu unless --gpu-optional
+  debug-heap     gpu Debug (debug heap): the Debug gpu suite under both API caps on the Windows debug heap, with every
+                 device's GPU object lifetimes logged (Docs/Decisions/0029-m18-contract.md, R-GPUCRASH: the
+                 intermittent crash on a driver thread, Docs/Backlog.md): Test.py --suite gpu --config Debug --junit
+                 --debug-heap [--require-gpu unless --gpu-optional], each Tests run on the debug heap
+                 (Scripts/Lib/debugheap.py: started under a debugger that detaches at the loader's initial breakpoint,
+                 so every heap of the process, the graphics driver's included, checks block tails, fills freed blocks
+                 and validates parameters, and its crash handler still reports a crash), with ENGINE_GPU_LIFETIME_LOG
+                 naming bin/TestResults/DebugHeap/Run<k>/GpuLifetime/ (one GpuLifetime-<pid>.log per process,
+                 Engine/Source/Engine/Graphics/GpuResourceTracker.h) and the run's reports copied beside it
+                 (Gpu-Debug-Vulkan1{4,3}-DebugHeap.xml), with the crash reports its Tests runs wrote below their own
+                 user data (Test.py's bin/TestResults/<report stem>/UserData) in Crashes/, which the run's detail names
+                 instead of the originals that the next run deletes. --debug-heap-runs <n> runs
+                 it n times (the crash runs of M18's W18.2: 20, overnight), every run whatever the earlier ones did, and
+                 fails naming each failed run; a missing Debug build is exit code 3. Windows only: elsewhere the step
+                 is skipped, naming why
   fuzz           fuzz Release (ASan): the sanitized Tests binary with --test-suite=Fuzz --fuzz-iterations=1000000
                  --fuzz-shard=<k>/<n> --test-timeout-scale=<s> in n = hardening.fuzz_process_count(logical CPUs,
                  available memory, FUZZ_PEAK_PROCESS_BYTES) processes, each with its own --user-data-dir and the
@@ -80,12 +95,15 @@ longer than about a quarter of the soak can leave the script heap rule inconclus
 and a longer soak of that scene (--soak-only <subject> --soak-frames 40000) confirms it; it is a full soak, not a
 development aid.
 
-A run whose steps include perf, soak or asan-feature holds the machine-wide GPU lock (Scripts/Lib/locks.py;
+A run whose steps include perf, soak, asan-feature or debug-heap holds the machine-wide GPU lock (Scripts/Lib/locks.py;
 Docs/Architecture.md §2.3, ADR 0028 decision 16), shared by every checkout of the repository, from its start to its end;
 its child scripts (Perf.py, Build.py, Test.py) run under that hold, so they never wait for a gate that began after it.
 It waits while another GPU run or a gate (CI.py) holds the lock, unless it runs inside that run (CI.py's hardening
 stage), reporting the holder (pid, worktree, command), at most --lock-timeout seconds (exit code 5); --no-wait fails at
 once instead (exit code 3). A run of the other steps takes no lock of its own; its Build.py takes the build lock.
+
+It works from any directory (Docs/Architecture.md §2.3): once it has parsed its arguments, main() makes the repository
+root of its own checkout the working directory.
 
 Exit codes: 0 every step passed (or warned), 1 a step failed, 2 usage error, 3 a build output, the AddressSanitizer
 runtime or a current export package is missing, the machine has too little memory or too few CPUs for the fuzz to
@@ -116,7 +134,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from Lib import exports, hardening, locks, paths
+from Lib import debugheap, exports, hardening, locks, paths
 from Lib import process as process_lib
 from Lib.process import (
     ToolNotFoundError,
@@ -140,9 +158,9 @@ from Lib.report import (
     write_junit,
 )
 
-STEPS = ("perf", "soak", "asan-generate", "asan-build", "asan-unit", "asan-feature", "fuzz")
+STEPS = ("perf", "soak", "asan-generate", "asan-build", "asan-unit", "asan-feature", "debug-heap", "fuzz")
 # The steps that run the GPU: a run that includes one holds the machine-wide GPU lock from its start to its end.
-GPU_STEPS = frozenset({"perf", "soak", "asan-feature"})
+GPU_STEPS = frozenset({"perf", "soak", "asan-feature", "debug-heap"})
 STEP_NAMES = {
     "perf": "perf capture (Release)",
     "soak": "soak Release",
@@ -150,6 +168,7 @@ STEP_NAMES = {
     "asan-build": "asan build",
     "asan-unit": "unit Release (ASan)",
     "asan-feature": "feature Release (ASan)",
+    "debug-heap": "gpu Debug (debug heap)",
     "fuzz": "fuzz Release (ASan)",
 }
 # Seconds per step (ADR 0024 decision 19's TIMEOUTS as amended at integration: perf 1200 s, the ASan build 7200 s, every
@@ -158,10 +177,22 @@ STEP_NAMES = {
 # (hardening.fuzz_budget_seconds). Measured on the 24-thread workstation: perf 3 min, soak 16 min, ASan build 20 min
 # from scratch and 2 min incremental, ASan unit 21 min, ASan feature 1 min, fuzz 52 min (M17: 55 min at 18 shards).
 TIMEOUTS = {"perf": 1200.0, "soak": 3600.0, "asan-generate": 3600.0, "asan-build": 7200.0, "asan-unit": 3600.0,
-            "asan-feature": 3600.0}
-# What the sanitized suites' Test.py runs get beyond their own --timeout, to write their reports after it.
+            "asan-feature": 3600.0, "debug-heap": 7200.0}
+# What the sanitized suites' and the debug-heap step's Test.py runs get beyond their own --timeout, to write their
+# reports after it.
 SUITE_GRACE_SECONDS = 60.0
 SANITIZED_SUITES = ("unit", "feature")
+# The steps whose Test.py runs get SUITE_GRACE_SECONDS: the sanitized suites and the debug-heap step (one run).
+GRACED_STEPS = ("asan-unit", "asan-feature", "debug-heap")
+# The debug-heap step (Docs/Decisions/0029-m18-contract.md, R-GPUCRASH): the configuration of its gpu suite, whose Tests
+# runs take the API caps below in turn (each bounded by its share of TIMEOUTS["debug-heap"], 3,600 s, under the debug
+# heap's slower allocations), the directory where Test.py writes their JUnit reports, the directory of the step's copies
+# of them and its lifetime logs, and the variable that turns the logs on.
+DEBUG_HEAP_CONFIG = "Debug"
+DEBUG_HEAP_CAPS = ("1.4", "1.3")
+DEBUG_HEAP_SUITE_REPORTS = paths.TEST_RESULTS_ROOT
+DEBUG_HEAP_REPORTS = paths.TEST_RESULTS_ROOT / "DebugHeap"
+GPU_LIFETIME_LOG_VARIABLE = "ENGINE_GPU_LIFETIME_LOG"
 CONFIG = "Release"
 PYTHON = sys.executable
 SCRIPTS = paths.REPOSITORY_ROOT / "Scripts"
@@ -257,15 +288,16 @@ class JsonRun:
         return "timed out" if self.timed_out else f"exit code {describe_exit_code(self.exit_code)}"
 
 
-def run_json_script(name: str, script: Path, arguments: list[str], timeout: float, console: Console) -> JsonRun:
+def run_json_script(name: str, script: Path, arguments: list[str], timeout: float, console: Console,
+                    environment: dict[str, str] | None = None) -> JsonRun:
     """Runs a script with --json among `arguments`: its progress (on its stderr) is shown as it runs, its stdout parsed.
-    Raises ToolNotFoundError when it cannot be started."""
+    `environment` replaces child_environment(). Raises ToolNotFoundError when it cannot be started."""
     command = [PYTHON, str(script), *arguments]
     console.heading(f"{name}: {format_command(['python', paths.display_path(script), *arguments])}")
     started = time.monotonic()
     try:
         child = subprocess.Popen(command, cwd=paths.REPOSITORY_ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                 stderr=None, env=child_environment())
+                                 stderr=None, env=environment if environment is not None else child_environment())
     except OSError as error:
         raise ToolNotFoundError(f"could not start {script.name}: {error}") from None
     timed_out = False
@@ -867,6 +899,152 @@ def step_asan_feature(arguments: argparse.Namespace, console: Console) -> Step:
 
 
 # --------------------------------------------------------------------------------------------------------------------
+# debug-heap (Docs/Decisions/0029-m18-contract.md, W18.1 stream C: R-GPUCRASH)
+# --------------------------------------------------------------------------------------------------------------------
+
+
+def debug_heap_run_directory(run: int) -> Path:
+    """Where run `run` (from 1) of the debug-heap step keeps its JUnit reports and, in GpuLifetime/, its lifetime
+    logs."""
+    return DEBUG_HEAP_REPORTS / f"Run{run}"
+
+
+def debug_heap_suite_reports() -> list[Path]:
+    """The JUnit reports one run of the debug-heap step's Test.py writes, one per API cap
+    (Gpu-Debug-Vulkan<cap>-DebugHeap.xml in DEBUG_HEAP_SUITE_REPORTS)."""
+    return [DEBUG_HEAP_SUITE_REPORTS / f"Gpu-{DEBUG_HEAP_CONFIG}-Vulkan{cap.replace('.', '')}-DebugHeap.xml"
+            for cap in DEBUG_HEAP_CAPS]
+
+
+def debug_heap_suite_crashes() -> list[Path]:
+    """The folders of the crash reports one run of the debug-heap step's Tests runs write, one per API cap: the crash
+    report folder of the user data Test.py gives each Tests run beside its JUnit report (Lib/paths.py's
+    tests_run_user_data and crash_report_folder, which Test.py's run_user_data and crash_reports use). Test.py keeps
+    them between its runs, so the step deletes them before each of its runs."""
+    return [paths.crash_report_folder(paths.tests_run_user_data(report)) for report in debug_heap_suite_reports()]
+
+
+def debug_heap_run_options(arguments: argparse.Namespace) -> list[str]:
+    """Test.py's options of one run of the debug-heap step: the Debug gpu suite under both API caps on the debug heap,
+    each Tests run bounded by its share of the step's timeout."""
+    per_tests_run = int(TIMEOUTS["debug-heap"] / len(DEBUG_HEAP_CAPS))
+    return ["--suite", "gpu", "--config", DEBUG_HEAP_CONFIG, "--junit", "--debug-heap", "--timeout", str(per_tests_run),
+            "--json", *([] if arguments.gpu_optional else ["--require-gpu"])]
+
+
+def evaluate_debug_heap_run(run: JsonRun) -> tuple[Status, str, int | None]:
+    """The outcome of one run of the debug-heap step from Test.py's JSON result: its status, a detail naming every
+    failed or warned Tests run, and the exit code a failure keeps (3 when the Debug build is missing)."""
+    if run.timed_out:
+        return Status.TIMEOUT, f"Test.py {run.describe_exit()}", None
+    steps = [step for step in run.document.get("steps", []) if isinstance(step, dict)]
+    if not steps:
+        code = run.exit_code if run.exit_code in (EXIT_INIT_FAILED, EXIT_USAGE) else EXIT_FAILED
+        return Status.FAILED, f"Test.py {run.describe_exit()} without a result", code
+    statuses: list[Status] = []
+    details: list[str] = []
+    exit_code: int | None = None
+    for step in steps:
+        try:
+            status = Status(step.get("status", "failed"))
+        except ValueError:
+            status = Status.FAILED
+        statuses.append(status)
+        if status != Status.PASSED:
+            details.append(f"{step.get('name', 'gpu')}: {step.get('detail', '')}")
+        if status in (Status.FAILED, Status.TIMEOUT) and step.get("exitCode") == EXIT_INIT_FAILED:
+            exit_code = EXIT_INIT_FAILED
+    for status in (Status.TIMEOUT, Status.FAILED, Status.WARNING):
+        if status in statuses:
+            return status, "; ".join(details), exit_code
+    if run.exit_code != 0:
+        return Status.FAILED, f"Test.py {run.describe_exit()}", None
+    return Status.PASSED, f"{len(steps)} Tests run(s) passed", None
+
+
+def count_lifetime_logs(directory: Path) -> int:
+    """The lifetime logs (GpuLifetime-<pid>.log) a run left in `directory`."""
+    return len(list(directory.glob("GpuLifetime-*.log"))) if directory.is_dir() else 0
+
+
+def step_debug_heap(arguments: argparse.Namespace, console: Console) -> Step:
+    """The Debug gpu suite under both API caps on the Windows debug heap, with every device's GPU object lifetimes
+    logged (R-GPUCRASH: the intermittent crash on a driver thread, Docs/Backlog.md), --debug-heap-runs times. Each run
+    is `Test.py --suite gpu --config Debug --junit --debug-heap [--require-gpu]` with ENGINE_GPU_LIFETIME_LOG set to its
+    GpuLifetime/ directory (Engine/Source/Engine/Graphics/GpuResourceTracker.h), and its JUnit reports are copied
+    beside it (DEBUG_HEAP_REPORTS/Run<k>/), with the crash reports and minidumps of its Tests runs in Crashes/, which
+    the run's detail and its outcome's "crashReports" name instead of the originals: the reports and the crash folders
+    (which Test.py keeps between its runs) are deleted before each run, so a run that wrote none (a Tests run killed by
+    its timeout or crashed before its report) gets no earlier run's copy, and only the copies outlive the next run.
+    Every run runs, whatever the earlier ones did, so a crash reproduction keeps the evidence of all of them; the step
+    fails naming each failed run, and a missing Debug build (exit code 3) stops it. Windows only: elsewhere it is
+    skipped, naming why."""
+    name = STEP_NAMES["debug-heap"]
+    if not debugheap.is_available():
+        return Step(name, Status.SKIPPED, "the Windows debug heap exists on Windows only "
+                                          "(Docs/Decisions/0028-backlog-program.md decision 10)")
+    runs = arguments.debug_heap_runs
+    shutil.rmtree(DEBUG_HEAP_REPORTS, ignore_errors=True)
+    outcomes: list[dict[str, Any]] = []
+    started = time.monotonic()
+    for run in range(1, runs + 1):
+        directory = debug_heap_run_directory(run)
+        lifetime = directory / "GpuLifetime"
+        lifetime.mkdir(parents=True, exist_ok=True)
+        for report in debug_heap_suite_reports():
+            report.unlink(missing_ok=True)
+        for crashes in debug_heap_suite_crashes():
+            shutil.rmtree(crashes, ignore_errors=True)
+        environment = child_environment({GPU_LIFETIME_LOG_VARIABLE: str(lifetime)})
+        try:
+            result = run_json_script(f"{name}, run {run} of {runs}", SCRIPTS / "Test.py",
+                                     debug_heap_run_options(arguments), TIMEOUTS["debug-heap"] + SUITE_GRACE_SECONDS,
+                                     console, environment)
+        except ToolNotFoundError as error:
+            return Step(name, Status.FAILED, str(error), time.monotonic() - started, exit_code=EXIT_INIT_FAILED)
+        status, detail, exit_code = evaluate_debug_heap_run(result)
+        for report in debug_heap_suite_reports():
+            if report.is_file():
+                shutil.copy2(report, directory / report.name)
+        crash_files = [path for crashes in debug_heap_suite_crashes() if crashes.is_dir()
+                       for path in sorted(crashes.iterdir()) if path.is_file()]
+        kept_reports: list[str] = []
+        if crash_files:
+            kept = directory / "Crashes"
+            kept.mkdir(exist_ok=True)
+            for path in crash_files:
+                copy = kept / path.name
+                shutil.copy2(path, copy)
+                # Test.py's detail names the original, which the next run deletes; the copy stays.
+                detail = detail.replace(paths.display_path(path), paths.display_path(copy))
+                if path.suffix == ".txt":
+                    kept_reports.append(paths.display_path(copy))
+        outcomes.append({"run": run, "status": status.value, "detail": detail,
+                         "durationSeconds": round(result.duration, 1), "lifetimeLogs": count_lifetime_logs(lifetime),
+                         "crashReports": kept_reports, "directory": paths.display_path(directory)})
+        console.print(f"{name}, run {run} of {runs}: {status.value}: {detail}")
+        if exit_code == EXIT_INIT_FAILED:
+            return Step(name, Status.FAILED, f"run {run}: {detail}", time.monotonic() - started,
+                        exit_code=EXIT_INIT_FAILED, data={"runs": outcomes})
+    duration = time.monotonic() - started
+    data = {"runs": outcomes, "reports": paths.display_path(DEBUG_HEAP_REPORTS)}
+    failed = [outcome for outcome in outcomes if outcome["status"] in (Status.FAILED.value, Status.TIMEOUT.value)]
+    if failed:
+        listed = "; ".join(f"run {outcome['run']}: {outcome['detail']}" for outcome in failed)
+        timed_out = all(outcome["status"] == Status.TIMEOUT.value for outcome in failed)
+        status = Status.TIMEOUT if timed_out else Status.FAILED
+        return Step(name, status, f"{len(failed)} of {runs} run(s) failed ({listed}); lifetime logs and reports in "
+                                  f"{paths.display_path(DEBUG_HEAP_REPORTS)}", duration, data=data)
+    warned = [outcome for outcome in outcomes if outcome["status"] == Status.WARNING.value]
+    if warned:
+        return Step(name, Status.WARNING, "; ".join(f"run {outcome['run']}: {outcome['detail']}" for outcome in warned),
+                    duration, data=data)
+    return Step(name, Status.PASSED, f"{runs} run(s) of the {DEBUG_HEAP_CONFIG} gpu suite on the debug heap passed "
+                                     f"under both API caps; lifetime logs in {paths.display_path(DEBUG_HEAP_REPORTS)}",
+                duration, data=data)
+
+
+# --------------------------------------------------------------------------------------------------------------------
 # fuzz
 # --------------------------------------------------------------------------------------------------------------------
 
@@ -1116,13 +1294,15 @@ STEP_FUNCTIONS = {
     "asan-build": step_asan_build,
     "asan-unit": step_asan_unit,
     "asan-feature": step_asan_feature,
+    "debug-heap": step_debug_heap,
     "fuzz": step_fuzz,
 }
 
 
 def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run the hardening stage: perf capture, soak, AddressSanitizer build and suites, long fuzz.",
+        description="Run the hardening stage: perf capture, soak, AddressSanitizer build and suites, the gpu suite on "
+                    "the debug heap, long fuzz.",
         epilog="Exit codes: 0 every step passed (or warned), 1 a step failed, 2 usage error, 3 a build output, the "
                "AddressSanitizer runtime or a current export package is missing, or the machine has too little memory "
                "or too few CPUs for the fuzz to finish in time (it needs as many logical CPUs and GiB of available "
@@ -1148,6 +1328,11 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
                              f"least that, a multiple of {hardening.SOAK_SAMPLE_INTERVAL}); a longer soak confirms a "
                              f"script heap result that was inconclusive because a collection cycle is longer than "
                              f"about a quarter of the soak; the step's deadline grows in proportion")
+    parser.add_argument("--debug-heap-runs", type=int, default=1, metavar="N",
+                        help="debug-heap: run the Debug gpu suite on the debug heap N times (default 1; the crash runs "
+                             "of M18's W18.2 take 20), each run's reports and lifetime logs in "
+                             "bin/TestResults/DebugHeap/Run<k>/; every run runs, and the step's deadline grows in "
+                             "proportion")
     parser.add_argument("--fuzz-processes", type=int,
                         help="fuzz: processes instead of the computed count; a development aid that makes the step a "
                              "warning, and a count below the minimum the step's budget needs (14 at 1,000,000 "
@@ -1160,7 +1345,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
         arguments.steps = paths.parse_name_list(arguments.steps, STEPS, "step")
     except ValueError as error:
         parser.error(str(error))
-    for option in ("jobs", "fuzz_iterations", "fuzz_processes"):
+    for option in ("jobs", "fuzz_iterations", "fuzz_processes", "debug_heap_runs"):
         value = getattr(arguments, option)
         if value is not None and value < 1:
             parser.error(f"--{option.replace('_', '-')} must be at least 1")
@@ -1175,6 +1360,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     configure_stdio()
     arguments = parse_arguments(sys.argv[1:] if argv is None else argv)
+    paths.enter_repository_root()
     console = Console(arguments.json)
     try:
         host = paths.host()
@@ -1217,10 +1403,11 @@ def take_machine_locks(arguments: argparse.Namespace, console: Console) -> locks
 
 
 def longest_run_seconds(target_count: int) -> float:
-    """The longest a run of every step can take with `target_count` fuzz targets: every step's timeout, the sanitized
-    suites' graces and the fuzz step's budget (hardening.fuzz_budget_seconds), which its timeout never exceeds. CI.py's
-    bound on the whole hardening run must exceed it (Tests/Automation/test_hardening.py)."""
-    return (sum(TIMEOUTS.values()) + SUITE_GRACE_SECONDS * len(SANITIZED_SUITES)
+    """The longest a run of every step can take with `target_count` fuzz targets and one run of the debug-heap step:
+    every step's timeout, the graces of the sanitized suites and the debug-heap step (GRACED_STEPS) and the fuzz step's
+    budget (hardening.fuzz_budget_seconds), which its timeout never exceeds. CI.py's bound on the whole hardening run
+    must exceed it (Tests/Automation/test_hardening.py)."""
+    return (sum(TIMEOUTS.values()) + SUITE_GRACE_SECONDS * len(GRACED_STEPS)
             + hardening.fuzz_budget_seconds(target_count))
 
 

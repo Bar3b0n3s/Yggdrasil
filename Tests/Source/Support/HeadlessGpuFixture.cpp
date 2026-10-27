@@ -168,6 +168,7 @@ namespace Engine {
 			specification.Graphics.FramesInFlight = options.FramesInFlight;
 			specification.Graphics.InjectFault = options.InjectFault;
 			specification.Graphics.DisableDepthClamp = options.DisableDepthClamp;
+			specification.Graphics.ResetWaitMilliseconds = options.ResetWaitMilliseconds;
 			specification.ApplicationName = "Tests";
 			Result<Scope<GraphicsDevice>> device = GraphicsDevice::Create(specification);
 			if (!device.has_value())

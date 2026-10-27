@@ -80,12 +80,12 @@ namespace Engine {
 			return Scope<PendingOperation>(CreateScope<DebugPendOperation>(params.Frames, client));
 		}
 
-		Result<DebugDeviceLostResult> DebugDeviceLost(EditorMethodContext& context, const NoParams& /*params*/)
+		Result<DebugDeviceLostResult> DebugDeviceLost(EditorMethodContext& context, const DebugDeviceLostParams& params)
 		{
 			const auto& specification = context.GetServer().GetSpecification();
 			if (specification.RendererName == "none" || !specification.QueueDeviceLost)
 				return MakeError(ErrorCode::Unsupported, "This host cannot queue an injected device loss");
-			ENGINE_TRY(specification.QueueDeviceLost());
+			ENGINE_TRY(specification.QueueDeviceLost(params.Unrecoverable));
 			return DebugDeviceLostResult{ .Queued = true };
 		}
 
@@ -106,6 +106,10 @@ namespace Engine {
 		registry.Struct<DebugPendResult>("DebugPendResult", "How the test hook debug.pend resolved.")
 			.Field("frames", &DebugPendResult::Frames, "The frames (polls) it took.");
 
+		registry.Struct<DebugDeviceLostParams>("DebugDeviceLostParams", "The params of the test hook debug.deviceLost.")
+			.Field("unrecoverable", &DebugDeviceLostParams::Unrecoverable,
+				"Whether the recovery fails too, so the editor autosaves and exits 4 instead of recovering the device.");
+
 		registry.Struct<DebugDeviceLostResult>("DebugDeviceLostResult", "Whether the rendering host queued an injected device loss.")
 			.Field("queued", &DebugDeviceLostResult::Queued, "The fault is queued for a submission after the host publishes its autosave snapshot.");
 	}
@@ -113,7 +117,8 @@ namespace Engine {
 	void RegisterDebugMethods(MethodRegistry& methods)
 	{
 		methods.Add({ .Name = "debug.deviceLost",
-						.Description = "Test hook: queue device loss on the next rendering submission after publishing the editor's autosave snapshot.",
+						.Description = "Test hook: queue device loss on the next rendering submission after publishing the editor's autosave snapshot; "
+									   "unrecoverable makes its recovery fail.",
 						.TestHook = true,
 						.Examples = { { .Description = "Exercise crash recovery after making a dirty edit.", .Params = Json::object() } } },
 			&Automation::DebugDeviceLost);

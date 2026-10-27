@@ -28,17 +28,66 @@ namespace Engine {
 		Vulkan14
 	};
 
-	// The faults --gpu-inject-fault forces in non-Dist builds (§8.14 item 8; GpuDiagnostics).
+	// The faults --gpu-inject-fault forces in non-Dist builds (§8.14 item 8; GpuDiagnostics). Values are appended, never
+	// reordered.
 	enum class GpuFault : uint8_t
 	{
 		None,
-		DeviceLost, // "device-lost": the device-lost flag is set after the next submission
+		// "device-lost": the device-lost flag is set after a submission. M18 (C18.3, Docs/Decisions/0029-m18-contract.md
+		// decision 30): at the first submission after the device's first RunGarbageCollection (an application's second
+		// frame, once its startup objects exist), once per process; the frame boundary recovers it (GraphicsDevice::Recover)
+		// and the process keeps running.
+		DeviceLost,
 		OomTexture, // "oom-texture": creating a sampled-only texture fails as if the device were out of memory
-		Hang,       // "hang": every bounded GPU wait times out until its budget is spent, so the first one ends in GpuHang
+		// "hang": every bounded GPU wait times out, its 10 s budget and then its reset wait (M18, C18.4: no loss report
+		// arrives), so the first wait with a submission ends in GpuHang: the hang that stays fatal.
+		Hang,
 		// "oom-specialization": creating a specialized shader fails as if the device were out of memory. Only the debug views'
 		// forward pipelines, created on first use (§8.5), specialize shaders, so startup is unaffected.
-		OomSpecialization
+		OomSpecialization,
+		// M18 (C18.3, decision 30), "device-lost-unrecoverable": the same loss as DeviceLost, and every device creation of its
+		// recovery fails (GpuDiagnostics::ShouldFailDeviceRecreation) without the reset wait, so the recovery ends in
+		// FatalError(DeviceLost) after its one retry: the editor's autosave, a crash report and exit code 4.
+		DeviceLostUnrecoverable,
+		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 46): the hangs a driver or the operating system resets
+		// (GpuDiagnostics::TakeBoundedWaitFault). "hang-reset": the first bounded wait after the device's first garbage
+		// collection times out its 10 s budget, and the first slice of its reset wait reports the device lost, which the frame
+		// boundary recovers like any loss; once per process. "hang-reset-persistent": every bounded wait after the first
+		// garbage collection does so, the recovered device's included, so a device that hangs again after its recovery is
+		// recovered again.
+		HangReset,
+		HangResetPersistent,
+		// M18 (C18.4, decision 46): out-of-memory after startup, one kind of creation each (GpuDiagnostics::
+		// TakeRenderTargetCreationFault, TakePipelineCreationFault, TakeSwapchainCreationFault). "oom-rendertarget": the first
+		// creation of a render-target or storage texture (isRenderTarget or isUAV) after the device's first garbage collection
+		// fails as if the device were out of memory, once per process, so the request's retry after its trim succeeds.
+		// "oom-pipeline": the same for the first graphics or compute pipeline; "oom-swapchain": for the first swapchain
+		// creation (a resize's recreation). Their "-persistent" spellings fail every such creation after the first garbage
+		// collection, the retry's included, so the request fails alone with ErrorCode::OutOfMemory. None of them strikes an
+		// application's startup, unless GpuFaultAtStartupVariable arms it at the device's creation (decision 46).
+		OomRenderTarget,
+		OomRenderTargetPersistent,
+		OomPipeline,
+		OomPipelinePersistent,
+		OomSwapchain,
+		OomSwapchainPersistent
 	};
+
+	// M18 (C18.4, decision 46): the environment variable that arms the injected faults that otherwise arm at the device's
+	// first garbage collection (the device-lost faults, the hang resets and the oom-* faults of C18.4) at the device's
+	// creation instead, so they strike an application's startup: "1" arms them, anything else (or unset) leaves the
+	// garbage-collection arming. GraphicsDevice::Create reads it in non-Dist builds (GpuTestHooksEnabled), like
+	// ENGINE_VULKAN_LOADER, and a process test sets it to prove that out-of-memory at startup stays fatal (exit code 4, a
+	// crash report and the editor's autosave hook) while the same fault after startup fails only its request.
+	inline constexpr std::string_view GpuFaultAtStartupVariable = "ENGINE_GPU_FAULT_AT_STARTUP";
+
+	// M18 (C18.3, decision 29; C18.4, decisions 40 and 41): the default reset wait (GraphicsSpecification::
+	// ResetWaitMilliseconds), long enough for the operating systems' GPU resets: a Windows TDR takes about 2 s plus the
+	// driver's recovery, a Linux kernel GPU hang check up to about 10 s.
+	inline constexpr uint32_t DefaultGpuResetWaitMilliseconds = 15'000;
+	// M18 (C18.4, decision 41): the longest reset wait --gpu-reset-wait accepts, two minutes, so a hang that no reset ends
+	// still ends the process in bounded time (a Windows TdrDelay raised up to about 110 s still fits).
+	inline constexpr uint32_t MaxGpuResetWaitMilliseconds = 120'000;
 
 	// Whether Vulkan and NVRHI validation is on by default in this configuration (§2.2): on in Debug, off in Release
 	// (--gpu-validation turns it on; the GPU tests always do), never in Dist.
@@ -50,7 +99,8 @@ namespace Engine {
 #endif
 
 	// Whether this build honours the GPU test hooks: --gpu-inject-fault and the ENGINE_VULKAN_LOADER environment variable
-	// (§8.14 item 8, Roadmap M5). Dist builds ignore both.
+	// (§8.14 item 8, Roadmap M5), and (M18, C18.4) the ENGINE_GPU_FAULT_AT_STARTUP environment variable
+	// (GpuFaultAtStartupVariable). Dist builds ignore them.
 	inline constexpr bool GpuTestHooksEnabled =
 #if defined(ENGINE_DIST)
 		false;
@@ -85,6 +135,18 @@ namespace Engine {
 		// every device. Honoured in every configuration, with no command-line option, so callers can deterministically
 		// exercise the extended-near shadow fallback.
 		bool DisableDepthClamp = false;
+		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 29; C18.4, decisions 40 and 41): the reset wait, the one
+		// setting of the operating system's GPU reset window. A bounded wait whose 10 s budget timed out waits up to this long
+		// more, in GpuWaitSliceNanoseconds slices, for a loss report before the hang is fatal (WaitForSubmission, FramePacer.h),
+		// and a device-loss recovery whose first device creation fails waits this long before its one retry
+		// (GraphicsDevice::Recover). 0 waits neither: a hang is fatal when its budget times out, and the recovery retries at
+		// once. Set by --gpu-reset-wait <milliseconds> in every configuration, Dist included, because the reset window
+		// belongs to the machine that runs the process, not to a project (decision 41); the option accepts 0 to
+		// MaxGpuResetWaitMilliseconds. A specification set in code may hold any value (tests set UINT32_MAX to prove that a
+		// path takes no wait), and GetGpuResetWaitSliceCount (FramePacer.h) handles every uint32_t. Tests never wait it: an
+		// injected hang reset reports the loss at the reset wait's first slice, and an injected recreation failure retries
+		// at once.
+		uint32_t ResetWaitMilliseconds = DefaultGpuResetWaitMilliseconds;
 	};
 
 	// "None" or "Vulkan".
@@ -140,16 +202,27 @@ namespace Engine {
 		return std::nullopt;
 	}
 
-	// The --gpu-inject-fault spelling: "none", "device-lost", "oom-texture", "hang" or "oom-specialization".
+	// The --gpu-inject-fault spelling: "none", "device-lost", "oom-texture", "hang", "oom-specialization",
+	// "device-lost-unrecoverable", "hang-reset", "hang-reset-persistent", "oom-rendertarget", "oom-rendertarget-persistent",
+	// "oom-pipeline", "oom-pipeline-persistent", "oom-swapchain" or "oom-swapchain-persistent".
 	[[nodiscard]] constexpr std::string_view GpuFaultToString(GpuFault fault)
 	{
 		switch (fault)
 		{
-			case GpuFault::None:              return "none";
-			case GpuFault::DeviceLost:        return "device-lost";
-			case GpuFault::OomTexture:        return "oom-texture";
-			case GpuFault::Hang:              return "hang";
-			case GpuFault::OomSpecialization: return "oom-specialization";
+			case GpuFault::None:                      return "none";
+			case GpuFault::DeviceLost:                return "device-lost";
+			case GpuFault::OomTexture:                return "oom-texture";
+			case GpuFault::Hang:                      return "hang";
+			case GpuFault::OomSpecialization:         return "oom-specialization";
+			case GpuFault::DeviceLostUnrecoverable:   return "device-lost-unrecoverable";
+			case GpuFault::HangReset:                 return "hang-reset";
+			case GpuFault::HangResetPersistent:       return "hang-reset-persistent";
+			case GpuFault::OomRenderTarget:           return "oom-rendertarget";
+			case GpuFault::OomRenderTargetPersistent: return "oom-rendertarget-persistent";
+			case GpuFault::OomPipeline:               return "oom-pipeline";
+			case GpuFault::OomPipelinePersistent:     return "oom-pipeline-persistent";
+			case GpuFault::OomSwapchain:              return "oom-swapchain";
+			case GpuFault::OomSwapchainPersistent:    return "oom-swapchain-persistent";
 		}
 		return "unknown";
 	}
@@ -167,6 +240,24 @@ namespace Engine {
 			return GpuFault::Hang;
 		if (text == "oom-specialization")
 			return GpuFault::OomSpecialization;
+		if (text == "device-lost-unrecoverable")
+			return GpuFault::DeviceLostUnrecoverable;
+		if (text == "hang-reset")
+			return GpuFault::HangReset;
+		if (text == "hang-reset-persistent")
+			return GpuFault::HangResetPersistent;
+		if (text == "oom-rendertarget")
+			return GpuFault::OomRenderTarget;
+		if (text == "oom-rendertarget-persistent")
+			return GpuFault::OomRenderTargetPersistent;
+		if (text == "oom-pipeline")
+			return GpuFault::OomPipeline;
+		if (text == "oom-pipeline-persistent")
+			return GpuFault::OomPipelinePersistent;
+		if (text == "oom-swapchain")
+			return GpuFault::OomSwapchain;
+		if (text == "oom-swapchain-persistent")
+			return GpuFault::OomSwapchainPersistent;
 		return std::nullopt;
 	}
 

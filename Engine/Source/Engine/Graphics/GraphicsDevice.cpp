@@ -4,10 +4,12 @@
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/FatalError.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Graphics/FramePacer.h"
 #include "Engine/Graphics/GpuProfiler.h"
 #include "Engine/Graphics/HostImageUpload.h"
 #include "Engine/Graphics/VulkanDispatch.h"
 #include "Engine/Platform/Environment.h"
+#include "Engine/Platform/Window.h"
 
 // Order matters: glfw3.h declares its Vulkan functions (glfwGetRequiredInstanceExtensions,
 // glfwGetPhysicalDevicePresentationSupport) only when the Vulkan headers come first.
@@ -18,9 +20,11 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <format>
 #include <limits>
 #include <optional>
+#include <thread>
 
 // Device creation (Architecture §8.1) through the dispatcher's C entry points, which report failures as VkResult values.
 // NVRHI's own Vulkan calls use vulkan.hpp's enhanced mode and throw vk::SystemError; this file is one of the allowlisted
@@ -371,6 +375,66 @@ namespace Engine {
 			return shader != nullptr ? DebugNameOrUnnamed(shader->getDesc().debugName) : std::string_view("none");
 		}
 
+		// A creation wrapper's refusal on a lost device (decision 28): "cannot create texture 'SceneColor': the device is lost".
+		static Error MakeLostDeviceError(std::string_view type, std::string_view name)
+		{
+			return Error(ErrorCode::Gpu, std::format("cannot create {} '{}': the device is lost", type, name));
+		}
+
+		// The host's answers to the two Vulkan calls through which NVRHI's queue submits and retires command lists, for a
+		// device that runs nothing more (decision 28): a submission that reaches no queue, and a timeline that has passed every
+		// submission. Neither reaches the loader, the validation layer or the driver, so a really lost device is never asked.
+		static VKAPI_ATTR VkResult VKAPI_CALL SubmitNothing(VkQueue /*queue*/, uint32_t /*submitCount*/, const VkSubmitInfo* /*submits*/,
+			VkFence /*fence*/)
+		{
+			return VK_SUCCESS;
+		}
+
+		static VKAPI_ATTR VkResult VKAPI_CALL ReportEverySubmissionCompleted(VkDevice /*device*/, VkSemaphore /*semaphore*/, uint64_t* value)
+		{
+			*value = std::numeric_limits<uint64_t>::max();
+			return VK_SUCCESS;
+		}
+
+		// While alive, the default dispatcher, which NVRHI calls Vulkan through, answers vkQueueSubmit and
+		// vkGetSemaphoreCounterValue on the host (above), so NVRHI's own bookkeeping runs for a lost device: a list executed
+		// on it is recorded as submitted (CommandList::executed drops the recording that keeps a closed list alive), and its
+		// garbage collection retires every list in flight. Main thread only, around one NVRHI call, like the memory tracker's
+		// entry points (VulkanDispatch.h); first-party code calls neither entry point meanwhile. Not copyable or movable.
+		class HostAnsweredQueue
+		{
+		public:
+			HostAnsweredQueue()
+				: m_QueueSubmit(VULKAN_HPP_DEFAULT_DISPATCHER.vkQueueSubmit),
+				  m_GetSemaphoreCounterValue(VULKAN_HPP_DEFAULT_DISPATCHER.vkGetSemaphoreCounterValue)
+			{
+				VULKAN_HPP_DEFAULT_DISPATCHER.vkQueueSubmit = &SubmitNothing;
+				VULKAN_HPP_DEFAULT_DISPATCHER.vkGetSemaphoreCounterValue = &ReportEverySubmissionCompleted;
+			}
+
+			~HostAnsweredQueue()
+			{
+				VULKAN_HPP_DEFAULT_DISPATCHER.vkQueueSubmit = m_QueueSubmit;
+				VULKAN_HPP_DEFAULT_DISPATCHER.vkGetSemaphoreCounterValue = m_GetSemaphoreCounterValue;
+			}
+
+			HostAnsweredQueue(const HostAnsweredQueue&) = delete;
+			HostAnsweredQueue& operator=(const HostAnsweredQueue&) = delete;
+		private:
+			PFN_vkQueueSubmit m_QueueSubmit = nullptr;
+			PFN_vkGetSemaphoreCounterValue m_GetSemaphoreCounterValue = nullptr;
+		};
+
+		// The default dispatcher with the loader's global commands only, so no pointer into a destroyed instance or device
+		// survives; the next device initializes it again (GraphicsDevice::Create's and Recover's CreateInstance).
+		static void ResetDispatcherToLoader()
+		{
+			const auto getInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(VulkanDispatch::GetInstanceProcAddr());
+			VULKAN_HPP_DEFAULT_DISPATCHER = vk::detail::DispatchLoaderDynamic();
+			if (getInstanceProcAddr != nullptr)
+				VULKAN_HPP_DEFAULT_DISPATCHER.init(getInstanceProcAddr);
+		}
+
 	}
 
 	GraphicsDevice::GraphicsDevice(ConstructionKey /*key*/, const GraphicsSpecification& specification)
@@ -398,13 +462,17 @@ namespace Engine {
 		if (m_IsShutDown)
 			return;
 		m_IsShutDown = true;
-		const vk::detail::DispatchLoaderDynamic& dispatcher = VULKAN_HPP_DEFAULT_DISPATCHER;
 
 		// 1. Nothing may still run on the GPU, and the retired command lists drop their references. The C entry point
-		// reports failures as values (§4.6 item 2): nothing may throw out of a destructor.
-		if (m_NvrhiDevice)
+		// reports failures as values (§4.6 item 2): nothing may throw out of a destructor. A lost device (M18: a failed
+		// recovery, or a test that ends lost) is never asked for its completed work: its lost path retires everything.
+		if (IsLost())
 		{
-			const VkResult idle = dispatcher.vkDeviceWaitIdle(m_Device);
+			CollectLostDevice();
+		}
+		else if (m_NvrhiDevice)
+		{
+			const VkResult idle = VULKAN_HPP_DEFAULT_DISPATCHER.vkDeviceWaitIdle(m_Device);
 			if (idle != VK_SUCCESS)
 				ENGINE_CORE_ERROR("vkDeviceWaitIdle failed at GPU device shutdown: {}", VkResultToString(idle));
 			m_NvrhiDevice->runGarbageCollection();
@@ -425,8 +493,22 @@ namespace Engine {
 		m_ResourceTracker.ReleaseAll();
 
 		// 3. §8.14 item 4: NVRHI device, VkDevice, debug messenger, VkInstance.
+		DestroyVulkanObjects();
+
+		// 4. The default dispatcher keeps only the loader's global commands (the next device initializes it again).
+		if (m_IsRegistered)
+		{
+			Utils::ResetDispatcherToLoader();
+			VulkanDispatch::UnregisterDevice();
+		}
+	}
+
+	void GraphicsDevice::DestroyVulkanObjects()
+	{
+		const vk::detail::DispatchLoaderDynamic& dispatcher = VULKAN_HPP_DEFAULT_DISPATCHER;
 		m_NvrhiDevice = nullptr;
 		m_VulkanNvrhiDevice = nullptr;
+		m_GraphicsQueueTimelineSemaphore = VK_NULL_HANDLE;
 		if (m_IsMemoryTracking)
 		{
 			const uint32_t remaining = VulkanDispatch::GetMemoryAllocationCount(m_Device);
@@ -438,21 +520,17 @@ namespace Engine {
 		}
 		if (m_Device != VK_NULL_HANDLE)
 			dispatcher.vkDestroyDevice(m_Device, nullptr);
+		m_Device = VK_NULL_HANDLE;
+		m_GraphicsQueue = VK_NULL_HANDLE;
+		m_PhysicalDevice = VK_NULL_HANDLE;
 		if (m_DebugMessenger != VK_NULL_HANDLE)
 			dispatcher.vkDestroyDebugUtilsMessengerEXT(m_Instance, m_DebugMessenger, nullptr);
+		m_DebugMessenger = VK_NULL_HANDLE;
 		if (m_Instance != VK_NULL_HANDLE)
 			dispatcher.vkDestroyInstance(m_Instance, nullptr);
-
-		// 4. The default dispatcher keeps only the loader's global commands, so no pointer into a destroyed instance or
-		// device survives (the next device initializes it again).
-		if (m_IsRegistered)
-		{
-			const auto getInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(VulkanDispatch::GetInstanceProcAddr());
-			VULKAN_HPP_DEFAULT_DISPATCHER = vk::detail::DispatchLoaderDynamic();
-			if (getInstanceProcAddr != nullptr)
-				VULKAN_HPP_DEFAULT_DISPATCHER.init(getInstanceProcAddr);
-			VulkanDispatch::UnregisterDevice();
-		}
+		m_Instance = VK_NULL_HANDLE;
+		m_InstanceExtensions.clear();
+		m_DeviceExtensions.clear();
 	}
 
 	Result<Scope<GraphicsDevice>> GraphicsDevice::Create(const GraphicsDeviceSpecification& specification)
@@ -479,6 +557,13 @@ namespace Engine {
 		Scope<GraphicsDevice> device = CreateScope<GraphicsDevice>(ConstructionKey(), graphics);
 		VulkanDispatch::RegisterDevice();
 		device->m_IsRegistered = true;
+		// The startup arming of the injected faults (decision 46), before the device's first creation, so they strike an
+		// application's startup, whose failures stay fatal. Recover runs Create's steps without this: it never arms again.
+		if constexpr (GpuTestHooksEnabled)
+		{
+			if (ReadEnvironmentVariable(GpuFaultAtStartupVariable) == "1")
+				device->m_Diagnostics.ArmInjectedFault();
+		}
 		ENGINE_TRY(device->CreateInstance(specification));
 		ENGINE_TRY(device->CreateLogicalDevice(specification));
 		ENGINE_TRY(device->CreateNvrhiDevice());
@@ -883,10 +968,18 @@ namespace Engine {
 
 	Result<nvrhi::TextureHandle> GraphicsDevice::CreateTexture(const nvrhi::TextureDesc& desc)
 	{
+		if (IsLost())
+			return std::unexpected(Utils::MakeLostDeviceError("texture", Utils::DebugNameOrUnnamed(desc.debugName)));
 		if (m_Diagnostics.ShouldFailTextureCreation(desc))
 		{
 			return MakeError(ErrorCode::Gpu, "cannot create texture {}: out of device memory (injected by --gpu-inject-fault={})",
 				Utils::DescribeTexture(desc), GpuFaultToString(GpuFault::OomTexture));
+		}
+		// A render-target or storage texture takes C18.4's injected fault, which strikes once armed (decision 46).
+		if ((desc.isRenderTarget || desc.isUAV) && m_Diagnostics.TakeRenderTargetCreationFault())
+		{
+			return MakeError(ErrorCode::Gpu, "cannot create texture {}: out of device memory (injected by --gpu-inject-fault={})",
+				Utils::DescribeTexture(desc), GpuFaultToString(m_Diagnostics.GetInjectedFault()));
 		}
 		nvrhi::TextureHandle texture = m_NvrhiDevice->createTexture(desc);
 		if (!texture)
@@ -897,6 +990,8 @@ namespace Engine {
 
 	Result<nvrhi::StagingTextureHandle> GraphicsDevice::CreateStagingTexture(const nvrhi::TextureDesc& desc, nvrhi::CpuAccessMode cpuAccess)
 	{
+		if (IsLost())
+			return std::unexpected(Utils::MakeLostDeviceError("staging texture", Utils::DebugNameOrUnnamed(desc.debugName)));
 		nvrhi::StagingTextureHandle texture = m_NvrhiDevice->createStagingTexture(desc, cpuAccess);
 		if (!texture)
 			return MakeError(ErrorCode::Gpu, "cannot create staging texture {}", Utils::DescribeTexture(desc));
@@ -906,6 +1001,8 @@ namespace Engine {
 
 	Result<nvrhi::BufferHandle> GraphicsDevice::CreateBuffer(const nvrhi::BufferDesc& desc)
 	{
+		if (IsLost())
+			return std::unexpected(Utils::MakeLostDeviceError("buffer", Utils::DebugNameOrUnnamed(desc.debugName)));
 		nvrhi::BufferHandle buffer = m_NvrhiDevice->createBuffer(desc);
 		if (!buffer)
 			return MakeError(ErrorCode::Gpu, "cannot create buffer '{}' ({} bytes)", Utils::DebugNameOrUnnamed(desc.debugName), desc.byteSize);
@@ -915,6 +1012,9 @@ namespace Engine {
 
 	Result<nvrhi::SamplerHandle> GraphicsDevice::CreateSampler(const nvrhi::SamplerDesc& desc)
 	{
+		// Sampler descriptions carry no debug name.
+		if (IsLost())
+			return std::unexpected(Utils::MakeLostDeviceError("sampler", "unnamed"));
 		nvrhi::SamplerHandle sampler = m_NvrhiDevice->createSampler(desc);
 		if (!sampler)
 		{
@@ -928,6 +1028,8 @@ namespace Engine {
 
 	Result<nvrhi::ShaderHandle> GraphicsDevice::CreateShader(const nvrhi::ShaderDesc& desc, std::span<const std::byte> binary)
 	{
+		if (IsLost())
+			return std::unexpected(Utils::MakeLostDeviceError("shader", Utils::DebugNameOrUnnamed(desc.debugName)));
 		nvrhi::ShaderHandle shader = m_NvrhiDevice->createShader(desc, binary.data(), binary.size());
 		if (!shader)
 		{
@@ -941,6 +1043,8 @@ namespace Engine {
 	Result<nvrhi::ShaderHandle> GraphicsDevice::CreateShaderSpecialization(nvrhi::IShader& baseShader,
 		std::span<const nvrhi::ShaderSpecialization> constants)
 	{
+		if (IsLost())
+			return std::unexpected(Utils::MakeLostDeviceError("shader specialization", Utils::DebugNameOrUnnamed(baseShader.getDesc().debugName)));
 		if (m_Diagnostics.ShouldFailShaderSpecialization())
 		{
 			return MakeError(ErrorCode::Gpu, "cannot create a specialization of shader '{}': out of device memory (injected by --gpu-inject-fault={})",
@@ -960,6 +1064,8 @@ namespace Engine {
 	Result<nvrhi::InputLayoutHandle> GraphicsDevice::CreateInputLayout(std::span<const nvrhi::VertexAttributeDesc> attributes,
 		nvrhi::IShader* vertexShader)
 	{
+		if (IsLost())
+			return std::unexpected(Utils::MakeLostDeviceError("input layout", Utils::GetShaderName(vertexShader)));
 		nvrhi::InputLayoutHandle layout =
 			m_NvrhiDevice->createInputLayout(attributes.data(), static_cast<uint32_t>(attributes.size()), vertexShader);
 		if (!layout)
@@ -973,6 +1079,8 @@ namespace Engine {
 
 	Result<nvrhi::BindingLayoutHandle> GraphicsDevice::CreateBindingLayout(const nvrhi::BindingLayoutDesc& desc)
 	{
+		if (IsLost())
+			return std::unexpected(Utils::MakeLostDeviceError("binding layout", std::format("space {}", desc.registerSpace)));
 		nvrhi::BindingLayoutHandle layout = m_NvrhiDevice->createBindingLayout(desc);
 		if (!layout)
 		{
@@ -985,6 +1093,8 @@ namespace Engine {
 
 	Result<nvrhi::BindingSetHandle> GraphicsDevice::CreateBindingSet(const nvrhi::BindingSetDesc& desc, nvrhi::IBindingLayout& layout)
 	{
+		if (IsLost())
+			return std::unexpected(Utils::MakeLostDeviceError("binding set", std::format("{} bindings", desc.bindings.size())));
 		nvrhi::BindingSetHandle set = m_NvrhiDevice->createBindingSet(desc, &layout);
 		if (!set)
 			return MakeError(ErrorCode::Gpu, "cannot create a binding set ({} bindings)", desc.bindings.size());
@@ -994,13 +1104,15 @@ namespace Engine {
 
 	Result<nvrhi::FramebufferHandle> GraphicsDevice::CreateFramebuffer(const nvrhi::FramebufferDesc& desc)
 	{
+		// A framebuffer is named after its first attachment.
+		const nvrhi::ITexture* first = !desc.colorAttachments.empty() ? desc.colorAttachments[0].texture : desc.depthAttachment.texture;
+		const std::string_view name = first != nullptr ? Utils::DebugNameOrUnnamed(first->getDesc().debugName) : std::string_view("nothing");
+		if (IsLost())
+			return std::unexpected(Utils::MakeLostDeviceError("framebuffer", name));
 		nvrhi::FramebufferHandle framebuffer = m_NvrhiDevice->createFramebuffer(desc);
 		if (!framebuffer)
 		{
-			// A framebuffer is named after its first attachment.
-			const nvrhi::ITexture* first = !desc.colorAttachments.empty() ? desc.colorAttachments[0].texture : desc.depthAttachment.texture;
-			return MakeError(ErrorCode::Gpu, "cannot create a framebuffer for '{}' ({} color attachments{})",
-				first != nullptr ? Utils::DebugNameOrUnnamed(first->getDesc().debugName) : std::string_view("nothing"), desc.colorAttachments.size(),
+			return MakeError(ErrorCode::Gpu, "cannot create a framebuffer for '{}' ({} color attachments{})", name, desc.colorAttachments.size(),
 				desc.depthAttachment.valid() ? ", depth" : "");
 		}
 		m_ResourceTracker.Track(GpuResourceType::Framebuffer, framebuffer.Get());
@@ -1010,6 +1122,13 @@ namespace Engine {
 	Result<nvrhi::GraphicsPipelineHandle> GraphicsDevice::CreateGraphicsPipeline(const nvrhi::GraphicsPipelineDesc& desc,
 		const nvrhi::FramebufferInfo& framebufferInfo)
 	{
+		if (IsLost())
+			return std::unexpected(Utils::MakeLostDeviceError("graphics pipeline", Utils::GetShaderName(desc.VS.Get())));
+		if (m_Diagnostics.TakePipelineCreationFault())
+		{
+			return MakeError(ErrorCode::Gpu, "cannot create the graphics pipeline of shaders '{}' and '{}': out of device memory (injected by --gpu-inject-fault={})",
+				Utils::GetShaderName(desc.VS.Get()), Utils::GetShaderName(desc.PS.Get()), GpuFaultToString(m_Diagnostics.GetInjectedFault()));
+		}
 		nvrhi::GraphicsPipelineHandle pipeline = m_NvrhiDevice->createGraphicsPipeline(desc, framebufferInfo);
 		if (!pipeline)
 		{
@@ -1022,6 +1141,13 @@ namespace Engine {
 
 	Result<nvrhi::ComputePipelineHandle> GraphicsDevice::CreateComputePipeline(const nvrhi::ComputePipelineDesc& desc)
 	{
+		if (IsLost())
+			return std::unexpected(Utils::MakeLostDeviceError("compute pipeline", Utils::GetShaderName(desc.CS.Get())));
+		if (m_Diagnostics.TakePipelineCreationFault())
+		{
+			return MakeError(ErrorCode::Gpu, "cannot create the compute pipeline of shader '{}': out of device memory (injected by --gpu-inject-fault={})",
+				Utils::GetShaderName(desc.CS.Get()), GpuFaultToString(m_Diagnostics.GetInjectedFault()));
+		}
 		nvrhi::ComputePipelineHandle pipeline = m_NvrhiDevice->createComputePipeline(desc);
 		if (!pipeline)
 			return MakeError(ErrorCode::Gpu, "cannot create the compute pipeline of shader '{}'", Utils::GetShaderName(desc.CS.Get()));
@@ -1031,6 +1157,8 @@ namespace Engine {
 
 	Result<nvrhi::CommandListHandle> GraphicsDevice::CreateCommandList(const nvrhi::CommandListParameters& parameters)
 	{
+		if (IsLost())
+			return std::unexpected(Utils::MakeLostDeviceError("command list", "unnamed"));
 		nvrhi::CommandListHandle commandList = m_NvrhiDevice->createCommandList(parameters);
 		if (!commandList)
 			return MakeError(ErrorCode::Gpu, "cannot create a command list");
@@ -1040,6 +1168,8 @@ namespace Engine {
 
 	Result<nvrhi::EventQueryHandle> GraphicsDevice::CreateEventQuery()
 	{
+		if (IsLost())
+			return std::unexpected(Utils::MakeLostDeviceError("event query", "unnamed"));
 		nvrhi::EventQueryHandle query = m_NvrhiDevice->createEventQuery();
 		if (!query)
 			return MakeError(ErrorCode::Gpu, "cannot create an event query");
@@ -1049,6 +1179,8 @@ namespace Engine {
 
 	Result<nvrhi::TimerQueryHandle> GraphicsDevice::CreateTimerQuery()
 	{
+		if (IsLost())
+			return std::unexpected(Utils::MakeLostDeviceError("timer query", "unnamed"));
 		nvrhi::TimerQueryHandle query = m_NvrhiDevice->createTimerQuery();
 		if (!query)
 			return MakeError(ErrorCode::Gpu, "cannot create a timer query (NVRHI's timer query pool may be exhausted)");
@@ -1058,6 +1190,8 @@ namespace Engine {
 
 	Result<nvrhi::TextureHandle> GraphicsDevice::CreateHandleForNativeTexture(VkImage image, const nvrhi::TextureDesc& desc)
 	{
+		if (IsLost())
+			return std::unexpected(Utils::MakeLostDeviceError("texture handle", Utils::DebugNameOrUnnamed(desc.debugName)));
 		// Not tracked (see the header): the image's creator counts it.
 		nvrhi::TextureHandle texture = m_NvrhiDevice->createHandleForNativeTexture(nvrhi::ObjectTypes::VK_Image, nvrhi::Object(image), desc);
 		if (!texture)
@@ -1074,14 +1208,37 @@ namespace Engine {
 	uint64_t GraphicsDevice::ExecuteCommandLists(std::span<nvrhi::ICommandList* const> commandLists)
 	{
 		ENGINE_CORE_ASSERT(!commandLists.empty(), "GraphicsDevice::ExecuteCommandLists without command lists");
+		if (IsLost())
+		{
+			// Nothing reaches the GPU (decision 28). NVRHI still records the lists as executed, so each drops the recording
+			// through which a closed list keeps itself and everything it used alive, once the lost device's submissions are
+			// retired (CollectLostDevice).
+			ExecuteOnHost(commandLists);
+			return m_LastSubmissionID;
+		}
 		const uint64_t submission = m_NvrhiDevice->executeCommandLists(commandLists.data(), commandLists.size(), nvrhi::CommandQueue::Graphics);
 		if (submission != 0)
 			m_LastSubmissionID = submission;
 		// NVRHI reports a device lost inside its submit through the message callback (§8.1); the injected fault likewise.
 		m_Diagnostics.OnSubmitted();
 		if (m_Diagnostics.IsDeviceLost())
-			RaiseDeviceLost("executeCommandLists");
+			ReportDeviceLost("executeCommandLists");
 		return submission;
+	}
+
+	void GraphicsDevice::RetireCommandList(nvrhi::ICommandList& commandList)
+	{
+		const std::array<nvrhi::ICommandList*, 1> lists = { &commandList };
+		ExecuteOnHost(lists);
+	}
+
+	void GraphicsDevice::ExecuteOnHost(std::span<nvrhi::ICommandList* const> commandLists)
+	{
+		// No device after a failed recovery: nothing can have been recorded on it.
+		if (!m_NvrhiDevice)
+			return;
+		const Utils::HostAnsweredQueue hostAnswered;
+		static_cast<void>(m_NvrhiDevice->executeCommandLists(commandLists.data(), commandLists.size(), nvrhi::CommandQueue::Graphics));
 	}
 
 	uint64_t GraphicsDevice::GetLastSubmissionID() const
@@ -1091,12 +1248,15 @@ namespace Engine {
 
 	uint64_t GraphicsDevice::GetCompletedSubmissionID()
 	{
+		// A lost device runs nothing more: nothing in flight will complete, and nothing needs to wait for it (decision 28).
+		if (IsLost())
+			return m_LastSubmissionID;
 		uint64_t value = 0;
 		const VkResult result = VULKAN_HPP_DEFAULT_DISPATCHER.vkGetSemaphoreCounterValue(m_Device, m_GraphicsQueueTimelineSemaphore, &value);
 		if (result == VK_ERROR_DEVICE_LOST)
 		{
-			m_Diagnostics.SetDeviceLost();
-			RaiseDeviceLost("vkGetSemaphoreCounterValue");
+			ReportDeviceLost("vkGetSemaphoreCounterValue");
+			return m_LastSubmissionID;
 		}
 		if (result != VK_SUCCESS)
 			FatalError(GetFatalErrorKind(result), std::format("vkGetSemaphoreCounterValue failed: {}", VkResultToString(result)));
@@ -1105,22 +1265,64 @@ namespace Engine {
 
 	void GraphicsDevice::RunGarbageCollection()
 	{
+		if (IsLost())
+		{
+			CollectLostDevice();
+			return;
+		}
 		// §8.14 item 2, ADR 0009 decision 9: NVRHI retires the completed submissions first, so the sweep sees the
 		// references they dropped, and the host images' release sees the sweep's.
 		m_NvrhiDevice->runGarbageCollection();
 		m_ResourceTracker.Sweep();
 		if (m_HostImageUpload != nullptr)
 			m_HostImageUpload->CollectGarbage();
+		// The first collection arms the injected device-lost faults (decision 30).
+		m_Diagnostics.OnGarbageCollected();
+	}
+
+	void GraphicsDevice::CollectLostDevice()
+	{
+		ENGINE_CORE_ASSERT(IsLost(), "GraphicsDevice::CollectLostDevice on a device that is not lost");
+		// Vulkan returns this in finite time on a lost device, and VK_ERROR_DEVICE_LOST then counts as the completion of every
+		// submission ("Lost Device"); an injected loss leaves the device working, and its real submissions complete. Either
+		// way the GPU runs nothing more, so what the submissions used may be released.
+		if (m_Device != VK_NULL_HANDLE)
+		{
+			const VkResult idle = VULKAN_HPP_DEFAULT_DISPATCHER.vkDeviceWaitIdle(m_Device);
+			if (idle != VK_SUCCESS && idle != VK_ERROR_DEVICE_LOST)
+				ENGINE_CORE_WARN("vkDeviceWaitIdle failed on the lost GPU device: {}", VkResultToString(idle));
+		}
+		// NVRHI's garbage collection asks the queue's timeline what completed, which a really lost device may answer with an
+		// error (vk::DeviceLostError out of vulkan.hpp): the host answers instead, with every submission completed.
+		if (m_NvrhiDevice)
+		{
+			const Utils::HostAnsweredQueue hostAnswered;
+			m_NvrhiDevice->runGarbageCollection();
+		}
+		// The order of RunGarbageCollection and Shutdown: the sweep before the host images' release, and again after it.
+		m_ResourceTracker.Sweep();
+		if (m_HostImageUpload != nullptr)
+			m_HostImageUpload->CollectGarbage();
+		m_ResourceTracker.Sweep();
 	}
 
 	void GraphicsDevice::WaitForIdle()
 	{
+		// A lost device waits for nothing (decision 28); a loss whose flag alone was set is reported here.
+		if (IsLost())
+		{
+			ReportDeviceLost("vkDeviceWaitIdle");
+			return;
+		}
 		// NVRHI's waitForIdle is vkDeviceWaitIdle through vulkan.hpp's throwing wrapper, which catches only device loss.
 		// The C entry point reports every result as a value, so this also works outside the frame boundary (shutdown, the
 		// swapchain's destructor) and never throws (§4.6 item 2).
 		const VkResult result = VULKAN_HPP_DEFAULT_DISPATCHER.vkDeviceWaitIdle(m_Device);
 		if (result == VK_ERROR_DEVICE_LOST || m_Diagnostics.IsDeviceLost())
-			RaiseDeviceLost("vkDeviceWaitIdle");
+		{
+			ReportDeviceLost("vkDeviceWaitIdle");
+			return;
+		}
 		if (result != VK_SUCCESS)
 			FatalError(GetFatalErrorKind(result), std::format("vkDeviceWaitIdle failed: {}", VkResultToString(result)));
 	}
@@ -1136,7 +1338,10 @@ namespace Engine {
 	{
 		m_Diagnostics.SetDeviceLost();
 		std::string message = std::format("{}: device lost", context);
-		if (m_Info.DeviceFault)
+		// The report keeps what the device said when the loss surfaced; a failed recovery may have no device left to ask.
+		if (m_LossReport.has_value())
+			message += std::format("; {}", m_LossReport->FaultDescription);
+		else if (m_Info.DeviceFault)
 			message += std::format("; {}", DescribeDeviceFault());
 		FatalError(FatalErrorKind::DeviceLost, message);
 	}
@@ -1148,11 +1353,17 @@ namespace Engine {
 		// The query is valid only on a lost device (validation reports it otherwise), and an injected loss has no fault.
 		if (!m_Diagnostics.IsDeviceLost())
 			return "no fault information";
-		if (m_Diagnostics.GetInjectedFault() == GpuFault::DeviceLost)
-			return std::format("no fault information (the device loss was injected by --gpu-inject-fault={})", GpuFaultToString(GpuFault::DeviceLost));
+		if (const GpuFault fault = m_Diagnostics.GetInjectedFault(); fault == GpuFault::DeviceLost || fault == GpuFault::DeviceLostUnrecoverable)
+			return std::format("no fault information (the device loss was injected by --gpu-inject-fault={})", GpuFaultToString(fault));
 		if (m_Diagnostics.IsDeviceLossInjected())
 			return "no fault information (the device loss was injected)";
 		const vk::detail::DispatchLoaderDynamic& dispatcher = VULKAN_HPP_DEFAULT_DISPATCHER;
+		// Only a device that Vulkan itself reports lost may be queried: the flag of a vk::DeviceLostError that no Vulkan call
+		// returned (a test throws one at the frame boundary) leaves the device answering. The timeline query never waits.
+		uint64_t completed = 0;
+		if (m_GraphicsQueueTimelineSemaphore == VK_NULL_HANDLE
+			|| dispatcher.vkGetSemaphoreCounterValue(m_Device, m_GraphicsQueueTimelineSemaphore, &completed) != VK_ERROR_DEVICE_LOST)
+			return "no fault information (Vulkan does not report the device lost)";
 
 		VkDeviceFaultCountsEXT counts{};
 		counts.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT;
@@ -1230,6 +1441,161 @@ namespace Engine {
 	void GraphicsDevice::QueueSignalSemaphore(VkSemaphore semaphore, uint64_t value)
 	{
 		static_cast<nvrhi::vulkan::IDevice*>(m_VulkanNvrhiDevice.Get())->queueSignalSemaphore(nvrhi::CommandQueue::Graphics, semaphore, value);
+	}
+
+	bool GraphicsDevice::IsLost() const
+	{
+		return m_Diagnostics.IsDeviceLost();
+	}
+
+	void GraphicsDevice::ReportDeviceLost(std::string_view context)
+	{
+		m_Diagnostics.SetDeviceLost();
+		// Later reports of the same loss change nothing: the first names where it surfaced.
+		if (m_LossReport.has_value())
+			return;
+		GpuDeviceLossReport report;
+		report.Context = std::string(context);
+		report.FaultDescription = DescribeDeviceFault();
+		report.Injected = m_Diagnostics.IsDeviceLossInjected();
+		ENGINE_CORE_WARN("GPU device lost ({}); recovering at the frame boundary: {}", report.Context, report.FaultDescription);
+		m_LossReport = std::move(report);
+	}
+
+	std::optional<GpuDeviceLossReport> GraphicsDevice::GetLossReport() const
+	{
+		return m_LossReport;
+	}
+
+	Status GraphicsDevice::CreateVulkanObjects(const GraphicsDeviceSpecification& specification)
+	{
+		if (m_Diagnostics.ShouldFailDeviceRecreation())
+			return MakeError(ErrorCode::Gpu, "the device creation failed (an injected unrecoverable device loss)");
+		Status created = CreateInstance(specification);
+		if (created.has_value())
+			created = CreateLogicalDevice(specification);
+		if (created.has_value())
+			created = CreateNvrhiDevice();
+		if (!created.has_value())
+		{
+			DestroyVulkanObjects();
+			Utils::ResetDispatcherToLoader();
+			return created;
+		}
+		m_HostImageUpload = CreateScope<HostImageUpload>(*this);
+		LogDeviceInfo();
+		return {};
+	}
+
+	Status GraphicsDevice::Recover(Window* presentWindow)
+	{
+		ENGINE_CORE_ASSERT(IsLost(), "GraphicsDevice::Recover on a device that is not lost");
+		ENGINE_CORE_ASSERT(!m_Recreation.IsRunning(), "GraphicsDevice::Recover while the owners are released or recreated");
+		if (!IsLost())
+			return MakeError(ErrorCode::InvalidState, "the GPU device is not lost; there is nothing to recover");
+
+		// 1. A loss whose flag alone was set (NVRHI's report outside a submission, a test hook) is reported first.
+		ReportDeviceLost("the frame boundary");
+		const std::string lossContext = m_LossReport->Context;
+
+		// 2. Release. The idle wait first: an injected loss's real submissions complete before any owner destroys what they
+		// use (a swapchain's semaphores), and a really lost device answers it in finite time.
+		if (m_Device != VK_NULL_HANDLE)
+		{
+			const VkResult idle = VULKAN_HPP_DEFAULT_DISPATCHER.vkDeviceWaitIdle(m_Device);
+			if (idle != VK_SUCCESS && idle != VK_ERROR_DEVICE_LOST)
+				ENGINE_CORE_WARN("vkDeviceWaitIdle failed on the lost GPU device: {}", VkResultToString(idle));
+		}
+		m_Recreation.ReleaseAll();
+		CollectLostDevice();
+		if (m_ResourceTracker.GetTotalLiveCount() > 0)
+		{
+			return std::unexpected(Error(ErrorCode::InvalidState,
+				std::format("GPU objects are still alive after every owner released its objects for the recovery: {}",
+					m_ResourceTracker.DescribeLiveCounts()))
+					.WithHint("a GPU object lives in SceneRendererPipelines, a SceneRenderer or GpuResourceCache, or its owner registers with "
+							  "GraphicsDevice::GetRecreation (the placement rule, Graphics/GpuRecreation.h)"));
+		}
+
+		// 3. Teardown in §8.14 item 4's order; the dispatcher keeps the loader's global commands for the creation.
+		m_HostImageUpload.reset();
+		DestroyVulkanObjects();
+		Utils::ResetDispatcherToLoader();
+
+		// 4. Create's steps again, scoring the devices again. A failed creation waits for the operating system's reset
+		// once and tries again; an injected unrecoverable loss fails both attempts at once.
+		const GraphicsDeviceSpecification specification{
+			.Graphics = m_Specification,
+			.PresentWindow = presentWindow,
+			.ApplicationName = presentWindow != nullptr ? presentWindow->GetTitle() : std::string(),
+		};
+		Status created = MakeError(ErrorCode::Gpu, "no device creation was attempted");
+		for (uint32_t attempt = 1; attempt <= MaxDeviceCreationAttempts; ++attempt)
+		{
+			created = CreateVulkanObjects(specification);
+			if (created.has_value())
+				break;
+			ENGINE_CORE_WARN("GPU device recovery: creating the device again failed (attempt {} of {}): {}", attempt, MaxDeviceCreationAttempts,
+				created.error().ToString());
+			if (attempt < MaxDeviceCreationAttempts && !m_Diagnostics.ShouldFailDeviceRecreation() && m_Specification.ResetWaitMilliseconds > 0)
+				std::this_thread::sleep_for(std::chrono::milliseconds(m_Specification.ResetWaitMilliseconds));
+		}
+		if (!created.has_value())
+		{
+			return MakeError(ErrorCode::Gpu, "the device could not be created again after a device loss ({}): {}", lossContext,
+				created.error().ToString());
+		}
+		// The new queue's timeline starts again; every owner forgot its submissions in its Release.
+		m_LastSubmissionID = 0;
+		m_Diagnostics.ClearDeviceLost();
+
+		// 5. and 6. The owners create again what they need; a loss reported meanwhile is a second one.
+		Status recreated = m_Recreation.RecreateAll();
+		if (IsLost())
+		{
+			// The first loss's report stays the current one (GetLossReport), so the second loss's fault goes into the error.
+			return MakeError(ErrorCode::Gpu, "the device was lost again during its recovery from a device loss ({}): {}", lossContext,
+				DescribeDeviceFault());
+		}
+		ENGINE_TRY(recreated);
+
+		// 7.
+		++m_RecoveryCount;
+		m_LossReport.reset();
+		ENGINE_CORE_WARN("GPU device recovered after a device loss ({})", lossContext);
+		return {};
+	}
+
+	uint32_t GraphicsDevice::GetRecoveryCount() const
+	{
+		return m_RecoveryCount;
+	}
+
+	GpuRecreationRegistry& GraphicsDevice::GetRecreation()
+	{
+		return m_Recreation;
+	}
+
+	void GraphicsDevice::TrimUnused()
+	{
+		ENGINE_CORE_ASSERT(!m_Recreation.IsRunning(), "GraphicsDevice::TrimUnused while the owners are released, recreated or trimmed");
+		// A lost device: the recovery releases everything (decision 43).
+		if (IsLost() || m_Recreation.IsRunning())
+			return;
+		// 1. Every submission that may have used what the owners drop completes first, in every configuration: in Dist no
+		// tracker reference delays a destruction, and NVRHI does not reference a texture used only by a clear (ADR 0009
+		// decision 31). A hang here is a hang, and a loss the loss, after which nothing more is done.
+		WaitForSubmission(*this, m_LastSubmissionID, "GraphicsDevice::TrimUnused");
+		if (IsLost())
+			return;
+		// 2. The owners' hooks, last registered first.
+		static_cast<void>(m_Recreation.TrimUnused());
+		// 3. RunGarbageCollection's order without arming an injected fault (OnGarbageCollected is not called): NVRHI retires
+		// the completed submissions, so the sweep sees the references they dropped, and the host images' release the sweep's.
+		m_NvrhiDevice->runGarbageCollection();
+		m_ResourceTracker.Sweep();
+		if (m_HostImageUpload != nullptr)
+			m_HostImageUpload->CollectGarbage();
 	}
 
 }

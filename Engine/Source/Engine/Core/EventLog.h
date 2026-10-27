@@ -28,6 +28,10 @@ namespace Engine {
 		ScriptErrorRaised,
 		DiagnosticsChanged,
 		AutomationClientDisconnected,
+		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 31; the plan's "gpu.deviceLost" event): the GPU device was
+		// lost and recovered. Appended by Application after each successful recovery, so a failed one, which ends the
+		// process, never appears. Registered for automation (the "EngineEventType" registry enum) by W18.3's integration.
+		GpuDeviceLost,
 		SceneActivated, // M20 (Docs/Decisions/0031-m20-contract.md decision 13)
 		SceneClosed
 	};
@@ -49,6 +53,7 @@ namespace Engine {
 	//   ScriptErrorRaised             Id = entity (invalid for module-level errors), Path = script path, Message = error
 	//   DiagnosticsChanged            Message = summary ("2 errors, 1 warning")
 	//   AutomationClientDisconnected  Name = client name
+	//   GpuDeviceLost                 Message = the loss's report: "<context>: device lost; <fault description>" (M18)
 	//   SceneActivated                Path = the editor's newly active open scene's path (empty for an unsaved scene)
 	//   SceneClosed                   Path = the closed open scene's path (empty for an unsaved scene)
 	struct EngineEvent

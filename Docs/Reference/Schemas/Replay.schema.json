@@ -109,7 +109,7 @@
 							},
 							"Type": {
 								"description": "The asset's type.",
-								"enum": ["Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay"]
+								"enum": ["Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet"]
 							},
 							"Hash": {
 								"description": "XXH64 (seed 0) of the asset's cooked artifact, the same in the editor's cache and in an exported pak: 16 lowercase hex digits.",

@@ -9,7 +9,10 @@
 
 #include <atomic>
 #include <latch>
+#include <span>
+#include <string>
 #include <thread>
+#include <vector>
 
 namespace Engine {
 
@@ -412,6 +415,129 @@ namespace Engine {
 				ENGINE_PROFILE_SCOPE(name);
 			}
 			CHECK(ZonesNamed(Profiler::CollectZones(since), "ProfilerTests.NamedByPointer").size() == 1);
+		}
+
+		TEST_CASE("Profiler: a capture holds the zones since its mark and reports itself complete in its trace")
+		{
+			// M18 (R-PROF): profiler.capture's trace. Zones recorded after the mark, at or after its time, are in it; a capture
+			// whose rings overwrote none of them says so in the trace's otherData.
+			const ScopedProfiler profiler(ProfilerSpecification{ .ZonesPerThread = 8 });
+			for (uint64_t index = 0; index < 3; ++index)
+				Profiler::RecordZone("ProfilerTests.BeforeMark", 0, 0, 0);
+			const ProfilerCaptureMark mark = Profiler::MarkCapture();
+			REQUIRE(mark.Generation != 0);
+			for (uint64_t index = 0; index < 5; ++index)
+				Profiler::RecordZone("ProfilerTests.Captured", mark.TimeNs + index, mark.TimeNs + index + 1, 0);
+			const ProfileZone gpuZone{ .Name = "ProfilerTests.CapturedPass", .BeginNs = mark.TimeNs, .EndNs = mark.TimeNs + 10 };
+			Profiler::SubmitGpuZones(std::span<const ProfileZone>(&gpuZone, 1));
+
+			const ProfilerCapture capture = Profiler::ExportCapture(mark);
+			CHECK(capture.DroppedZones == 0);
+			CHECK(capture.GpuZones == 1);
+			const Result<Json> document = JsonReader::Parse(capture.ChromeTrace);
+			REQUIRE(document.has_value());
+			const Result<JsonReader> events = JsonReader(*document).GetMember("traceEvents");
+			REQUIRE(events.has_value());
+			const Result<size_t> eventCount = events->GetArraySize();
+			REQUIRE(eventCount.has_value());
+			uint64_t completeEvents = 0;
+			uint64_t captured = 0;
+			for (size_t index = 0; index < *eventCount; ++index)
+			{
+				const Result<JsonReader> event = events->GetElement(index);
+				REQUIRE(event.has_value());
+				if (event->ReadMember<std::string>("ph").value_or("") != "X")
+					continue;
+				++completeEvents;
+				captured += event->ReadMember<std::string>("name").value_or("") == "ProfilerTests.Captured" ? 1 : 0;
+			}
+			CHECK(captured == 5);
+			CHECK(completeEvents == capture.CpuZones + capture.GpuZones);
+			const Result<JsonReader> otherData = JsonReader(*document).GetMember("otherData");
+			REQUIRE(otherData.has_value());
+			CHECK(otherData->ReadMember<uint64_t>("droppedZones").value_or(1) == 0);
+		}
+
+		TEST_CASE("Profiler: a capture counts the zones its ring overwrote after its mark, and only those")
+		{
+			const ScopedProfiler profiler(ProfilerSpecification{ .ZonesPerThread = 8 });
+			for (uint64_t index = 0; index < 3; ++index)
+				Profiler::RecordZone("ProfilerTests.BeforeMark", 0, 0, 0);
+			const ProfilerCaptureMark mark = Profiler::MarkCapture();
+			// Nine zones in a ring of eight overwrite the oldest, a zone of before the mark: nothing of the capture is lost.
+			for (uint64_t index = 0; index < 6; ++index)
+				Profiler::RecordZone("ProfilerTests.Captured", mark.TimeNs, mark.TimeNs, 0);
+			CHECK(Profiler::ExportCapture(mark).DroppedZones == 0);
+			// Fourteen more overwrite every zone of before the mark and twelve of the capture's twenty.
+			for (uint64_t index = 0; index < 14; ++index)
+				Profiler::RecordZone("ProfilerTests.Captured", mark.TimeNs, mark.TimeNs, 0);
+			const ProfilerCapture capture = Profiler::ExportCapture(mark);
+			CHECK(capture.DroppedZones == 12);
+			CHECK(capture.CpuZones == 8);
+			const Result<Json> document = JsonReader::Parse(capture.ChromeTrace);
+			REQUIRE(document.has_value());
+			const Result<JsonReader> otherData = JsonReader(*document).GetMember("otherData");
+			REQUIRE(otherData.has_value());
+			CHECK(otherData->ReadMember<uint64_t>("droppedZones").value_or(0) == 12);
+		}
+
+		TEST_CASE("Profiler: a capture counts the GPU zones the GPU ring overwrote after its mark")
+		{
+			const ScopedProfiler profiler(ProfilerSpecification{ .ZonesPerThread = 4 });
+			const ProfilerCaptureMark mark = Profiler::MarkCapture();
+			std::vector<ProfileZone> zones;
+			for (uint64_t index = 0; index < 10; ++index)
+				zones.push_back({ .Name = "ProfilerTests.GpuPass", .BeginNs = mark.TimeNs + index, .EndNs = mark.TimeNs + index + 1 });
+			Profiler::SubmitGpuZones(zones);
+			const ProfilerCapture capture = Profiler::ExportCapture(mark);
+			CHECK(capture.GpuZones == 4);
+			CHECK(capture.DroppedZones == 6);
+		}
+
+		TEST_CASE("Profiler: a capture counts the zones of the rings freed since its mark that it recorded after it")
+		{
+			// MaxRetiredRings (16) rings of exited threads are kept; an older one is freed with every zone it held.
+			const ScopedProfiler profiler;
+			const auto recordOnThread = [](uint64_t zones)
+			{
+				std::thread worker([zones]()
+				{
+					const uint64_t now = Profiler::GetTimeNs();
+					for (uint64_t index = 0; index < zones; ++index)
+						Profiler::RecordZone("ProfilerTests.Exited", now, now, 0);
+				});
+				worker.join();
+			};
+			// A ring of before the mark, freed after it: its zones of before the mark are not the capture's.
+			recordOnThread(5);
+			const ProfilerCaptureMark mark = Profiler::MarkCapture();
+			for (uint32_t thread = 0; thread < 16; ++thread)
+				recordOnThread(1);
+			CHECK(Profiler::ExportCapture(mark).DroppedZones == 0);
+			// Two more threads free the rings of the first two threads after the mark, one zone each.
+			recordOnThread(1);
+			recordOnThread(1);
+			CHECK(Profiler::ExportCapture(mark).DroppedZones == 2);
+		}
+
+		TEST_CASE("Profiler: a capture whose mark is of an earlier initialization counts from the current one")
+		{
+			const ScopedProfiler profiler;
+			const ProfilerCaptureMark earlier = Profiler::MarkCapture();
+			Profiler::Shutdown();
+			Profiler::Initialize();
+			Profiler::RecordZone("ProfilerTests.AfterRestart", 1, 2, 0);
+			const ProfilerCapture capture = Profiler::ExportCapture(earlier);
+			CHECK(capture.DroppedZones == 0);
+			CHECK(capture.CpuZones == 1);
+			// Without a profiler there is nothing to capture.
+			Profiler::Shutdown();
+			const ProfilerCapture empty = Profiler::ExportCapture(Profiler::MarkCapture());
+			CHECK(empty.CpuZones == 0);
+			CHECK(empty.GpuZones == 0);
+			CHECK(empty.DroppedZones == 0);
+			const Result<Json> document = JsonReader::Parse(empty.ChromeTrace);
+			CHECK(document.has_value());
 		}
 	}
 

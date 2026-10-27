@@ -43,6 +43,9 @@ SourceHash is empty when the build failed before it could hash the sources (not 
 read), which both readers accept in the record of a failed build. The editor runs this script by fixed paths with
 fixed arguments (EditorCore/Native/NativeBuild.h CreateNativeBuildBackend, §13.2).
 
+It works from any directory (Docs/Architecture.md §2.3): a relative path given on its command line is resolved against
+the caller's directory, then main() makes the repository root of its own checkout the working directory.
+
 Exit codes: 0 built, 1 a lint, compile or link failure (the record says which), 2 usage error, 3 no Native/ or no
 source, not Windows, the toolchain or premake missing, the build outputs it links missing (bin/<OutputDir>/...), or
 --no-wait found the build lock held, 5 a timeout (of the build, or of the wait for the build lock).
@@ -430,12 +433,13 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
         epilog="Exit codes: 0 built, 1 lint, compile or link failure, 2 usage error, 3 no Native/ or no source, not "
                "Windows, the toolchain or build outputs missing, or --no-wait found the build lock held, 5 timeout.",
     )
-    parser.add_argument("--project", type=Path, required=True, help="the game project's directory (holding Native/)")
+    parser.add_argument("--project", type=paths.argument_path, required=True,
+                        help="the game project's directory (holding Native/)")
     parser.add_argument("--kind", choices=("module", "runtime"), required=True,
                         help="module: the editor's shared library (Debug or Release); runtime: the game's Runtime "
                              "executable with the module linked in")
     parser.add_argument("--config", choices=native_build.CONFIGURATIONS, required=True, help="the configuration")
-    parser.add_argument("--out", type=Path, required=True,
+    parser.add_argument("--out", type=paths.argument_path, required=True,
                         help="the build's output directory, missing or empty: the output, NativeBuild.json, Build.log")
     parser.add_argument("--jobs", type=int,
                         help="parallel compilers, at most half the logical CPUs (default: half): a capped build")
@@ -468,6 +472,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     configure_stdio()
     arguments = parse_arguments(sys.argv[1:] if argv is None else argv)
+    paths.enter_repository_root()
     standard = Console(arguments.json)
     with (arguments.out / native_build.LOG_FILE).open("w", encoding="utf-8", newline="\n") as log:
         console = Console(arguments.json)

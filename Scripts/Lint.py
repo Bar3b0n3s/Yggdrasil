@@ -73,6 +73,10 @@ only when each one fails with exactly its expected findings.
 each tool when it is installed and falls back to the regex checker otherwise, "clang" requires them, "regex" forces the
 fallbacks. premake is the pinned release (Scripts/Lib/premake.py).
 
+It works from any directory (Docs/Architecture.md §2.3): a relative path given on its command line is resolved against
+the caller's directory (--paths excepted: they are relative to --root), then main() makes the repository root of
+its own checkout the working directory.
+
 Exit codes: 0 no findings, 1 findings, a failed self-test or a tool that failed, 2 usage error or invalid rules,
 3 a required tool (premake, clang-tidy or clang-query in --mode clang, a C++ compiler) is missing or has the wrong
 version, 5 a tool timed out.
@@ -2721,10 +2725,10 @@ def run_contract(context: LintContext, report: StepReport) -> None:
 # --------------------------------------------------------------------------------------------------------------------
 
 
-def find_premake(override: str | None) -> Path:
+def find_premake(override: Path | None) -> Path:
     """The pinned premake (Scripts/Lib/premake.py), or --premake when it reports the pinned version."""
     try:
-        return premake.require_pinned(Path(override) if override else None)
+        return premake.require_pinned(override)
     except (ToolNotFoundError, premake.PremakeError) as error:
         raise ToolMissing(str(error)) from None
 
@@ -2826,14 +2830,14 @@ _DATABASE_ENTRIES: dict[tuple[str, str], tuple[list[dict[str, Any]], str]] = {}
 
 
 def load_compile_database(
-    tree: Tree, existing: str | None, premake_override: str | None
+    tree: Tree, existing: Path | None, premake_override: Path | None
 ) -> tuple[CompileDatabase, str]:
     """Generate (or read) the compilation database. Returns it with a description of its origin."""
-    if existing:
-        cache_key = ("file", str(Path(existing).resolve()))
+    if existing is not None:
+        cache_key = ("file", str(existing.resolve()))
         if cache_key not in _DATABASE_ENTRIES:
             try:
-                _DATABASE_ENTRIES[cache_key] = (json.loads(Path(existing).read_text(encoding="utf-8")), existing)
+                _DATABASE_ENTRIES[cache_key] = (json.loads(existing.read_text(encoding="utf-8")), existing.as_posix())
             except (OSError, json.JSONDecodeError) as error:
                 raise UsageError(f"cannot read {existing}: {error}") from error
     else:
@@ -2885,7 +2889,7 @@ def visual_studio_llvm_directories() -> list[Path]:
     return _LLVM_DIRECTORIES
 
 
-def find_llvm_tool(name: str, override: str | None, environment: str | None,
+def find_llvm_tool(name: str, override: Path | None, environment: str | None,
                    minimum_major: int | None = None) -> Path | None:
     """An LLVM tool: the override, the environment variable, Visual Studio's bundled LLVM, then PATH. On PATH the
     unversioned name is preferred when it is at least `minimum_major`, else the newest name-NN that is: Ubuntu 24.04's
@@ -3589,11 +3593,11 @@ class LintOptions:
     paths: list[str] | None
     jobs: int
     mode: str  # auto, clang or regex (MODES)
-    clang_tidy: str | None
-    clang_query: str | None
-    cxx: str | None
-    premake: str | None
-    compile_commands: str | None
+    clang_tidy: Path | None
+    clang_query: Path | None
+    cxx: str | None  # a path or a name on PATH
+    premake: Path | None
+    compile_commands: Path | None
     allow_contract_stubs: bool = False  # contract mode: the contract step reports what it finds as allowed
 
 
@@ -4450,12 +4454,15 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--root",
-        type=Path,
+        type=repository_paths.argument_path,
         default=REPOSITORY_ROOT,
         help="tree to lint (default: the repository; e.g. a fixture under Tests/Data/Lint)",
     )
     parser.add_argument(
-        "--rules", type=Path, default=DEFAULT_RULES_PATH, help="rules file (default: Scripts/ModuleRules.json)"
+        "--rules",
+        type=repository_paths.argument_path,
+        default=DEFAULT_RULES_PATH,
+        help="rules file (default: Scripts/ModuleRules.json)",
     )
     parser.add_argument(
         "--mode",
@@ -4465,18 +4472,31 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
         "installed, clang requires them, regex forces the fallbacks",
     )
     parser.add_argument(
-        "--clang-tidy", help="path to clang-tidy (default: $CLANG_TIDY, Visual Studio's LLVM, then PATH)"
+        "--clang-tidy",
+        type=repository_paths.argument_path,
+        help="path to clang-tidy (default: $CLANG_TIDY, Visual Studio's LLVM, then PATH)",
     )
     parser.add_argument(
-        "--clang-query", help="path to clang-query (default: $CLANG_QUERY, Visual Studio's LLVM, then PATH)"
+        "--clang-query",
+        type=repository_paths.argument_path,
+        help="path to clang-query (default: $CLANG_QUERY, Visual Studio's LLVM, then PATH)",
     )
     parser.add_argument(
-        "--cxx", help="compiler for header self-containment (default: the database's compiler, clang++)"
+        "--cxx",
+        type=repository_paths.tool_argument,
+        help="compiler for header self-containment, a path or a name on PATH (default: the database's compiler, "
+        "clang++)",
     )
     parser.add_argument(
-        "--premake", help="premake5 to use; it must be the pinned version (default: Vendor/premake/bin)"
+        "--premake",
+        type=repository_paths.argument_path,
+        help="premake5 to use; it must be the pinned version (default: Vendor/premake/bin)",
     )
-    parser.add_argument("--compile-commands", help="use this compile_commands.json instead of generating one")
+    parser.add_argument(
+        "--compile-commands",
+        type=repository_paths.argument_path,
+        help="use this compile_commands.json instead of generating one",
+    )
     parser.add_argument(
         "--jobs", type=int, default=os.cpu_count() or 1, help="parallel tool processes (default: CPU count)"
     )
@@ -4537,6 +4557,7 @@ def build_options(arguments: argparse.Namespace) -> LintOptions:
 
 def main(argv: list[str] | None = None) -> int:
     arguments = parse_arguments(sys.argv[1:] if argv is None else argv)
+    repository_paths.enter_repository_root()
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(errors="replace")  # type: ignore[union-attr]
     try:

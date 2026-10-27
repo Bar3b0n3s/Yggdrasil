@@ -11,13 +11,20 @@
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/RenderContext.h"
 #include "Engine/Platform/Process.h"
+#include "Support/ChildOutput.h"
 #include "Support/DeathTest.h"
 #include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/TempDirectory.h"
 #include "Support/TestOptions.h"
+#include "Support/TrimCounter.h"
 #include "Support/Utf8Path.h"
+#include "Support/WaitUntil.h"
 #include "Support/WindowedChild.h"
+
+#include <glm/glm.hpp>
+#include <imgui.h>
+#include <vulkan/vulkan.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -46,7 +53,8 @@ namespace Engine {
 			std::vector<std::string> Calls;
 			bool FailInitialize = false;
 			std::optional<int> ExitDuringInitialize;
-			std::optional<uint64_t> ExitAtFrame; // RequestExit(ExitCode::Timeout) from the OnUpdate of this frame, twice
+			std::optional<uint64_t> ExitAtFrame;  // RequestExit(ExitCode::Timeout) from the OnUpdate of this frame, twice
+			std::optional<int> FailRunAtShutdown; // FailRun with this code from OnShutdown, after the frame loop ended
 			bool ProcessContextWasCurrent = false;
 		protected:
 			Status OnInitialize() override
@@ -66,6 +74,8 @@ namespace Engine {
 			void OnShutdown() override
 			{
 				Calls.push_back("shutdown");
+				if (FailRunAtShutdown.has_value())
+					FailRun(*FailRunAtShutdown);
 			}
 
 			void OnFixedStep(const SimStep& step) override
@@ -162,6 +172,167 @@ namespace Engine {
 			}
 		};
 
+		// M18 (C18.3): loses its device in the update of frame `LoseAtFrame` (the test hooks' flag) and records the frames
+		// it renders, the recovery hooks and the GpuDeviceLost events its run appended.
+		class LosingApplication final : public Application
+		{
+		public:
+			explicit LosingApplication(ApplicationSpecification specification)
+				: Application(std::move(specification))
+			{
+			}
+		public:
+			std::vector<std::string> Calls;
+			uint64_t LoseAtFrame = 1;
+			size_t DeviceLostEvents = 0;
+			uint32_t RecoveryCount = 0;
+		protected:
+			void OnUpdate(const FrameTime& frame) override
+			{
+				Calls.push_back(std::format("update {}", frame.FrameIndex));
+				if (frame.FrameIndex == LoseAtFrame)
+					GetContext().GetGraphicsDevice()->GetDiagnostics().SetDeviceLost(true);
+			}
+
+			void OnRender(RenderContext& /*context*/) override
+			{
+				Calls.push_back("render");
+			}
+
+			void OnDeviceLost(const GpuDeviceLossReport& report) override
+			{
+				Calls.push_back(report.Injected ? "lost (injected)" : "lost");
+			}
+
+			void OnDeviceRecovered(const GpuDeviceLossReport& /*report*/) override
+			{
+				Calls.push_back("recovered");
+			}
+
+			void OnShutdown() override
+			{
+				const std::array types = { EngineEventType::GpuDeviceLost };
+				DeviceLostEvents = GetContext().GetEventLog().Read(0, types).Events.size();
+				RecoveryCount = GetContext().GetGraphicsDevice()->GetRecoveryCount();
+			}
+		};
+
+		// M18 (C18.3, decision 28): loses its device in the update of frame `LoseAtFrame` (the test hooks' flag) and clears the
+		// flag itself in the next frame's update (GpuDiagnostics::ClearDeviceLost), as the recovery at the frame boundary
+		// does, so what it records is the lost frame alone: the steps, updates and rendered frames, with the index and slot of
+		// each rendered frame. Where the frame boundary recovers the device, the clear finds the flag cleared already.
+		class LostFrameApplication final : public Application
+		{
+		public:
+			explicit LostFrameApplication(ApplicationSpecification specification)
+				: Application(std::move(specification))
+			{
+			}
+		public:
+			std::vector<std::string> Calls;
+			std::vector<RenderedFrame> Frames;
+			uint64_t LoseAtFrame = 1;
+		protected:
+			void OnFixedStep(const SimStep& step) override
+			{
+				Calls.push_back(std::format("step {}", step.Tick));
+			}
+
+			void OnUpdate(const FrameTime& frame) override
+			{
+				Calls.push_back(std::format("update {}", frame.FrameIndex));
+				GpuDiagnostics& diagnostics = GetContext().GetGraphicsDevice()->GetDiagnostics();
+				if (frame.FrameIndex == LoseAtFrame)
+					diagnostics.SetDeviceLost(true);
+				else if (frame.FrameIndex == LoseAtFrame + 1)
+					diagnostics.ClearDeviceLost();
+			}
+
+			void OnRender(RenderContext& context) override
+			{
+				Calls.push_back("render");
+				Frames.push_back({ .FrameIndex = context.FrameIndex, .FrameSlot = context.FrameSlot });
+			}
+		};
+
+		// M18 (C18.3, decision 26 and ADR 0029 risk 10): in the UI frame of frame `LoseAtFrame` opens a window and throws the
+		// vk::DeviceLostError NVRHI's internal calls throw on a lost device, so the frame-boundary catch ends the frame inside
+		// OnImGuiRender with its UI frame begun; records the hooks, the GpuDeviceLost events and the recoveries.
+		class UiLosingApplication final : public Application
+		{
+		public:
+			explicit UiLosingApplication(ApplicationSpecification specification)
+				: Application(std::move(specification))
+			{
+			}
+		public:
+			std::vector<std::string> Calls;
+			uint64_t LoseAtFrame = 1;
+			size_t DeviceLostEvents = 0;
+			uint32_t RecoveryCount = 0;
+		protected:
+			void OnUpdate(const FrameTime& frame) override
+			{
+				Calls.push_back(std::format("update {}", frame.FrameIndex));
+				m_Frame = frame.FrameIndex;
+			}
+
+			void OnRender(RenderContext& /*context*/) override
+			{
+				Calls.push_back("render");
+			}
+
+			void OnImGuiRender() override
+			{
+				Calls.push_back("imgui");
+				ImGui::Begin("Interrupted");
+				ImGui::TextUnformatted("A window the loss interrupts");
+				if (m_Frame == LoseAtFrame)
+					vk::detail::resultCheck(vk::Result::eErrorDeviceLost, "ApplicationTests: a device loss thrown out of NVRHI during the UI frame");
+				ImGui::End();
+			}
+
+			void OnDeviceLost(const GpuDeviceLossReport& /*report*/) override
+			{
+				Calls.push_back("lost");
+			}
+
+			void OnDeviceRecovered(const GpuDeviceLossReport& /*report*/) override
+			{
+				Calls.push_back("recovered");
+			}
+
+			void OnShutdown() override
+			{
+				const std::array types = { EngineEventType::GpuDeviceLost };
+				DeviceLostEvents = GetContext().GetEventLog().Read(0, types).Events.size();
+				RecoveryCount = GetContext().GetGraphicsDevice()->GetRecoveryCount();
+			}
+		private:
+			uint64_t m_Frame = 0;
+		};
+
+		// M18 (C18.3, decision 25): loses its device during OnInitialize, before its first frame; a frame that ran would log.
+		class InitializeLosingApplication final : public Application
+		{
+		public:
+			explicit InitializeLosingApplication(ApplicationSpecification specification)
+				: Application(std::move(specification))
+			{
+			}
+		protected:
+			Status OnInitialize() override
+			{
+				GetContext().GetGraphicsDevice()->GetDiagnostics().SetDeviceLost(true);
+				return {};
+			}
+
+			void OnUpdate(const FrameTime& frame) override
+			{
+				ENGINE_CORE_ERROR("ApplicationTests: frame {} ran after a device loss before the first frame", frame.FrameIndex);
+			}
+		};
+
 		// Reports one GPU message of `Severity` through its device's diagnostics during its first update, as a validation
 		// message would; or, with LeakAtShutdown, leaves a host image counted as alive, which only the device's teardown
 		// reports.
@@ -231,6 +402,128 @@ namespace Engine {
 			}
 		private:
 			Scope<Test::GpuSubmissionGate> m_Gate;
+		};
+
+		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decisions 42 and 44): resizes its headless window in frames 1 and 3,
+		// and records the width of every frame it renders and how many times the device trimmed (an owner of its own that
+		// counts its TrimUnused calls).
+		class OutOfMemoryResizeApplication final : public Application
+		{
+		public:
+			explicit OutOfMemoryResizeApplication(ApplicationSpecification specification)
+				: Application(std::move(specification))
+			{
+			}
+		public:
+			std::vector<uint32_t> FrameWidths;
+			// The device's trims in the run (Test::TrimCounter), read at the shutdown.
+			uint32_t Trims = 0;
+		protected:
+			Status OnInitialize() override
+			{
+				m_TrimCounter = CreateScope<Test::TrimCounter>(GetContext().GetGraphicsDevice()->GetRecreation());
+				return {};
+			}
+
+			void OnShutdown() override
+			{
+				if (m_TrimCounter)
+					Trims = m_TrimCounter->GetTrims();
+				m_TrimCounter.reset();
+			}
+
+			void OnUpdate(const FrameTime& frame) override
+			{
+				if (frame.FrameIndex == 1)
+					GetContext().GetWindow()->SetSize(96, 80);
+				if (frame.FrameIndex == 3)
+					GetContext().GetWindow()->SetSize(112, 72);
+			}
+
+			void OnRender(RenderContext& context) override
+			{
+				FrameWidths.push_back(context.Width);
+			}
+		private:
+			Scope<Test::TrimCounter> m_TrimCounter;
+		};
+
+		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decisions 42 and 44): a windowed application on a swapchain whose
+		// recreations may run out of memory (oom-swapchain, oom-swapchain-persistent). It resizes its window in the updates
+		// of frames 3 and 6, each waited for until the framebuffer reports a new size (recorded in Sizes), minimizes it in
+		// the update of frame 9 and restores it in the update of frame 12, so frames 9 to 11 render minimized; it records
+		// the index and size of every frame it renders, and the device's trims (Test::TrimCounter).
+		class SwapchainOutOfMemoryApplication final : public Application
+		{
+		public:
+			explicit SwapchainOutOfMemoryApplication(ApplicationSpecification specification)
+				: Application(std::move(specification))
+			{
+			}
+		public:
+			struct Frame
+			{
+				uint64_t Index = 0;
+				uint32_t Width = 0;
+				uint32_t Height = 0;
+			};
+			std::vector<Frame> Rendered;
+			// The framebuffer sizes after the startup and after each resize.
+			std::vector<glm::uvec2> Sizes;
+			uint32_t Trims = 0;
+			bool WindowChangesArrived = true;
+		protected:
+			Status OnInitialize() override
+			{
+				m_TrimCounter = CreateScope<Test::TrimCounter>(GetContext().GetGraphicsDevice()->GetRecreation());
+				const Window& window = *GetContext().GetWindow();
+				Sizes.emplace_back(window.GetFramebufferWidth(), window.GetFramebufferHeight());
+				return {};
+			}
+
+			void OnShutdown() override
+			{
+				if (m_TrimCounter)
+					Trims = m_TrimCounter->GetTrims();
+				m_TrimCounter.reset();
+			}
+
+			void OnUpdate(const FrameTime& frame) override
+			{
+				Window& window = *GetContext().GetWindow();
+				if (frame.FrameIndex == 3 || frame.FrameIndex == 6)
+				{
+					const glm::uvec2 before(window.GetFramebufferWidth(), window.GetFramebufferHeight());
+					if (frame.FrameIndex == 3)
+						window.SetSize(480, 300);
+					else
+						window.SetSize(400, 260);
+					// Resizing is asynchronous on X11 and macOS: wait for the new framebuffer size, so the frame sees it.
+					WindowChangesArrived = Test::WaitUntil([&window, before]()
+					{
+						window.WaitEventsTimeout(0.025);
+						return glm::uvec2(window.GetFramebufferWidth(), window.GetFramebufferHeight()) != before;
+					}) && WindowChangesArrived;
+					Sizes.emplace_back(window.GetFramebufferWidth(), window.GetFramebufferHeight());
+				}
+				if (frame.FrameIndex == 9)
+				{
+					window.Minimize();
+					WindowChangesArrived = Test::WaitUntilMinimized(window, true) && WindowChangesArrived;
+				}
+				if (frame.FrameIndex == 12)
+				{
+					window.Restore();
+					WindowChangesArrived = Test::WaitUntilMinimized(window, false) && WindowChangesArrived;
+				}
+			}
+
+			void OnRender(RenderContext& context) override
+			{
+				Rendered.push_back({ .Index = context.FrameIndex, .Width = context.Width, .Height = context.Height });
+			}
+		private:
+			Scope<Test::TrimCounter> m_TrimCounter;
 		};
 
 	}
@@ -403,6 +696,17 @@ namespace Engine {
 		ENGINE_CORE_ASSERT(false, "Log level report: {}", report);
 	}
 
+	// M18 (C18.3, decision 25): a device lost during OnInitialize ends the process before the first frame, through
+	// GraphicsDevice::RaiseDeviceLost. Reaching the end of the body (a recovered or ignored loss) fails the death test.
+	ENGINE_DEATH_TEST("App/DeviceLostBeforeFirstFrame")
+	{
+		ApplicationSpecification specification = MakeHeadlessSpecification(2);
+		UseTestRenderer(specification);
+		InitializeLosingApplication application(std::move(specification));
+		const int exitCode = application.Run();
+		ENGINE_CORE_ERROR("ApplicationTests: the application returned {} after a device loss before its first frame", exitCode);
+	}
+
 	TEST_SUITE("App")
 	{
 		TEST_CASE("Application: hooks run in order and --frames ends the run with Success")
@@ -458,6 +762,21 @@ namespace Engine {
 				"shutdown",
 			};
 			CHECK(application.Calls == expected);
+		}
+
+		TEST_CASE("Application: FailRun fails a run that the frame loop ended with Success, and keeps an earlier failure")
+		{
+			// M18's milestone review: a failure found after the frame loop decided to end with Success (MaxFrames), such as the
+			// editor's final screenshots taken in OnDeviceRecovered after a device loss on the run's last frame, fails the run,
+			// which RequestExit cannot do: its first request wins.
+			RecordingApplication succeeding(MakeHeadlessSpecification(2));
+			succeeding.FailRunAtShutdown = ExitCode::Failed;
+			CHECK(succeeding.Run() == ExitCode::Failed);
+
+			RecordingApplication failing(MakeHeadlessSpecification(std::nullopt));
+			failing.ExitAtFrame = 0;
+			failing.FailRunAtShutdown = ExitCode::Failed;
+			CHECK(failing.Run() == ExitCode::Timeout);
 		}
 
 		TEST_CASE("Application: --expect-no-gpu-errors fails a run whose device reported an error"
@@ -519,6 +838,36 @@ namespace Engine {
 			CHECK(application.FrameWidths == widths);
 		}
 
+		TEST_CASE("Application: a headless frame resize out of memory is retried after a trim, or skips its frames until the next size"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 acceptance (C18.4, Docs/Decisions/0029-m18-contract.md decisions 42, 44 and 46): under oom-rendertarget the resized
+			// frame target fails once, is created again after the trim and the frames render at the new size; under
+			// oom-rendertarget-persistent every frame at a size that failed renders nothing, each new size is tried again (one trim
+			// each), and the run goes on to its end without a GPU message (--expect-no-gpu-errors) and without a fatal error.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			for (const GpuFault fault : { GpuFault::OomRenderTarget, GpuFault::OomRenderTargetPersistent })
+			{
+				CAPTURE(GpuFaultToString(fault));
+				ApplicationSpecification specification = MakeHeadlessSpecification(5);
+				UseTestRenderer(specification);
+				specification.Graphics.InjectFault = fault;
+				OutOfMemoryResizeApplication application(std::move(specification));
+				CHECK(application.Run() == ExitCode::Success);
+				if (fault == GpuFault::OomRenderTarget)
+				{
+					CHECK(application.FrameWidths == std::vector<uint32_t>{ 64, 96, 96, 112, 112 });
+					CHECK(application.Trims == 1);
+				}
+				else
+				{
+					CHECK(application.FrameWidths == std::vector<uint32_t>{ 64 });
+					CHECK(application.Trims == 2);
+				}
+			}
+		}
+
 		TEST_CASE("Application: a headless Vulkan application renders every frame into its offscreen target"
 			* doctest::test_suite(Test::GpuSuite))
 		{
@@ -546,6 +895,134 @@ namespace Engine {
 				CHECK(frame.FramebufferWidth == 64);
 				CHECK(frame.TargetFormat == nvrhi::Format::RGBA8_UNORM);
 			}
+		}
+
+		TEST_CASE("Application: a device loss is recovered at the frame boundary and the run goes on"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 acceptance (C18.3, Docs/Decisions/0029-m18-contract.md decision 29): the lost frame renders nothing, the
+			// recovery runs OnDeviceLost, recovers the device with the frame's objects and the ImGui renderer, appends one
+			// GpuDeviceLost event and calls OnDeviceRecovered, and the next frames render; no GPU message, and the run succeeds.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			ApplicationSpecification specification = MakeHeadlessSpecification(4);
+			UseTestRenderer(specification);
+			specification.EnableImGui = true;
+			LosingApplication application(std::move(specification));
+			CHECK(application.Run() == ExitCode::Success);
+			CHECK(application.Calls == std::vector<std::string>{ "update 0", "render", "update 1", "lost (injected)", "recovered", "update 2", "render", "update 3", "render" });
+			CHECK(application.DeviceLostEvents == 1);
+			CHECK(application.RecoveryCount == 1);
+		}
+
+		TEST_CASE("Application: a frame on a lost device renders nothing while its steps and update run"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.3, decision 28): the simulation never needs the GPU, so a play session goes on through a loss; the lost
+			// frame calls no rendering hook and submits nothing, and the frames after it render again.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			ApplicationSpecification specification = MakeHeadlessSpecification(4);
+			UseTestRenderer(specification);
+			LostFrameApplication application(std::move(specification));
+			CHECK(application.Run() == ExitCode::Success);
+			const std::vector<std::string> expected = {
+				"step 0",
+				"update 0",
+				"render",
+				"step 1",
+				"update 1",
+				"step 2",
+				"update 2",
+				"render",
+				"step 3",
+				"update 3",
+				"render",
+			};
+			CHECK(application.Calls == expected);
+		}
+
+		TEST_CASE("Application: rendered frames keep growing indices that match their slots across a device loss"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.3, decision 33): a recovery at the frame boundary replaces the frame's FramePacer, which counts its
+			// frames from 0 again; the frames after it continue from the first multiple of the frames in flight after the last
+			// index, so renderers, whose GPU timing history ignores an older frame, keep their timings, and every frame's slot
+			// is its index modulo the frames in flight (2).
+			if (!Test::ProbeGpuForProcess())
+				return;
+			ApplicationSpecification specification = MakeHeadlessSpecification(5);
+			UseTestRenderer(specification);
+			LostFrameApplication application(std::move(specification));
+			application.LoseAtFrame = 2;
+			CHECK(application.Run() == ExitCode::Success);
+			REQUIRE(application.Frames.size() == 4);
+			for (size_t frame = 0; frame < application.Frames.size(); ++frame)
+			{
+				CAPTURE(frame);
+				CAPTURE(application.Frames[frame].FrameIndex);
+				CHECK(application.Frames[frame].FrameSlot == application.Frames[frame].FrameIndex % 2);
+				if (frame > 0)
+					CHECK(application.Frames[frame].FrameIndex > application.Frames[frame - 1].FrameIndex);
+			}
+		}
+
+		TEST_CASE("Application: a device loss thrown inside the UI frame is recovered, and the next UI frame begins"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.3, decision 26 and ADR 0029 risk 10; through the frame-boundary catch and recovery and the
+			// ImGuiRenderer owner): the frame-boundary catch reports the thrown loss and ends the frame inside OnImGuiRender,
+			// with the window it opened; the "Application frame" owner's release ends that UI frame (ImGuiLayer::
+			// EndInterruptedFrame), so the frames after the recovery draw their UI.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			ApplicationSpecification specification = MakeHeadlessSpecification(4);
+			UseTestRenderer(specification);
+			specification.EnableImGui = true;
+			UiLosingApplication application(std::move(specification));
+			CHECK(application.Run() == ExitCode::Success);
+			const std::vector<std::string> expected = {
+				"update 0",
+				"render",
+				"imgui",
+				"update 1",
+				"render",
+				"imgui",
+				"lost",
+				"recovered",
+				"update 2",
+				"render",
+				"imgui",
+				"update 3",
+				"render",
+				"imgui",
+			};
+			CHECK(application.Calls == expected);
+			CHECK(application.DeviceLostEvents == 1);
+			CHECK(application.RecoveryCount == 1);
+		}
+
+		TEST_CASE("Application: a device loss before the first frame exits 4 with a crash report"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 (C18.3, decision 25): the startup objects cannot be created on the lost device and nothing has rendered, so
+			// the loss is not recovered: the process ends through FatalError(DeviceLost) without running a frame.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			Test::TempDirectory userData("DeviceLostBeforeFirstFrame");
+			std::vector<std::string> arguments = Test::GetGpuTestsChildArguments();
+			arguments.push_back("--death-test=App/DeviceLostBeforeFirstFrame");
+			arguments.push_back("--user-data-dir=" + Test::PathToUtf8(userData.GetPath()));
+			const Result<ProcessResult> result = Process::Run(Test::MakeTestsChildSpecification(std::move(arguments)), std::chrono::seconds(60));
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			INFO("child stderr: ", result->StandardError);
+			CHECK(result->ExitCode == ExitCode::Crash);
+			// No frame ran: a loss left for the frames (or for the shutdown's idle wait) would run them first.
+			CHECK_FALSE(result->StandardError.contains("ran after a device loss before the first frame"));
+			const Result<std::string> report = Test::ReadOnlyCrashReport(userData.GetPath());
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			CHECK(report->contains("Reason: Fatal error (DeviceLost)"));
+			CHECK(Test::FindGpuMessageLines(result->StandardError).empty());
 		}
 
 		TEST_CASE("Application: with ImGui each rendered frame submits its UI after OnRender"
@@ -618,6 +1095,136 @@ namespace Engine {
 		{
 			std::vector<std::string> arguments = {
 				"--windowed-child=Application: a windowed Vulkan application presents its frames except while minimized",
+			};
+			const std::vector<std::string> gpuArguments = Test::GetGpuTestsChildArguments();
+			arguments.insert(arguments.end(), gpuArguments.begin(), gpuArguments.end());
+			const Result<ProcessResult> child = Process::Run(Test::MakeTestsChildSpecification(std::move(arguments)), std::chrono::seconds(60));
+			REQUIRE_MESSAGE(child.has_value(), child.error().ToString());
+			INFO("child stdout: ", child->StandardOutput);
+			INFO("child stderr: ", child->StandardError);
+			CHECK(child->ExitCode == 0);
+		}
+
+		// Runs only in a windowed child process (Support/WindowedChild.h), M18 (C18.3, Docs/Decisions/0029-m18-contract.md
+		// decisions 29 and 32): a windowed application on a swapchain loses its device in the update of frame 2. The recovery
+		// releases the "Application frame" owner's swapchain and surface before the old VkInstance is destroyed, creates the
+		// device again with Recover(window) (presentation support scored again) and the swapchain on a new surface, and the
+		// frames after it present. ExpectNoGpuErrors fails the run on any GPU message of the device's whole life.
+		TEST_CASE("Application: a windowed run loses its device and presents again after the recovery"
+			* doctest::test_suite(Test::ChildTargetSuite) * doctest::skip(true))
+		{
+			if (!Test::ProbeGpuForProcess())
+				return;
+			ApplicationSpecification specification;
+			specification.Name = "ApplicationTests";
+			specification.Window = WindowMode::Windowed;
+			specification.WindowSettings = { .Title = "Application test", .Width = 320, .Height = 240 };
+			specification.Clock = ClockKind::Manual;
+			specification.MaxFrames = 6;
+			specification.WorkerCount = 0;
+			specification.EnableImGui = true;
+			// No test touches the machine's audio device (§15.1 T1).
+			specification.Audio = AudioEngineSpecification{};
+			UseTestRenderer(specification);
+			LosingApplication application(std::move(specification));
+			application.LoseAtFrame = 2;
+			CHECK(application.Run() == ExitCode::Success);
+			const auto lost = std::ranges::find(application.Calls, std::string("lost (injected)"));
+			REQUIRE(lost != application.Calls.end());
+			REQUIRE(std::next(lost) != application.Calls.end());
+			CHECK(*std::next(lost) == "recovered");
+			// Frames 3 to 5 render after the recovery; at most one is skipped while the swapchain is created again.
+			CHECK(std::count(lost, application.Calls.end(), std::string("render")) >= 2);
+			CHECK(application.DeviceLostEvents == 1);
+			CHECK(application.RecoveryCount == 1);
+		}
+
+		TEST_CASE("Application: a windowed run recovers its swapchain after an injected loss and presents the next frame without a GPU message"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 acceptance (C18.3): the recovery of a presenting device, which the headless cases and the shared loss-test
+			// helper (Support/DeviceLossTest.h, Recover(nullptr)) cannot reach: the swapchain's and the surface's release and
+			// creation across the recreated VkInstance, and Recover(window).
+			std::vector<std::string> arguments = {
+				"--windowed-child=Application: a windowed run loses its device and presents again after the recovery",
+			};
+			const std::vector<std::string> gpuArguments = Test::GetGpuTestsChildArguments();
+			arguments.insert(arguments.end(), gpuArguments.begin(), gpuArguments.end());
+			const Result<ProcessResult> child = Process::Run(Test::MakeTestsChildSpecification(std::move(arguments)), std::chrono::seconds(60));
+			REQUIRE_MESSAGE(child.has_value(), child.error().ToString());
+			INFO("child stdout: ", child->StandardOutput);
+			INFO("child stderr: ", child->StandardError);
+			CHECK(child->ExitCode == 0);
+		}
+
+		// Runs only in a windowed child process (Support/WindowedChild.h), M18 (C18.4, Docs/Decisions/0029-m18-contract.md
+		// decisions 42 and 44): the windowed frame's swapchain recreation at a resize runs out of memory. Under oom-swapchain it
+		// is retried after one trim and the frames present at each new size; under oom-swapchain-persistent the frame is
+		// skipped with a warning, no later frame renders (the failed recreation retired the old swapchain) or tries the failed
+		// size again, each new size is tried once (one trim each), and a minimize forgets the failed size, so restoring the
+		// window to it tries again. Both runs end with exit code 0 and no GPU message (ExpectNoGpuErrors).
+		TEST_CASE("Application: a windowed run whose swapchain recreation runs out of memory skips that size until it changes"
+			* doctest::test_suite(Test::ChildTargetSuite) * doctest::skip(true))
+		{
+			if (!Test::ProbeGpuForProcess())
+				return;
+			for (const GpuFault fault : { GpuFault::OomSwapchain, GpuFault::OomSwapchainPersistent })
+			{
+				CAPTURE(GpuFaultToString(fault));
+				ApplicationSpecification specification;
+				specification.Name = "ApplicationTests";
+				specification.Window = WindowMode::Windowed;
+				specification.WindowSettings = { .Title = "Application test", .Width = 320, .Height = 240 };
+				specification.Clock = ClockKind::Manual;
+				specification.MaxFrames = 16;
+				specification.WorkerCount = 0;
+				specification.EnableImGui = true;
+				// No test touches the machine's audio device (§15.1 T1).
+				specification.Audio = AudioEngineSpecification{};
+				UseTestRenderer(specification);
+				specification.Graphics.InjectFault = fault;
+				SwapchainOutOfMemoryApplication application(std::move(specification));
+				CHECK(application.Run() == ExitCode::Success);
+				CHECK(application.WindowChangesArrived);
+				REQUIRE(application.Sizes.size() == 3);
+				CHECK(application.Sizes[1] != application.Sizes[0]);
+				CHECK(application.Sizes[2] != application.Sizes[1]);
+				// The frames rendered in [first, end) at `size`.
+				const auto renderedAt = [&application](const glm::uvec2& size, uint64_t first, uint64_t end)
+				{
+					return std::ranges::count_if(application.Rendered, [&size, first, end](const SwapchainOutOfMemoryApplication::Frame& frame)
+					{
+						return frame.Index >= first && frame.Index < end && frame.Width == size.x && frame.Height == size.y;
+					});
+				};
+				CHECK(renderedAt(application.Sizes[0], 0, 3) == 3);
+				if (fault == GpuFault::OomSwapchain)
+				{
+					// The first recreation after the arming fails once and is retried after the trim; the later ones succeed.
+					CHECK(application.Trims == 1);
+					CHECK(renderedAt(application.Sizes[1], 3, 6) > 0);
+					CHECK(renderedAt(application.Sizes[2], 6, 9) > 0);
+					CHECK(renderedAt(application.Sizes[2], 12, 16) > 0);
+				}
+				else
+				{
+					// Frame 3's size, frame 6's and the restore to frame 6's size after the minimize: one trim each.
+					CHECK(application.Trims == 3);
+					CHECK(std::ranges::count_if(application.Rendered, [](const SwapchainOutOfMemoryApplication::Frame& frame)
+					{
+						return frame.Index >= 3;
+					}) == 0);
+				}
+			}
+		}
+
+		TEST_CASE("Application: a windowed swapchain recreation out of memory is retried after a trim, or its size is skipped until it changes"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18 acceptance (C18.4): the windowed half of "a persistent one fails only its request", through the Application's
+			// frame (Application.h step 2c), which the headless cases and the Swapchain children cannot reach.
+			std::vector<std::string> arguments = {
+				"--windowed-child=Application: a windowed run whose swapchain recreation runs out of memory skips that size until it changes",
 			};
 			const std::vector<std::string> gpuArguments = Test::GetGpuTestsChildArguments();
 			arguments.insert(arguments.end(), gpuArguments.begin(), gpuArguments.end());
@@ -877,7 +1484,10 @@ namespace Engine {
 			const std::span<const CommandLineOption> options = GetEngineCommandLineOptions();
 			const auto option = std::ranges::find(options, std::string_view("--gpu-inject-fault"), &CommandLineOption::Name);
 			REQUIRE(option != options.end());
-			for (const GpuFault fault : { GpuFault::DeviceLost, GpuFault::OomTexture, GpuFault::Hang, GpuFault::OomSpecialization })
+			for (const GpuFault fault : { GpuFault::DeviceLost, GpuFault::OomTexture, GpuFault::Hang, GpuFault::OomSpecialization,
+					 GpuFault::DeviceLostUnrecoverable, GpuFault::HangReset, GpuFault::HangResetPersistent, GpuFault::OomRenderTarget,
+					 GpuFault::OomRenderTargetPersistent, GpuFault::OomPipeline, GpuFault::OomPipelinePersistent, GpuFault::OomSwapchain,
+					 GpuFault::OomSwapchainPersistent })
 			{
 				const std::string spelled(GpuFaultToString(fault));
 				CAPTURE(spelled);
@@ -898,6 +1508,49 @@ namespace Engine {
 			const Status applied = ApplyEngineCommandLine(*commandLine, specification);
 			REQUIRE_FALSE(applied.has_value());
 			CHECK(applied.error().GetMessageText().contains("'oom-specialization'"));
+			CHECK(applied.error().GetMessageText().contains("'oom-swapchain-persistent'"));
+		}
+
+		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 41): the machine's GPU reset window, an engine setting.
+		TEST_CASE("ApplyEngineCommandLine: --gpu-reset-wait sets the reset wait and refuses values outside 0 to 120000")
+		{
+			const std::span<const CommandLineOption> options = GetEngineCommandLineOptions();
+			REQUIRE(std::ranges::any_of(options, [](const CommandLineOption& option)
+			{
+				return option.Name == "--gpu-reset-wait";
+			}));
+			for (const auto& [text, milliseconds] : std::vector<std::pair<std::string, uint32_t>>{
+					 { "0", 0u }, { "2500", 2'500u }, { "120000", MaxGpuResetWaitMilliseconds } })
+			{
+				CAPTURE(text);
+				const std::vector<std::string> arguments = { "--headless", "--gpu-reset-wait", text };
+				const Result<CommandLine> commandLine = CommandLine::Parse(arguments, options);
+				REQUIRE_MESSAGE(commandLine.has_value(), commandLine.error().ToString());
+				ApplicationSpecification specification;
+				REQUIRE(ApplyEngineCommandLine(*commandLine, specification).has_value());
+				CHECK(specification.Graphics.ResetWaitMilliseconds == milliseconds);
+			}
+
+			// Absent: the default, long enough for a Windows TDR and a Linux GPU reset.
+			const Result<CommandLine> none = CommandLine::Parse({}, options);
+			REQUIRE(none.has_value());
+			ApplicationSpecification defaults;
+			REQUIRE(ApplyEngineCommandLine(*none, defaults).has_value());
+			CHECK(defaults.Graphics.ResetWaitMilliseconds == DefaultGpuResetWaitMilliseconds);
+
+			for (const std::string text : { "120001", "-1", "15s", "1.5" })
+			{
+				CAPTURE(text);
+				const std::vector<std::string> arguments = { "--gpu-reset-wait=" + text };
+				const Result<CommandLine> commandLine = CommandLine::Parse(arguments, options);
+				REQUIRE_MESSAGE(commandLine.has_value(), commandLine.error().ToString());
+				ApplicationSpecification specification;
+				const Status applied = ApplyEngineCommandLine(*commandLine, specification);
+				REQUIRE_FALSE(applied.has_value());
+				CHECK(applied.error().GetCode() == ErrorCode::InvalidArgument);
+				CHECK(applied.error().GetMessageText().contains("--gpu-reset-wait"));
+				CHECK(specification.Graphics.ResetWaitMilliseconds == DefaultGpuResetWaitMilliseconds);
+			}
 		}
 
 		TEST_CASE("ApplyEngineCommandLine: --user-data-dir sets an absolute user-data root")

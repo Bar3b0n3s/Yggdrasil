@@ -3,6 +3,7 @@
 
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Graphics/CommandListRecording.h"
 #include "Engine/Graphics/GpuDiagnostics.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 
@@ -346,6 +347,10 @@ namespace Engine {
 		TextureUploadPath preferredPath)
 	{
 		ENGINE_TRY(Utils::ValidateUpload(desc, subresources));
+		// A lost device creates nothing (decision 28): the host-copy path would call Vulkan before the creation wrappers
+		// refuse.
+		if (m_Device->IsLost())
+			return MakeError(ErrorCode::Gpu, "cannot create texture '{}': the device is lost", desc.debugName);
 
 		// Immutable and sampled: NVRHI keeps the texture in ShaderResource between command lists (see the file comment).
 		nvrhi::TextureDesc immutable = desc;
@@ -368,15 +373,14 @@ namespace Engine {
 
 		// writeTexture copies the texels into NVRHI's upload buffer while recording; closing the list returns the texture
 		// from CopyDest to its kept initial state.
-		commandList->open();
+		CommandListRecording recording(*m_Device, *commandList);
 		for (const TextureSubresourceData& subresource : subresources)
 		{
 			const SubresourceLayout layout = Utils::GetSubresourceLayout(desc, subresource);
 			commandList->writeTexture(texture, subresource.ArraySlice, subresource.MipLevel, subresource.Data.data(), layout.RowPitch,
 				layout.DepthPitch);
 		}
-		commandList->close();
-		m_Device->ExecuteCommandList(*commandList);
+		recording.Execute();
 		return TextureUpload{ .Texture = std::move(texture), .Path = TextureUploadPath::Staging };
 	}
 
@@ -524,10 +528,9 @@ namespace Engine {
 		// NVRHI assumes an untracked texture with keepInitialState starts undefined until a submitted command list has
 		// used it. This list declares the layout the host transition left, and its submission makes NVRHI start every
 		// later list from ShaderResource. Queue submission also makes the host writes visible to the device.
-		commandList->open();
+		CommandListRecording recording(*m_Device, *commandList);
 		commandList->beginTrackingTextureState(*texture, nvrhi::AllSubresources, nvrhi::ResourceStates::ShaderResource);
-		commandList->close();
-		m_Device->ExecuteCommandList(*commandList);
+		recording.Execute();
 		return TextureUpload{ .Texture = std::move(*texture), .Path = TextureUploadPath::HostImageCopy };
 	}
 

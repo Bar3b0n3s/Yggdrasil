@@ -99,6 +99,7 @@ namespace Engine {
 			case ErrorCode::Unsupported:        return "Unsupported";
 			case ErrorCode::Conflict:           return "Conflict";
 			case ErrorCode::Cancelled:          return "Cancelled";
+			case ErrorCode::OutOfMemory:        return "OutOfMemory";
 		}
 
 		// Documented: a value outside the enumeration (a code read from a newer peer, for example) is "Unknown". Not a
@@ -110,10 +111,10 @@ namespace Engine {
 	{
 		// Every enumerator, in order: ErrorCodeToString's switch names each, and its test checks that the value after the
 		// last one listed here is not a code, so an appended enumerator cannot be left out.
-		static constexpr std::array<ErrorCode, 18> Codes = { ErrorCode::Unknown, ErrorCode::InvalidArgument, ErrorCode::NotFound,
+		static constexpr std::array<ErrorCode, 19> Codes = { ErrorCode::Unknown, ErrorCode::InvalidArgument, ErrorCode::NotFound,
 			ErrorCode::AlreadyExists, ErrorCode::InvalidState, ErrorCode::Io, ErrorCode::Parse, ErrorCode::Validation, ErrorCode::UnsupportedVersion,
 			ErrorCode::ImportFailed, ErrorCode::CompileFailed, ErrorCode::Script, ErrorCode::Gpu, ErrorCode::Timeout, ErrorCode::PermissionDenied,
-			ErrorCode::Unsupported, ErrorCode::Conflict, ErrorCode::Cancelled };
+			ErrorCode::Unsupported, ErrorCode::Conflict, ErrorCode::Cancelled, ErrorCode::OutOfMemory };
 		for (const ErrorCode code : Codes)
 		{
 			if (ErrorCodeToString(code) == name)

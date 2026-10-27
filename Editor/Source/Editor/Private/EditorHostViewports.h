@@ -3,6 +3,7 @@
 #include "Editor/Viewport/EditorViewportHost.h"
 #include "EditorCore/ShownSceneTracker.h"
 #include "Engine/Core/Base.h"
+#include "Engine/Graphics/GpuRecreation.h"
 #include "Engine/Platform/Events.h"
 #include "Engine/Renderer/SceneRenderer.h"
 
@@ -19,6 +20,20 @@ namespace Engine {
 
 	// EditorApp-owned adapter. All services are borrowed, main-thread-only and outlive this adapter.
 	// Each view owns its renderer and ImGui registration; Retire withdraws registrations before GPU teardown.
+	// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decisions 26 and 33): the views' ImGui texture keys are one owner of
+	// the device's GPU objects ("EditorHostViewports", registered by Initialize after the ImGui renderer and the views'
+	// renderers, so a recovery releases it first). Its Release removes both keys (counted as withdrawals) and forgets the
+	// images, the queued and pending picks and the recorded frame, which never completes; the renderers release and recreate
+	// themselves (SceneRenderer, the placement rule's place 2), and the next Render registers the recreated images again.
+	//
+	// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decisions 42 and 44): out-of-memory after startup fails only its request.
+	// A view whose new size runs out of memory after its renderer's trim and retry (SceneRenderer::Resize's OutOfMemory) goes
+	// on rendering at its previous size, which its panel shows scaled into the view's area and maps clicks through (the
+	// image's size is the rendered size), with one Warn line per failed size; the size is asked for again only once the
+	// view's size changes. A debug-view switch whose pipelines run out of memory (Render's OutOfMemory) sets the scene view's
+	// debug-view setting back to the mode its renderer stayed on (SceneRenderer::GetRenderedDebugView), so the next frames do
+	// not try again. A view's per-frame render that runs out of memory (a lazily created target or binding set) is trimmed
+	// for once after the frame's submission (Submitted), and the next frame renders again.
 	class EditorHostViewports final : public EditorViewportHost
 	{
 	public:
@@ -26,10 +41,15 @@ namespace Engine {
 		~EditorHostViewports() override;
 		[[nodiscard]] Status Initialize(GraphicsDevice& device, SceneRendererPipelines& pipelines, GpuResourceCache& cache, ImGuiRenderer& imgui);
 		// Renders every displayed view and notifies its renderer, even when another view fails: the first error is returned
-		// after both views ran (a Gpu error at once, since the host ends the process for it). A view that is not displayed
+		// after both views ran, a Gpu error before any other (M18, C18.4: out-of-memory of a lazily created target or binding
+		// set, for which Submitted trims after the frame, never fatal; on a lost device the loss). A view that is not displayed
 		// withdraws its image; when the shown scene changes while it is hidden, it also releases its renderer, whose binding
 		// caches would otherwise keep the previous scene's GPU textures alive, and gets a new one when displayed again.
 		[[nodiscard]] Status Render(RenderContext& context);
+		// Notifies every view recorded in the frame of its submission and requests its queued pick. M18 (C18.4, decision 44):
+		// then, when the frame's Render returned an out-of-memory error (IsGpuOutOfMemory: a Gpu error on a device that is
+		// not lost), runs GraphicsDevice::TrimUnused once, which waits for that submission before any owner drops what it can
+		// rebuild; a later frame whose Render succeeds trims nothing.
 		[[nodiscard]] Status Submitted(uint64_t frameIndex, uint64_t submissionId);
 		void Retire();
 		void Invalidate();
@@ -46,6 +66,10 @@ namespace Engine {
 		// and recreates its renderer like any view. EditorApp calls it once, after construction, for a headless editor started
 		// with the option. Errors: InvalidState without a headless window (a windowed editor's panels decide).
 		[[nodiscard]] Status ForceGameView();
+		// Whether every shown view's image has the size it renders at (GetTargetSize: its panel's, or the forced Game view's
+		// whatever its panel does, M18's merge with M19), or (M18, C18.4) the size it stays at because that size ran out of
+		// memory. A forced Game view counts once it has rendered, also when its panel is open but not drawn (a headless
+		// editor's default layout keeps the Game tab behind the Scene view), so editor.screenshot's fresh UI frame completes.
 		[[nodiscard]] bool IsLayoutReady() const;
 		// How many times registered view images were withdrawn outside a render (minimizing, retiring). A UI frame whose
 		// draw data was built before the latest withdrawal references removed textures and must not be captured.
@@ -87,9 +111,19 @@ namespace Engine {
 			uint64_t LatestSequence = 0;
 			bool Recorded = false;
 			bool HoldsSceneResources = false; // rendered since its renderer was created
+			// M18 (C18.4, decision 44): the requested size whose Resize ran out of memory (0x0: none), not asked for again
+			// until the requested size changes.
+			glm::uvec2 FailedSize = glm::uvec2(0);
 		};
 		[[nodiscard]] static size_t Index(ViewportView view);
+		// The size view `index` (0 the Scene view, 1 the Game view) renders at: the forced Game view's (ForceGameView: the game
+		// resolution, or the project's deterministic window size) whatever its panel does; otherwise the size its open panel
+		// asked for (0 x 0 for an open panel that is not drawn); nullopt for a view that is not shown (its panel closed, or no
+		// project). RenderView and IsLayoutReady share it (M18's milestone review).
+		[[nodiscard]] std::optional<glm::uvec2> GetTargetSize(size_t index) const;
 		void Cancel(View& view);
+		// The recreation owner's Release (see the class comment): no GPU call.
+		void ReleaseGpuObjects();
 		[[nodiscard]] Status Poll(View& view, uint64_t frameIndex);
 		[[nodiscard]] Status RenderView(size_t index, RenderContext& context, bool sceneChanged);
 		[[nodiscard]] bool IsCursorLocked() const;
@@ -107,7 +141,9 @@ namespace Engine {
 		uint64_t m_Withdrawals = 0;
 		bool m_Unavailable = false;
 		bool m_GameFocused = false;
-		bool m_GameForced = false; // ForceGameView: the Game view renders whether or not its panel is displayed
+		bool m_TrimAfterSubmission = false;       // the last Render ran out of memory: Submitted trims (M18, C18.4 decision 44)
+		bool m_GameForced = false;                // ForceGameView: the Game view renders whether or not its panel is displayed
+		GpuRecreationRegistration m_Recreation{}; // from Initialize until Retire
 	};
 
 }

@@ -40,6 +40,18 @@ namespace Engine {
 			return created;
 		}
 
+		bool MaterialBindingCache::Contains(AssetHandle handle) const
+		{
+			return m_Entries.contains(handle);
+		}
+
+		void MaterialBindingCache::Keep(AssetHandle handle, uint64_t generation)
+		{
+			const auto found = m_Entries.find(handle);
+			if (found != m_Entries.end() && found->second.Generation == generation)
+				found->second.IsUsed = true;
+		}
+
 		void MaterialBindingCache::ReleaseUnused()
 		{
 			std::erase_if(m_Entries, [](const auto& entry)

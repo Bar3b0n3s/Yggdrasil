@@ -8,6 +8,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory_resource>
 #include <span>
 #include <string>
 #include <variant>
@@ -25,6 +26,11 @@
 // are not validated here (producers that take external input validate it, M13's bindings with located errors); the
 // renderer skips a primitive with a non-finite value. Frozen by the M8 contract (Docs/Decisions/0013-m8-decisions.md
 // decision 6) and implemented by it, because M11's collider visualization and M13's scripts emit into it.
+//
+// Commands (M18, R-ARENA; Docs/Decisions/0029-m18-contract.md decision 9): the list keeps its commands in a std::pmr vector.
+// A list built with DebugDrawList(resource) allocates them from that memory resource, which must outlive the list; a
+// default-constructed list, and every copy, allocates from std::pmr::get_default_resource(). Assignment keeps the target's
+// resource. A DebugText's string keeps the default allocator.
 
 namespace Engine {
 
@@ -141,6 +147,8 @@ namespace Engine {
 		static constexpr size_t MaxCommands = 65536;
 
 		DebugDrawList() = default;
+		// M18 (R-ARENA): the commands allocate from `resource` (not null, asserted), which outlives the list.
+		explicit DebugDrawList(std::pmr::memory_resource* resource);
 
 		// Each appends one command with the given colour (linear RGBA), duration (simulation seconds; negative or non-finite
 		// values are stored as 0) and depth mode. Values are stored as given otherwise (see the file comment).
@@ -183,10 +191,12 @@ namespace Engine {
 		[[nodiscard]] bool IsEmpty() const { return m_Commands.empty(); }
 		// Commands Add and Append dropped at MaxCommands since construction or the last Clear.
 		[[nodiscard]] size_t GetDroppedCount() const { return m_Dropped; }
+		// M18 (R-ARENA): the memory resource the commands allocate from (see the file comment).
+		[[nodiscard]] std::pmr::memory_resource* GetMemoryResource() const { return m_Commands.get_allocator().resource(); }
 
 		bool operator==(const DebugDrawList&) const = default;
 	private:
-		std::vector<DebugDrawCommand> m_Commands;
+		std::pmr::vector<DebugDrawCommand> m_Commands;
 		size_t m_Dropped = 0;
 	};
 

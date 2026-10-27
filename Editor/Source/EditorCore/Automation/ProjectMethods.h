@@ -153,15 +153,16 @@ namespace Engine {
 	};
 
 	// project.upgrade {}: applies migrations and canonical re-saves to every project file: the .eproj and every .scene,
-	// .prefab, .meta, .material, .sfx and .replay file under Assets/, each through its reader (with its migrations) and its
-	// canonical writer (§6, §13.5, §13.12; Docs/Decisions/0026-m16-contract.md decision 12); .material, .sfx and .replay files
-	// are read with unknown members refused, as their importers read them, so such a member fails the upgrade at its file and
-	// pointer instead of being dropped by the rewrite. A file is written only when its canonical bytes differ, through
+	// .prefab, .meta, .material, .sfx, .replay and .spritesheet file under Assets/, each through its reader (with its
+	// migrations) and its canonical writer (§6, §13.5, §13.12; Docs/Decisions/0026-m16-contract.md decision 12; sprite sheets
+	// from M18, Docs/Decisions/0029-m18-contract.md decision 14); .material, .sfx, .replay and .spritesheet files are read
+	// with unknown members refused, as their importers read them, so such a member fails the upgrade at its file and pointer
+	// instead of being dropped by the rewrite. A file is written only when its canonical bytes differ, through
 	// EditorContext::WriteProjectFile, so provenance records each rewrite with the method "project.upgrade". No open scene
-	// may be dirty (InvalidState naming every dirty one; decision 14); every open scene whose file changed is reloaded
-	// afterwards in its tab position, the active scene staying active; no scene needs to be open. Supports dry runs:
-	// changedFiles then lists what a real upgrade would rewrite, and nothing is written. Not undoable (it is a file-format
-	// operation); a reloaded scene's history is cleared.
+	// may be dirty (InvalidState naming every dirty one; Docs/Decisions/0031-m20-contract.md decision 14); every open scene
+	// whose file changed is reloaded afterwards in its tab position, the active scene staying active; no scene needs to be
+	// open. Supports dry runs: changedFiles then lists what a real upgrade would rewrite, and nothing is written. Not
+	// undoable (it is a file-format operation); a reloaded scene's history is cleared.
 	struct ProjectUpgradeResult
 	{
 		std::vector<std::string> ChangedFiles{}; // project-relative, sorted

@@ -1,6 +1,8 @@
 #include "EnginePCH.h"
 #include "Engine/ImGui/ImGuiScreenshot.h"
 
+#include "Engine/Graphics/CommandListRecording.h"
+#include "Engine/Graphics/GpuOutOfMemory.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/OffscreenTarget.h"
 #include "Engine/Graphics/Readback.h"
@@ -8,6 +10,10 @@
 #include "Engine/ImGui/ImGuiLayer.h"
 
 #include <imgui.h>
+
+#include <format>
+#include <optional>
+#include <utility>
 
 namespace Engine {
 
@@ -32,21 +38,38 @@ namespace Engine {
 		targetSpecification.ColorFormat = nvrhi::Format::RGBA8_UNORM;
 		targetSpecification.ClearColor = nvrhi::Color(FrameClearColor[0], FrameClearColor[1], FrameClearColor[2], FrameClearColor[3]);
 		targetSpecification.DebugName = "ImGuiScreenshot";
-		ENGINE_TRY_ASSIGN(const OffscreenTarget target, OffscreenTarget::Create(device, targetSpecification));
+		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decisions 42, 44 and 45): the capture is one request. When a creation
+		// runs out of memory (the target, ImGui's pipeline for its format, a geometry buffer, the staging texture), its list has
+		// been executed, and the trim waits for it before the whole capture runs once more; a second failure is OutOfMemory.
+		// The target lives until the capture returns, so it outlives the submission that cleared it until the trim's wait
+		// (NVRHI does not reference a texture used only by a clear, ADR 0009 decision 31). A retry reuses the target an earlier
+		// attempt created (each attempt clears it again), so it never needs memory for a second one while the first is held.
+		std::optional<OffscreenTarget> target;
+		Image image;
+		const Status captured = RetryAfterTrim(device, std::format("an editor UI capture at {}x{}", targetSpecification.Width, targetSpecification.Height),
+			[&device, &imgui, &targetSpecification, &target, &image]() -> Status
+		{
+			if (!target.has_value())
+			{
+				ENGINE_TRY_ASSIGN(OffscreenTarget created, OffscreenTarget::Create(device, targetSpecification));
+				target = std::move(created);
+			}
 
-		// Not an immediate command list: NVRHI's validation allows one open immediate list at a time.
-		ENGINE_TRY_ASSIGN(const nvrhi::CommandListHandle commandList,
-			device.CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false)));
-		commandList->open();
-		target.Clear(*commandList);
-		const Status rendered = imgui.Render(*commandList, *target.GetFramebuffer());
-		commandList->close();
-		if (!rendered.has_value())
-			return std::unexpected(rendered.error());
-		device.ExecuteCommandList(*commandList);
+			// Not an immediate command list: NVRHI's validation allows one open immediate list at a time.
+			ENGINE_TRY_ASSIGN(const nvrhi::CommandListHandle commandList,
+				device.CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false)));
+			// The list is executed whatever Render reports, so a failed render leaves no recording behind (CommandListRecording).
+			CommandListRecording recording(device, *commandList);
+			target->Clear(*commandList);
+			const Status rendered = imgui.Render(*commandList, *target->GetFramebuffer());
+			recording.Execute();
+			ENGINE_TRY(rendered);
 
-		Readback readback(device);
-		ENGINE_TRY_ASSIGN(Image image, readback.ReadTexture(*target.GetColorTexture()));
+			Readback readback(device);
+			ENGINE_TRY_ASSIGN(image, readback.ReadTexture(*target->GetColorTexture()));
+			return {};
+		});
+		ENGINE_TRY(captured);
 		if (request.MaxDimension > 0)
 			return DownscaleImage(image, request.MaxDimension);
 		return image;

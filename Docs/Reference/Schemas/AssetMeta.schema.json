@@ -19,11 +19,11 @@
 		},
 		"Type": {
 			"description": "The asset's main type, or \"Dependency\" for a file a glTF references.",
-			"enum": ["Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "Dependency"]
+			"enum": ["Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Dependency"]
 		},
 		"Importer": {
 			"description": "The importer that cooks the source (asset metas only).",
-			"enum": ["Audio", "Environment", "Font", "Gltf", "Material", "Prefab", "Replay", "Scene", "Script", "SoundEffect", "Texture"]
+			"enum": ["Audio", "Environment", "Font", "Gltf", "Material", "Prefab", "Replay", "Scene", "Script", "SoundEffect", "SpriteSheet", "Texture"]
 		},
 		"ImporterVersion": {
 			"description": "The version of that importer when it last wrote the meta (asset metas only).",
@@ -52,7 +52,7 @@
 					},
 					"Type": {
 						"description": "The sub-asset's asset type.",
-						"enum": ["Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay"]
+						"enum": ["Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet"]
 					}
 				},
 				"required": ["Key", "Handle", "Type"],

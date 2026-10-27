@@ -1,0 +1,180 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "SpriteSheet",
+	"description": "A sprite sheet file (§6.9).",
+	"type": "object",
+	"properties": {
+		"Format": {
+			"description": "The file's format name; first key of the file.",
+			"enum": ["SpriteSheet"]
+		},
+		"Version": {
+			"description": "The format version this build writes; older versions are migrated when read.",
+			"enum": [1]
+		},
+		"Texture": {
+			"description": "The texture the frames are cut from; null draws the frames as opaque white.",
+			"type": ["string", "null"],
+			"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+			"x-assetType": "Texture"
+		},
+		"Frames": {
+			"description": "At most 65536 frames; a frame's identity is its index.",
+			"type": "array",
+			"items": {
+				"$ref": "#/$defs/SpriteFrame"
+			}
+		},
+		"Clips": {
+			"description": "At most 1024 clips, in authored order.",
+			"type": "array",
+			"items": {
+				"$ref": "#/$defs/SpriteClip"
+			}
+		}
+	},
+	"required": ["Format", "Version"],
+	"additionalProperties": false,
+	"$defs": {
+		"SpriteFrame": {
+			"description": "One frame of a sprite sheet: a rectangle of its texture with a pivot and 9-slice borders. Clips and sprites refer to it by its index.",
+			"type": "object",
+			"properties": {
+				"Name": {
+					"description": "An optional label of at most 128 bytes, without control characters, unique among the frames when not empty.",
+					"type": "string"
+				},
+				"Rect": {
+					"description": "The frame's texel rectangle.",
+					"$ref": "#/$defs/SpriteRect"
+				},
+				"Pivot": {
+					"description": "The point of the frame placed at its sprite's position, as a fraction of the frame's size from its top-left corner: (0.5, 0.5) is its centre, (0.5, 1) the middle of its bottom edge.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 2,
+					"maxItems": 2
+				},
+				"Borders": {
+					"description": "The frame's 9-slice insets.",
+					"$ref": "#/$defs/SpriteBorders"
+				}
+			},
+			"additionalProperties": false
+		},
+		"SpriteClip": {
+			"description": "A named animation over a sprite sheet's frames, driven by fixed-step ticks.",
+			"type": "object",
+			"properties": {
+				"Name": {
+					"description": "The clip's name, which scripts play it by: 1 to 128 bytes without control characters, unique among the clips.",
+					"type": "string"
+				},
+				"Frames": {
+					"description": "1 to 1024 steps, played in order.",
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/SpriteClipFrame"
+					}
+				},
+				"Loop": {
+					"description": "Whether the clip starts again after its last step; otherwise it holds its last frame.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"SpriteRect": {
+			"description": "A frame's rectangle in its texture, in whole texels: x right and y down from the texture's top-left corner.",
+			"type": "object",
+			"properties": {
+				"X": {
+					"description": "The texel column of the frame's left edge.",
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 16383
+				},
+				"Y": {
+					"description": "The texel row of the frame's top edge (row 0 is the texture's top row).",
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 16383
+				},
+				"Width": {
+					"description": "The frame's width; X + Width is at most 16384.",
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 16384
+				},
+				"Height": {
+					"description": "The frame's height; Y + Height is at most 16384.",
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 16384
+				}
+			},
+			"additionalProperties": false
+		},
+		"SpriteBorders": {
+			"description": "A frame's 9-slice insets in texels: the corners keep their size and the edges and the centre stretch when the frame is drawn larger. All zero: the frame is not sliced.",
+			"type": "object",
+			"properties": {
+				"Left": {
+					"description": "The left inset; Left + Right is at most the frame's Width.",
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 16384
+				},
+				"Top": {
+					"description": "The top inset; Top + Bottom is at most the frame's Height.",
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 16384
+				},
+				"Right": {
+					"description": "The right inset.",
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 16384
+				},
+				"Bottom": {
+					"description": "The bottom inset.",
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 16384
+				}
+			},
+			"additionalProperties": false
+		},
+		"SpriteClipFrame": {
+			"description": "One step of a sprite clip: a frame shown for a number of fixed-step ticks.",
+			"type": "object",
+			"properties": {
+				"Frame": {
+					"description": "The index of the frame in the sheet's Frames, from 0.",
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 65535
+				},
+				"Ticks": {
+					"description": "How many fixed-step ticks the frame shows.",
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 65535
+				}
+			},
+			"additionalProperties": false
+		}
+	}
+}

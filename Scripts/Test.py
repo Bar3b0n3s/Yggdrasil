@@ -45,8 +45,10 @@ format lacks the 1.4 path, §8.1); under the 1.3 cap those skips are expected an
 golden run reports the device class that rendered, read from the harness's log lines
 (Tests/Source/Support/GoldenImage.cpp), and ends with "warning" when goldens are missing for that device class (smoke
 mode) or when --update-golden wrote candidates into Tests/Golden/<DeviceClass>/, which must be reviewed (the git diff)
-before they are committed. A failed comparison writes <Name>-actual.png, <Name>-expected.png and <Name>-diff.png into
-bin/TestResults/Golden/.
+before they are committed. A device class without an image's golden while another class of the same vendor has it (the
+driver's major version changed; M18's device-class check) fails that test case, never smoke-tests it, and the step's
+detail names the images and points to the rename procedure (Tests/Golden/README.md). A failed comparison writes
+<Name>-actual.png, <Name>-expected.png and <Name>-diff.png into bin/TestResults/Golden/.
 
 Skipped test cases (Roadmap rule 3, Docs/Decisions/0004-contract-stub-gate.md): after every run of the Tests binary
 (unit, gpu, golden), it lists the test cases the run's filters select, skipped ones included (doctest --no-skip
@@ -56,6 +58,17 @@ skipped test case in any other suite, such as a contract task's not yet implemen
 --allow-skips (contract mode, a contract checkpoint's targeted runs on a milestone branch, ADR 0028 decision 11;
 PreCommit.py --contract and CI.py --contract pass it too, but no gate run of the backlog program uses them) reports them
 without failing. The counts are in the step detail and, with --json, in the step's "skipCheck" object.
+
+User data of the Tests runs (the "Milestone review" of Docs/Decisions/0029-m18-contract.md): every Tests process of
+the unit, gpu and golden suites gets --user-data-dir=bin/TestResults/<report stem>/UserData (run_user_data, from
+Lib/paths.py's tests_run_user_data; <report stem> as the JUnit file's, such as Gpu-Debug-Vulkan14), so its Tests.log
+(<root>/<product>/Logs/, appended to and rotated as in any root) and the crash report of a crash or a failed assertion
+(<root>/<product>/Crashes/crash-<epoch>-<pid>.txt, with a .dmp minidump on Windows) stay in the checkout's bin/ and
+never reach the user's real user-data folder; the listing of skipped test cases gets a temporary root. The root is
+never emptied: every run of that suite and configuration in the checkout shares it, and two can overlap (a unit run
+takes no machine lock). A run names only the crash reports its own Tests process wrote (new since the run started, with
+that process's id in the name): each is printed as a "CRASH REPORT: <path>" line and named in the step's detail, and
+with --json the step holds "userData" and "crashReports".
 
 The automation suite (Roadmap M4, Docs/Decisions/0008-m4-decisions.md decisions 33 and 34; its skip rule is
 decision 16):
@@ -195,6 +208,12 @@ count (the product owner's decision, Docs/Decisions/0024-m15-contract.md decisio
 --exclude-test-suites <names> leaves those doctest test suites out of the unit suite's Tests runs, besides GPU and
 Golden: the hardening stage's sanitized unit run leaves out Fuzz, whose cases its fuzz step runs over a superset of the
 same iterations.
+--debug-heap (Windows only; the unit, gpu and golden suites; the hardening stage's debug-heap GPU step,
+Docs/Decisions/0029-m18-contract.md) starts each Tests process on the Windows debug heap (Scripts/Lib/debugheap.py:
+under a debugger that detaches at the loader's initial breakpoint, so every heap of the process, the graphics driver's
+included, checks block tails, fills freed blocks and validates parameters, while its crash handler still reports a
+crash; the processes it starts run on their own heaps). The step names gain " (debug heap)" and the reports the suffix
+-DebugHeap (Gpu-Debug-Vulkan14-DebugHeap.xml).
 
 Machine-wide locks (Scripts/Lib/locks.py; Docs/Architecture.md §2.3, ADR 0028 decision 16): before its first suite, a
 run that includes a GPU-using suite (gpu, golden, feature, automation, export, determinism or games; --update-golden
@@ -210,6 +229,9 @@ the coverage gate; the feature suite keeps the editor's own suites FeatureTest a
 suite writes Determinism.xml). The console then shows a summary and every failure parsed from that file instead of
 doctest's console reporter. If the test process dies before writing it, a JUnit file with one error test case records
 the crash.
+
+It works from any directory (Docs/Architecture.md §2.3): a relative path given on its command line is resolved against
+the caller's directory, then main() makes the repository root of its own checkout the working directory.
 
 Exit codes: 0 every requested suite that exists passed, 1 a suite failed or none of the requested suites exists
 yet, 2 usage error, 3 a test executable or the MCP virtual environment is missing (build it, or run Setup.py), a
@@ -241,7 +263,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from Lib import coverage, exports, games, hardening, locks, native_build, paths, provenance
+from Lib import coverage, debugheap, exports, games, hardening, locks, native_build, paths, provenance
 from Lib.process import (
     ToolNotFoundError,
     child_environment,
@@ -285,6 +307,9 @@ DOCTEST_SUMMARY_PATTERN = re.compile(
 # (Tests/Source/Support/TestOptions.h). They are the only test cases that stay skipped (Docs/Decisions/
 # 0003-m1-contract-decisions.md decision 7).
 CHILD_TARGET_SUITE = "ChildTargets"
+# The name of a crash report a process writes in its crash report folder (Lib/paths.py's crash_report_folder; Engine/
+# Source/Engine/Platform/CrashHandler.cpp, FormatCrashReportStem): crash-<epoch>-<process id>[-<attempt>].txt.
+CRASH_REPORT_NAME_PATTERN = re.compile(r"^crash-\d+-(\d+)(?:-\d+)?\.txt$")
 LISTING_TIMEOUT_SECONDS = 120.0
 UNEXPECTED_SKIPS_IN_DETAIL = 3
 NAMES_IN_DETAIL = 4
@@ -299,10 +324,10 @@ NO_DEVICE_PATTERN = re.compile(r"GPU test without a device \(passes without runn
 # The log line of a host-image-copy case the device cannot run (HostImageUploadTests.cpp, ReportHostCopySkipped).
 HOST_COPY_SKIP_PATTERN = re.compile(r"Host image copy skipped for (?P<case>'[^']*' \([^)]*\)): (?P<skip_reason>.*)$")
 # The log lines of the golden harness (GoldenImage.cpp): "Golden image '<name>' on device class '<class>'" followed by
-# ": matched", ": goldens missing", ": wrote the candidate" or " does not match".
+# ": matched", ": goldens missing", ": wrote the candidate", ": device class changed" or " does not match".
 GOLDEN_PATTERN = re.compile(
     r"Golden image '(?P<name>[^']+)' on device class '(?P<device>[^']+)'"
-    r"(?::\s(?P<event>matched|goldens missing|wrote the candidate)|\s(?P<mismatch>does not match))"
+    r"(?::\s(?P<event>matched|goldens missing|wrote the candidate|device class changed)|\s(?P<mismatch>does not match))"
 )
 # The first line of every AddressSanitizer report ("==1234==ERROR: AddressSanitizer: heap-buffer-overflow on ...").
 SANITIZER_ERROR_PATTERN = re.compile(r"ERROR: AddressSanitizer: .*$")
@@ -312,6 +337,10 @@ REPORTED_LINES_PATTERN = re.compile(
 )
 # --sanitizer: the sanitizers Test.py knows, with the label of their step names and the suffix of their report stems.
 SANITIZERS = {"address": ("ASan", "Asan")}
+# --debug-heap (the hardening stage's debug-heap GPU step, Docs/Decisions/0029-m18-contract.md): the label of its step
+# names and the suffix of its report stems, and the suites whose Tests runs take it.
+DEBUG_HEAP_LABELS = ("debug heap", "DebugHeap")
+DEBUG_HEAP_SUITES = ("unit", "gpu", "golden")
 # The --fuzz-scale of the unit runs that pass no --fuzz-scale, by configuration (Docs/Decisions/0024-m15-contract.md
 # decision 14, approved by the product owner): Debug executes the first tenth of each fuzz case's sequence (at least its
 # minimum); Release, absent here, executes every count.
@@ -424,21 +453,24 @@ class TestRun:
     options: tuple[str, ...] = ()  # Tests options of the run (--vulkan-api=1.3, --require-gpu, --update-golden)
     cap: str = ""  # the gpu suite's API cap ("1.3" or "1.4")
     sanitizer: str = ""  # --sanitizer of the run ("address"), or empty
+    debug_heap: bool = False  # --debug-heap: the Tests process runs on the Windows debug heap (Lib/debugheap.py)
 
     @property
     def name(self) -> str:
         return (f"{self.suite} {self.config}" + (f" (Vulkan {self.cap})" if self.cap else "")
-                + sanitizer_name_suffix(self.sanitizer))
+                + sanitizer_name_suffix(self.sanitizer) + (f" ({DEBUG_HEAP_LABELS[0]})" if self.debug_heap else ""))
 
     @property
     def report_stem(self) -> str:
         return "-".join([self.suite.capitalize(), self.config, *([cap_label(self.cap)] if self.cap else []),
-                         *([SANITIZERS[self.sanitizer][1]] if self.sanitizer else [])])
+                         *([SANITIZERS[self.sanitizer][1]] if self.sanitizer else []),
+                         *([DEBUG_HEAP_LABELS[1]] if self.debug_heap else [])])
 
     @property
     def junit_suite_name(self) -> str:
         return ".".join([self.suite.capitalize(), self.config, *([cap_label(self.cap)] if self.cap else []),
-                         *([SANITIZERS[self.sanitizer][1]] if self.sanitizer else [])])
+                         *([SANITIZERS[self.sanitizer][1]] if self.sanitizer else []),
+                         *([DEBUG_HEAP_LABELS[1]] if self.debug_heap else [])])
 
 
 def cap_label(cap: str) -> str:
@@ -513,6 +545,8 @@ class DeviceReport:
     goldens_missing: set[str] = dataclasses.field(default_factory=set)
     candidates_written: set[str] = dataclasses.field(default_factory=set)
     mismatched: set[str] = dataclasses.field(default_factory=set)
+    # The images whose device class has no golden while a class of the same vendor has one (the device-class check).
+    class_changed: set[str] = dataclasses.field(default_factory=set)
 
     @staticmethod
     def parse(lines: list[str]) -> DeviceReport:
@@ -539,6 +573,8 @@ class DeviceReport:
                 report.matched.add(name)
             elif golden.group("event") == "goldens missing":
                 report.goldens_missing.add(name)
+            elif golden.group("event") == "device class changed":
+                report.class_changed.add(name)
             else:
                 report.candidates_written.add(name)
         return report
@@ -552,6 +588,7 @@ class DeviceReport:
             "goldensMissing": sorted(self.goldens_missing),
             "candidatesWritten": sorted(self.candidates_written),
             "mismatched": sorted(self.mismatched),
+            "deviceClassChanged": sorted(self.class_changed),
         }
 
     def describe_host_copy_skips(self) -> str:
@@ -587,10 +624,12 @@ def list_skipped_test_cases(executable: Path, filters: list[str],
                             environment: dict[str, str] | None = None) -> SkipCheck:
     """Ask the Tests binary which test cases `filters` select, skipped ones included (--no-skip). doctest's XML
     reporter gives each <TestCase> its suite and its doctest::skip flag; the listing goes to a file (--out), so the log
-    on stderr never interleaves with it. `environment` is the suite's (default: child_environment())."""
+    on stderr never interleaves with it, and the process's user data (its Tests.log) goes to the same temporary
+    directory. `environment` is the suite's (default: child_environment())."""
     with tempfile.TemporaryDirectory(prefix="Test-SkipCheck-") as directory:
         listing = Path(directory) / "TestCases.xml"
-        command = [str(executable), *filters, "--no-skip", "--list-test-cases", "--reporters=xml", f"--out={listing}"]
+        command = [str(executable), *filters, "--no-skip", "--list-test-cases", "--reporters=xml", f"--out={listing}",
+                   f"--user-data-dir={Path(directory).resolve() / 'UserData'}"]
         try:
             result = run_captured(command, cwd=paths.REPOSITORY_ROOT,
                                   env=environment if environment is not None else child_environment(),
@@ -623,6 +662,29 @@ def tests_executable(config: str, build_root: Path = paths.BIN_ROOT) -> Path:
 
 def junit_path(report_stem: str) -> Path:
     return paths.TEST_RESULTS_ROOT / f"{report_stem}.xml"
+
+
+def run_user_data(run: TestRun) -> Path:
+    """bin/TestResults/<report stem>/UserData: the user-data root (--user-data-dir) of `run`'s Tests process, so no
+    Tests.log or crash report of it reaches the user's real user-data folder. Never emptied: every run of the suite and
+    configuration in the checkout shares it, and two may overlap."""
+    return paths.tests_run_user_data(junit_path(run.report_stem))
+
+
+def crash_reports(user_data: Path, process_id: int | None = None) -> list[Path]:
+    """The crash reports in the crash report folder of the user-data root `user_data`, in name order; with
+    `process_id`, only those that process wrote."""
+    reports: list[Path] = []
+    for path in sorted(paths.crash_report_folder(user_data).glob("crash-*.txt")):
+        match = CRASH_REPORT_NAME_PATTERN.match(path.name)
+        if match is not None and (process_id is None or int(match.group(1)) == process_id):
+            reports.append(path)
+    return reports
+
+
+def describe_crash_reports(reports: list[Path]) -> str:
+    """The step detail's part naming the crash reports a run left."""
+    return f"crash report(s) of the run: {', '.join(paths.display_path(report) for report in reports)}"
 
 
 def read_junit(path: Path, suite_name: str | None) -> TestCounts:
@@ -671,6 +733,7 @@ def plan_runs(suite: str, config: str, arguments: argparse.Namespace) -> list[Te
     """The Tests runs of `suite` in `config`: one, except for the gpu suite, which runs once per API cap."""
     gpu_options = ("--require-gpu",) if arguments.require_gpu else ()
     sanitizer = getattr(arguments, "sanitizer", None) or ""
+    debug_heap = bool(getattr(arguments, "debug_heap", False))
     timeout_scale = getattr(arguments, "test_timeout_scale", None)
     common = (f"--test-timeout-scale={timeout_scale:g}",) if timeout_scale else ()
     if suite == "unit":
@@ -678,15 +741,15 @@ def plan_runs(suite: str, config: str, arguments: argparse.Namespace) -> list[Te
         fuzz_options = (f"--fuzz-scale={fuzz_scale:g}",) if fuzz_scale else ()
         excluded = ",".join([UNIT_EXCLUDED_TEST_SUITES, *(getattr(arguments, "exclude_test_suites", None) or [])])
         return [TestRun(suite, config, (f"--test-suite-exclude={excluded}",), (*common, *fuzz_options),
-                        sanitizer=sanitizer)]
+                        sanitizer=sanitizer, debug_heap=debug_heap)]
     if suite == "gpu":
         caps = [arguments.vulkan_api] if arguments.vulkan_api else list(VULKAN_API_CAPS)
         return [TestRun(suite, config, (f"--test-suite={GPU_TEST_SUITE}",),
-                        (f"--vulkan-api={cap}", *gpu_options, *common), cap, sanitizer) for cap in caps]
+                        (f"--vulkan-api={cap}", *gpu_options, *common), cap, sanitizer, debug_heap) for cap in caps]
     if suite == "golden":
         golden_options = ("--update-golden",) if arguments.update_golden else ()
         return [TestRun(suite, config, (f"--test-suite={GOLDEN_TEST_SUITE}",), (*gpu_options, *golden_options, *common),
-                        sanitizer=sanitizer)]
+                        sanitizer=sanitizer, debug_heap=debug_heap)]
     raise ValueError(f"no runs for suite '{suite}'")
 
 
@@ -710,28 +773,45 @@ def run_tests(run: TestRun, arguments: argparse.Namespace, console: Console) -> 
         environment = suite_environment(arguments)
     except FileNotFoundError as error:
         return missing_sanitizer_runtime(run.name, error)
+    # Kept, never emptied: another run of the suite and configuration in the checkout may be using it.
+    user_data = run_user_data(run)
+    try:
+        user_data.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        detail = f"cannot create the run's user data {paths.display_path(user_data)}: {error}"
+        return Step(run.name, Status.FAILED, detail, exit_code=EXIT_INIT_FAILED)
+    earlier_reports = set(crash_reports(user_data))
     filters = list(run.filters)
     if arguments.filter:
         filters.append(f"--test-case={arguments.filter}")
-    command = [str(executable), *filters, *run.options]
+    command = [str(executable), *filters, *run.options, f"--user-data-dir={user_data.resolve()}"]
     report = junit_path(run.report_stem) if arguments.junit else None
     if report is not None:
         report.parent.mkdir(parents=True, exist_ok=True)
         report.unlink(missing_ok=True)
         command += ["--reporters=junit", f"--out={report}"]
 
-    console.heading(f"{run.name}: {format_command([paths.display_path(executable), *filters, *run.options])}")
+    console.heading(f"{run.name}: {format_command([paths.display_path(executable), *filters, *run.options])} "
+                    f"--user-data-dir={paths.display_path(user_data)}")
     try:
         result = run_streamed(command, cwd=paths.REPOSITORY_ROOT, env=environment, timeout=arguments.timeout,
-                              echo=console.stream, collect=REPORTED_LINES_PATTERN)
+                              echo=console.stream, collect=REPORTED_LINES_PATTERN, debug_heap=run.debug_heap)
     except ToolNotFoundError as error:
         return Step(run.name, Status.FAILED, str(error), exit_code=EXIT_INIT_FAILED)
 
-    data: dict[str, object] = {"suite": run.suite, "config": run.config, "executable": paths.display_path(executable)}
+    data: dict[str, object] = {"suite": run.suite, "config": run.config, "executable": paths.display_path(executable),
+                               "userData": paths.display_path(user_data)}
+    reports = [path for path in crash_reports(user_data, result.process_id) if path not in earlier_reports]
+    if reports:
+        data["crashReports"] = [paths.display_path(path) for path in reports]
+        for path in reports:
+            console.print(f"CRASH REPORT: {paths.display_path(path)}")
     if run.cap:
         data["vulkanApi"] = run.cap
     if run.sanitizer:
         data["sanitizer"] = run.sanitizer
+    if run.debug_heap:
+        data["debugHeap"] = True
     sanitizer_errors = [line for line in result.collected if SANITIZER_ERROR_PATTERN.search(line)]
     if sanitizer_errors:
         data["sanitizerErrors"] = sanitizer_errors
@@ -769,7 +849,8 @@ def run_tests(run: TestRun, arguments: argparse.Namespace, console: Console) -> 
     if result.timed_out:
         if report is not None:
             write_crash_junit(report, run.junit_suite_name, f"Tests {result.describe_exit()}", result.tail(60))
-        return Step(run.name, Status.TIMEOUT, f"Tests {result.describe_exit()}", result.duration, data=data)
+        detail = f"Tests {result.describe_exit()}" + (f"; {describe_crash_reports(reports)}" if reports else "")
+        return Step(run.name, Status.TIMEOUT, detail, result.duration, data=data)
 
     skips: SkipCheck | None = None
     skip_error = ""
@@ -791,8 +872,14 @@ def run_tests(run: TestRun, arguments: argparse.Namespace, console: Console) -> 
             detail = f"Tests exited with code {describe_exit_code(result.exit_code)}"
         if sanitizer_errors:
             detail += f"; {describe_sanitizer_errors(sanitizer_errors)}"
+        if reports:
+            detail += f"; {describe_crash_reports(reports)}"
         if device.mismatched:
             detail += f"; golden mismatches: {describe_names(device.mismatched)} (outputs in bin/TestResults/Golden/)"
+        if device.class_changed:
+            detail += (f"; device class {', '.join(sorted(device.device_classes))} has no goldens for "
+                       f"{describe_names(device.class_changed)}, but a class of the same vendor has them: the driver's "
+                       "major version changed (Tests/Golden/README.md, \"Renaming a device class\")")
         return Step(run.name, Status.FAILED, detail, result.duration, data=data)
     if counts is None:
         return Step(run.name, Status.FAILED, "Tests exited with code 0 but printed no doctest summary", result.duration,
@@ -2423,7 +2510,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
                              "so does a game's plain Dist export whose smoke test did not run; determinism suite: a "
                              "missing or stale exported report fails (exit code 3) instead of leaving that run out "
                              "(CI.py and PreCommit.py pass it unless --gpu-optional, §15.2)")
-    parser.add_argument("--editor-report", type=Path,
+    parser.add_argument("--editor-report", type=paths.argument_path,
                         help="export suite: the Editor-mode FeatureTest report its coverage merge reads (default: "
                              f"{paths.display_path(DEFAULT_EDITOR_REPORT)}, which Test.py --suite feature --config "
                              "Release --junit writes)")
@@ -2447,10 +2534,11 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
                              f"{EXPORT_FEATURE_TEST_RUN_SECONDS:.0f} s more for its own feature-test run and whose "
                              f"Dist exports of a game with Native/ {EXPORT_NATIVE_BUILD_SECONDS:.0f} s more for its "
                              f"native Runtime build (default: {SUITE_TIMEOUT_SECONDS:.0f})")
-    parser.add_argument("--merge-coverage", nargs=3, metavar=("EDITOR_JSON", "RELEASE_JSON", "DIST_JSON"),
+    parser.add_argument("--merge-coverage", nargs=3, type=paths.argument_path,
+                        metavar=("EDITOR_JSON", "RELEASE_JSON", "DIST_JSON"),
                         help="run only the cross-mode coverage merge of three FeatureTest reports (§15.6) and print "
                              "one 'merge: <rule>: <subject>' line per failure")
-    parser.add_argument("--build-root", type=Path, default=paths.BIN_ROOT,
+    parser.add_argument("--build-root", type=paths.argument_path, default=paths.BIN_ROOT,
                         help="unit, gpu, golden and feature suites: the bin directory whose <OutputDir> holds the "
                              "executables (default: the repository's bin/; the AddressSanitizer workspace builds into "
                              "bin-int/Asan/bin)")
@@ -2458,6 +2546,13 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
                         help="unit, gpu, golden and feature suites: give every process the suite starts the "
                              "sanitizer's environment (address: ASAN_OPTIONS and MSVC's runtime first on PATH); the "
                              "step names gain ' (ASan)' and the reports the suffix -Asan")
+    parser.add_argument("--debug-heap", action="store_true",
+                        help="unit, gpu and golden suites (Windows only): start each Tests process on the Windows "
+                             "debug heap (Scripts/Lib/debugheap.py: under a debugger that detaches at the loader's "
+                             "initial breakpoint, so every heap of the process, the graphics driver's included, checks "
+                             "block tails, fills freed blocks and validates parameters, and its crash handler still "
+                             "reports a crash); the step names gain ' (debug heap)' and the reports the suffix "
+                             "-DebugHeap (the hardening stage's debug-heap GPU step)")
     parser.add_argument("--test-timeout-scale", type=float,
                         help="unit, gpu and golden suites: pass --test-timeout-scale=<s> (s >= 1) to the Tests binary, "
                              "which multiplies every per-test-case limit")
@@ -2499,6 +2594,10 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     custom_root = arguments.build_root != paths.BIN_ROOT.resolve()
     if (arguments.sanitizer or custom_root) and not set(arguments.suites) <= set(sanitized_suites):
         parser.error(f"--sanitizer and --build-root apply to the {', '.join(sanitized_suites)} suites only")
+    if arguments.debug_heap and not set(arguments.suites) <= set(DEBUG_HEAP_SUITES):
+        parser.error(f"--debug-heap applies to the {', '.join(DEBUG_HEAP_SUITES)} suites only")
+    if arguments.debug_heap and not debugheap.is_available():
+        parser.error("--debug-heap is Windows only: the Windows debug heap does not exist elsewhere")
     if arguments.test_timeout_scale is not None and not 1.0 <= arguments.test_timeout_scale < float("inf"):
         parser.error("--test-timeout-scale must be a finite number of at least 1")
     if arguments.fuzz_scale is not None and not 0.0 < arguments.fuzz_scale <= 1.0:
@@ -2516,6 +2615,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     configure_stdio()
     arguments = parse_arguments(sys.argv[1:] if argv is None else argv)
+    paths.enter_repository_root()
     console = Console(arguments.json)
     if arguments.merge_coverage:
         return run_merge(arguments, console)

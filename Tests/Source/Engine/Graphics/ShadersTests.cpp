@@ -12,8 +12,10 @@
 #include "Engine/Renderer/BlitPass.h"
 #include "Engine/Renderer/BloomPass.h"
 #include "Engine/Renderer/EnvironmentBaker.h"
+#include "Engine/Renderer/QuadBatcher.h"
 #include "Engine/Renderer/SceneRenderer.h"
 #include "Engine/Renderer/TrianglePass.h"
+#include "Engine/Renderer/UpscalePass.h"
 #include "Shared/BloomConstants.h"
 #include "Shared/DrawConstants.h"
 #include "Shared/EnvironmentBakeConstants.h"
@@ -26,6 +28,8 @@
 #include "Shared/ShadowProbeConstants.h"
 #include "Shared/Private/SceneDataViewConstants.h"
 #include "Shared/Private/SelectionPassConstants.h"
+#include "Shared/Private/UpscaleConstants.h"
+#include "Shared/QuadVertex.h"
 #include "Shared/ShadowConstants.h"
 #include "Shared/ShaderLight.h"
 #include "Shared/SmokeConstants.h"
@@ -80,7 +84,9 @@ namespace Engine {
 
 	// Every engine pipeline's layout description; a new pass adds its own here. The scene renderer's set includes the passes
 	// it owns (SceneRenderer.h) with the R11G11B10 Bloom permutation; the RGBA16 fallback (§8.1) and the environment bake,
-	// which no SceneRendererPipelines creates, are added beside it (M8, Docs/Decisions/0013-m8-decisions.md decision 3).
+	// which no SceneRendererPipelines creates, are added beside it (M8, Docs/Decisions/0013-m8-decisions.md decision 3). M18's
+	// QuadBatcher and UpscalePass (Docs/Decisions/0029-m18-contract.md decisions 6 and 10) are listed with their own
+	// descriptions; a layout the set's descriptions also return is only checked twice.
 	static std::vector<PipelineLayoutDescription> GetEnginePipelineLayouts()
 	{
 		std::vector<PipelineLayoutDescription> layouts = {
@@ -93,7 +99,8 @@ namespace Engine {
 			Test::MakeTonemapCurvesLayoutDescription(),
 		};
 		for (std::vector<PipelineLayoutDescription> more : { SceneRendererPipelines::GetLayoutDescriptions(nvrhi::Format::R11G11B10_FLOAT),
-				 BloomPass::GetLayoutDescriptions(nvrhi::Format::RGBA16_FLOAT), EnvironmentBaker::GetLayoutDescriptions() })
+				 BloomPass::GetLayoutDescriptions(nvrhi::Format::RGBA16_FLOAT), EnvironmentBaker::GetLayoutDescriptions(), QuadBatcher::GetLayoutDescriptions(),
+				 UpscalePass::GetLayoutDescriptions() })
 			layouts.insert(layouts.end(), std::make_move_iterator(more.begin()), std::make_move_iterator(more.end()));
 		nvrhi::BindingLayoutDesc shadowProbe;
 		shadowProbe.visibility = nvrhi::ShaderType::Compute;
@@ -380,6 +387,24 @@ namespace Engine {
 				.Program = "Scene",
 				.Entry = "PSForward",
 				.Permutation = { { .Key = "ALPHA_MASK", .Value = "0" } },
+			},
+			{
+				.Name = "QuadConstants",
+				.Size = sizeof(QuadConstants),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(QuadConstants, Transform),
+				},
+				.Program = "Quad",
+				.Entry = "VSMain",
+			},
+			{
+				.Name = "UpscaleConstants",
+				.Size = sizeof(UpscaleConstants),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(UpscaleConstants, Mapping),
+				},
+				.Program = "Upscale",
+				.Entry = "PSColor",
 			},
 			{
 				.Name = "SmokeConstants",

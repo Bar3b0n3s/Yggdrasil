@@ -183,6 +183,13 @@ namespace Engine {
 		// teardown. Zero counts without a device; afterwards the three getters above return nullptr. Application calls it
 		// at shutdown, after its rendering objects are gone, so --expect-no-gpu-errors sees the device's whole life (§15.3).
 		[[nodiscard]] GpuMessageCounts DestroyGraphics();
+
+		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 29): recovers the context's lost device in place,
+		// GraphicsDevice::Recover with the window the Graphics step presented to (the context's window in a windowed process,
+		// none in a headless one). The shader library, the pipeline factory and the device keep their addresses; the library
+		// releases its shaders as a registered owner (GpuRecreation.h). Main thread, between frames; Application calls it at the
+		// frame boundary (FrameLoop's OnFrameDeviceLost). Errors: InvalidState without a device; those of Recover.
+		[[nodiscard]] Status RecoverGraphics();
 	private:
 		// The EngineResources step (EngineContextStep::EngineResources).
 		[[nodiscard]] Status MountEngineResources(const EngineContextSpecification& specification);
