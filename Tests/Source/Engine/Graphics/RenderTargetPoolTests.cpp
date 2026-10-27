@@ -269,6 +269,62 @@ namespace Engine {
 			gate->reset();
 			commandList->Reset();
 		}
+
+		TEST_CASE("RenderTargetPool: a target whose framebuffer only the tracker still holds is free for the next Acquire, ReleaseFree and EndFrame"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M18's gate (Docs/Decisions/0029-m18-contract.md, "Milestone review"): a framebuffer dropped before any command
+			// list recorded it is held by the device's tracker alone until a sweep in Debug and Release, while Dist destroys it
+			// at its drop. The pool sweeps the tracker before it decides that a target is acquired, so its attachment is free
+			// at once, as in Dist.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			const nvrhi::TextureDesc desc = MakeTargetDesc(32, nvrhi::Format::RGBA8_UNORM, "Attachment");
+			const auto dropFramebufferOn = [&device](const nvrhi::TextureHandle& target)
+			{
+				Result<nvrhi::FramebufferHandle> framebuffer = device.CreateFramebuffer(nvrhi::FramebufferDesc().addColorAttachment(target));
+				REQUIRE_MESSAGE(framebuffer.has_value(), framebuffer.error().ToString());
+			};
+
+			// Acquire reuses it, and GetAcquiredCount counts it as free.
+			RenderTargetPool pool(device);
+			nvrhi::ITexture* first = nullptr;
+			{
+				Result<nvrhi::TextureHandle> acquired = pool.Acquire(desc);
+				REQUIRE_MESSAGE(acquired.has_value(), acquired.error().ToString());
+				first = acquired->Get();
+				dropFramebufferOn(*acquired);
+			}
+			{
+				Result<nvrhi::TextureHandle> reused = pool.Acquire(desc);
+				REQUIRE_MESSAGE(reused.has_value(), reused.error().ToString());
+				CHECK(reused->Get() == first);
+				CHECK(pool.GetTargetCount() == 1);
+				dropFramebufferOn(*reused);
+			}
+			CHECK(pool.GetAcquiredCount() == 0);
+
+			// ReleaseFree releases it once an EndFrame stamped it.
+			{
+				Result<nvrhi::TextureHandle> held = pool.Acquire(desc);
+				REQUIRE_MESSAGE(held.has_value(), held.error().ToString());
+				pool.EndFrame();
+				dropFramebufferOn(*held);
+			}
+			pool.ReleaseFree();
+			CHECK(pool.GetTargetCount() == 0);
+
+			// EndFrame ages it as free, and releases it after keepFrames frames (0 here).
+			RenderTargetPool aging(device, 0);
+			{
+				Result<nvrhi::TextureHandle> acquired = aging.Acquire(desc);
+				REQUIRE_MESSAGE(acquired.has_value(), acquired.error().ToString());
+				dropFramebufferOn(*acquired);
+			}
+			aging.EndFrame();
+			CHECK(aging.GetTargetCount() == 0);
+		}
 	}
 
 }

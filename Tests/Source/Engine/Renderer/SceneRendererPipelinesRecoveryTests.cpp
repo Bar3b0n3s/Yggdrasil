@@ -26,7 +26,14 @@ namespace Engine {
 	namespace Test {
 
 		// Renders `snapshot` with `setup`'s renderer into a command list of its own and reads the final image back, returning
-		// every error instead of failing the test, so it also runs on a lost device.
+		// every error instead of failing the test, so it also runs on a lost device. A render is one frame, which ends as a
+		// host's frame ends (Application.cpp), with the device's garbage collection: it releases the framebuffers and binding
+		// sets the render dropped, which NVRHI's unretired lists keep until then in every configuration (and the tracker in
+		// Debug and Release, whose hold the pool sweeps itself, RenderTargetPool.h), so the next frame's pool finds the
+		// targets they reference free again. Without it, a scene target set replaced in one of the Use's frames can stay
+		// acquired for the rest of the Use, and the pool's contents at the measurement then depend on the set the Use starts
+		// with: before the loss the view-size set `Create` made, after the recovery the set `RecreateGpuObjects` made at the
+		// last render's scene size (decision 32).
 		[[nodiscard]] static Result<std::vector<std::byte>> RenderSetAndRead(GraphicsDevice& device, SceneRendererIntegrationFixture& setup,
 			const RenderSnapshot& snapshot)
 		{
@@ -41,6 +48,7 @@ namespace Engine {
 				return MakeError(ErrorCode::InvalidState, "the renderer has no final texture");
 			Readback readback(device);
 			ENGINE_TRY_ASSIGN(const Image pixels, readback.ReadTexture(*image));
+			device.RunGarbageCollection();
 			return pixels.Pixels;
 		}
 
@@ -106,7 +114,9 @@ namespace Engine {
 		{
 			// M18 acceptance (C18.3, decisions 26, 27 and 32): "Release and Recreate through CreatePipelines". A lit frame, a
 			// debug view (whose lazily created pipelines are created again on first use) and an upscaled frame at scale 3 (the
-			// output stage) render byte-identical images after the recovery, with the declared pipeline count.
+			// output stage) render byte-identical images after the recovery, with the declared pipeline count. Each frame ends
+			// with the device's garbage collection (RenderSetAndRead): the recovery creates the scene targets at the upscaled
+			// frame's scene size, which the lit frame replaces and the upscaled frame reuses, as a host's frames do.
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			Test::SceneRendererIntegrationFixture setup(gpu, 66, 48);

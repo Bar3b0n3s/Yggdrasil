@@ -25,10 +25,13 @@
 // no frame to NVRHI's deferred destruction. Objects NVRHI does not own (the host-copied images of HostImageUpload) are
 // counted with RecordCreated and RecordDestroyed instead.
 //
-// The tracker's reference must not change what owners observe: a pool or cache that hands out copies of a handle and
-// asks whether anyone still uses it (RenderTargetPool, HostImageUpload, M6's GpuResourceCache) asks HasOtherReferences,
-// which discounts the tracker's own reference and answers the same in every configuration. Reading the reference count
-// directly would see one reference more in Debug and Release than in Dist.
+// The tracker's references must not change what owners observe. A pool or cache that hands out copies of a handle and
+// asks whether anyone still uses it (RenderTargetPool, HostImageUpload) asks HasOtherReferences, which discounts the
+// tracker's own reference to the object: reading the reference count directly would see one reference more in Debug
+// and Release than in Dist. The tracker also keeps an object that references others (a framebuffer its attachments, a
+// binding set its resources) until a Sweep, where Dist destroys it at its last drop, so HasOtherReferences answers as
+// in Dist only after a Sweep: such an owner sweeps before it asks (RenderTargetPool), or asks right after the device's
+// sweep (HostImageUpload's collection, which GraphicsDevice runs after it).
 //
 // Active in Debug and Release builds; in Dist every member except HasOtherReferences is a no-op and every count is 0
 // (§8.14: "non-Dist"). Thread safety: main thread only, like every NVRHI call (§4.11).
@@ -109,13 +112,17 @@ namespace Engine {
 		// repeats until a pass releases nothing: objects reference each other (a framebuffer its textures, a binding set its
 		// resources, a pipeline its shaders and layouts), so releasing one can make the tracker the last owner of another.
 		// After NVRHI's runGarbageCollection on an idle device, one Sweep therefore leaves exactly the objects someone
-		// besides the tracker still holds.
+		// besides the tracker still holds. It releases only what nobody else holds, which Dist destroyed at its last drop,
+		// so it may run at any point on the main thread (RenderTargetPool sweeps before it decides that a target is
+		// acquired).
 		void Sweep();
 
 		// Whether anyone besides the caller and the tracker references `resource`: its reference count, minus the tracker's
 		// own reference while the tracker holds one (Debug and Release, for an object a creation wrapper made), exceeds
 		// `callerReferences`, the references the caller itself holds (usually 1, its own handle). References held by
-		// submitted command lists that NVRHI has not retired yet count as other references. The answer is the same in every
+		// submitted command lists that NVRHI has not retired yet count as other references, in every configuration. So does
+		// one held by another tracked object that only the tracker still holds (a dropped framebuffer on a texture) until a
+		// Sweep releases that object, which Dist destroyed at its drop: after a Sweep, the answer is the same in every
 		// configuration, Dist included. The way pools and caches decide that a resource they own is free (see the file
 		// comment). `resource` must be alive (the caller holds it).
 		[[nodiscard]] bool HasOtherReferences(nvrhi::IResource& resource, uint32_t callerReferences) const;

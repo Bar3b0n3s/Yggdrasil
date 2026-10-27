@@ -12,15 +12,23 @@
 
 // Transient render targets keyed by their TextureDesc (Architecture §8.2: "Pass targets come from RenderTargetPool
 // keyed by TextureDesc"). The pool owns every target (§8.14 item 1); a pass holds the handle it acquired for as long as
-// it uses the target, and a target nobody besides the pool references (GpuResourceTracker::HasOtherReferences(target,
-// 1), which discounts the tracker's own reference, so reuse behaves the same in every configuration) is free for the
-// next Acquire with an equal key. Reusing a target while a frame that used it is still in flight is safe: the GPU
-// orders the work of one queue, and NVRHI's barriers order the accesses.
+// it uses the target, and a target nobody besides the pool references is free for the next Acquire with an equal key.
+// Reusing a target while a frame that used it is still in flight is safe: the GPU orders the work of one queue, and
+// NVRHI's barriers order the accesses.
 //
 // Releasing one is not: NVRHI's command lists do not reference textures used only by clears (ADR 0009 decision 31), so
 // an unretired submission that cleared a target does not count as a reference. The pool therefore stamps each target
 // with the last submission of the frames that acquired it (EndFrame) and releases a free target only once the GPU has
 // completed that submission (GraphicsDevice::GetCompletedSubmissionID), never one acquired since the last EndFrame.
+//
+// Reuse behaves the same in every configuration. The pool asks GpuResourceTracker::HasOtherReferences(target, 1), which
+// discounts the tracker's own reference to the target, and before it decides that a target is acquired (Acquire, when a
+// target with an equal key is not free; EndFrame, ReleaseFree, TrimUnused and GetAcquiredCount) it sweeps the device's
+// tracker (GpuResourceTracker::Sweep), which releases what only the tracker still holds: in Debug and Release a
+// framebuffer or binding set on a target, dropped before any command list recorded it, would otherwise keep the target
+// acquired until the next garbage collection, while Dist, which has no tracker, destroys it at its drop (M18's gate,
+// Docs/Decisions/0029-m18-contract.md "Milestone review"). What a submitted command list used stays referenced until
+// NVRHI's garbage collection retires the list, in every configuration.
 
 namespace Engine {
 
@@ -79,8 +87,9 @@ namespace Engine {
 
 		// Targets the pool holds, free or acquired.
 		[[nodiscard]] size_t GetTargetCount() const;
-		// Targets someone besides the pool references (HasOtherReferences).
-		[[nodiscard]] size_t GetAcquiredCount() const;
+		// Targets someone besides the pool references (HasOtherReferences), after the tracker's sweep (the file comment), so
+		// not const.
+		[[nodiscard]] size_t GetAcquiredCount();
 	private:
 		// LastSubmission of a target acquired since the last EndFrame: its submission is not known yet.
 		static constexpr uint64_t PendingSubmission = std::numeric_limits<uint64_t>::max();
@@ -93,7 +102,10 @@ namespace Engine {
 			uint64_t LastSubmission = PendingSubmission;
 		};
 
-		// Whether nobody besides the pool references `target`.
+		// Releases what only the device's tracker still holds (GpuResourceTracker::Sweep; nothing in Dist), so IsFree then
+		// answers as in Dist (the file comment).
+		void SweepTracker();
+		// Whether nobody besides the pool references `target`; as in Dist after a SweepTracker.
 		[[nodiscard]] bool IsFree(const PooledTarget& target) const;
 		// Whether `target` may be released: free, and every submission that may have used it has completed.
 		[[nodiscard]] bool IsReleasable(const PooledTarget& target, uint64_t completedSubmission) const;
