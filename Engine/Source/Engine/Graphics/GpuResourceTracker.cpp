@@ -58,7 +58,7 @@ namespace Engine {
 
 		// The file of the lifetime log in `directory` (GpuResourceTracker.h), created when missing; empty after one warning
 		// when the directory cannot be made.
-		[[nodiscard]] static std::filesystem::path MakeLifetimeLogPath(const std::filesystem::path& directory)
+		[[maybe_unused]] [[nodiscard]] static std::filesystem::path MakeLifetimeLogPath(const std::filesystem::path& directory)
 		{
 			if (const Status created = FileSystem::CreateDirectories(directory); !created)
 			{

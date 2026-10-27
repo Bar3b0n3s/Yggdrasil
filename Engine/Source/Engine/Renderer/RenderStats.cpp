@@ -52,7 +52,7 @@ namespace Engine {
 
 		// Merges an available frame's samples into the process profiler's timeline, each at the frame's CPU anchor plus its
 		// start, with its depth (RenderStatsHistory::PublishGpu).
-		static void SubmitGpuFrameToProfiler(const GpuTimingFrame& frame)
+		[[maybe_unused]] static void SubmitGpuFrameToProfiler(const GpuTimingFrame& frame)
 		{
 			if (!Profiler::IsInitialized() || frame.Samples.empty())
 				return;
