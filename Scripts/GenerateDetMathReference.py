@@ -33,6 +33,9 @@ Regenerate after changing the regions or the generator: `python Scripts/Generate
 like `--check`). `--check` compares a fresh run with the committed file and writes nothing; `--self-test` runs only
 the self-test.
 
+It works from any directory (Docs/Architecture.md §2.3): a relative path given on its command line is resolved against
+the caller's directory, then main() makes the repository root of its own checkout the working directory.
+
 Exit codes: 0 success, 1 the self-test failed, a reference could not be decided or --check found a difference,
 2 usage error.
 """
@@ -1466,7 +1469,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true", help="compare a fresh run with the committed file; write nothing")
     mode.add_argument("--self-test", action="store_true", help="run only the self-test")
-    parser.add_argument("--output", type=Path, default=OUTPUT_PATH,
+    parser.add_argument("--output", type=paths.argument_path, default=OUTPUT_PATH,
                         help=f"the header to write or check (default: {paths.display_path(OUTPUT_PATH)})")
     parser.add_argument("--json", action="store_true", help="print a machine-readable result on stdout")
     return parser.parse_args(argv)
@@ -1495,6 +1498,7 @@ def generate_tables(calculator: ReferenceCalculator, console: Console) -> tuple[
 def main(argv: list[str] | None = None) -> int:
     configure_stdio()
     arguments = parse_arguments(sys.argv[1:] if argv is None else argv)
+    paths.enter_repository_root()
     console = Console(arguments.json)
     output: Path = arguments.output.resolve()
     console.heading("DetMath references")

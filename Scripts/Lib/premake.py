@@ -28,6 +28,7 @@ from .process import ProcessResult, ToolNotFoundError, run_captured
 PREMAKE_VERSION = "5.0.0"
 RELEASE_BASE_URL = f"https://github.com/premake/premake-core/releases/download/v{PREMAKE_VERSION}/"
 INSTALL_DIRECTORY = paths.VENDOR_ROOT / "premake" / "bin"
+WORKING_DIRECTORY = paths.REPOSITORY_ROOT  # where run() starts premake, and what its relative output paths are below
 
 USER_AGENT = "Engine-Setup"
 DOWNLOAD_ATTEMPTS = 3
@@ -227,9 +228,9 @@ def install(host: paths.Host, log: Callable[[str], None]) -> Path:
 
 
 def run(arguments: list[str], timeout: float = 300.0, premake: Path | None = None) -> ProcessResult:
-    """Run premake with `arguments` from the repository root and capture its output."""
+    """Run premake with `arguments` from the repository root (WORKING_DIRECTORY) and capture its output."""
     executable = premake or find_premake()
-    return run_captured([str(executable), *arguments], cwd=paths.REPOSITORY_ROOT, timeout=timeout)
+    return run_captured([str(executable), *arguments], cwd=WORKING_DIRECTORY, timeout=timeout)
 
 
 def version(premake: Path | None = None) -> str:
@@ -258,5 +259,14 @@ def require_pinned(override: Path | None = None) -> Path:
 
 
 def generated_files(output: str) -> list[str]:
-    """The files premake reported as generated ("Generated <path>..." lines), in output order."""
+    """The files premake reported as generated ("Generated <path>..." lines), in output order, as premake printed them:
+    relative to its working directory when inside it, else absolute."""
     return [match.group(1).strip() for match in _GENERATED_PATTERN.finditer(output)]
+
+
+def generated_paths(output: str) -> list[Path]:
+    """The files premake reported as generated, as absolute paths in output order. premake prints a file below its
+    working directory relative to it, and run() starts it in WORKING_DIRECTORY, so each is resolved there, never
+    against this process's working directory: a script started from another checkout must not name that checkout's
+    files."""
+    return [(WORKING_DIRECTORY / file).resolve() for file in generated_files(output)]

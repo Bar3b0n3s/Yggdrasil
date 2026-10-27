@@ -48,7 +48,7 @@ Order of authority: `Docs/Architecture.md`, then `Docs/Roadmap.md`, then this fi
 
 ## Commands
 
-Run every command from the repository root. Windows uses `python`; Linux and macOS use `python3`. Every script has `--help` and `--json`, and exits non-zero on failure (Architecture §2.3). The `build-and-test` skill covers output paths, single test cases and failure diagnosis.
+Run every command from the repository root; a script started elsewhere resolves its command-line paths against the caller's directory, then works in its own checkout's root (Architecture §2.3). Windows uses `python`; Linux and macOS use `python3`. Every script has `--help` and `--json`, and exits non-zero on failure. The `build-and-test` skill covers output paths, single test cases and failure diagnosis.
 
 | Task | Command |
 |---|---|

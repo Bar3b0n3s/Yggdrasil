@@ -102,6 +102,9 @@ It waits while another GPU run or a gate (CI.py) holds the lock, unless it runs 
 stage), reporting the holder (pid, worktree, command), at most --lock-timeout seconds (exit code 5); --no-wait fails at
 once instead (exit code 3). A run of the other steps takes no lock of its own; its Build.py takes the build lock.
 
+It works from any directory (Docs/Architecture.md §2.3): once it has parsed its arguments, main() makes the repository
+root of its own checkout the working directory.
+
 Exit codes: 0 every step passed (or warned), 1 a step failed, 2 usage error, 3 a build output, the AddressSanitizer
 runtime or a current export package is missing, the machine has too little memory or too few CPUs for the fuzz to
 finish in time (it needs at least as many logical CPUs and GiB of available memory as its minimum shard count, 14 at
@@ -1357,6 +1360,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     configure_stdio()
     arguments = parse_arguments(sys.argv[1:] if argv is None else argv)
+    paths.enter_repository_root()
     console = Console(arguments.json)
     try:
         host = paths.host()

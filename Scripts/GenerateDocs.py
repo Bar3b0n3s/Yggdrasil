@@ -6,6 +6,9 @@ Runs the freshly built Editor without a window, renderer, audio device or projec
 generated: a stale, missing or extra file fails --check, and write mode deletes extras. Engine.d.luau goes to
 Resources/Scripting/ and the MCP catalogue to Tools/MCP/. Check mode never rewrites a reference. Temporary user data,
 output and any crash reports remain inside one disposable directory.
+
+It works from any directory (Docs/Architecture.md §2.3): once it has parsed its arguments, main() makes the repository
+root of its own checkout the working directory.
 """
 
 from __future__ import annotations
@@ -140,6 +143,7 @@ def main(argv: list[str] | None = None) -> int:
                         help="fail if any committed reference is stale, missing or extra; write nothing")
     parser.add_argument("--json", action="store_true", help="emit a machine-readable result")
     options = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    paths.enter_repository_root()
     console = Console(options.json)
     step = generate(options.config, options.check, console)
     console.result(step)

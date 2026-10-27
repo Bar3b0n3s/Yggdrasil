@@ -9,6 +9,9 @@ waiting for the running ones). It changes nothing: the operating system releases
 so a lock is never cleared by hand; a holder that should not run any more is stopped like any process (its pid is
 listed).
 
+It works from any directory (Docs/Architecture.md §2.3): once it has parsed its arguments, main() makes the repository
+root of its own checkout the working directory.
+
 Exit codes: 0 listed (whether the locks are held or not), 2 usage error.
 """
 
@@ -34,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--json", action="store_true", help="print a machine-readable result on stdout")
     arguments = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    paths.enter_repository_root()
     console = Console(arguments.json)
 
     directory = locks.lock_directory()

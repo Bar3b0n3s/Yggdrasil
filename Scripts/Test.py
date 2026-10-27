@@ -230,6 +230,9 @@ suite writes Determinism.xml). The console then shows a summary and every failur
 doctest's console reporter. If the test process dies before writing it, a JUnit file with one error test case records
 the crash.
 
+It works from any directory (Docs/Architecture.md §2.3): a relative path given on its command line is resolved against
+the caller's directory, then main() makes the repository root of its own checkout the working directory.
+
 Exit codes: 0 every requested suite that exists passed, 1 a suite failed or none of the requested suites exists
 yet, 2 usage error, 3 a test executable or the MCP virtual environment is missing (build it, or run Setup.py), a
 report the export or determinism suite reads is missing or stale (run the suite that writes it), a game's
@@ -2507,7 +2510,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
                              "so does a game's plain Dist export whose smoke test did not run; determinism suite: a "
                              "missing or stale exported report fails (exit code 3) instead of leaving that run out "
                              "(CI.py and PreCommit.py pass it unless --gpu-optional, §15.2)")
-    parser.add_argument("--editor-report", type=Path,
+    parser.add_argument("--editor-report", type=paths.argument_path,
                         help="export suite: the Editor-mode FeatureTest report its coverage merge reads (default: "
                              f"{paths.display_path(DEFAULT_EDITOR_REPORT)}, which Test.py --suite feature --config "
                              "Release --junit writes)")
@@ -2531,10 +2534,11 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
                              f"{EXPORT_FEATURE_TEST_RUN_SECONDS:.0f} s more for its own feature-test run and whose "
                              f"Dist exports of a game with Native/ {EXPORT_NATIVE_BUILD_SECONDS:.0f} s more for its "
                              f"native Runtime build (default: {SUITE_TIMEOUT_SECONDS:.0f})")
-    parser.add_argument("--merge-coverage", nargs=3, metavar=("EDITOR_JSON", "RELEASE_JSON", "DIST_JSON"),
+    parser.add_argument("--merge-coverage", nargs=3, type=paths.argument_path,
+                        metavar=("EDITOR_JSON", "RELEASE_JSON", "DIST_JSON"),
                         help="run only the cross-mode coverage merge of three FeatureTest reports (§15.6) and print "
                              "one 'merge: <rule>: <subject>' line per failure")
-    parser.add_argument("--build-root", type=Path, default=paths.BIN_ROOT,
+    parser.add_argument("--build-root", type=paths.argument_path, default=paths.BIN_ROOT,
                         help="unit, gpu, golden and feature suites: the bin directory whose <OutputDir> holds the "
                              "executables (default: the repository's bin/; the AddressSanitizer workspace builds into "
                              "bin-int/Asan/bin)")
@@ -2611,6 +2615,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     configure_stdio()
     arguments = parse_arguments(sys.argv[1:] if argv is None else argv)
+    paths.enter_repository_root()
     console = Console(arguments.json)
     if arguments.merge_coverage:
         return run_merge(arguments, console)

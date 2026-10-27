@@ -14,6 +14,9 @@ custom build rule, so IDE builds re-run this script whenever a shader input chan
 Every slangc and spirv-val run has a timeout (TOOL_TIMEOUT_SECONDS), because this script runs inside IDE and make
 builds where no other timeout applies; a run that exceeds it is terminated and fails its variant.
 
+It works from any directory (Docs/Architecture.md §2.3): a relative path given on its command line is resolved against
+the caller's directory, then main() makes the repository root of its own checkout the working directory.
+
 Exit codes: 0 success, 1 a shader failed to compile or validate, or a tool failed or timed out, 2 usage or
 configuration error (bad arguments, invalid Shaders.json or Toolchain.json), 3 slangc or spirv-val is missing or
 slangc does not have the pinned version.
@@ -246,13 +249,12 @@ def default_output_directory(config: str) -> Path:
 # --------------------------------------------------------------------------------------------------------------------
 
 
-def find_tool(name: str, override: str | None) -> Path:
+def find_tool(name: str, override: Path | None) -> Path:
     executable = f"{name}.exe" if os.name == "nt" else name
-    if override:
-        path = Path(override)
-        if not path.is_file():
-            raise ToolMissing(f"{name} not found at {path}")
-        return path
+    if override is not None:
+        if not override.is_file():
+            raise ToolMissing(f"{name} not found at {override}")
+        return override
 
     candidates: list[Path] = []
     sdk = os.environ.get("VULKAN_SDK")
@@ -604,7 +606,9 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
         "--config", choices=CONFIGURATIONS, default="Debug", help="build configuration (default: Debug)"
     )
     parser.add_argument(
-        "--output-dir", type=Path, help="output directory (default: bin/<Config>-<system>-<architecture>/Shaders)"
+        "--output-dir",
+        type=paths.argument_path,
+        help="output directory (default: bin/<Config>-<system>-<architecture>/Shaders)",
     )
     parser.add_argument(
         "--program",
@@ -615,8 +619,9 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--force", action="store_true", help="recompile every selected variant")
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 1, help="parallel slangc processes")
-    parser.add_argument("--slangc", help="path to slangc (default: $VULKAN_SDK, then PATH)")
-    parser.add_argument("--spirv-val", dest="spirv_val", help="path to spirv-val (default: $VULKAN_SDK, then PATH)")
+    parser.add_argument("--slangc", type=paths.argument_path, help="path to slangc (default: $VULKAN_SDK, then PATH)")
+    parser.add_argument("--spirv-val", dest="spirv_val", type=paths.argument_path,
+                        help="path to spirv-val (default: $VULKAN_SDK, then PATH)")
     parser.add_argument("--verbose", action="store_true", help="print every command line")
     parser.add_argument("--json", action="store_true", help="print a machine-readable summary on stdout")
     arguments = parser.parse_args(argv)
@@ -721,6 +726,7 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     arguments = parse_arguments(sys.argv[1:] if argv is None else argv)
+    paths.enter_repository_root()
     try:
         summary = run(arguments)
     except UsageError as error:

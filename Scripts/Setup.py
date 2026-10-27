@@ -16,6 +16,9 @@ Installs:
            or the Python version changes, and the gitignored .mcp.json with the venv interpreter's absolute path
            (§13.8), so Claude Code starts the bridge with no python on PATH.
 
+It works from any directory (Docs/Architecture.md §2.3): once it has parsed its arguments, main() makes the repository
+root of its own checkout the working directory.
+
 Exit codes: 0 every required check passed, 2 usage error, 3 a required check or installation failed (a tool or file
 is missing, has the wrong version or could not be installed; Architecture §4.1 "initialization failed").
 """
@@ -431,6 +434,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     configure_stdio()
     arguments = parse_arguments(sys.argv[1:] if argv is None else argv)
+    paths.enter_repository_root()
     console = Console(arguments.json)
     try:
         host = paths.host()

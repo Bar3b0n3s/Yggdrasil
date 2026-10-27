@@ -63,6 +63,9 @@ branch, Lint.py --allow-contract-stubs and Test.py --allow-skips (ADR 0028 decis
 options to Lint.py and Test.py (CI.py --contract does the same); both stay available, but no gate run of the backlog
 program uses them. The run prints which mode it is in at the start and in the summary.
 
+It works from any directory (Docs/Architecture.md §2.3): once it has parsed its arguments, main() makes the repository
+root of its own checkout the working directory.
+
 Exit codes: 0 every step passed, otherwise the code of the first failing step (1 failed, 2 usage error, 3 a required
 tool or file is missing, 5 timeout).
 """
@@ -77,6 +80,7 @@ if sys.version_info < (3, 10):
 
 import argparse
 
+from Lib import paths
 from Lib.report import (
     EXIT_FAILED,
     EXIT_SUCCESS,
@@ -121,6 +125,7 @@ def main(argv: list[str] | None = None) -> int:
                              "running, naming the reason (a warning)")
     parser.add_argument("--json", action="store_true", help="print a machine-readable result on stdout")
     arguments = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    paths.enter_repository_root()
     console = Console(arguments.json)
     gpu_note = "GPU optional (--gpu-optional)" if arguments.gpu_optional else "GPU required"
     console.heading(f"PreCommit, {mode_note(arguments.contract)}, {gpu_note}")

@@ -153,6 +153,9 @@ expected and diff images of failed golden comparisons in bin/TestResults/Golden/
 Exit codes (§4.1): 0 every selected stage passed, otherwise the code of the first failing step: 1 failed,
 2 usage error, 3 a required tool or file is missing, or --no-wait found a machine lock held, 5 timeout (of a step, or
 of the wait for a machine lock).
+
+It works from any directory (Docs/Architecture.md §2.3): a relative path given on its command line is resolved against
+the caller's directory, then main() makes the repository root of its own checkout the working directory.
 """
 
 from __future__ import annotations
@@ -580,14 +583,21 @@ class Runner:
         arguments = ["--fatal", f"--os={system}", f"--to={location}", action]
         self.console.heading(f"{name}: premake5 {' '.join(arguments)}")
         result = premake.run(arguments, timeout=TIMEOUTS["portability"])
-        files = sorted(Path(file).resolve().relative_to(location.resolve()).as_posix()
-                       for file in premake.generated_files(result.output))
+        # premake's paths are relative to the directory it ran in (premake.generated_paths), never to this process's.
+        root = location.resolve()
+        reported = premake.generated_paths(result.output)
+        files = sorted(path.relative_to(root).as_posix() for path in reported if path.is_relative_to(root))
+        outside = [paths.display_path(path) for path in reported if not path.is_relative_to(root)]
         if result.timed_out:
             return Step(name, Status.TIMEOUT, f"premake {result.describe_exit()}", result.duration), location, files
         if not result.succeeded:
             self.console.print(result.output.rstrip())
             return (Step(name, Status.FAILED, f"premake {result.describe_exit()}: {result.tail(1)}", result.duration,
                          data={"outputTail": result.tail(40)}), location, files)
+        if outside:
+            return (Step(name, Status.FAILED, f"premake wrote {len(outside)} file(s) outside "
+                                              f"{paths.display_path(location)}: {', '.join(outside)}", result.duration,
+                         data={"files": files, "outside": outside}), location, files)
         return (Step(name, Status.PASSED, f"{len(files)} files in {paths.display_path(location)}", result.duration,
                      data={"files": files}), location, files)
 
@@ -806,7 +816,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
                              "without a usable device, bake without the environments (--renderer none) and end as a "
                              "warning; by default a missing device fails them")
     parser.add_argument("--contract", action="store_true", help=CONTRACT_FLAG_HELP)
-    parser.add_argument("--summary-junit", type=Path, default=SUMMARY_JUNIT,
+    parser.add_argument("--summary-junit", type=paths.argument_path, default=SUMMARY_JUNIT,
                         help=f"JUnit summary of this run (default: {paths.display_path(SUMMARY_JUNIT)})")
     parser.add_argument("--json", action="store_true", help="print a machine-readable result on stdout")
     locks.add_wait_arguments(parser)
@@ -883,6 +893,7 @@ def run_stage(runner: Runner, stage: Stage, configs: list[str]) -> list[Step]:
 def main(argv: list[str] | None = None) -> int:
     configure_stdio()
     arguments = parse_arguments(sys.argv[1:] if argv is None else argv)
+    paths.enter_repository_root()
     console = Console(arguments.json)
     try:
         host = paths.host()

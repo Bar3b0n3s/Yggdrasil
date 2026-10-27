@@ -53,6 +53,9 @@ decision 16), shared by every checkout of the repository, from its start to its 
 or a gate (CI.py) holds it, unless it runs inside that run, reporting the holder (pid, worktree, command), at most
 --lock-timeout seconds (exit code 5); --no-wait fails at once instead (exit code 3).
 
+It works from any directory (Docs/Architecture.md §2.3): once it has parsed its arguments, main() makes the repository
+root of its own checkout the working directory.
+
 Exit codes: 0 regenerated (or reproduced byte for byte), 1 a scaffold failed or the check found differences, 2 usage
 error, 3 the editor or the scaffold manifest is missing, or --no-wait found the GPU lock held, 5 timeout (of a
 scaffold, or of the wait for the GPU lock).
@@ -547,6 +550,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", help="print a machine-readable result on stdout")
     locks.add_wait_arguments(parser)
     arguments = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    paths.enter_repository_root()
     locks.check_wait_arguments(parser, arguments)
     console = Console(arguments.json)
 
