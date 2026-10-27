@@ -1803,14 +1803,18 @@ class DebugHeapTests(unittest.TestCase):
             quiet_parse(test_script.parse_arguments, ["--suite", "gpu", "--debug-heap"])
 
     def run_debug_heap_step(self, documents: list[dict[str, Any]], argv: list[str],
-                            written: list[tuple[str, ...]] | None = None) -> tuple[Step, mock.MagicMock, Path]:
+                            written: list[tuple[str, ...]] | None = None,
+                            crashed: list[tuple[str, ...]] | None = None) -> tuple[Step, mock.MagicMock, Path]:
         """Hardening.py's debug-heap step with run_json_script answering `documents` in turn, into a temporary reports
         directory that also stands in for bin/TestResults/: the step, the mock and the step's directory. `written`
-        names, per run, the API caps whose JUnit report that run's Test.py writes (none by default)."""
+        names, per run, the API caps whose JUnit report that run's Test.py writes, and `crashed` those whose Tests
+        process crashed, writing a crash report and its minidump where Test.py's run_user_data puts the Tests run's
+        user data, which that run's step detail names as Test.py's does (none by default)."""
         arguments = quiet_parse(hardening_script.parse_arguments, ["--steps", "debug-heap", *argv])
         results = iter([hardening_script.JsonRun(0 if all(step["status"] == "passed" for step in document["steps"])
                                                  else 1, False, 1.0, document) for document in documents])
         caps = iter(written if written is not None else [() for _ in documents])
+        crashes = iter(crashed if crashed is not None else [() for _ in documents])
         reports = Path(tempfile.mkdtemp(prefix="DebugHeapStep-"))
         self.addCleanup(shutil.rmtree, reports, True)
         runs = iter(range(1, len(documents) + 1))
@@ -1820,10 +1824,21 @@ class DebugHeapTests(unittest.TestCase):
             for cap in next(caps):
                 report = reports / f"Gpu-Debug-Vulkan{cap.replace('.', '')}-DebugHeap.xml"
                 report.write_text(f'<testsuites name="run {run}"/>', encoding="utf-8")
+            for cap in next(crashes):
+                tests_run = test_script.TestRun("gpu", "Debug", (), cap=cap, debug_heap=True)
+                folder = test_script.paths.crash_report_folder(test_script.run_user_data(tests_run))
+                folder.mkdir(parents=True, exist_ok=True)
+                crash_report = folder / f"crash-{run}-{run}.txt"
+                crash_report.write_text(f"Crash report of run {run}", encoding="utf-8")
+                (folder / f"crash-{run}-{run}.dmp").write_bytes(b"MDMP")
+                for step in documents[run - 1]["steps"]:
+                    if step["name"] == tests_run.name:
+                        step["detail"] += f"; {test_script.describe_crash_reports([crash_report])}"
             return next(results)
 
         with mock.patch.object(hardening_script, "DEBUG_HEAP_REPORTS", reports / "DebugHeap"), \
                 mock.patch.object(hardening_script, "DEBUG_HEAP_SUITE_REPORTS", reports), \
+                mock.patch.object(hardening_script.paths, "TEST_RESULTS_ROOT", reports), \
                 mock.patch.object(hardening_script.debugheap, "is_available", return_value=True), \
                 mock.patch.object(hardening_script, "run_json_script", side_effect=run_test_script) as run_json:
             step = hardening_script.step_debug_heap(arguments, hardening_script.Console(True))
@@ -1834,7 +1849,7 @@ class DebugHeapTests(unittest.TestCase):
         crashed = run_document(gpu_step("1.4", "failed", "Tests exited with code 0xC0000005"),
                                gpu_step("1.3", "passed", "300 passed"))
         step, run_json, reports = self.run_debug_heap_step([passed, crashed, passed], ["--debug-heap-runs", "3"],
-                                                           [("1.4", "1.3"), (), ("1.4",)])
+                                                           [("1.4", "1.3"), (), ("1.4",)], [(), ("1.4",), ()])
         # Every run runs, the crash's included, and the step fails naming the run that crashed.
         self.assertEqual(run_json.call_count, 3)
         self.assertEqual(step.status, Status.FAILED)
@@ -1859,6 +1874,17 @@ class DebugHeapTests(unittest.TestCase):
                          ["Gpu-Debug-Vulkan14-DebugHeap.xml"])
         self.assertEqual((reports / "Run3" / "Gpu-Debug-Vulkan14-DebugHeap.xml").read_text(encoding="utf-8"),
                          '<testsuites name="run 3"/>')
+        # The crash's report and minidump, which Test.py leaves below the Tests run's own user data and the step deletes
+        # before the next run, are kept with run 2, and only there; the step's detail and run 2's outcome name the
+        # kept copy, not the original.
+        self.assertEqual(sorted(path.name for path in (reports / "Run2" / "Crashes").iterdir()),
+                         ["crash-2-2.dmp", "crash-2-2.txt"])
+        self.assertFalse((reports / "Run1" / "Crashes").exists())
+        self.assertFalse((reports / "Run3" / "Crashes").exists())
+        kept = hardening_script.paths.display_path(reports / "Run2" / "Crashes" / "crash-2-2.txt")
+        self.assertIn(f"crash report(s) of the run: {kept}", step.detail)
+        self.assertNotIn("UserData", step.detail)
+        self.assertEqual([run["crashReports"] for run in step.data["runs"]], [[], [kept], []])
 
     def test_the_debug_heap_step_passes_warns_and_stops_on_a_missing_build(self) -> None:
         passed = run_document(gpu_step("1.4", "passed", "300 passed"))

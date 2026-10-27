@@ -143,6 +143,21 @@ def display_path(path: Path) -> str:
         return path.resolve().as_posix()
 
 
+def tests_run_user_data(report: Path) -> Path:
+    """The user-data root (--user-data-dir) that Scripts/Test.py gives the Tests process of the run whose JUnit report
+    is `report` (bin/TestResults/<report stem>.xml): <report stem>/UserData beside it (Docs/Architecture.md §2.3). Every
+    run of that suite and configuration in the checkout shares it; Test.py and Hardening.py's debug-heap step read the
+    run's crash reports below it (crash_report_folder)."""
+    return report.with_suffix("") / "UserData"
+
+
+def crash_report_folder(user_data: Path) -> Path:
+    """Where a process of the workspace whose user-data root is `user_data` writes its crash reports (Architecture §4.4
+    and §4.13): <root>/<product>/Crashes/, each report crash-<epoch>-<pid>[-<attempt>].txt with a .dmp minidump beside
+    it on Windows."""
+    return user_data / workspace_name() / "Crashes"
+
+
 def parse_configurations(text: str, allowed: tuple[str, ...] = CONFIGURATIONS) -> list[str]:
     """Parse a comma-separated configuration list ("Debug,Release"), case-insensitively, keeping the canonical order.
 

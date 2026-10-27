@@ -42,6 +42,7 @@ class ProcessResult:
     duration: float
     output: str  # the full output for captured runs, the last lines for streamed runs
     collected: list[str] = dataclasses.field(default_factory=list)  # streamed lines matching `collect`, in order
+    process_id: int | None = None  # the started process's id; None in a result made without starting one
 
     @property
     def succeeded(self) -> bool:
@@ -173,6 +174,7 @@ def run_captured(
         timed_out,
         time.monotonic() - started,
         _decode(raw or b"").replace("\r\n", "\n"),
+        process_id=process.pid,
     )
 
 
@@ -253,6 +255,7 @@ def run_streamed(
         time.monotonic() - started,
         "\n".join(tail),
         collected,
+        process_id=process.pid,
     )
 
 

@@ -154,11 +154,20 @@ namespace Engine {
 			const Result<std::filesystem::path> root = Paths::GetUserDataRoot();
 			REQUIRE_MESSAGE(root.has_value(), root.error().ToString());
 			CHECK(root->is_absolute());
-			// Paths creates nothing, but the folder exists on every host the tests run on: Windows and macOS create theirs
-			// with the profile, and on Linux the Tests main's ProcessContext has created <root>/<ENGINE_PRODUCT_NAME>/Logs
-			// below it before any test runs.
+			// Paths creates nothing, and neither does the Tests main below it when Scripts/Test.py gives the process its own
+			// --user-data-dir. Windows and macOS create the folder with the user's profile; on Linux, $XDG_DATA_HOME or
+			// ~/.local/share may not exist yet (a fresh account), so there the nearest folder above it that exists, the home
+			// folder at the least, is a directory.
 			std::error_code error;
+#if defined(ENGINE_PLATFORM_WINDOWS) || defined(ENGINE_PLATFORM_MACOS)
 			CHECK(std::filesystem::is_directory(*root, error));
+#else
+			std::filesystem::path existing = *root;
+			while (!std::filesystem::exists(existing, error) && existing.has_relative_path())
+				existing = existing.parent_path();
+			INFO("the nearest existing folder: ", Test::PathToUtf8(existing));
+			CHECK(std::filesystem::is_directory(existing, error));
+#endif
 
 			// Without an override, GetUserDataPaths uses it.
 			const Result<UserDataPaths> paths = Paths::GetUserDataPaths("Tetris");

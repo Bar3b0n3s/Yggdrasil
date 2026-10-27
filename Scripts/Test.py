@@ -59,6 +59,17 @@ skipped test case in any other suite, such as a contract task's not yet implemen
 PreCommit.py --contract and CI.py --contract pass it too, but no gate run of the backlog program uses them) reports them
 without failing. The counts are in the step detail and, with --json, in the step's "skipCheck" object.
 
+User data of the Tests runs (the "Milestone review" of Docs/Decisions/0029-m18-contract.md): every Tests process of
+the unit, gpu and golden suites gets --user-data-dir=bin/TestResults/<report stem>/UserData (run_user_data, from
+Lib/paths.py's tests_run_user_data; <report stem> as the JUnit file's, such as Gpu-Debug-Vulkan14), so its Tests.log
+(<root>/<product>/Logs/, appended to and rotated as in any root) and the crash report of a crash or a failed assertion
+(<root>/<product>/Crashes/crash-<epoch>-<pid>.txt, with a .dmp minidump on Windows) stay in the checkout's bin/ and
+never reach the user's real user-data folder; the listing of skipped test cases gets a temporary root. The root is
+never emptied: every run of that suite and configuration in the checkout shares it, and two can overlap (a unit run
+takes no machine lock). A run names only the crash reports its own Tests process wrote (new since the run started, with
+that process's id in the name): each is printed as a "CRASH REPORT: <path>" line and named in the step's detail, and
+with --json the step holds "userData" and "crashReports".
+
 The automation suite (Roadmap M4, Docs/Decisions/0008-m4-decisions.md decisions 33 and 34; its skip rule is
 decision 16):
   - The tests start editors themselves (Tests/Automation/harness.py, the bridge's launcher); ENGINE_AUTOMATION_CONFIG
@@ -293,6 +304,9 @@ DOCTEST_SUMMARY_PATTERN = re.compile(
 # (Tests/Source/Support/TestOptions.h). They are the only test cases that stay skipped (Docs/Decisions/
 # 0003-m1-contract-decisions.md decision 7).
 CHILD_TARGET_SUITE = "ChildTargets"
+# The name of a crash report a process writes in its crash report folder (Lib/paths.py's crash_report_folder; Engine/
+# Source/Engine/Platform/CrashHandler.cpp, FormatCrashReportStem): crash-<epoch>-<process id>[-<attempt>].txt.
+CRASH_REPORT_NAME_PATTERN = re.compile(r"^crash-\d+-(\d+)(?:-\d+)?\.txt$")
 LISTING_TIMEOUT_SECONDS = 120.0
 UNEXPECTED_SKIPS_IN_DETAIL = 3
 NAMES_IN_DETAIL = 4
@@ -607,10 +621,12 @@ def list_skipped_test_cases(executable: Path, filters: list[str],
                             environment: dict[str, str] | None = None) -> SkipCheck:
     """Ask the Tests binary which test cases `filters` select, skipped ones included (--no-skip). doctest's XML
     reporter gives each <TestCase> its suite and its doctest::skip flag; the listing goes to a file (--out), so the log
-    on stderr never interleaves with it. `environment` is the suite's (default: child_environment())."""
+    on stderr never interleaves with it, and the process's user data (its Tests.log) goes to the same temporary
+    directory. `environment` is the suite's (default: child_environment())."""
     with tempfile.TemporaryDirectory(prefix="Test-SkipCheck-") as directory:
         listing = Path(directory) / "TestCases.xml"
-        command = [str(executable), *filters, "--no-skip", "--list-test-cases", "--reporters=xml", f"--out={listing}"]
+        command = [str(executable), *filters, "--no-skip", "--list-test-cases", "--reporters=xml", f"--out={listing}",
+                   f"--user-data-dir={Path(directory).resolve() / 'UserData'}"]
         try:
             result = run_captured(command, cwd=paths.REPOSITORY_ROOT,
                                   env=environment if environment is not None else child_environment(),
@@ -643,6 +659,29 @@ def tests_executable(config: str, build_root: Path = paths.BIN_ROOT) -> Path:
 
 def junit_path(report_stem: str) -> Path:
     return paths.TEST_RESULTS_ROOT / f"{report_stem}.xml"
+
+
+def run_user_data(run: TestRun) -> Path:
+    """bin/TestResults/<report stem>/UserData: the user-data root (--user-data-dir) of `run`'s Tests process, so no
+    Tests.log or crash report of it reaches the user's real user-data folder. Never emptied: every run of the suite and
+    configuration in the checkout shares it, and two may overlap."""
+    return paths.tests_run_user_data(junit_path(run.report_stem))
+
+
+def crash_reports(user_data: Path, process_id: int | None = None) -> list[Path]:
+    """The crash reports in the crash report folder of the user-data root `user_data`, in name order; with
+    `process_id`, only those that process wrote."""
+    reports: list[Path] = []
+    for path in sorted(paths.crash_report_folder(user_data).glob("crash-*.txt")):
+        match = CRASH_REPORT_NAME_PATTERN.match(path.name)
+        if match is not None and (process_id is None or int(match.group(1)) == process_id):
+            reports.append(path)
+    return reports
+
+
+def describe_crash_reports(reports: list[Path]) -> str:
+    """The step detail's part naming the crash reports a run left."""
+    return f"crash report(s) of the run: {', '.join(paths.display_path(report) for report in reports)}"
 
 
 def read_junit(path: Path, suite_name: str | None) -> TestCounts:
@@ -731,24 +770,39 @@ def run_tests(run: TestRun, arguments: argparse.Namespace, console: Console) -> 
         environment = suite_environment(arguments)
     except FileNotFoundError as error:
         return missing_sanitizer_runtime(run.name, error)
+    # Kept, never emptied: another run of the suite and configuration in the checkout may be using it.
+    user_data = run_user_data(run)
+    try:
+        user_data.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        detail = f"cannot create the run's user data {paths.display_path(user_data)}: {error}"
+        return Step(run.name, Status.FAILED, detail, exit_code=EXIT_INIT_FAILED)
+    earlier_reports = set(crash_reports(user_data))
     filters = list(run.filters)
     if arguments.filter:
         filters.append(f"--test-case={arguments.filter}")
-    command = [str(executable), *filters, *run.options]
+    command = [str(executable), *filters, *run.options, f"--user-data-dir={user_data.resolve()}"]
     report = junit_path(run.report_stem) if arguments.junit else None
     if report is not None:
         report.parent.mkdir(parents=True, exist_ok=True)
         report.unlink(missing_ok=True)
         command += ["--reporters=junit", f"--out={report}"]
 
-    console.heading(f"{run.name}: {format_command([paths.display_path(executable), *filters, *run.options])}")
+    console.heading(f"{run.name}: {format_command([paths.display_path(executable), *filters, *run.options])} "
+                    f"--user-data-dir={paths.display_path(user_data)}")
     try:
         result = run_streamed(command, cwd=paths.REPOSITORY_ROOT, env=environment, timeout=arguments.timeout,
                               echo=console.stream, collect=REPORTED_LINES_PATTERN, debug_heap=run.debug_heap)
     except ToolNotFoundError as error:
         return Step(run.name, Status.FAILED, str(error), exit_code=EXIT_INIT_FAILED)
 
-    data: dict[str, object] = {"suite": run.suite, "config": run.config, "executable": paths.display_path(executable)}
+    data: dict[str, object] = {"suite": run.suite, "config": run.config, "executable": paths.display_path(executable),
+                               "userData": paths.display_path(user_data)}
+    reports = [path for path in crash_reports(user_data, result.process_id) if path not in earlier_reports]
+    if reports:
+        data["crashReports"] = [paths.display_path(path) for path in reports]
+        for path in reports:
+            console.print(f"CRASH REPORT: {paths.display_path(path)}")
     if run.cap:
         data["vulkanApi"] = run.cap
     if run.sanitizer:
@@ -792,7 +846,8 @@ def run_tests(run: TestRun, arguments: argparse.Namespace, console: Console) -> 
     if result.timed_out:
         if report is not None:
             write_crash_junit(report, run.junit_suite_name, f"Tests {result.describe_exit()}", result.tail(60))
-        return Step(run.name, Status.TIMEOUT, f"Tests {result.describe_exit()}", result.duration, data=data)
+        detail = f"Tests {result.describe_exit()}" + (f"; {describe_crash_reports(reports)}" if reports else "")
+        return Step(run.name, Status.TIMEOUT, detail, result.duration, data=data)
 
     skips: SkipCheck | None = None
     skip_error = ""
@@ -814,6 +869,8 @@ def run_tests(run: TestRun, arguments: argparse.Namespace, console: Console) -> 
             detail = f"Tests exited with code {describe_exit_code(result.exit_code)}"
         if sanitizer_errors:
             detail += f"; {describe_sanitizer_errors(sanitizer_errors)}"
+        if reports:
+            detail += f"; {describe_crash_reports(reports)}"
         if device.mismatched:
             detail += f"; golden mismatches: {describe_names(device.mismatched)} (outputs in bin/TestResults/Golden/)"
         if device.class_changed:

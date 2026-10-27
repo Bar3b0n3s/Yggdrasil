@@ -48,9 +48,12 @@ Steps, in this order, failing fast (a step after a failed one is reported as not
                  and validates parameters, and its crash handler still reports a crash), with ENGINE_GPU_LIFETIME_LOG
                  naming bin/TestResults/DebugHeap/Run<k>/GpuLifetime/ (one GpuLifetime-<pid>.log per process,
                  Engine/Source/Engine/Graphics/GpuResourceTracker.h) and the run's reports copied beside it
-                 (Gpu-Debug-Vulkan1{4,3}-DebugHeap.xml). --debug-heap-runs <n> runs it n times (the crash runs of M18's
-                 W18.2: 20, overnight), every run whatever the earlier ones did, and fails naming each failed run; a
-                 missing Debug build is exit code 3. Windows only: elsewhere the step is skipped, naming why
+                 (Gpu-Debug-Vulkan1{4,3}-DebugHeap.xml), with the crash reports its Tests runs wrote below their own
+                 user data (Test.py's bin/TestResults/<report stem>/UserData) in Crashes/, which the run's detail names
+                 instead of the originals that the next run deletes. --debug-heap-runs <n> runs
+                 it n times (the crash runs of M18's W18.2: 20, overnight), every run whatever the earlier ones did, and
+                 fails naming each failed run; a missing Debug build is exit code 3. Windows only: elsewhere the step
+                 is skipped, naming why
   fuzz           fuzz Release (ASan): the sanitized Tests binary with --test-suite=Fuzz --fuzz-iterations=1000000
                  --fuzz-shard=<k>/<n> --test-timeout-scale=<s> in n = hardening.fuzz_process_count(logical CPUs,
                  available memory, FUZZ_PEAK_PROCESS_BYTES) processes, each with its own --user-data-dir and the
@@ -910,6 +913,14 @@ def debug_heap_suite_reports() -> list[Path]:
             for cap in DEBUG_HEAP_CAPS]
 
 
+def debug_heap_suite_crashes() -> list[Path]:
+    """The folders of the crash reports one run of the debug-heap step's Tests runs write, one per API cap: the crash
+    report folder of the user data Test.py gives each Tests run beside its JUnit report (Lib/paths.py's
+    tests_run_user_data and crash_report_folder, which Test.py's run_user_data and crash_reports use). Test.py keeps
+    them between its runs, so the step deletes them before each of its runs."""
+    return [paths.crash_report_folder(paths.tests_run_user_data(report)) for report in debug_heap_suite_reports()]
+
+
 def debug_heap_run_options(arguments: argparse.Namespace) -> list[str]:
     """Test.py's options of one run of the debug-heap step: the Debug gpu suite under both API caps on the debug heap,
     each Tests run bounded by its share of the step's timeout."""
@@ -958,10 +969,13 @@ def step_debug_heap(arguments: argparse.Namespace, console: Console) -> Step:
     logged (R-GPUCRASH: the intermittent crash on a driver thread, Docs/Backlog.md), --debug-heap-runs times. Each run
     is `Test.py --suite gpu --config Debug --junit --debug-heap [--require-gpu]` with ENGINE_GPU_LIFETIME_LOG set to its
     GpuLifetime/ directory (Engine/Source/Engine/Graphics/GpuResourceTracker.h), and its JUnit reports are copied
-    beside it (DEBUG_HEAP_REPORTS/Run<k>/): the reports are deleted before each run, so a run that wrote none (a Tests
-    run killed by its timeout or crashed before its report) gets no earlier run's copy. Every run runs, whatever the
-    earlier ones did, so a crash reproduction keeps the evidence of all of them; the step fails naming each failed run,
-    and a missing Debug build (exit code 3) stops it. Windows only: elsewhere it is skipped, naming why."""
+    beside it (DEBUG_HEAP_REPORTS/Run<k>/), with the crash reports and minidumps of its Tests runs in Crashes/, which
+    the run's detail and its outcome's "crashReports" name instead of the originals: the reports and the crash folders
+    (which Test.py keeps between its runs) are deleted before each run, so a run that wrote none (a Tests run killed by
+    its timeout or crashed before its report) gets no earlier run's copy, and only the copies outlive the next run.
+    Every run runs, whatever the earlier ones did, so a crash reproduction keeps the evidence of all of them; the step
+    fails naming each failed run, and a missing Debug build (exit code 3) stops it. Windows only: elsewhere it is
+    skipped, naming why."""
     name = STEP_NAMES["debug-heap"]
     if not debugheap.is_available():
         return Step(name, Status.SKIPPED, "the Windows debug heap exists on Windows only "
@@ -976,6 +990,8 @@ def step_debug_heap(arguments: argparse.Namespace, console: Console) -> Step:
         lifetime.mkdir(parents=True, exist_ok=True)
         for report in debug_heap_suite_reports():
             report.unlink(missing_ok=True)
+        for crashes in debug_heap_suite_crashes():
+            shutil.rmtree(crashes, ignore_errors=True)
         environment = child_environment({GPU_LIFETIME_LOG_VARIABLE: str(lifetime)})
         try:
             result = run_json_script(f"{name}, run {run} of {runs}", SCRIPTS / "Test.py",
@@ -987,9 +1003,22 @@ def step_debug_heap(arguments: argparse.Namespace, console: Console) -> Step:
         for report in debug_heap_suite_reports():
             if report.is_file():
                 shutil.copy2(report, directory / report.name)
+        crash_files = [path for crashes in debug_heap_suite_crashes() if crashes.is_dir()
+                       for path in sorted(crashes.iterdir()) if path.is_file()]
+        kept_reports: list[str] = []
+        if crash_files:
+            kept = directory / "Crashes"
+            kept.mkdir(exist_ok=True)
+            for path in crash_files:
+                copy = kept / path.name
+                shutil.copy2(path, copy)
+                # Test.py's detail names the original, which the next run deletes; the copy stays.
+                detail = detail.replace(paths.display_path(path), paths.display_path(copy))
+                if path.suffix == ".txt":
+                    kept_reports.append(paths.display_path(copy))
         outcomes.append({"run": run, "status": status.value, "detail": detail,
                          "durationSeconds": round(result.duration, 1), "lifetimeLogs": count_lifetime_logs(lifetime),
-                         "directory": paths.display_path(directory)})
+                         "crashReports": kept_reports, "directory": paths.display_path(directory)})
         console.print(f"{name}, run {run} of {runs}: {status.value}: {detail}")
         if exit_code == EXIT_INIT_FAILED:
             return Step(name, Status.FAILED, f"run {run}: {detail}", time.monotonic() - started,
