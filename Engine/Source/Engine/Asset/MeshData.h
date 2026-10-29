@@ -36,6 +36,34 @@ namespace Engine {
 	};
 	static_assert(sizeof(MeshVertex) == 48, "MeshVertex is the 48-byte cooked vertex of Architecture §6.8");
 
+	// M23 (C23.1, C-MESH2; Docs/Decisions/0034-m23-contract.md decision 9): a vertex's second stream, MeshData version 2's
+	// attribute stream, bound as vertex binding 1 of every mesh pipeline (the 24 mesh pipelines take both bindings): the
+	// second texture coordinate set (glTF TEXCOORD_1, which Material version 2's UV sets select) and the vertex colour (glTF
+	// COLOR_0, linear RGBA, which always multiplies the material's base colour, as glTF defines it). 24 bytes, no padding.
+	// A mesh without the stream draws with (0, 0) and opaque white, which leaves its image as before.
+	struct MeshVertexAttributes
+	{
+		glm::vec2 TexCoord1{ 0.0f };
+		glm::vec4 Color{ 1.0f };
+
+		bool operator==(const MeshVertexAttributes&) const = default;
+	};
+	static_assert(sizeof(MeshVertexAttributes) == 24, "MeshVertexAttributes is MeshData version 2's 24-byte attribute vertex");
+
+	// The optional streams of a version 2 mesh, persisted as the payload's Streams bits (append only). Skin and Morph are
+	// reserved for C23.3 (C-SKEL, C-MORPH): their sections follow the attribute stream, in bit order, and a payload that
+	// sets one is refused until C23.3 defines it.
+	enum class MeshStreams : uint32_t
+	{
+		None = 0,
+		Attributes = 1U << 0, // Attributes holds one MeshVertexAttributes per vertex
+		Skin = 1U << 1,       // reserved (C23.3): joint indices and weights per vertex
+		Morph = 1U << 2       // reserved (C23.3): morph target deltas
+	};
+
+	template<>
+	inline constexpr bool EnableFlagOperators<MeshStreams> = true;
+
 	// A range of the index buffer drawn with one material slot (§6.8 {IndexOffset, IndexCount, MaterialSlot, AABB}).
 	struct MeshSubmesh
 	{
@@ -70,6 +98,9 @@ namespace Engine {
 		}
 
 		std::vector<MeshVertex> Vertices{};
+		// M23 (C23.1, MeshData version 2): empty, or one per vertex (MeshStreams::Attributes). Stream M serializes and
+		// validates it with the version 2 payload.
+		std::vector<MeshVertexAttributes> Attributes{};
 		std::vector<uint32_t> Indices{}; // uint32 triangle-list indices (§6.8)
 		std::vector<MeshSubmesh> Submeshes{};
 		std::vector<MeshMaterialSlot> Slots{};

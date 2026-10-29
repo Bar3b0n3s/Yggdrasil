@@ -30,8 +30,11 @@
 // decision 5); M9 added the pick table, the view flags, the selected entities, the annotations and their draw list, the
 // quality settings, the icons and the frame and scene revision stamps (ADR 0017). The M18 contract (C18.1,
 // Docs/Decisions/0029-m18-contract.md decisions 5 to 8) added the output stage (RenderOutputSettings, the view-to-scene
-// mapping) and the memory resource of the containers (decision 9). Additions are frozen-header changes reviewed by their
-// contract owner; no member here changes meaning. A plain value type: copyable, movable, thread-compatible.
+// mapping) and the memory resource of the containers (decision 9). The M23 contract (C23.1,
+// Docs/Decisions/0034-m23-contract.md decisions 2 to 5) changed existing members only, as phase 2's ledger lets it: the mesh
+// draw item's PreviousWorld for its instance record, the point lights' shadows and the quality settings' two reference
+// paths. Additions are frozen-header changes reviewed by their contract owner; no member here changes meaning. A plain
+// value type: copyable, movable, thread-compatible.
 //
 // Containers (M18, R-ARENA): the snapshot's own containers that grow with the scene (Meshes, Lights, Texts, PickTable,
 // Icons, and the commands of DebugDraw and AnnotationDraw) are std::pmr containers. A snapshot built with
@@ -111,6 +114,12 @@ namespace Engine {
 	{
 		uint32_t ShadowMapSize = 2048; // power of two, [256, 8192]
 		bool SsaoHalfResolution = false;
+		// M23 (C23.1, decisions 2 and 5): the reference paths the renderer's tests compare its fast paths with, on in every
+		// host (no project setting copies them). Instancing false draws every mesh item's submesh with its own draw, which an
+		// instanced render equals byte for byte (R-INST); ClusteredLights false shades every pixel with every light of the
+		// light list, which a clustered render equals byte for byte (R-CLC).
+		bool Instancing = true;
+		bool ClusteredLights = true;
 	};
 
 	// A world-space ray. Camera pixel rays are normalized; SceneRaycast also accepts and normalizes non-unit directions.
@@ -219,11 +228,15 @@ namespace Engine {
 
 	// One MeshRenderer to draw (§8.2 "world matrix, mesh handle+version, material per submesh, flags"). The renderer resolves
 	// the asset versions, the mesh's default materials and placeholders through the AssetManager and its GpuResourceCache,
-	// so extraction never touches assets.
+	// so extraction never touches assets. M23 (C23.1, decision 2): each of its submesh draws is one instance record
+	// (Shared/InstanceRecord.h), and draws whose mesh, submesh, material and pipeline agree share an instanced draw.
 	struct MeshDrawItem
 	{
 		glm::mat4 World = glm::mat4(1.0f); // the rendered (interpolated, §5.2) world matrix
-		AssetHandle Mesh{};                // a null handle draws nothing
+		// M23 (C23.1): the item's world matrix at the previous frame's render, for motion vectors (M26's TAA): the instance
+		// record's PreviousWorld. Empty means no motion (the record takes World); extraction leaves it empty until M26.
+		std::optional<glm::mat4> PreviousWorld{};
+		AssetHandle Mesh{}; // a null handle draws nothing
 		// MeshRendererComponent::Materials: one slot per submesh; a missing or null slot uses the mesh's default material.
 		std::vector<AssetHandle> Materials{};
 		bool CastShadows = true;
@@ -234,7 +247,8 @@ namespace Engine {
 
 	// One light (§8.2: directional, point, spot). The renderer culls them on the CPU and lights with at most
 	// MaxVisibleLights of them (RenderPrepare.h, RENDER_LIGHT_LIMIT_EXCEEDED); the walking skeleton used the first
-	// directional light only.
+	// directional light only. M23 (C23.1): the forward passes shade them through the view's cluster grid
+	// (LightClusters.h), and point lights cast shadows (PointShadowMaps.h).
 	struct LightData
 	{
 		RenderLightType Type = RenderLightType::Directional;
@@ -249,7 +263,8 @@ namespace Engine {
 		float LightAngle = 1.0f;                            // degrees (directional; PCSS from M9)
 		bool CastShadows = false;
 		UUID Entity{};
-		// DirectionalLightComponent's shadow settings. Spot maps use DepthBias/NormalBias defaults; points cast no shadows.
+		// DirectionalLightComponent's shadow settings. Spot and point maps use DepthBias/NormalBias defaults; a point light casts
+		// shadows from M23 (PointLightComponent::CastShadows, PointLight version 2), at most MaxPointShadowLights of them.
 		float ShadowDistance = 100.0f;
 		uint32_t CascadeCount = 4;
 		float CascadeSplitLambda = 0.75f;

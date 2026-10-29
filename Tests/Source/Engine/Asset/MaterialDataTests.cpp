@@ -210,6 +210,38 @@ namespace Engine {
 			CHECK(GetMaterialTextureHandles(material) == std::vector<AssetHandle>{ AssetHandle(10), AssetHandle(30) });
 			CHECK(GetMaterialTextureHandles(MaterialData()).empty());
 		}
+
+		// M23 (C23.1, Material version 2; Docs/Decisions/0034-m23-contract.md decision 10, stream M): a version 1 file loads
+		// with every map's texture coordinate set UV0 and saves as version 2, each map's UV set after it: the Formats/Material
+		// fixture and its upgraded counterpart.
+		TEST_CASE("MaterialData: MaterialV1 fixture loads with UV0 sets and saves as version 2" * doctest::skip(true))
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			const Result<std::string> legacy = Test::ReadTestDataText("Formats/Material/MaterialV1.material");
+			const Result<std::string> golden = Test::ReadTestDataText("Formats/Material/MaterialV1.upgraded.material");
+			REQUIRE(legacy.has_value());
+			REQUIRE(golden.has_value());
+			CHECK(MaterialData::CurrentVersion == 2);
+			CHECK(MaterialData::FormatVersion == 2);
+
+			MaterialLoadReport report;
+			const Result<MaterialData> material = MaterialFromText(*legacy, *registry, report, true);
+			REQUIRE_MESSAGE(material.has_value(), material.error().ToString());
+			CHECK(report.FileVersion == 1);
+			CHECK(material->BaseColorUVSet == TextureCoordinateSet::UV0);
+			CHECK(material->OcclusionUVSet == TextureCoordinateSet::UV0);
+			const Result<std::string> saved = MaterialToText(*material, *registry);
+			REQUIRE(saved.has_value());
+			CHECK(*saved == *golden);
+
+			// A version 2 file selects UV1 per map.
+			MaterialLoadReport uvReport;
+			const Result<MaterialData> uv1 =
+				MaterialFromText(R"({"Format": "Material", "Version": 2, "OcclusionUVSet": "UV1"})", *registry, uvReport, true);
+			REQUIRE_MESSAGE(uv1.has_value(), uv1.error().ToString());
+			CHECK(uv1->OcclusionUVSet == TextureCoordinateSet::UV1);
+			CHECK(uv1->BaseColorUVSet == TextureCoordinateSet::UV0);
+		}
 	}
 
 }

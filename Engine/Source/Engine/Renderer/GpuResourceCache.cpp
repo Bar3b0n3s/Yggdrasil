@@ -642,7 +642,9 @@ namespace Engine {
 		entry.Value.Version = key.Version;
 		entry.Value.Generation = state.NextGeneration++;
 		entry.Value.IsPlaceholder = isPlaceholder;
-		Result<nvrhi::BufferHandle> constants = Utils::CreateMaterialConstants(*state.Device, Utils::MakeMaterialConstants(*material),
+		const MaterialConstants materialConstants = Utils::MakeMaterialConstants(*material);
+		entry.Value.Flags = materialConstants.Flags;
+		Result<nvrhi::BufferHandle> constants = Utils::CreateMaterialConstants(*state.Device, materialConstants,
 			std::format("{} (constants)", Utils::GetAssetName(assets, resolved)));
 		if (constants.has_value())
 		{

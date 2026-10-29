@@ -3,6 +3,7 @@
 #include "Engine/Audio/AudioDecoder.h"
 
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Core/Hash.h"
 #include "Support/AudioTestData.h"
 #include "Support/Fuzz.h"
 #include "Support/TestData.h"
@@ -14,6 +15,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <format>
 #include <initializer_list>
 #include <limits>
 #include <optional>
@@ -145,6 +147,25 @@ namespace Engine {
 				REQUIRE(probed.has_value());
 				CHECK(*probed == decoded->Info);
 			}
+		}
+
+		// M23 (C23.1, A-OPUS; Docs/Decisions/0034-m23-contract.md decision 16, stream O): the pinned public-domain Ogg Opus
+		// fixture (Water.opus, Tests/Data/LICENSES.md) decodes through libopus's fixed-point decoder to the same 48 kHz stereo
+		// samples in every configuration: their XXH64 is the digest stream O commits from Debug and confirms in Release (Dist
+		// through FeatureTest's exported run). EncodedAudioFormat::Opus is the value decision 16 freezes (4).
+		TEST_CASE("AudioDecoder: an Ogg Opus file decodes bit-exact to its committed digest in every configuration" * doctest::skip(true))
+		{
+			constexpr auto Opus = static_cast<EncodedAudioFormat>(4);
+			const Buffer bytes = ReadFixture("Assets/Audio/Water.opus");
+			const Result<DecodedAudio> decoded = DecodeEncodedAudio(bytes);
+			REQUIRE_MESSAGE(decoded.has_value(), decoded.error().ToString());
+			CHECK(decoded->Info.Format == Opus);
+			CHECK(decoded->Info.SampleRate == 48000);
+			CHECK(decoded->Info.ChannelCount == 2);
+			CHECK(decoded->Info.FrameCount > 1000000);
+			CHECK(EncodedAudioFormatToString(Opus) == "Opus");
+			const uint64_t digest = XXH64(std::as_bytes(std::span<const float>(decoded->Samples)));
+			CHECK_MESSAGE(digest == 0x0000000000000000ULL, std::format("digest {:016x}", digest));
 		}
 
 		TEST_CASE("AudioDecoder: bytes that are no audio file are a Parse error naming the formats")

@@ -55,6 +55,45 @@ namespace Engine {
 			CHECK(SerializeMeshPayload(**loaded) == payload);
 		}
 
+		// M23 (C23.1, C-MESH2; Docs/Decisions/0034-m23-contract.md decision 9, stream M): MeshData version 2 carries the
+		// attribute stream (TexCoord1 and the vertex colour) after the indices, flagged by MeshStreams::Attributes, and keeps
+		// the version 1 layout's other members; a payload that sets a bit C23.3 reserves (Skin, Morph) or holds attributes
+		// for another vertex count is refused.
+		TEST_CASE("MeshData: a version 2 payload round-trips the attribute stream and refuses the reserved bits" * doctest::skip(true))
+		{
+			MeshData quad = MakeQuad();
+			for (size_t index = 0; index < quad.Vertices.size(); ++index)
+			{
+				const float shade = static_cast<float>(index) * 0.25f;
+				quad.Attributes.push_back({ .TexCoord1 = { shade, 1.0f - shade }, .Color = { shade, 0.5f, 1.0f, 1.0f - shade } });
+			}
+			CHECK(MeshData::FormatVersion == 2);
+			REQUIRE(ValidateMeshData(quad).has_value());
+			const Buffer payload = SerializeMeshPayload(quad);
+			// Version 1's 311 bytes, the Streams and Reserved words (8) and 4 attribute vertices (96).
+			CHECK(payload.size() == 311 + 8 + 96);
+			const Result<MeshData> read = DeserializeMeshPayload(payload);
+			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
+			CHECK(read->Attributes == quad.Attributes);
+			CHECK(SerializeMeshPayload(*read) == payload);
+
+			// A mesh without the stream serializes none and reads back without it.
+			const MeshData plain = MakeQuad();
+			const Result<MeshData> plainRead = DeserializeMeshPayload(SerializeMeshPayload(plain));
+			REQUIRE(plainRead.has_value());
+			CHECK(plainRead->Attributes.empty());
+
+			// Attributes for another vertex count fail validation.
+			MeshData mismatched = quad;
+			mismatched.Attributes.pop_back();
+			CHECK_FALSE(ValidateMeshData(mismatched).has_value());
+
+			// The Streams word follows the four counts; setting the Skin bit (C23.3's) is refused.
+			Buffer skinned = payload;
+			skinned[16] = static_cast<std::byte>(std::to_integer<uint32_t>(skinned[16]) | 2U);
+			CHECK_FALSE(DeserializeMeshPayload(skinned).has_value());
+		}
+
 		TEST_CASE("MeshData: invalid meshes fail validation")
 		{
 			MeshData outOfRange = MakeQuad();

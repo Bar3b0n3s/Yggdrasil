@@ -481,9 +481,9 @@ Tests support (`Tests/Source/Support/`): recording assert handler, death-test re
 
 **Deliverables**
 - Mesh instancing, point-light shadows and clustered light culling.
-- Mesh v2 (a second UV set, vertex colours), Material v2, EXR import for environments, Ogg Opus import, and BC1–BC7 compression including BC6H through CMP_Core with a decode fallback, opted out per texture by a `Compression` import setting.
+- Mesh v2 (a second UV set, vertex colours), Material v2, EXR import for environments, Ogg Opus import, and BC compression through CMP_Core (BC1, BC4, BC5, BC6H and BC7; BC2 and BC3 left out, `Docs/Decisions/0034-m23-contract.md` decision 13) with a decode fallback, opted out per texture by a `Compression` import setting.
 - Skeletal and morph animation with script-driven blending.
-- At its merge, `Compression: None` applied to M21's and M22's sprite, tile and UI textures, and every golden its compression changes regenerated, the siblings' included, in one reviewed change.
+- At its merge, `Compression: None` applied to M21's and M22's sprite, tile and UI textures and set by the sprite-sheet creation and editing paths. The goldens its compression changes are regenerated at the integration of each wave that changes them (the BC default for imported textures, BC6H for the built-in environments) and once more on the merged tree at its landing, the siblings' included, each a reviewed regeneration of exactly the images `Docs/Decisions/0034-m23-contract.md` names.
 
 **Acceptance**
 - Instanced and per-draw renders are byte-identical; clustered culling equals brute force exactly on 256 lights; the point-shadow oracle and golden pass.

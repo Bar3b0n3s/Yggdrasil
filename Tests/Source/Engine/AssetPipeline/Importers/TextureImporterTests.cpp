@@ -2,6 +2,7 @@
 
 #include "Engine/AssetPipeline/Importers/TextureImporter.h"
 
+#include "Engine/Asset/TextureCompression.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Graphics/Image.h"
@@ -135,6 +136,45 @@ namespace Engine {
 				CHECK(run.Counts.Rejected > 0);
 				CHECK(run.Counts.Accepted > 0);
 			}
+		}
+
+		// M23 (C23.1, R-TEXC-BC; Docs/Decisions/0034-m23-contract.md decision 13, stream X): TextureImporter version 2's
+		// Compression Auto cooks a Color texture as BC7 sRGB, every Linear texture as BC7 and a NormalMap as BC5, every level
+		// BC blocks; None cooks version 1's RGBA8 levels. A grey Linear texture is BC7 too, never BC4, whose texels sample as
+		// (r, 0, 0, 1): as a metallic-roughness map (G roughness, B metallic) it must decode with G and B equal to R, as its
+		// None import samples. The format values are those decision 13 freezes (stream X names them in TextureFormat).
+		TEST_CASE("TextureImporter: Compression Auto cooks BC7 and BC5 by usage, and None keeps RGBA8" * doctest::skip(true))
+		{
+			constexpr auto BC5Unorm = static_cast<TextureFormat>(7);
+			constexpr auto BC7Unorm = static_cast<TextureFormat>(8);
+			constexpr auto BC7Srgb = static_cast<TextureFormat>(9);
+			CHECK(TextureImporter::Version == 2);
+			CHECK(TextureData::FormatVersion == 2);
+			const Buffer rgba = ReadTextureFixture("Rgba.png");
+			const Buffer grey = ReadTextureFixture("Grey.png");
+			const Buffer normal = ReadTextureFixture("Normal.png");
+			CHECK(ImportFromMemory(rgba, ColorSettings, "Rgba.png")->Format == BC7Srgb);
+			CHECK(ImportFromMemory(rgba, { .Usage = TextureUsage::Linear, .GenerateMips = true }, "Rgba.png")->Format == BC7Unorm);
+			const AssetRef<TextureData> greyData = ImportFromMemory(grey, { .Usage = TextureUsage::Linear, .GenerateMips = true }, "Grey.png");
+			REQUIRE(greyData->Format == BC7Unorm);
+			const TextureMip& greyLevel = greyData->Mips.front();
+			const Result<Buffer> greyTexels = DecompressTextureBlocks(TextureBlockCodec::BC7, greyLevel.Width, greyLevel.Height, GetMipPixels(*greyData, 0));
+			REQUIRE_MESSAGE(greyTexels.has_value(), greyTexels.error().ToString());
+			for (size_t texel = 0; texel < greyTexels->size(); texel += 4)
+			{
+				const int red = std::to_integer<int>((*greyTexels)[texel]);
+				CHECK(std::abs(std::to_integer<int>((*greyTexels)[texel + 1]) - red) <= 2);
+				CHECK(std::abs(std::to_integer<int>((*greyTexels)[texel + 2]) - red) <= 2);
+			}
+			const AssetRef<TextureData> normalMap = ImportFromMemory(normal, { .Usage = TextureUsage::NormalMap, .GenerateMips = true }, "Normal.png");
+			CHECK(normalMap->Format == BC5Unorm);
+			// Normal.png is 8 x 8: its levels are 2 x 2, 1 x 1, 1 x 1 and 1 x 1 blocks of 16 bytes.
+			REQUIRE(normalMap->Mips.size() == 4);
+			CHECK(normalMap->Mips[0].Size == 64);
+			CHECK(normalMap->Mips[3].Size == 16);
+			CHECK(ImportFromMemory(rgba, { .Usage = TextureUsage::Color, .GenerateMips = true, .Compression = TextureCompression::None }, "Rgba.png")
+					  ->Format
+				== TextureFormat::RGBA8Srgb);
 		}
 
 		TEST_CASE("TextureImporter: a PNG imports with a full sRGB mip chain")

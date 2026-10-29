@@ -19,11 +19,28 @@ namespace Engine {
 		NormalMap // tangent-space normals: RGBA8Unorm, every generated mip renormalized to unit vectors (level 0 as authored)
 	};
 
+	// M23 (C23.1, R-TEXC-BC; phase 2's ledger, ADR 0028; Docs/Decisions/0034-m23-contract.md decision 13): registry enum
+	// "TextureCompression", whether an import compresses its levels with the BC codecs (Asset/TextureCompression.h).
+	//   Auto: by usage: Color BC7 (sRGB); Linear BC7 (unorm), whatever its texels, since a Linear texture may be a
+	//         metallic-roughness map, which the shader reads from G and B, and BC4 samples as (r, 0, 0, 1); NormalMap BC5
+	//         (x and y; the shader reconstructs z). The default.
+	//   None: the uncompressed formats of TextureImporter version 1 (RGBA8). Sprite, tile and UI art takes it (ADR 0028's
+	//         ledger), and the built-in procedural textures and font atlases are never compressed.
+	// EnvironmentImportSettings takes it too: Auto stores the cubes as BC6H, None as RGBA16F.
+	enum class TextureCompression : uint8_t
+	{
+		Auto,
+		None
+	};
+
 	// Registry struct "TextureImportSettings" (§5.4: every *ImportSettings is reflected; a .meta's "Settings").
 	struct TextureImportSettings
 	{
 		TextureUsage Usage = TextureUsage::Color;
 		bool GenerateMips = true; // the full chain to 1x1 (§7.4: CPU mips with stb_image_resize2)
+		// M23 (C23.1, TextureImporter version 2): appended after GenerateMips, so earlier .meta settings read as Auto. Stream
+		// X registers it with TextureImporter version 2 (until then it is Auto and never read).
+		TextureCompression Compression = TextureCompression::Auto;
 	};
 
 	// PNG, JPEG, TGA and BMP (§7.4), decoded from memory with stb_image (through the implementation in

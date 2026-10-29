@@ -4,12 +4,14 @@
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/TextureCompression.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Json/JsonWriter.h"
 #include "Engine/Graphics/GraphicsDevice.h"
+#include "Engine/Graphics/Image.h"
 #include "Engine/ImGui/ImGuiRenderer.h"
 #include "Support/DeviceLossTest.h"
 #include "Support/EditorTestFixture.h"
@@ -246,6 +248,56 @@ namespace Engine {
 			thumbnails.Reset();
 			CHECK_FALSE(thumbnails.GetCache().Find(request).has_value());
 		}
+
+		// M23 (C23.1, R-TEXC-BC; Docs/Decisions/0034-m23-contract.md decision 13, stream X): an imported texture, BC7 under
+		// Compression Auto, previews its decoded texels (DecompressTextureBlocks of its first level), never its blocks' bytes
+		// read as RGBA8. A 16 x 16 gradient previewed at 16 pixels maps each texel to one pixel. BC7Srgb is decision 13's
+		// value.
+		TEST_CASE("EditorHostThumbnails: a BC7 texture's preview shows its decoded texels" * doctest::skip(true))
+		{
+			constexpr auto BC7Srgb = static_cast<TextureFormat>(9);
+			Test::EditorTestFixture fixture("HostThumbnailCompressed");
+			fixture.CreateAndOpenProject();
+			auto& editor = fixture.GetEditor();
+			const auto file = editor.GetProject().GetRoot() / "Assets/Gradient.png";
+			auto image = CreateImage(16, 16, nvrhi::Format::RGBA8_UNORM);
+			REQUIRE(image.has_value());
+			for (uint32_t y = 0; y < 16; ++y)
+			{
+				for (uint32_t x = 0; x < 16; ++x)
+				{
+					const size_t texel = (size_t{ y } * 16 + x) * 4;
+					image->Pixels[texel] = static_cast<std::byte>(x * 16);
+					image->Pixels[texel + 1] = static_cast<std::byte>(y * 16);
+					image->Pixels[texel + 2] = static_cast<std::byte>(255 - x * 8);
+					image->Pixels[texel + 3] = std::byte{ 255 };
+				}
+			}
+			REQUIRE(WritePng(file, *image).has_value());
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			const auto asset = editor.GetAssets().Resolve("Assets/Gradient.png");
+			REQUIRE(asset.has_value());
+			const auto loaded = editor.GetAssets().Load(*asset);
+			REQUIRE(loaded.has_value());
+			const AssetRef<TextureData> texture = AssetCast<TextureData>(*loaded);
+			REQUIRE(texture != nullptr);
+			REQUIRE(texture->Format == BC7Srgb);
+			const Result<Buffer> decoded = DecompressTextureBlocks(TextureBlockCodec::BC7, 16, 16, GetMipPixels(*texture, 0));
+			REQUIRE_MESSAGE(decoded.has_value(), decoded.error().ToString());
+
+			EditorHostThumbnails thumbnails(editor, {});
+			REQUIRE(thumbnails.GetCache().BindProject(1).has_value());
+			const ThumbnailRequest request{ 1, *asset, editor.GetAssets().GetVersion(*asset), 16 };
+			const auto preview = thumbnails.GetCache().Request(request);
+			REQUIRE(preview.has_value());
+			const auto thumbnail = ReadPng(FileSystem::PathFromUtf8(preview->Path));
+			REQUIRE(thumbnail.has_value());
+			REQUIRE(thumbnail->Width == 16);
+			REQUIRE(thumbnail->Height == 16);
+			CHECK(thumbnail->Pixels == *decoded);
+			thumbnails.Reset();
+		}
+
 		TEST_CASE("EditorHostThumbnails: material previews capture the referenced material on a fitted sphere")
 		{
 			Test::EditorTestFixture fixture("HostMaterialThumbnail");

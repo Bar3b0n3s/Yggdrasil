@@ -31,6 +31,10 @@ namespace Engine {
 		CrashHandler, // CrashHandler::Install with <UserData>/<AppName>/Crashes, and the fatal-error handler (below)
 		Scripting,    // InitializeScriptingRuntime: released flags and assert hook, before any VM or import worker
 		Physics,      // PhysicsEngine::Initialize with ProcessContextSpecification::Physics (§9.1; M11)
+		// M23 (C23.1, Docs/Decisions/0034-m23-contract.md decision 13): InitializeTextureCodecs (Asset/TextureCompression.h),
+		// CMP_Core's process-level state, set once before any import worker compresses a texture; nothing to shut down. The
+		// values are not persisted, so the step takes its place in the order rather than the end.
+		TextureCodecs,
 		VulkanLoader, // VulkanDispatch::Initialize (§8.1); only when VulkanLoaderPolicy is not None
 		Glfw          // GlfwLibrary::Initialize with the chosen platform, handing GLFW the loader (glfwInitVulkanLoader)
 	};

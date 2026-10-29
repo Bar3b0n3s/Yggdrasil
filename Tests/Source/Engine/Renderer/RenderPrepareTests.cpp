@@ -2,10 +2,18 @@
 
 #include "Engine/Renderer/RenderPrepare.h"
 
+#include "Engine/Asset/MaterialData.h"
+#include "Engine/Asset/MeshData.h"
+#include "Engine/Graphics/Image.h"
+#include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
+#include "Engine/Renderer/RenderStats.h"
+#include "Support/HeadlessGpuFixture.h"
+
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
 #include <cstdint>
+#include <string_view>
 #include <vector>
 
 // The CPU rules of §8.3 pass 1 (Architecture §15.2 "Renderer (CPU): ... light culling; transparent sort ties";
@@ -148,6 +156,105 @@ namespace Engine {
 			for (const OpaqueSortKey& key : keys)
 				order.push_back(key.DrawIndex);
 			CHECK(order == std::vector<uint32_t>{ 3, 4, 2, 1, 0 });
+		}
+
+		// M23 (C23.1, R-INST; Docs/Decisions/0034-m23-contract.md decision 2): the submesh joins the opaque key before the
+		// snapshot order, so the draws of two-submesh items of one mesh and material come out submesh by submesh, each in
+		// snapshot order, where they would interleave item by item without it and no two equal draws would be adjacent.
+		TEST_CASE("RenderPrepare: opaque draws of one mesh and material sort by submesh before snapshot order")
+		{
+			std::vector<OpaqueSortKey> keys;
+			for (uint32_t item = 0; item < 3; ++item)
+			{
+				for (uint32_t submesh = 0; submesh < 2; ++submesh)
+					keys.push_back({ .Pipeline = 0, .Material = AssetHandle(10), .Mesh = AssetHandle(1), .Submesh = submesh, .DrawIndex = item * 2 + submesh });
+			}
+			keys.push_back({ .Pipeline = 0, .Material = AssetHandle(10), .Mesh = AssetHandle(2), .Submesh = 0, .DrawIndex = 6 });
+			SortOpaqueDraws(keys);
+			std::vector<uint32_t> order;
+			for (const OpaqueSortKey& key : keys)
+				order.push_back(key.DrawIndex);
+			CHECK(order == std::vector<uint32_t>{ 0, 2, 4, 1, 3, 5, 6 });
+		}
+
+		// M23 (C23.1, R-INST; Docs/Decisions/0034-m23-contract.md decision 2, stream A): an instanced draw is a maximal run of
+		// adjacent draws with equal keys, so the runs, in order, cover the pass's draws once and in their order.
+		TEST_CASE("RenderPrepare: GroupMeshInstances batches adjacent draws with equal keys, in order" * doctest::skip(true))
+		{
+			const MeshInstanceKey cube{ .Pipeline = 0, .Material = AssetHandle(10), .Mesh = AssetHandle(1), .Submesh = 0 };
+			const MeshInstanceKey cubeTop{ .Pipeline = 0, .Material = AssetHandle(10), .Mesh = AssetHandle(1), .Submesh = 1 };
+			const MeshInstanceKey sphere{ .Pipeline = 0, .Material = AssetHandle(10), .Mesh = AssetHandle(2), .Submesh = 0 };
+			const MeshInstanceKey mirrored{ .Pipeline = 1, .Material = AssetHandle(10), .Mesh = AssetHandle(1), .Submesh = 0 };
+			// Two deformed draws of the cube (C23.3): each reads vertices of its own, so neither batches with the other or with
+			// the cube's undeformed draw before them.
+			const MeshInstanceKey deformedA{ .Pipeline = 0, .Material = AssetHandle(10), .Mesh = AssetHandle(1), .Submesh = 0, .VertexStream = 1 };
+			const MeshInstanceKey deformedB{ .Pipeline = 0, .Material = AssetHandle(10), .Mesh = AssetHandle(1), .Submesh = 0, .VertexStream = 2 };
+			const std::vector<MeshInstanceKey> keys = { cube, cube, cubeTop, sphere, sphere, sphere, cube, mirrored, cube, deformedA, deformedB };
+			const std::vector<MeshInstanceBatch> batches = GroupMeshInstances(keys);
+			const std::vector<MeshInstanceBatch> expected = { { .First = 0, .Count = 2 }, { .First = 2, .Count = 1 }, { .First = 3, .Count = 3 },
+				{ .First = 6, .Count = 1 }, { .First = 7, .Count = 1 }, { .First = 8, .Count = 1 }, { .First = 9, .Count = 1 }, { .First = 10, .Count = 1 } };
+			CHECK(batches == expected);
+			CHECK(GroupMeshInstances({}).empty());
+		}
+	}
+
+	TEST_SUITE(Test::GpuSuite)
+	{
+		// M23 acceptance (R-INST, stream A): the same snapshot of 24 equal quads of two submeshes each, mirrored ones and two
+		// materials renders byte-identically with instancing and with one draw per submesh (RenderQualitySettings::Instancing
+		// false). The instanced render records one forward draw per pipeline variant, material and submesh: 2 x 2 x 2 = 8 of
+		// the 48 submesh draws. Without the submesh in the opaque order the two submeshes of each quad would alternate, no two
+		// equal draws would be adjacent, and nothing would batch.
+		TEST_CASE("SceneRenderer: an instanced render is byte-identical to the per-draw render" * doctest::skip(true))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu);
+			setup.Assets().Publish(UUID(8912), CreateRef<MaterialData>());
+			// The integration fixture's quad as two submeshes of one triangle each, both of material slot 0.
+			auto quad = CreateRef<MeshData>();
+			quad->Vertices = {
+				{ .Position = { -1, -1, 0 }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 0, 1 } },
+				{ .Position = { 1, -1, 0 }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 1, 1 } },
+				{ .Position = { 1, 1, 0 }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 1, 0 } },
+				{ .Position = { -1, 1, 0 }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 0, 0 } },
+			};
+			quad->Indices = { 0, 1, 2, 0, 2, 3 };
+			quad->Bounds = { { -1, -1, 0 }, { 1, 1, 0 } };
+			quad->Submeshes = { { .IndexOffset = 0, .IndexCount = 3, .MaterialSlot = 0, .Bounds = quad->Bounds },
+				{ .IndexOffset = 3, .IndexCount = 3, .MaterialSlot = 0, .Bounds = quad->Bounds } };
+			quad->Slots = { {} };
+			setup.Assets().Publish(UUID(8913), quad);
+			RenderSnapshot snapshot = setup.Snapshot();
+			snapshot.Meshes.clear();
+			for (int index = 0; index < 24; ++index)
+			{
+				const glm::vec3 position(static_cast<float>(index % 6) - 2.5f, static_cast<float>(index / 6) - 1.5f, -8.0f);
+				glm::mat4 world = glm::translate(glm::mat4(1.0f), position) * glm::scale(glm::mat4(1.0f), glm::vec3(0.4f));
+				if (index % 5 == 0)
+					world = world * glm::scale(glm::mat4(1.0f), glm::vec3(-1.0f, 1.0f, 1.0f));
+				snapshot.Meshes.push_back({ .World = world, .Mesh = UUID(8913), .Materials = { UUID(index % 3 == 0 ? 8912 : 8911) } });
+			}
+			snapshot.Lights.push_back({ .Type = RenderLightType::Directional, .Direction = glm::normalize(glm::vec3(0.3f, -1.0f, -0.4f)) });
+
+			const auto forwardDraws = [&setup]()
+			{
+				for (const RenderPassStats& pass : setup.Renderer().GetRenderStats().Passes)
+				{
+					if (pass.Name == std::string_view("ForwardOpaque"))
+						return pass.DrawCalls;
+				}
+				return 0U;
+			};
+			const Image instanced = setup.Render(snapshot);
+			const uint32_t instancedDraws = forwardDraws();
+			snapshot.Quality.Instancing = false;
+			++snapshot.FrameIndex;
+			const Image perDraw = setup.Render(snapshot);
+			const uint32_t perDrawDraws = forwardDraws();
+			CHECK(instanced.Pixels == perDraw.Pixels);
+			CHECK(perDrawDraws == 48);
+			CHECK(instancedDraws == 8);
 		}
 	}
 

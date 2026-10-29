@@ -628,6 +628,36 @@ namespace Engine {
 			return static_cast<uint16_t>(sign | (static_cast<uint32_t>(biased) << 10U) | (static_cast<uint32_t>(significand) - 1024U));
 		}
 
+		bool IsPointLightVisible(const glm::dvec3& receiver, const glm::dvec3& light, std::span<const ReferenceTriangle> occluders)
+		{
+			// The segment receiver + t (light - receiver), t in (End, 1 - End), against each triangle (Moller-Trumbore).
+			constexpr double End = 1e-6;
+			const glm::dvec3 direction = light - receiver;
+			for (const ReferenceTriangle& triangle : occluders)
+			{
+				const glm::dvec3 edge1 = triangle.B - triangle.A;
+				const glm::dvec3 edge2 = triangle.C - triangle.A;
+				const glm::dvec3 p = glm::cross(direction, edge2);
+				const double determinant = glm::dot(edge1, p);
+				// Parallel to the triangle's plane (or a degenerate triangle): the segment crosses no interior point.
+				if (std::abs(determinant) <= 1e-12 * glm::length(direction) * glm::length(glm::cross(edge1, edge2)))
+					continue;
+				const double inverse = 1.0 / determinant;
+				const glm::dvec3 s = receiver - triangle.A;
+				const double u = glm::dot(s, p) * inverse;
+				if (u < 0.0 || u > 1.0)
+					continue;
+				const glm::dvec3 q = glm::cross(s, edge1);
+				const double v = glm::dot(direction, q) * inverse;
+				if (v < 0.0 || u + v > 1.0)
+					continue;
+				const double t = glm::dot(edge2, q) * inverse;
+				if (t > End && t < 1.0 - End)
+					return false;
+			}
+			return true;
+		}
+
 	}
 
 }

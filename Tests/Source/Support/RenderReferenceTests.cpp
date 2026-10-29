@@ -3,6 +3,7 @@
 
 #include <glm/gtc/constants.hpp>
 
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -418,6 +419,31 @@ namespace Engine {
 			CHECK(Test::DoubleToHalf(-0.0) == 0x8000);
 			CHECK(Test::HalfToDouble(0x7C00) == std::numeric_limits<double>::infinity());
 			CHECK(std::isnan(Test::HalfToDouble(0x7E00)));
+		}
+
+		// M23 (decision 3): the point-shadow oracle. A unit square in the z = 0 plane (two triangles) hides the light at
+		// (0, 0, 1) from receivers whose segment to it crosses the square, from either side, and from no other receiver.
+		TEST_CASE("RenderReference: a point light is hidden exactly where the segment to it crosses an occluder")
+		{
+			const std::array<Test::ReferenceTriangle, 2> square = { {
+				{ .A = glm::dvec3(-0.5, -0.5, 0.0), .B = glm::dvec3(0.5, -0.5, 0.0), .C = glm::dvec3(0.5, 0.5, 0.0) },
+				{ .A = glm::dvec3(-0.5, -0.5, 0.0), .B = glm::dvec3(0.5, 0.5, 0.0), .C = glm::dvec3(-0.5, 0.5, 0.0) },
+			} };
+			const glm::dvec3 light(0.0, 0.0, 1.0);
+			// Behind the square: the segment crosses it at (x / 2, y / 2) for a receiver at (x, y, -1), inside for |x|, |y| < 1.
+			CHECK_FALSE(Test::IsPointLightVisible(glm::dvec3(0.0, 0.0, -1.0), light, square));
+			CHECK_FALSE(Test::IsPointLightVisible(glm::dvec3(0.9, -0.6, -1.0), light, square));
+			CHECK_FALSE(Test::IsPointLightVisible(glm::dvec3(-0.2, 0.8, -1.0), light, square)); // the second triangle
+			CHECK(Test::IsPointLightVisible(glm::dvec3(1.1, 0.0, -1.0), light, square));
+			CHECK(Test::IsPointLightVisible(glm::dvec3(0.0, -1.2, -1.0), light, square));
+			// In front of the square, on it, and in its plane: nothing between the receiver and the light.
+			CHECK(Test::IsPointLightVisible(glm::dvec3(0.1, 0.1, 0.5), light, square));
+			CHECK(Test::IsPointLightVisible(glm::dvec3(0.1, 0.1, 0.0), light, square));
+			CHECK(Test::IsPointLightVisible(glm::dvec3(0.25, 0.0, 0.0), glm::dvec3(-0.25, 0.0, 0.0), square));
+			// A light behind the square hides receivers in front of it the same way (either face).
+			CHECK_FALSE(Test::IsPointLightVisible(glm::dvec3(0.0, 0.0, 1.0), glm::dvec3(0.2, 0.2, -1.0), square));
+			// No occluder hides nothing.
+			CHECK(Test::IsPointLightVisible(glm::dvec3(0.0, 0.0, -1.0), light, {}));
 		}
 	}
 

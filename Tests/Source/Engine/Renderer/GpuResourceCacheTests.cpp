@@ -11,6 +11,7 @@
 #include "Engine/Asset/FontData.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/MeshData.h"
+#include "Engine/Asset/TextureCompression.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/RingBufferSink.h"
@@ -20,10 +21,12 @@
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/SceneRenderer.h"
+#include "Shared/MaterialConstants.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/InMemoryAssetManager.h"
+#include "Support/RenderReference.h"
 #include "Support/TestOptions.h"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -31,6 +34,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <format>
 #include <map>
 #include <numeric>
@@ -121,6 +127,212 @@ namespace Engine {
 
 	TEST_SUITE("Renderer")
 	{
+		// M23 acceptance (R-TEXC-BC, decision 15, stream X): a BC7 texture uploads as BC7 on a device with the
+		// textureCompressionBC feature, and on a device without it through the decode fallback as RGBA8, whose texels are
+		// DecompressTextureBlocks' (Asset/TextureCompression.h), never the placeholder. BC7Unorm is decision 13's value.
+		TEST_CASE("GpuResourceCache: a device without BC support uploads a BC texture through the decode fallback"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			constexpr auto BC7Unorm = static_cast<TextureFormat>(8);
+			Buffer rgba;
+			for (uint32_t texel = 0; texel < 8 * 8; ++texel)
+			{
+				for (const uint32_t value : { texel * 4, 255 - texel * 2, (texel * 37) % 256, 255U })
+					rgba.push_back(static_cast<std::byte>(value & 0xFFU));
+			}
+			const Result<Buffer> blocks = CompressTextureBlocks(TextureBlockCodec::BC7, 8, 8, rgba);
+			REQUIRE(blocks.has_value());
+			const Result<Buffer> expected = DecompressTextureBlocks(TextureBlockCodec::BC7, 8, 8, *blocks);
+			REQUIRE(expected.has_value());
+			auto texture = CreateRef<TextureData>();
+			texture->Format = BC7Unorm;
+			texture->Width = 8;
+			texture->Height = 8;
+			texture->Mips = { { .Width = 8, .Height = 8, .Offset = 0, .Size = blocks->size() } };
+			texture->Pixels = *blocks;
+			REQUIRE_MESSAGE(ValidateTextureData(*texture).has_value(), ValidateTextureData(*texture).error().ToString());
+
+			for (const bool withBc : { true, false })
+			{
+				CAPTURE(withBc);
+				Test::HeadlessGpuFixture gpu({ .DisableTextureCompressionBC = !withBc });
+				ENGINE_REQUIRE_GPU(gpu);
+				CHECK(gpu.GetDevice().GetInfo().TextureCompressionBC == withBc);
+				Test::InMemoryAssetManager assets;
+				assets.Publish(UUID(0x7E57BC7000000001ULL), texture);
+				{
+					GpuResourceCache cache(gpu.GetDevice(), assets);
+					const GpuTexture& mirror = cache.GetTexture(UUID(0x7E57BC7000000001ULL));
+					REQUIRE(mirror.Texture != nullptr);
+					CHECK_FALSE(mirror.IsPlaceholder);
+					CHECK(mirror.Texture->getDesc().format == (withBc ? nvrhi::Format::BC7_UNORM : nvrhi::Format::RGBA8_UNORM));
+					if (!withBc)
+					{
+						Readback readback(gpu.GetDevice());
+						const Result<Image> image = readback.ReadTexture(*mirror.Texture);
+						REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
+						CHECK(image->Pixels == *expected);
+					}
+				}
+				gpu.GetDevice().RunGarbageCollection();
+			}
+		}
+
+		// M23 (decision 10, stream X): MaterialFlagNormalMapTwoChannel follows the bound normal map's TextureFormat. A material
+		// first drawn while its normal map is RGBA8 (its placeholder during an import, or Compression None) gets constants
+		// without the flag; when only the texture changes to BC5 (a new version), the mirror writes constants with the flag and
+		// takes a new generation, and a change back to RGBA8 clears it, on a device with BC and through the decode fallback
+		// alike (whose RGBA8 mirror of a BC5 texture holds (x, y, 0, 255), so z is reconstructed either way). BC5Unorm is
+		// decision 13's value.
+		TEST_CASE("GpuResourceCache: a material's two-channel normal flag follows its normal map's format when only the texture changes"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			constexpr auto BC5Unorm = static_cast<TextureFormat>(7);
+			Buffer rgba;
+			for (uint32_t texel = 0; texel < 4 * 4; ++texel)
+			{
+				for (const uint32_t value : { 128 + texel, 128 - texel, 255U, 255U })
+					rgba.push_back(static_cast<std::byte>(value & 0xFFU));
+			}
+			const Result<Buffer> blocks = CompressTextureBlocks(TextureBlockCodec::BC5, 4, 4, rgba);
+			REQUIRE(blocks.has_value());
+			auto bc5 = CreateRef<TextureData>();
+			bc5->Format = BC5Unorm;
+			bc5->Width = 4;
+			bc5->Height = 4;
+			bc5->Mips = { { .Width = 4, .Height = 4, .Offset = 0, .Size = blocks->size() } };
+			bc5->Pixels = *blocks;
+			REQUIRE_MESSAGE(ValidateTextureData(*bc5).has_value(), ValidateTextureData(*bc5).error().ToString());
+			auto rgba8 = CreateRef<TextureData>();
+			rgba8->Format = TextureFormat::RGBA8Unorm;
+			rgba8->Width = 4;
+			rgba8->Height = 4;
+			rgba8->Mips = { { .Width = 4, .Height = 4, .Offset = 0, .Size = rgba.size() } };
+			rgba8->Pixels = rgba;
+
+			for (const bool withBc : { true, false })
+			{
+				CAPTURE(withBc);
+				Test::HeadlessGpuFixture gpu({ .DisableTextureCompressionBC = !withBc });
+				ENGINE_REQUIRE_GPU(gpu);
+				Test::InMemoryAssetManager assets;
+				const AssetHandle normalMap(0x7E57BC5000000001ULL);
+				const AssetHandle material(0x7E57BC5000000002ULL);
+				assets.Publish(normalMap, rgba8);
+				auto data = CreateRef<MaterialData>();
+				data->NormalMap = TypedAssetHandle<AssetType::Texture>(normalMap);
+				assets.Publish(material, data);
+				{
+					GpuResourceCache cache(gpu.GetDevice(), assets);
+					const GpuMaterial& first = cache.GetMaterial(material);
+					CHECK((first.Flags & MaterialFlagNormalMapTwoChannel) == 0);
+					const uint64_t firstGeneration = first.Generation;
+					const nvrhi::BufferHandle firstConstants = first.Constants;
+
+					assets.Publish(normalMap, bc5);
+					const GpuMaterial& compressed = cache.GetMaterial(material);
+					CHECK((compressed.Flags & MaterialFlagNormalMapTwoChannel) != 0);
+					CHECK(compressed.Generation != firstGeneration);
+					CHECK(compressed.Constants != firstConstants);
+
+					assets.Publish(normalMap, rgba8);
+					CHECK((cache.GetMaterial(material).Flags & MaterialFlagNormalMapTwoChannel) == 0);
+				}
+				gpu.GetDevice().RunGarbageCollection();
+			}
+		}
+
+		// M23 acceptance (R-TEXC-HDR, decisions 14 and 15, stream Y): a BC6H skybox cube uploads as BC6H_UFLOAT on a device with
+		// BC, and on a device without it through the decode fallback as RGBA16_FLOAT, whose texels are DecompressTextureBlocks'
+		// for every face (+X to -Z: a face read from the wrong layer fails) and close to the source's. Each face is a distinct
+		// constant colour, which BC6H holds within a few per cent. BC6HUfloat is CubeMapFormat's frozen value.
+		TEST_CASE("GpuResourceCache: a BC6H environment uploads as BC6H with BC support and through the decode fallback without it"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			constexpr uint32_t FaceSize = 8;
+			constexpr uint32_t MipCount = 4;
+			const std::array<glm::dvec3, CubeMapData::FaceCount> faceColors = { glm::dvec3(4.0, 0.5, 0.25), glm::dvec3(0.25, 4.0, 0.5),
+				glm::dvec3(0.5, 0.25, 4.0), glm::dvec3(2.0, 2.0, 0.125), glm::dvec3(0.125, 2.0, 2.0), glm::dvec3(1.0, 0.0625, 1.0) };
+			// Mip 0 of each face as RGBA16F texels, and every level's blocks in CubeMapData's order (level by level, the six
+			// faces of each in layer order).
+			std::array<Buffer, CubeMapData::FaceCount> sources{};
+			std::array<Buffer, CubeMapData::FaceCount> faceBlocks{};
+			EnvironmentData environment;
+			environment.Skybox = { .FaceSize = FaceSize, .MipCount = MipCount, .Format = CubeMapFormat::BC6HUfloat, .Texels = {} };
+			for (uint32_t level = 0; level < MipCount; ++level)
+			{
+				const uint32_t size = std::max(1U, FaceSize >> level);
+				for (uint32_t face = 0; face < CubeMapData::FaceCount; ++face)
+				{
+					Buffer texels;
+					for (uint32_t texel = 0; texel < size * size; ++texel)
+					{
+						for (const double value : { faceColors[face].x, faceColors[face].y, faceColors[face].z, 1.0 })
+						{
+							const uint16_t half = Test::DoubleToHalf(value);
+							texels.push_back(static_cast<std::byte>(half & 0xFFU));
+							texels.push_back(static_cast<std::byte>(half >> 8));
+						}
+					}
+					const Result<Buffer> blocks = CompressTextureBlocks(TextureBlockCodec::BC6H, size, size, texels);
+					REQUIRE_MESSAGE(blocks.has_value(), blocks.error().ToString());
+					if (level == 0)
+					{
+						sources[face] = texels;
+						faceBlocks[face] = *blocks;
+					}
+					environment.Skybox.Texels.insert(environment.Skybox.Texels.end(), blocks->begin(), blocks->end());
+				}
+			}
+			environment.Specular = { .FaceSize = EnvironmentData::SpecularFaceSize,
+				.MipCount = EnvironmentData::SpecularMipCount,
+				.Format = CubeMapFormat::Rgba16Float,
+				.Texels = Buffer(ComputeCubeMapByteSize(EnvironmentData::SpecularFaceSize, EnvironmentData::SpecularMipCount), std::byte{ 0 }) };
+			REQUIRE_MESSAGE(ValidateEnvironmentData(environment).has_value(), ValidateEnvironmentData(environment).error().ToString());
+			const auto asset = CreateRef<EnvironmentData>(std::move(environment));
+			// The binary16 value at byte `index` of RGBA16F texels.
+			const auto readHalf = [](std::span<const std::byte> texels, size_t index)
+			{
+				return Test::HalfToDouble(static_cast<uint16_t>(std::to_integer<uint32_t>(texels[index]) | (std::to_integer<uint32_t>(texels[index + 1]) << 8)));
+			};
+
+			for (const bool withBc : { true, false })
+			{
+				CAPTURE(withBc);
+				Test::HeadlessGpuFixture gpu({ .DisableTextureCompressionBC = !withBc });
+				ENGINE_REQUIRE_GPU(gpu);
+				Test::InMemoryAssetManager assets;
+				assets.Publish(AssetHandle(0x7E57BC6000000001ULL), asset);
+				{
+					GpuResourceCache cache(gpu.GetDevice(), assets);
+					const GpuEnvironment* mirror = cache.GetEnvironment(AssetHandle(0x7E57BC6000000001ULL));
+					REQUIRE(mirror != nullptr);
+					REQUIRE(mirror->Skybox != nullptr);
+					CHECK(mirror->SkyboxMipCount == MipCount);
+					CHECK(mirror->Skybox->getDesc().format == (withBc ? nvrhi::Format::BC6H_UFLOAT : nvrhi::Format::RGBA16_FLOAT));
+					if (!withBc)
+					{
+						Readback readback(gpu.GetDevice());
+						for (uint32_t face = 0; face < CubeMapData::FaceCount; ++face)
+						{
+							CAPTURE(face);
+							const Result<Image> image = readback.ReadTexture(*mirror->Skybox, 0, face);
+							REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
+							const Result<Buffer> expected = DecompressTextureBlocks(TextureBlockCodec::BC6H, FaceSize, FaceSize, faceBlocks[face]);
+							REQUIRE(expected.has_value());
+							CHECK(image->Pixels == *expected);
+							for (size_t channel = 0; channel < 3; ++channel)
+							{
+								const double source = readHalf(sources[face], channel * 2);
+								CHECK(std::abs(readHalf(image->Pixels, channel * 2) - source) <= 0.05 * source + 1.0 / 1024.0);
+							}
+						}
+					}
+				}
+				gpu.GetDevice().RunGarbageCollection();
+			}
+		}
+
 		TEST_CASE("GpuResourceCache: uploads a mesh and a texture through the M5 upload paths"
 			* doctest::test_suite(Test::GpuSuite))
 		{
@@ -565,6 +777,7 @@ namespace Engine {
 				CHECK(mirrored.AlphaCutoff == 0.25f);
 				CHECK(mirrored.DoubleSided);
 				CHECK_FALSE(mirrored.IsPlaceholder);
+				CHECK(mirrored.Flags == 0); // the flags its constants were written with: no emissive map
 
 				// A missing material mirrors the Error material (GetOrPlaceholder reports it once); a null handle the Default
 				// material.
@@ -574,10 +787,14 @@ namespace Engine {
 				}
 				CHECK_FALSE(cache.GetMaterial(AssetHandle()).IsPlaceholder);
 
-				// A new version rebuilds the mirror under a new generation.
+				// A new version rebuilds the mirror under a new generation, with the new version's flags.
 				const uint64_t generation = cache.GetMaterial(AssetHandle(0x9101)).Generation;
-				assets.Publish(AssetHandle(0x9101), CreateRef<MaterialData>());
-				const uint64_t rebuilt = cache.GetMaterial(AssetHandle(0x9101)).Generation;
+				auto emissive = CreateRef<MaterialData>();
+				emissive->EmissiveMap = TypedAssetHandle<AssetType::Texture>(BuiltinAssetHandles::WhiteTexture);
+				assets.Publish(AssetHandle(0x9101), emissive);
+				const GpuMaterial& rebuiltMirror = cache.GetMaterial(AssetHandle(0x9101));
+				CHECK(rebuiltMirror.Flags == MaterialFlagEmissiveMap);
+				const uint64_t rebuilt = rebuiltMirror.Generation;
 				CHECK(rebuilt != generation);
 				// A mirror released by CollectStale and built again never gets an earlier generation back (the renderer's
 				// binding sets key on it).

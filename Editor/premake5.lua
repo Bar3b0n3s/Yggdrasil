@@ -44,6 +44,7 @@ project "EditorCore"
 	UseSpdlog()
 	UseMiniaudio()
 	UseMikkTSpace()
+	UseCMPCore()
 	UseLuau(true)
 
 project "Editor"
@@ -92,4 +93,5 @@ project "Editor"
 	UseMiniaudio()
 	UseMikkTSpace()
 	UseNativeFileDialog()
+	UseCMPCore()
 	UseLuau(true)

@@ -60,12 +60,16 @@ namespace Engine {
 		uint32_t Pipeline = 0; // the scene pipeline variant's index
 		AssetHandle Material{};
 		AssetHandle Mesh{};
+		// M23 (C23.1, R-INST; Docs/Decisions/0034-m23-contract.md decision 2): the submesh's index in its mesh, so the draws
+		// of one submesh of one mesh and material are adjacent and batch into one instanced draw (GroupMeshInstances). The
+		// Prepare stage fills it with stream A; until then every key's is 0, which keeps the order of M18.
+		uint32_t Submesh = 0;
 		uint32_t DrawIndex = 0; // the draw's position before sorting (snapshot order)
 
 		bool operator==(const OpaqueSortKey&) const = default;
 	};
 
-	// Sorts by (Pipeline, Material, Mesh, DrawIndex), so equal keys keep snapshot order. Pure.
+	// Sorts by (Pipeline, Material, Mesh, Submesh, DrawIndex), so equal keys keep snapshot order. Pure.
 	void SortOpaqueDraws(std::span<OpaqueSortKey> keys);
 
 	// A draw's place in the transparent order (§8.3 pass 1: "transparent back-to-front, ties by UUID").
@@ -82,5 +86,38 @@ namespace Engine {
 	// Sorts back to front: descending ViewDepth, then ascending Entity, then ascending Submesh, then ascending DrawIndex.
 	// A non-finite ViewDepth sorts as the farthest. Pure.
 	void SortTransparentDraws(std::span<TransparentSortKey> keys);
+
+	// M23 (C23.1, R-INST; Docs/Decisions/0034-m23-contract.md decision 2): what the draws of one instanced draw share. Two
+	// submesh draws with equal keys draw the same vertices and indices with the same pipeline variant and material set, and
+	// differ only in their instance records (Shared/InstanceRecord.h).
+	struct MeshInstanceKey
+	{
+		uint32_t Pipeline = 0; // the scene pipeline variant's index (alpha mode, cull mode and the mirroring it implies)
+		AssetHandle Material{};
+		AssetHandle Mesh{};
+		uint32_t Submesh = 0;
+		// The vertices the draw reads: 0 for the mesh asset's own vertex buffers (every draw until C23.3); C23.3's Deform
+		// stage gives each deformed draw (a skinned or morphed entity's, whose deformed vertices are its own) a value of its
+		// own, so two deformed draws of one mesh and material never share an instanced draw.
+		uint32_t VertexStream = 0;
+
+		bool operator==(const MeshInstanceKey&) const = default;
+	};
+
+	// One instanced draw: Count draws from position First of a pass's draw order.
+	struct MeshInstanceBatch
+	{
+		uint32_t First = 0;
+		uint32_t Count = 0;
+
+		bool operator==(const MeshInstanceBatch&) const = default;
+	};
+
+	// Splits a pass's draws, given by their keys in the order the pass records them (the opaque order of SortOpaqueDraws,
+	// whose key gains the submesh before DrawIndex, or the transparent order of SortTransparentDraws), into instanced draws:
+	// maximal runs of adjacent draws with equal keys, in order, together covering every draw once. Recording the runs as
+	// instanced draws, each instance in its run's order, draws exactly what one draw per element would, in the same order,
+	// which is why an instanced render equals the per-draw render byte for byte. Empty keys give no batch. Pure.
+	[[nodiscard]] std::vector<MeshInstanceBatch> GroupMeshInstances(std::span<const MeshInstanceKey> keys);
 
 }

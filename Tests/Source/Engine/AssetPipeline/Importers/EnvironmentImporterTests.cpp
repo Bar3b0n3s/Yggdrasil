@@ -281,6 +281,50 @@ namespace Engine {
 			gpu.GetDevice().RunGarbageCollection();
 		}
 
+		// M23 (C23.1, A-EXR and R-TEXC-HDR; Docs/Decisions/0034-m23-contract.md decision 14, stream Y): EnvironmentImporter
+		// version 2 reads OpenEXR through tinyexr: Gradient.exr, the half-float scanline copy of Gradient.hdr's texels that
+		// stream Y's generator writes, bakes the environment Gradient.hdr bakes (Compression None: RGBA16F cubes); with
+		// Compression Auto, the default, both cubes are stored as BC6H.
+		TEST_CASE("EnvironmentImporter: Gradient.exr bakes as Gradient.hdr does, and Auto stores BC6H cubes"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			{
+				Result<Scope<EnvironmentBaker>> baker = EnvironmentBaker::Create(gpu.GetDevice(), gpu.GetPipelines());
+				REQUIRE_MESSAGE(baker.has_value(), baker.error().ToString());
+				Test::AssetTestFixture fixture;
+				Json uncompressed = DefaultSettings();
+				uncompressed["Compression"] = "None";
+				Result<Buffer> hdr = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Environments/Gradient.hdr"));
+				Result<Buffer> exr = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Environments/Gradient.exr"));
+				REQUIRE_MESSAGE(hdr.has_value(), hdr.error().ToString());
+				REQUIRE_MESSAGE(exr.has_value(), exr.error().ToString());
+				const Result<ImportResult> fromHdr = ImportEnvironment(fixture, "Gradient.hdr", *hdr, uncompressed, baker->get());
+				const Result<ImportResult> fromExr = ImportEnvironment(fixture, "Gradient.exr", *exr, uncompressed, baker->get());
+				REQUIRE_MESSAGE(fromHdr.has_value(), fromHdr.error().ToString());
+				REQUIRE_MESSAGE(fromExr.has_value(), fromExr.error().ToString());
+				const Result<AssetRef<EnvironmentData>> hdrEnvironment = LoadCookedEnvironment(fromHdr->Artifacts.front().Cooked);
+				const Result<AssetRef<EnvironmentData>> exrEnvironment = LoadCookedEnvironment(fromExr->Artifacts.front().Cooked);
+				REQUIRE(hdrEnvironment.has_value());
+				REQUIRE(exrEnvironment.has_value());
+				CHECK((*exrEnvironment)->Skybox.FaceSize == (*hdrEnvironment)->Skybox.FaceSize);
+				for (size_t coefficient = 0; coefficient < 9; ++coefficient)
+				{
+					for (int channel = 0; channel < 3; ++channel)
+						CHECK((*exrEnvironment)->IrradianceSH9[coefficient][channel] == doctest::Approx((*hdrEnvironment)->IrradianceSH9[coefficient][channel]).epsilon(1e-3));
+				}
+
+				const Result<ImportResult> compressed = ImportEnvironment(fixture, "Gradient.exr", *exr, DefaultSettings(), baker->get());
+				REQUIRE_MESSAGE(compressed.has_value(), compressed.error().ToString());
+				const Result<AssetRef<EnvironmentData>> bc6h = LoadCookedEnvironment(compressed->Artifacts.front().Cooked);
+				REQUIRE_MESSAGE(bc6h.has_value(), bc6h.error().ToString());
+				CHECK((*bc6h)->Skybox.Format == CubeMapFormat::BC6HUfloat);
+				CHECK((*bc6h)->Specular.Format == CubeMapFormat::BC6HUfloat);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
 		TEST_CASE("EnvironmentImporter: an import whose bake meets a device loss is not remembered, and imports after the recovery"
 			* doctest::test_suite(Test::GpuSuite))
 		{

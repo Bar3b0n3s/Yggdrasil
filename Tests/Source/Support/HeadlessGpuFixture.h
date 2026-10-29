@@ -56,6 +56,9 @@ namespace Engine {
 			// GraphicsSpecification::DisableDepthClamp: turns shadow pancaking off (GraphicsDeviceInfo::DepthClamp false), so
 			// shadow casters take the extended-near fallback. No Vulkan device feature is involved.
 			bool DisableDepthClamp = false;
+			// GraphicsSpecification::DisableTextureCompressionBC (M23, Docs/Decisions/0034-m23-contract.md decision 15): a device
+			// without the textureCompressionBC feature, whose BC textures upload through the decode fallback.
+			bool DisableTextureCompressionBC = false;
 			// GraphicsSpecification::ResetWaitMilliseconds: the bounded wait's reset wait for a hang and the recovery's wait
 			// between its two device creations (M18, Docs/Decisions/0029-m18-contract.md decisions 29 and 41).
 			uint32_t ResetWaitMilliseconds = DefaultGpuResetWaitMilliseconds;

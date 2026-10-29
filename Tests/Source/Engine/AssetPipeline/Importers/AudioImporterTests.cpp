@@ -148,6 +148,30 @@ namespace Engine {
 			}
 		}
 
+		// M23 (C23.1, A-OPUS; Docs/Decisions/0034-m23-contract.md decision 16, stream O): AudioImporter version 2 claims .opus
+		// and imports an Ogg Opus file, by its content, as an AudioClipData version 2 clip whose encoding is Opus (5, decision
+		// 16's value), with the original bytes, 48 kHz (Opus's decoding rate) and the file's channel count; it streams, being
+		// longer than 10 seconds.
+		TEST_CASE("AudioImporter: an Ogg Opus file imports with its original bytes as an Opus clip" * doctest::skip(true))
+		{
+			constexpr auto OpusEncoding = static_cast<AudioClipEncoding>(5);
+			CHECK(AudioImporter::Version == 2);
+			CHECK(AudioClipData::FormatVersion == 2);
+			Test::AssetTestFixture fixture;
+			const IAssetImporter* registered = fixture.GetImporters().FindForExtension(".opus");
+			REQUIRE(registered != nullptr);
+			CHECK(registered->GetId() == AudioImporter::Id);
+			const Buffer bytes = ReadFixture("Assets/Audio/Water.opus");
+			const Result<ImportResult> imported = ImportAudio(fixture, "Water.opus", bytes);
+			REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+			const AssetRef<AudioClipData> clip = LoadClip(*imported);
+			CHECK(clip->Encoding == OpusEncoding);
+			CHECK(clip->Bytes == bytes);
+			CHECK(clip->SampleRate == 48000);
+			CHECK(clip->ChannelCount == 2);
+			CHECK(clip->Stream);
+		}
+
 		TEST_CASE("AudioImporter: Auto streams clips longer than 10 seconds")
 		{
 			Test::AssetTestFixture fixture;

@@ -10,7 +10,9 @@
 #include "Engine/Renderer/DepthPyramidPass.h"
 #include "Engine/Renderer/FxaaPass.h"
 #include "Engine/Renderer/GtaoPass.h"
+#include "Engine/Renderer/LightClusters.h"
 #include "Engine/Renderer/PassBindingCache.h"
+#include "Engine/Renderer/PointShadowMaps.h"
 #include "Engine/Renderer/Private/ForwardPipelines.h"
 #include "Engine/Renderer/Private/MaterialBindingCache.h"
 #include "Engine/Renderer/QuadBatcher.h"
@@ -26,6 +28,8 @@
 #include "Engine/Renderer/UpscalePass.h"
 #include "Shared/DrawConstants.h"
 #include "Shared/EnvironmentConstants.h"
+#include "Shared/InstanceRecord.h"
+#include "Shared/LightClusterConstants.h"
 #include "Shared/ShaderLight.h"
 #include "Shared/ShadowConstants.h"
 #include "Shared/ViewConstants.h"
@@ -96,6 +100,11 @@ namespace Engine {
 			nvrhi::TextureHandle SpotAtlas{};
 			std::vector<nvrhi::FramebufferHandle> CascadeFramebuffers{}; // ShadowPass::CreateFramebuffers(Cascades)
 			nvrhi::FramebufferHandle SpotAtlasFramebuffer{};
+			// M23 (C23.1, Docs/Decisions/0034-m23-contract.md decision 3; stream B): the PointShadowMaps cube array (6 x
+			// MaxPointShadowLights layers of GetPointShadowFaceSize texels, the Shadows declaration's depth format), created
+			// while a point light is planned, and one framebuffer per face layer.
+			nvrhi::TextureHandle PointShadowMaps{};
+			std::vector<nvrhi::FramebufferHandle> PointShadowFramebuffers{};
 			nvrhi::TextureHandle SelectionMask{};
 			nvrhi::TextureHandle SelectionScratch{};
 			nvrhi::TextureHandle Overdraw{};
@@ -180,6 +189,10 @@ namespace Engine {
 			ShadowConstants Shadow{};
 			ShadowCascadeSet Cascades{};
 			SpotShadowAtlas Spots{};
+			// M23 (C23.1, decisions 3 and 5; streams B and C): the point-shadow plan (ShadowConstants' Points), and the cluster
+			// grid the LightClusters pass and the forward passes read (LightClusterConstants b3).
+			PointShadowSet Points{};
+			LightClusterGrid Clusters{};
 			nvrhi::TextureHandle EnvironmentSpecular{};
 			nvrhi::TextureHandle EnvironmentSkybox{};
 			nvrhi::TextureHandle BlueNoise{};
@@ -313,6 +326,13 @@ namespace Engine {
 		nvrhi::BufferHandle ViewConstantsBuffer{};
 		nvrhi::BufferHandle EnvironmentConstantsBuffer{};
 		nvrhi::BufferHandle LightBuffer{};
+		// M23 (C23.1, Docs/Decisions/0034-m23-contract.md decisions 2 and 5): the mesh path's per-view buffers (the placement
+		// rule's place 2), null until their streams create them: the Instances structured buffer of InstanceRecord (stream
+		// A: t10 of set 0, grown to the view's instance count), the cluster masks (stream C: t11 of set 0, the LightClusters
+		// pass's u0) and the cluster grid's constants (stream C: b3 of set 0).
+		nvrhi::BufferHandle InstanceBuffer{};
+		nvrhi::BufferHandle LightClusterBuffer{};
+		nvrhi::BufferHandle LightClusterConstantsBuffer{};
 		// M18 (C18.3, decision 26): the renderer's registration with its device's recreation registry (Create); kept by
 		// ReleaseGpuObjects like the back-references.
 		GpuRecreationRegistration Recreation{};
@@ -321,6 +341,10 @@ namespace Engine {
 		std::vector<Detail::SceneRendererDraw> TransparentDraws{};
 		std::vector<ShaderLight> Lights{};
 		bool LightLimitLogged = false; // RENDER_LIGHT_LIMIT_EXCEEDED is logged once per renderer
+		// M23 (C23.1): the view's instance records, reused by every Render (stream A), and RENDER_POINT_SHADOW_BUDGET logged
+		// once per renderer (stream B).
+		std::vector<InstanceRecord> Instances{};
+		bool PointShadowLimitLogged = false;
 		SceneRenderStats Stats{};
 		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 44): the debug view the last Render recorded (Lit before the
 		// first), which a Render records instead of a debug view whose first pipelines ran out of memory after their trim and

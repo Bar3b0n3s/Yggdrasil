@@ -116,6 +116,23 @@ namespace Engine {
 		[[nodiscard]] double HalfToDouble(uint16_t half);
 		[[nodiscard]] uint16_t DoubleToHalf(double value);
 
+		// --- Point-light shadows (§8.7; M23, Docs/Decisions/0034-m23-contract.md decision 3) --------------------------------
+
+		// One triangle of an occluder, in world space.
+		struct ReferenceTriangle
+		{
+			glm::dvec3 A = glm::dvec3(0.0);
+			glm::dvec3 B = glm::dvec3(0.0);
+			glm::dvec3 C = glm::dvec3(0.0);
+		};
+
+		// Whether a point light at `light` reaches `receiver` directly: true unless the segment between them crosses a
+		// triangle of `occluders` (either face, edges included; a crossing within a millionth of the segment of either end
+		// does not count, so a receiver on an occluder's surface is not hidden by it, and a segment in a triangle's plane
+		// crosses nothing). The oracle of point-light shadow visibility: exact geometry, without the shadow map's bias,
+		// resolution or filtering, so a test compares it with the renderer away from shadow edges.
+		[[nodiscard]] bool IsPointLightVisible(const glm::dvec3& receiver, const glm::dvec3& light, std::span<const ReferenceTriangle> occluders);
+
 	}
 
 }

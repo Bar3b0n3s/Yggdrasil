@@ -131,6 +131,28 @@ namespace Engine {
 			CHECK(*saved == *golden);
 		}
 
+		// M23 (C23.1, R-PLS; Docs/Decisions/0034-m23-contract.md decision 3, stream B): PointLight version 2 adds CastShadows
+		// (false) between Range and SourceRadius, as SpotLight orders them; a version 1 component loads with it false and saves
+		// as the upgraded fixture.
+		TEST_CASE("Migrations: PointLightV1 fixture upgrades to version 2" * doctest::skip(true))
+		{
+			const Result<std::string> legacy = Test::ReadTestDataText("Formats/Scene/PointLightV1.scene");
+			const Result<std::string> golden = Test::ReadTestDataText("Formats/Scene/PointLightV1.upgraded.scene");
+			REQUIRE(legacy.has_value());
+			REQUIRE(golden.has_value());
+
+			Test::SceneTestFixture setup;
+			LoadReport report;
+			const Status loaded = SceneSerializer::LoadFromString(setup.GetScene(), *legacy, LoadOptions{}, report);
+			REQUIRE_MESSAGE(loaded.has_value(), (loaded ? std::string() : loaded.error().ToString()));
+			CHECK(report.FileVersion == 1);
+			CHECK(report.Migrated);
+
+			const Result<std::string> saved = SceneSerializer::SaveToString(setup.GetScene());
+			REQUIRE(saved.has_value());
+			CHECK(*saved == *golden);
+		}
+
 		// The Script overrides follow only the upgrade of the Script component itself: a document whose Script component is
 		// at version 2 keeps its overrides as they are, whatever their Field.
 		TEST_CASE("Migrations: prefab overrides of a current Script component are not rewritten")

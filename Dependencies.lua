@@ -79,6 +79,7 @@ IncludeDir["stb"] = RepositoryRoot .. "/Vendor/stb"
 IncludeDir["MikkTSpace"] = RepositoryRoot .. "/Vendor/MikkTSpace"
 IncludeDir["nfd"] = RepositoryRoot .. "/Vendor/nativefiledialog-extended/src/include"
 IncludeDir["doctest"] = RepositoryRoot .. "/Vendor/doctest"
+IncludeDir["CMP_Core"] = RepositoryRoot .. "/Vendor/CMP_Core/cmp_core/source"
 
 -- Project kinds that produce a linked binary and therefore link libraries.
 local LinkingKinds = "kind:ConsoleApp or WindowedApp or SharedLib"
@@ -404,6 +405,20 @@ function UseImGui()
 	filter {}
 end
 
+-- Compressonator CMP_Core (Vendor/CMP_Core/VENDOR.md): the BC1, BC4, BC5, BC6H and BC7 block codecs of texture
+-- compression (M23, Docs/Decisions/0034-m23-contract.md decision 13). No defines: cmp_core.h's two macros, CMP_CDECL and
+-- CMP_DEFAULTNULL, keep their defaults. Engine takes the include directory: its Asset/TextureCompression.cpp alone
+-- includes cmp_core.h (Scripts/ModuleRules.json), whose encoder the editor's importers use and whose decoder the Runtime's
+-- device without BC support uses, so every executable links the library.
+function UseCMPCore()
+	externalincludedirs { IncludeDir.CMP_Core }
+
+	filter { LinkingKinds }
+		links { "CMP_Core" }
+
+	filter {}
+end
+
 -- The libraries the Runtime's code is compiled against (and, in an executable, linked with): the RuntimeCore library
 -- and the Runtime executable (Runtime/premake5.lua), and a game's native module and the Runtime linked with it
 -- (Scripts/Premake/NativeModule.lua; Docs/Decisions/0030-m19-contract.md decision 30), so a module's code compiles with
@@ -416,6 +431,7 @@ function UseRuntimeDependencies()
 	UseSpdlog()
 	UseMiniaudio()
 	UseMikkTSpace()
+	UseCMPCore()
 	UseLuau(false)
 end
 

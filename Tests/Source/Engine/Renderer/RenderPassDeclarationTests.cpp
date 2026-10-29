@@ -105,11 +105,12 @@ namespace Engine {
 		TEST_CASE("RenderPassDeclarations: the stats order puts game Text before the upscale and the editor overlays after it")
 		{
 			// M17's order (§8.3) with Text moved to the SceneOverlay stage, the output stage's Upscale after it, the labels
-			// after the other editor overlays and the letterbox repaint last; a frozen contract of stats.get.
-			constexpr std::array<std::string_view, 25> Expected = { "Prepare", "DirectionalShadows", "SpotShadows", "DepthNormal", "DepthPyramid", "GTAO",
-				"GTAODenoiseHorizontal", "GTAODenoiseVertical", "ForwardOpaque", "Skybox", "ForwardTransparent", "Overdraw", "Bloom", "Tonemap", "FXAA",
-				"Text", "Upscale", "SelectionMask", "SelectionDilateHorizontal", "SelectionDilateVertical", "SelectionComposite", "Wireframe",
-				"Overlays", "Labels", "Letterbox" };
+			// after the other editor overlays and the letterbox repaint last; M23's PointShadows after SpotShadows and
+			// LightClusters after the GTAO denoise (phase 2's ledger, ADR 0028); a frozen contract of stats.get.
+			constexpr std::array<std::string_view, 27> Expected = { "Prepare", "DirectionalShadows", "SpotShadows", "PointShadows", "DepthNormal",
+				"DepthPyramid", "GTAO", "GTAODenoiseHorizontal", "GTAODenoiseVertical", "LightClusters", "ForwardOpaque", "Skybox", "ForwardTransparent",
+				"Overdraw", "Bloom", "Tonemap", "FXAA", "Text", "Upscale", "SelectionMask", "SelectionDilateHorizontal", "SelectionDilateVertical",
+				"SelectionComposite", "Wireframe", "Overlays", "Labels", "Letterbox" };
 			REQUIRE(RenderStatsOrder.size() == Expected.size());
 			for (size_t index = 0; index < Expected.size(); ++index)
 				CHECK(RenderStatsOrder[index] == Expected[index]);
@@ -139,6 +140,8 @@ namespace Engine {
 			CHECK(GetDeclaredPipelineCountOf("Wireframe") == 0);
 			CHECK(GetDeclaredPipelineCountOf("Labels") == 0);
 			CHECK(GetDeclaredPipelineCountOf("Letterbox") == 0);
+			// M23: the point shadows draw with the Shadows declaration's caster pipelines.
+			CHECK(GetDeclaredPipelineCountOf("PointShadows") == 0);
 		}
 	}
 

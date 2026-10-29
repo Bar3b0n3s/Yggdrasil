@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/App/ProcessContext.h"
 
+#include "Engine/Asset/TextureCompression.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Log.h"
@@ -24,12 +25,13 @@ namespace Engine {
 		// The live context, read by the fatal-error handler on whichever thread fails (process-level state, §3 rule 5).
 		static std::atomic<ProcessContext*> s_CurrentProcessContext{ nullptr };
 
-		constexpr std::array<ProcessContextStep, 7> ProcessContextSteps = {
+		constexpr std::array<ProcessContextStep, 8> ProcessContextSteps = {
 			ProcessContextStep::Log,
 			ProcessContextStep::Profiler,
 			ProcessContextStep::CrashHandler,
 			ProcessContextStep::Scripting,
 			ProcessContextStep::Physics,
+			ProcessContextStep::TextureCodecs,
 			ProcessContextStep::VulkanLoader,
 			ProcessContextStep::Glfw,
 		};
@@ -158,6 +160,12 @@ namespace Engine {
 				ENGINE_TRY(PhysicsEngine::Initialize(m_Specification.Physics));
 				break;
 			}
+			case ProcessContextStep::TextureCodecs:
+			{
+				// CMP_Core's scalar codecs and BC7 tables, before any import worker compresses a texture.
+				InitializeTextureCodecs();
+				break;
+			}
 			case ProcessContextStep::VulkanLoader:
 			{
 				Status loaded = VulkanDispatch::Initialize();
@@ -209,6 +217,9 @@ namespace Engine {
 			case ProcessContextStep::Scripting:
 				ShutdownScriptingRuntime();
 				break;
+			case ProcessContextStep::TextureCodecs:
+				// CMP_Core's state needs no teardown.
+				break;
 			case ProcessContextStep::VulkanLoader:
 				VulkanDispatch::Shutdown();
 				m_IsVulkanLoaderAvailable = false;
@@ -258,13 +269,14 @@ namespace Engine {
 	{
 		switch (step)
 		{
-			case ProcessContextStep::Log:          return "Log";
-			case ProcessContextStep::Profiler:     return "Profiler";
-			case ProcessContextStep::CrashHandler: return "CrashHandler";
-			case ProcessContextStep::Scripting:    return "Scripting";
-			case ProcessContextStep::Physics:      return "Physics";
-			case ProcessContextStep::VulkanLoader: return "VulkanLoader";
-			case ProcessContextStep::Glfw:         return "Glfw";
+			case ProcessContextStep::Log:           return "Log";
+			case ProcessContextStep::Profiler:      return "Profiler";
+			case ProcessContextStep::CrashHandler:  return "CrashHandler";
+			case ProcessContextStep::Scripting:     return "Scripting";
+			case ProcessContextStep::Physics:       return "Physics";
+			case ProcessContextStep::TextureCodecs: return "TextureCodecs";
+			case ProcessContextStep::VulkanLoader:  return "VulkanLoader";
+			case ProcessContextStep::Glfw:          return "Glfw";
 		}
 
 		ENGINE_CORE_ASSERT(false, "Unknown ProcessContextStep {}", std::to_underlying(step));

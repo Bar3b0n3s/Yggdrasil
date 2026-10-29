@@ -38,6 +38,16 @@
 
 namespace Engine {
 
+	// M23 (C23.1, R-TEXC-HDR; Docs/Decisions/0034-m23-contract.md decision 14): how a cube's texels are stored, persisted in
+	// EnvironmentData version 2's payload (append only). Rgba16Float is version 1's only format; BC6HUfloat holds each face
+	// level as BC6H blocks (Asset/TextureCompression.h, 16 bytes a 4 x 4 block, rows of blocks top first), which the GPU
+	// samples as BC6H_UFLOAT, or the decode fallback decompresses to RGBA16F on a device without BC support.
+	enum class CubeMapFormat : uint8_t
+	{
+		Rgba16Float,
+		BC6HUfloat
+	};
+
 	// A cube map with a mip chain of RGBA16_FLOAT texels (8 bytes each: four IEEE 754 binary16 values, little-endian).
 	// Texels are laid out level by level from mip 0; each level holds the six faces in the order +X, -X, +Y, -Y, +Z, -Z
 	// (Vulkan's layer order); each face holds max(1, FaceSize >> level) rows of as many texels, top row first.
@@ -48,6 +58,9 @@ namespace Engine {
 
 		uint32_t FaceSize = 0; // edge length of mip 0 in texels
 		uint32_t MipCount = 0; // 1 to the full chain
+		// M23 (C23.1, EnvironmentData version 2): stream Y stores, sizes and validates BC6HUfloat levels with version 2's
+		// payload; until then every cube is Rgba16Float.
+		CubeMapFormat Format = CubeMapFormat::Rgba16Float;
 		Buffer Texels{};
 	};
 

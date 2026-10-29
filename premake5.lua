@@ -81,6 +81,7 @@ group "Dependencies"
 	include "Vendor/MikkTSpace"
 	include "Vendor/nativefiledialog-extended"
 	include "Vendor/spdlog"
+	include "Vendor/CMP_Core"
 
 group "Engine"
 	include "Engine"

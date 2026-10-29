@@ -41,6 +41,10 @@ namespace Engine {
 	struct GpuMesh
 	{
 		nvrhi::BufferHandle VertexBuffer{};
+		// M23 (C23.1, C-MESH2; Docs/Decisions/0034-m23-contract.md decision 9): vertex binding 1, MeshVertexAttributes (24
+		// bytes each): the mesh's attribute stream, or the cache's shared default stream (TexCoord1 (0, 0), opaque white)
+		// for a mesh without one, at least VertexCount entries. Stream M creates it; null until then.
+		nvrhi::BufferHandle AttributeBuffer{};
 		nvrhi::BufferHandle IndexBuffer{};
 		uint32_t VertexCount = 0;
 		uint32_t IndexCount = 0;
@@ -75,6 +79,11 @@ namespace Engine {
 		Engine::AlphaMode AlphaMode = Engine::AlphaMode::Opaque; // the type is spelled Engine:: (GCC's "changes meaning")
 		float AlphaCutoff = 0.5f;
 		bool DoubleSided = false;
+		// The Flags of Constants (Shared/MaterialConstants.h) as the mirror wrote them. M23 (C23.1, decision 10 of
+		// Docs/Decisions/0034-m23-contract.md, stream X): MaterialFlagNormalMapTwoChannel follows the bound normal map's
+		// TextureFormat (BC5Unorm), so when a texture change alone changes a flag (a placeholder replaced by a BC5 texture, a
+		// Compression setting changed), the mirror writes new constants and takes a new Generation, never keeping stale ones.
+		uint32_t Flags = 0;
 		uint64_t Version = 0; // the material asset's version it mirrors
 		// A new value whenever the mirror is built or rebuilt (a new material version, or a new version of one of its
 		// textures), from one counter of the cache that only increases (starting at 1), so no Generation is ever reused

@@ -102,6 +102,9 @@
 		],
 		"doctest": [
 			"Vendor/doctest"
+		],
+		"CMP_Core": [
+			"Vendor/CMP_Core/cmp_core/source"
 		]
 	},
 	"GlobalThirdParty": {
@@ -259,16 +262,20 @@
 				"Reflection",
 				"Platform"
 			],
-			"Notes": "M19 (Docs/Decisions/0030-m19-contract.md decision 17): the pak entry codec (Asset/PakCompression.cpp) is the module's one third-party user, private: stb_image.h's inflate and stb_image_write.h's deflate, whose implementation is Graphics' (Docs/Decisions/0009-m5-decisions.md decision 11), so the Runtime's PakReader and the editor's PakWriter share one pair.",
+			"Notes": "M19 (Docs/Decisions/0030-m19-contract.md decision 17): the pak entry codec (Asset/PakCompression.cpp) is a third-party user, private: stb_image.h's inflate and stb_image_write.h's deflate, whose implementation is Graphics' (Docs/Decisions/0009-m5-decisions.md decision 11), so the Runtime's PakReader and the editor's PakWriter share one pair. M23 (Docs/Decisions/0034-m23-contract.md): the texture block codec (Asset/TextureCompression.cpp) is the other, private: CMP_Core's BC1, BC4, BC5, BC6H and BC7 encoders, which the editor's importers use, and its decoders, which a device without BC support uses in the Runtime too, so both share one codec.",
 			"ThirdParty": {
 				"Public": [],
 				"Private": [
-					"stb"
+					"stb",
+					"CMP_Core"
 				]
 			},
 			"RestrictedThirdParty": {
 				"stb": [
 					"Engine/Source/Engine/Asset/PakCompression.cpp"
+				],
+				"CMP_Core": [
+					"Engine/Source/Engine/Asset/TextureCompression.cpp"
 				]
 			}
 		},

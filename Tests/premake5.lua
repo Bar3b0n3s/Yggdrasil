@@ -79,4 +79,5 @@ project "Tests"
 	UseMiniaudio()
 	UseMikkTSpace()
 	UseNativeFileDialog()
+	UseCMPCore()
 	UseLuau(true)

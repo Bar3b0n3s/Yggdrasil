@@ -135,6 +135,11 @@ namespace Engine {
 		// every device. Honoured in every configuration, with no command-line option, so callers can deterministically
 		// exercise the extended-near shadow fallback.
 		bool DisableDepthClamp = false;
+		// M23 (C23.1, R-TEXC-BC; Docs/Decisions/0034-m23-contract.md decision 15): turns GraphicsDeviceInfo::TextureCompressionBC
+		// off, so the device is created without the textureCompressionBC feature and the GpuResourceCache uploads BC
+		// textures through the decode fallback. Honoured in every configuration, with no command-line option, like
+		// DisableDepthClamp, so tests exercise the fallback on a device that has the feature.
+		bool DisableTextureCompressionBC = false;
 		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 29; C18.4, decisions 40 and 41): the reset wait, the one
 		// setting of the operating system's GPU reset window. A bounded wait whose 10 s budget timed out waits up to this long
 		// more, in GpuWaitSliceNanoseconds slices, for a loss report before the hang is fatal (WaitForSubmission, FramePacer.h),

@@ -30,6 +30,7 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
@@ -456,6 +457,45 @@ namespace Engine {
 			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
 			CHECK(setup.Renderer().GetWidth() == 64);
 			CHECK(setup.Pipelines().GetGeneration() == 2); // Create, then CreatePipelines in the recovery
+		}
+
+		// M23 (C23.1, Docs/Decisions/0034-m23-contract.md decisions 2, 3, 5 and 7; streams A, B and C): the mesh path's new
+		// GPU objects follow the placement rule (the instance buffer, the cluster masks and constants and the point-shadow
+		// cube array in the renderer's state, the LightClusters pipeline in the pipeline set), so a loss with instanced
+		// draws, a shadow-casting point light and the clustered loop recovers byte-identically, and the recovered renderer
+		// records the PointShadows and LightClusters passes again.
+		TEST_CASE("SceneRenderer: a device loss recreates the instances, the clusters and the point shadows and renders the same image"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			uint64_t frame = 30;
+			Test::DeviceLossTest test;
+			test.Owners = { "GpuResourceCache", "SceneRendererPipelines", "SceneRenderer" };
+			test.Use = [&device, &setup, &frame]()
+			{
+				RenderSnapshot snapshot = setup.Snapshot();
+				snapshot.FrameIndex = ++frame;
+				snapshot.Meshes.clear();
+				for (int index = 0; index < 4; ++index)
+				{
+					const glm::vec3 position(static_cast<float>(index) - 1.5f, 0.0f, -4.0f);
+					snapshot.Meshes.push_back({ .World = glm::translate(glm::mat4(1.0f), position) * glm::scale(glm::mat4(1.0f), glm::vec3(0.4f)),
+						.Mesh = UUID(8910),
+						.Materials = { UUID(8911) } });
+				}
+				snapshot.Lights = { { .Type = RenderLightType::Point, .Intensity = 20.0f, .Position = glm::vec3(0.0f, 0.0f, -2.0f), .Range = 6.0f, .CastShadows = true, .Entity = UUID(77) } };
+				return Test::RenderAndRead(device, setup, snapshot);
+			};
+			const Result<Test::DeviceLossReport> report = Test::RunDeviceLossTest(gpu, test);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			std::vector<std::string> rows;
+			for (const RenderPassStats& pass : setup.Renderer().GetRenderStats().Passes)
+				rows.push_back(pass.Name);
+			CHECK(std::ranges::find(rows, "PointShadows") != rows.end());
+			CHECK(std::ranges::find(rows, "LightClusters") != rows.end());
 		}
 
 		TEST_CASE("SceneRenderer: Release forgets a pending render and its picks, and Recreate restores the final texture"

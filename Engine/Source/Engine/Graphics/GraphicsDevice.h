@@ -60,6 +60,10 @@ namespace Engine {
 		// emulated in the shader, no Vulkan feature): true unless GraphicsSpecification::DisableDepthClamp.
 		bool DepthClamp = false;
 		bool FillModeNonSolid = false;
+		// M23 (C23.1, decision 15): the device's textureCompressionBC feature, enabled, unless
+		// GraphicsSpecification::DisableTextureCompressionBC: BC textures upload as they are; without it the GpuResourceCache
+		// decompresses them (Asset/TextureCompression.h). Stream X queries and enables the feature; false until then.
+		bool TextureCompressionBC = false;
 		bool PortabilitySubset = false;
 		// Bloom's storage format: R11G11B10_FLOAT, or RGBA16_FLOAT when unsupported as storage (DeviceSelection.h).
 		nvrhi::Format BloomFormat = nvrhi::Format::R11G11B10_FLOAT;

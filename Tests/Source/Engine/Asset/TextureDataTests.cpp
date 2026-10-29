@@ -192,6 +192,33 @@ namespace Engine {
 			if (Test::IsFuzzSample(run.Range))
 				CHECK(run.Counts.Rejected > 0);
 		}
+
+		// M23 (C23.1, R-TEXC-BC; Docs/Decisions/0034-m23-contract.md decision 13, stream X): TextureData version 2 takes the BC
+		// formats, whose levels are block-sized (Asset/TextureCompression.h: ceil(w / 4) * ceil(h / 4) blocks) and may have
+		// any size; a BC level of the wrong size is refused. BC7Unorm is the value decision 13 freezes.
+		TEST_CASE("TextureData: a version 2 payload holds BC levels sized by their blocks" * doctest::skip(true))
+		{
+			constexpr auto BC7Unorm = static_cast<TextureFormat>(8);
+			CHECK(TextureData::FormatVersion == 2);
+			TextureData texture;
+			texture.Format = BC7Unorm;
+			texture.Width = 5;
+			texture.Height = 3;
+			texture.Mips = { { .Width = 5, .Height = 3, .Offset = 0, .Size = 32 }, { .Width = 2, .Height = 1, .Offset = 32, .Size = 16 },
+				{ .Width = 1, .Height = 1, .Offset = 48, .Size = 16 } };
+			texture.Pixels.assign(64, std::byte{ 0x5A });
+			REQUIRE_MESSAGE(ValidateTextureData(texture).has_value(), ValidateTextureData(texture).error().ToString());
+			const Buffer payload = SerializeTexturePayload(texture);
+			const Result<TextureData> read = DeserializeTexturePayload(payload);
+			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
+			CHECK(read->Format == BC7Unorm);
+			CHECK(read->Mips == texture.Mips);
+			CHECK(read->Pixels == texture.Pixels);
+
+			TextureData wrong = texture;
+			wrong.Mips[0].Size = 5 * 3 * 4;
+			CHECK_FALSE(ValidateTextureData(wrong).has_value());
+		}
 	}
 
 }

@@ -1,0 +1,32 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "PointLightV1",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"PointLight": 1
+	},
+	"Entities": [
+		{
+			"ID": "7a1c3e5f20b4d608",
+			"Name": "Lamp",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 2, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [1, 0.5, 0.25],
+					"Intensity": 20,
+					"Range": 12,
+					"SourceRadius": 0.1
+				}
+			}
+		}
+	]
+}

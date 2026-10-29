@@ -35,6 +35,15 @@ namespace Engine {
 		Blend
 	};
 
+	// M23 (C23.1, Material version 2; Docs/Decisions/0034-m23-contract.md decision 10): registry enum "TextureCoordinateSet",
+	// the texture coordinates a map samples (glTF textureInfo.texCoord 0 or 1): UV0, the mesh's TexCoord (MeshVertex), or
+	// UV1, its second set (MeshVertexAttributes::TexCoord1; (0, 0) on a mesh without the attribute stream).
+	enum class TextureCoordinateSet : uint8_t
+	{
+		UV0,
+		UV1
+	};
+
 	// A PBR metallic-roughness material (§6.5, §8.5), registry struct "Material". Every field is serialized under its member
 	// name, in member order, after "Format": "Material" and "Version": 1. Texture slots are null for "no texture" (the
 	// renderer binds White, FlatNormal or Black then, §8.4). Defaults and bounds (also enforced on every write path, §5.4):
@@ -59,16 +68,23 @@ namespace Engine {
 
 		glm::vec4 BaseColor{ 1.0f, 1.0f, 1.0f, 1.0f };
 		TypedAssetHandle<AssetType::Texture> BaseColorMap{};
+		// M23 (Material version 2, decision 10): each map's texture coordinate set follows its map; stream M registers them
+		// (until then they are UV0 and never written).
+		Engine::TextureCoordinateSet BaseColorUVSet = Engine::TextureCoordinateSet::UV0;
 		float Metallic = 0.0f;
 		float Roughness = 0.5f;
 		TypedAssetHandle<AssetType::Texture> MetallicRoughnessMap{}; // G = roughness, B = metallic (glTF)
-		TypedAssetHandle<AssetType::Texture> NormalMap{};            // tangent space
+		Engine::TextureCoordinateSet MetallicRoughnessUVSet = Engine::TextureCoordinateSet::UV0;
+		TypedAssetHandle<AssetType::Texture> NormalMap{}; // tangent space
+		Engine::TextureCoordinateSet NormalUVSet = Engine::TextureCoordinateSet::UV0;
 		float NormalScale = 1.0f;
 		TypedAssetHandle<AssetType::Texture> OcclusionMap{}; // R
+		Engine::TextureCoordinateSet OcclusionUVSet = Engine::TextureCoordinateSet::UV0;
 		float OcclusionStrength = 1.0f;
 		glm::vec3 Emissive{ 0.0f, 0.0f, 0.0f };
 		float EmissiveStrength = 1.0f;
 		TypedAssetHandle<AssetType::Texture> EmissiveMap{};
+		Engine::TextureCoordinateSet EmissiveUVSet = Engine::TextureCoordinateSet::UV0;
 		Engine::AlphaMode AlphaMode = Engine::AlphaMode::Opaque; // the type is spelled Engine:: (GCC's "changes meaning", ADR 0006)
 		float AlphaCutoff = 0.5f;
 		bool DoubleSided = false;

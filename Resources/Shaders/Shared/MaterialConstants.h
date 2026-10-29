@@ -29,6 +29,26 @@ inline constexpr uint32_t MaterialAlphaModeBlend = 2;
 inline constexpr uint32_t MaterialFlagEmissiveMap = 1;
 #endif
 
+	// M23 (C23.1, Material version 2 and BC compression; Docs/Decisions/0034-m23-contract.md decisions 10 and 13): a map
+	// whose bit is set samples the second texture coordinate set (MaterialData's <Map>UVSet UV1, MeshVertexAttributes'
+	// TexCoord1); MaterialFlagNormalMapTwoChannel marks a normal map stored in two channels (BC5: x and y in R and G), whose
+	// z the shader reconstructs as sqrt(saturate(1 - x² - y²)), set from the normal map's TextureFormat (GpuResourceCache).
+#if defined(ENGINE_SHADER)
+	static const uint MaterialFlagBaseColorUV1 = 2;
+	static const uint MaterialFlagMetallicRoughnessUV1 = 4;
+	static const uint MaterialFlagNormalUV1 = 8;
+	static const uint MaterialFlagOcclusionUV1 = 16;
+	static const uint MaterialFlagEmissiveUV1 = 32;
+	static const uint MaterialFlagNormalMapTwoChannel = 64;
+#else
+inline constexpr uint32_t MaterialFlagBaseColorUV1 = 2;
+inline constexpr uint32_t MaterialFlagMetallicRoughnessUV1 = 4;
+inline constexpr uint32_t MaterialFlagNormalUV1 = 8;
+inline constexpr uint32_t MaterialFlagOcclusionUV1 = 16;
+inline constexpr uint32_t MaterialFlagEmissiveUV1 = 32;
+inline constexpr uint32_t MaterialFlagNormalMapTwoChannel = 64;
+#endif
+
 	// The per-material constants: b0 of descriptor set 1 (§8.4), one buffer per material mirror (GpuResourceCache::GetMaterial,
 	// written once per material version). The factors of the glTF 2.0 metallic-roughness model (§8.5, MaterialData), each
 	// multiplied in the shader with its map of set 1 (an empty slot binds White, FlatNormal or Black, so the factor alone

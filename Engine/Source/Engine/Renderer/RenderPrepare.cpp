@@ -208,7 +208,8 @@ namespace Engine {
 	{
 		std::ranges::sort(keys, [](const OpaqueSortKey& left, const OpaqueSortKey& right)
 		{
-			return std::tie(left.Pipeline, left.Material, left.Mesh, left.DrawIndex) < std::tie(right.Pipeline, right.Material, right.Mesh, right.DrawIndex);
+			return std::tie(left.Pipeline, left.Material, left.Mesh, left.Submesh, left.DrawIndex)
+				< std::tie(right.Pipeline, right.Material, right.Mesh, right.Submesh, right.DrawIndex);
 		});
 	}
 
@@ -227,6 +228,13 @@ namespace Engine {
 				return leftDepth > rightDepth;
 			return std::tie(left.Entity, left.Submesh, left.DrawIndex) < std::tie(right.Entity, right.Submesh, right.DrawIndex);
 		});
+	}
+
+	std::vector<MeshInstanceBatch> GroupMeshInstances(std::span<const MeshInstanceKey> /*keys*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		// M23 instancing contract (Docs/Decisions/0034-m23-contract.md decision 2, stream A): no batch until then.
+		return {};
 	}
 
 }

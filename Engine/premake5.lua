@@ -111,6 +111,7 @@ project "Engine"
 	UseMiniaudio()
 	UseMikkTSpace()
 	UseNativeFileDialog()
+	UseCMPCore()
 	UseLuau(false)
 
 	if UseShadersProject then
