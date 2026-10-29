@@ -2635,6 +2635,64 @@
 			"timeoutSeconds": 900
 		},
 		{
+			"name": "ui_tree",
+			"method": "ui.tree",
+			"description": "Shows the scene's UI laid out in scene pixels: every canvas and element with its rectangle, clip, visibility, components and text, as a compact text outline or a flat JSON list, optionally for one canvas and to a depth.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "UiTreeParams",
+				"description": "The params of ui.tree.",
+				"type": "object",
+				"properties": {
+					"canvas": {
+						"description": "An entity with a UiCanvas whose UI alone is listed; omitted: every canvas.",
+						"type": "string"
+					},
+					"depth": {
+						"description": "The most levels listed below each canvas; 0: unlimited.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"format": {
+						"description": "Text: a compact outline; Json: a flat list of entries.",
+						"enum": ["Text", "Json"]
+					},
+					"width": {
+						"description": "The scene resolution's width to lay out at, with height; omitted: the play session's own, or the project's window size for the edit scene.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 16384
+					},
+					"height": {
+						"description": "The scene resolution's height to lay out at, with width.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 16384
+					},
+					"target": {
+						"description": "The scene to read; omitted: the play scene while playing, else the edit scene.",
+						"enum": ["Edit", "Play"]
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
 			"name": "viewport_screenshot",
 			"method": "viewport.screenshot",
 			"description": "Renders a view of the target scene afresh at width x height (the game view through the primary camera, the editor's scene view, or a camera entity), downscales it to maxDimension and writes it as a PNG whose path the result names. Needs a renderer (not --renderer none).",

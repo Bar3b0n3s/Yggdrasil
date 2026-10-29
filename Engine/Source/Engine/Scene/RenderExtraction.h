@@ -108,6 +108,11 @@ namespace Engine {
 	//     screenshot sets it).
 	// M9 additions: copy Flags, Quality, Annotations and SelectedEntities (sort/unique/filter unknown ids), assign mesh
 	// PickIds/PickTable in canonical entity order before GPU culling, and copy all five directional shadow fields.
+	// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 7): Ui, every effectively enabled canvas laid out at the scene
+	// resolution of the snapshot's Output (ComputeUiLayout, Scene/UiLayout.h; the view's size by default) and its visible
+	// elements' draw items appended in draw order (AppendUiDrawItems, Scene/UiExtraction.h), for the Primary and Entity camera
+	// sources (the game view and a camera's view; a view without a primary camera draws its UI too, as it draws its screen
+	// texts). The editor's scene view (Explicit) draws no game UI.
 	// Asset-dependent overlays are appended afterwards with AppendRenderAnnotations at the snapshot's Alpha.
 	// Errors: InvalidArgument for a zero Width or Height or an Alpha that is not finite or outside [0, 1]; NotFound for an
 	// Entity request whose CameraEntity names no entity of the scene, and InvalidArgument when that entity has no

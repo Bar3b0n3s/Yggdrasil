@@ -684,6 +684,17 @@ namespace Engine {
 		m_State->LatchActions(InputPhase::Frame);
 	}
 
+	void PlayInput::SetFramePreview(bool /*enabled*/)
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
+	bool PlayInput::IsFramePreviewEnabled() const
+	{
+		ENGINE_CONTRACT_STUB();
+		return false;
+	}
+
 	uint64_t PlayInput::GetNextTick() const
 	{
 		return m_State->NextTick;

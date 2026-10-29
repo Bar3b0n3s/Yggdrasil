@@ -47,6 +47,10 @@ namespace Engine {
 		// Optional safety clock forwarded to Sandbox; empty uses lua_clock. Must be finite, nonnegative and
 		// monotonic, with captures valid for the engine lifetime. Never used as simulation time.
 		std::function<double()> ClockSeconds{};
+		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 11): the locale Loc.Get reads string tables in and
+		// Loc.GetLocale returns, fixed for the VM's life: the project's Localization.Locale (a play session's and an edit
+		// evaluation's VM alike); empty reads every table in its fallback locale.
+		std::string Locale{};
 	};
 
 	// One behaviour instance. M20 (S-MULTI; Docs/Decisions/0031-m20-contract.md decision 17): an instance is identified by
@@ -188,6 +192,8 @@ namespace Engine {
 		[[nodiscard]] IScriptHost& GetHost() const;
 		[[nodiscard]] ScriptApiRegistry& GetApi() const;
 		[[nodiscard]] const ScriptingSettings& GetSettings() const;
+		// M22 (C22.1): ScriptEngineSpecification::Locale.
+		[[nodiscard]] std::string_view GetLocale() const;
 		[[nodiscard]] RunModes GetRunMode() const;
 		[[nodiscard]] bool IsTestMode() const;
 		[[nodiscard]] bool IsReadOnly() const;

@@ -105,10 +105,11 @@ namespace Engine {
 		TEST_CASE("RenderPassDeclarations: the stats order puts game Text before the upscale and the editor overlays after it")
 		{
 			// M17's order (§8.3) with Text moved to the SceneOverlay stage, the output stage's Upscale after it, the labels
-			// after the other editor overlays and the letterbox repaint last; a frozen contract of stats.get.
-			constexpr std::array<std::string_view, 25> Expected = { "Prepare", "DirectionalShadows", "SpotShadows", "DepthNormal", "DepthPyramid", "GTAO",
+			// after the other editor overlays and the letterbox repaint last; a frozen contract of stats.get. M22's Ui follows
+			// Text in M18's reserved slot (Docs/Decisions/0033-m22-contract.md decision 7; ADR 0028's phase-2 ledger).
+			constexpr std::array<std::string_view, 26> Expected = { "Prepare", "DirectionalShadows", "SpotShadows", "DepthNormal", "DepthPyramid", "GTAO",
 				"GTAODenoiseHorizontal", "GTAODenoiseVertical", "ForwardOpaque", "Skybox", "ForwardTransparent", "Overdraw", "Bloom", "Tonemap", "FXAA",
-				"Text", "Upscale", "SelectionMask", "SelectionDilateHorizontal", "SelectionDilateVertical", "SelectionComposite", "Wireframe",
+				"Text", "Ui", "Upscale", "SelectionMask", "SelectionDilateHorizontal", "SelectionDilateVertical", "SelectionComposite", "Wireframe",
 				"Overlays", "Labels", "Letterbox" };
 			REQUIRE(RenderStatsOrder.size() == Expected.size());
 			for (size_t index = 0; index < Expected.size(); ++index)
@@ -139,6 +140,8 @@ namespace Engine {
 			CHECK(GetDeclaredPipelineCountOf("Wireframe") == 0);
 			CHECK(GetDeclaredPipelineCountOf("Labels") == 0);
 			CHECK(GetDeclaredPipelineCountOf("Letterbox") == 0);
+			// M22: the Ui pass records with the QuadBatcher's Ldr pipeline and the Text pipelines.
+			CHECK(GetDeclaredPipelineCountOf("Ui") == 0);
 		}
 	}
 

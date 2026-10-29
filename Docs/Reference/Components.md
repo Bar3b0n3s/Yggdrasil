@@ -30,6 +30,12 @@ Every component of the type registry, in canonical component order: the order of
 | `AudioSource` | Audio | Serializable, ScriptVisible, EditorVisible, Removable | Plays an audio clip, optionally positioned at the entity. |
 | `AudioListener` | Audio | Serializable, ScriptVisible, EditorVisible, Removable | Hears the scene from the entity's position and orientation. |
 | `Script` | Scripting | Serializable, ScriptVisible, EditorVisible, Removable, NoShortcut | Attaches Behaviour scripts to the entity, an ordered list of slots. |
+| `UiCanvas` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text. |
+| `UiRect` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A UI element's rectangle in its parent's (or its canvas's), in canvas units, x right and y down. |
+| `UiImage` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | Draws a sprite sheet frame, or a plain colour, over a UI element's rectangle. |
+| `UiText` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | Draws text in a UI element's rectangle, wrapped and aligned in it. |
+| `UiLayout` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A container that places its children's rectangles in a stack, a grid or a flexible row or column. |
+| `UiLayoutElement` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | How a UI element takes part in its parent's layout container: flex weights, a minimum size, or none. |
 
 ## ID
 
@@ -721,6 +727,190 @@ Script members of `Script`:
 |---|---|---|---|---|---|
 | `Scripts` | proxy field | `{{Script: AssetRef?, Fields: {[string]: any}, ExecutionOrder: number}}` | read/write | All | The behaviours of the entity, in slot order; each slot is its own instance. A value a script writes holds at most 4096 bytes of text. |
 
+## UiCanvas
+
+The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text.
+
+- Category: Ui
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: none
+- Excludes: `UiRect`
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `SortOrder` | `Int32` | `0` |  |  |  | Canvases draw in ascending SortOrder, ties in entity order; a later canvas draws over earlier ones. |
+| `ScaleMode` | `UiScaleMode` | `"ConstantPixelSize"` |  |  |  | How canvas units map to scene pixels. |
+| `ScaleFactor` | `Float` | `1` | 0.01 to 100 |  |  | ConstantPixelSize: the scene pixels per canvas unit. |
+| `ReferenceHeight` | `Float` | `1080` | 1 to 1e+05 | units |  | MatchHeight: the canvas's height in canvas units, so one unit is the scene's height / ReferenceHeight scene pixels. |
+| `PixelSnap` | `Bool` | `true` |  |  |  | Rounds every element's corners to whole scene pixels, so images and clips land on pixel corners. |
+
+Script members of `UiCanvas`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `PixelSnap` | proxy field | `boolean` | read/write | All | Rounds every element's corners to whole scene pixels, so images and clips land on pixel corners. |
+| `ReferenceHeight` | proxy field | `number` | read/write | All | MatchHeight: the canvas's height in canvas units, so one unit is the scene's height / ReferenceHeight scene pixels. |
+| `ScaleFactor` | proxy field | `number` | read/write | All | ConstantPixelSize: the scene pixels per canvas unit. |
+| `ScaleMode` | proxy field | `UiScaleMode` | read/write | All | How canvas units map to scene pixels. |
+| `SortOrder` | proxy field | `number` | read/write | All | Canvases draw in ascending SortOrder, ties in entity order; a later canvas draws over earlier ones. |
+
+## UiRect
+
+A UI element's rectangle in its parent's (or its canvas's), in canvas units, x right and y down.
+
+- Category: Ui
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: none
+- Excludes: `UiCanvas`
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `AnchorMin` | `Vec2` | `[0.5,0.5]` | 0 to 1 |  |  | The anchor rectangle's top-left corner, normalized in the parent's rectangle: (0, 0) its top-left corner, (1, 1) its bottom-right. |
+| `AnchorMax` | `Vec2` | `[0.5,0.5]` | 0 to 1 |  |  | The anchor rectangle's bottom-right corner, normalized in the parent's rectangle; equal to AnchorMin for a fixed-size element. |
+| `Pivot` | `Vec2` | `[0.5,0.5]` | 0 to 1 |  |  | The point of the element that Position places, normalized to the element: (0, 0) its top-left corner, (1, 1) its bottom-right. |
+| `Position` | `Vec2` | `[0,0]` | -1e+06 to 1e+06 | units |  | The pivot's offset from its point in the anchor rectangle, in canvas units, x right and y down. |
+| `Size` | `Vec2` | `[100,100]` | -1e+06 to 1e+06 | units |  | The element's size in canvas units, added to the anchor rectangle's size (negative values inset stretched anchors); a container's child takes it as its preferred size. |
+| `ClipChildren` | `Bool` | `false` |  |  |  | Whether the element's descendants are clipped to its rectangle. |
+
+Script members of `UiRect`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `AnchorMax` | proxy field | `vector` | read/write | All | The anchor rectangle's bottom-right corner, normalized in the parent's rectangle; equal to AnchorMin for a fixed-size element. |
+| `AnchorMin` | proxy field | `vector` | read/write | All | The anchor rectangle's top-left corner, normalized in the parent's rectangle: (0, 0) its top-left corner, (1, 1) its bottom-right. |
+| `ClipChildren` | proxy field | `boolean` | read/write | All | Whether the element's descendants are clipped to its rectangle. |
+| `Pivot` | proxy field | `vector` | read/write | All | The point of the element that Position places, normalized to the element: (0, 0) its top-left corner, (1, 1) its bottom-right. |
+| `Position` | proxy field | `vector` | read/write | All | The pivot's offset from its point in the anchor rectangle, in canvas units, x right and y down. |
+| `Size` | proxy field | `vector` | read/write | All | The element's size in canvas units, added to the anchor rectangle's size (negative values inset stretched anchors); a container's child takes it as its preferred size. |
+
+## UiImage
+
+Draws a sprite sheet frame, or a plain colour, over a UI element's rectangle.
+
+- Category: Ui
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `UiRect`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Sheet` | `AssetRef(SpriteSheet)` | `null` |  |  |  | The sprite sheet whose frame is drawn; null draws a plain rectangle of Color. |
+| `Frame` | `UInt32` | `0` | 0 to 65535 |  |  | The index of the frame in the sheet's Frames; a frame the sheet lacks draws nothing. |
+| `Color` | `Color4` | `[1,1,1,1]` | 0 to 1 |  |  | The linear tint multiplied with the frame's texels, with opacity in the fourth component. |
+| `Type` | `UiImageType` | `"Simple"` |  |  |  | Whether the frame stretches or keeps its 9-slice borders. |
+| `BorderScale` | `Float` | `1` | 0.01 to 1000 |  |  | Sliced: the canvas units each border texel takes. |
+| `Filter` | `UiImageFilter` | `"Point"` |  |  |  | How the frame's texture is sampled. |
+
+Script members of `UiImage`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `BorderScale` | proxy field | `number` | read/write | All | Sliced: the canvas units each border texel takes. |
+| `Color` | proxy field | `Color` | read/write | All | The linear tint multiplied with the frame's texels, with opacity in the fourth component. |
+| `Filter` | proxy field | `UiImageFilter` | read/write | All | How the frame's texture is sampled. |
+| `Frame` | proxy field | `number` | read/write | All | The index of the frame in the sheet's Frames; a frame the sheet lacks draws nothing. |
+| `Sheet` | proxy field | `AssetRef?` | read/write | All | The sprite sheet whose frame is drawn; null draws a plain rectangle of Color. |
+| `Type` | proxy field | `UiImageType` | read/write | All | Whether the frame stretches or keeps its 9-slice borders. |
+
+## UiText
+
+Draws text in a UI element's rectangle, wrapped and aligned in it.
+
+- Category: Ui
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `UiRect`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Text` | `String` | `""` |  |  |  | The UTF-8 text; a line feed starts a new line. Scripts read localized strings with Loc.Get. |
+| `Font` | `AssetRef(Font)` | `null` |  |  |  | The font; null uses the default font. |
+| `Size` | `Float` | `32` | 1 to 1e+05 | units |  | The em size in canvas units. |
+| `Color` | `Color4` | `[1,1,1,1]` | 0 to 1 |  |  | The linear text colour with opacity in the fourth component. |
+| `Alignment` | `TextAlignment` | `"Left"` |  |  |  | How each line is aligned within the rectangle's width. |
+| `VerticalAlignment` | `UiTextVerticalAlignment` | `"Top"` |  |  |  | Where the text block sits in the rectangle's height. |
+| `Wrap` | `Bool` | `true` |  |  |  | Whether lines break at spaces to fit the rectangle's width. |
+| `LineSpacing` | `Float` | `1` | 0.1 to 10 |  |  | Multiplies the font's line height. |
+
+Script members of `UiText`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Alignment` | proxy field | `TextAlignment` | read/write | All | How each line is aligned within the rectangle's width. |
+| `Color` | proxy field | `Color` | read/write | All | The linear text colour with opacity in the fourth component. |
+| `Font` | proxy field | `AssetRef?` | read/write | All | The font; null uses the default font. |
+| `LineSpacing` | proxy field | `number` | read/write | All | Multiplies the font's line height. |
+| `Size` | proxy field | `number` | read/write | All | The em size in canvas units. |
+| `Text` | proxy field | `string` | read/write | All | The UTF-8 text; a line feed starts a new line. Scripts read localized strings with Loc.Get. A value a script writes holds at most 4096 bytes of text. |
+| `VerticalAlignment` | proxy field | `UiTextVerticalAlignment` | read/write | All | Where the text block sits in the rectangle's height. |
+| `Wrap` | proxy field | `boolean` | read/write | All | Whether lines break at spaces to fit the rectangle's width. |
+
+## UiLayout
+
+A container that places its children's rectangles in a stack, a grid or a flexible row or column.
+
+- Category: Ui
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `UiRect`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Kind` | `UiLayoutKind` | `"Stack"` |  |  |  | How the children are placed. |
+| `Direction` | `UiLayoutDirection` | `"Vertical"` |  |  |  | The main axis the children follow. |
+| `Padding` | `UiPadding` | `{"Left":0,"Top":0,"Right":0,"Bottom":0}` |  |  |  | Insets of the container's rectangle that the children are placed in. |
+| `Spacing` | `Vec2` | `[0,0]` | 0 to 1e+06 | units |  | The gaps between children, lines and cells along x and y, in canvas units. |
+| `MainAlignment` | `UiMainAlignment` | `"Start"` |  |  |  | Where the children sit along the main axis when they do not fill it. |
+| `CrossAlignment` | `UiCrossAlignment` | `"Start"` |  |  |  | Where each child sits across the main axis. |
+| `Columns` | `UInt32` | `0` | 0 to 1024 |  |  | Grid: the cells per row (Horizontal) or per column (Vertical); 0 fits as many as the container holds. |
+| `CellSize` | `Vec2` | `[100,100]` | 0 to 1e+06 | units |  | Grid: the size of each cell in canvas units. |
+| `Wrap` | `Bool` | `false` |  |  |  | Flex: whether a child that does not fit the line starts a new line. |
+
+Script members of `UiLayout`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `CellSize` | proxy field | `vector` | read/write | All | Grid: the size of each cell in canvas units. |
+| `Columns` | proxy field | `number` | read/write | All | Grid: the cells per row (Horizontal) or per column (Vertical); 0 fits as many as the container holds. |
+| `CrossAlignment` | proxy field | `UiCrossAlignment` | read/write | All | Where each child sits across the main axis. |
+| `Direction` | proxy field | `UiLayoutDirection` | read/write | All | The main axis the children follow. |
+| `Kind` | proxy field | `UiLayoutKind` | read/write | All | How the children are placed. |
+| `MainAlignment` | proxy field | `UiMainAlignment` | read/write | All | Where the children sit along the main axis when they do not fill it. |
+| `Padding` | proxy field | `{Left: number, Top: number, Right: number, Bottom: number}` | read/write | All | Insets of the container's rectangle that the children are placed in. |
+| `Spacing` | proxy field | `vector` | read/write | All | The gaps between children, lines and cells along x and y, in canvas units. |
+| `Wrap` | proxy field | `boolean` | read/write | All | Flex: whether a child that does not fit the line starts a new line. |
+
+## UiLayoutElement
+
+How a UI element takes part in its parent's layout container: flex weights, a minimum size, or none.
+
+- Category: Ui
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `UiRect`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `IgnoreLayout` | `Bool` | `false` |  |  |  | Whether the element keeps its own placement and takes no space in the container. |
+| `Grow` | `Float` | `0` | 0 to 1000 |  |  | Flex: the element's share of the main axis's free space. |
+| `Shrink` | `Float` | `1` | 0 to 1000 |  |  | Flex: the element's share, times its preferred size, of the main axis's overflow. |
+| `MinSize` | `Vec2` | `[0,0]` | 0 to 1e+06 | units |  | The size the element never goes below in a Stack or Flex container, in canvas units. |
+
+Script members of `UiLayoutElement`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Grow` | proxy field | `number` | read/write | All | Flex: the element's share of the main axis's free space. |
+| `IgnoreLayout` | proxy field | `boolean` | read/write | All | Whether the element keeps its own placement and takes no space in the container. |
+| `MinSize` | proxy field | `vector` | read/write | All | The size the element never goes below in a Stack or Flex container, in canvas units. |
+| `Shrink` | proxy field | `number` | read/write | All | Flex: the element's share, times its preferred size, of the main axis's overflow. |
+
 ## Structs
 
 The structs component fields hold, in name order.
@@ -746,6 +936,17 @@ One behaviour of a Script component.
 | `Script` | `AssetRef(Script)` | `null` |  |  |  | The Behaviour script. |
 | `Fields` | `Map<Variant>` | `{}` |  |  |  | Overrides of the script's declared fields, by name. |
 | `ExecutionOrder` | `Int32` | `0` |  |  |  | Callbacks run in (ExecutionOrder, canonical entity order, slot) order. |
+
+### UiPadding
+
+Insets of a UI layout container's rectangle, in canvas units.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Left` | `Float` | `0` | 0 to 1e+06 | units |  | The inset from the left edge. |
+| `Top` | `Float` | `0` | 0 to 1e+06 | units |  | The inset from the top edge. |
+| `Right` | `Float` | `0` | 0 to 1e+06 | units |  | The inset from the right edge. |
+| `Bottom` | `Float` | `0` | 0 to 1e+06 | units |  | The inset from the bottom edge. |
 
 ## Enums
 
@@ -860,3 +1061,80 @@ The curve that maps HDR scene colours to the display.
 | `ACES` | The ACES filmic approximation: higher contrast and saturation. |
 | `PbrNeutral` | Khronos PBR Neutral: keeps base colours faithful up to the highlights. |
 | `Linear` | No curve: exposure only, then clamped to the display range. |
+
+### UiCrossAlignment
+
+Where each child of a container sits across its main axis.
+
+| Value | Description |
+|---|---|
+| `Start` | At the start of its line: the top (Horizontal) or the left edge (Vertical). |
+| `Center` | Centred across the main axis. |
+| `End` | At the end of its line: the bottom (Horizontal) or the right edge (Vertical). |
+| `Stretch` | Stretched to fill its line's cross size (a Grid child: its cell's). |
+
+### UiImageFilter
+
+How a UI image samples its texture.
+
+| Value | Description |
+|---|---|
+| `Point` | The nearest texel: pixel art, and a 1:1 image reproduces its texels exactly. |
+| `Linear` | Bilinear filtering between texels. |
+
+### UiImageType
+
+How a UI image fills its element's rectangle.
+
+| Value | Description |
+|---|---|
+| `Simple` | The sprite frame is stretched over the rectangle. |
+| `Sliced` | The frame's 9-slice borders keep their size; the edges and the centre stretch. |
+
+### UiLayoutDirection
+
+The main axis of a UI layout container.
+
+| Value | Description |
+|---|---|
+| `Horizontal` | Children follow each other from left to right. |
+| `Vertical` | Children follow each other from top to bottom. |
+
+### UiLayoutKind
+
+How a UI layout container places its children.
+
+| Value | Description |
+|---|---|
+| `Stack` | One after another along Direction, each at its own size. |
+| `Grid` | In cells of CellSize, Columns cells per row (Horizontal) or per column (Vertical). |
+| `Flex` | A stack whose children grow into free space and shrink when they overflow, wrapping with Wrap. |
+
+### UiMainAlignment
+
+Where a container's children sit along its main axis when they do not fill it.
+
+| Value | Description |
+|---|---|
+| `Start` | At the start: the left edge (Horizontal) or the top (Vertical). |
+| `Center` | Centred along the main axis. |
+| `End` | At the end: the right edge (Horizontal) or the bottom (Vertical). |
+
+### UiScaleMode
+
+How a UI canvas maps its units to scene pixels.
+
+| Value | Description |
+|---|---|
+| `ConstantPixelSize` | ScaleFactor scene pixels per canvas unit, whatever the scene resolution. |
+| `MatchHeight` | The canvas is ReferenceHeight units high, so it scales with the scene's height. |
+
+### UiTextVerticalAlignment
+
+Where a UI text block sits in its element's rectangle.
+
+| Value | Description |
+|---|---|
+| `Top` | The first line starts at the rectangle's top edge. |
+| `Middle` | The block is centred vertically in the rectangle. |
+| `Bottom` | The last line ends at the rectangle's bottom edge. |

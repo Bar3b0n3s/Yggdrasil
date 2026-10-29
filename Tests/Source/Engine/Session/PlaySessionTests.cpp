@@ -2,20 +2,25 @@
 
 #include "Engine/Session/PlaySession.h"
 
+#include "Engine/Asset/DocumentData.h"
 #include "Engine/Core/Json/Json.h"
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/TransformComponent.h"
+#include "Engine/Scene/Components/UiCanvasComponent.h"
+#include "Engine/Scene/Components/UiRectComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/PhysicsSystem.h"
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Scene/UiSystem.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Support/PhysicsTestScene.h"
 #include "Support/SceneTestFixture.h"
 #include "Support/ScriptTestFixture.h"
 
+#include <algorithm>
 #include <iterator>
 #include <limits>
 #include <string>
@@ -283,6 +288,113 @@ namespace Engine {
 				PlaySessionPhase::RenderExtraction,
 			};
 			CHECK(observer.Phases == expected);
+		}
+
+		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 3; stream A, which also adds the two phases to the documented
+		// sequence above): ADR 0028's phase-2 ledger fixes their positions. The step's layout is at the session's view size.
+		TEST_CASE("PlaySession: UiLayout ends the fixed step and FrameUiLayout follows FrameTransformUpdate, in Play and Simulate" * doctest::skip(true))
+		{
+			for (const PlayMode mode : { PlayMode::Play, PlayMode::Simulate })
+			{
+				CAPTURE(mode == PlayMode::Play);
+				Test::SceneTestFixture fixture;
+				Entity canvas = fixture.GetScene().CreateEntity("Canvas");
+				canvas.AddComponent<UiCanvasComponent>(UiCanvasComponent{});
+				Entity title = fixture.GetScene().CreateEntity("Title", canvas);
+				title.AddComponent<UiRectComponent>(UiRectComponent{});
+				RecordingObserver observer;
+				PlaySessionSpecification specification = MakeSpecification(fixture, &observer);
+				specification.Mode = mode;
+				specification.ViewWidth = 320;
+				specification.ViewHeight = 180;
+				Result<Scope<PlaySession>> session = PlaySession::CreateFromScene(specification, fixture.GetScene());
+				REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+				(*session)->Tick();
+				const auto postStep = std::find(observer.Phases.begin(), observer.Phases.end(), PlaySessionPhase::PostStepTransformUpdate);
+				REQUIRE(postStep != observer.Phases.end());
+				REQUIRE(std::next(postStep) != observer.Phases.end());
+				CHECK(*std::next(postStep) == PlaySessionPhase::UiLayout);
+				CHECK(*std::next(postStep, 2) == PlaySessionPhase::LatchFrame);
+				const auto frameTransforms = std::find(observer.Phases.begin(), observer.Phases.end(), PlaySessionPhase::FrameTransformUpdate);
+				REQUIRE(frameTransforms != observer.Phases.end());
+				REQUIRE(std::next(frameTransforms) != observer.Phases.end());
+				CHECK(*std::next(frameTransforms) == PlaySessionPhase::FrameUiLayout);
+				const UiSystem& ui = (*session)->GetUi();
+				CHECK(ui.IsFrameLayoutCurrent());
+				CHECK(ui.GetStepLayout().SceneSize == glm::uvec2(320, 180));
+				CHECK(ui.GetLayout().Nodes.size() == 1);
+			}
+		}
+
+		// M22 (C22.1, decision 3; stream A; the C22.1 review): the current layout describes the current scene from the
+		// session's start, and right after a Scene.Load replaces the scene at the end of a frame, before the next step, so
+		// ui.tree and W22.2's UiInput never read an empty table or a replaced scene's rectangles.
+		TEST_CASE("PlaySession: the current UI layout is the scene's from the start and the loaded scene's right after a Scene.Load"
+			* doctest::skip(true))
+		{
+			Test::ScriptTestFixture fixture;
+			const UiRectComponent topLeft{ .AnchorMin = glm::vec2(0.0f), .AnchorMax = glm::vec2(0.0f), .Pivot = glm::vec2(0.0f), .Size = glm::vec2(10.0f) };
+			Entity menu = fixture.GetScene().CreateEntity("Menu");
+			menu.AddComponent<UiCanvasComponent>(UiCanvasComponent{});
+			fixture.GetScene().CreateEntity("Start", menu).AddComponent<UiRectComponent>(topLeft);
+			// The loaded scene's element is elsewhere, so its rectangle tells the two layouts apart whatever the ids.
+			Test::SceneTestFixture levelFixture;
+			Entity hud = levelFixture.GetScene().CreateEntity("Hud");
+			hud.AddComponent<UiCanvasComponent>(UiCanvasComponent{});
+			UiRectComponent scoreRect = topLeft;
+			scoreRect.Position = glm::vec2(20.0f, 30.0f);
+			levelFixture.GetScene().CreateEntity("Score", hud).AddComponent<UiRectComponent>(scoreRect);
+			Result<Json> levelDocument = SceneSerializer::ToJson(levelFixture.GetScene());
+			REQUIRE_MESSAGE(levelDocument.has_value(), levelDocument.error().ToString());
+			auto level = CreateRef<SceneData>();
+			level->Document = CreateRef<const Json>(std::move(*levelDocument));
+			fixture.GetAssetManager().Publish(AssetHandle(0x7100a1), level, "Assets/Scenes/Level.scene");
+
+			PlaySessionSpecification specification{};
+			specification.Registry = &fixture.GetTypes();
+			specification.Assets = &fixture.GetAssetManager();
+			specification.ScriptSchemas = fixture.GetSchemaSnapshot();
+			specification.Seed = 47;
+			specification.ViewWidth = 320;
+			specification.ViewHeight = 180;
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(specification, fixture.GetScene());
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& session = **created;
+			session.SetExtractionEnabled(false);
+
+			// Laid out when the session starts, before its first step.
+			const UiLayoutTable& started = session.GetUi().GetLayout();
+			CHECK(started.SceneSize == glm::uvec2(320, 180));
+			REQUIRE(started.Nodes.size() == 1);
+			CHECK(started.Nodes[0].Entity == session.GetScene().FindEntityByPath("/Menu/Start").GetUUID());
+			CHECK(started.Nodes[0].Min == glm::vec2(0.0f));
+
+			// Scene.Load replaces the scene at the end of the frame, which lays the new scene out before the next step.
+			const auto requested = session.GetScripts()->Evaluate("Scene.Load(Assets.Load(\"Assets/Scenes/Level.scene\"))\nreturn true", {});
+			REQUIRE_MESSAGE(requested.has_value(), requested.error().ToString());
+			session.FrameUpdate(FrameTime{ .DeltaTime = 1.0 / 60.0, .UnscaledDeltaTime = 1.0 / 60.0, .Alpha = 1.0, .FrameIndex = 0 });
+			REQUIRE(session.GetSceneGeneration() == 2);
+			CHECK_FALSE(session.GetUi().IsFrameLayoutCurrent());
+			const UiLayoutTable& loaded = session.GetUi().GetLayout();
+			REQUIRE(loaded.Nodes.size() == 1);
+			CHECK(loaded.Nodes[0].Entity == session.GetScene().FindEntityByPath("/Hud/Score").GetUUID());
+			CHECK(loaded.Nodes[0].Min == glm::vec2(20.0f, 30.0f));
+			REQUIRE(loaded.Canvases.size() == 1);
+			CHECK(loaded.Canvases[0].Canvas == session.GetScene().FindEntityByPath("/Hud").GetUUID());
+		}
+
+		// W-CLOCK (M22, C22.1, decision 12; stream K): the session previews device input in the frame view only in live play.
+		TEST_CASE("PlaySession: the frame preview is on in live play and off in lockstep" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			Result<Scope<PlaySession>> session = PlaySession::CreateFromScene(MakeSpecification(fixture), fixture.GetScene());
+			REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+			PlaySession& play = **session;
+			play.FrameUpdate(FrameTime{ .DeltaTime = 1.0 / 60.0, .UnscaledDeltaTime = 1.0 / 60.0, .Alpha = 0.5, .FrameIndex = 0 });
+			CHECK(play.GetInput().IsFramePreviewEnabled());
+			play.SetLockstep(true);
+			play.Tick();
+			CHECK_FALSE(play.GetInput().IsFramePreviewEnabled());
 		}
 
 		TEST_CASE("PlaySession: entity cap raises an error, never crashes")
@@ -632,6 +744,9 @@ namespace Engine {
 			CHECK(PlaySessionPhaseToString(PlaySessionPhase::InterpolationSnapshot) == "InterpolationSnapshot");
 			CHECK(PlaySessionPhaseToString(PlaySessionPhase::PreStepTransformUpdate) == "PreStepTransformUpdate");
 			CHECK(PlaySessionPhaseToString(PlaySessionPhase::RenderExtraction) == "RenderExtraction");
+			// M22 (Docs/Decisions/0033-m22-contract.md decision 3): the UI's layout phases.
+			CHECK(PlaySessionPhaseToString(PlaySessionPhase::UiLayout) == "UiLayout");
+			CHECK(PlaySessionPhaseToString(PlaySessionPhase::FrameUiLayout) == "FrameUiLayout");
 		}
 
 		TEST_CASE("PlaySession: scripts measure screen coordinates in the session's view, never the host's window")

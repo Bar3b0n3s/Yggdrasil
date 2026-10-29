@@ -50,6 +50,7 @@ namespace Engine {
 	class NativeModuleTypes;
 	class NativeWorld;
 	class TypeRegistry;
+	class UiSystem;
 	struct RenderExtractionRequest;
 
 	// Play runs scripts and audio; Simulate is Play without them (§5.6), viewed through the editor camera.
@@ -80,6 +81,9 @@ namespace Engine {
 		DestroyFlush,            // 8: OnDestroy, synthesized exits, body/voice/instance removal (M11-M13), then entity destruction,
 								 //    children first (Scene::FlushPendingDestroys)
 		PostStepTransformUpdate, // 9: TransformSystem::Update
+		UiLayout,                // 10: UiSystem::LayoutStep at the session's scene resolution (M22, Docs/Decisions/0033-m22-contract.md
+								 //     decision 3): after every phase that can change UI data, so the layout matches the state
+								 //     the step left; in Play and Simulate
 		// Frame phase.
 		LatchFrame,           // 1: PlayInput::LatchFrame
 		FrameStartFlush,      // 1: start flush (M13; empty)
@@ -88,6 +92,8 @@ namespace Engine {
 		FrameDestroyFlush,    // 2: destroy flush, as DestroyFlush
 		FrameTransformUpdate, // 2: TransformSystem::Update; entities whose world matrix changed outside the fixed steps get
 							  //    InterpolationResetTag (see "Render interpolation" below)
+		FrameUiLayout,        // 2a: UiSystem::LayoutFrame (M22, decision 3): UI written in OnUpdate or OnLateUpdate is laid out
+							  //     as this frame draws it; in Play and Simulate
 		AudioUpdate,          // 3: AudioSystem::Update, then, while the session owns audio time, the simulation-time pulls of
 							  //    the ticks run since the last pull (M12; see "Audio" below)
 		RenderExtraction      // 4: the game view's snapshot (ExtractRenderSnapshot), unless extraction is disabled
@@ -150,7 +156,8 @@ namespace Engine {
 	// ("Interpolation: script-moved entities interpolate; frame-phase writes, teleports and new entities do not").
 	// Production code installs none. Simulate mode skips the script and audio
 	// phases (StartFlush, FixedUpdate, Tasks, FrameStartFlush, Update, LateUpdate, AudioUpdate) entirely, so they are not
-	// reported there. NativeStep (M19) runs, and is reported, only in Play mode with a native module.
+	// reported there. NativeStep (M19) runs, and is reported, only in Play mode with a native module. UiLayout and
+	// FrameUiLayout (M22) run, and are reported, in both modes, with or without a canvas.
 	class IPlaySessionObserver
 	{
 	public:
@@ -351,7 +358,7 @@ namespace Engine {
 		[[nodiscard]] static Result<Scope<PlaySession>> Prepare(const PlaySessionSpecification& specification, const Json& sceneDocument);
 		[[nodiscard]] static Result<Scope<PlaySession>> Prepare(const PlaySessionSpecification& specification, Ref<const Json> startDocument);
 		// Once, after retiring the previous session: acquire audio, initialize instances and run startup callbacks,
-		// then start PlayOnStart voices. Script faults use the normal error stream/pause/fatal-stop path, not an outer
+		// then start PlayOnStart voices and lay the scene's UI out (GetUi, M22). Script faults use the normal error stream/pause/fatal-stop path, not an outer
 		// preparation error. Create is Prepare followed by Activate. Activate itself does not return a fallible result.
 		void Activate();
 
@@ -450,6 +457,16 @@ namespace Engine {
 		// Simulate mode and without PlaySessionSpecification::Native. Valid for the session's lifetime.
 		[[nodiscard]] NativeWorld* GetNative();
 		[[nodiscard]] const NativeWorld* GetNative() const;
+
+		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 3): the session's UI (Scene/UiSystem.h): the layouts of the
+		// UiLayout and FrameUiLayout phases at the session's scene resolution (GetViewSize in W22.1; the later lander of M21
+		// and M22 makes it the scene resolution M21's PixelPerfectCamera sets), in Play and Simulate alike; ui.tree reads the
+		// current one for the play scene, and W22.2's UiInput hit-tests it. Valid for the session's lifetime. Activate ends,
+		// and a Scene.Load or Scene.Reload's replacement of the scene at the end of a frame ends, after the scene's startup
+		// callbacks, with UiSystem::LayoutStep of the current scene (not a phase: no observer reports it), so the current
+		// layout always describes the current scene, before its first step included.
+		[[nodiscard]] UiSystem& GetUi();
+		[[nodiscard]] const UiSystem& GetUi() const;
 
 		// The state hash (§13.7, §5.1): XXH64 (seed 0) over the scene's minified canonical serialization
 		// (SceneSerializer::SaveToString, JsonStyle::Minified), followed by the tick, the Random state and the UUIDGenerator's

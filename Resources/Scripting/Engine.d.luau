@@ -167,6 +167,30 @@ export type TextureUsage = "Color" | "Linear" | "NormalMap"
 -- The curve that maps HDR scene colours to the display.
 export type Tonemapper = "AgX" | "ACES" | "PbrNeutral" | "Linear"
 
+-- Where each child of a container sits across its main axis.
+export type UiCrossAlignment = "Start" | "Center" | "End" | "Stretch"
+
+-- How a UI image samples its texture.
+export type UiImageFilter = "Point" | "Linear"
+
+-- How a UI image fills its element's rectangle.
+export type UiImageType = "Simple" | "Sliced"
+
+-- The main axis of a UI layout container.
+export type UiLayoutDirection = "Horizontal" | "Vertical"
+
+-- How a UI layout container places its children.
+export type UiLayoutKind = "Stack" | "Grid" | "Flex"
+
+-- Where a container's children sit along its main axis when they do not fill it.
+export type UiMainAlignment = "Start" | "Center" | "End"
+
+-- How a UI canvas maps its units to scene pixels.
+export type UiScaleMode = "ConstantPixelSize" | "MatchHeight"
+
+-- Where a UI text block sits in its element's rectangle.
+export type UiTextVerticalAlignment = "Top" | "Middle" | "Bottom"
+
 -- What project.validate checks.
 export type ValidationScope = "Project" | "Scene"
 
@@ -453,6 +477,12 @@ declare extern type Entity with
 	function GetComponent(self, name: "AudioSource"): AudioSource?
 	function GetComponent(self, name: "AudioListener"): AudioListener?
 	function GetComponent(self, name: "Script"): Script?
+	function GetComponent(self, name: "UiCanvas"): UiCanvas?
+	function GetComponent(self, name: "UiRect"): UiRect?
+	function GetComponent(self, name: "UiImage"): UiImage?
+	function GetComponent(self, name: "UiText"): UiText?
+	function GetComponent(self, name: "UiLayout"): UiLayout?
+	function GetComponent(self, name: "UiLayoutElement"): UiLayoutElement?
 	-- Get the parent, or nil for a root. [All modes; Runtime|Test; pure/read]
 	GetParent: (self: Entity) -> Entity?
 	-- Get the instance of the first script slot whose behaviour has this name, or of the first slot without a name; nil when there is none. [All modes; Runtime|Test; pure/read]
@@ -503,6 +533,18 @@ declare extern type Entity with
 	Text: Text?
 	-- The entity's Transform component, which every entity has. [All modes; Runtime|Test; pure/read]
 	Transform: Transform
+	-- The entity's UiCanvas component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	UiCanvas: UiCanvas?
+	-- The entity's UiImage component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	UiImage: UiImage?
+	-- The entity's UiLayout component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	UiLayout: UiLayout?
+	-- The entity's UiLayoutElement component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	UiLayoutElement: UiLayoutElement?
+	-- The entity's UiRect component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	UiRect: UiRect?
+	-- The entity's UiText component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	UiText: UiText?
 	-- Compare UUIDs; equality does not authorize access to an expired scene. [All modes; Runtime|Test; pure/read]
 	__eq: (self: Entity, other: Entity) -> boolean
 end
@@ -817,6 +859,106 @@ declare extern type Transform with
 	WorldScale: vector
 end
 
+-- The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text.
+declare extern type UiCanvas with
+	-- Rounds every element's corners to whole scene pixels, so images and clips land on pixel corners. [All modes; Runtime|Test; pure/read; setter mutates]
+	PixelSnap: boolean
+	-- MatchHeight: the canvas's height in canvas units, so one unit is the scene's height / ReferenceHeight scene pixels. [All modes; Runtime|Test; pure/read; setter mutates]
+	ReferenceHeight: number
+	-- ConstantPixelSize: the scene pixels per canvas unit. [All modes; Runtime|Test; pure/read; setter mutates]
+	ScaleFactor: number
+	-- How canvas units map to scene pixels. [All modes; Runtime|Test; pure/read; setter mutates]
+	ScaleMode: UiScaleMode
+	-- Canvases draw in ascending SortOrder, ties in entity order; a later canvas draws over earlier ones. [All modes; Runtime|Test; pure/read; setter mutates]
+	SortOrder: number
+end
+
+-- Draws a sprite sheet frame, or a plain colour, over a UI element's rectangle.
+declare extern type UiImage with
+	-- Sliced: the canvas units each border texel takes. [All modes; Runtime|Test; pure/read; setter mutates]
+	BorderScale: number
+	-- The linear tint multiplied with the frame's texels, with opacity in the fourth component. [All modes; Runtime|Test; pure/read; setter mutates]
+	Color: Color
+	-- How the frame's texture is sampled. [All modes; Runtime|Test; pure/read; setter mutates]
+	Filter: UiImageFilter
+	-- The index of the frame in the sheet's Frames; a frame the sheet lacks draws nothing. [All modes; Runtime|Test; pure/read; setter mutates]
+	Frame: number
+	-- The sprite sheet whose frame is drawn; null draws a plain rectangle of Color. [All modes; Runtime|Test; pure/read; setter mutates]
+	Sheet: AssetRef?
+	-- Whether the frame stretches or keeps its 9-slice borders. [All modes; Runtime|Test; pure/read; setter mutates]
+	Type: UiImageType
+end
+
+-- A container that places its children's rectangles in a stack, a grid or a flexible row or column.
+declare extern type UiLayout with
+	-- Grid: the size of each cell in canvas units. [All modes; Runtime|Test; pure/read; setter mutates]
+	CellSize: vector
+	-- Grid: the cells per row (Horizontal) or per column (Vertical); 0 fits as many as the container holds. [All modes; Runtime|Test; pure/read; setter mutates]
+	Columns: number
+	-- Where each child sits across the main axis. [All modes; Runtime|Test; pure/read; setter mutates]
+	CrossAlignment: UiCrossAlignment
+	-- The main axis the children follow. [All modes; Runtime|Test; pure/read; setter mutates]
+	Direction: UiLayoutDirection
+	-- How the children are placed. [All modes; Runtime|Test; pure/read; setter mutates]
+	Kind: UiLayoutKind
+	-- Where the children sit along the main axis when they do not fill it. [All modes; Runtime|Test; pure/read; setter mutates]
+	MainAlignment: UiMainAlignment
+	-- Insets of the container's rectangle that the children are placed in. [All modes; Runtime|Test; pure/read; setter mutates]
+	Padding: {Left: number, Top: number, Right: number, Bottom: number}
+	-- The gaps between children, lines and cells along x and y, in canvas units. [All modes; Runtime|Test; pure/read; setter mutates]
+	Spacing: vector
+	-- Flex: whether a child that does not fit the line starts a new line. [All modes; Runtime|Test; pure/read; setter mutates]
+	Wrap: boolean
+end
+
+-- How a UI element takes part in its parent's layout container: flex weights, a minimum size, or none.
+declare extern type UiLayoutElement with
+	-- Flex: the element's share of the main axis's free space. [All modes; Runtime|Test; pure/read; setter mutates]
+	Grow: number
+	-- Whether the element keeps its own placement and takes no space in the container. [All modes; Runtime|Test; pure/read; setter mutates]
+	IgnoreLayout: boolean
+	-- The size the element never goes below in a Stack or Flex container, in canvas units. [All modes; Runtime|Test; pure/read; setter mutates]
+	MinSize: vector
+	-- Flex: the element's share, times its preferred size, of the main axis's overflow. [All modes; Runtime|Test; pure/read; setter mutates]
+	Shrink: number
+end
+
+-- A UI element's rectangle in its parent's (or its canvas's), in canvas units, x right and y down.
+declare extern type UiRect with
+	-- The anchor rectangle's bottom-right corner, normalized in the parent's rectangle; equal to AnchorMin for a fixed-size element. [All modes; Runtime|Test; pure/read; setter mutates]
+	AnchorMax: vector
+	-- The anchor rectangle's top-left corner, normalized in the parent's rectangle: (0, 0) its top-left corner, (1, 1) its bottom-right. [All modes; Runtime|Test; pure/read; setter mutates]
+	AnchorMin: vector
+	-- Whether the element's descendants are clipped to its rectangle. [All modes; Runtime|Test; pure/read; setter mutates]
+	ClipChildren: boolean
+	-- The point of the element that Position places, normalized to the element: (0, 0) its top-left corner, (1, 1) its bottom-right. [All modes; Runtime|Test; pure/read; setter mutates]
+	Pivot: vector
+	-- The pivot's offset from its point in the anchor rectangle, in canvas units, x right and y down. [All modes; Runtime|Test; pure/read; setter mutates]
+	Position: vector
+	-- The element's size in canvas units, added to the anchor rectangle's size (negative values inset stretched anchors); a container's child takes it as its preferred size. [All modes; Runtime|Test; pure/read; setter mutates]
+	Size: vector
+end
+
+-- Draws text in a UI element's rectangle, wrapped and aligned in it.
+declare extern type UiText with
+	-- How each line is aligned within the rectangle's width. [All modes; Runtime|Test; pure/read; setter mutates]
+	Alignment: TextAlignment
+	-- The linear text colour with opacity in the fourth component. [All modes; Runtime|Test; pure/read; setter mutates]
+	Color: Color
+	-- The font; null uses the default font. [All modes; Runtime|Test; pure/read; setter mutates]
+	Font: AssetRef?
+	-- Multiplies the font's line height. [All modes; Runtime|Test; pure/read; setter mutates]
+	LineSpacing: number
+	-- The em size in canvas units. [All modes; Runtime|Test; pure/read; setter mutates]
+	Size: number
+	-- The UTF-8 text; a line feed starts a new line. Scripts read localized strings with Loc.Get. A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
+	Text: string
+	-- Where the text block sits in the rectangle's height. [All modes; Runtime|Test; pure/read; setter mutates]
+	VerticalAlignment: UiTextVerticalAlignment
+	-- Whether lines break at spaces to fit the rectangle's width. [All modes; Runtime|Test; pure/read; setter mutates]
+	Wrap: boolean
+end
+
 -- Application identity, window state and deferred quit requests.
 declare Application: {
 	-- Returns the host platform name. [All modes; Runtime|Test; pure/read]
@@ -939,6 +1081,16 @@ declare Input: {
 	IsMouseButtonReleased: (button: MouseButton) -> boolean,
 	-- Changes cursor visibility/capture; refused during read-only evaluation. [All modes; Runtime|Test; mutates]
 	SetCursorMode: (mode: CursorMode) -> (),
+}
+
+-- Localized strings from string tables (.stringtable assets) in the project's locale (Localization.Locale): a table's locale equal to it, else its language's, else the table's first (fallback) locale; an entry without a string for that locale gives the fallback's.
+declare Loc: {
+	-- Returns the string of key in the locale. A key the table lacks, an asset that is not a string table, or a table that fails to load raises a located error naming them (with the closest keys as a hint). [All modes; Runtime|Test; pure/read]
+	Get: (table: AssetRef, key: string) -> string,
+	-- Returns the project's locale (Localization.Locale) that lookups use; empty when it is unset, so every table reads its fallback locale. [All modes; Runtime|Test; pure/read]
+	GetLocale: () -> string,
+	-- Returns whether the string table has the key. An asset that is not a string table, or a table that fails to load, raises a located error naming it, as in Get. [All modes; Runtime|Test; pure/read]
+	Has: (table: AssetRef, key: string) -> boolean,
 }
 
 -- Script-channel logging with authored source, line, entity and simulation tick; arguments use tostring and tab separators. An entry keeps at most 8192 bytes (longer text is truncated and marked), and one VM writes at most 1024 entries per frame, dropping and counting the rest.

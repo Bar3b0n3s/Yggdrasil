@@ -76,6 +76,7 @@ namespace Engine {
 				{ "scene.tree", SceneRelation::Target },
 				{ "script.errors", SceneRelation::Target }, // entity paths are read from the addressed scene
 				{ "script.eval", SceneRelation::Target },   // context "edit" evaluates over the addressed scene
+				{ "ui.tree", SceneRelation::Target },       // M22: the addressed scene's UI (Docs/Decisions/0033-m22-contract.md decision 8)
 				{ "viewport.screenshot", SceneRelation::Target },
 				// The active scene only.
 				{ "editor.screenshot", SceneRelation::ActiveScene }, // the editor window shows the active tab

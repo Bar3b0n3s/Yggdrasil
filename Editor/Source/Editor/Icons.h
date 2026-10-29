@@ -23,7 +23,8 @@ namespace Engine {
 		Script,
 		Font,
 		Replay,
-		SpriteSheet // M18: a texture cut into a grid of frames (Docs/Decisions/0029-m18-contract.md decision 18)
+		SpriteSheet, // M18: a texture cut into a grid of frames (Docs/Decisions/0029-m18-contract.md decision 18)
+		StringTable  // M22: a page of lines beside a speech bubble (Docs/Decisions/0033-m22-contract.md decision 10)
 	};
 
 	// First-party vector glyphs drawn with ImDrawList lines, no downloaded assets or icon licence. Main thread, inside an

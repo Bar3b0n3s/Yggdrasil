@@ -780,7 +780,7 @@ return true
 		{
 			Test::ScriptTestFixture fixture;
 			REQUIRE(fixture.Start());
-			for (const char* name : { "Script", "Field", "Scene", "Input", "Time", "Physics", "Audio", "Assets", "Task", "Random", "Math", "Debug", "Log", "Application", "Test" })
+			for (const char* name : { "Script", "Field", "Scene", "Input", "Time", "Physics", "Audio", "Assets", "Task", "Random", "Math", "Debug", "Log", "Application", "Test", "Loc" })
 				CHECK(std::ranges::any_of(fixture.GetApi().GetModules(), [name](const auto& group)
 				{
 					return group.Name == name;

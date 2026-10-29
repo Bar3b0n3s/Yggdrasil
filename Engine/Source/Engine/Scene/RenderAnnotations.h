@@ -24,6 +24,8 @@ namespace Engine {
 	// Label mode does not filter bounds/axes/colliders; those flags independently apply to eligible entities.
 	// InvalidArgument: invalid snapshot alpha/annotation values. Build first, then append, so failure is atomic.
 	// Repeated calls intentionally append again: the host calls once for each freshly extracted snapshot.
+	// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 9): the UI elements' bounds and labels go to snapshot.Ui's
+	// annotations in scene pixels (AppendUiRenderAnnotations, Scene/UiExtraction.h), whether or not the view has a camera.
 	[[nodiscard]] Status AppendRenderAnnotations(const Scene& scene, AssetManager& assets, const PhysicsLayerTable& layers,
 		const PhysicsSystem* physics, RenderSnapshot& snapshot);
 

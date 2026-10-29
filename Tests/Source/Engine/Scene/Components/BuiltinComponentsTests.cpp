@@ -8,6 +8,7 @@
 #include "Engine/Scene/Components/UnknownComponentsComponent.h"
 #include "Support/SceneTestFixture.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <string>
@@ -34,7 +35,7 @@ namespace Engine {
 	{
 		TEST_CASE("BuiltinComponents: every listed type is plain component data")
 		{
-			static_assert(BuiltinComponents::Size == 24);
+			static_assert(BuiltinComponents::Size == 30);
 			size_t count = 0;
 			ForEachType(BuiltinComponents{}, [&count]<typename T>()
 			{
@@ -253,6 +254,84 @@ namespace Engine {
 			CHECK(slot.ExecutionOrder == 0);
 		}
 
+		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 2): the Ui category's defaults.
+		TEST_CASE("BuiltinComponents: UI defaults follow the component table")
+		{
+			const UiCanvasComponent canvas;
+			CHECK(canvas.SortOrder == 0);
+			CHECK(canvas.ScaleMode == UiScaleMode::ConstantPixelSize);
+			CHECK(canvas.ScaleFactor == 1.0f);
+			CHECK(canvas.ReferenceHeight == 1080.0f);
+			CHECK(canvas.PixelSnap);
+
+			const UiRectComponent rect;
+			CHECK(rect.AnchorMin == glm::vec2(0.5f));
+			CHECK(rect.AnchorMax == glm::vec2(0.5f));
+			CHECK(rect.Pivot == glm::vec2(0.5f));
+			CHECK(rect.Position == glm::vec2(0.0f));
+			CHECK(rect.Size == glm::vec2(100.0f));
+			CHECK_FALSE(rect.ClipChildren);
+
+			const UiImageComponent image;
+			CHECK_FALSE(image.Sheet.IsValid());
+			CHECK(image.Frame == 0);
+			CHECK(image.Color == glm::vec4(1.0f));
+			CHECK(image.Type == UiImageType::Simple);
+			CHECK(image.BorderScale == 1.0f);
+			CHECK(image.Filter == UiImageFilter::Point);
+
+			const UiTextComponent text;
+			CHECK(text.Text.empty());
+			CHECK_FALSE(text.Font.IsValid());
+			CHECK(text.Size == 32.0f);
+			CHECK(text.Color == glm::vec4(1.0f));
+			CHECK(text.Alignment == TextAlignment::Left);
+			CHECK(text.VerticalAlignment == UiTextVerticalAlignment::Top);
+			CHECK(text.Wrap);
+			CHECK(text.LineSpacing == 1.0f);
+
+			const UiLayoutComponent layout;
+			CHECK(layout.Kind == UiLayoutKind::Stack);
+			CHECK(layout.Direction == UiLayoutDirection::Vertical);
+			CHECK(layout.Padding == UiPadding{});
+			CHECK(layout.Spacing == glm::vec2(0.0f));
+			CHECK(layout.MainAlignment == UiMainAlignment::Start);
+			CHECK(layout.CrossAlignment == UiCrossAlignment::Start);
+			CHECK(layout.Columns == 0);
+			CHECK(layout.CellSize == glm::vec2(100.0f));
+			CHECK_FALSE(layout.Wrap);
+
+			const UiLayoutElementComponent element;
+			CHECK_FALSE(element.IgnoreLayout);
+			CHECK(element.Grow == 0.0f);
+			CHECK(element.Shrink == 1.0f);
+			CHECK(element.MinSize == glm::vec2(0.0f));
+		}
+
+		// Several paths read only the added component's own Excludes (Entity:AddComponent, component.list and component.schema,
+		// the generated reference), so both components of an exclusion declare it: RigidBody and CharacterController, UiCanvas
+		// and UiRect (the C22.1 review, Docs/Decisions/0033-m22-contract.md decision 2).
+		TEST_CASE("BuiltinComponents: every exclusion is declared by both components")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			size_t exclusions = 0;
+			for (const ComponentInfo* component : registry->GetComponents())
+			{
+				for (const ComponentInfo* excluded : component->GetExcludes())
+				{
+					INFO(component->GetName(), " excludes ", excluded->GetName());
+					CHECK(std::find(excluded->GetExcludes().begin(), excluded->GetExcludes().end(), component) != excluded->GetExcludes().end());
+					++exclusions;
+				}
+			}
+			CHECK(exclusions == 4);
+			const ComponentInfo* canvas = registry->FindComponent<UiCanvasComponent>();
+			const ComponentInfo* rect = registry->FindComponent<UiRectComponent>();
+			REQUIRE(canvas != nullptr);
+			REQUIRE(rect != nullptr);
+			CHECK(std::find(rect->GetExcludes().begin(), rect->GetExcludes().end(), canvas) != rect->GetExcludes().end());
+		}
+
 		TEST_CASE("BuiltinComponents: every listed type is registered in list order")
 		{
 			TypeRegistry registry;
@@ -321,6 +400,12 @@ namespace Engine {
 				"AudioSource",
 				"AudioListener",
 				"Script",
+				"UiCanvas",
+				"UiRect",
+				"UiImage",
+				"UiText",
+				"UiLayout",
+				"UiLayoutElement",
 			};
 			std::vector<std::string> names;
 			for (const ComponentInfo* component : registry->GetComponents())
@@ -331,7 +416,7 @@ namespace Engine {
 		TEST_CASE("BuiltinComponents: every component has a category, a version and descriptions")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
-			const std::vector<std::string> categories = { "Core", "Rendering", "Physics", "Audio", "Scripting" };
+			const std::vector<std::string> categories = { "Core", "Rendering", "Physics", "Audio", "Scripting", "Ui" };
 			// The components that migrated since their first version: Prefab's override paths and Script's list of slots (M20,
 			// Docs/Decisions/0031-m20-contract.md decisions 10 and 17). Every other component is at version 1.
 			const std::map<std::string, uint32_t> migrated = { { "Prefab", 2 }, { "Script", 2 } };

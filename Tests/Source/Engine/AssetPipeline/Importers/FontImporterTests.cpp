@@ -745,6 +745,66 @@ namespace Engine {
 			CHECK(rejected.error().GetCode() == ErrorCode::Validation);
 		}
 
+		// M22 (C22.1, R-UI-TEXT's character ranges; Docs/Decisions/0033-m22-contract.md decision 6; stream B): a font's import
+		// settings add per-font ranges to ASCII and Latin-1 (FontImportSettings.Ranges, FontImporter version 4).
+		TEST_CASE("FontImporter: a font's Ranges add their codepoints to ASCII and Latin-1" * doctest::skip(true))
+		{
+			CHECK(FontImporter::Version == 4);
+			Test::AssetTestFixture fixture;
+			Result<ImportResult> defaults = ImportInter(fixture);
+			REQUIRE(defaults.has_value());
+			CHECK(FindGlyph(*LoadFont(*defaults), 0x03A9) == nullptr);
+
+			// Greek capitals (U+0391 to U+03A9): Inter has them; the codepoints the font lacks in a range (U+03A2) are left out.
+			Json greek = Json::object();
+			greek["Ranges"] = Json::array({ Json{ { "First", 0x0391 }, { "Last", 0x03A9 } } });
+			Result<ImportResult> imported = ImportFont(fixture, "Greek.ttf", ReadInter(), greek);
+			REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+			const AssetRef<FontData> font = LoadFont(*imported);
+			CHECK(FindGlyph(*font, 0x0391) != nullptr);
+			CHECK(FindGlyph(*font, 0x03A9) != nullptr);
+			CHECK(FindGlyph(*font, 0x03A2) == nullptr);
+			CHECK(FindGlyph(*font, 'A') != nullptr);
+			CHECK(FindGlyph(*font, 0x00E9) != nullptr);
+
+			// A range that is reversed, below U+0020 or beyond U+10FFFF is refused.
+			for (const Json& range : { Json{ { "First", 0x03A9 }, { "Last", 0x0391 } }, Json{ { "First", 0x0000 }, { "Last", 0x0010 } },
+					 Json{ { "First", 0x10FFF0 }, { "Last", 0x110000 } } })
+			{
+				CAPTURE(range.dump());
+				Json invalid = Json::object();
+				invalid["Ranges"] = Json::array({ range });
+				Result<ImportResult> rejected = ImportFont(fixture, "Bad.ttf", ReadInter(), invalid);
+				REQUIRE_FALSE(rejected.has_value());
+				CHECK(rejected.error().GetCode() == ErrorCode::Validation);
+			}
+
+			// The limits that bound the baker's work: at most 64 ranges and 65,536 codepoints in all, located under /Ranges.
+			// The ranges lie in Supplementary Private Use Area-B (U+100000 to U+10FFFF), which Inter lacks, so the accepted
+			// import bakes ASCII and Latin-1 only.
+			Json many = Json::array();
+			for (uint32_t index = 0; index < 65; ++index)
+				many.push_back(Json{ { "First", 0x100000 + index }, { "Last", 0x100000 + index } });
+			const Json overLimit = Json::array({ Json{ { "First", 0x0FFFFF }, { "Last", 0x10FFFF } } }); // 65,537 codepoints
+			for (const Json& ranges : { many, overLimit })
+			{
+				CAPTURE(ranges.size());
+				Json invalid = Json::object();
+				invalid["Ranges"] = ranges;
+				Result<ImportResult> rejected = ImportFont(fixture, "Large.ttf", ReadInter(), invalid);
+				REQUIRE_FALSE(rejected.has_value());
+				CHECK(rejected.error().GetCode() == ErrorCode::Validation);
+				REQUIRE_FALSE(rejected.error().GetIssues().empty());
+				CHECK(rejected.error().GetIssues().front().JsonPointer.starts_with("/Ranges"));
+			}
+			// Exactly 65,536 codepoints, split over two ranges, is accepted.
+			Json atLimit = Json::object();
+			atLimit["Ranges"] = Json::array({ Json{ { "First", 0x100000 }, { "Last", 0x107FFF } }, Json{ { "First", 0x108000 }, { "Last", 0x10FFFF } } });
+			Result<ImportResult> accepted = ImportFont(fixture, "Limit.ttf", ReadInter(), atLimit);
+			REQUIRE_MESSAGE(accepted.has_value(), accepted.error().ToString());
+			CHECK(FindGlyph(*LoadFont(*accepted), 'A') != nullptr);
+		}
+
 		TEST_CASE("FontImporter: the generated Glyphs.ttf imports its quadratic outlines, counters and legacy kerning")
 		{
 			// Tests/Data/Assets/Fonts/Glyphs.ttf (MakeFormatFixtures.py): 1000 units per em, ascent 800, descent -200; space

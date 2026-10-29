@@ -31,6 +31,8 @@ namespace Engine {
 			ENGINE_TRY(ScriptBindings::RegisterLog(api));
 			ENGINE_TRY(ScriptBindings::RegisterApplication(api));
 			ENGINE_TRY(ScriptBindings::RegisterTest(api));
+			// M22 (Docs/Decisions/0033-m22-contract.md decision 11); phase 2's modules append in landing order.
+			ENGINE_TRY(ScriptBindings::RegisterLoc(api));
 			return {};
 		}
 

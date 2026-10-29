@@ -3099,6 +3099,24 @@
 							},
 							"Script": {
 								"$ref": "#/$defs/Script"
+							},
+							"UiCanvas": {
+								"$ref": "#/$defs/UiCanvas"
+							},
+							"UiRect": {
+								"$ref": "#/$defs/UiRect"
+							},
+							"UiImage": {
+								"$ref": "#/$defs/UiImage"
+							},
+							"UiText": {
+								"$ref": "#/$defs/UiText"
+							},
+							"UiLayout": {
+								"$ref": "#/$defs/UiLayout"
+							},
+							"UiLayoutElement": {
+								"$ref": "#/$defs/UiLayoutElement"
 							}
 						},
 						"additionalProperties": false
@@ -4287,6 +4305,384 @@
 						},
 						"additionalProperties": false
 					},
+					"UiCanvas": {
+						"description": "The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text.",
+						"type": "object",
+						"properties": {
+							"SortOrder": {
+								"description": "Canvases draw in ascending SortOrder, ties in entity order; a later canvas draws over earlier ones.",
+								"type": "integer",
+								"minimum": -2147483648,
+								"maximum": 2147483647
+							},
+							"ScaleMode": {
+								"description": "How canvas units map to scene pixels.",
+								"enum": ["ConstantPixelSize", "MatchHeight"]
+							},
+							"ScaleFactor": {
+								"description": "ConstantPixelSize: the scene pixels per canvas unit.",
+								"type": "number",
+								"minimum": 0.01,
+								"maximum": 100
+							},
+							"ReferenceHeight": {
+								"description": "MatchHeight: the canvas's height in canvas units, so one unit is the scene's height / ReferenceHeight scene pixels.",
+								"type": "number",
+								"minimum": 1,
+								"maximum": 100000
+							},
+							"PixelSnap": {
+								"description": "Rounds every element's corners to whole scene pixels, so images and clips land on pixel corners.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"UiRect": {
+						"description": "A UI element's rectangle in its parent's (or its canvas's), in canvas units, x right and y down.",
+						"type": "object",
+						"properties": {
+							"AnchorMin": {
+								"description": "The anchor rectangle's top-left corner, normalized in the parent's rectangle: (0, 0) its top-left corner, (1, 1) its bottom-right.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"AnchorMax": {
+								"description": "The anchor rectangle's bottom-right corner, normalized in the parent's rectangle; equal to AnchorMin for a fixed-size element.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Pivot": {
+								"description": "The point of the element that Position places, normalized to the element: (0, 0) its top-left corner, (1, 1) its bottom-right.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Position": {
+								"description": "The pivot's offset from its point in the anchor rectangle, in canvas units, x right and y down.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": -1000000,
+										"maximum": 1000000
+									},
+									{
+										"type": "number",
+										"minimum": -1000000,
+										"maximum": 1000000
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Size": {
+								"description": "The element's size in canvas units, added to the anchor rectangle's size (negative values inset stretched anchors); a container's child takes it as its preferred size.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": -1000000,
+										"maximum": 1000000
+									},
+									{
+										"type": "number",
+										"minimum": -1000000,
+										"maximum": 1000000
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"ClipChildren": {
+								"description": "Whether the element's descendants are clipped to its rectangle.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"UiImage": {
+						"description": "Draws a sprite sheet frame, or a plain colour, over a UI element's rectangle.",
+						"type": "object",
+						"properties": {
+							"Sheet": {
+								"description": "The sprite sheet whose frame is drawn; null draws a plain rectangle of Color.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "SpriteSheet"
+							},
+							"Frame": {
+								"description": "The index of the frame in the sheet's Frames; a frame the sheet lacks draws nothing.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 65535
+							},
+							"Color": {
+								"description": "The linear tint multiplied with the frame's texels, with opacity in the fourth component.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"Type": {
+								"description": "Whether the frame stretches or keeps its 9-slice borders.",
+								"enum": ["Simple", "Sliced"]
+							},
+							"BorderScale": {
+								"description": "Sliced: the canvas units each border texel takes.",
+								"type": "number",
+								"minimum": 0.01,
+								"maximum": 1000
+							},
+							"Filter": {
+								"description": "How the frame's texture is sampled.",
+								"enum": ["Point", "Linear"]
+							}
+						},
+						"additionalProperties": false
+					},
+					"UiText": {
+						"description": "Draws text in a UI element's rectangle, wrapped and aligned in it.",
+						"type": "object",
+						"properties": {
+							"Text": {
+								"description": "The UTF-8 text; a line feed starts a new line. Scripts read localized strings with Loc.Get.",
+								"type": "string"
+							},
+							"Font": {
+								"description": "The font; null uses the default font.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Font"
+							},
+							"Size": {
+								"description": "The em size in canvas units.",
+								"type": "number",
+								"minimum": 1,
+								"maximum": 100000
+							},
+							"Color": {
+								"description": "The linear text colour with opacity in the fourth component.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"Alignment": {
+								"description": "How each line is aligned within the rectangle's width.",
+								"enum": ["Left", "Center", "Right"]
+							},
+							"VerticalAlignment": {
+								"description": "Where the text block sits in the rectangle's height.",
+								"enum": ["Top", "Middle", "Bottom"]
+							},
+							"Wrap": {
+								"description": "Whether lines break at spaces to fit the rectangle's width.",
+								"type": "boolean"
+							},
+							"LineSpacing": {
+								"description": "Multiplies the font's line height.",
+								"type": "number",
+								"minimum": 0.1,
+								"maximum": 10
+							}
+						},
+						"additionalProperties": false
+					},
+					"UiLayout": {
+						"description": "A container that places its children's rectangles in a stack, a grid or a flexible row or column.",
+						"type": "object",
+						"properties": {
+							"Kind": {
+								"description": "How the children are placed.",
+								"enum": ["Stack", "Grid", "Flex"]
+							},
+							"Direction": {
+								"description": "The main axis the children follow.",
+								"enum": ["Horizontal", "Vertical"]
+							},
+							"Padding": {
+								"description": "Insets of the container's rectangle that the children are placed in.",
+								"$ref": "#/$defs/UiPadding"
+							},
+							"Spacing": {
+								"description": "The gaps between children, lines and cells along x and y, in canvas units.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000000
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000000
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"MainAlignment": {
+								"description": "Where the children sit along the main axis when they do not fill it.",
+								"enum": ["Start", "Center", "End"]
+							},
+							"CrossAlignment": {
+								"description": "Where each child sits across the main axis.",
+								"enum": ["Start", "Center", "End", "Stretch"]
+							},
+							"Columns": {
+								"description": "Grid: the cells per row (Horizontal) or per column (Vertical); 0 fits as many as the container holds.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 1024
+							},
+							"CellSize": {
+								"description": "Grid: the size of each cell in canvas units.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000000
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000000
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Wrap": {
+								"description": "Flex: whether a child that does not fit the line starts a new line.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"UiLayoutElement": {
+						"description": "How a UI element takes part in its parent's layout container: flex weights, a minimum size, or none.",
+						"type": "object",
+						"properties": {
+							"IgnoreLayout": {
+								"description": "Whether the element keeps its own placement and takes no space in the container.",
+								"type": "boolean"
+							},
+							"Grow": {
+								"description": "Flex: the element's share of the main axis's free space.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"Shrink": {
+								"description": "Flex: the element's share, times its preferred size, of the main axis's overflow.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"MinSize": {
+								"description": "The size the element never goes below in a Stack or Flex container, in canvas units.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000000
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000000
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							}
+						},
+						"additionalProperties": false
+					},
 					"PrefabOverride": {
 						"description": "One recorded difference between an outermost prefab instance and its prefab.",
 						"type": "object",
@@ -4337,6 +4733,37 @@
 								"type": "integer",
 								"minimum": -2147483648,
 								"maximum": 2147483647
+							}
+						},
+						"additionalProperties": false
+					},
+					"UiPadding": {
+						"description": "Insets of a UI layout container's rectangle, in canvas units.",
+						"type": "object",
+						"properties": {
+							"Left": {
+								"description": "The inset from the left edge.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000000
+							},
+							"Top": {
+								"description": "The inset from the top edge.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000000
+							},
+							"Right": {
+								"description": "The inset from the right edge.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000000
+							},
+							"Bottom": {
+								"description": "The inset from the bottom edge.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000000
 							}
 						},
 						"additionalProperties": false
@@ -4979,6 +5406,24 @@
 							},
 							"Script": {
 								"$ref": "#/$defs/Script"
+							},
+							"UiCanvas": {
+								"$ref": "#/$defs/UiCanvas"
+							},
+							"UiRect": {
+								"$ref": "#/$defs/UiRect"
+							},
+							"UiImage": {
+								"$ref": "#/$defs/UiImage"
+							},
+							"UiText": {
+								"$ref": "#/$defs/UiText"
+							},
+							"UiLayout": {
+								"$ref": "#/$defs/UiLayout"
+							},
+							"UiLayoutElement": {
+								"$ref": "#/$defs/UiLayoutElement"
 							}
 						},
 						"additionalProperties": false
@@ -6174,6 +6619,384 @@
 						},
 						"additionalProperties": false
 					},
+					"UiCanvas": {
+						"description": "The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text.",
+						"type": "object",
+						"properties": {
+							"SortOrder": {
+								"description": "Canvases draw in ascending SortOrder, ties in entity order; a later canvas draws over earlier ones.",
+								"type": "integer",
+								"minimum": -2147483648,
+								"maximum": 2147483647
+							},
+							"ScaleMode": {
+								"description": "How canvas units map to scene pixels.",
+								"enum": ["ConstantPixelSize", "MatchHeight"]
+							},
+							"ScaleFactor": {
+								"description": "ConstantPixelSize: the scene pixels per canvas unit.",
+								"type": "number",
+								"minimum": 0.01,
+								"maximum": 100
+							},
+							"ReferenceHeight": {
+								"description": "MatchHeight: the canvas's height in canvas units, so one unit is the scene's height / ReferenceHeight scene pixels.",
+								"type": "number",
+								"minimum": 1,
+								"maximum": 100000
+							},
+							"PixelSnap": {
+								"description": "Rounds every element's corners to whole scene pixels, so images and clips land on pixel corners.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"UiRect": {
+						"description": "A UI element's rectangle in its parent's (or its canvas's), in canvas units, x right and y down.",
+						"type": "object",
+						"properties": {
+							"AnchorMin": {
+								"description": "The anchor rectangle's top-left corner, normalized in the parent's rectangle: (0, 0) its top-left corner, (1, 1) its bottom-right.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"AnchorMax": {
+								"description": "The anchor rectangle's bottom-right corner, normalized in the parent's rectangle; equal to AnchorMin for a fixed-size element.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Pivot": {
+								"description": "The point of the element that Position places, normalized to the element: (0, 0) its top-left corner, (1, 1) its bottom-right.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Position": {
+								"description": "The pivot's offset from its point in the anchor rectangle, in canvas units, x right and y down.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": -1000000,
+										"maximum": 1000000
+									},
+									{
+										"type": "number",
+										"minimum": -1000000,
+										"maximum": 1000000
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Size": {
+								"description": "The element's size in canvas units, added to the anchor rectangle's size (negative values inset stretched anchors); a container's child takes it as its preferred size.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": -1000000,
+										"maximum": 1000000
+									},
+									{
+										"type": "number",
+										"minimum": -1000000,
+										"maximum": 1000000
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"ClipChildren": {
+								"description": "Whether the element's descendants are clipped to its rectangle.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"UiImage": {
+						"description": "Draws a sprite sheet frame, or a plain colour, over a UI element's rectangle.",
+						"type": "object",
+						"properties": {
+							"Sheet": {
+								"description": "The sprite sheet whose frame is drawn; null draws a plain rectangle of Color.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "SpriteSheet"
+							},
+							"Frame": {
+								"description": "The index of the frame in the sheet's Frames; a frame the sheet lacks draws nothing.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 65535
+							},
+							"Color": {
+								"description": "The linear tint multiplied with the frame's texels, with opacity in the fourth component.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"Type": {
+								"description": "Whether the frame stretches or keeps its 9-slice borders.",
+								"enum": ["Simple", "Sliced"]
+							},
+							"BorderScale": {
+								"description": "Sliced: the canvas units each border texel takes.",
+								"type": "number",
+								"minimum": 0.01,
+								"maximum": 1000
+							},
+							"Filter": {
+								"description": "How the frame's texture is sampled.",
+								"enum": ["Point", "Linear"]
+							}
+						},
+						"additionalProperties": false
+					},
+					"UiText": {
+						"description": "Draws text in a UI element's rectangle, wrapped and aligned in it.",
+						"type": "object",
+						"properties": {
+							"Text": {
+								"description": "The UTF-8 text; a line feed starts a new line. Scripts read localized strings with Loc.Get.",
+								"type": "string"
+							},
+							"Font": {
+								"description": "The font; null uses the default font.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Font"
+							},
+							"Size": {
+								"description": "The em size in canvas units.",
+								"type": "number",
+								"minimum": 1,
+								"maximum": 100000
+							},
+							"Color": {
+								"description": "The linear text colour with opacity in the fourth component.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"Alignment": {
+								"description": "How each line is aligned within the rectangle's width.",
+								"enum": ["Left", "Center", "Right"]
+							},
+							"VerticalAlignment": {
+								"description": "Where the text block sits in the rectangle's height.",
+								"enum": ["Top", "Middle", "Bottom"]
+							},
+							"Wrap": {
+								"description": "Whether lines break at spaces to fit the rectangle's width.",
+								"type": "boolean"
+							},
+							"LineSpacing": {
+								"description": "Multiplies the font's line height.",
+								"type": "number",
+								"minimum": 0.1,
+								"maximum": 10
+							}
+						},
+						"additionalProperties": false
+					},
+					"UiLayout": {
+						"description": "A container that places its children's rectangles in a stack, a grid or a flexible row or column.",
+						"type": "object",
+						"properties": {
+							"Kind": {
+								"description": "How the children are placed.",
+								"enum": ["Stack", "Grid", "Flex"]
+							},
+							"Direction": {
+								"description": "The main axis the children follow.",
+								"enum": ["Horizontal", "Vertical"]
+							},
+							"Padding": {
+								"description": "Insets of the container's rectangle that the children are placed in.",
+								"$ref": "#/$defs/UiPadding"
+							},
+							"Spacing": {
+								"description": "The gaps between children, lines and cells along x and y, in canvas units.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000000
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000000
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"MainAlignment": {
+								"description": "Where the children sit along the main axis when they do not fill it.",
+								"enum": ["Start", "Center", "End"]
+							},
+							"CrossAlignment": {
+								"description": "Where each child sits across the main axis.",
+								"enum": ["Start", "Center", "End", "Stretch"]
+							},
+							"Columns": {
+								"description": "Grid: the cells per row (Horizontal) or per column (Vertical); 0 fits as many as the container holds.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 1024
+							},
+							"CellSize": {
+								"description": "Grid: the size of each cell in canvas units.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000000
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000000
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Wrap": {
+								"description": "Flex: whether a child that does not fit the line starts a new line.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"UiLayoutElement": {
+						"description": "How a UI element takes part in its parent's layout container: flex weights, a minimum size, or none.",
+						"type": "object",
+						"properties": {
+							"IgnoreLayout": {
+								"description": "Whether the element keeps its own placement and takes no space in the container.",
+								"type": "boolean"
+							},
+							"Grow": {
+								"description": "Flex: the element's share of the main axis's free space.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"Shrink": {
+								"description": "Flex: the element's share, times its preferred size, of the main axis's overflow.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"MinSize": {
+								"description": "The size the element never goes below in a Stack or Flex container, in canvas units.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000000
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000000
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							}
+						},
+						"additionalProperties": false
+					},
 					"PrefabOverride": {
 						"description": "One recorded difference between an outermost prefab instance and its prefab.",
 						"type": "object",
@@ -6224,6 +7047,37 @@
 								"type": "integer",
 								"minimum": -2147483648,
 								"maximum": 2147483647
+							}
+						},
+						"additionalProperties": false
+					},
+					"UiPadding": {
+						"description": "Insets of a UI layout container's rectangle, in canvas units.",
+						"type": "object",
+						"properties": {
+							"Left": {
+								"description": "The inset from the left edge.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000000
+							},
+							"Top": {
+								"description": "The inset from the top edge.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000000
+							},
+							"Right": {
+								"description": "The inset from the right edge.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000000
+							},
+							"Bottom": {
+								"description": "The inset from the bottom edge.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000000
 							}
 						},
 						"additionalProperties": false
@@ -9990,6 +10844,24 @@
 							},
 							"Script": {
 								"$ref": "#/$defs/Script"
+							},
+							"UiCanvas": {
+								"$ref": "#/$defs/UiCanvas"
+							},
+							"UiRect": {
+								"$ref": "#/$defs/UiRect"
+							},
+							"UiImage": {
+								"$ref": "#/$defs/UiImage"
+							},
+							"UiText": {
+								"$ref": "#/$defs/UiText"
+							},
+							"UiLayout": {
+								"$ref": "#/$defs/UiLayout"
+							},
+							"UiLayoutElement": {
+								"$ref": "#/$defs/UiLayoutElement"
 							}
 						},
 						"additionalProperties": false
@@ -11174,6 +12046,384 @@
 						},
 						"additionalProperties": false
 					},
+					"UiCanvas": {
+						"description": "The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text.",
+						"type": "object",
+						"properties": {
+							"SortOrder": {
+								"description": "Canvases draw in ascending SortOrder, ties in entity order; a later canvas draws over earlier ones.",
+								"type": "integer",
+								"minimum": -2147483648,
+								"maximum": 2147483647
+							},
+							"ScaleMode": {
+								"description": "How canvas units map to scene pixels.",
+								"enum": ["ConstantPixelSize", "MatchHeight"]
+							},
+							"ScaleFactor": {
+								"description": "ConstantPixelSize: the scene pixels per canvas unit.",
+								"type": "number",
+								"minimum": 0.01,
+								"maximum": 100
+							},
+							"ReferenceHeight": {
+								"description": "MatchHeight: the canvas's height in canvas units, so one unit is the scene's height / ReferenceHeight scene pixels.",
+								"type": "number",
+								"minimum": 1,
+								"maximum": 100000
+							},
+							"PixelSnap": {
+								"description": "Rounds every element's corners to whole scene pixels, so images and clips land on pixel corners.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"UiRect": {
+						"description": "A UI element's rectangle in its parent's (or its canvas's), in canvas units, x right and y down.",
+						"type": "object",
+						"properties": {
+							"AnchorMin": {
+								"description": "The anchor rectangle's top-left corner, normalized in the parent's rectangle: (0, 0) its top-left corner, (1, 1) its bottom-right.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"AnchorMax": {
+								"description": "The anchor rectangle's bottom-right corner, normalized in the parent's rectangle; equal to AnchorMin for a fixed-size element.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Pivot": {
+								"description": "The point of the element that Position places, normalized to the element: (0, 0) its top-left corner, (1, 1) its bottom-right.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Position": {
+								"description": "The pivot's offset from its point in the anchor rectangle, in canvas units, x right and y down.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": -1000000,
+										"maximum": 1000000
+									},
+									{
+										"type": "number",
+										"minimum": -1000000,
+										"maximum": 1000000
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Size": {
+								"description": "The element's size in canvas units, added to the anchor rectangle's size (negative values inset stretched anchors); a container's child takes it as its preferred size.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": -1000000,
+										"maximum": 1000000
+									},
+									{
+										"type": "number",
+										"minimum": -1000000,
+										"maximum": 1000000
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"ClipChildren": {
+								"description": "Whether the element's descendants are clipped to its rectangle.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"UiImage": {
+						"description": "Draws a sprite sheet frame, or a plain colour, over a UI element's rectangle.",
+						"type": "object",
+						"properties": {
+							"Sheet": {
+								"description": "The sprite sheet whose frame is drawn; null draws a plain rectangle of Color.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "SpriteSheet"
+							},
+							"Frame": {
+								"description": "The index of the frame in the sheet's Frames; a frame the sheet lacks draws nothing.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 65535
+							},
+							"Color": {
+								"description": "The linear tint multiplied with the frame's texels, with opacity in the fourth component.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"Type": {
+								"description": "Whether the frame stretches or keeps its 9-slice borders.",
+								"enum": ["Simple", "Sliced"]
+							},
+							"BorderScale": {
+								"description": "Sliced: the canvas units each border texel takes.",
+								"type": "number",
+								"minimum": 0.01,
+								"maximum": 1000
+							},
+							"Filter": {
+								"description": "How the frame's texture is sampled.",
+								"enum": ["Point", "Linear"]
+							}
+						},
+						"additionalProperties": false
+					},
+					"UiText": {
+						"description": "Draws text in a UI element's rectangle, wrapped and aligned in it.",
+						"type": "object",
+						"properties": {
+							"Text": {
+								"description": "The UTF-8 text; a line feed starts a new line. Scripts read localized strings with Loc.Get.",
+								"type": "string"
+							},
+							"Font": {
+								"description": "The font; null uses the default font.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Font"
+							},
+							"Size": {
+								"description": "The em size in canvas units.",
+								"type": "number",
+								"minimum": 1,
+								"maximum": 100000
+							},
+							"Color": {
+								"description": "The linear text colour with opacity in the fourth component.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"Alignment": {
+								"description": "How each line is aligned within the rectangle's width.",
+								"enum": ["Left", "Center", "Right"]
+							},
+							"VerticalAlignment": {
+								"description": "Where the text block sits in the rectangle's height.",
+								"enum": ["Top", "Middle", "Bottom"]
+							},
+							"Wrap": {
+								"description": "Whether lines break at spaces to fit the rectangle's width.",
+								"type": "boolean"
+							},
+							"LineSpacing": {
+								"description": "Multiplies the font's line height.",
+								"type": "number",
+								"minimum": 0.1,
+								"maximum": 10
+							}
+						},
+						"additionalProperties": false
+					},
+					"UiLayout": {
+						"description": "A container that places its children's rectangles in a stack, a grid or a flexible row or column.",
+						"type": "object",
+						"properties": {
+							"Kind": {
+								"description": "How the children are placed.",
+								"enum": ["Stack", "Grid", "Flex"]
+							},
+							"Direction": {
+								"description": "The main axis the children follow.",
+								"enum": ["Horizontal", "Vertical"]
+							},
+							"Padding": {
+								"description": "Insets of the container's rectangle that the children are placed in.",
+								"$ref": "#/$defs/UiPadding"
+							},
+							"Spacing": {
+								"description": "The gaps between children, lines and cells along x and y, in canvas units.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000000
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000000
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"MainAlignment": {
+								"description": "Where the children sit along the main axis when they do not fill it.",
+								"enum": ["Start", "Center", "End"]
+							},
+							"CrossAlignment": {
+								"description": "Where each child sits across the main axis.",
+								"enum": ["Start", "Center", "End", "Stretch"]
+							},
+							"Columns": {
+								"description": "Grid: the cells per row (Horizontal) or per column (Vertical); 0 fits as many as the container holds.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 1024
+							},
+							"CellSize": {
+								"description": "Grid: the size of each cell in canvas units.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000000
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000000
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Wrap": {
+								"description": "Flex: whether a child that does not fit the line starts a new line.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"UiLayoutElement": {
+						"description": "How a UI element takes part in its parent's layout container: flex weights, a minimum size, or none.",
+						"type": "object",
+						"properties": {
+							"IgnoreLayout": {
+								"description": "Whether the element keeps its own placement and takes no space in the container.",
+								"type": "boolean"
+							},
+							"Grow": {
+								"description": "Flex: the element's share of the main axis's free space.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"Shrink": {
+								"description": "Flex: the element's share, times its preferred size, of the main axis's overflow.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"MinSize": {
+								"description": "The size the element never goes below in a Stack or Flex container, in canvas units.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000000
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000000
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							}
+						},
+						"additionalProperties": false
+					},
 					"PrefabOverride": {
 						"description": "One recorded difference between an outermost prefab instance and its prefab.",
 						"type": "object",
@@ -11224,6 +12474,37 @@
 								"type": "integer",
 								"minimum": -2147483648,
 								"maximum": 2147483647
+							}
+						},
+						"additionalProperties": false
+					},
+					"UiPadding": {
+						"description": "Insets of a UI layout container's rectangle, in canvas units.",
+						"type": "object",
+						"properties": {
+							"Left": {
+								"description": "The inset from the left edge.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000000
+							},
+							"Top": {
+								"description": "The inset from the top edge.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000000
+							},
+							"Right": {
+								"description": "The inset from the right edge.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000000
+							},
+							"Bottom": {
+								"description": "The inset from the bottom edge.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000000
 							}
 						},
 						"additionalProperties": false
@@ -17550,6 +18831,268 @@
 					"description": "Run every test and return the script API coverage counters.",
 					"params": {
 						"coverage": true
+					}
+				}
+			]
+		},
+		{
+			"name": "ui.tree",
+			"domain": "ui",
+			"description": "Shows the scene's UI laid out in scene pixels: every canvas and element with its rectangle, clip, visibility, components and text, as a compact text outline or a flat JSON list, optionally for one canvas and to a depth.",
+			"exposeAsTool": true,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": true,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": [],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "UiTreeParams",
+				"description": "The params of ui.tree.",
+				"type": "object",
+				"properties": {
+					"canvas": {
+						"description": "An entity with a UiCanvas whose UI alone is listed; omitted: every canvas.",
+						"type": "string"
+					},
+					"depth": {
+						"description": "The most levels listed below each canvas; 0: unlimited.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"format": {
+						"description": "Text: a compact outline; Json: a flat list of entries.",
+						"enum": ["Text", "Json"]
+					},
+					"width": {
+						"description": "The scene resolution's width to lay out at, with height; omitted: the play session's own, or the project's window size for the edit scene.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 16384
+					},
+					"height": {
+						"description": "The scene resolution's height to lay out at, with width.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 16384
+					},
+					"target": {
+						"description": "The scene to read; omitted: the play scene while playing, else the edit scene.",
+						"enum": ["Edit", "Play"]
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "UiTreeResult",
+				"description": "A scene's UI laid out in scene pixels.",
+				"type": "object",
+				"properties": {
+					"scene": {
+						"description": "The scene read.",
+						"$ref": "#/$defs/SceneSummary"
+					},
+					"width": {
+						"description": "The scene resolution's width laid out at.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"height": {
+						"description": "The scene resolution's height laid out at.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"text": {
+						"description": "The outline (format text).",
+						"type": "string"
+					},
+					"elements": {
+						"description": "The canvases in draw order, each followed by its elements in draw order (format json).",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/UiTreeEntry"
+						}
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"SceneSummary": {
+						"description": "The open scene.",
+						"type": "object",
+						"properties": {
+							"path": {
+								"description": "The project-relative path of its file; empty for a scene never saved.",
+								"type": "string"
+							},
+							"name": {
+								"description": "The scene's name.",
+								"type": "string"
+							},
+							"revision": {
+								"description": "The host's revision (_meta.revision; the play scene's in the Runtime): it grows with every change to the open scene or the project settings; writing an asset or script file alone leaves it unchanged.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"dirty": {
+								"description": "Whether the scene has unsaved changes.",
+								"type": "boolean"
+							},
+							"entityCount": {
+								"description": "The number of entities.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							}
+						},
+						"additionalProperties": false
+					},
+					"UiTreeEntry": {
+						"description": "One canvas or UI element of ui.tree's JSON list, in draw order.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The entity's id.",
+								"type": "string"
+							},
+							"name": {
+								"description": "The entity's name.",
+								"type": "string"
+							},
+							"path": {
+								"description": "The entity's path.",
+								"type": "string"
+							},
+							"canvas": {
+								"description": "The id of the canvas the element belongs to (a canvas's own id).",
+								"type": "string"
+							},
+							"parent": {
+								"description": "The parent element's id, or the canvas's for a top-level element; empty for a canvas.",
+								"type": "string"
+							},
+							"depth": {
+								"description": "0 for a canvas, 1 for a top-level element, one more per level below it.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"components": {
+								"description": "The UI components the entity holds, in registry order.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"rect": {
+								"description": "The laid-out rectangle in scene pixels; a canvas's is the whole scene image.",
+								"$ref": "#/$defs/UiPixelRect"
+							},
+							"sortOrder": {
+								"description": "A canvas's UiCanvas SortOrder (canvases draw in ascending order); 0 for an element.",
+								"type": "integer",
+								"minimum": -2147483648,
+								"maximum": 2147483647
+							},
+							"scale": {
+								"description": "A canvas's scale: the scene pixels per canvas unit at the resolution laid out at, which turns a pixel measurement into UiRect's canvas units; 0 for an element.",
+								"type": "number"
+							},
+							"clipped": {
+								"description": "Whether a clipping ancestor (UiRect.ClipChildren) clips the element to clip.",
+								"type": "boolean"
+							},
+							"clip": {
+								"description": "The clip rectangle in whole scene pixels, when clipped.",
+								"$ref": "#/$defs/UiPixelRect"
+							},
+							"visible": {
+								"description": "Whether the element covers a pixel of the scene image once clipped.",
+								"type": "boolean"
+							},
+							"text": {
+								"description": "Its UiText's text, cut to 256 bytes; empty without one.",
+								"type": "string"
+							},
+							"interactable": {
+								"description": "Whether the element takes pointer and navigation input (W22.2; false before).",
+								"type": "boolean"
+							},
+							"focused": {
+								"description": "Whether the element has the focus (W22.2; false before).",
+								"type": "boolean"
+							},
+							"hovered": {
+								"description": "Whether the pointer is over the element (W22.2; false before).",
+								"type": "boolean"
+							},
+							"pressed": {
+								"description": "Whether the element is pressed (W22.2; false before).",
+								"type": "boolean"
+							},
+							"widget": {
+								"description": "The element's widget kind, such as Button or Slider (W22.2); empty for none.",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					},
+					"UiPixelRect": {
+						"description": "A rectangle in scene pixels: x right and y down from the scene image's top-left corner.",
+						"type": "object",
+						"properties": {
+							"x": {
+								"description": "The left edge.",
+								"type": "number"
+							},
+							"y": {
+								"description": "The top edge.",
+								"type": "number"
+							},
+							"width": {
+								"description": "The width.",
+								"type": "number"
+							},
+							"height": {
+								"description": "The height.",
+								"type": "number"
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Outline every canvas.",
+					"params": {
+						"format": "Text"
 					}
 				}
 			]

@@ -18,8 +18,9 @@
 // labels drawn as SDF text (TextRenderer), each with a colour, a duration in simulation seconds and a depth mode. It is
 // plain CPU data in the RenderSnapshot (RenderSnapshot::DebugDraw), filled by scripts (Debug.*, M13), collider
 // visualization (built from the components, so it works in edit mode, M11), light and camera gizmos (M9, M10) and the
-// editor. This header is the second of the two Renderer headers Scene may include (§3 rule 3, the SnapshotHeaders rule of
-// Scripts/ModuleRules.json): it includes nothing beyond Core, glm and the standard library, and no NVRHI.
+// editor. This header is one of the Renderer headers Scene may include (§3 rule 3, the SnapshotHeaders rule of
+// Scripts/ModuleRules.json, with RenderSnapshot.h and M22's UiDrawList.h): it includes nothing beyond Core, glm and the
+// standard library, and no NVRHI.
 //
 // A list is a value type (copyable, movable, comparable), thread-compatible, deterministic: commands keep the order they
 // were added in, and the renderer draws them in that order, so a deterministic producer gives an identical image. Values

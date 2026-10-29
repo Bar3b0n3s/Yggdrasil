@@ -339,7 +339,8 @@
 			],
 			"Headers": [
 				"Engine/Source/Engine/Renderer/RenderSnapshot.h",
-				"Engine/Source/Engine/Renderer/DebugDrawList.h"
+				"Engine/Source/Engine/Renderer/DebugDrawList.h",
+				"Engine/Source/Engine/Renderer/UiDrawList.h"
 			],
 			"ThirdParty": {
 				"Public": [
@@ -447,10 +448,11 @@
 		]
 	],
 	"SnapshotHeaders": {
-		"Notes": "Renderer/RenderSnapshot.h and Renderer/DebugDrawList.h, the only Renderer headers Scene may include, include nothing beyond Core, Asset, glm and the standard library, directly or transitively; in particular no NVRHI (section 3 rule 3). Transitively, the third-party headers that Core and Asset public headers may include are accepted.",
+		"Notes": "Renderer/RenderSnapshot.h, Renderer/DebugDrawList.h and Renderer/UiDrawList.h (M22, Docs/Decisions/0033-m22-contract.md decision 7), the only Renderer headers Scene may include, include nothing beyond Core, Asset, glm and the standard library, directly or transitively; in particular no NVRHI (section 3 rule 3). Transitively, the third-party headers that Core and Asset public headers may include are accepted.",
 		"Files": [
 			"Engine/Source/Engine/Renderer/RenderSnapshot.h",
-			"Engine/Source/Engine/Renderer/DebugDrawList.h"
+			"Engine/Source/Engine/Renderer/DebugDrawList.h",
+			"Engine/Source/Engine/Renderer/UiDrawList.h"
 		],
 		"AllowedModules": [
 			"Core",

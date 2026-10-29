@@ -15,6 +15,7 @@
 #include "Engine/Automation/Methods/ScriptMethods.h"
 #include "Engine/Automation/Methods/SessionMethods.h"
 #include "Engine/Automation/Methods/StatsMethods.h"
+#include "Engine/Automation/Methods/UiMethods.h"
 
 namespace Engine {
 
@@ -38,6 +39,9 @@ namespace Engine {
 		RegisterStatsMethodTypes(registry);
 		RegisterSharedScriptMethodTypes(registry);
 		RegisterReplayMethodTypes(registry);
+		// M22 (Docs/Decisions/0033-m22-contract.md decision 8): ui.tree, after the scene types it uses; phase 2's domains append
+		// in landing order.
+		RegisterUiMethodTypes(registry);
 	}
 
 	void RegisterSharedMethods(MethodRegistry& methods, AutomationHost host)
@@ -58,6 +62,8 @@ namespace Engine {
 		RegisterStatsMethods(methods);
 		RegisterSharedScriptMethods(methods);
 		RegisterReplayMethods(methods);
+		// M22 (decision 8).
+		RegisterUiMethods(methods);
 	}
 
 }

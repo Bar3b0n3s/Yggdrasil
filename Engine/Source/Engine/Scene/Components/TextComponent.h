@@ -26,9 +26,10 @@ namespace Engine {
 		Right
 	};
 
-	// Registry name "Text" (Architecture §5.3, §8.10): SDF text, the only UI element in v1. A null Font is the default
-	// font. Size in pixels at the 1080p reference height. Anchor is viewport-normalized (Screen space); Pivot is normalized
-	// to the text block; Offset in pixels; Billboard applies in World space.
+	// Registry name "Text" (Architecture §5.3, §8.10): SDF text on the screen or in the world (M22's UI lays text out in its
+	// elements with UiText, UiTextComponent.h). A null Font is the default font. Size in pixels at the 1080p reference
+	// height. Anchor is viewport-normalized (Screen space); Pivot is normalized to the text block; Offset in pixels;
+	// Billboard applies in World space.
 	struct TextComponent
 	{
 		std::string Text;

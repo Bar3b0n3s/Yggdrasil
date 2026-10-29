@@ -450,6 +450,34 @@ All modes; Runtime|Test; mutates.
 
 Argument 1: CursorMode.
 
+## Loc
+
+Localized strings from string tables (.stringtable assets) in the project's locale (Localization.Locale): a table's locale equal to it, else its language's, else the table's first (fallback) locale; an entry without a string for that locale gives the fallback's.
+
+### Loc.Get
+
+`(table: AssetRef, key: string) -> string`
+
+Returns the string of key in the locale. A key the table lacks, an asset that is not a string table, or a table that fails to load raises a located error naming them (with the closest keys as a hint).
+
+All modes; Runtime|Test; pure/read.
+
+### Loc.GetLocale
+
+`() -> string`
+
+Returns the project's locale (Localization.Locale) that lookups use; empty when it is unset, so every table reads its fallback locale.
+
+All modes; Runtime|Test; pure/read.
+
+### Loc.Has
+
+`(table: AssetRef, key: string) -> boolean`
+
+Returns whether the string table has the key. An asset that is not a string table, or a table that fails to load, raises a located error naming it, as in Get.
+
+All modes; Runtime|Test; pure/read.
+
 ## Log
 
 Script-channel logging with authored source, line, entity and simulation tick; arguments use tostring and tab separators. An entry keeps at most 8192 bytes (longer text is truncated and marked), and one VM writes at most 1024 entries per frame, dropping and counting the rest.
@@ -2028,7 +2056,7 @@ All modes; Runtime|Test; pure/read.
 
 ### Entity.GetComponent
 
-`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?)`
+`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "UiCanvas") -> UiCanvas?) & ((self: Entity, name: "UiRect") -> UiRect?) & ((self: Entity, name: "UiImage") -> UiImage?) & ((self: Entity, name: "UiText") -> UiText?) & ((self: Entity, name: "UiLayout") -> UiLayout?) & ((self: Entity, name: "UiLayoutElement") -> UiLayoutElement?)`
 
 Get a component proxy, or nil when absent.
 
@@ -2231,6 +2259,54 @@ All modes; Runtime|Test; pure/read.
 `Transform`
 
 The entity's Transform component, which every entity has.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.UiCanvas
+
+`UiCanvas?`
+
+The entity's UiCanvas component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.UiImage
+
+`UiImage?`
+
+The entity's UiImage component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.UiLayout
+
+`UiLayout?`
+
+The entity's UiLayout component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.UiLayoutElement
+
+`UiLayoutElement?`
+
+The entity's UiLayoutElement component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.UiRect
+
+`UiRect?`
+
+The entity's UiRect component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.UiText
+
+`UiText?`
+
+The entity's UiText component, or nil when absent.
 
 All modes; Runtime|Test; pure/read.
 
@@ -3282,6 +3358,334 @@ Approximate scale in world space (read-only: a sheared parent chain has no exact
 
 All modes; Runtime|Test; pure/read.
 
+## UiCanvas
+
+The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text.
+
+### UiCanvas.PixelSnap
+
+`boolean`
+
+Rounds every element's corners to whole scene pixels, so images and clips land on pixel corners.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiCanvas.ReferenceHeight
+
+`number`
+
+MatchHeight: the canvas's height in canvas units, so one unit is the scene's height / ReferenceHeight scene pixels.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiCanvas.ScaleFactor
+
+`number`
+
+ConstantPixelSize: the scene pixels per canvas unit.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiCanvas.ScaleMode
+
+`UiScaleMode`
+
+How canvas units map to scene pixels.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiCanvas.SortOrder
+
+`number`
+
+Canvases draw in ascending SortOrder, ties in entity order; a later canvas draws over earlier ones.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## UiImage
+
+Draws a sprite sheet frame, or a plain colour, over a UI element's rectangle.
+
+### UiImage.BorderScale
+
+`number`
+
+Sliced: the canvas units each border texel takes.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiImage.Color
+
+`Color`
+
+The linear tint multiplied with the frame's texels, with opacity in the fourth component.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiImage.Filter
+
+`UiImageFilter`
+
+How the frame's texture is sampled.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiImage.Frame
+
+`number`
+
+The index of the frame in the sheet's Frames; a frame the sheet lacks draws nothing.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiImage.Sheet
+
+`AssetRef?`
+
+The sprite sheet whose frame is drawn; null draws a plain rectangle of Color.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiImage.Type
+
+`UiImageType`
+
+Whether the frame stretches or keeps its 9-slice borders.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## UiLayout
+
+A container that places its children's rectangles in a stack, a grid or a flexible row or column.
+
+### UiLayout.CellSize
+
+`vector`
+
+Grid: the size of each cell in canvas units.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiLayout.Columns
+
+`number`
+
+Grid: the cells per row (Horizontal) or per column (Vertical); 0 fits as many as the container holds.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiLayout.CrossAlignment
+
+`UiCrossAlignment`
+
+Where each child sits across the main axis.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiLayout.Direction
+
+`UiLayoutDirection`
+
+The main axis the children follow.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiLayout.Kind
+
+`UiLayoutKind`
+
+How the children are placed.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiLayout.MainAlignment
+
+`UiMainAlignment`
+
+Where the children sit along the main axis when they do not fill it.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiLayout.Padding
+
+`{Left: number, Top: number, Right: number, Bottom: number}`
+
+Insets of the container's rectangle that the children are placed in.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiLayout.Spacing
+
+`vector`
+
+The gaps between children, lines and cells along x and y, in canvas units.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiLayout.Wrap
+
+`boolean`
+
+Flex: whether a child that does not fit the line starts a new line.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## UiLayoutElement
+
+How a UI element takes part in its parent's layout container: flex weights, a minimum size, or none.
+
+### UiLayoutElement.Grow
+
+`number`
+
+Flex: the element's share of the main axis's free space.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiLayoutElement.IgnoreLayout
+
+`boolean`
+
+Whether the element keeps its own placement and takes no space in the container.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiLayoutElement.MinSize
+
+`vector`
+
+The size the element never goes below in a Stack or Flex container, in canvas units.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiLayoutElement.Shrink
+
+`number`
+
+Flex: the element's share, times its preferred size, of the main axis's overflow.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## UiRect
+
+A UI element's rectangle in its parent's (or its canvas's), in canvas units, x right and y down.
+
+### UiRect.AnchorMax
+
+`vector`
+
+The anchor rectangle's bottom-right corner, normalized in the parent's rectangle; equal to AnchorMin for a fixed-size element.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiRect.AnchorMin
+
+`vector`
+
+The anchor rectangle's top-left corner, normalized in the parent's rectangle: (0, 0) its top-left corner, (1, 1) its bottom-right.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiRect.ClipChildren
+
+`boolean`
+
+Whether the element's descendants are clipped to its rectangle.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiRect.Pivot
+
+`vector`
+
+The point of the element that Position places, normalized to the element: (0, 0) its top-left corner, (1, 1) its bottom-right.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiRect.Position
+
+`vector`
+
+The pivot's offset from its point in the anchor rectangle, in canvas units, x right and y down.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiRect.Size
+
+`vector`
+
+The element's size in canvas units, added to the anchor rectangle's size (negative values inset stretched anchors); a container's child takes it as its preferred size.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## UiText
+
+Draws text in a UI element's rectangle, wrapped and aligned in it.
+
+### UiText.Alignment
+
+`TextAlignment`
+
+How each line is aligned within the rectangle's width.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiText.Color
+
+`Color`
+
+The linear text colour with opacity in the fourth component.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiText.Font
+
+`AssetRef?`
+
+The font; null uses the default font.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiText.LineSpacing
+
+`number`
+
+Multiplies the font's line height.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiText.Size
+
+`number`
+
+The em size in canvas units.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiText.Text
+
+`string`
+
+The UTF-8 text; a line feed starts a new line. Scripts read localized strings with Loc.Get. A value a script writes holds at most 4096 bytes of text.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiText.VerticalAlignment
+
+`UiTextVerticalAlignment`
+
+Where the text block sits in the rectangle's height.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiText.Wrap
+
+`boolean`
+
+Whether lines break at spaces to fit the rectangle's width.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
 ## AlphaMode
 
 How a material's base colour alpha is used (the glTF 2.0 alpha modes).
@@ -4217,6 +4621,80 @@ The curve that maps HDR scene colours to the display.
 - `PbrNeutral`: Khronos PBR Neutral: keeps base colours faithful up to the highlights.
 
 - `Linear`: No curve: exposure only, then clamped to the display range.
+
+## UiCrossAlignment
+
+Where each child of a container sits across its main axis.
+
+- `Start`: At the start of its line: the top (Horizontal) or the left edge (Vertical).
+
+- `Center`: Centred across the main axis.
+
+- `End`: At the end of its line: the bottom (Horizontal) or the right edge (Vertical).
+
+- `Stretch`: Stretched to fill its line's cross size (a Grid child: its cell's).
+
+## UiImageFilter (enum)
+
+How a UI image samples its texture.
+
+- `Point`: The nearest texel: pixel art, and a 1:1 image reproduces its texels exactly.
+
+- `Linear`: Bilinear filtering between texels.
+
+## UiImageType (enum)
+
+How a UI image fills its element's rectangle.
+
+- `Simple`: The sprite frame is stretched over the rectangle.
+
+- `Sliced`: The frame's 9-slice borders keep their size; the edges and the centre stretch.
+
+## UiLayoutDirection (enum)
+
+The main axis of a UI layout container.
+
+- `Horizontal`: Children follow each other from left to right.
+
+- `Vertical`: Children follow each other from top to bottom.
+
+## UiLayoutKind (enum)
+
+How a UI layout container places its children.
+
+- `Stack`: One after another along Direction, each at its own size.
+
+- `Grid`: In cells of CellSize, Columns cells per row (Horizontal) or per column (Vertical).
+
+- `Flex`: A stack whose children grow into free space and shrink when they overflow, wrapping with Wrap.
+
+## UiMainAlignment
+
+Where a container's children sit along its main axis when they do not fill it.
+
+- `Start`: At the start: the left edge (Horizontal) or the top (Vertical).
+
+- `Center`: Centred along the main axis.
+
+- `End`: At the end: the right edge (Horizontal) or the bottom (Vertical).
+
+## UiScaleMode
+
+How a UI canvas maps its units to scene pixels.
+
+- `ConstantPixelSize`: ScaleFactor scene pixels per canvas unit, whatever the scene resolution.
+
+- `MatchHeight`: The canvas is ReferenceHeight units high, so it scales with the scene's height.
+
+## UiTextVerticalAlignment (enum)
+
+Where a UI text block sits in its element's rectangle.
+
+- `Top`: The first line starts at the rectangle's top edge.
+
+- `Middle`: The block is centred vertically in the rectangle.
+
+- `Bottom`: The last line ends at the rectangle's bottom edge.
 
 ## ValidationScope
 

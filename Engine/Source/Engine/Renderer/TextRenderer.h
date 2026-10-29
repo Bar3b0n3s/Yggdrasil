@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine/Asset/AssetHandle.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
 #include "Engine/Graphics/PipelineFactory.h"
@@ -42,6 +43,12 @@
 // renderer keeps no binding sets: each Record takes them (one per atlas) from the view's PassBindingCache, which releases a
 // stale atlas's set one render after its last use. Main thread only; not copyable or movable. Frozen by the M8 contract
 // (Docs/Decisions/0013-m8-decisions.md decision 11).
+//
+// Glyph runs (M22, C22.1, R-UI-TEXT; Docs/Decisions/0033-m22-contract.md decision 7): RecordGlyphRuns draws glyphs its caller
+// laid out in the framebuffer's pixels (the Ui pass's UiText, through the text-measurement layer, TextMeasurement.h), run by
+// run in the order given, each run one font and one colour with an optional scissor (UI clipping), on top (the screen
+// vertices, TextVertexScreen, without the depth test), with the same atlases, sampler, shading and vertex budget as Record.
+// M22 owns the font and text pipeline in phase 2 (ADR 0028's phase-2 ledger).
 
 namespace Engine {
 
@@ -64,6 +71,42 @@ namespace Engine {
 		// camera plane (view-space z >= 0) is then neither recorded nor counted. Without it every label is recorded and
 		// counted, and the vertex shader drops those on or behind the camera plane (the image is the same).
 		std::optional<glm::mat4> CameraView{};
+	};
+
+	// M22 (C22.1): one glyph laid out in the framebuffer's pixels (x right, y down, origin at its top-left corner) with its
+	// rectangle in its font's atlas (normalized, origin top left; FontGlyph::AtlasMin and AtlasMax).
+	struct TextPixelGlyph
+	{
+		glm::vec2 Min = glm::vec2(0.0f);
+		glm::vec2 Max = glm::vec2(0.0f);
+		glm::vec2 AtlasMin = glm::vec2(0.0f);
+		glm::vec2 AtlasMax = glm::vec2(0.0f);
+
+		bool operator==(const TextPixelGlyph&) const = default;
+	};
+
+	// M22 (C22.1): a run of glyphs that share a font, a colour and a clip: TextGlyphRenderInputs::Glyphs[FirstGlyph,
+	// FirstGlyph + GlyphCount).
+	struct TextGlyphRun
+	{
+		AssetHandle Font{};                // null: the Default font; a missing font draws with its placeholder, as a TextItem's
+		glm::vec4 Color = glm::vec4(1.0f); // linear RGB, straight alpha
+		uint32_t FirstGlyph = 0;
+		uint32_t GlyphCount = 0;
+		// The run's scissor in the framebuffer's pixels (nvrhi::Rect: x right, y down, the maxima exclusive), intersected with
+		// the framebuffer's extent; empty or wholly outside: the run draws nothing. nullopt: the whole extent.
+		std::optional<nvrhi::Rect> Scissor{};
+	};
+
+	// M22 (C22.1): the inputs of RecordGlyphRuns.
+	struct TextGlyphRenderInputs
+	{
+		std::span<const TextPixelGlyph> Glyphs{};
+		std::span<const TextGlyphRun> Runs{}; // in draw order; each run's glyphs lie inside Glyphs (asserted)
+		AssetManager* Assets = nullptr;       // resolves the fonts; never null
+		// The final LDR target with SceneDepth (GetOverlayFramebufferInfo), whose extent the pixels are in; never null.
+		nvrhi::IFramebuffer* Framebuffer = nullptr;
+		nvrhi::IBuffer* ViewConstants = nullptr; // b0; never null
 	};
 
 	class TextRenderer
@@ -101,6 +144,15 @@ namespace Engine {
 		// AssetUploadFailedCode diagnostic once (§8.14 item 7). Asserts the inputs. Errors: Gpu when the vertex buffer or a
 		// binding set cannot be created (the texts are skipped).
 		[[nodiscard]] Result<uint32_t> Record(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const TextRenderInputs& inputs);
+
+		// M22 (C22.1): records `inputs.Runs` into `inputs.Framebuffer` (see the file comment's "Glyph runs"), with binding sets
+		// from the caller's `bindings`, adding the draw calls and triangles to `counters`, under the caller's stats row (the Ui
+		// pass's "Ui"). Returns the number of runs drawn (a run clipped away, or left out for a vertex beyond float's range or
+		// the vertex budget, does not count). A font whose atlas cannot be uploaded skips its runs and records an
+		// AssetUploadFailedCode diagnostic once, as Record. Asserts the inputs. Errors: Gpu when the vertex buffer or a binding
+		// set cannot be created (the runs are skipped).
+		[[nodiscard]] Result<uint32_t> RecordGlyphRuns(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const TextGlyphRenderInputs& inputs,
+			RenderPassCounters& counters);
 
 		// Releases atlas mirrors whose font has a newer version in `assets`, and with `releaseUnused` those no Record used since
 		// the previous call.

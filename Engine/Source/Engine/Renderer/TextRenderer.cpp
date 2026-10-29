@@ -422,6 +422,13 @@ namespace Engine {
 		return RecordCounted(commandList, bindings, inputs, counters);
 	}
 
+	Result<uint32_t> TextRenderer::RecordGlyphRuns(nvrhi::ICommandList& /*commandList*/, PassBindingCache& /*bindings*/,
+		const TextGlyphRenderInputs& /*inputs*/, RenderPassCounters& /*counters*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "glyph runs (Docs/Decisions/0033-m22-contract.md decision 7, stream C)");
+	}
+
 	Result<uint32_t> TextRenderer::RecordCounted(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const TextRenderInputs& inputs, RenderPassCounters& counters)
 	{
 		ENGINE_CORE_ASSERT(inputs.Assets != nullptr && inputs.Framebuffer != nullptr && inputs.ViewConstants != nullptr,

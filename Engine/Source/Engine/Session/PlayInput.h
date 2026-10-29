@@ -149,8 +149,20 @@ namespace Engine {
 		// then latches the step view. GetNextTick() becomes tick + 1.
 		void ApplyTick(uint64_t tick);
 
-		// §5.7 frame phase step 1: latches the frame view.
+		// §5.7 frame phase step 1: latches the frame view. M22 (W-CLOCK, C22.1; Docs/Decisions/0033-m22-contract.md decision 12):
+		// with the frame preview enabled (SetFramePreview), the frame view is latched from the devices' state with the device
+		// events queued for GetNextTick() applied on a preview copy (QueueDeviceEvent's events only, in their queue order, as
+		// ApplyTick will apply them), so a frame that runs no step sees new device input while the step view, the applied
+		// state, the queue and the next ApplyTick are unchanged; a previewed edge is reported once by the frame view (the
+		// frame after the tick that applies it sees no second press). Without the preview, the frame view follows the
+		// applied ticks only, as before M22. Injected events (Queue: automation, replays, Test.Inject*) are never previewed.
 		void LatchFrame();
+
+		// M22 (W-CLOCK, C22.1, decision 12): enables or disables LatchFrame's frame preview (off at creation). The play session
+		// enables it in its LatchFrame phase only while it is neither in lockstep nor recording (a recording replays with the
+		// frame views its ticks gave, never a preview), so lockstep, recording, replaying and test sessions latch as before.
+		void SetFramePreview(bool enabled);
+		[[nodiscard]] bool IsFramePreviewEnabled() const;
 
 		// The tick the next ApplyTick applies.
 		[[nodiscard]] uint64_t GetNextTick() const;

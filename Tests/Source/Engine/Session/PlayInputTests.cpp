@@ -289,6 +289,80 @@ namespace Engine {
 			CHECK(PlayInputEventTypeToString(PlayInputEventType::GamepadAxisInput) == "GamepadAxis");
 			CHECK(PlayInputEventStateToString(PlayInputEventState::Tap) == "Tap");
 		}
+
+		// W-CLOCK (M22, C22.1; Docs/Decisions/0033-m22-contract.md decision 12; stream K): Roadmap M22's acceptance "a frame that
+		// runs no step sees new input while the step view is unchanged".
+		TEST_CASE("PlayInput: a frame that runs no step sees new device input while the step view is unchanged" * doctest::skip(true))
+		{
+			Result<PlayInput> created = PlayInput::Create(MakeActions());
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlayInput& input = *created;
+			const uint32_t jump = *input.GetActions().FindAction("Jump");
+			input.SetFramePreview(true);
+			CHECK(input.IsFramePreviewEnabled());
+			input.ApplyTick(0);
+			input.LatchFrame();
+
+			// Space goes down between two ticks: the next frame, which runs no step, sees it pressed.
+			input.QueueDeviceEvent(Event(KeyEvent{ .KeyCode = Key::Space, .Action = ButtonAction::Pressed, .Modifiers = KeyModifiers::None, .Handled = false }));
+			input.LatchFrame();
+			CHECK(input.GetDevices().IsKeyDown(InputPhase::Frame, Key::Space));
+			CHECK(input.GetDevices().WasKeyPressed(InputPhase::Frame, Key::Space));
+			CHECK(input.WasActionPressed(InputPhase::Frame, jump));
+			// The step view, the queue and the next tick are unchanged.
+			CHECK_FALSE(input.GetDevices().IsKeyDown(InputPhase::Step, Key::Space));
+			CHECK_FALSE(input.IsActionDown(InputPhase::Step, jump));
+			CHECK(input.GetQueuedEventCount() == 1);
+			CHECK(input.GetNextTick() == 1);
+
+			// The tick applies the press as before: the step view sees it once.
+			input.ApplyTick(1);
+			CHECK(input.GetDevices().WasKeyPressed(InputPhase::Step, Key::Space));
+			REQUIRE(input.GetLastAppliedEvents().size() == 1);
+		}
+
+		TEST_CASE("PlayInput: a previewed press is reported once by the frame view" * doctest::skip(true))
+		{
+			Result<PlayInput> created = PlayInput::Create(MakeActions());
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlayInput& input = *created;
+			input.SetFramePreview(true);
+			input.QueueDeviceEvent(Event(KeyEvent{ .KeyCode = Key::Space, .Action = ButtonAction::Pressed, .Modifiers = KeyModifiers::None, .Handled = false }));
+			input.LatchFrame();
+			CHECK(input.GetDevices().WasKeyPressed(InputPhase::Frame, Key::Space));
+			// A second frame before the tick, and the frame after the tick that applies it, see it down but not pressed again.
+			input.LatchFrame();
+			CHECK(input.GetDevices().IsKeyDown(InputPhase::Frame, Key::Space));
+			CHECK_FALSE(input.GetDevices().WasKeyPressed(InputPhase::Frame, Key::Space));
+			input.ApplyTick(0);
+			input.LatchFrame();
+			CHECK(input.GetDevices().IsKeyDown(InputPhase::Frame, Key::Space));
+			CHECK_FALSE(input.GetDevices().WasKeyPressed(InputPhase::Frame, Key::Space));
+		}
+
+		TEST_CASE("PlayInput: injected events are never previewed, and without the preview the frame view follows the ticks" * doctest::skip(true))
+		{
+			Result<PlayInput> created = PlayInput::Create(MakeActions());
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlayInput& input = *created;
+			const uint32_t jump = *input.GetActions().FindAction("Jump");
+			CHECK_FALSE(input.IsFramePreviewEnabled()); // off at creation
+			input.SetFramePreview(true);
+			REQUIRE(input.IsFramePreviewEnabled());
+			REQUIRE(input.Queue(0, MakeActionEvent("Jump", PlayInputEventState::Down)).has_value());
+			input.LatchFrame();
+			CHECK_FALSE(input.IsActionDown(InputPhase::Frame, jump));
+
+			input.SetFramePreview(false);
+			CHECK_FALSE(input.IsFramePreviewEnabled());
+			input.QueueDeviceEvent(Event(KeyEvent{ .KeyCode = Key::Space, .Action = ButtonAction::Pressed, .Modifiers = KeyModifiers::None, .Handled = false }));
+			input.LatchFrame();
+			CHECK_FALSE(input.GetDevices().IsKeyDown(InputPhase::Frame, Key::Space));
+			input.ApplyTick(0);
+			input.LatchFrame();
+			CHECK(input.GetDevices().IsKeyDown(InputPhase::Frame, Key::Space));
+			CHECK(input.IsActionDown(InputPhase::Frame, jump));
+		}
 	}
 
 }

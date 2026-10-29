@@ -22,6 +22,7 @@
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Scene/TransformSystem.h"
+#include "Engine/Scene/UiSystem.h"
 #include "Engine/Scripting/RegisterBindings.h"
 #include "Engine/Scripting/ScriptApiRegistry.h"
 #include "Engine/Scripting/ScriptEngine.h"
@@ -220,6 +221,8 @@ namespace Engine {
 		bool AudioHeld = false;
 		// M19: the native module's runtime (NativeWorld.h), in Play with PlaySessionSpecification::Native; null otherwise.
 		Scope<NativeWorld> Native{};
+		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 3): the UiLayout and FrameUiLayout phases' layouts.
+		UiSystem Ui{};
 		Scope<ScriptApiRegistry> OwnedApi{};
 		ScriptApiRegistry* Api = nullptr;
 		Ref<const ScriptFieldSchemaSource> Schemas{};
@@ -868,12 +871,14 @@ namespace Engine {
 			case PlaySessionPhase::PhysicsPostStep:         return "PhysicsPostStep";
 			case PlaySessionPhase::DestroyFlush:            return "DestroyFlush";
 			case PlaySessionPhase::PostStepTransformUpdate: return "PostStepTransformUpdate";
+			case PlaySessionPhase::UiLayout:                return "UiLayout";
 			case PlaySessionPhase::LatchFrame:              return "LatchFrame";
 			case PlaySessionPhase::FrameStartFlush:         return "FrameStartFlush";
 			case PlaySessionPhase::Update:                  return "Update";
 			case PlaySessionPhase::LateUpdate:              return "LateUpdate";
 			case PlaySessionPhase::FrameDestroyFlush:       return "FrameDestroyFlush";
 			case PlaySessionPhase::FrameTransformUpdate:    return "FrameTransformUpdate";
+			case PlaySessionPhase::FrameUiLayout:           return "FrameUiLayout";
 			case PlaySessionPhase::AudioUpdate:             return "AudioUpdate";
 			case PlaySessionPhase::RenderExtraction:        return "RenderExtraction";
 		}
@@ -1307,6 +1312,16 @@ namespace Engine {
 	const NativeWorld* PlaySession::GetNative() const
 	{
 		return m_State->Native.get();
+	}
+
+	UiSystem& PlaySession::GetUi()
+	{
+		return m_State->Ui;
+	}
+
+	const UiSystem& PlaySession::GetUi() const
+	{
+		return m_State->Ui;
 	}
 
 	AudioSystem* PlaySession::GetAudioSystem()

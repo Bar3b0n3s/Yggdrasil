@@ -26,6 +26,12 @@
 #include "Engine/Scene/Components/TagsComponent.h"
 #include "Engine/Scene/Components/TextComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
+#include "Engine/Scene/Components/UiCanvasComponent.h"
+#include "Engine/Scene/Components/UiImageComponent.h"
+#include "Engine/Scene/Components/UiLayoutComponent.h"
+#include "Engine/Scene/Components/UiLayoutElementComponent.h"
+#include "Engine/Scene/Components/UiRectComponent.h"
+#include "Engine/Scene/Components/UiTextComponent.h"
 
 namespace Engine {
 
@@ -48,7 +54,10 @@ namespace Engine {
 		// Audio (Registration/AudioRegistration.cpp)
 		AudioSourceComponent, AudioListenerComponent,
 		// Scripting (Registration/ScriptingRegistration.cpp)
-		ScriptComponent>;
+		ScriptComponent,
+		// Ui (Registration/UiRegistration.cpp; M22, Docs/Decisions/0033-m22-contract.md decision 2: phase 2's categories go
+		// after Scripting in landing order, ADR 0028's phase-2 ledger)
+		UiCanvasComponent, UiRectComponent, UiImageComponent, UiTextComponent, UiLayoutComponent, UiLayoutElementComponent>;
 
 	// The category registration functions, each registering its enums, structs and components in BuiltinComponents order
 	// through RegisterComponent<T> (Scene/ComponentRegistration.h). Each is called exactly once per registry, in this
@@ -58,8 +67,9 @@ namespace Engine {
 	void RegisterPhysicsComponents(TypeRegistry& registry);
 	void RegisterAudioComponents(TypeRegistry& registry);
 	void RegisterScriptingComponents(TypeRegistry& registry);
+	void RegisterUiComponents(TypeRegistry& registry);
 
-	// Registers every built-in component (the five functions above, in order) into a registry that is not frozen yet, then
+	// Registers every built-in component (the six functions above, in order) into a registry that is not frozen yet, then
 	// asserts that every BuiltinComponents type is registered and that the registration order equals the list order
 	// (the startup check of §5.4). The caller adds its own types (project settings, automation structs) and then freezes
 	// the registry.

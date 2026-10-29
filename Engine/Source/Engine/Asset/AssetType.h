@@ -25,7 +25,10 @@ namespace Engine {
 		Script,
 		Font,
 		Replay,
-		SpriteSheet // M18 (ADR 0028's phase-1 ledger; Docs/Decisions/0029-m18-contract.md decision 14)
+		SpriteSheet, // M18 (ADR 0028's phase-1 ledger; Docs/Decisions/0029-m18-contract.md decision 14)
+		// M22 (Docs/Decisions/0033-m22-contract.md decision 10). ADR 0028's phase-2 ledger: the first of M21 and M22 to land
+		// takes 12 and the other 13, renumbering its own at its merge (the values live only in cooked headers).
+		StringTable
 	};
 
 	// The PascalCase name of `type` ("AudioClip"), the spelling used in .meta files, reflected AssetFilter metadata, the
@@ -47,6 +50,7 @@ namespace Engine {
 			case AssetType::Font:        return "Font";
 			case AssetType::Replay:      return "Replay";
 			case AssetType::SpriteSheet: return "SpriteSheet";
+			case AssetType::StringTable: return "StringTable";
 		}
 		return "None";
 	}
@@ -68,6 +72,7 @@ namespace Engine {
 			AssetType::Font,
 			AssetType::Replay,
 			AssetType::SpriteSheet,
+			AssetType::StringTable,
 		};
 		for (const AssetType type : Types)
 		{

@@ -35,6 +35,7 @@ PROXIED_TOOLS = {
     "script_write", "script_check", "script_errors", "script_eval", "test_run",
     "native_build", "native_get_components", "native_load", "native_read", "native_set_components", "native_status",
     "native_write",
+    "ui_tree",
 }
 MAX_SCHEMA_BYTES = 4096
 

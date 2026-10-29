@@ -127,6 +127,8 @@ namespace Engine {
 		[[nodiscard]] Status RegisterLog(ScriptApiRegistry& api);
 		[[nodiscard]] Status RegisterApplication(ScriptApiRegistry& api);
 		[[nodiscard]] Status RegisterTest(ScriptApiRegistry& api);
+		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 11): the Loc module.
+		[[nodiscard]] Status RegisterLoc(ScriptApiRegistry& api);
 
 	}
 

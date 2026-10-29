@@ -35,6 +35,8 @@ namespace Engine {
 			std::function<Status(ScriptApiRegistry&)> ConfigureApi{};
 			// Deterministic safety-clock injection; copied into the engine, captures outlive the fixture.
 			std::function<double()> ClockSeconds{};
+			// M22 (Docs/Decisions/0033-m22-contract.md decision 11): the engine's locale (ScriptEngineSpecification::Locale).
+			std::string Locale{};
 		};
 
 		// Real compiler/extraction, immutable memory assets, and one runtime engine. Host requests are observed rather

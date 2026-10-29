@@ -552,6 +552,10 @@ namespace Engine {
 	{
 		return m_Specification.Settings;
 	}
+	std::string_view ScriptEngine::GetLocale() const
+	{
+		return m_Specification.Locale;
+	}
 	RunModes ScriptEngine::GetRunMode() const
 	{
 		return m_Specification.Mode;

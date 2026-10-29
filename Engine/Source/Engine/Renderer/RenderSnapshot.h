@@ -5,6 +5,7 @@
 #include "Engine/Core/Result.h"
 #include "Engine/Core/UUID.h"
 #include "Engine/Renderer/DebugDrawList.h"
+#include "Engine/Renderer/UiDrawList.h"
 
 #include <glm/glm.hpp>
 
@@ -17,9 +18,9 @@
 
 // The render snapshot (Architecture §8.2): everything the renderer needs to draw one view, as plain data. Scene's render
 // extraction (Scene/RenderExtraction.h) builds it from the ECS, so the renderer never sees the scene and is tested with
-// synthetic snapshots. This header is one of the two Renderer headers Scene may include (§3 rule 3): it includes nothing
-// beyond Core, Asset, glm and the standard library, and in particular no NVRHI (the SnapshotHeaders rule of
-// Scripts/ModuleRules.json, checked by Lint.py).
+// synthetic snapshots. This header is one of the Renderer headers Scene may include (§3 rule 3, with DebugDrawList.h and
+// M22's UiDrawList.h, both of which it includes): it includes nothing beyond Core, Asset, glm and the standard library, and
+// in particular no NVRHI (the SnapshotHeaders rule of Scripts/ModuleRules.json, checked by Lint.py).
 //
 // Conventions (§5.2, §8.3): right-handed, +Y up, metres; cameras and lights look down their local -Z; colours are linear;
 // angles are degrees; depth is reverse-Z (perspective projections have an infinite far plane, orthographic ones the finite
@@ -30,11 +31,13 @@
 // decision 5); M9 added the pick table, the view flags, the selected entities, the annotations and their draw list, the
 // quality settings, the icons and the frame and scene revision stamps (ADR 0017). The M18 contract (C18.1,
 // Docs/Decisions/0029-m18-contract.md decisions 5 to 8) added the output stage (RenderOutputSettings, the view-to-scene
-// mapping) and the memory resource of the containers (decision 9). Additions are frozen-header changes reviewed by their
+// mapping) and the memory resource of the containers (decision 9). The M22 contract (C22.1,
+// Docs/Decisions/0033-m22-contract.md decision 7) added the UI draw list (Ui, Renderer/UiDrawList.h) after Output, where ADR
+// 0028's phase-2 ledger puts M21's and M22's members in landing order. Additions are frozen-header changes reviewed by their
 // contract owner; no member here changes meaning. A plain value type: copyable, movable, thread-compatible.
 //
 // Containers (M18, R-ARENA): the snapshot's own containers that grow with the scene (Meshes, Lights, Texts, PickTable,
-// Icons, and the commands of DebugDraw and AnnotationDraw) are std::pmr containers. A snapshot built with
+// Icons, the commands of DebugDraw and AnnotationDraw, and M22's Ui items and annotations) are std::pmr containers. A snapshot built with
 // RenderSnapshot(resource) allocates them from that memory resource, which must outlive the snapshot; a default-constructed
 // one, and every copy (std::pmr's copy construction), allocates from std::pmr::get_default_resource(), the global heap
 // unless a host changed it. Assignment keeps the target's resource. SelectedEntities (a handful of UUIDs, copied from the
@@ -45,7 +48,8 @@
 // view's size by default, which renders exactly as before the output stage), then the output stage upscales the scene image
 // by the largest integer factor that fits the view, with point sampling, centred in a letterbox. Picking, CPU rays,
 // captures and UI hit testing map view pixels to scene pixels with RenderOutputMapping (ComputeRenderOutputMapping and the
-// Map* functions below). UI is laid out and hit-tested in scene pixels.
+// Map* functions below). UI is laid out and hit-tested in scene pixels (M22: the Ui member, drawn at the scene resolution
+// before the upscale).
 
 namespace Engine {
 
@@ -407,6 +411,12 @@ namespace Engine {
 		uint64_t SceneRevision = 0; // opaque host revision stamped alongside FrameIndex before Render, echoed by picking
 		// M18 (C18.1): the output stage (RenderOutputSettings); the default renders the scene at the view's size.
 		RenderOutputSettings Output{};
+		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 7): the view's UI (UiDrawList.h): every effectively enabled
+		// canvas laid out at the scene resolution of Output (the view's size by default), its visible elements' images and
+		// texts in draw order, and a capture's UI annotations; empty without a canvas and in the editor's scene view
+		// (ExtractRenderSnapshot). The Ui pass draws it after game Text in the SceneOverlay stage; the data views (AO,
+		// ShadowCascades, Overdraw) show none, as they show no Text.
+		UiDrawList Ui{};
 	};
 
 	// World ray through pixel centre (x + 0.5, y + 0.5), top-left origin, in Camera.ViewportWidth/Height: scene pixels (M18:

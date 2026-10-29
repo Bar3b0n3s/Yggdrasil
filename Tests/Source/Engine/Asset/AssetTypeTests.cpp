@@ -21,6 +21,7 @@ namespace Engine {
 				AssetType::Font,
 				AssetType::Replay,
 				AssetType::SpriteSheet,
+				AssetType::StringTable,
 			};
 			for (const AssetType type : Types)
 			{
@@ -44,6 +45,9 @@ namespace Engine {
 			static_assert(std::to_underlying(AssetType::Replay) == 10);
 			// M18's sprite sheets, phase 1's only new type (ADR 0028's phase-1 ledger: values follow the landing order).
 			static_assert(std::to_underlying(AssetType::SpriteSheet) == 11);
+			// M22's string tables (ADR 0028's phase-2 ledger: 12 on M22's branch; the second of M21 and M22 to land renumbers its
+			// own type to 13 at its merge, Docs/Decisions/0033-m22-contract.md decision 10).
+			static_assert(std::to_underlying(AssetType::StringTable) == 12);
 			CHECK(AssetTypeToString(static_cast<AssetType>(999)) == "None");
 		}
 	}

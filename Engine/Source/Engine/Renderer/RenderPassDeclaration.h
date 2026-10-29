@@ -25,11 +25,11 @@
 // Skinning, the first GPU work of a frame, alone in the Deform stage (before the shadow casters and the prepass read the
 // deformed vertices); PointShadows in Shadows, after SpotShadows; LightClusters at the end of Ambient, after the depth
 // pyramid it can bound clusters with and before the forward passes read the clusters; Sprites and Lights2D in the Sprites
-// stage; Ui after Text in SceneOverlay. Phase 3's (Particles, Exposure, Lut, Taa, Ssr and terrain) take the stages their
-// contracts name. A declaration with no stats row creates pipelines its users record under their own rows (the
+// stage; Ui after Text in SceneOverlay (declared by M22's contract, C22.1). Phase 3's (Particles, Exposure, Lut, Taa, Ssr
+// and terrain) take the stages their contracts name. A declaration with no stats row creates pipelines its users record under their own rows (the
 // QuadBatcher), or is a startup-only computation (the DFG LUT); one with no pipeline records with another declaration's
 // pipelines (Wireframe and Overlays share the debug lines' pipelines, Labels the Text pipelines, Letterbox the Upscale
-// pipelines).
+// pipelines, Ui the QuadBatcher's and the Text pipelines).
 
 namespace Engine {
 
@@ -82,6 +82,7 @@ namespace Engine {
 		inline constexpr std::array<std::string_view, 1> FxaaTargets = { "LdrColorFxaa" };
 		inline constexpr std::array<std::string_view, 1> TextPrograms = { "Text" };
 		inline constexpr std::array<std::string_view, 1> TextRows = { "Text" };
+		inline constexpr std::array<std::string_view, 1> UiRows = { "Ui" };
 		inline constexpr std::array<std::string_view, 1> UpscalePrograms = { "Upscale" };
 		inline constexpr std::array<std::string_view, 1> UpscaleRows = { "Upscale" };
 		inline constexpr std::array<std::string_view, 2> UpscaleTargets = { "OutputColor", "OutputDepth" };
@@ -99,7 +100,7 @@ namespace Engine {
 	}
 
 	// The pass list, in stats order (see the file comment). 58 pipelines at startup: M17's 54 plus the QuadBatcher's 2 and the
-	// output stage's 2.
+	// output stage's 2 (M22's Ui adds none).
 	inline constexpr std::array ScenePassDeclarations = std::to_array<RenderPassDeclaration>({
 		{ .Name = "Prepare", .Stage = RenderStage::Prepare, .StatsRows = Detail::PrepareRows },
 		{ .Name = "Shadows", .Stage = RenderStage::Shadows, .PipelineCount = 6, .Programs = Detail::ShadowPrograms, .StatsRows = Detail::ShadowRows, .Targets = Detail::ShadowTargets },
@@ -124,6 +125,9 @@ namespace Engine {
 		{ .Name = "Fxaa", .Stage = RenderStage::LdrPost, .PipelineCount = 1, .Programs = Detail::FxaaPrograms, .StatsRows = Detail::FxaaRows, .Targets = Detail::FxaaTargets },
 		// Game Text at the scene resolution (TextRenderer's two pipelines, which Labels shares).
 		{ .Name = "Text", .Stage = RenderStage::SceneOverlay, .PipelineCount = 2, .Programs = Detail::TextPrograms, .StatsRows = Detail::TextRows },
+		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 7): the UI draw list at the scene resolution, after game Text,
+		// with the QuadBatcher's Ldr pipeline and the Text pipelines (UiPass.h), so it declares none of its own.
+		{ .Name = "Ui", .Stage = RenderStage::SceneOverlay, .StatsRows = Detail::UiRows },
 		{ .Name = "Upscale", .Stage = RenderStage::Output, .PipelineCount = 2, .Programs = Detail::UpscalePrograms, .StatsRows = Detail::UpscaleRows, .Targets = Detail::UpscaleTargets },
 		{ .Name = "Selection", .Stage = RenderStage::EditorOverlay, .PipelineCount = 8, .Programs = Detail::SelectionPrograms, .StatsRows = Detail::SelectionRows, .Targets = Detail::SelectionTargets },
 		{ .Name = "Wireframe", .Stage = RenderStage::EditorOverlay, .StatsRows = Detail::WireframeRows },
