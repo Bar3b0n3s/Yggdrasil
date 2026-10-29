@@ -159,10 +159,7 @@ class AutosaveTests(AutomationTestCase):
             pass
         self.assertEqual(editor.wait(), 4, editor.output())
         self.assertIn("Fatal error (DeviceLost)", editor.output())
-        gpu_messages = [line for line in editor.output().splitlines()
-                        if ("Vulkan validation:" in line or "NVRHI:" in line)
-                        and any(level in line for level in ("[warning]", "[error]", "[critical]"))]
-        self.assertFalse(gpu_messages, editor.output())
+        self.assert_no_gpu_messages(editor)
         self.assertEqual(source.read_bytes(), before)
         restored, result = self.open_recovery(root)
         self.assertTrue(result["recovered"], editor.output())

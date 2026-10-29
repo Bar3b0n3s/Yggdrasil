@@ -17,6 +17,7 @@
 #include "Engine/Scripting/Watchdog.h"
 
 #include <algorithm>
+#include <map>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -380,7 +381,27 @@ namespace Engine {
 			return !entry.second.PendingPhysics.empty();
 		}))
 			return;
+		// Held events are addressed to an entity, as live ones are (decision 17): they reach the entity's slots together, in
+		// slot order, at the turn of its slot that comes first in (ExecutionOrder, canonical entity) order, as OnEnable and
+		// OnDisable do. The snapshot is in (ExecutionOrder, canonical entity, slot) order, so an entity's first appearance in
+		// it is its turn.
+		std::vector<InstanceKey> snapshot;
 		for (const InstanceKey key : OrderedInstances(false))
+		{
+			const auto found = Instances.find(key);
+			if (found != Instances.end() && found->second.Started && !found->second.PendingPhysics.empty())
+				snapshot.push_back(key);
+		}
+		std::map<UUID, size_t> turns;
+		for (const InstanceKey key : snapshot)
+			turns.try_emplace(key.Entity, turns.size());
+		std::ranges::sort(snapshot, [&turns](InstanceKey left, InstanceKey right)
+		{
+			const size_t leftTurn = turns.find(left.Entity)->second;
+			const size_t rightTurn = turns.find(right.Entity)->second;
+			return leftTurn != rightTurn ? leftTurn < rightTurn : left.Slot < right.Slot;
+		});
+		for (const InstanceKey key : snapshot)
 		{
 			const auto found = Instances.find(key);
 			if (found == Instances.end() || !found->second.Started || found->second.PendingPhysics.empty())

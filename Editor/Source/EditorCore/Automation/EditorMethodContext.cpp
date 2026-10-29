@@ -39,8 +39,9 @@ namespace Engine {
 
 	namespace Utils {
 
-		// The indices of the slots of the Script component params `script` that give a non-empty Fields object without a
-		// Script member: their values resolve against the Script handle they borrow (CompleteParameterOwners).
+		// The indices of the slots of the Script component params `script` that give a Fields object, empty or not, without a
+		// Script member: each patches the slot at its index (CompleteBorrowingScriptSlot), whose Script handle its values
+		// resolve against (CompleteParameterOwners).
 		static std::vector<size_t> FindBorrowingScriptSlots(const Json& script)
 		{
 			std::vector<size_t> borrowing;
@@ -51,10 +52,38 @@ namespace Engine {
 			{
 				const Json& entry = (*slots)[slot];
 				const auto fields = entry.is_object() ? entry.find("Fields") : entry.end();
-				if (entry.is_object() && !entry.contains("Script") && fields != entry.end() && fields->is_object() && !fields->empty())
+				if (entry.is_object() && !entry.contains("Script") && fields != entry.end() && fields->is_object())
 					borrowing.push_back(slot);
 			}
 			return borrowing;
+		}
+
+		// Completes `entry`, a slot entry of FindBorrowingScriptSlots, from `owner`, the JSON of the slot at its index that its
+		// list replaces (Docs/Decisions/0031-m20-contract.md decision 17; the milestone review, S2 and S3): the entry takes
+		// the slot's Script and, when it gives none, its ExecutionOrder, and its Fields become the slot's with the entry's
+		// applied as a key patch (RFC 7386: a key it gives replaces the slot's, a null removes it). So the entry describes
+		// the slot as a Fields patch of Script version 1 left it, and a prefab instance records the changed keys only
+		// (decision 19). Nothing changes for an owner without a script.
+		static void CompleteBorrowingScriptSlot(Json& entry, const Json& owner)
+		{
+			const auto script = owner.find("Script");
+			if (script == owner.end() || !script->is_string())
+				return;
+			entry["Script"] = *script;
+			if (const auto order = owner.find("ExecutionOrder"); order != owner.end() && !entry.contains("ExecutionOrder"))
+				entry["ExecutionOrder"] = *order;
+			Json fields = Json::object();
+			if (const auto stored = owner.find("Fields"); stored != owner.end() && stored->is_object())
+				fields = *stored;
+			const Json patch = entry["Fields"];
+			for (auto member = patch.begin(); member != patch.end(); ++member)
+			{
+				if (member->is_null())
+					fields.erase(member.key());
+				else
+					fields[member.key()] = *member;
+			}
+			entry["Fields"] = std::move(fields);
 		}
 
 	}
@@ -255,7 +284,7 @@ namespace Engine {
 		const auto script = components->find("Script");
 		if (script == components->end() || !script->is_object())
 			return {};
-		// The slots that give Fields without a Script handle borrow the handle of the slot at their index
+		// The slots that give Fields without a Script handle patch the slot at their index, borrowing its handle
 		// (Docs/Decisions/0031-m20-contract.md decision 17).
 		const std::vector<size_t> borrowing = Utils::FindBorrowingScriptSlots(*script);
 		if (borrowing.empty())
@@ -285,8 +314,14 @@ namespace Engine {
 		const auto* existing = owner.TryGetComponent<ScriptComponent>();
 		for (const size_t slot : borrowing)
 		{
-			if (existing != nullptr && slot < existing->Scripts.size() && existing->Scripts[slot].Script.IsValid())
-				(*script)["Scripts"][slot]["Script"] = existing->Scripts[slot].Script.GetHandle().ToString();
+			if (existing == nullptr || slot >= existing->Scripts.size() || !existing->Scripts[slot].Script.IsValid())
+				continue;
+			const ScriptSlot& stored = existing->Scripts[slot];
+			Json fields = Json::object();
+			for (const auto& [name, value] : stored.Fields)
+				fields[name] = value.Get();
+			const Json slotJson{ { "Script", stored.Script.GetHandle().ToString() }, { "Fields", std::move(fields) }, { "ExecutionOrder", stored.ExecutionOrder } };
+			Utils::CompleteBorrowingScriptSlot((*script)["Scripts"][slot], slotJson);
 		}
 		return {};
 	}
@@ -302,7 +337,7 @@ namespace Engine {
 		if (!reference)
 			return {};
 		ENGINE_TRY_ASSIGN(const AssetHandle handle, Utils::ResolveAssetParam(*this, *reference, "/prefab"));
-		// Only the root's Script handle is read here; the request's validation checks the field values against it.
+		// Only the root's Script slots are read here; the request's validation checks the field values against their scripts.
 		LoadReport report;
 		Result<Prefab> prefab = LoadPrefabAsset(m_Editor->GetAssets(), handle, m_Editor->GetTypeRegistry(), nullptr, report);
 		if (!prefab)
@@ -324,10 +359,8 @@ namespace Engine {
 				return {};
 			for (const size_t slot : Utils::FindBorrowingScriptSlots(script))
 			{
-				const Json* rootSlot = slot < slots->size() && (*slots)[slot].is_object() ? &(*slots)[slot] : nullptr;
-				const auto handleJson = rootSlot != nullptr ? rootSlot->find("Script") : Json::const_iterator();
-				if (rootSlot != nullptr && handleJson != rootSlot->end() && handleJson->is_string())
-					script["Scripts"][slot]["Script"] = *handleJson;
+				if (slot < slots->size() && (*slots)[slot].is_object())
+					Utils::CompleteBorrowingScriptSlot(script["Scripts"][slot], (*slots)[slot]);
 			}
 			return {};
 		}

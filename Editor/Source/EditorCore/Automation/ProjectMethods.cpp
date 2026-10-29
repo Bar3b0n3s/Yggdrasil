@@ -260,13 +260,12 @@ namespace Engine {
 		}
 
 		// project.upgrade's reload of every open scene whose file it rewrote, `rewritten` (Docs/Decisions/0031-m20-contract.md
-		// decision 14): each read again in its tab position, in tab order (EditorContext::SetScene, with the scene addressed),
-		// and the tab active before is active again (SetScene gives the scene it reads a new id and makes it active). Errors:
-		// those of loading a file (LoadSceneFile, strict) and of addressing a scene; the scenes reloaded before stay reloaded.
+		// decision 14): each read again in its tab position, in tab order (EditorContext::SetScene, with the scene addressed,
+		// which gives it a new id and keeps the active tab active: the active one's replacement becomes active, another's
+		// leaves it, so no SceneActivated event is appended). Errors: those of loading a file (LoadSceneFile, strict) and of
+		// addressing a scene; the scenes reloaded before stay reloaded.
 		static Status ReloadRewrittenOpenScenes(EditorContext& editor, std::span<const VfsPath> rewritten)
 		{
-			const std::vector<OpenSceneId> tabs = editor.GetOpenScenes();
-			const size_t activeTab = static_cast<size_t>(std::ranges::find(tabs, editor.GetActiveSceneId()) - tabs.begin());
 			for (const OpenSceneState& open : ListOpenScenes(editor))
 			{
 				if (!open.Path.has_value() || std::ranges::find(rewritten, *open.Path) == rewritten.end())
@@ -279,9 +278,6 @@ namespace Engine {
 				LogLoadDiagnostics(ToProjectRelative(path), report);
 				editor.SetScene(std::move(scene), path, false);
 			}
-			const std::vector<OpenSceneId> reloaded = editor.GetOpenScenes();
-			if (activeTab < reloaded.size() && editor.GetActiveSceneId() != reloaded[activeTab])
-				ENGINE_TRY(editor.ActivateScene(reloaded[activeTab]));
 			return {};
 		}
 
@@ -617,13 +613,14 @@ namespace Engine {
 
 		registry.Struct<ProjectOpenParams>("ProjectOpenParams", "The params of project.open.")
 			.Field("path", &ProjectOpenParams::Path, "The .eproj, or the directory holding exactly one: native, absolute or relative.")
-			.Field("recover", &ProjectOpenParams::Recover, "Adopt the newest validated dirty recovery before opening; source files are preserved.");
+			.Field("recover", &ProjectOpenParams::Recover, "Adopt the newest valid recovery of every autosaved scene before opening, each as an open "
+														   "scene (the oldest active); source files are preserved.");
 
 		registry.Struct<ProjectOpenResult>("ProjectOpenResult", "The opened project.")
 			.Field("project", &ProjectOpenResult::Project, "The open project.")
 			.Field("warnings", &ProjectOpenResult::Warnings, "Project load and recovery validation warnings.")
 			.Field("recoveryAvailable", &ProjectOpenResult::RecoveryAvailable, "A complete dirty recovery is available for this unchanged project and source.")
-			.Field("recovered", &ProjectOpenResult::Recovered, "The recovery was installed as a dirty scene with empty undo history.");
+			.Field("recovered", &ProjectOpenResult::Recovered, "The recoveries were installed as dirty open scenes with empty undo histories.");
 
 		registry.Struct<ProjectSaveResult>("ProjectSaveResult", "What project.save wrote.")
 			.Field("savedFiles", &ProjectSaveResult::SavedFiles, "The project-relative files written, in tab order.");

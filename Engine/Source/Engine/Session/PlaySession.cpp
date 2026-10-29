@@ -34,6 +34,8 @@
 #include <format>
 #include <limits>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <utility>
 
 namespace Engine {
@@ -249,9 +251,11 @@ namespace Engine {
 		Ref<const Json> CurrentDocument{};
 		AssetHandle CurrentSceneAsset{};
 		std::string CurrentSourcePath{};
+		bool CurrentIsStartDocument = true; // CurrentDocument is the session's start document (no Scene.Load since)
 		Ref<const Json> PendingDocument{};
 		AssetHandle PendingSceneAsset{};
 		std::string PendingSourcePath{};
+		bool PendingIsReload = false; // the pending transition is a Scene.Reload, not a Scene.Load
 
 		[[nodiscard]] Scene& GetScene() override { return *RuntimeScene; }
 		[[nodiscard]] const TypeRegistry& GetTypes() const override { return *Registry; }
@@ -306,19 +310,25 @@ namespace Engine {
 				FatalError = Errors.GetErrors().back();
 		}
 		[[nodiscard]] Status PrepareScripts();
-		void StartScripts();
+		// Creates and starts the scene's instances; a failure is reported as the session error of `transition`, the request
+		// that made the scene current (ReportSessionError).
+		void StartScripts(std::string_view transition);
 		void FlushDestroyed();
 		// OK while the frame may still request a scene transition: one per frame, none during a replacement or after a stop
 		// or quit request.
 		[[nodiscard]] Status CheckSceneTransition() const;
-		// Scene.Load's and Scene.Reload's request: `document` loaded strictly into a new runtime scene before the request is
-		// accepted, so the caller still receives its located error, then kept with the parameters, the asset and the path as
-		// the pending transition that ConsumeRequests commits at the end of the frame.
-		[[nodiscard]] Status PrepareSceneTransition(Ref<const Json> document, AssetHandle asset, std::string sourcePath, Json parameters);
+		// Scene.Load's and Scene.Reload's (`reload`) request: `document` loaded strictly into a new runtime scene before the
+		// request is accepted, so the caller still receives its located error, then kept with the parameters, the asset and
+		// the path as the pending transition that ConsumeRequests commits at the end of the frame. A reload of the session's
+		// start document in Play with a native module makes the new scene's native components canonical, as the start did
+		// (Prepare; Docs/Decisions/0031-m20-contract.md decision 5, the milestone review's P2).
+		[[nodiscard]] Status PrepareSceneTransition(Ref<const Json> document, AssetHandle asset, std::string sourcePath, Json parameters, bool reload);
 		// Drops the pending transition.
 		void ClearPendingTransition();
 		void ConsumeRequests();
-		void ReportSessionError(const Error& error);
+		// Publishes `error`, a failed scene transition, as a script error of the callback `transition` ("Scene.Load" or
+		// "Scene.Reload") and pauses the session.
+		void ReportSessionError(const Error& error, std::string_view transition);
 
 		// The observer's notification at the start of `phase` (IPlaySessionObserver).
 		void EnterPhase(PlaySession& session, PlaySessionPhase phase, uint64_t tick) const;
@@ -424,7 +434,7 @@ namespace Engine {
 		return {};
 	}
 
-	Status PlaySession::State::PrepareSceneTransition(Ref<const Json> document, AssetHandle asset, std::string sourcePath, Json parameters)
+	Status PlaySession::State::PrepareSceneTransition(Ref<const Json> document, AssetHandle asset, std::string sourcePath, Json parameters, bool reload)
 	{
 		// Validate before accepting the request, while the caller can still receive its located error. No gameplay or
 		// teardown runs here; the active protected call continues in its original scene and VM until frame end.
@@ -436,11 +446,16 @@ namespace Engine {
 		ENGINE_TRY(SceneSerializer::FromJson(*candidate, *document, options, report));
 		if (candidate->GetEntityCount() > Project.Simulation.MaxEntities)
 			return Utils::MakeSceneOverLimitError(Project.Simulation.MaxEntities, candidate->GetEntityCount());
+		// The start document restarts as the start made it: canonical against the module (M19 decision 27). A scene
+		// Scene.Load loaded stays as its file holds it (NativeWorld.h).
+		if (reload && CurrentIsStartDocument && Native != nullptr)
+			ENGINE_TRY(Utils::CanonicalizeNativeScene(*candidate, Native->GetTypes()));
 		PendingScene = std::move(candidate);
 		PendingParameters = std::move(parameters);
 		PendingDocument = std::move(document);
 		PendingSceneAsset = asset;
 		PendingSourcePath = std::move(sourcePath);
+		PendingIsReload = reload;
 		return {};
 	}
 
@@ -451,6 +466,7 @@ namespace Engine {
 		PendingDocument.reset();
 		PendingSceneAsset = AssetHandle();
 		PendingSourcePath.clear();
+		PendingIsReload = false;
 	}
 
 	Status PlaySession::State::RequestSceneLoad(AssetHandle scene, Json parameters)
@@ -465,7 +481,7 @@ namespace Engine {
 		if (data == nullptr || data->Document == nullptr)
 			return MakeError(ErrorCode::Validation, "Scene.Load requires a valid Scene asset");
 		// The asset's document as it is now: a later Scene.Reload restarts from it even if the asset changes meanwhile.
-		return PrepareSceneTransition(data->Document, scene, Assets->GetReferencePath(scene), std::move(parameters));
+		return PrepareSceneTransition(data->Document, scene, Assets->GetReferencePath(scene), std::move(parameters), false);
 	}
 
 	Status PlaySession::State::RequestSceneReload(std::optional<Json> parameters)
@@ -477,7 +493,7 @@ namespace Engine {
 		// The document the current scene started from, never its asset's file now: in editor play the play copy, so the
 		// edit scene's unsaved edits are kept (§5.6), and what play changed since is not.
 		Json kept = parameters.has_value() ? std::move(*parameters) : Parameters;
-		return PrepareSceneTransition(CurrentDocument, CurrentSceneAsset, CurrentSourcePath, std::move(kept));
+		return PrepareSceneTransition(CurrentDocument, CurrentSceneAsset, CurrentSourcePath, std::move(kept), true);
 	}
 
 	AssetHandle PlaySession::State::GetCurrentScene() const
@@ -535,14 +551,14 @@ namespace Engine {
 		return {};
 	}
 
-	void PlaySession::State::StartScripts()
+	void PlaySession::State::StartScripts(std::string_view transition)
 	{
 		if (Scripts == nullptr)
 			return;
 		const Status initialized = Scripts->InitializeInstances();
 		if (!initialized)
 		{
-			ReportSessionError(initialized.error());
+			ReportSessionError(initialized.error(), transition);
 			StopAfterSessionError();
 			return;
 		}
@@ -570,7 +586,7 @@ namespace Engine {
 		RuntimeScene->FlushPendingDestroys();
 	}
 
-	void PlaySession::State::ReportSessionError(const Error& error)
+	void PlaySession::State::ReportSessionError(const Error& error, std::string_view transition)
 	{
 		ScriptError report{};
 		report.Script = error.GetLocation().File;
@@ -578,7 +594,7 @@ namespace Engine {
 		report.Column = error.GetLocation().Column;
 		report.JsonPointer = error.GetLocation().JsonPointer.value_or("");
 		report.Message = error.ToString();
-		report.Callback = "Scene.Load";
+		report.Callback = std::string(transition);
 		report.Tick = Tick;
 		ENGINE_CORE_ERROR("Script scene transition failed: {}", error);
 		OnScriptError(report, false);
@@ -598,6 +614,9 @@ namespace Engine {
 		}
 		if (PendingScene == nullptr)
 			return;
+		// The request a failure of the transition is reported as (the milestone review, P1).
+		const bool reload = PendingIsReload;
+		const std::string_view transition = reload ? "Scene.Reload" : "Scene.Load";
 		// Create the new physics world before discarding the old scene. Failed setup leaves the current session intact.
 		TransformSystem::Update(*PendingScene);
 		PlaySessionSpecification specification{};
@@ -606,7 +625,7 @@ namespace Engine {
 		auto physics = PhysicsSystem::Create(Utils::MakePhysicsSpecification(specification, *PendingScene));
 		if (!physics)
 		{
-			ReportSessionError(physics.error());
+			ReportSessionError(physics.error(), transition);
 			ClearPendingTransition();
 			return;
 		}
@@ -633,6 +652,7 @@ namespace Engine {
 		CurrentDocument = std::move(PendingDocument);
 		CurrentSceneAsset = PendingSceneAsset;
 		CurrentSourcePath = std::move(PendingSourcePath);
+		CurrentIsStartDocument = CurrentIsStartDocument && reload;
 		ClearPendingTransition();
 		ENGINE_CORE_VERIFY(SceneGeneration != std::numeric_limits<uint64_t>::max(), "Session scene generation exhausted");
 		++SceneGeneration;
@@ -652,11 +672,11 @@ namespace Engine {
 		const Status prepared = PrepareScripts();
 		if (!prepared)
 		{
-			ReportSessionError(prepared.error());
+			ReportSessionError(prepared.error(), transition);
 			StopAfterSessionError();
 		}
 		else
-			StartScripts();
+			StartScripts(transition);
 		if (SceneAudio != nullptr)
 			SceneAudio->Start();
 	}
@@ -1023,7 +1043,8 @@ namespace Engine {
 			state.AudioHeld = true;
 			state.ApplyAudioRunState();
 		}
-		state.StartScripts();
+		// The session's own scene: a failure is reported as a Scene.Load's, as before Scene.Reload existed.
+		state.StartScripts("Scene.Load");
 		if (state.SceneAudio != nullptr)
 			state.SceneAudio->Start();
 	}

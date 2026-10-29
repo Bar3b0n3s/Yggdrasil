@@ -7,6 +7,7 @@
 #include "EditorCore/Commands/SceneEdit.h"
 #include "EditorCore/EditorContext.h"
 #include "Engine/App/EngineContext.h"
+#include "Engine/Core/EventLog.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
@@ -745,6 +746,7 @@ namespace Engine {
 				REQUIRE(FileSystem::WriteFileAtomic(root / file, AsBytes(reformatted), {}).has_value());
 			}
 
+			const uint64_t cursor = editor.GetEngine().GetEventLog().GetNextSeq();
 			const Result<Json> upgraded = setup.Call("project.upgrade", Json::object());
 			REQUIRE_MESSAGE(upgraded.has_value(), upgraded.error().ToString());
 			const Json& changed = (*upgraded)["changedFiles"];
@@ -759,6 +761,15 @@ namespace Engine {
 			CHECK(editor.GetScene().GetName() == "Main");
 			CHECK(editor.DescribeOpenScene(open[1])->Path == std::optional<VfsPath>(ProjectScenePath("project://Assets/Scenes/Second.scene")));
 			CHECK_FALSE(editor.IsAnySceneDirty());
+			// Each reload opened its scene in place; the active tab never changed, so no SceneActivated event (the milestone
+			// review, M4).
+			const EngineEventType types[] = { EngineEventType::SceneOpened, EngineEventType::SceneActivated, EngineEventType::SceneClosed };
+			const EventReadResult events = editor.GetEngine().GetEventLog().Read(cursor, types, 10);
+			REQUIRE(events.Events.size() == 2);
+			CHECK(events.Events[0].Type == EngineEventType::SceneOpened);
+			CHECK(events.Events[0].Path == "Assets/Scenes/Main.scene");
+			CHECK(events.Events[1].Type == EngineEventType::SceneOpened);
+			CHECK(events.Events[1].Path == "Assets/Scenes/Second.scene");
 		}
 	}
 

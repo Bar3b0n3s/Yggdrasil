@@ -26,6 +26,8 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <format>
+#include <initializer_list>
 #include <limits>
 #include <map>
 #include <optional>
@@ -237,6 +239,33 @@ namespace Engine {
 			CHECK((*reordered)["Scripts"][1]["ExecutionOrder"] == Json(4));
 			CHECK((*reordered)["Scripts"][0]["Fields"] == (*edited)["Scripts"][0]["Fields"]);
 			CHECK((*reordered)["Scripts"][1]["Fields"] == (*edited)["Scripts"][1]["Fields"]);
+
+			// Two slots of one script (the milestone review, S4): Counter's Step became a String, so both slots hold a value
+			// its schema rejects. Each slot can still be fixed, its sibling keeping its stale value, and the edited slot's new
+			// value is still checked against the schema.
+			const auto counter = editor.GetScriptService()->Write(Test::ParseVfsPath("project://Assets/Counter.luau"),
+				"return Script.Define(\"Counter\", {Fields = {Step = Field.String(\"one\")}})");
+			REQUIRE(counter);
+			const Entity hero = editor.GetScene().CreateEntity("Hero");
+			const UUID heroId = hero.GetUUID();
+			ScriptSlot stale;
+			stale.Script = TypedAssetHandle<AssetType::Script>(counter->Script);
+			stale.Fields.emplace("Step", VariantValue(Json(3)));
+			hero.AddComponent<ScriptComponent>(ScriptComponent{ { stale, stale } });
+			for (const size_t slot : std::initializer_list<size_t>{ 0, 1 })
+			{
+				CAPTURE(slot);
+				REQUIRE(edits.Begin({ .Entities = { heroId }, .Component = "Script", .FieldPath = std::format("Scripts[{}].Fields[Step]", slot) }));
+				CHECK_FALSE(edits.Preview(Value::FromVariant(VariantValue(Json(5)))));
+				const auto fixed = edits.Preview(Value::FromVariant(VariantValue(Json("two"))));
+				REQUIRE_MESSAGE(fixed.has_value(), fixed.error().ToString());
+				const Result<uint64_t> stepped = edits.Commit();
+				REQUIRE_MESSAGE(stepped.has_value(), stepped.error().ToString());
+				const auto steps = ComponentAccess::GetComponentJson(editor.GetScene().FindEntityByID(heroId), "Script");
+				REQUIRE(steps);
+				CHECK((*steps)["Scripts"][slot]["Fields"] == Json{ { "Step", "two" } });
+				CHECK((*steps)["Scripts"][1 - slot]["Fields"] == Json{ { "Step", slot == 0 ? Json(3) : Json("two") } });
+			}
 		}
 
 		TEST_CASE("ReflectedEditController: nested script arrays validate their element schema before committing")

@@ -16,6 +16,7 @@
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Core/VfsPath.h"
 #include "Engine/Core/VirtualFileSystem.h"
 
 #include <imgui.h>
@@ -252,7 +253,13 @@ namespace Engine {
 		const bool previewRunning = editor.GetPlay().GetSession() != nullptr;
 		const auto openScene = [this, &editor, &submit, previewRunning](const std::string& path)
 		{
-			if (previewRunning)
+			// A scene another tab holds is activated (M20 decision 14): nothing is replaced, so no save-or-discard prompt, and
+			// activating a tab is allowed while playing; scene.open would refuse its path.
+			const Result<VfsPath> file = VfsPath::Create("project", path);
+			const OpenSceneId open = file ? editor.FindOpenScene(*file) : NoOpenScene;
+			if (open != NoOpenScene)
+				submit("scene.activate", Json{ { "scene", open } });
+			else if (previewRunning)
 				m_Error = "Stop the preview before changing scenes.";
 			else if (editor.IsSceneDirty())
 			{

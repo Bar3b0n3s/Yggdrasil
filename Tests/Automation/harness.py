@@ -203,6 +203,14 @@ class AutomationTestCase(unittest.TestCase):
         if error_code is not None:
             self.assertEqual(error.error_code, error_code, quoted)
 
+    def assert_no_gpu_messages(self, process: engine_client.EditorProcess) -> None:
+        """`process` printed no GPU warning or error so far (Vulkan validation or NVRHI); it may still be running, as
+        before a test kills it."""
+        gpu_messages = [line for line in process.output().splitlines()
+                        if ("Vulkan validation:" in line or "NVRHI:" in line)
+                        and any(level in line for level in ("[warning]", "[error]", "[critical]"))]
+        self.assertFalse(gpu_messages, process.output())
+
 
 class GpuRecoveryTestCase(AutomationTestCase):
     """The shared helpers of the tests that inject GPU faults into rendering editors and exported games (M18,
@@ -243,10 +251,7 @@ class GpuRecoveryTestCase(AutomationTestCase):
     def assert_clean_exit(self, process: engine_client.EditorProcess) -> None:
         """`process` exits 0 (it runs with --expect-no-gpu-errors) and printed no GPU warning or error."""
         self.assertEqual(process.wait(), EXIT_SUCCESS, process.output())
-        gpu_messages = [line for line in process.output().splitlines()
-                        if ("Vulkan validation:" in line or "NVRHI:" in line)
-                        and any(level in line for level in ("[warning]", "[error]", "[critical]"))]
-        self.assertFalse(gpu_messages, process.output())
+        self.assert_no_gpu_messages(process)
 
 
 def read_json(path: Path) -> Any:

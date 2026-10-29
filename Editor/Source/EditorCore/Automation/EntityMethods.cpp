@@ -468,7 +468,9 @@ namespace Engine {
 			.Field("active", &EntityUpdateParams::Active, "The new active flag.")
 			.Field("tags", &EntityUpdateParams::Tags, "The new tag list (replaces the old one).")
 			.VariantField("components", &EntityUpdateParams::Components,
-				"Component values by registry name, merged into the existing components; missing components are added. An Entity value takes 16 hex "
+				"Component values by registry name, merged into the existing components; missing components are added. A list replaces the old "
+				"one, but a Script slot entry that gives Fields without Script patches the slot at its index (its script, ExecutionOrder and "
+				"other field values kept; a null value removes one). An Entity value takes 16 hex "
 				"digits, a unique id prefix of at least 6 or a path such as \"/Game/ScoreText\", resolved in the target scene. Native components "
 				"(Native.<Name>) are written with native.setComponents.",
 				&ResolveComponentValue)

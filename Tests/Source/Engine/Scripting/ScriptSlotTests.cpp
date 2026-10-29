@@ -351,6 +351,67 @@ return Script.Define("SlotFail", T))"));
 			CHECK(fixture.Errors.empty());
 		}
 
+		// Decision 17's entity callbacks for held events (the milestone review, S1): events held until the start flush reach
+		// an entity's slots together, in slot order, as a live event does, at the turn of its slot that comes first in
+		// (ExecutionOrder, canonical entity) order; never in the slots' own ExecutionOrder across the entity.
+		TEST_CASE("ScriptSlots: held physics events reach an entity's slots together in slot order")
+		{
+			Test::ScriptTestFixture fixture(ScriptSlotSpecification());
+			const AssetHandle aim(0x210001);
+			const AssetHandle fire(0x210002);
+			REQUIRE(fixture.AddScript(aim, "Assets/Scripts/Aim.luau", SlotBehaviourSource("Aim")));
+			REQUIRE(fixture.AddScript(fire, "Assets/Scripts/Fire.luau", SlotBehaviourSource("Fire")));
+			REQUIRE(fixture.Start());
+			Scene& scene = fixture.GetScene();
+			// Pair's slot 0 runs after Other and its slot 1 before it: Pair's turn is its slot 1's, ExecutionOrder 0.
+			const Entity pair = scene.CreateEntityWithID(UUID(150), "Pair");
+			const Entity other = scene.CreateEntityWithID(UUID(151), "Other");
+			AddScriptSlots(fixture, pair, std::format(R"([ {{ "Script": "{}", "ExecutionOrder": 10 }}, {{ "Script": "{}" }} ])", aim.ToString(), fire.ToString()));
+			AddScriptSlots(fixture, other, std::format(R"([ {{ "Script": "{}", "ExecutionOrder": 5 }} ])", aim.ToString()));
+			REQUIRE(fixture.GetEngine()->SynchronizeInstances());
+			// Both entities overlap a trigger before their instances started: every slot holds the event.
+			fixture.GetEngine()->OnPhysicsEvent(PhysicsEvent{ .Type = PhysicsEventType::TriggerEnter, .Self = UUID(150), .Other = UUID(152) });
+			fixture.GetEngine()->OnPhysicsEvent(PhysicsEvent{ .Type = PhysicsEventType::TriggerEnter, .Self = UUID(151), .Other = UUID(152) });
+
+			const size_t from = ScriptSlotTrace(scene).size();
+			fixture.Frame.Phase = InputPhase::Step;
+			fixture.GetEngine()->StartPending();
+			CHECK(ScriptSlotTraceSince(scene, from) == std::vector<std::string>{ "Pair:Fire:start", "Other:Aim:start", "Pair:Aim:start", "Pair:Aim:trigger", "Pair:Fire:trigger", "Other:Aim:trigger" });
+			CHECK(fixture.Errors.empty());
+		}
+
+		// Decision 17 (the milestone review, S5): a physics diagnostic belongs to the entity, so it names and disables the
+		// entity's first slot that has an instance (the first slot may hold no script), and an entity without an instance is
+		// still named.
+		TEST_CASE("ScriptSlots: a physics diagnostic names the entity's first slot that has an instance")
+		{
+			auto specification = ScriptSlotSpecification();
+			specification.TestMode = false;
+			Test::ScriptTestFixture fixture(specification);
+			const AssetHandle aim(0x210001);
+			REQUIRE(fixture.AddScript(aim, "Assets/Scripts/Aim.luau", SlotBehaviourSource("Aim")));
+			Scene& scene = fixture.GetScene();
+			const Entity hollow = scene.CreateEntityWithID(UUID(160), "Hollow");
+			AddScriptSlots(fixture, hollow, std::format(R"([ {{ }}, {{ "Script": "{}" }} ])", aim.ToString()));
+			static_cast<void>(scene.CreateEntityWithID(UUID(161), "Plain"));
+			REQUIRE(fixture.Start());
+
+			for (const UUID entity : { UUID(160), UUID(161) })
+				fixture.GetEngine()->OnPhysicsDiagnostic(PhysicsDiagnostic{ .Code = "PHYSICS_INVALID_SHAPE", .Severity = DiagnosticSeverity::Error, .Entity = entity, .Message = "a refused shape" });
+			REQUIRE(fixture.Errors.size() == 2);
+			CHECK(fixture.Errors[0].Entity == UUID(160));
+			CHECK(fixture.Errors[0].Slot == 1);
+			CHECK(fixture.Errors[0].EntityName == "Hollow");
+			CHECK(fixture.Errors[0].Callback == "Physics");
+			CHECK(fixture.Errors[1].Entity == UUID(161));
+			CHECK(fixture.Errors[1].Slot == 0);
+			CHECK(fixture.Errors[1].EntityName == "Plain");
+			const std::vector<ScriptInstanceInfo> instances = fixture.GetEngine()->GetInstances();
+			REQUIRE(instances.size() == 1);
+			CHECK(instances[0].Slot == 1);
+			CHECK(instances[0].Disabled);
+		}
+
 		// Decision 17's list writes: a write of the Script list keeps an instance whose slot index still holds the same
 		// script, and destroys and creates the others, as removing and adding the component would.
 		TEST_CASE("ScriptSlots: a write of the Script list keeps the instances whose slot keeps its script")

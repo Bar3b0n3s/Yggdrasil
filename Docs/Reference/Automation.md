@@ -831,7 +831,7 @@ Changes only what is given: name, active flag, tags, component fields (merged; m
 | `name` | `String` |  | `""` | The new name. |
 | `active` | `Bool` |  | `true` | The new active flag. |
 | `tags` | `Array<String>` |  | `[]` | The new tag list (replaces the old one). |
-| `components` | `Map<Variant>` |  | `{}` | Component values by registry name, merged into the existing components; missing components are added. An Entity value takes 16 hex digits, a unique id prefix of at least 6 or a path such as "/Game/ScoreText", resolved in the target scene. Native components (Native.\<Name>) are written with native.setComponents. |
+| `components` | `Map<Variant>` |  | `{}` | Component values by registry name, merged into the existing components; missing components are added. A list replaces the old one, but a Script slot entry that gives Fields without Script patches the slot at its index (its script, ExecutionOrder and other field values kept; a null value removes one). An Entity value takes 16 hex digits, a unique id prefix of at least 6 or a path such as "/Game/ScoreText", resolved in the target scene. Native components (Native.\<Name>) are written with native.setComponents. |
 | `removeComponents` | `Array<String>` |  | `[]` | Components to remove (before the components are written); native.setComponents removes a native one (null). |
 | `target` | `SceneTarget` |  | `"Edit"` | The scene to change; omitted: the edit scene. "play" changes the play scene transiently. |
 
@@ -1609,7 +1609,7 @@ Creates an instance of a prefab asset (a .prefab or a glTF) under a parent, with
 | `index` | `UInt32` |  | `0` | The position among the parent's children; last when absent. |
 | `transform` | `Variant` |  | `null` | Transform fields over the prefab root's, such as {"Translation": [2, 0, 0]}. |
 | `name` | `String` |  | `""` | The instance root's name; the prefab root's when absent. |
-| `components` | `Map<Variant>` |  | `{}` | Per-instance component values for the instance root by registry name, merged into the prefab's as entity.update merges them (missing components are added) and recorded as the instance's overrides; script fields go in {"Script": {"Scripts": [{"Fields": {...}}]}}: an entry that gives Fields without Script takes the Script handle of the prefab root's slot at its index, every other member an entry omits takes its default (repeat a non-zero ExecutionOrder), and the list replaces the root's. An Entity value takes 16 hex digits, a unique id prefix of at least 6 or a path such as "/Game/ScoreText", resolved in the edit scene the request addresses. |
+| `components` | `Map<Variant>` |  | `{}` | Per-instance component values for the instance root by registry name, merged into the prefab's as entity.update merges them (missing components are added) and recorded as the instance's overrides; script fields go in {"Script": {"Scripts": [{"Fields": {...}}]}}, one entry per root slot, the list replacing the root's: an entry that gives Fields without Script patches the root's slot at its index (its script and ExecutionOrder kept, its other field values too; a null value removes one), and an entry with a Script describes its whole slot, omitted members taking their defaults. An Entity value takes 16 hex digits, a unique id prefix of at least 6 or a path such as "/Game/ScoreText", resolved in the edit scene the request addresses. |
 
 | Result | Type | Description |
 |---|---|---|
@@ -1831,14 +1831,14 @@ Opens the project a native path names (its .eproj, or its directory), taking its
 | Param | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `path` | `String` | yes | `""` | The .eproj, or the directory holding exactly one: native, absolute or relative. |
-| `recover` | `Bool` |  | `false` | Adopt the newest validated dirty recovery before opening; source files are preserved. |
+| `recover` | `Bool` |  | `false` | Adopt the newest valid recovery of every autosaved scene before opening, each as an open scene (the oldest active); source files are preserved. |
 
 | Result | Type | Description |
 |---|---|---|
 | `project` | `ProjectSummary` | The open project. |
 | `warnings` | `Array<String>` | Project load and recovery validation warnings. |
 | `recoveryAvailable` | `Bool` | A complete dirty recovery is available for this unchanged project and source. |
-| `recovered` | `Bool` | The recovery was installed as a dirty scene with empty undo history. |
+| `recovered` | `Bool` | The recoveries were installed as dirty open scenes with empty undo histories. |
 
 Example: Open the Tetris project.
 
@@ -2729,7 +2729,7 @@ Queries visual triangles at a viewport pixel without a GPU, clipping to the came
 | `x` | `UInt32` | yes | `0` | Horizontal pixel from the left; must be below the actual framebuffer width. |
 | `y` | `UInt32` | yes | `0` | Vertical pixel from the top; must be below the actual framebuffer height. |
 | `view` | `ViewportView` | yes | `"Scene"` | Scene camera or the target scene's primary game camera. |
-| `target` | `SceneTarget` |  | `"Edit"` | Defaults to play while playing, edit otherwise. |
+| `target` | `SceneTarget` |  | `"Edit"` | Defaults to the scene the view shows: for the scene view, play only while the played scene's tab is active; for the game view, play while playing; edit otherwise. |
 
 | Result | Type | Description |
 |---|---|---|

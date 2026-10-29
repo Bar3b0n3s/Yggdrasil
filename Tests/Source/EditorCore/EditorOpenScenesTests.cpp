@@ -4,6 +4,7 @@
 #include "EditorCore/Commands/CommandHistory.h"
 #include "EditorCore/Commands/SceneEdit.h"
 #include "EditorCore/Play/EditorPlayController.h"
+#include "Engine/Core/Buffer.h"
 #include "Engine/Core/EventLog.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
@@ -13,6 +14,7 @@
 #include "Engine/Scene/SceneSerializer.h"
 #include "Support/AutomationTestClient.h"
 #include "Support/EditorTestFixture.h"
+#include "Support/TestData.h"
 
 #include <nlohmann/json.hpp>
 
@@ -518,6 +520,142 @@ namespace Engine {
 			REQUIRE(undone.has_value());
 			CHECK(OpenScenesName((*undone)["entities"][1]) == "Bulb");
 			CHECK(setup.GetEditor().GetScene().FindEntityByPath("/Lamp/Globe").IsValid());
+		}
+
+		// Decision 15 (the milestone review, T1): a new version of a prefab that only another open scene instantiates reaches
+		// that scene, as an entry of its own history, whether an asset.reimport or an import setting gives it that version.
+		TEST_CASE("EditorContext: a reimport and an import setting of a glTF that only another open scene instantiates rebuild that scene")
+		{
+			Test::AutomationFixture setup("OpenScenesGltfVersions");
+			EditorContext& editor = setup.GetEditor();
+			const Result<Buffer> bytes = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Gltf/Hierarchy.gltf"));
+			REQUIRE_MESSAGE(bytes.has_value(), bytes.error().ToString());
+			const VfsPath gltf = OpenScenesPath("project://Assets/Models/Hierarchy.gltf");
+			REQUIRE(editor.CreateProjectDirectory(gltf.GetParent()).has_value());
+			REQUIRE(editor.WriteProjectFile(gltf, *bytes).has_value());
+			REQUIRE(setup.Call("project.refreshAssets", Json::object()).has_value());
+			const OpenSceneId main = editor.GetActiveSceneId();
+			REQUIRE(setup.Call("scene.new", Json{ { "path", "Assets/Scenes/Second.scene" }, { "keepOpen", true } }).has_value());
+			REQUIRE(setup.Call("prefab.instantiate", Json{ { "prefab", "Assets/Models/Hierarchy.gltf" } }).has_value());
+			REQUIRE(setup.Call("scene.activate", Json{ { "scene", main } }).has_value());
+			const Json inSecond{ { "scene", "Assets/Scenes/Second.scene" } };
+			const auto baseHeight = [&setup, &inSecond]()
+			{
+				Json params = inSecond;
+				params["entity"] = "/Hierarchy/Base";
+				const Result<Json> base = setup.Call("entity.get", params);
+				REQUIRE_MESSAGE(base.has_value(), base.error().ToString());
+				return JsonReader((*base)["entity"]["components"]["Transform"]["Translation"][1]).ReadFloat().value_or(-1.0f);
+			};
+			const auto history = [&setup, &inSecond]()
+			{
+				const Result<Json> entries = setup.Call("edit.history", inSecond);
+				REQUIRE_MESSAGE(entries.has_value(), entries.error().ToString());
+				return (*entries)["entries"];
+			};
+			const size_t entries = history().size();
+			CHECK(baseHeight() == doctest::Approx(1.0f));
+
+			// Another program moves the Base node up, and asset.reimport, while Main is active, rebuilds Second.
+			const std::filesystem::path file = setup.GetEditorFixture().GetProjectRoot() / "Assets/Models/Hierarchy.gltf";
+			const Result<std::string> text = FileSystem::ReadText(file);
+			REQUIRE(text.has_value());
+			Result<Json> document = JsonReader::Parse(*text);
+			REQUIRE(document.has_value());
+			(*document)["nodes"][0]["translation"][1] = 2.0;
+			REQUIRE(FileSystem::WriteFileAtomic(file, AsBytes(document->dump(2)), {}).has_value());
+			const Result<Json> reimported = setup.Call("asset.reimport", Json{ { "asset", "Assets/Models/Hierarchy.gltf" } });
+			REQUIRE_MESSAGE(reimported.has_value(), reimported.error().ToString());
+			CHECK(baseHeight() == doctest::Approx(2.0f));
+			Json after = history();
+			REQUIRE(after.size() == entries + 1);
+			CHECK(JsonReader(after.back()["label"]).ReadString().value_or(std::string()).contains("Update Prefab Instances"));
+
+			// An import setting halves the model, in an undo step of Main's history, and Second follows in an entry of its own.
+			const Result<Json> scaled = setup.Call("asset.setImportSettings", Json{ { "asset", "Assets/Models/Hierarchy.gltf" }, { "settings", Json{ { "Scale", 0.5 } } } });
+			REQUIRE_MESSAGE(scaled.has_value(), scaled.error().ToString());
+			CHECK(baseHeight() == doctest::Approx(1.0f));
+			after = history();
+			REQUIRE(after.size() == entries + 2);
+			CHECK(JsonReader(after.back()["label"]).ReadString().value_or(std::string()).contains("Update Prefab Instances"));
+			CHECK(editor.GetActiveSceneId() == main);
+		}
+
+		// Decision 15 with decision 8's nesting (the milestone review, T1): an edit applied at the Lamp level of a lamp nested
+		// in a room reaches another open scene that holds only a room, whose lamp follows Lamp.prefab through Room.prefab.
+		TEST_CASE("EditorContext: an applied edit of a nested prefab reaches another open scene that holds only the prefab nesting it")
+		{
+			Test::AutomationFixture setup("OpenScenesNestedApply");
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Room" } }).has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Lamp" }, { "parent", "/Room" } }).has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Bulb" }, { "parent", "/Room/Lamp" }, { "components", Json{ { "MeshRenderer", Json{ { "Mesh", "engine://Meshes/Cube" } } } } } })
+					.has_value());
+			REQUIRE(setup.Call("prefab.create", Json{ { "entity", "/Room/Lamp" }, { "path", "Assets/Prefabs/Lamp.prefab" }, { "replaceWithInstance", true } }).has_value());
+			REQUIRE(setup.Call("prefab.create", Json{ { "entity", "/Room" }, { "path", "Assets/Prefabs/Room.prefab" }, { "replaceWithInstance", true } }).has_value());
+			const OpenSceneId main = setup.GetEditor().GetActiveSceneId();
+			REQUIRE(setup.Call("scene.new", Json{ { "path", "Assets/Scenes/Second.scene" }, { "keepOpen", true } }).has_value());
+			REQUIRE(setup.Call("prefab.instantiate", Json{ { "prefab", "Assets/Prefabs/Room.prefab" }, { "name", "Room2" } }).has_value());
+			const Json inSecond{ { "scene", "Assets/Scenes/Second.scene" } };
+			const Result<Json> before = setup.Call("edit.history", inSecond);
+			REQUIRE(before.has_value());
+			REQUIRE(setup.Call("scene.activate", Json{ { "scene", main } }).has_value());
+
+			REQUIRE(setup.Call("entity.update", Json{ { "entity", "/Room/Lamp/Bulb" }, { "components", Json{ { "MeshRenderer", Json{ { "CastShadows", false } } } } } }).has_value());
+			const Result<Json> applied = setup.Call("prefab.apply", Json{ { "instance", "/Room/Lamp" }, { "level", "/Room/Lamp" } });
+			REQUIRE_MESSAGE(applied.has_value(), applied.error().ToString());
+			CHECK((*applied)["prefab"]["path"] == Json("Assets/Prefabs/Lamp.prefab"));
+			Json bulb = inSecond;
+			bulb["entity"] = "/Room2/Lamp/Bulb";
+			const Result<Json> followed = setup.Call("entity.get", bulb);
+			REQUIRE_MESSAGE(followed.has_value(), followed.error().ToString());
+			CHECK((*followed)["entity"]["components"]["MeshRenderer"]["CastShadows"] == Json(false));
+			const Result<Json> after = setup.Call("edit.history", inSecond);
+			REQUIRE(after.has_value());
+			REQUIRE((*after)["entries"].size() == (*before)["entries"].size() + 1);
+			CHECK(JsonReader((*after)["entries"].back()["label"]).ReadString().value_or(std::string()).contains("Update Prefab Instances"));
+		}
+
+		// Decision 15 (the milestone review, M1): undoing another scene's "Update Prefab Instances" entry leaves its instance
+		// as it was before the update, which differs from the prefab. The next prefab update records that difference as the
+		// scene's overrides against the prefab's version before the write, as the addressed scene's are, so the instance keeps
+		// it and still follows the prefab's other changes.
+		TEST_CASE("EditorContext: an open scene that undid a prefab update keeps its own value through the next update")
+		{
+			Test::AutomationFixture setup("OpenScenesPrefabUndoneUpdate");
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Lamp" } }).has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Bulb" }, { "parent", "/Lamp" } }).has_value());
+			REQUIRE(setup.Call("prefab.create", Json{ { "entity", "/Lamp" }, { "path", "Assets/Prefabs/Lamp.prefab" }, { "replaceWithInstance", true } }).has_value());
+			REQUIRE(setup.Call("scene.new", Json{ { "path", "Assets/Scenes/Second.scene" }, { "keepOpen", true } }).has_value());
+			REQUIRE(setup.Call("prefab.instantiate", Json{ { "prefab", "Assets/Prefabs/Lamp.prefab" }, { "name", "Copy" } }).has_value());
+			const Json main{ { "scene", "Assets/Scenes/Main.scene" } };
+			const Json inSecond{ { "scene", "Assets/Scenes/Second.scene" } };
+			const auto inMain = [&main](Json params)
+			{
+				params.update(main);
+				return params;
+			};
+
+			// Main renames the bulb and applies it; Second follows, then undoes its entry and keeps the old name.
+			REQUIRE(setup.Call("entity.update", inMain(Json{ { "entity", "/Lamp/Bulb" }, { "name", "Globe" } })).has_value());
+			REQUIRE(setup.Call("prefab.apply", inMain(Json{ { "instance", "/Lamp" } })).has_value());
+			REQUIRE(setup.Call("edit.undo", inSecond).has_value());
+			Scene* second = setup.GetEditor().FindScene(setup.GetEditor().FindOpenScene(OpenScenesPath("project://Assets/Scenes/Second.scene")));
+			REQUIRE(second != nullptr);
+			REQUIRE(second->FindEntityByPath("/Copy/Bulb").IsValid());
+
+			// Main moves the bulb up and applies that: Second's instance keeps its name and takes the move.
+			REQUIRE(setup.Call("entity.update", inMain(Json{ { "entity", "/Lamp/Globe" }, { "components", Json{ { "Transform", Json{ { "Translation", { 0, 2, 0 } } } } } } }))
+					.has_value());
+			const Result<Json> applied = setup.Call("prefab.apply", inMain(Json{ { "instance", "/Lamp" } }));
+			REQUIRE_MESSAGE(applied.has_value(), applied.error().ToString());
+			second = setup.GetEditor().FindScene(setup.GetEditor().FindOpenScene(OpenScenesPath("project://Assets/Scenes/Second.scene")));
+			REQUIRE(second != nullptr);
+			CHECK_FALSE(second->FindEntityByPath("/Copy/Globe").IsValid());
+			Json bulb = inSecond;
+			bulb["entity"] = "/Copy/Bulb";
+			const Result<Json> kept = setup.Call("entity.get", bulb);
+			REQUIRE_MESSAGE(kept.has_value(), kept.error().ToString());
+			CHECK((*kept)["entity"]["components"]["Transform"]["Translation"] == Json::array({ 0, 2, 0 }));
 		}
 
 		// Decision 15 under decision 16's scene target: a prefab update made by a request that targets an open scene other

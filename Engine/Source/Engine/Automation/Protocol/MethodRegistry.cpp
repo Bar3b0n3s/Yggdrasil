@@ -892,15 +892,17 @@ namespace Engine {
 			context.m_Request.Params = std::move(resolved);
 			return canonicalizer.NeedsFieldSchemas();
 		};
+		// The host completes what partial entries omit first, whether or not their own values need field schemas (an empty
+		// Fields object of a Script slot needs none), so what it completes is canonicalized and validated with the rest.
+		const Status owners = context.CompleteParameterOwners(context.m_Request.Params);
+		if (!owners)
+			return owners.error();
 		const Result<bool> needsSchemas = canonicalize(nullptr);
 		if (!needsSchemas)
 			return needsSchemas.error();
 		Ref<const IFieldSchemaSource> schemas;
 		if (*needsSchemas)
 		{
-			const Status owners = context.CompleteParameterOwners(context.m_Request.Params);
-			if (!owners)
-				return owners.error();
 			// Asset path resolution may import the script that declares these fields. Acquire only afterwards and pin the
 			// exact same immutable source through both reads and the handler, even if a resolver publishes newer assets.
 			const auto acquired = context.GetFieldSchemaSnapshot();

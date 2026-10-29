@@ -10,6 +10,7 @@
 #include "Editor/Viewport/EditorViewportHost.h"
 #include "EditorCore/Automation/EditorAutomationControls.h"
 #include "EditorCore/EditorActions.h"
+#include "EditorCore/EditorContext.h"
 #include "EditorCore/Inspector/ReflectedEditController.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "EditorCore/Thumbnails/ThumbnailCache.h"
@@ -742,6 +743,44 @@ namespace Engine {
 			context.Actions.Pump();
 			REQUIRE(context.Editor.GetScenePath());
 			CHECK(context.Editor.GetScenePath()->GetPath() == "Assets/Level3.scene");
+		}
+
+		// M20 (Docs/Decisions/0031-m20-contract.md decision 14; the milestone review, M3): a scene already open in another tab
+		// is activated (scene.activate), without the save-or-discard prompt since nothing is replaced, where scene.open would
+		// refuse its path.
+		TEST_CASE("ContentBrowserPanel: opening a scene that another tab holds activates that tab")
+		{
+			Test::PanelInteractionFixture fixture("ContentOpenTab", true);
+			auto& context = fixture.GetContext();
+			const auto created = fixture.GetAutomation().Call("asset.create", Json{ { "type", "Scene" }, { "path", "Assets/Level2.scene" } });
+			REQUIRE(created);
+			const auto level = JsonReader((*created)["asset"]["id"]).ReadUUID();
+			REQUIRE(level);
+			const OpenSceneId main = context.Editor.GetActiveSceneId();
+			REQUIRE(fixture.GetAutomation().Call("scene.open", Json{ { "path", "Assets/Level2.scene" }, { "keepOpen", true } }));
+			const OpenSceneId levelTab = context.Editor.GetActiveSceneId();
+			REQUIRE(levelTab != main);
+			REQUIRE(fixture.GetAutomation().Call("scene.activate", Json{ { "scene", main } }));
+			REQUIRE(fixture.GetAutomation().Call("entity.create", Json{ { "name", "Unsaved" } }));
+			REQUIRE(context.Editor.IsSceneDirty());
+			ContentBrowserPanel panel;
+			Test::AssetDesignInteraction ui;
+			const auto draw = [&panel, &context]()
+			{
+				return panel.Draw(context);
+			};
+			REQUIRE(ui.Frame(draw));
+			auto* root = ui.Window("Panel interaction");
+			auto* grid = ui.Child(root, ImHashStr("AssetTiles", 0, ContentControlID(root, context.Editor, "ContentColumns")));
+			DoubleClickContentItem(ui, draw, grid, ImHashStr("##Asset", 0, ImHashStr(level->ToString().c_str(), 0, grid->GetID("AssetGrid"))));
+			context.Actions.Pump();
+			REQUIRE(ui.Frame(draw));
+			CHECK(ImGui::GetCurrentContext()->OpenPopupStack.empty());
+			CHECK(context.Editor.GetActiveSceneId() == levelTab);
+			CHECK(context.Editor.GetOpenScenes() == std::vector<OpenSceneId>{ main, levelTab });
+			const Result<OpenSceneInfo> mainInfo = context.Editor.DescribeOpenScene(main);
+			REQUIRE(mainInfo.has_value());
+			CHECK(mainInfo->Dirty);
 		}
 
 		TEST_CASE("ContentBrowserPanel: authored folder labels retain distinct browsing and undoable move targets")

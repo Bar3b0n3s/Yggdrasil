@@ -87,8 +87,9 @@
 //      resolving ordinary asset paths, then canonicalizes schema-defined enums/assets and uses that same source for
 //      ValidateJson and FromJson. Snapshot acquisition errors keep their host error code; the handler does not run.
 //      Registry-only params never request a snapshot (MethodContext::GetFieldSchemaSnapshot).
-//      For partial patches the host may complete absent schema owner discriminators from the addressed object first
-//      (CompleteParameterOwners); explicit values always win and all completed params still undergo strict validation.
+//      For partial patches the host may first complete what an entry omits from the addressed object, its schema owner
+//      discriminators included (CompleteParameterOwners, before canonicalization); explicit values always win and all
+//      completed params still undergo strict validation.
 
 namespace Engine {
 

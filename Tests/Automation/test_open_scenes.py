@@ -241,6 +241,9 @@ return Script.Define("Hud", Hud)
             self.wait_for_rendered_frame(client, held)
             self.assertEqual(self.shoot(client, {"scene": scene}), before[scene], scene)
         self.assertEqual(len(self.device_loss_events(client, cursor)), 1)
+        # The two-scene recovery printed no GPU warning or error (the milestone review, T3): the crash below ends the
+        # editor without its clean-exit check.
+        self.assert_no_gpu_messages(self.editors[-1])
 
         # The autosave the loss wrote recovers both scenes after a crash.
         client.close()

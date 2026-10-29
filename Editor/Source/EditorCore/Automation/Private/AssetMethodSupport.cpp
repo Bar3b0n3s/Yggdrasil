@@ -26,6 +26,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <map>
 #include <optional>
 #include <utility>
 
@@ -39,22 +40,28 @@ namespace Engine {
 		class PrefabPropagationCommand final : public Command
 		{
 		public:
-			PrefabPropagationCommand(std::vector<AssetHandle> prefabs, bool afterUndo)
-				: m_Prefabs(std::move(prefabs)), m_AfterUndo(afterUndo)
+			PrefabPropagationCommand(std::vector<AssetHandle> prefabs, bool afterUndo, std::map<AssetHandle, Prefab> recordAgainst)
+				: m_Prefabs(std::move(prefabs)), m_RecordAgainst(std::move(recordAgainst)), m_AfterUndo(afterUndo)
 			{
 			}
 
 			[[nodiscard]] Status Execute(EditorContext& context) override
 			{
 				if (!m_AfterUndo)
-					Follow(context);
+				{
+					// The versions before the step's writes serve its first execution only, as the addressed scene records
+					// its overrides against them only then (a redo replays that record); on a redo, as on the undo, the other
+					// scenes' instances follow their recorded overrides.
+					Follow(context, m_RecordAgainst.empty() ? nullptr : &m_RecordAgainst);
+					m_RecordAgainst.clear();
+				}
 				return {};
 			}
 
 			[[nodiscard]] Status Undo(EditorContext& context) override
 			{
 				if (m_AfterUndo)
-					Follow(context);
+					Follow(context, nullptr);
 				return {};
 			}
 
@@ -65,7 +72,7 @@ namespace Engine {
 			// EditorContext::PropagatePrefabUpdate once the prefabs' files are imported: a write, or the restore of an undo,
 			// only schedules the import of what it wrote. Only while another scene is open, so editing one scene imports
 			// nothing more. Never fails: a failed import is logged, and the scenes follow the last good version.
-			void Follow(EditorContext& context) const
+			void Follow(EditorContext& context, const std::map<AssetHandle, Prefab>* recordAgainst) const
 			{
 				if (context.IsDryRun())
 					return;
@@ -86,10 +93,11 @@ namespace Engine {
 							imported.error().ToString());
 					}
 				}
-				context.PropagatePrefabUpdate(m_Prefabs);
+				context.PropagatePrefabUpdate(m_Prefabs, recordAgainst);
 			}
 		private:
 			std::vector<AssetHandle> m_Prefabs;
+			std::map<AssetHandle, Prefab> m_RecordAgainst; // the versions before the step's writes, until its first execution
 			bool m_AfterUndo = false;
 		};
 
@@ -267,9 +275,9 @@ namespace Engine {
 			return editor.GetNestingPrefabs(prefabs);
 		}
 
-		Scope<Command> CreatePrefabPropagationCommand(std::vector<AssetHandle> prefabs, bool afterUndo)
+		Scope<Command> CreatePrefabPropagationCommand(std::vector<AssetHandle> prefabs, bool afterUndo, std::map<AssetHandle, Prefab> recordAgainst)
 		{
-			return CreateScope<PrefabPropagationCommand>(std::move(prefabs), afterUndo);
+			return CreateScope<PrefabPropagationCommand>(std::move(prefabs), afterUndo, std::move(recordAgainst));
 		}
 
 		Result<PrefabVersionUpdate> UpdatePrefabVersion(EditorContext& editor, AssetHandle prefab, const Prefab& current, Scope<Command> write,
@@ -282,14 +290,19 @@ namespace Engine {
 
 			EditorTransaction transaction(editor, std::move(label));
 			ENGINE_TRY(RecordPrefabOverrides(editor, prefab, current));
+			// The versions the overrides are recorded against, which the other open scenes record theirs against too (the
+			// milestone review, M1).
+			std::map<AssetHandle, Prefab> before;
+			before.emplace(prefab, current);
 			if (!nesting.empty())
 			{
 				ENGINE_TRY_ASSIGN(const auto schemas, editor.GetScriptSchemaSnapshot());
 				for (const AssetHandle nestingPrefab : nesting)
 				{
 					LoadReport report;
-					ENGINE_TRY_ASSIGN(const Prefab nestingCurrent, LoadPrefabAsset(assets, nestingPrefab, editor.GetTypeRegistry(), schemas.get(), report));
+					ENGINE_TRY_ASSIGN(Prefab nestingCurrent, LoadPrefabAsset(assets, nestingPrefab, editor.GetTypeRegistry(), schemas.get(), report));
 					ENGINE_TRY(RecordPrefabOverrides(editor, nestingPrefab, nestingCurrent));
+					before.emplace(nestingPrefab, std::move(nestingCurrent));
 				}
 			}
 
@@ -300,7 +313,7 @@ namespace Engine {
 				if (propagating)
 					return {};
 				propagating = true;
-				ENGINE_TRY(editor.Execute(CreatePrefabPropagationCommand({ prefab }, true)));
+				ENGINE_TRY(editor.Execute(CreatePrefabPropagationCommand({ prefab }, true, {})));
 				return {};
 			};
 			if (write != nullptr)
@@ -331,7 +344,7 @@ namespace Engine {
 					ENGINE_TRY(editor.Execute(std::move(instances)));
 			}
 			if (propagating)
-				ENGINE_TRY(editor.Execute(CreatePrefabPropagationCommand({ prefab }, false)));
+				ENGINE_TRY(editor.Execute(CreatePrefabPropagationCommand({ prefab }, false, std::move(before))));
 			update.UndoIndex = transaction.Commit();
 			return update;
 		}

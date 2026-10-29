@@ -207,9 +207,9 @@ def local_tool_schemas(templates: list[str] | None = None) -> dict[str, dict[str
             "renderer": {"type": "string", "enum": ["vulkan", "none"],
                          "description": "Default none; vulkan for the screenshot tools (needs a GPU)"},
             "recover": {"type": "boolean",
-                        "description": "Adopt the project's newest valid autosave (project.open {recover: true}), as "
-                                       "after EditorCrashed with autosaveAvailable; the result reports "
-                                       "recoveryAvailable and recovered"},
+                        "description": "Adopt the newest valid autosave of every autosaved scene, each as an "
+                                       "unsaved open scene (project.open {recover: true}), as after EditorCrashed "
+                                       "with autosaveAvailable; the result reports recoveryAvailable and recovered"},
         }, ("project",)),
         "editor_attach": _object_schema({
             "project": {"type": "string", "description": "Attach to the editor serving this project (relative to the "
@@ -218,7 +218,7 @@ def local_tool_schemas(templates: list[str] | None = None) -> dict[str, dict[str
         }),
         "editor_status": _object_schema({}),
         "editor_shutdown": _object_schema({
-            "save": {"type": "boolean", "description": "Save the open scene first"},
+            "save": {"type": "boolean", "description": "Save every open scene with unsaved changes first"},
             "force": {"type": "boolean", "description": "Exit even with unsaved changes"},
         }),
         "engine_methods": _object_schema({
@@ -242,14 +242,15 @@ def local_tool_schemas(templates: list[str] | None = None) -> dict[str, dict[str
 
 _LOCAL_TOOL_DESCRIPTIONS = {
     "editor_launch": "Starts a headless editor on a project, or attaches to the editor already serving it; creates the "
-                     "project first with create: true; reports its session, the open scene included, and an available "
-                     "autosave, which recover: true adopts. A start waits while a gate (CI.py) runs and, with renderer "
-                     "vulkan, while another GPU run holds the machine-wide GPU lock, which the bridge then holds until "
-                     "the editor exits or the bridge itself exits (an editor left running with unsaved changes holds "
-                     "none); after 30 min it fails with LockUnavailable, naming the holder.",
+                     "project first with create: true; reports its session, the active scene included, and an "
+                     "available autosave, which recover: true adopts (every autosaved scene, each as an unsaved open "
+                     "scene). A start waits while a gate (CI.py) runs and, with renderer vulkan, while another GPU run "
+                     "holds the machine-wide GPU lock, which the bridge then holds until the editor exits or the "
+                     "bridge itself exits (an editor left running with unsaved changes holds none); after 30 min it "
+                     "fails with LockUnavailable, naming the holder.",
     "editor_attach": "Attaches to a running editor with automation, by project or process id; reports its session, the "
-                     "open scene included.",
-    "editor_status": "Reports the connected editor: process, project, open scene, versions and whether it crashed. "
+                     "active scene included.",
+    "editor_status": "Reports the connected editor: process, project, active scene, versions and whether it crashed. "
                      "Without a connection it lists the editors running with automation (pid, project, renderer), "
                      "which editor_attach {pid} connects to.",
     "editor_shutdown": "Shuts down an editor this bridge launched (an attached editor is only disconnected).",
@@ -608,7 +609,7 @@ class Bridge:
             status["session"] = self.connection.session_info
             text += describe_scene(self.connection.session_info)
         if status.get("recovered"):
-            text += "; recovered its autosave as an unsaved scene"
+            text += "; recovered every autosaved scene as an unsaved open scene (scene_list lists them)"
         elif status.get("recoveryAvailable"):
             text += ("; an autosave is available: call editor_shutdown, then editor_launch with recover: true to adopt "
                      "it")

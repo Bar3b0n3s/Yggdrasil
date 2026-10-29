@@ -147,6 +147,20 @@ return Script.Define("Fields", Fields)
 			CHECK(written[0]["Fields"]["Count"] == Json(3));
 			CHECK(written[1]["Fields"]["Mode"] == Json("Burst"));
 
+			// An empty Fields object borrows too (the milestone review, S2): its slot keeps its script, whether the request's
+			// other entries need the field schemas or none does.
+			for (const Json& scripts : { Json::array({ Json{ { "Fields", Json::object() } }, Json{ { "Fields", Json{ { "Mode", "Single" } } } } }),
+					 Json::array({ Json{ { "Fields", Json::object() } }, Json{ { "Fields", Json::object() } } }) })
+			{
+				CAPTURE(scripts.dump());
+				const auto kept = setup.Call("entity.update", Json{ { "entity", "/Turret" }, { "components", Json{ { "Script", Json{ { "Scripts", scripts } } } } } });
+				REQUIRE_MESSAGE(kept.has_value(), (kept ? std::string() : kept.error().ToString()));
+				const Json& slotsKept = (*kept)["entity"]["components"]["Script"]["Scripts"];
+				REQUIRE(slotsKept.size() == 2);
+				CHECK(slotsKept[0]["Script"] == attached[0]["Script"]);
+				CHECK(slotsKept[1]["Script"] == attached[1]["Script"]);
+			}
+
 			// Slot 1's value checked against slot 0's script: Fire declares no Count.
 			const Json swapped{ { "Scripts", Json::array({ Json{ { "Fields", Json{ { "Count", 2 } } } }, Json{ { "Fields", Json{ { "Count", 2 } } } } }) } };
 			const auto rejected = setup.Call("entity.update", Json{ { "entity", "/Turret" }, { "components", Json{ { "Script", swapped } } } });
@@ -171,6 +185,60 @@ return Script.Define("Fields", Fields)
 			const Json& copied = (*copy)["entity"]["components"]["Script"]["Scripts"];
 			CHECK(copied[1]["Script"] == attached[1]["Script"]);
 			CHECK(copied[1]["Fields"]["Mode"] == Json("Single"));
+
+			// Fields-only entries with nothing to change record no override of the slots' scripts (S2).
+			const Json unchanged{ { "Scripts", Json::array({ Json{ { "Fields", Json::object() } }, Json{ { "Fields", Json::object() } } }) } };
+			const auto same = setup.Call("prefab.instantiate", Json{ { "prefab", "Assets/Turret.prefab" }, { "name", "Same" }, { "components", Json{ { "Script", unchanged } } } });
+			REQUIRE_MESSAGE(same.has_value(), (same ? std::string() : same.error().ToString()));
+			const auto sameRoot = setup.Call("entity.get", Json{ { "entity", "/Same" } });
+			REQUIRE(sameRoot.has_value());
+			CHECK((*sameRoot)["entity"]["components"]["Script"]["Scripts"][0]["Script"] == attached[0]["Script"]);
+			CHECK((*sameRoot)["entity"]["components"]["Prefab"]["Overrides"].empty());
+		}
+
+		// The milestone review (S3): an entry that gives Fields without a Script patches its slot as a Fields patch did before
+		// Script version 2 (RFC 7386: a key it gives replaces, a null removes, and the slot's other keys and its ExecutionOrder
+		// stay), so prefab.instantiate records the changed keys only (decision 19) and the prefab's later edits of the other
+		// keys still reach the instance. An entry with a Script still describes its whole slot.
+		TEST_CASE("EditorMethodContext: a fields-only script slot patches its slot's fields and keeps its execution order")
+		{
+			Test::AutomationFixture setup("ContextScriptSlotPatch");
+			REQUIRE(setup.Call("script.write", Json{ { "path", "Assets/Brick.luau" }, { "source", "return Script.Define(\"Brick\", {Fields = {Points = Field.Number(1), Hits = Field.Number(1)}})" } })
+					.has_value());
+			const Json slot{ { "Script", "Assets/Brick.luau" }, { "Fields", Json{ { "Points", 1 }, { "Hits", 2 } } }, { "ExecutionOrder", 3 } };
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Brick" }, { "components", Json{ { "Script", ScriptSlots(slot) } } } }).has_value());
+			REQUIRE(setup.Call("prefab.create", Json{ { "entity", "/Brick" }, { "path", "Assets/Brick.prefab" } }).has_value());
+
+			const auto instance = setup.Call("prefab.instantiate", Json{ { "prefab", "Assets/Brick.prefab" }, { "name", "Copy" }, { "components", Json{ { "Script", ScriptSlots(Json{ { "Fields", Json{ { "Points", 5 } } } }) } } } });
+			REQUIRE_MESSAGE(instance.has_value(), (instance ? std::string() : instance.error().ToString()));
+			const auto copy = setup.Call("entity.get", Json{ { "entity", "/Copy" } });
+			REQUIRE(copy.has_value());
+			const Json& copied = (*copy)["entity"]["components"]["Script"]["Scripts"][0];
+			CHECK(copied["Fields"] == Json{ { "Hits", 2 }, { "Points", 5 } });
+			CHECK(copied["ExecutionOrder"] == Json(3));
+			const Json& overrides = (*copy)["entity"]["components"]["Prefab"]["Overrides"];
+			REQUIRE(overrides.size() == 1);
+			CHECK(overrides[0]["Field"] == Json("Scripts/0/Fields"));
+			CHECK(overrides[0]["Value"] == Json{ { "Points", 5 } });
+
+			const auto patch = [&setup](const Json& entry)
+			{
+				const auto updated = setup.Call("entity.update", Json{ { "entity", "/Brick" }, { "components", Json{ { "Script", ScriptSlots(entry) } } } });
+				REQUIRE_MESSAGE(updated.has_value(), (updated ? std::string() : updated.error().ToString()));
+				return (*updated)["entity"]["components"]["Script"]["Scripts"][0];
+			};
+			const Json patched = patch(Json{ { "Fields", Json{ { "Points", 7 } } } });
+			CHECK(patched["Fields"] == Json{ { "Hits", 2 }, { "Points", 7 } });
+			CHECK(patched["ExecutionOrder"] == Json(3));
+			const Json removed = patch(Json{ { "Fields", Json{ { "Hits", nullptr } } } });
+			CHECK(removed["Fields"] == Json{ { "Points", 7 } });
+			CHECK(removed["ExecutionOrder"] == Json(3));
+			const Json reordered = patch(Json{ { "Fields", Json::object() }, { "ExecutionOrder", 1 } });
+			CHECK(reordered["Fields"] == Json{ { "Points", 7 } });
+			CHECK(reordered["ExecutionOrder"] == Json(1));
+			const Json replaced = patch(Json{ { "Script", "Assets/Brick.luau" }, { "Fields", Json{ { "Hits", 4 } } } });
+			CHECK(replaced["Fields"] == Json{ { "Hits", 4 } });
+			CHECK(replaced["ExecutionOrder"] == Json(0));
 		}
 
 		TEST_CASE("EditorMethodContext: entity references resolve by id, unique prefix and path")

@@ -58,11 +58,13 @@ namespace Engine {
 		// Lazily pins the editor's current script field snapshot for this request, after path resolution. No project is
 		// InvalidState; snapshot acquisition failures propagate. Methods without schema-dependent params never load it.
 		[[nodiscard]] Result<Ref<const IFieldSchemaSource>> GetFieldSchemaSnapshot() override;
-		// A Script slot that entity.update gives Fields without a Script borrows the absent handle of the addressed entity's
-		// slot at its index, and prefab.instantiate's that of the prefab root's slot at its index (the component the
-		// per-instance values merge into). An explicit Script (including null), or removing/re-adding the component, never
-		// borrows the old handle. No scene writes. Errors: prefab.instantiate's for a prefab that does not resolve or load,
-		// located at /prefab.
+		// A Script slot entry that entity.update gives a Fields object (an empty one included) without a Script patches the
+		// addressed entity's slot at its index, and prefab.instantiate's the prefab root's slot at its index (the component
+		// the per-instance values merge into): the entry takes that slot's Script handle and, when it gives none, its
+		// ExecutionOrder, and its Fields become the slot's with its own applied as a key patch (RFC 7386, a null removing a
+		// key; Docs/Decisions/0031-m20-contract.md decision 17 and the milestone review). An explicit Script (including
+		// null), or removing/re-adding the component, never borrows the old slot. No scene writes. Errors:
+		// prefab.instantiate's for a prefab that does not resolve or load, located at /prefab.
 		[[nodiscard]] Status CompleteParameterOwners(Json& params) override;
 
 		// The scene a request addresses (§13.4 "Target"): `target` as given when `given`, else the play scene for reads while
@@ -156,8 +158,8 @@ namespace Engine {
 		// InvalidState for an unavailable/minimized view; Unsupported only while this contract adapter is unimplemented.
 		[[nodiscard]] Result<ViewportPixelSize> GetViewportPixelSize(ViewportView view) const;
 	private:
-		// CompleteParameterOwners for prefab.instantiate: sets the Script handle of each slot of `script` (the Script object
-		// of params' components) that gives Fields without one to that of the prefab root's slot at its index, when it has one.
+		// CompleteParameterOwners for prefab.instantiate: completes each slot entry of `script` (the Script object of params'
+		// components) that gives Fields without a Script from the prefab root's slot at its index, when that slot has a script.
 		[[nodiscard]] Status CompletePrefabScriptOwner(const Json& params, Json& script);
 		// The SceneTarget the "target" member of `params` names, or nullopt when there is none or it is no SceneTarget name.
 		[[nodiscard]] std::optional<SceneTarget> ReadTargetParam(const Json& params) const;

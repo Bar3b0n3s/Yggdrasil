@@ -20,7 +20,8 @@
 //      a component's data is read from its JSON in the scene (the entity's preserved components, NativeComponents.h) the
 //      first time a system asks for it in the step, and a pointer stays valid until the system returns. The read is
 //      NativeValueFromJson's migration by field name (decision 27), because only the starting scene is canonicalized
-//      (PlaySession::Prepare): a scene Scene.Load loads and a prefab instantiated during play reach the step as their files
+//      (PlaySession::Prepare, and again by a Scene.Reload of it, Docs/Decisions/0031-m20-contract.md decision 5): a scene
+//      Scene.Load loads, a Scene.Reload of that scene, and a prefab instantiated during play reach the step as their files
 //      hold them, in the editor and in every Runtime alike. A value its type rejects (NATIVE_COMPONENT_INVALID) stops the
 //      session fatally, like an exception that escapes a system: PlaySession::GetFatalError names the entity (its path and
 //      id), the component and the first issue, and no later system or phase runs. A value read with notes

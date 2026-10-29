@@ -39,7 +39,9 @@ namespace Engine {
 	namespace Automation {
 
 		// CPU only, deterministic without a graphics device. Scene view uses context.GetSceneViewCamera; game uses the
-		// target's primary camera. Size is the current viewport framebuffer extent supplied by M10's EditorContext;
+		// target's primary camera. Without `target` the scene view reads the scene it shows (EditorContext::ShowsPlayScene:
+		// the play scene in the played scene's tab, another tab's edit scene; M20 decisions 13 and 14), the game view the
+		// play scene while playing. Size is the current viewport framebuffer extent supplied by M10's EditorContext;
 		// headless hosts retain a documented 640x360 default, never infer from a last screenshot. Ray through pixel centre
 		// uses ComputeViewPixelRayInterval and passes BOTH distances to RaycastScene; FarClip is view-axis depth,
 		// never a normalized ray distance. Orthographic distance starts at its near-plane origin.

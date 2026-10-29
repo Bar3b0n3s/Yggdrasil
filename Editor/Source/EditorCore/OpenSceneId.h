@@ -17,8 +17,8 @@ namespace Engine {
 	using OpenSceneId = uint32_t;
 	inline constexpr OpenSceneId NoOpenScene = 0;
 
-	// The most scenes one editor holds open at once (decision 13): autosave's fatal path keeps one fixed snapshot slot per
-	// open scene, so the count is bounded.
+	// The most scenes one editor holds open at once (decision 13): autosave publishes one immutable snapshot per dirty open
+	// scene, together in one of its fixed publication slots (Autosave.h), so the work of its fatal path is bounded.
 	inline constexpr size_t MaxOpenScenes = 16;
 
 }

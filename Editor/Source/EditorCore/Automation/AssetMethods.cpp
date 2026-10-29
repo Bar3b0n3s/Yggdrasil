@@ -563,7 +563,7 @@ namespace Engine {
 			}
 			// The rewritten prefabs' files and their restore on undo reach the other open scenes like any prefab write.
 			EditorTransaction transaction(editor, "Update Prefab Instances");
-			ENGINE_TRY(editor.Execute(Utils::CreatePrefabPropagationCommand({ handle }, true)));
+			ENGINE_TRY(editor.Execute(Utils::CreatePrefabPropagationCommand({ handle }, true, {})));
 			ENGINE_TRY(editor.Execute(std::move(rewrite)));
 			if (editor.HasScene())
 			{
@@ -571,7 +571,7 @@ namespace Engine {
 				if (update != nullptr)
 					ENGINE_TRY(editor.Execute(std::move(update)));
 			}
-			ENGINE_TRY(editor.Execute(Utils::CreatePrefabPropagationCommand({ handle }, false)));
+			ENGINE_TRY(editor.Execute(Utils::CreatePrefabPropagationCommand({ handle }, false, {})));
 			static_cast<void>(transaction.Commit());
 			return {};
 		}

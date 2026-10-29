@@ -22,10 +22,12 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <format>
 #include <limits>
 #include <map>
 #include <semaphore>
@@ -1212,6 +1214,41 @@ namespace Engine {
 			REQUIRE(offers->size() == 2);
 			CHECK(AutosaveRead(setup.Root() / (*offers)[0].Generation / "Scene.json").contains("MainSecond"));
 			CHECK(AutosaveRead(setup.Root() / (*offers)[1].Generation / "Scene.json").contains("InSecond"));
+		}
+
+		// Decision 15 (the milestone review, T2): retention keeps the generations of the MaxOpenScenes scenes written last, so
+		// when a seventeenth scene is written over time, the scene written first is retired, and the manifest still parses.
+		TEST_CASE("Autosave: retention keeps the generations of the MaxOpenScenes scenes written last")
+		{
+			AutosaveSetup setup;
+			EditorContext& editor = setup.Fixture.GetEditor();
+			std::vector<std::string> generations;
+			for (uint32_t scene = 0; scene <= MaxOpenScenes; ++scene)
+			{
+				// Each scene is opened, edited, saved and closed again, so one save writes it alone.
+				const Result<VfsPath> path = VfsPath::Parse(std::format("project://Assets/Scenes/Scene{}.scene", scene));
+				REQUIRE(path.has_value());
+				const Result<OpenSceneId> opened = editor.AddScene(editor.CreateScene(std::format("Scene{}", scene)), *path);
+				REQUIRE_MESSAGE(opened.has_value(), opened.error().ToString());
+				setup.Dirty(std::format("In{}", scene));
+				const AutosaveWriteResult written = setup.Save();
+				REQUIRE(written.Files == std::vector<std::string>{ std::format("Assets/Scenes/Scene{}.scene", scene) });
+				generations.push_back(written.Generation);
+				REQUIRE(editor.CloseScene(*opened).has_value());
+			}
+
+			const Json manifest = AutosaveReadJson(setup.Root() / "Manifest.json");
+			CHECK(manifest["Generations"].size() == MaxOpenScenes);
+			CHECK_FALSE(FileSystem::Exists(setup.Root() / generations.front()));
+			for (size_t scene = 1; scene < generations.size(); ++scene)
+				CHECK(FileSystem::Exists(setup.Root() / generations[scene]));
+			const auto offers = setup.Service.FindRecoveries();
+			REQUIRE_MESSAGE(offers.has_value(), offers.error().ToString());
+			CHECK(offers->size() == MaxOpenScenes);
+			CHECK(std::ranges::none_of(*offers, [](const AutosaveRecoveryInfo& offer)
+			{
+				return offer.ScenePath == "Assets/Scenes/Scene0.scene";
+			}));
 		}
 
 		// Decision 15: a recovery of a scene that is not open opens it as an additional open scene, the active one.

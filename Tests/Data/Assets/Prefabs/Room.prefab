@@ -1,0 +1,92 @@
+{
+	"Format": "Prefab",
+	"Version": 1,
+	"Name": "Room",
+	"Root": "00000000000d0001",
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"PointLight": 1,
+		"Prefab": 2,
+		"PrefabLink": 1
+	},
+	"Entities": [
+		{
+			"ID": "00000000000d0001",
+			"Name": "Room",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			}
+		},
+		{
+			"ID": "00000000000d0002",
+			"Name": "Lamp",
+			"Parent": "00000000000d0001",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [1, 0.8, 0.6],
+					"Intensity": 12,
+					"Range": 8,
+					"SourceRadius": 0.05
+				},
+				"Prefab": {
+					"Prefab": "a41f0c2290b1d3e5",
+					"Overrides": [
+						{
+							"Path": ["00000000000c0002"],
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "CastShadows",
+							"Value": true
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "00000000000c0001",
+					"InstanceRoot": "00000000000d0002",
+					"OuterPrefabEntityID": null
+				}
+			}
+		},
+		{
+			"ID": "00000000000d0003",
+			"Name": "Bulb",
+			"Parent": "00000000000d0002",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.25, 0.25, 0.25]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["a41f0c2290b1d3e4"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "00000000000c0002",
+					"InstanceRoot": "00000000000d0002",
+					"OuterPrefabEntityID": null
+				}
+			}
+		}
+	]
+}

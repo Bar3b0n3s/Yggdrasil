@@ -364,31 +364,20 @@ namespace Engine {
 		}
 
 		// Existing invalid and unknown overrides survive an unrelated edit. An edit of a Script component changes at most
-		// one slot's field (Docs/Decisions/0031-m20-contract.md decision 17), so only the edited slot's new or changed
-		// entries (`fields`, as they would be stored) resolve against the pinned authored schema of its script; every other
-		// entry, the other slots' included, keeps what it holds through the free-form descriptor. A schema source cannot
-		// tell slots apart, so another slot holding the edited slot's script resolves an entry of a changed name against
-		// the authored schema too. Without a pinned schema (an edit of a slot's Script or ExecutionOrder) every entry keeps
-		// what it holds.
+		// one slot's field (Docs/Decisions/0031-m20-contract.md decision 17), so while the list is checked and written every
+		// entry of every slot keeps what it holds through the free-form descriptor, and only the edited slot's new or changed
+		// entries are checked against the pinned authored schema of its script, apart (ValidateEditedScriptFields): a schema
+		// source cannot tell slots apart, and another slot holding the same script keeps its own values, those that schema
+		// rejects included (the milestone review, S4).
 		class InspectorPreservedSchemas final : public IFieldSchemaSource
 		{
 		public:
-			InspectorPreservedSchemas(const InspectorValueSnapshot& snapshot, const Json& fields)
-				: m_Snapshot(snapshot), m_Fields(fields), m_Preserved({ .Name = "Fields", .Description = "Unchanged stored script override.", .Type = FindScriptFieldsElementType(snapshot), .Meta = {}, .Accessor = {}, .Getter = nullptr, .Setter = nullptr, .Resolver = nullptr })
+			explicit InspectorPreservedSchemas(const InspectorValueSnapshot& snapshot)
+				: m_Snapshot(snapshot), m_Preserved({ .Name = "Fields", .Description = "Unchanged stored script override.", .Type = FindScriptFieldsElementType(snapshot), .Meta = {}, .Accessor = {}, .Getter = nullptr, .Setter = nullptr, .Resolver = nullptr })
 			{
 			}
 
-			Result<const FieldInfo*> FindField(UUID owner, std::string_view name) const override
-			{
-				if (m_Snapshot.Schemas != nullptr && owner == m_Snapshot.Script)
-				{
-					const auto previous = m_Snapshot.StoredFields.find(name);
-					const auto proposed = m_Fields.find(name);
-					if (previous == m_Snapshot.StoredFields.end() || proposed == m_Fields.end() || *previous != *proposed)
-						return m_Snapshot.Schemas->FindField(owner, name);
-				}
-				return &m_Preserved;
-			}
+			Result<const FieldInfo*> FindField(UUID /*owner*/, std::string_view /*name*/) const override { return &m_Preserved; }
 
 			std::vector<std::string> GetFieldNames(UUID owner) const override
 			{
@@ -396,9 +385,36 @@ namespace Engine {
 			}
 		private:
 			const InspectorValueSnapshot& m_Snapshot; // Borrowed for one synchronous component write.
-			const Json& m_Fields;
 			FieldInfo m_Preserved;
 		};
+
+		// Checks the edited slot's new or changed entries (`fields`, as they would be stored) against the pinned authored
+		// schema of its script, adding issues at Scripts/<slot>/Fields/<name>. An entry whose name the script does not
+		// declare is kept as written, as an unresolved Variant is. Nothing without a pinned schema (an edit of a slot's
+		// Script or ExecutionOrder).
+		static void ValidateEditedScriptFields(const InspectorValueSnapshot& snapshot, const Json& fields, ValidationContext& validation)
+		{
+			if (snapshot.Schemas == nullptr)
+				return;
+			ResolveContext resolve;
+			resolve.Registry = &snapshot.Type->GetRegistry();
+			resolve.Schemas = snapshot.Schemas.get();
+			validation.PushKey("Scripts");
+			validation.PushKey(std::to_string(snapshot.ScriptSlot));
+			validation.PushKey("Fields");
+			for (auto entry = fields.begin(); entry != fields.end(); ++entry)
+			{
+				const auto previous = snapshot.StoredFields.find(entry.key());
+				if (previous != snapshot.StoredFields.end() && *previous == entry.value())
+					continue;
+				const Result<const FieldInfo*> schema = snapshot.Schemas->FindField(snapshot.Script, entry.key());
+				if (schema.has_value() && *schema != nullptr)
+					(*schema)->ValidateJson(JsonReader(entry.value()), resolve, validation);
+			}
+			validation.PopKey();
+			validation.PopKey();
+			validation.PopKey();
+		}
 
 		static Status SetInspectorComponentField(Entity entity, std::string_view component, const FieldInfo& field,
 			const InspectorValueSnapshot& snapshot)
@@ -407,8 +423,10 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(Value value, ValueFromJson(JsonReader(stored), field.GetType()));
 			if (component == "Script" && field.GetName() == "Scripts")
 			{
-				const Json fields = snapshot.Schemas != nullptr ? StoredInspectorScriptFields(snapshot) : Json::object();
-				const InspectorPreservedSchemas schemas(snapshot, fields);
+				ValidationContext validation;
+				ValidateEditedScriptFields(snapshot, snapshot.Schemas != nullptr ? StoredInspectorScriptFields(snapshot) : Json::object(), validation);
+				ENGINE_TRY(validation.ToStatus(field.GetName()));
+				const InspectorPreservedSchemas schemas(snapshot);
 				return ComponentAccess::SetFieldValue(entity, component, field.GetName(), value, &schemas);
 			}
 			return ComponentAccess::SetFieldValue(entity, component, field.GetName(), value, snapshot.Schemas.get());
@@ -430,15 +448,16 @@ namespace Engine {
 			{
 				if (snapshot.Schemas != nullptr && path.size() > 3 && path.front() == "Scripts" && path[2] == "Fields")
 					snapshot.EditedScriptField = path[3];
-				// A Script list's entries other than the edited slot's changed ones keep what they hold.
+				// A Script list's entries keep what they hold; the edited slot's changed ones are checked against its script.
 				const bool scriptList = snapshot.Type->GetName() == "Script" && path.front() == "Scripts";
-				const Json fields = scriptList && snapshot.Schemas != nullptr ? StoredInspectorScriptFields(snapshot) : Json::object();
-				const InspectorPreservedSchemas preserved(snapshot, fields);
+				const InspectorPreservedSchemas preserved(snapshot);
 				ResolveContext checked = resolve;
 				if (scriptList)
 					checked.Schemas = &preserved;
 				ValidationContext validation;
 				field->ValidateJson(JsonReader(*found), checked, validation);
+				if (scriptList && snapshot.Schemas != nullptr)
+					ValidateEditedScriptFields(snapshot, StoredInspectorScriptFields(snapshot), validation);
 				ENGINE_TRY(validation.ToStatus(field->GetName()));
 				if (!field->IsVirtual())
 				{

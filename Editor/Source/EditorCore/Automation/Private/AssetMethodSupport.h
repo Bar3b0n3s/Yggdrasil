@@ -12,6 +12,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <span>
 #include <string>
 #include <string_view>
@@ -95,8 +96,11 @@ namespace Engine {
 		// (EditorAssetManager::Reimport, since a write only schedules its import) and EditorContext::PropagatePrefabUpdate
 		// rebuilds the other open scenes. Both do nothing while no other scene is open or in a dry run, and never fail (a
 		// failed import is logged at Error and the scenes follow the last good version). Neither changes a file or the
-		// addressed scene (ChangesScene is false); UpdatePrefabVersion composes them.
-		[[nodiscard]] Scope<Command> CreatePrefabPropagationCommand(std::vector<AssetHandle> prefabs, bool afterUndo);
+		// addressed scene (ChangesScene is false); UpdatePrefabVersion composes them. `recordAgainst` (the closing command's;
+		// empty for the opening one) holds the versions of the step's prefabs before its first write, which the closing
+		// command's first execution passes to PropagatePrefabUpdate, so the other scenes record their overrides against them
+		// as the addressed scene does (the milestone review, M1); its redo and the undo pass none.
+		[[nodiscard]] Scope<Command> CreatePrefabPropagationCommand(std::vector<AssetHandle> prefabs, bool afterUndo, std::map<AssetHandle, Prefab> recordAgainst);
 
 		// What UpdatePrefabVersion did.
 		struct PrefabVersionUpdate
@@ -114,7 +118,8 @@ namespace Engine {
 		// (null when nothing is written), executed and `prefab` imported at once (EditorAssetManager::Reimport); the prefabs
 		// of `nesting` rewritten from its new version (EditorContext::CreateNestingPrefabUpdateCommand); and every outermost
 		// instance of `prefab` and of `nesting` in the addressed scene rebuilt (CreatePrefabUpdateCommand). The step's
-		// writes, their undo and their redo reach the other open scenes (CreatePrefabPropagationCommand around them).
+		// writes, their undo and their redo reach the other open scenes (CreatePrefabPropagationCommand around them), which
+		// on the step's execution record their overrides against the same versions before the rebuild.
 		// `nesting` is FindNestingPrefabs's, which the caller asks before anything is written, so a nesting cycle refuses the
 		// action whole. Errors: those of each part; the transaction rolls back what was done then.
 		[[nodiscard]] Result<PrefabVersionUpdate> UpdatePrefabVersion(EditorContext& editor, AssetHandle prefab, const Prefab& current,

@@ -213,12 +213,14 @@ namespace Engine {
 		// Errors from acquiring a snapshot propagate unchanged and prevent the handler from running. Main thread only.
 		[[nodiscard]] virtual Result<Ref<const IFieldSchemaSource>> GetFieldSchemaSnapshot();
 
-		// Completes missing schema-discriminating owner fields in a partial params object using the addressed host object
-		// (for example the existing Script handle for an entity.update Fields-only patch). Called only when a supplied
-		// Variant cannot yet resolve, after ordinary asset path resolution and before the request snapshot is acquired.
-		// The default does nothing. An override may add only absent owner discriminators, never overwrite supplied values,
-		// copy unrelated fields, mutate host state or relax validation. Added fields keep their existing host value when
-		// the handler applies the patch. Errors propagate unchanged and prevent invocation. Main thread only.
+		// Completes what a partial entry of the params omits from the addressed host object: the schema-discriminating owner
+		// fields its values resolve against, and for an entry of a list that replaces the old one whole while it patches
+		// one element, that element's other members (an entity.update Fields-only Script slot takes the slot's Script
+		// handle, its ExecutionOrder and its other field values, Docs/Decisions/0031-m20-contract.md decision 17). Called
+		// for every request after its admission and before its params are canonicalized, so what it adds is canonicalized
+		// and validated with the rest. The default does nothing. An override never overwrites a supplied value (a supplied
+		// null member of a key patch removes that key), mutates host state or relaxes validation; what it adds is the host
+		// object's current value. Errors propagate unchanged and prevent invocation. Main thread only.
 		[[nodiscard]] virtual Status CompleteParameterOwners(Json& params);
 	protected:
 		// `request.Method` and `request.Registry` must be set (asserted).

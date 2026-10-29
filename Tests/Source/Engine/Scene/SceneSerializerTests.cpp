@@ -277,12 +277,17 @@ namespace Engine {
 
 		TEST_CASE("SceneSerializer: 10,000 seeded mutations of a scene file never crash" * doctest::test_suite(Test::FuzzSuite))
 		{
-			// The seed corpus: the scene fixtures of Tests/Data/Scenes, the structurally invalid ones included.
+			// The seed corpus: the scene fixtures of Tests/Data/Scenes, the structurally invalid ones included, and the version 1
+			// documents of the Script and PrefabInstance migrations (Formats/Scene), so mutations reach nested prefab links and
+			// the migrations' readers too.
 			std::vector<std::string> seeds;
-			for (const std::string_view name : { "AllComponents", "Hierarchy", "UnknownComponent", "Empty", "Invalid/ChildBeforeParent",
-					 "Invalid/DanglingParent", "Invalid/DuplicateIds", "Invalid/DuplicateUniqueComponent", "Invalid/MisplacedComponent",
-					 "Invalid/ParentCycle", "Invalid/PrefabLinkMissingRoot", "Invalid/PrefabLinkRootNotInstance", "Invalid/ZeroId" })
-				seeds.push_back(ReadFixture(std::format("Scenes/{}.scene", name)));
+			for (const std::string_view name : { "Scenes/AllComponents", "Scenes/Hierarchy", "Scenes/UnknownComponent", "Scenes/Empty",
+					 "Scenes/Invalid/ChildBeforeParent", "Scenes/Invalid/DanglingParent", "Scenes/Invalid/DuplicateIds",
+					 "Scenes/Invalid/DuplicateUniqueComponent", "Scenes/Invalid/MisplacedComponent", "Scenes/Invalid/ParentCycle",
+					 "Scenes/Invalid/PrefabLinkMissingRoot", "Scenes/Invalid/PrefabLinkOuterWithoutEnclosing", "Scenes/Invalid/PrefabLinkOuterWithoutInstance",
+					 "Scenes/Invalid/PrefabLinkRootNotInstance", "Scenes/Invalid/PrefabNestedRootOverrides", "Scenes/Invalid/ZeroId",
+					 "Formats/Scene/ScriptV1", "Formats/Scene/PrefabInstanceV1" })
+				seeds.push_back(ReadFixture(std::format("{}.scene", name)));
 			// One registry for the whole run; every iteration loads into a fresh empty scene with its own repair generator.
 			Test::SceneTestFixture setup;
 			const Test::FuzzRun run = Test::RunFuzzCase(0xf022, 10000, [&seeds, &setup](Random& random, uint64_t index)

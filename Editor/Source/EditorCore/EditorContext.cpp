@@ -348,6 +348,35 @@ namespace Engine {
 			return changed;
 		}
 
+		// The overrides of `scene`'s outermost instances of the prefabs `versions` holds, recorded against the version it holds
+		// for each (PrefabInstantiator::RefreshOverrides), as Utils::RecordPrefabOverrides records the addressed scene's
+		// before a prefab write. Errors: those of the schema snapshot and of the refresh.
+		static Status RecordPrefabOverridesAgainst(EditorContext& context, Scene& scene, const std::map<AssetHandle, Prefab>& versions)
+		{
+			std::vector<AssetHandle> prefabs;
+			prefabs.reserve(versions.size());
+			for (const auto& [handle, prefab] : versions)
+			{
+				static_cast<void>(prefab);
+				prefabs.push_back(handle); // sorted, as FindPrefabInstances needs
+			}
+			const std::vector<std::pair<UUID, AssetHandle>> instances = Utils::FindPrefabInstances(scene, prefabs);
+			if (instances.empty())
+				return {};
+			ENGINE_TRY_ASSIGN(const Ref<const ScriptFieldSchemaSource> schemas, context.GetScriptSchemaSnapshot());
+			const PrefabOptions options{ .Schemas = schemas.get() };
+			for (const auto& [rootID, handle] : instances)
+			{
+				const Entity root = scene.FindEntityByID(rootID);
+				const auto version = versions.find(handle);
+				if (!root.IsValid() || version == versions.end())
+					continue;
+				ENGINE_TRY(WithContext(PrefabInstantiator::RefreshOverrides(root, version->second, options),
+					std::format("recording the overrides of the prefab instance '{}'", scene.GetEntityPath(root))));
+			}
+			return {};
+		}
+
 		// "Update Prefab Instances" (EditorContext::CreatePrefabUpdateCommand): the entity changes of one prefab update,
 		// applied by Execute and reverted by Undo through SceneEditCommand::ApplyChanges, the one scene-copy path (§1.3), like a
 		// SceneEditCommand whose first Execute performs the edit. It is built unapplied, so the history records the revision
@@ -1022,7 +1051,7 @@ namespace Engine {
 		return update;
 	}
 
-	Result<Scope<Command>> EditorContext::CreatePrefabUpdateCommand(std::span<const AssetHandle> prefabs)
+	Result<Scope<Command>> EditorContext::CreatePrefabUpdateCommand(std::span<const AssetHandle> prefabs, const std::map<AssetHandle, Prefab>* recordAgainst)
 	{
 		if (!HasScene())
 		{
@@ -1035,7 +1064,8 @@ namespace Engine {
 		// The update runs once under the change tracker to find what it changes, and is then rolled back: the command applies
 		// those changes when it is executed (PrefabUpdateCommand).
 		scene.GetChangeTracker().Begin();
-		Result<bool> updated = UpdatePrefabInstances(scene, prefabs);
+		const Status recordedBefore = recordAgainst != nullptr ? Utils::RecordPrefabOverridesAgainst(*this, scene, *recordAgainst) : Status();
+		Result<bool> updated = recordedBefore ? UpdatePrefabInstances(scene, prefabs) : Result<bool>(std::unexpected(recordedBefore.error()));
 		const std::vector<EntityChange> tracked = scene.GetChangeTracker().End();
 
 		std::vector<SceneEntityChange> changes;
@@ -1083,7 +1113,7 @@ namespace Engine {
 		return Scope<Command>(CreateScope<Utils::PrefabUpdateCommand>("Update Prefab Instances", std::move(changes)));
 	}
 
-	void EditorContext::PropagatePrefabUpdate(std::span<const AssetHandle> prefabs)
+	void EditorContext::PropagatePrefabUpdate(std::span<const AssetHandle> prefabs, const std::map<AssetHandle, Prefab>* recordAgainst)
 	{
 		if (IsDryRun() || !HasProject() || prefabs.empty())
 			return;
@@ -1126,9 +1156,9 @@ namespace Engine {
 		{
 			ParkAddressedScene();
 			UnparkScene(id);
-			const Status followed = [this, &changed]() -> Status
+			const Status followed = [this, &changed, recordAgainst]() -> Status
 			{
-				ENGINE_TRY_ASSIGN(Scope<Command> update, CreatePrefabUpdateCommand(changed));
+				ENGINE_TRY_ASSIGN(Scope<Command> update, CreatePrefabUpdateCommand(changed, recordAgainst));
 				if (update == nullptr)
 					return {};
 				ENGINE_TRY_ASSIGN(const uint64_t index, Execute(std::move(update)));
@@ -1664,14 +1694,17 @@ namespace Engine {
 			return;
 		}
 		// The addressed scene is replaced in its tab position with a new id (the first open scene when none is addressed),
-		// and becomes the active one.
+		// and becomes the active one, unless a target scope addresses a tab that is not active (project.upgrade's reload of
+		// it): that replacement leaves the active scene as it is (the milestone review, M4).
 		const OpenSceneId id = AllocateOpenSceneId();
+		const bool activate = m_AddressedScene == NoOpenScene || m_AddressedScene == m_ActiveScene;
 		if (OpenSceneDocument* replaced = FindDocument(m_AddressedScene); replaced != nullptr)
 			replaced->Id = id;
 		else
 			m_OpenScenes.push_back(OpenSceneDocument{ .Id = id });
 		m_AddressedScene = id;
-		m_ActiveScene = id;
+		if (activate)
+			m_ActiveScene = id;
 		InstallScene(std::move(scene), std::move(path), dirty);
 	}
 

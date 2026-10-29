@@ -1864,7 +1864,7 @@
 						"type": "string"
 					},
 					"recover": {
-						"description": "Adopt the newest validated dirty recovery before opening; source files are preserved.",
+						"description": "Adopt the newest valid recovery of every autosaved scene before opening, each as an open scene (the oldest active); source files are preserved.",
 						"type": "boolean"
 					},
 					"ifRevision": {

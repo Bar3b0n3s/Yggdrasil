@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <format>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -564,6 +565,34 @@ namespace Engine {
 			const NativeEntityComponents written = ReadNativeComponents(session->GetScene().FindEntityByPath("/Loaded"), types.get());
 			REQUIRE(written.Registered.size() == 1);
 			CHECK(written.Registered[0].second.Get() == ParseJson(R"({"DegreesPerSecond": 10, "Axis": [0, 1, 0], "Turns": 1})"));
+		}
+
+		// Docs/Decisions/0031-m20-contract.md decision 5 (the milestone review, P2): Scene.Reload of the scene the session
+		// started with restarts it as the start made it, its native components canonical against the module (ADR 0030
+		// decision 27), never as its start document holds them.
+		TEST_CASE("NativeWorld: Scene.Reload of the start scene makes its native components canonical as the start does")
+		{
+			Test::SceneTestFixture fixture;
+			const Ref<const NativeModuleTypes> types = RequireTestTypes(Test::GetNativeTestModule());
+			UUID mover{};
+			UUID spinner{};
+			PopulateNativeScene(fixture.GetScene(), *types, mover, spinner);
+			SetStoredJson(fixture.GetScene().FindEntityByID(spinner), "Native.TestSpinner", R"({"DegreesPerSecond": 10, "Wobble": true})");
+			const Test::ExpectLog dropped(LogLevel::Warn, NativeFieldDroppedCode);
+			const Scope<PlaySession> session = RequireSession(MakeNativeSpecification(fixture, types), fixture.GetScene());
+			const Json canonical = ParseJson(R"({"DegreesPerSecond": 10, "Axis": [0, 1, 0], "Turns": 0})");
+			const NativeEntityComponents started = ReadNativeComponents(session->GetScene().FindEntityByID(spinner), types.get());
+			REQUIRE(started.Registered.size() == 1);
+			CHECK(started.Registered[0].second.Get() == canonical);
+
+			session->Tick();
+			REQUIRE(session->GetScripts()->GetHost().RequestSceneReload(std::nullopt).has_value());
+			session->Tick();
+			REQUIRE_FALSE(session->GetFatalError().has_value());
+			CHECK(session->GetSceneGeneration() == 2);
+			const NativeEntityComponents reloaded = ReadNativeComponents(session->GetScene().FindEntityByID(spinner), types.get());
+			REQUIRE(reloaded.Registered.size() == 1);
+			CHECK(reloaded.Registered[0].second.Get() == canonical);
 		}
 
 		// The milestone review (Docs/Decisions/0030-m19-contract.md decisions 2 and 28): a game's native module is simulation

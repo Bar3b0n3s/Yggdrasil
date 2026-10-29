@@ -21,7 +21,13 @@ namespace Engine {
 	{
 		if (params.View != ViewportView::Scene && params.View != ViewportView::Game)
 			return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/view", "expected scene or game"));
-		ENGINE_TRY_ASSIGN(Scene * scene, context.ResolveTargetScene(params.Target, context.HasParam("target"), false));
+		// Without a target, the scene view reads the scene it shows (M20 decisions 13 and 14): the play scene only while the
+		// editor shows it, so a pick in another open scene's tab while a session plays reads that tab's edit scene, as
+		// viewport.frame does. The game view keeps the reads' default, the session while one plays.
+		const bool given = context.HasParam("target");
+		const bool shownScene = !given && params.View == ViewportView::Scene;
+		const SceneTarget target = shownScene ? (context.GetEditor().ShowsPlayScene() ? SceneTarget::Play : SceneTarget::Edit) : params.Target;
+		ENGINE_TRY_ASSIGN(Scene * scene, context.ResolveTargetScene(target, given || shownScene, false));
 		AssetManager* assets = context.GetAssets();
 		if (assets == nullptr)
 			return MakeError(ErrorCode::Unsupported, "this host has no asset manager for visual queries");
@@ -88,7 +94,8 @@ namespace Engine {
 			.Field("x", &ViewportPickParams::X, "Horizontal pixel from the left; must be below the actual framebuffer width.")
 			.Field("y", &ViewportPickParams::Y, "Vertical pixel from the top; must be below the actual framebuffer height.")
 			.Field("view", &ViewportPickParams::View, "Scene camera or the target scene's primary game camera.")
-			.Field("target", &ViewportPickParams::Target, "Defaults to play while playing, edit otherwise.");
+			.Field("target", &ViewportPickParams::Target, "Defaults to the scene the view shows: for the scene view, play only while the played "
+														  "scene's tab is active; for the game view, play while playing; edit otherwise.");
 		registry.Struct<ViewportPickResult>("ViewportPickResult", "A camera-clipped visual ray hit without changing selection or history.")
 			.Field("view", &ViewportPickResult::View, "The viewport queried.")
 			.Field("width", &ViewportPickResult::Width, "Actual framebuffer width used for the projection.")

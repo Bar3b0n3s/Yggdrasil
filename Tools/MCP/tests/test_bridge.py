@@ -1156,7 +1156,7 @@ class LauncherTests(BridgeTestCase):
         launcher, _ = self.make_launcher()
         bridge = server.Bridge(REPOSITORY_ROOT, [], launcher)
         requests: list[LaunchRequest] = []
-        for recovery, expected in (({"recoveryAvailable": True, "recovered": True}, "recovered its autosave"),
+        for recovery, expected in (({"recoveryAvailable": True, "recovered": True}, "recovered every autosaved scene"),
                                    ({"recoveryAvailable": True, "recovered": False}, "recover: true")):
             with self.subTest(recovered=recovery["recovered"]):
                 connection = EditorConnection(root, supervised=True, client=self.connect(editor))

@@ -145,8 +145,9 @@ namespace Engine {
 		void InvokeDeferredCreates();
 		void Invoke(InstanceKey key, std::string_view callback, const PhysicsEvent* event = nullptr, bool destroying = false);
 		void InvokePhysics(InstanceKey key, const PhysicsEvent& event);
-		// Delivers physics callbacks held for started instances, in (ExecutionOrder, canonical entity, slot) order and
-		// dispatch order per instance; an instance removed or faulted by a callback discards the rest of its held events.
+		// Delivers physics callbacks held for started instances: an entity's instances together, in slot order, at the turn
+		// of its first in (ExecutionOrder, canonical entity, slot) order (decision 17's entity callbacks), and dispatch order
+		// per instance; an instance removed or faulted by a callback discards the rest of its held events.
 		void DeliverPendingPhysics();
 		// Unreferences the instance's table, erases it and marks the lifecycle order for a refresh. Returns the next one.
 		std::map<InstanceKey, Instance>::iterator EraseInstance(std::map<InstanceKey, Instance>::iterator instance);

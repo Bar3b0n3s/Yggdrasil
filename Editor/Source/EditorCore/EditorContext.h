@@ -59,6 +59,7 @@ namespace Engine {
 	class ImporterRegistry;
 	class NativeModuleHost;
 	class PlaySession;
+	class Prefab;
 	class ProjectSettingsCommand;
 	class SceneEdit;
 	class TypeRegistry;
@@ -314,7 +315,9 @@ namespace Engine {
 		// selection, sets the dirty flag to `dirty` (a repaired load is dirty until saved), appends a SceneOpened event and
 		// logs the scene's name and entity count. Asserts a project, and a scene on this context's registry and generator.
 		// M20 (decision 13): `scene` replaces the addressed scene in its tab position (opens the first scene when none is
-		// open), gets a new OpenSceneId and becomes the active scene; the other open scenes are untouched.
+		// open), gets a new OpenSceneId and becomes the active scene; the other open scenes are untouched. Inside an
+		// EditorSceneTargetScope of a tab that is not active (project.upgrade's reload of it), the replacement keeps the
+		// active scene as it is.
 		void SetScene(Scope<Scene> scene, std::optional<VfsPath> path, bool dirty = false);
 
 		// Closes the open scene without saving; no effect without one. M20: the addressed scene, as CloseScene(id) closes it.
@@ -412,8 +415,11 @@ namespace Engine {
 		// `prefabs` or nests one of them, directly or through others; a nested instance follows its outermost one.
 		// Open scenes (M20, decision 15): the command updates the addressed scene, in the caller's undo step; the undo step's
 		// prefab writes, their undo and their redo make the other open scenes follow (PropagatePrefabUpdate), each in an entry
-		// of its own history.
-		[[nodiscard]] Result<Scope<Command>> CreatePrefabUpdateCommand(std::span<const AssetHandle> prefabs);
+		// of its own history. With `recordAgainst`, the command first records the overrides of the scene's outermost
+		// instances of each prefab it holds against the version it holds for it (PrefabInstantiator::RefreshOverrides),
+		// before the rebuild and as part of the same command (PropagatePrefabUpdate's first execution of a step).
+		[[nodiscard]] Result<Scope<Command>> CreatePrefabUpdateCommand(std::span<const AssetHandle> prefabs,
+			const std::map<AssetHandle, Prefab>* recordAgainst = nullptr);
 
 		// Open scenes (M20, Docs/Decisions/0031-m20-contract.md decision 15): makes every open scene but the addressed one
 		// follow the published versions of the Prefab assets `prefabs`. Each such scene that instantiates one of them, or a
@@ -428,8 +434,13 @@ namespace Engine {
 		// inside a request's EditorSceneTargetScope, which keeps addressing its scene afterwards, and while the addressed
 		// scene's history undoes or redoes the step that calls it. Never fails: a scene that cannot follow (its rebuild's
 		// errors, a nesting cycle) is logged at Error with the reason and keeps its instances, and the other scenes still
-		// follow.
-		void PropagatePrefabUpdate(std::span<const AssetHandle> prefabs);
+		// follow. `recordAgainst`, the versions the step's prefabs and the prefabs nesting them had before its first write
+		// (prefab.apply's, asset.setImportSettings' and the inspector's first execution of the step), makes each scene's entry
+		// record the overrides of its instances against them first, as the step records the addressed scene's: an instance
+		// that differs from them, as one whose scene undid an earlier entry does, keeps what differs (the milestone review,
+		// M1). Without it, as after asset.reimport, whose import already replaced the version, and on the step's undo and
+		// redo, the instances are rebuilt from their recorded overrides.
+		void PropagatePrefabUpdate(std::span<const AssetHandle> prefabs, const std::map<AssetHandle, Prefab>* recordAgainst = nullptr);
 
 		// Live nested prefabs (M20, decision 8). The Prefab assets that nest one of `prefabs`, directly or through others
 		// (read from the registry's import dependencies, which a prefab's nested instances join), in the order they must be

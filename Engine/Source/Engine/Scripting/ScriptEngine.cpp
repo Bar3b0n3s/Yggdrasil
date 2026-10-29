@@ -447,9 +447,17 @@ namespace Engine {
 		error.Callback = "Physics";
 		error.Entity = diagnostic.Entity;
 		// Physics already logged this diagnostic; retain script observability and policy without a second log entry. The
-		// diagnostic belongs to the entity, not to one of its behaviours, so it names the entity's first slot, as an
-		// entity-addressed evaluation does.
-		m_State->Publish(std::move(error), { .Entity = diagnostic.Entity, .Case = m_State->CurrentOwner.Case, .Slot = 0 }, false, true);
+		// diagnostic belongs to the entity, not to one of its behaviours, so it names, and disables, the entity's first slot
+		// that has an instance (a slot without a script has none), as an entity-addressed evaluation does; an entity without
+		// an instance is named from the scene.
+		const std::vector<State::InstanceKey> instances = m_State->InstancesOf(diagnostic.Entity);
+		if (instances.empty())
+		{
+			if (const Entity entity = GetHost().GetScene().FindEntityByID(diagnostic.Entity))
+				error.EntityName = entity.GetName();
+		}
+		const uint32_t slot = instances.empty() ? 0 : instances.front().Slot;
+		m_State->Publish(std::move(error), { .Entity = diagnostic.Entity, .Case = m_State->CurrentOwner.Case, .Slot = slot }, false, true);
 	}
 
 	void ScriptEngine::Stop()

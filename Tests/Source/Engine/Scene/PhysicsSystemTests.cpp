@@ -1570,6 +1570,42 @@ namespace Engine {
 			piece.AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = ColliderScript, .Fields = {}, .ExecutionOrder = 0 });
 			session->Tick();
 			REQUIRE(listener.Find(pieceId, PhysicsEventType::CollisionEnter).size() == 1);
+
+			// Decision 2's other leaving routes (the milestone review, T5), each ending the pair with one synthesized exit to
+			// the piece: its component kept but naming no script any more, and the piece moved out of the body.
+			const auto colliderEvents = [&listener, pieceId](PhysicsEventType type)
+			{
+				std::vector<PhysicsEvent> found;
+				for (const PhysicsEvent& event : listener.Find(pieceId, type))
+				{
+					if (event.IsColliderEvent())
+						found.push_back(event);
+				}
+				return found;
+			};
+			listener.Events.clear();
+			piece.GetComponent<ScriptComponent>().Scripts.front().Script = {};
+			session->Tick();
+			const std::vector<PhysicsEvent> unscripted = colliderEvents(PhysicsEventType::CollisionExit);
+			REQUIRE(unscripted.size() == 1);
+			CHECK(unscripted[0].Synthesized);
+			CHECK(listener.Events.size() == 1);
+			piece.GetComponent<ScriptComponent>().Scripts.front().Script = ColliderScript;
+			session->Tick();
+			REQUIRE(colliderEvents(PhysicsEventType::CollisionEnter).size() == 1);
+
+			listener.Events.clear();
+			REQUIRE(runtime.SetParent(piece, Entity()).has_value());
+			session->Tick();
+			const std::vector<PhysicsEvent> moved = colliderEvents(PhysicsEventType::CollisionExit);
+			REQUIRE(moved.size() == 1);
+			CHECK(moved[0].Synthesized);
+			CHECK(moved[0].SelfBody == level);
+			// Back in the level, scripted, the piece enters again at the next PostStep.
+			REQUIRE(runtime.SetParent(piece, runtime.FindEntityByID(level)).has_value());
+			session->Tick();
+			REQUIRE(colliderEvents(PhysicsEventType::CollisionEnter).size() == 1);
+
 			listener.Events.clear();
 			piece.AddComponent<RigidBodyComponent>(RigidBodyComponent{ .Type = BodyType::Static });
 			session->Tick();

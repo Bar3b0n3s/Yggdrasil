@@ -58,10 +58,12 @@ namespace Engine {
 	// partial Transform component value (registry PascalCase, virtual fields such as EulerAngles allowed, ADR 0008 decision
 	// 35) over the prefab root's; `name` renames the root (absent: the prefab root's name). `components` are per-instance
 	// values for the root, written as entity.update writes them after `transform` (merged into the prefab's components,
-	// missing ones added; script fields through {"Script": {"Scripts": [{"Fields": {...}}]}}, where an entry that gives
-	// Fields without Script takes the Script handle of the prefab root's slot at its index, every other member an entry
-	// omits takes its default and the list replaces the root's) and recorded as the instance's overrides when the step
-	// commits, so one call equals prefab.instantiate followed by entity.update of the new root. Supports dry runs and
+	// missing ones added; script fields through {"Script": {"Scripts": [{"Fields": {...}}]}}, whose list replaces the
+	// root's: an entry that gives Fields without Script patches the prefab root's slot at its index, keeping its script,
+	// its ExecutionOrder and its other field values (EditorMethodContext::CompleteParameterOwners), and an entry with a
+	// Script describes its whole slot, every member it omits taking its default) and recorded as the instance's overrides
+	// when the step commits, a patched slot's Fields as its changed keys (Docs/Decisions/0031-m20-contract.md decision
+	// 19), so one call equals prefab.instantiate followed by entity.update of the new root. Supports dry runs and
 	// batches. The result names the new root `entity` (prefab.create names its instance `instance`).
 	struct PrefabInstantiateParams
 	{

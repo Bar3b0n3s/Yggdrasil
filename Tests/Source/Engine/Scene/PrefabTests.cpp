@@ -146,16 +146,30 @@ namespace Engine {
 
 		TEST_CASE("Prefab: 1,000 seeded mutations of a prefab file and of its cooked form never crash" * doctest::test_suite(Test::FuzzSuite))
 		{
-			// The seed corpus: the prefab fixtures of Tests/Data. The text goes through a strict or a repair load; the cooked
-			// form (the payload hash sealed again) through LoadCookedPrefab and then Prefab::FromJson, as a Runtime loads it.
+			// The seed corpus: the prefab fixtures of Tests/Data, Room.prefab holding a live nested Lamp instance with an
+			// override (Docs/Decisions/0031-m20-contract.md decision 8). The text goes through a strict or a repair load; the
+			// cooked form (the payload hash sealed again) through LoadCookedPrefab and then Prefab::FromJson, as a Runtime loads
+			// it. Every seed loads strictly, so mutations start from documents the reader accepts.
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			std::vector<std::string> seeds;
-			for (const std::string_view fixture : { "Prefabs/Block.prefab", "Assets/Prefabs/Lamp.prefab" })
+			for (const std::string_view fixture : { "Prefabs/Block.prefab", "Assets/Prefabs/Lamp.prefab", "Assets/Prefabs/Room.prefab" })
 			{
+				CAPTURE(fixture);
 				const Result<std::string> text = Test::ReadTestDataText(fixture);
 				REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+				LoadReport report;
+				const Result<Prefab> seed = Prefab::LoadFromString(*text, *registry, LoadOptions{}, report);
+				REQUIRE_MESSAGE(seed.has_value(), (seed ? std::string() : seed.error().ToString()));
 				seeds.push_back(*text);
 			}
+			// Room's lamp stays a live instance through the strict load.
+			LoadReport roomReport;
+			const Result<Prefab> room = Prefab::LoadFromString(seeds.back(), *registry, LoadOptions{}, roomReport);
+			REQUIRE(room.has_value());
+			const Json* lamp = room->FindEntity(UUID(0x00000000000d0002));
+			REQUIRE(lamp != nullptr);
+			CHECK((*lamp)["Components"].contains("PrefabLink"));
+			CHECK((*lamp)["Components"]["Prefab"]["Overrides"].size() == 1);
 			const Test::FuzzRun run = Test::RunFuzzCase(0x9EFAB, 1000, [&registry, &seeds](Random& random, uint64_t index)
 			{
 				std::string mutated = seeds[static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(seeds.size()) - 1))];

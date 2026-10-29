@@ -646,8 +646,10 @@ end)
 				};
 				REQUIRE(harness.Frame(0).has_value());
 				REQUIRE(harness.Frame(1, click(1, 1)).has_value());
-				for (uint64_t frame = 2; frame < 5 && editor.GetSelection().empty(); ++frame)
-					REQUIRE(harness.Frame(frame).has_value());
+				// The pick's result is read back at its fixed frame latency (the milestone review, T6): not one frame early.
+				REQUIRE(harness.Frame(2).has_value());
+				CHECK(editor.GetSelection().empty());
+				REQUIRE(harness.Frame(3).has_value());
 				CHECK(editor.GetActiveSceneId() == second);
 				CHECK(editor.GetSelectionTarget() == SceneTarget::Edit);
 				CHECK(std::vector<UUID>(editor.GetSelection().begin(), editor.GetSelection().end()) == std::vector<UUID>{ edited });

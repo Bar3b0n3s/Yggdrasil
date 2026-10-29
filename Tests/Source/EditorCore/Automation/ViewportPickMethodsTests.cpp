@@ -2,6 +2,7 @@
 
 #include "EditorCore/Automation/ViewportPickMethods.h"
 
+#include "EditorCore/EditorContext.h"
 #include "EditorCore/Viewport/EditorViewportState.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Support/AutomationTestClient.h"
@@ -96,6 +97,39 @@ namespace Engine {
 			CHECK((*game)["height"] == Json(7));
 			REQUIRE(setup.GetEditor().GetViewportState().SetPixelSize(ViewportView::Game, glm::uvec2(13, 11)));
 			CHECK(setup.GetEditor().GetViewportState().GetPixelSize(ViewportView::Scene).value() == glm::uvec2(5, 3));
+		}
+
+		// M20 (Docs/Decisions/0031-m20-contract.md decisions 13 and 14; the milestone review, M2): without a target, a scene
+		// view pick reads the scene the scene view shows: the play scene in the played scene's tab, and in another open
+		// scene's tab its edit scene. The game view keeps showing the session.
+		TEST_CASE("ViewportPick: a scene view pick in another open scene's tab while a session plays reads that tab's edit scene")
+		{
+			Test::AutomationFixture setup("PickOpenScenes");
+			MakePickScene(setup);
+			EditorContext& editor = setup.GetEditor();
+			REQUIRE(editor.GetViewportState().SetPixelSize(ViewportView::Scene, glm::uvec2(5, 3)));
+			REQUIRE(editor.GetViewportState().SetPixelSize(ViewportView::Game, glm::uvec2(5, 3)));
+			const OpenSceneId main = editor.GetActiveSceneId();
+			REQUIRE(setup.Call("scene.new", Json{ { "path", "Assets/Scenes/Second.scene" }, { "keepOpen", true } }));
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Edited" }, { "components", { { "MeshRenderer", { { "Mesh", "engine://Meshes/Cube" } } } } } }));
+			const OpenSceneId second = editor.GetActiveSceneId();
+			REQUIRE(setup.Call("scene.activate", Json{ { "scene", main } }));
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true } }));
+			REQUIRE(setup.Call("scene.activate", Json{ { "scene", second } }));
+
+			const Json scenePixel{ { "x", 2 }, { "y", 1 }, { "view", "scene" } };
+			const auto edited = setup.Call("viewport.pick", scenePixel);
+			REQUIRE_MESSAGE(edited.has_value(), edited.error().ToString());
+			CHECK((*edited)["raycast"]["entity"]["name"] == Json("Edited"));
+			const auto game = setup.Call("viewport.pick", Json{ { "x", 2 }, { "y", 1 }, { "view", "game" } });
+			REQUIRE_MESSAGE(game.has_value(), game.error().ToString());
+			CHECK((*game)["raycast"]["entity"]["name"] == Json("Cube"));
+
+			REQUIRE(setup.Call("scene.activate", Json{ { "scene", main } }));
+			const auto played = setup.Call("viewport.pick", scenePixel);
+			REQUIRE_MESSAGE(played.has_value(), played.error().ToString());
+			CHECK((*played)["raycast"]["entity"]["name"] == Json("Cube"));
+			REQUIRE(setup.Call("play.stop", Json::object()));
 		}
 	}
 
