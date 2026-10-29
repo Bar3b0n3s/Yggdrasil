@@ -23,6 +23,7 @@ namespace Engine {
 			snapshot.Texts.push_back(TextItem{ .Text = "Score" });
 			snapshot.PickTable.push_back(UUID(1));
 			snapshot.Icons.push_back(RenderIcon{});
+			snapshot.Sprites.push_back(SpriteItem{});
 			snapshot.DebugDraw.AddLine(glm::vec3(0.0f), glm::vec3(1.0f), glm::vec4(1.0f));
 			snapshot.AnnotationDraw.AddLine(glm::vec3(0.0f), glm::vec3(1.0f), glm::vec4(1.0f));
 			CHECK(snapshot.Meshes.get_allocator().resource() == &arena);
@@ -30,6 +31,7 @@ namespace Engine {
 			CHECK(snapshot.Texts.get_allocator().resource() == &arena);
 			CHECK(snapshot.PickTable.get_allocator().resource() == &arena);
 			CHECK(snapshot.Icons.get_allocator().resource() == &arena);
+			CHECK(snapshot.Sprites.get_allocator().resource() == &arena);
 			CHECK(snapshot.DebugDraw.GetMemoryResource() == &arena);
 			CHECK(snapshot.AnnotationDraw.GetMemoryResource() == &arena);
 

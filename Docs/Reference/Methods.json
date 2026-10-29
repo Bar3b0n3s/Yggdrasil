@@ -3099,6 +3099,27 @@
 							},
 							"Script": {
 								"$ref": "#/$defs/Script"
+							},
+							"SpriteRenderer": {
+								"$ref": "#/$defs/SpriteRenderer"
+							},
+							"SpriteAnimator": {
+								"$ref": "#/$defs/SpriteAnimator"
+							},
+							"PixelPerfectCamera": {
+								"$ref": "#/$defs/PixelPerfectCamera"
+							},
+							"RigidBody2D": {
+								"$ref": "#/$defs/RigidBody2D"
+							},
+							"BoxCollider2D": {
+								"$ref": "#/$defs/BoxCollider2D"
+							},
+							"CircleCollider2D": {
+								"$ref": "#/$defs/CircleCollider2D"
+							},
+							"PolygonCollider2D": {
+								"$ref": "#/$defs/PolygonCollider2D"
 							}
 						},
 						"additionalProperties": false
@@ -4287,6 +4308,373 @@
 						},
 						"additionalProperties": false
 					},
+					"SpriteRenderer": {
+						"description": "Draws a sprite: a sprite sheet frame or a texture in the entity's XY plane.",
+						"type": "object",
+						"properties": {
+							"Sheet": {
+								"description": "The sprite sheet whose frame Frame is drawn; null draws Texture whole.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "SpriteSheet"
+							},
+							"Frame": {
+								"description": "The index of the sheet's frame to draw; an index the sheet lacks draws nothing (SPRITE_FRAME_OUT_OF_RANGE).",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 65535
+							},
+							"Texture": {
+								"description": "The texture drawn whole, pivoted at its centre, when Sheet is null; null draws the built-in white square.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Texture"
+							},
+							"Color": {
+								"description": "The linear colour every texel is multiplied with, with opacity in the fourth component.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"FlipX": {
+								"description": "Whether the image is mirrored left to right about its pivot.",
+								"type": "boolean"
+							},
+							"FlipY": {
+								"description": "Whether the image is mirrored top to bottom about its pivot.",
+								"type": "boolean"
+							},
+							"PixelsPerUnit": {
+								"description": "How many texels of the image make one unit of the entity's local space; the sprite's size is its texels divided by this.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 65536
+							},
+							"SortingLayer": {
+								"description": "The sorting layer name from project settings; later layers draw over earlier ones, and an undeclared name draws in the first.",
+								"type": "string"
+							},
+							"OrderInLayer": {
+								"description": "The draw order within the sorting layer: higher values draw over lower ones, equal values in canonical entity order.",
+								"type": "integer",
+								"minimum": -2147483648,
+								"maximum": 2147483647
+							},
+							"Lit": {
+								"description": "Whether 2D lights light the sprite; an unlit sprite keeps its texels unchanged.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"SpriteAnimator": {
+						"description": "Plays a clip of the SpriteRenderer's sprite sheet, one step per clip frame for its ticks, driven by the fixed step.",
+						"type": "object",
+						"properties": {
+							"Clip": {
+								"description": "The name of the sheet's clip to play; empty plays nothing.",
+								"type": "string"
+							},
+							"Playing": {
+								"description": "Whether the clip advances each fixed step; a clip without Loop clears it after its last step and holds its last frame.",
+								"type": "boolean"
+							},
+							"Step": {
+								"description": "The index of the clip step shown.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 1023
+							},
+							"StepTicks": {
+								"description": "How many fixed steps the current clip step has been shown.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 65534
+							}
+						},
+						"additionalProperties": false
+					},
+					"PixelPerfectCamera": {
+						"description": "Renders the entity's camera at a reference resolution, upscaled by the largest whole factor that fits the view in a letterbox.",
+						"type": "object",
+						"properties": {
+							"ReferenceWidth": {
+								"description": "The width the scene renders at, in pixels.",
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 8192
+							},
+							"ReferenceHeight": {
+								"description": "The height the scene renders at, in pixels; the orthographic view is this many pixels of PixelsPerUnit high.",
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 8192
+							},
+							"PixelsPerUnit": {
+								"description": "How many scene pixels make one world unit; sprites of the same PixelsPerUnit map each texel to one pixel.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 65536
+							},
+							"LetterboxColor": {
+								"description": "The linear colour of the bars around the upscaled image.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							}
+						},
+						"additionalProperties": false
+					},
+					"RigidBody2D": {
+						"description": "Simulates the entity in the 2D world: moves along world X and Y and rotates about world Z.",
+						"type": "object",
+						"properties": {
+							"Type": {
+								"description": "Static never moves; Kinematic is moved by script; Dynamic is simulated.",
+								"enum": ["Static", "Kinematic", "Dynamic"]
+							},
+							"Mass": {
+								"description": "Mass in kilograms (Dynamic only).",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 1000000000
+							},
+							"Friction": {
+								"description": "The friction coefficient of the body's surfaces; a contact uses the geometric mean of both bodies' values.",
+								"type": "number",
+								"minimum": 0
+							},
+							"Restitution": {
+								"description": "Bounciness, from no bounce (0) to a perfectly elastic bounce (1); a contact uses the larger of both bodies' values.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"LinearDamping": {
+								"description": "How quickly linear velocity decays, per second.",
+								"type": "number",
+								"minimum": 0
+							},
+							"AngularDamping": {
+								"description": "How quickly angular velocity decays, per second.",
+								"type": "number",
+								"minimum": 0
+							},
+							"GravityFactor": {
+								"description": "The multiplier of the project's 2D gravity for this body (0 floats).",
+								"type": "number"
+							},
+							"MotionQuality": {
+								"description": "Discrete or continuous (LinearCast) collision detection.",
+								"enum": ["Discrete", "LinearCast"]
+							},
+							"AllowSleeping": {
+								"description": "Whether the body may sleep when it comes to rest.",
+								"type": "boolean"
+							},
+							"FixedRotation": {
+								"description": "Whether a Dynamic body is kept from rotating.",
+								"type": "boolean"
+							},
+							"Layer": {
+								"description": "Physics layer name from project settings (the 3D world's layers).",
+								"type": "string"
+							},
+							"MaxLinearVelocity": {
+								"description": "The speed the body is clamped to, in metres per second.",
+								"type": "number",
+								"minimum": 0
+							},
+							"MaxAngularVelocity": {
+								"description": "The angular speed the body is clamped to, in radians per second.",
+								"type": "number",
+								"minimum": 0
+							},
+							"EnhancedInternalEdgeRemoval": {
+								"description": "Removes ghost collisions with internal edges of compound shapes; set it on bodies that roll or slide across tiles.",
+								"type": "boolean"
+							},
+							"InitialLinearVelocity": {
+								"description": "The velocity along world X and Y the body starts with, in metres per second.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"InitialAngularVelocity": {
+								"description": "The angular velocity about world Z the body starts with, in radians per second, counter-clockwise seen from +Z.",
+								"type": "number"
+							}
+						},
+						"additionalProperties": false
+					},
+					"BoxCollider2D": {
+						"description": "A rectangle collider in the entity's XY plane.",
+						"type": "object",
+						"properties": {
+							"HalfExtents": {
+								"description": "Half the rectangle's size along local X and Y; at least 1 mm.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0.001
+									},
+									{
+										"type": "number",
+										"minimum": 0.001
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Offset": {
+								"description": "The rectangle's centre relative to the entity, in its XY plane.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Angle": {
+								"description": "The rectangle's rotation about the entity's Z axis, counter-clockwise, in degrees.",
+								"type": "number"
+							},
+							"IsTrigger": {
+								"description": "Whether the collider only detects overlaps instead of colliding.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"CircleCollider2D": {
+						"description": "A circle collider in the entity's XY plane.",
+						"type": "object",
+						"properties": {
+							"Radius": {
+								"description": "The circle's radius; at least 1 mm.",
+								"type": "number",
+								"minimum": 0.001
+							},
+							"Offset": {
+								"description": "The circle's centre relative to the entity, in its XY plane.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"IsTrigger": {
+								"description": "Whether the collider only detects overlaps instead of colliding.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"PolygonCollider2D": {
+						"description": "A convex polygon collider in the entity's XY plane.",
+						"type": "object",
+						"properties": {
+							"Points": {
+								"description": "The points whose convex hull is the collider, 3 to 64 of them, in the collider's own space before Offset and Angle.",
+								"type": "array",
+								"items": {
+									"type": "array",
+									"prefixItems": [
+										{
+											"type": "number"
+										},
+										{
+											"type": "number"
+										}
+									],
+									"minItems": 2,
+									"maxItems": 2
+								}
+							},
+							"Offset": {
+								"description": "Where the polygon's origin sits relative to the entity, in its XY plane.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Angle": {
+								"description": "The polygon's rotation about the entity's Z axis, counter-clockwise, in degrees.",
+								"type": "number"
+							},
+							"IsTrigger": {
+								"description": "Whether the collider only detects overlaps instead of colliding.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
 					"PrefabOverride": {
 						"description": "One recorded difference between an outermost prefab instance and its prefab.",
 						"type": "object",
@@ -4979,6 +5367,27 @@
 							},
 							"Script": {
 								"$ref": "#/$defs/Script"
+							},
+							"SpriteRenderer": {
+								"$ref": "#/$defs/SpriteRenderer"
+							},
+							"SpriteAnimator": {
+								"$ref": "#/$defs/SpriteAnimator"
+							},
+							"PixelPerfectCamera": {
+								"$ref": "#/$defs/PixelPerfectCamera"
+							},
+							"RigidBody2D": {
+								"$ref": "#/$defs/RigidBody2D"
+							},
+							"BoxCollider2D": {
+								"$ref": "#/$defs/BoxCollider2D"
+							},
+							"CircleCollider2D": {
+								"$ref": "#/$defs/CircleCollider2D"
+							},
+							"PolygonCollider2D": {
+								"$ref": "#/$defs/PolygonCollider2D"
 							}
 						},
 						"additionalProperties": false
@@ -6170,6 +6579,373 @@
 								"items": {
 									"$ref": "#/$defs/ScriptSlot"
 								}
+							}
+						},
+						"additionalProperties": false
+					},
+					"SpriteRenderer": {
+						"description": "Draws a sprite: a sprite sheet frame or a texture in the entity's XY plane.",
+						"type": "object",
+						"properties": {
+							"Sheet": {
+								"description": "The sprite sheet whose frame Frame is drawn; null draws Texture whole.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "SpriteSheet"
+							},
+							"Frame": {
+								"description": "The index of the sheet's frame to draw; an index the sheet lacks draws nothing (SPRITE_FRAME_OUT_OF_RANGE).",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 65535
+							},
+							"Texture": {
+								"description": "The texture drawn whole, pivoted at its centre, when Sheet is null; null draws the built-in white square.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Texture"
+							},
+							"Color": {
+								"description": "The linear colour every texel is multiplied with, with opacity in the fourth component.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"FlipX": {
+								"description": "Whether the image is mirrored left to right about its pivot.",
+								"type": "boolean"
+							},
+							"FlipY": {
+								"description": "Whether the image is mirrored top to bottom about its pivot.",
+								"type": "boolean"
+							},
+							"PixelsPerUnit": {
+								"description": "How many texels of the image make one unit of the entity's local space; the sprite's size is its texels divided by this.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 65536
+							},
+							"SortingLayer": {
+								"description": "The sorting layer name from project settings; later layers draw over earlier ones, and an undeclared name draws in the first.",
+								"type": "string"
+							},
+							"OrderInLayer": {
+								"description": "The draw order within the sorting layer: higher values draw over lower ones, equal values in canonical entity order.",
+								"type": "integer",
+								"minimum": -2147483648,
+								"maximum": 2147483647
+							},
+							"Lit": {
+								"description": "Whether 2D lights light the sprite; an unlit sprite keeps its texels unchanged.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"SpriteAnimator": {
+						"description": "Plays a clip of the SpriteRenderer's sprite sheet, one step per clip frame for its ticks, driven by the fixed step.",
+						"type": "object",
+						"properties": {
+							"Clip": {
+								"description": "The name of the sheet's clip to play; empty plays nothing.",
+								"type": "string"
+							},
+							"Playing": {
+								"description": "Whether the clip advances each fixed step; a clip without Loop clears it after its last step and holds its last frame.",
+								"type": "boolean"
+							},
+							"Step": {
+								"description": "The index of the clip step shown.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 1023
+							},
+							"StepTicks": {
+								"description": "How many fixed steps the current clip step has been shown.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 65534
+							}
+						},
+						"additionalProperties": false
+					},
+					"PixelPerfectCamera": {
+						"description": "Renders the entity's camera at a reference resolution, upscaled by the largest whole factor that fits the view in a letterbox.",
+						"type": "object",
+						"properties": {
+							"ReferenceWidth": {
+								"description": "The width the scene renders at, in pixels.",
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 8192
+							},
+							"ReferenceHeight": {
+								"description": "The height the scene renders at, in pixels; the orthographic view is this many pixels of PixelsPerUnit high.",
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 8192
+							},
+							"PixelsPerUnit": {
+								"description": "How many scene pixels make one world unit; sprites of the same PixelsPerUnit map each texel to one pixel.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 65536
+							},
+							"LetterboxColor": {
+								"description": "The linear colour of the bars around the upscaled image.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							}
+						},
+						"additionalProperties": false
+					},
+					"RigidBody2D": {
+						"description": "Simulates the entity in the 2D world: moves along world X and Y and rotates about world Z.",
+						"type": "object",
+						"properties": {
+							"Type": {
+								"description": "Static never moves; Kinematic is moved by script; Dynamic is simulated.",
+								"enum": ["Static", "Kinematic", "Dynamic"]
+							},
+							"Mass": {
+								"description": "Mass in kilograms (Dynamic only).",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 1000000000
+							},
+							"Friction": {
+								"description": "The friction coefficient of the body's surfaces; a contact uses the geometric mean of both bodies' values.",
+								"type": "number",
+								"minimum": 0
+							},
+							"Restitution": {
+								"description": "Bounciness, from no bounce (0) to a perfectly elastic bounce (1); a contact uses the larger of both bodies' values.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"LinearDamping": {
+								"description": "How quickly linear velocity decays, per second.",
+								"type": "number",
+								"minimum": 0
+							},
+							"AngularDamping": {
+								"description": "How quickly angular velocity decays, per second.",
+								"type": "number",
+								"minimum": 0
+							},
+							"GravityFactor": {
+								"description": "The multiplier of the project's 2D gravity for this body (0 floats).",
+								"type": "number"
+							},
+							"MotionQuality": {
+								"description": "Discrete or continuous (LinearCast) collision detection.",
+								"enum": ["Discrete", "LinearCast"]
+							},
+							"AllowSleeping": {
+								"description": "Whether the body may sleep when it comes to rest.",
+								"type": "boolean"
+							},
+							"FixedRotation": {
+								"description": "Whether a Dynamic body is kept from rotating.",
+								"type": "boolean"
+							},
+							"Layer": {
+								"description": "Physics layer name from project settings (the 3D world's layers).",
+								"type": "string"
+							},
+							"MaxLinearVelocity": {
+								"description": "The speed the body is clamped to, in metres per second.",
+								"type": "number",
+								"minimum": 0
+							},
+							"MaxAngularVelocity": {
+								"description": "The angular speed the body is clamped to, in radians per second.",
+								"type": "number",
+								"minimum": 0
+							},
+							"EnhancedInternalEdgeRemoval": {
+								"description": "Removes ghost collisions with internal edges of compound shapes; set it on bodies that roll or slide across tiles.",
+								"type": "boolean"
+							},
+							"InitialLinearVelocity": {
+								"description": "The velocity along world X and Y the body starts with, in metres per second.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"InitialAngularVelocity": {
+								"description": "The angular velocity about world Z the body starts with, in radians per second, counter-clockwise seen from +Z.",
+								"type": "number"
+							}
+						},
+						"additionalProperties": false
+					},
+					"BoxCollider2D": {
+						"description": "A rectangle collider in the entity's XY plane.",
+						"type": "object",
+						"properties": {
+							"HalfExtents": {
+								"description": "Half the rectangle's size along local X and Y; at least 1 mm.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0.001
+									},
+									{
+										"type": "number",
+										"minimum": 0.001
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Offset": {
+								"description": "The rectangle's centre relative to the entity, in its XY plane.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Angle": {
+								"description": "The rectangle's rotation about the entity's Z axis, counter-clockwise, in degrees.",
+								"type": "number"
+							},
+							"IsTrigger": {
+								"description": "Whether the collider only detects overlaps instead of colliding.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"CircleCollider2D": {
+						"description": "A circle collider in the entity's XY plane.",
+						"type": "object",
+						"properties": {
+							"Radius": {
+								"description": "The circle's radius; at least 1 mm.",
+								"type": "number",
+								"minimum": 0.001
+							},
+							"Offset": {
+								"description": "The circle's centre relative to the entity, in its XY plane.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"IsTrigger": {
+								"description": "Whether the collider only detects overlaps instead of colliding.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"PolygonCollider2D": {
+						"description": "A convex polygon collider in the entity's XY plane.",
+						"type": "object",
+						"properties": {
+							"Points": {
+								"description": "The points whose convex hull is the collider, 3 to 64 of them, in the collider's own space before Offset and Angle.",
+								"type": "array",
+								"items": {
+									"type": "array",
+									"prefixItems": [
+										{
+											"type": "number"
+										},
+										{
+											"type": "number"
+										}
+									],
+									"minItems": 2,
+									"maxItems": 2
+								}
+							},
+							"Offset": {
+								"description": "Where the polygon's origin sits relative to the entity, in its XY plane.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Angle": {
+								"description": "The polygon's rotation about the entity's Z axis, counter-clockwise, in degrees.",
+								"type": "number"
+							},
+							"IsTrigger": {
+								"description": "Whether the collider only detects overlaps instead of colliding.",
+								"type": "boolean"
 							}
 						},
 						"additionalProperties": false
@@ -9990,6 +10766,27 @@
 							},
 							"Script": {
 								"$ref": "#/$defs/Script"
+							},
+							"SpriteRenderer": {
+								"$ref": "#/$defs/SpriteRenderer"
+							},
+							"SpriteAnimator": {
+								"$ref": "#/$defs/SpriteAnimator"
+							},
+							"PixelPerfectCamera": {
+								"$ref": "#/$defs/PixelPerfectCamera"
+							},
+							"RigidBody2D": {
+								"$ref": "#/$defs/RigidBody2D"
+							},
+							"BoxCollider2D": {
+								"$ref": "#/$defs/BoxCollider2D"
+							},
+							"CircleCollider2D": {
+								"$ref": "#/$defs/CircleCollider2D"
+							},
+							"PolygonCollider2D": {
+								"$ref": "#/$defs/PolygonCollider2D"
 							}
 						},
 						"additionalProperties": false
@@ -11170,6 +11967,373 @@
 								"items": {
 									"$ref": "#/$defs/ScriptSlot"
 								}
+							}
+						},
+						"additionalProperties": false
+					},
+					"SpriteRenderer": {
+						"description": "Draws a sprite: a sprite sheet frame or a texture in the entity's XY plane.",
+						"type": "object",
+						"properties": {
+							"Sheet": {
+								"description": "The sprite sheet whose frame Frame is drawn; null draws Texture whole.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "SpriteSheet"
+							},
+							"Frame": {
+								"description": "The index of the sheet's frame to draw; an index the sheet lacks draws nothing (SPRITE_FRAME_OUT_OF_RANGE).",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 65535
+							},
+							"Texture": {
+								"description": "The texture drawn whole, pivoted at its centre, when Sheet is null; null draws the built-in white square.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Texture"
+							},
+							"Color": {
+								"description": "The linear colour every texel is multiplied with, with opacity in the fourth component.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"FlipX": {
+								"description": "Whether the image is mirrored left to right about its pivot.",
+								"type": "boolean"
+							},
+							"FlipY": {
+								"description": "Whether the image is mirrored top to bottom about its pivot.",
+								"type": "boolean"
+							},
+							"PixelsPerUnit": {
+								"description": "How many texels of the image make one unit of the entity's local space; the sprite's size is its texels divided by this.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 65536
+							},
+							"SortingLayer": {
+								"description": "The sorting layer name from project settings; later layers draw over earlier ones, and an undeclared name draws in the first.",
+								"type": "string"
+							},
+							"OrderInLayer": {
+								"description": "The draw order within the sorting layer: higher values draw over lower ones, equal values in canonical entity order.",
+								"type": "integer",
+								"minimum": -2147483648,
+								"maximum": 2147483647
+							},
+							"Lit": {
+								"description": "Whether 2D lights light the sprite; an unlit sprite keeps its texels unchanged.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"SpriteAnimator": {
+						"description": "Plays a clip of the SpriteRenderer's sprite sheet, one step per clip frame for its ticks, driven by the fixed step.",
+						"type": "object",
+						"properties": {
+							"Clip": {
+								"description": "The name of the sheet's clip to play; empty plays nothing.",
+								"type": "string"
+							},
+							"Playing": {
+								"description": "Whether the clip advances each fixed step; a clip without Loop clears it after its last step and holds its last frame.",
+								"type": "boolean"
+							},
+							"Step": {
+								"description": "The index of the clip step shown.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 1023
+							},
+							"StepTicks": {
+								"description": "How many fixed steps the current clip step has been shown.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 65534
+							}
+						},
+						"additionalProperties": false
+					},
+					"PixelPerfectCamera": {
+						"description": "Renders the entity's camera at a reference resolution, upscaled by the largest whole factor that fits the view in a letterbox.",
+						"type": "object",
+						"properties": {
+							"ReferenceWidth": {
+								"description": "The width the scene renders at, in pixels.",
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 8192
+							},
+							"ReferenceHeight": {
+								"description": "The height the scene renders at, in pixels; the orthographic view is this many pixels of PixelsPerUnit high.",
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 8192
+							},
+							"PixelsPerUnit": {
+								"description": "How many scene pixels make one world unit; sprites of the same PixelsPerUnit map each texel to one pixel.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 65536
+							},
+							"LetterboxColor": {
+								"description": "The linear colour of the bars around the upscaled image.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							}
+						},
+						"additionalProperties": false
+					},
+					"RigidBody2D": {
+						"description": "Simulates the entity in the 2D world: moves along world X and Y and rotates about world Z.",
+						"type": "object",
+						"properties": {
+							"Type": {
+								"description": "Static never moves; Kinematic is moved by script; Dynamic is simulated.",
+								"enum": ["Static", "Kinematic", "Dynamic"]
+							},
+							"Mass": {
+								"description": "Mass in kilograms (Dynamic only).",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 1000000000
+							},
+							"Friction": {
+								"description": "The friction coefficient of the body's surfaces; a contact uses the geometric mean of both bodies' values.",
+								"type": "number",
+								"minimum": 0
+							},
+							"Restitution": {
+								"description": "Bounciness, from no bounce (0) to a perfectly elastic bounce (1); a contact uses the larger of both bodies' values.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"LinearDamping": {
+								"description": "How quickly linear velocity decays, per second.",
+								"type": "number",
+								"minimum": 0
+							},
+							"AngularDamping": {
+								"description": "How quickly angular velocity decays, per second.",
+								"type": "number",
+								"minimum": 0
+							},
+							"GravityFactor": {
+								"description": "The multiplier of the project's 2D gravity for this body (0 floats).",
+								"type": "number"
+							},
+							"MotionQuality": {
+								"description": "Discrete or continuous (LinearCast) collision detection.",
+								"enum": ["Discrete", "LinearCast"]
+							},
+							"AllowSleeping": {
+								"description": "Whether the body may sleep when it comes to rest.",
+								"type": "boolean"
+							},
+							"FixedRotation": {
+								"description": "Whether a Dynamic body is kept from rotating.",
+								"type": "boolean"
+							},
+							"Layer": {
+								"description": "Physics layer name from project settings (the 3D world's layers).",
+								"type": "string"
+							},
+							"MaxLinearVelocity": {
+								"description": "The speed the body is clamped to, in metres per second.",
+								"type": "number",
+								"minimum": 0
+							},
+							"MaxAngularVelocity": {
+								"description": "The angular speed the body is clamped to, in radians per second.",
+								"type": "number",
+								"minimum": 0
+							},
+							"EnhancedInternalEdgeRemoval": {
+								"description": "Removes ghost collisions with internal edges of compound shapes; set it on bodies that roll or slide across tiles.",
+								"type": "boolean"
+							},
+							"InitialLinearVelocity": {
+								"description": "The velocity along world X and Y the body starts with, in metres per second.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"InitialAngularVelocity": {
+								"description": "The angular velocity about world Z the body starts with, in radians per second, counter-clockwise seen from +Z.",
+								"type": "number"
+							}
+						},
+						"additionalProperties": false
+					},
+					"BoxCollider2D": {
+						"description": "A rectangle collider in the entity's XY plane.",
+						"type": "object",
+						"properties": {
+							"HalfExtents": {
+								"description": "Half the rectangle's size along local X and Y; at least 1 mm.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0.001
+									},
+									{
+										"type": "number",
+										"minimum": 0.001
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Offset": {
+								"description": "The rectangle's centre relative to the entity, in its XY plane.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Angle": {
+								"description": "The rectangle's rotation about the entity's Z axis, counter-clockwise, in degrees.",
+								"type": "number"
+							},
+							"IsTrigger": {
+								"description": "Whether the collider only detects overlaps instead of colliding.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"CircleCollider2D": {
+						"description": "A circle collider in the entity's XY plane.",
+						"type": "object",
+						"properties": {
+							"Radius": {
+								"description": "The circle's radius; at least 1 mm.",
+								"type": "number",
+								"minimum": 0.001
+							},
+							"Offset": {
+								"description": "The circle's centre relative to the entity, in its XY plane.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"IsTrigger": {
+								"description": "Whether the collider only detects overlaps instead of colliding.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"PolygonCollider2D": {
+						"description": "A convex polygon collider in the entity's XY plane.",
+						"type": "object",
+						"properties": {
+							"Points": {
+								"description": "The points whose convex hull is the collider, 3 to 64 of them, in the collider's own space before Offset and Angle.",
+								"type": "array",
+								"items": {
+									"type": "array",
+									"prefixItems": [
+										{
+											"type": "number"
+										},
+										{
+											"type": "number"
+										}
+									],
+									"minItems": 2,
+									"maxItems": 2
+								}
+							},
+							"Offset": {
+								"description": "Where the polygon's origin sits relative to the entity, in its XY plane.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Angle": {
+								"description": "The polygon's rotation about the entity's Z axis, counter-clockwise, in degrees.",
+								"type": "number"
+							},
+							"IsTrigger": {
+								"description": "Whether the collider only detects overlaps instead of colliding.",
+								"type": "boolean"
 							}
 						},
 						"additionalProperties": false

@@ -105,9 +105,10 @@ namespace Engine {
 		TEST_CASE("RenderPassDeclarations: the stats order puts game Text before the upscale and the editor overlays after it")
 		{
 			// M17's order (§8.3) with Text moved to the SceneOverlay stage, the output stage's Upscale after it, the labels
-			// after the other editor overlays and the letterbox repaint last; a frozen contract of stats.get.
-			constexpr std::array<std::string_view, 25> Expected = { "Prepare", "DirectionalShadows", "SpotShadows", "DepthNormal", "DepthPyramid", "GTAO",
-				"GTAODenoiseHorizontal", "GTAODenoiseVertical", "ForwardOpaque", "Skybox", "ForwardTransparent", "Overdraw", "Bloom", "Tonemap", "FXAA",
+			// after the other editor overlays and the letterbox repaint last; M21's Sprites in the Sprites stage, between the
+			// forward passes and Bloom (ADR 0028's phase-2 ledger); a frozen contract of stats.get.
+			constexpr std::array<std::string_view, 26> Expected = { "Prepare", "DirectionalShadows", "SpotShadows", "DepthNormal", "DepthPyramid", "GTAO",
+				"GTAODenoiseHorizontal", "GTAODenoiseVertical", "ForwardOpaque", "Skybox", "ForwardTransparent", "Overdraw", "Sprites", "Bloom", "Tonemap", "FXAA",
 				"Text", "Upscale", "SelectionMask", "SelectionDilateHorizontal", "SelectionDilateVertical", "SelectionComposite", "Wireframe",
 				"Overlays", "Labels", "Letterbox" };
 			REQUIRE(RenderStatsOrder.size() == Expected.size());

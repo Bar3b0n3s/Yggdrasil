@@ -7,10 +7,12 @@
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
+#include "Engine/Scene/Components/PixelPerfectCameraComponent.h"
 #include "Engine/Scene/Components/PointLightComponent.h"
 #include "Engine/Scene/Components/PostProcessComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
+#include "Engine/Scene/Components/SpriteRendererComponent.h"
 #include "Engine/Scene/Components/TextComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
@@ -530,6 +532,74 @@ namespace Engine {
 			REQUIRE(overArena->Texts.size() == 1);
 			CHECK(overArena->Texts[0].Text == "Arena");
 			CHECK(overArena->Camera.View == overHeap->Camera.View);
+		}
+
+		// Docs/Decisions/0032-m21-contract.md decision 4 (stream A): sprites in draw order, their layers resolved by name.
+		TEST_CASE("RenderExtraction: sprites are extracted in sorting-layer, order-in-layer and canonical order" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			static_cast<void>(CreateCamera(scene, "Camera", true));
+			const auto addSprite = [&scene](std::string_view name, std::string layer, int32_t order)
+			{
+				Entity entity = scene.CreateEntity(name);
+				entity.AddComponent<SpriteRendererComponent>(SpriteRendererComponent{ .Texture = TypedAssetHandle<AssetType::Texture>(BuiltinAssetHandles::SpriteSquareTexture),
+					.SortingLayer = std::move(layer),
+					.OrderInLayer = order });
+				return entity.GetUUID();
+			};
+			const UUID front = addSprite("Front", "Foreground", 0);
+			const UUID backLate = addSprite("BackLate", "Background", 5);
+			const UUID backEarly = addSprite("BackEarly", "Background", -1);
+			const UUID backTie = addSprite("BackTie", "Background", 5);
+			const UUID unknown = addSprite("Unknown", "NoSuchLayer", 0);
+			Entity hidden = scene.CreateEntity("Hidden");
+			hidden.AddComponent<SpriteRendererComponent>();
+			hidden.SetActive(false);
+			TransformSystem::Update(scene);
+
+			RenderExtractionRequest request{ .Width = 640, .Height = 360 };
+			request.SortingLayers = { "Default", "Background", "Foreground" };
+			const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, request);
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			REQUIRE(snapshot->Sprites.size() == 5);
+			// An undeclared layer draws in the first one (SPRITE_UNKNOWN_SORTING_LAYER); equal keys keep canonical order.
+			CHECK(snapshot->Sprites[0].Entity == unknown);
+			CHECK(snapshot->Sprites[0].SortingLayer == 0);
+			CHECK(snapshot->Sprites[1].Entity == backEarly);
+			CHECK(snapshot->Sprites[2].Entity == backLate);
+			CHECK(snapshot->Sprites[3].Entity == backTie);
+			CHECK(snapshot->Sprites[3].SortingLayer == 1);
+			CHECK(snapshot->Sprites[4].Entity == front);
+			CHECK(snapshot->Sprites[4].SortingLayer == 2);
+			CHECK(snapshot->Sprites[4].Texture == BuiltinAssetHandles::SpriteSquareTexture);
+		}
+
+		// Docs/Decisions/0032-m21-contract.md decision 6 (stream C): the pixel-perfect camera drives the output stage.
+		TEST_CASE("RenderExtraction: a PixelPerfectCamera sets the output stage and an orthographic view of its reference height" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity camera = CreateCamera(scene, "Camera", true);
+			camera.AddComponent<PixelPerfectCameraComponent>(PixelPerfectCameraComponent{ .ReferenceWidth = 320, .ReferenceHeight = 180, .PixelsPerUnit = 16.0f, .LetterboxColor = glm::vec3(0.25f, 0.0f, 0.0f) });
+			SetTranslation(camera, glm::vec3(0.03f, 0.0f, 10.0f));
+			TransformSystem::Update(scene);
+
+			const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, { .Width = 960, .Height = 540 });
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			CHECK(snapshot->Output.SceneWidth == 320);
+			CHECK(snapshot->Output.SceneHeight == 180);
+			CHECK(snapshot->Output.PixelArt);
+			CHECK(snapshot->Output.LetterboxColor == glm::vec3(0.25f, 0.0f, 0.0f));
+			CHECK(snapshot->Camera.ProjectionKind == RenderProjection::Orthographic);
+			CHECK(snapshot->Camera.OrthographicSize == 180.0f / 32.0f);
+			// Snapped to the pixel grid: the view's left edge at a multiple of 1 / 16.
+			CHECK(snapshot->Camera.Position.x == 0.0f);
+
+			// The editor's explicit scene-view camera ignores it.
+			const Result<RenderSnapshot> sceneView = ExtractRenderSnapshot(scene, { .Camera = RenderCameraSource::Explicit, .Width = 960, .Height = 540 });
+			REQUIRE(sceneView.has_value());
+			CHECK(sceneView->Output == RenderOutputSettings{});
 		}
 	}
 

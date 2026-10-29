@@ -1,0 +1,46 @@
+#pragma once
+
+#include "Engine/Core/Base.h"
+#include "Engine/Core/Result.h"
+#include "Engine/Renderer/RenderSnapshot.h"
+#include "Engine/Scene/SceneRaycast.h"
+
+#include <optional>
+#include <string>
+#include <vector>
+
+// 2D picking (M21, C21.1, R-2D-EDITOR; Docs/Decisions/0032-m21-contract.md decision 14): the sprite a view pixel shows, on
+// the CPU, without a GPU or a physics world. Sprites draw in painter's order without writing depth, so the sprite a pixel
+// shows is the last one drawn (highest sorting layer, then order in layer, then canonical order) whose quad covers it; the
+// GPU pick reads only the meshes' EntityId. The editor's click selection and viewport.pick ask PickSprite first and fall back
+// to the mesh pick when it hits no sprite (a sprite therefore wins over a mesh in front of it: an accepted limit of scenes
+// that mix them, recorded in Backlog §6). The quads are SpriteGeometry's (Asset/SpriteGeometry.h) at the rendered pose, so
+// what is drawn is what is picked; texture alpha is not sampled (a transparent texel inside the quad is still the sprite).
+//
+// Frozen by the M21 contract (C21.1); stream A implements it.
+
+namespace Engine {
+
+	class AssetManager;
+	class Scene;
+
+	struct SpritePickRequest
+	{
+		RenderRay Ray{};
+		float MaxDistance = 1000.0f; // positive, finite, metres along the normalized ray
+		float MinDistance = 0.0f;    // finite, in [0, MaxDistance)
+		float Alpha = 1.0f;          // [0, 1], the rendered pose; callers refresh the scene's transforms as for extraction
+		// The project's SortingLayers.Layers (RenderExtractionRequest::SortingLayers).
+		std::vector<std::string> SortingLayers{};
+	};
+
+	// The last-drawn effectively enabled sprite whose quad (two-sided) the ray crosses within [MinDistance, MaxDistance],
+	// as a SceneRaycastHit: Entity, Distance, Position, Normal (the quad's, against the ray), Submesh 0, Triangle 0 or 1 (the
+	// quad's two triangles, top-left first) and its Barycentric weights. A sprite is hit on the quad it is drawn with
+	// (SpriteRendererComponent.h's rule): a texture that is missing or fails to load is hit on its placeholder's quad, and a
+	// sheet that is missing or fails to load, or an out-of-range Frame, gives no quad and is never hit. Empty optional: no
+	// sprite hit. Errors: InvalidArgument for a non-finite or zero direction, a non-finite origin, an invalid distance
+	// interval or Alpha. Main thread.
+	[[nodiscard]] Result<std::optional<SceneRaycastHit>> PickSprite(const Scene& scene, AssetManager& assets, const SpritePickRequest& request);
+
+}

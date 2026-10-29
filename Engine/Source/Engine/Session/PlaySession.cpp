@@ -16,6 +16,7 @@
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
+#include "Engine/Scene/Physics2DSystem.h"
 #include "Engine/Scene/PhysicsSystem.h"
 #include "Engine/Scene/PrefabAsset.h"
 #include "Engine/Scene/RenderExtraction.h"
@@ -179,6 +180,8 @@ namespace Engine {
 		Scope<Scene> RuntimeScene;
 		// The scene's physics (M11), declared after the scene it refers to, so it is destroyed first.
 		Scope<PhysicsSystem> Physics;
+		// The scene's 2D physics (M21, decision 10), likewise; null until stream P2 creates it.
+		Scope<Physics2DSystem> Physics2D{};
 		PlayInput Input;
 		uint64_t Tick = 0;       // the next tick
 		uint64_t FrameIndex = 0; // frame phases run so far
@@ -262,6 +265,7 @@ namespace Engine {
 		[[nodiscard]] AssetManager* GetAssets() override { return Assets; }
 		[[nodiscard]] const IFieldSchemaSource* GetFieldSchemas() const override { return Schemas.get(); }
 		[[nodiscard]] PhysicsSystem* GetPhysics() override { return Physics.get(); }
+		[[nodiscard]] Physics2DSystem* GetPhysics2D() override { return Physics2D.get(); }
 		[[nodiscard]] AudioSystem* GetAudio() override { return SceneAudio.get(); }
 		[[nodiscard]] DebugDrawList* GetDebugDraw() override { return &DebugDraw; }
 		[[nodiscard]] Random& GetRandom() override { return Stream; }
@@ -862,10 +866,14 @@ namespace Engine {
 			case PlaySessionPhase::FixedUpdate:             return "FixedUpdate";
 			case PlaySessionPhase::Tasks:                   return "Tasks";
 			case PlaySessionPhase::NativeStep:              return "NativeStep";
+			case PlaySessionPhase::SpriteAnimation:         return "SpriteAnimation";
 			case PlaySessionPhase::PreStepTransformUpdate:  return "PreStepTransformUpdate";
 			case PlaySessionPhase::PhysicsPreStep:          return "PhysicsPreStep";
 			case PlaySessionPhase::PhysicsStep:             return "PhysicsStep";
 			case PlaySessionPhase::PhysicsPostStep:         return "PhysicsPostStep";
+			case PlaySessionPhase::Physics2DPreStep:        return "Physics2DPreStep";
+			case PlaySessionPhase::Physics2DStep:           return "Physics2DStep";
+			case PlaySessionPhase::Physics2DPostStep:       return "Physics2DPostStep";
 			case PlaySessionPhase::DestroyFlush:            return "DestroyFlush";
 			case PlaySessionPhase::PostStepTransformUpdate: return "PostStepTransformUpdate";
 			case PlaySessionPhase::LatchFrame:              return "LatchFrame";
@@ -1307,6 +1315,16 @@ namespace Engine {
 	const NativeWorld* PlaySession::GetNative() const
 	{
 		return m_State->Native.get();
+	}
+
+	Physics2DSystem* PlaySession::GetPhysics2D()
+	{
+		return m_State->Physics2D.get();
+	}
+
+	const Physics2DSystem* PlaySession::GetPhysics2D() const
+	{
+		return m_State->Physics2D.get();
 	}
 
 	AudioSystem* PlaySession::GetAudioSystem()

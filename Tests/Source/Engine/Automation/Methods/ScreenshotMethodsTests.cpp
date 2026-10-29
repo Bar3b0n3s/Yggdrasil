@@ -641,6 +641,32 @@ namespace Engine {
 			CHECK(log.LastSnapshot->DebugView == RenderDebugView::Lit);
 		}
 
+		// M21 (Docs/Decisions/0032-m21-contract.md decisions 4 and 16, stream A): viewport.screenshot copies the project's
+		// SortingLayers.Layers into its extraction request (the one statement ADR 0028's phase-2 ledger grants M21 in
+		// ScreenshotMethods.cpp), so a capture draws the sprites in the project's layer order, never every sprite in the first
+		// layer. Skipped until stream A registers the section and extracts the sprites.
+		TEST_CASE("ScreenshotMethods: viewport.screenshot extracts sprites in the project's sorting layers" * doctest::skip(true))
+		{
+			CaptureLog log;
+			ScreenshotSetup setup("ViewportScreenshotSortingLayers", log);
+			const Result<Json> layers = setup.Call("project.setSettings", ParseJson(R"({"patch":{"SortingLayers":{"Layers":["Default","Background","Foreground"]}}})"));
+			REQUIRE_MESSAGE(layers.has_value(), layers.error().ToString());
+			// Front comes first in canonical order and has the lower OrderInLayer: only its sorting layer draws it last.
+			const Result<Json> front = setup.Call("entity.create", ParseJson(R"({"name":"Front","components":{"SpriteRenderer":{"SortingLayer":"Foreground","OrderInLayer":0}}})"));
+			const Result<Json> back = setup.Call("entity.create", ParseJson(R"({"name":"Back","components":{"SpriteRenderer":{"SortingLayer":"Background","OrderInLayer":5}}})"));
+			REQUIRE_MESSAGE(front.has_value(), front.error().ToString());
+			REQUIRE_MESSAGE(back.has_value(), back.error().ToString());
+			const Result<Json> shot = setup.Call("viewport.screenshot", Json{ { "view", "scene" }, { "width", 32 }, { "height", 24 } });
+			REQUIRE_MESSAGE(shot.has_value(), shot.error().ToString());
+			REQUIRE(log.LastSnapshot.has_value());
+			const auto& sprites = log.LastSnapshot->Sprites;
+			REQUIRE(sprites.size() == 2);
+			CHECK(sprites[0].Entity == JsonReader((*back)["entity"]["id"]).ReadUUID().value());
+			CHECK(sprites[0].SortingLayer == 1);
+			CHECK(sprites[1].Entity == JsonReader((*front)["entity"]["id"]).ReadUUID().value());
+			CHECK(sprites[1].SortingLayer == 2);
+		}
+
 		TEST_CASE("ScreenshotMethods: an unknown debug view is InvalidArgument at /debugView naming the valid views")
 		{
 			CaptureLog log;

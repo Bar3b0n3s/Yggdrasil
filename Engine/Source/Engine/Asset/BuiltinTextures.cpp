@@ -197,6 +197,11 @@ namespace Engine {
 				case BuiltinTexture::FlatNormal: return CreateSolid(TextureFormat::RGBA8Unorm, FlatNormal);
 				case BuiltinTexture::Checker:    return CreateChecker(LightGrey, DarkGrey);
 				case BuiltinTexture::Missing:    return CreateChecker(Magenta, Black);
+				case BuiltinTexture::SpriteSquare:
+				case BuiltinTexture::SpriteRounded:
+				case BuiltinTexture::SpriteBevel:
+				case BuiltinTexture::SpriteCircle:
+					return GenerateBuiltinSpriteTexture(texture);
 			}
 			ENGINE_CORE_ASSERT(false, "Unknown BuiltinTexture {}", std::to_underlying(texture));
 			return CreateChecker(Magenta, Black);
@@ -208,13 +213,23 @@ namespace Engine {
 	{
 		switch (texture)
 		{
-			case BuiltinTexture::White:      return "White";
-			case BuiltinTexture::Black:      return "Black";
-			case BuiltinTexture::FlatNormal: return "FlatNormal";
-			case BuiltinTexture::Checker:    return "Checker";
-			case BuiltinTexture::Missing:    return "Missing";
+			case BuiltinTexture::White:         return "White";
+			case BuiltinTexture::Black:         return "Black";
+			case BuiltinTexture::FlatNormal:    return "FlatNormal";
+			case BuiltinTexture::Checker:       return "Checker";
+			case BuiltinTexture::Missing:       return "Missing";
+			case BuiltinTexture::SpriteSquare:  return "SpriteSquare";
+			case BuiltinTexture::SpriteRounded: return "SpriteRounded";
+			case BuiltinTexture::SpriteBevel:   return "SpriteBevel";
+			case BuiltinTexture::SpriteCircle:  return "SpriteCircle";
 		}
 		return "Unknown";
+	}
+
+	TextureData GenerateBuiltinSpriteTexture(BuiltinTexture /*texture*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return {};
 	}
 
 	TextureData GenerateBuiltinTexture(BuiltinTexture texture)

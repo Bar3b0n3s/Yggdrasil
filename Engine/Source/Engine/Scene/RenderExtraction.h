@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <memory_resource>
+#include <string>
 #include <vector>
 
 // Render extraction (Architecture §5.2, §5.7 frame phase step 4, §8.2): builds the plain RenderSnapshot of one view from a
@@ -77,6 +78,10 @@ namespace Engine {
 		std::vector<UUID> SelectedEntities{};
 		RenderAnnotations Annotations{};
 		RenderQualitySettings Quality{}; // host copies ProjectSettings.Rendering, including screenshot and Runtime paths
+		// M21 (C21.1, Docs/Decisions/0032-m21-contract.md decision 4): the project's SortingLayers.Layers, which every host
+		// copies as it copies Quality; a sprite's sorting layer is its name's index here (SpriteItem::SortingLayer), 0 for a
+		// name it lacks (SPRITE_UNKNOWN_SORTING_LAYER). Empty: every sprite is in layer 0.
+		std::vector<std::string> SortingLayers{};
 	};
 
 	// The scene's primary camera: the first entity in canonical order (§5.1) that is effectively enabled (no
@@ -106,6 +111,14 @@ namespace Engine {
 	//     TextItem (Space, Alignment and the font handle as they are; World = the rendered world matrix, used by World
 	//     texts). DebugDraw stays empty (its producers append: M11's colliders, M13's scripts) and DebugView is Lit (a
 	//     screenshot sets it).
+	//   - Sprites (M21, C21.1; Docs/Decisions/0032-m21-contract.md decision 4): every effectively enabled entity with a
+	//     SpriteRendererComponent, at its rendered world matrix, with Sheet, Frame, Texture, Color, FlipX, FlipY,
+	//     PixelsPerUnit, OrderInLayer and Lit as they are and SortingLayer resolved against request.SortingLayers, sorted
+	//     stably by (SortingLayer, OrderInLayer) from canonical order (RenderSnapshot::Sprites).
+	//   - PixelPerfectCamera (M21, decision 6): for the Primary and Entity sources, when the camera entity holds a
+	//     PixelPerfectCameraComponent, Output, the camera's position and its orthographic projection come from
+	//     ComputePixelPerfectView (Scene/PixelPerfectCamera.h), at the reference resolution's aspect, whatever the Camera's
+	//     own Projection and OrthographicSize; Explicit cameras ignore it. Without one, Output keeps its defaults.
 	// M9 additions: copy Flags, Quality, Annotations and SelectedEntities (sort/unique/filter unknown ids), assign mesh
 	// PickIds/PickTable in canonical entity order before GPU culling, and copy all five directional shadow fields.
 	// Asset-dependent overlays are appended afterwards with AppendRenderAnnotations at the snapshot's Alpha.

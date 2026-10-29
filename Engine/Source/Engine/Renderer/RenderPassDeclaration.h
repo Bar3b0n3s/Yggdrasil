@@ -71,6 +71,7 @@ namespace Engine {
 		inline constexpr std::array<std::string_view, 1> OverdrawRows = { "Overdraw" };
 		inline constexpr std::array<std::string_view, 1> OverdrawTargets = { "Overdraw" };
 		inline constexpr std::array<std::string_view, 1> QuadPrograms = { "Quad" };
+		inline constexpr std::array<std::string_view, 1> SpritesRows = { "Sprites" };
 		inline constexpr std::array<std::string_view, 1> BloomPrograms = { "Bloom" };
 		inline constexpr std::array<std::string_view, 1> BloomRows = { "Bloom" };
 		inline constexpr std::array<std::string_view, 1> BloomTargets = { "Bloom" };
@@ -99,7 +100,7 @@ namespace Engine {
 	}
 
 	// The pass list, in stats order (see the file comment). 58 pipelines at startup: M17's 54 plus the QuadBatcher's 2 and the
-	// output stage's 2.
+	// output stage's 2 (M21's Sprites records with the QuadBatcher's).
 	inline constexpr std::array ScenePassDeclarations = std::to_array<RenderPassDeclaration>({
 		{ .Name = "Prepare", .Stage = RenderStage::Prepare, .StatsRows = Detail::PrepareRows },
 		{ .Name = "Shadows", .Stage = RenderStage::Shadows, .PipelineCount = 6, .Programs = Detail::ShadowPrograms, .StatsRows = Detail::ShadowRows, .Targets = Detail::ShadowTargets },
@@ -118,6 +119,9 @@ namespace Engine {
 		{ .Name = "Overdraw", .Stage = RenderStage::Forward, .PipelineCount = 3, .Programs = Detail::ScenePrograms, .StatsRows = Detail::OverdrawRows, .Targets = Detail::OverdrawTargets },
 		// QuadBatcher.h: its users record under their own rows (M21's Sprites in this stage, M22's Ui in SceneOverlay).
 		{ .Name = "QuadBatcher", .Stage = RenderStage::Sprites, .PipelineCount = 2, .Programs = Detail::QuadPrograms },
+		// M21 (C21.1, Docs/Decisions/0032-m21-contract.md decision 4): the snapshot's sprites, in its draw order, with the
+		// QuadBatcher's Hdr pipeline into SceneColor, depth-tested against SceneDepth; C21.2's Lights2D follows it.
+		{ .Name = "Sprites", .Stage = RenderStage::Sprites, .StatsRows = Detail::SpritesRows },
 		{ .Name = "Bloom", .Stage = RenderStage::HdrPost, .PipelineCount = 3, .Programs = Detail::BloomPrograms, .StatsRows = Detail::BloomRows, .Targets = Detail::BloomTargets },
 		// The tonemap pass and the data views' composite, which replaces it under the same row.
 		{ .Name = "Tonemap", .Stage = RenderStage::Tonemap, .PipelineCount = 2, .Programs = Detail::TonemapPrograms, .StatsRows = Detail::TonemapRows, .Targets = Detail::TonemapTargets },

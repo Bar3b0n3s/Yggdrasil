@@ -4,25 +4,32 @@
 #include "Engine/Reflection/TypeList.h"
 #include "Engine/Scene/Components/AudioListenerComponent.h"
 #include "Engine/Scene/Components/AudioSourceComponent.h"
+#include "Engine/Scene/Components/BoxCollider2DComponent.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/CapsuleColliderComponent.h"
 #include "Engine/Scene/Components/CharacterControllerComponent.h"
+#include "Engine/Scene/Components/CircleCollider2DComponent.h"
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
 #include "Engine/Scene/Components/IDComponent.h"
 #include "Engine/Scene/Components/MeshColliderComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/NameComponent.h"
+#include "Engine/Scene/Components/PixelPerfectCameraComponent.h"
 #include "Engine/Scene/Components/PointLightComponent.h"
+#include "Engine/Scene/Components/PolygonCollider2DComponent.h"
 #include "Engine/Scene/Components/PostProcessComponent.h"
 #include "Engine/Scene/Components/PrefabInstanceComponent.h"
 #include "Engine/Scene/Components/PrefabLinkComponent.h"
 #include "Engine/Scene/Components/RelationshipComponent.h"
+#include "Engine/Scene/Components/RigidBody2DComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/SphereColliderComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
+#include "Engine/Scene/Components/SpriteAnimatorComponent.h"
+#include "Engine/Scene/Components/SpriteRendererComponent.h"
 #include "Engine/Scene/Components/TagsComponent.h"
 #include "Engine/Scene/Components/TextComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
@@ -48,7 +55,11 @@ namespace Engine {
 		// Audio (Registration/AudioRegistration.cpp)
 		AudioSourceComponent, AudioListenerComponent,
 		// Scripting (Registration/ScriptingRegistration.cpp)
-		ScriptComponent>;
+		ScriptComponent,
+		// Rendering2D (Registration/Rendering2DRegistration.cpp; M21, Docs/Decisions/0032-m21-contract.md decisions 3, 5 and 6)
+		SpriteRendererComponent, SpriteAnimatorComponent, PixelPerfectCameraComponent,
+		// Physics2D (Registration/Physics2DRegistration.cpp; M21, Docs/Decisions/0032-m21-contract.md decision 9)
+		RigidBody2DComponent, BoxCollider2DComponent, CircleCollider2DComponent, PolygonCollider2DComponent>;
 
 	// The category registration functions, each registering its enums, structs and components in BuiltinComponents order
 	// through RegisterComponent<T> (Scene/ComponentRegistration.h). Each is called exactly once per registry, in this
@@ -58,8 +69,11 @@ namespace Engine {
 	void RegisterPhysicsComponents(TypeRegistry& registry);
 	void RegisterAudioComponents(TypeRegistry& registry);
 	void RegisterScriptingComponents(TypeRegistry& registry);
+	// M21 (ADR 0028's phase-2 ledger: a milestone's new components go in categories of their own after Scripting).
+	void RegisterRendering2DComponents(TypeRegistry& registry);
+	void RegisterPhysics2DComponents(TypeRegistry& registry);
 
-	// Registers every built-in component (the five functions above, in order) into a registry that is not frozen yet, then
+	// Registers every built-in component (the seven functions above, in order) into a registry that is not frozen yet, then
 	// asserts that every BuiltinComponents type is registered and that the registration order equals the list order
 	// (the startup check of §5.4). The caller adds its own types (project settings, automation structs) and then freezes
 	// the registry.

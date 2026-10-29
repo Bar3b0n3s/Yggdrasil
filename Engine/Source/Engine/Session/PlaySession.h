@@ -40,6 +40,7 @@ namespace Engine {
 	class AudioEngine;
 	class AudioSystem;
 	class Entity;
+	class Physics2DSystem;
 	class PhysicsSystem;
 	class ReplayRecorder;
 	class Scene;
@@ -73,10 +74,16 @@ namespace Engine {
 		Tasks,                   // 4: Task.Wait*/Task.Delay threads due at this tick, then the test case thread (M13; empty)
 		NativeStep,              // 4a: the native module's systems (NativeWorld::Step; M19, Docs/Decisions/0030-m19-contract.md
 								 //     decision 28): only in Play with a native module (PlaySessionSpecification::Native)
+		SpriteAnimation,         // 4b: SpriteAnimationSystem::Step, every playing SpriteAnimator advanced one tick (M21,
+								 //     Docs/Decisions/0032-m21-contract.md decision 5); Play and Simulate
 		PreStepTransformUpdate,  // 5: TransformSystem::Update, before PhysicsSystem::PreStep
 		PhysicsPreStep,          // 5: PhysicsSystem::PreStep: create, rebuild or remove bodies; teleports; MoveKinematic (M11)
 		PhysicsStep,             // 6: PhysicsSystem::Step: PhysicsWorld::Step(fixedDt) (M11)
 		PhysicsPostStep,         // 7: PhysicsSystem::PostStep: dynamic poses written back; sorted collision and trigger events (M11)
+		Physics2DPreStep,        // 7a: TransformSystem::Update when the 3D post-step changed a transform, then
+								 //     Physics2DSystem::PreStep (M21, Docs/Decisions/0032-m21-contract.md decision 10)
+		Physics2DStep,           // 7b: Physics2DSystem::Step: Physics2DWorld::Step(fixedDt) (M21)
+		Physics2DPostStep,       // 7c: Physics2DSystem::PostStep: 2D poses written back; sorted 2D collision and trigger events (M21)
 		DestroyFlush,            // 8: OnDestroy, synthesized exits, body/voice/instance removal (M11-M13), then entity destruction,
 								 //    children first (Scene::FlushPendingDestroys)
 		PostStepTransformUpdate, // 9: TransformSystem::Update
@@ -451,6 +458,15 @@ namespace Engine {
 		[[nodiscard]] NativeWorld* GetNative();
 		[[nodiscard]] const NativeWorld* GetNative() const;
 
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 10): the session's 2D physics (Scene/Physics2DSystem.h). Stream P2
+		// creates it right after the PhysicsSystem, from Project.Physics2D's gravity, Project.Physics's layers and
+		// collisions and Project.Simulation.FixedHz (its errors fail Create like the 3D system's), in Play and Simulate alike;
+		// the fixed step calls its PreStep, Step and PostStep in the Physics2D phases, and both destroy flushes call its
+		// FlushDestroyed after the 3D system's. The system creates its Physics2DWorld only at the first 2D body, so a session
+		// without one holds one PhysicsWorld, as before M21. Null until stream P2 creates it. Valid for the session's lifetime.
+		[[nodiscard]] Physics2DSystem* GetPhysics2D();
+		[[nodiscard]] const Physics2DSystem* GetPhysics2D() const;
+
 		// The state hash (§13.7, §5.1): XXH64 (seed 0) over the scene's minified canonical serialization
 		// (SceneSerializer::SaveToString, JsonStyle::Minified), followed by the tick, the Random state and the UUIDGenerator's
 		// draw count as little-endian 64-bit values; M11 appends the physics state (§5.1 "+ physics velocities at runtime").
@@ -462,7 +478,9 @@ namespace Engine {
 		// Equal for equal sessions in every configuration (§1.3); play.state, play.step and input.replay report it as 16
 		// lowercase hex digits. Returns 0 only when the scene cannot be serialized (logged). M19 (decision 28): the native
 		// block follows the physics block, NativeWorld::AppendStateHash (the module's resources; native components are in the
-		// scene's serialization), and is empty without a native module, so a session without one hashes as before.
+		// scene's serialization), and is empty without a native module, so a session without one hashes as before. M21
+		// (Docs/Decisions/0032-m21-contract.md decision 11): the physics2d block, Physics2DSystem::AppendStateHash, follows
+		// the native block and is empty without a 2D body; M22's ui block follows it (ADR 0028's phase-2 ledger).
 		[[nodiscard]] uint64_t ComputeStateHash() const;
 
 		// The entity cap (see the class comment).

@@ -30,6 +30,13 @@ Every component of the type registry, in canonical component order: the order of
 | `AudioSource` | Audio | Serializable, ScriptVisible, EditorVisible, Removable | Plays an audio clip, optionally positioned at the entity. |
 | `AudioListener` | Audio | Serializable, ScriptVisible, EditorVisible, Removable | Hears the scene from the entity's position and orientation. |
 | `Script` | Scripting | Serializable, ScriptVisible, EditorVisible, Removable, NoShortcut | Attaches Behaviour scripts to the entity, an ordered list of slots. |
+| `SpriteRenderer` | Rendering2D | Serializable, ScriptVisible, EditorVisible, Removable | Draws a sprite: a sprite sheet frame or a texture in the entity's XY plane. |
+| `SpriteAnimator` | Rendering2D | Serializable, ScriptVisible, EditorVisible, Removable | Plays a clip of the SpriteRenderer's sprite sheet, one step per clip frame for its ticks, driven by the fixed step. |
+| `PixelPerfectCamera` | Rendering2D | Serializable, ScriptVisible, EditorVisible, Removable | Renders the entity's camera at a reference resolution, upscaled by the largest whole factor that fits the view in a letterbox. |
+| `RigidBody2D` | Physics2D | Serializable, ScriptVisible, EditorVisible, Removable | Simulates the entity in the 2D world: moves along world X and Y and rotates about world Z. |
+| `BoxCollider2D` | Physics2D | Serializable, ScriptVisible, EditorVisible, Removable | A rectangle collider in the entity's XY plane. |
+| `CircleCollider2D` | Physics2D | Serializable, ScriptVisible, EditorVisible, Removable | A circle collider in the entity's XY plane. |
+| `PolygonCollider2D` | Physics2D | Serializable, ScriptVisible, EditorVisible, Removable | A convex polygon collider in the entity's XY plane. |
 
 ## ID
 
@@ -720,6 +727,222 @@ Script members of `Script`:
 | Member | Kind | Signature | Access | Modes | Description |
 |---|---|---|---|---|---|
 | `Scripts` | proxy field | `{{Script: AssetRef?, Fields: {[string]: any}, ExecutionOrder: number}}` | read/write | All | The behaviours of the entity, in slot order; each slot is its own instance. A value a script writes holds at most 4096 bytes of text. |
+
+## SpriteRenderer
+
+Draws a sprite: a sprite sheet frame or a texture in the entity's XY plane.
+
+- Category: Rendering2D
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Sheet` | `AssetRef(SpriteSheet)` | `null` |  |  |  | The sprite sheet whose frame Frame is drawn; null draws Texture whole. |
+| `Frame` | `UInt32` | `0` | 0 to 65535 |  |  | The index of the sheet's frame to draw; an index the sheet lacks draws nothing (SPRITE_FRAME_OUT_OF_RANGE). |
+| `Texture` | `AssetRef(Texture)` | `null` |  |  |  | The texture drawn whole, pivoted at its centre, when Sheet is null; null draws the built-in white square. |
+| `Color` | `Color4` | `[1,1,1,1]` | 0 to 1 |  |  | The linear colour every texel is multiplied with, with opacity in the fourth component. |
+| `FlipX` | `Bool` | `false` |  |  |  | Whether the image is mirrored left to right about its pivot. |
+| `FlipY` | `Bool` | `false` |  |  |  | Whether the image is mirrored top to bottom about its pivot. |
+| `PixelsPerUnit` | `Float` | `16` | 0.001 to 65536 | px |  | How many texels of the image make one unit of the entity's local space; the sprite's size is its texels divided by this. |
+| `SortingLayer` | `String` | `"Default"` |  |  |  | The sorting layer name from project settings; later layers draw over earlier ones, and an undeclared name draws in the first. |
+| `OrderInLayer` | `Int32` | `0` |  |  |  | The draw order within the sorting layer: higher values draw over lower ones, equal values in canonical entity order. |
+| `Lit` | `Bool` | `false` |  |  |  | Whether 2D lights light the sprite; an unlit sprite keeps its texels unchanged. |
+
+Script members of `SpriteRenderer`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Color` | proxy field | `Color` | read/write | All | The linear colour every texel is multiplied with, with opacity in the fourth component. |
+| `FlipX` | proxy field | `boolean` | read/write | All | Whether the image is mirrored left to right about its pivot. |
+| `FlipY` | proxy field | `boolean` | read/write | All | Whether the image is mirrored top to bottom about its pivot. |
+| `Frame` | proxy field | `number` | read/write | All | The index of the sheet's frame to draw; an index the sheet lacks draws nothing (SPRITE_FRAME_OUT_OF_RANGE). |
+| `Lit` | proxy field | `boolean` | read/write | All | Whether 2D lights light the sprite; an unlit sprite keeps its texels unchanged. |
+| `OrderInLayer` | proxy field | `number` | read/write | All | The draw order within the sorting layer: higher values draw over lower ones, equal values in canonical entity order. |
+| `PixelsPerUnit` | proxy field | `number` | read/write | All | How many texels of the image make one unit of the entity's local space; the sprite's size is its texels divided by this. |
+| `Sheet` | proxy field | `AssetRef?` | read/write | All | The sprite sheet whose frame Frame is drawn; null draws Texture whole. |
+| `SortingLayer` | proxy field | `string` | read/write | All | The sorting layer name from project settings; later layers draw over earlier ones, and an undeclared name draws in the first. A value a script writes holds at most 4096 bytes of text. |
+| `Texture` | proxy field | `AssetRef?` | read/write | All | The texture drawn whole, pivoted at its centre, when Sheet is null; null draws the built-in white square. |
+
+## SpriteAnimator
+
+Plays a clip of the SpriteRenderer's sprite sheet, one step per clip frame for its ticks, driven by the fixed step.
+
+- Category: Rendering2D
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `SpriteRenderer`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Clip` | `String` | `""` |  |  |  | The name of the sheet's clip to play; empty plays nothing. |
+| `Playing` | `Bool` | `true` |  |  |  | Whether the clip advances each fixed step; a clip without Loop clears it after its last step and holds its last frame. |
+| `Step` | `UInt32` | `0` | 0 to 1023 |  |  | The index of the clip step shown. |
+| `StepTicks` | `UInt32` | `0` | 0 to 65534 |  |  | How many fixed steps the current clip step has been shown. |
+
+Script members of `SpriteAnimator`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Clip` | proxy field | `string` | read/write | All | The name of the sheet's clip to play; empty plays nothing. A value a script writes holds at most 4096 bytes of text. |
+| `Playing` | proxy field | `boolean` | read/write | All | Whether the clip advances each fixed step; a clip without Loop clears it after its last step and holds its last frame. |
+| `Step` | proxy field | `number` | read/write | All | The index of the clip step shown. |
+| `StepTicks` | proxy field | `number` | read/write | All | How many fixed steps the current clip step has been shown. |
+
+## PixelPerfectCamera
+
+Renders the entity's camera at a reference resolution, upscaled by the largest whole factor that fits the view in a letterbox.
+
+- Category: Rendering2D
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Camera`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `ReferenceWidth` | `UInt32` | `320` | 1 to 8192 | px |  | The width the scene renders at, in pixels. |
+| `ReferenceHeight` | `UInt32` | `180` | 1 to 8192 | px |  | The height the scene renders at, in pixels; the orthographic view is this many pixels of PixelsPerUnit high. |
+| `PixelsPerUnit` | `Float` | `16` | 0.001 to 65536 | px |  | How many scene pixels make one world unit; sprites of the same PixelsPerUnit map each texel to one pixel. |
+| `LetterboxColor` | `Color3` | `[0,0,0]` | 0 to 1 |  |  | The linear colour of the bars around the upscaled image. |
+
+Script members of `PixelPerfectCamera`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `LetterboxColor` | proxy field | `Color` | read/write | All | The linear colour of the bars around the upscaled image. |
+| `PixelsPerUnit` | proxy field | `number` | read/write | All | How many scene pixels make one world unit; sprites of the same PixelsPerUnit map each texel to one pixel. |
+| `ReferenceHeight` | proxy field | `number` | read/write | All | The height the scene renders at, in pixels; the orthographic view is this many pixels of PixelsPerUnit high. |
+| `ReferenceWidth` | proxy field | `number` | read/write | All | The width the scene renders at, in pixels. |
+
+## RigidBody2D
+
+Simulates the entity in the 2D world: moves along world X and Y and rotates about world Z.
+
+- Category: Physics2D
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Type` | `BodyType` | `"Dynamic"` |  |  |  | Static never moves; Kinematic is moved by script; Dynamic is simulated. |
+| `Mass` | `Float` | `1` | 0.001 to 1e+09 | kg |  | Mass in kilograms (Dynamic only). |
+| `Friction` | `Float` | `0.5` | >= 0 |  |  | The friction coefficient of the body's surfaces; a contact uses the geometric mean of both bodies' values. |
+| `Restitution` | `Float` | `0` | 0 to 1 |  |  | Bounciness, from no bounce (0) to a perfectly elastic bounce (1); a contact uses the larger of both bodies' values. |
+| `LinearDamping` | `Float` | `0.05` | >= 0 |  |  | How quickly linear velocity decays, per second. |
+| `AngularDamping` | `Float` | `0.05` | >= 0 |  |  | How quickly angular velocity decays, per second. |
+| `GravityFactor` | `Float` | `1` |  |  |  | The multiplier of the project's 2D gravity for this body (0 floats). |
+| `MotionQuality` | `MotionQuality` | `"Discrete"` |  |  |  | Discrete or continuous (LinearCast) collision detection. |
+| `AllowSleeping` | `Bool` | `true` |  |  |  | Whether the body may sleep when it comes to rest. |
+| `FixedRotation` | `Bool` | `false` |  |  |  | Whether a Dynamic body is kept from rotating. |
+| `Layer` | `String` | `"Default"` |  |  |  | Physics layer name from project settings (the 3D world's layers). |
+| `MaxLinearVelocity` | `Float` | `500` | >= 0 | m/s |  | The speed the body is clamped to, in metres per second. |
+| `MaxAngularVelocity` | `Float` | `47.12` | >= 0 | rad/s |  | The angular speed the body is clamped to, in radians per second. |
+| `EnhancedInternalEdgeRemoval` | `Bool` | `false` |  |  |  | Removes ghost collisions with internal edges of compound shapes; set it on bodies that roll or slide across tiles. |
+| `InitialLinearVelocity` | `Vec2` | `[0,0]` |  | m/s |  | The velocity along world X and Y the body starts with, in metres per second. |
+| `InitialAngularVelocity` | `Float` | `0` |  | rad/s |  | The angular velocity about world Z the body starts with, in radians per second, counter-clockwise seen from +Z. |
+
+Script members of `RigidBody2D`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `AllowSleeping` | proxy field | `boolean` | read/write | All | Whether the body may sleep when it comes to rest. |
+| `AngularDamping` | proxy field | `number` | read/write | All | How quickly angular velocity decays, per second. |
+| `EnhancedInternalEdgeRemoval` | proxy field | `boolean` | read/write | All | Removes ghost collisions with internal edges of compound shapes; set it on bodies that roll or slide across tiles. |
+| `FixedRotation` | proxy field | `boolean` | read/write | All | Whether a Dynamic body is kept from rotating. |
+| `Friction` | proxy field | `number` | read/write | All | The friction coefficient of the body's surfaces; a contact uses the geometric mean of both bodies' values. |
+| `GravityFactor` | proxy field | `number` | read/write | All | The multiplier of the project's 2D gravity for this body (0 floats). |
+| `InitialAngularVelocity` | proxy field | `number` | read/write | All | The angular velocity about world Z the body starts with, in radians per second, counter-clockwise seen from +Z. |
+| `InitialLinearVelocity` | proxy field | `vector` | read/write | All | The velocity along world X and Y the body starts with, in metres per second. |
+| `Layer` | proxy field | `string` | read/write | All | Physics layer name from project settings (the 3D world's layers). A value a script writes holds at most 4096 bytes of text. |
+| `LinearDamping` | proxy field | `number` | read/write | All | How quickly linear velocity decays, per second. |
+| `Mass` | proxy field | `number` | read/write | All | Mass in kilograms (Dynamic only). |
+| `MaxAngularVelocity` | proxy field | `number` | read/write | All | The angular speed the body is clamped to, in radians per second. |
+| `MaxLinearVelocity` | proxy field | `number` | read/write | All | The speed the body is clamped to, in metres per second. |
+| `MotionQuality` | proxy field | `MotionQuality` | read/write | All | Discrete or continuous (LinearCast) collision detection. |
+| `Restitution` | proxy field | `number` | read/write | All | Bounciness, from no bounce (0) to a perfectly elastic bounce (1); a contact uses the larger of both bodies' values. |
+| `Type` | proxy field | `BodyType` | read/write | All | Static never moves; Kinematic is moved by script; Dynamic is simulated. |
+
+## BoxCollider2D
+
+A rectangle collider in the entity's XY plane.
+
+- Category: Physics2D
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `HalfExtents` | `Vec2` | `[0.5,0.5]` | >= 0.001 | m |  | Half the rectangle's size along local X and Y; at least 1 mm. |
+| `Offset` | `Vec2` | `[0,0]` |  | m |  | The rectangle's centre relative to the entity, in its XY plane. |
+| `Angle` | `Float` | `0` |  | deg |  | The rectangle's rotation about the entity's Z axis, counter-clockwise, in degrees. |
+| `IsTrigger` | `Bool` | `false` |  |  |  | Whether the collider only detects overlaps instead of colliding. |
+
+Script members of `BoxCollider2D`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Angle` | proxy field | `number` | read/write | All | The rectangle's rotation about the entity's Z axis, counter-clockwise, in degrees. |
+| `HalfExtents` | proxy field | `vector` | read/write | All | Half the rectangle's size along local X and Y; at least 1 mm. |
+| `IsTrigger` | proxy field | `boolean` | read/write | All | Whether the collider only detects overlaps instead of colliding. |
+| `Offset` | proxy field | `vector` | read/write | All | The rectangle's centre relative to the entity, in its XY plane. |
+
+## CircleCollider2D
+
+A circle collider in the entity's XY plane.
+
+- Category: Physics2D
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Radius` | `Float` | `0.5` | >= 0.001 | m |  | The circle's radius; at least 1 mm. |
+| `Offset` | `Vec2` | `[0,0]` |  | m |  | The circle's centre relative to the entity, in its XY plane. |
+| `IsTrigger` | `Bool` | `false` |  |  |  | Whether the collider only detects overlaps instead of colliding. |
+
+Script members of `CircleCollider2D`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `IsTrigger` | proxy field | `boolean` | read/write | All | Whether the collider only detects overlaps instead of colliding. |
+| `Offset` | proxy field | `vector` | read/write | All | The circle's centre relative to the entity, in its XY plane. |
+| `Radius` | proxy field | `number` | read/write | All | The circle's radius; at least 1 mm. |
+
+## PolygonCollider2D
+
+A convex polygon collider in the entity's XY plane.
+
+- Category: Physics2D
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Points` | `Array<Vec2>` | `[[-0.5,-0.5],[0.5,-0.5],[0,0.5]]` |  | m |  | The points whose convex hull is the collider, 3 to 64 of them, in the collider's own space before Offset and Angle. |
+| `Offset` | `Vec2` | `[0,0]` |  | m |  | Where the polygon's origin sits relative to the entity, in its XY plane. |
+| `Angle` | `Float` | `0` |  | deg |  | The polygon's rotation about the entity's Z axis, counter-clockwise, in degrees. |
+| `IsTrigger` | `Bool` | `false` |  |  |  | Whether the collider only detects overlaps instead of colliding. |
+
+Script members of `PolygonCollider2D`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Angle` | proxy field | `number` | read/write | All | The polygon's rotation about the entity's Z axis, counter-clockwise, in degrees. |
+| `IsTrigger` | proxy field | `boolean` | read/write | All | Whether the collider only detects overlaps instead of colliding. |
+| `Offset` | proxy field | `vector` | read/write | All | Where the polygon's origin sits relative to the entity, in its XY plane. |
+| `Points` | proxy field | `{vector}` | read/write | All | The points whose convex hull is the collider, 3 to 64 of them, in the collider's own space before Offset and Angle. |
 
 ## Structs
 

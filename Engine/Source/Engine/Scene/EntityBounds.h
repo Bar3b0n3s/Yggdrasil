@@ -24,7 +24,11 @@ namespace Engine {
 	// correct between TransformSystem updates) and merged. Effectively disabled entities (HierarchyDisabledTag) are skipped,
 	// as rendering skips them; MeshRenderer::Visible does not matter (an invisible mesh still occupies its space for layout).
 	// A mesh that is missing or fails to load counts with its placeholder's bounds (the unit cube, AssetManager::
-	// GetOrPlaceholder, which records the diagnostic). nullopt when no included entity has a MeshRenderer with a mesh.
+	// GetOrPlaceholder, which records the diagnostic). M21 (Docs/Decisions/0032-m21-contract.md decision 3, stream A): a
+	// SpriteRenderer counts with the world AABB of the quad it is drawn with (Asset/SpriteGeometry.h at its entity's world
+	// matrix), a missing or failed texture with its placeholder's quad, while a missing or failed sheet or an out-of-range
+	// Frame adds nothing (SpriteRendererComponent.h states the one rule). nullopt when no included entity has a MeshRenderer
+	// with a mesh or a SpriteRenderer with a quad.
 	// `entity` is readable (Entity::IsReadable): an entity pending destruction and its subtree, also pending, still have
 	// their bounds until the flush (Entity:GetWorldBounds; M20, decision 4 of Docs/Decisions/0031-m20-contract.md).
 	// Main thread (the scene and the manager).

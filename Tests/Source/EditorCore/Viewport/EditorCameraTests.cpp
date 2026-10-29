@@ -189,6 +189,33 @@ namespace Engine {
 			CHECK(orthographic->Position == camera.Position);
 			CHECK(orthographic->Target == camera.Target);
 		}
+
+		// Docs/Decisions/0032-m21-contract.md decision 14 (stream D): the scene view's 2D mode.
+		TEST_CASE("EditorCamera: the 2D camera looks down -Z orthographically and navigates by pan and zoom only" * doctest::skip(true))
+		{
+			const ExplicitRenderCamera perspective{ .Position = glm::vec3(4.0f, 3.0f, 10.0f), .Target = glm::vec3(4.0f, 1.0f, 0.0f) };
+			const Result<ExplicitRenderCamera> flat = EditorCamera::Make2D(perspective);
+			REQUIRE_MESSAGE(flat.has_value(), flat.error().ToString());
+			CHECK(flat->Projection == RenderProjection::Orthographic);
+			CHECK(flat->Target == glm::vec3(4.0f, 1.0f, 0.0f));
+			CHECK(flat->Position == glm::vec3(4.0f, 1.0f, EditorCamera::Make2DDistance));
+			CHECK(flat->OrthographicSize > 0.0f);
+
+			// Orbit and fly are ignored; pan moves both points in X and Y; the wheel zooms.
+			const Result<ExplicitRenderCamera> orbited = EditorCamera::Navigate2D(*flat, { .PointerDelta = glm::vec2(50.0f, 0.0f), .Orbit = true }, 360.0f);
+			REQUIRE(orbited.has_value());
+			CHECK(orbited->Position == flat->Position);
+			const Result<ExplicitRenderCamera> panned = EditorCamera::Navigate2D(*flat, { .PointerDelta = glm::vec2(36.0f, 0.0f), .Pan = true }, 360.0f);
+			REQUIRE(panned.has_value());
+			CHECK(panned->Position.z == flat->Position.z);
+			CHECK(panned->Target.z == 0.0f);
+			CHECK(panned->Position.x != flat->Position.x);
+			CHECK(panned->Position.x - flat->Position.x == doctest::Approx(panned->Target.x - flat->Target.x));
+			const Result<ExplicitRenderCamera> zoomed = EditorCamera::Navigate2D(*flat, { .Wheel = 1.0f }, 360.0f);
+			REQUIRE(zoomed.has_value());
+			CHECK(zoomed->OrthographicSize == doctest::Approx(flat->OrthographicSize / 1.2f));
+			CHECK(zoomed->Projection == RenderProjection::Orthographic);
+		}
 	}
 
 }

@@ -460,6 +460,16 @@ namespace Engine {
 		m_State->Publish(std::move(error), { .Entity = diagnostic.Entity, .Case = m_State->CurrentOwner.Case, .Slot = slot }, false, true);
 	}
 
+	void ScriptEngine::OnPhysics2DEvent(const PhysicsEvent& /*event*/)
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
+	void ScriptEngine::OnPhysics2DDiagnostic(const PhysicsDiagnostic& /*diagnostic*/)
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
 	void ScriptEngine::Stop()
 	{
 		if (m_State == nullptr || m_State->Vm == nullptr || m_State->Stopping)

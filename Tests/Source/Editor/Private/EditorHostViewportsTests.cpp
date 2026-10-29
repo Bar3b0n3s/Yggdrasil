@@ -252,6 +252,49 @@ return vector.magnitude(direction - vector.create(0, 0, -1)) < 0.001)")
 			REQUIRE(client.Call("play.stop", Json::object()).has_value());
 		}
 
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 4, stream D): the editor's scene and game views copy the project's
+		// SortingLayers.Layers into their extraction request, in edit and in play (PlaySession::ExtractView takes the request
+		// as it is), as they copy the rendering quality. Skipped until stream D copies them; it needs stream A's section and
+		// sprite extraction, so it runs at W21.1's integration.
+		TEST_CASE("EditorHostViewports: scene and game extraction carry the project's sorting layers" * doctest::skip(true))
+		{
+			Test::EditorTestFixture fixture("HostSortingLayers");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			editor.GetScene().CreateEntity("Camera").AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			Test::AutomationTestClient client(editor);
+			REQUIRE(client.Call("project.setSettings", Json{ { "patch", Json{ { "SortingLayers", Json{ { "Layers", Json::array({ "Default", "Background", "Foreground" }) } } } } } }).has_value());
+			// Front comes first in canonical order and has the lower OrderInLayer: only its sorting layer draws it last.
+			const Result<Json> front = client.Call("entity.create", Json{ { "name", "Front" }, { "components", Json{ { "SpriteRenderer", Json{ { "SortingLayer", "Foreground" }, { "OrderInLayer", 0 } } } } } });
+			const Result<Json> back = client.Call("entity.create", Json{ { "name", "Back" }, { "components", Json{ { "SpriteRenderer", Json{ { "SortingLayer", "Background" }, { "OrderInLayer", 5 } } } } } });
+			REQUIRE(front.has_value());
+			REQUIRE(back.has_value());
+			const std::vector<std::string> expected = { "Back", "Front" };
+			GizmoController gizmos(editor);
+			EditorHostViewports host(editor, gizmos);
+			for (const bool playing : { false, true })
+			{
+				CAPTURE(playing);
+				if (playing)
+					REQUIRE(client.Call("play.start", Json{ { "paused", true } }).has_value());
+				const Scene& shown = playing ? editor.GetPlay().GetSession()->GetScene() : editor.GetScene();
+				for (const ViewportView view : { ViewportView::Scene, ViewportView::Game })
+				{
+					const auto snapshot = host.Extract(view, 160, 90);
+					REQUIRE(snapshot.has_value());
+					std::vector<std::string> order;
+					for (const SpriteItem& sprite : snapshot->Sprites)
+						order.push_back(shown.FindEntityByID(sprite.Entity).GetName());
+					CHECK(order == expected);
+					REQUIRE(snapshot->Sprites.size() == 2);
+					CHECK(snapshot->Sprites[0].SortingLayer == 1);
+					CHECK(snapshot->Sprites[1].SortingLayer == 2);
+				}
+			}
+			REQUIRE(client.Call("play.stop", Json::object()).has_value());
+		}
+
 		// M20 (Docs/Decisions/0031-m20-contract.md decisions 13 and 23): while a session plays one open scene, another tab's
 		// scene view shows that tab's edit scene, as its hierarchy does, and the game view keeps showing the session; the
 		// played scene's tab shows the play scene in both views.

@@ -30,11 +30,13 @@
 // decision 5); M9 added the pick table, the view flags, the selected entities, the annotations and their draw list, the
 // quality settings, the icons and the frame and scene revision stamps (ADR 0017). The M18 contract (C18.1,
 // Docs/Decisions/0029-m18-contract.md decisions 5 to 8) added the output stage (RenderOutputSettings, the view-to-scene
-// mapping) and the memory resource of the containers (decision 9). Additions are frozen-header changes reviewed by their
-// contract owner; no member here changes meaning. A plain value type: copyable, movable, thread-compatible.
+// mapping) and the memory resource of the containers (decision 9). The M21 contract (C21.1,
+// Docs/Decisions/0032-m21-contract.md decision 4) added the sprites (SpriteItem, Sprites) after Output, as ADR 0028's phase-2
+// ledger places phase 2's members. Additions are frozen-header changes reviewed by their contract owner; no member here
+// changes meaning. A plain value type: copyable, movable, thread-compatible.
 //
 // Containers (M18, R-ARENA): the snapshot's own containers that grow with the scene (Meshes, Lights, Texts, PickTable,
-// Icons, and the commands of DebugDraw and AnnotationDraw) are std::pmr containers. A snapshot built with
+// Icons, M21's Sprites, and the commands of DebugDraw and AnnotationDraw) are std::pmr containers. A snapshot built with
 // RenderSnapshot(resource) allocates them from that memory resource, which must outlive the snapshot; a default-constructed
 // one, and every copy (std::pmr's copy construction), allocates from std::pmr::get_default_resource(), the global heap
 // unless a host changed it. Assignment keeps the target's resource. SelectedEntities (a handful of UUIDs, copied from the
@@ -361,8 +363,35 @@ namespace Engine {
 		bool operator==(const RenderOutputMapping&) const = default;
 	};
 
+	// One SpriteRenderer to draw (M21, C21.1; Docs/Decisions/0032-m21-contract.md decisions 3 and 4), from render extraction.
+	// The renderer resolves the sheet's frame (its texel rectangle and pivot) and the texture through the AssetManager and its
+	// GpuResourceCache, so extraction never touches assets, and draws the sprite in the Sprites stage as one QuadBatcher quad
+	// in world space (Asset/SpriteGeometry.h gives its corners), depth-tested against the opaque meshes without writing depth.
+	// A texture that is missing or fails to load (Texture, or the sheet's) draws its placeholder, the Missing checker, whole
+	// over the sprite's quad (the frame's, or the placeholder's 64 x 64 texels centred); a sheet that is missing or fails to
+	// load, or an out-of-range Frame, draws nothing (Scene/Components/SpriteRendererComponent.h states the one rule, which
+	// picking and bounds follow).
+	struct SpriteItem
+	{
+		glm::mat4 World = glm::mat4(1.0f); // the rendered (interpolated, §5.2) world matrix
+		AssetHandle Sheet{};               // the sprite sheet; null draws Texture whole
+		uint32_t Frame = 0;                // the index of the sheet's frame
+		// The texture drawn whole when Sheet is null; null draws the built-in white square (engine://Textures/SpriteSquare).
+		AssetHandle Texture{};
+		glm::vec4 Color = glm::vec4(1.0f); // linear RGB, straight alpha; multiplies every texel
+		bool FlipX = false;
+		bool FlipY = false;
+		float PixelsPerUnit = 16.0f; // texels per unit of the entity's local space
+		// The sprite's sorting layer: its index in the project's SortingLayers.Layers (RenderExtractionRequest::SortingLayers),
+		// 0 for an undeclared name.
+		uint32_t SortingLayer = 0;
+		int32_t OrderInLayer = 0;
+		bool Lit = false; // W21.2 (C21.2): the sprite opts in to 2D lights; no effect before
+		UUID Entity{};
+	};
+
 	// One view's render snapshot (§8.2). Vectors are in canonical entity order (§5.1), so a snapshot of a deterministic scene
-	// is deterministic.
+	// is deterministic; Sprites (M21) are in draw order instead.
 	struct RenderSnapshot
 	{
 		// The containers allocate from the default memory resource (see the file comment).
@@ -407,6 +436,10 @@ namespace Engine {
 		uint64_t SceneRevision = 0; // opaque host revision stamped alongside FrameIndex before Render, echoed by picking
 		// M18 (C18.1): the output stage (RenderOutputSettings); the default renders the scene at the view's size.
 		RenderOutputSettings Output{};
+		// M21 (C21.1, Docs/Decisions/0032-m21-contract.md decision 4): every effectively enabled SpriteRenderer, in draw order:
+		// sorted by (SortingLayer, OrderInLayer), ties in canonical entity order (a stable sort of the canonical list), so the
+		// Sprites stage draws them back to front exactly in this order.
+		std::pmr::vector<SpriteItem> Sprites{};
 	};
 
 	// World ray through pixel centre (x + 0.5, y + 0.5), top-left origin, in Camera.ViewportWidth/Height: scene pixels (M18:

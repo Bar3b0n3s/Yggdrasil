@@ -70,6 +70,18 @@ namespace Engine {
 		return candidate;
 	}
 
+	Result<ExplicitRenderCamera> EditorCamera::Make2D(const ExplicitRenderCamera& /*camera*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "the 2D editor camera (Docs/Decisions/0032-m21-contract.md decision 14, stream D)");
+	}
+
+	Result<ExplicitRenderCamera> EditorCamera::Navigate2D(const ExplicitRenderCamera& /*camera*/, const EditorCameraInput& /*input*/, float /*viewHeight*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "the 2D editor camera (Docs/Decisions/0032-m21-contract.md decision 14, stream D)");
+	}
+
 	Result<ExplicitRenderCamera> EditorCamera::FrameBounds(const ExplicitRenderCamera& camera, const glm::vec3& minimum,
 		const glm::vec3& maximum, float aspect)
 	{

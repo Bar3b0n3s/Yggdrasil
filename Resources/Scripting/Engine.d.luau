@@ -295,6 +295,18 @@ declare extern type BoxCollider with
 	Rotation: Quat
 end
 
+-- A rectangle collider in the entity's XY plane.
+declare extern type BoxCollider2D with
+	-- The rectangle's rotation about the entity's Z axis, counter-clockwise, in degrees. [All modes; Runtime|Test; pure/read; setter mutates]
+	Angle: number
+	-- Half the rectangle's size along local X and Y; at least 1 mm. [All modes; Runtime|Test; pure/read; setter mutates]
+	HalfExtents: vector
+	-- Whether the collider only detects overlaps instead of colliding. [All modes; Runtime|Test; pure/read; setter mutates]
+	IsTrigger: boolean
+	-- The rectangle's centre relative to the entity, in its XY plane. [All modes; Runtime|Test; pure/read; setter mutates]
+	Offset: vector
+end
+
 -- Renders the scene from the entity, looking down its local -Z axis.
 declare extern type Camera with
 	-- What the camera draws behind the scene. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -361,6 +373,16 @@ declare extern type CharacterController with
 	StepHeight: number
 end
 
+-- A circle collider in the entity's XY plane.
+declare extern type CircleCollider2D with
+	-- Whether the collider only detects overlaps instead of colliding. [All modes; Runtime|Test; pure/read; setter mutates]
+	IsTrigger: boolean
+	-- The circle's centre relative to the entity, in its XY plane. [All modes; Runtime|Test; pure/read; setter mutates]
+	Offset: vector
+	-- The circle's radius; at least 1 mm. [All modes; Runtime|Test; pure/read; setter mutates]
+	Radius: number
+end
+
 -- A local linear RGBA float value. Channels are finite and unclamped, allowing HDR values.
 declare extern type Color with
 	-- Compares the four channels exactly, like vector equality. [All modes; LoadTime|Runtime|Test; pure/read]
@@ -418,12 +440,16 @@ declare extern type Entity with
 	AudioSource: AudioSource?
 	-- The entity's BoxCollider component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	BoxCollider: BoxCollider?
+	-- The entity's BoxCollider2D component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	BoxCollider2D: BoxCollider2D?
 	-- The entity's Camera component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	Camera: Camera?
 	-- The entity's CapsuleCollider component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	CapsuleCollider: CapsuleCollider?
 	-- The entity's CharacterController component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	CharacterController: CharacterController?
+	-- The entity's CircleCollider2D component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	CircleCollider2D: CircleCollider2D?
 	-- Mark this subtree for the normal destruction flush. [All modes; Runtime|Test; mutates]
 	Destroy: (self: Entity) -> ()
 	-- The entity's DirectionalLight component, or nil when absent. [All modes; Runtime|Test; pure/read]
@@ -453,6 +479,13 @@ declare extern type Entity with
 	function GetComponent(self, name: "AudioSource"): AudioSource?
 	function GetComponent(self, name: "AudioListener"): AudioListener?
 	function GetComponent(self, name: "Script"): Script?
+	function GetComponent(self, name: "SpriteRenderer"): SpriteRenderer?
+	function GetComponent(self, name: "SpriteAnimator"): SpriteAnimator?
+	function GetComponent(self, name: "PixelPerfectCamera"): PixelPerfectCamera?
+	function GetComponent(self, name: "RigidBody2D"): RigidBody2D?
+	function GetComponent(self, name: "BoxCollider2D"): BoxCollider2D?
+	function GetComponent(self, name: "CircleCollider2D"): CircleCollider2D?
+	function GetComponent(self, name: "PolygonCollider2D"): PolygonCollider2D?
 	-- Get the parent, or nil for a root. [All modes; Runtime|Test; pure/read]
 	GetParent: (self: Entity) -> Entity?
 	-- Get the instance of the first script slot whose behaviour has this name, or of the first slot without a name; nil when there is none. [All modes; Runtime|Test; pure/read]
@@ -481,8 +514,12 @@ declare extern type Entity with
 	MeshRenderer: MeshRenderer?
 	-- The entity name; a written name is UTF-8 without NUL and at most 256 bytes. [All modes; Runtime|Test; pure/read; setter mutates]
 	Name: string
+	-- The entity's PixelPerfectCamera component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	PixelPerfectCamera: PixelPerfectCamera?
 	-- The entity's PointLight component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	PointLight: PointLight?
+	-- The entity's PolygonCollider2D component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	PolygonCollider2D: PolygonCollider2D?
 	-- The entity's PostProcess component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	PostProcess: PostProcess?
 	-- Remove a removable component when no present component requires it. [All modes; Runtime|Test; mutates]
@@ -491,6 +528,8 @@ declare extern type Entity with
 	RemoveTag: (self: Entity, tag: string) -> ()
 	-- The entity's RigidBody component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	RigidBody: RigidBody?
+	-- The entity's RigidBody2D component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	RigidBody2D: RigidBody2D?
 	-- Change local active state and dispatch effective lifecycle transitions before returning. [All modes; Runtime|Test; mutates]
 	SetActive: (self: Entity, active: boolean) -> ()
 	-- Reparent to the last sibling, preserving world pose by default; synchronize effective lifecycle transitions. [All modes; Runtime|Test; mutates]
@@ -499,6 +538,10 @@ declare extern type Entity with
 	SphereCollider: SphereCollider?
 	-- The entity's SpotLight component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	SpotLight: SpotLight?
+	-- The entity's SpriteAnimator component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	SpriteAnimator: SpriteAnimator?
+	-- The entity's SpriteRenderer component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	SpriteRenderer: SpriteRenderer?
 	-- The entity's Text component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	Text: Text?
 	-- The entity's Transform component, which every entity has. [All modes; Runtime|Test; pure/read]
@@ -555,6 +598,18 @@ declare extern type MeshRenderer with
 	Visible: boolean
 end
 
+-- Renders the entity's camera at a reference resolution, upscaled by the largest whole factor that fits the view in a letterbox.
+declare extern type PixelPerfectCamera with
+	-- The linear colour of the bars around the upscaled image. [All modes; Runtime|Test; pure/read; setter mutates]
+	LetterboxColor: Color
+	-- How many scene pixels make one world unit; sprites of the same PixelsPerUnit map each texel to one pixel. [All modes; Runtime|Test; pure/read; setter mutates]
+	PixelsPerUnit: number
+	-- The height the scene renders at, in pixels; the orthographic view is this many pixels of PixelsPerUnit high. [All modes; Runtime|Test; pure/read; setter mutates]
+	ReferenceHeight: number
+	-- The width the scene renders at, in pixels. [All modes; Runtime|Test; pure/read; setter mutates]
+	ReferenceWidth: number
+end
+
 -- A light shining in every direction from the entity (no shadows).
 declare extern type PointLight with
 	-- The linear light colour. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -565,6 +620,18 @@ declare extern type PointLight with
 	Range: number
 	-- The radius of the emitting sphere, in metres; widens highlights. [All modes; Runtime|Test; pure/read; setter mutates]
 	SourceRadius: number
+end
+
+-- A convex polygon collider in the entity's XY plane.
+declare extern type PolygonCollider2D with
+	-- The polygon's rotation about the entity's Z axis, counter-clockwise, in degrees. [All modes; Runtime|Test; pure/read; setter mutates]
+	Angle: number
+	-- Whether the collider only detects overlaps instead of colliding. [All modes; Runtime|Test; pure/read; setter mutates]
+	IsTrigger: boolean
+	-- Where the polygon's origin sits relative to the entity, in its XY plane. [All modes; Runtime|Test; pure/read; setter mutates]
+	Offset: vector
+	-- The points whose convex hull is the collider, 3 to 64 of them, in the collider's own space before Offset and Angle. [All modes; Runtime|Test; pure/read; setter mutates]
+	Points: {vector}
 end
 
 -- The scene's exposure, tone mapping, ambient occlusion, bloom and anti-aliasing (one per scene).
@@ -713,6 +780,42 @@ declare extern type RigidBody with
 	WakeUp: (self: RigidBody) -> ()
 end
 
+-- Simulates the entity in the 2D world: moves along world X and Y and rotates about world Z.
+declare extern type RigidBody2D with
+	-- Whether the body may sleep when it comes to rest. [All modes; Runtime|Test; pure/read; setter mutates]
+	AllowSleeping: boolean
+	-- How quickly angular velocity decays, per second. [All modes; Runtime|Test; pure/read; setter mutates]
+	AngularDamping: number
+	-- Removes ghost collisions with internal edges of compound shapes; set it on bodies that roll or slide across tiles. [All modes; Runtime|Test; pure/read; setter mutates]
+	EnhancedInternalEdgeRemoval: boolean
+	-- Whether a Dynamic body is kept from rotating. [All modes; Runtime|Test; pure/read; setter mutates]
+	FixedRotation: boolean
+	-- The friction coefficient of the body's surfaces; a contact uses the geometric mean of both bodies' values. [All modes; Runtime|Test; pure/read; setter mutates]
+	Friction: number
+	-- The multiplier of the project's 2D gravity for this body (0 floats). [All modes; Runtime|Test; pure/read; setter mutates]
+	GravityFactor: number
+	-- The angular velocity about world Z the body starts with, in radians per second, counter-clockwise seen from +Z. [All modes; Runtime|Test; pure/read; setter mutates]
+	InitialAngularVelocity: number
+	-- The velocity along world X and Y the body starts with, in metres per second. [All modes; Runtime|Test; pure/read; setter mutates]
+	InitialLinearVelocity: vector
+	-- Physics layer name from project settings (the 3D world's layers). A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
+	Layer: string
+	-- How quickly linear velocity decays, per second. [All modes; Runtime|Test; pure/read; setter mutates]
+	LinearDamping: number
+	-- Mass in kilograms (Dynamic only). [All modes; Runtime|Test; pure/read; setter mutates]
+	Mass: number
+	-- The angular speed the body is clamped to, in radians per second. [All modes; Runtime|Test; pure/read; setter mutates]
+	MaxAngularVelocity: number
+	-- The speed the body is clamped to, in metres per second. [All modes; Runtime|Test; pure/read; setter mutates]
+	MaxLinearVelocity: number
+	-- Discrete or continuous (LinearCast) collision detection. [All modes; Runtime|Test; pure/read; setter mutates]
+	MotionQuality: MotionQuality
+	-- Bounciness, from no bounce (0) to a perfectly elastic bounce (1); a contact uses the larger of both bodies' values. [All modes; Runtime|Test; pure/read; setter mutates]
+	Restitution: number
+	-- Static never moves; Kinematic is moved by script; Dynamic is simulated. [All modes; Runtime|Test; pure/read; setter mutates]
+	Type: BodyType
+end
+
 -- Attaches Behaviour scripts to the entity, an ordered list of slots.
 declare extern type Script with
 	-- The behaviours of the entity, in slot order; each slot is its own instance. A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -745,6 +848,42 @@ declare extern type SpotLight with
 	Range: number
 	-- The radius of the emitting disc, in metres; widens highlights and shadow penumbrae. [All modes; Runtime|Test; pure/read; setter mutates]
 	SourceRadius: number
+end
+
+-- Plays a clip of the SpriteRenderer's sprite sheet, one step per clip frame for its ticks, driven by the fixed step.
+declare extern type SpriteAnimator with
+	-- The name of the sheet's clip to play; empty plays nothing. A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
+	Clip: string
+	-- Whether the clip advances each fixed step; a clip without Loop clears it after its last step and holds its last frame. [All modes; Runtime|Test; pure/read; setter mutates]
+	Playing: boolean
+	-- The index of the clip step shown. [All modes; Runtime|Test; pure/read; setter mutates]
+	Step: number
+	-- How many fixed steps the current clip step has been shown. [All modes; Runtime|Test; pure/read; setter mutates]
+	StepTicks: number
+end
+
+-- Draws a sprite: a sprite sheet frame or a texture in the entity's XY plane.
+declare extern type SpriteRenderer with
+	-- The linear colour every texel is multiplied with, with opacity in the fourth component. [All modes; Runtime|Test; pure/read; setter mutates]
+	Color: Color
+	-- Whether the image is mirrored left to right about its pivot. [All modes; Runtime|Test; pure/read; setter mutates]
+	FlipX: boolean
+	-- Whether the image is mirrored top to bottom about its pivot. [All modes; Runtime|Test; pure/read; setter mutates]
+	FlipY: boolean
+	-- The index of the sheet's frame to draw; an index the sheet lacks draws nothing (SPRITE_FRAME_OUT_OF_RANGE). [All modes; Runtime|Test; pure/read; setter mutates]
+	Frame: number
+	-- Whether 2D lights light the sprite; an unlit sprite keeps its texels unchanged. [All modes; Runtime|Test; pure/read; setter mutates]
+	Lit: boolean
+	-- The draw order within the sorting layer: higher values draw over lower ones, equal values in canonical entity order. [All modes; Runtime|Test; pure/read; setter mutates]
+	OrderInLayer: number
+	-- How many texels of the image make one unit of the entity's local space; the sprite's size is its texels divided by this. [All modes; Runtime|Test; pure/read; setter mutates]
+	PixelsPerUnit: number
+	-- The sprite sheet whose frame Frame is drawn; null draws Texture whole. [All modes; Runtime|Test; pure/read; setter mutates]
+	Sheet: AssetRef?
+	-- The sorting layer name from project settings; later layers draw over earlier ones, and an undeclared name draws in the first. A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
+	SortingLayer: string
+	-- The texture drawn whole, pivoted at its centre, when Sheet is null; null draws the built-in white square. [All modes; Runtime|Test; pure/read; setter mutates]
+	Texture: AssetRef?
 end
 
 -- An opaque coroutine handle owned by one script VM.
