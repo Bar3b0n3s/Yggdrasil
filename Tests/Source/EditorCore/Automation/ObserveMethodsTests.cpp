@@ -67,6 +67,16 @@ namespace Engine {
 													  "\tGetAxis: (name: string) -> number,\n"
 													  "}\n";
 
+		// A skill's reference page (.claude/skills/<skill>/<page>.md).
+		constexpr std::string_view SkillPageText = "# Sample guide\n"
+												   "A page of the sample skill.\n"
+												   "## Steps\n"
+												   "Step text.\n"
+												   "### Detail\n"
+												   "Detail text.\n"
+												   "## Pitfalls\n"
+												   "Pitfall text.\n";
+
 		std::filesystem::path MakeDocsTree(const std::filesystem::path& root)
 		{
 			WriteDocsFile(root, ".claude/skills/sample/SKILL.md", "---\nname: sample\ndescription: A sample skill.\n---\n# Sample\n");
@@ -530,6 +540,118 @@ namespace Engine {
 				CHECK_MESSAGE(client.Call("docs.get", Json{ { "topic", topic } }).error().GetCode() == ErrorCode::NotFound, topic);
 		}
 
+		// Architecture §13.10: a skill keeps its rarely needed reference material in pages beside its SKILL.md, so the
+		// skills keep room below the offload threshold; docs.get lists each page with its first heading and serves it like a
+		// reference document.
+		TEST_CASE("ObserveMethods: docs.get lists a skill's reference pages with their titles and serves them")
+		{
+			Test::EditorTestFixture fixture("DocsSkillPages");
+			const std::filesystem::path root = MakeDocsTree(fixture.GetDirectory() / "Docs");
+			WriteDocsFile(root, ".claude/skills/sample/guide.md", SkillPageText);
+			// Not pages: a name that is no topic segment, a file that is not Markdown, a Markdown file below a subdirectory.
+			WriteDocsFile(root, ".claude/skills/sample/notes.v2.md", "# Notes\n");
+			WriteDocsFile(root, ".claude/skills/sample/data.json", "{}\n");
+			WriteDocsFile(root, ".claude/skills/sample/nested/deep.md", "# Deep\n");
+			// A page whose first "# " heading is not its first line, in a skill of its own.
+			constexpr std::string_view NotesText = "Intro.\n# Notes on other\nText.\n";
+			WriteDocsFile(root, ".claude/skills/other/SKILL.md", "---\nname: other\ndescription: Another skill.\n---\n# Other\n");
+			WriteDocsFile(root, ".claude/skills/other/notes.md", NotesText);
+			Test::AutomationTestClient client(fixture.GetEditor(), MakeDocsSpecification(root));
+
+			// Sorted with the other topics, each page after its skill.
+			const Json listed = CallDocs(client, Json::object());
+			std::vector<std::string> names;
+			for (const Json& topic : listed["topics"])
+				names.push_back(JsonReader(topic).ReadMember<std::string>("name").value_or(std::string()));
+			CHECK(names == std::vector<std::string>{ "reference/Guide", "reference/Schemas/Thing", "scripting/Engine.d.luau", "skills/other", "skills/other/notes", "skills/sample", "skills/sample/guide", "templates/Scripts/Behaviour" });
+			const auto findTopic = [&listed](std::string_view name)
+			{
+				const auto found = std::ranges::find_if(listed["topics"], [name](const Json& topic)
+				{
+					return topic["name"] == Json(std::string(name));
+				});
+				REQUIRE(found != listed["topics"].end());
+				return *found;
+			};
+			CHECK(findTopic("skills/sample/guide")["title"] == Json("Sample guide"));
+			CHECK(findTopic("skills/sample/guide")["bytes"] == Json(SkillPageText.size()));
+			CHECK(findTopic("skills/other/notes")["title"] == Json("Notes on other"));
+			CHECK(findTopic("skills/sample")["title"] == Json("A sample skill."));
+
+			// The whole page, as a reference document is served.
+			const Json page = CallDocs(client, Json{ { "topic", "skills/sample/guide" } });
+			CHECK(ReadContent(page) == SkillPageText);
+			CHECK(page["topic"] == Json("skills/sample/guide"));
+			CHECK(page["path"] == Json(".claude/skills/sample/guide.md"));
+			CHECK(page["totalBytes"] == Json(SkillPageText.size()));
+			CHECK(page["nextOffset"] == Json(0));
+			// The skill itself is still its SKILL.md.
+			CHECK(CallDocs(client, Json{ { "topic", "skills/sample" } })["path"] == Json(".claude/skills/sample/SKILL.md"));
+
+			// A section, by heading text, by anchor or as "<topic>#<section>", with its subsections.
+			const Json steps = CallDocs(client, Json{ { "topic", "skills/sample/guide" }, { "section", "Steps" } });
+			CHECK(steps["section"] == Json("steps"));
+			CHECK(ReadContent(steps) == "## Steps\nStep text.\n### Detail\nDetail text.\n");
+			CHECK(ReadContent(CallDocs(client, Json{ { "topic", "skills/sample/guide#detail" } })) == "### Detail\nDetail text.\n");
+			CHECK(ReadContent(CallDocs(client, Json{ { "topic", "skills/sample/guide" }, { "section", "pitfalls" } })) == "## Pitfalls\nPitfall text.\n");
+			const Json missing = client.Request("docs.get", Json{ { "topic", "skills/sample/guide" }, { "section", "Stpes" } });
+			CHECK(missing["error"]["data"]["errorCode"] == Json("NotFound"));
+			CHECK(missing["error"]["data"]["hint"].dump().contains("'steps'"));
+
+			// toc and paging, as for any other topic.
+			const Json toc = CallDocs(client, Json{ { "topic", "skills/sample/guide" }, { "toc", true } });
+			CHECK(ReadContent(toc).empty());
+			std::vector<std::string> titles;
+			for (const Json& section : toc["sections"])
+				titles.push_back(JsonReader(section).ReadMember<std::string>("title").value_or(std::string()));
+			CHECK(titles == std::vector<std::string>{ "Sample guide", "Steps", "Detail", "Pitfalls" });
+			const Json first = CallDocs(client, Json{ { "topic", "skills/sample/guide" }, { "offset", 0 }, { "length", 20 } });
+			CHECK(ReadContent(first) == "# Sample guide\n");
+			CHECK(first["nextOffset"] == Json(15));
+			CHECK_FALSE(first["sections"].empty());
+			const Json second = CallDocs(client, Json{ { "topic", "skills/sample/guide" }, { "offset", 15 }, { "length", 40 } });
+			CHECK(ReadContent(second) == "A page of the sample skill.\n## Steps\n");
+		}
+
+		// A page name is one topic segment, so no page names a file outside its skill's directory; SKILL.md is the skill's own
+		// topic, never a page; and a page is served only by its exact spelling, on every host.
+		TEST_CASE("ObserveMethods: docs.get refuses a skill page it does not serve, with suggestions")
+		{
+			Test::EditorTestFixture fixture("DocsSkillPageNames");
+			const std::filesystem::path root = MakeDocsTree(fixture.GetDirectory() / "Docs");
+			WriteDocsFile(root, ".claude/skills/sample/guide.md", SkillPageText);
+			WriteDocsFile(root, ".claude/skills/sample/notes.v2.md", "# Notes\n");
+			WriteDocsFile(root, ".claude/skills/other/SKILL.md", "---\nname: other\ndescription: Another skill.\n---\n# Other\n");
+			WriteDocsFile(root, ".claude/skills/other/notes.md", "# Notes\n");
+			Test::AutomationTestClient client(fixture.GetEditor(), MakeDocsSpecification(root));
+			const auto refused = [&client](std::string_view topic)
+			{
+				CAPTURE(topic);
+				const Json response = client.Request("docs.get", Json{ { "topic", topic } });
+				CHECK(response["error"]["data"]["errorCode"] == Json("NotFound"));
+				return JsonReader(response["error"]["data"]).ReadMember<std::string>("hint").value_or(std::string());
+			};
+
+			// A page the skill does not have: the hint names the pages that are close.
+			CHECK(refused("skills/sample/guid").contains("did you mean 'skills/sample/guide'"));
+			const std::string otherSkill = refused("skills/other/guide");
+			CHECK(otherSkill.contains("did you mean"));
+			CHECK(otherSkill.contains("'skills/other/notes'"));
+			CHECK_FALSE(refused("skills/missing/guide").empty());
+
+			// Segments that are not letters, digits, '-' and '_': a dot (notes.v2.md exists), "..", a slash, an empty one.
+			for (const std::string_view topic : { "skills/sample/notes.v2", "skills/sample/guide.md", "skills/sample/..", "skills/sample/../other/notes",
+					 "skills/../Docs/Reference/Guide", "skills/sample/guide/steps", "skills/sample/", "skills/sample//guide", "skills//guide", "skills/sample/.guide" })
+				refused(topic);
+			// SKILL.md is never a page, in any letter case.
+			for (const std::string_view topic : { "skills/sample/SKILL", "skills/sample/skill", "skills/sample/Skill" })
+				refused(topic);
+			// The same spelling on every host: a name that matches a file only ignoring case is not a topic.
+			for (const std::string_view topic : { "skills/sample/Guide", "skills/sample/GUIDE", "skills/Sample/guide", "skills/other/Notes" })
+				refused(topic);
+			CHECK(ReadContent(CallDocs(client, Json{ { "topic", "skills/sample/guide" } })) == SkillPageText);
+		}
+
 		// Docs/Decisions/0030-m19-contract.md decision 26 and "Integration of W19.2": a builder reads only what docs.get serves,
 		// so the native module's interface is a topic; no other engine header is one.
 		TEST_CASE("ObserveMethods: docs.get serves the native module's interface and no other engine header")
@@ -620,8 +742,8 @@ namespace Engine {
 		}
 
 		// Friction S1-05 (Docs/Decisions/0026-m16-contract.md, F04): an automation-only builder reads the documentation through
-		// docs.get alone, so the skills it follows (game-building, luau-gameplay and game-debugging, which name each other) may
-		// send it only to what docs.get serves: a topic by its name, or a repository document by the path of a served topic.
+		// docs.get alone, so the skills it follows (game-building, luau-gameplay and game-debugging, which name each other) and
+		// their reference pages may send it only to what docs.get serves: a topic by its name, or a repository document by the path of a served topic.
 		// Not documents: the Python commands under Scripts/ (the repository's gate), game project directories
 		// (Projects/<Name>, Tests/Projects/<Name>: what the builder builds), placeholders ("<Game>") and the build output.
 		TEST_CASE("ObserveMethods: every document and topic the game-building skills name is one docs.get serves")
@@ -648,10 +770,20 @@ namespace Engine {
 				};
 				return isProjectName(path, "Projects/") || isProjectName(path, "Tests/Projects/");
 			};
-			size_t checked = 0;
+			// The three skills and their reference pages ("skills/<skill>/<page>").
+			std::vector<std::string> documents;
 			for (const std::string_view skill : { "skills/game-building", "skills/luau-gameplay", "skills/game-debugging" })
 			{
 				REQUIRE_MESSAGE(topics.contains(std::string(skill)), skill);
+				for (const std::string& topic : topics)
+				{
+					if (topic == skill || topic.starts_with(std::format("{}/", skill)))
+						documents.push_back(topic);
+				}
+			}
+			size_t checked = 0;
+			for (const std::string& skill : documents)
+			{
 				for (const std::string& word : FindPathWords(ReadWholeTopic(client, skill)))
 				{
 					if (word.contains('<') || word.contains('>'))

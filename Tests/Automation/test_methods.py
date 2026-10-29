@@ -199,6 +199,26 @@ class MethodTests(AutomationTestCase):
         self.assertIn("skills/add-automation-method", topics)
         skill = client.call("docs.get", {"topic": "skills/add-automation-method"})
         self.assertIn("RegisterMethods.cpp", skill["content"])
+        # Architecture §13.10: a skill's reference pages beside its SKILL.md are topics "skills/<skill>/<page>", listed
+        # with their first heading and read like any other topic.
+        listed = {topic["name"]: topic for topic in client.call("docs.get")["topics"]}
+        file = REPOSITORY_ROOT / ".claude" / "skills" / "game-building" / "replays.md"
+        text = file.read_bytes()
+        self.assertEqual(listed["skills/game-building/replays"]["bytes"], len(text))
+        self.assertEqual(listed["skills/game-building/replays"]["title"],
+                         text.decode("utf-8").split("\n", 1)[0].removeprefix("# "))
+        page = client.call("docs.get", {"topic": "skills/game-building/replays"})
+        self.assertEqual(page["path"], ".claude/skills/game-building/replays.md")
+        self.assertEqual(page["nextOffset"], 0)
+        self.assertEqual(page["content"].encode("utf-8"), text)
+        section = client.call("docs.get", {"topic": "skills/game-building/replays", "section": "Re-recording replays"})
+        self.assertTrue(section["content"].startswith("## Re-recording replays\n"))
+        self.assertEqual(section["section"], "re-recording-replays")
+        for topic in ("skills/game-building/replay", "skills/game-building/SKILL", "skills/game-building/../look"):
+            with self.subTest(topic=topic):
+                with self.assertRaises(engine_client.EngineError) as missing:
+                    client.call("docs.get", {"topic": topic})
+                self.assert_engine_error(missing.exception, engine_client.NOT_FOUND, "NotFound")
 
     def test_docs_get_serves_sections_pages_and_the_generated_topics(self) -> None:
         # Docs/Decisions/0026-m16-contract.md, friction S1-01: the large reference topics came back offloaded, as one

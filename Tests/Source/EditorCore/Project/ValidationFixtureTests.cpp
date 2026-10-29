@@ -302,10 +302,11 @@ namespace Engine {
 			CHECK(FindUntriggeredCodes(std::set<std::string>(exclude.begin(), exclude.end())) == missing);
 		}
 
-		// The game-debugging skill's error-code table (ADR 0022 decision 17) covers every validation code GetCodeInfos documents.
+		// The game-debugging skill's error-code table (ADR 0022 decision 17) covers every validation code GetCodeInfos documents;
+		// the table is the skill's reference page skills/game-debugging/validation-codes (Architecture §13.10).
 		TEST_CASE("Validation: the game-debugging skill's error table names every validation code")
 		{
-			const auto skill = FileSystem::ReadText(Test::GetRepositoryRoot() / ".claude" / "skills" / "game-debugging" / "SKILL.md");
+			const auto skill = FileSystem::ReadText(Test::GetRepositoryRoot() / ".claude" / "skills" / "game-debugging" / "validation-codes.md");
 			REQUIRE_MESSAGE(skill.has_value(), skill.error().ToString());
 			for (const ValidationCodeInfo& info : ProjectValidator::GetCodeInfos())
 			{

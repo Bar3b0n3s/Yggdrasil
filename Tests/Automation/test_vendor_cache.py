@@ -7,7 +7,7 @@ generates the real workspace with the pinned premake into temporary directories,
 vendored projects do not depend on where a workspace is generated, and that the AddressSanitizer and clang-cl
 workspaces get their own entries, and one runs CheckBuildConfig.py's rule 9 against the entries Build.py publishes for
 the workspace Generate.py writes. That MSBuild links the cached libraries is proven by Build.py's own builds (the
-build-and-test skill's end-to-end check).
+end-to-end check of the build-and-test skill's page skills/build-and-test/vendor-cache).
 """
 
 from __future__ import annotations

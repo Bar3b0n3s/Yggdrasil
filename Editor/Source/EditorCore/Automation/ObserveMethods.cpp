@@ -24,6 +24,7 @@
 #include <set>
 #include <span>
 #include <string_view>
+#include <system_error>
 #include <utility>
 
 namespace Engine {
@@ -37,6 +38,9 @@ namespace Engine {
 		constexpr std::string_view TemplatesTopicPrefix = "templates/Scripts/";
 		constexpr std::string_view SkillsDirectory = ".claude/skills";
 		constexpr std::string_view SkillFileName = "SKILL.md";
+		// A skill's reference pages: the other Markdown files beside its SKILL.md.
+		constexpr std::string_view SkillPageExtension = ".md";
+		constexpr std::string_view SkillFileStem = SkillFileName.substr(0, SkillFileName.size() - SkillPageExtension.size());
 		constexpr std::string_view ReferenceDirectory = "Docs/Reference";
 		constexpr std::string_view SchemasDirectory = "Docs/Reference/Schemas";
 		constexpr std::string_view SchemaExtension = ".schema.json";
@@ -85,6 +89,17 @@ namespace Engine {
 				return (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9')
 					|| character == '-' || character == '_';
 			});
+		}
+
+		// A skill page's name: a topic segment that is not SKILL.md's stem in any ASCII letter case, since SKILL.md is the
+		// skill's own topic and never one of its pages.
+		static bool IsSkillPage(std::string_view name)
+		{
+			const bool isSkillFile = std::ranges::equal(name, SkillFileStem, [](char character, char upper)
+			{
+				return (character >= 'a' && character <= 'z' ? static_cast<char>(character - 'a' + 'A') : character) == upper;
+			});
+			return IsTopicSegment(name) && !isSkillFile;
 		}
 
 		// The lines of `text` with their byte offsets, without their line breaks ("\n" or "\r\n").
@@ -161,9 +176,17 @@ namespace Engine {
 		{
 			if (topic.starts_with(SkillsTopicPrefix))
 			{
-				const std::string_view name = topic.substr(SkillsTopicPrefix.size());
-				if (IsTopicSegment(name))
+				// "skills/<name>", or one of its pages "skills/<name>/<page>".
+				const std::string_view rest = topic.substr(SkillsTopicPrefix.size());
+				const size_t slash = rest.find('/');
+				const std::string_view name = rest.substr(0, slash);
+				if (!IsTopicSegment(name))
+					return std::nullopt;
+				if (slash == std::string_view::npos)
 					return DocsTopicFile{ std::format("{}/{}/{}", SkillsDirectory, name, SkillFileName), DocsTextKind::Markdown };
+				const std::string_view page = rest.substr(slash + 1);
+				if (IsSkillPage(page))
+					return DocsTopicFile{ std::format("{}/{}/{}{}", SkillsDirectory, name, page, SkillPageExtension), DocsTextKind::Markdown };
 				return std::nullopt;
 			}
 			if (topic.starts_with(SchemasTopicPrefix))
@@ -234,10 +257,19 @@ namespace Engine {
 				for (const std::filesystem::path& directory : *skills)
 				{
 					const std::string name = FileSystem::PathToUtf8(directory.filename());
-					const Result<std::string> text = FileSystem::ReadText(directory / FileSystem::PathFromUtf8(SkillFileName));
-					if (!IsTopicSegment(name) || !text)
+					std::error_code error;
+					if (!IsTopicSegment(name) || !std::filesystem::is_directory(directory, error))
 						continue;
-					topics.push_back(DocsTopic{ std::format("{}{}", SkillsTopicPrefix, name), ReadSkillDescription(*text), ToByteCount(text->size()) });
+					if (const Result<std::string> text = FileSystem::ReadText(directory / FileSystem::PathFromUtf8(SkillFileName)))
+						topics.push_back(DocsTopic{ std::format("{}{}", SkillsTopicPrefix, name), ReadSkillDescription(*text), ToByteCount(text->size()) });
+					ENGINE_TRY_ASSIGN(const auto pages, ListTopicFiles(docsRoot, std::format("{}/{}", SkillsDirectory, name), SkillPageExtension));
+					for (const auto& [stem, file] : pages)
+					{
+						if (!IsSkillPage(stem))
+							continue;
+						if (const Result<std::string> text = FileSystem::ReadText(file))
+							topics.push_back(DocsTopic{ std::format("{}{}/{}", SkillsTopicPrefix, name, stem), ReadFirstHeading(*text), ToByteCount(text->size()) });
+					}
 				}
 			}
 			else if (skills.error().GetCode() != ErrorCode::NotFound)
@@ -750,15 +782,15 @@ namespace Engine {
 	void RegisterEditorObserveMethodTypes(TypeRegistry& registry)
 	{
 		registry.Struct<DocsGetParams>("DocsGetParams", "The params of docs.get.")
-			.Field("topic", &DocsGetParams::Topic, "The topic, such as \"skills/game-building\", \"reference/ScriptAPI\", \"reference/Schemas/Scene\", \"scripting/Engine.d.luau\", \"templates/Scripts/Behaviour\" or \"native/NativeApi.h\"; a \"#<section>\" suffix selects a section like section; empty for the list of topics.")
+			.Field("topic", &DocsGetParams::Topic, "The topic, such as \"skills/game-building\" (a skill), \"skills/game-building/replays\" (one of its reference pages), \"reference/ScriptAPI\", \"reference/Schemas/Scene\", \"scripting/Engine.d.luau\", \"templates/Scripts/Behaviour\" or \"native/NativeApi.h\"; a \"#<section>\" suffix selects a section like section; empty for the list of topics.")
 			.Field("section", &DocsGetParams::Section, "A section of the topic: a Markdown heading, or a top-level declaration of a .d.luau topic (\"Entity\"). Named by the heading's exact text (\"Test.Suite\"), by that text without a trailing parenthesized qualifier (\"TestSuite\" for \"TestSuite (type)\"), or by its anchor (the text lowercased, spaces as '-', other ASCII punctuation removed, \"-1\" added to a repeat: \"testsuite-type\"), tried in that order; a text several headings share is refused with their anchors. The result is the section with its subsections.")
 			.Field("offset", &DocsGetParams::Offset, "Where the page starts, in bytes of the topic's (or the section's) text: 0, or the previous page's nextOffset.")
 			.Field("length", &DocsGetParams::Length, "The most bytes of text to return (the default is the most). A page ends after a line break when one falls inside it.", { .Min = 1.0, .Max = static_cast<double>(DocsPageBytes) })
 			.Field("toc", &DocsGetParams::Toc, std::format("Return no text, only the topic's section list (or the subsections of section) with each section's title, anchor, level, offset and size, down to the deepest heading level whose list fits in {} bytes, and totalBytes. Not with offset or length.", DocsTocBytes));
 
 		registry.Struct<DocsTopic>("DocsTopic", "One documentation topic.")
-			.Field("name", &DocsTopic::Name, "The topic's name, such as \"skills/game-building\" or \"reference/Validation\".")
-			.Field("title", &DocsTopic::Title, "A skill's description, a reference document's first heading, a schema's description, or a summary of the script declarations, a script template or the native module's interface.")
+			.Field("name", &DocsTopic::Name, "The topic's name, such as \"skills/game-building\", \"skills/game-building/replays\" or \"reference/Validation\".")
+			.Field("title", &DocsTopic::Title, "A skill's description, a skill page's or reference document's first heading, a schema's description, or a summary of the script declarations, a script template or the native module's interface.")
 			.Field("bytes", &DocsTopic::Bytes, std::format("The size of the topic's text; a topic whose result would be over the offload threshold comes back in pages of at most {} bytes.", DocsPageBytes));
 
 		registry.Struct<DocsSection>("DocsSection", "One section of a topic, as a long text's first page or toc lists it.")
@@ -772,7 +804,7 @@ namespace Engine {
 			.Field("topics", &DocsGetResult::Topics, "Every topic, when no topic was asked for.")
 			.Field("topic", &DocsGetResult::Topic, "The topic asked for, without its \"#<section>\".")
 			.Field("section", &DocsGetResult::Section, "The anchor of the section returned; empty for the whole topic.")
-			.Field("content", &DocsGetResult::Content, "The text (Markdown for skills and reference documents), or one page of it.")
+			.Field("content", &DocsGetResult::Content, "The text (Markdown for skills, their pages and reference documents), or one page of it.")
 			.Field("path", &DocsGetResult::Path, "The topic's file, relative to the repository root.")
 			.Field("offset", &DocsGetResult::Offset, "Where content starts in the topic's (or the section's) text, in bytes.")
 			.Field("totalBytes", &DocsGetResult::TotalBytes, "The size of the topic's (or the section's) text.")
@@ -799,11 +831,11 @@ namespace Engine {
 		methods.Add(
 			{
 				.Name = "docs.get",
-				.Description = "Serves the agent documentation: without a topic the list of topics (skills, the generated reference and JSON "
-							   "schemas, the script declarations, the script templates and the native module's interface); with one its text, "
-							   "one section of it (section, or \"<topic>#<section>\", by heading text or anchor), one page (offset, length) or "
-							   "with toc only its section list with sizes. A text too large to return inline comes back as its first page with "
-							   "nextOffset and its list of sections.",
+				.Description = "Serves the agent documentation: without a topic the list of topics (skills and their reference pages, the "
+							   "generated reference and JSON schemas, the script declarations, the script templates and the native module's "
+							   "interface); with one its text, one section of it (section, or \"<topic>#<section>\", by heading text or anchor), "
+							   "one page (offset, length) or with toc only its section list with sizes. A text too large to return inline comes "
+							   "back as its first page with nextOffset and its list of sections.",
 				.ExposeAsTool = true,
 				.AvailableInLauncher = true,
 				.AllowedInBatch = true,

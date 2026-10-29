@@ -32,6 +32,8 @@ namespace Engine {
 	// S2-05): without a topic, the list of topics; with one, its text, read from the repository root the server was given
 	// (AutomationServerSpecification::DocsRoot). Topics:
 	//   - "skills/<name>": .claude/skills/<name>/SKILL.md;
+	//   - "skills/<name>/<page>": .claude/skills/<name>/<page>.md, a reference page of the skill: any Markdown file beside
+	//     its SKILL.md (which is never a page, in any letter case), listed with its first "# " heading as its title;
 	//   - "reference/<name>": Docs/Reference/<name>.md (generated);
 	//   - "reference/Schemas/<Name>": Docs/Reference/Schemas/<Name>.schema.json (the generated JSON schemas);
 	//   - "scripting/<name>.d.luau": Resources/Scripting/<name>.d.luau (the generated script declarations,
@@ -39,6 +41,9 @@ namespace Engine {
 	//   - "templates/Scripts/<Name>": Resources/Templates/Scripts/<Name>.luau (the templates of script.create);
 	//   - "native/NativeApi.h": Engine/Source/Engine/Native/NativeApi.h, the interface of a game's native module, the one
 	//     engine header its sources include (Docs/Decisions/0030-m19-contract.md decision 26), as plain text.
+	// Every name segment (<name>, <page>, <Name>) is letters, digits, '-' and '_' only, so no topic names a path outside its
+	// directory, and a topic is served only when its file has exactly that spelling (a name that matches a file only
+	// ignoring case is not a topic).
 	// Sections: the headings of a Markdown topic ("#" to "######" outside code fences), each with its text up to the next
 	// heading of the same or a higher level, and the top-level declarations of a .d.luau topic ("declare ..." with the
 	// comment lines above it, adjacent declarations of one name together; a name declared again further on titles its
@@ -67,9 +72,9 @@ namespace Engine {
 	// Registry struct "DocsTopic".
 	struct DocsTopic
 	{
-		std::string Name{}; // "skills/game-building"
-		// A skill's description, a reference document's first heading, a schema's description, or the summary of the script
-		// declarations, a script template or the native module's interface.
+		std::string Name{}; // "skills/game-building", "skills/game-building/replays"
+		// A skill's description, a skill page's or reference document's first heading, a schema's description, or the
+		// summary of the script declarations, a script template or the native module's interface.
 		std::string Title{};
 		uint32_t Bytes = 0; // the size of the topic's file
 	};

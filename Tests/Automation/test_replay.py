@@ -134,8 +134,8 @@ class ReplayTests(AutomationTestCase):
         # M17 friction F03: a state hash that differs says what changes the world and how to re-record.
         self.assertIn("the world differs from the recording", mismatch.exception.data["hint"])
         # M17 review D-06/R-03: the hint names the method engine_client calls, never the MCP tool.
-        self.assertIn('re-record it with test.run {record} (the game-building skill, "Re-recording replays")',
-                      mismatch.exception.data["hint"])
+        self.assertIn("re-record it with test.run {record} (the game-building skill's page "
+                      'skills/game-building/replays, "Re-recording replays")', mismatch.exception.data["hint"])
         self.assertNotIn("test_run", mismatch.exception.data["hint"])
         outcome = mismatch.exception.data["replay"]
         self.assertTrue(outcome["hashChecked"])

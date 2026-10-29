@@ -423,14 +423,14 @@ Example: Describe the RigidBody component.
 
 ### docs.get
 
-Serves the agent documentation: without a topic the list of topics (skills, the generated reference and JSON schemas, the script declarations, the script templates and the native module's interface); with one its text, one section of it (section, or "\<topic>#\<section>", by heading text or anchor), one page (offset, length) or with toc only its section list with sizes. A text too large to return inline comes back as its first page with nextOffset and its list of sections.
+Serves the agent documentation: without a topic the list of topics (skills and their reference pages, the generated reference and JSON schemas, the script declarations, the script templates and the native module's interface); with one its text, one section of it (section, or "\<topic>#\<section>", by heading text or anchor), one page (offset, length) or with toc only its section list with sizes. A text too large to return inline comes back as its first page with nextOffset and its list of sections.
 
 - Flags: tool `docs_get`, launcher, batch
 - Timeout: 60 s
 
 | Param | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `topic` | `String` |  | `""` | The topic, such as "skills/game-building", "reference/ScriptAPI", "reference/Schemas/Scene", "scripting/Engine.d.luau", "templates/Scripts/Behaviour" or "native/NativeApi.h"; a "#\<section>" suffix selects a section like section; empty for the list of topics. |
+| `topic` | `String` |  | `""` | The topic, such as "skills/game-building" (a skill), "skills/game-building/replays" (one of its reference pages), "reference/ScriptAPI", "reference/Schemas/Scene", "scripting/Engine.d.luau", "templates/Scripts/Behaviour" or "native/NativeApi.h"; a "#\<section>" suffix selects a section like section; empty for the list of topics. |
 | `section` | `String` |  | `""` | A section of the topic: a Markdown heading, or a top-level declaration of a .d.luau topic ("Entity"). Named by the heading's exact text ("Test.Suite"), by that text without a trailing parenthesized qualifier ("TestSuite" for "TestSuite (type)"), or by its anchor (the text lowercased, spaces as '-', other ASCII punctuation removed, "-1" added to a repeat: "testsuite-type"), tried in that order; a text several headings share is refused with their anchors. The result is the section with its subsections. |
 | `offset` | `UInt32` |  | `0` | Where the page starts, in bytes of the topic's (or the section's) text: 0, or the previous page's nextOffset. |
 | `length` | `UInt32` |  | `32768` | The most bytes of text to return (the default is the most). A page ends after a line break when one falls inside it. |
@@ -441,7 +441,7 @@ Serves the agent documentation: without a topic the list of topics (skills, the 
 | `topics` | `Array<DocsTopic>` | Every topic, when no topic was asked for. |
 | `topic` | `String` | The topic asked for, without its "#\<section>". |
 | `section` | `String` | The anchor of the section returned; empty for the whole topic. |
-| `content` | `String` | The text (Markdown for skills and reference documents), or one page of it. |
+| `content` | `String` | The text (Markdown for skills, their pages and reference documents), or one page of it. |
 | `path` | `String` | The topic's file, relative to the repository root. |
 | `offset` | `UInt32` | Where content starts in the topic's (or the section's) text, in bytes. |
 | `totalBytes` | `UInt32` | The size of the topic's (or the section's) text. |

@@ -1865,7 +1865,7 @@
 		{
 			"name": "docs.get",
 			"domain": "docs",
-			"description": "Serves the agent documentation: without a topic the list of topics (skills, the generated reference and JSON schemas, the script declarations, the script templates and the native module's interface); with one its text, one section of it (section, or \"<topic>#<section>\", by heading text or anchor), one page (offset, length) or with toc only its section list with sizes. A text too large to return inline comes back as its first page with nextOffset and its list of sections.",
+			"description": "Serves the agent documentation: without a topic the list of topics (skills and their reference pages, the generated reference and JSON schemas, the script declarations, the script templates and the native module's interface); with one its text, one section of it (section, or \"<topic>#<section>\", by heading text or anchor), one page (offset, length) or with toc only its section list with sizes. A text too large to return inline comes back as its first page with nextOffset and its list of sections.",
 			"exposeAsTool": true,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -1881,7 +1881,7 @@
 				"type": "object",
 				"properties": {
 					"topic": {
-						"description": "The topic, such as \"skills/game-building\", \"reference/ScriptAPI\", \"reference/Schemas/Scene\", \"scripting/Engine.d.luau\", \"templates/Scripts/Behaviour\" or \"native/NativeApi.h\"; a \"#<section>\" suffix selects a section like section; empty for the list of topics.",
+						"description": "The topic, such as \"skills/game-building\" (a skill), \"skills/game-building/replays\" (one of its reference pages), \"reference/ScriptAPI\", \"reference/Schemas/Scene\", \"scripting/Engine.d.luau\", \"templates/Scripts/Behaviour\" or \"native/NativeApi.h\"; a \"#<section>\" suffix selects a section like section; empty for the list of topics.",
 						"type": "string"
 					},
 					"section": {
@@ -1935,7 +1935,7 @@
 						"type": "string"
 					},
 					"content": {
-						"description": "The text (Markdown for skills and reference documents), or one page of it.",
+						"description": "The text (Markdown for skills, their pages and reference documents), or one page of it.",
 						"type": "string"
 					},
 					"path": {
@@ -1983,11 +1983,11 @@
 						"type": "object",
 						"properties": {
 							"name": {
-								"description": "The topic's name, such as \"skills/game-building\" or \"reference/Validation\".",
+								"description": "The topic's name, such as \"skills/game-building\", \"skills/game-building/replays\" or \"reference/Validation\".",
 								"type": "string"
 							},
 							"title": {
-								"description": "A skill's description, a reference document's first heading, a schema's description, or a summary of the script declarations, a script template or the native module's interface.",
+								"description": "A skill's description, a skill page's or reference document's first heading, a schema's description, or a summary of the script declarations, a script template or the native module's interface.",
 								"type": "string"
 							},
 							"bytes": {

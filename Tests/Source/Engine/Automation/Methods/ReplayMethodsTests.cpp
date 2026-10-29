@@ -621,8 +621,9 @@ namespace Engine {
 			const std::string hint(GetReplayDivergenceHint());
 			CHECK(hint.find("the look's included") != std::string::npos);
 			// M17 review D-06/R-03: an engine hint names the method, which engine_client and Runtime callers can call, and the
-			// skill section as game-building titles it, never the MCP tool.
-			CHECK(hint.ends_with("; re-record it with test.run {record} (the game-building skill, \"Re-recording replays\")"));
+			// skill section as game-building titles it, never the MCP tool; the section lives on the skill's replays page, the
+			// docs.get topic the hint names.
+			CHECK(hint.ends_with("; re-record it with test.run {record} (the game-building skill's page skills/game-building/replays, \"Re-recording replays\")"));
 			CHECK(hint.find("test_run") == std::string::npos);
 			const auto setRadius = [&fixture](double radius)
 			{

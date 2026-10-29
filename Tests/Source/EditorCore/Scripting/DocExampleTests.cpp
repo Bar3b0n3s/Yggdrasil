@@ -34,10 +34,11 @@ namespace Engine {
 		constexpr size_t MinimumCheckedBlocks = 5;
 
 		// The size the dispatcher compares with its offload threshold (DefaultOffloadThresholdBytes, §13.10) for the docs.get
-		// result of the skill `name` with the text `content`: the minified JSON of the serialized result without "_meta"
-		// (Dispatcher.cpp), so every newline, tab, quote and backslash of the text counts as its escape, and the topic and
-		// path members count too. §13.11 step 1 fetches the game-building skill inline, which needs it below the threshold.
-		size_t MeasureDocsGetResult(std::string_view name, const std::string& content)
+		// result of the topic `topic` (a skill, or one of its reference pages) whose file is `path`, with the text `content`:
+		// the minified JSON of the serialized result without "_meta" (Dispatcher.cpp), so every newline, tab, quote and
+		// backslash of the text counts as its escape, and the topic and path members count too. §13.11 step 1 fetches the
+		// game-building skill inline, which needs it below the threshold.
+		size_t MeasureDocsGetResult(std::string_view topic, std::string_view path, const std::string& content)
 		{
 			TypeRegistry types;
 			RegisterEditorObserveMethodTypes(types);
@@ -45,9 +46,9 @@ namespace Engine {
 			const StructInfo* type = types.FindStruct<DocsGetResult>();
 			REQUIRE(type != nullptr);
 			DocsGetResult result;
-			result.Topic = std::format("skills/{}", name);
+			result.Topic = std::string(topic);
 			result.Content = content;
-			result.Path = std::format(".claude/skills/{}/SKILL.md", name);
+			result.Path = std::string(path);
 			const Result<Json> serialized = type->ToJson(&result);
 			REQUIRE_MESSAGE(serialized.has_value(), serialized.error().ToString());
 			return serialized->dump(-1, ' ', false, Json::error_handler_t::replace).size();
@@ -56,7 +57,8 @@ namespace Engine {
 		// The documents of the tree at `root` (the repository) whose Luau blocks are checked, root-relative and sorted:
 		// Docs/*.md, Docs/Reference/*.md, AGENTS.md, Projects/*/AGENTS.md, Tests/Projects/*/AGENTS.md (the dry-run game's
 		// notes, Docs/Decisions/0026-m16-contract.md decision 13; the directory may not exist yet),
-		// Resources/Templates/**/*.md and .claude/skills/*/SKILL.md (Docs/Decisions/ is history and is not checked).
+		// Resources/Templates/**/*.md and .claude/skills/*/*.md (each skill's SKILL.md and reference pages, Architecture
+		// §13.10; Docs/Decisions/ is history and is not checked).
 		std::vector<std::string> ListCheckedDocuments(const std::filesystem::path& root)
 		{
 			std::vector<std::string> documents;
@@ -97,7 +99,6 @@ namespace Engine {
 			constexpr DocumentDirectory Directories[] = {
 				{ .Directory = "Projects", .File = "AGENTS.md", .Optional = false },
 				{ .Directory = "Tests/Projects", .File = "AGENTS.md", .Optional = true },
-				{ .Directory = ".claude/skills", .File = "SKILL.md", .Optional = false },
 			};
 			for (const DocumentDirectory& directory : Directories)
 			{
@@ -109,6 +110,15 @@ namespace Engine {
 				REQUIRE_MESSAGE(entries.has_value(), (entries ? std::string() : entries.error().ToString()));
 				for (const std::filesystem::path& entry : *entries)
 					addFile(entry / FileSystem::PathFromUtf8(directory.File));
+			}
+			// Each skill's SKILL.md and reference pages: the Markdown files directly in its directory.
+			const auto skills = FileSystem::ListDirectory(root / ".claude" / "skills", false);
+			REQUIRE_MESSAGE(skills.has_value(), (skills ? std::string() : skills.error().ToString()));
+			for (const std::filesystem::path& skill : *skills)
+			{
+				std::error_code error;
+				if (std::filesystem::is_directory(skill, error))
+					addMarkdown(skill, false);
 			}
 			std::ranges::sort(documents);
 			documents.erase(std::unique(documents.begin(), documents.end()), documents.end());
@@ -137,7 +147,7 @@ namespace Engine {
 	{
 		// Roadmap M14 acceptance; Architecture §11.9 (ADR 0022 decision 14). Every fenced block whose info string starts with
 		// lua or luau in Docs/*.md, Docs/Reference/*.md, AGENTS.md, Projects/*/AGENTS.md, Tests/Projects/*/AGENTS.md,
-		// Resources/Templates/**/*.md and .claude/skills/*/SKILL.md (Docs/Decisions/ excluded) is checked with the engine's
+		// Resources/Templates/**/*.md and .claude/skills/*/*.md (Docs/Decisions/ excluded) is checked with the engine's
 		// strict checker at its path=
 		// (default Assets/Scripts/DocExample.luau), wrapped by its prelude= stub, unless it carries skip="<reason>". Stub
 		// modules and preludes live in Tests/Data/TypeChecker/DocExamples/. Zero Error findings pass; at least
@@ -356,13 +366,16 @@ namespace Engine {
 
 		// ADR 0022 decision 17: every skill opens with the frontmatter the docs.get parser reads (name equal to its directory,
 		// a single-line description) and is small enough for docs.get to return inline: its serialized result, which the
-		// dispatcher measures, stays within the offload threshold (review finding M21: the raw text's size is not it).
+		// dispatcher measures, stays within the offload threshold (review finding M21: the raw text's size is not it). Its
+		// reference pages (Architecture §13.10: the other Markdown files of its directory, the topics "skills/<skill>/<page>")
+		// each fit inline on their own, have a name docs.get serves, carry no frontmatter but start with the "# " heading that
+		// docs.get {} lists as their title, and are named in their SKILL.md by topic and by file.
 		TEST_CASE("DocExamples: every skill document has the docs.get frontmatter and fits inline")
 		{
 			// A text below the threshold in raw bytes whose characters JSON escapes is still offloaded, so the raw size
 			// cannot stand in for the measure.
 			const std::string escaped(DefaultOffloadThresholdBytes - 1024, '\n');
-			CHECK(MeasureDocsGetResult("game-building", escaped) > DefaultOffloadThresholdBytes);
+			CHECK(MeasureDocsGetResult("skills/game-building", ".claude/skills/game-building/SKILL.md", escaped) > DefaultOffloadThresholdBytes);
 			const std::filesystem::path skills = Test::GetRepositoryRoot() / ".claude" / "skills";
 			const auto entries = FileSystem::ListDirectory(skills, false);
 			REQUIRE_MESSAGE(entries.has_value(), (entries ? std::string() : entries.error().ToString()));
@@ -377,19 +390,71 @@ namespace Engine {
 			for (const std::string_view required : { "add-automation-method", "add-component", "add-script-api", "build-and-test",
 					 "commit-review", "game-building", "game-debugging", "golden-images", "luau-gameplay" })
 				CHECK_MESSAGE(std::ranges::binary_search(names, required), required);
+			size_t pages = 0;
 			for (const std::string& name : names)
 			{
 				CAPTURE(name);
-				const Result<std::string> text = FileSystem::ReadText(skills / FileSystem::PathFromUtf8(name) / "SKILL.md");
+				const std::filesystem::path directory = skills / FileSystem::PathFromUtf8(name);
+				const Result<std::string> text = FileSystem::ReadText(directory / "SKILL.md");
 				REQUIRE_MESSAGE(text.has_value(), (text ? std::string() : text.error().ToString()));
-				CHECK(MeasureDocsGetResult(name, *text) <= DefaultOffloadThresholdBytes);
+				CHECK(MeasureDocsGetResult(std::format("skills/{}", name), std::format(".claude/skills/{}/SKILL.md", name), *text) <= DefaultOffloadThresholdBytes);
 				const std::string header = std::format("---\nname: {}\ndescription: ", name);
 				REQUIRE(text->starts_with(header));
 				const size_t end = text->find('\n', header.size());
 				REQUIRE(end != std::string::npos);
 				CHECK(end > header.size());
 				CHECK(std::string_view(*text).substr(end + 1).starts_with("---\n"));
+
+				const auto files = FileSystem::ListDirectory(directory, false);
+				REQUIRE_MESSAGE(files.has_value(), (files ? std::string() : files.error().ToString()));
+				for (const std::filesystem::path& file : *files)
+				{
+					const std::string fileName = FileSystem::PathToUtf8(file.filename());
+					std::error_code error;
+					if (fileName == "SKILL.md" || !fileName.ends_with(".md") || !std::filesystem::is_regular_file(file, error))
+						continue;
+					const std::string page = fileName.substr(0, fileName.size() - std::string_view(".md").size());
+					CAPTURE(page);
+					++pages;
+					// A name docs.get serves: one topic segment that is not SKILL.md's stem in another case.
+					CHECK_FALSE(page.empty());
+					CHECK(std::ranges::all_of(page, [](char character)
+					{
+						return (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9')
+							|| character == '-' || character == '_';
+					}));
+					std::string folded = page;
+					std::ranges::transform(folded, folded.begin(), [](char character)
+					{
+						return character >= 'a' && character <= 'z' ? static_cast<char>(character - 'a' + 'A') : character;
+					});
+					CHECK(folded != "SKILL");
+					const Result<std::string> pageText = FileSystem::ReadText(file);
+					REQUIRE_MESSAGE(pageText.has_value(), (pageText ? std::string() : pageText.error().ToString()));
+					const std::string topic = std::format("skills/{}/{}", name, page);
+					CHECK(MeasureDocsGetResult(topic, std::format(".claude/skills/{}/{}", name, fileName), *pageText) <= DefaultOffloadThresholdBytes);
+					CHECK(pageText->starts_with("# "));
+					CHECK_MESSAGE(text->contains(topic), std::format("SKILL.md does not name its page by the topic '{}'", topic));
+					CHECK_MESSAGE(text->contains(std::format("({})", fileName)), std::format("SKILL.md does not link its page '{}'", fileName));
+				}
 			}
+			// The crowded skills keep pages (build-and-test, game-building, game-debugging): a listing that finds none is broken.
+			CHECK(pages >= 3);
+		}
+
+		// Architecture §13.10: a skill's reference pages are documents like its SKILL.md, so their Luau fences are checked too;
+		// only the Markdown files directly in a skill's directory are its pages.
+		TEST_CASE("DocExamples: the reference pages of every skill are checked")
+		{
+			Test::TempDirectory tree("DocExampleSkillPages");
+			const std::string_view notes = "# Notes\n\n```luau\nlocal speed: number = 8\n```\n";
+			for (const std::string_view directory : { "Docs/Reference", "Resources/Templates", "Projects", ".claude/skills/a-skill/nested", ".claude/skills/b-skill" })
+				REQUIRE(FileSystem::CreateDirectories(tree / directory).has_value());
+			for (const std::string_view file : { ".claude/skills/a-skill/SKILL.md", ".claude/skills/a-skill/page.md", ".claude/skills/a-skill/nested/deep.md",
+					 ".claude/skills/a-skill/data.json", ".claude/skills/b-skill/SKILL.md", ".claude/skills/README.md" })
+				REQUIRE(FileSystem::WriteFileAtomic(tree / file, AsBytes(notes)).has_value());
+			CHECK(ListCheckedDocuments(tree.GetPath())
+				== std::vector<std::string>{ ".claude/skills/a-skill/SKILL.md", ".claude/skills/a-skill/page.md", ".claude/skills/b-skill/SKILL.md" });
 		}
 	}
 
