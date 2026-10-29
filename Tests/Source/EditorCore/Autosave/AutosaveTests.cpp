@@ -1129,6 +1129,41 @@ namespace Engine {
 			CHECK(manifest["Generations"].size() == 2);
 		}
 
+		// Decision 23 (M18's device-loss autosave, Docs/Decisions/0029-m18-contract.md decision 29, with every open scene): before
+		// it recovers a lost device the editor writes the fatal snapshot of every dirty open scene, and when the recovery then
+		// fails, the fatal hook's write of the same publication writes none of them again; a later edit of one scene is written
+		// alone.
+		TEST_CASE("Autosave: a fatal snapshot after the device-loss write of every dirty open scene writes none of them again")
+		{
+			AutosaveSetup setup;
+			EditorContext& editor = setup.Fixture.GetEditor();
+			setup.Dirty("LostMain");
+			const Result<VfsPath> secondPath = VfsPath::Parse("project://Assets/Scenes/Second.scene");
+			REQUIRE(secondPath.has_value());
+			const Result<OpenSceneId> second = editor.AddScene(editor.CreateScene("Second"), *secondPath);
+			REQUIRE_MESSAGE(second.has_value(), second.error().ToString());
+			setup.Dirty("LostSecond");
+			REQUIRE(setup.Service.Publish().has_value());
+
+			// EditorApp::OnDeviceLost, then the fatal hook of a failed recovery.
+			CHECK(setup.Service.WriteFatalSnapshot() == AutosaveFatalResult::Saved);
+			const Json written = AutosaveReadJson(setup.Root() / "Manifest.json");
+			CHECK(written["Generations"].size() == 2);
+			CHECK(setup.Service.WriteFatalSnapshot() == AutosaveFatalResult::Saved);
+			CHECK(AutosaveReadJson(setup.Root() / "Manifest.json") == written);
+
+			setup.Dirty("LaterSecond");
+			REQUIRE(setup.Service.Publish().has_value());
+			CHECK(setup.Service.WriteFatalSnapshot() == AutosaveFatalResult::Saved);
+			const Json later = AutosaveReadJson(setup.Root() / "Manifest.json");
+			CHECK(later["Generations"].size() == 3);
+			const auto offers = setup.Service.FindRecoveries();
+			REQUIRE_MESSAGE(offers.has_value(), offers.error().ToString());
+			REQUIRE(offers->size() == 2);
+			CHECK(AutosaveRead(setup.Root() / (*offers)[0].Generation / "Scene.json").contains("LostMain"));
+			CHECK(AutosaveRead(setup.Root() / (*offers)[1].Generation / "Scene.json").contains("LaterSecond"));
+		}
+
 		// Decision 15 (isolation): a scene that cannot be autosaved (its source changed under its edits) reports its conflict,
 		// and the other open scenes are written all the same.
 		TEST_CASE("Autosave: a scene whose source conflicts does not keep the other open scenes from being written")

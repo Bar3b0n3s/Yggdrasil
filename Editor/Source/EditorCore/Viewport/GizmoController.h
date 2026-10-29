@@ -39,10 +39,12 @@ namespace Engine {
 	// CPU logic only; ImGuizmo calls live in Editor/Viewport/GizmoOverlay. Main thread, non-copyable.
 	// Stores UUIDs and an owned preview scene copy, never a live component reference. context outlives the controller.
 	// Begin captures the base revision and scene; Update edits only the preview, used by the scene viewport's extraction.
-	// End applies the final poses with one short SceneEdit. In play/simulate it targets only the runtime scene and
-	// returns index 0 (transient, no history). No live tracker spans frames, so agent commands can interleave.
-	// An intervening agent/UI edit, undo, scene swap, play transition or runtime scene replacement (Scene.Load: the session's
-	// serial plus scene generation identify the runtime scene) discards the preview with Conflict before writing.
+	// End applies the final poses with one short SceneEdit. In play/simulate, while the editor shows the play scene, it
+	// targets only the runtime scene and returns index 0 (transient, no history); in another open scene's tab it edits that
+	// tab's edit scene as in Edit mode (M20, Docs/Decisions/0031-m20-contract.md decisions 13 and 23: a drag edits the scene
+	// the scene view shows, EditorContext::ShowsPlayScene). No live tracker spans frames, so agent commands can interleave.
+	// An intervening agent/UI edit, undo, scene swap or tab switch, play transition or runtime scene replacement (Scene.Load:
+	// the session's serial plus scene generation identify the runtime scene) discards the preview with Conflict before writing.
 	class GizmoController
 	{
 	public:

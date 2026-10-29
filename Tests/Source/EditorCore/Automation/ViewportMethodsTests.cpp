@@ -49,6 +49,40 @@ namespace Engine {
 			CHECK((*framed)["target"] == Json::array({ 0, 0, 0 }));
 		}
 
+		// M20 (Docs/Decisions/0031-m20-contract.md decisions 13 and 23): viewport.frame frames entities of the scene the scene
+		// view shows: the play scene in the played scene's tab, and in another open scene's tab its edit scene.
+		TEST_CASE("ViewportMethods: frame resolves in another open scene's edit scene while a session plays")
+		{
+			Test::M10MethodFixture setup;
+			EditorContext& editor = setup.Fixture.GetEditor();
+			{
+				SceneEdit edit(editor, "Create");
+				static_cast<void>(editor.GetScene().CreateEntity("Played"));
+				REQUIRE(edit.Commit().has_value());
+			}
+			const OpenSceneId main = editor.GetActiveSceneId();
+			REQUIRE(setup.Call("scene.new", Json{ { "path", "Assets/Scenes/Second.scene" }, { "keepOpen", true } }).has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Edited" }, { "components", Json{ { "Transform", Json{ { "Translation", { 4, 0, 0 } } } } } } }).has_value());
+			const OpenSceneId second = editor.GetActiveSceneId();
+			REQUIRE(setup.Call("scene.activate", Json{ { "scene", main } }).has_value());
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true } }).has_value());
+			REQUIRE(setup.Call("scene.activate", Json{ { "scene", second } }).has_value());
+
+			const auto framed = setup.Call("viewport.frame", Json{ { "entities", { "/Edited" } } });
+			REQUIRE_MESSAGE(framed.has_value(), framed.error().ToString());
+			CHECK((*framed)["entities"][0]["name"] == "Edited");
+			CHECK((*framed)["target"] == Json::array({ 4, 0, 0 }));
+			const auto missing = setup.Call("viewport.frame", Json{ { "entities", { "/Played" } } });
+			REQUIRE_FALSE(missing.has_value());
+			CHECK(missing.error().GetCode() == ErrorCode::NotFound);
+
+			REQUIRE(setup.Call("scene.activate", Json{ { "scene", main } }).has_value());
+			const auto played = setup.Call("viewport.frame", Json{ { "entities", { "/Played" } } });
+			REQUIRE_MESSAGE(played.has_value(), played.error().ToString());
+			CHECK((*played)["entities"][0]["name"] == "Played");
+			REQUIRE(setup.Call("play.stop").has_value());
+		}
+
 		TEST_CASE("ViewportMethods: setOptions patches only supplied options")
 		{
 			Test::M10MethodFixture setup;

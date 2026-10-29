@@ -208,7 +208,7 @@ All modes; LoadTime|Runtime|Test; pure/read.
 
 `(type: string) -> FieldDescriptor`
 
-Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for imported audio and .sfx sound effects, Script, Font or Replay), with a null default; any other name fails the import.
+Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for imported audio and .sfx sound effects, Script, Font, Replay or SpriteSheet), with a null default; any other name fails the import.
 
 All modes; LoadTime|Runtime|Test; pure/read.
 
@@ -3306,6 +3306,8 @@ What asset.create makes.
 
 - `Folder`: A folder below Assets/; one that already exists is left as it is (created: false).
 
+- `SpriteSheet`: A .spritesheet sprite sheet: frames of a texture with pivots and 9-slice borders, and clips; without values an empty sheet.
+
 ## AssetState
 
 Where an asset is in its life (§7.2).
@@ -3343,6 +3345,8 @@ The kind of a loadable asset (§7.1).
 - `Font`: A font (TTF, OTF) as a signed distance field atlas.
 
 - `Replay`: An input replay (.replay).
+
+- `SpriteSheet`: A sprite sheet (.spritesheet): frames of a texture with pivots and 9-slice borders, and clips.
 
 ## Attenuation
 
@@ -3467,6 +3471,8 @@ The kind of an engine event (§4.9).
 - `DiagnosticsChanged`: The project's diagnostics changed.
 
 - `AutomationClientDisconnected`: An automation client disconnected.
+
+- `GpuDeviceLost`: The GPU device was lost and has been recovered, so the frames after it render again (message: the loss's report). A failed recovery ends the process, so it never appears.
 
 - `SceneActivated`: The editor's active scene changed.
 

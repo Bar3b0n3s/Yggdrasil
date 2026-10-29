@@ -61,7 +61,7 @@ namespace Engine {
 		return GetFeatureTestRoot() / Test::PathFromUtf8(relative);
 	}
 
-	// The field schemas of every script a scene document attaches (its entities' Script components), loaded through
+	// The field schemas of every script a scene document attaches (every slot of its entities' Script components), loaded through
 	// `manager`, so a strict load resolves the scene's script fields as the play copy and an export do (M13); fails the test
 	// case when the document or a script does not load.
 	static Ref<const ScriptFieldSchemaSource> LoadSceneScriptSchemas(AssetManager& manager, std::string_view sceneText)
@@ -77,16 +77,23 @@ namespace Engine {
 			REQUIRE(entity.has_value());
 			const std::optional<JsonReader> components = entity->FindMember("Components");
 			const std::optional<JsonReader> component = components ? components->FindMember("Script") : std::nullopt;
-			const std::optional<JsonReader> script = component ? component->FindMember("Script") : std::nullopt;
-			if (!script || script->IsNull())
-				continue;
-			const Result<AssetHandle> handle = script->Read<AssetHandle>();
-			REQUIRE_MESSAGE(handle.has_value(), handle.error().ToString());
-			const Result<AssetRef<Asset>> loaded = manager.Load(*handle);
-			REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
-			AssetRef<ScriptData> data = AssetCast<ScriptData>(*loaded);
-			REQUIRE(data);
-			scripts.emplace(*handle, std::move(data));
+			const std::optional<JsonReader> slots = component ? component->FindMember("Scripts") : std::nullopt;
+			// Every slot's script (Script version 2, Docs/Decisions/0031-m20-contract.md decision 17).
+			for (size_t slot = 0; slots && slot < slots->GetArraySize().value_or(0); ++slot)
+			{
+				const Result<JsonReader> entry = slots->GetElement(slot);
+				REQUIRE(entry.has_value());
+				const std::optional<JsonReader> script = entry->FindMember("Script");
+				if (!script || script->IsNull())
+					continue;
+				const Result<AssetHandle> handle = script->Read<AssetHandle>();
+				REQUIRE_MESSAGE(handle.has_value(), handle.error().ToString());
+				const Result<AssetRef<Asset>> loaded = manager.Load(*handle);
+				REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
+				AssetRef<ScriptData> data = AssetCast<ScriptData>(*loaded);
+				REQUIRE(data);
+				scripts.emplace(*handle, std::move(data));
+			}
 		}
 		Result<Ref<const ScriptFieldSchemaSource>> schemas = ScriptFieldSchemaSource::Create(std::move(scripts));
 		REQUIRE_MESSAGE(schemas.has_value(), schemas.error().ToString());

@@ -38,7 +38,10 @@ namespace Engine {
 	};
 	struct ViewportFrameParams
 	{
-		std::vector<std::string> Entities{}; // required, non-empty EntityRefs from the shown scene (Play when running)
+		// required, non-empty EntityRefs from the scene the scene view shows: the play scene while the editor shows it
+		// (EditorContext::ShowsPlayScene), otherwise the active scene's edit scene (M20, Docs/Decisions/0031-m20-contract.md
+		// decisions 13 and 23)
+		std::vector<std::string> Entities{};
 	};
 	struct ViewportFrameResult
 	{

@@ -62,7 +62,8 @@ namespace Engine {
 
 	Status SceneViewportPanel::FrameSelection(EditorPanelContext& context)
 	{
-		const SceneTarget target = context.Editor.GetPlay().IsPlaying() ? SceneTarget::Play : SceneTarget::Edit;
+		// The scene the scene view shows (M20 decisions 13 and 23), which viewport.frame frames.
+		const SceneTarget target = context.Editor.ShowsPlayScene() ? SceneTarget::Play : SceneTarget::Edit;
 		if (context.Editor.GetSelectionTarget() != target || context.Editor.GetSelection().empty())
 			return MakeError(ErrorCode::InvalidState, "Select entities in the displayed scene to frame them");
 		Json entities = Json::array();

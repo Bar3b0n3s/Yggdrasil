@@ -14,7 +14,7 @@
 		"Text": 1,
 		"AudioSource": 1,
 		"AudioListener": 1,
-		"Script": 1
+		"Script": 2
 	},
 	"Entities": [
 		{
@@ -555,11 +555,15 @@
 					"Scale": [1, 1, 1]
 				},
 				"Script": {
-					"Script": "5f6d935758e2bfd1",
-					"Fields": {
-						"Sheet": "aa3013b7e31d75ca"
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "5f6d935758e2bfd1",
+							"Fields": {
+								"Sheet": "aa3013b7e31d75ca"
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		}

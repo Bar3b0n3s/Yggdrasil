@@ -11,7 +11,7 @@
 		"Environment": 1,
 		"PostProcess": 1,
 		"Text": 1,
-		"Script": 1
+		"Script": 2
 	},
 	"Entities": [
 		{
@@ -291,21 +291,25 @@
 					"Scale": [1, 1, 1]
 				},
 				"Script": {
-					"Script": "2c31e5fd8094d5ff",
-					"Fields": {
-						"CellPrefab": "b2ce1ae4cc59874d",
-						"ClearSound": "bace05d6580b3799",
-						"DropSound": "5f795ba4ad9c13e6",
-						"GameOverSound": "5a73e72041250825",
-						"HoldSound": "fa88b7ddac079753",
-						"LevelSound": "cc538f4c47bce4da",
-						"LockSound": "ca51c77fbe30b01d",
-						"Materials": ["aff966c9a9e359dc", "27ca6d33a4480e64", "893c23986c541ed6", "dc4dfea16315ab14", "90668ec5cd8a76b4", "e109111d603ab2d0", "235bd62a206faf5d", "1687a7ad5db0d220", "59a06c0f473572bf"],
-						"MoveSound": "0fb92e13ec6a305f",
-						"RotateSound": "755872f1acca1dab",
-						"TetrisSound": "c971e7208a5a6cc8"
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "2c31e5fd8094d5ff",
+							"Fields": {
+								"CellPrefab": "b2ce1ae4cc59874d",
+								"ClearSound": "bace05d6580b3799",
+								"DropSound": "5f795ba4ad9c13e6",
+								"GameOverSound": "5a73e72041250825",
+								"HoldSound": "fa88b7ddac079753",
+								"LevelSound": "cc538f4c47bce4da",
+								"LockSound": "ca51c77fbe30b01d",
+								"Materials": ["aff966c9a9e359dc", "27ca6d33a4480e64", "893c23986c541ed6", "dc4dfea16315ab14", "90668ec5cd8a76b4", "e109111d603ab2d0", "235bd62a206faf5d", "1687a7ad5db0d220", "59a06c0f473572bf"],
+								"MoveSound": "0fb92e13ec6a305f",
+								"RotateSound": "755872f1acca1dab",
+								"TetrisSound": "c971e7208a5a6cc8"
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},

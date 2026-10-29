@@ -58,7 +58,9 @@ namespace Engine {
 			Utils::CancelViewportGizmo(controller);
 			return {};
 		}
-		PlaySession* session = context.GetPlay().GetSession();
+		// The scene the scene view shows, which the drag edits (GizmoController; M20 decisions 13 and 23): the play scene only
+		// while the editor shows it.
+		PlaySession* session = context.ShowsPlayScene() ? context.GetPlay().GetSession() : nullptr;
 		const SceneTarget target = session ? SceneTarget::Play : SceneTarget::Edit;
 		const Scene* scene = session ? &session->GetScene() : context.HasScene() ? &context.GetScene()
 																				 : nullptr;

@@ -8,7 +8,7 @@
 		"MeshRenderer": 1,
 		"RigidBody": 1,
 		"BoxCollider": 1,
-		"Script": 1
+		"Script": 2
 	},
 	"Entities": [
 		{
@@ -56,11 +56,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 1
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 1
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		}

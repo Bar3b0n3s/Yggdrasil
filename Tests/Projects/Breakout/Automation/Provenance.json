@@ -236,11 +236,11 @@
 		},
 		{
 			"Path": "Assets/Prefabs/Brick.prefab",
-			"XXH64": "1b03223310afc522",
-			"Method": "prefab.create",
-			"RequestId": 29,
-			"Client": "engine-mcp",
-			"TranscriptLine": 55
+			"XXH64": "8bf9f4170925374c",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 403
 		},
 		{
 			"Path": "Assets/Prefabs/Brick.prefab.meta",
@@ -252,11 +252,11 @@
 		},
 		{
 			"Path": "Assets/Scenes/Main.scene",
-			"XXH64": "3c8ae4b32ebb5d43",
-			"Method": "scene.save",
-			"RequestId": 37,
-			"Client": "engine-mcp",
-			"TranscriptLine": 71
+			"XXH64": "d68425e3bf5595eb",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 403
 		},
 		{
 			"Path": "Assets/Scenes/Main.scene.meta",

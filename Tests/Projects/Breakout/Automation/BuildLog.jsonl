@@ -398,3 +398,7 @@
 {"type":"response","time":"2026-10-26T05:35:39.341Z","client":"cli","id":1,"requestLine":397,"ok":true,"summary":"ok"}
 {"type":"request","time":"2026-10-26T05:35:39.343Z","client":"cli","id":2,"method":"project.upgrade","params":{}}
 {"type":"response","time":"2026-10-26T05:35:39.379Z","client":"cli","id":2,"requestLine":399,"ok":true,"summary":"ok"}
+{"type":"request","time":"2026-10-27T06:31:41.024Z","client":"cli","id":1,"method":"project.refreshAssets","params":{}}
+{"type":"response","time":"2026-10-27T06:31:41.072Z","client":"cli","id":1,"requestLine":401,"ok":true,"summary":"ok"}
+{"type":"request","time":"2026-10-27T06:31:41.073Z","client":"cli","id":2,"method":"project.upgrade","params":{}}
+{"type":"response","time":"2026-10-27T06:31:41.138Z","client":"cli","id":2,"requestLine":403,"ok":true,"summary":"ok"}

@@ -493,6 +493,48 @@ namespace Engine {
 			CHECK_FALSE(editor.IsSceneDirty());
 		}
 
+		// M20 (Docs/Decisions/0031-m20-contract.md decisions 13 and 23): a drag edits the scene the scene view shows. In an open
+		// scene's tab other than the played one, that is the tab's edit scene, recorded in its history as in Edit mode, and the
+		// play scene is untouched; a tab switch during a drag discards it.
+		TEST_CASE("GizmoController: a drag in another open scene's tab while a session plays edits that tab's edit scene")
+		{
+			Test::EditorTestFixture fixture("GizmoOpenScenes");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			Test::AutomationTestClient client(editor);
+			const OpenSceneId main = editor.GetActiveSceneId();
+			static_cast<void>(editor.GetScene().CreateEntity("Played"));
+			REQUIRE(client.Call("scene.new", Json{ { "path", "Assets/Scenes/Second.scene" }, { "keepOpen", true } }).has_value());
+			const OpenSceneId second = editor.GetActiveSceneId();
+			const std::array selected{ editor.GetScene().CreateEntity("Edited").GetUUID() };
+			REQUIRE(client.Call("scene.activate", Json{ { "scene", main } }).has_value());
+			REQUIRE(editor.GetPlay().Start({ .Mode = PlayMode::Play, .Lockstep = true, .Paused = true }).has_value());
+			const Scene& played = editor.GetPlay().GetSession()->GetScene();
+			const std::string playedBefore = Utils::ViewportTestSceneText(played);
+			REQUIRE(client.Call("scene.activate", Json{ { "scene", second } }).has_value());
+
+			GizmoController gizmo(editor);
+			REQUIRE(gizmo.Begin(selected, glm::mat4(1.0f), {}).has_value());
+			REQUIRE(gizmo.Update(Utils::ViewportTestTranslation(3.0f)).has_value());
+			const auto moved = gizmo.End();
+			REQUIRE_MESSAGE(moved.has_value(), moved.error().ToString());
+			CHECK(*moved != 0);
+			CHECK(editor.GetActiveSceneId() == second);
+			Utils::ViewportTestNear(Utils::ViewportTestPosition(editor.GetScene(), selected[0]), { 3.0f, 0.0f, 0.0f });
+			CHECK(editor.GetHistory().GetUndoCount() == 1);
+			CHECK(Utils::ViewportTestSceneText(played) == playedBefore);
+
+			// A tab switch during the drag discards it.
+			REQUIRE(gizmo.Begin(selected, glm::mat4(1.0f), {}).has_value());
+			REQUIRE(gizmo.Update(Utils::ViewportTestTranslation(5.0f)).has_value());
+			REQUIRE(client.Call("scene.activate", Json{ { "scene", main } }).has_value());
+			const auto switched = gizmo.End();
+			REQUIRE_FALSE(switched.has_value());
+			CHECK(switched.error().GetCode() == ErrorCode::Conflict);
+			REQUIRE(editor.GetPlay().Stop().has_value());
+		}
+
 		TEST_CASE("GizmoController: local snapping follows the captured rotated axes")
 		{
 			Test::EditorTestFixture fixture("GizmoLocalSnap");

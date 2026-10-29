@@ -229,9 +229,16 @@ namespace Engine {
 		snapshot.SelectedEntities.assign(selection.begin(), selection.end());
 		return {};
 	}
-	Result<RenderSnapshot> EditorHostViewports::Extract(ViewportView view, uint32_t width, uint32_t height)
+	PlaySession* EditorHostViewports::GetShownSession(ViewportView view) const
 	{
 		PlaySession* session = m_Editor.GetPlay().GetSession();
+		if (session == nullptr || (view == ViewportView::Scene && !m_Editor.ShowsPlayScene()))
+			return nullptr;
+		return session;
+	}
+	Result<RenderSnapshot> EditorHostViewports::Extract(ViewportView view, uint32_t width, uint32_t height)
+	{
+		PlaySession* session = GetShownSession(view);
 		const Scene* preview = view == ViewportView::Scene ? m_Gizmos.GetPreviewScene() : nullptr;
 		const Scene* scene = preview ? preview : session ? &session->GetScene()
 			: m_Editor.HasScene()                        ? &m_Editor.GetScene()
@@ -289,7 +296,7 @@ namespace Engine {
 		view.Queued = click;
 		return {};
 	}
-	Status EditorHostViewports::Poll(View& view, uint64_t frameIndex)
+	Status EditorHostViewports::Poll(View& view, ViewportView kind, uint64_t frameIndex)
 	{
 		for (auto item = view.Pending.begin(); item != view.Pending.end();)
 		{
@@ -309,7 +316,9 @@ namespace Engine {
 			const PickResult picked = **result;
 			const EditorViewportClick click = item->Click;
 			item = view.Pending.erase(item);
-			PlaySession* session = m_Editor.GetPlay().GetSession();
+			// The scene the view shows (GetShownSession), which the pick's image rendered: a pick in another open scene's tab
+			// while a session plays selects in that tab's edit scene.
+			PlaySession* session = GetShownSession(kind);
 			Scene* scene = session ? &session->GetScene() : m_Editor.HasScene() ? &m_Editor.GetScene()
 																				: nullptr;
 			if (!scene || scene != view.Source || scene->GetRevision() != picked.SceneRevision
@@ -405,7 +414,7 @@ namespace Engine {
 		}
 		const glm::uvec2 rendered(view.Renderer->GetWidth(), view.Renderer->GetHeight());
 		ENGINE_TRY_ASSIGN(RenderSnapshot snapshot, Extract(kind, rendered.x, rendered.y));
-		PlaySession* session = m_Editor.GetPlay().GetSession();
+		PlaySession* session = GetShownSession(kind);
 		const Scene* source = session ? &session->GetScene() : m_Editor.HasScene() ? &m_Editor.GetScene()
 																				   : nullptr;
 		// Cancel before polling: a proportional resize keeps the camera matrices equal, but the old pixel no longer
@@ -417,7 +426,7 @@ namespace Engine {
 			Cancel(view);
 		view.Source = source;
 		view.Flags = snapshot.Flags;
-		ENGINE_TRY(Poll(view, context.FrameIndex));
+		ENGINE_TRY(Poll(view, kind, context.FrameIndex));
 		snapshot.FrameIndex = context.FrameIndex;
 		view.Recorded = true;
 		view.HoldsSceneResources = true;

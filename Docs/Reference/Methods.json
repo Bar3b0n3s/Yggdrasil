@@ -6,7 +6,7 @@
 		{
 			"name": "asset.create",
 			"domain": "asset",
-			"description": "Creates a material or a sound effect (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
+			"description": "Creates a material, a sound effect or a sprite sheet (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": true,
@@ -23,14 +23,14 @@
 				"properties": {
 					"type": {
 						"description": "What to create.",
-						"enum": ["Material", "Scene", "Prefab", "SoundEffect", "Folder"]
+						"enum": ["Material", "Scene", "Prefab", "SoundEffect", "Folder", "SpriteSheet"]
 					},
 					"path": {
-						"description": "The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx; none for a folder); missing parent folders are created with it.",
+						"description": "The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx, .spritesheet; none for a folder); missing parent folders are created with it.",
 						"type": "string"
 					},
 					"values": {
-						"description": "A Material's or a SoundEffect's fields over the defaults (registry names, such as Roughness, or Layers, which a sound effect needs); absent for other types."
+						"description": "A Material's, a SoundEffect's or a SpriteSheet's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, or a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads); absent for other types."
 					},
 					"dryRun": {
 						"description": "Validate and return the would-be result without applying anything.",
@@ -95,7 +95,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet"]
 							}
 						},
 						"additionalProperties": false
@@ -124,6 +124,53 @@
 								{
 									"Wave": "Square",
 									"Notes": ["B5:0.05", "E6:0.2"]
+								}
+							]
+						}
+					}
+				},
+				{
+					"description": "Create a sprite sheet with two 16 x 16 frames of a texture and a looping clip over them.",
+					"params": {
+						"type": "SpriteSheet",
+						"path": "Assets/Sprites/Hero.spritesheet",
+						"values": {
+							"Texture": "4a1c0e7d2b9f3a65",
+							"Frames": [
+								{
+									"Name": "Idle0",
+									"Rect": {
+										"X": 0,
+										"Y": 0,
+										"Width": 16,
+										"Height": 16
+									},
+									"Pivot": [0.5, 1]
+								},
+								{
+									"Name": "Idle1",
+									"Rect": {
+										"X": 16,
+										"Y": 0,
+										"Width": 16,
+										"Height": 16
+									},
+									"Pivot": [0.5, 1]
+								}
+							],
+							"Clips": [
+								{
+									"Name": "Idle",
+									"Frames": [
+										{
+											"Frame": 0,
+											"Ticks": 10
+										},
+										{
+											"Frame": 1,
+											"Ticks": 10
+										}
+									]
 								}
 							]
 						}
@@ -222,7 +269,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet"]
 							}
 						},
 						"additionalProperties": false
@@ -312,7 +359,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet"]
 							}
 						},
 						"additionalProperties": false
@@ -331,7 +378,7 @@
 		{
 			"name": "asset.getProperties",
 			"domain": "asset",
-			"description": "Returns every property of a native asset (a material or a sound effect) by registry name.",
+			"description": "Returns every property of a native asset (a material, a sound effect or a sprite sheet) by registry name.",
 			"exposeAsTool": true,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -347,7 +394,7 @@
 				"type": "object",
 				"properties": {
 					"asset": {
-						"description": "The native asset (a material or a sound effect).",
+						"description": "The native asset (a material, a sound effect or a sprite sheet).",
 						"type": "string"
 					},
 					"ifRevision": {
@@ -398,7 +445,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet"]
 							}
 						},
 						"additionalProperties": false
@@ -515,7 +562,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet"]
 							}
 						},
 						"additionalProperties": false
@@ -688,7 +735,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet"]
 							}
 						},
 						"additionalProperties": false
@@ -755,7 +802,7 @@
 					},
 					"type": {
 						"description": "Only assets of this type; None lists every type.",
-						"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay"]
+						"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet"]
 					},
 					"recursive": {
 						"description": "Also list the folders below dir.",
@@ -832,7 +879,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet"]
 							}
 						},
 						"additionalProperties": false
@@ -939,7 +986,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet"]
 							}
 						},
 						"additionalProperties": false
@@ -1037,7 +1084,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet"]
 							}
 						},
 						"additionalProperties": false
@@ -1163,7 +1210,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet"]
 							}
 						},
 						"additionalProperties": false
@@ -1185,7 +1232,7 @@
 		{
 			"name": "asset.setProperties",
 			"domain": "asset",
-			"description": "Applies an RFC 7386 merge patch to a native asset's properties (a material or a sound effect) and writes it, as one undoable command. A running lockstep, recording, replay or test session sees the change only after it ends: asset reloads are deferred like script reloads.",
+			"description": "Applies an RFC 7386 merge patch to a native asset's properties (a material, a sound effect or a sprite sheet; an array such as a sheet's Frames is replaced whole) and writes it, as one undoable command. A running lockstep, recording, replay or test session sees the change only after it ends: asset reloads are deferred like script reloads.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": true,
@@ -1201,7 +1248,7 @@
 				"type": "object",
 				"properties": {
 					"asset": {
-						"description": "The native asset (a material or a sound effect).",
+						"description": "The native asset (a material, a sound effect or a sprite sheet).",
 						"type": "string"
 					},
 					"values": {
@@ -1265,7 +1312,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet"]
 							}
 						},
 						"additionalProperties": false
@@ -1495,7 +1542,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet"]
 							}
 						},
 						"additionalProperties": false
@@ -6298,7 +6345,7 @@
 		{
 			"name": "events.read",
 			"domain": "events",
-			"description": "Reads engine events (entities, scenes, assets, scripts, clients) by cursor, filtered by type. Pass nextCursor to the next read; \"end\" returns only the cursor of the next event.",
+			"description": "Reads engine events (entities, scenes, assets, scripts, clients, recovered GPU device losses) by cursor, filtered by type. Pass nextCursor to the next read; \"end\" returns only the cursor of the next event.",
 			"exposeAsTool": false,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -6321,7 +6368,7 @@
 						"description": "Only these event types; empty for every type.",
 						"type": "array",
 						"items": {
-							"enum": ["EntityCreated", "EntityDestroyed", "ComponentChanged", "SceneOpened", "SceneChangedOnDisk", "PlayStateChanged", "AssetReloaded", "AssetImportFailed", "ScriptErrorRaised", "DiagnosticsChanged", "AutomationClientDisconnected", "SceneActivated", "SceneClosed"]
+							"enum": ["EntityCreated", "EntityDestroyed", "ComponentChanged", "SceneOpened", "SceneChangedOnDisk", "PlayStateChanged", "AssetReloaded", "AssetImportFailed", "ScriptErrorRaised", "DiagnosticsChanged", "AutomationClientDisconnected", "GpuDeviceLost", "SceneActivated", "SceneClosed"]
 						}
 					},
 					"limit": {
@@ -6385,7 +6432,7 @@
 							},
 							"type": {
 								"description": "The event's type.",
-								"enum": ["EntityCreated", "EntityDestroyed", "ComponentChanged", "SceneOpened", "SceneChangedOnDisk", "PlayStateChanged", "AssetReloaded", "AssetImportFailed", "ScriptErrorRaised", "DiagnosticsChanged", "AutomationClientDisconnected", "SceneActivated", "SceneClosed"]
+								"enum": ["EntityCreated", "EntityDestroyed", "ComponentChanged", "SceneOpened", "SceneChangedOnDisk", "PlayStateChanged", "AssetReloaded", "AssetImportFailed", "ScriptErrorRaised", "DiagnosticsChanged", "AutomationClientDisconnected", "GpuDeviceLost", "SceneActivated", "SceneClosed"]
 							},
 							"tick": {
 								"description": "The simulation tick; -1 outside play.",
@@ -9686,7 +9733,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet"]
 							}
 						},
 						"additionalProperties": false
@@ -9804,7 +9851,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet"]
 							}
 						},
 						"additionalProperties": false
@@ -11247,7 +11294,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet"]
 							}
 						},
 						"additionalProperties": false
@@ -11517,6 +11564,94 @@
 					"description": "Make the cell an ordinary entity.",
 					"params": {
 						"instance": "/Board/Cell"
+					}
+				}
+			]
+		},
+		{
+			"name": "profiler.capture",
+			"domain": "profiler",
+			"description": "Captures the editor's next frames as one Chrome trace with the CPU zones of every thread and the GPU zones of every rendered view (stages and passes), written to the automation output directory; without a renderer the trace holds CPU zones only. Timings are diagnostic.",
+			"exposeAsTool": false,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": true,
+			"timeoutSeconds": 120,
+			"requiredParams": [],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "ProfilerCaptureParams",
+				"description": "The params of profiler.capture.",
+				"type": "object",
+				"properties": {
+					"frames": {
+						"description": "How many of the editor's next frames the trace captures.",
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 600
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "ProfilerCaptureResult",
+				"description": "The Chrome trace profiler.capture wrote.",
+				"type": "object",
+				"properties": {
+					"path": {
+						"description": "The trace's absolute path: a Chrome trace JSON file for chrome://tracing or Perfetto.",
+						"type": "string"
+					},
+					"frames": {
+						"description": "The frames captured.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"cpuZones": {
+						"description": "The CPU zones the trace holds, of every thread.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"gpuZones": {
+						"description": "The GPU zones the trace holds (render stages and passes); 0 without a renderer.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"droppedZones": {
+						"description": "The zones of the captured frames that the profiler's per-thread rings overwrote before the trace was written, which the trace lacks (also in its otherData); 0 for a complete trace. Capture fewer frames when it is not 0.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {}
+			},
+			"examples": [
+				{
+					"description": "Profile the next 30 frames.",
+					"params": {
+						"frames": 30
 					}
 				}
 			]
@@ -13416,7 +13551,7 @@
 		{
 			"name": "project.upgrade",
 			"domain": "project",
-			"description": "Applies migrations and canonical re-saves to every project file (the .eproj, and every scene, prefab, .meta, material, sound effect and replay under Assets/), records each rewrite in provenance and reports the changed files, each with its reason (changes: \"format version 1 to 2\", \"canonical form\"). Run it after an engine change to canonical output; dryRun: true lists what it would rewrite. An unknown member in a material, sound effect or replay fails the upgrade at its file and pointer, as its importer refuses it. Not undoable; refuses while an open scene has unsaved changes (save them first), and reloads every open scene whose file it rewrote.",
+			"description": "Applies migrations and canonical re-saves to every project file (the .eproj, and every scene, prefab, .meta, material, sound effect, replay and sprite sheet under Assets/), records each rewrite in provenance and reports the changed files, each with its reason (changes: \"format version 1 to 2\", \"canonical form\"). Run it after an engine change to canonical output; dryRun: true lists what it would rewrite. An unknown member in a material, sound effect, replay or sprite sheet fails the upgrade at its file and pointer, as its importer refuses it. Not undoable; refuses while an open scene has unsaved changes (save them first), and reloads every open scene whose file it rewrote.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": true,
@@ -15457,7 +15592,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet"]
 							}
 						},
 						"additionalProperties": false
@@ -15889,7 +16024,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet"]
 							}
 						},
 						"additionalProperties": false
@@ -16001,7 +16136,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet"]
 							}
 						},
 						"additionalProperties": false
@@ -16105,7 +16240,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet"]
 							}
 						},
 						"additionalProperties": false
@@ -16546,6 +16681,70 @@
 			]
 		},
 		{
+			"name": "shaders.reload",
+			"domain": "shaders",
+			"description": "Reloads the editor's compiled shaders without a restart, after CompileShaders.py or a build of the Shaders project rewrote them: every scene renderer pipeline is rebuilt and swapped in only when all succeed, so a broken shader fails the call and keeps the previous pipelines. Compiles nothing; Unsupported without a renderer.",
+			"exposeAsTool": false,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 120,
+			"requiredParams": [],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NoParams",
+				"description": "The params of a method that takes none: an empty object.",
+				"type": "object",
+				"properties": {
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "ShadersReloadResult",
+				"description": "The scene renderer pipelines shaders.reload swapped in.",
+				"type": "object",
+				"properties": {
+					"pipelineCount": {
+						"description": "The scene renderer pipelines in use after the reload.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"generation": {
+						"description": "The pipeline generation after the reload; it increases with every reload that succeeds.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {}
+			},
+			"examples": [
+				{
+					"description": "Swap in shaders rebuilt by CompileShaders.py.",
+					"params": {}
+				}
+			]
+		},
+		{
 			"name": "stats.get",
 			"domain": "stats",
 			"description": "Reads host and displayed-view statistics without waiting for the GPU or advancing a frame.",
@@ -16646,6 +16845,12 @@
 						"items": {
 							"$ref": "#/$defs/StatsViewSummary"
 						}
+					},
+					"deviceLosses": {
+						"description": "The GPU device losses this host recovered from since it started, each also a GpuDeviceLost event; 0 with renderer none.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
 					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",

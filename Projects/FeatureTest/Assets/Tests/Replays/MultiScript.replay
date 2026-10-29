@@ -1,6 +1,6 @@
 {
 	"Format": "Replay",
-	"Version": 2,
+	"Version": 3,
 	"Scene": {
 		"Handle": "084938f9b9014150",
 		"Path": "Assets/Scenes/MultiScript.scene"
@@ -10,6 +10,182 @@
 	"FixedHz": 64,
 	"EngineVersion": "0.1.0",
 	"Config": "Editor",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "195edc3357abc458",
+				"Path": "/Camera",
+				"Hash": "64f531dbed5520c4",
+				"Components": {
+					"Transform": "29a2d28c9ab4ac29",
+					"Camera": "8509390a2ff98dfc",
+					"AudioListener": "5364d8903ff7ab7d"
+				}
+			},
+			{
+				"Id": "247b639641fc61dd",
+				"Path": "/Beta",
+				"Hash": "06918362a0421df5",
+				"Components": {
+					"Transform": "a0fdc7c701487bd5",
+					"Script": "64a2ca1fe5cd7bee"
+				}
+			},
+			{
+				"Id": "310860e331ff8326",
+				"Path": "/WalkerA",
+				"Hash": "803951fded56399a",
+				"Components": {
+					"Transform": "dcc518d2cab07519",
+					"Prefab": "d05b9e7202726dfe",
+					"PrefabLink": "7c589aae7cd9a167",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"Script": "29e7a3056f91d319"
+				}
+			},
+			{
+				"Id": "434744dcff716753",
+				"Path": "/Walker",
+				"Hash": "11fb8fdf20d33a9c",
+				"Components": {
+					"Transform": "c192ffb58859b95e",
+					"Prefab": "6b8f9c96cca86d8e",
+					"PrefabLink": "a5ef198b8f7f7d16",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"Script": "0904f208f2f79562"
+				}
+			},
+			{
+				"Id": "5c26b9c956c9bb0d",
+				"Path": "/Faller",
+				"Hash": "7bc4170dbaa7a942",
+				"Components": {
+					"Transform": "68608d1227f3d4b2",
+					"MeshRenderer": "f433c3ab9a1171d2",
+					"RigidBody": "19cd99a609d79184",
+					"SphereCollider": "9cd09cbe54c4e3b3",
+					"Script": "bc6ed9db62edf0f6"
+				}
+			},
+			{
+				"Id": "8e54123d72df838a",
+				"Path": "/Alpha",
+				"Hash": "725314736b1814b9",
+				"Components": {
+					"Transform": "4b8751e4630e92f4",
+					"Script": "1b12ebde8f21b628"
+				}
+			},
+			{
+				"Id": "ca15c92610660977",
+				"Path": "/Pilot",
+				"Hash": "5630bafd598f5316",
+				"Components": {
+					"Transform": "fdd0d1eb4610e49a",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"Script": "ef02269b66f52489"
+				}
+			},
+			{
+				"Id": "cd0da480ae5170f2",
+				"Path": "/Swapper",
+				"Hash": "729e05d2fae4b0a6",
+				"Components": {
+					"Transform": "ff8a6ac611284ff3",
+					"Script": "aba56d36cc36c9aa"
+				}
+			},
+			{
+				"Id": "cd1b960855644311",
+				"Path": "/Hero",
+				"Hash": "3eade9ef1b300494",
+				"Components": {
+					"Transform": "f2f68b448749ef83",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"Script": "fb0f6d49df4e379e"
+				}
+			},
+			{
+				"Id": "d17e4bbcfff9db6f",
+				"Path": "/Sun",
+				"Hash": "a1d606e5bfe2ce7b",
+				"Components": {
+					"Transform": "6d00e2e3cb0d7cff",
+					"DirectionalLight": "6c90c620fea1993b"
+				}
+			},
+			{
+				"Id": "dbe7cd7cce7f8b02",
+				"Path": "/Ground",
+				"Hash": "6e3cb12087a2fc89",
+				"Components": {
+					"Transform": "314c6b43eb6c5aa5",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "cea9cf4aa5bfe949",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "ea43a8a0126819c6",
+				"Path": "/Hollow",
+				"Hash": "9ced105d93d2971b",
+				"Components": {
+					"Transform": "aa90dfdad764ba94",
+					"Script": "88ebd5633ecf503d"
+				}
+			},
+			{
+				"Id": "fdc99d11df75029d",
+				"Path": "/WalkerB",
+				"Hash": "737e0076d55398fa",
+				"Components": {
+					"Transform": "29e59d2585691669",
+					"Prefab": "dc38db9329a63eb7",
+					"PrefabLink": "1ae9fb66eb366af5",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"Script": "39209ff0453c555b"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "08329da5e1d2e5df",
+				"Path": "Assets/Scripts/MultiScript/Counter.luau",
+				"Type": "Script",
+				"Hash": "1cc8159d5b9cf246"
+			},
+			{
+				"Handle": "0c86727f04e23066",
+				"Path": "Assets/Scripts/MultiScript/Mover.luau",
+				"Type": "Script",
+				"Hash": "c3f1fbfb213ee91a"
+			},
+			{
+				"Handle": "165ed710ba719718",
+				"Path": "Assets/Prefabs/MultiScript/Walker.prefab",
+				"Type": "Prefab",
+				"Hash": "b4f82d77662e059a"
+			},
+			{
+				"Handle": "8e603aa567bec4bf",
+				"Path": "Assets/Scripts/MultiScript/Trail.luau",
+				"Type": "Script",
+				"Hash": "d0c66d5dc28ed32c"
+			},
+			{
+				"Handle": "a495909a675e2a9e",
+				"Path": "Assets/Scripts/MultiScript/Tracer.luau",
+				"Type": "Script",
+				"Hash": "0b8ed60dd1db1353"
+			},
+			{
+				"Handle": "baa5ea4151fba553",
+				"Path": "Assets/Scripts/MultiScript/Fragile.luau",
+				"Type": "Script",
+				"Hash": "af19c7b12658db46"
+			}
+		]
+	},
 	"Events": [
 		{
 			"Tick": 5,

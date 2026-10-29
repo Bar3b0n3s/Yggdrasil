@@ -137,7 +137,10 @@ namespace Engine {
 	{
 		if (params.Entities.empty() || params.Entities.size() > 1000)
 			return std::unexpected(Utils::ViewportParamError("/entities", "frame needs between 1 and 1000 entity references"));
-		ENGINE_TRY_ASSIGN(Scene * scene, context.ResolveTargetScene(SceneTarget::Edit, false, false));
+		// The scene the scene view shows (M20 decisions 13 and 23): the play scene only while the editor shows it, so a frame
+		// in another open scene's tab while a session plays frames that tab's edit scene.
+		const SceneTarget shown = context.GetEditor().ShowsPlayScene() ? SceneTarget::Play : SceneTarget::Edit;
+		ENGINE_TRY_ASSIGN(Scene * scene, context.ResolveTargetScene(shown, true, false));
 		std::vector<Entity> entities;
 		entities.reserve(params.Entities.size());
 		for (size_t index = 0; index < params.Entities.size(); ++index)

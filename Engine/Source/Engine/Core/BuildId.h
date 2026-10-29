@@ -23,8 +23,8 @@ namespace Engine {
 	// Automation/Protocol/JsonRpc.h, which includes this header, with the build id. The backlog program's reservation
 	// ledgers (Docs/Decisions/0028-backlog-program.md) own its value: the last lander of each phase bumps the minor
 	// version (0.2.0 at the end of phase 1, 0.3.0 and 0.4.0 after phases 2 and 3), so parallel milestone branches never
-	// take the same value.
-	inline constexpr std::string_view EngineVersionString = "0.1.0";
+	// take the same value. 0.2.0 since M20, phase 1's last lander (Docs/Decisions/0031-m20-contract.md decision 10).
+	inline constexpr std::string_view EngineVersionString = "0.2.0";
 
 	// The build a binary is, stamped when it was built (decision 13).
 	struct BuildId

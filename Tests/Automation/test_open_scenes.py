@@ -1,10 +1,12 @@
-"""Multiple open scenes through automation (Docs/Decisions/0031-m20-contract.md decisions 13 to 16, E-SCENES)."""
+"""Multiple open scenes through automation (Docs/Decisions/0031-m20-contract.md decisions 13 to 16 and 23, E-SCENES)."""
 
 from __future__ import annotations
 
+import json
 import unittest
+from pathlib import Path
 
-from harness import AutomationTestCase, engine_client
+from harness import GpuRecoveryTestCase, engine_client
 
 MAIN = "Assets/Scenes/Main.scene"
 SECOND = "Assets/Scenes/Second.scene"
@@ -15,7 +17,22 @@ def entity_names(tree: dict) -> list[str]:
     return [entity["name"] for entity in tree["entities"]]
 
 
-class OpenSceneTests(AutomationTestCase):
+def autosaved_scenes(root: Path) -> dict[str, str]:
+    """The scene payload of the newest autosave generation of each scene of the project at `root`, by its scene path."""
+    autosave = root / "Library" / "Autosave"
+    manifest = json.loads((autosave / "Manifest.json").read_text(encoding="utf-8"))
+    scenes: dict[str, str] = {}
+    # The manifest lists the newest generation first.
+    for entry in manifest["Generations"]:
+        generation = autosave / entry["Generation"]
+        path = json.loads((generation / "Metadata.json").read_text(encoding="utf-8"))["ScenePath"]
+        scenes.setdefault(path, (generation / "Scene.json").read_text(encoding="utf-8"))
+    return scenes
+
+
+class OpenSceneTests(GpuRecoveryTestCase):
+    """GpuRecoveryTestCase for its device-loss helpers (M18's loss tests), which only the device-loss test uses."""
+
     def test_list_activate_and_close_the_open_scenes(self) -> None:
         # Decision 14: scene.new and scene.open with keepOpen add an open scene and make it active; scene.list reports
         # them in tab order; scene.activate switches by path or id; scene.close needs save or discardChanges for a dirty
@@ -182,6 +199,58 @@ return Script.Define("Hud", Hud)
         self.assertEqual(entity_names(reopened.call("scene.tree", {"format": "json", "scene": SECOND})), ["InSecond"])
         self.assertEqual(entity_names(reopened.call("scene.tree", {"format": "json", "scene": MAIN})), ["InMain"])
         self.assertEqual((root / "Assets" / "Scenes" / "Main.scene").read_text(encoding="utf-8"), main_text)
+
+    def test_device_loss_with_two_open_scenes_autosaves_and_recovers_both(self) -> None:
+        # Decision 23 (Roadmap M20 acceptance "an injected device loss with two open scenes autosaves both and recovers
+        # both views"): M18's recovery writes the autosave its fatal hook would write before it recovers, which holds
+        # one generation per dirty open scene, and after it each open scene's view renders what it rendered before the
+        # loss.
+        if not self.require_gpu():
+            return
+        client, root = self.open_editor_with_scene("DeviceLossOpenScenes", renderer="vulkan")
+        client.call("viewport.camera", {"position": [0, 0, 5], "target": [0, 0, 0]})
+        client.call("entity.create",
+                    {"name": "InMain", "components": {"MeshRenderer": {"Mesh": "engine://Meshes/Cube"}}})
+        client.call("scene.new", {"path": SECOND, "keepOpen": True})
+        client.call("entity.create",
+                    {"name": "InSecond", "components": {"MeshRenderer": {"Mesh": "engine://Meshes/Sphere"}}})
+        before = {scene: self.shoot(client, {"scene": scene}) for scene in (MAIN, SECOND)}
+        self.assertNotEqual(before[MAIN], before[SECOND])
+        self.assertFalse((root / "Library" / "Autosave" / "Manifest.json").exists())
+        cursor = client.call("events.read", {"cursor": "end"})["nextCursor"]
+
+        # The loss is injected with Second active: the autosave before the recovery writes both dirty scenes.
+        self.assertTrue(client.call("debug.deviceLost")["queued"])
+        events = self.wait_for_device_loss_events(client, cursor, 1)
+        self.assertEqual(len(events), 1, events)
+        self.assertEqual(client.call("stats.get")["deviceLosses"], 1)
+        autosaved = autosaved_scenes(root)
+        self.assertEqual(sorted(autosaved), [MAIN, SECOND])
+        self.assertIn('"InMain"', autosaved[MAIN])
+        self.assertNotIn('"InSecond"', autosaved[MAIN])
+        self.assertIn('"InSecond"', autosaved[SECOND])
+
+        # Both scenes stay open with their unsaved changes, and each one's view renders again in its tab (the editor's
+        # scene view, after a frame newer than the one held when it became active), and the same image as before.
+        scenes = client.call("scene.list")["scenes"]
+        self.assertEqual([entry["scene"]["path"] for entry in scenes], [MAIN, SECOND])
+        self.assertTrue(all(entry["scene"]["dirty"] for entry in scenes))
+        for scene in (MAIN, SECOND):
+            client.call("scene.activate", {"scene": scene})
+            held = self.wait_for_rendered_frame(client, -1)
+            self.wait_for_rendered_frame(client, held)
+            self.assertEqual(self.shoot(client, {"scene": scene}), before[scene], scene)
+        self.assertEqual(len(self.device_loss_events(client, cursor)), 1)
+
+        # The autosave the loss wrote recovers both scenes after a crash.
+        client.close()
+        self.editors[-1].kill()
+        reopened = self.connect(self.start_editor())
+        self.assertTrue(reopened.call("project.open", {"path": str(root), "recover": True})["recovered"])
+        recovered = reopened.call("scene.list")["scenes"]
+        self.assertEqual(sorted(entry["scene"]["path"] for entry in recovered), [MAIN, SECOND])
+        self.assertEqual(entity_names(reopened.call("scene.tree", {"format": "json", "scene": MAIN})), ["InMain"])
+        self.assertEqual(entity_names(reopened.call("scene.tree", {"format": "json", "scene": SECOND})), ["InSecond"])
 
 
 if __name__ == "__main__":

@@ -252,6 +252,58 @@ return vector.magnitude(direction - vector.create(0, 0, -1)) < 0.001)")
 			REQUIRE(client.Call("play.stop", Json::object()).has_value());
 		}
 
+		// M20 (Docs/Decisions/0031-m20-contract.md decisions 13 and 23): while a session plays one open scene, another tab's
+		// scene view shows that tab's edit scene, as its hierarchy does, and the game view keeps showing the session; the
+		// played scene's tab shows the play scene in both views.
+		TEST_CASE("EditorHostViewports: the scene view shows the active scene's edit scene while another open scene plays")
+		{
+			Test::EditorTestFixture fixture("HostOpenScenes");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			Test::AutomationTestClient client(editor);
+			const auto addMesh = [&editor](std::string_view name)
+			{
+				editor.GetScene().CreateEntity(std::string(name)).AddComponent<MeshRendererComponent>(MeshRendererComponent{ .Mesh = TypedAssetHandle<AssetType::Mesh>(BuiltinAssetHandles::CubeMesh), .Materials = {} });
+			};
+			// Main holds one mesh and Second two, so each snapshot tells which scene it shows.
+			const OpenSceneId main = editor.GetActiveSceneId();
+			editor.GetScene().CreateEntity("Camera").AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			addMesh("Played");
+			REQUIRE(client.Call("scene.new", Json{ { "path", "Assets/Scenes/Second.scene" }, { "keepOpen", true } }).has_value());
+			const OpenSceneId second = editor.GetActiveSceneId();
+			editor.GetScene().CreateEntity("Camera").AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			addMesh("EditedA");
+			addMesh("EditedB");
+			REQUIRE(client.Call("scene.activate", Json{ { "scene", main } }).has_value());
+			REQUIRE(client.Call("play.start", Json{ { "lockstep", true } }).has_value());
+			GizmoController gizmos(editor);
+			EditorHostViewports host(editor, gizmos);
+			const auto meshes = [&host](ViewportView view) -> size_t
+			{
+				const Result<RenderSnapshot> snapshot = host.Extract(view, 160, 90);
+				REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+				return snapshot->Meshes.size();
+			};
+			CHECK(meshes(ViewportView::Scene) == 1);
+			CHECK(meshes(ViewportView::Game) == 1);
+
+			REQUIRE(client.Call("scene.activate", Json{ { "scene", second } }).has_value());
+			CHECK(meshes(ViewportView::Scene) == 2);
+			const Result<RenderSnapshot> shown = host.Extract(ViewportView::Scene, 160, 90);
+			REQUIRE(shown.has_value());
+			CHECK(shown->SceneRevision == editor.GetScene().GetRevision());
+			CHECK(meshes(ViewportView::Game) == 1);
+
+			// The played scene's tab shows the play scene again.
+			REQUIRE(client.Call("scene.activate", Json{ { "scene", main } }).has_value());
+			CHECK(meshes(ViewportView::Scene) == 1);
+			REQUIRE(client.Call("play.stop", Json::object()).has_value());
+			REQUIRE(client.Call("scene.activate", Json{ { "scene", second } }).has_value());
+			CHECK(meshes(ViewportView::Scene) == 2);
+			CHECK(meshes(ViewportView::Game) == 2);
+		}
+
 		TEST_CASE("EditorHostViewports: frames forced while minimized render the images without publishing their extents" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
@@ -546,6 +598,61 @@ end)
 			device.WaitForIdle();
 			host.Retire();
 			(*renderer)->DestroyTextures();
+		}
+
+		// M20 (decisions 13 and 23): a click in the scene view of an open scene that is not the played one selects in that
+		// scene's edit scene, which the view shows, never in the play scene.
+		TEST_CASE("EditorHostViewports: a pick in another open scene's tab while a session plays selects in that tab's edit scene"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::EditorTestFixture fixture("HostOpenScenePick");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			Test::AutomationTestClient client(editor);
+			const auto addCube = [&editor](std::string_view name)
+			{
+				const Entity cube = editor.GetScene().CreateEntity(std::string(name));
+				cube.AddComponent<MeshRendererComponent>(
+					MeshRendererComponent{ .Mesh = TypedAssetHandle<AssetType::Mesh>(BuiltinAssetHandles::CubeMesh), .Materials = {} });
+				return cube.GetUUID();
+			};
+			const OpenSceneId main = editor.GetActiveSceneId();
+			const UUID played = addCube("Played");
+			REQUIRE(client.Call("scene.new", Json{ { "path", "Assets/Scenes/Second.scene" }, { "keepOpen", true } }).has_value());
+			const OpenSceneId second = editor.GetActiveSceneId();
+			const UUID edited = addCube("Edited");
+			REQUIRE(played != edited);
+			editor.GetViewportState().SetOptions({ .Grid = false, .Icons = false });
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::SceneViewport, true).has_value());
+			REQUIRE(client.Call("scene.activate", Json{ { "scene", main } }).has_value());
+			REQUIRE(client.Call("play.start", Json{ { "lockstep", true } }).has_value());
+			REQUIRE(client.Call("scene.activate", Json{ { "scene", second } }).has_value());
+			{
+				HostGpuHarness harness(gpu, editor);
+				EditorHostViewports& host = harness.GetHost();
+				host.SetRectangle(ViewportView::Scene, { .Size = glm::vec2(96, 64) });
+				const auto click = [&host](uint64_t frame, uint64_t sequence)
+				{
+					const EditorViewportImage image = host.GetImage(ViewportView::Scene);
+					return EditorViewportClick{ .View = ViewportView::Scene,
+						.Pixel = { image.Width / 2, image.Height / 2 },
+						.FrameIndex = frame,
+						.SceneRevision = image.SceneRevision,
+						.Sequence = sequence,
+						.ViewGeneration = image.Generation };
+				};
+				REQUIRE(harness.Frame(0).has_value());
+				REQUIRE(harness.Frame(1, click(1, 1)).has_value());
+				for (uint64_t frame = 2; frame < 5 && editor.GetSelection().empty(); ++frame)
+					REQUIRE(harness.Frame(frame).has_value());
+				CHECK(editor.GetActiveSceneId() == second);
+				CHECK(editor.GetSelectionTarget() == SceneTarget::Edit);
+				CHECK(std::vector<UUID>(editor.GetSelection().begin(), editor.GetSelection().end()) == std::vector<UUID>{ edited });
+			}
+			REQUIRE(client.Call("play.stop", Json::object()).has_value());
 		}
 
 		TEST_CASE("EditorHostViewports: a click queued in the frame that lost the device is dropped without a failure"

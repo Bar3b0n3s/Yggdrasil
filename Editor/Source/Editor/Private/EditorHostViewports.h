@@ -16,6 +16,7 @@ namespace Engine {
 	class EditorContext;
 	class GizmoController;
 	class ImGuiRenderer;
+	class PlaySession;
 	struct RenderContext;
 
 	// EditorApp-owned adapter. All services are borrowed, main-thread-only and outlive this adapter.
@@ -34,6 +35,13 @@ namespace Engine {
 	// debug-view setting back to the mode its renderer stayed on (SceneRenderer::GetRenderedDebugView), so the next frames do
 	// not try again. A view's per-frame render that runs out of memory (a lazily created target or binding set) is trimmed
 	// for once after the frame's submission (Submitted), and the next frame renders again.
+	//
+	// M20 (Docs/Decisions/0031-m20-contract.md decisions 13 and 23): the views show the active open scene. The Scene view shows
+	// its edit scene, or the play scene while the editor shows it (EditorContext::ShowsPlayScene: the active tab is the played
+	// scene, or a test run owns the editor); the Game view shows a running session's play scene whatever tab is active, and
+	// otherwise the active scene. A pick selects in the scene its view shows, so a click in another tab's Scene view while a
+	// session plays selects in that tab's edit scene. A device loss recovers the views and nothing of a scene, so every open
+	// scene's view renders again as it rendered before the loss when its tab is next shown.
 	class EditorHostViewports final : public EditorViewportHost
 	{
 	public:
@@ -74,6 +82,7 @@ namespace Engine {
 		// How many times registered view images were withdrawn outside a render (minimizing, retiring). A UI frame whose
 		// draw data was built before the latest withdrawal references removed textures and must not be captured.
 		[[nodiscard]] uint64_t GetTextureWithdrawalCount() const { return m_Withdrawals; }
+		// The snapshot of the scene `view` shows (GetShownSession), at `width` x `height`; an empty snapshot without a scene.
 		[[nodiscard]] Result<RenderSnapshot> Extract(ViewportView view, uint32_t width, uint32_t height);
 		[[nodiscard]] SceneRenderer* GetRenderer(ViewportView view) const;
 		[[nodiscard]] bool IsGameInputFocused() const override { return m_GameFocused; }
@@ -124,7 +133,13 @@ namespace Engine {
 		void Cancel(View& view);
 		// The recreation owner's Release (see the class comment): no GPU call.
 		void ReleaseGpuObjects();
-		[[nodiscard]] Status Poll(View& view, uint64_t frameIndex);
+		// The play session whose scene `view` shows, or nullptr when it shows the active scene's edit scene (M20,
+		// Docs/Decisions/0031-m20-contract.md decisions 13 and 23): the Game view shows a running session whatever tab is
+		// active, and the Scene view only while the editor shows the play scene (EditorContext::ShowsPlayScene: the active
+		// tab is the played scene, or a test run owns the editor), as the hierarchy does.
+		[[nodiscard]] PlaySession* GetShownSession(ViewportView view) const;
+		// Completes `view`'s pending picks (the view `kind`) and selects what they hit in the scene the view shows.
+		[[nodiscard]] Status Poll(View& view, ViewportView kind, uint64_t frameIndex);
 		[[nodiscard]] Status RenderView(size_t index, RenderContext& context, bool sceneChanged);
 		[[nodiscard]] bool IsCursorLocked() const;
 	private:

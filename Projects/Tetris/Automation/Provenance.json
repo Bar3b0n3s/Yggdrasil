@@ -380,11 +380,11 @@
 		},
 		{
 			"Path": "Assets/Scenes/Main.scene",
-			"XXH64": "45520fc8817512ba",
-			"Method": "scene.save",
-			"RequestId": 61,
-			"Client": "engine-mcp",
-			"TranscriptLine": 421
+			"XXH64": "8c92f2209bec2fe4",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 521
 		},
 		{
 			"Path": "Assets/Scenes/Main.scene.meta",

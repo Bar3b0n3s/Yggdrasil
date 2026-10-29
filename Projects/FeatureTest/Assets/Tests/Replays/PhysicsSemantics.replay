@@ -1,6 +1,6 @@
 {
 	"Format": "Replay",
-	"Version": 2,
+	"Version": 3,
 	"Scene": {
 		"Handle": "a02799e9aa1e04fe",
 		"Path": "Assets/Scenes/PhysicsSemantics.scene"
@@ -10,6 +10,225 @@
 	"FixedHz": 64,
 	"EngineVersion": "0.1.0",
 	"Config": "Editor",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "09d8acbed6e0b2c2",
+				"Path": "/Glider",
+				"Hash": "3b7f15f5a26be955",
+				"Components": {
+					"Transform": "4d8c256f31902133",
+					"MeshRenderer": "65046d1ee03542d7",
+					"RigidBody": "fdfc239cea6e903e",
+					"SphereCollider": "9cd09cbe54c4e3b3",
+					"Script": "282f09d8d09dc5e3"
+				}
+			},
+			{
+				"Id": "0e09c43779ad0d8a",
+				"Path": "/Level/BrickC",
+				"Hash": "d7a542de2ec11af9",
+				"Components": {
+					"Transform": "6f1a25a9f5ec67c8",
+					"MeshRenderer": "e1a8e3c62c4ac8b4",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "37f90ca01fe8bd0b",
+				"Path": "/Anvil",
+				"Hash": "4072de805a70a647",
+				"Components": {
+					"Transform": "a8b0d70a47bd2d42",
+					"MeshRenderer": "7f736706d0daeab0",
+					"RigidBody": "cea9cf4aa5bfe949",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "fc9a2b6bd9ad8477"
+				}
+			},
+			{
+				"Id": "5e7845811af85a40",
+				"Path": "/Pebble",
+				"Hash": "a88a10aebcd759ae",
+				"Components": {
+					"Transform": "3f26115c62310cc9",
+					"MeshRenderer": "e0d393507948c953",
+					"RigidBody": "0d8db2325a9ad74f",
+					"SphereCollider": "9cd09cbe54c4e3b3",
+					"Script": "e75bb3f4537175f5"
+				}
+			},
+			{
+				"Id": "6d2df4e9412f772f",
+				"Path": "/Hammer",
+				"Hash": "7199d8f53af4425a",
+				"Components": {
+					"Transform": "39e68ccd96971d3b",
+					"MeshRenderer": "1774b1b9f5105527",
+					"RigidBody": "0d8db2325a9ad74f",
+					"SphereCollider": "9cd09cbe54c4e3b3",
+					"Script": "39b286c5feeeda1c"
+				}
+			},
+			{
+				"Id": "84d5a562ab9aabf4",
+				"Path": "/Level",
+				"Hash": "f4b12a2e0f04d420",
+				"Components": {
+					"Transform": "ac8cc95090d33ce3",
+					"RigidBody": "cea9cf4aa5bfe949"
+				}
+			},
+			{
+				"Id": "a9dd45736b731d1d",
+				"Path": "/Floor",
+				"Hash": "f425138fd51103b9",
+				"Components": {
+					"Transform": "026e417dd2f3eb67",
+					"MeshRenderer": "818cf11abdba0624",
+					"RigidBody": "cea9cf4aa5bfe949",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "b404eecb66e2cb59",
+				"Path": "/Zone",
+				"Hash": "6473fd9bddbd3a11",
+				"Components": {
+					"Transform": "7d7ca5f0583fa8e7",
+					"BoxCollider": "9ea809aa1f7dda3e"
+				}
+			},
+			{
+				"Id": "c77864307f3c8200",
+				"Path": "/Crate/Tag",
+				"Hash": "a2c73a5b14e72ea6",
+				"Components": {
+					"Transform": "821e32fc88edfdd4",
+					"MeshRenderer": "e1a8e3c62c4ac8b4",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "282f09d8d09dc5e3"
+				}
+			},
+			{
+				"Id": "ccfb41ee5cb6ef78",
+				"Path": "/Level/BrickB",
+				"Hash": "6a34cec73faf47f7",
+				"Components": {
+					"Transform": "89e801d003628b09",
+					"MeshRenderer": "7f736706d0daeab0",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "282f09d8d09dc5e3"
+				}
+			},
+			{
+				"Id": "dcc131a0fb981dce",
+				"Path": "/GlideBrick",
+				"Hash": "5e69809e61046e73",
+				"Components": {
+					"Transform": "ec7e312ff05c4fdd",
+					"MeshRenderer": "7f736706d0daeab0",
+					"RigidBody": "cea9cf4aa5bfe949",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "282f09d8d09dc5e3"
+				}
+			},
+			{
+				"Id": "dd8b848eb069f0ba",
+				"Path": "/Camera",
+				"Hash": "e6f451af9c88de4c",
+				"Components": {
+					"Transform": "f7219ffc76180f83",
+					"Camera": "8509390a2ff98dfc",
+					"AudioListener": "5364d8903ff7ab7d"
+				}
+			},
+			{
+				"Id": "e8c209ca1272f52f",
+				"Path": "/Sun",
+				"Hash": "9ca9ca77b21cdd28",
+				"Components": {
+					"Transform": "277ec5c0817bbe09",
+					"DirectionalLight": "6c90c620fea1993b"
+				}
+			},
+			{
+				"Id": "f1806797a0160241",
+				"Path": "/DropBall",
+				"Hash": "886f529a8291f1d3",
+				"Components": {
+					"Transform": "99baeb1aa4b5434c",
+					"MeshRenderer": "65046d1ee03542d7",
+					"RigidBody": "0d8db2325a9ad74f",
+					"SphereCollider": "9cd09cbe54c4e3b3",
+					"Script": "282f09d8d09dc5e3"
+				}
+			},
+			{
+				"Id": "f4680178bc9fcd2a",
+				"Path": "/Crate",
+				"Hash": "ac92c7cb93a7e0ef",
+				"Components": {
+					"Transform": "576cc50abf0a2f08",
+					"RigidBody": "0d8db2325a9ad74f"
+				}
+			},
+			{
+				"Id": "feb0b2508abc3e36",
+				"Path": "/Level/BrickA",
+				"Hash": "5f50f7fb0488d1e9",
+				"Components": {
+					"Transform": "e9991cf281b9932f",
+					"MeshRenderer": "e1a8e3c62c4ac8b4",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "00ccaf2a32599084",
+				"Path": "Assets/Scenes/Components/Materials/Glow.material",
+				"Type": "Material",
+				"Hash": "cadc5b1385919e49"
+			},
+			{
+				"Handle": "103291d13c7ad4df",
+				"Path": "Assets/Scenes/Components/Materials/Metal.material",
+				"Type": "Material",
+				"Hash": "b05eae1d9bf71722"
+			},
+			{
+				"Handle": "271b19875531f0e3",
+				"Path": "Assets/Scripts/PhysicsSemantics/ColliderProbe.luau",
+				"Type": "Script",
+				"Hash": "afe9b9ce7982796b"
+			},
+			{
+				"Handle": "433f5f61ba7a7ebe",
+				"Path": "Assets/Scripts/PhysicsSemantics/Dropper.luau",
+				"Type": "Script",
+				"Hash": "7aab0802d5a0addc"
+			},
+			{
+				"Handle": "70ba9c0f09cd7ef7",
+				"Path": "Assets/Scripts/PhysicsSemantics/Crusher.luau",
+				"Type": "Script",
+				"Hash": "72aba108eab391cd"
+			},
+			{
+				"Handle": "9016817dbe7d2c7a",
+				"Path": "Assets/Scenes/Components/Materials/Crate.material",
+				"Type": "Material",
+				"Hash": "b7623843a4e03375"
+			},
+			{
+				"Handle": "d31facacf6bb6908",
+				"Path": "Assets/Scenes/Components/Materials/Ground.material",
+				"Type": "Material",
+				"Hash": "2ea00f6cb6cac4da"
+			}
+		]
+	},
 	"Events": [
 		{
 			"Tick": 100,

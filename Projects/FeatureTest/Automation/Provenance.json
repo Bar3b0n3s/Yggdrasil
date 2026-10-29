@@ -275,6 +275,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Formats/SpriteSheets/Tiles.spritesheet",
+			"XXH64": "e5d1d0eef6944218",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Formats/SpriteSheets/Tiles.spritesheet.meta",
+			"XXH64": "c924b0926ad633bd",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Formats/Textures/Alpha.tga",
 			"XXH64": "77a11e030c3b6ae7",
 			"Method": "asset.import",
@@ -1187,6 +1203,54 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Materials/GoldenRendererII/Blue.material",
+			"XXH64": "2dd7e41d05a2e93f",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenRendererII/Blue.material.meta",
+			"XXH64": "4cb704607057425a",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenRendererII/Grey.material",
+			"XXH64": "8c30fd4fe282a7d8",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenRendererII/Grey.material.meta",
+			"XXH64": "bc02d4a10035c920",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenRendererII/Red.material",
+			"XXH64": "79081a0d2ce27068",
+			"Method": "asset.create",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenRendererII/Red.material.meta",
+			"XXH64": "8dcfe4b46aeba4db",
+			"Method": "asset.create",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Models/Golden/NormalMapped.gltf",
 			"XXH64": "0e0fa6232698a6e9",
 			"Method": "asset.import",
@@ -1556,9 +1620,9 @@
 		},
 		{
 			"Path": "Assets/Scenes/Formats.scene",
-			"XXH64": "d1c5f817d184a53f",
+			"XXH64": "3fea2e843916d1dc",
 			"Method": "scene.save",
-			"RequestId": 26,
+			"RequestId": 7,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -1695,6 +1759,150 @@
 			"XXH64": "5322f090c3cb52b2",
 			"Method": "edit.batch",
 			"RequestId": 46,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenRendererII/AnnotatedScreenshot.scene",
+			"XXH64": "8224d23b03d93b57",
+			"Method": "scene.save",
+			"RequestId": 30,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenRendererII/AnnotatedScreenshot.scene.meta",
+			"XXH64": "baec7dac130b4eb3",
+			"Method": "edit.batch",
+			"RequestId": 29,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenRendererII/GtaoOff.scene",
+			"XXH64": "588a0d99c4455ca3",
+			"Method": "scene.save",
+			"RequestId": 21,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenRendererII/GtaoOff.scene.meta",
+			"XXH64": "7d6d8d2343572fc8",
+			"Method": "edit.batch",
+			"RequestId": 20,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenRendererII/GtaoOn.scene",
+			"XXH64": "e0c22dd70d04c7e5",
+			"Method": "scene.save",
+			"RequestId": 18,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenRendererII/GtaoOn.scene.meta",
+			"XXH64": "94e122006e9b165b",
+			"Method": "edit.batch",
+			"RequestId": 17,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenRendererII/GtaoOrtho.scene",
+			"XXH64": "0e9bec4be6b3059f",
+			"Method": "scene.save",
+			"RequestId": 24,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenRendererII/GtaoOrtho.scene.meta",
+			"XXH64": "06a001ab6e744345",
+			"Method": "edit.batch",
+			"RequestId": 23,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenRendererII/SelectionOutline.scene",
+			"XXH64": "53eb30f81584378e",
+			"Method": "scene.save",
+			"RequestId": 27,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenRendererII/SelectionOutline.scene.meta",
+			"XXH64": "e8f17a0ff36cea8c",
+			"Method": "edit.batch",
+			"RequestId": 26,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenRendererII/ShadowsFar.scene",
+			"XXH64": "e93787780e7bc810",
+			"Method": "scene.save",
+			"RequestId": 9,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenRendererII/ShadowsFar.scene.meta",
+			"XXH64": "5656ac97eef6aae0",
+			"Method": "edit.batch",
+			"RequestId": 8,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenRendererII/ShadowsNear.scene",
+			"XXH64": "a391b084a3d4b178",
+			"Method": "scene.save",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenRendererII/ShadowsNear.scene.meta",
+			"XXH64": "4a9bf9dd3466975a",
+			"Method": "edit.batch",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenRendererII/ShadowsOrtho.scene",
+			"XXH64": "65ba12fba4164e29",
+			"Method": "scene.save",
+			"RequestId": 12,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenRendererII/ShadowsOrtho.scene.meta",
+			"XXH64": "a2204d2a0d4647b8",
+			"Method": "edit.batch",
+			"RequestId": 11,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenRendererII/SpotShadows.scene",
+			"XXH64": "14784112dd60e729",
+			"Method": "scene.save",
+			"RequestId": 15,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenRendererII/SpotShadows.scene.meta",
+			"XXH64": "360aa75cf1a5a9aa",
+			"Method": "edit.batch",
+			"RequestId": 14,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -1876,7 +2084,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/Scripting.scene",
-			"XXH64": "9be355c8fac511dd",
+			"XXH64": "de7ee41612a1b905",
 			"Method": "scene.save",
 			"RequestId": 46,
 			"Client": "batch",
@@ -1999,6 +2207,22 @@
 			"XXH64": "aa980662f3971bad",
 			"Method": "script.write",
 			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Formats/SheetHolder.luau",
+			"XXH64": "b02f4e7c4affbc20",
+			"Method": "script.write",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Formats/SheetHolder.luau.meta",
+			"XXH64": "28c29550e6ebf7ab",
+			"Method": "script.write",
+			"RequestId": 3,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -3011,6 +3235,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Formats/SpriteSheets.test.luau",
+			"XXH64": "72dde4f5321632b2",
+			"Method": "script.write",
+			"RequestId": 8,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Formats/SpriteSheets.test.luau.meta",
+			"XXH64": "bb128c0284362eea",
+			"Method": "script.write",
+			"RequestId": 8,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Input/Input.test.luau",
 			"XXH64": "21b69520d471e33c",
 			"Method": "script.write",
@@ -3108,7 +3348,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Physics/Physics.test.luau",
-			"XXH64": "ed7d54fec0a4c54b",
+			"XXH64": "a15eefcd184c12be",
 			"Method": "script.write",
 			"RequestId": 5,
 			"Client": "batch",
@@ -3172,7 +3412,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Determinism.replay",
-			"XXH64": "0dfee6aa7b6fc726",
+			"XXH64": "efc0b907708f6299",
 			"Method": "input.record",
 			"RequestId": 7,
 			"Client": "batch",
@@ -3188,7 +3428,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Input.replay",
-			"XXH64": "b86effbe1ec0df2c",
+			"XXH64": "8ed5ba153f6e41fd",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -3204,7 +3444,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/MultiScript.replay",
-			"XXH64": "734c8f3caf724c02",
+			"XXH64": "aec85955217a1ce2",
 			"Method": "input.record",
 			"RequestId": 19,
 			"Client": "batch",
@@ -3212,7 +3452,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/MultiScript.replay.meta",
-			"XXH64": "0c098e0df743c4f7",
+			"XXH64": "9b985cb4d8cb104d",
 			"Method": "input.record",
 			"RequestId": 19,
 			"Client": "batch",
@@ -3220,7 +3460,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/PhysicsSemantics.replay",
-			"XXH64": "17226fbea2d6d369",
+			"XXH64": "54cbde8469a02228",
 			"Method": "input.record",
 			"RequestId": 12,
 			"Client": "batch",
@@ -3228,7 +3468,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/PhysicsSemantics.replay.meta",
-			"XXH64": "de542c8afab17ad9",
+			"XXH64": "69d0ffd0f1904321",
 			"Method": "input.record",
 			"RequestId": 12,
 			"Client": "batch",
@@ -3284,7 +3524,7 @@
 		},
 		{
 			"Path": "FeatureTest.eproj",
-			"XXH64": "ee570ead0bc408a7",
+			"XXH64": "bf8a7dbece285258",
 			"Method": "project.setSettings",
 			"RequestId": 1,
 			"Client": "batch",

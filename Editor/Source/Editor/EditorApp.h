@@ -54,7 +54,8 @@ namespace Engine {
 		void OnRender(RenderContext& context) override;
 		void OnImGuiRender() override;
 		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 29): before the recovery releases anything, the autosave
-		// its fatal hook would write: the committed scene published, then written (Autosave::WriteFatalSnapshot), CPU only.
+		// its fatal hook would write: the committed state of every dirty open scene published, then written, one generation
+		// per scene (Autosave::WriteFatalSnapshot; M20, Docs/Decisions/0031-m20-contract.md decisions 15 and 23), CPU only.
 		// The play session goes on untouched.
 		void OnDeviceLost(const GpuDeviceLossReport& report) override;
 		// After a recovery: ImGui's last draw data names textures the recovery released, so a fresh UI frame replaces it
@@ -72,7 +73,7 @@ namespace Engine {
 		// Autosave::Publish, its failure logged once per distinct error (ReportAutosave).
 		void PublishAutosave();
 		void ReportAutosave(const Status& status);
-		// Publishes the current committed scene before FatalError, whose installed hook writes it once.
+		// Publishes the committed state of every dirty open scene before FatalError, whose installed hook writes it once.
 		void RefreshFatalSnapshot();
 		// Asks for a complete UI frame at the next render, also while minimized (RequestOffscreenUiFrame), and keeps asking
 		// until one completes with the views' layout ready (OnRenderSubmitted): editor.screenshot's request, and the

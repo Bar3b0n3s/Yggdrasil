@@ -1930,9 +1930,9 @@ namespace Engine {
 			REQUIRE(editor.GetAssets().Refresh().has_value());
 			const Entity cube = editor.GetScene().FindEntityByPath("/Cube");
 			REQUIRE(cube.IsValid());
-			ScriptComponent& holder = cube.AddComponent<ScriptComponent>();
-			holder.Script = TypedAssetHandle<AssetType::Script>(handleOf("Assets/Scripts/Holder.luau"));
+			ScriptSlot holder{ .Script = TypedAssetHandle<AssetType::Script>(handleOf("Assets/Scripts/Holder.luau")), .Fields = {} };
 			holder.Fields["Sheet"] = VariantValue(Json(handleOf("Assets/SpriteSheets/Used.spritesheet").ToString()));
+			cube.AddComponent<ScriptComponent>().Scripts.push_back(std::move(holder));
 			SaveScene(editor);
 			ApplySettings(editor, R"({"Export":{"PruneUnreferenced":true}})");
 

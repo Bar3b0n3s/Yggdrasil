@@ -106,7 +106,7 @@ class DeviceLossTests(GpuRecoveryTestCase):
         client.call("script.write", {"path": "Assets/Scripts/Drifter.luau", "source": DRIFTER})
         client.call("entity.create", {"name": "Falling", "components": {
             "Transform": {"Translation": [0, 4, 0]}, "RigidBody": {"Type": "Dynamic"}, "BoxCollider": {},
-            "Script": {"Script": "Assets/Scripts/Drifter.luau"}}})
+            "Script": {"Scripts": [{"Script": "Assets/Scripts/Drifter.luau"}]}}})
         client.call("entity.create", {"name": "Ground", "components": {
             "Transform": {"Scale": [20, 1, 20]}, "RigidBody": {"Type": "Static"}, "BoxCollider": {}}})
         client.call("scene.save")

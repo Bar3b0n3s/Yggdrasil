@@ -987,20 +987,22 @@ namespace Engine {
 	void EditorApp::OnDeviceLost(const GpuDeviceLossReport& /*report*/)
 	{
 		// Decision 29: what the fatal hook would write, before the recovery. A recovery that then fails ends the process,
-		// and the hook finds this generation already written (Autosave::WriteFatalSnapshot writes a snapshot once).
+		// and the hook finds these generations already written (Autosave::WriteFatalSnapshot writes a snapshot once). M20
+		// (Docs/Decisions/0031-m20-contract.md decisions 15 and 23): the publication holds every dirty open scene, and the
+		// write writes one generation for each, in tab order, with one manifest publication.
 		if (!m_State->Saves)
 			return;
 		PublishAutosave();
 		switch (m_State->Saves->WriteFatalSnapshot())
 		{
 			case AutosaveFatalResult::Saved:
-				ENGINE_INFO("Autosaved the open scene before recovering the GPU device");
+				ENGINE_INFO("Autosaved every dirty open scene before recovering the GPU device");
 				break;
 			case AutosaveFatalResult::Busy:
-				ENGINE_WARN("Cannot autosave the open scene before recovering the GPU device: another autosave is being written");
+				ENGINE_WARN("Cannot autosave the open scenes before recovering the GPU device: another autosave is being written");
 				break;
 			case AutosaveFatalResult::IoFailure:
-				ENGINE_WARN("Cannot autosave the open scene before recovering the GPU device: the autosave could not be written");
+				ENGINE_WARN("Cannot autosave every dirty open scene before recovering the GPU device: an autosave could not be written");
 				break;
 			case AutosaveFatalResult::NothingDirty:
 			case AutosaveFatalResult::Disabled:

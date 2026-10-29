@@ -131,6 +131,7 @@ namespace Engine {
 				{ "play.step", SceneRelation::None },
 				{ "play.stop", SceneRelation::None },
 				{ "play.waitFor", SceneRelation::None },
+				{ "profiler.capture", SceneRelation::None }, // M18: the profiler's zones, every thread and view
 				{ "project.create", SceneRelation::None },
 				{ "project.getSettings", SceneRelation::None },
 				{ "project.setSettings", SceneRelation::None }, // recorded in the active scene's history, as before M20
@@ -141,6 +142,7 @@ namespace Engine {
 				{ "script.read", SceneRelation::None },
 				{ "script.write", SceneRelation::None },
 				{ "session.hello", SceneRelation::None },
+				{ "shaders.reload", SceneRelation::None }, // M18: the scene renderer's pipelines
 				{ "stats.get", SceneRelation::None },
 				{ "test.list", SceneRelation::None },
 				{ "viewport.camera", SceneRelation::None },

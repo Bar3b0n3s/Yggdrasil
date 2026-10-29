@@ -24,9 +24,13 @@ namespace Engine {
 
 	namespace Utils {
 
+		// The scene a drag edits, the one the scene view shows (M20, Docs/Decisions/0031-m20-contract.md decisions 13 and 23):
+		// the play scene while the editor shows it (EditorContext::ShowsPlayScene), otherwise the active scene's edit scene,
+		// also while a session plays another open scene.
 		static Scene* GizmoLiveScene(EditorContext& context)
 		{
-			if (PlaySession* session = context.GetPlay().GetSession())
+			PlaySession* session = context.GetPlay().GetSession();
+			if (session != nullptr && context.ShowsPlayScene())
 				return &session->GetScene();
 			return context.HasScene() ? &context.GetScene() : nullptr;
 		}
@@ -167,6 +171,7 @@ namespace Engine {
 		uint64_t PlaySerial = 0;
 		uint64_t PlaySceneGeneration = 0; // Scene.Load replaces the runtime scene within one session serial
 		bool Playing = false;
+		bool OnPlayScene = false; // the drag edits the play scene (GizmoLiveScene), not an edit scene
 	};
 
 	GizmoController::GizmoController(EditorContext& context)
@@ -179,6 +184,9 @@ namespace Engine {
 	bool GizmoController::HasCurrentSource() const
 	{
 		if (!m_Drag || m_Context->GetRevision() != m_Drag->EditorRevision || m_Context->GetPlay().IsPlaying() != m_Drag->Playing)
+			return false;
+		const PlaySession* live = m_Context->GetPlay().GetSession();
+		if ((live != nullptr && m_Context->ShowsPlayScene()) != m_Drag->OnPlayScene)
 			return false;
 		const PlaySession* session = m_Context->GetPlay().GetSession();
 		if (session && (session->GetSerial() != m_Drag->PlaySerial || session->GetSceneGeneration() != m_Drag->PlaySceneGeneration))
@@ -223,6 +231,7 @@ namespace Engine {
 		{
 			drag->PlaySerial = session->GetSerial();
 			drag->PlaySceneGeneration = session->GetSceneGeneration();
+			drag->OnPlayScene = scene == &session->GetScene();
 		}
 		std::vector<UUID> selected(entities.begin(), entities.end());
 		std::ranges::sort(selected);
@@ -328,7 +337,8 @@ namespace Engine {
 			{
 				transform = root.After;
 			});
-			if (PlaySession* session = m_Context->GetPlay().GetSession())
+			PlaySession* session = m_Context->GetPlay().GetSession();
+			if (session != nullptr && drag->OnPlayScene)
 				session->MarkTeleported(entity);
 		}
 		return edit.Commit();

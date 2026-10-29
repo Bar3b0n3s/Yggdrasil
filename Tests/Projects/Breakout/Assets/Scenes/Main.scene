@@ -5,7 +5,7 @@
 	"Seed": 0,
 	"ComponentVersions": {
 		"Transform": 1,
-		"Prefab": 1,
+		"Prefab": 2,
 		"PrefabLink": 1,
 		"MeshRenderer": 1,
 		"Camera": 1,
@@ -17,7 +17,7 @@
 		"BoxCollider": 1,
 		"SphereCollider": 1,
 		"AudioListener": 1,
-		"Script": 1
+		"Script": 2
 	},
 	"Entities": [
 		{
@@ -309,11 +309,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e2a8433934a22dc6",
-					"Fields": {
-						"Game": "3164574db437db5a"
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e2a8433934a22dc6",
+							"Fields": {
+								"Game": "3164574db437db5a"
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -347,17 +351,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["18c27cc27d24eda2"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 5
 							}
@@ -366,7 +370,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "cbfd044833d2a16c"
+					"InstanceRoot": "cbfd044833d2a16c",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -401,11 +406,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 5
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 5
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -425,17 +434,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["18c27cc27d24eda2"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 5
 							}
@@ -444,7 +453,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "4e2a51398b3145a4"
+					"InstanceRoot": "4e2a51398b3145a4",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -479,11 +489,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 5
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 5
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -503,17 +517,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["18c27cc27d24eda2"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 5
 							}
@@ -522,7 +536,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "6356333445f5e902"
+					"InstanceRoot": "6356333445f5e902",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -557,11 +572,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 5
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 5
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -581,17 +600,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["18c27cc27d24eda2"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 5
 							}
@@ -600,7 +619,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "9d0926e0f602be4f"
+					"InstanceRoot": "9d0926e0f602be4f",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -635,11 +655,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 5
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 5
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -659,17 +683,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["18c27cc27d24eda2"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 5
 							}
@@ -678,7 +702,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "8cbfb0ae9345e2f0"
+					"InstanceRoot": "8cbfb0ae9345e2f0",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -713,11 +738,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 5
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 5
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -737,17 +766,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["18c27cc27d24eda2"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 5
 							}
@@ -756,7 +785,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "5473307ac37053ef"
+					"InstanceRoot": "5473307ac37053ef",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -791,11 +821,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 5
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 5
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -815,17 +849,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["18c27cc27d24eda2"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 5
 							}
@@ -834,7 +868,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "ba2fb6d1651a873c"
+					"InstanceRoot": "ba2fb6d1651a873c",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -869,11 +904,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 5
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 5
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -893,17 +932,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["18c27cc27d24eda2"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 5
 							}
@@ -912,7 +951,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "c5d19285c95aa153"
+					"InstanceRoot": "c5d19285c95aa153",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -947,11 +987,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 5
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 5
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -971,17 +1015,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["18c27cc27d24eda2"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 5
 							}
@@ -990,7 +1034,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "32e5f72800e5b7cc"
+					"InstanceRoot": "32e5f72800e5b7cc",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -1025,11 +1070,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 5
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 5
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -1049,17 +1098,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["18c27cc27d24eda2"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 5
 							}
@@ -1068,7 +1117,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "fd61fbe6be3141a3"
+					"InstanceRoot": "fd61fbe6be3141a3",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -1103,11 +1153,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 5
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 5
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -1127,17 +1181,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["19c57a9ec62c018d"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 4
 							}
@@ -1146,7 +1200,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "67b0d694546d0e9d"
+					"InstanceRoot": "67b0d694546d0e9d",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -1181,11 +1236,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 4
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 4
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -1205,17 +1264,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["19c57a9ec62c018d"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 4
 							}
@@ -1224,7 +1283,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "2ed66af102020bcc"
+					"InstanceRoot": "2ed66af102020bcc",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -1259,11 +1319,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 4
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 4
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -1283,17 +1347,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["19c57a9ec62c018d"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 4
 							}
@@ -1302,7 +1366,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "71323b9e27a1530c"
+					"InstanceRoot": "71323b9e27a1530c",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -1337,11 +1402,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 4
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 4
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -1361,17 +1430,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["19c57a9ec62c018d"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 4
 							}
@@ -1380,7 +1449,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "a2de7c63b9fc7b52"
+					"InstanceRoot": "a2de7c63b9fc7b52",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -1415,11 +1485,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 4
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 4
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -1439,17 +1513,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["19c57a9ec62c018d"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 4
 							}
@@ -1458,7 +1532,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "3e3023611346d17a"
+					"InstanceRoot": "3e3023611346d17a",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -1493,11 +1568,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 4
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 4
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -1517,17 +1596,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["19c57a9ec62c018d"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 4
 							}
@@ -1536,7 +1615,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "dc17af7a94ee6cb7"
+					"InstanceRoot": "dc17af7a94ee6cb7",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -1571,11 +1651,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 4
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 4
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -1595,17 +1679,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["19c57a9ec62c018d"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 4
 							}
@@ -1614,7 +1698,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "93fb14ff2e67c8d1"
+					"InstanceRoot": "93fb14ff2e67c8d1",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -1649,11 +1734,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 4
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 4
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -1673,17 +1762,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["19c57a9ec62c018d"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 4
 							}
@@ -1692,7 +1781,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "28219e05312cc711"
+					"InstanceRoot": "28219e05312cc711",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -1727,11 +1817,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 4
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 4
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -1751,17 +1845,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["19c57a9ec62c018d"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 4
 							}
@@ -1770,7 +1864,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "4cab2139eac239fa"
+					"InstanceRoot": "4cab2139eac239fa",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -1805,11 +1900,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 4
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 4
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -1829,17 +1928,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["19c57a9ec62c018d"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 4
 							}
@@ -1848,7 +1947,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "577616da91a3ae34"
+					"InstanceRoot": "577616da91a3ae34",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -1883,11 +1983,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 4
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 4
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -1907,17 +2011,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["a6d76e2cc629df81"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 3
 							}
@@ -1926,7 +2030,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "3b109ebad56fc624"
+					"InstanceRoot": "3b109ebad56fc624",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -1961,11 +2066,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 3
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 3
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -1985,17 +2094,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["a6d76e2cc629df81"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 3
 							}
@@ -2004,7 +2113,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "6ad01dbb2bc2bd12"
+					"InstanceRoot": "6ad01dbb2bc2bd12",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -2039,11 +2149,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 3
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 3
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -2063,17 +2177,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["a6d76e2cc629df81"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 3
 							}
@@ -2082,7 +2196,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "d5194d081162cd38"
+					"InstanceRoot": "d5194d081162cd38",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -2117,11 +2232,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 3
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 3
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -2141,17 +2260,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["a6d76e2cc629df81"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 3
 							}
@@ -2160,7 +2279,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "12923d2505078d92"
+					"InstanceRoot": "12923d2505078d92",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -2195,11 +2315,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 3
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 3
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -2219,17 +2343,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["a6d76e2cc629df81"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 3
 							}
@@ -2238,7 +2362,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "02dd471e60a71aee"
+					"InstanceRoot": "02dd471e60a71aee",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -2273,11 +2398,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 3
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 3
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -2297,17 +2426,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["a6d76e2cc629df81"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 3
 							}
@@ -2316,7 +2445,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "94e9350ca4a9c397"
+					"InstanceRoot": "94e9350ca4a9c397",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -2351,11 +2481,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 3
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 3
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -2375,17 +2509,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["a6d76e2cc629df81"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 3
 							}
@@ -2394,7 +2528,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "d4d1a58b3d8e10fb"
+					"InstanceRoot": "d4d1a58b3d8e10fb",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -2429,11 +2564,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 3
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 3
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -2453,17 +2592,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["a6d76e2cc629df81"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 3
 							}
@@ -2472,7 +2611,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "d6525f275562fa6b"
+					"InstanceRoot": "d6525f275562fa6b",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -2507,11 +2647,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 3
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 3
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -2531,17 +2675,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["a6d76e2cc629df81"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 3
 							}
@@ -2550,7 +2694,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "4c047f6c239f6c54"
+					"InstanceRoot": "4c047f6c239f6c54",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -2585,11 +2730,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 3
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 3
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -2609,17 +2758,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["a6d76e2cc629df81"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 3
 							}
@@ -2628,7 +2777,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "235a63600269dd6f"
+					"InstanceRoot": "235a63600269dd6f",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -2663,11 +2813,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 3
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 3
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -2687,17 +2841,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["16305f6ca94cdc2d"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 2
 							}
@@ -2706,7 +2860,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "5a128711643b5917"
+					"InstanceRoot": "5a128711643b5917",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -2741,11 +2896,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 2
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 2
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -2765,17 +2924,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["16305f6ca94cdc2d"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 2
 							}
@@ -2784,7 +2943,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "ac6cbf3ecdcff45c"
+					"InstanceRoot": "ac6cbf3ecdcff45c",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -2819,11 +2979,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 2
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 2
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -2843,17 +3007,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["16305f6ca94cdc2d"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 2
 							}
@@ -2862,7 +3026,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "0e8ad929dfaa7c54"
+					"InstanceRoot": "0e8ad929dfaa7c54",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -2897,11 +3062,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 2
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 2
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -2921,17 +3090,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["16305f6ca94cdc2d"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 2
 							}
@@ -2940,7 +3109,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "92cc45d1ad345564"
+					"InstanceRoot": "92cc45d1ad345564",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -2975,11 +3145,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 2
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 2
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -2999,17 +3173,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["16305f6ca94cdc2d"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 2
 							}
@@ -3018,7 +3192,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "c95be6caa2147037"
+					"InstanceRoot": "c95be6caa2147037",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -3053,11 +3228,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 2
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 2
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -3077,17 +3256,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["16305f6ca94cdc2d"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 2
 							}
@@ -3096,7 +3275,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "33cdbc030fc4ab5e"
+					"InstanceRoot": "33cdbc030fc4ab5e",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -3131,11 +3311,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 2
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 2
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -3155,17 +3339,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["16305f6ca94cdc2d"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 2
 							}
@@ -3174,7 +3358,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "08c5f6fede8488f1"
+					"InstanceRoot": "08c5f6fede8488f1",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -3209,11 +3394,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 2
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 2
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -3233,17 +3422,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["16305f6ca94cdc2d"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 2
 							}
@@ -3252,7 +3441,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "e01240fff9bed39f"
+					"InstanceRoot": "e01240fff9bed39f",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -3287,11 +3477,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 2
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 2
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -3311,17 +3505,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["16305f6ca94cdc2d"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 2
 							}
@@ -3330,7 +3524,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "2109d9199dbeed36"
+					"InstanceRoot": "2109d9199dbeed36",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -3365,11 +3560,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 2
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 2
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -3389,17 +3588,17 @@
 					"Prefab": "11d04163305d2e9f",
 					"Overrides": [
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "MeshRenderer",
 							"Field": "Materials",
 							"Value": ["16305f6ca94cdc2d"]
 						},
 						{
-							"PrefabEntityID": "55425a047af78945",
+							"Path": ["55425a047af78945"],
 							"Kind": "Field",
 							"Component": "Script",
-							"Field": "Fields",
+							"Field": "Scripts/0/Fields",
 							"Value": {
 								"Points": 2
 							}
@@ -3408,7 +3607,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "699dfc19778a77ff"
+					"InstanceRoot": "699dfc19778a77ff",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -3443,11 +3643,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 2
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 2
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -3469,7 +3673,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "77ba594175e157f1"
+					"InstanceRoot": "77ba594175e157f1",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -3504,11 +3709,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 1
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 1
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -3530,7 +3739,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "64acee1c8f7fcd6b"
+					"InstanceRoot": "64acee1c8f7fcd6b",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -3565,11 +3775,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 1
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 1
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -3591,7 +3805,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "2011b4db5569f665"
+					"InstanceRoot": "2011b4db5569f665",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -3626,11 +3841,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 1
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 1
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -3652,7 +3871,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "4f060f247cfd860d"
+					"InstanceRoot": "4f060f247cfd860d",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -3687,11 +3907,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 1
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 1
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -3713,7 +3937,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "8aed70f49845ef20"
+					"InstanceRoot": "8aed70f49845ef20",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -3748,11 +3973,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 1
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 1
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -3774,7 +4003,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "302348698acc43ae"
+					"InstanceRoot": "302348698acc43ae",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -3809,11 +4039,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 1
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 1
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -3835,7 +4069,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "2c01bc0c282ab3ca"
+					"InstanceRoot": "2c01bc0c282ab3ca",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -3870,11 +4105,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 1
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 1
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -3896,7 +4135,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "e52d96fd9d52709a"
+					"InstanceRoot": "e52d96fd9d52709a",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -3931,11 +4171,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 1
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 1
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -3957,7 +4201,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "c3ef825b16186b9b"
+					"InstanceRoot": "c3ef825b16186b9b",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -3992,11 +4237,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 1
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 1
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -4018,7 +4267,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "55425a047af78945",
-					"InstanceRoot": "a54602d5759eb73b"
+					"InstanceRoot": "a54602d5759eb73b",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "0000000000000101",
@@ -4053,11 +4303,15 @@
 					"IsTrigger": false
 				},
 				"Script": {
-					"Script": "e29b62c819907a37",
-					"Fields": {
-						"Points": 1
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "e29b62c819907a37",
+							"Fields": {
+								"Points": 1
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		},
@@ -4152,22 +4406,26 @@
 					"Scale": [1, 1, 1]
 				},
 				"Script": {
-					"Script": "f03aaac70b2f5037",
-					"Fields": {
-						"Ball": "e0e0fb587c483494",
-						"BrickBreakSound": "3e69f27e1119a90d",
-						"BrickRoot": "0deebadb2218c766",
-						"GameOverSound": "1281af27c6d1d20f",
-						"LifeLostSound": "04a73e94d0da0935",
-						"LivesText": "e83aa29a71e02baa",
-						"MessageText": "358a46446e19c3e5",
-						"Paddle": "c9bff8428185b819",
-						"PaddleHitSound": "47480773fb23c464",
-						"ScoreText": "c485508f72efec16",
-						"WallHitSound": "3b22308614f51348",
-						"WinSound": "4a99b5db3ab5af16"
-					},
-					"ExecutionOrder": 0
+					"Scripts": [
+						{
+							"Script": "f03aaac70b2f5037",
+							"Fields": {
+								"Ball": "e0e0fb587c483494",
+								"BrickBreakSound": "3e69f27e1119a90d",
+								"BrickRoot": "0deebadb2218c766",
+								"GameOverSound": "1281af27c6d1d20f",
+								"LifeLostSound": "04a73e94d0da0935",
+								"LivesText": "e83aa29a71e02baa",
+								"MessageText": "358a46446e19c3e5",
+								"Paddle": "c9bff8428185b819",
+								"PaddleHitSound": "47480773fb23c464",
+								"ScoreText": "c485508f72efec16",
+								"WallHitSound": "3b22308614f51348",
+								"WinSound": "4a99b5db3ab5af16"
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		}
