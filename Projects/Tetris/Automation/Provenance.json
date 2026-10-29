@@ -540,11 +540,11 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/LineClear.replay",
-			"XXH64": "3d64662bed3ffc41",
-			"Method": "project.upgrade",
-			"RequestId": 2,
-			"Client": "cli",
-			"TranscriptLine": 513
+			"XXH64": "a0829fd985f2df5c",
+			"Method": "test.run",
+			"RequestId": 12,
+			"Client": "engine-mcp",
+			"TranscriptLine": 543
 		},
 		{
 			"Path": "Assets/Tests/Replays/LineClear.replay.meta",
@@ -556,11 +556,11 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Opening.replay",
-			"XXH64": "70cb512e8a8b3591",
-			"Method": "project.upgrade",
-			"RequestId": 2,
-			"Client": "cli",
-			"TranscriptLine": 513
+			"XXH64": "8e17ad7e93ceacf8",
+			"Method": "test.run",
+			"RequestId": 11,
+			"Client": "engine-mcp",
+			"TranscriptLine": 541
 		},
 		{
 			"Path": "Assets/Tests/Replays/Opening.replay.meta",

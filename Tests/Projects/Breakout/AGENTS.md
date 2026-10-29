@@ -100,20 +100,24 @@ is won or restarted, so every serve starts at 9 m/s again.
   serves again, returns the ball once more and ends 20 ticks later with the ball in play. Its last assertions (run only
   when the suite runs, not when the replay is verified): exactly one lost life, phase `Playing`, a positive score, the
   broken bricks inactive in the scene and the HUD texts matching the state. It recorded the replay.
-- `Assets/Tests/Replays/Opening.replay` (format version 2, 872 ticks from tick 0, 14 checkpoints at ticks 60 to 840,
-  final hash `d4b7ace57c8d7e15`, recorded in session 3; the editor's input check accepted it). It has no `Expect`
+- `Assets/Tests/Replays/Opening.replay` (format version 3, 872 ticks from tick 0, 791 input events, 14 checkpoints at
+  ticks 60 to 840, final hash `685d68832c1f74d4`, re-recorded in M20; the editor's input check accepted it, diverging at
+  tick 60). It has no `Expect`
   entries (the `test_run` record path takes none), so what its verification proves is limited to what the state hash
   covers: playing its recorded `MoveX`/`Launch` input without the autopilot reproduces the recorded world at every
   checkpoint and at the end, which pins every entity's active flag (8 bricks inactive at the end), the HUD Text
   components (`SCORE 12`, `LIVES 2`) and every body's position and velocity. It does not assert script-table values;
-  replayed in session 3 and inspected with `script_eval` at its last tick, the game showed phase `Playing`, score 12,
-  2 lives, 42 bricks left, 5 paddle hits, 4 wall hits, 8 broken bricks, 1 lost life and `RallyHits` 1. Without its input
-  (`input_replay {verify: true, strictHash: true, withoutInput: true}`) it fails at its first checkpoint (tick 60: expected
-  `25d94fd414071a30`, observed `21bca35c3b7b1b41`). Re-record with
+  replayed in session 3 and again after M20's re-recording and inspected with `script_eval` at its last tick, the game
+  showed phase `Playing`, score 12, 2 lives, 42 bricks left, 5 paddle hits, 4 wall hits, 8 broken bricks, 1 lost life and
+  `RallyHits` 1. Without its input (`input_replay {verify: true, strictHash: true, withoutInput: true}`) it fails at its
+  first checkpoint (tick 60: expected `84971d0672aca529`, observed `66a11366c8454909`; with `continuePastCheckpoint` all
+  14 checkpoints differ and the final hash is `7afe459503c0156c`). Re-record with
   `test_run {filter: "Autopilot.Breakout", record: "Assets/Tests/Replays/Opening.replay"}` after a legitimate simulation
   change.
 - Earlier recordings: session 1's was 636 ticks, `3a109217817a6b09`; session 2's was format version 1 (no checkpoints),
-  902 ticks, `7bca7f325ca12227`. Session 2's ended with a restart in place, and `7bca7f325ca12227` is the hash of the
+  902 ticks, `7bca7f325ca12227`; session 3's was format version 2 with the same 872 ticks and 14 checkpoints,
+  `d4b7ace57c8d7e15`, until M20's engine changes (Script component version 2 with ordered script slots, PrefabInstance
+  version 2, the pending-enter rule for physics contacts) changed the state hash. Session 2's ended with a restart in place, and `7bca7f325ca12227` is the hash of the
   untouched start at tick 902, so it also passed without its input and proved nothing about the gameplay. Keep the
   played state in the scene at the end of a recording.
 - The state hash does not cover values held only in script tables (such as `State.RallyHits`): a change that only alters

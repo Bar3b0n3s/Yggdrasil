@@ -128,14 +128,17 @@ return game.Match.Board:ToAscii()
 
 | Replay | Recorded with | Ticks | Events | Checkpoints | FinalStateHash | Without input |
 |---|---|---|---|---|---|---|
-| `Opening.replay` | `test_run {filter: "Record.Opening", record: ...}` | 301 | 44 | 5 | `93ad9cdf7978c2d2` | fails at checkpoint tick 60 |
-| `LineClear.replay` | `test_run {filter: "Record.LineClear", record: ...}` | 95 | 34 | 1 | `bd018732d506bb4e` | fails at checkpoint tick 60 |
+| `Opening.replay` | `test_run {filter: "Record.Opening", record: ...}` | 301 | 44 | 5 | `5b96177faa088fd0` | fails at checkpoint tick 60 |
+| `LineClear.replay` | `test_run {filter: "Record.LineClear", record: ...}` | 95 | 34 | 1 | `18c6b54ec7f80aff` | fails at checkpoint tick 60 |
 
 Opening ends with O, J, Z, S and T locked (the Z after a 60-tick soft drop), the I in the hold and L falling; LineClear
 ends with one line cleared, score 100 and "SINGLE +100" on the HUD. Session 2 re-recorded both after raising
 `PostProcess.BloomIntensity` from 0.07 to 0.3 (session 1's hashes were `bcac10e522808880` and `39f647ca007f08f6`; the
-script fixes of session 2 left those unchanged, checked with `test_run {}` before the bloom change). Each was verified
-twice with `input_replay {verify: true, strictHash: true}` (equal hashes) and fails without its input.
+script fixes of session 2 left those unchanged, checked with `test_run {}` before the bloom change). M20 re-recorded both
+the same way after its engine changes (Script component version 2 with ordered script slots, PrefabInstance version 2)
+changed the hashed components; session 2's hashes were `93ad9cdf7978c2d2` and `bd018732d506bb4e`, and the ticks, events and
+checkpoint counts above are unchanged. Each was verified twice with `input_replay {verify: true, strictHash:
+true}` (equal hashes) and fails without its input (with `continuePastCheckpoint`, every checkpoint differs).
 **The state hash covers every serialized component, the look included**: changing a `PostProcess`, light or camera
 value in `Main.scene`, or anything the behaviour writes, changes both hashes, so re-record both replays
 (`test_run {filter, record}`), verify each twice and run the input check again after any such change. Material asset

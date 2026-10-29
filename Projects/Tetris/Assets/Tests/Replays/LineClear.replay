@@ -10,7 +10,2760 @@
 	"FixedHz": 60,
 	"EngineVersion": "0.1.0",
 	"Config": "Editor",
-	"Fingerprint": null,
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "02a730c96929c076",
+				"Path": "/Game/Cells/Cell15_07",
+				"Hash": "a5a01ab5bfa36523",
+				"Components": {
+					"Transform": "a1c0fc14b856a106",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "3c57bcd4ff5bacb6",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "02c43a6ad76a3d43",
+				"Path": "/Game/Cells/Cell19_04",
+				"Hash": "576bb160a9ee3f89",
+				"Components": {
+					"Transform": "260caa85a8af72f0",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "27b28ab2686fbd91",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "04560cc1e5f8feef",
+				"Path": "/Game/Cells/Cell09_04",
+				"Hash": "480f7e7452e56d18",
+				"Components": {
+					"Transform": "339e28a0c14a6d95",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "283d25151c2b742e",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "048dbf494ed349bb",
+				"Path": "/Game/Cells/Cell17_04",
+				"Hash": "fbfc879b83619611",
+				"Components": {
+					"Transform": "770583383b5649f3",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "479a9bd9ea93cd78",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "04940777e2275630",
+				"Path": "/Game/Cells/Cell17_02",
+				"Hash": "7e8a2e2bbaa2399d",
+				"Components": {
+					"Transform": "67fc9bf8a0139c3b",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "3ff936a5d273fe17",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "0543d922259f4e5c",
+				"Path": "/Game/Cells/Cell01_07",
+				"Hash": "151315289eefeedb",
+				"Components": {
+					"Transform": "ca28f9d45899c82e",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "26825c9219d7ae30",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "075f71e9581840c5",
+				"Path": "/Game/Cells/Cell12_10",
+				"Hash": "d5bf19ea2e268ef5",
+				"Components": {
+					"Transform": "b84205b048a463ce",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "64ae93e6099bd386",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "08db8017ae338726",
+				"Path": "/Game/Cells/Cell14_07",
+				"Hash": "06a0771c1350bebe",
+				"Components": {
+					"Transform": "f4ae14274cf7c249",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "66e940e6a3e0d10b",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "08f7995616dfd52f",
+				"Path": "/Game/Cells/Cell08_07",
+				"Hash": "3fc12e8c958ffbd9",
+				"Components": {
+					"Transform": "64a0abbcf6058749",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "a1a9623011bec14b",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "09edf5d8b56faf28",
+				"Path": "/Game/Cells/Cell18_08",
+				"Hash": "380b85c02da8037e",
+				"Components": {
+					"Transform": "948d44b8dc91b265",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "39b69932d9a8d508",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "0a84c9d749e9f986",
+				"Path": "/Game/Cells/Cell14_03",
+				"Hash": "92512f1eb69a7efb",
+				"Components": {
+					"Transform": "d6cf935ed9413bfd",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "d3471689e57aa95d",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "0cc4e8e6cb7c2ea8",
+				"Path": "/Game/Cells/Cell20_04",
+				"Hash": "787df515ca41aebc",
+				"Components": {
+					"Transform": "0872b54fb2e8d8de",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "4d1b406873e0430c",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "0ee9b94634adb1f5",
+				"Path": "/Game/Cells/Cell08_04",
+				"Hash": "4eb3d4b81e549a91",
+				"Components": {
+					"Transform": "9cd4d84c0d491869",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "74677eb64fd52607",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "0f1a15bac8aaa09c",
+				"Path": "/Game/Cells/Cell04_08",
+				"Hash": "fa03f4476474ffaf",
+				"Components": {
+					"Transform": "4e3666a04ad2f5f6",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "26ebb0f053307a41",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "0fc6bf57a87630d2",
+				"Path": "/Game/Cells/Cell15_01",
+				"Hash": "08a29cec2aca1116",
+				"Components": {
+					"Transform": "d8901f2485d02f4c",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "05f63f830a07027e",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "10f9d57f71bf25c6",
+				"Path": "/Game/Cells/Cell11_08",
+				"Hash": "0dec27873c39b03d",
+				"Components": {
+					"Transform": "0344bca57f9e12c4",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "420e1588693b9ba8",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "1142da6903323e09",
+				"Path": "/Game/Cells/Cell10_09",
+				"Hash": "5d2c6b70cd5d4e27",
+				"Components": {
+					"Transform": "538abb86c2dbedb1",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "95fed6a02bdf0e42",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "118409d833bfe64c",
+				"Path": "/Game/Cells/Cell01_08",
+				"Hash": "54e1d50ed71ed8e6",
+				"Components": {
+					"Transform": "083343ee461f6a57",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "3d146ed70a79ea66",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "14a674e484aec33b",
+				"Path": "/Game/Previews",
+				"Hash": "f7cb380b2658ada8",
+				"Components": {
+					"Transform": "82125f902860db21"
+				}
+			},
+			{
+				"Id": "15ac500806bb7059",
+				"Path": "/Game/Cells/Cell02_01",
+				"Hash": "c18f71a6c00cb56c",
+				"Components": {
+					"Transform": "140b3cf8242ec0f8",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "a6548f0ae7402673",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "16deb84d7a48f64f",
+				"Path": "/Game/Cells/Cell03_04",
+				"Hash": "cde53a25d0181bd2",
+				"Components": {
+					"Transform": "ba1d057e706c4b52",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "bc6eb1550ba99a36",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "1861ecd1b3a65cad",
+				"Path": "/Game/Cells/Cell10_05",
+				"Hash": "e1e2d73b5680b87a",
+				"Components": {
+					"Transform": "26b639a89f4b4fe6",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "17f8ca667afa9087",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "1ac66de8d1fb8349",
+				"Path": "/Game/Cells/Cell08_05",
+				"Hash": "c44623f574141b2f",
+				"Components": {
+					"Transform": "0e6291db515cc359",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "cdacc6da44851338",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "1b4ccefb42ec2f5a",
+				"Path": "/Game/Cells/Cell10_01",
+				"Hash": "9456113ad6ebab5b",
+				"Components": {
+					"Transform": "26f37a69531e1569",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "efe09bad07d817ac",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "1c8fffbb4afe6a11",
+				"Path": "/Game/Cells/Cell04_01",
+				"Hash": "cace05751a8738c1",
+				"Components": {
+					"Transform": "c9c8768e13f50c5c",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "b90633eb0200cf52",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "1ccf5319c01609da",
+				"Path": "/Game/Cells/Cell15_03",
+				"Hash": "6927bb774682f89b",
+				"Components": {
+					"Transform": "8946649deb2d91b8",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "bb6de322964d1d44",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "1f29eceba0fe8206",
+				"Path": "/Game/Cells/Cell11_02",
+				"Hash": "5f3c088a02f3fa43",
+				"Components": {
+					"Transform": "2d482eca5ab98405",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "9c30c569fe511e42",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "210dc7424a6f5ae7",
+				"Path": "/Game/Cells/Cell11_01",
+				"Hash": "8a9b35f1aa38e63f",
+				"Components": {
+					"Transform": "6f8da395af62bc0f",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "84b96c367d695483",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "28167e582ffe5506",
+				"Path": "/Game/Cells/Cell09_03",
+				"Hash": "9bac175b70fe8e8f",
+				"Components": {
+					"Transform": "182cbdabf5fecd04",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "8cb2216b9e627a46",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "28ec1488e01d3f2c",
+				"Path": "/HUD/ScoreText",
+				"Hash": "f7b19c1a6071592d",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Text": "4120a2e4b7729171"
+				}
+			},
+			{
+				"Id": "2ac3bd68f428430a",
+				"Path": "/Game/Cells/Cell06_01",
+				"Hash": "31c4cda6fb0f671d",
+				"Components": {
+					"Transform": "f28fc877e6316312",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "7a098e8cffdfeaff",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "2adc9c036ec00fac",
+				"Path": "/Game/Cells/Cell19_07",
+				"Hash": "0833c566feaf88dd",
+				"Components": {
+					"Transform": "84062af53b67a9b3",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "416a4c26ed3983e6",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "2bb776b22bf2f179",
+				"Path": "/Game/Cells/Cell01_06",
+				"Hash": "cf41709334c71bfe",
+				"Components": {
+					"Transform": "c031f6d57d086ecc",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "abec34f514af7216",
+					"MeshRenderer": "83d418a3dbbe6a49"
+				}
+			},
+			{
+				"Id": "2cdb17e533b0f5aa",
+				"Path": "/Game/Cells/Cell05_01",
+				"Hash": "a96424afc02bcc72",
+				"Components": {
+					"Transform": "80e540eaab869104",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "7a783ff80678b31c",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "2e3e86f15ea8f922",
+				"Path": "/Game/Cells/Cell11_06",
+				"Hash": "65cccdc28f1e3b2a",
+				"Components": {
+					"Transform": "d3402092bd7abeaa",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "da0e0d7d4564793f",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "2e5ae1d6b44a2f7c",
+				"Path": "/Game/Cells/Cell02_04",
+				"Hash": "855f0bcc799b353e",
+				"Components": {
+					"Transform": "cb7e596638f6dd06",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "2b16f3a89910f829",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "30045135d71b3e71",
+				"Path": "/Stage/Floor",
+				"Hash": "e8bd5377e6ef9306",
+				"Components": {
+					"Transform": "37ca27ff45cdbbe5",
+					"MeshRenderer": "49a0a60cf569eb46"
+				}
+			},
+			{
+				"Id": "306e76de98eb6f3a",
+				"Path": "/Game/Previews/Preview1_4",
+				"Hash": "3b8fddc6c14201c3",
+				"Components": {
+					"Transform": "061f34aeab99a448",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "34b613490cc80bc3",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "31301c78e19cba00",
+				"Path": "/Game/Cells/Cell15_02",
+				"Hash": "3fcdba5f3de1a48d",
+				"Components": {
+					"Transform": "0e0f6c5e201230f5",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "6ca0369eab267398",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "31d1da1cbf3d4613",
+				"Path": "/Game/Cells/Cell18_03",
+				"Hash": "ba8643e4c48861a7",
+				"Components": {
+					"Transform": "0a56bf611fc43ff1",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "e45614e2021f27a8",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "323b64325d2b038f",
+				"Path": "/Game/Cells/Cell06_09",
+				"Hash": "1f291c32a2fe720c",
+				"Components": {
+					"Transform": "cfd00809866dd930",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "601efc5cf5ff384e",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "32dfd0d79073485e",
+				"Path": "/Game/Cells/Cell02_02",
+				"Hash": "176c2bf5e87c7882",
+				"Components": {
+					"Transform": "237706c825f3b352",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "1d4240f7ebd90ebd",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "32e722cc107bce56",
+				"Path": "/Game/Cells/Cell10_07",
+				"Hash": "c97869f6b6716053",
+				"Components": {
+					"Transform": "88c5f3bb8e0de6ff",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "df8e5fe19a0e17db",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "354717fc7449a2ee",
+				"Path": "/Game/Cells/Cell02_07",
+				"Hash": "ea0d8c975621b38a",
+				"Components": {
+					"Transform": "9961a9b69400934b",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "90f3c144d42a73d3",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "357a7a234c8f85ba",
+				"Path": "/Game/Cells/Cell13_06",
+				"Hash": "f5dc3ee83f456a0f",
+				"Components": {
+					"Transform": "85e521e678fa5621",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "f1bd6e85cef4415f",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "35d62d8136b30df5",
+				"Path": "/Game/Cells",
+				"Hash": "3f050953eb47face",
+				"Components": {
+					"Transform": "82125f902860db21"
+				}
+			},
+			{
+				"Id": "36e306147b7b1a3d",
+				"Path": "/Game/Cells/Cell17_09",
+				"Hash": "d4a741ef89c40e03",
+				"Components": {
+					"Transform": "32e623973ba83159",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "e79ceb38b56dc25c",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "371ef26e16151cba",
+				"Path": "/Game/Cells/Cell19_02",
+				"Hash": "ae7ffb00b029216f",
+				"Components": {
+					"Transform": "eb91d10fdac30d8a",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "efdc53884b746598",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "3807bda25a3683d7",
+				"Path": "/Game/Cells/Cell18_10",
+				"Hash": "f62363d8a69413e8",
+				"Components": {
+					"Transform": "ee682c8c29220514",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "fa3a2a3c4022e334",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "3aa837bdb99b159d",
+				"Path": "/Game/Cells/Cell03_01",
+				"Hash": "be68e6d3b02c897f",
+				"Components": {
+					"Transform": "f5510cc6319515d6",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "ec615cb8b263f09c",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "3c822d904f97e4c3",
+				"Path": "/Game/Cells/Cell07_01",
+				"Hash": "06daf46db1c58aad",
+				"Components": {
+					"Transform": "a2bfe40d04adc75c",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "41c99317b8ba9fb6",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "429ef95185005e34",
+				"Path": "/Game/Cells/Cell19_08",
+				"Hash": "f84bb193cbd4caea",
+				"Components": {
+					"Transform": "23c836a1520ae195",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "17cd9c28aeca1346",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "42cfc0b25de8ee0e",
+				"Path": "/Game/Cells/Cell13_05",
+				"Hash": "db795a4026dda9fd",
+				"Components": {
+					"Transform": "a1db40575ef2f32c",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "0d569c59515b406e",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "4580639765825157",
+				"Path": "/Game/Cells/Cell12_02",
+				"Hash": "23b6351b048e9a51",
+				"Components": {
+					"Transform": "1d5fc8d4b0e464a8",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "568edb0b1134a909",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "45a84ee76e906a61",
+				"Path": "/Stage/TopLine",
+				"Hash": "6d98e3942101af1c",
+				"Components": {
+					"Transform": "ad8824fd323ef89e",
+					"MeshRenderer": "62c44b620e8f9822"
+				}
+			},
+			{
+				"Id": "45f03de821b3b8e9",
+				"Path": "/Game/Cells/Cell11_04",
+				"Hash": "765ce938042d1002",
+				"Components": {
+					"Transform": "5d6e21d776799c63",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "6457ddf43c7b39d2",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "4685864140fe9878",
+				"Path": "/Game/Cells/Cell16_01",
+				"Hash": "04c6a1b142185dda",
+				"Components": {
+					"Transform": "20746df83b15e9aa",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "80ff741f37c15eb9",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "4697956418bc34e6",
+				"Path": "/Game/Cells/Cell01_10",
+				"Hash": "7f96fee5e0c5cf3d",
+				"Components": {
+					"Transform": "e5f0bb8ac7a4d06a",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "c80a87495268da51",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "46ee9c20747dd9af",
+				"Path": "/Game/Cells/Cell18_06",
+				"Hash": "0a9dbaf6a457411d",
+				"Components": {
+					"Transform": "59922f4abde9caa6",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "419abe35c01428ff",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "484e465b3aa1f8a3",
+				"Path": "/Game/Cells/Cell19_05",
+				"Hash": "2221e4cf355d6de5",
+				"Components": {
+					"Transform": "8de10c5dd073be5a",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "10bdcdd5732e4ded",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "491bdcdbf0084e5c",
+				"Path": "/Game/Cells/Cell09_06",
+				"Hash": "8efb4414e495f71e",
+				"Components": {
+					"Transform": "12d6eaa5f69ac19c",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "1c8b5a33232fab17",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "4a321f1b3e615234",
+				"Path": "/Game/Cells/Cell20_07",
+				"Hash": "39555986289c798c",
+				"Components": {
+					"Transform": "b99d5a1cbbd32b0a",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "14dd092ff790cb92",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "4a5897dd417ecc00",
+				"Path": "/Game/Cells/Cell04_10",
+				"Hash": "55d17eda0c523a51",
+				"Components": {
+					"Transform": "fd26ea80d1a22a7b",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "0ec55d2c889fa9d5",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "4a82b3e219b5f1c8",
+				"Path": "/Game/Cells/Cell10_03",
+				"Hash": "364f8437590495b5",
+				"Components": {
+					"Transform": "fde98deb79c07c9b",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "f7560a8eb60d9f82",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "4e20a607f14be98b",
+				"Path": "/Game/Cells/Cell12_08",
+				"Hash": "5f20b23efdb0dd1b",
+				"Components": {
+					"Transform": "7c47a90bd4b59b7f",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "9485ea85dce4c09b",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "4e94ba63e4a96b8d",
+				"Path": "/Game/Cells/Cell07_03",
+				"Hash": "0c071386e312a8e6",
+				"Components": {
+					"Transform": "e435c3af50f2b490",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "46697c287aebc402",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "4f4c079c016f49ed",
+				"Path": "/Game/Cells/Cell12_04",
+				"Hash": "48d4a48e92f07ea0",
+				"Components": {
+					"Transform": "5d20cab0745b3e5f",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "62efd9d5ec473eda",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "4f7e2f5bda3f6205",
+				"Path": "/Environment",
+				"Hash": "033e4bc125e72ef3",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Environment": "c8af2ac02b09feb5",
+					"PostProcess": "42a2839e13339d17"
+				}
+			},
+			{
+				"Id": "4fb170d1d7ee384a",
+				"Path": "/Game/Cells/Cell16_07",
+				"Hash": "9776caf838ed7210",
+				"Components": {
+					"Transform": "d870efd05b65aa0b",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "8572fca394034b6b",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "4fbc576fe25d35be",
+				"Path": "/Game/Cells/Cell05_05",
+				"Hash": "a0e43f11f2fa8d0f",
+				"Components": {
+					"Transform": "0b05997005d24247",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "61a3f7b14f1c2374",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "4fd4619b17983adf",
+				"Path": "/Game/Cells/Cell01_02",
+				"Hash": "8b9732583fd938ba",
+				"Components": {
+					"Transform": "bcc41258534b2eb2",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "b46830a88f0ae5d3",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "506af0e4df4ad0e2",
+				"Path": "/Game/Cells/Cell11_07",
+				"Hash": "4127b2fc0ea898af",
+				"Components": {
+					"Transform": "5867097f07910930",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "edf44b4c64fa6b69",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "51b66c160beb372b",
+				"Path": "/Game/Cells/Cell17_05",
+				"Hash": "bb9de9c254a53a81",
+				"Components": {
+					"Transform": "45b11821092f57fa",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "c33396e339b525f4",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "51c0d5129fd644c0",
+				"Path": "/Game/Previews/Preview3_2",
+				"Hash": "dc3362f28cf0dcac",
+				"Components": {
+					"Transform": "35e9509e63191234",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "2f29562133aeddf6",
+					"MeshRenderer": "9fd9451a8ea04845"
+				}
+			},
+			{
+				"Id": "54bf0d5394b19255",
+				"Path": "/Game/Cells/Cell18_04",
+				"Hash": "c97bd65f45774e32",
+				"Components": {
+					"Transform": "d3f3a2f0183efab2",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "6d79292e184f8919",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "55ffd72fca03c135",
+				"Path": "/Game/Cells/Cell03_02",
+				"Hash": "962ed82f8ed51741",
+				"Components": {
+					"Transform": "570dacfe51569a8a",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "2d0fbfef508ac682",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "59aafd73121c5d62",
+				"Path": "/Game/Cells/Cell16_03",
+				"Hash": "8e391a047850e04b",
+				"Components": {
+					"Transform": "19b29974f3ed5fd0",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "aac651da8e77277e",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "59baa875ed917141",
+				"Path": "/Stage/NextPanel",
+				"Hash": "9235d29ba8fdbd09",
+				"Components": {
+					"Transform": "0539c8996f393226",
+					"MeshRenderer": "7c20838e03561021"
+				}
+			},
+			{
+				"Id": "5a9c99d16c831d5f",
+				"Path": "/Game/Cells/Cell14_05",
+				"Hash": "87580fca34a39085",
+				"Components": {
+					"Transform": "3f2a6aec9f011aea",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "b6d542cc35c2ebcb",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "5bd20d323eee083c",
+				"Path": "/Game/Cells/Cell08_08",
+				"Hash": "20d7f375de834e58",
+				"Components": {
+					"Transform": "49c7627c16ddfd81",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "e15efa2a31500025",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "5bf45ab7c6171336",
+				"Path": "/Game/Cells/Cell18_09",
+				"Hash": "26731a1662e2aa3e",
+				"Components": {
+					"Transform": "1e0ff5b5543aa390",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "770b37085ee4d1fd",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "5d207bf2bff3bbee",
+				"Path": "/Game/Cells/Cell16_05",
+				"Hash": "bd3c1ace503cdab4",
+				"Components": {
+					"Transform": "343c7dee076850d1",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "0748e109e65e721e",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "5d361b8f1f41662d",
+				"Path": "/Game/Previews/Preview4_4",
+				"Hash": "773c63bdc3dd8020",
+				"Components": {
+					"Transform": "019ea80286938a2b",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "94600fb09902167a",
+					"MeshRenderer": "f65563a29010345e"
+				}
+			},
+			{
+				"Id": "5d63b2f316be2c38",
+				"Path": "/Game/Cells/Cell14_02",
+				"Hash": "1870d3d31e530888",
+				"Components": {
+					"Transform": "94e6cf0545a9b2f6",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "47385d4ff595e7c8",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "60aeff9e6c57515c",
+				"Path": "/Game/Cells/Cell20_03",
+				"Hash": "fb5ea4ae330a5e35",
+				"Components": {
+					"Transform": "a1d971c3edaa3c22",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "c5c84b5ba91f5cfa",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "618d3f4b8bc7fd32",
+				"Path": "/Game/Cells/Cell03_05",
+				"Hash": "07b7de9b980c111a",
+				"Components": {
+					"Transform": "1ffbc14e0a94b4bb",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "77f67e031921ce83",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "6349e22cb772b207",
+				"Path": "/Game/Cells/Cell11_03",
+				"Hash": "ec10817aabafb89e",
+				"Components": {
+					"Transform": "4be58fb749a1c5e9",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "870aae77f88f1308",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "64050135302bd90e",
+				"Path": "/Game/Cells/Cell02_10",
+				"Hash": "5c11483d1b19db43",
+				"Components": {
+					"Transform": "ac30026bba8b9427",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "6df2f39b71202436",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "641eba3ad977b820",
+				"Path": "/Game/Cells/Cell06_06",
+				"Hash": "cbaf21bdf86292b6",
+				"Components": {
+					"Transform": "4a9fe52142b7813f",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "36d58de180ec342a",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "6665fb51c948c4df",
+				"Path": "/Game/Cells/Cell06_08",
+				"Hash": "85d5edf3be81d40b",
+				"Components": {
+					"Transform": "c68e0a13b206fbf9",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "94bfe69439d712f5",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "668d829ab3213927",
+				"Path": "/Game/Cells/Cell16_09",
+				"Hash": "820aa255ae5129ec",
+				"Components": {
+					"Transform": "059d213520b33c32",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "c4f51c16cf6c2e33",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "66a5298f243d623c",
+				"Path": "/Game/Cells/Cell20_10",
+				"Hash": "15534423cf324af3",
+				"Components": {
+					"Transform": "659703dc1bb913e4",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "b49a714482b6f72a",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "66fbbe7cc59ff724",
+				"Path": "/Game/Previews/Preview3_3",
+				"Hash": "becae579c7ea8ae4",
+				"Components": {
+					"Transform": "990519868e65626d",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "81600552366849ad",
+					"MeshRenderer": "9fd9451a8ea04845"
+				}
+			},
+			{
+				"Id": "6740420e9a24f067",
+				"Path": "/Game/Cells/Cell06_04",
+				"Hash": "936ed85b62765a22",
+				"Components": {
+					"Transform": "3b31589f4dae87bd",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "2e32591241dac3db",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "681f02829235c778",
+				"Path": "/Game/Cells/Cell05_03",
+				"Hash": "10b02034fbde82fb",
+				"Components": {
+					"Transform": "b6b04f7ee5b924e5",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "411f5f7a11bee267",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "69a6f725dc280f62",
+				"Path": "/Game/Cells/Cell01_09",
+				"Hash": "0ccd8c68bd53dfcd",
+				"Components": {
+					"Transform": "e425e7d9f1b30759",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "4c8e79da435143b6",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "69e29bb3e4506213",
+				"Path": "/Game/Cells/Cell20_06",
+				"Hash": "52612aa584958bfd",
+				"Components": {
+					"Transform": "3e47776fe5942849",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "6482a962195ac197",
+					"MeshRenderer": "bddafa8514e72128"
+				}
+			},
+			{
+				"Id": "69ef83712b2701bd",
+				"Path": "/Game/Cells/Cell03_10",
+				"Hash": "889afb3830dffc09",
+				"Components": {
+					"Transform": "c976f9412c8785ff",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "f979db6b759a8d77",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "6a1e9eff86a65017",
+				"Path": "/Game/Cells/Cell05_04",
+				"Hash": "1609f6bfe4165c78",
+				"Components": {
+					"Transform": "92428def4d169372",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "19cbc33b10375785",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "6b42c7498a27d750",
+				"Path": "/Game/Cells/Cell15_08",
+				"Hash": "9491dd22618322d0",
+				"Components": {
+					"Transform": "bd1bd62c03bbf70e",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "06c2abc79178e308",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "6df0231ec8a3e439",
+				"Path": "/Game/Cells/Cell05_10",
+				"Hash": "652e58aa3961d9d9",
+				"Components": {
+					"Transform": "7bde5a9386b7e8d8",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "bf71c0f2c0ff7646",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "6e9b08136ecffde0",
+				"Path": "/Stage/Backdrop",
+				"Hash": "715ba889ffe665b9",
+				"Components": {
+					"Transform": "f98740faf911a70f",
+					"MeshRenderer": "e865766fdddf6050"
+				}
+			},
+			{
+				"Id": "70b494c49e9a20d5",
+				"Path": "/Game/Cells/Cell07_07",
+				"Hash": "c9f07dbfe182763f",
+				"Components": {
+					"Transform": "b9c23e2b74e02eab",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "2f1dd15350503477",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "70d5056e01f8c099",
+				"Path": "/Game/Cells/Cell09_02",
+				"Hash": "829884fb2e211ec2",
+				"Components": {
+					"Transform": "46b874dda1f78729",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "63e9972c6019aa05",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "76135553366a7c5b",
+				"Path": "/Game/Cells/Cell07_09",
+				"Hash": "4ed4bf0a7349b7bf",
+				"Components": {
+					"Transform": "44d6180447548f31",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "38fa4584dfabdddf",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "766e7becbb76a92d",
+				"Path": "/Game/Previews/Preview3_1",
+				"Hash": "ee7dae23954b050d",
+				"Components": {
+					"Transform": "8356ddd74d45b6bc",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "7199da83b875567d",
+					"MeshRenderer": "9fd9451a8ea04845"
+				}
+			},
+			{
+				"Id": "76a1dddec8d3dcf2",
+				"Path": "/Game/Cells/Cell09_05",
+				"Hash": "cd9e0e9e4233f0d9",
+				"Components": {
+					"Transform": "015b29d81438e2f9",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "63449605ebcd2fc1",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "78b6f2682e34fe08",
+				"Path": "/Game/Cells/Cell16_02",
+				"Hash": "ba0565be56ff2867",
+				"Components": {
+					"Transform": "90fa468e3478e07f",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "e0004f0397a2b996",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "7ac24239ba87a26c",
+				"Path": "/Game/Cells/Cell17_06",
+				"Hash": "3d6ccc77a90d4e52",
+				"Components": {
+					"Transform": "f6a7996c16532575",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "93035f15a38f9e06",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "7b38667dc21a52ec",
+				"Path": "/Game/Cells/Cell16_10",
+				"Hash": "4beb6e77ebc2757f",
+				"Components": {
+					"Transform": "d34aece9911e5de1",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "5d2d4dc53ef01045",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "7c43db62646b138d",
+				"Path": "/Game/Cells/Cell16_04",
+				"Hash": "37880233c5878e21",
+				"Components": {
+					"Transform": "dada63672787f3c6",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "3f839af0d3089ef7",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "7f06108f6148fa7c",
+				"Path": "/Game/Cells/Cell04_05",
+				"Hash": "058baa89e864b782",
+				"Components": {
+					"Transform": "aa049d41de78e74d",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "ed2c90e31119bbca",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "7fd46e5484c0064c",
+				"Path": "/Game/Cells/Cell04_04",
+				"Hash": "2b591b53ce8251a1",
+				"Components": {
+					"Transform": "0bf7ec86b5f9e4eb",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "704346f9022a2053",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "80a52bc90ffab670",
+				"Path": "/Game/Cells/Cell03_06",
+				"Hash": "9836c162b45ce99e",
+				"Components": {
+					"Transform": "1e2c1852549a35a3",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "5bd3f5614bad93b1",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "815225548d0079c8",
+				"Path": "/Game/Cells/Cell02_09",
+				"Hash": "ec2b242faf3ba900",
+				"Components": {
+					"Transform": "48d4bc3d683800fc",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "db648b813aae04a8",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "81e5d6c38c77e6bf",
+				"Path": "/Game/Cells/Cell04_06",
+				"Hash": "43060fc069720e02",
+				"Components": {
+					"Transform": "5a29958be5163a6f",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "a7f9d6a2475bcd3c",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "82ef5a733e721528",
+				"Path": "/Game/Cells/Cell10_08",
+				"Hash": "c4070441b13316ae",
+				"Components": {
+					"Transform": "d1764c92ad7e7dcc",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "d20825a1e97df70d",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "836656404aa5b765",
+				"Path": "/Game",
+				"Hash": "8ee78cd99851423e",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Script": "476f330ca313be6b"
+				}
+			},
+			{
+				"Id": "84082ca9636e58e0",
+				"Path": "/HUD/ClearText",
+				"Hash": "ca19849f199f97a5",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Text": "58cfb61836203299"
+				}
+			},
+			{
+				"Id": "852fe7ca75e47ec6",
+				"Path": "/HUD/StatusText",
+				"Hash": "838e48c7814bcfbd",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Text": "1cf5a11b80d3cebc"
+				}
+			},
+			{
+				"Id": "85c5fba2d51d4dab",
+				"Path": "/HUD/NextLabel",
+				"Hash": "17cf60bca2fe0efa",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Text": "a75a45cfd7723264"
+				}
+			},
+			{
+				"Id": "8737c35bada57d8e",
+				"Path": "/Game/Cells/Cell18_01",
+				"Hash": "77c665f3f5f0c9b7",
+				"Components": {
+					"Transform": "321d09525b1ec20b",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "77f294f90199dff5",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "87f6c0c29f58d16a",
+				"Path": "/Game/Cells/Cell17_10",
+				"Hash": "e416b36c8d55afb3",
+				"Components": {
+					"Transform": "3dc9b889015e6582",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "b270c56fe7292884",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "8892c8ab62dce1b8",
+				"Path": "/Game/Cells/Cell13_07",
+				"Hash": "3232d3add5f9bede",
+				"Components": {
+					"Transform": "c4a9785f6a3959bd",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "77466fd74bad2659",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "8a20209c7dda5a1b",
+				"Path": "/Game/Cells/Cell08_10",
+				"Hash": "b17287c2b08d97ab",
+				"Components": {
+					"Transform": "1ff9734c7afc1817",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "0dbec57c6dac6ccc",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "8a6669910257a82e",
+				"Path": "/Game/Cells/Cell06_07",
+				"Hash": "e53650a7370aae65",
+				"Components": {
+					"Transform": "3f29e87707048c91",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "16534de13e2bb0ff",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "8a839aed6c122f26",
+				"Path": "/Game/Previews/Preview4_2",
+				"Hash": "779804c92d2167cb",
+				"Components": {
+					"Transform": "87e784a297025443",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "99443bef529e31ba",
+					"MeshRenderer": "f65563a29010345e"
+				}
+			},
+			{
+				"Id": "8aa97eac0e764c6a",
+				"Path": "/Game/Cells/Cell10_10",
+				"Hash": "9648e73162a02242",
+				"Components": {
+					"Transform": "5adf1034f46e6d3f",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "d4ca7427eef61ef4",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "8b08094c92811ec1",
+				"Path": "/Game/Cells/Cell12_01",
+				"Hash": "a53786c387c67a88",
+				"Components": {
+					"Transform": "c21b0e02f1752a53",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "09614033ce8a1616",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "8b356d4f3c52ddc3",
+				"Path": "/Game/Cells/Cell14_06",
+				"Hash": "8c906c54ea2cde91",
+				"Components": {
+					"Transform": "2b610316ef5aa78c",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "dfce85f01dfa1a34",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "8c103d3c0012244c",
+				"Path": "/Game/Previews/Preview1_3",
+				"Hash": "d7bff18402d38363",
+				"Components": {
+					"Transform": "061f34aeab99a448",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "87fe7f9eed27e3ba",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "8cc7090156149d77",
+				"Path": "/HUD/LinesText",
+				"Hash": "5dd0dbb6a1b917db",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Text": "64c99cf7cb7b9bd1"
+				}
+			},
+			{
+				"Id": "8daadf8521b4489d",
+				"Path": "/Game/Cells/Cell19_01",
+				"Hash": "c2f75e35e99eb2a1",
+				"Components": {
+					"Transform": "b0105cb454aa9b0d",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "52e9744da64810e8",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "8f451ca667df8ff9",
+				"Path": "/Game/Cells/Cell15_06",
+				"Hash": "012323fa82515471",
+				"Components": {
+					"Transform": "56a26944ca7d46f4",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "5faf0935c4f9dd19",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "8ff06b6dab49e5c6",
+				"Path": "/Game/Cells/Cell17_07",
+				"Hash": "241404a02723d938",
+				"Components": {
+					"Transform": "144d43426dcb929f",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "f71df0162ce8e28c",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "92d7585284fbd7ab",
+				"Path": "/Game/Cells/Cell19_06",
+				"Hash": "e830e45d8f9689ff",
+				"Components": {
+					"Transform": "856e67556f5e9497",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "ed712f3dcb5b4b46",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "9423de06f5c484e9",
+				"Path": "/Game/Cells/Cell19_10",
+				"Hash": "e22a15d170441f7c",
+				"Components": {
+					"Transform": "88d0129c19159e53",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "31eb2373171b9526",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "98187920fd5f9ddd",
+				"Path": "/Game/Cells/Cell02_06",
+				"Hash": "b07f8069e4029f79",
+				"Components": {
+					"Transform": "2e2e7bb036e5ecb4",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "4011f5c3dd10fbb0",
+					"MeshRenderer": "83d418a3dbbe6a49"
+				}
+			},
+			{
+				"Id": "98ce5eb1b4258d9a",
+				"Path": "/Game/Cells/Cell14_04",
+				"Hash": "59623d8eb8b4c7c9",
+				"Components": {
+					"Transform": "4412ebd91fb8da77",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "7e2f5671699d5b53",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "9918901d0d7f2990",
+				"Path": "/Game/Cells/Cell15_10",
+				"Hash": "80d2cc0f58e8f1d1",
+				"Components": {
+					"Transform": "76b7aeb2cd9a4898",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "3ebd7f8b609b3f33",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "9928dff15b70f21f",
+				"Path": "/Game/Cells/Cell13_03",
+				"Hash": "6c9adac86924418b",
+				"Components": {
+					"Transform": "564831c17254febd",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "dc88a8ad99d1b677",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "9b2479320feb566f",
+				"Path": "/Stage/HoldPanel",
+				"Hash": "5633f7240e8e3246",
+				"Components": {
+					"Transform": "32eb2f20a4654aad",
+					"MeshRenderer": "7c20838e03561021"
+				}
+			},
+			{
+				"Id": "9d598fce3151c9cb",
+				"Path": "/Game/Cells/Cell14_01",
+				"Hash": "12782317c228b74f",
+				"Components": {
+					"Transform": "c955de0ebc3bee69",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "3ddb17c29fc4e795",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "9e2b60776c9680dd",
+				"Path": "/Game/Cells/Cell11_05",
+				"Hash": "a2f98efde2140570",
+				"Components": {
+					"Transform": "ba4578b4ba7fda5e",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "b1051175e960d4e0",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "a046c0cfc08c2648",
+				"Path": "/Game/Cells/Cell16_08",
+				"Hash": "4da787363ffb14c6",
+				"Components": {
+					"Transform": "974513e2e147e1ba",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "c60b8a443553777d",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "a0a86f4f5b4b9f78",
+				"Path": "/Sun",
+				"Hash": "96a91baf40d4fdcf",
+				"Components": {
+					"Transform": "838d902439d0b18b",
+					"DirectionalLight": "dac6add944543472"
+				}
+			},
+			{
+				"Id": "a17394b718733a71",
+				"Path": "/Game/Cells/Cell10_04",
+				"Hash": "43f72a572bb5203f",
+				"Components": {
+					"Transform": "79513fe8248d2110",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "af8255a1f54ea747",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "a30902c6f8d79768",
+				"Path": "/Game/Cells/Cell13_09",
+				"Hash": "432abbaefbf80287",
+				"Components": {
+					"Transform": "59811305ce3f8833",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "bc0ba28c989e2765",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "a3587a2eea7df76b",
+				"Path": "/Stage/Backboard",
+				"Hash": "fca855b14728fb81",
+				"Components": {
+					"Transform": "768818ee28b26d4b",
+					"MeshRenderer": "7c20838e03561021"
+				}
+			},
+			{
+				"Id": "a40b2d3715da98e6",
+				"Path": "/Stage",
+				"Hash": "6f45954fbe24c1af",
+				"Components": {
+					"Transform": "82125f902860db21"
+				}
+			},
+			{
+				"Id": "a58999a6d78ecdc0",
+				"Path": "/Game/Cells/Cell09_08",
+				"Hash": "ebfd9a1f0bc2ff8e",
+				"Components": {
+					"Transform": "b1caea48769fcc22",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "d68b4027b9a0bfdb",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "a85986ea48449b1c",
+				"Path": "/Game/Cells/Cell15_04",
+				"Hash": "dbcf861b0809dbd2",
+				"Components": {
+					"Transform": "4d016c813d4766a5",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "366660b6d38adb1b",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "a9424c31b3a57520",
+				"Path": "/Game/Cells/Cell13_04",
+				"Hash": "05f52ebc943d31c3",
+				"Components": {
+					"Transform": "94fb5d459f6dc4d3",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "d42c2c42f12b6357",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "aa41aebdda8d120c",
+				"Path": "/Game/Cells/Cell14_10",
+				"Hash": "92229542c1c222a0",
+				"Components": {
+					"Transform": "4ba771a503473bcd",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "c8dd4e42d3c219c6",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "ab8a07e5f3617cfa",
+				"Path": "/Game/Cells/Cell12_09",
+				"Hash": "2c8a6411ddf3cab8",
+				"Components": {
+					"Transform": "fb68a21bf85a7add",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "2ba306cc4d1e1bb4",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "abab806494afd355",
+				"Path": "/Game/Cells/Cell13_02",
+				"Hash": "663376db76e44575",
+				"Components": {
+					"Transform": "a3ed78c340001eb8",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "12f4fc1385bb6427",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "acfb03de54f2214b",
+				"Path": "/Game/Cells/Cell08_02",
+				"Hash": "6cacb0087cc2bdbd",
+				"Components": {
+					"Transform": "f44a0a128710f1a9",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "a7152621f699a060",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "ad5f6aac0718de5e",
+				"Path": "/Game/Cells/Cell08_06",
+				"Hash": "6979fa4a531df9be",
+				"Components": {
+					"Transform": "e1de9313cd304116",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "09eadcbcc71bd7d3",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "ad9746d42b02dada",
+				"Path": "/HUD/Title",
+				"Hash": "bc21513ddc429a7a",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Text": "bb9cbb1442d00913"
+				}
+			},
+			{
+				"Id": "ae586f5cf9894fc5",
+				"Path": "/Game/Cells/Cell01_05",
+				"Hash": "fda1591c31dcb321",
+				"Components": {
+					"Transform": "91413ebacdbe1994",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "0803c0b4373ccc5d",
+					"MeshRenderer": "83d418a3dbbe6a49"
+				}
+			},
+			{
+				"Id": "ae9e99f8496b2884",
+				"Path": "/Game/Cells/Cell06_02",
+				"Hash": "67d9b50738c45ce7",
+				"Components": {
+					"Transform": "ddde5c2c832b7f84",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "9a7bf71279bf7c13",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "aec9b94e20b245c0",
+				"Path": "/Game/Cells/Cell19_09",
+				"Hash": "2ac29079aac7bb18",
+				"Components": {
+					"Transform": "2479dc4554710233",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "bd79a3fbb28e7256",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "b3e11b8590891333",
+				"Path": "/Game/Cells/Cell09_01",
+				"Hash": "5a7a95c488dd1b71",
+				"Components": {
+					"Transform": "f875a708b9f11234",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "bc46535732919276",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "b63b75288b563733",
+				"Path": "/Game/Previews/Preview2_3",
+				"Hash": "5ae4bde5bb8469d7",
+				"Components": {
+					"Transform": "a9367e0aee1dd81b",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "cc0e7d26bb927133",
+					"MeshRenderer": "4a15711e210fbde4"
+				}
+			},
+			{
+				"Id": "b6c6b45507e5ecef",
+				"Path": "/Game/Cells/Cell07_08",
+				"Hash": "dcd79ead8122d3cd",
+				"Components": {
+					"Transform": "3993456c6e1ecbfa",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "d0ab7d4a2d1cfd70",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "b7a4595925d05ac6",
+				"Path": "/Game/Cells/Cell20_05",
+				"Hash": "48dc005ea57667fd",
+				"Components": {
+					"Transform": "bc47af94443c1fe1",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "089b70d5d4e4a76f",
+					"MeshRenderer": "bddafa8514e72128"
+				}
+			},
+			{
+				"Id": "b9fb90a233ff225c",
+				"Path": "/Game/Cells/Cell03_09",
+				"Hash": "276859d5009c9daa",
+				"Components": {
+					"Transform": "68036299355a28aa",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "f53b86c8fe11fc5c",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "bcd2c984093b118d",
+				"Path": "/Game/Cells/Cell02_03",
+				"Hash": "0a4065f58ec046f6",
+				"Components": {
+					"Transform": "0a8b68ab3dee1ed9",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "681d2941f1829718",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "bd1fe1d2b5dbbc25",
+				"Path": "/Game/Cells/Cell14_08",
+				"Hash": "f050131b47dd5774",
+				"Components": {
+					"Transform": "576b8b756540a976",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "eeea3d06252b633f",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "bd34ded1c478b328",
+				"Path": "/Game/Cells/Cell11_10",
+				"Hash": "82639875f5ce2b96",
+				"Components": {
+					"Transform": "2d52d3ea37c43b4c",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "1ae926827ce33ff4",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "be93e5cd1d035fa1",
+				"Path": "/Game/Cells/Cell07_10",
+				"Hash": "bd2913440cfd0d27",
+				"Components": {
+					"Transform": "bf4c490eb4198080",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "def6151ca97ed571",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "bebd96ced1453265",
+				"Path": "/Game/Cells/Cell06_03",
+				"Hash": "620521495da77877",
+				"Components": {
+					"Transform": "abe22739c03feb1a",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "8bb415d11541d389",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "bee8a6d325c9d4f8",
+				"Path": "/Game/Cells/Cell04_09",
+				"Hash": "d94a657d58c48bd0",
+				"Components": {
+					"Transform": "6ec21c15f7a967a2",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "66403d604b2a39b7",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "befca0050342c693",
+				"Path": "/Game/Cells/Cell10_06",
+				"Hash": "b37ecbe2b06fa653",
+				"Components": {
+					"Transform": "238c4397b3bb823c",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "2edf1a9f32882ae9",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "bf20fe228561c4a4",
+				"Path": "/Game/Cells/Cell08_09",
+				"Hash": "2cc2d58a61c5c538",
+				"Components": {
+					"Transform": "992c51c82597d614",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "3693a60e245a0159",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "c0d7eac4aed1e775",
+				"Path": "/HUD/HelpText",
+				"Hash": "fb956da7f428ca12",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Text": "26e4a41c0efa92c1"
+				}
+			},
+			{
+				"Id": "c24855a1462f59df",
+				"Path": "/Game/Previews/Preview2_1",
+				"Hash": "c7e9656dfbabd63c",
+				"Components": {
+					"Transform": "41aa16e452d66434",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "ed9b8a7974749b26",
+					"MeshRenderer": "4a15711e210fbde4"
+				}
+			},
+			{
+				"Id": "c485a3b37c66a84c",
+				"Path": "/Game/Previews/Preview3_4",
+				"Hash": "3249d180c31ad9e5",
+				"Components": {
+					"Transform": "041de25d7fda0717",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "3eec183c13d6c16f",
+					"MeshRenderer": "9fd9451a8ea04845"
+				}
+			},
+			{
+				"Id": "c542e21690f44a5f",
+				"Path": "/Game/Cells/Cell05_07",
+				"Hash": "a9f719b5e0797b12",
+				"Components": {
+					"Transform": "d2f673cae3275678",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "3281936efbc25556",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "c5745013c7964b4f",
+				"Path": "/Game/Cells/Cell15_09",
+				"Hash": "a9b5fe84e1d8dccc",
+				"Components": {
+					"Transform": "82f8b836e680cfe6",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "992dda929dee91b9",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "c7b75b2a892801e0",
+				"Path": "/Game/Cells/Cell17_01",
+				"Hash": "4cbe9428d2f12392",
+				"Components": {
+					"Transform": "6d195eed86d9fcaf",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "482335f71e71188e",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "c8767143c18b60a8",
+				"Path": "/Game/Cells/Cell18_02",
+				"Hash": "44391321ed77d39b",
+				"Components": {
+					"Transform": "3c0c24b4f5539b3b",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "1d3d7bab9b414263",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "c9b5663ae0c694cd",
+				"Path": "/Stage/WallLeft",
+				"Hash": "da90ded7be6166cc",
+				"Components": {
+					"Transform": "90c9b12ecc9df132",
+					"MeshRenderer": "49a0a60cf569eb46"
+				}
+			},
+			{
+				"Id": "ca63bdf9e943134f",
+				"Path": "/Game/Cells/Cell03_07",
+				"Hash": "99e9cbc8ab7b2785",
+				"Components": {
+					"Transform": "2984967ebcfa91e7",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "66d1f5cffd135c4b",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "ca7707a8d7d5ef9c",
+				"Path": "/Game/Cells/Cell12_06",
+				"Hash": "c7445c0be490fe49",
+				"Components": {
+					"Transform": "8aa93605408e5d54",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "6530c8abd8ab1e01",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "caf31a4ae7491c04",
+				"Path": "/Game/Cells/Cell07_05",
+				"Hash": "022c08a907493596",
+				"Components": {
+					"Transform": "1c25a4d1b4729f39",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "1d566c39f07188f3",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "cc20846de446a83f",
+				"Path": "/Game/Cells/Cell10_02",
+				"Hash": "b19ecef3c9bb359f",
+				"Components": {
+					"Transform": "1ddfeba05b55c75d",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "c406c5412ad76bc6",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "cce6269e72d2a0c5",
+				"Path": "/Game/Cells/Cell16_06",
+				"Hash": "617c33633fd0cb21",
+				"Components": {
+					"Transform": "41a3e3b1b41adad5",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "d2c915b907347fd7",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "ccf9dbf8d55cb11f",
+				"Path": "/Game/Cells/Cell14_09",
+				"Hash": "0b4d40d13b68ae97",
+				"Components": {
+					"Transform": "38303b725a372294",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "7a9a408dd2a1bd0e",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "cdc714e996b48494",
+				"Path": "/Game/Cells/Cell18_05",
+				"Hash": "fb08dbc439efa309",
+				"Components": {
+					"Transform": "b48c78cc96f92a64",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "f79b898de3b1b2a4",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "d07cbf959e19f148",
+				"Path": "/Game/Cells/Cell08_03",
+				"Hash": "d54834f5db63c7ea",
+				"Components": {
+					"Transform": "fe6a0420854d5a19",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "0e2f33643ae5c611",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "d09efbf23ef4bb2b",
+				"Path": "/Game/Cells/Cell04_03",
+				"Hash": "72159ba50c045d92",
+				"Components": {
+					"Transform": "6f2343d38e59437b",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "b56c6bd8da744255",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "d2cbf8e6eab08337",
+				"Path": "/Game/Cells/Cell01_01",
+				"Hash": "d58bed26816d92bc",
+				"Components": {
+					"Transform": "673a3ed19dc266b2",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "1f96f70b9d675925",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "d2cfb59ffaba62bb",
+				"Path": "/Game/Cells/Cell01_03",
+				"Hash": "6d577396778bfa8f",
+				"Components": {
+					"Transform": "1c56cc05a1258147",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "85258a8d10a9f109",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "d3b20f61715a0ad7",
+				"Path": "/Game/Cells/Cell11_09",
+				"Hash": "f52f441129f2c231",
+				"Components": {
+					"Transform": "bfb0108d28c762db",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "549e3056200bf94c",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "d490a0588225ded8",
+				"Path": "/Game/Previews/Preview2_2",
+				"Hash": "bd76dc0ad0c4ad05",
+				"Components": {
+					"Transform": "da4018140322960f",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "2d8ab7688206278d",
+					"MeshRenderer": "4a15711e210fbde4"
+				}
+			},
+			{
+				"Id": "d548cc0efb1622d7",
+				"Path": "/Game/Cells/Cell19_03",
+				"Hash": "c3200294523b7b1d",
+				"Components": {
+					"Transform": "b6dc4eb8cac85a67",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "c3baf80be27c9f47",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "d590fe40124385ff",
+				"Path": "/Game/Cells/Cell06_10",
+				"Hash": "7169166700204c11",
+				"Components": {
+					"Transform": "52ed79a8b5144b8a",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "5fbd05c033137256",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "d5a1d569b77d14e4",
+				"Path": "/Game/Cells/Cell15_05",
+				"Hash": "cba62f30cc965870",
+				"Components": {
+					"Transform": "84156d7757224eb4",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "a724a1d71deef05c",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "d6bc9ed4be714a11",
+				"Path": "/Game/Cells/Cell04_02",
+				"Hash": "0d223dd801462bd6",
+				"Components": {
+					"Transform": "a2291ff25a77eaec",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "efe6b7a4cd5d716d",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "d72d6f995c6ec81c",
+				"Path": "/Game/Cells/Cell20_08",
+				"Hash": "3124ae528a6bce3e",
+				"Components": {
+					"Transform": "b01aa75668f900a5",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "4afd197bb1ba96cd",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "d7878d57b2a4c1c5",
+				"Path": "/Game/Cells/Cell17_03",
+				"Hash": "9cb514f57d937f9f",
+				"Components": {
+					"Transform": "693afc96a255525e",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "b6944d6e7ab6b74d",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "d7a9bb719ea89560",
+				"Path": "/Game/Cells/Cell09_07",
+				"Hash": "505e5f3ff82b7b00",
+				"Components": {
+					"Transform": "7ad0a9017e7c9e12",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "cda6ce0a282c6c0e",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "d7fe8c6082d2b9e0",
+				"Path": "/Game/Previews/Preview1_1",
+				"Hash": "10fde25b2e2e9f30",
+				"Components": {
+					"Transform": "061f34aeab99a448",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "cd8eecf11dbccd46",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "d92de8611fe229f6",
+				"Path": "/Game/Cells/Cell17_08",
+				"Hash": "049e32f93f46da30",
+				"Components": {
+					"Transform": "487f4b6732b4f522",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "1f306fc64ca63000",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "d98a51c7bad3e24f",
+				"Path": "/HUD",
+				"Hash": "7a3093abcd2c0f2b",
+				"Components": {
+					"Transform": "82125f902860db21"
+				}
+			},
+			{
+				"Id": "d9edf42a43d4dd6e",
+				"Path": "/Game/Previews/Preview2_4",
+				"Hash": "30cf5954abe68d4d",
+				"Components": {
+					"Transform": "086463d6da9ee6c6",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "f227ccf287566650",
+					"MeshRenderer": "4a15711e210fbde4"
+				}
+			},
+			{
+				"Id": "dc1ed97ba5025ceb",
+				"Path": "/Game/Cells/Cell13_08",
+				"Hash": "2d4b47f7336b96eb",
+				"Components": {
+					"Transform": "417e6016ee69b570",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "ddfbc5bed922db45",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "dd79ef9fe7a58ce4",
+				"Path": "/Game/Cells/Cell05_06",
+				"Hash": "6d8816ccc2708967",
+				"Components": {
+					"Transform": "0fcccc3c929d2d69",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "b1fd2fe84392f127",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "ddd5abf96fe1b325",
+				"Path": "/Stage/WallRight",
+				"Hash": "77de48e38c997bd8",
+				"Components": {
+					"Transform": "5c50656cd699da07",
+					"MeshRenderer": "49a0a60cf569eb46"
+				}
+			},
+			{
+				"Id": "de17447cb0e4a6f8",
+				"Path": "/Game/Previews/Preview4_1",
+				"Hash": "6a42de3cee47a64f",
+				"Components": {
+					"Transform": "213399d6957eae11",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "656dca4bd22e11ab",
+					"MeshRenderer": "f65563a29010345e"
+				}
+			},
+			{
+				"Id": "de5d7f146fe69966",
+				"Path": "/HUD/HoldLabel",
+				"Hash": "bc3e6922015f02e8",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Text": "7306c9f9b0c16afd"
+				}
+			},
+			{
+				"Id": "e0260aa1693d3ba2",
+				"Path": "/Game/Cells/Cell02_08",
+				"Hash": "58aa2dee834f487a",
+				"Components": {
+					"Transform": "6e5d6f6dd7b4742d",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "b85b47b334cdbbd7",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "e3d3222a20b45de2",
+				"Path": "/Game/Cells/Cell01_04",
+				"Hash": "b8190dbab99a154d",
+				"Components": {
+					"Transform": "2103a40c9b282be9",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "733539ad4a55a350",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "e447bf691e9b5c3e",
+				"Path": "/Game/Cells/Cell18_07",
+				"Hash": "2790d1fa352464a4",
+				"Components": {
+					"Transform": "d9c3a3b40c0706df",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "3c8c77c1b298ec40",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "e4e6e9cfdc385609",
+				"Path": "/Game/Cells/Cell09_10",
+				"Hash": "88de7e32c439b732",
+				"Components": {
+					"Transform": "ccb19db40c68e60e",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "80d802f40bfe8ad2",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "e76f53572c326e78",
+				"Path": "/Game/Cells/Cell04_07",
+				"Hash": "3006dfd9f32e05ef",
+				"Components": {
+					"Transform": "845502c244fb022f",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "f6ab43dcf1f5da29",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "e8839e67575e1f84",
+				"Path": "/Game/Cells/Cell12_03",
+				"Hash": "ea459cfcb92e295f",
+				"Components": {
+					"Transform": "4065e6dcb78c0481",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "6c127bf8983141c4",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "e9f7ba1b727c8d0f",
+				"Path": "/Game/Cells/Cell12_07",
+				"Hash": "f96c0834491ff477",
+				"Components": {
+					"Transform": "e602b715c09b6482",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "a9eb752955ae9b12",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "ea3247c38e3bd3e2",
+				"Path": "/Game/Cells/Cell20_09",
+				"Hash": "2615ff0672249cfa",
+				"Components": {
+					"Transform": "06fa3d137d3dd976",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "7f876e09a911aa51",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "eb42ee4ac64e9727",
+				"Path": "/Game/Previews/Preview4_3",
+				"Hash": "20ed6c8e90f7cdbd",
+				"Components": {
+					"Transform": "8678320fabaa6661",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "9f215be625de5212",
+					"MeshRenderer": "f65563a29010345e"
+				}
+			},
+			{
+				"Id": "ecab9160d26bdc2a",
+				"Path": "/Game/Cells/Cell12_05",
+				"Hash": "62158dd3f3e3f0f2",
+				"Components": {
+					"Transform": "264bca95dc1182e6",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "4e6e0a37c2e4466a",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "ed0b1efeaef8a04b",
+				"Path": "/Game/Cells/Cell05_08",
+				"Hash": "19dee1235c7b941f",
+				"Components": {
+					"Transform": "93e2e9b19b0a120e",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "34f4e21e9cb014ea",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "ed6e4cc7889a178a",
+				"Path": "/Game/Cells/Cell07_02",
+				"Hash": "8fb4427126bb2c29",
+				"Components": {
+					"Transform": "ea398e4763863ea9",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "dac9e6df8426dd3d",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "ed9a1557bab7896d",
+				"Path": "/Game/Cells/Cell07_04",
+				"Hash": "5fb0221ae8222923",
+				"Components": {
+					"Transform": "2c6a91d597e47ef8",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "9235de103eff255b",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "edf0d5a4b5ac27ad",
+				"Path": "/Game/Cells/Cell13_01",
+				"Hash": "0d89be7abf874d2e",
+				"Components": {
+					"Transform": "543c4ae6b8fd7fff",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "bb30284d2875be0d",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "ee0fdf3bfdbff78b",
+				"Path": "/Game/Cells/Cell20_02",
+				"Hash": "dc2c6c9a0b50d603",
+				"Components": {
+					"Transform": "3b0564c474a3005f",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "a43d3387120f88a8",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "f0caa5f3621ca12c",
+				"Path": "/Game/Cells/Cell06_05",
+				"Hash": "b684ead7dc0167c6",
+				"Components": {
+					"Transform": "35df2e2245717280",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "c10800fb45b2b104",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "f0f9a2170d4b33ca",
+				"Path": "/HUD/LevelText",
+				"Hash": "c0373b44ee77daba",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Text": "d42baab72a1127fa"
+				}
+			},
+			{
+				"Id": "f1c1947e1f86daa5",
+				"Path": "/Game/Cells/Cell02_05",
+				"Hash": "b08183dfcfab6767",
+				"Components": {
+					"Transform": "4be5140ca1fdf5f5",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "2528952cf6fe86a9",
+					"MeshRenderer": "83d418a3dbbe6a49"
+				}
+			},
+			{
+				"Id": "f1f0b3bb1a5c00ab",
+				"Path": "/Game/Cells/Cell20_01",
+				"Hash": "83e997a310b542c5",
+				"Components": {
+					"Transform": "af0a2a8f0c1441aa",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "b0d582e63b3c1f16",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "f4df09eeb4fcbef7",
+				"Path": "/Game/Previews/Preview1_2",
+				"Hash": "997df1de81950713",
+				"Components": {
+					"Transform": "061f34aeab99a448",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "d97e90c544e2eefb",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "f55a2c342dbb8787",
+				"Path": "/Camera",
+				"Hash": "dcc1fff494bb401a",
+				"Components": {
+					"Transform": "00f5e143c91ab089",
+					"Camera": "596b1b3051f4555a"
+				}
+			},
+			{
+				"Id": "f6983e0f10c7c7ff",
+				"Path": "/Game/Cells/Cell07_06",
+				"Hash": "2763d588d37c7e90",
+				"Components": {
+					"Transform": "9d1d2a90c66c92c3",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "3cb87a31442211c2",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "f73d567ad525864c",
+				"Path": "/Game/Cells/Cell08_01",
+				"Hash": "5b05057a3e1e349c",
+				"Components": {
+					"Transform": "a519091a03435604",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "f4951642653c7226",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "f9f58c1136e5a68f",
+				"Path": "/Game/Cells/Cell13_10",
+				"Hash": "108b29f13e251df3",
+				"Components": {
+					"Transform": "f141bfb3af8ae41b",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "2b44880119387705",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "fa244b4a1a792081",
+				"Path": "/Game/Cells/Cell03_03",
+				"Hash": "897333d9f05e5d6b",
+				"Components": {
+					"Transform": "a4fdc76a7109dc39",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "bc9ebfe11fe7dfb2",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "fcd539dc0e7b3546",
+				"Path": "/Game/Cells/Cell05_09",
+				"Hash": "53f1537bda9c2253",
+				"Components": {
+					"Transform": "494363eaf7102833",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "ebd6967274579062",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "fd054dd6ea3fba88",
+				"Path": "/Game/Cells/Cell03_08",
+				"Hash": "751c93d5f6539f3f",
+				"Components": {
+					"Transform": "a0a163fea18b4291",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "83d3e672661ad9f0",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "fdc4804b400be689",
+				"Path": "/Game/Cells/Cell05_02",
+				"Hash": "d826b73c5a10fc40",
+				"Components": {
+					"Transform": "54f70678406a0e6c",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "1b56bb06b9f15710",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			},
+			{
+				"Id": "fe1f92186ba14ab1",
+				"Path": "/Game/Cells/Cell09_09",
+				"Hash": "76d98250b0fd7c04",
+				"Components": {
+					"Transform": "76a67df75971f1ab",
+					"Prefab": "000343aa8a1f3c11",
+					"PrefabLink": "4221dfdff0d81e49",
+					"MeshRenderer": "2d47f3eb3103de61"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "0000000000000201",
+				"Path": "engine://Environments/Studio",
+				"Type": "Environment",
+				"Hash": "6a11c68afc2888f1"
+			},
+			{
+				"Handle": "0fb92e13ec6a305f",
+				"Path": "Assets/Audio/Move.sfx",
+				"Type": "AudioClip",
+				"Hash": "bc372facd3a5c9d2"
+			},
+			{
+				"Handle": "1687a7ad5db0d220",
+				"Path": "Assets/Materials/Ghost.material",
+				"Type": "Material",
+				"Hash": "cd4ef32a5d728957"
+			},
+			{
+				"Handle": "1aadfddcfd5accee",
+				"Path": "Assets/Materials/Accent.material",
+				"Type": "Material",
+				"Hash": "82931907b542aff8"
+			},
+			{
+				"Handle": "235bd62a206faf5d",
+				"Path": "Assets/Materials/PieceL.material",
+				"Type": "Material",
+				"Hash": "af73b00cb47255d2"
+			},
+			{
+				"Handle": "27ca6d33a4480e64",
+				"Path": "Assets/Materials/PieceO.material",
+				"Type": "Material",
+				"Hash": "29eed39974e23336"
+			},
+			{
+				"Handle": "2c31e5fd8094d5ff",
+				"Path": "Assets/Scripts/Game.luau",
+				"Type": "Script",
+				"Hash": "4307dc130e3c5c64"
+			},
+			{
+				"Handle": "59a06c0f473572bf",
+				"Path": "Assets/Materials/Garbage.material",
+				"Type": "Material",
+				"Hash": "45dc7d09655e128c"
+			},
+			{
+				"Handle": "5a73e72041250825",
+				"Path": "Assets/Audio/GameOver.sfx",
+				"Type": "AudioClip",
+				"Hash": "c755a577ba959ab5"
+			},
+			{
+				"Handle": "5c848caebbf84c4f",
+				"Path": "Assets/Materials/Backdrop.material",
+				"Type": "Material",
+				"Hash": "218100046500b417"
+			},
+			{
+				"Handle": "5f795ba4ad9c13e6",
+				"Path": "Assets/Audio/Drop.sfx",
+				"Type": "AudioClip",
+				"Hash": "d281a2b0241487f3"
+			},
+			{
+				"Handle": "755872f1acca1dab",
+				"Path": "Assets/Audio/Rotate.sfx",
+				"Type": "AudioClip",
+				"Hash": "99ee59910d0e7cb5"
+			},
+			{
+				"Handle": "893c23986c541ed6",
+				"Path": "Assets/Materials/PieceT.material",
+				"Type": "Material",
+				"Hash": "430b70e767e02a38"
+			},
+			{
+				"Handle": "90668ec5cd8a76b4",
+				"Path": "Assets/Materials/PieceZ.material",
+				"Type": "Material",
+				"Hash": "6888fc78e967eaac"
+			},
+			{
+				"Handle": "a33b616ed870d536",
+				"Path": "Assets/Materials/Backboard.material",
+				"Type": "Material",
+				"Hash": "3743b225f4c10c7b"
+			},
+			{
+				"Handle": "aff966c9a9e359dc",
+				"Path": "Assets/Materials/PieceI.material",
+				"Type": "Material",
+				"Hash": "556a2d7d2e589528"
+			},
+			{
+				"Handle": "b2ce1ae4cc59874d",
+				"Path": "Assets/Prefabs/Cell.prefab",
+				"Type": "Prefab",
+				"Hash": "f479070182697c2b"
+			},
+			{
+				"Handle": "bace05d6580b3799",
+				"Path": "Assets/Audio/Clear.sfx",
+				"Type": "AudioClip",
+				"Hash": "2bd9342ac41574bd"
+			},
+			{
+				"Handle": "c030b52a5aa3b58a",
+				"Path": "Assets/Materials/Frame.material",
+				"Type": "Material",
+				"Hash": "ce077d3644d7ddc0"
+			},
+			{
+				"Handle": "c971e7208a5a6cc8",
+				"Path": "Assets/Audio/Tetris.sfx",
+				"Type": "AudioClip",
+				"Hash": "ffc00574c3bf5494"
+			},
+			{
+				"Handle": "ca51c77fbe30b01d",
+				"Path": "Assets/Audio/Lock.sfx",
+				"Type": "AudioClip",
+				"Hash": "a40e741bc0414c85"
+			},
+			{
+				"Handle": "cc538f4c47bce4da",
+				"Path": "Assets/Audio/LevelUp.sfx",
+				"Type": "AudioClip",
+				"Hash": "3956d442b2092b48"
+			},
+			{
+				"Handle": "dc4dfea16315ab14",
+				"Path": "Assets/Materials/PieceS.material",
+				"Type": "Material",
+				"Hash": "a1dad10c3947e0ae"
+			},
+			{
+				"Handle": "e109111d603ab2d0",
+				"Path": "Assets/Materials/PieceJ.material",
+				"Type": "Material",
+				"Hash": "17ac049d3bab3126"
+			},
+			{
+				"Handle": "fa88b7ddac079753",
+				"Path": "Assets/Audio/Hold.sfx",
+				"Type": "AudioClip",
+				"Hash": "c5e886d0e9bbd72c"
+			}
+		]
+	},
 	"Events": [
 		{
 			"Tick": 11,
@@ -221,9 +2974,9 @@
 	"Checkpoints": [
 		{
 			"Tick": 60,
-			"StateHash": "e2f4e315deaa8d9d"
+			"StateHash": "1b60a7c87734d558"
 		}
 	],
 	"FinalTick": 95,
-	"FinalStateHash": "bd018732d506bb4e"
+	"FinalStateHash": "18c6b54ec7f80aff"
 }

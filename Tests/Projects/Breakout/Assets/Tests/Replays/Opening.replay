@@ -10,7 +10,955 @@
 	"FixedHz": 60,
 	"EngineVersion": "0.1.0",
 	"Config": "Editor",
-	"Fingerprint": null,
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "02dd471e60a71aee",
+				"Path": "/Bricks/Brick_R3_C05",
+				"Hash": "34593ff805c10d5a",
+				"Components": {
+					"Transform": "be27b70f8c39a3f4",
+					"Prefab": "c007cee92b84ba86",
+					"PrefabLink": "e89247e05e7efd04",
+					"MeshRenderer": "bca30cc79f8f269e",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "9bb8b756adff97ad"
+				}
+			},
+			{
+				"Id": "08c5f6fede8488f1",
+				"Path": "/Bricks/Brick_R4_C07",
+				"Hash": "e41befb0cb50986f",
+				"Components": {
+					"Transform": "a37b811f05c99ac1",
+					"Prefab": "25907743892681dc",
+					"PrefabLink": "4d3916c779c97733",
+					"MeshRenderer": "07f3203aa135e2d1",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "d21b9746583c0f2d"
+				}
+			},
+			{
+				"Id": "0deebadb2218c766",
+				"Path": "/Bricks",
+				"Hash": "73f7bb74289b570c",
+				"Components": {
+					"Transform": "82125f902860db21"
+				}
+			},
+			{
+				"Id": "0e8ad929dfaa7c54",
+				"Path": "/Bricks/Brick_R4_C03",
+				"Hash": "e02111c8681bd1b2",
+				"Components": {
+					"Transform": "28a0bba25f3f5555",
+					"Prefab": "25907743892681dc",
+					"PrefabLink": "03a2d1514cbd4a67",
+					"MeshRenderer": "07f3203aa135e2d1",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "d21b9746583c0f2d"
+				}
+			},
+			{
+				"Id": "12923d2505078d92",
+				"Path": "/Bricks/Brick_R3_C04",
+				"Hash": "bfb874c1fdef185b",
+				"Components": {
+					"Transform": "8b953552ce75de41",
+					"Prefab": "c007cee92b84ba86",
+					"PrefabLink": "5434ff930733d715",
+					"MeshRenderer": "bca30cc79f8f269e",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "9bb8b756adff97ad"
+				}
+			},
+			{
+				"Id": "14fbfefba5500a5d",
+				"Path": "/Sun",
+				"Hash": "74f382d4a4554c10",
+				"Components": {
+					"Transform": "5e0b9c36fef9332a",
+					"DirectionalLight": "d71d2105d40937db"
+				}
+			},
+			{
+				"Id": "2011b4db5569f665",
+				"Path": "/Bricks/Brick_R5_C03",
+				"Hash": "847d0d2fd391a5d2",
+				"Components": {
+					"Transform": "29273e8fbc644790",
+					"Prefab": "3d322faedae4d1e7",
+					"PrefabLink": "c19bd5c34af0f7c0",
+					"MeshRenderer": "6e85c35a960ce1b1",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "801801e255bc0c92"
+				}
+			},
+			{
+				"Id": "2109d9199dbeed36",
+				"Path": "/Bricks/Brick_R4_C09",
+				"Hash": "af077f3b6f1a6c83",
+				"Components": {
+					"Transform": "8869147a22db4047",
+					"Prefab": "25907743892681dc",
+					"PrefabLink": "055c692e5b0f7a65",
+					"MeshRenderer": "07f3203aa135e2d1",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "d21b9746583c0f2d"
+				}
+			},
+			{
+				"Id": "235a63600269dd6f",
+				"Path": "/Bricks/Brick_R3_C10",
+				"Hash": "5802ce790292f1c8",
+				"Components": {
+					"Transform": "1a7d03dc286df53b",
+					"Prefab": "c007cee92b84ba86",
+					"PrefabLink": "16cfabb508d37f3a",
+					"MeshRenderer": "bca30cc79f8f269e",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "9bb8b756adff97ad"
+				}
+			},
+			{
+				"Id": "28219e05312cc711",
+				"Path": "/Bricks/Brick_R2_C08",
+				"Hash": "b00a419329bf99a4",
+				"Components": {
+					"Transform": "d99bcd62c31d0aaa",
+					"Prefab": "da755232335fbb41",
+					"PrefabLink": "1a92e2af3644c5b2",
+					"MeshRenderer": "591957fdb9a3d5f5",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "b581e6409e6dbd9f"
+				}
+			},
+			{
+				"Id": "2c01bc0c282ab3ca",
+				"Path": "/Bricks/Brick_R5_C07",
+				"Hash": "27badbe5d68f31dc",
+				"Components": {
+					"Transform": "9c9490d432cb33fe",
+					"Prefab": "3d322faedae4d1e7",
+					"PrefabLink": "d1248cd296fff9dc",
+					"MeshRenderer": "6e85c35a960ce1b1",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "801801e255bc0c92"
+				}
+			},
+			{
+				"Id": "2ed66af102020bcc",
+				"Path": "/Bricks/Brick_R2_C02",
+				"Hash": "b08b53d97df93af3",
+				"Components": {
+					"Transform": "45861754cc7033e5",
+					"Prefab": "da755232335fbb41",
+					"PrefabLink": "3b1cca68f35b5857",
+					"MeshRenderer": "591957fdb9a3d5f5",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "b581e6409e6dbd9f"
+				}
+			},
+			{
+				"Id": "302348698acc43ae",
+				"Path": "/Bricks/Brick_R5_C06",
+				"Hash": "14a4f706cd3946f1",
+				"Components": {
+					"Transform": "1f8ad3f3dc620ab1",
+					"Prefab": "3d322faedae4d1e7",
+					"PrefabLink": "8a4e379e9e23fbc0",
+					"MeshRenderer": "6e85c35a960ce1b1",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "801801e255bc0c92"
+				}
+			},
+			{
+				"Id": "3164574db437db5a",
+				"Path": "/Game",
+				"Hash": "a74e83eac4647b2f",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Script": "726793ec7f58d7a5"
+				}
+			},
+			{
+				"Id": "32e5f72800e5b7cc",
+				"Path": "/Bricks/Brick_R1_C09",
+				"Hash": "ac19e1fbb360813b",
+				"Components": {
+					"Transform": "1cf69bc1b8a4ace8",
+					"Prefab": "511c875622c41226",
+					"PrefabLink": "df91a32615dc2a78",
+					"MeshRenderer": "efc9904ec928572b",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "80f5fe3364fbe9ad"
+				}
+			},
+			{
+				"Id": "33cdbc030fc4ab5e",
+				"Path": "/Bricks/Brick_R4_C06",
+				"Hash": "4ee2fadf21d6d7b4",
+				"Components": {
+					"Transform": "4393db37dc65575e",
+					"Prefab": "25907743892681dc",
+					"PrefabLink": "40981a39b0ee3956",
+					"MeshRenderer": "07f3203aa135e2d1",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "d21b9746583c0f2d"
+				}
+			},
+			{
+				"Id": "358a46446e19c3e5",
+				"Path": "/MessageText",
+				"Hash": "0fda122fe1d41117",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Text": "42fe05c3c230db41"
+				}
+			},
+			{
+				"Id": "3b109ebad56fc624",
+				"Path": "/Bricks/Brick_R3_C01",
+				"Hash": "41594a6961483a18",
+				"Components": {
+					"Transform": "ed2476a6adba9134",
+					"Prefab": "c007cee92b84ba86",
+					"PrefabLink": "fc7a72f46206cf12",
+					"MeshRenderer": "bca30cc79f8f269e",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "9bb8b756adff97ad"
+				}
+			},
+			{
+				"Id": "3bdcf79abe22ceaa",
+				"Path": "/Environment",
+				"Hash": "f01e476ce59d7c75",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Environment": "966b96aa3d3e7154",
+					"PostProcess": "43801d8b4acd6fc4"
+				}
+			},
+			{
+				"Id": "3e3023611346d17a",
+				"Path": "/Bricks/Brick_R2_C05",
+				"Hash": "971e7ef5149704bd",
+				"Components": {
+					"Transform": "e6cde4f2686b4a1c",
+					"Prefab": "da755232335fbb41",
+					"PrefabLink": "fcfe7c861f6b01bd",
+					"MeshRenderer": "591957fdb9a3d5f5",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "b581e6409e6dbd9f"
+				}
+			},
+			{
+				"Id": "4c047f6c239f6c54",
+				"Path": "/Bricks/Brick_R3_C09",
+				"Hash": "11a120321164ed33",
+				"Components": {
+					"Transform": "8bb40d2e23cc7ba4",
+					"Prefab": "c007cee92b84ba86",
+					"PrefabLink": "340955bc20e8c2fb",
+					"MeshRenderer": "bca30cc79f8f269e",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "9bb8b756adff97ad"
+				}
+			},
+			{
+				"Id": "4cab2139eac239fa",
+				"Path": "/Bricks/Brick_R2_C09",
+				"Hash": "9fd9be2d934c3326",
+				"Components": {
+					"Transform": "64d4dc7817d7cef2",
+					"Prefab": "da755232335fbb41",
+					"PrefabLink": "bae7fe394f44db26",
+					"MeshRenderer": "591957fdb9a3d5f5",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "b581e6409e6dbd9f"
+				}
+			},
+			{
+				"Id": "4e2a51398b3145a4",
+				"Path": "/Bricks/Brick_R1_C02",
+				"Hash": "f1735506e232a37c",
+				"Components": {
+					"Transform": "2291d66a4abb413f",
+					"Prefab": "511c875622c41226",
+					"PrefabLink": "48b1df0b67fa449a",
+					"MeshRenderer": "efc9904ec928572b",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "80f5fe3364fbe9ad"
+				}
+			},
+			{
+				"Id": "4f060f247cfd860d",
+				"Path": "/Bricks/Brick_R5_C04",
+				"Hash": "724ea2979b3db38d",
+				"Components": {
+					"Transform": "eadf46c2afd63f43",
+					"Prefab": "3d322faedae4d1e7",
+					"PrefabLink": "18f74a9de3d96880",
+					"MeshRenderer": "6e85c35a960ce1b1",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "801801e255bc0c92"
+				}
+			},
+			{
+				"Id": "5473307ac37053ef",
+				"Path": "/Bricks/Brick_R1_C06",
+				"Hash": "a60fa10b03e85d79",
+				"Components": {
+					"Transform": "611a2bbcc025c1df",
+					"Prefab": "511c875622c41226",
+					"PrefabLink": "a9cb426c047f900a",
+					"MeshRenderer": "efc9904ec928572b",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "80f5fe3364fbe9ad"
+				}
+			},
+			{
+				"Id": "577616da91a3ae34",
+				"Path": "/Bricks/Brick_R2_C10",
+				"Hash": "b575eb13abc12cac",
+				"Components": {
+					"Transform": "c64e9f7c597c7752",
+					"Prefab": "da755232335fbb41",
+					"PrefabLink": "248b80d75b09b45c",
+					"MeshRenderer": "591957fdb9a3d5f5",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "b581e6409e6dbd9f"
+				}
+			},
+			{
+				"Id": "5a128711643b5917",
+				"Path": "/Bricks/Brick_R4_C01",
+				"Hash": "c001da5ab94036e6",
+				"Components": {
+					"Transform": "9004ca997143c567",
+					"Prefab": "25907743892681dc",
+					"PrefabLink": "336cd54e611e2630",
+					"MeshRenderer": "07f3203aa135e2d1",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "d21b9746583c0f2d"
+				}
+			},
+			{
+				"Id": "5da4c06203159740",
+				"Path": "/Arena",
+				"Hash": "1e120bfb1ea74534",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"RigidBody": "77d681e6c0bb1f4d"
+				}
+			},
+			{
+				"Id": "6356333445f5e902",
+				"Path": "/Bricks/Brick_R1_C03",
+				"Hash": "6bb10c0b3aa05ca3",
+				"Components": {
+					"Transform": "b58ac7f665052dcb",
+					"Prefab": "511c875622c41226",
+					"PrefabLink": "635832111f2c7989",
+					"MeshRenderer": "efc9904ec928572b",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "80f5fe3364fbe9ad"
+				}
+			},
+			{
+				"Id": "64acee1c8f7fcd6b",
+				"Path": "/Bricks/Brick_R5_C02",
+				"Hash": "913035d501381717",
+				"Components": {
+					"Transform": "6183708fd282bb86",
+					"Prefab": "3d322faedae4d1e7",
+					"PrefabLink": "04f7e239808ec5e2",
+					"MeshRenderer": "6e85c35a960ce1b1",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "801801e255bc0c92"
+				}
+			},
+			{
+				"Id": "67b0d694546d0e9d",
+				"Path": "/Bricks/Brick_R2_C01",
+				"Hash": "cc2cf44c393781f6",
+				"Components": {
+					"Transform": "6d704b3b26f4fc3c",
+					"Prefab": "da755232335fbb41",
+					"PrefabLink": "7a86a218d5f134fd",
+					"MeshRenderer": "591957fdb9a3d5f5",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "b581e6409e6dbd9f"
+				}
+			},
+			{
+				"Id": "680ef1b788caceb3",
+				"Path": "/Camera",
+				"Hash": "5a1ef114d95d7014",
+				"Components": {
+					"Transform": "dbc561c60935972c",
+					"Camera": "f7ef3394279ed0ef",
+					"AudioListener": "5364d8903ff7ab7d"
+				}
+			},
+			{
+				"Id": "699dfc19778a77ff",
+				"Path": "/Bricks/Brick_R4_C10",
+				"Hash": "2c43df2ca5f5fa73",
+				"Components": {
+					"Transform": "cb8f918ad501c090",
+					"Prefab": "25907743892681dc",
+					"PrefabLink": "c732fb95c0058fa7",
+					"MeshRenderer": "07f3203aa135e2d1",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "d21b9746583c0f2d"
+				}
+			},
+			{
+				"Id": "6ad01dbb2bc2bd12",
+				"Path": "/Bricks/Brick_R3_C02",
+				"Hash": "b034827096590b64",
+				"Components": {
+					"Transform": "67348f34ae7ac1f0",
+					"Prefab": "c007cee92b84ba86",
+					"PrefabLink": "b9e274faf3c9ec2c",
+					"MeshRenderer": "bca30cc79f8f269e",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "9bb8b756adff97ad"
+				}
+			},
+			{
+				"Id": "71323b9e27a1530c",
+				"Path": "/Bricks/Brick_R2_C03",
+				"Hash": "6c39bdabd88021a5",
+				"Components": {
+					"Transform": "59a9b434277d8e5e",
+					"Prefab": "da755232335fbb41",
+					"PrefabLink": "39217aa0bcf0ab81",
+					"MeshRenderer": "591957fdb9a3d5f5",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "b581e6409e6dbd9f"
+				}
+			},
+			{
+				"Id": "77ba594175e157f1",
+				"Path": "/Bricks/Brick_R5_C01",
+				"Hash": "22e362445ff15081",
+				"Components": {
+					"Transform": "944fb97671a666fb",
+					"Prefab": "3d322faedae4d1e7",
+					"PrefabLink": "37889699eadff366",
+					"MeshRenderer": "6e85c35a960ce1b1",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "801801e255bc0c92"
+				}
+			},
+			{
+				"Id": "8a5e7f86fe80752a",
+				"Path": "/Arena/RightWall",
+				"Hash": "b3a66be8e6d5282b",
+				"Components": {
+					"Transform": "db78763f50eb9999",
+					"MeshRenderer": "d479ac31c8fc43c7",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "8aed70f49845ef20",
+				"Path": "/Bricks/Brick_R5_C05",
+				"Hash": "6b9223101cc00ded",
+				"Components": {
+					"Transform": "36cbeb0a1550ac88",
+					"Prefab": "3d322faedae4d1e7",
+					"PrefabLink": "6a87f54382cbb780",
+					"MeshRenderer": "6e85c35a960ce1b1",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "801801e255bc0c92"
+				}
+			},
+			{
+				"Id": "8cbfb0ae9345e2f0",
+				"Path": "/Bricks/Brick_R1_C05",
+				"Hash": "de1e4d850460f0dc",
+				"Components": {
+					"Transform": "6e35fe6cdd4b59b6",
+					"Prefab": "511c875622c41226",
+					"PrefabLink": "f0d1022053dfaa81",
+					"MeshRenderer": "efc9904ec928572b",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "80f5fe3364fbe9ad"
+				}
+			},
+			{
+				"Id": "92cc45d1ad345564",
+				"Path": "/Bricks/Brick_R4_C04",
+				"Hash": "29786f840e09ddb2",
+				"Components": {
+					"Transform": "cd229686a4fb1a7b",
+					"Prefab": "25907743892681dc",
+					"PrefabLink": "717bd2dd7da8c41d",
+					"MeshRenderer": "07f3203aa135e2d1",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "d21b9746583c0f2d"
+				}
+			},
+			{
+				"Id": "93fb14ff2e67c8d1",
+				"Path": "/Bricks/Brick_R2_C07",
+				"Hash": "c60d436b82eddeca",
+				"Components": {
+					"Transform": "c6eef18fd59b5cdd",
+					"Prefab": "da755232335fbb41",
+					"PrefabLink": "05832708920af89c",
+					"MeshRenderer": "591957fdb9a3d5f5",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "b581e6409e6dbd9f"
+				}
+			},
+			{
+				"Id": "94e9350ca4a9c397",
+				"Path": "/Bricks/Brick_R3_C06",
+				"Hash": "9b735e15f5c76555",
+				"Components": {
+					"Transform": "d8b63ce04332665f",
+					"Prefab": "c007cee92b84ba86",
+					"PrefabLink": "f5ce394682a9065f",
+					"MeshRenderer": "bca30cc79f8f269e",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "9bb8b756adff97ad"
+				}
+			},
+			{
+				"Id": "9cc1ab3770405d60",
+				"Path": "/Arena/TopWall",
+				"Hash": "874405afa33758ff",
+				"Components": {
+					"Transform": "d2fecea46fb348e9",
+					"MeshRenderer": "d479ac31c8fc43c7",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "9d0926e0f602be4f",
+				"Path": "/Bricks/Brick_R1_C04",
+				"Hash": "3ccc5530478e7f43",
+				"Components": {
+					"Transform": "cc5b028304534f3c",
+					"Prefab": "511c875622c41226",
+					"PrefabLink": "5fbe1b7cc031d0c8",
+					"MeshRenderer": "efc9904ec928572b",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "80f5fe3364fbe9ad"
+				}
+			},
+			{
+				"Id": "a2de7c63b9fc7b52",
+				"Path": "/Bricks/Brick_R2_C04",
+				"Hash": "4fcea6b6802c9ac7",
+				"Components": {
+					"Transform": "1d5d9d0697e076fb",
+					"Prefab": "da755232335fbb41",
+					"PrefabLink": "c10b82a5e7c1b780",
+					"MeshRenderer": "591957fdb9a3d5f5",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "b581e6409e6dbd9f"
+				}
+			},
+			{
+				"Id": "a54602d5759eb73b",
+				"Path": "/Bricks/Brick_R5_C10",
+				"Hash": "945a6c6d7a5aef34",
+				"Components": {
+					"Transform": "d4ed498013fc5231",
+					"Prefab": "3d322faedae4d1e7",
+					"PrefabLink": "22dc6efefb36d794",
+					"MeshRenderer": "6e85c35a960ce1b1",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "801801e255bc0c92"
+				}
+			},
+			{
+				"Id": "ac6cbf3ecdcff45c",
+				"Path": "/Bricks/Brick_R4_C02",
+				"Hash": "791a8f1e9221b11a",
+				"Components": {
+					"Transform": "7a3609b4d8edd439",
+					"Prefab": "25907743892681dc",
+					"PrefabLink": "ca1a90708dfadefa",
+					"MeshRenderer": "07f3203aa135e2d1",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "d21b9746583c0f2d"
+				}
+			},
+			{
+				"Id": "ba2fb6d1651a873c",
+				"Path": "/Bricks/Brick_R1_C07",
+				"Hash": "8e778e13b3cd4fb6",
+				"Components": {
+					"Transform": "b55fe11685a08562",
+					"Prefab": "511c875622c41226",
+					"PrefabLink": "823c5de963227c97",
+					"MeshRenderer": "efc9904ec928572b",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "80f5fe3364fbe9ad"
+				}
+			},
+			{
+				"Id": "c313f33f24dc5535",
+				"Path": "/Arena/LeftWall",
+				"Hash": "1f4780236c91bfe3",
+				"Components": {
+					"Transform": "632d8824ecbb0bcd",
+					"MeshRenderer": "d479ac31c8fc43c7",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "c3ef825b16186b9b",
+				"Path": "/Bricks/Brick_R5_C09",
+				"Hash": "8fd3190a61c82071",
+				"Components": {
+					"Transform": "f38b18d2484fa2d9",
+					"Prefab": "3d322faedae4d1e7",
+					"PrefabLink": "45a35329eabbd17b",
+					"MeshRenderer": "6e85c35a960ce1b1",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "801801e255bc0c92"
+				}
+			},
+			{
+				"Id": "c485508f72efec16",
+				"Path": "/ScoreText",
+				"Hash": "5cd6425b8aa9a5a4",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Text": "6a6b7732820fea0e"
+				}
+			},
+			{
+				"Id": "c5d19285c95aa153",
+				"Path": "/Bricks/Brick_R1_C08",
+				"Hash": "9a2389eb14f0e94c",
+				"Components": {
+					"Transform": "647ef1b198585e3e",
+					"Prefab": "511c875622c41226",
+					"PrefabLink": "b9ed5e4456a4d2a9",
+					"MeshRenderer": "efc9904ec928572b",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "80f5fe3364fbe9ad"
+				}
+			},
+			{
+				"Id": "c95be6caa2147037",
+				"Path": "/Bricks/Brick_R4_C05",
+				"Hash": "a6adc7e43349e74b",
+				"Components": {
+					"Transform": "5f32979461fdb5a7",
+					"Prefab": "25907743892681dc",
+					"PrefabLink": "aa1b737ed7f30677",
+					"MeshRenderer": "07f3203aa135e2d1",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "d21b9746583c0f2d"
+				}
+			},
+			{
+				"Id": "c9bff8428185b819",
+				"Path": "/Paddle",
+				"Hash": "4c7e4673c8882eb7",
+				"Components": {
+					"Transform": "ef209f04eacedab6",
+					"MeshRenderer": "87b076db1bb871f4",
+					"RigidBody": "1ccb3d276800bcc6",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "cbfd044833d2a16c",
+				"Path": "/Bricks/Brick_R1_C01",
+				"Hash": "f579f9f4ef2d601d",
+				"Components": {
+					"Transform": "68889568dc9eaac9",
+					"Prefab": "511c875622c41226",
+					"PrefabLink": "ada2fa81d78bde7f",
+					"MeshRenderer": "efc9904ec928572b",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "80f5fe3364fbe9ad"
+				}
+			},
+			{
+				"Id": "d4d1a58b3d8e10fb",
+				"Path": "/Bricks/Brick_R3_C07",
+				"Hash": "4624a309e8c7eda9",
+				"Components": {
+					"Transform": "fd363fefce9fcc89",
+					"Prefab": "c007cee92b84ba86",
+					"PrefabLink": "ab765eb0697f0ead",
+					"MeshRenderer": "bca30cc79f8f269e",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "9bb8b756adff97ad"
+				}
+			},
+			{
+				"Id": "d5194d081162cd38",
+				"Path": "/Bricks/Brick_R3_C03",
+				"Hash": "1910e6d1d4ab0ba8",
+				"Components": {
+					"Transform": "64b5078af0e88df7",
+					"Prefab": "c007cee92b84ba86",
+					"PrefabLink": "12c65abacfa06f0c",
+					"MeshRenderer": "bca30cc79f8f269e",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "9bb8b756adff97ad"
+				}
+			},
+			{
+				"Id": "d6525f275562fa6b",
+				"Path": "/Bricks/Brick_R3_C08",
+				"Hash": "707e92aa6ae04c54",
+				"Components": {
+					"Transform": "369d2c613aa363f3",
+					"Prefab": "c007cee92b84ba86",
+					"PrefabLink": "c6fd64cd2fd33736",
+					"MeshRenderer": "bca30cc79f8f269e",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "9bb8b756adff97ad"
+				}
+			},
+			{
+				"Id": "dc17af7a94ee6cb7",
+				"Path": "/Bricks/Brick_R2_C06",
+				"Hash": "2de8c49d53909ce0",
+				"Components": {
+					"Transform": "5f6b89efebda777d",
+					"Prefab": "da755232335fbb41",
+					"PrefabLink": "441cfc186aa60857",
+					"MeshRenderer": "591957fdb9a3d5f5",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "b581e6409e6dbd9f"
+				}
+			},
+			{
+				"Id": "e01240fff9bed39f",
+				"Path": "/Bricks/Brick_R4_C08",
+				"Hash": "501567f0f24767bb",
+				"Components": {
+					"Transform": "4eb549c87348b664",
+					"Prefab": "25907743892681dc",
+					"PrefabLink": "acb23e86019fe55c",
+					"MeshRenderer": "07f3203aa135e2d1",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "d21b9746583c0f2d"
+				}
+			},
+			{
+				"Id": "e0e0fb587c483494",
+				"Path": "/Ball",
+				"Hash": "0038429c6fa0932e",
+				"Components": {
+					"Transform": "82d498192fd679a8",
+					"MeshRenderer": "791196109ab1dd85",
+					"RigidBody": "39d76a4b30a9f4a3",
+					"SphereCollider": "9cd09cbe54c4e3b3",
+					"Script": "c83caa6e806dfafa"
+				}
+			},
+			{
+				"Id": "e52d96fd9d52709a",
+				"Path": "/Bricks/Brick_R5_C08",
+				"Hash": "86b5af343aa78620",
+				"Components": {
+					"Transform": "352238933ecb690d",
+					"Prefab": "3d322faedae4d1e7",
+					"PrefabLink": "b30a597e2f60b157",
+					"MeshRenderer": "6e85c35a960ce1b1",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "801801e255bc0c92"
+				}
+			},
+			{
+				"Id": "e83aa29a71e02baa",
+				"Path": "/LivesText",
+				"Hash": "87314062bb0a8462",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Text": "222f88fc24b382c1"
+				}
+			},
+			{
+				"Id": "fd61fbe6be3141a3",
+				"Path": "/Bricks/Brick_R1_C10",
+				"Hash": "e04459bbda3bd2af",
+				"Components": {
+					"Transform": "131a21568db25f56",
+					"Prefab": "511c875622c41226",
+					"PrefabLink": "904eb894c1e10461",
+					"MeshRenderer": "efc9904ec928572b",
+					"RigidBody": "77d681e6c0bb1f4d",
+					"BoxCollider": "5c8184944c7a623b",
+					"Script": "80f5fe3364fbe9ad"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "04a73e94d0da0935",
+				"Path": "Assets/Audio/LifeLost.sfx",
+				"Type": "AudioClip",
+				"Hash": "a210e8987c5bd357"
+			},
+			{
+				"Handle": "11d04163305d2e9f",
+				"Path": "Assets/Prefabs/Brick.prefab",
+				"Type": "Prefab",
+				"Hash": "1c034907955fcbfb"
+			},
+			{
+				"Handle": "1281af27c6d1d20f",
+				"Path": "Assets/Audio/GameOver.sfx",
+				"Type": "AudioClip",
+				"Hash": "4a79873539dd1b54"
+			},
+			{
+				"Handle": "16305f6ca94cdc2d",
+				"Path": "Assets/Materials/BrickGreen.material",
+				"Type": "Material",
+				"Hash": "ea1950041e2003b6"
+			},
+			{
+				"Handle": "18c27cc27d24eda2",
+				"Path": "Assets/Materials/BrickRed.material",
+				"Type": "Material",
+				"Hash": "78b902bb0f6c5b02"
+			},
+			{
+				"Handle": "19c57a9ec62c018d",
+				"Path": "Assets/Materials/BrickOrange.material",
+				"Type": "Material",
+				"Hash": "9ae89518f411d448"
+			},
+			{
+				"Handle": "1f23a7278b972c0a",
+				"Path": "Assets/Materials/Ball.material",
+				"Type": "Material",
+				"Hash": "9c7fa3abe3ffff1b"
+			},
+			{
+				"Handle": "3b22308614f51348",
+				"Path": "Assets/Audio/WallHit.sfx",
+				"Type": "AudioClip",
+				"Hash": "486cae6898db3fce"
+			},
+			{
+				"Handle": "3e69f27e1119a90d",
+				"Path": "Assets/Audio/BrickBreak.sfx",
+				"Type": "AudioClip",
+				"Hash": "389dc670b7d84d26"
+			},
+			{
+				"Handle": "4680262ddf5bce12",
+				"Path": "Assets/Materials/Wall.material",
+				"Type": "Material",
+				"Hash": "431314116cf52900"
+			},
+			{
+				"Handle": "47480773fb23c464",
+				"Path": "Assets/Audio/PaddleHit.sfx",
+				"Type": "AudioClip",
+				"Hash": "d4a410a6aceb7b29"
+			},
+			{
+				"Handle": "4a99b5db3ab5af16",
+				"Path": "Assets/Audio/Win.sfx",
+				"Type": "AudioClip",
+				"Hash": "143f89ea2df02b1e"
+			},
+			{
+				"Handle": "4fe19c1c1e553eec",
+				"Path": "Assets/Materials/BrickBlue.material",
+				"Type": "Material",
+				"Hash": "639bc2c06f01c034"
+			},
+			{
+				"Handle": "a6d76e2cc629df81",
+				"Path": "Assets/Materials/BrickYellow.material",
+				"Type": "Material",
+				"Hash": "712e9697f271ac63"
+			},
+			{
+				"Handle": "e29b62c819907a37",
+				"Path": "Assets/Scripts/Brick.luau",
+				"Type": "Script",
+				"Hash": "173d5588cd36510c"
+			},
+			{
+				"Handle": "e2a8433934a22dc6",
+				"Path": "Assets/Scripts/Ball.luau",
+				"Type": "Script",
+				"Hash": "533602e4bd41fbc9"
+			},
+			{
+				"Handle": "f03aaac70b2f5037",
+				"Path": "Assets/Scripts/Game.luau",
+				"Type": "Script",
+				"Hash": "b82769f4fed2d5bc"
+			},
+			{
+				"Handle": "fbaa5ba7c97f054e",
+				"Path": "Assets/Materials/Paddle.material",
+				"Type": "Material",
+				"Hash": "b27e99ff15dc4e9a"
+			}
+		]
+	},
 	"Events": [
 		{
 			"Tick": 31,
@@ -4763,61 +5711,61 @@
 	"Checkpoints": [
 		{
 			"Tick": 60,
-			"StateHash": "25d94fd414071a30"
+			"StateHash": "84971d0672aca529"
 		},
 		{
 			"Tick": 120,
-			"StateHash": "e132ab0666ac844c"
+			"StateHash": "40fe44df55a19fc3"
 		},
 		{
 			"Tick": 180,
-			"StateHash": "2cee7474cdbddb41"
+			"StateHash": "063a4e2e6cc8bd95"
 		},
 		{
 			"Tick": 240,
-			"StateHash": "d8940084fd84fa6c"
+			"StateHash": "5e2dcdc3dd0ad503"
 		},
 		{
 			"Tick": 300,
-			"StateHash": "00b71417faf660df"
+			"StateHash": "faa7db9e323a853e"
 		},
 		{
 			"Tick": 360,
-			"StateHash": "cde216f9bd3dfb55"
+			"StateHash": "b7d2c4125bfce396"
 		},
 		{
 			"Tick": 420,
-			"StateHash": "2fa30f036c225291"
+			"StateHash": "eb0b1d00fc85b55d"
 		},
 		{
 			"Tick": 480,
-			"StateHash": "b6cee4916c685c8c"
+			"StateHash": "56540b61c584ac39"
 		},
 		{
 			"Tick": 540,
-			"StateHash": "30b7a4ebe96333b5"
+			"StateHash": "f430b8c561f5ebba"
 		},
 		{
 			"Tick": 600,
-			"StateHash": "5e317dc5711c87cf"
+			"StateHash": "00f09fb4724ec295"
 		},
 		{
 			"Tick": 660,
-			"StateHash": "4e5fee647e4b4fc5"
+			"StateHash": "8ebb9cca0f14e894"
 		},
 		{
 			"Tick": 720,
-			"StateHash": "50cf22cc8d7fb47a"
+			"StateHash": "af80c3ae3cc24eb0"
 		},
 		{
 			"Tick": 780,
-			"StateHash": "5a7d7db615f7b0b0"
+			"StateHash": "d8ec18eb1f4f3f99"
 		},
 		{
 			"Tick": 840,
-			"StateHash": "6717f4a74f3199e5"
+			"StateHash": "a71cb211cef1a309"
 		}
 	],
 	"FinalTick": 872,
-	"FinalStateHash": "d4b7ace57c8d7e15"
+	"FinalStateHash": "685d68832c1f74d4"
 }
