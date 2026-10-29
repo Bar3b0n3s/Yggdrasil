@@ -57,8 +57,8 @@ is won or restarted, so every serve starts at 9 m/s again.
   z translation and every rotation locked, MaxLinearVelocity 500; `Ball.luau` with `Game` pointing at the Game entity.
 - `Bricks`: 50 instances of `Assets/Prefabs/Brick.prefab` named `Brick_R<row>_C<column>` (row 1 at the top, y = 5.5,
   rows 0.6 apart, columns 1.6 apart from x = -7.2). Each row overrides the material (`BrickRed`, `BrickOrange`,
-  `BrickYellow`, `BrickGreen`, the prefab's `BrickBlue`) and `Script.Fields.Points`. Bricks are tagged `Brick` and have
-  their own Static bodies.
+  `BrickYellow`, `BrickGreen`, the prefab's `BrickBlue`) and `Scripts/0/Fields` (`Points`). Bricks are tagged `Brick`
+  and have their own Static bodies.
 - `ScoreText`, `LivesText`, `MessageText`: screen-space Text (anchors are top-left based).
 - `Game`: `Game.luau`, whose fields reference the entities above and the six sounds. The speed fields (`BallSpeed`,
   `SpeedUpHits`, `SpeedStep`, `MaxBallSpeed`) are not overridden in the scene, so the script defaults (9, 4, 1, 13) apply.
@@ -117,9 +117,10 @@ is won or restarted, so every serve starts at 9 m/s again.
 - Earlier recordings: session 1's was 636 ticks, `3a109217817a6b09`; session 2's was format version 1 (no checkpoints),
   902 ticks, `7bca7f325ca12227`; session 3's was format version 2 with the same 872 ticks and 14 checkpoints,
   `d4b7ace57c8d7e15`, until M20's engine changes (Script component version 2 with ordered script slots, PrefabInstance
-  version 2, the pending-enter rule for physics contacts) changed the state hash. Session 2's ended with a restart in place, and `7bca7f325ca12227` is the hash of the
-  untouched start at tick 902, so it also passed without its input and proved nothing about the gameplay. Keep the
-  played state in the scene at the end of a recording.
+  version 2, the PrefabLink key `OuterPrefabEntityID`, the pending-enter rule for physics contacts) changed the state
+  hash. Session 2's ended with a restart in place, and `7bca7f325ca12227` is the hash of the untouched start at tick
+  902, so it also passed without its input and proved nothing about the gameplay. Keep the played state in the scene at
+  the end of a recording.
 - The state hash does not cover values held only in script tables (such as `State.RallyHits`): a change that only alters
   script state leaves replay hashes unchanged, so cover such state with test cases.
 - `test_run {}` runs 27 rows (25 cases, the autopilot case and the replay); all pass.

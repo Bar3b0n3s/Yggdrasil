@@ -135,9 +135,9 @@ Opening ends with O, J, Z, S and T locked (the Z after a 60-tick soft drop), the
 ends with one line cleared, score 100 and "SINGLE +100" on the HUD. Session 2 re-recorded both after raising
 `PostProcess.BloomIntensity` from 0.07 to 0.3 (session 1's hashes were `bcac10e522808880` and `39f647ca007f08f6`; the
 script fixes of session 2 left those unchanged, checked with `test_run {}` before the bloom change). M20 re-recorded both
-the same way after its engine changes (Script component version 2 with ordered script slots, PrefabInstance version 2)
-changed the hashed components; session 2's hashes were `93ad9cdf7978c2d2` and `bd018732d506bb4e`, and the ticks, events and
-checkpoint counts above are unchanged. Each was verified twice with `input_replay {verify: true, strictHash:
+the same way after its engine changes (Script component version 2 with ordered script slots, PrefabInstance version 2,
+the PrefabLink key `OuterPrefabEntityID`) changed the hashed components; session 2's hashes were `93ad9cdf7978c2d2`
+and `bd018732d506bb4e`, and the ticks, events and checkpoint counts above are unchanged. Each was verified twice with `input_replay {verify: true, strictHash:
 true}` (equal hashes) and fails without its input (with `continuePastCheckpoint`, every checkpoint differs).
 **The state hash covers every serialized component, the look included**: changing a `PostProcess`, light or camera
 value in `Main.scene`, or anything the behaviour writes, changes both hashes, so re-record both replays

@@ -62,7 +62,7 @@ Every error response carries `error.data.errorCode` (the engine `ErrorCode` belo
 |---|---|---|
 | -32700 / -32600 | Parse error / Invalid request | Send one well-formed JSON-RPC 2.0 object per message. |
 | -32601 | Method not found | Use a method `rpc.discover` lists; the hint suggests close names. |
-| -32602 | Invalid params | Correct each `issues[]` pointer (unknown field, wrong type, out of range, missing required param). A `scene` member on a method that takes no scene target, or on an op of `edit.batch`, is refused at `/scene` (target the whole batch instead). The one-script shape `{Script: {Script: ...}}` is an unknown field: give `{Script: {Scripts: [{Script: ..., Fields: {...}}]}}`. |
+| -32602 | Invalid params | Correct each `issues[]` pointer (unknown field, wrong type, out of range, missing required param). A `scene` member on a method that takes no scene target is refused at `/scene`, and on an op of `edit.batch` at `/ops/<i>/params/scene` (give `scene` on the batch instead). The one-script shape `{Script: {Script: ...}}` is an unknown field: give `{Script: {Scripts: [{Script: ..., Fields: {...}}]}}`. |
 | -32000 | Internal | An engine bug: read `log.read` and the crash report, then report it with the request. When `error.data.errorCode` is `Io`, `Gpu` or `OutOfMemory`, the environment failed instead: see the engine `ErrorCode` table. |
 | -32001 | NotFound | The entity, asset, component, file or topic does not exist: check the path or id; follow the suggestions. |
 | -32002 | InvalidState | Not allowed now (no project or scene open, a test run owns the editor, another client owns lockstep, not playing): reach the needed state first. |
