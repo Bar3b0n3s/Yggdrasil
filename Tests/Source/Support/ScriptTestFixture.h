@@ -33,8 +33,10 @@ namespace Engine {
 			IScriptTestHost* TestHost = nullptr; // borrowed, outlives the fixture's engine
 			// Add a native observation function before Freeze. The built-in registrations are already present.
 			std::function<Status(ScriptApiRegistry&)> ConfigureApi{};
-			// Deterministic safety-clock injection; copied into the engine, captures outlive the fixture.
+			// Deterministic safety-clock injection (ScriptEngineSpecification); copied into the engine, captures outlive the
+			// fixture. Script compilation's load-time VMs get ClockSeconds alone, their only clock when it is set.
 			std::function<double()> ClockSeconds{};
+			std::function<double()> CpuClockSeconds{};
 		};
 
 		// Real compiler/extraction, immutable memory assets, and one runtime engine. Host requests are observed rather

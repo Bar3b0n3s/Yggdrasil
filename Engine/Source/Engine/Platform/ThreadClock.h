@@ -5,8 +5,9 @@
 // The CPU time of the calling thread: GetThreadTimes on Windows, clock_gettime(CLOCK_THREAD_CPUTIME_ID) on Linux and
 // macOS. A safety clock for work bounds that must not depend on how loaded the machine is: it advances only while the
 // thread itself runs, never while it waits for I/O or a lock or is descheduled. The import-time script VM measures its
-// 250 ms budget with it (Architecture §11.2, ADR 0022 "Integration"). Never simulation time, never on the simulation
-// path (§4.12).
+// 250 ms budget with it (Architecture §11.2, ADR 0022 "Integration"), and the runtime script watchdog counts a callback's
+// budget in it once the callback's wall deadline has passed (§11.1, Docs/Decisions/0039-script-budget-cpu-time.md). Never
+// simulation time, never on the simulation path (§4.12).
 
 namespace Engine {
 

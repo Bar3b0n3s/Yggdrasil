@@ -76,6 +76,7 @@ namespace Engine {
 											   .TestHost = m_Specification.TestHost,
 											   .ReadOnly = m_Specification.ReadOnly,
 											   .ClockSeconds = m_Specification.ClockSeconds,
+											   .CpuClockSeconds = m_Specification.CpuClockSeconds,
 										   }));
 			ENGINE_TRY(engine->InitializeInstances());
 			engine->StartPending();
