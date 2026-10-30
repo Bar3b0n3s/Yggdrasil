@@ -114,6 +114,9 @@ class SuiteBoundTests(unittest.TestCase):
     # The Debug automation suite took 1,562 s on an unloaded machine and timed out at the 1,800 s every run had, beside
     # PreCommit's other suites (Docs/Decisions/0039-script-budget-cpu-time.md decision 5).
     UNLOADED_DEBUG_AUTOMATION_SECONDS = 1562.0
+    # The Debug unit suite takes about 880 s unloaded; it took 1,212 s beside the phase's other worktrees and passed
+    # 1,800 s under heavier load.
+    UNLOADED_DEBUG_UNIT_SECONDS = 880.0
 
     def automation_bound(self, config: str, *options: str) -> float:
         """The timeout run_automation gives the suite's runner in `config`, which a stand-in run_streamed records."""
@@ -145,6 +148,19 @@ class SuiteBoundTests(unittest.TestCase):
                                 2 * self.UNLOADED_DEBUG_AUTOMATION_SECONDS)
         self.assertEqual(self.automation_bound("Debug"), test_script.DEBUG_AUTOMATION_TIMEOUT_SECONDS)
         self.assertEqual(self.automation_bound("Release"), test_script.SUITE_TIMEOUT_SECONDS)
+
+    def run_tests_bound(self, suite: str, config: str, *options: str) -> float:
+        """The timeout run_tests gives the Tests process of `suite` in `config`."""
+        with contextlib.redirect_stderr(io.StringIO()):
+            arguments = test_script.parse_arguments(["--suite", suite, "--config", config, *options])
+        return test_script.tests_timeout(test_script.TestRun(suite, config, ()), arguments)
+
+    def test_the_debug_unit_run_is_bounded_by_three_times_its_unloaded_time(self) -> None:
+        self.assertGreaterEqual(test_script.DEBUG_UNIT_TIMEOUT_SECONDS, 3 * self.UNLOADED_DEBUG_UNIT_SECONDS)
+        self.assertEqual(self.run_tests_bound("unit", "Debug"), test_script.DEBUG_UNIT_TIMEOUT_SECONDS)
+        self.assertEqual(self.run_tests_bound("unit", "Release"), test_script.SUITE_TIMEOUT_SECONDS)
+        self.assertEqual(self.run_tests_bound("gpu", "Debug"), test_script.SUITE_TIMEOUT_SECONDS)
+        self.assertEqual(self.run_tests_bound("unit", "Debug", "--timeout", "90"), 90.0)
 
     def test_a_given_timeout_bounds_every_run(self) -> None:
         self.assertEqual(self.automation_bound("Debug", "--timeout", "90"), 90.0)

@@ -36,6 +36,9 @@ suite named in --suite must take every configuration --config names (a usage err
 all, each suite runs in the requested configurations it takes and reports each other one as a "skipped" step ("not run
 in <Config>"), so `--config Debug` runs every suite that has a Debug run.
 A suite that does not exist yet is reported with the distinct status "not-available"; it neither passes nor fails.
+Without --timeout every run is bounded by 1800 s (SUITE_TIMEOUT_SECONDS), except the Debug unit and automation runs, by
+3600 s each (DEBUG_UNIT_TIMEOUT_SECONDS, DEBUG_AUTOMATION_TIMEOUT_SECONDS; Docs/Decisions/0039-script-budget-cpu-time.md
+decision 5); a bound only catches a hang.
 
 GPU and golden runs (Docs/Decisions/0009-m5-decisions.md decision 14): a test case without a usable Vulkan device passes
 after logging that it found none, unless --require-gpu is given (CI.py and PreCommit.py pass it unless they get
@@ -294,6 +297,9 @@ SUITE_TIMEOUT_SECONDS = 1800.0
 # run took 1,562 s on an unloaded machine, so SUITE_TIMEOUT_SECONDS timed it out beside PreCommit's other suites; this
 # is more than twice the unloaded time. Like every run's bound, it only catches a hang.
 DEBUG_AUTOMATION_TIMEOUT_SECONDS = 3600.0
+# The Debug unit suite's bound without --timeout (the same decision): that run took 1,212 s beside the phase's other
+# worktrees and passed SUITE_TIMEOUT_SECONDS under heavier load; this is three times its unloaded time of about 880 s.
+DEBUG_UNIT_TIMEOUT_SECONDS = 3600.0
 # The bound of the package's --feature-test run inside project.export {featureTest: true} (RunTimeout in
 # Editor/Source/EditorCore/Export/ExportFeatureTest.cpp, Exporter.h step 6a): the games suite's Dist half waits that
 # much longer for such an export than --timeout, which bounds the export's other phases and the smoke test.
@@ -770,6 +776,14 @@ def build_hint(config: str, project: str, arguments: argparse.Namespace) -> str:
             f"--workspace-dir {paths.display_path(build_root.parent)} --config {config})")
 
 
+def tests_timeout(run: TestRun, arguments: argparse.Namespace) -> float:
+    """The bound of one Tests run: --timeout when given, otherwise DEBUG_UNIT_TIMEOUT_SECONDS for the Debug unit run
+    and SUITE_TIMEOUT_SECONDS for every other run."""
+    if arguments.timeout_given:
+        return arguments.timeout
+    return DEBUG_UNIT_TIMEOUT_SECONDS if run.suite == "unit" and run.config == "Debug" else SUITE_TIMEOUT_SECONDS
+
+
 def run_tests(run: TestRun, arguments: argparse.Namespace, console: Console) -> Step:
     executable = tests_executable(run.config, arguments.build_root)
     if not executable.is_file():
@@ -801,8 +815,9 @@ def run_tests(run: TestRun, arguments: argparse.Namespace, console: Console) -> 
     console.heading(f"{run.name}: {format_command([paths.display_path(executable), *filters, *run.options])} "
                     f"--user-data-dir={paths.display_path(user_data)}")
     try:
-        result = run_streamed(command, cwd=paths.REPOSITORY_ROOT, env=environment, timeout=arguments.timeout,
-                              echo=console.stream, collect=REPORTED_LINES_PATTERN, debug_heap=run.debug_heap)
+        result = run_streamed(command, cwd=paths.REPOSITORY_ROOT, env=environment,
+                              timeout=tests_timeout(run, arguments), echo=console.stream,
+                              collect=REPORTED_LINES_PATTERN, debug_heap=run.debug_heap)
     except ToolNotFoundError as error:
         return Step(run.name, Status.FAILED, str(error), exit_code=EXIT_INIT_FAILED)
 
@@ -2550,7 +2565,8 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
                              f"{EXPORT_FEATURE_TEST_RUN_SECONDS:.0f} s more for its own feature-test run and whose "
                              f"Dist exports of a game with Native/ {EXPORT_NATIVE_BUILD_SECONDS:.0f} s more for its "
                              f"native Runtime build (default: {SUITE_TIMEOUT_SECONDS:.0f}, and "
-                             f"{DEBUG_AUTOMATION_TIMEOUT_SECONDS:.0f} for the Debug automation run)")
+                             f"{DEBUG_AUTOMATION_TIMEOUT_SECONDS:.0f} for the Debug automation run and "
+                             f"{DEBUG_UNIT_TIMEOUT_SECONDS:.0f} for the Debug unit run)")
     parser.add_argument("--merge-coverage", nargs=3, type=paths.argument_path,
                         metavar=("EDITOR_JSON", "RELEASE_JSON", "DIST_JSON"),
                         help="run only the cross-mode coverage merge of three FeatureTest reports (§15.6) and print "
@@ -2584,7 +2600,8 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--json", action="store_true", help="print a machine-readable result on stdout")
     locks.add_wait_arguments(parser)
     arguments = parser.parse_args(argv)
-    # automation_timeout tells a given --timeout from the default, which the Debug automation run does not take.
+    # automation_timeout and tests_timeout tell a given --timeout from the default, which the Debug automation and unit
+    # runs do not take.
     arguments.timeout_given = arguments.timeout is not None
     if not arguments.timeout_given:
         arguments.timeout = SUITE_TIMEOUT_SECONDS
