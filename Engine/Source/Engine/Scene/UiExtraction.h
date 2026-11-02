@@ -2,6 +2,7 @@
 
 #include "Engine/Core/Base.h"
 #include "Engine/Renderer/RenderSnapshot.h"
+#include "Engine/Scene/UiInteraction.h"
 #include "Engine/Scene/UiLayout.h"
 
 // The UI's render extraction (M22, C22.1, R-UI-RENDER and R-UI-AUTO; Docs/Decisions/0033-m22-contract.md decisions 7 and
@@ -22,7 +23,14 @@ namespace Engine {
 	// (UiText::Size to FontSize, UiImage::BorderScale to scene pixels per border texel) and the enums mapped to the draw
 	// list's (TextAlignment Left, Center and Right to Start, Center and End; UiTextVerticalAlignment Top, Middle and Bottom
 	// likewise). `table` is a layout of `scene` (ComputeUiLayout); an element the scene no longer holds is skipped. Pure.
-	void AppendUiDrawItems(const Scene& scene, const UiLayoutTable& table, UiDrawList& list);
+	// C22.2's theme (Docs/Decisions/0033-m22-contract.md decision 25; stream C):
+	//   - the image of a widget's element (UiButton, UiToggle, UiSlider, UiScrollView) has its Color multiplied, component by
+	//     component, by its canvas's UiTheme tint of the widget's state: Disabled when not Interactable, else, from
+	//     `interaction` (the session's state; null outside a play session, every widget then Normal), Pressed when it is
+	//     the state's Pressed, Focused when Focused, Hovered when Hovered, else Normal;
+	//   - a text whose Font is null takes its canvas's Font (the canvas the element belongs to; still null when the canvas
+	//     names none, which the Ui pass draws with the default font).
+	void AppendUiDrawItems(const Scene& scene, const UiLayoutTable& table, UiDrawList& list, const UiInteractionState* interaction = nullptr);
 
 	// The UI's capture annotations (viewport.screenshot's annotations, §8.13): with snapshot.Annotations.Bounds, an Outline in
 	// yellow (1, 1, 0, 1) around every element that has a draw item in snapshot.Ui; with a label mode other than None, a

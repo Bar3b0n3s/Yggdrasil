@@ -10,7 +10,11 @@
 // The Ui category (M22, C22.1; Docs/Decisions/0033-m22-contract.md decision 2): canvases, element rectangles, images, text and
 // layout containers, laid out and hit-tested in scene pixels (Architecture §5.3, §8.3). Lengths are canvas units (a canvas
 // maps them to scene pixels by its scale); colours are linear with straight alpha. ADR 0028's phase-2 ledger puts a phase-2
-// milestone's components in a category of its own after Scripting, appended in landing order.
+// milestone's components in a category of its own after Scripting, appended in landing order. C22.2 (decision 21) appends
+// the four widgets (UiButton, UiToggle, UiSlider, UiScrollView) after UiLayoutElement; the fields it adds to UiCanvas (Font,
+// Theme and DefaultFocus, with the UiTheme struct: stream C) and to UiImage and UiText (RaycastTarget: stream A) are
+// registered by their streams, which regenerate FeatureTest's UI scenes with them. The components are unlanded, so they
+// stay at version 1.
 
 namespace Engine {
 
@@ -58,6 +62,27 @@ namespace Engine {
 				std::swap(rect.AnchorMin.x, rect.AnchorMax.x);
 			if (rect.AnchorMin.y > rect.AnchorMax.y)
 				std::swap(rect.AnchorMin.y, rect.AnchorMax.y);
+		}
+
+		// C22.2 (decision 21): a slider's range is not empty. Its Value may lie outside it: readers clamp it
+		// (UiSliderComponent.h), so a script that moves the range and then the value never fails in between.
+		static void ValidateUiSlider(const UiSliderComponent& slider, ValidationContext& context)
+		{
+			if (!(slider.Min < slider.Max))
+				context.Error("Min", "must be below Max");
+		}
+
+		static void MakeUiSliderValid(UiSliderComponent& slider, Random& /*random*/)
+		{
+			if (slider.Min > slider.Max)
+				std::swap(slider.Min, slider.Max);
+			if (slider.Min < slider.Max)
+				return;
+			// Equal ends: widen the range by one unit on the side that stays inside the fields' range.
+			if (slider.Max - 1.0f >= static_cast<float>(-MaxUiLength))
+				slider.Min = slider.Max - 1.0f;
+			else
+				slider.Max = slider.Min + 1.0f;
 		}
 
 	}
@@ -205,6 +230,80 @@ namespace Engine {
 			.Field("Shrink", &UiLayoutElementComponent::Shrink, "Flex: the element's share, times its preferred size, of the main axis's overflow.",
 				{ .Min = 0.0, .Max = Utils::MaxUiFlexWeight })
 			.Field("MinSize", &UiLayoutElementComponent::MinSize, "The size the element never goes below in a Stack or Flex container, in canvas units.",
+				{ .Min = 0.0, .Max = Utils::MaxUiLength, .Unit = "units" });
+
+		// C22.2 (decision 21): the widgets, one per element (each excludes the other three, declared by both sides).
+		constexpr std::string_view InteractableDescription =
+			"Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event.";
+		constexpr std::string_view FocusableDescription =
+			"Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it.";
+
+		RegisterComponent<UiButtonComponent>(registry, "UiButton", "A UI button: a pointer click or Submit while focused raises OnUiClick.")
+			.Category("Ui")
+			.Version(1)
+			.Requires<UiRectComponent>()
+			.Excludes<UiToggleComponent>()
+			.Excludes<UiSliderComponent>()
+			.Excludes<UiScrollViewComponent>()
+			.Field("Interactable", &UiButtonComponent::Interactable, InteractableDescription)
+			.Field("Focusable", &UiButtonComponent::Focusable, FocusableDescription);
+
+		RegisterComponent<UiToggleComponent>(registry, "UiToggle",
+			"A UI toggle: a pointer click or Submit while focused flips IsOn and raises OnUiValueChanged; Graphic shows while it is on.")
+			.Category("Ui")
+			.Version(1)
+			.Requires<UiRectComponent>()
+			.Excludes<UiButtonComponent>()
+			.Excludes<UiSliderComponent>()
+			.Excludes<UiScrollViewComponent>()
+			.Field("Interactable", &UiToggleComponent::Interactable, InteractableDescription)
+			.Field("Focusable", &UiToggleComponent::Focusable, FocusableDescription)
+			.Field("IsOn", &UiToggleComponent::IsOn, "Whether the toggle is on.")
+			.Field("Graphic", &UiToggleComponent::Graphic,
+				"A UI element below the toggle (its check mark) that is drawn and hit only while the toggle is on; null for none.");
+
+		RegisterComponent<UiSliderComponent>(registry, "UiSlider",
+			"A UI slider: the pointer drags its value between Min and Max and the directions along it step it, raising OnUiValueChanged.")
+			.Category("Ui")
+			.Version(1)
+			.Requires<UiRectComponent>()
+			.Excludes<UiButtonComponent>()
+			.Excludes<UiToggleComponent>()
+			.Excludes<UiScrollViewComponent>()
+			.Field("Interactable", &UiSliderComponent::Interactable, InteractableDescription)
+			.Field("Focusable", &UiSliderComponent::Focusable, FocusableDescription)
+			.Field("Value", &UiSliderComponent::Value, "The value, read clamped to Min and Max (and rounded with WholeNumbers).",
+				{ .Min = -Utils::MaxUiLength, .Max = Utils::MaxUiLength })
+			.Field("Min", &UiSliderComponent::Min, "The value at the start edge (left, or bottom when Vertical); below Max.",
+				{ .Min = -Utils::MaxUiLength, .Max = Utils::MaxUiLength })
+			.Field("Max", &UiSliderComponent::Max, "The value at the end edge (right, or top when Vertical).", { .Min = -Utils::MaxUiLength, .Max = Utils::MaxUiLength })
+			.Field("WholeNumbers", &UiSliderComponent::WholeNumbers, "Whether the value is rounded to whole numbers.")
+			.Field("Step", &UiSliderComponent::Step,
+				"The change per navigation press along the slider; 0 is a tenth of the range. With WholeNumbers it is rounded to a whole number of at least 1.",
+				{ .Min = 0.0, .Max = Utils::MaxUiLength })
+			.Field("Direction", &UiSliderComponent::Direction, "Horizontal puts Min at the left edge; Vertical puts it at the bottom edge.")
+			.Field("Fill", &UiSliderComponent::Fill, "A UI element below the slider stretched from the Min edge to the value; null for none.")
+			.Field("Handle", &UiSliderComponent::Handle, "A UI element below the slider placed at the value; null for none.")
+			.Validate(&Utils::ValidateUiSlider)
+			.Generate(&Utils::MakeUiSliderValid);
+
+		RegisterComponent<UiScrollViewComponent>(registry, "UiScrollView",
+			"A UI scroll view: clips its descendants and moves its Content by the scroll position, which the wheel, a drag and focus change.")
+			.Category("Ui")
+			.Version(1)
+			.Requires<UiRectComponent>()
+			.Excludes<UiButtonComponent>()
+			.Excludes<UiToggleComponent>()
+			.Excludes<UiSliderComponent>()
+			.Field("Interactable", &UiScrollViewComponent::Interactable, InteractableDescription)
+			.Field("Focusable", &UiScrollViewComponent::Focusable, FocusableDescription)
+			.Field("Content", &UiScrollViewComponent::Content, "The UI element below the scroll view that scrolls; null scrolls nothing.")
+			.Field("Horizontal", &UiScrollViewComponent::Horizontal, "Whether the content scrolls along x.")
+			.Field("Vertical", &UiScrollViewComponent::Vertical, "Whether the content scrolls along y.")
+			.Field("ScrollPosition", &UiScrollViewComponent::ScrollPosition,
+				"Canvas units the content is moved left (x) and up (y), read clamped to the content's overflow.",
+				{ .Min = 0.0, .Max = Utils::MaxUiLength, .Unit = "units" })
+			.Field("ScrollStep", &UiScrollViewComponent::ScrollStep, "Canvas units per wheel step and per navigation press.",
 				{ .Min = 0.0, .Max = Utils::MaxUiLength, .Unit = "units" });
 	}
 

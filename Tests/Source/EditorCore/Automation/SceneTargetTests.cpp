@@ -74,9 +74,10 @@ namespace Engine {
 				{ "scene.raycast", SceneRelation::Target },
 				{ "scene.save", SceneRelation::Target },
 				{ "scene.tree", SceneRelation::Target },
-				{ "script.errors", SceneRelation::Target }, // entity paths are read from the addressed scene
-				{ "script.eval", SceneRelation::Target },   // context "edit" evaluates over the addressed scene
-				{ "ui.tree", SceneRelation::Target },       // M22: the addressed scene's UI (Docs/Decisions/0033-m22-contract.md decision 8)
+				{ "script.errors", SceneRelation::Target },   // entity paths are read from the addressed scene
+				{ "script.eval", SceneRelation::Target },     // context "edit" evaluates over the addressed scene
+				{ "ui.tree", SceneRelation::Target },         // M22: the addressed scene's UI (Docs/Decisions/0033-m22-contract.md decision 8)
+				{ "ui.createWidget", SceneRelation::Target }, // M22 C22.2: builds in the addressed scene (decision 32)
 				{ "viewport.screenshot", SceneRelation::Target },
 				// The active scene only.
 				{ "editor.screenshot", SceneRelation::ActiveScene }, // the editor window shows the active tab

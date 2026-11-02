@@ -7,8 +7,11 @@
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/TransformComponent.h"
+#include "Engine/Scene/Components/UiButtonComponent.h"
 #include "Engine/Scene/Components/UiCanvasComponent.h"
+#include "Engine/Scene/Components/UiImageComponent.h"
 #include "Engine/Scene/Components/UiRectComponent.h"
+#include "Engine/Scene/Components/UiToggleComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/PhysicsSystem.h"
 #include "Engine/Scene/RenderExtraction.h"
@@ -113,6 +116,35 @@ namespace Engine {
 			specification.Seed = 42;
 			specification.Observer = observer;
 			return specification;
+		}
+
+		// M22 C22.2: a canvas holding the buttons "A" at (0, 0) and "B" at (0, 30), each 100 x 20 scene pixels with an image.
+		void PopulateUiScene(Scene& scene)
+		{
+			Entity canvas = scene.CreateEntity("Canvas");
+			canvas.AddComponent<UiCanvasComponent>(UiCanvasComponent{});
+			for (const auto& [name, y] : { std::pair<std::string_view, float>{ "A", 0.0f }, std::pair<std::string_view, float>{ "B", 30.0f } })
+			{
+				Entity button = scene.CreateEntity(name, canvas);
+				button.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f),
+					.AnchorMax = glm::vec2(0.0f),
+					.Pivot = glm::vec2(0.0f),
+					.Position = glm::vec2(0.0f, y),
+					.Size = glm::vec2(100.0f, 20.0f) });
+				button.AddComponent<UiImageComponent>(UiImageComponent{});
+				button.AddComponent<UiButtonComponent>(UiButtonComponent{});
+			}
+		}
+
+		// A tap of `key` for `tick`, as a host or play.step queues it.
+		void QueueKeyTap(PlaySession& session, uint64_t tick, Key key)
+		{
+			REQUIRE(session.GetInput().Queue(tick, PlayInputEvent{ .Type = PlayInputEventType::KeyInput, .State = PlayInputEventState::Tap, .KeyCode = key }).has_value());
+		}
+
+		void QueuePointer(PlaySession& session, uint64_t tick, glm::vec2 position)
+		{
+			REQUIRE(session.GetInput().Queue(tick, PlayInputEvent{ .Type = PlayInputEventType::MouseMove, .Position = position }).has_value());
 		}
 
 		// A small edit scene: a root with a child and a moved root.
@@ -386,6 +418,162 @@ namespace Engine {
 			CHECK(loaded.Nodes[0].Min == glm::vec2(20.0f, 30.0f));
 			REQUIRE(loaded.Canvases.size() == 1);
 			CHECK(loaded.Canvases[0].Canvas == session.GetScene().FindEntityByPath("/Hud").GetUUID());
+		}
+
+		// C22.2 (Docs/Decisions/0033-m22-contract.md decisions 24 and 27; ADR 0028's phase-2 execution order): UiInput after
+		// ApplyInput (C22.3's TextLatch goes between them) and UiEvents after StartFlush; Simulate runs UiInput, whose writes
+		// are simulation, but no script phase, and drops the UI events. Streams A (UiInput) and B (UiEvents); the integration
+		// extends "step order matches the documented sequence" and "Simulate mode skips the script and audio phases" with them.
+		TEST_CASE("PlaySession: UiInput follows ApplyInput and UiEvents follows StartFlush, and Simulate drops the UI events" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			PopulateUiScene(fixture.GetScene());
+			RecordingObserver observer;
+			Result<Scope<PlaySession>> session = PlaySession::CreateFromScene(MakeSpecification(fixture, &observer), fixture.GetScene());
+			REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+			(*session)->FixedStep();
+			CHECK(observer.Phases == std::vector<PlaySessionPhase>{ PlaySessionPhase::InterpolationSnapshot, PlaySessionPhase::ApplyInput, PlaySessionPhase::UiInput, PlaySessionPhase::StartFlush, PlaySessionPhase::UiEvents, PlaySessionPhase::FixedUpdate, PlaySessionPhase::Tasks, PlaySessionPhase::PreStepTransformUpdate, PlaySessionPhase::PhysicsPreStep, PlaySessionPhase::PhysicsStep, PlaySessionPhase::PhysicsPostStep, PlaySessionPhase::DestroyFlush, PlaySessionPhase::PostStepTransformUpdate, PlaySessionPhase::UiLayout });
+
+			RecordingObserver simulateObserver;
+			PlaySessionSpecification specification = MakeSpecification(fixture, &simulateObserver);
+			specification.Mode = PlayMode::Simulate;
+			Result<Scope<PlaySession>> simulate = PlaySession::CreateFromScene(specification, fixture.GetScene());
+			REQUIRE_MESSAGE(simulate.has_value(), simulate.error().ToString());
+			QueuePointer(**simulate, 0, glm::vec2(10.0f));
+			(*simulate)->FixedStep();
+			CHECK(simulateObserver.Phases == std::vector<PlaySessionPhase>{ PlaySessionPhase::InterpolationSnapshot, PlaySessionPhase::ApplyInput, PlaySessionPhase::UiInput, PlaySessionPhase::PreStepTransformUpdate, PlaySessionPhase::PhysicsPreStep, PlaySessionPhase::PhysicsStep, PlaySessionPhase::PhysicsPostStep, PlaySessionPhase::DestroyFlush, PlaySessionPhase::PostStepTransformUpdate, PlaySessionPhase::UiLayout });
+			CHECK((*simulate)->GetUi().GetInteraction().Hovered == (*simulate)->GetScene().FindEntityByPath("/Canvas/A").GetUUID());
+			CHECK((*simulate)->GetUi().GetQueuedEventCount() == 0);
+		}
+
+		// Roadmap M22's acceptance "scenes without UI keep their hash" (decision 29): hovering writes nothing to the scene, so
+		// two sessions differ only by the ui block while one hovers, and hash alike again once its state is empty (the
+		// UiEvents phase empties the queue every tick).
+		TEST_CASE("PlaySession: the state hash holds the ui block only while the UI interaction state or event queue is not empty" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			PopulateUiScene(fixture.GetScene());
+			Result<Scope<PlaySession>> hovering = PlaySession::CreateFromScene(MakeSpecification(fixture), fixture.GetScene());
+			Result<Scope<PlaySession>> away = PlaySession::CreateFromScene(MakeSpecification(fixture), fixture.GetScene());
+			REQUIRE_MESSAGE(hovering.has_value(), hovering.error().ToString());
+			REQUIRE_MESSAGE(away.has_value(), away.error().ToString());
+			CHECK((*hovering)->ComputeStateHash() == (*away)->ComputeStateHash());
+
+			QueuePointer(**hovering, 0, glm::vec2(10.0f));
+			QueuePointer(**away, 0, glm::vec2(500.0f));
+			(*hovering)->Tick();
+			(*away)->Tick();
+			REQUIRE_FALSE((*hovering)->GetUi().GetInteraction().IsEmpty());
+			CHECK((*away)->GetUi().GetInteraction().IsEmpty());
+			CHECK((*hovering)->ComputeStateHash() != (*away)->ComputeStateHash());
+
+			QueuePointer(**hovering, 1, glm::vec2(500.0f));
+			(*hovering)->Tick();
+			(*away)->Tick();
+			CHECK((*hovering)->GetUi().GetInteraction().IsEmpty());
+			CHECK((*hovering)->ComputeStateHash() == (*away)->ComputeStateHash());
+		}
+
+		// Roadmap M22's acceptance "scenes without UI keep their hash" (decision 24 step 1, the C22.2 review's major): in a
+		// scene without a canvas, UiInput reads no input, so a held gamepad stick (with the pointer pressed and moved) leaves
+		// the interaction state empty and the ui block absent at every tick: the session hashes as one without that input.
+		// Live: it holds on the contract tree, where no session runs UiInput yet, and keeps holding once stream A adds it.
+		TEST_CASE("PlaySession: a scene without a canvas keeps its state hash while a gamepad stick is held")
+		{
+			Test::SceneTestFixture fixture;
+			PopulateScene(fixture.GetScene());
+			Result<Scope<PlaySession>> held = PlaySession::CreateFromScene(MakeSpecification(fixture), fixture.GetScene());
+			Result<Scope<PlaySession>> idle = PlaySession::CreateFromScene(MakeSpecification(fixture), fixture.GetScene());
+			REQUIRE_MESSAGE(held.has_value(), held.error().ToString());
+			REQUIRE_MESSAGE(idle.has_value(), idle.error().ToString());
+			REQUIRE((*held)->GetInput().Queue(0, PlayInputEvent{ .Type = PlayInputEventType::GamepadAxisInput, .Value = 0.75f, .Gamepad = 0, .Axis = GamepadAxis::LeftY }).has_value());
+			REQUIRE((*held)->GetInput().Queue(0, PlayInputEvent{ .Type = PlayInputEventType::MouseButtonInput, .Button = MouseButton::Left, .HasPosition = true, .Position = glm::vec2(0.0f) }).has_value());
+			QueuePointer(**held, 1, glm::vec2(10.0f));
+			for (int tick = 0; tick < 3; ++tick)
+			{
+				(*held)->Tick();
+				(*idle)->Tick();
+				CHECK((*held)->GetUi().GetInteraction().IsEmpty());
+				CHECK((*held)->GetUi().GetQueuedEventCount() == 0);
+				CHECK((*held)->ComputeStateHash() == (*idle)->ComputeStateHash());
+			}
+		}
+
+		// Decision 30: the Ui settings name the controls of each command and can turn navigation off; a binding that does not
+		// name a key or a gamepad button fails the session's start at its location, as an action's binding does. Next with a
+		// Shift key down is Previous, and a gamepad command counts on any connected gamepad (gamepad 1 here). Navigation
+		// starts from the canvas's DefaultFocus (decision 23). Taps are two ticks apart, so each press is a new edge.
+		TEST_CASE("PlaySession: the Ui settings' bindings drive navigation, and a binding that is not a key or gamepad button fails the start" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			PopulateUiScene(scene);
+			const UUID a = scene.FindEntityByPath("/Canvas/A").GetUUID();
+			const UUID b = scene.FindEntityByPath("/Canvas/B").GetUUID();
+			Entity canvas = scene.FindEntityByPath("/Canvas");
+			canvas.GetComponent<UiCanvasComponent>().DefaultFocus = a;
+			// A toggle "C" below B, at (0, 60), whose IsOn shows a gamepad's Submit.
+			Entity toggle = scene.CreateEntity("C", canvas);
+			toggle.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f),
+				.AnchorMax = glm::vec2(0.0f),
+				.Pivot = glm::vec2(0.0f),
+				.Position = glm::vec2(0.0f, 60.0f),
+				.Size = glm::vec2(100.0f, 20.0f) });
+			toggle.AddComponent<UiImageComponent>(UiImageComponent{});
+			toggle.AddComponent<UiToggleComponent>(UiToggleComponent{});
+			const UUID c = toggle.GetUUID();
+			PlaySessionSpecification specification = MakeSpecification(fixture);
+			specification.Project.Ui.Next = { "Key.N" };
+			Result<Scope<PlaySession>> session = PlaySession::CreateFromScene(specification, scene);
+			REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+			PlaySession& play = **session;
+			const auto gamepadTap = [&play](uint64_t tick, GamepadButton button)
+			{
+				REQUIRE(play.GetInput().Queue(tick, PlayInputEvent{ .Type = PlayInputEventType::GamepadButtonInput, .State = PlayInputEventState::Tap, .Gamepad = 1, .GamepadButtonCode = button }).has_value());
+			};
+			const auto key = [&play](uint64_t tick, Key code, PlayInputEventState state)
+			{
+				REQUIRE(play.GetInput().Queue(tick, PlayInputEvent{ .Type = PlayInputEventType::KeyInput, .State = state, .KeyCode = code }).has_value());
+			};
+			// The focus after each tick: N focuses the DefaultFocus, Tab is no longer Next, N moves on, Shift+N (Previous)
+			// moves back, gamepad 1's DPadDown moves down twice and its South flips the toggle.
+			QueueKeyTap(play, 0, Key::N);
+			QueueKeyTap(play, 2, Key::Tab);
+			QueueKeyTap(play, 4, Key::N);
+			key(6, Key::LeftShift, PlayInputEventState::Down);
+			QueueKeyTap(play, 6, Key::N);
+			key(7, Key::LeftShift, PlayInputEventState::Up);
+			gamepadTap(8, GamepadButton::DPadDown);
+			gamepadTap(10, GamepadButton::DPadDown);
+			gamepadTap(12, GamepadButton::South);
+			const std::vector<std::pair<uint64_t, UUID>> focus = { { 0, a }, { 2, a }, { 4, b }, { 6, a }, { 8, b }, { 10, c }, { 12, c } };
+			for (const auto& [tick, focused] : focus)
+			{
+				while (play.GetTick() <= tick)
+					play.Tick();
+				INFO("tick " << tick);
+				CHECK(play.GetUi().GetInteraction().Focused == focused);
+			}
+			CHECK(play.GetScene().FindEntityByPath("/Canvas/C").GetComponent<UiToggleComponent>().IsOn);
+
+			specification.Project.Ui.Navigation = false;
+			Result<Scope<PlaySession>> off = PlaySession::CreateFromScene(specification, scene);
+			REQUIRE_MESSAGE(off.has_value(), off.error().ToString());
+			QueueKeyTap(**off, 0, Key::N);
+			(*off)->Tick();
+			CHECK_FALSE((*off)->GetUi().GetInteraction().Focused.IsValid());
+
+			for (const std::string_view binding : { "Mouse.Left", "Gamepad.LeftX", "Key.Nope" })
+			{
+				INFO(std::string(binding));
+				PlaySessionSpecification refused = MakeSpecification(fixture);
+				refused.Project.Ui.Submit = { "Key.Enter", std::string(binding) };
+				const Result<Scope<PlaySession>> failed = PlaySession::CreateFromScene(refused, scene);
+				REQUIRE_FALSE(failed.has_value());
+				CHECK(failed.error().GetCode() == ErrorCode::Validation);
+				REQUIRE_FALSE(failed.error().GetIssues().empty());
+				CHECK(failed.error().GetIssues()[0].JsonPointer == "/Ui/Submit/1");
+			}
 		}
 
 		// W-CLOCK (M22, C22.1, decision 12; stream K): the session previews device input in the frame view only in live play.
@@ -800,6 +988,9 @@ namespace Engine {
 			// M22 (Docs/Decisions/0033-m22-contract.md decision 3): the UI's layout phases.
 			CHECK(PlaySessionPhaseToString(PlaySessionPhase::UiLayout) == "UiLayout");
 			CHECK(PlaySessionPhaseToString(PlaySessionPhase::FrameUiLayout) == "FrameUiLayout");
+			// M22 C22.2 (decisions 24 and 27): the UI's interaction phases.
+			CHECK(PlaySessionPhaseToString(PlaySessionPhase::UiInput) == "UiInput");
+			CHECK(PlaySessionPhaseToString(PlaySessionPhase::UiEvents) == "UiEvents");
 		}
 
 		TEST_CASE("PlaySession: scripts measure screen coordinates in the session's view, never the host's window")

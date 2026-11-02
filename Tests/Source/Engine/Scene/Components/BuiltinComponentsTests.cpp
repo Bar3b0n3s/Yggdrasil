@@ -35,7 +35,7 @@ namespace Engine {
 	{
 		TEST_CASE("BuiltinComponents: every listed type is plain component data")
 		{
-			static_assert(BuiltinComponents::Size == 30);
+			static_assert(BuiltinComponents::Size == 34);
 			size_t count = 0;
 			ForEachType(BuiltinComponents{}, [&count]<typename T>()
 			{
@@ -263,6 +263,15 @@ namespace Engine {
 			CHECK(canvas.ScaleFactor == 1.0f);
 			CHECK(canvas.ReferenceHeight == 1080.0f);
 			CHECK(canvas.PixelSnap);
+			// C22.2 (decision 25): the canvas's theme.
+			CHECK_FALSE(canvas.Font.IsValid());
+			CHECK(canvas.Theme.Normal == glm::vec4(1.0f));
+			CHECK(canvas.Theme.Hovered == glm::vec4(0.85f, 0.85f, 0.85f, 1.0f));
+			CHECK(canvas.Theme.Pressed == glm::vec4(0.6f, 0.6f, 0.6f, 1.0f));
+			CHECK(canvas.Theme.Focused == glm::vec4(0.75f, 0.85f, 1.0f, 1.0f));
+			CHECK(canvas.Theme.Disabled == glm::vec4(0.5f, 0.5f, 0.5f, 0.5f));
+			// C22.2 (decision 23): no default focus, so navigation starts only from a press or Ui.SetFocus.
+			CHECK_FALSE(canvas.DefaultFocus.IsValid());
 
 			const UiRectComponent rect;
 			CHECK(rect.AnchorMin == glm::vec2(0.5f));
@@ -279,6 +288,7 @@ namespace Engine {
 			CHECK(image.Type == UiImageType::Simple);
 			CHECK(image.BorderScale == 1.0f);
 			CHECK(image.Filter == UiImageFilter::Point);
+			CHECK(image.RaycastTarget);
 
 			const UiTextComponent text;
 			CHECK(text.Text.empty());
@@ -289,6 +299,7 @@ namespace Engine {
 			CHECK(text.VerticalAlignment == UiTextVerticalAlignment::Top);
 			CHECK(text.Wrap);
 			CHECK(text.LineSpacing == 1.0f);
+			CHECK(text.RaycastTarget);
 
 			const UiLayoutComponent layout;
 			CHECK(layout.Kind == UiLayoutKind::Stack);
@@ -306,11 +317,44 @@ namespace Engine {
 			CHECK(element.Grow == 0.0f);
 			CHECK(element.Shrink == 1.0f);
 			CHECK(element.MinSize == glm::vec2(0.0f));
+
+			// C22.2 (Docs/Decisions/0033-m22-contract.md decision 21): the widgets.
+			const UiButtonComponent button;
+			CHECK(button.Interactable);
+			CHECK(button.Focusable);
+
+			const UiToggleComponent toggle;
+			CHECK(toggle.Interactable);
+			CHECK(toggle.Focusable);
+			CHECK_FALSE(toggle.IsOn);
+			CHECK_FALSE(toggle.Graphic.IsValid());
+
+			const UiSliderComponent slider;
+			CHECK(slider.Interactable);
+			CHECK(slider.Focusable);
+			CHECK(slider.Value == 0.0f);
+			CHECK(slider.Min == 0.0f);
+			CHECK(slider.Max == 1.0f);
+			CHECK_FALSE(slider.WholeNumbers);
+			CHECK(slider.Step == 0.0f);
+			CHECK(slider.Direction == UiLayoutDirection::Horizontal);
+			CHECK_FALSE(slider.Fill.IsValid());
+			CHECK_FALSE(slider.Handle.IsValid());
+
+			const UiScrollViewComponent scrollView;
+			CHECK(scrollView.Interactable);
+			CHECK_FALSE(scrollView.Focusable);
+			CHECK_FALSE(scrollView.Content.IsValid());
+			CHECK_FALSE(scrollView.Horizontal);
+			CHECK(scrollView.Vertical);
+			CHECK(scrollView.ScrollPosition == glm::vec2(0.0f));
+			CHECK(scrollView.ScrollStep == 40.0f);
 		}
 
 		// Several paths read only the added component's own Excludes (Entity:AddComponent, component.list and component.schema,
 		// the generated reference), so both components of an exclusion declare it: RigidBody and CharacterController, UiCanvas
-		// and UiRect (the C22.1 review, Docs/Decisions/0033-m22-contract.md decision 2).
+		// and UiRect (the C22.1 review, Docs/Decisions/0033-m22-contract.md decision 2), and each pair of C22.2's four widgets
+		// (decision 21).
 		TEST_CASE("BuiltinComponents: every exclusion is declared by both components")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
@@ -324,7 +368,7 @@ namespace Engine {
 					++exclusions;
 				}
 			}
-			CHECK(exclusions == 4);
+			CHECK(exclusions == 16);
 			const ComponentInfo* canvas = registry->FindComponent<UiCanvasComponent>();
 			const ComponentInfo* rect = registry->FindComponent<UiRectComponent>();
 			REQUIRE(canvas != nullptr);
@@ -406,6 +450,10 @@ namespace Engine {
 				"UiText",
 				"UiLayout",
 				"UiLayoutElement",
+				"UiButton",
+				"UiToggle",
+				"UiSlider",
+				"UiScrollView",
 			};
 			std::vector<std::string> names;
 			for (const ComponentInfo* component : registry->GetComponents())

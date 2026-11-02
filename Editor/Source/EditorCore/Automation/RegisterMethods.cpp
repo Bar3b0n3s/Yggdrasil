@@ -19,6 +19,7 @@
 #include "EditorCore/Automation/ScriptMethods.h"
 #include "EditorCore/Automation/ShaderMethods.h"
 #include "EditorCore/Automation/TestMethods.h"
+#include "EditorCore/Automation/UiAuthoringMethods.h"
 #include "EditorCore/Automation/ViewportMethods.h"
 #include "EditorCore/Automation/ViewportPickMethods.h"
 #include "EditorCore/Project/ProjectValidator.h"
@@ -59,6 +60,8 @@ namespace Engine {
 		// M18 (ADR 0029 decisions 3 and 11): the editor's shader hot reload and its Chrome trace capture.
 		RegisterShaderMethodTypes(registry);
 		RegisterProfilerMethodTypes(registry);
+		// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 32): ui.createWidget; phase 2 appends in landing order.
+		RegisterUiAuthoringMethodTypes(registry);
 	}
 
 	void RegisterEditorMethods(MethodRegistry& methods, const EditorMethodOptions& options)
@@ -82,6 +85,7 @@ namespace Engine {
 		RegisterNativeMethods(methods);
 		RegisterShaderMethods(methods);
 		RegisterProfilerMethods(methods);
+		RegisterUiAuthoringMethods(methods); // M22 C22.2, decision 32
 		if (options.TestHooks)
 			RegisterDebugMethods(methods);
 	}

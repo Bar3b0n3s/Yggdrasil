@@ -1527,6 +1527,154 @@
 			},
 			"additionalProperties": false
 		},
+		"UiButton": {
+			"description": "A UI button: a pointer click or Submit while focused raises OnUiClick.",
+			"type": "object",
+			"properties": {
+				"Interactable": {
+					"description": "Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event.",
+					"type": "boolean"
+				},
+				"Focusable": {
+					"description": "Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"UiToggle": {
+			"description": "A UI toggle: a pointer click or Submit while focused flips IsOn and raises OnUiValueChanged; Graphic shows while it is on.",
+			"type": "object",
+			"properties": {
+				"Interactable": {
+					"description": "Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event.",
+					"type": "boolean"
+				},
+				"Focusable": {
+					"description": "Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it.",
+					"type": "boolean"
+				},
+				"IsOn": {
+					"description": "Whether the toggle is on.",
+					"type": "boolean"
+				},
+				"Graphic": {
+					"description": "A UI element below the toggle (its check mark) that is drawn and hit only while the toggle is on; null for none.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				}
+			},
+			"additionalProperties": false
+		},
+		"UiSlider": {
+			"description": "A UI slider: the pointer drags its value between Min and Max and the directions along it step it, raising OnUiValueChanged.",
+			"type": "object",
+			"properties": {
+				"Interactable": {
+					"description": "Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event.",
+					"type": "boolean"
+				},
+				"Focusable": {
+					"description": "Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it.",
+					"type": "boolean"
+				},
+				"Value": {
+					"description": "The value, read clamped to Min and Max (and rounded with WholeNumbers).",
+					"type": "number",
+					"minimum": -1000000,
+					"maximum": 1000000
+				},
+				"Min": {
+					"description": "The value at the start edge (left, or bottom when Vertical); below Max.",
+					"type": "number",
+					"minimum": -1000000,
+					"maximum": 1000000
+				},
+				"Max": {
+					"description": "The value at the end edge (right, or top when Vertical).",
+					"type": "number",
+					"minimum": -1000000,
+					"maximum": 1000000
+				},
+				"WholeNumbers": {
+					"description": "Whether the value is rounded to whole numbers.",
+					"type": "boolean"
+				},
+				"Step": {
+					"description": "The change per navigation press along the slider; 0 is a tenth of the range. With WholeNumbers it is rounded to a whole number of at least 1.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000000
+				},
+				"Direction": {
+					"description": "Horizontal puts Min at the left edge; Vertical puts it at the bottom edge.",
+					"enum": ["Horizontal", "Vertical"]
+				},
+				"Fill": {
+					"description": "A UI element below the slider stretched from the Min edge to the value; null for none.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				},
+				"Handle": {
+					"description": "A UI element below the slider placed at the value; null for none.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				}
+			},
+			"additionalProperties": false
+		},
+		"UiScrollView": {
+			"description": "A UI scroll view: clips its descendants and moves its Content by the scroll position, which the wheel, a drag and focus change.",
+			"type": "object",
+			"properties": {
+				"Interactable": {
+					"description": "Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event.",
+					"type": "boolean"
+				},
+				"Focusable": {
+					"description": "Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it.",
+					"type": "boolean"
+				},
+				"Content": {
+					"description": "The UI element below the scroll view that scrolls; null scrolls nothing.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				},
+				"Horizontal": {
+					"description": "Whether the content scrolls along x.",
+					"type": "boolean"
+				},
+				"Vertical": {
+					"description": "Whether the content scrolls along y.",
+					"type": "boolean"
+				},
+				"ScrollPosition": {
+					"description": "Canvas units the content is moved left (x) and up (y), read clamped to the content's overflow.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1000000
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1000000
+						}
+					],
+					"minItems": 2,
+					"maxItems": 2
+				},
+				"ScrollStep": {
+					"description": "Canvas units per wheel step and per navigation press.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000000
+				}
+			},
+			"additionalProperties": false
+		},
 		"PrefabOverride": {
 			"description": "One recorded difference between an outermost prefab instance and its prefab.",
 			"type": "object",
@@ -1722,6 +1870,18 @@
 						},
 						"UiLayoutElement": {
 							"$ref": "#/$defs/UiLayoutElement"
+						},
+						"UiButton": {
+							"$ref": "#/$defs/UiButton"
+						},
+						"UiToggle": {
+							"$ref": "#/$defs/UiToggle"
+						},
+						"UiSlider": {
+							"$ref": "#/$defs/UiSlider"
+						},
+						"UiScrollView": {
+							"$ref": "#/$defs/UiScrollView"
 						}
 					},
 					"additionalProperties": true

@@ -36,6 +36,10 @@ Every component of the type registry, in canonical component order: the order of
 | `UiText` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | Draws text in a UI element's rectangle, wrapped and aligned in it. |
 | `UiLayout` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A container that places its children's rectangles in a stack, a grid or a flexible row or column. |
 | `UiLayoutElement` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | How a UI element takes part in its parent's layout container: flex weights, a minimum size, or none. |
+| `UiButton` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A UI button: a pointer click or Submit while focused raises OnUiClick. |
+| `UiToggle` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A UI toggle: a pointer click or Submit while focused flips IsOn and raises OnUiValueChanged; Graphic shows while it is on. |
+| `UiSlider` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A UI slider: the pointer drags its value between Min and Max and the directions along it step it, raising OnUiValueChanged. |
+| `UiScrollView` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A UI scroll view: clips its descendants and moves its Content by the scroll position, which the wheel, a drag and focus change. |
 
 ## ID
 
@@ -910,6 +914,124 @@ Script members of `UiLayoutElement`:
 | `IgnoreLayout` | proxy field | `boolean` | read/write | All | Whether the element keeps its own placement and takes no space in the container. |
 | `MinSize` | proxy field | `vector` | read/write | All | The size the element never goes below in a Stack or Flex container, in canvas units. |
 | `Shrink` | proxy field | `number` | read/write | All | Flex: the element's share, times its preferred size, of the main axis's overflow. |
+
+## UiButton
+
+A UI button: a pointer click or Submit while focused raises OnUiClick.
+
+- Category: Ui
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `UiRect`
+- Excludes: `UiToggle`, `UiSlider`, `UiScrollView`
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Interactable` | `Bool` | `true` |  |  |  | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
+| `Focusable` | `Bool` | `true` |  |  |  | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
+
+Script members of `UiButton`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Focusable` | proxy field | `boolean` | read/write | All | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
+| `Interactable` | proxy field | `boolean` | read/write | All | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
+
+## UiToggle
+
+A UI toggle: a pointer click or Submit while focused flips IsOn and raises OnUiValueChanged; Graphic shows while it is on.
+
+- Category: Ui
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `UiRect`
+- Excludes: `UiButton`, `UiSlider`, `UiScrollView`
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Interactable` | `Bool` | `true` |  |  |  | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
+| `Focusable` | `Bool` | `true` |  |  |  | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
+| `IsOn` | `Bool` | `false` |  |  |  | Whether the toggle is on. |
+| `Graphic` | `EntityRef` | `null` |  |  |  | A UI element below the toggle (its check mark) that is drawn and hit only while the toggle is on; null for none. |
+
+Script members of `UiToggle`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Focusable` | proxy field | `boolean` | read/write | All | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
+| `Graphic` | proxy field | `Entity?` | read/write | All | A UI element below the toggle (its check mark) that is drawn and hit only while the toggle is on; null for none. |
+| `Interactable` | proxy field | `boolean` | read/write | All | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
+| `IsOn` | proxy field | `boolean` | read/write | All | Whether the toggle is on. |
+
+## UiSlider
+
+A UI slider: the pointer drags its value between Min and Max and the directions along it step it, raising OnUiValueChanged.
+
+- Category: Ui
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `UiRect`
+- Excludes: `UiButton`, `UiToggle`, `UiScrollView`
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Interactable` | `Bool` | `true` |  |  |  | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
+| `Focusable` | `Bool` | `true` |  |  |  | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
+| `Value` | `Float` | `0` | -1e+06 to 1e+06 |  |  | The value, read clamped to Min and Max (and rounded with WholeNumbers). |
+| `Min` | `Float` | `0` | -1e+06 to 1e+06 |  |  | The value at the start edge (left, or bottom when Vertical); below Max. |
+| `Max` | `Float` | `1` | -1e+06 to 1e+06 |  |  | The value at the end edge (right, or top when Vertical). |
+| `WholeNumbers` | `Bool` | `false` |  |  |  | Whether the value is rounded to whole numbers. |
+| `Step` | `Float` | `0` | 0 to 1e+06 |  |  | The change per navigation press along the slider; 0 is a tenth of the range. With WholeNumbers it is rounded to a whole number of at least 1. |
+| `Direction` | `UiLayoutDirection` | `"Horizontal"` |  |  |  | Horizontal puts Min at the left edge; Vertical puts it at the bottom edge. |
+| `Fill` | `EntityRef` | `null` |  |  |  | A UI element below the slider stretched from the Min edge to the value; null for none. |
+| `Handle` | `EntityRef` | `null` |  |  |  | A UI element below the slider placed at the value; null for none. |
+
+Script members of `UiSlider`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Direction` | proxy field | `UiLayoutDirection` | read/write | All | Horizontal puts Min at the left edge; Vertical puts it at the bottom edge. |
+| `Fill` | proxy field | `Entity?` | read/write | All | A UI element below the slider stretched from the Min edge to the value; null for none. |
+| `Focusable` | proxy field | `boolean` | read/write | All | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
+| `Handle` | proxy field | `Entity?` | read/write | All | A UI element below the slider placed at the value; null for none. |
+| `Interactable` | proxy field | `boolean` | read/write | All | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
+| `Max` | proxy field | `number` | read/write | All | The value at the end edge (right, or top when Vertical). |
+| `Min` | proxy field | `number` | read/write | All | The value at the start edge (left, or bottom when Vertical); below Max. |
+| `Step` | proxy field | `number` | read/write | All | The change per navigation press along the slider; 0 is a tenth of the range. With WholeNumbers it is rounded to a whole number of at least 1. |
+| `Value` | proxy field | `number` | read/write | All | The value, read clamped to Min and Max (and rounded with WholeNumbers). |
+| `WholeNumbers` | proxy field | `boolean` | read/write | All | Whether the value is rounded to whole numbers. |
+
+## UiScrollView
+
+A UI scroll view: clips its descendants and moves its Content by the scroll position, which the wheel, a drag and focus change.
+
+- Category: Ui
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `UiRect`
+- Excludes: `UiButton`, `UiToggle`, `UiSlider`
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Interactable` | `Bool` | `true` |  |  |  | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
+| `Focusable` | `Bool` | `false` |  |  |  | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
+| `Content` | `EntityRef` | `null` |  |  |  | The UI element below the scroll view that scrolls; null scrolls nothing. |
+| `Horizontal` | `Bool` | `false` |  |  |  | Whether the content scrolls along x. |
+| `Vertical` | `Bool` | `true` |  |  |  | Whether the content scrolls along y. |
+| `ScrollPosition` | `Vec2` | `[0,0]` | 0 to 1e+06 | units |  | Canvas units the content is moved left (x) and up (y), read clamped to the content's overflow. |
+| `ScrollStep` | `Float` | `40` | 0 to 1e+06 | units |  | Canvas units per wheel step and per navigation press. |
+
+Script members of `UiScrollView`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Content` | proxy field | `Entity?` | read/write | All | The UI element below the scroll view that scrolls; null scrolls nothing. |
+| `Focusable` | proxy field | `boolean` | read/write | All | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
+| `Horizontal` | proxy field | `boolean` | read/write | All | Whether the content scrolls along x. |
+| `Interactable` | proxy field | `boolean` | read/write | All | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
+| `ScrollPosition` | proxy field | `vector` | read/write | All | Canvas units the content is moved left (x) and up (y), read clamped to the content's overflow. |
+| `ScrollStep` | proxy field | `number` | read/write | All | Canvas units per wheel step and per navigation press. |
+| `Vertical` | proxy field | `boolean` | read/write | All | Whether the content scrolls along y. |
 
 ## Structs
 

@@ -3,6 +3,7 @@
 #include "Engine/Scene/UiExtraction.h"
 
 #include "Engine/Scene/Components/CameraComponent.h"
+#include "Engine/Scene/Components/UiButtonComponent.h"
 #include "Engine/Scene/Components/UiCanvasComponent.h"
 #include "Engine/Scene/Components/UiImageComponent.h"
 #include "Engine/Scene/Components/UiRectComponent.h"
@@ -319,6 +320,96 @@ namespace Engine {
 			RenderSnapshot plain = view(RenderAnnotations{}, { icon.GetUUID() });
 			REQUIRE(AppendRenderAnnotations(fixture.GetScene(), assets, {}, nullptr, plain));
 			CHECK(plain.Ui.Annotations.empty());
+		}
+
+		// C22.2 (Docs/Decisions/0033-m22-contract.md decision 25; stream C): each widget's image takes its canvas's tint for
+		// its state, from the session's interaction state when there is one; a text without a font takes its canvas's.
+		TEST_CASE("UiExtraction: a widget's image takes its canvas's tint for its state, and a text without a font takes its canvas's" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			const TypedAssetHandle<AssetType::Font> canvasFont(AssetHandle(UUID(0xF0A7)));
+			const TypedAssetHandle<AssetType::Font> ownFont(AssetHandle(UUID(0xF0B7)));
+			const UiTheme theme{ .Normal = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f),
+				.Hovered = glm::vec4(0.5f, 1.0f, 1.0f, 1.0f),
+				.Pressed = glm::vec4(1.0f, 0.5f, 1.0f, 1.0f),
+				.Focused = glm::vec4(1.0f, 1.0f, 0.5f, 1.0f),
+				.Disabled = glm::vec4(1.0f, 1.0f, 1.0f, 0.5f) };
+			Entity canvas = scene.CreateEntity("Canvas");
+			canvas.AddComponent<UiCanvasComponent>(UiCanvasComponent{ .Font = canvasFont, .Theme = theme });
+			const glm::vec4 color(0.5f, 0.5f, 0.5f, 1.0f);
+			const auto addButton = [&scene, &canvas, color](std::string_view name, float y, bool interactable)
+			{
+				Entity button = AddElement(scene, name, canvas, glm::vec2(0.0f, y), glm::vec2(20.0f, 10.0f));
+				button.AddComponent<UiImageComponent>(UiImageComponent{ .Color = color });
+				button.AddComponent<UiButtonComponent>(UiButtonComponent{ .Interactable = interactable });
+				return button;
+			};
+			const Entity normal = addButton("Normal", 0.0f, true);
+			const Entity hovered = addButton("Hovered", 10.0f, true);
+			const Entity pressed = addButton("Pressed", 20.0f, true);
+			const Entity focused = addButton("Focused", 30.0f, true);
+			const Entity disabled = addButton("Disabled", 40.0f, false);
+			Entity label = AddElement(scene, "Label", canvas, glm::vec2(0.0f, 50.0f), glm::vec2(20.0f, 10.0f));
+			label.AddComponent<UiImageComponent>(UiImageComponent{ .Color = color });
+			label.AddComponent<UiTextComponent>(UiTextComponent{ .Text = "Hi" });
+			Entity titled = AddElement(scene, "Titled", canvas, glm::vec2(0.0f, 60.0f), glm::vec2(20.0f, 10.0f));
+			titled.AddComponent<UiTextComponent>(UiTextComponent{ .Text = "Title", .Font = ownFont });
+			const UiLayoutTable table = ComputeUiLayout(scene, glm::uvec2(100, 100));
+			// Each state on a widget of its own (the precedence follows below).
+			const UiInteractionState state{ .Focused = focused.GetUUID(), .Hovered = hovered.GetUUID(), .Pressed = pressed.GetUUID() };
+
+			UiDrawList list;
+			AppendUiDrawItems(scene, table, list, &state);
+			const auto colorOf = [&list](Entity entity, UiDrawKind kind)
+			{
+				const auto found = std::ranges::find_if(list.Items, [&entity, kind](const UiDrawItem& item)
+				{
+					return item.Entity == entity.GetUUID() && item.Kind == kind;
+				});
+				REQUIRE(found != list.Items.end());
+				return found->Color;
+			};
+			CHECK(colorOf(normal, UiDrawKind::Image) == color * theme.Normal);
+			CHECK(colorOf(hovered, UiDrawKind::Image) == color * theme.Hovered);
+			CHECK(colorOf(pressed, UiDrawKind::Image) == color * theme.Pressed);
+			CHECK(colorOf(focused, UiDrawKind::Image) == color * theme.Focused);
+			CHECK(colorOf(disabled, UiDrawKind::Image) == color * theme.Disabled);
+			// An element that is not a widget keeps its colour.
+			CHECK(colorOf(label, UiDrawKind::Image) == color);
+			const auto fontOf = [&list](Entity entity)
+			{
+				const auto found = std::ranges::find_if(list.Items, [&entity](const UiDrawItem& item)
+				{
+					return item.Entity == entity.GetUUID() && item.Kind == UiDrawKind::Text;
+				});
+				REQUIRE(found != list.Items.end());
+				return found->Font;
+			};
+			CHECK(fontOf(label) == canvasFont.GetHandle());
+			CHECK(fontOf(titled) == ownFont.GetHandle());
+
+			// The first match wins on a widget in several states: Pressed over Focused and Hovered (a pressed button is always
+			// under the held pointer), Focused over Hovered, and Disabled over all of them.
+			const auto tintWith = [&scene, &table, &colorOf, &list](Entity entity, const UiInteractionState& with)
+			{
+				UiDrawList states;
+				AppendUiDrawItems(scene, table, states, &with);
+				list = std::move(states);
+				return colorOf(entity, UiDrawKind::Image);
+			};
+			const UUID normalId = normal.GetUUID();
+			CHECK(tintWith(normal, UiInteractionState{ .Focused = normalId, .Hovered = normalId, .Pressed = normalId }) == color * theme.Pressed);
+			CHECK(tintWith(normal, UiInteractionState{ .Focused = normalId, .Hovered = normalId }) == color * theme.Focused);
+			const UUID disabledId = disabled.GetUUID();
+			CHECK(tintWith(disabled, UiInteractionState{ .Focused = disabledId, .Hovered = disabledId, .Pressed = disabledId }) == color * theme.Disabled);
+
+			// Without a session's state every widget is Normal, the disabled one still Disabled.
+			UiDrawList edit;
+			AppendUiDrawItems(scene, table, edit);
+			list = std::move(edit);
+			CHECK(colorOf(hovered, UiDrawKind::Image) == color * theme.Normal);
+			CHECK(colorOf(disabled, UiDrawKind::Image) == color * theme.Disabled);
 		}
 	}
 

@@ -437,6 +437,12 @@ namespace Engine {
 		}
 	}
 
+	// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 27): a stub of the contract that stream B implements.
+	void ScriptEngine::DispatchUiEvents(std::span<const UiEvent> /*events*/)
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
 	void ScriptEngine::OnPhysicsDiagnostic(const PhysicsDiagnostic& diagnostic)
 	{
 		m_State->AssertOwner();

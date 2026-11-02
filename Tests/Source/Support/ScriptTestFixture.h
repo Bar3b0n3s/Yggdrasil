@@ -94,6 +94,7 @@ namespace Engine {
 			void OnScriptError(const ScriptError& error, bool fatal) override;
 			void OnExternalMutation(std::string_view reason) override;
 			[[nodiscard]] bool IsReloadDeferred() const override { return ReloadDeferred; }
+			[[nodiscard]] UiSystem* GetUi() override { return Ui; }
 
 			ScriptFrameState Frame{};
 			ScriptEnvironment Environment{ .IsEditor = true, .Platform = "Test", .Version = "1" };
@@ -103,6 +104,9 @@ namespace Engine {
 			// Optional test services over GetScene(); callers stop the VM before destroying these borrowed systems.
 			PhysicsSystem* Physics = nullptr;
 			AudioSystem* Audio = nullptr;
+			// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 28): the UI the Ui module reads (IScriptHost::GetUi); null
+			// as in an edit evaluation.
+			UiSystem* Ui = nullptr;
 			Json Parameters = Json::object();
 			std::map<std::string, ScriptActionState> Actions{};
 			CursorMode Cursor = CursorMode::Normal;

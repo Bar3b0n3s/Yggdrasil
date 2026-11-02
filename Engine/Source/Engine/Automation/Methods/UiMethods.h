@@ -11,8 +11,10 @@
 
 // The ui domain (M22, C22.1, R-UI-AUTO; Docs/Decisions/0033-m22-contract.md decision 8): ui.tree, the laid-out UI of a scene,
 // shared by the Editor and the Runtime (§13.5 "Runtime subset"), so an agent sees where every element landed in scene pixels
-// without a screenshot. Conventions as in MethodRegistry.h. The interaction members of UiTreeEntry are reserved for W22.2,
-// which fills them from its interaction state (focus, hover, press, the widget kind); W22.1 reports their defaults.
+// without a screenshot. Conventions as in MethodRegistry.h. The interaction members of UiTreeEntry were reserved by W22.1;
+// C22.2 (decision 31; stream A) fills them: the widget kind and Interactable from the scene's components, and, for the play
+// scene, Focused, Hovered and Pressed from the session's interaction state (UiSystem::GetInteraction); the edit scene has
+// no interaction, so they are false there.
 
 namespace Engine {
 
@@ -49,12 +51,14 @@ namespace Engine {
 		UiPixelRect Clip{};
 		bool Visible = false; // UiLayoutNode::Visible; a canvas is visible
 		std::string Text{};   // its UiText's Text, cut to 256 bytes at a UTF-8 boundary with "…" when longer; empty without one
-		// W22.2's interaction state (decision 8), reported as their defaults by W22.1.
+		// The interaction (decision 8, filled by C22.2's stream A, decision 31): Interactable for a widget whose Interactable
+		// is set; Focused, Hovered and Pressed from the play session's state (false in the edit scene); Widget the kind
+		// (UiWidgetTypeToString: "Button", "Toggle", "Slider", "ScrollView"; W22.3 "TextInput"), empty for none.
 		bool Interactable = false;
 		bool Focused = false;
 		bool Hovered = false;
 		bool Pressed = false;
-		std::string Widget{}; // the widget kind W22.2 names ("Button", "Toggle", "Slider", "ScrollView"; W22.3 "TextInput"); empty for none
+		std::string Widget{};
 	};
 
 	// ui.tree {canvas?, depth?, format?, width?, height?, target?}: the UI of the target scene laid out in scene pixels: every
@@ -64,8 +68,10 @@ namespace Engine {
 	// window size (GetDeterministicViewSize, the size of every deterministic session's view). Text: a header line
 	// "<file name>  rev <n>  <width>x<height> scene pixels  <count> elements", then per canvas a line "<name> <8 hex>
 	// UiCanvas(sort <n>, scale <s>)" and per element a line with box-drawing indentation, its name, its first 8 hex digits, its
-	// short component forms ("UiImage(<sheet path>#<frame>)", "UiText(\"<text>\")", "UiLayout(<kind> <direction>)"), its
-	// rectangle "(x,y wxh)", and "clipped" or "hidden" when it is.
+	// short component forms ("UiImage(<sheet path>#<frame>)", "UiText(\"<text>\")", "UiLayout(<kind> <direction>)"; C22.2's
+	// widgets "UiButton", "UiToggle(on|off)", "UiSlider(<value as read>)" and "UiScrollView(<x>,<y>)", the scroll position as
+	// read), its rectangle "(x,y wxh)", and "clipped" or "hidden" when it is, then (C22.2) "disabled" for a widget that is not
+	// interactable and "focused", "hovered" and "pressed" by the play session's state.
 	struct UiTreeParams
 	{
 		std::string Canvas{};

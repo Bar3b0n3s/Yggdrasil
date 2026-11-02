@@ -41,6 +41,7 @@ namespace Engine {
 
 	class ConstEntity;
 	class Scene;
+	struct UiInteractionState;
 
 	// The camera a view renders through.
 	enum class RenderCameraSource : uint8_t
@@ -77,6 +78,11 @@ namespace Engine {
 		std::vector<UUID> SelectedEntities{};
 		RenderAnnotations Annotations{};
 		RenderQualitySettings Quality{}; // host copies ProjectSettings.Rendering, including screenshot and Runtime paths
+		// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 25): the play session's UI interaction state, whose widget
+		// states pick the UI's tints (AppendUiDrawItems, Scene/UiExtraction.h); a borrowed pointer valid for the call. The
+		// session sets it for its game view and its views between ticks (PlaySession's RenderExtraction phase and
+		// ExtractView); null (every other host, the edit scene) draws every widget Normal, or Disabled when not interactable.
+		const UiInteractionState* UiInteraction = nullptr;
 	};
 
 	// The scene's primary camera: the first entity in canonical order (§5.1) that is effectively enabled (no

@@ -1,9 +1,14 @@
 #pragma once
 
 #include "Engine/Core/Base.h"
+#include "Engine/Core/Result.h"
+#include "Engine/Core/UUID.h"
+#include "Engine/Scene/UiInteraction.h"
 #include "Engine/Scene/UiLayout.h"
 
 #include <glm/glm.hpp>
+
+#include <vector>
 
 // The play session's UI (M22, C22.1, R-UI-CORE; Docs/Decisions/0033-m22-contract.md decisions 3 and 4): the two layouts of
 // the session's scene that the step order keeps (ADR 0028's phase-2 ledger, PlaySessionPhase):
@@ -17,12 +22,24 @@
 // scene's startup callbacks), so the current layout always describes the session's current scene: never a replaced scene's,
 // and empty only before Activate. Both layouts are at the session's scene resolution
 // (the view's size in W22.1; the later lander of M21 and M22 makes it the scene resolution M21's PixelPerfectCamera sets).
-// Layouts are derived data: they never reach the state hash (W22.2's ui hash block holds the interaction state only).
+// Layouts are derived data: they never reach the state hash (W22.2's ui hash block holds the interaction state and the
+// event queue only).
 // Owned by the PlaySession (GetUi); runs in Play and Simulate alike. Main thread; not copyable.
+//
+// Interaction (C22.2, R-UI-INPUT, R-UI-EVENTS and R-UI-DET; decisions 23, 24, 27 and 29). The UiInput phase (after
+// ApplyInput, ADR 0028's ledger) calls ProcessInput with the tick's latched step input; it updates the interaction state
+// (UiInteractionState: focus, hover, press, drag), writes what the widgets change (a toggle's IsOn, a slider's Value, a scroll
+// view's ScrollPosition) to the scene through Scene/UiWidgets.h, and queues the UI events it raises. The UiEvents phase
+// (after StartFlush) takes the queue (TakeEvents) and the script engine delivers it, bubbling (ScriptEngine::DispatchUiEvents);
+// a Simulate session, which runs no UiEvents phase, takes and drops the queue right after UiInput. SetFocus (the Ui script
+// module's Ui.SetFocus) changes focus at once and queues its events behind those already queued. The state and the queue
+// are session state outside the scene: AppendStateHash is the state hash's ui block, and a scene replacement resets them
+// (ResetInteraction) with the layouts.
 
 namespace Engine {
 
 	class Scene;
+	class XXH64Hasher;
 
 	class UiSystem
 	{
@@ -45,10 +62,77 @@ namespace Engine {
 		[[nodiscard]] const UiLayoutTable& GetFrameLayout() const { return m_FrameLayout; }
 		// True when the frame's layout is the current one (a FrameUiLayout ran after the last UiLayout).
 		[[nodiscard]] bool IsFrameLayoutCurrent() const { return m_FrameLayoutCurrent; }
+
+		// --- Interaction (C22.2; stream A, the widgets' behaviours from Scene/UiWidgets.h) -------------------------------
+
+		// The UiInput phase (decision 24): against GetLayout(), a layout of `scene`, in this order, appending each event to
+		// the queue as it is raised:
+		//   1. Stale state: an id of the state that is not an element of the layout is cleared, and so are a Focused that is
+		//      no longer focusable and a Pressed or Dragged no longer interactable; a cleared Focused or Hovered whose entity
+		//      the scene still holds (not pending destruction) raises Focus or Hover (false) at it. When the layout holds no
+		//      canvas, the rest of the state then returns to its default (DragOrigin and DragStart zero, Stick None,
+		//      PointerOverUi false) and the phase ends here, reading no input: a scene without a canvas keeps an empty state
+		//      whatever the pointer, the wheel, the stick and the bindings do (Roadmap M22: scenes without UI keep their hash).
+		//   2. Hover: HitTestUi at input.Pointer; PointerOverUi is whether a target was hit; the hovered widget is the hit's
+		//      widget when it is interactable, else none. A change raises Hover (false) at the old one, then (true) at the new.
+		//   3. Press (PointerPressed) on the hovered widget: it becomes Pressed; a focusable one (IsUiFocusable) takes focus
+		//      (Focus false at the old focus, true at it), while one whose Focusable is off leaves focus as it is, so a HUD
+		//      button that is not Focusable is clicked without taking keyboard focus; a Slider takes the value at the pointer
+		//      (SetUiSliderFromPointer) and becomes Dragged with DragOrigin the pointer and DragStart zero; a ScrollView becomes
+		//      Dragged with DragOrigin the pointer and DragStart its ScrollPosition as read.
+		//   4. Drag (PointerDown, Dragged set, and not the press's own step): a Slider takes the value at the pointer; a
+		//      ScrollView follows the pointer (DragUiScrollView with the pointer's move from DragOrigin).
+		//   5. Release (PointerReleased, or Pressed set while the pointer is not down): when the hovered widget is Pressed it
+		//      is activated (ActivateUiWidget: a Button's Click, a Toggle's flip); then Pressed and Dragged are cleared.
+		//   Whenever Dragged is cleared (here or in step 1), DragOrigin and DragStart return to zero.
+		//   6. Wheel (a non-zero Scroll) over a target: the innermost interactable scroll view at or above it
+		//      (FindUiScrollView) scrolls by (Scroll.x, -Scroll.y) times its ScrollStep (ScrollUiScrollView).
+		//   7. Stick: GetUiStickDirection(input.Stick) different from the state's Stick and not None adds that direction to
+		//      the navigation commands; the state's Stick becomes it.
+		//   8. Navigation, in the order Next, Previous, Up, Down, Left, Right: a direction is first offered to the focused
+		//      element when it is a Slider (StepUiSlider) or a ScrollView (StepUiScrollView), which may consume it; otherwise
+		//      FindUiNavigationTarget (a direction) or FindNextUiFocus (Next, Previous) picks the element that takes focus
+		//      (Focus false at the old, true at the new), and the scroll views holding it reveal it (RevealInUiScrollViews).
+		//      With nothing focused, both pick the layout's default focus (a canvas's DefaultFocus, Scene/UiInteraction.h)
+		//      or nothing, so a command does nothing until something has focus or a canvas names its DefaultFocus.
+		//   9. Submit: the focused element is activated (ActivateUiWidget); nothing when none is focused.
+		//  10. Cancel: Cancel at the focused element, else at the last canvas of the layout (its entity), else none.
+		// Writes go to `scene`'s components only (never its structure).
+		void ProcessInput(Scene& scene, const UiInputFrame& input);
+
+		// The interaction state (decision 24), the default before the first UiInput and after ResetInteraction.
+		[[nodiscard]] const UiInteractionState& GetInteraction() const { return m_Interaction; }
+
+		// Ui.SetFocus (decision 28): focuses `element`, an element focusable in GetLayout() (IsUiFocusable), or clears focus
+		// with a null id; Focus (false) at the old focus and (true) at the new are queued (nothing when it does not change),
+		// and the scroll views holding the new focus reveal it. Errors: InvalidArgument for an id that is not focusable,
+		// naming why (not laid out, hidden, no widget, not interactable or not focusable); nothing changes then.
+		[[nodiscard]] Status SetFocus(Scene& scene, UUID element);
+
+		// The UiEvents phase: the queued events, in the order queued, leaving the queue empty.
+		[[nodiscard]] std::vector<UiEvent> TakeEvents();
+		[[nodiscard]] size_t GetQueuedEventCount() const { return m_Events.size(); }
+
+		// A scene replacement (Scene.Load, Scene.Reload): the interaction state returns to its default and the queue is
+		// emptied, before the replacement's LayoutStep.
+		void ResetInteraction();
+
+		// The state hash's ui block (decision 29; ADR 0028's ledger: after the physics2d block): nothing while the
+		// interaction state IsEmpty and the event queue is empty, so every scene without a canvas (which keeps both empty)
+		// hashes as before; otherwise the 8 ASCII bytes "UiState1" (as UpdateU64 of their little-endian value), then Focused,
+		// Hovered, Pressed and Dragged (UUID values), DragOrigin.x, DragOrigin.y, DragStart.x and DragStart.y (each float's
+		// bit pattern, zero-extended), Stick and PointerOverUi (as integers), then the queue: its event count, then each
+		// event's Kind, Target (its UUID value), Flag, HasNumber, Number (its bit pattern), Vector.x and Vector.y (their bit
+		// patterns), in the order queued, each value with UpdateU64. The queue crosses a tick boundary when a script calls
+		// Ui.SetFocus after the tick's UiEvents phase: its events reach their callbacks at the next UiEvents phase, so the
+		// block holds them.
+		void AppendStateHash(XXH64Hasher& hasher) const;
 	private:
 		UiLayoutTable m_StepLayout{};
 		UiLayoutTable m_FrameLayout{};
 		bool m_FrameLayoutCurrent = false;
+		UiInteractionState m_Interaction{};
+		std::vector<UiEvent> m_Events{};
 	};
 
 }

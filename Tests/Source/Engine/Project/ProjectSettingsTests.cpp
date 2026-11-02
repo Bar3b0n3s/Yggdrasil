@@ -15,6 +15,11 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <format>
+#include <iterator>
+#include <span>
+
 namespace Engine {
 
 	// The sorted pointers of the errors Validate reports for `object`, an object of a registered struct.
@@ -268,6 +273,51 @@ namespace Engine {
 				CHECK(issues(std::string(invalid)) == std::vector<std::string>{ "/Localization/Locale" });
 				CHECK_FALSE(tableAccepts(invalid));
 			}
+		}
+
+		// M22 C22.2 (Docs/Decisions/0033-m22-contract.md decision 30): the Ui section, registered right after Localization
+		// (ADR 0028's phase-2 ledger appends M21's sections after M22's or before them, in landing order, so only the relative
+		// order is checked); each binding list holds at most 16 unique, non-empty names, located at /Ui/<list>/<index> (the
+		// names themselves are checked against the key and gamepad tables when a play session starts, as an action's bindings
+		// are). Skipped by the contract until stream A registers the section.
+		TEST_CASE("ProjectSettings: the Ui section's binding lists hold at most 16 unique names, located at /Ui" * doctest::skip(true))
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			const StructInfo* type = registry->FindStruct<ProjectSettings>();
+			REQUIRE(type != nullptr);
+			REQUIRE(registry->FindStruct("UiSettings") != nullptr);
+			REQUIRE(type->FindField("Ui") != nullptr);
+			const std::span<const Scope<FieldInfo>> fields = type->GetFields();
+			const auto localization = std::ranges::find_if(fields, [](const Scope<FieldInfo>& field)
+			{
+				return field->GetName() == "Localization";
+			});
+			REQUIRE(localization != fields.end());
+			REQUIRE(std::next(localization) != fields.end());
+			CHECK((*std::next(localization))->GetName() == "Ui");
+			const auto issues = [&](const UiSettings& ui)
+			{
+				ProjectSettings settings;
+				settings.Ui = ui;
+				ResolveContext resolve;
+				resolve.Registry = registry.get();
+				ValidationContext context;
+				type->Validate(&settings, resolve, context);
+				std::vector<std::string> pointers;
+				for (const ValidationIssue& issue : context.GetIssues())
+					pointers.push_back(issue.JsonPointer);
+				return pointers;
+			};
+			CHECK(issues(UiSettings{}).empty());
+			CHECK(issues(UiSettings{ .Submit = { "Key.Enter", "Key.Enter" } }) == std::vector<std::string>{ "/Ui/Submit/1" });
+			CHECK(issues(UiSettings{ .Cancel = { "" } }) == std::vector<std::string>{ "/Ui/Cancel/0" });
+			UiSettings many;
+			many.Next.clear();
+			for (int key = 0; key < 17; ++key)
+				many.Next.push_back(std::format("Key.F{}", key + 1));
+			CHECK(issues(many) == std::vector<std::string>{ "/Ui/Next" });
+			many.Next.pop_back();
+			CHECK(issues(many).empty());
 		}
 
 		TEST_CASE("ProjectSettings: physics layers are 1 to 16 unique names starting with Default, and collisions pair declared layers")

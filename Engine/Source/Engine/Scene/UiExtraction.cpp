@@ -75,8 +75,9 @@ namespace Engine {
 
 	}
 
-	void AppendUiDrawItems(const Scene& scene, const UiLayoutTable& table, UiDrawList& list)
+	void AppendUiDrawItems(const Scene& scene, const UiLayoutTable& table, UiDrawList& list, const UiInteractionState* /*interaction*/)
 	{
+		// C22.2's theme (UiExtraction.h: the widgets' tints and the canvas's Font) is stream C's.
 		for (const UiCanvasLayout& canvas : table.Canvases)
 		{
 			// A table of this scene's layout holds its canvases' node ranges; a range past the nodes is cut to them.

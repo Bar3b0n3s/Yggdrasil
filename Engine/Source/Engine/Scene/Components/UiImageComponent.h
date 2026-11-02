@@ -28,7 +28,8 @@ namespace Engine {
 	// of a sprite sheet (M18's SpriteSheet asset) over the element's UiRect, tinted by Color, through the QuadBatcher's Ldr
 	// pipeline. A null Sheet draws a plain rectangle of Color (the QuadBatcher's white texel). A missing or failed sheet, or
 	// a Frame the sheet does not have, draws nothing (the Ui pass counts it; project.validate reports
-	// UI_IMAGE_FRAME_OUT_OF_RANGE). On an entity with a UiText too, the image draws first.
+	// UI_IMAGE_FRAME_OUT_OF_RANGE). On an entity with a UiText too, the image draws first. On a widget's element (UiButton,
+	// UiToggle, UiSlider, UiScrollView) its Color is multiplied by the tint of the widget's state (UiTheme, C22.2).
 	struct UiImageComponent
 	{
 		TypedAssetHandle<AssetType::SpriteSheet> Sheet{};
@@ -39,6 +40,10 @@ namespace Engine {
 		// wider than the rectangle shrink in proportion (ExpandNineSlice).
 		float BorderScale = 1.0f;
 		UiImageFilter Filter = UiImageFilter::Point;
+		// C22.2 (Docs/Decisions/0033-m22-contract.md decision 22): the element is a pointer target (Scene/UiInteraction.h's
+		// hit test): the pointer over it reaches its nearest widget at or above it, and is over the UI (Ui.IsPointerOverUi).
+		// False lets the pointer pass through the image to what lies under it. Registered by stream A, after Filter.
+		bool RaycastTarget = true;
 	};
 
 }

@@ -6,6 +6,9 @@
 #include "Engine/Scene/Components/UiLayoutComponent.h"
 #include "Engine/Scene/Components/UiLayoutElementComponent.h"
 #include "Engine/Scene/Components/UiRectComponent.h"
+#include "Engine/Scene/Components/UiScrollViewComponent.h"
+#include "Engine/Scene/Components/UiSliderComponent.h"
+#include "Engine/Scene/Components/UiToggleComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Support/SceneTestFixture.h"
@@ -358,6 +361,116 @@ namespace Engine {
 			CHECK(FindUiLayoutNode(table, group.GetUUID()) == nullptr);
 			// Free keeps its own placement in the column's rectangle.
 			CHECK(RequireNode(table, free).Min == glm::vec2(80.0f, 10.0f));
+		}
+
+		// C22.2 (Docs/Decisions/0033-m22-contract.md decision 26; stream B): a slider's anchors along its direction follow its
+		// value as read, and an off toggle's Graphic is laid out but hidden with its subtree.
+		TEST_CASE("UiLayout: a slider's value places its Fill and Handle, and an off toggle hides its Graphic" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity canvas = AddCanvas(scene, "Canvas", UiCanvasComponent{});
+			Entity slider = AddElement(scene, "Slider", canvas, MakeTopLeftRect(glm::vec2(0.0f), glm::vec2(100.0f, 20.0f)));
+			Entity fill = AddElement(scene, "Fill", slider, UiRectComponent{ .AnchorMin = glm::vec2(0.0f), .AnchorMax = glm::vec2(0.0f, 1.0f), .Size = glm::vec2(0.0f) });
+			Entity handle = AddElement(scene, "Handle", slider, UiRectComponent{ .AnchorMin = glm::vec2(0.0f, 0.5f), .AnchorMax = glm::vec2(0.0f, 0.5f), .Size = glm::vec2(10.0f, 20.0f) });
+			// Value 3 of [1, 9] reads as 3: a quarter along.
+			slider.AddComponent<UiSliderComponent>(UiSliderComponent{ .Value = 3.0f, .Min = 1.0f, .Max = 9.0f, .Fill = fill.GetUUID(), .Handle = handle.GetUUID() });
+			Entity vertical = AddElement(scene, "Vertical", canvas, MakeTopLeftRect(glm::vec2(200.0f, 0.0f), glm::vec2(20.0f, 100.0f)));
+			Entity column = AddElement(scene, "Column", vertical, UiRectComponent{ .AnchorMin = glm::vec2(0.0f), .AnchorMax = glm::vec2(1.0f, 0.0f), .Size = glm::vec2(0.0f) });
+			// A value past Max reads as Max: the fill covers the whole height.
+			vertical.AddComponent<UiSliderComponent>(UiSliderComponent{ .Value = 2.0f, .Direction = UiLayoutDirection::Vertical, .Fill = column.GetUUID() });
+			Entity toggle = AddElement(scene, "Toggle", canvas, MakeTopLeftRect(glm::vec2(0.0f, 50.0f), glm::vec2(20.0f)));
+			Entity check = AddElement(scene, "Check", toggle, UiRectComponent{ .AnchorMin = glm::vec2(0.0f), .AnchorMax = glm::vec2(1.0f), .Size = glm::vec2(-4.0f) });
+			Entity mark = AddElement(scene, "Mark", check, MakeTopLeftRect(glm::vec2(0.0f), glm::vec2(4.0f)));
+			toggle.AddComponent<UiToggleComponent>(UiToggleComponent{ .Graphic = check.GetUUID() });
+
+			UiLayoutTable table = ComputeUiLayout(scene, glm::uvec2(320, 180));
+			CHECK(RequireNode(table, fill).Min == glm::vec2(0.0f, 0.0f));
+			CHECK(RequireNode(table, fill).Max == glm::vec2(25.0f, 20.0f));
+			CHECK(RequireNode(table, handle).Min == glm::vec2(20.0f, 0.0f));
+			CHECK(RequireNode(table, handle).Max == glm::vec2(30.0f, 20.0f));
+			CHECK(RequireNode(table, column).Min == glm::vec2(200.0f, 0.0f));
+			CHECK(RequireNode(table, column).Max == glm::vec2(220.0f, 100.0f));
+			// The toggle is off: its check mark and the mark inside it are laid out, hidden and not visible.
+			CHECK(RequireNode(table, check).Min == glm::vec2(2.0f, 52.0f));
+			CHECK(RequireNode(table, check).Hidden);
+			CHECK_FALSE(RequireNode(table, check).Visible);
+			CHECK(RequireNode(table, mark).Hidden);
+			CHECK_FALSE(RequireNode(table, toggle).Hidden);
+
+			toggle.GetComponent<UiToggleComponent>().IsOn = true;
+			table = ComputeUiLayout(scene, glm::uvec2(320, 180));
+			CHECK_FALSE(RequireNode(table, check).Hidden);
+			CHECK(RequireNode(table, check).Visible);
+			CHECK(RequireNode(table, mark).Visible);
+		}
+
+		// C22.2 (decision 26; stream C): a scroll view clips its descendants whatever ClipChildren says, and its content moves
+		// by the scroll position clamped to the content's overflow, along the axes it scrolls.
+		TEST_CASE("UiLayout: a scroll view clips its descendants and moves its content by the clamped scroll position" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity canvas = AddCanvas(scene, "Canvas", UiCanvasComponent{});
+			Entity view = AddElement(scene, "View", canvas, MakeTopLeftRect(glm::vec2(10.0f), glm::vec2(100.0f, 40.0f)));
+			Entity content = AddElement(scene, "Content", view, MakeTopLeftRect(glm::vec2(0.0f), glm::vec2(100.0f, 200.0f)));
+			Entity item = AddElement(scene, "Item", content, MakeTopLeftRect(glm::vec2(0.0f, 50.0f), glm::vec2(100.0f, 20.0f)));
+			// x does not scroll (Horizontal is off): its 30 is ignored.
+			view.AddComponent<UiScrollViewComponent>(UiScrollViewComponent{ .Content = content.GetUUID(), .ScrollPosition = glm::vec2(30.0f) });
+
+			UiLayoutTable table = ComputeUiLayout(scene, glm::uvec2(320, 180));
+			CHECK(RequireNode(table, content).Min == glm::vec2(10.0f, -20.0f));
+			CHECK(RequireNode(table, content).Max == glm::vec2(110.0f, 180.0f));
+			const UiLayoutNode& itemNode = RequireNode(table, item);
+			CHECK(itemNode.Min == glm::vec2(10.0f, 30.0f));
+			CHECK(itemNode.Max == glm::vec2(110.0f, 50.0f));
+			CHECK(itemNode.Clipped);
+			CHECK(itemNode.Clip == UiClipRect{ .MinX = 10, .MinY = 10, .MaxX = 110, .MaxY = 50 });
+			CHECK_FALSE(RequireNode(table, view).Clipped);
+
+			// Past the overflow (200 - 40): the content stops at its bottom.
+			view.GetComponent<UiScrollViewComponent>().ScrollPosition = glm::vec2(0.0f, 500.0f);
+			table = ComputeUiLayout(scene, glm::uvec2(320, 180));
+			CHECK(RequireNode(table, content).Min == glm::vec2(10.0f, -150.0f));
+		}
+
+		// C22.2 (decision 26; streams B and C, the review's m9): a Fill, Handle, Graphic or Content that is not an element below
+		// its widget in the same canvas (a sibling, an element of another canvas, the widget itself, an ancestor) is ignored:
+		// it keeps its own placement and stays shown. Live: it holds on the contract tree, whose layout applies no widget rule
+		// yet, and keeps holding once streams B and C add the rules.
+		TEST_CASE("UiLayout: a widget part that is not an element below its widget in the same canvas is ignored")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity canvas = AddCanvas(scene, "Canvas", UiCanvasComponent{});
+			Entity outside = AddElement(scene, "Outside", canvas, MakeTopLeftRect(glm::vec2(150.0f, 0.0f), glm::vec2(40.0f, 10.0f)));
+			Entity other = AddCanvas(scene, "Other", UiCanvasComponent{ .SortOrder = 1 });
+			Entity elsewhere = AddElement(scene, "Elsewhere", other, MakeTopLeftRect(glm::vec2(50.0f, 150.0f), glm::vec2(10.0f)));
+			// A slider at a half whose Fill is a sibling and whose Handle is in another canvas.
+			Entity slider = AddElement(scene, "Slider", canvas, MakeTopLeftRect(glm::vec2(0.0f), glm::vec2(100.0f, 20.0f)));
+			slider.AddComponent<UiSliderComponent>(UiSliderComponent{ .Value = 0.5f, .Fill = outside.GetUUID(), .Handle = elsewhere.GetUUID() });
+			// Off toggles whose Graphic is a sibling, and the toggle itself.
+			Entity toggle = AddElement(scene, "Toggle", canvas, MakeTopLeftRect(glm::vec2(0.0f, 30.0f), glm::vec2(20.0f)));
+			toggle.AddComponent<UiToggleComponent>(UiToggleComponent{ .Graphic = outside.GetUUID() });
+			Entity self = AddElement(scene, "Self", canvas, MakeTopLeftRect(glm::vec2(30.0f, 30.0f), glm::vec2(20.0f)));
+			self.AddComponent<UiToggleComponent>(UiToggleComponent{ .Graphic = self.GetUUID() });
+			// A scroll view whose Content is the element holding it.
+			Entity panel = AddElement(scene, "Panel", canvas, MakeTopLeftRect(glm::vec2(0.0f, 60.0f), glm::vec2(200.0f, 60.0f)));
+			Entity view = AddElement(scene, "View", panel, MakeTopLeftRect(glm::vec2(0.0f), glm::vec2(100.0f, 40.0f)));
+			view.AddComponent<UiScrollViewComponent>(UiScrollViewComponent{ .Content = panel.GetUUID(), .ScrollPosition = glm::vec2(0.0f, 30.0f) });
+
+			const UiLayoutTable table = ComputeUiLayout(scene, glm::uvec2(320, 180));
+			const UiLayoutNode& outsideNode = RequireNode(table, outside);
+			CHECK(outsideNode.Min == glm::vec2(150.0f, 0.0f));
+			CHECK(outsideNode.Max == glm::vec2(190.0f, 10.0f));
+			CHECK_FALSE(outsideNode.Hidden);
+			CHECK(outsideNode.Visible);
+			CHECK(RequireNode(table, elsewhere).Min == glm::vec2(50.0f, 150.0f));
+			CHECK(RequireNode(table, elsewhere).Max == glm::vec2(60.0f, 160.0f));
+			CHECK_FALSE(RequireNode(table, self).Hidden);
+			CHECK(RequireNode(table, self).Visible);
+			CHECK(RequireNode(table, panel).Min == glm::vec2(0.0f, 60.0f));
+			CHECK(RequireNode(table, view).Min == glm::vec2(0.0f, 60.0f));
 		}
 	}
 

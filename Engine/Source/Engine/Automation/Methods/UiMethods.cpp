@@ -388,11 +388,11 @@ namespace Engine {
 			.Field("clip", &UiTreeEntry::Clip, "The clip rectangle in whole scene pixels, when clipped.")
 			.Field("visible", &UiTreeEntry::Visible, "Whether the element covers a pixel of the scene image once clipped.")
 			.Field("text", &UiTreeEntry::Text, "Its UiText's text, cut to 256 bytes; empty without one.")
-			.Field("interactable", &UiTreeEntry::Interactable, "Whether the element takes pointer and navigation input (W22.2; false before).")
-			.Field("focused", &UiTreeEntry::Focused, "Whether the element has the focus (W22.2; false before).")
-			.Field("hovered", &UiTreeEntry::Hovered, "Whether the pointer is over the element (W22.2; false before).")
-			.Field("pressed", &UiTreeEntry::Pressed, "Whether the element is pressed (W22.2; false before).")
-			.Field("widget", &UiTreeEntry::Widget, "The element's widget kind, such as Button or Slider (W22.2); empty for none.");
+			.Field("interactable", &UiTreeEntry::Interactable, "Whether the element is a widget whose Interactable is set (it takes the pointer and focus).")
+			.Field("focused", &UiTreeEntry::Focused, "Whether the element has keyboard and gamepad focus in the play session; false in the edit scene.")
+			.Field("hovered", &UiTreeEntry::Hovered, "Whether the element is the widget under the pointer in the play session; false in the edit scene.")
+			.Field("pressed", &UiTreeEntry::Pressed, "Whether the held pointer presses the element in the play session; false in the edit scene.")
+			.Field("widget", &UiTreeEntry::Widget, "The element's widget: Button, Toggle, Slider or ScrollView; empty for none.");
 
 		registry.Struct<UiTreeParams>("UiTreeParams", "The params of ui.tree.")
 			.Field("canvas", &UiTreeParams::Canvas, "An entity with a UiCanvas whose UI alone is listed; omitted: every canvas.")

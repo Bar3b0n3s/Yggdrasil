@@ -874,7 +874,9 @@ namespace Engine {
 		{
 			case PlaySessionPhase::InterpolationSnapshot:   return "InterpolationSnapshot";
 			case PlaySessionPhase::ApplyInput:              return "ApplyInput";
+			case PlaySessionPhase::UiInput:                 return "UiInput";
 			case PlaySessionPhase::StartFlush:              return "StartFlush";
+			case PlaySessionPhase::UiEvents:                return "UiEvents";
 			case PlaySessionPhase::FixedUpdate:             return "FixedUpdate";
 			case PlaySessionPhase::Tasks:                   return "Tasks";
 			case PlaySessionPhase::NativeStep:              return "NativeStep";

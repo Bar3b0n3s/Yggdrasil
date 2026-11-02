@@ -253,6 +253,63 @@ namespace Engine {
 			REQUIRE_MESSAGE(canvas.has_value(), canvas.error().ToString());
 			CHECK((*canvas)["elements"].size() == 2);
 		}
+
+		// C22.2 (Docs/Decisions/0033-m22-contract.md decision 31; stream A): the interaction fields W22.1 reserved, the widget
+		// kind and Interactable from the components in both scenes, Focused, Hovered and Pressed from the play session's state,
+		// and the widgets' short forms and markers in the text outline.
+		TEST_CASE("UiMethods: ui.tree reports each element's widget and the play session's focus, hover and press" * doctest::skip(true))
+		{
+			Test::AutomationFixture setup("UiTreeWidgets");
+			REQUIRE(setup.Call("edit.batch", ParseUiMethodJson(R"({"label":"Widgets","ops":[
+				{"method":"entity.create","params":{"name":"Hud","components":{"UiCanvas":{}}}},
+				{"method":"entity.create","params":{"name":"Play","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[10,10],"Size":[100,40]},"UiImage":{},"UiButton":{}}}},
+				{"method":"entity.create","params":{"name":"Sound","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[10,60],"Size":[30,30]},"UiImage":{},
+					"UiToggle":{"IsOn":true,"Interactable":false}}}}]})"))
+					.has_value());
+			const auto findEntry = [](const Json& elements, std::string_view name)
+			{
+				for (const Json& element : elements)
+				{
+					if (element["name"] == Json(name))
+						return element;
+				}
+				return Json();
+			};
+
+			Result<Json> edit = setup.Call("ui.tree", Json{ { "format", "Json" } });
+			REQUIRE_MESSAGE(edit.has_value(), edit.error().ToString());
+			Json play = findEntry((*edit)["elements"], "Play");
+			CHECK(play["widget"] == Json("Button"));
+			CHECK(play["interactable"] == Json(true));
+			CHECK(play["focused"] == Json(false));
+			const Json sound = findEntry((*edit)["elements"], "Sound");
+			CHECK(sound["widget"] == Json("Toggle"));
+			CHECK(sound["interactable"] == Json(false));
+			CHECK(findEntry((*edit)["elements"], "Hud")["widget"] == Json(""));
+			const Result<Json> outline = setup.Call("ui.tree", Json::object());
+			REQUIRE_MESSAGE(outline.has_value(), outline.error().ToString());
+			const std::string text = JsonReader((*outline)["text"]).ReadString().value_or(std::string());
+			CHECK(text.find("UiButton") != std::string::npos);
+			CHECK(text.find("UiToggle(on)") != std::string::npos);
+			CHECK(text.find("disabled") != std::string::npos);
+
+			// A press on Play in the play session hovers, presses and focuses it.
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true } }).has_value());
+			const Json press = Json::array({ Json{ { "type", "mouseButton" }, { "button", "Left" }, { "state", "down" }, { "position", Json::array({ 20, 20 }) } } });
+			REQUIRE(setup.Call("play.step", Json{ { "ticks", 1 }, { "render", "none" }, { "input", press } }).has_value());
+			const Result<Json> played = setup.Call("ui.tree", Json{ { "format", "Json" }, { "target", "play" } });
+			REQUIRE_MESSAGE(played.has_value(), played.error().ToString());
+			play = findEntry((*played)["elements"], "Play");
+			CHECK(play["focused"] == Json(true));
+			CHECK(play["hovered"] == Json(true));
+			CHECK(play["pressed"] == Json(true));
+			const Result<Json> playedOutline = setup.Call("ui.tree", Json{ { "target", "play" } });
+			REQUIRE_MESSAGE(playedOutline.has_value(), playedOutline.error().ToString());
+			CHECK(JsonReader((*playedOutline)["text"]).ReadString().value_or(std::string()).find("focused hovered pressed") != std::string::npos);
+			REQUIRE(setup.Call("play.stop", Json::object()).has_value());
+		}
 	}
 
 }

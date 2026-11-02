@@ -1650,6 +1650,81 @@ end
 			CHECK_FALSE(frame->AutoFixable);
 		}
 
+		// M22 C22.2 (Docs/Decisions/0033-m22-contract.md decision 35; stream B, the review's m9): a widget part (a UiToggle's
+		// Graphic, a UiSlider's Fill or Handle, a UiScrollView's Content) that is not a UI element below its widget in the
+		// same canvas is named once, at its widget's entity, component and field; valid parts and null parts stay quiet.
+		TEST_CASE("ProjectValidator: UI_WIDGET_PART_INVALID names each widget part that is not an element below its widget and stays quiet for valid parts" * doctest::skip(true))
+		{
+			Test::EditorTestFixture fixture("ValidatorUiParts");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			Scene& scene = editor.GetScene();
+			{
+				SceneEdit edit(editor, "UI parts");
+				const auto add = [&scene](std::string_view name, Entity parent, std::string_view component, const std::string& json)
+				{
+					const Entity entity = parent.IsValid() ? scene.CreateEntity(name, parent) : scene.CreateEntity(name);
+					if (!component.empty())
+					{
+						const Json value = ParseValidatorJson(json);
+						const Status added = ComponentAccess::AddComponent(entity, component, &value);
+						REQUIRE_MESSAGE(added.has_value(), added.error().ToString());
+					}
+					return entity;
+				};
+				const auto addWidget = [](Entity entity, std::string_view component, const std::string& json)
+				{
+					const Json value = ParseValidatorJson(json);
+					const Status added = ComponentAccess::AddComponent(entity, component, &value);
+					REQUIRE_MESSAGE(added.has_value(), added.error().ToString());
+				};
+				const Entity hud = add("Hud", Entity(), "UiCanvas", "{}");
+				const Entity other = add("Other", Entity(), "UiCanvas", "{}");
+				const Entity elsewhere = add("Elsewhere", other, "UiRect", "{}");
+				const Entity loose = add("Loose", Entity(), "", "");
+				const Entity panel = add("Panel", hud, "UiRect", "{}");
+				// Faulty: a Graphic in another canvas, a Fill that is the slider's parent element, a Handle that is no element.
+				const Entity toggle = add("Toggle", panel, "UiRect", "{}");
+				addWidget(toggle, "UiToggle", std::format(R"({{"Graphic": "{}"}})", elsewhere.GetUUID().ToString()));
+				const Entity slider = add("Slider", panel, "UiRect", "{}");
+				addWidget(slider, "UiSlider", std::format(R"({{"Fill": "{}", "Handle": "{}"}})", panel.GetUUID().ToString(), loose.GetUUID().ToString()));
+				// Quiet: a toggle whose Graphic is its child, a slider whose parts are its children, a scroll view without content.
+				const Entity valid = add("Valid", hud, "UiRect", "{}");
+				const Entity check = add("Check", valid, "UiRect", "{}");
+				addWidget(valid, "UiToggle", std::format(R"({{"Graphic": "{}"}})", check.GetUUID().ToString()));
+				const Entity volume = add("Volume", hud, "UiRect", "{}");
+				const Entity fill = add("Fill", volume, "UiRect", "{}");
+				const Entity handle = add("Handle", volume, "UiRect", "{}");
+				addWidget(volume, "UiSlider", std::format(R"({{"Fill": "{}", "Handle": "{}"}})", fill.GetUUID().ToString(), handle.GetUUID().ToString()));
+				const Entity scroll = add("Scroll", hud, "UiRect", "{}");
+				addWidget(scroll, "UiScrollView", "{}");
+				REQUIRE(edit.Commit().has_value());
+			}
+
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			INFO(DescribeDiagnostics(*report));
+			std::vector<std::string> found;
+			for (const ProjectDiagnostic& diagnostic : report->Diagnostics)
+			{
+				if (diagnostic.Code != "UI_WIDGET_PART_INVALID")
+					continue;
+				CHECK(diagnostic.Severity == DiagnosticSeverity::Warning);
+				CHECK(diagnostic.File == "Assets/Scenes/Main.scene");
+				CHECK_FALSE(diagnostic.AutoFixable);
+				found.push_back(std::format("{} {}.{}", diagnostic.Entity, diagnostic.Component, diagnostic.Field));
+			}
+			std::ranges::sort(found);
+			std::vector<std::string> expected = {
+				std::format("{} UiToggle.Graphic", scene.FindEntityByPath("/Hud/Panel/Toggle").GetUUID().ToString()),
+				std::format("{} UiSlider.Fill", scene.FindEntityByPath("/Hud/Panel/Slider").GetUUID().ToString()),
+				std::format("{} UiSlider.Handle", scene.FindEntityByPath("/Hud/Panel/Slider").GetUUID().ToString()),
+			};
+			std::ranges::sort(expected);
+			CHECK(found == expected);
+		}
+
 		TEST_CASE("ProjectValidator: GetCodes lists the M6 asset codes")
 		{
 			const std::span<const std::string_view> codes = ProjectValidator::GetCodes();

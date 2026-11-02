@@ -212,6 +212,29 @@ namespace Engine {
 		std::string Locale;
 	};
 
+	// Registry struct "UiSettings" (§6.1 "Ui", §5.7 UiInput; M22 C22.2, Docs/Decisions/0033-m22-contract.md decision 30): the
+	// keyboard and gamepad navigation of the game's UI. Navigation false: focus moves only by the pointer and Ui.SetFocus,
+	// and none of the bindings below, nor the stick, is read. Each list holds control names in an InputAction's Bindings
+	// form ("Key.Enter", "Gamepad.South"; a gamepad control counts on any connected gamepad), keys and gamepad buttons only
+	// (no mouse button or axis), unique, at most 16: a command is given when one of its controls is pressed in the tick's
+	// step view. Next pressed with Key.LeftShift or Key.RightShift down is Previous. StickNavigation lets the left stick of a
+	// connected gamepad step the four directions (Scene/UiInteraction.h's UiStickDirection). A control name that does not
+	// parse (InputBinding::Parse) or names a mouse control or an axis fails a play session's start with Validation located
+	// at /Ui/<list>/<index>, as an unknown action binding fails it at /Input/Actions. Registered by stream A with its
+	// canonical fixtures, after Localization (ADR 0028's phase-2 ledger: M22's sections after Testing in landing order).
+	struct UiSettings
+	{
+		bool Navigation = true;
+		std::vector<std::string> Submit = { "Key.Enter", "Key.Space", "Gamepad.South" };
+		std::vector<std::string> Cancel = { "Key.Escape", "Gamepad.East" };
+		std::vector<std::string> Up = { "Key.Up", "Gamepad.DPadUp" };
+		std::vector<std::string> Down = { "Key.Down", "Gamepad.DPadDown" };
+		std::vector<std::string> Left = { "Key.Left", "Gamepad.DPadLeft" };
+		std::vector<std::string> Right = { "Key.Right", "Gamepad.DPadRight" };
+		std::vector<std::string> Next = { "Key.Tab" };
+		bool StickNavigation = true;
+	};
+
 	// Registry struct "ProjectSettings": the whole .eproj below its "Format"/"Version" header (§6.1). Name is the game's
 	// display name (exported games use it for their user-data folder, §14.1); StartScene is the project-relative scene the
 	// game starts with (empty: none yet).
@@ -228,6 +251,7 @@ namespace Engine {
 		ExportSettings Export;
 		TestingSettings Testing;
 		LocalizationSettings Localization; // M22: after Testing (ADR 0028's phase-2 ledger)
+		UiSettings Ui;                     // M22 C22.2: after Localization (registered by stream A, decision 30)
 	};
 
 	// Registers the enums and structs above (InputActionType, TestPauseOnError, TestIsolation, TestMode, WindowSettings,

@@ -29,6 +29,16 @@
 //   - Clip: the intersection of the ComputeUiClipRect of every ancestor element with ClipChildren (the element's own flag
 //     clips only its descendants).
 //   - Visible: the element's rectangle, intersected with its clip and with the scene image, covers a pixel.
+// The widgets' rules (C22.2, Docs/Decisions/0033-m22-contract.md decision 26; stream B the slider and toggle rules, stream C
+// the scroll view's), each applied only to a part that is an element below its widget in the same canvas:
+//   - UiSlider: its Fill's and Handle's anchors along its Direction follow its value (UiSliderComponent.h), in place of
+//     their own, before they are placed in their parent element.
+//   - UiToggle: while IsOn is false, its Graphic element and that element's subtree are Hidden (and so not Visible): laid
+//     out as usual, neither drawn, hit nor focusable.
+//   - UiScrollView: it clips its descendants as ClipChildren does; its Content is moved, with its subtree, by -offset
+//     canvas units (times Scale in scene pixels) after it is placed, offset being ScrollPosition clamped to the content's
+//     overflow (UiScrollViewComponent.h, ClampUiScrollPosition in Scene/UiWidgets.h; the sizes are the scroll view's and
+//     the content's laid-out sizes in canvas units). With PixelSnap the moved corners are snapped again.
 // Only IEEE-exact operations (+, -, *, /, comparisons, floor, ceil) in float on the components' values: a deterministic scene gives
 // the identical table in every configuration (Roadmap M22's acceptance, "UI layout tables are byte-identical across
 // configurations"). No asset access: rectangles never follow their content (decision 6), so layout needs no font.
@@ -50,7 +60,9 @@ namespace Engine {
 		glm::vec2 Max = glm::vec2(0.0f);
 		bool Clipped = false; // Clip holds; false: no clipping ancestor
 		UiClipRect Clip{};
-		bool Visible = false; // its rectangle, clipped and inside the scene image, covers a pixel
+		bool Visible = false; // its rectangle, clipped and inside the scene image, covers a pixel, and it is not Hidden
+		// C22.2 (decision 26): inside an off toggle's Graphic subtree, so neither drawn, hit nor focusable (never Visible).
+		bool Hidden = false;
 
 		bool operator==(const UiLayoutNode&) const = default;
 	};

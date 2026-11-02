@@ -69,7 +69,16 @@ namespace Engine {
 								 //    last update (automation at the safe point); then PreviousWorldTransform <- WorldTransform
 								 //    for every entity and InterpolationResetTag cleared (§5.2)
 		ApplyInput,              // 1: the events queued for this tick, then the step view latched (PlayInput::ApplyTick)
+		UiInput,                 // 1b: UiSystem::ProcessInput with the step view's pointer, wheel, stick and the Ui settings'
+								 //     navigation bindings, against the current UI layout: focus, hover, press, widgets and the
+								 //     UI events queued (M22 C22.2, Docs/Decisions/0033-m22-contract.md decision 24); in Play and
+								 //     Simulate, with or without a canvas (without one it reads no input and keeps the interaction
+								 //     state empty). C22.3's TextLatch takes 1a, between ApplyInput and it
 		StartFlush,              // 2: OnStart of instances created since the last flush, canonical order (M13; empty)
+		UiEvents,                // 2a: the queued UI events delivered to their callbacks, bubbling (ScriptEngine::DispatchUiEvents;
+								 //     M22 C22.2, decision 27): after OnStart, so a new instance starts before its first UI
+								 //     callback, and before FixedUpdate, which sees the interaction; Play only (Simulate drops
+								 //     the queue after UiInput)
 		FixedUpdate,             // 3: script OnFixedUpdate, (ExecutionOrder, canonical) order (M13; empty)
 		Tasks,                   // 4: Task.Wait*/Task.Delay threads due at this tick, then the test case thread (M13; empty)
 		NativeStep,              // 4a: the native module's systems (NativeWorld::Step; M19, Docs/Decisions/0030-m19-contract.md
@@ -155,9 +164,9 @@ namespace Engine {
 	// scene during FixedUpdate, Update, LateUpdate and PhysicsStep to exercise phase-dependent behavior
 	// ("Interpolation: script-moved entities interpolate; frame-phase writes, teleports and new entities do not").
 	// Production code installs none. Simulate mode skips the script and audio
-	// phases (StartFlush, FixedUpdate, Tasks, FrameStartFlush, Update, LateUpdate, AudioUpdate) entirely, so they are not
-	// reported there. NativeStep (M19) runs, and is reported, only in Play mode with a native module. UiLayout and
-	// FrameUiLayout (M22) run, and are reported, in both modes, with or without a canvas.
+	// phases (StartFlush, UiEvents, FixedUpdate, Tasks, FrameStartFlush, Update, LateUpdate, AudioUpdate) entirely, so they are
+	// not reported there. NativeStep (M19) runs, and is reported, only in Play mode with a native module. UiLayout and
+	// FrameUiLayout (M22), and UiInput (M22 C22.2), run, and are reported, in both modes, with or without a canvas.
 	class IPlaySessionObserver
 	{
 	public:
@@ -464,7 +473,12 @@ namespace Engine {
 		// current one for the play scene, and W22.2's UiInput hit-tests it. Valid for the session's lifetime. Activate ends,
 		// and a Scene.Load or Scene.Reload's replacement of the scene at the end of a frame ends, after the scene's startup
 		// callbacks, with UiSystem::LayoutStep of the current scene (not a phase: no observer reports it), so the current
-		// layout always describes the current scene, before its first step included.
+		// layout always describes the current scene, before its first step included. C22.2 (decisions 24, 27 and 29): its
+		// interaction state, which the UiInput phase updates from the step view and the project's Ui settings (and keeps
+		// empty while the scene has no canvas), the UiEvents phase's queue, and the ui block of ComputeStateHash; a scene
+		// replacement resets the interaction (UiSystem::ResetInteraction) before its layout. The session's script host
+		// returns it (IScriptHost::GetUi) to the Ui script module, and its game view and ExtractView pass its interaction
+		// state to extraction for the widgets' tints (RenderExtractionRequest::UiInteraction).
 		[[nodiscard]] UiSystem& GetUi();
 		[[nodiscard]] const UiSystem& GetUi() const;
 
@@ -479,7 +493,13 @@ namespace Engine {
 		// Equal for equal sessions in every configuration (§1.3); play.state, play.step and input.replay report it as 16
 		// lowercase hex digits. Returns 0 only when the scene cannot be serialized (logged). M19 (decision 28): the native
 		// block follows the physics block, NativeWorld::AppendStateHash (the module's resources; native components are in the
-		// scene's serialization), and is empty without a native module, so a session without one hashes as before.
+		// scene's serialization), and is empty without a native module, so a session without one hashes as before. M22 (C22.2,
+		// Docs/Decisions/0033-m22-contract.md decision 29): the ui block follows (ADR 0028's phase-2 ledger: after M21's
+		// physics2d block, which a merge inserts before it), UiSystem::AppendStateHash, the UI interaction state (focus,
+		// hover, press, drag, the stick, the pointer over the UI) and the UI events still queued; it is empty while both
+		// are, which the UiInput phase keeps so in every scene without a canvas, so such a scene hashes as before, whatever
+		// its input. What interaction writes (a toggle's IsOn, a slider's Value, a scroll view's ScrollPosition) is in the
+		// scene's serialization.
 		[[nodiscard]] uint64_t ComputeStateHash() const;
 
 		// The entity cap (see the class comment).

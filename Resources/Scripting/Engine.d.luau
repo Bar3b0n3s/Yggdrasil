@@ -191,6 +191,9 @@ export type UiScaleMode = "ConstantPixelSize" | "MatchHeight"
 -- Where a UI text block sits in its element's rectangle.
 export type UiTextVerticalAlignment = "Top" | "Middle" | "Bottom"
 
+-- The UI widget ui.createWidget builds.
+export type UiWidgetKind = "Canvas" | "Panel" | "Image" | "Text" | "Button" | "Toggle" | "Slider" | "ScrollView"
+
 -- What project.validate checks.
 export type ValidationScope = "Project" | "Scene"
 
@@ -483,6 +486,10 @@ declare extern type Entity with
 	function GetComponent(self, name: "UiText"): UiText?
 	function GetComponent(self, name: "UiLayout"): UiLayout?
 	function GetComponent(self, name: "UiLayoutElement"): UiLayoutElement?
+	function GetComponent(self, name: "UiButton"): UiButton?
+	function GetComponent(self, name: "UiToggle"): UiToggle?
+	function GetComponent(self, name: "UiSlider"): UiSlider?
+	function GetComponent(self, name: "UiScrollView"): UiScrollView?
 	-- Get the parent, or nil for a root. [All modes; Runtime|Test; pure/read]
 	GetParent: (self: Entity) -> Entity?
 	-- Get the instance of the first script slot whose behaviour has this name, or of the first slot without a name; nil when there is none. [All modes; Runtime|Test; pure/read]
@@ -533,6 +540,8 @@ declare extern type Entity with
 	Text: Text?
 	-- The entity's Transform component, which every entity has. [All modes; Runtime|Test; pure/read]
 	Transform: Transform
+	-- The entity's UiButton component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	UiButton: UiButton?
 	-- The entity's UiCanvas component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	UiCanvas: UiCanvas?
 	-- The entity's UiImage component, or nil when absent. [All modes; Runtime|Test; pure/read]
@@ -543,8 +552,14 @@ declare extern type Entity with
 	UiLayoutElement: UiLayoutElement?
 	-- The entity's UiRect component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	UiRect: UiRect?
+	-- The entity's UiScrollView component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	UiScrollView: UiScrollView?
+	-- The entity's UiSlider component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	UiSlider: UiSlider?
 	-- The entity's UiText component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	UiText: UiText?
+	-- The entity's UiToggle component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	UiToggle: UiToggle?
 	-- Compare UUIDs; equality does not authorize access to an expired scene. [All modes; Runtime|Test; pure/read]
 	__eq: (self: Entity, other: Entity) -> boolean
 end
@@ -859,6 +874,14 @@ declare extern type Transform with
 	WorldScale: vector
 end
 
+-- A UI button: a pointer click or Submit while focused raises OnUiClick.
+declare extern type UiButton with
+	-- Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. [All modes; Runtime|Test; pure/read; setter mutates]
+	Focusable: boolean
+	-- Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. [All modes; Runtime|Test; pure/read; setter mutates]
+	Interactable: boolean
+end
+
 -- The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text.
 declare extern type UiCanvas with
 	-- Rounds every element's corners to whole scene pixels, so images and clips land on pixel corners. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -939,6 +962,48 @@ declare extern type UiRect with
 	Size: vector
 end
 
+-- A UI scroll view: clips its descendants and moves its Content by the scroll position, which the wheel, a drag and focus change.
+declare extern type UiScrollView with
+	-- The UI element below the scroll view that scrolls; null scrolls nothing. [All modes; Runtime|Test; pure/read; setter mutates]
+	Content: Entity?
+	-- Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. [All modes; Runtime|Test; pure/read; setter mutates]
+	Focusable: boolean
+	-- Whether the content scrolls along x. [All modes; Runtime|Test; pure/read; setter mutates]
+	Horizontal: boolean
+	-- Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. [All modes; Runtime|Test; pure/read; setter mutates]
+	Interactable: boolean
+	-- Canvas units the content is moved left (x) and up (y), read clamped to the content's overflow. [All modes; Runtime|Test; pure/read; setter mutates]
+	ScrollPosition: vector
+	-- Canvas units per wheel step and per navigation press. [All modes; Runtime|Test; pure/read; setter mutates]
+	ScrollStep: number
+	-- Whether the content scrolls along y. [All modes; Runtime|Test; pure/read; setter mutates]
+	Vertical: boolean
+end
+
+-- A UI slider: the pointer drags its value between Min and Max and the directions along it step it, raising OnUiValueChanged.
+declare extern type UiSlider with
+	-- Horizontal puts Min at the left edge; Vertical puts it at the bottom edge. [All modes; Runtime|Test; pure/read; setter mutates]
+	Direction: UiLayoutDirection
+	-- A UI element below the slider stretched from the Min edge to the value; null for none. [All modes; Runtime|Test; pure/read; setter mutates]
+	Fill: Entity?
+	-- Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. [All modes; Runtime|Test; pure/read; setter mutates]
+	Focusable: boolean
+	-- A UI element below the slider placed at the value; null for none. [All modes; Runtime|Test; pure/read; setter mutates]
+	Handle: Entity?
+	-- Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. [All modes; Runtime|Test; pure/read; setter mutates]
+	Interactable: boolean
+	-- The value at the end edge (right, or top when Vertical). [All modes; Runtime|Test; pure/read; setter mutates]
+	Max: number
+	-- The value at the start edge (left, or bottom when Vertical); below Max. [All modes; Runtime|Test; pure/read; setter mutates]
+	Min: number
+	-- The change per navigation press along the slider; 0 is a tenth of the range. With WholeNumbers it is rounded to a whole number of at least 1. [All modes; Runtime|Test; pure/read; setter mutates]
+	Step: number
+	-- The value, read clamped to Min and Max (and rounded with WholeNumbers). [All modes; Runtime|Test; pure/read; setter mutates]
+	Value: number
+	-- Whether the value is rounded to whole numbers. [All modes; Runtime|Test; pure/read; setter mutates]
+	WholeNumbers: boolean
+end
+
 -- Draws text in a UI element's rectangle, wrapped and aligned in it.
 declare extern type UiText with
 	-- How each line is aligned within the rectangle's width. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -957,6 +1022,18 @@ declare extern type UiText with
 	VerticalAlignment: UiTextVerticalAlignment
 	-- Whether lines break at spaces to fit the rectangle's width. [All modes; Runtime|Test; pure/read; setter mutates]
 	Wrap: boolean
+end
+
+-- A UI toggle: a pointer click or Submit while focused flips IsOn and raises OnUiValueChanged; Graphic shows while it is on.
+declare extern type UiToggle with
+	-- Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. [All modes; Runtime|Test; pure/read; setter mutates]
+	Focusable: boolean
+	-- A UI element below the toggle (its check mark) that is drawn and hit only while the toggle is on; null for none. [All modes; Runtime|Test; pure/read; setter mutates]
+	Graphic: Entity?
+	-- Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. [All modes; Runtime|Test; pure/read; setter mutates]
+	Interactable: boolean
+	-- Whether the toggle is on. [All modes; Runtime|Test; pure/read; setter mutates]
+	IsOn: boolean
 end
 
 -- Application identity, window state and deferred quit requests.

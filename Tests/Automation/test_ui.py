@@ -81,5 +81,88 @@ class UiTreeTests(AutomationTestCase):
         self.assertEqual(game.wait(), EXIT_SUCCESS, game.output())
 
 
+CLICK_COUNTER = """local T = {}
+function T:OnCreate() self.Clicks = 0 end
+function T:OnUiClick(element) self.Clicks += 1 self.Last = element.Name end
+return Script.Define("ClickCounter", T)
+"""
+
+
+class UiInteractionTests(AutomationTestCase):
+    """The UI's interaction through automation (Docs/Decisions/0033-m22-contract.md decisions 24, 27 and 31)."""
+
+    @unittest.skip("contract stub: Docs/Decisions/0033-m22-contract.md decisions 24, 27 and 31 (streams A and B)")
+    def test_a_click_through_play_step_input_reaches_on_ui_click_and_ui_tree_reports_the_state(self) -> None:
+        # A press and release injected through play.step over a button: the click bubbles from the button to the
+        # canvas's behaviour in the next UiEvents phase, and ui.tree reports the play session's hover and focus.
+        client, _ = self.open_editor_with_scene()
+        client.call("script.write", {"path": "Assets/Scripts/ClickCounter.luau", "source": CLICK_COUNTER})
+        button_rect = {"AnchorMin": [0, 0], "AnchorMax": [0, 0], "Pivot": [0, 0], "Position": [10, 10],
+                       "Size": [100, 40]}
+        client.call("edit.batch", {"label": "Ui", "ops": [
+            {"method": "entity.create", "params": {"name": "Hud", "components": {
+                "UiCanvas": {}, "Script": {"Scripts": [{"Script": "Assets/Scripts/ClickCounter.luau"}]}}}},
+            {"method": "entity.create", "params": {"name": "Play", "parent": {"$ref": "0.entity.id"}, "components": {
+                "UiRect": button_rect, "UiImage": {}, "UiButton": {}}}},
+        ]})
+        client.call("play.start", {"lockstep": True})
+        press = {"type": "mouseButton", "button": "Left", "state": "tap", "position": [20, 20]}
+        client.call("play.step", {"ticks": 3, "render": "none", "input": [press]})
+        clicks = client.call("script.eval", {"context": "play", "entity": "/Hud",
+                                             "code": "return {self.Clicks, self.Last}"})
+        self.assertEqual(clicks["value"], [1, "Play"])
+        played = client.call("ui.tree", {"format": "Json", "target": "play"})
+        button = next(element for element in played["elements"] if element["name"] == "Play")
+        self.assertEqual(button["widget"], "Button")
+        self.assertTrue(button["hovered"])
+        self.assertTrue(button["focused"])
+        self.assertFalse(button["pressed"])
+        client.call("play.stop")
+
+    @unittest.skip("contract stub: Docs/Decisions/0033-m22-contract.md decisions 24 and 31 (stream A)")
+    def test_ui_tree_reports_the_interaction_in_the_runtime(self) -> None:
+        # The exported game's Runtime fills ui.tree's interaction members from its own play session: a button the held
+        # pointer pressed is its widget, interactable, hovered, focused and pressed; the release leaves it hovered and
+        # focused.
+        if not self.require_gpu():
+            return
+        client = self.connect(self.start_editor())
+        self.create_project(client, TINY_GAME_NAME)
+        build_tiny_game(client)
+        create_ui(client)
+        play_rect = {"AnchorMin": [0, 0], "AnchorMax": [0, 0], "Pivot": [0, 0], "Position": [60, 5], "Size": [40, 20]}
+        client.call("entity.create", {"name": "Play", "parent": "/Hud", "components": {
+            "UiRect": play_rect, "UiImage": {}, "UiButton": {}}})
+        client.call("scene.save")
+        executable = exported_executable(export_tiny_game(client))
+        client.call("session.shutdown")
+        self.editors[-1].wait()
+
+        arguments = ["--headless", "--automation", "--paused", *GPU_EDITOR_ARGUMENTS]
+        game = engine_client.launch_editor(executable, arguments, self.directory / "Interacted", TINY_GAME_NAME)
+        self.editors.append(game)
+        runtime = self.connect(game)
+        # The canvas's scale is 2: the button covers scene pixels (120, 10) to (200, 50).
+        runtime.call("input.inject", {"events": [
+            {"type": "mouseButton", "button": "Left", "state": "down", "position": [150, 30]}]})
+        runtime.call("play.step", {"ticks": 1, "render": "none"})
+        held = next(element for element in runtime.call("ui.tree", {"format": "Json"})["elements"]
+                    if element["name"] == "Play")
+        self.assertEqual(held["widget"], "Button")
+        self.assertTrue(held["interactable"])
+        self.assertTrue(held["hovered"])
+        self.assertTrue(held["focused"])
+        self.assertTrue(held["pressed"])
+        runtime.call("input.inject", {"events": [{"type": "mouseButton", "button": "Left", "state": "up"}]})
+        runtime.call("play.step", {"ticks": 1, "render": "none"})
+        released = next(element for element in runtime.call("ui.tree", {"format": "Json"})["elements"]
+                        if element["name"] == "Play")
+        self.assertTrue(released["hovered"])
+        self.assertTrue(released["focused"])
+        self.assertFalse(released["pressed"])
+        runtime.call("session.shutdown")
+        self.assertEqual(game.wait(), EXIT_SUCCESS, game.output())
+
+
 if __name__ == "__main__":
     unittest.main()

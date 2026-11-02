@@ -2056,7 +2056,7 @@ All modes; Runtime|Test; pure/read.
 
 ### Entity.GetComponent
 
-`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "UiCanvas") -> UiCanvas?) & ((self: Entity, name: "UiRect") -> UiRect?) & ((self: Entity, name: "UiImage") -> UiImage?) & ((self: Entity, name: "UiText") -> UiText?) & ((self: Entity, name: "UiLayout") -> UiLayout?) & ((self: Entity, name: "UiLayoutElement") -> UiLayoutElement?)`
+`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "UiCanvas") -> UiCanvas?) & ((self: Entity, name: "UiRect") -> UiRect?) & ((self: Entity, name: "UiImage") -> UiImage?) & ((self: Entity, name: "UiText") -> UiText?) & ((self: Entity, name: "UiLayout") -> UiLayout?) & ((self: Entity, name: "UiLayoutElement") -> UiLayoutElement?) & ((self: Entity, name: "UiButton") -> UiButton?) & ((self: Entity, name: "UiToggle") -> UiToggle?) & ((self: Entity, name: "UiSlider") -> UiSlider?) & ((self: Entity, name: "UiScrollView") -> UiScrollView?)`
 
 Get a component proxy, or nil when absent.
 
@@ -2262,6 +2262,14 @@ The entity's Transform component, which every entity has.
 
 All modes; Runtime|Test; pure/read.
 
+### Entity.UiButton
+
+`UiButton?`
+
+The entity's UiButton component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
 ### Entity.UiCanvas
 
 `UiCanvas?`
@@ -2302,11 +2310,35 @@ The entity's UiRect component, or nil when absent.
 
 All modes; Runtime|Test; pure/read.
 
+### Entity.UiScrollView
+
+`UiScrollView?`
+
+The entity's UiScrollView component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.UiSlider
+
+`UiSlider?`
+
+The entity's UiSlider component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
 ### Entity.UiText
 
 `UiText?`
 
 The entity's UiText component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.UiToggle
+
+`UiToggle?`
+
+The entity's UiToggle component, or nil when absent.
 
 All modes; Runtime|Test; pure/read.
 
@@ -3358,6 +3390,26 @@ Approximate scale in world space (read-only: a sheared parent chain has no exact
 
 All modes; Runtime|Test; pure/read.
 
+## UiButton
+
+A UI button: a pointer click or Submit while focused raises OnUiClick.
+
+### UiButton.Focusable
+
+`boolean`
+
+Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiButton.Interactable
+
+`boolean`
+
+Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
 ## UiCanvas
 
 The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text.
@@ -3618,6 +3670,150 @@ The element's size in canvas units, added to the anchor rectangle's size (negati
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
+## UiScrollView
+
+A UI scroll view: clips its descendants and moves its Content by the scroll position, which the wheel, a drag and focus change.
+
+### UiScrollView.Content
+
+`Entity?`
+
+The UI element below the scroll view that scrolls; null scrolls nothing.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiScrollView.Focusable
+
+`boolean`
+
+Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiScrollView.Horizontal
+
+`boolean`
+
+Whether the content scrolls along x.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiScrollView.Interactable
+
+`boolean`
+
+Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiScrollView.ScrollPosition
+
+`vector`
+
+Canvas units the content is moved left (x) and up (y), read clamped to the content's overflow.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiScrollView.ScrollStep
+
+`number`
+
+Canvas units per wheel step and per navigation press.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiScrollView.Vertical
+
+`boolean`
+
+Whether the content scrolls along y.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## UiSlider
+
+A UI slider: the pointer drags its value between Min and Max and the directions along it step it, raising OnUiValueChanged.
+
+### UiSlider.Direction
+
+`UiLayoutDirection`
+
+Horizontal puts Min at the left edge; Vertical puts it at the bottom edge.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiSlider.Fill
+
+`Entity?`
+
+A UI element below the slider stretched from the Min edge to the value; null for none.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiSlider.Focusable
+
+`boolean`
+
+Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiSlider.Handle
+
+`Entity?`
+
+A UI element below the slider placed at the value; null for none.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiSlider.Interactable
+
+`boolean`
+
+Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiSlider.Max
+
+`number`
+
+The value at the end edge (right, or top when Vertical).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiSlider.Min
+
+`number`
+
+The value at the start edge (left, or bottom when Vertical); below Max.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiSlider.Step
+
+`number`
+
+The change per navigation press along the slider; 0 is a tenth of the range. With WholeNumbers it is rounded to a whole number of at least 1.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiSlider.Value
+
+`number`
+
+The value, read clamped to Min and Max (and rounded with WholeNumbers).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiSlider.WholeNumbers
+
+`boolean`
+
+Whether the value is rounded to whole numbers.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
 ## UiText
 
 Draws text in a UI element's rectangle, wrapped and aligned in it.
@@ -3683,6 +3879,42 @@ All modes; Runtime|Test; pure/read; setter mutates.
 `boolean`
 
 Whether lines break at spaces to fit the rectangle's width.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## UiToggle
+
+A UI toggle: a pointer click or Submit while focused flips IsOn and raises OnUiValueChanged; Graphic shows while it is on.
+
+### UiToggle.Focusable
+
+`boolean`
+
+Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiToggle.Graphic
+
+`Entity?`
+
+A UI element below the toggle (its check mark) that is drawn and hit only while the toggle is on; null for none.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiToggle.Interactable
+
+`boolean`
+
+Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiToggle.IsOn
+
+`boolean`
+
+Whether the toggle is on.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -4699,6 +4931,26 @@ Where a UI text block sits in its element's rectangle.
 - `Middle`: The block is centred vertically in the rectangle.
 
 - `Bottom`: The last line ends at the rectangle's bottom edge.
+
+## UiWidgetKind
+
+The UI widget ui.createWidget builds.
+
+- `Canvas`: A UI canvas, the root of a UI tree.
+
+- `Panel`: An image stretched over its parent: a background for a group of elements.
+
+- `Image`: A 100 by 100 image.
+
+- `Text`: A centred text.
+
+- `Button`: A button with an image and a Label child.
+
+- `Toggle`: A toggle box with a Check child that shows while it is on, and a Label child.
+
+- `Slider`: A horizontal slider with Fill and Handle children.
+
+- `ScrollView`: A vertical scroll view whose Content child stacks its children.
 
 ## ValidationScope
 
