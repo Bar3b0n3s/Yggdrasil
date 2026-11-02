@@ -8,6 +8,7 @@
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Random.h"
 #include "Engine/Core/Utf8.h"
+#include "Engine/Platform/ThreadClock.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/Components/BuiltinComponents.h"
 #include "Engine/Scene/Entity.h"
@@ -711,6 +712,11 @@ namespace Engine {
 		auto sandbox = CreateScope<Sandbox>(ConstructionKey{});
 		auto& state = *sandbox->m_State;
 		state.Specification = specification;
+		// The callback budget counts the VM thread's CPU time (§11.1, Docs/Decisions/0039-script-budget-cpu-time.md):
+		// ClockSeconds (lua_clock) is every interrupt's fast path, and the CPU clock is sampled only once that deadline
+		// passes. A supplied ClockSeconds without a CpuClockSeconds stays the budget's only clock (SandboxSpecification).
+		if (!specification.ClockSeconds || specification.CpuClockSeconds)
+			state.Watchdog.SetCpuClock(specification.CpuClockSeconds ? specification.CpuClockSeconds : std::function<double()>(&ThreadClock::GetCpuSeconds));
 		state.Generation = identity;
 		state.Budget = specification.Mode == SandboxMode::LoadTime ? LoadTimeVm::RequireGraphBudgetMs : budget;
 		state.Allocator = std::move(allocator);

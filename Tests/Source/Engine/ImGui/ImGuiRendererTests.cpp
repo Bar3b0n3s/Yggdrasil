@@ -2,6 +2,7 @@
 
 #include "Engine/ImGui/ImGuiRenderer.h"
 
+#include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Graphics/FramePacer.h"
 #include "Engine/Graphics/GpuRecreation.h"
@@ -13,13 +14,19 @@
 #include "Support/DeviceLossTest.h"
 #include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
+#include "Support/TestData.h"
 
 #include <imgui.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -230,6 +237,97 @@ namespace Engine {
 		{
 			return texture->GetTexID() != ImTextureID_Invalid;
 		}));
+	}
+
+	// The editor's font, the committed Inter-Regular.ttf (Resources/Fonts). Its glyphs advance by fractions of a pixel, unlike
+	// Dear ImGui's pixel-snapped default font, so their quads sit between pixels and bilinear sampling reads one texel past
+	// each glyph's rectangle in the atlas.
+	static Buffer ReadEditorFont()
+	{
+		Result<Buffer> font = FileSystem::ReadFile(Test::GetRepositoryRoot() / "Resources/Fonts/Inter-Regular.ttf");
+		REQUIRE_MESSAGE(font.has_value(), font.error().ToString());
+		return std::move(*font);
+	}
+
+	// Adds `font` at the editor's 15 px to the current context's atlas, which owns a copy and frees it with Dear ImGui's
+	// allocator.
+	static void AddFont(const Buffer& font)
+	{
+		void* data = ImGui::MemAlloc(font.size());
+		REQUIRE(data != nullptr);
+		std::memcpy(data, font.data(), font.size());
+		REQUIRE(ImGui::GetIO().Fonts->AddFontFromMemoryTTF(data, static_cast<int>(font.size()), 15.0f) != nullptr);
+	}
+
+	// Inside a frame: packs the glyphs of `history` into the font atlas in order, as drawing that text first would.
+	static void LoadGlyphs(std::string_view history)
+	{
+		ImFontBaked* baked = ImGui::GetFontBaked();
+		for (const char character : history)
+			static_cast<void>(baked->FindGlyph(static_cast<ImWchar>(character)));
+	}
+
+	// Inside a frame: the column of `character`'s rectangle in the font atlas, in texels.
+	static int GetAtlasColumn(char character)
+	{
+		const ImFontGlyph* glyph = ImGui::GetFontBaked()->FindGlyph(static_cast<ImWchar>(character));
+		return static_cast<int>(std::lround(glyph->U0 * static_cast<float>(ImGui::GetIO().Fonts->TexData->Width)));
+	}
+
+	// The shortest prefix of `pool` after which an atlas of `font` packs '0' at its left edge (column 0), found on the CPU;
+	// none when no prefix does.
+	static std::optional<std::string> FindHistoryPackingZeroAtEdge(const Buffer& font, std::string_view pool)
+	{
+		for (size_t length = 1; length <= pool.size(); ++length)
+		{
+			ImGuiTestContext context;
+			ImGui::GetIO().BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
+			AddFont(font);
+			ImGui::NewFrame();
+			LoadGlyphs(pool.substr(0, length));
+			LoadGlyphs("0");
+			const bool isAtEdge = GetAtlasColumn('0') == 0;
+			ImGui::EndFrame();
+			if (isAtEdge)
+				return std::string(pool.substr(0, length));
+		}
+		return std::nullopt;
+	}
+
+	// Draws a row of zeros in `font` after packing the glyphs of `history` into a new context's atlas, and reads the image
+	// back; `zeroColumn` receives the atlas column of '0'.
+	static Image DrawZerosAfter(Test::HeadlessGpuFixture& gpu, const Buffer& font, std::string_view history, int& zeroColumn)
+	{
+		GraphicsDevice& device = gpu.GetDevice();
+		ImGuiTestContext context;
+		AddFont(font);
+		Result<Scope<ImGuiRenderer>> created = ImGuiRenderer::Create(device, gpu.GetPipelines(), { .FramesInFlight = 1 });
+		REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+		ImGuiRenderer& renderer = **created;
+		Result<OffscreenTarget> target = OffscreenTarget::Create(device, { .Width = 256, .Height = 128 });
+		REQUIRE_MESSAGE(target.has_value(), target.error().ToString());
+		Result<nvrhi::CommandListHandle> commandList = device.CreateCommandList();
+		REQUIRE_MESSAGE(commandList.has_value(), commandList.error().ToString());
+
+		renderer.BeginFrame(0);
+		ImGui::NewFrame();
+		LoadGlyphs(history);
+		zeroColumn = GetAtlasColumn('0');
+		// '0' advances 7.82 px, so sixteen of them start at sixteen different fractions of a pixel.
+		ImGui::GetForegroundDrawList()->AddText(ImVec2(8.0f, 8.0f), IM_COL32_WHITE, "0000000000000000");
+		ImGui::Render();
+		(*commandList)->open();
+		target->Clear(**commandList);
+		const Status rendered = renderer.RenderDrawData(**commandList, *target->GetFramebuffer(), *ImGui::GetDrawData());
+		REQUIRE_MESSAGE(rendered.has_value(), rendered.error().ToString());
+		(*commandList)->close();
+		device.ExecuteCommandList(**commandList);
+		Readback readback(device);
+		Result<Image> image = readback.ReadTexture(*target->GetColorTexture());
+		REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
+		device.WaitForIdle();
+		renderer.DestroyTextures();
+		return std::move(*image);
 	}
 
 	TEST_SUITE("ImGui")
@@ -463,6 +561,49 @@ namespace Engine {
 			renderer.DestroyTextures();
 		}
 
+		TEST_CASE("ImGuiRenderer: text draws the same pixels wherever the font atlas packed its glyphs"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// Dear ImGui 1.92 packs a glyph when it is first drawn, so where it lands in the atlas depends on the text drawn
+			// before it, which differs between runs of the same UI (the editor's Console shows the process's whole log). A
+			// glyph quad's bilinear samples reach one texel past its rectangle: an empty packing gap inside the atlas, and the
+			// sampler's address mode at the atlas's left and top edges, which must read as the same transparent black (§8.11).
+			// The same glyphs packed in two orders, once with '0' inside the atlas and once at its left edge, draw the same zeros.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			const Buffer font = ReadEditorFont();
+			const std::optional<std::string> others =
+				FindHistoryPackingZeroAtEdge(font, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz123456789");
+			REQUIRE(others.has_value());
+			int insideColumn = -1;
+			const Image inside = DrawZerosAfter(gpu, font, "0" + *others, insideColumn);
+			int edgeColumn = -1;
+			const Image edge = DrawZerosAfter(gpu, font, *others + "0", edgeColumn);
+			REQUIRE(insideColumn > 0);
+			REQUIRE(edgeColumn == 0);
+			REQUIRE(inside.Format == edge.Format);
+			REQUIRE(inside.Width == edge.Width);
+			REQUIRE(inside.Height == edge.Height);
+			size_t differing = 0;
+			for (uint32_t y = 0; y < inside.Height; ++y)
+			{
+				const std::span<const std::byte> insideRow = inside.GetRow(y);
+				const std::span<const std::byte> edgeRow = edge.GetRow(y);
+				for (uint32_t x = 0; x < inside.Width; ++x)
+				{
+					const size_t offset = static_cast<size_t>(x) * 4;
+					if (std::ranges::equal(insideRow.subspan(offset, 4), edgeRow.subspan(offset, 4)))
+						continue;
+					if (differing++ < 8)
+					{
+						MESSAGE("pixel (", x, ", ", y, ") is ", DescribePixel(GetPixel(edge, x, y)), " with '0' at the atlas edge, ",
+							DescribePixel(GetPixel(inside, x, y)), " inside it");
+					}
+				}
+			}
+			CHECK(differing == 0);
+		}
+
 		TEST_CASE("ImGuiRenderer: the layout description matches the ImGui program")
 		{
 			const PipelineLayoutDescription description = ImGuiRenderer::GetLayoutDescription();
@@ -490,7 +631,7 @@ namespace Engine {
 			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M18 acceptance (C18.3, Docs/Decisions/0029-m18-contract.md decisions 32 and 33): the renderer registers itself
-			// ("ImGuiRenderer"); its Release drops its pipelines, buffers, sampler, binding sets and texture handles and marks
+			// ("ImGuiRenderer"); its Release drops its pipelines, buffers, samplers, binding sets and texture handles and marks
 			// ImGui's textures for creation, so the font atlas is uploaded again from ImGui's own pixels and the same frame draws
 			// the same image. The frame's own objects stand for an application's frame owner, which registers them.
 			Test::HeadlessGpuFixture gpu;

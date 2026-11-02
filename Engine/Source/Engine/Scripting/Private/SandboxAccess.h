@@ -133,9 +133,11 @@ namespace Engine {
 			[[nodiscard]] static ScriptApiRegistry* GetApi(Sandbox& sandbox);
 			[[nodiscard]] static Random* GetRandom(Sandbox& sandbox);
 			[[nodiscard]] static uint32_t GetBudgetMs(const Sandbox& sandbox); // effective runtime budget, or load-time 250
+			// The wall clock every interrupt compares (SandboxSpecification::ClockSeconds, or lua_clock); the watchdog samples
+			// the CPU clock the budget counts itself (ScriptWatchdog::SetCpuClock).
 			[[nodiscard]] static double SampleClock(Sandbox& sandbox);
 			// Bracket a host operation that runs no Luau inside a protected call (ScriptWatchdog::BeginHostTime and
-			// EndHostTime with SampleClock samples), so its wall time never counts toward the callback budget. No effect when
+			// EndHostTime with SampleClock samples), so its time never counts toward the callback budget. No effect when
 			// idle. ScriptEngine::RunHostOperation is the public form.
 			static void BeginHostTime(Sandbox& sandbox);
 			static void EndHostTime(Sandbox& sandbox);
