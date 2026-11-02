@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["UI_IMAGE_FRAME_OUT_OF_RANGE"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

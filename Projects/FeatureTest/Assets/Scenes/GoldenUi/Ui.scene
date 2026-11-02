@@ -1,0 +1,373 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Ui",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Camera": 1,
+		"UiCanvas": 1,
+		"UiRect": 1,
+		"UiImage": 1,
+		"UiText": 1,
+		"UiLayout": 1
+	},
+	"Entities": [
+		{
+			"ID": "a8ee8cca2692655c",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 60,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.1, 0.1, 0.12]
+				}
+			}
+		},
+		{
+			"ID": "408957556ab6af13",
+			"Name": "Canvas",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiCanvas": {
+					"SortOrder": 0,
+					"ScaleMode": "ConstantPixelSize",
+					"ScaleFactor": 1,
+					"ReferenceHeight": 1080,
+					"PixelSnap": true
+				}
+			}
+		},
+		{
+			"ID": "1f4dc28c8e3d691e",
+			"Name": "Exact",
+			"Parent": "408957556ab6af13",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [16, 16],
+					"Size": [16, 8],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": "3a6a7dcf5bbb0178",
+					"Frame": 0,
+					"Color": [1, 1, 1, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point"
+				}
+			}
+		},
+		{
+			"ID": "58292b5d3f11e8f9",
+			"Name": "Scaled",
+			"Parent": "408957556ab6af13",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [48, 16],
+					"Size": [64, 32],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": "3a6a7dcf5bbb0178",
+					"Frame": 0,
+					"Color": [1, 1, 1, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point"
+				}
+			}
+		},
+		{
+			"ID": "4caa94c02718fd32",
+			"Name": "Panel",
+			"Parent": "408957556ab6af13",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [16, 72],
+					"Size": [296, 136],
+					"ClipChildren": true
+				},
+				"UiImage": {
+					"Sheet": "3a6a7dcf5bbb0178",
+					"Frame": 1,
+					"Color": [1, 1, 1, 1],
+					"Type": "Sliced",
+					"BorderScale": 4,
+					"Filter": "Point"
+				}
+			}
+		},
+		{
+			"ID": "ec2895a515d1486c",
+			"Name": "Row",
+			"Parent": "4caa94c02718fd32",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [1, 0],
+					"Pivot": [0, 0],
+					"Position": [0, 16],
+					"Size": [0, 48],
+					"ClipChildren": false
+				},
+				"UiLayout": {
+					"Kind": "Stack",
+					"Direction": "Horizontal",
+					"Padding": {
+						"Left": 16,
+						"Top": 0,
+						"Right": 16,
+						"Bottom": 0
+					},
+					"Spacing": [8, 0],
+					"MainAlignment": "Start",
+					"CrossAlignment": "Stretch",
+					"Columns": 0,
+					"CellSize": [100, 100],
+					"Wrap": false
+				}
+			}
+		},
+		{
+			"ID": "2c573c9583a1b09e",
+			"Name": "Red",
+			"Parent": "ec2895a515d1486c",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0.5, 0.5],
+					"AnchorMax": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [64, 0],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.9, 0.2, 0.2, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point"
+				}
+			}
+		},
+		{
+			"ID": "d8c77f0d9c63179a",
+			"Name": "Green",
+			"Parent": "ec2895a515d1486c",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0.5, 0.5],
+					"AnchorMax": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [96, 0],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.2, 0.8, 0.3, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point"
+				}
+			}
+		},
+		{
+			"ID": "e6edd219160f765d",
+			"Name": "Blue",
+			"Parent": "ec2895a515d1486c",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0.5, 0.5],
+					"AnchorMax": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [160, 0],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.2, 0.4, 0.9, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point"
+				}
+			}
+		},
+		{
+			"ID": "446b76f391dbb5b6",
+			"Name": "Label",
+			"Parent": "4caa94c02718fd32",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 1],
+					"AnchorMax": [1, 1],
+					"Pivot": [0, 1],
+					"Position": [0, -8],
+					"Size": [0, 56],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "UI golden: a wrapped, centred label",
+					"Font": null,
+					"Size": 24,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Center",
+					"VerticalAlignment": "Middle",
+					"Wrap": true,
+					"LineSpacing": 1
+				}
+			}
+		},
+		{
+			"ID": "deaef7ddc0847050",
+			"Name": "Front",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiCanvas": {
+					"SortOrder": 1,
+					"ScaleMode": "ConstantPixelSize",
+					"ScaleFactor": 2,
+					"ReferenceHeight": 1080,
+					"PixelSnap": true
+				}
+			}
+		},
+		{
+			"ID": "12aee137bdd381d0",
+			"Name": "Title",
+			"Parent": "deaef7ddc0847050",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [1, 0],
+					"AnchorMax": [1, 0],
+					"Pivot": [1, 0],
+					"Position": [-8, 8],
+					"Size": [144, 40],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0, 0, 0, 0.5],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point"
+				},
+				"UiText": {
+					"Text": "Ui",
+					"Font": null,
+					"Size": 32,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Right",
+					"VerticalAlignment": "Bottom",
+					"Wrap": true,
+					"LineSpacing": 1
+				}
+			}
+		}
+	]
+}

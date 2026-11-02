@@ -88,5 +88,8 @@
 		"CaseTimeoutTicks": 1200,
 		"SuiteTickLimit": 72000,
 		"CoverageGates": true
+	},
+	"Localization": {
+		"Locale": "fr-CA"
 	}
 }

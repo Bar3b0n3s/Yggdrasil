@@ -12,11 +12,11 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 // ui.tree (M22, C22.1, R-UI-AUTO; Docs/Decisions/0033-m22-contract.md decision 8), in process through the editor's
 // AutomationFixture (§15.2); the Runtime's answer is tested against an exported build in Tests/Automation/test_ui.py
 // (UiTreeTests.test_ui_tree_works_in_the_runtime).
-// Skipped by the contract; stream E un-skips them.
 
 namespace Engine {
 
@@ -41,11 +41,38 @@ namespace Engine {
 					.has_value());
 		}
 
+		// The rectangle of the element `name` in ui.tree's JSON entries `elements`, or null.
+		Json FindUiTreeRect(const Json& elements, std::string_view name)
+		{
+			for (const Json& element : elements)
+			{
+				if (element["name"] == Json(name))
+					return element["rect"];
+			}
+			return Json();
+		}
+
+		// `text` split at its line feeds (the last line's feed ends it, so no empty line follows).
+		std::vector<std::string> SplitUiOutline(std::string_view text)
+		{
+			std::vector<std::string> lines;
+			size_t start = 0;
+			while (start < text.size())
+			{
+				const size_t end = text.find('\n', start);
+				lines.emplace_back(text.substr(start, end == std::string_view::npos ? std::string_view::npos : end - start));
+				if (end == std::string_view::npos)
+					break;
+				start = end + 1;
+			}
+			return lines;
+		}
+
 	}
 
 	TEST_SUITE("Automation")
 	{
-		TEST_CASE("UiMethods: ui.tree lists every canvas and element with its scene-pixel rectangle in draw order" * doctest::skip(true))
+		TEST_CASE("UiMethods: ui.tree lists every canvas and element with its scene-pixel rectangle in draw order")
 		{
 			Test::AutomationFixture setup("UiTree");
 			CreateUi(setup);
@@ -86,7 +113,11 @@ namespace Engine {
 			CHECK(outline.contains("(20,10 80x40)"));
 		}
 
-		TEST_CASE("UiMethods: ui.tree of the play scene reads the session's current layout" * doctest::skip(true))
+		// Decision 8: the play scene's rectangles are the session's current layout (UiSystem::GetLayout), which W22.2's UiInput
+		// hit-tests, not a layout made afresh: an edit of the play scene shows in ui.tree only once a step lays it out, while
+		// ui.tree with an explicit size lays the scene as it is now out at once (the W22.1 review: a lockstep session's view
+		// is the window size, so without the edit a fresh layout would give the same answer).
+		TEST_CASE("UiMethods: ui.tree of the play scene reads the session's current layout")
 		{
 			Test::AutomationFixture setup("UiTreePlay");
 			CreateUi(setup);
@@ -99,10 +130,116 @@ namespace Engine {
 			CHECK((*listed)["width"] == Json(settings.Window.Width));
 			CHECK((*listed)["height"] == Json(settings.Window.Height));
 			CHECK((*listed)["elements"].size() == 3);
+			const Json laidOut{ { "x", 20 }, { "y", 10 }, { "width", 80 }, { "height", 40 } };
+			CHECK(FindUiTreeRect((*listed)["elements"], "Panel") == laidOut);
+
+			// Move the panel in the play scene without stepping: the session's layout still holds the old rectangle.
+			const Result<Json> moved = setup.Call("entity.update",
+				ParseUiMethodJson(R"({"entity": "/Hud/Panel", "target": "play", "components": {"UiRect": {"AnchorMin": [0, 0], "AnchorMax": [0, 0],
+					"Pivot": [0, 0], "Position": [30, 5], "Size": [40, 20]}}})"));
+			REQUIRE_MESSAGE(moved.has_value(), moved.error().ToString());
+			const Json movedRect{ { "x", 60 }, { "y", 10 }, { "width", 80 }, { "height", 40 } };
+			listed = setup.Call("ui.tree", Json{ { "format", "Json" }, { "target", "play" } });
+			REQUIRE_MESSAGE(listed.has_value(), listed.error().ToString());
+			CHECK(FindUiTreeRect((*listed)["elements"], "Panel") == laidOut);
+			// An explicit size lays the play scene out as it is now.
+			const Result<Json> fresh = setup.Call("ui.tree",
+				Json{ { "format", "Json" }, { "target", "play" }, { "width", settings.Window.Width }, { "height", settings.Window.Height } });
+			REQUIRE_MESSAGE(fresh.has_value(), fresh.error().ToString());
+			CHECK(FindUiTreeRect((*fresh)["elements"], "Panel") == movedRect);
+			// The next step lays the moved panel out.
+			REQUIRE(setup.Call("play.step", Json{ { "ticks", 1 }, { "render", "none" } }).has_value());
+			listed = setup.Call("ui.tree", Json{ { "format", "Json" }, { "target", "play" } });
+			REQUIRE_MESSAGE(listed.has_value(), listed.error().ToString());
+			CHECK(FindUiTreeRect((*listed)["elements"], "Panel") == movedRect);
 			REQUIRE(setup.Call("play.stop", Json::object()).has_value());
 		}
 
-		TEST_CASE("UiMethods: ui.tree refuses a canvas reference without a UiCanvas, and one of width and height alone" * doctest::skip(true))
+		// Decision 8 and Architecture §13.5 (the W22.1 review): the clip, visibility and short component forms in both
+		// formats, and the text outline line by line: the header, the canvas line, the box-drawn prefixes of every depth and
+		// the clipped and hidden markers. At 200 x 100 scene pixels and scale 1: a panel that clips its children holds a
+		// nested pair inside its clip and an element outside it; a stack container places its cell; an element lies off the
+		// scene image.
+		TEST_CASE("UiMethods: ui.tree reports clips, hidden elements, sheets and containers in its JSON and its text outline")
+		{
+			Test::AutomationFixture setup("UiTreeOutline");
+			const Result<Json> sheet = setup.Call("asset.create",
+				ParseUiMethodJson(R"({"type": "SpriteSheet", "path": "Assets/Ui/Panels.spritesheet", "values": {"Frames": [
+					{"Rect": {"X": 0, "Y": 0, "Width": 4, "Height": 4}}, {"Rect": {"X": 4, "Y": 0, "Width": 4, "Height": 4}}]}})"));
+			REQUIRE_MESSAGE(sheet.has_value(), sheet.error().ToString());
+			const std::string sheetId = JsonReader((*sheet)["asset"]["id"]).ReadString().value_or(std::string());
+			REQUIRE(sheetId.size() == 16);
+			Json batch = ParseUiMethodJson(R"({"label":"Ui","ops":[
+				{"method":"entity.create","params":{"name":"Hud","components":{"UiCanvas":{}}}},
+				{"method":"entity.create","params":{"name":"Panel","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[10,10],"Size":[100,50],"ClipChildren":true},
+					"UiImage":{"Frame":1}}}},
+				{"method":"entity.create","params":{"name":"Inner","parent":{"$ref":"1.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[5,5],"Size":[20,10]}}}},
+				{"method":"entity.create","params":{"name":"Deep","parent":{"$ref":"2.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[1,1],"Size":[0,0]}}}},
+				{"method":"entity.create","params":{"name":"Outside","parent":{"$ref":"1.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[120,5],"Size":[20,10]}}}},
+				{"method":"entity.create","params":{"name":"Row","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[0,70],"Size":[60,20]},
+					"UiLayout":{"Kind":"Stack","Direction":"Horizontal"}}}},
+				{"method":"entity.create","params":{"name":"Cell","parent":{"$ref":"5.entity.id"},"components":{"UiRect":{"Size":[20,20]}}}},
+				{"method":"entity.create","params":{"name":"Offscreen","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[300,0],"Size":[10,10]}}}}]})");
+			batch["ops"][1]["params"]["components"]["UiImage"]["Sheet"] = sheetId;
+			REQUIRE(setup.Call("edit.batch", batch).has_value());
+
+			Result<Json> listed = setup.Call("ui.tree", Json{ { "format", "Json" }, { "width", 200 }, { "height", 100 } });
+			REQUIRE_MESSAGE(listed.has_value(), listed.error().ToString());
+			const Json& elements = (*listed)["elements"];
+			REQUIRE(elements.size() == 8);
+			std::vector<std::string> names;
+			std::vector<std::string> ids;
+			for (const Json& element : elements)
+			{
+				names.push_back(JsonReader(element["name"]).ReadString().value_or(std::string()));
+				ids.push_back(JsonReader(element["id"]).ReadString().value_or(std::string()).substr(0, 8));
+			}
+			CHECK(names == std::vector<std::string>{ "Hud", "Panel", "Inner", "Deep", "Outside", "Row", "Cell", "Offscreen" });
+			const Json panelClip{ { "x", 10 }, { "y", 10 }, { "width", 100 }, { "height", 50 } };
+			// The panel clips its descendants, not itself.
+			CHECK(elements[1]["clipped"] == Json(false));
+			CHECK(elements[1]["visible"] == Json(true));
+			for (const size_t inside : { 2u, 3u })
+			{
+				CAPTURE(inside);
+				CHECK(elements[inside]["clipped"] == Json(true));
+				CHECK(elements[inside]["clip"] == panelClip);
+				CHECK(elements[inside]["visible"] == Json(true));
+			}
+			CHECK(elements[3]["depth"] == Json(3));
+			// Outside the panel's clip: clipped and covering no pixel.
+			CHECK(elements[4]["rect"] == Json{ { "x", 130 }, { "y", 15 }, { "width", 20 }, { "height", 10 } });
+			CHECK(elements[4]["clipped"] == Json(true));
+			CHECK(elements[4]["clip"] == panelClip);
+			CHECK(elements[4]["visible"] == Json(false));
+			// The stack places its cell at the container's start; the element off the scene image covers no pixel.
+			CHECK(elements[6]["rect"] == Json{ { "x", 0 }, { "y", 70 }, { "width", 20 }, { "height", 20 } });
+			CHECK(elements[7]["clipped"] == Json(false));
+			CHECK(elements[7]["visible"] == Json(false));
+
+			Result<Json> text = setup.Call("ui.tree", Json{ { "width", 200 }, { "height", 100 } });
+			REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+			const std::vector<std::string> lines = SplitUiOutline(JsonReader((*text)["text"]).ReadString().value_or(std::string()));
+			REQUIRE(lines.size() == 9);
+			CHECK(lines[0].starts_with("Main.scene  rev "));
+			CHECK(lines[0].ends_with("  200x100 scene pixels  7 elements"));
+			CHECK(lines[1] == "Hud  " + ids[0] + "  UiCanvas(sort 0, scale 1)");
+			CHECK(lines[2] == "├─ Panel  " + ids[1] + "  UiImage(Ui/Panels.spritesheet#1)  (10,10 100x50)");
+			CHECK(lines[3] == "│  ├─ Inner  " + ids[2] + "  (15,15 20x10)  clipped");
+			CHECK(lines[4] == "│  │  └─ Deep  " + ids[3] + "  (15,15 20x10)  clipped");
+			CHECK(lines[5] == "│  └─ Outside  " + ids[4] + "  (130,15 20x10)  clipped  hidden");
+			CHECK(lines[6] == "├─ Row  " + ids[5] + "  UiLayout(Stack Horizontal)  (0,70 60x20)");
+			CHECK(lines[7] == "│  └─ Cell  " + ids[6] + "  (0,70 20x20)");
+			CHECK(lines[8] == "└─ Offscreen  " + ids[7] + "  (300,0 10x10)  hidden");
+		}
+
+		TEST_CASE("UiMethods: ui.tree refuses a canvas reference without a UiCanvas, and one of width and height alone")
 		{
 			Test::AutomationFixture setup("UiTreeErrors");
 			CreateUi(setup);

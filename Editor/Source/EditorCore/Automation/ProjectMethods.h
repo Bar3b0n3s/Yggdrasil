@@ -154,9 +154,10 @@ namespace Engine {
 	};
 
 	// project.upgrade {}: applies migrations and canonical re-saves to every project file: the .eproj and every .scene,
-	// .prefab, .meta, .material, .sfx, .replay and .spritesheet file under Assets/, each through its reader (with its
-	// migrations) and its canonical writer (§6, §13.5, §13.12; Docs/Decisions/0026-m16-contract.md decision 12; sprite sheets
-	// from M18, Docs/Decisions/0029-m18-contract.md decision 14); .material, .sfx, .replay and .spritesheet files are read
+	// .prefab, .meta, .material, .sfx, .replay, .spritesheet and .stringtable file under Assets/, each through its reader (with
+	// its migrations) and its canonical writer (§6, §13.5, §13.12; Docs/Decisions/0026-m16-contract.md decision 12; sprite
+	// sheets from M18, Docs/Decisions/0029-m18-contract.md decision 14; string tables from M22,
+	// Docs/Decisions/0033-m22-contract.md decision 10); .material, .sfx, .replay, .spritesheet and .stringtable files are read
 	// with unknown members refused, as their importers read them, so such a member fails the upgrade at its file and pointer
 	// instead of being dropped by the rewrite. A file is written only when its canonical bytes differ, through
 	// EditorContext::WriteProjectFile, so provenance records each rewrite with the method "project.upgrade". No open scene

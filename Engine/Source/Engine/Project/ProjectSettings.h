@@ -203,6 +203,15 @@ namespace Engine {
 		bool CoverageGates = false;
 	};
 
+	// Registry struct "LocalizationSettings" (§6.1 "Localization", §11.5; M22, Docs/Decisions/0033-m22-contract.md decision 11).
+	// Locale is the locale Loc.Get reads string tables in, fixed for each script VM's life (a play session's and an edit
+	// evaluation's): empty, or a locale tag of a string table's form (1 to 35 ASCII letters, digits and '-', starting with a
+	// letter: Asset/StringTableData.h, which Project cannot include). Empty reads every table in its fallback locale.
+	struct LocalizationSettings
+	{
+		std::string Locale;
+	};
+
 	// Registry struct "ProjectSettings": the whole .eproj below its "Format"/"Version" header (§6.1). Name is the game's
 	// display name (exported games use it for their user-data folder, §14.1); StartScene is the project-relative scene the
 	// game starts with (empty: none yet).
@@ -218,13 +227,14 @@ namespace Engine {
 		ScriptingSettings Scripting;
 		ExportSettings Export;
 		TestingSettings Testing;
+		LocalizationSettings Localization; // M22: after Testing (ADR 0028's phase-2 ledger)
 	};
 
 	// Registers the enums and structs above (InputActionType, TestPauseOnError, TestIsolation, TestMode, WindowSettings,
 	// SimulationSettings, PhysicsSettings, InputAction, InputSettings, RenderingSettings, ScriptingSettings,
-	// ExportSettings, TestSuiteOverrides, TestSuite, TestingSettings, ProjectSettings) with their field metadata, the
-	// type-level validators of the rules in the comments above and, for each validated type, the Generate hook that turns
-	// random field values into valid settings (FieldBuilder::Generate). Call once per registry, before Freeze.
+	// ExportSettings, TestSuiteOverrides, TestSuite, TestingSettings, LocalizationSettings, ProjectSettings) with their field
+	// metadata, the type-level validators of the rules in the comments above and, for each validated type, the Generate hook
+	// that turns random field values into valid settings (FieldBuilder::Generate). Call once per registry, before Freeze.
 	void RegisterProjectSettingsTypes(TypeRegistry& registry);
 
 }

@@ -12,8 +12,11 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
+#include <cstring>
+#include <vector>
 
 namespace Engine {
 
@@ -99,6 +102,63 @@ namespace Engine {
 			};
 			const size_t data = at + 3 + (count + 1) * offsetSize - 1;
 			return { data + offset(element), offset(element + 1) - offset(element) };
+		}
+
+		// Glyphs.ttf with its cmap replaced in place by one format 13 (many-to-one) subtable that maps the space and O to
+		// their glyphs (1 and 3) and every codepoint of [first, last] to A (glyph 2): a font with as many codepoints as a CJK
+		// block, each drawing the same glyph, so a range's cost is its codepoint count. The new cmap (64 bytes: the header,
+		// one Windows UCS-4 record, the subtable's 16-byte header and three 12-byte groups) is shorter than the generated
+		// one, whose table record gets the new length.
+		Buffer MakeManyToOneFont(uint32_t first, uint32_t last)
+		{
+			Buffer font = ReadFontFixture("Glyphs.ttf");
+			std::vector<uint8_t> cmap;
+			const auto u16 = [&cmap](uint32_t value)
+			{
+				cmap.push_back(static_cast<uint8_t>(value >> 8));
+				cmap.push_back(static_cast<uint8_t>(value & 0xFF));
+			};
+			const auto u32 = [&u16](uint32_t value)
+			{
+				u16(value >> 16);
+				u16(value & 0xFFFF);
+			};
+			u16(0);  // version
+			u16(1);  // one encoding record
+			u16(3);  // Windows
+			u16(10); // UCS-4
+			u32(12); // the subtable's offset
+			u16(13); // format 13: every codepoint of a group maps to its one glyph
+			u16(0);
+			u32(16 + 12 * 3);
+			u32(0); // language
+			u32(3); // groups, sorted by their first codepoint
+			const std::array<std::array<uint32_t, 3>, 3> groups = { { { 0x20, 0x20, 1 }, { 0x4F, 0x4F, 3 }, { first, last, 2 } } };
+			for (const std::array<uint32_t, 3>& group : groups)
+			{
+				for (const uint32_t value : group)
+					u32(value);
+			}
+			const uint32_t tableCount = ReadFontU16(font, 4);
+			for (uint32_t table = 0; table < tableCount; ++table)
+			{
+				const size_t record = 12 + 16 * table;
+				if (std::memcmp(font.data() + record, "cmap", 4) != 0)
+					continue;
+				const size_t offset = ReadFontU32(font, record + 8);
+				REQUIRE(ReadFontU32(font, record + 12) >= cmap.size());
+				std::ranges::transform(cmap, font.begin() + static_cast<std::ptrdiff_t>(offset), [](uint8_t value)
+				{
+					return std::byte{ value };
+				});
+				const auto length = static_cast<uint32_t>(cmap.size());
+				WriteFontBytes(font, record + 12,
+					{ static_cast<uint8_t>(length >> 24), static_cast<uint8_t>((length >> 16) & 0xFF), static_cast<uint8_t>((length >> 8) & 0xFF),
+						static_cast<uint8_t>(length & 0xFF) });
+				return font;
+			}
+			FAIL("Glyphs.ttf has no 'cmap' table");
+			return font;
 		}
 
 		// Imports the bytes `font` as project://Assets/Fonts/<name> with `settings` (a JSON object, or null for the
@@ -207,18 +267,22 @@ namespace Engine {
 			// TrueTypeFont::Open run) must refuse every font stb_truetype would read out of bounds or assert on. Each mutation
 			// is imported from memory at the smallest settings, so a font that passes opens, answers its metrics and kerning,
 			// and rasterizes every glyph of the character set it has. The seeds: Glyphs.ttf (quadratic outlines, legacy
-			// kerning, five glyphs) and, one iteration in eight, the pinned Inter OTF (CFF outlines, GPOS kerning).
+			// kerning, five glyphs) and, one iteration in eight, the pinned Inter OTF (CFF outlines, GPOS kerning). Every
+			// other iteration (by index, so the mutations stay those of the seed) adds version 4's Ranges, Greek capitals and
+			// a supplementary-plane block, whose lookups reach the cmap's ranges beyond Latin-1.
 			const std::array<Buffer, 2> seeds = { ReadFontFixture("Glyphs.ttf"), ReadFontFixture("Inter-Regular.otf") };
 			Test::AssetTestFixture fixture;
 			Json settings = Json::object();
 			settings["PixelSize"] = 16.0;
 			settings["Spread"] = 1.0;
-			const Test::FuzzRun run = Test::RunFuzzCase(0xF0A7, 200, [&seeds, &fixture, &settings](Random& random, uint64_t /*index*/)
+			Json withRanges = settings;
+			withRanges["Ranges"] = Json::array({ Json{ { "First", 0x0391 }, { "Last", 0x03A9 } }, Json{ { "First", 0x1F600 }, { "Last", 0x1F64F } } });
+			const Test::FuzzRun run = Test::RunFuzzCase(0xF0A7, 200, [&seeds, &fixture, &settings, &withRanges](Random& random, uint64_t index)
 			{
 				Buffer mutated = seeds[random.RangeInt(0, 7) == 0 ? 1 : 0];
 				Test::MutateBytes(mutated, random);
 				const Status validated = FontImporter::ValidateSource(mutated);
-				const Result<ImportResult> imported = ImportFontBytes(fixture, "Fuzz.otf", mutated, settings);
+				const Result<ImportResult> imported = ImportFontBytes(fixture, "Fuzz.otf", mutated, index % 2 == 0 ? settings : withRanges);
 				if (!imported.has_value())
 				{
 					CHECK_MESSAGE(imported.error().GetCode() == ErrorCode::ImportFailed, imported.error().ToString());
@@ -747,7 +811,7 @@ namespace Engine {
 
 		// M22 (C22.1, R-UI-TEXT's character ranges; Docs/Decisions/0033-m22-contract.md decision 6; stream B): a font's import
 		// settings add per-font ranges to ASCII and Latin-1 (FontImportSettings.Ranges, FontImporter version 4).
-		TEST_CASE("FontImporter: a font's Ranges add their codepoints to ASCII and Latin-1" * doctest::skip(true))
+		TEST_CASE("FontImporter: a font's Ranges add their codepoints to ASCII and Latin-1")
 		{
 			CHECK(FontImporter::Version == 4);
 			Test::AssetTestFixture fixture;
@@ -803,6 +867,99 @@ namespace Engine {
 			Result<ImportResult> accepted = ImportFont(fixture, "Limit.ttf", ReadInter(), atLimit);
 			REQUIRE_MESSAGE(accepted.has_value(), accepted.error().ToString());
 			CHECK(FindGlyph(*LoadFont(*accepted), 'A') != nullptr);
+		}
+
+		// The W22.1 review (Docs/Decisions/0033-m22-contract.md): the limits on Ranges bound the codepoints, not each glyph's
+		// field, which PixelSize and Spread size, so a large range at the largest settings needs more atlas than
+		// MaxFontAtlasSize gives. The bake measures and packs every glyph's box before it rasterizes any field, so such a
+		// font fails without computing a field (FontBakeReport::RasterizedGlyphs), where it rasterized all of them first,
+		// gigabytes for a CJK font, before learning that they do not fit.
+		TEST_CASE("FontImporter: Ranges whose glyphs cannot fit the atlas fail before any glyph is rasterized")
+		{
+			// At 128 pixels per em with a 32-pixel spread, each A of MakeManyToOneFont is a 137 x 154 pixel field: the first
+			// 16,384 codepoints of CJK Unified Ideographs (U+4E00 to U+8DFF) need more pixels than a 16384 x 16384 atlas has.
+			const Buffer font = MakeManyToOneFont(0x4E00, 0x9FFF);
+			FontImportSettings settings{ .PixelSize = 128.0f, .Spread = 32.0f, .Ranges = { FontCharacterRange{ .First = 0x4E00, .Last = 0x8DFF } } };
+			FontBakeReport report;
+			const Result<FontData> refused = FontImporter::Bake(font, settings, "Assets/Fonts/Cjk.ttf", report);
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::ImportFailed);
+			CHECK(report.Glyphs == 2 + 16384); // the space, O and the range
+			CHECK(report.AtlasSize == 0);
+			REQUIRE(report.RasterizedGlyphs == 0);
+
+			// The import reads its settings and bakes the same way: ImportFailed, naming the source.
+			Test::AssetTestFixture fixture;
+			Json json = Json::object();
+			json["PixelSize"] = 128.0;
+			json["Spread"] = 32.0;
+			json["Ranges"] = Json::array({ Json{ { "First", 0x4E00 }, { "Last", 0x8DFF } } });
+			const Result<ImportResult> imported = ImportFontBytes(fixture, "Cjk.ttf", font, json);
+			REQUIRE_FALSE(imported.has_value());
+			CHECK(imported.error().GetCode() == ErrorCode::ImportFailed);
+			CHECK(imported.error().ToString().contains("Cjk.ttf"));
+
+			// A range that fits rasterizes each glyph with an outline once, O and the range's 64 codepoints (the space has no
+			// field), into the smallest atlas that holds them.
+			settings.Ranges = { FontCharacterRange{ .First = 0x4E00, .Last = 0x4E3F } };
+			const Result<FontData> baked = FontImporter::Bake(font, settings, "Assets/Fonts/Cjk.ttf", report);
+			REQUIRE_MESSAGE(baked.has_value(), baked.error().ToString());
+			CHECK(report.Glyphs == 2 + 64);
+			CHECK(report.RasterizedGlyphs == 1 + 64);
+			CHECK(report.AtlasSize == 2048);
+			CHECK(baked->AtlasWidth == report.AtlasSize);
+			CHECK(baked->Glyphs.size() == report.Glyphs);
+			const FontGlyph* first = FindGlyph(*baked, 0x4E00);
+			const FontGlyph* last = FindGlyph(*baked, 0x4E3F);
+			REQUIRE(first != nullptr);
+			REQUIRE(last != nullptr);
+			CHECK(first->PlaneMax - first->PlaneMin == last->PlaneMax - last->PlaneMin);
+			CHECK(FindGlyph(*baked, 0x4E40) == nullptr);
+		}
+
+		// FontImporter.h's version 4 rules beside the contract's case: a codepoint named twice is baked once, so ranges
+		// within ASCII and Latin-1 change nothing; a range's glyphs are not kerned; a reversed range is located at its element.
+		TEST_CASE("FontImporter: overlapping Ranges bake each codepoint once, and only ASCII and Latin-1 glyphs are kerned")
+		{
+			Test::AssetTestFixture fixture;
+			Result<ImportResult> defaults = ImportInter(fixture);
+			REQUIRE_MESSAGE(defaults.has_value(), defaults.error().ToString());
+
+			// Ranges inside ASCII and Latin-1, overlapping each other, and an explicit empty list cook the defaults' bytes.
+			Json overlapping = Json::object();
+			overlapping["PixelSize"] = 48.0;
+			overlapping["Spread"] = 8.0;
+			overlapping["Ranges"] = Json::array({ Json{ { "First", 0x41 }, { "Last", 0x5A } }, Json{ { "First", 0x50 }, { "Last", 0xFF } } });
+			Json empty = overlapping;
+			empty["Ranges"] = Json::array();
+			for (const Json& settings : { overlapping, empty })
+			{
+				CAPTURE(settings.dump());
+				Result<ImportResult> imported = ImportFont(fixture, "Same.ttf", ReadInter(), settings);
+				REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+				CHECK(imported->Artifacts.front().Cooked == defaults->Artifacts.front().Cooked);
+			}
+
+			// Greek capitals and small letters: their glyphs join the atlas, and the kerning stays the defaults' pairs.
+			Json greek = overlapping;
+			greek["Ranges"] = Json::array({ Json{ { "First", 0x0391 }, { "Last", 0x03C9 } } });
+			Result<ImportResult> imported = ImportFont(fixture, "Greek.ttf", ReadInter(), greek);
+			REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+			const AssetRef<FontData> font = LoadFont(*imported);
+			const AssetRef<FontData> latin = LoadFont(*defaults);
+			CHECK(FindGlyph(*font, 0x03B1) != nullptr);
+			CHECK(font->Glyphs.size() > latin->Glyphs.size());
+			CHECK(font->Kerning == latin->Kerning);
+			CHECK(std::ranges::is_sorted(font->Glyphs, {}, &FontGlyph::Codepoint));
+
+			// A reversed range is located at its Last.
+			Json reversed = Json::object();
+			reversed["Ranges"] = Json::array({ Json{ { "First", 0x41 }, { "Last", 0x5A } }, Json{ { "First", 0x03A9 }, { "Last", 0x0391 } } });
+			Result<ImportResult> rejected = ImportFont(fixture, "Reversed.ttf", ReadInter(), reversed);
+			REQUIRE_FALSE(rejected.has_value());
+			CHECK(rejected.error().GetCode() == ErrorCode::Validation);
+			REQUIRE_FALSE(rejected.error().GetIssues().empty());
+			CHECK(rejected.error().GetIssues().front().JsonPointer == "/Ranges/1/Last");
 		}
 
 		TEST_CASE("FontImporter: the generated Glyphs.ttf imports its quadratic outlines, counters and legacy kerning")
@@ -962,10 +1119,11 @@ namespace Engine {
 		// Docs/Decisions/0030-m19-contract.md decision 23 (A-STBTT): version 3 rasterizes through stb_truetype.h of the
 		// vendored stb (Vendor/stb, commit 2c980bb) instead of Dear ImGui's imstb_truetype.h, and keeps the atlases of
 		// version 2: the Inter TrueType and CFF atlases at the default settings hash as they did, so the Text golden, drawn in
-		// the Default font (Inter's TrueType outlines at these settings), is unchanged.
+		// the Default font (Inter's TrueType outlines at these settings), is unchanged. Every later version keeps them for a
+		// font without Ranges, as the Default font is (version 4: M22, Docs/Decisions/0033-m22-contract.md decision 6), so
+		// the case checks no version number; "FontImporter: a font's Ranges add their codepoints to ASCII and Latin-1" does.
 		TEST_CASE("FontImporter: version 3 rasterizes through the vendored stb_truetype.h with the atlases of version 2")
 		{
-			CHECK(FontImporter::Version == 3);
 			Test::AssetTestFixture fixture;
 			Json settings = Json::object();
 			settings["PixelSize"] = 48.0;

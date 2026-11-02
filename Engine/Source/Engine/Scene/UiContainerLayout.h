@@ -57,7 +57,9 @@ namespace Engine {
 	//     1024 when cell + spacing is 0 (every count fits; the quotient is never computed); each child takes its cell's size
 	//     whatever its own; the cell block is placed in the inner rectangle by MainAlignment (main) and Start (cross).
 	//   - CrossAlignment places each child in its line's cross size (Grid: its cell's): Start, Center, End, or Stretch to the
-	//     whole of it.
+	//     whole of it (Stack and Flex: never below the child's MinSize). A Stack's or Flex's child larger than its line across
+	//     keeps the same formula: Center overflows both sides equally and End overflows the start
+	//     (Docs/Decisions/0033-m22-contract.md decision 5).
 	// Pure.
 	[[nodiscard]] std::vector<UiContainerPlacement> LayoutUiContainer(const UiLayoutComponent& layout, glm::vec2 containerSize,
 		std::span<const UiContainerChild> children);

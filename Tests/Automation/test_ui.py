@@ -1,6 +1,6 @@
 """ui.tree through automation (Docs/Architecture.md §13.5; Docs/Decisions/0033-m22-contract.md decision 8): a scene's
 UI laid out in scene pixels, in the editor's edit and play scenes and in an exported game's Runtime, which serves it as
-part of its subset. Skipped by the M22 contract (C22.1); stream E un-skips them."""
+part of its subset."""
 
 from __future__ import annotations
 
@@ -8,8 +8,6 @@ import unittest
 
 from harness import EXIT_SUCCESS, GPU_EDITOR_ARGUMENTS, AutomationTestCase, engine_client
 from tiny_game import TINY_GAME_NAME, build_tiny_game, export_tiny_game, exported_executable
-
-SKIP_UI_TREE = "contract stub: ui.tree (Docs/Decisions/0033-m22-contract.md decision 8, stream E)"
 
 
 def create_ui(client: engine_client.EngineClient) -> None:
@@ -28,7 +26,6 @@ def create_ui(client: engine_client.EngineClient) -> None:
 class UiTreeTests(AutomationTestCase):
     """ui.tree in the editor and the Runtime."""
 
-    @unittest.skip(SKIP_UI_TREE)
     def test_ui_tree_lists_the_edit_and_play_scene_ui_in_scene_pixels(self) -> None:
         client, _ = self.open_editor_with_scene()
         create_ui(client)
@@ -60,7 +57,6 @@ class UiTreeTests(AutomationTestCase):
             client.call("ui.tree", {"canvas": "/Hud/Panel"})
         self.assert_engine_error(not_canvas.exception, engine_client.INVALID_PARAMS)
 
-    @unittest.skip(SKIP_UI_TREE)
     def test_ui_tree_works_in_the_runtime(self) -> None:
         if not self.require_gpu():
             return

@@ -173,6 +173,47 @@ return Bag
 
 A behaviour creates it in `OnStart` with `Bag.New(Random.New(Random.Integer(0, 2147483647)))` and calls `self.Bag:Draw()`; a test passes a `Random.New(<constant>)` to get a known sequence.
 
+## UI
+
+UI is entities with UI components below a `UiCanvas`, laid out in scene pixels (`skills/game-building/ui`). Scripts use their proxies like any component's: `entity.UiText.Text`, `entity.UiRect.Position` and `Size` (canvas units), `entity.UiImage.Frame` and `Color`, `entity.UiLayout.Padding` (a `{Left, Top, Right, Bottom}` table, written whole). Scripts cannot read a laid-out rectangle; automation's `ui.tree` does.
+- Show and hide an element with `SetActive`; a disabled element and its subtree take no space in a container.
+- UI components are in the state hash, like `Text`: write them in `OnFixedUpdate`, and `UiText.Text` only when its string changes.
+- Strings come from string tables: `Loc.Get(table, key)` returns the key's string in the project's `Localization.Locale` (the table's locale equal to it, else its language's, else the table's first; empty reads the first), `Loc.Has(table, key)` tests a key and `Loc.GetLocale()` returns the locale. A key the table lacks raises a located error naming the closest keys, so let a suite read every key the game uses. Hold the table in a `Field.Asset("StringTable")` field, or load it by a literal path.
+- In live play a frame that runs no fixed step already sees the device input of the next tick, so `OnUpdate` reacts to a press in its own frame; lockstep sessions, recordings, replays and test runs never preview, and injected input never is. Decide in `OnFixedUpdate` and use `OnUpdate`'s earlier view only for presentation (a highlight that follows the cursor).
+
+```luau path=Assets/Scripts/ScoreLabel.luau
+--!strict
+-- Shows the score in its entity's UiText, in the project's locale, rewriting the text only when the score changes.
+export type ScoreLabel = ScriptInstance & {
+	Strings: AssetRef?,
+	Score: number,
+	Shown: number,
+}
+
+local ScoreLabel = {}
+
+ScoreLabel.Fields = {
+	Strings = Field.Asset("StringTable"),
+}
+
+function ScoreLabel.OnStart(self: ScoreLabel)
+	self.Score = 0
+	self.Shown = -1
+end
+
+function ScoreLabel.OnFixedUpdate(self: ScoreLabel)
+	local label = self.Entity.UiText
+	local strings = self.Strings
+	if label == nil or strings == nil or self.Score == self.Shown then
+		return
+	end
+	self.Shown = self.Score
+	label.Text = `{Loc.Get(strings, "Hud.Score")} {self.Score}`
+end
+
+return Script.Define("ScoreLabel", ScoreLabel)
+```
+
 ## Determinism pitfalls
 
 - Write non-trivial powers with `math.pow(x, y)`, which uses the engine's deterministic math. The `^` operator is exact only when the exponent is a `2`, `3` or `0.5` the compiler knows: written in the expression (`x ^ 2`) or held in a local initialized with it and never reassigned. An exponent held in a parameter, a table field or a reassigned local (`x ^ n`, even when `n` is 2) and every other constant call the platform's C runtime and may differ between machines, and a constant expression such as `2 ^ 10` is folded with the compiling editor's C runtime. A curve such as a gravity speed per level is safest as a frozen integer table indexed by level. `math.sin` and the other `math` functions and `vector.angle` are already deterministic.

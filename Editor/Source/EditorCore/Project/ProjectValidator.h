@@ -36,7 +36,9 @@
 // with Export.PruneUnreferenced on, each computed Assets.Load of a script below Assets/ that Export.Exclude leaves in, a
 // testing export's excluded test content unchecked; Docs/Decisions/0030-m19-contract.md decision 21). M20 adds
 // PREFAB_CYCLE (Scene/LoadReport.h) on every prefab file that nests itself, directly or through other prefabs
-// (Docs/Decisions/0031-m20-contract.md decision 8). GetCodes lists every code in §13.7 order, later milestones' codes
+// (Docs/Decisions/0031-m20-contract.md decision 8). M22 adds UI_ELEMENT_WITHOUT_CANVAS on a UiRect without a UiCanvas on
+// an ancestor and UI_IMAGE_FRAME_OUT_OF_RANGE on a UiImage whose Frame its sprite sheet lacks
+// (Docs/Decisions/0033-m22-contract.md decision 13). GetCodes lists every code in §13.7 order, later milestones' codes
 // appended in landing order.
 
 namespace Engine {

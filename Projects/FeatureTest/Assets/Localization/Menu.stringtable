@@ -1,0 +1,21 @@
+{
+	"Format": "StringTable",
+	"Version": 1,
+	"Locales": ["en", "fr", "pt-BR"],
+	"Entries": [
+		{
+			"Key": "Menu.Start",
+			"Values": {
+				"en": "Start",
+				"fr": "Commencer",
+				"pt-BR": "Iniciar"
+			}
+		},
+		{
+			"Key": "Menu.Quit",
+			"Values": {
+				"en": "Quit"
+			}
+		}
+	]
+}

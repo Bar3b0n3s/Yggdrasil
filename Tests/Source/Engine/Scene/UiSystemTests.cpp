@@ -11,14 +11,13 @@
 #include <glm/glm.hpp>
 
 // The play session's UI (M22, C22.1; Docs/Decisions/0033-m22-contract.md decision 3): the step's and the frame's layouts and
-// which one is current (ADR 0028's phase-2 ledger: UiInput hit-tests the later of the two). Skipped by the contract; stream A
-// un-skips it.
+// which one is current (ADR 0028's phase-2 ledger: UiInput hit-tests the later of the two).
 
 namespace Engine {
 
 	TEST_SUITE("Scene")
 	{
-		TEST_CASE("UiSystem: the current layout is the frame's after a FrameUiLayout and the step's after a UiLayout" * doctest::skip(true))
+		TEST_CASE("UiSystem: the current layout is the frame's after a FrameUiLayout and the step's after a UiLayout")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();

@@ -159,6 +159,49 @@ namespace Engine {
 				settings.Company.clear();
 		}
 
+		// A string table's locale tag (Asset/StringTableData.h's rule, which Project cannot include; ProjectSettingsTests checks
+		// that they agree): 1 to MaxLocaleBytes bytes of ASCII letters, digits and '-', starting with a letter.
+		static constexpr size_t MaxLocaleBytes = 35;
+
+		static bool IsAsciiLetter(char character)
+		{
+			return (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z');
+		}
+
+		static bool IsLocaleTag(std::string_view locale)
+		{
+			if (locale.empty() || locale.size() > MaxLocaleBytes || !IsAsciiLetter(locale.front()))
+				return false;
+			return std::all_of(locale.begin(), locale.end(), [](char character)
+			{
+				return IsAsciiLetter(character) || (character >= '0' && character <= '9') || character == '-';
+			});
+		}
+
+		static void ValidateLocalization(const LocalizationSettings& localization, ValidationContext& context)
+		{
+			if (!localization.Locale.empty() && !IsLocaleTag(localization.Locale))
+			{
+				context.Error("Locale",
+					std::format("must be empty or a locale tag of 1 to {} ASCII letters, digits and '-' starting with a letter, such as fr or pt-BR (got '{}')",
+						MaxLocaleBytes, localization.Locale));
+			}
+		}
+
+		// Random text becomes a tag: its letters, digits and '-' only, starting with a letter, cut to MaxLocaleBytes bytes; an
+		// empty result stays empty (no locale).
+		static void GenerateLocalization(LocalizationSettings& localization, Random& /*random*/)
+		{
+			std::string tag;
+			for (const char character : localization.Locale)
+			{
+				if ((tag.empty() && IsAsciiLetter(character)) || (!tag.empty() && (IsAsciiLetter(character) || (character >= '0' && character <= '9') || character == '-')))
+					tag += character;
+			}
+			tag.resize(std::min(tag.size(), MaxLocaleBytes));
+			localization.Locale = std::move(tag);
+		}
+
 		static void ValidateOverrides(const TestSuiteOverrides& overrides, ValidationContext& context)
 		{
 			if (overrides.CallbackBudgetMs != 0 && overrides.CallbackBudgetMs < MinCallbackBudgetMs)
@@ -397,6 +440,13 @@ namespace Engine {
 			.Field("CoverageGates", &TestingSettings::CoverageGates,
 				"Whether unfiltered test runs record coverage and fail on any gap of the per-mode coverage gates (FeatureTest).");
 
+		registry.Struct<LocalizationSettings>("LocalizationSettings", "The project's localization (§6.1 Localization).")
+			.Field("Locale", &LocalizationSettings::Locale,
+				"The locale Loc.Get reads string tables in, such as fr or pt-BR: a table's locale equal to it, else its language's, else the table's first; "
+				"empty reads every table's first.")
+			.Validate(&Utils::ValidateLocalization)
+			.Generate(&Utils::GenerateLocalization);
+
 		registry.Struct<ProjectSettings>("ProjectSettings", "The settings of a project: the .eproj file below its header.")
 			.Field("Name", &ProjectSettings::Name, "Display name of the game; exported games name their user-data folder after it.")
 			.Field("StartScene", &ProjectSettings::StartScene, "Project-relative scene the game starts with; empty while none is chosen.")
@@ -407,7 +457,8 @@ namespace Engine {
 			.Field("Rendering", &ProjectSettings::Rendering, "Rendering quality.")
 			.Field("Scripting", &ProjectSettings::Scripting, "Script VM limits and error behaviour.")
 			.Field("Export", &ProjectSettings::Export, "Contents and labelling of exported games.")
-			.Field("Testing", &ProjectSettings::Testing, "Test suites and replays.");
+			.Field("Testing", &ProjectSettings::Testing, "Test suites and replays.")
+			.Field("Localization", &ProjectSettings::Localization, "Localized strings (M22).");
 	}
 
 }

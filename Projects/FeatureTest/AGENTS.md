@@ -20,7 +20,8 @@ serves its skills and generated reference through automation (`docs.get {}` list
 - Its content is produced by the committed batch scaffolds under `Scaffold/` (`Editor --batch`), never by hand.
   `Scaffold/Scaffolds.json` lists them in run order, each with its id seed (`Editor --id-seed`) and renderer:
   `Settings.jsonl` writes the project settings, the stream scaffolds write the scenes, scripts, suites and test assets
-  under `Assets/Scenes/`, `Assets/Scripts/`, `Assets/Prefabs/`, `Assets/Formats/` and `Assets/Tests/<Area>/`,
+  under `Assets/Scenes/`, `Assets/Scripts/`, `Assets/Prefabs/`, `Assets/Formats/`, `Assets/Localization/` (M22's string
+  table), `Assets/Ui/` (M22's font imported with `Ranges`) and `Assets/Tests/<Area>/`,
   `Suites.jsonl` writes `Testing.Suites` and `Testing.Replays`, and `Replays.jsonl` records `Input.replay` and
   `Determinism.replay` last (`PhysicsSemantics.jsonl` and `MultiScript.jsonl` record their scenes' replays in
   `Assets/Tests/Replays/` themselves).
@@ -34,7 +35,9 @@ serves its skills and generated reference through automation (`docs.get {}` list
   later golden scene comes from a golden scaffold, a `Scaffolds.json` entry with `GoldenDirectories`, which writes only
   below directories of its own and is regenerated like every other scaffold: `Scaffold/GoldenRendererII.jsonl` (M18's
   recorded regeneration of `Golden.jsonl`'s M9 part) writes the Renderer II scenes under
-  `Assets/Scenes/GoldenRendererII/` and their materials under `Assets/Materials/GoldenRendererII/`.
+  `Assets/Scenes/GoldenRendererII/` and their materials under `Assets/Materials/GoldenRendererII/`, and
+  `Scaffold/UiGolden.jsonl` (M22) writes the UI golden scene under `Assets/Scenes/GoldenUi/` and its sprite sheet and
+  texture under `Assets/Textures/GoldenUi/`.
   `asset.import` reads only project paths and absolute ones, so imported files come from `Scaffold/Sources/`,
   byte-identical copies of the `Tests/Data/Assets` fixtures (`Tests/Data/Generate`), which a unit test keeps in step. The
   editor's `.bak` backups of rewritten files are not committed (`.gitignore` leaves them out).

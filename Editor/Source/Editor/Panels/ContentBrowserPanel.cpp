@@ -655,16 +655,19 @@ namespace Engine {
 		if (ImGui::BeginPopup("Create asset"))
 		{
 			Utils::EditorSectionHeading("Create asset");
-			// Indices 5 to 7 are the script templates (script.create); the others are asset.create types. M18's sprite sheet is
-			// appended last, so the earlier entries keep their indices (Docs/Decisions/0029-m18-contract.md decision 18).
-			constexpr const char* Labels[] = { "Folder", "Scene", "Material", "Prefab", "Sound effect", "Behaviour script", "Module script", "Test script", "Sprite sheet" };
-			constexpr const char* Types[] = { "Folder", "Scene", "Material", "Prefab", "SoundEffect", "", "", "", "SpriteSheet" };
-			constexpr const char* Extensions[] = { "", ".scene", ".material", ".prefab", ".sfx", ".luau", ".luau", ".test.luau", ".spritesheet" };
+			// Indices 5 to 7 are the script templates (script.create); the others are asset.create types. M18's sprite sheet and
+			// M22's string table are appended in landing order, so the earlier entries keep their indices
+			// (Docs/Decisions/0029-m18-contract.md decision 18, Docs/Decisions/0033-m22-contract.md decision 10).
+			constexpr const char* Labels[] = { "Folder", "Scene", "Material", "Prefab", "Sound effect", "Behaviour script", "Module script", "Test script", "Sprite sheet",
+				"String table" };
+			constexpr const char* Types[] = { "Folder", "Scene", "Material", "Prefab", "SoundEffect", "", "", "", "SpriteSheet", "StringTable" };
+			constexpr const char* Extensions[] = { "", ".scene", ".material", ".prefab", ".sfx", ".luau", ".luau", ".test.luau", ".spritesheet", ".stringtable" };
 			constexpr int FirstScriptTemplate = 5;
 			constexpr int LastScriptTemplate = 7;
 			ImGui::TextDisabled("In %s", m_ActionDirectory.c_str());
 			ImGui::SetNextItemWidth(-1.0f);
-			ImGui::Combo("##AssetType", &m_CreateType, Labels, static_cast<int>(std::size(Labels)));
+			// Every entry fits the list, so none hides below a scroll (ImGui's default list shows eight).
+			ImGui::Combo("##AssetType", &m_CreateType, Labels, static_cast<int>(std::size(Labels)), static_cast<int>(std::size(Labels)));
 			ImGui::SetNextItemWidth(-1.0f);
 			ImGui::InputTextWithHint("##AssetName", "Asset name", m_CreateName.data(), m_CreateName.size());
 			ImGui::BeginDisabled(editor.IsReadOnly() || !Utils::AssetNameValid(m_CreateName.data()));

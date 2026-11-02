@@ -38,7 +38,7 @@ Flags: **tool** (proxied by the MCP bridge as the named tool), **mutates** (chan
 
 ### asset.create
 
-Creates a material, a sound effect or a sprite sheet (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.
+Creates a material, a sound effect, a sprite sheet or a string table (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.
 
 - Flags: tool `asset_create`, mutates, dry run, batch
 - Timeout: 60 s
@@ -47,8 +47,8 @@ Creates a material, a sound effect or a sprite sheet (with values over the defau
 | Param | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `type` | `AssetCreateType` | yes | `"Material"` | What to create. |
-| `path` | `String` | yes | `""` | The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx, .spritesheet; none for a folder); missing parent folders are created with it. |
-| `values` | `Variant` |  | `null` | A Material's, a SoundEffect's or a SpriteSheet's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, or a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads); absent for other types. |
+| `path` | `String` | yes | `""` | The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx, .spritesheet, .stringtable; none for a folder); missing parent folders are created with it. |
+| `values` | `Variant` |  | `null` | A Material's, a SoundEffect's, a SpriteSheet's or a StringTable's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads, or a table's Locales and Entries); absent for other types. |
 
 | Result | Type | Description |
 |---|---|---|
@@ -73,6 +73,12 @@ Example: Create a sprite sheet with two 16 x 16 frames of a texture and a loopin
 
 ```json
 {"type":"SpriteSheet","path":"Assets/Sprites/Hero.spritesheet","values":{"Texture":"4a1c0e7d2b9f3a65","Frames":[{"Name":"Idle0","Rect":{"X":0,"Y":0,"Width":16,"Height":16},"Pivot":[0.5,1]},{"Name":"Idle1","Rect":{"X":16,"Y":0,"Width":16,"Height":16},"Pivot":[0.5,1]}],"Clips":[{"Name":"Idle","Frames":[{"Frame":0,"Ticks":10},{"Frame":1,"Ticks":10}]}]}}
+```
+
+Example: Create a string table with an English and a French string for one key.
+
+```json
+{"type":"StringTable","path":"Assets/Text/Menu.stringtable","values":{"Locales":["en","fr"],"Entries":[{"Key":"Menu.Start","Values":{"en":"Start","fr":"Commencer"}}]}}
 ```
 
 ### asset.delete
@@ -127,7 +133,7 @@ Example: Read a texture's import settings.
 
 ### asset.getProperties
 
-Returns every property of a native asset (a material, a sound effect or a sprite sheet) by registry name.
+Returns every property of a native asset (a material, a sound effect, a sprite sheet or a string table) by registry name.
 
 - Flags: tool `asset_get_properties`, batch
 - Timeout: 60 s
@@ -135,7 +141,7 @@ Returns every property of a native asset (a material, a sound effect or a sprite
 
 | Param | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `asset` | `String` | yes | `""` | The native asset (a material, a sound effect or a sprite sheet). |
+| `asset` | `String` | yes | `""` | The native asset (a material, a sound effect, a sprite sheet or a string table). |
 
 | Result | Type | Description |
 |---|---|---|
@@ -320,7 +326,7 @@ Example: Import a texture as a normal map.
 
 ### asset.setProperties
 
-Applies an RFC 7386 merge patch to a native asset's properties (a material, a sound effect or a sprite sheet; an array such as a sheet's Frames is replaced whole) and writes it, as one undoable command. A running lockstep, recording, replay or test session sees the change only after it ends: asset reloads are deferred like script reloads.
+Applies an RFC 7386 merge patch to a native asset's properties (a material, a sound effect, a sprite sheet or a string table; an array such as a sheet's Frames is replaced whole) and writes it, as one undoable command. A running lockstep, recording, replay or test session sees the change only after it ends: asset reloads are deferred like script reloads.
 
 - Flags: tool `asset_set_properties`, mutates, dry run, batch
 - Timeout: 60 s
@@ -328,7 +334,7 @@ Applies an RFC 7386 merge patch to a native asset's properties (a material, a so
 
 | Param | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `asset` | `String` | yes | `""` | The native asset (a material, a sound effect or a sprite sheet). |
+| `asset` | `String` | yes | `""` | The native asset (a material, a sound effect, a sprite sheet or a string table). |
 | `values` | `Variant` | yes | `null` | An RFC 7386 merge patch of its properties: members replace, null resets a field. |
 
 | Result | Type | Description |
@@ -1916,7 +1922,7 @@ Example: Name the window and set the start scene.
 
 ### project.upgrade
 
-Applies migrations and canonical re-saves to every project file (the .eproj, and every scene, prefab, .meta, material, sound effect, replay and sprite sheet under Assets/), records each rewrite in provenance and reports the changed files, each with its reason (changes: "format version 1 to 2", "canonical form"). Run it after an engine change to canonical output; dryRun: true lists what it would rewrite. An unknown member in a material, sound effect, replay or sprite sheet fails the upgrade at its file and pointer, as its importer refuses it. Not undoable; refuses while an open scene has unsaved changes (save them first), and reloads every open scene whose file it rewrote.
+Applies migrations and canonical re-saves to every project file (the .eproj, and every scene, prefab, .meta, material, sound effect, replay, sprite sheet and string table under Assets/), records each rewrite in provenance and reports the changed files, each with its reason (changes: "format version 1 to 2", "canonical form"). Run it after an engine change to canonical output; dryRun: true lists what it would rewrite. An unknown member in a material, sound effect, replay, sprite sheet or string table fails the upgrade at its file and pointer, as its importer refuses it. Not undoable; refuses while an open scene has unsaved changes (save them first), and reloads every open scene whose file it rewrote.
 
 - Flags: tool `project_upgrade`, mutates, dry run
 - Timeout: 600 s

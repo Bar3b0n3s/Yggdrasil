@@ -1,25 +1,25 @@
 #include "EnginePCH.h"
 #include "Engine/Scene/UiSystem.h"
 
-// The play session's UI (UiSystem.h): stubs of the M22 contract (C22.1, Docs/Decisions/0033-m22-contract.md decision 3) that
-// stream A implements.
+// The play session's UI (UiSystem.h; Docs/Decisions/0033-m22-contract.md decision 3).
 
 namespace Engine {
 
-	void UiSystem::LayoutStep(const Scene& /*scene*/, glm::uvec2 /*sceneSize*/)
+	void UiSystem::LayoutStep(const Scene& scene, glm::uvec2 sceneSize)
 	{
-		ENGINE_CONTRACT_STUB();
+		m_StepLayout = ComputeUiLayout(scene, sceneSize);
+		m_FrameLayoutCurrent = false;
 	}
 
-	void UiSystem::LayoutFrame(const Scene& /*scene*/, glm::uvec2 /*sceneSize*/)
+	void UiSystem::LayoutFrame(const Scene& scene, glm::uvec2 sceneSize)
 	{
-		ENGINE_CONTRACT_STUB();
+		m_FrameLayout = ComputeUiLayout(scene, sceneSize);
+		m_FrameLayoutCurrent = true;
 	}
 
 	const UiLayoutTable& UiSystem::GetLayout() const
 	{
-		ENGINE_CONTRACT_STUB();
-		return m_StepLayout;
+		return m_FrameLayoutCurrent ? m_FrameLayout : m_StepLayout;
 	}
 
 }

@@ -21,7 +21,9 @@
 #include <compare>
 #include <cstddef>
 #include <format>
+#include <limits>
 #include <map>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -30,8 +32,11 @@
 
 // Record lays every drawable item out on the CPU into one vertex list (six vertices per glyph quad, Shared/TextVertex.h
 // says how the vertex shader places each mode), cutting it into batches wherever the atlas or the pipeline changes, so the
-// items keep their order; then it uploads the list once and draws the batches. Font atlases are mirrored per (font handle,
-// version); a missing font and a null font share the Default font's mirror, because both resolve to the font placeholder.
+// items keep their order; then it uploads the list once and draws the batches. RecordGlyphRuns (M22) does the same with its
+// caller's glyphs, already in the framebuffer's pixels, cutting batches also where the scissor changes, each run's glyphs as
+// screen vertices on top; both share the vertex buffer, the binding sets and the drawing (State::Submit). Font atlases are
+// mirrored per (font handle, version); a missing font and a null font share the Default font's mirror, because both resolve
+// to the font placeholder.
 // An atlas is uploaded through HostImageUpload, whose command lists are not immediate ones and are executed at once, so it
 // can be created while the caller's frame command list is open (NVRHI allows one open immediate list at a time) and a
 // mirror is never left empty by a frame list its caller did not execute.
@@ -76,13 +81,15 @@ namespace Engine {
 			nvrhi::ITexture* Atlas = nullptr; // null: the font's texts are skipped
 		};
 
-		// A run of consecutive vertices drawn with one atlas and one pipeline.
+		// A run of consecutive vertices drawn with one atlas, one pipeline and one scissor.
 		struct TextBatch
 		{
 			nvrhi::ITexture* Atlas = nullptr;
 			size_t Pipeline = 0;
 			uint32_t FirstVertex = 0;
 			uint32_t VertexCount = 0;
+			// The draw's scissor in the framebuffer's pixels, inside its extent; nullopt: the whole extent (Record's batches).
+			std::optional<nvrhi::Rect> Scissor{};
 		};
 
 		// Where a glyph corner goes: the vertex's Position and Corner (Shared/TextVertex.h).
@@ -252,6 +259,19 @@ namespace Engine {
 			return std::move(upload.Texture);
 		}
 
+		// The intersection of a glyph run's `scissor` (or the whole extent) with a `width` x `height` framebuffer's extent;
+		// empty when they do not overlap (QuadBatcher's rule for its scissor).
+		static nvrhi::Rect ClipGlyphScissor(const std::optional<nvrhi::Rect>& scissor, uint32_t width, uint32_t height)
+		{
+			constexpr uint32_t Largest = static_cast<uint32_t>(std::numeric_limits<int>::max());
+			const int extentX = static_cast<int>(std::min(width, Largest));
+			const int extentY = static_cast<int>(std::min(height, Largest));
+			if (!scissor)
+				return nvrhi::Rect(0, extentX, 0, extentY);
+			return nvrhi::Rect(std::clamp(scissor->minX, 0, extentX), std::clamp(scissor->maxX, 0, extentX), std::clamp(scissor->minY, 0, extentY),
+				std::clamp(scissor->maxY, 0, extentY));
+		}
+
 		// Appends the six vertices of each quad of `layout`, each corner placed by `place` (block em units -> PlacedCorner).
 		template<typename Place>
 		static void AppendQuads(std::vector<TextVertex>& vertices, const TextLayoutResult& layout, const glm::vec4& color, uint32_t mode,
@@ -298,9 +318,15 @@ namespace Engine {
 		// The font `handle` resolves to (null: the Default font) with its atlas mirror, uploading the atlas when this version
 		// has none yet; each handle is resolved once per Record.
 		[[nodiscard]] const ResolvedFont& ResolveFont(AssetManager& assets, AssetHandle handle);
-		// Batches the vertices added to Staging since `firstVertex`: they extend the last batch when it has the same atlas and
-		// pipeline, and start a new one otherwise.
-		void AddBatch(nvrhi::ITexture* atlas, size_t pipeline, size_t firstVertex);
+		// Batches the vertices added to Staging since `firstVertex`: they extend the last batch when it has the same atlas,
+		// pipeline and scissor, and start a new one otherwise.
+		void AddBatch(nvrhi::ITexture* atlas, size_t pipeline, size_t firstVertex, const std::optional<nvrhi::Rect>& scissor = std::nullopt);
+		// Uploads Staging (not empty) and draws Batches into `framebuffer`, its whole extent the viewport and each batch clipped
+		// to its scissor, with ViewConstants `viewConstants` and binding sets from `bindings`, inside the debug marker `marker`,
+		// adding the draw calls and triangles to `counters`. Everything that can fail comes before the first command. Errors:
+		// Gpu when the vertex buffer or a binding set cannot be created (nothing is recorded), with `context` added.
+		[[nodiscard]] Status Submit(nvrhi::ICommandList& commandList, PassBindingCache& bindings, nvrhi::IFramebuffer& framebuffer, nvrhi::IBuffer& viewConstants,
+			const char* marker, std::string_view context, RenderPassCounters& counters);
 	};
 
 	const ResolvedFont& TextRenderer::State::ResolveFont(AssetManager& assets, AssetHandle handle)
@@ -363,17 +389,87 @@ namespace Engine {
 		return resolved;
 	}
 
-	void TextRenderer::State::AddBatch(nvrhi::ITexture* atlas, size_t pipeline, size_t firstVertex)
+	void TextRenderer::State::AddBatch(nvrhi::ITexture* atlas, size_t pipeline, size_t firstVertex, const std::optional<nvrhi::Rect>& scissor)
 	{
 		const uint32_t count = static_cast<uint32_t>(Staging.size() - firstVertex);
 		if (count == 0)
 			return;
-		if (!Batches.empty() && Batches.back().Atlas == atlas && Batches.back().Pipeline == pipeline)
+		if (!Batches.empty() && Batches.back().Atlas == atlas && Batches.back().Pipeline == pipeline && Batches.back().Scissor == scissor)
 		{
 			Batches.back().VertexCount += count;
 			return;
 		}
-		Batches.push_back({ .Atlas = atlas, .Pipeline = pipeline, .FirstVertex = static_cast<uint32_t>(firstVertex), .VertexCount = count });
+		Batches.push_back({ .Atlas = atlas, .Pipeline = pipeline, .FirstVertex = static_cast<uint32_t>(firstVertex), .VertexCount = count, .Scissor = scissor });
+	}
+
+	Status TextRenderer::State::Submit(nvrhi::ICommandList& commandList, PassBindingCache& bindings, nvrhi::IFramebuffer& framebuffer, nvrhi::IBuffer& viewConstants,
+		const char* marker, std::string_view context, RenderPassCounters& counters)
+	{
+		ENGINE_CORE_ASSERT(!Staging.empty(), "TextRenderer::State::Submit needs vertices");
+		// The list never exceeds MaxTextVertices, so neither does the buffer.
+		const size_t vertexCount = Staging.size();
+		if (Vertices == nullptr || VertexCapacity < vertexCount)
+		{
+			size_t capacity = std::max(VertexCapacity, Utils::InitialTextVertexCapacity);
+			while (capacity < vertexCount)
+				capacity *= 2;
+			capacity = std::min(capacity, Utils::MaxTextVertices);
+			nvrhi::BufferDesc desc;
+			desc.byteSize = static_cast<uint64_t>(capacity) * sizeof(TextVertex);
+			desc.isVertexBuffer = true;
+			desc.initialState = nvrhi::ResourceStates::VertexBuffer;
+			desc.keepInitialState = true;
+			desc.debugName = "TextRenderer.Vertices";
+			ENGINE_TRY_ASSIGN(nvrhi::BufferHandle buffer, WithContext(Device->CreateBuffer(desc), std::string(context)));
+			Vertices = std::move(buffer);
+			VertexCapacity = capacity;
+		}
+		nvrhi::IBindingLayout& layout = *Pipelines[Utils::TextTestedPipeline].BindingLayouts[0];
+		std::vector<nvrhi::IBindingSet*> sets;
+		sets.reserve(Batches.size());
+		for (const TextBatch& batch : Batches)
+		{
+			nvrhi::BindingSetDesc desc;
+			desc.bindings = {
+				nvrhi::BindingSetItem::ConstantBuffer(0, &viewConstants),
+				nvrhi::BindingSetItem::Texture_SRV(0, batch.Atlas),
+				nvrhi::BindingSetItem::Sampler(0, Sampler),
+			};
+			ENGINE_TRY_ASSIGN(nvrhi::IBindingSet * set, WithContext(bindings.GetOrCreate(*Device, desc, layout), std::string(context)));
+			sets.push_back(set);
+		}
+
+		const nvrhi::FramebufferInfoEx& target = framebuffer.getFramebufferInfo();
+		const nvrhi::Viewport viewport(static_cast<float>(std::max(target.width, 1U)), static_cast<float>(std::max(target.height, 1U)));
+		const nvrhi::Rect extent(viewport);
+		commandList.beginMarker(marker);
+		commandList.writeBuffer(Vertices, Staging.data(), vertexCount * sizeof(TextVertex), 0);
+		nvrhi::GraphicsState graphics;
+		graphics.framebuffer = &framebuffer;
+		graphics.viewport.addViewportAndScissorRect(viewport);
+		graphics.bindings.push_back(nullptr);
+		graphics.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(Vertices).setSlot(0).setOffset(0));
+		for (size_t index = 0; index < Batches.size(); ++index)
+		{
+			const TextBatch& batch = Batches[index];
+			nvrhi::IGraphicsPipeline* pipeline = Pipelines[batch.Pipeline].Pipeline;
+			const nvrhi::Rect scissor = batch.Scissor.value_or(extent);
+			if (index == 0 || graphics.pipeline != pipeline || graphics.bindings[0] != sets[index] || graphics.viewport.scissorRects[0] != scissor)
+			{
+				graphics.pipeline = pipeline;
+				graphics.bindings[0] = sets[index];
+				graphics.viewport.scissorRects[0] = scissor;
+				commandList.setGraphicsState(graphics);
+			}
+			nvrhi::DrawArguments arguments;
+			arguments.vertexCount = batch.VertexCount;
+			arguments.startVertexLocation = batch.FirstVertex;
+			commandList.draw(arguments);
+			++counters.DrawCalls;
+			counters.Triangles += batch.VertexCount / 3;
+		}
+		commandList.endMarker();
+		return {};
 	}
 
 	TextRenderer::TextRenderer(ConstructionKey /*key*/)
@@ -422,11 +518,89 @@ namespace Engine {
 		return RecordCounted(commandList, bindings, inputs, counters);
 	}
 
-	Result<uint32_t> TextRenderer::RecordGlyphRuns(nvrhi::ICommandList& /*commandList*/, PassBindingCache& /*bindings*/,
-		const TextGlyphRenderInputs& /*inputs*/, RenderPassCounters& /*counters*/)
+	Result<uint32_t> TextRenderer::RecordGlyphRuns(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const TextGlyphRenderInputs& inputs,
+		RenderPassCounters& counters)
 	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "glyph runs (Docs/Decisions/0033-m22-contract.md decision 7, stream C)");
+		ENGINE_CORE_ASSERT(inputs.Assets != nullptr && inputs.Framebuffer != nullptr && inputs.ViewConstants != nullptr,
+			"TextRenderer::RecordGlyphRuns needs an asset manager, a framebuffer and ViewConstants");
+		if (inputs.Assets == nullptr || inputs.Framebuffer == nullptr || inputs.ViewConstants == nullptr)
+			return MakeError(ErrorCode::InvalidArgument, "the glyph runs need an asset manager, a framebuffer and ViewConstants");
+		State& state = *m_State;
+		state.Staging.clear();
+		state.Batches.clear();
+		state.Fonts.clear();
+
+		const nvrhi::FramebufferInfoEx& target = inputs.Framebuffer->getFramebufferInfo();
+		const uint32_t width = std::max(target.width, 1U);
+		const uint32_t height = std::max(target.height, 1U);
+		// Framebuffer pixels (+y down) to normalized device coordinates (+y up), as Record places its screen texts.
+		const glm::vec2 pixelToNdc = glm::vec2(2.0f, -2.0f) / glm::vec2(static_cast<float>(width), static_cast<float>(height));
+		AssetManager& assets = *inputs.Assets;
+		uint32_t drawn = 0;
+		uint32_t budgetSkipped = 0; // runs left out because their glyphs exceed the vertex budget
+
+		for (const TextGlyphRun& run : inputs.Runs)
+		{
+			const bool inside = static_cast<size_t>(run.FirstGlyph) + run.GlyphCount <= inputs.Glyphs.size();
+			ENGINE_CORE_ASSERT(inside, "a glyph run's glyphs [{}, +{}) lie outside the {} glyphs given", run.FirstGlyph, run.GlyphCount, inputs.Glyphs.size());
+			if (!inside || run.GlyphCount == 0 || !Utils::IsFinite(run.Color))
+				continue;
+			const nvrhi::Rect scissor = Utils::ClipGlyphScissor(run.Scissor, width, height);
+			if (scissor.maxX <= scissor.minX || scissor.maxY <= scissor.minY)
+				continue;
+			const ResolvedFont& font = state.ResolveFont(assets, run.Font);
+			if (font.Atlas == nullptr)
+				continue;
+			if (run.GlyphCount > (Utils::MaxTextVertices - state.Staging.size()) / Utils::VerticesPerQuad)
+			{
+				++budgetSkipped;
+				continue;
+			}
+			const size_t firstVertex = state.Staging.size();
+			for (const TextPixelGlyph& glyph : inputs.Glyphs.subspan(run.FirstGlyph, run.GlyphCount))
+			{
+				const std::array<glm::vec2, 4> corners = {
+					glyph.Min,
+					glm::vec2(glyph.Max.x, glyph.Min.y),
+					glyph.Max,
+					glm::vec2(glyph.Min.x, glyph.Max.y),
+				};
+				const std::array<glm::vec2, 4> texCoords = {
+					glyph.AtlasMin,
+					glm::vec2(glyph.AtlasMax.x, glyph.AtlasMin.y),
+					glyph.AtlasMax,
+					glm::vec2(glyph.AtlasMin.x, glyph.AtlasMax.y),
+				};
+				for (const size_t corner : Utils::QuadCornerOrder)
+				{
+					const glm::vec2 ndc = corners[corner] * pixelToNdc + glm::vec2(-1.0f, 1.0f);
+					state.Staging.push_back(
+						{ .Position = glm::vec3(ndc, 0.0f), .Corner = glm::vec2(0.0f), .TexCoord = texCoords[corner], .Color = run.Color, .Mode = TextVertexScreen });
+				}
+			}
+			// A glyph placed beyond float's range (finite pixels can overflow on the way to device coordinates) never reaches
+			// the GPU: its run is left out.
+			if (!Utils::HasFinitePlacement(std::span<const TextVertex>(state.Staging).subspan(firstVertex)))
+			{
+				state.Staging.resize(firstVertex);
+				continue;
+			}
+			// The colour is per vertex, so consecutive runs of one atlas and one scissor draw together.
+			state.AddBatch(font.Atlas, Utils::TextOnTopPipeline, firstVertex, scissor);
+			++drawn;
+		}
+
+		if (budgetSkipped > 0 && !state.HasWarnedBudget)
+		{
+			state.HasWarnedBudget = true;
+			ENGINE_CORE_WARN("The text renderer left out {} glyph run(s) whose glyphs exceed the budget of {} vertices per record; further runs and texts "
+							 "beyond the budget are left out without a warning",
+				budgetSkipped, Utils::MaxTextVertices);
+		}
+		if (state.Staging.empty())
+			return drawn;
+		ENGINE_TRY(state.Submit(commandList, bindings, *inputs.Framebuffer, *inputs.ViewConstants, "GlyphRuns", "while recording the glyph runs", counters));
+		return drawn;
 	}
 
 	Result<uint32_t> TextRenderer::RecordCounted(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const TextRenderInputs& inputs, RenderPassCounters& counters)
@@ -574,66 +748,7 @@ namespace Engine {
 		}
 		if (state.Staging.empty())
 			return drawn;
-
-		// Everything that can fail, before the first command. The list never exceeds MaxTextVertices, so neither does the
-		// buffer.
-		const size_t vertexCount = state.Staging.size();
-		if (state.Vertices == nullptr || state.VertexCapacity < vertexCount)
-		{
-			size_t capacity = std::max(state.VertexCapacity, Utils::InitialTextVertexCapacity);
-			while (capacity < vertexCount)
-				capacity *= 2;
-			capacity = std::min(capacity, Utils::MaxTextVertices);
-			nvrhi::BufferDesc desc;
-			desc.byteSize = static_cast<uint64_t>(capacity) * sizeof(TextVertex);
-			desc.isVertexBuffer = true;
-			desc.initialState = nvrhi::ResourceStates::VertexBuffer;
-			desc.keepInitialState = true;
-			desc.debugName = "TextRenderer.Vertices";
-			ENGINE_TRY_ASSIGN(nvrhi::BufferHandle buffer, WithContext(state.Device->CreateBuffer(desc), "while recording the text"));
-			state.Vertices = std::move(buffer);
-			state.VertexCapacity = capacity;
-		}
-		nvrhi::IBindingLayout& layout = *state.Pipelines[Utils::TextTestedPipeline].BindingLayouts[0];
-		std::vector<nvrhi::IBindingSet*> sets;
-		sets.reserve(state.Batches.size());
-		for (const TextBatch& batch : state.Batches)
-		{
-			nvrhi::BindingSetDesc desc;
-			desc.bindings = {
-				nvrhi::BindingSetItem::ConstantBuffer(0, inputs.ViewConstants),
-				nvrhi::BindingSetItem::Texture_SRV(0, batch.Atlas),
-				nvrhi::BindingSetItem::Sampler(0, state.Sampler),
-			};
-			ENGINE_TRY_ASSIGN(nvrhi::IBindingSet * set, WithContext(bindings.GetOrCreate(*state.Device, desc, layout), "while recording the text"));
-			sets.push_back(set);
-		}
-
-		commandList.beginMarker("Text");
-		commandList.writeBuffer(state.Vertices, state.Staging.data(), vertexCount * sizeof(TextVertex), 0);
-		nvrhi::GraphicsState graphics;
-		graphics.framebuffer = inputs.Framebuffer;
-		graphics.viewport.addViewportAndScissorRect(nvrhi::Viewport(viewport.x, viewport.y));
-		graphics.bindings.push_back(nullptr);
-		graphics.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(state.Vertices).setSlot(0).setOffset(0));
-		for (size_t index = 0; index < state.Batches.size(); ++index)
-		{
-			const TextBatch& batch = state.Batches[index];
-			nvrhi::IGraphicsPipeline* pipeline = state.Pipelines[batch.Pipeline].Pipeline;
-			if (index == 0 || graphics.pipeline != pipeline || graphics.bindings[0] != sets[index])
-			{
-				graphics.pipeline = pipeline;
-				graphics.bindings[0] = sets[index];
-				commandList.setGraphicsState(graphics);
-			}
-			nvrhi::DrawArguments arguments;
-			arguments.vertexCount = batch.VertexCount;
-			arguments.startVertexLocation = batch.FirstVertex;
-			commandList.draw(arguments);
-			++counters.DrawCalls;
-			counters.Triangles += batch.VertexCount / 3;
-		}
-		commandList.endMarker();
+		ENGINE_TRY(state.Submit(commandList, bindings, *inputs.Framebuffer, *inputs.ViewConstants, "Text", "while recording the text", counters));
 		return drawn;
 	}
 

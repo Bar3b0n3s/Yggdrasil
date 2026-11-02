@@ -750,6 +750,58 @@ namespace Engine {
 				"values": {"Format": "SpriteSheet"}})"));
 			CHECK(header["error"]["code"] == Json(-32602));
 		}
+
+		// M22 (Docs/Decisions/0033-m22-contract.md decision 10): string tables through asset.create, asset.getProperties and
+		// asset.setProperties, checked by ValidateStringTable; a table imports with no dependency and loads as a StringTable.
+		TEST_CASE("AssetMethods: a string table is created over the defaults and patched, its rules refused at the offending value")
+		{
+			Test::AutomationFixture setup("AssetStringTable");
+
+			// Without values: the locale en and no entries, every field written.
+			const Json empty = CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "StringTable", "path": "Assets/Text/Empty.stringtable"})"));
+			CHECK(empty["asset"]["type"] == Json("StringTable"));
+			const Result<std::string> emptyText = setup.GetEditor().GetVfs().ReadText(VfsPath::Create("project", "Assets/Text/Empty.stringtable").value_or(VfsPath()));
+			REQUIRE_MESSAGE(emptyText.has_value(), emptyText.error().ToString());
+			CHECK(*emptyText == "{\n\t\"Format\": \"StringTable\",\n\t\"Version\": 1,\n\t\"Locales\": [\"en\"],\n\t\"Entries\": []\n}\n");
+
+			const Json created = CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "StringTable", "path": "Assets/Text/Menu.stringtable",
+				"values": {"Locales": ["en", "fr"], "Entries": [{"Key": "Menu.Start", "Values": {"en": "Start", "fr": "Commencer"}}]}})"));
+			CHECK(created["undoIndex"] != Json(0));
+			CallOrFail(setup, "asset.reimport", ParseAssetMethodJson(R"({"asset": "Assets/Text/Menu.stringtable"})"));
+			const Json info = CallOrFail(setup, "asset.info", ParseAssetMethodJson(R"({"asset": "Assets/Text/Menu.stringtable"})"));
+			CHECK(info["importer"] == Json("StringTable"));
+			CHECK(info["dependencies"].empty());
+			CHECK(info["diagnostics"].empty());
+			const Json properties = CallOrFail(setup, "asset.getProperties", ParseAssetMethodJson(R"({"asset": "Assets/Text/Menu.stringtable"})"));
+			CHECK(properties["values"]["Locales"] == Json::array({ "en", "fr" }));
+			CHECK(properties["values"]["Entries"][0]["Values"]["fr"] == Json("Commencer"));
+
+			// A repeated key is refused at the later entry's Key, by a create and by a patch, which leaves the file as it was.
+			const Json repeated = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "StringTable", "path": "Assets/Text/Bad.stringtable",
+				"values": {"Entries": [{"Key": "A", "Values": {"en": "a"}}, {"Key": "A", "Values": {"en": "b"}}]}})"));
+			CHECK(repeated["error"]["code"] == Json(-32003));
+			CHECK(repeated["error"]["data"]["errorCode"] == Json("Validation"));
+			CHECK(repeated["error"]["data"]["issues"][0]["pointer"] == Json("/values/Entries/1/Key"));
+			CHECK_FALSE(setup.GetEditor().GetVfs().Exists(VfsPath::Create("project", "Assets/Text/Bad.stringtable").value_or(VfsPath())));
+			const Json unknownLocale = setup.Request("asset.setProperties",
+				ParseAssetMethodJson(R"({"asset": "Assets/Text/Menu.stringtable", "values": {"Locales": ["en"]}})"));
+			CHECK(unknownLocale["error"]["code"] == Json(-32003));
+			CHECK(unknownLocale["error"]["data"]["issues"][0]["pointer"] == Json("/values/Entries/0/Values/fr"));
+			const Json unchanged = CallOrFail(setup, "asset.getProperties", ParseAssetMethodJson(R"({"asset": "Assets/Text/Menu.stringtable"})"));
+			CHECK(unchanged["values"]["Locales"] == Json::array({ "en", "fr" }));
+
+			// A patch replaces an array whole and is one undo step.
+			const Json patched = CallOrFail(setup, "asset.setProperties",
+				ParseAssetMethodJson(R"({"asset": "Assets/Text/Menu.stringtable", "values": {"Locales": ["en", "fr", "de"]}})"));
+			CHECK(patched["values"]["Locales"] == Json::array({ "en", "fr", "de" }));
+			CallOrFail(setup, "edit.undo", Json::object());
+			const Json undone = CallOrFail(setup, "asset.getProperties", ParseAssetMethodJson(R"({"asset": "Assets/Text/Menu.stringtable"})"));
+			CHECK(undone["values"]["Locales"] == Json::array({ "en", "fr" }));
+
+			const Json header = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "StringTable", "path": "Assets/Text/Bad.stringtable",
+				"values": {"Version": 1}})"));
+			CHECK(header["error"]["code"] == Json(-32602));
+		}
 	}
 
 }

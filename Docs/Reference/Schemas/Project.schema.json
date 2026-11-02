@@ -51,6 +51,10 @@
 		"Testing": {
 			"description": "Test suites and replays.",
 			"$ref": "#/$defs/TestingSettings"
+		},
+		"Localization": {
+			"description": "Localized strings (M22).",
+			"$ref": "#/$defs/LocalizationSettings"
 		}
 	},
 	"required": ["Format", "Version"],
@@ -297,6 +301,17 @@
 				"CoverageGates": {
 					"description": "Whether unfiltered test runs record coverage and fail on any gap of the per-mode coverage gates (FeatureTest).",
 					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"LocalizationSettings": {
+			"description": "The project's localization (§6.1 Localization).",
+			"type": "object",
+			"properties": {
+				"Locale": {
+					"description": "The locale Loc.Get reads string tables in, such as fr or pt-BR: a table's locale equal to it, else its language's, else the table's first; empty reads every table's first.",
+					"type": "string"
 				}
 			},
 			"additionalProperties": false

@@ -44,6 +44,8 @@ namespace Engine {
 				{ ".replay", "Replay", AssetType::Replay },
 				// M18.
 				{ ".spritesheet", "SpriteSheet", AssetType::SpriteSheet },
+				// M22.
+				{ ".stringtable", "StringTable", AssetType::StringTable },
 			};
 			for (const Expected& entry : expected)
 			{
@@ -59,7 +61,8 @@ namespace Engine {
 			CHECK(importers.FindForExtension(".HDR") == importers.FindById("Environment"));
 			CHECK(importers.FindForExtension(".unknown") == nullptr);
 			CHECK(importers.FindForExtension(".SpriteSheet") == importers.FindById("SpriteSheet"));
-			CHECK(importers.GetImporters().size() == 12);
+			CHECK(importers.FindForExtension(".StringTable") == importers.FindById("StringTable"));
+			CHECK(importers.GetImporters().size() == 13);
 		}
 
 		TEST_CASE("ImporterRegistry: Describe lists ids, main types and extensions sorted by id")
@@ -67,7 +70,7 @@ namespace Engine {
 			ImporterRegistry importers;
 			RegisterBuiltinImporters(importers);
 			const std::vector<AssetImporterDescription> descriptions = importers.Describe();
-			REQUIRE(descriptions.size() == 12);
+			REQUIRE(descriptions.size() == 13);
 			CHECK(descriptions.front().Id == "Audio");
 			CHECK(descriptions.back().Id == "Texture");
 			for (size_t index = 1; index < descriptions.size(); ++index)
@@ -95,6 +98,10 @@ namespace Engine {
 			// M18: the sprite sheet importer has no settings; its document struct is the Asset module's (RegisterAssetTypes).
 			CHECK(importers.FindById("SpriteSheet")->GetSettingsTypeName().empty());
 			CHECK(registry->FindStruct("SpriteSheet") != nullptr);
+			// M22: neither has the string table importer; its document structs are the Asset module's too.
+			CHECK(importers.FindById("StringTable")->GetSettingsTypeName().empty());
+			CHECK(registry->FindStruct("StringTable") != nullptr);
+			CHECK(registry->FindStruct("StringTableEntry") != nullptr);
 		}
 	}
 

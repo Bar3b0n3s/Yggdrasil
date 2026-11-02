@@ -145,7 +145,7 @@ namespace Engine {
 		// ProjectSettings is observed through its production consumer, never by reading the settings struct back: the game
 		// process's application specification, the exporter's executable resources and its Export.Exclude, the runner's
 		// inventory and run, the play session (its fixed delta, seed, entity cap and view, its physics world's gravity and
-		// layers, its input actions, its extraction's quality, its ScriptEngine's limits and enforcement), the play
+		// layers, its input actions, its extraction's quality, its ScriptEngine's limits, enforcement and locale), the play
 		// controller's PauseOnError and BlockPlayOnTypeErrors behaviour, the suite overrides' application and the validator's
 		// StartScene and BuildScenes checks and its computed Assets.Load check (Export.PruneUnreferenced). The test ends by
 		// comparing the observed pointers with the reflected leaf walk and naming each unobserved one.
@@ -304,6 +304,8 @@ namespace Engine {
 			observe("/Rendering/SsaoHalfResolution", session->GetLastExtraction().Quality.SsaoHalfResolution == settings.Rendering.SsaoHalfResolution);
 			REQUIRE(session->GetScripts() != nullptr);
 			observe("/Scripting/MemoryLimitMB", session->GetScripts()->GetMemoryState().SoftLimitBytes == settings.Scripting.MemoryLimitMB * MiB);
+			// The session's VM reads string tables in the project's locale (Loc.GetLocale, M22).
+			observe("/Localization/Locale", !settings.Localization.Locale.empty() && session->GetScripts()->GetLocale() == settings.Localization.Locale);
 			CallOrFail(client, "play.stop", Json::object());
 
 			// Ordinary play enforces the callback budget, and with PauseOnError false keeps running after the fault.

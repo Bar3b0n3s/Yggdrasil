@@ -618,6 +618,71 @@ namespace Engine {
 			CHECK(provenance->Find("Assets/Sprites/Typo.spritesheet") == nullptr);
 		}
 
+		// M22 (Docs/Decisions/0033-m22-contract.md decision 10): string tables are canonical authored files too, so
+		// project.upgrade rewrites them as it rewrites sprite sheets: a minified table gets the editor's bytes back, one that
+		// leaves its entries out gets them written, both are recorded, and a table with an unknown member fails at its pointer,
+		// unchanged.
+		TEST_CASE("ProjectMethods: project.upgrade rewrites .stringtable files canonically and fails at an unknown member of one")
+		{
+			Test::AutomationFixture setup("ProjectUpgradeStringTables", false);
+			REQUIRE(setup.Call("asset.create", ParseProjectJson(R"({"type": "StringTable", "path": "Assets/Text/Menu.stringtable",
+				"values": {"Locales": ["en", "fr"], "Entries": [{"Key": "Menu.Start", "Values": {"en": "Start", "fr": "Commencer"}}]}})"))
+					.has_value());
+			const std::filesystem::path root = setup.GetEditor().GetProject().GetRoot();
+			const Result<std::string> canonical = FileSystem::ReadText(root / "Assets/Text/Menu.stringtable");
+			REQUIRE(canonical.has_value());
+			REQUIRE(FileSystem::WriteFileAtomic(root / "Assets/Text/Menu.stringtable", AsBytes(ParseProjectJson(*canonical).dump()), { .KeepBackup = false })
+					.has_value());
+			// A valid table written by hand with its entry list left out.
+			const std::string sparse = R"({"Format": "StringTable", "Version": 1, "Locales": ["en"]})";
+			REQUIRE(FileSystem::WriteFileAtomic(root / "Assets/Text/Sparse.stringtable", AsBytes(sparse), { .KeepBackup = false }).has_value());
+
+			const Json expected = ParseProjectJson(R"([
+				{"path": "Assets/Text/Menu.stringtable", "reason": "canonical form"},
+				{"path": "Assets/Text/Sparse.stringtable", "reason": "canonical form"}])");
+			Result<Json> dryRun = setup.Call("project.upgrade", Json{ { "dryRun", true } });
+			REQUIRE_MESSAGE(dryRun.has_value(), dryRun.error().ToString());
+			CHECK((*dryRun)["changes"] == expected);
+			CHECK(FileSystem::ReadText(root / "Assets/Text/Sparse.stringtable").value_or("") == sparse);
+			Result<Json> upgraded = setup.Call("project.upgrade", Json::object());
+			REQUIRE_MESSAGE(upgraded.has_value(), upgraded.error().ToString());
+			CHECK((*upgraded)["changes"] == expected);
+			CHECK(FileSystem::ReadText(root / "Assets/Text/Menu.stringtable").value_or("") == *canonical);
+			const Json rewritten = ParseProjectJson(FileSystem::ReadText(root / "Assets/Text/Sparse.stringtable").value_or("{}"));
+			CHECK(rewritten.contains("Entries"));
+			const ProvenanceRecorder* provenance = setup.GetEditor().GetProvenance();
+			REQUIRE(provenance != nullptr);
+			for (const std::string_view file : { "Assets/Text/Menu.stringtable", "Assets/Text/Sparse.stringtable" })
+			{
+				CAPTURE(std::string(file));
+				const ProvenanceEntry* entry = provenance->Find(file);
+				REQUIRE(entry != nullptr);
+				CHECK(entry->Method == "project.upgrade");
+			}
+			Result<Json> again = setup.Call("project.upgrade", Json::object());
+			REQUIRE(again.has_value());
+			CHECK((*again)["changes"] == Json::array());
+
+			// An unknown member fails the upgrade at its pointer, as the importer refuses the table; nothing is rewritten.
+			Json typo = ParseProjectJson(*canonical);
+			typo["Entriez"] = Json::array();
+			const std::string typoText = typo.dump(1, '\t');
+			REQUIRE(FileSystem::WriteFileAtomic(root / "Assets/Text/Typo.stringtable", AsBytes(typoText), { .KeepBackup = false }).has_value());
+			for (const bool isDryRun : { true, false })
+			{
+				CAPTURE(isDryRun);
+				const Json response = setup.Request("project.upgrade", isDryRun ? Json{ { "dryRun", true } } : Json::object());
+				REQUIRE_MESSAGE(response.contains("error"), response.dump());
+				const Json& data = response["error"]["data"];
+				CAPTURE(data.dump());
+				CHECK(data["errorCode"] == Json("Validation"));
+				CHECK(data["location"]["file"] == Json("Assets/Text/Typo.stringtable"));
+				CHECK(data["location"]["pointer"] == Json("/Entriez"));
+			}
+			CHECK(FileSystem::ReadText(root / "Assets/Text/Typo.stringtable").value_or(std::string()) == typoText);
+			CHECK(provenance->Find("Assets/Text/Typo.stringtable") == nullptr);
+		}
+
 		TEST_CASE("ProjectMethods: project.refreshAssets registers an externally written file")
 		{
 			Test::AutomationFixture setup("ProjectRefreshAssets", false);

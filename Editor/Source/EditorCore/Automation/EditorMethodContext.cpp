@@ -590,7 +590,8 @@ namespace Engine {
 		EditScriptHost host(*m_Editor);
 		ENGINE_TRY(host.Initialize());
 		ENGINE_TRY_ASSIGN(ScriptApiRegistry * api, m_Editor->GetPlay().GetScriptApi());
-		ENGINE_TRY_ASSIGN(auto engine, ScriptEngine::Create({ .Host = &host, .Api = api, .Settings = m_Editor->GetProject().GetSettings().Scripting, .Mode = RunModes::Editor, .ReadOnly = true }));
+		// M22 (Docs/Decisions/0033-m22-contract.md decisions 11 and 17): the project's locale, as a play session's VM reads it.
+		ENGINE_TRY_ASSIGN(auto engine, ScriptEngine::Create({ .Host = &host, .Api = api, .Settings = m_Editor->GetProject().GetSettings().Scripting, .Mode = RunModes::Editor, .ReadOnly = true, .Locale = m_Editor->GetProject().GetSettings().Localization.Locale }));
 		ENGINE_TRY(engine->InitializeInstances());
 		return engine->Evaluate(code, VfsPath{}, entity, behaviour);
 	}

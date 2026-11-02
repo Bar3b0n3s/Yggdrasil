@@ -12,6 +12,7 @@
 #include "Engine/Asset/ReplayData.h"
 #include "Engine/Asset/SourceFormats.h"
 #include "Engine/Asset/SpriteSheetData.h"
+#include "Engine/Asset/StringTableData.h"
 #include "Engine/AssetPipeline/IAssetImporter.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/AssetPipeline/Importers/SoundEffectImporter.h"
@@ -118,6 +119,9 @@ namespace Engine {
 {"Name": "Panel", "Rect": {"X": 0, "Y": 8, "Width": 12, "Height": 6}, "Pivot": [0.5, 0.5], "Borders": {"Left": 3, "Top": 2, "Right": 4, "Bottom": 1}}],
 "Clips": [{"Name": "Idle", "Frames": [{"Frame": 0, "Ticks": 8}, {"Frame": 1, "Ticks": 12}], "Loop": true}]})";
 
+		constexpr std::string_view StringTableExample = R"({"Format": "StringTable", "Version": 1, "Locales": ["en", "fr", "pt-BR"],
+"Entries": [{"Key": "Menu.Start", "Values": {"en": "Start", "fr": "Commencer", "pt-BR": "Iniciar"}}, {"Key": "Menu.Quit", "Values": {"en": "Quit"}}]})";
+
 		constexpr std::string_view ReplayExample = R"({"Format": "Replay", "Version": 3, "Scene": {"Handle": "8a61c0d2e4f31b77", "Path": "Assets/Scenes/Level2.scene"},
 "Parameters": {"Time": 61.25}, "Seed": 7, "FixedHz": 60, "EngineVersion": "0.1.0", "Config": "Editor",
 "Fingerprint": {"Entities": [{"Id": "0000000000000011", "Path": "/Camera", "Hash": "5e1f0c2b9a7d3e48",
@@ -140,7 +144,7 @@ namespace Engine {
 
 		constexpr std::string_view BatchRequestExample = R"({"method": "entity.create", "params": {"name": "Ball", "components": {"Transform": {"Translation": [0, 2, 0]}}}})";
 
-		constexpr std::array<AuthoredFormat, 11> AuthoredFormats = {
+		constexpr std::array<AuthoredFormat, 12> AuthoredFormats = {
 			AuthoredFormat{ "AssetMeta", ".meta", AssetMetadata::CurrentVersion,
 				"The sidecar of every asset file (§6.4): its handle, type, importer, import settings and sub-assets; or, for a file a glTF references, a dependency meta naming its owner.",
 				AssetMetaExample },
@@ -181,6 +185,12 @@ namespace Engine {
 				"corner, each with a pivot and 9-slice borders) and named clips that show frames, by their index in `Frames`, for a number of "
 				"fixed-step ticks. A null `Texture` draws the frames as opaque white. The tables below list every field, its range and the limits.",
 				SpriteSheetExample, "SpriteSheet" },
+			AuthoredFormat{ "StringTable", ".stringtable", StringTableFormatVersion,
+				"A string table (§6.10): locale tags, the first of them the fallback, and entries that give each key a string per locale, read by "
+				"`Loc.Get` in the project's `Localization.Locale` (the table's locale equal to it ignoring ASCII case, else its language's, the "
+				"part before its first `-`, else the fallback; an entry without a string for that locale gives the fallback's). Lookups are "
+				"byte-wise and deterministic. The tables below list every field, its rules and the limits.",
+				StringTableExample, "StringTable" },
 		};
 
 	}
@@ -1164,10 +1174,11 @@ namespace Engine {
 			const StructInfo* material = types.FindStruct("Material");
 			const StructInfo* soundEffect = types.FindStruct("SoundEffect");
 			const StructInfo* spriteSheet = types.FindStruct("SpriteSheet");
-			if (project == nullptr || material == nullptr || soundEffect == nullptr || spriteSheet == nullptr)
+			const StructInfo* stringTable = types.FindStruct("StringTable");
+			if (project == nullptr || material == nullptr || soundEffect == nullptr || spriteSheet == nullptr || stringTable == nullptr)
 			{
 				return MakeError(ErrorCode::InvalidArgument,
-					"the type registry lacks ProjectSettings, Material, SoundEffect or SpriteSheet, which the file format schemas use");
+					"the type registry lacks ProjectSettings, Material, SoundEffect, SpriteSheet or StringTable, which the file format schemas use");
 			}
 
 			std::map<std::string, Json> schemas;
@@ -1187,6 +1198,7 @@ namespace Engine {
 				StructDocumentSchema(*soundEffect, SoundEffectFormatName, SoundEffectFormatVersion, "A sound effect file (§6.6)."));
 			schemas.emplace("SpriteSheet",
 				StructDocumentSchema(*spriteSheet, SpriteSheetFormatName, SpriteSheetFormatVersion, "A sprite sheet file (§6.9)."));
+			schemas.emplace("StringTable", StructDocumentSchema(*stringTable, StringTableFormatName, StringTableFormatVersion, "A string table file (§6.10)."));
 			return schemas;
 		}
 

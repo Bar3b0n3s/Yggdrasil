@@ -3,6 +3,7 @@
 
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/SpriteSheetData.h"
+#include "Engine/Asset/StringTableData.h"
 
 namespace Engine {
 
@@ -11,6 +12,8 @@ namespace Engine {
 		RegisterMaterialTypes(registry);
 		// M18 (Docs/Decisions/0029-m18-contract.md decision 15).
 		RegisterSpriteSheetTypes(registry);
+		// M22 (Docs/Decisions/0033-m22-contract.md decision 10).
+		RegisterStringTableTypes(registry);
 	}
 
 }

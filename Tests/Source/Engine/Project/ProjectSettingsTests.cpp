@@ -2,6 +2,7 @@
 
 #include "Engine/Project/ProjectSettings.h"
 
+#include "Engine/Asset/StringTableData.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Random.h"
 #include "Engine/Physics/PhysicsLayers.h"
@@ -111,7 +112,7 @@ namespace Engine {
 		TEST_CASE("ProjectSettings: every settings struct and enum is registered")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
-			const std::array<std::string_view, 12> structs = {
+			const std::array<std::string_view, 13> structs = {
 				"ProjectSettings",
 				"WindowSettings",
 				"SimulationSettings",
@@ -124,6 +125,7 @@ namespace Engine {
 				"TestingSettings",
 				"TestSuite",
 				"TestSuiteOverrides",
+				"LocalizationSettings",
 			};
 			for (const std::string_view name : structs)
 			{
@@ -224,6 +226,48 @@ namespace Engine {
 			REQUIRE_FALSE(loaded.has_value());
 			CHECK(loaded.error().GetCode() == ErrorCode::Validation);
 			CHECK(loaded.error().ToString().contains("/Export/Company"));
+		}
+
+		// M22 (Docs/Decisions/0033-m22-contract.md decision 11): Localization.Locale is empty or a string table's locale tag,
+		// refused with a Validation error located at /Localization/Locale otherwise.
+		TEST_CASE("ProjectSettings: Localization.Locale is empty or a locale tag, located at /Localization/Locale")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			const StructInfo* type = registry->FindStruct<ProjectSettings>();
+			REQUIRE(type != nullptr);
+			const auto issues = [&](std::string locale)
+			{
+				ProjectSettings settings;
+				settings.Localization.Locale = std::move(locale);
+				ResolveContext resolve;
+				resolve.Registry = registry.get();
+				ValidationContext context;
+				type->Validate(&settings, resolve, context);
+				std::vector<std::string> pointers;
+				for (const ValidationIssue& issue : context.GetIssues())
+					pointers.push_back(issue.JsonPointer);
+				return pointers;
+			};
+			// Project cannot include Asset, so the rule is written twice: a non-empty locale passes exactly when a string table
+			// accepts it as a locale tag.
+			const auto tableAccepts = [](std::string_view locale)
+			{
+				StringTableData table;
+				table.Locales = { std::string(locale) };
+				return ValidateStringTable(table).has_value();
+			};
+			for (const std::string_view valid : { "", "fr", "pt-BR", "zh-Hant-TW", "x", "abcdefghijklmnopqrstuvwxyz012345678" })
+			{
+				CAPTURE(valid);
+				CHECK(issues(std::string(valid)).empty());
+				CHECK((valid.empty() || tableAccepts(valid)));
+			}
+			for (const std::string_view invalid : { "-fr", "1en", "fr_CA", "f r", "pt-BR\n", "abcdefghijklmnopqrstuvwxyz0123456789" })
+			{
+				CAPTURE(invalid);
+				CHECK(issues(std::string(invalid)) == std::vector<std::string>{ "/Localization/Locale" });
+				CHECK_FALSE(tableAccepts(invalid));
+			}
 		}
 
 		TEST_CASE("ProjectSettings: physics layers are 1 to 16 unique names starting with Default, and collisions pair declared layers")

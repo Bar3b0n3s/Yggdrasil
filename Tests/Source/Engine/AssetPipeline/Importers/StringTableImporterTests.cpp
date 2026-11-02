@@ -10,8 +10,7 @@
 #include <string_view>
 #include <vector>
 
-// StringTableImporter (M22, C22.1, R-UI-L10N; Docs/Decisions/0033-m22-contract.md decision 10). Skipped by the contract;
-// stream L un-skips them.
+// StringTableImporter (M22, C22.1, R-UI-L10N; Docs/Decisions/0033-m22-contract.md decision 10).
 
 namespace Engine {
 
@@ -49,7 +48,7 @@ namespace Engine {
 
 	TEST_SUITE("AssetPipeline")
 	{
-		TEST_CASE("StringTableImporter: a table imports with its entries sorted by key and no dependencies" * doctest::skip(true))
+		TEST_CASE("StringTableImporter: a table imports with its entries sorted by key and no dependencies")
 		{
 			CHECK(StringTableImporter().CanImport(".StringTable"));
 			CHECK(StringTableImporter().GetMainType() == AssetType::StringTable);
@@ -77,7 +76,7 @@ namespace Engine {
 			CHECK(again->Artifacts.front().Cooked == imported->Artifacts.front().Cooked);
 		}
 
-		TEST_CASE("StringTableImporter: an unknown member or an invalid table fails the import, located in its file" * doctest::skip(true))
+		TEST_CASE("StringTableImporter: an unknown member or an invalid table fails the import, located in its file")
 		{
 			Test::AssetTestFixture fixture;
 			fixture.WriteProjectText("Assets/Typo.stringtable", R"({"Format": "StringTable", "Version": 1, "Locales": ["en"], "Entry": []})");

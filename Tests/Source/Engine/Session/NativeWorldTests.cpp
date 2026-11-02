@@ -265,6 +265,7 @@ namespace Engine {
 				PlaySessionPhase::PhysicsPostStep,
 				PlaySessionPhase::DestroyFlush,
 				PlaySessionPhase::PostStepTransformUpdate,
+				PlaySessionPhase::UiLayout,
 			};
 			CHECK(observer.Phases == expected);
 			CHECK(PlaySessionPhaseToString(PlaySessionPhase::NativeStep) == "NativeStep");

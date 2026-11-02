@@ -694,6 +694,20 @@
 				"Modes": ["Editor", "Release", "Dist"]
 			},
 			{
+				"Script": "Assets/Tests/Api/Ui.test.luau",
+				"Scene": "Assets/Scenes/Components/Ui.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
 				"Script": "Assets/Tests/Api/EditorOnly.test.luau",
 				"Scene": "Assets/Scenes/Scripting.scene",
 				"Parameters": null,
@@ -806,6 +820,20 @@
 				"Modes": ["Editor", "Release", "Dist"]
 			},
 			{
+				"Script": "Assets/Tests/Localization/Localization.test.luau",
+				"Scene": "",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
 				"Script": "Assets/Tests/SceneLoad/SceneLoad.test.luau",
 				"Scene": "Assets/Scenes/SceneLoadA.scene",
 				"Parameters": {
@@ -886,5 +914,8 @@
 		"CaseTimeoutTicks": 600,
 		"SuiteTickLimit": 36000,
 		"CoverageGates": true
+	},
+	"Localization": {
+		"Locale": "fr-CA"
 	}
 }

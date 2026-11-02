@@ -18,7 +18,7 @@
 // UI layout (M22, C22.1; Docs/Decisions/0033-m22-contract.md decisions 4 and 5): rectangles in scene pixels from anchors,
 // pivots, positions, sizes and canvas scales; pixel snapping; clipping; draw order. Every expected value is the exact result
 // of IEEE-exact float arithmetic, so the unit suite's Debug and Release runs check that the tables are identical across
-// configurations (Roadmap M22's acceptance). Skipped by the contract; stream A (stream D for the containers) un-skips them.
+// configurations (Roadmap M22's acceptance).
 
 namespace Engine {
 
@@ -61,7 +61,7 @@ namespace Engine {
 
 	TEST_SUITE("Scene")
 	{
-		TEST_CASE("UiLayout: a rectangle's clip covers the pixels whose centres it holds" * doctest::skip(true))
+		TEST_CASE("UiLayout: a rectangle's clip covers the pixels whose centres it holds")
 		{
 			// Pixel x is covered when min <= x + 0.5 < max: ceil(v - 0.5) at both ends.
 			CHECK(ComputeUiClipRect(glm::vec2(10.4f, 0.5f), glm::vec2(20.5f, 3.6f)) == UiClipRect{ .MinX = 10, .MinY = 0, .MaxX = 20, .MaxY = 4 });
@@ -74,7 +74,7 @@ namespace Engine {
 			CHECK(ComputeUiClipRect(glm::vec2(2.16e9f, 0.0f), glm::vec2(3.0e9f, 1.0f)).IsEmpty());
 		}
 
-		TEST_CASE("UiLayout: anchors, pivot, position and size place an element in its parent in scene pixels" * doctest::skip(true))
+		TEST_CASE("UiLayout: anchors, pivot, position and size place an element in its parent in scene pixels")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -127,7 +127,7 @@ namespace Engine {
 			CHECK(table.Nodes[3].Entity == centred.GetUUID());
 		}
 
-		TEST_CASE("UiLayout: a canvas maps its units to scene pixels by ScaleFactor or by MatchHeight" * doctest::skip(true))
+		TEST_CASE("UiLayout: a canvas maps its units to scene pixels by ScaleFactor or by MatchHeight")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -156,7 +156,7 @@ namespace Engine {
 			CHECK(RequireNode(table, halvedElement).Max == glm::vec2(15.0f, 7.5f));
 		}
 
-		TEST_CASE("UiLayout: PixelSnap rounds every corner to whole scene pixels before the children are placed" * doctest::skip(true))
+		TEST_CASE("UiLayout: PixelSnap rounds every corner to whole scene pixels before the children are placed")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -173,7 +173,7 @@ namespace Engine {
 			CHECK(RequireNode(table, dot).Max == glm::vec2(14.0f, 25.0f));
 		}
 
-		TEST_CASE("UiLayout: ClipChildren clips the descendants to the intersection of their clipping ancestors, not the element itself" * doctest::skip(true))
+		TEST_CASE("UiLayout: ClipChildren clips the descendants to the intersection of their clipping ancestors, not the element itself")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -203,7 +203,7 @@ namespace Engine {
 			CHECK_FALSE(outsideNode.Visible);
 		}
 
-		TEST_CASE("UiLayout: canvases are in SortOrder, ties in entity order, each with its elements in canonical order" * doctest::skip(true))
+		TEST_CASE("UiLayout: canvases are in SortOrder, ties in entity order, each with its elements in canonical order")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -233,7 +233,7 @@ namespace Engine {
 			CHECK(FindUiCanvasLayout(table, middle.GetUUID()) == &table.Canvases[1]);
 		}
 
-		TEST_CASE("UiLayout: an effectively disabled element, its subtree and an element without a canvas are not laid out" * doctest::skip(true))
+		TEST_CASE("UiLayout: an effectively disabled element, its subtree and an element without a canvas are not laid out")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -257,8 +257,74 @@ namespace Engine {
 			CHECK(FindUiLayoutNode(table, stray.GetUUID()) == nullptr);
 		}
 
-		// Streams A and D: the stream that lands last of the two un-skips it.
-		TEST_CASE("UiLayout: a container places its children, and an element that ignores the layout or is disabled takes no space" * doctest::skip(true))
+		TEST_CASE("UiLayout: a canvas below another canvas's element starts a tree of its own over the whole scene image")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity outer = AddCanvas(scene, "Outer", MakeUnsnappedCanvas());
+			Entity panel = AddElement(scene, "Panel", outer, MakeTopLeftRect(glm::vec2(10.0f), glm::vec2(50.0f)));
+			Entity nested = scene.CreateEntity("Nested", panel);
+			nested.AddComponent<UiCanvasComponent>(UiCanvasComponent{ .ScaleFactor = 2.0f, .PixelSnap = false });
+			Entity inner = AddElement(scene, "Inner", nested, MakeTopLeftRect(glm::vec2(5.0f), glm::vec2(10.0f)));
+			// After the nested canvas's subtree, Panel's next child is the outer canvas's again.
+			Entity after = AddElement(scene, "After", panel, MakeTopLeftRect(glm::vec2(1.0f), glm::vec2(2.0f)));
+
+			const UiLayoutTable table = ComputeUiLayout(scene, glm::uvec2(200, 100));
+			REQUIRE(table.Canvases.size() == 2);
+			CHECK(table.Canvases[0].Canvas == outer.GetUUID());
+			CHECK(table.Canvases[0].NodeCount == 2);
+			CHECK(table.Canvases[1].Canvas == nested.GetUUID());
+			CHECK(table.Canvases[1].FirstNode == 2);
+			CHECK(table.Canvases[1].NodeCount == 1);
+			CHECK(table.Canvases[1].Size == glm::vec2(100.0f, 50.0f));
+			REQUIRE(table.Nodes.size() == 3);
+			CHECK(table.Nodes[0].Entity == panel.GetUUID());
+			CHECK(table.Nodes[1].Entity == after.GetUUID());
+			CHECK(table.Nodes[2].Entity == inner.GetUUID());
+
+			// The nested canvas's element is placed in the scene image at its own scale, not in Panel.
+			const UiLayoutNode& innerNode = RequireNode(table, inner);
+			CHECK(innerNode.Canvas == nested.GetUUID());
+			CHECK(innerNode.Parent == nested.GetUUID());
+			CHECK(innerNode.Depth == 1);
+			CHECK(innerNode.Min == glm::vec2(10.0f));
+			CHECK(innerNode.Max == glm::vec2(30.0f));
+			const UiLayoutNode& afterNode = RequireNode(table, after);
+			CHECK(afterNode.Canvas == outer.GetUUID());
+			CHECK(afterNode.Parent == panel.GetUUID());
+			CHECK(afterNode.Depth == 2);
+			CHECK(afterNode.Min == glm::vec2(11.0f));
+			CHECK(FindUiLayoutNode(table, nested.GetUUID()) == nullptr);
+		}
+
+		TEST_CASE("UiLayout: an element is visible only when its rectangle covers a pixel of the scene image")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			// Without a canvas the table is empty, at the scene resolution it was asked for.
+			const UiLayoutTable withoutCanvas = ComputeUiLayout(scene, glm::uvec2(200, 100));
+			CHECK(withoutCanvas.SceneSize == glm::uvec2(200, 100));
+			CHECK(withoutCanvas.Canvases.empty());
+			CHECK(withoutCanvas.Nodes.empty());
+
+			Entity canvas = AddCanvas(scene, "Canvas", MakeUnsnappedCanvas());
+			Entity inside = AddElement(scene, "Inside", canvas, MakeTopLeftRect(glm::vec2(10.0f), glm::vec2(10.0f)));
+			Entity straddling = AddElement(scene, "Straddling", canvas, MakeTopLeftRect(glm::vec2(-5.0f), glm::vec2(10.0f)));
+			Entity beyond = AddElement(scene, "Beyond", canvas, MakeTopLeftRect(glm::vec2(200.0f, 10.0f), glm::vec2(10.0f)));
+			Entity empty = AddElement(scene, "Empty", canvas, MakeTopLeftRect(glm::vec2(10.0f), glm::vec2(0.0f, 10.0f)));
+			// From x 10.2 to 10.4: no pixel centre (10.5) inside.
+			Entity sliver = AddElement(scene, "Sliver", canvas, MakeTopLeftRect(glm::vec2(10.2f, 10.0f), glm::vec2(0.2f, 10.0f)));
+
+			const UiLayoutTable table = ComputeUiLayout(scene, glm::uvec2(200, 100));
+			CHECK(RequireNode(table, inside).Visible);
+			CHECK(RequireNode(table, straddling).Visible);
+			CHECK_FALSE(RequireNode(table, beyond).Visible);
+			CHECK_FALSE(RequireNode(table, empty).Visible);
+			CHECK_FALSE(RequireNode(table, sliver).Visible);
+			CHECK_FALSE(RequireNode(table, inside).Clipped);
+		}
+
+		TEST_CASE("UiLayout: a container places its children, and an element that ignores the layout or is disabled takes no space")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();

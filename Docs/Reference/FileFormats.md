@@ -19,6 +19,7 @@ Every authored file is UTF-8 JSON with LF line ends and tabs, written by the can
 | Scene | `.scene` | 1 | [Schemas/Scene.schema.json](Schemas/Scene.schema.json) |
 | SoundEffect | `.sfx` | 1 | [Schemas/SoundEffect.schema.json](Schemas/SoundEffect.schema.json) |
 | SpriteSheet | `.spritesheet` | 1 | [Schemas/SpriteSheet.schema.json](Schemas/SpriteSheet.schema.json) |
+| StringTable | `.stringtable` | 1 | [Schemas/StringTable.schema.json](Schemas/StringTable.schema.json) |
 
 ### AssetMeta (`.meta`)
 
@@ -625,6 +626,52 @@ One step of a sprite clip: a frame shown for a number of fixed-step ticks.
 | `Frame` | `UInt32` | `0` | 0 to 65535 |  |  | The index of the frame in the sheet's Frames, from 0. |
 | `Ticks` | `UInt32` | `1` | 1 to 65535 | ticks |  | How many fixed-step ticks the frame shows. |
 
+### StringTable (`.stringtable`)
+
+A string table (§6.10): locale tags, the first of them the fallback, and entries that give each key a string per locale, read by `Loc.Get` in the project's `Localization.Locale` (the table's locale equal to it ignoring ASCII case, else its language's, the part before its first `-`, else the fallback; an entry without a string for that locale gives the fallback's). Lookups are byte-wise and deterministic. The tables below list every field, its rules and the limits.
+
+Header: `"Format": "StringTable", "Version": 1`. Schema: [Schemas/StringTable.schema.json](Schemas/StringTable.schema.json).
+
+```json
+{
+	"Format": "StringTable",
+	"Version": 1,
+	"Locales": ["en", "fr", "pt-BR"],
+	"Entries": [
+		{
+			"Key": "Menu.Start",
+			"Values": {
+				"en": "Start",
+				"fr": "Commencer",
+				"pt-BR": "Iniciar"
+			}
+		},
+		{
+			"Key": "Menu.Quit",
+			"Values": {
+				"en": "Quit"
+			}
+		}
+	]
+}
+```
+
+#### Fields of StringTable
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Locales` | `Array<String>` | `["en"]` |  |  |  | 1 to 64 locale tags (1 to 35 ASCII letters, digits and '-', starting with a letter, such as en, fr or pt-BR), unique ignoring ASCII case; the first is the fallback locale. |
+| `Entries` | `Array<StringTableEntry>` | `[]` |  |  |  | At most 65536 entries, in authored order (sorted by Key once cooked). |
+
+#### Fields of StringTableEntry
+
+One key and its strings by locale.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Key` | `String` | `""` |  |  |  | The entry's identity, which Loc.Get looks up: 1 to 256 bytes of text without control characters, unique in the table. |
+| `Values` | `Map<String>` | `{}` |  |  |  | The entry's strings by locale (each key one of the table's Locales, written sorted): at most 16384 bytes of UTF-8 each, line feeds and tabs their only control characters; the fallback locale's string is required, the others optional. |
+
 ## Source formats
 
 The files the editor imports from `Assets/`, by importer and extension (§7.4). Importable rows are cooked into assets; a row that is not importable is claimed only to be refused with a hint. Settings name the importer's settings struct, the shape of a `.meta`'s `Settings` (`asset.getImportSettings` returns it).
@@ -637,8 +684,8 @@ The files the editor imports from `Assets/`, by importer and extension (§7.4). 
 | Audio | `.wav` | AudioClip | 1 | `AudioImportSettings` | yes |
 | Environment | `.exr` | Environment | 1 | `EnvironmentImportSettings` | no |
 | Environment | `.hdr` | Environment | 1 | `EnvironmentImportSettings` | yes |
-| Font | `.otf` | Font | 3 | `FontImportSettings` | yes |
-| Font | `.ttf` | Font | 3 | `FontImportSettings` | yes |
+| Font | `.otf` | Font | 4 | `FontImportSettings` | yes |
+| Font | `.ttf` | Font | 4 | `FontImportSettings` | yes |
 | Gltf | `.glb` | Prefab | 1 | `GltfImportSettings` | yes |
 | Gltf | `.gltf` | Prefab | 1 | `GltfImportSettings` | yes |
 | Material | `.material` | Material | 1 | none | yes |
@@ -648,6 +695,7 @@ The files the editor imports from `Assets/`, by importer and extension (§7.4). 
 | Script | `.luau` | Script | 1 | none | yes |
 | SoundEffect | `.sfx` | AudioClip | 1 | none | yes |
 | SpriteSheet | `.spritesheet` | SpriteSheet | 1 | none | yes |
+| StringTable | `.stringtable` | StringTable | 1 | none | yes |
 | Texture | `.bmp` | Texture | 1 | `TextureImportSettings` | yes |
 | Texture | `.jpeg` | Texture | 1 | `TextureImportSettings` | yes |
 | Texture | `.jpg` | Texture | 1 | `TextureImportSettings` | yes |

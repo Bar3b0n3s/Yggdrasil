@@ -4,27 +4,31 @@
 
 #include "Engine/Asset/AssetDiagnostic.h"
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/FontData.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/GraphicsSpecification.h"
 #include "Engine/Graphics/Image.h"
 #include "Engine/Graphics/Readback.h"
+#include "Engine/Renderer/RenderStats.h"
 #include "Engine/Renderer/SceneTargetFormats.h"
 #include "Shared/ViewConstants.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
+#include "Support/InMemoryAssetManager.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <string>
 #include <vector>
 
 // The text pass (Architecture §8.10, §8.3 pass 14; Docs/Decisions/0013-m8-decisions.md decision 11) with the Default font
-// (Inter, M6's FontImporter through the engine resources).
+// (Inter, M6's FontImporter through the engine resources), and M22's glyph runs with a font of their own.
 
 namespace Engine {
 
@@ -91,6 +95,27 @@ namespace Engine {
 			{
 				inputs.Framebuffer = m_Framebuffer;
 				inputs.ViewConstants = m_ViewBuffer;
+				return Record(drawn, depth, [this, &inputs](nvrhi::ICommandList& commandList, PassBindingCache& bindings)
+				{
+					return m_Renderer->Record(commandList, bindings, inputs);
+				});
+			}
+
+			// M22: draws glyph runs (TextRenderer::RecordGlyphRuns) as Render draws texts, adding to `counters`.
+			Image RenderGlyphRuns(TextGlyphRenderInputs inputs, uint32_t& drawn, RenderPassCounters& counters)
+			{
+				inputs.Framebuffer = m_Framebuffer;
+				inputs.ViewConstants = m_ViewBuffer;
+				return Record(drawn, 0.0f, [this, &inputs, &counters](nvrhi::ICommandList& commandList, PassBindingCache& bindings)
+				{
+					return m_Renderer->RecordGlyphRuns(commandList, bindings, inputs, counters);
+				});
+			}
+		private:
+			// Clears the targets, calls `record` with the command list and a binding cache, executes and reads the LDR target.
+			template<typename RecordFunction>
+			Image Record(uint32_t& drawn, float depth, const RecordFunction& record)
+			{
 				Result<nvrhi::CommandListHandle> commandList = m_Device.CreateCommandList();
 				REQUIRE(commandList.has_value());
 				(*commandList)->open();
@@ -98,7 +123,7 @@ namespace Engine {
 				(*commandList)->clearTextureFloat(m_Color, nvrhi::AllSubresources, nvrhi::Color(0.0f, 0.0f, 0.0f, 1.0f));
 				(*commandList)->clearDepthStencilTexture(m_Depth, nvrhi::AllSubresources, true, depth, false, 0);
 				PassBindingCache bindings;
-				const Result<uint32_t> recorded = m_Renderer->Record(**commandList, bindings, inputs);
+				const Result<uint32_t> recorded = record(**commandList, bindings);
 				(*commandList)->close();
 				REQUIRE_MESSAGE(recorded.has_value(), recorded.error().ToString());
 				drawn = *recorded;
@@ -117,6 +142,34 @@ namespace Engine {
 			nvrhi::BufferHandle m_ViewBuffer;
 			ViewConstants m_View{};
 		};
+
+		// M22: a font whose 4 x 4 atlas is inside every glyph everywhere (each texel 255, beyond the outline's 128), so a glyph
+		// quad covers its pixels fully and draws exactly its colour; its glyph 'A' spans the whole atlas.
+		Ref<FontData> MakeSolidFont()
+		{
+			auto font = CreateRef<FontData>();
+			font->Ascent = 0.8f;
+			font->Descent = -0.2f;
+			font->AtlasWidth = 4;
+			font->AtlasHeight = 4;
+			font->AtlasPixels.assign(16, std::byte{ 255 });
+			font->Glyphs = { FontGlyph{ .Codepoint = 'A', .Advance = 1.0f, .PlaneMax = glm::vec2(1.0f), .AtlasMin = glm::vec2(0.0f), .AtlasMax = glm::vec2(1.0f) } };
+			REQUIRE(ValidateFontData(*font).has_value());
+			return font;
+		}
+
+		// A glyph of the solid font over [min, max) in pixels.
+		TextPixelGlyph MakeSolidGlyph(glm::vec2 min, glm::vec2 max)
+		{
+			return TextPixelGlyph{ .Min = min, .Max = max, .AtlasMin = glm::vec2(0.0f), .AtlasMax = glm::vec2(1.0f) };
+		}
+
+		// The red, green and blue bytes of pixel (x, y).
+		glm::ivec3 GetPixel(const Image& image, uint32_t x, uint32_t y)
+		{
+			const std::span<const std::byte> texel = image.GetRow(y).subspan(static_cast<size_t>(x) * 4, 4);
+			return glm::ivec3(std::to_integer<int>(texel[0]), std::to_integer<int>(texel[1]), std::to_integer<int>(texel[2]));
+		}
 
 		// The number of pixels whose red channel exceeds 128 inside the rectangle [x0, x1) x [y0, y1).
 		uint32_t CountLit(const Image& image, uint32_t x0, uint32_t y0, uint32_t x1, uint32_t y1)
@@ -365,6 +418,100 @@ namespace Engine {
 					return diagnostic.Code == AssetUploadFailedCode && diagnostic.Asset == BuiltinAssetHandles::DefaultFont;
 				});
 				CHECK(uploadFailures == 1);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		TEST_CASE("TextRenderer: glyph runs draw their glyphs in their colours, each clipped to its scissor" * doctest::test_suite(Test::GpuSuite))
+		{
+			// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 7): pre-laid-out glyphs in the framebuffer's pixels, a run
+			// per font, colour and scissor; a scissor partly outside the framebuffer is cut to it, one wholly outside or empty
+			// draws nothing and is not counted.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			constexpr AssetHandle SolidFont{ 0xF047 };
+			Test::InMemoryAssetManager assets;
+			assets.Publish(SolidFont, MakeSolidFont());
+			{
+				TextSetup setup(gpu);
+				const std::vector<TextPixelGlyph> glyphs = {
+					MakeSolidGlyph(glm::vec2(8.0f), glm::vec2(24.0f)),
+					MakeSolidGlyph(glm::vec2(40.0f, 8.0f), glm::vec2(56.0f, 24.0f)),
+					MakeSolidGlyph(glm::vec2(72.0f, 8.0f), glm::vec2(88.0f, 24.0f)),
+					MakeSolidGlyph(glm::vec2(104.0f, 8.0f), glm::vec2(120.0f, 24.0f)),
+				};
+				const std::vector<TextGlyphRun> runs = {
+					TextGlyphRun{ .Font = SolidFont, .Color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f), .FirstGlyph = 0, .GlyphCount = 1 },
+					TextGlyphRun{ .Font = SolidFont, .Color = glm::vec4(0.0f, 1.0f, 0.0f, 1.0f), .FirstGlyph = 1, .GlyphCount = 1, .Scissor = nvrhi::Rect(44, 52, -8, 16) },
+					TextGlyphRun{ .Font = SolidFont, .Color = glm::vec4(0.0f, 0.0f, 1.0f, 1.0f), .FirstGlyph = 2, .GlyphCount = 1, .Scissor = nvrhi::Rect(200, 300, 0, 64) },
+					TextGlyphRun{ .Font = SolidFont, .Color = glm::vec4(1.0f), .FirstGlyph = 3, .GlyphCount = 1, .Scissor = nvrhi::Rect(104, 104, 8, 24) },
+				};
+				uint32_t drawn = 0;
+				RenderPassCounters counters;
+				const Image image = setup.RenderGlyphRuns({ .Glyphs = glyphs, .Runs = runs, .Assets = &assets }, drawn, counters);
+				CHECK(drawn == 2);
+				CHECK(counters.DrawCalls == 2);
+				CHECK(counters.Triangles == 4);
+				for (uint32_t y = 0; y < 32; ++y)
+				{
+					for (uint32_t x = 0; x < Width; ++x)
+					{
+						CAPTURE(x);
+						CAPTURE(y);
+						glm::ivec3 expected(0);
+						if (x >= 8 && x < 24 && y >= 8 && y < 24)
+							expected = glm::ivec3(255, 0, 0);
+						else if (x >= 44 && x < 52 && y >= 8 && y < 16)
+							expected = glm::ivec3(0, 255, 0);
+						CHECK(GetPixel(image, x, y) == expected);
+					}
+				}
+				CHECK(setup.GetRenderer().GetFontAtlasCount() == 1);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		TEST_CASE("TextRenderer: glyph runs of one atlas and scissor draw together, and runs placed beyond float's range are left out"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// Colour is per vertex, so two runs of one font and one scissor are one draw; a run with a non-finite glyph corner or
+			// colour, or without glyphs, is left out and not counted, and the others still draw.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			constexpr AssetHandle SolidFont{ 0xF047 };
+			Test::InMemoryAssetManager assets;
+			assets.Publish(SolidFont, MakeSolidFont());
+			{
+				TextSetup setup(gpu);
+				constexpr float Infinity = std::numeric_limits<float>::infinity();
+				const std::vector<TextPixelGlyph> glyphs = {
+					MakeSolidGlyph(glm::vec2(8.0f), glm::vec2(24.0f)),
+					MakeSolidGlyph(glm::vec2(40.0f, 8.0f), glm::vec2(56.0f, 24.0f)),
+					MakeSolidGlyph(glm::vec2(72.0f, 8.0f), glm::vec2(Infinity, 24.0f)),
+				};
+				const std::vector<TextGlyphRun> runs = {
+					TextGlyphRun{ .Font = SolidFont, .Color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f), .FirstGlyph = 0, .GlyphCount = 1 },
+					TextGlyphRun{ .Font = SolidFont, .Color = glm::vec4(0.0f, 1.0f, 0.0f, 1.0f), .FirstGlyph = 1, .GlyphCount = 1 },
+					TextGlyphRun{ .Font = SolidFont, .Color = glm::vec4(1.0f), .FirstGlyph = 2, .GlyphCount = 1 },
+					TextGlyphRun{ .Font = SolidFont, .Color = glm::vec4(Infinity), .FirstGlyph = 0, .GlyphCount = 1 },
+					TextGlyphRun{ .Font = SolidFont, .Color = glm::vec4(1.0f), .FirstGlyph = 1, .GlyphCount = 0 },
+				};
+				uint32_t drawn = 0;
+				RenderPassCounters counters;
+				const Image image = setup.RenderGlyphRuns({ .Glyphs = glyphs, .Runs = runs, .Assets = &assets }, drawn, counters);
+				CHECK(drawn == 2);
+				CHECK(counters.DrawCalls == 1);
+				CHECK(GetPixel(image, 16, 16) == glm::ivec3(255, 0, 0));
+				CHECK(GetPixel(image, 48, 16) == glm::ivec3(0, 255, 0));
+				CHECK(GetPixel(image, 80, 16) == glm::ivec3(0));
+				CHECK(CountLit(image, 64, 0, Width, Height) == 0);
+
+				// No run to draw: nothing is recorded.
+				RenderPassCounters none;
+				const std::vector<TextGlyphRun> empty = { runs[2] };
+				setup.RenderGlyphRuns({ .Glyphs = glyphs, .Runs = empty, .Assets = &assets }, drawn, none);
+				CHECK(drawn == 0);
+				CHECK(none.DrawCalls == 0);
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}

@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["UI_ELEMENT_WITHOUT_CANVAS"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

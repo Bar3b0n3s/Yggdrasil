@@ -750,7 +750,8 @@
 			".sfx",
 			".meta",
 			".replay",
-			".spritesheet"
+			".spritesheet",
+			".stringtable"
 		],
 		"LineDelimitedExtensions": [
 			".jsonl"

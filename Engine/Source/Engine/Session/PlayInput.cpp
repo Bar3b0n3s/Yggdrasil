@@ -42,6 +42,19 @@ namespace Engine {
 			std::array<View, PhaseCount> Views{};
 		};
 
+		// One event waiting for its tick, with what W-CLOCK's frame preview (Docs/Decisions/0033-m22-contract.md decision 12)
+		// knows of it: whether the host's devices queued it (QueueDeviceEvent: the preview applies only those) and whether the
+		// preview has applied it to the frame view's state. A Scroll adds the offsets of every source queued for its tick, so it
+		// counts the part of its Delta that devices queued and the part of that the preview has applied instead.
+		struct QueuedEvent
+		{
+			PlayInputEvent Event{};
+			bool FromDevice = false;
+			bool Previewed = false;
+			glm::vec2 DeviceDelta{ 0.0f };    // Scroll
+			glm::vec2 PreviewedDelta{ 0.0f }; // Scroll
+		};
+
 	}
 
 	namespace Utils {
@@ -205,51 +218,105 @@ namespace Engine {
 
 	}
 
+	namespace {
+
+		// The devices' InputState with the live cursor and gamepad connections, which InputState reports only in its latched
+		// views: MouseDelta moves from the live position, and injected gamepad events connect their gamepad first (see the
+		// class comment in the header). PlayInput keeps one for the applied ticks and, while W-CLOCK's frame preview has shown
+		// input the ticks have not applied, one for the frame view.
+		struct TrackedDevices
+		{
+			InputState Input{};
+			glm::vec2 MousePosition{ 0.0f };
+			bool HasMousePosition = false;
+			std::array<bool, MaxGamepads> GamepadConnected{};
+
+			// Applies one queued device event (any type but Action; Tap already expanded).
+			void Apply(const PlayInputEvent& event);
+			// Moves the live cursor to `position` through a MouseMoveEvent.
+			void MoveMouse(const glm::vec2& position);
+			// Injects a Connected event for `gamepad` unless it is connected.
+			void EnsureGamepadConnected(uint32_t gamepad);
+			// Applies a device's Connected or Disconnected event at once (`gamepad.Gamepad` < MaxGamepads).
+			void SetGamepadConnection(const GamepadEvent& gamepad);
+			// Gives this state the levels `applied` holds (keys, mouse buttons, the cursor, gamepad connections, buttons and
+			// axes), injecting an event for each that differs, so W-CLOCK's frame view converges to the applied ticks.
+			// `applied`'s Step view must be its live state (a tick has just latched it); this state's Step view is read the
+			// same way, so it is latched first: nothing else reads the frame view's state's Step side.
+			void TakeLevels(const TrackedDevices& applied);
+		};
+
+	}
+
 	struct PlayInput::State
 	{
-		InputState Devices;
+		// The devices as the applied ticks left them: the Step view every fixed step reads, and the Frame view unless W-CLOCK's
+		// frame preview shows more (Frame).
+		TrackedDevices Devices;
 		InputActionMap Actions;
 		std::vector<InjectedAction> Injected; // parallel to the actions' indexes
 		// The events not applied yet, by tick; each tick's list in queue order. Ordered, so iteration is canonical.
-		std::map<uint64_t, std::vector<PlayInputEvent>> Queued;
+		std::map<uint64_t, std::vector<QueuedEvent>> Queued;
 		std::vector<PlayInputEvent> LastApplied;
 		uint64_t NextTick = 0;
-		// The live cursor and gamepad connections, which InputState reports only in its latched views: MouseDelta moves from
-		// the live position, and injected gamepad events connect their gamepad first (see the class comment in the header).
-		glm::vec2 MousePosition{ 0.0f };
-		bool HasMousePosition = false;
-		std::array<bool, MaxGamepads> GamepadConnected{};
+		// W-CLOCK (Docs/Decisions/0033-m22-contract.md decision 12). FramePreview: SetFramePreview. Frame: the frame view's own
+		// device state, which LatchFrame latches and gives to Devices' Frame view (InputState::SetFrameView), from the first
+		// preview that applies an event until the frame view no longer differs from the applied ticks, or until a frame is
+		// latched without the preview (DropFramePreview): created as a copy of Devices (with its pending Frame changes), it
+		// takes every previewed event once, then at each tick the events and levels that tick applied that it has not seen
+		// (CatchUpFrame). FrameAhead: the preview has applied events since the last tick, so Frame holds input Devices does
+		// not.
+		bool FramePreview = false;
+		std::optional<TrackedDevices> Frame{};
+		bool FrameAhead = false;
 
 		// Applies one queued event (Tap already expanded) to the devices or the injected actions.
 		void Apply(const PlayInputEvent& event);
 		// Sets the injected button level of action `action`, recording the edge for both phases.
 		void SetInjectedButton(uint32_t action, bool down);
-		// Moves the live cursor to `position` through a MouseMoveEvent.
-		void MoveMouse(const glm::vec2& position);
-		// Injects a Connected event for `gamepad` unless it is connected.
-		void EnsureGamepadConnected(uint32_t gamepad);
 		// Latches the injected actions' view of `phase`.
 		void LatchActions(InputPhase phase);
+		// W-CLOCK: applies to Frame (created from Devices first) the device input queued for NextTick that it has not
+		// previewed yet, in queue order.
+		void PreviewDeviceEvents();
+		// W-CLOCK, after a tick applied `applied` (its queued list, in order) to Devices while Frame exists: Frame takes what it
+		// has not seen of the tick, every scroll offset not previewed and the events after the tick's last previewed one,
+		// then the applied levels (TrackedDevices::TakeLevels). Earlier injected events (input queued for the tick before a
+		// device event the preview showed, QueueReleaseAll's releases) reach the frame view only through the levels, since
+		// the frame view saw the device event first.
+		void CatchUpFrame(std::span<const QueuedEvent> applied);
+		// W-CLOCK: forgets Frame and what the preview applied to it, so a frame latched without the preview is Devices' own
+		// frame view, exactly as without any preview (Devices' pending Frame changes are those since the last frame latch,
+		// which SetFrameView drops like LatchFrame), and a later preview shows the queued device input anew.
+		void DropFramePreview();
 	};
 
 	void PlayInput::State::Apply(const PlayInputEvent& event)
 	{
+		if (event.Type == PlayInputEventType::Action)
+		{
+			const std::optional<uint32_t> action = Actions.FindAction(event.Name);
+			ENGINE_CORE_ASSERT(action.has_value(), "PlayInput: queued action event for the unknown action '{}'", event.Name);
+			if (!action.has_value())
+				return;
+			if (event.HasValue)
+				Injected[*action].Value = event.Value;
+			else
+				SetInjectedButton(*action, event.State == PlayInputEventState::Down);
+			return;
+		}
+		Devices.Apply(event);
+	}
+
+	void TrackedDevices::Apply(const PlayInputEvent& event)
+	{
 		switch (event.Type)
 		{
 			case PlayInputEventType::Action:
-			{
-				const std::optional<uint32_t> action = Actions.FindAction(event.Name);
-				ENGINE_CORE_ASSERT(action.has_value(), "PlayInput: queued action event for the unknown action '{}'", event.Name);
-				if (!action.has_value())
-					return;
-				if (event.HasValue)
-					Injected[*action].Value = event.Value;
-				else
-					SetInjectedButton(*action, event.State == PlayInputEventState::Down);
+				ENGINE_CORE_ASSERT(false, "PlayInput: an action event is no device input");
 				return;
-			}
 			case PlayInputEventType::KeyInput:
-				Devices.Inject(KeyEvent{ .KeyCode = event.KeyCode,
+				Input.Inject(KeyEvent{ .KeyCode = event.KeyCode,
 					.Action = event.State == PlayInputEventState::Down ? ButtonAction::Pressed : ButtonAction::Released,
 					.Modifiers = KeyModifiers::None,
 					.Handled = false });
@@ -257,7 +324,7 @@ namespace Engine {
 			case PlayInputEventType::MouseButtonInput:
 				if (event.HasPosition)
 					MoveMouse(event.Position);
-				Devices.Inject(MouseButtonEvent{ .Button = event.Button,
+				Input.Inject(MouseButtonEvent{ .Button = event.Button,
 					.Action = event.State == PlayInputEventState::Down ? ButtonAction::Pressed : ButtonAction::Released,
 					.Modifiers = KeyModifiers::None,
 					.Handled = false });
@@ -273,11 +340,11 @@ namespace Engine {
 				MoveMouse(MousePosition + event.Delta);
 				return;
 			case PlayInputEventType::Scroll:
-				Devices.Inject(MouseScrollEvent{ .Offset = event.Delta, .Handled = false });
+				Input.Inject(MouseScrollEvent{ .Offset = event.Delta, .Handled = false });
 				return;
 			case PlayInputEventType::GamepadButtonInput:
 				EnsureGamepadConnected(event.Gamepad);
-				Devices.Inject(GamepadEvent{ .Gamepad = event.Gamepad,
+				Input.Inject(GamepadEvent{ .Gamepad = event.Gamepad,
 					.Kind = GamepadEventKind::Button,
 					.Button = event.GamepadButtonCode,
 					.Pressed = event.State == PlayInputEventState::Down,
@@ -287,7 +354,7 @@ namespace Engine {
 				return;
 			case PlayInputEventType::GamepadAxisInput:
 				EnsureGamepadConnected(event.Gamepad);
-				Devices.Inject(GamepadEvent{ .Gamepad = event.Gamepad,
+				Input.Inject(GamepadEvent{ .Gamepad = event.Gamepad,
 					.Kind = GamepadEventKind::Axis,
 					.Button = GamepadButton::South,
 					.Pressed = false,
@@ -297,7 +364,7 @@ namespace Engine {
 				return;
 			case PlayInputEventType::Text:
 				for (const uint32_t codepoint : Utils::DecodeUtf8(event.Text))
-					Devices.Inject(CharEvent{ .Codepoint = codepoint, .Handled = false });
+					Input.Inject(CharEvent{ .Codepoint = codepoint, .Handled = false });
 				return;
 		}
 		ENGINE_CORE_ASSERT(false, "PlayInput: unknown PlayInputEventType {}", std::to_underlying(event.Type));
@@ -318,9 +385,9 @@ namespace Engine {
 		}
 	}
 
-	void PlayInput::State::MoveMouse(const glm::vec2& position)
+	void TrackedDevices::MoveMouse(const glm::vec2& position)
 	{
-		Devices.Inject(MouseMoveEvent{ .Position = position, .Handled = false });
+		Input.Inject(MouseMoveEvent{ .Position = position, .Handled = false });
 		// InputState ignores a position that is not finite; the live cursor stays where InputState keeps it.
 		if (Utils::IsFinite(position))
 		{
@@ -329,11 +396,11 @@ namespace Engine {
 		}
 	}
 
-	void PlayInput::State::EnsureGamepadConnected(uint32_t gamepad)
+	void TrackedDevices::EnsureGamepadConnected(uint32_t gamepad)
 	{
 		if (gamepad >= MaxGamepads || GamepadConnected[gamepad])
 			return;
-		Devices.Inject(GamepadEvent{ .Gamepad = gamepad,
+		Input.Inject(GamepadEvent{ .Gamepad = gamepad,
 			.Kind = GamepadEventKind::Connected,
 			.Button = GamepadButton::South,
 			.Pressed = false,
@@ -341,6 +408,96 @@ namespace Engine {
 			.Value = 0.0f,
 			.Handled = false });
 		GamepadConnected[gamepad] = true;
+	}
+
+	void TrackedDevices::SetGamepadConnection(const GamepadEvent& gamepad)
+	{
+		ENGINE_CORE_ASSERT(gamepad.Gamepad < MaxGamepads, "PlayInput: gamepad {} does not exist", gamepad.Gamepad);
+		Input.Inject(gamepad);
+		GamepadConnected[gamepad.Gamepad] = gamepad.Kind == GamepadEventKind::Connected;
+	}
+
+	void TrackedDevices::TakeLevels(const TrackedDevices& applied)
+	{
+		const InputState& target = applied.Input;
+		Input.LatchStep();
+		for (size_t code = 0; code < KeyCodeCount; ++code)
+		{
+			const auto key = static_cast<Key>(code);
+			if (KeyToString(key).empty())
+				continue;
+			const bool down = target.IsKeyDown(InputPhase::Step, key);
+			if (Input.IsKeyDown(InputPhase::Step, key) != down)
+			{
+				Input.Inject(KeyEvent{ .KeyCode = key,
+					.Action = down ? ButtonAction::Pressed : ButtonAction::Released,
+					.Modifiers = KeyModifiers::None,
+					.Handled = false });
+			}
+		}
+		for (size_t code = 0; code < MouseButtonCount; ++code)
+		{
+			const auto button = static_cast<MouseButton>(code);
+			const bool down = target.IsMouseButtonDown(InputPhase::Step, button);
+			if (Input.IsMouseButtonDown(InputPhase::Step, button) != down)
+			{
+				Input.Inject(MouseButtonEvent{ .Button = button,
+					.Action = down ? ButtonAction::Pressed : ButtonAction::Released,
+					.Modifiers = KeyModifiers::None,
+					.Handled = false });
+			}
+		}
+		const glm::vec2 position = target.GetMousePosition(InputPhase::Step);
+		if (applied.HasMousePosition && (!HasMousePosition || Input.GetMousePosition(InputPhase::Step) != position))
+			MoveMouse(position);
+		for (uint32_t gamepad = 0; gamepad < MaxGamepads; ++gamepad)
+		{
+			const bool connected = target.IsGamepadConnected(InputPhase::Step, gamepad);
+			const bool wasConnected = Input.IsGamepadConnected(InputPhase::Step, gamepad);
+			if (connected != wasConnected)
+			{
+				SetGamepadConnection(GamepadEvent{ .Gamepad = gamepad,
+					.Kind = connected ? GamepadEventKind::Connected : GamepadEventKind::Disconnected,
+					.Button = GamepadButton::South,
+					.Pressed = false,
+					.Axis = GamepadAxis::LeftX,
+					.Value = 0.0f,
+					.Handled = false });
+			}
+			if (!connected)
+				continue;
+			// A gamepad that connects here starts at rest, as InputState keeps every unconnected gamepad.
+			for (size_t code = 0; code < GamepadButtonCount; ++code)
+			{
+				const auto button = static_cast<GamepadButton>(code);
+				const bool down = target.IsGamepadButtonDown(InputPhase::Step, gamepad, button);
+				if ((wasConnected && Input.IsGamepadButtonDown(InputPhase::Step, gamepad, button)) != down)
+				{
+					Input.Inject(GamepadEvent{ .Gamepad = gamepad,
+						.Kind = GamepadEventKind::Button,
+						.Button = button,
+						.Pressed = down,
+						.Axis = GamepadAxis::LeftX,
+						.Value = 0.0f,
+						.Handled = false });
+				}
+			}
+			for (size_t code = 0; code < GamepadAxisCount; ++code)
+			{
+				const auto axis = static_cast<GamepadAxis>(code);
+				const float value = target.GetGamepadAxis(InputPhase::Step, gamepad, axis);
+				if ((wasConnected ? Input.GetGamepadAxis(InputPhase::Step, gamepad, axis) : 0.0f) != value)
+				{
+					Input.Inject(GamepadEvent{ .Gamepad = gamepad,
+						.Kind = GamepadEventKind::Axis,
+						.Button = GamepadButton::South,
+						.Pressed = false,
+						.Axis = axis,
+						.Value = value,
+						.Handled = false });
+				}
+			}
+		}
 	}
 
 	void PlayInput::State::LatchActions(InputPhase phase)
@@ -354,6 +511,79 @@ namespace Engine {
 				.Value = injected.Value };
 			injected.PendingPressed[index] = false;
 			injected.PendingReleased[index] = false;
+		}
+	}
+
+	void PlayInput::State::PreviewDeviceEvents()
+	{
+		const auto queued = Queued.find(NextTick);
+		if (queued == Queued.end())
+			return;
+		for (QueuedEvent& entry : queued->second)
+		{
+			PlayInputEvent previewed{};
+			if (entry.Event.Type == PlayInputEventType::Scroll)
+			{
+				// What devices added to the scroll since the last preview: scrolling sums, so the frame view takes each part once.
+				const glm::vec2 unseen = entry.DeviceDelta - entry.PreviewedDelta;
+				if (unseen == glm::vec2(0.0f))
+					continue;
+				previewed = PlayInputEvent{ .Type = PlayInputEventType::Scroll, .Delta = unseen };
+				entry.PreviewedDelta = entry.DeviceDelta;
+			}
+			else
+			{
+				if (!entry.FromDevice || entry.Previewed)
+					continue;
+				previewed = entry.Event;
+				entry.Previewed = true;
+			}
+			if (!Frame.has_value())
+				Frame = Devices;
+			Frame->Apply(previewed);
+			FrameAhead = true;
+		}
+	}
+
+	void PlayInput::State::CatchUpFrame(std::span<const QueuedEvent> applied)
+	{
+		ENGINE_CORE_ASSERT(Frame.has_value(), "PlayInput: no frame view state to catch up");
+		size_t firstUnseen = 0;
+		for (size_t index = 0; index < applied.size(); ++index)
+		{
+			if (applied[index].Previewed || applied[index].PreviewedDelta != glm::vec2(0.0f))
+				firstUnseen = index + 1;
+		}
+		for (size_t index = 0; index < applied.size(); ++index)
+		{
+			const PlayInputEvent& event = applied[index].Event;
+			if (event.Type == PlayInputEventType::Action)
+				continue;
+			if (event.Type == PlayInputEventType::Scroll)
+			{
+				const glm::vec2 unseen = event.Delta - applied[index].PreviewedDelta;
+				if (unseen != glm::vec2(0.0f))
+					Frame->Apply(PlayInputEvent{ .Type = PlayInputEventType::Scroll, .Delta = unseen });
+				continue;
+			}
+			if (index >= firstUnseen)
+				Frame->Apply(event);
+		}
+		Frame->TakeLevels(Devices);
+		FrameAhead = false;
+	}
+
+	void PlayInput::State::DropFramePreview()
+	{
+		Frame.reset();
+		FrameAhead = false;
+		if (const auto queued = Queued.find(NextTick); queued != Queued.end())
+		{
+			for (QueuedEvent& entry : queued->second)
+			{
+				entry.Previewed = false;
+				entry.PreviewedDelta = glm::vec2(0.0f);
+			}
 		}
 	}
 
@@ -484,11 +714,11 @@ namespace Engine {
 			down.State = PlayInputEventState::Down;
 			PlayInputEvent up = event;
 			up.State = PlayInputEventState::Up;
-			m_State->Queued[tick].push_back(std::move(down));
-			m_State->Queued[tick + 1].push_back(std::move(up));
+			m_State->Queued[tick].push_back(QueuedEvent{ .Event = std::move(down) });
+			m_State->Queued[tick + 1].push_back(QueuedEvent{ .Event = std::move(up) });
 			return {};
 		}
-		m_State->Queued[tick].push_back(event);
+		m_State->Queued[tick].push_back(QueuedEvent{ .Event = event });
 		return {};
 	}
 
@@ -503,37 +733,35 @@ namespace Engine {
 		projected.Devices = state.Devices;
 		projected.Actions = state.Actions;
 		projected.Injected = state.Injected;
-		projected.MousePosition = state.MousePosition;
-		projected.HasMousePosition = state.HasMousePosition;
-		projected.GamepadConnected = state.GamepadConnected;
 		for (const auto& [queuedTick, events] : state.Queued)
 		{
-			for (const PlayInputEvent& event : events)
-				projected.Apply(event);
+			for (const QueuedEvent& queued : events)
+				projected.Apply(queued.Event);
 		}
-		projected.Devices.LatchStep();
+		InputState& latest = projected.Devices.Input;
+		latest.LatchStep();
 
 		std::vector<PlayInputEvent> releases;
 		for (size_t code = 0; code < KeyCodeCount; ++code)
 		{
 			const auto key = static_cast<Key>(code);
-			if (!KeyToString(key).empty() && projected.Devices.IsKeyDown(InputPhase::Step, key))
+			if (!KeyToString(key).empty() && latest.IsKeyDown(InputPhase::Step, key))
 				releases.push_back(PlayInputEvent{ .Type = PlayInputEventType::KeyInput, .State = PlayInputEventState::Up, .KeyCode = key });
 		}
 		for (size_t code = 0; code < MouseButtonCount; ++code)
 		{
 			const auto button = static_cast<MouseButton>(code);
-			if (projected.Devices.IsMouseButtonDown(InputPhase::Step, button))
+			if (latest.IsMouseButtonDown(InputPhase::Step, button))
 				releases.push_back(PlayInputEvent{ .Type = PlayInputEventType::MouseButtonInput, .State = PlayInputEventState::Up, .Button = button });
 		}
 		for (uint32_t gamepad = 0; gamepad < MaxGamepads; ++gamepad)
 		{
-			if (!projected.Devices.IsGamepadConnected(InputPhase::Step, gamepad))
+			if (!latest.IsGamepadConnected(InputPhase::Step, gamepad))
 				continue;
 			for (size_t code = 0; code < GamepadButtonCount; ++code)
 			{
 				const auto button = static_cast<GamepadButton>(code);
-				if (projected.Devices.IsGamepadButtonDown(InputPhase::Step, gamepad, button))
+				if (latest.IsGamepadButtonDown(InputPhase::Step, gamepad, button))
 				{
 					releases.push_back(PlayInputEvent{
 						.Type = PlayInputEventType::GamepadButtonInput, .State = PlayInputEventState::Up, .Gamepad = gamepad, .GamepadButtonCode = button });
@@ -542,7 +770,7 @@ namespace Engine {
 			for (size_t code = 0; code < GamepadAxisCount; ++code)
 			{
 				const auto axis = static_cast<GamepadAxis>(code);
-				if (projected.Devices.GetGamepadAxis(InputPhase::Step, gamepad, axis) != 0.0f)
+				if (latest.GetGamepadAxis(InputPhase::Step, gamepad, axis) != 0.0f)
 				{
 					releases.push_back(
 						PlayInputEvent{ .Type = PlayInputEventType::GamepadAxisInput, .Value = 0.0f, .Gamepad = gamepad, .Axis = axis });
@@ -559,8 +787,12 @@ namespace Engine {
 				releases.push_back(PlayInputEvent{ .Type = PlayInputEventType::Action, .Name = name, .HasValue = true, .Value = 0.0f });
 		}
 
-		std::vector<PlayInputEvent>& events = state.Queued[tick];
-		events.insert(events.begin(), std::make_move_iterator(releases.begin()), std::make_move_iterator(releases.end()));
+		std::vector<QueuedEvent>& events = state.Queued[tick];
+		std::vector<QueuedEvent> queuedReleases;
+		queuedReleases.reserve(releases.size());
+		for (PlayInputEvent& release : releases)
+			queuedReleases.push_back(QueuedEvent{ .Event = std::move(release) });
+		events.insert(events.begin(), std::make_move_iterator(queuedReleases.begin()), std::make_move_iterator(queuedReleases.end()));
 		if (events.empty())
 			state.Queued.erase(tick);
 	}
@@ -602,8 +834,9 @@ namespace Engine {
 					// Connection changes are no replayable input: they apply at once.
 					if (gamepad.Gamepad < MaxGamepads)
 					{
-						state.Devices.Inject(gamepad);
-						state.GamepadConnected[gamepad.Gamepad] = gamepad.Kind == GamepadEventKind::Connected;
+						state.Devices.SetGamepadConnection(gamepad);
+						if (state.Frame.has_value())
+							state.Frame->SetGamepadConnection(gamepad);
 					}
 					return;
 				case GamepadEventKind::Button:
@@ -635,64 +868,88 @@ namespace Engine {
 			return;
 
 		// Continuous sources are coalesced with what is queued for the same tick (see the header).
-		std::vector<PlayInputEvent>& events = state.Queued[state.NextTick];
+		std::vector<QueuedEvent>& events = state.Queued[state.NextTick];
 		if (converted->Type == PlayInputEventType::Scroll)
 		{
-			const auto previous = std::ranges::find_if(events.rbegin(), events.rend(), [](const PlayInputEvent& queued)
+			const auto previous = std::ranges::find_if(events.rbegin(), events.rend(), [](const QueuedEvent& queued)
 			{
-				return queued.Type == PlayInputEventType::Scroll;
+				return queued.Event.Type == PlayInputEventType::Scroll;
 			});
 			if (previous != events.rend())
 			{
-				previous->Delta += converted->Delta;
+				previous->Event.Delta += converted->Delta;
+				previous->DeviceDelta += converted->Delta;
 				return;
 			}
 		}
 		else if (converted->Type == PlayInputEventType::MouseMove || converted->Type == PlayInputEventType::GamepadAxisInput)
 		{
 			const PlayInputEvent& latest = *converted;
-			std::erase_if(events, [&latest](const PlayInputEvent& queued)
+			std::erase_if(events, [&latest](const QueuedEvent& queued)
 			{
-				if (queued.Type != latest.Type)
+				if (queued.Event.Type != latest.Type)
 					return false;
-				return latest.Type == PlayInputEventType::MouseMove || (queued.Gamepad == latest.Gamepad && queued.Axis == latest.Axis);
+				return latest.Type == PlayInputEventType::MouseMove || (queued.Event.Gamepad == latest.Gamepad && queued.Event.Axis == latest.Axis);
 			});
 		}
-		events.push_back(std::move(*converted));
+		const glm::vec2 deviceDelta = converted->Type == PlayInputEventType::Scroll ? converted->Delta : glm::vec2(0.0f);
+		events.push_back(QueuedEvent{ .Event = std::move(*converted), .FromDevice = true, .DeviceDelta = deviceDelta });
 	}
 
 	void PlayInput::ApplyTick(uint64_t tick)
 	{
 		State& state = *m_State;
 		ENGINE_CORE_ASSERT(tick == state.NextTick, "PlayInput::ApplyTick({}) out of order: the next tick is {}", tick, state.NextTick);
-		state.LastApplied.clear();
+		std::vector<QueuedEvent> applied;
 		if (const auto queued = state.Queued.find(tick); queued != state.Queued.end())
 		{
-			state.LastApplied = std::move(queued->second);
+			applied = std::move(queued->second);
 			state.Queued.erase(queued);
 		}
+		state.LastApplied.clear();
+		state.LastApplied.reserve(applied.size());
+		for (const QueuedEvent& queued : applied)
+			state.LastApplied.push_back(queued.Event);
 		for (const PlayInputEvent& event : state.LastApplied)
 			state.Apply(event);
-		state.Devices.LatchStep();
+		state.Devices.Input.LatchStep();
 		state.LatchActions(InputPhase::Step);
 		state.NextTick = tick + 1;
+		if (state.Frame.has_value())
+			state.CatchUpFrame(applied);
 	}
 
 	void PlayInput::LatchFrame()
 	{
-		m_State->Devices.LatchFrame();
-		m_State->LatchActions(InputPhase::Frame);
+		State& state = *m_State;
+		if (state.FramePreview)
+			state.PreviewDeviceEvents();
+		else if (state.Frame.has_value())
+			state.DropFramePreview();
+		if (state.Frame.has_value())
+		{
+			state.Frame->Input.LatchFrame();
+			state.Devices.Input.SetFrameView(state.Frame->Input);
+			// Once the ticks have applied everything it previewed and the frame view has latched what they applied, the frame
+			// view's state holds what Devices holds again, so Devices latches its own frame view until the next preview.
+			if (!state.FrameAhead)
+				state.Frame.reset();
+		}
+		else
+		{
+			state.Devices.Input.LatchFrame();
+		}
+		state.LatchActions(InputPhase::Frame);
 	}
 
-	void PlayInput::SetFramePreview(bool /*enabled*/)
+	void PlayInput::SetFramePreview(bool enabled)
 	{
-		ENGINE_CONTRACT_STUB();
+		m_State->FramePreview = enabled;
 	}
 
 	bool PlayInput::IsFramePreviewEnabled() const
 	{
-		ENGINE_CONTRACT_STUB();
-		return false;
+		return m_State->FramePreview;
 	}
 
 	uint64_t PlayInput::GetNextTick() const
@@ -715,7 +972,7 @@ namespace Engine {
 
 	const InputState& PlayInput::GetDevices() const
 	{
-		return m_State->Devices;
+		return m_State->Devices.Input;
 	}
 
 	const InputActionMap& PlayInput::GetActions() const
@@ -726,19 +983,19 @@ namespace Engine {
 	bool PlayInput::IsActionDown(InputPhase phase, uint32_t action) const
 	{
 		ENGINE_CORE_ASSERT(action < m_State->Actions.GetActionCount(), "PlayInput: action {} does not exist", action);
-		return m_State->Actions.IsDown(m_State->Devices, phase, action) || m_State->Injected[action].Views[Utils::PhaseIndex(phase)].Down;
+		return m_State->Actions.IsDown(m_State->Devices.Input, phase, action) || m_State->Injected[action].Views[Utils::PhaseIndex(phase)].Down;
 	}
 
 	bool PlayInput::WasActionPressed(InputPhase phase, uint32_t action) const
 	{
 		ENGINE_CORE_ASSERT(action < m_State->Actions.GetActionCount(), "PlayInput: action {} does not exist", action);
-		return m_State->Actions.WasPressed(m_State->Devices, phase, action) || m_State->Injected[action].Views[Utils::PhaseIndex(phase)].Pressed;
+		return m_State->Actions.WasPressed(m_State->Devices.Input, phase, action) || m_State->Injected[action].Views[Utils::PhaseIndex(phase)].Pressed;
 	}
 
 	bool PlayInput::WasActionReleased(InputPhase phase, uint32_t action) const
 	{
 		ENGINE_CORE_ASSERT(action < m_State->Actions.GetActionCount(), "PlayInput: action {} does not exist", action);
-		return m_State->Actions.WasReleased(m_State->Devices, phase, action) || m_State->Injected[action].Views[Utils::PhaseIndex(phase)].Released;
+		return m_State->Actions.WasReleased(m_State->Devices.Input, phase, action) || m_State->Injected[action].Views[Utils::PhaseIndex(phase)].Released;
 	}
 
 	float PlayInput::GetActionAxis(InputPhase phase, uint32_t action) const
@@ -747,14 +1004,14 @@ namespace Engine {
 		const InputActionMap& actions = m_State->Actions;
 		// A Button action's axis is 1 while it is down (InputActionMap's rule), an injected button use counting as a binding.
 		const float bound = actions.GetDefinition(action).Type == InputActionType::Button ? (IsActionDown(phase, action) ? 1.0f : 0.0f)
-																						  : actions.GetAxis(m_State->Devices, phase, action);
+																						  : actions.GetAxis(m_State->Devices.Input, phase, action);
 		const float injected = m_State->Injected[action].Views[Utils::PhaseIndex(phase)].Value;
 		return std::abs(injected) >= std::abs(bound) ? injected : bound;
 	}
 
 	PlayInputSummary PlayInput::GetSummary(InputPhase phase) const
 	{
-		const InputState& devices = m_State->Devices;
+		const InputState& devices = m_State->Devices.Input;
 		PlayInputSummary summary;
 		const auto add = [&summary](std::string name, bool down, bool pressed, bool released)
 		{

@@ -112,6 +112,25 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "Ui.jsonl",
+			"IdSeed": 2001,
+			"Renderer": "none"
+		},
+		{
+			"File": "UiGolden.jsonl",
+			"IdSeed": 2002,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Scenes/GoldenUi",
+				"Assets/Textures/GoldenUi"
+			]
+		},
+		{
+			"File": "Localization.jsonl",
+			"IdSeed": 2003,
+			"Renderer": "none"
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

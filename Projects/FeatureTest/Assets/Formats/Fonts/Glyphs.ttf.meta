@@ -4,10 +4,11 @@
 	"Handle": "5c938f62648f0414",
 	"Type": "Font",
 	"Importer": "Font",
-	"ImporterVersion": 3,
+	"ImporterVersion": 4,
 	"Settings": {
 		"PixelSize": 48,
-		"Spread": 8
+		"Spread": 8,
+		"Ranges": []
 	},
 	"SubAssets": []
 }

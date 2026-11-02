@@ -1,0 +1,19 @@
+{
+	"Format": "AssetMeta",
+	"Version": 1,
+	"Handle": "8437e42391ce559f",
+	"Type": "Font",
+	"Importer": "Font",
+	"ImporterVersion": 4,
+	"Settings": {
+		"PixelSize": 48,
+		"Spread": 8,
+		"Ranges": [
+			{
+				"First": 256,
+				"Last": 383
+			}
+		]
+	},
+	"SubAssets": []
+}

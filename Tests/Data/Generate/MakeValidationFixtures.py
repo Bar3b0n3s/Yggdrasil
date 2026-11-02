@@ -61,7 +61,8 @@ COMPONENT_ORDER = [
     "ID", "Name", "Tags", "Relationship", "Transform", "Prefab", "PrefabLink", "MeshRenderer", "Camera",
     "DirectionalLight", "PointLight", "SpotLight", "Environment", "PostProcess", "Text", "RigidBody", "BoxCollider",
     "SphereCollider", "CapsuleCollider", "MeshCollider", "CharacterController", "AudioSource", "AudioListener",
-    "Script", "ValidatorTarget", "ValidatorFollower",
+    "Script", "UiCanvas", "UiRect", "UiImage", "UiText", "UiLayout", "UiLayoutElement", "ValidatorTarget",
+    "ValidatorFollower",
 ]
 
 # The registered version of each component above 1 ("ComponentVersions"); every other component is at version 1.
@@ -199,11 +200,17 @@ def default_project(name: str) -> dict[str, Any]:
                    "PruneUnreferenced": False},
         "Testing": {"Suites": [], "Replays": [], "CaseTimeoutTicks": 600, "SuiteTickLimit": 36000,
                     "CoverageGates": False},
+        "Localization": {"Locale": ""},
     }
 
 
 def transform(x: float = 0, y: float = 0, z: float = 0, scale: list[float] | None = None) -> dict[str, Any]:
     return {"Translation": [x, y, z], "Rotation": [0, 0, 0, 1], "Scale": scale or [1, 1, 1]}
+
+
+def ui_rect() -> dict[str, Any]:
+    """A UiRect of 120 x 40 canvas units at its parent's top-left corner (M22)."""
+    return {"AnchorMin": [0, 0], "AnchorMax": [0, 0], "Pivot": [0, 0], "Position": [0, 0], "Size": [120, 40]}
 
 
 def entity(identifier: str, name: str, components: dict[str, Any], parent: str | None = None) -> dict[str, Any]:
@@ -588,6 +595,22 @@ return Script.Define("Jumper", Jumper)
     item = fixture("SCRIPT_COMPUTED_ASSET_LOAD")
     item.project["Export"]["PruneUnreferenced"] = True
     item.add_script("Project/Assets/Scripts/Loader.luau", "5c41000000000006", COMPUTED_LOADER)
+
+    # M22 (Docs/Decisions/0033-m22-contract.md decision 13). A UI element whose parent holds no UiCanvas: layout never
+    # reaches it.
+    item = fixture("UI_ELEMENT_WITHOUT_CANVAS")
+    item.entities.append(entity("e000000000000003", "Hud", {"Transform": transform()}))
+    item.entities.append(entity("e000000000000004", "Score", {
+        "Transform": transform(), "UiRect": ui_rect(), "UiText": {"Text": "Score"}}, parent="e000000000000003"))
+
+    # A UiImage below a canvas that names frame 3 of Plain.spritesheet's three frames (a sheet without a texture).
+    item = fixture("UI_IMAGE_FRAME_OUT_OF_RANGE")
+    item.copy_asset("SpriteSheets/Plain.spritesheet", "Project/Assets/Ui/Plain.spritesheet")
+    item.add_json("Project/Assets/Ui/Plain.spritesheet.meta", meta("3a7e000000000009", "SpriteSheet", "SpriteSheet"))
+    item.entities.append(entity("e000000000000003", "Hud", {"Transform": transform(), "UiCanvas": {}}))
+    item.entities.append(entity("e000000000000004", "Button", {
+        "Transform": transform(), "UiRect": ui_rect(), "UiImage": {"Sheet": "3a7e000000000009", "Frame": 3}},
+        parent="e000000000000003"))
 
     return fixtures
 

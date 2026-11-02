@@ -11,6 +11,7 @@
 #include "Engine/Asset/ReplayData.h"
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/Asset/SpriteSheetData.h"
+#include "Engine/Asset/StringTableData.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/Core/Assert.h"
 
@@ -97,6 +98,11 @@ namespace Engine {
 			return LoadCookedSpriteSheet(cooked);
 		}
 
+		static Result<AssetRef<StringTableData>> LoadStringTable(std::span<const std::byte> cooked, const AssetLoadContext& /*context*/)
+		{
+			return LoadCookedStringTable(cooked);
+		}
+
 	}
 
 	AssetLoaderRegistry::AssetLoaderRegistry() = default;
@@ -164,6 +170,8 @@ namespace Engine {
 		registry.Register(CreateScope<PayloadLoader<ReplayData, &Utils::LoadReplay>>());
 		// M18 (Docs/Decisions/0029-m18-contract.md decision 17).
 		registry.Register(CreateScope<PayloadLoader<SpriteSheetData, &Utils::LoadSpriteSheet>>());
+		// M22 (Docs/Decisions/0033-m22-contract.md decision 10).
+		registry.Register(CreateScope<PayloadLoader<StringTableData, &Utils::LoadStringTable>>());
 	}
 
 }

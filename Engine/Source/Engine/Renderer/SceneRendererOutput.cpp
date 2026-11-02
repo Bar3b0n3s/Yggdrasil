@@ -11,6 +11,7 @@
 #include "Engine/Renderer/SceneTargetFormats.h"
 #include "Engine/Renderer/SelectionPass.h"
 #include "Engine/Renderer/TextRenderer.h"
+#include "Engine/Renderer/UiPass.h"
 #include "Engine/Renderer/UpscalePass.h"
 #include "Shared/ViewConstants.h"
 
@@ -26,7 +27,7 @@
 #include <variant>
 
 // The scene renderer's last three stages (SceneRenderer.h; Docs/Decisions/0029-m18-contract.md decisions 1 and 6): the
-// scene-resolution overlays (game Text, then M22's reserved Ui slot), the output stage's integer upscale with its
+// scene-resolution overlays (game Text, then M22's Ui, ADR 0033 decision 7), the output stage's integer upscale with its
 // letterbox, and the view-resolution editor overlays.
 //
 // At the identity mapping (the default scene resolution) the Output stage records nothing and the editor overlays draw into
@@ -212,27 +213,60 @@ namespace Engine {
 
 	void SceneRenderer::State::RecordSceneOverlayStage(Detail::SceneRendererFrame& frame)
 	{
-		// Game texts, world then screen (TextRenderer), at the scene resolution into the scene image; the data views show
-		// none (ADR 0017). The debug and annotation labels are editor overlays (RecordEditorOverlayStage).
+		// Game texts, world then screen (TextRenderer), then M22's UI (UiPass), at the scene resolution into the scene image;
+		// the data views show neither (ADR 0017). The debug and annotation labels are editor overlays
+		// (RecordEditorOverlayStage).
 		const RenderSnapshot& snapshot = *frame.Snapshot;
-		if (frame.IsDataView || snapshot.Texts.empty())
+		if (frame.IsDataView)
 			return;
 		nvrhi::ICommandList& commandList = *frame.CommandList;
 		RenderRecordingContext& recording = *frame.Recording;
-		recording.BeginPass("Text", &commandList);
+		if (!snapshot.Texts.empty())
+		{
+			recording.BeginPass("Text", &commandList);
+			RenderPassCounters counters;
+			const TextRenderInputs inputs{ .Texts = std::span<const TextItem>(snapshot.Texts),
+				.DebugDraw = nullptr,
+				.Assets = Assets,
+				.Framebuffer = Targets.OverlayFramebuffers[frame.SceneTarget],
+				.ViewConstants = ViewConstantsBuffer,
+				.HasCamera = frame.HasCamera,
+				.CameraView = frame.HasCamera ? std::optional<glm::mat4>(frame.Camera.View) : std::nullopt };
+			auto result = Pipelines->Text->RecordCounted(commandList, TextBindings, inputs, counters);
+			if (result)
+				Stats.TextDraws += *result;
+			else
+				frame.KeepFirstError(std::unexpected(std::move(result).error()));
+			recording.EndPass(counters);
+		}
+
+		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 7): the UI draw list after game Text, into the same
+		// framebuffer, before the output stage's upscale and under the editor overlays, with or without a camera (the UI is
+		// in scene pixels). The "Ui" row appears only when the plan records a run; the glyph runs share the Text pass's
+		// binding sets (the same atlases and ViewConstants).
+		if (snapshot.Ui.Items.empty() && snapshot.Ui.Annotations.empty())
+			return;
+		ENGINE_CORE_ASSERT(Pipelines->Quads != nullptr, "the pipeline set has no QuadBatcher");
+		if (Pipelines->Quads == nullptr)
+		{
+			frame.KeepFirstError(MakeError(ErrorCode::InvalidState, "the scene renderer's pipelines have no QuadBatcher for the UI"));
+			return;
+		}
+		const UiPassPlan plan = PlanUiPass(snapshot.Ui, *Assets);
+		if (plan.Runs.empty())
+			return;
+		recording.BeginPass("Ui", &commandList);
 		RenderPassCounters counters;
-		const TextRenderInputs inputs{ .Texts = std::span<const TextItem>(snapshot.Texts),
-			.DebugDraw = nullptr,
+		const UiPassInputs inputs{ .Plan = &plan,
+			.Quads = Pipelines->Quads.get(),
+			.Text = Pipelines->Text.get(),
+			.Resources = Cache,
 			.Assets = Assets,
 			.Framebuffer = Targets.OverlayFramebuffers[frame.SceneTarget],
-			.ViewConstants = ViewConstantsBuffer,
-			.HasCamera = frame.HasCamera,
-			.CameraView = frame.HasCamera ? std::optional<glm::mat4>(frame.Camera.View) : std::nullopt };
-		auto result = Pipelines->Text->RecordCounted(commandList, TextBindings, inputs, counters);
-		if (result)
-			Stats.TextDraws += *result;
-		else
-			frame.KeepFirstError(std::unexpected(std::move(result).error()));
+			.ViewConstants = ViewConstantsBuffer };
+		const Result<uint32_t> recorded = RecordUiPass(commandList, UiQuadBindings, TextBindings, inputs, counters);
+		if (!recorded)
+			frame.KeepFirstError(std::unexpected(recorded.error()));
 		recording.EndPass(counters);
 	}
 

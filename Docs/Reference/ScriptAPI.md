@@ -208,7 +208,7 @@ All modes; LoadTime|Runtime|Test; pure/read.
 
 `(type: string) -> FieldDescriptor`
 
-Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for imported audio and .sfx sound effects, Script, Font, Replay or SpriteSheet), with a null default; any other name fails the import.
+Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for imported audio and .sfx sound effects, Script, Font, Replay, SpriteSheet or StringTable), with a null default; any other name fails the import.
 
 All modes; LoadTime|Runtime|Test; pure/read.
 
@@ -3712,6 +3712,8 @@ What asset.create makes.
 
 - `SpriteSheet`: A .spritesheet sprite sheet: frames of a texture with pivots and 9-slice borders, and clips; without values an empty sheet.
 
+- `StringTable`: A .stringtable string table: keyed strings in several locales, read by Loc.Get; without values the locale en and no entries.
+
 ## AssetState
 
 Where an asset is in its life (§7.2).
@@ -3751,6 +3753,8 @@ The kind of a loadable asset (§7.1).
 - `Replay`: An input replay (.replay).
 
 - `SpriteSheet`: A sprite sheet (.spritesheet): frames of a texture with pivots and 9-slice borders, and clips.
+
+- `StringTable`: A string table (.stringtable): keyed strings in several locales, read by Loc.Get.
 
 ## Attenuation
 

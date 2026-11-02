@@ -1,21 +1,364 @@
 #include "EnginePCH.h"
 #include "Engine/Automation/Methods/UiMethods.h"
 
+#include "Engine/Asset/AssetManager.h"
 #include "Engine/Automation/Methods/AutomationMethodContext.h"
+#include "Engine/Automation/Methods/SharedMethodSupport.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
+#include "Engine/Project/ProjectSettings.h"
+#include "Engine/Reflection/ComponentInfo.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Scene/Components/UiCanvasComponent.h"
+#include "Engine/Scene/Components/UiImageComponent.h"
+#include "Engine/Scene/Components/UiLayoutComponent.h"
+#include "Engine/Scene/Components/UiTextComponent.h"
+#include "Engine/Scene/Entity.h"
+#include "Engine/Scene/Scene.h"
+#include "Engine/Scene/UiLayout.h"
+#include "Engine/Scene/UiSystem.h"
+#include "Engine/Session/PlaySession.h"
 
-// The ui domain (UiMethods.h): the types and the registration are final; the handler is a stub of the M22 contract (C22.1,
-// Docs/Decisions/0033-m22-contract.md decision 8) that stream E implements.
+#include <glm/glm.hpp>
+
+#include <algorithm>
+#include <format>
+#include <optional>
+#include <set>
+#include <span>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+// The ui domain (UiMethods.h; Docs/Decisions/0033-m22-contract.md decision 8). ui.tree lays the target scene out with
+// ComputeUiLayout, or reads the play session's current layout (UiSystem::GetLayout), and reports it in the table's draw order:
+// each canvas, then its elements (canonical order, a parent before its children).
 
 namespace Engine {
 
+	namespace Utils {
+
+		// The registry category of the UI components (Scene/Registration/UiRegistration.cpp): an entry lists the ones its
+		// entity holds, in registry order.
+		constexpr std::string_view UiComponentCategory = "Ui";
+
+		// The JSON entries' text is cut to this many bytes, the outline's to this many (as scene.tree's Text form).
+		constexpr size_t MaxUiTreeTextBytes = 256;
+		constexpr size_t MaxUiOutlineTextLength = 24;
+
+		// `text` cut to at most `limit` bytes at a UTF-8 boundary, followed by "…" when it was longer.
+		static std::string CutUiText(std::string_view text, size_t limit)
+		{
+			if (text.size() <= limit)
+				return std::string(text);
+			size_t cut = limit;
+			while (cut > 0 && (static_cast<unsigned char>(text[cut]) & 0xc0) == 0x80)
+				--cut;
+			return std::format("{}…", text.substr(0, cut));
+		}
+
+		// A float as the outline prints it: the shortest text that reads back as the same float ("4.5", "20"), as scene.tree's.
+		static std::string FormatUiOutlineNumber(float value)
+		{
+			return std::format("{}", value == 0.0f ? 0.0f : value);
+		}
+
+		// The outline's file name, as scene.tree's header names it: the last component of the summary's path, or
+		// "<name> (unsaved)" for a scene never saved.
+		static std::string FormatUiOutlineFile(const SceneSummary& summary)
+		{
+			if (summary.Path.empty())
+				return std::format("{} (unsaved)", summary.Name);
+			const size_t slash = summary.Path.rfind('/');
+			return slash == std::string::npos ? summary.Path : summary.Path.substr(slash + 1);
+		}
+
+		static UiPixelRect MakeUiPixelRect(glm::vec2 min, glm::vec2 max)
+		{
+			return UiPixelRect{ .X = min.x, .Y = min.y, .Width = max.x - min.x, .Height = max.y - min.y };
+		}
+
+		static UiPixelRect MakeUiPixelRect(const UiClipRect& clip)
+		{
+			// Whole pixels within plus or minus 2^30 (ComputeUiClipRect), so each difference fits int64 and converts exactly
+			// enough to float for a report.
+			const int64_t width = static_cast<int64_t>(clip.MaxX) - clip.MinX;
+			const int64_t height = static_cast<int64_t>(clip.MaxY) - clip.MinY;
+			return UiPixelRect{ .X = static_cast<float>(clip.MinX),
+				.Y = static_cast<float>(clip.MinY),
+				.Width = static_cast<float>(std::max<int64_t>(width, 0)),
+				.Height = static_cast<float>(std::max<int64_t>(height, 0)) };
+		}
+
+		// The registry names of the UI components `entity` holds, in registry order.
+		static std::vector<const ComponentInfo*> GetUiComponents(ConstEntity entity)
+		{
+			std::vector<const ComponentInfo*> components = GetEntityComponents(entity);
+			std::erase_if(components, [](const ComponentInfo* info)
+			{
+				return info->GetCategory() != UiComponentCategory;
+			});
+			return components;
+		}
+
+		static std::string_view GetUiLayoutKindName(UiLayoutKind kind)
+		{
+			switch (kind)
+			{
+				case UiLayoutKind::Stack:
+					return "Stack";
+				case UiLayoutKind::Grid:
+					return "Grid";
+				case UiLayoutKind::Flex:
+					return "Flex";
+			}
+			return "Stack";
+		}
+
+		static std::string_view GetUiLayoutDirectionName(UiLayoutDirection direction)
+		{
+			return direction == UiLayoutDirection::Horizontal ? "Horizontal" : "Vertical";
+		}
+
+		// How the outline names a UiImage's frame: its sheet's project path without "Assets/" (or the first 8 hex digits of its
+		// handle when `assets` cannot name it), '#' and the frame's index ("Ui/Buttons.spritesheet#2"); "none" for a plain
+		// rectangle (a null sheet).
+		static std::string FormatUiOutlineSheet(const UiImageComponent& image, const AssetManager* assets)
+		{
+			if (!image.Sheet.IsValid())
+				return "none";
+			const AssetHandle handle = image.Sheet.GetHandle();
+			const std::string path = assets != nullptr ? assets->GetReferencePath(handle) : std::string();
+			constexpr std::string_view AssetsFolder = "Assets/";
+			std::string sheet = path.empty() ? handle.ToString().substr(0, 8) : path;
+			if (sheet.starts_with(AssetsFolder))
+				sheet.erase(0, AssetsFolder.size());
+			return std::format("{}#{}", sheet, image.Frame);
+		}
+
+		// The short forms of an element's UI components in the outline: "UiImage(<sheet>#<frame>)", "UiText(\"<text>\")",
+		// "UiLayout(<kind> <direction>)", and the name of any other but UiRect, which every element holds.
+		static std::string FormatUiOutlineComponents(ConstEntity entity, const AssetManager* assets)
+		{
+			std::string components;
+			const auto append = [&components](std::string_view text)
+			{
+				components += std::format("{}{}", components.empty() ? "" : " ", text);
+			};
+			for (const ComponentInfo* info : GetUiComponents(entity))
+			{
+				const std::string& name = info->GetName();
+				if (name == "UiRect")
+					continue;
+				if (const UiImageComponent* image = name == "UiImage" ? entity.TryGetComponent<UiImageComponent>() : nullptr)
+					append(std::format("UiImage({})", FormatUiOutlineSheet(*image, assets)));
+				else if (const UiTextComponent* text = name == "UiText" ? entity.TryGetComponent<UiTextComponent>() : nullptr)
+					append(std::format("UiText(\"{}\")", CutUiText(text->Text, MaxUiOutlineTextLength)));
+				else if (const UiLayoutComponent* layout = name == "UiLayout" ? entity.TryGetComponent<UiLayoutComponent>() : nullptr)
+					append(std::format("UiLayout({} {})", GetUiLayoutKindName(layout->Kind), GetUiLayoutDirectionName(layout->Direction)));
+				else
+					append(name);
+			}
+			return components;
+		}
+
+		static std::string FormatUiOutlineRect(const UiPixelRect& rect)
+		{
+			return std::format("({},{} {}x{})", FormatUiOutlineNumber(rect.X), FormatUiOutlineNumber(rect.Y), FormatUiOutlineNumber(rect.Width),
+				FormatUiOutlineNumber(rect.Height));
+		}
+
+		// The scene resolution ui.tree lays out at, and the layout: `requested` when given (both components non-zero), else
+		// the play session's current layout for its own scene (laid out afresh at its view's size before the session's first
+		// layout, which Activate makes), else the project's window size (the view of every deterministic session).
+		struct UiTreeLayout
+		{
+			UiLayoutTable Computed{};
+			const UiLayoutTable* Table = nullptr;
+		};
+
+		static void ResolveUiTreeLayout(const AutomationMethodContext& context, const Scene& scene, glm::uvec2 requested, UiTreeLayout& layout)
+		{
+			if (requested.x != 0 && requested.y != 0)
+			{
+				layout.Computed = ComputeUiLayout(scene, requested);
+				layout.Table = &layout.Computed;
+				return;
+			}
+			const PlaySession* session = context.GetPlaySession();
+			if (session != nullptr && &session->GetScene() == &scene)
+			{
+				const UiLayoutTable& current = session->GetUi().GetLayout();
+				if (current.SceneSize.x != 0 && current.SceneSize.y != 0)
+				{
+					layout.Table = &current;
+					return;
+				}
+				layout.Computed = ComputeUiLayout(scene, glm::max(session->GetViewSize(), glm::uvec2(1)));
+				layout.Table = &layout.Computed;
+				return;
+			}
+			const ProjectSettings* settings = context.GetProjectSettings();
+			layout.Computed = ComputeUiLayout(scene, GetDeterministicViewSize(settings != nullptr ? settings->Window : WindowSettings{}));
+			layout.Table = &layout.Computed;
+		}
+
+		// One canvas of the result: its entry or outline line, then each of its listed elements'.
+		struct UiTreeWriter
+		{
+			const Scene* Target = nullptr;
+			const AssetManager* Assets = nullptr;
+			uint32_t DepthLimit = 0; // 0: unlimited
+			UiTreeResult* Result = nullptr;
+			bool Text = false;
+		};
+
+		static void WriteUiTreeCanvas(const UiTreeWriter& writer, const UiLayoutTable& table, const UiCanvasLayout& canvas, ConstEntity canvasEntity)
+		{
+			const Scene& scene = *writer.Target;
+			UiTreeResult& result = *writer.Result;
+			const UiPixelRect sceneRect{ .X = 0.0f, .Y = 0.0f, .Width = static_cast<float>(table.SceneSize.x), .Height = static_cast<float>(table.SceneSize.y) };
+			const std::string canvasId = canvasEntity.GetUUID().ToString();
+			if (writer.Text)
+			{
+				result.Text += std::format("{}  {}  UiCanvas(sort {}, scale {})\n", canvasEntity.GetName(), canvasId.substr(0, 8), canvas.SortOrder,
+					FormatUiOutlineNumber(canvas.Scale));
+			}
+			else
+			{
+				UiTreeEntry entry;
+				entry.Id = canvasId;
+				entry.Name = canvasEntity.GetName();
+				entry.Path = scene.GetEntityPath(canvasEntity);
+				entry.Canvas = canvasId;
+				entry.Depth = 0;
+				for (const ComponentInfo* info : GetUiComponents(canvasEntity))
+					entry.Components.push_back(info->GetName());
+				entry.Rect = sceneRect;
+				entry.SortOrder = canvas.SortOrder;
+				entry.Scale = canvas.Scale;
+				entry.Visible = true;
+				result.Elements.push_back(std::move(entry));
+			}
+
+			// The canvas's elements within the depth limit whose entities the scene still holds, in the table's order.
+			const size_t first = std::min<size_t>(canvas.FirstNode, table.Nodes.size());
+			const size_t count = std::min<size_t>(canvas.NodeCount, table.Nodes.size() - first);
+			std::vector<const UiLayoutNode*> listed;
+			for (const UiLayoutNode& node : std::span(table.Nodes).subspan(first, count))
+			{
+				if ((writer.DepthLimit == 0 || node.Depth <= writer.DepthLimit) && scene.FindEntityByID(node.Entity).IsValid())
+					listed.push_back(&node);
+			}
+
+			// An element is the last of its parent's listed children when no later listed element has its parent (the table is
+			// depth-first, a parent before its children).
+			std::vector<bool> lastOfParent(listed.size(), false);
+			std::set<UUID> parentsSeen;
+			for (size_t index = listed.size(); index > 0; --index)
+				lastOfParent[index - 1] = parentsSeen.insert(listed[index - 1]->Parent).second;
+
+			std::vector<bool> lastAtDepth;
+			for (size_t index = 0; index < listed.size(); ++index)
+			{
+				const UiLayoutNode& node = *listed[index];
+				const ConstEntity entity = scene.FindEntityByID(node.Entity);
+				const UiPixelRect rect = MakeUiPixelRect(node.Min, node.Max);
+				if (writer.Text)
+				{
+					const uint32_t depth = std::max<uint32_t>(node.Depth, 1);
+					lastAtDepth.resize(std::max<size_t>(lastAtDepth.size(), depth + 1));
+					lastAtDepth[depth] = lastOfParent[index];
+					std::string line;
+					for (uint32_t level = 1; level < depth; ++level)
+						line += lastAtDepth[level] ? "   " : "│  ";
+					line += std::format("{}{}  {}", lastOfParent[index] ? "└─ " : "├─ ", entity.GetName(), entity.GetUUID().ToString().substr(0, 8));
+					for (const std::string& part : { FormatUiOutlineComponents(entity, writer.Assets), FormatUiOutlineRect(rect) })
+					{
+						if (!part.empty())
+							line += std::format("  {}", part);
+					}
+					if (node.Clipped)
+						line += "  clipped";
+					if (!node.Visible)
+						line += "  hidden";
+					result.Text += line + "\n";
+					continue;
+				}
+
+				UiTreeEntry entry;
+				entry.Id = entity.GetUUID().ToString();
+				entry.Name = entity.GetName();
+				entry.Path = scene.GetEntityPath(entity);
+				entry.Canvas = canvasId;
+				entry.Parent = FormatOptionalUUID(node.Parent);
+				entry.Depth = node.Depth;
+				for (const ComponentInfo* info : GetUiComponents(entity))
+					entry.Components.push_back(info->GetName());
+				entry.Rect = rect;
+				entry.Clipped = node.Clipped;
+				if (node.Clipped)
+					entry.Clip = MakeUiPixelRect(node.Clip);
+				entry.Visible = node.Visible;
+				if (const UiTextComponent* text = entity.TryGetComponent<UiTextComponent>())
+					entry.Text = CutUiText(text->Text, MaxUiTreeTextBytes);
+				result.Elements.push_back(std::move(entry));
+			}
+		}
+
+	}
+
 	namespace Automation {
 
-		Result<UiTreeResult> UiTree(AutomationMethodContext& /*context*/, const UiTreeParams& /*params*/)
+		Result<UiTreeResult> UiTree(AutomationMethodContext& context, const UiTreeParams& params)
 		{
-			ENGINE_CONTRACT_STUB();
-			return MakeError(ErrorCode::Unsupported, "ui.tree (Docs/Decisions/0033-m22-contract.md decision 8, stream E)");
+			if ((params.Width == 0) != (params.Height == 0))
+			{
+				const std::string_view missing = params.Width == 0 ? "/width" : "/height";
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, missing, "width and height are given together or not at all",
+					"give both to lay the UI out at that scene resolution, or neither for the scene's own"));
+			}
+			ENGINE_TRY_ASSIGN(Scene * scene, context.ResolveTargetScene(params.Target, context.HasParam("target"), false));
+
+			std::optional<UUID> onlyCanvas;
+			if (!params.Canvas.empty())
+			{
+				ENGINE_TRY_ASSIGN(const Entity canvas, context.ResolveEntity(*scene, params.Canvas, "/canvas"));
+				if (!canvas.HasComponent<UiCanvasComponent>())
+				{
+					return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/canvas",
+						std::format("'{}' has no UiCanvas component", scene->GetEntityPath(canvas)),
+						"name the canvas the element belongs to (ui.tree lists each element's canvas), or omit canvas to list every one"));
+				}
+				onlyCanvas = canvas.GetUUID();
+			}
+
+			Utils::UiTreeLayout layout;
+			Utils::ResolveUiTreeLayout(context, *scene, glm::uvec2(params.Width, params.Height), layout);
+			const UiLayoutTable& table = *layout.Table;
+
+			UiTreeResult result;
+			result.Scene = context.MakeSceneSummary(*scene);
+			result.Width = table.SceneSize.x;
+			result.Height = table.SceneSize.y;
+			const Utils::UiTreeWriter writer{
+				.Target = scene, .Assets = context.GetAssets(), .DepthLimit = params.Depth, .Result = &result, .Text = params.Format == SceneTreeFormat::Text
+			};
+			size_t elementCount = 0;
+			for (const UiCanvasLayout& canvas : table.Canvases)
+			{
+				const ConstEntity entity = std::as_const(*scene).FindEntityByID(canvas.Canvas);
+				if (!entity.IsValid() || (onlyCanvas.has_value() && *onlyCanvas != canvas.Canvas))
+					continue;
+				elementCount += canvas.NodeCount;
+				Utils::WriteUiTreeCanvas(writer, table, canvas, entity);
+			}
+			if (writer.Text)
+			{
+				result.Text = std::format("{}  rev {}  {}x{} scene pixels  {} {}\n{}", Utils::FormatUiOutlineFile(result.Scene), result.Scene.Revision,
+					result.Width, result.Height, elementCount, elementCount == 1 ? "element" : "elements", result.Text);
+			}
+			return result;
 		}
 
 	}

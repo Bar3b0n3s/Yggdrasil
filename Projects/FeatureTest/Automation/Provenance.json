@@ -140,7 +140,7 @@
 		},
 		{
 			"Path": "Assets/Formats/Fonts/Glyphs.ttf.meta",
-			"XXH64": "b9366683d1f7b4fb",
+			"XXH64": "998c9762c37d8775",
 			"Method": "asset.import",
 			"RequestId": 10,
 			"Client": "batch",
@@ -156,7 +156,7 @@
 		},
 		{
 			"Path": "Assets/Formats/Fonts/Inter-Regular.otf.meta",
-			"XXH64": "5a0586840534a3d3",
+			"XXH64": "848d795a7dc78aa5",
 			"Method": "asset.import",
 			"RequestId": 11,
 			"Client": "batch",
@@ -367,6 +367,22 @@
 			"XXH64": "2a7feee1d6ad0621",
 			"Method": "asset.import",
 			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Localization/Menu.stringtable",
+			"XXH64": "7845d9d7a60e3df0",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Localization/Menu.stringtable.meta",
+			"XXH64": "a4f17cbd3db878c3",
+			"Method": "asset.create",
+			"RequestId": 1,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -1587,6 +1603,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scenes/Components/Ui.scene",
+			"XXH64": "96a3499fc3c66da9",
+			"Method": "scene.save",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Components/Ui.scene.meta",
+			"XXH64": "83ed4174058c7e6a",
+			"Method": "edit.batch",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scenes/Determinism.scene",
 			"XXH64": "bc29650306d34633",
 			"Method": "scene.save",
@@ -1903,6 +1935,22 @@
 			"XXH64": "360aa75cf1a5a9aa",
 			"Method": "edit.batch",
 			"RequestId": 14,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenUi/Ui.scene",
+			"XXH64": "5f33109217abfa9e",
+			"Method": "scene.save",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenUi/Ui.scene.meta",
+			"XXH64": "81ac38771509bdf4",
+			"Method": "edit.batch",
+			"RequestId": 4,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -3123,6 +3171,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Api/Ui.test.luau",
+			"XXH64": "2067c12628979121",
+			"Method": "script.write",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/Ui.test.luau.meta",
+			"XXH64": "2f1792cb2f7df9a1",
+			"Method": "script.write",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Audio/Audio.test.luau",
 			"XXH64": "47b5598329ece648",
 			"Method": "script.write",
@@ -3261,6 +3325,22 @@
 		{
 			"Path": "Assets/Tests/Input/Input.test.luau.meta",
 			"XXH64": "c21430d52468d4f4",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Localization/Localization.test.luau",
+			"XXH64": "cc143b795c4da836",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Localization/Localization.test.luau.meta",
+			"XXH64": "49b80b53f39b9699",
 			"Method": "script.write",
 			"RequestId": 2,
 			"Client": "batch",
@@ -3523,8 +3603,56 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Textures/GoldenUi/Rgba.png",
+			"XXH64": "2a4bed42f9a31ba0",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Textures/GoldenUi/Rgba.png.meta",
+			"XXH64": "62a9b80161545f8e",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Textures/GoldenUi/Ui.spritesheet",
+			"XXH64": "ea997daef390e8d4",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Textures/GoldenUi/Ui.spritesheet.meta",
+			"XXH64": "07a0bd198d8beafd",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Ui/Fonts/Inter-Regular.otf",
+			"XXH64": "38e610539efec6b5",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Ui/Fonts/Inter-Regular.otf.meta",
+			"XXH64": "067ad02f229c269c",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "FeatureTest.eproj",
-			"XXH64": "bf8a7dbece285258",
+			"XXH64": "402d9a03eeccee98",
 			"Method": "project.setSettings",
 			"RequestId": 1,
 			"Client": "batch",

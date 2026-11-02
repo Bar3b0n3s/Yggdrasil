@@ -87,8 +87,9 @@ namespace Engine {
 		std::vector<TextPixelGlyph> Glyphs{};
 		std::vector<UiPassRun> Runs{}; // in draw order
 		uint32_t DrawnItems = 0;       // items that drew anything (an empty text or a clipped-away item draws nothing)
-		// Images whose sheet is missing or failed or lacks the item's Frame: they draw nothing (the AssetManager records the
-		// missing or failed sheet's diagnostic; a frame index out of range is project.validate's UI_IMAGE_FRAME_OUT_OF_RANGE).
+		// Images whose sheet is missing, failed or of another type, or lacks the item's Frame: they draw nothing. PlanUiPass
+		// reports such a sheet through the AssetManager's shared failure policy (PlanUiPass's comment); a frame index out of
+		// range is project.validate's UI_IMAGE_FRAME_OUT_OF_RANGE.
 		uint32_t SkippedItems = 0;
 
 		bool operator==(const UiPassPlan&) const = default;
@@ -100,8 +101,10 @@ namespace Engine {
 	//     a Label, when not empty, in the Default font (a null Font) at UiAnnotationLabelSize in its Color, left-aligned, its
 	//     block's bottom-left corner at the rectangle's top-left corner.
 	//   - Image: a null Sheet is one quad of Color over [Min, Max] with the white texel. Otherwise the sheet
-	//     (AssetManager::Load; there is no placeholder sheet) and its texture's size (the texture's CPU data, a missing or failed
-	//     texture its placeholder's) give the frame's texel rectangle: Simple is one quad with the frame's rectangle as its
+	//     (AssetManager::Load; there is no placeholder sheet, so an unknown handle, an asset of another type or a failed load
+	//     skips the item and is reported once per plan through AssetManager::ReportDiagnostic as GetOrPlaceholder reports
+	//     one: ASSET_MISSING, ASSET_TYPE_MISMATCH or ASSET_IMPORT_FAILED, logged once per manager) and its texture's size (the
+	//     texture's CPU data, a missing or failed texture its placeholder's) give the frame's texel rectangle: Simple is one quad with the frame's rectangle as its
 	//     texture coordinates (texel edges over the texture's size, no half-texel inset); Sliced is ExpandNineSlice of the
 	//     frame's Rect and Borders over the rectangle's size with BorderScale, one quad per patch, offset by Min.
 	//   - Text: MeasureText with the item's font (null: the Default font; missing or failed: its placeholder) at FontSize,

@@ -67,8 +67,8 @@ namespace Engine {
 	// motion, added to a phase's pending delta, would exceed the float range (about 3.4e38): the views never hold NaN or
 	// infinity, whatever finite values a caller injects.
 	//
-	// Not thread-safe: the main thread owns it. Deterministic: the views depend only on the sequence of Inject and latch
-	// calls.
+	// Not thread-safe: the main thread owns it. Deterministic: the views depend only on the sequence of Inject, latch and
+	// SetFrameView calls.
 	class InputState
 	{
 	public:
@@ -81,6 +81,13 @@ namespace Engine {
 
 		// Latches the Frame view (see the class comment).
 		void LatchFrame();
+
+		// Replaces the Frame view with `source`'s latched Frame view and drops the Frame changes pending since this state's
+		// last Frame latch, as a LatchFrame() would consume them; the live state and the Step side are unchanged. For a play
+		// session's frame preview (M22 W-CLOCK, Docs/Decisions/0033-m22-contract.md decision 12): PlayInput latches the Frame
+		// view of a frame that runs no step on a state that also holds device input no tick has applied yet, while this
+		// state's Step view keeps following the applied ticks only.
+		void SetFrameView(const InputState& source);
 
 		// Keys: down at the phase's last latch; pressed or released since the latch before it.
 		[[nodiscard]] bool IsKeyDown(InputPhase phase, Key key) const;

@@ -1299,8 +1299,8 @@ end
 			const std::span<const std::string_view> codes = ProjectValidator::GetCodes();
 			// M4's 14 codes, M6's 11 (the asset codes but the runtime-only ASSET_UPLOAD_FAILED, and PREFAB_MISSING_ASSET), M8's
 			// RENDER_LIGHT_LIMIT_EXCEEDED, M9's two render warnings, M11's 10 physics codes, M12's 2 audio codes, M13's 7 and
-			// M19's SCRIPT_COMPUTED_ASSET_LOAD and M20's PREFAB_CYCLE.
-			CHECK(codes.size() == 39 + PhysicsDiagnosticCodes.size());
+			// M19's SCRIPT_COMPUTED_ASSET_LOAD, M20's PREFAB_CYCLE and M22's two UI codes.
+			CHECK(codes.size() == 41 + PhysicsDiagnosticCodes.size());
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -1316,10 +1316,11 @@ end
 			CHECK(position(PhysicsLimitExceededCode) + 1 == position("SCRIPT_COMPILE_ERROR"));
 			CHECK(position("INPUT_UNKNOWN_ACTION") + 1 == position(AudioNoListenerCode));
 			// The codes of later milestones are appended in landing order (Docs/Decisions/0028-backlog-program.md, the reservation
-			// ledger): M19's after TEST_SUITE_INVALID, then M20's.
+			// ledger): M19's after TEST_SUITE_INVALID, then M20's, then M22's (Docs/Decisions/0033-m22-contract.md decision 13).
 			CHECK(position("TEST_SUITE_INVALID") + 1 == position(ScriptComputedAssetLoadCode));
 			CHECK(position(ScriptComputedAssetLoadCode) + 1 == position(PrefabCycleCode));
-			CHECK(codes.back() == PrefabCycleCode);
+			CHECK(position(PrefabCycleCode) + 1 == position("UI_ELEMENT_WITHOUT_CANVAS"));
+			CHECK(codes.back() == "UI_IMAGE_FRAME_OUT_OF_RANGE");
 			CHECK(position(AudioNoListenerCode) + 1 == position(AudioMultiplePrimaryListenersCode));
 			CHECK(position(AudioMultiplePrimaryListenersCode) < position(RenderLightLimitExceededCode));
 			CHECK(position(RenderLightLimitExceededCode) < position(BuildStartSceneMissingCode));
@@ -1574,6 +1575,79 @@ end
 			}
 			std::ranges::sort(files);
 			CHECK(files == std::vector<std::string>{ "Assets/Prefabs/A.prefab", "Assets/Prefabs/B.prefab" });
+		}
+
+		// Docs/Decisions/0033-m22-contract.md decision 13 (the W22.1 review: the fixtures check only which codes a project
+		// reports): each faulty element is named once, at its entity and component, and valid UI stays quiet: an element
+		// reached through a grouping entity without a UiRect, one below a nested canvas, an image at its sheet's last frame
+		// and a plain image (a null sheet) whatever its Frame.
+		TEST_CASE("ProjectValidator: UI_ELEMENT_WITHOUT_CANVAS and UI_IMAGE_FRAME_OUT_OF_RANGE name the element and stay quiet for valid UI")
+		{
+			Test::EditorTestFixture fixture("ValidatorUi");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			// Plain.spritesheet: three frames, no texture.
+			Result<std::string> sheet = Test::ReadTestDataText("Assets/SpriteSheets/Plain.spritesheet");
+			REQUIRE(sheet.has_value());
+			WriteValidatorFile(editor, "Assets/Ui/Plain.spritesheet", *sheet);
+			WriteValidatorFile(editor, "Assets/Ui/Plain.spritesheet.meta",
+				R"({"Format": "AssetMeta", "Version": 1, "Handle": "3a7e000000000009", "Type": "SpriteSheet", "Importer": "SpriteSheet", "ImporterVersion": 1, "Settings": null, "SubAssets": []})");
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+
+			Scene& scene = editor.GetScene();
+			{
+				SceneEdit edit(editor, "UI");
+				// `name` below `parent` (the scene root when invalid) with `components`, each added with its JSON in order.
+				const auto add = [&scene](std::string_view name, Entity parent, std::initializer_list<std::pair<std::string_view, std::string_view>> components)
+				{
+					const Entity entity = parent.IsValid() ? scene.CreateEntity(name, parent) : scene.CreateEntity(name);
+					for (const auto& [component, json] : components)
+					{
+						const Json value = ParseValidatorJson(json);
+						const Status added = ComponentAccess::AddComponent(entity, component, &value);
+						REQUIRE_MESSAGE(added.has_value(), added.error().ToString());
+					}
+					return entity;
+				};
+				const Entity hud = add("Hud", Entity(), { { "UiCanvas", "{}" } });
+				const Entity group = add("Group", hud, {});
+				add("LastFrame", group, { { "UiRect", "{}" }, { "UiImage", R"({"Sheet": "3a7e000000000009", "Frame": 2})" } });
+				const Entity panel = add("Panel", hud, { { "UiRect", "{}" } });
+				const Entity inner = add("Inner", panel, { { "UiCanvas", "{}" } });
+				add("Plain", inner, { { "UiRect", "{}" }, { "UiImage", R"({"Frame": 7})" } });
+				add("PastLast", hud, { { "UiRect", "{}" }, { "UiImage", R"({"Sheet": "3a7e000000000009", "Frame": 3})" } });
+				const Entity loose = add("Loose", Entity(), {});
+				add("Stray", loose, { { "UiRect", "{}" }, { "UiText", R"({"Text": "Score"})" } });
+				REQUIRE(edit.Commit().has_value());
+			}
+
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			INFO(DescribeDiagnostics(*report));
+			std::vector<const ProjectDiagnostic*> found;
+			for (const ProjectDiagnostic& diagnostic : report->Diagnostics)
+			{
+				if (diagnostic.Code.starts_with("UI_"))
+					found.push_back(&diagnostic);
+			}
+			REQUIRE(found.size() == 2);
+			const ProjectDiagnostic* withoutCanvas = FindDiagnostic(*report, "UI_ELEMENT_WITHOUT_CANVAS");
+			REQUIRE(withoutCanvas != nullptr);
+			CHECK(withoutCanvas->Severity == DiagnosticSeverity::Warning);
+			CHECK(withoutCanvas->File == "Assets/Scenes/Main.scene");
+			CHECK(withoutCanvas->Entity == scene.FindEntityByPath("/Loose/Stray").GetUUID().ToString());
+			CHECK(withoutCanvas->Component == "UiRect");
+			CHECK(withoutCanvas->Field.empty());
+			CHECK_FALSE(withoutCanvas->AutoFixable);
+			const ProjectDiagnostic* frame = FindDiagnostic(*report, "UI_IMAGE_FRAME_OUT_OF_RANGE");
+			REQUIRE(frame != nullptr);
+			CHECK(frame->Severity == DiagnosticSeverity::Warning);
+			CHECK(frame->File == "Assets/Scenes/Main.scene");
+			CHECK(frame->Entity == scene.FindEntityByPath("/Hud/PastLast").GetUUID().ToString());
+			CHECK(frame->Component == "UiImage");
+			CHECK(frame->Field == "Frame");
+			CHECK_FALSE(frame->AutoFixable);
 		}
 
 		TEST_CASE("ProjectValidator: GetCodes lists the M6 asset codes")

@@ -33,8 +33,9 @@
 // cube, a sphere and a ground plane) extracted from a scene and rendered by the scene renderer through the viewport
 // capture (viewport.screenshot's path); and the M8 goldens of Roadmap M8 (MaterialGrid, IblOnly, Tonemappers, Bloom,
 // AlphaModes, DebugDraw, Text, GltfFixture), each a scene of Projects/FeatureTest/Assets/Scenes/Golden rendered through
-// Test::RenderGoldenScene (§15.4; Docs/Decisions/0013-m8-decisions.md decision 14). They run in the golden stage (Release) on
-// this machine's device class; Test.py --update-golden writes candidates for review.
+// Test::RenderGoldenScene (§15.4; Docs/Decisions/0013-m8-decisions.md decision 14), and M22's Ui, the scene of a golden
+// scaffold of its own, rendered the same way. They run in the golden stage (Release) on this machine's device class;
+// Test.py --update-golden writes candidates for review.
 
 namespace Engine {
 
@@ -249,6 +250,16 @@ namespace Engine {
 			// Projects/FeatureTest/Assets/Models/Golden by the scaffold and instantiated as prefabs, under the Studio HDRI
 			// with a blurred skybox (SkyboxBlur) and a sun.
 			CheckGoldenScene("GltfFixture");
+		}
+
+		TEST_CASE("Golden: Ui")
+		{
+			// M22 (Docs/Decisions/0033-m22-contract.md decision 14): the scene of the golden scaffold Scaffold/UiGolden.jsonl
+			// (IdSeed 2002) over a cleared camera view: a 16 x 8 sprite frame at 1:1 and four times larger, point sampled; a
+			// 9-sliced frame stretched over a clipping panel that holds a horizontal stack, whose last child the panel clips,
+			// and a wrapped, centred label in the Default font; and a second canvas at two scene pixels per unit drawn over the
+			// first.
+			CheckGoldenScene("Ui");
 		}
 	}
 

@@ -16,6 +16,7 @@
 #include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Scene/UiSystem.h"
 #include "Engine/Scripting/ScriptEngine.h"
+#include "Engine/Session/ReplayRecorder.h"
 #include "Support/PhysicsTestScene.h"
 #include "Support/SceneTestFixture.h"
 #include "Support/ScriptTestFixture.h"
@@ -231,7 +232,8 @@ namespace Engine {
 			REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
 
 			(*session)->Tick();
-			// §5.7: the fixed step (0 to 9, TransformSystem::Update before PhysicsSystem::PreStep), then the frame phase.
+			// §5.7: the fixed step (0 to 10, TransformSystem::Update before PhysicsSystem::PreStep, UiLayout last), then the
+			// frame phase (FrameUiLayout after FrameTransformUpdate).
 			const std::vector<PlaySessionPhase> expected = {
 				PlaySessionPhase::InterpolationSnapshot,
 				PlaySessionPhase::ApplyInput,
@@ -244,12 +246,14 @@ namespace Engine {
 				PlaySessionPhase::PhysicsPostStep,
 				PlaySessionPhase::DestroyFlush,
 				PlaySessionPhase::PostStepTransformUpdate,
+				PlaySessionPhase::UiLayout,
 				PlaySessionPhase::LatchFrame,
 				PlaySessionPhase::FrameStartFlush,
 				PlaySessionPhase::Update,
 				PlaySessionPhase::LateUpdate,
 				PlaySessionPhase::FrameDestroyFlush,
 				PlaySessionPhase::FrameTransformUpdate,
+				PlaySessionPhase::FrameUiLayout,
 				PlaySessionPhase::AudioUpdate,
 				PlaySessionPhase::RenderExtraction,
 			};
@@ -258,10 +262,10 @@ namespace Engine {
 			// FixedStep alone runs the fixed step only; FrameUpdate alone the frame phase only.
 			observer.Phases.clear();
 			(*session)->FixedStep();
-			CHECK(observer.Phases == std::vector<PlaySessionPhase>(expected.begin(), expected.begin() + 11));
+			CHECK(observer.Phases == std::vector<PlaySessionPhase>(expected.begin(), expected.begin() + 12));
 			observer.Phases.clear();
 			(*session)->FrameUpdate(FrameTime{ .DeltaTime = 1.0 / 60.0, .UnscaledDeltaTime = 1.0 / 60.0, .Alpha = 0.5, .FrameIndex = 0 });
-			CHECK(observer.Phases == std::vector<PlaySessionPhase>(expected.begin() + 11, expected.end()));
+			CHECK(observer.Phases == std::vector<PlaySessionPhase>(expected.begin() + 12, expected.end()));
 		}
 
 		TEST_CASE("PlaySession: Simulate mode skips the script and audio phases")
@@ -282,9 +286,11 @@ namespace Engine {
 				PlaySessionPhase::PhysicsPostStep,
 				PlaySessionPhase::DestroyFlush,
 				PlaySessionPhase::PostStepTransformUpdate,
+				PlaySessionPhase::UiLayout,
 				PlaySessionPhase::LatchFrame,
 				PlaySessionPhase::FrameDestroyFlush,
 				PlaySessionPhase::FrameTransformUpdate,
+				PlaySessionPhase::FrameUiLayout,
 				PlaySessionPhase::RenderExtraction,
 			};
 			CHECK(observer.Phases == expected);
@@ -292,7 +298,7 @@ namespace Engine {
 
 		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 3; stream A, which also adds the two phases to the documented
 		// sequence above): ADR 0028's phase-2 ledger fixes their positions. The step's layout is at the session's view size.
-		TEST_CASE("PlaySession: UiLayout ends the fixed step and FrameUiLayout follows FrameTransformUpdate, in Play and Simulate" * doctest::skip(true))
+		TEST_CASE("PlaySession: UiLayout ends the fixed step and FrameUiLayout follows FrameTransformUpdate, in Play and Simulate")
 		{
 			for (const PlayMode mode : { PlayMode::Play, PlayMode::Simulate })
 			{
@@ -329,8 +335,7 @@ namespace Engine {
 		// M22 (C22.1, decision 3; stream A; the C22.1 review): the current layout describes the current scene from the
 		// session's start, and right after a Scene.Load replaces the scene at the end of a frame, before the next step, so
 		// ui.tree and W22.2's UiInput never read an empty table or a replaced scene's rectangles.
-		TEST_CASE("PlaySession: the current UI layout is the scene's from the start and the loaded scene's right after a Scene.Load"
-			* doctest::skip(true))
+		TEST_CASE("PlaySession: the current UI layout is the scene's from the start and the loaded scene's right after a Scene.Load")
 		{
 			Test::ScriptTestFixture fixture;
 			const UiRectComponent topLeft{ .AnchorMin = glm::vec2(0.0f), .AnchorMax = glm::vec2(0.0f), .Pivot = glm::vec2(0.0f), .Size = glm::vec2(10.0f) };
@@ -384,7 +389,7 @@ namespace Engine {
 		}
 
 		// W-CLOCK (M22, C22.1, decision 12; stream K): the session previews device input in the frame view only in live play.
-		TEST_CASE("PlaySession: the frame preview is on in live play and off in lockstep" * doctest::skip(true))
+		TEST_CASE("PlaySession: the frame preview is on in live play and off in lockstep")
 		{
 			Test::SceneTestFixture fixture;
 			Result<Scope<PlaySession>> session = PlaySession::CreateFromScene(MakeSpecification(fixture), fixture.GetScene());
@@ -395,6 +400,54 @@ namespace Engine {
 			play.SetLockstep(true);
 			play.Tick();
 			CHECK_FALSE(play.GetInput().IsFramePreviewEnabled());
+		}
+
+		// W-CLOCK (decision 12; stream K): a recording replays with the frame views its ticks gave, so while it records the
+		// session latches the frame view of the applied ticks only; live play's frame without a step sees the device press.
+		TEST_CASE("PlaySession: the frame preview is off while recording, and live play previews device input before its tick")
+		{
+			Test::ScriptTestFixture fixture;
+			PlaySessionSpecification specification{};
+			specification.Registry = &fixture.GetTypes();
+			specification.Assets = &fixture.GetAssetManager();
+			specification.ScriptSchemas = fixture.GetSchemaSnapshot();
+			specification.Seed = 47;
+			const FrameTime frame{ .DeltaTime = 1.0 / 60.0, .UnscaledDeltaTime = 1.0 / 60.0, .Alpha = 0.5, .FrameIndex = 0 };
+			const Event space = KeyEvent{ .KeyCode = Key::Space, .Action = ButtonAction::Pressed, .Modifiers = KeyModifiers::None, .Handled = false };
+
+			Result<Scope<PlaySession>> live = PlaySession::CreateFromScene(specification, fixture.GetScene());
+			REQUIRE_MESSAGE(live.has_value(), live.error().ToString());
+			(*live)->SetExtractionEnabled(false);
+			(*live)->GetInput().QueueDeviceEvent(space);
+			(*live)->FrameUpdate(frame);
+			CHECK((*live)->GetInput().IsFramePreviewEnabled());
+			CHECK((*live)->GetInput().GetDevices().WasKeyPressed(InputPhase::Frame, Key::Space));
+			CHECK_FALSE((*live)->GetInput().GetDevices().IsKeyDown(InputPhase::Step, Key::Space));
+
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(specification, fixture.GetScene());
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& recording = **created;
+			recording.SetExtractionEnabled(false);
+			ReplayHeader header{};
+			header.Scene = { AssetHandle(0x7100b1), "Assets/Scenes/Preview.scene" };
+			header.Seed = specification.Seed;
+			header.EngineVersion = "1";
+			header.Config = "Debug";
+			const Status began = recording.GetRecorder()->Begin(header, recording);
+			REQUIRE_MESSAGE(began.has_value(), began.error().ToString());
+			recording.GetInput().QueueDeviceEvent(space);
+			recording.FrameUpdate(frame);
+			CHECK_FALSE(recording.GetInput().IsFramePreviewEnabled());
+			CHECK_FALSE(recording.GetInput().GetDevices().IsKeyDown(InputPhase::Frame, Key::Space));
+			// The tick applies the press, and its frame phase reports it.
+			recording.Tick();
+			CHECK(recording.GetInput().GetDevices().WasKeyPressed(InputPhase::Frame, Key::Space));
+			CHECK(recording.GetInput().GetDevices().WasKeyPressed(InputPhase::Step, Key::Space));
+
+			// Once the recording ends, the session previews again.
+			recording.GetRecorder()->Cancel();
+			recording.FrameUpdate(frame);
+			CHECK(recording.GetInput().IsFramePreviewEnabled());
 		}
 
 		TEST_CASE("PlaySession: entity cap raises an error, never crashes")

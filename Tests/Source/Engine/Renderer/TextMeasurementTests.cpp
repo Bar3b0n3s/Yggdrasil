@@ -3,15 +3,20 @@
 #include "Engine/Renderer/TextMeasurement.h"
 
 #include "Engine/Asset/FontData.h"
+#include "Engine/Core/Hash.h"
 
 #include <glm/glm.hpp>
 
 #include <array>
+#include <bit>
+#include <cstdint>
+#include <limits>
 #include <string>
+#include <string_view>
 
 // The text-measurement layer (M22, C22.1, R-UI-TEXT; Docs/Decisions/0033-m22-contract.md decision 6) on TextLayoutTests'
-// synthetic font: positions, word wrapping, line feeds and spacing, alignment, the font chain and byte offsets. Skipped by
-// the contract; stream B un-skips them.
+// synthetic font: positions, word wrapping, line feeds and spacing, alignment, the font chain and byte offsets, and the
+// wrapping and byte-range rules of TextMeasurement.cpp's file comment.
 
 namespace Engine {
 
@@ -43,7 +48,7 @@ namespace Engine {
 
 	TEST_SUITE("Renderer")
 	{
-		TEST_CASE("TextMeasurement: a line measures its glyph advances and kerning at the size" * doctest::skip(true))
+		TEST_CASE("TextMeasurement: a line measures its glyph advances and kerning at the size")
 		{
 			const FontData font = MakeFont();
 			const std::array<const FontData*, 1> chain = { &font };
@@ -73,7 +78,7 @@ namespace Engine {
 			CHECK(MeasureText(chain, "AB A", { .Size = 10.0f }) == measured);
 		}
 
-		TEST_CASE("TextMeasurement: Word wraps at the last space that fits MaxWidth and breaks a longer word between glyphs" * doctest::skip(true))
+		TEST_CASE("TextMeasurement: Word wraps at the last space that fits MaxWidth and breaks a longer word between glyphs")
 		{
 			const FontData font = MakeFont();
 			const std::array<const FontData*, 1> chain = { &font };
@@ -97,7 +102,7 @@ namespace Engine {
 			CHECK(MeasureText(chain, "AB A", { .Size = 10.0f, .MaxWidth = 12.0f }).Lines.size() == 1);
 		}
 
-		TEST_CASE("TextMeasurement: line feeds break lines, carriage returns are ignored, and LineSpacing scales the pitch" * doctest::skip(true))
+		TEST_CASE("TextMeasurement: line feeds break lines, carriage returns are ignored, and LineSpacing scales the pitch")
 		{
 			const FontData font = MakeFont();
 			const std::array<const FontData*, 1> chain = { &font };
@@ -111,7 +116,7 @@ namespace Engine {
 			CHECK(MeasureText(chain, "", { .Size = 10.0f }).Lines.empty());
 		}
 
-		TEST_CASE("TextMeasurement: Alignment places each line within MaxWidth, or within the widest line" * doctest::skip(true))
+		TEST_CASE("TextMeasurement: Alignment places each line within MaxWidth, or within the widest line")
 		{
 			const FontData font = MakeFont();
 			const std::array<const FontData*, 1> chain = { &font };
@@ -130,7 +135,7 @@ namespace Engine {
 			CHECK(centred.Glyphs[2].Min.x == doctest::Approx(7.5f));
 		}
 
-		TEST_CASE("TextMeasurement: a codepoint takes the first font of the chain with its glyph, and the rest are skipped and counted" * doctest::skip(true))
+		TEST_CASE("TextMeasurement: a codepoint takes the first font of the chain with its glyph, and the rest are skipped and counted")
 		{
 			const FontData first = MakeFont(true, false);
 			const FontData second = MakeFont(false, true);
@@ -146,6 +151,134 @@ namespace Engine {
 			CHECK(measured.Glyphs[2].Font == 1);
 			CHECK(measured.Glyphs[2].ByteOffset == 5);
 			CHECK(measured.Glyphs[2].Min.x == doctest::Approx(11.5f));
+		}
+
+		TEST_CASE("TextMeasurement: Word breaks at the last space whose line fits, else at the first, and never before a line's first other codepoint")
+		{
+			const FontData font = MakeFont();
+			const std::array<const FontData*, 1> chain = { &font };
+			const auto wrap = [&chain](std::string_view text, float maxWidth)
+			{
+				return MeasureText(chain, text, { .Size = 10.0f, .Wrap = TextWrap::Word, .MaxWidth = maxWidth });
+			};
+
+			// "AB  A": the spaces start at 10 and 12.5 and the last 'A' would end at 20. Within 16 both spaces fit, so the line
+			// keeps the first and breaks at the second.
+			const TextMeasurement wide = wrap("AB  A", 16.0f);
+			REQUIRE(wide.Lines.size() == 2);
+			CHECK(wide.Lines[0].ByteEnd == 3);
+			CHECK(wide.Lines[0].Width == doctest::Approx(12.5f));
+			CHECK(wide.Lines[1].ByteBegin == 4);
+			CHECK(wide.Lines[1].Width == doctest::Approx(5.0f));
+			// Within 11 only the first fits: the line breaks there, and the second space starts the next line.
+			const TextMeasurement narrow = wrap("AB  A", 11.0f);
+			REQUIRE(narrow.Lines.size() == 2);
+			CHECK(narrow.Lines[0].ByteEnd == 2);
+			CHECK(narrow.Lines[0].Width == doctest::Approx(10.0f));
+			CHECK(narrow.Lines[1].ByteBegin == 3);
+			CHECK(narrow.Lines[1].Width == doctest::Approx(7.5f));
+			REQUIRE(narrow.Glyphs.size() == 3);
+			CHECK(narrow.Glyphs[2].Min.x == doctest::Approx(2.5f));
+
+			// A glyph wider than MaxWidth stays alone on its line; no space fits after it, so the line breaks at the first.
+			const TextMeasurement lone = wrap("B A", 4.0f);
+			REQUIRE(lone.Lines.size() == 2);
+			CHECK(lone.Lines[0].ByteEnd == 1);
+			CHECK(lone.Lines[0].Width == doctest::Approx(6.0f));
+			CHECK(lone.Lines[1].ByteBegin == 2);
+
+			// Leading spaces are no break: the first 'A' stays on the first line although it ends at 7.5, beyond 6, and the
+			// word breaks before 'B'.
+			const TextMeasurement leading = wrap(" AB", 6.0f);
+			REQUIRE(leading.Lines.size() == 2);
+			CHECK(leading.Lines[0].GlyphCount == 1);
+			CHECK(leading.Lines[0].ByteEnd == 2);
+			CHECK(leading.Lines[0].Width == doctest::Approx(7.5f));
+			CHECK(leading.Lines[1].ByteBegin == 2);
+			CHECK(leading.Glyphs[1].Min.x == doctest::Approx(0.5f));
+
+			// A MaxWidth that is not positive and finite neither wraps nor sizes the block.
+			for (const float maxWidth : { -5.0f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN() })
+			{
+				CAPTURE(maxWidth);
+				const TextMeasurement unbounded = wrap("AB A", maxWidth);
+				CHECK(unbounded.Lines.size() == 1);
+				CHECK(unbounded.Size.x == doctest::Approx(17.5f));
+			}
+		}
+
+		TEST_CASE("TextMeasurement: the lines of a paragraph share its bytes, a trailing line feed starts an empty line, and every direction lays out left to right")
+		{
+			const FontData font = MakeFont();
+			const std::array<const FontData*, 1> chain = { &font };
+			// The carriage return and the invalid byte belong to the lines around them; only the line feed is no line's.
+			const TextMeasurement measured = MeasureText(chain, std::string("A\r\nB\xFF") + "\n", { .Size = 10.0f });
+			REQUIRE(measured.Lines.size() == 3);
+			CHECK(measured.SkippedCodepoints == 1);
+			CHECK(measured.Lines[0].ByteBegin == 0);
+			CHECK(measured.Lines[0].ByteEnd == 2);
+			CHECK(measured.Lines[1].ByteBegin == 3);
+			CHECK(measured.Lines[1].ByteEnd == 5);
+			CHECK(measured.Lines[2].ByteBegin == 6);
+			CHECK(measured.Lines[2].ByteEnd == 6);
+			CHECK(measured.Lines[2].GlyphCount == 0);
+			CHECK(measured.Lines[2].Width == doctest::Approx(0.0f));
+			// Three lines: two pitches of 11 and the last line's 10.
+			CHECK(measured.Size.y == doctest::Approx(32.0f));
+			CHECK(measured.Lines[2].Baseline == doctest::Approx(30.0f));
+
+			// An empty text has no line and no height; a bounded block keeps its width.
+			const TextMeasurement empty = MeasureText(chain, "", { .Size = 10.0f, .MaxWidth = 20.0f });
+			CHECK(empty.Lines.empty());
+			CHECK(empty.Size.x == doctest::Approx(20.0f));
+			CHECK(empty.Size.y == doctest::Approx(0.0f));
+
+			// Shaping and bidi are W22.3's: in W22.1 every TextDirection gives the left-to-right layout.
+			const TextMeasurement leftToRight = MeasureText(chain, "AB A", { .Size = 10.0f, .Direction = TextDirection::LeftToRight });
+			CHECK(MeasureText(chain, "AB A", { .Size = 10.0f, .Direction = TextDirection::RightToLeft }) == leftToRight);
+			CHECK(MeasureText(chain, "AB A", { .Size = 10.0f, .Direction = TextDirection::Auto }) == leftToRight);
+		}
+
+		TEST_CASE("TextMeasurement: a wrapped and centred block measures to the same bytes in every configuration")
+		{
+			// The pinned digest of every float and integer of the measurement, at a size, line spacing and width that binary
+			// floats do not hold exactly, so every product rounds: the Debug and Release unit runs (and the milestone gate's)
+			// compare the layout byte for byte.
+			constexpr uint64_t ExpectedDigest = 0xea4be6a75af8cf57ull;
+			const FontData font = MakeFont();
+			const std::array<const FontData*, 1> chain = { &font };
+			// Kerned pairs, a run of spaces, a line feed after a carriage return, a leading space and an ill-formed byte (\377).
+			constexpr std::string_view Text = "AB A BAB  ABBA\nBA\r\n A \377AAAA AB";
+			const TextMeasurement measured = MeasureText(chain, Text,
+				{ .Size = 13.7f, .LineSpacing = 1.3f, .Wrap = TextWrap::Word, .MaxWidth = 23.9f, .Alignment = RenderTextAlignment::Center });
+			REQUIRE(measured.Lines.size() > 4);
+
+			XXH64Hasher hasher;
+			const auto updateFloat = [&hasher](float value)
+			{
+				hasher.UpdateU64(std::bit_cast<uint32_t>(value));
+			};
+			for (const TextMeasuredGlyph& glyph : measured.Glyphs)
+			{
+				for (const glm::vec2& corner : { glyph.Min, glyph.Max, glyph.AtlasMin, glyph.AtlasMax })
+				{
+					updateFloat(corner.x);
+					updateFloat(corner.y);
+				}
+				hasher.UpdateU64(glyph.Font);
+				hasher.UpdateU64(glyph.ByteOffset);
+			}
+			for (const TextMeasuredLine& line : measured.Lines)
+			{
+				for (const uint32_t value : { line.FirstGlyph, line.GlyphCount, line.ByteBegin, line.ByteEnd })
+					hasher.UpdateU64(value);
+				for (const float value : { line.Left, line.Width, line.Top, line.Baseline })
+					updateFloat(value);
+			}
+			updateFloat(measured.Size.x);
+			updateFloat(measured.Size.y);
+			hasher.UpdateU64(measured.SkippedCodepoints);
+			CHECK(hasher.Digest() == ExpectedDigest);
 		}
 	}
 

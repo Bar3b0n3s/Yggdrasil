@@ -186,7 +186,7 @@ namespace Engine {
 		[[nodiscard]] PlayInputSummary GetSummary(InputPhase phase) const;
 	private:
 		// The InputState, the action map, the injected action states and their per-phase edges, the queue by tick, the
-		// applied events of the last tick and the next tick (PlayInput.cpp).
+		// applied events of the last tick, the next tick and the frame preview's state (PlayInput.cpp).
 		struct State;
 	private:
 		Scope<State> m_State;

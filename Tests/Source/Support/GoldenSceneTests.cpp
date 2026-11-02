@@ -330,18 +330,20 @@ namespace Engine {
 				mirrored.push_back(relative);
 			}
 
-			// The golden imports keep their M8 destinations; Formats.jsonl imports into Assets/Formats/<same relative path>.
+			// The golden imports keep their M8 destinations, and M22's UiGolden.jsonl imports into its own golden directory
+			// (Docs/Decisions/0033-m22-contract.md decision 14); Formats.jsonl imports into Assets/Formats/<same relative path>.
 			struct SourceCopy
 			{
 				std::string_view Fixture;  // below Tests/Data/Assets
 				std::string_view Imported; // below Projects/FeatureTest/Assets
 			};
-			constexpr std::array<SourceCopy, 5> GoldenCopies = { {
+			constexpr std::array<SourceCopy, 6> GoldenCopies = { {
 				{ "Gltf/NormalMapped.gltf", "Models/Golden/NormalMapped.gltf" },
 				{ "Gltf/Textured.bin", "Models/Golden/Textured.bin" },
 				{ "Gltf/Textured.gltf", "Models/Golden/Textured.gltf" },
 				{ "Gltf/Textures/Checker.png", "Models/Golden/Textures/Checker.png" },
 				{ "Textures/Rgba.png", "Textures/Golden/Rgba.png" },
+				{ "Textures/Rgba.png", "Textures/GoldenUi/Rgba.png" },
 			} };
 			std::vector<std::string> imported;
 			for (const SourceCopy& copy : GoldenCopies)
@@ -387,14 +389,15 @@ namespace Engine {
 
 		TEST_CASE("GoldenScene: the component, physics, audio and format scenes load strictly and re-save byte for byte")
 		{
-			// The scenes of stream B's scaffolds (Formats, Components, Physics and Audio .jsonl; ADR 0022 decision 9), opened
-			// read-only on the CPU like the golden scenes: they load without a diagnostic, reference only assets the project
-			// or the engine has, and re-save to exactly their committed bytes (the round trip of Architecture §6), so a
-			// scaffold change that writes a non-canonical or unloadable scene fails here before the feature stage. Script fields
+			// The scenes of stream B's scaffolds (Formats, Components, Physics and Audio .jsonl; ADR 0022 decision 9) and M22's
+			// Components/Ui.scene (Ui.jsonl; Docs/Decisions/0033-m22-contract.md decision 14), opened read-only on the CPU like
+			// the golden scenes: they load without a diagnostic, reference only assets the project or the engine has, and re-save
+			// to exactly their committed bytes (the round trip of Architecture §6), so a scaffold change that writes a
+			// non-canonical or unloadable scene fails here before the feature stage. Script fields
 			// (Formats.scene's SheetHolder, ADR 0029 decision 22) resolve against the field schemas of the scripts the scene
 			// attaches, as in a play copy or an export.
-			constexpr std::array<std::string_view, 7> Scenes = { "Components", "Components/TonemapAces", "Components/TonemapPbrNeutral",
-				"Components/TonemapLinear", "Physics", "Audio", "Formats" };
+			constexpr std::array<std::string_view, 8> Scenes = { "Components", "Components/TonemapAces", "Components/TonemapPbrNeutral",
+				"Components/TonemapLinear", "Components/Ui", "Physics", "Audio", "Formats" };
 			Test::AssetTestFixture assets({ .EngineResources = true });
 			VirtualFileSystem& vfs = assets.GetVfs();
 			REQUIRE(vfs.Unmount("project").has_value());

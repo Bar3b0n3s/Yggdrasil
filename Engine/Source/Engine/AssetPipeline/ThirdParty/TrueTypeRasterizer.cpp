@@ -396,14 +396,13 @@ namespace Engine {
 		return stbtt_IsGlyphEmpty(&m_State->Info, glyph) != 0;
 	}
 
-	Result<TrueTypeGlyphSdf> TrueTypeFont::RenderGlyphSdf(int32_t glyph, float pixelsPerEm, int32_t padding, float valuePerPixel) const
+	Result<TrueTypeGlyphBox> TrueTypeFont::GetGlyphSdfBox(int32_t glyph, float pixelsPerEm, int32_t padding) const
 	{
 		ENGINE_CORE_ASSERT(glyph >= 0 && glyph < m_State->GlyphCount, "glyph {} of a font with {} glyphs", glyph, m_State->GlyphCount);
-		ENGINE_CORE_ASSERT(pixelsPerEm > 0.0f && padding >= 0 && valuePerPixel > 0.0f, "invalid distance field parameters");
+		ENGINE_CORE_ASSERT(pixelsPerEm > 0.0f && padding >= 0, "invalid distance field parameters");
 		if (IsGlyphEmpty(glyph))
-			return TrueTypeGlyphSdf{};
+			return TrueTypeGlyphBox{};
 
-		constexpr unsigned char OnEdgeValue = 128;
 		const float scale = stbtt_ScaleForMappingEmToPixels(&m_State->Info, pixelsPerEm);
 		int x0 = 0;
 		int y0 = 0;
@@ -412,7 +411,7 @@ namespace Engine {
 		stbtt_GetGlyphBitmapBoxSubpixel(&m_State->Info, glyph, scale, scale, 0.0f, 0.0f, &x0, &y0, &x1, &y1);
 		// An outline too small to cover a pixel at this size has an empty bounding box; it draws nothing.
 		if (x0 == x1 || y0 == y1)
-			return TrueTypeGlyphSdf{};
+			return TrueTypeGlyphBox{};
 		x0 -= padding;
 		y0 -= padding;
 		x1 += padding;
@@ -426,7 +425,19 @@ namespace Engine {
 			return MakeError(ErrorCode::ImportFailed, "glyph {} would be a {}x{} pixel distance field; at most {} pixels on a side are supported", glyph,
 				x1 - x0, y1 - y0, MaxGlyphBitmapSide);
 		}
+		return TrueTypeGlyphBox{ .Width = static_cast<uint32_t>(x1 - x0), .Height = static_cast<uint32_t>(y1 - y0), .OffsetX = x0, .OffsetY = y0 };
+	}
 
+	Result<TrueTypeGlyphSdf> TrueTypeFont::RenderGlyphSdf(int32_t glyph, const TrueTypeGlyphBox& box, float pixelsPerEm, float valuePerPixel) const
+	{
+		ENGINE_CORE_ASSERT(glyph >= 0 && glyph < m_State->GlyphCount, "glyph {} of a font with {} glyphs", glyph, m_State->GlyphCount);
+		ENGINE_CORE_ASSERT(pixelsPerEm > 0.0f && valuePerPixel > 0.0f, "invalid distance field parameters");
+		ENGINE_CORE_ASSERT(box.Width > 0 && box.Height > 0 && box.Width <= static_cast<uint32_t>(MaxGlyphBitmapSide)
+				&& box.Height <= static_cast<uint32_t>(MaxGlyphBitmapSide),
+			"RenderGlyphSdf takes a non-empty box of GetGlyphSdfBox, got {}x{}", box.Width, box.Height);
+
+		constexpr unsigned char OnEdgeValue = 128;
+		const float scale = stbtt_ScaleForMappingEmToPixels(&m_State->Info, pixelsPerEm);
 		stbtt_vertex* shapeVertices = nullptr;
 		const int shapeCount = stbtt_GetGlyphShape(&m_State->Info, glyph, &shapeVertices);
 		const std::unique_ptr<stbtt_vertex, StbShapeDeleter> shape(shapeVertices, StbShapeDeleter{ &m_State->Info });
@@ -435,13 +446,17 @@ namespace Engine {
 		std::vector<stbtt_vertex> vertices = Utils::ReplaceCubics(std::span<const stbtt_vertex>(shape.get(), static_cast<size_t>(shapeCount)));
 		if (vertices.size() > static_cast<size_t>(std::numeric_limits<int>::max()))
 			return MakeError(ErrorCode::ImportFailed, "the outline of glyph {} has too many segments", glyph);
+		const int x0 = box.OffsetX;
+		const int y0 = box.OffsetY;
+		const int x1 = box.OffsetX + static_cast<int>(box.Width);
+		const int y1 = box.OffsetY + static_cast<int>(box.Height);
 		const std::vector<unsigned char> field = Utils::ComputeGlyphSdf(vertices, scale, x0, y0, x1, y1, OnEdgeValue, valuePerPixel);
 
 		TrueTypeGlyphSdf sdf;
-		sdf.Width = static_cast<uint32_t>(x1 - x0);
-		sdf.Height = static_cast<uint32_t>(y1 - y0);
-		sdf.OffsetX = x0;
-		sdf.OffsetY = y0;
+		sdf.Width = box.Width;
+		sdf.Height = box.Height;
+		sdf.OffsetX = box.OffsetX;
+		sdf.OffsetY = box.OffsetY;
 		const auto* pixels = reinterpret_cast<const std::byte*>(field.data());
 		sdf.Pixels.assign(pixels, pixels + field.size());
 		return sdf;

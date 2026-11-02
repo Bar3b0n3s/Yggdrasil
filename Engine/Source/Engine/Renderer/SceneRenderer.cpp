@@ -544,6 +544,7 @@ namespace Engine {
 	{
 		ClearTargetBindings();
 		UpscaleBindings.Clear();
+		UiQuadBindings.Clear();
 		Materials.Clear();
 	}
 
@@ -562,6 +563,7 @@ namespace Engine {
 		SelectionBindings.ReleaseUnused();
 		DataViewBindings.ReleaseUnused();
 		UpscaleBindings.ReleaseUnused();
+		UiQuadBindings.ReleaseUnused();
 
 		Materials.ReleaseUnused();
 	}

@@ -9,6 +9,7 @@
 #include "Support/SceneTestFixture.h"
 #include "Support/TestData.h"
 
+#include <format>
 #include <functional>
 #include <string>
 #include <string_view>
@@ -16,7 +17,7 @@
 #include <vector>
 
 // String tables (M22, C22.1, R-UI-L10N; Docs/Decisions/0033-m22-contract.md decision 10): the .stringtable file, its rules,
-// the locale resolution of a lookup, the cooked payload and its fuzz target. Skipped by the contract; stream L un-skips them.
+// the locale resolution of a lookup, the cooked payload and its fuzz target.
 
 namespace Engine {
 
@@ -52,6 +53,31 @@ namespace Engine {
 			CHECK(FirstPointer(status.error()) == pointer);
 		}
 
+		void CheckValid(std::string_view what, const std::function<void(StringTableData&)>& change)
+		{
+			CAPTURE(what);
+			StringTableData table = MakeMenuTable();
+			change(table);
+			const Status status = ValidateStringTable(table);
+			CHECK_MESSAGE(status.has_value(), status.error().ToString());
+		}
+
+		// MakeMenuTable's three locales followed by "x0", "x1", ... up to `count` locales in all.
+		void SetLocaleCount(StringTableData& table, uint32_t count)
+		{
+			for (uint32_t index = 0; table.Locales.size() < count; ++index)
+				table.Locales.push_back(std::format("x{}", index));
+		}
+
+		// `count` entries "K00000", "K00001", ... (sorted byte-wise), each with the fallback locale's string only.
+		void SetEntryCount(StringTableData& table, uint32_t count)
+		{
+			table.Entries.clear();
+			table.Entries.reserve(count);
+			for (uint32_t index = 0; index < count; ++index)
+				table.Entries.push_back(StringTableEntry{ .Key = std::format("K{:05}", index), .Values = { { table.Locales.front(), "v" } } });
+		}
+
 		// MakeMenuTable sorted by key, as a cooked table is.
 		StringTableData MakeSortedMenuTable()
 		{
@@ -64,7 +90,7 @@ namespace Engine {
 
 	TEST_SUITE("Asset")
 	{
-		TEST_CASE("StringTableData: a .stringtable file round-trips byte-identically" * doctest::skip(true))
+		TEST_CASE("StringTableData: a .stringtable file round-trips byte-identically")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			const StringTableData table = MakeMenuTable();
@@ -84,7 +110,29 @@ namespace Engine {
 			CHECK(GetStringTableDependencies(*read).empty());
 		}
 
-		TEST_CASE("StringTableData: invalid locales, keys and values are located Validation errors" * doctest::skip(true))
+		// Architecture §6 ("load -> save is byte-identical") for the hand-written fixtures, which also seed the fuzz case.
+		TEST_CASE("StringTableData: every fixture table reads strictly and writes back byte-identically")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			const auto files = Test::ListTestDataFiles("Assets/StringTables", { ".stringtable" });
+			REQUIRE_MESSAGE(files.has_value(), files.error().ToString());
+			REQUIRE(files->size() >= 2);
+			for (const std::string& file : *files)
+			{
+				CAPTURE(file);
+				const auto text = Test::ReadTestDataText(file);
+				REQUIRE(text.has_value());
+				StringTableLoadReport report;
+				const Result<StringTableData> table = StringTableFromText(*text, *registry, report, true);
+				REQUIRE_MESSAGE(table.has_value(), table.error().ToString());
+				CHECK(report.Diagnostics.empty());
+				const Result<std::string> written = StringTableToText(*table, *registry);
+				REQUIRE(written.has_value());
+				CHECK(*written == *text);
+			}
+		}
+
+		TEST_CASE("StringTableData: invalid locales, keys and values are located Validation errors")
 		{
 			REQUIRE(ValidateStringTable(MakeMenuTable()).has_value());
 			CheckInvalid("/Locales", [](StringTableData& table)
@@ -126,7 +174,64 @@ namespace Engine {
 			});
 		}
 
-		TEST_CASE("StringTableData: a lookup takes the locale, then its language, then the fallback, and the fallback's string for a missing one" * doctest::skip(true))
+		// The W22.1 review: every limit and text rule of StringTableData.h, refused one past it and accepted at it.
+		TEST_CASE("StringTableData: the locale and entry counts, the key length and the text rules are checked at their limits")
+		{
+			CheckInvalid("/Locales", [](StringTableData& table)
+			{
+				SetLocaleCount(table, MaxStringTableLocales + 1);
+			});
+			CheckValid("64 locales", [](StringTableData& table)
+			{
+				SetLocaleCount(table, MaxStringTableLocales);
+			});
+			CheckInvalid("/Entries", [](StringTableData& table)
+			{
+				SetEntryCount(table, MaxStringTableEntries + 1);
+			});
+			CheckValid("65,536 entries", [](StringTableData& table)
+			{
+				SetEntryCount(table, MaxStringTableEntries);
+			});
+			CheckInvalid("/Entries/0/Key", [](StringTableData& table)
+			{
+				table.Entries[0].Key = std::string(MaxStringTableKeyBytes + 1, 'k');
+			});
+			CheckValid("a 256-byte key", [](StringTableData& table)
+			{
+				table.Entries[0].Key = std::string(MaxStringTableKeyBytes, 'k');
+			});
+			CheckInvalid("/Entries/0/Key", [](StringTableData& table)
+			{
+				table.Entries[0].Key = "Menu\tStart"; // a control character, which values may hold and keys may not
+			});
+			CheckInvalid("/Entries/0/Key", [](StringTableData& table)
+			{
+				table.Entries[0].Key = "Menu\xC2\x85Start"; // U+0085, a C1 control
+			});
+			CheckInvalid("/Entries/0/Key", [](StringTableData& table)
+			{
+				table.Entries[0].Key = "Menu\xFF"; // not UTF-8
+			});
+			CheckInvalid("/Entries/0/Values/en", [](StringTableData& table)
+			{
+				table.Entries[0].Values["en"] = "Start\xC3"; // a truncated sequence
+			});
+			CheckInvalid("/Entries/0/Values/en", [](StringTableData& table)
+			{
+				table.Entries[0].Values["en"] = "St\xC2\x85"
+												"art";
+			});
+			CheckValid("a 16,384-byte string with line feeds and tabs", [](StringTableData& table)
+			{
+				std::string value(MaxStringTableValueBytes, 'x');
+				value[1] = '\n';
+				value[2] = '\t';
+				table.Entries[0].Values["en"] = std::move(value);
+			});
+		}
+
+		TEST_CASE("StringTableData: a lookup takes the locale, then its language, then the fallback, and the fallback's string for a missing one")
 		{
 			const StringTableData table = MakeSortedMenuTable();
 			CHECK(ResolveStringTableLocale(table, "fr") == 1);
@@ -145,7 +250,7 @@ namespace Engine {
 			CHECK(FindStringTableEntry(table, "Menu.Start")->Key == "Menu.Start");
 		}
 
-		TEST_CASE("StringTableData: the cooked payload is the documented little-endian layout, entries sorted by key" * doctest::skip(true))
+		TEST_CASE("StringTableData: the cooked payload is the documented little-endian layout, entries sorted by key")
 		{
 			// The bytes StringTableData.h documents, written here independently of the serializer, so the Debug and Release unit
 			// runs both prove that a table cooks to the same bytes in every configuration.
@@ -178,7 +283,7 @@ namespace Engine {
 			CHECK((*loaded)->Locales == table.Locales);
 		}
 
-		TEST_CASE("StringTableData: a damaged payload is refused, never trusted" * doctest::skip(true))
+		TEST_CASE("StringTableData: a damaged payload is refused, never trusted")
 		{
 			const Buffer valid = SerializeStringTablePayload(MakeMenuTable());
 			REQUIRE_FALSE(valid.empty());
@@ -221,8 +326,42 @@ namespace Engine {
 				== ErrorCode::UnsupportedVersion);
 		}
 
+		// The W22.1 review: the reader holds the entry count to its limit before it reads an entry, so a payload of more entries
+		// than a table may have is a Parse error even when every entry follows (without the limit the table would be read and
+		// then refused as a Validation error), a table of more entries than locales are allowed reads (the limits are not
+		// swapped), and a count larger than the bytes that follow is refused before anything is reserved for it.
+		TEST_CASE("StringTableData: the cooked reader holds the entry count to its limit and to the bytes that follow")
+		{
+			const auto writeEntries = [](uint32_t count, uint32_t written)
+			{
+				BinaryWriter payload;
+				payload.WriteU32(1);
+				payload.WriteString("en");
+				payload.WriteU32(count);
+				for (uint32_t index = 0; index < written; ++index)
+				{
+					payload.WriteString(std::format("K{:05}", index));
+					payload.WriteU8(1);
+					payload.WriteString("v");
+				}
+				return payload.TakeBuffer();
+			};
+			const Result<StringTableData> overLimit = DeserializeStringTablePayload(writeEntries(MaxStringTableEntries + 1, MaxStringTableEntries + 1));
+			REQUIRE_FALSE(overLimit.has_value());
+			CHECK(overLimit.error().GetCode() == ErrorCode::Parse);
+			const Result<StringTableData> atLimit = DeserializeStringTablePayload(writeEntries(MaxStringTableEntries, MaxStringTableEntries));
+			REQUIRE_MESSAGE(atLimit.has_value(), atLimit.error().ToString());
+			CHECK(atLimit->Entries.size() == MaxStringTableEntries);
+			const Result<StringTableData> moreThanLocales = DeserializeStringTablePayload(writeEntries(MaxStringTableLocales + 1, MaxStringTableLocales + 1));
+			REQUIRE_MESSAGE(moreThanLocales.has_value(), moreThanLocales.error().ToString());
+			CHECK(moreThanLocales->Entries.size() == MaxStringTableLocales + 1);
+			const Result<StringTableData> truncated = DeserializeStringTablePayload(writeEntries(MaxStringTableEntries, 1));
+			REQUIRE_FALSE(truncated.has_value());
+			CHECK(truncated.error().GetCode() == ErrorCode::Parse);
+		}
+
 		TEST_CASE("StringTableData: 1,000 seeded mutations of a string table file and of its cooked form never crash"
-			* doctest::test_suite(Test::FuzzSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::FuzzSuite))
 		{
 			// The seed corpus: the string table fixtures of Tests/Data/Assets/StringTables (stream L adds them) and this file's own
 			// table. The text goes through StringTableFromText, the cooked form through LoadCookedStringTable; a table either

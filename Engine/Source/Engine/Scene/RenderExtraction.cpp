@@ -16,6 +16,8 @@
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
+#include "Engine/Scene/UiExtraction.h"
+#include "Engine/Scene/UiLayout.h"
 
 #include <glm/gtc/quaternion.hpp>
 
@@ -520,6 +522,14 @@ namespace Engine {
 		});
 		snapshot.Environment = environment.value_or(RenderEnvironment{});
 		snapshot.Post = post.value_or(PostProcessSettings{});
+		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 7): the view's UI, laid out at the scene resolution of the
+		// snapshot's Output (the view's size by default), for the game view and a camera's view; the editor's scene view
+		// (Explicit) draws no game UI.
+		if (request.Camera != RenderCameraSource::Explicit)
+		{
+			const RenderOutputMapping mapping = ComputeRenderOutputMapping(request.Width, request.Height, snapshot.Output);
+			AppendUiDrawItems(scene, ComputeUiLayout(scene, glm::uvec2(mapping.SceneWidth, mapping.SceneHeight)), snapshot.Ui);
+		}
 		// Moved, so the containers keep `resource` (a copy would allocate from the default resource).
 		return Result<RenderSnapshot>(std::move(snapshot));
 	}

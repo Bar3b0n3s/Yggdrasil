@@ -166,3 +166,7 @@
 {"type": "response", "time": "2026-10-26T09:57:07.222Z", "client": "engine-mcp", "id": 88, "requestLine": 165, "ok": true, "summary": "entities 0; scene Main Assets/Scenes/Main.scene; rev 47"}
 {"type": "request", "time": "2026-10-26T09:57:36.593Z", "client": "engine-mcp", "id": 89, "method": "session.shutdown", "params": {"save": false, "force": false}}
 {"type": "response", "time": "2026-10-26T09:57:36.622Z", "client": "engine-mcp", "id": 89, "requestLine": 167, "ok": true, "summary": "savedFiles 0; saved no; rev 47"}
+{"type":"request","time":"2026-11-02T16:49:52.646Z","client":"cli","id":1,"method":"project.refreshAssets","params":{}}
+{"type":"response","time":"2026-11-02T16:49:52.814Z","client":"cli","id":1,"requestLine":169,"ok":true,"summary":"ok"}
+{"type":"request","time":"2026-11-02T16:49:52.815Z","client":"cli","id":2,"method":"project.upgrade","params":{}}
+{"type":"response","time":"2026-11-02T16:49:52.898Z","client":"cli","id":2,"requestLine":171,"ok":true,"summary":"ok"}

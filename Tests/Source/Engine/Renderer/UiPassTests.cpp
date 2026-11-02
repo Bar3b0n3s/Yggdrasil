@@ -2,6 +2,7 @@
 
 #include "Engine/Renderer/UiPass.h"
 
+#include "Engine/Asset/AssetDiagnostic.h"
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/FontData.h"
 #include "Engine/Asset/SpriteSheetData.h"
@@ -13,6 +14,7 @@
 #include "Engine/Renderer/RenderPassDeclaration.h"
 #include "Engine/Renderer/RenderStats.h"
 #include "Support/DeviceLossTest.h"
+#include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/InMemoryAssetManager.h"
 
@@ -21,13 +23,14 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // The Ui pass (M22, C22.1, R-UI-RENDER; Docs/Decisions/0033-m22-contract.md decision 7): planning a UI draw list (sheet frames,
 // 9-slices, text, runs, annotations) and recording it in the SceneOverlay stage after game Text, before the upscale, clipped
-// by the QuadBatcher's and the glyph runs' scissors. Skipped by the contract; stream C un-skips them (the text case once
-// stream B's measurement lands).
+// by the QuadBatcher's and the glyph runs' scissors. Texts and annotation labels lay out through TextMeasurement.h.
 
 namespace Engine {
 
@@ -119,7 +122,7 @@ namespace Engine {
 
 	TEST_SUITE("Renderer")
 	{
-		TEST_CASE("UiPass: a plain image is one white quad of its colour over its rectangle" * doctest::skip(true))
+		TEST_CASE("UiPass: a plain image is one white quad of its colour over its rectangle")
 		{
 			Test::InMemoryAssetManager assets;
 			UiDrawList list;
@@ -136,7 +139,7 @@ namespace Engine {
 			CHECK(plan.SkippedItems == 0);
 		}
 
-		TEST_CASE("UiPass: a Simple image samples its frame's texel rectangle and a Sliced one its nine patches" * doctest::skip(true))
+		TEST_CASE("UiPass: a Simple image samples its frame's texel rectangle and a Sliced one its nine patches")
 		{
 			Test::InMemoryAssetManager assets;
 			PublishUiAssets(assets);
@@ -170,22 +173,124 @@ namespace Engine {
 			CHECK(plan.DrawnItems == 2);
 		}
 
-		TEST_CASE("UiPass: an image whose sheet is missing or lacks its frame draws nothing and is counted" * doctest::skip(true))
+		// The W22.1 review (Docs/Decisions/0033-m22-contract.md): a sheet has no placeholder, so the pass reports an unusable
+		// one itself through the AssetManager's shared failure policy (§7.2), as GetOrPlaceholder reports a missing mesh or
+		// font: ASSET_MISSING for an unknown handle and ASSET_TYPE_MISMATCH for an asset of another type, each recorded for
+		// its handle and logged once however many images and frames use it. A frame the sheet lacks is project.validate's
+		// UI_IMAGE_FRAME_OUT_OF_RANGE, with no asset diagnostic.
+		TEST_CASE("UiPass: an image whose sheet is missing or lacks its frame draws nothing and is counted")
 		{
 			Test::InMemoryAssetManager assets;
 			PublishUiAssets(assets);
+			constexpr AssetHandle Missing{ 0xDEAD };
 			UiDrawList list;
-			list.Items.push_back(MakeImage(glm::vec2(0.0f), glm::vec2(8.0f), AssetHandle(0xDEAD), 0));
+			list.Items.push_back(MakeImage(glm::vec2(0.0f), glm::vec2(8.0f), Missing, 0));
 			list.Items.push_back(MakeImage(glm::vec2(0.0f), glm::vec2(8.0f), Sheet, 9));
 			list.Items.push_back(MakeImage(glm::vec2(0.0f), glm::vec2(8.0f)));
-			const UiPassPlan plan = PlanUiPass(list, assets);
-			CHECK(plan.SkippedItems == 2);
-			CHECK(plan.DrawnItems == 1);
-			CHECK(plan.Quads.size() == 1);
+			list.Items.push_back(MakeImage(glm::vec2(0.0f), glm::vec2(8.0f), Missing, 1));
+			list.Items.push_back(MakeImage(glm::vec2(0.0f), glm::vec2(8.0f), SheetTexture, 0)); // a texture, not a sheet
+			const auto countDiagnostics = [&assets](std::string_view code, AssetHandle handle)
+			{
+				return std::ranges::count_if(assets.GetDiagnostics(), [code, handle](const AssetDiagnostic& diagnostic)
+				{
+					return diagnostic.Code == code && diagnostic.Asset == handle;
+				});
+			};
+			Test::ExpectLog missing(LogLevel::Error, std::string(AssetMissingCode));
+			Test::ExpectLog mismatch(LogLevel::Error, std::string(AssetTypeMismatchCode));
+			for (int frame = 0; frame < 2; ++frame)
+			{
+				CAPTURE(frame);
+				const UiPassPlan plan = PlanUiPass(list, assets);
+				CHECK(plan.SkippedItems == 4);
+				CHECK(plan.DrawnItems == 1);
+				CHECK(plan.Quads.size() == 1);
+				CHECK(countDiagnostics(AssetMissingCode, Missing) == 1);
+				CHECK(countDiagnostics(AssetTypeMismatchCode, SheetTexture) == 1);
+				CHECK(assets.GetDiagnostics().size() == 2);
+			}
+			CHECK(missing.GetMatchCount() == 1);
+			CHECK(mismatch.GetMatchCount() == 1);
+			// Reference diagnostics report a use, not the state of an asset: they never block play or export.
+			CHECK_FALSE(assets.HasErrorDiagnostics());
 		}
 
-		// Streams B and C: the later of the two un-skips it.
-		TEST_CASE("UiPass: a text lays out in its rectangle by its alignments and wraps at its width" * doctest::skip(true))
+		TEST_CASE("UiPass: an item clipped away or without area draws nothing, and a sheet without a texture samples white")
+		{
+			Test::InMemoryAssetManager assets;
+			PublishUiAssets(assets);
+			constexpr AssetHandle Untextured{ 0x5EE8 };
+			auto sheet = CreateRef<SpriteSheetData>();
+			sheet->Frames = { SpriteFrame{ .Rect = SpriteRect{ .X = 2, .Y = 0, .Width = 2, .Height = 4 } } };
+			assets.Publish(Untextured, sheet);
+			UiDrawList list;
+			UiDrawItem clippedAway = MakeImage(glm::vec2(0.0f), glm::vec2(8.0f), Sheet, 0);
+			clippedAway.Clipped = true;
+			clippedAway.Clip = UiClipRect{ .MinX = 4, .MinY = 0, .MaxX = 4, .MaxY = 8 };
+			list.Items.push_back(clippedAway);
+			list.Items.push_back(MakeImage(glm::vec2(8.0f), glm::vec2(8.0f, 12.0f)));                                  // no width
+			list.Items.push_back(MakeImage(glm::vec2(8.0f), glm::vec2(4.0f)));                                         // inverted
+			list.Items.push_back(MakeImage(glm::vec2(0.0f), glm::vec2(std::numeric_limits<float>::infinity(), 4.0f))); // unbounded
+			UiDrawItem sliced = MakeImage(glm::vec2(0.0f), glm::vec2(8.0f), Sheet, 1);
+			sliced.ImageType = UiDrawImageType::Sliced;
+			sliced.BorderScale = 0.0f; // no border size
+			list.Items.push_back(sliced);
+			// An unclipped item's clip rectangle is ignored, whatever it holds.
+			UiDrawItem untextured = MakeImage(glm::vec2(1.0f), glm::vec2(3.0f, 5.0f), Untextured, 0);
+			untextured.Clip = UiClipRect{ .MinX = 7, .MinY = 7, .MaxX = 7, .MaxY = 7 };
+			list.Items.push_back(untextured);
+			const UiPassPlan plan = PlanUiPass(list, assets);
+			CHECK(plan.SkippedItems == 0);
+			CHECK(plan.DrawnItems == 1);
+			REQUIRE(plan.Quads.size() == 1);
+			CHECK_FALSE(plan.Quads[0].Texture.IsValid());
+			CHECK(plan.Quads[0].Min == glm::vec2(1.0f));
+			CHECK(plan.Quads[0].Max == glm::vec2(3.0f, 5.0f));
+			REQUIRE(plan.Runs.size() == 1);
+			CHECK(plan.Runs[0] == UiPassRun{ .Kind = UiPassRunKind::Quads, .First = 0, .Count = 1 });
+		}
+
+		TEST_CASE("UiPass: an outline is four one-pixel edges inside its rectangle, and a thin one leaves out the edges without area")
+		{
+			Test::InMemoryAssetManager assets;
+			UiDrawList list;
+			list.Annotations.push_back(UiAnnotation{ .Min = glm::vec2(10.0f, 20.0f), .Max = glm::vec2(14.0f, 24.0f), .Color = glm::vec4(1.0f, 1.0f, 0.0f, 1.0f), .Outline = true });
+			// One pixel high: its top row alone; two pixels wide and three high: its two rows and two one-pixel columns between them.
+			list.Annotations.push_back(UiAnnotation{ .Min = glm::vec2(0.0f), .Max = glm::vec2(5.0f, 1.0f), .Outline = true });
+			list.Annotations.push_back(UiAnnotation{ .Min = glm::vec2(0.0f), .Max = glm::vec2(2.0f, 3.0f), .Outline = true });
+			// Without Outline and Label, an annotation draws nothing.
+			list.Annotations.push_back(UiAnnotation{ .Min = glm::vec2(0.0f), .Max = glm::vec2(9.0f) });
+			const UiPassPlan plan = PlanUiPass(list, assets);
+			REQUIRE(plan.Quads.size() == 9);
+			CHECK(plan.Quads[0].Min == glm::vec2(10.0f, 20.0f));
+			CHECK(plan.Quads[0].Max == glm::vec2(14.0f, 21.0f));
+			CHECK(plan.Quads[1].Min == glm::vec2(10.0f, 23.0f));
+			CHECK(plan.Quads[1].Max == glm::vec2(14.0f, 24.0f));
+			CHECK(plan.Quads[2].Min == glm::vec2(10.0f, 21.0f));
+			CHECK(plan.Quads[2].Max == glm::vec2(11.0f, 23.0f));
+			CHECK(plan.Quads[3].Min == glm::vec2(13.0f, 21.0f));
+			CHECK(plan.Quads[3].Max == glm::vec2(14.0f, 23.0f));
+			for (size_t index = 0; index < 4; ++index)
+			{
+				CHECK(plan.Quads[index].Color == glm::vec4(1.0f, 1.0f, 0.0f, 1.0f));
+				CHECK_FALSE(plan.Quads[index].Texture.IsValid());
+			}
+			CHECK(plan.Quads[4].Min == glm::vec2(0.0f));
+			CHECK(plan.Quads[4].Max == glm::vec2(5.0f, 1.0f));
+			// The 2 x 3 rectangle: its rows, then its columns of one pixel each between them.
+			CHECK(plan.Quads[5].Max == glm::vec2(2.0f, 1.0f));
+			CHECK(plan.Quads[6].Min == glm::vec2(0.0f, 2.0f));
+			CHECK(plan.Quads[7].Min == glm::vec2(0.0f, 1.0f));
+			CHECK(plan.Quads[7].Max == glm::vec2(1.0f, 2.0f));
+			CHECK(plan.Quads[8].Min == glm::vec2(1.0f, 1.0f));
+			CHECK(plan.Quads[8].Max == glm::vec2(2.0f, 2.0f));
+			// Annotations are not items, and all of them are one unclipped run.
+			CHECK(plan.DrawnItems == 0);
+			REQUIRE(plan.Runs.size() == 1);
+			CHECK(plan.Runs[0] == UiPassRun{ .Kind = UiPassRunKind::Quads, .First = 0, .Count = 9 });
+		}
+
+		TEST_CASE("UiPass: a text lays out in its rectangle by its alignments and wraps at its width")
 		{
 			Test::InMemoryAssetManager assets;
 			PublishUiAssets(assets);
@@ -211,7 +316,7 @@ namespace Engine {
 			CHECK(plan.Glyphs[2].AtlasMax == glm::vec2(0.5f));
 		}
 
-		TEST_CASE("UiPass: runs split where the kind, the clip, the font or the colour changes, in draw order" * doctest::skip(true))
+		TEST_CASE("UiPass: runs split where the kind, the clip, the font or the colour changes, in draw order")
 		{
 			Test::InMemoryAssetManager assets;
 			PublishUiAssets(assets);
@@ -236,7 +341,7 @@ namespace Engine {
 			CHECK(plan.DrawnItems == 7);
 		}
 
-		TEST_CASE("UiPass: annotations draw after the items as one-pixel outlines and labels" * doctest::skip(true))
+		TEST_CASE("UiPass: annotations draw after the items as one-pixel outlines and labels")
 		{
 			Test::InMemoryAssetManager assets;
 			PublishUiAssets(assets);
@@ -269,7 +374,7 @@ namespace Engine {
 
 	TEST_SUITE(Test::GpuSuite)
 	{
-		TEST_CASE("UiPass: a 1:1 UI image reads back its source texels pixel-exact" * doctest::skip(true))
+		TEST_CASE("UiPass: a 1:1 UI image reads back its source texels pixel-exact")
 		{
 			// Roadmap M22's acceptance: frame 0 (8 x 8 texels) drawn over [6, 14) x [6, 14) with the point sampler gives each
 			// pixel its texel's exact bytes, under both API caps (the gpu suite runs every case under 1.4 and 1.3).
@@ -296,7 +401,7 @@ namespace Engine {
 			CHECK(ui->DrawCalls >= 1);
 		}
 
-		TEST_CASE("UiPass: a clipped element leaves the pixels outside its clip untouched" * doctest::skip(true))
+		TEST_CASE("UiPass: a clipped element leaves the pixels outside its clip untouched")
 		{
 			// The scissor oracle: the same render without the item gives every pixel outside the clip; inside it the texels.
 			Test::HeadlessGpuFixture gpu;
@@ -327,7 +432,39 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("UiPass: at scale 3 the UI is upscaled with the scene image, its row between Text and Upscale" * doctest::skip(true))
+		TEST_CASE("UiPass: a view without a camera draws its UI, and the data views draw none")
+		{
+			// The UI is in scene pixels, so a game view without a primary camera (a menu scene) draws it, as it draws its screen
+			// texts; the data views show no UI, as they show no Text, and record no "Ui" row.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu, 32, 32);
+			RenderSnapshot snapshot = setup.Snapshot();
+			snapshot.Meshes.clear();
+			snapshot.HasCamera = false;
+			UiDrawItem red = MakeImage(glm::vec2(4.0f), glm::vec2(12.0f));
+			red.Color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
+			snapshot.Ui.Items.push_back(red);
+			const Image menu = setup.Render(snapshot);
+			CHECK(Test::SceneRendererIntegrationFixture::Channel(menu, 8, 8, 0) == 255);
+			CHECK(Test::SceneRendererIntegrationFixture::Channel(menu, 8, 8, 1) == 0);
+			CHECK(Test::SceneRendererIntegrationFixture::Channel(menu, 20, 20, 0) != 255);
+			CHECK(Test::SceneRendererIntegrationFixture::FindPass(setup.Renderer().GetRenderStats(), "Ui") != nullptr);
+
+			// The AO view without GTAO is white everywhere: a black UI image leaves it so.
+			RenderSnapshot ao = setup.Snapshot();
+			ao.DebugView = RenderDebugView::AO;
+			ao.FrameIndex += 1;
+			UiDrawItem black = MakeImage(glm::vec2(0.0f), glm::vec2(32.0f));
+			black.Color = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+			ao.Ui.Items.push_back(black);
+			const Image image = setup.Render(ao);
+			for (size_t pixel = 0; pixel < image.Pixels.size(); pixel += 4)
+				CHECK(image.Pixels[pixel] == std::byte{ 255 });
+			CHECK(Test::SceneRendererIntegrationFixture::FindPass(setup.Renderer().GetRenderStats(), "Ui") == nullptr);
+		}
+
+		TEST_CASE("UiPass: at scale 3 the UI is upscaled with the scene image, its row between Text and Upscale")
 		{
 			// A 16 x 16 scene in a 48 x 48 view: the frame drawn 1:1 at scene pixels [2, 10) shows as 3 x 3 blocks of its texels.
 			Test::HeadlessGpuFixture gpu;
@@ -359,7 +496,7 @@ namespace Engine {
 			CHECK(ui < upscale);
 		}
 
-		TEST_CASE("UiPass: a device loss recreates nothing of the pass's own and the UI draws the same image afterwards" * doctest::skip(true))
+		TEST_CASE("UiPass: a device loss recreates nothing of the pass's own and the UI draws the same image afterwards")
 		{
 			// The recreation protocol (C18.3): the pass owns no GPU object; its QuadBatcher and TextRenderer are
 			// SceneRendererPipelines', its binding caches the SceneRenderer's, so those owners' recovery covers it.

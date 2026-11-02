@@ -350,6 +350,9 @@ namespace Engine {
 		void RunFramePhase(PlaySession& session, const FrameTime& frame);
 		// The RenderExtraction phase's work: the game view through the primary camera at `alpha`.
 		void ExtractGameView(float alpha);
+		// M22 (Docs/Decisions/0033-m22-contract.md decision 3): the scene resolution the UI phases lay the scene out at, the
+		// session's view size (GetViewSize) in W22.1, as the game view's extraction uses with the default output settings.
+		[[nodiscard]] glm::uvec2 GetUiSceneResolution() const { return { ViewWidth, ViewHeight }; }
 		// M12: the AudioUpdate phase's work (see "Audio" in PlaySession.h).
 		void UpdateAudio(double deltaSeconds);
 		// M12: applies the run state to the audio: the voices are paused while held, or while the session is paused and not in
@@ -548,7 +551,9 @@ namespace Engine {
 			ENGINE_TRY(RegisterBindings(*OwnedApi, *Registry));
 			Api = OwnedApi.get();
 		}
-		ENGINE_TRY_ASSIGN(auto engine, ScriptEngine::Create({ .Host = this, .Api = Api, .Settings = Project.Scripting, .Mode = ScriptRunMode, .TestMode = TestMode, .TestHost = TestHost, .ReadOnly = false, .ClockSeconds = {} }));
+		// M22 (Docs/Decisions/0033-m22-contract.md decision 11): every VM of the session, a Scene.Load's next one included, reads
+		// string tables in the project's locale.
+		ENGINE_TRY_ASSIGN(auto engine, ScriptEngine::Create({ .Host = this, .Api = Api, .Settings = Project.Scripting, .Mode = ScriptRunMode, .TestMode = TestMode, .TestHost = TestHost, .ReadOnly = false, .ClockSeconds = {}, .Locale = Project.Localization.Locale }));
 		Scripts = std::move(engine);
 		Physics->SetEventListener(Scripts.get());
 		return {};
@@ -682,6 +687,8 @@ namespace Engine {
 			StartScripts(transition);
 		if (SceneAudio != nullptr)
 			SceneAudio->Start();
+		// M22 (decision 3): the replaced scene's layout is never the current one, even before the next step.
+		Ui.LayoutStep(*RuntimeScene, GetUiSceneResolution());
 	}
 
 	void PlaySession::State::EnterPhase(PlaySession& session, PlaySessionPhase phase, uint64_t tick) const
@@ -753,6 +760,10 @@ namespace Engine {
 		ScriptFrame = { .Phase = InputPhase::Frame, .Tick = tick, .Frame = FrameIndex, .DeltaTime = frame.DeltaTime, .FixedDeltaTime = FixedDelta, .TimeScale = TimeScale, .InterpolationAlpha = alpha };
 
 		EnterPhase(session, PlaySessionPhase::LatchFrame, tick);
+		// W-CLOCK (Docs/Decisions/0033-m22-contract.md decision 12): live play previews the device input queued for the next
+		// tick in the frame view; lockstep and recording sessions latch the frame view of the applied ticks only, so a
+		// recording replays with the frame views its ticks gave.
+		Input.SetFramePreview(!Lockstep && (Recorder == nullptr || !Recorder->IsRecording()));
 		Input.LatchFrame();
 		if (play)
 		{
@@ -768,6 +779,8 @@ namespace Engine {
 		EnterPhase(session, PlaySessionPhase::FrameTransformUpdate, tick);
 		UpdateTransforms();
 		TagWritesOutsideSteps(true);
+		EnterPhase(session, PlaySessionPhase::FrameUiLayout, tick);
+		Ui.LayoutFrame(scene, GetUiSceneResolution());
 		if (play)
 		{
 			EnterPhase(session, PlaySessionPhase::AudioUpdate, tick);
@@ -1052,6 +1065,8 @@ namespace Engine {
 		state.StartScripts("Scene.Load");
 		if (state.SceneAudio != nullptr)
 			state.SceneAudio->Start();
+		// M22 (decision 3): the current layout describes the scene from the start, before its first step.
+		state.Ui.LayoutStep(*state.RuntimeScene, state.GetUiSceneResolution());
 	}
 
 	Result<Scope<PlaySession>> PlaySession::CreateFromScene(const PlaySessionSpecification& specification, const Scene& editScene)
@@ -1127,6 +1142,8 @@ namespace Engine {
 		state.UpdateTransforms();
 		// Motion made inside the fixed step interpolates: the frame phase compares with the matrices as the step left them.
 		state.RecordReferenceTransforms();
+		state.EnterPhase(*this, PlaySessionPhase::UiLayout, tick);
+		state.Ui.LayoutStep(*state.RuntimeScene, state.GetUiSceneResolution());
 		state.Tick = tick + 1;
 	}
 
