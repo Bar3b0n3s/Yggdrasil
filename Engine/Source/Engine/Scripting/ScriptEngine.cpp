@@ -68,6 +68,7 @@ namespace Engine {
 		vm.IsTestRun = specification.TestMode;
 		vm.ReadOnly = specification.ReadOnly;
 		vm.ClockSeconds = specification.ClockSeconds;
+		vm.CpuClockSeconds = specification.CpuClockSeconds;
 		vm.Host = specification.Host;
 		vm.Engine = engine.get();
 		vm.Api = specification.Api;

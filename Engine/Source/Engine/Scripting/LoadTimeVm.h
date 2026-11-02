@@ -14,8 +14,10 @@ namespace Engine {
 	struct LoadTimeVmSpecification
 	{
 		uint32_t MemoryLimitMB = 256;
-		// Same safety-clock contract as SandboxSpecification; empty selects lua_clock. Borrowed captures must live
-		// for Extract only. This does not change the budget or expose time to the imported script.
+		// SandboxSpecification::ClockSeconds without a CpuClockSeconds: supplied, it is the budget's only clock (ScriptImporter
+		// passes the import thread's CPU time, ThreadClock::GetCpuSeconds); empty selects the runtime VMs' pair, lua_clock
+		// compared first and the thread's CPU time counted. Borrowed captures must live for Extract only. This does not
+		// change the budget or expose time to the imported script.
 		std::function<double()> ClockSeconds{};
 	};
 

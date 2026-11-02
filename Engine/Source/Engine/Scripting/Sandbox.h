@@ -79,9 +79,15 @@ namespace Engine {
 		// Copied provider for trusted, engine-produced/hash-verified ScriptData. Dist requires this for require and
 		// never falls back to SourceModules. Callable captures must outlive Sandbox; it runs on the VM owner thread.
 		std::function<Result<Ref<const ScriptData>>(const VfsPath&)> CookedModules{};
-		// Empty selects lua_clock. A supplied monotonic, finite, nonnegative seconds source is used only for safety
-		// deadlines, never simulation; copied callable with explicit captures. Enables exact tests without sleeps.
+		// The safety clocks of the callback budget (ScriptWatchdog), never simulation time: copied callables with explicit
+		// captures, each a finite, nonnegative and monotonic seconds source on the VM's thread. ClockSeconds is the wall clock
+		// every interrupt compares (empty: lua_clock); CpuClockSeconds is what the budget counts, sampled only at an outermost
+		// entry, at host periods' boundaries and once the wall deadline has passed (empty: ThreadClock::GetCpuSeconds, the VM
+		// thread's CPU time; Docs/Decisions/0039-script-budget-cpu-time.md). A supplied ClockSeconds without a CpuClockSeconds
+		// is the budget's only clock (the load-time VMs pass the import thread's CPU time there). Supplying both makes tests
+		// exact without sleeps.
 		std::function<double()> ClockSeconds{};
+		std::function<double()> CpuClockSeconds{};
 	};
 
 	// Owns one VM, its allocator, deadline stack, resolver, module-return cache and immutable loaded source maps.

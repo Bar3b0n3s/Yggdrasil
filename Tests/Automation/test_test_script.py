@@ -1,7 +1,9 @@
-"""Scripts/Test.py's runs of the Tests binary (Docs/Architecture.md §2.3): every Tests process it starts gets a
-user-data root below the run's own directory, bin/TestResults/<report stem>/UserData, so its log and its crash reports
-stay with the run and never reach the user's real user-data folder (AGENTS.md "Tests"; the "Milestone review" of
-Docs/Decisions/0029-m18-contract.md). Runs the Tests binary of the automation suite's configuration; no editor.
+"""Scripts/Test.py's runs (Docs/Architecture.md §2.3). Every Tests process it starts gets a user-data root below
+the run's own directory, bin/TestResults/<report stem>/UserData, so its log and its crash reports stay with the run and
+never reach the user's real user-data folder (AGENTS.md "Tests"; the "Milestone review" of
+Docs/Decisions/0029-m18-contract.md): that test runs the Tests binary of the automation suite's configuration. The
+automation suite's run is bounded by its configuration's default unless --timeout is given
+(Docs/Decisions/0039-script-budget-cpu-time.md decision 5): those tests start no process. No editor.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ from harness import REPOSITORY_ROOT, app_name, automation_config
 sys.path.insert(0, str(REPOSITORY_ROOT / "Scripts"))
 
 import Test as test_script  # noqa: E402  (Scripts/ is on sys.path above)
+from Lib.process import ProcessResult  # noqa: E402
 from Lib.report import Console, Status  # noqa: E402
 
 # A child-process target that fails an assertion (Tests/Source/Support/RecordingAssertHandlerTests.cpp). Selected with
@@ -105,6 +108,67 @@ class TestsRunUserDataTests(unittest.TestCase):
         if real is not None:
             self.assertFalse((real / app_name() / "Crashes" / report.name).exists(),
                              f"the run wrote {report.name} into the real user-data folder {real}")
+
+
+class SuiteBoundTests(unittest.TestCase):
+    # The Debug automation suite took 1,562 s on an unloaded machine and timed out at the 1,800 s every run had, beside
+    # PreCommit's other suites (Docs/Decisions/0039-script-budget-cpu-time.md decision 5).
+    UNLOADED_DEBUG_AUTOMATION_SECONDS = 1562.0
+    # The Debug unit suite takes about 880 s unloaded; it took 1,212 s beside the phase's other worktrees and passed
+    # 1,800 s under heavier load.
+    UNLOADED_DEBUG_UNIT_SECONDS = 880.0
+
+    def automation_bound(self, config: str, *options: str) -> float:
+        """The timeout run_automation gives the suite's runner in `config`, which a stand-in run_streamed records."""
+        bounds: list[float] = []
+
+        def timed_out_run(command: list[str], **settings: Any) -> ProcessResult:
+            bounds.append(settings["timeout"])
+            return ProcessResult(command, None, True, settings["timeout"], "")
+
+        directory = Path(tempfile.mkdtemp(prefix="TestScriptBound-")).resolve()
+        self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
+        stand_in = directory / "StandIn"
+        stand_in.write_text("", encoding="utf-8")
+        with contextlib.redirect_stderr(io.StringIO()):
+            arguments = test_script.parse_arguments(["--suite", "automation", "--config", config, "--filter",
+                                                     "test_none", *options])
+        console = Console()
+        console.stream = io.StringIO()
+        with mock.patch.object(test_script, "editor_executable", return_value=stand_in), \
+                mock.patch.object(test_script, "venv_interpreter", return_value=stand_in), \
+                mock.patch.object(test_script, "run_streamed", timed_out_run):
+            step = test_script.run_automation(config, arguments, console)
+        self.assertEqual(step.status, Status.TIMEOUT, step.detail)
+        self.assertEqual(len(bounds), 1)
+        return bounds[0]
+
+    def test_the_debug_automation_run_is_bounded_by_more_than_twice_its_unloaded_time(self) -> None:
+        self.assertGreaterEqual(test_script.DEBUG_AUTOMATION_TIMEOUT_SECONDS,
+                                2 * self.UNLOADED_DEBUG_AUTOMATION_SECONDS)
+        self.assertEqual(self.automation_bound("Debug"), test_script.DEBUG_AUTOMATION_TIMEOUT_SECONDS)
+        self.assertEqual(self.automation_bound("Release"), test_script.SUITE_TIMEOUT_SECONDS)
+
+    def run_tests_bound(self, suite: str, config: str, *options: str) -> float:
+        """The timeout run_tests gives the Tests process of `suite` in `config`."""
+        with contextlib.redirect_stderr(io.StringIO()):
+            arguments = test_script.parse_arguments(["--suite", suite, "--config", config, *options])
+        return test_script.tests_timeout(test_script.TestRun(suite, config, ()), arguments)
+
+    def test_the_debug_unit_run_is_bounded_by_three_times_its_unloaded_time(self) -> None:
+        self.assertGreaterEqual(test_script.DEBUG_UNIT_TIMEOUT_SECONDS, 3 * self.UNLOADED_DEBUG_UNIT_SECONDS)
+        self.assertEqual(self.run_tests_bound("unit", "Debug"), test_script.DEBUG_UNIT_TIMEOUT_SECONDS)
+        self.assertEqual(self.run_tests_bound("unit", "Release"), test_script.SUITE_TIMEOUT_SECONDS)
+        self.assertEqual(self.run_tests_bound("gpu", "Debug"), test_script.SUITE_TIMEOUT_SECONDS)
+        self.assertEqual(self.run_tests_bound("unit", "Debug", "--timeout", "90"), 90.0)
+
+    def test_a_given_timeout_bounds_every_run(self) -> None:
+        self.assertEqual(self.automation_bound("Debug", "--timeout", "90"), 90.0)
+        self.assertEqual(self.automation_bound("Release", "--timeout", "90"), 90.0)
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(test_script.parse_arguments(["--suite", "unit", "--config", "Debug"]).timeout,
+                             test_script.SUITE_TIMEOUT_SECONDS)
+            self.assertEqual(test_script.parse_arguments(["--suite", "unit", "--timeout", "90"]).timeout, 90.0)
 
 
 if __name__ == "__main__":

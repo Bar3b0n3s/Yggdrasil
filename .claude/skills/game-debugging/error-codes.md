@@ -53,7 +53,7 @@ Every error response carries `error.data.errorCode` (the engine `ErrorCode` belo
 | `compile` | The source or a required module does not compile, a require does not resolve, or the module top fails at load time (an engine call at the module top, an error, the 250 ms load budget). Also a reload refused for these. | Fix the reported location; keep module tops free of engine calls (do that work in callbacks). |
 | `type` | A reload refused because the new source has type errors while `Scripting.BlockPlayOnTypeErrors` is set, or in a test run (callback `Reload`). The running code is kept. | Fix the type error at the reported location (`script.check`), then save again to reload. |
 | `runtime` | A callback, task or test case raised. The instance is disabled. | Fix the line in the traceback; guard optional values (`if self.Goal then`). |
-| `timeout` | A callback ran past `Scripting.CallbackBudgetMs`. | Remove the unbounded loop, or spread the work over ticks with a task. |
+| `timeout` | A callback used more than `Scripting.CallbackBudgetMs` of the script thread's own CPU time (time the machine spends on other work never counts). | Remove the unbounded loop, or spread the work over ticks with a task. |
 | `memory` | The VM passed `Scripting.MemoryLimitMB`; a second breach stops the session. | Stop allocating per tick (pool tables and entities), or raise the limit deliberately. |
 
 ## MCP bridge errors
