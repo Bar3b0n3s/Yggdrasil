@@ -8,6 +8,7 @@
 #include "Engine/Scripting/TaskScheduler.h"
 #include "Support/ExpectLog.h"
 #include "Support/ScriptTestFixture.h"
+#include "Support/TestOptions.h"
 
 #include <nlohmann/json.hpp>
 
@@ -485,6 +486,74 @@ end))");
 			CHECK(spin.Error->Kind == ScriptErrorKind::Timeout);
 			CHECK(expected.GetMatchCount() >= 1);
 			fixture.GetEngine()->CancelCase(thread);
+			fixture.GetEngine()->EndSuite();
+		}
+
+		// Test.Case checks a name's uniqueness in a set of the suite's names, and the execution check around each
+		// binding call of a suite body looks the calling thread up in an index of coroutines. Both were linear scans,
+		// so collecting a suite at its cap of 4,096 cases did quadratic work in one callback: most of the default
+		// 1,000 ms budget in Debug, which a loaded machine exceeded. No seam counts the work a binding does (the
+		// injected safety clocks see only Luau's calls and loop back-edges), so the bound is the callback budget, in
+		// CPU time (Docs/Decisions/0039-script-budget-cpu-time.md), set a wide factor from both costs. With these
+		// names, 256 bytes sharing a 252-byte prefix, the quadratic code took about 1,000 ms in Debug and 175 ms in
+		// Release, the linear code about 80 ms and 7 ms: each budget below is more than three times either cost away.
+		// Debug's code is several times slower, so no one budget sits that far from all four costs.
+		TEST_CASE("TestBindings: a suite registers its cap of long-named cases well within the callback budget")
+		{
+#if defined(ENGINE_DEBUG)
+			constexpr double BudgetMs = 300.0;
+#else
+			constexpr double BudgetMs = 50.0;
+#endif
+			TestServices services;
+			Test::ScriptTestFixtureSpecification specification{ .Mode = RunModes::Editor, .TestMode = true, .TestHost = &services };
+			// A sanitized run scales it like every per-case limit (--test-timeout-scale).
+			specification.Settings.CallbackBudgetMs = static_cast<uint32_t>(BudgetMs * Test::GetTestOptions().TimeoutScale);
+			Test::ScriptTestFixture fixture(specification);
+			// Duplicates of the first and latest names are refused as duplicates, a new name past the cap by the cap.
+			auto suite = Collect(fixture, services, std::format(R"(return Test.Suite("Many", function()
+	local prefix = string.rep("x", {0})
+	local function name(index) return prefix .. string.format("%04d", index) end
+	for index = 1, {1} - 1 do Test.Case(name(index), function() end) end
+	for _, index in {{1, {1} - 1}} do
+		local ok, message = pcall(Test.Case, name(index), function() end)
+		assert(not ok and string.find(message, "unique within the suite", 1, true) ~= nil, tostring(message))
+	end
+	Test.Case(name({1}), function() end)
+	local ok, message = pcall(Test.Case, name(0), function() end)
+	assert(not ok and string.find(message, "at most {1} cases", 1, true) ~= nil, tostring(message))
+end))",
+														MaxScriptTestNameBytes - 4, MaxScriptTestCasesPerSuite));
+			REQUIRE(suite.Cases.size() == MaxScriptTestCasesPerSuite);
+			// In registration order.
+			const std::string prefix(MaxScriptTestNameBytes - 4, 'x');
+			bool ordered = true;
+			for (size_t index = 0; index < suite.Cases.size(); ++index)
+				ordered = ordered && suite.Cases[index].Name == prefix + std::format("{:04}", index + 1);
+			CHECK(ordered);
+			CHECK(fixture.Errors.empty());
+			// The next suite the VM collects starts without the last one's names.
+			fixture.GetEngine()->EndSuite();
+			const auto again = fixture.GetEngine()->CollectSuite(UUID(731), services);
+			REQUIRE_MESSAGE(again, (again ? std::string() : again.error().ToString()));
+			CHECK(again->Cases.size() == MaxScriptTestCasesPerSuite);
+			fixture.GetEngine()->EndSuite();
+		}
+
+		TEST_CASE("TestBindings: a suite body may register a case name its module top registered, which collection drops")
+		{
+			TestServices services;
+			Test::ScriptTestFixture fixture({ .Mode = RunModes::Editor, .TestMode = true, .TestHost = &services });
+			// Collection loads the module, whose top runs in the collecting VM (the importer's load-time VM refuses
+			// Test.Case), then replaces the suite with the body's.
+			auto suite = Collect(fixture, services, R"(local registered = pcall(Test.Case, "shared", function() end)
+return Test.Suite("Top", function()
+	assert(registered, "the module top registered no case")
+	Test.Case("shared", function() end)
+end))");
+			REQUIRE(suite.Cases.size() == 1);
+			CHECK(suite.Cases[0].Name == "shared");
+			CHECK(suite.Cases[0].Line == 4);
 			fixture.GetEngine()->EndSuite();
 		}
 
