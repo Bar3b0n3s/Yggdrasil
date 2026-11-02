@@ -4,6 +4,7 @@
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Json/JsonWriter.h"
+#include "Engine/Platform/PublishedFile.h"
 
 #include <nlohmann/json.hpp>
 
@@ -14,7 +15,9 @@
 // The token is the server's only secret, so the session directory is 0700 and the file 0600 on POSIX hosts
 // (std::filesystem::permissions; on Windows it only toggles the read-only attribute and the per-user %LOCALAPPDATA% ACL
 // does the work). The file is written to a temporary name, restricted, and then renamed over the final name, so no
-// reader ever sees it with wider permissions or half written.
+// reader ever sees it with wider permissions or half written. The rename and the clients' reads go through
+// PublishedFile, so on Windows a client never fails while the rename is in flight and a rewrite never fails while a
+// client reads (Platform/PublishedFile.h, Docs/Decisions/0040-session-file-sharing.md).
 
 namespace Engine {
 
@@ -141,15 +144,28 @@ namespace Engine {
 
 		std::filesystem::permissions(temporary, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
 			std::filesystem::perm_options::replace, error);
-		if (!error)
-			std::filesystem::rename(temporary, file, error);
+		Status published;
 		if (error)
+		{
+			published = Utils::MakeSessionFileError("write", content.Pid, error);
+		}
+		else if (const Status replaced = PublishedFile::Replace(temporary, file); !replaced)
+		{
+			published = MakeError(ErrorCode::Io, "cannot write the session file of process {}: {}", content.Pid,
+				replaced.error().GetMessageText());
+		}
+		if (!published)
 		{
 			std::error_code removeError;
 			std::filesystem::remove(temporary, removeError);
-			return Utils::MakeSessionFileError("write", content.Pid, error);
 		}
-		return {};
+		return published;
+	}
+
+	Result<SessionFileContent> SessionFile::Read(const std::filesystem::path& directory, uint32_t pid)
+	{
+		ENGINE_TRY_ASSIGN(const Buffer bytes, PublishedFile::Read(GetPath(directory, pid)));
+		return FromText(AsStringView(bytes));
 	}
 
 	Status SessionFile::Remove(const std::filesystem::path& directory, uint32_t pid)

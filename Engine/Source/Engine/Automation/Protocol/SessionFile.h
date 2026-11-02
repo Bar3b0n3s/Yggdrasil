@@ -23,6 +23,10 @@
 // Core/BuildId.h); a file without it, from an engine before M19, reads with an empty one.
 // The file holds the token, so only the user may read it: the directory is created with 0700 and the file with 0600 on
 // POSIX; on Windows the per-user %LOCALAPPDATA% ACL already restricts both.
+// Clients in other processes read the file at any moment, also while the server's rename publishes or replaces it, so
+// the server renames with PublishedFile::Replace and every client reads with PublishedFile::Read (Read below; the Python
+// client's read_shared_bytes): on Windows a reader that does not share deletion fails while that rename is in flight,
+// and makes a rewrite fail while it reads (Platform/PublishedFile.h, Docs/Decisions/0040-session-file-sharing.md).
 
 namespace Engine {
 
@@ -63,9 +67,14 @@ namespace Engine {
 		[[nodiscard]] static Result<SessionFileContent> FromText(std::string_view text);
 
 		// Creates `directory` (0700 on POSIX) and writes the file of content.Pid atomically (0600 on POSIX, permissions set
-		// before the rename makes it visible). Rewriting replaces it (the server rewrites it when a project opens or closes).
-		// Errors: Io naming the path.
+		// before the rename makes it visible). Rewriting replaces it (the server rewrites it when a project opens or closes),
+		// also while clients read it through Read (PublishedFile::Replace). Errors: Io naming the path.
 		[[nodiscard]] static Status Write(const std::filesystem::path& directory, const SessionFileContent& content);
+
+		// The session file of `pid` in `directory`, read as every client reads it (PublishedFile::Read): never failed by
+		// the rename that publishes or replaces it, and never making that rename fail. Errors: NotFound when there is
+		// none, PermissionDenied, Io; those of FromText.
+		[[nodiscard]] static Result<SessionFileContent> Read(const std::filesystem::path& directory, uint32_t pid);
 
 		// Deletes the file of `pid`; a missing file is success. Errors: Io.
 		[[nodiscard]] static Status Remove(const std::filesystem::path& directory, uint32_t pid);
