@@ -2,8 +2,10 @@
 
 #include "Engine/Automation/Protocol/SessionFile.h"
 
+#include "Engine/Core/Buffer.h"
 #include "Engine/Core/BuildId.h"
 #include "Engine/Core/FileSystem.h"
+#include "Support/PlatformProbes.h"
 #include "Support/TempDirectory.h"
 
 #include <format>
@@ -121,6 +123,85 @@ namespace Engine {
 			CHECK_FALSE(FileSystem::Exists(file));
 			CHECK(SessionFile::Remove(sessions, content.Pid).has_value());
 		}
+
+		TEST_CASE("SessionFile: read returns the written content and reports a missing file")
+		{
+			Test::TempDirectory directory("SessionFileRead");
+			const std::filesystem::path sessions = directory / "Sessions";
+			const SessionFileContent content = MakeSessionContent();
+			const Result<SessionFileContent> missing = SessionFile::Read(sessions, content.Pid);
+			REQUIRE_FALSE(missing.has_value());
+			CHECK(missing.error().GetCode() == ErrorCode::NotFound);
+
+			REQUIRE(SessionFile::Write(sessions, content).has_value());
+			const Result<SessionFileContent> read = SessionFile::Read(sessions, content.Pid);
+			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
+			CHECK(read->Pid == content.Pid);
+			CHECK(read->Port == content.Port);
+			CHECK(read->Token == content.Token);
+			CHECK(read->ProjectPath == content.ProjectPath);
+		}
+
+#if defined(ENGINE_PLATFORM_WINDOWS)
+		// Docs/Decisions/0040-session-file-sharing.md: a client that polls for a server's session file can open it in the
+		// moment after the rename that published it took effect and before the rename returned, while the rename's handle
+		// with DELETE access is still open on it. A reader that does not share deletion failed there with PermissionDenied
+		// (the GPU case "RuntimeApp: a game-view render that runs out of memory ..." did once on a loaded machine).
+		TEST_CASE("SessionFile: a client reads the file while the rename that publishes it is still in flight")
+		{
+			Test::TempDirectory directory("SessionFileRenameInFlight");
+			const std::filesystem::path sessions = directory / "Sessions";
+			REQUIRE(FileSystem::CreateDirectories(sessions).has_value());
+			const SessionFileContent content = MakeSessionContent();
+			const std::filesystem::path file = SessionFile::GetPath(sessions, content.Pid);
+			std::filesystem::path staged = file;
+			staged += ".tmp";
+			REQUIRE(FileSystem::WriteFileAtomic(staged, AsBytes(SessionFile::ToText(content)), { .KeepBackup = false }).has_value());
+
+			const Result<Test::HeldFileHandle> renaming = Test::RenameKeepingHandleOpen(staged, file);
+			REQUIRE_MESSAGE(renaming.has_value(), renaming.error().ToString());
+			REQUIRE(FileSystem::Exists(file));
+			const Result<SessionFileContent> read = SessionFile::Read(sessions, content.Pid);
+			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
+			CHECK(read->Port == content.Port);
+			CHECK(read->Token == content.Token);
+		}
+
+		// Docs/Decisions/0040-session-file-sharing.md: the editor rewrites its session file when a project opens or closes,
+		// and a client may be reading it then. MoveFileExW cannot replace a file that any reader has open, so the rewrite
+		// failed; the POSIX-semantics rename replaces it, the client keeps the content it opened, and the next read finds
+		// the rewrite. Removing the file at exit succeeds while a client reads it too.
+		TEST_CASE("SessionFile: rewriting and removing the file succeed while a client is reading it")
+		{
+			Test::TempDirectory directory("SessionFileRewriteWhileRead");
+			const std::filesystem::path sessions = directory / "Sessions";
+			const SessionFileContent content = MakeSessionContent();
+			REQUIRE(SessionFile::Write(sessions, content).has_value());
+			const std::filesystem::path file = SessionFile::GetPath(sessions, content.Pid);
+
+			const Result<Test::HeldFileHandle> reading = Test::OpenForReadingSharingAll(file);
+			REQUIRE_MESSAGE(reading.has_value(), reading.error().ToString());
+			SessionFileContent reopened = content;
+			reopened.ProjectPath = "C:/Projects/Breakout/Breakout.eproj";
+			const Status rewritten = SessionFile::Write(sessions, reopened);
+			REQUIRE_MESSAGE(rewritten.has_value(), rewritten.error().ToString());
+			const Result<std::string> opened = Test::ReadRemaining(*reading);
+			REQUIRE_MESSAGE(opened.has_value(), opened.error().ToString());
+			CHECK(*opened == SessionFile::ToText(content));
+			const Result<SessionFileContent> read = SessionFile::Read(sessions, content.Pid);
+			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
+			CHECK(read->ProjectPath == reopened.ProjectPath);
+			std::filesystem::path staged = file;
+			staged += ".tmp";
+			CHECK_FALSE(FileSystem::Exists(staged));
+
+			const Result<Test::HeldFileHandle> stillReading = Test::OpenForReadingSharingAll(file);
+			REQUIRE_MESSAGE(stillReading.has_value(), stillReading.error().ToString());
+			const Status removed = SessionFile::Remove(sessions, content.Pid);
+			REQUIRE_MESSAGE(removed.has_value(), removed.error().ToString());
+			CHECK_FALSE(FileSystem::Exists(file));
+		}
+#endif
 
 		TEST_CASE("SessionFile: timestamps are UTC ISO 8601 with seconds")
 		{

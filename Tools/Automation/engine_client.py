@@ -5,11 +5,14 @@ One module shared by the MCP bridge (Tools/MCP/engine_mcp/connection.py) and the
 
   - framing: LSP-style "Content-Length: N\\r\\n\\r\\n<UTF-8 JSON>" (encode_frame, FrameReader);
   - sessions: <UserData>/<AppName>/Automation/Sessions/<pid>.json written by a listening editor (§13.2), read with
-    list_sessions and find_session; files of dead processes are ignored;
+    list_sessions and find_session through read_shared_bytes, which shares deletion so that neither the editor's rename
+    of the file nor the read fails the other (Docs/Decisions/0040-session-file-sharing.md); files of dead processes are
+    ignored;
   - the project lock: <Project>/Library/Editor.lock names the holder's pid (§4.13, read_lock_holder);
   - connections: EngineClient.connect performs session.hello with the session token, then call() sends requests and
     raises EngineError for error responses;
-  - launching: find_editor_executable and launch_editor start a headless editor and wait for its session file;
+  - launching: find_editor_executable and launch_editor start a headless editor and wait for its session file, at most
+    LAUNCH_TIMEOUT_SECONDS (300 s, a hang bound with headroom over a loaded machine's start, ADR 0040);
   - method coverage (§15.6 gate 5): every call() is recorded by a CallLog; with the environment variable
     ENGINE_AUTOMATION_COVERAGE=<file> each called method name is appended to that file, one per line, which
     Scripts/Test.py's automation suite compares with the registered methods.
@@ -35,8 +38,11 @@ PROTOCOL_VERSION = "1.0"
 CLIENT_NAME = "engine-client"
 CLIENT_VERSION = "1"
 DEFAULT_TIMEOUT_SECONDS = 60.0
-# How long launch_editor waits for a new editor's session file.
-LAUNCH_TIMEOUT_SECONDS = 60.0
+# How long launch_editor waits for a new editor's session file, and wait_for_lock_holder for an editor to take a
+# project's lock: only a hang bound. A --strict Debug editor opening FeatureTest took 32 s on an unloaded machine and
+# 134 s while sibling worktrees loaded it, so the bound is more than twice the loaded start (Docs/Decisions/
+# 0040-session-file-sharing.md).
+LAUNCH_TIMEOUT_SECONDS = 300.0
 COVERAGE_ENVIRONMENT_VARIABLE = "ENGINE_AUTOMATION_COVERAGE"
 # The one build configuration whose editor the tests and the MCP bridge start (Release, then Debug, when unset).
 CONFIG_ENVIRONMENT_VARIABLE = "ENGINE_AUTOMATION_CONFIG"
@@ -246,10 +252,38 @@ def is_process_alive(pid: int) -> bool:
     return True
 
 
+def read_shared_bytes(path: Path) -> bytes:
+    """The bytes of `path`, read the way every client reads a session file (§13.2, Docs/Decisions/
+    0040-session-file-sharing.md): on Windows through a handle that shares reading, writing and deletion. Python's
+    open() shares only reading and writing there, so it fails with PermissionError (a sharing violation) in the moment
+    after the editor's rename published or replaced the file and before that rename returned, while the rename's handle
+    with DELETE access is still open, and the editor's rewrite of the file fails while such a reader has it open.
+    Elsewhere no open conflicts with a rename. Raises OSError as open() does (FileNotFoundError, PermissionError)."""
+    if sys.platform != "win32":
+        return path.read_bytes()
+    import ctypes
+    import msvcrt
+
+    kernel32 = _windows_kernel32()
+    generic_read, share_all, open_existing, normal = 0x80000000, 0x7, 3, 0x80
+    handle = kernel32.CreateFileW(str(path), generic_read, share_all, None, open_existing, normal, None)
+    if handle is None or handle == ctypes.c_void_p(-1).value:
+        error = ctypes.get_last_error()
+        # With the Windows error code, OSError picks the errno and the subclass open() would (FileNotFoundError, ...).
+        raise OSError(0, ctypes.FormatError(error), str(path), error)
+    try:
+        descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY)
+    except OSError:
+        kernel32.CloseHandle(handle)
+        raise
+    with os.fdopen(descriptor, "rb") as file:
+        return file.read()
+
+
 def _parse_session(path: Path) -> SessionInfo | None:
     """A session file's content, or None when it is unreadable or malformed."""
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(read_shared_bytes(path).decode("utf-8"))
     except (OSError, UnicodeDecodeError, ValueError):
         return None
     if not isinstance(data, dict):
