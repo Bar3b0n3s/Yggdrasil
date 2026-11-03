@@ -161,10 +161,7 @@ namespace Engine {
 			if (call.Engine == nullptr || !call.Engine->IsTestMode() || !call.Engine->m_State->Collecting)
 				return MakeError(ErrorCode::InvalidState, "Test.Case outside Test.Suite");
 			auto& state = *call.Engine->m_State;
-			if (name.empty() || std::any_of(state.Suite.Cases.begin(), state.Suite.Cases.end(), [name](const ScriptTestCase& test)
-			{
-				return test.Name == name;
-			}))
+			if (name.empty() || state.SuiteCaseNames.contains(name))
 				return MakeError(ErrorCode::InvalidArgument, "Test case names must be nonempty and unique within the suite");
 			// The runner keeps every case for the run's inventory and report.
 			if (state.Suite.Cases.size() >= MaxScriptTestCasesPerSuite)
@@ -172,6 +169,7 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(auto function, RetainFunction(call, functionIndex));
 			state.Suite.Cases.push_back({ std::string(name), function, timeoutTicks != 0 ? timeoutTicks : state.SuiteTimeout,
 				location.File, location.Line });
+			state.SuiteCaseNames.emplace(name);
 			return {};
 		}
 
@@ -262,6 +260,8 @@ namespace Engine {
 				threadId = state.Retain(call.State, -1, kind == ScriptThreadKind::Case ? ScriptEngine::State::ReferenceKind::Case : ScriptEngine::State::ReferenceKind::Task);
 				auto& record = state.References.find(threadId.Index)->second;
 				record.Thread = *thread;
+				const bool indexed = state.ThreadReferences.emplace(*thread, threadId.Index).second;
+				ENGINE_CORE_ASSERT(indexed, "A new coroutine already belongs to a live reference");
 				record.Owner = owner;
 				record.Origin = origin;
 				record.Due = state.Engine.GetHost().GetFrameState().Tick;

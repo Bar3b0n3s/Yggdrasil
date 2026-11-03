@@ -53,6 +53,31 @@ namespace Engine {
 		// Errors: Io.
 		[[nodiscard]] Result<std::string> ReadFileDenyingWriters(const std::filesystem::path& file);
 
+		// Closes a Windows file handle.
+		struct FileHandleCloser
+		{
+			void operator()(void* handle) const;
+		};
+
+		// An open Windows file handle, closed with the object.
+		using HeldFileHandle = std::unique_ptr<void, FileHandleCloser>;
+
+		// Renames `from` to `to`, replacing it, the way every rename on Windows does it (MoveFileExW's behind
+		// std::filesystem::rename included): through a handle to `from` opened with DELETE access, sharing everything, whose
+		// rename (SetFileInformationByHandle, FileRenameInfo) takes effect before the handle is closed. Here the handle stays
+		// open until the result is destroyed, so `to` names the file while a handle with DELETE access is still open on it:
+		// the moment between a rename taking effect and its call returning, which a loaded machine stretches, held for as
+		// long as a test needs. Errors: Io.
+		[[nodiscard]] Result<HeldFileHandle> RenameKeepingHandleOpen(const std::filesystem::path& from, const std::filesystem::path& to);
+
+		// Opens `file` for reading with the sharing PublishedFile::Read uses (FILE_SHARE_READ | FILE_SHARE_WRITE |
+		// FILE_SHARE_DELETE) and keeps it open until the result is destroyed: a client in the middle of reading it.
+		// Errors: Io.
+		[[nodiscard]] Result<HeldFileHandle> OpenForReadingSharingAll(const std::filesystem::path& file);
+
+		// What is left to read through `handle` from its current position. Errors: Io.
+		[[nodiscard]] Result<std::string> ReadRemaining(const HeldFileHandle& handle);
+
 		// The bytes of stack the calling thread keeps for its own stack overflow (SetThreadStackGuarantee's current
 		// value); 0 when the thread keeps only the system's guard region. Errors: Io when the query fails.
 		[[nodiscard]] Result<uint32_t> GetThreadStackGuarantee();

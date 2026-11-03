@@ -4,6 +4,8 @@ need no editor build; their calls never count towards method coverage (no CallLo
 
 from __future__ import annotations
 
+import contextlib
+import inspect
 import json
 import os
 import shutil
@@ -13,6 +15,7 @@ import tempfile
 import threading
 import time
 import unittest
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -177,6 +180,24 @@ class SessionAndLockTests(unittest.TestCase):
                 self.assertEqual(client.hello["engineVersion"], "0.1.0")
         self.assertEqual(engine_client.list_sessions(directory / "Missing"), [])
 
+    def test_a_session_file_is_listed_while_the_rename_that_publishes_it_is_in_flight(self) -> None:
+        # Docs/Decisions/0040-session-file-sharing.md: on Windows the editor's rename keeps a handle with DELETE access
+        # open on the file under its new name until the rename returns. A client polling for the file can read it in
+        # that moment; Python's open(), which does not share deletion, failed there with PermissionError, so the live
+        # editor was not listed (and the MCP bridge's editor_launch, finding its project lock held, refused with
+        # EditorAlreadyOpen instead of attaching).
+        directory = make_directory(self)
+        with fake_editor.FakeEditor() as server:
+            staged = server.write_session_file(directory / "Staging")
+            published = directory / staged.name
+            with rename_keeping_handle_open(staged, published):
+                sessions = engine_client.list_sessions(directory)
+                self.assertEqual([session.path for session in sessions], [published])
+                self.assertEqual(sessions[0].port, server.port)
+                self.assertEqual(json.loads(engine_client.read_shared_bytes(published))["pid"], os.getpid())
+        with self.assertRaises(FileNotFoundError):
+            engine_client.read_shared_bytes(directory / "Missing.json")
+
     def test_process_liveness(self) -> None:
         self.assertTrue(engine_client.is_process_alive(os.getpid()))
         self.assertFalse(engine_client.is_process_alive(finished_process_pid()))
@@ -212,6 +233,10 @@ class SessionAndLockTests(unittest.TestCase):
 
 
 class LaunchTests(unittest.TestCase):
+    # The slowest start of an editor measured to its session file: a --strict Debug editor opening FeatureTest while
+    # sibling worktrees loaded the machine (32 s unloaded; Docs/Decisions/0040-session-file-sharing.md).
+    LOADED_EDITOR_START_SECONDS = 134.0
+
     # A stand-in "editor": a Python process that writes a lot of output (the pipes must be drained), then its session
     # file into the --user-data-dir it was given, then waits to be killed.
     EDITOR_SCRIPT = (
@@ -242,6 +267,18 @@ class LaunchTests(unittest.TestCase):
         self.assertIsNotNone(editor.process.returncode)
         self.assertEqual(editor.output_tail[-1], "log line")
 
+    def test_the_launch_wait_is_a_hang_bound_with_headroom_over_a_loaded_start(self) -> None:
+        self.assertGreaterEqual(engine_client.LAUNCH_TIMEOUT_SECONDS, 2 * self.LOADED_EDITOR_START_SECONDS)
+        self.assertEqual(inspect.signature(engine_client.wait_for_lock_holder).parameters["timeout"].default,
+                         engine_client.LAUNCH_TIMEOUT_SECONDS)
+        # An editor that never writes its session file fails the launch once the bound has passed, naming it.
+        user_data = make_directory(self) / "UserData"
+        with mock.patch.object(engine_client, "LAUNCH_TIMEOUT_SECONDS", 1.0):
+            with self.assertRaises(TimeoutError) as raised:
+                engine_client.launch_editor(fake_editor.PYTHON, ["-c", "import time; time.sleep(120)"], user_data,
+                                            "App")
+        self.assertIn("wrote no session file within 1 s", str(raised.exception))
+
     def test_launch_reports_an_editor_that_exits_first(self) -> None:
         user_data = make_directory(self) / "UserData"
         script = "import sys; print('starting'); sys.stderr.write('is locked by process 42\\n'); sys.exit(3)"
@@ -271,6 +308,48 @@ def make_directory(test: unittest.TestCase) -> Path:
     directory = Path(tempfile.mkdtemp(prefix="EngineClient-")).resolve()
     test.addCleanup(shutil.rmtree, directory, ignore_errors=True)
     return directory
+
+
+@contextlib.contextmanager
+def rename_keeping_handle_open(source: Path, target: Path) -> Iterator[None]:
+    """Renames `source` to `target` the way every rename runs on Windows (MoveFileExW's included): through a handle with
+    DELETE access, sharing everything, whose rename (SetFileInformationByHandle, FileRenameInfo) takes effect before the
+    handle closes. The handle stays open for the with-block: the moment between a rename taking effect and its return,
+    which a loaded machine stretches, held as long as the test needs. Elsewhere a descriptor of `source` stays open
+    across a plain rename instead."""
+    if sys.platform != "win32":
+        with source.open("rb"):
+            os.replace(source, target)
+            yield
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateFileW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD,
+                                     wintypes.DWORD, wintypes.HANDLE)
+    kernel32.CreateFileW.restype = wintypes.HANDLE
+    kernel32.SetFileInformationByHandle.argtypes = (wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD)
+    kernel32.SetFileInformationByHandle.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    name = str(target)
+
+    class RenameInformation(ctypes.Structure):  # FILE_RENAME_INFO with room for the whole name
+        _fields_ = [("ReplaceIfExists", wintypes.BOOLEAN), ("RootDirectory", wintypes.HANDLE),
+                    ("FileNameLength", wintypes.DWORD), ("FileName", wintypes.WCHAR * (len(name) + 1))]
+
+    delete, synchronize, share_all, open_existing, normal, file_rename_info = 0x10000, 0x100000, 0x7, 3, 0x80, 3
+    handle = kernel32.CreateFileW(str(source), delete | synchronize, share_all, None, open_existing, normal, None)
+    if handle is None or handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        information = RenameInformation(True, None, len(name) * ctypes.sizeof(wintypes.WCHAR), name)
+        if not kernel32.SetFileInformationByHandle(handle, file_rename_info, ctypes.byref(information),
+                                                   ctypes.sizeof(information)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        yield
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def finished_process_pid() -> int:

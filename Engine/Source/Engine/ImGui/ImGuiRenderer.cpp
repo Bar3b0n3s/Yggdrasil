@@ -45,11 +45,12 @@ namespace Engine {
 			return (indexCount + 1) & ~static_cast<size_t>(1);
 		}
 
-		// The renderer's linear-clamp sampler (Create, and Recreate after a device loss).
-		static Result<nvrhi::SamplerHandle> CreateImGuiSampler(GraphicsDevice& device)
+		// One of the renderer's linear samplers (Create, and Recreate after a device loss): Clamp for AddTexture's images,
+		// Border for ImGui's own textures, whose border is transparent black (see the class comment).
+		static Result<nvrhi::SamplerHandle> CreateImGuiSampler(GraphicsDevice& device, nvrhi::SamplerAddressMode addressMode)
 		{
 			nvrhi::SamplerDesc samplerDesc;
-			samplerDesc.setAllFilters(true).setAllAddressModes(nvrhi::SamplerAddressMode::Clamp);
+			samplerDesc.setAllFilters(true).setAllAddressModes(addressMode).setBorderColor(nvrhi::Color(0.0f));
 			return device.CreateSampler(samplerDesc);
 		}
 
@@ -90,13 +91,15 @@ namespace Engine {
 		ENGINE_TRY(WithContext(ValidatePipelineLayout(GetLayoutDescription(), pipelines.GetShaderLibrary()),
 			"while creating the ImGui renderer"));
 
-		ENGINE_TRY_ASSIGN(nvrhi::SamplerHandle sampler, Utils::CreateImGuiSampler(device));
+		ENGINE_TRY_ASSIGN(nvrhi::SamplerHandle imageSampler, Utils::CreateImGuiSampler(device, nvrhi::SamplerAddressMode::Clamp));
+		ENGINE_TRY_ASSIGN(nvrhi::SamplerHandle atlasSampler, Utils::CreateImGuiSampler(device, nvrhi::SamplerAddressMode::Border));
 
 		Scope<ImGuiRenderer> renderer = CreateScope<ImGuiRenderer>(ConstructionKey());
 		renderer->m_Device = &device;
 		renderer->m_PipelineFactory = &pipelines;
 		renderer->m_FramesInFlight = specification.FramesInFlight;
-		renderer->m_Sampler = std::move(sampler);
+		renderer->m_ImageSampler = std::move(imageSampler);
+		renderer->m_AtlasSampler = std::move(atlasSampler);
 		renderer->m_Geometry.resize(specification.FramesInFlight);
 
 		ImGuiIO& io = ImGui::GetIO();
@@ -235,16 +238,18 @@ namespace Engine {
 		ImGui::SetCurrentContext(current);
 
 		// Then the objects the next use creates again: the pipelines with their binding layouts, the geometry buffers of
-		// every frame slot, and the sampler, which Recreate creates again.
+		// every frame slot, and the samplers, which Recreate creates again.
 		m_TargetPipelines.clear();
 		for (GeometryBuffers& geometry : m_Geometry)
 			geometry = GeometryBuffers{};
-		m_Sampler = nullptr;
+		m_ImageSampler = nullptr;
+		m_AtlasSampler = nullptr;
 	}
 
 	Status ImGuiRenderer::RecreateGpuObjects()
 	{
-		ENGINE_TRY_ASSIGN(m_Sampler, Utils::CreateImGuiSampler(*m_Device));
+		ENGINE_TRY_ASSIGN(m_ImageSampler, Utils::CreateImGuiSampler(*m_Device, nvrhi::SamplerAddressMode::Clamp));
+		ENGINE_TRY_ASSIGN(m_AtlasSampler, Utils::CreateImGuiSampler(*m_Device, nvrhi::SamplerAddressMode::Border));
 		return {};
 	}
 
@@ -543,7 +548,7 @@ namespace Engine {
 		desc.bindings = {
 			nvrhi::BindingSetItem::Texture_SRV(0, entry.Texture, nvrhi::Format::UNKNOWN,
 				nvrhi::TextureSubresourceSet(entry.MipLevel, 1, entry.ArraySlice, 1)),
-			nvrhi::BindingSetItem::Sampler(0, m_Sampler),
+			nvrhi::BindingSetItem::Sampler(0, entry.IsImGuiTexture ? m_AtlasSampler : m_ImageSampler),
 			nvrhi::BindingSetItem::PushConstants(0, sizeof(ImGuiConstants)),
 		};
 		const TargetPipeline& pipeline = m_TargetPipelines[pipelineIndex];

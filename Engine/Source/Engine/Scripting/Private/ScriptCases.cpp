@@ -28,6 +28,7 @@ namespace Engine {
 		m_State->Collecting = true;
 		m_State->TestHost = &host;
 		m_State->Suite = {};
+		m_State->SuiteCaseNames.clear();
 		m_State->SuiteTimeout = 0;
 		std::optional<ScriptError> bodyFailure;
 		const auto operation = [this, script, &bodyFailure](ScriptCall& call) -> int
@@ -38,6 +39,8 @@ namespace Engine {
 			const Status body = Detail::PushSuiteBody(call, -1, m_State->Suite, m_State->SuiteTimeout);
 			if (!body)
 				return Lua::RaiseError(call, body.error());
+			// The suite was replaced, dropping any case a module top registered while loading.
+			m_State->SuiteCaseNames.clear();
 			const auto result = Lua::ProtectedCall(call, 0, 0);
 			if (!result)
 				return Lua::RaiseError(call, result.error());
@@ -145,6 +148,7 @@ namespace Engine {
 		for (const ScriptTestCase& test : m_State->Suite.Cases)
 			m_State->Release(test.Function);
 		m_State->Suite = {};
+		m_State->SuiteCaseNames.clear();
 		m_State->SuiteActive = false;
 		m_State->Collecting = false;
 		m_State->ObservedErrors.clear();

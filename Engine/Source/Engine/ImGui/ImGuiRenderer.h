@@ -41,15 +41,24 @@ namespace Engine {
 	// of memory (M18, C18.3 decision 28): the texture stays ImTextureStatus_WantCreate without a log line, and the frame's
 	// draws that use it are skipped until the recovery.
 	//
+	// Sampling: both samplers are linear. AddTexture's images clamp to their edge texels. ImGui's own textures (the font
+	// atlas) read transparent black outside the texture (a border), which is what Dear ImGui's RGBA32 atlas holds in the
+	// one-texel gaps around every rectangle it packs: a glyph quad sits at a fraction of a pixel and its bilinear samples
+	// reach one texel past the glyph's rectangle, so with clamping a glyph packed against the atlas's left or top edge would
+	// read its own edge texels there and draw differently from the same glyph packed elsewhere. Dear ImGui 1.92 packs a glyph
+	// when it is first drawn, so where it lands depends on the text drawn before it, and the same frame must draw the same
+	// pixels whatever that history (§8.11). The engine keeps the RGBA32 atlas (ImFontAtlas::TexDesiredFormat's default); an
+	// Alpha8 atlas, which UploadPixels expands to white, would hold transparent white in its gaps instead.
+	//
 	// Device loss (M18, C18.3; Docs/Decisions/0029-m18-contract.md decisions 26 and 33): Create registers the renderer with
 	// its device's recreation registry as "ImGuiRenderer". Its Release drops every GPU object it holds, on a lost device and
 	// possibly in the middle of a frame the loss ended (an ImGui frame begun, a command list open): the target pipelines and
-	// their binding layouts, the geometry buffers, the sampler, every texture handle and binding set (retired entries
+	// their binding layouts, the geometry buffers, the samplers, every texture handle and binding set (retired entries
 	// included, with no frame slot to wait for), and every key: ImGui's textures get the invalid ImTextureID and are marked
 	// for creation again (ImTextureStatus_WantCreate, since they keep their pixels; one whose creation failed too), so the
 	// next RenderDrawData uploads the font atlas again from ImGui's own pixels, and an AddTexture key no longer matches. The
 	// owners of AddTexture keys register after the renderer, so their Release runs first and removes their keys. Its
-	// Recreate creates the sampler again, as Create does; the pipelines, buffers and binding sets are created by their next
+	// Recreate creates the samplers again, as Create does; the pipelines, buffers and binding sets are created by their next
 	// use, as always.
 	class ImGuiRenderer
 	{
@@ -71,8 +80,8 @@ namespace Engine {
 
 		// Sets the backend flags and renderer name on the current context's ImGuiIO (a current context is required,
 		// asserted), checks GetLayoutDescription against the ImGui program's reflection (ValidatePipelineLayout, so stale or
-		// missing shaders fail here), creates the linear-clamp sampler and registers the renderer with the device's recreation
-		// registry ("ImGuiRenderer", see the class comment). Pipelines, each with the binding layout
+		// missing shaders fail here), creates the two samplers and registers the renderer with the device's recreation
+		// registry ("ImGuiRenderer"; both in the class comment). Pipelines, each with the binding layout
 		// PipelineFactory creates for it, are created per target format on first use in RenderDrawData, through
 		// `pipelines`; binding sets are cached per texture and pipeline. `device` and `pipelines` are documented
 		// back-references that must outlive the renderer. Errors: InvalidState without a current Dear ImGui context (also
@@ -149,7 +158,7 @@ namespace Engine {
 		};
 
 		// The renderer's hooks in the recreation protocol (see the class comment): Release drops every GPU object and key,
-		// with the renderer's Dear ImGui context made current for the call; Recreate creates the sampler again. Errors
+		// with the renderer's Dear ImGui context made current for the call; Recreate creates the samplers again. Errors
 		// (Recreate): those of GraphicsDevice::CreateSampler.
 		void ReleaseGpuObjects();
 		[[nodiscard]] Status RecreateGpuObjects();
@@ -188,7 +197,8 @@ namespace Engine {
 		ImGuiContext* m_Context = nullptr;            // the context Create configured
 		uint32_t m_FramesInFlight = 0;
 		uint32_t m_FrameSlot = 0;
-		nvrhi::SamplerHandle m_Sampler{};
+		nvrhi::SamplerHandle m_ImageSampler{}; // AddTexture's images: clamped to the edge
+		nvrhi::SamplerHandle m_AtlasSampler{}; // ImGui's own textures: a transparent black border
 		std::vector<TextureEntry> m_Textures{};
 		std::vector<uint32_t> m_FreeTextureSlots{};
 		std::vector<RetiredTexture> m_RetiredTextures{};

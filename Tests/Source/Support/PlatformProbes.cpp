@@ -19,6 +19,9 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <cstddef>
+#include <cstring>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -126,6 +129,61 @@ namespace Engine {
 			}
 			CloseHandle(handle);
 			return text;
+		}
+
+		void FileHandleCloser::operator()(void* handle) const
+		{
+			CloseHandle(handle);
+		}
+
+		Result<HeldFileHandle> RenameKeepingHandleOpen(const std::filesystem::path& from, const std::filesystem::path& to)
+		{
+			const HANDLE handle = CreateFileW(from.c_str(), DELETE | SYNCHRONIZE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+				nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+			if (handle == INVALID_HANDLE_VALUE)
+				return MakeError(ErrorCode::Io, "cannot open '{}' to rename it: {}", PathToUtf8(from), Utils::DescribeLastError());
+			HeldFileHandle held(handle);
+
+			// FILE_RENAME_INFO ends in the name: the structure, the rest of the name and a zeroed terminator.
+			const std::wstring& target = to.native();
+			const size_t nameBytes = target.size() * sizeof(wchar_t);
+			const size_t informationBytes = offsetof(FILE_RENAME_INFO, FileName) + nameBytes + sizeof(wchar_t);
+			const std::unique_ptr<std::byte[]> storage = std::make_unique<std::byte[]>(informationBytes);
+			auto* information = reinterpret_cast<FILE_RENAME_INFO*>(storage.get());
+			information->ReplaceIfExists = TRUE;
+			information->RootDirectory = nullptr;
+			information->FileNameLength = static_cast<DWORD>(nameBytes);
+			std::memcpy(storage.get() + offsetof(FILE_RENAME_INFO, FileName), target.c_str(), nameBytes);
+			if (SetFileInformationByHandle(handle, FileRenameInfo, information, static_cast<DWORD>(informationBytes)) == FALSE)
+			{
+				return MakeError(ErrorCode::Io, "cannot rename '{}' to '{}': {}", PathToUtf8(from), PathToUtf8(to),
+					Utils::DescribeLastError());
+			}
+			return held;
+		}
+
+		Result<HeldFileHandle> OpenForReadingSharingAll(const std::filesystem::path& file)
+		{
+			const HANDLE handle = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+				OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+			if (handle == INVALID_HANDLE_VALUE)
+				return MakeError(ErrorCode::Io, "cannot open '{}' sharing everything: {}", PathToUtf8(file), Utils::DescribeLastError());
+			return HeldFileHandle(handle);
+		}
+
+		Result<std::string> ReadRemaining(const HeldFileHandle& handle)
+		{
+			std::string text;
+			std::array<char, 4096> buffer{};
+			while (true)
+			{
+				DWORD read = 0;
+				if (ReadFile(handle.get(), buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr) == FALSE)
+					return MakeError(ErrorCode::Io, "cannot read a held file: {}", Utils::DescribeLastError());
+				if (read == 0)
+					return text;
+				text.append(buffer.data(), read);
+			}
 		}
 
 		Result<uint32_t> GetThreadStackGuarantee()
