@@ -1177,6 +1177,21 @@
 				"PixelSnap": {
 					"description": "Rounds every element's corners to whole scene pixels, so images and clips land on pixel corners.",
 					"type": "boolean"
+				},
+				"Font": {
+					"description": "The font of the canvas's texts whose own Font is null; null uses the default font.",
+					"type": ["string", "null"],
+					"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+					"x-assetType": "Font"
+				},
+				"Theme": {
+					"description": "The state tints of the canvas's widgets (buttons, toggles, sliders and scroll views).",
+					"$ref": "#/$defs/UiTheme"
+				},
+				"DefaultFocus": {
+					"description": "The UI widget keyboard and gamepad navigation focuses first while nothing has focus; null: navigation starts only from a pointer press or Ui.SetFocus.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
 				}
 			},
 			"additionalProperties": false
@@ -1339,6 +1354,10 @@
 				"Filter": {
 					"description": "How the frame's texture is sampled.",
 					"enum": ["Point", "Linear"]
+				},
+				"RaycastTarget": {
+					"description": "Whether the image catches the pointer for its nearest widget; false lets the pointer pass through it.",
+					"type": "boolean"
 				}
 			},
 			"additionalProperties": false
@@ -1352,7 +1371,7 @@
 					"type": "string"
 				},
 				"Font": {
-					"description": "The font; null uses the default font.",
+					"description": "The font; null uses its canvas's Font, or the default font when the canvas names none.",
 					"type": ["string", "null"],
 					"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
 					"x-assetType": "Font"
@@ -1408,6 +1427,10 @@
 					"type": "number",
 					"minimum": 0.1,
 					"maximum": 10
+				},
+				"RaycastTarget": {
+					"description": "Whether the text catches the pointer for its nearest widget; false lets the pointer pass through it.",
+					"type": "boolean"
 				}
 			},
 			"additionalProperties": false
@@ -1724,6 +1747,153 @@
 					"type": "integer",
 					"minimum": -2147483648,
 					"maximum": 2147483647
+				}
+			},
+			"additionalProperties": false
+		},
+		"UiTheme": {
+			"description": "The state tints of a canvas's widgets: each multiplies the colour of a widget element's own UiImage in that state.",
+			"type": "object",
+			"properties": {
+				"Normal": {
+					"description": "The tint of an interactable widget that is neither hovered, pressed nor focused.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 4,
+					"maxItems": 4
+				},
+				"Hovered": {
+					"description": "The tint of a widget under the pointer.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 4,
+					"maxItems": 4
+				},
+				"Pressed": {
+					"description": "The tint of a widget the pointer presses.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 4,
+					"maxItems": 4
+				},
+				"Focused": {
+					"description": "The tint of the widget that has keyboard and gamepad focus.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 4,
+					"maxItems": 4
+				},
+				"Disabled": {
+					"description": "The tint of a widget whose Interactable is false.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 4,
+					"maxItems": 4
 				}
 			},
 			"additionalProperties": false

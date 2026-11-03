@@ -264,12 +264,14 @@ namespace Engine {
 			REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
 
 			(*session)->Tick();
-			// §5.7: the fixed step (0 to 10, TransformSystem::Update before PhysicsSystem::PreStep, UiLayout last), then the
-			// frame phase (FrameUiLayout after FrameTransformUpdate).
+			// §5.7: the fixed step (0 to 10, UiInput after ApplyInput, UiEvents after StartFlush, TransformSystem::Update before
+			// PhysicsSystem::PreStep, UiLayout last), then the frame phase (FrameUiLayout after FrameTransformUpdate).
 			const std::vector<PlaySessionPhase> expected = {
 				PlaySessionPhase::InterpolationSnapshot,
 				PlaySessionPhase::ApplyInput,
+				PlaySessionPhase::UiInput,
 				PlaySessionPhase::StartFlush,
+				PlaySessionPhase::UiEvents,
 				PlaySessionPhase::FixedUpdate,
 				PlaySessionPhase::Tasks,
 				PlaySessionPhase::PreStepTransformUpdate,
@@ -294,10 +296,10 @@ namespace Engine {
 			// FixedStep alone runs the fixed step only; FrameUpdate alone the frame phase only.
 			observer.Phases.clear();
 			(*session)->FixedStep();
-			CHECK(observer.Phases == std::vector<PlaySessionPhase>(expected.begin(), expected.begin() + 12));
+			CHECK(observer.Phases == std::vector<PlaySessionPhase>(expected.begin(), expected.begin() + 14));
 			observer.Phases.clear();
 			(*session)->FrameUpdate(FrameTime{ .DeltaTime = 1.0 / 60.0, .UnscaledDeltaTime = 1.0 / 60.0, .Alpha = 0.5, .FrameIndex = 0 });
-			CHECK(observer.Phases == std::vector<PlaySessionPhase>(expected.begin() + 12, expected.end()));
+			CHECK(observer.Phases == std::vector<PlaySessionPhase>(expected.begin() + 14, expected.end()));
 		}
 
 		TEST_CASE("PlaySession: Simulate mode skips the script and audio phases")
@@ -312,6 +314,7 @@ namespace Engine {
 			const std::vector<PlaySessionPhase> expected = {
 				PlaySessionPhase::InterpolationSnapshot,
 				PlaySessionPhase::ApplyInput,
+				PlaySessionPhase::UiInput,
 				PlaySessionPhase::PreStepTransformUpdate,
 				PlaySessionPhase::PhysicsPreStep,
 				PlaySessionPhase::PhysicsStep,
@@ -420,11 +423,51 @@ namespace Engine {
 			CHECK(loaded.Canvases[0].Canvas == session.GetScene().FindEntityByPath("/Hud").GetUUID());
 		}
 
+		// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 24; stream A): a scene replacement drops the replaced scene's
+		// focus, hover and queued UI events (UiSystem::ResetInteraction), so the loaded scene starts without a ui block and no
+		// event of the old scene reaches the new one's callbacks.
+		TEST_CASE("PlaySession: a Scene.Load drops the replaced scene's UI focus, hover and queued events")
+		{
+			Test::ScriptTestFixture fixture;
+			PopulateUiScene(fixture.GetScene());
+			Test::SceneTestFixture levelFixture;
+			static_cast<void>(levelFixture.GetScene().CreateEntity("Level"));
+			Result<Json> levelDocument = SceneSerializer::ToJson(levelFixture.GetScene());
+			REQUIRE_MESSAGE(levelDocument.has_value(), levelDocument.error().ToString());
+			auto level = CreateRef<SceneData>();
+			level->Document = CreateRef<const Json>(std::move(*levelDocument));
+			fixture.GetAssetManager().Publish(AssetHandle(0x7100a2), level, "Assets/Scenes/Level.scene");
+
+			PlaySessionSpecification specification{};
+			specification.Registry = &fixture.GetTypes();
+			specification.Assets = &fixture.GetAssetManager();
+			specification.ScriptSchemas = fixture.GetSchemaSnapshot();
+			specification.Seed = 48;
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(specification, fixture.GetScene());
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& session = **created;
+			session.SetExtractionEnabled(false);
+
+			// The pointer over A hovers it, and a script focuses B: the session holds interaction state and a queued event.
+			QueuePointer(session, 0, glm::vec2(10.0f));
+			session.Tick();
+			REQUIRE(session.GetUi().GetInteraction().Hovered == session.GetScene().FindEntityByPath("/Canvas/A").GetUUID());
+			REQUIRE(session.GetUi().SetFocus(session.GetScene(), session.GetScene().FindEntityByPath("/Canvas/B").GetUUID()).has_value());
+			REQUIRE(session.GetUi().GetQueuedEventCount() > 0);
+
+			const auto requested = session.GetScripts()->Evaluate("Scene.Load(Assets.Load(\"Assets/Scenes/Level.scene\"))\nreturn true", {});
+			REQUIRE_MESSAGE(requested.has_value(), requested.error().ToString());
+			session.FrameUpdate(FrameTime{ .DeltaTime = 1.0 / 60.0, .UnscaledDeltaTime = 1.0 / 60.0, .Alpha = 1.0, .FrameIndex = 1 });
+			REQUIRE(session.GetSceneGeneration() == 2);
+			CHECK(session.GetUi().GetInteraction().IsEmpty());
+			CHECK(session.GetUi().GetQueuedEventCount() == 0);
+		}
+
 		// C22.2 (Docs/Decisions/0033-m22-contract.md decisions 24 and 27; ADR 0028's phase-2 execution order): UiInput after
 		// ApplyInput (C22.3's TextLatch goes between them) and UiEvents after StartFlush; Simulate runs UiInput, whose writes
-		// are simulation, but no script phase, and drops the UI events. Streams A (UiInput) and B (UiEvents); the integration
-		// extends "step order matches the documented sequence" and "Simulate mode skips the script and audio phases" with them.
-		TEST_CASE("PlaySession: UiInput follows ApplyInput and UiEvents follows StartFlush, and Simulate drops the UI events" * doctest::skip(true))
+		// are simulation, but no script phase, and drops the UI events. Streams A (UiInput) and B (UiEvents); the cases "step
+		// order matches the documented sequence" and "Simulate mode skips the script and audio phases" list them too.
+		TEST_CASE("PlaySession: UiInput follows ApplyInput and UiEvents follows StartFlush, and Simulate drops the UI events")
 		{
 			Test::SceneTestFixture fixture;
 			PopulateUiScene(fixture.GetScene());
@@ -449,7 +492,7 @@ namespace Engine {
 		// Roadmap M22's acceptance "scenes without UI keep their hash" (decision 29): hovering writes nothing to the scene, so
 		// two sessions differ only by the ui block while one hovers, and hash alike again once its state is empty (the
 		// UiEvents phase empties the queue every tick).
-		TEST_CASE("PlaySession: the state hash holds the ui block only while the UI interaction state or event queue is not empty" * doctest::skip(true))
+		TEST_CASE("PlaySession: the state hash holds the ui block only while the UI interaction state or event queue is not empty")
 		{
 			Test::SceneTestFixture fixture;
 			PopulateUiScene(fixture.GetScene());
@@ -472,6 +515,83 @@ namespace Engine {
 			(*away)->Tick();
 			CHECK((*hovering)->GetUi().GetInteraction().IsEmpty());
 			CHECK((*hovering)->ComputeStateHash() == (*away)->ComputeStateHash());
+		}
+
+		// Decision 25 (the review of W22.2's tests major, the lead's decision 3): the session passes its interaction state to
+		// the extraction of its game view (the RenderExtraction phase) and to ExtractView (what viewport.screenshot of the play
+		// scene captures), so a widget the pointer hovers or presses, or that has focus, takes its canvas's tint for that state
+		// in both, while the others keep Normal.
+		TEST_CASE("PlaySession: the game view and ExtractView tint the widgets by the session's interaction state")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			PopulateUiScene(scene);
+			const UiTheme theme{ .Normal = glm::vec4(0.9f, 0.9f, 0.9f, 1.0f),
+				.Hovered = glm::vec4(0.5f, 1.0f, 1.0f, 1.0f),
+				.Pressed = glm::vec4(1.0f, 0.5f, 1.0f, 1.0f),
+				.Focused = glm::vec4(1.0f, 1.0f, 0.5f, 1.0f) };
+			scene.FindEntityByPath("/Canvas").GetComponent<UiCanvasComponent>().Theme = theme;
+			const glm::vec4 color(0.8f, 0.6f, 0.4f, 1.0f);
+			for (const std::string_view path : { "/Canvas/A", "/Canvas/B" })
+				scene.FindEntityByPath(path).GetComponent<UiImageComponent>().Color = color;
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(MakeSpecification(fixture), scene);
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& session = **created;
+			const UUID a = session.GetScene().FindEntityByPath("/Canvas/A").GetUUID();
+			const UUID b = session.GetScene().FindEntityByPath("/Canvas/B").GetUUID();
+			const auto imageColor = [](const RenderSnapshot& snapshot, UUID entity)
+			{
+				const auto found = std::ranges::find_if(snapshot.Ui.Items, [entity](const UiDrawItem& item)
+				{
+					return item.Entity == entity && item.Kind == UiDrawKind::Image;
+				});
+				REQUIRE(found != snapshot.Ui.Items.end());
+				return found->Color;
+			};
+			// The tints of A and B in the game view of the last frame and in an ExtractView of the play scene.
+			const auto checkTints = [&session, &imageColor, a, b, color](glm::vec4 tintA, glm::vec4 tintB)
+			{
+				CHECK(imageColor(session.GetLastExtraction(), a) == color * tintA);
+				CHECK(imageColor(session.GetLastExtraction(), b) == color * tintB);
+				RenderExtractionRequest request;
+				request.Camera = RenderCameraSource::Primary;
+				request.Width = 320;
+				request.Height = 180;
+				const Result<RenderSnapshot> view = session.ExtractView(request);
+				REQUIRE_MESSAGE(view.has_value(), view.error().ToString());
+				CHECK(imageColor(*view, a) == color * tintA);
+				CHECK(imageColor(*view, b) == color * tintB);
+			};
+			const auto mouse = [&session](uint64_t tick, PlayInputEventState state, glm::vec2 position)
+			{
+				REQUIRE(session.GetInput()
+						.Queue(tick,
+							PlayInputEvent{ .Type = PlayInputEventType::MouseButtonInput,
+								.State = state,
+								.Button = MouseButton::Left,
+								.HasPosition = true,
+								.Position = position })
+						.has_value());
+			};
+
+			// The pointer away from the UI: Normal. Over A: Hovered. A held press on A: Pressed (over its focus and hover).
+			// Released away from it: A keeps the focus the press gave it, Focused, and B stays Normal throughout.
+			QueuePointer(session, 0, glm::vec2(500.0f));
+			session.Tick();
+			checkTints(theme.Normal, theme.Normal);
+			QueuePointer(session, 1, glm::vec2(10.0f));
+			session.Tick();
+			REQUIRE(session.GetUi().GetInteraction().Hovered == a);
+			checkTints(theme.Hovered, theme.Normal);
+			mouse(2, PlayInputEventState::Down, glm::vec2(10.0f));
+			session.Tick();
+			REQUIRE(session.GetUi().GetInteraction().Pressed == a);
+			checkTints(theme.Pressed, theme.Normal);
+			mouse(3, PlayInputEventState::Up, glm::vec2(500.0f));
+			session.Tick();
+			REQUIRE(session.GetUi().GetInteraction().Focused == a);
+			REQUIRE_FALSE(session.GetUi().GetInteraction().Hovered.IsValid());
+			checkTints(theme.Focused, theme.Normal);
 		}
 
 		// Roadmap M22's acceptance "scenes without UI keep their hash" (decision 24 step 1, the C22.2 review's major): in a
@@ -503,7 +623,7 @@ namespace Engine {
 		// name a key or a gamepad button fails the session's start at its location, as an action's binding does. Next with a
 		// Shift key down is Previous, and a gamepad command counts on any connected gamepad (gamepad 1 here). Navigation
 		// starts from the canvas's DefaultFocus (decision 23). Taps are two ticks apart, so each press is a new edge.
-		TEST_CASE("PlaySession: the Ui settings' bindings drive navigation, and a binding that is not a key or gamepad button fails the start" * doctest::skip(true))
+		TEST_CASE("PlaySession: the Ui settings' bindings drive navigation, and a binding that is not a key or gamepad button fails the start")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();

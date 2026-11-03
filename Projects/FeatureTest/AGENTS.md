@@ -23,8 +23,8 @@ serves its skills and generated reference through automation (`docs.get {}` list
   under `Assets/Scenes/`, `Assets/Scripts/`, `Assets/Prefabs/`, `Assets/Formats/`, `Assets/Localization/` (M22's string
   table), `Assets/Ui/` (M22's font imported with `Ranges`) and `Assets/Tests/<Area>/`,
   `Suites.jsonl` writes `Testing.Suites` and `Testing.Replays`, and `Replays.jsonl` records `Input.replay` and
-  `Determinism.replay` last (`PhysicsSemantics.jsonl` and `MultiScript.jsonl` record their scenes' replays in
-  `Assets/Tests/Replays/` themselves).
+  `Determinism.replay` last (`PhysicsSemantics.jsonl`, `MultiScript.jsonl` and M22's `UiReplay.jsonl` record their
+  scenes' replays in `Assets/Tests/Replays/` themselves).
   `python Scripts/Scaffold.py`, run from the engine repository's root with every editor on the project closed, restores
   `Scaffold/Baseline/` and runs them all; `python Scripts/Scaffold.py --check` proves that they reproduce the project byte
   for byte. To change the content, change a scaffold and regenerate; a changed setting, scene or id re-records the replays.
@@ -35,9 +35,10 @@ serves its skills and generated reference through automation (`docs.get {}` list
   later golden scene comes from a golden scaffold, a `Scaffolds.json` entry with `GoldenDirectories`, which writes only
   below directories of its own and is regenerated like every other scaffold: `Scaffold/GoldenRendererII.jsonl` (M18's
   recorded regeneration of `Golden.jsonl`'s M9 part) writes the Renderer II scenes under
-  `Assets/Scenes/GoldenRendererII/` and their materials under `Assets/Materials/GoldenRendererII/`, and
+  `Assets/Scenes/GoldenRendererII/` and their materials under `Assets/Materials/GoldenRendererII/`,
   `Scaffold/UiGolden.jsonl` (M22) writes the UI golden scene under `Assets/Scenes/GoldenUi/` and its sprite sheet and
-  texture under `Assets/Textures/GoldenUi/`.
+  texture under `Assets/Textures/GoldenUi/`, and `Scaffold/UiWidgetsGolden.jsonl` (M22) writes the widgets golden scene
+  under `Assets/Scenes/GoldenUiWidgets/`.
   `asset.import` reads only project paths and absolute ones, so imported files come from `Scaffold/Sources/`,
   byte-identical copies of the `Tests/Data/Assets` fixtures (`Tests/Data/Generate`), which a unit test keeps in step. The
   editor's `.bak` backups of rewritten files are not committed (`.gitignore` leaves them out).

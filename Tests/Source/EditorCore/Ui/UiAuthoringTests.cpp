@@ -5,6 +5,8 @@
 #include "Engine/Scene/Components/UiCanvasComponent.h"
 #include "Engine/Scene/Components/UiImageComponent.h"
 #include "Engine/Scene/Components/UiRectComponent.h"
+#include "Engine/Scene/Components/UiScrollViewComponent.h"
+#include "Engine/Scene/Components/UiToggleComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/UiLayout.h"
@@ -13,10 +15,10 @@
 #include <glm/glm.hpp>
 
 #include <optional>
+#include <string_view>
 
 // UI authoring (M22, C22.2, R-UI-EDITOR; Docs/Decisions/0033-m22-contract.md decisions 33 and 34): the anchor presets of the
 // UiRect drawer, the rect tool's handles and drags, the preview's selection and its frame in the panel, as pure functions.
-// Skipped by the contract until stream D lands them.
 
 namespace Engine {
 
@@ -24,7 +26,7 @@ namespace Engine {
 	{
 		// Decision 34: a preset sets the anchors, and keeps the element's rectangle in its parent unless SetPosition moves it
 		// to the anchors; SetPivot moves the pivot with them.
-		TEST_CASE("UiAuthoring: anchor presets set the anchors and keep the rectangle unless asked to move it" * doctest::skip(true))
+		TEST_CASE("UiAuthoring: anchor presets set the anchors and keep the rectangle unless asked to move it")
 		{
 			// A 100 x 40 element whose top-left corner is at (10, 20) in a 400 x 300 parent, anchored at its top-left corner.
 			const UiRectComponent rect{ .AnchorMin = glm::vec2(0.0f), .AnchorMax = glm::vec2(0.0f), .Pivot = glm::vec2(0.0f), .Position = glm::vec2(10.0f, 20.0f), .Size = glm::vec2(100.0f, 40.0f) };
@@ -76,7 +78,7 @@ namespace Engine {
 		}
 
 		// Decision 34: the handles of a rectangle, and drags that move one edge and keep the opposite one in place.
-		TEST_CASE("UiAuthoring: the rect tool moves an edge and keeps the opposite one in place" * doctest::skip(true))
+		TEST_CASE("UiAuthoring: the rect tool moves an edge and keeps the opposite one in place")
 		{
 			const glm::vec2 min(100.0f, 100.0f);
 			const glm::vec2 max(200.0f, 150.0f);
@@ -107,7 +109,7 @@ namespace Engine {
 
 		// Decision 33: the preview shows the game frame fitted in the panel; its points map to the frame's scene pixels, where
 		// the topmost element holding a point is selected.
-		TEST_CASE("UiAuthoring: the UI preview fits the game frame in the panel and selects the topmost element at a point" * doctest::skip(true))
+		TEST_CASE("UiAuthoring: the UI preview fits the game frame in the panel and selects the topmost element at a point")
 		{
 			CHECK(GetUiPreviewFrameSize(glm::uvec2(0), WindowSettings{ .Width = 1280, .Height = 720 }) == glm::uvec2(1280, 720));
 			CHECK(GetUiPreviewFrameSize(glm::uvec2(320, 180), WindowSettings{ .Width = 1280, .Height = 720 }) == glm::uvec2(320, 180));
@@ -128,11 +130,36 @@ namespace Engine {
 			panel.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f), .AnchorMax = glm::vec2(0.0f), .Pivot = glm::vec2(0.0f), .Size = glm::vec2(200.0f) });
 			Entity group = scene.CreateEntity("Group", panel);
 			group.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f), .AnchorMax = glm::vec2(0.0f), .Pivot = glm::vec2(0.0f), .Position = glm::vec2(50.0f), .Size = glm::vec2(20.0f) });
+			// An off toggle at (100, 10), 40 x 40, whose Graphic "Check" covers (105, 15) to (135, 45), and a scroll view at
+			// (100, 100), 50 x 50, whose 150-tall content is clipped to it (decisions 26 and 34).
+			const auto addElement = [&scene](std::string_view name, Entity parent, glm::vec2 position, glm::vec2 size)
+			{
+				Entity element = scene.CreateEntity(name, parent);
+				element.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f),
+					.AnchorMax = glm::vec2(0.0f),
+					.Pivot = glm::vec2(0.0f),
+					.Position = position,
+					.Size = size });
+				return element;
+			};
+			Entity toggle = addElement("Toggle", panel, glm::vec2(100.0f, 10.0f), glm::vec2(40.0f));
+			Entity check = addElement("Check", toggle, glm::vec2(5.0f), glm::vec2(30.0f));
+			toggle.AddComponent<UiToggleComponent>(UiToggleComponent{ .Graphic = check.GetUUID() });
+			Entity list = addElement("List", panel, glm::vec2(100.0f, 100.0f), glm::vec2(50.0f));
+			Entity content = addElement("Content", list, glm::vec2(0.0f), glm::vec2(50.0f, 150.0f));
+			list.AddComponent<UiScrollViewComponent>(UiScrollViewComponent{ .Content = content.GetUUID() });
 			const UiLayoutTable table = ComputeUiLayout(scene, glm::uvec2(400, 300));
 			// The group draws nothing, and is still selected over the panel.
 			CHECK(PickUiElement(table, glm::vec2(55.0f)) == group.GetUUID());
 			CHECK(PickUiElement(table, glm::vec2(10.0f)) == panel.GetUUID());
 			CHECK_FALSE(PickUiElement(table, glm::vec2(300.0f)).IsValid());
+			// The hidden Graphic is passed over for the toggle below it; the content is picked inside its view only, and its
+			// clipped part leaves the click to the panel.
+			REQUIRE(FindUiLayoutNode(table, check.GetUUID()) != nullptr);
+			CHECK(FindUiLayoutNode(table, check.GetUUID())->Hidden);
+			CHECK(PickUiElement(table, glm::vec2(110.0f, 20.0f)) == toggle.GetUUID());
+			CHECK(PickUiElement(table, glm::vec2(110.0f, 120.0f)) == content.GetUUID());
+			CHECK(PickUiElement(table, glm::vec2(110.0f, 170.0f)) == panel.GetUUID());
 		}
 	}
 

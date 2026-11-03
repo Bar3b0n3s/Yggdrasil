@@ -1,0 +1,810 @@
+{
+	"Format": "Replay",
+	"Version": 3,
+	"Scene": {
+		"Handle": "79e8ee1e9f1be04f",
+		"Path": "Assets/Scenes/Components/UiWidgets.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.1.0",
+	"Config": "Editor",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "088ace5e3147f6c1",
+				"Path": "/Menu/Hints/HintsCheck",
+				"Hash": "19e33e9048ca14a2",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "86efa64ad61ad08f",
+					"UiImage": "8c1315cd3134798d"
+				}
+			},
+			{
+				"Id": "0a255271eef2cc0e",
+				"Path": "/Menu/Volume/VolumeHandle",
+				"Hash": "aab20cb24bbdbd32",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "c941a3778e79c856",
+					"UiImage": "4fb7a4ab08d0e632"
+				}
+			},
+			{
+				"Id": "0adc7996d92088d3",
+				"Path": "/Menu/List/Items/Item6",
+				"Hash": "bcda122517d911e5",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "ebbff03658c61199",
+					"UiImage": "baceee20aa83c9e5",
+					"UiText": "0890d541b2f404cd",
+					"UiButton": "2a3523b8a133ae8f"
+				}
+			},
+			{
+				"Id": "0b285fe97f8b9655",
+				"Path": "/Menu/Strip/Row/Tile2",
+				"Hash": "144d40e5ff15fa0c",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "537f2a1e27d629f1",
+					"UiImage": "d9734f860c500f69"
+				}
+			},
+			{
+				"Id": "0c0756d516f16f30",
+				"Path": "/Menu/Hints",
+				"Hash": "d5610d9636234959",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "8b36c76e6b7f450e",
+					"UiImage": "0cfab20e194ce3f3",
+					"UiToggle": "949477c89f58d20c"
+				}
+			},
+			{
+				"Id": "1175447548dcb62d",
+				"Path": "/Menu/Dimmer",
+				"Hash": "cc3537216fc9eeac",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "58cc1df3c603be74",
+					"UiImage": "868e800b17b4df3f",
+					"UiSlider": "841de5e89993b37e"
+				}
+			},
+			{
+				"Id": "21f14dd600252f2a",
+				"Path": "/Menu/List/Items/Item1",
+				"Hash": "7c7be338abf977df",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "ebbff03658c61199",
+					"UiImage": "e6ce7e7e6ab51e6b",
+					"UiText": "bbe4d416436c554f",
+					"UiButton": "2a3523b8a133ae8f"
+				}
+			},
+			{
+				"Id": "231125c15c8c717a",
+				"Path": "/Menu/Music/MusicLabel",
+				"Hash": "165d52a53f3a0827",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "bfec56468dfcc63a",
+					"UiText": "49d38d5d42227481"
+				}
+			},
+			{
+				"Id": "2a861232b3e06f06",
+				"Path": "/Menu/List/Items/Item4",
+				"Hash": "69071c971b0b3cae",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "ebbff03658c61199",
+					"UiImage": "baceee20aa83c9e5",
+					"UiText": "840f887ccaa7af15",
+					"UiButton": "2a3523b8a133ae8f"
+				}
+			},
+			{
+				"Id": "2f3d60655fabc76c",
+				"Path": "/Menu/Title",
+				"Hash": "e6990f95e2000ef4",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "dffb6f467723aaba",
+					"UiText": "470d1c9d94792e5d"
+				}
+			},
+			{
+				"Id": "32d80c6cb3e11fe2",
+				"Path": "/Menu/Music/MusicCheck",
+				"Hash": "85032b602d839f33",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "86efa64ad61ad08f",
+					"UiImage": "8c1315cd3134798d"
+				}
+			},
+			{
+				"Id": "37040f97e7cde578",
+				"Path": "/Menu/Hud",
+				"Hash": "9989253cde0f2538",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "cc6b4926f0ad8e2c",
+					"UiImage": "bd21872b4237f68d",
+					"UiButton": "a71d9b21ce240886"
+				}
+			},
+			{
+				"Id": "38b9edac823acd6f",
+				"Path": "/Menu",
+				"Hash": "b3eb4a36fa9f3f76",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Script": "5ba1881be86021a7",
+					"UiCanvas": "c7368b1ba83dc6da"
+				}
+			},
+			{
+				"Id": "430a732c7e644985",
+				"Path": "/Menu/Strip",
+				"Hash": "a820326782cbba5a",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "2ccd6d22df78f627",
+					"UiImage": "f8b5ec0194390e9d",
+					"UiScrollView": "2d14dafeef07cc73"
+				}
+			},
+			{
+				"Id": "48c5c6a2cd1cde83",
+				"Path": "/Menu/List/Items",
+				"Hash": "36b9771bc758b001",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "b065db93ad1ebec2",
+					"UiLayout": "7e4281b05b3e24d8"
+				}
+			},
+			{
+				"Id": "4928d83e3af5c15e",
+				"Path": "/Menu/Strip/Row/Tile3",
+				"Hash": "d50354f9a0188fef",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "537f2a1e27d629f1",
+					"UiImage": "69f4aa6e1156bf9d"
+				}
+			},
+			{
+				"Id": "4dd74ff3cd0500a1",
+				"Path": "/Menu/Strip/Row/Tile4",
+				"Hash": "c7d8862539e5de7b",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "537f2a1e27d629f1",
+					"UiImage": "fa2a7658d2c95762"
+				}
+			},
+			{
+				"Id": "508b3258c795c2a8",
+				"Path": "/Menu/Play",
+				"Hash": "714a15cbd2a23ec0",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "8c1bc92eaa51c1f4",
+					"UiImage": "74126dfe5f85f24d",
+					"UiButton": "2a3523b8a133ae8f"
+				}
+			},
+			{
+				"Id": "522e423d345c1fa0",
+				"Path": "/Menu/List/Items/Item7",
+				"Hash": "4d1fc7f2a0bcf6df",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "ebbff03658c61199",
+					"UiImage": "e6ce7e7e6ab51e6b",
+					"UiText": "7fba9b85ae76e159",
+					"UiButton": "2a3523b8a133ae8f"
+				}
+			},
+			{
+				"Id": "5a11bfb1e6b3f6e6",
+				"Path": "/Menu/Dimmer/DimmerFill",
+				"Hash": "c40c3ab747b0f430",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "03793cb79c1eb999",
+					"UiImage": "63ad6da45a884ec2"
+				}
+			},
+			{
+				"Id": "5b5956da7a9350d3",
+				"Path": "/Menu/Quit",
+				"Hash": "f37cb8b868120606",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "8bfc54faed117606",
+					"UiImage": "fd4ffb40700a2316",
+					"UiButton": "381d28fb2bb358d7"
+				}
+			},
+			{
+				"Id": "5d80186f138af255",
+				"Path": "/Menu/Backdrop",
+				"Hash": "47c0f58dd8bbf668",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "03793cb79c1eb999",
+					"UiImage": "f39f38b993cdad53"
+				}
+			},
+			{
+				"Id": "63311a71f6247ae7",
+				"Path": "/Menu/List/Items/Item2",
+				"Hash": "b794fd37d634d967",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "ebbff03658c61199",
+					"UiImage": "baceee20aa83c9e5",
+					"UiText": "9b50789ea2a8ed18",
+					"UiButton": "2a3523b8a133ae8f"
+				}
+			},
+			{
+				"Id": "641a3735e1b6282e",
+				"Path": "/Menu/Hints/HintsLabel",
+				"Hash": "f09d187c73c69725",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "bfec56468dfcc63a",
+					"UiText": "4bc21f951f9cb5fc"
+				}
+			},
+			{
+				"Id": "748849bb450f8f3e",
+				"Path": "/Menu/Locked/LockedCheck",
+				"Hash": "4e24851283469c15",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "86efa64ad61ad08f",
+					"UiImage": "8c1315cd3134798d"
+				}
+			},
+			{
+				"Id": "7a03d70b5fcd1a0b",
+				"Path": "/Menu/Brightness/BrightnessHandle",
+				"Hash": "5df40b7a3d8697c6",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "fdace32f3062771b",
+					"UiImage": "4fb7a4ab08d0e632"
+				}
+			},
+			{
+				"Id": "a06ac330f037de74",
+				"Path": "/Menu/Play/PlayLabel",
+				"Hash": "a789a0e823c9d3a4",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "03793cb79c1eb999",
+					"UiText": "2ee54e54f280f470"
+				}
+			},
+			{
+				"Id": "a14df09988ba2b4c",
+				"Path": "/Menu/Music",
+				"Hash": "09eb51f9b46cc8d8",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "cb4180dbad9606c7",
+					"UiImage": "0cfab20e194ce3f3",
+					"UiToggle": "2d29681f44c59779"
+				}
+			},
+			{
+				"Id": "a56035b46246833c",
+				"Path": "/Menu/Quit/QuitLabel",
+				"Hash": "ec2ea3094e8d5fa9",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "03793cb79c1eb999",
+					"UiText": "17a7856ad2db9801"
+				}
+			},
+			{
+				"Id": "a62bfe1f9ceb1215",
+				"Path": "/Menu/List/Items/Item8",
+				"Hash": "d49f88eb3ab3b9fa",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "ebbff03658c61199",
+					"UiImage": "baceee20aa83c9e5",
+					"UiText": "b3d64e68fab97dbf",
+					"UiButton": "2a3523b8a133ae8f"
+				}
+			},
+			{
+				"Id": "af9c581152674d25",
+				"Path": "/Menu/Locked/LockedLabel",
+				"Hash": "ad5ed7d92e43b2d1",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "bfec56468dfcc63a",
+					"UiText": "f63510dd2388af46"
+				}
+			},
+			{
+				"Id": "b23dbc8e543e4f53",
+				"Path": "/Camera",
+				"Hash": "daf6d980193e552f",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Camera": "52504468d219ee20"
+				}
+			},
+			{
+				"Id": "c66c308ba4e23dbd",
+				"Path": "/Menu/List/Items/Item3",
+				"Hash": "e47081f38946c54f",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "ebbff03658c61199",
+					"UiImage": "e6ce7e7e6ab51e6b",
+					"UiText": "e1108dcb9a167df1",
+					"UiButton": "2a3523b8a133ae8f"
+				}
+			},
+			{
+				"Id": "d0ef271b61a7711c",
+				"Path": "/Menu/Strip/Row",
+				"Hash": "80d261d301d3fe88",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "78b629b7ff368dab",
+					"UiLayout": "26ffbcd45f3d5415"
+				}
+			},
+			{
+				"Id": "db8ceccff4633919",
+				"Path": "/Menu/Hud/HudLabel",
+				"Hash": "eaeb56c5e08d9670",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "03793cb79c1eb999",
+					"UiText": "3591587dea71e6cd"
+				}
+			},
+			{
+				"Id": "e1468d12ac6f78b8",
+				"Path": "/Menu/Volume",
+				"Hash": "c0daf46f079cd8ae",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "b97b506b90e44c06",
+					"UiImage": "868e800b17b4df3f",
+					"UiSlider": "dc77e687d403dfd9"
+				}
+			},
+			{
+				"Id": "e291ec5781001f96",
+				"Path": "/Menu/Brightness/BrightnessFill",
+				"Hash": "3b92ed48fa12cc23",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "03793cb79c1eb999",
+					"UiImage": "0a51545866897551"
+				}
+			},
+			{
+				"Id": "e50ab37afafe9629",
+				"Path": "/Menu/Locked",
+				"Hash": "e26855874c92e876",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "fc4f03e4266ac378",
+					"UiImage": "0cfab20e194ce3f3",
+					"UiToggle": "edee6eb0a64a8722"
+				}
+			},
+			{
+				"Id": "eab08442250f10db",
+				"Path": "/Menu/List",
+				"Hash": "cab582766b9885cd",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "4d66bf23c24a70dc",
+					"UiImage": "f8b5ec0194390e9d",
+					"UiScrollView": "a7af2b4251aa9c89"
+				}
+			},
+			{
+				"Id": "ee4d8f3ad373a5cc",
+				"Path": "/Menu/Strip/Row/Tile1",
+				"Hash": "a6d7eec8a49caad6",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "537f2a1e27d629f1",
+					"UiImage": "44c0688f953f4d98"
+				}
+			},
+			{
+				"Id": "f1f2f337301c1172",
+				"Path": "/Menu/List/Items/Item5",
+				"Hash": "1ed403d7259f06cb",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "ebbff03658c61199",
+					"UiImage": "e6ce7e7e6ab51e6b",
+					"UiText": "6fbb436b8ffc4553",
+					"UiButton": "2a3523b8a133ae8f"
+				}
+			},
+			{
+				"Id": "f2859773f251e2f5",
+				"Path": "/Menu/Volume/VolumeFill",
+				"Hash": "31ded96eb77ca5f3",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "03793cb79c1eb999",
+					"UiImage": "78e9702b6cb56f1b"
+				}
+			},
+			{
+				"Id": "ff8dfcd43410adec",
+				"Path": "/Menu/Brightness",
+				"Hash": "49e5b2d1a878b21b",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "71db2d11c3d0ab38",
+					"UiImage": "868e800b17b4df3f",
+					"UiSlider": "9b9212a7240c023a"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "8437e42391ce559f",
+				"Path": "Assets/Ui/Fonts/Inter-Regular.otf",
+				"Type": "Font",
+				"Hash": "2421d1513c7bea58"
+			},
+			{
+				"Handle": "d219d993c72cdbe5",
+				"Path": "Assets/Scripts/UiWidgets/UiRecorder.luau",
+				"Type": "Script",
+				"Hash": "56b500386b44b36a"
+			}
+		]
+	},
+	"Events": [
+		{
+			"Tick": 3,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Down"
+		},
+		{
+			"Tick": 4,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Down"
+		},
+		{
+			"Tick": 5,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Enter"
+		},
+		{
+			"Tick": 6,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Enter"
+		},
+		{
+			"Tick": 7,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "LeftShift"
+		},
+		{
+			"Tick": 7,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Tab"
+		},
+		{
+			"Tick": 8,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Tab"
+		},
+		{
+			"Tick": 9,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "LeftShift"
+		},
+		{
+			"Tick": 11,
+			"Type": "GamepadButton",
+			"State": "Down",
+			"Button": "South",
+			"Gamepad": 0
+		},
+		{
+			"Tick": 12,
+			"Type": "GamepadButton",
+			"State": "Up",
+			"Button": "South",
+			"Gamepad": 0
+		},
+		{
+			"Tick": 13,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Escape"
+		},
+		{
+			"Tick": 14,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Escape"
+		},
+		{
+			"Tick": 15,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Tab"
+		},
+		{
+			"Tick": 16,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Tab"
+		},
+		{
+			"Tick": 17,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Right"
+		},
+		{
+			"Tick": 18,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Right"
+		},
+		{
+			"Tick": 19,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Space"
+		},
+		{
+			"Tick": 20,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Space"
+		},
+		{
+			"Tick": 21,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Right"
+		},
+		{
+			"Tick": 22,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Right"
+		},
+		{
+			"Tick": 23,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Right"
+		},
+		{
+			"Tick": 24,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Right"
+		},
+		{
+			"Tick": 25,
+			"Type": "GamepadButton",
+			"State": "Down",
+			"Button": "DPadRight",
+			"Gamepad": 0
+		},
+		{
+			"Tick": 26,
+			"Type": "GamepadButton",
+			"State": "Up",
+			"Button": "DPadRight",
+			"Gamepad": 0
+		},
+		{
+			"Tick": 27,
+			"Type": "GamepadButton",
+			"State": "Down",
+			"Button": "DPadDown",
+			"Gamepad": 0
+		},
+		{
+			"Tick": 28,
+			"Type": "GamepadButton",
+			"State": "Up",
+			"Button": "DPadDown",
+			"Gamepad": 0
+		},
+		{
+			"Tick": 29,
+			"Type": "GamepadAxis",
+			"Value": -0.8,
+			"Gamepad": 0,
+			"Axis": "LeftY"
+		},
+		{
+			"Tick": 31,
+			"Type": "GamepadAxis",
+			"Value": 0,
+			"Gamepad": 0,
+			"Axis": "LeftY"
+		},
+		{
+			"Tick": 33,
+			"Type": "GamepadAxis",
+			"Value": -0.8,
+			"Gamepad": 0,
+			"Axis": "LeftY"
+		},
+		{
+			"Tick": 35,
+			"Type": "GamepadAxis",
+			"Value": 0,
+			"Gamepad": 0,
+			"Axis": "LeftY"
+		},
+		{
+			"Tick": 37,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Down"
+		},
+		{
+			"Tick": 38,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Down"
+		},
+		{
+			"Tick": 39,
+			"Type": "GamepadButton",
+			"State": "Down",
+			"Button": "DPadUp",
+			"Gamepad": 0
+		},
+		{
+			"Tick": 40,
+			"Type": "GamepadButton",
+			"State": "Up",
+			"Button": "DPadUp",
+			"Gamepad": 0
+		},
+		{
+			"Tick": 42,
+			"Type": "MouseMove",
+			"Position": [440, 198]
+		},
+		{
+			"Tick": 44,
+			"Type": "MouseButton",
+			"State": "Down",
+			"Button": "Left",
+			"Position": [440, 198]
+		},
+		{
+			"Tick": 45,
+			"Type": "MouseButton",
+			"State": "Up",
+			"Button": "Left"
+		},
+		{
+			"Tick": 48,
+			"Type": "MouseButton",
+			"State": "Down",
+			"Button": "Left",
+			"Position": [1060, 300]
+		},
+		{
+			"Tick": 49,
+			"Type": "MouseMove",
+			"Position": [1060, 260]
+		},
+		{
+			"Tick": 50,
+			"Type": "MouseMove",
+			"Position": [1060, 200]
+		},
+		{
+			"Tick": 51,
+			"Type": "MouseMove",
+			"Position": [1060, 130]
+		},
+		{
+			"Tick": 52,
+			"Type": "MouseButton",
+			"State": "Up",
+			"Button": "Left"
+		},
+		{
+			"Tick": 55,
+			"Type": "MouseMove",
+			"Position": [800, 380]
+		},
+		{
+			"Tick": 56,
+			"Type": "Scroll",
+			"Delta": [0, -1]
+		},
+		{
+			"Tick": 58,
+			"Type": "Scroll",
+			"Delta": [0, -3]
+		},
+		{
+			"Tick": 60,
+			"Type": "Scroll",
+			"Delta": [0, 2]
+		},
+		{
+			"Tick": 63,
+			"Type": "MouseButton",
+			"State": "Down",
+			"Button": "Left",
+			"Position": [160, 128]
+		},
+		{
+			"Tick": 64,
+			"Type": "MouseButton",
+			"State": "Up",
+			"Button": "Left"
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 10,
+			"Luau": "local r = Scene.FindByName(\"Menu\"):GetScript()\nreturn r.Clicks.Play == 1 and Ui.GetFocus() == Scene.FindByName(\"Item8\") and Scene.FindByName(\"List\").UiScrollView.ScrollPosition == vector.create(0, 200, 0)"
+		},
+		{
+			"Tick": 20,
+			"Luau": "local r = Scene.FindByName(\"Menu\"):GetScript()\nreturn r.Clicks.Item8 == 1 and r.Cancels.Item8 == 1 and not Scene.FindByName(\"Music\").UiToggle.IsOn and Ui.GetFocus() == Scene.FindByName(\"Music\")"
+		},
+		{
+			"Tick": 41,
+			"Luau": "return Scene.FindByName(\"Volume\").UiSlider.Value == 35 and Ui.GetFocus() == Scene.FindByName(\"List\") and Scene.FindByName(\"List\").UiScrollView.ScrollPosition == vector.create(0, 100, 0)"
+		},
+		{
+			"Tick": 80,
+			"Luau": "local r = Scene.FindByName(\"Menu\"):GetScript()\nreturn Scene.FindByName(\"Hints\").UiToggle.IsOn and math.abs(Scene.FindByName(\"Brightness\").UiSlider.Value - 0.75) < 1e-5 and Scene.FindByName(\"List\").UiScrollView.ScrollPosition == vector.create(0, 140, 0) and r.Clicks.Play == 2 and Ui.GetFocus() == Scene.FindByName(\"Play\")"
+		}
+	],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "28e5309edc944ed4"
+		}
+	],
+	"FinalTick": 80,
+	"FinalStateHash": "94b2457e1ed7567b"
+}

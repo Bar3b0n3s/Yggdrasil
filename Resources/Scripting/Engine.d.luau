@@ -230,6 +230,9 @@ export type TestSuite = {Name: string, Body: () -> (), Options: TestSuiteOptions
 -- Default positive tick timeout for cases in a suite.
 export type TestSuiteOptions = {CaseTimeoutTicks: number?}
 
+-- A UI element's laid-out rectangle in scene pixels: its top-left (Min) and bottom-right (Max) corners as (x, y, 0), x right and y down.
+export type UiElementRect = {Min: vector, Max: vector}
+
 -- An opaque immutable asset handle; resolve metadata through Assets.
 declare extern type AssetRef with
 	-- Compares asset handles, so two references to the same asset are equal. [All modes; LoadTime|Runtime|Test; pure/read]
@@ -306,6 +309,18 @@ declare extern type Behaviour with
 	OnTriggerEnter: (self: ScriptInstance, other: Entity) -> ()
 	-- Called when the corresponding collision or trigger transition occurs. [All modes; Runtime|Test; mutates]
 	OnTriggerExit: (self: ScriptInstance, other: Entity) -> ()
+	-- Called when Cancel is pressed, at the focused UI element (or the last canvas when none is focused); bubbles like OnUiClick. [All modes; Runtime|Test; mutates]
+	OnUiCancel: (self: ScriptInstance, element: Entity) -> boolean?
+	-- Called when a UI button is clicked or submitted, at its entity, then bubbling to its ancestors; return true to stop it. [All modes; Runtime|Test; mutates]
+	OnUiClick: (self: ScriptInstance, element: Entity) -> boolean?
+	-- Called when a UI element gains (true) or loses (false) keyboard and gamepad focus; bubbles like OnUiClick. [All modes; Runtime|Test; mutates]
+	OnUiFocus: (self: ScriptInstance, element: Entity, focused: boolean) -> boolean?
+	-- Called when the pointer enters (true) or leaves (false) an interactable UI widget; bubbles like OnUiClick. [All modes; Runtime|Test; mutates]
+	OnUiHover: (self: ScriptInstance, element: Entity, hovered: boolean) -> boolean?
+	-- Called when interaction scrolls a UI scroll view, with its new ScrollPosition (x, y, 0); bubbles like OnUiClick. [All modes; Runtime|Test; mutates]
+	OnUiScroll: (self: ScriptInstance, element: Entity, position: vector) -> boolean?
+	-- Called when interaction changes a UI toggle's IsOn (a boolean) or a UI slider's Value (a number); bubbles like OnUiClick. [All modes; Runtime|Test; mutates]
+	OnUiValueChanged: (self: ScriptInstance, element: Entity, value: boolean | number) -> boolean?
 	-- Called for the current fixed, presentation or late presentation phase. [All modes; Runtime|Test; mutates]
 	OnUpdate: (self: ScriptInstance, dt: number) -> ()
 end
@@ -884,6 +899,10 @@ end
 
 -- The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text.
 declare extern type UiCanvas with
+	-- The UI widget keyboard and gamepad navigation focuses first while nothing has focus; null: navigation starts only from a pointer press or Ui.SetFocus. [All modes; Runtime|Test; pure/read; setter mutates]
+	DefaultFocus: Entity?
+	-- The font of the canvas's texts whose own Font is null; null uses the default font. [All modes; Runtime|Test; pure/read; setter mutates]
+	Font: AssetRef?
 	-- Rounds every element's corners to whole scene pixels, so images and clips land on pixel corners. [All modes; Runtime|Test; pure/read; setter mutates]
 	PixelSnap: boolean
 	-- MatchHeight: the canvas's height in canvas units, so one unit is the scene's height / ReferenceHeight scene pixels. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -894,6 +913,8 @@ declare extern type UiCanvas with
 	ScaleMode: UiScaleMode
 	-- Canvases draw in ascending SortOrder, ties in entity order; a later canvas draws over earlier ones. [All modes; Runtime|Test; pure/read; setter mutates]
 	SortOrder: number
+	-- The state tints of the canvas's widgets (buttons, toggles, sliders and scroll views). [All modes; Runtime|Test; pure/read; setter mutates]
+	Theme: {Normal: Color, Hovered: Color, Pressed: Color, Focused: Color, Disabled: Color}
 end
 
 -- Draws a sprite sheet frame, or a plain colour, over a UI element's rectangle.
@@ -906,6 +927,8 @@ declare extern type UiImage with
 	Filter: UiImageFilter
 	-- The index of the frame in the sheet's Frames; a frame the sheet lacks draws nothing. [All modes; Runtime|Test; pure/read; setter mutates]
 	Frame: number
+	-- Whether the image catches the pointer for its nearest widget; false lets the pointer pass through it. [All modes; Runtime|Test; pure/read; setter mutates]
+	RaycastTarget: boolean
 	-- The sprite sheet whose frame is drawn; null draws a plain rectangle of Color. [All modes; Runtime|Test; pure/read; setter mutates]
 	Sheet: AssetRef?
 	-- Whether the frame stretches or keeps its 9-slice borders. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -1010,10 +1033,12 @@ declare extern type UiText with
 	Alignment: TextAlignment
 	-- The linear text colour with opacity in the fourth component. [All modes; Runtime|Test; pure/read; setter mutates]
 	Color: Color
-	-- The font; null uses the default font. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The font; null uses its canvas's Font, or the default font when the canvas names none. [All modes; Runtime|Test; pure/read; setter mutates]
 	Font: AssetRef?
 	-- Multiplies the font's line height. [All modes; Runtime|Test; pure/read; setter mutates]
 	LineSpacing: number
+	-- Whether the text catches the pointer for its nearest widget; false lets the pointer pass through it. [All modes; Runtime|Test; pure/read; setter mutates]
+	RaycastTarget: boolean
 	-- The em size in canvas units. [All modes; Runtime|Test; pure/read; setter mutates]
 	Size: number
 	-- The UTF-8 text; a line feed starts a new line. Scripts read localized strings with Loc.Get. A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -1388,4 +1413,20 @@ declare Time: {
 	GetTimeScale: () -> number,
 	-- Sets the session time scale in [0, 100]; refused during read-only evaluation. [All modes; Runtime|Test; mutates]
 	SetTimeScale: (scale: number) -> (),
+}
+
+-- The game UI's interaction state in the running scene: keyboard and gamepad focus, the widget under the pointer and the one it presses, and where elements were laid out. UI events reach behaviours through the OnUi callbacks, which bubble from the element to its ancestors.
+declare Ui: {
+	-- Returns the UI element that has keyboard and gamepad focus, or nil. [All modes; Runtime|Test; pure/read]
+	GetFocus: () -> Entity?,
+	-- Returns the interactable UI widget under the pointer, or nil. [All modes; Runtime|Test; pure/read]
+	GetHovered: () -> Entity?,
+	-- Returns the UI widget the held pointer pressed, or nil. [All modes; Runtime|Test; pure/read]
+	GetPressed: () -> Entity?,
+	-- Returns element's rectangle in the current UI layout, in scene pixels (which are view coordinates unless the output is upscaled), or nil when it is not laid out. [All modes; Runtime|Test; pure/read]
+	GetRect: (element: Entity) -> UiElementRect?,
+	-- Returns whether the pointer was over a UI image, text or widget that catches it at this tick, so gameplay can ignore clicks meant for the UI. [All modes; Runtime|Test; pure/read]
+	IsPointerOverUi: () -> boolean,
+	-- Moves focus to element, a laid-out, interactable and focusable UI widget, or clears it with nil; OnUiFocus follows in the next UiEvents phase. Any other element raises a located error saying why. [All modes; Runtime|Test; mutates]
+	SetFocus: (element: Entity?) -> (),
 }

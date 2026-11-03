@@ -33,9 +33,9 @@
 // cube, a sphere and a ground plane) extracted from a scene and rendered by the scene renderer through the viewport
 // capture (viewport.screenshot's path); and the M8 goldens of Roadmap M8 (MaterialGrid, IblOnly, Tonemappers, Bloom,
 // AlphaModes, DebugDraw, Text, GltfFixture), each a scene of Projects/FeatureTest/Assets/Scenes/Golden rendered through
-// Test::RenderGoldenScene (§15.4; Docs/Decisions/0013-m8-decisions.md decision 14), and M22's Ui, the scene of a golden
-// scaffold of its own, rendered the same way. They run in the golden stage (Release) on this machine's device class;
-// Test.py --update-golden writes candidates for review.
+// Test::RenderGoldenScene (§15.4; Docs/Decisions/0013-m8-decisions.md decision 14), and M22's Ui and UiWidgets, the
+// scenes of golden scaffolds of their own, rendered the same way. They run in the golden stage (Release) on this
+// machine's device class; Test.py --update-golden writes candidates for review.
 
 namespace Engine {
 
@@ -260,6 +260,17 @@ namespace Engine {
 			// and a wrapped, centred label in the Default font; and a second canvas at two scene pixels per unit drawn over the
 			// first.
 			CheckGoldenScene("Ui");
+		}
+
+		TEST_CASE("Golden: UiWidgets")
+		{
+			// M22 (Docs/Decisions/0033-m22-contract.md decision 36): the scene of the golden scaffold
+			// Scaffold/UiWidgetsGolden.jsonl (IdSeed 2012), the widgets at rest over a cleared camera view, as the edit scene
+			// draws them (no interaction state, so each widget's image takes its canvas's Normal tint, or Disabled when it is
+			// not interactable): an enabled button and a disabled one, a toggle on (its check shown) and one off (hidden), a
+			// horizontal and a vertical slider at a quarter (fill and handle placed by the value), and a list of eight items
+			// scrolled 60 units within its 200-unit clip, labels in the Default font.
+			CheckGoldenScene("UiWidgets");
 		}
 	}
 

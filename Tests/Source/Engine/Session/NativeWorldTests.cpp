@@ -255,7 +255,9 @@ namespace Engine {
 			const std::vector<PlaySessionPhase> expected = {
 				PlaySessionPhase::InterpolationSnapshot,
 				PlaySessionPhase::ApplyInput,
+				PlaySessionPhase::UiInput,
 				PlaySessionPhase::StartFlush,
+				PlaySessionPhase::UiEvents,
 				PlaySessionPhase::FixedUpdate,
 				PlaySessionPhase::Tasks,
 				PlaySessionPhase::NativeStep,

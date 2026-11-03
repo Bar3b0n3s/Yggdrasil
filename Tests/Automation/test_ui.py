@@ -91,7 +91,6 @@ return Script.Define("ClickCounter", T)
 class UiInteractionTests(AutomationTestCase):
     """The UI's interaction through automation (Docs/Decisions/0033-m22-contract.md decisions 24, 27 and 31)."""
 
-    @unittest.skip("contract stub: Docs/Decisions/0033-m22-contract.md decisions 24, 27 and 31 (streams A and B)")
     def test_a_click_through_play_step_input_reaches_on_ui_click_and_ui_tree_reports_the_state(self) -> None:
         # A press and release injected through play.step over a button: the click bubbles from the button to the
         # canvas's behaviour in the next UiEvents phase, and ui.tree reports the play session's hover and focus.
@@ -119,7 +118,6 @@ class UiInteractionTests(AutomationTestCase):
         self.assertFalse(button["pressed"])
         client.call("play.stop")
 
-    @unittest.skip("contract stub: Docs/Decisions/0033-m22-contract.md decisions 24 and 31 (stream A)")
     def test_ui_tree_reports_the_interaction_in_the_runtime(self) -> None:
         # The exported game's Runtime fills ui.tree's interaction members from its own play session: a button the held
         # pointer pressed is its widget, interactable, hovered, focused and pressed; the release leaves it hovered and

@@ -10,7 +10,10 @@
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Native/NativeComponents.h"
+#include "Engine/Platform/Input/InputActionMap.h"
+#include "Engine/Platform/Input/InputState.h"
 #include "Engine/Reflection/FuzzySuggest.h"
+#include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Scene/AudioSystem.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
@@ -22,6 +25,7 @@
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Scene/TransformSystem.h"
+#include "Engine/Scene/UiInteraction.h"
 #include "Engine/Scene/UiSystem.h"
 #include "Engine/Scripting/RegisterBindings.h"
 #include "Engine/Scripting/ScriptApiRegistry.h"
@@ -31,6 +35,7 @@
 #include "Engine/Session/ReplayRecorder.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <format>
 #include <limits>
@@ -38,6 +43,8 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
+#include <vector>
 
 namespace Engine {
 
@@ -154,6 +161,92 @@ namespace Engine {
 					.WithContext("while starting the play session"));
 		}
 
+		// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 30): one command of the project's Ui settings and the
+		// controls its list names, keys and gamepad buttons only, parsed when the session starts.
+		struct UiCommandControls
+		{
+			UiNavigation Command = UiNavigation::None; // Next stands for Previous too: Next with a Shift key down
+			std::vector<InputBinding::Control> Controls{};
+		};
+
+		// Submit, Cancel, Up, Down, Left, Right and Next, in UiSettings' order.
+		constexpr size_t UiCommandCount = 7;
+		using UiCommandBindings = std::array<UiCommandControls, UiCommandCount>;
+
+		// Parses every list of the Ui settings (InputBinding::Parse), whether Navigation is on or not: a name that does not
+		// parse, or names a mouse control or a gamepad axis, is a Validation issue at /Ui/<list>/<index>, as an action's
+		// binding is at /Input/Actions.
+		static Result<UiCommandBindings> ResolveUiCommands(const UiSettings& ui)
+		{
+			const std::array<std::pair<std::string_view, const std::vector<std::string>*>, UiCommandCount> lists = {
+				std::pair{ std::string_view("Submit"), &ui.Submit }, std::pair{ std::string_view("Cancel"), &ui.Cancel },
+				std::pair{ std::string_view("Up"), &ui.Up }, std::pair{ std::string_view("Down"), &ui.Down },
+				std::pair{ std::string_view("Left"), &ui.Left }, std::pair{ std::string_view("Right"), &ui.Right },
+				std::pair{ std::string_view("Next"), &ui.Next }
+			};
+			constexpr std::array<UiNavigation, UiCommandCount> Commands = { UiNavigation::Submit, UiNavigation::Cancel, UiNavigation::Up,
+				UiNavigation::Down, UiNavigation::Left, UiNavigation::Right, UiNavigation::Next };
+			constexpr std::string_view KeysAndButtons = "UI navigation takes keys and gamepad buttons, such as 'Key.Enter' or 'Gamepad.South'";
+			UiCommandBindings bindings{};
+			std::vector<ErrorIssue> issues;
+			for (size_t list = 0; list < lists.size(); ++list)
+			{
+				const auto& [name, controls] = lists[list];
+				bindings[list].Command = Commands[list];
+				for (size_t index = 0; index < controls->size(); ++index)
+				{
+					const std::string& control = (*controls)[index];
+					std::string pointer = std::format("/Ui/{}/{}", name, index);
+					Result<InputBinding> binding = InputBinding::Parse(control);
+					if (!binding)
+					{
+						issues.push_back({ .JsonPointer = std::move(pointer),
+							.Message = binding.error().GetMessageText(),
+							.Hint = binding.error().GetHint(),
+							.Suggestions = {} });
+						continue;
+					}
+					if (std::holds_alternative<MouseButton>(binding->Target) || std::holds_alternative<GamepadAxis>(binding->Target))
+					{
+						issues.push_back({ .JsonPointer = std::move(pointer),
+							.Message = std::format("'{}' names a {}: Ui.{} lists keys and gamepad buttons only", control,
+								std::holds_alternative<MouseButton>(binding->Target) ? "mouse button" : "gamepad axis", name),
+							.Hint = std::string(KeysAndButtons),
+							.Suggestions = {} });
+						continue;
+					}
+					bindings[list].Controls.push_back(binding->Target);
+				}
+			}
+			if (issues.empty())
+				return bindings;
+			Error error(ErrorCode::Validation,
+				std::format("{} problem{} in the Ui settings' navigation bindings", issues.size(), issues.size() == 1 ? "" : "s"));
+			ErrorLocation location;
+			location.JsonPointer = "/Ui";
+			return std::unexpected(std::move(error)
+					.WithHint("fix the bindings in the project's Ui settings (project.setSettings), then play again")
+					.WithLocation(std::move(location))
+					.WithIssues(std::move(issues))
+					.WithContext("while starting the play session"));
+		}
+
+		// Whether `control` (a key, or a gamepad button on any connected gamepad) was pressed in the step view.
+		static bool WasUiControlPressed(const InputState& devices, const InputBinding::Control& control)
+		{
+			if (const Key* key = std::get_if<Key>(&control))
+				return devices.WasKeyPressed(InputPhase::Step, *key);
+			if (const GamepadButton* button = std::get_if<GamepadButton>(&control))
+			{
+				for (uint32_t gamepad = 0; gamepad < MaxGamepads; ++gamepad)
+				{
+					if (devices.IsGamepadConnected(InputPhase::Step, gamepad) && devices.WasGamepadButtonPressed(InputPhase::Step, gamepad, *button))
+						return true;
+				}
+			}
+			return false;
+		}
+
 	}
 
 	struct PlaySession::State final : IScriptHost
@@ -221,8 +314,10 @@ namespace Engine {
 		bool AudioHeld = false;
 		// M19: the native module's runtime (NativeWorld.h), in Play with PlaySessionSpecification::Native; null otherwise.
 		Scope<NativeWorld> Native{};
-		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 3): the UiLayout and FrameUiLayout phases' layouts.
+		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 3): the UiLayout and FrameUiLayout phases' layouts, and
+		// (C22.2, decisions 24 and 30) the UiInput phase's interaction state, with the Ui settings' commands it reads.
 		UiSystem Ui{};
+		Utils::UiCommandBindings UiCommands{};
 		Scope<ScriptApiRegistry> OwnedApi{};
 		ScriptApiRegistry* Api = nullptr;
 		Ref<const ScriptFieldSchemaSource> Schemas{};
@@ -305,6 +400,8 @@ namespace Engine {
 			if (Host != nullptr)
 				Host->OnScriptPhase(script, callback);
 		}
+		// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 28): the session's UI, which the Ui script module reads.
+		[[nodiscard]] UiSystem* GetUi() override { return &Ui; }
 		// FatalStop with the session error that caused it, already published (ReportSessionError).
 		void StopAfterSessionError()
 		{
@@ -353,6 +450,18 @@ namespace Engine {
 		// M22 (Docs/Decisions/0033-m22-contract.md decision 3): the scene resolution the UI phases lay the scene out at, the
 		// session's view size (GetViewSize) in W22.1, as the game view's extraction uses with the default output settings.
 		[[nodiscard]] glm::uvec2 GetUiSceneResolution() const { return { ViewWidth, ViewHeight }; }
+		// M22 (C22.2, decision 24): how the UiInput phase maps the pointer's view coordinates to the scene pixels the layout is
+		// in: the output mapping of the default RenderOutputSettings (the identity at GetUiSceneResolution) in W22.2. With
+		// GetUiSceneResolution, the one place the later lander of M21 and M22 makes PixelPerfectCamera's.
+		[[nodiscard]] RenderOutputMapping GetUiOutputMapping() const
+		{
+			return ComputeRenderOutputMapping(ViewWidth, ViewHeight, RenderOutputSettings{});
+		}
+		// M22 (C22.2, decisions 24 and 30): the UiInput phase's input from the tick's step view: the mouse mapped to scene
+		// pixels, Mouse.Left's state and edges and the scroll, then, while Ui.Navigation is on, the commands whose controls
+		// were pressed (Next with a Shift key down is Previous) and, while Ui.StickNavigation is on too, the left stick of the
+		// connected gamepad whose stick reaches farthest (the first such gamepad on a tie).
+		[[nodiscard]] UiInputFrame MakeUiInputFrame() const;
 		// M12: the AudioUpdate phase's work (see "Audio" in PlaySession.h).
 		void UpdateAudio(double deltaSeconds);
 		// M12: applies the run state to the audio: the voices are paused while held, or while the session is paused and not in
@@ -667,6 +776,11 @@ namespace Engine {
 		DebugDraw.Clear();
 		LastExtraction = {};
 		ExtractionErrorLogged = false;
+		// M22 (C22.2, decision 24): the replaced scene's focus, hover, press and queued UI events go with it, before the new
+		// scene's scripts start. Decision 3 (the review of W22.2): the new scene is laid out before its startup callbacks, so
+		// the Ui module never reads the replaced scene's layout from them, and again once they ran (below).
+		Ui.ResetInteraction();
+		Ui.LayoutStep(*RuntimeScene, GetUiSceneResolution());
 		UpdateTransforms();
 		RecordReferenceTransforms();
 		if (Audio != nullptr)
@@ -687,7 +801,7 @@ namespace Engine {
 			StartScripts(transition);
 		if (SceneAudio != nullptr)
 			SceneAudio->Start();
-		// M22 (decision 3): the replaced scene's layout is never the current one, even before the next step.
+		// M22 (decision 3): the new scene as its startup callbacks left it is the current layout before the next step.
 		Ui.LayoutStep(*RuntimeScene, GetUiSceneResolution());
 	}
 
@@ -805,7 +919,9 @@ namespace Engine {
 			.Width = ViewWidth,
 			.Height = ViewHeight,
 			.Alpha = alpha,
-			.Quality = { .ShadowMapSize = Project.Rendering.ShadowMapSize, .SsaoHalfResolution = Project.Rendering.SsaoHalfResolution } };
+			.Quality = { .ShadowMapSize = Project.Rendering.ShadowMapSize, .SsaoHalfResolution = Project.Rendering.SsaoHalfResolution },
+			// M22 (C22.2, decision 25): the widgets' tints follow the session's interaction state.
+			.UiInteraction = &Ui.GetInteraction() };
 		Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(*RuntimeScene, request);
 		if (snapshot)
 		{
@@ -819,6 +935,50 @@ namespace Engine {
 			ENGINE_CORE_WARN("The game view of the play session could not be extracted (it keeps showing its previous view): {}", snapshot.error());
 			ExtractionErrorLogged = true;
 		}
+	}
+
+	UiInputFrame PlaySession::State::MakeUiInputFrame() const
+	{
+		const InputState& devices = Input.GetDevices();
+		constexpr InputPhase Step = InputPhase::Step;
+		UiInputFrame frame{ .Pointer = MapViewPointToScenePoint(GetUiOutputMapping(), devices.GetMousePosition(Step)),
+			.PointerDown = devices.IsMouseButtonDown(Step, MouseButton::Left),
+			.PointerPressed = devices.WasMouseButtonPressed(Step, MouseButton::Left),
+			.PointerReleased = devices.WasMouseButtonReleased(Step, MouseButton::Left),
+			.Scroll = devices.GetScrollDelta(Step) };
+		if (!Project.Ui.Navigation)
+			return frame;
+
+		const bool shift = devices.IsKeyDown(Step, Key::LeftShift) || devices.IsKeyDown(Step, Key::RightShift);
+		for (const Utils::UiCommandControls& command : UiCommands)
+		{
+			const bool pressed = std::ranges::any_of(command.Controls, [&devices](const InputBinding::Control& control)
+			{
+				return Utils::WasUiControlPressed(devices, control);
+			});
+			if (!pressed)
+				continue;
+			frame.Navigation |= command.Command == UiNavigation::Next && shift ? UiNavigation::Previous : command.Command;
+		}
+		if (!Project.Ui.StickNavigation)
+			return frame;
+
+		// The stick that reaches farthest, compared by squared length (correctly rounded products and sums, no square root).
+		float farthest = 0.0f;
+		for (uint32_t gamepad = 0; gamepad < MaxGamepads; ++gamepad)
+		{
+			if (!devices.IsGamepadConnected(Step, gamepad))
+				continue;
+			const glm::vec2 stick(devices.GetGamepadAxis(Step, gamepad, GamepadAxis::LeftX),
+				devices.GetGamepadAxis(Step, gamepad, GamepadAxis::LeftY));
+			const float reach = stick.x * stick.x + stick.y * stick.y;
+			if (reach > farthest)
+			{
+				farthest = reach;
+				frame.Stick = stick;
+			}
+		}
+		return frame;
 	}
 
 	void PlaySession::State::UpdateAudio(double deltaSeconds)
@@ -979,6 +1139,8 @@ namespace Engine {
 		Result<PlayInput> input = PlayInput::Create(specification.Project.Input);
 		if (!input)
 			return std::unexpected(std::move(input).error().WithContext("while starting the play session"));
+		// M22 (C22.2, decision 30): the Ui settings' bindings, keys and gamepad buttons only.
+		ENGINE_TRY_ASSIGN(Utils::UiCommandBindings uiCommands, Utils::ResolveUiCommands(specification.Project.Ui));
 
 		Scope<PlaySession> session = CreateScope<PlaySession>(ConstructionKey());
 		State& state = *session->m_State;
@@ -993,6 +1155,7 @@ namespace Engine {
 		state.IdGenerator = UUIDGenerator::CreateDeterministic(specification.Seed);
 		state.Stream.Seed(specification.Seed);
 		state.Input = std::move(*input);
+		state.UiCommands = std::move(uiCommands);
 		state.ViewWidth = specification.ViewWidth;
 		state.ViewHeight = specification.ViewHeight;
 		state.Api = specification.ScriptApi;
@@ -1063,11 +1226,14 @@ namespace Engine {
 			state.AudioHeld = true;
 			state.ApplyAudioRunState();
 		}
+		// M22 (decision 3, the review of W22.2): the scene is laid out before its startup callbacks, so the Ui module reads its
+		// layout from them, and again once they ran (below).
+		state.Ui.LayoutStep(*state.RuntimeScene, state.GetUiSceneResolution());
 		// The session's own scene: a failure is reported as a Scene.Load's, as before Scene.Reload existed.
 		state.StartScripts("Scene.Load");
 		if (state.SceneAudio != nullptr)
 			state.SceneAudio->Start();
-		// M22 (decision 3): the current layout describes the scene from the start, before its first step.
+		// M22 (decision 3): the current layout describes the scene as its startup callbacks left it, before its first step.
 		state.Ui.LayoutStep(*state.RuntimeScene, state.GetUiSceneResolution());
 	}
 
@@ -1110,16 +1276,30 @@ namespace Engine {
 			if (!captured)
 				state.Recorder->Invalidate(captured.error().ToString());
 		}
+		// M22 (C22.2, decision 24): the tick's latched input against the current UI layout, in Play and Simulate, with or
+		// without a canvas (without one it reads no input and keeps the interaction state empty).
+		state.EnterPhase(*this, PlaySessionPhase::UiInput, tick);
+		state.Ui.ProcessInput(*state.RuntimeScene, state.MakeUiInputFrame());
 		if (play)
 		{
 			state.EnterPhase(*this, PlaySessionPhase::StartFlush, tick);
 			state.Scripts->StartPending();
+			// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 27): the UI events UiInput (and Ui.SetFocus since the
+			// last UiEvents phase) queued, after OnStart and before OnFixedUpdate, bubbling from their elements.
+			state.EnterPhase(*this, PlaySessionPhase::UiEvents, tick);
+			const std::vector<UiEvent> uiEvents = state.Ui.TakeEvents();
+			state.Scripts->DispatchUiEvents(uiEvents);
 			state.EnterPhase(*this, PlaySessionPhase::FixedUpdate, tick);
 			state.Scripts->FixedUpdate();
 			state.EnterPhase(*this, PlaySessionPhase::Tasks, tick);
 			state.Scripts->ResumeTasks();
 			if (state.TestHook != nullptr)
 				state.TestHook->AfterTasks(*this, step);
+		}
+		else
+		{
+			// Simulate runs no UiEvents phase (decision 27): the events UiInput raised are dropped, since no script receives them.
+			static_cast<void>(state.Ui.TakeEvents());
 		}
 		// M19 (decision 28): the native module's systems, whose Transform writes the transform update below propagates
 		// before physics. A fault in native code stops the session at once: no later phase or tick runs (NativeWorld.h).
@@ -1377,6 +1557,9 @@ namespace Engine {
 		// M19 (decision 28): the native block, the module's resources; nothing without a module.
 		if (state.Native != nullptr)
 			state.Native->AppendStateHash(hasher);
+		// M22 (C22.2, decision 29; ADR 0028's phase-2 ledger: after M21's physics2d block): the ui block, the interaction
+		// state and the queued UI events; nothing while both are empty, as in every scene without a canvas.
+		state.Ui.AppendStateHash(hasher);
 		return hasher.Digest();
 	}
 
@@ -1534,6 +1717,8 @@ namespace Engine {
 		m_State->RefreshViewState();
 		RenderExtractionRequest view = request;
 		view.Alpha = GetViewAlpha();
+		// M22 (C22.2, decision 25): the widgets' tints follow the session's interaction state, as in its game view.
+		view.UiInteraction = &m_State->Ui.GetInteraction();
 		ENGINE_TRY_ASSIGN(auto snapshot, ExtractRenderSnapshot(*m_State->RuntimeScene, view));
 		snapshot.DebugDraw.Append(m_State->DebugDraw);
 		return snapshot;

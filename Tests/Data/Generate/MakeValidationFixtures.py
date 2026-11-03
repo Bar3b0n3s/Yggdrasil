@@ -61,8 +61,8 @@ COMPONENT_ORDER = [
     "ID", "Name", "Tags", "Relationship", "Transform", "Prefab", "PrefabLink", "MeshRenderer", "Camera",
     "DirectionalLight", "PointLight", "SpotLight", "Environment", "PostProcess", "Text", "RigidBody", "BoxCollider",
     "SphereCollider", "CapsuleCollider", "MeshCollider", "CharacterController", "AudioSource", "AudioListener",
-    "Script", "UiCanvas", "UiRect", "UiImage", "UiText", "UiLayout", "UiLayoutElement", "ValidatorTarget",
-    "ValidatorFollower",
+    "Script", "UiCanvas", "UiRect", "UiImage", "UiText", "UiLayout", "UiLayoutElement", "UiButton", "UiToggle",
+    "UiSlider", "UiScrollView", "ValidatorTarget", "ValidatorFollower",
 ]
 
 # The registered version of each component above 1 ("ComponentVersions"); every other component is at version 1.
@@ -201,6 +201,10 @@ def default_project(name: str) -> dict[str, Any]:
         "Testing": {"Suites": [], "Replays": [], "CaseTimeoutTicks": 600, "SuiteTickLimit": 36000,
                     "CoverageGates": False},
         "Localization": {"Locale": ""},
+        "Ui": {"Navigation": True, "Submit": ["Key.Enter", "Key.Space", "Gamepad.South"],
+               "Cancel": ["Key.Escape", "Gamepad.East"], "Up": ["Key.Up", "Gamepad.DPadUp"],
+               "Down": ["Key.Down", "Gamepad.DPadDown"], "Left": ["Key.Left", "Gamepad.DPadLeft"],
+               "Right": ["Key.Right", "Gamepad.DPadRight"], "Next": ["Key.Tab"], "StickNavigation": True},
     }
 
 
@@ -611,6 +615,16 @@ return Script.Define("Jumper", Jumper)
     item.entities.append(entity("e000000000000004", "Button", {
         "Transform": transform(), "UiRect": ui_rect(), "UiImage": {"Sheet": "3a7e000000000009", "Frame": 3}},
         parent="e000000000000003"))
+
+    # M22 (decision 35). A toggle whose Graphic is its sibling, an element of the same canvas that is not below it: the
+    # toggle ignores it, so the check mark always shows.
+    item = fixture("UI_WIDGET_PART_INVALID")
+    item.entities.append(entity("e000000000000003", "Hud", {"Transform": transform(), "UiCanvas": {}}))
+    item.entities.append(entity("e000000000000004", "Sound", {
+        "Transform": transform(), "UiRect": ui_rect(), "UiToggle": {"Graphic": "e000000000000005"}},
+        parent="e000000000000003"))
+    item.entities.append(entity("e000000000000005", "Check", {"Transform": transform(), "UiRect": ui_rect()},
+                                parent="e000000000000003"))
 
     return fixtures
 

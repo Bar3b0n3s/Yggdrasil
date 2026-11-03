@@ -18,12 +18,12 @@
 // The current layout (GetLayout) is the later of the two: the frame's when a frame phase ran since the last step's layout,
 // the step's own when none did. W22.2's UiInput hit-tests it, and ui.tree reads it for the play scene, so a hit test depends
 // only on the state, never on how many frames ran between two ticks. The session also runs LayoutStep, outside the phase
-// list, at the end of PlaySession::Activate and right after a Scene.Load or Scene.Reload replaces its scene (each after the
-// scene's startup callbacks), so the current layout always describes the session's current scene: never a replaced scene's,
-// and empty only before Activate. Both layouts are at the session's scene resolution
-// (the view's size in W22.1; the later lander of M21 and M22 makes it the scene resolution M21's PixelPerfectCamera sets).
-// Layouts are derived data: they never reach the state hash (W22.2's ui hash block holds the interaction state and the
-// event queue only).
+// list, in PlaySession::Activate and right after a Scene.Load or Scene.Reload replaces its scene, each time both before the
+// scene's startup callbacks (OnCreate, OnStart) and after them, so the current layout always describes the session's current
+// scene, in those callbacks too: never a replaced scene's, and empty only before Activate. Both layouts are at the session's
+// scene resolution (the view's size in W22.1; the later lander of M21 and M22 makes it the scene resolution M21's
+// PixelPerfectCamera sets). Layouts are derived data: they never reach the state hash (W22.2's ui hash block holds the
+// interaction state and the event queue only).
 // Owned by the PlaySession (GetUi); runs in Play and Simulate alike. Main thread; not copyable.
 //
 // Interaction (C22.2, R-UI-INPUT, R-UI-EVENTS and R-UI-DET; decisions 23, 24, 27 and 29). The UiInput phase (after
@@ -32,9 +32,9 @@
 // view's ScrollPosition) to the scene through Scene/UiWidgets.h, and queues the UI events it raises. The UiEvents phase
 // (after StartFlush) takes the queue (TakeEvents) and the script engine delivers it, bubbling (ScriptEngine::DispatchUiEvents);
 // a Simulate session, which runs no UiEvents phase, takes and drops the queue right after UiInput. SetFocus (the Ui script
-// module's Ui.SetFocus) changes focus at once and queues its events behind those already queued. The state and the queue
-// are session state outside the scene: AppendStateHash is the state hash's ui block, and a scene replacement resets them
-// (ResetInteraction) with the layouts.
+// module's Ui.SetFocus) changes focus at once, checked and revealed against a layout of the scene as it is at the call, and
+// queues its events behind those already queued. The state and the queue are session state outside the scene:
+// AppendStateHash is the state hash's ui block, and a scene replacement resets them (ResetInteraction) with the layouts.
 
 namespace Engine {
 
@@ -92,7 +92,9 @@ namespace Engine {
 		//   8. Navigation, in the order Next, Previous, Up, Down, Left, Right: a direction is first offered to the focused
 		//      element when it is a Slider (StepUiSlider) or a ScrollView (StepUiScrollView), which may consume it; otherwise
 		//      FindUiNavigationTarget (a direction) or FindNextUiFocus (Next, Previous) picks the element that takes focus
-		//      (Focus false at the old, true at the new), and the scroll views holding it reveal it (RevealInUiScrollViews).
+		//      (Focus false at the old, true at the new), and the scroll views holding it reveal it (RevealInUiScrollViews)
+		//      against a layout of `scene` as it is then (ComputeUiLayout at GetLayout()'s scene size), so a scroll position this
+		//      step already changed (the wheel, a drag, a step or an earlier reveal) is the one the reveal moves from.
 		//      With nothing focused, both pick the layout's default focus (a canvas's DefaultFocus, Scene/UiInteraction.h)
 		//      or nothing, so a command does nothing until something has focus or a canvas names its DefaultFocus.
 		//   9. Submit: the focused element is activated (ActivateUiWidget); nothing when none is focused.
@@ -103,11 +105,21 @@ namespace Engine {
 		// The interaction state (decision 24), the default before the first UiInput and after ResetInteraction.
 		[[nodiscard]] const UiInteractionState& GetInteraction() const { return m_Interaction; }
 
-		// Ui.SetFocus (decision 28): focuses `element`, an element focusable in GetLayout() (IsUiFocusable), or clears focus
-		// with a null id; Focus (false) at the old focus and (true) at the new are queued (nothing when it does not change),
-		// and the scroll views holding the new focus reveal it. Errors: InvalidArgument for an id that is not focusable,
-		// naming why (not laid out, hidden, no widget, not interactable or not focusable); nothing changes then.
+		// Ui.SetFocus (decision 28, amended by the review of W22.2): focuses `element`, an element focusable (IsUiFocusable)
+		// in a layout of `scene` as it is at the call (ComputeUiLayout at GetLayout()'s scene size, never stored), or clears
+		// focus with a null id; Focus (false) at the old focus and (true) at the new are queued (nothing when it does not
+		// change), and the scroll views holding the new focus reveal it against that layout. So a menu a callback has just
+		// enabled, created or moved takes focus in that callback, and a scroll position written since the last layout is the
+		// one the reveal moves from; layout is a pure function of the scene, so this stays deterministic. Before the first
+		// layout there is no scene size, so nothing is laid out (a session lays its scene out before any script runs). Errors:
+		// InvalidArgument for an id that is not focusable, naming why (not laid out, hidden, no widget, not interactable, not
+		// focusable or no area); nothing changes then.
 		[[nodiscard]] Status SetFocus(Scene& scene, UUID element);
+
+		// SetFocus's check, changing nothing: whether SetFocus(scene, element) would change focus (false for the current
+		// focus), or the InvalidArgument it returns for an element it refuses. The Ui module asks first, so a call that
+		// changes nothing reports no mutation (decision 28).
+		[[nodiscard]] Result<bool> CheckFocus(const Scene& scene, UUID element) const;
 
 		// The UiEvents phase: the queued events, in the order queued, leaving the queue empty.
 		[[nodiscard]] std::vector<UiEvent> TakeEvents();

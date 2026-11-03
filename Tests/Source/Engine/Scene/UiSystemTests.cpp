@@ -19,14 +19,14 @@
 #include <algorithm>
 #include <bit>
 #include <cstdint>
+#include <format>
 #include <string_view>
 #include <vector>
 
 // The play session's UI (M22, C22.1; Docs/Decisions/0033-m22-contract.md decision 3): the step's and the frame's layouts and
 // which one is current (ADR 0028's phase-2 ledger: UiInput hit-tests the later of the two). C22.2 (decisions 23, 24, 28 and
-// 29): the UiInput phase's state machine, Ui.SetFocus and the ui state-hash block, skipped by the contract until stream A
-// lands them (the cases that activate, step or scroll widgets need streams B and C too: the last of them, or the wave's
-// integration, un-skips them).
+// 29): the UiInput phase's state machine, Ui.SetFocus and the ui state-hash block (stream A); the cases that activate, step
+// or scroll widgets also run streams B's and C's widget behaviours.
 
 namespace Engine {
 
@@ -62,6 +62,37 @@ namespace Engine {
 		{
 			ui.ProcessInput(scene, UiInputFrame{ .Pointer = glm::vec2(-1000.0f), .Navigation = navigation, .Stick = stick });
 			return ui.TakeEvents();
+		}
+
+		// A vertical list on its own canvas: the scroll view "List" at (0, 0), 100 x 100 scene pixels, whose Content holds ten
+		// focusable buttons "Item0" to "Item9", each 100 x 40 at y = 40 i in the content (400 tall, so it scrolls up to 300),
+		// with a ScrollStep of 40. Returns the list; the items are its content's children in order.
+		Entity AddUiSystemList(Scene& scene)
+		{
+			Entity canvas = scene.CreateEntity("Canvas");
+			canvas.AddComponent<UiCanvasComponent>(UiCanvasComponent{});
+			Entity list = AddUiSystemElement(scene, "List", canvas, glm::vec2(0.0f), glm::vec2(100.0f));
+			Entity content = scene.CreateEntity("Content", list);
+			content.AddComponent<UiRectComponent>(MakeUiSystemRect(glm::vec2(0.0f), glm::vec2(100.0f, 400.0f)));
+			list.AddComponent<UiScrollViewComponent>(UiScrollViewComponent{ .Content = content.GetUUID(), .ScrollStep = 40.0f });
+			for (int index = 0; index < 10; ++index)
+			{
+				Entity item = AddUiSystemElement(scene, std::format("Item{}", index), content, glm::vec2(0.0f, 40.0f * static_cast<float>(index)),
+					glm::vec2(100.0f, 40.0f));
+				item.AddComponent<UiButtonComponent>(UiButtonComponent{});
+			}
+			return list;
+		}
+
+		// The list's item `index` (AddUiSystemList).
+		Entity FindUiSystemItem(Scene& scene, int index)
+		{
+			return scene.FindEntityByPath(std::format("/Canvas/List/Content/Item{}", index));
+		}
+
+		glm::vec2 GetUiSystemScroll(Entity list)
+		{
+			return list.GetComponent<UiScrollViewComponent>().ScrollPosition;
 		}
 
 	}
@@ -104,7 +135,7 @@ namespace Engine {
 
 		// Decision 24: hover follows the pointer, a press focuses and presses the widget under it, and a release over the
 		// pressed button clicks it; a release elsewhere clicks nothing.
-		TEST_CASE("UiSystem: hover follows the pointer, and a press and release over a button clicks it" * doctest::skip(true))
+		TEST_CASE("UiSystem: hover follows the pointer, and a press and release over a button clicks it")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -143,7 +174,7 @@ namespace Engine {
 		// canvas's DefaultFocus, the button, and Submit clicks it; Down reaches the toggle, which Submit flips; the slider
 		// steps with the arrows and the stick's edges; the focusable scroll view scrolls with its axis's directions; Cancel
 		// goes to the focused element.
-		TEST_CASE("UiSystem: every widget works by keyboard and gamepad" * doctest::skip(true))
+		TEST_CASE("UiSystem: every widget works by keyboard and gamepad")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -197,7 +228,7 @@ namespace Engine {
 
 		// Decision 24 step 1: state for an element that can no longer take it is cleared, and an element the scene still holds
 		// hears that it lost focus.
-		TEST_CASE("UiSystem: interaction state for an element that can no longer take it is cleared" * doctest::skip(true))
+		TEST_CASE("UiSystem: interaction state for an element that can no longer take it is cleared")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -221,7 +252,7 @@ namespace Engine {
 		// until a canvas names its DefaultFocus, which the first of them then focuses, whatever its direction; Submit acts
 		// only on the focused widget; and a pointer press focuses only a focusable widget, so a HUD button that is not
 		// Focusable is clicked without taking keyboard focus, and a game whose play uses the arrows and Space keeps them.
-		TEST_CASE("UiSystem: with nothing focused, navigation focuses only a canvas's DefaultFocus, and a press focuses only a focusable widget" * doctest::skip(true))
+		TEST_CASE("UiSystem: with nothing focused, navigation focuses only a canvas's DefaultFocus, and a press focuses only a focusable widget")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -259,11 +290,56 @@ namespace Engine {
 			CHECK(ui.GetInteraction().Focused == menu.GetUUID());
 		}
 
+		// Decision 24's two rules stream A chose (accepted at W22.2's integration): the step view's edges carry no order, so a
+		// press and a release of one step that the pointer no longer holds are a tap, which clicks, while a release edge never
+		// releases a press of its own step that the pointer still holds; and an element the scene no longer holds, or holds
+		// pending destruction, hears no Focus or Hover (false) when the state drops it.
+		TEST_CASE("UiSystem: a tap within a step clicks, a held press outlives its step's release edge, and a destroyed element hears nothing")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Entity canvas = scene.CreateEntity("Canvas");
+			canvas.AddComponent<UiCanvasComponent>(UiCanvasComponent{});
+			Entity play = AddUiSystemElement(scene, "Play", canvas, glm::vec2(0.0f), glm::vec2(100.0f, 20.0f));
+			play.AddComponent<UiButtonComponent>(UiButtonComponent{});
+			Entity quit = AddUiSystemElement(scene, "Quit", canvas, glm::vec2(0.0f, 30.0f), glm::vec2(100.0f, 20.0f));
+			quit.AddComponent<UiButtonComponent>(UiButtonComponent{});
+			UiSystem ui;
+			ui.LayoutStep(scene, glm::uvec2(200, 100));
+
+			// Down and up within one step, the pointer up at its end: the hover, the focus and the click.
+			CHECK(ProcessPointer(ui, scene, glm::vec2(10.0f), false, true, true)
+				== std::vector<UiEvent>{ MakeUiEvent(UiEventKind::Hover, play, true), MakeUiEvent(UiEventKind::Focus, play, true),
+					MakeUiEvent(UiEventKind::Click, play) });
+			CHECK_FALSE(ui.GetInteraction().Pressed.IsValid());
+
+			// Held, then up and down again within one step, the pointer down at its end: the step's press stands, nothing is
+			// clicked until the release.
+			CHECK(ProcessPointer(ui, scene, glm::vec2(10.0f), true, true, false).empty());
+			CHECK(ProcessPointer(ui, scene, glm::vec2(10.0f), true, true, true).empty());
+			CHECK(ui.GetInteraction().Pressed == play.GetUUID());
+			CHECK(ProcessPointer(ui, scene, glm::vec2(10.0f), false, false, true) == std::vector<UiEvent>{ MakeUiEvent(UiEventKind::Click, play) });
+
+			// Quit focused and hovered, then destroyed (pending until the flush): it leaves the layout, and the state drops it
+			// without telling it.
+			REQUIRE(ui.SetFocus(scene, quit.GetUUID()).has_value());
+			static_cast<void>(ui.TakeEvents());
+			CHECK(ProcessPointer(ui, scene, glm::vec2(10.0f, 40.0f), false, false, false)
+				== std::vector<UiEvent>{ MakeUiEvent(UiEventKind::Hover, play, false), MakeUiEvent(UiEventKind::Hover, quit, true) });
+			REQUIRE(ui.GetInteraction().Focused == quit.GetUUID());
+			const UUID quitId = quit.GetUUID();
+			scene.DestroyEntity(quit);
+			REQUIRE(scene.FindReadableEntityByID(quitId).IsReadable());
+			ui.LayoutStep(scene, glm::uvec2(200, 100));
+			CHECK(ProcessPointer(ui, scene, glm::vec2(10.0f, 40.0f), false, false, false).empty());
+			CHECK(ui.GetInteraction().IsEmpty());
+		}
+
 		// Decision 24 steps 3 to 6: a press on a slider sets its value at the pointer and drags it; a press on a scroll view's
 		// content drags the content with the pointer; the wheel scrolls the innermost scroll view under the pointer (y
 		// up-positive: a step down scrolls down by ScrollStep). Neither widget is focusable here, so once released and left
 		// the state is empty again: DragOrigin and DragStart return to zero with Dragged.
-		TEST_CASE("UiSystem: the pointer drags a slider and a scroll view, and the wheel scrolls the scroll view under it" * doctest::skip(true))
+		TEST_CASE("UiSystem: the pointer drags a slider and a scroll view, and the wheel scrolls the scroll view under it")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -324,10 +400,39 @@ namespace Engine {
 			CHECK(ui.GetInteraction().IsEmpty());
 		}
 
+		// Decisions 21 and 26 (W22.2's integration: the drag start reads the scroll functions' rule): a Content that is not an
+		// element below its scroll view leaves nothing to scroll, so a press on the scroll view starts its drag at the
+		// position as read, zero, and neither the drag nor the wheel moves it or raises Scroll, whatever ScrollPosition holds.
+		TEST_CASE("UiSystem: a scroll view whose Content is not below it starts its drag at zero and scrolls nothing")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity canvas = scene.CreateEntity("Canvas");
+			canvas.AddComponent<UiCanvasComponent>(UiCanvasComponent{});
+			Entity scroll = AddUiSystemElement(scene, "Scroll", canvas, glm::vec2(0.0f), glm::vec2(100.0f, 40.0f));
+			// A sibling taller than the view, so it would overflow by 160 if it were the content.
+			Entity sibling = AddUiSystemElement(scene, "Sibling", canvas, glm::vec2(0.0f, 100.0f), glm::vec2(100.0f, 200.0f));
+			scroll.AddComponent<UiScrollViewComponent>(
+				UiScrollViewComponent{ .Content = sibling.GetUUID(), .ScrollPosition = glm::vec2(0.0f, 30.0f) });
+			UiSystem ui;
+			ui.LayoutStep(scene, glm::uvec2(200, 400));
+
+			CHECK(ProcessPointer(ui, scene, glm::vec2(50.0f, 20.0f), true, true, false)
+				== std::vector<UiEvent>{ MakeUiEvent(UiEventKind::Hover, scroll, true) });
+			CHECK(ui.GetInteraction().Dragged == scroll.GetUUID());
+			CHECK(ui.GetInteraction().DragOrigin == glm::vec2(50.0f, 20.0f));
+			CHECK(ui.GetInteraction().DragStart == glm::vec2(0.0f));
+			CHECK(ProcessPointer(ui, scene, glm::vec2(50.0f, 0.0f), true, false, false).empty());
+			CHECK(ProcessPointer(ui, scene, glm::vec2(50.0f, 0.0f), false, false, true).empty());
+			ui.ProcessInput(scene, UiInputFrame{ .Pointer = glm::vec2(50.0f, 20.0f), .Scroll = glm::vec2(0.0f, -1.0f) });
+			CHECK(ui.TakeEvents().empty());
+			CHECK(scroll.GetComponent<UiScrollViewComponent>().ScrollPosition == glm::vec2(0.0f, 30.0f));
+		}
+
 		// Decision 24 step 1 (the C22.2 review's major): without a canvas UiInput reads no input, so the state and the ui
 		// block stay empty whatever the pointer, the wheel, the stick and the bindings do; a scene that loses its last canvas
 		// drops its state, telling the widget it still holds that it lost focus and hover.
-		TEST_CASE("UiSystem: without a canvas the interaction state stays empty whatever the input" * doctest::skip(true))
+		TEST_CASE("UiSystem: without a canvas the interaction state stays empty whatever the input")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -373,7 +478,7 @@ namespace Engine {
 		}
 
 		// Decision 28: Ui.SetFocus takes a focusable element or null, and refuses any other element without a change.
-		TEST_CASE("UiSystem: SetFocus focuses a focusable element and refuses any other" * doctest::skip(true))
+		TEST_CASE("UiSystem: SetFocus focuses a focusable element and refuses any other")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -384,29 +489,153 @@ namespace Engine {
 			Entity disabled = AddUiSystemElement(scene, "Disabled", canvas, glm::vec2(0.0f, 30.0f), glm::vec2(100.0f, 20.0f));
 			disabled.AddComponent<UiButtonComponent>(UiButtonComponent{ .Interactable = false });
 			Entity label = AddUiSystemElement(scene, "Label", canvas, glm::vec2(0.0f, 60.0f), glm::vec2(100.0f, 20.0f));
+			// A button without an area, and one hidden in an off toggle's Graphic (decision 26).
+			Entity flat = AddUiSystemElement(scene, "Flat", canvas, glm::vec2(120.0f, 0.0f), glm::vec2(40.0f, 0.0f));
+			flat.AddComponent<UiButtonComponent>(UiButtonComponent{});
+			Entity toggle = AddUiSystemElement(scene, "Toggle", canvas, glm::vec2(120.0f, 30.0f), glm::vec2(40.0f, 20.0f));
+			Entity hidden = AddUiSystemElement(scene, "Hidden", toggle, glm::vec2(0.0f), glm::vec2(20.0f));
+			hidden.AddComponent<UiButtonComponent>(UiButtonComponent{});
+			toggle.AddComponent<UiToggleComponent>(UiToggleComponent{ .Graphic = hidden.GetUUID() });
 			UiSystem ui;
+			// Before the first layout there is no scene size, so nothing is laid out and nothing takes focus.
+			const Status unlaid = ui.SetFocus(scene, play.GetUUID());
+			REQUIRE_FALSE(unlaid.has_value());
+			CHECK(unlaid.error().GetCode() == ErrorCode::InvalidArgument);
+			CHECK_FALSE(ui.CheckFocus(scene, play.GetUUID()).has_value());
+			CHECK(ui.GetInteraction().IsEmpty());
 			ui.LayoutStep(scene, glm::uvec2(200, 100));
 
 			REQUIRE(ui.SetFocus(scene, play.GetUUID()).has_value());
 			CHECK(ui.GetInteraction().Focused == play.GetUUID());
 			CHECK(ui.TakeEvents() == std::vector<UiEvent>{ MakeUiEvent(UiEventKind::Focus, play, true) });
-			for (const Entity refused : { disabled, label, canvas })
+			for (const Entity refused : { disabled, label, canvas, flat, hidden })
 			{
+				CAPTURE(refused.GetName());
 				const Status status = ui.SetFocus(scene, refused.GetUUID());
 				REQUIRE_FALSE(status.has_value());
 				CHECK(status.error().GetCode() == ErrorCode::InvalidArgument);
 				CHECK(ui.GetInteraction().Focused == play.GetUUID());
+				// CheckFocus, the Ui module's question first, refuses it alike and changes nothing.
+				const Result<bool> checked = ui.CheckFocus(scene, refused.GetUUID());
+				REQUIRE_FALSE(checked.has_value());
+				CHECK(checked.error().GetCode() == ErrorCode::InvalidArgument);
 			}
+			const Result<bool> same = ui.CheckFocus(scene, play.GetUUID());
+			REQUIRE(same.has_value());
+			CHECK_FALSE(*same);
+			const Result<bool> cleared = ui.CheckFocus(scene, UUID{});
+			REQUIRE(cleared.has_value());
+			CHECK(*cleared);
 			CHECK(ui.GetQueuedEventCount() == 0);
 			REQUIRE(ui.SetFocus(scene, UUID{}).has_value());
 			CHECK(ui.TakeEvents() == std::vector<UiEvent>{ MakeUiEvent(UiEventKind::Focus, play, false) });
 			CHECK(ui.GetInteraction().IsEmpty());
 		}
 
+		// Decision 28, amended by the review of W22.2 (the lead's decision 2): Ui.SetFocus checks against the scene as it is at
+		// the call, never the last layout, so a pause menu a callback has just shown, or a button it has just created, takes
+		// focus at once. The current layout stays the last one made, which UiInput hit-tests (what was drawn).
+		TEST_CASE("UiSystem: SetFocus focuses a menu a callback has just shown or created, before any layout")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			static_cast<void>(AddUiSystemList(scene));
+			Entity menu = scene.CreateEntity("Menu");
+			menu.AddComponent<UiCanvasComponent>(UiCanvasComponent{ .SortOrder = 1 });
+			Entity resume = AddUiSystemElement(scene, "Resume", menu, glm::vec2(150.0f, 0.0f), glm::vec2(40.0f, 20.0f));
+			resume.AddComponent<UiButtonComponent>(UiButtonComponent{});
+			menu.SetActive(false);
+			UiSystem ui;
+			ui.LayoutStep(scene, glm::uvec2(200, 200));
+			REQUIRE(FindUiLayoutNode(ui.GetLayout(), resume.GetUUID()) == nullptr);
+
+			menu.SetActive(true);
+			REQUIRE(ui.SetFocus(scene, resume.GetUUID()).has_value());
+			CHECK(ui.GetInteraction().Focused == resume.GetUUID());
+			Entity quit = AddUiSystemElement(scene, "Quit", menu, glm::vec2(150.0f, 30.0f), glm::vec2(40.0f, 20.0f));
+			quit.AddComponent<UiButtonComponent>(UiButtonComponent{});
+			REQUIRE(ui.SetFocus(scene, quit.GetUUID()).has_value());
+			CHECK(ui.TakeEvents()
+				== std::vector<UiEvent>{ MakeUiEvent(UiEventKind::Focus, resume, true), MakeUiEvent(UiEventKind::Focus, resume, false),
+					MakeUiEvent(UiEventKind::Focus, quit, true) });
+			CHECK(FindUiLayoutNode(ui.GetLayout(), resume.GetUUID()) == nullptr);
+		}
+
+		// Decisions 23 and 28, amended by the review of W22.2 (the lead's decision 2): Ui.SetFocus reveals against the scene as
+		// it is at the call, so the scroll position the reveal starts from is the one the layout of that scene used: after a
+		// wheel scroll of the same step it scrolls no further than needed, and after a script reset the position it scrolls
+		// back to show the item.
+		TEST_CASE("UiSystem: SetFocus reveals from the scroll position the scene has at the call")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity list = AddUiSystemList(scene);
+			UiSystem ui;
+
+			// The step's layout, then the wheel scrolls the list two steps, to 80, against it; Item2 (content 80 to 120) is then
+			// at 0 to 40, in view, so focusing it from the step's events scrolls nothing (from the layout's rectangle, 80 to
+			// 120, it would scroll 20 more and clip half of it).
+			ui.LayoutStep(scene, glm::uvec2(200, 200));
+			ui.ProcessInput(scene, UiInputFrame{ .Pointer = glm::vec2(50.0f, 50.0f), .Scroll = glm::vec2(0.0f, -2.0f) });
+			static_cast<void>(ui.TakeEvents());
+			REQUIRE(GetUiSystemScroll(list) == glm::vec2(0.0f, 80.0f));
+			const Entity item2 = FindUiSystemItem(scene, 2);
+			REQUIRE(ui.SetFocus(scene, item2.GetUUID()).has_value());
+			CHECK(ui.TakeEvents() == std::vector<UiEvent>{ MakeUiEvent(UiEventKind::Focus, item2, true) });
+			CHECK(GetUiSystemScroll(list) == glm::vec2(0.0f, 80.0f));
+
+			// Laid out at 80, then reset to 0 by a script: Item6 (content 240 to 280) needs a scroll of 180, the least that
+			// shows it (from the layout's rectangle, 160 to 200, the reveal would stop at 100 and leave it hidden).
+			list.GetComponent<UiScrollViewComponent>().ScrollPosition = glm::vec2(0.0f, 80.0f);
+			ui.LayoutStep(scene, glm::uvec2(200, 200));
+			list.GetComponent<UiScrollViewComponent>().ScrollPosition = glm::vec2(0.0f);
+			const Entity item6 = FindUiSystemItem(scene, 6);
+			REQUIRE(ui.SetFocus(scene, item6.GetUUID()).has_value());
+			CHECK(ui.TakeEvents()
+				== std::vector<UiEvent>{ MakeUiEvent(UiEventKind::Focus, item2, false), MakeUiEvent(UiEventKind::Focus, item6, true),
+					UiEvent{ .Kind = UiEventKind::Scroll, .Target = list.GetUUID(), .Vector = glm::vec2(0.0f, 180.0f) } });
+			ui.LayoutStep(scene, glm::uvec2(200, 200));
+			const UiLayoutNode* shown = FindUiLayoutNode(ui.GetLayout(), item6.GetUUID());
+			REQUIRE(shown != nullptr);
+			CHECK(shown->Min.y == 60.0f);
+			CHECK(shown->Max.y == 100.0f);
+		}
+
+		// Decision 24 step 8 (the review of W22.2): a focus that navigation moves is revealed against the scene as it is then,
+		// so a scroll of the same UiInput (the wheel, or the reveal of an earlier command) is where the reveal starts: each
+		// reveal scrolls the least that shows its element.
+		TEST_CASE("UiSystem: navigation reveals the new focus from the scroll position of its own step")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity list = AddUiSystemList(scene);
+			UiSystem ui;
+			ui.LayoutStep(scene, glm::uvec2(200, 200));
+			REQUIRE(ui.SetFocus(scene, FindUiSystemItem(scene, 0).GetUUID()).has_value());
+			static_cast<void>(ui.TakeEvents());
+
+			// The wheel scrolls to 80, which hides Item1 (content 40 to 80, now -40 to 0); Down then focuses it and scrolls
+			// back to 40, the least that shows it (from the layout's rectangle, inside the view, it would stay hidden at 80).
+			ui.ProcessInput(scene,
+				UiInputFrame{ .Pointer = glm::vec2(50.0f, 50.0f), .Scroll = glm::vec2(0.0f, -2.0f), .Navigation = UiNavigation::Down });
+			CHECK(ui.GetInteraction().Focused == FindUiSystemItem(scene, 1).GetUUID());
+			CHECK(GetUiSystemScroll(list) == glm::vec2(0.0f, 40.0f));
+			static_cast<void>(ui.TakeEvents());
+
+			// From Item1 with the list back at 0: Next reveals Item2 (content 80 to 120) by 20, then Down from it reveals Item3
+			// (120 to 160) by 40 more, to 60, its bottom on the view's (from the layout's rectangles of the step, Down would
+			// scroll on to 80).
+			list.GetComponent<UiScrollViewComponent>().ScrollPosition = glm::vec2(0.0f);
+			ui.LayoutStep(scene, glm::uvec2(200, 200));
+			ui.ProcessInput(scene, UiInputFrame{ .Pointer = glm::vec2(-1000.0f), .Navigation = UiNavigation::Next | UiNavigation::Down });
+			CHECK(ui.GetInteraction().Focused == FindUiSystemItem(scene, 3).GetUUID());
+			CHECK(GetUiSystemScroll(list) == glm::vec2(0.0f, 60.0f));
+		}
+
 		// Decision 29 (R-UI-DET): nothing while the interaction state and the event queue are empty, so a scene that holds
 		// no interaction keeps its hash; otherwise the marker, every member of the state in the frozen order, then the queue
 		// (events a script queued with Ui.SetFocus after the tick's UiEvents phase cross the tick boundary).
-		TEST_CASE("UiSystem: the ui block is empty while the interaction state and the event queue are, and holds them otherwise" * doctest::skip(true))
+		TEST_CASE("UiSystem: the ui block is empty while the interaction state and the event queue are, and holds them otherwise")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();

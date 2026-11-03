@@ -91,5 +91,16 @@
 	},
 	"Localization": {
 		"Locale": "fr-CA"
+	},
+	"Ui": {
+		"Navigation": false,
+		"Submit": ["Key.K", "Gamepad.West"],
+		"Cancel": ["Key.Backspace", "Gamepad.North"],
+		"Up": ["Key.W", "Gamepad.DPadUp"],
+		"Down": ["Key.S", "Gamepad.DPadDown"],
+		"Left": ["Key.A", "Gamepad.DPadLeft"],
+		"Right": ["Key.D", "Gamepad.DPadRight"],
+		"Next": ["Key.N"],
+		"StickNavigation": false
 	}
 }

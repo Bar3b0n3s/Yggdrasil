@@ -279,8 +279,8 @@ namespace Engine {
 		// (ADR 0028's phase-2 ledger appends M21's sections after M22's or before them, in landing order, so only the relative
 		// order is checked); each binding list holds at most 16 unique, non-empty names, located at /Ui/<list>/<index> (the
 		// names themselves are checked against the key and gamepad tables when a play session starts, as an action's bindings
-		// are). Skipped by the contract until stream A registers the section.
-		TEST_CASE("ProjectSettings: the Ui section's binding lists hold at most 16 unique names, located at /Ui" * doctest::skip(true))
+		// are).
+		TEST_CASE("ProjectSettings: the Ui section's binding lists hold at most 16 unique names, located at /Ui")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			const StructInfo* type = registry->FindStruct<ProjectSettings>();

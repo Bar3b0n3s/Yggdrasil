@@ -1299,8 +1299,8 @@ end
 			const std::span<const std::string_view> codes = ProjectValidator::GetCodes();
 			// M4's 14 codes, M6's 11 (the asset codes but the runtime-only ASSET_UPLOAD_FAILED, and PREFAB_MISSING_ASSET), M8's
 			// RENDER_LIGHT_LIMIT_EXCEEDED, M9's two render warnings, M11's 10 physics codes, M12's 2 audio codes, M13's 7 and
-			// M19's SCRIPT_COMPUTED_ASSET_LOAD, M20's PREFAB_CYCLE and M22's two UI codes.
-			CHECK(codes.size() == 41 + PhysicsDiagnosticCodes.size());
+			// M19's SCRIPT_COMPUTED_ASSET_LOAD, M20's PREFAB_CYCLE and M22's three UI codes.
+			CHECK(codes.size() == 42 + PhysicsDiagnosticCodes.size());
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -1316,11 +1316,14 @@ end
 			CHECK(position(PhysicsLimitExceededCode) + 1 == position("SCRIPT_COMPILE_ERROR"));
 			CHECK(position("INPUT_UNKNOWN_ACTION") + 1 == position(AudioNoListenerCode));
 			// The codes of later milestones are appended in landing order (Docs/Decisions/0028-backlog-program.md, the reservation
-			// ledger): M19's after TEST_SUITE_INVALID, then M20's, then M22's (Docs/Decisions/0033-m22-contract.md decision 13).
+			// ledger): M19's after TEST_SUITE_INVALID, then M20's, then M22's (Docs/Decisions/0033-m22-contract.md decisions 13
+			// and 35).
 			CHECK(position("TEST_SUITE_INVALID") + 1 == position(ScriptComputedAssetLoadCode));
 			CHECK(position(ScriptComputedAssetLoadCode) + 1 == position(PrefabCycleCode));
 			CHECK(position(PrefabCycleCode) + 1 == position("UI_ELEMENT_WITHOUT_CANVAS"));
-			CHECK(codes.back() == "UI_IMAGE_FRAME_OUT_OF_RANGE");
+			CHECK(position("UI_ELEMENT_WITHOUT_CANVAS") + 1 == position("UI_IMAGE_FRAME_OUT_OF_RANGE"));
+			CHECK(position("UI_IMAGE_FRAME_OUT_OF_RANGE") + 1 == position("UI_WIDGET_PART_INVALID"));
+			CHECK(codes.back() == "UI_WIDGET_PART_INVALID");
 			CHECK(position(AudioNoListenerCode) + 1 == position(AudioMultiplePrimaryListenersCode));
 			CHECK(position(AudioMultiplePrimaryListenersCode) < position(RenderLightLimitExceededCode));
 			CHECK(position(RenderLightLimitExceededCode) < position(BuildStartSceneMissingCode));
@@ -1653,7 +1656,7 @@ end
 		// M22 C22.2 (Docs/Decisions/0033-m22-contract.md decision 35; stream B, the review's m9): a widget part (a UiToggle's
 		// Graphic, a UiSlider's Fill or Handle, a UiScrollView's Content) that is not a UI element below its widget in the
 		// same canvas is named once, at its widget's entity, component and field; valid parts and null parts stay quiet.
-		TEST_CASE("ProjectValidator: UI_WIDGET_PART_INVALID names each widget part that is not an element below its widget and stays quiet for valid parts" * doctest::skip(true))
+		TEST_CASE("ProjectValidator: UI_WIDGET_PART_INVALID names each widget part that is not an element below its widget and stays quiet for valid parts")
 		{
 			Test::EditorTestFixture fixture("ValidatorUiParts");
 			fixture.CreateAndOpenProject();
@@ -1699,6 +1702,12 @@ end
 				addWidget(volume, "UiSlider", std::format(R"({{"Fill": "{}", "Handle": "{}"}})", fill.GetUUID().ToString(), handle.GetUUID().ToString()));
 				const Entity scroll = add("Scroll", hud, "UiRect", "{}");
 				addWidget(scroll, "UiScrollView", "{}");
+				// Faulty: a scroll view whose Content is an element of its canvas outside it. Quiet: a toggle whose Graphic names
+				// no entity, which is ENTITY_DANGLING_REFERENCE's.
+				const Entity list = add("List", hud, "UiRect", "{}");
+				addWidget(list, "UiScrollView", std::format(R"({{"Content": "{}"}})", panel.GetUUID().ToString()));
+				const Entity dangling = add("Dangling", hud, "UiRect", "{}");
+				addWidget(dangling, "UiToggle", R"({"Graphic": "7e57000000000123"})");
 				REQUIRE(edit.Commit().has_value());
 			}
 
@@ -1720,6 +1729,7 @@ end
 				std::format("{} UiToggle.Graphic", scene.FindEntityByPath("/Hud/Panel/Toggle").GetUUID().ToString()),
 				std::format("{} UiSlider.Fill", scene.FindEntityByPath("/Hud/Panel/Slider").GetUUID().ToString()),
 				std::format("{} UiSlider.Handle", scene.FindEntityByPath("/Hud/Panel/Slider").GetUUID().ToString()),
+				std::format("{} UiScrollView.Content", scene.FindEntityByPath("/Hud/List").GetUUID().ToString()),
 			};
 			std::ranges::sort(expected);
 			CHECK(found == expected);

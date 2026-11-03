@@ -2690,7 +2690,7 @@ Example: Add a Play button to the canvas.
 
 ### ui.tree
 
-Shows the scene's UI laid out in scene pixels: every canvas and element with its rectangle, clip, visibility, components and text, as a compact text outline or a flat JSON list, optionally for one canvas and to a depth.
+Shows the scene's UI laid out in scene pixels: every canvas and element with its rectangle, clip, visibility, components, text and widget, and in the play scene the session's focus, hover and press, as a compact text outline or a flat JSON list, optionally for one canvas and to a depth.
 
 - Flags: tool `ui_tree`, runtime, batch, scene target
 - Timeout: 60 s
@@ -2699,7 +2699,7 @@ Shows the scene's UI laid out in scene pixels: every canvas and element with its
 |---|---|---|---|---|
 | `canvas` | `String` |  | `""` | An entity with a UiCanvas whose UI alone is listed; omitted: every canvas. |
 | `depth` | `UInt32` |  | `0` | The most levels listed below each canvas; 0: unlimited. |
-| `format` | `SceneTreeFormat` |  | `"Text"` | Text: a compact outline; Json: a flat list of entries. |
+| `format` | `SceneTreeFormat` |  | `"Text"` | Text: a compact outline (widgets as UiButton, UiToggle(on\|off), UiSlider(\<value>) and UiScrollView(\<x>,\<y>), marked disabled, focused, hovered or pressed); Json: a flat list of entries. |
 | `width` | `UInt32` |  | `0` | The scene resolution's width to lay out at, with height; omitted: the play session's own, or the project's window size for the edit scene. |
 | `height` | `UInt32` |  | `0` | The scene resolution's height to lay out at, with width. |
 | `target` | `SceneTarget` |  | `"Edit"` | The scene to read; omitted: the play scene while playing, else the edit scene. |
@@ -2872,6 +2872,7 @@ Patches the scene viewport's overlays and debug view and the Game view's resolut
 | `wireframe` | `Bool` |  | `false` | Show mesh wireframes. |
 | `debugView` | `String` |  | `""` | The scene view's debug view, any ASCII case: Lit, Albedo, Normals, Roughness, Metallic, Emissive, AO, ShadowCascades or Overdraw. |
 | `gameResolution` | `Array<UInt32>` |  | `[]` | The Game view's resolution [width, height], each 1 to 8192, or [0, 0] for free resolution. |
+| `uiPreview` | `Bool` |  | `false` | Show the scene view as the game frames it, through its primary camera with its UI, for UI authoring. |
 
 | Result | Type | Description |
 |---|---|---|
@@ -2882,6 +2883,7 @@ Patches the scene viewport's overlays and debug view and the Game view's resolut
 | `wireframe` | `Bool` | Whether mesh wireframes are shown. |
 | `debugView` | `String` | The scene view's debug view (canonical name). |
 | `gameResolution` | `Array<UInt32>` | The Game view's resolution [width, height]; [0, 0] is free resolution. |
+| `uiPreview` | `Bool` | Show the scene view as the game frames it, through its primary camera with its UI, for UI authoring. |
 
 Example: Show colliders.
 

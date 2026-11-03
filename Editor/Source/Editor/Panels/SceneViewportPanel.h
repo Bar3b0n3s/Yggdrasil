@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Editor/Ui/UiAuthoringOverlay.h"
 #include "EditorCore/Viewport/GizmoController.h"
 #include "Engine/Core/Json/Json.h"
 #include "Engine/Core/Result.h"
@@ -22,6 +23,9 @@ namespace Engine {
 	// EditorViewportHost, never a direct GPU wait, and only on an image rendered with picking; without a scene the view
 	// shows its placeholder. Grid/icons/colliders/debug view reflect EditorViewportState. Dropped mesh/prefab/HDR invokes
 	// commands: entity, instance, Environment.
+	// M22 (Docs/Decisions/0033-m22-contract.md decisions 33 and 34): the Overlays popup's "UI preview" (EditorViewportOptions::
+	// UiPreview) shows the game frame letterboxed in the view (UiPreview.h) under the UI authoring overlay (UiAuthoringOverlay.h),
+	// whose item takes the image's presses; the camera's controls, the gizmo, Frame and mesh picking are off meanwhile.
 	// Main thread inside ImGui. Retains only UI presentation state, no entity/component/asset pointers across frames.
 	class SceneViewportPanel
 	{
@@ -44,6 +48,7 @@ namespace Engine {
 		std::vector<UUID> m_DragSelection{};
 		bool m_DragInPlay = false;
 		std::string m_LastError{};
+		UiAuthoringOverlay m_UiOverlay{};
 	};
 
 }

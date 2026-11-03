@@ -12,9 +12,9 @@
 // maps them to scene pixels by its scale); colours are linear with straight alpha. ADR 0028's phase-2 ledger puts a phase-2
 // milestone's components in a category of its own after Scripting, appended in landing order. C22.2 (decision 21) appends
 // the four widgets (UiButton, UiToggle, UiSlider, UiScrollView) after UiLayoutElement; the fields it adds to UiCanvas (Font,
-// Theme and DefaultFocus, with the UiTheme struct: stream C) and to UiImage and UiText (RaycastTarget: stream A) are
-// registered by their streams, which regenerate FeatureTest's UI scenes with them. The components are unlanded, so they
-// stay at version 1.
+// Theme and DefaultFocus after PixelSnap, with the UiTheme struct: stream C) and to UiImage and UiText (RaycastTarget:
+// stream A) are registered by their streams, and W22.2's integration regenerates FeatureTest's UI scenes with them. The
+// components are unlanded, so they stay at version 1.
 
 namespace Engine {
 
@@ -132,6 +132,17 @@ namespace Engine {
 			.Field("Right", &UiPadding::Right, "The inset from the right edge.", { .Min = 0.0, .Max = Utils::MaxUiLength, .Unit = "units" })
 			.Field("Bottom", &UiPadding::Bottom, "The inset from the bottom edge.", { .Min = 0.0, .Max = Utils::MaxUiLength, .Unit = "units" });
 
+		// C22.2 (decision 25): a canvas's theme.
+		registry
+			.Struct<UiTheme>("UiTheme",
+				"The state tints of a canvas's widgets: each multiplies the colour of a widget element's own UiImage in that state.")
+			.ColorField("Normal", &UiTheme::Normal, "The tint of an interactable widget that is neither hovered, pressed nor focused.",
+				Utils::UiColorRange())
+			.ColorField("Hovered", &UiTheme::Hovered, "The tint of a widget under the pointer.", Utils::UiColorRange())
+			.ColorField("Pressed", &UiTheme::Pressed, "The tint of a widget the pointer presses.", Utils::UiColorRange())
+			.ColorField("Focused", &UiTheme::Focused, "The tint of the widget that has keyboard and gamepad focus.", Utils::UiColorRange())
+			.ColorField("Disabled", &UiTheme::Disabled, "The tint of a widget whose Interactable is false.", Utils::UiColorRange());
+
 		RegisterComponent<UiCanvasComponent>(registry, "UiCanvas",
 			"The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text.")
 			.Category("Ui")
@@ -145,7 +156,12 @@ namespace Engine {
 				"MatchHeight: the canvas's height in canvas units, so one unit is the scene's height / ReferenceHeight scene pixels.",
 				{ .Min = 1.0, .Max = Utils::MaxUiReferenceHeight, .Unit = "units" })
 			.Field("PixelSnap", &UiCanvasComponent::PixelSnap,
-				"Rounds every element's corners to whole scene pixels, so images and clips land on pixel corners.");
+				"Rounds every element's corners to whole scene pixels, so images and clips land on pixel corners.")
+			.Field("Font", &UiCanvasComponent::Font, "The font of the canvas's texts whose own Font is null; null uses the default font.")
+			.Field("Theme", &UiCanvasComponent::Theme, "The state tints of the canvas's widgets (buttons, toggles, sliders and scroll views).")
+			.Field("DefaultFocus", &UiCanvasComponent::DefaultFocus,
+				"The UI widget keyboard and gamepad navigation focuses first while nothing has focus; null: navigation starts only from a pointer "
+				"press or Ui.SetFocus.");
 
 		RegisterComponent<UiRectComponent>(registry, "UiRect",
 			"A UI element's rectangle in its parent's (or its canvas's), in canvas units, x right and y down.")
@@ -184,21 +200,25 @@ namespace Engine {
 			.Field("Type", &UiImageComponent::Type, "Whether the frame stretches or keeps its 9-slice borders.")
 			.Field("BorderScale", &UiImageComponent::BorderScale, "Sliced: the canvas units each border texel takes.",
 				{ .Min = Utils::MinUiBorderScale, .Max = Utils::MaxUiBorderScale })
-			.Field("Filter", &UiImageComponent::Filter, "How the frame's texture is sampled.");
+			.Field("Filter", &UiImageComponent::Filter, "How the frame's texture is sampled.")
+			.Field("RaycastTarget", &UiImageComponent::RaycastTarget,
+				"Whether the image catches the pointer for its nearest widget; false lets the pointer pass through it.");
 
 		RegisterComponent<UiTextComponent>(registry, "UiText", "Draws text in a UI element's rectangle, wrapped and aligned in it.")
 			.Category("Ui")
 			.Version(1)
 			.Requires<UiRectComponent>()
 			.Field("Text", &UiTextComponent::Text, "The UTF-8 text; a line feed starts a new line. Scripts read localized strings with Loc.Get.")
-			.Field("Font", &UiTextComponent::Font, "The font; null uses the default font.")
+			.Field("Font", &UiTextComponent::Font, "The font; null uses its canvas's Font, or the default font when the canvas names none.")
 			.Field("Size", &UiTextComponent::Size, "The em size in canvas units.", { .Min = Utils::MinUiTextSize, .Max = Utils::MaxUiTextSize, .Unit = "units" })
 			.ColorField("Color", &UiTextComponent::Color, "The linear text colour with opacity in the fourth component.", Utils::UiColorRange())
 			.Field("Alignment", &UiTextComponent::Alignment, "How each line is aligned within the rectangle's width.")
 			.Field("VerticalAlignment", &UiTextComponent::VerticalAlignment, "Where the text block sits in the rectangle's height.")
 			.Field("Wrap", &UiTextComponent::Wrap, "Whether lines break at spaces to fit the rectangle's width.")
 			.Field("LineSpacing", &UiTextComponent::LineSpacing, "Multiplies the font's line height.",
-				{ .Min = Utils::MinUiLineSpacing, .Max = Utils::MaxUiLineSpacing });
+				{ .Min = Utils::MinUiLineSpacing, .Max = Utils::MaxUiLineSpacing })
+			.Field("RaycastTarget", &UiTextComponent::RaycastTarget,
+				"Whether the text catches the pointer for its nearest widget; false lets the pointer pass through it.");
 
 		RegisterComponent<UiLayoutComponent>(registry, "UiLayout",
 			"A container that places its children's rectangles in a stack, a grid or a flexible row or column.")

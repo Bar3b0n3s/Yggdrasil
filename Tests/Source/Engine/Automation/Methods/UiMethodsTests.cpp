@@ -257,7 +257,7 @@ namespace Engine {
 		// C22.2 (Docs/Decisions/0033-m22-contract.md decision 31; stream A): the interaction fields W22.1 reserved, the widget
 		// kind and Interactable from the components in both scenes, Focused, Hovered and Pressed from the play session's state,
 		// and the widgets' short forms and markers in the text outline.
-		TEST_CASE("UiMethods: ui.tree reports each element's widget and the play session's focus, hover and press" * doctest::skip(true))
+		TEST_CASE("UiMethods: ui.tree reports each element's widget and the play session's focus, hover and press")
 		{
 			Test::AutomationFixture setup("UiTreeWidgets");
 			REQUIRE(setup.Call("edit.batch", ParseUiMethodJson(R"({"label":"Widgets","ops":[
@@ -266,7 +266,18 @@ namespace Engine {
 					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[10,10],"Size":[100,40]},"UiImage":{},"UiButton":{}}}},
 				{"method":"entity.create","params":{"name":"Sound","parent":{"$ref":"0.entity.id"},"components":{
 					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[10,60],"Size":[30,30]},"UiImage":{},
-					"UiToggle":{"IsOn":true,"Interactable":false}}}}]})"))
+					"UiToggle":{"IsOn":true,"Interactable":false}}}},
+				{"method":"entity.create","params":{"name":"Music","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[50,60],"Size":[30,30]},"UiToggle":{}}}},
+				{"method":"entity.create","params":{"name":"Volume","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[10,100],"Size":[100,20]},
+					"UiSlider":{"Value":12.4,"Max":10,"WholeNumbers":true}}}},
+				{"method":"entity.create","params":{"name":"List","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[150,10],"Size":[50,50]},"UiScrollView":{}}}},
+				{"method":"entity.create","params":{"name":"Items","parent":{"$ref":"5.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Size":[50,150]}}}},
+				{"method":"entity.update","params":{"entity":"/Hud/List","components":{
+					"UiScrollView":{"Content":"/Hud/List/Items","ScrollPosition":[0,300]}}}}]})"))
 					.has_value());
 			const auto findEntry = [](const Json& elements, std::string_view name)
 			{
@@ -293,7 +304,14 @@ namespace Engine {
 			const std::string text = JsonReader((*outline)["text"]).ReadString().value_or(std::string());
 			CHECK(text.find("UiButton") != std::string::npos);
 			CHECK(text.find("UiToggle(on)") != std::string::npos);
+			CHECK(text.find("UiToggle(off)") != std::string::npos);
 			CHECK(text.find("disabled") != std::string::npos);
+			// The values as read: the whole-number slider's 12.4 clamped to its Max, 10, and the scroll position 300 clamped
+			// to the content's overflow, 150 - 50 = 100, on the vertical axis only.
+			CHECK(text.find("UiSlider(10)") != std::string::npos);
+			CHECK(text.find("UiScrollView(0,100)") != std::string::npos);
+			CHECK(findEntry((*edit)["elements"], "Volume")["widget"] == Json("Slider"));
+			CHECK(findEntry((*edit)["elements"], "List")["widget"] == Json("ScrollView"));
 
 			// A press on Play in the play session hovers, presses and focuses it.
 			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true } }).has_value());

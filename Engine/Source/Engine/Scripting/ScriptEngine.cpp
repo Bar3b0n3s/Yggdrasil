@@ -437,10 +437,43 @@ namespace Engine {
 		}
 	}
 
-	// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 27): a stub of the contract that stream B implements.
-	void ScriptEngine::DispatchUiEvents(std::span<const UiEvent> /*events*/)
+	// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 27; ADR 0031 decision 18). An event's walk is the chain of its
+	// target and the target's ancestors as they are when the walk starts (all live then: a pending entity's subtree is
+	// pending with it), so a callback that reparents an entity cannot lengthen or repeat the walk, and an ancestor that a
+	// callback of the event destroyed (pending destruction when its turn comes) is passed over, the walk going on to the
+	// ancestor above it.
+	void ScriptEngine::DispatchUiEvents(std::span<const UiEvent> events)
 	{
-		ENGINE_CONTRACT_STUB();
+		m_State->AssertOwner();
+		if (IsStopped() || IsReadOnly())
+			return;
+		Scene& scene = GetHost().GetScene();
+		std::vector<UUID> walk;
+		for (const UiEvent& event : events)
+		{
+			if (IsStopped())
+				return;
+			// An element the scene no longer holds, or holds pending destruction, receives nothing: the event is dropped.
+			const Entity target = scene.FindEntityByID(event.Target);
+			if (!target)
+				continue;
+			walk.clear();
+			for (Entity entity = target; entity; entity = entity.GetParent())
+				walk.push_back(entity.GetUUID());
+			for (const UUID id : walk)
+			{
+				if (IsStopped())
+					return;
+				if (!scene.FindEntityByID(id))
+					continue;
+				// Every slot of the entity hears it, in slot order, even after one of them returned true.
+				bool stop = false;
+				for (const State::InstanceKey key : m_State->InstancesOf(id))
+					stop = m_State->InvokeUi(key, event) || stop;
+				if (stop)
+					break;
+			}
+		}
 	}
 
 	void ScriptEngine::OnPhysicsDiagnostic(const PhysicsDiagnostic& diagnostic)

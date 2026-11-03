@@ -16,6 +16,9 @@
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
+#include "Engine/Scene/Components/UiCanvasComponent.h"
+#include "Engine/Scene/Components/UiImageComponent.h"
+#include "Engine/Scene/Components/UiRectComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Support/AutomationTestClient.h"
 #include "Support/DeviceLossTest.h"
@@ -769,6 +772,82 @@ end)
 			CHECK(scene->SceneRevision == editor.GetScene().GetRevision());
 			REQUIRE(game->Meshes.size() == 1);
 			CHECK(game->Meshes.front().PickId != 0);
+		}
+
+		// M22 (Docs/Decisions/0033-m22-contract.md decision 33): with the UI preview the scene view extracts what the game view
+		// does, through the primary camera with its UI, without the editor overlays, the selection or the debug view.
+		TEST_CASE("EditorHostViewports: the UI preview extracts the scene view through the primary camera with its UI and no editor overlays")
+		{
+			Test::EditorTestFixture fixture("HostUiPreview");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			const Entity mesh = editor.GetScene().CreateEntity("Mesh");
+			mesh.AddComponent<MeshRendererComponent>(MeshRendererComponent{ .Mesh = TypedAssetHandle<AssetType::Mesh>(BuiltinAssetHandles::CubeMesh), .Materials = {} });
+			editor.GetScene().CreateEntity("Camera").AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			const Entity canvas = editor.GetScene().CreateEntity("Canvas");
+			canvas.AddComponent<UiCanvasComponent>();
+			const Entity image = editor.GetScene().CreateEntity("Image", canvas);
+			image.AddComponent<UiRectComponent>();
+			image.AddComponent<UiImageComponent>();
+			REQUIRE(editor.SetSelection({ mesh.GetUUID() }, SceneTarget::Edit).has_value());
+			REQUIRE(editor.GetViewportState().SetDebugView(RenderDebugView::Normals).has_value());
+			GizmoController gizmos(editor);
+			EditorHostViewports host(editor, gizmos);
+			const auto edited = host.Extract(ViewportView::Scene, 320, 240);
+			REQUIRE(edited.has_value());
+			CHECK(HasFlag(edited->Flags, RenderViewFlags::EditorOverlays));
+			CHECK(edited->DebugView == RenderDebugView::Normals);
+			// The scene view's own camera draws no game UI (decision 7).
+			CHECK(edited->Ui.Items.empty());
+
+			EditorViewportOptions options = editor.GetViewportState().GetOptions();
+			options.UiPreview = true;
+			editor.GetViewportState().SetOptions(options);
+			const auto preview = host.Extract(ViewportView::Scene, 320, 240);
+			const auto game = host.Extract(ViewportView::Game, 320, 240);
+			REQUIRE(preview.has_value());
+			REQUIRE(game.has_value());
+			CHECK(preview->Flags == RenderViewFlags::None);
+			CHECK(preview->SelectedEntities.empty());
+			CHECK(preview->DebugView == RenderDebugView::Lit);
+			CHECK(preview->Camera.View == game->Camera.View);
+			CHECK(preview->Camera.Projection == game->Camera.Projection);
+			CHECK(preview->Ui.Items.size() == 1);
+			CHECK(preview->Ui.Items.size() == game->Ui.Items.size());
+		}
+
+		TEST_CASE("EditorHostViewports: the UI preview renders the scene view at the game frame without a picking image" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::EditorTestFixture fixture("HostUiPreviewFrame");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::SceneViewport, true).has_value());
+			REQUIRE(editor.GetViewportState().SetGameResolution(glm::uvec2(160, 90)).has_value());
+			HostGpuHarness harness(gpu, editor);
+			harness.GetHost().SetRectangle(ViewportView::Scene, { .Size = glm::vec2(96, 64) });
+			REQUIRE(harness.Frame(0).has_value());
+			CHECK(harness.GetHost().GetImage(ViewportView::Scene).Width == 96);
+			CHECK(harness.GetHost().GetImage(ViewportView::Scene).Picking);
+
+			EditorViewportOptions options = editor.GetViewportState().GetOptions();
+			options.UiPreview = true;
+			editor.GetViewportState().SetOptions(options);
+			// The panel hands the letterboxed frame; the host renders the game frame whatever its size on screen.
+			harness.GetHost().SetRectangle(ViewportView::Scene, { .Size = glm::vec2(96, 54) });
+			REQUIRE(harness.Frame(1).has_value());
+			const EditorViewportImage image = harness.GetHost().GetImage(ViewportView::Scene);
+			CHECK(image.Width == 160);
+			CHECK(image.Height == 90);
+			CHECK_FALSE(image.Picking);
+			CHECK(editor.GetViewportState().GetPixelSize(ViewportView::Scene).value() == glm::uvec2(160, 90));
+			// A hidden view stays hidden: no area, no render.
+			harness.GetHost().SetRectangle(ViewportView::Scene, {});
+			REQUIRE(harness.Frame(2).has_value());
+			CHECK(harness.GetHost().GetImage(ViewportView::Scene).Texture == 0);
 		}
 
 		TEST_CASE("EditorHostViewports: scene options map to renderer flags without changing camera quality or annotations")

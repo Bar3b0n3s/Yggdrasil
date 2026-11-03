@@ -7,9 +7,13 @@
 #include "Engine/Scene/Components/UiLayoutComponent.h"
 #include "Engine/Scene/Components/UiLayoutElementComponent.h"
 #include "Engine/Scene/Components/UiRectComponent.h"
+#include "Engine/Scene/Components/UiScrollViewComponent.h"
+#include "Engine/Scene/Components/UiSliderComponent.h"
+#include "Engine/Scene/Components/UiToggleComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/UiContainerLayout.h"
+#include "Engine/Scene/UiWidgets.h"
 
 #include <glm/glm.hpp>
 
@@ -18,6 +22,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <utility>
 #include <vector>
 
 // UI layout (UiLayout.h; Docs/Decisions/0033-m22-contract.md decision 4). Two passes: a scan of the scene in canonical order
@@ -71,6 +76,18 @@ namespace Engine {
 		{
 			bool Clipped = false;
 			UiClipRect Clip{};
+		};
+
+		// What the slider and toggle rules (C22.2, Docs/Decisions/0033-m22-contract.md decision 26) do to one element of a
+		// canvas: a slider's Fill or Handle takes the anchors along its slider's direction in place of its own, and an off
+		// toggle's Graphic is Hidden with its subtree.
+		struct UiWidgetPartRule
+		{
+			bool Anchored = false;
+			glm::length_t Axis = 0; // 0: x (a Horizontal slider), 1: y (a Vertical one)
+			float AnchorMin = 0.0f;
+			float AnchorMax = 0.0f;
+			bool Hides = false;
 		};
 
 	}
@@ -171,6 +188,88 @@ namespace Engine {
 			max = min + size;
 		}
 
+		// The slider and toggle rules of `canvas`'s elements (UiLayout.h), by element index; empty when none applies, as in
+		// every canvas without a slider or an off toggle that names a part. A rule applies only to a part that is an element
+		// below its widget in this canvas: found among the canvas's elements, with the widget on its chain of parent
+		// elements (so neither the widget itself nor an element outside its subtree). When several rules reach one element
+		// (a Fill that is also its slider's Handle, or a part of two nested sliders), the later in canonical order wins.
+		static std::vector<UiWidgetPartRule> FindUiWidgetPartRules(const UiScannedCanvas& canvas)
+		{
+			std::vector<UiWidgetPartRule> rules;
+			std::vector<std::pair<UUID, uint32_t>> indices; // the elements' ids, sorted, made at the first part
+			const auto findPart = [&canvas, &rules, &indices](uint32_t widget, UUID part) -> UiWidgetPartRule*
+			{
+				if (!part.IsValid())
+					return nullptr;
+				if (indices.empty())
+				{
+					indices.reserve(canvas.Elements.size());
+					for (uint32_t index = 0; index < canvas.Elements.size(); ++index)
+						indices.emplace_back(canvas.Elements[index].Entity.GetUUID(), index);
+					std::ranges::sort(indices);
+					rules.resize(canvas.Elements.size());
+				}
+				const auto found = std::ranges::lower_bound(indices, part, {}, &std::pair<UUID, uint32_t>::first);
+				if (found == indices.end() || found->first != part)
+					return nullptr;
+				for (uint32_t parent = canvas.Elements[found->second].Parent; parent != NoUiElement; parent = canvas.Elements[parent].Parent)
+				{
+					if (parent == widget)
+						return &rules[found->second];
+				}
+				return nullptr;
+			};
+			for (uint32_t index = 0; index < canvas.Elements.size(); ++index)
+			{
+				const ConstEntity entity = canvas.Elements[index].Entity;
+				if (const UiSliderComponent* slider = entity.TryGetComponent<UiSliderComponent>())
+				{
+					// Horizontal: Min at the left edge; Vertical: Min at the bottom edge, so the anchors count from 1 down.
+					const float t = GetUiSliderPosition(*slider);
+					const bool horizontal = slider->Direction == UiLayoutDirection::Horizontal;
+					const glm::length_t axis = horizontal ? 0 : 1;
+					if (UiWidgetPartRule* fill = findPart(index, slider->Fill))
+						*fill = UiWidgetPartRule{ .Anchored = true,
+							.Axis = axis,
+							.AnchorMin = horizontal ? 0.0f : 1.0f - t,
+							.AnchorMax = horizontal ? t : 1.0f,
+							.Hides = fill->Hides };
+					if (UiWidgetPartRule* handle = findPart(index, slider->Handle))
+						*handle = UiWidgetPartRule{ .Anchored = true,
+							.Axis = axis,
+							.AnchorMin = horizontal ? t : 1.0f - t,
+							.AnchorMax = horizontal ? t : 1.0f - t,
+							.Hides = handle->Hides };
+				}
+				else if (const UiToggleComponent* toggle = entity.TryGetComponent<UiToggleComponent>(); toggle != nullptr && !toggle->IsOn)
+				{
+					if (UiWidgetPartRule* graphic = findPart(index, toggle->Graphic))
+						graphic->Hides = true;
+				}
+			}
+			return rules;
+		}
+
+		// The scroll view rule (C22.2, decision 26): how far, in scene pixels, the element at `index` of `canvas` moves as the
+		// Content of the scroll views above it in the canvas, each by its ScrollPosition clamped to the overflow of the
+		// element's laid-out size `size` over the scroll view's (canvas units). Zero for an element that no scroll view above
+		// it names; a Content that is not below its scroll view is never reached from it.
+		static glm::vec2 GetUiScrollOffset(const UiScannedCanvas& canvas, uint32_t index, const UiLayoutTable& table, uint32_t firstNode, glm::vec2 size,
+			float scale)
+		{
+			const UUID entity = canvas.Elements[index].Entity.GetUUID();
+			glm::vec2 offset(0.0f);
+			for (uint32_t ancestor = canvas.Elements[index].Parent; ancestor != NoUiElement; ancestor = canvas.Elements[ancestor].Parent)
+			{
+				const UiScrollViewComponent* scrollView = canvas.Elements[ancestor].Entity.TryGetComponent<UiScrollViewComponent>();
+				if (scrollView == nullptr || scrollView->Content != entity)
+					continue;
+				const UiLayoutNode& view = table.Nodes[firstNode + ancestor];
+				offset += ClampUiScrollPosition(*scrollView, (view.Max - view.Min) / scale, size, scrollView->ScrollPosition) * scale;
+			}
+			return offset;
+		}
+
 		// Lays out the elements of `canvas` into `table`, in their order (a parent before its children).
 		static void LayoutUiCanvas(const UiScannedCanvas& canvas, glm::uvec2 sceneSize, UiLayoutTable& table)
 		{
@@ -197,6 +296,8 @@ namespace Engine {
 			std::vector<UiInheritedClip> childClips(count);
 			std::vector<UiContainerChild> participants;
 			std::vector<uint32_t> participantIndices;
+			// The slider and toggle rules (decision 26), by element index; empty when no widget names a part here.
+			const std::vector<UiWidgetPartRule> partRules = FindUiWidgetPartRules(canvas);
 
 			for (uint32_t index = 0; index < count; ++index)
 			{
@@ -222,12 +323,34 @@ namespace Engine {
 					node.Min = parentMin + placement->Position * scale;
 					node.Max = node.Min + placement->Size * scale;
 				}
+				else if (!partRules.empty() && partRules[index].Anchored)
+				{
+					// A slider's Fill or Handle: its anchors along the slider's direction follow the value, the rest are its own.
+					const UiWidgetPartRule& rule = partRules[index];
+					UiRectComponent anchored = rect;
+					anchored.AnchorMin[rule.Axis] = rule.AnchorMin;
+					anchored.AnchorMax[rule.Axis] = rule.AnchorMax;
+					PlaceUiRect(anchored, parentMin, parentMax, scale, node.Min, node.Max);
+				}
 				else
 					PlaceUiRect(rect, parentMin, parentMax, scale, node.Min, node.Max);
 				if (component.PixelSnap)
 				{
 					node.Min = SnapToScenePixels(node.Min);
 					node.Max = SnapToScenePixels(node.Max);
+				}
+				// A scroll view's Content moves by its scroll offset, before its children are placed in it (so its subtree moves
+				// with it), and snaps again.
+				if (const glm::vec2 offset = GetUiScrollOffset(canvas, index, table, firstNode, (node.Max - node.Min) / scale, scale);
+					offset != glm::vec2(0.0f))
+				{
+					node.Min -= offset;
+					node.Max -= offset;
+					if (component.PixelSnap)
+					{
+						node.Min = SnapToScenePixels(node.Min);
+						node.Max = SnapToScenePixels(node.Max);
+					}
 				}
 
 				node.Clipped = clip.Clipped;
@@ -236,10 +359,13 @@ namespace Engine {
 				UiClipRect visible = IntersectUiClipRects(covered, sceneImage);
 				if (clip.Clipped)
 					visible = IntersectUiClipRects(visible, clip.Clip);
-				node.Visible = !visible.IsEmpty();
+				// An off toggle's Graphic and its subtree are laid out but Hidden, so never Visible.
+				node.Hidden = !partRules.empty()
+					&& (partRules[index].Hides || (element.Parent != NoUiElement && table.Nodes[firstNode + element.Parent].Hidden));
+				node.Visible = !visible.IsEmpty() && !node.Hidden;
 
-				// The element's own flag clips its descendants only.
-				if (rect.ClipChildren)
+				// The element's own flag clips its descendants only; a scroll view clips its descendants whatever the flag says.
+				if (rect.ClipChildren || element.Entity.HasComponent<UiScrollViewComponent>())
 					childClips[index] = UiInheritedClip{ .Clipped = true, .Clip = clip.Clipped ? IntersectUiClipRects(clip.Clip, covered) : covered };
 				else
 					childClips[index] = clip;

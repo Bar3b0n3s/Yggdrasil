@@ -748,16 +748,22 @@ The root of a UI tree, laid out over the whole scene image in scene pixels and d
 | `ScaleFactor` | `Float` | `1` | 0.01 to 100 |  |  | ConstantPixelSize: the scene pixels per canvas unit. |
 | `ReferenceHeight` | `Float` | `1080` | 1 to 1e+05 | units |  | MatchHeight: the canvas's height in canvas units, so one unit is the scene's height / ReferenceHeight scene pixels. |
 | `PixelSnap` | `Bool` | `true` |  |  |  | Rounds every element's corners to whole scene pixels, so images and clips land on pixel corners. |
+| `Font` | `AssetRef(Font)` | `null` |  |  |  | The font of the canvas's texts whose own Font is null; null uses the default font. |
+| `Theme` | `UiTheme` | `{"Normal":[1,1,1,1],"Hovered":[0.85,0.85,0.85,1],"Pressed":[0.6,0.6,0.6,1],"Focused":[0.75,0.85,1,1],"Disabled":[0.5,0.5,0.5,0.5]}` |  |  |  | The state tints of the canvas's widgets (buttons, toggles, sliders and scroll views). |
+| `DefaultFocus` | `EntityRef` | `null` |  |  |  | The UI widget keyboard and gamepad navigation focuses first while nothing has focus; null: navigation starts only from a pointer press or Ui.SetFocus. |
 
 Script members of `UiCanvas`:
 
 | Member | Kind | Signature | Access | Modes | Description |
 |---|---|---|---|---|---|
+| `DefaultFocus` | proxy field | `Entity?` | read/write | All | The UI widget keyboard and gamepad navigation focuses first while nothing has focus; null: navigation starts only from a pointer press or Ui.SetFocus. |
+| `Font` | proxy field | `AssetRef?` | read/write | All | The font of the canvas's texts whose own Font is null; null uses the default font. |
 | `PixelSnap` | proxy field | `boolean` | read/write | All | Rounds every element's corners to whole scene pixels, so images and clips land on pixel corners. |
 | `ReferenceHeight` | proxy field | `number` | read/write | All | MatchHeight: the canvas's height in canvas units, so one unit is the scene's height / ReferenceHeight scene pixels. |
 | `ScaleFactor` | proxy field | `number` | read/write | All | ConstantPixelSize: the scene pixels per canvas unit. |
 | `ScaleMode` | proxy field | `UiScaleMode` | read/write | All | How canvas units map to scene pixels. |
 | `SortOrder` | proxy field | `number` | read/write | All | Canvases draw in ascending SortOrder, ties in entity order; a later canvas draws over earlier ones. |
+| `Theme` | proxy field | `{Normal: Color, Hovered: Color, Pressed: Color, Focused: Color, Disabled: Color}` | read/write | All | The state tints of the canvas's widgets (buttons, toggles, sliders and scroll views). |
 
 ## UiRect
 
@@ -807,6 +813,7 @@ Draws a sprite sheet frame, or a plain colour, over a UI element's rectangle.
 | `Type` | `UiImageType` | `"Simple"` |  |  |  | Whether the frame stretches or keeps its 9-slice borders. |
 | `BorderScale` | `Float` | `1` | 0.01 to 1000 |  |  | Sliced: the canvas units each border texel takes. |
 | `Filter` | `UiImageFilter` | `"Point"` |  |  |  | How the frame's texture is sampled. |
+| `RaycastTarget` | `Bool` | `true` |  |  |  | Whether the image catches the pointer for its nearest widget; false lets the pointer pass through it. |
 
 Script members of `UiImage`:
 
@@ -816,6 +823,7 @@ Script members of `UiImage`:
 | `Color` | proxy field | `Color` | read/write | All | The linear tint multiplied with the frame's texels, with opacity in the fourth component. |
 | `Filter` | proxy field | `UiImageFilter` | read/write | All | How the frame's texture is sampled. |
 | `Frame` | proxy field | `number` | read/write | All | The index of the frame in the sheet's Frames; a frame the sheet lacks draws nothing. |
+| `RaycastTarget` | proxy field | `boolean` | read/write | All | Whether the image catches the pointer for its nearest widget; false lets the pointer pass through it. |
 | `Sheet` | proxy field | `AssetRef?` | read/write | All | The sprite sheet whose frame is drawn; null draws a plain rectangle of Color. |
 | `Type` | proxy field | `UiImageType` | read/write | All | Whether the frame stretches or keeps its 9-slice borders. |
 
@@ -832,13 +840,14 @@ Draws text in a UI element's rectangle, wrapped and aligned in it.
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
 | `Text` | `String` | `""` |  |  |  | The UTF-8 text; a line feed starts a new line. Scripts read localized strings with Loc.Get. |
-| `Font` | `AssetRef(Font)` | `null` |  |  |  | The font; null uses the default font. |
+| `Font` | `AssetRef(Font)` | `null` |  |  |  | The font; null uses its canvas's Font, or the default font when the canvas names none. |
 | `Size` | `Float` | `32` | 1 to 1e+05 | units |  | The em size in canvas units. |
 | `Color` | `Color4` | `[1,1,1,1]` | 0 to 1 |  |  | The linear text colour with opacity in the fourth component. |
 | `Alignment` | `TextAlignment` | `"Left"` |  |  |  | How each line is aligned within the rectangle's width. |
 | `VerticalAlignment` | `UiTextVerticalAlignment` | `"Top"` |  |  |  | Where the text block sits in the rectangle's height. |
 | `Wrap` | `Bool` | `true` |  |  |  | Whether lines break at spaces to fit the rectangle's width. |
 | `LineSpacing` | `Float` | `1` | 0.1 to 10 |  |  | Multiplies the font's line height. |
+| `RaycastTarget` | `Bool` | `true` |  |  |  | Whether the text catches the pointer for its nearest widget; false lets the pointer pass through it. |
 
 Script members of `UiText`:
 
@@ -846,8 +855,9 @@ Script members of `UiText`:
 |---|---|---|---|---|---|
 | `Alignment` | proxy field | `TextAlignment` | read/write | All | How each line is aligned within the rectangle's width. |
 | `Color` | proxy field | `Color` | read/write | All | The linear text colour with opacity in the fourth component. |
-| `Font` | proxy field | `AssetRef?` | read/write | All | The font; null uses the default font. |
+| `Font` | proxy field | `AssetRef?` | read/write | All | The font; null uses its canvas's Font, or the default font when the canvas names none. |
 | `LineSpacing` | proxy field | `number` | read/write | All | Multiplies the font's line height. |
+| `RaycastTarget` | proxy field | `boolean` | read/write | All | Whether the text catches the pointer for its nearest widget; false lets the pointer pass through it. |
 | `Size` | proxy field | `number` | read/write | All | The em size in canvas units. |
 | `Text` | proxy field | `string` | read/write | All | The UTF-8 text; a line feed starts a new line. Scripts read localized strings with Loc.Get. A value a script writes holds at most 4096 bytes of text. |
 | `VerticalAlignment` | proxy field | `UiTextVerticalAlignment` | read/write | All | Where the text block sits in the rectangle's height. |
@@ -1069,6 +1079,18 @@ Insets of a UI layout container's rectangle, in canvas units.
 | `Top` | `Float` | `0` | 0 to 1e+06 | units |  | The inset from the top edge. |
 | `Right` | `Float` | `0` | 0 to 1e+06 | units |  | The inset from the right edge. |
 | `Bottom` | `Float` | `0` | 0 to 1e+06 | units |  | The inset from the bottom edge. |
+
+### UiTheme
+
+The state tints of a canvas's widgets: each multiplies the colour of a widget element's own UiImage in that state.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Normal` | `Color4` | `[1,1,1,1]` | 0 to 1 |  |  | The tint of an interactable widget that is neither hovered, pressed nor focused. |
+| `Hovered` | `Color4` | `[0.85,0.85,0.85,1]` | 0 to 1 |  |  | The tint of a widget under the pointer. |
+| `Pressed` | `Color4` | `[0.6,0.6,0.6,1]` | 0 to 1 |  |  | The tint of a widget the pointer presses. |
+| `Focused` | `Color4` | `[0.75,0.85,1,1]` | 0 to 1 |  |  | The tint of the widget that has keyboard and gamepad focus. |
+| `Disabled` | `Color4` | `[0.5,0.5,0.5,0.5]` | 0 to 1 |  |  | The tint of a widget whose Interactable is false. |
 
 ## Enums
 

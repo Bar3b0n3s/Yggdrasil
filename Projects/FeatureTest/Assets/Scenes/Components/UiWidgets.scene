@@ -1,0 +1,1588 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "UiWidgets",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Camera": 1,
+		"Script": 2,
+		"UiCanvas": 1,
+		"UiRect": 1,
+		"UiImage": 1,
+		"UiText": 1,
+		"UiLayout": 1,
+		"UiButton": 1,
+		"UiToggle": 1,
+		"UiSlider": 1,
+		"UiScrollView": 1
+	},
+	"Entities": [
+		{
+			"ID": "b23dbc8e543e4f53",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 60,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.05, 0.06, 0.08]
+				}
+			}
+		},
+		{
+			"ID": "38b9edac823acd6f",
+			"Name": "Menu",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "d219d993c72cdbe5",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				},
+				"UiCanvas": {
+					"SortOrder": 0,
+					"ScaleMode": "ConstantPixelSize",
+					"ScaleFactor": 1,
+					"ReferenceHeight": 1080,
+					"PixelSnap": true,
+					"Font": "8437e42391ce559f",
+					"Theme": {
+						"Normal": [0.95, 0.95, 0.95, 1],
+						"Hovered": [0.8, 0.9, 1, 1],
+						"Pressed": [0.55, 0.65, 0.75, 1],
+						"Focused": [1, 0.9, 0.6, 1],
+						"Disabled": [0.45, 0.45, 0.45, 0.6]
+					},
+					"DefaultFocus": "508b3258c795c2a8"
+				}
+			}
+		},
+		{
+			"ID": "5d80186f138af255",
+			"Name": "Backdrop",
+			"Parent": "38b9edac823acd6f",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [1, 1],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [0, 0],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.1, 0.12, 0.16, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": false
+				}
+			}
+		},
+		{
+			"ID": "2f3d60655fabc76c",
+			"Name": "Title",
+			"Parent": "38b9edac823acd6f",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [40, 24],
+					"Size": [600, 48],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "Widgets",
+					"Font": null,
+					"Size": 36,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Left",
+					"VerticalAlignment": "Middle",
+					"Wrap": true,
+					"LineSpacing": 1,
+					"RaycastTarget": false
+				}
+			}
+		},
+		{
+			"ID": "508b3258c795c2a8",
+			"Name": "Play",
+			"Parent": "38b9edac823acd6f",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [40, 100],
+					"Size": [240, 56],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.25, 0.55, 0.35, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiButton": {
+					"Interactable": true,
+					"Focusable": true
+				}
+			}
+		},
+		{
+			"ID": "a06ac330f037de74",
+			"Name": "PlayLabel",
+			"Parent": "508b3258c795c2a8",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [1, 1],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [0, 0],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "Play",
+					"Font": null,
+					"Size": 28,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Center",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "5b5956da7a9350d3",
+			"Name": "Quit",
+			"Parent": "38b9edac823acd6f",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [40, 170],
+					"Size": [240, 56],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.55, 0.25, 0.25, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiButton": {
+					"Interactable": false,
+					"Focusable": true
+				}
+			}
+		},
+		{
+			"ID": "a56035b46246833c",
+			"Name": "QuitLabel",
+			"Parent": "5b5956da7a9350d3",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [1, 1],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [0, 0],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "Quit",
+					"Font": null,
+					"Size": 28,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Center",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "37040f97e7cde578",
+			"Name": "Hud",
+			"Parent": "38b9edac823acd6f",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [40, 240],
+					"Size": [240, 56],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.3, 0.3, 0.6, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiButton": {
+					"Interactable": true,
+					"Focusable": false
+				}
+			}
+		},
+		{
+			"ID": "db8ceccff4633919",
+			"Name": "HudLabel",
+			"Parent": "37040f97e7cde578",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [1, 1],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [0, 0],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "Hud",
+					"Font": null,
+					"Size": 28,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Center",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "a14df09988ba2b4c",
+			"Name": "Music",
+			"Parent": "38b9edac823acd6f",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [320, 100],
+					"Size": [240, 56],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.3, 0.3, 0.34, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiToggle": {
+					"Interactable": true,
+					"Focusable": true,
+					"IsOn": true,
+					"Graphic": "32d80c6cb3e11fe2"
+				}
+			}
+		},
+		{
+			"ID": "32d80c6cb3e11fe2",
+			"Name": "MusicCheck",
+			"Parent": "a14df09988ba2b4c",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [8, 8],
+					"Size": [40, 40],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.4, 0.85, 0.45, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "231125c15c8c717a",
+			"Name": "MusicLabel",
+			"Parent": "a14df09988ba2b4c",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [1, 1],
+					"Pivot": [0.5, 0.5],
+					"Position": [28, 0],
+					"Size": [-56, 0],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "Music",
+					"Font": null,
+					"Size": 28,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Center",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "0c0756d516f16f30",
+			"Name": "Hints",
+			"Parent": "38b9edac823acd6f",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [320, 170],
+					"Size": [240, 56],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.3, 0.3, 0.34, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiToggle": {
+					"Interactable": true,
+					"Focusable": false,
+					"IsOn": false,
+					"Graphic": "088ace5e3147f6c1"
+				}
+			}
+		},
+		{
+			"ID": "088ace5e3147f6c1",
+			"Name": "HintsCheck",
+			"Parent": "0c0756d516f16f30",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [8, 8],
+					"Size": [40, 40],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.4, 0.85, 0.45, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "641a3735e1b6282e",
+			"Name": "HintsLabel",
+			"Parent": "0c0756d516f16f30",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [1, 1],
+					"Pivot": [0.5, 0.5],
+					"Position": [28, 0],
+					"Size": [-56, 0],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "Hints",
+					"Font": null,
+					"Size": 28,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Center",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "e50ab37afafe9629",
+			"Name": "Locked",
+			"Parent": "38b9edac823acd6f",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [320, 240],
+					"Size": [240, 56],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.3, 0.3, 0.34, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiToggle": {
+					"Interactable": false,
+					"Focusable": true,
+					"IsOn": true,
+					"Graphic": "748849bb450f8f3e"
+				}
+			}
+		},
+		{
+			"ID": "748849bb450f8f3e",
+			"Name": "LockedCheck",
+			"Parent": "e50ab37afafe9629",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [8, 8],
+					"Size": [40, 40],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.4, 0.85, 0.45, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "af9c581152674d25",
+			"Name": "LockedLabel",
+			"Parent": "e50ab37afafe9629",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [1, 1],
+					"Pivot": [0.5, 0.5],
+					"Position": [28, 0],
+					"Size": [-56, 0],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "Locked",
+					"Font": null,
+					"Size": 28,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Center",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "e1468d12ac6f78b8",
+			"Name": "Volume",
+			"Parent": "38b9edac823acd6f",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [600, 100],
+					"Size": [400, 40],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.2, 0.2, 0.25, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiSlider": {
+					"Interactable": true,
+					"Focusable": true,
+					"Value": 25,
+					"Min": 0,
+					"Max": 100,
+					"WholeNumbers": true,
+					"Step": 5,
+					"Direction": "Horizontal",
+					"Fill": "f2859773f251e2f5",
+					"Handle": "0a255271eef2cc0e"
+				}
+			}
+		},
+		{
+			"ID": "f2859773f251e2f5",
+			"Name": "VolumeFill",
+			"Parent": "e1468d12ac6f78b8",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [1, 1],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [0, 0],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.3, 0.6, 0.9, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "0a255271eef2cc0e",
+			"Name": "VolumeHandle",
+			"Parent": "e1468d12ac6f78b8",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 1],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [16, 0],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.95, 0.95, 0.95, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "1175447548dcb62d",
+			"Name": "Dimmer",
+			"Parent": "38b9edac823acd6f",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [600, 160],
+					"Size": [400, 40],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.2, 0.2, 0.25, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiSlider": {
+					"Interactable": false,
+					"Focusable": true,
+					"Value": 0.75,
+					"Min": 0,
+					"Max": 1,
+					"WholeNumbers": false,
+					"Step": 0,
+					"Direction": "Horizontal",
+					"Fill": "5a11bfb1e6b3f6e6",
+					"Handle": null
+				}
+			}
+		},
+		{
+			"ID": "5a11bfb1e6b3f6e6",
+			"Name": "DimmerFill",
+			"Parent": "1175447548dcb62d",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [1, 1],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [0, 0],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.6, 0.6, 0.3, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "ff8dfcd43410adec",
+			"Name": "Brightness",
+			"Parent": "38b9edac823acd6f",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [1040, 100],
+					"Size": [40, 240],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.2, 0.2, 0.25, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiSlider": {
+					"Interactable": true,
+					"Focusable": false,
+					"Value": 0.5,
+					"Min": -1,
+					"Max": 1,
+					"WholeNumbers": false,
+					"Step": 0,
+					"Direction": "Vertical",
+					"Fill": "e291ec5781001f96",
+					"Handle": "7a03d70b5fcd1a0b"
+				}
+			}
+		},
+		{
+			"ID": "e291ec5781001f96",
+			"Name": "BrightnessFill",
+			"Parent": "ff8dfcd43410adec",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [1, 1],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [0, 0],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.9, 0.8, 0.3, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "7a03d70b5fcd1a0b",
+			"Name": "BrightnessHandle",
+			"Parent": "ff8dfcd43410adec",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [1, 0],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [0, 16],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.95, 0.95, 0.95, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "eab08442250f10db",
+			"Name": "List",
+			"Parent": "38b9edac823acd6f",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [600, 240],
+					"Size": [400, 200],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.15, 0.15, 0.2, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiScrollView": {
+					"Interactable": true,
+					"Focusable": true,
+					"Content": "48c5c6a2cd1cde83",
+					"Horizontal": false,
+					"Vertical": true,
+					"ScrollPosition": [0, 0],
+					"ScrollStep": 30
+				}
+			}
+		},
+		{
+			"ID": "48c5c6a2cd1cde83",
+			"Name": "Items",
+			"Parent": "eab08442250f10db",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [1, 0],
+					"Pivot": [0, 0],
+					"Position": [0, 0],
+					"Size": [0, 400],
+					"ClipChildren": false
+				},
+				"UiLayout": {
+					"Kind": "Stack",
+					"Direction": "Vertical",
+					"Padding": {
+						"Left": 0,
+						"Top": 0,
+						"Right": 0,
+						"Bottom": 0
+					},
+					"Spacing": [0, 0],
+					"MainAlignment": "Start",
+					"CrossAlignment": "Start",
+					"Columns": 0,
+					"CellSize": [100, 100],
+					"Wrap": false
+				}
+			}
+		},
+		{
+			"ID": "21f14dd600252f2a",
+			"Name": "Item1",
+			"Parent": "48c5c6a2cd1cde83",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0.5, 0.5],
+					"AnchorMax": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [400, 50],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.3, 0.3, 0.38, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiText": {
+					"Text": "Item 1",
+					"Font": null,
+					"Size": 24,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Center",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				},
+				"UiButton": {
+					"Interactable": true,
+					"Focusable": true
+				}
+			}
+		},
+		{
+			"ID": "63311a71f6247ae7",
+			"Name": "Item2",
+			"Parent": "48c5c6a2cd1cde83",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0.5, 0.5],
+					"AnchorMax": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [400, 50],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.24, 0.24, 0.32, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiText": {
+					"Text": "Item 2",
+					"Font": null,
+					"Size": 24,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Center",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				},
+				"UiButton": {
+					"Interactable": true,
+					"Focusable": true
+				}
+			}
+		},
+		{
+			"ID": "c66c308ba4e23dbd",
+			"Name": "Item3",
+			"Parent": "48c5c6a2cd1cde83",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0.5, 0.5],
+					"AnchorMax": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [400, 50],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.3, 0.3, 0.38, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiText": {
+					"Text": "Item 3",
+					"Font": null,
+					"Size": 24,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Center",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				},
+				"UiButton": {
+					"Interactable": true,
+					"Focusable": true
+				}
+			}
+		},
+		{
+			"ID": "2a861232b3e06f06",
+			"Name": "Item4",
+			"Parent": "48c5c6a2cd1cde83",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0.5, 0.5],
+					"AnchorMax": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [400, 50],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.24, 0.24, 0.32, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiText": {
+					"Text": "Item 4",
+					"Font": null,
+					"Size": 24,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Center",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				},
+				"UiButton": {
+					"Interactable": true,
+					"Focusable": true
+				}
+			}
+		},
+		{
+			"ID": "f1f2f337301c1172",
+			"Name": "Item5",
+			"Parent": "48c5c6a2cd1cde83",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0.5, 0.5],
+					"AnchorMax": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [400, 50],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.3, 0.3, 0.38, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiText": {
+					"Text": "Item 5",
+					"Font": null,
+					"Size": 24,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Center",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				},
+				"UiButton": {
+					"Interactable": true,
+					"Focusable": true
+				}
+			}
+		},
+		{
+			"ID": "0adc7996d92088d3",
+			"Name": "Item6",
+			"Parent": "48c5c6a2cd1cde83",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0.5, 0.5],
+					"AnchorMax": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [400, 50],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.24, 0.24, 0.32, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiText": {
+					"Text": "Item 6",
+					"Font": null,
+					"Size": 24,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Center",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				},
+				"UiButton": {
+					"Interactable": true,
+					"Focusable": true
+				}
+			}
+		},
+		{
+			"ID": "522e423d345c1fa0",
+			"Name": "Item7",
+			"Parent": "48c5c6a2cd1cde83",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0.5, 0.5],
+					"AnchorMax": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [400, 50],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.3, 0.3, 0.38, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiText": {
+					"Text": "Item 7",
+					"Font": null,
+					"Size": 24,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Center",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				},
+				"UiButton": {
+					"Interactable": true,
+					"Focusable": true
+				}
+			}
+		},
+		{
+			"ID": "a62bfe1f9ceb1215",
+			"Name": "Item8",
+			"Parent": "48c5c6a2cd1cde83",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0.5, 0.5],
+					"AnchorMax": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [400, 50],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.24, 0.24, 0.32, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiText": {
+					"Text": "Item 8",
+					"Font": null,
+					"Size": 24,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Center",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				},
+				"UiButton": {
+					"Interactable": true,
+					"Focusable": true
+				}
+			}
+		},
+		{
+			"ID": "430a732c7e644985",
+			"Name": "Strip",
+			"Parent": "38b9edac823acd6f",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [40, 320],
+					"Size": [480, 80],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.15, 0.15, 0.2, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiScrollView": {
+					"Interactable": false,
+					"Focusable": false,
+					"Content": "d0ef271b61a7711c",
+					"Horizontal": true,
+					"Vertical": false,
+					"ScrollPosition": [40, 0],
+					"ScrollStep": 40
+				}
+			}
+		},
+		{
+			"ID": "d0ef271b61a7711c",
+			"Name": "Row",
+			"Parent": "430a732c7e644985",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 1],
+					"Pivot": [0, 0],
+					"Position": [0, 0],
+					"Size": [800, 0],
+					"ClipChildren": false
+				},
+				"UiLayout": {
+					"Kind": "Stack",
+					"Direction": "Horizontal",
+					"Padding": {
+						"Left": 0,
+						"Top": 0,
+						"Right": 0,
+						"Bottom": 0
+					},
+					"Spacing": [0, 0],
+					"MainAlignment": "Start",
+					"CrossAlignment": "Start",
+					"Columns": 0,
+					"CellSize": [100, 100],
+					"Wrap": false
+				}
+			}
+		},
+		{
+			"ID": "ee4d8f3ad373a5cc",
+			"Name": "Tile1",
+			"Parent": "d0ef271b61a7711c",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0.5, 0.5],
+					"AnchorMax": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [200, 80],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.8, 0.3, 0.3, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "0b285fe97f8b9655",
+			"Name": "Tile2",
+			"Parent": "d0ef271b61a7711c",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0.5, 0.5],
+					"AnchorMax": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [200, 80],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.3, 0.8, 0.3, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "4928d83e3af5c15e",
+			"Name": "Tile3",
+			"Parent": "d0ef271b61a7711c",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0.5, 0.5],
+					"AnchorMax": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [200, 80],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.3, 0.3, 0.8, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "4dd74ff3cd0500a1",
+			"Name": "Tile4",
+			"Parent": "d0ef271b61a7711c",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0.5, 0.5],
+					"AnchorMax": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [200, 80],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.8, 0.8, 0.3, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				}
+			}
+		}
+	]
+}

@@ -7,6 +7,7 @@
 #include "Engine/Scene/Components/UiImageComponent.h"
 #include "Engine/Scene/Components/UiRectComponent.h"
 #include "Engine/Scene/Components/UiTextComponent.h"
+#include "Engine/Scene/Components/UiToggleComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/UiLayout.h"
@@ -18,8 +19,7 @@
 
 // UI interaction's pure functions (M22, C22.2, R-UI-INPUT; Docs/Decisions/0033-m22-contract.md decisions 22 and 23): the hit
 // test of pointer targets, directional and sequential navigation and the stick's direction, on tables ComputeUiLayout lays out
-// at one scene pixel per canvas unit, so every coordinate below is exact. The names are final (a live case); the rest is
-// skipped by the contract until stream A lands it.
+// at one scene pixel per canvas unit, so every coordinate below is exact.
 
 namespace Engine {
 
@@ -83,7 +83,7 @@ namespace Engine {
 
 		// Decision 22: the topmost pointer target reaches its nearest widget; a target with RaycastTarget off passes the pointer
 		// on, one without a widget blocks it, and a clip limits where a target is hit.
-		TEST_CASE("UiInteraction: the topmost pointer target over a point reaches its nearest widget" * doctest::skip(true))
+		TEST_CASE("UiInteraction: the topmost pointer target over a point reaches its nearest widget")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -131,7 +131,7 @@ namespace Engine {
 		// Decision 23: the smallest along-distance plus twice the across-distance among the focusable elements ahead; a
 		// disabled or unfocusable widget is never picked, nothing ahead keeps the focus, and without a focus only a canvas's
 		// DefaultFocus is picked.
-		TEST_CASE("UiInteraction: directional navigation picks the nearest focusable element along the direction" * doctest::skip(true))
+		TEST_CASE("UiInteraction: directional navigation picks the nearest focusable element along the direction")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -174,7 +174,7 @@ namespace Engine {
 		// Decision 23: Next and Previous follow draw order and wrap; an element outside the scene image stays focusable, one
 		// without an area does not. Without a focus they give the default focus: the DefaultFocus of the last canvas in draw
 		// order whose DefaultFocus is focusable, or nothing.
-		TEST_CASE("UiInteraction: Next and Previous cycle the focusable elements in draw order" * doctest::skip(true))
+		TEST_CASE("UiInteraction: Next and Previous cycle the focusable elements in draw order")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -210,7 +210,41 @@ namespace Engine {
 			CHECK(FindNextUiFocus(scene, menuTable, UUID{}, true) == b.GetUUID());
 		}
 
-		TEST_CASE("UiInteraction: the stick's direction is its larger axis at one half or more" * doctest::skip(true))
+		// Decision 26: an off toggle's Graphic and its subtree are Hidden, laid out but never hit or focusable, so a button
+		// inside it is passed over by the hit test, by Next and Previous and by the directions, and is not focusable; once
+		// the toggle is on, it takes part again.
+		TEST_CASE("UiInteraction: an element hidden in an off toggle's Graphic is neither hit nor focusable")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity canvas = AddInteractionCanvas(scene);
+			const Entity a = AddInteractionButton(scene, "A", canvas, glm::vec2(0.0f), glm::vec2(40.0f, 20.0f)); // centre (20, 10)
+			Entity toggle = AddInteractionElement(scene, "Toggle", canvas, glm::vec2(0.0f, 40.0f), glm::vec2(100.0f, 40.0f));
+			const Entity inner = AddInteractionButton(scene, "Inner", toggle, glm::vec2(0.0f), glm::vec2(40.0f, 20.0f)); // (20, 50)
+			toggle.AddComponent<UiToggleComponent>(UiToggleComponent{ .Focusable = false, .Graphic = inner.GetUUID() });
+			const Entity b = AddInteractionButton(scene, "B", canvas, glm::vec2(0.0f, 100.0f), glm::vec2(40.0f, 20.0f)); // (20, 110)
+			const UiLayoutTable table = ComputeUiLayout(scene, glm::uvec2(200, 200));
+			const UiLayoutNode* hidden = FindUiLayoutNode(table, inner.GetUUID());
+			REQUIRE(hidden != nullptr);
+			REQUIRE(hidden->Hidden);
+
+			CHECK_FALSE(IsUiFocusable(scene, table, inner.GetUUID()));
+			CHECK(FindNextUiFocus(scene, table, a.GetUUID(), true) == b.GetUUID());
+			CHECK(FindNextUiFocus(scene, table, b.GetUUID(), false) == a.GetUUID());
+			CHECK(FindUiNavigationTarget(scene, table, a.GetUUID(), UiDirection::Down) == b.GetUUID());
+			// Over the hidden button the toggle below it, a widget and so a pointer target, is the topmost target.
+			CHECK(HitTestUi(scene, table, glm::vec2(10.0f, 50.0f)).Target == toggle.GetUUID());
+			CHECK(HitTestUi(scene, table, glm::vec2(10.0f, 50.0f)).Widget == toggle.GetUUID());
+
+			toggle.GetComponent<UiToggleComponent>().IsOn = true;
+			const UiLayoutTable shown = ComputeUiLayout(scene, glm::uvec2(200, 200));
+			CHECK(IsUiFocusable(scene, shown, inner.GetUUID()));
+			CHECK(FindNextUiFocus(scene, shown, a.GetUUID(), true) == inner.GetUUID());
+			CHECK(FindUiNavigationTarget(scene, shown, a.GetUUID(), UiDirection::Down) == inner.GetUUID());
+			CHECK(HitTestUi(scene, shown, glm::vec2(10.0f, 50.0f)).Widget == inner.GetUUID());
+		}
+
+		TEST_CASE("UiInteraction: the stick's direction is its larger axis at one half or more")
 		{
 			CHECK(GetUiStickDirection(glm::vec2(0.6f, 0.2f)) == UiStickDirection::Right);
 			CHECK(GetUiStickDirection(glm::vec2(-0.2f, 0.7f)) == UiStickDirection::Up);

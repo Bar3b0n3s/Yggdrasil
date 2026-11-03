@@ -156,11 +156,11 @@
 		},
 		{
 			"Path": "NativeTest.eproj",
-			"XXH64": "f9609533b475360e",
+			"XXH64": "8ed33139ae5bb05f",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 171
+			"TranscriptLine": 175
 		}
 	]
 }

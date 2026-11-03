@@ -129,6 +129,8 @@ namespace Engine {
 		[[nodiscard]] Status RegisterTest(ScriptApiRegistry& api);
 		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 11): the Loc module.
 		[[nodiscard]] Status RegisterLoc(ScriptApiRegistry& api);
+		// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 28): the Ui module and its UiElementRect alias.
+		[[nodiscard]] Status RegisterUi(ScriptApiRegistry& api);
 
 	}
 

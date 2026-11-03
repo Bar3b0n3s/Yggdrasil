@@ -7,7 +7,10 @@
 #include "Engine/Scene/Components/UiCanvasComponent.h"
 #include "Engine/Scene/Components/UiImageComponent.h"
 #include "Engine/Scene/Components/UiRectComponent.h"
+#include "Engine/Scene/Components/UiScrollViewComponent.h"
+#include "Engine/Scene/Components/UiSliderComponent.h"
 #include "Engine/Scene/Components/UiTextComponent.h"
+#include "Engine/Scene/Components/UiToggleComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/RenderAnnotations.h"
 #include "Engine/Scene/RenderExtraction.h"
@@ -324,7 +327,7 @@ namespace Engine {
 
 		// C22.2 (Docs/Decisions/0033-m22-contract.md decision 25; stream C): each widget's image takes its canvas's tint for
 		// its state, from the session's interaction state when there is one; a text without a font takes its canvas's.
-		TEST_CASE("UiExtraction: a widget's image takes its canvas's tint for its state, and a text without a font takes its canvas's" * doctest::skip(true))
+		TEST_CASE("UiExtraction: a widget's image takes its canvas's tint for its state, and a text without a font takes its canvas's")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -410,6 +413,74 @@ namespace Engine {
 			list = std::move(edit);
 			CHECK(colorOf(hovered, UiDrawKind::Image) == color * theme.Normal);
 			CHECK(colorOf(disabled, UiDrawKind::Image) == color * theme.Disabled);
+		}
+
+		// Decision 25: every widget kind tints its own image, never a child's; a text takes the font of the canvas it belongs
+		// to (a nested canvas's below it); and render extraction tints with the request's interaction state.
+		TEST_CASE("UiExtraction: every widget kind takes its tint, a text takes its own canvas's font, and extraction reads the request's state")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			const TypedAssetHandle<AssetType::Font> outerFont(AssetHandle(UUID(0xF0C7)));
+			const TypedAssetHandle<AssetType::Font> innerFont(AssetHandle(UUID(0xF0D7)));
+			const UiTheme theme{ .Hovered = glm::vec4(0.5f, 1.0f, 1.0f, 1.0f), .Disabled = glm::vec4(1.0f, 0.5f, 1.0f, 0.5f) };
+			Entity canvas = scene.CreateEntity("Canvas");
+			canvas.AddComponent<UiCanvasComponent>(UiCanvasComponent{ .Font = outerFont, .Theme = theme });
+			const glm::vec4 color(0.5f, 0.5f, 0.5f, 1.0f);
+			const auto addWidget = [&scene, &canvas, color](std::string_view name, float y)
+			{
+				Entity widget = AddElement(scene, name, canvas, glm::vec2(0.0f, y), glm::vec2(20.0f, 10.0f));
+				widget.AddComponent<UiImageComponent>(UiImageComponent{ .Color = color });
+				return widget;
+			};
+			Entity toggle = addWidget("Toggle", 0.0f);
+			toggle.AddComponent<UiToggleComponent>(UiToggleComponent{ .Interactable = false });
+			Entity slider = addWidget("Slider", 10.0f);
+			slider.AddComponent<UiSliderComponent>(UiSliderComponent{ .Interactable = false });
+			Entity scrollView = addWidget("ScrollView", 20.0f);
+			scrollView.AddComponent<UiScrollViewComponent>(UiScrollViewComponent{ .Interactable = false });
+			Entity button = addWidget("Button", 30.0f);
+			button.AddComponent<UiButtonComponent>(UiButtonComponent{});
+			// The button's label holds an image of its own, which keeps its colour, and a text in the canvas's font.
+			Entity label = AddElement(scene, "Label", button, glm::vec2(0.0f), glm::vec2(20.0f, 10.0f));
+			label.AddComponent<UiImageComponent>(UiImageComponent{ .Color = color });
+			label.AddComponent<UiTextComponent>(UiTextComponent{ .Text = "Go" });
+			// A canvas nested below the button's element, whose text takes the nested canvas's font.
+			Entity nested = scene.CreateEntity("Nested", button);
+			nested.AddComponent<UiCanvasComponent>(UiCanvasComponent{ .SortOrder = 1, .Font = innerFont });
+			Entity caption = AddElement(scene, "Caption", nested, glm::vec2(0.0f, 50.0f), glm::vec2(20.0f, 10.0f));
+			caption.AddComponent<UiTextComponent>(UiTextComponent{ .Text = "Hi" });
+			TransformSystem::Update(scene);
+
+			const UiInteractionState state{ .Hovered = button.GetUUID() };
+			const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, { .Width = 100, .Height = 100, .UiInteraction = &state });
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			const auto itemOf = [&snapshot](Entity entity, UiDrawKind kind)
+			{
+				const auto found = std::ranges::find_if(snapshot->Ui.Items, [&entity, kind](const UiDrawItem& item)
+				{
+					return item.Entity == entity.GetUUID() && item.Kind == kind;
+				});
+				REQUIRE(found != snapshot->Ui.Items.end());
+				return *found;
+			};
+			CHECK(itemOf(toggle, UiDrawKind::Image).Color == color * theme.Disabled);
+			CHECK(itemOf(slider, UiDrawKind::Image).Color == color * theme.Disabled);
+			CHECK(itemOf(scrollView, UiDrawKind::Image).Color == color * theme.Disabled);
+			CHECK(itemOf(button, UiDrawKind::Image).Color == color * theme.Hovered);
+			CHECK(itemOf(label, UiDrawKind::Image).Color == color);
+			CHECK(itemOf(label, UiDrawKind::Text).Font == outerFont.GetHandle());
+			CHECK(itemOf(caption, UiDrawKind::Text).Font == innerFont.GetHandle());
+
+			// Without the request's state, the button is Normal.
+			const Result<RenderSnapshot> plain = ExtractRenderSnapshot(scene, { .Width = 100, .Height = 100 });
+			REQUIRE_MESSAGE(plain.has_value(), plain.error().ToString());
+			const auto plainButton = std::ranges::find_if(plain->Ui.Items, [&button](const UiDrawItem& item)
+			{
+				return item.Entity == button.GetUUID();
+			});
+			REQUIRE(plainButton != plain->Ui.Items.end());
+			CHECK(plainButton->Color == color * theme.Normal);
 		}
 	}
 

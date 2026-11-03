@@ -366,9 +366,10 @@ namespace Engine {
 		// Only configure run state or inspect the candidate until Activate; do not advance or invoke its script VM.
 		[[nodiscard]] static Result<Scope<PlaySession>> Prepare(const PlaySessionSpecification& specification, const Json& sceneDocument);
 		[[nodiscard]] static Result<Scope<PlaySession>> Prepare(const PlaySessionSpecification& specification, Ref<const Json> startDocument);
-		// Once, after retiring the previous session: acquire audio, initialize instances and run startup callbacks,
-		// then start PlayOnStart voices and lay the scene's UI out (GetUi, M22). Script faults use the normal error stream/pause/fatal-stop path, not an outer
-		// preparation error. Create is Prepare followed by Activate. Activate itself does not return a fallible result.
+		// Once, after retiring the previous session: acquire audio, lay the scene's UI out (GetUi, M22), initialize instances
+		// and run startup callbacks, then start PlayOnStart voices and lay the UI out again. Script faults use the normal error
+		// stream/pause/fatal-stop path, not an outer preparation error. Create is Prepare followed by Activate. Activate itself
+		// does not return a fallible result.
 		void Activate();
 
 		// The serializer copy of §5.6: SceneSerializer::ToJson(editScene) into an in-memory document, then Create, which keeps
@@ -470,13 +471,14 @@ namespace Engine {
 		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 3): the session's UI (Scene/UiSystem.h): the layouts of the
 		// UiLayout and FrameUiLayout phases at the session's scene resolution (GetViewSize in W22.1; the later lander of M21
 		// and M22 makes it the scene resolution M21's PixelPerfectCamera sets), in Play and Simulate alike; ui.tree reads the
-		// current one for the play scene, and W22.2's UiInput hit-tests it. Valid for the session's lifetime. Activate ends,
-		// and a Scene.Load or Scene.Reload's replacement of the scene at the end of a frame ends, after the scene's startup
-		// callbacks, with UiSystem::LayoutStep of the current scene (not a phase: no observer reports it), so the current
-		// layout always describes the current scene, before its first step included. C22.2 (decisions 24, 27 and 29): its
-		// interaction state, which the UiInput phase updates from the step view and the project's Ui settings (and keeps
-		// empty while the scene has no canvas), the UiEvents phase's queue, and the ui block of ComputeStateHash; a scene
-		// replacement resets the interaction (UiSystem::ResetInteraction) before its layout. The session's script host
+		// current one for the play scene, and W22.2's UiInput hit-tests it. Valid for the session's lifetime. Activate, and a
+		// Scene.Load or Scene.Reload's replacement of the scene at the end of a frame, run UiSystem::LayoutStep of the current
+		// scene both before the scene's startup callbacks and after them (not a phase: no observer reports it), so the current
+		// layout always describes the current scene, in its OnCreate and OnStart and before its first step included (the
+		// review of W22.2). C22.2 (decisions 24, 27 and 29): its interaction state, which the UiInput phase updates from the
+		// step view and the project's Ui settings (and keeps empty while the scene has no canvas), the UiEvents phase's queue,
+		// and the ui block of ComputeStateHash; a scene replacement resets the interaction (UiSystem::ResetInteraction) before
+		// its layouts. The session's script host
 		// returns it (IScriptHost::GetUi) to the Ui script module, and its game view and ExtractView pass its interaction
 		// state to extraction for the widgets' tints (RenderExtractionRequest::UiInteraction).
 		[[nodiscard]] UiSystem& GetUi();

@@ -19,7 +19,15 @@
 #include "Engine/Project/ProjectSettings.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Renderer/RenderSnapshot.h"
+#include "Engine/Scene/Components/UiButtonComponent.h"
+#include "Engine/Scene/Components/UiCanvasComponent.h"
+#include "Engine/Scene/Components/UiImageComponent.h"
+#include "Engine/Scene/Components/UiRectComponent.h"
+#include "Engine/Scene/Entity.h"
 #include "Engine/Scene/PhysicsSystem.h"
+#include "Engine/Scene/Scene.h"
+#include "Engine/Scene/UiInteraction.h"
+#include "Engine/Scene/UiSystem.h"
 #include "Engine/Scripting/ScriptAssetLoads.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Scripting/ScriptError.h"
@@ -45,7 +53,9 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 namespace Engine {
@@ -124,6 +134,42 @@ namespace Engine {
 			Result<Scope<ProjectSettingsCommand>> command = ProjectSettingsCommand::CreateFromPatch(editor, *patch, "Observation");
 			REQUIRE_MESSAGE(command.has_value(), command.error().ToString());
 			REQUIRE(editor.Execute(std::move(*command)).has_value());
+		}
+
+		// Takes the UI events of every tick at StartFlush, right after the UiInput phase raised them (M22).
+		class UiEventRecorder final : public IPlaySessionObserver
+		{
+		public:
+			void OnPhase(PlaySession& session, PlaySessionPhase phase, uint64_t /*tick*/) override
+			{
+				if (phase != PlaySessionPhase::StartFlush)
+					return;
+				for (const UiEvent& event : session.GetUi().TakeEvents())
+					Events.push_back(event);
+			}
+
+			std::vector<UiEvent> Events;
+		};
+
+		// The UI the Ui settings are observed on (M22): a canvas with the buttons A (0, 0) and B (0, 40) in its left column and
+		// C (120, 40) and D (120, 0) in its right one, each 100 x 20 scene pixels, in the draw order A, B, C, D.
+		void PopulateObservationUi(Scene& scene)
+		{
+			Entity canvas = scene.CreateEntity("Canvas");
+			canvas.AddComponent<UiCanvasComponent>(UiCanvasComponent{});
+			const std::pair<std::string_view, glm::vec2> buttons[] = { { "A", glm::vec2(0.0f) }, { "B", glm::vec2(0.0f, 40.0f) },
+				{ "C", glm::vec2(120.0f, 40.0f) }, { "D", glm::vec2(120.0f, 0.0f) } };
+			for (const auto& [name, position] : buttons)
+			{
+				Entity button = scene.CreateEntity(name, canvas);
+				button.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f),
+					.AnchorMax = glm::vec2(0.0f),
+					.Pivot = glm::vec2(0.0f),
+					.Position = position,
+					.Size = glm::vec2(100.0f, 20.0f) });
+				button.AddComponent<UiImageComponent>(UiImageComponent{});
+				button.AddComponent<UiButtonComponent>(UiButtonComponent{});
+			}
 		}
 
 		// The InputState after `events` (gamepad 0 connected first) and one step latch.
@@ -307,6 +353,100 @@ namespace Engine {
 			// The session's VM reads string tables in the project's locale (Loc.GetLocale, M22).
 			observe("/Localization/Locale", !settings.Localization.Locale.empty() && session->GetScripts()->GetLocale() == settings.Localization.Locale);
 			CallOrFail(client, "play.stop", Json::object());
+
+			// The Ui settings (M22, Docs/Decisions/0033-m22-contract.md decision 30), through play sessions of a UI scene with
+			// the open project's settings, each starting with a button focused (UiSystem::SetFocus, Ui.SetFocus's path): the
+			// fixture's Navigation is off, so its session ignores the commands, which are then observed with Navigation on, and
+			// its StickNavigation is off, observed against a session with it on (as the exporter's Export.Exclude is observed
+			// through a patched BuildScenes). Taps are two ticks apart, so each press is an edge; Submit and Cancel are observed
+			// as the events the UiInput phase raises.
+			{
+				Test::SceneTestFixture uiFixture;
+				PopulateObservationUi(uiFixture.GetScene());
+				const auto startUi = [&uiFixture](const ProjectSettings& project, IPlaySessionObserver* observer, std::string_view focus)
+				{
+					PlaySessionSpecification specification;
+					specification.Registry = &uiFixture.GetRegistry();
+					specification.Project = project;
+					specification.Seed = 3;
+					specification.Observer = observer;
+					Result<Scope<PlaySession>> started = PlaySession::CreateFromScene(specification, uiFixture.GetScene());
+					REQUIRE_MESSAGE(started.has_value(), started.error().ToString());
+					PlaySession& ui = **started;
+					ui.SetExtractionEnabled(false);
+					const Status focused = ui.GetUi().SetFocus(ui.GetScene(), ui.GetScene().FindEntityByPath(focus).GetUUID());
+					REQUIRE_MESSAGE(focused.has_value(), focused.error().ToString());
+					return std::move(*started);
+				};
+				const auto tap = [](PlaySession& ui, uint64_t tick, Key key)
+				{
+					REQUIRE(ui.GetInput()
+							.Queue(tick, PlayInputEvent{ .Type = PlayInputEventType::KeyInput, .State = PlayInputEventState::Tap, .KeyCode = key })
+							.has_value());
+				};
+				const auto pushStickUp = [](PlaySession& ui, uint64_t tick)
+				{
+					REQUIRE(ui.GetInput()
+							.Queue(tick,
+								PlayInputEvent{ .Type = PlayInputEventType::GamepadAxisInput,
+									.Value = 1.0f,
+									.Gamepad = 0,
+									.Axis = GamepadAxis::LeftY })
+							.has_value());
+				};
+				// The path of the element that has focus once `tick` has run; empty for none.
+				const auto focusAfter = [](PlaySession& ui, uint64_t tick)
+				{
+					while (ui.GetTick() <= tick)
+						ui.Tick();
+					const Entity focused = ui.GetScene().FindEntityByID(ui.GetUi().GetInteraction().Focused);
+					return focused.IsValid() ? ui.GetScene().GetEntityPath(focused) : std::string();
+				};
+				const ProjectSettings& opened = editor.GetProject().GetSettings();
+				const Scope<PlaySession> withoutNavigation = startUi(opened, nullptr, "/Canvas/A");
+				tap(*withoutNavigation, 0, Key::N);
+				const std::string ignored = focusAfter(*withoutNavigation, 0);
+
+				ProjectSettings navigating = opened;
+				navigating.Ui.Navigation = true;
+				UiEventRecorder recorder;
+				const Scope<PlaySession> ui = startUi(navigating, &recorder, "/Canvas/A");
+				tap(*ui, 0, Key::Tab);
+				tap(*ui, 2, Key::N);
+				tap(*ui, 4, Key::W);
+				tap(*ui, 6, Key::D);
+				tap(*ui, 8, Key::S);
+				tap(*ui, 10, Key::A);
+				tap(*ui, 12, Key::K);
+				tap(*ui, 14, Key::Backspace);
+				pushStickUp(*ui, 16);
+				const std::string afterTab = focusAfter(*ui, 0);
+				const std::string afterNext = focusAfter(*ui, 2);
+				observe("/Ui/Navigation", ignored == "/Canvas/A" && afterNext == "/Canvas/B");
+				observe("/Ui/Next", afterTab == "/Canvas/A" && afterNext == "/Canvas/B");
+				observe("/Ui/Up", focusAfter(*ui, 4) == "/Canvas/A");
+				observe("/Ui/Right", focusAfter(*ui, 6) == "/Canvas/D");
+				observe("/Ui/Down", focusAfter(*ui, 8) == "/Canvas/C");
+				observe("/Ui/Left", focusAfter(*ui, 10) == "/Canvas/B");
+				CHECK(focusAfter(*ui, 14) == "/Canvas/B");
+				const UUID b = ui->GetScene().FindEntityByPath("/Canvas/B").GetUUID();
+				const auto raised = [&recorder, b](UiEventKind kind)
+				{
+					return std::ranges::any_of(recorder.Events, [kind, b](const UiEvent& event)
+					{
+						return event.Kind == kind && event.Target == b;
+					});
+				};
+				observe("/Ui/Submit", raised(UiEventKind::Click));
+				observe("/Ui/Cancel", raised(UiEventKind::Cancel));
+				const bool stickIgnored = focusAfter(*ui, 16) == "/Canvas/B";
+
+				ProjectSettings sticking = navigating;
+				sticking.Ui.StickNavigation = true;
+				const Scope<PlaySession> stickSession = startUi(sticking, nullptr, "/Canvas/B");
+				pushStickUp(*stickSession, 0);
+				observe("/Ui/StickNavigation", stickIgnored && focusAfter(*stickSession, 0) == "/Canvas/A");
+			}
 
 			// Ordinary play enforces the callback budget, and with PauseOnError false keeps running after the fault.
 			CallOrFail(client, "scene.open", Json{ { "path", settings.StartScene } });

@@ -365,7 +365,7 @@ namespace Engine {
 
 		// C22.2 (Docs/Decisions/0033-m22-contract.md decision 26; stream B): a slider's anchors along its direction follow its
 		// value as read, and an off toggle's Graphic is laid out but hidden with its subtree.
-		TEST_CASE("UiLayout: a slider's value places its Fill and Handle, and an off toggle hides its Graphic" * doctest::skip(true))
+		TEST_CASE("UiLayout: a slider's value places its Fill and Handle, and an off toggle hides its Graphic")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -407,7 +407,7 @@ namespace Engine {
 
 		// C22.2 (decision 26; stream C): a scroll view clips its descendants whatever ClipChildren says, and its content moves
 		// by the scroll position clamped to the content's overflow, along the axes it scrolls.
-		TEST_CASE("UiLayout: a scroll view clips its descendants and moves its content by the clamped scroll position" * doctest::skip(true))
+		TEST_CASE("UiLayout: a scroll view clips its descendants and moves its content by the clamped scroll position")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -432,6 +432,41 @@ namespace Engine {
 			view.GetComponent<UiScrollViewComponent>().ScrollPosition = glm::vec2(0.0f, 500.0f);
 			table = ComputeUiLayout(scene, glm::uvec2(320, 180));
 			CHECK(RequireNode(table, content).Min == glm::vec2(10.0f, -150.0f));
+		}
+
+		// Decision 26: the offset is in canvas units times the canvas's scale, so at 1.5 scene pixels per unit a scroll of 33
+		// moves the content 49.5 pixels, and PixelSnap snaps the moved corners again (keeping the content's size); without
+		// PixelSnap they stay where they land.
+		TEST_CASE("UiLayout: a scrolled content's corners snap again after the move at a fractional scale")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity canvas = AddCanvas(scene, "Canvas", UiCanvasComponent{ .ScaleFactor = 1.5f });
+			Entity view = AddElement(scene, "View", canvas, MakeTopLeftRect(glm::vec2(10.0f), glm::vec2(100.0f, 40.0f)));
+			Entity content = AddElement(scene, "Content", view, MakeTopLeftRect(glm::vec2(0.0f), glm::vec2(300.0f, 40.0f)));
+			Entity cell = AddElement(scene, "Cell", content, MakeTopLeftRect(glm::vec2(10.0f, 0.0f), glm::vec2(20.0f, 40.0f)));
+			// Horizontal only: y does not scroll, and x reads 33 of an overflow of 200.
+			view.AddComponent<UiScrollViewComponent>(
+				UiScrollViewComponent{ .Content = content.GetUUID(),
+					.Horizontal = true,
+					.Vertical = false,
+					.ScrollPosition = glm::vec2(33.0f, 10.0f) });
+
+			UiLayoutTable table = ComputeUiLayout(scene, glm::uvec2(640, 360));
+			CHECK(RequireNode(table, view).Min == glm::vec2(15.0f, 15.0f));
+			CHECK(RequireNode(table, view).Max == glm::vec2(165.0f, 75.0f));
+			// 15 - 49.5 = -34.5 and 465 - 49.5 = 415.5 snap to -34 and 416.
+			CHECK(RequireNode(table, content).Min == glm::vec2(-34.0f, 15.0f));
+			CHECK(RequireNode(table, content).Max == glm::vec2(416.0f, 75.0f));
+			const UiLayoutNode& cellNode = RequireNode(table, cell);
+			CHECK(cellNode.Min == glm::vec2(-19.0f, 15.0f));
+			CHECK(cellNode.Max == glm::vec2(11.0f, 75.0f));
+			CHECK(cellNode.Clip == UiClipRect{ .MinX = 15, .MinY = 15, .MaxX = 165, .MaxY = 75 });
+
+			canvas.GetComponent<UiCanvasComponent>().PixelSnap = false;
+			table = ComputeUiLayout(scene, glm::uvec2(640, 360));
+			CHECK(RequireNode(table, content).Min == glm::vec2(-34.5f, 15.0f));
+			CHECK(RequireNode(table, content).Max == glm::vec2(415.5f, 75.0f));
 		}
 
 		// C22.2 (decision 26; streams B and C, the review's m9): a Fill, Handle, Graphic or Content that is not an element below

@@ -43,6 +43,9 @@
 #include "Engine/Scene/Components/UiCanvasComponent.h"
 #include "Engine/Scene/Components/UiImageComponent.h"
 #include "Engine/Scene/Components/UiRectComponent.h"
+#include "Engine/Scene/Components/UiScrollViewComponent.h"
+#include "Engine/Scene/Components/UiSliderComponent.h"
+#include "Engine/Scene/Components/UiToggleComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
 #include "Engine/Scene/Migrations.h"
@@ -82,6 +85,8 @@ namespace Engine {
 		// M22 (Docs/Decisions/0033-m22-contract.md decision 13): the UI checks of CheckUi.
 		constexpr std::string_view UiElementWithoutCanvasCode = "UI_ELEMENT_WITHOUT_CANVAS";
 		constexpr std::string_view UiImageFrameOutOfRangeCode = "UI_IMAGE_FRAME_OUT_OF_RANGE";
+		// M22 (Docs/Decisions/0033-m22-contract.md decision 35): CheckUi's widget parts.
+		constexpr std::string_view UiWidgetPartInvalidCode = "UI_WIDGET_PART_INVALID";
 
 		constexpr std::array ValidatorCodes = {
 			SceneNoPrimaryCameraCode,
@@ -141,6 +146,7 @@ namespace Engine {
 			// M22 (Docs/Decisions/0033-m22-contract.md decision 13), appended in landing order (ADR 0028's phase-2 ledger).
 			UiElementWithoutCanvasCode,
 			UiImageFrameOutOfRangeCode,
+			UiWidgetPartInvalidCode,
 		};
 
 		// The documentation of every code, in ValidatorCodes order (M14, ADR 0022 decision 10): Docs/Reference/Validation.md, the
@@ -305,6 +311,10 @@ namespace Engine {
 			ValidationCodeInfo{ UiImageFrameOutOfRangeCode, "Warning", false,
 				"A UiImage's Frame is not an index of its sprite sheet's Frames, so it draws nothing.",
 				"Set Frame below the sheet's frame count, or add the frame to the sheet." },
+			ValidationCodeInfo{ UiWidgetPartInvalidCode, "Warning", false,
+				"A UiToggle's Graphic, a UiSlider's Fill or Handle, or a UiScrollView's Content names an entity that is not a UI element below "
+				"the widget in its canvas, so the widget ignores it.",
+				"Name an element below the widget, or clear the reference." },
 		};
 
 		// The code documentation lists exactly the codes, in order.
@@ -1217,12 +1227,33 @@ namespace Engine {
 			return false;
 		}
 
-		// The UI checks (M22, Docs/Decisions/0033-m22-contract.md decision 13), in canonical order: UI_ELEMENT_WITHOUT_CANVAS on
-		// every entity with a UiRect and no UiCanvas on an ancestor, which layout leaves out (Scene/UiLayout.h), and
-		// UI_IMAGE_FRAME_OUT_OF_RANGE on every UiImage whose Frame is not an index of its sheet's Frames, which the Ui pass skips
-		// (Renderer/UiPass.h). A null sheet draws a plain rectangle and has no frames to check; a sheet that is missing or fails
-		// to load is ASSET_MISSING's or ASSET_IMPORT_FAILED's. Neither is fixable: only the author knows where an element or a
-		// frame belongs.
+		// Whether `part` is a UI element below `widget` in the widget's canvas, the only part a widget's layout rule applies to
+		// (Scene/UiLayout.h, C22.2 decision 26): it has a UiRect, and `widget` is an ancestor with no UiCanvas between them (a
+		// canvas there starts a tree of its own). Bounded by the entity count, so a scratch scene's parent chain always ends.
+		static bool IsUiWidgetPart(const Scene& scene, ConstEntity widget, ConstEntity part)
+		{
+			if (!part.HasComponent<UiRectComponent>())
+				return false;
+			ConstEntity ancestor = part.GetParent();
+			for (size_t steps = 0; ancestor.IsValid() && steps < scene.GetEntityCount(); ++steps)
+			{
+				if (ancestor.GetUUID() == widget.GetUUID())
+					return true;
+				if (ancestor.HasComponent<UiCanvasComponent>())
+					return false;
+				ancestor = ancestor.GetParent();
+			}
+			return false;
+		}
+
+		// The UI checks (M22, Docs/Decisions/0033-m22-contract.md decisions 13 and 35), in canonical order:
+		// UI_ELEMENT_WITHOUT_CANVAS on every entity with a UiRect and no UiCanvas on an ancestor, which layout leaves out
+		// (Scene/UiLayout.h); UI_WIDGET_PART_INVALID on every UiToggle Graphic, UiSlider Fill or Handle and UiScrollView Content
+		// that names an entity of the scene that is not a UI element below its widget in its canvas, which the widget ignores (a
+		// null part is no part, and one the scene lacks is ENTITY_DANGLING_REFERENCE's); and UI_IMAGE_FRAME_OUT_OF_RANGE on every
+		// UiImage whose Frame is not an index of its sheet's Frames, which the Ui pass skips (Renderer/UiPass.h). A null sheet
+		// draws a plain rectangle and has no frames to check; a sheet that is missing or fails to load is ASSET_MISSING's or
+		// ASSET_IMPORT_FAILED's. None is fixable: only the author knows where an element, a part or a frame belongs.
 		static void CheckUi(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			const Scene& scene = *checked.Target;
@@ -1239,6 +1270,29 @@ namespace Engine {
 						std::format("'{}' has a UiRect but no UiCanvas on an ancestor, so it is never laid out or drawn", scene.GetEntityPath(entity)),
 						site, "move it below an entity with a UiCanvas (entity.reparent), or add a UiCanvas to its root", false));
 				}
+				const auto checkPart = [&scene, &entity, &site, &diagnostics](std::string_view component, std::string_view field, UUID part)
+				{
+					const ConstEntity target = part.IsValid() ? scene.FindEntityByID(part) : ConstEntity();
+					if (!target.IsValid() || IsUiWidgetPart(scene, entity, target))
+						return;
+					DiagnosticSite partSite = site;
+					partSite.Component = component;
+					partSite.Field = field;
+					diagnostics.push_back(MakeDiagnostic(UiWidgetPartInvalidCode, DiagnosticSeverity::Warning,
+						std::format("{}.{} of '{}' names '{}', which is not a UI element below it in its canvas, so the widget ignores it",
+							component, field, scene.GetEntityPath(entity), scene.GetEntityPath(target)),
+						partSite,
+						"name a UI element below the widget (an entity with a UiRect, with no UiCanvas in between), or clear the reference", false));
+				};
+				if (const UiToggleComponent* toggle = entity.TryGetComponent<UiToggleComponent>())
+					checkPart("UiToggle", "Graphic", toggle->Graphic);
+				if (const UiSliderComponent* slider = entity.TryGetComponent<UiSliderComponent>())
+				{
+					checkPart("UiSlider", "Fill", slider->Fill);
+					checkPart("UiSlider", "Handle", slider->Handle);
+				}
+				if (const UiScrollViewComponent* scrollView = entity.TryGetComponent<UiScrollViewComponent>())
+					checkPart("UiScrollView", "Content", scrollView->Content);
 				const UiImageComponent* image = entity.TryGetComponent<UiImageComponent>();
 				if (image == nullptr || !image->Sheet.IsValid() || assets == nullptr)
 					return;

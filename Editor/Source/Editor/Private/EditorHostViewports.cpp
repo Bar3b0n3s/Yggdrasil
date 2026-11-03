@@ -1,6 +1,7 @@
 #include "EditorPCH.h"
 #include "Editor/Private/EditorHostViewports.h"
 
+#include "Editor/Ui/UiPreview.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Viewport/GizmoController.h"
@@ -202,6 +203,9 @@ namespace Engine {
 				static_cast<uint32_t>(std::clamp(std::floor(rectangle.Size.y * scale.y), 1.0f, 8192.0f)));
 			if (view == ViewportView::Game && m_Editor.GetViewportState().GetGameResolution().x != 0)
 				size = m_Editor.GetViewportState().GetGameResolution();
+			// M22 (decision 33): the UI preview renders the scene view at the game frame, which its panel letterboxes.
+			if (view == ViewportView::Scene)
+				size = GetUiPreviewRenderSize(m_Editor).value_or(size);
 		}
 		if (view == ViewportView::Game)
 			m_GameRectangle = rectangle;
@@ -260,6 +264,8 @@ namespace Engine {
 			request.Flags = options.Flags;
 			request.SelectedEntities = std::move(options.SelectedEntities);
 		}
+		// M22 (decision 33): the UI preview frames the scene as the game does, through its primary camera.
+		const bool uiPreview = view == ViewportView::Scene && ConfigureUiPreviewRequest(m_Editor, request);
 		if (m_Editor.HasProject())
 		{
 			const auto& rendering = m_Editor.GetProject().GetSettings().Rendering;
@@ -269,7 +275,7 @@ namespace Engine {
 			TransformSystem::Update(m_Editor.GetScene());
 		ENGINE_TRY_ASSIGN(RenderSnapshot snapshot, session && !preview ? session->ExtractView(request) : ExtractRenderSnapshot(*scene, request));
 		snapshot.SceneRevision = scene->GetRevision();
-		if (view == ViewportView::Scene)
+		if (view == ViewportView::Scene && !uiPreview)
 			snapshot.DebugView = m_Editor.GetViewportState().GetDebugView();
 		if (m_Editor.HasProject())
 		{

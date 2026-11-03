@@ -4365,6 +4365,21 @@
 							"PixelSnap": {
 								"description": "Rounds every element's corners to whole scene pixels, so images and clips land on pixel corners.",
 								"type": "boolean"
+							},
+							"Font": {
+								"description": "The font of the canvas's texts whose own Font is null; null uses the default font.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Font"
+							},
+							"Theme": {
+								"description": "The state tints of the canvas's widgets (buttons, toggles, sliders and scroll views).",
+								"$ref": "#/$defs/UiTheme"
+							},
+							"DefaultFocus": {
+								"description": "The UI widget keyboard and gamepad navigation focuses first while nothing has focus; null: navigation starts only from a pointer press or Ui.SetFocus.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
 							}
 						},
 						"additionalProperties": false
@@ -4527,6 +4542,10 @@
 							"Filter": {
 								"description": "How the frame's texture is sampled.",
 								"enum": ["Point", "Linear"]
+							},
+							"RaycastTarget": {
+								"description": "Whether the image catches the pointer for its nearest widget; false lets the pointer pass through it.",
+								"type": "boolean"
 							}
 						},
 						"additionalProperties": false
@@ -4540,7 +4559,7 @@
 								"type": "string"
 							},
 							"Font": {
-								"description": "The font; null uses the default font.",
+								"description": "The font; null uses its canvas's Font, or the default font when the canvas names none.",
 								"type": ["string", "null"],
 								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
 								"x-assetType": "Font"
@@ -4596,6 +4615,10 @@
 								"type": "number",
 								"minimum": 0.1,
 								"maximum": 10
+							},
+							"RaycastTarget": {
+								"description": "Whether the text catches the pointer for its nearest widget; false lets the pointer pass through it.",
+								"type": "boolean"
 							}
 						},
 						"additionalProperties": false
@@ -4912,6 +4935,153 @@
 								"type": "integer",
 								"minimum": -2147483648,
 								"maximum": 2147483647
+							}
+						},
+						"additionalProperties": false
+					},
+					"UiTheme": {
+						"description": "The state tints of a canvas's widgets: each multiplies the colour of a widget element's own UiImage in that state.",
+						"type": "object",
+						"properties": {
+							"Normal": {
+								"description": "The tint of an interactable widget that is neither hovered, pressed nor focused.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"Hovered": {
+								"description": "The tint of a widget under the pointer.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"Pressed": {
+								"description": "The tint of a widget the pointer presses.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"Focused": {
+								"description": "The tint of the widget that has keyboard and gamepad focus.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"Disabled": {
+								"description": "The tint of a widget whose Interactable is false.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
 							}
 						},
 						"additionalProperties": false
@@ -6839,6 +7009,21 @@
 							"PixelSnap": {
 								"description": "Rounds every element's corners to whole scene pixels, so images and clips land on pixel corners.",
 								"type": "boolean"
+							},
+							"Font": {
+								"description": "The font of the canvas's texts whose own Font is null; null uses the default font.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Font"
+							},
+							"Theme": {
+								"description": "The state tints of the canvas's widgets (buttons, toggles, sliders and scroll views).",
+								"$ref": "#/$defs/UiTheme"
+							},
+							"DefaultFocus": {
+								"description": "The UI widget keyboard and gamepad navigation focuses first while nothing has focus; null: navigation starts only from a pointer press or Ui.SetFocus.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
 							}
 						},
 						"additionalProperties": false
@@ -7001,6 +7186,10 @@
 							"Filter": {
 								"description": "How the frame's texture is sampled.",
 								"enum": ["Point", "Linear"]
+							},
+							"RaycastTarget": {
+								"description": "Whether the image catches the pointer for its nearest widget; false lets the pointer pass through it.",
+								"type": "boolean"
 							}
 						},
 						"additionalProperties": false
@@ -7014,7 +7203,7 @@
 								"type": "string"
 							},
 							"Font": {
-								"description": "The font; null uses the default font.",
+								"description": "The font; null uses its canvas's Font, or the default font when the canvas names none.",
 								"type": ["string", "null"],
 								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
 								"x-assetType": "Font"
@@ -7070,6 +7259,10 @@
 								"type": "number",
 								"minimum": 0.1,
 								"maximum": 10
+							},
+							"RaycastTarget": {
+								"description": "Whether the text catches the pointer for its nearest widget; false lets the pointer pass through it.",
+								"type": "boolean"
 							}
 						},
 						"additionalProperties": false
@@ -7386,6 +7579,153 @@
 								"type": "integer",
 								"minimum": -2147483648,
 								"maximum": 2147483647
+							}
+						},
+						"additionalProperties": false
+					},
+					"UiTheme": {
+						"description": "The state tints of a canvas's widgets: each multiplies the colour of a widget element's own UiImage in that state.",
+						"type": "object",
+						"properties": {
+							"Normal": {
+								"description": "The tint of an interactable widget that is neither hovered, pressed nor focused.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"Hovered": {
+								"description": "The tint of a widget under the pointer.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"Pressed": {
+								"description": "The tint of a widget the pointer presses.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"Focused": {
+								"description": "The tint of the widget that has keyboard and gamepad focus.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"Disabled": {
+								"description": "The tint of a widget whose Interactable is false.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
 							}
 						},
 						"additionalProperties": false
@@ -12426,6 +12766,21 @@
 							"PixelSnap": {
 								"description": "Rounds every element's corners to whole scene pixels, so images and clips land on pixel corners.",
 								"type": "boolean"
+							},
+							"Font": {
+								"description": "The font of the canvas's texts whose own Font is null; null uses the default font.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Font"
+							},
+							"Theme": {
+								"description": "The state tints of the canvas's widgets (buttons, toggles, sliders and scroll views).",
+								"$ref": "#/$defs/UiTheme"
+							},
+							"DefaultFocus": {
+								"description": "The UI widget keyboard and gamepad navigation focuses first while nothing has focus; null: navigation starts only from a pointer press or Ui.SetFocus.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
 							}
 						},
 						"additionalProperties": false
@@ -12588,6 +12943,10 @@
 							"Filter": {
 								"description": "How the frame's texture is sampled.",
 								"enum": ["Point", "Linear"]
+							},
+							"RaycastTarget": {
+								"description": "Whether the image catches the pointer for its nearest widget; false lets the pointer pass through it.",
+								"type": "boolean"
 							}
 						},
 						"additionalProperties": false
@@ -12601,7 +12960,7 @@
 								"type": "string"
 							},
 							"Font": {
-								"description": "The font; null uses the default font.",
+								"description": "The font; null uses its canvas's Font, or the default font when the canvas names none.",
 								"type": ["string", "null"],
 								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
 								"x-assetType": "Font"
@@ -12657,6 +13016,10 @@
 								"type": "number",
 								"minimum": 0.1,
 								"maximum": 10
+							},
+							"RaycastTarget": {
+								"description": "Whether the text catches the pointer for its nearest widget; false lets the pointer pass through it.",
+								"type": "boolean"
 							}
 						},
 						"additionalProperties": false
@@ -12973,6 +13336,153 @@
 								"type": "integer",
 								"minimum": -2147483648,
 								"maximum": 2147483647
+							}
+						},
+						"additionalProperties": false
+					},
+					"UiTheme": {
+						"description": "The state tints of a canvas's widgets: each multiplies the colour of a widget element's own UiImage in that state.",
+						"type": "object",
+						"properties": {
+							"Normal": {
+								"description": "The tint of an interactable widget that is neither hovered, pressed nor focused.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"Hovered": {
+								"description": "The tint of a widget under the pointer.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"Pressed": {
+								"description": "The tint of a widget the pointer presses.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"Focused": {
+								"description": "The tint of the widget that has keyboard and gamepad focus.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"Disabled": {
+								"description": "The tint of a widget whose Interactable is false.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
 							}
 						},
 						"additionalProperties": false
@@ -14038,6 +14548,10 @@
 							"Localization": {
 								"description": "Localized strings (M22).",
 								"$ref": "#/$defs/LocalizationSettings"
+							},
+							"Ui": {
+								"description": "The game UI's navigation (M22).",
+								"$ref": "#/$defs/UiSettings"
 							}
 						},
 						"additionalProperties": false
@@ -14294,6 +14808,70 @@
 							"Locale": {
 								"description": "The locale Loc.Get reads string tables in, such as fr or pt-BR: a table's locale equal to it, else its language's, else the table's first; empty reads every table's first.",
 								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					},
+					"UiSettings": {
+						"description": "The keyboard and gamepad navigation of the game's UI (§6.1 Ui).",
+						"type": "object",
+						"properties": {
+							"Navigation": {
+								"description": "Whether keyboard and gamepad navigation moves focus and activates widgets; false leaves focus to the pointer and Ui.SetFocus.",
+								"type": "boolean"
+							},
+							"Submit": {
+								"description": "The key and gamepad button controls of Submit, as an input action's bindings.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"Cancel": {
+								"description": "The key and gamepad button controls of Cancel, as an input action's bindings.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"Up": {
+								"description": "The key and gamepad button controls of Up, as an input action's bindings.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"Down": {
+								"description": "The key and gamepad button controls of Down, as an input action's bindings.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"Left": {
+								"description": "The key and gamepad button controls of Left, as an input action's bindings.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"Right": {
+								"description": "The key and gamepad button controls of Right, as an input action's bindings.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"Next": {
+								"description": "The key and gamepad button controls of Next, as an input action's bindings.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"StickNavigation": {
+								"description": "Whether a connected gamepad's left stick moves focus.",
+								"type": "boolean"
 							}
 						},
 						"additionalProperties": false
@@ -14973,6 +15551,10 @@
 							"Localization": {
 								"description": "Localized strings (M22).",
 								"$ref": "#/$defs/LocalizationSettings"
+							},
+							"Ui": {
+								"description": "The game UI's navigation (M22).",
+								"$ref": "#/$defs/UiSettings"
 							}
 						},
 						"additionalProperties": false
@@ -15229,6 +15811,70 @@
 							"Locale": {
 								"description": "The locale Loc.Get reads string tables in, such as fr or pt-BR: a table's locale equal to it, else its language's, else the table's first; empty reads every table's first.",
 								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					},
+					"UiSettings": {
+						"description": "The keyboard and gamepad navigation of the game's UI (§6.1 Ui).",
+						"type": "object",
+						"properties": {
+							"Navigation": {
+								"description": "Whether keyboard and gamepad navigation moves focus and activates widgets; false leaves focus to the pointer and Ui.SetFocus.",
+								"type": "boolean"
+							},
+							"Submit": {
+								"description": "The key and gamepad button controls of Submit, as an input action's bindings.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"Cancel": {
+								"description": "The key and gamepad button controls of Cancel, as an input action's bindings.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"Up": {
+								"description": "The key and gamepad button controls of Up, as an input action's bindings.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"Down": {
+								"description": "The key and gamepad button controls of Down, as an input action's bindings.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"Left": {
+								"description": "The key and gamepad button controls of Left, as an input action's bindings.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"Right": {
+								"description": "The key and gamepad button controls of Right, as an input action's bindings.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"Next": {
+								"description": "The key and gamepad button controls of Next, as an input action's bindings.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"StickNavigation": {
+								"description": "Whether a connected gamepad's left stick moves focus.",
+								"type": "boolean"
 							}
 						},
 						"additionalProperties": false
@@ -19494,7 +20140,7 @@
 		{
 			"name": "ui.tree",
 			"domain": "ui",
-			"description": "Shows the scene's UI laid out in scene pixels: every canvas and element with its rectangle, clip, visibility, components and text, as a compact text outline or a flat JSON list, optionally for one canvas and to a depth.",
+			"description": "Shows the scene's UI laid out in scene pixels: every canvas and element with its rectangle, clip, visibility, components, text and widget, and in the play scene the session's focus, hover and press, as a compact text outline or a flat JSON list, optionally for one canvas and to a depth.",
 			"exposeAsTool": true,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -19520,7 +20166,7 @@
 						"maximum": 4294967295
 					},
 					"format": {
-						"description": "Text: a compact outline; Json: a flat list of entries.",
+						"description": "Text: a compact outline (widgets as UiButton, UiToggle(on|off), UiSlider(<value>) and UiScrollView(<x>,<y>), marked disabled, focused, hovered or pressed); Json: a flat list of entries.",
 						"enum": ["Text", "Json"]
 					},
 					"width": {
@@ -20475,6 +21121,10 @@
 							"maximum": 4294967295
 						}
 					},
+					"uiPreview": {
+						"description": "Show the scene view as the game frames it, through its primary camera with its UI, for UI authoring.",
+						"type": "boolean"
+					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
@@ -20522,6 +21172,10 @@
 							"minimum": 0,
 							"maximum": 4294967295
 						}
+					},
+					"uiPreview": {
+						"description": "Show the scene view as the game frames it, through its primary camera with its UI, for UI authoring.",
+						"type": "boolean"
 					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",

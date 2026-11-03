@@ -57,3 +57,4 @@ The codes `project.validate` reports (Architecture §13.7), in report order, fro
 | `PREFAB_CYCLE` | Error | no | A prefab nests itself, directly or through other prefabs. | Remove the nested instance that closes the cycle from one of the prefab files, then reimport it. |
 | `UI_ELEMENT_WITHOUT_CANVAS` | Warning | no | A UI element (an entity with UiRect) has no UiCanvas on an ancestor, so it is never laid out or drawn. | Move it below a canvas, or add a UiCanvas to its root. |
 | `UI_IMAGE_FRAME_OUT_OF_RANGE` | Warning | no | A UiImage's Frame is not an index of its sprite sheet's Frames, so it draws nothing. | Set Frame below the sheet's frame count, or add the frame to the sheet. |
+| `UI_WIDGET_PART_INVALID` | Warning | no | A UiToggle's Graphic, a UiSlider's Fill or Handle, or a UiScrollView's Content names an entity that is not a UI element below the widget in its canvas, so the widget ignores it. | Name an element below the widget, or clear the reference. |

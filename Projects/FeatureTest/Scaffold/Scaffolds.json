@@ -131,6 +131,24 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "UiWidgets.jsonl",
+			"IdSeed": 2010,
+			"Renderer": "none"
+		},
+		{
+			"File": "UiReplay.jsonl",
+			"IdSeed": 2011,
+			"Renderer": "none"
+		},
+		{
+			"File": "UiWidgetsGolden.jsonl",
+			"IdSeed": 2012,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Scenes/GoldenUiWidgets"
+			]
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

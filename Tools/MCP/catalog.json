@@ -2692,7 +2692,7 @@
 		{
 			"name": "ui_tree",
 			"method": "ui.tree",
-			"description": "Shows the scene's UI laid out in scene pixels: every canvas and element with its rectangle, clip, visibility, components and text, as a compact text outline or a flat JSON list, optionally for one canvas and to a depth.",
+			"description": "Shows the scene's UI laid out in scene pixels: every canvas and element with its rectangle, clip, visibility, components, text and widget, and in the play scene the session's focus, hover and press, as a compact text outline or a flat JSON list, optionally for one canvas and to a depth.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "UiTreeParams",
@@ -2710,7 +2710,7 @@
 						"maximum": 4294967295
 					},
 					"format": {
-						"description": "Text: a compact outline; Json: a flat list of entries.",
+						"description": "Text: a compact outline (widgets as UiButton, UiToggle(on|off), UiSlider(<value>) and UiScrollView(<x>,<y>), marked disabled, focused, hovered or pressed); Json: a flat list of entries.",
 						"enum": ["Text", "Json"]
 					},
 					"width": {

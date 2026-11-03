@@ -23,6 +23,11 @@ namespace Engine {
 		bool Colliders = false;
 		bool Icons = true;
 		bool Wireframe = false;
+		// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 33): the UI preview. The scene view shows its scene as the
+		// game frames it, through the primary camera with its UI and without the editor overlays, at the game frame
+		// (GetUiPreviewFrameSize, EditorCore/Ui/UiAuthoring.h) letterboxed in the panel, under the UI authoring overlay; the
+		// scene camera's controls, the transform gizmo and mesh picking are off while it is on.
+		bool UiPreview = false;
 	};
 
 	// UI display rectangle in logical screen coordinates; ImageSize is the displayed texture's actual pixel size.

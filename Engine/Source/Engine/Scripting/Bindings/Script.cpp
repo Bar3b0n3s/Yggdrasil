@@ -585,6 +585,20 @@ namespace Engine {
 			for (const char* name : { "OnCollisionExit", "OnTriggerEnter", "OnTriggerExit" })
 				behaviour.Callback(name, "(self: ScriptInstance, other: Entity) -> ()", "Called when the corresponding collision or trigger transition occurs.");
 			behaviour.Callback("OnHotReload", "(self: ScriptInstance) -> ()", "Called after the class is replaced while instance state survives.", { .Modes = RunModes::EditorOnly });
+			// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 27): the UI events, which bubble from the element to its
+			// ancestors (ScriptEngine::DispatchUiEvents); phase 2's callbacks append in landing order.
+			behaviour.Callback("OnUiClick", "(self: ScriptInstance, element: Entity) -> boolean?",
+				"Called when a UI button is clicked or submitted, at its entity, then bubbling to its ancestors; return true to stop it.");
+			behaviour.Callback("OnUiValueChanged", "(self: ScriptInstance, element: Entity, value: boolean | number) -> boolean?",
+				"Called when interaction changes a UI toggle's IsOn (a boolean) or a UI slider's Value (a number); bubbles like OnUiClick.");
+			behaviour.Callback("OnUiFocus", "(self: ScriptInstance, element: Entity, focused: boolean) -> boolean?",
+				"Called when a UI element gains (true) or loses (false) keyboard and gamepad focus; bubbles like OnUiClick.");
+			behaviour.Callback("OnUiHover", "(self: ScriptInstance, element: Entity, hovered: boolean) -> boolean?",
+				"Called when the pointer enters (true) or leaves (false) an interactable UI widget; bubbles like OnUiClick.");
+			behaviour.Callback("OnUiCancel", "(self: ScriptInstance, element: Entity) -> boolean?",
+				"Called when Cancel is pressed, at the focused UI element (or the last canvas when none is focused); bubbles like OnUiClick.");
+			behaviour.Callback("OnUiScroll", "(self: ScriptInstance, element: Entity, position: vector) -> boolean?",
+				"Called when interaction scrolls a UI scroll view, with its new ScrollPosition (x, y, 0); bubbles like OnUiClick.");
 			return {};
 		}
 

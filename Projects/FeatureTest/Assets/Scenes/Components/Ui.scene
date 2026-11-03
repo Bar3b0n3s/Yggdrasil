@@ -55,7 +55,16 @@
 					"ScaleMode": "MatchHeight",
 					"ScaleFactor": 2,
 					"ReferenceHeight": 720,
-					"PixelSnap": false
+					"PixelSnap": false,
+					"Font": null,
+					"Theme": {
+						"Normal": [1, 1, 1, 1],
+						"Hovered": [0.85, 0.85, 0.85, 1],
+						"Pressed": [0.6, 0.6, 0.6, 1],
+						"Focused": [0.75, 0.85, 1, 1],
+						"Disabled": [0.5, 0.5, 0.5, 0.5]
+					},
+					"DefaultFocus": null
 				}
 			}
 		},
@@ -85,7 +94,8 @@
 					"Color": [1, 0.8, 0.6, 0.9],
 					"Type": "Sliced",
 					"BorderScale": 2,
-					"Filter": "Linear"
+					"Filter": "Linear",
+					"RaycastTarget": true
 				},
 				"UiLayout": {
 					"Kind": "Flex",
@@ -131,7 +141,8 @@
 					"Color": [1, 1, 1, 1],
 					"Type": "Simple",
 					"BorderScale": 1,
-					"Filter": "Point"
+					"Filter": "Point",
+					"RaycastTarget": true
 				},
 				"UiLayoutElement": {
 					"IgnoreLayout": false,
@@ -169,7 +180,8 @@
 					"Alignment": "Center",
 					"VerticalAlignment": "Middle",
 					"Wrap": false,
-					"LineSpacing": 1.25
+					"LineSpacing": 1.25,
+					"RaycastTarget": true
 				},
 				"UiLayoutElement": {
 					"IgnoreLayout": true,
@@ -245,7 +257,8 @@
 					"Alignment": "Right",
 					"VerticalAlignment": "Bottom",
 					"Wrap": true,
-					"LineSpacing": 1
+					"LineSpacing": 1,
+					"RaycastTarget": true
 				}
 			}
 		},
@@ -313,7 +326,8 @@
 					"Color": [0.2, 0.4, 0.8, 1],
 					"Type": "Simple",
 					"BorderScale": 1,
-					"Filter": "Point"
+					"Filter": "Point",
+					"RaycastTarget": true
 				}
 			}
 		},
@@ -381,7 +395,8 @@
 					"Color": [0.9, 0.3, 0.3, 1],
 					"Type": "Simple",
 					"BorderScale": 1,
-					"Filter": "Point"
+					"Filter": "Point",
+					"RaycastTarget": true
 				}
 			}
 		},
@@ -402,7 +417,16 @@
 					"ScaleMode": "ConstantPixelSize",
 					"ScaleFactor": 1,
 					"ReferenceHeight": 1080,
-					"PixelSnap": true
+					"PixelSnap": true,
+					"Font": null,
+					"Theme": {
+						"Normal": [1, 1, 1, 1],
+						"Hovered": [0.85, 0.85, 0.85, 1],
+						"Pressed": [0.6, 0.6, 0.6, 1],
+						"Focused": [0.75, 0.85, 1, 1],
+						"Disabled": [0.5, 0.5, 0.5, 0.5]
+					},
+					"DefaultFocus": null
 				}
 			}
 		},
@@ -434,7 +458,8 @@
 					"Alignment": "Left",
 					"VerticalAlignment": "Top",
 					"Wrap": true,
-					"LineSpacing": 1
+					"LineSpacing": 1,
+					"RaycastTarget": true
 				}
 			}
 		},
@@ -466,7 +491,8 @@
 					"Alignment": "Left",
 					"VerticalAlignment": "Top",
 					"Wrap": true,
-					"LineSpacing": 1
+					"LineSpacing": 1,
+					"RaycastTarget": true
 				}
 			}
 		}

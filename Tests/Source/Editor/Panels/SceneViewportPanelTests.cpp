@@ -11,6 +11,8 @@
 #include "Engine/Scene/Components/EnvironmentComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
+#include "Engine/Scene/Components/UiCanvasComponent.h"
+#include "Engine/Scene/Components/UiRectComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
@@ -20,6 +22,7 @@
 #include <ImGuizmo.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <functional>
 #include <span>
@@ -651,6 +654,204 @@ namespace Engine {
 				CHECK(CountEntities(scene) == entities);
 				CHECK(editor.GetHistory().GetUndoCount() == history);
 			}
+		}
+
+		// M22 (Docs/Decisions/0033-m22-contract.md decisions 33 and 34): the UI preview shows the game frame letterboxed in the
+		// view, without the camera's controls, the gizmo or mesh picking; a click selects the topmost UI element and a handle
+		// drag resizes the selected one in one undo step.
+		TEST_CASE("SceneViewportPanel: the UI preview letterboxes the game frame, selects an element with a click and resizes it with a handle drag")
+		{
+			ScenePanelHarness test("SceneUiPreview");
+			EditorContext& editor = test.GetEditor();
+			REQUIRE(editor.GetViewportState().SetGameResolution(glm::uvec2(400, 300)).has_value());
+			UUID panel;
+			{
+				SceneEdit edit(editor, "Create UI");
+				const Entity canvas = editor.GetScene().CreateEntity("Canvas");
+				canvas.AddComponent<UiCanvasComponent>();
+				// [100, 300] x [50, 150] scene pixels on a canvas of one pixel per unit.
+				const Entity element = editor.GetScene().CreateEntity("Panel", canvas);
+				element.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f),
+					.AnchorMax = glm::vec2(0.0f),
+					.Pivot = glm::vec2(0.0f),
+					.Position = glm::vec2(100.0f, 50.0f),
+					.Size = glm::vec2(200.0f, 100.0f) });
+				panel = element.GetUUID();
+				REQUIRE(edit.Commit().has_value());
+			}
+			REQUIRE(test.GetAutomation().Call("viewport.setOptions", Json{ { "uiPreview", true } }).has_value());
+			REQUIRE(editor.SetSelection({}, SceneTarget::Edit).has_value());
+			// The host renders the preview at the game frame.
+			test.Viewport.Image.Width = 400;
+			test.Viewport.Image.Height = 300;
+			test.FrameOk();
+			const EditorViewportRect frame = test.Viewport.Rectangle;
+			CHECK(frame.ImageSize == glm::uvec2(400, 300));
+			REQUIRE(frame.Size.x > 0.0f);
+			CHECK(frame.Size.x * 300.0f == doctest::Approx(frame.Size.y * 400.0f));
+			const float scale = frame.Size.x / 400.0f;
+			const auto at = [&frame, scale](glm::vec2 scenePixel)
+			{
+				return ImVec2(frame.Min.x + scenePixel.x * scale, frame.Min.y + scenePixel.y * scale);
+			};
+			const ExplicitRenderCamera camera = test.Camera();
+
+			// A click on the element selects it, and requests no mesh pick.
+			test.MoveTo(at(glm::vec2(200.0f, 100.0f)));
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+			test.FrameOk();
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+			test.FrameOk();
+			test.GetContext().Actions.Pump();
+			test.FrameOk();
+			REQUIRE(editor.GetSelection().size() == 1);
+			CHECK(editor.GetSelection().front() == panel);
+			CHECK(test.Viewport.Clicks.empty());
+
+			// The right edge dragged 50 scene pixels right: one entity.update at the release, the left edge in place.
+			const size_t history = editor.GetHistory().GetUndoCount();
+			test.MoveTo(at(glm::vec2(300.0f, 100.0f)));
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+			test.FrameOk();
+			for (int step = 1; step <= 5; ++step)
+				test.MoveTo(at(glm::vec2(300.0f + 10.0f * static_cast<float>(step), 100.0f)));
+			CHECK(editor.GetHistory().GetUndoCount() == history);
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+			test.FrameOk();
+			test.GetContext().Actions.Pump();
+			test.FrameOk();
+			CHECK(editor.GetHistory().GetUndoCount() == history + 1);
+			const UiRectComponent& resized = editor.GetScene().FindEntityByID(panel).GetComponent<UiRectComponent>();
+			CHECK(resized.Size.x == doctest::Approx(250.0f).epsilon(1e-3));
+			CHECK(resized.Size.y == 100.0f);
+			CHECK(resized.Position == glm::vec2(100.0f, 50.0f));
+			// Neither the camera nor the transform gizmo took the presses.
+			CHECK(test.Camera().Position == camera.Position);
+			CHECK(test.Camera().Target == camera.Target);
+			CHECK_FALSE(test.GetContext().Gizmos.IsDragging());
+			CHECK(test.Viewport.Clicks.empty());
+
+			// A click over no element clears the selection; without the preview the image fills the view again.
+			test.MoveTo(at(glm::vec2(20.0f, 280.0f)));
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+			test.FrameOk();
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+			test.FrameOk();
+			test.GetContext().Actions.Pump();
+			CHECK(editor.GetSelection().empty());
+			REQUIRE(test.GetAutomation().Call("viewport.setOptions", Json{ { "uiPreview", false } }).has_value());
+			test.FrameOk();
+			const EditorViewportRect full = test.Viewport.Rectangle;
+			CHECK(full.Size.x >= frame.Size.x);
+			CHECK(full.Size.y >= frame.Size.y);
+			CHECK((full.Size.x > frame.Size.x + 1.0f || full.Size.y > frame.Size.y + 1.0f));
+		}
+
+		// M22 (decision 34; the review of W22.2): over the UI preview, a click on the selected element's body keeps it
+		// selected and writes nothing, a drag of the body moves it by the pointer's delta in one undo step, and a drag that
+		// Escape cancels, or whose scene changed after it began (its entity.update's ifRevision), leaves the element as it was.
+		TEST_CASE("SceneViewportPanel: the UI preview moves the selected element with a body drag, and a click, Escape or a changed scene writes nothing")
+		{
+			ScenePanelHarness test("SceneUiPreviewDrag");
+			EditorContext& editor = test.GetEditor();
+			REQUIRE(editor.GetViewportState().SetGameResolution(glm::uvec2(400, 300)).has_value());
+			UUID panel;
+			{
+				SceneEdit edit(editor, "Create UI");
+				const Entity canvas = editor.GetScene().CreateEntity("Canvas");
+				canvas.AddComponent<UiCanvasComponent>();
+				// [100, 300] x [50, 150] scene pixels on a canvas of one pixel per unit.
+				const Entity element = editor.GetScene().CreateEntity("Panel", canvas);
+				element.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f),
+					.AnchorMax = glm::vec2(0.0f),
+					.Pivot = glm::vec2(0.0f),
+					.Position = glm::vec2(100.0f, 50.0f),
+					.Size = glm::vec2(200.0f, 100.0f) });
+				panel = element.GetUUID();
+				REQUIRE(edit.Commit().has_value());
+			}
+			REQUIRE(test.GetAutomation().Call("viewport.setOptions", Json{ { "uiPreview", true } }).has_value());
+			REQUIRE(editor.SetSelection({ panel }, SceneTarget::Edit).has_value());
+			test.Viewport.Image.Width = 400;
+			test.Viewport.Image.Height = 300;
+			test.FrameOk();
+			const EditorViewportRect frame = test.Viewport.Rectangle;
+			const float scale = frame.Size.x / 400.0f;
+			const auto at = [&frame, scale](glm::vec2 scenePixel)
+			{
+				return ImVec2(frame.Min.x + scenePixel.x * scale, frame.Min.y + scenePixel.y * scale);
+			};
+			const auto rect = [&editor, panel]()
+			{
+				return editor.GetScene().FindEntityByID(panel).GetComponent<UiRectComponent>();
+			};
+			// A press at `from`, the pointer moved to `to` in five steps (past ImGui's drag threshold), the press held.
+			const auto pressAndMove = [&test, &at](glm::vec2 from, glm::vec2 to)
+			{
+				test.MoveTo(at(from));
+				ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+				test.FrameOk();
+				for (int step = 1; step <= 5; ++step)
+					test.MoveTo(at(from + (to - from) * (static_cast<float>(step) / 5.0f)));
+			};
+			const auto release = [&test]()
+			{
+				ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+				test.FrameOk();
+				test.GetContext().Actions.Pump();
+			};
+
+			// A click on the selected element's body selects it again and writes nothing.
+			size_t history = editor.GetHistory().GetUndoCount();
+			pressAndMove(glm::vec2(200.0f, 100.0f), glm::vec2(200.0f, 100.0f));
+			release();
+			test.FrameOk();
+			REQUIRE(editor.GetSelection().size() == 1);
+			CHECK(editor.GetSelection().front() == panel);
+			CHECK(editor.GetHistory().GetUndoCount() == history);
+			CHECK(rect().Position == glm::vec2(100.0f, 50.0f));
+
+			// The body dragged 30 right and 20 down: Position follows by (30, 20) canvas units, within the panel pixel ImGui
+			// rounds the pointer to, the size kept, one undo step.
+			pressAndMove(glm::vec2(200.0f, 100.0f), glm::vec2(230.0f, 120.0f));
+			CHECK(editor.GetHistory().GetUndoCount() == history);
+			release();
+			test.FrameOk();
+			CHECK(editor.GetHistory().GetUndoCount() == history + 1);
+			CHECK(std::abs(rect().Position.x - 130.0f) <= 1.0f / scale);
+			CHECK(std::abs(rect().Position.y - 70.0f) <= 1.0f / scale);
+			CHECK(rect().Size == glm::vec2(200.0f, 100.0f));
+			const UiRectComponent moved = rect();
+
+			// The right edge (now at x 330, y 70 to 170) dragged, then Escape before the release: no write.
+			history = editor.GetHistory().GetUndoCount();
+			const glm::vec2 edge(moved.Position.x + moved.Size.x, moved.Position.y + moved.Size.y * 0.5f);
+			pressAndMove(edge, edge + glm::vec2(40.0f, 0.0f));
+			ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, true);
+			test.FrameOk();
+			ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, false);
+			release();
+			test.FrameOk();
+			CHECK(editor.GetHistory().GetUndoCount() == history);
+			CHECK(rect().Size == moved.Size);
+			CHECK(rect().Position == moved.Position);
+
+			// The right edge dragged while another edit changes the scene: the release's entity.update is refused at once by
+			// its ifRevision, so only that edit is recorded and the element keeps its size.
+			pressAndMove(edge, edge + glm::vec2(40.0f, 0.0f));
+			{
+				SceneEdit edit(editor, "Add an entity");
+				static_cast<void>(editor.GetScene().CreateEntity("Other"));
+				REQUIRE(edit.Commit().has_value());
+			}
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+			const Status refused = test.Frame();
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::Conflict);
+			test.GetContext().Actions.Pump();
+			test.FrameOk();
+			CHECK(editor.GetHistory().GetUndoCount() == history + 1);
+			CHECK(rect().Size == moved.Size);
 		}
 	}
 

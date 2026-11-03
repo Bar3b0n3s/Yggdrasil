@@ -47,6 +47,7 @@ namespace Engine {
 		void RunTestBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 		void RunBehaviourCallbacksCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 		void RunLocBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
+		void RunUiBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 
 	}
 
@@ -163,7 +164,8 @@ namespace Engine {
 				&Test::RunApplicationBindingsCoverage,
 				&Test::RunTestBindingsCoverage,
 				&Test::RunBehaviourCallbacksCoverage,
-				&Test::RunLocBindingsCoverage
+				&Test::RunLocBindingsCoverage,
+				&Test::RunUiBindingsCoverage
 			};
 			Test::ScriptTestFixture catalog;
 			REQUIRE(catalog.Start());
@@ -782,7 +784,9 @@ return true
 		{
 			Test::ScriptTestFixture fixture;
 			REQUIRE(fixture.Start());
-			for (const char* name : { "Script", "Field", "Scene", "Input", "Time", "Physics", "Audio", "Assets", "Task", "Random", "Math", "Debug", "Log", "Application", "Test", "Loc" })
+			for (const char* name :
+				{ "Script", "Field", "Scene", "Input", "Time", "Physics", "Audio", "Assets", "Task", "Random", "Math", "Debug", "Log",
+					"Application", "Test", "Loc", "Ui" })
 				CHECK(std::ranges::any_of(fixture.GetApi().GetModules(), [name](const auto& group)
 				{
 					return group.Name == name;
@@ -795,7 +799,7 @@ return true
 			for (const auto& group : fixture.GetApi().GetTypes())
 				if (group.Name == "Behaviour")
 				{
-					REQUIRE(group.Members.size() == 13);
+					REQUIRE(group.Members.size() == 19);
 					for (const auto& member : group.Members)
 					{
 						CHECK(member.Kind == ScriptApiMemberKind::Callback);

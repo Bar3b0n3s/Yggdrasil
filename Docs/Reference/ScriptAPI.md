@@ -1266,6 +1266,58 @@ Sets the session time scale in [0, 100]; refused during read-only evaluation.
 
 All modes; Runtime|Test; mutates.
 
+## Ui
+
+The game UI's interaction state in the running scene: keyboard and gamepad focus, the widget under the pointer and the one it presses, and where elements were laid out. UI events reach behaviours through the OnUi callbacks, which bubble from the element to its ancestors.
+
+### Ui.GetFocus
+
+`() -> Entity?`
+
+Returns the UI element that has keyboard and gamepad focus, or nil.
+
+All modes; Runtime|Test; pure/read.
+
+### Ui.GetHovered
+
+`() -> Entity?`
+
+Returns the interactable UI widget under the pointer, or nil.
+
+All modes; Runtime|Test; pure/read.
+
+### Ui.GetPressed
+
+`() -> Entity?`
+
+Returns the UI widget the held pointer pressed, or nil.
+
+All modes; Runtime|Test; pure/read.
+
+### Ui.GetRect
+
+`(element: Entity) -> UiElementRect?`
+
+Returns element's rectangle in the current UI layout, in scene pixels (which are view coordinates unless the output is upscaled), or nil when it is not laid out.
+
+All modes; Runtime|Test; pure/read.
+
+### Ui.IsPointerOverUi
+
+`() -> boolean`
+
+Returns whether the pointer was over a UI image, text or widget that catches it at this tick, so gameplay can ignore clicks meant for the UI.
+
+All modes; Runtime|Test; pure/read.
+
+### Ui.SetFocus
+
+`(element: Entity?) -> ()`
+
+Moves focus to element, a laid-out, interactable and focusable UI widget, or clears it with nil; OnUiFocus follows in the next UiEvents phase. Any other element raises a located error saying why.
+
+All modes; Runtime|Test; mutates.
+
 ## AssetRef
 
 An opaque immutable asset handle; resolve metadata through Assets.
@@ -1527,6 +1579,54 @@ All modes; Runtime|Test; mutates.
 `(self: ScriptInstance, other: Entity) -> ()`
 
 Called when the corresponding collision or trigger transition occurs.
+
+All modes; Runtime|Test; mutates.
+
+### Behaviour.OnUiCancel
+
+`(self: ScriptInstance, element: Entity) -> boolean?`
+
+Called when Cancel is pressed, at the focused UI element (or the last canvas when none is focused); bubbles like OnUiClick.
+
+All modes; Runtime|Test; mutates.
+
+### Behaviour.OnUiClick
+
+`(self: ScriptInstance, element: Entity) -> boolean?`
+
+Called when a UI button is clicked or submitted, at its entity, then bubbling to its ancestors; return true to stop it.
+
+All modes; Runtime|Test; mutates.
+
+### Behaviour.OnUiFocus
+
+`(self: ScriptInstance, element: Entity, focused: boolean) -> boolean?`
+
+Called when a UI element gains (true) or loses (false) keyboard and gamepad focus; bubbles like OnUiClick.
+
+All modes; Runtime|Test; mutates.
+
+### Behaviour.OnUiHover
+
+`(self: ScriptInstance, element: Entity, hovered: boolean) -> boolean?`
+
+Called when the pointer enters (true) or leaves (false) an interactable UI widget; bubbles like OnUiClick.
+
+All modes; Runtime|Test; mutates.
+
+### Behaviour.OnUiScroll
+
+`(self: ScriptInstance, element: Entity, position: vector) -> boolean?`
+
+Called when interaction scrolls a UI scroll view, with its new ScrollPosition (x, y, 0); bubbles like OnUiClick.
+
+All modes; Runtime|Test; mutates.
+
+### Behaviour.OnUiValueChanged
+
+`(self: ScriptInstance, element: Entity, value: boolean | number) -> boolean?`
+
+Called when interaction changes a UI toggle's IsOn (a boolean) or a UI slider's Value (a number); bubbles like OnUiClick.
 
 All modes; Runtime|Test; mutates.
 
@@ -3414,6 +3514,22 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text.
 
+### UiCanvas.DefaultFocus
+
+`Entity?`
+
+The UI widget keyboard and gamepad navigation focuses first while nothing has focus; null: navigation starts only from a pointer press or Ui.SetFocus.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiCanvas.Font
+
+`AssetRef?`
+
+The font of the canvas's texts whose own Font is null; null uses the default font.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
 ### UiCanvas.PixelSnap
 
 `boolean`
@@ -3454,6 +3570,14 @@ Canvases draw in ascending SortOrder, ties in entity order; a later canvas draws
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
+### UiCanvas.Theme
+
+`{Normal: Color, Hovered: Color, Pressed: Color, Focused: Color, Disabled: Color}`
+
+The state tints of the canvas's widgets (buttons, toggles, sliders and scroll views).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
 ## UiImage
 
 Draws a sprite sheet frame, or a plain colour, over a UI element's rectangle.
@@ -3487,6 +3611,14 @@ All modes; Runtime|Test; pure/read; setter mutates.
 `number`
 
 The index of the frame in the sheet's Frames; a frame the sheet lacks draws nothing.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiImage.RaycastTarget
+
+`boolean`
+
+Whether the image catches the pointer for its nearest widget; false lets the pointer pass through it.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -3838,7 +3970,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `AssetRef?`
 
-The font; null uses the default font.
+The font; null uses its canvas's Font, or the default font when the canvas names none.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -3847,6 +3979,14 @@ All modes; Runtime|Test; pure/read; setter mutates.
 `number`
 
 Multiplies the font's line height.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiText.RaycastTarget
+
+`boolean`
+
+Whether the text catches the pointer for its nearest widget; false lets the pointer pass through it.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -5027,3 +5167,9 @@ Authenticated suite constructor result.
 `{CaseTimeoutTicks: number?}`
 
 Default positive tick timeout for cases in a suite.
+
+## UiElementRect
+
+`{Min: vector, Max: vector}`
+
+A UI element's laid-out rectangle in scene pixels: its top-left (Min) and bottom-right (Max) corners as (x, y, 0), x right and y down.

@@ -58,6 +58,7 @@ namespace Engine {
 		bool Wireframe = false;
 		std::string DebugView{};                // the scene view's debug-view dropdown: any RenderDebugView name, any ASCII case
 		std::vector<uint32_t> GameResolution{}; // the Game panel's resolution: [width, height], [0, 0] for free
+		bool UiPreview = false;                 // M22 (decision 33): EditorViewportOptions::UiPreview
 	};
 	struct ViewportSetOptionsResult
 	{
@@ -68,6 +69,7 @@ namespace Engine {
 		bool Wireframe = false;
 		std::string DebugView{};                // canonical RenderDebugView name
 		std::vector<uint32_t> GameResolution{}; // [width, height]; [0, 0] is free resolution
+		bool UiPreview = false;                 // M22 (decision 33): EditorViewportOptions::UiPreview
 	};
 
 	namespace Automation {

@@ -55,6 +55,10 @@
 		"Localization": {
 			"description": "Localized strings (M22).",
 			"$ref": "#/$defs/LocalizationSettings"
+		},
+		"Ui": {
+			"description": "The game UI's navigation (M22).",
+			"$ref": "#/$defs/UiSettings"
 		}
 	},
 	"required": ["Format", "Version"],
@@ -312,6 +316,70 @@
 				"Locale": {
 					"description": "The locale Loc.Get reads string tables in, such as fr or pt-BR: a table's locale equal to it, else its language's, else the table's first; empty reads every table's first.",
 					"type": "string"
+				}
+			},
+			"additionalProperties": false
+		},
+		"UiSettings": {
+			"description": "The keyboard and gamepad navigation of the game's UI (§6.1 Ui).",
+			"type": "object",
+			"properties": {
+				"Navigation": {
+					"description": "Whether keyboard and gamepad navigation moves focus and activates widgets; false leaves focus to the pointer and Ui.SetFocus.",
+					"type": "boolean"
+				},
+				"Submit": {
+					"description": "The key and gamepad button controls of Submit, as an input action's bindings.",
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"Cancel": {
+					"description": "The key and gamepad button controls of Cancel, as an input action's bindings.",
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"Up": {
+					"description": "The key and gamepad button controls of Up, as an input action's bindings.",
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"Down": {
+					"description": "The key and gamepad button controls of Down, as an input action's bindings.",
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"Left": {
+					"description": "The key and gamepad button controls of Left, as an input action's bindings.",
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"Right": {
+					"description": "The key and gamepad button controls of Right, as an input action's bindings.",
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"Next": {
+					"description": "The key and gamepad button controls of Next, as an input action's bindings.",
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"StickNavigation": {
+					"description": "Whether a connected gamepad's left stick moves focus.",
+					"type": "boolean"
 				}
 			},
 			"additionalProperties": false

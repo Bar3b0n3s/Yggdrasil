@@ -77,6 +77,8 @@ namespace Engine {
 	// After focus moved to `element`: every scroll view whose Content holds `element` (from the innermost outward) scrolls
 	// the least that puts the element's rectangle inside its own (the element's top-left corner first when it is larger),
 	// using the rectangles of `table` and adding each scroll view's change to the element's rectangle before the next.
+	// `table` is a layout of `scene` as it is now (the review of W22.2: UiSystem lays the scene out afresh for a reveal), so
+	// each scroll view's position as read is the one its rectangles were laid out with, and the shift applies to it.
 	void RevealInUiScrollViews(Scene& scene, const UiLayoutTable& table, UUID element, std::vector<UiEvent>& events);
 
 }

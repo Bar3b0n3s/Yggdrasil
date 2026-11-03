@@ -55,7 +55,8 @@ namespace Engine {
 				.Icons = options.Icons,
 				.Wireframe = options.Wireframe,
 				.DebugView = std::string(RenderDebugViewToString(viewport.GetDebugView())),
-				.GameResolution = { resolution.x, resolution.y } };
+				.GameResolution = { resolution.x, resolution.y },
+				.UiPreview = options.UiPreview };
 		}
 
 	}
@@ -190,6 +191,8 @@ namespace Engine {
 			options.Icons = params.Icons;
 		if (context.HasParam("wireframe"))
 			options.Wireframe = params.Wireframe;
+		if (context.HasParam("uiPreview"))
+			options.UiPreview = params.UiPreview;
 		// Validate every member before changing anything.
 		std::optional<RenderDebugView> debugView;
 		if (context.HasParam("debugView"))
@@ -252,7 +255,10 @@ namespace Engine {
 			.Field("icons", &ViewportSetOptionsParams::Icons, "Show scene object icons.")
 			.Field("wireframe", &ViewportSetOptionsParams::Wireframe, "Show mesh wireframes.")
 			.Field("debugView", &ViewportSetOptionsParams::DebugView, "The scene view's debug view, any ASCII case: Lit, Albedo, Normals, Roughness, Metallic, Emissive, AO, ShadowCascades or Overdraw.")
-			.Field("gameResolution", &ViewportSetOptionsParams::GameResolution, "The Game view's resolution [width, height], each 1 to 8192, or [0, 0] for free resolution.");
+			.Field("gameResolution", &ViewportSetOptionsParams::GameResolution,
+				"The Game view's resolution [width, height], each 1 to 8192, or [0, 0] for free resolution.")
+			.Field("uiPreview", &ViewportSetOptionsParams::UiPreview,
+				"Show the scene view as the game frames it, through its primary camera with its UI, for UI authoring.");
 		registry.Struct<ViewportSetOptionsResult>("ViewportSetOptionsResult", "All current scene and game viewport options.")
 			.Field("grid", &ViewportSetOptionsResult::Grid, "Whether the scene grid is shown.")
 			.Field("gizmos", &ViewportSetOptionsResult::Gizmos, "Whether transform gizmos are enabled.")
@@ -260,7 +266,10 @@ namespace Engine {
 			.Field("icons", &ViewportSetOptionsResult::Icons, "Whether object icons are shown.")
 			.Field("wireframe", &ViewportSetOptionsResult::Wireframe, "Whether mesh wireframes are shown.")
 			.Field("debugView", &ViewportSetOptionsResult::DebugView, "The scene view's debug view (canonical name).")
-			.Field("gameResolution", &ViewportSetOptionsResult::GameResolution, "The Game view's resolution [width, height]; [0, 0] is free resolution.");
+			.Field("gameResolution", &ViewportSetOptionsResult::GameResolution,
+				"The Game view's resolution [width, height]; [0, 0] is free resolution.")
+			.Field("uiPreview", &ViewportSetOptionsResult::UiPreview,
+				"Show the scene view as the game frames it, through its primary camera with its UI, for UI authoring.");
 	}
 
 	void RegisterViewportMethods(MethodRegistry& methods)

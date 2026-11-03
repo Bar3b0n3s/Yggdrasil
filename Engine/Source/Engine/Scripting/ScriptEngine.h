@@ -145,16 +145,17 @@ namespace Engine {
 		void OnPhysicsEvent(const PhysicsEvent& event) override;
 		void OnPhysicsDiagnostic(const PhysicsDiagnostic& diagnostic) override;
 		// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 27; stream B): the UiEvents phase. Each event, in order,
-		// bubbles by the class comment's rule from its target: the target, then each ancestor in turn; at each entity every
+		// bubbles by the class comment's rule from its target: the target, then each ancestor it had when its walk started,
+		// in turn (so a callback that reparents an entity neither lengthens nor loops the walk); at each entity every
 		// started, enabled instance whose behaviour defines the event's callback (GetUiEventCallbackName: OnUiClick,
 		// OnUiValueChanged, OnUiFocus, OnUiHover, OnUiCancel, OnUiScroll) receives it in slot order, with the target as
 		// `element` and the event's value (OnUiValueChanged: a boolean for a toggle, a number for a slider; OnUiFocus and
-		// OnUiHover: a boolean; OnUiScroll: a vector (x, y, 0)); after an entity where any of those callbacks returned true,
-		// the event goes no further. An event whose target the scene no longer holds, or holds pending destruction, when
-		// its turn comes is dropped: nothing receives it. During an event's walk, an ancestor that a callback of that event
-		// destroyed (so pending destruction when the walk reaches it) is passed over, its instances receiving nothing, and
-		// the walk goes on to its parent. A callback's fault disables only its instance (§11.7), and the event goes on to the
-		// next receiver.
+		// OnUiHover: a boolean; OnUiScroll: a vector (x, y, 0)); after an entity where any of those callbacks returned the
+		// boolean true (no other value), the event goes no further. An event whose target the scene no longer holds, or
+		// holds pending destruction, when its turn comes is dropped: nothing receives it. During an event's walk, an
+		// ancestor that a callback of that event destroyed (so pending destruction when the walk reaches it) is passed over,
+		// its instances receiving nothing, and the walk goes on to the next ancestor. A callback's fault disables only its
+		// instance (§11.7), and the event goes on to the next receiver.
 		void DispatchUiEvents(std::span<const UiEvent> events);
 		// Idempotent. OnDestroy for all remaining instances and cancellation while host/scene/services still exist.
 		void Stop();

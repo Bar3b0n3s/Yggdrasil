@@ -256,9 +256,10 @@ namespace Engine {
 
 	// Registers the enums and structs above (InputActionType, TestPauseOnError, TestIsolation, TestMode, WindowSettings,
 	// SimulationSettings, PhysicsSettings, InputAction, InputSettings, RenderingSettings, ScriptingSettings,
-	// ExportSettings, TestSuiteOverrides, TestSuite, TestingSettings, LocalizationSettings, ProjectSettings) with their field
-	// metadata, the type-level validators of the rules in the comments above and, for each validated type, the Generate hook
-	// that turns random field values into valid settings (FieldBuilder::Generate). Call once per registry, before Freeze.
+	// ExportSettings, TestSuiteOverrides, TestSuite, TestingSettings, LocalizationSettings, UiSettings, ProjectSettings)
+	// with their field metadata, the type-level validators of the rules in the comments above and, for each validated
+	// type, the Generate hook that turns random field values into valid settings (FieldBuilder::Generate). Call once per
+	// registry, before Freeze.
 	void RegisterProjectSettingsTypes(TypeRegistry& registry);
 
 }

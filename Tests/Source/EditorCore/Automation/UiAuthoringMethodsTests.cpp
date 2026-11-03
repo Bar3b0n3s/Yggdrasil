@@ -24,8 +24,7 @@
 #include <vector>
 
 // ui.createWidget (M22, C22.2, R-UI-EDITOR; Docs/Decisions/0033-m22-contract.md decision 32), in process through the
-// editor's AutomationFixture; the editor's Create UI menu submits the same action. Skipped by the contract until stream D
-// lands it.
+// editor's AutomationFixture; the editor's Create UI menu submits the same action.
 
 namespace Engine {
 
@@ -53,7 +52,7 @@ namespace Engine {
 	TEST_SUITE("EditorCore")
 	{
 		// The templates of UiAuthoringMethods.h, each kind in one undo step.
-		TEST_CASE("UiAuthoringMethods: ui.createWidget builds each kind from its template in one undo step" * doctest::skip(true))
+		TEST_CASE("UiAuthoringMethods: ui.createWidget builds each kind from its template in one undo step")
 		{
 			Test::AutomationFixture setup("UiCreateWidget");
 			const Json canvas = CreateWidget(setup, Json{ { "kind", "Canvas" } });
@@ -112,7 +111,7 @@ namespace Engine {
 		// Decision 32: a widget without a canvas above it (no parent, or a parent without a UiCanvas at or above it) goes below
 		// a new canvas created in the same command, so one undo removes both; without a parent, index places the created root
 		// among the scene's roots.
-		TEST_CASE("UiAuthoringMethods: ui.createWidget puts a widget without a canvas above it below a new canvas, and refuses a label on a kind without one" * doctest::skip(true))
+		TEST_CASE("UiAuthoringMethods: ui.createWidget puts a widget without a canvas above it below a new canvas, and refuses a label on a kind without one")
 		{
 			Test::AutomationFixture setup("UiCreateWidgetRoot");
 			const size_t entitiesBefore = setup.GetEditor().GetScene().GetEntityCount();

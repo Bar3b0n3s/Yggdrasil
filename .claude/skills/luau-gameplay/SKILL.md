@@ -175,10 +175,12 @@ A behaviour creates it in `OnStart` with `Bag.New(Random.New(Random.Integer(0, 2
 
 ## UI
 
-UI is entities with UI components below a `UiCanvas`, laid out in scene pixels (`skills/game-building/ui`). Scripts use their proxies like any component's: `entity.UiText.Text`, `entity.UiRect.Position` and `Size` (canvas units), `entity.UiImage.Frame` and `Color`, `entity.UiLayout.Padding` (a `{Left, Top, Right, Bottom}` table, written whole). Scripts cannot read a laid-out rectangle; automation's `ui.tree` does.
+UI is entities with UI components below a `UiCanvas`, laid out in scene pixels (`skills/game-building/ui`). Scripts use their proxies like any component's: `entity.UiText.Text`, `entity.UiRect.Position` and `Size` (canvas units), `entity.UiImage.Frame` and `Color`, `entity.UiLayout.Padding` (a `{Left, Top, Right, Bottom}` table, written whole). `Ui.GetRect(element)` reads where the layout placed an element; automation's `ui.tree` lists them all.
 - Show and hide an element with `SetActive`; a disabled element and its subtree take no space in a container.
 - UI components are in the state hash, like `Text`: write them in `OnFixedUpdate`, and `UiText.Text` only when its string changes.
 - Strings come from string tables: `Loc.Get(table, key)` returns the key's string in the project's `Localization.Locale` (the table's locale equal to it, else its language's, else the table's first; empty reads the first), `Loc.Has(table, key)` tests a key and `Loc.GetLocale()` returns the locale. A key the table lacks raises a located error naming the closest keys, so let a suite read every key the game uses. Hold the table in a `Field.Asset("StringTable")` field, or load it by a literal path.
+- Widgets (`UiButton`, `UiToggle`, `UiSlider`, `UiScrollView`) raise UI events in the fixed step, from latched input, before `OnFixedUpdate`: `OnUiClick(self, element)`, `OnUiValueChanged(self, element, value)` (a toggle's boolean or a slider's number), `OnUiFocus(self, element, focused)`, `OnUiHover(self, element, hovered)`, `OnUiCancel(self, element)` (at the focused element, else the last canvas) and `OnUiScroll(self, element, position)`. Each event bubbles from its element through its ancestors to every started behaviour that defines the callback, in slot order; returning `true` stops it after that entity. So one behaviour on a menu's canvas or panel handles its widgets by `element.Name`. Interaction writes the widget's `IsOn`, `Value` or `ScrollPosition` itself; a script's writes raise no event.
+- The `Ui` module reads the interaction state: `Ui.GetFocus()`, `Ui.GetHovered()`, `Ui.GetPressed()`, `Ui.IsPointerOverUi()` (skip a gameplay click the UI caught) and `Ui.GetRect(element)` (its rectangle in scene pixels, nil when it is not laid out). `Ui.SetFocus(element)` focuses a laid-out, interactable and focusable widget at once, laid out as the scene is at the call, so a menu the same callback has just shown takes focus (its `OnUiFocus` follows in the next UiEvents phase), `Ui.SetFocus(nil)` clears focus, and any other element raises. Keyboard and gamepad navigation moves focus only from a focused widget, or first to the canvas's `DefaultFocus`: a menu that opens over a game whose play uses the arrows names it or calls `Ui.SetFocus`, and the game's HUD buttons stay not `Focusable` (`skills/game-building/ui`, "Where navigation starts").
 - In live play a frame that runs no fixed step already sees the device input of the next tick, so `OnUpdate` reacts to a press in its own frame; lockstep sessions, recordings, replays and test runs never preview, and injected input never is. Decide in `OnFixedUpdate` and use `OnUpdate`'s earlier view only for presentation (a highlight that follows the cursor).
 
 ```luau path=Assets/Scripts/ScoreLabel.luau
@@ -212,6 +214,48 @@ function ScoreLabel.OnFixedUpdate(self: ScoreLabel)
 end
 
 return Script.Define("ScoreLabel", ScoreLabel)
+```
+
+```luau path=Assets/Scripts/OptionsMenu.luau
+--!strict
+-- On an options menu's canvas, whose DefaultFocus names its first widget: its widgets' events bubble here and are told
+-- apart by the element's name. Returning true stops an event at this entity; nil lets it bubble on.
+export type OptionsMenu = ScriptInstance & {
+	Volume: number,
+	Music: boolean,
+}
+
+local OptionsMenu = {}
+
+function OptionsMenu.OnStart(self: OptionsMenu)
+	self.Volume = 1
+	self.Music = true
+end
+
+function OptionsMenu.OnUiValueChanged(self: OptionsMenu, element: Entity, value: boolean | number): boolean?
+	if element.Name == "Volume" and type(value) == "number" then
+		self.Volume = value
+	elseif element.Name == "Music" and type(value) == "boolean" then
+		self.Music = value
+	end
+	return true
+end
+
+-- Back (a click, or Submit while it has focus) and Cancel (Escape, the gamepad's East) close the menu.
+function OptionsMenu.OnUiClick(self: OptionsMenu, element: Entity): boolean?
+	if element.Name ~= "Back" then
+		return nil
+	end
+	self.Entity:SetActive(false)
+	return true
+end
+
+function OptionsMenu.OnUiCancel(self: OptionsMenu): boolean?
+	self.Entity:SetActive(false)
+	return true
+end
+
+return Script.Define("OptionsMenu", OptionsMenu)
 ```
 
 ## Determinism pitfalls

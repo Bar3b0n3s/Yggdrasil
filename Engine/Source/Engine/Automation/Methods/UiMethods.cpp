@@ -11,11 +11,16 @@
 #include "Engine/Scene/Components/UiCanvasComponent.h"
 #include "Engine/Scene/Components/UiImageComponent.h"
 #include "Engine/Scene/Components/UiLayoutComponent.h"
+#include "Engine/Scene/Components/UiScrollViewComponent.h"
+#include "Engine/Scene/Components/UiSliderComponent.h"
 #include "Engine/Scene/Components/UiTextComponent.h"
+#include "Engine/Scene/Components/UiToggleComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Scene/UiInteraction.h"
 #include "Engine/Scene/UiLayout.h"
 #include "Engine/Scene/UiSystem.h"
+#include "Engine/Scene/UiWidgets.h"
 #include "Engine/Session/PlaySession.h"
 
 #include <glm/glm.hpp>
@@ -30,9 +35,10 @@
 #include <utility>
 #include <vector>
 
-// The ui domain (UiMethods.h; Docs/Decisions/0033-m22-contract.md decision 8). ui.tree lays the target scene out with
+// The ui domain (UiMethods.h; Docs/Decisions/0033-m22-contract.md decisions 8 and 31). ui.tree lays the target scene out with
 // ComputeUiLayout, or reads the play session's current layout (UiSystem::GetLayout), and reports it in the table's draw order:
-// each canvas, then its elements (canonical order, a parent before its children).
+// each canvas, then its elements (canonical order, a parent before its children), with each element's widget and, in the play
+// scene, the session's interaction state (UiSystem::GetInteraction).
 
 namespace Engine {
 
@@ -136,9 +142,36 @@ namespace Engine {
 			return std::format("{}#{}", sheet, image.Frame);
 		}
 
+		// A scroll view's ScrollPosition as read (UiScrollViewComponent.h): clamped to its content's overflow in `table`, the
+		// sizes being the laid-out rectangles in canvas units. A Content that is not an element below it leaves nothing to
+		// scroll: its size is then the view's, as UiSystem.cpp's and UiWidgets.cpp's readers take it.
+		static glm::vec2 ReadUiOutlineScrollPosition(const UiScrollViewComponent& scrollView, const UiLayoutTable& table, UUID element)
+		{
+			const UiLayoutNode* view = FindUiLayoutNode(table, element);
+			if (view == nullptr)
+				return glm::vec2(0.0f);
+			const UiCanvasLayout* canvas = FindUiCanvasLayout(table, view->Canvas);
+			const float scale = canvas != nullptr ? canvas->Scale : 1.0f;
+			const glm::vec2 viewSize = (view->Max - view->Min) / scale;
+			glm::vec2 contentSize = viewSize;
+			const UiLayoutNode* content = scrollView.Content.IsValid() ? FindUiLayoutNode(table, scrollView.Content) : nullptr;
+			for (const UiLayoutNode* parent = content != nullptr ? FindUiLayoutNode(table, content->Parent) : nullptr; parent != nullptr;
+				parent = FindUiLayoutNode(table, parent->Parent))
+			{
+				if (parent->Entity == element)
+				{
+					contentSize = (content->Max - content->Min) / scale;
+					break;
+				}
+			}
+			return ClampUiScrollPosition(scrollView, viewSize, contentSize, scrollView.ScrollPosition);
+		}
+
 		// The short forms of an element's UI components in the outline: "UiImage(<sheet>#<frame>)", "UiText(\"<text>\")",
-		// "UiLayout(<kind> <direction>)", and the name of any other but UiRect, which every element holds.
-		static std::string FormatUiOutlineComponents(ConstEntity entity, const AssetManager* assets)
+		// "UiLayout(<kind> <direction>)", C22.2's widgets "UiToggle(on|off)", "UiSlider(<value as read>)" and
+		// "UiScrollView(<x>,<y>)" (its position as read in `table`), and the name of any other but UiRect, which every
+		// element holds (UiButton, UiLayoutElement).
+		static std::string FormatUiOutlineComponents(ConstEntity entity, const AssetManager* assets, const UiLayoutTable& table)
 		{
 			std::string components;
 			const auto append = [&components](std::string_view text)
@@ -156,6 +189,15 @@ namespace Engine {
 					append(std::format("UiText(\"{}\")", CutUiText(text->Text, MaxUiOutlineTextLength)));
 				else if (const UiLayoutComponent* layout = name == "UiLayout" ? entity.TryGetComponent<UiLayoutComponent>() : nullptr)
 					append(std::format("UiLayout({} {})", GetUiLayoutKindName(layout->Kind), GetUiLayoutDirectionName(layout->Direction)));
+				else if (const UiToggleComponent* toggle = name == "UiToggle" ? entity.TryGetComponent<UiToggleComponent>() : nullptr)
+					append(std::format("UiToggle({})", toggle->IsOn ? "on" : "off"));
+				else if (const UiSliderComponent* slider = name == "UiSlider" ? entity.TryGetComponent<UiSliderComponent>() : nullptr)
+					append(std::format("UiSlider({})", FormatUiOutlineNumber(ReadUiSliderValue(*slider))));
+				else if (const UiScrollViewComponent* scrollView = name == "UiScrollView" ? entity.TryGetComponent<UiScrollViewComponent>() : nullptr)
+				{
+					const glm::vec2 position = ReadUiOutlineScrollPosition(*scrollView, table, entity.GetUUID());
+					append(std::format("UiScrollView({},{})", FormatUiOutlineNumber(position.x), FormatUiOutlineNumber(position.y)));
+				}
 				else
 					append(name);
 			}
@@ -208,10 +250,55 @@ namespace Engine {
 		{
 			const Scene* Target = nullptr;
 			const AssetManager* Assets = nullptr;
+			// The play session's interaction state when Target is its scene (C22.2, decision 31); null for the edit scene.
+			const UiInteractionState* Interaction = nullptr;
 			uint32_t DepthLimit = 0; // 0: unlimited
 			UiTreeResult* Result = nullptr;
 			bool Text = false;
 		};
+
+		// An element's interaction (UiTreeEntry's members, decision 31).
+		struct UiTreeInteraction
+		{
+			UiWidgetType Widget = UiWidgetType::None;
+			bool Interactable = false;
+			bool Focused = false;
+			bool Hovered = false;
+			bool Pressed = false;
+		};
+
+		static UiTreeInteraction ReadUiTreeInteraction(const UiTreeWriter& writer, UUID element)
+		{
+			UiTreeInteraction interaction{ .Widget = GetUiWidgetType(*writer.Target, element),
+				.Interactable = IsUiInteractable(*writer.Target, element) };
+			if (writer.Interaction != nullptr)
+			{
+				interaction.Focused = writer.Interaction->Focused == element;
+				interaction.Hovered = writer.Interaction->Hovered == element;
+				interaction.Pressed = writer.Interaction->Pressed == element;
+			}
+			return interaction;
+		}
+
+		// The outline's interaction markers, one group after "clipped" and "hidden": "disabled" for a widget that is not
+		// interactable, then "focused", "hovered" and "pressed", separated by single spaces; empty for none.
+		static std::string FormatUiOutlineInteraction(const UiTreeInteraction& interaction)
+		{
+			std::string markers;
+			const auto append = [&markers](std::string_view marker)
+			{
+				markers += std::format("{}{}", markers.empty() ? "" : " ", marker);
+			};
+			if (interaction.Widget != UiWidgetType::None && !interaction.Interactable)
+				append("disabled");
+			if (interaction.Focused)
+				append("focused");
+			if (interaction.Hovered)
+				append("hovered");
+			if (interaction.Pressed)
+				append("pressed");
+			return markers;
+		}
 
 		static void WriteUiTreeCanvas(const UiTreeWriter& writer, const UiLayoutTable& table, const UiCanvasLayout& canvas, ConstEntity canvasEntity)
 		{
@@ -264,6 +351,7 @@ namespace Engine {
 				const UiLayoutNode& node = *listed[index];
 				const ConstEntity entity = scene.FindEntityByID(node.Entity);
 				const UiPixelRect rect = MakeUiPixelRect(node.Min, node.Max);
+				const UiTreeInteraction interaction = ReadUiTreeInteraction(writer, node.Entity);
 				if (writer.Text)
 				{
 					const uint32_t depth = std::max<uint32_t>(node.Depth, 1);
@@ -273,7 +361,7 @@ namespace Engine {
 					for (uint32_t level = 1; level < depth; ++level)
 						line += lastAtDepth[level] ? "   " : "│  ";
 					line += std::format("{}{}  {}", lastOfParent[index] ? "└─ " : "├─ ", entity.GetName(), entity.GetUUID().ToString().substr(0, 8));
-					for (const std::string& part : { FormatUiOutlineComponents(entity, writer.Assets), FormatUiOutlineRect(rect) })
+					for (const std::string& part : { FormatUiOutlineComponents(entity, writer.Assets, table), FormatUiOutlineRect(rect) })
 					{
 						if (!part.empty())
 							line += std::format("  {}", part);
@@ -282,6 +370,8 @@ namespace Engine {
 						line += "  clipped";
 					if (!node.Visible)
 						line += "  hidden";
+					if (const std::string markers = FormatUiOutlineInteraction(interaction); !markers.empty())
+						line += std::format("  {}", markers);
 					result.Text += line + "\n";
 					continue;
 				}
@@ -302,6 +392,11 @@ namespace Engine {
 				entry.Visible = node.Visible;
 				if (const UiTextComponent* text = entity.TryGetComponent<UiTextComponent>())
 					entry.Text = CutUiText(text->Text, MaxUiTreeTextBytes);
+				entry.Interactable = interaction.Interactable;
+				entry.Focused = interaction.Focused;
+				entry.Hovered = interaction.Hovered;
+				entry.Pressed = interaction.Pressed;
+				entry.Widget = std::string(UiWidgetTypeToString(interaction.Widget));
 				result.Elements.push_back(std::move(entry));
 			}
 		}
@@ -341,9 +436,16 @@ namespace Engine {
 			result.Scene = context.MakeSceneSummary(*scene);
 			result.Width = table.SceneSize.x;
 			result.Height = table.SceneSize.y;
-			const Utils::UiTreeWriter writer{
-				.Target = scene, .Assets = context.GetAssets(), .DepthLimit = params.Depth, .Result = &result, .Text = params.Format == SceneTreeFormat::Text
-			};
+			// The play scene's interaction is its session's (decision 31); the edit scene has none.
+			const PlaySession* session = context.GetPlaySession();
+			const bool played = session != nullptr && &session->GetScene() == scene;
+			const UiInteractionState* interaction = played ? &session->GetUi().GetInteraction() : nullptr;
+			const Utils::UiTreeWriter writer{ .Target = scene,
+				.Assets = context.GetAssets(),
+				.Interaction = interaction,
+				.DepthLimit = params.Depth,
+				.Result = &result,
+				.Text = params.Format == SceneTreeFormat::Text };
 			size_t elementCount = 0;
 			for (const UiCanvasLayout& canvas : table.Canvases)
 			{
@@ -397,7 +499,9 @@ namespace Engine {
 		registry.Struct<UiTreeParams>("UiTreeParams", "The params of ui.tree.")
 			.Field("canvas", &UiTreeParams::Canvas, "An entity with a UiCanvas whose UI alone is listed; omitted: every canvas.")
 			.Field("depth", &UiTreeParams::Depth, "The most levels listed below each canvas; 0: unlimited.")
-			.Field("format", &UiTreeParams::Format, "Text: a compact outline; Json: a flat list of entries.")
+			.Field("format", &UiTreeParams::Format,
+				"Text: a compact outline (widgets as UiButton, UiToggle(on|off), UiSlider(<value>) and UiScrollView(<x>,<y>), marked disabled, "
+				"focused, hovered or pressed); Json: a flat list of entries.")
 			.Field("width", &UiTreeParams::Width,
 				"The scene resolution's width to lay out at, with height; omitted: the play session's own, or the project's window size for "
 				"the edit scene.",
@@ -421,7 +525,8 @@ namespace Engine {
 			{
 				.Name = "ui.tree",
 				.Description = "Shows the scene's UI laid out in scene pixels: every canvas and element with its rectangle, clip, visibility, "
-							   "components and text, as a compact text outline or a flat JSON list, optionally for one canvas and to a depth.",
+							   "components, text and widget, and in the play scene the session's focus, hover and press, as a compact text outline "
+							   "or a flat JSON list, optionally for one canvas and to a depth.",
 				.ExposeAsTool = true,
 				.SupportsSceneTarget = true,
 				.AvailableInRuntime = true,
