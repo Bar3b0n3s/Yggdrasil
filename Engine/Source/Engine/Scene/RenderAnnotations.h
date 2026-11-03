@@ -32,7 +32,8 @@ namespace Engine {
 	struct RenderSceneValidation
 	{
 		bool NoLighting = false;
-		uint32_t ShadowedSpotLights = 0; // global scene count, not view-dependent atlas allocation
+		uint32_t ShadowedSpotLights = 0;  // global scene count, not view-dependent atlas allocation
+		uint32_t ShadowedPointLights = 0; // the same for point lights (M23), not the view's point-shadow plan
 	};
 
 	// Main-thread read-only scene/CPU asset scan. Uses the existing synchronous CPU AssetManager lookup, which may
@@ -45,8 +46,9 @@ namespace Engine {
 	// emission means max(Emissive * EmissiveStrength)>0; conservatively do not inspect texture texels. Emission never
 	// illuminates another nonemissive material. All current materials are PBR; no new Unlit field is assumed. Resolve missing
 	// meshes/materials via the renderer's CPU placeholders. ShadowedSpotLights counts enabled finite contributing spots
-	// with CastShadows, regardless of camera visibility. Parent ProjectValidator maps NoLighting and count>8 to
-	// RENDER_NO_LIGHTING/RENDER_SPOT_SHADOW_BUDGET: Warning, AutoFixable=false, one stable scene-file diagnostic each.
+	// with CastShadows, regardless of camera visibility, and ShadowedPointLights the point lights alike (M23). Parent
+	// ProjectValidator maps NoLighting, spot count>8 and point count>4 to RENDER_NO_LIGHTING/RENDER_SPOT_SHADOW_BUDGET/
+	// RENDER_POINT_SHADOW_BUDGET: Warning, AutoFixable=false, one stable scene-file diagnostic each.
 	// Run identically for the open scene and scratch-loaded project scenes. Separate asset errors remain unchanged.
 	// InvalidArgument for nonfinite material/environment values that prevent illumination classification; malformed
 	// light values do not contribute, matching CullLights. Missing assets use placeholders, not a helper failure.

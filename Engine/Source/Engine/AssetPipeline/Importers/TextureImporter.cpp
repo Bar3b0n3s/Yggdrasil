@@ -1,7 +1,9 @@
 #include "EnginePCH.h"
 #include "Engine/AssetPipeline/Importers/TextureImporter.h"
 
+#include "Engine/Asset/TextureCompression.h"
 #include "Engine/Asset/TextureData.h"
+#include "Engine/Core/Assert.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Reflection/TypeRegistry.h"
 
@@ -16,8 +18,10 @@
 #include <cmath>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace Engine {
 
@@ -210,6 +214,51 @@ namespace Engine {
 			return {};
 		}
 
+		// The cooked format of a texture of `usage`: with Compression Auto, BC7 for colour (sRGB) and linear data and BC5 for
+		// normal maps (TextureImporter.h); with None, RGBA8 (sRGB for colour).
+		[[nodiscard]] static TextureFormat GetCookedFormat(TextureUsage usage, TextureCompression compression)
+		{
+			if (compression == TextureCompression::None)
+				return usage == TextureUsage::Color ? TextureFormat::RGBA8Srgb : TextureFormat::RGBA8Unorm;
+			switch (usage)
+			{
+				case TextureUsage::Color:     return TextureFormat::BC7Srgb;
+				case TextureUsage::Linear:    return TextureFormat::BC7Unorm;
+				case TextureUsage::NormalMap: return TextureFormat::BC5Unorm;
+			}
+			return TextureFormat::BC7Unorm;
+		}
+
+		// Replaces every RGBA8 level of `texture` with its blocks in `format` (a block-compressed format), level by level, in
+		// order. Errors: ImportFailed naming the level and the codec's reason.
+		[[nodiscard]] static Status CompressLevels(TextureData& texture, TextureFormat format, std::string_view name)
+		{
+			const std::optional<TextureBlockCodec> codec = GetTextureBlockCodec(format);
+			ENGINE_CORE_ASSERT(codec.has_value(), "CompressLevels needs a block-compressed format, not {}", TextureFormatToString(format));
+			if (!codec.has_value())
+				return MakeError(ErrorCode::ImportFailed, "'{}': {} is not a block-compressed format", name, TextureFormatToString(format));
+
+			Buffer blocks;
+			std::vector<TextureMip> mips;
+			mips.reserve(texture.Mips.size());
+			for (uint32_t level = 0; level < texture.Mips.size(); ++level)
+			{
+				const TextureMip& mip = texture.Mips[level];
+				Result<Buffer> compressed = CompressTextureBlocks(*codec, mip.Width, mip.Height, GetMipPixels(texture, level));
+				if (!compressed.has_value())
+				{
+					return MakeError(ErrorCode::ImportFailed, "cannot compress mip level {} ({}x{}) of '{}' as {}: {}", level, mip.Width, mip.Height, name,
+						TextureFormatToString(format), compressed.error().ToString());
+				}
+				mips.push_back({ .Width = mip.Width, .Height = mip.Height, .Offset = blocks.size(), .Size = compressed->size() });
+				blocks.insert(blocks.end(), compressed->begin(), compressed->end());
+			}
+			texture.Format = format;
+			texture.Mips = std::move(mips);
+			texture.Pixels = std::move(blocks);
+			return {};
+		}
+
 		// The settings object of an import as the registered struct (null: the defaults). Errors: Validation for settings
 		// the struct rejects; InvalidState for a registry without TextureImportSettings.
 		[[nodiscard]] static Result<TextureImportSettings> ReadSettings(const Json& settings, const TypeRegistry& registry)
@@ -279,6 +328,11 @@ namespace Engine {
 			const std::span<std::byte> next(texture.Pixels.data() + static_cast<size_t>(mip.Offset), static_cast<size_t>(mip.Size));
 			ENGINE_TRY(Utils::DownsampleLevel(previous, above.Width, above.Height, next, mip.Width, mip.Height, settings.Usage));
 		}
+
+		// The levels are made in RGBA8 whatever the compression, so Auto compresses exactly the levels None keeps.
+		const TextureFormat format = Utils::GetCookedFormat(settings.Usage, settings.Compression);
+		if (GetTextureBlockCodec(format).has_value())
+			ENGINE_TRY(Utils::CompressLevels(texture, format, name));
 		return CookTexture(texture, Version);
 	}
 
@@ -289,9 +343,15 @@ namespace Engine {
 			.Entry(TextureUsage::Linear, "Linear", "Linear data (metallic-roughness, occlusion, masks): mips filtered on the stored values.")
 			.Entry(TextureUsage::NormalMap, "NormalMap", "Tangent-space normals: linear, every generated mip renormalized to unit vectors.");
 
+		// M23: the entries' and the Compression field's texts are frozen by Docs/Decisions/0034-m23-contract.md decision 18.
+		registry.Enum<TextureCompression>("TextureCompression", "Whether an imported texture or environment is stored block-compressed for the GPU.")
+			.Entry(TextureCompression::Auto, "Auto", "Compress by usage: BC7 for colour and linear data, BC5 for normal maps; BC6H for an environment's cubes.")
+			.Entry(TextureCompression::None, "None", "Keep the texels uncompressed (RGBA8, or RGBA16F for an environment): sprite, tile and UI art.");
+
 		registry.Struct<TextureImportSettings>("TextureImportSettings", "How a PNG, JPEG, TGA or BMP image is imported as a texture.")
 			.Field("Usage", &TextureImportSettings::Usage, "How the texels are interpreted: sRGB colour, linear data or a tangent-space normal map.")
-			.Field("GenerateMips", &TextureImportSettings::GenerateMips, "Whether the full mip chain down to 1x1 is generated; otherwise only the base level.");
+			.Field("GenerateMips", &TextureImportSettings::GenerateMips, "Whether the full mip chain down to 1x1 is generated; otherwise only the base level.")
+			.Field("Compression", &TextureImportSettings::Compression, "Whether the texture is stored block-compressed for the GPU.");
 	}
 
 }

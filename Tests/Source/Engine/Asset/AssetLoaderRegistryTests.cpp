@@ -2,10 +2,12 @@
 
 #include "Engine/Asset/AssetLoaderRegistry.h"
 
+#include "Engine/Asset/AudioClipData.h"
 #include "Engine/Asset/BuiltinMeshes.h"
 #include "Engine/Asset/CookedFormat.h"
 #include "Engine/Asset/DocumentData.h"
 #include "Engine/Asset/MeshData.h"
+#include "Engine/Asset/TextureData.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Support/SceneTestFixture.h"
 
@@ -30,6 +32,41 @@ namespace Engine {
 				CHECK(loaders.Find(type)->GetType() == type);
 			}
 			CHECK(loaders.Find(AssetType::None) == nullptr);
+		}
+
+		// M23 (Docs/Decisions/0034-m23-contract.md decision 20): the version the caches compare a cached artifact's header
+		// with is the one each loader requires.
+		TEST_CASE("AssetLoaderRegistry: GetCookedFormatVersion names the payload format version each built-in loader reads")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			AssetLoaderRegistry loaders;
+			RegisterBuiltinLoaders(loaders);
+			CHECK_FALSE(GetCookedFormatVersion(AssetType::None).has_value());
+			// Every AssetType has a version and a loader, a type appended later included.
+			uint16_t value = 1;
+			for (; AssetTypeFromString(AssetTypeToString(static_cast<AssetType>(value))) == static_cast<AssetType>(value); ++value)
+			{
+				const AssetType type = static_cast<AssetType>(value);
+				CAPTURE(AssetTypeToString(type));
+				const std::optional<uint16_t> version = GetCookedFormatVersion(type);
+				REQUIRE(version.has_value());
+				REQUIRE(loaders.Find(type) != nullptr);
+				// The loader refuses the versions around it as UnsupportedVersion and never refuses its own as such (an empty
+				// payload fails as its reader's Parse or Validation instead).
+				const std::byte payload[1] = {};
+				for (const uint16_t other : { static_cast<uint16_t>(*version - 1), static_cast<uint16_t>(*version + 1) })
+				{
+					const Result<AssetRef<Asset>> refused = loaders.Load(WriteCookedArtifact(type, other, 1, payload), { .Registry = registry.get(), .Handle = AssetHandle(0x301) });
+					REQUIRE_FALSE(refused.has_value());
+					CHECK(refused.error().GetCode() == ErrorCode::UnsupportedVersion);
+				}
+				const Result<AssetRef<Asset>> own = loaders.Load(WriteCookedArtifact(type, *version, 1, payload), { .Registry = registry.get(), .Handle = AssetHandle(0x301) });
+				CHECK((own.has_value() || own.error().GetCode() != ErrorCode::UnsupportedVersion));
+			}
+			CHECK_FALSE(GetCookedFormatVersion(static_cast<AssetType>(value)).has_value());
+			CHECK(GetCookedFormatVersion(AssetType::AudioClip) == AudioClipData::FormatVersion);
+			CHECK(GetCookedFormatVersion(AssetType::Texture) == TextureData::FormatVersion);
+			CHECK(GetCookedFormatVersion(AssetType::Mesh) == MeshData::FormatVersion);
 		}
 
 		TEST_CASE("AssetLoaderRegistry: dispatches by the cooked header's type")

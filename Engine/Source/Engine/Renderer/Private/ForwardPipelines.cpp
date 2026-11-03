@@ -6,6 +6,7 @@
 #include "Engine/Renderer/SceneTargetFormats.h"
 #include "Shared/DrawConstants.h"
 #include "Shared/EnvironmentConstants.h"
+#include "Shared/LightClusterConstants.h"
 #include "Shared/MaterialConstants.h"
 #include "Shared/Private/SceneDataViewConstants.h"
 #include "Shared/ShadowConstants.h"
@@ -40,6 +41,7 @@ namespace Engine {
 		{
 			return MakeSetLayout(0, {
 										nvrhi::BindingLayoutItem::ConstantBuffer(ViewConstantsRegister),
+										nvrhi::BindingLayoutItem::StructuredBuffer_SRV(InstancesRegister),
 										nvrhi::BindingLayoutItem::Sampler(AnisoWrapRegister),
 										nvrhi::BindingLayoutItem::PushConstants(DrawConstantsSlot, sizeof(DrawConstants)),
 									});
@@ -51,6 +53,7 @@ namespace Engine {
 										nvrhi::BindingLayoutItem::ConstantBuffer(ViewConstantsRegister),
 										nvrhi::BindingLayoutItem::ConstantBuffer(ShadowConstantsRegister),
 										nvrhi::BindingLayoutItem::ConstantBuffer(EnvironmentConstantsRegister),
+										nvrhi::BindingLayoutItem::ConstantBuffer(LightClusterConstantsRegister),
 										nvrhi::BindingLayoutItem::StructuredBuffer_SRV(LightsRegister),
 										nvrhi::BindingLayoutItem::Texture_SRV(ShadowCascadesRegister),
 										nvrhi::BindingLayoutItem::Texture_SRV(ShadowAtlasRegister),
@@ -59,6 +62,9 @@ namespace Engine {
 										nvrhi::BindingLayoutItem::Texture_SRV(AmbientOcclusionRegister),
 										nvrhi::BindingLayoutItem::Texture_SRV(ViewDepthRegister),
 										nvrhi::BindingLayoutItem::Texture_SRV(SceneNormalsRegister),
+										nvrhi::BindingLayoutItem::StructuredBuffer_SRV(InstancesRegister),
+										nvrhi::BindingLayoutItem::StructuredBuffer_SRV(LightClusterMasksRegister),
+										nvrhi::BindingLayoutItem::Texture_SRV(PointShadowMapsRegister),
 										nvrhi::BindingLayoutItem::Sampler(LinearClampRegister),
 										nvrhi::BindingLayoutItem::Sampler(ShadowCompareRegister),
 										nvrhi::BindingLayoutItem::Sampler(AnisoWrapRegister),
@@ -85,7 +91,7 @@ namespace Engine {
 			return {
 				.Name = std::format("Scene{}{}{}", picking ? "Picking" : "Prepass", mask ? "Mask" : "Opaque", CullModeNames[variant % MeshCullModeCount]),
 				.Program = std::string(SceneProgram),
-				.Entries = { "VSMain", picking ? "PSPicking" : "PSPrepass" },
+				.Entries = { picking ? "VSPicking" : "VSMain", picking ? "PSPicking" : "PSPrepass" },
 				.Permutation = MakeAlphaMaskPermutation(mask),
 				.BindingLayouts = { MakePrepassViewLayout(), MakeMaterialLayout() },
 				.ConstantBuffers = {
@@ -110,6 +116,7 @@ namespace Engine {
 					{ .Set = 0, .Register = ViewConstantsRegister, .ByteSize = sizeof(ViewConstants) },
 					{ .Set = 0, .Register = EnvironmentConstantsRegister, .ByteSize = sizeof(EnvironmentConstants) },
 					{ .Set = 0, .Register = ShadowConstantsRegister, .ByteSize = sizeof(ShadowConstants) },
+					{ .Set = 0, .Register = LightClusterConstantsRegister, .ByteSize = sizeof(LightClusterConstants) },
 					{ .Set = 1, .Register = MaterialConstantsRegister, .ByteSize = sizeof(MaterialConstants) },
 				},
 			};
@@ -212,7 +219,7 @@ namespace Engine {
 			{
 				auto description = MakePrepassDescription(variant);
 				description.Name = std::format("SceneOverdraw{}", CullModeNames[variant]);
-				description.Entries = { "VSMain", "PSOverdraw" };
+				description.Entries = { "VSOverdraw", "PSOverdraw" };
 				descriptions.push_back(std::move(description));
 			}
 			return descriptions;
@@ -224,10 +231,11 @@ namespace Engine {
 				.Name = "SceneDataView",
 				.Program = "SceneDataView",
 				.Entries = { "CSMain" },
-				.BindingLayouts = { MakeSetLayout(0, { nvrhi::BindingLayoutItem::ConstantBuffer(0), nvrhi::BindingLayoutItem::ConstantBuffer(1), nvrhi::BindingLayoutItem::Texture_SRV(0), nvrhi::BindingLayoutItem::Texture_SRV(1), nvrhi::BindingLayoutItem::Texture_SRV(2), nvrhi::BindingLayoutItem::Texture_SRV(3), nvrhi::BindingLayoutItem::Texture_SRV(4), nvrhi::BindingLayoutItem::Texture_UAV(0), nvrhi::BindingLayoutItem::PushConstants(3, sizeof(SceneDataViewConstants)) }) },
+				.BindingLayouts = { MakeSetLayout(0, { nvrhi::BindingLayoutItem::ConstantBuffer(0), nvrhi::BindingLayoutItem::ConstantBuffer(1), nvrhi::BindingLayoutItem::ConstantBuffer(SceneDataViewClustersRegister), nvrhi::BindingLayoutItem::Texture_SRV(0), nvrhi::BindingLayoutItem::Texture_SRV(1), nvrhi::BindingLayoutItem::Texture_SRV(2), nvrhi::BindingLayoutItem::Texture_SRV(3), nvrhi::BindingLayoutItem::Texture_SRV(4), nvrhi::BindingLayoutItem::StructuredBuffer_SRV(SceneDataViewMasksRegister), nvrhi::BindingLayoutItem::Texture_UAV(0), nvrhi::BindingLayoutItem::PushConstants(3, sizeof(SceneDataViewConstants)) }) },
 				.StorageImages = { { .Set = 0, .Register = 0, .Format = nvrhi::Format::RGBA8_UNORM } },
 				.ConstantBuffers = { { .Set = 0, .Register = 0, .ByteSize = sizeof(ViewConstants) },
-					{ .Set = 0, .Register = 1, .ByteSize = sizeof(ShadowConstants) } },
+					{ .Set = 0, .Register = 1, .ByteSize = sizeof(ShadowConstants) },
+					{ .Set = 0, .Register = SceneDataViewClustersRegister, .ByteSize = sizeof(LightClusterConstants) } },
 			};
 		}
 
@@ -255,8 +263,14 @@ namespace Engine {
 		{
 			auto layout = MakePrepassDescription(cullMode);
 			layout.Name = std::format("SceneOverdraw{}", CullModeNames[cullMode]);
-			layout.Entries = { "VSMain", "PSOverdraw" };
+			layout.Entries = { "VSOverdraw", "PSOverdraw" };
 			auto specification = MakeMeshPipelineSpecification(std::move(layout), layouts, true, cullMode);
+			// VSOverdraw reads only MeshVertex's position and texture coordinates (Scene.slang's OverdrawVertexInput).
+			constexpr uint32_t Stride = sizeof(MeshVertex);
+			specification.VertexAttributes = {
+				nvrhi::VertexAttributeDesc().setName("POSITION").setFormat(nvrhi::Format::RGB32_FLOAT).setOffset(offsetof(MeshVertex, Position)).setElementStride(Stride),
+				nvrhi::VertexAttributeDesc().setName("TEXCOORD").setFormat(nvrhi::Format::RG32_FLOAT).setOffset(offsetof(MeshVertex, TexCoord)).setElementStride(Stride),
+			};
 			specification.Framebuffer = nvrhi::FramebufferInfo().addColorFormat(nvrhi::Format::RGBA16_FLOAT);
 			specification.RenderState.depthStencilState.setDepthTestEnable(false).setDepthWriteEnable(false);
 			specification.RenderState.blendState.targets[0].setBlendEnable(true).setSrcBlend(nvrhi::BlendFactor::One).setDestBlend(nvrhi::BlendFactor::One).setBlendOp(nvrhi::BlendOp::Add).setSrcBlendAlpha(nvrhi::BlendFactor::One).setDestBlendAlpha(nvrhi::BlendFactor::One).setBlendOpAlpha(nvrhi::BlendOp::Add);

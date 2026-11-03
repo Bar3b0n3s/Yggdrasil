@@ -13,8 +13,8 @@
 
 // The scene renderer's mesh pipelines (SceneRenderer.h; Architecture §8.4, §8.5; Docs/Decisions/0013-m8-decisions.md
 // decision 7): the Scene program's prepass and forward variants, their layout descriptions and their shared binding
-// layouts. Every variant draws MeshVertex (§6.8) with frontCounterClockwise = true (§8.3) and reverse-Z depth
-// (GreaterOrEqual). A variant is an alpha mode and a cull mode:
+// layouts. Every variant draws MeshVertex (§6.8; the overdraw variants only its position and texture coordinates) with
+// frontCounterClockwise = true (§8.3) and reverse-Z depth (GreaterOrEqual). A variant is an alpha mode and a cull mode:
 //   - prepass (pass 4, SceneNormals with SceneDepth written): {Opaque, Mask} x {CullBack, CullFront, CullNone};
 //   - forward opaque (pass 7, SceneColor, depth tested without writes): the same six;
 //   - forward transparent (pass 9, SceneColor, depth tested without writes, straight alpha blending): Blend x the three.
@@ -23,9 +23,11 @@
 // view's value (SceneDebugViewConstantId); a debug view shares its Lit variant's layout description.
 //
 // Binding layouts (§8.4), shared through PipelineFactory::CreateBindingLayouts so one binding set serves every variant:
-//   - prepass set 0: b0 ViewConstants, s2 AnisoWrap and the DrawConstants push constants;
-//   - forward set 0: b0 ViewConstants, b2 EnvironmentConstants, t0 Lights, t3 EnvSpecular, t5 BRDFLut, s0 LinearClamp,
-//     s2 AnisoWrap and the push constants;
+//   - prepass set 0: b0 ViewConstants, t10 Instances, s2 AnisoWrap and the DrawConstants push constants;
+//   - forward set 0: b0 ViewConstants, b1 ShadowConstants, b2 EnvironmentConstants, b3 LightClusterConstants, t0 Lights,
+//     t1 ShadowCascades, t2 ShadowAtlas, t3 EnvSpecular, t5 BRDFLut, t6 AmbientOcclusion, t8 ViewDepth, t9 SceneNormals,
+//     t10 Instances, t11 the light cluster masks (M23, Renderer/LightClusterPass.h), t12 PointShadowMaps, s0 LinearClamp,
+//     s1 ShadowCompare, s2 AnisoWrap and the push constants;
 //   - set 1 (every variant): b0 MaterialConstants and t0..t4 the base colour, metallic-roughness, normal, occlusion and
 //     emissive maps.
 
@@ -34,14 +36,16 @@ namespace Engine {
 	namespace Utils {
 
 		// NVRHI's validation counts push constants as a constant-buffer slot (DX12 root constants), so they may not share one
-		// with a constant buffer of the layout; Vulkan ignores the slot. b0 to b2 of set 0 are the per-view constants of
-		// §8.4, so the draw's push constants take b3 (ADR 0012 decision 22).
-		inline constexpr uint32_t DrawConstantsSlot = 3;
+		// with a constant buffer of the layout; Vulkan ignores the slot. b0 to b3 of set 0 are the per-view constants of
+		// §8.4, so the draw's push constants take the first slot after them: b3 until M23 (ADR 0012 decision 22), b4 since
+		// M23's LightClusterConstants took b3 (Docs/Decisions/0034-m23-contract.md decision 5).
+		inline constexpr uint32_t DrawConstantsSlot = 4;
 
 		// The registers of set 0 (§8.4) and set 1.
 		inline constexpr uint32_t ViewConstantsRegister = 0;
 		inline constexpr uint32_t ShadowConstantsRegister = 1;
 		inline constexpr uint32_t EnvironmentConstantsRegister = 2;
+		inline constexpr uint32_t LightClusterConstantsRegister = 3; // M23 (stream C): the cluster grid
 		inline constexpr uint32_t LightsRegister = 0;
 		inline constexpr uint32_t ShadowCascadesRegister = 1;
 		inline constexpr uint32_t ShadowAtlasRegister = 2;
@@ -50,6 +54,13 @@ namespace Engine {
 		inline constexpr uint32_t AmbientOcclusionRegister = 6;
 		inline constexpr uint32_t ViewDepthRegister = 8;
 		inline constexpr uint32_t SceneNormalsRegister = 9;
+		// M23 (C23.1, R-INST; Docs/Decisions/0034-m23-contract.md decision 2): the view's Instances structured buffer of
+		// Shared/InstanceRecord.h, read by every program that draws meshes (Scene, Shadow and SelectionMask) at this register.
+		inline constexpr uint32_t InstancesRegister = 10;
+		inline constexpr uint32_t LightClusterMasksRegister = 11; // M23 (stream C): the cluster masks
+		// M23 (R-PLS, Docs/Decisions/0034-m23-contract.md decision 3): the PointShadowMaps cube array, sampled with
+		// ShadowCompareRegister's comparison sampler.
+		inline constexpr uint32_t PointShadowMapsRegister = 12;
 		inline constexpr uint32_t LinearClampRegister = 0;
 		inline constexpr uint32_t ShadowCompareRegister = 1;
 		inline constexpr uint32_t AnisoWrapRegister = 2;
@@ -97,6 +108,11 @@ namespace Engine {
 		// Creates prepass variant `variant` with the shared layouts. Errors: those of PipelineFactory.
 		[[nodiscard]] Result<GraphicsPipeline> CreatePrepassPipeline(PipelineFactory& pipelines, const MeshBindingLayouts& layouts, uint32_t variant, bool picking = false);
 		[[nodiscard]] Result<GraphicsPipeline> CreateOverdrawPipeline(PipelineFactory& pipelines, const MeshBindingLayouts& layouts, uint32_t cullMode);
+		// The data views' composite (Passes/SceneDataView.slang): set 0 with b0 ViewConstants, b1 ShadowConstants, b2
+		// LightClusterConstants (M23), t0 SceneDepth, t1 the occlusion, t2 the linear depth, t3 SceneNormals, t4 the overdraw
+		// count, t5 the light cluster masks (M23), u0 LdrColor and its push constants (b3).
+		inline constexpr uint32_t SceneDataViewClustersRegister = 2;
+		inline constexpr uint32_t SceneDataViewMasksRegister = 5;
 		[[nodiscard]] PipelineLayoutDescription GetSceneDataViewLayout();
 
 		// Creates forward variant `variant` specialized with `view` (Lit: the shaders as compiled). Errors: those of

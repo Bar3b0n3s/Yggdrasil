@@ -65,7 +65,7 @@ COMPONENT_ORDER = [
 ]
 
 # The registered version of each component above 1 ("ComponentVersions"); every other component is at version 1.
-COMPONENT_VERSIONS = {"Prefab": 2, "Script": 2}
+COMPONENT_VERSIONS = {"Prefab": 2, "PointLight": 2, "Script": 2}
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Canonical JSON (the JsonWriter form of Architecture §6: tabs, LF, scalar arrays on one line, final newline)
@@ -588,6 +588,12 @@ return Script.Define("Jumper", Jumper)
     item = fixture("SCRIPT_COMPUTED_ASSET_LOAD")
     item.project["Export"]["PruneUnreferenced"] = True
     item.add_script("Project/Assets/Scripts/Loader.luau", "5c41000000000006", COMPUTED_LOADER)
+
+    # Five shadow-casting point lights, one more than a view shadows (Docs/Decisions/0034-m23-contract.md decision 18).
+    item = fixture("RENDER_POINT_SHADOW_BUDGET")
+    for index in range(5):
+        item.entities.append(entity(f"e00000000000002{index}", f"Bulb{index}", {
+            "Transform": transform(index * 2, 3, 0), "PointLight": {"CastShadows": True}}))
 
     return fixtures
 

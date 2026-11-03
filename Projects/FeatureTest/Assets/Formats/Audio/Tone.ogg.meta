@@ -4,7 +4,7 @@
 	"Handle": "a06d0a5c58c9c793",
 	"Type": "AudioClip",
 	"Importer": "Audio",
-	"ImporterVersion": 1,
+	"ImporterVersion": 2,
 	"Settings": {
 		"Stream": "Auto"
 	},

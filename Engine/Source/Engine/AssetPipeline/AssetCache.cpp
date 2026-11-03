@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/AssetPipeline/AssetCache.h"
 
+#include "Engine/Asset/AssetLoaderRegistry.h"
 #include "Engine/Asset/CookedFormat.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/Hash.h"
@@ -493,6 +494,22 @@ namespace Engine {
 			return {};
 		}
 
+		// Why a cooked artifact this build reads is not current: its payload format version is not the one this build's loader
+		// of its type reads (GetCookedFormatVersion). An earlier build cooked it under a key that the format change left as it
+		// was (an importer whose own version did not change, such as SoundEffectImporter's when AudioClipData went to version
+		// 2), so it is an entry to rebuild, never a hit (§7.5; Docs/Decisions/0034-m23-contract.md decision 20). nullopt when it
+		// is current.
+		static std::optional<std::string> FindOutdatedFormat(const CookedHeader& header)
+		{
+			const std::optional<uint16_t> current = GetCookedFormatVersion(header.Type);
+			if (current.has_value() && *current == header.FormatVersion)
+				return std::nullopt;
+			if (!current.has_value())
+				return std::format("this build reads no {} payload", AssetTypeToString(header.Type));
+			return std::format("it holds {} payload format version {}, and this build reads version {}", AssetTypeToString(header.Type),
+				header.FormatVersion, *current);
+		}
+
 		// Removes `path` when it exists.
 		static Status RemoveIfPresent(VirtualFileSystem& vfs, const VfsPath& path)
 		{
@@ -582,12 +599,22 @@ namespace Engine {
 			// Validation: not UTF-8 text, a corrupted manifest.
 		}
 
-		// A present entry: every part must be intact, or the whole entry is discarded and rebuilt (§7.5).
-		const auto discard = [&vfs, &root, &manifestPath, source, key](const std::string& reason, std::span<const ManifestArtifact> artifacts)
-			-> Result<std::optional<CachedImport>>
+		// A present entry: every part must be intact and current, or the whole entry is discarded and rebuilt (§7.5). A corrupted
+		// entry is logged at Warn; one an earlier build cooked at another payload format version (outdated) at Info, since every
+		// format change leaves such entries behind.
+		const auto discard = [&vfs, &root, &manifestPath, source, key](const std::string& reason, std::span<const ManifestArtifact> artifacts,
+								 bool outdated = false) -> Result<std::optional<CachedImport>>
 		{
-			ENGINE_CORE_WARN("Asset cache: discarding the corrupted cache entry {} of asset {} in '{}' ({}); it is rebuilt", Utils::FormatHex(key),
-				source, root.ToString(), reason);
+			if (outdated)
+			{
+				ENGINE_CORE_INFO("Asset cache: discarding the outdated cache entry {} of asset {} in '{}' ({}); it is rebuilt", Utils::FormatHex(key),
+					source, root.ToString(), reason);
+			}
+			else
+			{
+				ENGINE_CORE_WARN("Asset cache: discarding the corrupted cache entry {} of asset {} in '{}' ({}); it is rebuilt", Utils::FormatHex(key),
+					source, root.ToString(), reason);
+			}
 			ENGINE_TRY(Utils::RemoveIfPresent(vfs, manifestPath));
 			ENGINE_TRY_ASSIGN(const VfsPath mainArtifact, Utils::KeyFile(root, source, key, ArtifactExtension));
 			ENGINE_TRY(Utils::RemoveIfPresent(vfs, mainArtifact));
@@ -625,6 +652,8 @@ namespace Engine {
 								   AssetTypeToString(artifact.Type)),
 					manifest->Artifacts);
 			}
+			if (const std::optional<std::string> outdated = Utils::FindOutdatedFormat(cooked->Header); outdated.has_value())
+				return discard(std::format("artifact {}: {}", artifact.Handle, *outdated), manifest->Artifacts, true);
 			import.Import.Artifacts.push_back(ImportedArtifact{
 				.Handle = artifact.Handle,
 				.Type = artifact.Type,
@@ -656,6 +685,13 @@ namespace Engine {
 		{
 			ENGINE_CORE_WARN("Asset cache: discarding the corrupted cached artifact {} ({}) in '{}': {}; it is rebuilt", artifact, Utils::FormatHex(key),
 				m_State->Root.ToString(), cooked.error().ToString());
+			ENGINE_TRY(Utils::RemoveIfPresent(vfs, path));
+			return std::optional<Buffer>();
+		}
+		if (const std::optional<std::string> outdated = Utils::FindOutdatedFormat(cooked->Header); outdated.has_value())
+		{
+			ENGINE_CORE_INFO("Asset cache: discarding the outdated cached artifact {} ({}) in '{}': {}; it is rebuilt", artifact, Utils::FormatHex(key),
+				m_State->Root.ToString(), *outdated);
 			ENGINE_TRY(Utils::RemoveIfPresent(vfs, path));
 			return std::optional<Buffer>();
 		}

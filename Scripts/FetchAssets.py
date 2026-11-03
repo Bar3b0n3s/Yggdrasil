@@ -19,11 +19,11 @@ Commands:
       The pinned format fixtures that are not generated first-party (Architecture §15.5,
       Docs/Decisions/0022-m14-contract.md decision 16): Inter-Regular.otf (the member extras/otf/Inter-Regular.otf of
       the pinned Inter release archive) as Tests/Data/Assets/Fonts/Inter-Regular.otf, and the public-domain Tone.mp3
-      and Tone.ogg from upload.wikimedia.org as Tests/Data/Assets/Audio/, each verified against the SHA-256 and size
-      pinned below (FIXTURE_FILES), which Tests/Data/LICENSES.md mirrors (a pin missing there, or different, fails the
-      command). Only a file that is missing or does not match its pin is downloaded. --check downloads nothing: it
-      verifies the committed files and the mirror only. The other format fixtures (WAV, FLAC, TTF, HDR, the textures
-      and glTF) are generated first-party by Tests/Data/Generate/.
+      and Tone.ogg and the CC0 Water.opus from upload.wikimedia.org as Tests/Data/Assets/Audio/, each verified against
+      the SHA-256 and size pinned below (FIXTURE_FILES), which Tests/Data/LICENSES.md mirrors (a pin missing there, or
+      different, fails the command). Only a file that is missing or does not match its pin is downloaded. --check
+      downloads nothing: it verifies the committed files and the mirror only. The other format fixtures (WAV, FLAC,
+      TTF, HDR, the textures and glTF) are generated first-party by Tests/Data/Generate/.
 
 Downloads need operator approval, which Roadmap M0 collects up front; the items this script fetches are the ones
 recorded in Docs/Decisions/0001-approvals.md. Files are written to a temporary name and renamed into place only after
@@ -165,8 +165,9 @@ DEFAULT_RESOURCES = (
 
 
 # The pinned format fixtures; Tests/Data/LICENSES.md names their sources and licenses. The Commons digests were computed
-# from the unmodified downloads when the files were first committed (Roadmap M12, ADR 0015 decision 25), the OTF's from
-# the pinned Inter archive (Roadmap M14, ADR 0022 decision 16).
+# from the unmodified downloads when the files were first committed (Roadmap M12, ADR 0015 decision 25; Water.opus,
+# Roadmap M23, Docs/Decisions/0034-m23-contract.md decision 16), the OTF's from the pinned Inter archive (Roadmap M14,
+# ADR 0022 decision 16).
 FIXTURE_FILES = (
     PinnedResource(
         destination="Tests/Data/Assets/Audio/Tone.mp3",
@@ -181,6 +182,13 @@ FIXTURE_FILES = (
         sha256="f6d213190ddd88313ea689fadcbce10083932fa2779243ca28d0bafb30d3ba8f",
         size=5490,
         url=f"https://{WIKIMEDIA_UPLOAD_HOST}/wikipedia/commons/1/17/1000Hz.ogg",
+    ),
+    PinnedResource(
+        destination="Tests/Data/Assets/Audio/Water.opus",
+        kind="commons",
+        sha256="063b8a1ed2e1958d8a7e79a13c182f8aa9e132afa3a4207139395b14f80965ec",
+        size=339139,
+        url=f"https://{WIKIMEDIA_UPLOAD_HOST}/wikipedia/commons/c/cd/Toberbreedia_water_bubbling.opus",
     ),
     PinnedResource(
         destination="Tests/Data/Assets/Fonts/Inter-Regular.otf",

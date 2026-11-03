@@ -1085,9 +1085,10 @@ namespace Engine {
 			CHECK(material->MetallicRoughnessMap.GetHandle() == DeriveSubAssetHandle(source, "texture:2:linear"));
 			CHECK(material->OcclusionMap.GetHandle() == DeriveSubAssetHandle(source, "texture:2:linear"));
 
-			// Colour data is sRGB, the other uses are linear.
-			const std::pair<std::string_view, TextureFormat> formats[] = { { "texture:0", TextureFormat::RGBA8Srgb },
-				{ "texture:1:normal", TextureFormat::RGBA8Unorm }, { "texture:2:linear", TextureFormat::RGBA8Unorm } };
+			// Colour data is sRGB, the other uses are linear, each compressed by its usage (TextureImporter's Compression Auto, M23):
+			// BC7 for colour and linear data, BC5 for the normal map.
+			const std::pair<std::string_view, TextureFormat> formats[] = { { "texture:0", TextureFormat::BC7Srgb },
+				{ "texture:1:normal", TextureFormat::BC5Unorm }, { "texture:2:linear", TextureFormat::BC7Unorm } };
 			for (const auto& [key, format] : formats)
 			{
 				CAPTURE(std::string(key));

@@ -266,7 +266,39 @@ namespace Engine {
 			const auto result = EvaluateRenderSceneValidation(scene, assets);
 			REQUIRE(result);
 			CHECK(result->ShadowedSpotLights == 9);
+			CHECK(result->ShadowedPointLights == 0);
 			CHECK_FALSE(result->NoLighting);
+		}
+
+		// M23 (R-PLS; Docs/Decisions/0034-m23-contract.md decision 18): PointLight version 2's CastShadows reaches the scan, which
+		// counts the point lights the way it counts the spots.
+		TEST_CASE("RenderSceneValidation: only enabled contributing shadowed point lights consume the point budget")
+		{
+			Test::SceneTestFixture fixture;
+			Test::InMemoryAssetManager assets;
+			Scene& scene = fixture.GetScene();
+			for (int i = 0; i < 5; ++i)
+				scene.CreateEntity("Bulb").AddComponent<PointLightComponent>().CastShadows = true;
+			scene.CreateEntity("Unshadowed").AddComponent<PointLightComponent>();
+			Entity disabled = scene.CreateEntity("Disabled");
+			disabled.AddComponent<PointLightComponent>().CastShadows = true;
+			disabled.SetActive(false);
+			Entity dark = scene.CreateEntity("Dark");
+			dark.AddComponent<PointLightComponent>().CastShadows = true;
+			dark.Patch<PointLightComponent>([](PointLightComponent& light)
+			{
+				light.Intensity = 0;
+			});
+			Entity invalid = scene.CreateEntity("Invalid");
+			invalid.AddComponent<PointLightComponent>().CastShadows = true;
+			invalid.Patch<PointLightComponent>([](PointLightComponent& light)
+			{
+				light.Range = std::numeric_limits<float>::quiet_NaN();
+			});
+			const auto result = EvaluateRenderSceneValidation(scene, assets);
+			REQUIRE(result);
+			CHECK(result->ShadowedPointLights == 5);
+			CHECK(result->ShadowedSpotLights == 0);
 		}
 
 		TEST_CASE("RenderSceneValidation: nonfinite environment and emission return classification errors")

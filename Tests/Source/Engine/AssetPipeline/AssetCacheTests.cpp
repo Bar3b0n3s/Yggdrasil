@@ -369,6 +369,49 @@ namespace Engine {
 			}
 		}
 
+		// M23 (Docs/Decisions/0034-m23-contract.md decision 20): a payload format change leaves the key of an importer whose
+		// own version did not change as it was, so another build's artifact at another format version sits under the current
+		// key. It is rebuilt like a corrupted one (logged at Info), never served to a caller that does not load it first.
+		TEST_CASE("AssetCache: an artifact at another payload format version than this build reads is discarded as a miss")
+		{
+			Test::AssetTestFixture fixture;
+			AssetCache cache(fixture.GetVfs(), Test::ParseVfsPath("cache://"));
+			VirtualFileSystem& vfs = fixture.GetVfs();
+			const CachedImport track = MakeTrackImport({ "mesh:0:Straight" });
+			const AssetHandle straight = DeriveSubAssetHandle(Track, "mesh:0:Straight");
+			const Result<CookedArtifactView> current = ReadCookedArtifact(track.Import.Artifacts[1].Cooked);
+			REQUIRE(current.has_value());
+			REQUIRE(current->Header.FormatVersion == MeshData::FormatVersion);
+			const Buffer outdated = WriteCookedArtifact(AssetType::Mesh, static_cast<uint16_t>(MeshData::FormatVersion + 1), current->Header.ImporterVersion,
+				current->Payload);
+
+			REQUIRE(cache.Store(Track, 1, track).has_value());
+			CHECK_FALSE(IsMiss(cache.Find(Track, 1)));
+			REQUIRE(vfs.WriteFileAtomic(CacheFile(straight, 1, ".bin"), outdated).has_value());
+			{
+				Test::ExpectLog discarded(LogLevel::Info, "outdated");
+				CHECK(IsMiss(cache.Find(Track, 1)));
+				CHECK(discarded.GetMatchCount() == 1);
+			}
+			// Every file of the entry is gone, so the rebuild starts clean.
+			CHECK_FALSE(vfs.Exists(CacheFile(Track, 1, ".import")));
+			CHECK_FALSE(vfs.Exists(CacheFile(Track, 1, ".bin")));
+			CHECK_FALSE(vfs.Exists(CacheFile(straight, 1, ".bin")));
+
+			// ReadArtifact discards it the same way.
+			REQUIRE(cache.Store(Track, 2, track).has_value());
+			REQUIRE(vfs.WriteFileAtomic(CacheFile(straight, 2, ".bin"), outdated).has_value());
+			Test::ExpectLog discarded(LogLevel::Info, "outdated");
+			Result<std::optional<Buffer>> rejected = cache.ReadArtifact(straight, 2);
+			REQUIRE_MESSAGE(rejected.has_value(), rejected.error().ToString());
+			CHECK_FALSE(rejected->has_value());
+			CHECK_FALSE(vfs.Exists(CacheFile(straight, 2, ".bin")));
+			// The main artifact, still current, is served.
+			Result<std::optional<Buffer>> main = cache.ReadArtifact(Track, 2);
+			REQUIRE(main.has_value());
+			CHECK(main->has_value());
+		}
+
 		TEST_CASE("AssetCache: ReadArtifact serves one valid artifact and discards a corrupted one")
 		{
 			Test::AssetTestFixture fixture;

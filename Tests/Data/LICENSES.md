@@ -13,7 +13,8 @@ second byte-identical copy of each imported file. Each copy, in either place, is
 here. The third-party copies are those of the pinned fixtures below:
 `Projects/FeatureTest/Assets/Formats/Fonts/Inter-Regular.otf` (SIL OFL 1.1, whose full text the OpenType font fixture
 section holds), `Projects/FeatureTest/Assets/Formats/Audio/Tone.mp3` and `Projects/FeatureTest/Assets/Formats/Audio/Tone.ogg`
-(public domain), with their `Scaffold/Sources/` counterparts; every other copy is first-party.
+(public domain) and `Projects/FeatureTest/Assets/Formats/Audio/Water.opus` (CC0 1.0, the Ogg Opus fixture), with their
+`Scaffold/Sources/` counterparts; every other copy is first-party.
 
 ## Pinned third-party fixtures (`Scripts/FetchAssets.py fixture`)
 
@@ -27,6 +28,7 @@ one reviewed change. The sections below give each file's origin and license.
 |---|---|---|---|---|
 | `Tests/Data/Assets/Audio/Tone.mp3` | Wikimedia Commons `File:Sputnik - Beep.mp3` (NASA) | Public domain | 70272 | `84ab44b58396913c75ba0d8f5c29b18bca382269a10527bcf90a39c5c1460215` |
 | `Tests/Data/Assets/Audio/Tone.ogg` | Wikimedia Commons `File:1000Hz.ogg` | Public domain | 5490 | `f6d213190ddd88313ea689fadcbce10083932fa2779243ca28d0bafb30d3ba8f` |
+| `Tests/Data/Assets/Audio/Water.opus` | Wikimedia Commons `File:Toberbreedia_water_bubbling.opus` (User:A.-K. D.) | CC0 1.0 | 339139 | `063b8a1ed2e1958d8a7e79a13c182f8aa9e132afa3a4207139395b14f80965ec` |
 | `Tests/Data/Assets/Fonts/Inter-Regular.otf` | Inter 4.1, Regular (`extras/otf/Inter-Regular.otf` of the release archive) | SIL OFL 1.1 | 609600 | `d4f2b9e148059a15f014cb0f0b8fea8cd11bfa447dd483bedf1b0adc0e2ba799` |
 
 ## M13 Luau fixtures (`TypeChecker/`)
@@ -86,6 +88,20 @@ geometry is a unit cube and unit quads computed in the script.
 | SHA-256 | `f6d213190ddd88313ea689fadcbce10083932fa2779243ca28d0bafb30d3ba8f` (5,490 bytes) |
 
 A 1000 Hz tone: Ogg Vorbis, 22,050 Hz mono, 44,100 frames (2 s), three Ogg pages, the last with the end-of-stream flag.
+
+## Ogg Opus fixture (`Assets/Audio/Water.opus`)
+
+| | |
+|---|---|
+| Files | `Tests/Data/Assets/Audio/Water.opus` |
+| Origin | Wikimedia Commons, [File:Toberbreedia_water_bubbling.opus](https://commons.wikimedia.org/wiki/File:Toberbreedia_water_bubbling.opus), "The bubbling sound of Toberbreedia, a holy well in County Kilkenny", own work of User:A.-K. D., 2024-09-09; downloaded unmodified from `https://upload.wikimedia.org/wikipedia/commons/c/cd/Toberbreedia_water_bubbling.opus` on 2026-10-29 and renamed (M23, `Docs/Decisions/0034-m23-contract.md` decision 16; approved in `Docs/Decisions/0001-approvals.md`) |
+| Version | The file revision whose SHA-1 is `e6dd2f04d2d244432cf5ec2cb32ce889954baab6` (the SHA-1 Commons lists for it) |
+| License | CC0 1.0 Universal public domain dedication (`{{self|cc-zero}}` on the file's Commons page) |
+| SHA-256 | `063b8a1ed2e1958d8a7e79a13c182f8aa9e132afa3a4207139395b14f80965ec` (339,139 bytes) |
+
+Water bubbling: Ogg Opus (encoded by libopus 1.4), stereo, 48 kHz, channel mapping family 0, a 312-frame pre-skip, 82
+Ogg pages of one logical stream (20 ms CELT packets, about 14 a page), the last with the end-of-stream flag; it decodes to
+1,066,531 frames (22.22 s).
 
 ## MP3 fixture (`Assets/Audio/Tone.mp3`)
 

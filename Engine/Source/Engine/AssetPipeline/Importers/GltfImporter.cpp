@@ -980,8 +980,10 @@ namespace Engine {
 				return existing->second;
 
 			ENGINE_TRY_ASSIGN(const Buffer encoded, ReadImage(image));
+			// Compressed by its usage (TextureImporter.h's Compression Auto): sub-assets have no settings of their own.
 			TextureImportSettings settings;
 			settings.GenerateMips = true;
+			settings.Compression = TextureCompression::Auto;
 			std::string_view suffix;
 			switch (use)
 			{

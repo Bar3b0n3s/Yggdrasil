@@ -1,0 +1,137 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Main",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"PointLight": 2,
+		"AudioListener": 1
+	},
+	"Entities": [
+		{
+			"ID": "e000000000000001",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 2, 10],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Primary": true
+				},
+				"AudioListener": {
+					"Primary": true
+				}
+			}
+		},
+		{
+			"ID": "e000000000000002",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 10, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Intensity": 3
+				}
+			}
+		},
+		{
+			"ID": "e000000000000020",
+			"Name": "Bulb0",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"CastShadows": true
+				}
+			}
+		},
+		{
+			"ID": "e000000000000021",
+			"Name": "Bulb1",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [2, 3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"CastShadows": true
+				}
+			}
+		},
+		{
+			"ID": "e000000000000022",
+			"Name": "Bulb2",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [4, 3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"CastShadows": true
+				}
+			}
+		},
+		{
+			"ID": "e000000000000023",
+			"Name": "Bulb3",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [6, 3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"CastShadows": true
+				}
+			}
+		},
+		{
+			"ID": "e000000000000024",
+			"Name": "Bulb4",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [8, 3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"CastShadows": true
+				}
+			}
+		}
+	]
+}

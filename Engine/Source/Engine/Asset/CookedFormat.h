@@ -22,7 +22,10 @@ static_assert(std::endian::native == std::endian::little, "cooked formats are li
 namespace Engine {
 
 	// The engine-wide cook version, part of every cache key (§7.5: "... ‖ engine cook version"). Bump it when a change to
-	// the engine (not to one importer, which bumps its own version) alters cooked bytes, so every cache entry is rebuilt.
+	// the engine alters cooked bytes at an unchanged payload format version, so every cache entry is rebuilt. Not for one
+	// importer, which bumps its own version, and not for a payload format change (a data type's FormatVersion): the caches
+	// treat an artifact at another format version than this build reads as an entry to rebuild under the same key
+	// (AssetCache::Find, GetCookedFormatVersion; M23, Docs/Decisions/0034-m23-contract.md decision 20).
 	inline constexpr uint32_t EngineCookVersion = 1;
 
 	// The 32-byte little-endian header (§6.8):

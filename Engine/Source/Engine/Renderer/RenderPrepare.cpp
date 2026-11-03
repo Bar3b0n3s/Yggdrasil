@@ -230,11 +230,17 @@ namespace Engine {
 		});
 	}
 
-	std::vector<MeshInstanceBatch> GroupMeshInstances(std::span<const MeshInstanceKey> /*keys*/)
+	std::vector<MeshInstanceBatch> GroupMeshInstances(std::span<const MeshInstanceKey> keys)
 	{
-		ENGINE_CONTRACT_STUB();
-		// M23 instancing contract (Docs/Decisions/0034-m23-contract.md decision 2, stream A): no batch until then.
-		return {};
+		std::vector<MeshInstanceBatch> batches;
+		for (uint32_t index = 0; index < keys.size(); ++index)
+		{
+			if (!batches.empty() && keys[index] == keys[index - 1])
+				++batches.back().Count;
+			else
+				batches.push_back({ .First = index, .Count = 1 });
+		}
+		return batches;
 	}
 
 }

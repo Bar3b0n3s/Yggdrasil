@@ -101,6 +101,7 @@ namespace Engine {
 			integrated.B10G11R11StorageSupported = true;
 			integrated.DeviceFault = true;
 			integrated.FillModeNonSolid = true;
+			integrated.TextureCompressionBC = true;
 			const DeviceCandidate cpu = MakeAcceptableCandidate(2, "Cpu", GpuDeviceType::Cpu);
 			const std::optional<int32_t> discreteScore = ScoreDevice(base);
 			const std::optional<int32_t> integratedScore = ScoreDevice(integrated);
@@ -115,14 +116,19 @@ namespace Engine {
 			const std::optional<int32_t> storageScore = ScoreDevice(WithFeature(base, &DeviceCandidate::B10G11R11StorageSupported));
 			const std::optional<int32_t> deviceFaultScore = ScoreDevice(WithFeature(base, &DeviceCandidate::DeviceFault));
 			const std::optional<int32_t> wireframeScore = ScoreDevice(WithFeature(base, &DeviceCandidate::FillModeNonSolid));
+			// M23 (Docs/Decisions/0034-m23-contract.md decision 15): BC textures, the lightest optional feature, since its
+			// absence only costs the decode fallback's memory.
+			const std::optional<int32_t> textureCompressionScore = ScoreDevice(WithFeature(base, &DeviceCandidate::TextureCompressionBC));
 			REQUIRE(hostCopyScore.has_value());
 			REQUIRE(storageScore.has_value());
 			REQUIRE(deviceFaultScore.has_value());
 			REQUIRE(wireframeScore.has_value());
+			REQUIRE(textureCompressionScore.has_value());
 			CHECK(*hostCopyScore > *storageScore);
 			CHECK(*storageScore > *deviceFaultScore);
 			CHECK(*deviceFaultScore > *wireframeScore);
-			CHECK(*wireframeScore > *discreteScore);
+			CHECK(*wireframeScore > *textureCompressionScore);
+			CHECK(*textureCompressionScore > *discreteScore);
 
 			// A higher API version breaks a remaining tie.
 			DeviceCandidate api14 = base;

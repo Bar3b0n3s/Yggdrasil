@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <format>
 #include <span>
 #include <vector>
 
@@ -99,6 +100,11 @@ namespace Engine {
 			const Result<Buffer> again = GenerateBlueNoiseTexture();
 			REQUIRE(again.has_value());
 			CHECK(*again == *cooked);
+			// The cooked bytes, the header's format version included, are what an engine cooked cache keeps under the
+			// generator's key, so they change only with BlueNoiseGeneratorVersion: TextureData's version 2 (M23) cooks new
+			// bytes, hence version 2, and an older cache's version 1 artifact, which no longer loads, is baked again.
+			CHECK(BlueNoiseGeneratorVersion == 2);
+			CHECK_MESSAGE(XXH64(*cooked) == 0x36B99BA13226132EULL, std::format("cooked XXH64 {:016x}", XXH64(*cooked)));
 		}
 	}
 

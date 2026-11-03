@@ -14,10 +14,10 @@
 #include <vector>
 
 // The CPU part of §8.3 pass 1 (Prepare) as pure functions, so the rules are unit-tested without a GPU (§15.2 "Renderer
-// (CPU): ... light culling; transparent sort ties"): frustum culling of submesh bounds, the light list with its limit, and
-// the two draw orders. SceneRenderer calls them on every Render. Deterministic: no unordered containers, ties broken by
-// stable keys, only the snapshot's data. Thread-safe (no state). Frozen by the M8 contract
-// (Docs/Decisions/0013-m8-decisions.md decision 7).
+// (CPU): ... light culling; transparent sort ties"): frustum culling of submesh bounds, the light list with its limit, the
+// two draw orders and (M23) their split into instanced draws. SceneRenderer calls them on every Render. Deterministic: no
+// unordered containers, ties broken by stable keys, only the snapshot's data. Thread-safe (no state). Frozen by the M8
+// contract (Docs/Decisions/0013-m8-decisions.md decision 7).
 
 namespace Engine {
 
@@ -62,7 +62,7 @@ namespace Engine {
 		AssetHandle Mesh{};
 		// M23 (C23.1, R-INST; Docs/Decisions/0034-m23-contract.md decision 2): the submesh's index in its mesh, so the draws
 		// of one submesh of one mesh and material are adjacent and batch into one instanced draw (GroupMeshInstances). The
-		// Prepare stage fills it with stream A; until then every key's is 0, which keeps the order of M18.
+		// Prepare stage fills it from the draw's submesh.
 		uint32_t Submesh = 0;
 		uint32_t DrawIndex = 0; // the draw's position before sorting (snapshot order)
 

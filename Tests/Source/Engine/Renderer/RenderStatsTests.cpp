@@ -398,7 +398,10 @@ namespace Engine {
 					const auto stats = fixture.Renderer().GetRenderStats();
 					const auto* pass = Test::SceneRendererIntegrationFixture::FindPass(stats, "Overdraw");
 					REQUIRE(pass != nullptr);
-					CHECK(pass->DrawCalls == count + 2);
+					// M23 (R-INST): the unmirrored opaque quads of one material are one instanced draw and the mirrored
+					// transparent ones another, besides the rejected Mask quad's and the transparent alpha-zero quad's draws, so
+					// at most four draws record the count + 2 quads' triangles.
+					CHECK(pass->DrawCalls == std::min(count + 2, 4U));
 					CHECK(pass->Triangles == 2 * (count + 2));
 					for (const auto disabled : { "DirectionalShadows", "GTAO", "ForwardOpaque", "Bloom", "FXAA", "SelectionMask", "Wireframe", "Overlays", "Text" })
 						CHECK(Test::SceneRendererIntegrationFixture::FindPass(stats, disabled) == nullptr);

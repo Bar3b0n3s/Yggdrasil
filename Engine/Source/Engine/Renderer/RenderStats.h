@@ -43,6 +43,10 @@ namespace Engine {
 		uint32_t ShadowDraws = 0;
 		uint32_t ShadowedSpotLights = 0;
 		uint32_t DroppedSpotShadows = 0;
+		// M23 (R-PLS, Docs/Decisions/0034-m23-contract.md decision 3): the point lights the frame shadowed (the plan's lights,
+		// at most MaxPointShadowLights) and the visible shadow-casting point lights beyond that budget, lit unshadowed.
+		uint32_t ShadowedPointLights = 0;
+		uint32_t DroppedPointShadows = 0;
 		uint32_t MemoryAllocationCount = 0; // tracked Vulkan device allocations, not NVRHI object count
 		uint32_t MaxMemoryAllocationCount = 0;
 	};

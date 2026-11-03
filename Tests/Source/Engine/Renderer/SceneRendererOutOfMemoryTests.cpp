@@ -2,22 +2,81 @@
 
 #include "Engine/Renderer/SceneRenderer.h"
 
+#include "Engine/Graphics/GpuOutOfMemory.h"
 #include "Engine/Graphics/GpuResourceTracker.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Image.h"
+#include "Engine/Renderer/LightClusterPass.h"
+#include "Engine/Renderer/LightClusters.h"
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Engine/Renderer/RenderSnapshot.h"
+#include "Shared/InstanceRecord.h"
+#include "Support/BufferCreationFails.h"
 #include "Support/HeadlessGpuFixture.h"
 
+#include <glm/gtc/matrix_transform.hpp>
+
 #include <cstddef>
+#include <cstdint>
+#include <string_view>
 #include <vector>
 
 // A scene renderer's requests after startup that run out of GPU memory (M18, C18.4; Docs/Decisions/0029-m18-contract.md
 // decisions 42, 43, 44 and 46): a view's new size and a debug-view switch are trimmed and retried once, and then fail alone
 // with OutOfMemory, keeping what the renderer had; never fatal. ReleaseTargets lets an owner whose image nothing displays
-// give its targets back.
+// give its targets back. M23 (Docs/Decisions/0034-m23-contract.md decision 20): the per-view buffers a Render creates
+// lazily, the instance buffer and the light clusters' buffers, whose out-of-memory creation fails only that Render.
 
 namespace Engine {
+
+	namespace {
+
+		// Renders `snapshot` into a command list of its own and submits it, returning Render's status: an error before
+		// recording leaves nothing pending, which OnSubmitted then ignores.
+		Status RenderOnce(GraphicsDevice& device, SceneRenderer& renderer, const RenderSnapshot& snapshot)
+		{
+			Result<nvrhi::CommandListHandle> list = device.CreateCommandList();
+			REQUIRE_MESSAGE(list.has_value(), list.error().ToString());
+			(*list)->open();
+			const Status rendered = renderer.Render(**list, snapshot);
+			(*list)->close();
+			renderer.OnSubmitted(snapshot.FrameIndex, device.ExecuteCommandList(**list));
+			return rendered;
+		}
+
+		// `fixture`'s snapshot with four quads and a point light: the view has instances, and its forward passes read the
+		// light clusters.
+		RenderSnapshot MakeClusteredSnapshot(const Test::SceneRendererIntegrationFixture& fixture)
+		{
+			RenderSnapshot snapshot = fixture.Snapshot();
+			snapshot.Meshes.clear();
+			for (int index = 0; index < 4; ++index)
+			{
+				const glm::vec3 position(static_cast<float>(index) - 1.5f, 0.0f, -4.0f);
+				snapshot.Meshes.push_back({ .World = glm::translate(glm::mat4(1.0f), position) * glm::scale(glm::mat4(1.0f), glm::vec3(0.4f)),
+					.Mesh = UUID(8910),
+					.Materials = { UUID(8911) } });
+			}
+			snapshot.Lights = { { .Type = RenderLightType::Point, .Intensity = 20.0f, .Position = glm::vec3(0.0f, 0.0f, -2.0f), .Range = 6.0f, .Entity = UUID(77) } };
+			return snapshot;
+		}
+
+		// Whether the last render of `renderer` recorded the pass whose stats row is `name`.
+		bool Recorded(SceneRenderer& renderer, std::string_view name)
+		{
+			return Test::SceneRendererIntegrationFixture::FindPass(renderer.GetRenderStats(), name) != nullptr;
+		}
+
+		// Selects the creation of a storage buffer of `size` bytes: a view's instance buffer or its light cluster masks.
+		Test::BufferCreationFails::Selector StorageBufferOfSize(uint64_t size)
+		{
+			return [size](const VkBufferCreateInfo& info)
+			{
+				return (info.usage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) != 0 && info.size == size;
+			};
+		}
+
+	}
 
 	TEST_SUITE("Renderer")
 	{
@@ -257,6 +316,123 @@ namespace Engine {
 				REQUIRE_FALSE(rendered.has_value());
 				CHECK(rendered.error().GetCode() == ErrorCode::OutOfMemory);
 				CHECK(fixture.Read().Pixels == lit.Pixels);
+			}
+			device.RunGarbageCollection();
+		}
+
+		// M23 (decisions 2 and 20): the Prepare stage creates the view's instance buffer; an out-of-memory creation fails the
+		// Render before recording (nothing recorded), as a lazily created target's does, never fatal, and the host's next
+		// Render creates it and renders the image a renderer without the failure renders.
+		TEST_CASE("SceneRenderer: an instance buffer that runs out of memory fails the render before recording, and the next render creates it"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			std::vector<std::byte> reference;
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu);
+				reference = fixture.Render(MakeClusteredSnapshot(fixture)).Pixels;
+			}
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu);
+				RenderSnapshot snapshot = MakeClusteredSnapshot(fixture);
+				{
+					// The first instance buffer holds 64 records (SceneRenderer::State::EnsureInstanceBuffer's minimum).
+					const Test::BufferCreationFails failing(StorageBufferOfSize(uint64_t{ 64 } * sizeof(InstanceRecord)));
+					const Status rendered = RenderOnce(device, fixture.Renderer(), snapshot);
+					REQUIRE_FALSE(rendered.has_value());
+					CHECK(rendered.error().GetCode() == ErrorCode::Gpu);
+					CHECK(IsGpuOutOfMemory(rendered.error(), device));
+					CHECK(failing.GetFailedCount() == 1);
+				}
+				++snapshot.FrameIndex;
+				CHECK(fixture.Render(snapshot).Pixels == reference);
+				CHECK(Recorded(fixture.Renderer(), "ForwardOpaque"));
+				CHECK_FALSE(device.IsLost());
+			}
+			device.RunGarbageCollection();
+		}
+
+		// M23 (decisions 5 and 20): the Ambient stage creates the light clusters' buffers; when the mask buffer's first
+		// creation runs out of memory, the forward passes and the data views' composite, which bind it, are skipped with a
+		// partial Gpu error, never fatal, and the next Render creates it and renders the image a renderer without the failure
+		// renders.
+		TEST_CASE("SceneRenderer: light cluster masks that run out of memory skip the forward passes, and the next render creates them"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			std::vector<std::byte> reference;
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu);
+				reference = fixture.Render(MakeClusteredSnapshot(fixture)).Pixels;
+			}
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu);
+				RenderSnapshot snapshot = MakeClusteredSnapshot(fixture);
+				const LightClusterGrid grid = ComputeLightClusterGrid(snapshot.Camera, fixture.Renderer().GetWidth(), fixture.Renderer().GetHeight());
+				{
+					const Test::BufferCreationFails failing(StorageBufferOfSize(LightClusterPass::GetMaskBufferDesc(GetLightClusterCount(grid)).byteSize));
+					const Status rendered = RenderOnce(device, fixture.Renderer(), snapshot);
+					REQUIRE_FALSE(rendered.has_value());
+					CHECK(rendered.error().GetCode() == ErrorCode::Gpu);
+					CHECK(IsGpuOutOfMemory(rendered.error(), device));
+					CHECK(failing.GetFailedCount() == 1);
+					CHECK_FALSE(Recorded(fixture.Renderer(), "ForwardOpaque"));
+					CHECK_FALSE(Recorded(fixture.Renderer(), "LightClusters"));
+
+					// The LightCount view's composite binds them too.
+					RenderSnapshot lightCount = snapshot;
+					++lightCount.FrameIndex;
+					lightCount.DebugView = RenderDebugView::LightCount;
+					const Status composited = RenderOnce(device, fixture.Renderer(), lightCount);
+					REQUIRE_FALSE(composited.has_value());
+					CHECK(composited.error().GetCode() == ErrorCode::Gpu);
+					CHECK(failing.GetFailedCount() == 2);
+				}
+				snapshot.FrameIndex += 2;
+				CHECK(fixture.Render(snapshot).Pixels == reference);
+				CHECK(Recorded(fixture.Renderer(), "ForwardOpaque"));
+				CHECK(Recorded(fixture.Renderer(), "LightClusters"));
+				CHECK_FALSE(device.IsLost());
+			}
+			device.RunGarbageCollection();
+		}
+
+		// M23 (decisions 5 and 20): a larger view needs a larger mask buffer; when that creation runs out of memory the frame
+		// keeps the smaller buffer, which the brute-force loop never reads, and shades every light of the list instead, so the
+		// image is the clustered one exactly (decision 5), with a partial Gpu error; the next Render grows the masks.
+		TEST_CASE("SceneRenderer: light cluster masks that cannot grow fall back to the brute-force light loop with the same image"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, 64, 64);
+				static_cast<void>(fixture.Render(MakeClusteredSnapshot(fixture)));
+				REQUIRE(fixture.Renderer().Resize(256, 128).has_value());
+				RenderSnapshot snapshot = MakeClusteredSnapshot(fixture);
+				++snapshot.FrameIndex;
+				const LightClusterGrid grid = ComputeLightClusterGrid(snapshot.Camera, 256, 128);
+				std::vector<std::byte> fallback;
+				{
+					const Test::BufferCreationFails failing(StorageBufferOfSize(LightClusterPass::GetMaskBufferDesc(GetLightClusterCount(grid)).byteSize));
+					const Status rendered = RenderOnce(device, fixture.Renderer(), snapshot);
+					REQUIRE_FALSE(rendered.has_value());
+					CHECK(rendered.error().GetCode() == ErrorCode::Gpu);
+					CHECK(failing.GetFailedCount() == 1);
+					CHECK(Recorded(fixture.Renderer(), "ForwardOpaque"));
+					CHECK_FALSE(Recorded(fixture.Renderer(), "LightClusters"));
+					fallback = fixture.Read().Pixels;
+				}
+				++snapshot.FrameIndex;
+				const Image clustered = fixture.Render(snapshot);
+				CHECK(Recorded(fixture.Renderer(), "LightClusters"));
+				CHECK(clustered.Pixels == fallback);
+				CHECK_FALSE(device.IsLost());
 			}
 			device.RunGarbageCollection();
 		}

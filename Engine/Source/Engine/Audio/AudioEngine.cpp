@@ -3,6 +3,7 @@
 
 #include "Engine/Audio/AudioDecoder.h"
 #include "Engine/Audio/AudioVfs.h"
+#include "Engine/Audio/Private/MiniaudioOpus.h"
 #include "Engine/Audio/Private/MiniaudioSupport.h"
 #include "Engine/Audio/Private/MiniaudioVfs.h"
 #include "Engine/Core/Assert.h"
@@ -373,6 +374,8 @@ namespace Engine {
 		MiniaudioLog MiniaudioLogger;
 		Scope<AudioVfs> ClipVfs;
 		Scope<MiniaudioVfs> VfsBridge;
+		// The resource manager's one custom decoding backend, Ogg Opus (its streams' decoders keep the vtable's address).
+		MiniaudioOpusBackend OpusBackend;
 		ma_resource_manager Resources{};
 		bool ResourcesInitialized = false;
 		ma_engine Mixer{};
@@ -502,6 +505,9 @@ namespace Engine {
 		resourceConfig.decodedChannels = 0;
 		resourceConfig.decodedSampleRate = 0;
 		resourceConfig.pVFS = VfsBridge->Get();
+		// Streamed Ogg Opus clips decode through the same backend as DecodeEncodedAudio (16-bit fixed-point samples).
+		resourceConfig.ppCustomDecodingBackendVTables = OpusBackend.GetVTables();
+		resourceConfig.customDecodingBackendCount = OpusBackend.GetVTableCount();
 		if (Specification.Decoding == AudioDecoding::Deterministic)
 		{
 			resourceConfig.flags = MA_RESOURCE_MANAGER_FLAG_NO_THREADING | MA_RESOURCE_MANAGER_FLAG_NON_BLOCKING;

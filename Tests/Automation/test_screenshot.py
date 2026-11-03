@@ -20,6 +20,7 @@ import unittest
 from pathlib import Path
 
 from harness import EXIT_SUCCESS, AutomationTestCase, engine_client
+from test_environment import png_pixels
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
@@ -226,7 +227,8 @@ class ScreenshotRenderingTests(AutomationTestCase):
         self.assertEqual(shoot(""), lit)
         self.assertEqual(shoot("LIT"), lit)
         images = {}
-        for view in ("Albedo", "Normals", "Roughness", "Metallic", "Emissive", "ao", "SHADOWCASCADES", "Overdraw"):
+        for view in ("Albedo", "Normals", "Roughness", "Metallic", "Emissive", "ao", "SHADOWCASCADES", "Overdraw",
+                     "lightCount"):
             with self.subTest(view=view):
                 images[view] = shoot(view)
                 self.assertEqual(shoot(view), images[view])
@@ -238,6 +240,38 @@ class ScreenshotRenderingTests(AutomationTestCase):
             client.call("viewport.screenshot", {**size, "debugView": "Wireframe"})
         self.assert_engine_error(raised.exception, engine_client.INVALID_PARAMS)
         self.assertEqual(raised.exception.issues[0]["pointer"], "/debugView")
+        client.call("scene.save")
+        self.shut_down(client)
+
+    def test_viewport_screenshot_light_count_view_counts_each_clusters_lights(self) -> None:
+        # M23 (R-CLC; Docs/Decisions/0034-m23-contract.md decision 5): the LightCount view colours each surface by the
+        # lights its light cluster holds (0 black, 1 to 2 blue, 3 to 4 cyan, ...). The directional light reaches every
+        # cluster, and three point lights 1 m in front of the wall's left end reach only the left 64-pixel tile's.
+        if not self.require_gpu():
+            return
+        client, _ = self.open_editor_with_scene(renderer="vulkan")
+        client.call("entity.create", {"name": "Wall", "components": {
+            "Transform": {"Translation": [0, 0, -3], "Scale": [12, 2, 0.1]},
+            "MeshRenderer": {"Mesh": "engine://Meshes/Cube"}}})
+        client.call("entity.create", {"name": "Sun", "components": {"DirectionalLight": {}}})
+        for index in range(3):
+            client.call("entity.create", {"name": f"Lamp{index}", "components": {
+                "Transform": {"Translation": [-5.5, 0, -2.5]}, "PointLight": {"Range": 1}}})
+        client.call("viewport.camera", {"position": [0, 0, 0], "target": [0, 0, -1], "projection": "Perspective",
+                                        "verticalFov": 60, "nearClip": 0.1, "farClip": 100})
+        size = {"view": "scene", "width": 256, "height": 64}
+        shot = client.call("viewport.screenshot", {**size, "debugView": "LightCount"})
+        width, height, pixels = png_pixels(Path(shot["path"]))
+        self.assertEqual((width, height), (256, 64))
+
+        def colour(x: int, y: int) -> tuple[int, ...]:
+            offset = (y * width + x) * 4
+            return tuple(pixels[offset:offset + 3])
+
+        self.assertEqual(colour(32, 32), (0, 255, 255))  # 4 lights
+        self.assertEqual(colour(224, 32), (0, 0, 255))  # the directional light alone
+        lit = client.call("viewport.screenshot", size)
+        self.assertNotEqual(Path(lit["path"]).read_bytes(), Path(shot["path"]).read_bytes())
         client.call("scene.save")
         self.shut_down(client)
 

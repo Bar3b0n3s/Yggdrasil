@@ -10,13 +10,16 @@
 #include "Support/SceneTestFixture.h"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string_view>
 #include <utility>
 
-// Audio clip CPU data and its cooked payload (Architecture §6.8, §10.1; Docs/Decisions/0015-m12-decisions.md decision 9):
-// the silent clip, validation, the payload codec, its fuzzing and the loader.
+// Audio clip CPU data and its cooked payload (Architecture §6.8, §10.1; Docs/Decisions/0015-m12-decisions.md decision 9;
+// version 2's Opus encoding, Docs/Decisions/0034-m23-contract.md decision 16): the silent clip, validation, the payload
+// codec, its fuzzing and the loader.
 
 namespace Engine {
 
@@ -55,6 +58,21 @@ namespace Engine {
 			clip.FrameCount = tone.FrameCount;
 			clip.Stream = true;
 			clip.Bytes = Test::MakeToneWav(tone);
+			return clip;
+		}
+
+		// An imported-style Ogg Opus clip: 48 kHz stereo, decoded at load. The bytes stand for the original file; the payload
+		// reader never decodes them.
+		AudioClipData MakeOpusClip()
+		{
+			AudioClipData clip;
+			clip.Encoding = AudioClipEncoding::Opus;
+			clip.SampleRate = 48000;
+			clip.ChannelCount = 2;
+			clip.FrameCount = 960;
+			for (const char character : std::string_view("OggS"))
+				clip.Bytes.push_back(static_cast<std::byte>(character));
+			clip.Bytes.resize(64, std::byte{ 0x5A });
 			return clip;
 		}
 
@@ -99,11 +117,12 @@ namespace Engine {
 			CHECK(AudioClipEncodingToString(AudioClipEncoding::Flac) == "Flac");
 			CHECK(AudioClipEncodingToString(AudioClipEncoding::Mp3) == "Mp3");
 			CHECK(AudioClipEncodingToString(AudioClipEncoding::Vorbis) == "Vorbis");
+			CHECK(AudioClipEncodingToString(AudioClipEncoding::Opus) == "Opus");
 		}
 
 		TEST_CASE("AudioClipData: the payload round-trips for PCM and encoded clips")
 		{
-			for (const AudioClipData& clip : { MakePcmClip(), MakeEncodedClip(), CreateSilentAudioClip() })
+			for (const AudioClipData& clip : { MakePcmClip(), MakeEncodedClip(), MakeOpusClip(), CreateSilentAudioClip() })
 			{
 				REQUIRE(ValidateAudioClipData(clip).has_value());
 				const Buffer payload = SerializeAudioClipPayload(clip);
@@ -153,6 +172,11 @@ namespace Engine {
 			AudioClipData unknown = MakeEncodedClip();
 			unknown.Encoding = static_cast<AudioClipEncoding>(42);
 			CHECK(GetErrorCode(ValidateAudioClipData(unknown)) == ErrorCode::Validation);
+			// Opus decodes at 48 kHz, whatever rate its input had.
+			CHECK(ValidateAudioClipData(MakeOpusClip()).has_value());
+			AudioClipData opusAt44k = MakeOpusClip();
+			opusAt44k.SampleRate = 44100;
+			CHECK(GetErrorCode(ValidateAudioClipData(opusAt44k)) == ErrorCode::Validation);
 		}
 
 		TEST_CASE("AudioClipData: truncation, trailing bytes and bad header fields fail with Parse")
@@ -177,10 +201,11 @@ namespace Engine {
 
 		TEST_CASE("AudioClipData: 10,000 seeded mutations of a payload never crash" * doctest::test_suite(Test::FuzzSuite))
 		{
-			const Buffer payload = SerializeAudioClipPayload(MakePcmClip());
-			const Test::FuzzRun run = Test::RunFuzzCase(0xA0D1, 10000, [&payload](Random& random, uint64_t /*index*/)
+			// The seeds: a Pcm16 payload and, since version 2, an Opus one (encoding 5).
+			const std::array<Buffer, 2> payloads = { SerializeAudioClipPayload(MakePcmClip()), SerializeAudioClipPayload(MakeOpusClip()) };
+			const Test::FuzzRun run = Test::RunFuzzCase(0xA0D1, 10000, [&payloads](Random& random, uint64_t /*index*/)
 			{
-				Buffer mutated = payload;
+				Buffer mutated = payloads[static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(payloads.size()) - 1))];
 				Test::MutateBytes(mutated, random);
 				// A payload the reader accepts is a valid clip.
 				const Result<AudioClipData> read = DeserializeAudioClipPayload(mutated);

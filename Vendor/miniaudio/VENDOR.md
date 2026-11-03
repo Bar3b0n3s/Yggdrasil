@@ -19,8 +19,14 @@ Kept (byte-identical to upstream, LF line endings as stored upstream):
   `#include "miniaudio.h"`). Kept for reference and for updates; since M12 it is not compiled (see "Local
   additions").
 - `LICENSE`
+- `extras/decoders/libopus/miniaudio_libopus.c` (SHA-256
+  `d58586494c65a4604c7b3d2e0a78851a9ed4ec8a56b68b300aa423a96c9e16ac`, 14,906 bytes) and
+  `extras/decoders/libopus/miniaudio_libopus.h` (`2d15bc4acb91a9775babe25527654f75ecc970ecdb05cdf2382a43d8e3eaed97`,
+  2,135 bytes), since M23 (`Docs/Decisions/0034-m23-contract.md` decision 16): upstream's libopus decoding backend at
+  the commit above, from `https://raw.githubusercontent.com/mackron/miniaudio/<commit>/extras/decoders/libopus/`, at its
+  upstream path (the header includes `../../../miniaudio.h`).
 
-Removed: `extras/` (split build, optional libvorbis/libopus decoders, extra nodes, stb_vorbis, osaudio),
+Removed: the rest of `extras/` (split build, the libvorbis decoder, extra nodes, stb_vorbis, osaudio),
 `external/`, `examples/`, `tests/`, `tools/`, `research/`, `resources/`, `data/`, `website/`, `camal/`,
 `CMakeLists.txt`, `miniaudio.pc.in`, `README.md`, `CHANGES.md`, `CONTRIBUTING.md`, `.github/`, git metadata.
 
@@ -45,12 +51,28 @@ None: every upstream file is byte-identical to the release.
 - `MA_HAS_VORBIS` is decided inside the implementation section of `miniaudio.h` (after the `MINIAUDIO_IMPLEMENTATION`
   guard at line 11552), so no struct a consumer sees changes and consumers need no new define.
 
+## Ogg Opus (M23)
+
+`extras/decoders/libopus/miniaudio_libopus.c` is compiled, unmodified, as a second translation unit of the project:
+miniaudio's custom decoding backend for Ogg Opus (`ma_decoding_backend_libopus`, an `ma_decoding_backend_vtable`), over
+opusfile, libopus and libogg (`Vendor/opusfile`, `Vendor/libopus`, `Vendor/libogg`, each with its `VENDOR.md`;
+`MA_NO_LIBOPUS` stays undefined). It is miniaudio's documented route for a decoder it does not build in: the engine
+registers the backend in `ma_decoder_config::ppCustomBackendVTables` (`Audio/AudioDecoder`) and
+`ma_resource_manager_config::ppCustomDecodingBackendVTables` (the `AudioEngine`'s streams), through a vtable of its own
+(`Audio/Private/MiniaudioOpus.h`) that claims only Ogg Opus data and asks the backend for `ma_format_s16`, so opusfile's
+`op_read` returns the fixed-point decoder's own samples and miniaudio converts them to f32 exactly. The file compiles
+without warnings under MSVC 14.51 (Debug, Release and Dist). Every binary that links miniaudio links `opusfile`, `opus`
+and `ogg` after it (`Dependencies.lua` `UseMiniaudio()`).
+
 ## Build configuration (`premake5.lua`)
 
 Mirrors upstream `add_library(miniaudio miniaudio.c miniaudio.h)`:
 
 - Files: `miniaudio_vorbis.c` (the local implementation translation unit, above) and `miniaudio.h`, the same on every
-  platform (the backend is chosen inside the header). Include directories: `.` and `../stb` (for `stb_vorbis.c`).
+  platform (the backend is chosen inside the header), and `extras/decoders/libopus/miniaudio_libopus.{c,h}` (Ogg Opus,
+  above). Include directories: `.`, `../stb` (for `stb_vorbis.c`), and `../libogg/include`, `../libopus/include` and
+  `../opusfile/include` (for `miniaudio_libopus.c`'s `<opusfile.h>`; no defines, since those headers read none of the
+  libraries' configuration macros).
 - C dialect: compiler default, as upstream CMake does (no `-std=` flag; GCC 14 / Clang 18 default to
   gnu17). Do not force `-std=c89`/`-std=c99`: miniaudio warns this can break `timespec`/`timeval` on Linux.
 - Configuration defines:
@@ -77,7 +99,7 @@ so no SDKs or `-dev` packages are needed to build.
 ```lua
 includedirs { "%{wks.location}/Vendor/miniaudio" }       -- #include <miniaudio.h>
 defines { "MA_NO_ENCODING" }                              -- keep in sync with premake5.lua
-links { "miniaudio" }
+links { "miniaudio", "opusfile", "opus", "ogg" }  -- UseMiniaudio() calls UseOpusFile(), UseOpus() and UseOgg()
 filter "system:linux"
     links { "dl", "pthread", "m" }
 filter "system:macosx"
@@ -105,8 +127,8 @@ Notes:
 
 - miniaudio does not guarantee ABI compatibility between releases, even bug-fix ones. Always link it
   statically (as here) and rebuild everything after an update.
-- Ogg Vorbis is built in since M12 through stb_vorbis (see "Local additions"); Ogg Opus is not (it would need
-  libopus and libopusfile, which are not vendored).
+- Ogg Vorbis is built in since M12 through stb_vorbis (see "Local additions"); Ogg Opus since M23 through upstream's
+  libopus decoding backend over the vendored opusfile, libopus and libogg (see "Ogg Opus").
 - Upstream's `miniaudio.c` has one MSVC level-3 warning: C4244 in `ma_dr_wav__read_smpl_to_metadata_obj`
   (the dr_wav `smpl` chunk parser), where `(pChunkHeader->sizeInBytes - MA_DR_WAV_SMPL_BYTES) /
   MA_DR_WAV_SMPL_LOOP_BYTES` (64-bit) is assigned to the 32-bit `calculatedLoopCount`. It is harmless: the
@@ -136,7 +158,7 @@ Verified on Windows (MSVC 14.51 / v145, Debug/Release/Dist, C++23 consumer) by a
 1. Find the latest release: `git ls-remote --tags https://github.com/mackron/miniaudio`.
 2. `git clone --depth 1 --branch <tag> https://github.com/mackron/miniaudio <tmp>` and export with the
    original line endings: `git -C <tmp> -c core.autocrlf=false archive HEAD | tar -x -C <tmp2>`.
-3. Replace `miniaudio.h`, `miniaudio.c` and `LICENSE`. Check that `miniaudio.c` still only defines
+3. Replace `miniaudio.h`, `miniaudio.c`, `LICENSE` and `extras/decoders/libopus/miniaudio_libopus.{c,h}`. Check that `miniaudio.c` still only defines
    `MINIAUDIO_IMPLEMENTATION` and includes `miniaudio.h` (`miniaudio_vorbis.c` repeats that between the stb_vorbis
    includes), that `miniaudio.h` still documents the stb_vorbis route, and compare upstream's `extras/stb_vorbis.c`
    with `Vendor/stb/stb_vorbis.c` (update the stb copy, per `Vendor/stb/VENDOR.md`, when they differ).

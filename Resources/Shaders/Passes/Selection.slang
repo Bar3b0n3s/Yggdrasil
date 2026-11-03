@@ -1,3 +1,8 @@
+// SelectionMask: the selected meshes' coverage for the selection outline (Renderer/SelectionPass.h). Every draw is instanced
+// (M23, R-INST; Docs/Decisions/0034-m23-contract.md decision 2): instance i of a draw is the view's instance record
+// Instances[MaskDraw.FirstInstance + i] (t10, Shared/InstanceRecord.h), whose world matrix places it.
+
+#include "Shared/InstanceRecord.h"
 #include "Shared/MaterialConstants.h"
 #include "Shared/Private/SelectionPassConstants.h"
 
@@ -6,6 +11,7 @@
 #endif
 
 Texture2D<float> Source : register(t0, space0);
+StructuredBuffer<InstanceRecord> Instances : register(t10, space0);
 [[vk::push_constant]] ConstantBuffer<SelectionMaskConstants> MaskDraw;
 ConstantBuffer<MaterialConstants> Material : register(b0, space1);
 Texture2D<float4> BaseColorMap : register(t0, space1);
@@ -33,11 +39,13 @@ float4 SelectionMultiplyExact(float4x4 matrix, float4 vector)
 	};
 }
 
+// SV_VulkanInstanceID is gl_InstanceIndex, counted from 0 within the draw (Scene.slang's VSMain).
 [shader("vertex")]
-SelectionVertexOutput VSMain(SelectionVertexInput input)
+SelectionVertexOutput VSMain(SelectionVertexInput input, uint instance : SV_VulkanInstanceID)
 {
 	SelectionVertexOutput result;
-	result.Position = SelectionMultiplyExact(MaskDraw.ViewProjection, SelectionMultiplyExact(MaskDraw.World, float4(input.Position, 1.0)));
+	const float4x4 world = Instances[MaskDraw.FirstInstance + instance].World;
+	result.Position = SelectionMultiplyExact(MaskDraw.ViewProjection, SelectionMultiplyExact(world, float4(input.Position, 1.0)));
 	result.TexCoord = input.TexCoord;
 	return result;
 }

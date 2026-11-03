@@ -71,6 +71,7 @@ namespace Engine {
 		bool FillModeNonSolid = false;          // the wireframe debug view
 		bool HostImageCopy = false;             // VkPhysicalDeviceVulkan14Features::hostImageCopy (needs ApiVersion >= 1.4)
 		bool DeviceFault = false;               // VK_EXT_device_fault with the deviceFault feature (crash reports)
+		bool TextureCompressionBC = false;      // textureCompressionBC: BC textures as their blocks, else the decode fallback (M23)
 		bool PortabilitySubset = false;         // VK_KHR_portability_subset is exposed and must be enabled (MoltenVK)
 	};
 
@@ -113,7 +114,7 @@ namespace Engine {
 	// The score of an acceptable candidate; nullopt when GetDeviceRejection(candidate, false) is not None. Ranking (§8.1):
 	// every discrete device scores above every integrated one, which scores above every virtual, other and CPU device;
 	// within a type, more optional features score higher (HostImageCopy, B10G11R11 storage, DeviceFault, FillModeNonSolid,
-	// in that weight order), and a higher ApiVersion breaks a remaining tie. Pure and deterministic.
+	// TextureCompressionBC, in that weight order), and a higher ApiVersion breaks a remaining tie. Pure and deterministic.
 	[[nodiscard]] std::optional<int32_t> ScoreDevice(const DeviceCandidate& candidate);
 
 	// Picks the device to use. With an override: a decimal index selects the candidate with that Index, anything else

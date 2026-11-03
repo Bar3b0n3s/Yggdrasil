@@ -112,6 +112,20 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "GoldenPointShadows.jsonl",
+			"IdSeed": 2104,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Materials/GoldenPointShadows",
+				"Assets/Scenes/GoldenPointShadows"
+			]
+		},
+		{
+			"File": "OpusAndCompression.jsonl",
+			"IdSeed": 2105,
+			"Renderer": "none"
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

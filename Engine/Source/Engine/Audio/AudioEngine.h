@@ -170,7 +170,7 @@ namespace Engine {
 	// How a registered clip's bytes are encoded.
 	enum class AudioClipFormat : uint8_t
 	{
-		Encoded, // a WAV, FLAC, MP3 or Ogg Vorbis file, decoded by miniaudio (the container is detected from the bytes)
+		Encoded, // a WAV, FLAC, MP3, Ogg Vorbis or Ogg Opus file, decoded by miniaudio (the container is detected from the bytes)
 		Pcm16    // interleaved little-endian signed 16-bit PCM (synthesized sound effects: 48 kHz mono, §6.6)
 	};
 

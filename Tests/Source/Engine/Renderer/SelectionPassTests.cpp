@@ -7,6 +7,7 @@
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Readback.h"
 #include "Engine/Renderer/GpuResourceCache.h"
+#include "Shared/InstanceRecord.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/InMemoryAssetManager.h"
 
@@ -20,12 +21,16 @@ namespace Engine {
 
 	namespace {
 
+		// The most instance records a selection test writes.
+		constexpr size_t SelectionTestMaxInstances = 16;
+
 		struct SelectionTestTargets
 		{
 			nvrhi::TextureHandle Mask{};
 			nvrhi::TextureHandle Scratch{};
 			nvrhi::TextureHandle Depth{};
 			nvrhi::TextureHandle Color{};
+			nvrhi::BufferHandle Instances{}; // the view's Instances buffer (SceneRenderer::State::InstanceBuffer's desc)
 			PassBindingCache Bindings{};
 		};
 
@@ -45,6 +50,13 @@ namespace Engine {
 			desc.isUAV = false;
 			desc.initialState = nvrhi::ResourceStates::DepthWrite;
 			auto depth = device.CreateTexture(desc);
+			nvrhi::BufferDesc instancesDesc;
+			instancesDesc.byteSize = SelectionTestMaxInstances * sizeof(InstanceRecord);
+			instancesDesc.structStride = sizeof(InstanceRecord);
+			instancesDesc.initialState = nvrhi::ResourceStates::ShaderResource;
+			instancesDesc.keepInitialState = true;
+			auto instances = device.CreateBuffer(instancesDesc);
+			REQUIRE(instances.has_value());
 			REQUIRE(mask.has_value());
 			REQUIRE(scratch.has_value());
 			REQUIRE(color.has_value());
@@ -53,6 +65,7 @@ namespace Engine {
 			result.Scratch = *scratch;
 			result.Color = *color;
 			result.Depth = *depth;
+			result.Instances = *instances;
 			return result;
 		}
 
@@ -86,12 +99,20 @@ namespace Engine {
 			return snapshot;
 		}
 
-		static Image RenderSelectionTest(GraphicsDevice& device, SelectionPass& pass, GpuResourceCache& cache, AssetManager& assets,
-			SelectionTestTargets& targets, const RenderSnapshot& snapshot, float sceneDepth, RenderStats& stats, uint32_t radius = 2)
+		// Prepares the snapshot's selection draws (their instance records written into the view's Instances buffer, as
+		// RecordViewSetup writes them) and records the pass; `instancing` false is RenderQualitySettings::Instancing's
+		// reference path.
+		static Image RenderSelectionTest(GraphicsDevice& device, SelectionPass& pass, GpuResourceCache& cache, SelectionTestTargets& targets,
+			const RenderSnapshot& snapshot, float sceneDepth, RenderStats& stats, uint32_t radius = 2, bool instancing = true)
 		{
+			std::vector<InstanceRecord> instances;
+			const SelectionDrawSet draws = SelectionPass::PrepareDraws(cache, snapshot, instancing, instances);
+			REQUIRE(instances.size() <= SelectionTestMaxInstances);
 			auto commands = device.CreateCommandList();
 			REQUIRE(commands.has_value());
 			(*commands)->open();
+			if (!instances.empty())
+				(*commands)->writeBuffer(targets.Instances, instances.data(), instances.size() * sizeof(InstanceRecord));
 			(*commands)->clearDepthStencilTexture(targets.Depth, nvrhi::AllSubresources, true, sceneDepth, false, 0);
 			(*commands)->clearTextureFloat(targets.Color, nvrhi::AllSubresources, nvrhi::Color(0.0f));
 			Status recorded;
@@ -100,8 +121,15 @@ namespace Engine {
 				{
 					return 0.0;
 				});
-				recorded = pass.Record(**commands, recording, targets.Bindings, cache, assets,
-					{ .Snapshot = &snapshot, .SceneDepth = targets.Depth, .Mask = targets.Mask, .Scratch = targets.Scratch, .LdrColor = targets.Color, .Radius = radius });
+				recorded = pass.Record(**commands, recording, targets.Bindings,
+					{ .Snapshot = &snapshot,
+						.Draws = &draws,
+						.Instances = targets.Instances,
+						.SceneDepth = targets.Depth,
+						.Mask = targets.Mask,
+						.Scratch = targets.Scratch,
+						.LdrColor = targets.Color,
+						.Radius = radius });
 			}
 			(*commands)->close();
 			device.ExecuteCommandList(**commands);
@@ -142,8 +170,8 @@ namespace Engine {
 						CAPTURE(winding);
 						const auto snapshot = Utils::SelectionTestSnapshot(assets, projection, winding == 1, winding == 2, alpha, winding == 2);
 						RenderStats visibleStats, hiddenStats;
-						const auto visible = Utils::RenderSelectionTest(gpu.GetDevice(), **pass, cache, assets, targets, snapshot, 0.0f, visibleStats);
-						const auto hidden = Utils::RenderSelectionTest(gpu.GetDevice(), **pass, cache, assets, targets, snapshot, 1.0f, hiddenStats);
+						const auto visible = Utils::RenderSelectionTest(gpu.GetDevice(), **pass, cache, targets, snapshot, 0.0f, visibleStats);
+						const auto hidden = Utils::RenderSelectionTest(gpu.GetDevice(), **pass, cache, targets, snapshot, 1.0f, hiddenStats);
 						CHECK(Utils::SelectionTestRed(visible, 6, 16) == 255);
 						// Half alpha crosses two R8 conversions and the sRGB OETF; allow one UNORM step.
 						CHECK(Utils::SelectionTestRed(hidden, 6, 16) >= 127);
@@ -168,7 +196,7 @@ namespace Engine {
 			{
 				const auto snapshot = Utils::SelectionTestSnapshot(assets, RenderProjection::Orthographic, false, false, alpha, false, 0.0f);
 				RenderStats stats;
-				const auto image = Utils::RenderSelectionTest(gpu.GetDevice(), **pass, cache, assets, targets, snapshot, 0.0f, stats);
+				const auto image = Utils::RenderSelectionTest(gpu.GetDevice(), **pass, cache, targets, snapshot, 0.0f, stats);
 				CHECK(Utils::SelectionTestRed(image, 6, 16) == (alpha == AlphaMode::Mask ? 0 : 255));
 			}
 		}
@@ -199,7 +227,7 @@ namespace Engine {
 				material->UVOffset.x = shifted ? 0.5f : 0.0f;
 				assets.Publish(UUID(902), material);
 				RenderStats stats;
-				const auto image = Utils::RenderSelectionTest(gpu.GetDevice(), **pass, cache, assets, targets, snapshot, 0.0f, stats);
+				const auto image = Utils::RenderSelectionTest(gpu.GetDevice(), **pass, cache, targets, snapshot, 0.0f, stats);
 				CHECK(Utils::SelectionTestRed(image, 6, 16) == (shifted ? 255 : 0));
 				CHECK(Utils::SelectionTestRed(image, 25, 16) == (shifted ? 0 : 255));
 			}
@@ -207,7 +235,7 @@ namespace Engine {
 			for (uint32_t radius : { 1u, 8u })
 			{
 				RenderStats stats;
-				const auto image = Utils::RenderSelectionTest(gpu.GetDevice(), **pass, cache, assets, targets, snapshot, 0.0f, stats, radius);
+				const auto image = Utils::RenderSelectionTest(gpu.GetDevice(), **pass, cache, targets, snapshot, 0.0f, stats, radius);
 				CHECK(Utils::SelectionTestRed(image, 8 - radius, 16) == 255);
 				CHECK(Utils::SelectionTestRed(image, 23 + radius, 16) == 255);
 				CHECK(Utils::SelectionTestRed(image, 16, 16) == 0);
@@ -223,9 +251,15 @@ namespace Engine {
 				{
 					return 0.0;
 				});
-				for (int invalid = 0; invalid < 4; ++invalid)
+				// M23 (decision 2): the snapshot has a camera and a selection, so its prepared draws and the view's instance
+				// buffer are required too (cases 4 and 5, each with valid targets and radius).
+				REQUIRE(snapshot.HasCamera);
+				REQUIRE_FALSE(snapshot.SelectedEntities.empty());
+				std::vector<InstanceRecord> records;
+				const SelectionDrawSet draws = SelectionPass::PrepareDraws(cache, snapshot, true, records);
+				for (int invalid = 0; invalid < 6; ++invalid)
 				{
-					SelectionRenderInputs inputs{ .Snapshot = &snapshot, .SceneDepth = targets.Depth, .Mask = targets.Mask, .Scratch = targets.Scratch, .LdrColor = targets.Color };
+					SelectionRenderInputs inputs{ .Snapshot = &snapshot, .Draws = &draws, .Instances = targets.Instances, .SceneDepth = targets.Depth, .Mask = targets.Mask, .Scratch = targets.Scratch, .LdrColor = targets.Color };
 					if (invalid == 0)
 						inputs.Radius = 0;
 					if (invalid == 1)
@@ -234,7 +268,12 @@ namespace Engine {
 						inputs.Scratch = inputs.Mask;
 					if (invalid == 3)
 						inputs.SceneDepth = inputs.Mask;
-					const auto refused = (*pass)->Record(**commands, recording, targets.Bindings, cache, assets, inputs);
+					if (invalid == 4)
+						inputs.Draws = nullptr;
+					if (invalid == 5)
+						inputs.Instances = nullptr;
+					CAPTURE(invalid);
+					const auto refused = (*pass)->Record(**commands, recording, targets.Bindings, inputs);
 					CHECK_FALSE(refused.has_value());
 					if (!refused)
 						CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
@@ -243,6 +282,39 @@ namespace Engine {
 			(*commands)->close();
 			gpu.GetDevice().ExecuteCommandList(**commands);
 			CHECK(stats.Passes.empty());
+		}
+
+		// M23 (R-INST; Docs/Decisions/0034-m23-contract.md decision 2): two selected items of one mesh and material are one
+		// instanced mask draw, and the outline equals the per-draw reference path's.
+		TEST_CASE("Selection: selected items of one mesh draw one instanced mask draw with the per-draw outline")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::InMemoryAssetManager assets;
+			GpuResourceCache cache(gpu.GetDevice(), assets);
+			auto pass = SelectionPass::Create(gpu.GetDevice(), gpu.GetPipelines());
+			REQUIRE_MESSAGE(pass.has_value(), pass.error().ToString());
+			auto targets = Utils::MakeSelectionTestTargets(gpu.GetDevice(), 32);
+			RenderSnapshot snapshot = Utils::SelectionTestSnapshot(assets, RenderProjection::Perspective, false, false, AlphaMode::Opaque, false);
+			MeshDrawItem left = snapshot.Meshes[0];
+			left.World = glm::translate(glm::mat4(1.0f), glm::vec3(-0.5f, 0.0f, 0.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(0.5f, 0.5f, 1.0f));
+			MeshDrawItem right = left;
+			right.World[3].x = 0.5f;
+			right.Entity = UUID(43);
+			snapshot.Meshes = { left, right };
+			snapshot.SelectedEntities = { UUID(42), UUID(43) };
+			RenderStats instancedStats, perDrawStats;
+			const Image instanced = Utils::RenderSelectionTest(gpu.GetDevice(), **pass, cache, targets, snapshot, 0.0f, instancedStats);
+			const Image perDraw = Utils::RenderSelectionTest(gpu.GetDevice(), **pass, cache, targets, snapshot, 0.0f, perDrawStats, 2, false);
+			REQUIRE_FALSE(instancedStats.Passes.empty());
+			REQUIRE_FALSE(perDrawStats.Passes.empty());
+			CHECK(instancedStats.Passes[0].DrawCalls == 1);
+			CHECK(instancedStats.Passes[0].Triangles == 4);
+			CHECK(perDrawStats.Passes[0].DrawCalls == 2);
+			CHECK(instanced.Pixels == perDraw.Pixels);
+			// Both quads are outlined: each one's outer edge, two pixels outside it.
+			CHECK(Utils::SelectionTestRed(instanced, 2, 16) == 255);
+			CHECK(Utils::SelectionTestRed(instanced, 29, 16) == 255);
 		}
 
 		TEST_CASE("Selection: deselection clears stale mask and resize releases view targets")
@@ -257,16 +329,16 @@ namespace Engine {
 			auto second = Utils::MakeSelectionTestTargets(gpu.GetDevice(), 16);
 			auto snapshot = Utils::SelectionTestSnapshot(assets, RenderProjection::Orthographic, false, false, AlphaMode::Opaque, false);
 			RenderStats firstStats, secondStats;
-			Utils::RenderSelectionTest(gpu.GetDevice(), **pass, cache, assets, first, snapshot, 0.0f, firstStats);
+			Utils::RenderSelectionTest(gpu.GetDevice(), **pass, cache, first, snapshot, 0.0f, firstStats);
 			snapshot.SelectedEntities = { UUID(999) }; // Deleted or stale selection does not resolve through another index.
-			const auto empty = Utils::RenderSelectionTest(gpu.GetDevice(), **pass, cache, assets, second, snapshot, 0.0f, secondStats);
+			const auto empty = Utils::RenderSelectionTest(gpu.GetDevice(), **pass, cache, second, snapshot, 0.0f, secondStats);
 			CHECK(std::ranges::all_of(empty.Pixels, [](std::byte pixel)
 			{
 				return pixel == std::byte{ 0 };
 			}));
 			snapshot.SelectedEntities.clear();
 			RenderStats clearedStats;
-			Utils::RenderSelectionTest(gpu.GetDevice(), **pass, cache, assets, first, snapshot, 0.0f, clearedStats);
+			Utils::RenderSelectionTest(gpu.GetDevice(), **pass, cache, first, snapshot, 0.0f, clearedStats);
 			REQUIRE(clearedStats.Passes.size() == 1);
 			CHECK(clearedStats.Passes[0].DrawCalls == 0);
 			Readback readback(gpu.GetDevice());
@@ -281,7 +353,7 @@ namespace Engine {
 			gpu.GetDevice().RunGarbageCollection();
 			snapshot.SelectedEntities = { UUID(42) };
 			RenderStats resizedStats;
-			const auto resized = Utils::RenderSelectionTest(gpu.GetDevice(), **pass, cache, assets, first, snapshot, 0.0f, resizedStats);
+			const auto resized = Utils::RenderSelectionTest(gpu.GetDevice(), **pass, cache, first, snapshot, 0.0f, resizedStats);
 			CHECK(Utils::SelectionTestRed(resized, 10, 24) == 255);
 			// Fixture checks all targets, binding sets and pipelines are released after submission retirement.
 		}

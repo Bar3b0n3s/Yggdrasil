@@ -1,0 +1,241 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "PointShadows",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"PointLight": 2,
+		"Environment": 1,
+		"PostProcess": 1
+	},
+	"Entities": [
+		{
+			"ID": "b7e5c0049aab40ef",
+			"Name": "Rendering",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Environment": {
+					"Environment": null,
+					"Intensity": 1,
+					"Rotation": 0,
+					"ShowSkybox": false,
+					"SkyboxBlur": 0,
+					"FallbackColor": [0.03, 0.03, 0.035]
+				},
+				"PostProcess": {
+					"ExposureEV": 0,
+					"Tonemap": "AgX",
+					"SsaoEnabled": false,
+					"SsaoRadius": 1,
+					"SsaoIntensity": 2,
+					"SsaoQuality": "High",
+					"BloomEnabled": false,
+					"BloomIntensity": 0.04,
+					"FxaaEnabled": true
+				}
+			}
+		},
+		{
+			"ID": "041fa85871213873",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [5.5, 4.2, 8.5],
+					"Rotation": [-0.14110877, 0.2805711, 0.0417413, 0.9484861],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 50,
+					"OrthographicSize": 3.7,
+					"NearClip": 0.1,
+					"FarClip": 300,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.02, 0.025, 0.035]
+				}
+			}
+		},
+		{
+			"ID": "8b8c7a2de95ad4a8",
+			"Name": "Ground",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [18, 1, 18]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000103",
+					"Materials": ["12fa51e5359e4042"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "474b79f51e841c8b",
+			"Name": "Wall",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 2.5, -4.5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [12, 5, 0.4]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["12fa51e5359e4042"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "ad3139d7e10b818f",
+			"Name": "Crate",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1.6, 0.6, 0.4],
+					"Rotation": [0, 0.2164396, 0, 0.976296],
+					"Scale": [1.2, 1.2, 1.2]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["9bcbd144fae180cc"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "5d4971d5885f7ec4",
+			"Name": "Ball",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1.5, 0.55, 1.2],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.1, 1.1, 1.1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["a85dc2d42cf69c15"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "69e2460fd6cf539a",
+			"Name": "Pillar",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-0.4, 1.4, -2],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.5, 2.8, 0.5]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["12fa51e5359e4042"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "318dae78084d25be",
+			"Name": "Block",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-2.6, 0.45, -1.4],
+					"Rotation": [0, -0.25881904, 0, 0.9659258],
+					"Scale": [0.9, 0.9, 0.9]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["9bcbd144fae180cc"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "93a2945175b74915",
+			"Name": "WarmLamp",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0.1, 1.7, -0.3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [1, 0.82, 0.62],
+					"Intensity": 28,
+					"Range": 12,
+					"CastShadows": true,
+					"SourceRadius": 0.15
+				}
+			}
+		},
+		{
+			"ID": "9c429da69972ea93",
+			"Name": "CoolLamp",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3.4, 1.1, 1.8],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [0.55, 0.75, 1],
+					"Intensity": 12,
+					"Range": 8,
+					"CastShadows": true,
+					"SourceRadius": 0.05
+				}
+			}
+		}
+	]
+}

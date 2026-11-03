@@ -6,6 +6,7 @@
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/ScriptData.h"
+#include "Engine/Asset/TextureCompression.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/FileSystem.h"
@@ -27,6 +28,7 @@
 #include <limits>
 #include <optional>
 #include <ranges>
+#include <span>
 
 namespace Engine {
 
@@ -174,35 +176,53 @@ namespace Engine {
 		}
 		return failure ? Status(std::unexpected(std::move(*failure))) : Status{};
 	}
+	Result<Image> EditorHostThumbnails::RenderTexturePreview(const TextureData& texture, uint32_t size)
+	{
+		ENGINE_TRY(ValidateTextureData(texture));
+		ENGINE_TRY_ASSIGN(Image image, CreateImage(size, size, nvrhi::Format::RGBA8_UNORM));
+		const auto& mip = texture.Mips.front();
+		// M23 (Docs/Decisions/0034-m23-contract.md decision 13): a block-compressed level holds blocks, not texels, so it is
+		// decoded first, as the GpuResourceCache's decode fallback decodes it: RGBA8 (BC5 as (x, y, 0, 255)), and BC4's
+		// red channel alone, which previews grey like an R8 texture.
+		std::span<const std::byte> texels = GetMipPixels(texture, 0);
+		uint32_t stride = GetTextureBytesPerPixel(texture.Format);
+		bool singleChannel = stride == 1;
+		Buffer decoded;
+		if (const std::optional<TextureBlockCodec> codec = GetTextureBlockCodec(texture.Format))
+		{
+			ENGINE_TRY_ASSIGN(decoded, DecompressTextureBlocks(*codec, mip.Width, mip.Height, texels));
+			texels = decoded;
+			stride = 4;
+			singleChannel = *codec == TextureBlockCodec::BC4;
+		}
+		const float scale = std::min(static_cast<float>(size) / static_cast<float>(mip.Width), static_cast<float>(size) / static_cast<float>(mip.Height));
+		const uint32_t width = std::max(1U, static_cast<uint32_t>(static_cast<float>(mip.Width) * scale));
+		const uint32_t height = std::max(1U, static_cast<uint32_t>(static_cast<float>(mip.Height) * scale));
+		for (uint32_t y = 0; y < size; ++y)
+		{
+			for (uint32_t x = 0; x < size; ++x)
+			{
+				const size_t dest = (static_cast<size_t>(y) * size + x) * 4;
+				image.Pixels[dest + 3] = std::byte{ 255 };
+				const uint32_t left = (size - width) / 2, top = (size - height) / 2;
+				if (x < left || x >= left + width || y < top || y >= top + height)
+					continue;
+				const uint32_t sx = (x - left) * mip.Width / width, sy = (y - top) * mip.Height / height;
+				const size_t source = (static_cast<size_t>(sy) * mip.Width + sx) * stride;
+				for (uint32_t c = 0; c < 3; ++c)
+					image.Pixels[dest + c] = texels[source + (singleChannel ? 0 : c)];
+				if (stride == 4)
+					image.Pixels[dest + 3] = texels[source + 3];
+			}
+		}
+		return image;
+	}
+
 	Result<Image> EditorHostThumbnails::Render(const ThumbnailRequest& request)
 	{
 		ENGINE_TRY_ASSIGN(const AssetRef<Asset> asset, m_Editor.GetAssets().Load(request.Asset));
 		if (const auto texture = AssetCast<TextureData>(asset))
-		{
-			ENGINE_TRY(ValidateTextureData(*texture));
-			ENGINE_TRY_ASSIGN(Image image, CreateImage(request.Size, request.Size, nvrhi::Format::RGBA8_UNORM));
-			const auto& mip = texture->Mips.front();
-			const uint32_t channels = GetTextureBytesPerPixel(texture->Format);
-			const float scale = std::min(static_cast<float>(request.Size) / static_cast<float>(mip.Width), static_cast<float>(request.Size) / static_cast<float>(mip.Height));
-			const uint32_t width = std::max(1U, static_cast<uint32_t>(static_cast<float>(mip.Width) * scale));
-			const uint32_t height = std::max(1U, static_cast<uint32_t>(static_cast<float>(mip.Height) * scale));
-			for (uint32_t y = 0; y < request.Size; ++y)
-				for (uint32_t x = 0; x < request.Size; ++x)
-				{
-					const size_t dest = (static_cast<size_t>(y) * request.Size + x) * 4;
-					image.Pixels[dest + 3] = std::byte{ 255 };
-					const uint32_t left = (request.Size - width) / 2, top = (request.Size - height) / 2;
-					if (x < left || x >= left + width || y < top || y >= top + height)
-						continue;
-					const uint32_t sx = (x - left) * mip.Width / width, sy = (y - top) * mip.Height / height;
-					const size_t source = (static_cast<size_t>(sy) * mip.Width + sx) * channels;
-					for (uint32_t c = 0; c < 3; ++c)
-						image.Pixels[dest + c] = texture->Pixels[source + (channels == 1 ? 0 : c)];
-					if (channels == 4)
-						image.Pixels[dest + 3] = texture->Pixels[source + 3];
-				}
-			return image;
-		}
+			return RenderTexturePreview(*texture, request.Size);
 		if (!m_Capture)
 			return MakeError(ErrorCode::Unsupported, "This thumbnail needs a rendering device");
 		UUIDGenerator ids = UUIDGenerator::CreateDeterministic(0);

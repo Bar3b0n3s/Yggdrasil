@@ -26,21 +26,30 @@ namespace Engine {
 			REQUIRE(reflection);
 			const auto* shadows = (*reflection)->FindStruct("ShadowConstants");
 			const auto* spot = (*reflection)->FindStruct("SpotShadowConstants");
+			// M23 (R-PLS): the forward pass reads the point entries (Common/Shadows.slang's SamplePointShadow).
+			const auto* point = (*reflection)->FindStruct("PointShadowConstants");
 			REQUIRE(shadows != nullptr);
 			REQUIRE(spot != nullptr);
+			REQUIRE(point != nullptr);
 			CHECK(shadows->Size == sizeof(ShadowConstants));
 			CHECK(spot->Size == sizeof(SpotShadowConstants));
+			CHECK(point->Size == sizeof(PointShadowConstants));
 #define ENGINE_SHADOW_FIELD(type, field) ShaderStructField{ #field, static_cast<uint32_t>(offsetof(type, field)), static_cast<uint32_t>(sizeof(type::field)) }
-			const std::array<ShaderStructField, 8> shadowFields = {
+			const std::array<ShaderStructField, 9> shadowFields = {
 				ENGINE_SHADOW_FIELD(ShadowConstants, CascadeViewProjection), ENGINE_SHADOW_FIELD(ShadowConstants, CascadeSplits),
 				ENGINE_SHADOW_FIELD(ShadowConstants, CascadeBlendStarts), ENGINE_SHADOW_FIELD(ShadowConstants, CascadeTexelWorldSizes),
 				ENGINE_SHADOW_FIELD(ShadowConstants, CascadeDepthRanges), ENGINE_SHADOW_FIELD(ShadowConstants, Spots),
-				ENGINE_SHADOW_FIELD(ShadowConstants, Directional), ENGINE_SHADOW_FIELD(ShadowConstants, Counts)
+				ENGINE_SHADOW_FIELD(ShadowConstants, Directional), ENGINE_SHADOW_FIELD(ShadowConstants, Counts),
+				ENGINE_SHADOW_FIELD(ShadowConstants, Points)
 			};
 			const std::array<ShaderStructField, 5> spotFields = {
 				ENGINE_SHADOW_FIELD(SpotShadowConstants, ViewProjection), ENGINE_SHADOW_FIELD(SpotShadowConstants, UvScaleBias),
 				ENGINE_SHADOW_FIELD(SpotShadowConstants, DepthSoftness), ENGINE_SHADOW_FIELD(SpotShadowConstants, Bias),
 				ENGINE_SHADOW_FIELD(SpotShadowConstants, Indices)
+			};
+			const std::array<ShaderStructField, 4> pointFields = {
+				ENGINE_SHADOW_FIELD(PointShadowConstants, PositionRange), ENGINE_SHADOW_FIELD(PointShadowConstants, DepthSoftness),
+				ENGINE_SHADOW_FIELD(PointShadowConstants, Bias), ENGINE_SHADOW_FIELD(PointShadowConstants, Indices)
 			};
 #undef ENGINE_SHADOW_FIELD
 			const auto compare = [](const ShaderStruct& actual, std::span<const ShaderStructField> expected)
@@ -56,6 +65,7 @@ namespace Engine {
 			};
 			compare(*shadows, shadowFields);
 			compare(*spot, spotFields);
+			compare(*point, pointFields);
 		}
 	}
 

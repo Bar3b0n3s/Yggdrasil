@@ -42,6 +42,7 @@ namespace Engine {
 				"Assets/Audio/Tone.mp3",
 				"Assets/Audio/Tone.ogg",
 				"Assets/Audio/Tone.wav",
+				"Assets/Audio/Water.opus",
 				"Assets/Environments/Gradient.hdr",
 				"Assets/Fonts/Glyphs.ttf",
 				"Assets/Fonts/Inter-Regular.otf",

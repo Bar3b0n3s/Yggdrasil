@@ -166,4 +166,24 @@ namespace Engine {
 		registry.Register(CreateScope<PayloadLoader<SpriteSheetData, &Utils::LoadSpriteSheet>>());
 	}
 
+	std::optional<uint16_t> GetCookedFormatVersion(AssetType type)
+	{
+		switch (type)
+		{
+			case AssetType::None:        return std::nullopt;
+			case AssetType::Scene:       return SceneData::FormatVersion;
+			case AssetType::Prefab:      return PrefabData::FormatVersion;
+			case AssetType::Mesh:        return MeshData::FormatVersion;
+			case AssetType::Material:    return MaterialData::FormatVersion;
+			case AssetType::Texture:     return TextureData::FormatVersion;
+			case AssetType::Environment: return EnvironmentData::FormatVersion;
+			case AssetType::AudioClip:   return AudioClipData::FormatVersion;
+			case AssetType::Script:      return ScriptData::FormatVersion;
+			case AssetType::Font:        return FontData::FormatVersion;
+			case AssetType::Replay:      return ReplayData::FormatVersion;
+			case AssetType::SpriteSheet: return SpriteSheetData::FormatVersion;
+		}
+		return std::nullopt;
+	}
+
 }

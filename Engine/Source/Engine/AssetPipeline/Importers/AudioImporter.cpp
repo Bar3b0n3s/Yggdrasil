@@ -44,6 +44,7 @@ namespace Engine {
 				case EncodedAudioFormat::Flac:   return AudioClipEncoding::Flac;
 				case EncodedAudioFormat::Mp3:    return AudioClipEncoding::Mp3;
 				case EncodedAudioFormat::Vorbis: return AudioClipEncoding::Vorbis;
+				case EncodedAudioFormat::Opus:   return AudioClipEncoding::Opus;
 			}
 			ENGINE_CORE_ASSERT(false, "Unknown EncodedAudioFormat {}", std::to_underlying(format));
 			return AudioClipEncoding::Wav;
@@ -67,7 +68,7 @@ namespace Engine {
 
 	std::span<const std::string_view> AudioImporter::GetExtensions() const
 	{
-		static constexpr std::array<std::string_view, 4> Extensions = { ".wav", ".flac", ".mp3", ".ogg" };
+		static constexpr std::array<std::string_view, 5> Extensions = { ".wav", ".flac", ".mp3", ".ogg", ".opus" };
 		return Extensions;
 	}
 
@@ -107,7 +108,7 @@ namespace Engine {
 			.Entry(AudioStreamMode::Stream, "Stream", "Always stream the clip while it plays.")
 			.Entry(AudioStreamMode::Decode, "Decode", "Always decode the whole clip when it loads.");
 
-		registry.Struct<AudioImportSettings>("AudioImportSettings", "How a WAV, FLAC, MP3 or Ogg Vorbis file becomes an audio clip.")
+		registry.Struct<AudioImportSettings>("AudioImportSettings", "How a WAV, FLAC, MP3, Ogg Vorbis or Ogg Opus file becomes an audio clip.")
 			.Field("Stream", &AudioImportSettings::Stream, "Whether the clip decodes when it loads or streams while it plays.");
 	}
 

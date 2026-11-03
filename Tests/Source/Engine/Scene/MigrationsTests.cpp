@@ -134,7 +134,7 @@ namespace Engine {
 		// M23 (C23.1, R-PLS; Docs/Decisions/0034-m23-contract.md decision 3, stream B): PointLight version 2 adds CastShadows
 		// (false) between Range and SourceRadius, as SpotLight orders them; a version 1 component loads with it false and saves
 		// as the upgraded fixture.
-		TEST_CASE("Migrations: PointLightV1 fixture upgrades to version 2" * doctest::skip(true))
+		TEST_CASE("Migrations: PointLightV1 fixture upgrades to version 2")
 		{
 			const Result<std::string> legacy = Test::ReadTestDataText("Formats/Scene/PointLightV1.scene");
 			const Result<std::string> golden = Test::ReadTestDataText("Formats/Scene/PointLightV1.upgraded.scene");

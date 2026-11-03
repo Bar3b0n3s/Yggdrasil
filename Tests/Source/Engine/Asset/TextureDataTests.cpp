@@ -3,29 +3,33 @@
 #include "Engine/Asset/TextureData.h"
 
 #include "Engine/Asset/CookedFormat.h"
+#include "Engine/Asset/TextureCompression.h"
 #include "Engine/Core/Random.h"
 #include "Support/Fuzz.h"
 
+#include <array>
 #include <optional>
+#include <string>
+#include <string_view>
 
 namespace Engine {
 
 	namespace {
 
-		// A width x height RGBA8 texture with the full mip chain, texel values a function of position and level.
+		// A width x height texture with the full mip chain, byte values a function of position and level (any bytes are
+		// valid blocks of a block-compressed format).
 		TextureData MakeTexture(uint32_t width, uint32_t height, TextureFormat format = TextureFormat::RGBA8Srgb)
 		{
 			TextureData texture;
 			texture.Format = format;
 			texture.Width = width;
 			texture.Height = height;
-			const uint32_t bytesPerPixel = GetTextureBytesPerPixel(format);
 			uint64_t offset = 0;
 			for (uint32_t level = 0; level < ComputeFullMipCount(width, height); ++level)
 			{
 				const uint32_t mipWidth = std::max(1u, width >> level);
 				const uint32_t mipHeight = std::max(1u, height >> level);
-				const uint64_t size = static_cast<uint64_t>(mipWidth) * mipHeight * bytesPerPixel;
+				const uint64_t size = ComputeTextureLevelSize(format, mipWidth, mipHeight);
 				texture.Mips.push_back({ .Width = mipWidth, .Height = mipHeight, .Offset = offset, .Size = size });
 				for (uint64_t index = 0; index < size; ++index)
 					texture.Pixels.push_back(static_cast<std::byte>((index * 13 + level * 71) & 0xFF));
@@ -69,6 +73,44 @@ namespace Engine {
 			CHECK(GetTextureBytesPerPixel(TextureFormat::R8Unorm) == 1);
 			CHECK(TextureFormatToString(TextureFormat::RGBA8Srgb) == "RGBA8Srgb");
 			CHECK(TextureFormatToString(static_cast<TextureFormat>(0)) == "Unknown");
+		}
+
+		// M23 (C23.1, R-TEXC-BC; Docs/Decisions/0034-m23-contract.md decision 13): the block-compressed formats, persisted with
+		// the values the contract froze, name their codec, have no bytes per pixel and size their levels by whole 4 x 4 blocks.
+		TEST_CASE("TextureData: the block-compressed formats name their codec and size their levels by blocks")
+		{
+			struct BlockFormat
+			{
+				TextureFormat Format = TextureFormat::RGBA8Unorm;
+				uint8_t Value = 0;
+				std::string_view Name{};
+				TextureBlockCodec Codec = TextureBlockCodec::BC1;
+				uint64_t FiveByThreeBytes = 0; // a 5 x 3 level: 2 x 1 blocks
+			};
+			const std::array<BlockFormat, 6> formats = { {
+				{ TextureFormat::BC1Unorm, 4, "BC1Unorm", TextureBlockCodec::BC1, 16 },
+				{ TextureFormat::BC1Srgb, 5, "BC1Srgb", TextureBlockCodec::BC1, 16 },
+				{ TextureFormat::BC4Unorm, 6, "BC4Unorm", TextureBlockCodec::BC4, 16 },
+				{ TextureFormat::BC5Unorm, 7, "BC5Unorm", TextureBlockCodec::BC5, 32 },
+				{ TextureFormat::BC7Unorm, 8, "BC7Unorm", TextureBlockCodec::BC7, 32 },
+				{ TextureFormat::BC7Srgb, 9, "BC7Srgb", TextureBlockCodec::BC7, 32 },
+			} };
+			for (const BlockFormat& format : formats)
+			{
+				CAPTURE(std::string(format.Name));
+				CHECK(std::to_underlying(format.Format) == format.Value);
+				CHECK(TextureFormatToString(format.Format) == format.Name);
+				CHECK(GetTextureBytesPerPixel(format.Format) == 0);
+				CHECK(GetTextureBlockCodec(format.Format) == format.Codec);
+				CHECK(ComputeTextureLevelSize(format.Format, 5, 3) == format.FiveByThreeBytes);
+				CHECK(ComputeTextureLevelSize(format.Format, 1, 1) == GetTextureBlockBytes(format.Codec));
+			}
+			for (const TextureFormat format : { TextureFormat::RGBA8Unorm, TextureFormat::RGBA8Srgb, TextureFormat::R8Unorm })
+				CHECK_FALSE(GetTextureBlockCodec(format).has_value());
+			CHECK(ComputeTextureLevelSize(TextureFormat::RGBA8Srgb, 5, 3) == 60);
+			CHECK(ComputeTextureLevelSize(TextureFormat::R8Unorm, 5, 3) == 15);
+			CHECK_FALSE(GetTextureBlockCodec(static_cast<TextureFormat>(10)).has_value());
+			CHECK(ComputeTextureLevelSize(static_cast<TextureFormat>(10), 5, 3) == 0);
 		}
 
 		TEST_CASE("TextureData: the payload round-trips with a full mip chain")
@@ -139,9 +181,14 @@ namespace Engine {
 			TextureData shortPixels = MakeTexture(8, 8);
 			shortPixels.Pixels.pop_back();
 			CHECK_FALSE(ValidateTextureData(shortPixels).has_value());
-			TextureData unknownFormat = MakeTexture(2, 2);
-			unknownFormat.Format = static_cast<TextureFormat>(9);
-			CHECK_FALSE(ValidateTextureData(unknownFormat).has_value());
+			// Values outside the enumeration (9 was one until M23 appended the BC formats, 4 to 9).
+			for (const int value : { 0, 10, 255 })
+			{
+				CAPTURE(value);
+				TextureData unknownFormat = MakeTexture(2, 2);
+				unknownFormat.Format = static_cast<TextureFormat>(static_cast<uint8_t>(value));
+				CHECK(GetErrorCode(ValidateTextureData(unknownFormat)) == ErrorCode::Validation);
+			}
 
 			TextureData wrongLevelSize = MakeTexture(4, 4);
 			wrongLevelSize.Mips[1].Width = 3;
@@ -177,31 +224,48 @@ namespace Engine {
 
 		TEST_CASE("TextureData: 10,000 seeded mutations of a payload never crash" * doctest::test_suite(Test::FuzzSuite))
 		{
-			const Buffer payload = SerializeTexturePayload(MakeTexture(8, 8, TextureFormat::R8Unorm));
-			const Test::FuzzRun run = Test::RunFuzzCase(0x7E47, 10000, [&payload](Random& random, uint64_t /*index*/)
+			// M23 (Docs/Decisions/0034-m23-contract.md decision 19): the seeds hold uncompressed and block-compressed payloads, and
+			// every block-compressed level of a payload the reader accepts is decompressed too, so CMP_Core's decoders see every
+			// mutation that reaches them.
+			const std::array<Buffer, 3> payloads = { SerializeTexturePayload(MakeTexture(8, 8, TextureFormat::R8Unorm)),
+				SerializeTexturePayload(MakeTexture(5, 3, TextureFormat::BC7Srgb)), SerializeTexturePayload(MakeTexture(8, 4, TextureFormat::BC4Unorm)) };
+			const Test::FuzzRun run = Test::RunFuzzCase(0x7E47, 10000, [&payloads](Random& random, uint64_t /*index*/)
 			{
-				Buffer mutated = payload;
+				Buffer mutated = payloads[static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(payloads.size()) - 1))];
 				Test::MutateBytes(mutated, random);
 				// A payload the reader accepts is a valid texture.
 				const Result<TextureData> read = DeserializeTexturePayload(mutated);
 				if (!read.has_value())
 					return false;
 				CHECK(ValidateTextureData(*read).has_value());
+				if (const std::optional<TextureBlockCodec> codec = GetTextureBlockCodec(read->Format))
+				{
+					for (uint32_t level = 0; level < read->Mips.size(); ++level)
+					{
+						const TextureMip& mip = read->Mips[level];
+						const Result<Buffer> texels = DecompressTextureBlocks(*codec, mip.Width, mip.Height, GetMipPixels(*read, level));
+						REQUIRE_MESSAGE(texels.has_value(), texels.error().ToString());
+						CHECK(texels->size() == uint64_t{ mip.Width } * mip.Height * GetTextureBlockTexelBytes(*codec));
+					}
+				}
 				return true;
 			});
 			if (Test::IsFuzzSample(run.Range))
+			{
 				CHECK(run.Counts.Rejected > 0);
+				CHECK(run.Counts.Accepted > 0);
+			}
 		}
 
 		// M23 (C23.1, R-TEXC-BC; Docs/Decisions/0034-m23-contract.md decision 13, stream X): TextureData version 2 takes the BC
 		// formats, whose levels are block-sized (Asset/TextureCompression.h: ceil(w / 4) * ceil(h / 4) blocks) and may have
-		// any size; a BC level of the wrong size is refused. BC7Unorm is the value decision 13 freezes.
-		TEST_CASE("TextureData: a version 2 payload holds BC levels sized by their blocks" * doctest::skip(true))
+		// any size; a BC level of the wrong size is refused. BC7Unorm's value is the one decision 13 froze (checked with the
+		// others in "the block-compressed formats name their codec and size their levels by blocks").
+		TEST_CASE("TextureData: a version 2 payload holds BC levels sized by their blocks")
 		{
-			constexpr auto BC7Unorm = static_cast<TextureFormat>(8);
 			CHECK(TextureData::FormatVersion == 2);
 			TextureData texture;
-			texture.Format = BC7Unorm;
+			texture.Format = TextureFormat::BC7Unorm;
 			texture.Width = 5;
 			texture.Height = 3;
 			texture.Mips = { { .Width = 5, .Height = 3, .Offset = 0, .Size = 32 }, { .Width = 2, .Height = 1, .Offset = 32, .Size = 16 },
@@ -211,7 +275,7 @@ namespace Engine {
 			const Buffer payload = SerializeTexturePayload(texture);
 			const Result<TextureData> read = DeserializeTexturePayload(payload);
 			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
-			CHECK(read->Format == BC7Unorm);
+			CHECK(read->Format == TextureFormat::BC7Unorm);
 			CHECK(read->Mips == texture.Mips);
 			CHECK(read->Pixels == texture.Pixels);
 

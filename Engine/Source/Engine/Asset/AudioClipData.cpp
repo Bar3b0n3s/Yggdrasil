@@ -17,13 +17,15 @@ namespace Engine {
 		// The sample rates and channel counts a clip may have (AudioClipData.h).
 		constexpr uint32_t MinAudioClipSampleRate = 8000;
 		constexpr uint32_t MaxAudioClipSampleRate = 192000;
+		// Opus decodes at 48 kHz whatever rate its input had (RFC 7845 section 5.1).
+		constexpr uint32_t OpusSampleRate = 48000;
 		constexpr uint32_t MaxAudioClipChannelCount = 2;
 		// The bytes of one Pcm16 sample.
 		constexpr uint64_t Pcm16SampleBytes = 2;
 
 		[[nodiscard]] static bool IsKnownEncoding(uint8_t encoding)
 		{
-			return encoding <= std::to_underlying(AudioClipEncoding::Vorbis);
+			return encoding <= std::to_underlying(AudioClipEncoding::Opus);
 		}
 
 	}
@@ -44,6 +46,8 @@ namespace Engine {
 			return MakeError(ErrorCode::Validation, "the sample rate {} Hz is outside {} to {} Hz", clip.SampleRate, Utils::MinAudioClipSampleRate,
 				Utils::MaxAudioClipSampleRate);
 		}
+		if (clip.Encoding == AudioClipEncoding::Opus && clip.SampleRate != Utils::OpusSampleRate)
+			return MakeError(ErrorCode::Validation, "an Opus clip decodes at {} Hz, not {} Hz", Utils::OpusSampleRate, clip.SampleRate);
 		if (clip.ChannelCount == 0 || clip.ChannelCount > Utils::MaxAudioClipChannelCount)
 			return MakeError(ErrorCode::Validation, "an audio clip has 1 or 2 channels (got {})", clip.ChannelCount);
 		if (clip.FrameCount == 0)
@@ -149,6 +153,7 @@ namespace Engine {
 			case AudioClipEncoding::Flac:   return "Flac";
 			case AudioClipEncoding::Mp3:    return "Mp3";
 			case AudioClipEncoding::Vorbis: return "Vorbis";
+			case AudioClipEncoding::Opus:   return "Opus";
 		}
 
 		ENGINE_CORE_ASSERT(false, "Unknown AudioClipEncoding {}", std::to_underlying(encoding));

@@ -26,6 +26,7 @@
 #include "Engine/Physics/PhysicsDiagnostics.h"
 #include "Engine/Physics/PhysicsLayers.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Renderer/PointShadowMaps.h"
 #include "Engine/Renderer/SpotShadowAtlas.h"
 #include "Engine/Scene/AudioSystem.h"
 #include "Engine/Scene/ComponentAccess.h"
@@ -131,6 +132,8 @@ namespace Engine {
 			ScriptComputedAssetLoadCode,
 			// M20 (Scene/LoadReport.h, Docs/Decisions/0031-m20-contract.md decision 10), appended in landing order.
 			PrefabCycleCode,
+			// M23 (Renderer/PointShadowMaps.h, Docs/Decisions/0034-m23-contract.md decision 18).
+			RenderPointShadowBudgetCode,
 		};
 
 		// The documentation of every code, in ValidatorCodes order (M14, ADR 0022 decision 10): Docs/Reference/Validation.md, the
@@ -289,6 +292,9 @@ namespace Engine {
 			ValidationCodeInfo{ PrefabCycleCode, "Error", false,
 				"A prefab nests itself, directly or through other prefabs.",
 				"Remove the nested instance that closes the cycle from one of the prefab files, then reimport it." },
+			ValidationCodeInfo{ RenderPointShadowBudgetCode, "Warning", false,
+				"More than four shadow-casting point lights are enabled in the scene; the least important ones are lit without shadows.",
+				"Turn off CastShadows on less important point lights, or keep fewer of them in view at once." },
 		};
 
 		// The code documentation lists exactly the codes, in order.
@@ -1026,6 +1032,10 @@ namespace Engine {
 				diagnostics.push_back(MakeDiagnostic(RenderSpotShadowBudgetCode, DiagnosticSeverity::Warning,
 					std::format("the scene has {} shadow-casting spot lights; each view shadows at most {}", render->ShadowedSpotLights, MaxSpotShadowLights),
 					site, "disable shadows on less important spot lights or keep fewer in view at once", false));
+			if (render->ShadowedPointLights > MaxPointShadowLights)
+				diagnostics.push_back(MakeDiagnostic(RenderPointShadowBudgetCode, DiagnosticSeverity::Warning,
+					std::format("the scene has {} shadow-casting point lights; each view shadows at most {}", render->ShadowedPointLights, MaxPointShadowLights),
+					site, "disable shadows on less important point lights or keep fewer in view at once", false));
 			return {};
 		}
 

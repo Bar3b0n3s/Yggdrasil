@@ -20,6 +20,7 @@
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Graphics/Image.h"
 #include "Engine/Project/ProjectSettings.h"
+#include "Engine/Reflection/EnumInfo.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/ViewportCapture.h"
@@ -38,6 +39,7 @@
 #include <filesystem>
 #include <format>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -651,6 +653,28 @@ namespace Engine {
 			CHECK(FirstIssuePointer(shot.error()) == "/debugView");
 			CHECK(shot.error().ToString().contains("Albedo"));
 			CHECK(log.ViewCalls == 0);
+		}
+
+		// M23 (Docs/Decisions/0034-m23-contract.md decisions 5 and 20): the debugView descriptions of viewport.screenshot and
+		// viewport.setOptions name the registered RenderDebugView enum instead of listing the views, and the generated
+		// references and the MCP schema list its entries, so it holds every view the parameters parse, under the same names.
+		TEST_CASE("ScreenshotMethods: the registered RenderDebugView enum holds every debug view under the name debugView parses")
+		{
+			const Scope<TypeRegistry> registry = CreateRuntimeTypeRegistry();
+			const EnumInfo* views = registry->FindEnum<RenderDebugView>();
+			REQUIRE(views != nullptr);
+			CHECK(views->GetName() == "RenderDebugView");
+			const std::span<const EnumEntry> entries = views->GetEntries();
+			REQUIRE(entries.size() == RenderDebugViewCount);
+			for (uint32_t index = 0; index < RenderDebugViewCount; ++index)
+			{
+				const RenderDebugView view = static_cast<RenderDebugView>(index);
+				CAPTURE(RenderDebugViewToString(view));
+				CHECK(entries[index].Value == static_cast<int64_t>(index));
+				CHECK(entries[index].Name == RenderDebugViewToString(view));
+				CHECK(ParseRenderDebugView(entries[index].Name) == view);
+				CHECK_FALSE(entries[index].Description.empty());
+			}
 		}
 
 		TEST_CASE("ScreenshotMethods: a missing view and sizes out of range are InvalidArgument")

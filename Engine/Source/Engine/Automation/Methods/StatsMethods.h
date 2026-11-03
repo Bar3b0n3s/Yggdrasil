@@ -48,6 +48,8 @@ namespace Engine {
 		uint32_t ShadowDraws = 0;
 		uint32_t ShadowedSpotLights = 0;
 		uint32_t DroppedSpotShadows = 0;
+		uint32_t ShadowedPointLights = 0; // M23 (R-PLS): RenderStats::ShadowedPointLights
+		uint32_t DroppedPointShadows = 0;
 		// The quality settings the recorded frame rendered with (RenderStats; the project's ProjectSettings.Rendering, in
 		// the Editor and in an exported Runtime alike); 0 and false while unavailable.
 		uint32_t ShadowMapSize = 0;

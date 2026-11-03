@@ -19,8 +19,10 @@ instruction-set options (/arch:, -m<feature>, -mno-<feature>, -march=, -mcpu=). 
 and configuration:
 
 1. an ABI-relevant define differs between a vendored library project and a project that includes its headers (a
-   consumer: its include path contains one of the library's include directories). The families come from each
-   library's VENDOR.md (VENDOR_ABI_FAMILIES below); NDEBUG is compared for every library;
+   consumer: its include path contains one of the library's own include directories, those below the Vendor/<Lib>
+   directory of its sources; a directory it borrows from another library, such as miniaudio's Vendor/stb, holds that
+   library's headers). The families come from each library's VENDOR.md (VENDOR_ABI_FAMILIES below); NDEBUG is compared
+   for every library;
 2. JPH_CROSS_PLATFORM_DETERMINISTIC is missing from JoltPhysics or from any Jolt consumer;
 3. a Jolt consumer is compiled for another instruction set than JoltPhysics. Jolt/Core/Core.h derives JPH_USE_AVX2,
    JPH_USE_AVX, JPH_USE_F16C, JPH_USE_LZCNT, JPH_USE_TZCNT and more from the compiler's predefined __AVX2__,
@@ -144,6 +146,17 @@ VENDOR_ABI_FAMILIES: dict[str, DefineFamily] = {
     # defaults, and a consumer that set one would change the calling convention or the declarations it sees
     # (Vendor/CMP_Core/VENDOR.md).
     "CMP_Core": DefineFamily(prefixes=("CMP_",)),
+    # libogg has no configuration macros (Vendor/libogg/VENDOR.md): only NDEBUG is compared for it.
+    "ogg": DefineFamily(),
+    # libopus: the macros its public headers read, which no consumer sets (Vendor/libopus/VENDOR.md); OPUS_BUILD is the
+    # library's own (VENDOR_PRIVATE_DEFINES), and FIXED_POINT and its other configuration macros are read by its sources
+    # only.
+    "opus": DefineFamily(
+        prefixes=("OPUS_",), names=("CUSTOM_MODES", "ENABLE_OPUS_CUSTOM_API", "DISABLE_PTR_CHECK", "DLL_EXPORT")
+    ),
+    # opusfile: opusfile.h reads no configuration macro, and OP_FIXED_POINT is the library's own
+    # (Vendor/opusfile/VENDOR.md), so a consumer defines none of the family.
+    "opusfile": DefineFamily(prefixes=("OP_",)),
 }
 GLOBAL_ABI_DEFINES = ("NDEBUG",)
 
@@ -152,11 +165,16 @@ GLOBAL_ABI_DEFINES = ("NDEBUG",)
 # - Luau: NDEBUG in Release compiles out LUAU_ASSERT; no Luau layout depends on it and no Luau translation unit
 #   includes vulkan.hpp (Architecture §2.2, Vendor/Luau/VENDOR.md).
 # - GLFW: the backend selection _GLFW_WIN32/_GLFW_X11/_GLFW_COCOA is private (Vendor/GLFW/VENDOR.md).
+# - libopus: OPUS_BUILD marks the library's own translation units; the public headers read it only to export symbols
+#   from a shared library and to declare the custom-mode API to the library itself (Vendor/libopus/VENDOR.md).
+# - opusfile: OP_FIXED_POINT is read by its sources only (src/internal.h; Vendor/opusfile/VENDOR.md).
 VENDOR_PRIVATE_DEFINES: dict[str, frozenset[str]] = {
     "spdlog": frozenset({"SPDLOG_FWRITE_UNLOCKED"}),
     "Luau": frozenset({"NDEBUG"}),
     "LuauAnalysis": frozenset({"NDEBUG"}),
     "GLFW": frozenset({"_GLFW_WIN32", "_GLFW_X11", "_GLFW_COCOA"}),
+    "opus": frozenset({"OPUS_BUILD"}),
+    "opusfile": frozenset({"OP_FIXED_POINT"}),
 }
 
 JOLT_PROJECT = "JoltPhysics"
@@ -839,13 +857,17 @@ LOADERS: dict[str, Callable[[Path, Target], GeneratedWorkspace]] = {
 # --------------------------------------------------------------------------------------------------------------------
 
 
+# The source suffixes a project compiles (headers and other listed files compile nothing).
+COMPILED_SUFFIXES = (".c", ".cc", ".cpp", ".m", ".mm")
+
+
 def classify(projects: dict[str, Project]) -> tuple[set[str], set[str]]:
     """Split projects into vendored libraries (every compiled source under Vendor/) and first-party projects."""
     vendor_root = normalize_path(VENDOR_ROOT) + os.sep
     vendored: set[str] = set()
     first_party: set[str] = set()
     for name, project in projects.items():
-        compiled = [source for source in project.sources if source.suffix.lower() in (".c", ".cc", ".cpp", ".m", ".mm")]
+        compiled = [source for source in project.sources if source.suffix.lower() in COMPILED_SUFFIXES]
         if not compiled:
             continue
         if all(normalize_path(source).startswith(vendor_root) for source in compiled):
@@ -868,8 +890,32 @@ def abi_filter(vendor: str) -> Callable[[str], bool]:
     return relevant
 
 
+def library_directory(vendor: Project) -> str | None:
+    """The normalized Vendor/<Lib> directory of a vendored project's compiled sources; None when they lie in several
+    libraries' directories (or outside Vendor/)."""
+    vendor_root = normalize_path(VENDOR_ROOT) + os.sep
+    directories = set()
+    for source in vendor.sources:
+        if source.suffix.lower() not in COMPILED_SUFFIXES:
+            continue
+        path = normalize_path(source)
+        if not path.startswith(vendor_root):
+            return None
+        directories.add(path[len(vendor_root):].split(os.sep, 1)[0])
+    return vendor_root + directories.pop() if len(directories) == 1 else None
+
+
 def consumers_of(vendor: Project, projects: dict[str, Project], config: str) -> list[Project]:
-    own = vendor.include_dirs.get(config, set())
+    """The projects that include `vendor`'s headers: their include path shares one of its own include directories, those
+    below its library directory (all of them when it has none). An include directory a library borrows from another one
+    (miniaudio's Vendor/stb and the Ogg Opus libraries' include directories, ImGuizmo's Vendor/imgui) holds that other
+    library's headers, so sharing it makes no consumer of the borrower: libogg is no consumer of miniaudio."""
+    directory = library_directory(vendor)
+    own = {
+        path
+        for path in vendor.include_dirs.get(config, set())
+        if directory is None or path == directory or path.startswith(directory + os.sep)
+    }
     return [
         project
         for project in projects.values()

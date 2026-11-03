@@ -2,6 +2,7 @@
 
 #include "Engine/Asset/AssetHandle.h"
 #include "Engine/Asset/MaterialData.h"
+#include "Engine/Asset/TextureData.h"
 #include "Engine/Core/Aabb.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Graphics/HostImageUpload.h"
@@ -60,6 +61,11 @@ namespace Engine {
 	{
 		nvrhi::TextureHandle Texture{}; // null only when even the placeholder could not be created (draws using it are skipped)
 		TextureUploadPath Path = TextureUploadPath::Staging;
+		// M23 (C23.1, Docs/Decisions/0034-m23-contract.md decisions 10 and 15): the TextureFormat of the asset whose texels
+		// Texture holds (the placeholder's when the placeholder stands in), whether it uploaded as it is or through the decode
+		// fallback, whose RGBA8 or R8 texture no longer tells a BC5 normal map from an RGBA8 one: GetMaterial's two-channel
+		// normal flag reads it.
+		TextureFormat Format = TextureFormat::RGBA8Unorm;
 		uint64_t Version = 0;
 		bool IsPlaceholder = false;
 	};
@@ -144,13 +150,22 @@ namespace Engine {
 		[[nodiscard]] const GpuMesh& GetMesh(AssetHandle handle);
 
 		// The mirror of texture `handle`, as GetMesh (placeholder: the Missing texture). TextureFormat maps to RGBA8_UNORM,
-		// SRGBA8_UNORM and R8_UNORM with every mip uploaded.
+		// SRGBA8_UNORM and R8_UNORM with every mip uploaded. M23 (C23.1, Docs/Decisions/0034-m23-contract.md decision 15): a
+		// block-compressed texture uploads its blocks on a device with BC support (GraphicsDeviceInfo::TextureCompressionBC):
+		// BC1_UNORM, BC1_UNORM_SRGB, BC4_UNORM, BC5_UNORM, BC7_UNORM and BC7_UNORM_SRGB. Without it, the decode fallback
+		// decompresses every level (DecompressTextureBlocks, Asset/TextureCompression.h) into RGBA8_UNORM (BC1Unorm, BC5Unorm,
+		// as (x, y, 0, 255), and BC7Unorm), SRGBA8_UNORM (BC1Srgb and BC7Srgb) or R8_UNORM (BC4Unorm), so a BC texture is
+		// never replaced by its placeholder for want of the feature. The cache logs one Info line naming the path at its first
+		// block-compressed texture.
 		[[nodiscard]] const GpuTexture& GetTexture(AssetHandle handle);
 
 		// M8: the mirror of material `handle` at its current version (a null handle: the Default material; a missing or failed
 		// one: the Error material's mirror with IsPlaceholder), resolving and uploading its textures through GetTexture and
 		// writing its constants through one command list executed at once. Rebuilt when the material's version or one of its
-		// textures' versions changes. A constants buffer that cannot be created records an AssetUploadFailedCode diagnostic
+		// textures' versions changes; M23 (decision 10): when the flags its resolved textures imply (a BC5 normal map's
+		// MaterialFlagNormalMapTwoChannel) differ from GpuMaterial::Flags, the mirror writes new constants into a new buffer
+		// under a new Generation, so a texture change alone (a placeholder replaced, a new version, a Compression change)
+		// never leaves stale flags. A constants buffer that cannot be created records an AssetUploadFailedCode diagnostic
 		// once per material and leaves Constants null (its draws are skipped). The reference stays valid until the next call
 		// that uploads, CollectStale or Clear.
 		[[nodiscard]] const GpuMaterial& GetMaterial(AssetHandle handle);

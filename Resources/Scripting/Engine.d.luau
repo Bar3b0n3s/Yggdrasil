@@ -113,6 +113,9 @@ export type ProjectTemplate = "Empty" | "Basic3D"
 -- How a camera projects the scene onto the screen.
 export type ProjectionType = "Perspective" | "Orthographic"
 
+-- What a view renders instead of the lit image (a debug view).
+export type RenderDebugView = "Lit" | "Albedo" | "Normals" | "Roughness" | "Metallic" | "Emissive" | "AO" | "ShadowCascades" | "Overdraw" | "LightCount"
+
 -- What scene.diff compares the open scene with.
 export type SceneDiffAgainst = "Saved" | "Revision"
 
@@ -160,6 +163,9 @@ export type TextAlignment = "Left" | "Center" | "Right"
 
 -- Where a text element is placed.
 export type TextSpace = "Screen" | "World"
+
+-- Whether an imported texture or environment is stored block-compressed for the GPU.
+export type TextureCompression = "Auto" | "None"
 
 -- How a texture's texels are interpreted.
 export type TextureUsage = "Color" | "Linear" | "NormalMap"
@@ -555,15 +561,17 @@ declare extern type MeshRenderer with
 	Visible: boolean
 end
 
--- A light shining in every direction from the entity (no shadows).
+-- A light shining in every direction from the entity.
 declare extern type PointLight with
+	-- Whether the light casts soft shadows (at most four point lights per view; the shadow budget applies). [All modes; Runtime|Test; pure/read; setter mutates]
+	CastShadows: boolean
 	-- The linear light colour. [All modes; Runtime|Test; pure/read; setter mutates]
 	Color: Color
 	-- The unitless brightness multiplied with Color. [All modes; Runtime|Test; pure/read; setter mutates]
 	Intensity: number
 	-- The distance at which the light's falloff reaches zero, in metres. [All modes; Runtime|Test; pure/read; setter mutates]
 	Range: number
-	-- The radius of the emitting sphere, in metres; widens highlights. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The radius of the emitting sphere, in metres; widens highlights and shadow penumbrae. [All modes; Runtime|Test; pure/read; setter mutates]
 	SourceRadius: number
 end
 
@@ -1109,6 +1117,8 @@ declare Test: {
 	ExpectScriptError: (pattern: string, withinTicks: number) -> (),
 	-- End this case as failed. A case thread, or a task a behaviour spawned (which is cancelled), never runs past the call, even inside pcall; a lifecycle callback cannot yield, so there the call raises a script error that unwinds to the nearest pcall. The outcome stays latched either way. [All modes; Test; pure/read]
 	Fail: (message: string) -> (),
+	-- Returns the XXH64 of an audio clip's samples decoded to 32-bit float at its own rate, as 16 hexadecimal digits; test suites only. [All modes; Test; pure/read]
+	GetAudioClipDigest: (clip: AssetRef) -> string,
 	-- Read an entity's position in the last render snapshot. [All modes; Test; pure/read]
 	GetExtractedPosition: (entity: Entity) -> vector?,
 	-- Read the last completed render extraction. [All modes; Test; pure/read]

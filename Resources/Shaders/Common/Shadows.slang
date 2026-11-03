@@ -1,7 +1,10 @@
 // In-house PCSS: linear blocker distances, 16/32 Vogel taps and fixed per-pixel IGN rotation.
 // Perspective spot geometry follows the PCSS integration paper; directional lights use angular world penumbrae.
+// Point lights (M23, R-PLS; Docs/Decisions/0034-m23-contract.md decision 3) filter their cube faces with a fixed
+// percentage-closer kernel, without a blocker search, rotation or any temporal term.
 #pragma once
 
+#include "Shared/ShaderLight.h"
 #include "Shared/ShadowConstants.h"
 
 // Vendored NVRHI's Vulkan comparison sampler is strict Less. Complementing each filtered result is exactly
@@ -212,5 +215,105 @@ float SampleSpotShadow(Texture2D<float> atlas, SamplerComparisonState comparison
 		}
 		return visibility / float(ShadowFilterTaps);
 	}
+	return 1.0;
+}
+
+// The point shadows' kernel: a fixed Vogel disk, the same taps for every pixel and frame (plan §7 item 9).
+static const uint PointShadowFilterTaps = 16;
+// The least normal offset of a point-shadow receiver, in face texels at its distance: a receiver facing the light (whose
+// depth slope, and so its caster's slope-scaled bias, is near zero) keeps a margin above the rounding of its interpolated
+// position and of the rasterized caster depth.
+static const float PointShadowMinimumNormalOffset = 0.0625;
+
+// Vulkan's cube face selection table, as Renderer/PointShadowMaps.cpp projects the faces: face f's major axis and the axes
+// whose components are its sc and tc, so a direction's face UV is 0.5 (sc, tc) / |ma| + 0.5.
+static const float3 PointShadowMajorAxes[6] = { float3(1, 0, 0), float3(-1, 0, 0), float3(0, 1, 0), float3(0, -1, 0), float3(0, 0, 1), float3(0, 0, -1) };
+static const float3 PointShadowScAxes[6] = { float3(0, 0, -1), float3(0, 0, 1), float3(1, 0, 0), float3(1, 0, 0), float3(1, 0, 0), float3(-1, 0, 0) };
+static const float3 PointShadowTcAxes[6] = { float3(0, -1, 0), float3(0, -1, 0), float3(0, 0, 1), float3(0, 0, -1), float3(0, -1, 0), float3(0, -1, 0) };
+
+// The cube face of `direction`: its largest component's axis and sign.
+uint PointShadowFace(float3 direction)
+{
+	float3 magnitude = abs(direction);
+	if (magnitude.x >= magnitude.y && magnitude.x >= magnitude.z)
+		return direction.x >= 0.0 ? 0 : 1;
+	if (magnitude.y >= magnitude.z)
+		return direction.y >= 0.0 ? 2 : 3;
+	return direction.z >= 0.0 ? 4 : 5;
+}
+
+// Finds the point light's cube by uploaded Lights index; an unplanned light returns full visibility. The receiver,
+// offset along its normal, selects the face its direction from the light's major axis gives, and its reference depth is
+// that face's reverse-Z depth (1 at the near plane, 0 at Range). Over a plane that depth is affine in the face's UV, so
+// the receiver plane gives each tap's reference exactly (the nearest over the tap's bilinear footprint, as the spots'
+// ShadowFilterDepth does). The taps stay inside the receiver's face (clamped half a texel from its edges), so a bilinear
+// footprint never crosses into a face of another projection. The kernel's radius is half SourceRadius over the
+// receiver's distance in face UV (a penumbra about as wide as the source), at least 1.5 texels and at most
+// DepthSoftness.w.
+float SamplePointShadow(TextureCubeArray<float> maps, SamplerComparisonState comparison, ShadowConstants shadows,
+	uint lightIndex, float3 worldPosition, float3 normal, float3 toLight)
+{
+	uint width, height, elements;
+	maps.GetDimensions(width, height, elements);
+	for (uint index = 0; index < shadows.Counts.w; ++index)
+	{
+		PointShadowConstants shadow = shadows.Points[index];
+		if (shadow.Indices.x != lightIndex)
+			continue;
+		float3 light = shadow.PositionRange.xyz;
+		float nearPlane = shadow.DepthSoftness.x;
+		float farPlane = shadow.DepthSoftness.y;
+		float3 fromLight = worldPosition - light;
+		float receiverAxisDistance = max(abs(fromLight.x), max(abs(fromLight.y), abs(fromLight.z)));
+		float offset = shadow.Bias.y * shadow.Bias.z * receiverAxisDistance * max(1.0 - saturate(dot(normal, toLight)), PointShadowMinimumNormalOffset);
+		float3 direction = fromLight + normal * offset;
+		uint face = PointShadowFace(direction);
+		float3 major = PointShadowMajorAxes[face];
+		float3 scAxis = PointShadowScAxes[face];
+		float3 tcAxis = PointShadowTcAxes[face];
+		float axisDistance = dot(direction, major);
+		if (!(axisDistance > nearPlane) || axisDistance >= farPlane)
+			return 1.0;
+		float2 uv = float2(dot(direction, scAxis), dot(direction, tcAxis)) / axisDistance * 0.5 + 0.5;
+		// depth = K / d - near / (far - near) with K = near far / (far - near), d the distance along the face's axis; along the
+		// direction major + a sc + b tc, 1 / d = dot(major + a sc + b tc, normal) / dot(direction, normal), affine in a = 2u - 1
+		// and b = 2v - 1.
+		float depthScale = nearPlane * farPlane / (farPlane - nearPlane);
+		float receiverDepth = depthScale / axisDistance - nearPlane / (farPlane - nearPlane);
+		float2 gradient = 2.0 * depthScale * float2(dot(scAxis, normal), dot(tcAxis, normal)) / dot(direction, normal);
+		if (!all(isfinite(gradient)))
+			gradient = 0.0;
+		float texel = 1.0 / float(width);
+		float radius = clamp(0.5 * shadow.DepthSoftness.z / axisDistance, 1.5 * texel, max(1.5 * texel, shadow.DepthSoftness.w));
+		float visibility = 0.0;
+		for (uint tap = 0; tap < PointShadowFilterTaps; ++tap)
+		{
+			float2 sampleUv = clamp(uv + ShadowDisk(tap, PointShadowFilterTaps, 0.0) * radius, 0.5 * texel, 1.0 - 0.5 * texel);
+			float reference = ShadowFilterDepth(receiverDepth, gradient, uv, sampleUv, float2(width, height));
+			float2 planar = sampleUv * 2.0 - 1.0;
+			float3 sampleDirection = major + planar.x * scAxis + planar.y * tcAxis;
+			visibility += 1.0 - maps.SampleCmpLevelZero(comparison, float4(sampleDirection, float(shadow.Indices.y)), reference);
+		}
+		return visibility / float(PointShadowFilterTaps);
+	}
+	return 1.0;
+}
+
+// The shadow visibility of the uploaded light `lightIndex` at a receiver, 1 where it casts none: the directional
+// cascades for Counts.z, a spot's atlas tile, a point light's cube (M23; Docs/Decisions/0034-m23-contract.md decision 4:
+// the forward light loop multiplies each light's radiance by it). `normal` is the receiver's geometric (triangle-plane)
+// normal on the viewer's side, `viewDistance` its distance along the camera's forward axis.
+float GetLightVisibility(Texture2DArray<float> cascades, Texture2D<float> atlas, TextureCubeArray<float> points,
+	SamplerComparisonState comparison, ShadowConstants shadows, ShaderLight light, uint lightIndex, float3 worldPosition,
+	float3 normal, float viewDistance, uint2 pixel)
+{
+	if (light.Type == ShaderLightTypeDirectional && shadows.Counts.x != 0 && lightIndex == shadows.Counts.z)
+		return SampleDirectionalShadow(cascades, comparison, shadows, worldPosition, normal, -light.Direction, viewDistance, pixel);
+	float3 toLight = light.Position - worldPosition;
+	toLight *= rsqrt(max(dot(toLight, toLight), 1e-20));
+	if (light.Type == ShaderLightTypeSpot && shadows.Counts.y != 0)
+		return SampleSpotShadow(atlas, comparison, shadows, lightIndex, worldPosition, normal, toLight, pixel);
+	if (light.Type == ShaderLightTypePoint && shadows.Counts.w != 0)
+		return SamplePointShadow(points, comparison, shadows, lightIndex, worldPosition, normal, toLight);
 	return 1.0;
 }

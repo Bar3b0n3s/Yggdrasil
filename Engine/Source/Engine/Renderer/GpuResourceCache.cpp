@@ -6,7 +6,9 @@
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/EnvironmentData.h"
 #include "Engine/Asset/MeshData.h"
+#include "Engine/Asset/TextureCompression.h"
 #include "Engine/Asset/TextureData.h"
+#include "Engine/Core/Log.h"
 #include "Engine/Graphics/CommandListRecording.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Shared/MaterialConstants.h"
@@ -17,6 +19,7 @@
 #include <compare>
 #include <format>
 #include <map>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -32,8 +35,10 @@
 //
 // Materials (M8) are keyed the same way, but a mirror also depends on its textures: every GetMaterial resolves the five
 // slots through GetTexture (which marks those mirrors used and uploads a texture's new version), and a mirror whose resolved
-// textures changed takes them with a new Generation, keeping its constants buffer (the constants depend on the material's
-// version only, which is the key). Generations come from one counter of the cache that only increases. Environments (M8)
+// textures changed takes them with a new Generation, keeping its constants buffer, unless the flags the textures imply
+// changed (M23: a BC5 normal map's MaterialFlagNormalMapTwoChannel), which the constants hold: then it writes new constants
+// into a new buffer. Every other constant depends on the material's version only, which is the key. Generations come from
+// one counter of the cache that only increases. Environments (M8)
 // have no placeholder (§7.2): an entry remembers a failed load or upload for its (handle, version), so the failure is
 // reported once and nothing is retried until the asset's version changes.
 
@@ -56,6 +61,8 @@ namespace Engine {
 			GraphicsDevice* Device = nullptr; // documented back-references of the cache
 			AssetManager* Assets = nullptr;
 			size_t* UploadFailures = nullptr;
+			// M23 (decision 15): whether the cache logged its block-compressed textures' path (once per cache).
+			bool* BlockPathLogged = nullptr;
 		};
 
 		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 43): whether GpuResourceCache::TrimUnused releases the mirror
@@ -89,6 +96,7 @@ namespace Engine {
 			return !device.IsLost();
 		}
 
+		// The GPU format a texture of `format` uploads as, its blocks included (a device with BC support).
 		static Result<nvrhi::Format> ToNvrhiFormat(TextureFormat format)
 		{
 			switch (format)
@@ -96,8 +104,63 @@ namespace Engine {
 				case TextureFormat::RGBA8Unorm: return nvrhi::Format::RGBA8_UNORM;
 				case TextureFormat::RGBA8Srgb:  return nvrhi::Format::SRGBA8_UNORM;
 				case TextureFormat::R8Unorm:    return nvrhi::Format::R8_UNORM;
+				case TextureFormat::BC1Unorm:   return nvrhi::Format::BC1_UNORM;
+				case TextureFormat::BC1Srgb:    return nvrhi::Format::BC1_UNORM_SRGB;
+				case TextureFormat::BC4Unorm:   return nvrhi::Format::BC4_UNORM;
+				case TextureFormat::BC5Unorm:   return nvrhi::Format::BC5_UNORM;
+				case TextureFormat::BC7Unorm:   return nvrhi::Format::BC7_UNORM;
+				case TextureFormat::BC7Srgb:    return nvrhi::Format::BC7_UNORM_SRGB;
 			}
 			return MakeError(ErrorCode::InvalidArgument, "unknown texture format {}", std::to_underlying(format));
+		}
+
+		// M23 (decision 15): the GPU format the decode fallback uploads a block-compressed `format` as, on a device without BC
+		// support: what a sampler returns from the BC format, at 8 bits per channel.
+		static Result<nvrhi::Format> ToFallbackFormat(TextureFormat format)
+		{
+			switch (format)
+			{
+				case TextureFormat::BC1Unorm:
+				case TextureFormat::BC5Unorm:
+				case TextureFormat::BC7Unorm:   return nvrhi::Format::RGBA8_UNORM;
+				case TextureFormat::BC1Srgb:
+				case TextureFormat::BC7Srgb:    return nvrhi::Format::SRGBA8_UNORM;
+				case TextureFormat::BC4Unorm:   return nvrhi::Format::R8_UNORM;
+				case TextureFormat::RGBA8Unorm:
+				case TextureFormat::RGBA8Srgb:
+				case TextureFormat::R8Unorm:    break;
+			}
+			return MakeError(ErrorCode::InvalidArgument, "texture format {} is not block-compressed", TextureFormatToString(format));
+		}
+
+		// The decode fallback's texels of one level: DecompressTextureBlocks' RGBA8, or for BC4 its red channel alone, which an
+		// R8_UNORM texture samples as (r, 0, 0, 1), as the GPU samples BC4. Errors: those of DecompressTextureBlocks.
+		static Result<Buffer> DecodeLevel(TextureBlockCodec codec, const TextureMip& mip, std::span<const std::byte> blocks)
+		{
+			ENGINE_TRY_ASSIGN(Buffer texels, DecompressTextureBlocks(codec, mip.Width, mip.Height, blocks));
+			if (codec != TextureBlockCodec::BC4)
+				return texels;
+			Buffer red(texels.size() / 4);
+			for (size_t texel = 0; texel < red.size(); ++texel)
+				red[texel] = texels[texel * 4];
+			return red;
+		}
+
+		// Logs, once per cache, the path its block-compressed textures take on its device.
+		static void LogBlockPath(const UploadContext& context, bool decode)
+		{
+			if (*context.BlockPathLogged)
+				return;
+			*context.BlockPathLogged = true;
+			if (decode)
+			{
+				ENGINE_CORE_INFO("GpuResourceCache: the device has no BC texture support, so block-compressed textures are decompressed at "
+								 "upload (the decode fallback: RGBA8 or R8, more GPU memory)");
+			}
+			else
+			{
+				ENGINE_CORE_INFO("GpuResourceCache: block-compressed textures upload as their BC blocks");
+			}
 		}
 
 		// Creates a vertex or index buffer of `size` bytes, kept in its shader-readable state between command lists, and
@@ -222,8 +285,9 @@ namespace Engine {
 
 			[[nodiscard]] static bool HasGpuObjects(const GpuMesh& mirror) { return mirror.VertexBuffer != nullptr && mirror.IndexBuffer != nullptr; }
 
-			[[nodiscard]] static Result<GpuMesh> Upload(GraphicsDevice& device, const MeshData& mesh, const std::string& name)
+			[[nodiscard]] static Result<GpuMesh> Upload(const UploadContext& context, const MeshData& mesh, const std::string& name)
 			{
+				GraphicsDevice& device = *context.Device;
 				if (mesh.Vertices.empty() || mesh.Indices.empty())
 					return MakeError(ErrorCode::InvalidArgument, "mesh '{}' has no vertices or no indices", name);
 				// Not an immediate command list: the scene renderer resolves its meshes inside the frame (§8.3 pass 1), while the
@@ -270,7 +334,8 @@ namespace Engine {
 		};
 
 		// The texture half: an immutable sampled texture with every mip, through HostImageUpload (host image copy where the
-		// device allows it, staging otherwise).
+		// device allows it, staging otherwise). M23 (decision 15): a block-compressed texture uploads its blocks, or on a
+		// device without BC support its decompressed levels (the decode fallback).
 		struct TextureTraits
 		{
 			using Data = TextureData;
@@ -279,11 +344,29 @@ namespace Engine {
 
 			[[nodiscard]] static bool HasGpuObjects(const GpuTexture& mirror) { return mirror.Texture != nullptr; }
 
-			[[nodiscard]] static Result<GpuTexture> Upload(GraphicsDevice& device, const TextureData& texture, const std::string& name)
+			[[nodiscard]] static Result<GpuTexture> Upload(const UploadContext& context, const TextureData& texture, const std::string& name)
 			{
+				GraphicsDevice& device = *context.Device;
 				if (texture.Mips.empty())
 					return MakeError(ErrorCode::InvalidArgument, "texture '{}' has no mip levels", name);
-				ENGINE_TRY_ASSIGN(const nvrhi::Format format, Utils::ToNvrhiFormat(texture.Format));
+				const std::optional<TextureBlockCodec> codec = GetTextureBlockCodec(texture.Format);
+				const bool decode = codec.has_value() && !device.GetInfo().TextureCompressionBC;
+				if (codec.has_value())
+					Utils::LogBlockPath(context, decode);
+				ENGINE_TRY_ASSIGN(const nvrhi::Format format, decode ? Utils::ToFallbackFormat(texture.Format) : Utils::ToNvrhiFormat(texture.Format));
+				// The decode fallback's levels, which the subresources view until the upload returns.
+				std::vector<Buffer> decoded;
+				if (decode)
+				{
+					decoded.reserve(texture.Mips.size());
+					for (uint32_t level = 0; level < texture.Mips.size(); ++level)
+					{
+						Result<Buffer> texels = Utils::DecodeLevel(*codec, texture.Mips[level], GetMipPixels(texture, level));
+						if (!texels.has_value())
+							return std::unexpected(std::move(texels).error().WithContext(std::format("while decoding mip level {} of texture '{}'", level, name)));
+						decoded.push_back(std::move(*texels));
+					}
+				}
 				nvrhi::TextureDesc desc;
 				desc.width = texture.Width;
 				desc.height = texture.Height;
@@ -298,7 +381,7 @@ namespace Engine {
 					subresources.push_back({
 						.MipLevel = level,
 						.ArraySlice = 0,
-						.Data = GetMipPixels(texture, level),
+						.Data = decode ? std::span<const std::byte>(decoded[level]) : GetMipPixels(texture, level),
 						.RowPitch = 0,
 						.DepthPitch = 0,
 					});
@@ -307,6 +390,7 @@ namespace Engine {
 				GpuTexture mirror;
 				mirror.Texture = std::move(upload.Texture);
 				mirror.Path = upload.Path;
+				mirror.Format = texture.Format;
 				return mirror;
 			}
 		};
@@ -391,7 +475,7 @@ namespace Engine {
 				else
 				{
 					const std::string name = Utils::GetAssetName(assets, handle);
-					Result<Mirror> uploaded = Traits::Upload(*context.Device, *data, name);
+					Result<Mirror> uploaded = Traits::Upload(context, *data, name);
 					if (uploaded)
 					{
 						entry.Value = std::move(*uploaded);
@@ -505,12 +589,21 @@ namespace Engine {
 		std::map<MirrorKey, EnvironmentEntry> Environments;
 		size_t UploadFailures = 0;
 		uint64_t NextGeneration = 1; // GpuMaterial::Generation: only increases
+		// M23 (decision 15): the Info line naming the block-compressed textures' path was logged. Kept across a device loss:
+		// the recovered device has the same specification, so the same path.
+		bool BlockPathLogged = false;
 		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 26): the cache's registration with its device.
 		GpuRecreationRegistration Recreation{};
 
-		[[nodiscard]] UploadContext GetContext() { return { .Device = Device, .Assets = Assets, .UploadFailures = &UploadFailures }; }
-		// The texture of `slot`, or of the built-in `fallback` when the slot is empty, through the texture mirrors.
-		[[nodiscard]] nvrhi::TextureHandle ResolveSlot(const TypedAssetHandle<AssetType::Texture>& slot, AssetHandle fallback);
+		[[nodiscard]] UploadContext GetContext()
+		{
+			return { .Device = Device, .Assets = Assets, .UploadFailures = &UploadFailures, .BlockPathLogged = &BlockPathLogged };
+		}
+		// The texture mirror of `slot`, or of the built-in `fallback` when the slot is empty.
+		[[nodiscard]] const GpuTexture& ResolveSlot(const TypedAssetHandle<AssetType::Texture>& slot, AssetHandle fallback);
+		// Writes `entry`'s constants: MakeMaterialConstants of `material` with `flags`, into a new buffer, recording a failure
+		// as GetMaterial documents (counted and reported once, never on a lost device).
+		void WriteMaterialConstants(AssetHandle handle, const MaterialData& material, uint32_t flags, MaterialEntry& entry);
 		// Reports the failed constants buffer of material `handle` once (§8.14 item 7).
 		void ReportMaterialFailure(AssetHandle handle, MaterialEntry& entry);
 		// Reports why environment `handle` has no mirror (GpuResourceCache.h): once per (handle, version), as its entry is made.
@@ -550,9 +643,31 @@ namespace Engine {
 		return m_State->Textures.Get(m_State->GetContext(), handle);
 	}
 
-	nvrhi::TextureHandle GpuResourceCache::State::ResolveSlot(const TypedAssetHandle<AssetType::Texture>& slot, AssetHandle fallback)
+	const GpuTexture& GpuResourceCache::State::ResolveSlot(const TypedAssetHandle<AssetType::Texture>& slot, AssetHandle fallback)
 	{
-		return Textures.Get(GetContext(), slot.IsValid() ? slot.GetHandle() : fallback).Texture;
+		return Textures.Get(GetContext(), slot.IsValid() ? slot.GetHandle() : fallback);
+	}
+
+	void GpuResourceCache::State::WriteMaterialConstants(AssetHandle handle, const MaterialData& material, uint32_t flags, MaterialEntry& entry)
+	{
+		MaterialConstants constants = Utils::MakeMaterialConstants(material);
+		constants.Flags = flags;
+		entry.Value.Flags = flags;
+		Result<nvrhi::BufferHandle> created = Utils::CreateMaterialConstants(*Device, constants, std::format("{} (constants)", Utils::GetAssetName(*Assets, handle)));
+		if (created.has_value())
+		{
+			entry.Value.Constants = std::move(*created);
+			entry.UploadError.clear();
+			return;
+		}
+		// The previous constants (a rebuild's) hold other flags: draws using the material are skipped instead.
+		entry.Value.Constants = nullptr;
+		if (Utils::IsUploadFailure(*Device))
+		{
+			++UploadFailures;
+			entry.UploadError = created.error().ToString();
+			entry.IsReported = false;
+		}
 	}
 
 	void GpuResourceCache::State::ReportMaterialFailure(AssetHandle handle, MaterialEntry& entry)
@@ -594,13 +709,20 @@ namespace Engine {
 		const bool isPlaceholder =
 			resolved != BuiltinAssetHandles::ErrorMaterial && material == AssetCast<MaterialData>(assets.GetPlaceholder(AssetType::Material));
 
-		// The five maps, empty slots bound to White, FlatNormal or Black (§8.4), each texture at its current version.
+		// The five maps, empty slots bound to White, FlatNormal or Black (§8.4), each texture at its current version, resolved
+		// in slot order.
+		const nvrhi::TextureHandle baseColorMap = state.ResolveSlot(material->BaseColorMap, BuiltinAssetHandles::WhiteTexture).Texture;
+		const nvrhi::TextureHandle metallicRoughnessMap = state.ResolveSlot(material->MetallicRoughnessMap, BuiltinAssetHandles::WhiteTexture).Texture;
+		const GpuTexture& normalMap = state.ResolveSlot(material->NormalMap, BuiltinAssetHandles::FlatNormalTexture);
+		// M23 (decision 10): the flags the resolved textures imply. A BC5 normal map holds x and y only, on a device with BC
+		// and through the decode fallback alike, so the shader reconstructs z.
+		const uint32_t textureFlags = normalMap.Format == TextureFormat::BC5Unorm ? MaterialFlagNormalMapTwoChannel : 0U;
 		const std::array<nvrhi::TextureHandle, 5> textures = {
-			state.ResolveSlot(material->BaseColorMap, BuiltinAssetHandles::WhiteTexture),
-			state.ResolveSlot(material->MetallicRoughnessMap, BuiltinAssetHandles::WhiteTexture),
-			state.ResolveSlot(material->NormalMap, BuiltinAssetHandles::FlatNormalTexture),
-			state.ResolveSlot(material->OcclusionMap, BuiltinAssetHandles::WhiteTexture),
-			state.ResolveSlot(material->EmissiveMap, BuiltinAssetHandles::BlackTexture),
+			baseColorMap,
+			metallicRoughnessMap,
+			normalMap.Texture,
+			state.ResolveSlot(material->OcclusionMap, BuiltinAssetHandles::WhiteTexture).Texture,
+			state.ResolveSlot(material->EmissiveMap, BuiltinAssetHandles::BlackTexture).Texture,
 		};
 		const auto assignTextures = [&textures](GpuMaterial& mirror)
 		{
@@ -624,10 +746,18 @@ namespace Engine {
 				mirror.OcclusionMap,
 				mirror.EmissiveMap,
 			};
-			if (current != textures)
+			// The material's own flags are its version's, which the key fixes; only the textures' can change here.
+			const uint32_t flags = (mirror.Flags & ~MaterialFlagNormalMapTwoChannel) | textureFlags;
+			if (current != textures || flags != mirror.Flags)
 			{
-				// A texture changed (a new version, or its placeholder replaced by the asset): same constants, new textures.
+				// A texture changed (a new version, or its placeholder replaced by the asset): new textures, the same constants
+				// unless the flags the textures imply changed (decision 10), which the constants hold.
 				assignTextures(entry.Value);
+				if (flags != entry.Value.Flags)
+				{
+					state.WriteMaterialConstants(resolved, *material, flags, entry);
+					state.ReportMaterialFailure(resolved, entry);
+				}
 				entry.Value.Generation = state.NextGeneration++;
 			}
 			return entry.Value;
@@ -642,19 +772,7 @@ namespace Engine {
 		entry.Value.Version = key.Version;
 		entry.Value.Generation = state.NextGeneration++;
 		entry.Value.IsPlaceholder = isPlaceholder;
-		const MaterialConstants materialConstants = Utils::MakeMaterialConstants(*material);
-		entry.Value.Flags = materialConstants.Flags;
-		Result<nvrhi::BufferHandle> constants = Utils::CreateMaterialConstants(*state.Device, materialConstants,
-			std::format("{} (constants)", Utils::GetAssetName(assets, resolved)));
-		if (constants.has_value())
-		{
-			entry.Value.Constants = std::move(*constants);
-		}
-		else if (Utils::IsUploadFailure(*state.Device))
-		{
-			++state.UploadFailures;
-			entry.UploadError = constants.error().ToString();
-		}
+		state.WriteMaterialConstants(resolved, *material, Utils::MakeMaterialConstants(*material).Flags | textureFlags, entry);
 		MaterialEntry& inserted = state.Materials.insert_or_assign(key, std::move(entry)).first->second;
 		state.ReportMaterialFailure(resolved, inserted);
 		return inserted.Value;

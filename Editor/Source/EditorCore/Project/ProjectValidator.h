@@ -36,8 +36,9 @@
 // with Export.PruneUnreferenced on, each computed Assets.Load of a script below Assets/ that Export.Exclude leaves in, a
 // testing export's excluded test content unchecked; Docs/Decisions/0030-m19-contract.md decision 21). M20 adds
 // PREFAB_CYCLE (Scene/LoadReport.h) on every prefab file that nests itself, directly or through other prefabs
-// (Docs/Decisions/0031-m20-contract.md decision 8). GetCodes lists every code in §13.7 order, later milestones' codes
-// appended in landing order.
+// (Docs/Decisions/0031-m20-contract.md decision 8). M23 adds RENDER_POINT_SHADOW_BUDGET (Renderer/PointShadowMaps.h) when
+// more than MaxPointShadowLights point lights of a scene cast shadows (Docs/Decisions/0034-m23-contract.md decision 18).
+// GetCodes lists every code in §13.7 order, later milestones' codes appended in landing order.
 
 namespace Engine {
 

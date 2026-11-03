@@ -10,11 +10,13 @@
 #include <vector>
 
 // Probing and decoding encoded audio files with miniaudio's decoders (Architecture §7.4 AudioImporter: "probe and validate
-// decode with miniaudio"): WAV, FLAC and MP3 (miniaudio's built-in decoders) and Ogg Vorbis (stb_vorbis, built into the
-// vendored miniaudio, Vendor/miniaudio/VENDOR.md). AssetPipeline's AudioImporter uses it, so miniaudio stays private to the
-// Audio module (§3 rule 3), and the AudioEngine decodes the clips that decode at registration with DecodeEncodedAudio
-// (AudioEngine.h "Clips"). Frozen by the M12 contract (Docs/Decisions/0015-m12-decisions.md). Pure functions of the bytes,
-// thread-safe (each call has its own ma_decoder); never assert on data.
+// decode with miniaudio"): WAV, FLAC and MP3 (miniaudio's built-in decoders), Ogg Vorbis (stb_vorbis, built into the
+// vendored miniaudio, Vendor/miniaudio/VENDOR.md) and, since M23, Ogg Opus (miniaudio's libopus decoding backend over
+// opusfile and the fixed-point libopus, Docs/Decisions/0034-m23-contract.md decision 16). AssetPipeline's AudioImporter
+// uses it, so miniaudio stays private to the Audio module (§3 rule 3), and the AudioEngine decodes the clips that decode at
+// registration with DecodeEncodedAudio (AudioEngine.h "Clips"). Frozen by the M12 contract
+// (Docs/Decisions/0015-m12-decisions.md). Pure functions of the bytes, thread-safe (each call has its own ma_decoder);
+// never assert on data.
 
 namespace Engine {
 
@@ -24,7 +26,8 @@ namespace Engine {
 		Wav,
 		Flac,
 		Mp3,
-		Vorbis // Ogg Vorbis
+		Vorbis, // Ogg Vorbis
+		Opus    // Ogg Opus (M23): decoded at 48 kHz, bit-exact in every configuration (fixed-point libopus, 16-bit samples)
 	};
 
 	// What a probe found. FrameCount is exact: the probe decodes every frame once.
@@ -50,23 +53,29 @@ namespace Engine {
 		std::vector<float> Samples{}; // FrameCount * ChannelCount samples
 	};
 
-	// Identifies the container (RIFF/WAVE, "fLaC", an MP3 frame or ID3 tag, "OggS" with a Vorbis identification header),
-	// opens miniaudio's decoder over the bytes in memory and decodes every frame once, so a file that would fail halfway
-	// through playback fails here. Errors: Parse listing the four formats ("WAV, FLAC, MP3 or Ogg Vorbis") for bytes that
-	// are none of them (Ogg Opus and other Ogg codecs included, with the hint to convert the file); Parse for a truncated
-	// or corrupt file (with miniaudio's result description and the frame reached), and for Ogg Vorbis headers stb_vorbis
-	// cannot read safely (a comment header whose lengths run past its packet, a codebook of more than 2^20 entries times
-	// dimensions, a type 1 lookup whose size it computes out of int range); Validation for a sample rate outside
-	// 8,000 to 192,000 Hz, a channel count other than 1 or 2 (hint: convert to mono or stereo), no frames, or a sample that
-	// is not finite (NaN or an infinity, which an IEEE-float WAV can hold; the message names the frame), so no such sample
-	// reaches the mixer through an imported clip, streamed or not.
+	// Identifies the container (RIFF/WAVE, "fLaC", an MP3 frame or ID3 tag, "OggS" with a Vorbis or an Opus
+	// identification header), opens miniaudio's decoder over the bytes in memory and decodes every frame once, so a file
+	// that would fail halfway through playback fails here. Errors: Parse listing the five formats ("WAV, FLAC, MP3, Ogg
+	// Vorbis or Ogg Opus") for bytes that are none of them (other Ogg codecs included, with the hint to convert the file);
+	// Parse for a truncated or corrupt file (with miniaudio's result description and the frame reached; an Ogg Opus file
+	// that decodes fewer frames than its last page's granule position states counts as truncated), for Ogg Vorbis headers
+	// stb_vorbis cannot read safely (a comment header whose lengths run past its packet, a codebook of more than 2^20
+	// entries times dimensions, a type 1 lookup whose size it computes out of int range), and for an Ogg Opus file that is
+	// not one logical stream (RFC 7845: the identification header alone on a first page with the beginning-of-stream flag,
+	// every page of that page's serial number, the end-of-stream flag on the last page only; chained and multiplexed
+	// files are refused); Validation for a sample rate outside 8,000 to 192,000 Hz, a channel count other than 1 or 2 (hint:
+	// convert to mono or stereo), an Ogg Opus channel mapping family other than 0 or 1 (the same hint), no frames, or a
+	// sample that is not finite (NaN or an infinity, which an IEEE-float WAV can hold; the message names the frame), so no
+	// such sample reaches the mixer through an imported clip, streamed or not. Ogg Opus decodes at 48 kHz (Opus's decoding
+	// rate) through libopus's fixed-point decoder, 16-bit samples converted to f32 exactly, so its samples are identical in
+	// Debug, Release and Dist.
 	[[nodiscard]] Result<EncodedAudioInfo> ProbeEncodedAudio(std::span<const std::byte> bytes);
 
 	// ProbeEncodedAudio's checks, keeping the decoded samples (tests compare decoders and playback with it). Errors: as
 	// ProbeEncodedAudio.
 	[[nodiscard]] Result<DecodedAudio> DecodeEncodedAudio(std::span<const std::byte> bytes);
 
-	// "Wav", "Flac", "Mp3", "Vorbis"; "Unknown" outside the enum (asserted).
+	// "Wav", "Flac", "Mp3", "Vorbis", "Opus"; "Unknown" outside the enum (asserted).
 	[[nodiscard]] std::string_view EncodedAudioFormatToString(EncodedAudioFormat format);
 
 }

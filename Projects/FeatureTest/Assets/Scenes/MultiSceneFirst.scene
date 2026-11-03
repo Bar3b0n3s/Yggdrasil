@@ -10,7 +10,7 @@
 		"MeshRenderer": 1,
 		"Camera": 1,
 		"DirectionalLight": 1,
-		"PointLight": 1,
+		"PointLight": 2,
 		"AudioListener": 1
 	},
 	"Entities": [
@@ -98,6 +98,7 @@
 					"Color": [1, 1, 1],
 					"Intensity": 6,
 					"Range": 6,
+					"CastShadows": false,
 					"SourceRadius": 0.05
 				}
 			}
@@ -139,6 +140,7 @@
 					"Color": [1, 1, 1],
 					"Intensity": 4,
 					"Range": 10,
+					"CastShadows": false,
 					"SourceRadius": 0.05
 				}
 			}

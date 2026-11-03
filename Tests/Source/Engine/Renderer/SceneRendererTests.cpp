@@ -13,6 +13,7 @@
 #include "Engine/Graphics/Readback.h"
 #include "Engine/Renderer/BrdfLut.h"
 #include "Engine/Renderer/GpuResourceCache.h"
+#include "Engine/Renderer/LightClusters.h"
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Engine/Renderer/RenderPrepare.h"
 #include "Engine/Renderer/RenderSnapshot.h"
@@ -459,10 +460,11 @@ namespace Engine {
 		TEST_CASE("Pipelines: count matches the expected total" * doctest::test_suite(Test::GpuSuite))
 		{
 			// §8.5: "The total pipeline count is logged and asserted by a test." Mesh 24 + Skybox 1 + Bloom 3 + Tonemap 1 +
-			// FXAA 1 + debug lines 2 + text 2 + DFG LUT 1 + shadows 6 + depth pyramid 2 + GTAO 2 + selection 8 + data views 1 +
-			// quads 2 + upscale 2 (M18: the QuadBatcher and the output stage's UpscalePass, ADR 0029 decision 2).
+			// FXAA 1 + debug lines 2 + text 2 + DFG LUT 1 + shadows 6 + depth pyramid 2 + GTAO 2 + light clusters 1 + selection
+			// 8 + data views 1 + quads 2 + upscale 2 (M18: the QuadBatcher and the output stage's UpscalePass, ADR 0029 decision
+			// 2; M23: the LightClusters pass, ADR 0034 decision 5).
 			// Each material debug view adds its 9 forward variants the first time it renders, 45 for the five.
-			static_assert(SceneRendererPipelines::StartupPipelineCount == 58);
+			static_assert(SceneRendererPipelines::StartupPipelineCount == 59);
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			Test::AssetTestFixture assets;
@@ -470,8 +472,8 @@ namespace Engine {
 				GpuResourceCache cache(gpu.GetDevice(), assets.GetManager());
 				Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());
 				REQUIRE_MESSAGE(pipelines.has_value(), pipelines.error().ToString());
-				CHECK((*pipelines)->GetPipelineCount() == 58);
-				CHECK(SceneRendererPipelines::GetLayoutDescriptions().size() == 58);
+				CHECK((*pipelines)->GetPipelineCount() == 59);
+				CHECK(SceneRendererPipelines::GetLayoutDescriptions().size() == 59);
 				Result<Scope<SceneRenderer>> renderer = SceneRenderer::Create(gpu.GetDevice(), **pipelines, cache, assets.GetManager(),
 					{ .Width = 16, .Height = 16 });
 				REQUIRE_MESSAGE(renderer.has_value(), renderer.error().ToString());
@@ -482,13 +484,13 @@ namespace Engine {
 					snapshot.DebugView = view;
 					static_cast<void>(RenderToImage(gpu.GetDevice(), **renderer, snapshot));
 				}
-				CHECK((*pipelines)->GetPipelineCount() == 58 + 5 * SceneRendererPipelines::DebugViewPipelineCount);
+				CHECK((*pipelines)->GetPipelineCount() == 59 + 5 * SceneRendererPipelines::DebugViewPipelineCount);
 				// EnsureDebugView, which Render called, has no effect for Lit or for a view that exists.
 				const Status lit = (*pipelines)->EnsureDebugView(RenderDebugView::Lit);
 				const Status existing = (*pipelines)->EnsureDebugView(RenderDebugView::Albedo);
 				CHECK(lit.has_value());
 				CHECK(existing.has_value());
-				CHECK((*pipelines)->GetPipelineCount() == 58 + 5 * SceneRendererPipelines::DebugViewPipelineCount);
+				CHECK((*pipelines)->GetPipelineCount() == 59 + 5 * SceneRendererPipelines::DebugViewPipelineCount);
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}
@@ -1442,6 +1444,55 @@ namespace Engine {
 			snapshot.Lights[0].CastShadows = false;
 			snapshot.Meshes[0].World[3].z = -3;
 			CHECK(Test::SceneRendererIntegrationFixture::Channel(fixture.Render(snapshot), 32, 32) == 0);
+		}
+
+		// M23 (R-CLC, Docs/Decisions/0034-m23-contract.md decision 5): the LightCount data view colours each surface pixel by
+		// the lights its cluster holds, in GetLightCountDebugColor's palette. A directional light is in every cluster and three
+		// point lights 1 m in front of the wall's left end reach only the left tile's; without the clusters every pixel counts
+		// the whole list. The background stays black.
+		TEST_CASE("SceneRenderer: the LightCount view shows the lights of each pixel's cluster")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu, 256, 64);
+			RenderSnapshot snapshot = fixture.Snapshot();
+			snapshot.DebugView = RenderDebugView::LightCount;
+			// A wall 12 m wide and 3 m away fills the view's width but its first and last 15 pixels (4 tiles of 64 pixels).
+			snapshot.Meshes[0].World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -3.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(6.0f, 1.0f, 1.0f));
+			snapshot.Lights = { { .Type = RenderLightType::Directional, .Entity = UUID(30) } };
+			for (uint64_t index = 0; index < 3; ++index)
+				snapshot.Lights.push_back({ .Type = RenderLightType::Point, .Position = glm::vec3(-5.5f, 0.0f, -2.5f), .Range = 1.0f, .Entity = UUID(31 + index) });
+			const auto colour = [](const Image& image, uint32_t x, uint32_t y)
+			{
+				return glm::ivec3(Test::SceneRendererIntegrationFixture::Channel(image, x, y, 0), Test::SceneRendererIntegrationFixture::Channel(image, x, y, 1),
+					Test::SceneRendererIntegrationFixture::Channel(image, x, y, 2));
+			};
+			const auto expected = [](uint32_t count)
+			{
+				return glm::ivec3(glm::round(GetLightCountDebugColor(count) * 255.0f));
+			};
+			const Image clustered = fixture.Render(snapshot);
+			CHECK(Test::SceneRendererIntegrationFixture::FindPass(fixture.Renderer().GetRenderStats(), "LightClusters") != nullptr);
+			CHECK(colour(clustered, 32, 32) == expected(4));
+			CHECK(colour(clustered, 224, 32) == expected(1));
+			CHECK(colour(clustered, 2, 2) == expected(0));
+
+			snapshot.Quality.ClusteredLights = false;
+			++snapshot.FrameIndex;
+			const Image bruteForce = fixture.Render(snapshot);
+			CHECK(Test::SceneRendererIntegrationFixture::FindPass(fixture.Renderer().GetRenderStats(), "LightClusters") == nullptr);
+			CHECK(colour(bruteForce, 32, 32) == expected(4));
+			CHECK(colour(bruteForce, 224, 32) == expected(4));
+			CHECK(colour(bruteForce, 2, 2) == expected(0));
+
+			// With the directional light alone every cluster would hold the whole list: no pass, and one light everywhere.
+			snapshot.Quality.ClusteredLights = true;
+			snapshot.Lights.resize(1);
+			++snapshot.FrameIndex;
+			const Image directional = fixture.Render(snapshot);
+			CHECK(Test::SceneRendererIntegrationFixture::FindPass(fixture.Renderer().GetRenderStats(), "LightClusters") == nullptr);
+			CHECK(colour(directional, 32, 32) == expected(1));
+			CHECK(colour(directional, 224, 32) == expected(1));
 		}
 
 		TEST_CASE("SceneRenderer: submitted picking owns the exact table despite culled draws and later mutations")

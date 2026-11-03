@@ -9,6 +9,7 @@
 #include "Engine/Graphics/Readback.h"
 #include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Renderer/ShadowPass.h"
+#include "Shared/InstanceRecord.h"
 #include "Shared/ShadowConstants.h"
 #include "Shared/ShadowProbeConstants.h"
 #include "Support/HeadlessGpuFixture.h"
@@ -102,14 +103,23 @@ namespace Engine {
 				auto cascadeFramebuffers = ShadowPass::CreateFramebuffers(m_Device, *m_Cascades);
 				auto atlasFramebuffers = ShadowPass::CreateFramebuffers(m_Device, *m_Atlas);
 				auto casterConstants = m_Device.CreateBuffer(ShadowPass::GetCasterConstantsDesc());
+				// The view's Instances buffer (SceneRenderer::State::InstanceBuffer's desc), for the casters' records.
+				nvrhi::BufferDesc instancesDesc;
+				instancesDesc.byteSize = MaxInstances * sizeof(InstanceRecord);
+				instancesDesc.structStride = sizeof(InstanceRecord);
+				instancesDesc.initialState = nvrhi::ResourceStates::ShaderResource;
+				instancesDesc.keepInitialState = true;
+				auto instances = m_Device.CreateBuffer(instancesDesc);
 				REQUIRE(cascadeFramebuffers);
 				REQUIRE(atlasFramebuffers);
 				REQUIRE(casterConstants);
+				REQUIRE(instances);
 				REQUIRE(cascadeFramebuffers->size() == MaxShadowCascades);
 				REQUIRE(atlasFramebuffers->size() == 1);
 				m_CascadeFramebuffers = std::move(*cascadeFramebuffers);
 				m_AtlasFramebuffer = atlasFramebuffers->front();
 				m_CasterConstants = *casterConstants;
+				m_Instances = *instances;
 
 				nvrhi::BindingLayoutDesc layout;
 				layout.visibility = nvrhi::ShaderType::Compute;
@@ -150,19 +160,29 @@ namespace Engine {
 			[[nodiscard]] Test::InMemoryAssetManager& GetAssets() { return m_Assets; }
 			[[nodiscard]] const RenderStats& GetStats() const { return m_Stats; }
 
+			// Prepares `items` as a view's casters (their instance records written into the view's Instances buffer, as
+			// RecordViewSetup writes them) and records them; `instancing` false is RenderQualitySettings::Instancing's reference
+			// path.
 			ShadowRenderResult Render(std::span<const MeshDrawItem> items, const ShadowCascadeSet& cascades,
-				const SpotShadowAtlas* spots = nullptr, float depthBias = 0)
+				const SpotShadowAtlas* spots = nullptr, float depthBias = 0, bool instancing = true)
 			{
+				std::vector<InstanceRecord> instances;
+				auto casters = ShadowPass::PrepareCasters(m_Cache, items, instancing, instances);
+				REQUIRE_MESSAGE(casters, casters.error().ToString());
+				REQUIRE(instances.size() <= MaxInstances);
 				auto command = m_Device.CreateCommandList();
 				REQUIRE(command);
 				(*command)->open();
+				if (!instances.empty())
+					(*command)->writeBuffer(m_Instances, instances.data(), instances.size() * sizeof(InstanceRecord));
 				m_Stats = {};
 				RenderRecordingContext recording(m_Stats, []
 				{
 					return 0.0;
 				});
-				auto result = m_Pass->Record(**command, recording, m_Bindings, m_Cache, m_Assets,
-					{ .Casters = items,
+				auto result = m_Pass->Record(**command, recording, m_Bindings,
+					{ .Casters = &*casters,
+						.Instances = m_Instances,
 						.Cascades = &cascades,
 						.Spots = spots,
 						.CascadeTarget = m_Cascades,
@@ -224,6 +244,7 @@ namespace Engine {
 				return std::move(*image);
 			}
 		private:
+			static constexpr size_t MaxInstances = 64;
 			GraphicsDevice& m_Device;
 			Test::InMemoryAssetManager m_Assets{};
 			GpuResourceCache m_Cache;
@@ -234,6 +255,7 @@ namespace Engine {
 			std::vector<nvrhi::FramebufferHandle> m_CascadeFramebuffers{};
 			nvrhi::FramebufferHandle m_AtlasFramebuffer{};
 			nvrhi::BufferHandle m_CasterConstants{};
+			nvrhi::BufferHandle m_Instances{};
 			ComputePipeline m_Probe{};
 			nvrhi::SamplerHandle m_Comparison{};
 			RenderStats m_Stats{};
@@ -328,6 +350,40 @@ namespace Engine {
 			material.AlphaMode = AlphaMode::Blend;
 			setup.GetAssets().Publish(ShadowMaterialHandle, CreateRef<MaterialData>(material));
 			CHECK(setup.Render(std::span(&item, 1), IdentityShadowCascade()).DrawCalls == 0);
+		}
+
+		// M23 (R-INST; Docs/Decisions/0034-m23-contract.md decision 2): the casters of one mesh are adjacent after
+		// PrepareCasters, and a face draws each run of them its frustum keeps as one instanced draw: a caster the face culls
+		// splits its batch, and a mirrored caster takes a pipeline of its own. The depth equals the per-draw reference path's.
+		TEST_CASE("ShadowPass: equal casters batch into instanced draws per face and render the per-draw depth")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			ShadowSetup setup(gpu);
+			const auto quad = [](float x, float y, float z, bool mirrored)
+			{
+				MeshDrawItem item;
+				item.Mesh = ShadowQuadHandle;
+				item.World = glm::translate(glm::mat4(1), glm::vec3(x, y, z)) * glm::scale(glm::mat4(1), glm::vec3(mirrored ? -0.25f : 0.25f, 0.25f, 1));
+				return item;
+			};
+			// In caster order: the second quad is outside the cascade's frustum, the fourth mirrored.
+			const std::array<MeshDrawItem, 5> items = { quad(-0.6f, 0, 0.2f, false), quad(5, 0, 0.3f, false), quad(0, 0, 0.5f, false),
+				quad(0, 0.6f, 0.4f, true), quad(0.6f, 0, 0.8f, false) };
+			const ShadowRenderResult instanced = setup.Render(items, IdentityShadowCascade());
+			const Image instancedDepth = setup.Probe(0);
+			const ShadowRenderResult perDraw = setup.Render(items, IdentityShadowCascade(), nullptr, 0, false);
+			const Image perDrawDepth = setup.Probe(0);
+			// Instanced: the unmirrored quads' runs around the culled one ([first], [third, fifth]) and the mirrored quad.
+			CHECK(instanced.DrawCalls == 3);
+			CHECK(perDraw.DrawCalls == 4);
+			CHECK(instanced.Triangles == 8);
+			CHECK(perDraw.Triangles == 8);
+			CHECK(instancedDepth.Pixels == perDrawDepth.Pixels);
+			CHECK(ShadowPixel(instancedDepth, 51, 128).x == doctest::Approx(0.2));  // the first quad, at clip x -0.6
+			CHECK(ShadowPixel(instancedDepth, 128, 128).x == doctest::Approx(0.5)); // the third
+			CHECK(ShadowPixel(instancedDepth, 128, 51).x == doctest::Approx(0.4));  // the mirrored one, at clip y 0.6
+			CHECK(ShadowPixel(instancedDepth, 204, 128).x == doctest::Approx(0.8)); // the fifth
 		}
 
 		TEST_CASE("Shadows: both depth-clamp and extended-near fallback render off-screen casters")

@@ -98,6 +98,7 @@ local fields: { Authored } = {
 	authored("Lamp", "PointLight", "Color", Color.New(1, 0.6, 0.3)),
 	authored("Lamp", "PointLight", "Intensity", 25),
 	authored("Lamp", "PointLight", "Range", 8),
+	authored("Lamp", "PointLight", "CastShadows", true),
 	authored("Lamp", "PointLight", "SourceRadius", 0.2),
 	authored("Spot", "SpotLight", "Color", Color.New(0.6, 0.8, 1)),
 	authored("Spot", "SpotLight", "Intensity", 40),

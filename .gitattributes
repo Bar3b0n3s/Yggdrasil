@@ -13,6 +13,7 @@
 *.bin binary
 *.wav binary
 *.ogg binary
+*.opus binary
 *.mp3 binary
 *.flac binary
 *.ttf binary

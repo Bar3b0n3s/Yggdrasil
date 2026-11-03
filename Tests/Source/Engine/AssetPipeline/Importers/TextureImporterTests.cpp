@@ -5,6 +5,7 @@
 #include "Engine/Asset/TextureCompression.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Core/Hash.h"
 #include "Engine/Graphics/Image.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/Fuzz.h"
@@ -12,21 +13,31 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <format>
+#include <optional>
+#include <string>
+#include <vector>
 
 namespace Engine {
 
 	namespace {
 
-		Result<ImportResult> ImportTexture(Test::AssetTestFixture& fixture, std::string_view relative, std::string_view usage)
+		// Imports `relative` through the importer with a .meta's settings: `usage`, mips, and `compression` when given (an
+		// earlier .meta, without the member, when not).
+		Result<ImportResult> ImportTexture(Test::AssetTestFixture& fixture, std::string_view relative, std::string_view usage,
+			std::optional<std::string_view> compression = std::nullopt)
 		{
 			const VfsPath source = fixture.ProjectPath(relative);
 			const Buffer bytes = fixture.ReadProjectFile(relative);
 			Json settings = Json::object();
 			settings["Usage"] = std::string(usage);
 			settings["GenerateMips"] = true;
+			if (compression.has_value())
+				settings["Compression"] = std::string(*compression);
 			AssetMetadata metadata;
 			metadata.Handle = AssetHandle(0x7e57000000000001ull);
 			metadata.Type = AssetType::Texture;
@@ -97,6 +108,10 @@ namespace Engine {
 		}
 
 		constexpr TextureImportSettings ColorSettings{ .Usage = TextureUsage::Color, .GenerateMips = true };
+		// The settings of the cases that check decoded texels and mips: version 1's RGBA8 levels (Compression None,
+		// Docs/Decisions/0034-m23-contract.md decision 13).
+		constexpr TextureImportSettings UncompressedColor{ .Usage = TextureUsage::Color, .GenerateMips = true, .Compression = TextureCompression::None };
+		constexpr TextureImportSettings UncompressedLinear{ .Usage = TextureUsage::Linear, .GenerateMips = true, .Compression = TextureCompression::None };
 
 	}
 
@@ -119,7 +134,9 @@ namespace Engine {
 				Buffer mutated = seeds[static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(seeds.size()) - 1))];
 				Test::MutateBytes(mutated, random);
 				static constexpr std::array<TextureUsage, 3> Usages = { TextureUsage::Color, TextureUsage::Linear, TextureUsage::NormalMap };
-				const TextureImportSettings settings{ .Usage = Usages[static_cast<size_t>(random.RangeInt(0, 2))], .GenerateMips = random.NextBool() };
+				const TextureImportSettings settings{ .Usage = Usages[static_cast<size_t>(random.RangeInt(0, 2))],
+					.GenerateMips = random.NextBool(),
+					.Compression = random.NextBool() ? TextureCompression::Auto : TextureCompression::None };
 				const Result<Buffer> cooked = TextureImporter::ImportTextureFromMemory(mutated, settings, "Fuzz.png");
 				if (!cooked.has_value())
 				{
@@ -142,12 +159,12 @@ namespace Engine {
 		// Compression Auto cooks a Color texture as BC7 sRGB, every Linear texture as BC7 and a NormalMap as BC5, every level
 		// BC blocks; None cooks version 1's RGBA8 levels. A grey Linear texture is BC7 too, never BC4, whose texels sample as
 		// (r, 0, 0, 1): as a metallic-roughness map (G roughness, B metallic) it must decode with G and B equal to R, as its
-		// None import samples. The format values are those decision 13 freezes (stream X names them in TextureFormat).
-		TEST_CASE("TextureImporter: Compression Auto cooks BC7 and BC5 by usage, and None keeps RGBA8" * doctest::skip(true))
+		// None import samples.
+		TEST_CASE("TextureImporter: Compression Auto cooks BC7 and BC5 by usage, and None keeps RGBA8")
 		{
-			constexpr auto BC5Unorm = static_cast<TextureFormat>(7);
-			constexpr auto BC7Unorm = static_cast<TextureFormat>(8);
-			constexpr auto BC7Srgb = static_cast<TextureFormat>(9);
+			constexpr auto BC5Unorm = TextureFormat::BC5Unorm;
+			constexpr auto BC7Unorm = TextureFormat::BC7Unorm;
+			constexpr auto BC7Srgb = TextureFormat::BC7Srgb;
 			CHECK(TextureImporter::Version == 2);
 			CHECK(TextureData::FormatVersion == 2);
 			const Buffer rgba = ReadTextureFixture("Rgba.png");
@@ -175,13 +192,59 @@ namespace Engine {
 			CHECK(ImportFromMemory(rgba, { .Usage = TextureUsage::Color, .GenerateMips = true, .Compression = TextureCompression::None }, "Rgba.png")
 					  ->Format
 				== TextureFormat::RGBA8Srgb);
+
+			// Every Auto level holds the blocks of its None level's texels: the levels are made in RGBA8 whatever the setting.
+			const AssetRef<TextureData> compressed = ImportFromMemory(rgba, ColorSettings, "Rgba.png");
+			const AssetRef<TextureData> uncompressed = ImportFromMemory(rgba, UncompressedColor, "Rgba.png");
+			REQUIRE(compressed->Mips.size() == uncompressed->Mips.size());
+			for (uint32_t level = 0; level < compressed->Mips.size(); ++level)
+			{
+				CAPTURE(level);
+				const TextureMip& mip = uncompressed->Mips[level];
+				CHECK(compressed->Mips[level].Width == mip.Width);
+				CHECK(compressed->Mips[level].Height == mip.Height);
+				const Result<Buffer> blocks = CompressTextureBlocks(TextureBlockCodec::BC7, mip.Width, mip.Height, GetMipPixels(*uncompressed, level));
+				REQUIRE_MESSAGE(blocks.has_value(), blocks.error().ToString());
+				CHECK(std::ranges::equal(GetMipPixels(*compressed, level), *blocks));
+			}
+		}
+
+		// M23 acceptance (Docs/Decisions/0034-m23-contract.md decision 13): cooked BC bytes are byte-identical from the Debug
+		// and Release editors of one compiler. Every committed texture fixture (PNG, JPEG, TGA and BMP) cooks with Compression
+		// Auto in every usage, mips included, to artifacts whose XXH64 is the committed digest, in Debug and in Release (never
+		// compared across compilers, plan §7 item 12). A different digest in one configuration is a determinism failure; a
+		// deliberate change to the cooked bytes (the codec's settings, the mips, the payload) updates it with the importer's
+		// version.
+		TEST_CASE("TextureImporter: the fixture set cooks to the committed BC bytes in every configuration")
+		{
+			Result<std::vector<std::string>> fixtures = Test::ListTestDataFiles("Assets/Textures", { ".png", ".jpg", ".jpeg", ".bmp", ".tga" });
+			REQUIRE(fixtures.has_value());
+			XXH64Hasher hasher;
+			size_t artifacts = 0;
+			for (const std::string& path : *fixtures)
+			{
+				if (path.ends_with("Truncated.png"))
+					continue;
+				CAPTURE(path);
+				Result<Buffer> encoded = FileSystem::ReadFile(Test::GetTestDataPath(path));
+				REQUIRE(encoded.has_value());
+				for (const TextureUsage usage : { TextureUsage::Color, TextureUsage::Linear, TextureUsage::NormalMap })
+				{
+					const Result<Buffer> cooked = TextureImporter::ImportTextureFromMemory(*encoded, { .Usage = usage, .GenerateMips = true }, path);
+					REQUIRE_MESSAGE(cooked.has_value(), cooked.error().ToString());
+					hasher.Update(*cooked);
+					++artifacts;
+				}
+			}
+			CHECK(artifacts == 3 * (fixtures->size() - 1));
+			CHECK_MESSAGE(hasher.Digest() == 0xD8D523AA7431B0AFULL, std::format("digest {:016x}", hasher.Digest()));
 		}
 
 		TEST_CASE("TextureImporter: a PNG imports with a full sRGB mip chain")
 		{
 			Test::AssetTestFixture fixture;
 			fixture.WriteProjectFile("Assets/Wood.png", Test::MakeTestPng(16, 8, 5));
-			Result<ImportResult> imported = ImportTexture(fixture, "Assets/Wood.png", "Color");
+			Result<ImportResult> imported = ImportTexture(fixture, "Assets/Wood.png", "Color", "None");
 			REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
 			CHECK(imported->Artifacts.front().Handle == AssetHandle(0x7e57000000000001ull));
 			CHECK(imported->Artifacts.front().SubAssetKey.empty());
@@ -203,7 +266,7 @@ namespace Engine {
 		{
 			Test::AssetTestFixture fixture;
 			fixture.WriteProjectFile("Assets/Normal.png", Test::MakeTestPng(8, 8, 9));
-			Result<ImportResult> imported = ImportTexture(fixture, "Assets/Normal.png", "NormalMap");
+			Result<ImportResult> imported = ImportTexture(fixture, "Assets/Normal.png", "NormalMap", "None");
 			REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
 			const AssetRef<TextureData> texture = LoadMainTexture(*imported);
 			CHECK(texture->Format == TextureFormat::RGBA8Unorm);
@@ -272,7 +335,7 @@ namespace Engine {
 		TEST_CASE("TextureImporter: Color mips are filtered in linear light, Linear mips on the stored values")
 		{
 			const Buffer png = MakeBlackWhitePng();
-			const AssetRef<TextureData> color = ImportFromMemory(png, ColorSettings, "BlackWhite.png");
+			const AssetRef<TextureData> color = ImportFromMemory(png, UncompressedColor, "BlackWhite.png");
 			REQUIRE(color->Mips.size() == 2);
 			// The mean of black and white is 0.5 in linear light: 188 in sRGB.
 			const std::array<uint8_t, 4> srgb = GetTexel(*color, 1, 0, 0);
@@ -280,7 +343,7 @@ namespace Engine {
 			CHECK(srgb[0] <= 189);
 			CHECK(srgb[3] == 255);
 
-			const AssetRef<TextureData> linear = ImportFromMemory(png, { .Usage = TextureUsage::Linear, .GenerateMips = true }, "BlackWhite.png");
+			const AssetRef<TextureData> linear = ImportFromMemory(png, UncompressedLinear, "BlackWhite.png");
 			CHECK(linear->Format == TextureFormat::RGBA8Unorm);
 			const std::array<uint8_t, 4> stored = GetTexel(*linear, 1, 0, 0);
 			CHECK(stored[0] >= 127);
@@ -289,14 +352,19 @@ namespace Engine {
 
 		TEST_CASE("TextureImporter: without GenerateMips only the base level is cooked")
 		{
-			const AssetRef<TextureData> texture = ImportFromMemory(Test::MakeTestPng(8, 4, 1), { .Usage = TextureUsage::Color, .GenerateMips = false }, "Flat.png");
+			const AssetRef<TextureData> texture = ImportFromMemory(Test::MakeTestPng(8, 4, 1),
+				{ .Usage = TextureUsage::Color, .GenerateMips = false, .Compression = TextureCompression::None }, "Flat.png");
 			CHECK(texture->Mips.size() == 1);
 			CHECK(texture->Pixels.size() == 8 * 4 * 4);
+			// Compressed, the base level alone holds its 2 x 1 BC7 blocks.
+			const AssetRef<TextureData> compressed = ImportFromMemory(Test::MakeTestPng(8, 4, 1), { .Usage = TextureUsage::Color, .GenerateMips = false }, "Flat.png");
+			CHECK(compressed->Mips.size() == 1);
+			CHECK(compressed->Pixels.size() == 2 * 16);
 		}
 
 		TEST_CASE("TextureImporter: odd sizes round every mip level down to 1x1")
 		{
-			const AssetRef<TextureData> texture = ImportFromMemory(ReadTextureFixture("Rgb.png"), ColorSettings, "Rgb.png");
+			const AssetRef<TextureData> texture = ImportFromMemory(ReadTextureFixture("Rgb.png"), UncompressedColor, "Rgb.png");
 			REQUIRE(texture->Mips.size() == 3);
 			CHECK(texture->Mips[1].Width == 3);
 			CHECK(texture->Mips[1].Height == 2);
@@ -307,7 +375,7 @@ namespace Engine {
 
 		TEST_CASE("TextureImporter: PNG, BMP and TGA variants decode to the expected RGBA texels")
 		{
-			const TextureImportSettings flat{ .Usage = TextureUsage::Linear, .GenerateMips = false };
+			const TextureImportSettings flat{ .Usage = TextureUsage::Linear, .GenerateMips = false, .Compression = TextureCompression::None };
 
 			const AssetRef<TextureData> grey = ImportFromMemory(ReadTextureFixture("Grey.png"), flat, "Grey.png");
 			CHECK(GetTexel(*grey, 0, 1, 2) == std::array<uint8_t, 4>{ 153, 153, 153, 255 });
@@ -346,7 +414,7 @@ namespace Engine {
 
 		TEST_CASE("TextureImporter: baseline JPEGs decode close to their source colours")
 		{
-			const AssetRef<TextureData> photo = ImportFromMemory(ReadTextureFixture("Photo.jpg"), ColorSettings, "Photo.jpg");
+			const AssetRef<TextureData> photo = ImportFromMemory(ReadTextureFixture("Photo.jpg"), UncompressedColor, "Photo.jpg");
 			CHECK(photo->Width == 16);
 			CHECK(photo->Height == 16);
 			CHECK(photo->Mips.size() == 5);
@@ -360,7 +428,7 @@ namespace Engine {
 				CHECK(texel[3] == 255);
 			}
 
-			const AssetRef<TextureData> grey = ImportFromMemory(ReadTextureFixture("GreyPhoto.jpg"), ColorSettings, "GreyPhoto.jpg");
+			const AssetRef<TextureData> grey = ImportFromMemory(ReadTextureFixture("GreyPhoto.jpg"), UncompressedColor, "GreyPhoto.jpg");
 			CHECK(grey->Width == 8);
 			const std::array<uint8_t, 4> texel = GetTexel(*grey, 0, 5, 5);
 			CHECK(texel[0] == texel[1]);
@@ -373,7 +441,7 @@ namespace Engine {
 			// (200 + 3x, 64 + 12x, 32), the right one a cool vertical ramp (40, 96 + 16y, 160 + 10y).
 			Test::AssetTestFixture fixture;
 			fixture.WriteProjectFile("Assets/Textures/Baseline.jpeg", ReadTextureFixture("Baseline.jpeg"));
-			Result<ImportResult> imported = ImportTexture(fixture, "Assets/Textures/Baseline.jpeg", "Color");
+			Result<ImportResult> imported = ImportTexture(fixture, "Assets/Textures/Baseline.jpeg", "Color", "None");
 			REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
 			CHECK(imported->Diagnostics.empty());
 			const AssetRef<TextureData> texture = LoadMainTexture(*imported);
@@ -396,7 +464,7 @@ namespace Engine {
 			CHECK(near(cool[2], 180));
 			CHECK(cool[3] == 255);
 			// The extension changes nothing about the decode: the same bytes cook identically from memory.
-			const Result<Buffer> fromMemory = TextureImporter::ImportTextureFromMemory(ReadTextureFixture("Baseline.jpeg"), ColorSettings, "Baseline.jpg");
+			const Result<Buffer> fromMemory = TextureImporter::ImportTextureFromMemory(ReadTextureFixture("Baseline.jpeg"), UncompressedColor, "Baseline.jpg");
 			REQUIRE_MESSAGE(fromMemory.has_value(), fromMemory.error().ToString());
 			CHECK(*fromMemory == imported->Artifacts.front().Cooked);
 		}
@@ -415,15 +483,19 @@ namespace Engine {
 				REQUIRE(encoded.has_value());
 				for (const TextureUsage usage : { TextureUsage::Color, TextureUsage::Linear, TextureUsage::NormalMap })
 				{
-					const TextureImportSettings settings{ .Usage = usage, .GenerateMips = true };
-					const Result<Buffer> first = TextureImporter::ImportTextureFromMemory(*encoded, settings, path);
-					const Result<Buffer> second = TextureImporter::ImportTextureFromMemory(*encoded, settings, path);
-					REQUIRE_MESSAGE(first.has_value(), first.error().ToString());
-					REQUIRE(second.has_value());
-					CHECK(*first == *second);
-					const Result<AssetRef<TextureData>> texture = LoadCookedTexture(*first);
-					REQUIRE(texture.has_value());
-					CHECK((*texture)->Mips.size() == ComputeFullMipCount((*texture)->Width, (*texture)->Height));
+					for (const TextureCompression compression : { TextureCompression::Auto, TextureCompression::None })
+					{
+						const TextureImportSettings settings{ .Usage = usage, .GenerateMips = true, .Compression = compression };
+						const Result<Buffer> first = TextureImporter::ImportTextureFromMemory(*encoded, settings, path);
+						const Result<Buffer> second = TextureImporter::ImportTextureFromMemory(*encoded, settings, path);
+						REQUIRE_MESSAGE(first.has_value(), first.error().ToString());
+						REQUIRE(second.has_value());
+						CHECK(*first == *second);
+						const Result<AssetRef<TextureData>> texture = LoadCookedTexture(*first);
+						REQUIRE(texture.has_value());
+						CHECK((*texture)->Mips.size() == ComputeFullMipCount((*texture)->Width, (*texture)->Height));
+						CHECK(GetTextureBlockCodec((*texture)->Format).has_value() == (compression == TextureCompression::Auto));
+					}
 				}
 			}
 		}
@@ -441,8 +513,26 @@ namespace Engine {
 			REQUIRE(settings != nullptr);
 			CHECK(settings->FindField("Usage") != nullptr);
 			CHECK(settings->FindField("GenerateMips") != nullptr);
+			CHECK(settings->FindField("Compression") != nullptr);
 			REQUIRE(fixture.GetRegistry().FindEnum<TextureUsage>() != nullptr);
 			CHECK(fixture.GetRegistry().FindEnum<TextureUsage>()->GetEntries().size() == 3);
+			REQUIRE(fixture.GetRegistry().FindEnum<TextureCompression>() != nullptr);
+			CHECK(fixture.GetRegistry().FindEnum<TextureCompression>()->GetEntries().size() == 2);
+
+			// M23 (decision 13): a .meta written before version 2 has no Compression and imports as Auto; None and Auto are
+			// read by name, anything else fails.
+			const auto importedFormat = [&fixture](std::optional<std::string_view> compression)
+			{
+				Result<ImportResult> imported = ImportTexture(fixture, "Assets/Tile.png", "Color", compression);
+				REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+				return LoadMainTexture(*imported)->Format;
+			};
+			CHECK(importedFormat(std::nullopt) == TextureFormat::BC7Srgb);
+			CHECK(importedFormat("Auto") == TextureFormat::BC7Srgb);
+			CHECK(importedFormat("None") == TextureFormat::RGBA8Srgb);
+			Result<ImportResult> lossy = ImportTexture(fixture, "Assets/Tile.png", "Color", "Lossy");
+			REQUIRE_FALSE(lossy.has_value());
+			CHECK(lossy.error().GetCode() == ErrorCode::Validation);
 		}
 	}
 

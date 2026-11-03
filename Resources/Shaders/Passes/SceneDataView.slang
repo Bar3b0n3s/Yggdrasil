@@ -1,16 +1,23 @@
+// SceneDataView: the data views' composite (Architecture §8.3; RenderDebugView AO 6, ShadowCascades 7, Overdraw 8 and
+// LightCount 9) into LdrColor, unencoded.
+
+#include "Shared/LightClusterConstants.h"
 #include "Shared/ViewConstants.h"
 #include "Shared/Private/SceneDataViewConstants.h"
+#include "Common/LightClusters.slang"
 #include "Common/Shadows.slang"
 
 import Common.Gtao;
 
 ConstantBuffer<ViewConstants> View : register(b0, space0);
 ConstantBuffer<ShadowConstants> Shadows : register(b1, space0);
+ConstantBuffer<LightClusterConstants> Clusters : register(b2, space0);
 Texture2D<float> SceneDepth : register(t0, space0);
 Texture2D<float> Occlusion : register(t1, space0);
 Texture2D<float> ViewDepth : register(t2, space0);
 Texture2D<float2> SceneNormals : register(t3, space0);
 Texture2D<float4> Coverage : register(t4, space0);
+StructuredBuffer<uint> LightClusterMasks : register(t5, space0);
 [[vk::push_constant]] ConstantBuffer<SceneDataViewConstants> DataView;
 [vk::image_format("rgba8")]
 RWTexture2D<float4> Output : register(u0, space0);
@@ -41,6 +48,21 @@ void CSMain(uint3 thread : SV_DispatchThreadID)
 		else if (count >= 3.0) color = float3(0, 1, 0);
 		else if (count >= 2.0) color = float3(0, 1, 1);
 		else if (count >= 1.0) color = float3(0, 0, 1);
+	}
+	else if (DataView.Options.x == 9 && depth > 0.0)
+	{
+		// LightCount (M23): the lights of the pixel's cluster, or of the whole list when the forward passes loop over every
+		// light (LightClusterModeBruteForce).
+		const float viewDepth = View.ProjectionKind == ProjectionKindOrthographic ? View.Far - depth * (View.Far - View.Near) : View.Near / depth;
+		uint count = View.LightCount;
+		if (Clusters.Mode.x == LightClusterModeClustered)
+		{
+			const uint offset = GetLightClusterIndex(Clusters, pixel, viewDepth) * Clusters.Grid.w;
+			count = 0;
+			for (uint word = 0; word < Clusters.Grid.w; ++word)
+				count += countbits(LightClusterMasks[offset + word]);
+		}
+		color = GetLightCountDebugColor(count);
 	}
 	Output[pixel] = float4(color, 1.0);
 }

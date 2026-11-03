@@ -1,11 +1,15 @@
 #include "TestsPCH.h"
 #include "Engine/Scripting/ScriptTestHost.h"
 
+#include "Engine/Asset/AudioClipData.h"
+#include "Engine/Audio/AudioDecoder.h"
+#include "Engine/Core/Hash.h"
 #include "Engine/Platform/Input/KeyCodes.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Scripting/ScriptLimits.h"
 #include "Engine/Scripting/TaskScheduler.h"
+#include "Support/AudioTestData.h"
 #include "Support/ExpectLog.h"
 #include "Support/ScriptTestFixture.h"
 
@@ -13,7 +17,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <format>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -369,6 +375,49 @@ end))");
 			CaptureCoverage(fixture, mode, snapshots);
 		}
 
+		// Test.GetAudioClipDigest of an encoded clip (its samples as DecodeEncodedAudio returns them) and of a Pcm16 one (each
+		// sample divided by 32768), and its error for an asset that is no AudioClip.
+		void RunAudioClipDigestScenario(RunModes mode, std::vector<ScriptApiCoverage>& snapshots)
+		{
+			TestServices services;
+			Test::ScriptTestFixture fixture({ .Mode = mode, .TestMode = true, .TestHost = &services });
+			const Test::TestToneSpecification tone{ .SampleRate = 22050, .ChannelCount = 2, .FrameCount = 2205, .Frequency = 440.0, .Amplitude = 0.5 };
+			auto wav = CreateRef<AudioClipData>();
+			wav->Encoding = AudioClipEncoding::Wav;
+			wav->SampleRate = tone.SampleRate;
+			wav->ChannelCount = tone.ChannelCount;
+			wav->FrameCount = tone.FrameCount;
+			wav->Bytes = Test::MakeToneWav(tone);
+			auto pcm = CreateRef<AudioClipData>();
+			pcm->Encoding = AudioClipEncoding::Pcm16;
+			pcm->SampleRate = tone.SampleRate;
+			pcm->ChannelCount = tone.ChannelCount;
+			pcm->FrameCount = tone.FrameCount;
+			pcm->Bytes = Test::MakeTonePcm16Bytes(tone);
+			fixture.GetAssetManager().Publish(AssetHandle(0xa0d1), wav, "Assets/Audio/Tone.wav");
+			fixture.GetAssetManager().Publish(AssetHandle(0xa0d2), pcm, "Assets/Audio/Tone.sfx");
+			REQUIRE(fixture.AddScript(UUID(735), "Assets/Scripts/NotAudio.luau", "return {}"));
+			REQUIRE(fixture.Start());
+
+			const Result<DecodedAudio> decoded = DecodeEncodedAudio(wav->Bytes);
+			REQUIRE(decoded.has_value());
+			std::vector<float> pcmSamples;
+			for (const int16_t sample : Test::MakeTonePcm16(tone))
+				pcmSamples.push_back(static_cast<float>(sample) / 32768.0f);
+			const auto digest = [](std::span<const float> samples)
+			{
+				return std::format("{:016x}", XXH64(std::as_bytes(samples)));
+			};
+			CheckTrue(fixture, std::format(R"(
+assert(Test.GetAudioClipDigest(Assets.Load("Assets/Audio/Tone.wav"))=="{}")
+assert(Test.GetAudioClipDigest(Assets.Load("Assets/Audio/Tone.sfx"))=="{}")
+assert(not pcall(Test.GetAudioClipDigest,Assets.Load("Assets/Scripts/NotAudio.luau")))
+return true
+)",
+								   digest(decoded->Samples), digest(pcmSamples)));
+			CaptureCoverage(fixture, mode, snapshots);
+		}
+
 	}
 
 	namespace Test {
@@ -380,6 +429,7 @@ end))");
 			RunWaitsScenario(mode, snapshots);
 			RunInputScenario(mode, snapshots);
 			RunClaimsScenario(mode, snapshots);
+			RunAudioClipDigestScenario(mode, snapshots);
 		}
 
 	}
@@ -678,6 +728,14 @@ end))");
 			CHECK_FALSE(fixture.GetEngine()->ResumeCase(thread));
 		}
 
+		// M23 (Docs/Decisions/0034-m23-contract.md decision 18): FeatureTest's AssetFormats suite compares an Ogg Opus clip's
+		// digest in the exported Release and Dist runs with the one AudioDecoderTests commits.
+		TEST_CASE("TestBindings: GetAudioClipDigest hashes an audio clip's samples decoded to 32-bit float")
+		{
+			std::vector<ScriptApiCoverage> snapshots;
+			RunAudioClipDigestScenario(RunModes::Editor, snapshots);
+		}
+
 		TEST_CASE("TestBindings: registry rejects ordinary play and read only mutations before host effects")
 		{
 			SUBCASE("runtime")
@@ -691,6 +749,7 @@ assert(not pcall(Test.Expect,true))
 assert(not pcall(Test.InjectKey,"Space","Down"))
 assert(not pcall(Test.CaptureAudio,1))
 assert(not pcall(Test.GetStateHash))
+assert(not pcall(Test.GetAudioClipDigest,Assets.Load("engine://Audio/Silence")))
 return not ran
 )");
 			}
@@ -715,7 +774,7 @@ return Test.GetStateHash()=="0000000000001234"
 		{
 			Test::ScriptTestFixture fixture;
 			REQUIRE(fixture.Start());
-			const std::array<std::string_view, 21> names{ "Suite", "Case", "Expect", "ExpectEqual", "ExpectNear", "Fail", "Skip", "WaitTicks", "WaitUntil", "ExpectScriptError", "CaptureAudio", "InjectAction", "InjectKey", "InjectMouse", "InjectGamepad", "Screenshot", "ReloadScript", "GetStateHash", "GetLastExtraction", "GetExtractedPosition", "GetScriptErrors" };
+			const std::array<std::string_view, 22> names{ "Suite", "Case", "Expect", "ExpectEqual", "ExpectNear", "Fail", "Skip", "WaitTicks", "WaitUntil", "ExpectScriptError", "CaptureAudio", "InjectAction", "InjectKey", "InjectMouse", "InjectGamepad", "Screenshot", "ReloadScript", "GetStateHash", "GetLastExtraction", "GetExtractedPosition", "GetScriptErrors", "GetAudioClipDigest" };
 			const auto modules = fixture.GetApi().GetModules();
 			const auto found = std::find_if(modules.begin(), modules.end(), [](const auto& group)
 			{

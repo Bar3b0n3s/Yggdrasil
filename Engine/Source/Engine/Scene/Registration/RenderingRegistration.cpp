@@ -1,9 +1,12 @@
 #include "EnginePCH.h"
 #include "Engine/Scene/Components/BuiltinComponents.h"
 
+#include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Random.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/ComponentRegistration.h"
+
+#include <nlohmann/json.hpp>
 
 #include <utility>
 
@@ -79,6 +82,16 @@ namespace Engine {
 				else
 					light.OuterConeAngle = static_cast<float>(MaxSpotConeAngle);
 			}
+		}
+
+		// The PointLight component from version 1 to 2 (M23, R-PLS; Docs/Decisions/0034-m23-contract.md decision 3): writes
+		// "CastShadows": false, a version 1 light casting no shadows, and keeps every other member. Errors: Validation
+		// (located within the component) for a component that is not an object.
+		static Status MigratePointLightV1(Json& component)
+		{
+			ENGINE_TRY(JsonReader(component).ExpectType(JsonType::Object));
+			component["CastShadows"] = false;
+			return {};
 		}
 
 	}
@@ -159,15 +172,18 @@ namespace Engine {
 			.Field("DepthBias", &DirectionalLightComponent::DepthBias, "The shadow depth bias, in shadow-map texels.", { .Min = 0.0 })
 			.Field("NormalBias", &DirectionalLightComponent::NormalBias, "The shadow normal-offset bias, in shadow-map texels.", { .Min = 0.0 });
 
-		RegisterComponent<PointLightComponent>(registry, "PointLight", "A light shining in every direction from the entity (no shadows).")
+		RegisterComponent<PointLightComponent>(registry, "PointLight", "A light shining in every direction from the entity.")
 			.Category("Rendering")
-			.Version(1)
+			.Version(2)
+			.Migration(1, &Utils::MigratePointLightV1)
 			.ColorField("Color", &PointLightComponent::Color, "The linear light colour.", Utils::ColorRange())
 			.Field("Intensity", &PointLightComponent::Intensity, "The unitless brightness multiplied with Color.", { .Min = 0.0 })
 			.Field("Range", &PointLightComponent::Range, "The distance at which the light's falloff reaches zero, in metres.",
 				{ .Min = Utils::MinRenderLength, .Unit = "m" })
-			.Field("SourceRadius", &PointLightComponent::SourceRadius, "The radius of the emitting sphere, in metres; widens highlights.",
-				{ .Min = 0.0, .Unit = "m" });
+			.Field("CastShadows", &PointLightComponent::CastShadows,
+				"Whether the light casts soft shadows (at most four point lights per view; the shadow budget applies).")
+			.Field("SourceRadius", &PointLightComponent::SourceRadius,
+				"The radius of the emitting sphere, in metres; widens highlights and shadow penumbrae.", { .Min = 0.0, .Unit = "m" });
 
 		RegisterComponent<SpotLightComponent>(registry, "SpotLight", "A cone of light shining down the entity's local -Z axis.")
 			.Category("Rendering")

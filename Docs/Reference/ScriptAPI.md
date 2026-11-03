@@ -1034,6 +1034,14 @@ End this case as failed. A case thread, or a task a behaviour spawned (which is 
 
 All modes; Test; pure/read.
 
+### Test.GetAudioClipDigest
+
+`(clip: AssetRef) -> string`
+
+Returns the XXH64 of an audio clip's samples decoded to 32-bit float at its own rate, as 16 hexadecimal digits; test suites only.
+
+All modes; Test; pure/read.
+
 ### Test.GetExtractedPosition
 
 `(entity: Entity) -> vector?`
@@ -2388,7 +2396,15 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 ## PointLight
 
-A light shining in every direction from the entity (no shadows).
+A light shining in every direction from the entity.
+
+### PointLight.CastShadows
+
+`boolean`
+
+Whether the light casts soft shadows (at most four point lights per view; the shadow budget applies).
+
+All modes; Runtime|Test; pure/read; setter mutates.
 
 ### PointLight.Color
 
@@ -2418,7 +2434,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `number`
 
-The radius of the emitting sphere, in metres; widens highlights.
+The radius of the emitting sphere, in metres; widens highlights and shadow penumbrae.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -4050,6 +4066,30 @@ How a camera projects the scene onto the screen.
 
 - `Orthographic`: Parallel projection whose half height is OrthographicSize.
 
+## RenderDebugView
+
+What a view renders instead of the lit image (a debug view).
+
+- `Lit`: The shaded image.
+
+- `Albedo`: The base colour (factor times map), alpha ignored, sRGB-encoded.
+
+- `Normals`: The shading normal (normal-mapped, world space) as N * 0.5 + 0.5.
+
+- `Roughness`: The perceptual roughness (after its 0.045 clamp) as grey.
+
+- `Metallic`: Metallic as grey.
+
+- `Emissive`: The emitted radiance (Emissive times map times EmissiveStrength), clamped to [0, 1], sRGB-encoded.
+
+- `AO`: The final ambient occlusion (GTAO, before the material's occlusion) as grey; white where it is off and on the background.
+
+- `ShadowCascades`: Each surface coloured by the directional shadow cascade its view distance falls in: 1 red, 2 green, 3 blue, 4 yellow, blended across the blend bands; black means no surface, no shadow-casting directional light, or beyond the shadow distance (ShadowDistance or the camera's far clip, whichever is nearer), into which the last cascade fades over the last tenth of that distance. A uniform colour over an orthographic board means it lies in one cascade, which CascadeCount 1 suits.
+
+- `Overdraw`: The fragments each pixel accepted before depth rejection: 1 blue, 2 cyan, 3 green, 4 yellow, 5 or more red; black where none.
+
+- `LightCount`: The number of lights each pixel's light cluster holds, as a heat map.
+
 ## SceneDiffAgainst
 
 What scene.diff compares the open scene with.
@@ -4195,6 +4235,14 @@ Where a text element is placed.
 - `Screen`: On the screen, positioned by Anchor, Pivot and Offset.
 
 - `World`: In the world, at the entity's transform.
+
+## TextureCompression
+
+Whether an imported texture or environment is stored block-compressed for the GPU.
+
+- `Auto`: Compress by usage: BC7 for colour and linear data, BC5 for normal maps; BC6H for an environment's cubes.
+
+- `None`: Keep the texels uncompressed (RGBA8, or RGBA16F for an environment): sprite, tile and UI art.
 
 ## TextureUsage
 

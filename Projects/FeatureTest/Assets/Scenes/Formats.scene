@@ -347,6 +347,34 @@
 			}
 		},
 		{
+			"ID": "014b6f0ce2374ba0",
+			"Name": "Opus",
+			"Parent": "6d538914ccf7cd1a",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"AudioSource": {
+					"Clip": "4ede026c2efd2ab8",
+					"Volume": 1,
+					"Pitch": 1,
+					"Loop": false,
+					"PlayOnStart": false,
+					"Spatial": false,
+					"MinDistance": 1,
+					"MaxDistance": 50,
+					"Attenuation": "Inverse",
+					"Rolloff": 1,
+					"DopplerFactor": 1,
+					"Group": "Sfx"
+				}
+			}
+		},
+		{
 			"ID": "3937542b2353aa57",
 			"Name": "BoxGlb",
 			"Parent": null,

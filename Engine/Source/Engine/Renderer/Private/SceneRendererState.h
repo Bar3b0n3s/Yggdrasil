@@ -10,6 +10,7 @@
 #include "Engine/Renderer/DepthPyramidPass.h"
 #include "Engine/Renderer/FxaaPass.h"
 #include "Engine/Renderer/GtaoPass.h"
+#include "Engine/Renderer/LightClusterPass.h"
 #include "Engine/Renderer/LightClusters.h"
 #include "Engine/Renderer/PassBindingCache.h"
 #include "Engine/Renderer/PointShadowMaps.h"
@@ -26,7 +27,6 @@
 #include "Engine/Renderer/TextRenderer.h"
 #include "Engine/Renderer/TonemapPass.h"
 #include "Engine/Renderer/UpscalePass.h"
-#include "Shared/DrawConstants.h"
 #include "Shared/EnvironmentConstants.h"
 #include "Shared/InstanceRecord.h"
 #include "Shared/LightClusterConstants.h"
@@ -55,7 +55,13 @@ namespace Engine {
 			nvrhi::IBindingSet* Material = nullptr; // held by the renderer's material cache for the render
 			uint32_t ForwardVariant = 0;
 			uint32_t PrepassVariant = 0; // opaque draws only
-			DrawConstants Constants{};
+			// M23 (C23.1, R-INST; Docs/Decisions/0034-m23-contract.md decision 2): the draw's instance record (its world matrix,
+			// pick id and draw flags) at index Instance of the view's Instances buffer, and the instanced draw it belongs to: a
+			// draw that starts one has Batch, the number of its draws (itself and the next Batch - 1 draws of its list, whose
+			// records follow its own); the others have 0. Set by the Prepare stage after sorting (GroupMeshInstances, or 1 for
+			// every draw without instancing).
+			uint32_t Instance = 0;
+			uint32_t Batch = 1;
 			// Sort keys (§8.3 pass 1).
 			AssetHandle MaterialHandle{};
 			AssetHandle Mesh{};
@@ -158,7 +164,7 @@ namespace Engine {
 			RenderOutputMapping Output{};
 			RenderDebugView DebugView = RenderDebugView::Lit;
 			bool IsLit = true;       // DebugView == Lit
-			bool IsDataView = false; // AO, ShadowCascades or Overdraw
+			bool IsDataView = false; // AO, ShadowCascades, Overdraw or LightCount
 			bool IsOverdraw = false;
 			bool Wireframe = false; // Lit with RenderViewFlags::Wireframe
 			bool Picking = false;   // RenderViewFlags::Picking
@@ -206,6 +212,12 @@ namespace Engine {
 			// Set by the HdrPost stage: the bloom chain's result for the Tonemap stage (null without bloom) and its intensity.
 			nvrhi::ITexture* Bloom = nullptr;
 			float BloomIntensity = 0.0f;
+			// M23 (C23.1, R-INST; Docs/Decisions/0034-m23-contract.md decision 2): set by the Prepare stage with the view's
+			// instance records (SceneRenderer::State::Instances, after the camera's draws'): the shadow casters the Shadows stage
+			// records (ShadowPass::PrepareCasters; empty without a planned shadow) and the selection mask's draws the
+			// EditorOverlay stage records (SelectionPass::PrepareDraws; empty without frame.Selection).
+			ShadowCasterSet ShadowCasters{};
+			SelectionDrawSet SelectionDraws{};
 
 			// Keeps `result` when it is the render's first error.
 			void KeepFirstError(Status result)
@@ -235,12 +247,17 @@ namespace Engine {
 		nvrhi::TextureHandle BlackCube{};
 		nvrhi::TextureHandle EmptyCascades{};
 		nvrhi::TextureHandle EmptyAtlas{};
+		// M23 (R-PLS): the neutral PointShadowMaps (t12) of a view without a planned point light (SceneRenderer.cpp).
+		nvrhi::TextureHandle EmptyPointShadows{};
 		nvrhi::TextureHandle WhiteAo{};
 		nvrhi::TextureHandle FarDepth{};
 		nvrhi::SamplerHandle ShadowCompare{};
 		Scope<ShadowPass> Shadows{};
 		Scope<DepthPyramidPass> DepthPyramid{};
 		Scope<GtaoPass> Gtao{};
+		// M23 (C23.1, Docs/Decisions/0034-m23-contract.md decision 5; stream C): the LightClusters pass (the placement rule's
+		// place 1).
+		Scope<LightClusterPass> LightClusters{};
 		Scope<SelectionPass> Selection{};
 		// The passes the set owns (SceneRenderer.h).
 		Scope<SkyboxPass> Skybox;
@@ -285,6 +302,7 @@ namespace Engine {
 		PassBindingCache GtaoBindings{};
 		PassBindingCache SelectionBindings{};
 		PassBindingCache DataViewBindings{};
+		PassBindingCache LightClusterBindings{}; // M23 (stream C): the LightClusters pass's sets
 		Scope<RenderTargetPool> TargetPool{};
 		Scope<AsyncPicker> Picker{};
 		Scope<GpuProfiler> Profiler{};
@@ -341,8 +359,9 @@ namespace Engine {
 		std::vector<Detail::SceneRendererDraw> TransparentDraws{};
 		std::vector<ShaderLight> Lights{};
 		bool LightLimitLogged = false; // RENDER_LIGHT_LIMIT_EXCEEDED is logged once per renderer
-		// M23 (C23.1): the view's instance records, reused by every Render (stream A), and RENDER_POINT_SHADOW_BUDGET logged
-		// once per renderer (stream B).
+		// M23 (C23.1): the view's instance records, reused by every Render (stream A: the opaque draws', then the transparent
+		// draws', the shadow casters' and the selection's, written into InstanceBuffer by RecordViewSetup), and
+		// RENDER_POINT_SHADOW_BUDGET logged once per renderer (stream B).
 		std::vector<InstanceRecord> Instances{};
 		bool PointShadowLimitLogged = false;
 		SceneRenderStats Stats{};
@@ -355,7 +374,9 @@ namespace Engine {
 
 		// The targets of `width` x `height` with their framebuffers.
 		[[nodiscard]] Result<Detail::SceneRendererTargets> CreateTargets(uint32_t width, uint32_t height) const;
-		[[nodiscard]] Status EnsureFrameTargets(bool picking, bool ao, bool halfAo, uint32_t shadowSize, bool spots, bool selection, bool overdraw);
+		// `pointShadowFaceSize`: the PointShadowMaps' face size while a point light is planned (GetPointShadowFaceSize), else 0.
+		[[nodiscard]] Status EnsureFrameTargets(bool picking, bool ao, bool halfAo, uint32_t shadowSize, bool spots, uint32_t pointShadowFaceSize,
+			bool selection, bool overdraw);
 		// Clears every binding-set cache that references the targets.
 		void ClearTargetBindings();
 		// Clears every binding-set cache and the material sets: Render calls it before its first recording with a new
@@ -366,18 +387,24 @@ namespace Engine {
 		// Detail::SceneRendererMaterial (no set: its draws are skipped) when the mirror lacks GPU objects, which the cache reported.
 		// Errors: those of the material cache's GetOrCreate (Gpu), with the material named.
 		[[nodiscard]] Result<Detail::SceneRendererMaterial> ResolveMaterial(AssetHandle handle);
-		// Pass 1: the draws of `snapshot` seen by `camera` into OpaqueDraws and TransparentDraws, culled, resolved and sorted.
+		// Pass 1: the draws of `snapshot` seen by `camera` into OpaqueDraws and TransparentDraws, culled, resolved and sorted;
+		// then (M23) their instance records into Instances and their instanced draws (SceneRendererDraw's Instance and Batch).
 		// A material of a culled submesh keeps the set it already has while its mirror is current (R-MATSET,
 		// MaterialBindingCache::Keep), so it makes no new set when it re-enters the view; a culled material never gets one.
 		// Returns the first non-finite world matrix's error, after skipping that draw, or a material set's creation error.
 		[[nodiscard]] Status PrepareDraws(const RenderSnapshot& snapshot, const CameraData& camera);
-		// Passes 4, 7 and 9: `draws` with the pipelines of `pass` (the forward ones of `view`) and the view set `viewSet`.
+		// Passes 4, 7 and 9: `draws` with the pipelines of `pass` (the forward ones of `view`) and the view set `viewSet`, one
+		// instanced draw per batch of `draws` (M23, R-INST).
 		void RecordMeshPass(nvrhi::ICommandList& commandList, Detail::SceneRendererMeshPass pass, std::span<const Detail::SceneRendererDraw> draws, nvrhi::IBindingSet& viewSet,
 			RenderDebugView view, RenderPassCounters& counters);
 		// Drops what the render did not use from every binding-set cache.
 		void ReleaseUnusedBindings();
+		// M23 (C23.1, R-INST): grows InstanceBuffer, the view's Instances structured buffer (null after a device loss's
+		// release, so the next Render creates it again), to hold Instances (at least one record, so every set binds a buffer).
+		// Errors: Gpu when the buffer cannot be created (the previous one stays).
+		[[nodiscard]] Status EnsureInstanceBuffer();
 		// What Render records between the Prepare stage and the Deform stage: the per-view constants the Prepare stage made
-		// (frame's View, Environment and Shadow, and the packed Lights), then the clears of SceneColor (the camera's
+		// (frame's View, Environment and Shadow, the packed Lights and the instance records), then the clears of SceneColor (the camera's
 		// ClearColor), SceneDepth (0, the far plane), SceneNormals and, for a picking view, EntityId.
 		void RecordViewSetup(Detail::SceneRendererFrame& frame);
 
@@ -394,6 +421,18 @@ namespace Engine {
 		void RecordShadowsStage(Detail::SceneRendererFrame& frame);
 		void RecordDepthNormalStage(Detail::SceneRendererFrame& frame);
 		void RecordAmbientStage(Detail::SceneRendererFrame& frame);
+		// M23 (C23.1, decision 5; stream C): the end of the Ambient stage. Computes frame.Clusters at the scene resolution,
+		// makes LightClusterConstantsBuffer and grows LightClusterBuffer to the grid (EnsureLightClusterBuffers), then records
+		// the LightClusters pass, which writes the clustered constants, when Quality.ClusteredLights is on, the light list
+		// holds a point or spot light (with directional lights alone every cluster would hold the whole list) and a pass reads
+		// the masks (the Lit view's forward passes with a camera, or the LightCount view); otherwise, or when the pass cannot be
+		// recorded (its error kept), it writes the brute-force constants. Without both buffers (their creation error kept) it
+		// writes nothing, and the forward passes and the data views' composite, which bind them, are skipped.
+		void RecordLightClusters(Detail::SceneRendererFrame& frame);
+		// LightClusterConstantsBuffer when it is null, and LightClusterBuffer when it is null or holds fewer than
+		// `clusterCount` clusters (LightClusterPass's descs), each replacing the member only when its creation succeeded.
+		// Errors: those of GraphicsDevice::CreateBuffer (Gpu).
+		[[nodiscard]] Status EnsureLightClusterBuffers(uint32_t clusterCount);
 		void RecordForwardStage(Detail::SceneRendererFrame& frame);
 		// Reserved for M21's Sprites and Lights2D passes; records nothing in M18.
 		void RecordSpritesStage(Detail::SceneRendererFrame& frame);

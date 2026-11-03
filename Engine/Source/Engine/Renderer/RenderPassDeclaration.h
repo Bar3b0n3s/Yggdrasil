@@ -64,6 +64,7 @@ namespace Engine {
 		inline constexpr std::array<std::string_view, 1> GtaoPrograms = { "Gtao" };
 		inline constexpr std::array<std::string_view, 3> GtaoRows = { "GTAO", "GTAODenoiseHorizontal", "GTAODenoiseVertical" };
 		inline constexpr std::array<std::string_view, 2> GtaoTargets = { "AmbientOcclusion", "AmbientOcclusionScratch" };
+		inline constexpr std::array<std::string_view, 1> LightClustersPrograms = { "LightClusters" };
 		inline constexpr std::array<std::string_view, 1> LightClustersRows = { "LightClusters" };
 		inline constexpr std::array<std::string_view, 1> BrdfLutPrograms = { "BrdfLut" };
 		inline constexpr std::array<std::string_view, 1> ForwardOpaqueRows = { "ForwardOpaque" };
@@ -101,9 +102,9 @@ namespace Engine {
 
 	}
 
-	// The pass list, in stats order (see the file comment). 58 pipelines at startup: M17's 54 plus the QuadBatcher's 2 and the
-	// output stage's 2. M23's C23.1 adds PointShadows and LightClusters at the places phase 2's ledger fixes (ADR 0028), and
-	// C23.3 Skinning, alone in Deform.
+	// The pass list, in stats order (see the file comment). 59 pipelines at startup: M17's 54 plus the QuadBatcher's 2 and the
+	// output stage's 2, and M23's LightClusters 1. M23's C23.1 adds PointShadows and LightClusters at the places phase 2's
+	// ledger fixes (ADR 0028), and C23.3 Skinning, alone in Deform.
 	inline constexpr std::array ScenePassDeclarations = std::to_array<RenderPassDeclaration>({
 		{ .Name = "Prepare", .Stage = RenderStage::Prepare, .StatsRows = Detail::PrepareRows },
 		{ .Name = "Shadows", .Stage = RenderStage::Shadows, .PipelineCount = 6, .Programs = Detail::ShadowPrograms, .StatsRows = Detail::ShadowRows, .Targets = Detail::ShadowTargets },
@@ -114,10 +115,9 @@ namespace Engine {
 		{ .Name = "DepthNormal", .Stage = RenderStage::DepthNormal, .PipelineCount = 12, .Programs = Detail::ScenePrograms, .StatsRows = Detail::DepthNormalRows, .Targets = Detail::DepthNormalTargets },
 		{ .Name = "DepthPyramid", .Stage = RenderStage::Ambient, .PipelineCount = 2, .Programs = Detail::DepthPyramidPrograms, .StatsRows = Detail::DepthPyramidRows, .Targets = Detail::DepthPyramidTargets },
 		{ .Name = "Gtao", .Stage = RenderStage::Ambient, .PipelineCount = 2, .Programs = Detail::GtaoPrograms, .StatsRows = Detail::GtaoRows, .Targets = Detail::GtaoTargets },
-		// M23 (C23.1, decision 5): the cluster masks of the clustered light loop, a per-view buffer (no target). Its compute
-		// pipeline and program, LightClusters, join this declaration with stream C's LightClusterPass (PipelineCount 1), which
-		// makes the startup count 59.
-		{ .Name = "LightClusters", .Stage = RenderStage::Ambient, .StatsRows = Detail::LightClustersRows },
+		// M23 (C23.1, decision 5): the cluster masks of the clustered light loop, a per-view buffer (no target), written by
+		// LightClusterPass's one compute pipeline of the program LightClusters, which makes the startup count 59.
+		{ .Name = "LightClusters", .Stage = RenderStage::Ambient, .PipelineCount = 1, .Programs = Detail::LightClustersPrograms, .StatsRows = Detail::LightClustersRows },
 		// Generates the DFG LUT once at creation (BrdfLut.h); the forward passes read it.
 		{ .Name = "BrdfLut", .Stage = RenderStage::Forward, .PipelineCount = 1, .Programs = Detail::BrdfLutPrograms },
 		// The Lit forward variants, {Opaque, Mask} x the three cull modes; a material debug view adds its own lazily.

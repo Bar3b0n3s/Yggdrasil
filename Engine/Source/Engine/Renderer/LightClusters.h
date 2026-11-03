@@ -9,9 +9,10 @@
 #include <cstdint>
 
 // The cluster grid of the clustered light loop on the CPU (M23, C23.1, R-CLC; Docs/Decisions/0034-m23-contract.md
-// decision 5): the grid the Prepare stage writes into LightClusterConstants (Shared/LightClusterConstants.h) for the
-// LightClusters pass and the forward passes, and the LightCount debug view's palette. Pure, thread-safe and
-// deterministic: the same camera and size give the same grid in every configuration.
+// decision 5): the grid the Ambient stage writes into LightClusterConstants (Shared/LightClusterConstants.h) for the
+// LightClusters pass, the forward passes and the LightCount view (Renderer/LightClusterPass.h), and the LightCount debug
+// view's palette. Pure, thread-safe and deterministic: the same camera and size give the same grid in every configuration
+// (the slicing's logarithms are DetMath's).
 
 namespace Engine {
 
@@ -40,7 +41,10 @@ namespace Engine {
 
 	// The cluster of scene pixel (x, y) at view depth `viewDepth` (positive in front of the camera): the index
 	// (z * TilesY + y / LightClusterTileSize) * TilesX + x / LightClusterTileSize, z the depth's slice clamped to
-	// [0, Slices - 1]. The forward shader computes exactly this (Common/LightLoop.slang). Pure.
+	// [0, Slices - 1]. The forward shader computes the same formula (Common/LightLoop.slang), but in float with the GPU's
+	// log2, where this takes the logarithm in double (DetMath::Log): the two agree away from slice boundaries, and next to
+	// one they may pick adjacent slices, which the LightClusters pass's depth margin covers (it widens each cluster's depth
+	// range by 0.1 %, so a light near a boundary is in both slices' clusters). Pure.
 	[[nodiscard]] uint32_t GetLightClusterIndex(const LightClusterGrid& grid, uint32_t x, uint32_t y, float viewDepth);
 
 	// The LightCount debug view's colour for a cluster holding `count` lights (display-encoded, like GetOverdrawDebugColor):

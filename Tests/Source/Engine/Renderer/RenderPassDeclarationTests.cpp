@@ -12,6 +12,7 @@
 #include "Engine/Renderer/DepthPyramidPass.h"
 #include "Engine/Renderer/FxaaPass.h"
 #include "Engine/Renderer/GtaoPass.h"
+#include "Engine/Renderer/LightClusterPass.h"
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Engine/Renderer/QuadBatcher.h"
 #include "Engine/Renderer/RenderStage.h"
@@ -126,6 +127,8 @@ namespace Engine {
 				== SceneRendererPipelines::DebugViewPipelineCount);
 			CHECK(GetDeclaredPipelineCountOf("DepthPyramid") == DepthPyramidPass::PipelineCount);
 			CHECK(GetDeclaredPipelineCountOf("Gtao") == GtaoPass::PipelineCount);
+			// M23: the cluster masks' compute pipeline.
+			CHECK(GetDeclaredPipelineCountOf("LightClusters") == LightClusterPass::PipelineCount);
 			CHECK(GetDeclaredPipelineCountOf("BrdfLut") == BrdfLut::PipelineCount);
 			CHECK(GetDeclaredPipelineCountOf("Skybox") == SkyboxPass::PipelineCount);
 			CHECK(GetDeclaredPipelineCountOf("QuadBatcher") == QuadBatcher::PipelineCount);
@@ -163,8 +166,9 @@ namespace Engine {
 
 		TEST_CASE("Pipelines: Create makes exactly the declared startup pipelines")
 		{
-			// M18 acceptance (C18.1): the startup count is the declarations' sum, and Create goes through CreatePipelines.
-			static_assert(GetDeclaredPipelineCount() == 58);
+			// M18 acceptance (C18.1): the startup count is the declarations' sum, and Create goes through CreatePipelines. M23's
+			// LightClusters pass makes it 59 (Docs/Decisions/0034-m23-contract.md decision 5).
+			static_assert(GetDeclaredPipelineCount() == 59);
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());

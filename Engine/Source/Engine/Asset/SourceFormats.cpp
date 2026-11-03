@@ -14,6 +14,7 @@ namespace Engine {
 			{ .Importer = "Audio", .Extension = ".flac", .MainType = AssetType::AudioClip, .Importable = true },
 			{ .Importer = "Audio", .Extension = ".mp3", .MainType = AssetType::AudioClip, .Importable = true },
 			{ .Importer = "Audio", .Extension = ".ogg", .MainType = AssetType::AudioClip, .Importable = true },
+			{ .Importer = "Audio", .Extension = ".opus", .MainType = AssetType::AudioClip, .Importable = true },
 			{ .Importer = "Audio", .Extension = ".wav", .MainType = AssetType::AudioClip, .Importable = true },
 			// EnvironmentImporter claims .exr only to refuse it with a hint ("OpenEXR is not supported").
 			{ .Importer = "Environment", .Extension = ".exr", .MainType = AssetType::Environment, .Importable = false },

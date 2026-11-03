@@ -2669,7 +2669,7 @@
 						"type": "string"
 					},
 					"debugView": {
-						"description": "A debug view to render instead of the lit image, ignoring case: \"Lit\" (the default, also for \"\"), \"Albedo\", \"Normals\", \"Roughness\", \"Metallic\", \"Emissive\", \"AO\", \"ShadowCascades\" or \"Overdraw\". A data view stores each value v as round(255 v). ShadowCascades colours each surface by the directional shadow cascade its view distance falls in: 1 red, 2 green, 3 blue, 4 yellow, blended across the blend bands; black means no surface, no shadow-casting directional light, or beyond the shadow distance (ShadowDistance or the camera's far clip, whichever is nearer), into which the last cascade fades over the last tenth of that distance. A uniform colour over an orthographic board means it lies in one cascade, which CascadeCount 1 suits.",
+						"description": "A debug view to render instead of the lit image: a RenderDebugView name, ignoring case (\"Lit\", the default, also for \"\"). A data view stores each value v as round(255 v), except LightCount's heat map: 0 lights black, 1 to 2 blue, 3 to 4 cyan, 5 to 8 green, 9 to 16 yellow, 17 to 32 orange (1, 0.5, 0), more red.",
 						"type": "string"
 					},
 					"annotate": {

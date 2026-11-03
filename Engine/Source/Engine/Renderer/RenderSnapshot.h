@@ -168,9 +168,9 @@ namespace Engine {
 	// no skybox, bloom, FXAA or dither, exposure 1, the Linear tonemapper, and the sRGB OETF only for the colour views
 	// (Albedo, Emissive), so a data view's value v is stored as round(255 v). Overdraw bypasses the forward-depth test
 	// and counts geometric coverage in its dedicated additive pass; it is not a forward shading specialization alone.
-	// AO/ShadowCascades/Overdraw suppress ordinary overlays and text; explicit capture annotations append afterwards.
-	// M9 appends AO, ShadowCascades and Overdraw after
-	// Emissive (Docs/Decisions/0013-m8-decisions.md decision 12).
+	// AO/ShadowCascades/Overdraw/LightCount suppress ordinary overlays and text; explicit capture annotations append
+	// afterwards. M9 appends AO, ShadowCascades and Overdraw after Emissive (Docs/Decisions/0013-m8-decisions.md decision 12),
+	// and M23 LightCount after Overdraw (Docs/Decisions/0034-m23-contract.md decision 5), a data view like them.
 	enum class RenderDebugView : uint8_t
 	{
 		Lit,            // the shaded image
@@ -181,13 +181,16 @@ namespace Engine {
 		Emissive,       // emitted radiance (Emissive times map times EmissiveStrength), clamped to [0, 1]
 		AO,             // final denoised/upscaled GTAO (before materialAO), scalar grey; disabled/background = white
 		ShadowCascades, // receiver cascade index colors, blended/faded exactly like shadow visibility; no allocation = black
-		Overdraw        // accepted fragment count before depth rejection, palette specified in ADR0017; background black
+		Overdraw,       // accepted fragment count before depth rejection, palette specified in ADR0017; background black
+		// M23 (R-CLC): the number of lights the pixel's light cluster holds (LightClusters.h; every light of the list when the
+		// forward passes loop over all of them), in GetLightCountDebugColor's palette; background black
+		LightCount
 	};
 
-	// The number of debug views: RenderDebugView's last enumerator plus one, so the view that M9 appends last is named here.
+	// The number of debug views: RenderDebugView's last enumerator plus one, so the view that M23 appends last is named here.
 	// The view names (RenderDebugViewToString), the forward pipelines per view (SceneRendererPipelines::EnsureDebugView) and
 	// viewport.screenshot's list of valid names all follow it.
-	inline constexpr uint32_t RenderDebugViewCount = static_cast<uint32_t>(RenderDebugView::Overdraw) + 1;
+	inline constexpr uint32_t RenderDebugViewCount = static_cast<uint32_t>(RenderDebugView::LightCount) + 1;
 
 	// Where a TextItem is laid out (TextComponent::Space, §5.3, §8.10).
 	enum class RenderTextSpace : uint8_t
@@ -403,8 +406,8 @@ namespace Engine {
 		// together; the text pass draws the world ones, depth-tested, then the screen ones, §8.3 pass 14).
 		std::pmr::vector<TextItem> Texts{};
 		// M8: the ordinary debug primitives of this view (DebugDrawList.h): M13's scripts through the session's persistent list,
-		// the editor's gizmos. Extraction leaves it empty; its producers append to it. The AO, ShadowCascades and Overdraw data
-		// views leave it out (ADR 0017).
+		// the editor's gizmos. Extraction leaves it empty; its producers append to it. The AO, ShadowCascades, Overdraw and
+		// LightCount data views leave it out (ADR 0017).
 		DebugDrawList DebugDraw{};
 		// M9: the view's annotations (Scene/RenderAnnotations.h: entity labels, bounds, axes and collider outlines, for a capture
 		// or the editor's viewport options). Drawn in every debug view after DebugDraw, data views included.
@@ -449,7 +452,7 @@ namespace Engine {
 	// deterministic (IEEE-exact operations only).
 	[[nodiscard]] glm::vec2 MapViewPointToScenePoint(const RenderOutputMapping& mapping, glm::vec2 viewPoint);
 
-	// Canonical debug-view spelling, including M9's AO, ShadowCascades and Overdraw.
+	// Canonical debug-view spelling, including M9's AO, ShadowCascades and Overdraw and M23's LightCount.
 	[[nodiscard]] std::string_view RenderDebugViewToString(RenderDebugView view);
 
 	// The debug view named `name`, ignoring ASCII case; nullopt for any other name. All enumerated views are supported

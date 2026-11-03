@@ -195,12 +195,15 @@ namespace Engine {
 			return std::move(*bytes);
 		}
 
-		// The format fixtures of Tests/Data/Assets/Audio (ADR 0015 decisions 18 and 25), one per container the decoder knows.
+		// The format fixtures of Tests/Data/Assets/Audio (ADR 0015 decisions 18 and 25), one per container the decoder knows;
+		// Water.opus since M23 (Docs/Decisions/0034-m23-contract.md decision 16): its streams decode through the resource
+		// manager's custom backend, its decoded clips through DecodeEncodedAudio's.
 		constexpr std::string_view AudioFixtures[] = {
 			"Assets/Audio/Tone.wav",
 			"Assets/Audio/Tone.flac",
 			"Assets/Audio/Tone.mp3",
 			"Assets/Audio/Tone.ogg",
+			"Assets/Audio/Water.opus",
 		};
 
 		// `bytes` registered as an Encoded clip under `name`, streamed or decoded at registration; fails the test case on error.

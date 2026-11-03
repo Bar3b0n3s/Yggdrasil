@@ -155,7 +155,7 @@ namespace Engine {
 			});
 			Entity lamp = scene.CreateEntity("Lamp");
 			SetTranslation(lamp, glm::vec3(0.0f, 4.0f, 0.0f));
-			lamp.AddComponent<PointLightComponent>(PointLightComponent{ .Range = 7.0f });
+			lamp.AddComponent<PointLightComponent>(PointLightComponent{ .Range = 7.0f, .CastShadows = true });
 			Entity spot = scene.CreateEntity("Spot");
 			spot.AddComponent<SpotLightComponent>(SpotLightComponent{ .InnerConeAngle = 10.0f, .OuterConeAngle = 25.0f, .CastShadows = true });
 			TransformSystem::Update(scene);
@@ -173,6 +173,7 @@ namespace Engine {
 			CHECK(point.Type == RenderLightType::Point);
 			CHECK(point.Range == 7.0f);
 			CHECK(Test::ApproxEqual(point.Position, glm::vec3(0.0f, 4.0f, 0.0f), 1e-6f));
+			CHECK(point.CastShadows); // PointLight version 2 (M23, R-PLS)
 			const LightData& cone = snapshot->Lights[2];
 			CHECK(cone.Type == RenderLightType::Spot);
 			CHECK(cone.InnerConeAngle == 10.0f);

@@ -383,11 +383,13 @@ namespace Engine {
 		if (frame.Selection)
 		{
 			const SelectionRenderInputs inputs{ .Snapshot = identity ? &snapshot : &overlaySnapshot,
+				.Draws = &frame.SelectionDraws,
+				.Instances = InstanceBuffer,
 				.SceneDepth = identity ? Targets.SceneDepth.Get() : OutputTargets.Depth.Get(),
 				.Mask = identity ? Targets.SelectionMask.Get() : OutputTargets.SelectionMask.Get(),
 				.Scratch = identity ? Targets.SelectionScratch.Get() : OutputTargets.SelectionScratch.Get(),
 				.LdrColor = frame.ViewColor };
-			frame.KeepFirstError(Pipelines->Selection->Record(commandList, recording, SelectionBindings, *Cache, *Assets, inputs));
+			frame.KeepFirstError(Pipelines->Selection->Record(commandList, recording, SelectionBindings, inputs));
 		}
 		// The data views show no ordinary debug primitives (a session's script lines among them), only the view's annotations.
 		DebugDrawList overlays;

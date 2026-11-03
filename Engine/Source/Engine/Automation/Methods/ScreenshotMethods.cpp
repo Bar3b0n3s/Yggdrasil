@@ -252,6 +252,26 @@ namespace Engine {
 			.Entry(ViewportView::Scene, "Scene", "The target scene through the editor's scene-view camera (the editor only).")
 			.Entry(ViewportView::Game, "Game", "The target scene through its primary camera: what the game shows.");
 
+		// The names viewport.screenshot's and viewport.setOptions' debugView take (ParseRenderDebugView, any ASCII case), so
+		// their descriptions name this enum instead of listing the views (M23, Docs/Decisions/0034-m23-contract.md decision 5).
+		registry.Enum<RenderDebugView>("RenderDebugView", "What a view renders instead of the lit image (a debug view).")
+			.Entry(RenderDebugView::Lit, "Lit", "The shaded image.")
+			.Entry(RenderDebugView::Albedo, "Albedo", "The base colour (factor times map), alpha ignored, sRGB-encoded.")
+			.Entry(RenderDebugView::Normals, "Normals", "The shading normal (normal-mapped, world space) as N * 0.5 + 0.5.")
+			.Entry(RenderDebugView::Roughness, "Roughness", "The perceptual roughness (after its 0.045 clamp) as grey.")
+			.Entry(RenderDebugView::Metallic, "Metallic", "Metallic as grey.")
+			.Entry(RenderDebugView::Emissive, "Emissive", "The emitted radiance (Emissive times map times EmissiveStrength), clamped to [0, 1], sRGB-encoded.")
+			.Entry(RenderDebugView::AO, "AO",
+				"The final ambient occlusion (GTAO, before the material's occlusion) as grey; white where it is off and on the background.")
+			.Entry(RenderDebugView::ShadowCascades, "ShadowCascades",
+				"Each surface coloured by the directional shadow cascade its view distance falls in: 1 red, 2 green, 3 blue, 4 yellow, "
+				"blended across the blend bands; black means no surface, no shadow-casting directional light, or beyond the shadow distance "
+				"(ShadowDistance or the camera's far clip, whichever is nearer), into which the last cascade fades over the last tenth of that distance. A uniform "
+				"colour over an orthographic board means it lies in one cascade, which CascadeCount 1 suits.")
+			.Entry(RenderDebugView::Overdraw, "Overdraw",
+				"The fragments each pixel accepted before depth rejection: 1 blue, 2 cyan, 3 green, 4 yellow, 5 or more red; black where none.")
+			.Entry(RenderDebugView::LightCount, "LightCount", "The number of lights each pixel's light cluster holds, as a heat map.");
+
 		registry.Struct<ViewportScreenshotParams>("ViewportScreenshotParams", "The params of viewport.screenshot: a fresh render of a view as a PNG.")
 			.Field("view", &ViewportScreenshotParams::View,
 				"The view to render: \"Game\" (the primary camera) or \"Scene\" (the editor's scene-view camera; not in the Runtime).")
@@ -261,12 +281,9 @@ namespace Engine {
 			.Field("camera", &ViewportScreenshotParams::Camera,
 				"A camera entity of the target scene (an EntityRef) to render through instead of the view's camera.")
 			.Field("debugView", &ViewportScreenshotParams::DebugView,
-				"A debug view to render instead of the lit image, ignoring case: \"Lit\" (the default, also for \"\"), \"Albedo\", "
-				"\"Normals\", \"Roughness\", \"Metallic\", \"Emissive\", \"AO\", \"ShadowCascades\" or \"Overdraw\". A data view stores each value v as round(255 v). "
-				"ShadowCascades colours each surface by the directional shadow cascade its view distance falls in: 1 red, 2 green, 3 blue, 4 yellow, "
-				"blended across the blend bands; black means no surface, no shadow-casting directional light, or beyond the shadow distance "
-				"(ShadowDistance or the camera's far clip, whichever is nearer), into which the last cascade fades over the last tenth of that distance. A uniform "
-				"colour over an orthographic board means it lies in one cascade, which CascadeCount 1 suits.")
+				"A debug view to render instead of the lit image: a RenderDebugView name, ignoring case (\"Lit\", the default, also for \"\"). "
+				"A data view stores each value v as round(255 v), except LightCount's heat map: 0 lights black, 1 to 2 blue, 3 to 4 cyan, "
+				"5 to 8 green, 9 to 16 yellow, 17 to 32 orange (1, 0.5, 0), more red.")
 			.Field("annotate", &ViewportScreenshotParams::Annotate,
 				"Capture-only annotations: labels=all, selection (selected), none or an EntityRef array; colliders, bounds and axes are booleans. Unknown members and invalid references are rejected.")
 			.Field("maxDimension", &ViewportScreenshotParams::MaxDimension, "The larger side of the PNG at most this many pixels.", dimensionMeta)

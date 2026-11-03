@@ -2,7 +2,9 @@
 
 #include "Engine/AssetPipeline/EngineAssetBaker.h"
 
+#include "Engine/Asset/AudioClipData.h"
 #include "Engine/Asset/BuiltinTextures.h"
+#include "Engine/Asset/CookedFormat.h"
 #include "Engine/Asset/EnvironmentData.h"
 #include "Engine/Asset/FontData.h"
 #include "Engine/Asset/TextureData.h"
@@ -429,6 +431,75 @@ namespace Engine {
 			CHECK(Contains(rebaked->Baked, AssetHandle(0x301)));
 			CHECK(environment.Jobs.GetCount() == 3);
 			CHECK(ReadEngineCache(environment.Vfs) == files);
+		}
+
+		// M23 (Docs/Decisions/0034-m23-contract.md decision 20): AudioClipData went to version 2 while SoundEffectImporter kept
+		// its version, so the key of a sound-effect preset did not change and an engine cache baked before M23 holds its version
+		// 1 clip under the current key. The cache treats it as outdated: both the bake run and the first-use path bake it
+		// again, so the editor's built-in and Engine.pak never get a clip the loader refuses.
+		TEST_CASE("EngineAssetBaker: a built-in sound effect cooked before AudioClipData version 2 is baked again")
+		{
+			BakeEnvironment environment;
+			Result<BuiltinAssetCatalog> catalog = BuiltinAssetCatalog::Load(environment.Vfs);
+			REQUIRE_MESSAGE(catalog.has_value(), catalog.error().ToString());
+			const BuiltinAssetEntry* click = catalog->Find(BuiltinAssetHandles::ClickSound);
+			REQUIRE(click != nullptr);
+			const EngineBakeSpecification specification = environment.GetSpecification();
+			Result<std::vector<Buffer>> baked = GetOrBakeEngineAsset(specification, *click);
+			REQUIRE_MESSAGE(baked.has_value(), baked.error().ToString());
+			REQUIRE(baked->size() == 1);
+			const Buffer current = baked->front();
+
+			// The preset's artifact in enginecache://<handle>/<key>.bin, rewritten as a build before M23 cooked it: version 2 is
+			// version 1's layout, so the same payload under the earlier version.
+			const std::string directory = std::format("enginecache://{}/", BuiltinAssetHandles::ClickSound);
+			const auto writeOutdated = [&environment, &directory, &current]()
+			{
+				const Result<CookedArtifactView> view = ReadCookedArtifact(current);
+				REQUIRE(view.has_value());
+				REQUIRE(view->Header.FormatVersion == AudioClipData::FormatVersion);
+				const Buffer outdated = WriteCookedArtifact(AssetType::AudioClip, static_cast<uint16_t>(AudioClipData::FormatVersion - 1),
+					view->Header.ImporterVersion, view->Payload);
+				REQUIRE_FALSE(LoadCookedAudioClip(outdated).has_value());
+				uint32_t written = 0;
+				for (const auto& [path, bytes] : ReadEngineCache(environment.Vfs))
+				{
+					if (!path.starts_with(directory) || !path.ends_with(".bin"))
+						continue;
+					REQUIRE(bytes == current);
+					REQUIRE(environment.Vfs.WriteFileAtomic(Test::ParseVfsPath(path), outdated).has_value());
+					++written;
+				}
+				REQUIRE(written == 1);
+			};
+			const auto cachedArtifact = [&environment, &directory]()
+			{
+				for (auto& [path, bytes] : ReadEngineCache(environment.Vfs))
+				{
+					if (path.starts_with(directory) && path.ends_with(".bin"))
+						return std::move(bytes);
+				}
+				FAIL("the preset has no cached artifact");
+				return Buffer();
+			};
+
+			// The bake run reports it baked, not up to date, and stores the current clip under the same key.
+			writeOutdated();
+			Result<EngineBakeReport> report = BakeEngineAssets(specification, *catalog);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			CHECK(Contains(report->Baked, BuiltinAssetHandles::ClickSound));
+			CHECK_FALSE(Contains(report->UpToDate, BuiltinAssetHandles::ClickSound));
+			CHECK(cachedArtifact() == current);
+
+			// The first-use path (EditorAssetManager's built-ins, the exporter's Engine.pak) serves a clip the loader reads.
+			writeOutdated();
+			Result<std::vector<Buffer>> served = GetOrBakeEngineAsset(specification, *click);
+			REQUIRE_MESSAGE(served.has_value(), served.error().ToString());
+			REQUIRE(served->size() == 1);
+			CHECK(served->front() == current);
+			const Result<AssetRef<AudioClipData>> clip = LoadCookedAudioClip(served->front());
+			CHECK_MESSAGE(clip.has_value(), clip.error().ToString());
+			CHECK(cachedArtifact() == current);
 		}
 
 		TEST_CASE("EngineAssetBaker: identical inputs leave byte-identical caches, whatever the worker count")

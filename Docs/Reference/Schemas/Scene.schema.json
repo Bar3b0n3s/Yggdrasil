@@ -376,7 +376,7 @@
 			"additionalProperties": false
 		},
 		"PointLight": {
-			"description": "A light shining in every direction from the entity (no shadows).",
+			"description": "A light shining in every direction from the entity.",
 			"type": "object",
 			"properties": {
 				"Color": {
@@ -412,8 +412,12 @@
 					"type": "number",
 					"minimum": 0.001
 				},
+				"CastShadows": {
+					"description": "Whether the light casts soft shadows (at most four point lights per view; the shadow budget applies).",
+					"type": "boolean"
+				},
 				"SourceRadius": {
-					"description": "The radius of the emitting sphere, in metres; widens highlights.",
+					"description": "The radius of the emitting sphere, in metres; widens highlights and shadow penumbrae.",
 					"type": "number",
 					"minimum": 0
 				}

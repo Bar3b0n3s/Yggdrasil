@@ -7,7 +7,8 @@
 #include <span>
 #include <string_view>
 
-// Frozen by the M12 contract (Docs/Decisions/0015-m12-decisions.md).
+// Frozen by the M12 contract (Docs/Decisions/0015-m12-decisions.md); version 2 (M23) adds Ogg Opus
+// (Docs/Decisions/0034-m23-contract.md decision 16).
 
 namespace Engine {
 
@@ -28,24 +29,26 @@ namespace Engine {
 		AudioStreamMode Stream = AudioStreamMode::Auto;
 	};
 
-	// WAV, FLAC, MP3 and Ogg Vorbis (Architecture §7.4; .ogg through the stb_vorbis decoder built into miniaudio, approved in
-	// Docs/Decisions/0001-approvals.md, which replaces Appendix C's "OGG rejected with a conversion hint"). The import probes
-	// and validates the whole file with Audio/AudioDecoder (ProbeEncodedAudio: format detected from the bytes, every frame
+	// WAV, FLAC, MP3, Ogg Vorbis and Ogg Opus (Architecture §7.4; .ogg through the stb_vorbis decoder built into miniaudio,
+	// approved in Docs/Decisions/0001-approvals.md, which replaces Appendix C's "OGG rejected with a conversion hint"; Ogg
+	// Opus, .opus or .ogg, through miniaudio's libopus decoding backend since version 2, M23). The import probes and
+	// validates the whole file with Audio/AudioDecoder (ProbeEncodedAudio: format detected from the bytes, every frame
 	// decoded once) and cooks one AudioClipData (CookAudioClip) holding the original bytes unchanged, the probed format,
-	// sample rate, channel count and frame count, and Stream resolved from the settings. A file whose content is another
-	// format than its extension says is imported as what it is. A file the decoder rejects (corrupt, truncated, Ogg Opus,
-	// more than two channels, an unsupported sample rate) is ImportFailed with the decoder's message and hint. Pure function
-	// of (bytes, settings, version); no dependency files.
+	// sample rate (48 kHz for Ogg Opus, its decoding rate), channel count and frame count, and Stream resolved from the
+	// settings. A file whose content is another format than its extension says is imported as what it is. A file the
+	// decoder rejects (corrupt, truncated, another Ogg codec, a chained Ogg Opus file, more than two channels, an
+	// unsupported sample rate) is ImportFailed with the decoder's message and hint. Pure function of (bytes, settings,
+	// version); no dependency files.
 	class AudioImporter final : public IAssetImporter
 	{
 	public:
 		static constexpr std::string_view Id = "Audio";
-		static constexpr uint32_t Version = 1;
+		static constexpr uint32_t Version = 2;
 
 		[[nodiscard]] std::string_view GetId() const override { return Id; }
 		[[nodiscard]] uint32_t GetVersion() const override { return Version; }
 		[[nodiscard]] AssetType GetMainType() const override { return AssetType::AudioClip; }
-		// ".wav", ".flac", ".mp3", ".ogg".
+		// ".wav", ".flac", ".mp3", ".ogg", ".opus".
 		[[nodiscard]] std::span<const std::string_view> GetExtensions() const override;
 		[[nodiscard]] std::string_view GetSettingsTypeName() const override { return "AudioImportSettings"; }
 

@@ -7,11 +7,12 @@
 //   - PSForward (passes 7 and 9) writes linear HDR radiance into SceneColor (RGBA16_FLOAT): the glTF 2.0 metallic-roughness
 //     material (Shared/MaterialConstants.h) shaded with GGX, the height-correlated Smith visibility, Schlick's Fresnel,
 //     Lambert's diffuse and the multi-scatter energy compensation of the DFG LUT (Common/Brdf.slang, Renderer/BrdfLut.h),
-//     perceptual roughness clamped to at least 0.045 and widened by geometric specular anti-aliasing, every light of the
-//     view's light list (Common/Lighting.slang's artist units) and image-based lighting: the environment's SH9 irradiance
-//     and prefiltered specular cube (split sum), or the constant ambient AmbientColor treated as a uniform environment
-//     without a map (Shared/EnvironmentConstants.h), with multi-bounce, specular and horizon occlusion from the material's
-//     occlusion; plus emission. Blend materials output the base colour's alpha for the transparent pass's blending.
+//     perceptual roughness clamped to at least 0.045 and widened by geometric specular anti-aliasing, the lights of the
+//     view's light list that reach the pixel's light cluster (Common/LightLoop.slang, M23; Common/Lighting.slang's artist
+//     units) and image-based lighting: the environment's SH9 irradiance and prefiltered specular cube (split sum), or the
+//     constant ambient AmbientColor treated as a uniform environment without a map (Shared/EnvironmentConstants.h), with
+//     multi-bounce, specular and horizon occlusion from the material's occlusion; plus emission. Blend materials output the
+//     base colour's alpha for the transparent pass's blending.
 // Permutation ALPHA_MASK = 1 is the Mask materials' variant: both entry points drop the fragments below AlphaCutoff by
 // writing a zero SV_Coverage, which keeps the sample's colour and depth unwritten exactly as a discard would. A discard
 // compiles to OpDemoteToHelperInvocation for SPIR-V 1.6, which needs the shaderDemoteToHelperInvocation feature the device
@@ -19,12 +20,23 @@
 // pipelines specialize constant 0 (SceneDebugViewConstantId) with the debug view (Shared/DrawConstants.h): a view other
 // than Lit outputs its quantity, linear, with alpha 1.
 // Vertices are MeshVertex (§6.8): position, normal, tangent (w: the bitangent sign) and texture coordinates at locations
-// 0 to 3. The normal matrix is the cofactor of the world matrix's upper 3x3 (§8.4), negated for a mirroring world
-// (DrawFlagMirrored), whose draws use the CullFront pipelines; front faces are SV_IsFrontFace, inverted when mirrored, and
-// double-sided materials (CullNone) flip the normals of back faces.
+// 0 to 3. Every draw is instanced (M23, R-INST; Docs/Decisions/0034-m23-contract.md decision 2): instance i of a draw is
+// the view's instance record Instances[Draw.FirstInstance + i] (t10, Shared/InstanceRecord.h), whose world matrix places
+// it and whose draw flags (and, for the picking prepass, pick id) the vertex shader hands to the fragment shaders, flat.
+// Three vertex entries transform a vertex with the same NoContraction products, one per set of outputs its fragment
+// shaders read, since the validation layer reports a flat integer output a fragment shader does not read
+// (WARNING-Shader-OutputNotConsumed): VSMain for PSPrepass and PSForward, VSPicking (with the pick id) for PSPicking and
+// VSOverdraw for PSOverdraw, which reads only the position and texture coordinates of MeshVertex, the two attributes the
+// overdraw pipelines bind (as the shadow casters' do), since the layer also reports a vertex attribute the vertex shader
+// does not read. The normal matrix is the
+// cofactor of the world matrix's upper 3x3 (§8.4), negated for a mirroring world (DrawFlagMirrored), whose draws use the
+// CullFront pipelines; front faces are SV_IsFrontFace, inverted when mirrored, and double-sided materials (CullNone) flip
+// the normals of back faces.
 
 #include "Shared/DrawConstants.h"
 #include "Shared/EnvironmentConstants.h"
+#include "Shared/InstanceRecord.h"
+#include "Shared/LightClusterConstants.h"
 #include "Shared/MaterialConstants.h"
 #include "Shared/ShaderLight.h"
 #include "Shared/ViewConstants.h"
@@ -43,6 +55,7 @@ import Common.Gtao;
 ConstantBuffer<ViewConstants> View : register(b0, space0);
 ConstantBuffer<ShadowConstants> Shadows : register(b1, space0);
 ConstantBuffer<EnvironmentConstants> Env : register(b2, space0);
+ConstantBuffer<LightClusterConstants> Clusters : register(b3, space0); // M23: the cluster grid (Common/LightLoop.slang)
 StructuredBuffer<ShaderLight> Lights : register(t0, space0);
 Texture2DArray<float> ShadowMaps : register(t1, space0);
 Texture2D<float> ShadowAtlas : register(t2, space0);
@@ -51,6 +64,9 @@ Texture2D<float2> DfgLut : register(t5, space0);
 Texture2D<float> AmbientOcclusion : register(t6, space0);
 Texture2D<float> LinearViewDepth : register(t8, space0);
 Texture2D<float2> SceneNormals : register(t9, space0);
+StructuredBuffer<InstanceRecord> Instances : register(t10, space0);
+StructuredBuffer<uint> LightClusterMasks : register(t11, space0); // M23: the cluster masks (Renderer/LightClusterPass.h)
+TextureCubeArray<float> PointShadowMaps : register(t12, space0); // M23 (R-PLS): ShadowConstants::Points' cubes
 SamplerState LinearClamp : register(s0, space0);
 SamplerComparisonState ShadowCompare : register(s1, space0);
 SamplerState AnisoWrap : register(s2, space0);
@@ -68,6 +84,9 @@ Texture2D<float4> EmissiveMap : register(t4, space1);
 [vk::constant_id(0)]
 const uint DebugView = 0;
 
+// The forward passes' light loop over the declarations above (M23, Docs/Decisions/0034-m23-contract.md decision 4).
+#include "Common/LightLoop.slang"
+
 struct VertexInput
 {
 	float3 Position : POSITION;
@@ -76,12 +95,36 @@ struct VertexInput
 	float2 TexCoord : TEXCOORD0;
 };
 
+// VSMain's outputs, which PSPrepass and PSForward read.
 struct VertexOutput
 {
 	float4 Position : SV_Position;
 	float3 WorldPosition : WORLDPOSITION;
 	float3 WorldNormal : NORMAL;
 	float4 WorldTangent : TANGENT;
+	float2 TexCoord : TEXCOORD0;
+	// The instance record's draw flags (a fragment shader has no instance index to read the record with).
+	nointerpolation uint Flags : DRAWFLAGS;
+};
+
+// VSPicking's outputs, which PSPicking reads: VSMain's and the instance record's pick id.
+struct PickingVertexOutput
+{
+	VertexOutput Surface;
+	nointerpolation uint EntityId : ENTITYID;
+};
+
+// VSOverdraw's inputs: MeshVertex's position and texture coordinates at locations 0 and 1.
+struct OverdrawVertexInput
+{
+	float3 Position : POSITION;
+	float2 TexCoord : TEXCOORD0;
+};
+
+// VSOverdraw's outputs, which PSOverdraw reads: the position and the texture coordinates of its alpha test.
+struct OverdrawVertexOutput
+{
+	float4 Position : SV_Position;
 	float2 TexCoord : TEXCOORD0;
 };
 
@@ -97,9 +140,9 @@ struct Surface
 	float3 GeometricNormal;    // the interpolated vertex normal, world space, unit, on the same side
 };
 
-bool IsMirrored()
+bool IsMirrored(uint flags)
 {
-	return (Draw.Flags & DrawFlagMirrored) != 0;
+	return (flags & DrawFlagMirrored) != 0;
 }
 
 // `vector` scaled to unit length, or zero for a zero vector (never NaN).
@@ -154,7 +197,11 @@ Surface EvaluateSurface(VertexOutput input, bool isFrontFace)
 	const float2 uv = input.TexCoord * Material.UVScale + Material.UVOffset;
 	const float4 baseColor = BaseColorMap.Sample(AnisoWrap, uv) * Material.BaseColor;
 	const float4 metallicRoughness = MetallicRoughnessMap.Sample(AnisoWrap, uv);
-	const float3 tangentNormal = NormalMap.Sample(AnisoWrap, uv).xyz * 2.0 - 1.0;
+	float3 tangentNormal = NormalMap.Sample(AnisoWrap, uv).xyz * 2.0 - 1.0;
+	// A two-channel normal map (BC5, or the decode fallback's RGBA8 copy of one, MaterialFlagNormalMapTwoChannel) stores x
+	// and y only: z is reconstructed from them, before NormalScale scales x and y, as glTF's unit normals have it.
+	if ((Material.Flags & MaterialFlagNormalMapTwoChannel) != 0)
+		tangentNormal.z = sqrt(saturate(1.0 - dot(tangentNormal.xy, tangentNormal.xy)));
 	const float occlusion = OcclusionMap.Sample(AnisoWrap, uv).r;
 	const float3 emissiveMap = EmissiveMap.Sample(AnisoWrap, uv).rgb;
 
@@ -176,40 +223,10 @@ Surface EvaluateSurface(VertexOutput input, bool isFrontFace)
 	const float3 normal = SafeNormalize(scaled.x * tangent + scaled.y * bitangent + scaled.z * geometricNormal);
 
 	// A back face (only double-sided materials draw them) is shaded with its normals flipped.
-	const bool frontFacing = isFrontFace != IsMirrored();
+	const bool frontFacing = isFrontFace != IsMirrored(input.Flags);
 	surface.Normal = frontFacing ? normal : -normal;
 	surface.GeometricNormal = frontFacing ? geometricNormal : -geometricNormal;
 	return surface;
-}
-
-// The direct light of one light-list entry at `position`.
-float3 ShadeLight(ShaderLight light, float3 position, float3 normal, float3 view, float nDotV, float3 diffuseColor, float3 f0,
-	float3 energyCompensation, float alpha, float3 reflection)
-{
-	if (light.Type == ShaderLightTypeDirectional)
-	{
-		const float3 direction = -light.Direction;
-		return EvaluateDirectLight(normal, view, nDotV, diffuseColor, f0, energyCompensation, alpha, direction, direction, alpha, Pi * light.Radiance);
-	}
-
-	const float3 toLight = light.Position - position;
-	const float distanceSquared = dot(toLight, toLight);
-	const float3 direction = toLight * rsqrt(max(distanceSquared, 1e-12));
-	float attenuation = WindowedInverseSquare(distanceSquared, light.InverseRangeSquared, light.SourceRadius);
-	if (light.Type == ShaderLightTypeSpot)
-		attenuation *= SpotConeAttenuation(dot(-direction, light.Direction), light.SpotCosOuter, light.SpotCosInner);
-	if (attenuation <= 0.0)
-		return float3(0.0);
-
-	float3 specularDirection = direction;
-	float specularAlpha = alpha;
-	if (light.SourceRadius > 0.0)
-	{
-		specularDirection = SphereLightSpecularDirection(toLight, reflection, light.SourceRadius);
-		specularAlpha = SphereLightAlpha(alpha, light.SourceRadius, sqrt(distanceSquared));
-	}
-	return EvaluateDirectLight(normal, view, nDotV, diffuseColor, f0, energyCompensation, alpha, direction, specularDirection, specularAlpha,
-		Pi * light.Radiance * attenuation);
 }
 
 // The quantity a debug view outputs (RenderDebugView), linear.
@@ -226,17 +243,52 @@ float3 GetDebugViewValue(Surface surface)
 	}
 }
 
-[shader("vertex")]
-VertexOutput VSMain(VertexInput input)
+// Instance `instance` of the draw: its record. SV_VulkanInstanceID is gl_InstanceIndex itself, which counts from 0 within
+// the draw since every draw's own first instance is 0; SV_InstanceID would subtract the base instance and need the
+// DrawParameters capability, which needs the shaderDrawParameters device feature.
+InstanceRecord GetInstance(uint instance)
 {
-	const bool mirrored = IsMirrored();
-	const float4 world = MultiplyExact(Draw.World, float4(input.Position, 1.0));
+	return Instances[Draw.FirstInstance + instance];
+}
+
+// The vertex placed by `record`: every vertex entry's position comes from these two products.
+VertexOutput TransformVertex(VertexInput input, InstanceRecord record)
+{
+	const bool mirrored = IsMirrored(record.Flags);
+	const float4 world = MultiplyExact(record.World, float4(input.Position, 1.0));
 	VertexOutput output;
 	output.Position = MultiplyExact(View.ViewProjection, world);
 	output.WorldPosition = world.xyz;
-	output.WorldNormal = mul(MakeNormalMatrix(Draw.World, mirrored), input.Normal);
+	output.WorldNormal = mul(MakeNormalMatrix(record.World, mirrored), input.Normal);
 	// A mirroring world turns the frame's handedness: the bitangent's sign flips with it.
-	output.WorldTangent = float4(mul((float3x3)Draw.World, input.Tangent.xyz), mirrored ? -input.Tangent.w : input.Tangent.w);
+	output.WorldTangent = float4(mul((float3x3)record.World, input.Tangent.xyz), mirrored ? -input.Tangent.w : input.Tangent.w);
+	output.TexCoord = input.TexCoord;
+	output.Flags = record.Flags;
+	return output;
+}
+
+[shader("vertex")]
+VertexOutput VSMain(VertexInput input, uint instance : SV_VulkanInstanceID)
+{
+	return TransformVertex(input, GetInstance(instance));
+}
+
+[shader("vertex")]
+PickingVertexOutput VSPicking(VertexInput input, uint instance : SV_VulkanInstanceID)
+{
+	const InstanceRecord record = GetInstance(instance);
+	PickingVertexOutput output;
+	output.Surface = TransformVertex(input, record);
+	output.EntityId = record.EntityId;
+	return output;
+}
+
+[shader("vertex")]
+OverdrawVertexOutput VSOverdraw(OverdrawVertexInput input, uint instance : SV_VulkanInstanceID)
+{
+	const InstanceRecord record = GetInstance(instance);
+	OverdrawVertexOutput output;
+	output.Position = MultiplyExact(View.ViewProjection, MultiplyExact(record.World, float4(input.Position, 1.0)));
 	output.TexCoord = input.TexCoord;
 	return output;
 }
@@ -311,22 +363,10 @@ float4 ShadeForward(VertexOutput input, Surface surface)
 	shadowNormal = shadowNormalLength > 1e-20 ? shadowNormal * rsqrt(shadowNormalLength) : surface.GeometricNormal;
 	shadowNormal *= dot(shadowNormal, surface.GeometricNormal) < 0.0 ? -1.0 : 1.0;
 
-	float3 radiance = float3(0.0);
-	for (uint index = 0; index < View.LightCount; ++index)
-	{
-		const ShaderLight light = Lights[index];
-		float visibility = 1.0;
-		if ((Draw.Flags & DrawFlagReceiveShadows) != 0)
-		{
-			if (light.Type == ShaderLightTypeDirectional && Shadows.Counts.x != 0 && index == Shadows.Counts.z)
-				visibility = SampleDirectionalShadow(ShadowMaps, ShadowCompare, Shadows, input.WorldPosition, shadowNormal, -light.Direction,
-					-mul(View.View, float4(input.WorldPosition, 1.0)).z, uint2(input.Position.xy));
-			else if (light.Type == ShaderLightTypeSpot && Shadows.Counts.y != 0)
-				visibility = SampleSpotShadow(ShadowAtlas, ShadowCompare, Shadows, index, input.WorldPosition, shadowNormal,
-					SafeNormalize(light.Position - input.WorldPosition), uint2(input.Position.xy));
-		}
-		radiance += visibility * ShadeLight(light, input.WorldPosition, normal, view, nDotV, diffuseColor, f0, energyCompensation, alpha, reflection);
-	}
+	// The direct light of the pixel's lights (Common/LightLoop.slang): its cluster's, or every light of the list.
+	const float viewDepth = -mul(View.View, float4(input.WorldPosition, 1.0)).z;
+	float3 radiance = ShadeDirectLights(input.WorldPosition, uint2(input.Position.xy), viewDepth, (input.Flags & DrawFlagReceiveShadows) != 0, shadowNormal,
+		normal, view, nDotV, diffuseColor, f0, energyCompensation, alpha, reflection);
 
 	// Image-based lighting (§8.6), or the constant ambient as a uniform environment.
 	float3 irradiance = Env.AmbientColor;
@@ -367,12 +407,12 @@ struct PickingOutput
 };
 
 [shader("fragment")]
-PickingOutput PSPicking(VertexOutput input, bool isFrontFace : SV_IsFrontFace)
+PickingOutput PSPicking(PickingVertexOutput input, bool isFrontFace : SV_IsFrontFace)
 {
-	const Surface surface = EvaluateSurface(input, isFrontFace);
+	const Surface surface = EvaluateSurface(input.Surface, isFrontFace);
 	PickingOutput output;
 	output.Normal = EncodeOctahedral(SafeNormalize(mul((float3x3)View.View, surface.Normal)));
-	output.EntityId = Draw.EntityId;
+	output.EntityId = input.EntityId;
 	output.Coverage = GetCoverage(surface);
 	return output;
 }
@@ -384,7 +424,7 @@ struct OverdrawOutput
 };
 
 [shader("fragment")]
-OverdrawOutput PSOverdraw(VertexOutput input)
+OverdrawOutput PSOverdraw(OverdrawVertexOutput input)
 {
 	const float alpha = BaseColorMap.Sample(AnisoWrap, input.TexCoord * Material.UVScale + Material.UVOffset).a * Material.BaseColor.a;
 	const bool rejected = (Material.AlphaMode == MaterialAlphaModeMask && alpha < Material.AlphaCutoff)

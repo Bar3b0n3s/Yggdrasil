@@ -23,6 +23,8 @@
 #include "Engine/Renderer/SceneRenderer.h"
 #include "Shared/MaterialConstants.h"
 #include "Support/AssetTestFixture.h"
+#include "Support/BufferCreationFails.h"
+#include "Support/DeviceLossTest.h"
 #include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/InMemoryAssetManager.h"
@@ -30,58 +32,22 @@
 #include "Support/TestOptions.h"
 
 #include <glm/gtc/matrix_transform.hpp>
-#include <vulkan/vulkan.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <format>
 #include <map>
 #include <numeric>
 #include <optional>
 #include <span>
 #include <string>
+#include <vector>
 
 namespace Engine {
-
-	namespace {
-
-		// While alive, the device's index buffer creations fail as out-of-memory without reaching Vulkan (NVRHI's
-		// createBuffer then returns null without a message), and every other buffer is created: the dispatcher's
-		// vkCreateBuffer, which NVRHI calls through, is replaced. Main thread, around the calls under test.
-		class IndexBufferCreationFails
-		{
-		public:
-			IndexBufferCreationFails()
-			{
-				s_CreateBuffer = VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateBuffer;
-				VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateBuffer = &CreateBuffer;
-			}
-
-			~IndexBufferCreationFails()
-			{
-				VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateBuffer = s_CreateBuffer;
-				s_CreateBuffer = nullptr;
-			}
-
-			IndexBufferCreationFails(const IndexBufferCreationFails&) = delete;
-			IndexBufferCreationFails& operator=(const IndexBufferCreationFails&) = delete;
-		private:
-			static VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(VkDevice device, const VkBufferCreateInfo* info, const VkAllocationCallbacks* allocator,
-				VkBuffer* buffer)
-			{
-				if ((info->usage & VK_BUFFER_USAGE_INDEX_BUFFER_BIT) != 0)
-					return VK_ERROR_OUT_OF_DEVICE_MEMORY;
-				return s_CreateBuffer(device, info, allocator, buffer);
-			}
-
-			// The dispatcher's entry point while one is alive, which CreateBuffer, a C function pointer, cannot capture.
-			static inline PFN_vkCreateBuffer s_CreateBuffer = nullptr;
-		};
-
-	}
 
 	// A 2x1 RGBA8 texture whose two texels are `value`.
 	static AssetRef<Asset> MakeTexture(uint8_t value)
@@ -129,28 +95,56 @@ namespace Engine {
 	{
 		// M23 acceptance (R-TEXC-BC, decision 15, stream X): a BC7 texture uploads as BC7 on a device with the
 		// textureCompressionBC feature, and on a device without it through the decode fallback as RGBA8, whose texels are
-		// DecompressTextureBlocks' (Asset/TextureCompression.h), never the placeholder. BC7Unorm is decision 13's value.
+		// DecompressTextureBlocks' (Asset/TextureCompression.h), never the placeholder. BC1 (sRGB) and BC4, which Auto never
+		// chooses but the payload, the upload and the fallback handle (decision 13), take their own formats: BC1Srgb's mirror
+		// is SRGBA8 and BC4's is R8 holding the decoded red channel alone, which samples as (r, 0, 0, 1) as BC4 does. The
+		// TextureFormat values are decision 13's.
 		TEST_CASE("GpuResourceCache: a device without BC support uploads a BC texture through the decode fallback"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
-			constexpr auto BC7Unorm = static_cast<TextureFormat>(8);
 			Buffer rgba;
 			for (uint32_t texel = 0; texel < 8 * 8; ++texel)
 			{
 				for (const uint32_t value : { texel * 4, 255 - texel * 2, (texel * 37) % 256, 255U })
 					rgba.push_back(static_cast<std::byte>(value & 0xFFU));
 			}
-			const Result<Buffer> blocks = CompressTextureBlocks(TextureBlockCodec::BC7, 8, 8, rgba);
-			REQUIRE(blocks.has_value());
-			const Result<Buffer> expected = DecompressTextureBlocks(TextureBlockCodec::BC7, 8, 8, *blocks);
-			REQUIRE(expected.has_value());
-			auto texture = CreateRef<TextureData>();
-			texture->Format = BC7Unorm;
-			texture->Width = 8;
-			texture->Height = 8;
-			texture->Mips = { { .Width = 8, .Height = 8, .Offset = 0, .Size = blocks->size() } };
-			texture->Pixels = *blocks;
-			REQUIRE_MESSAGE(ValidateTextureData(*texture).has_value(), ValidateTextureData(*texture).error().ToString());
+			struct BlockCase
+			{
+				TextureFormat Format = TextureFormat::RGBA8Unorm;
+				TextureBlockCodec Codec = TextureBlockCodec::BC7;
+				nvrhi::Format Native = nvrhi::Format::UNKNOWN;   // the mirror's format with BC support
+				nvrhi::Format Fallback = nvrhi::Format::UNKNOWN; // and through the decode fallback
+			};
+			const std::array<BlockCase, 3> cases = { {
+				{ .Format = TextureFormat::BC7Unorm, .Codec = TextureBlockCodec::BC7, .Native = nvrhi::Format::BC7_UNORM, .Fallback = nvrhi::Format::RGBA8_UNORM },
+				{ .Format = TextureFormat::BC1Srgb, .Codec = TextureBlockCodec::BC1, .Native = nvrhi::Format::BC1_UNORM_SRGB, .Fallback = nvrhi::Format::SRGBA8_UNORM },
+				{ .Format = TextureFormat::BC4Unorm, .Codec = TextureBlockCodec::BC4, .Native = nvrhi::Format::BC4_UNORM, .Fallback = nvrhi::Format::R8_UNORM },
+			} };
+			std::vector<AssetRef<TextureData>> textures;
+			std::vector<Buffer> fallbackTexels;
+			for (const BlockCase& block : cases)
+			{
+				const Result<Buffer> blocks = CompressTextureBlocks(block.Codec, 8, 8, rgba);
+				REQUIRE(blocks.has_value());
+				const Result<Buffer> decoded = DecompressTextureBlocks(block.Codec, 8, 8, *blocks);
+				REQUIRE(decoded.has_value());
+				Buffer expected = *decoded;
+				if (block.Codec == TextureBlockCodec::BC4)
+				{
+					expected.resize(decoded->size() / 4);
+					for (size_t texel = 0; texel < expected.size(); ++texel)
+						expected[texel] = (*decoded)[texel * 4];
+				}
+				fallbackTexels.push_back(std::move(expected));
+				auto texture = CreateRef<TextureData>();
+				texture->Format = block.Format;
+				texture->Width = 8;
+				texture->Height = 8;
+				texture->Mips = { { .Width = 8, .Height = 8, .Offset = 0, .Size = blocks->size() } };
+				texture->Pixels = *blocks;
+				REQUIRE_MESSAGE(ValidateTextureData(*texture).has_value(), ValidateTextureData(*texture).error().ToString());
+				textures.push_back(std::move(texture));
+			}
 
 			for (const bool withBc : { true, false })
 			{
@@ -159,20 +153,30 @@ namespace Engine {
 				ENGINE_REQUIRE_GPU(gpu);
 				CHECK(gpu.GetDevice().GetInfo().TextureCompressionBC == withBc);
 				Test::InMemoryAssetManager assets;
-				assets.Publish(UUID(0x7E57BC7000000001ULL), texture);
 				{
+					// The cache names its path once, at its first block-compressed texture, however many follow.
+					Test::ExpectLog path(LogLevel::Info, withBc ? "upload as their BC blocks" : "the decode fallback");
 					GpuResourceCache cache(gpu.GetDevice(), assets);
-					const GpuTexture& mirror = cache.GetTexture(UUID(0x7E57BC7000000001ULL));
-					REQUIRE(mirror.Texture != nullptr);
-					CHECK_FALSE(mirror.IsPlaceholder);
-					CHECK(mirror.Texture->getDesc().format == (withBc ? nvrhi::Format::BC7_UNORM : nvrhi::Format::RGBA8_UNORM));
-					if (!withBc)
+					Readback readback(gpu.GetDevice());
+					for (size_t index = 0; index < cases.size(); ++index)
 					{
-						Readback readback(gpu.GetDevice());
-						const Result<Image> image = readback.ReadTexture(*mirror.Texture);
-						REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
-						CHECK(image->Pixels == *expected);
+						const BlockCase& block = cases[index];
+						CAPTURE(TextureFormatToString(block.Format));
+						const UUID handle(0x7E57BC7000000001ULL + index);
+						assets.Publish(handle, textures[index]);
+						const GpuTexture& mirror = cache.GetTexture(handle);
+						REQUIRE(mirror.Texture != nullptr);
+						CHECK_FALSE(mirror.IsPlaceholder);
+						CHECK(mirror.Format == block.Format);
+						CHECK(mirror.Texture->getDesc().format == (withBc ? block.Native : block.Fallback));
+						if (!withBc)
+						{
+							const Result<Image> image = readback.ReadTexture(*mirror.Texture);
+							REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
+							CHECK(image->Pixels == fallbackTexels[index]);
+						}
 					}
+					CHECK(path.GetMatchCount() == 1);
 				}
 				gpu.GetDevice().RunGarbageCollection();
 			}
@@ -185,9 +189,9 @@ namespace Engine {
 		// alike (whose RGBA8 mirror of a BC5 texture holds (x, y, 0, 255), so z is reconstructed either way). BC5Unorm is
 		// decision 13's value.
 		TEST_CASE("GpuResourceCache: a material's two-channel normal flag follows its normal map's format when only the texture changes"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
-			constexpr auto BC5Unorm = static_cast<TextureFormat>(7);
+			constexpr auto BC5Unorm = TextureFormat::BC5Unorm;
 			Buffer rgba;
 			for (uint32_t texel = 0; texel < 4 * 4; ++texel)
 			{
@@ -240,6 +244,116 @@ namespace Engine {
 				}
 				gpu.GetDevice().RunGarbageCollection();
 			}
+		}
+
+		// M23 (decisions 7, 10 and 15, stream X): a quad emitting a BC7 sRGB texture and lit through a BC5 normal map, on a
+		// device with BC and through the decode fallback. The cache's BC mirrors (BC7_UNORM_SRGB, BC5_UNORM) and the fallback's
+		// decompressed ones (SRGBA8_UNORM, RGBA8_UNORM) are asset mirrors of the placement rule's place 3, released with the
+		// cache in a device loss and uploaded again by the next Get, so the image after the recovery is byte-identical; the
+		// material keeps its two-channel normal flag through the loss. The two devices' images agree within a few levels: the
+		// GPU's BC decoders and CMP_Core's agree within the formats' tolerance, and the shader reconstructs the normal's z
+		// from x and y either way.
+		TEST_CASE("GpuResourceCache: a device loss drops the BC and fallback mirrors, and the next Get uploads them again"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Buffer colorTexels;
+			Buffer normalTexels;
+			for (uint32_t y = 0; y < 8; ++y)
+			{
+				for (uint32_t x = 0; x < 8; ++x)
+				{
+					for (const uint32_t value : { 32 + x * 28, 40 + y * 24, 200 - (x + y) * 10, 255U })
+						colorTexels.push_back(static_cast<std::byte>(value & 0xFFU));
+					// A bumpy normal map: x and y lean by column and row, z is what a unit vector leaves.
+					for (const uint32_t value : { 96 + x * 9, 160 - y * 9, 255U, 255U })
+						normalTexels.push_back(static_cast<std::byte>(value & 0xFFU));
+				}
+			}
+			const auto makeTexture = [](TextureFormat format, TextureBlockCodec codec, const Buffer& texels)
+			{
+				Result<Buffer> blocks = CompressTextureBlocks(codec, 8, 8, texels);
+				REQUIRE_MESSAGE(blocks.has_value(), blocks.error().ToString());
+				auto texture = CreateRef<TextureData>();
+				texture->Format = format;
+				texture->Width = 8;
+				texture->Height = 8;
+				texture->Mips = { { .Width = 8, .Height = 8, .Offset = 0, .Size = blocks->size() } };
+				texture->Pixels = std::move(*blocks);
+				REQUIRE_MESSAGE(ValidateTextureData(*texture).has_value(), ValidateTextureData(*texture).error().ToString());
+				return texture;
+			};
+			const AssetRef<TextureData> emissive = makeTexture(TextureFormat::BC7Srgb, TextureBlockCodec::BC7, colorTexels);
+			const AssetRef<TextureData> normal = makeTexture(TextureFormat::BC5Unorm, TextureBlockCodec::BC5, normalTexels);
+			const UUID emissiveHandle(0x7E57BC7000000011ULL);
+			const UUID normalHandle(0x7E57BC5000000011ULL);
+
+			std::array<std::vector<std::byte>, 2> images{};
+			for (const bool withBc : { true, false })
+			{
+				CAPTURE(withBc);
+				Test::HeadlessGpuFixture gpu({ .DisableTextureCompressionBC = !withBc });
+				ENGINE_REQUIRE_GPU(gpu);
+				GraphicsDevice& device = gpu.GetDevice();
+				REQUIRE(device.GetInfo().TextureCompressionBC == withBc);
+				Test::SceneRendererIntegrationFixture setup(gpu);
+				setup.Assets().Publish(emissiveHandle, emissive);
+				setup.Assets().Publish(normalHandle, normal);
+				auto material = CreateRef<MaterialData>();
+				material->BaseColor = glm::vec4(0.5f, 0.5f, 0.5f, 1.0f);
+				material->Roughness = 0.6f;
+				material->Emissive = glm::vec3(1.0f);
+				material->EmissiveStrength = 0.25f;
+				material->EmissiveMap = TypedAssetHandle<AssetType::Texture>(emissiveHandle);
+				material->NormalMap = TypedAssetHandle<AssetType::Texture>(normalHandle);
+				setup.Assets().Publish(UUID(8911), material);
+
+				uint64_t frame = 40;
+				Test::DeviceLossTest test;
+				test.Owners = { "GpuResourceCache", "SceneRendererPipelines", "SceneRenderer" };
+				test.Use = [&device, &setup, &frame]() -> Result<std::vector<std::byte>>
+				{
+					RenderSnapshot snapshot = setup.Snapshot();
+					snapshot.FrameIndex = ++frame;
+					snapshot.Lights.push_back(LightData{ .Type = RenderLightType::Directional,
+						.Intensity = 3.0f,
+						.Direction = glm::normalize(glm::vec3(0.3f, -0.4f, -1.0f)) });
+					ENGINE_TRY_ASSIGN(nvrhi::CommandListHandle list, device.CreateCommandList());
+					list->open();
+					const Status rendered = setup.Renderer().Render(*list, snapshot);
+					list->close();
+					setup.Renderer().OnSubmitted(snapshot.FrameIndex, device.ExecuteCommandList(*list));
+					ENGINE_TRY(rendered);
+					Readback readback(device);
+					ENGINE_TRY_ASSIGN(const Image pixels, readback.ReadTexture(*setup.Renderer().GetFinalTexture()));
+					return pixels.Pixels;
+				};
+				const Result<Test::DeviceLossReport> report = Test::RunDeviceLossTest(gpu, test);
+				REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+
+				// After the recovery: the same mirrors' formats, never a placeholder, and the material's flag.
+				const GpuTexture& emissiveMirror = setup.Cache().GetTexture(emissiveHandle);
+				const GpuTexture& normalMirror = setup.Cache().GetTexture(normalHandle);
+				REQUIRE(emissiveMirror.Texture != nullptr);
+				REQUIRE(normalMirror.Texture != nullptr);
+				CHECK_FALSE(emissiveMirror.IsPlaceholder);
+				CHECK_FALSE(normalMirror.IsPlaceholder);
+				CHECK(emissiveMirror.Texture->getDesc().format == (withBc ? nvrhi::Format::BC7_UNORM_SRGB : nvrhi::Format::SRGBA8_UNORM));
+				CHECK(normalMirror.Texture->getDesc().format == (withBc ? nvrhi::Format::BC5_UNORM : nvrhi::Format::RGBA8_UNORM));
+				CHECK((setup.Cache().GetMaterial(UUID(8911)).Flags & MaterialFlagNormalMapTwoChannel) != 0);
+				images[withBc ? 0 : 1] = report->After;
+			}
+
+			REQUIRE(images[0].size() == images[1].size());
+			REQUIRE_FALSE(images[0].empty());
+			int largest = 0;
+			for (size_t index = 0; index < images[0].size(); ++index)
+				largest = std::max(largest, std::abs(std::to_integer<int>(images[0][index]) - std::to_integer<int>(images[1][index])));
+			CHECK(largest <= 3);
+			// The quad is lit and emits, so the comparison is not of two black images.
+			CHECK(std::ranges::any_of(images[0], [](std::byte value)
+			{
+				return std::to_integer<int>(value) > 32;
+			}));
 		}
 
 		// M23 acceptance (R-TEXC-HDR, decisions 14 and 15, stream Y): a BC6H skybox cube uploads as BC6H_UFLOAT on a device with
@@ -695,8 +809,10 @@ namespace Engine {
 		TEST_CASE("HotReload: texture change re-uploads" * doctest::test_suite(Test::GpuSuite))
 		{
 			// An external change of a texture through the editor's asset manager (polled, reimported, swapped, §7.5) gives the
-			// cache a new version: the next GetTexture uploads it and a material using it is rebuilt with the new texture.
-			Test::HeadlessGpuFixture gpu;
+			// cache a new version: the next GetTexture uploads it and a material using it is rebuilt with the new texture. The
+			// PNG imports as BC7 (Compression Auto, M23), which Readback cannot read, so the device has no BC support and the
+			// cache uploads the decoded texels (the decode fallback), which it can.
+			Test::HeadlessGpuFixture gpu({ .DisableTextureCompressionBC = true });
 			ENGINE_REQUIRE_GPU(gpu);
 			GraphicsDevice& device = gpu.GetDevice();
 			Test::AssetTestFixture fixture;
@@ -975,7 +1091,7 @@ namespace Engine {
 			// M18 (C18.3; Docs/Decisions/0029-m18-contract.md decision 39): an upload's command list is executed whatever its
 			// buffers' creations returned. Closed and never executed, it kept itself and the vertex buffer it wrote alive, an
 			// out-of-memory upload (§8.14 item 7: a placeholder and a diagnostic) poisoned every later recovery, whose live
-			// check refused it. The index buffers fail as out-of-memory without reaching Vulkan (IndexBufferCreationFails).
+			// check refused it. The index buffers fail as out-of-memory without reaching Vulkan (Test::BufferCreationFails).
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			GraphicsDevice& device = gpu.GetDevice();
@@ -993,7 +1109,10 @@ namespace Engine {
 			const std::array<uint64_t, GpuResourceTypeCount> before = countLive();
 			{
 				Test::ExpectLog failed(LogLevel::Error, std::string(AssetUploadFailedCode));
-				const IndexBufferCreationFails failing;
+				const Test::BufferCreationFails failing([](const VkBufferCreateInfo& info)
+				{
+					return (info.usage & VK_BUFFER_USAGE_INDEX_BUFFER_BIT) != 0;
+				});
 				const GpuMesh& mesh = cache.GetMesh(BuiltinAssetHandles::CubeMesh);
 				CHECK(mesh.IsPlaceholder);
 				CHECK(mesh.IndexBuffer == nullptr);

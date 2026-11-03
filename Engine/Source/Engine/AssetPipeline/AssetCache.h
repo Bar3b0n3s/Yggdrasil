@@ -36,8 +36,10 @@
 // import knows them; the manifest records what the import read and looked up, and a hit is valid only while every read
 // file still hashes the same and every lookup still finds the same asset (the EditorAssetManager checks with
 // IsManifestCurrent). An entry whose artifacts fail their header or hash check is discarded and rebuilt, never trusted
-// ("AssetCache: corrupted entry is rebuilt"). The EditorAssetManager also keeps its AssetLocations.json at the root of the
-// project cache (EditorAssetManager.h); the cache's own calls never touch it.
+// ("AssetCache: corrupted entry is rebuilt"), and so is one whose artifact holds another payload format version than this
+// build's loader of its type reads (GetCookedFormatVersion, AssetLoaderRegistry.h): a payload format change needs no new
+// key (M23, Docs/Decisions/0034-m23-contract.md decision 20). The EditorAssetManager also keeps its AssetLocations.json at
+// the root of the project cache (EditorAssetManager.h); the cache's own calls never touch it.
 
 namespace Engine {
 
@@ -77,13 +79,17 @@ namespace Engine {
 			const Json& canonicalSettings, uint32_t engineCookVersion);
 
 		// The import of source `source` cached under `key`, every artifact read and validated (ReadCookedArtifact; its type
-		// matching the manifest). nullopt on a miss. A present but corrupted or incomplete entry (an unreadable manifest, a
-		// missing artifact, a failed header or hash check) is removed, logged once at Warn and reported as a miss, so the
-		// caller rebuilds it (§7.5). Errors: Io for a cache that cannot be read at all.
+		// matching the manifest; its FormatVersion the one GetCookedFormatVersion gives its type). nullopt on a miss. A present
+		// but corrupted or incomplete entry (an unreadable manifest, a missing artifact, a failed header or hash check) is
+		// removed, logged once at Warn and reported as a miss, so the caller rebuilds it (§7.5); an outdated one (an artifact
+		// an earlier build cooked at another payload format version, under a key the format change did not change) is removed
+		// and reported as a miss the same way, logged at Info. Every caller that takes a cached artifact without loading it
+		// (the engine cooked cache's bakes, the exporter's Game.pak) therefore never gets one its loader refuses. Errors: Io
+		// for a cache that cannot be read at all.
 		[[nodiscard]] Result<std::optional<CachedImport>> Find(AssetHandle source, uint64_t key) const;
 
 		// One artifact of a cached import, validated like Find (for loading a single sub-asset). nullopt on a miss or a
-		// corrupted file (removed). Errors: Io.
+		// corrupted or outdated file (removed). Errors: Io.
 		[[nodiscard]] Result<std::optional<Buffer>> ReadArtifact(AssetHandle artifact, uint64_t key) const;
 
 		// Stores `import` under (`source`, `key`): every artifact and then the manifest, each written atomically, after which

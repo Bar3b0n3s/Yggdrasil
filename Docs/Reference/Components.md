@@ -16,7 +16,7 @@ Every component of the type registry, in canonical component order: the order of
 | `MeshRenderer` | Rendering | Serializable, ScriptVisible, EditorVisible, Removable | Draws a mesh asset with one material per submesh. |
 | `Camera` | Rendering | Serializable, ScriptVisible, EditorVisible, Removable | Renders the scene from the entity, looking down its local -Z axis. |
 | `DirectionalLight` | Rendering | Serializable, ScriptVisible, EditorVisible, Removable | A sun-like light shining down the entity's local -Z axis. |
-| `PointLight` | Rendering | Serializable, ScriptVisible, EditorVisible, Removable | A light shining in every direction from the entity (no shadows). |
+| `PointLight` | Rendering | Serializable, ScriptVisible, EditorVisible, Removable | A light shining in every direction from the entity. |
 | `SpotLight` | Rendering | Serializable, ScriptVisible, EditorVisible, Removable | A cone of light shining down the entity's local -Z axis. |
 | `Environment` | Rendering | Serializable, ScriptVisible, EditorVisible, Removable, UniquePerScene | The scene's image-based lighting and skybox (one per scene). |
 | `PostProcess` | Rendering | Serializable, ScriptVisible, EditorVisible, Removable, UniquePerScene | The scene's exposure, tone mapping, ambient occlusion, bloom and anti-aliasing (one per scene). |
@@ -269,10 +269,10 @@ Script members of `DirectionalLight`:
 
 ## PointLight
 
-A light shining in every direction from the entity (no shadows).
+A light shining in every direction from the entity.
 
 - Category: Rendering
-- Version: 1
+- Version: 2
 - Flags: Serializable, ScriptVisible, EditorVisible, Removable
 - Requires: none
 - Excludes: none
@@ -282,16 +282,18 @@ A light shining in every direction from the entity (no shadows).
 | `Color` | `Color3` | `[1,1,1]` | 0 to 1 |  |  | The linear light colour. |
 | `Intensity` | `Float` | `10` | >= 0 |  |  | The unitless brightness multiplied with Color. |
 | `Range` | `Float` | `10` | >= 0.001 | m |  | The distance at which the light's falloff reaches zero, in metres. |
-| `SourceRadius` | `Float` | `0.05` | >= 0 | m |  | The radius of the emitting sphere, in metres; widens highlights. |
+| `CastShadows` | `Bool` | `false` |  |  |  | Whether the light casts soft shadows (at most four point lights per view; the shadow budget applies). |
+| `SourceRadius` | `Float` | `0.05` | >= 0 | m |  | The radius of the emitting sphere, in metres; widens highlights and shadow penumbrae. |
 
 Script members of `PointLight`:
 
 | Member | Kind | Signature | Access | Modes | Description |
 |---|---|---|---|---|---|
+| `CastShadows` | proxy field | `boolean` | read/write | All | Whether the light casts soft shadows (at most four point lights per view; the shadow budget applies). |
 | `Color` | proxy field | `Color` | read/write | All | The linear light colour. |
 | `Intensity` | proxy field | `number` | read/write | All | The unitless brightness multiplied with Color. |
 | `Range` | proxy field | `number` | read/write | All | The distance at which the light's falloff reaches zero, in metres. |
-| `SourceRadius` | proxy field | `number` | read/write | All | The radius of the emitting sphere, in metres; widens highlights. |
+| `SourceRadius` | proxy field | `number` | read/write | All | The radius of the emitting sphere, in metres; widens highlights and shadow penumbrae. |
 
 ## SpotLight
 

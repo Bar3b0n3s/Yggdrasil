@@ -11,12 +11,13 @@
 #include <span>
 #include <string_view>
 
-// Audio clip CPU data and its cooked payload (Architecture §6.8 "audio clip: original encoded bytes (WAV/FLAC/MP3) or
-// synthesized PCM", §7.4 AudioImporter and SoundEffectImporter, §10.1 "Clips"). Produced by AudioImporter (the original
+// Audio clip CPU data and its cooked payload (Architecture §6.8 "audio clip: original encoded bytes (WAV, FLAC, MP3, Ogg
+// Vorbis or Ogg Opus) or synthesized PCM", §7.4 AudioImporter and SoundEffectImporter, §10.1 "Clips"). Produced by AudioImporter (the original
 // file's bytes, probed and validated by Audio/AudioDecoder), SoundEffectImporter (Audio/SoundSynth's PCM) and the built-in
 // silent clip; played by Scene/AudioSystem and EditorCore's AudioPreview, which register the bytes with the AudioEngine
 // (MakeAudioClipSource, Scene/AudioSystem.h). The Asset module cannot include Audio (§3), so the encoding enum is its own.
-// Frozen by the M12 contract (Docs/Decisions/0015-m12-decisions.md).
+// Frozen by the M12 contract (Docs/Decisions/0015-m12-decisions.md); M23 appends Opus and makes the payload version 2
+// (Docs/Decisions/0034-m23-contract.md decision 16).
 
 namespace Engine {
 
@@ -27,15 +28,17 @@ namespace Engine {
 		Wav,   // the original files, decoded by miniaudio at play time
 		Flac,
 		Mp3,
-		Vorbis // Ogg Vorbis (stb_vorbis inside miniaudio)
+		Vorbis, // Ogg Vorbis (stb_vorbis inside miniaudio)
+		Opus    // Ogg Opus (miniaudio's libopus decoding backend; M23): 48 kHz, mono or stereo
 	};
 
 	// A loaded audio clip (AssetType::AudioClip). Plain data; immutable once loaded (AssetRef<AudioClipData>).
 	struct AudioClipData : Asset
 	{
 		static constexpr AssetType StaticType = AssetType::AudioClip;
-		// The cooked payload layout below (CookedHeader::FormatVersion).
-		static constexpr uint16_t FormatVersion = 1;
+		// The cooked payload layout below (CookedHeader::FormatVersion): version 2 (M23) is version 1's layout with the
+		// encoding Opus; cooked clips are cache artifacts the importers rebuild, so no reader keeps version 1.
+		static constexpr uint16_t FormatVersion = 2;
 
 		AudioClipData()
 			: Asset(StaticType)
@@ -56,13 +59,13 @@ namespace Engine {
 	// FrameCount / SampleRate in seconds (0 for a SampleRate of 0).
 	[[nodiscard]] double GetAudioClipDuration(const AudioClipData& clip);
 
-	// Checks: a known encoding; SampleRate 8,000 to 192,000; ChannelCount 1 or 2; FrameCount >= 1; Pcm16 with exactly
-	// FrameCount * ChannelCount * 2 bytes and Stream false; an encoded clip with at least one byte. The encoded bytes
-	// themselves are not decoded here (the Asset module has no decoder; AudioImporter probed them, and the AudioEngine reports
-	// a clip it cannot decode). Pure. Errors: Validation naming the first violation.
+	// Checks: a known encoding; SampleRate 8,000 to 192,000, and 48,000 for Opus (its decoding rate); ChannelCount 1 or 2;
+	// FrameCount >= 1; Pcm16 with exactly FrameCount * ChannelCount * 2 bytes and Stream false; an encoded clip with at
+	// least one byte. The encoded bytes themselves are not decoded here (the Asset module has no decoder; AudioImporter
+	// probed them, and the AudioEngine reports a clip it cannot decode). Pure. Errors: Validation naming the first violation.
 	[[nodiscard]] Status ValidateAudioClipData(const AudioClipData& clip);
 
-	// The cooked audio clip payload (FormatVersion 1), little-endian:
+	// The cooked audio clip payload (FormatVersion 2), little-endian:
 	//     uint8 Encoding; uint8 Stream (0 or 1); uint16 Reserved (0); uint32 SampleRate; uint32 ChannelCount;
 	//     uint64 FrameCount; uint64 ByteCount; ByteCount bytes
 	// Asserts ValidateAudioClipData. Pure; identical clips give identical bytes.
@@ -84,7 +87,7 @@ namespace Engine {
 	// 0.1 s of 48 kHz mono Pcm16 zeros (4,800 frames). Pure; the asset managers generate it as a procedural built-in.
 	[[nodiscard]] AudioClipData CreateSilentAudioClip();
 
-	// "Pcm16", "Wav", "Flac", "Mp3", "Vorbis"; "Unknown" outside the enum (asserted).
+	// "Pcm16", "Wav", "Flac", "Mp3", "Vorbis", "Opus"; "Unknown" outside the enum (asserted).
 	[[nodiscard]] std::string_view AudioClipEncodingToString(AudioClipEncoding encoding);
 
 }

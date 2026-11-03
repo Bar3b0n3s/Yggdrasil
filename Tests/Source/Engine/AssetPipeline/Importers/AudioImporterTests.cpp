@@ -19,7 +19,8 @@
 #include <vector>
 
 // The audio importer (Architecture §7.4: WAV, FLAC, MP3 and, approved in Docs/Decisions/0001-approvals.md, Ogg Vorbis;
-// Docs/Decisions/0015-m12-decisions.md decision 10). The import probes through Audio/AudioDecoder and imports the format
+// Docs/Decisions/0015-m12-decisions.md decision 10; Ogg Opus since version 2, Docs/Decisions/0034-m23-contract.md
+// decision 16). The import probes through Audio/AudioDecoder and imports the format
 // fixtures of Tests/Data/Assets/Audio (ADR 0015 decision 18); the first case also checks that RegisterBuiltinImporters
 // registers the importer.
 
@@ -93,6 +94,7 @@ namespace Engine {
 			CHECK(importer.CanImport(".FLAC"));
 			CHECK(importer.CanImport(".mp3"));
 			CHECK(importer.CanImport(".ogg"));
+			CHECK(importer.CanImport(".opus"));
 			CHECK_FALSE(importer.CanImport(".sfx"));
 		}
 
@@ -151,25 +153,32 @@ namespace Engine {
 		// M23 (C23.1, A-OPUS; Docs/Decisions/0034-m23-contract.md decision 16, stream O): AudioImporter version 2 claims .opus
 		// and imports an Ogg Opus file, by its content, as an AudioClipData version 2 clip whose encoding is Opus (5, decision
 		// 16's value), with the original bytes, 48 kHz (Opus's decoding rate) and the file's channel count; it streams, being
-		// longer than 10 seconds.
-		TEST_CASE("AudioImporter: an Ogg Opus file imports with its original bytes as an Opus clip" * doctest::skip(true))
+		// longer than 10 seconds. An Ogg Opus file named .ogg imports the same way.
+		TEST_CASE("AudioImporter: an Ogg Opus file imports with its original bytes as an Opus clip")
 		{
-			constexpr auto OpusEncoding = static_cast<AudioClipEncoding>(5);
 			CHECK(AudioImporter::Version == 2);
 			CHECK(AudioClipData::FormatVersion == 2);
+			CHECK(static_cast<uint8_t>(AudioClipEncoding::Opus) == 5);
 			Test::AssetTestFixture fixture;
 			const IAssetImporter* registered = fixture.GetImporters().FindForExtension(".opus");
 			REQUIRE(registered != nullptr);
 			CHECK(registered->GetId() == AudioImporter::Id);
 			const Buffer bytes = ReadFixture("Assets/Audio/Water.opus");
-			const Result<ImportResult> imported = ImportAudio(fixture, "Water.opus", bytes);
-			REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
-			const AssetRef<AudioClipData> clip = LoadClip(*imported);
-			CHECK(clip->Encoding == OpusEncoding);
-			CHECK(clip->Bytes == bytes);
-			CHECK(clip->SampleRate == 48000);
-			CHECK(clip->ChannelCount == 2);
-			CHECK(clip->Stream);
+			for (const std::string_view name : { "Water.opus", "Water.ogg" })
+			{
+				CAPTURE(std::string(name));
+				const Result<ImportResult> imported = ImportAudio(fixture, name, bytes);
+				REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+				const AssetRef<AudioClipData> clip = LoadClip(*imported);
+				CHECK(clip->Encoding == AudioClipEncoding::Opus);
+				CHECK(clip->Bytes == bytes);
+				CHECK(clip->SampleRate == 48000);
+				CHECK(clip->ChannelCount == 2);
+				CHECK(clip->FrameCount == 1066531);
+				CHECK(clip->Stream);
+				CHECK(imported->Dependencies.empty());
+				CHECK(imported->Diagnostics.empty());
+			}
 		}
 
 		TEST_CASE("AudioImporter: Auto streams clips longer than 10 seconds")

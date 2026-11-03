@@ -42,12 +42,14 @@ namespace Engine {
 		{
 			int32_t bits = 0;
 			if (candidate.HostImageCopy)
-				bits += 8;
+				bits += 16;
 			if (candidate.B10G11R11StorageSupported)
-				bits += 4;
+				bits += 8;
 			if (candidate.DeviceFault)
-				bits += 2;
+				bits += 4;
 			if (candidate.FillModeNonSolid)
+				bits += 2;
+			if (candidate.TextureCompressionBC)
 				bits += 1;
 			return bits;
 		}

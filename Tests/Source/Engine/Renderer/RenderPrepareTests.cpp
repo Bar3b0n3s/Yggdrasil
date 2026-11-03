@@ -5,6 +5,7 @@
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Graphics/Image.h"
+#include "Engine/Graphics/Readback.h"
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Engine/Renderer/RenderStats.h"
 #include "Support/HeadlessGpuFixture.h"
@@ -13,6 +14,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <string_view>
 #include <vector>
 
@@ -179,7 +181,7 @@ namespace Engine {
 
 		// M23 (C23.1, R-INST; Docs/Decisions/0034-m23-contract.md decision 2, stream A): an instanced draw is a maximal run of
 		// adjacent draws with equal keys, so the runs, in order, cover the pass's draws once and in their order.
-		TEST_CASE("RenderPrepare: GroupMeshInstances batches adjacent draws with equal keys, in order" * doctest::skip(true))
+		TEST_CASE("RenderPrepare: GroupMeshInstances batches adjacent draws with equal keys, in order")
 		{
 			const MeshInstanceKey cube{ .Pipeline = 0, .Material = AssetHandle(10), .Mesh = AssetHandle(1), .Submesh = 0 };
 			const MeshInstanceKey cubeTop{ .Pipeline = 0, .Material = AssetHandle(10), .Mesh = AssetHandle(1), .Submesh = 1 };
@@ -205,7 +207,7 @@ namespace Engine {
 		// false). The instanced render records one forward draw per pipeline variant, material and submesh: 2 x 2 x 2 = 8 of
 		// the 48 submesh draws. Without the submesh in the opaque order the two submeshes of each quad would alternate, no two
 		// equal draws would be adjacent, and nothing would batch.
-		TEST_CASE("SceneRenderer: an instanced render is byte-identical to the per-draw render" * doctest::skip(true))
+		TEST_CASE("SceneRenderer: an instanced render is byte-identical to the per-draw render")
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -255,6 +257,52 @@ namespace Engine {
 			CHECK(instanced.Pixels == perDraw.Pixels);
 			CHECK(perDrawDraws == 48);
 			CHECK(instancedDraws == 8);
+		}
+
+		// M23 (R-INST): the picking prepass reads each instance's pick id from its record, so two items of one mesh and
+		// material drawn as one instanced draw write their own ids, as the per-draw render does.
+		TEST_CASE("SceneRenderer: an instanced picking prepass writes each instance's pick id")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu);
+			RenderSnapshot snapshot = setup.Snapshot();
+			snapshot.Flags = RenderViewFlags::Picking;
+			MeshDrawItem left = snapshot.Meshes[0];
+			left.World = glm::translate(glm::mat4(1.0f), glm::vec3(-1.0f, 0.0f, -3.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(0.4f));
+			MeshDrawItem right = left;
+			right.World[3].x = 1.0f;
+			right.Entity = UUID(40);
+			right.PickId = 2;
+			snapshot.Meshes = { left, right };
+			const auto readIds = [&gpu, &setup](const RenderSnapshot& rendered)
+			{
+				setup.Submit(rendered);
+				Readback readback(gpu.GetDevice());
+				auto ids = readback.ReadTexture(*setup.Renderer().GetEntityIdTexture());
+				REQUIRE_MESSAGE(ids.has_value(), ids.error().ToString());
+				return std::move(*ids);
+			};
+			const auto idAt = [](const Image& image, uint32_t x, uint32_t y)
+			{
+				uint32_t id = 0;
+				std::memcpy(&id, image.GetRow(y).data() + static_cast<size_t>(x) * sizeof(id), sizeof(id));
+				return id;
+			};
+			const Image instanced = readIds(snapshot);
+			const RenderStats stats = setup.Renderer().GetRenderStats();
+			const RenderPassStats* depth = Test::SceneRendererIntegrationFixture::FindPass(stats, "DepthNormal");
+			REQUIRE(depth != nullptr);
+			CHECK(depth->DrawCalls == 1);
+			CHECK(depth->Triangles == 4);
+			// The quads' centres, at x = -1 and 1 three metres away with a 60 degree field of view: view pixels 13 and 50.
+			CHECK(idAt(instanced, 13, 32) == 1);
+			CHECK(idAt(instanced, 50, 32) == 2);
+			CHECK(idAt(instanced, 32, 32) == 0);
+			snapshot.Quality.Instancing = false;
+			++snapshot.FrameIndex;
+			const Image perDraw = readIds(snapshot);
+			CHECK(instanced.Pixels == perDraw.Pixels);
 		}
 	}
 

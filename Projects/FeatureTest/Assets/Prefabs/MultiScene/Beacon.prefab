@@ -6,7 +6,7 @@
 	"ComponentVersions": {
 		"Transform": 1,
 		"MeshRenderer": 1,
-		"PointLight": 1
+		"PointLight": 2
 	},
 	"Entities": [
 		{
@@ -32,6 +32,7 @@
 					"Color": [1, 1, 1],
 					"Intensity": 6,
 					"Range": 6,
+					"CastShadows": false,
 					"SourceRadius": 0.05
 				}
 			}

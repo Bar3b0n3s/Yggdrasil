@@ -13,6 +13,7 @@ local ASSETS: { Expected } = {
 	{ Path = "Assets/Formats/Audio/Tone.mp3", Type = "AudioClip" },
 	{ Path = "Assets/Formats/Audio/Tone.ogg", Type = "AudioClip" },
 	{ Path = "Assets/Formats/Audio/Tone.wav", Type = "AudioClip" },
+	{ Path = "Assets/Formats/Audio/Water.opus", Type = "AudioClip" },
 	{ Path = "Assets/Formats/Environments/Gradient.hdr", Type = "Environment" },
 	{ Path = "Assets/Formats/Fonts/Glyphs.ttf", Type = "Font" },
 	{ Path = "Assets/Formats/Fonts/Inter-Regular.otf", Type = "Font" },

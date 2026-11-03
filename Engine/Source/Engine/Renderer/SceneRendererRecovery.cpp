@@ -72,6 +72,7 @@ namespace Engine {
 		state.WireframeBudgetLogged = released.WireframeBudgetLogged;
 		state.AllocationLimitLogged = released.AllocationLimitLogged;
 		state.LightLimitLogged = released.LightLimitLogged;
+		state.PointShadowLimitLogged = released.PointShadowLimitLogged; // M23 (R-PLS): RENDER_POINT_SHADOW_BUDGET's once-per-renderer flag
 		// M18 (C18.4, decision 44): the mode a failed debug-view switch falls back to, and its once-per-view log flags.
 		state.RenderedDebugView = released.RenderedDebugView;
 		state.DebugViewFailureLogged = released.DebugViewFailureLogged;

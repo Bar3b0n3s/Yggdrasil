@@ -3,9 +3,12 @@
 
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/MeshData.h"
+#include "Engine/Core/Assert.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Renderer/GpuResourceCache.h"
+#include "Engine/Renderer/Private/ForwardPipelines.h"
 #include "Engine/Renderer/SceneTargetFormats.h"
+#include "Shared/DrawConstants.h"
 #include "Shared/MaterialConstants.h"
 #include "Shared/Private/SelectionPassConstants.h"
 
@@ -53,7 +56,8 @@ namespace Engine {
 			view.registerSpaceIsDescriptorSet = true;
 			view.bindings = {
 				nvrhi::BindingLayoutItem::PushConstants(0, sizeof(SelectionMaskConstants)),
-				nvrhi::BindingLayoutItem::Texture_SRV(0)
+				nvrhi::BindingLayoutItem::Texture_SRV(0),
+				nvrhi::BindingLayoutItem::StructuredBuffer_SRV(InstancesRegister)
 			};
 			PipelineLayoutDescription description{
 				.Name = std::format("SelectionMask{}", variant),
@@ -124,6 +128,8 @@ namespace Engine {
 			for (const MeshDrawItem& item : inputs.Snapshot->Meshes)
 				if (!SelectionFiniteMatrix(item.World))
 					return MakeError(ErrorCode::InvalidArgument, "Selection mesh transforms must be finite");
+			if (inputs.Snapshot->HasCamera && !inputs.Snapshot->SelectedEntities.empty() && (!inputs.Draws || !inputs.Instances))
+				return MakeError(ErrorCode::InvalidArgument, "Selection needs its prepared draws and the view's instance buffer");
 			return {};
 		}
 
@@ -200,8 +206,67 @@ namespace Engine {
 		return desc;
 	}
 
+	SelectionDrawSet SelectionPass::PrepareDraws(GpuResourceCache& cache, const RenderSnapshot& snapshot, bool instancing,
+		std::vector<InstanceRecord>& instances)
+	{
+		SelectionDrawSet set;
+		if (!snapshot.HasCamera || snapshot.SelectedEntities.empty())
+			return set;
+		std::vector<MeshInstanceKey> keys;
+		for (const MeshDrawItem& item : snapshot.Meshes)
+		{
+			if (!item.Mesh.IsValid() || !item.Entity.IsValid() || std::ranges::find(snapshot.SelectedEntities, item.Entity) == snapshot.SelectedEntities.end()
+				|| !Utils::SelectionFiniteMatrix(item.World))
+				continue;
+			// Cache uploads invalidate borrowed references; own this mesh's handles and value arrays before resolving materials.
+			const GpuMesh mesh = cache.GetMesh(item.Mesh);
+			if (!mesh.VertexBuffer || !mesh.IndexBuffer)
+				continue;
+			const bool mirrored = glm::determinant(glm::mat3(item.World)) < 0.0f;
+			for (uint32_t submeshIndex = 0; submeshIndex < mesh.Submeshes.size(); ++submeshIndex)
+			{
+				const GpuSubmesh& submesh = mesh.Submeshes[submeshIndex];
+				if (submesh.IndexCount == 0)
+					continue;
+				AssetHandle materialHandle = BuiltinAssetHandles::DefaultMaterial;
+				if (submesh.MaterialSlot < item.Materials.size() && item.Materials[submesh.MaterialSlot].IsValid())
+					materialHandle = item.Materials[submesh.MaterialSlot];
+				else if (submesh.MaterialSlot < mesh.DefaultMaterials.size() && mesh.DefaultMaterials[submesh.MaterialSlot].IsValid())
+					materialHandle = mesh.DefaultMaterials[submesh.MaterialSlot];
+				const GpuMaterial& material = cache.GetMaterial(materialHandle);
+				const bool masked = material.AlphaMode == AlphaMode::Mask;
+				if (masked && (!material.Constants || !material.BaseColorMap))
+					continue;
+				const uint32_t variant = (masked ? 3U : 0U) + (material.DoubleSided ? 2U : (mirrored ? 1U : 0U));
+				set.Draws.push_back({ .Vertices = mesh.VertexBuffer,
+					.Indices = mesh.IndexBuffer,
+					.IndexOffset = submesh.IndexOffset,
+					.IndexCount = submesh.IndexCount,
+					.Variant = variant,
+					.MaterialConstants = masked ? material.Constants : nvrhi::BufferHandle(),
+					.BaseColorMap = masked ? material.BaseColorMap : nvrhi::TextureHandle(),
+					.Instance = static_cast<uint32_t>(instances.size()) });
+				instances.push_back({ .World = item.World,
+					.PreviousWorld = item.PreviousWorld.value_or(item.World),
+					.EntityId = item.PickId,
+					.Flags = mirrored ? DrawFlagMirrored : 0U });
+				// Only a Mask draw binds its material: the other draws of one mesh batch whatever their materials.
+				keys.push_back({ .Pipeline = variant, .Material = masked ? materialHandle : AssetHandle(), .Mesh = item.Mesh, .Submesh = submeshIndex });
+			}
+		}
+		if (instancing)
+			set.Batches = GroupMeshInstances(keys);
+		else
+		{
+			set.Batches.reserve(set.Draws.size());
+			for (uint32_t index = 0; index < set.Draws.size(); ++index)
+				set.Batches.push_back({ .First = index, .Count = 1 });
+		}
+		return set;
+	}
+
 	Status SelectionPass::Record(nvrhi::ICommandList& commandList, RenderRecordingContext& recording, PassBindingCache& bindings,
-		GpuResourceCache& cache, AssetManager& /*assets*/, const SelectionRenderInputs& inputs)
+		const SelectionRenderInputs& inputs)
 	{
 		ENGINE_TRY(Utils::SelectionValidateInputs(inputs));
 		State& state = *m_State;
@@ -211,62 +276,54 @@ namespace Engine {
 		{
 			SelectionRecordingScope scope(recording, commandList, "SelectionMask");
 			commandList.clearTextureFloat(inputs.Mask, nvrhi::AllSubresources, nvrhi::Color(0.0f));
-			if (!snapshot.HasCamera || snapshot.SelectedEntities.empty())
+			if (!snapshot.HasCamera || snapshot.SelectedEntities.empty() || inputs.Draws->Draws.empty())
 				return {};
+			const SelectionDrawSet& prepared = *inputs.Draws;
+			ENGINE_CORE_ASSERT(inputs.Instances->getDesc().structStride == sizeof(InstanceRecord)
+					&& inputs.Instances->getDesc().byteSize >= (static_cast<uint64_t>(prepared.Draws.back().Instance) + 1) * sizeof(InstanceRecord),
+				"the selection's draws need the view's Instances buffer holding their records");
 			ENGINE_TRY_ASSIGN(const nvrhi::FramebufferHandle framebuffer, state.Device->CreateFramebuffer(nvrhi::FramebufferDesc().addColorAttachment(inputs.Mask)));
-			for (const MeshDrawItem& item : snapshot.Meshes)
+			const glm::mat4 viewProjection = snapshot.Camera.Projection * snapshot.Camera.View;
+			for (const MeshInstanceBatch& batch : prepared.Batches)
 			{
-				if (!item.Mesh.IsValid() || !item.Entity.IsValid() || std::ranges::find(snapshot.SelectedEntities, item.Entity) == snapshot.SelectedEntities.end())
-					continue;
-				const GpuMesh mesh = cache.GetMesh(item.Mesh);
-				if (!mesh.VertexBuffer || !mesh.IndexBuffer)
-					continue;
-				for (const GpuSubmesh& submesh : mesh.Submeshes)
+				const SelectionDraw& draw = prepared.Draws[batch.First];
+				ENGINE_CORE_ASSERT(batch.Count >= 1 && prepared.Draws[batch.First + batch.Count - 1].Instance == draw.Instance + batch.Count - 1,
+					"the instance records of a batch's draws must be adjacent");
+				const GraphicsPipeline& pipeline = state.Mask[draw.Variant];
+				nvrhi::BindingSetDesc viewDesc;
+				viewDesc.bindings = {
+					nvrhi::BindingSetItem::PushConstants(0, sizeof(SelectionMaskConstants)),
+					nvrhi::BindingSetItem::Texture_SRV(0, inputs.SceneDepth),
+					nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstancesRegister, inputs.Instances)
+				};
+				ENGINE_TRY_ASSIGN(nvrhi::IBindingSet * viewSet, bindings.GetOrCreate(*state.Device, viewDesc, *pipeline.BindingLayouts[0]));
+				nvrhi::GraphicsState graphics;
+				graphics.pipeline = pipeline.Pipeline;
+				graphics.framebuffer = framebuffer;
+				graphics.viewport.addViewportAndScissorRect(nvrhi::Viewport(static_cast<float>(target.width), static_cast<float>(target.height)));
+				graphics.bindings = { viewSet };
+				if (draw.MaterialConstants != nullptr)
 				{
-					AssetHandle materialHandle = BuiltinAssetHandles::DefaultMaterial;
-					if (submesh.MaterialSlot < item.Materials.size() && item.Materials[submesh.MaterialSlot].IsValid())
-						materialHandle = item.Materials[submesh.MaterialSlot];
-					else if (submesh.MaterialSlot < mesh.DefaultMaterials.size() && mesh.DefaultMaterials[submesh.MaterialSlot].IsValid())
-						materialHandle = mesh.DefaultMaterials[submesh.MaterialSlot];
-					const GpuMaterial material = cache.GetMaterial(materialHandle);
-					const bool masked = material.AlphaMode == AlphaMode::Mask;
-					if (masked && (!material.Constants || !material.BaseColorMap))
-						continue;
-					const uint32_t variant = (masked ? 3u : 0u) + (material.DoubleSided ? 2u : glm::determinant(glm::mat3(item.World)) < 0.0f ? 1u
-																																			  : 0u);
-					const GraphicsPipeline& pipeline = state.Mask[variant];
-					nvrhi::BindingSetDesc viewDesc;
-					viewDesc.bindings = {
-						nvrhi::BindingSetItem::PushConstants(0, sizeof(SelectionMaskConstants)),
-						nvrhi::BindingSetItem::Texture_SRV(0, inputs.SceneDepth)
+					nvrhi::BindingSetDesc materialDesc;
+					materialDesc.bindings = {
+						nvrhi::BindingSetItem::ConstantBuffer(0, draw.MaterialConstants),
+						nvrhi::BindingSetItem::Texture_SRV(0, draw.BaseColorMap),
+						nvrhi::BindingSetItem::Sampler(0, state.Sampler)
 					};
-					ENGINE_TRY_ASSIGN(nvrhi::IBindingSet * viewSet, bindings.GetOrCreate(*state.Device, viewDesc, *pipeline.BindingLayouts[0]));
-					nvrhi::GraphicsState graphics;
-					graphics.pipeline = pipeline.Pipeline;
-					graphics.framebuffer = framebuffer;
-					graphics.viewport.addViewportAndScissorRect(nvrhi::Viewport(static_cast<float>(target.width), static_cast<float>(target.height)));
-					graphics.bindings = { viewSet };
-					if (masked)
-					{
-						nvrhi::BindingSetDesc materialDesc;
-						materialDesc.bindings = {
-							nvrhi::BindingSetItem::ConstantBuffer(0, material.Constants),
-							nvrhi::BindingSetItem::Texture_SRV(0, material.BaseColorMap),
-							nvrhi::BindingSetItem::Sampler(0, state.Sampler)
-						};
-						ENGINE_TRY_ASSIGN(nvrhi::IBindingSet * materialSet, bindings.GetOrCreate(*state.Device, materialDesc, *pipeline.BindingLayouts[1]));
-						graphics.bindings.push_back(materialSet);
-					}
-					graphics.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(mesh.VertexBuffer).setSlot(0));
-					graphics.setIndexBuffer(nvrhi::IndexBufferBinding().setBuffer(mesh.IndexBuffer).setFormat(nvrhi::Format::R32_UINT));
-					commandList.setGraphicsState(graphics);
-					const SelectionMaskConstants constants{ item.World, snapshot.Camera.Projection * snapshot.Camera.View };
-					commandList.setPushConstants(&constants, sizeof(constants));
-					commandList.drawIndexed(nvrhi::DrawArguments().setVertexCount(submesh.IndexCount).setStartIndexLocation(submesh.IndexOffset));
-					++scope.Counters.DrawCalls;
-					scope.Counters.Triangles += submesh.IndexCount / 3;
-					++draws;
+					ENGINE_TRY_ASSIGN(nvrhi::IBindingSet * materialSet, bindings.GetOrCreate(*state.Device, materialDesc, *pipeline.BindingLayouts[1]));
+					graphics.bindings.push_back(materialSet);
 				}
+				graphics.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(draw.Vertices).setSlot(0));
+				graphics.setIndexBuffer(nvrhi::IndexBufferBinding().setBuffer(draw.Indices).setFormat(nvrhi::Format::R32_UINT));
+				commandList.setGraphicsState(graphics);
+				SelectionMaskConstants constants{};
+				constants.ViewProjection = viewProjection;
+				constants.FirstInstance = draw.Instance;
+				commandList.setPushConstants(&constants, sizeof(constants));
+				commandList.drawIndexed(nvrhi::DrawArguments().setVertexCount(draw.IndexCount).setInstanceCount(batch.Count).setStartIndexLocation(draw.IndexOffset));
+				++scope.Counters.DrawCalls;
+				scope.Counters.Triangles += draw.IndexCount / 3 * batch.Count;
+				++draws;
 			}
 		}
 		if (draws == 0)

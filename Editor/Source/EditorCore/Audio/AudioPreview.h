@@ -8,7 +8,7 @@
 
 // The asset browser's audio preview (Architecture §10.2: "Edit mode is silent except asset-browser previews"; §12.2
 // ContentBrowserPanel): the EditorCore-level API that M10's panel calls to audition an AudioClip asset (an imported WAV,
-// FLAC, MP3 or Ogg Vorbis file, or a .sfx sound effect). EditorContext owns one when its engine context has an AudioEngine
+// FLAC, MP3, Ogg Vorbis or Ogg Opus file, or a .sfx sound effect). EditorContext owns one when its engine context has an AudioEngine
 // (EditorContext::GetAudioPreview). Frozen by the M12 contract (Docs/Decisions/0015-m12-decisions.md).
 
 namespace Engine {

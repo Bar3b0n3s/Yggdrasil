@@ -10,7 +10,7 @@
 		"MeshRenderer": 1,
 		"Camera": 1,
 		"DirectionalLight": 1,
-		"PointLight": 1,
+		"PointLight": 2,
 		"Text": 1,
 		"RigidBody": 1,
 		"BoxCollider": 1,
@@ -161,6 +161,7 @@
 								"Color": [1, 1, 1],
 								"Intensity": 4,
 								"Range": 3,
+								"CastShadows": false,
 								"SourceRadius": 0.05
 							}
 						},
@@ -259,6 +260,7 @@
 					"Color": [1, 1, 1],
 					"Intensity": 4,
 					"Range": 3,
+					"CastShadows": false,
 					"SourceRadius": 0.05
 				},
 				"Script": {

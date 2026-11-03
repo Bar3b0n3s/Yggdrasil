@@ -12,6 +12,7 @@ return Test.Suite("Api.PointLight", function()
 		Support.ExpectColorNear(before, Color.New(1, 0.8, 0.6), 1e-6, "the scene's colour")
 		Test.ExpectNear(Support.RoundTrip(light, "Intensity", 20, 1e-5), 8, 1e-5, "the scene's intensity")
 		Test.ExpectNear(Support.RoundTrip(light, "Range", 4, 1e-6), 6, 1e-6, "the scene's range")
+		Test.ExpectEqual(Support.RoundTrip(light, "CastShadows", true), false, "the scene's CastShadows")
 		Support.RoundTrip(light, "SourceRadius", 0.2, 1e-6)
 		Test.Expect(not pcall(function()
 			light.Range = 0

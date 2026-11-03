@@ -11,17 +11,19 @@ namespace Engine {
 
 	TEST_SUITE(Test::GpuSuite)
 	{
+		// For every shadowed light type: the directional cascades, a spot's atlas tile and, from M23 (R-PLS), a point light's
+		// cube, whose receiver plane crosses three of its faces here (-Z, -Y and +X), so the faces' seams are covered too.
 		TEST_CASE("Shadows: a planar receiver never shadows itself and retains a nearby occluder")
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			Test::SceneRendererIntegrationFixture fixture(gpu, 128, 128);
-			for (const bool spot : { false, true })
+			for (const RenderLightType type : { RenderLightType::Directional, RenderLightType::Spot, RenderLightType::Point })
 				for (const RenderProjection projection : { RenderProjection::Perspective, RenderProjection::Orthographic })
 					for (uint32_t normalMode = 0; normalMode < 3; ++normalMode)
 						for (uint32_t shadowMapSize : { 256U, 1024U })
 						{
-							CAPTURE(spot);
+							CAPTURE(static_cast<uint32_t>(type));
 							CAPTURE(normalMode);
 							CAPTURE(shadowMapSize);
 							auto material = CreateRef<MaterialData>();
@@ -47,11 +49,11 @@ namespace Engine {
 							snapshot.Meshes[0].World = glm::scale(glm::translate(glm::mat4(1), glm::vec3(0, 0, -4)), glm::vec3(10));
 							snapshot.Environment.FallbackColor = glm::vec3(0);
 							LightData light;
-							light.Type = spot ? RenderLightType::Spot : RenderLightType::Directional;
+							light.Type = type;
 							light.Entity = UUID(30);
 							light.Position = glm::vec3(-3, 4, 0);
 							light.Direction = glm::normalize(glm::vec3(0, 0, -4) - light.Position);
-							light.Intensity = spot ? 12.0f : 0.25f;
+							light.Intensity = type == RenderLightType::Directional ? 0.25f : 12.0f;
 							light.Range = 20;
 							light.InnerConeAngle = 45;
 							light.OuterConeAngle = 60;

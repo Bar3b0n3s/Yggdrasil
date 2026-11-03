@@ -2,9 +2,12 @@
 
 #include "Engine/Renderer/PointShadowMaps.h"
 
+#include "Engine/Core/Log.h"
+#include "Engine/Graphics/GpuResourceTracker.h"
 #include "Engine/Graphics/Image.h"
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Engine/Renderer/RenderPrepare.h"
+#include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/RenderReference.h"
 
@@ -13,7 +16,9 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <optional>
+#include <string>
 #include <vector>
 
 // Point-light shadows (M23, C23.1, R-PLS; Docs/Decisions/0034-m23-contract.md decision 3, stream B).
@@ -42,7 +47,7 @@ namespace Engine {
 		// The four most important visible shadow-casting point lights are planned, in CullLights' order, each with its six
 		// faces and its layer; the fifth is dropped, a point light without CastShadows is not a candidate, and one whose range
 		// is not above twice its near plane is rejected without costing another its shadow.
-		TEST_CASE("PointShadowMaps: the four most important shadow-casting point lights are planned and the rest dropped" * doctest::skip(true))
+		TEST_CASE("PointShadowMaps: the four most important shadow-casting point lights are planned and the rest dropped")
 		{
 			std::vector<LightData> lights;
 			for (uint64_t index = 0; index < 5; ++index)
@@ -66,12 +71,54 @@ namespace Engine {
 			CHECK(set->Rejected == 1);
 		}
 
+		// The plan's other rules: an index out of range or given twice is InvalidArgument; a spot or directional light is never
+		// a candidate; a non-finite position is rejected; the near plane is max(SourceRadius, 0.05) and the far plane the Range,
+		// which each face's projection takes; a source radius at least half the range is rejected.
+		TEST_CASE("PointShadowMaps: the plan refuses bad indices, skips other light types and rejects lights it cannot project")
+		{
+			std::vector<LightData> lights = { MakeShadowedPoint(glm::vec3(0.0f, 0.0f, -5.0f), 10.0f, 1) };
+			for (const std::vector<uint32_t>& indices : { std::vector<uint32_t>{ 1 }, std::vector<uint32_t>{ 0, 0 } })
+			{
+				const Result<PointShadowSet> refused = AllocatePointShadows(lights, indices);
+				REQUIRE_FALSE(refused.has_value());
+				CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
+			}
+
+			LightData spot = MakeShadowedPoint(glm::vec3(1.0f, 0.0f, -5.0f), 10.0f, 2);
+			spot.Type = RenderLightType::Spot;
+			LightData sun = MakeShadowedPoint(glm::vec3(0.0f), 10.0f, 3);
+			sun.Type = RenderLightType::Directional;
+			LightData lost = MakeShadowedPoint(glm::vec3(std::numeric_limits<float>::quiet_NaN(), 0.0f, -5.0f), 10.0f, 4);
+			LightData wide = MakeShadowedPoint(glm::vec3(0.0f, 2.0f, -5.0f), 10.0f, 5);
+			wide.SourceRadius = 2.5f; // a near plane of Range / 2
+			LightData soft = MakeShadowedPoint(glm::vec3(0.0f, -2.0f, -5.0f), 10.0f, 6);
+			soft.SourceRadius = 0.5f;
+			lights.insert(lights.end(), { spot, sun, lost, wide, soft });
+			const Result<PointShadowSet> set = AllocatePointShadows(lights, std::vector<uint32_t>{ 2, 1, 3, 4, 5, 0 });
+			REQUIRE_MESSAGE(set.has_value(), set.error().ToString());
+			REQUIRE(set->Lights.size() == 2);
+			CHECK(set->Lights[0].LightIndex == 5);
+			CHECK(set->Lights[0].NearClip == 0.5f);
+			CHECK(set->Lights[1].LightIndex == 0);
+			CHECK(set->Lights[1].NearClip == 0.05f);
+			CHECK(set->Lights[1].FarClip == 5.0f);
+			CHECK(set->Rejected == 2);
+			CHECK(set->Dropped == 0);
+			for (uint32_t face = 0; face < PointShadowFaceCount; ++face)
+			{
+				CAPTURE(face);
+				const glm::mat4 expected = ComputePointShadowFaceViewProjection(lights[5].Position, face, 0.5f, 5.0f);
+				for (glm::length_t column = 0; column < 4; ++column)
+					CHECK(set->Lights[0].FaceViewProjections[face][column] == expected[column]);
+			}
+		}
+
 		// Each face looks down its major axis in Vulkan's cube face order: a point on the face's axis maps to the face's
 		// centre, at depth 1 on the near plane and 0 on the far plane (reverse-Z). Off the axis, a direction from the light
 		// lands on the texel a cube sampler reads for it (Vulkan's face selection table, RenderReference's CubeTexelDirection):
 		// texel (column, row) of a face of N texels at NDC x = 2 (column + 0.5) / N - 1 and y = 1 - 2 (row + 0.5) / N, since
 		// NVRHI's flipped viewport puts NDC +Y on row 0. A face that is mirrored, rotated or swapped with another fails.
-		TEST_CASE("PointShadowMaps: each face's projection centres its axis, near at depth 1 and far at depth 0" * doctest::skip(true))
+		TEST_CASE("PointShadowMaps: each face's projection centres its axis, near at depth 1 and far at depth 0")
 		{
 			const glm::vec3 position(1.0f, 2.0f, 3.0f);
 			const std::array<glm::vec3, PointShadowFaceCount> axes = { glm::vec3(1, 0, 0), glm::vec3(-1, 0, 0), glm::vec3(0, 1, 0), glm::vec3(0, -1, 0),
@@ -111,7 +158,7 @@ namespace Engine {
 		// shadow falls to one side of each face it crosses (the -Z face and the +X face), and a face projection that mirrors,
 		// rotates or swaps a face moves it, which the oracle's pixels catch. Only pixels whose 5 x 5 neighbourhood the oracle
 		// gives one answer are compared, so the shadow map's resolution, bias and filtering at the edge never matter.
-		TEST_CASE("SceneRenderer: a shadow-casting point light leaves the occluded floor unlit, as the CPU oracle predicts" * doctest::skip(true))
+		TEST_CASE("SceneRenderer: a shadow-casting point light leaves the occluded floor unlit, as the CPU oracle predicts")
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -193,6 +240,121 @@ namespace Engine {
 			}
 			CHECK(lit >= 100);
 			CHECK(unlit >= 20);
+		}
+
+		// R-PLS's budget (decision 3): five visible shadow-casting point lights over a floor; the four most important are
+		// shadowed and the fifth, the dimmest, is lit without a shadow. RENDER_POINT_SHADOW_BUDGET is logged once per
+		// renderer, the PointShadows row counts the faces' caster draws (in ShadowDraws too), and the render repeats exactly.
+		TEST_CASE("SceneRenderer: more visible shadow-casting point lights than the budget warn once and stay lit")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu, 64, 64);
+			RenderSnapshot snapshot = setup.Snapshot();
+			snapshot.Meshes = { { .World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -6.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(3.0f)),
+				.Mesh = UUID(8910),
+				.Materials = { UUID(8911) } } };
+			snapshot.Environment.FallbackColor = glm::vec3(0.0f);
+			for (uint32_t index = 0; index < MaxPointShadowLights; ++index)
+				snapshot.Lights.push_back(MakeShadowedPoint(glm::vec3(-1.5f, -0.6f + 0.4f * static_cast<float>(index), -4.5f), 40.0f, 100 + index));
+			snapshot.Lights.push_back(MakeShadowedPoint(glm::vec3(1.5f, 0.0f, -4.5f), 4.0f, 200));
+			Test::ExpectLog warning(LogLevel::Warn, std::string(RenderPointShadowBudgetCode));
+			const Image first = setup.Render(snapshot);
+			++snapshot.FrameIndex;
+			const Image second = setup.Render(snapshot);
+			CHECK(warning.GetMatchCount() == 1);
+			const RenderStats stats = setup.Renderer().GetRenderStats();
+			CHECK(stats.ShadowedPointLights == MaxPointShadowLights);
+			CHECK(stats.DroppedPointShadows == 1);
+			const RenderPassStats* pass = Test::SceneRendererIntegrationFixture::FindPass(stats, "PointShadows");
+			REQUIRE(pass != nullptr);
+			CHECK(pass->DrawCalls >= MaxPointShadowLights);
+			CHECK(stats.ShadowDraws == pass->DrawCalls);
+			CHECK(Test::SceneRendererIntegrationFixture::FindPass(stats, "SpotShadows") == nullptr);
+			// The dropped light still lights the floor below it (x = 1.5 at z = -6 is pixel 32 + 1.5 / (6 tan 30) * 32 = 45.9).
+			CHECK(Test::SceneRendererIntegrationFixture::Channel(second, 46, 32) > 0);
+			CHECK(second.Pixels == first.Pixels);
+		}
+
+		// Decision 7: a device loss's release replaces the renderer's state but keeps RENDER_POINT_SHADOW_BUDGET's
+		// once-per-renderer flag (SceneRendererRecovery.cpp's kept members), so the recovered renderer, still over the budget,
+		// does not warn again.
+		TEST_CASE("SceneRenderer: the point-shadow budget warning stays once per renderer across a release and recreation")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu, 64, 64);
+			RenderSnapshot snapshot = setup.Snapshot();
+			snapshot.Meshes = { { .World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -6.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(3.0f)),
+				.Mesh = UUID(8910),
+				.Materials = { UUID(8911) } } };
+			for (uint32_t index = 0; index <= MaxPointShadowLights; ++index)
+				snapshot.Lights.push_back(MakeShadowedPoint(glm::vec3(-1.5f + 0.6f * static_cast<float>(index), 0.0f, -4.5f), 40.0f - static_cast<float>(index), 100 + index));
+			Test::ExpectLog warning(LogLevel::Warn, std::string(RenderPointShadowBudgetCode));
+			const Image before = setup.Render(snapshot);
+			CHECK(warning.GetMatchCount() == 1);
+
+			setup.Renderer().ReleaseGpuObjects();
+			const Status recreated = setup.Renderer().RecreateGpuObjects();
+			REQUIRE_MESSAGE(recreated.has_value(), recreated.error().ToString());
+			++snapshot.FrameIndex;
+			const Image after = setup.Render(snapshot);
+			CHECK(warning.GetMatchCount() == 1);
+			CHECK(setup.Renderer().GetRenderStats().DroppedPointShadows == 1);
+			CHECK(after.Pixels == before.Pixels);
+		}
+
+		// A shadow-casting point light the plan cannot project (a source radius of half its range, so no near plane fits) is
+		// lit without a shadow, reported once per renderer, and costs the valid light beside it nothing; with only it, no
+		// PointShadows pass is recorded.
+		TEST_CASE("SceneRenderer: a point light that cannot be shadowed is lit unshadowed and reported once")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu, 64, 64);
+			RenderSnapshot snapshot = setup.Snapshot();
+			snapshot.Meshes = { { .World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -6.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(3.0f)),
+				.Mesh = UUID(8910),
+				.Materials = { UUID(8911) } } };
+			snapshot.Environment.FallbackColor = glm::vec3(0.0f);
+			LightData wide = MakeShadowedPoint(glm::vec3(0.0f, 0.0f, -4.5f), 40.0f, 300);
+			wide.SourceRadius = 2.5f;
+			snapshot.Lights = { wide };
+			Test::ExpectLog warning(LogLevel::Warn, "cannot be shadowed");
+			const Image rejected = setup.Render(snapshot);
+			CHECK(Test::SceneRendererIntegrationFixture::FindPass(setup.Renderer().GetRenderStats(), "PointShadows") == nullptr);
+			CHECK(setup.Renderer().GetRenderStats().ShadowedPointLights == 0);
+			CHECK(Test::SceneRendererIntegrationFixture::Channel(rejected, 32, 32) > 0);
+			snapshot.Lights.push_back(MakeShadowedPoint(glm::vec3(1.0f, 0.0f, -4.5f), 40.0f, 301));
+			++snapshot.FrameIndex;
+			static_cast<void>(setup.Render(snapshot));
+			CHECK(warning.GetMatchCount() == 1);
+			CHECK(setup.Renderer().GetRenderStats().ShadowedPointLights == 1);
+			CHECK(setup.Renderer().GetRenderStats().DroppedPointShadows == 0);
+		}
+
+		// Once the cube array, its framebuffers and the forward set exist, a point-shadowed render creates no GPU object.
+		TEST_CASE("SceneRenderer: steady-state point-shadowed renders create no GPU objects")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu, 64, 64);
+			RenderSnapshot snapshot = setup.Snapshot();
+			snapshot.Lights = { MakeShadowedPoint(glm::vec3(0.5f, 0.0f, -1.0f), 20.0f, 31), MakeShadowedPoint(glm::vec3(-0.5f, 0.0f, -1.0f), 20.0f, 32) };
+			for (uint32_t frame = 0; frame < 2; ++frame, ++snapshot.FrameIndex)
+				setup.Submit(snapshot);
+			const GpuResourceTracker& tracker = gpu.GetDevice().GetResourceTracker();
+			const auto created = [&tracker]()
+			{
+				return std::array<uint64_t, 4>{ tracker.GetCounts(GpuResourceType::GpuBuffer).Created, tracker.GetCounts(GpuResourceType::BindingSet).Created,
+					tracker.GetCounts(GpuResourceType::Framebuffer).Created, tracker.GetCounts(GpuResourceType::Texture).Created };
+			};
+			const std::array<uint64_t, 4> before = created();
+			for (uint32_t frame = 0; frame < 3; ++frame, ++snapshot.FrameIndex)
+				setup.Submit(snapshot);
+			CHECK(setup.Renderer().GetRenderStats().ShadowedPointLights == 2);
+			if (GpuResourceTracker::IsEnabled())
+				CHECK(created() == before);
 		}
 	}
 

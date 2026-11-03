@@ -18,12 +18,14 @@
 #include "Engine/Renderer/UpscalePass.h"
 #include "Shared/BloomConstants.h"
 #include "Shared/DrawConstants.h"
+#include "Shared/InstanceRecord.h"
 #include "Shared/EnvironmentBakeConstants.h"
 #include "Shared/EnvironmentConstants.h"
 #include "Shared/ImGuiConstants.h"
 #include "Shared/MaterialConstants.h"
 #include "Shared/DepthPyramidConstants.h"
 #include "Shared/GtaoConstants.h"
+#include "Shared/LightClusterConstants.h"
 #include "Shared/ShadowCasterConstants.h"
 #include "Shared/ShadowProbeConstants.h"
 #include "Shared/Private/SceneDataViewConstants.h"
@@ -176,6 +178,15 @@ namespace Engine {
 																	  },
 				.Program = "Gtao",
 				.Entry = "CSMain" },
+			// M23 (stream C): the cluster grid, as the LightClusters pass reads it (the forward passes' b3 and the data views' b2
+			// hold the same struct).
+			{ .Name = "LightClusterConstants", .Size = sizeof(LightClusterConstants), .Fields = {
+																						  ENGINE_TEST_SHARED_FIELD(LightClusterConstants, Grid),
+																						  ENGINE_TEST_SHARED_FIELD(LightClusterConstants, Slicing),
+																						  ENGINE_TEST_SHARED_FIELD(LightClusterConstants, Mode),
+																					  },
+				.Program = "LightClusters",
+				.Entry = "CSMain" },
 			{ .Name = "ShadowCasterConstants", .Size = sizeof(ShadowCasterConstants), .Fields = {
 																						  ENGINE_TEST_SHARED_FIELD(ShadowCasterConstants, ViewProjection),
 																						  ENGINE_TEST_SHARED_FIELD(ShadowCasterConstants, Bias),
@@ -195,8 +206,10 @@ namespace Engine {
 				.Program = "SceneDataView",
 				.Entry = "CSMain" },
 			{ .Name = "SelectionMaskConstants", .Size = sizeof(SelectionMaskConstants), .Fields = {
-																							ENGINE_TEST_SHARED_FIELD(SelectionMaskConstants, World),
 																							ENGINE_TEST_SHARED_FIELD(SelectionMaskConstants, ViewProjection),
+																							ENGINE_TEST_SHARED_FIELD(SelectionMaskConstants, FirstInstance),
+																							ENGINE_TEST_SHARED_FIELD(SelectionMaskConstants, Padding0),
+																							ENGINE_TEST_SHARED_FIELD(SelectionMaskConstants, Padding1),
 																						},
 				.Program = "SelectionMask",
 				.Entry = "VSMain",
@@ -327,10 +340,26 @@ namespace Engine {
 				.Name = "DrawConstants",
 				.Size = sizeof(DrawConstants),
 				.Fields = {
-					ENGINE_TEST_SHARED_FIELD(DrawConstants, World),
-					ENGINE_TEST_SHARED_FIELD(DrawConstants, EntityId),
-					ENGINE_TEST_SHARED_FIELD(DrawConstants, Flags),
-					ENGINE_TEST_SHARED_FIELD(DrawConstants, Padding),
+					ENGINE_TEST_SHARED_FIELD(DrawConstants, FirstInstance),
+					ENGINE_TEST_SHARED_FIELD(DrawConstants, Padding0),
+					ENGINE_TEST_SHARED_FIELD(DrawConstants, Padding1),
+				},
+				.Program = "Scene",
+				.Entry = "VSMain",
+				.Permutation = { { .Key = "ALPHA_MASK", .Value = "0" } },
+			},
+			{
+				// M23 (R-INST): the element of the Instances structured buffer (std430), which every mesh program's vertex
+				// shader reads.
+				.Name = "InstanceRecord",
+				.Size = sizeof(InstanceRecord),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(InstanceRecord, World),
+					ENGINE_TEST_SHARED_FIELD(InstanceRecord, PreviousWorld),
+					ENGINE_TEST_SHARED_FIELD(InstanceRecord, EntityId),
+					ENGINE_TEST_SHARED_FIELD(InstanceRecord, Flags),
+					ENGINE_TEST_SHARED_FIELD(InstanceRecord, Padding0),
+					ENGINE_TEST_SHARED_FIELD(InstanceRecord, Padding1),
 				},
 				.Program = "Scene",
 				.Entry = "VSMain",

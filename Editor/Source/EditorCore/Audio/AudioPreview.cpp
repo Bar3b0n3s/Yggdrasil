@@ -69,7 +69,7 @@ namespace Engine {
 		{
 			return std::unexpected(Error(ErrorCode::Validation,
 				std::format("'{}' is a {}, not an AudioClip", state.Assets->GetReferencePath(clip), AssetTypeToString(asset->GetAssetType())))
-					.WithHint("preview an audio clip: an imported .wav, .flac, .mp3 or .ogg file, or a .sfx sound effect"));
+					.WithHint("preview an audio clip: an imported .wav, .flac, .mp3, .ogg or .opus file, or a .sfx sound effect"));
 		}
 
 		const uint64_t version = std::max<uint64_t>(1, state.Assets->GetVersion(clip));

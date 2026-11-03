@@ -1,6 +1,10 @@
 #include "EnginePCH.h"
 #include "Engine/Scripting/Private/BindingRegistration.h"
 
+#include "Engine/Asset/AssetManager.h"
+#include "Engine/Asset/AudioClipData.h"
+#include "Engine/Audio/AudioDecoder.h"
+#include "Engine/Core/Hash.h"
 #include "Engine/Core/Utf8.h"
 #include "Engine/Platform/Input/KeyCodes.h"
 #include "Engine/Reflection/EnumInfo.h"
@@ -16,11 +20,15 @@
 
 #include <array>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <format>
 #include <limits>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace Engine {
 
@@ -414,6 +422,58 @@ namespace Engine {
 			return 1;
 		}
 
+		// The XXH64 of a clip's samples as interleaved f32 at its own rate: an encoded clip decoded by DecodeEncodedAudio (an
+		// Ogg Opus clip through the fixed-point decoder, so the digest is the same in every configuration), a Pcm16 clip's
+		// little-endian samples divided by 32768, the conversion miniaudio applies (exact for every 16-bit value).
+		static Result<uint64_t> ComputeAudioClipDigest(const AudioClipData& clip)
+		{
+			if (clip.Encoding != AudioClipEncoding::Pcm16)
+			{
+				ENGINE_TRY_ASSIGN(const DecodedAudio decoded, DecodeEncodedAudio(clip.Bytes));
+				return XXH64(std::as_bytes(std::span<const float>(decoded.Samples)));
+			}
+			std::vector<float> samples(clip.Bytes.size() / sizeof(int16_t));
+			for (size_t index = 0; index < samples.size(); ++index)
+			{
+				const auto low = std::to_integer<uint16_t>(clip.Bytes[2 * index]);
+				const auto high = std::to_integer<uint16_t>(clip.Bytes[2 * index + 1]);
+				samples[index] = static_cast<float>(static_cast<int16_t>(static_cast<uint16_t>(low | (high << 8)))) / 32768.0f;
+			}
+			return XXH64(std::as_bytes(std::span<const float>(samples)));
+		}
+
+		static int GetAudioClipDigest(ScriptCall& call)
+		{
+			const auto handle = Lua::Check<AssetHandle>(call, 1);
+			AssetManager* assets = call.Engine->GetHost().GetAssets();
+			if (assets == nullptr)
+				return Lua::RaiseError(call, "asset service is unavailable");
+			// Loading (an import when the clip is not cached) and decoding are host work, outside the callback budget.
+			Result<uint64_t> digest = MakeError(ErrorCode::Unsupported, "the audio clip {} was not decoded", handle.ToString());
+			Checked(call, call.Engine->RunHostOperation([assets, handle, &digest]() -> Status
+			{
+				Result<AssetRef<Asset>> loaded = assets->Load(handle);
+				if (!loaded)
+				{
+					digest = std::unexpected(std::move(loaded).error());
+					return {};
+				}
+				const AssetRef<AudioClipData> clip = AssetCast<AudioClipData>(*loaded);
+				if (clip == nullptr)
+				{
+					digest = MakeError(ErrorCode::Validation, "Test.GetAudioClipDigest needs an AudioClip, but {} is a {}", assets->GetReferencePath(handle),
+						AssetTypeToString((*loaded)->GetAssetType()));
+					return {};
+				}
+				digest = ComputeAudioClipDigest(*clip);
+				return {};
+			}));
+			if (!digest)
+				return Lua::RaiseError(call, digest.error());
+			Lua::PushString(call, std::format("{:016x}", *digest));
+			return 1;
+		}
+
 		static int GetScriptErrors(ScriptCall& call)
 		{
 			uint64_t since = 0;
@@ -554,7 +614,9 @@ namespace Engine {
 				.Function("GetStateHash", Utils::GetStateHash, "() -> string", "Read the canonical simulated state hash: the world (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input. It includes the tick, so two reads at different ticks always differ: compare two runs with input.replay's stateHash instead.", pure)
 				.Function("GetLastExtraction", Utils::GetLastExtraction, "() -> TestExtraction", "Read the last completed render extraction.", pure)
 				.Function("GetExtractedPosition", Utils::GetExtractedPosition, "(entity: Entity) -> vector?", "Read an entity's position in the last render snapshot.", pure)
-				.Function("GetScriptErrors", Utils::GetScriptErrors, "(since: number?) -> {ScriptError}", std::format("Read occurrences newer than an exclusive error cursor; claimed errors remain visible. The VM keeps the {} distinct errors with the latest occurrences.", MaxScriptErrorEntries), pure);
+				.Function("GetScriptErrors", Utils::GetScriptErrors, "(since: number?) -> {ScriptError}", std::format("Read occurrences newer than an exclusive error cursor; claimed errors remain visible. The VM keeps the {} distinct errors with the latest occurrences.", MaxScriptErrorEntries), pure)
+				.Function("GetAudioClipDigest", Utils::GetAudioClipDigest, "(clip: AssetRef) -> string",
+					"Returns the XXH64 of an audio clip's samples decoded to 32-bit float at its own rate, as 16 hexadecimal digits; test suites only.", pure);
 			return {};
 		}
 

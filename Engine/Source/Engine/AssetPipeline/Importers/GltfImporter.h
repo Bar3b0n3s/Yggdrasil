@@ -48,10 +48,13 @@ namespace Engine {
 	//   - "material:<index>[:<name>]": one Material per glTF material (metallic-roughness factors and textures,
 	//     KHR_materials_emissive_strength, KHR_texture_transform scale and offset, alpha mode and cutoff, double-sided);
 	//   - "texture:<image index>" (colour data), "texture:<image index>:linear" (metallic-roughness, occlusion) and
-	//     "texture:<image index>:normal" (normal maps): Textures through TextureImporter::ImportTextureFromMemory, only for
-	//     images that have no Texture meta of their own. An image file with its own Texture meta is referenced by that
-	//     standalone handle instead and not imported again ("GltfImporter: an image with its own Texture meta is
-	//     referenced, not duplicated"; §6.4); its own settings apply.
+	//     "texture:<image index>:normal" (normal maps): Textures through TextureImporter::ImportTextureFromMemory with mips
+	//     and Compression Auto, so each compresses by its usage (BC7 for colour and linear data, BC5 for normal maps; M23,
+	//     Docs/Decisions/0034-m23-contract.md decision 13), only for images that have no Texture meta of their own. A
+	//     texture artifact cached before TextureData version 2 is outdated, so the cache discards it and the import is
+	//     rebuilt (AssetCache::Find, §7.5; decision 20). An image file with its own Texture meta is referenced by that
+	//     standalone handle instead and not imported again ("GltfImporter: an image with its own Texture meta is referenced,
+	//     not duplicated"; §6.4); its own settings apply.
 	//   Names in keys are the glTF names with every character outside [A-Za-z0-9_-] replaced by '_' (empty: no name part).
 	//
 	// Buffers and images may be embedded (.glb binary chunk, bufferView images), data URIs, or relative external files. The

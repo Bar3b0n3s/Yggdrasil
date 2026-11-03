@@ -292,6 +292,7 @@ namespace Engine {
 			candidate.ImageCubeArray = features.features.imageCubeArray == VK_TRUE;
 			candidate.ShaderStorageImageExtendedFormats = features.features.shaderStorageImageExtendedFormats == VK_TRUE;
 			candidate.FillModeNonSolid = features.features.fillModeNonSolid == VK_TRUE;
+			candidate.TextureCompressionBC = features.features.textureCompressionBC == VK_TRUE;
 			candidate.DeviceFault = hasDeviceFaultExtension && faultFeatures.deviceFault == VK_TRUE;
 			candidate.HostImageCopy = queryVulkan14 && features14.hostImageCopy == VK_TRUE && CanHostCopyToShaderReadOnly(device);
 
@@ -778,6 +779,9 @@ namespace Engine {
 		// Per-fragment pancaking needs no device feature (ShadowPass, Shadow.slang): only the test restriction turns it off.
 		m_Info.DepthClamp = !m_Specification.DisableDepthClamp;
 		m_Info.FillModeNonSolid = candidate.FillModeNonSolid;
+		// M23 (decision 15): BC textures as their blocks, unless the test restriction leaves the feature off so the
+		// GpuResourceCache's decode fallback runs on a device that has it.
+		m_Info.TextureCompressionBC = candidate.TextureCompressionBC && !m_Specification.DisableTextureCompressionBC;
 		m_Info.PortabilitySubset = candidate.PortabilitySubset;
 		m_Info.BloomFormat = selection.BloomFormat;
 		m_Info.MaxMemoryAllocationCount = chosen.MaxMemoryAllocationCount;
@@ -812,6 +816,7 @@ namespace Engine {
 		features.features.imageCubeArray = VK_TRUE;
 		features.features.shaderStorageImageExtendedFormats = VK_TRUE;
 		features.features.fillModeNonSolid = m_Info.FillModeNonSolid ? VK_TRUE : VK_FALSE;
+		features.features.textureCompressionBC = m_Info.TextureCompressionBC ? VK_TRUE : VK_FALSE;
 		void** tail = &features13.pNext;
 		if (m_Info.HostImageCopy)
 		{
@@ -917,6 +922,7 @@ namespace Engine {
 		addPath(m_Info.DeviceFault, "device fault");
 		addPath(m_Info.DepthClamp, "shadow pancaking");
 		addPath(m_Info.FillModeNonSolid, "wireframe");
+		addPath(m_Info.TextureCompressionBC, "BC textures");
 		addPath(m_Info.PortabilitySubset, "portability subset");
 		addPath(m_Info.BloomFormat == nvrhi::Format::R11G11B10_FLOAT, "B10G11R11 bloom");
 		const std::string_view validation = !m_Info.Validation ? "off" : (m_Info.SynchronizationValidation ? "on, with synchronization" : "on");

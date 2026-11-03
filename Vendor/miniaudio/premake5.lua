@@ -2,12 +2,16 @@
 -- The implementation translation unit is the local miniaudio_vorbis.c (VENDOR.md, "Local additions"): upstream's
 -- miniaudio.c (MINIAUDIO_IMPLEMENTATION + miniaudio.h) with stb_vorbis (Vendor/stb/stb_vorbis.c) included around it,
 -- the route miniaudio.h documents for Ogg Vorbis decoding. miniaudio.c stays vendored unmodified but is not compiled.
+-- Ogg Opus (M23, Docs/Decisions/0034-m23-contract.md decision 16): upstream's unmodified libopus decoding backend,
+-- extras/decoders/libopus/miniaudio_libopus.c, its own translation unit over opusfile, libopus and libogg
+-- (Vendor/opusfile, Vendor/libopus, Vendor/libogg), which the engine registers as a custom decoding backend.
 --
 -- Consumers include <miniaudio.h> with includedirs { "%{wks.location}/Vendor/miniaudio" } (adjust to the
 -- workspace layout) and should use the same configuration defines as this project (see VENDOR.md):
 --     defines { "MA_NO_ENCODING" }
 --     filter "system:macosx"  defines { "MA_NO_RUNTIME_LINKING" }
--- Executables must link: Linux { "dl", "pthread", "m" };
+-- Executables must link opusfile, opus and ogg after miniaudio (Dependencies.lua UseMiniaudio()), and:
+-- Linux { "dl", "pthread", "m" };
 -- macOS { "CoreFoundation.framework", "CoreAudio.framework", "AudioToolbox.framework" }; Windows: nothing.
 
 project "miniaudio"
@@ -19,18 +23,26 @@ project "miniaudio"
 	objdir ("%{wks.location}/bin-int/" .. OutputDir .. "/%{prj.name}")
 
 	-- Mirrors add_library(miniaudio miniaudio.c miniaudio.h) in upstream CMakeLists.txt, with the local implementation
-	-- translation unit in place of miniaudio.c (Ogg Vorbis through stb_vorbis, VENDOR.md).
+	-- translation unit in place of miniaudio.c (Ogg Vorbis through stb_vorbis, VENDOR.md), and upstream's libopus decoding
+	-- backend, a translation unit of its own (Ogg Opus, VENDOR.md).
 	files
 	{
 		"miniaudio.h",
 		"miniaudio_vorbis.c",
+		"extras/decoders/libopus/miniaudio_libopus.h",
+		"extras/decoders/libopus/miniaudio_libopus.c",
 	}
 
-	-- "../stb" holds stb_vorbis.c, which miniaudio_vorbis.c includes; nothing else of stb is used here.
+	-- "../stb" holds stb_vorbis.c, which miniaudio_vorbis.c includes; nothing else of stb is used here. The libogg,
+	-- libopus and opusfile include directories are for miniaudio_libopus.c, which includes <opusfile.h> (no defines:
+	-- their headers read none of the libraries' configuration macros, VENDOR.md).
 	includedirs
 	{
 		".",
 		"../stb",
+		"../libogg/include",
+		"../libopus/include",
+		"../opusfile/include",
 	}
 
 	-- Configuration defines. These must match what consumers see when they include miniaudio.h.

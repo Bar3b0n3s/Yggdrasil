@@ -77,6 +77,26 @@ class RendererIITests(AutomationTestCase):
         self.assertTrue(all((view["width"], view["height"]) != (73, 51)
                             for view in following["views"]))
 
+        # M23 (R-PLS, Docs/Decisions/0034-m23-contract.md decision 18): five shadow-casting point lights around the
+        # cube, one more than a view shadows: the views report four shadowed and one dropped, with a PointShadows pass.
+        for index in range(5):
+            rendered.call("entity.create", {"name": f"Bulb{index}", "components": {
+                "Transform": {"Translation": [index - 2.0, 1.5, 1.5]},
+                "PointLight": {"Intensity": 10 - index, "Range": 6, "CastShadows": True}}})
+        deadline = time.monotonic() + 60
+        while True:
+            observed = rendered.call("stats.get")
+            shadowed = [view for view in observed["views"]
+                        if view["available"] and view["shadowedPointLights"] == 4 and view["droppedPointShadows"] == 1]
+            if shadowed or time.monotonic() >= deadline:
+                break
+        self.assertTrue(shadowed, observed)
+        for view in shadowed:
+            passes = {entry["name"]: entry for entry in view["passes"]}
+            self.assertIn("PointShadows", passes, view)
+            self.assertGreater(passes["PointShadows"]["drawCalls"], 0, view)
+            self.assertGreaterEqual(view["shadowDraws"], passes["PointShadows"]["drawCalls"], view)
+
     def test_viewport_pick_deterministic(self) -> None:
         client, _ = self.open_editor_with_scene()
         self.make_scene(client)
@@ -220,6 +240,14 @@ class RendererIITests(AutomationTestCase):
         repeated = client.call("project.validate", {"scope": "project"})["diagnostics"]
         self.assertEqual([item["id"] for item in repeated if item["code"] == "RENDER_SPOT_SHADOW_BUDGET"],
                          [budget[0]["id"]])
+        # M23 (R-PLS): four shadow-casting point lights fit the budget, a fifth is warned about, unfixably.
+        for index in range(5):
+            client.call("entity.create", {"name": f"Bulb{index}", "components": {"PointLight": {"CastShadows": True}}})
+            report = client.call("project.validate", {"scope": "scene"})["diagnostics"]
+            points = [item for item in report if item["code"] == "RENDER_POINT_SHADOW_BUDGET"]
+            self.assertEqual(len(points), 1 if index == 4 else 0, report)
+        self.assertEqual(points[0]["severity"], "Warning")
+        self.assertFalse(points[0]["autoFixable"])
 
     def test_renderer_debug_outputs_and_wireframe(self) -> None:
         client, _ = self.open_editor_with_scene()

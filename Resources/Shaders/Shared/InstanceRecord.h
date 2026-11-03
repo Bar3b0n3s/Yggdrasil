@@ -11,9 +11,12 @@ namespace Engine {
 #endif
 
 	// One instance of an instanced mesh draw (M23, C23.1, R-INST; Docs/Decisions/0034-m23-contract.md decision 2): an entry
-	// of the view's Instances structured buffer (t10 of descriptor set 0), which every mesh pipeline's vertex shader reads at
-	// the draw's first instance plus its instance index (DrawConstants, stream A). The Prepare stage writes one per mesh draw
-	// item and submesh draw of the view, from the snapshot's MeshDrawItem:
+	// of the view's Instances structured buffer (t10 of descriptor set 0 of the Scene, Shadow and SelectionMask programs),
+	// which every mesh pipeline's vertex shader reads at the draw's first instance plus its instance index (DrawConstants
+	// version 2, SelectionMaskConstants). The Prepare stage writes one per submesh draw of the view, from the snapshot's
+	// MeshDrawItem: the camera's opaque draws in their order, its transparent draws in theirs, the shadow casters' draws
+	// (ShadowPass::PrepareCasters) and the selection mask's (SelectionPass::PrepareDraws), so the instances of every
+	// instanced draw are adjacent; RecordViewSetup writes them once per view. Its members:
 	//   - World: the item's rendered world matrix (MeshDrawItem::World);
 	//   - PreviousWorld: the item's world matrix at the previous frame's render, for motion vectors (M26's TAA, plan §4.1):
 	//     MeshDrawItem::PreviousWorld, or World when the item has none (no motion), which is every item until M26;

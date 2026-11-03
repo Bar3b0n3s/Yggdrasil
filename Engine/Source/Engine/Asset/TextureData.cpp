@@ -33,6 +33,12 @@ namespace Engine {
 			case TextureFormat::RGBA8Unorm: return "RGBA8Unorm";
 			case TextureFormat::RGBA8Srgb:  return "RGBA8Srgb";
 			case TextureFormat::R8Unorm:    return "R8Unorm";
+			case TextureFormat::BC1Unorm:   return "BC1Unorm";
+			case TextureFormat::BC1Srgb:    return "BC1Srgb";
+			case TextureFormat::BC4Unorm:   return "BC4Unorm";
+			case TextureFormat::BC5Unorm:   return "BC5Unorm";
+			case TextureFormat::BC7Unorm:   return "BC7Unorm";
+			case TextureFormat::BC7Srgb:    return "BC7Srgb";
 		}
 		return "Unknown";
 	}
@@ -52,8 +58,8 @@ namespace Engine {
 
 	Status ValidateTextureData(const TextureData& texture)
 	{
-		const uint32_t bytesPerPixel = GetTextureBytesPerPixel(texture.Format);
-		if (bytesPerPixel == 0)
+		// A known format has texel bytes or a block codec (ComputeTextureLevelSize is 0 for a value outside the enumeration).
+		if (ComputeTextureLevelSize(texture.Format, 1, 1) == 0)
 			return MakeError(ErrorCode::Validation, "unknown texture format {}", std::to_underlying(texture.Format));
 		if (texture.Width == 0 || texture.Height == 0 || texture.Width > MaxTextureDimension || texture.Height > MaxTextureDimension)
 		{
@@ -79,7 +85,7 @@ namespace Engine {
 				return MakeError(ErrorCode::Validation, "mip level {} is {}x{}; a {}x{} texture's level {} is {}x{}", level, mip.Width, mip.Height,
 					texture.Width, texture.Height, level, width, height);
 			}
-			const uint64_t size = static_cast<uint64_t>(width) * height * bytesPerPixel;
+			const uint64_t size = ComputeTextureLevelSize(texture.Format, width, height);
 			if (mip.Size != size)
 				return MakeError(ErrorCode::Validation, "mip level {} holds {} bytes; {}x{} {} texels take {}", level, mip.Size, width, height,
 					TextureFormatToString(texture.Format), size);

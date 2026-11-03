@@ -129,6 +129,7 @@ namespace Engine {
 			CHECK(point.Color == glm::vec3(1.0f));
 			CHECK(point.Intensity == 10.0f);
 			CHECK(point.Range == 10.0f);
+			CHECK_FALSE(point.CastShadows);
 			CHECK(point.SourceRadius == 0.05f);
 
 			const SpotLightComponent spot;
@@ -333,8 +334,9 @@ namespace Engine {
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			const std::vector<std::string> categories = { "Core", "Rendering", "Physics", "Audio", "Scripting" };
 			// The components that migrated since their first version: Prefab's override paths and Script's list of slots (M20,
-			// Docs/Decisions/0031-m20-contract.md decisions 10 and 17). Every other component is at version 1.
-			const std::map<std::string, uint32_t> migrated = { { "Prefab", 2 }, { "Script", 2 } };
+			// Docs/Decisions/0031-m20-contract.md decisions 10 and 17), and PointLight's CastShadows (M23,
+			// Docs/Decisions/0034-m23-contract.md decision 3). Every other component is at version 1.
+			const std::map<std::string, uint32_t> migrated = { { "PointLight", 2 }, { "Prefab", 2 }, { "Script", 2 } };
 			for (const ComponentInfo* component : registry->GetComponents())
 			{
 				INFO(component->GetName());

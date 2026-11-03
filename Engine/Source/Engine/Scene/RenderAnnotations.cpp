@@ -133,6 +133,8 @@ namespace Engine {
 				illumination = true;
 				if (light.Type == RenderLightType::Spot && light.CastShadows)
 					++result.ShadowedSpotLights;
+				if (light.Type == RenderLightType::Point && light.CastShadows)
+					++result.ShadowedPointLights;
 			}
 		const RenderEnvironment& environment = snapshot.Environment;
 		if (!std::isfinite(environment.Intensity) || !Utils::IsFiniteAnnotationVector(environment.FallbackColor))

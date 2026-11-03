@@ -465,7 +465,7 @@ namespace Engine {
 		// draws, a shadow-casting point light and the clustered loop recovers byte-identically, and the recovered renderer
 		// records the PointShadows and LightClusters passes again.
 		TEST_CASE("SceneRenderer: a device loss recreates the instances, the clusters and the point shadows and renders the same image"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);

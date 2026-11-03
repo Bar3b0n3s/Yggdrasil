@@ -13,6 +13,7 @@
 #include "Engine/App/EngineContext.h"
 #include "Engine/Asset/AudioClipData.h"
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/CookedFormat.h"
 #include "Engine/Asset/EnvironmentData.h"
 #include "Engine/Asset/IEnvironmentBaker.h"
 #include "Engine/Asset/PakReader.h"
@@ -330,6 +331,7 @@ namespace Engine {
 
 			[[nodiscard]] EditorContext& GetEditor() { return *m_Editor; }
 			[[nodiscard]] std::filesystem::path GetProjectRoot() const { return m_Directory / "TestProject"; }
+			[[nodiscard]] std::filesystem::path GetEngineCacheDirectory() const { return m_Directory / "EngineCache"; }
 		private:
 			Test::TempDirectory m_Directory;
 			Scope<EngineContext> m_Engine;
@@ -1726,6 +1728,83 @@ namespace Engine {
 			CHECK(win->Reason == ExportReachReason::ComputedLoad);
 			CHECK(win->From == "Assets/Scripts/Sounds.luau");
 			CHECK(win->Line == 3);
+		}
+
+		// M23 (Docs/Decisions/0034-m23-contract.md decision 20): AudioClipData went to version 2 while SoundEffectImporter kept
+		// its version, so a cache cooked before M23 holds version 1 clips under the current keys, both in the engine cooked
+		// cache (the presets) and in a project's Library/Cache (a project's .sfx). The exporter takes those artifacts without
+		// loading them (Engine.pak's built-ins, Game.pak's cooked sources), and packs only artifacts the Runtime's loader reads.
+		TEST_CASE("Exporter: an artifact a cache holds at an outdated payload format version is cooked again, never packaged")
+		{
+			EngineResourcesEditor fixture;
+			EditorContext& editor = fixture.GetEditor();
+			const Result<std::string> preset = FileSystem::ReadText(Test::GetRepositoryRoot() / "Resources" / "Audio" / "Coin.sfx");
+			REQUIRE(preset.has_value());
+			WriteTestFile(fixture.GetProjectRoot() / "Assets" / "Audio" / "Ding.sfx", *preset);
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			const std::optional<AssetHandle> ding = editor.GetAssets().Resolve("Assets/Audio/Ding.sfx");
+			REQUIRE(ding.has_value());
+			const Entity coin = editor.GetScene().CreateEntity("Coin");
+			coin.AddComponent<AudioSourceComponent>().Clip = TypedAssetHandle<AssetType::AudioClip>(BuiltinAssetHandles::CoinSound);
+			const Entity bell = editor.GetScene().CreateEntity("Bell");
+			bell.AddComponent<AudioSourceComponent>().Clip = TypedAssetHandle<AssetType::AudioClip>(*ding);
+			SaveScene(editor);
+
+			const Test::TempDirectory binaries("ExportBinaries");
+			const std::filesystem::path binaryRoot = MakeRealBinaryRoot(binaries);
+			const auto exportGame = [&editor, &binaryRoot]()
+			{
+				Result<Scope<Exporter>> exporter = Exporter::Start(editor, MakeSpecification(binaryRoot));
+				REQUIRE_MESSAGE(exporter.has_value(), exporter.error().ToString());
+				std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+				REQUIRE(outcome.has_value());
+				REQUIRE_MESSAGE(outcome->has_value(), outcome->error().ToString());
+				return std::move(**outcome);
+			};
+			// Both clips in the export's paks: the preset in Engine.pak, the project's in Game.pak; each loads.
+			const auto checkPackaged = [&ding](const ExportReport& report)
+			{
+				const std::filesystem::path data = PackageResources(report.OutputDirectory, "TestProject") / "Data";
+				const Result<Ref<const PakReader>> enginePak = PakReader::Open(data / "Engine.pak");
+				REQUIRE_MESSAGE(enginePak.has_value(), enginePak.error().ToString());
+				CheckSoundPresets(**enginePak, std::array{ BuiltinAssetHandles::CoinSound });
+				const Result<Ref<const PakReader>> gamePak = PakReader::Open(data / "Game.pak");
+				REQUIRE_MESSAGE(gamePak.has_value(), gamePak.error().ToString());
+				const PakEntry* entry = (*gamePak)->FindByHandle(*ding);
+				REQUIRE(entry != nullptr);
+				const Result<Buffer> bytes = (*gamePak)->ReadEntry(*entry);
+				REQUIRE(bytes.has_value());
+				const Result<AssetRef<AudioClipData>> clip = LoadCookedAudioClip(*bytes);
+				CHECK_MESSAGE(clip.has_value(), clip.error().ToString());
+			};
+			checkPackaged(exportGame());
+
+			// Each clip's cached artifact (<cache>/<handle>/<key>.bin) rewritten as a build before M23 cooked it: version 2 is
+			// version 1's layout, so the same payload under the earlier version.
+			const auto writeOutdated = [](const std::filesystem::path& directory)
+			{
+				const Result<std::vector<std::filesystem::path>> files = FileSystem::ListDirectory(directory, false);
+				REQUIRE_MESSAGE(files.has_value(), files.error().ToString());
+				uint32_t written = 0;
+				for (const std::filesystem::path& file : *files)
+				{
+					if (file.extension() != ".bin")
+						continue;
+					const Result<Buffer> bytes = FileSystem::ReadFile(file);
+					REQUIRE(bytes.has_value());
+					const Result<CookedArtifactView> view = ReadCookedArtifact(*bytes);
+					REQUIRE(view.has_value());
+					REQUIRE(view->Header.FormatVersion == AudioClipData::FormatVersion);
+					const Buffer outdated = WriteCookedArtifact(AssetType::AudioClip, static_cast<uint16_t>(AudioClipData::FormatVersion - 1),
+						view->Header.ImporterVersion, view->Payload);
+					REQUIRE(FileSystem::WriteFileAtomic(file, outdated, { .KeepBackup = false }).has_value());
+					++written;
+				}
+				REQUIRE(written == 1);
+			};
+			writeOutdated(fixture.GetEngineCacheDirectory() / BuiltinAssetHandles::CoinSound.ToString());
+			writeOutdated(fixture.GetProjectRoot() / "Library" / "Cache" / ding->ToString());
+			checkPackaged(exportGame());
 		}
 
 		// The merge with M19 (Docs/Decisions/0031-m20-contract.md, "Merge with M19"): the pruned export reads the asset handles

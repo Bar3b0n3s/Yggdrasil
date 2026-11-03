@@ -12,6 +12,7 @@ namespace Engine {
 
 	class GraphicsDevice;
 	class ImGuiRenderer;
+	struct TextureData;
 	// Main-thread host. Draw only records requested keys; Pump uploads outside ImGui traversal.
 	// Borrowed editor/device/renderer outlive this owner; Reset retires texture keys before project unmount.
 	// A registration belongs to an asset and size in one binding and follows the cache's current image: a regenerated
@@ -37,9 +38,15 @@ namespace Engine {
 		[[nodiscard]] uint64_t FindTexture(const ThumbnailRequest& request);
 		[[nodiscard]] Status Pump();
 		void Reset();
-		// The renderer the cache calls: decoded pixels for textures, and for meshes, materials, prefabs and environments
-		// an offscreen capture of a framed preview scene with the open project's Rendering quality settings.
+		// The renderer the cache calls: decoded pixels for textures (RenderTexturePreview), and for meshes, materials, prefabs
+		// and environments an offscreen capture of a framed preview scene with the open project's Rendering quality settings.
 		[[nodiscard]] Result<Image> Render(const ThumbnailRequest& request);
+		// The preview of `texture` without a GPU: its first level fitted, centred, into a `size` x `size` RGBA8 image on opaque
+		// black, sampled nearest. A block-compressed level is decoded first, as the GpuResourceCache's decode fallback decodes
+		// it (M23, Docs/Decisions/0034-m23-contract.md decision 13): RGBA8 (BC5 as (x, y, 0, 255)), and BC4's red channel
+		// alone, which previews grey with alpha 255 like an R8 texture. Pure. Errors: those of ValidateTextureData,
+		// CreateImage and DecompressTextureBlocks.
+		[[nodiscard]] static Result<Image> RenderTexturePreview(const TextureData& texture, uint32_t size);
 	private:
 		struct Entry
 		{

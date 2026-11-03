@@ -14,19 +14,19 @@ namespace Engine {
 	// Registry enum "TextureUsage": how a texture's texels are interpreted (§7.4 "sRGB or linear by usage setting").
 	enum class TextureUsage : uint8_t
 	{
-		Color,    // base colour, emissive: TextureFormat::RGBA8Srgb, mips filtered in linear light (sRGB-correct)
-		Linear,   // data (metallic-roughness, occlusion, masks): RGBA8Unorm, mips filtered on the stored values
-		NormalMap // tangent-space normals: RGBA8Unorm, every generated mip renormalized to unit vectors (level 0 as authored)
+		Color,    // base colour, emissive: BC7Srgb (None: RGBA8Srgb), mips filtered in linear light (sRGB-correct)
+		Linear,   // data (metallic-roughness, occlusion, masks): BC7Unorm (None: RGBA8Unorm), mips filtered on the stored values
+		NormalMap // tangent-space normals: BC5Unorm (None: RGBA8Unorm), every generated mip renormalized to unit vectors (level 0 as authored)
 	};
 
 	// M23 (C23.1, R-TEXC-BC; phase 2's ledger, ADR 0028; Docs/Decisions/0034-m23-contract.md decision 13): registry enum
 	// "TextureCompression", whether an import compresses its levels with the BC codecs (Asset/TextureCompression.h).
 	//   Auto: by usage: Color BC7 (sRGB); Linear BC7 (unorm), whatever its texels, since a Linear texture may be a
 	//         metallic-roughness map, which the shader reads from G and B, and BC4 samples as (r, 0, 0, 1); NormalMap BC5
-	//         (x and y; the shader reconstructs z). The default.
+	//         (x and y; the shader reconstructs z, MaterialFlagNormalMapTwoChannel). The default.
 	//   None: the uncompressed formats of TextureImporter version 1 (RGBA8). Sprite, tile and UI art takes it (ADR 0028's
 	//         ledger), and the built-in procedural textures and font atlases are never compressed.
-	// EnvironmentImportSettings takes it too: Auto stores the cubes as BC6H, None as RGBA16F.
+	// EnvironmentImportSettings takes it too: Auto stores the cubes as BC6H, None as RGBA16F. TextureImporter registers it.
 	enum class TextureCompression : uint8_t
 	{
 		Auto,
@@ -38,24 +38,30 @@ namespace Engine {
 	{
 		TextureUsage Usage = TextureUsage::Color;
 		bool GenerateMips = true; // the full chain to 1x1 (§7.4: CPU mips with stb_image_resize2)
-		// M23 (C23.1, TextureImporter version 2): appended after GenerateMips, so earlier .meta settings read as Auto. Stream
-		// X registers it with TextureImporter version 2 (until then it is Auto and never read).
+		// M23 (C23.1, TextureImporter version 2): appended after GenerateMips, so earlier .meta settings, which do not hold
+		// it, read as Auto.
 		TextureCompression Compression = TextureCompression::Auto;
 	};
 
 	// PNG, JPEG, TGA and BMP (§7.4), decoded from memory with stb_image (through the implementation in
 	// Graphics/ThirdParty/StbImageImplementation.cpp, ADR 0009 decision 11), expanded to RGBA8 (grey and grey-alpha
 	// replicate, missing alpha becomes 255), mips made with stb_image_resize2 (sRGB-aware for Color; for NormalMap the
-	// generated levels are renormalized and level 0 keeps the authored texels), cooked as one TextureData (CookTexture). A
-	// width or height above MaxTextureDimension (16384), zero, or a decode failure is ImportFailed naming stb's reason.
-	// Deterministic: stb_image_resize2 runs without SIMD-dependent rounding differences across configurations (its
-	// implementation TU sets fp_contract off, Vendor/stb/VENDOR.md). The glTF importer reuses ImportTextureFromMemory for
-	// its texture sub-assets.
+	// generated levels are renormalized and level 0 keeps the authored texels), then, with Compression Auto, every level
+	// compressed with CompressTextureBlocks (BC7Srgb for Color, BC7Unorm for Linear, BC5Unorm for NormalMap; None keeps the
+	// RGBA8 levels: RGBA8Srgb for Color, RGBA8Unorm otherwise), cooked as one TextureData (CookTexture). A width or height
+	// above MaxTextureDimension (16384), zero, or a decode failure is ImportFailed naming stb's reason; a level the codec
+	// refuses is ImportFailed naming the level. Deterministic: stb_image_resize2 runs without SIMD-dependent rounding
+	// differences across configurations (its implementation TU sets fp_contract off, Vendor/stb/VENDOR.md), and the block
+	// codec compresses to the same bytes in every configuration of one compiler (Asset/TextureCompression.h). The glTF
+	// importer reuses ImportTextureFromMemory for its texture sub-assets.
+	//
+	// Version 2 (M23, Docs/Decisions/0034-m23-contract.md decision 13): the Compression setting, Auto by default, so a
+	// texture imported by version 1 cooks again as BC7 or BC5.
 	class TextureImporter final : public IAssetImporter
 	{
 	public:
 		static constexpr std::string_view Id = "Texture";
-		static constexpr uint32_t Version = 1;
+		static constexpr uint32_t Version = 2;
 
 		[[nodiscard]] std::string_view GetId() const override { return Id; }
 		[[nodiscard]] uint32_t GetVersion() const override { return Version; }
@@ -73,7 +79,7 @@ namespace Engine {
 		[[nodiscard]] static Result<Buffer> ImportTextureFromMemory(std::span<const std::byte> encoded, const TextureImportSettings& settings,
 			std::string_view name);
 
-		// Registers TextureUsage and TextureImportSettings.
+		// Registers TextureUsage, TextureCompression and TextureImportSettings.
 		static void RegisterTypes(TypeRegistry& registry);
 	};
 

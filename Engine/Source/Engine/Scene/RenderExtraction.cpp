@@ -456,7 +456,7 @@ namespace Engine {
 						.Intensity = light->Intensity,
 						.Range = light->Range,
 						.SourceRadius = light->SourceRadius,
-						.CastShadows = false,
+						.CastShadows = light->CastShadows,
 					},
 					getWorld(), id);
 			}

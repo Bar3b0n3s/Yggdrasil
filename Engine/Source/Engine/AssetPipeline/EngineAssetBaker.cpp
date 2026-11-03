@@ -147,7 +147,8 @@ namespace Engine {
 		}
 
 		// The cached bake of `pending` when it is valid for the current inputs; nullopt when it must be baked (missing, or
-		// discarded by the cache as corrupted). Errors: the cache's (Io).
+		// discarded by the cache as corrupted or as outdated: an artifact an earlier build cooked at another payload format
+		// version under this key, AssetCache::Find). Errors: the cache's (Io).
 		static Result<std::optional<CachedImport>> FindCurrentBake(const VirtualFileSystem& vfs, const AssetCache& cache, const PendingBake& pending)
 		{
 			ENGINE_TRY_ASSIGN(std::optional<CachedImport> cached, cache.Find(pending.Handle, pending.Key));

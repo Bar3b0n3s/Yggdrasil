@@ -145,6 +145,16 @@
 			]
 		},
 		{
+			"Name": "LightClusters",
+			"File": "Passes/LightClusters.slang",
+			"Entries": [
+				{
+					"Name": "CSMain",
+					"Stage": "compute"
+				}
+			]
+		},
+		{
 			"Name": "MatrixConvention",
 			"File": "Passes/MatrixConvention.slang",
 			"Entries": [
@@ -178,6 +188,14 @@
 			"Entries": [
 				{
 					"Name": "VSMain",
+					"Stage": "vertex"
+				},
+				{
+					"Name": "VSPicking",
+					"Stage": "vertex"
+				},
+				{
+					"Name": "VSOverdraw",
 					"Stage": "vertex"
 				},
 				{

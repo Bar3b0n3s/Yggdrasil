@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/Audio/AudioDecoder.h"
 
+#include "Engine/Audio/Private/MiniaudioOpus.h"
 #include "Engine/Audio/Private/MiniaudioSupport.h"
 #include "Engine/Core/Assert.h"
 
@@ -24,14 +25,15 @@ namespace Engine {
 	namespace {
 
 		// The formats a decode accepts, for the messages of bytes that are none of them.
-		constexpr std::string_view SupportedFormats = "WAV, FLAC, MP3 or Ogg Vorbis";
+		constexpr std::string_view SupportedFormats = "WAV, FLAC, MP3, Ogg Vorbis or Ogg Opus";
 		constexpr uint32_t MinSampleRate = 8000;
 		constexpr uint32_t MaxSampleRate = 192000;
 		// Frames decoded per ma_decoder_read_pcm_frames call.
 		constexpr uint64_t DecodeChunkFrames = 4096;
-		// Ogg pages (RFC 3533): a 27-byte header with the flags at byte 5 and the segment count at byte 26, then the lacing
-		// values and the body.
+		// Ogg pages (RFC 3533): a 27-byte header with the flags at byte 5, the serial number at bytes 14 to 17 and the
+		// segment count at byte 26, then the lacing values and the body.
 		constexpr size_t OggPageHeaderSize = 27;
+		constexpr size_t OggPageSerialOffset = 14;
 		constexpr uint8_t OggContinuedPacket = 0x01;
 		constexpr uint8_t OggFirstPage = 0x02;
 		constexpr uint8_t OggEndOfStream = 0x04;
@@ -45,11 +47,19 @@ namespace Engine {
 		// codebook's entries times dimensions, in int. A codebook of more values than this, far beyond any encoder's, is
 		// refused, so those tables stay within a few MiB and their sizes never overflow.
 		constexpr uint64_t MaxVorbisCodebookValues = uint64_t{ 1 } << 20;
+		// The Ogg Opus identification header (RFC 7845 section 5.1): "OpusHead", the version, the channel count, the
+		// pre-skip, the input sample rate and the output gain, then the channel mapping family at byte 18; at least 19 bytes.
+		constexpr size_t OpusHeadMinimumSize = 19;
+		constexpr size_t OpusHeadMappingFamilyOffset = 18;
+		// The channel mapping families a clip may use (RFC 7845 section 5.1.1): 0, mono or stereo, and 1, Vorbis channel
+		// order, whose channel count is checked once the decoder has opened the file.
+		constexpr uint8_t MaxOpusMappingFamily = 1;
 
-		// One page of an Ogg file: its header flags, its lacing values and its body.
+		// One page of an Ogg file: its header flags, its serial number, its lacing values and its body.
 		struct OggPage
 		{
 			uint8_t Flags = 0;
+			uint32_t Serial = 0;
 			std::span<const std::byte> Lacing{};
 			std::span<const std::byte> Body{};
 		};
@@ -126,10 +136,17 @@ namespace Engine {
 			ScopedDecoder(const ScopedDecoder&) = delete;
 			ScopedDecoder& operator=(const ScopedDecoder&) = delete;
 
-			[[nodiscard]] ma_result Initialize(std::span<const std::byte> bytes, ma_encoding_format format)
+			// `opus`, when set, is the only custom backend (Ogg Opus, whose format is ma_encoding_format_unknown); it
+			// outlives the decoder.
+			[[nodiscard]] ma_result Initialize(std::span<const std::byte> bytes, ma_encoding_format format, MiniaudioOpusBackend* opus)
 			{
 				ma_decoder_config config = ma_decoder_config_init(ma_format_f32, 0, 0);
 				config.encodingFormat = format;
+				if (opus != nullptr)
+				{
+					config.ppCustomBackendVTables = opus->GetVTables();
+					config.customBackendCount = opus->GetVTableCount();
+				}
 				const ma_result result = ma_decoder_init_memory(bytes.data(), bytes.size(), &config, &m_Decoder);
 				m_Initialized = result == MA_SUCCESS;
 				return result;
@@ -208,11 +225,10 @@ namespace Engine {
 			return bytes.subspan(start, std::min(packetSize, bytes.size() - start));
 		}
 
-		// The codec of an Ogg stream that is not Vorbis, from its identification header, for the refusal's message.
+		// The codec of an Ogg stream that is neither Vorbis nor Opus, from its identification header, for the refusal's
+		// message.
 		static std::string_view DescribeOggCodec(std::span<const std::byte> packet)
 		{
-			if (HasPrefix(packet, 0, "OpusHead"))
-				return "Opus";
 			if (HasPrefix(packet, 0, "\177FLAC")) // 0x7F, then "FLAC"
 				return "FLAC";
 			if (HasPrefix(packet, 0, "Speex   "))
@@ -221,7 +237,7 @@ namespace Engine {
 		}
 
 		// The container of `bytes`, from its magic numbers (never from a file extension). Errors: Parse naming the supported
-		// formats, or the Ogg codec that is not Vorbis with a conversion hint.
+		// formats, or the Ogg codec that is neither Vorbis nor Opus with a conversion hint.
 		static Result<EncodedAudioFormat> DetectFormat(std::span<const std::byte> bytes)
 		{
 			if ((HasPrefix(bytes, 0, "RIFF") || HasPrefix(bytes, 0, "RIFX") || HasPrefix(bytes, 0, "RF64")) && HasPrefix(bytes, 8, "WAVE"))
@@ -233,7 +249,9 @@ namespace Engine {
 				const std::span<const std::byte> packet = GetFirstOggPacket(bytes);
 				if (HasPrefix(packet, 0, "\x01vorbis"))
 					return EncodedAudioFormat::Vorbis;
-				return std::unexpected(Error(ErrorCode::Parse, std::format("the Ogg file holds {}, not Vorbis", DescribeOggCodec(packet)))
+				if (HasPrefix(packet, 0, "OpusHead"))
+					return EncodedAudioFormat::Opus;
+				return std::unexpected(Error(ErrorCode::Parse, std::format("the Ogg file holds {}, not Vorbis or Opus", DescribeOggCodec(packet)))
 						.WithHint(std::format("convert the file to {}", SupportedFormats)));
 			}
 			if (const size_t tag = GetId3TagSize(bytes); tag != 0)
@@ -252,10 +270,20 @@ namespace Engine {
 				case EncodedAudioFormat::Flac:   return ma_encoding_format_flac;
 				case EncodedAudioFormat::Mp3:    return ma_encoding_format_mp3;
 				case EncodedAudioFormat::Vorbis: return ma_encoding_format_vorbis;
+				case EncodedAudioFormat::Opus:   return ma_encoding_format_unknown; // the custom backend (MiniaudioOpus.h)
 			}
 
 			ENGINE_CORE_ASSERT(false, "Unknown EncodedAudioFormat {}", std::to_underlying(format));
 			return ma_encoding_format_unknown;
+		}
+
+		// The serial number of the Ogg page whose complete header starts at `offset` (little-endian).
+		static uint32_t ReadPageSerial(std::span<const std::byte> bytes, size_t offset)
+		{
+			uint32_t serial = 0;
+			for (size_t index = 0; index < 4; ++index)
+				serial |= static_cast<uint32_t>(ByteAt(bytes, offset + OggPageSerialOffset + index)) << (8 * index);
+			return serial;
 		}
 
 		// The pages of an Ogg stream, which is complete when its pages tile the bytes exactly and the last one ends the
@@ -284,6 +312,7 @@ namespace Engine {
 						bytes.size() - offset);
 				}
 				pages.push_back({ .Flags = ByteAt(bytes, offset + 5),
+					.Serial = ReadPageSerial(bytes, offset),
 					.Lacing = bytes.subspan(offset + OggPageHeaderSize, segmentCount),
 					.Body = bytes.subspan(offset + OggPageHeaderSize + segmentCount, bodySize) });
 				offset += pageSize;
@@ -508,19 +537,67 @@ namespace Engine {
 			return CheckVorbisCodebooks(setup);
 		}
 
+		// An Ogg Opus file as one logical stream (RFC 7845 section 3), before opusfile reads it: the first page holds the
+		// identification header alone and begins the stream, every later page has its serial number and begins no other
+		// stream, and no page before the last ends it (ReadOggPages checked that the last one does). opusfile reads chained
+		// and multiplexed files too, but miniaudio's decoder sizes its buffers for the first link's channel count while the
+		// libopus backend writes each link's own, so a later link with more channels would be written past them. Then the
+		// channel mapping family: 0 (mono or stereo) or 1 (Vorbis channel order); the channel count itself is checked once
+		// the decoder has opened the file, as for every format. Errors: Parse; Validation for another channel mapping family
+		// (hint: convert to mono or stereo).
+		static Status CheckOpusStream(std::span<const OggPage> pages)
+		{
+			const OggPage& first = pages.front();
+			const bool firstPage = (first.Flags & (OggFirstPage | OggContinuedPacket | OggEndOfStream)) == OggFirstPage;
+			// One packet that ends on the page: every lacing value but the last is 255, and the last is less.
+			const bool alone = !first.Lacing.empty() && first.Lacing.back() != std::byte{ 0xFF }
+				&& std::ranges::all_of(first.Lacing.first(first.Lacing.size() - 1), [](std::byte lacing)
+			{
+				return lacing == std::byte{ 0xFF };
+			});
+			if (!firstPage || !alone)
+				return MakeError(ErrorCode::Parse, "corrupt Ogg Opus file: the first page does not hold the identification header alone");
+			if (first.Body.size() < OpusHeadMinimumSize)
+			{
+				return MakeError(ErrorCode::Parse, "corrupt Ogg Opus file: the identification header has {} bytes, fewer than {}", first.Body.size(),
+					OpusHeadMinimumSize);
+			}
+			for (size_t page = 1; page < pages.size(); ++page)
+			{
+				if (pages[page].Serial != first.Serial || (pages[page].Flags & OggFirstPage) != 0)
+					return MakeError(ErrorCode::Parse, "unsupported Ogg Opus file: page {} is not of the first logical stream (chained or multiplexed)", page);
+				if (page + 1 < pages.size() && (pages[page].Flags & OggEndOfStream) != 0)
+					return MakeError(ErrorCode::Parse, "corrupt Ogg Opus file: page {} ends the stream before its last page", page);
+			}
+			const uint8_t family = ByteAt(first.Body, OpusHeadMappingFamilyOffset);
+			if (family > MaxOpusMappingFamily)
+			{
+				return std::unexpected(Error(ErrorCode::Validation,
+					std::format("the Ogg Opus file uses channel mapping family {}; only families 0 and 1 (mono or stereo) are supported", family))
+						.WithHint("convert the file to mono or stereo"));
+			}
+			return {};
+		}
+
 		// The checks of ProbeEncodedAudio and DecodeEncodedAudio; keeps the samples when `samples` is set.
 		static Result<EncodedAudioInfo> Decode(std::span<const std::byte> bytes, std::vector<float>* samples)
 		{
 			ENGINE_TRY_ASSIGN(const EncodedAudioFormat format, DetectFormat(bytes));
-			if (format == EncodedAudioFormat::Vorbis)
+			if (format == EncodedAudioFormat::Vorbis || format == EncodedAudioFormat::Opus)
 			{
 				ENGINE_TRY_ASSIGN(const std::vector<OggPage> pages, ReadOggPages(bytes));
-				ENGINE_TRY(CheckVorbisHeaders(pages));
+				ENGINE_TRY(format == EncodedAudioFormat::Vorbis ? CheckVorbisHeaders(pages) : CheckOpusStream(pages));
 			}
 
+			// Declared before the decoder, which keeps its vtable's address until it is uninitialized.
+			MiniaudioOpusBackend opus;
+			const bool isOpus = format == EncodedAudioFormat::Opus;
 			ScopedDecoder decoder;
-			if (const ma_result result = decoder.Initialize(bytes, ToMiniaudioFormat(format)); result != MA_SUCCESS)
+			if (const ma_result result = decoder.Initialize(bytes, ToMiniaudioFormat(format), isOpus ? &opus : nullptr); result != MA_SUCCESS)
 				return MakeError(ErrorCode::Parse, "corrupt or truncated {} file: {}", EncodedAudioFormatToString(format), DescribeMiniaudioResult(result));
+			// An Ogg Opus file opusfile refused, which one of miniaudio's built-in decoders, tried after it, then took.
+			if (isOpus && !opus.Decodes(decoder.Get()))
+				return MakeError(ErrorCode::Parse, "corrupt Ogg Opus file: libopus cannot open it");
 
 			ma_format sampleFormat = ma_format_unknown;
 			ma_uint32 channels = 0;
@@ -538,10 +615,11 @@ namespace Engine {
 			if (sampleRate < MinSampleRate || sampleRate > MaxSampleRate)
 				return MakeError(ErrorCode::Validation, "the clip's sample rate of {} Hz is outside {} to {} Hz", sampleRate, MinSampleRate, MaxSampleRate);
 
-			// The length a WAV or FLAC header states, which a complete file decodes in full; 0 when unknown. MP3 and Vorbis
-			// lengths come from scanning the data itself (a truncated Ogg file was caught by its pages above).
+			// The length a WAV or FLAC header states, or an Ogg Opus file's last granule position (opusfile's op_pcm_total),
+			// which a complete file decodes in full; 0 when unknown. MP3 and Vorbis lengths come from scanning the data itself
+			// (a truncated Ogg file was caught by its pages above).
 			ma_uint64 declaredFrames = 0;
-			const bool statesLength = format == EncodedAudioFormat::Wav || format == EncodedAudioFormat::Flac;
+			const bool statesLength = format == EncodedAudioFormat::Wav || format == EncodedAudioFormat::Flac || isOpus;
 			if (!statesLength || ma_decoder_get_length_in_pcm_frames(&decoder.Get(), &declaredFrames) != MA_SUCCESS)
 				declaredFrames = 0;
 
@@ -612,6 +690,7 @@ namespace Engine {
 			case EncodedAudioFormat::Flac:   return "Flac";
 			case EncodedAudioFormat::Mp3:    return "Mp3";
 			case EncodedAudioFormat::Vorbis: return "Vorbis";
+			case EncodedAudioFormat::Opus:   return "Opus";
 		}
 
 		ENGINE_CORE_ASSERT(false, "Unknown EncodedAudioFormat {}", std::to_underlying(format));

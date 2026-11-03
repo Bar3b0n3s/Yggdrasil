@@ -10,7 +10,7 @@
 		"MeshRenderer": 1,
 		"Camera": 1,
 		"DirectionalLight": 1,
-		"PointLight": 1,
+		"PointLight": 2,
 		"SpotLight": 1,
 		"Environment": 1,
 		"PostProcess": 1,
@@ -127,6 +127,7 @@
 					"Color": [1, 0.5, 0.25],
 					"Intensity": 20,
 					"Range": 12,
+					"CastShadows": true,
 					"SourceRadius": 0.1
 				},
 				"SpotLight": {

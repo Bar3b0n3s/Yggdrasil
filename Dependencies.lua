@@ -303,7 +303,9 @@ function UseSpdlog()
 	filter {}
 end
 
--- miniaudio (Vendor/miniaudio/VENDOR.md).
+-- miniaudio (Vendor/miniaudio/VENDOR.md). Its libopus decoding backend (M23, Docs/Decisions/0034-m23-contract.md decision
+-- 16) reads Ogg Opus through opusfile, libopus and libogg, which every binary that links miniaudio links after it, in that
+-- order (UseOpusFile, UseOpus, UseOgg).
 function UseMiniaudio()
 	externalincludedirs { IncludeDir.miniaudio }
 	defines { "MA_NO_ENCODING" }
@@ -314,11 +316,43 @@ function UseMiniaudio()
 	filter { LinkingKinds }
 		links { "miniaudio" }
 
+	filter {}
+	UseOpusFile()
+	UseOpus()
+	UseOgg()
+
 	filter { LinkingKinds, "system:linux" }
 		links { "dl", "pthread", "m" }
 
 	filter { LinkingKinds, "system:macosx" }
 		links { "CoreFoundation.framework", "CoreAudio.framework", "AudioToolbox.framework" }
+
+	filter {}
+end
+
+-- opusfile (Vendor/opusfile/VENDOR.md): the Ogg Opus reader of miniaudio's libopus decoding backend. Linked only: no
+-- first-party code includes its header, and it has no consumer defines (OP_FIXED_POINT is its sources' own).
+function UseOpusFile()
+	filter { LinkingKinds }
+		links { "opusfile" }
+
+	filter {}
+end
+
+-- libopus (Vendor/libopus/VENDOR.md): the fixed-point Opus decoder opusfile uses. Linked only: no first-party code
+-- includes its headers, and it has no consumer defines (OPUS_BUILD, FIXED_POINT and the rest are its sources' own).
+function UseOpus()
+	filter { LinkingKinds }
+		links { "opus" }
+
+	filter {}
+end
+
+-- libogg (Vendor/libogg/VENDOR.md): the Ogg container library opusfile uses. Linked only: no first-party code includes its
+-- headers, and it has no configuration defines.
+function UseOgg()
+	filter { LinkingKinds }
+		links { "ogg" }
 
 	filter {}
 end

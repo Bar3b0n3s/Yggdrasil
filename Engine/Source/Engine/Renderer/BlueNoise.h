@@ -25,9 +25,11 @@ namespace Engine {
 	inline constexpr uint64_t BlueNoiseSeed = 0x0B1E0015E5EEDull;
 	// The Gaussian's sigma in texels (Ulichney's 1.5).
 	inline constexpr double BlueNoiseSigma = 1.5;
-	// The EngineAssetGenerator of the built-in (EngineAssetBaker.h): bump the version whenever the output changes.
+	// The EngineAssetGenerator of the built-in (EngineAssetBaker.h): bump the version whenever the output changes, its cooked
+	// header's included. Version 2: TextureData's FormatVersion 2 (M23, Docs/Decisions/0034-m23-contract.md decision 13), so
+	// an engine cooked cache rebuilds the texture instead of keeping a version 1 artifact that no longer loads.
 	inline constexpr std::string_view BlueNoiseGeneratorId = "BlueNoise";
-	inline constexpr uint32_t BlueNoiseGeneratorVersion = 1;
+	inline constexpr uint32_t BlueNoiseGeneratorVersion = 2;
 
 	// A `size` x `size` blue-noise threshold map (size a power of two from 4 to 256, asserted): the void-and-cluster rank of
 	// each texel, toroidally wrapped, scaled to 0-255 (rank * 256 / size²), rows top first. Every value occurs size² / 256

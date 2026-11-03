@@ -30,6 +30,7 @@ namespace Engine {
 			{ RenderDebugView::AO, "AO" },
 			{ RenderDebugView::ShadowCascades, "ShadowCascades" },
 			{ RenderDebugView::Overdraw, "Overdraw" },
+			{ RenderDebugView::LightCount, "LightCount" },
 		} };
 
 		// Every view has its entry at its enumerator's index with a name; an entry the array value-initialized because a view

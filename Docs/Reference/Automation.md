@@ -2759,7 +2759,7 @@ Renders a view of the target scene afresh at width x height (the game view throu
 | `width` | `UInt32` |  | `640` | The rendered width in pixels, before maxDimension. |
 | `height` | `UInt32` |  | `360` | The rendered height in pixels, before maxDimension. |
 | `camera` | `String` |  | `""` | A camera entity of the target scene (an EntityRef) to render through instead of the view's camera. |
-| `debugView` | `String` |  | `""` | A debug view to render instead of the lit image, ignoring case: "Lit" (the default, also for ""), "Albedo", "Normals", "Roughness", "Metallic", "Emissive", "AO", "ShadowCascades" or "Overdraw". A data view stores each value v as round(255 v). ShadowCascades colours each surface by the directional shadow cascade its view distance falls in: 1 red, 2 green, 3 blue, 4 yellow, blended across the blend bands; black means no surface, no shadow-casting directional light, or beyond the shadow distance (ShadowDistance or the camera's far clip, whichever is nearer), into which the last cascade fades over the last tenth of that distance. A uniform colour over an orthographic board means it lies in one cascade, which CascadeCount 1 suits. |
+| `debugView` | `String` |  | `""` | A debug view to render instead of the lit image: a RenderDebugView name, ignoring case ("Lit", the default, also for ""). A data view stores each value v as round(255 v), except LightCount's heat map: 0 lights black, 1 to 2 blue, 3 to 4 cyan, 5 to 8 green, 9 to 16 yellow, 17 to 32 orange (1, 0.5, 0), more red. |
 | `annotate` | `Variant` |  | `null` | Capture-only annotations: labels=all, selection (selected), none or an EntityRef array; colliders, bounds and axes are booleans. Unknown members and invalid references are rejected. |
 | `maxDimension` | `UInt32` |  | `1024` | The larger side of the PNG at most this many pixels. |
 | `inline` | `Bool` |  | `false` | Also return the PNG as base64 in "data" when it is at most 30 KB; a larger one is only written (inlineOmitted). |
@@ -2803,7 +2803,7 @@ Patches the scene viewport's overlays and debug view and the Game view's resolut
 | `colliders` | `Bool` |  | `false` | Show collider geometry. |
 | `icons` | `Bool` |  | `true` | Show scene object icons. |
 | `wireframe` | `Bool` |  | `false` | Show mesh wireframes. |
-| `debugView` | `String` |  | `""` | The scene view's debug view, any ASCII case: Lit, Albedo, Normals, Roughness, Metallic, Emissive, AO, ShadowCascades or Overdraw. |
+| `debugView` | `String` |  | `""` | The scene view's debug view: a RenderDebugView name, any ASCII case. |
 | `gameResolution` | `Array<UInt32>` |  | `[]` | The Game view's resolution [width, height], each 1 to 8192, or [0, 0] for free resolution. |
 
 | Result | Type | Description |

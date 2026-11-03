@@ -165,6 +165,8 @@ class EditorViewportTests(AutomationTestCase):
                     client.call("viewport.setOptions", params)
                 self.assert_engine_error(refused.exception, engine_client.INVALID_PARAMS)
                 self.assertEqual(client.call("viewport.setOptions"), changed)
+        # M23's LightCount view (Docs/Decisions/0034-m23-contract.md decision 5) is one of RenderDebugView's names.
+        self.assertEqual(client.call("viewport.setOptions", {"debugView": "lightcount"})["debugView"], "LightCount")
         free = client.call("viewport.setOptions", {"gameResolution": [0, 0], "debugView": "Lit"})
         self.assertEqual(free["gameResolution"], [0, 0])
         self.assertEqual(free["debugView"], "Lit")

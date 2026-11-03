@@ -17,19 +17,23 @@
 // render graph). The pass list (Roadmap M8/M9; Docs/Decisions/0013-m8-decisions.md and 0017-m9-contract.md):
 //   1. Prepare (CPU, RenderPrepare.h): every MeshDrawItem resolved through the GpuResourceCache (meshes, materials with their
 //      textures, the environment; placeholders for missing assets, §7.2), submeshes culled against the view frustum by their
-//      bounds, opaque draws (AlphaMode Opaque and Mask) sorted by pipeline, then material, then mesh, transparent draws
-//      (AlphaMode Blend) back to front with ties by entity UUID; the lights culled and packed, at most MaxVisibleLights,
-//      logging RENDER_LIGHT_LIMIT_EXCEEDED once per renderer when more are visible; the per-view constants written
-//      (ViewConstants b0, EnvironmentConstants b2, the Lights structured buffer t0).
+//      bounds, opaque draws (AlphaMode Opaque and Mask) sorted by pipeline, then material, then mesh, then submesh (M23),
+//      transparent draws (AlphaMode Blend) back to front with ties by entity UUID; the lights culled and packed, at most
+//      MaxVisibleLights, logging RENDER_LIGHT_LIMIT_EXCEEDED once per renderer when more are visible; the per-view constants
+//      written (ViewConstants b0, EnvironmentConstants b2, the Lights structured buffer t0, and from M23 the Instances
+//      structured buffer t10: one instance record per submesh draw of the view, every mesh pass drawing maximal runs of
+//      adjacent equal draws as one instanced draw, which renders exactly what one draw per submesh draw renders).
 //   2. Directional cascades and 3. spot shadow atlas: shared shadow pipelines, per-view depth targets and constants (b1).
 //   4. Depth/normal prepass: SceneDepth (reverse-Z) and SceneNormals (octahedral view-space normals, normal-mapped); Mask
 //      materials discard below AlphaCutoff here and in the forward pass. Picking adds the same visible surfaces to EntityId.
 //   5. Linear view-depth pyramid and 6. GTAO: projection-aware, with optional half resolution and edge-aware filtering.
+//      Then M23's light clusters (LightClusterPass.h): the masks of the lights each cluster of the view may receive.
 //   7. Forward opaque: SceneColor cleared to the camera's ClearColor; PBR (§8.5: GGX, height-correlated Smith, Schlick,
 //      Lambert, multi-scatter energy compensation from the DFG LUT (BrdfLut.h), perceptual roughness >= 0.045, geometric
-//      specular anti-aliasing) with every visible light (artist units, windowed inverse-square falloff, smoothstep cones,
-//      SourceRadius widening) and IBL (§8.6: SH9 diffuse, split-sum specular from the prefiltered cube, specular and
-//      horizon occlusion), or the constant ambient FallbackColor * Intensity without an environment map; emissive added.
+//      specular anti-aliasing) with the visible lights of the pixel's light cluster (artist units, windowed inverse-square
+//      falloff, smoothstep cones, SourceRadius widening; the clustered sum equals the sum over every light) and IBL (§8.6:
+//      SH9 diffuse, split-sum specular from the prefiltered cube, specular and horizon occlusion), or the constant ambient
+//      FallbackColor * Intensity without an environment map; emissive added.
 //   8. Skybox (SkyboxPass.h): when the camera clears to the skybox and the environment has a map and ShowSkybox.
 //   9. Forward transparent: the Blend draws sorted back to front, alpha blended, depth tested without writes.
 //  10. Bloom (BloomPass.h): when PostProcessSettings::BloomEnabled.
@@ -45,8 +49,8 @@
 //  14. Text (TextRenderer.h): world texts (depth-tested), then screen texts, then the debug list's labels.
 // Debug views (RenderSnapshot::DebugView other than Lit) specialize the forward pipelines and fix the post chain: no skybox,
 // bloom, FXAA or dither, exposure 1, the Linear tonemapper, the OETF only for Albedo and Emissive. Existing M8 material
-// views retain overlays/text. M9 AO/ShadowCascades/Overdraw suppress them except explicit capture annotations (ADR0017);
-// Overdraw uses a dedicated depth-independent additive pass, not the forward shading specialization.
+// views retain overlays/text. M9 AO/ShadowCascades/Overdraw and M23 LightCount suppress them except explicit capture
+// annotations (ADR0017); Overdraw uses a dedicated depth-independent additive pass, not the forward shading specialization.
 // A snapshot without a camera clears SceneColor to the default ClearColor and draws nothing but screen texts.
 // Rendering is deterministic for a snapshot on a given device (§8.3: no temporal effects), which the golden images rely on.
 //
@@ -54,7 +58,7 @@
 // and shared by every SceneRenderer of that device (Docs/Decisions/0012-m7-decisions.md decision 7): the scene's own mesh
 // pipelines, {Opaque, Mask} prepass and forward variants and the Blend transparent variants, each for CullBack (front
 // faces counter-clockwise, §8.3), CullFront (a mirroring world matrix, whose front faces turn clockwise on screen; the
-// shaders flip the normal by DrawConstants::Flags) and CullNone (double-sided materials; the shaders flip back faces'
+// shaders flip the normal by the instance record's DrawFlagMirrored) and CullNone (double-sided materials; the shaders flip back faces'
 // normals), plus picking and overdraw, 24 in all; plus the passes it owns: SkyboxPass, BloomPass (for the device's Bloom
 // format, §8.1), TonemapPass, FxaaPass, DebugRenderer, TextRenderer, shadows, depth pyramid, GTAO, selection, data views and
 // BrdfLut (which generates the DFG LUT once at Create). Material binding sets
@@ -154,8 +158,8 @@ namespace Engine {
 		// Data-view pipelines are included in StartupPipelineCount.
 		static constexpr uint32_t DebugViewPipelineCount = 9;
 		// Every pipeline Create makes: the mesh pipelines plus SkyboxPass (1), BloomPass (3), TonemapPass (1), FxaaPass (1),
-		// DebugRenderer (2), TextRenderer (2), BrdfLut (1), ShadowPass (6), DepthPyramid (2), GTAO (2), Selection (8),
-		// the data-view composite (1), QuadBatcher (2) and UpscalePass (2): 58, the declarations' sum
+		// DebugRenderer (2), TextRenderer (2), BrdfLut (1), ShadowPass (6), DepthPyramid (2), GTAO (2), LightClusterPass (1, M23),
+		// Selection (8), the data-view composite (1), QuadBatcher (2) and UpscalePass (2): 59, the declarations' sum
 		// (GetDeclaredPipelineCount, RenderPassDeclaration.h), which SceneRenderer.cpp checks against each pass's PipelineCount.
 		static constexpr uint32_t StartupPipelineCount = GetDeclaredPipelineCount();
 
@@ -322,20 +326,24 @@ namespace Engine {
 		// awaits its OnSubmitted (also asserted), or between the pipeline set's ReleaseGpuObjects and its CreatePipelines (a
 		// programmer error, also asserted); InvalidArgument for a debug view outside RenderDebugView or a
 		// Quality.ShadowMapSize that is not a power of two in [256, 8192]; a debug view's pipeline error other than Gpu (an
-		// invalid shader), or its Gpu error on a lost device. Partial errors (the view is still recorded, the first error is returned): InvalidArgument for a
-		// non-finite camera matrix (the view clears as without a camera) or world matrix (that draw is skipped, the error
-		// names the entity), or invalid wireframe, overlay or selection data; Gpu when a binding set or a lazily created
-		// target cannot be created. Data the schemas accept is never a render error: a missing asset draws its placeholder, a
-		// missing environment the fallback ambient, and a shadow-casting light the shadow planners reject stays lit without
-		// shadows (warned once per renderer).
+		// invalid shader), or its Gpu error on a lost device; Gpu when a lazily created target of the Prepare stage or (M23)
+		// the view's instance buffer cannot be created. Partial errors (the view is still recorded, the first error is
+		// returned): InvalidArgument for a non-finite camera matrix (the view clears as without a camera) or world matrix
+		// (that draw is skipped, the error names the entity), or invalid wireframe, overlay or selection data; Gpu when a
+		// binding set, a lazily created target or the light clusters' buffers cannot be created (M23: without them the
+		// forward passes and the data views' composite, which bind them, are skipped; a mask buffer that cannot grow for a
+		// larger view keeps the smaller one, and the frame shades every light through the brute-force loop, the same image).
+		// Data the schemas accept is never a render error: a missing asset draws its placeholder, a missing environment the
+		// fallback ambient, and a shadow-casting light the shadow planners reject stays lit without shadows (warned once per
+		// renderer).
 		// M18 (C18.4, decisions 42 and 44): a debug-view switch after startup. The debug view's first pipelines are created
 		// through RetryAfterTrim, before anything is recorded; when they run out of memory again after the trim, the view is
 		// recorded with the debug view the renderer last rendered (Lit before its first Render, and Lit when that view's
 		// pipelines are gone too: a CreatePipelines since, by a shader reload or a recovery, dropped them) and Render returns
 		// OutOfMemory as a partial error naming the view that stayed (one Warn line per renderer and view), so the image
 		// stays on its previous mode and the host reverts its setting to GetRenderedDebugView (decision 44); the next Render
-		// that asks for the view tries again. A partial Gpu error of a lazily created target or binding set on a device that
-		// is not lost is out-of-memory too: returned as now, never fatal, and its host trims after the frame
+		// that asks for the view tries again. A partial Gpu error of a lazily created target, buffer or binding set on a device
+		// that is not lost is out-of-memory too: returned as now, never fatal, and its host trims after the frame
 		// (GraphicsDevice::TrimUnused) and renders again at the next frame.
 		// M18's milestone review (decision 39): a vk::SystemError that NVRHI throws in the middle of the recording (on a really
 		// lost device, an upload's first write asks the queue's timeline what completed) unwinds Render to the frame boundary

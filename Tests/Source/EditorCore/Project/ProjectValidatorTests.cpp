@@ -21,6 +21,7 @@
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Physics/PhysicsDiagnostics.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Renderer/PointShadowMaps.h"
 #include "Engine/Renderer/RenderPrepare.h"
 #include "Engine/Renderer/SpotShadowAtlas.h"
 #include "Engine/Scene/AudioSystem.h"
@@ -28,6 +29,7 @@
 #include "Engine/Scene/ComponentRegistration.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
+#include "Engine/Scene/Components/PointLightComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
@@ -1299,8 +1301,8 @@ end
 			const std::span<const std::string_view> codes = ProjectValidator::GetCodes();
 			// M4's 14 codes, M6's 11 (the asset codes but the runtime-only ASSET_UPLOAD_FAILED, and PREFAB_MISSING_ASSET), M8's
 			// RENDER_LIGHT_LIMIT_EXCEEDED, M9's two render warnings, M11's 10 physics codes, M12's 2 audio codes, M13's 7 and
-			// M19's SCRIPT_COMPUTED_ASSET_LOAD and M20's PREFAB_CYCLE.
-			CHECK(codes.size() == 39 + PhysicsDiagnosticCodes.size());
+			// M19's SCRIPT_COMPUTED_ASSET_LOAD, M20's PREFAB_CYCLE and M23's RENDER_POINT_SHADOW_BUDGET.
+			CHECK(codes.size() == 40 + PhysicsDiagnosticCodes.size());
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -1316,10 +1318,11 @@ end
 			CHECK(position(PhysicsLimitExceededCode) + 1 == position("SCRIPT_COMPILE_ERROR"));
 			CHECK(position("INPUT_UNKNOWN_ACTION") + 1 == position(AudioNoListenerCode));
 			// The codes of later milestones are appended in landing order (Docs/Decisions/0028-backlog-program.md, the reservation
-			// ledger): M19's after TEST_SUITE_INVALID, then M20's.
+			// ledger): M19's after TEST_SUITE_INVALID, then M20's, then M23's.
 			CHECK(position("TEST_SUITE_INVALID") + 1 == position(ScriptComputedAssetLoadCode));
 			CHECK(position(ScriptComputedAssetLoadCode) + 1 == position(PrefabCycleCode));
-			CHECK(codes.back() == PrefabCycleCode);
+			CHECK(position(PrefabCycleCode) + 1 == position(RenderPointShadowBudgetCode));
+			CHECK(codes.back() == RenderPointShadowBudgetCode);
 			CHECK(position(AudioNoListenerCode) + 1 == position(AudioMultiplePrimaryListenersCode));
 			CHECK(position(AudioMultiplePrimaryListenersCode) < position(RenderLightLimitExceededCode));
 			CHECK(position(RenderLightLimitExceededCode) < position(BuildStartSceneMissingCode));
@@ -1686,6 +1689,47 @@ end
 			const auto after = SceneSerializer::ToJson(editor.GetScene());
 			REQUIRE(after);
 			CHECK(*before == *after);
+		}
+
+		// M23 (R-PLS; Docs/Decisions/0034-m23-contract.md decision 18): a scene whose enabled shadow-casting point lights
+		// outnumber what one view shadows (MaxPointShadowLights) is warned once, without a fix; a point light without
+		// CastShadows or on an inactive entity does not count.
+		TEST_CASE("ProjectValidator: more than four shadow-casting point lights is RENDER_POINT_SHADOW_BUDGET, a warning without a fix")
+		{
+			Test::EditorTestFixture fixture("ValidatorPointShadowBudget");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			Scene& scene = editor.GetScene();
+			for (uint32_t light = 0; light < MaxPointShadowLights; ++light)
+				scene.CreateEntity("Bulb").AddComponent<PointLightComponent>().CastShadows = true;
+			scene.CreateEntity("Unshadowed").AddComponent<PointLightComponent>();
+			Entity inactive = scene.CreateEntity("Inactive");
+			inactive.AddComponent<PointLightComponent>().CastShadows = true;
+			inactive.SetActive(false);
+			Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			CHECK(FindDiagnostic(*report, RenderPointShadowBudgetCode) == nullptr); // exactly the budget is fine
+
+			scene.CreateEntity("Bulb").AddComponent<PointLightComponent>().CastShadows = true;
+			const size_t undoCount = editor.GetHistory().GetUndoCount();
+			report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			const ProjectDiagnostic* budget = FindDiagnostic(*report, RenderPointShadowBudgetCode);
+			REQUIRE(budget != nullptr);
+			CHECK(budget->Severity == DiagnosticSeverity::Warning);
+			CHECK_FALSE(budget->AutoFixable);
+			CHECK(budget->File == "Assets/Scenes/Main.scene");
+			CHECK(budget->Entity.empty());
+			const Result<ValidationReport> repeated = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE(repeated.has_value());
+			const ProjectDiagnostic* again = FindDiagnostic(*repeated, RenderPointShadowBudgetCode);
+			REQUIRE(again != nullptr);
+			CHECK(again->Id == budget->Id);
+			const auto fixed = ProjectValidator::Fix(editor, ValidationScope::Scene, { .IdsOrCodes = { std::string(RenderPointShadowBudgetCode) } });
+			REQUIRE(fixed);
+			CHECK(fixed->Fixed.empty());
+			CHECK(editor.GetHistory().GetUndoCount() == undoCount);
 		}
 
 		TEST_CASE("ProjectValidator: an invalid illumination scan returns its error with the scene path")

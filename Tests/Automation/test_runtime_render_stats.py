@@ -82,6 +82,7 @@ class RuntimeRenderStatsTests(AutomationTestCase):
         self.assertEqual(view["passes"], [])
         self.assertEqual(view["shadowMapSize"], 0)
         self.assertFalse(view["ssaoHalfResolution"])
+        self.assertEqual((view["shadowedPointLights"], view["droppedPointShadows"]), (0, 0))
         after = client.call("play.state")
         self.assertEqual(after["tick"], before["tick"])
         self.assertEqual(after["stateHash"], before["stateHash"])
@@ -134,6 +135,9 @@ class RuntimeRenderStatsTests(AutomationTestCase):
         # AO).
         self.assertEqual(view["shadowMapSize"], EXPORTED_RENDERING["ShadowMapSize"])
         self.assertEqual(view["ssaoHalfResolution"], EXPORTED_RENDERING["SsaoHalfResolution"])
+        # The tiny game holds no point light (M23's point-shadow counts, Docs/Decisions/0034-m23-contract.md
+        # decision 18).
+        self.assertEqual((view["shadowedPointLights"], view["droppedPointShadows"]), (0, 0))
         self.assertTrue(view["frame"].isdigit())
         self.assertTrue(view["gpuFrame"].isdigit())
         self.assertLessEqual(int(view["gpuFrame"]), int(view["frame"]))

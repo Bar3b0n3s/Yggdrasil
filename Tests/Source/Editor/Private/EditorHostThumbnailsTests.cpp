@@ -253,9 +253,9 @@ namespace Engine {
 		// Compression Auto, previews its decoded texels (DecompressTextureBlocks of its first level), never its blocks' bytes
 		// read as RGBA8. A 16 x 16 gradient previewed at 16 pixels maps each texel to one pixel. BC7Srgb is decision 13's
 		// value.
-		TEST_CASE("EditorHostThumbnails: a BC7 texture's preview shows its decoded texels" * doctest::skip(true))
+		TEST_CASE("EditorHostThumbnails: a BC7 texture's preview shows its decoded texels")
 		{
-			constexpr auto BC7Srgb = static_cast<TextureFormat>(9);
+			constexpr auto BC7Srgb = TextureFormat::BC7Srgb;
 			Test::EditorTestFixture fixture("HostThumbnailCompressed");
 			fixture.CreateAndOpenProject();
 			auto& editor = fixture.GetEditor();
@@ -296,6 +296,49 @@ namespace Engine {
 			REQUIRE(thumbnail->Height == 16);
 			CHECK(thumbnail->Pixels == *decoded);
 			thumbnails.Reset();
+		}
+
+		// M23 (decision 13): BC4 and BC1 are formats Auto never chooses but a texture may hold. A BC4 level previews its decoded
+		// red channel as grey, with alpha 255, as an R8 texture does; a BC1 level its decoded colour, opaque. An 8 x 8 level
+		// previewed at 8 pixels maps each texel to one pixel.
+		TEST_CASE("EditorHostThumbnails: a BC4 texture previews grey and a BC1 texture its decoded colour")
+		{
+			Buffer rgba;
+			for (uint32_t texel = 0; texel < 8 * 8; ++texel)
+			{
+				for (const uint32_t value : { texel * 4, 255 - texel * 2, (texel * 37) % 256, 128U })
+					rgba.push_back(static_cast<std::byte>(value & 0xFFU));
+			}
+			for (const TextureFormat format : { TextureFormat::BC4Unorm, TextureFormat::BC1Unorm })
+			{
+				CAPTURE(TextureFormatToString(format));
+				const std::optional<TextureBlockCodec> codec = GetTextureBlockCodec(format);
+				REQUIRE(codec.has_value());
+				const Result<Buffer> blocks = CompressTextureBlocks(*codec, 8, 8, rgba);
+				REQUIRE(blocks.has_value());
+				const Result<Buffer> decoded = DecompressTextureBlocks(*codec, 8, 8, *blocks);
+				REQUIRE(decoded.has_value());
+				TextureData texture;
+				texture.Format = format;
+				texture.Width = 8;
+				texture.Height = 8;
+				texture.Mips = { { .Width = 8, .Height = 8, .Offset = 0, .Size = blocks->size() } };
+				texture.Pixels = *blocks;
+
+				const Result<Image> preview = EditorHostThumbnails::RenderTexturePreview(texture, 8);
+				REQUIRE_MESSAGE(preview.has_value(), preview.error().ToString());
+				REQUIRE(preview->Width == 8);
+				REQUIRE(preview->Height == 8);
+				for (size_t texel = 0; texel < 8 * 8; ++texel)
+				{
+					CAPTURE(texel);
+					const size_t offset = texel * 4;
+					const bool grey = format == TextureFormat::BC4Unorm;
+					for (size_t channel = 0; channel < 3; ++channel)
+						CHECK(preview->Pixels[offset + channel] == (*decoded)[offset + (grey ? 0 : channel)]);
+					CHECK(preview->Pixels[offset + 3] == std::byte{ 255 });
+				}
+			}
 		}
 
 		TEST_CASE("EditorHostThumbnails: material previews capture the referenced material on a fitted sphere")

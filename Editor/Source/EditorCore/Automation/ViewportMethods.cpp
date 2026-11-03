@@ -251,7 +251,7 @@ namespace Engine {
 			.Field("colliders", &ViewportSetOptionsParams::Colliders, "Show collider geometry.")
 			.Field("icons", &ViewportSetOptionsParams::Icons, "Show scene object icons.")
 			.Field("wireframe", &ViewportSetOptionsParams::Wireframe, "Show mesh wireframes.")
-			.Field("debugView", &ViewportSetOptionsParams::DebugView, "The scene view's debug view, any ASCII case: Lit, Albedo, Normals, Roughness, Metallic, Emissive, AO, ShadowCascades or Overdraw.")
+			.Field("debugView", &ViewportSetOptionsParams::DebugView, "The scene view's debug view: a RenderDebugView name, any ASCII case.")
 			.Field("gameResolution", &ViewportSetOptionsParams::GameResolution, "The Game view's resolution [width, height], each 1 to 8192, or [0, 0] for free resolution.");
 		registry.Struct<ViewportSetOptionsResult>("ViewportSetOptionsResult", "All current scene and game viewport options.")
 			.Field("grid", &ViewportSetOptionsResult::Grid, "Whether the scene grid is shown.")

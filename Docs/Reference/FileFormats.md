@@ -631,10 +631,11 @@ The files the editor imports from `Assets/`, by importer and extension (§7.4). 
 
 | Importer | Extension | Main type | Importer version | Settings | Importable |
 |---|---|---|---|---|---|
-| Audio | `.flac` | AudioClip | 1 | `AudioImportSettings` | yes |
-| Audio | `.mp3` | AudioClip | 1 | `AudioImportSettings` | yes |
-| Audio | `.ogg` | AudioClip | 1 | `AudioImportSettings` | yes |
-| Audio | `.wav` | AudioClip | 1 | `AudioImportSettings` | yes |
+| Audio | `.flac` | AudioClip | 2 | `AudioImportSettings` | yes |
+| Audio | `.mp3` | AudioClip | 2 | `AudioImportSettings` | yes |
+| Audio | `.ogg` | AudioClip | 2 | `AudioImportSettings` | yes |
+| Audio | `.opus` | AudioClip | 2 | `AudioImportSettings` | yes |
+| Audio | `.wav` | AudioClip | 2 | `AudioImportSettings` | yes |
 | Environment | `.exr` | Environment | 1 | `EnvironmentImportSettings` | no |
 | Environment | `.hdr` | Environment | 1 | `EnvironmentImportSettings` | yes |
 | Font | `.otf` | Font | 3 | `FontImportSettings` | yes |
@@ -648,8 +649,8 @@ The files the editor imports from `Assets/`, by importer and extension (§7.4). 
 | Script | `.luau` | Script | 1 | none | yes |
 | SoundEffect | `.sfx` | AudioClip | 1 | none | yes |
 | SpriteSheet | `.spritesheet` | SpriteSheet | 1 | none | yes |
-| Texture | `.bmp` | Texture | 1 | `TextureImportSettings` | yes |
-| Texture | `.jpeg` | Texture | 1 | `TextureImportSettings` | yes |
-| Texture | `.jpg` | Texture | 1 | `TextureImportSettings` | yes |
-| Texture | `.png` | Texture | 1 | `TextureImportSettings` | yes |
-| Texture | `.tga` | Texture | 1 | `TextureImportSettings` | yes |
+| Texture | `.bmp` | Texture | 2 | `TextureImportSettings` | yes |
+| Texture | `.jpeg` | Texture | 2 | `TextureImportSettings` | yes |
+| Texture | `.jpg` | Texture | 2 | `TextureImportSettings` | yes |
+| Texture | `.png` | Texture | 2 | `TextureImportSettings` | yes |
+| Texture | `.tga` | Texture | 2 | `TextureImportSettings` | yes |
