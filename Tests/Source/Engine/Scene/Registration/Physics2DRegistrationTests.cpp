@@ -7,8 +7,9 @@
 #include <limits>
 #include <string_view>
 
-// The Physics2D category (Docs/Decisions/0032-m21-contract.md decision 9): the contract registers M21's 2D physics components,
-// so these cases are live; the 2D world's behaviour is frozen by the skipped cases of Physics2DWorld and Physics2DSystem.
+// The Physics2D category (Docs/Decisions/0032-m21-contract.md decisions 9 and 25): the contracts register M21's 2D physics
+// components, the tilemap collider (C21.2) last, so these cases are live; the 2D world's behaviour is frozen by the skipped
+// cases of Physics2DWorld and Physics2DSystem.
 
 namespace Engine {
 
@@ -28,9 +29,10 @@ namespace Engine {
 		TEST_CASE("Physics2DRegistration: the 2D physics components are registered after the sprite ones, beside no 3D exclusion")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
-			const ComponentInfo& camera = RequirePhysics2DComponent(*registry, "PixelPerfectCamera");
-			size_t expected = camera.GetIndex() + 1;
-			for (const std::string_view name : { "RigidBody2D", "BoxCollider2D", "CircleCollider2D", "PolygonCollider2D" })
+			// The Rendering2D category ends with C21.2's TilemapRenderer.
+			const ComponentInfo& lastSprite = RequirePhysics2DComponent(*registry, "TilemapRenderer");
+			size_t expected = lastSprite.GetIndex() + 1;
+			for (const std::string_view name : { "RigidBody2D", "BoxCollider2D", "CircleCollider2D", "PolygonCollider2D", "TilemapCollider" })
 			{
 				CAPTURE(name);
 				const ComponentInfo& info = RequirePhysics2DComponent(*registry, name);
@@ -50,6 +52,10 @@ namespace Engine {
 			REQUIRE(RequirePhysics2DComponent(*registry, "CircleCollider2D").FindField("Radius")->GetMeta().Min.has_value());
 			CHECK(*RequirePhysics2DComponent(*registry, "CircleCollider2D").FindField("Radius")->GetMeta().Min == doctest::Approx(0.001));
 			CHECK(RequirePhysics2DComponent(*registry, "PolygonCollider2D").FindField("Points")->GetKind() == FieldType::Array);
+			const ComponentInfo& tilemap = RequirePhysics2DComponent(*registry, "TilemapCollider");
+			CHECK(tilemap.FindField("Tilemap")->GetKind() == FieldType::AssetRef);
+			CHECK(tilemap.FindField("Tilemap")->GetMeta().AssetFilter == "Tilemap");
+			CHECK(tilemap.FindField("IsTrigger")->GetKind() == FieldType::Bool);
 		}
 
 		TEST_CASE("Physics2DRegistration: a polygon collider needs 3 to 64 finite points")

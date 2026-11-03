@@ -33,10 +33,13 @@ Every component of the type registry, in canonical component order: the order of
 | `SpriteRenderer` | Rendering2D | Serializable, ScriptVisible, EditorVisible, Removable | Draws a sprite: a sprite sheet frame or a texture in the entity's XY plane. |
 | `SpriteAnimator` | Rendering2D | Serializable, ScriptVisible, EditorVisible, Removable | Plays a clip of the SpriteRenderer's sprite sheet, one step per clip frame for its ticks, driven by the fixed step. |
 | `PixelPerfectCamera` | Rendering2D | Serializable, ScriptVisible, EditorVisible, Removable | Renders the entity's camera at a reference resolution, upscaled by the largest whole factor that fits the view in a letterbox. |
+| `Light2D` | Rendering2D | Serializable, ScriptVisible, EditorVisible, Removable | A 2D light: lights the lit sprites and tilemaps of the view, never unlit ones; no shadows. |
+| `TilemapRenderer` | Rendering2D | Serializable, ScriptVisible, EditorVisible, Removable | Draws a tilemap's tiles in the entity's XY plane, each tile as a sprite of its palette entry's sheet frame. |
 | `RigidBody2D` | Physics2D | Serializable, ScriptVisible, EditorVisible, Removable | Simulates the entity in the 2D world: moves along world X and Y and rotates about world Z. |
 | `BoxCollider2D` | Physics2D | Serializable, ScriptVisible, EditorVisible, Removable | A rectangle collider in the entity's XY plane. |
 | `CircleCollider2D` | Physics2D | Serializable, ScriptVisible, EditorVisible, Removable | A circle collider in the entity's XY plane. |
 | `PolygonCollider2D` | Physics2D | Serializable, ScriptVisible, EditorVisible, Removable | A convex polygon collider in the entity's XY plane. |
+| `TilemapCollider` | Physics2D | Serializable, ScriptVisible, EditorVisible, Removable | The solid cells of a tilemap as 2D colliders: each chunk's solid cells merged into boxes, one static compound without a RigidBody2D. |
 
 ## ID
 
@@ -821,6 +824,66 @@ Script members of `PixelPerfectCamera`:
 | `ReferenceHeight` | proxy field | `number` | read/write | All | The height the scene renders at, in pixels; the orthographic view is this many pixels of PixelsPerUnit high. |
 | `ReferenceWidth` | proxy field | `number` | read/write | All | The width the scene renders at, in pixels. |
 
+## Light2D
+
+A 2D light: lights the lit sprites and tilemaps of the view, never unlit ones; no shadows.
+
+- Category: Rendering2D
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Type` | `Light2DType` | `"Point"` |  |  |  | Whether the light is a point light around the entity or a global light of the whole view. |
+| `Color` | `Color3` | `[1,1,1]` | 0 to 1 |  |  | The light's linear colour. |
+| `Intensity` | `Float` | `1` | 0 to 1000 |  |  | How strong the light is: its colour is multiplied by this, so values above 1 overbright. |
+| `Radius` | `Float` | `5` | 0.001 to 1e+05 | m |  | Point: how far the light reaches from the entity, in world units. |
+| `Falloff` | `Float` | `0.5` | 0 to 1 |  |  | Point: the fraction of the radius, from its edge inward, over which the light fades smoothly to nothing; 0 is a hard edge. |
+| `Height` | `Float` | `1` | 0.001 to 1e+05 | m |  | Point: how far above the lit plane the light sits, in world units; only normal-mapped sprites read it. |
+
+Script members of `Light2D`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Color` | proxy field | `Color` | read/write | All | The light's linear colour. |
+| `Falloff` | proxy field | `number` | read/write | All | Point: the fraction of the radius, from its edge inward, over which the light fades smoothly to nothing; 0 is a hard edge. |
+| `Height` | proxy field | `number` | read/write | All | Point: how far above the lit plane the light sits, in world units; only normal-mapped sprites read it. |
+| `Intensity` | proxy field | `number` | read/write | All | How strong the light is: its colour is multiplied by this, so values above 1 overbright. |
+| `Radius` | proxy field | `number` | read/write | All | Point: how far the light reaches from the entity, in world units. |
+| `Type` | proxy field | `Light2DType` | read/write | All | Whether the light is a point light around the entity or a global light of the whole view. |
+
+## TilemapRenderer
+
+Draws a tilemap's tiles in the entity's XY plane, each tile as a sprite of its palette entry's sheet frame.
+
+- Category: Rendering2D
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Tilemap` | `AssetRef(Tilemap)` | `null` |  |  |  | The tilemap whose tiles are drawn; null draws nothing. |
+| `Color` | `Color4` | `[1,1,1,1]` | 0 to 1 |  |  | The linear colour every tile's texels are multiplied with, with opacity in the fourth component. |
+| `PixelsPerUnit` | `Float` | `16` | 0.001 to 65536 | px |  | How many texels of a tile's frame make one unit of the entity's local space, as a sprite's. |
+| `SortingLayer` | `String` | `"Default"` |  |  |  | The sorting layer name from project settings; the tilemap sorts with the sprites, and an undeclared name draws in the first. |
+| `OrderInLayer` | `Int32` | `0` |  |  |  | The draw order within the sorting layer, among the sprites: higher values draw over lower ones, equal values in canonical entity order. |
+| `Lit` | `Bool` | `false` |  |  |  | Whether 2D lights light the tiles; unlit tiles keep their texels unchanged. |
+
+Script members of `TilemapRenderer`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Color` | proxy field | `Color` | read/write | All | The linear colour every tile's texels are multiplied with, with opacity in the fourth component. |
+| `Lit` | proxy field | `boolean` | read/write | All | Whether 2D lights light the tiles; unlit tiles keep their texels unchanged. |
+| `OrderInLayer` | proxy field | `number` | read/write | All | The draw order within the sorting layer, among the sprites: higher values draw over lower ones, equal values in canonical entity order. |
+| `PixelsPerUnit` | proxy field | `number` | read/write | All | How many texels of a tile's frame make one unit of the entity's local space, as a sprite's. |
+| `SortingLayer` | proxy field | `string` | read/write | All | The sorting layer name from project settings; the tilemap sorts with the sprites, and an undeclared name draws in the first. A value a script writes holds at most 4096 bytes of text. |
+| `Tilemap` | proxy field | `AssetRef?` | read/write | All | The tilemap whose tiles are drawn; null draws nothing. |
+
 ## RigidBody2D
 
 Simulates the entity in the 2D world: moves along world X and Y and rotates about world Z.
@@ -960,6 +1023,28 @@ Script members of `PolygonCollider2D`:
 | `Offset` | proxy field | `vector` | read/write | All | Where the polygon's origin sits relative to the entity, in its XY plane. |
 | `Points` | proxy field | `{vector}` | read/write | All | The points whose convex hull is the collider, 3 to 64 of them, in the collider's own space before Offset and Angle. |
 
+## TilemapCollider
+
+The solid cells of a tilemap as 2D colliders: each chunk's solid cells merged into boxes, one static compound without a RigidBody2D.
+
+- Category: Physics2D
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Tilemap` | `AssetRef(Tilemap)` | `null` |  |  |  | The tilemap whose solid cells collide; null takes the entity's TilemapRenderer.Tilemap. |
+| `IsTrigger` | `Bool` | `false` |  |  |  | Whether the collider only detects overlaps instead of colliding. |
+
+Script members of `TilemapCollider`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `IsTrigger` | proxy field | `boolean` | read/write | All | Whether the collider only detects overlaps instead of colliding. |
+| `Tilemap` | proxy field | `AssetRef?` | read/write | All | The tilemap whose solid cells collide; null takes the entity's TilemapRenderer.Tilemap. |
+
 ## Structs
 
 The structs component fields hold, in name order.
@@ -1029,6 +1114,15 @@ What a camera draws behind the scene's geometry.
 |---|---|
 | `Skybox` | The scene's Environment skybox (its fallback colour when none is shown). |
 | `Color` | The camera's ClearColor. |
+
+### Light2DType
+
+What a 2D light lights.
+
+| Value | Description |
+|---|---|
+| `Point` | A circle of light around the entity, fading to nothing at its Radius. |
+| `Global` | The same light at every lit pixel of the view, wherever the entity is. |
 
 ### MotionQuality
 

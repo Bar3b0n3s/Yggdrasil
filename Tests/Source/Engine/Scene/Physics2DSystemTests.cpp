@@ -2,15 +2,19 @@
 
 #include "Engine/Scene/Physics2DSystem.h"
 
+#include "Engine/Asset/TilemapData.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Physics/Physics2DWorld.h"
 #include "Engine/Physics/PhysicsEngine.h"
 #include "Engine/Scene/Components/BoxCollider2DComponent.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/CircleCollider2DComponent.h"
+#include "Engine/Scene/Components/Light2DComponent.h"
 #include "Engine/Scene/Components/RigidBody2DComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
+#include "Engine/Scene/Components/TilemapColliderComponent.h"
+#include "Engine/Scene/Components/TilemapRendererComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Physics2DValidation.h"
@@ -18,6 +22,7 @@
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
 #include "Support/ExpectLog.h"
+#include "Support/InMemoryAssetManager.h"
 #include "Support/SceneTestFixture.h"
 
 #include <glm/gtc/quaternion.hpp>
@@ -579,6 +584,42 @@ namespace Engine {
 			CHECK((*system)->GetStats().BodyCount == 1);
 		}
 
+		// C21.2 (Docs/Decisions/0032-m21-contract.md decision 29): a 2D light and a tilemap renderer are rendering only, so a
+		// scene that holds them and no 2D physics component composes nothing, creates no 2D world and appends no hash block,
+		// whatever their tilemap holds. Live from the contract on, so it guards streams L, T1 and T2: only a TilemapCollider
+		// makes a body from a tilemap.
+		TEST_CASE("Physics2DSystem: lights and tilemap renderers make no 2D body, world or hash block")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Entity light = Create2DEntity(scene, "Torch", glm::vec2(1.0f, 2.0f));
+			light.AddComponent<Light2DComponent>();
+			Entity tiles = Create2DEntity(scene, "Ground", glm::vec2(0.0f));
+			tiles.AddComponent<TilemapRendererComponent>(TilemapRendererComponent{ .Tilemap = TypedAssetHandle<AssetType::Tilemap>(AssetHandle(0x7a11ull)) });
+			TransformSystem::Update(scene);
+			const uint32_t worldsBefore = PhysicsEngine::GetLiveWorldCount();
+			Result<Scope<Physics2DSystem>> system = Physics2DSystem::Create({ .RuntimeScene = &scene });
+			REQUIRE_MESSAGE(system.has_value(), system.error().ToString());
+			uint64_t tick = 0;
+			for (const bool active : { true, false, true })
+			{
+				tiles.SetActive(active);
+				light.Patch<Light2DComponent>([](Light2DComponent& component)
+				{
+					component.Intensity += 1.0f;
+				});
+				UpdateAndStep(scene, **system, tick++);
+			}
+			CHECK((*system)->GetStats().Compositions == 0);
+			CHECK((*system)->GetStats().BodyCount == 0);
+			CHECK(PhysicsEngine::GetLiveWorldCount() == worldsBefore);
+			XXH64Hasher untouched(0);
+			XXH64Hasher appended(0);
+			(*system)->AppendStateHash(appended);
+			CHECK(appended.Digest() == untouched.Digest());
+			CHECK((*system)->GetDiagnostics().empty());
+		}
+
 		// W21.1's review: Create refuses what the 2D world's creation would, so the world made at the first 2D body cannot fail
 		// (ValidatePhysicsWorldLimits, PhysicsWorld::Create's checks).
 		TEST_CASE("Physics2DSystem: Create refuses limits the 2D world would refuse")
@@ -860,6 +901,173 @@ namespace Engine {
 			const Result<PhysicsMotionType> implicit = (*system)->GetMotionType(wall.GetUUID());
 			REQUIRE_FALSE(implicit.has_value());
 			CHECK(implicit.error().GetCode() == ErrorCode::NotFound);
+		}
+
+		// C21.2 (Docs/Decisions/0032-m21-contract.md decision 25, stream T2): the TilemapCollider's tilemap, a ground row in two
+		// chunks of 4 x 4 unit cells with a non-solid cell above it: its boxes, [0, 4] x [0, 1] and [4, 8] x [0, 1] (never merged
+		// across the chunks' edge), form the implicit static body of the tilemap's entity.
+		TEST_CASE("Physics2DSystem: a TilemapCollider makes one static compound of its merged boxes in canonical order" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Test::InMemoryAssetManager assets;
+			const AssetHandle tilemapHandle = UUID(8960);
+			Ref<TilemapData> tilemap = CreateRef<TilemapData>();
+			tilemap->ChunkSize = 4;
+			tilemap->Palette = { TilemapTile{ .Solid = true }, TilemapTile{ .Solid = false } };
+			tilemap->Chunks = {
+				TilemapChunk{ .X = 0, .Y = 0, .Tiles = { 1, 1, 1, 1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0 } },
+				TilemapChunk{ .X = 1, .Y = 0, .Tiles = { 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } },
+			};
+			assets.Publish(tilemapHandle, tilemap, "Assets/Tilemaps/Ground.tilemap");
+			Entity ground = Create2DEntity(scene, "Ground", glm::vec2(0.0f));
+			ground.AddComponent<TilemapColliderComponent>(TilemapColliderComponent{ .Tilemap = TypedAssetHandle<AssetType::Tilemap>(tilemapHandle) });
+			// A ball falls through the non-solid cell (2, 1) onto the ground, and rolls across the seam at x = 4.
+			Entity ball = Create2DEntity(scene, "Ball", glm::vec2(2.5f, 3.0f));
+			ball.AddComponent<RigidBody2DComponent>(RigidBody2DComponent{ .EnhancedInternalEdgeRemoval = true, .InitialLinearVelocity = glm::vec2(2.0f, 0.0f) });
+			ball.AddComponent<CircleCollider2DComponent>(CircleCollider2DComponent{ .Radius = 0.25f });
+			TransformSystem::Update(scene);
+			Recording2DListener listener;
+			Result<Scope<Physics2DSystem>> system = Physics2DSystem::Create({ .RuntimeScene = &scene, .Assets = &assets });
+			REQUIRE_MESSAGE(system.has_value(), system.error().ToString());
+			(*system)->SetEventListener(&listener);
+			CHECK((*system)->GetDiagnostics().empty());
+			CHECK((*system)->GetStats().BodyCount == 2);
+			const std::optional<Aabb> bounds = (*system)->GetBodyBounds(ground.GetUUID());
+			REQUIRE(bounds.has_value());
+			CHECK(bounds->Min.x == doctest::Approx(0.0f));
+			CHECK(bounds->Min.y == doctest::Approx(0.0f));
+			CHECK(bounds->Max.x == doctest::Approx(8.0f));
+			CHECK(bounds->Max.y == doctest::Approx(1.0f));
+
+			for (uint64_t tick = 0; tick < 120; ++tick)
+				UpdateAndStep(scene, **system, tick);
+			// It rests on the ground's top, past the seam, without catching on it.
+			const glm::vec3 rest = ball.GetComponent<TransformComponent>().Translation;
+			CHECK(rest.y == doctest::Approx(1.25f).epsilon(0.01));
+			CHECK(rest.x > 4.5f);
+			// The ball's enter names the tilemap's entity as the collider it touched.
+			const std::vector<PhysicsEvent> enters = FindEvents(listener, ball.GetUUID(), PhysicsEventType::CollisionEnter);
+			REQUIRE(enters.size() == 1);
+			CHECK(enters[0].Other == ground.GetUUID());
+			CHECK(enters[0].Contact.OtherCollider == ground.GetUUID());
+			// A ray down at x = 6 hits the second chunk's box, the tilemap's entity, at the ground's top.
+			const Result<std::optional<Physics2DRaycastHit>> hit = (*system)->Raycast(glm::vec2(6.0f, 5.0f), glm::vec2(0.0f, -1.0f), 10.0f);
+			REQUIRE(hit.has_value());
+			REQUIRE(hit->has_value());
+			CHECK((*hit)->Entity == ground.GetUUID());
+			CHECK((*hit)->Body == ground.GetUUID());
+			CHECK((*hit)->Point.y == doctest::Approx(1.0f));
+		}
+
+		// C21.2 (decision 25, stream T2): a new asset version of the tilemap (a tilemap.paint edit) rebuilds the shape in place at
+		// the next pre-step, as a mesh collider's hot reload; so does a new TilemapRenderer.Tilemap on an entity whose
+		// TilemapCollider has none, as a MeshRenderer's new Mesh does for a MeshCollider without one (C21.2's review).
+		TEST_CASE("Physics2DSystem: a tilemap's new version rebuilds its collider's shape in place" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Test::InMemoryAssetManager assets;
+			const AssetHandle tilemapHandle = UUID(8961);
+			const AssetHandle lowHandle = UUID(8962);
+			const AssetHandle highHandle = UUID(8963);
+			const auto publish = [&assets](AssetHandle handle, std::vector<uint32_t> tiles)
+			{
+				Ref<TilemapData> tilemap = CreateRef<TilemapData>();
+				tilemap->ChunkSize = 2;
+				tilemap->Palette = { TilemapTile{ .Solid = true } };
+				tilemap->Chunks = { TilemapChunk{ .X = 0, .Y = 0, .Tiles = std::move(tiles) } };
+				assets.Publish(handle, tilemap, "Assets/Tilemaps/" + handle.ToString() + ".tilemap");
+			};
+			publish(tilemapHandle, { 1, 1, 0, 0 });
+			publish(lowHandle, { 1, 1, 0, 0 });
+			publish(highHandle, { 1, 1, 1, 1 });
+			Entity ground = Create2DEntity(scene, "Ground", glm::vec2(0.0f));
+			ground.AddComponent<TilemapColliderComponent>(TilemapColliderComponent{ .Tilemap = TypedAssetHandle<AssetType::Tilemap>(tilemapHandle) });
+			// A collider without a Tilemap takes its entity's TilemapRenderer's.
+			Entity ledge = Create2DEntity(scene, "Ledge", glm::vec2(10.0f, 0.0f));
+			ledge.AddComponent<TilemapRendererComponent>(TilemapRendererComponent{ .Tilemap = TypedAssetHandle<AssetType::Tilemap>(lowHandle) });
+			ledge.AddComponent<TilemapColliderComponent>();
+			TransformSystem::Update(scene);
+			Result<Scope<Physics2DSystem>> system = Physics2DSystem::Create({ .RuntimeScene = &scene, .Assets = &assets });
+			REQUIRE_MESSAGE(system.has_value(), system.error().ToString());
+			const auto topAt = [&system](float x)
+			{
+				const Result<std::optional<Physics2DRaycastHit>> hit = (*system)->Raycast(glm::vec2(x, 5.0f), glm::vec2(0.0f, -1.0f), 10.0f);
+				REQUIRE(hit.has_value());
+				return hit->has_value() ? (*hit)->Point.y : -1.0f;
+			};
+			CHECK(topAt(1.5f) == doctest::Approx(1.0f));
+			CHECK(topAt(10.5f) == doctest::Approx(1.0f));
+			CHECK((*system)->GetStats().BodyCount == 2);
+			uint64_t compositions = (*system)->GetStats().Compositions;
+			// Painting cell (1, 1) raises the right column to 2; the body keeps its identity (no new body, one more composition).
+			publish(tilemapHandle, { 1, 1, 0, 1 });
+			UpdateAndStep(scene, **system, 0);
+			CHECK(topAt(1.5f) == doctest::Approx(2.0f));
+			CHECK(topAt(0.5f) == doctest::Approx(1.0f));
+			CHECK((*system)->GetStats().BodyCount == 2);
+			CHECK((*system)->GetStats().Compositions == compositions + 1);
+			// Switching the ledge renderer's tilemap rebuilds the ledge's collider in place: both columns rise to 2.
+			compositions = (*system)->GetStats().Compositions;
+			ledge.Patch<TilemapRendererComponent>([highHandle](TilemapRendererComponent& renderer)
+			{
+				renderer.Tilemap = TypedAssetHandle<AssetType::Tilemap>(highHandle);
+			});
+			UpdateAndStep(scene, **system, 1);
+			CHECK(topAt(10.5f) == doctest::Approx(2.0f));
+			CHECK(topAt(11.5f) == doctest::Approx(2.0f));
+			CHECK((*system)->GetStats().BodyCount == 2);
+			CHECK((*system)->GetStats().Compositions == compositions + 1);
+			CHECK((*system)->GetDiagnostics().empty());
+			// Erasing every cell of the ground's tilemap leaves it no shape: its body is removed, without a diagnostic.
+			publish(tilemapHandle, { 0, 0, 0, 0 });
+			UpdateAndStep(scene, **system, 2);
+			CHECK((*system)->GetStats().BodyCount == 1);
+			CHECK((*system)->GetDiagnostics().empty());
+		}
+
+		// C21.2 (decision 27, stream P3): physics2d.bodyInfo's report, PhysicsSystem::GetBodyInfo's in the plane.
+		TEST_CASE("Physics2DSystem: GetBodyInfo reports a 2D body's pose, colliders and contacts" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Entity floor = Create2DBox(scene, "Floor", glm::vec2(0.0f, -0.5f), glm::vec2(5.0f, 0.5f), BodyType::Static);
+			Entity crate = Create2DBox(scene, "Crate", glm::vec2(1.0f, 0.5f), glm::vec2(0.5f), BodyType::Dynamic);
+			// A collider-only child gathered into the crate's body.
+			Entity lid = Create2DBox(scene, "Lid", glm::vec2(0.0f, 0.6f), glm::vec2(0.5f, 0.1f), std::nullopt);
+			REQUIRE(scene.SetParent(lid, crate).has_value());
+			TransformSystem::Update(scene);
+			Result<Scope<Physics2DSystem>> system = Physics2DSystem::Create({ .RuntimeScene = &scene, .Gravity = glm::vec2(0.0f, -9.81f) });
+			REQUIRE_MESSAGE(system.has_value(), system.error().ToString());
+			for (uint64_t tick = 0; tick < 30; ++tick)
+				UpdateAndStep(scene, **system, tick);
+
+			const std::optional<Physics2DBodyReport> report = (*system)->GetBodyInfo(lid.GetUUID());
+			REQUIRE(report.has_value());
+			CHECK(report->Owner == crate.GetUUID());
+			CHECK(report->Origin == PhysicsBodyOrigin::RigidBody);
+			CHECK(report->MotionType == PhysicsMotionType::Dynamic);
+			CHECK_FALSE(report->IsSensor);
+			CHECK(report->LayerName == "Default");
+			CHECK(report->Colliders == std::vector<UUID>{ crate.GetUUID(), lid.GetUUID() });
+			CHECK(report->Pose.Position.x == doctest::Approx(1.0f).epsilon(0.01));
+			CHECK(report->Pose.Position.y == doctest::Approx(0.5f).epsilon(0.02));
+			CHECK(report->BoundsMin.x == doctest::Approx(0.5f).epsilon(0.02));
+			CHECK(report->BoundsMax.y == doctest::Approx(1.2f).epsilon(0.02));
+			REQUIRE(report->Contacts.size() == 1);
+			CHECK(report->Contacts[0].Other == floor.GetUUID());
+			CHECK_FALSE(report->Contacts[0].IsTrigger);
+
+			const std::optional<Physics2DBodyReport> floorReport = (*system)->GetBodyInfo(floor.GetUUID());
+			REQUIRE(floorReport.has_value());
+			CHECK(floorReport->MotionType == PhysicsMotionType::Static);
+			CHECK(floorReport->LinearVelocity == glm::vec2(0.0f));
+			// An entity without a 2D body, or one disabled, reports none.
+			Entity marker = Create2DEntity(scene, "Marker", glm::vec2(3.0f, 3.0f));
+			CHECK_FALSE((*system)->GetBodyInfo(marker.GetUUID()).has_value());
+			crate.SetActive(false);
+			CHECK_FALSE((*system)->GetBodyInfo(crate.GetUUID()).has_value());
 		}
 	}
 

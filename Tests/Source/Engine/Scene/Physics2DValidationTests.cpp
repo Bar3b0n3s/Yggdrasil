@@ -2,18 +2,21 @@
 
 #include "Engine/Scene/Physics2DValidation.h"
 
+#include "Engine/Asset/TilemapData.h"
 #include "Engine/Physics/PhysicsDiagnostics.h"
 #include "Engine/Scene/Components/BoxCollider2DComponent.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/CircleCollider2DComponent.h"
 #include "Engine/Scene/Components/PolygonCollider2DComponent.h"
 #include "Engine/Scene/Components/RigidBody2DComponent.h"
+#include "Engine/Scene/Components/TilemapColliderComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Physics2DSystem.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
 #include "Support/ExpectLog.h"
+#include "Support/InMemoryAssetManager.h"
 #include "Support/SceneTestFixture.h"
 
 #include <glm/gtc/quaternion.hpp>
@@ -236,6 +239,58 @@ namespace Engine {
 					CHECK(limit->Subject == "bodies");
 				}
 			}
+		}
+
+		// C21.2 (Docs/Decisions/0032-m21-contract.md decision 25, stream T2): a TilemapCollider loads its tilemap through the
+		// validator's asset manager as the session's system does, so project.validate and the session agree.
+		TEST_CASE("Physics2DValidation: a TilemapCollider without a tilemap is PHYSICS_INVALID_SHAPE, and one without a solid cell is quiet"
+			* doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Test::InMemoryAssetManager assets;
+			const AssetHandle emptyHandle = UUID(8970);
+			Ref<TilemapData> empty = CreateRef<TilemapData>();
+			empty->Palette = { TilemapTile{ .Solid = false } };
+			empty->ChunkSize = 1;
+			empty->Chunks = { TilemapChunk{ .X = 0, .Y = 0, .Tiles = { 1 } } };
+			assets.Publish(emptyHandle, empty, "Assets/Tilemaps/Decor.tilemap");
+			// Neither a Tilemap nor a TilemapRenderer to take one from.
+			Entity bare = CreatePlanarEntity(scene, "Bare", glm::vec2(0.0f));
+			bare.AddComponent<TilemapColliderComponent>();
+			// A tilemap that is not registered.
+			Entity missing = CreatePlanarEntity(scene, "Missing", glm::vec2(4.0f, 0.0f));
+			missing.AddComponent<TilemapColliderComponent>(TilemapColliderComponent{ .Tilemap = TypedAssetHandle<AssetType::Tilemap>(AssetHandle(0x89700000ull)) });
+			// Only non-solid cells: no shape and no body, without a diagnostic.
+			Entity decor = CreatePlanarEntity(scene, "Decor", glm::vec2(8.0f, 0.0f));
+			decor.AddComponent<TilemapColliderComponent>(TilemapColliderComponent{ .Tilemap = TypedAssetHandle<AssetType::Tilemap>(emptyHandle) });
+			// A TilemapCollider is a 2D physics component: with a 3D one beside it, the entity is in both worlds.
+			Entity mixed = CreatePlanarEntity(scene, "Mixed", glm::vec2(12.0f, 0.0f));
+			mixed.AddComponent<TilemapColliderComponent>(TilemapColliderComponent{ .Tilemap = TypedAssetHandle<AssetType::Tilemap>(emptyHandle) });
+			mixed.AddComponent<BoxColliderComponent>();
+			TransformSystem::Update(scene);
+
+			const PhysicsLayerTable layers = MakeDefaultLayers();
+			const std::vector<PhysicsDiagnostic> diagnostics = ValidateScenePhysics2D(scene, layers, &assets);
+			const std::optional<PhysicsDiagnostic> bareShape = FindDiagnostic(diagnostics, PhysicsInvalidShapeCode, bare.GetUUID());
+			REQUIRE(bareShape.has_value());
+			CHECK(bareShape->Component == "TilemapCollider");
+			CHECK(bareShape->Field == "Tilemap");
+			CHECK(FindDiagnostic(diagnostics, PhysicsInvalidShapeCode, missing.GetUUID()).has_value());
+			CHECK(FindDiagnostic(diagnostics, Physics2DMixedWorldsCode, mixed.GetUUID()).has_value());
+			CHECK(std::ranges::none_of(diagnostics, [&decor](const PhysicsDiagnostic& diagnostic)
+			{
+				return diagnostic.Entity == decor.GetUUID();
+			}));
+			// Without an asset manager every tilemap collider is PHYSICS_INVALID_SHAPE, as a mesh collider is in the 3D world.
+			const std::vector<PhysicsDiagnostic> withoutAssets = ValidateScenePhysics2D(scene, layers);
+			CHECK(FindDiagnostic(withoutAssets, PhysicsInvalidShapeCode, decor.GetUUID()).has_value());
+
+			// The session reports the same and creates none of these bodies.
+			Result<Scope<Physics2DSystem>> system = Physics2DSystem::Create({ .RuntimeScene = &scene, .Assets = &assets });
+			REQUIRE_MESSAGE(system.has_value(), system.error().ToString());
+			CHECK((*system)->GetStats().BodyCount == 0);
+			CHECK(FindDiagnostic((*system)->GetDiagnostics(), PhysicsInvalidShapeCode, bare.GetUUID()).has_value());
 		}
 	}
 

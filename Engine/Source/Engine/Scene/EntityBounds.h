@@ -27,8 +27,10 @@ namespace Engine {
 	// GetOrPlaceholder, which records the diagnostic). M21 (Docs/Decisions/0032-m21-contract.md decision 3, stream A): a
 	// SpriteRenderer counts with the world AABB of the quad it is drawn with (Asset/SpriteGeometry.h at its entity's world
 	// matrix), a missing or failed texture with its placeholder's quad, while a missing or failed sheet or an out-of-range
-	// Frame adds nothing (SpriteRendererComponent.h states the one rule). nullopt when no included entity has a MeshRenderer
-	// with a mesh or a SpriteRenderer with a quad.
+	// Frame adds nothing (SpriteRendererComponent.h states the one rule). M21 (C21.2, decision 24, stream T1): a
+	// TilemapRenderer counts with the world AABB of every tile it draws, each tile's quad as a sprite's at its cell
+	// (TilemapRendererComponent.h), a missing or failed Tilemap adding nothing. nullopt when no included entity has a
+	// MeshRenderer with a mesh, a SpriteRenderer with a quad or a TilemapRenderer with a tile.
 	// `entity` is readable (Entity::IsReadable): an entity pending destruction and its subtree, also pending, still have
 	// their bounds until the flush (Entity:GetWorldBounds; M20, decision 4 of Docs/Decisions/0031-m20-contract.md).
 	// Main thread (the scene and the manager).

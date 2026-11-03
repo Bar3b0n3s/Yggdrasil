@@ -13,6 +13,7 @@
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
 #include "Engine/Scene/Components/IDComponent.h"
+#include "Engine/Scene/Components/Light2DComponent.h"
 #include "Engine/Scene/Components/MeshColliderComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/NameComponent.h"
@@ -32,6 +33,8 @@
 #include "Engine/Scene/Components/SpriteRendererComponent.h"
 #include "Engine/Scene/Components/TagsComponent.h"
 #include "Engine/Scene/Components/TextComponent.h"
+#include "Engine/Scene/Components/TilemapColliderComponent.h"
+#include "Engine/Scene/Components/TilemapRendererComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 
 namespace Engine {
@@ -56,10 +59,11 @@ namespace Engine {
 		AudioSourceComponent, AudioListenerComponent,
 		// Scripting (Registration/ScriptingRegistration.cpp)
 		ScriptComponent,
-		// Rendering2D (Registration/Rendering2DRegistration.cpp; M21, Docs/Decisions/0032-m21-contract.md decisions 3, 5 and 6)
-		SpriteRendererComponent, SpriteAnimatorComponent, PixelPerfectCameraComponent,
-		// Physics2D (Registration/Physics2DRegistration.cpp; M21, Docs/Decisions/0032-m21-contract.md decision 9)
-		RigidBody2DComponent, BoxCollider2DComponent, CircleCollider2DComponent, PolygonCollider2DComponent>;
+		// Rendering2D (Registration/Rendering2DRegistration.cpp; M21, Docs/Decisions/0032-m21-contract.md decisions 3, 5, 6,
+		// 20 and 24)
+		SpriteRendererComponent, SpriteAnimatorComponent, PixelPerfectCameraComponent, Light2DComponent, TilemapRendererComponent,
+		// Physics2D (Registration/Physics2DRegistration.cpp; M21, Docs/Decisions/0032-m21-contract.md decisions 9 and 25)
+		RigidBody2DComponent, BoxCollider2DComponent, CircleCollider2DComponent, PolygonCollider2DComponent, TilemapColliderComponent>;
 
 	// The category registration functions, each registering its enums, structs and components in BuiltinComponents order
 	// through RegisterComponent<T> (Scene/ComponentRegistration.h). Each is called exactly once per registry, in this

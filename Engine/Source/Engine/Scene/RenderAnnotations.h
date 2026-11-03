@@ -11,6 +11,7 @@
 namespace Engine {
 
 	class AssetManager;
+	class Physics2DSystem;
 	class PhysicsSystem;
 	class Scene;
 
@@ -24,8 +25,14 @@ namespace Engine {
 	// Label mode does not filter bounds/axes/colliders; those flags independently apply to eligible entities.
 	// InvalidArgument: invalid snapshot alpha/annotation values. Build first, then append, so failure is atomic.
 	// Repeated calls intentionally append again: the host calls once for each freshly extracted snapshot.
+	// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 28, stream P3): with Colliders, the 2D colliders follow the 3D
+	// ones (BuildCollider2DDebugDraw with `physics2D`, the session's Physics2DSystem for play, null in edit). Both hosts pass
+	// it for a play scene: the editor's views (EditorHostViewports) and viewport.screenshot (ScreenshotMethods.cpp's one
+	// argument, granted by the ledger amendment on main of 2026-11-02); a host that passed none would draw a play scene's 2D
+	// colliders as an edit scene's, Dynamic bodies awake and asleep alike. Where the view's icons are on, a Light2D shows the
+	// PointLight icon in its Color (decision 20, stream L).
 	[[nodiscard]] Status AppendRenderAnnotations(const Scene& scene, AssetManager& assets, const PhysicsLayerTable& layers,
-		const PhysicsSystem* physics, RenderSnapshot& snapshot);
+		const PhysicsSystem* physics, RenderSnapshot& snapshot, const Physics2DSystem* physics2D = nullptr);
 
 	inline constexpr std::string_view RenderNoLightingCode = "RENDER_NO_LIGHTING";
 

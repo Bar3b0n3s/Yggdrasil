@@ -50,4 +50,28 @@ namespace Engine {
 		return info;
 	}
 
+	// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 22): the Lights2D pass's per-view targets, at the scene
+	// resolution. Lights2DNormals: the lit sprites' and tiles' world normals (xyz) and whether the pixel's lit item has a normal
+	// map (w, 1 or 0). Lights2DLight: the linear light every 2D light added at the pixel (rgb; a stays 0).
+	inline constexpr nvrhi::Format Lights2DNormalsFormat = nvrhi::Format::RGBA16_FLOAT;
+	inline constexpr nvrhi::Format Lights2DLightFormat = nvrhi::Format::RGBA16_FLOAT;
+
+	// The framebuffer of the lit items' normals (the QuadBatcher's Normals pipeline): Lights2DNormals with SceneDepth, so a
+	// mesh in front of a sprite hides its normal as it hides its colour.
+	[[nodiscard]] inline nvrhi::FramebufferInfo GetLights2DNormalsFramebufferInfo()
+	{
+		nvrhi::FramebufferInfo info;
+		info.addColorFormat(Lights2DNormalsFormat);
+		info.setDepthFormat(SceneDepthFormat);
+		return info;
+	}
+
+	// The framebuffer the 2D lights accumulate into (the Lights2D pipeline, additive): Lights2DLight alone.
+	[[nodiscard]] inline nvrhi::FramebufferInfo GetLights2DLightFramebufferInfo()
+	{
+		nvrhi::FramebufferInfo info;
+		info.addColorFormat(Lights2DLightFormat);
+		return info;
+	}
+
 }

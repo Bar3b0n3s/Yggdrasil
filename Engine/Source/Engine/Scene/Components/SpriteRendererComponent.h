@@ -34,8 +34,16 @@ namespace Engine {
 	//   - Order: sprites draw in (sorting layer, OrderInLayer, canonical entity order) order, back to front, without writing
 	//     depth (painter's order), depth-tested against the opaque meshes. SortingLayer names an entry of the project's
 	//     SortingLayers.Layers; an undeclared name draws in the first layer (SPRITE_UNKNOWN_SORTING_LAYER).
-	//   - Lit (W21.2, C21.2): the sprite opts in to 2D lights (Light2D); unlit sprites keep their texels unchanged. The flag
-	//     lands with the component so the component never needs a migration for it; it has no effect until W21.2.
+	//   - Lit (C21.2; Docs/Decisions/0032-m21-contract.md decisions 21 and 22): the sprite opts in to 2D lights (Light2D):
+	//     each of its texels is multiplied by the light the view's lights give its pixel (Renderer/Light2DShading.h); unlit
+	//     sprites keep their texels unchanged.
+	//   - NormalMap (C21.2, decision 21): an optional tangent-space normal map for a lit sprite, a texture imported with Usage
+	//     NormalMap (linear, (r, g, b) = (n + 1) / 2, +X towards the image's right, +Y towards its top), laid like the image's
+	//     texture: sampled at the same normalized texture coordinates, so a sheet's normal map has the sheet texture's layout.
+	//     Point lights then light the sprite by the cosine between its normal (turned with the sprite's quad: its flips and its
+	//     entity's rotation) and the direction to the light (Light2DComponent::Height above the plane). Null: the flat normal,
+	//     which takes each light whole. An unlit sprite ignores it. Frozen here and registered (after Lit) by stream L, which
+	//     regenerates FeatureTest's canonical sprite scenes with it at W21.2's integration.
 	struct SpriteRendererComponent
 	{
 		TypedAssetHandle<AssetType::SpriteSheet> Sheet{};
@@ -48,6 +56,7 @@ namespace Engine {
 		std::string SortingLayer = std::string(DefaultSortingLayerName);
 		int32_t OrderInLayer = 0;
 		bool Lit = false;
+		TypedAssetHandle<AssetType::Texture> NormalMap{}; // C21.2; registered by stream L (see above)
 	};
 
 }

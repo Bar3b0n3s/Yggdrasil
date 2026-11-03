@@ -6,6 +6,7 @@
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
+#include "Engine/Scene/Components/Light2DComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/PixelPerfectCameraComponent.h"
 #include "Engine/Scene/Components/PointLightComponent.h"
@@ -14,6 +15,7 @@
 #include "Engine/Scene/Components/SpotLightComponent.h"
 #include "Engine/Scene/Components/SpriteRendererComponent.h"
 #include "Engine/Scene/Components/TextComponent.h"
+#include "Engine/Scene/Components/TilemapRendererComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
@@ -624,6 +626,100 @@ namespace Engine {
 			const Result<RenderSnapshot> sceneView = ExtractRenderSnapshot(scene, { .Camera = RenderCameraSource::Explicit, .Width = 960, .Height = 540 });
 			REQUIRE(sceneView.has_value());
 			CHECK(sceneView->Output == RenderOutputSettings{});
+		}
+
+		// C21.2 (Docs/Decisions/0032-m21-contract.md decisions 21 and 22, stream L): the 2D lights in canonical order with every
+		// field, at their rendered position, and a lit sprite's normal map.
+		TEST_CASE("RenderExtraction: Light2D components become 2D lights in canonical order, and sprites carry their normal maps" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			static_cast<void>(CreateCamera(scene, "Camera", true));
+			Entity torch = scene.CreateEntity("Torch");
+			torch.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(2.0f, -1.0f, 0.5f);
+			});
+			torch.AddComponent<Light2DComponent>(Light2DComponent{ .Type = Light2DType::Point, .Color = glm::vec3(1.0f, 0.5f, 0.25f), .Intensity = 3.0f, .Radius = 6.0f, .Falloff = 0.25f, .Height = 2.0f });
+			Entity sky = scene.CreateEntity("Sky");
+			sky.AddComponent<Light2DComponent>(Light2DComponent{ .Type = Light2DType::Global, .Color = glm::vec3(0.1f), .Intensity = 0.5f });
+			Entity off = scene.CreateEntity("Off");
+			off.AddComponent<Light2DComponent>();
+			off.SetActive(false);
+			Entity sprite = scene.CreateEntity("Sprite");
+			const AssetHandle normalMap(0x4e4d000000000001ull);
+			sprite.AddComponent<SpriteRendererComponent>(SpriteRendererComponent{ .Lit = true, .NormalMap = TypedAssetHandle<AssetType::Texture>(normalMap) });
+			TransformSystem::Update(scene);
+
+			const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, { .Width = 320, .Height = 180 });
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			REQUIRE(snapshot->Lights2D.size() == 2);
+			const Light2DItem& point = snapshot->Lights2D[0];
+			CHECK(point.Entity == torch.GetUUID());
+			CHECK(point.Type == RenderLight2DType::Point);
+			CHECK(point.Position == glm::vec3(2.0f, -1.0f, 0.5f));
+			CHECK(point.Color == glm::vec3(1.0f, 0.5f, 0.25f));
+			CHECK(point.Intensity == 3.0f);
+			CHECK(point.Radius == 6.0f);
+			CHECK(point.Falloff == 0.25f);
+			CHECK(point.Height == 2.0f);
+			CHECK(snapshot->Lights2D[1].Entity == sky.GetUUID());
+			CHECK(snapshot->Lights2D[1].Type == RenderLight2DType::Global);
+			REQUIRE(snapshot->Sprites.size() == 1);
+			CHECK(snapshot->Sprites[0].Lit);
+			CHECK(snapshot->Sprites[0].NormalMap == normalMap);
+		}
+
+		// C21.2 (decision 24, stream T1): tilemaps sort with the sprites by (sorting layer, order in layer, canonical order), each
+		// placed among them by its DrawPosition.
+		TEST_CASE("RenderExtraction: tilemaps are extracted in sorting-layer order and placed among the sprites" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			static_cast<void>(CreateCamera(scene, "Camera", true));
+			const TypedAssetHandle<AssetType::Tilemap> map(AssetHandle(0x7113000000000002ull));
+			const auto addSprite = [&scene](std::string_view name, std::string layer, int32_t order)
+			{
+				Entity entity = scene.CreateEntity(name);
+				entity.AddComponent<SpriteRendererComponent>(SpriteRendererComponent{ .SortingLayer = std::move(layer), .OrderInLayer = order });
+				return entity.GetUUID();
+			};
+			const auto addTilemap = [&scene, map](std::string_view name, std::string layer, int32_t order)
+			{
+				Entity entity = scene.CreateEntity(name);
+				entity.AddComponent<TilemapRendererComponent>(TilemapRendererComponent{ .Tilemap = map, .Color = glm::vec4(0.5f), .PixelsPerUnit = 8.0f, .SortingLayer = std::move(layer), .OrderInLayer = order, .Lit = true });
+				return entity.GetUUID();
+			};
+			const UUID ground = addTilemap("Ground", "Background", 0);
+			const UUID hero = addSprite("Hero", "Foreground", 0);
+			const UUID sky = addSprite("Sky", "Background", -5);
+			const UUID decor = addTilemap("Decor", "Foreground", 0); // ties with Hero: canonical order puts it after
+			const UUID tree = addSprite("Tree", "Background", 0);    // ties with Ground: canonical order puts it after
+			Entity empty = scene.CreateEntity("Empty");
+			empty.AddComponent<TilemapRendererComponent>(); // a null Tilemap draws nothing and is not extracted
+			TransformSystem::Update(scene);
+
+			RenderExtractionRequest request{ .Width = 640, .Height = 360 };
+			request.SortingLayers = { "Default", "Background", "Foreground" };
+			const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, request);
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			// The one order: Sky, Ground, Tree, Hero, Decor.
+			REQUIRE(snapshot->Sprites.size() == 3);
+			CHECK(snapshot->Sprites[0].Entity == sky);
+			CHECK(snapshot->Sprites[1].Entity == tree);
+			CHECK(snapshot->Sprites[2].Entity == hero);
+			REQUIRE(snapshot->Tilemaps.size() == 2);
+			const TilemapItem& first = snapshot->Tilemaps[0];
+			CHECK(first.Entity == ground);
+			CHECK(first.DrawPosition == 1);
+			CHECK(first.Tilemap == map.GetHandle());
+			CHECK(first.Color == glm::vec4(0.5f));
+			CHECK(first.PixelsPerUnit == 8.0f);
+			CHECK(first.SortingLayer == 1);
+			CHECK(first.Lit);
+			CHECK(snapshot->Tilemaps[1].Entity == decor);
+			CHECK(snapshot->Tilemaps[1].DrawPosition == 3);
+			CHECK(snapshot->Tilemaps[1].SortingLayer == 2);
 		}
 	}
 

@@ -41,7 +41,9 @@ namespace Engine {
 	// (SpriteRendererComponent.h's rule): a texture that is missing or fails to load is hit on its placeholder's quad, and a
 	// sheet that is missing or fails to load, or an out-of-range Frame, gives no quad and is never hit. Empty optional: no
 	// sprite hit. Errors: InvalidArgument for a non-finite or zero direction, a non-finite origin, an invalid distance
-	// interval or Alpha. Main thread.
+	// interval or Alpha. Main thread. M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 24, stream T1): the
+	// TilemapRenderers take part as the sprites they draw: a ray that crosses a drawn tile's quad hits the tilemap's entity,
+	// in the one draw order of sprites and tilemaps (TilemapItem::DrawPosition), the last-drawn tile of a tilemap first.
 	[[nodiscard]] Result<std::optional<SceneRaycastHit>> PickSprite(const Scene& scene, AssetManager& assets, const SpritePickRequest& request);
 
 	// PickSprite against `sprites`, a snapshot's sprites in their draw order (RenderSnapshot::Sprites: effectively enabled,
@@ -50,5 +52,12 @@ namespace Engine {
 	// (EditorHostViewports). The request's Alpha and SortingLayers are the snapshot's own and are not read; its ray and
 	// distances are checked as PickSprite checks them. Errors: PickSprite's. Main thread.
 	[[nodiscard]] Result<std::optional<SceneRaycastHit>> PickSprite(std::span<const SpriteItem> sprites, AssetManager& assets, const SpritePickRequest& request);
+
+	// M21 (C21.2, decision 24, stream T1): PickSprite against a snapshot's sprites and tilemaps (RenderSnapshot::Sprites and
+	// Tilemaps, each tilemap drawn before Sprites[DrawPosition]), so the editor's click selection picks a tile of the image it
+	// rendered as it picks a sprite: a hit tile is its tilemap's entity. The sprites-only overload is this one with no
+	// tilemaps. Errors: PickSprite's. Main thread.
+	[[nodiscard]] Result<std::optional<SceneRaycastHit>> PickSprite(std::span<const SpriteItem> sprites, std::span<const TilemapItem> tilemaps,
+		AssetManager& assets, const SpritePickRequest& request);
 
 }

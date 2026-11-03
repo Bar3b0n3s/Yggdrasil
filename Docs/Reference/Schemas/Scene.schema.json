@@ -1305,6 +1305,125 @@
 			},
 			"additionalProperties": false
 		},
+		"Light2D": {
+			"description": "A 2D light: lights the lit sprites and tilemaps of the view, never unlit ones; no shadows.",
+			"type": "object",
+			"properties": {
+				"Type": {
+					"description": "Whether the light is a point light around the entity or a global light of the whole view.",
+					"enum": ["Point", "Global"]
+				},
+				"Color": {
+					"description": "The light's linear colour.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"Intensity": {
+					"description": "How strong the light is: its colour is multiplied by this, so values above 1 overbright.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000
+				},
+				"Radius": {
+					"description": "Point: how far the light reaches from the entity, in world units.",
+					"type": "number",
+					"minimum": 0.001,
+					"maximum": 100000
+				},
+				"Falloff": {
+					"description": "Point: the fraction of the radius, from its edge inward, over which the light fades smoothly to nothing; 0 is a hard edge.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"Height": {
+					"description": "Point: how far above the lit plane the light sits, in world units; only normal-mapped sprites read it.",
+					"type": "number",
+					"minimum": 0.001,
+					"maximum": 100000
+				}
+			},
+			"additionalProperties": false
+		},
+		"TilemapRenderer": {
+			"description": "Draws a tilemap's tiles in the entity's XY plane, each tile as a sprite of its palette entry's sheet frame.",
+			"type": "object",
+			"properties": {
+				"Tilemap": {
+					"description": "The tilemap whose tiles are drawn; null draws nothing.",
+					"type": ["string", "null"],
+					"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+					"x-assetType": "Tilemap"
+				},
+				"Color": {
+					"description": "The linear colour every tile's texels are multiplied with, with opacity in the fourth component.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 4,
+					"maxItems": 4
+				},
+				"PixelsPerUnit": {
+					"description": "How many texels of a tile's frame make one unit of the entity's local space, as a sprite's.",
+					"type": "number",
+					"minimum": 0.001,
+					"maximum": 65536
+				},
+				"SortingLayer": {
+					"description": "The sorting layer name from project settings; the tilemap sorts with the sprites, and an undeclared name draws in the first.",
+					"type": "string"
+				},
+				"OrderInLayer": {
+					"description": "The draw order within the sorting layer, among the sprites: higher values draw over lower ones, equal values in canonical entity order.",
+					"type": "integer",
+					"minimum": -2147483648,
+					"maximum": 2147483647
+				},
+				"Lit": {
+					"description": "Whether 2D lights light the tiles; unlit tiles keep their texels unchanged.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
 		"RigidBody2D": {
 			"description": "Simulates the entity in the 2D world: moves along world X and Y and rotates about world Z.",
 			"type": "object",
@@ -1516,6 +1635,23 @@
 			},
 			"additionalProperties": false
 		},
+		"TilemapCollider": {
+			"description": "The solid cells of a tilemap as 2D colliders: each chunk's solid cells merged into boxes, one static compound without a RigidBody2D.",
+			"type": "object",
+			"properties": {
+				"Tilemap": {
+					"description": "The tilemap whose solid cells collide; null takes the entity's TilemapRenderer.Tilemap.",
+					"type": ["string", "null"],
+					"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+					"x-assetType": "Tilemap"
+				},
+				"IsTrigger": {
+					"description": "Whether the collider only detects overlaps instead of colliding.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
 		"PrefabOverride": {
 			"description": "One recorded difference between an outermost prefab instance and its prefab.",
 			"type": "object",
@@ -1672,6 +1808,12 @@
 						"PixelPerfectCamera": {
 							"$ref": "#/$defs/PixelPerfectCamera"
 						},
+						"Light2D": {
+							"$ref": "#/$defs/Light2D"
+						},
+						"TilemapRenderer": {
+							"$ref": "#/$defs/TilemapRenderer"
+						},
 						"RigidBody2D": {
 							"$ref": "#/$defs/RigidBody2D"
 						},
@@ -1683,6 +1825,9 @@
 						},
 						"PolygonCollider2D": {
 							"$ref": "#/$defs/PolygonCollider2D"
+						},
+						"TilemapCollider": {
+							"$ref": "#/$defs/TilemapCollider"
 						}
 					},
 					"additionalProperties": true

@@ -73,6 +73,34 @@ namespace Engine {
 			checkParseError(std::span<const std::byte>(artifact).first(31));
 		}
 
+		// The type range follows the enumeration (Docs/Decisions/0032-m21-contract.md decision 31), so it holds whichever types
+		// phase 2's milestones append and in whichever order they land: every type AssetTypeToString names reads back, and
+		// None and the values past the last enumerator are unknown.
+		TEST_CASE("CookedFormat: every named asset type reads back, and None and values past the enumeration are refused")
+		{
+			const Buffer payload = MakePayload(8);
+			uint16_t value = 1;
+			for (; AssetTypeToString(static_cast<AssetType>(value)) != AssetTypeToString(AssetType::None); ++value)
+			{
+				CAPTURE(value);
+				const Result<CookedArtifactView> view = ReadCookedArtifact(WriteCookedArtifact(static_cast<AssetType>(value), 1, 1, payload));
+				REQUIRE_MESSAGE(view.has_value(), view.error().ToString());
+				CHECK(std::to_underlying(view->Header.Type) == value);
+			}
+			CHECK(value > std::to_underlying(AssetType::Tilemap));
+			Buffer artifact = WriteCookedArtifact(AssetType::Texture, 1, 1, payload);
+			constexpr size_t TypeOffset = 6; // the little-endian uint16 after the magic and the format version
+			for (const uint16_t unknown : { uint16_t{ 0 }, value, uint16_t{ 0xFFFF } })
+			{
+				CAPTURE(unknown);
+				artifact[TypeOffset] = static_cast<std::byte>(unknown & 0xFFU);
+				artifact[TypeOffset + 1] = static_cast<std::byte>(unknown >> 8U);
+				const Result<CookedArtifactView> refused = ReadCookedArtifact(artifact);
+				REQUIRE_FALSE(refused.has_value());
+				CHECK(refused.error().GetCode() == ErrorCode::Validation);
+			}
+		}
+
 		TEST_CASE("CookedFormat: 10,000 seeded mutations never crash and always return Result" * doctest::test_suite(Test::FuzzSuite))
 		{
 			const Buffer original = WriteCookedArtifact(AssetType::Font, 1, 1, MakePayload(256));

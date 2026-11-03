@@ -105,12 +105,12 @@ namespace Engine {
 		TEST_CASE("RenderPassDeclarations: the stats order puts game Text before the upscale and the editor overlays after it")
 		{
 			// M17's order (§8.3) with Text moved to the SceneOverlay stage, the output stage's Upscale after it, the labels
-			// after the other editor overlays and the letterbox repaint last; M21's Sprites in the Sprites stage, between the
-			// forward passes and Bloom (ADR 0028's phase-2 ledger); a frozen contract of stats.get.
-			constexpr std::array<std::string_view, 26> Expected = { "Prepare", "DirectionalShadows", "SpotShadows", "DepthNormal", "DepthPyramid", "GTAO",
-				"GTAODenoiseHorizontal", "GTAODenoiseVertical", "ForwardOpaque", "Skybox", "ForwardTransparent", "Overdraw", "Sprites", "Bloom", "Tonemap", "FXAA",
-				"Text", "Upscale", "SelectionMask", "SelectionDilateHorizontal", "SelectionDilateVertical", "SelectionComposite", "Wireframe",
-				"Overlays", "Labels", "Letterbox" };
+			// after the other editor overlays and the letterbox repaint last; M21's Sprites, then Lights2D (C21.2), in the Sprites
+			// stage, between the forward passes and Bloom (ADR 0028's phase-2 ledger); a frozen contract of stats.get.
+			constexpr std::array<std::string_view, 27> Expected = { "Prepare", "DirectionalShadows", "SpotShadows", "DepthNormal", "DepthPyramid", "GTAO",
+				"GTAODenoiseHorizontal", "GTAODenoiseVertical", "ForwardOpaque", "Skybox", "ForwardTransparent", "Overdraw", "Sprites", "Lights2D", "Bloom",
+				"Tonemap", "FXAA", "Text", "Upscale", "SelectionMask", "SelectionDilateHorizontal", "SelectionDilateVertical", "SelectionComposite",
+				"Wireframe", "Overlays", "Labels", "Letterbox" };
 			REQUIRE(RenderStatsOrder.size() == Expected.size());
 			for (size_t index = 0; index < Expected.size(); ++index)
 				CHECK(RenderStatsOrder[index] == Expected[index]);
@@ -140,6 +140,30 @@ namespace Engine {
 			CHECK(GetDeclaredPipelineCountOf("Wireframe") == 0);
 			CHECK(GetDeclaredPipelineCountOf("Labels") == 0);
 			CHECK(GetDeclaredPipelineCountOf("Letterbox") == 0);
+		}
+
+		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 22): stream L gives the Lights2D declaration its pipeline of
+		// the Lights2D program and the QuadBatcher its HdrLit and Normals pipelines: 61 startup pipelines.
+		TEST_CASE("RenderPassDeclarations: the Lights2D pass declares one pipeline of its program and the QuadBatcher four" * doctest::skip(true))
+		{
+			const auto lights = std::find_if(ScenePassDeclarations.begin(), ScenePassDeclarations.end(), [](const RenderPassDeclaration& declaration)
+			{
+				return declaration.Name == "Lights2D";
+			});
+			REQUIRE(lights != ScenePassDeclarations.end());
+			CHECK(lights->Stage == RenderStage::Sprites);
+			CHECK(lights->PipelineCount == 1);
+			REQUIRE(lights->Programs.size() == 1);
+			CHECK(lights->Programs[0] == "Lights2D");
+			REQUIRE(lights->Targets.size() == 2);
+			CHECK(lights->Targets[0] == "Lights2DNormals");
+			CHECK(lights->Targets[1] == "Lights2DLight");
+			// It follows Sprites, which follows the QuadBatcher.
+			REQUIRE(lights != ScenePassDeclarations.begin());
+			CHECK((lights - 1)->Name == "Sprites");
+			CHECK(GetDeclaredPipelineCountOf("QuadBatcher") == 4);
+			CHECK(QuadBatcher::PipelineCount == 4);
+			CHECK(GetDeclaredPipelineCount() == 61);
 		}
 	}
 

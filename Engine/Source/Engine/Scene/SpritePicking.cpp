@@ -110,4 +110,11 @@ namespace Engine {
 		return std::optional<SceneRaycastHit>();
 	}
 
+	Result<std::optional<SceneRaycastHit>> PickSprite(std::span<const SpriteItem> /*sprites*/, std::span<const TilemapItem> /*tilemaps*/,
+		AssetManager& /*assets*/, const SpritePickRequest& /*request*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "tilemap picking (Docs/Decisions/0032-m21-contract.md decision 24, stream T1)");
+	}
+
 }

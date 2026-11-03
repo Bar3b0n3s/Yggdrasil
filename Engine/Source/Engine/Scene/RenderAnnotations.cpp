@@ -54,7 +54,7 @@ namespace Engine {
 	}
 
 	Status AppendRenderAnnotations(const Scene& scene, AssetManager& assets, const PhysicsLayerTable& layers,
-		const PhysicsSystem* physics, RenderSnapshot& snapshot)
+		const PhysicsSystem* physics, RenderSnapshot& snapshot, const Physics2DSystem* /*physics2D*/)
 	{
 		const RenderAnnotations& options = snapshot.Annotations;
 		if (!std::isfinite(snapshot.Alpha) || snapshot.Alpha < 0 || snapshot.Alpha > 1

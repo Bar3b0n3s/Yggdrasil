@@ -137,6 +137,54 @@ namespace Engine {
 			REQUIRE((*once)["entities"].size() == 1);
 			CHECK((*once)["entities"][0]["name"] == Json("Bumper"));
 		}
+
+		// C21.2 (Docs/Decisions/0032-m21-contract.md decision 27, stream P3): physics2d.bodyInfo, physics.bodyInfo in the plane;
+		// stream P3 registers it.
+		TEST_CASE("Physics2DMethods: physics2d.bodyInfo reports a 2D body's pose, colliders and contacts" * doctest::skip(true))
+		{
+			Test::AutomationFixture setup("Physics2DBodyInfo");
+			REQUIRE(setup.Call("edit.batch", ParsePhysics2DMethodJson(R"({"label":"Physics2D","ops":[
+				{"method":"entity.create","params":{"name":"Floor","components":{"Transform":{"Translation":[0,-0.5,0]},
+					"RigidBody2D":{"Type":"Static"},"BoxCollider2D":{"HalfExtents":[5,0.5]}}}},
+				{"method":"entity.create","params":{"name":"Crate","components":{"Transform":{"Translation":[1,0.5,0]},
+					"RigidBody2D":{},"BoxCollider2D":{}}}},
+				{"method":"entity.create","params":{"name":"Lid","parent":"/Crate","components":{"Transform":{"Translation":[0,0.6,0]},
+					"BoxCollider2D":{"HalfExtents":[0.5,0.1]}}}},
+				{"method":"entity.create","params":{"name":"Marker","components":{}}}]})"))
+					.has_value());
+			// Bodies exist only in a play session: InvalidState, the hint naming play.start.
+			const Json notPlaying = setup.Request("physics2d.bodyInfo", Json{ { "entity", "/Crate" } });
+			CHECK(notPlaying["error"]["data"]["errorCode"] == Json("InvalidState"));
+			CHECK(notPlaying["error"]["data"]["hint"].dump().contains("play.start"));
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true }, { "seed", 3 }, { "mode", "simulate" } }).has_value());
+			REQUIRE(setup.Call("play.step", Json{ { "ticks", 30 } }).has_value());
+
+			// The gathered child reports its owner's body.
+			const Result<Json> lid = setup.Call("physics2d.bodyInfo", Json{ { "entity", "/Crate/Lid" } });
+			REQUIRE_MESSAGE(lid.has_value(), lid.error().ToString());
+			CHECK((*lid)["entity"]["name"] == Json("Lid"));
+			CHECK((*lid)["body"]["name"] == Json("Crate"));
+			CHECK((*lid)["origin"] == Json("RigidBody"));
+			CHECK((*lid)["type"] == Json("Dynamic"));
+			CHECK((*lid)["layer"] == Json("Default"));
+			REQUIRE((*lid)["colliders"].size() == 2);
+			CHECK((*lid)["colliders"][0]["name"] == Json("Crate"));
+			CHECK((*lid)["colliders"][1]["name"] == Json("Lid"));
+			REQUIRE((*lid)["position"].size() == 2);
+			CHECK(JsonReader((*lid)["position"][0]).ReadFloat().value_or(0.0f) == doctest::Approx(1.0f).epsilon(0.01));
+			CHECK((*lid)["angle"].is_number());
+			REQUIRE((*lid)["linearVelocity"].size() == 2);
+			CHECK((*lid)["angularVelocity"].is_number());
+			REQUIRE((*lid)["boundsMin"].size() == 2);
+			REQUIRE((*lid)["contacts"].size() == 1);
+			CHECK((*lid)["contacts"][0]["other"]["name"] == Json("Floor"));
+			CHECK((*lid)["tick"] == Json(30));
+			// An entity without a 2D body: NotFound at /entity.
+			const Result<Json> none = setup.Call("physics2d.bodyInfo", Json{ { "entity", "/Marker" } });
+			REQUIRE_FALSE(none.has_value());
+			CHECK(none.error().GetCode() == ErrorCode::NotFound);
+			CHECK(none.error().GetLocation().JsonPointer.value_or(std::string()) == "/entity");
+		}
 	}
 
 }

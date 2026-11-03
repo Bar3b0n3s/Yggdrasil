@@ -21,11 +21,13 @@
 
 namespace Engine {
 
+	class AssetManager;
 	class Scene;
 
 	// Error, not fixable: an entity holds a 2D physics component (RigidBody2D, BoxCollider2D, CircleCollider2D,
-	// PolygonCollider2D) and a 3D one (RigidBody, BoxCollider, SphereCollider, CapsuleCollider, MeshCollider,
-	// CharacterController). An entity belongs to one world: it keeps its 3D body and its 2D components make no 2D body.
+	// PolygonCollider2D, and from C21.2 TilemapCollider) and a 3D one (RigidBody, BoxCollider, SphereCollider,
+	// CapsuleCollider, MeshCollider, CharacterController). An entity belongs to one world: it keeps its 3D body and its 2D
+	// components make no 2D body.
 	inline constexpr std::string_view Physics2DMixedWorldsCode = "PHYSICS2D_MIXED_WORLDS";
 	// Warning, not fixable: a 2D body's owner has a world rotation that is not a rotation about Z alone (a swing about X or Y
 	// beyond PhysicsUnitRotationTolerance). The body takes the rotation's twist about Z, and its write-back drops the swing.
@@ -38,7 +40,13 @@ namespace Engine {
 	// subject): the 2D composition's (the shared PHYSICS_* codes and PHYSICS2D_OFF_PLANE), PHYSICS_INVALID_SHAPE for every 2D
 	// body whose shape MakeBody2DShape or PhysicsShape::Create refuses, and PHYSICS2D_MIXED_WORLDS for every entity that
 	// holds both kinds of physics components. Building shapes needs the process's PhysicsEngine (skipped and logged once at
-	// Warn without it, as ValidateScenePhysics). Pure function of its inputs otherwise; main thread.
-	[[nodiscard]] std::vector<PhysicsDiagnostic> ValidateScenePhysics2D(const Scene& scene, const PhysicsLayerTable& layers);
+	// Warn without it, as ValidateScenePhysics). Pure function of its inputs otherwise; main thread. M21 (C21.2,
+	// Docs/Decisions/0032-m21-contract.md decision 25, stream T2): a TilemapCollider's tilemap loads through `assets` as the
+	// play session's Physics2DSystem loads it (Physics2DSystem.h's tilemap paragraph), so its PHYSICS_INVALID_SHAPE cases agree;
+	// null `assets` makes every tilemap collider PHYSICS_INVALID_SHAPE, as ValidateScenePhysics does for mesh colliders.
+	// project.validate passes the editor's asset manager (stream T2). The default exists only so that the contract tree's
+	// callers compile unchanged: stream T2 removes it when it passes the editor's manager from ProjectValidator.cpp, so a
+	// caller can never forget the argument and see every tilemap collider reported (ValidateScenePhysics' signature).
+	[[nodiscard]] std::vector<PhysicsDiagnostic> ValidateScenePhysics2D(const Scene& scene, const PhysicsLayerTable& layers, AssetManager* assets = nullptr);
 
 }

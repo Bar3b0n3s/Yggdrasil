@@ -114,7 +114,16 @@ namespace Engine {
 	//   - Sprites (M21, C21.1; Docs/Decisions/0032-m21-contract.md decision 4): every effectively enabled entity with a
 	//     SpriteRendererComponent, at its rendered world matrix, with Sheet, Frame, Texture, Color, FlipX, FlipY,
 	//     PixelsPerUnit, OrderInLayer and Lit as they are and SortingLayer resolved against request.SortingLayers, sorted
-	//     stably by (SortingLayer, OrderInLayer) from canonical order (RenderSnapshot::Sprites).
+	//     stably by (SortingLayer, OrderInLayer) from canonical order (RenderSnapshot::Sprites); NormalMap as it is (C21.2,
+	//     decision 21; stream L).
+	//   - Tilemaps (M21, C21.2; decision 24, stream T1): every effectively enabled entity with a TilemapRendererComponent whose
+	//     Tilemap is not null, at its rendered world matrix, with Tilemap, Color, PixelsPerUnit, OrderInLayer and Lit as they
+	//     are and SortingLayer resolved as a sprite's, sorted stably by (SortingLayer, OrderInLayer) from canonical order; each
+	//     one's DrawPosition is the number of sprites before it in the one order of sprites and tilemaps by (SortingLayer,
+	//     OrderInLayer, canonical entity order) (RenderSnapshot::Tilemaps).
+	//   - Lights2D (M21, C21.2; decision 22, stream L): every effectively enabled entity with a Light2DComponent, in canonical
+	//     order, Position its rendered world matrix's translation, with Type, Color, Intensity, Radius, Falloff and Height as
+	//     they are (RenderSnapshot::Lights2D).
 	//   - PixelPerfectCamera (M21, decision 6): for the Primary and Entity sources, when the camera entity holds a
 	//     PixelPerfectCameraComponent, Output, the camera's position and its orthographic projection come from
 	//     ComputePixelPerfectView (Scene/PixelPerfectCamera.h), at the reference resolution's aspect, whatever the Camera's

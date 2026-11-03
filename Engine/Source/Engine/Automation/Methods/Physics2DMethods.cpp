@@ -152,6 +152,12 @@ namespace Engine {
 			return result;
 		}
 
+		Result<Physics2DBodyInfoResult> Physics2DBodyInfo(AutomationMethodContext& /*context*/, const Physics2DBodyInfoParams& /*params*/)
+		{
+			ENGINE_CONTRACT_STUB();
+			return MakeError(ErrorCode::Unsupported, "physics2d.bodyInfo (Docs/Decisions/0032-m21-contract.md decision 27, stream P3)");
+		}
+
 	}
 
 	void RegisterPhysics2DMethodTypes(TypeRegistry& registry)

@@ -9,7 +9,7 @@ export type AssetCreateType = "Material" | "Scene" | "Prefab" | "SoundEffect" | 
 export type AssetState = "Unloaded" | "Loading" | "Loaded" | "Failed"
 
 -- The kind of a loadable asset (§7.1).
-export type AssetType = "None" | "Scene" | "Prefab" | "Mesh" | "Material" | "Texture" | "Environment" | "AudioClip" | "Script" | "Font" | "Replay" | "SpriteSheet"
+export type AssetType = "None" | "Scene" | "Prefab" | "Mesh" | "Material" | "Texture" | "Environment" | "AudioClip" | "Script" | "Font" | "Replay" | "SpriteSheet" | "Tilemap"
 
 -- How a spatial sound's volume falls off with distance.
 export type Attenuation = "None" | "Inverse" | "Linear" | "Exponential"
@@ -76,6 +76,9 @@ export type InputRecordAction = "Start" | "Stop"
 
 -- Keyboard keys by their US-layout position.
 export type Key = "Space" | "Apostrophe" | "Comma" | "Minus" | "Period" | "Slash" | "D0" | "D1" | "D2" | "D3" | "D4" | "D5" | "D6" | "D7" | "D8" | "D9" | "Semicolon" | "Equal" | "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z" | "LeftBracket" | "Backslash" | "RightBracket" | "GraveAccent" | "World1" | "World2" | "Escape" | "Enter" | "Tab" | "Backspace" | "Insert" | "Delete" | "Right" | "Left" | "Down" | "Up" | "PageUp" | "PageDown" | "Home" | "End" | "CapsLock" | "ScrollLock" | "NumLock" | "PrintScreen" | "Pause" | "F1" | "F2" | "F3" | "F4" | "F5" | "F6" | "F7" | "F8" | "F9" | "F10" | "F11" | "F12" | "F13" | "F14" | "F15" | "F16" | "F17" | "F18" | "F19" | "F20" | "F21" | "F22" | "F23" | "F24" | "F25" | "Keypad0" | "Keypad1" | "Keypad2" | "Keypad3" | "Keypad4" | "Keypad5" | "Keypad6" | "Keypad7" | "Keypad8" | "Keypad9" | "KeypadDecimal" | "KeypadDivide" | "KeypadMultiply" | "KeypadSubtract" | "KeypadAdd" | "KeypadEnter" | "KeypadEqual" | "LeftShift" | "LeftControl" | "LeftAlt" | "LeftSuper" | "RightShift" | "RightControl" | "RightAlt" | "RightSuper" | "Menu"
+
+-- What a 2D light lights.
+export type Light2DType = "Point" | "Global"
 
 -- The logger an entry came from.
 export type LogChannel = "Engine" | "App" | "Script"
@@ -493,10 +496,13 @@ declare extern type Entity with
 	function GetComponent(self, name: "SpriteRenderer"): SpriteRenderer?
 	function GetComponent(self, name: "SpriteAnimator"): SpriteAnimator?
 	function GetComponent(self, name: "PixelPerfectCamera"): PixelPerfectCamera?
+	function GetComponent(self, name: "Light2D"): Light2D?
+	function GetComponent(self, name: "TilemapRenderer"): TilemapRenderer?
 	function GetComponent(self, name: "RigidBody2D"): RigidBody2D?
 	function GetComponent(self, name: "BoxCollider2D"): BoxCollider2D?
 	function GetComponent(self, name: "CircleCollider2D"): CircleCollider2D?
 	function GetComponent(self, name: "PolygonCollider2D"): PolygonCollider2D?
+	function GetComponent(self, name: "TilemapCollider"): TilemapCollider?
 	-- Get the parent, or nil for a root. [All modes; Runtime|Test; pure/read]
 	GetParent: (self: Entity) -> Entity?
 	-- Get the instance of the first script slot whose behaviour has this name, or of the first slot without a name; nil when there is none. [All modes; Runtime|Test; pure/read]
@@ -519,6 +525,8 @@ declare extern type Entity with
 	IsActiveSelf: (self: Entity) -> boolean
 	-- Whether this identity still names a live entity in this scene. [All modes; Runtime|Test; pure/read]
 	IsValid: (self: Entity) -> boolean
+	-- The entity's Light2D component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	Light2D: Light2D?
 	-- The entity's MeshCollider component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	MeshCollider: MeshCollider?
 	-- The entity's MeshRenderer component, or nil when absent. [All modes; Runtime|Test; pure/read]
@@ -555,6 +563,10 @@ declare extern type Entity with
 	SpriteRenderer: SpriteRenderer?
 	-- The entity's Text component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	Text: Text?
+	-- The entity's TilemapCollider component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	TilemapCollider: TilemapCollider?
+	-- The entity's TilemapRenderer component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	TilemapRenderer: TilemapRenderer?
 	-- The entity's Transform component, which every entity has. [All modes; Runtime|Test; pure/read]
 	Transform: Transform
 	-- Compare UUIDs; equality does not authorize access to an expired scene. [All modes; Runtime|Test; pure/read]
@@ -579,6 +591,22 @@ end
 
 -- An authenticated immutable Field constructor descriptor.
 declare extern type FieldDescriptor with
+end
+
+-- A 2D light: lights the lit sprites and tilemaps of the view, never unlit ones; no shadows.
+declare extern type Light2D with
+	-- The light's linear colour. [All modes; Runtime|Test; pure/read; setter mutates]
+	Color: Color
+	-- Point: the fraction of the radius, from its edge inward, over which the light fades smoothly to nothing; 0 is a hard edge. [All modes; Runtime|Test; pure/read; setter mutates]
+	Falloff: number
+	-- Point: how far above the lit plane the light sits, in world units; only normal-mapped sprites read it. [All modes; Runtime|Test; pure/read; setter mutates]
+	Height: number
+	-- How strong the light is: its colour is multiplied by this, so values above 1 overbright. [All modes; Runtime|Test; pure/read; setter mutates]
+	Intensity: number
+	-- Point: how far the light reaches from the entity, in world units. [All modes; Runtime|Test; pure/read; setter mutates]
+	Radius: number
+	-- Whether the light is a point light around the entity or a global light of the whole view. [All modes; Runtime|Test; pure/read; setter mutates]
+	Type: Light2DType
 end
 
 -- A collider shaped like a mesh: its convex hull, or the exact triangles for Static and Kinematic bodies.
@@ -955,6 +983,30 @@ declare extern type Text with
 	Space: TextSpace
 	-- The UTF-8 text; a line feed starts a new line. A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
 	Text: string
+end
+
+-- The solid cells of a tilemap as 2D colliders: each chunk's solid cells merged into boxes, one static compound without a RigidBody2D.
+declare extern type TilemapCollider with
+	-- Whether the collider only detects overlaps instead of colliding. [All modes; Runtime|Test; pure/read; setter mutates]
+	IsTrigger: boolean
+	-- The tilemap whose solid cells collide; null takes the entity's TilemapRenderer.Tilemap. [All modes; Runtime|Test; pure/read; setter mutates]
+	Tilemap: AssetRef?
+end
+
+-- Draws a tilemap's tiles in the entity's XY plane, each tile as a sprite of its palette entry's sheet frame.
+declare extern type TilemapRenderer with
+	-- The linear colour every tile's texels are multiplied with, with opacity in the fourth component. [All modes; Runtime|Test; pure/read; setter mutates]
+	Color: Color
+	-- Whether 2D lights light the tiles; unlit tiles keep their texels unchanged. [All modes; Runtime|Test; pure/read; setter mutates]
+	Lit: boolean
+	-- The draw order within the sorting layer, among the sprites: higher values draw over lower ones, equal values in canonical entity order. [All modes; Runtime|Test; pure/read; setter mutates]
+	OrderInLayer: number
+	-- How many texels of a tile's frame make one unit of the entity's local space, as a sprite's. [All modes; Runtime|Test; pure/read; setter mutates]
+	PixelsPerUnit: number
+	-- The sorting layer name from project settings; the tilemap sorts with the sprites, and an undeclared name draws in the first. A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
+	SortingLayer: string
+	-- The tilemap whose tiles are drawn; null draws nothing. [All modes; Runtime|Test; pure/read; setter mutates]
+	Tilemap: AssetRef?
 end
 
 -- Positions, rotates and scales the entity relative to its parent.

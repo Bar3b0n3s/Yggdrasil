@@ -5,6 +5,7 @@
 #include "Engine/Asset/SpriteSheetData.h"
 #include "Engine/Scene/Components/SpriteAnimatorComponent.h"
 #include "Engine/Scene/Components/SpriteRendererComponent.h"
+#include "Engine/Scene/Components/TilemapRendererComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Support/InMemoryAssetManager.h"
@@ -14,7 +15,8 @@
 #include <vector>
 
 // The sprite validation codes (Docs/Decisions/0032-m21-contract.md decision 12): stream A's two (the sorting layer and the
-// frame) and stream B's clip, each in a case of its own so each stream proves its checks alone. Skipped until they land.
+// frame) and stream B's clip, each in a case of its own so each stream proves its checks alone; C21.2's stream T1 extends the
+// sorting-layer check to TilemapRenderer (decision 30), skipped until it lands.
 
 namespace Engine {
 
@@ -127,6 +129,30 @@ namespace Engine {
 			CHECK(issues[0].Code == SpriteUnknownClipCode);
 			CHECK(issues[0].Entity == sheetless.GetUUID());
 			CHECK(issues[0].Field == "Clip");
+			CHECK(FindSpriteSceneIssues(scene, nullptr, layers).empty());
+		}
+
+		// C21.2 (decision 30, stream T1): a TilemapRenderer's SortingLayer sorts with the sprites, so an undeclared one draws in
+		// the first layer and is reported with the sprites' code, naming the TilemapRenderer; the check needs no asset manager.
+		TEST_CASE("SpriteValidation: a TilemapRenderer's unknown sorting layer is reported" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity known = scene.CreateEntity("Known");
+			known.AddComponent<TilemapRendererComponent>(TilemapRendererComponent{ .SortingLayer = "Background" });
+			Entity typo = scene.CreateEntity("Typo");
+			typo.AddComponent<TilemapRendererComponent>(TilemapRendererComponent{ .SortingLayer = "Backgroud" });
+
+			const std::vector<std::string> layers = { "Default", "Background" };
+			const std::vector<SpriteSceneIssue> issues = FindSpriteSceneIssues(scene, nullptr, layers);
+			REQUIRE(issues.size() == 1);
+			CHECK(issues[0].Code == SpriteUnknownSortingLayerCode);
+			CHECK(issues[0].Severity == DiagnosticSeverity::Warning);
+			CHECK(issues[0].Entity == typo.GetUUID());
+			CHECK(issues[0].Component == "TilemapRenderer");
+			CHECK(issues[0].Field == "SortingLayer");
+			// A disabled entity's tilemap is not checked.
+			typo.SetActive(false);
 			CHECK(FindSpriteSceneIssues(scene, nullptr, layers).empty());
 		}
 	}

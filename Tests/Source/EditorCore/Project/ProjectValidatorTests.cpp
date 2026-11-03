@@ -13,6 +13,7 @@
 #include "Engine/Asset/AssetMetadata.h"
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/ScriptData.h"
+#include "Engine/Asset/TilemapData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
@@ -1318,16 +1319,18 @@ end
 			CHECK(position(PhysicsLimitExceededCode) + 1 == position("SCRIPT_COMPILE_ERROR"));
 			CHECK(position("INPUT_UNKNOWN_ACTION") + 1 == position(AudioNoListenerCode));
 			// The codes of later milestones are appended in landing order (Docs/Decisions/0028-backlog-program.md, the reservation
-			// ledger): M19's after TEST_SUITE_INVALID, then M20's, then M21's in Docs/Decisions/0032-m21-contract.md decision 12's
-			// order (the sprite codes, then the 2D physics codes).
+			// ledger): M19's after TEST_SUITE_INVALID, then M20's. Phase 2's milestones append their blocks after PREFAB_CYCLE in
+			// landing order, so M22's codes come before or after M21's: M21's block is checked by its relative order and its
+			// own chain only, never by an absolute neighbour or the last code, which a sibling's block can take (M22's C22.2
+			// lesson; Docs/Decisions/0032-m21-contract.md decisions 12 and 30): the sprite codes, then the 2D physics codes,
+			// one after another (stream T1 appends TILEMAP_FRAME_OUT_OF_RANGE right after PHYSICS2D_OFF_PLANE).
 			CHECK(position("TEST_SUITE_INVALID") + 1 == position(ScriptComputedAssetLoadCode));
 			CHECK(position(ScriptComputedAssetLoadCode) + 1 == position(PrefabCycleCode));
-			CHECK(position(PrefabCycleCode) + 1 == position(SpriteUnknownSortingLayerCode));
+			CHECK(position(PrefabCycleCode) < position(SpriteUnknownSortingLayerCode));
 			CHECK(position(SpriteUnknownSortingLayerCode) + 1 == position(SpriteFrameOutOfRangeCode));
 			CHECK(position(SpriteFrameOutOfRangeCode) + 1 == position(SpriteUnknownClipCode));
 			CHECK(position(SpriteUnknownClipCode) + 1 == position(Physics2DMixedWorldsCode));
 			CHECK(position(Physics2DMixedWorldsCode) + 1 == position(Physics2DOffPlaneCode));
-			CHECK(codes.back() == Physics2DOffPlaneCode);
 			CHECK(position(AudioNoListenerCode) + 1 == position(AudioMultiplePrimaryListenersCode));
 			CHECK(position(AudioMultiplePrimaryListenersCode) < position(RenderLightLimitExceededCode));
 			CHECK(position(RenderLightLimitExceededCode) < position(BuildStartSceneMissingCode));
@@ -2190,6 +2193,50 @@ end
 			CHECK(found.front().Severity == DiagnosticSeverity::Warning);
 			CHECK_FALSE(found.front().AutoFixable);
 			CHECK(std::ranges::find(ProjectValidator::GetCodes(), ScriptComputedAssetLoadCode) != ProjectValidator::GetCodes().end());
+		}
+
+		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 30, stream T1): TILEMAP_FRAME_OUT_OF_RANGE, appended after M21's
+		// C21.1 codes, on each palette entry of a tilemap file whose frame its sheet lacks.
+		TEST_CASE("ProjectValidator: TILEMAP_FRAME_OUT_OF_RANGE names each palette entry whose frame its sheet lacks" * doctest::skip(true))
+		{
+			Test::EditorTestFixture fixture("ValidatorTilemapFrames");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			WriteValidatorFile(editor, "Assets/Sprites/Tiles.spritesheet", R"({"Format": "SpriteSheet", "Version": 1, "Texture": null,
+				"Frames": [{"Name": "", "Rect": {"X": 0, "Y": 0, "Width": 8, "Height": 8}}, {"Name": "", "Rect": {"X": 8, "Y": 0, "Width": 8, "Height": 8}}],
+				"Clips": []})");
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			const std::optional<AssetHandle> sheet = editor.GetAssets().Resolve("Assets/Sprites/Tiles.spritesheet");
+			REQUIRE(sheet.has_value());
+			// Entry 0's frame 1 exists, entry 1's frame 5 does not, entry 2 has no sheet (no issue).
+			WriteValidatorFile(editor, "Assets/Tilemaps/Level.tilemap",
+				std::format(R"({{"Format": "Tilemap", "Version": 1, "CellSize": [1, 1], "ChunkSize": 1,
+				"Palette": [{{"Sheet": "{0}", "Frame": 1, "Solid": true}}, {{"Sheet": "{0}", "Frame": 5, "Solid": true}}, {{"Sheet": null, "Frame": 9, "Solid": false}}],
+				"Chunks": [{{"X": 0, "Y": 0, "Tiles": [2]}}]}})",
+					sheet->ToString()));
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Project);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			INFO(DescribeDiagnostics(*report));
+			const ProjectDiagnostic* frame = FindDiagnostic(*report, TilemapFrameOutOfRangeCode);
+			REQUIRE(frame != nullptr);
+			CHECK(frame->Severity == DiagnosticSeverity::Warning);
+			CHECK_FALSE(frame->AutoFixable);
+			CHECK(frame->File == "Assets/Tilemaps/Level.tilemap");
+			CHECK(frame->Field == "Palette[1].Frame");
+			CHECK(std::count_if(report->Diagnostics.begin(), report->Diagnostics.end(), [](const ProjectDiagnostic& diagnostic)
+			{
+				return diagnostic.Code == TilemapFrameOutOfRangeCode;
+			}) == 1);
+			// The code is listed right after M21's C21.1 codes.
+			const std::span<const std::string_view> codes = ProjectValidator::GetCodes();
+			const auto position = [&codes](std::string_view code)
+			{
+				return std::find(codes.begin(), codes.end(), code) - codes.begin();
+			};
+			CHECK(position(Physics2DOffPlaneCode) + 1 == position(TilemapFrameOutOfRangeCode));
 		}
 	}
 

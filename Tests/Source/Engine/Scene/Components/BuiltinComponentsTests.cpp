@@ -34,7 +34,7 @@ namespace Engine {
 	{
 		TEST_CASE("BuiltinComponents: every listed type is plain component data")
 		{
-			static_assert(BuiltinComponents::Size == 31);
+			static_assert(BuiltinComponents::Size == 34);
 			size_t count = 0;
 			ForEachType(BuiltinComponents{}, [&count]<typename T>()
 			{
@@ -267,6 +267,7 @@ namespace Engine {
 			CHECK(sprite.SortingLayer == "Default");
 			CHECK(sprite.OrderInLayer == 0);
 			CHECK_FALSE(sprite.Lit);
+			CHECK_FALSE(sprite.NormalMap.IsValid());
 
 			const SpriteAnimatorComponent animator;
 			CHECK(animator.Clip.empty());
@@ -279,6 +280,23 @@ namespace Engine {
 			CHECK(camera.ReferenceHeight == 180);
 			CHECK(camera.PixelsPerUnit == 16.0f);
 			CHECK(camera.LetterboxColor == glm::vec3(0.0f));
+
+			// C21.2 (Docs/Decisions/0032-m21-contract.md decisions 20, 24 and 25).
+			const Light2DComponent light;
+			CHECK(light.Type == Light2DType::Point);
+			CHECK(light.Color == glm::vec3(1.0f));
+			CHECK(light.Intensity == 1.0f);
+			CHECK(light.Radius == 5.0f);
+			CHECK(light.Falloff == 0.5f);
+			CHECK(light.Height == 1.0f);
+
+			const TilemapRendererComponent tiles;
+			CHECK_FALSE(tiles.Tilemap.IsValid());
+			CHECK(tiles.Color == glm::vec4(1.0f));
+			CHECK(tiles.PixelsPerUnit == 16.0f);
+			CHECK(tiles.SortingLayer == "Default");
+			CHECK(tiles.OrderInLayer == 0);
+			CHECK_FALSE(tiles.Lit);
 
 			const RigidBody2DComponent body;
 			CHECK(body.Type == BodyType::Dynamic);
@@ -295,6 +313,8 @@ namespace Engine {
 			REQUIRE(polygon.Points.size() == 3);
 			CHECK(polygon.Points[2] == glm::vec2(0.0f, 0.5f));
 			CHECK_FALSE(polygon.IsTrigger);
+			CHECK_FALSE(TilemapColliderComponent{}.Tilemap.IsValid());
+			CHECK_FALSE(TilemapColliderComponent{}.IsTrigger);
 		}
 
 		TEST_CASE("BuiltinComponents: every listed type is registered in list order")
@@ -369,10 +389,13 @@ namespace Engine {
 				"SpriteRenderer",
 				"SpriteAnimator",
 				"PixelPerfectCamera",
+				"Light2D",         // C21.2
+				"TilemapRenderer", // C21.2
 				"RigidBody2D",
 				"BoxCollider2D",
 				"CircleCollider2D",
 				"PolygonCollider2D",
+				"TilemapCollider", // C21.2
 			};
 			std::vector<std::string> names;
 			for (const ComponentInfo* component : registry->GetComponents())

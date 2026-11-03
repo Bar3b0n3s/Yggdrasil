@@ -5,6 +5,7 @@
 #include "Engine/Core/Result.h"
 #include "Engine/Core/Time.h"
 #include "Engine/Core/UUID.h"
+#include "Engine/Physics/Physics2DWorld.h"
 #include "Engine/Physics/PhysicsDiagnostics.h"
 #include "Engine/Physics/PhysicsLayers.h"
 #include "Engine/Physics/PhysicsTypes.h"
@@ -62,11 +63,27 @@
 //     PreStep returns at once, whatever else changed (an entity enabled or disabled, a 3D component): it composes nothing
 //     (GetStats().Compositions). So a session without 2D bodies, every 3D game's, costs and behaves exactly as before M21:
 //     it holds one PhysicsWorld ("PhysicsSystem: destroying the session destroys every body and the world").
+//   - Tilemaps (M21, C21.2; Docs/Decisions/0032-m21-contract.md decision 25, stream T2). A TilemapCollider is a 2D collider of
+//     the composition beside BoxCollider2D, CircleCollider2D and PolygonCollider2D (in that component order on an entity):
+//     its sub-shapes are its tilemap's merged boxes (Asset/TilemapCollision.h's MergeTilemapBoxes, chunks in canonical
+//     order), each a BoxShape2D of its cells' rectangle at its centre in the collider entity's local plane, all with the
+//     collider's user data, so contacts and queries name the tilemap's entity. Tilemaps load through the specification's
+//     Assets (AssetManager::Load: a missing or failed tilemap, no Assets, an entity whose TilemapCollider has no Tilemap and
+//     no TilemapRenderer one, or more than MaxTilemapColliderBoxes boxes is PHYSICS_INVALID_SHAPE and makes no body; a
+//     tilemap without a solid cell adds no shape, and a body left without any is not created, without a diagnostic). As a
+//     MeshCollider's mesh, a collider's tilemap getting a new asset version (AssetManager::GetVersion: a tilemap.paint edit,
+//     a reimport) rebuilds its body's shape in place at the next PreStep (PhysicsWorld::SetShape: pose, velocities and
+//     pairs kept), and so does a change of the TilemapRenderer.Tilemap of an entity whose TilemapCollider has no Tilemap
+//     (as the MeshRenderer.Mesh of an entity whose MeshCollider has no Mesh rebuilds in the 3D world). A scene without a
+//     TilemapCollider loads no tilemap, and neither a TilemapRenderer nor a Light2D is a 2D physics component: they make
+//     no body, no world and no hash block, and a TilemapRenderer change matters only to its entity's TilemapCollider.
 //
 // Determinism, threading and ownership as PhysicsSystem's. Frozen by the M21 contract (C21.1); stream P2 implements it.
+// C21.2 adds the tilemap collider (stream T2) and GetBodyInfo (stream P3).
 
 namespace Engine {
 
+	class AssetManager;
 	class Scene;
 	class XXH64Hasher;
 
@@ -83,6 +100,9 @@ namespace Engine {
 		// Simulation.FixedHz (>= 1): the collision steps of each world step, as the 3D world's.
 		uint32_t FixedHz = 60;
 		PhysicsWorldLimits Limits{};
+		// M21 (C21.2, decision 25): the session's asset manager, outliving the system: the TilemapColliders' tilemaps. Null
+		// makes every tilemap collider PHYSICS_INVALID_SHAPE (as PhysicsSystemSpecification::Assets for mesh colliders).
+		AssetManager* Assets = nullptr;
 	};
 
 	// Receives the 2D world's sorted events and run-time diagnostics (the ScriptEngine, which delivers the 2D callbacks).
@@ -106,6 +126,27 @@ namespace Engine {
 		float Distance = 0.0f;
 
 		bool operator==(const Physics2DRaycastHit&) const = default;
+	};
+
+	// What physics2d.bodyInfo reports about one 2D body (M21, C21.2, decision 27; PhysicsBodyReport in the plane).
+	struct Physics2DBodyReport
+	{
+		UUID Owner{};
+		PhysicsBodyOrigin Origin = PhysicsBodyOrigin::RigidBody;  // never Character
+		PhysicsMotionType MotionType = PhysicsMotionType::Static; // as simulated (GetMotionType's rule)
+		bool IsSensor = false;
+		uint32_t Layer = 0;
+		std::string LayerName{};
+		// The collider entities in sub-shape user data order: each once, a TilemapCollider's entity for all its boxes.
+		std::vector<UUID> Colliders{};
+		Physics2DPose Pose{};                       // the body origin's position in the plane and its angle about +Z, radians
+		glm::vec2 LinearVelocity = glm::vec2(0.0f); // m/s
+		float AngularVelocity = 0.0f;               // rad/s about +Z
+		bool IsSleeping = false;
+		glm::vec2 BoundsMin = glm::vec2(0.0f); // the world rectangle of the whole body in the plane
+		glm::vec2 BoundsMax = glm::vec2(0.0f);
+		// The body's active pairs, sorted by Other (PhysicsContactInfo's members, the 2D world's pairs).
+		std::vector<PhysicsContactInfo> Contacts{};
 	};
 
 	struct Physics2DSystemStats
@@ -197,6 +238,11 @@ namespace Engine {
 		// PHYSICS2D_OFF_PLANE, Scene/Physics2DValidation.h), as PhysicsSystem::GetDiagnostics.
 		[[nodiscard]] std::span<const PhysicsDiagnostic> GetDiagnostics() const;
 		[[nodiscard]] Physics2DSystemStats GetStats() const;
+		// M21 (C21.2, decision 27, stream P3): the 2D body `entity` owns (its RigidBody2D or implicit static body, before its
+		// implicit sensor body when it owns both), else the body its colliders were gathered into; nullopt when neither
+		// exists, when the entity or that body's owner is pending destruction or disabled, or before the world exists
+		// (PhysicsSystem::GetBodyInfo's rules).
+		[[nodiscard]] std::optional<Physics2DBodyReport> GetBodyInfo(UUID entity) const;
 		// Appends the 2D block to the session's state hash: for every created 2D body in canonical order of its owner (an
 		// owner's solid body before its sensor body), the owner's UUID, its position (x, y), angle, linear velocity (x, y) and
 		// angular velocity as the little-endian bit patterns of their floats, and its sleeping flag. Without a 2D body it

@@ -399,4 +399,11 @@ namespace Engine {
 		}
 	}
 
+	std::vector<ColliderDebugShape> BuildCollider2DDebugDraw(const Scene& /*scene*/, const PhysicsLayerTable& /*layers*/,
+		const Physics2DSystem* /*physics2D*/, AssetManager* /*assets*/, const ColliderDebugDrawOptions& /*options*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return {};
+	}
+
 }

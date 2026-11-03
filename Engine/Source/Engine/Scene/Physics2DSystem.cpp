@@ -2453,6 +2453,12 @@ namespace Engine {
 		return stats;
 	}
 
+	std::optional<Physics2DBodyReport> Physics2DSystem::GetBodyInfo(UUID /*entity*/) const
+	{
+		ENGINE_CONTRACT_STUB();
+		return std::nullopt;
+	}
+
 	void Physics2DSystem::AppendStateHash(XXH64Hasher& hasher) const
 	{
 		const State& state = *m_State;

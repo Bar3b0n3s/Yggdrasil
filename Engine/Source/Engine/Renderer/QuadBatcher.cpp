@@ -140,6 +140,14 @@ namespace Engine {
 			return clipped;
 		}
 
+		// M21's lit targets, HdrLit and Normals (Docs/Decisions/0032-m21-contract.md decision 22): stream L records them with
+		// their two pipelines, replacing this refusal.
+		static Result<uint32_t> RecordLights2DTarget(QuadBatchTarget /*target*/)
+		{
+			ENGINE_CONTRACT_STUB();
+			return MakeError(ErrorCode::Unsupported, "the quad batcher's lit targets (Docs/Decisions/0032-m21-contract.md decision 22, stream L)");
+		}
+
 	}
 
 	namespace {
@@ -336,7 +344,14 @@ namespace Engine {
 
 	nvrhi::FramebufferInfo QuadBatcher::GetFramebufferInfo(QuadBatchTarget target)
 	{
-		return target == QuadBatchTarget::Hdr ? GetSceneColorFramebufferInfo() : GetOverlayFramebufferInfo();
+		switch (target)
+		{
+			case QuadBatchTarget::Hdr:
+			case QuadBatchTarget::HdrLit:  return GetSceneColorFramebufferInfo();
+			case QuadBatchTarget::Ldr:     return GetOverlayFramebufferInfo();
+			case QuadBatchTarget::Normals: return GetLights2DNormalsFramebufferInfo();
+		}
+		return GetOverlayFramebufferInfo();
 	}
 
 	uint32_t QuadBatcher::GetPipelineCount() const
@@ -360,6 +375,8 @@ namespace Engine {
 		ENGINE_CORE_ASSERT(inputs.Framebuffer != nullptr, "QuadBatcher::Record needs a framebuffer");
 		if (inputs.Framebuffer == nullptr)
 			return MakeError(ErrorCode::InvalidArgument, "the quad batcher needs a framebuffer");
+		if (inputs.Target == QuadBatchTarget::HdrLit || inputs.Target == QuadBatchTarget::Normals)
+			return Utils::RecordLights2DTarget(inputs.Target);
 		State& state = *m_State;
 		state.Staging.clear();
 		// The record's batches name its textures, so they live only for the call.

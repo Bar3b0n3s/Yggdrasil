@@ -471,6 +471,43 @@ namespace Engine {
 			CHECK(warning.GetMatchCount() == 1);
 		}
 
+		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 24, stream L): no quad is lost to the vertex buffer's
+		// capacity. A record of more than MaxQuadsPerRecord quads draws them all, in their order, in consecutive batches of at
+		// most MaxQuadsPerRecord quads, so a tilemap that fills a record never drops the sprites after it. When stream L
+		// implements it, this case replaces "QuadBatcher: quads beyond the per-record budget are skipped with one warning",
+		// whose skipped quad then draws.
+		TEST_CASE("QuadBatcher: a record beyond the vertex buffer's capacity draws every quad in order, in further batches" * doctest::skip(true))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			QuadSetup setup(gpu, 4, 4, glm::uvec2(4));
+			// MaxQuadsPerRecord white quads over the top-left 2 x 2 pixels, then, past the capacity, a red quad over pixel (0, 0)
+			// and a green one over the bottom-right 2 x 2 pixels: the red one covers the white ones, so the order holds across
+			// the batches.
+			std::vector<QuadDraw> quads(QuadBatcher::MaxQuadsPerRecord,
+				MakePixelQuad(glm::vec2(0.0f), glm::vec2(2.0f), glm::vec2(0.0f), glm::vec2(1.0f), nullptr));
+			QuadDraw red = MakePixelQuad(glm::vec2(0.0f), glm::vec2(1.0f), glm::vec2(0.0f), glm::vec2(1.0f), nullptr);
+			red.Color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
+			QuadDraw green = MakePixelQuad(glm::vec2(2.0f), glm::vec2(4.0f), glm::vec2(0.0f), glm::vec2(1.0f), nullptr);
+			green.Color = glm::vec4(0.0f, 1.0f, 0.0f, 1.0f);
+			quads.push_back(red);
+			quads.push_back(green);
+			uint32_t drawn = 0;
+			RenderPassCounters counters;
+			const Image image = setup.Render(quads, drawn, std::nullopt, &counters);
+			CHECK(drawn == QuadBatcher::MaxQuadsPerRecord + 2);
+			// One texture and sampler: one draw per batch.
+			CHECK(counters.DrawCalls == 2);
+			CHECK(counters.Triangles == 2 * (QuadBatcher::MaxQuadsPerRecord + 2));
+			CHECK(GetPixel(image, 0, 0) == glm::u8vec4(255, 0, 0, 255));
+			CHECK(GetPixel(image, 1, 1) == glm::u8vec4(255, 255, 255, 255));
+			CHECK(GetPixel(image, 3, 3) == glm::u8vec4(0, 255, 0, 255));
+			// The buffer keeps its capacity: the next record of the same quads draws the same image.
+			const Image second = setup.Render(quads, drawn);
+			CHECK(drawn == QuadBatcher::MaxQuadsPerRecord + 2);
+			CHECK(second.Pixels == image.Pixels);
+		}
+
 		TEST_CASE("QuadBatcher: a record whose binding set fails keeps no unwritten index buffer, and the next record draws")
 		{
 			// A record of 1,500 quads grows the buffers past their first 1,024 quads; its first texture's binding set fails

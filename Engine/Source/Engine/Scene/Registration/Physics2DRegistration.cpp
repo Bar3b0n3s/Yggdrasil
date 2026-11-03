@@ -16,7 +16,7 @@
 // world (Scene/Physics2DSystem.h). The bounds are the Physics category's (PhysicsRegistration.cpp), so every value the 2D
 // world hands Jolt is valid (§9.1); BodyType and MotionQuality are that category's enums. The composition rules that span
 // entities (PHYSICS2D_MIXED_WORLDS, PHYSICS2D_OFF_PLANE and the shared PHYSICS_* codes) are the 2D validator's
-// (Scene/Physics2DValidation.h), not rules of a single component. C21.2 appends the tilemap collider to this category.
+// (Scene/Physics2DValidation.h), not rules of a single component. C21.2 appends the tilemap collider (decision 25).
 
 namespace Engine {
 
@@ -122,6 +122,14 @@ namespace Engine {
 			.Field("IsTrigger", &PolygonCollider2DComponent::IsTrigger, "Whether the collider only detects overlaps instead of colliding.")
 			.Validate(&Utils::ValidatePolygonCollider2D)
 			.Generate(&Utils::MakePolygonCollider2DValid);
+
+		RegisterComponent<TilemapColliderComponent>(registry, "TilemapCollider",
+			"The solid cells of a tilemap as 2D colliders: each chunk's solid cells merged into boxes, one static compound without a RigidBody2D.")
+			.Category("Physics2D")
+			.Version(1)
+			.Requires<TransformComponent>()
+			.Field("Tilemap", &TilemapColliderComponent::Tilemap, "The tilemap whose solid cells collide; null takes the entity's TilemapRenderer.Tilemap.")
+			.Field("IsTrigger", &TilemapColliderComponent::IsTrigger, "Whether the collider only detects overlaps instead of colliding.");
 	}
 
 }

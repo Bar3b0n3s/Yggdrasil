@@ -2192,7 +2192,7 @@ All modes; Runtime|Test; pure/read.
 
 ### Entity.GetComponent
 
-`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "SpriteRenderer") -> SpriteRenderer?) & ((self: Entity, name: "SpriteAnimator") -> SpriteAnimator?) & ((self: Entity, name: "PixelPerfectCamera") -> PixelPerfectCamera?) & ((self: Entity, name: "RigidBody2D") -> RigidBody2D?) & ((self: Entity, name: "BoxCollider2D") -> BoxCollider2D?) & ((self: Entity, name: "CircleCollider2D") -> CircleCollider2D?) & ((self: Entity, name: "PolygonCollider2D") -> PolygonCollider2D?)`
+`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "SpriteRenderer") -> SpriteRenderer?) & ((self: Entity, name: "SpriteAnimator") -> SpriteAnimator?) & ((self: Entity, name: "PixelPerfectCamera") -> PixelPerfectCamera?) & ((self: Entity, name: "Light2D") -> Light2D?) & ((self: Entity, name: "TilemapRenderer") -> TilemapRenderer?) & ((self: Entity, name: "RigidBody2D") -> RigidBody2D?) & ((self: Entity, name: "BoxCollider2D") -> BoxCollider2D?) & ((self: Entity, name: "CircleCollider2D") -> CircleCollider2D?) & ((self: Entity, name: "PolygonCollider2D") -> PolygonCollider2D?) & ((self: Entity, name: "TilemapCollider") -> TilemapCollider?)`
 
 Get a component proxy, or nil when absent.
 
@@ -2283,6 +2283,14 @@ All modes; Runtime|Test; pure/read.
 `(self: Entity) -> boolean`
 
 Whether this identity still names a live entity in this scene.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.Light2D
+
+`Light2D?`
+
+The entity's Light2D component, or nil when absent.
 
 All modes; Runtime|Test; pure/read.
 
@@ -2430,6 +2438,22 @@ The entity's Text component, or nil when absent.
 
 All modes; Runtime|Test; pure/read.
 
+### Entity.TilemapCollider
+
+`TilemapCollider?`
+
+The entity's TilemapCollider component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.TilemapRenderer
+
+`TilemapRenderer?`
+
+The entity's TilemapRenderer component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
 ### Entity.Transform
 
 `Transform`
@@ -2501,6 +2525,58 @@ All modes; Runtime|Test; pure/read; setter mutates.
 ## FieldDescriptor
 
 An authenticated immutable Field constructor descriptor.
+
+## Light2D
+
+A 2D light: lights the lit sprites and tilemaps of the view, never unlit ones; no shadows.
+
+### Light2D.Color
+
+`Color`
+
+The light's linear colour.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Light2D.Falloff
+
+`number`
+
+Point: the fraction of the radius, from its edge inward, over which the light fades smoothly to nothing; 0 is a hard edge.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Light2D.Height
+
+`number`
+
+Point: how far above the lit plane the light sits, in world units; only normal-mapped sprites read it.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Light2D.Intensity
+
+`number`
+
+How strong the light is: its colour is multiplied by this, so values above 1 overbright.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Light2D.Radius
+
+`number`
+
+Point: how far the light reaches from the entity, in world units.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Light2D.Type
+
+`Light2DType`
+
+Whether the light is a point light around the entity or a global light of the whole view.
+
+All modes; Runtime|Test; pure/read; setter mutates.
 
 ## MeshCollider
 
@@ -3778,6 +3854,78 @@ The UTF-8 text; a line feed starts a new line. A value a script writes holds at 
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
+## TilemapCollider
+
+The solid cells of a tilemap as 2D colliders: each chunk's solid cells merged into boxes, one static compound without a RigidBody2D.
+
+### TilemapCollider.IsTrigger
+
+`boolean`
+
+Whether the collider only detects overlaps instead of colliding.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### TilemapCollider.Tilemap
+
+`AssetRef?`
+
+The tilemap whose solid cells collide; null takes the entity's TilemapRenderer.Tilemap.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## TilemapRenderer
+
+Draws a tilemap's tiles in the entity's XY plane, each tile as a sprite of its palette entry's sheet frame.
+
+### TilemapRenderer.Color
+
+`Color`
+
+The linear colour every tile's texels are multiplied with, with opacity in the fourth component.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### TilemapRenderer.Lit
+
+`boolean`
+
+Whether 2D lights light the tiles; unlit tiles keep their texels unchanged.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### TilemapRenderer.OrderInLayer
+
+`number`
+
+The draw order within the sorting layer, among the sprites: higher values draw over lower ones, equal values in canonical entity order.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### TilemapRenderer.PixelsPerUnit
+
+`number`
+
+How many texels of a tile's frame make one unit of the entity's local space, as a sprite's.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### TilemapRenderer.SortingLayer
+
+`string`
+
+The sorting layer name from project settings; the tilemap sorts with the sprites, and an undeclared name draws in the first. A value a script writes holds at most 4096 bytes of text.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### TilemapRenderer.Tilemap
+
+`AssetRef?`
+
+The tilemap whose tiles are drawn; null draws nothing.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
 ## Transform
 
 Positions, rotates and scales the entity relative to its parent.
@@ -4003,6 +4151,8 @@ The kind of a loadable asset (§7.1).
 - `Replay`: An input replay (.replay).
 
 - `SpriteSheet`: A sprite sheet (.spritesheet): frames of a texture with pivots and 9-slice borders, and clips.
+
+- `Tilemap`: A tilemap (.tilemap): a grid of cells in chunks, each empty or a palette entry's sprite sheet frame.
 
 ## Attenuation
 
@@ -4573,6 +4723,14 @@ Keyboard keys by their US-layout position.
 - `RightSuper`: The RightSuper input value.
 
 - `Menu`: The Menu input value.
+
+## Light2DType (enum)
+
+What a 2D light lights.
+
+- `Point`: A circle of light around the entity, fading to nothing at its Radius.
+
+- `Global`: The same light at every lit pixel of the view, wherever the entity is.
 
 ## LogChannel
 

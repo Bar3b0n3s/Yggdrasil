@@ -2,10 +2,14 @@
 
 #include "Engine/Scene/SpritePicking.h"
 
+#include "Engine/Asset/SpriteSheetData.h"
 #include "Engine/Asset/TextureData.h"
+#include "Engine/Asset/TilemapData.h"
 #include "Engine/Scene/Components/SpriteRendererComponent.h"
+#include "Engine/Scene/Components/TilemapRendererComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
 #include "Support/InMemoryAssetManager.h"
@@ -149,6 +153,75 @@ namespace Engine {
 			CHECK(refused(SpritePickRequest{ .MaxDistance = 1.0f, .MinDistance = 2.0f }));
 			CHECK(refused(SpritePickRequest{ .MinDistance = -1.0f }));
 			CHECK(refused(SpritePickRequest{ .Alpha = 1.5f }));
+		}
+
+		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 24, stream T1): a tile is picked as a sprite of its tilemap's
+		// entity, in the one draw order of sprites and tilemaps, in the scene and in a snapshot's sprites and tilemaps alike.
+		TEST_CASE("SpritePicking: a tile is picked as its tilemap's entity in the draw order" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Test::InMemoryAssetManager assets;
+			assets.Publish(PickTextureHandle, MakePickTexture(), "Assets/Textures/Pick.png");
+			// A one-frame sheet of the 16-texel texture: one unit at 16 pixels per unit, one tile per unit cell.
+			const AssetHandle sheetHandle = UUID(8931);
+			Ref<SpriteSheetData> sheet = CreateRef<SpriteSheetData>();
+			sheet->Texture = TypedAssetHandle<AssetType::Texture>(PickTextureHandle);
+			sheet->Frames.push_back(SpriteFrame{ .Rect = { .Width = 16, .Height = 16 } });
+			assets.Publish(sheetHandle, sheet, "Assets/Sprites/Pick.spritesheet");
+			// Cells (0, 0) and (2, 0) hold the tile: the second tile covers x in [2, 3], y in [0, 1].
+			const AssetHandle tilemapHandle = UUID(8932);
+			Ref<TilemapData> tilemap = CreateRef<TilemapData>();
+			tilemap->ChunkSize = 4;
+			tilemap->Palette = { TilemapTile{ .Sheet = TypedAssetHandle<AssetType::SpriteSheet>(sheetHandle) } };
+			tilemap->Chunks = { TilemapChunk{ .X = 0, .Y = 0, .Tiles = { 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } } };
+			assets.Publish(tilemapHandle, tilemap, "Assets/Tilemaps/Pick.tilemap");
+
+			Entity ground = scene.CreateEntity("Ground");
+			ground.AddComponent<TilemapRendererComponent>(TilemapRendererComponent{ .Tilemap = TypedAssetHandle<AssetType::Tilemap>(tilemapHandle), .OrderInLayer = 1 });
+			// A sprite over the second tile, drawn before the tilemap (a lower order in the layer), and one drawn after it.
+			const auto addSprite = [&scene](std::string_view name, glm::vec3 position, int32_t order)
+			{
+				Entity entity = scene.CreateEntity(name);
+				entity.Patch<TransformComponent>([position](TransformComponent& transform)
+				{
+					transform.Translation = position;
+				});
+				entity.AddComponent<SpriteRendererComponent>(SpriteRendererComponent{ .Texture = TypedAssetHandle<AssetType::Texture>(PickTextureHandle),
+					.OrderInLayer = order });
+				return entity.GetUUID();
+			};
+			static_cast<void>(addSprite("Behind", glm::vec3(2.5f, 0.5f, 0.0f), 0));
+			const UUID above = addSprite("Above", glm::vec3(0.5f, 0.5f, 0.0f), 2);
+			TransformSystem::Update(scene);
+
+			SpritePickRequest request;
+			request.Ray = RenderRay{ .Origin = glm::vec3(2.4f, 0.3f, 10.0f), .Direction = glm::vec3(0.0f, 0.0f, -1.0f) };
+			request.SortingLayers = { std::string(DefaultSortingLayerName) };
+			// The tile, drawn after the sprite behind it, is what the pixel shows.
+			const Result<std::optional<SceneRaycastHit>> tile = PickSprite(scene, assets, request);
+			REQUIRE_MESSAGE(tile.has_value(), tile.error().ToString());
+			REQUIRE(tile->has_value());
+			CHECK((*tile)->Entity == ground.GetUUID());
+			// Over the first tile, the sprite drawn after the tilemap wins; between the tiles, the empty cell (1, 0) picks nothing.
+			request.Ray.Origin = glm::vec3(0.6f, 0.4f, 10.0f);
+			const Result<std::optional<SceneRaycastHit>> sprite = PickSprite(scene, assets, request);
+			REQUIRE(sprite.has_value());
+			REQUIRE(sprite->has_value());
+			CHECK((*sprite)->Entity == above);
+			request.Ray.Origin = glm::vec3(1.5f, 0.5f, 10.0f);
+			const Result<std::optional<SceneRaycastHit>> gap = PickSprite(scene, assets, request);
+			REQUIRE(gap.has_value());
+			CHECK_FALSE(gap->has_value());
+
+			// The snapshot overload picks the same in the image's sprites and tilemaps.
+			const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, { .Width = 64, .Height = 64, .SortingLayers = request.SortingLayers });
+			REQUIRE(snapshot.has_value());
+			request.Ray.Origin = glm::vec3(2.4f, 0.3f, 10.0f);
+			const Result<std::optional<SceneRaycastHit>> fromImage = PickSprite(snapshot->Sprites, snapshot->Tilemaps, assets, request);
+			REQUIRE_MESSAGE(fromImage.has_value(), fromImage.error().ToString());
+			REQUIRE(fromImage->has_value());
+			CHECK((*fromImage)->Entity == ground.GetUUID());
 		}
 	}
 

@@ -54,7 +54,7 @@ namespace Engine {
 
 	}
 
-	std::vector<PhysicsDiagnostic> ValidateScenePhysics2D(const Scene& scene, const PhysicsLayerTable& layers)
+	std::vector<PhysicsDiagnostic> ValidateScenePhysics2D(const Scene& scene, const PhysicsLayerTable& layers, AssetManager* /*assets*/)
 	{
 		Physics2DComposition composition = ComposePhysics2DBodies(scene, layers);
 		std::vector<PhysicsDiagnostic> diagnostics = std::move(composition.Diagnostics);

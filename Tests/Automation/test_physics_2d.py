@@ -7,6 +7,8 @@ import unittest
 
 from harness import AutomationTestCase
 
+SKIP_BODY_INFO = "contract stub: physics2d.bodyInfo (ADR 0032 decision 27, stream P3)"
+
 RECORDER = """local T = {}
 function T:OnCollisionEnter2D(other, contact) Scene.CreateEntity("Trace:" .. self.Entity.Name .. ":" .. other.Name) end
 return Script.Define("Recorder", T)
@@ -61,6 +63,30 @@ class Physics2DTests(AutomationTestCase):
         report = client.call("project.validate", {"scope": "Scene"})
         codes = [diagnostic["code"] for diagnostic in report["diagnostics"]]
         self.assertIn("PHYSICS2D_MIXED_WORLDS", codes)
+
+    @unittest.skip(SKIP_BODY_INFO)
+    def test_physics2d_body_info_reports_a_2d_body(self) -> None:
+        # C21.2, decision 27: physics.bodyInfo in the plane; a gathered child reports its owner's body, and the resting
+        # crate's contact with the floor is listed.
+        client, _ = self.open_editor_with_scene()
+        client.call("entity.create", {"name": "Floor", "components": {
+            "Transform": {"Translation": [0, -0.5, 0]},
+            "RigidBody2D": {"Type": "Static"}, "BoxCollider2D": {"HalfExtents": [5, 0.5]}}})
+        client.call("entity.create", {"name": "Crate", "components": {
+            "Transform": {"Translation": [1, 0.5, 0]}, "RigidBody2D": {}, "BoxCollider2D": {}}})
+        client.call("entity.create", {"name": "Lid", "parent": "/Crate", "components": {
+            "Transform": {"Translation": [0, 0.6, 0]}, "BoxCollider2D": {"HalfExtents": [0.5, 0.1]}}})
+        client.call("play.start", {"lockstep": True, "mode": "simulate"})
+        client.call("play.step", {"ticks": 30})
+        info = client.call("physics2d.bodyInfo", {"entity": "/Crate/Lid"})
+        self.assertEqual(info["body"]["name"], "Crate")
+        self.assertEqual(info["type"], "Dynamic")
+        self.assertEqual([collider["name"] for collider in info["colliders"]], ["Crate", "Lid"])
+        self.assertEqual(len(info["position"]), 2)
+        self.assertAlmostEqual(info["position"][0], 1.0, places=2)
+        self.assertEqual([contact["other"]["name"] for contact in info["contacts"]], ["Floor"])
+        self.assertEqual(info["tick"], 30)
+        client.call("play.stop")
 
 
 if __name__ == "__main__":
