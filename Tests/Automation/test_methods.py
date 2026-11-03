@@ -336,7 +336,7 @@ class MethodTests(AutomationTestCase):
                 self.assertRegex(build, r"\+[0-9a-f]{12}(\.dirty)?$", f"{stamp} names commit {commit.group(1)}")
         self.assertEqual(client.call("session.info")["build"], build)
         self.assertIsNotNone(editor.session)
-        session_file = json.loads(editor.session.path.read_text(encoding="utf-8"))
+        session_file = json.loads(engine_client.read_shared_bytes(editor.session.path))
         self.assertEqual(session_file["build"], build)
         self.assertEqual(list(session_file).index("build"), list(session_file).index("engineVersion") + 1)
 

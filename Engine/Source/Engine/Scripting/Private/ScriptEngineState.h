@@ -203,6 +203,11 @@ namespace Engine {
 		// while its entity is inactive is recreated only when the entity is enabled again, whatever its other slots did.
 		std::set<InstanceKey> DisabledHistory{};
 		std::map<uint64_t, Reference> References{};
+		// The index in References of each live coroutine (Reference::Thread, unique while rooted), so FindThread, which
+		// CheckExecution runs around every binding call outside a task or case body, is logarithmic in the references
+		// retained (a suite's cases alone retain thousands). A lookup structure only, never iterated: CreateThread adds
+		// an entry and DiscardThreadContents removes it.
+		std::map<const lua_State*, uint64_t> ThreadReferences{};
 		uint64_t NextReference = 1;
 		uint64_t NextInstanceSerial = 1;
 		uint32_t CreationDepth = 0;
@@ -220,6 +225,9 @@ namespace Engine {
 		bool Collecting = false;
 		uint32_t SuiteTimeout = 0;
 		ScriptCollectedSuite Suite{};
+		// The names of Suite.Cases, so Test.Case checks a name's uniqueness in logarithmic time. A lookup structure
+		// only, never iterated: Suite.Cases keeps the registration order. Cleared wherever Suite is replaced.
+		std::set<std::string, std::less<>> SuiteCaseNames{};
 		// The running case receives error attribution and test signals from any code, but owns only the work executing on
 		// its thread or on tasks it spawned; gameplay callbacks and their tasks are never cancelled with the case.
 		ScriptReference ActiveCase{};

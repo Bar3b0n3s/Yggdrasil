@@ -103,11 +103,11 @@ namespace Engine {
 		public:
 			static constexpr std::chrono::seconds Timeout{ 60 };
 
-			// Connects to the server whose session file <sessionsDirectory>/<pid>.json exists, and says hello.
+			// Connects to the server whose session file <sessionsDirectory>/<pid>.json exists, and says hello. The file is read
+			// as every client reads it (SessionFile::Read), since the rename that published it may still be in flight.
 			[[nodiscard]] static Result<RuntimeAutomationConnection> Open(const std::filesystem::path& sessionsDirectory, uint32_t pid)
 			{
-				ENGINE_TRY_ASSIGN(const std::string text, FileSystem::ReadText(SessionFile::GetPath(sessionsDirectory, pid)));
-				ENGINE_TRY_ASSIGN(const SessionFileContent session, SessionFile::FromText(text));
+				ENGINE_TRY_ASSIGN(const SessionFileContent session, SessionFile::Read(sessionsDirectory, pid));
 				ENGINE_TRY_ASSIGN(Socket socket, Socket::Connect(session.Port, Timeout));
 				RuntimeAutomationConnection connection(std::move(socket));
 				const Json client{ { "name", "engine-tests" }, { "version", "1" } };

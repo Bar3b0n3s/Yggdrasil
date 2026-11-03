@@ -380,13 +380,13 @@ namespace Engine {
 
 	ScriptEngine::State::Reference* ScriptEngine::State::FindThread(lua_State* state)
 	{
-		for (auto& [index, reference] : References)
-		{
-			static_cast<void>(index);
-			if (reference.Thread == state)
-				return &reference;
-		}
-		return nullptr;
+		const auto thread = ThreadReferences.find(state);
+		if (thread == ThreadReferences.end())
+			return nullptr;
+		const auto found = References.find(thread->second);
+		ENGINE_CORE_ASSERT(found != References.end() && found->second.Thread == state,
+			"A live coroutine's reference was released without discarding its thread");
+		return found != References.end() ? &found->second : nullptr;
 	}
 
 	void ScriptEngine::State::DiscardThreadContents(Reference& reference)
@@ -403,6 +403,8 @@ namespace Engine {
 		if (reference.Root != LUA_NOREF)
 			lua_unref(Detail::SandboxAccess::MainCall(*Vm).State, reference.Root);
 		reference.Root = LUA_NOREF;
+		if (reference.Thread != nullptr)
+			ThreadReferences.erase(reference.Thread);
 		reference.Thread = nullptr;
 	}
 
