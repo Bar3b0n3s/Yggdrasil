@@ -100,6 +100,17 @@ namespace Engine {
 		//   9. Submit: the focused element is activated (ActivateUiWidget); nothing when none is focused.
 		//  10. Cancel: Cancel at the focused element, else at the last canvas of the layout (its entity), else none.
 		// Writes go to `scene`'s components only (never its structure).
+		// C22.3 (Docs/Decisions/0033-m22-contract.md decisions 47 and 50) changes the steps so:
+		//   - World canvases (stream W): step 2 hit-tests with HitTestUiPointer (input.Pointer and input.Ray), so the
+		//     hovered widget may be on a World canvas; steps 3 and 4 give a widget on a World canvas the pointer in its
+		//     canvas's pixels (MapUiPointerToCanvas; a drag whose ray leaves the plane holds its last value), which
+		//     DragOrigin then holds; step 6's wheel scrolls the scroll view under the hit target, on whichever canvas.
+		//   - Text input (stream T), a step 7a after the stick: when the focused element is an interactable UiTextInput,
+		//     EditUiTextInput with input.Text and input.TextKeys (TextChanged, then Submit for Enter); and while it has
+		//     focus this step's navigation commands are input.GamepadNavigation plus input.Navigation's Next, Previous and
+		//     Cancel (the stick's direction kept), so a keyboard key typed into the field never navigates. Step 9's Submit
+		//     on a focused interactable text input raises Submit at it (ActivateUiWidget leaves a text input alone, so a
+		//     click on one only focuses it).
 		void ProcessInput(Scene& scene, const UiInputFrame& input);
 
 		// The interaction state (decision 24), the default before the first UiInput and after ResetInteraction.

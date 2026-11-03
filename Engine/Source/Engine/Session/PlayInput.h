@@ -45,7 +45,7 @@ namespace Engine {
 		Scroll,             // Delta (x right-positive, y up-positive)
 		GamepadButtonInput, // Gamepad, GamepadButtonCode with State
 		GamepadAxisInput,   // Gamepad, Axis with Value (engine convention: up-positive sticks, §4.3)
-		Text                // Text: one CharEvent per code point (no game API reads text before the UI work of later milestones)
+		Text                // Text: one CharEvent per code point; the text latch reads them (M22, C22.3: LatchStepText, GetText)
 	};
 
 	// The state of a button-like event (§13.6): Tap is Down on its tick and Up on the next, so both edges are observed.
@@ -163,6 +163,18 @@ namespace Engine {
 		// frame views its ticks gave, never a preview), so lockstep, recording, replaying and test sessions latch as before.
 		void SetFramePreview(bool enabled);
 		[[nodiscard]] bool IsFramePreviewEnabled() const;
+
+		// M22 (C22.3, R-UI-TEXTINPUT; Docs/Decisions/0033-m22-contract.md decision 46; stream T): the text latch, the play
+		// session's TextLatch phase (after ApplyInput, before UiInput). The step's text becomes the committed characters of
+		// the Text events the last ApplyTick applied (GetLastAppliedEvents), concatenated in their order, so the tick's
+		// UiInput and its scripts read the same characters, none on a tick without Text events. The frame's text, latched
+		// by LatchFrame, is every step text latched since the previous LatchFrame, in order: none in a frame that ran no step
+		// (Text events are never previewed, W-CLOCK's preview included). No replay format change: replays already carry the
+		// Text events (§13.6).
+		void LatchStepText();
+		// The latched text of `phase`'s view (UTF-8): Step the tick's (LatchStepText), Frame the frame's (LatchFrame). Empty
+		// before the first latch.
+		[[nodiscard]] std::string_view GetText(InputPhase phase) const;
 
 		// The tick the next ApplyTick applies.
 		[[nodiscard]] uint64_t GetNextTick() const;

@@ -3,6 +3,7 @@
 #include "Engine/Core/Base.h"
 #include "Engine/Core/UUID.h"
 #include "Engine/Renderer/UiDrawList.h"
+#include "Engine/Scene/Components/UiCanvasComponent.h"
 
 #include <glm/glm.hpp>
 
@@ -39,6 +40,17 @@
 //     canvas units (times Scale in scene pixels) after it is placed, offset being ScrollPosition clamped to the content's
 //     overflow (UiScrollViewComponent.h, ClampUiScrollPosition in Scene/UiWidgets.h; the sizes are the scroll view's and
 //     the content's laid-out sizes in canvas units). With PixelSnap the moved corners are snapped again.
+// C22.3's rules (Docs/Decisions/0033-m22-contract.md decisions 48 and 49; stream T the text input's, stream W the world
+// canvases'), the text input's applied only to a part that is an element below its input in the same canvas:
+//   - UiTextInput: it clips its descendants as ClipChildren does, whatever ClipChildren says; its Placeholder element and
+//     that element's subtree are Hidden while its Text is not empty.
+//   - A World canvas (UiCanvasComponent::RenderMode) is laid out as a Screen canvas would be over a scene image of its own
+//     WorldWidth x WorldHeight canvas pixels, whatever the scene resolution: its scale mode applies to that size, its
+//     elements' rectangles, clips and visibility are in its canvas pixels (Visible: inside that rectangle), and
+//     UiCanvasLayout records the size and the matrix that places it in the world, from the canvas entity's world transform
+//     (the scene's simulated pose; render extraction draws it at the render pose). A Screen canvas below a World canvas's
+//     element starts a canvas of its own over the scene image, as before, and a World canvas below a Screen canvas's
+//     element one of its own in the world.
 // Only IEEE-exact operations (+, -, *, /, comparisons, floor, ceil) in float on the components' values: a deterministic scene gives
 // the identical table in every configuration (Roadmap M22's acceptance, "UI layout tables are byte-identical across
 // configurations"). No asset access: rectangles never follow their content (decision 6), so layout needs no font.
@@ -55,12 +67,15 @@ namespace Engine {
 		UUID Canvas{};      // its canvas's entity
 		UUID Parent{};      // its parent element, or its canvas for a top-level element
 		uint32_t Depth = 1; // 1 for a top-level element, its parent's plus one below it
-		// The element's rectangle in scene pixels (snapped when its canvas snaps): [Min, Max].
+		// The element's rectangle in scene pixels (snapped when its canvas snaps): [Min, Max]. C22.3: an element of a World
+		// canvas has its rectangle, and its Clip, in that canvas's own pixels (UiCanvasLayout::SceneSize).
 		glm::vec2 Min = glm::vec2(0.0f);
 		glm::vec2 Max = glm::vec2(0.0f);
 		bool Clipped = false; // Clip holds; false: no clipping ancestor
 		UiClipRect Clip{};
-		bool Visible = false; // its rectangle, clipped and inside the scene image, covers a pixel, and it is not Hidden
+		// Its rectangle, clipped and inside the scene image (a World canvas's element: inside its canvas's rectangle, (0, 0) to
+		// SceneSize), covers a pixel, and it is not Hidden.
+		bool Visible = false;
 		// C22.2 (decision 26): inside an off toggle's Graphic subtree, so neither drawn, hit nor focusable (never Visible).
 		bool Hidden = false;
 
@@ -72,10 +87,17 @@ namespace Engine {
 	{
 		UUID Canvas{};
 		int32_t SortOrder = 0;
-		float Scale = 1.0f;               // scene pixels per canvas unit
-		glm::vec2 Size = glm::vec2(0.0f); // canvas units: the scene resolution / Scale
+		float Scale = 1.0f;               // scene pixels per canvas unit (a World canvas: its canvas pixels per canvas unit)
+		glm::vec2 Size = glm::vec2(0.0f); // canvas units: the scene resolution / Scale (a World canvas: SceneSize / Scale)
 		uint32_t FirstNode = 0;           // its elements: UiLayoutTable::Nodes[FirstNode, FirstNode + NodeCount)
 		uint32_t NodeCount = 0;
+		// C22.3 (decision 49; stream W): the canvas's render mode; a World canvas's own resolution in canvas pixels
+		// (WorldWidth x WorldHeight; zero for a Screen canvas, which covers the table's SceneSize) and the matrix from its
+		// canvas pixels to world space: translate(-SceneSize / 2), then the y flip, then 1 / PixelsPerUnit, then the canvas
+		// entity's world matrix (identity for a Screen canvas). Its nodes' rectangles are in its canvas pixels.
+		UiCanvasRenderMode RenderMode = UiCanvasRenderMode::Screen;
+		glm::uvec2 SceneSize = glm::uvec2(0);
+		glm::mat4 World = glm::mat4(1.0f);
 
 		bool operator==(const UiCanvasLayout&) const = default;
 	};

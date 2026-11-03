@@ -45,6 +45,8 @@ project "EditorCore"
 	UseMiniaudio()
 	UseMikkTSpace()
 	UseLuau(true)
+	UseHarfBuzz()
+	UseSheenBidi()
 
 project "Editor"
 	kind "ConsoleApp"
@@ -93,3 +95,5 @@ project "Editor"
 	UseMikkTSpace()
 	UseNativeFileDialog()
 	UseLuau(true)
+	UseHarfBuzz()
+	UseSheenBidi()

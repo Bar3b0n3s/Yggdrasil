@@ -853,6 +853,75 @@ namespace Engine {
 			CHECK(editor.GetHistory().GetUndoCount() == history + 1);
 			CHECK(rect().Size == moved.Size);
 		}
+
+		// C22.3 (the review of C22.3, its major on the consumers of World canvases' pixels; stream W): the UI preview shows
+		// and edits Screen canvases' elements only. An element of a World canvas, whose rectangle is in its canvas's own
+		// pixels, is neither selected by a click at those pixels nor given the rect tool's handles while selected (a World
+		// canvas is placed by its entity's Transform and its elements are edited in the inspector or with entity.update).
+		TEST_CASE("SceneViewportPanel: the UI preview neither selects nor resizes an element of a World canvas" * doctest::skip(true))
+		{
+			ScenePanelHarness test("SceneUiPreviewWorld");
+			EditorContext& editor = test.GetEditor();
+			REQUIRE(editor.GetViewportState().SetGameResolution(glm::uvec2(400, 300)).has_value());
+			UUID sign;
+			{
+				SceneEdit edit(editor, "Create UI");
+				const Entity board = editor.GetScene().CreateEntity("Board");
+				board.AddComponent<UiCanvasComponent>(UiCanvasComponent{ .RenderMode = UiCanvasRenderMode::World, .WorldWidth = 400, .WorldHeight = 300 });
+				// [100, 300] x [50, 150] in the World canvas's own pixels.
+				const Entity element = editor.GetScene().CreateEntity("Sign", board);
+				element.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f),
+					.AnchorMax = glm::vec2(0.0f),
+					.Pivot = glm::vec2(0.0f),
+					.Position = glm::vec2(100.0f, 50.0f),
+					.Size = glm::vec2(200.0f, 100.0f) });
+				sign = element.GetUUID();
+				REQUIRE(edit.Commit().has_value());
+			}
+			REQUIRE(test.GetAutomation().Call("viewport.setOptions", Json{ { "uiPreview", true } }).has_value());
+			REQUIRE(editor.SetSelection({}, SceneTarget::Edit).has_value());
+			test.Viewport.Image.Width = 400;
+			test.Viewport.Image.Height = 300;
+			test.FrameOk();
+			const EditorViewportRect frame = test.Viewport.Rectangle;
+			REQUIRE(frame.Size.x > 0.0f);
+			const float scale = frame.Size.x / 400.0f;
+			const auto at = [&frame, scale](glm::vec2 scenePixel)
+			{
+				return ImVec2(frame.Min.x + scenePixel.x * scale, frame.Min.y + scenePixel.y * scale);
+			};
+			const auto rect = [&editor, sign]() -> const UiRectComponent&
+			{
+				return editor.GetScene().FindEntityByID(sign).GetComponent<UiRectComponent>();
+			};
+
+			// A click inside the sign's canvas-pixel rectangle selects nothing.
+			test.MoveTo(at(glm::vec2(200.0f, 100.0f)));
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+			test.FrameOk();
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+			test.FrameOk();
+			test.GetContext().Actions.Pump();
+			test.FrameOk();
+			CHECK(editor.GetSelection().empty());
+
+			// Selected in the hierarchy, its canvas-pixel right edge takes no handle drag: nothing is written.
+			REQUIRE(editor.SetSelection({ sign }, SceneTarget::Edit).has_value());
+			test.FrameOk();
+			const size_t history = editor.GetHistory().GetUndoCount();
+			test.MoveTo(at(glm::vec2(300.0f, 100.0f)));
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+			test.FrameOk();
+			for (int step = 1; step <= 5; ++step)
+				test.MoveTo(at(glm::vec2(300.0f + 10.0f * static_cast<float>(step), 100.0f)));
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+			test.FrameOk();
+			test.GetContext().Actions.Pump();
+			test.FrameOk();
+			CHECK(editor.GetHistory().GetUndoCount() == history);
+			CHECK(rect().Size == glm::vec2(200.0f, 100.0f));
+			CHECK(rect().Position == glm::vec2(100.0f, 50.0f));
+		}
 	}
 
 }

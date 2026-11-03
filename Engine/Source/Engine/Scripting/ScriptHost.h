@@ -129,6 +129,11 @@ namespace Engine {
 		// (the edit evaluation, test fixtures without a session) keeps the default, null, for which the module reports no
 		// focus, hover or press and no rectangle, and refuses Ui.SetFocus.
 		[[nodiscard]] virtual UiSystem* GetUi() { return nullptr; }
+		// M22 (C22.3, Docs/Decisions/0033-m22-contract.md decision 46; stream T): the committed characters latched into
+		// `phase`'s view (UTF-8; PlayInput::GetText, the text latch), which Input.GetText reads in that phase; valid until the
+		// session's next latch. A play session's host returns its PlayInput's, and every other host (the edit evaluation,
+		// test fixtures without a session) keeps the default, empty, so Input.GetText reads no text there.
+		[[nodiscard]] virtual std::string_view GetText(InputPhase /*phase*/) const { return {}; }
 	};
 
 }

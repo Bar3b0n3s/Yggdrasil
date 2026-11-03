@@ -96,6 +96,12 @@ namespace Engine {
 		// The run's scissor in the framebuffer's pixels (nvrhi::Rect: x right, y down, the maxima exclusive), intersected with
 		// the framebuffer's extent; empty or wholly outside: the run draws nothing. nullopt: the whole extent.
 		std::optional<nvrhi::Rect> Scissor{};
+		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 51; stream W): a World canvas's matrix (UiWorldCanvas::World).
+		// The run's glyphs are then in that canvas's pixels: they are placed in the world by it and drawn with the
+		// depth-tested pipeline of world texts (against SceneDepth, without depth writes), the view-projection from b0, and
+		// Scissor must be nullopt (the Ui pass clips a world canvas's glyphs on the CPU). nullopt: the framebuffer's pixels,
+		// on top, as before C22.3.
+		std::optional<glm::mat4> World{};
 	};
 
 	// M22 (C22.1): the inputs of RecordGlyphRuns.

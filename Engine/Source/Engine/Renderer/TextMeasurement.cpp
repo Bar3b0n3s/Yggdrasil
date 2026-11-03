@@ -319,4 +319,11 @@ namespace Engine {
 		return MeasureText(fonts, text, options).Size;
 	}
 
+	// A stub of the M22 contract (C22.3, Docs/Decisions/0033-m22-contract.md decision 48) that stream S implements.
+	TextCaret FindTextCaret(const TextMeasurement& /*measurement*/, uint32_t /*byteOffset*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return {};
+	}
+
 }

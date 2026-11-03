@@ -134,6 +134,7 @@ namespace Engine {
 			case UiWidgetType::Toggle:     return "Toggle";
 			case UiWidgetType::Slider:     return "Slider";
 			case UiWidgetType::ScrollView: return "ScrollView";
+			case UiWidgetType::TextInput:  return "TextInput";
 		}
 		return {};
 	}
@@ -148,6 +149,8 @@ namespace Engine {
 			case UiEventKind::Hover:        return "Hover";
 			case UiEventKind::Cancel:       return "Cancel";
 			case UiEventKind::Scroll:       return "Scroll";
+			case UiEventKind::TextChanged:  return "TextChanged";
+			case UiEventKind::Submit:       return "Submit";
 		}
 		return {};
 	}
@@ -162,6 +165,8 @@ namespace Engine {
 			case UiEventKind::Hover:        return "OnUiHover";
 			case UiEventKind::Cancel:       return "OnUiCancel";
 			case UiEventKind::Scroll:       return "OnUiScroll";
+			case UiEventKind::TextChanged:  return "OnUiTextChanged";
+			case UiEventKind::Submit:       return "OnUiSubmit";
 		}
 		return {};
 	}
@@ -276,6 +281,27 @@ namespace Engine {
 		if (!(y >= Threshold))
 			return UiStickDirection::None;
 		return stick.y > 0.0f ? UiStickDirection::Up : UiStickDirection::Down;
+	}
+
+	// World canvases: stubs of the M22 contract (C22.3, Docs/Decisions/0033-m22-contract.md decision 50) that stream W
+	// implements.
+
+	std::optional<UiPointerRay> ComputeUiPointerRay(const Scene& /*scene*/, glm::vec2 /*pointer*/, glm::uvec2 /*sceneSize*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return std::nullopt;
+	}
+
+	std::optional<UiCanvasPointer> MapUiPointerToCanvas(const UiCanvasLayout& /*canvas*/, glm::vec2 /*point*/, const std::optional<UiPointerRay>& /*ray*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return std::nullopt;
+	}
+
+	UiPointerHit HitTestUiPointer(const Scene& /*scene*/, const UiLayoutTable& /*table*/, glm::vec2 /*point*/, const std::optional<UiPointerRay>& /*ray*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return {};
 	}
 
 }

@@ -480,4 +480,11 @@ namespace Engine {
 		return plan.DrawnItems;
 	}
 
+	// A stub of the M22 contract (C22.3, Docs/Decisions/0033-m22-contract.md decision 42) that stream F implements.
+	std::vector<AssetHandle> BuildUiFontChain(AssetHandle /*font*/, AssetManager& /*assets*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return {};
+	}
+
 }

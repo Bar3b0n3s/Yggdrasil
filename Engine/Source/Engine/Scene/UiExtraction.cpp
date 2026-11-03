@@ -96,7 +96,9 @@ namespace Engine {
 
 	}
 
-	void AppendUiDrawItems(const Scene& scene, const UiLayoutTable& table, UiDrawList& list, const UiInteractionState* interaction)
+	// C22.3: no caller passes worldOnly before stream W, which makes the editor's scene view pass it and reads it here.
+	void AppendUiDrawItems(const Scene& scene, const UiLayoutTable& table, UiDrawList& list, const UiInteractionState* interaction,
+		bool /*worldOnly*/)
 	{
 		for (const UiCanvasLayout& canvas : table.Canvases)
 		{

@@ -197,7 +197,7 @@ The same inputs and seed must give the same state hash in Debug, Release and Dis
 **Layers (§3)**
 - A module includes only lower layers and the listed exceptions. Layer 5 is an explicit DAG in `Scripts/ModuleRules.json`. `Lint.py` enforces all of this.
 - `Renderer` never includes `Scene`.
-- Public headers never expose GLFW, Jolt, Luau, miniaudio, cgltf or stb types.
+- Public headers never expose GLFW, Jolt, Luau, miniaudio, cgltf, stb, HarfBuzz or SheenBidi types.
 - Platform code lives only in `Platform/Windows/`, `Platform/Posix/` (shared by Linux and macOS; `Platform/Linux/` and `Platform/MacOS/` when a difference grows) and in the Graphics device setup. Helpers that both OS halves of a unit share go in `Platform/Private/`, named after the unit. In Tests, only `Support/PlatformProbes.cpp` has OS headers (ADR 0005 decisions 1 and 25).
 
 **No product name in code.** "Yggdrasil" appears only in the premake workspace name (`WorkspaceName` in `premake5.lua`, which scripts read through `Scripts/Lib/paths.py`), in `ENGINE_PRODUCT_NAME` and in docs. Code, macros, files, shaders, Python and premake scripts say `Engine`/`ENGINE_`; `Lint.py` checks C++, Slang, Python and Lua.
@@ -222,7 +222,7 @@ The same inputs and seed must give the same state hash in Debug, Release and Dis
 
 - **Upstream sources are never edited or reformatted.** Build changes go in `Vendor/<Lib>/premake5.lua`, and `VENDOR.md` records them: version, commit, license, kept and removed files, build configuration, consumer settings and verification.
 - **Consumer settings** live in `Use<Lib>()` in `Dependencies.lua`, copied verbatim from `VENDOR.md`.
-  - ABI-relevant defines must match between a library and every consumer: `JPH_*`, `SPDLOG_*`, `MA_NO_*`, `VULKAN_HPP_*`, `VK_USE_PLATFORM_*`, `NOMINMAX`, `NDEBUG`, and the Luau (`LUA_VECTOR_*`, `LUA_USE_LONGJMP`, `LUA_API`, `LUACODE_API`), Dear ImGui (`IMGUI_*`, `ImTextureID`, `ImDrawIdx`) and GLFW (`_GLFW_*`, `GLFW_DLL`) configuration macros. Jolt consumers also use Jolt's instruction set (`/arch:SSE4.2`, `-msse4.2 -mpopcnt`).
+  - ABI-relevant defines must match between a library and every consumer: `JPH_*`, `SPDLOG_*`, `MA_NO_*`, `VULKAN_HPP_*`, `VK_USE_PLATFORM_*`, `NOMINMAX`, `NDEBUG`, and the Luau (`LUA_VECTOR_*`, `LUA_USE_LONGJMP`, `LUA_API`, `LUACODE_API`), Dear ImGui (`IMGUI_*`, `ImTextureID`, `ImDrawIdx`), GLFW (`_GLFW_*`, `GLFW_DLL`), HarfBuzz (`HB_*`) and SheenBidi (`SB_CONFIG_*`) configuration macros. Jolt consumers also use Jolt's instruction set (`/arch:SSE4.2`, `-msse4.2 -mpopcnt`).
   - These macros are set in premake only, never with `#define`/`#undef` in source (Lint `banned-abi-macro`).
   - After any build-file change, run `python Scripts/CheckBuildConfig.py` (PreCommit runs it too).
 - **`NDEBUG`** is defined at workspace scope, for Dist only, and never in a project script (vulkan.hpp ODR rule, §2.2).

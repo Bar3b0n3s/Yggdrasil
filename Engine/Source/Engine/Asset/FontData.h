@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Asset/Asset.h"
+#include "Engine/Asset/AssetHandle.h"
 #include "Engine/Asset/AssetType.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Buffer.h"
@@ -15,6 +16,15 @@
 
 // Font CPU data and its cooked payload (Architecture §6.8 "font: R8 SDF atlas and glyph metrics", §7.4 FontImporter, §8.10
 // text). Produced by FontImporter (TTF, OTF: ASCII + Latin-1 at 48 px with spread 8) and drawn by the TextRenderer (M8).
+//
+// Format 2 (M22, C22.3, R-UI-L10N and R-UI-L10N-RTL; Docs/Decisions/0033-m22-contract.md decision 44; FontImporter version
+// 5): what shaping and the fallback chain read. Each glyph records its glyph index in the font; IndexedGlyphs holds every
+// baked glyph by index, those that only shaping reaches included (an Arabic letter's contextual forms, ligatures: the
+// importer bakes the glyphs the font's substitutions can produce from its baked codepoints); ShapingSource is the sfnt
+// HarfBuzz shapes with; Fallbacks are the fonts that follow this one in a text's chain (FontImportSettings::Fallbacks).
+// The members are frozen by the contract and filled by stream S (the glyph indices, IndexedGlyphs, UnitsPerEm and
+// ShapingSource, the payload's version 2) and stream F (Fallbacks); a FontData without ShapingSource (format 1, or built
+// by hand) measures without shaping (Renderer/TextMeasurement.h).
 
 namespace Engine {
 
@@ -29,6 +39,8 @@ namespace Engine {
 		glm::vec2 PlaneMax{ 0.0f };
 		glm::vec2 AtlasMin{ 0.0f };
 		glm::vec2 AtlasMax{ 0.0f };
+		// Format 2 (C22.3): the glyph's index in the font (its glyph id, the one HarfBuzz shapes to); 0 in format 1.
+		uint32_t GlyphIndex = 0;
 
 		bool operator==(const FontGlyph&) const = default;
 	};
@@ -66,10 +78,30 @@ namespace Engine {
 		Buffer AtlasPixels{};
 		std::vector<FontGlyph> Glyphs{};        // sorted by Codepoint, unique
 		std::vector<FontKerningPair> Kerning{}; // sorted by (First, Second), unique, both glyphs present
+
+		// --- Format 2 (C22.3, decision 44) ------------------------------------------------------------------------------
+		// The font's units per em (head.unitsPerEm, 16 to 16,384); 0 without shaping data.
+		uint32_t UnitsPerEm = 0;
+		// Every baked glyph once, sorted by GlyphIndex, unique: the glyphs of Glyphs (each with the smallest baked codepoint
+		// that maps to it as its Codepoint, and the same metrics and atlas rectangle) and the glyphs only shaping reaches
+		// (Codepoint 0). Empty without shaping data.
+		std::vector<FontGlyph> IndexedGlyphs{};
+		// The sfnt HarfBuzz shapes with: the source font subset by HarfBuzz's subsetter to the baked glyphs, glyph ids
+		// retained, its layout (GDEF, GSUB, GPOS, kern) and metrics tables kept; empty: the font has no shaping data.
+		Buffer ShapingSource{};
+		// The fonts that follow this one in a text's font chain, in order (FontImportSettings::Fallbacks), at most
+		// MaxFontFallbacks; the importer records them as its dependencies.
+		std::vector<AssetHandle> Fallbacks{};
 	};
+
+	// C22.3: the most fallbacks one font names.
+	inline constexpr size_t MaxFontFallbacks = 8;
 
 	// The glyph for `codepoint`, or nullptr (binary search).
 	[[nodiscard]] const FontGlyph* FindGlyph(const FontData& font, uint32_t codepoint);
+
+	// C22.3 (decision 44; stream S): the glyph whose GlyphIndex is `glyphIndex` in IndexedGlyphs, or nullptr (binary search).
+	[[nodiscard]] const FontGlyph* FindGlyphByIndex(const FontData& font, uint32_t glyphIndex);
 
 	// Checks: PixelSize and Spread positive; Ascent >= 0 >= Descent; every float finite; an atlas of 1 to 16384 pixels in
 	// each dimension holding exactly AtlasWidth * AtlasHeight bytes; glyphs and kerning sorted and unique, kerning glyphs

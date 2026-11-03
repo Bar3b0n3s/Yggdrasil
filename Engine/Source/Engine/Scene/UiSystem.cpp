@@ -233,6 +233,7 @@ namespace Engine {
 				case UiWidgetType::None:
 				case UiWidgetType::Button:
 				case UiWidgetType::Toggle:
+				case UiWidgetType::TextInput:
 					break;
 			}
 		}
@@ -251,6 +252,7 @@ namespace Engine {
 				case UiWidgetType::None:
 				case UiWidgetType::Button:
 				case UiWidgetType::Toggle:
+				case UiWidgetType::TextInput:
 					break;
 			}
 		}

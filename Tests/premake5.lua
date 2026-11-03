@@ -80,3 +80,5 @@ project "Tests"
 	UseMikkTSpace()
 	UseNativeFileDialog()
 	UseLuau(true)
+	UseHarfBuzz()
+	UseSheenBidi()

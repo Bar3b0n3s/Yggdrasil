@@ -25,12 +25,13 @@ and configuration:
 3. a Jolt consumer is compiled for another instruction set than JoltPhysics. Jolt/Core/Core.h derives JPH_USE_AVX2,
    JPH_USE_AVX, JPH_USE_F16C, JPH_USE_LZCNT, JPH_USE_TZCNT and more from the compiler's predefined __AVX2__,
    __AVX__, ... macros, and those are not part of JPH_VERSION_ID, so VerifyJoltVersionID() cannot catch a mismatch;
-4. a first-party project, JoltPhysics, MikkTSpace or Luau uses a non-precise floating-point model: MSVC
-   FloatingPointModel=Fast, /fp:fast, /fp:contract or /Qfast_transcendentals; GCC/Clang (and clang-cl's /clang:
-   options) -ffast-math, -Ofast, -ffp-model=fast or any component of -ffast-math in effect (unsafe, associative or
-   reciprocal math, finite math only, no NaNs or infinities, no signed zeros, no trapping math, limited complex
-   range, approximate functions, fast excess precision), or an effective -ffp-contract other than "off" (it must be
-   explicit: GCC's C++ default is "fast", clang-cl's is "on"). C sources are checked with the C compiler's flags;
+4. a first-party project, JoltPhysics, MikkTSpace, Luau, HarfBuzz or SheenBidi uses a non-precise floating-point
+   model: MSVC FloatingPointModel=Fast, /fp:fast, /fp:contract or /Qfast_transcendentals; GCC/Clang (and clang-cl's
+   /clang: options) -ffast-math, -Ofast, -ffp-model=fast or any component of -ffast-math in effect (unsafe,
+   associative or reciprocal math, finite math only, no NaNs or infinities, no signed zeros, no trapping math, limited
+   complex range, approximate functions, fast excess precision), or an effective -ffp-contract other than "off" (it
+   must be explicit: GCC's C++ default is "fast", clang-cl's is "on"). C sources are checked with the C compiler's
+   flags;
 5. the solution builds EditorCore, Editor or Tests in Dist, or does not build Engine or Runtime in Dist;
 6. a Windows project does not select x64 host tools (the 32-bit linker can exhaust its address space);
 7. AddressSanitizer is not instrumented alike (MSVC's STL marks the translation units that use its container
@@ -140,6 +141,11 @@ VENDOR_ABI_FAMILIES: dict[str, DefineFamily] = {
     # nativefiledialog-extended is built without configuration macros (its defaults, Windows backend only;
     # Vendor/nativefiledialog-extended/VENDOR.md): only NDEBUG is compared for it.
     "nfd": DefineFamily(),
+    # M22 (C22.3, Docs/Decisions/0033-m22-contract.md decision 41): HarfBuzz's configuration macros (HB_NO_*, HB_TINY,
+    # HB_EXPERIMENTAL_API, ...) and SheenBidi's (SB_CONFIG_*); the libraries' own private defines are listed below, and
+    # SheenBidi is built without any (Vendor/HarfBuzz/VENDOR.md, Vendor/SheenBidi/VENDOR.md).
+    "HarfBuzz": DefineFamily(prefixes=("HB_",)),
+    "SheenBidi": DefineFamily(prefixes=("SB_CONFIG_",)),
 }
 GLOBAL_ABI_DEFINES = ("NDEBUG",)
 
@@ -153,6 +159,9 @@ VENDOR_PRIVATE_DEFINES: dict[str, frozenset[str]] = {
     "Luau": frozenset({"NDEBUG"}),
     "LuauAnalysis": frozenset({"NDEBUG"}),
     "GLFW": frozenset({"_GLFW_WIN32", "_GLFW_X11", "_GLFW_COCOA"}),
+    # - HarfBuzz: HB_NO_GETENV and HB_NO_SETLOCALE remove the library's reads of environment variables and of the C
+    #   locale; only its sources read them, never a public header (Vendor/HarfBuzz/VENDOR.md).
+    "HarfBuzz": frozenset({"HB_NO_GETENV", "HB_NO_SETLOCALE"}),
 }
 
 JOLT_PROJECT = "JoltPhysics"
@@ -160,7 +169,9 @@ JOLT_PROJECT = "JoltPhysics"
 # (simulation determinism, §9.1), MikkTSpace (generated tangents are cooked into meshes, which must be identical in
 # every configuration, Docs/Decisions/0010-m6-decisions.md) and the Luau VM (scripts' gameplay arithmetic runs in its
 # interpreter and vector/math libraries on the simulation path, §11.1). LuauAnalysis only type-checks in the editor.
-PRECISE_VENDOR_PROJECTS = (JOLT_PROJECT, "MikkTSpace", "Luau")
+# HarfBuzz and SheenBidi (M22, C22.3): shaped glyph positions and bidirectional runs reach the UI's layout and the
+# cooked fonts, which must be identical in every configuration (Roadmap M22: shaped text is byte-identical across them).
+PRECISE_VENDOR_PROJECTS = (JOLT_PROJECT, "MikkTSpace", "Luau", "HarfBuzz", "SheenBidi")
 DETERMINISM_DEFINE = "JPH_CROSS_PLATFORM_DETERMINISTIC"
 NOT_IN_DIST = ("EditorCore", "Editor", "Tests")
 BUILT_IN_DIST = ("Engine", "Runtime")
@@ -1054,8 +1065,8 @@ def check_floating_point(workspace: GeneratedWorkspace, first_party: set[str], f
                 for problem in problems:
                     findings.append(
                         f"[{target.name}] {config}: {unit_location(name, unit)} uses a non-precise floating-point "
-                        f"model: {problem} (first-party projects, JoltPhysics, MikkTSpace and Luau must use the "
-                        "precise model, Docs/Architecture.md section 2.2)"
+                        f"model: {problem} (first-party projects, JoltPhysics, MikkTSpace, Luau, HarfBuzz and "
+                        "SheenBidi must use the precise model, Docs/Architecture.md section 2.2)"
                     )
 
 

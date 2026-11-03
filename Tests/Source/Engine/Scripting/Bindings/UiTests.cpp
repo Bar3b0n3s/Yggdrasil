@@ -144,6 +144,40 @@ return not pcall(Ui.SetFocus, button) and not pcall(Ui.SetFocus, nil)
 			CHECK(fixture.Errors.empty());
 		}
 
+		// C22.3 (the review of C22.3, its major on the consumers of World canvases' pixels; stream W, decision 56's text): an
+		// element of a World canvas is laid out in its canvas's own pixels, which Ui.GetRect reports with the canvas, as it
+		// reports every element's canvas.
+		TEST_CASE("Ui: GetRect reports a World canvas's element in its canvas pixels, with its canvas" * doctest::skip(true))
+		{
+			Test::ScriptTestFixture fixture({ .TestMode = true });
+			Scene& scene = fixture.GetScene();
+			PopulateUiModuleScene(scene);
+			// A World canvas of 400 x 300 canvas pixels holding "Sign" at (100, 50), 200 x 100, whatever the scene's size.
+			Entity board = scene.CreateEntity("Board");
+			board.AddComponent<UiCanvasComponent>(UiCanvasComponent{ .RenderMode = UiCanvasRenderMode::World, .WorldWidth = 400, .WorldHeight = 300 });
+			Entity sign = scene.CreateEntity("Sign", board);
+			sign.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f),
+				.AnchorMax = glm::vec2(0.0f),
+				.Pivot = glm::vec2(0.0f),
+				.Position = glm::vec2(100.0f, 50.0f),
+				.Size = glm::vec2(200.0f, 100.0f) });
+			UiSystem ui;
+			ui.LayoutStep(scene, glm::uvec2(320, 180));
+			fixture.Ui = &ui;
+			REQUIRE(fixture.Start());
+
+			const auto result = fixture.Evaluate(R"(
+local sign = Ui.GetRect(Scene.FindByName("Sign"))
+assert(sign.Min == vector.create(100, 50, 0) and sign.Max == vector.create(300, 150, 0))
+assert(sign.Canvas == Scene.FindByName("Board"))
+local button = Ui.GetRect(Scene.FindByName("Button"))
+return button.Canvas == Scene.FindByName("Canvas")
+)");
+			REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
+			CHECK(result->Value.Get() == Json(true));
+			CHECK(fixture.Errors.empty());
+		}
+
 		// Decision 28: the play session's script host serves its UiSystem (IScriptHost::GetUi), so the session's scripts read
 		// the layout its UiLayout phase made.
 		TEST_CASE("Ui: a play session's scripts read the session's UI")

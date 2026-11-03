@@ -1034,6 +1034,7 @@ namespace Engine {
 		{
 			case PlaySessionPhase::InterpolationSnapshot:   return "InterpolationSnapshot";
 			case PlaySessionPhase::ApplyInput:              return "ApplyInput";
+			case PlaySessionPhase::TextLatch:               return "TextLatch";
 			case PlaySessionPhase::UiInput:                 return "UiInput";
 			case PlaySessionPhase::StartFlush:              return "StartFlush";
 			case PlaySessionPhase::UiEvents:                return "UiEvents";

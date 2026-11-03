@@ -619,6 +619,75 @@ namespace Engine {
 			}
 		}
 
+		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 46; stream T): the text latch between ApplyInput and UiInput, in
+		// Play and Simulate, and the step view holds the tick's text. Relative order only (the lead's decision 7 of the review
+		// of C22.3): the full phase lists differ with the phases M21 and M23 insert, whichever lands first, so this case
+		// holds on every merged tree; the documented-sequence cases, which stream T extends, pin the whole lists.
+		TEST_CASE("PlaySession: TextLatch follows ApplyInput and precedes UiInput, in Play and Simulate" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			PopulateUiScene(fixture.GetScene());
+			const auto indexOf = [](const std::vector<PlaySessionPhase>& phases, PlaySessionPhase phase)
+			{
+				return std::ranges::find(phases, phase) - phases.begin();
+			};
+			for (const PlayMode mode : { PlayMode::Play, PlayMode::Simulate })
+			{
+				CAPTURE(mode == PlayMode::Play);
+				RecordingObserver observer;
+				PlaySessionSpecification specification = MakeSpecification(fixture, &observer);
+				specification.Mode = mode;
+				Result<Scope<PlaySession>> session = PlaySession::CreateFromScene(specification, fixture.GetScene());
+				REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+				REQUIRE((*session)->GetInput().Queue(0, PlayInputEvent{ .Type = PlayInputEventType::Text, .Text = "ok" }).has_value());
+				(*session)->FixedStep();
+				const auto latch = indexOf(observer.Phases, PlaySessionPhase::TextLatch);
+				REQUIRE(latch < std::ssize(observer.Phases));
+				CHECK(std::ranges::count(observer.Phases, PlaySessionPhase::TextLatch) == 1);
+				CHECK(latch == indexOf(observer.Phases, PlaySessionPhase::ApplyInput) + 1);
+				CHECK(indexOf(observer.Phases, PlaySessionPhase::UiInput) == latch + 1);
+				CHECK((*session)->GetInput().GetText(InputPhase::Step) == "ok");
+			}
+		}
+
+		// C22.3's guard (decision 54, the lead's lesson from C22.2's and C21.2's reviews): a scene without a text input or a
+		// World canvas keeps its state hash exactly whatever is typed (typing reaches no component while no text input has
+		// focus, and the editing keys and Enter change nothing), and its UI interaction ignores where the primary camera looks
+		// (no pointer ray is cast without a World canvas). It holds on the contract tree, where no session latches text or
+		// casts a ray, and guards streams T and W.
+		TEST_CASE("PlaySession: a scene with Screen UI and no text input or World canvas keeps its state hash while text is typed")
+		{
+			Test::SceneTestFixture fixture;
+			PopulateUiScene(fixture.GetScene());
+			fixture.GetScene().CreateEntity("Camera").AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			Result<Scope<PlaySession>> typing = PlaySession::CreateFromScene(MakeSpecification(fixture), fixture.GetScene());
+			Result<Scope<PlaySession>> turning = PlaySession::CreateFromScene(MakeSpecification(fixture), fixture.GetScene());
+			Result<Scope<PlaySession>> idle = PlaySession::CreateFromScene(MakeSpecification(fixture), fixture.GetScene());
+			REQUIRE_MESSAGE(typing.has_value(), typing.error().ToString());
+			REQUIRE_MESSAGE(turning.has_value(), turning.error().ToString());
+			REQUIRE_MESSAGE(idle.has_value(), idle.error().ToString());
+			// All three hover button A; one types and presses the editing keys, one turns its camera.
+			for (PlaySession* session : { typing->get(), turning->get(), idle->get() })
+				QueuePointer(*session, 0, glm::vec2(10.0f));
+			REQUIRE((*typing)->GetInput().Queue(0, PlayInputEvent{ .Type = PlayInputEventType::Text, .Text = "abc \xD7\x90" }).has_value());
+			for (const Key key : { Key::Backspace, Key::Delete, Key::Left, Key::Right, Key::Home, Key::End, Key::Enter })
+				QueueKeyTap(**typing, 1, key);
+			REQUIRE((*typing)->GetInput().Queue(2, PlayInputEvent{ .Type = PlayInputEventType::Text, .Text = "d" }).has_value());
+			for (int tick = 0; tick < 4; ++tick)
+			{
+				(*turning)->GetScene().FindEntityByPath("/Camera").Patch<TransformComponent>([tick](TransformComponent& transform)
+				{
+					transform.Rotation = glm::angleAxis(0.25f * static_cast<float>(tick + 1), glm::vec3(0.0f, 1.0f, 0.0f));
+				});
+				(*typing)->Tick();
+				(*turning)->Tick();
+				(*idle)->Tick();
+				CHECK((*typing)->GetUi().GetInteraction() == (*idle)->GetUi().GetInteraction());
+				CHECK((*turning)->GetUi().GetInteraction() == (*idle)->GetUi().GetInteraction());
+				CHECK((*typing)->ComputeStateHash() == (*idle)->ComputeStateHash());
+			}
+		}
+
 		// Decision 30: the Ui settings name the controls of each command and can turn navigation off; a binding that does not
 		// name a key or a gamepad button fails the session's start at its location, as an action's binding does. Next with a
 		// Shift key down is Previous, and a gamepad command counts on any connected gamepad (gamepad 1 here). Navigation
@@ -1111,6 +1180,8 @@ namespace Engine {
 			// M22 C22.2 (decisions 24 and 27): the UI's interaction phases.
 			CHECK(PlaySessionPhaseToString(PlaySessionPhase::UiInput) == "UiInput");
 			CHECK(PlaySessionPhaseToString(PlaySessionPhase::UiEvents) == "UiEvents");
+			// M22 C22.3 (decision 46): the text latch.
+			CHECK(PlaySessionPhaseToString(PlaySessionPhase::TextLatch) == "TextLatch");
 		}
 
 		TEST_CASE("PlaySession: scripts measure screen coordinates in the session's view, never the host's window")

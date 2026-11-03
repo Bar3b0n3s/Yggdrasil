@@ -7,6 +7,8 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <optional>
+#include <string>
 #include <string_view>
 
 // UI interaction (M22, C22.2, R-UI-INPUT and R-UI-DET; Docs/Decisions/0033-m22-contract.md decisions 22 to 24 and 29): the
@@ -20,7 +22,8 @@
 // latched step input). Scene is on the simulation path's lint scope (§4.12). Main thread.
 //
 // Pointer targets (decision 22). An element of a layout table is a pointer target when it is Visible (UiLayoutNode) and
-// holds a widget component (UiButton, UiToggle, UiSlider, UiScrollView), or a UiImage or UiText whose RaycastTarget is set.
+// holds a widget component (UiButton, UiToggle, UiSlider, UiScrollView, and C22.3's UiTextInput), or a UiImage or UiText
+// whose RaycastTarget is set.
 // A point is over a target when it lies in the target's rectangle (Min <= p < Max on both axes) and, when the target is
 // Clipped, in its clip (the pixel rectangle [X0, X1) x [Y0, Y1) of UiClipRect, compared with the point as is). The
 // topmost target over a point is the last such element in the table's draw order (its canvases in draw order, each
@@ -35,6 +38,18 @@
 // table's default focus, the DefaultFocus of the last canvas in draw order whose DefaultFocus is focusable, and does
 // nothing when no canvas names one. So a game whose play uses the arrows and Space keeps them while nothing has focus,
 // and its menus opt in through a canvas's DefaultFocus, Ui.SetFocus or a pointer press on a focusable widget.
+//
+// World canvases (C22.3, R-UI-WORLD; decision 50; stream W). A World canvas (UiCanvasComponent::RenderMode) is laid out in
+// its own canvas pixels (UiCanvasLayout::SceneSize) and placed in the world by UiCanvasLayout::World, so its elements'
+// rectangles are not scene pixels. The pointer reaches it along a ray through the scene's primary camera
+// (ComputeUiPointerRay, from the step's latched pointer and the camera's simulated pose): the ray meets the canvas's plane
+// at a point of its canvas pixels (MapUiPointerToCanvas), where the canvas's elements are hit-tested by the rule above,
+// restricted to that canvas. Screen canvases draw over the world, so a target of a Screen canvas under the pointer wins;
+// otherwise the nearest World canvas along the ray with a target under its point (the later in draw order on a tie)
+// (HitTestUiPointer). Directional navigation moves among the focusable elements of one render space: every Screen
+// canvas's together, as before C22.3, or one World canvas's; Next, Previous and the default focus span every canvas in
+// draw order. The same IEEE-exact operations, with DetMath for the camera's field of view (Core/DetMath.h), so a world
+// canvas interacts identically in every configuration.
 
 namespace Engine {
 
@@ -47,10 +62,11 @@ namespace Engine {
 		Button,
 		Toggle,
 		Slider,
-		ScrollView
+		ScrollView,
+		TextInput // C22.3 (decision 45): UiTextInput
 	};
 
-	// "Button", "Toggle", "Slider", "ScrollView"; empty for None (ui.tree's widget kind).
+	// "Button", "Toggle", "Slider", "ScrollView", "TextInput"; empty for None (ui.tree's widget kind).
 	[[nodiscard]] std::string_view UiWidgetTypeToString(UiWidgetType type);
 
 	// The widget `element` holds in `scene`; None for an entity without one or that the scene does not hold.
@@ -88,11 +104,40 @@ namespace Engine {
 	template<>
 	inline constexpr bool EnableFlagOperators<UiNavigation> = true;
 
+	// C22.3 (decision 47): the text input's editing keys pressed in the step view (Key.Backspace, Key.Delete, Key.Left,
+	// Key.Right, Key.Home, Key.End, and Key.Enter or Key.KeypadEnter): fixed keys, never the Ui settings' bindings.
+	enum class UiTextKeys : uint8_t
+	{
+		None = 0,
+		Backspace = 1 << 0,
+		Delete = 1 << 1,
+		Left = 1 << 2,
+		Right = 1 << 3,
+		Home = 1 << 4,
+		End = 1 << 5,
+		Enter = 1 << 6
+	};
+
+	template<>
+	inline constexpr bool EnableFlagOperators<UiTextKeys> = true;
+
+	// C22.3 (decision 50): a pointer ray in world space, through the scene's primary camera (ComputeUiPointerRay).
+	struct UiPointerRay
+	{
+		glm::vec3 Origin = glm::vec3(0.0f);
+		glm::vec3 Direction = glm::vec3(0.0f, 0.0f, -1.0f); // unit length
+
+		bool operator==(const UiPointerRay&) const = default;
+	};
+
 	// What the UiInput phase reads from the tick's latched step view (decision 24). The session builds it: the pointer is
 	// the mouse in view coordinates mapped to scene pixels (MapViewPointToScenePoint of the session's output mapping), the
 	// button is Mouse.Left, Scroll the step's scroll delta, Navigation the Ui settings' bindings pressed in the step view
 	// and Stick the left stick of the connected gamepad whose stick has the largest magnitude (the first such gamepad on a
 	// tie); Navigation and Stick are empty and zero while Ui.Navigation is off.
+	// C22.3 (decisions 46, 47 and 50) appends what the text input and the world canvases read: the tick's latched text and
+	// editing keys, the navigation commands a gamepad pressed (so a focused text input can ignore the keyboard's), and the
+	// pointer's ray, which the session computes only while the current layout holds a World canvas.
 	struct UiInputFrame
 	{
 		glm::vec2 Pointer = glm::vec2(0.0f); // scene pixels
@@ -102,6 +147,17 @@ namespace Engine {
 		glm::vec2 Scroll = glm::vec2(0.0f); // wheel steps, x right-positive, y up-positive (InputState's convention)
 		UiNavigation Navigation = UiNavigation::None;
 		glm::vec2 Stick = glm::vec2(0.0f); // engine convention: x right-positive, y up-positive, each -1 to 1
+		// C22.3: the tick's committed characters (PlayInput::GetText of the step view, the text latch), UTF-8 in the order
+		// typed.
+		std::string Text{};
+		UiTextKeys TextKeys = UiTextKeys::None; // C22.3: the editing keys pressed in the step view
+		// C22.3: the commands of Navigation pressed through a gamepad button binding (a subset of Navigation; the stick's
+		// edges are UiSystem::ProcessInput's own, step 7); while a text input has focus only these, Next, Previous and Cancel
+		// navigate (decision 47).
+		UiNavigation GamepadNavigation = UiNavigation::None;
+		// C22.3: the pointer's ray through the primary camera (ComputeUiPointerRay); nullopt without a primary camera, and
+		// whenever the current layout holds no World canvas (the session computes none then).
+		std::optional<UiPointerRay> Ray{};
 	};
 
 	// The left stick's navigation direction: the axis of larger magnitude when it is at least 0.5 (x on a tie), its sign
@@ -146,12 +202,17 @@ namespace Engine {
 		Focus,        // OnUiFocus(self, element, focused): the element gained (true) or lost (false) focus
 		Hover,        // OnUiHover(self, element, hovered): the pointer entered (true) or left (false) the widget
 		Cancel,       // OnUiCancel(self, element): Cancel was pressed with the element focused (or at the last canvas)
-		Scroll        // OnUiScroll(self, element, position): a ScrollView's ScrollPosition changed
+		Scroll,       // OnUiScroll(self, element, position): a ScrollView's ScrollPosition changed
+		// C22.3 (decision 47): these carry no text (so the ui hash block keeps its layout); the callback receives the input's
+		// Text as it is when the callback runs.
+		TextChanged, // OnUiTextChanged(self, element, text): typing or an editing key changed a UiTextInput's Text
+		Submit       // OnUiSubmit(self, element, text): Enter, or Submit, while the UiTextInput had focus
 	};
 
-	// "Click", "ValueChanged", "Focus", "Hover", "Cancel", "Scroll".
+	// "Click", "ValueChanged", "Focus", "Hover", "Cancel", "Scroll", "TextChanged", "Submit".
 	[[nodiscard]] std::string_view UiEventKindToString(UiEventKind kind);
-	// The callback that receives `kind`: "OnUiClick", "OnUiValueChanged", "OnUiFocus", "OnUiHover", "OnUiCancel", "OnUiScroll".
+	// The callback that receives `kind`: "OnUiClick", "OnUiValueChanged", "OnUiFocus", "OnUiHover", "OnUiCancel",
+	// "OnUiScroll", "OnUiTextChanged", "OnUiSubmit".
 	[[nodiscard]] std::string_view GetUiEventCallbackName(UiEventKind kind);
 
 	// One UI event. Only the members of its Kind are read.
@@ -172,14 +233,67 @@ namespace Engine {
 	{
 		UUID Target{}; // null when the point is over no pointer target
 		UUID Widget{}; // null when the target has no widget at or above it
+
+		bool operator==(const UiHit&) const = default;
 	};
 
 	// The hit test of the file comment: the topmost pointer target of `table` (a layout of `scene`) over `point` (scene
-	// pixels) and its widget. Pure.
+	// pixels) and its widget, among the Screen canvases' elements (C22.3: a World canvas's are in its own pixels, which
+	// HitTestUiPointer reaches). Pure.
 	[[nodiscard]] UiHit HitTestUi(const Scene& scene, const UiLayoutTable& table, glm::vec2 point);
 
+	// --- World canvases (C22.3, decision 50; stream W) --------------------------------------------------------------------
+
+	// The ray through `pointer` (scene pixels of a scene image of `sceneSize`, each >= 1, asserted) from the scene's primary
+	// camera (the one its game view renders: the first enabled Camera with Primary in canonical order, as render extraction
+	// picks it): the inverse of the projection render extraction gives that camera's view, at its simulated world transform
+	// (the TransformSystem's world matrix, never the interpolated render pose). With the Camera component's projection
+	// (RenderExtraction.h), n = (2 pointer.x / sceneSize.x - 1, 1 - 2 pointer.y / sceneSize.y) and the aspect
+	// sceneSize.x / sceneSize.y, a Perspective camera's ray starts at its position along its orientation times
+	// normalize(n.x aspect t, n.y t, -1), t = DetMath::Tan(VerticalFov / 2 in radians); an Orthographic camera's starts at
+	// its position plus its orientation times (n.x aspect OrthographicSize, n.y OrthographicSize, -NearClip), along its -Z.
+	// A sibling that renders the primary camera through another projection or pose follows it here: on the merged tree,
+	// the later lander of M21 and M22 makes the ray the inverse of M21's PixelPerfectCamera projection (orthographic, half
+	// height ReferenceHeight / (2 PixelsPerUnit)) at its pixel-snapped position, with a case (decision 50, risk 11).
+	// nullopt without a primary camera. Pure.
+	[[nodiscard]] std::optional<UiPointerRay> ComputeUiPointerRay(const Scene& scene, glm::vec2 pointer, glm::uvec2 sceneSize);
+
+	// Where the pointer is in a canvas's pixels (MapUiPointerToCanvas).
+	struct UiCanvasPointer
+	{
+		glm::vec2 Point = glm::vec2(0.0f); // canvas pixels (scene pixels for a Screen canvas)
+		float Distance = 0.0f;             // World: the ray parameter (world units along the unit direction); Screen: 0
+
+		bool operator==(const UiCanvasPointer&) const = default;
+	};
+
+	// The pointer in `canvas`'s pixels: a Screen canvas's is `point` itself (scene pixels); a World canvas's is the point
+	// where `ray` meets the canvas's plane (UiCanvasLayout::World's z = 0 plane, from either side), mapped through the
+	// inverse of World, with its ray parameter: nullopt without a ray, for a ray parallel to the plane, or one that meets it
+	// behind its origin (a parameter below 0). Pure.
+	[[nodiscard]] std::optional<UiCanvasPointer> MapUiPointerToCanvas(const UiCanvasLayout& canvas, glm::vec2 point,
+		const std::optional<UiPointerRay>& ray);
+
+	// The topmost pointer target under the pointer across every canvas of a table (HitTestUiPointer).
+	struct UiPointerHit
+	{
+		UiHit Hit{};
+		UUID Canvas{};                           // the hit target's canvas; null without a target
+		glm::vec2 CanvasPoint = glm::vec2(0.0f); // the pointer in that canvas's pixels
+
+		bool operator==(const UiPointerHit&) const = default;
+	};
+
+	// The file comment's world-canvas rule: HitTestUi's target among the Screen canvases at `point` when there is one;
+	// otherwise, among the World canvases the pointer maps onto (MapUiPointerToCanvas), the target of the one with the
+	// smallest Distance that has a target at its point (the later in draw order on a tie), hit-tested by HitTestUi's rule
+	// within that canvas. Pure.
+	[[nodiscard]] UiPointerHit HitTestUiPointer(const Scene& scene, const UiLayoutTable& table, glm::vec2 point,
+		const std::optional<UiPointerRay>& ray);
+
 	// Directional navigation (decision 23) from `from` toward `direction`: among the focusable elements of `table` other
-	// than `from`, with the centre c of each rectangle and v = c - (the centre of from's rectangle), the along-distance a =
+	// than `from` in `from`'s render space (C22.3: every Screen canvas's elements, or its own World canvas's; the file
+	// comment), with the centre c of each rectangle and v = c - (the centre of from's rectangle), the along-distance a =
 	// the component of v in `direction` (v.y for Down, -v.y for Up, v.x for Right, -v.x for Left) and the across-distance
 	// b = |the other component of v|, those with a > 0, the one with the smallest a + 2 * b (the first in draw order on a
 	// tie). With `from` null, or not an element of `table`: the table's default focus (the file comment), or null when no

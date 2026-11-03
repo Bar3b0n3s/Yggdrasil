@@ -27,7 +27,8 @@ namespace Engine {
 	// --- Button and Toggle (stream B) ----------------------------------------------------------------------------------
 
 	// Activation (a pointer click, or Submit while focused): a Button raises Click at `element`; a Toggle flips IsOn and
-	// raises ValueChanged (Flag: the new IsOn); any other element, or a widget that is not interactable, does nothing.
+	// raises ValueChanged (Flag: the new IsOn); any other element (C22.3: a UiTextInput included, whose Submit UiSystem
+	// raises itself, so a click on one only focuses it), or a widget that is not interactable, does nothing.
 	void ActivateUiWidget(Scene& scene, UUID element, std::vector<UiEvent>& events);
 
 	// --- Slider (stream B) ---------------------------------------------------------------------------------------------

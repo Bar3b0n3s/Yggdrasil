@@ -808,6 +808,31 @@ return Test.GetStateHash()=="0000000000001234"
 				CHECK_FALSE(member->Description.empty());
 			}
 		}
+
+		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 52; stream I, which registers the three functions and adds them
+		// to the member list above): a recording suite drives a slider, a scroll list and a text field as input.record does.
+		TEST_CASE("TestBindings: InjectMouseMove, InjectScroll and InjectText queue their events for the next unapplied tick" * doctest::skip(true))
+		{
+			TestServices services;
+			Test::ScriptTestFixture fixture({ .Mode = RunModes::Editor, .TestMode = true, .TestHost = &services });
+			REQUIRE(fixture.Start());
+			CheckTrue(fixture, R"(
+Test.InjectMouseMove(vector.create(12.5, 40, 0))
+Test.InjectScroll(vector.create(0, -2, 0))
+Test.InjectText("h\u{E9}")
+for _, call in {
+	function() Test.InjectMouseMove(vector.create(0/0, 0, 0)) end,
+	function() Test.InjectScroll(vector.create(math.huge, 0, 0)) end,
+	function() Test.InjectText("") end,
+	function() Test.InjectText("\255") end,
+} do assert(not pcall(call)) end
+return true
+)");
+			REQUIRE(services.Inputs.size() == 3);
+			CHECK(services.Inputs[0] == Json{ { "type", "mouseMove" }, { "position", { 12.5f, 40.0f } } });
+			CHECK(services.Inputs[1] == Json{ { "type", "scroll" }, { "delta", { 0.0f, -2.0f } } });
+			CHECK(services.Inputs[2] == Json{ { "type", "text" }, { "text", "h\xC3\xA9" } });
+		}
 	}
 
 }

@@ -19,9 +19,9 @@ namespace Engine {
 	}
 
 	UiDrawList::UiDrawList(std::pmr::memory_resource* resource)
-		: Items(Utils::CheckUiMemoryResource(resource)), Annotations(Items.get_allocator().resource())
+		: Items(Utils::CheckUiMemoryResource(resource)), Annotations(Items.get_allocator().resource()), WorldCanvases(Items.get_allocator().resource())
 	{
-		// Items is declared first, so Annotations takes its checked resource.
+		// Items is declared first, so Annotations and WorldCanvases take its checked resource.
 	}
 
 }

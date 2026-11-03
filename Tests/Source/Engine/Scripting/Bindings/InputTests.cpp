@@ -229,6 +229,44 @@ return Script.Define("ActionProbe", T))"));
 			CHECK(errors.back().Message.find("Input.IsActionDown: ") != std::string::npos);
 			CHECK(errors.back().Message.find("Jump") != std::string::npos);
 		}
+
+		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 46; stream T, which registers Input.GetText over
+		// IScriptHost::GetText and overrides that in the play session's host): the text latch read by scripts, the tick's
+		// characters in the step and the frame's in OnUpdate.
+		TEST_CASE("InputBindings: GetText reads the tick's committed characters in the step and the frame's in OnUpdate" * doctest::skip(true))
+		{
+			Test::ScriptTestFixture compiler;
+			const AssetHandle script(471);
+			REQUIRE(compiler.AddScript(script, "Assets/Scripts/TextProbe.luau", R"(local T = {}
+function T:OnCreate() self.Log = {} end
+function T:OnFixedUpdate() table.insert(self.Log, "fixed " .. Time.GetTick() .. " [" .. Input.GetText() .. "]") end
+function T:OnUpdate() table.insert(self.Log, "frame [" .. Input.GetText() .. "]") end
+return Script.Define("TextProbe", T))"));
+			ScriptSlot component;
+			component.Script.SetHandle(script);
+			const UUID probe = compiler.GetScene().CreateEntity("Probe").GetUUID();
+			compiler.GetScene().FindEntityByID(probe).AddComponent<ScriptComponent>(ScriptComponent{ { component } });
+			const auto document = SceneSerializer::ToJson(compiler.GetScene());
+			REQUIRE(document.has_value());
+			PlaySessionSpecification specification;
+			specification.Registry = &compiler.GetTypes();
+			specification.Assets = &compiler.GetAssetManager();
+			specification.ScriptSchemas = compiler.GetSchemaSnapshot();
+			specification.Project.Scripting.PauseOnError = false;
+			specification.Serial = 1;
+			auto session = PlaySession::Create(specification, *document);
+			REQUIRE_MESSAGE(session.has_value(), (session ? "" : session.error().ToString()));
+			PlayInput& input = (*session)->GetInput();
+			REQUIRE(input.Queue(0, { .Type = PlayInputEventType::Text, .Text = "ab" }));
+			REQUIRE(input.Queue(2, { .Type = PlayInputEventType::Text, .Text = "c" }));
+			for (int tick = 0; tick < 3; ++tick)
+				(*session)->Tick();
+			const auto path = VfsPath::Parse("project://Assets/Tests/TextProbe.luau");
+			REQUIRE(path.has_value());
+			const auto log = (*session)->GetScripts()->Evaluate("return table.concat(self.Log, '|')", *path, probe);
+			REQUIRE_MESSAGE(log.has_value(), (log ? "" : log.error().ToString()));
+			CHECK(log->Value.Get() == Json("fixed 0 [ab]|frame [ab]|fixed 1 []|frame []|fixed 2 [c]|frame [c]"));
+		}
 	}
 
 }

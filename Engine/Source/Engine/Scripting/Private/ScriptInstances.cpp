@@ -432,6 +432,11 @@ namespace Engine {
 					Lua::Push(call, glm::vec3(event.Vector, 0.0f));
 					++arguments;
 					break;
+				case UiEventKind::TextChanged:
+				case UiEventKind::Submit:
+					// C22.3 (Docs/Decisions/0033-m22-contract.md decision 47): nothing raises these before stream T, which
+					// registers OnUiTextChanged and OnUiSubmit and passes the input's Text here as the third argument.
+					break;
 			}
 			const auto result = Lua::ProtectedCall(call, arguments, 1);
 			if (!result)

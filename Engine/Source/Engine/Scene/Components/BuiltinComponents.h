@@ -35,6 +35,7 @@
 #include "Engine/Scene/Components/UiScrollViewComponent.h"
 #include "Engine/Scene/Components/UiSliderComponent.h"
 #include "Engine/Scene/Components/UiTextComponent.h"
+#include "Engine/Scene/Components/UiTextInputComponent.h"
 #include "Engine/Scene/Components/UiToggleComponent.h"
 
 namespace Engine {
@@ -60,9 +61,10 @@ namespace Engine {
 		// Scripting (Registration/ScriptingRegistration.cpp)
 		ScriptComponent,
 		// Ui (Registration/UiRegistration.cpp; M22, Docs/Decisions/0033-m22-contract.md decision 2: phase 2's categories go
-		// after Scripting in landing order, ADR 0028's phase-2 ledger; C22.2's widgets appended, decision 21)
+		// after Scripting in landing order, ADR 0028's phase-2 ledger; C22.2's widgets appended, decision 21; C22.3's text
+		// input appended, decision 45)
 		UiCanvasComponent, UiRectComponent, UiImageComponent, UiTextComponent, UiLayoutComponent, UiLayoutElementComponent,
-		UiButtonComponent, UiToggleComponent, UiSliderComponent, UiScrollViewComponent>;
+		UiButtonComponent, UiToggleComponent, UiSliderComponent, UiScrollViewComponent, UiTextInputComponent>;
 
 	// The category registration functions, each registering its enums, structs and components in BuiltinComponents order
 	// through RegisterComponent<T> (Scene/ComponentRegistration.h). Each is called exactly once per registry, in this

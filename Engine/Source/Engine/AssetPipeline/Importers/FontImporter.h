@@ -1,6 +1,8 @@
 #pragma once
 
+#include "Engine/Asset/AssetType.h"
 #include "Engine/Asset/FontData.h"
+#include "Engine/Asset/TypedAssetHandle.h"
 #include "Engine/AssetPipeline/IAssetImporter.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
@@ -41,6 +43,12 @@ namespace Engine {
 		float Spread = 8.0f;     // SDF spread in atlas pixels (§7.4: spread 8); 1 to 32
 		// Codepoints baked besides ASCII and Latin-1 (M22), within the limits above, located under /Ranges.
 		std::vector<FontCharacterRange> Ranges{};
+		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 42; registered by stream F after Ranges, with the importer's
+		// version 5): the fonts a text in this font falls back to, in order, for a codepoint this font lacks (the Ui pass's
+		// chain, BuildUiFontChain): at most MaxFontFallbacks, none null, none the font itself, located Validation errors under
+		// /Fallbacks otherwise. Cooked into FontData::Fallbacks and recorded as the import's dependencies (Import.Dependencies),
+		// so an export that prunes keeps them; a fallback need not exist when the font is imported.
+		std::vector<TypedAssetHandle<AssetType::Font>> Fallbacks{};
 	};
 
 	// What one FontImporter::Bake measured and did: the bound on its work, which the tests read.
@@ -49,6 +57,7 @@ namespace Engine {
 		uint32_t Glyphs = 0;           // the character set's codepoints the font has a glyph for
 		uint32_t AtlasSize = 0;        // the atlas side their boxes pack into; 0 when they do not fit (or the bake failed first)
 		uint32_t RasterizedGlyphs = 0; // the distance fields computed: none unless the boxes fit
+		uint32_t ShapingGlyphs = 0;    // C22.3 (stream S): of Glyphs, those only shaping reaches (no baked codepoint maps to them)
 	};
 
 	// TTF and OTF (Architecture §7.4): an R8 signed-distance-field atlas of ASCII and Latin-1 (U+0020-U+007E and
@@ -69,7 +78,18 @@ namespace Engine {
 	// decision 6, R-UI-TEXT's character ranges): the Ranges setting, so cached atlases are rebuilt once; a font without
 	// Ranges bakes version 3's FontData byte for byte. A range's glyphs are not kerned: the kerning reader holds a table of
 	// every ordered pair of the glyphs it kerns, which ASCII and Latin-1 keep small (191 glyphs at most) where Ranges reach
-	// 65,536 codepoints.
+	// 65,536 codepoints. Version 5 (M22, C22.3, decisions 42 and 44; streams S and F): FontData format 2. The bake adds the
+	// glyphs shaping can produce from the baked codepoints with the shaper's default features (HarfBuzz's
+	// hb_ot_shape_glyphs_closure, one buffer per script of the baked codepoints, no user features: an Arabic letter's
+	// contextual forms, ligatures), counted in Glyphs and ShapingGlyphs; packs the codepoint glyphs first exactly as version
+	// 4 does, then those glyphs, by glyph index, in the same packer, growing the square only when they do not fit; records
+	// every baked glyph's index (IndexedGlyphs) and the font's units per em; embeds the font subset to the baked glyphs by
+	// HarfBuzz's subsetter, glyph ids retained (ShapingSource); and cooks the settings' Fallbacks, which it records as the
+	// import's dependencies. So a font whose shaping adds no glyph keeps version 4's atlas byte for byte, one whose added
+	// glyphs fit keeps every codepoint glyph where version 4 put it, and every codepoint glyph keeps version 4's field.
+	// Inter, the built-in default font, gains the glyphs its default features reach from ASCII and Latin-1 (contextual
+	// alternates, and the fraction forms of frac, numr and dnom, among them), so its atlas changes deliberately
+	// (Docs/Decisions/0033-m22-contract.md decision 44, the lead's decision 2 of the review of C22.3).
 	class FontImporter final : public IAssetImporter
 	{
 	public:

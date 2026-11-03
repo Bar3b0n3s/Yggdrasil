@@ -16,17 +16,25 @@
 #include <bit>
 #include <cmath>
 #include <cstring>
+#include <format>
 #include <vector>
 
 namespace Engine {
 
 	namespace {
 
-		// The XXH64 of the atlas pixels of version 2 (imstb_truetype.h) for Inter at 48 pixels per em with spread 8: the
-		// committed TrueType font and the pinned CFF fixture (Docs/Decisions/0030-m19-contract.md decision 23). Version 3
-		// (stb_truetype.h) keeps both.
-		constexpr uint64_t InterTrueTypeAtlasHash = 0x66f83cc4b7cca3c8ull;
-		constexpr uint64_t InterCffAtlasHash = 0x1c5d3945b145bec0ull;
+		// HashGlyphFields of version 2's atlases (imstb_truetype.h) for Inter at 48 pixels per em with spread 8: the committed
+		// TrueType font and the pinned CFF fixture (Docs/Decisions/0030-m19-contract.md decision 23). Version 3
+		// (stb_truetype.h) keeps both. Recorded by the review of C22.3 from atlases whose whole pixels still hashed as
+		// version 2's did (0x66f83cc4b7cca3c8 and 0x1c5d3945b145bec0, checked in the same run), so they hold version 2's
+		// fields wherever a later version packs them.
+		constexpr uint64_t InterTrueTypeFieldsHash = 0xd380590e9d9eedd0ull;
+		constexpr uint64_t InterCffFieldsHash = 0xc95eb57eae625ca4ull;
+		// The XXH64 of Inter's whole atlas at version 5 (Docs/Decisions/0033-m22-contract.md decision 44 and the lead's
+		// decision 2 of the review of C22.3): it adds the glyphs Inter's default features reach, so the atlas changes
+		// deliberately. Stream S, which implements version 5, records the value its Debug run bakes here, and its Release
+		// run must bake the same.
+		constexpr uint64_t InterTrueTypeShapingAtlasHash = 0;
 
 		// The committed Inter-Regular.ttf (Resources/Fonts, SIL OFL).
 		Buffer ReadInter()
@@ -161,13 +169,16 @@ namespace Engine {
 			return font;
 		}
 
+		// The handle of every font the cases import (ImportFontBytes).
+		constexpr AssetHandle ImportedFontHandle{ 0xf0e7000000000001ull };
+
 		// Imports the bytes `font` as project://Assets/Fonts/<name> with `settings` (a JSON object, or null for the
 		// defaults), without writing them to the project.
 		Result<ImportResult> ImportFontBytes(Test::AssetTestFixture& fixture, std::string_view name, std::span<const std::byte> font, const Json& settings)
 		{
 			const std::string relative = std::string("Assets/Fonts/") + std::string(name);
 			AssetMetadata metadata;
-			metadata.Handle = AssetHandle(0xf0e7000000000001ull);
+			metadata.Handle = ImportedFontHandle;
 			metadata.Type = AssetType::Font;
 			metadata.Importer = std::string(FontImporter::Id);
 			metadata.ImporterVersion = FontImporter::Version;
@@ -209,6 +220,31 @@ namespace Engine {
 			Result<AssetRef<FontData>> font = LoadCookedFont(result.Artifacts.front().Cooked);
 			REQUIRE_MESSAGE(font.has_value(), font.error().ToString());
 			return std::move(*font);
+		}
+
+		// The digest of a font's codepoint glyphs' distance fields, wherever its atlas packs them: in codepoint order
+		// (FontData::Glyphs), each glyph's codepoint, its field's width and height in atlas pixels, then the field's rows.
+		uint64_t HashGlyphFields(const FontData& font)
+		{
+			const auto toPixel = [](float coordinate, uint32_t size)
+			{
+				return static_cast<uint32_t>(std::lround(coordinate * static_cast<float>(size)));
+			};
+			const std::span<const std::byte> pixels(font.AtlasPixels);
+			XXH64Hasher hasher;
+			for (const FontGlyph& glyph : font.Glyphs)
+			{
+				const uint32_t left = toPixel(glyph.AtlasMin.x, font.AtlasWidth);
+				const uint32_t top = toPixel(glyph.AtlasMin.y, font.AtlasHeight);
+				const uint32_t right = toPixel(glyph.AtlasMax.x, font.AtlasWidth);
+				const uint32_t bottom = toPixel(glyph.AtlasMax.y, font.AtlasHeight);
+				hasher.UpdateU64(glyph.Codepoint);
+				hasher.UpdateU64(right - left);
+				hasher.UpdateU64(bottom - top);
+				for (uint32_t row = top; row < bottom; ++row)
+					hasher.Update(pixels.subspan(static_cast<size_t>(row) * font.AtlasWidth + left, right - left));
+			}
+			return hasher.Digest();
 		}
 
 		// The kerning adjustment of (first, second), or 0 when the font lists none.
@@ -1117,12 +1153,14 @@ namespace Engine {
 		}
 
 		// Docs/Decisions/0030-m19-contract.md decision 23 (A-STBTT): version 3 rasterizes through stb_truetype.h of the
-		// vendored stb (Vendor/stb, commit 2c980bb) instead of Dear ImGui's imstb_truetype.h, and keeps the atlases of
-		// version 2: the Inter TrueType and CFF atlases at the default settings hash as they did, so the Text golden, drawn in
-		// the Default font (Inter's TrueType outlines at these settings), is unchanged. Every later version keeps them for a
-		// font without Ranges, as the Default font is (version 4: M22, Docs/Decisions/0033-m22-contract.md decision 6), so
-		// the case checks no version number; "FontImporter: a font's Ranges add their codepoints to ASCII and Latin-1" does.
-		TEST_CASE("FontImporter: version 3 rasterizes through the vendored stb_truetype.h with the atlases of version 2")
+		// vendored stb (Vendor/stb, commit 2c980bb) instead of Dear ImGui's imstb_truetype.h, and keeps version 2's distance
+		// fields: every codepoint glyph of the Inter TrueType and CFF fonts at the default settings has the field it had,
+		// wherever the atlas packs it (HashGlyphFields). Every later version keeps them, so the case checks no version
+		// number: version 4 (M22, Docs/Decisions/0033-m22-contract.md decision 6) kept a font without Ranges byte for byte,
+		// and version 5 (C22.3, decision 44) adds the glyphs shaping reaches to the atlas, which "FontImporter: version 5
+		// bakes the glyphs shaping reaches, their indices and the font's shaping subset" checks. This case compared the whole
+		// atlases until the review of C22.3, which recorded their fields instead.
+		TEST_CASE("FontImporter: version 3 rasterizes through the vendored stb_truetype.h with the glyph fields of version 2")
 		{
 			Test::AssetTestFixture fixture;
 			Json settings = Json::object();
@@ -1130,10 +1168,100 @@ namespace Engine {
 			settings["Spread"] = 8.0;
 			Result<ImportResult> truetype = ImportInter(fixture);
 			REQUIRE_MESSAGE(truetype.has_value(), truetype.error().ToString());
-			CHECK(XXH64(LoadFont(*truetype)->AtlasPixels) == InterTrueTypeAtlasHash);
+			CHECK(HashGlyphFields(*LoadFont(*truetype)) == InterTrueTypeFieldsHash);
 			Result<ImportResult> cff = ImportFont(fixture, "Inter-Regular.otf", ReadFontFixture("Inter-Regular.otf"), settings);
 			REQUIRE_MESSAGE(cff.has_value(), cff.error().ToString());
-			CHECK(XXH64(LoadFont(*cff)->AtlasPixels) == InterCffAtlasHash);
+			CHECK(HashGlyphFields(*LoadFont(*cff)) == InterCffFieldsHash);
+		}
+
+		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 44; stream S): version 5's shaping data. The Noto Sans Arabic
+		// fixture is stream F's (pinned in decision 42), so the case runs once both streams have landed.
+		TEST_CASE("FontImporter: version 5 bakes the glyphs shaping reaches, their indices and the font's shaping subset" * doctest::skip(true))
+		{
+			Test::AssetTestFixture fixture;
+			// The Arabic letters Beh, Alef, Beh and Teh Marbuta (U+0628, U+0627, U+062A, U+0629) and the space.
+			Json settings = Json::object();
+			settings["Ranges"] = Json::array({ Json{ { "First", 0x0627 }, { "Last", 0x062A } } });
+			const Result<ImportResult> imported = ImportFont(fixture, "NotoSansArabic-Regular.ttf", ReadFontFixture("NotoSansArabic-Regular.ttf"), settings);
+			REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+			const AssetRef<FontData> font = LoadFont(*imported);
+			CHECK(FontImporter::Version == 5u);
+			CHECK(font->UnitsPerEm == 1000u);
+			CHECK_FALSE(font->ShapingSource.empty());
+			// Every codepoint glyph is indexed with its own glyph index, and shaping adds Beh's initial and medial forms, which
+			// no codepoint maps to.
+			REQUIRE(FindGlyph(*font, 0x0628) != nullptr);
+			const FontGlyph* beh = FindGlyphByIndex(*font, FindGlyph(*font, 0x0628)->GlyphIndex);
+			REQUIRE(beh != nullptr);
+			CHECK(beh->Codepoint == 0x0628u);
+			CHECK(beh->AtlasMin == FindGlyph(*font, 0x0628)->AtlasMin);
+			const auto shapingOnly = std::ranges::count_if(font->IndexedGlyphs, [](const FontGlyph& glyph)
+			{
+				return glyph.Codepoint == 0;
+			});
+			CHECK(shapingOnly >= 2);
+			CHECK(std::ranges::is_sorted(font->IndexedGlyphs, {}, &FontGlyph::GlyphIndex));
+			// The subset keeps what HarfBuzz shapes with and is far smaller than the font.
+			CHECK(font->ShapingSource.size() < ReadFontFixture("NotoSansArabic-Regular.ttf").size() / 2);
+
+			// The bake is deterministic. Inter at the default settings, the built-in default font, gains the glyphs its
+			// default features reach from ASCII and Latin-1 (contextual alternates among them), so its atlas changes
+			// deliberately (the lead's decision 2 of the review of C22.3: the Text, Ui and UiWidgets goldens that move are
+			// regenerated at W22.3's integration); its codepoint glyphs keep their fields.
+			const Result<ImportResult> again = ImportFont(fixture, "NotoSansArabic-Regular.ttf", ReadFontFixture("NotoSansArabic-Regular.ttf"), settings);
+			REQUIRE(again.has_value());
+			CHECK(again->Artifacts.front().Cooked == imported->Artifacts.front().Cooked);
+			const Result<ImportResult> inter = ImportInter(fixture);
+			REQUIRE(inter.has_value());
+			const AssetRef<FontData> interFont = LoadFont(*inter);
+			CHECK(std::ranges::count_if(interFont->IndexedGlyphs, [](const FontGlyph& glyph)
+			{
+				return glyph.Codepoint == 0;
+			}) > 0);
+			CHECK(HashGlyphFields(*interFont) == InterTrueTypeFieldsHash);
+			CHECK(XXH64(interFont->AtlasPixels) == InterTrueTypeShapingAtlasHash);
+		}
+
+		// C22.3 (decision 42; stream F, after stream S: the cooked Fallbacks are read only from FontData format 2, which
+		// version 5 writes, decision 58).
+		TEST_CASE("FontImporter: a font's Fallbacks are cooked in order and recorded as its dependencies, and invalid ones are refused under /Fallbacks"
+			* doctest::skip(true))
+		{
+			Test::AssetTestFixture fixture;
+			const AssetHandle arabic(0xA2AB);
+			const AssetHandle japanese(0x7A9A);
+			Json settings = Json::object();
+			settings["Fallbacks"] = Json::array({ std::format("{}", arabic), std::format("{}", japanese) });
+			const Result<ImportResult> imported = ImportFont(fixture, "Inter-Regular.ttf", ReadInter(), settings);
+			REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+			CHECK(LoadFont(*imported)->Fallbacks == std::vector<AssetHandle>{ arabic, japanese });
+			// Dependencies are sorted and unique (ImportResult's rule); a fallback need not exist yet.
+			CHECK(imported->Dependencies == std::vector<AssetHandle>{ arabic, japanese });
+
+			// Nine fallbacks, a null one and the font itself are Validation errors located under /Fallbacks.
+			Json nine = Json::object();
+			nine["Fallbacks"] = Json::array();
+			for (uint64_t index = 1; index <= 9; ++index)
+				nine["Fallbacks"].push_back(std::format("{:016x}", index));
+			const Result<ImportResult> tooMany = ImportFont(fixture, "Inter-Regular.ttf", ReadInter(), nine);
+			REQUIRE_FALSE(tooMany.has_value());
+			CHECK(tooMany.error().GetCode() == ErrorCode::Validation);
+			CHECK(tooMany.error().ToString().contains("/Fallbacks"));
+			Json null = Json::object();
+			null["Fallbacks"] = Json::array({ nullptr });
+			const Result<ImportResult> withNull = ImportFont(fixture, "Inter-Regular.ttf", ReadInter(), null);
+			REQUIRE_FALSE(withNull.has_value());
+			CHECK(withNull.error().GetCode() == ErrorCode::Validation);
+			REQUIRE_FALSE(withNull.error().GetIssues().empty());
+			CHECK(withNull.error().GetIssues().front().JsonPointer == "/Fallbacks/0");
+			// The font itself, after a valid fallback: located at its own index (the review of C22.3).
+			Json self = Json::object();
+			self["Fallbacks"] = Json::array({ std::format("{}", arabic), std::format("{}", ImportedFontHandle) });
+			const Result<ImportResult> withSelf = ImportFont(fixture, "Inter-Regular.ttf", ReadInter(), self);
+			REQUIRE_FALSE(withSelf.has_value());
+			CHECK(withSelf.error().GetCode() == ErrorCode::Validation);
+			REQUIRE_FALSE(withSelf.error().GetIssues().empty());
+			CHECK(withSelf.error().GetIssues().front().JsonPointer == "/Fallbacks/1");
 		}
 	}
 

@@ -12,6 +12,7 @@
 #include "Engine/Scene/Components/UiScrollViewComponent.h"
 #include "Engine/Scene/Components/UiSliderComponent.h"
 #include "Engine/Scene/Components/UiTextComponent.h"
+#include "Engine/Scene/Components/UiTextInputComponent.h"
 #include "Engine/Scene/Components/UiToggleComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
@@ -163,6 +164,33 @@ namespace Engine {
 			CHECK(past.error().GetCode() == ErrorCode::InvalidArgument);
 			REQUIRE_FALSE(past.error().GetIssues().empty());
 			CHECK(past.error().GetIssues()[0].JsonPointer == "/index");
+		}
+
+		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 53; stream T): the TextInput kind, appended to UiWidgetKind: an
+		// element with a dark image and a UiTextInput whose TextElement and Placeholder are its two text children, the text as
+		// the placeholder's.
+		TEST_CASE("UiAuthoringMethods: ui.createWidget builds a text input with its text and placeholder elements" * doctest::skip(true))
+		{
+			Test::AutomationFixture setup("UiCreateTextInput");
+			const Json created = CreateWidget(setup, Json{ { "kind", "TextInput" }, { "name", "Name" }, { "text", "Your name" } });
+			// A new canvas, the input, its Text and its Placeholder, in creation order.
+			REQUIRE(created["entities"].size() == 4);
+			const Entity input = FindCreated(setup, created["entity"]["id"]);
+			REQUIRE(input.HasComponent<UiTextInputComponent>());
+			REQUIRE(input.HasComponent<UiImageComponent>());
+			const UiTextInputComponent& field = input.GetComponent<UiTextInputComponent>();
+			CHECK(field.Text.empty());
+			const Entity text = setup.GetEditor().GetScene().FindEntityByID(field.TextElement);
+			const Entity placeholder = setup.GetEditor().GetScene().FindEntityByID(field.Placeholder);
+			REQUIRE(text.IsValid());
+			REQUIRE(placeholder.IsValid());
+			CHECK(text.GetParent() == input);
+			CHECK(placeholder.GetParent() == input);
+			CHECK_FALSE(text.GetComponent<UiTextComponent>().Wrap);
+			CHECK(placeholder.GetComponent<UiTextComponent>().Text == "Your name");
+			// One undo step removes all four.
+			REQUIRE(setup.Call("edit.undo", Json::object()).has_value());
+			CHECK_FALSE(setup.GetEditor().GetScene().FindEntityByID(input.GetUUID()).IsValid());
 		}
 	}
 

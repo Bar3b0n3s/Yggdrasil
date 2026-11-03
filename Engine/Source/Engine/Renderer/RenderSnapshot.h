@@ -413,9 +413,9 @@ namespace Engine {
 		RenderOutputSettings Output{};
 		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 7): the view's UI (UiDrawList.h): every effectively enabled
 		// canvas laid out at the scene resolution of Output (the view's size by default), its visible elements' images and
-		// texts in draw order, and a capture's UI annotations; empty without a canvas and in the editor's scene view
-		// (ExtractRenderSnapshot). The Ui pass draws it after game Text in the SceneOverlay stage; the data views (AO,
-		// ShadowCascades, Overdraw) show none, as they show no Text.
+		// texts in draw order, and a capture's UI annotations; empty without a canvas, and in the editor's scene view, which
+		// draws no Screen canvas, but for C22.3's World canvases (ExtractRenderSnapshot). The Ui pass draws it after game
+		// Text in the SceneOverlay stage; the data views (AO, ShadowCascades, Overdraw) show none, as they show no Text.
 		UiDrawList Ui{};
 	};
 

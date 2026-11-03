@@ -59,6 +59,11 @@ namespace Engine {
 		bool Hovered = false;
 		bool Pressed = false;
 		std::string Widget{};
+		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 53; registered by stream W after Widget): true for a World canvas
+		// and its elements, whose Rect and Clip are in the canvas's own pixels (a World canvas's Rect is (0, 0, WorldWidth,
+		// WorldHeight)); false for a Screen canvas's, in scene pixels. Stream T: a UiTextInput's element reports its input's
+		// Text as Text and "TextInput" as Widget, and the outline's short form UiTextInput("<text>").
+		bool WorldCanvas = false;
 	};
 
 	// ui.tree {canvas?, depth?, format?, width?, height?, target?}: the UI of the target scene laid out in scene pixels: every

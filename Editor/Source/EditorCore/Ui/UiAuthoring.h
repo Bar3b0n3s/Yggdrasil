@@ -99,6 +99,10 @@ namespace Engine {
 	// The element the preview selects at `point` (scene pixels): the topmost element of `table` (the last in draw order)
 	// whose rectangle holds the point (Min <= p < Max) and, when Clipped, whose clip does, whether it draws or not; Hidden
 	// elements are left out. Null when none. Pure.
+	// C22.3 (the review of C22.3; stream W): the elements of a World canvas are left out too, since their rectangles are in
+	// that canvas's own pixels, not the frame's; the Editor's authoring overlay likewise outlines, and gives the rect tool's
+	// handles to, Screen canvases' elements only. A World canvas is placed by its entity's Transform (the scene view's
+	// gizmo), and its elements are edited in the inspector or with entity.update, ui.tree reporting their rectangles.
 	[[nodiscard]] UUID PickUiElement(const UiLayoutTable& table, glm::vec2 point);
 
 	// The game frame the UI preview shows (decision 33): the Game view's fixed resolution (`gameResolution`, viewport.setOptions'

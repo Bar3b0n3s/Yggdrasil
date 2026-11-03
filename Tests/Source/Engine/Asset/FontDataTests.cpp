@@ -7,6 +7,8 @@
 
 #include <limits>
 #include <optional>
+#include <utility>
+#include <vector>
 
 namespace Engine {
 
@@ -59,6 +61,47 @@ namespace Engine {
 			Result<AssetRef<FontData>> loaded = LoadCookedFont(CookFont(font, 1));
 			REQUIRE(loaded.has_value());
 			CHECK(SerializeFontPayload(**loaded) == payload);
+		}
+
+		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 44; stream S): format 2's members round-trip, and an indexed glyph
+		// is found by its glyph index.
+		TEST_CASE("FontData: a format 2 payload round-trips glyph indices, indexed glyphs, the shaping source and fallbacks" * doctest::skip(true))
+		{
+			FontData font = MakeFont();
+			font.Glyphs[0].GlyphIndex = 36;
+			font.Glyphs[1].GlyphIndex = 57;
+			font.UnitsPerEm = 2048;
+			// A ligature glyph only shaping reaches (Codepoint 0) between the two codepoint glyphs by index.
+			font.IndexedGlyphs = { font.Glyphs[0],
+				FontGlyph{ .Codepoint = 0, .Advance = 1.1f, .PlaneMax = { 1.0f, 0.7f }, .AtlasMin = { 0.0f, 0.0f }, .AtlasMax = { 1.0f, 1.0f }, .GlyphIndex = 40 },
+				font.Glyphs[1] };
+			font.ShapingSource = Buffer(64, std::byte{ 7 });
+			font.Fallbacks = { AssetHandle(0xFA11), AssetHandle(0xBAC4) };
+			REQUIRE(ValidateFontData(font).has_value());
+			CHECK(FontData::FormatVersion == 2u);
+			Result<FontData> read = DeserializeFontPayload(SerializeFontPayload(font));
+			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
+			CHECK(read->Glyphs == font.Glyphs);
+			CHECK(read->IndexedGlyphs == font.IndexedGlyphs);
+			CHECK(read->UnitsPerEm == 2048u);
+			CHECK(read->ShapingSource == font.ShapingSource);
+			CHECK(read->Fallbacks == font.Fallbacks);
+
+			// FindGlyphByIndex binary-searches IndexedGlyphs; validation refuses an unsorted list, a codepoint glyph missing from
+			// it and more than MaxFontFallbacks fallbacks.
+			REQUIRE(FindGlyphByIndex(*read, 40) != nullptr);
+			CHECK(FindGlyphByIndex(*read, 40)->Advance == 1.1f);
+			CHECK(FindGlyphByIndex(*read, 57)->Codepoint == static_cast<uint32_t>('V'));
+			CHECK(FindGlyphByIndex(*read, 41) == nullptr);
+			FontData unsorted = font;
+			std::swap(unsorted.IndexedGlyphs[0], unsorted.IndexedGlyphs[2]);
+			CHECK(GetErrorCode(ValidateFontData(unsorted)) == ErrorCode::Validation);
+			FontData missing = font;
+			missing.IndexedGlyphs.erase(missing.IndexedGlyphs.begin());
+			CHECK(GetErrorCode(ValidateFontData(missing)) == ErrorCode::Validation);
+			FontData many = font;
+			many.Fallbacks.assign(MaxFontFallbacks + 1, AssetHandle(0x1));
+			CHECK(GetErrorCode(ValidateFontData(many)) == ErrorCode::Validation);
 		}
 
 		TEST_CASE("FontData: the payload layout is the documented one")

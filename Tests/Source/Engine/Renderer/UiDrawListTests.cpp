@@ -22,9 +22,12 @@ namespace Engine {
 			UiDrawList list(&arena);
 			CHECK(list.Items.get_allocator().resource() == &arena);
 			CHECK(list.Annotations.get_allocator().resource() == &arena);
+			CHECK(list.WorldCanvases.get_allocator().resource() == &arena); // C22.3
 			list.Items.push_back(UiDrawItem{ .Kind = UiDrawKind::Text });
 			list.Annotations.push_back(UiAnnotation{ .Outline = true });
+			list.WorldCanvases.push_back(UiWorldCanvas{ .Size = glm::uvec2(64, 32) });
 			CHECK(list.Items.size() == 1);
+			CHECK(list.Items[0].WorldCanvas == UiScreenCanvas);
 
 			// A copy allocates from the default resource; the default list does too.
 			const UiDrawList copy = list;
@@ -35,6 +38,7 @@ namespace Engine {
 			const RenderSnapshot snapshot(&arena);
 			CHECK(snapshot.Ui.Items.get_allocator().resource() == &arena);
 			CHECK(snapshot.Ui.Annotations.get_allocator().resource() == &arena);
+			CHECK(snapshot.Ui.WorldCanvases.get_allocator().resource() == &arena);
 		}
 
 		TEST_CASE("UiClipRect: a rectangle that holds no pixel is empty")

@@ -4,6 +4,7 @@
 #include "Engine/Core/Random.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/ComponentRegistration.h"
+#include "Engine/Scene/UiTextInput.h"
 
 #include <utility>
 
@@ -14,7 +15,10 @@
 // the four widgets (UiButton, UiToggle, UiSlider, UiScrollView) after UiLayoutElement; the fields it adds to UiCanvas (Font,
 // Theme and DefaultFocus after PixelSnap, with the UiTheme struct: stream C) and to UiImage and UiText (RaycastTarget:
 // stream A) are registered by their streams, and W22.2's integration regenerates FeatureTest's UI scenes with them. The
-// components are unlanded, so they stay at version 1.
+// components are unlanded, so they stay at version 1. C22.3 (decisions 45 and 49) appends UiTextInput, a fifth widget,
+// after UiScrollView; the fields it adds to UiCanvas (RenderMode, WorldWidth, WorldHeight and PixelsPerUnit after
+// DefaultFocus, with the UiCanvasRenderMode enum: stream W) are registered by their stream, with FeatureTest's
+// regeneration.
 
 namespace Engine {
 
@@ -265,6 +269,7 @@ namespace Engine {
 			.Excludes<UiToggleComponent>()
 			.Excludes<UiSliderComponent>()
 			.Excludes<UiScrollViewComponent>()
+			.Excludes<UiTextInputComponent>()
 			.Field("Interactable", &UiButtonComponent::Interactable, InteractableDescription)
 			.Field("Focusable", &UiButtonComponent::Focusable, FocusableDescription);
 
@@ -276,6 +281,7 @@ namespace Engine {
 			.Excludes<UiButtonComponent>()
 			.Excludes<UiSliderComponent>()
 			.Excludes<UiScrollViewComponent>()
+			.Excludes<UiTextInputComponent>()
 			.Field("Interactable", &UiToggleComponent::Interactable, InteractableDescription)
 			.Field("Focusable", &UiToggleComponent::Focusable, FocusableDescription)
 			.Field("IsOn", &UiToggleComponent::IsOn, "Whether the toggle is on.")
@@ -290,6 +296,7 @@ namespace Engine {
 			.Excludes<UiButtonComponent>()
 			.Excludes<UiToggleComponent>()
 			.Excludes<UiScrollViewComponent>()
+			.Excludes<UiTextInputComponent>()
 			.Field("Interactable", &UiSliderComponent::Interactable, InteractableDescription)
 			.Field("Focusable", &UiSliderComponent::Focusable, FocusableDescription)
 			.Field("Value", &UiSliderComponent::Value, "The value, read clamped to Min and Max (and rounded with WholeNumbers).",
@@ -315,6 +322,7 @@ namespace Engine {
 			.Excludes<UiButtonComponent>()
 			.Excludes<UiToggleComponent>()
 			.Excludes<UiSliderComponent>()
+			.Excludes<UiTextInputComponent>()
 			.Field("Interactable", &UiScrollViewComponent::Interactable, InteractableDescription)
 			.Field("Focusable", &UiScrollViewComponent::Focusable, FocusableDescription)
 			.Field("Content", &UiScrollViewComponent::Content, "The UI element below the scroll view that scrolls; null scrolls nothing.")
@@ -325,6 +333,30 @@ namespace Engine {
 				{ .Min = 0.0, .Max = Utils::MaxUiLength, .Unit = "units" })
 			.Field("ScrollStep", &UiScrollViewComponent::ScrollStep, "Canvas units per wheel step and per navigation press.",
 				{ .Min = 0.0, .Max = Utils::MaxUiLength, .Unit = "units" });
+
+		// C22.3 (decision 45): the text input, a fifth widget (it and the other four exclude each other, declared by both).
+		RegisterComponent<UiTextInputComponent>(registry, "UiTextInput",
+			"A UI text field: while focused, typed characters insert at its caret and the editing keys edit it, raising OnUiTextChanged; Enter raises OnUiSubmit.")
+			.Category("Ui")
+			.Version(1)
+			.Requires<UiRectComponent>()
+			.Excludes<UiButtonComponent>()
+			.Excludes<UiToggleComponent>()
+			.Excludes<UiSliderComponent>()
+			.Excludes<UiScrollViewComponent>()
+			.Field("Interactable", &UiTextInputComponent::Interactable, InteractableDescription)
+			.Field("Focusable", &UiTextInputComponent::Focusable, FocusableDescription)
+			.Field("Text", &UiTextInputComponent::Text,
+				"The field's UTF-8 text: typing inserts at the caret; a script's write raises no OnUiTextChanged.")
+			.Field("MaxLength", &UiTextInputComponent::MaxLength, "The most codepoints typing reaches; characters typed past it are dropped.",
+				{ .Min = 1.0, .Max = static_cast<double>(MaxUiTextInputLength) })
+			.Field("Caret", &UiTextInputComponent::Caret,
+				"The caret, in codepoints from the start of Text, read clamped to Text's length; typing and the editing keys move it.",
+				{ .Min = 0.0 })
+			.Field("TextElement", &UiTextInputComponent::TextElement,
+				"A UI element below the input whose UiText shows the input's Text, with the caret while focused; null shows nothing.")
+			.Field("Placeholder", &UiTextInputComponent::Placeholder,
+				"A UI element below the input shown only while its Text is empty (a hint); null for none.");
 	}
 
 }

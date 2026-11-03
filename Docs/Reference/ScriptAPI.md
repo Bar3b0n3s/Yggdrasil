@@ -2156,7 +2156,7 @@ All modes; Runtime|Test; pure/read.
 
 ### Entity.GetComponent
 
-`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "UiCanvas") -> UiCanvas?) & ((self: Entity, name: "UiRect") -> UiRect?) & ((self: Entity, name: "UiImage") -> UiImage?) & ((self: Entity, name: "UiText") -> UiText?) & ((self: Entity, name: "UiLayout") -> UiLayout?) & ((self: Entity, name: "UiLayoutElement") -> UiLayoutElement?) & ((self: Entity, name: "UiButton") -> UiButton?) & ((self: Entity, name: "UiToggle") -> UiToggle?) & ((self: Entity, name: "UiSlider") -> UiSlider?) & ((self: Entity, name: "UiScrollView") -> UiScrollView?)`
+`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "UiCanvas") -> UiCanvas?) & ((self: Entity, name: "UiRect") -> UiRect?) & ((self: Entity, name: "UiImage") -> UiImage?) & ((self: Entity, name: "UiText") -> UiText?) & ((self: Entity, name: "UiLayout") -> UiLayout?) & ((self: Entity, name: "UiLayoutElement") -> UiLayoutElement?) & ((self: Entity, name: "UiButton") -> UiButton?) & ((self: Entity, name: "UiToggle") -> UiToggle?) & ((self: Entity, name: "UiSlider") -> UiSlider?) & ((self: Entity, name: "UiScrollView") -> UiScrollView?) & ((self: Entity, name: "UiTextInput") -> UiTextInput?)`
 
 Get a component proxy, or nil when absent.
 
@@ -2431,6 +2431,14 @@ All modes; Runtime|Test; pure/read.
 `UiText?`
 
 The entity's UiText component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.UiTextInput
+
+`UiTextInput?`
+
+The entity's UiTextInput component, or nil when absent.
 
 All modes; Runtime|Test; pure/read.
 
@@ -4019,6 +4027,66 @@ All modes; Runtime|Test; pure/read; setter mutates.
 `boolean`
 
 Whether lines break at spaces to fit the rectangle's width.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## UiTextInput
+
+A UI text field: while focused, typed characters insert at its caret and the editing keys edit it, raising OnUiTextChanged; Enter raises OnUiSubmit.
+
+### UiTextInput.Caret
+
+`number`
+
+The caret, in codepoints from the start of Text, read clamped to Text's length; typing and the editing keys move it.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiTextInput.Focusable
+
+`boolean`
+
+Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiTextInput.Interactable
+
+`boolean`
+
+Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiTextInput.MaxLength
+
+`number`
+
+The most codepoints typing reaches; characters typed past it are dropped.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiTextInput.Placeholder
+
+`Entity?`
+
+A UI element below the input shown only while its Text is empty (a hint); null for none.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiTextInput.Text
+
+`string`
+
+The field's UTF-8 text: typing inserts at the caret; a script's write raises no OnUiTextChanged. A value a script writes holds at most 4096 bytes of text.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiTextInput.TextElement
+
+`Entity?`
+
+A UI element below the input whose UiText shows the input's Text, with the caret while focused; null shows nothing.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 

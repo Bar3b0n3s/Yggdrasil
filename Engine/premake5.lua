@@ -112,6 +112,8 @@ project "Engine"
 	UseMikkTSpace()
 	UseNativeFileDialog()
 	UseLuau(false)
+	UseHarfBuzz()
+	UseSheenBidi()
 
 	if UseShadersProject then
 		dependson { "Shaders" }

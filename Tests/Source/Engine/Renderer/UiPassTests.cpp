@@ -370,6 +370,144 @@ namespace Engine {
 			CHECK(plan.Glyphs[0].Min.x == doctest::Approx(2.0f));
 			CHECK(plan.Glyphs[0].Max.y <= 20.0f);
 		}
+
+		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 42; stream F): the font chain.
+		TEST_CASE("UiPass: a text's font chain follows its fallbacks depth first, each font once, and leaves out a missing one"
+			* doctest::skip(true))
+		{
+			Test::InMemoryAssetManager assets;
+			PublishUiAssets(assets);
+			// A falls back to B, a missing font and C; B to D and back to A. The chain of A: A, B, D, C.
+			constexpr AssetHandle FontA{ 0xA0 }, FontB{ 0xB0 }, FontC{ 0xC0 }, FontD{ 0xD0 }, Missing{ 0xDEAD };
+			const auto publish = [&assets](AssetHandle handle, std::vector<AssetHandle> fallbacks)
+			{
+				Ref<FontData> font = MakeFont();
+				font->Fallbacks = std::move(fallbacks);
+				assets.Publish(handle, font);
+			};
+			Test::ExpectLog missing(LogLevel::Error, std::string(AssetMissingCode));
+			publish(FontA, { FontB, Missing, FontC });
+			publish(FontB, { FontD, FontA });
+			publish(FontC, {});
+			publish(FontD, {});
+			CHECK(BuildUiFontChain(FontA, assets) == std::vector<AssetHandle>{ FontA, FontB, FontD, FontC });
+			CHECK(BuildUiFontChain(FontC, assets) == std::vector<AssetHandle>{ FontC });
+			// A null font is the Default font's chain; a chain stops at MaxUiFontChainLength fonts.
+			CHECK(BuildUiFontChain({}, assets) == std::vector<AssetHandle>{ BuiltinAssetHandles::DefaultFont });
+			std::vector<AssetHandle> many;
+			for (uint64_t index = 1; index <= 10; ++index)
+			{
+				many.push_back(AssetHandle(0x100 + index));
+				publish(many.back(), {});
+			}
+			publish(FontA, many);
+			CHECK(BuildUiFontChain(FontA, assets).size() == MaxUiFontChainLength);
+			// The missing fallback was reported once, however many chains met it.
+			CHECK(std::ranges::count_if(assets.GetDiagnostics(), [](const AssetDiagnostic& diagnostic)
+			{
+				return diagnostic.Asset == AssetHandle(0xDEAD) && diagnostic.Code == AssetMissingCode;
+			}) == 1);
+			CHECK(missing.GetMatchCount() == 1);
+		}
+
+		TEST_CASE("UiPass: a codepoint the text's font lacks falls back to the first font of its chain that has it" * doctest::skip(true))
+		{
+			Test::InMemoryAssetManager assets;
+			PublishUiAssets(assets);
+			// "Latin" has A and the space; "Extra" has B. A text in Latin falling back to Extra draws "AB A" from both.
+			constexpr AssetHandle Latin{ 0x1A7 }, Extra{ 0xE77 };
+			Ref<FontData> latin = MakeFont();
+			std::erase_if(latin->Glyphs, [](const FontGlyph& glyph)
+			{
+				return glyph.Codepoint == 'B';
+			});
+			latin->Kerning.clear();
+			latin->Fallbacks = { Extra };
+			Ref<FontData> extra = MakeFont();
+			std::erase_if(extra->Glyphs, [](const FontGlyph& glyph)
+			{
+				return glyph.Codepoint != 'B';
+			});
+			extra->Kerning.clear();
+			assets.Publish(Latin, latin);
+			assets.Publish(Extra, extra);
+			UiDrawList list;
+			UiDrawItem text = MakeText(glm::vec2(0.0f), glm::vec2(100.0f, 20.0f), "AB A");
+			text.Font = Latin;
+			list.Items.push_back(text);
+			const UiPassPlan plan = PlanUiPass(list, assets);
+			REQUIRE(plan.Glyphs.size() == 3);
+			// Runs split where the glyph's font changes: A (Latin), B (Extra), A (Latin); B starts at A's unkerned 5 pixels.
+			REQUIRE(plan.Runs.size() == 3);
+			CHECK(plan.Runs[0].Font == Latin);
+			CHECK(plan.Runs[1].Font == Extra);
+			CHECK(plan.Runs[2].Font == Latin);
+			CHECK(plan.Glyphs[1].Min.x == doctest::Approx(5.5f));
+		}
+
+		// C22.3 (decision 48; streams T and S): the text input's caret.
+		TEST_CASE("UiPass: a focused text input's caret stands before its byte and keeps inside the rectangle" * doctest::skip(true))
+		{
+			Test::InMemoryAssetManager assets;
+			PublishUiAssets(assets);
+			UiDrawList list;
+			// "AB A" at 10 pixels per em in (100, 50)-(140, 70): the caret before byte 1 is at x 104 (A's 5 less the kerning's
+			// 1), one pixel wide (floor(10 / 16 + 0.5)), the line's 10 pixels high.
+			UiDrawItem field = MakeText(glm::vec2(100.0f, 50.0f), glm::vec2(140.0f, 70.0f), "AB A");
+			field.Wrap = false;
+			field.HasCaret = true;
+			field.CaretByte = 1;
+			list.Items.push_back(field);
+			UiPassPlan plan = PlanUiPass(list, assets);
+			REQUIRE(plan.Quads.size() == 1);
+			CHECK(plan.Quads[0].Min == glm::vec2(104.0f, 50.0f));
+			CHECK(plan.Quads[0].Max == glm::vec2(105.0f, 60.0f));
+			CHECK_FALSE(plan.Quads[0].Texture.IsValid());
+			REQUIRE(plan.Runs.size() == 2);
+			CHECK(plan.Runs[0].Kind == UiPassRunKind::Glyphs);
+			CHECK(plan.Runs[1].Kind == UiPassRunKind::Quads);
+
+			// A text wider than the rectangle (40 pixels) with the caret at its end moves left by the least that puts the caret
+			// inside: the caret's right edge lands on the rectangle's right edge, 140, and the first glyph left of 100.
+			list.Items[0].Text = "ABABABAB";
+			list.Items[0].CaretByte = 8;
+			plan = PlanUiPass(list, assets);
+			REQUIRE(plan.Quads.size() == 1);
+			CHECK(plan.Quads[0].Max.x == 140.0f);
+			CHECK(plan.Glyphs.front().Min.x < 100.0f);
+			// The caret at the start moves the block back so its left is the rectangle's left.
+			list.Items[0].CaretByte = 0;
+			plan = PlanUiPass(list, assets);
+			CHECK(plan.Quads[0].Min.x == 100.0f);
+			CHECK(plan.Glyphs.front().Min.x == doctest::Approx(100.0f));
+
+			// Right-aligned, "ABABABABAB" (50 pixels) starts 10 pixels left of the rectangle: the caret at its start moves the
+			// block right by the least that puts the caret inside, so the text starts at the rectangle's left (the review of
+			// C22.3).
+			list.Items[0].Text = "ABABABABAB";
+			list.Items[0].HorizontalAlignment = UiDrawAlignment::End;
+			plan = PlanUiPass(list, assets);
+			REQUIRE(plan.Quads.size() == 1);
+			CHECK(plan.Quads[0].Min.x == 100.0f);
+			CHECK(plan.Glyphs.front().Min.x == doctest::Approx(100.0f));
+
+			// An empty focused field draws only its caret, aligned as one line of LineHeight (10 pixels) in the 20-pixel
+			// rectangle: in the middle, then at the bottom, where its first character's line will stand.
+			list.Items[0].Text.clear();
+			list.Items[0].CaretByte = 0;
+			list.Items[0].HorizontalAlignment = UiDrawAlignment::Start;
+			list.Items[0].VerticalAlignment = UiDrawAlignment::Center;
+			plan = PlanUiPass(list, assets);
+			CHECK(plan.Glyphs.empty());
+			REQUIRE(plan.Quads.size() == 1);
+			CHECK(plan.Quads[0].Min == glm::vec2(100.0f, 55.0f));
+			CHECK(plan.Quads[0].Max == glm::vec2(101.0f, 65.0f));
+			list.Items[0].VerticalAlignment = UiDrawAlignment::End;
+			plan = PlanUiPass(list, assets);
+			REQUIRE(plan.Quads.size() == 1);
+			CHECK(plan.Quads[0].Min == glm::vec2(100.0f, 60.0f));
+			CHECK(plan.Quads[0].Max == glm::vec2(101.0f, 70.0f));
+		}
 	}
 
 	TEST_SUITE(Test::GpuSuite)
@@ -534,6 +672,85 @@ namespace Engine {
 			const size_t texel = (static_cast<size_t>(3) * 32 + 3) * 4;
 			REQUIRE(report->Before.size() > texel);
 			CHECK(std::to_integer<int>(report->Before[texel]) == MakeTexel(1, 1).r);
+		}
+
+		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 51; stream W): World canvases in the world.
+		TEST_CASE("UiPass: a World canvas is depth-tested against the scene and drawn under the Screen canvases" * doctest::skip(true))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu, 32, 32);
+			PublishUiAssets(setup.Assets());
+			// The fixture's cube at z = -3 in front of a red World canvas of 64 x 64 canvas pixels covering [-4, 4] x [-4, 4]
+			// at z = -6 (beyond the view's edges), and a green Screen image over the image's centre [14, 18).
+			RenderSnapshot snapshot = setup.Snapshot();
+			snapshot.Ui.WorldCanvases.push_back(UiWorldCanvas{ .Canvas = UUID(0xB0A2D),
+				.Size = glm::uvec2(64),
+				.World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -6.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(0.125f, -0.125f, 1.0f))
+					* glm::translate(glm::mat4(1.0f), glm::vec3(-32.0f, -32.0f, 0.0f)) });
+			UiDrawItem board = MakeImage(glm::vec2(0.0f), glm::vec2(64.0f));
+			board.Color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
+			board.WorldCanvas = 0;
+			snapshot.Ui.Items.push_back(board);
+			UiDrawItem overlay = MakeImage(glm::vec2(14.0f), glm::vec2(18.0f));
+			overlay.Color = glm::vec4(0.0f, 1.0f, 0.0f, 1.0f);
+			snapshot.Ui.Items.push_back(overlay);
+			const Image image = setup.Render(snapshot);
+			// The corner shows the canvas; the cube hides it beside the overlay; the overlay is on top of both.
+			CHECK(Test::SceneRendererIntegrationFixture::Channel(image, 1, 1, 0) == 255);
+			CHECK(Test::SceneRendererIntegrationFixture::Channel(image, 1, 1, 1) == 0);
+			CHECK(Test::SceneRendererIntegrationFixture::Channel(image, 12, 16, 0) != 255);
+			CHECK(Test::SceneRendererIntegrationFixture::Channel(image, 16, 16, 1) == 255);
+			CHECK(Test::SceneRendererIntegrationFixture::Channel(image, 16, 16, 0) == 0);
+			// A view without a camera draws no World canvas, only the overlay.
+			snapshot.HasCamera = false;
+			const Image cameraless = setup.Render(snapshot);
+			CHECK(Test::SceneRendererIntegrationFixture::Channel(cameraless, 1, 1, 0) == 0);
+			CHECK(Test::SceneRendererIntegrationFixture::Channel(cameraless, 16, 16, 1) == 255);
+		}
+
+		TEST_CASE("UiPass: a device loss recreates the world canvases' pipeline and a World canvas draws the same image afterwards"
+			* doctest::skip(true))
+		{
+			// The recreation protocol (C18.3): the depth-tested pipeline World canvases draw with is SceneRendererPipelines'
+			// (the QuadBatcher's LdrDepth target, decision 57's ledger amendment, granted on main in 1707cf47), so its owner's
+			// recovery covers it.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu, 32, 32);
+			PublishUiAssets(setup.Assets());
+			RenderSnapshot snapshot = setup.Snapshot();
+			snapshot.Meshes.clear();
+			snapshot.Ui.WorldCanvases.push_back(UiWorldCanvas{ .Canvas = UUID(0xB0A2D),
+				.Size = glm::uvec2(64),
+				.World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -6.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(0.125f, -0.125f, 1.0f))
+					* glm::translate(glm::mat4(1.0f), glm::vec3(-32.0f, -32.0f, 0.0f)) });
+			UiDrawItem board = MakeImage(glm::vec2(0.0f), glm::vec2(64.0f), Sheet, 0);
+			board.WorldCanvas = 0;
+			snapshot.Ui.Items.push_back(board);
+			Test::DeviceLossTest test;
+			test.Owners = { "SceneRendererPipelines", "SceneRenderer" };
+			test.Use = [&gpu, &setup, &snapshot]() -> Result<std::vector<std::byte>>
+			{
+				ENGINE_TRY_ASSIGN(nvrhi::CommandListHandle list, gpu.GetDevice().CreateCommandList());
+				list->open();
+				const Status rendered = setup.Renderer().Render(*list, snapshot);
+				list->close();
+				setup.Renderer().OnSubmitted(snapshot.FrameIndex, gpu.GetDevice().ExecuteCommandList(*list));
+				++snapshot.FrameIndex;
+				ENGINE_TRY(rendered);
+				nvrhi::ITexture* image = setup.Renderer().GetFinalTexture();
+				if (image == nullptr)
+					return MakeError(ErrorCode::InvalidState, "the renderer has no final texture");
+				Readback readback(gpu.GetDevice());
+				ENGINE_TRY_ASSIGN(const Image pixels, readback.ReadTexture(*image));
+				return pixels.Pixels;
+			};
+			const Result<Test::DeviceLossReport> report = Test::RunDeviceLossTest(gpu, test);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			// The canvas was drawn: its sheet's frame covers the whole view, so no pixel keeps the black clear colour.
+			REQUIRE(report->Before.size() >= 4);
+			CHECK(std::to_integer<int>(report->Before[0]) + std::to_integer<int>(report->Before[1]) + std::to_integer<int>(report->Before[2]) > 0);
 		}
 	}
 

@@ -69,11 +69,15 @@ namespace Engine {
 								 //    last update (automation at the safe point); then PreviousWorldTransform <- WorldTransform
 								 //    for every entity and InterpolationResetTag cleared (§5.2)
 		ApplyInput,              // 1: the events queued for this tick, then the step view latched (PlayInput::ApplyTick)
+		TextLatch,               // 1a: PlayInput::LatchStepText: the tick's committed characters (its Text events) latched into
+								 //     the step view, so UiInput and the tick's scripts read the same text (M22 C22.3,
+								 //     Docs/Decisions/0033-m22-contract.md decision 46); in Play and Simulate
 		UiInput,                 // 1b: UiSystem::ProcessInput with the step view's pointer, wheel, stick and the Ui settings'
 								 //     navigation bindings, against the current UI layout: focus, hover, press, widgets and the
 								 //     UI events queued (M22 C22.2, Docs/Decisions/0033-m22-contract.md decision 24); in Play and
 								 //     Simulate, with or without a canvas (without one it reads no input and keeps the interaction
-								 //     state empty). C22.3's TextLatch takes 1a, between ApplyInput and it
+								 //     state empty). C22.3 (decisions 47 and 50) adds the step's text and editing keys and, while
+								 //     the layout holds a World canvas, the pointer's ray through the primary camera
 		StartFlush,              // 2: OnStart of instances created since the last flush, canonical order (M13; empty)
 		UiEvents,                // 2a: the queued UI events delivered to their callbacks, bubbling (ScriptEngine::DispatchUiEvents;
 								 //     M22 C22.2, decision 27): after OnStart, so a new instance starts before its first UI

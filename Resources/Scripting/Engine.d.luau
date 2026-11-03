@@ -505,6 +505,7 @@ declare extern type Entity with
 	function GetComponent(self, name: "UiToggle"): UiToggle?
 	function GetComponent(self, name: "UiSlider"): UiSlider?
 	function GetComponent(self, name: "UiScrollView"): UiScrollView?
+	function GetComponent(self, name: "UiTextInput"): UiTextInput?
 	-- Get the parent, or nil for a root. [All modes; Runtime|Test; pure/read]
 	GetParent: (self: Entity) -> Entity?
 	-- Get the instance of the first script slot whose behaviour has this name, or of the first slot without a name; nil when there is none. [All modes; Runtime|Test; pure/read]
@@ -573,6 +574,8 @@ declare extern type Entity with
 	UiSlider: UiSlider?
 	-- The entity's UiText component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	UiText: UiText?
+	-- The entity's UiTextInput component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	UiTextInput: UiTextInput?
 	-- The entity's UiToggle component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	UiToggle: UiToggle?
 	-- Compare UUIDs; equality does not authorize access to an expired scene. [All modes; Runtime|Test; pure/read]
@@ -1047,6 +1050,24 @@ declare extern type UiText with
 	VerticalAlignment: UiTextVerticalAlignment
 	-- Whether lines break at spaces to fit the rectangle's width. [All modes; Runtime|Test; pure/read; setter mutates]
 	Wrap: boolean
+end
+
+-- A UI text field: while focused, typed characters insert at its caret and the editing keys edit it, raising OnUiTextChanged; Enter raises OnUiSubmit.
+declare extern type UiTextInput with
+	-- The caret, in codepoints from the start of Text, read clamped to Text's length; typing and the editing keys move it. [All modes; Runtime|Test; pure/read; setter mutates]
+	Caret: number
+	-- Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. [All modes; Runtime|Test; pure/read; setter mutates]
+	Focusable: boolean
+	-- Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. [All modes; Runtime|Test; pure/read; setter mutates]
+	Interactable: boolean
+	-- The most codepoints typing reaches; characters typed past it are dropped. [All modes; Runtime|Test; pure/read; setter mutates]
+	MaxLength: number
+	-- A UI element below the input shown only while its Text is empty (a hint); null for none. [All modes; Runtime|Test; pure/read; setter mutates]
+	Placeholder: Entity?
+	-- The field's UTF-8 text: typing inserts at the caret; a script's write raises no OnUiTextChanged. A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
+	Text: string
+	-- A UI element below the input whose UiText shows the input's Text, with the caret while focused; null shows nothing. [All modes; Runtime|Test; pure/read; setter mutates]
+	TextElement: Entity?
 end
 
 -- A UI toggle: a pointer click or Submit while focused flips IsOn and raises OnUiValueChanged; Graphic shows while it is on.

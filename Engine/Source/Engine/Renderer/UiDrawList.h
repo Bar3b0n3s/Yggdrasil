@@ -7,6 +7,7 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <limits>
 #include <memory_resource>
 #include <string>
 #include <vector>
@@ -25,9 +26,15 @@
 // One of the Renderer headers Scene may include (Scripts/ModuleRules.json's SnapshotHeaders, §3 rule 3): it includes nothing
 // beyond Core, Asset, glm and the standard library, and in particular no NVRHI.
 //
-// Containers (as RenderSnapshot's, M18's R-ARENA): a list built with UiDrawList(resource) allocates Items and Annotations from
-// that memory resource, which must outlive it; a default-constructed one, and every copy, from the default resource. The
-// nested strings keep the default allocator. A plain value type: copyable, movable, thread-compatible.
+// Containers (as RenderSnapshot's, M18's R-ARENA): a list built with UiDrawList(resource) allocates Items, Annotations and
+// (C22.3) WorldCanvases from that memory resource, which must outlive it; a default-constructed one, and every copy, from
+// the default resource. The nested strings keep the default allocator. A plain value type: copyable, movable,
+// thread-compatible.
+//
+// C22.3 (Docs/Decisions/0033-m22-contract.md decisions 48 and 51): an item of a World canvas (UiCanvasRenderMode::World) is
+// in that canvas's own pixels and names it (UiDrawItem::WorldCanvas, an index of WorldCanvases), whose matrix places it in
+// the world; its clip is in the same pixels, so the Ui pass clips it on the CPU instead of with a scissor. A focused text
+// input's text item carries its caret (UiDrawItem::HasCaret).
 
 namespace Engine {
 
@@ -77,6 +84,21 @@ namespace Engine {
 		Linear
 	};
 
+	// C22.3: UiDrawItem::WorldCanvas of an item of a Screen canvas.
+	inline constexpr uint32_t UiScreenCanvas = std::numeric_limits<uint32_t>::max();
+
+	// C22.3 (decision 51): a World canvas of the list: its canvas pixels (x right, y down, origin at its top-left corner, Size
+	// wide and high) map to world space by World (UiCanvasLayout::World at the canvas entity's render pose: the
+	// interpolated transform meshes draw with, so a moving canvas draws where its parent's meshes draw).
+	struct UiWorldCanvas
+	{
+		UUID Canvas{};
+		glm::uvec2 Size = glm::uvec2(1);
+		glm::mat4 World = glm::mat4(1.0f);
+
+		bool operator==(const UiWorldCanvas&) const = default;
+	};
+
 	// One image or text of a UI element, in draw order. Only the members of its Kind are read.
 	struct UiDrawItem
 	{
@@ -105,6 +127,14 @@ namespace Engine {
 		UiDrawAlignment VerticalAlignment = UiDrawAlignment::Start;
 		bool Wrap = true; // lines break at spaces to fit the rectangle's width
 		float LineSpacing = 1.0f;
+
+		// C22.3 (decision 51): UiScreenCanvas, or the index in UiDrawList::WorldCanvases of the World canvas whose pixels the
+		// item's rectangle and clip are in.
+		uint32_t WorldCanvas = UiScreenCanvas;
+		// C22.3 (decision 48): Text of a focused text input's TextElement: the caret is drawn before the byte CaretByte of
+		// Text (Text's size: after its end), and the text moves the least that keeps it inside the rectangle.
+		bool HasCaret = false;
+		uint32_t CaretByte = 0;
 	};
 
 	// One capture annotation of a UI element (viewport.screenshot's bounds and labels, Scene/UiExtraction.h): with Outline a
@@ -132,6 +162,8 @@ namespace Engine {
 		// canonical entity order, an element's image before its text.
 		std::pmr::vector<UiDrawItem> Items{};
 		std::pmr::vector<UiAnnotation> Annotations{};
+		// C22.3: the World canvases its items name, in the layout table's order.
+		std::pmr::vector<UiWorldCanvas> WorldCanvases{};
 	};
 
 }

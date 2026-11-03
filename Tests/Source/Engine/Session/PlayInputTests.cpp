@@ -330,6 +330,43 @@ namespace Engine {
 			REQUIRE(input.GetLastAppliedEvents().size() == 1);
 		}
 
+		// M22 C22.3 (Docs/Decisions/0033-m22-contract.md decision 46; stream T): the text latch.
+		TEST_CASE("PlayInput: the text latch holds the tick's committed characters in the step view and the frame's since the last frame"
+			* doctest::skip(true))
+		{
+			Result<PlayInput> created = PlayInput::Create(MakeActions());
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlayInput& input = *created;
+			input.SetFramePreview(true);
+			CHECK(input.GetText(InputPhase::Step).empty());
+			CHECK(input.GetText(InputPhase::Frame).empty());
+
+			// Tick 0: an injected Text event, then a device character (both UTF-8, both committed in queue order).
+			REQUIRE(input.Queue(0, PlayInputEvent{ .Type = PlayInputEventType::Text, .Text = "h\xC3\xA9" }).has_value());
+			input.QueueDeviceEvent(Event(CharEvent{ .Codepoint = 0x05D0, .Handled = false }));
+			input.ApplyTick(0);
+			input.LatchStepText();
+			CHECK(input.GetText(InputPhase::Step) == "h\xC3\xA9\xD7\x90");
+
+			// A device character typed before the next frame is never previewed: the frame sees tick 0's text only.
+			input.QueueDeviceEvent(Event(CharEvent{ .Codepoint = 'x', .Handled = false }));
+			input.LatchFrame();
+			CHECK(input.GetText(InputPhase::Frame) == "h\xC3\xA9\xD7\x90");
+
+			// Two ticks in one frame: each step reads its own; the frame reads both, in order. A tick without Text events
+			// latches no text, and a frame that ran no step reads none.
+			input.ApplyTick(1);
+			input.LatchStepText();
+			CHECK(input.GetText(InputPhase::Step) == "x");
+			input.ApplyTick(2);
+			input.LatchStepText();
+			CHECK(input.GetText(InputPhase::Step).empty());
+			input.LatchFrame();
+			CHECK(input.GetText(InputPhase::Frame) == "x");
+			input.LatchFrame();
+			CHECK(input.GetText(InputPhase::Frame).empty());
+		}
+
 		TEST_CASE("PlayInput: a previewed press is reported once by the frame view")
 		{
 			Result<PlayInput> created = PlayInput::Create(MakeActions());

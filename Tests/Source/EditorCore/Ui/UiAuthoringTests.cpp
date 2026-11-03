@@ -161,6 +161,36 @@ namespace Engine {
 			CHECK(PickUiElement(table, glm::vec2(110.0f, 120.0f)) == content.GetUUID());
 			CHECK(PickUiElement(table, glm::vec2(110.0f, 170.0f)) == panel.GetUUID());
 		}
+
+		// C22.3 (the review of C22.3, its major on the consumers of World canvases' pixels; stream W): a World canvas's
+		// elements are in its own canvas pixels, which are not the preview frame's scene pixels, so the preview leaves them
+		// out: a point inside a World canvas element's canvas-pixel rectangle picks only a Screen canvas's element there.
+		TEST_CASE("UiAuthoring: the UI preview picks no element of a World canvas" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			const auto addElement = [&scene](std::string_view name, Entity parent, glm::vec2 position, glm::vec2 size)
+			{
+				Entity element = scene.CreateEntity(name, parent);
+				element.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f),
+					.AnchorMax = glm::vec2(0.0f),
+					.Pivot = glm::vec2(0.0f),
+					.Position = position,
+					.Size = size });
+				return element;
+			};
+			// A World canvas of 400 x 300 canvas pixels holding "Sign" at [100, 300] x [50, 150], and a Screen canvas holding
+			// "Button" at [250, 350] x [100, 150], over the sign's right part.
+			Entity board = scene.CreateEntity("Board");
+			board.AddComponent<UiCanvasComponent>(UiCanvasComponent{ .RenderMode = UiCanvasRenderMode::World, .WorldWidth = 400, .WorldHeight = 300 });
+			addElement("Sign", board, glm::vec2(100.0f, 50.0f), glm::vec2(200.0f, 100.0f));
+			Entity hud = scene.CreateEntity("Hud");
+			hud.AddComponent<UiCanvasComponent>(UiCanvasComponent{});
+			const Entity button = addElement("Button", hud, glm::vec2(250.0f, 100.0f), glm::vec2(100.0f, 50.0f));
+			const UiLayoutTable table = ComputeUiLayout(scene, glm::uvec2(400, 300));
+			CHECK_FALSE(PickUiElement(table, glm::vec2(150.0f, 100.0f)).IsValid());
+			CHECK(PickUiElement(table, glm::vec2(260.0f, 110.0f)) == button.GetUUID());
+		}
 	}
 
 }

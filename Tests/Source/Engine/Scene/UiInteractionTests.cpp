@@ -2,6 +2,8 @@
 
 #include "Engine/Scene/UiInteraction.h"
 
+#include "Engine/Scene/Components/CameraComponent.h"
+#include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Components/UiButtonComponent.h"
 #include "Engine/Scene/Components/UiCanvasComponent.h"
 #include "Engine/Scene/Components/UiImageComponent.h"
@@ -10,11 +12,13 @@
 #include "Engine/Scene/Components/UiToggleComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Scene/TransformSystem.h"
 #include "Engine/Scene/UiLayout.h"
 #include "Support/SceneTestFixture.h"
 
 #include <glm/glm.hpp>
 
+#include <optional>
 #include <string_view>
 
 // UI interaction's pure functions (M22, C22.2, R-UI-INPUT; Docs/Decisions/0033-m22-contract.md decisions 22 and 23): the hit
@@ -77,6 +81,12 @@ namespace Engine {
 			CHECK(GetUiEventCallbackName(UiEventKind::Hover) == "OnUiHover");
 			CHECK(GetUiEventCallbackName(UiEventKind::Cancel) == "OnUiCancel");
 			CHECK(GetUiEventCallbackName(UiEventKind::Scroll) == "OnUiScroll");
+			// C22.3 (Docs/Decisions/0033-m22-contract.md decisions 45 and 47): the text input and its events.
+			CHECK(UiWidgetTypeToString(UiWidgetType::TextInput) == "TextInput");
+			CHECK(UiEventKindToString(UiEventKind::TextChanged) == "TextChanged");
+			CHECK(UiEventKindToString(UiEventKind::Submit) == "Submit");
+			CHECK(GetUiEventCallbackName(UiEventKind::TextChanged) == "OnUiTextChanged");
+			CHECK(GetUiEventCallbackName(UiEventKind::Submit) == "OnUiSubmit");
 			CHECK(UiInteractionState{}.IsEmpty());
 			CHECK_FALSE(UiInteractionState{ .PointerOverUi = true }.IsEmpty());
 		}
@@ -252,6 +262,94 @@ namespace Engine {
 			CHECK(GetUiStickDirection(glm::vec2(-0.7f, 0.7f)) == UiStickDirection::Left);
 			CHECK(GetUiStickDirection(glm::vec2(0.4f, -0.4f)) == UiStickDirection::None);
 			CHECK(GetUiStickDirection(glm::vec2(0.0f)) == UiStickDirection::None);
+		}
+
+		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 50; stream W): the pointer's ray and the world canvases' hit test.
+		TEST_CASE("UiInteraction: the pointer's ray goes through the primary camera at its simulated pose" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			CHECK_FALSE(ComputeUiPointerRay(scene, glm::vec2(50.0f), glm::uvec2(100, 100)).has_value());
+
+			// A perspective camera at (0, 0, 10) with a 90 degree field of view on a 200 x 100 image (aspect 2): the image's
+			// centre looks down -Z; its top-right corner along (2, 1, -1), normalized.
+			Entity camera = scene.CreateEntity("Camera");
+			camera.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, 0.0f, 10.0f);
+			camera.AddComponent<CameraComponent>(CameraComponent{ .VerticalFov = 90.0f, .Primary = true });
+			TransformSystem::Update(scene);
+			std::optional<UiPointerRay> ray = ComputeUiPointerRay(scene, glm::vec2(100.0f, 50.0f), glm::uvec2(200, 100));
+			REQUIRE(ray.has_value());
+			CHECK(ray->Origin == glm::vec3(0.0f, 0.0f, 10.0f));
+			CHECK(ray->Direction == glm::vec3(0.0f, 0.0f, -1.0f));
+			ray = ComputeUiPointerRay(scene, glm::vec2(200.0f, 0.0f), glm::uvec2(200, 100));
+			REQUIRE(ray.has_value());
+			CHECK(ray->Direction.x == doctest::Approx(2.0f / 2.4494897f));
+			CHECK(ray->Direction.y == doctest::Approx(1.0f / 2.4494897f));
+			CHECK(ray->Direction.z == doctest::Approx(-1.0f / 2.4494897f));
+
+			// The simulated pose, not a later one: moving the camera without a transform update leaves the ray as it was.
+			camera.GetComponent<TransformComponent>().Translation = glm::vec3(5.0f, 0.0f, 10.0f);
+			CHECK(ComputeUiPointerRay(scene, glm::vec2(100.0f, 50.0f), glm::uvec2(200, 100))->Origin == glm::vec3(0.0f, 0.0f, 10.0f));
+
+			// An orthographic camera's rays are parallel, from the near plane: OrthographicSize 5 is the half height.
+			camera.GetComponent<CameraComponent>().Projection = ProjectionType::Orthographic;
+			camera.GetComponent<CameraComponent>().OrthographicSize = 5.0f;
+			camera.GetComponent<CameraComponent>().NearClip = 1.0f;
+			TransformSystem::Update(scene);
+			ray = ComputeUiPointerRay(scene, glm::vec2(200.0f, 0.0f), glm::uvec2(200, 100));
+			REQUIRE(ray.has_value());
+			CHECK(ray->Origin == glm::vec3(15.0f, 5.0f, 9.0f));
+			CHECK(ray->Direction == glm::vec3(0.0f, 0.0f, -1.0f));
+		}
+
+		TEST_CASE("UiInteraction: the pointer hits a World canvas through its ray, under the Screen canvases and nearest first"
+			* doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			// Two World canvases of 100 x 100 canvas pixels at 10 pixels per unit, facing +Z: the far one at z = 0, the near one
+			// at z = 2, each a full-size button. A ray from (0, 0, 10) down -Z meets the near one at distance 8.
+			const UiCanvasComponent world{ .RenderMode = UiCanvasRenderMode::World, .WorldWidth = 100, .WorldHeight = 100, .PixelsPerUnit = 10.0f };
+			Entity far = scene.CreateEntity("Far");
+			far.AddComponent<UiCanvasComponent>(world);
+			Entity farButton = AddInteractionButton(scene, "Button", far, glm::vec2(0.0f), glm::vec2(100.0f));
+			Entity near = scene.CreateEntity("Near");
+			near.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, 0.0f, 2.0f);
+			near.AddComponent<UiCanvasComponent>(world);
+			Entity nearButton = AddInteractionButton(scene, "Button", near, glm::vec2(25.0f), glm::vec2(50.0f));
+			TransformSystem::Update(scene);
+			UiLayoutTable table = ComputeUiLayout(scene, glm::uvec2(100, 100));
+			const UiPointerRay down{ .Origin = glm::vec3(0.0f, 0.0f, 10.0f), .Direction = glm::vec3(0.0f, 0.0f, -1.0f) };
+
+			// The near canvas's button is first along the ray, though the far canvas is later in draw order.
+			const UiCanvasLayout* nearLayout = FindUiCanvasLayout(table, near.GetUUID());
+			REQUIRE(nearLayout != nullptr);
+			const std::optional<UiCanvasPointer> mapped = MapUiPointerToCanvas(*nearLayout, glm::vec2(-1.0f), down);
+			REQUIRE(mapped.has_value());
+			CHECK(mapped->Point == glm::vec2(50.0f));
+			CHECK(mapped->Distance == 8.0f);
+			UiPointerHit hit = HitTestUiPointer(scene, table, glm::vec2(-1.0f), down);
+			CHECK(hit.Hit.Target == nearButton.GetUUID());
+			CHECK(hit.Canvas == near.GetUUID());
+			CHECK(hit.CanvasPoint == glm::vec2(50.0f));
+			// Outside the near button (canvas pixel (10, 10), world (-4, 4)), the ray reaches the far canvas's.
+			const UiPointerRay corner{ .Origin = glm::vec3(-4.0f, 4.0f, 10.0f), .Direction = glm::vec3(0.0f, 0.0f, -1.0f) };
+			hit = HitTestUiPointer(scene, table, glm::vec2(-1.0f), corner);
+			CHECK(hit.Hit.Target == farButton.GetUUID());
+			CHECK(hit.CanvasPoint == glm::vec2(10.0f));
+			// A ray away from the canvases, parallel to them or without one hits nothing.
+			CHECK_FALSE(HitTestUiPointer(scene, table, glm::vec2(-1.0f), UiPointerRay{ .Origin = glm::vec3(0.0f, 0.0f, 20.0f), .Direction = glm::vec3(0.0f, 0.0f, 1.0f) }).Hit.Target.IsValid());
+			CHECK_FALSE(HitTestUiPointer(scene, table, glm::vec2(-1.0f), UiPointerRay{ .Origin = glm::vec3(0.0f, 0.0f, 5.0f), .Direction = glm::vec3(1.0f, 0.0f, 0.0f) }).Hit.Target.IsValid());
+			CHECK_FALSE(HitTestUiPointer(scene, table, glm::vec2(50.0f), std::nullopt).Hit.Target.IsValid());
+
+			// A Screen canvas's target under the pointer wins over every World canvas.
+			Entity screen = AddInteractionCanvas(scene);
+			Entity screenButton = AddInteractionButton(scene, "Overlay", screen, glm::vec2(0.0f), glm::vec2(20.0f));
+			table = ComputeUiLayout(scene, glm::uvec2(100, 100));
+			hit = HitTestUiPointer(scene, table, glm::vec2(10.0f), down);
+			CHECK(hit.Hit.Target == screenButton.GetUUID());
+			CHECK(hit.Canvas == screen.GetUUID());
+			CHECK(HitTestUi(scene, table, glm::vec2(50.0f)).Target.IsValid() == false);
 		}
 	}
 

@@ -40,6 +40,7 @@ Every component of the type registry, in canonical component order: the order of
 | `UiToggle` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A UI toggle: a pointer click or Submit while focused flips IsOn and raises OnUiValueChanged; Graphic shows while it is on. |
 | `UiSlider` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A UI slider: the pointer drags its value between Min and Max and the directions along it step it, raising OnUiValueChanged. |
 | `UiScrollView` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A UI scroll view: clips its descendants and moves its Content by the scroll position, which the wheel, a drag and focus change. |
+| `UiTextInput` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A UI text field: while focused, typed characters insert at its caret and the editing keys edit it, raising OnUiTextChanged; Enter raises OnUiSubmit. |
 
 ## ID
 
@@ -933,7 +934,7 @@ A UI button: a pointer click or Submit while focused raises OnUiClick.
 - Version: 1
 - Flags: Serializable, ScriptVisible, EditorVisible, Removable
 - Requires: `UiRect`
-- Excludes: `UiToggle`, `UiSlider`, `UiScrollView`
+- Excludes: `UiToggle`, `UiSlider`, `UiScrollView`, `UiTextInput`
 
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
@@ -955,7 +956,7 @@ A UI toggle: a pointer click or Submit while focused flips IsOn and raises OnUiV
 - Version: 1
 - Flags: Serializable, ScriptVisible, EditorVisible, Removable
 - Requires: `UiRect`
-- Excludes: `UiButton`, `UiSlider`, `UiScrollView`
+- Excludes: `UiButton`, `UiSlider`, `UiScrollView`, `UiTextInput`
 
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
@@ -981,7 +982,7 @@ A UI slider: the pointer drags its value between Min and Max and the directions 
 - Version: 1
 - Flags: Serializable, ScriptVisible, EditorVisible, Removable
 - Requires: `UiRect`
-- Excludes: `UiButton`, `UiToggle`, `UiScrollView`
+- Excludes: `UiButton`, `UiToggle`, `UiScrollView`, `UiTextInput`
 
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
@@ -1019,7 +1020,7 @@ A UI scroll view: clips its descendants and moves its Content by the scroll posi
 - Version: 1
 - Flags: Serializable, ScriptVisible, EditorVisible, Removable
 - Requires: `UiRect`
-- Excludes: `UiButton`, `UiToggle`, `UiSlider`
+- Excludes: `UiButton`, `UiToggle`, `UiSlider`, `UiTextInput`
 
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
@@ -1042,6 +1043,38 @@ Script members of `UiScrollView`:
 | `ScrollPosition` | proxy field | `vector` | read/write | All | Canvas units the content is moved left (x) and up (y), read clamped to the content's overflow. |
 | `ScrollStep` | proxy field | `number` | read/write | All | Canvas units per wheel step and per navigation press. |
 | `Vertical` | proxy field | `boolean` | read/write | All | Whether the content scrolls along y. |
+
+## UiTextInput
+
+A UI text field: while focused, typed characters insert at its caret and the editing keys edit it, raising OnUiTextChanged; Enter raises OnUiSubmit.
+
+- Category: Ui
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `UiRect`
+- Excludes: `UiButton`, `UiToggle`, `UiSlider`, `UiScrollView`
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Interactable` | `Bool` | `true` |  |  |  | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
+| `Focusable` | `Bool` | `true` |  |  |  | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
+| `Text` | `String` | `""` |  |  |  | The field's UTF-8 text: typing inserts at the caret; a script's write raises no OnUiTextChanged. |
+| `MaxLength` | `UInt32` | `256` | 1 to 1024 |  |  | The most codepoints typing reaches; characters typed past it are dropped. |
+| `Caret` | `UInt32` | `0` | >= 0 |  |  | The caret, in codepoints from the start of Text, read clamped to Text's length; typing and the editing keys move it. |
+| `TextElement` | `EntityRef` | `null` |  |  |  | A UI element below the input whose UiText shows the input's Text, with the caret while focused; null shows nothing. |
+| `Placeholder` | `EntityRef` | `null` |  |  |  | A UI element below the input shown only while its Text is empty (a hint); null for none. |
+
+Script members of `UiTextInput`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Caret` | proxy field | `number` | read/write | All | The caret, in codepoints from the start of Text, read clamped to Text's length; typing and the editing keys move it. |
+| `Focusable` | proxy field | `boolean` | read/write | All | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
+| `Interactable` | proxy field | `boolean` | read/write | All | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
+| `MaxLength` | proxy field | `number` | read/write | All | The most codepoints typing reaches; characters typed past it are dropped. |
+| `Placeholder` | proxy field | `Entity?` | read/write | All | A UI element below the input shown only while its Text is empty (a hint); null for none. |
+| `Text` | proxy field | `string` | read/write | All | The field's UTF-8 text: typing inserts at the caret; a script's write raises no OnUiTextChanged. A value a script writes holds at most 4096 bytes of text. |
+| `TextElement` | proxy field | `Entity?` | read/write | All | A UI element below the input whose UiText shows the input's Text, with the caret while focused; null shows nothing. |
 
 ## Structs
 

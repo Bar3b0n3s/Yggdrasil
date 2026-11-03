@@ -10,6 +10,7 @@
 #include <glm/glm.hpp>
 #include <nvrhi/nvrhi.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -32,6 +33,23 @@
 // rule; "UiPass: a device loss recreates nothing of the pass's own and the UI draws the same image afterwards").
 //
 // Deterministic: items in list order; an image's 9-slice patches row-major; a text's glyphs in text order. Main thread.
+//
+// C22.3 (Docs/Decisions/0033-m22-contract.md decisions 42, 48 and 51):
+//   - Fallback fonts (stream F): a text lays out with its font's chain (BuildUiFontChain), so a codepoint its font lacks
+//     takes the first font of the chain that has it; runs split where a glyph's font changes, as before.
+//   - The caret (stream T): an item with HasCaret draws a caret quad after its glyphs (PlanUiPass's comment).
+//   - World canvases (stream W): the items of a World canvas (UiDrawItem::WorldCanvas) are planned in its canvas pixels,
+//     clipped on the CPU to their clip (each quad's rectangle and texture coordinates cut to it, exact for these
+//     axis-aligned quads; a glyph likewise), and recorded first, canvas by canvas from the farthest to the nearest (the
+//     view-space depth of each canvas's centre, ties in list order), transformed by the canvas's World matrix and the view's
+//     view-projection and depth-tested against SceneDepth without depth writes: images through the QuadBatcher's
+//     depth-tested LDR target (QuadBatchTarget::LdrDepth, decision 57's ledger amendment, granted on main in 1707cf47)
+//     and glyphs through the TextRenderer's world pipeline (TextGlyphRun::World); then the Screen canvases' runs as
+//     before, on top. A view without a camera draws no World canvas. The world pipeline is SceneRendererPipelines' (the
+//     QuadBatcher's), so the placement rule covers it, with its own loss test ("UiPass: a device loss recreates the world
+//     canvases' pipeline and a World canvas draws the same image afterwards"). World Text, recorded in the Text row
+//     before the Ui row and depth-tested without depth writes like World canvases, never hides a World canvas: where
+//     they overlap the canvas draws over it, whichever is nearer (an accepted limit, decision 51, Backlog §6).
 
 namespace Engine {
 
@@ -44,6 +62,9 @@ namespace Engine {
 	// The size of a capture annotation's label (UiAnnotation::Label): scene pixels per em of the Default font.
 	inline constexpr float UiAnnotationLabelSize = 13.0f;
 
+	// C22.3 (decision 42): the most fonts a text's chain holds (its own font included).
+	inline constexpr size_t MaxUiFontChainLength = 8;
+
 	// One textured quad of a plan, axis-aligned in scene pixels. Texture names the texture asset that RecordUiPass resolves
 	// through the GpuResourceCache (a sheet's texture); null samples the QuadBatcher's opaque white texel.
 	struct UiPassQuad
@@ -55,6 +76,8 @@ namespace Engine {
 		glm::vec4 Color = glm::vec4(1.0f); // linear RGB, straight alpha
 		AssetHandle Texture{};
 		UiDrawFilter Filter = UiDrawFilter::Point;
+		// C22.3: UiScreenCanvas, or the World canvas (UiDrawList::WorldCanvases) whose pixels Min and Max are in.
+		uint32_t WorldCanvas = UiScreenCanvas;
 
 		bool operator==(const UiPassQuad&) const = default;
 	};
@@ -76,6 +99,9 @@ namespace Engine {
 		UiClipRect Clip{};
 		AssetHandle Font{};                // Glyphs: null is the Default font
 		glm::vec4 Color = glm::vec4(1.0f); // Glyphs: the text's colour
+		// C22.3: UiScreenCanvas, or the World canvas the run's quads or glyphs are in (already clipped on the CPU: Clipped is
+		// false); runs also split where it changes.
+		uint32_t WorldCanvas = UiScreenCanvas;
 
 		bool operator==(const UiPassRun&) const = default;
 	};
@@ -112,8 +138,25 @@ namespace Engine {
 	//     top-left corner at Min plus the vertical alignment's offset (Start 0, Center half, End all of the height the block
 	//     leaves), each glyph one TextPixelGlyph.
 	//   - Runs split where the kind, the clip, or a glyph run's font or colour changes; an item whose clip is empty draws nothing.
+	//   - C22.3: a text's chain is BuildUiFontChain of its font (stream F). A text item with HasCaret (stream T) then draws
+	//     its caret, a quad of its Color with the white texel, max(1, floor(FontSize / 16 + 0.5)) scene pixels wide, its
+	//     left edge at the x of FindTextCaret(measurement, CaretByte) and spanning that caret's line (its Top to its Top
+	//     plus the measurement's LineHeight). Its block is aligned vertically as at least LineHeight high (an empty text,
+	//     whose block has no height, places the caret where its first character's line will stand). When the item does not
+	//     wrap, the block (glyphs and caret) then moves by the least distance, left or right, that puts the caret's quad
+	//     inside [Min.x, Max.x] (none when it is inside; its left edge at Min.x when the quad is wider than the rectangle),
+	//     so the caret stays visible in a text wider than its rectangle, whatever its alignment. World canvases' items as
+	//     the file comment says (stream W).
 	// Main thread (the asset manager).
 	[[nodiscard]] UiPassPlan PlanUiPass(const UiDrawList& list, AssetManager& assets);
+
+	// C22.3 (decision 42; stream F): the font chain a text with font `font` lays out with: the font itself (null: the
+	// Default font, BuiltinAssetHandles::DefaultFont; missing or failed: its placeholder, as before C22.3), then its
+	// FontData::Fallbacks, depth first in their order (a fallback's own fallbacks right after it), each font once, at most
+	// MaxUiFontChainLength fonts. A fallback that is unknown, of another type or fails to load is left out (no placeholder
+	// in a chain: a placeholder has every glyph a fallback is meant for) and reported once per manager through
+	// AssetManager::ReportDiagnostic, as PlanUiPass reports a missing sheet. Main thread (the asset manager).
+	[[nodiscard]] std::vector<AssetHandle> BuildUiFontChain(AssetHandle font, AssetManager& assets);
 
 	struct UiPassInputs
 	{
@@ -126,6 +169,11 @@ namespace Engine {
 		// stage draws Text into); never null. Its pixels are the plan's scene pixels.
 		nvrhi::IFramebuffer* Framebuffer = nullptr;
 		nvrhi::IBuffer* ViewConstants = nullptr; // the Text pipelines' b0; never null
+		// C22.3 (decision 51; stream W): the view's camera, for the World canvases (HasCamera false: none is drawn); View
+		// orders them back to front and ViewProjection transforms their quads (the Text pipelines read it from b0).
+		bool HasCamera = false;
+		glm::mat4 View = glm::mat4(1.0f);
+		glm::mat4 ViewProjection = glm::mat4(1.0f);
 	};
 
 	// Records `inputs.Plan`'s runs in order under the caller's stats row ("Ui"): a Quads run through QuadBatcher::Record

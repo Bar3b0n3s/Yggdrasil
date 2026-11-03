@@ -4,6 +4,7 @@
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Scene/ComponentAccess.h"
+#include "Engine/Scene/Components/UiTextInputComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/UiInteraction.h"
@@ -288,6 +289,40 @@ return Script.Define("Mover", T)
 			}
 			CHECK(fixture.AddScript(AssetHandle(0x220020), "Assets/Scripts/Allowed.luau",
 				"local T = {Fields = {OnUiClicked = Field.Number()}}\nreturn Script.Define(\"Allowed\", T)\n"));
+		}
+
+		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 47; stream T): the text input's callbacks, registered with their
+		// reserved names by stream T; each receives the input's Text as it is when the callback runs, and bubbles.
+		TEST_CASE("UiEvents: OnUiTextChanged and OnUiSubmit receive the input's text and bubble, and their names are reserved" * doctest::skip(true))
+		{
+			Test::ScriptTestFixture fixture(UiEventSpecification());
+			const AssetHandle listen(0x220030);
+			REQUIRE(fixture.AddScript(listen, "Assets/Scripts/TextListen.luau", R"(local T = {}
+function T:OnUiTextChanged(element, text) Probe.Record(self.Entity.Name .. ":changed:" .. element.Name .. ":" .. text) end
+function T:OnUiSubmit(element, text) Probe.Record(self.Entity.Name .. ":submit:" .. element.Name .. ":" .. text) return true end
+return Script.Define("TextListen", T)
+)"));
+			Scene& scene = fixture.GetScene();
+			const Entity form = scene.CreateEntityWithID(UUID(50), "Form");
+			Entity field = scene.CreateEntityWithID(UUID(60), "Field", form);
+			field.AddComponent<UiTextInputComponent>(UiTextInputComponent{ .Text = "ab" });
+			const std::string slot = std::format(R"([ {{ "Script": "{}" }} ])", listen.ToString());
+			AddUiEventSlots(fixture, form, slot);
+			AddUiEventSlots(fixture, field, slot);
+			REQUIRE(fixture.Start());
+			fixture.GetEngine()->DispatchUiEvents(std::vector<UiEvent>{
+				UiEvent{ .Kind = UiEventKind::TextChanged, .Target = field.GetUUID() },
+				UiEvent{ .Kind = UiEventKind::Submit, .Target = field.GetUUID() },
+			});
+			// TextChanged bubbles to Form; Submit's true stops it at Field.
+			CHECK(UiEventTrace(scene) == std::vector<std::string>{ "Field:changed:Field:ab", "Form:changed:Field:ab", "Field:submit:Field:ab" });
+			for (const UiEventKind kind : { UiEventKind::TextChanged, UiEventKind::Submit })
+			{
+				const std::string_view callback = GetUiEventCallbackName(kind);
+				CAPTURE(callback);
+				CHECK_FALSE(fixture.AddScript(AssetHandle(0x220040 + static_cast<uint64_t>(kind)), std::format("Assets/Scripts/Reserved{}.luau", callback),
+					std::format("local T = {{Fields = {{{} = Field.Number()}}}}\nreturn Script.Define(\"Reserved\", T)\n", callback)));
+			}
 		}
 	}
 

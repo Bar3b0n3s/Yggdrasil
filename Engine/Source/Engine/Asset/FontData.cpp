@@ -71,6 +71,13 @@ namespace Engine {
 		return &*found;
 	}
 
+	// A stub of the M22 contract (C22.3, Docs/Decisions/0033-m22-contract.md decision 44) that stream S implements.
+	const FontGlyph* FindGlyphByIndex(const FontData& /*font*/, uint32_t /*glyphIndex*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return nullptr;
+	}
+
 	Status ValidateFontData(const FontData& font)
 	{
 		if (!std::isfinite(font.PixelSize) || !(font.PixelSize > 0.0f))

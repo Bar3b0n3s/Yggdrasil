@@ -7,10 +7,13 @@
 #include "Engine/Scene/Components/UiLayoutElementComponent.h"
 #include "Engine/Scene/Components/UiRectComponent.h"
 #include "Engine/Scene/Components/UiScrollViewComponent.h"
+#include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Components/UiSliderComponent.h"
+#include "Engine/Scene/Components/UiTextInputComponent.h"
 #include "Engine/Scene/Components/UiToggleComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Scene/TransformSystem.h"
 #include "Support/SceneTestFixture.h"
 
 #include <glm/glm.hpp>
@@ -506,6 +509,70 @@ namespace Engine {
 			CHECK(RequireNode(table, self).Visible);
 			CHECK(RequireNode(table, panel).Min == glm::vec2(0.0f, 60.0f));
 			CHECK(RequireNode(table, view).Min == glm::vec2(0.0f, 60.0f));
+		}
+
+		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 48; stream T).
+		TEST_CASE("UiLayout: a text input clips its descendants and hides its Placeholder while its Text is not empty" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity canvas = AddCanvas(scene, "Canvas", MakeUnsnappedCanvas());
+			Entity input = AddElement(scene, "Input", canvas, MakeTopLeftRect(glm::vec2(10.0f, 20.0f), glm::vec2(100.0f, 30.0f)));
+			Entity text = AddElement(scene, "Text", input, MakeTopLeftRect(glm::vec2(0.0f), glm::vec2(300.0f, 30.0f)));
+			Entity hint = AddElement(scene, "Hint", input, MakeTopLeftRect(glm::vec2(0.0f), glm::vec2(100.0f, 30.0f)));
+			input.AddComponent<UiTextInputComponent>(UiTextInputComponent{ .TextElement = text.GetUUID(), .Placeholder = hint.GetUUID() });
+
+			// Empty: the placeholder shows; the text element, wider than the input, is clipped to it (ClipChildren is off).
+			UiLayoutTable table = ComputeUiLayout(scene, glm::uvec2(400, 300));
+			CHECK_FALSE(RequireNode(table, hint).Hidden);
+			CHECK(RequireNode(table, hint).Visible);
+			CHECK(RequireNode(table, text).Clipped);
+			CHECK(RequireNode(table, text).Clip == UiClipRect{ .MinX = 10, .MinY = 20, .MaxX = 110, .MaxY = 50 });
+			CHECK_FALSE(RequireNode(table, input).Clipped);
+
+			// With text: the placeholder is hidden, laid out as before.
+			input.GetComponent<UiTextInputComponent>().Text = "abc";
+			table = ComputeUiLayout(scene, glm::uvec2(400, 300));
+			CHECK(RequireNode(table, hint).Hidden);
+			CHECK_FALSE(RequireNode(table, hint).Visible);
+			CHECK(RequireNode(table, hint).Min == glm::vec2(10.0f, 20.0f));
+		}
+
+		// C22.3 (decision 49; stream W).
+		TEST_CASE("UiLayout: a World canvas lays out over its own size and carries its world matrix" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			// A MatchHeight World canvas 400 x 200 canvas pixels with a reference height of 100 (2 pixels per unit) at 100
+			// pixels per world unit, translated to (1, 2, 3); the scene image is 1920 x 1080 and changes nothing.
+			Entity canvas = AddCanvas(scene, "Board",
+				UiCanvasComponent{ .ScaleMode = UiScaleMode::MatchHeight,
+					.ReferenceHeight = 100.0f,
+					.RenderMode = UiCanvasRenderMode::World,
+					.WorldWidth = 400,
+					.WorldHeight = 200,
+					.PixelsPerUnit = 100.0f });
+			canvas.GetComponent<TransformComponent>().Translation = glm::vec3(1.0f, 2.0f, 3.0f);
+			TransformSystem::Update(scene);
+			Entity panel = AddElement(scene, "Panel", canvas, MakeTopLeftRect(glm::vec2(10.0f, 5.0f), glm::vec2(50.0f, 25.0f)));
+			// Beyond the canvas's 400-pixel width: laid out but not visible, whatever the scene image.
+			Entity outside = AddElement(scene, "Outside", canvas, MakeTopLeftRect(glm::vec2(250.0f, 0.0f), glm::vec2(10.0f, 10.0f)));
+
+			const UiLayoutTable table = ComputeUiLayout(scene, glm::uvec2(1920, 1080));
+			REQUIRE(table.Canvases.size() == 1);
+			const UiCanvasLayout& layout = table.Canvases[0];
+			CHECK(layout.RenderMode == UiCanvasRenderMode::World);
+			CHECK(layout.SceneSize == glm::uvec2(400, 200));
+			CHECK(layout.Scale == 2.0f);
+			CHECK(layout.Size == glm::vec2(200.0f, 100.0f));
+			CHECK(RequireNode(table, panel).Min == glm::vec2(20.0f, 10.0f));
+			CHECK(RequireNode(table, panel).Max == glm::vec2(120.0f, 60.0f));
+			CHECK(RequireNode(table, panel).Visible);
+			CHECK_FALSE(RequireNode(table, outside).Visible);
+			// Canvas pixel (0, 0) is the top-left corner: (-2, 1) units from the canvas's centre, at (1, 2, 3); pixel (400, 200)
+			// the bottom-right one.
+			CHECK(glm::vec3(layout.World * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f)) == glm::vec3(-1.0f, 3.0f, 3.0f));
+			CHECK(glm::vec3(layout.World * glm::vec4(400.0f, 200.0f, 0.0f, 1.0f)) == glm::vec3(3.0f, 1.0f, 3.0f));
 		}
 	}
 

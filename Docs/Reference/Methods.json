@@ -3148,6 +3148,9 @@
 							},
 							"UiScrollView": {
 								"$ref": "#/$defs/UiScrollView"
+							},
+							"UiTextInput": {
+								"$ref": "#/$defs/UiTextInput"
 							}
 						},
 						"additionalProperties": false
@@ -4885,6 +4888,47 @@
 						},
 						"additionalProperties": false
 					},
+					"UiTextInput": {
+						"description": "A UI text field: while focused, typed characters insert at its caret and the editing keys edit it, raising OnUiTextChanged; Enter raises OnUiSubmit.",
+						"type": "object",
+						"properties": {
+							"Interactable": {
+								"description": "Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event.",
+								"type": "boolean"
+							},
+							"Focusable": {
+								"description": "Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it.",
+								"type": "boolean"
+							},
+							"Text": {
+								"description": "The field's UTF-8 text: typing inserts at the caret; a script's write raises no OnUiTextChanged.",
+								"type": "string"
+							},
+							"MaxLength": {
+								"description": "The most codepoints typing reaches; characters typed past it are dropped.",
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 1024
+							},
+							"Caret": {
+								"description": "The caret, in codepoints from the start of Text, read clamped to Text's length; typing and the editing keys move it.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"TextElement": {
+								"description": "A UI element below the input whose UiText shows the input's Text, with the caret while focused; null shows nothing.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
+							},
+							"Placeholder": {
+								"description": "A UI element below the input shown only while its Text is empty (a hint); null for none.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
+							}
+						},
+						"additionalProperties": false
+					},
 					"PrefabOverride": {
 						"description": "One recorded difference between an outermost prefab instance and its prefab.",
 						"type": "object",
@@ -5785,6 +5829,9 @@
 							},
 							"UiScrollView": {
 								"$ref": "#/$defs/UiScrollView"
+							},
+							"UiTextInput": {
+								"$ref": "#/$defs/UiTextInput"
 							}
 						},
 						"additionalProperties": false
@@ -7525,6 +7572,47 @@
 								"type": "number",
 								"minimum": 0,
 								"maximum": 1000000
+							}
+						},
+						"additionalProperties": false
+					},
+					"UiTextInput": {
+						"description": "A UI text field: while focused, typed characters insert at its caret and the editing keys edit it, raising OnUiTextChanged; Enter raises OnUiSubmit.",
+						"type": "object",
+						"properties": {
+							"Interactable": {
+								"description": "Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event.",
+								"type": "boolean"
+							},
+							"Focusable": {
+								"description": "Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it.",
+								"type": "boolean"
+							},
+							"Text": {
+								"description": "The field's UTF-8 text: typing inserts at the caret; a script's write raises no OnUiTextChanged.",
+								"type": "string"
+							},
+							"MaxLength": {
+								"description": "The most codepoints typing reaches; characters typed past it are dropped.",
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 1024
+							},
+							"Caret": {
+								"description": "The caret, in codepoints from the start of Text, read clamped to Text's length; typing and the editing keys move it.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"TextElement": {
+								"description": "A UI element below the input whose UiText shows the input's Text, with the caret while focused; null shows nothing.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
+							},
+							"Placeholder": {
+								"description": "A UI element below the input shown only while its Text is empty (a hint); null for none.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
 							}
 						},
 						"additionalProperties": false
@@ -11553,6 +11641,9 @@
 							},
 							"UiScrollView": {
 								"$ref": "#/$defs/UiScrollView"
+							},
+							"UiTextInput": {
+								"$ref": "#/$defs/UiTextInput"
 							}
 						},
 						"additionalProperties": false
@@ -13282,6 +13373,47 @@
 								"type": "number",
 								"minimum": 0,
 								"maximum": 1000000
+							}
+						},
+						"additionalProperties": false
+					},
+					"UiTextInput": {
+						"description": "A UI text field: while focused, typed characters insert at its caret and the editing keys edit it, raising OnUiTextChanged; Enter raises OnUiSubmit.",
+						"type": "object",
+						"properties": {
+							"Interactable": {
+								"description": "Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event.",
+								"type": "boolean"
+							},
+							"Focusable": {
+								"description": "Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it.",
+								"type": "boolean"
+							},
+							"Text": {
+								"description": "The field's UTF-8 text: typing inserts at the caret; a script's write raises no OnUiTextChanged.",
+								"type": "string"
+							},
+							"MaxLength": {
+								"description": "The most codepoints typing reaches; characters typed past it are dropped.",
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 1024
+							},
+							"Caret": {
+								"description": "The caret, in codepoints from the start of Text, read clamped to Text's length; typing and the editing keys move it.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"TextElement": {
+								"description": "A UI element below the input whose UiText shows the input's Text, with the caret while focused; null shows nothing.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
+							},
+							"Placeholder": {
+								"description": "A UI element below the input shown only while its Text is empty (a hint); null for none.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
 							}
 						},
 						"additionalProperties": false

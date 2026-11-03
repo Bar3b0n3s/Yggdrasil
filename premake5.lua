@@ -81,6 +81,8 @@ group "Dependencies"
 	include "Vendor/MikkTSpace"
 	include "Vendor/nativefiledialog-extended"
 	include "Vendor/spdlog"
+	include "Vendor/HarfBuzz"
+	include "Vendor/SheenBidi"
 
 group "Engine"
 	include "Engine"

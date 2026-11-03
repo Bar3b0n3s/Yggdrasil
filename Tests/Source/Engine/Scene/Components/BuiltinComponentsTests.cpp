@@ -35,7 +35,7 @@ namespace Engine {
 	{
 		TEST_CASE("BuiltinComponents: every listed type is plain component data")
 		{
-			static_assert(BuiltinComponents::Size == 34);
+			static_assert(BuiltinComponents::Size == 35);
 			size_t count = 0;
 			ForEachType(BuiltinComponents{}, [&count]<typename T>()
 			{
@@ -272,6 +272,11 @@ namespace Engine {
 			CHECK(canvas.Theme.Disabled == glm::vec4(0.5f, 0.5f, 0.5f, 0.5f));
 			// C22.2 (decision 23): no default focus, so navigation starts only from a press or Ui.SetFocus.
 			CHECK_FALSE(canvas.DefaultFocus.IsValid());
+			// C22.3 (decision 49): a Screen canvas; a World canvas's size and scale (registered by stream W).
+			CHECK(canvas.RenderMode == UiCanvasRenderMode::Screen);
+			CHECK(canvas.WorldWidth == 1024u);
+			CHECK(canvas.WorldHeight == 576u);
+			CHECK(canvas.PixelsPerUnit == 512.0f);
 
 			const UiRectComponent rect;
 			CHECK(rect.AnchorMin == glm::vec2(0.5f));
@@ -349,12 +354,22 @@ namespace Engine {
 			CHECK(scrollView.Vertical);
 			CHECK(scrollView.ScrollPosition == glm::vec2(0.0f));
 			CHECK(scrollView.ScrollStep == 40.0f);
+
+			// C22.3 (decision 45): the text input.
+			const UiTextInputComponent textInput;
+			CHECK(textInput.Interactable);
+			CHECK(textInput.Focusable);
+			CHECK(textInput.Text.empty());
+			CHECK(textInput.MaxLength == 256u);
+			CHECK(textInput.Caret == 0u);
+			CHECK_FALSE(textInput.TextElement.IsValid());
+			CHECK_FALSE(textInput.Placeholder.IsValid());
 		}
 
 		// Several paths read only the added component's own Excludes (Entity:AddComponent, component.list and component.schema,
 		// the generated reference), so both components of an exclusion declare it: RigidBody and CharacterController, UiCanvas
 		// and UiRect (the C22.1 review, Docs/Decisions/0033-m22-contract.md decision 2), and each pair of C22.2's four widgets
-		// (decision 21).
+		// (decision 21) and C22.3's text input (decision 45): five widgets, 20 ordered pairs.
 		TEST_CASE("BuiltinComponents: every exclusion is declared by both components")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
@@ -368,7 +383,7 @@ namespace Engine {
 					++exclusions;
 				}
 			}
-			CHECK(exclusions == 16);
+			CHECK(exclusions == 24);
 			const ComponentInfo* canvas = registry->FindComponent<UiCanvasComponent>();
 			const ComponentInfo* rect = registry->FindComponent<UiRectComponent>();
 			REQUIRE(canvas != nullptr);
@@ -454,6 +469,7 @@ namespace Engine {
 				"UiToggle",
 				"UiSlider",
 				"UiScrollView",
+				"UiTextInput",
 			};
 			std::vector<std::string> names;
 			for (const ComponentInfo* component : registry->GetComponents())

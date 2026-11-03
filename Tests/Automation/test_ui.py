@@ -23,6 +23,21 @@ def create_ui(client: engine_client.EngineClient) -> None:
     ]})
 
 
+# Records the text input's callbacks (C22.3, decision 47) as "<callback>:<element>:<text>".
+FORM_LOG = """local FormLog = {}
+function FormLog.OnCreate(self: any)
+\tself.Log = {}
+end
+function FormLog.OnUiTextChanged(self: any, element: Entity, text: string)
+\ttable.insert(self.Log, "changed:" .. element.Name .. ":" .. text)
+end
+function FormLog.OnUiSubmit(self: any, element: Entity, text: string)
+\ttable.insert(self.Log, "submit:" .. element.Name .. ":" .. text)
+end
+return Script.Define("FormLog", FormLog)
+"""
+
+
 class UiTreeTests(AutomationTestCase):
     """ui.tree in the editor and the Runtime."""
 
@@ -116,6 +131,37 @@ class UiInteractionTests(AutomationTestCase):
         self.assertTrue(button["hovered"])
         self.assertTrue(button["focused"])
         self.assertFalse(button["pressed"])
+        client.call("play.stop")
+
+    @unittest.skip("contract stub: Docs/Decisions/0033-m22-contract.md decisions 46, 47 and 53 (stream T)")
+    def test_typed_text_reaches_on_ui_text_changed_and_ui_tree_reports_it(self) -> None:
+        # M22 C22.3: a press focuses a text field; Text events injected through play.step are latched by the
+        # TextLatch phase and typed into it, OnUiTextChanged and OnUiSubmit (Enter) bubble to the canvas's behaviour
+        # with the field's text, and ui.tree reports the field as a TextInput with its text.
+        client, _ = self.open_editor_with_scene()
+        client.call("script.write", {"path": "Assets/Scripts/FormLog.luau", "source": FORM_LOG})
+        client.call("edit.batch", {"label": "Ui", "ops": [
+            {"method": "entity.create", "params": {"name": "Form", "components": {
+                "UiCanvas": {}, "Script": {"Scripts": [{"Script": "Assets/Scripts/FormLog.luau"}]}}}},
+            {"method": "ui.createWidget", "params": {"kind": "TextInput", "parent": {"$ref": "0.entity.id"},
+                                                     "name": "Name", "text": "Your name"}},
+        ]})
+        field = next(element for element in client.call("ui.tree", {"format": "Json"})["elements"]
+                     if element["name"] == "Name")
+        point = [field["rect"]["x"] + 4, field["rect"]["y"] + 4]
+        client.call("play.start", {"lockstep": True})
+        client.call("play.step", {"ticks": 2, "render": "none", "input": [
+            {"type": "mouseButton", "button": "Left", "state": "tap", "position": point}]})
+        client.call("play.step", {"ticks": 2, "render": "none", "input": [{"type": "text", "text": "Ada"}]})
+        client.call("play.step", {"ticks": 2, "render": "none", "input": [
+            {"type": "key", "key": "Enter", "state": "tap"}]})
+        log = client.call("script.eval", {"context": "play", "entity": "/Form", "code": "return self.Log"})
+        self.assertEqual(log["value"], ["changed:Name:Ada", "submit:Name:Ada"])
+        played = client.call("ui.tree", {"format": "Json", "target": "play"})
+        name = next(element for element in played["elements"] if element["name"] == "Name")
+        self.assertEqual(name["widget"], "TextInput")
+        self.assertEqual(name["text"], "Ada")
+        self.assertTrue(name["focused"])
         client.call("play.stop")
 
     def test_ui_tree_reports_the_interaction_in_the_runtime(self) -> None:

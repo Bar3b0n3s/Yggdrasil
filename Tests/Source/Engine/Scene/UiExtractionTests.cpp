@@ -9,7 +9,9 @@
 #include "Engine/Scene/Components/UiRectComponent.h"
 #include "Engine/Scene/Components/UiScrollViewComponent.h"
 #include "Engine/Scene/Components/UiSliderComponent.h"
+#include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Components/UiTextComponent.h"
+#include "Engine/Scene/Components/UiTextInputComponent.h"
 #include "Engine/Scene/Components/UiToggleComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/RenderAnnotations.h"
@@ -20,6 +22,7 @@
 #include "Support/SceneTestFixture.h"
 
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
 #include <format>
@@ -481,6 +484,160 @@ namespace Engine {
 			});
 			REQUIRE(plainButton != plain->Ui.Items.end());
 			CHECK(plainButton->Color == color * theme.Normal);
+		}
+
+		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 48; stream T).
+		TEST_CASE("UiExtraction: a text input's TextElement draws its Text, with the caret while the input is focused" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity canvas = scene.CreateEntity("Canvas");
+			canvas.AddComponent<UiCanvasComponent>(UiCanvasComponent{});
+			Entity input = AddElement(scene, "Input", canvas, glm::vec2(0.0f), glm::vec2(100.0f, 20.0f));
+			Entity text = AddElement(scene, "Text", input, glm::vec2(0.0f), glm::vec2(100.0f, 20.0f));
+			text.AddComponent<UiTextComponent>(UiTextComponent{ .Text = "authored", .Wrap = false });
+			Entity hint = AddElement(scene, "Hint", input, glm::vec2(0.0f), glm::vec2(100.0f, 20.0f));
+			hint.AddComponent<UiTextComponent>(UiTextComponent{ .Text = "Name?" });
+			input.AddComponent<UiTextInputComponent>(
+				UiTextInputComponent{ .Text = "h\xC3\xA9llo", .Caret = 2, .TextElement = text.GetUUID(), .Placeholder = hint.GetUUID() });
+			const UiLayoutTable table = ComputeUiLayout(scene, glm::uvec2(200, 100));
+
+			// Unfocused: the TextElement draws the input's Text, without a caret; the placeholder is hidden (Text is not empty).
+			UiDrawList list;
+			AppendUiDrawItems(scene, table, list);
+			REQUIRE(list.Items.size() == 1);
+			CHECK(list.Items[0].Entity == text.GetUUID());
+			CHECK(list.Items[0].Text == "h\xC3\xA9llo");
+			CHECK_FALSE(list.Items[0].HasCaret);
+
+			// Focused: the caret before codepoint 2, byte 3.
+			const UiInteractionState focused{ .Focused = input.GetUUID() };
+			list = UiDrawList{};
+			AppendUiDrawItems(scene, table, list, &focused);
+			REQUIRE(list.Items.size() == 1);
+			CHECK(list.Items[0].HasCaret);
+			CHECK(list.Items[0].CaretByte == 3u);
+
+			// Empty: the TextElement draws nothing and the placeholder its own text; focused, the TextElement draws only its caret.
+			input.GetComponent<UiTextInputComponent>().Text.clear();
+			const UiLayoutTable empty = ComputeUiLayout(scene, glm::uvec2(200, 100));
+			list = UiDrawList{};
+			AppendUiDrawItems(scene, empty, list);
+			REQUIRE(list.Items.size() == 1);
+			CHECK(list.Items[0].Entity == hint.GetUUID());
+			CHECK(list.Items[0].Text == "Name?");
+			list = UiDrawList{};
+			AppendUiDrawItems(scene, empty, list, &focused);
+			REQUIRE(list.Items.size() == 2);
+			CHECK(list.Items[0].Entity == text.GetUUID());
+			CHECK(list.Items[0].Text.empty());
+			CHECK(list.Items[0].HasCaret);
+			CHECK(list.Items[0].CaretByte == 0u);
+			CHECK(list.Items[1].Entity == hint.GetUUID());
+		}
+
+		// C22.3 (decision 51; stream W).
+		TEST_CASE("RenderExtraction: World canvases draw in every world view at their render pose, Screen canvases only in game and camera views"
+			* doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity camera = scene.CreateEntity("Camera");
+			camera.AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			Entity hud = scene.CreateEntity("Hud");
+			hud.AddComponent<UiCanvasComponent>(UiCanvasComponent{});
+			AddElement(scene, "Score", hud, glm::vec2(0.0f), glm::vec2(8.0f)).AddComponent<UiImageComponent>(UiImageComponent{});
+			Entity board = scene.CreateEntity("Board");
+			board.GetComponent<TransformComponent>().Translation = glm::vec3(4.0f, 0.0f, 0.0f);
+			board.AddComponent<UiCanvasComponent>(
+				UiCanvasComponent{ .RenderMode = UiCanvasRenderMode::World, .WorldWidth = 64, .WorldHeight = 32, .PixelsPerUnit = 32.0f });
+			Entity sign = AddElement(scene, "Sign", board, glm::vec2(8.0f), glm::vec2(16.0f));
+			sign.AddComponent<UiImageComponent>(UiImageComponent{});
+			TransformSystem::Update(scene);
+
+			// The game view: the World canvas's item in its own pixels, naming it; the Screen canvas's in scene pixels.
+			const Result<RenderSnapshot> game = ExtractRenderSnapshot(scene, { .Width = 200, .Height = 100 });
+			REQUIRE_MESSAGE(game.has_value(), game.error().ToString());
+			REQUIRE(game->Ui.WorldCanvases.size() == 1);
+			CHECK(game->Ui.WorldCanvases[0].Canvas == board.GetUUID());
+			CHECK(game->Ui.WorldCanvases[0].Size == glm::uvec2(64, 32));
+			CHECK(glm::vec3(game->Ui.WorldCanvases[0].World * glm::vec4(32.0f, 16.0f, 0.0f, 1.0f)) == glm::vec3(4.0f, 0.0f, 0.0f));
+			const auto signItem = std::ranges::find_if(game->Ui.Items, [&sign](const UiDrawItem& item)
+			{
+				return item.Entity == sign.GetUUID();
+			});
+			REQUIRE(signItem != game->Ui.Items.end());
+			CHECK(signItem->WorldCanvas == 0u);
+			CHECK(signItem->Min == glm::vec2(8.0f));
+			CHECK(game->Ui.Items.size() == 2);
+
+			// The editor's scene view (an Explicit camera) draws the World canvas only.
+			const Result<RenderSnapshot> sceneView = ExtractRenderSnapshot(scene, { .Camera = RenderCameraSource::Explicit, .Width = 200, .Height = 100 });
+			REQUIRE_MESSAGE(sceneView.has_value(), sceneView.error().ToString());
+			REQUIRE(sceneView->Ui.Items.size() == 1);
+			CHECK(sceneView->Ui.Items[0].Entity == sign.GetUUID());
+			CHECK(sceneView->Ui.WorldCanvases.size() == 1);
+		}
+
+		// C22.3 (the review of C22.3, its major on the consumers of World canvases' pixels; stream W, UiExtraction.h): a World
+		// canvas's element is outlined and labelled at the scene-pixel rectangle bounding its corners as the camera projects
+		// them, and not at all without a camera or when a corner lies behind the camera's plane; a Screen canvas's element
+		// keeps its rectangle. The list is built by hand, as the annotations read the snapshot's own draw list.
+		TEST_CASE("RenderAnnotations: a World canvas's element is outlined and labelled where the camera projects it" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			Entity sign = fixture.GetScene().CreateEntity("Sign");
+			Entity hud = fixture.GetScene().CreateEntity("Hud");
+			const auto view = [&sign, &hud](bool hasCamera, float z)
+			{
+				RenderSnapshot snapshot;
+				snapshot.HasCamera = hasCamera;
+				// The camera at the origin, looking down -Z, through a projection whose clip-space w is the view-space -z: a
+				// point at z = -0.5 lands at NDC (2 x, 2 y), in a 200 x 100 scene image.
+				snapshot.Camera.Projection = glm::mat4(1.0f);
+				snapshot.Camera.Projection[2][3] = -1.0f;
+				snapshot.Camera.Projection[3][3] = 0.0f;
+				snapshot.Camera.ViewportWidth = 200;
+				snapshot.Camera.ViewportHeight = 100;
+				snapshot.Annotations = RenderAnnotations{ .Labels = RenderAnnotationLabels::All, .Bounds = true };
+				// A 64 x 32 World canvas at 32 canvas pixels per unit, centred on (0, 0, z): the sign's [16, 8] to [48, 24] spans
+				// x -0.5 to 0.5 and y 0.25 down to -0.25.
+				snapshot.Ui.WorldCanvases.push_back(UiWorldCanvas{ .Canvas = UUID(0xB0A2D),
+					.Size = glm::uvec2(64, 32),
+					.World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, z)) * glm::scale(glm::mat4(1.0f), glm::vec3(1.0f / 32.0f, -1.0f / 32.0f, 1.0f))
+						* glm::translate(glm::mat4(1.0f), glm::vec3(-32.0f, -16.0f, 0.0f)) });
+				snapshot.Ui.Items.push_back(UiDrawItem{ .Kind = UiDrawKind::Image,
+					.Entity = sign.GetUUID(),
+					.Min = glm::vec2(16.0f, 8.0f),
+					.Max = glm::vec2(48.0f, 24.0f),
+					.WorldCanvas = 0 });
+				snapshot.Ui.Items.push_back(
+					UiDrawItem{ .Kind = UiDrawKind::Image, .Entity = hud.GetUUID(), .Min = glm::vec2(4.0f, 2.0f), .Max = glm::vec2(40.0f, 20.0f) });
+				return snapshot;
+			};
+
+			// In front of the camera: the sign's corners at NDC (-1, 0.5) and (1, -0.5), so (0, 25) to (200, 75).
+			RenderSnapshot front = view(true, -0.5f);
+			AppendUiRenderAnnotations(fixture.GetScene(), front);
+			const auto& marks = front.Ui.Annotations;
+			REQUIRE(marks.size() == 4);
+			CHECK((marks[0].Entity == sign.GetUUID() && marks[0].Outline));
+			CHECK(marks[0].Min == glm::vec2(0.0f, 25.0f));
+			CHECK(marks[0].Max == glm::vec2(200.0f, 75.0f));
+			CHECK((marks[1].Entity == sign.GetUUID() && !marks[1].Outline));
+			CHECK(marks[1].Min == glm::vec2(0.0f, 25.0f));
+			CHECK((marks[2].Entity == hud.GetUUID() && marks[2].Outline));
+			CHECK(marks[2].Min == glm::vec2(4.0f, 2.0f));
+			CHECK(marks[2].Max == glm::vec2(40.0f, 20.0f));
+
+			// Behind the camera, or in a view without one: the sign takes none, the HUD's element its own.
+			for (RenderSnapshot snapshot : { view(true, 0.5f), view(false, -0.5f) })
+			{
+				AppendUiRenderAnnotations(fixture.GetScene(), snapshot);
+				REQUIRE(snapshot.Ui.Annotations.size() == 2);
+				CHECK(snapshot.Ui.Annotations[0].Entity == hud.GetUUID());
+				CHECK(snapshot.Ui.Annotations[1].Entity == hud.GetUUID());
+			}
 		}
 	}
 

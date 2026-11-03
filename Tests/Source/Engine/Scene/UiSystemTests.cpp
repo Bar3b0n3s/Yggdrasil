@@ -3,15 +3,19 @@
 #include "Engine/Scene/UiSystem.h"
 
 #include "Engine/Core/Hash.h"
+#include "Engine/Scene/Components/CameraComponent.h"
+#include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Components/UiButtonComponent.h"
 #include "Engine/Scene/Components/UiCanvasComponent.h"
 #include "Engine/Scene/Components/UiImageComponent.h"
 #include "Engine/Scene/Components/UiRectComponent.h"
 #include "Engine/Scene/Components/UiScrollViewComponent.h"
 #include "Engine/Scene/Components/UiSliderComponent.h"
+#include "Engine/Scene/Components/UiTextInputComponent.h"
 #include "Engine/Scene/Components/UiToggleComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Scene/TransformSystem.h"
 #include "Support/SceneTestFixture.h"
 
 #include <glm/glm.hpp>
@@ -26,7 +30,8 @@
 // The play session's UI (M22, C22.1; Docs/Decisions/0033-m22-contract.md decision 3): the step's and the frame's layouts and
 // which one is current (ADR 0028's phase-2 ledger: UiInput hit-tests the later of the two). C22.2 (decisions 23, 24, 28 and
 // 29): the UiInput phase's state machine, Ui.SetFocus and the ui state-hash block (stream A); the cases that activate, step
-// or scroll widgets also run streams B's and C's widget behaviours.
+// or scroll widgets also run streams B's and C's widget behaviours. C22.3 (decisions 47 and 50): the text input's step and a
+// World canvas's pointer through the camera.
 
 namespace Engine {
 
@@ -705,6 +710,111 @@ namespace Engine {
 			XXH64Hasher taken(0);
 			ui.AppendStateHash(taken);
 			CHECK(taken.Digest() == untouched.Digest());
+		}
+
+		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 47; stream T): the text step 7a.
+		TEST_CASE("UiSystem: a focused text input takes the step's text and editing keys, and keyboard navigation pauses while it has focus"
+			* doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity canvas = scene.CreateEntity("Canvas");
+			canvas.AddComponent<UiCanvasComponent>(UiCanvasComponent{});
+			Entity field = AddUiSystemElement(scene, "Field", canvas, glm::vec2(0.0f), glm::vec2(200.0f, 30.0f));
+			field.AddComponent<UiTextInputComponent>(UiTextInputComponent{});
+			Entity button = AddUiSystemElement(scene, "Button", canvas, glm::vec2(0.0f, 40.0f), glm::vec2(200.0f, 30.0f));
+			button.AddComponent<UiButtonComponent>(UiButtonComponent{});
+			UiSystem ui;
+			ui.LayoutStep(scene, glm::uvec2(400, 300));
+
+			// Text typed while nothing is focused goes nowhere.
+			ui.ProcessInput(scene, UiInputFrame{ .Pointer = glm::vec2(-1000.0f), .Text = "lost" });
+			CHECK(field.GetComponent<UiTextInputComponent>().Text.empty());
+			CHECK(ui.TakeEvents().empty());
+
+			// A press on the field focuses it; the next step's text and keys edit it, raising TextChanged.
+			static_cast<void>(ProcessPointer(ui, scene, glm::vec2(10.0f), true, true, false));
+			static_cast<void>(ProcessPointer(ui, scene, glm::vec2(10.0f), false, false, true));
+			CHECK(ui.GetInteraction().Focused == field.GetUUID());
+			ui.ProcessInput(scene, UiInputFrame{ .Pointer = glm::vec2(-1000.0f), .Text = "hi!", .TextKeys = UiTextKeys::Backspace });
+			CHECK(field.GetComponent<UiTextInputComponent>().Text == "hi");
+			CHECK(ui.TakeEvents() == std::vector<UiEvent>{ MakeUiEvent(UiEventKind::Hover, field, false), MakeUiEvent(UiEventKind::TextChanged, field) });
+
+			// The keyboard's Down, Left and Submit, which typing presses as keys too, do not navigate or submit while the field
+			// has focus; a gamepad's Down does, and Next (Tab) would.
+			ui.ProcessInput(scene, UiInputFrame{ .Pointer = glm::vec2(-1000.0f), .Navigation = UiNavigation::Down | UiNavigation::Left | UiNavigation::Submit });
+			CHECK(ui.GetInteraction().Focused == field.GetUUID());
+			CHECK(ui.TakeEvents().empty());
+
+			// Enter submits the field; Submit through a gamepad does too.
+			ui.ProcessInput(scene, UiInputFrame{ .Pointer = glm::vec2(-1000.0f), .TextKeys = UiTextKeys::Enter });
+			CHECK(ui.TakeEvents() == std::vector<UiEvent>{ MakeUiEvent(UiEventKind::Submit, field) });
+			ui.ProcessInput(scene, UiInputFrame{ .Pointer = glm::vec2(-1000.0f), .Navigation = UiNavigation::Submit, .GamepadNavigation = UiNavigation::Submit });
+			CHECK(ui.TakeEvents() == std::vector<UiEvent>{ MakeUiEvent(UiEventKind::Submit, field) });
+			ui.ProcessInput(scene, UiInputFrame{ .Pointer = glm::vec2(-1000.0f), .Navigation = UiNavigation::Down, .GamepadNavigation = UiNavigation::Down });
+			CHECK(ui.GetInteraction().Focused == button.GetUUID());
+			// The button has focus now: a keyboard command (Up here), which the field ignored, navigates again, and typed text
+			// goes nowhere.
+			ui.ProcessInput(scene, UiInputFrame{ .Pointer = glm::vec2(-1000.0f), .Navigation = UiNavigation::Up, .Text = "x" });
+			CHECK(ui.GetInteraction().Focused == field.GetUUID());
+			CHECK(field.GetComponent<UiTextInputComponent>().Text == "hi");
+		}
+
+		// C22.3 (decisions 50 and 51; stream W): a World canvas takes the pointer through the camera.
+		TEST_CASE("UiSystem: a World canvas's button is hovered and clicked through the camera, and its slider drags along its plane"
+			* doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			// The camera at (0, 0, 10) looking down -Z with a 90 degree field of view; the scene image 200 x 200, so a pointer at
+			// the image's centre looks straight at the canvas's centre.
+			Entity camera = scene.CreateEntity("Camera");
+			camera.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, 0.0f, 10.0f);
+			camera.AddComponent<CameraComponent>(CameraComponent{ .VerticalFov = 90.0f, .Primary = true });
+			// A World canvas of 200 x 100 canvas pixels at 20 pixels per unit (10 x 5 units) at the origin, facing the camera.
+			Entity canvas = scene.CreateEntity("Board");
+			canvas.AddComponent<UiCanvasComponent>(
+				UiCanvasComponent{ .RenderMode = UiCanvasRenderMode::World, .WorldWidth = 200, .WorldHeight = 100, .PixelsPerUnit = 20.0f });
+			Entity button = AddUiSystemElement(scene, "Button", canvas, glm::vec2(80.0f, 30.0f), glm::vec2(40.0f, 40.0f));
+			button.AddComponent<UiButtonComponent>(UiButtonComponent{});
+			Entity slider = AddUiSystemElement(scene, "Slider", canvas, glm::vec2(0.0f, 0.0f), glm::vec2(200.0f, 20.0f));
+			slider.AddComponent<UiSliderComponent>(UiSliderComponent{ .Focusable = false });
+			TransformSystem::Update(scene);
+			UiSystem ui;
+			ui.LayoutStep(scene, glm::uvec2(200, 200));
+
+			const auto frame = [&scene](glm::vec2 pointer, bool down, bool pressed, bool released)
+			{
+				return UiInputFrame{ .Pointer = pointer,
+					.PointerDown = down,
+					.PointerPressed = pressed,
+					.PointerReleased = released,
+					.Ray = ComputeUiPointerRay(scene, pointer, glm::uvec2(200, 200)) };
+			};
+			// The image's centre (100, 100) meets the canvas's centre, canvas pixel (100, 50): inside the button.
+			ui.ProcessInput(scene, frame(glm::vec2(100.0f), false, false, false));
+			CHECK(ui.GetInteraction().Hovered == button.GetUUID());
+			CHECK(ui.GetInteraction().PointerOverUi);
+			ui.ProcessInput(scene, frame(glm::vec2(100.0f), true, true, false));
+			ui.ProcessInput(scene, frame(glm::vec2(100.0f), false, false, true));
+			const std::vector<UiEvent> clicked = ui.TakeEvents();
+			CHECK(std::ranges::count(clicked, MakeUiEvent(UiEventKind::Click, button)) == 1);
+
+			// The slider's left end is canvas x 0, world x -5; at the camera's distance of 10 a pointer 25 scene pixels right of
+			// the centre looks at world x 2.5 (tan 45 degrees: 100 pixels to 10 units), canvas x 150: three quarters along it.
+			// The press is on the slider's top row: canvas y 0 to 20 is world y 2.5 to 1.5, scene y 75 to 85.
+			ui.ProcessInput(scene, frame(glm::vec2(125.0f, 80.0f), true, true, false));
+			CHECK(ui.GetInteraction().Dragged == slider.GetUUID());
+			CHECK(slider.GetComponent<UiSliderComponent>().Value == doctest::Approx(0.75f));
+			// Dragging leftward along the plane, off the slider's rectangle, follows the plane: canvas x 50, a quarter.
+			ui.ProcessInput(scene, frame(glm::vec2(75.0f, 150.0f), true, false, false));
+			CHECK(slider.GetComponent<UiSliderComponent>().Value == doctest::Approx(0.25f));
+			ui.ProcessInput(scene, frame(glm::vec2(75.0f, 150.0f), false, false, true));
+			CHECK_FALSE(ui.GetInteraction().Dragged.IsValid());
+
+			// Without a ray (no primary camera, or a frame without it) the World canvas is not hit.
+			ui.ProcessInput(scene, UiInputFrame{ .Pointer = glm::vec2(100.0f) });
+			CHECK_FALSE(ui.GetInteraction().Hovered.IsValid());
 		}
 	}
 

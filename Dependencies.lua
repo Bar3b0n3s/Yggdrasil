@@ -79,6 +79,9 @@ IncludeDir["stb"] = RepositoryRoot .. "/Vendor/stb"
 IncludeDir["MikkTSpace"] = RepositoryRoot .. "/Vendor/MikkTSpace"
 IncludeDir["nfd"] = RepositoryRoot .. "/Vendor/nativefiledialog-extended/src/include"
 IncludeDir["doctest"] = RepositoryRoot .. "/Vendor/doctest"
+-- M22 (C22.3, Docs/Decisions/0033-m22-contract.md decision 41): text shaping and the bidirectional algorithm.
+IncludeDir["HarfBuzz"] = RepositoryRoot .. "/Vendor/HarfBuzz/src"
+IncludeDir["SheenBidi"] = RepositoryRoot .. "/Vendor/SheenBidi/Headers"
 
 -- Project kinds that produce a linked binary and therefore link libraries.
 local LinkingKinds = "kind:ConsoleApp or WindowedApp or SharedLib"
@@ -404,6 +407,29 @@ function UseImGui()
 	filter {}
 end
 
+-- HarfBuzz and SheenBidi (Vendor/HarfBuzz/VENDOR.md, Vendor/SheenBidi/VENDOR.md; M22, C22.3,
+-- Docs/Decisions/0033-m22-contract.md decision 41): text shaping (and the font importer's shaping glyphs and subset) and
+-- the Unicode bidirectional algorithm. No consumer defines: HarfBuzz's two defines are private to its own translation unit
+-- and SheenBidi defines none. Both are built with the precise floating-point model (checked by
+-- Scripts/CheckBuildConfig.py). Every executable links them: the Runtime's UI text is measured with them.
+function UseHarfBuzz()
+	externalincludedirs { IncludeDir.HarfBuzz }
+
+	filter { LinkingKinds }
+		links { "HarfBuzz" }
+
+	filter {}
+end
+
+function UseSheenBidi()
+	externalincludedirs { IncludeDir.SheenBidi }
+
+	filter { LinkingKinds }
+		links { "SheenBidi" }
+
+	filter {}
+end
+
 -- The libraries the Runtime's code is compiled against (and, in an executable, linked with): the RuntimeCore library
 -- and the Runtime executable (Runtime/premake5.lua), and a game's native module and the Runtime linked with it
 -- (Scripts/Premake/NativeModule.lua; Docs/Decisions/0030-m19-contract.md decision 30), so a module's code compiles with
@@ -417,6 +443,8 @@ function UseRuntimeDependencies()
 	UseMiniaudio()
 	UseMikkTSpace()
 	UseLuau(false)
+	UseHarfBuzz()
+	UseSheenBidi()
 end
 
 -- The Runtime executable (Docs/Architecture.md §2.2, §14.3): RuntimeMain.cpp linked with the RuntimeCore and Engine

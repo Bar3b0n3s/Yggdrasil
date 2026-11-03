@@ -328,6 +328,47 @@ namespace Engine {
 			CHECK(JsonReader((*playedOutline)["text"]).ReadString().value_or(std::string()).find("focused hovered pressed") != std::string::npos);
 			REQUIRE(setup.Call("play.stop", Json::object()).has_value());
 		}
+
+		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 53; stream T): a text input in ui.tree.
+		TEST_CASE("UiMethods: ui.tree reports a text input as TextInput with its text" * doctest::skip(true))
+		{
+			Test::AutomationFixture setup("UiTreeTextInput");
+			REQUIRE(setup.Call("edit.batch", ParseUiMethodJson(R"({"label":"Ui","ops":[
+				{"method":"entity.create","params":{"name":"Form","components":{"UiCanvas":{}}}},
+				{"method":"entity.create","params":{"name":"Name","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Size":[120,24]},"UiImage":{},"UiTextInput":{"Text":"Ada"}}}}]})"))
+					.has_value());
+			Result<Json> listed = setup.Call("ui.tree", Json{ { "format", "Json" }, { "width", 200 }, { "height", 100 } });
+			REQUIRE_MESSAGE(listed.has_value(), listed.error().ToString());
+			const Json& field = (*listed)["elements"][1];
+			CHECK(field["widget"] == Json("TextInput"));
+			CHECK(field["interactable"] == Json(true));
+			CHECK(field["text"] == Json("Ada"));
+			CHECK(field["components"] == Json::array({ "UiRect", "UiImage", "UiTextInput" }));
+			Result<Json> text = setup.Call("ui.tree", Json::object());
+			REQUIRE(text.has_value());
+			CHECK(JsonReader((*text)["text"]).ReadString().value_or(std::string()).contains("UiTextInput(\"Ada\")"));
+		}
+
+		// C22.3 (decision 53; stream W): a World canvas in ui.tree, in its own pixels, whatever the scene resolution.
+		TEST_CASE("UiMethods: ui.tree reports a World canvas and its elements in the canvas's own pixels" * doctest::skip(true))
+		{
+			Test::AutomationFixture setup("UiTreeWorld");
+			REQUIRE(setup.Call("edit.batch", ParseUiMethodJson(R"({"label":"Ui","ops":[
+				{"method":"entity.create","params":{"name":"Board","components":{"UiCanvas":{"RenderMode":"World","WorldWidth":300,"WorldHeight":150}}}},
+				{"method":"entity.create","params":{"name":"Sign","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[10,20],"Size":[30,40]},"UiImage":{}}}}]})"))
+					.has_value());
+			Result<Json> listed = setup.Call("ui.tree", Json{ { "format", "Json" }, { "width", 200 }, { "height", 100 } });
+			REQUIRE_MESSAGE(listed.has_value(), listed.error().ToString());
+			const Json& elements = (*listed)["elements"];
+			REQUIRE(elements.size() == 2);
+			CHECK(elements[0]["worldCanvas"] == Json(true));
+			CHECK(elements[0]["rect"] == Json{ { "x", 0 }, { "y", 0 }, { "width", 300 }, { "height", 150 } });
+			CHECK(elements[1]["worldCanvas"] == Json(true));
+			CHECK(elements[1]["rect"] == Json{ { "x", 10 }, { "y", 20 }, { "width", 30 }, { "height", 40 } });
+			CHECK(elements[1]["visible"] == Json(true));
+		}
 	}
 
 }

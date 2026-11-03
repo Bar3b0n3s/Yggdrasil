@@ -175,6 +175,74 @@ class ScriptTestRunnerTests(AutomationTestCase):
         self.assertEqual(recording["finalStateHash"], recorded["FinalStateHash"])
         self.assertEqual(recording["inputCheck"], {"ran": True, "divergedAtTick": recorded["FinalTick"]})
 
+    @unittest.skip("contract stub: Docs/Decisions/0033-m22-contract.md decision 52 (stream I)")
+    def test_a_recording_suite_moving_the_pointer_scrolling_and_typing_records_what_input_record_records(self) -> None:
+        # M22 C22.3: Test.InjectMouseMove, Test.InjectScroll and Test.InjectText queue the events a slider drag, a
+        # scroll list and a text field need, so a recording suite records the UI replay that input.record records from
+        # the same events planned through play.step: the same events at the same ticks and the same final state hash.
+        client, root = self.open_editor_with_scene()
+        client.call("edit.batch", {"label": "Ui", "ops": [
+            {"method": "entity.create", "params": {"name": "Hud", "components": {"UiCanvas": {}}}},
+            {"method": "ui.createWidget", "params": {"kind": "Slider", "parent": {"$ref": "0.entity.id"}}},
+            {"method": "ui.createWidget", "params": {"kind": "ScrollView", "parent": {"$ref": "0.entity.id"}}},
+            {"method": "ui.createWidget", "params": {"kind": "TextInput", "parent": {"$ref": "0.entity.id"}}},
+        ]})
+        tree = client.call("ui.tree", {"format": "Json"})["elements"]
+        slider, scroll, field = (next(element for element in tree if element["widget"] == kind)["rect"]
+                                 for kind in ("Slider", "ScrollView", "TextInput"))
+
+        def centre(rect: dict) -> tuple[float, float]:
+            return rect["x"] + rect["width"] / 2, rect["y"] + rect["height"] / 2
+
+        client.call("scene.save")
+        lines = [
+            'return Test.Suite("Pointer", function()',
+            'Test.Case("drag, scroll and type", function()',
+            f'Test.InjectMouse("Left", "Down", vector.create({slider["x"] + 1}, {centre(slider)[1]}, 0))',
+            "Test.WaitTicks(1)",
+            f'Test.InjectMouseMove(vector.create({slider["x"] + slider["width"] - 1}, {centre(slider)[1]}, 0))',
+            "Test.WaitTicks(1)",
+            'Test.InjectMouse("Left", "Up")',
+            f"Test.InjectMouseMove(vector.create({centre(scroll)[0]}, {centre(scroll)[1]}, 0))",
+            "Test.WaitTicks(1)",
+            "Test.InjectScroll(vector.create(0, -1, 0))",
+            f'Test.InjectMouse("Left", "Tap", vector.create({centre(field)[0]}, {centre(field)[1]}, 0))',
+            "Test.WaitTicks(2)",
+            'Test.InjectText("hi")',
+            "Test.WaitTicks(2)",
+            "end)",
+            "end)",
+        ]
+        self.configure_suite(client, "\n".join(lines))
+        suite_path = "Assets/Tests/Replays/Pointer.replay"
+        result = engine_client.load_offloaded(client.call("test.run", {"record": suite_path}, timeout=120.0))
+        self.assertTrue(result["passed"], result)
+        suite_replay = json.loads((root / suite_path).read_text(encoding="utf-8"))
+        types = {event["Type"] for event in suite_replay["Events"]}
+        self.assertTrue({"MouseMove", "Scroll", "Text"} <= types, types)
+
+        # The same events planned through play.step, tick for tick, recorded by input.record.
+        def as_input(event: dict) -> dict:
+            position = {"position": event["Position"]} if "Position" in event else {}
+            converted = {"MouseButton": lambda: {"type": "mouseButton", "button": event["Button"],
+                                                 "state": event["State"], **position},
+                         "MouseMove": lambda: {"type": "mouseMove", "position": event["Position"]},
+                         "Scroll": lambda: {"type": "scroll", "delta": event["Delta"]},
+                         "Text": lambda: {"type": "text", "text": event["Text"]}}
+            return converted[event["Type"]]()
+
+        by_tick: dict[int, list[dict]] = {}
+        for event in suite_replay["Events"]:
+            by_tick.setdefault(event["Tick"], []).append(as_input(event))
+        client.call("input.record", {"action": "start"})
+        for tick in range(suite_replay["FinalTick"]):
+            client.call("play.step", {"ticks": 1, "render": "none", "input": by_tick.get(tick, [])})
+        planned_path = "Assets/Tests/Replays/Planned.replay"
+        saved = client.call("input.record", {"action": "stop", "path": planned_path})
+        planned_replay = json.loads((root / planned_path).read_text(encoding="utf-8"))
+        self.assertEqual(planned_replay["Events"], suite_replay["Events"])
+        self.assertEqual(saved["stateHash"], suite_replay["FinalStateHash"])
+
     def test_test_run_record_writes_and_verifies_its_expectations(self) -> None:
         # Docs/Decisions/0030-m19-contract.md decision 6 (A-RECEXPECT; ADR 0026 friction F10): test.run {record, expect}
         # writes the expectations into the recorded replay and verifies them with the recording's input first: a false

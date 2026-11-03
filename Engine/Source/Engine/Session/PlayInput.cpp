@@ -952,6 +952,18 @@ namespace Engine {
 		return m_State->FramePreview;
 	}
 
+	// Stubs of the M22 contract (C22.3, Docs/Decisions/0033-m22-contract.md decision 46) that stream T implements.
+	void PlayInput::LatchStepText()
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
+	std::string_view PlayInput::GetText(InputPhase /*phase*/) const
+	{
+		ENGINE_CONTRACT_STUB();
+		return {};
+	}
+
 	uint64_t PlayInput::GetNextTick() const
 	{
 		return m_State->NextTick;
