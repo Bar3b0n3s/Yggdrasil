@@ -2,11 +2,13 @@
 
 #include "Engine/AssetPipeline/Importers/GltfImporter.h"
 
+#include "Engine/Asset/AnimationClipData.h"
 #include "Engine/Asset/AssetDiagnostic.h"
 #include "Engine/Asset/CookedFormat.h"
 #include "Engine/Asset/DocumentData.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/MeshData.h"
+#include "Engine/Asset/SkeletonData.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
@@ -1392,6 +1394,159 @@ namespace Engine {
 			json["Scale"] = 2.5;
 			REQUIRE(settings->FromJson(&value, JsonReader(json), ReadContext{}).has_value());
 			CHECK(value.Scale == 2.5f);
+		}
+
+		// M23 (C23.3, C-SKEL, C-MORPH; Docs/Decisions/0034-m23-contract.md decision 25, stream A): version 3 imports the
+		// generated Skinned.gltf (MakeGltfFixtures.py: a strip of two quads skinned to a two-joint chain under an "Armature"
+		// node, with one morph target "Bulge", and one animation "Wave" that turns the second joint and keys the bulge) as a
+		// Skeleton, an AnimationClip and the mesh's skin and morph sections.
+		TEST_CASE("GltfImporter: skins, animations and morph targets import as a Skeleton, AnimationClips and the mesh's skin and morph sections"
+			* doctest::skip(true))
+		{
+			CHECK(GltfImporter::Version == 3);
+			Test::AssetTestFixture fixture;
+			CopyGltfFixtures(fixture);
+			Result<ImportResult> imported = ImportGltf(fixture, "Assets/Models/Skinned.gltf", MakeGltfMetadata(AssetHandle(0x5c1)));
+			REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+			CHECK(imported->Diagnostics.empty());
+			CHECK(GetKeys(*imported, AssetType::Skeleton) == std::vector<std::string>{ "skin:0" });
+			CHECK(GetKeys(*imported, AssetType::AnimationClip) == std::vector<std::string>{ "animation:0:Wave" });
+
+			const ImportedArtifact* skin = FindArtifact(*imported, AssetType::Skeleton);
+			REQUIRE(skin != nullptr);
+			const Result<AssetRef<SkeletonData>> skeleton = LoadCookedSkeleton(skin->Cooked);
+			REQUIRE_MESSAGE(skeleton.has_value(), skeleton.error().ToString());
+			REQUIRE((*skeleton)->Joints.size() == 2);
+			CHECK((*skeleton)->Joints[0].Parent == SkeletonRootParent);
+			CHECK((*skeleton)->Joints[1].Parent == 0);
+
+			const ImportedArtifact* wave = FindArtifact(*imported, AssetType::AnimationClip);
+			REQUIRE(wave != nullptr);
+			const Result<AssetRef<AnimationClipData>> clip = LoadCookedAnimationClip(wave->Cooked);
+			REQUIRE_MESSAGE(clip.has_value(), clip.error().ToString());
+			CHECK((*clip)->Duration > 0.0f);
+			const auto weights = std::find_if((*clip)->Channels.begin(), (*clip)->Channels.end(), [](const AnimationChannel& channel)
+			{
+				return channel.Path == AnimationPath::Weights;
+			});
+			REQUIRE(weights != (*clip)->Channels.end());
+			CHECK(weights->WeightCount == 1);
+
+			const AssetRef<MeshData> mesh = LoadMesh(FindArtifact(*imported, AssetType::Mesh));
+			CHECK(mesh->SkinJointCount == 2);
+			CHECK(mesh->Skin.size() == mesh->Vertices.size());
+			REQUIRE(mesh->MorphTargets.size() == 1);
+			CHECK(mesh->MorphTargets[0].Name == "Bulge");
+			CHECK(mesh->MorphTargets[0].Deltas.size() == mesh->Vertices.size());
+			// The skins and clips reference only the file's own sub-assets: no dependency beyond the file's own.
+			CHECK(imported->Dependencies.empty());
+		}
+
+		TEST_CASE("GltfImporter: the prefab puts an Animator on the skin's common ancestor and a SkinnedMesh beside each skinned mesh"
+			* doctest::skip(true))
+		{
+			Test::AssetTestFixture fixture;
+			CopyGltfFixtures(fixture);
+			Result<ImportResult> imported = ImportGltf(fixture, "Assets/Models/Skinned.gltf", MakeGltfMetadata(AssetHandle(0x5c2)));
+			REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+			const Json document = LoadPrefabDocument(*imported);
+			const Json armature = FindEntity(document, "Armature");
+			REQUIRE(armature["Components"].contains("Animator"));
+			const Json& animator = armature["Components"]["Animator"];
+			CHECK(animator["Skeleton"] == FindArtifact(*imported, AssetType::Skeleton)->Handle.ToString());
+			REQUIRE(animator["Layers"].size() == 1);
+			CHECK(animator["Layers"][0]["Clip"] == FindArtifact(*imported, AssetType::AnimationClip)->Handle.ToString());
+			const Json body = FindEntity(document, "Body");
+			CHECK(body["Components"].contains("MeshRenderer"));
+			REQUIRE(body["Components"].contains("SkinnedMesh"));
+			// The joints are the Skeleton's, not entities.
+			for (const Json& entity : document["Entities"])
+				CHECK(entity["Name"] != "Joint0");
+		}
+
+		// M23 (C23.3, C-SKEL; decisions 24 and 25, stream A): the generated SkinnedRigs.gltf (MakeGltfFixtures.py) holds two
+		// rigs. "Character" holds an intermediate node "Rig" (turned and lifted, not a joint) above skin 0's root joint "Hips"
+		// and its child "Spine", beside the skinned "Body"; the root-level joint "Tail" (skin 1) holds its own skinned
+		// "TailMesh". Its animation "Walk" moves the hips; "Blink" keys the spine 0.0001 s apart, shorter than
+		// MinAnimationClipDuration. The intermediate node is a static joint before the root-motion joint, the hips; skin 1's
+		// common ancestor is its own joint, so its Animator goes on the nearest node above it that is not a joint, here none:
+		// the root entity; and the too-short animation is skipped.
+		TEST_CASE("GltfImporter: a rig below an intermediate node and a mesh below its own joint get their Animators, static joints and root-motion joint"
+			* doctest::skip(true))
+		{
+			Test::AssetTestFixture fixture;
+			CopyGltfFixtures(fixture);
+			Result<ImportResult> imported = ImportGltf(fixture, "Assets/Models/SkinnedRigs.gltf", MakeGltfMetadata(AssetHandle(0x5c5)));
+			REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+			CHECK(GetKeys(*imported, AssetType::Skeleton) == std::vector<std::string>{ "skin:0", "skin:1" });
+			CHECK(GetKeys(*imported, AssetType::AnimationClip) == std::vector<std::string>{ "animation:0:Walk" });
+			CHECK(GetDiagnosticSubjects(*imported, AssetContentSkippedCode) == std::vector<std::string>{ "animations[1]" });
+
+			const ImportedArtifact* rigArtifact = FindArtifact(*imported, "skin:0");
+			REQUIRE(rigArtifact != nullptr);
+			const Result<AssetRef<SkeletonData>> rig = LoadCookedSkeleton(rigArtifact->Cooked);
+			REQUIRE_MESSAGE(rig.has_value(), rig.error().ToString());
+			REQUIRE((*rig)->Joints.size() == 3);
+			CHECK((*rig)->Joints[0].Name == "Rig");
+			CHECK((*rig)->Joints[0].Parent == SkeletonRootParent);
+			CHECK((*rig)->Joints[0].InverseBind == glm::mat4(1.0f));
+			CHECK((*rig)->Joints[1].Name == "Hips");
+			CHECK((*rig)->Joints[1].Parent == 0);
+			CHECK((*rig)->Joints[2].Name == "Spine");
+			CHECK((*rig)->Joints[2].Parent == 1);
+			CHECK((*rig)->RootMotionJoint == 1);
+			const ImportedArtifact* tailArtifact = FindArtifact(*imported, "skin:1");
+			REQUIRE(tailArtifact != nullptr);
+			const Result<AssetRef<SkeletonData>> tail = LoadCookedSkeleton(tailArtifact->Cooked);
+			REQUIRE_MESSAGE(tail.has_value(), tail.error().ToString());
+			REQUIRE((*tail)->Joints.size() == 1);
+			CHECK((*tail)->Joints[0].Name == "Tail");
+			CHECK((*tail)->RootMotionJoint == 0);
+
+			const Json document = LoadPrefabDocument(*imported);
+			const Json character = FindEntity(document, "Character");
+			REQUIRE(character["Components"].contains("Animator"));
+			const Json& characterAnimator = character["Components"]["Animator"];
+			CHECK(characterAnimator["Skeleton"] == rigArtifact->Handle.ToString());
+			REQUIRE(characterAnimator["Layers"].size() == 1);
+			CHECK(characterAnimator["Layers"][0]["Clip"] == FindArtifact(*imported, AssetType::AnimationClip)->Handle.ToString());
+			CHECK(FindEntity(document, "Body")["Components"].contains("SkinnedMesh"));
+			const Json rootEntity = FindEntity(document, "SkinnedRigs");
+			REQUIRE(rootEntity["Components"].contains("Animator"));
+			CHECK(rootEntity["Components"]["Animator"]["Skeleton"] == tailArtifact->Handle.ToString());
+			CHECK(rootEntity["Components"]["Animator"]["Layers"].empty());
+			const Json tailMesh = FindEntity(document, "TailMesh");
+			CHECK(tailMesh["Parent"] == rootEntity["ID"]);
+			CHECK(tailMesh["Components"].contains("SkinnedMesh"));
+			// The joints are the Skeletons', not entities; the intermediate node stays an entity.
+			CHECK(FindEntity(document, "Rig")["Parent"] == character["ID"]);
+			for (const Json& entity : document["Entities"])
+			{
+				CHECK(entity["Name"] != "Hips");
+				CHECK(entity["Name"] != "Spine");
+				CHECK(entity["Name"] != "Tail");
+			}
+		}
+
+		TEST_CASE("GltfImporter: animation events from the import settings land in their clips, and an unknown clip fails the import"
+			* doctest::skip(true))
+		{
+			Test::AssetTestFixture fixture;
+			CopyGltfFixtures(fixture);
+			const Json events = Json::array({ { { "Animation", "animation:0:Wave" }, { "Name", "Peak" }, { "Time", 0.5 } },
+				{ { "Animation", "animation:0:Wave" }, { "Name", "Start" }, { "Time", 0.0 } } });
+			Result<ImportResult> imported = ImportGltf(fixture, "Assets/Models/Skinned.gltf", MakeGltfMetadata(AssetHandle(0x5c3), "AnimationEvents", events));
+			REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+			const Result<AssetRef<AnimationClipData>> clip = LoadCookedAnimationClip(FindArtifact(*imported, AssetType::AnimationClip)->Cooked);
+			REQUIRE_MESSAGE(clip.has_value(), clip.error().ToString());
+			REQUIRE((*clip)->Events.size() == 2);
+			CHECK((*clip)->Events[0].Name == "Start");
+			CHECK((*clip)->Events[1].Name == "Peak");
+
+			const Json unknown = Json::array({ { { "Animation", "animation:7" }, { "Name", "Lost" }, { "Time", 0.0 } } });
+			const Result<ImportResult> refused = ImportGltf(fixture, "Assets/Models/Skinned.gltf", MakeGltfMetadata(AssetHandle(0x5c4), "AnimationEvents", unknown));
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::ImportFailed);
 		}
 	}
 

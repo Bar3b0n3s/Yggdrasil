@@ -100,6 +100,23 @@ namespace Engine {
 					path({ { 0.15f, 0.62f }, { 0.85f, 0.62f } });
 					path({ { 0.15f, 0.15f }, { 0.38f, 0.38f } });
 					break;
+				case EditorIcon::Skeleton:
+					// A chain of three bones from a root joint, branching at the second joint.
+					circle({ 0.25f, 0.8f }, 0.07f);
+					path({ { 0.3f, 0.75f }, { 0.5f, 0.5f } });
+					circle({ 0.5f, 0.5f }, 0.06f);
+					path({ { 0.54f, 0.45f }, { 0.75f, 0.2f } });
+					path({ { 0.55f, 0.52f }, { 0.85f, 0.6f } });
+					circle({ 0.78f, 0.17f }, 0.05f);
+					break;
+				case EditorIcon::AnimationClip:
+					// A keyed curve over a timeline: the axis, the curve and its three keys.
+					path({ { 0.12f, 0.85f }, { 0.88f, 0.85f } });
+					path({ { 0.15f, 0.65f }, { 0.32f, 0.3f }, { 0.5f, 0.5f }, { 0.68f, 0.7f }, { 0.85f, 0.25f } });
+					circle({ 0.15f, 0.65f }, 0.04f);
+					circle({ 0.5f, 0.5f }, 0.04f);
+					circle({ 0.85f, 0.25f }, 0.04f);
+					break;
 			}
 			return segments;
 		}
@@ -122,18 +139,20 @@ namespace Engine {
 	{
 		switch (type)
 		{
-			case AssetType::None:        return EditorIcon::Folder;
-			case AssetType::Scene:       return EditorIcon::Scene;
-			case AssetType::Prefab:      return EditorIcon::Prefab;
-			case AssetType::Mesh:        return EditorIcon::Mesh;
-			case AssetType::Material:    return EditorIcon::Material;
-			case AssetType::Texture:     return EditorIcon::Texture;
-			case AssetType::Environment: return EditorIcon::Environment;
-			case AssetType::AudioClip:   return EditorIcon::Audio;
-			case AssetType::Script:      return EditorIcon::Script;
-			case AssetType::Font:        return EditorIcon::Font;
-			case AssetType::Replay:      return EditorIcon::Replay;
-			case AssetType::SpriteSheet: return EditorIcon::SpriteSheet;
+			case AssetType::None:          return EditorIcon::Folder;
+			case AssetType::Scene:         return EditorIcon::Scene;
+			case AssetType::Prefab:        return EditorIcon::Prefab;
+			case AssetType::Mesh:          return EditorIcon::Mesh;
+			case AssetType::Material:      return EditorIcon::Material;
+			case AssetType::Texture:       return EditorIcon::Texture;
+			case AssetType::Environment:   return EditorIcon::Environment;
+			case AssetType::AudioClip:     return EditorIcon::Audio;
+			case AssetType::Script:        return EditorIcon::Script;
+			case AssetType::Font:          return EditorIcon::Font;
+			case AssetType::Replay:        return EditorIcon::Replay;
+			case AssetType::SpriteSheet:   return EditorIcon::SpriteSheet;
+			case AssetType::Skeleton:      return EditorIcon::Skeleton;
+			case AssetType::AnimationClip: return EditorIcon::AnimationClip;
 		}
 		return EditorIcon::Folder;
 	}

@@ -2,6 +2,7 @@
 	"Format": "FuzzTargets",
 	"Version": 1,
 	"Targets": [
+		{ "Reader": "AnimationClipData", "Case": "AnimationClipData: 10,000 seeded mutations of a payload never crash", "Iterations": 1000000 },
 		{ "Reader": "AssetMetadata", "Case": "AssetMetadata: 1,000 seeded mutations of a meta file never crash", "Iterations": 1000000 },
 		{ "Reader": "AudioClipData", "Case": "AudioClipData: 10,000 seeded mutations of a payload never crash", "Iterations": 1000000 },
 		{ "Reader": "AudioDecoder", "Case": "AudioDecoder: 200 seeded mutations of WAV, FLAC, MP3 and Ogg Vorbis files never crash", "Iterations": 1000000 },
@@ -40,6 +41,7 @@
 		{ "Reader": "ScriptCompiler", "Case": "ScriptCompiler: 200 seeded mutations of Luau source compile or fail located, never crash", "Iterations": 1000000 },
 		{ "Reader": "ScriptData", "Case": "ScriptData: 10,000 seeded mutations of a cooked script never crash", "Iterations": 1000000 },
 		{ "Reader": "ShaderReflection", "Case": "ShaderReflection: 2,000 seeded mutations of a compiled document are errors, never crashes", "Iterations": 1000000 },
+		{ "Reader": "SkeletonData", "Case": "SkeletonData: 10,000 seeded mutations of a payload never crash", "Iterations": 1000000 },
 		{ "Reader": "SoundEffect", "Case": "SoundEffectImporter: 1,000 seeded mutations of a .sfx document never crash", "Iterations": 1000000 },
 		{ "Reader": "SpriteSheetData", "Case": "SpriteSheetData: 1,000 seeded mutations of a sprite sheet file and of its cooked form never crash", "Iterations": 1000000 },
 		{ "Reader": "TextureData", "Case": "TextureData: 10,000 seeded mutations of a payload never crash", "Iterations": 1000000 },

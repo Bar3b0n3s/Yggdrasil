@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/Asset/AssetLoaderRegistry.h"
 
+#include "Engine/Asset/AnimationClipData.h"
 #include "Engine/Asset/AudioClipData.h"
 #include "Engine/Asset/CookedFormat.h"
 #include "Engine/Asset/DocumentData.h"
@@ -10,6 +11,7 @@
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/ReplayData.h"
 #include "Engine/Asset/ScriptData.h"
+#include "Engine/Asset/SkeletonData.h"
 #include "Engine/Asset/SpriteSheetData.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/Core/Assert.h"
@@ -97,6 +99,16 @@ namespace Engine {
 			return LoadCookedSpriteSheet(cooked);
 		}
 
+		static Result<AssetRef<SkeletonData>> LoadSkeleton(std::span<const std::byte> cooked, const AssetLoadContext& /*context*/)
+		{
+			return LoadCookedSkeleton(cooked);
+		}
+
+		static Result<AssetRef<AnimationClipData>> LoadAnimationClip(std::span<const std::byte> cooked, const AssetLoadContext& /*context*/)
+		{
+			return LoadCookedAnimationClip(cooked);
+		}
+
 	}
 
 	AssetLoaderRegistry::AssetLoaderRegistry() = default;
@@ -164,24 +176,29 @@ namespace Engine {
 		registry.Register(CreateScope<PayloadLoader<ReplayData, &Utils::LoadReplay>>());
 		// M18 (Docs/Decisions/0029-m18-contract.md decision 17).
 		registry.Register(CreateScope<PayloadLoader<SpriteSheetData, &Utils::LoadSpriteSheet>>());
+		// M23 (C23.3; Docs/Decisions/0034-m23-contract.md decision 24).
+		registry.Register(CreateScope<PayloadLoader<SkeletonData, &Utils::LoadSkeleton>>());
+		registry.Register(CreateScope<PayloadLoader<AnimationClipData, &Utils::LoadAnimationClip>>());
 	}
 
 	std::optional<uint16_t> GetCookedFormatVersion(AssetType type)
 	{
 		switch (type)
 		{
-			case AssetType::None:        return std::nullopt;
-			case AssetType::Scene:       return SceneData::FormatVersion;
-			case AssetType::Prefab:      return PrefabData::FormatVersion;
-			case AssetType::Mesh:        return MeshData::FormatVersion;
-			case AssetType::Material:    return MaterialData::FormatVersion;
-			case AssetType::Texture:     return TextureData::FormatVersion;
-			case AssetType::Environment: return EnvironmentData::FormatVersion;
-			case AssetType::AudioClip:   return AudioClipData::FormatVersion;
-			case AssetType::Script:      return ScriptData::FormatVersion;
-			case AssetType::Font:        return FontData::FormatVersion;
-			case AssetType::Replay:      return ReplayData::FormatVersion;
-			case AssetType::SpriteSheet: return SpriteSheetData::FormatVersion;
+			case AssetType::None:          return std::nullopt;
+			case AssetType::Scene:         return SceneData::FormatVersion;
+			case AssetType::Prefab:        return PrefabData::FormatVersion;
+			case AssetType::Mesh:          return MeshData::FormatVersion;
+			case AssetType::Material:      return MaterialData::FormatVersion;
+			case AssetType::Texture:       return TextureData::FormatVersion;
+			case AssetType::Environment:   return EnvironmentData::FormatVersion;
+			case AssetType::AudioClip:     return AudioClipData::FormatVersion;
+			case AssetType::Script:        return ScriptData::FormatVersion;
+			case AssetType::Font:          return FontData::FormatVersion;
+			case AssetType::Replay:        return ReplayData::FormatVersion;
+			case AssetType::SpriteSheet:   return SpriteSheetData::FormatVersion;
+			case AssetType::Skeleton:      return SkeletonData::FormatVersion;
+			case AssetType::AnimationClip: return AnimationClipData::FormatVersion;
 		}
 		return std::nullopt;
 	}

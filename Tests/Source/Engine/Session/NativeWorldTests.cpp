@@ -242,7 +242,10 @@ namespace Engine {
 	TEST_SUITE("Session")
 	{
 		// Docs/Decisions/0030-m19-contract.md decision 28 and the phase 1 ledger's PlaySessionPhase (N-B): NativeStep runs in
-		// Play with a module, after Tasks and before PreStepTransformUpdate; Simulate has no native world.
+		// Play with a module, once a step, after Tasks and before PreStepTransformUpdate; Simulate has no native world. The
+		// case checks that relative order, never the whole list: phase 2 enters M21's SpriteAnimation and M23's AnimationSystem
+		// between NativeStep and PreStepTransformUpdate (ADR 0028's phase-2 execution order, Docs/Decisions/0034-m23-contract.md
+		// decision 29), and PlaySessionTests.cpp's phase lists pin the whole order.
 		TEST_CASE("NativeWorld: systems run in the NativeStep phase, after Tasks and before PreStepTransformUpdate")
 		{
 			Test::SceneTestFixture fixture;
@@ -252,21 +255,15 @@ namespace Engine {
 			REQUIRE(session->GetNative() != nullptr);
 			CHECK(&session->GetNative()->GetTypes() == types.get());
 			session->FixedStep();
-			const std::vector<PlaySessionPhase> expected = {
-				PlaySessionPhase::InterpolationSnapshot,
-				PlaySessionPhase::ApplyInput,
-				PlaySessionPhase::StartFlush,
-				PlaySessionPhase::FixedUpdate,
-				PlaySessionPhase::Tasks,
-				PlaySessionPhase::NativeStep,
-				PlaySessionPhase::PreStepTransformUpdate,
-				PlaySessionPhase::PhysicsPreStep,
-				PlaySessionPhase::PhysicsStep,
-				PlaySessionPhase::PhysicsPostStep,
-				PlaySessionPhase::DestroyFlush,
-				PlaySessionPhase::PostStepTransformUpdate,
+			const auto position = [&observer](PlaySessionPhase phase)
+			{
+				return static_cast<size_t>(std::ranges::find(observer.Phases, phase) - observer.Phases.begin());
 			};
-			CHECK(observer.Phases == expected);
+			CHECK(std::ranges::count(observer.Phases, PlaySessionPhase::NativeStep) == 1);
+			REQUIRE(position(PlaySessionPhase::PreStepTransformUpdate) < observer.Phases.size());
+			CHECK(position(PlaySessionPhase::FixedUpdate) < position(PlaySessionPhase::Tasks));
+			CHECK(position(PlaySessionPhase::Tasks) < position(PlaySessionPhase::NativeStep));
+			CHECK(position(PlaySessionPhase::NativeStep) < position(PlaySessionPhase::PreStepTransformUpdate));
 			CHECK(PlaySessionPhaseToString(PlaySessionPhase::NativeStep) == "NativeStep");
 
 			NativeRecordingObserver simulateObserver;

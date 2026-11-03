@@ -33,16 +33,17 @@
 // mapping) and the memory resource of the containers (decision 9). The M23 contract (C23.1,
 // Docs/Decisions/0034-m23-contract.md decisions 2 to 5) changed existing members only, as phase 2's ledger lets it: the mesh
 // draw item's PreviousWorld for its instance record, the point lights' shadows and the quality settings' two reference
-// paths. Additions are frozen-header changes reviewed by their contract owner; no member here changes meaning. A plain
-// value type: copyable, movable, thread-compatible.
+// paths; its C23.3 (decision 27) the mesh draw item's deformation (JointPalette, MorphWeights). Additions are frozen-header
+// changes reviewed by their contract owner; no member here changes meaning. A plain value type: copyable, movable,
+// thread-compatible.
 //
 // Containers (M18, R-ARENA): the snapshot's own containers that grow with the scene (Meshes, Lights, Texts, PickTable,
 // Icons, and the commands of DebugDraw and AnnotationDraw) are std::pmr containers. A snapshot built with
 // RenderSnapshot(resource) allocates them from that memory resource, which must outlive the snapshot; a default-constructed
 // one, and every copy (std::pmr's copy construction), allocates from std::pmr::get_default_resource(), the global heap
 // unless a host changed it. Assignment keeps the target's resource. SelectedEntities (a handful of UUIDs, copied from the
-// host's selection) and the nested containers (a mesh item's Materials, a text's Text, the annotations' label list) keep
-// the default allocator.
+// host's selection) and the nested containers (a mesh item's Materials, JointPalette and MorphWeights, a text's Text, the
+// annotations' label list) keep the default allocator.
 //
 // The output stage (M18, decisions 5 to 8): a view renders its scene at the scene resolution of RenderOutputSettings (the
 // view's size by default, which renders exactly as before the output stage), then the output stage upscales the scene image
@@ -246,6 +247,23 @@ namespace Engine {
 		bool ReceiveShadows = true;
 		UUID Entity{};
 		uint32_t PickId = 0; // 0: not pickable; otherwise PickTable[PickId - 1] is Entity, stable within this snapshot
+		// M23 (C23.3, C-SKEL, C-MORPH; Docs/Decisions/0034-m23-contract.md decision 27): a SkinnedMesh's deformation, which the
+		// Deform stage's Skinning pass applies to the mesh's vertices (Asset/MeshDeform.h's rule) before every pass draws them.
+		// JointPalette: one matrix per joint of its Animator's pose, from the mesh's bind space into this item's local space at
+		// the rendered (interpolated) poses: inverse(World) * the Animator entity's rendered world matrix *
+		// AnimationPoseComponent::Skin[j]; empty without a pose (the bind pose). MorphWeights: the SkinnedMesh's weights, each
+		// replaced by the weight the pose's blended channel for the entity holds at its index (as long as the longer of the two);
+		// empty without a SkinnedMesh. Extraction does not load the mesh, so the list may hold fewer weights than the mesh's
+		// targets (or more): the renderer resolves it against the targets' defaults the GPU mesh keeps (ResolveMorphWeights with
+		// GpuMesh::DeformBounds.DefaultWeights), so a missing weight, every weight of an item without a SkinnedMesh, is its
+		// target's DefaultWeight. A weight is any finite value (a clip's sampled weight may leave [-1, 1]; the deformed bounds
+		// cover it). An item is deformed when its mesh has a skin and JointPalette covers the skin's joints, or has morph targets
+		// and a resolved weight is not 0; otherwise it draws the mesh's own vertices. A deformed item's GPU state is keyed by its
+		// Entity and Mesh, so each deformed item of a snapshot has its own Entity (render extraction gives every item its entity;
+		// a snapshot built by hand must too), and deformed items are never instanced together (each has its own pose). Extraction
+		// fills them (stream B); empty until then.
+		std::vector<glm::mat4> JointPalette{};
+		std::vector<float> MorphWeights{};
 	};
 
 	// One light (§8.2: directional, point, spot). The renderer culls them on the CPU and lights with at most

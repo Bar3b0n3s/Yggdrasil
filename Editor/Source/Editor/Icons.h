@@ -23,7 +23,9 @@ namespace Engine {
 		Script,
 		Font,
 		Replay,
-		SpriteSheet // M18: a texture cut into a grid of frames (Docs/Decisions/0029-m18-contract.md decision 18)
+		SpriteSheet,  // M18: a texture cut into a grid of frames (Docs/Decisions/0029-m18-contract.md decision 18)
+		Skeleton,     // M23: a chain of joints from a root (Docs/Decisions/0034-m23-contract.md decision 23)
+		AnimationClip // M23: a keyed curve on a timeline (Docs/Decisions/0034-m23-contract.md decision 23)
 	};
 
 	// First-party vector glyphs drawn with ImDrawList lines, no downloaded assets or icon licence. Main thread, inside an

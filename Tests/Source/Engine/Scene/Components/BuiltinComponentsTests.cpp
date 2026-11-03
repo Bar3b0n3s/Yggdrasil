@@ -3,6 +3,7 @@
 #include "Engine/Scene/Components/BuiltinComponents.h"
 
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Scene/Components/AnimationPoseComponent.h"
 #include "Engine/Scene/Components/DisabledTag.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/UnknownComponentsComponent.h"
@@ -34,7 +35,7 @@ namespace Engine {
 	{
 		TEST_CASE("BuiltinComponents: every listed type is plain component data")
 		{
-			static_assert(BuiltinComponents::Size == 24);
+			static_assert(BuiltinComponents::Size == 26);
 			size_t count = 0;
 			ForEachType(BuiltinComponents{}, [&count]<typename T>()
 			{
@@ -53,6 +54,8 @@ namespace Engine {
 			static_assert(!TypeListContains<InterpolationResetTag, BuiltinComponents>);
 			static_assert(!TypeListContains<HierarchyDisabledTag, BuiltinComponents>);
 			static_assert(!TypeListContains<PendingDestroyTag, BuiltinComponents>);
+			// M23 (C23.3, Docs/Decisions/0034-m23-contract.md decision 29): an Animator's sampled pose is runtime state.
+			static_assert(!TypeListContains<AnimationPoseComponent, BuiltinComponents>);
 			static_assert(!TypeListContains<DisabledTag, BuiltinComponents>);
 			static_assert(!TypeListContains<UnknownComponentsComponent, BuiltinComponents>);
 			static_assert(std::is_empty_v<DisabledTag>);
@@ -60,6 +63,7 @@ namespace Engine {
 			// The reflected structs that components hold are not components themselves.
 			static_assert(!TypeListContains<PrefabOverride, BuiltinComponents>);
 			static_assert(!TypeListContains<PrefabEntityKeys, BuiltinComponents>);
+			static_assert(!TypeListContains<AnimatorLayer, BuiltinComponents>);
 			CHECK(TypeListContains<ScriptComponent, BuiltinComponents>);
 		}
 
@@ -254,6 +258,24 @@ namespace Engine {
 			CHECK(slot.ExecutionOrder == 0);
 		}
 
+		// M23 (C23.3, Docs/Decisions/0034-m23-contract.md decision 28).
+		TEST_CASE("BuiltinComponents: animation defaults follow the component table")
+		{
+			const AnimatorComponent animator;
+			CHECK_FALSE(animator.Skeleton.IsValid());
+			CHECK(animator.Layers.empty());
+			CHECK(animator.Playing);
+			CHECK(animator.RootMotion == AnimatorRootMotion::None);
+			const AnimatorLayer layer;
+			CHECK_FALSE(layer.Clip.IsValid());
+			CHECK(layer.Time == 0.0f);
+			CHECK(layer.Speed == 1.0f);
+			CHECK(layer.Weight == 1.0f);
+			CHECK(layer.Loop);
+
+			CHECK(SkinnedMeshComponent{}.MorphWeights.empty());
+		}
+
 		TEST_CASE("BuiltinComponents: every listed type is registered in list order")
 		{
 			TypeRegistry registry;
@@ -322,6 +344,9 @@ namespace Engine {
 				"AudioSource",
 				"AudioListener",
 				"Script",
+				// M23 (Docs/Decisions/0034-m23-contract.md decision 28): after M21's and M22's categories on phase 2's merged tree.
+				"Animator",
+				"SkinnedMesh",
 			};
 			std::vector<std::string> names;
 			for (const ComponentInfo* component : registry->GetComponents())
@@ -332,7 +357,7 @@ namespace Engine {
 		TEST_CASE("BuiltinComponents: every component has a category, a version and descriptions")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
-			const std::vector<std::string> categories = { "Core", "Rendering", "Physics", "Audio", "Scripting" };
+			const std::vector<std::string> categories = { "Core", "Rendering", "Physics", "Audio", "Scripting", "Animation" };
 			// The components that migrated since their first version: Prefab's override paths and Script's list of slots (M20,
 			// Docs/Decisions/0031-m20-contract.md decisions 10 and 17), and PointLight's CastShadows (M23,
 			// Docs/Decisions/0034-m23-contract.md decision 3). Every other component is at version 1.

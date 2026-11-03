@@ -310,6 +310,15 @@
 			}
 		},
 		{
+			"Name": "Animation",
+			"Layer": 3,
+			"Includes": [
+				"Core",
+				"Asset"
+			],
+			"Notes": "M23 (Docs/Decisions/0034-m23-contract.md decision 22): skeletal and morph animation's runtime, ECS-agnostic like Physics and Audio: sampling a Skeleton's AnimationClips at a time, script-driven blending of layers, root motion, animation events, joint model and skin matrices and the pose digest, over the Asset module's SkeletonData and AnimationClipData. On the simulation path (sampled in the fixed step), so DetMath only (Banned.SimulationPathModules). Scene includes it (the same-layer edge Scene -> Animation); it includes no other layer-3 module, and Renderer never includes it (deformation reads only the snapshot's palettes and Asset/MeshDeform.h)."
+		},
+		{
 			"Name": "ImGui",
 			"Layer": 3,
 			"Includes": [
@@ -345,8 +354,10 @@
 				"Platform",
 				"Asset",
 				"Physics",
-				"Audio"
+				"Audio",
+				"Animation"
 			],
+			"Notes": "M23 (Docs/Decisions/0034-m23-contract.md decision 22): Animation, beside Scene at layer 3, for the AnimationSystem phase, the Animator's runtime pose and the skinned items of render extraction; Animation never includes Scene.",
 			"Headers": [
 				"Engine/Source/Engine/Renderer/RenderSnapshot.h",
 				"Engine/Source/Engine/Renderer/DebugDrawList.h"
@@ -678,7 +689,8 @@
 			"Physics",
 			"Scripting",
 			"Session",
-			"Native"
+			"Native",
+			"Animation"
 		],
 		"SimulationPathExceptions": [],
 		"TryCatchFiles": [

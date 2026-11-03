@@ -1152,6 +1152,48 @@
 			},
 			"additionalProperties": false
 		},
+		"Animator": {
+			"description": "Poses a skeleton from layers of animation clips, blended by their weights, each fixed step; skinned meshes on the entity and below it follow.",
+			"type": "object",
+			"properties": {
+				"Skeleton": {
+					"description": "The skeleton the layers' clips pose; null poses nothing.",
+					"type": ["string", "null"],
+					"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+					"x-assetType": "Skeleton"
+				},
+				"Layers": {
+					"description": "The layers, at most eight, blended in order over the skeleton's rest pose.",
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/AnimatorLayer"
+					}
+				},
+				"Playing": {
+					"description": "Whether the layers' times advance each fixed step; the pose follows the times either way.",
+					"type": "boolean"
+				},
+				"RootMotion": {
+					"description": "What happens to the skeleton's root motion: kept in the pose, applied to the entity or only reported.",
+					"enum": ["None", "Apply", "Extract"]
+				}
+			},
+			"additionalProperties": false
+		},
+		"SkinnedMesh": {
+			"description": "Deforms the entity's MeshRenderer mesh: its skin follows the nearest Animator on the entity or above it, and its morph targets take weights.",
+			"type": "object",
+			"properties": {
+				"MorphWeights": {
+					"description": "One weight in [-1, 1] per morph target of the mesh, in order; a missing weight is the target's default, and an animated weight overrides it.",
+					"type": "array",
+					"items": {
+						"type": "number"
+					}
+				}
+			},
+			"additionalProperties": false
+		},
 		"PrefabOverride": {
 			"description": "One recorded difference between an outermost prefab instance and its prefab.",
 			"type": "object",
@@ -1202,6 +1244,41 @@
 					"type": "integer",
 					"minimum": -2147483648,
 					"maximum": 2147483647
+				}
+			},
+			"additionalProperties": false
+		},
+		"AnimatorLayer": {
+			"description": "One layer of an Animator's blend stack: a clip played at a time, speed and weight.",
+			"type": "object",
+			"properties": {
+				"Clip": {
+					"description": "The animation clip the layer plays; null plays nothing.",
+					"type": ["string", "null"],
+					"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+					"x-assetType": "AnimationClip"
+				},
+				"Time": {
+					"description": "How far into the clip the layer is, in seconds; advanced each fixed step by the step times Speed.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000000
+				},
+				"Speed": {
+					"description": "How fast the layer's time advances; 0 holds it.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 100
+				},
+				"Weight": {
+					"description": "How much the layer's animated joints override the layers before it, from 0 (none) to 1 (fully).",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"Loop": {
+					"description": "Whether the clip starts again at its end; otherwise its last pose holds.",
+					"type": "boolean"
 				}
 			},
 			"additionalProperties": false
@@ -1298,6 +1375,12 @@
 						},
 						"Script": {
 							"$ref": "#/$defs/Script"
+						},
+						"Animator": {
+							"$ref": "#/$defs/Animator"
+						},
+						"SkinnedMesh": {
+							"$ref": "#/$defs/SkinnedMesh"
 						}
 					},
 					"additionalProperties": true

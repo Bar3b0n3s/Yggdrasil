@@ -50,6 +50,7 @@ namespace Engine {
 	namespace Detail {
 
 		inline constexpr std::array<std::string_view, 1> PrepareRows = { "Prepare" };
+		inline constexpr std::array<std::string_view, 1> SkinningRows = { "Skinning" };
 		inline constexpr std::array<std::string_view, 1> ShadowPrograms = { "Shadow" };
 		inline constexpr std::array<std::string_view, 2> ShadowRows = { "DirectionalShadows", "SpotShadows" };
 		inline constexpr std::array<std::string_view, 2> ShadowTargets = { "ShadowCascades", "ShadowAtlas" };
@@ -107,6 +108,11 @@ namespace Engine {
 	// ledger fixes (ADR 0028), and C23.3 Skinning, alone in Deform.
 	inline constexpr std::array ScenePassDeclarations = std::to_array<RenderPassDeclaration>({
 		{ .Name = "Prepare", .Stage = RenderStage::Prepare, .StatsRows = Detail::PrepareRows },
+		// M23 (C23.3, Docs/Decisions/0034-m23-contract.md decision 27): the skinned and morphed meshes' vertices, deformed by
+		// SkinningPass's compute pipeline of the program Skinning into each deformed item's own vertex buffer before the
+		// shadow casters, the prepass and the forward passes draw them; no target (the vertices are buffers). Stream C sets its
+		// PipelineCount to 1 and its Programs to {Skinning} with its pass, which makes the startup count 60.
+		{ .Name = "Skinning", .Stage = RenderStage::Deform, .StatsRows = Detail::SkinningRows },
 		{ .Name = "Shadows", .Stage = RenderStage::Shadows, .PipelineCount = 6, .Programs = Detail::ShadowPrograms, .StatsRows = Detail::ShadowRows, .Targets = Detail::ShadowTargets },
 		// M23 (C23.1, Docs/Decisions/0034-m23-contract.md decision 3): the point lights' cube faces, drawn with the Shadows
 		// declaration's caster pipelines (ShadowPass) into its own cube-array target.

@@ -36,6 +36,7 @@
 
 namespace Engine {
 
+	class AnimationSystem;
 	class AssetManager;
 	class AudioEngine;
 	class AudioSystem;
@@ -73,6 +74,9 @@ namespace Engine {
 		Tasks,                   // 4: Task.Wait*/Task.Delay threads due at this tick, then the test case thread (M13; empty)
 		NativeStep,              // 4a: the native module's systems (NativeWorld::Step; M19, Docs/Decisions/0030-m19-contract.md
 								 //     decision 28): only in Play with a native module (PlaySessionSpecification::Native)
+		AnimationSystem,         // 4c: AnimationSystem::Step, every Animator's layers advanced, its pose sampled, root motion
+								 //     applied and events delivered (M23, Docs/Decisions/0034-m23-contract.md decision 29); Play
+								 //     and Simulate. M21's SpriteAnimation (4b) precedes it on phase 2's merged tree
 		PreStepTransformUpdate,  // 5: TransformSystem::Update, before PhysicsSystem::PreStep
 		PhysicsPreStep,          // 5: PhysicsSystem::PreStep: create, rebuild or remove bodies; teleports; MoveKinematic (M11)
 		PhysicsStep,             // 6: PhysicsSystem::Step: PhysicsWorld::Step(fixedDt) (M11)
@@ -451,6 +455,19 @@ namespace Engine {
 		[[nodiscard]] NativeWorld* GetNative();
 		[[nodiscard]] const NativeWorld* GetNative() const;
 
+		// M23 (Docs/Decisions/0034-m23-contract.md decision 29): the session's animation (Scene/AnimationSystem.h), created
+		// right after the PhysicsSystem (and again with it at a scene transition, for the new scene) with the session's asset
+		// manager, in Play and Simulate alike; the fixed step calls its Step in the AnimationSystem phase. Its event listener
+		// is the session's ScriptEngine in Play, set wherever the physics system's is (PrepareScripts, after it creates the
+		// engine at the start, a Scene.Load or a Scene.Reload, AnimationSystem::SetEventListener beside
+		// PhysicsSystem::SetEventListener) and cleared wherever that one is cleared (the transition and the destructor, before
+		// the engine is destroyed), so events reach scripts from the session's first tick and after every transition, and
+		// never a destroyed engine; none in Simulate. Null until stream B creates it; then never null, and valid until the
+		// next scene transition replaces it. A scene without an Animator costs it one empty view per tick and changes nothing
+		// (decision 29).
+		[[nodiscard]] AnimationSystem* GetAnimation();
+		[[nodiscard]] const AnimationSystem* GetAnimation() const;
+
 		// The state hash (§13.7, §5.1): XXH64 (seed 0) over the scene's minified canonical serialization
 		// (SceneSerializer::SaveToString, JsonStyle::Minified), followed by the tick, the Random state and the UUIDGenerator's
 		// draw count as little-endian 64-bit values; M11 appends the physics state (§5.1 "+ physics velocities at runtime").
@@ -462,7 +479,9 @@ namespace Engine {
 		// Equal for equal sessions in every configuration (§1.3); play.state, play.step and input.replay report it as 16
 		// lowercase hex digits. Returns 0 only when the scene cannot be serialized (logged). M19 (decision 28): the native
 		// block follows the physics block, NativeWorld::AppendStateHash (the module's resources; native components are in the
-		// scene's serialization), and is empty without a native module, so a session without one hashes as before.
+		// scene's serialization), and is empty without a native module, so a session without one hashes as before. M23 adds
+		// no block (Docs/Decisions/0034-m23-contract.md decision 29): an Animator's playback state is component data, which
+		// the scene's serialization covers, and its sampled pose is a function of that data and the assets.
 		[[nodiscard]] uint64_t ComputeStateHash() const;
 
 		// The entity cap (see the class comment).

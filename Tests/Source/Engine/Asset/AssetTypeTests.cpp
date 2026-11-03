@@ -21,6 +21,8 @@ namespace Engine {
 				AssetType::Font,
 				AssetType::Replay,
 				AssetType::SpriteSheet,
+				AssetType::Skeleton,
+				AssetType::AnimationClip,
 			};
 			for (const AssetType type : Types)
 			{
@@ -44,6 +46,11 @@ namespace Engine {
 			static_assert(std::to_underlying(AssetType::Replay) == 10);
 			// M18's sprite sheets, phase 1's only new type (ADR 0028's phase-1 ledger: values follow the landing order).
 			static_assert(std::to_underlying(AssetType::SpriteSheet) == 11);
+			// M23's skeletons and animation clips (C23.3, Docs/Decisions/0034-m23-contract.md decision 23): ADR 0028's phase-2
+			// ledger gives them 14 and 15 after M21's and M22's types, which land first; on M23's branch they follow SpriteSheet,
+			// and its merge of main renumbers them. Only their relative order is M23's: Skeleton, then AnimationClip.
+			static_assert(std::to_underlying(AssetType::Skeleton) > std::to_underlying(AssetType::SpriteSheet));
+			static_assert(std::to_underlying(AssetType::AnimationClip) == std::to_underlying(AssetType::Skeleton) + 1);
 			CHECK(AssetTypeToString(static_cast<AssetType>(999)) == "None");
 		}
 	}

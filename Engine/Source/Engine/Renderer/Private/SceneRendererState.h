@@ -22,6 +22,7 @@
 #include "Engine/Renderer/SelectionPass.h"
 #include "Engine/Renderer/ShadowCascades.h"
 #include "Engine/Renderer/ShadowPass.h"
+#include "Engine/Renderer/SkinningPass.h"
 #include "Engine/Renderer/SkyboxPass.h"
 #include "Engine/Renderer/SpotShadowAtlas.h"
 #include "Engine/Renderer/TextRenderer.h"
@@ -65,6 +66,10 @@ namespace Engine {
 			// every draw without instancing).
 			uint32_t Instance = 0;
 			uint32_t Batch = 1;
+			// M23 (C23.3, Docs/Decisions/0034-m23-contract.md decision 27; stream C): 0 when VertexBuffer is the mesh's own
+			// vertices; for a deformed item's draw, the VertexStream of its SceneRendererDeformedMesh, whose Vertices it binds
+			// (MeshInstanceKey::VertexStream, so a deformed draw never shares an instanced draw with another item's).
+			uint32_t VertexStream = 0;
 			// Sort keys (§8.3 pass 1).
 			AssetHandle MaterialHandle{};
 			AssetHandle Mesh{};
@@ -80,6 +85,30 @@ namespace Engine {
 			nvrhi::IBindingSet* Set = nullptr;
 			Engine::AlphaMode Mode = Engine::AlphaMode::Opaque; // the type is spelled Engine:: (GCC's "changes meaning")
 			bool DoubleSided = false;
+		};
+
+		// M23 (C23.3, C-SKEL, C-MORPH; Docs/Decisions/0034-m23-contract.md decision 27; stream C): one deformed item's GPU
+		// state, kept by its SceneRenderer across renders (the placement rule's place 2, SceneRenderer::State::DeformedMeshes),
+		// keyed by the item's Entity and Mesh, which is how its previous positions survive from one render to the next: each
+		// deformed item of a snapshot carries its own Entity (render extraction gives every item its entity, and a snapshot
+		// built by hand gives each deformed item one, as the tests do), so two deformed items never share an entry, and each
+		// entry's VertexStream keeps its draws out of every other item's instanced draw (each has its own pose). The Deform
+		// stage creates it at the item's first deformation, grows it with the mesh's vertex and joint counts, and writes it
+		// each render that draws the item; one that a render did not use is released at that render's end (with
+		// ReleaseUnusedBindings), so an item that leaves the view deforms afresh, its previous positions its new ones, when it
+		// returns. A device loss's release drops every entry with the state.
+		struct SceneRendererDeformedMesh
+		{
+			UUID Entity{};
+			AssetHandle Mesh{};
+			uint64_t MeshVersion = 0;                // the GpuMesh's Version it was made for; another version deforms afresh
+			nvrhi::BufferHandle Vertices{};          // SkinningPass::GetVerticesDesc: the deformed vertices, vertex binding 0 of its draws
+			nvrhi::BufferHandle PreviousPositions{}; // SkinningPass::GetPreviousPositionsDesc: the last render's deformed positions
+			nvrhi::BufferHandle Palette{};           // SkinningPass::GetPaletteDesc: the item's JointPalette
+			nvrhi::BufferHandle MorphWeights{};      // SkinningPass::GetMorphWeightsDesc: the item's MorphWeights
+			uint32_t VertexStream = 0;               // never 0: SceneRendererDraw::VertexStream of its draws, unique per renderer
+			uint64_t LastRender = 0;                 // the render that last deformed it
+			bool Deformed = false;                   // a deformation was recorded since its creation (otherwise FirstDeform)
 		};
 
 		// Which mesh pass RecordMeshPass records.
@@ -202,6 +231,10 @@ namespace Engine {
 			// grid the LightClusters pass and the forward passes read (LightClusterConstants b3).
 			PointShadowSet Points{};
 			LightClusterGrid Clusters{};
+			// M23 (C23.3, decision 27; stream C): set by the Prepare stage: the indices into SceneRenderer::State::DeformedMeshes
+			// of the items the Deform stage deforms this render (every deformed item one of whose draws survived culling, the
+			// shadow casters' included), in snapshot order.
+			std::vector<size_t> Deforms{};
 			nvrhi::TextureHandle EnvironmentSpecular{};
 			nvrhi::TextureHandle EnvironmentSkybox{};
 			nvrhi::TextureHandle BlueNoise{};
@@ -261,6 +294,8 @@ namespace Engine {
 		// M23 (C23.1, Docs/Decisions/0034-m23-contract.md decision 5; stream C): the LightClusters pass (the placement rule's
 		// place 1).
 		Scope<LightClusterPass> LightClusters{};
+		// M23 (C23.3, decision 27; stream C): the Skinning pass of the Deform stage (place 1), created by CreatePipelines.
+		Scope<SkinningPass> Skinning{};
 		Scope<SelectionPass> Selection{};
 		// The passes the set owns (SceneRenderer.h).
 		Scope<SkyboxPass> Skybox;
@@ -306,6 +341,7 @@ namespace Engine {
 		PassBindingCache SelectionBindings{};
 		PassBindingCache DataViewBindings{};
 		PassBindingCache LightClusterBindings{}; // M23 (stream C): the LightClusters pass's sets
+		PassBindingCache SkinningBindings{};     // M23 (C23.3, stream C): the Skinning pass's sets
 		Scope<RenderTargetPool> TargetPool{};
 		Scope<AsyncPicker> Picker{};
 		Scope<GpuProfiler> Profiler{};
@@ -367,6 +403,15 @@ namespace Engine {
 		// RENDER_POINT_SHADOW_BUDGET logged once per renderer (stream B).
 		std::vector<InstanceRecord> Instances{};
 		bool PointShadowLimitLogged = false;
+		// M23 (C23.3, Docs/Decisions/0034-m23-contract.md decision 27; stream C): the deformed items' GPU state (place 2), the
+		// next VertexStream value to give a new entry (from 1), and the render count that stamps LastRender. A skinned item
+		// whose palette is shorter than its mesh's skin draws its bind pose, which is logged once per renderer
+		// (RenderSkinMismatchCode): ReleaseGpuObjects keeps SkinMismatchLogged with the other once-per-renderer flags
+		// (SceneRendererRecovery.cpp's kept members, stream C), so a recovered renderer does not warn again.
+		std::vector<Detail::SceneRendererDeformedMesh> DeformedMeshes{};
+		uint32_t NextVertexStream = 1;
+		uint64_t DeformRender = 0;
+		bool SkinMismatchLogged = false;
 		SceneRenderStats Stats{};
 		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 44): the debug view the last Render recorded (Lit before the
 		// first), which a Render records instead of a debug view whose first pipelines ran out of memory after their trim and
@@ -419,7 +464,9 @@ namespace Engine {
 		// per-view constants and ensures the frame's targets at the scene resolution. An error returned here is one of
 		// Render's errors before recording: Render returns it and records nothing.
 		[[nodiscard]] Status RecordPrepareStage(Detail::SceneRendererFrame& frame);
-		// Reserved for M23's Skinning pass; records nothing in M18.
+		// M23 (C23.3, decision 27; stream C): the Skinning pass, one dispatch per entry of frame.Deforms, each writing the
+		// item's DeformedMeshes entry; an entry whose dispatch fails keeps its error in frame.FirstError and its draws are
+		// skipped this render. Records nothing without a deformed item (every render until stream C).
 		void RecordDeformStage(Detail::SceneRendererFrame& frame);
 		void RecordShadowsStage(Detail::SceneRendererFrame& frame);
 		void RecordDepthNormalStage(Detail::SceneRendererFrame& frame);

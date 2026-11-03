@@ -5,6 +5,7 @@
 #include "Engine/Core/Result.h"
 #include "Engine/Project/ProjectSettings.h"
 #include "Engine/Reflection/FieldType.h"
+#include "Engine/Scene/AnimationSystem.h"
 #include "Engine/Scene/PhysicsSystem.h"
 #include "Engine/Scripting/Sandbox.h"
 #include "Engine/Scripting/ScriptHost.h"
@@ -89,7 +90,7 @@ namespace Engine {
 	// behaviour that defines the callback receives it, in slot order; propagation to the next ancestor stops after an
 	// entity where any behaviour's callback returned true, and that entity's other behaviours still receive it.
 	// Non-bubbling callbacks ignore return values, so no slot can keep another from receiving one.
-	class ScriptEngine final : public IPhysicsEventListener
+	class ScriptEngine final : public IPhysicsEventListener, public IAnimationEventListener
 	{
 	public:
 		class ConstructionKey
@@ -139,6 +140,11 @@ namespace Engine {
 		// step and enter/exit pairs stay symmetric (§9.4); destruction or a fault discards held events.
 		void OnPhysicsEvent(const PhysicsEvent& event) override;
 		void OnPhysicsDiagnostic(const PhysicsDiagnostic& diagnostic) override;
+		// M23 (Docs/Decisions/0034-m23-contract.md decision 31; stream B): an AnimationSystem phase's event reaches
+		// OnAnimationEvent(self, event) on every slot of the event's entity, in slot order (decision 17), as physics callbacks
+		// do: a started instance at once, an unstarted one holding it until the first fixed-step start flush after its
+		// OnStart; destruction or a fault discards held events. A stub until stream B: nothing is delivered.
+		void OnAnimationEvent(const AnimationEventRecord& event) override;
 		// Idempotent. OnDestroy for all remaining instances and cancellation while host/scene/services still exist.
 		void Stop();
 

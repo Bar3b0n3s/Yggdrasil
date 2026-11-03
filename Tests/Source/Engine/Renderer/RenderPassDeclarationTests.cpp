@@ -19,6 +19,7 @@
 #include "Engine/Renderer/SceneRenderer.h"
 #include "Engine/Renderer/SelectionPass.h"
 #include "Engine/Renderer/ShadowPass.h"
+#include "Engine/Renderer/SkinningPass.h"
 #include "Engine/Renderer/SkyboxPass.h"
 #include "Engine/Renderer/TextRenderer.h"
 #include "Engine/Renderer/TonemapPass.h"
@@ -106,12 +107,13 @@ namespace Engine {
 		TEST_CASE("RenderPassDeclarations: the stats order puts game Text before the upscale and the editor overlays after it")
 		{
 			// M17's order (§8.3) with Text moved to the SceneOverlay stage, the output stage's Upscale after it, the labels
-			// after the other editor overlays and the letterbox repaint last; M23's PointShadows after SpotShadows and
-			// LightClusters after the GTAO denoise (phase 2's ledger, ADR 0028); a frozen contract of stats.get.
-			constexpr std::array<std::string_view, 27> Expected = { "Prepare", "DirectionalShadows", "SpotShadows", "PointShadows", "DepthNormal",
-				"DepthPyramid", "GTAO", "GTAODenoiseHorizontal", "GTAODenoiseVertical", "LightClusters", "ForwardOpaque", "Skybox", "ForwardTransparent",
-				"Overdraw", "Bloom", "Tonemap", "FXAA", "Text", "Upscale", "SelectionMask", "SelectionDilateHorizontal", "SelectionDilateVertical",
-				"SelectionComposite", "Wireframe", "Overlays", "Labels", "Letterbox" };
+			// after the other editor overlays and the letterbox repaint last; M23's Skinning after Prepare (C23.3), PointShadows
+			// after SpotShadows and LightClusters after the GTAO denoise (phase 2's ledger, ADR 0028); a frozen contract of
+			// stats.get. M21's Sprites and Lights2D and M22's Ui join it at their places on phase 2's merged tree.
+			constexpr std::array<std::string_view, 28> Expected = { "Prepare", "Skinning", "DirectionalShadows", "SpotShadows", "PointShadows",
+				"DepthNormal", "DepthPyramid", "GTAO", "GTAODenoiseHorizontal", "GTAODenoiseVertical", "LightClusters", "ForwardOpaque", "Skybox",
+				"ForwardTransparent", "Overdraw", "Bloom", "Tonemap", "FXAA", "Text", "Upscale", "SelectionMask", "SelectionDilateHorizontal",
+				"SelectionDilateVertical", "SelectionComposite", "Wireframe", "Overlays", "Labels", "Letterbox" };
 			REQUIRE(RenderStatsOrder.size() == Expected.size());
 			for (size_t index = 0; index < Expected.size(); ++index)
 				CHECK(RenderStatsOrder[index] == Expected[index]);
@@ -145,6 +147,17 @@ namespace Engine {
 			CHECK(GetDeclaredPipelineCountOf("Letterbox") == 0);
 			// M23: the point shadows draw with the Shadows declaration's caster pipelines.
 			CHECK(GetDeclaredPipelineCountOf("PointShadows") == 0);
+		}
+
+		// M23 (C23.3, Docs/Decisions/0034-m23-contract.md decision 27; stream C): the Skinning pass's one compute pipeline joins
+		// its declaration with the pass, and the deformed draws keep the 24 mesh pipelines (Roadmap M23: "there are still 24
+		// mesh pipelines").
+		TEST_CASE("RenderPassDeclarations: the Skinning pass declares its compute pipeline, and the mesh pipelines stay 24" * doctest::skip(true))
+		{
+			CHECK(GetDeclaredPipelineCountOf("Skinning") == SkinningPass::PipelineCount);
+			CHECK(SkinningPass::PipelineCount == 1);
+			CHECK(SceneRendererPipelines::MeshPipelineCount == 24);
+			CHECK(GetDeclaredPipelineCount() == 60);
 		}
 	}
 

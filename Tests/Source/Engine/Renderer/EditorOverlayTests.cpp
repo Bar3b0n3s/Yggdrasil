@@ -436,6 +436,56 @@ namespace Engine {
 			REQUIRE(AppendWireframeOverlay(snapshot, assets, small).has_value());
 			CHECK(small.GetSize() == 3); // Nonzero triangles retain edges regardless of world scale.
 		}
+
+		// M23 (C23.3, C-SKEL, C-MORPH; Docs/Decisions/0034-m23-contract.md decision 27, stream C): a deformed item's edges
+		// follow its deformation (Asset/MeshDeform.h's DeformMeshVertices with its palette and its resolved morph weights) and
+		// are culled by its deformed bounds (ComputeDeformedBounds), so a skinned character's wireframe lies over its shading,
+		// never over its bind pose.
+		TEST_CASE("Wireframe: a deformed item's edges follow its palette and morph weights, culled by its deformed bounds" * doctest::skip(true))
+		{
+			Test::InMemoryAssetManager assets;
+			auto snapshot = Utils::WireframeTestSnapshot(assets, false, false, false);
+			// The test triangle skinned to one joint, with a morph target that lifts its apex 0.5 along +Y.
+			auto mesh = CreateRef<MeshData>();
+			mesh->Vertices = { { .Position = { -0.5f, -0.5f, -2.0f } }, { .Position = { 0.5f, -0.5f, -2.0f } }, { .Position = { 0.0f, 0.5f, -2.0f } } };
+			mesh->Indices = { 0, 1, 2 };
+			mesh->Bounds = { { -0.5f, -0.5f, -2.0f }, { 0.5f, 0.5f, -2.0f } };
+			mesh->Submeshes = { { .IndexCount = 3, .Bounds = mesh->Bounds } };
+			mesh->Slots = { {} };
+			mesh->Skin = { MeshSkinVertex{}, MeshSkinVertex{}, MeshSkinVertex{} };
+			mesh->SkinJointCount = 1;
+			MeshMorphTarget lift{ .Name = "Lift" };
+			lift.Deltas = { MeshMorphDelta{}, MeshMorphDelta{}, MeshMorphDelta{ .Position = { 0.0f, 0.5f, 0.0f } } };
+			mesh->MorphTargets = { lift };
+			assets.Publish(UUID(913), mesh);
+			snapshot.Meshes[0].Mesh = UUID(913);
+			snapshot.Meshes[0].JointPalette = { glm::translate(glm::mat4(1.0f), glm::vec3(0.25f, 0.0f, 0.0f)) };
+			snapshot.Meshes[0].MorphWeights = { 1.0f };
+
+			DebugDrawList deformed;
+			REQUIRE(AppendWireframeOverlay(snapshot, assets, deformed).has_value());
+			REQUIRE(deformed.GetSize() == 3);
+			const std::array<glm::vec3, 3> corners = { glm::vec3(-0.25f, -0.5f, -2.0f), glm::vec3(0.75f, -0.5f, -2.0f), glm::vec3(0.25f, 1.0f, -2.0f) };
+			const auto isCorner = [&corners](const glm::vec3& point)
+			{
+				return std::ranges::any_of(corners, [&point](const glm::vec3& corner)
+				{
+					return glm::all(glm::lessThanEqual(glm::abs(point - corner), glm::vec3(1e-6f)));
+				});
+			};
+			for (const auto& command : deformed.GetCommands())
+			{
+				const auto& line = std::get<DebugLine>(command.Shape);
+				CHECK(isCorner(line.From));
+				CHECK(isCorner(line.To));
+			}
+
+			// A palette that carries the triangle behind the camera culls it, although its bind pose is in view.
+			snapshot.Meshes[0].JointPalette = { glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 4.0f)) };
+			DebugDrawList behind;
+			REQUIRE(AppendWireframeOverlay(snapshot, assets, behind).has_value());
+			CHECK(behind.IsEmpty());
+		}
 	}
 
 	TEST_SUITE(Test::GpuSuite)

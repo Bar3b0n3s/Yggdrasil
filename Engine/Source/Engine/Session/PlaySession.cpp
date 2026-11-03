@@ -11,6 +11,7 @@
 #include "Engine/Core/Log.h"
 #include "Engine/Native/NativeComponents.h"
 #include "Engine/Reflection/FuzzySuggest.h"
+#include "Engine/Scene/AnimationSystem.h"
 #include "Engine/Scene/AudioSystem.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
@@ -220,6 +221,9 @@ namespace Engine {
 		bool AudioHeld = false;
 		// M19: the native module's runtime (NativeWorld.h), in Play with PlaySessionSpecification::Native; null otherwise.
 		Scope<NativeWorld> Native{};
+		// M23 (Docs/Decisions/0034-m23-contract.md decision 29): the scene's animation (GetAnimation), null until stream B
+		// creates it right after the PhysicsSystem.
+		Scope<AnimationSystem> Animation{};
 		Scope<ScriptApiRegistry> OwnedApi{};
 		ScriptApiRegistry* Api = nullptr;
 		Ref<const ScriptFieldSchemaSource> Schemas{};
@@ -862,6 +866,7 @@ namespace Engine {
 			case PlaySessionPhase::FixedUpdate:             return "FixedUpdate";
 			case PlaySessionPhase::Tasks:                   return "Tasks";
 			case PlaySessionPhase::NativeStep:              return "NativeStep";
+			case PlaySessionPhase::AnimationSystem:         return "AnimationSystem";
 			case PlaySessionPhase::PreStepTransformUpdate:  return "PreStepTransformUpdate";
 			case PlaySessionPhase::PhysicsPreStep:          return "PhysicsPreStep";
 			case PlaySessionPhase::PhysicsStep:             return "PhysicsStep";
@@ -1307,6 +1312,16 @@ namespace Engine {
 	const NativeWorld* PlaySession::GetNative() const
 	{
 		return m_State->Native.get();
+	}
+
+	AnimationSystem* PlaySession::GetAnimation()
+	{
+		return m_State->Animation.get();
+	}
+
+	const AnimationSystem* PlaySession::GetAnimation() const
+	{
+		return m_State->Animation.get();
 	}
 
 	AudioSystem* PlaySession::GetAudioSystem()

@@ -2,6 +2,7 @@
 
 #include "Engine/Core/Base.h"
 #include "Engine/Reflection/TypeList.h"
+#include "Engine/Scene/Components/AnimatorComponent.h"
 #include "Engine/Scene/Components/AudioListenerComponent.h"
 #include "Engine/Scene/Components/AudioSourceComponent.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
@@ -21,6 +22,7 @@
 #include "Engine/Scene/Components/RelationshipComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
+#include "Engine/Scene/Components/SkinnedMeshComponent.h"
 #include "Engine/Scene/Components/SphereColliderComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
 #include "Engine/Scene/Components/TagsComponent.h"
@@ -48,7 +50,11 @@ namespace Engine {
 		// Audio (Registration/AudioRegistration.cpp)
 		AudioSourceComponent, AudioListenerComponent,
 		// Scripting (Registration/ScriptingRegistration.cpp)
-		ScriptComponent>;
+		ScriptComponent,
+		// Animation (Registration/AnimationRegistration.cpp; M23, Docs/Decisions/0034-m23-contract.md decision 28). ADR 0028's
+		// phase-2 ledger: a milestone's new components go in categories of their own after Scripting, appended in landing
+		// order, so M23, the last lander, appends this category after M21's and M22's at its merge.
+		AnimatorComponent, SkinnedMeshComponent>;
 
 	// The category registration functions, each registering its enums, structs and components in BuiltinComponents order
 	// through RegisterComponent<T> (Scene/ComponentRegistration.h). Each is called exactly once per registry, in this
@@ -58,8 +64,9 @@ namespace Engine {
 	void RegisterPhysicsComponents(TypeRegistry& registry);
 	void RegisterAudioComponents(TypeRegistry& registry);
 	void RegisterScriptingComponents(TypeRegistry& registry);
+	void RegisterAnimationComponents(TypeRegistry& registry);
 
-	// Registers every built-in component (the five functions above, in order) into a registry that is not frozen yet, then
+	// Registers every built-in component (the functions above, in order) into a registry that is not frozen yet, then
 	// asserts that every BuiltinComponents type is registered and that the registration order equals the list order
 	// (the startup check of §5.4). The caller adds its own types (project settings, automation structs) and then freezes
 	// the registry.

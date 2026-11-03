@@ -2,6 +2,7 @@
 
 #include "Engine/Asset/AssetHandle.h"
 #include "Engine/Asset/MaterialData.h"
+#include "Engine/Asset/MeshDeform.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/Core/Aabb.h"
 #include "Engine/Core/Base.h"
@@ -47,6 +48,17 @@ namespace Engine {
 		// cache's shared default stream (TexCoord1 (0, 0), opaque white), which holds at least VertexCount entries, all equal.
 		nvrhi::BufferHandle AttributeBuffer{};
 		nvrhi::BufferHandle IndexBuffer{};
+		// M23 (C23.3, C-SKEL, C-MORPH; Docs/Decisions/0034-m23-contract.md decision 27; stream C): the mesh's skin (a
+		// structured buffer of VertexCount MeshSkinVertex, 24 bytes each) and morph deltas (MorphTargetCount x VertexCount
+		// MeshMorphDelta, 36 bytes each, target by target), which the Skinning pass reads, null for a mesh without them; their
+		// counts; and the bounds the Prepare stage culls a deformed item with (ComputeMeshDeformBounds, a CPU copy), whose
+		// DefaultWeights are the morph targets' defaults the Prepare stage resolves each item's MorphWeights against
+		// (ResolveMorphWeights), so they travel with the GPU mesh.
+		nvrhi::BufferHandle SkinBuffer{};
+		nvrhi::BufferHandle MorphBuffer{};
+		uint32_t SkinJointCount = 0;
+		uint32_t MorphTargetCount = 0;
+		MeshDeformBounds DeformBounds{};
 		uint32_t VertexCount = 0;
 		uint32_t IndexCount = 0;
 		std::vector<GpuSubmesh> Submeshes{};

@@ -125,6 +125,50 @@ namespace Engine {
 			CHECK_FALSE(DeserializeMeshPayload(withoutStream).has_value());
 		}
 
+		// M23 (C23.3, C-SKEL, C-MORPH; Docs/Decisions/0034-m23-contract.md decision 25, stream A): the skin section (the joint
+		// count, then a joint quadruple and its weights per vertex) and the morph section (the target count, then per target
+		// its name, default weight and one delta per vertex) follow the attribute stream in bit order, and their invariants are
+		// validated.
+		TEST_CASE("MeshData: a version 2 payload round-trips the skin and morph sections" * doctest::skip(true))
+		{
+			MeshData quad = MakeColoredQuad();
+			quad.SkinJointCount = 3;
+			for (uint16_t index = 0; index < 4; ++index)
+				quad.Skin.push_back({ .Joints = { static_cast<uint16_t>(index % 3), 2, 0, 0 }, .Weights = { 0.75f, 0.25f, 0.0f, 0.0f } });
+			MeshMorphTarget smile{ .Name = "Smile", .DefaultWeight = 0.5f };
+			for (size_t index = 0; index < 4; ++index)
+				smile.Deltas.push_back({ .Position = { 0.0f, 0.1f * static_cast<float>(index), 0.0f } });
+			quad.MorphTargets.push_back(smile);
+			REQUIRE(ValidateMeshData(quad).has_value());
+			CHECK(GetMeshStreams(quad) == (MeshStreams::Attributes | MeshStreams::Skin | MeshStreams::Morph));
+			const Buffer payload = SerializeMeshPayload(quad);
+			// The attribute stream's 415 bytes, the skin section (4 + 4 x 24) and the morph section (4 + 4 + 5 + 4 + 4 x 36).
+			CHECK(payload.size() == 415 + 100 + 161);
+			const Result<MeshData> read = DeserializeMeshPayload(payload);
+			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
+			CHECK(read->SkinJointCount == 3);
+			CHECK(read->Skin == quad.Skin);
+			CHECK(read->MorphTargets == quad.MorphTargets);
+			CHECK(SerializeMeshPayload(*read) == payload);
+
+			// A joint index at the skin's joint count, weights that do not sum to 1, a skin for another vertex count, a joint
+			// count of 0 with a skin, a duplicate target name and deltas for another vertex count each fail validation.
+			MeshData outOfRange = quad;
+			outOfRange.Skin[1].Joints[0] = 3;
+			MeshData heavy = quad;
+			heavy.Skin[0].Weights = glm::vec4(0.75f, 0.75f, 0.0f, 0.0f);
+			MeshData shortSkin = quad;
+			shortSkin.Skin.pop_back();
+			MeshData noJoints = quad;
+			noJoints.SkinJointCount = 0;
+			MeshData twice = quad;
+			twice.MorphTargets.push_back(smile);
+			MeshData shortDeltas = quad;
+			shortDeltas.MorphTargets[0].Deltas.pop_back();
+			for (const MeshData* invalid : { &outOfRange, &heavy, &shortSkin, &noJoints, &twice, &shortDeltas })
+				CHECK_FALSE(ValidateMeshData(*invalid).has_value());
+		}
+
 		TEST_CASE("MeshData: attribute colours outside [0, 1] and non-finite attributes fail validation")
 		{
 			MeshData bright = MakeColoredQuad();

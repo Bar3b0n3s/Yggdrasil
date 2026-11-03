@@ -208,7 +208,7 @@ All modes; LoadTime|Runtime|Test; pure/read.
 
 `(type: string) -> FieldDescriptor`
 
-Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for imported audio and .sfx sound effects, Script, Font, Replay or SpriteSheet), with a null default; any other name fails the import.
+Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for imported audio and .sfx sound effects, Script, Font, Replay, SpriteSheet, Skeleton or AnimationClip), with a null default; any other name fails the import.
 
 All modes; LoadTime|Runtime|Test; pure/read.
 
@@ -1246,6 +1246,42 @@ Sets the session time scale in [0, 100]; refused during read-only evaluation.
 
 All modes; Runtime|Test; mutates.
 
+## Animator
+
+Poses a skeleton from layers of animation clips, blended by their weights, each fixed step; skinned meshes on the entity and below it follow.
+
+### Animator.Layers
+
+`{{Clip: AssetRef?, Time: number, Speed: number, Weight: number, Loop: boolean}}`
+
+The layers, at most eight, blended in order over the skeleton's rest pose.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Animator.Playing
+
+`boolean`
+
+Whether the layers' times advance each fixed step; the pose follows the times either way.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Animator.RootMotion
+
+`AnimatorRootMotion`
+
+What happens to the skeleton's root motion: kept in the pose, applied to the entity or only reported.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Animator.Skeleton
+
+`AssetRef?`
+
+The skeleton the layers' clips pose; null poses nothing.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
 ## AssetRef
 
 An opaque immutable asset handle; resolve metadata through Assets.
@@ -1946,6 +1982,14 @@ Add a nonempty tag of at most 256 bytes if absent; an entity carries at most 256
 
 All modes; Runtime|Test; mutates.
 
+### Entity.Animator
+
+`Animator?`
+
+The entity's Animator component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
 ### Entity.AudioListener
 
 `AudioListener?`
@@ -2036,7 +2080,7 @@ All modes; Runtime|Test; pure/read.
 
 ### Entity.GetComponent
 
-`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?)`
+`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "Animator") -> Animator?) & ((self: Entity, name: "SkinnedMesh") -> SkinnedMesh?)`
 
 Get a component proxy, or nil when absent.
 
@@ -2209,6 +2253,14 @@ All modes; Runtime|Test; mutates.
 Reparent to the last sibling, preserving world pose by default; synchronize effective lifecycle transitions.
 
 All modes; Runtime|Test; mutates.
+
+### Entity.SkinnedMesh
+
+`SkinnedMesh?`
+
+The entity's SkinnedMesh component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
 
 ### Entity.SphereCollider
 
@@ -2962,6 +3014,18 @@ The behaviours of the entity, in slot order; each slot is its own instance. A va
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
+## SkinnedMesh
+
+Deforms the entity's MeshRenderer mesh: its skin follows the nearest Animator on the entity or above it, and its morph targets take weights.
+
+### SkinnedMesh.MorphWeights
+
+`{number}`
+
+One weight in [-1, 1] per morph target of the mesh, in order; a missing weight is the target's default, and an animated weight overrides it.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
 ## SphereCollider
 
 A sphere-shaped collider in the entity's space.
@@ -3308,6 +3372,16 @@ How a material's base colour alpha is used (the glTF 2.0 alpha modes).
 
 - `Blend`: The surface is blended over what lies behind it by its alpha.
 
+## AnimatorRootMotion (enum)
+
+What an Animator does with its skeleton's root motion.
+
+- `None`: The root motion stays in the pose, so the mesh moves away from the entity.
+
+- `Apply`: The root motion moves the entity's Transform each fixed step; the mesh stays at the entity.
+
+- `Extract`: The root motion is held out of the pose and only reported by Animator:GetRootMotion, for a script to apply.
+
 ## AssetCreateType
 
 What asset.create makes.
@@ -3363,6 +3437,10 @@ The kind of a loadable asset (§7.1).
 - `Replay`: An input replay (.replay).
 
 - `SpriteSheet`: A sprite sheet (.spritesheet): frames of a texture with pivots and 9-slice borders, and clips.
+
+- `Skeleton`: A skeleton (a glTF's skin sub-asset): named joints in a hierarchy with their rest pose and inverse binds.
+
+- `AnimationClip`: An animation clip (a glTF's animation sub-asset): keyed joint transforms and morph weights, with named events.
 
 ## Attenuation
 

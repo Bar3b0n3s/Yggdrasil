@@ -25,7 +25,13 @@ namespace Engine {
 		Script,
 		Font,
 		Replay,
-		SpriteSheet // M18 (ADR 0028's phase-1 ledger; Docs/Decisions/0029-m18-contract.md decision 14)
+		SpriteSheet, // M18 (ADR 0028's phase-1 ledger; Docs/Decisions/0029-m18-contract.md decision 14)
+		// M23 (C23.3; Docs/Decisions/0034-m23-contract.md decision 23): a skin's joints and an animation's channels, the glTF
+		// importer's sub-assets. ADR 0028's phase-2 ledger gives M23, the last lander, 14 and 15 after M21's and M22's types;
+		// on M23's branch they follow SpriteSheet, and M23's merge of main renumbers them after main's (the values live only in
+		// cooked headers, so its checkouts' cooked caches are rebuilt).
+		Skeleton,
+		AnimationClip
 	};
 
 	// The PascalCase name of `type` ("AudioClip"), the spelling used in .meta files, reflected AssetFilter metadata, the
@@ -35,18 +41,20 @@ namespace Engine {
 	{
 		switch (type)
 		{
-			case AssetType::None:        return "None";
-			case AssetType::Scene:       return "Scene";
-			case AssetType::Prefab:      return "Prefab";
-			case AssetType::Mesh:        return "Mesh";
-			case AssetType::Material:    return "Material";
-			case AssetType::Texture:     return "Texture";
-			case AssetType::Environment: return "Environment";
-			case AssetType::AudioClip:   return "AudioClip";
-			case AssetType::Script:      return "Script";
-			case AssetType::Font:        return "Font";
-			case AssetType::Replay:      return "Replay";
-			case AssetType::SpriteSheet: return "SpriteSheet";
+			case AssetType::None:          return "None";
+			case AssetType::Scene:         return "Scene";
+			case AssetType::Prefab:        return "Prefab";
+			case AssetType::Mesh:          return "Mesh";
+			case AssetType::Material:      return "Material";
+			case AssetType::Texture:       return "Texture";
+			case AssetType::Environment:   return "Environment";
+			case AssetType::AudioClip:     return "AudioClip";
+			case AssetType::Script:        return "Script";
+			case AssetType::Font:          return "Font";
+			case AssetType::Replay:        return "Replay";
+			case AssetType::SpriteSheet:   return "SpriteSheet";
+			case AssetType::Skeleton:      return "Skeleton";
+			case AssetType::AnimationClip: return "AnimationClip";
 		}
 		return "None";
 	}
@@ -68,6 +76,8 @@ namespace Engine {
 			AssetType::Font,
 			AssetType::Replay,
 			AssetType::SpriteSheet,
+			AssetType::Skeleton,
+			AssetType::AnimationClip,
 		};
 		for (const AssetType type : Types)
 		{

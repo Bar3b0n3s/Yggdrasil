@@ -30,6 +30,8 @@ Every component of the type registry, in canonical component order: the order of
 | `AudioSource` | Audio | Serializable, ScriptVisible, EditorVisible, Removable | Plays an audio clip, optionally positioned at the entity. |
 | `AudioListener` | Audio | Serializable, ScriptVisible, EditorVisible, Removable | Hears the scene from the entity's position and orientation. |
 | `Script` | Scripting | Serializable, ScriptVisible, EditorVisible, Removable, NoShortcut | Attaches Behaviour scripts to the entity, an ordered list of slots. |
+| `Animator` | Animation | Serializable, ScriptVisible, EditorVisible, Removable | Poses a skeleton from layers of animation clips, blended by their weights, each fixed step; skinned meshes on the entity and below it follow. |
+| `SkinnedMesh` | Animation | Serializable, ScriptVisible, EditorVisible, Removable | Deforms the entity's MeshRenderer mesh: its skin follows the nearest Animator on the entity or above it, and its morph targets take weights. |
 
 ## ID
 
@@ -723,9 +725,67 @@ Script members of `Script`:
 |---|---|---|---|---|---|
 | `Scripts` | proxy field | `{{Script: AssetRef?, Fields: {[string]: any}, ExecutionOrder: number}}` | read/write | All | The behaviours of the entity, in slot order; each slot is its own instance. A value a script writes holds at most 4096 bytes of text. |
 
+## Animator
+
+Poses a skeleton from layers of animation clips, blended by their weights, each fixed step; skinned meshes on the entity and below it follow.
+
+- Category: Animation
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Skeleton` | `AssetRef(Skeleton)` | `null` |  |  |  | The skeleton the layers' clips pose; null poses nothing. |
+| `Layers` | `Array<AnimatorLayer>` | `[]` |  |  |  | The layers, at most eight, blended in order over the skeleton's rest pose. |
+| `Playing` | `Bool` | `true` |  |  |  | Whether the layers' times advance each fixed step; the pose follows the times either way. |
+| `RootMotion` | `AnimatorRootMotion` | `"None"` |  |  |  | What happens to the skeleton's root motion: kept in the pose, applied to the entity or only reported. |
+
+Script members of `Animator`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Layers` | proxy field | `{{Clip: AssetRef?, Time: number, Speed: number, Weight: number, Loop: boolean}}` | read/write | All | The layers, at most eight, blended in order over the skeleton's rest pose. |
+| `Playing` | proxy field | `boolean` | read/write | All | Whether the layers' times advance each fixed step; the pose follows the times either way. |
+| `RootMotion` | proxy field | `AnimatorRootMotion` | read/write | All | What happens to the skeleton's root motion: kept in the pose, applied to the entity or only reported. |
+| `Skeleton` | proxy field | `AssetRef?` | read/write | All | The skeleton the layers' clips pose; null poses nothing. |
+
+## SkinnedMesh
+
+Deforms the entity's MeshRenderer mesh: its skin follows the nearest Animator on the entity or above it, and its morph targets take weights.
+
+- Category: Animation
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `MeshRenderer`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `MorphWeights` | `Array<Float>` | `[]` |  |  |  | One weight in [-1, 1] per morph target of the mesh, in order; a missing weight is the target's default, and an animated weight overrides it. |
+
+Script members of `SkinnedMesh`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `MorphWeights` | proxy field | `{number}` | read/write | All | One weight in [-1, 1] per morph target of the mesh, in order; a missing weight is the target's default, and an animated weight overrides it. |
+
 ## Structs
 
 The structs component fields hold, in name order.
+
+### AnimatorLayer
+
+One layer of an Animator's blend stack: a clip played at a time, speed and weight.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Clip` | `AssetRef(AnimationClip)` | `null` |  |  |  | The animation clip the layer plays; null plays nothing. |
+| `Time` | `Float` | `0` | 0 to 1e+06 | s |  | How far into the clip the layer is, in seconds; advanced each fixed step by the step times Speed. |
+| `Speed` | `Float` | `1` | 0 to 100 |  |  | How fast the layer's time advances; 0 holds it. |
+| `Weight` | `Float` | `1` | 0 to 1 |  |  | How much the layer's animated joints override the layers before it, from 0 (none) to 1 (fully). |
+| `Loop` | `Bool` | `true` |  |  |  | Whether the clip starts again at its end; otherwise its last pose holds. |
 
 ### PrefabOverride
 
@@ -752,6 +812,16 @@ One behaviour of a Script component.
 ## Enums
 
 The enums component fields use, in name order; files spell each value exactly as listed.
+
+### AnimatorRootMotion
+
+What an Animator does with its skeleton's root motion.
+
+| Value | Description |
+|---|---|
+| `None` | The root motion stays in the pose, so the mesh moves away from the entity. |
+| `Apply` | The root motion moves the entity's Transform each fixed step; the mesh stays at the entity. |
+| `Extract` | The root motion is held out of the pose and only reported by Animator:GetRootMotion, for a script to apply. |
 
 ### Attenuation
 

@@ -2,6 +2,9 @@
 -- How a material's base colour alpha is used (the glTF 2.0 alpha modes).
 export type AlphaMode = "Opaque" | "Mask" | "Blend"
 
+-- What an Animator does with its skeleton's root motion.
+export type AnimatorRootMotion = "None" | "Apply" | "Extract"
+
 -- What asset.create makes.
 export type AssetCreateType = "Material" | "Scene" | "Prefab" | "SoundEffect" | "Folder" | "SpriteSheet"
 
@@ -9,7 +12,7 @@ export type AssetCreateType = "Material" | "Scene" | "Prefab" | "SoundEffect" | 
 export type AssetState = "Unloaded" | "Loading" | "Loaded" | "Failed"
 
 -- The kind of a loadable asset (§7.1).
-export type AssetType = "None" | "Scene" | "Prefab" | "Mesh" | "Material" | "Texture" | "Environment" | "AudioClip" | "Script" | "Font" | "Replay" | "SpriteSheet"
+export type AssetType = "None" | "Scene" | "Prefab" | "Mesh" | "Material" | "Texture" | "Environment" | "AudioClip" | "Script" | "Font" | "Replay" | "SpriteSheet" | "Skeleton" | "AnimationClip"
 
 -- How a spatial sound's volume falls off with distance.
 export type Attenuation = "None" | "Inverse" | "Linear" | "Exponential"
@@ -211,6 +214,18 @@ export type TestSuite = {Name: string, Body: () -> (), Options: TestSuiteOptions
 
 -- Default positive tick timeout for cases in a suite.
 export type TestSuiteOptions = {CaseTimeoutTicks: number?}
+
+-- Poses a skeleton from layers of animation clips, blended by their weights, each fixed step; skinned meshes on the entity and below it follow.
+declare extern type Animator with
+	-- The layers, at most eight, blended in order over the skeleton's rest pose. [All modes; Runtime|Test; pure/read; setter mutates]
+	Layers: {{Clip: AssetRef?, Time: number, Speed: number, Weight: number, Loop: boolean}}
+	-- Whether the layers' times advance each fixed step; the pose follows the times either way. [All modes; Runtime|Test; pure/read; setter mutates]
+	Playing: boolean
+	-- What happens to the skeleton's root motion: kept in the pose, applied to the entity or only reported. [All modes; Runtime|Test; pure/read; setter mutates]
+	RootMotion: AnimatorRootMotion
+	-- The skeleton the layers' clips pose; null poses nothing. [All modes; Runtime|Test; pure/read; setter mutates]
+	Skeleton: AssetRef?
+end
 
 -- An opaque immutable asset handle; resolve metadata through Assets.
 declare extern type AssetRef with
@@ -421,6 +436,8 @@ declare extern type Entity with
 	AddComponent: (self: Entity, name: string, values: {[string]: any}?) -> any
 	-- Add a nonempty tag of at most 256 bytes if absent; an entity carries at most 256 tags. [All modes; Runtime|Test; mutates]
 	AddTag: (self: Entity, tag: string) -> ()
+	-- The entity's Animator component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	Animator: Animator?
 	-- The entity's AudioListener component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	AudioListener: AudioListener?
 	-- The entity's AudioSource component, or nil when absent. [All modes; Runtime|Test; pure/read]
@@ -462,6 +479,8 @@ declare extern type Entity with
 	function GetComponent(self, name: "AudioSource"): AudioSource?
 	function GetComponent(self, name: "AudioListener"): AudioListener?
 	function GetComponent(self, name: "Script"): Script?
+	function GetComponent(self, name: "Animator"): Animator?
+	function GetComponent(self, name: "SkinnedMesh"): SkinnedMesh?
 	-- Get the parent, or nil for a root. [All modes; Runtime|Test; pure/read]
 	GetParent: (self: Entity) -> Entity?
 	-- Get the instance of the first script slot whose behaviour has this name, or of the first slot without a name; nil when there is none. [All modes; Runtime|Test; pure/read]
@@ -504,6 +523,8 @@ declare extern type Entity with
 	SetActive: (self: Entity, active: boolean) -> ()
 	-- Reparent to the last sibling, preserving world pose by default; synchronize effective lifecycle transitions. [All modes; Runtime|Test; mutates]
 	SetParent: (self: Entity, parent: Entity?, keepWorld: boolean?) -> ()
+	-- The entity's SkinnedMesh component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	SkinnedMesh: SkinnedMesh?
 	-- The entity's SphereCollider component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	SphereCollider: SphereCollider?
 	-- The entity's SpotLight component, or nil when absent. [All modes; Runtime|Test; pure/read]
@@ -730,6 +751,12 @@ declare extern type Script with
 	Scripts: {{Script: AssetRef?, Fields: {[string]: any}, ExecutionOrder: number}}
 end
 
+-- Deforms the entity's MeshRenderer mesh: its skin follows the nearest Animator on the entity or above it, and its morph targets take weights.
+declare extern type SkinnedMesh with
+	-- One weight in [-1, 1] per morph target of the mesh, in order; a missing weight is the target's default, and an animated weight overrides it. [All modes; Runtime|Test; pure/read; setter mutates]
+	MorphWeights: {number}
+end
+
 -- A sphere-shaped collider in the entity's space.
 declare extern type SphereCollider with
 	-- Whether the collider only detects overlaps instead of colliding. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -890,7 +917,7 @@ declare Debug: {
 declare Field: {
 	-- Declare an empty array whose element keeps its complete nested field schema. [All modes; LoadTime|Runtime|Test; pure/read]
 	Array: (element: FieldDescriptor) -> FieldDescriptor,
-	-- Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for imported audio and .sfx sound effects, Script, Font, Replay or SpriteSheet), with a null default; any other name fails the import. [All modes; LoadTime|Runtime|Test; pure/read]
+	-- Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for imported audio and .sfx sound effects, Script, Font, Replay, SpriteSheet, Skeleton or AnimationClip), with a null default; any other name fails the import. [All modes; LoadTime|Runtime|Test; pure/read]
 	Asset: (type: string) -> FieldDescriptor,
 	-- Declare a boolean; the omitted default is false. [All modes; LoadTime|Runtime|Test; pure/read]
 	Bool: (default: boolean?, options: FieldOptions?) -> FieldDescriptor,

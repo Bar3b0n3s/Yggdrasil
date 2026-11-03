@@ -3,6 +3,8 @@
 #include "Engine/Scene/RenderExtraction.h"
 
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Scene/Components/AnimationPoseComponent.h"
+#include "Engine/Scene/Components/AnimatorComponent.h"
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
@@ -10,6 +12,7 @@
 #include "Engine/Scene/Components/PointLightComponent.h"
 #include "Engine/Scene/Components/PostProcessComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
+#include "Engine/Scene/Components/SkinnedMeshComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
 #include "Engine/Scene/Components/TextComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
@@ -29,6 +32,14 @@
 namespace Engine {
 
 	namespace {
+
+		// A MeshRenderer drawing `mesh` with its default materials.
+		MeshRendererComponent MakeMeshRenderer(AssetHandle mesh)
+		{
+			MeshRendererComponent renderer;
+			renderer.Mesh = TypedAssetHandle<AssetType::Mesh>(mesh);
+			return renderer;
+		}
 
 		Entity CreateCamera(Scene& scene, std::string_view name, bool primary)
 		{
@@ -531,6 +542,54 @@ namespace Engine {
 			REQUIRE(overArena->Texts.size() == 1);
 			CHECK(overArena->Texts[0].Text == "Arena");
 			CHECK(overArena->Camera.View == overHeap->Camera.View);
+		}
+
+		// M23 (C23.3, C-SKEL, C-MORPH; Docs/Decisions/0034-m23-contract.md decisions 27 and 29, stream B): a SkinnedMesh's
+		// item carries its driving Animator's skin matrices taken into the item's own space (the inverse of its rendered world
+		// matrix times the Animator entity's, times each Skin matrix), and its morph weights, the pose's channel for its path
+		// overriding the component's; an item without a pose has no palette (its bind pose), a MeshRenderer without a
+		// SkinnedMesh neither.
+		TEST_CASE("RenderExtraction: a SkinnedMesh's item carries its Animator's palette in its own space and its morph weights" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			static_cast<void>(CreateCamera(scene, "Camera", true));
+			Entity rig = scene.CreateEntity("Rig");
+			SetTranslation(rig, glm::vec3(2.0f, 0.0f, 0.0f));
+			rig.AddComponent<AnimatorComponent>();
+			Entity body = scene.CreateEntity("Body", rig);
+			SetTranslation(body, glm::vec3(0.0f, 1.0f, 0.0f));
+			body.AddComponent<MeshRendererComponent>(MakeMeshRenderer(AssetHandle(0x5c1)));
+			body.AddComponent<SkinnedMeshComponent>(SkinnedMeshComponent{ .MorphWeights = { 0.25f, 0.5f } });
+			Entity plain = scene.CreateEntity("Plain");
+			plain.AddComponent<MeshRendererComponent>(MakeMeshRenderer(AssetHandle(0x5c2)));
+			const glm::mat4 joint = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 3.0f));
+			AnimationPoseComponent pose;
+			pose.JointModel = { glm::mat4(1.0f), joint };
+			pose.Skin = { glm::mat4(1.0f), joint };
+			pose.Morphs = { AnimationMorphWeights{ .Target = "Body", .Weights = { 1.0f } } };
+			rig.AddComponent<AnimationPoseComponent>(pose);
+			TransformSystem::Update(scene);
+
+			const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, RenderExtractionRequest{ .Width = 64, .Height = 64 });
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			REQUIRE(snapshot->Meshes.size() == 2);
+			const MeshDrawItem& skinned = snapshot->Meshes[0];
+			REQUIRE(skinned.JointPalette.size() == 2);
+			// The body sits one unit above the rig: its palette undoes that offset, so joint 0's matrix moves down by one.
+			CHECK(skinned.JointPalette[0] == glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -1.0f, 0.0f)));
+			CHECK(skinned.JointPalette[1] == glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -1.0f, 3.0f)));
+			// The pose's channel for "Body" overrides the first weight; the second keeps the component's.
+			CHECK(skinned.MorphWeights == std::vector<float>{ 1.0f, 0.5f });
+			CHECK(snapshot->Meshes[1].JointPalette.empty());
+			CHECK(snapshot->Meshes[1].MorphWeights.empty());
+
+			// Without a pose the skinned item draws its bind pose: no palette, the component's weights.
+			rig.RemoveComponent<AnimationPoseComponent>();
+			const Result<RenderSnapshot> unposed = ExtractRenderSnapshot(scene, RenderExtractionRequest{ .Width = 64, .Height = 64 });
+			REQUIRE(unposed.has_value());
+			CHECK(unposed->Meshes[0].JointPalette.empty());
+			CHECK(unposed->Meshes[0].MorphWeights == std::vector<float>{ 0.25f, 0.5f });
 		}
 	}
 
