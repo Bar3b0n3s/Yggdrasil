@@ -22,7 +22,7 @@
 						"type": "string"
 					},
 					"values": {
-						"description": "A Material's, a SoundEffect's or a SpriteSheet's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, or a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads); absent for other types."
+						"description": "A Material's, a SoundEffect's or a SpriteSheet's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, or a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads; the Texture takes any asset reference: a handle, an Assets/ path or an engine:// path); absent for other types."
 					},
 					"dryRun": {
 						"description": "Validate and return the would-be result without applying anything.",
@@ -223,7 +223,7 @@
 						"type": "string"
 					},
 					"values": {
-						"description": "An RFC 7386 merge patch of its properties: members replace, null resets a field."
+						"description": "An RFC 7386 merge patch of its properties: members replace, null resets a field; a sprite sheet's Texture takes any asset reference (a handle, an Assets/ path or an engine:// path)."
 					},
 					"dryRun": {
 						"description": "Validate and return the would-be result without applying anything.",

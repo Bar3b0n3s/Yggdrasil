@@ -710,6 +710,58 @@ Closest swept sphere hit; radius obeys collider size bounds.
 
 All modes; Runtime|Test; pure/read.
 
+## Physics2D
+
+Queries and gravity for the active scene's 2D physics world, in the XY plane.
+
+### Physics2D.GetGravity
+
+`() -> vector`
+
+Current 2D world gravity (Z is 0).
+
+All modes; Runtime|Test; pure/read.
+
+### Physics2D.OverlapBox
+
+`(center: vector, halfExtents: vector, angle: number?, layerMask: number?) -> {Entity}`
+
+Unique overlapping 2D collider entities sorted by UUID; the box rotated by angle degrees about +Z (0 by default).
+
+All modes; Runtime|Test; pure/read.
+
+### Physics2D.OverlapCircle
+
+`(center: vector, radius: number, layerMask: number?) -> {Entity}`
+
+Unique overlapping 2D collider entities sorted by UUID; radius obeys collider size bounds.
+
+All modes; Runtime|Test; pure/read.
+
+### Physics2D.Raycast
+
+`(origin: vector, direction: vector, maxDistance: number, layerMask: number?) -> RaycastHit?`
+
+Closest 2D hit, including sensors; vectors in the plane (Z ignored, results with Z 0).
+
+All modes; Runtime|Test; pure/read.
+
+### Physics2D.RaycastAll
+
+`(origin: vector, direction: vector, maxDistance: number, layerMask: number?) -> {RaycastHit}`
+
+All 2D hits sorted by distance then collider UUID.
+
+All modes; Runtime|Test; pure/read.
+
+### Physics2D.SetGravity
+
+`(gravity: vector) -> ()`
+
+Set the 2D world's gravity from the vector's X and Y for the session.
+
+All modes; Runtime|Test; mutates.
+
 ## Random
 
 Deterministic shared simulation randomness. Invalid arguments never advance the stream.
@@ -1414,11 +1466,27 @@ Called when a collision begins, with the other entity and contact.
 
 All modes; Runtime|Test; mutates.
 
+### Behaviour.OnCollisionEnter2D
+
+`(self: ScriptInstance, other: Entity, contact: CollisionContact) -> ()`
+
+Called when a 2D collision begins, with the other entity and the contact in the XY plane.
+
+All modes; Runtime|Test; mutates.
+
 ### Behaviour.OnCollisionExit
 
 `(self: ScriptInstance, other: Entity) -> ()`
 
 Called when the corresponding collision or trigger transition occurs.
+
+All modes; Runtime|Test; mutates.
+
+### Behaviour.OnCollisionExit2D
+
+`(self: ScriptInstance, other: Entity) -> ()`
+
+Called when the corresponding 2D collision or trigger transition occurs.
 
 All modes; Runtime|Test; mutates.
 
@@ -1494,11 +1562,27 @@ Called when the corresponding collision or trigger transition occurs.
 
 All modes; Runtime|Test; mutates.
 
+### Behaviour.OnTriggerEnter2D
+
+`(self: ScriptInstance, other: Entity) -> ()`
+
+Called when the corresponding 2D collision or trigger transition occurs.
+
+All modes; Runtime|Test; mutates.
+
 ### Behaviour.OnTriggerExit
 
 `(self: ScriptInstance, other: Entity) -> ()`
 
 Called when the corresponding collision or trigger transition occurs.
+
+All modes; Runtime|Test; mutates.
+
+### Behaviour.OnTriggerExit2D
+
+`(self: ScriptInstance, other: Entity) -> ()`
+
+Called when the corresponding 2D collision or trigger transition occurs.
 
 All modes; Runtime|Test; mutates.
 
@@ -1646,7 +1730,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `(self: Camera, x: number, y: number) -> (vector, vector)`
 
-Ray through a viewport pixel center, origin top-left, using the rendered camera pose.
+Ray through a viewport pixel center, origin top-left, using the rendered camera pose; under a PixelPerfectCamera through its snapped reference view and the output mapping.
 
 All modes; Runtime|Test; pure/read.
 
@@ -1662,7 +1746,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `(self: Camera, point: vector) -> vector`
 
-Project to top-left pixel coordinates and reverse-Z depth using the rendered camera pose.
+Project to top-left pixel coordinates and reverse-Z depth using the rendered camera pose; under a PixelPerfectCamera through its snapped reference view and the output mapping.
 
 All modes; Runtime|Test; pure/read.
 
@@ -3130,6 +3214,46 @@ All modes; Runtime|Test; mutates.
 
 Simulates the entity in the 2D world: moves along world X and Y and rotates about world Z.
 
+### RigidBody2D.AddAngularImpulse
+
+`(self: RigidBody2D, impulse: number) -> ()`
+
+Apply an angular impulse about +Z to a Dynamic 2D body.
+
+All modes; Runtime|Test; mutates.
+
+### RigidBody2D.AddForce
+
+`(self: RigidBody2D, force: vector) -> ()`
+
+Apply a force in the XY plane to a Dynamic 2D body.
+
+All modes; Runtime|Test; mutates.
+
+### RigidBody2D.AddForceAtPosition
+
+`(self: RigidBody2D, force: vector, position: vector) -> ()`
+
+Apply a force in the XY plane at a world position of the plane to a Dynamic 2D body.
+
+All modes; Runtime|Test; mutates.
+
+### RigidBody2D.AddImpulse
+
+`(self: RigidBody2D, impulse: vector) -> ()`
+
+Apply an impulse in the XY plane to a Dynamic 2D body.
+
+All modes; Runtime|Test; mutates.
+
+### RigidBody2D.AddTorque
+
+`(self: RigidBody2D, torque: number) -> ()`
+
+Apply a torque about +Z, in newton metres, to a Dynamic 2D body.
+
+All modes; Runtime|Test; mutates.
+
 ### RigidBody2D.AllowSleeping
 
 `boolean`
@@ -3170,6 +3294,22 @@ The friction coefficient of the body's surfaces; a contact uses the geometric me
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
+### RigidBody2D.GetAngularVelocity
+
+`(self: RigidBody2D) -> number`
+
+Read the angular velocity about +Z in radians per second.
+
+All modes; Runtime|Test; pure/read.
+
+### RigidBody2D.GetLinearVelocity
+
+`(self: RigidBody2D) -> vector`
+
+Read the linear velocity in the XY plane (Z is 0).
+
+All modes; Runtime|Test; pure/read.
+
 ### RigidBody2D.GravityFactor
 
 `number`
@@ -3193,6 +3333,14 @@ All modes; Runtime|Test; pure/read; setter mutates.
 The velocity along world X and Y the body starts with, in metres per second.
 
 All modes; Runtime|Test; pure/read; setter mutates.
+
+### RigidBody2D.IsSleeping
+
+`(self: RigidBody2D) -> boolean`
+
+Whether the 2D body is sleeping.
+
+All modes; Runtime|Test; pure/read.
 
 ### RigidBody2D.Layer
 
@@ -3242,6 +3390,14 @@ Discrete or continuous (LinearCast) collision detection.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
+### RigidBody2D.MoveKinematic
+
+`(self: RigidBody2D, position: vector, angle: number) -> ()`
+
+Set a Kinematic 2D target in the plane, the angle in degrees about +Z, for the next fixed step.
+
+All modes; Runtime|Test; mutates.
+
 ### RigidBody2D.Restitution
 
 `number`
@@ -3250,6 +3406,30 @@ Bounciness, from no bounce (0) to a perfectly elastic bounce (1); a contact uses
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
+### RigidBody2D.SetAngularVelocity
+
+`(self: RigidBody2D, velocity: number) -> ()`
+
+Set a Dynamic 2D body's angular velocity about +Z in radians per second.
+
+All modes; Runtime|Test; mutates.
+
+### RigidBody2D.SetLinearVelocity
+
+`(self: RigidBody2D, velocity: vector) -> ()`
+
+Set a Dynamic 2D body's linear velocity from the vector's X and Y.
+
+All modes; Runtime|Test; mutates.
+
+### RigidBody2D.Teleport
+
+`(self: RigidBody2D, position: vector, angle: number?) -> ()`
+
+Place a 2D body at once in the plane (the entity keeps its Z), the angle in degrees about +Z kept when omitted, preserving velocity and resetting interpolation.
+
+All modes; Runtime|Test; mutates.
+
 ### RigidBody2D.Type
 
 `BodyType`
@@ -3257,6 +3437,14 @@ All modes; Runtime|Test; pure/read; setter mutates.
 Static never moves; Kinematic is moved by script; Dynamic is simulated.
 
 All modes; Runtime|Test; pure/read; setter mutates.
+
+### RigidBody2D.WakeUp
+
+`(self: RigidBody2D) -> ()`
+
+Wake a sleeping 2D body.
+
+All modes; Runtime|Test; mutates.
 
 ## Script (component)
 
@@ -3370,6 +3558,14 @@ The name of the sheet's clip to play; empty plays nothing. A value a script writ
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
+### SpriteAnimator.Play
+
+`(self: SpriteAnimator, clip: string) -> ()`
+
+Play the sheet's clip named clip from its first step, which shows at the next fixed step's SpriteAnimation phase.
+
+All modes; Runtime|Test; mutates.
+
 ### SpriteAnimator.Playing
 
 `boolean`
@@ -3393,6 +3589,14 @@ All modes; Runtime|Test; pure/read; setter mutates.
 How many fixed steps the current clip step has been shown.
 
 All modes; Runtime|Test; pure/read; setter mutates.
+
+### SpriteAnimator.Stop
+
+`(self: SpriteAnimator) -> ()`
+
+Stop advancing the clip; the frame shown stays.
+
+All modes; Runtime|Test; mutates.
 
 ## SpriteRenderer
 
@@ -3453,6 +3657,14 @@ All modes; Runtime|Test; pure/read; setter mutates.
 How many texels of the image make one unit of the entity's local space; the sprite's size is its texels divided by this.
 
 All modes; Runtime|Test; pure/read; setter mutates.
+
+### SpriteRenderer.SetFrameByName
+
+`(self: SpriteRenderer, name: string) -> ()`
+
+Set Frame to the index of the sprite sheet's frame named name; an error names the sheet when it has no such frame.
+
+All modes; Runtime|Test; mutates.
 
 ### SpriteRenderer.Sheet
 
@@ -4421,6 +4633,14 @@ What a type of a game's native module is.
 - `Component`: Data on entities, saved in scenes and prefabs as Native.<Name>.
 
 - `Resource`: One value per play session, part of the state hash, never saved.
+
+## Physics2DQueryShape
+
+The shape of a 2D overlap query.
+
+- `Circle`: A circle of radius `radius` around `center`.
+
+- `Box`: A rectangle of half extents `halfExtents` around `center`, rotated by `angle` degrees.
 
 ## PhysicsBodyOrigin
 

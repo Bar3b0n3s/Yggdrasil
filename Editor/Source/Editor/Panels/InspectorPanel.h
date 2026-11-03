@@ -40,6 +40,10 @@ namespace Engine {
 	// edit or refresh interval, never every frame; a read or parse failure is shown inline. Replacing the inspected owner
 	// (the project binding, the edit scene document or the play session and its scene) discards a pending gesture or typed
 	// name; edits, undo/redo and project-settings changes keep them.
+	// M21 (Docs/Decisions/0032-m21-contract.md decision 14; Backlog §2's sprite sheet inspector): a selected sprite sheet
+	// shows its texture, frames and clips. A field's gesture shows its candidate while it lasts and, on release, submits
+	// asset.setProperties {asset, values: {<field>: <whole value>}} (an array replaces the whole array, RFC 7386), the
+	// method's own action, so its texture check and its undo step are asset.setProperties'; Escape discards the gesture.
 	// Main thread inside ImGui. Retains only UI presentation state, no entity/component/asset pointers across frames.
 	class InspectorPanel
 	{
@@ -71,6 +75,14 @@ namespace Engine {
 			Json Values{};
 			std::string Error{};
 		};
+		// M21: the sprite sheet field a gesture is changing (the sheet inspector), with the value it shows until its release
+		// submits it.
+		struct SheetEdit
+		{
+			AssetHandle Asset{};
+			std::string Field{};
+			Value Candidate{};
+		};
 		// The inspected entity's prefab instance (DescribePrefabInstance), re-read when the entity, the inspected owner, the
 		// editor revision or the outermost prefab's version changes, so an override list is never rebuilt every frame.
 		struct PrefabViewCache
@@ -97,6 +109,8 @@ namespace Engine {
 		void BeginPendingEdit(EditorPanelContext& context, PendingEdit pending);
 		[[nodiscard]] Status CommitActiveEdit(EditorPanelContext& context);
 		[[nodiscard]] const AssetProperties& ReadAssetProperties(EditorPanelContext& context, AssetHandle asset);
+		// M21: the selected sprite sheet `asset`'s fields, read in `properties`; `escape` discards a gesture.
+		void DrawSpriteSheet(EditorPanelContext& context, AssetHandle asset, const AssetProperties& properties, bool escape);
 		std::optional<InspectorEditTarget> m_ActiveTarget{};
 		std::optional<PendingEdit> m_Pending{};
 		uint32_t m_ActiveComponents = 0;
@@ -108,6 +122,7 @@ namespace Engine {
 		std::vector<uint64_t> m_Tickets{};
 		std::string m_ComponentSearch{};
 		std::optional<AssetProperties> m_AssetProperties{};
+		std::optional<SheetEdit> m_SheetEdit{};
 		std::optional<PrefabViewCache> m_PrefabView{};
 		UUID m_ApplyInstance{}; // the instance the level picker belongs to
 		UUID m_ApplyLevel{};    // the picked level's root; reset to the outermost for another instance

@@ -55,7 +55,8 @@ namespace Engine {
 				.Icons = options.Icons,
 				.Wireframe = options.Wireframe,
 				.DebugView = std::string(RenderDebugViewToString(viewport.GetDebugView())),
-				.GameResolution = { resolution.x, resolution.y } };
+				.GameResolution = { resolution.x, resolution.y },
+				.Mode2D = options.Mode2D };
 		}
 
 	}
@@ -169,7 +170,12 @@ namespace Engine {
 		EditorViewportState& viewport = context.GetEditor().GetViewportState();
 		const glm::uvec2 size = viewport.GetSceneSize();
 		const float aspect = static_cast<float>(size.x) / static_cast<float>(size.y);
-		ENGINE_TRY_ASSIGN(const ExplicitRenderCamera camera, EditorCamera::FrameBounds(viewport.GetCamera(), minimum, maximum, aspect));
+		ENGINE_TRY_ASSIGN(ExplicitRenderCamera camera, EditorCamera::FrameBounds(viewport.GetCamera(), minimum, maximum, aspect));
+		// The 2D mode frames in the plane: the framed target's X and Y and the framed size, from Make2D's height (M21).
+		if (viewport.GetOptions().Mode2D)
+		{
+			ENGINE_TRY_ASSIGN(camera, EditorCamera::Make2D(camera));
+		}
 		ENGINE_TRY(viewport.SetCamera(camera));
 		result.Position = camera.Position;
 		result.Target = camera.Target;
@@ -190,6 +196,19 @@ namespace Engine {
 			options.Icons = params.Icons;
 		if (context.HasParam("wireframe"))
 			options.Wireframe = params.Wireframe;
+		// Turning the 2D mode on makes the scene camera a 2D camera (M21, decision 14); turning it off keeps the camera.
+		std::optional<ExplicitRenderCamera> camera2D;
+		if (context.HasParam("mode2D"))
+		{
+			if (params.Mode2D && !options.Mode2D)
+			{
+				Result<ExplicitRenderCamera> made = EditorCamera::Make2D(viewport.GetCamera());
+				if (!made)
+					return std::unexpected(std::move(made).error().WithLocation({ .File = {}, .JsonPointer = "/mode2D", .Entity = {} }));
+				camera2D = *made;
+			}
+			options.Mode2D = params.Mode2D;
+		}
 		// Validate every member before changing anything.
 		std::optional<RenderDebugView> debugView;
 		if (context.HasParam("debugView"))
@@ -217,6 +236,8 @@ namespace Engine {
 			ENGINE_TRY(viewport.SetDebugView(*debugView));
 		if (resolution)
 			ENGINE_TRY(viewport.SetGameResolution(*resolution));
+		if (camera2D)
+			ENGINE_TRY(viewport.SetCamera(*camera2D));
 		viewport.SetOptions(options);
 		return Utils::MakeViewportOptionsResult(viewport);
 	}
@@ -252,7 +273,8 @@ namespace Engine {
 			.Field("icons", &ViewportSetOptionsParams::Icons, "Show scene object icons.")
 			.Field("wireframe", &ViewportSetOptionsParams::Wireframe, "Show mesh wireframes.")
 			.Field("debugView", &ViewportSetOptionsParams::DebugView, "The scene view's debug view, any ASCII case: Lit, Albedo, Normals, Roughness, Metallic, Emissive, AO, ShadowCascades or Overdraw.")
-			.Field("gameResolution", &ViewportSetOptionsParams::GameResolution, "The Game view's resolution [width, height], each 1 to 8192, or [0, 0] for free resolution.");
+			.Field("gameResolution", &ViewportSetOptionsParams::GameResolution, "The Game view's resolution [width, height], each 1 to 8192, or [0, 0] for free resolution.")
+			.Field("mode2D", &ViewportSetOptionsParams::Mode2D, "The scene view's 2D mode: turning it on makes the scene camera orthographic, looking down -Z at its target's X and Y; it then pans and zooms only, and its gizmos move in X and Y, rotate about Z and scale in X and Y. Turning it off keeps the camera.");
 		registry.Struct<ViewportSetOptionsResult>("ViewportSetOptionsResult", "All current scene and game viewport options.")
 			.Field("grid", &ViewportSetOptionsResult::Grid, "Whether the scene grid is shown.")
 			.Field("gizmos", &ViewportSetOptionsResult::Gizmos, "Whether transform gizmos are enabled.")
@@ -260,14 +282,15 @@ namespace Engine {
 			.Field("icons", &ViewportSetOptionsResult::Icons, "Whether object icons are shown.")
 			.Field("wireframe", &ViewportSetOptionsResult::Wireframe, "Whether mesh wireframes are shown.")
 			.Field("debugView", &ViewportSetOptionsResult::DebugView, "The scene view's debug view (canonical name).")
-			.Field("gameResolution", &ViewportSetOptionsResult::GameResolution, "The Game view's resolution [width, height]; [0, 0] is free resolution.");
+			.Field("gameResolution", &ViewportSetOptionsResult::GameResolution, "The Game view's resolution [width, height]; [0, 0] is free resolution.")
+			.Field("mode2D", &ViewportSetOptionsResult::Mode2D, "Whether the scene view is in its 2D mode.");
 	}
 
 	void RegisterViewportMethods(MethodRegistry& methods)
 	{
 		methods.Add({ .Name = "viewport.camera", .Description = "Reads or patches the editor scene camera (pose, projection, field of view, orthographic size and clip range) without changing the scene or history.", .Examples = { { .Description = "Read the scene camera.", .Params = Json::object() }, { .Description = "Switch the scene view to an orthographic top-down camera.", .Params = Json{ { "position", { 0, 20, 0.01 } }, { "target", { 0, 0, 0 } }, { "projection", "Orthographic" }, { "orthographicSize", 8 } } } } }, &Automation::ViewportCamera);
 		methods.Add({ .Name = "viewport.frame", .Description = "Frames every referenced entity in the scene viewport with ten percent padding.", .RequiredParams = { "entities" }, .Examples = { { .Description = "Frame the board.", .Params = Json{ { "entities", Json::array({ "/Board" }) } } } } }, &Automation::ViewportFrame);
-		methods.Add({ .Name = "viewport.setOptions", .Description = "Patches the scene viewport's overlays and debug view and the Game view's resolution; absent members remain unchanged.", .Examples = { { .Description = "Show colliders.", .Params = Json{ { "colliders", true } } }, { .Description = "Show the scene view's normals and a fixed 1280x720 game view.", .Params = Json{ { "debugView", "Normals" }, { "gameResolution", { 1280, 720 } } } } } }, &Automation::ViewportSetOptions);
+		methods.Add({ .Name = "viewport.setOptions", .Description = "Patches the scene viewport's overlays, debug view and 2D mode and the Game view's resolution; absent members remain unchanged.", .Examples = { { .Description = "Show colliders.", .Params = Json{ { "colliders", true } } }, { .Description = "Show the scene view's normals and a fixed 1280x720 game view.", .Params = Json{ { "debugView", "Normals" }, { "gameResolution", { 1280, 720 } } } }, { .Description = "Switch the scene view to its 2D mode.", .Params = Json{ { "mode2D", true } } } } }, &Automation::ViewportSetOptions);
 	}
 
 }

@@ -42,17 +42,20 @@
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
 #include "Engine/Scene/Migrations.h"
+#include "Engine/Scene/Physics2DValidation.h"
 #include "Engine/Scene/PhysicsValidation.h"
 #include "Engine/Scene/Prefab.h"
 #include "Engine/Scene/RenderAnnotations.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Scene/SpriteValidation.h"
 #include "Engine/Scripting/ScriptAssetLoads.h"
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <charconv>
+#include <iterator>
 #include <map>
 #include <optional>
 #include <set>
@@ -131,6 +134,13 @@ namespace Engine {
 			ScriptComputedAssetLoadCode,
 			// M20 (Scene/LoadReport.h, Docs/Decisions/0031-m20-contract.md decision 10), appended in landing order.
 			PrefabCycleCode,
+			// M21 (Scene/SpriteValidation.h and Scene/Physics2DValidation.h, Docs/Decisions/0032-m21-contract.md decision 12), in
+			// that decision's order.
+			SpriteUnknownSortingLayerCode,
+			SpriteFrameOutOfRangeCode,
+			SpriteUnknownClipCode,
+			Physics2DMixedWorldsCode,
+			Physics2DOffPlaneCode,
 		};
 
 		// The documentation of every code, in ValidatorCodes order (M14, ADR 0022 decision 10): Docs/Reference/Validation.md, the
@@ -289,6 +299,21 @@ namespace Engine {
 			ValidationCodeInfo{ PrefabCycleCode, "Error", false,
 				"A prefab nests itself, directly or through other prefabs.",
 				"Remove the nested instance that closes the cycle from one of the prefab files, then reimport it." },
+			ValidationCodeInfo{ SpriteUnknownSortingLayerCode, "Warning", false,
+				"A SpriteRenderer names a sorting layer that SortingLayers.Layers does not declare; it draws in the first layer.",
+				"Declare the layer with project.setSettings, or correct the name." },
+			ValidationCodeInfo{ SpriteFrameOutOfRangeCode, "Warning", false,
+				"A SpriteRenderer's Frame is not an index of its sprite sheet's frames; it draws nothing.",
+				"Set Frame below the sheet's frame count, or add the frame to the sheet." },
+			ValidationCodeInfo{ SpriteUnknownClipCode, "Warning", false,
+				"A SpriteAnimator's Clip names no clip of its SpriteRenderer's sprite sheet; it plays nothing.",
+				"Name a clip of the sheet, add the clip, or clear Clip." },
+			ValidationCodeInfo{ Physics2DMixedWorldsCode, "Error", false,
+				"An entity holds both 2D and 3D physics components; it stays in the 3D world and its 2D components make no body.",
+				"Remove the components of the world it does not belong to, or split the entity." },
+			ValidationCodeInfo{ Physics2DOffPlaneCode, "Warning", false,
+				"A 2D body's world rotation is not a rotation about Z alone; the body takes its rotation about Z.",
+				"Rotate the entity and its ancestors about Z only." },
 		};
 
 		// The code documentation lists exactly the codes, in order.
@@ -658,6 +683,23 @@ namespace Engine {
 			}
 		}
 
+		// The sprite checks (M21, Scene/SpriteValidation.h): SPRITE_UNKNOWN_SORTING_LAYER against the project's
+		// SortingLayers.Layers, and SPRITE_FRAME_OUT_OF_RANGE and SPRITE_UNKNOWN_CLIP against each sheet that loads; none is
+		// fixable.
+		static void CheckSprites(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			const std::vector<std::string>& layers = editor.GetProject().GetSettings().SortingLayers.Layers;
+			for (SpriteSceneIssue& issue : FindSpriteSceneIssues(*checked.Target, editor.GetEngine().GetAssetManager(), layers))
+			{
+				DiagnosticSite site;
+				site.File = checked.File;
+				site.Entity = FormatOptionalUUID(issue.Entity);
+				site.Component = std::move(issue.Component);
+				site.Field = std::move(issue.Field);
+				diagnostics.push_back(MakeDiagnostic(issue.Code, issue.Severity, std::move(issue.Message), site, std::move(issue.Hint), false));
+			}
+		}
+
 		static void CheckDanglingReferences(const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			const Scene& scene = *checked.Target;
@@ -996,7 +1038,11 @@ namespace Engine {
 		{
 			if (checked.Layers == nullptr)
 				return;
-			for (const PhysicsDiagnostic& physics : ValidateScenePhysics(*checked.Target, *checked.Layers, editor.GetEngine().GetAssetManager()))
+			// M21 (Docs/Decisions/0032-m21-contract.md decision 12): the 2D world's diagnostics follow the 3D world's.
+			std::vector<PhysicsDiagnostic> found = ValidateScenePhysics(*checked.Target, *checked.Layers, editor.GetEngine().GetAssetManager());
+			std::vector<PhysicsDiagnostic> found2D = ValidateScenePhysics2D(*checked.Target, *checked.Layers);
+			found.insert(found.end(), std::make_move_iterator(found2D.begin()), std::make_move_iterator(found2D.end()));
+			for (const PhysicsDiagnostic& physics : found)
 			{
 				DiagnosticSite site;
 				site.File = checked.File;
@@ -1196,6 +1242,7 @@ namespace Engine {
 			ENGINE_TRY(CheckSceneScripts(editor, checked, diagnostics));
 			CheckPhysics(editor, checked, diagnostics);
 			CheckLightLimit(checked, diagnostics);
+			CheckSprites(editor, checked, diagnostics);
 			return CheckRenderScene(editor, checked, diagnostics);
 		}
 

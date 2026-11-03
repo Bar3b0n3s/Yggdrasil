@@ -21,8 +21,9 @@ namespace Engine {
 	// asset.*, prefab.*, entity.bounds and project.refreshAssets (ADR 0010 decision 20), M7's play.*, input.inject and
 	// project.export (ADR 0012 decisions 4, 8 and 14), M11's physics.bodyInfo (ADR 0014 decision 18), M12's audio.stats
 	// (ADR 0015 decision 15), M19's input.readReplay and native.* (ADR 0030 decisions 14 and 32), M18's shaders.reload and
-	// profiler.capture (ADR 0029 decisions 3 and 11), and M20's scene.list, scene.activate and scene.close
-	// (Docs/Decisions/0031-m20-contract.md decision 14), test hooks excluded.
+	// profiler.capture (ADR 0029 decisions 3 and 11), M20's scene.list, scene.activate and scene.close
+	// (Docs/Decisions/0031-m20-contract.md decision 14), and M21's physics2d.raycast and physics2d.overlap
+	// (Docs/Decisions/0032-m21-contract.md decision 15), test hooks excluded.
 	static const std::vector<std::string>& GetExpectedMethodNames()
 	{
 		static const std::vector<std::string> ExpectedNames = { "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
@@ -31,7 +32,7 @@ namespace Engine {
 			"edit.undo", "editor.screenshot", "editor.state", "entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get",
 			"entity.reparent", "entity.update", "events.read", "input.inject", "input.readReplay", "input.record", "input.replay", "log.read",
 			"native.build", "native.getComponents", "native.load", "native.read", "native.setComponents", "native.status", "native.write",
-			"physics.bodyInfo", "play.pause", "play.resume",
+			"physics.bodyInfo", "physics2d.overlap", "physics2d.raycast", "play.pause", "play.resume",
 			"play.setTimeScale", "play.start", "play.state", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "prefab.revert",
 			"prefab.unpack", "profiler.capture", "project.create", "project.export", "project.getSettings", "project.info", "project.open", "project.refreshAssets",
 			"project.save", "project.setSettings", "project.upgrade", "project.validate", "rpc.discover", "scene.activate", "scene.close", "scene.diff", "scene.get",
@@ -127,7 +128,7 @@ namespace Engine {
 				"asset.info", "asset.list", "asset.move", "asset.setImportSettings", "asset.setProperties", "audio.stats", "component.list", "component.schema",
 				"docs.get", "edit.getSelection", "edit.history", "editor.state", "entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get",
 				"entity.reparent", "entity.update", "events.read", "log.read", "native.getComponents", "native.read", "native.setComponents", "native.status",
-				"native.write", "physics.bodyInfo", "prefab.apply", "prefab.create", "prefab.instantiate",
+				"native.write", "physics.bodyInfo", "physics2d.overlap", "physics2d.raycast", "prefab.apply", "prefab.create", "prefab.instantiate",
 				"prefab.revert", "prefab.unpack", "project.getSettings", "project.info", "project.setSettings", "project.validate", "rpc.discover", "scene.diff",
 				"scene.get", "scene.query", "scene.raycast", "scene.tree", "script.check", "script.create", "script.errors", "script.fields", "script.read", "script.write",
 				"session.info", "stats.get", "viewport.pick" };

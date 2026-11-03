@@ -6,13 +6,11 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from harness import AutomationTestCase
+from harness import AutomationTestCase, engine_client
 from test_environment import png_pixels
 
-SKIP_SPRITES = ("contract stub: sprites, sprite animation and the pixel-perfect camera "
-                "(ADR 0032 decisions 3 to 7, streams A, B and C)")
-SKIP_2D_MODE = "contract stub: the 2D editor mode and 2D picking (ADR 0032 decision 14, streams A and D)"
-
+# engine://Textures/Checker (64 x 64): a sheet's Texture takes any asset reference (W21.1's review), here an engine
+# path.
 SHEET = {
     "Texture": "engine://Textures/Checker",
     "Frames": [
@@ -26,10 +24,10 @@ SHEET = {
 
 
 class Sprite2DTests(AutomationTestCase):
-    @unittest.skip(SKIP_SPRITES)
     def test_a_sprite_animator_advances_its_sheet_frame_by_ticks(self) -> None:
         # Decision 5 (Roadmap M21 "a tick-driven SpriteAnimator playing SpriteSheet clips"): the SpriteAnimation phase
-        # writes the SpriteRenderer's Frame from the clip, one step per clip frame for its ticks, in Play and Simulate.
+        # writes the SpriteRenderer's Frame from the clip, one step per clip frame for its ticks; the phase runs in Play
+        # and Simulate alike, and this drives a Simulate session.
         client, _ = self.open_editor_with_scene()
         client.call("asset.create", {"type": "SpriteSheet", "path": "Assets/Sheets/Spin.spritesheet", "values": SHEET})
         client.call("entity.create", {"name": "Spinner", "components": {
@@ -44,7 +42,24 @@ class Sprite2DTests(AutomationTestCase):
         self.assertEqual(frames, [0, 0, 1, 2, 0])
         client.call("play.stop")
 
-    @unittest.skip(SKIP_SPRITES)
+    def test_a_sprite_sheet_takes_its_texture_by_any_asset_reference(self) -> None:
+        # Architecture §7.1 (W21.1's review): asset.create and asset.setProperties take a sheet's Texture as a handle, a
+        # project path or an engine path, as every AssetRef param, and write the handle it names; one that names
+        # nothing is refused at the Texture.
+        client, _ = self.open_editor_with_scene()
+        client.call("asset.create", {"type": "SpriteSheet", "path": "Assets/Sheets/Spin.spritesheet", "values": SHEET})
+        created = client.call("asset.getProperties", {"asset": "Assets/Sheets/Spin.spritesheet"})
+        self.assertEqual(created["values"]["Texture"], "0000000000000184")
+        # The Missing checker (64 x 64) holds the sheet's frames as the Checker does.
+        patched = client.call("asset.setProperties", {
+            "asset": "Assets/Sheets/Spin.spritesheet", "values": {"Texture": "engine://Textures/Missing"}})
+        self.assertEqual(patched["values"]["Texture"], "0000000000000185")
+        with self.assertRaises(engine_client.EngineError) as raised:
+            client.call("asset.setProperties", {
+                "asset": "Assets/Sheets/Spin.spritesheet", "values": {"Texture": "Assets/Textures/Missing.png"}})
+        self.assertEqual(raised.exception.data["errorCode"], "NotFound")
+        self.assertEqual(raised.exception.data["location"]["pointer"], "/values/Texture")
+
     def test_a_pixel_perfect_camera_renders_its_reference_resolution(self) -> None:
         # Decision 6: the game view of a PixelPerfectCamera at 320 x 180 in a 960 x 540 view is upscaled by 3 with point
         # sampling: the built-in white square at 16 pixels per unit, centred, covers scene pixels [152, 168) x [82, 98),
@@ -72,7 +87,28 @@ class Sprite2DTests(AutomationTestCase):
 
 
 class Editor2DModeTests(AutomationTestCase):
-    @unittest.skip(SKIP_2D_MODE)
+    def test_the_2d_mode_makes_a_2d_camera_that_frames_in_the_plane(self) -> None:
+        # Decision 14: viewport.setOptions {mode2D} is the toolbar's 2D toggle. Turning it on makes the scene camera
+        # orthographic, looking down -Z at its target's X and Y; framing keeps a 2D camera; turning it off keeps the
+        # camera.
+        client, _ = self.open_editor_with_scene()
+        client.call("entity.create", {"name": "Hero", "components": {
+            "Transform": {"Translation": [3, -1, 2]}, "SpriteRenderer": {}}})
+        self.assertFalse(client.call("viewport.setOptions")["mode2D"])
+        client.call("viewport.camera", {"position": [4, 3, 10], "target": [4, 1, 2]})
+        self.assertTrue(client.call("viewport.setOptions", {"mode2D": True})["mode2D"])
+        camera = client.call("viewport.camera")
+        self.assertEqual(camera["projection"], "Orthographic")
+        self.assertEqual(camera["position"], [4, 1, 500])
+        self.assertEqual(camera["target"], [4, 1, 0])
+        framed = client.call("viewport.frame", {"entities": ["/Hero"]})
+        self.assertEqual(framed["target"], [3, -1, 0])
+        self.assertEqual(framed["position"], [3, -1, 500])
+        self.assertFalse(client.call("viewport.setOptions", {"mode2D": False})["mode2D"])
+        kept = client.call("viewport.camera")
+        self.assertEqual(kept["projection"], "Orthographic")
+        self.assertEqual(kept["position"], [3, -1, 500])
+
     def test_the_2d_mode_looks_down_z_and_picks_the_topmost_sprite(self) -> None:
         # Decision 14: viewport.setOptions {mode2D} turns the scene view's camera into an orthographic one looking down
         # -Z, and viewport.pick reports the sprite drawn last under the pixel, before any mesh: the one in the later

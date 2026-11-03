@@ -1,9 +1,12 @@
 #include "EnginePCH.h"
 #include "Engine/Renderer/SceneRenderer.h"
 
+#include "Engine/Asset/AssetDiagnostic.h"
 #include "Engine/Asset/AssetManager.h"
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/MaterialData.h"
+#include "Engine/Asset/SpriteGeometry.h"
+#include "Engine/Asset/SpriteSheetData.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Graphics/CommandListRecording.h"
@@ -115,6 +118,61 @@ namespace Engine {
 		static bool IsFinite(const glm::vec3& vector)
 		{
 			return std::isfinite(vector.x) && std::isfinite(vector.y) && std::isfinite(vector.z);
+		}
+
+		// The clip volume's planes as (a, b, c, d) with a point (x, y, z, w) inside when ax + by + cz + dw >= 0: -w <= x <= w,
+		// -w <= y <= w and 0 <= z <= w (reverse-Z, §8.3).
+		constexpr std::array<glm::vec4, 6> ClipVolumePlanes = { {
+			{ 1.0f, 0.0f, 0.0f, 1.0f },
+			{ -1.0f, 0.0f, 0.0f, 1.0f },
+			{ 0.0f, 1.0f, 0.0f, 1.0f },
+			{ 0.0f, -1.0f, 0.0f, 1.0f },
+			{ 0.0f, 0.0f, 1.0f, 0.0f },
+			{ 0.0f, 0.0f, -1.0f, 1.0f },
+		} };
+
+		// Whether the quad of clip-space corners `clip` lies wholly outside one plane of the clip volume, so it covers no pixel
+		// (the Sprites stage's culling).
+		static bool IsOutsideClipVolume(const std::array<glm::vec4, 4>& clip)
+		{
+			return std::ranges::any_of(ClipVolumePlanes, [&clip](const glm::vec4& plane)
+			{
+				return std::ranges::all_of(clip, [&plane](const glm::vec4& point)
+				{
+					return glm::dot(plane, point) < 0.0f;
+				});
+			});
+		}
+
+		// The Sprites stage's report of sprite sheet `handle`, which is missing, fails to load (`error`) or is not a sprite
+		// sheet (`error` null): GetOrPlaceholder's codes (AssetManager.h), so every manager reports alike, the manager logging
+		// each once. Sheets have no placeholder: the sprites draw nothing.
+		static void ReportSpriteSheetFailure(AssetManager& assets, AssetHandle handle, const Error* error)
+		{
+			AssetDiagnostic diagnostic;
+			diagnostic.Severity = DiagnosticSeverity::Error;
+			diagnostic.Asset = handle;
+			diagnostic.Path = assets.GetReferencePath(handle);
+			if (error == nullptr || error->GetCode() == ErrorCode::InvalidArgument)
+			{
+				diagnostic.Code = std::string(AssetTypeMismatchCode);
+				diagnostic.Message = std::format("asset {} cannot be used as a SpriteSheet; its sprites draw nothing", handle.ToString());
+				diagnostic.Hint = "assign an asset of type SpriteSheet";
+			}
+			else if (error->GetCode() == ErrorCode::NotFound)
+			{
+				diagnostic.Code = std::string(AssetMissingCode);
+				diagnostic.Message = std::format("sprite sheet {} is missing; its sprites draw nothing", handle.ToString());
+				diagnostic.Hint = "restore the asset, or assign another one";
+			}
+			else
+			{
+				diagnostic.Code = std::string(AssetImportFailedCode);
+				diagnostic.Message = std::format("sprite sheet {} failed to load; its sprites draw nothing: {}", handle.ToString(),
+					Error(*error).WithHint(std::string()).ToString());
+				diagnostic.Hint = error->GetHint();
+			}
+			assets.ReportDiagnostic(std::move(diagnostic));
 		}
 
 		// How a target is written.
@@ -538,6 +596,7 @@ namespace Engine {
 		GtaoBindings.Clear();
 		SelectionBindings.Clear();
 		DataViewBindings.Clear();
+		SpriteBindings.Clear();
 	}
 
 	void SceneRenderer::State::ClearBindings()
@@ -561,6 +620,7 @@ namespace Engine {
 		GtaoBindings.ReleaseUnused();
 		SelectionBindings.ReleaseUnused();
 		DataViewBindings.ReleaseUnused();
+		SpriteBindings.ReleaseUnused();
 		UpscaleBindings.ReleaseUnused();
 
 		Materials.ReleaseUnused();
@@ -1403,9 +1463,113 @@ namespace Engine {
 		}
 	}
 
-	// Reserved for M21's Sprites and Lights2D passes (RenderStage::Sprites): no sprite is drawn in M18.
-	void SceneRenderer::State::RecordSpritesStage(Detail::SceneRendererFrame& /*frame*/)
+	void SceneRenderer::State::RecordSpritesStage(Detail::SceneRendererFrame& frame)
 	{
+		const RenderSnapshot& snapshot = *frame.Snapshot;
+		// Sprites draw in the Lit view only (decision 4): the data views, the material views and the wireframe show none.
+		if (snapshot.Sprites.empty() || !frame.HasCamera || !frame.IsLit || frame.Wireframe)
+			return;
+		ENGINE_CORE_ASSERT(Pipelines->Quads != nullptr, "the pipeline set has no QuadBatcher");
+		if (Pipelines->Quads == nullptr)
+		{
+			frame.KeepFirstError(MakeError(ErrorCode::InvalidState, "the scene renderer's pipelines have no QuadBatcher; the sprites are not drawn"));
+			return;
+		}
+		nvrhi::ICommandList& commandList = *frame.CommandList;
+		RenderRecordingContext& recording = *frame.Recording;
+		const glm::mat4 viewProjection = frame.Camera.Projection * frame.Camera.View;
+
+		// The sheets of this render, each loaded once: null for one that is missing or fails to load, which draws nothing and is
+		// reported with GetOrPlaceholder's codes (AssetManager.h), as sheets have no placeholder.
+		std::vector<std::pair<AssetHandle, AssetRef<SpriteSheetData>>> sheets;
+		const auto resolveSheet = [this, &sheets](AssetHandle handle) -> const SpriteSheetData*
+		{
+			if (const auto found = std::ranges::find(sheets, handle, &std::pair<AssetHandle, AssetRef<SpriteSheetData>>::first); found != sheets.end())
+				return found->second.get();
+			const Result<AssetRef<Asset>> loaded = Assets->Load(handle);
+			AssetRef<SpriteSheetData> sheet = loaded.has_value() ? AssetCast<SpriteSheetData>(*loaded) : nullptr;
+			if (sheet == nullptr)
+				Utils::ReportSpriteSheetFailure(*Assets, handle, loaded.has_value() ? nullptr : &loaded.error());
+			return sheets.emplace_back(handle, std::move(sheet)).second.get();
+		};
+
+		SpriteQuads.clear();
+		for (const SpriteItem& sprite : snapshot.Sprites)
+		{
+			if (!Utils::IsFinite(sprite.World))
+			{
+				frame.KeepFirstError(MakeError(ErrorCode::InvalidArgument,
+					"the world matrix of sprite entity {} in the render snapshot is not finite; its draw is skipped", sprite.Entity));
+				continue;
+			}
+			if (!std::isfinite(sprite.PixelsPerUnit) || !(sprite.PixelsPerUnit > 0.0f))
+			{
+				frame.KeepFirstError(MakeError(ErrorCode::InvalidArgument,
+					"sprite entity {} in the render snapshot has {} pixels per unit, not a finite positive value; its draw is skipped", sprite.Entity,
+					sprite.PixelsPerUnit));
+				continue;
+			}
+			// The image (SpriteRendererComponent.h's one rule): the sheet's frame over the sheet's texture (white without one),
+			// or the whole texture centred, the built-in white square without either. A missing or failed texture is its
+			// placeholder's mirror, shown whole over the quad.
+			std::optional<SpriteFrameGeometry> geometry;
+			nvrhi::ITexture* texture = nullptr;
+			bool wholeTexture = false;
+			if (sprite.Sheet.IsValid())
+			{
+				const SpriteSheetData* sheet = resolveSheet(sprite.Sheet);
+				if (sheet == nullptr || sprite.Frame >= sheet->Frames.size())
+					continue; // no quad: SPRITE_FRAME_OUT_OF_RANGE, or the sheet's failure reported above
+				glm::uvec2 textureSize = glm::uvec2(sheet->Frames[sprite.Frame].Rect.X + sheet->Frames[sprite.Frame].Rect.Width,
+					sheet->Frames[sprite.Frame].Rect.Y + sheet->Frames[sprite.Frame].Rect.Height);
+				if (sheet->Texture.IsValid())
+				{
+					const GpuTexture& mirror = Cache->GetTexture(sheet->Texture.GetHandle());
+					if (mirror.Texture == nullptr)
+						continue; // not even the placeholder could be created (GpuResourceCache.h)
+					texture = mirror.Texture.Get();
+					wholeTexture = mirror.IsPlaceholder;
+					textureSize = glm::uvec2(std::max(texture->getDesc().width, 1u), std::max(texture->getDesc().height, 1u));
+				}
+				geometry = GetSpriteFrameGeometry(sheet, sprite.Frame, textureSize);
+			}
+			else
+			{
+				const GpuTexture& mirror = Cache->GetTexture(sprite.Texture.IsValid() ? sprite.Texture : BuiltinAssetHandles::SpriteSquareTexture);
+				if (mirror.Texture == nullptr)
+					continue;
+				texture = mirror.Texture.Get();
+				geometry = GetSpriteFrameGeometry(nullptr, 0, glm::uvec2(std::max(texture->getDesc().width, 1u), std::max(texture->getDesc().height, 1u)));
+			}
+			if (!geometry.has_value())
+				continue;
+			const SpriteLocalQuad local = ComputeSpriteLocalQuad(*geometry, sprite.PixelsPerUnit, sprite.FlipX, sprite.FlipY);
+
+			QuadDraw quad{ .TexCoordMin = wholeTexture ? glm::vec2(0.0f) : local.TexCoordMin,
+				.TexCoordMax = wholeTexture ? glm::vec2(1.0f) : local.TexCoordMax,
+				.Color = sprite.Color,
+				.Texture = texture,
+				.Sampler = QuadSampler::Point };
+			std::array<glm::vec4, 4> clip{};
+			for (size_t index = 0; index < quad.Corners.size(); ++index)
+			{
+				const glm::vec4 world = sprite.World * glm::vec4(local.Corners[index], 0.0f, 1.0f);
+				quad.Corners[index] = glm::vec3(world);
+				clip[index] = viewProjection * world;
+			}
+			if (!Utils::IsOutsideClipVolume(clip))
+				SpriteQuads.push_back(quad);
+		}
+
+		recording.BeginPass("Sprites", &commandList);
+		RenderPassCounters counters;
+		Result<uint32_t> drawn = Pipelines->Quads->Record(commandList, SpriteBindings,
+			{ .Quads = SpriteQuads, .Target = QuadBatchTarget::Hdr, .Framebuffer = Targets.ForwardFramebuffer, .Transform = viewProjection }, counters);
+		if (!drawn)
+			frame.KeepFirstError(std::unexpected(std::move(drawn).error()));
+		recording.EndPass(counters);
+		// The borrowed texture pointers are valid for this render only.
+		SpriteQuads.clear();
 	}
 
 	void SceneRenderer::State::RecordHdrPostStage(Detail::SceneRendererFrame& frame)

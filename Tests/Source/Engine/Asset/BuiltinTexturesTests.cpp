@@ -31,7 +31,7 @@ namespace Engine {
 		}
 
 		// Docs/Decisions/0032-m21-contract.md decision 7 (stream B): the procedural sprite textures, white shapes a sprite tints.
-		TEST_CASE("BuiltinTextures: the sprite textures are 16x16 white shapes of one level, identical on every run" * doctest::skip(true))
+		TEST_CASE("BuiltinTextures: the sprite textures are 16x16 white shapes of one level, identical on every run")
 		{
 			const auto texel = [](const TextureData& texture, uint32_t x, uint32_t y)
 			{
@@ -113,10 +113,12 @@ namespace Engine {
 		TEST_CASE("BuiltinTextures: the generated texels match the hashes recorded in every configuration")
 		{
 			// Integer arithmetic and a fixed table only, so the recorded hashes hold in every configuration and on every platform.
-			constexpr std::array<BuiltinTexture, 5> Textures = { BuiltinTexture::White, BuiltinTexture::Black, BuiltinTexture::FlatNormal,
-				BuiltinTexture::Checker, BuiltinTexture::Missing };
-			constexpr std::array<uint64_t, 5> RecordedHashes = { 0x2e54fae2959dbb84ull, 0x088910b435c92dc1ull, 0xee5a85739c397f1cull,
-				0xc4e010a786d84db6ull, 0x959a5dac370947e5ull };
+			// M21's sprite textures (Docs/Decisions/0032-m21-contract.md decision 7) follow the M6 textures.
+			constexpr std::array<BuiltinTexture, 9> Textures = { BuiltinTexture::White, BuiltinTexture::Black, BuiltinTexture::FlatNormal,
+				BuiltinTexture::Checker, BuiltinTexture::Missing, BuiltinTexture::SpriteSquare, BuiltinTexture::SpriteRounded, BuiltinTexture::SpriteBevel,
+				BuiltinTexture::SpriteCircle };
+			constexpr std::array<uint64_t, 9> RecordedHashes = { 0x2e54fae2959dbb84ull, 0x088910b435c92dc1ull, 0xee5a85739c397f1cull,
+				0xc4e010a786d84db6ull, 0x959a5dac370947e5ull, 0x9ea922e57a320e17ull, 0xc0165963ae845894ull, 0xbb5ce8d25334fb6dull, 0x3737bbbc5466cf4eull };
 			for (size_t index = 0; index < Textures.size(); ++index)
 			{
 				CAPTURE(std::string(BuiltinTextureToString(Textures[index])));

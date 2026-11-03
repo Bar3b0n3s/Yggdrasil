@@ -55,6 +55,12 @@ namespace Engine {
 		PhysicsWorldLimits Limits{};
 	};
 
+	// The checks PhysicsWorld::Create makes of `limits`, for a caller that creates its world later and must not fail then
+	// (Scene/Physics2DSystem's Create, which makes its world at the first 2D body). Errors: InvalidArgument for a MaxBodies of
+	// 0 or above Jolt's limit (8,388,608 bodies), a MaxBodyPairs or MaxContactConstraints of 0, or a TempAllocatorBytes of 0
+	// or above 2^32 - 1.
+	[[nodiscard]] Status ValidatePhysicsWorldLimits(const PhysicsWorldLimits& limits);
+
 	// Everything a body is created from (Jolt's BodyCreationSettings, §9.2 "Body settings"). Every float finite. Settings
 	// that Jolt asserts on are made safe before they reach it (§9.1), as each member says: AllowedDofs and Mass act on
 	// Dynamic bodies only, and starting velocities are clamped.

@@ -29,8 +29,10 @@ namespace Engine {
 		void RunEntityBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 		void RunScriptBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 		void RunComponentsBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
+		void RunSpritesBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 		void RunReflectedFieldCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 		void RunPhysicsBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
+		void RunPhysics2DBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 		void RunAudioBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 		void RunMathBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 		void RunQuatBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
@@ -145,8 +147,10 @@ namespace Engine {
 				&Test::RunEntityBindingsCoverage,
 				&Test::RunScriptBindingsCoverage,
 				&Test::RunComponentsBindingsCoverage,
+				&Test::RunSpritesBindingsCoverage,
 				&Test::RunReflectedFieldCoverage,
 				&Test::RunPhysicsBindingsCoverage,
+				&Test::RunPhysics2DBindingsCoverage,
 				&Test::RunAudioBindingsCoverage,
 				&Test::RunMathBindingsCoverage,
 				&Test::RunQuatBindingsCoverage,
@@ -780,12 +784,12 @@ return true
 		{
 			Test::ScriptTestFixture fixture;
 			REQUIRE(fixture.Start());
-			for (const char* name : { "Script", "Field", "Scene", "Input", "Time", "Physics", "Audio", "Assets", "Task", "Random", "Math", "Debug", "Log", "Application", "Test" })
+			for (const char* name : { "Script", "Field", "Scene", "Input", "Time", "Physics", "Physics2D", "Audio", "Assets", "Task", "Random", "Math", "Debug", "Log", "Application", "Test" })
 				CHECK(std::ranges::any_of(fixture.GetApi().GetModules(), [name](const auto& group)
 				{
 					return group.Name == name;
 				}));
-			for (const char* name : { "Entity", "Transform", "RigidBody", "CharacterController", "AudioSource", "Camera", "MeshRenderer", "Quat", "Color", "RandomGenerator", "TaskHandle", "AssetRef", "Behaviour" })
+			for (const char* name : { "Entity", "Transform", "RigidBody", "RigidBody2D", "SpriteRenderer", "SpriteAnimator", "CharacterController", "AudioSource", "Camera", "MeshRenderer", "Quat", "Color", "RandomGenerator", "TaskHandle", "AssetRef", "Behaviour" })
 				CHECK(std::ranges::any_of(fixture.GetApi().GetTypes(), [name](const auto& group)
 				{
 					return group.Name == name;
@@ -793,7 +797,8 @@ return true
 			for (const auto& group : fixture.GetApi().GetTypes())
 				if (group.Name == "Behaviour")
 				{
-					REQUIRE(group.Members.size() == 13);
+					// The 13 callbacks before M21, then M21's four 2D physics callbacks (Docs/Decisions/0032-m21-contract.md decision 13).
+					REQUIRE(group.Members.size() == 17);
 					for (const auto& member : group.Members)
 					{
 						CHECK(member.Kind == ScriptApiMemberKind::Callback);

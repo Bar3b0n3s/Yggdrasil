@@ -247,6 +247,8 @@ namespace Engine {
 		[[nodiscard]] Status Step(float deltaTime, uint32_t collisionSteps);
 		[[nodiscard]] glm::vec2 GetGravity() const;
 		[[nodiscard]] Status SetGravity(const glm::vec2& gravity);
+		// PhysicsWorld::DrainContactEvents's records, each laid in the plane: its point at z = 0 and its normal in the plane
+		// (z = 0, unit length); a Removed record is left as it is.
 		[[nodiscard]] std::vector<ContactEvent> DrainContactEvents();
 
 		[[nodiscard]] const PhysicsLayerTable& GetLayers() const;

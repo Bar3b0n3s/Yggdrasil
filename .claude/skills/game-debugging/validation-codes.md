@@ -4,6 +4,8 @@ A reference page of the `game-debugging` skill (`skills/game-debugging`).
 
 `project.validate {fix: true}` applies every safe fix; `fix: ["<id or CODE>"]` only the selected ones, as one undoable command. Each diagnostic's `autoFixable` says whether that one can be fixed automatically.
 
+The `PHYSICS_*` codes also report the 2D world (RigidBody2D, BoxCollider2D, CircleCollider2D, PolygonCollider2D), naming the 2D component; a CircleCollider2D's `PHYSICS_NONUNIFORM_SCALE` is a scale that differs in X and Y.
+
 | Code | Severity | What it means | Fix |
 |---|---|---|---|
 | `SCENE_NO_PRIMARY_CAMERA` | Warning | A scene with entities has no Primary camera. | Set Primary on the camera, or add one with `entity.create {components: {Camera: {Primary: true}}}`; the fix makes a scene's only camera Primary. |
@@ -55,3 +57,8 @@ A reference page of the `game-debugging` skill (`skills/game-debugging`).
 | `TEST_SUITE_INVALID` | Error | A Testing.Suites entry's script is not a TestSuite, or its scene is not a registered scene asset. | Assign a `Test.Suite` script; create and save the scene (so it has its `.meta`), or leave Scene empty. |
 | `SCRIPT_COMPUTED_ASSET_LOAD` | Warning | With `Export.PruneUnreferenced` on, an `Assets.Load` computes its path, so a pruned export leaves out an asset only it names. | Pass the path as a string literal, reference the asset from a component or script field, or turn the setting off. |
 | `PREFAB_CYCLE` | Error | A prefab nests itself, directly or through other prefabs; a prefab update that would propagate around the cycle is refused. | Remove the nested instance that closes the cycle from one of the named prefab files (cycles come only from hand edits or merges). |
+| `SPRITE_UNKNOWN_SORTING_LAYER` | Warning | A SpriteRenderer names a sorting layer that `SortingLayers.Layers` does not declare; it draws in the first layer. | Declare the layer with `project.setSettings {patch: {SortingLayers: {Layers: [...]}}}`, or correct the name. |
+| `SPRITE_FRAME_OUT_OF_RANGE` | Warning | A SpriteRenderer's Frame is not an index of its sprite sheet's frames; it draws nothing, is never picked and has no bounds. | Set Frame below the sheet's frame count, or add the frame to the sheet. |
+| `SPRITE_UNKNOWN_CLIP` | Warning | A SpriteAnimator's Clip names no clip of its SpriteRenderer's sprite sheet (or the renderer has no sheet); it plays nothing, and play logs it once per entity and clip. | Name a clip of the sheet (`asset.getProperties` lists its clips), add the clip with `asset.setProperties`, or clear Clip. |
+| `PHYSICS2D_MIXED_WORLDS` | Error | An entity holds both 2D (RigidBody2D, a 2D collider) and 3D physics components; it stays in the 3D world and its 2D components make no body. | Remove the components of the world it does not belong to, or split the entity in two. |
+| `PHYSICS2D_OFF_PLANE` | Warning | A 2D body's entity (or an ancestor) is rotated about X or Y; the body takes only its rotation about Z, and its write-back drops the tilt. | Rotate the entity and its ancestors about Z only. |

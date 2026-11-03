@@ -4,13 +4,13 @@
 
 #include <optional>
 
-// The sprite geometry (Docs/Decisions/0032-m21-contract.md decision 3, stream A): skipped until stream A implements it.
+// The sprite geometry (Docs/Decisions/0032-m21-contract.md decision 3, stream A).
 
 namespace Engine {
 
 	TEST_SUITE("Asset")
 	{
-		TEST_CASE("SpriteGeometry: a sheet frame gives its texels and pivot, and a texture is whole and centred" * doctest::skip(true))
+		TEST_CASE("SpriteGeometry: a sheet frame gives its texels and pivot, and a texture is whole and centred")
 		{
 			SpriteSheetData sheet;
 			sheet.Frames.push_back(SpriteFrame{ .Name = "Idle", .Rect = { .X = 8, .Y = 4, .Width = 8, .Height = 12 }, .Pivot = glm::vec2(0.5f, 1.0f) });
@@ -31,7 +31,7 @@ namespace Engine {
 			CHECK(texture->Pivot == glm::vec2(0.5f));
 		}
 
-		TEST_CASE("SpriteGeometry: a frame's corners follow its pivot, size, pixels per unit and flips" * doctest::skip(true))
+		TEST_CASE("SpriteGeometry: a frame's corners follow its pivot, size, pixels per unit and flips")
 		{
 			// 16 x 8 texels of a 32 x 16 texture at 8 pixels per unit: 2 x 1 units, the pivot at the bottom-left corner.
 			const SpriteFrameGeometry frame{ .TextureSize = glm::uvec2(32, 16), .RectMin = glm::uvec2(16, 8), .RectSize = glm::uvec2(16, 8), .Pivot = glm::vec2(0.0f, 1.0f) };

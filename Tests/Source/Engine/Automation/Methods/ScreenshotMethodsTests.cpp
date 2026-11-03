@@ -644,8 +644,8 @@ namespace Engine {
 		// M21 (Docs/Decisions/0032-m21-contract.md decisions 4 and 16, stream A): viewport.screenshot copies the project's
 		// SortingLayers.Layers into its extraction request (the one statement ADR 0028's phase-2 ledger grants M21 in
 		// ScreenshotMethods.cpp), so a capture draws the sprites in the project's layer order, never every sprite in the first
-		// layer. Skipped until stream A registers the section and extracts the sprites.
-		TEST_CASE("ScreenshotMethods: viewport.screenshot extracts sprites in the project's sorting layers" * doctest::skip(true))
+		// layer.
+		TEST_CASE("ScreenshotMethods: viewport.screenshot extracts sprites in the project's sorting layers")
 		{
 			CaptureLog log;
 			ScreenshotSetup setup("ViewportScreenshotSortingLayers", log);

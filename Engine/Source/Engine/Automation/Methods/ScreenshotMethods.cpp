@@ -193,6 +193,7 @@ namespace Engine {
 			if (settings == nullptr)
 				return MakeError(ErrorCode::Unsupported, "viewport.screenshot needs the host's project rendering settings");
 			request.Quality = { .ShadowMapSize = settings->Rendering.ShadowMapSize, .SsaoHalfResolution = settings->Rendering.SsaoHalfResolution };
+			request.SortingLayers = settings->SortingLayers.Layers;
 			request.SelectedEntities = context.GetSelectedEntities(*scene);
 			ENGINE_TRY_ASSIGN(request.Annotations, ResolveViewportAnnotations(context, *scene, annotations));
 			request.Flags = annotations.Colliders ? RenderViewFlags::Colliders : RenderViewFlags::None;

@@ -1,0 +1,519 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Physics2D",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Camera": 1,
+		"AudioListener": 1,
+		"Script": 2,
+		"RigidBody2D": 1,
+		"BoxCollider2D": 1,
+		"CircleCollider2D": 1,
+		"PolygonCollider2D": 1
+	},
+	"Entities": [
+		{
+			"ID": "423f055e3eee1a9d",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 4, 24],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 40,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Skybox",
+					"ClearColor": [0.05, 0.05, 0.06]
+				},
+				"AudioListener": {
+					"Primary": true
+				}
+			}
+		},
+		{
+			"ID": "b5796367c695320d",
+			"Name": "Floor",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, -0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "fe49c756f2c056af",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				},
+				"RigidBody2D": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0.8,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"FixedRotation": false,
+					"Layer": "Track",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0],
+					"InitialAngularVelocity": 0
+				},
+				"BoxCollider2D": {
+					"HalfExtents": [12, 0.5],
+					"Offset": [0, 0],
+					"Angle": 0,
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "ed7e539955c4f873",
+			"Name": "WallLeft",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-12.5, 4, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"RigidBody2D": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"FixedRotation": false,
+					"Layer": "Track",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0],
+					"InitialAngularVelocity": 0
+				},
+				"BoxCollider2D": {
+					"HalfExtents": [0.5, 5],
+					"Offset": [0, 0],
+					"Angle": 0,
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "271bc181db2c9ff9",
+			"Name": "WallRight",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [12.5, 4, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"RigidBody2D": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"FixedRotation": false,
+					"Layer": "Track",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0],
+					"InitialAngularVelocity": 0
+				},
+				"BoxCollider2D": {
+					"HalfExtents": [0.5, 5],
+					"Offset": [0, 0],
+					"Angle": 0,
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "cafe226c42a16263",
+			"Name": "Ramp",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [9.5, 0.4, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"RigidBody2D": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"FixedRotation": false,
+					"Layer": "Track",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0],
+					"InitialAngularVelocity": 0
+				},
+				"BoxCollider2D": {
+					"HalfExtents": [2, 0.25],
+					"Offset": [0, 0],
+					"Angle": 12,
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "2a1b14b9807d6988",
+			"Name": "Ball",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-8, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "5c3036d6f52752ba",
+							"Fields": {},
+							"ExecutionOrder": 0
+						},
+						{
+							"Script": "fe49c756f2c056af",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				},
+				"RigidBody2D": {
+					"Type": "Dynamic",
+					"Mass": 2,
+					"Friction": 0.5,
+					"Restitution": 0.2,
+					"LinearDamping": 0.1,
+					"AngularDamping": 0.3,
+					"GravityFactor": 1,
+					"MotionQuality": "LinearCast",
+					"AllowSleeping": false,
+					"FixedRotation": false,
+					"Layer": "Ball",
+					"MaxLinearVelocity": 30,
+					"MaxAngularVelocity": 40,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [1.5, 0],
+					"InitialAngularVelocity": -1
+				},
+				"CircleCollider2D": {
+					"Radius": 0.5,
+					"Offset": [0, 0],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "f5ea34025c7b11b8",
+			"Name": "Crate",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-2, 0.4, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"RigidBody2D": {
+					"Type": "Dynamic",
+					"Mass": 1,
+					"Friction": 0.3,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1.5,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"FixedRotation": true,
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": true,
+					"InitialLinearVelocity": [0, 0],
+					"InitialAngularVelocity": 0
+				},
+				"BoxCollider2D": {
+					"HalfExtents": [0.6, 0.4],
+					"Offset": [0, 0],
+					"Angle": 0,
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "1b53dfcbda293079",
+			"Name": "Wedge",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"RigidBody2D": {
+					"Type": "Dynamic",
+					"Mass": 1.5,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"FixedRotation": false,
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0],
+					"InitialAngularVelocity": 0
+				},
+				"PolygonCollider2D": {
+					"Points": [
+						[-0.6, -0.5],
+						[0.6, -0.5],
+						[0.6, 0.5]
+					],
+					"Offset": [0.05, 0],
+					"Angle": 5,
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "b88aabbf8d076d57",
+			"Name": "Lift",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [8, 2, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"RigidBody2D": {
+					"Type": "Kinematic",
+					"Mass": 1,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"FixedRotation": false,
+					"Layer": "Track",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0],
+					"InitialAngularVelocity": 0
+				},
+				"BoxCollider2D": {
+					"HalfExtents": [1, 0.2],
+					"Offset": [0, -0.05],
+					"Angle": 0,
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "455b877ee3f6e0bd",
+			"Name": "BoxSensor",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0.5, 1.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "fe49c756f2c056af",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				},
+				"RigidBody2D": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"FixedRotation": false,
+					"Layer": "Trigger",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0],
+					"InitialAngularVelocity": 0
+				},
+				"BoxCollider2D": {
+					"HalfExtents": [0.5, 1.5],
+					"Offset": [0, 0],
+					"Angle": 0,
+					"IsTrigger": true
+				}
+			}
+		},
+		{
+			"ID": "c8eea157c8046cff",
+			"Name": "CircleSensor",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [5.5, 1.25, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "fe49c756f2c056af",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				},
+				"RigidBody2D": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"FixedRotation": false,
+					"Layer": "Trigger",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0],
+					"InitialAngularVelocity": 0
+				},
+				"CircleCollider2D": {
+					"Radius": 0.75,
+					"Offset": [0.25, 0],
+					"IsTrigger": true
+				}
+			}
+		},
+		{
+			"ID": "9b7ae6199b5668cd",
+			"Name": "WedgeSensor",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-5, 2.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "fe49c756f2c056af",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				},
+				"RigidBody2D": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"FixedRotation": false,
+					"Layer": "Trigger",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0],
+					"InitialAngularVelocity": 0
+				},
+				"PolygonCollider2D": {
+					"Points": [
+						[-0.8, -0.8],
+						[0.8, -0.8],
+						[0, 0.9]
+					],
+					"Offset": [0, -0.1],
+					"Angle": 30,
+					"IsTrigger": true
+				}
+			}
+		}
+	]
+}

@@ -92,6 +92,9 @@ export type MouseButton = "Left" | "Right" | "Middle" | "Button4" | "Button5" | 
 -- What a type of a game's native module is.
 export type NativeTypeRole = "Component" | "Resource"
 
+-- The shape of a 2D overlap query.
+export type Physics2DQueryShape = "Circle" | "Box"
+
 -- Why a physics body exists (§5.3 composition rules).
 export type PhysicsBodyOrigin = "RigidBody" | "ImplicitStatic" | "ImplicitSensor" | "Character"
 
@@ -257,8 +260,12 @@ end
 declare extern type Behaviour with
 	-- Called when a collision begins, with the other entity and contact. [All modes; Runtime|Test; mutates]
 	OnCollisionEnter: (self: ScriptInstance, other: Entity, contact: CollisionContact) -> ()
+	-- Called when a 2D collision begins, with the other entity and the contact in the XY plane. [All modes; Runtime|Test; mutates]
+	OnCollisionEnter2D: (self: ScriptInstance, other: Entity, contact: CollisionContact) -> ()
 	-- Called when the corresponding collision or trigger transition occurs. [All modes; Runtime|Test; mutates]
 	OnCollisionExit: (self: ScriptInstance, other: Entity) -> ()
+	-- Called when the corresponding 2D collision or trigger transition occurs. [All modes; Runtime|Test; mutates]
+	OnCollisionExit2D: (self: ScriptInstance, other: Entity) -> ()
 	-- Called at the corresponding lifecycle transition. [All modes; Runtime|Test; mutates]
 	OnCreate: (self: ScriptInstance) -> ()
 	-- Called at the corresponding lifecycle transition. [All modes; Runtime|Test; mutates]
@@ -277,8 +284,12 @@ declare extern type Behaviour with
 	OnStart: (self: ScriptInstance) -> ()
 	-- Called when the corresponding collision or trigger transition occurs. [All modes; Runtime|Test; mutates]
 	OnTriggerEnter: (self: ScriptInstance, other: Entity) -> ()
+	-- Called when the corresponding 2D collision or trigger transition occurs. [All modes; Runtime|Test; mutates]
+	OnTriggerEnter2D: (self: ScriptInstance, other: Entity) -> ()
 	-- Called when the corresponding collision or trigger transition occurs. [All modes; Runtime|Test; mutates]
 	OnTriggerExit: (self: ScriptInstance, other: Entity) -> ()
+	-- Called when the corresponding 2D collision or trigger transition occurs. [All modes; Runtime|Test; mutates]
+	OnTriggerExit2D: (self: ScriptInstance, other: Entity) -> ()
 	-- Called for the current fixed, presentation or late presentation phase. [All modes; Runtime|Test; mutates]
 	OnUpdate: (self: ScriptInstance, dt: number) -> ()
 end
@@ -323,11 +334,11 @@ declare extern type Camera with
 	Primary: boolean
 	-- Perspective or orthographic projection. [All modes; Runtime|Test; pure/read; setter mutates]
 	Projection: ProjectionType
-	-- Ray through a viewport pixel center, origin top-left, using the rendered camera pose. [All modes; Runtime|Test; pure/read]
+	-- Ray through a viewport pixel center, origin top-left, using the rendered camera pose; under a PixelPerfectCamera through its snapped reference view and the output mapping. [All modes; Runtime|Test; pure/read]
 	ScreenToWorldRay: (self: Camera, x: number, y: number) -> (vector, vector)
 	-- The vertical field of view of the perspective projection, in degrees. [All modes; Runtime|Test; pure/read; setter mutates]
 	VerticalFov: number
-	-- Project to top-left pixel coordinates and reverse-Z depth using the rendered camera pose. [All modes; Runtime|Test; pure/read]
+	-- Project to top-left pixel coordinates and reverse-Z depth using the rendered camera pose; under a PixelPerfectCamera through its snapped reference view and the output mapping. [All modes; Runtime|Test; pure/read]
 	WorldToScreen: (self: Camera, point: vector) -> vector
 end
 
@@ -782,6 +793,16 @@ end
 
 -- Simulates the entity in the 2D world: moves along world X and Y and rotates about world Z.
 declare extern type RigidBody2D with
+	-- Apply an angular impulse about +Z to a Dynamic 2D body. [All modes; Runtime|Test; mutates]
+	AddAngularImpulse: (self: RigidBody2D, impulse: number) -> ()
+	-- Apply a force in the XY plane to a Dynamic 2D body. [All modes; Runtime|Test; mutates]
+	AddForce: (self: RigidBody2D, force: vector) -> ()
+	-- Apply a force in the XY plane at a world position of the plane to a Dynamic 2D body. [All modes; Runtime|Test; mutates]
+	AddForceAtPosition: (self: RigidBody2D, force: vector, position: vector) -> ()
+	-- Apply an impulse in the XY plane to a Dynamic 2D body. [All modes; Runtime|Test; mutates]
+	AddImpulse: (self: RigidBody2D, impulse: vector) -> ()
+	-- Apply a torque about +Z, in newton metres, to a Dynamic 2D body. [All modes; Runtime|Test; mutates]
+	AddTorque: (self: RigidBody2D, torque: number) -> ()
 	-- Whether the body may sleep when it comes to rest. [All modes; Runtime|Test; pure/read; setter mutates]
 	AllowSleeping: boolean
 	-- How quickly angular velocity decays, per second. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -792,12 +813,18 @@ declare extern type RigidBody2D with
 	FixedRotation: boolean
 	-- The friction coefficient of the body's surfaces; a contact uses the geometric mean of both bodies' values. [All modes; Runtime|Test; pure/read; setter mutates]
 	Friction: number
+	-- Read the angular velocity about +Z in radians per second. [All modes; Runtime|Test; pure/read]
+	GetAngularVelocity: (self: RigidBody2D) -> number
+	-- Read the linear velocity in the XY plane (Z is 0). [All modes; Runtime|Test; pure/read]
+	GetLinearVelocity: (self: RigidBody2D) -> vector
 	-- The multiplier of the project's 2D gravity for this body (0 floats). [All modes; Runtime|Test; pure/read; setter mutates]
 	GravityFactor: number
 	-- The angular velocity about world Z the body starts with, in radians per second, counter-clockwise seen from +Z. [All modes; Runtime|Test; pure/read; setter mutates]
 	InitialAngularVelocity: number
 	-- The velocity along world X and Y the body starts with, in metres per second. [All modes; Runtime|Test; pure/read; setter mutates]
 	InitialLinearVelocity: vector
+	-- Whether the 2D body is sleeping. [All modes; Runtime|Test; pure/read]
+	IsSleeping: (self: RigidBody2D) -> boolean
 	-- Physics layer name from project settings (the 3D world's layers). A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
 	Layer: string
 	-- How quickly linear velocity decays, per second. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -810,10 +837,20 @@ declare extern type RigidBody2D with
 	MaxLinearVelocity: number
 	-- Discrete or continuous (LinearCast) collision detection. [All modes; Runtime|Test; pure/read; setter mutates]
 	MotionQuality: MotionQuality
+	-- Set a Kinematic 2D target in the plane, the angle in degrees about +Z, for the next fixed step. [All modes; Runtime|Test; mutates]
+	MoveKinematic: (self: RigidBody2D, position: vector, angle: number) -> ()
 	-- Bounciness, from no bounce (0) to a perfectly elastic bounce (1); a contact uses the larger of both bodies' values. [All modes; Runtime|Test; pure/read; setter mutates]
 	Restitution: number
+	-- Set a Dynamic 2D body's angular velocity about +Z in radians per second. [All modes; Runtime|Test; mutates]
+	SetAngularVelocity: (self: RigidBody2D, velocity: number) -> ()
+	-- Set a Dynamic 2D body's linear velocity from the vector's X and Y. [All modes; Runtime|Test; mutates]
+	SetLinearVelocity: (self: RigidBody2D, velocity: vector) -> ()
+	-- Place a 2D body at once in the plane (the entity keeps its Z), the angle in degrees about +Z kept when omitted, preserving velocity and resetting interpolation. [All modes; Runtime|Test; mutates]
+	Teleport: (self: RigidBody2D, position: vector, angle: number?) -> ()
 	-- Static never moves; Kinematic is moved by script; Dynamic is simulated. [All modes; Runtime|Test; pure/read; setter mutates]
 	Type: BodyType
+	-- Wake a sleeping 2D body. [All modes; Runtime|Test; mutates]
+	WakeUp: (self: RigidBody2D) -> ()
 end
 
 -- Attaches Behaviour scripts to the entity, an ordered list of slots.
@@ -854,12 +891,16 @@ end
 declare extern type SpriteAnimator with
 	-- The name of the sheet's clip to play; empty plays nothing. A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
 	Clip: string
+	-- Play the sheet's clip named clip from its first step, which shows at the next fixed step's SpriteAnimation phase. [All modes; Runtime|Test; mutates]
+	Play: (self: SpriteAnimator, clip: string) -> ()
 	-- Whether the clip advances each fixed step; a clip without Loop clears it after its last step and holds its last frame. [All modes; Runtime|Test; pure/read; setter mutates]
 	Playing: boolean
 	-- The index of the clip step shown. [All modes; Runtime|Test; pure/read; setter mutates]
 	Step: number
 	-- How many fixed steps the current clip step has been shown. [All modes; Runtime|Test; pure/read; setter mutates]
 	StepTicks: number
+	-- Stop advancing the clip; the frame shown stays. [All modes; Runtime|Test; mutates]
+	Stop: (self: SpriteAnimator) -> ()
 end
 
 -- Draws a sprite: a sprite sheet frame or a texture in the entity's XY plane.
@@ -878,6 +919,8 @@ declare extern type SpriteRenderer with
 	OrderInLayer: number
 	-- How many texels of the image make one unit of the entity's local space; the sprite's size is its texels divided by this. [All modes; Runtime|Test; pure/read; setter mutates]
 	PixelsPerUnit: number
+	-- Set Frame to the index of the sprite sheet's frame named name; an error names the sheet when it has no such frame. [All modes; Runtime|Test; mutates]
+	SetFrameByName: (self: SpriteRenderer, name: string) -> ()
 	-- The sprite sheet whose frame Frame is drawn; null draws Texture whole. [All modes; Runtime|Test; pure/read; setter mutates]
 	Sheet: AssetRef?
 	-- The sorting layer name from project settings; later layers draw over earlier ones, and an undeclared name draws in the first. A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -1152,6 +1195,22 @@ declare Physics: {
 	SetGravity: (gravity: vector) -> (),
 	-- Closest swept sphere hit; radius obeys collider size bounds. [All modes; Runtime|Test; pure/read]
 	SphereCast: (origin: vector, radius: number, direction: vector, maxDistance: number, layerMask: number?) -> RaycastHit?,
+}
+
+-- Queries and gravity for the active scene's 2D physics world, in the XY plane.
+declare Physics2D: {
+	-- Current 2D world gravity (Z is 0). [All modes; Runtime|Test; pure/read]
+	GetGravity: () -> vector,
+	-- Unique overlapping 2D collider entities sorted by UUID; the box rotated by angle degrees about +Z (0 by default). [All modes; Runtime|Test; pure/read]
+	OverlapBox: (center: vector, halfExtents: vector, angle: number?, layerMask: number?) -> {Entity},
+	-- Unique overlapping 2D collider entities sorted by UUID; radius obeys collider size bounds. [All modes; Runtime|Test; pure/read]
+	OverlapCircle: (center: vector, radius: number, layerMask: number?) -> {Entity},
+	-- Closest 2D hit, including sensors; vectors in the plane (Z ignored, results with Z 0). [All modes; Runtime|Test; pure/read]
+	Raycast: (origin: vector, direction: vector, maxDistance: number, layerMask: number?) -> RaycastHit?,
+	-- All 2D hits sorted by distance then collider UUID. [All modes; Runtime|Test; pure/read]
+	RaycastAll: (origin: vector, direction: vector, maxDistance: number, layerMask: number?) -> {RaycastHit},
+	-- Set the 2D world's gravity from the vector's X and Y for the session. [All modes; Runtime|Test; mutates]
+	SetGravity: (gravity: vector) -> (),
 }
 
 -- Deterministic shared simulation randomness. Invalid arguments never advance the stream.

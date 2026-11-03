@@ -234,9 +234,9 @@ Script members of `Camera`:
 | `OrthographicSize` | proxy field | `number` | read/write | All | Half the visible height of the orthographic projection, in metres. |
 | `Primary` | proxy field | `boolean` | read/write | All | Whether this is the scene's primary camera (exactly one active camera should be). |
 | `Projection` | proxy field | `ProjectionType` | read/write | All | Perspective or orthographic projection. |
-| `ScreenToWorldRay` | method | `(self: Camera, x: number, y: number) -> (vector, vector)` |  | All | Ray through a viewport pixel center, origin top-left, using the rendered camera pose. |
+| `ScreenToWorldRay` | method | `(self: Camera, x: number, y: number) -> (vector, vector)` |  | All | Ray through a viewport pixel center, origin top-left, using the rendered camera pose; under a PixelPerfectCamera through its snapped reference view and the output mapping. |
 | `VerticalFov` | proxy field | `number` | read/write | All | The vertical field of view of the perspective projection, in degrees. |
-| `WorldToScreen` | method | `(self: Camera, point: vector) -> vector` |  | All | Project to top-left pixel coordinates and reverse-Z depth using the rendered camera pose. |
+| `WorldToScreen` | method | `(self: Camera, point: vector) -> vector` |  | All | Project to top-left pixel coordinates and reverse-Z depth using the rendered camera pose; under a PixelPerfectCamera through its snapped reference view and the output mapping. |
 
 ## DirectionalLight
 
@@ -762,6 +762,7 @@ Script members of `SpriteRenderer`:
 | `Lit` | proxy field | `boolean` | read/write | All | Whether 2D lights light the sprite; an unlit sprite keeps its texels unchanged. |
 | `OrderInLayer` | proxy field | `number` | read/write | All | The draw order within the sorting layer: higher values draw over lower ones, equal values in canonical entity order. |
 | `PixelsPerUnit` | proxy field | `number` | read/write | All | How many texels of the image make one unit of the entity's local space; the sprite's size is its texels divided by this. |
+| `SetFrameByName` | method | `(self: SpriteRenderer, name: string) -> ()` |  | All | Set Frame to the index of the sprite sheet's frame named name; an error names the sheet when it has no such frame. |
 | `Sheet` | proxy field | `AssetRef?` | read/write | All | The sprite sheet whose frame Frame is drawn; null draws Texture whole. |
 | `SortingLayer` | proxy field | `string` | read/write | All | The sorting layer name from project settings; later layers draw over earlier ones, and an undeclared name draws in the first. A value a script writes holds at most 4096 bytes of text. |
 | `Texture` | proxy field | `AssetRef?` | read/write | All | The texture drawn whole, pivoted at its centre, when Sheet is null; null draws the built-in white square. |
@@ -788,9 +789,11 @@ Script members of `SpriteAnimator`:
 | Member | Kind | Signature | Access | Modes | Description |
 |---|---|---|---|---|---|
 | `Clip` | proxy field | `string` | read/write | All | The name of the sheet's clip to play; empty plays nothing. A value a script writes holds at most 4096 bytes of text. |
+| `Play` | method | `(self: SpriteAnimator, clip: string) -> ()` |  | All | Play the sheet's clip named clip from its first step, which shows at the next fixed step's SpriteAnimation phase. |
 | `Playing` | proxy field | `boolean` | read/write | All | Whether the clip advances each fixed step; a clip without Loop clears it after its last step and holds its last frame. |
 | `Step` | proxy field | `number` | read/write | All | The index of the clip step shown. |
 | `StepTicks` | proxy field | `number` | read/write | All | How many fixed steps the current clip step has been shown. |
+| `Stop` | method | `(self: SpriteAnimator) -> ()` |  | All | Stop advancing the clip; the frame shown stays. |
 
 ## PixelPerfectCamera
 
@@ -851,22 +854,35 @@ Script members of `RigidBody2D`:
 
 | Member | Kind | Signature | Access | Modes | Description |
 |---|---|---|---|---|---|
+| `AddAngularImpulse` | method | `(self: RigidBody2D, impulse: number) -> ()` |  | All | Apply an angular impulse about +Z to a Dynamic 2D body. |
+| `AddForce` | method | `(self: RigidBody2D, force: vector) -> ()` |  | All | Apply a force in the XY plane to a Dynamic 2D body. |
+| `AddForceAtPosition` | method | `(self: RigidBody2D, force: vector, position: vector) -> ()` |  | All | Apply a force in the XY plane at a world position of the plane to a Dynamic 2D body. |
+| `AddImpulse` | method | `(self: RigidBody2D, impulse: vector) -> ()` |  | All | Apply an impulse in the XY plane to a Dynamic 2D body. |
+| `AddTorque` | method | `(self: RigidBody2D, torque: number) -> ()` |  | All | Apply a torque about +Z, in newton metres, to a Dynamic 2D body. |
 | `AllowSleeping` | proxy field | `boolean` | read/write | All | Whether the body may sleep when it comes to rest. |
 | `AngularDamping` | proxy field | `number` | read/write | All | How quickly angular velocity decays, per second. |
 | `EnhancedInternalEdgeRemoval` | proxy field | `boolean` | read/write | All | Removes ghost collisions with internal edges of compound shapes; set it on bodies that roll or slide across tiles. |
 | `FixedRotation` | proxy field | `boolean` | read/write | All | Whether a Dynamic body is kept from rotating. |
 | `Friction` | proxy field | `number` | read/write | All | The friction coefficient of the body's surfaces; a contact uses the geometric mean of both bodies' values. |
+| `GetAngularVelocity` | method | `(self: RigidBody2D) -> number` |  | All | Read the angular velocity about +Z in radians per second. |
+| `GetLinearVelocity` | method | `(self: RigidBody2D) -> vector` |  | All | Read the linear velocity in the XY plane (Z is 0). |
 | `GravityFactor` | proxy field | `number` | read/write | All | The multiplier of the project's 2D gravity for this body (0 floats). |
 | `InitialAngularVelocity` | proxy field | `number` | read/write | All | The angular velocity about world Z the body starts with, in radians per second, counter-clockwise seen from +Z. |
 | `InitialLinearVelocity` | proxy field | `vector` | read/write | All | The velocity along world X and Y the body starts with, in metres per second. |
+| `IsSleeping` | method | `(self: RigidBody2D) -> boolean` |  | All | Whether the 2D body is sleeping. |
 | `Layer` | proxy field | `string` | read/write | All | Physics layer name from project settings (the 3D world's layers). A value a script writes holds at most 4096 bytes of text. |
 | `LinearDamping` | proxy field | `number` | read/write | All | How quickly linear velocity decays, per second. |
 | `Mass` | proxy field | `number` | read/write | All | Mass in kilograms (Dynamic only). |
 | `MaxAngularVelocity` | proxy field | `number` | read/write | All | The angular speed the body is clamped to, in radians per second. |
 | `MaxLinearVelocity` | proxy field | `number` | read/write | All | The speed the body is clamped to, in metres per second. |
 | `MotionQuality` | proxy field | `MotionQuality` | read/write | All | Discrete or continuous (LinearCast) collision detection. |
+| `MoveKinematic` | method | `(self: RigidBody2D, position: vector, angle: number) -> ()` |  | All | Set a Kinematic 2D target in the plane, the angle in degrees about +Z, for the next fixed step. |
 | `Restitution` | proxy field | `number` | read/write | All | Bounciness, from no bounce (0) to a perfectly elastic bounce (1); a contact uses the larger of both bodies' values. |
+| `SetAngularVelocity` | method | `(self: RigidBody2D, velocity: number) -> ()` |  | All | Set a Dynamic 2D body's angular velocity about +Z in radians per second. |
+| `SetLinearVelocity` | method | `(self: RigidBody2D, velocity: vector) -> ()` |  | All | Set a Dynamic 2D body's linear velocity from the vector's X and Y. |
+| `Teleport` | method | `(self: RigidBody2D, position: vector, angle: number?) -> ()` |  | All | Place a 2D body at once in the plane (the entity keeps its Z), the angle in degrees about +Z kept when omitted, preserving velocity and resetting interpolation. |
 | `Type` | proxy field | `BodyType` | read/write | All | Static never moves; Kinematic is moved by script; Dynamic is simulated. |
+| `WakeUp` | method | `(self: RigidBody2D) -> ()` |  | All | Wake a sleeping 2D body. |
 
 ## BoxCollider2D
 

@@ -35,7 +35,7 @@ namespace Engine {
 
 	TEST_SUITE("Scene")
 	{
-		TEST_CASE("SpriteValidation: an unknown sorting layer and an out-of-range frame are reported" * doctest::skip(true))
+		TEST_CASE("SpriteValidation: an unknown sorting layer and an out-of-range frame are reported")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -61,9 +61,18 @@ namespace Engine {
 			CHECK(issues[1].Field == "Frame");
 			for (const SpriteSceneIssue& issue : issues)
 				CHECK(issue.Severity == DiagnosticSeverity::Warning);
+
+			// Without an asset manager the sheets are not loaded, so only the sorting layers are checked; a disabled entity's
+			// sprite is not checked at all.
+			const std::vector<SpriteSceneIssue> layersOnly = FindSpriteSceneIssues(scene, nullptr, layers);
+			REQUIRE(layersOnly.size() == 1);
+			CHECK(layersOnly[0].Code == SpriteUnknownSortingLayerCode);
+			layer.SetActive(false);
+			frame.SetActive(false);
+			CHECK(FindSpriteSceneIssues(scene, &assets, layers).empty());
 		}
 
-		TEST_CASE("SpriteValidation: an unknown clip is reported" * doctest::skip(true))
+		TEST_CASE("SpriteValidation: an unknown clip is reported")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -88,6 +97,37 @@ namespace Engine {
 			CHECK(issues[0].Component == "SpriteAnimator");
 			CHECK(issues[0].Field == "Clip");
 			CHECK(issues[0].Severity == DiagnosticSeverity::Warning);
+		}
+
+		// Decision 12's SPRITE_UNKNOWN_CLIP covers a clip with no sheet to look it up in; a sheet that does not load is the
+		// asset checks' finding (ASSET_MISSING and the like), and an effectively disabled entity and a check without an asset
+		// manager report nothing.
+		TEST_CASE("SpriteValidation: a clip without a sheet is reported and a sheet that does not load is left to the asset checks")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Test::InMemoryAssetManager assets;
+			const TypedAssetHandle<AssetType::SpriteSheet> sheet = PublishHeroSheet(assets);
+
+			Entity sheetless = scene.CreateEntity("Sheetless");
+			sheetless.AddComponent<SpriteRendererComponent>(SpriteRendererComponent{});
+			sheetless.AddComponent<SpriteAnimatorComponent>(SpriteAnimatorComponent{ .Clip = "Idle", .Playing = false });
+			Entity missing = scene.CreateEntity("Missing");
+			missing.AddComponent<SpriteRendererComponent>(SpriteRendererComponent{ .Sheet = TypedAssetHandle<AssetType::SpriteSheet>(AssetHandle(0x2b9f3a654a1c0e7e)) });
+			missing.AddComponent<SpriteAnimatorComponent>(SpriteAnimatorComponent{ .Clip = "Idle" });
+			Entity parent = scene.CreateEntity("Disabled");
+			Entity hidden = scene.CreateEntity("Hidden", parent);
+			hidden.AddComponent<SpriteRendererComponent>(SpriteRendererComponent{ .Sheet = sheet });
+			hidden.AddComponent<SpriteAnimatorComponent>(SpriteAnimatorComponent{ .Clip = "Run" });
+			parent.SetActive(false);
+
+			const std::vector<std::string> layers = { "Default" };
+			const std::vector<SpriteSceneIssue> issues = FindSpriteSceneIssues(scene, &assets, layers);
+			REQUIRE(issues.size() == 1);
+			CHECK(issues[0].Code == SpriteUnknownClipCode);
+			CHECK(issues[0].Entity == sheetless.GetUUID());
+			CHECK(issues[0].Field == "Clip");
+			CHECK(FindSpriteSceneIssues(scene, nullptr, layers).empty());
 		}
 	}
 

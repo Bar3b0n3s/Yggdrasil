@@ -709,13 +709,16 @@ namespace Engine {
 		if (session == nullptr || !gameFocused || IsLiveInputSuppressed() || session->IsLockstep())
 			return;
 		// Positions arrive in the Game image's pixels, which are an ordinary session's view; a fixed view (a recording or a
-		// lockstep session its owner has resumed) gets them scaled from the image into its own pixels.
+		// lockstep session its owner has resumed) gets them mapped from the image into its own pixels, through both output
+		// mappings of the session's output settings, so under a PixelPerfectCamera the cursor names the scene pixel the image
+		// shows (MapImageToViewCoordinates; a plain stretch without one).
 		if (const auto* move = std::get_if<MouseMoveEvent>(&event); move != nullptr && m_State->SessionViewFixed)
 		{
 			const Result<glm::uvec2> image = m_State->Editor->GetViewportState().GetPixelSize(ViewportView::Game);
 			if (image && *image != session->GetViewSize())
 			{
-				if (const std::optional<glm::vec2> position = MapToViewCoordinates(move->Position, glm::vec2(0.0f), glm::vec2(*image), session->GetViewSize()))
+				if (const std::optional<glm::vec2> position = MapImageToViewCoordinates(move->Position, glm::vec2(0.0f), glm::vec2(*image), *image,
+						session->GetViewSize(), session->GetLastExtraction().Output))
 					session->GetInput().QueueDeviceEvent(MouseMoveEvent{ .Position = *position });
 				return;
 			}

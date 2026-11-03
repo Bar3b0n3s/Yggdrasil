@@ -584,6 +584,11 @@ namespace Engine {
 			for (const char* name : { "OnCollisionExit", "OnTriggerEnter", "OnTriggerExit" })
 				behaviour.Callback(name, "(self: ScriptInstance, other: Entity) -> ()", "Called when the corresponding collision or trigger transition occurs.");
 			behaviour.Callback("OnHotReload", "(self: ScriptInstance) -> ()", "Called after the class is replaced while instance state survives.", { .Modes = RunModes::EditorOnly });
+			// M21 (Docs/Decisions/0032-m21-contract.md decision 13): the 2D world's callbacks, appended in landing order.
+			behaviour.Callback("OnCollisionEnter2D", "(self: ScriptInstance, other: Entity, contact: CollisionContact) -> ()",
+				"Called when a 2D collision begins, with the other entity and the contact in the XY plane.");
+			for (const char* name : { "OnCollisionExit2D", "OnTriggerEnter2D", "OnTriggerExit2D" })
+				behaviour.Callback(name, "(self: ScriptInstance, other: Entity) -> ()", "Called when the corresponding 2D collision or trigger transition occurs.");
 			return {};
 		}
 

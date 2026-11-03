@@ -750,6 +750,55 @@ namespace Engine {
 				"values": {"Format": "SpriteSheet"}})"));
 			CHECK(header["error"]["code"] == Json(-32602));
 		}
+
+		// Architecture §7.1's asset references (W21.1's review): a sprite sheet's Texture in asset.create's and
+		// asset.setProperties' values takes every spelling an AssetRef param takes (MethodRegistry.h convention 13), written to
+		// the file as the handle; a reference that names nothing is NotFound, one of another type InvalidParams, located at it.
+		TEST_CASE("AssetMethods: a sprite sheet's Texture takes a handle, a project path or an engine path")
+		{
+			Test::AutomationFixture setup("AssetSpriteSheetTexture");
+			const Result<Buffer> png = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Textures/Rgba.png"));
+			REQUIRE_MESSAGE(png.has_value(), png.error().ToString());
+			const VfsPath texturePath = VfsPath::Create("project", "Assets/Textures/Rgba.png").value_or(VfsPath());
+			REQUIRE(setup.GetEditor().CreateProjectDirectory(texturePath.GetParent()).has_value());
+			REQUIRE(setup.GetEditor().WriteProjectFile(texturePath, *png).has_value());
+			CallOrFail(setup, "project.refreshAssets", Json::object());
+			const std::string texture = JsonReader(CallOrFail(setup, "asset.info", Json{ { "asset", "Assets/Textures/Rgba.png" } })["asset"]["id"])
+											.ReadString()
+											.value_or(std::string());
+			REQUIRE(texture.size() == 16);
+
+			// A project path, written as the handle it names, its frames checked against that texture.
+			const Json frame = ParseAssetMethodJson(R"([{"Name": "Corner", "Rect": {"X": 8, "Y": 0, "Width": 8, "Height": 8}}])");
+			CallOrFail(setup, "asset.create", Json{ { "type", "SpriteSheet" }, { "path", "Assets/Sprites/ByPath.spritesheet" }, { "values", Json{ { "Texture", "Assets/Textures/Rgba.png" }, { "Frames", frame } } } });
+			const Json byPath = CallOrFail(setup, "asset.getProperties", ParseAssetMethodJson(R"({"asset": "Assets/Sprites/ByPath.spritesheet"})"));
+			CHECK(byPath["values"]["Texture"] == Json(texture));
+			Json beyond = frame;
+			beyond[0]["Rect"]["X"] = 9;
+			const Json outside = setup.Request("asset.create", Json{ { "type", "SpriteSheet" }, { "path", "Assets/Sprites/Outside.spritesheet" }, { "values", Json{ { "Texture", "Assets/Textures/Rgba.png" }, { "Frames", beyond } } } });
+			CHECK(outside["error"]["data"]["errorCode"] == Json("Validation"));
+			CHECK(outside["error"]["data"]["issues"][0]["pointer"] == Json("/values/Frames/0/Rect"));
+
+			// An engine path (a built-in sprite texture) through asset.setProperties, and a handle kept as given.
+			const Json engine = CallOrFail(setup, "asset.setProperties",
+				ParseAssetMethodJson(R"({"asset": "Assets/Sprites/ByPath.spritesheet", "values": {"Texture": "engine://Textures/SpriteSquare"}})"));
+			CHECK(engine["values"]["Texture"] == Json(BuiltinAssetHandles::SpriteSquareTexture.ToString()));
+			const Json handle = CallOrFail(setup, "asset.setProperties", Json{ { "asset", "Assets/Sprites/ByPath.spritesheet" }, { "values", Json{ { "Texture", texture } } } });
+			CHECK(handle["values"]["Texture"] == Json(texture));
+
+			// A path that names nothing, and an asset that is not a texture, are refused at the Texture, changing nothing.
+			const Json missing = setup.Request("asset.setProperties",
+				ParseAssetMethodJson(R"({"asset": "Assets/Sprites/ByPath.spritesheet", "values": {"Texture": "Assets/Textures/Missing.png"}})"));
+			CHECK(missing["error"]["data"]["errorCode"] == Json("NotFound"));
+			CHECK(missing["error"]["data"]["location"]["pointer"] == Json("/values/Texture"));
+			const Json wrongType = setup.Request("asset.create",
+				ParseAssetMethodJson(R"({"type": "SpriteSheet", "path": "Assets/Sprites/Wrong.spritesheet", "values": {"Texture": "Assets/Sprites/ByPath.spritesheet"}})"));
+			CHECK(wrongType["error"]["data"]["errorCode"] == Json("InvalidArgument"));
+			CHECK(wrongType["error"]["data"]["location"]["pointer"] == Json("/values/Texture"));
+			CHECK_FALSE(setup.GetEditor().GetVfs().Exists(VfsPath::Create("project", "Assets/Sprites/Wrong.spritesheet").value_or(VfsPath())));
+			const Json unchanged = CallOrFail(setup, "asset.getProperties", ParseAssetMethodJson(R"({"asset": "Assets/Sprites/ByPath.spritesheet"})"));
+			CHECK(unchanged["values"]["Texture"] == Json(texture));
+		}
 	}
 
 }

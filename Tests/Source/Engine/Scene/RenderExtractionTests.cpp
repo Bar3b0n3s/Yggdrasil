@@ -535,7 +535,7 @@ namespace Engine {
 		}
 
 		// Docs/Decisions/0032-m21-contract.md decision 4 (stream A): sprites in draw order, their layers resolved by name.
-		TEST_CASE("RenderExtraction: sprites are extracted in sorting-layer, order-in-layer and canonical order" * doctest::skip(true))
+		TEST_CASE("RenderExtraction: sprites are extracted in sorting-layer, order-in-layer and canonical order")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -576,13 +576,19 @@ namespace Engine {
 		}
 
 		// Docs/Decisions/0032-m21-contract.md decision 6 (stream C): the pixel-perfect camera drives the output stage.
-		TEST_CASE("RenderExtraction: a PixelPerfectCamera sets the output stage and an orthographic view of its reference height" * doctest::skip(true))
+		TEST_CASE("RenderExtraction: a PixelPerfectCamera sets the output stage and an orthographic view of its reference height")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
+			// A perspective camera (the Camera's default) whose own orthographic size the pixel-perfect view replaces.
 			Entity camera = CreateCamera(scene, "Camera", true);
+			camera.Patch<CameraComponent>([](CameraComponent& component)
+			{
+				component.OrthographicSize = 3.0f;
+			});
 			camera.AddComponent<PixelPerfectCameraComponent>(PixelPerfectCameraComponent{ .ReferenceWidth = 320, .ReferenceHeight = 180, .PixelsPerUnit = 16.0f, .LetterboxColor = glm::vec3(0.25f, 0.0f, 0.0f) });
 			SetTranslation(camera, glm::vec3(0.03f, 0.0f, 10.0f));
+			const Entity plain = CreateCamera(scene, "Plain", false);
 			TransformSystem::Update(scene);
 
 			const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, { .Width = 960, .Height = 540 });
@@ -593,8 +599,26 @@ namespace Engine {
 			CHECK(snapshot->Output.LetterboxColor == glm::vec3(0.25f, 0.0f, 0.0f));
 			CHECK(snapshot->Camera.ProjectionKind == RenderProjection::Orthographic);
 			CHECK(snapshot->Camera.OrthographicSize == 180.0f / 32.0f);
-			// Snapped to the pixel grid: the view's left edge at a multiple of 1 / 16.
-			CHECK(snapshot->Camera.Position.x == 0.0f);
+			// Snapped to the pixel grid: the view's left edge at a multiple of 1 / 16, and the view matrix looks from there.
+			CHECK(snapshot->Camera.Position == glm::vec3(0.0f, 0.0f, 10.0f));
+			CHECK(glm::vec3(snapshot->Camera.View[3]) == glm::vec3(0.0f, 0.0f, -10.0f));
+			// The projection has the reference resolution's aspect, which is the camera's viewport (the scene resolution).
+			CHECK(snapshot->Camera.ViewportWidth == 320);
+			CHECK(snapshot->Camera.ViewportHeight == 180);
+			const CameraComponent& component = camera.GetComponent<CameraComponent>();
+			CHECK(snapshot->Camera.Projection
+				== ComputeReverseZProjection(RenderProjection::Orthographic, component.VerticalFov, 180.0f / 32.0f, component.NearClip, component.FarClip, 320, 180));
+
+			// An Entity request through the camera takes the same view; a camera without one keeps the default output stage.
+			const Result<RenderSnapshot> entityView = ExtractRenderSnapshot(scene, { .Camera = RenderCameraSource::Entity, .CameraEntity = camera.GetUUID(), .Width = 960, .Height = 540 });
+			REQUIRE_MESSAGE(entityView.has_value(), entityView.error().ToString());
+			CHECK(entityView->Output == snapshot->Output);
+			CHECK(entityView->Camera.Projection == snapshot->Camera.Projection);
+			const Result<RenderSnapshot> plainView = ExtractRenderSnapshot(scene, { .Camera = RenderCameraSource::Entity, .CameraEntity = plain.GetUUID(), .Width = 960, .Height = 540 });
+			REQUIRE_MESSAGE(plainView.has_value(), plainView.error().ToString());
+			CHECK(plainView->Output == RenderOutputSettings{});
+			CHECK(plainView->Camera.ProjectionKind == RenderProjection::Perspective);
+			CHECK(plainView->Camera.ViewportWidth == 960);
 
 			// The editor's explicit scene-view camera ignores it.
 			const Result<RenderSnapshot> sceneView = ExtractRenderSnapshot(scene, { .Camera = RenderCameraSource::Explicit, .Width = 960, .Height = 540 });

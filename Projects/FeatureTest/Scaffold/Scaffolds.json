@@ -112,6 +112,30 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "Sprites2D.jsonl",
+			"IdSeed": 1901,
+			"Renderer": "none"
+		},
+		{
+			"File": "Physics2D.jsonl",
+			"IdSeed": 1902,
+			"Renderer": "none"
+		},
+		{
+			"File": "Sprites2DGolden.jsonl",
+			"IdSeed": 1903,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Scenes/Sprites2DGolden",
+				"Assets/Textures/Sprites2DGolden"
+			]
+		},
+		{
+			"File": "Replays2D.jsonl",
+			"IdSeed": 1904,
+			"Renderer": "none"
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

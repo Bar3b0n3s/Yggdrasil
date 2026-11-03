@@ -612,6 +612,7 @@
 			"Projects": [
 				"EditorCore",
 				"Editor",
+				"Runtime",
 				"Tests",
 				"ShaderShared"
 			],

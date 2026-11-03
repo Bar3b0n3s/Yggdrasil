@@ -29,6 +29,7 @@ Reference pages beside this file, each a `docs.get` topic and a file in this ski
 - `skills/game-building/look` ([look.md](look.md)): the look: lights and shadows, glow, background, screen text, GTAO and framing.
 - `skills/game-building/replays` ([replays.md](replays.md)): recording and verifying replays, the input check, recording suites and re-recording.
 - `skills/game-building/exports` ([exports.md](exports.md)): testing, pruned and command-line exports.
+- `skills/game-building/sprites-2d` ([sprites-2d.md](sprites-2d.md)): 2D games: sprites, sprite sheets and clips, sorting layers, the pixel-perfect camera, 2D physics and the editor's 2D mode.
 
 ## Ground rules
 
@@ -87,6 +88,7 @@ Each entry is `{Script, Scene?, Parameters?, Isolation?, Clock?, Overrides?, Exp
 - **Prefabs, tracks and levels:** see `skills/game-building/prefabs-and-levels`.
 - Look at the result: `scene_tree {format: "Text"}` for the outline, `entity_bounds` for layout and gaps, and `viewport_screenshot {view: "Game", width: <Window.Width>, height: <Window.Height>, annotate: {labels: "all"}}` (needs `renderer: "vulkan"`). Without `width` and `height` it renders 640 × 360 whatever the window (`game-debugging` item 7). The image comes back as image content; its PNG in `Library/Automation/Out/` lasts until the next editor session prunes it, so pass `keep: true` for one you must hand over (`Library/Automation/Kept/`, never pruned).
 - **The look:** see `skills/game-building/look`. Finish the look before recording replays: every look component is hashed.
+- **2D games** (sprites, sorting layers, the pixel-perfect camera, 2D physics): see `skills/game-building/sprites-2d`.
 
 ## 4. Scripts
 

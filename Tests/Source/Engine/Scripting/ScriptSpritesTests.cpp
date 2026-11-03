@@ -2,6 +2,7 @@
 
 #include "Engine/Scripting/ScriptEngine.h"
 
+#include "Engine/Asset/BuiltinTextures.h"
 #include "Engine/Asset/SpriteSheetData.h"
 #include "Engine/Core/Time.h"
 #include "Engine/Scene/Components/SpriteAnimatorComponent.h"
@@ -9,6 +10,7 @@
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SpriteAnimationSystem.h"
+#include "Engine/Scripting/ScriptApiRegistry.h"
 #include "Support/ScriptTestFixture.h"
 
 #include <cstdint>
@@ -17,8 +19,7 @@
 #include <vector>
 
 // The sprite script surface (Docs/Decisions/0032-m21-contract.md decision 13, stream B): SpriteRenderer:SetFrameByName, and
-// SpriteAnimator:Play and Stop with the SpriteAnimation phase that plays what they set (decision 5). Skipped until stream B
-// binds them.
+// SpriteAnimator:Play and Stop with the SpriteAnimation phase that plays what they set (decision 5).
 
 namespace Engine {
 
@@ -31,13 +32,11 @@ namespace Engine {
 			CHECK(result->Value.Get() == Json(true));
 		}
 
-	}
-
-	TEST_SUITE("Scripting")
-	{
-		TEST_CASE("ScriptSprites: SetFrameByName sets the named frame, and Play and Stop drive the SpriteAnimation phase" * doctest::skip(true))
+		// The acceptance case's work in `mode`, whose API coverage it adds to `snapshots` ("ScriptApi: every registered
+		// function, method, property, operator and constructor has a test").
+		void SpriteCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots)
 		{
-			Test::ScriptTestFixture fixture({ .TestMode = true });
+			Test::ScriptTestFixture fixture({ .Mode = mode, .TestMode = true });
 			Scene& scene = fixture.GetScene();
 			const AssetHandle sheetHandle(0x5a1d0c77e3b14f21);
 			Ref<SpriteSheetData> sheet = CreateRef<SpriteSheetData>();
@@ -49,16 +48,32 @@ namespace Engine {
 			hero.AddComponent<SpriteRendererComponent>(SpriteRendererComponent{ .Sheet = TypedAssetHandle<AssetType::SpriteSheet>(sheetHandle) });
 			// A stopped animator left in the middle of another clip: Play must reset its step.
 			hero.AddComponent<SpriteAnimatorComponent>(SpriteAnimatorComponent{ .Clip = "Jump", .Playing = false, .Step = 4, .StepTicks = 9 });
+			// A renderer without a sheet, with a sheet that does not load and with a "sheet" that is a texture has no frame to name.
+			Entity plain = scene.CreateEntity("Plain");
+			plain.AddComponent<SpriteRendererComponent>(SpriteRendererComponent{ .Frame = 3 });
+			Entity lost = scene.CreateEntity("Lost");
+			lost.AddComponent<SpriteRendererComponent>(SpriteRendererComponent{ .Sheet = TypedAssetHandle<AssetType::SpriteSheet>(AssetHandle(0x5a1d0c77e3b14f27)), .Frame = 3 });
+			const AssetHandle textureHandle(0x5a1d0c77e3b14f28);
+			fixture.GetAssetManager().Publish(textureHandle, CreateRef<TextureData>(GenerateBuiltinTexture(BuiltinTexture::White)), "Assets/Textures/White.png");
+			Entity typed = scene.CreateEntity("Typed");
+			typed.AddComponent<SpriteRendererComponent>(SpriteRendererComponent{ .Sheet = TypedAssetHandle<AssetType::SpriteSheet>(textureHandle), .Frame = 3 });
 			REQUIRE(fixture.Start());
 
-			// SetFrameByName sets Frame to the named frame's index; a name the sheet lacks raises an error and changes nothing.
-			// Play sets the clip and resets the playback state; the frame changes only in the SpriteAnimation phase.
+			// SetFrameByName sets Frame to the named frame's index; a name the sheet lacks, an empty name and a renderer without a
+			// sheet raise an error and change nothing. Play sets the clip and resets the playback state; the frame changes only
+			// in the SpriteAnimation phase.
 			CheckSpriteScript(fixture, R"(
 local hero = Scene.FindByName("Hero")
 hero.SpriteRenderer:SetFrameByName("Run1")
 assert(hero.SpriteRenderer.Frame == 2)
 assert(not pcall(function() hero.SpriteRenderer:SetFrameByName("Jump") end))
+assert(not pcall(function() hero.SpriteRenderer:SetFrameByName("") end))
 assert(hero.SpriteRenderer.Frame == 2)
+for _, name in {"Plain", "Lost", "Typed"} do
+	local renderer = Scene.FindByName(name).SpriteRenderer
+	assert(not pcall(function() renderer:SetFrameByName("Idle") end))
+	assert(renderer.Frame == 3)
+end
 hero.SpriteAnimator:Play("Run")
 local animator = hero.SpriteAnimator
 assert(animator.Clip == "Run" and animator.Playing and animator.Step == 0 and animator.StepTicks == 0)
@@ -87,6 +102,28 @@ return true
 			(*system)->Step(SimStep::FromTick(3, 1.0 / 60.0));
 			CHECK(hero.GetComponent<SpriteRendererComponent>().Frame == 2);
 			CHECK(fixture.Errors.empty());
+			const auto coverage = fixture.GetApi().GetCoverage(mode);
+			REQUIRE(coverage);
+			snapshots.push_back(*coverage);
+		}
+
+	}
+
+	namespace Test {
+
+		void RunSpritesBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots)
+		{
+			SpriteCoverage(mode, snapshots);
+		}
+
+	}
+
+	TEST_SUITE("Scripting")
+	{
+		TEST_CASE("ScriptSprites: SetFrameByName sets the named frame, and Play and Stop drive the SpriteAnimation phase")
+		{
+			std::vector<ScriptApiCoverage> snapshots;
+			SpriteCoverage(RunModes::Editor, snapshots);
 		}
 	}
 

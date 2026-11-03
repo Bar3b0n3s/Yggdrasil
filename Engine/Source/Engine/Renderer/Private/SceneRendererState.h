@@ -272,6 +272,9 @@ namespace Engine {
 		PassBindingCache GtaoBindings{};
 		PassBindingCache SelectionBindings{};
 		PassBindingCache DataViewBindings{};
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 4): the Sprites stage's sets, the QuadBatcher's one per texture and
+		// sampler (place 2 of ADR 0029 decision 27: released with the state on a device loss, like every set above).
+		PassBindingCache SpriteBindings{};
 		Scope<RenderTargetPool> TargetPool{};
 		Scope<AsyncPicker> Picker{};
 		Scope<GpuProfiler> Profiler{};
@@ -319,6 +322,9 @@ namespace Engine {
 		// Reused by every Render.
 		std::vector<Detail::SceneRendererDraw> OpaqueDraws{};
 		std::vector<Detail::SceneRendererDraw> TransparentDraws{};
+		// M21: the Sprites stage's quads in the snapshot's draw order, their textures borrowed from the GpuResourceCache's
+		// mirrors for the render.
+		std::vector<QuadDraw> SpriteQuads{};
 		std::vector<ShaderLight> Lights{};
 		bool LightLimitLogged = false; // RENDER_LIGHT_LIMIT_EXCEEDED is logged once per renderer
 		SceneRenderStats Stats{};
@@ -371,7 +377,11 @@ namespace Engine {
 		void RecordDepthNormalStage(Detail::SceneRendererFrame& frame);
 		void RecordAmbientStage(Detail::SceneRendererFrame& frame);
 		void RecordForwardStage(Detail::SceneRendererFrame& frame);
-		// Reserved for M21's Sprites and Lights2D passes; records nothing in M18.
+		// M21's Sprites pass (Docs/Decisions/0032-m21-contract.md decision 4): in a Lit view with a camera (not the wireframe),
+		// the snapshot's sprites in its draw order, one QuadBatcher quad each in world space (Asset/SpriteGeometry.h's quad of
+		// the frame or texture this stage resolves through the GpuResourceCache, the camera's view-projection, the Point
+		// sampler, Color as the quad's colour), with the Hdr pipeline into SceneColor depth-tested against SceneDepth, under
+		// the Sprites row; a sprite whose quad lies wholly outside the view is culled. C21.2's Lights2D follows it.
 		void RecordSpritesStage(Detail::SceneRendererFrame& frame);
 		void RecordHdrPostStage(Detail::SceneRendererFrame& frame);
 		// Tonemap (or the data views' composite); with frame.PixelArt the 2D colour path (decision 7).

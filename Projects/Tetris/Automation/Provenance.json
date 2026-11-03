@@ -588,11 +588,11 @@
 		},
 		{
 			"Path": "Tetris.eproj",
-			"XXH64": "d44f3fecdc82b79a",
+			"XXH64": "5fa29d02d3642305",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 517
+			"TranscriptLine": 569
 		}
 	]
 }

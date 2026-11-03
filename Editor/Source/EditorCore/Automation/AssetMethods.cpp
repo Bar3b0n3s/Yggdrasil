@@ -27,6 +27,7 @@
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Automation/Protocol/PendingOperation.h"
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Reflection/MergePatch.h"
@@ -221,6 +222,36 @@ namespace Engine {
 			if (!sheet)
 				return std::unexpected(Utils::PrefixPointers(sheet.error(), pointer));
 			return sheet;
+		}
+
+		// A sprite sheet's values (asset.create, asset.setProperties) take its Texture in every spelling of an asset reference
+		// (Architecture §7.1: a 16-hex handle, a project path, a sub-asset path or an engine path), as the AssetRef fields of
+		// params do (MethodRegistry.h convention 13; Docs/Decisions/0032-m21-contract.md, W21.1's review): a Texture that is a
+		// string but not a handle is rewritten to the handle of the Texture it names; a handle is kept as given (it may name a
+		// missing asset). Errors, located at `pointer`/Texture: ResolveAssetParam's (InvalidArgument for a malformed
+		// reference, NotFound for one that names nothing, the refresh's errors) and InvalidArgument for an asset of another
+		// type.
+		Status ResolveSpriteSheetTexture(EditorMethodContext& context, Json& values, std::string_view pointer)
+		{
+			if (!values.is_object())
+				return {};
+			const auto texture = values.find("Texture");
+			if (texture == values.end() || !texture->is_string())
+				return {};
+			const Result<std::string> reference = JsonReader(*texture).ReadString();
+			if (!reference || UUID::FromString(*reference).has_value())
+				return {};
+			const std::string location = std::format("{}/Texture", pointer);
+			ENGINE_TRY_ASSIGN(const AssetHandle handle, Utils::ResolveAssetParam(context, *reference, location));
+			const AssetType type = context.GetEditor().GetAssets().GetAssetType(handle);
+			if (type != AssetType::Texture)
+			{
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, location,
+					std::format("'{}' is a {}, not a Texture", *reference, AssetTypeToString(type)),
+					"give a Texture asset; asset.list {\"type\": \"Texture\"} lists them"));
+			}
+			*texture = handle.ToString();
+			return {};
 		}
 
 		// asset.create's and asset.setProperties' texture check of a sprite sheet (Docs/Decisions/0029-m18-contract.md decision
@@ -1063,7 +1094,10 @@ namespace Engine {
 			else
 			{
 				ENGINE_TRY(Utils::CheckAssetPathFree(vfs, path, "/path"));
-				ENGINE_TRY_ASSIGN(const std::string text, MakeNativeAssetText(editor, params.Type, path, params.Values));
+				Json values = params.Values.Get();
+				if (params.Type == AssetCreateType::SpriteSheet)
+					ENGINE_TRY(ResolveSpriteSheetTexture(context, values, "/values"));
+				ENGINE_TRY_ASSIGN(const std::string text, MakeNativeAssetText(editor, params.Type, path, VariantValue(std::move(values))));
 				ENGINE_TRY_ASSIGN(const AssetMetadata metadata, editor.GetAssets().CreateMetadata(path));
 				const std::string metaText = SerializeAssetMetadata(metadata);
 				ENGINE_TRY_ASSIGN(const VfsPath metaPath, GetMetaPath(path));
@@ -1124,8 +1158,10 @@ namespace Engine {
 			Result<std::string> text = editor.GetVfs().ReadText(source);
 			if (!text)
 				return std::unexpected(Utils::ToEditorFileError(std::move(text).error()));
-			ENGINE_TRY_ASSIGN(NativeProperties patched,
-				ReadNativeProperties(*kind, *text, source, editor.GetTypeRegistry(), &params.Values.Get(), editor.GetAssets()));
+			Json values = params.Values.Get();
+			if (*kind == NativePropertiesKind::SpriteSheet)
+				ENGINE_TRY(ResolveSpriteSheetTexture(context, values, "/values"));
+			ENGINE_TRY_ASSIGN(NativeProperties patched, ReadNativeProperties(*kind, *text, source, editor.GetTypeRegistry(), &values, editor.GetAssets()));
 
 			AssetSetPropertiesResult result;
 			if (patched.Text != *text)
@@ -1309,8 +1345,8 @@ namespace Engine {
 				"folder); missing parent folders are created with it.")
 			.Field("values", &AssetCreateParams::Values,
 				"A Material's, a SoundEffect's or a SpriteSheet's fields over the defaults (registry names, such as Roughness, Layers, which a "
-				"sound effect needs, or a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads); absent for "
-				"other types.");
+				"sound effect needs, or a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads; the Texture takes "
+				"any asset reference: a handle, an Assets/ path or an engine:// path); absent for other types.");
 
 		registry.Struct<AssetCreateResult>("AssetCreateResult", "The created asset.")
 			.Field("asset", &AssetCreateResult::Asset, "The created asset; an empty id and type None for a folder.")
@@ -1328,7 +1364,9 @@ namespace Engine {
 
 		registry.Struct<AssetSetPropertiesParams>("AssetSetPropertiesParams", "The params of asset.setProperties.")
 			.Field("asset", &AssetSetPropertiesParams::Asset, "The native asset (a material, a sound effect or a sprite sheet).")
-			.Field("values", &AssetSetPropertiesParams::Values, "An RFC 7386 merge patch of its properties: members replace, null resets a field.");
+			.Field("values", &AssetSetPropertiesParams::Values,
+				"An RFC 7386 merge patch of its properties: members replace, null resets a field; a sprite sheet's Texture takes any asset "
+				"reference (a handle, an Assets/ path or an engine:// path).");
 
 		registry.Struct<AssetSetPropertiesResult>("AssetSetPropertiesResult", "The properties after the patch.")
 			.Field("asset", &AssetSetPropertiesResult::Asset, "The asset.")

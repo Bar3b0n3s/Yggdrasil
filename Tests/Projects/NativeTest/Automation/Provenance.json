@@ -156,11 +156,11 @@
 		},
 		{
 			"Path": "NativeTest.eproj",
-			"XXH64": "c48aa674116afb8c",
-			"Method": "project.setSettings",
-			"RequestId": 64,
-			"Client": "engine-mcp",
-			"TranscriptLine": 121
+			"XXH64": "71c6d65f7b682300",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 171
 		}
 	]
 }

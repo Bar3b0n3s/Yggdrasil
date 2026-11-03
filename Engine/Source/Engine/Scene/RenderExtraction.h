@@ -118,7 +118,8 @@ namespace Engine {
 	//   - PixelPerfectCamera (M21, decision 6): for the Primary and Entity sources, when the camera entity holds a
 	//     PixelPerfectCameraComponent, Output, the camera's position and its orthographic projection come from
 	//     ComputePixelPerfectView (Scene/PixelPerfectCamera.h), at the reference resolution's aspect, whatever the Camera's
-	//     own Projection and OrthographicSize; Explicit cameras ignore it. Without one, Output keeps its defaults.
+	//     own Projection and OrthographicSize, and the camera's viewport is the reference resolution (the scene resolution);
+	//     Explicit cameras ignore it. Without one, Output keeps its defaults.
 	// M9 additions: copy Flags, Quality, Annotations and SelectedEntities (sort/unique/filter unknown ids), assign mesh
 	// PickIds/PickTable in canonical entity order before GPU culling, and copy all five directional shadow fields.
 	// Asset-dependent overlays are appended afterwards with AppendRenderAnnotations at the snapshot's Alpha.

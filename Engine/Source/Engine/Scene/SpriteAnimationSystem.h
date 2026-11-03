@@ -7,6 +7,7 @@
 #include "Engine/Scene/Components/SpriteAnimatorComponent.h"
 #include "Engine/Scene/SpriteValidation.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <span>
 
@@ -21,7 +22,7 @@
 // Playing and Clip names a clip of the SpriteRenderer's sheet (loaded through the session's AssetManager), the
 // SpriteRenderer's Frame becomes AdvanceSpriteAnimator's result; otherwise nothing changes (an unknown clip, or a sheet that
 // is missing or fails to load, raises SPRITE_UNKNOWN_CLIP once per entity and clip name, logged at Warn and kept in
-// GetDiagnostics). The writes go through the scene, so the change tracker sees them.
+// GetDiagnostics, up to MaxSpriteAnimationDiagnostics). The writes go through the scene, so the change tracker sees them.
 //
 // Threading: main thread only. Not copyable or movable. Frozen by the M21 contract (C21.1); stream B implements it.
 
@@ -29,6 +30,11 @@ namespace Engine {
 
 	class AssetManager;
 	class Scene;
+
+	// The most SPRITE_UNKNOWN_CLIP findings a system keeps (GetDiagnostics), since a script can write a new clip name every
+	// tick: past it, a finding is neither kept nor logged, and one warning says so (as MaxAssetMissingDiagnostics bounds the
+	// asset manager's).
+	inline constexpr size_t MaxSpriteAnimationDiagnostics = 1024;
 
 	// One tick of `animator` over `clip` (1 or more steps), pure: clamps Step to the clip's last step, takes the frame of step
 	// Step as the result, then StepTicks + 1; when that reaches or passes the step's Ticks, StepTicks becomes 0 and Step + 1;

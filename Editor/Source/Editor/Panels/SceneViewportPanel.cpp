@@ -10,6 +10,7 @@
 #include "EditorCore/EditorUiState.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Viewport/EditorCamera.h"
+#include "EditorCore/Viewport/SpriteDrop.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
 #include "Engine/Scene/Entity.h"
@@ -72,7 +73,7 @@ namespace Engine {
 		return QueueAction(context, "viewport.frame", Json{ { "entities", std::move(entities) }, { "ifRevision", context.Editor.GetRevision() } });
 	}
 
-	Status SceneViewportPanel::AcceptAssetDrop(EditorPanelContext& context)
+	Status SceneViewportPanel::AcceptAssetDrop(EditorPanelContext& context, const EditorViewportRect& rectangle, const EditorViewportImage& image)
 	{
 		if (!ImGui::BeginDragDropTarget())
 			return {};
@@ -120,6 +121,25 @@ namespace Engine {
 		{
 			return QueueAction(context, "entity.create", Json{ { "name", "Mesh" }, { "target", target }, { "ifRevision", revision }, { "components", { { "MeshRenderer", { { "Mesh", reference } } } } } });
 		}
+		if (type == AssetType::SpriteSheet || type == AssetType::Texture)
+		{
+			// A sprite where the cursor's ray meets the plane z = 0 (M21, decision 14), through the displayed image's camera,
+			// or at the camera's target when the ray meets no point of the plane in front of it.
+			glm::vec3 position = context.Editor.GetViewportState().GetCamera().Target;
+			const ImVec2 pointer = ImGui::GetIO().MousePos;
+			if (const std::optional<EditorViewportPixel> pixel = ToViewportPixel(rectangle, { pointer.x, pointer.y }))
+			{
+				const RenderOutputMapping mapping = ComputeRenderOutputMapping(image.Width, image.Height, RenderOutputSettings{});
+				ENGINE_TRY_ASSIGN(const std::optional<RenderRayInterval> ray, ComputeOutputPixelRayInterval(image.Camera, mapping, pixel->X, pixel->Y));
+				if (ray)
+				{
+					if (const std::optional<glm::vec3> point = IntersectSpritePlane(ray->Ray))
+						position = *point;
+				}
+			}
+			ENGINE_TRY_ASSIGN(const Json params, MakeSpriteDropParams({ .Asset = *handle, .Type = type, .Position = position, .PlayScene = session != nullptr, .Revision = revision }));
+			return QueueAction(context, "entity.create", params);
+		}
 		if (type == AssetType::Environment)
 		{
 			UUID environment;
@@ -143,7 +163,7 @@ namespace Engine {
 		}
 		if (type == AssetType::None)
 			return MakeError(ErrorCode::NotFound, "The dropped asset {} is no longer available", *handle);
-		return MakeError(ErrorCode::InvalidArgument, "Drop a mesh, prefab or environment into the scene view");
+		return MakeError(ErrorCode::InvalidArgument, "Drop a mesh, prefab, environment, sprite sheet or texture into the scene view");
 	}
 
 	Status SceneViewportPanel::Draw(EditorPanelContext& context)
@@ -218,17 +238,26 @@ namespace Engine {
 			ImGui::Separator();
 			ExplicitRenderCamera camera = state.GetCamera();
 			bool orthographic = camera.Projection == RenderProjection::Orthographic;
+			// The 2D mode's camera is orthographic (M21): its projection follows the 2D toggle.
+			ImGui::BeginDisabled(options.Mode2D);
 			if (ImGui::Checkbox("Orthographic", &orthographic))
 			{
 				camera.Projection = orthographic ? RenderProjection::Orthographic : RenderProjection::Perspective;
 				record(state.SetCamera(camera));
 			}
+			ImGui::EndDisabled();
 			ImGui::EndPopup();
 		}
 		nextTool(buttonWidth("Frame"));
 		ImGui::BeginDisabled(draggingAtStart || context.Editor.GetSelection().empty());
 		if (Utils::EditorToolbarButton("Frame", "Frame the selected objects (F)"))
 			record(FrameSelection(context));
+		ImGui::EndDisabled();
+		// The 2D mode (M21, decision 14), through viewport.setOptions as automation sets it.
+		nextTool(buttonWidth("2D"));
+		ImGui::BeginDisabled(draggingAtStart);
+		if (Utils::EditorToolbarButton("2D", "2D mode: look down -Z orthographically, pan and zoom, and move in X and Y", options.Mode2D))
+			record(QueueAction(context, "viewport.setOptions", Json{ { "mode2D", !options.Mode2D } }));
 		ImGui::EndDisabled();
 		ImGui::Separator();
 		if (playing)
@@ -313,7 +342,7 @@ namespace Engine {
 			// A press on the image focuses the view within this frame, so the first click both focuses and picks.
 			rectangle.Focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
 			if (!draggingAtStart)
-				record(AcceptAssetDrop(context));
+				record(AcceptAssetDrop(context, rectangle, image));
 		}
 		else if (hasRegion)
 		{
@@ -336,7 +365,21 @@ namespace Engine {
 			const bool orbit = imageActive && io.KeyAlt && ImGui::IsMouseDown(ImGuiMouseButton_Left);
 			const bool pan = imageActive && ImGui::IsMouseDown(ImGuiMouseButton_Middle);
 			const float wheel = rectangle.Hovered ? io.MouseWheel : 0.0f;
-			if (fly || orbit || pan || wheel != 0.0f)
+			if (options.Mode2D && (fly || orbit || pan || wheel != 0.0f))
+			{
+				// The 2D mode pans with any navigation button and zooms with the wheel (M21, decision 14).
+				EditorCameraInput input;
+				input.PointerDelta = { io.MouseDelta.x, io.MouseDelta.y };
+				input.Wheel = wheel;
+				input.DeltaSeconds = io.DeltaTime;
+				input.Pan = fly || orbit || pan;
+				Result<ExplicitRenderCamera> navigated = EditorCamera::Navigate2D(state.GetCamera(), input, rectangle.Size.y);
+				if (navigated)
+					record(state.SetCamera(*navigated));
+				else
+					record(std::unexpected(std::move(navigated).error()));
+			}
+			else if (fly || orbit || pan || wheel != 0.0f)
 			{
 				EditorCameraInput input;
 				input.PointerDelta = { io.MouseDelta.x, io.MouseDelta.y };

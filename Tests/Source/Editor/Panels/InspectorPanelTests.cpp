@@ -1025,6 +1025,62 @@ namespace Engine {
 			CHECK((*settings)["settings"]["GenerateMips"] == Json(true));
 		}
 
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 14; Backlog §2): the sprite sheet inspector.
+		TEST_CASE("InspectorPanel: a sprite sheet shows its frames and clips and edits them through asset.setProperties")
+		{
+			InspectorLayerHarness test;
+			auto& context = test.Fixture.GetContext();
+			auto& automation = test.Fixture.GetAutomation();
+			const Json values{ { "Frames", Json::array({ Json{ { "Name", "Idle" }, { "Rect", Json{ { "X", 0 }, { "Y", 0 }, { "Width", 8 }, { "Height", 8 } } } } }) },
+				{ "Clips", Json::array({ Json{ { "Name", "Spin" }, { "Frames", Json::array({ Json{ { "Frame", 0 }, { "Ticks", 2 } } }) }, { "Loop", true } } }) } };
+			const auto created = automation.Call("asset.create", Json{ { "type", "SpriteSheet" }, { "path", "Assets/Sheets/Inspector.spritesheet" }, { "values", values } });
+			REQUIRE_MESSAGE(created.has_value(), (created ? std::string() : created.error().ToString()));
+			const auto id = JsonReader((*created)["asset"]["id"]).ReadUUID();
+			REQUIRE(id);
+			context.Editor.GetUiState().SetSelectedAsset(*id);
+			test.CaptureText = true;
+			REQUIRE(test.Frame());
+			REQUIRE(test.Frame());
+			test.CaptureText = false;
+			CAPTURE(test.Text);
+			CHECK(test.Text.contains("Frames: 1"));
+			CHECK(test.Text.contains("Clips: 1"));
+			const auto draw = [&test]()
+			{
+				return test.Draw();
+			};
+			const auto* inspector = ImGui::FindWindowByName(Utils::EditorWindowTitle(EditorPanel::Inspector));
+			REQUIRE(inspector != nullptr);
+			const auto frameCount = [&automation, &id]()
+			{
+				const auto properties = automation.Call("asset.getProperties", Json{ { "asset", id->ToString() } });
+				REQUIRE(properties);
+				return (*properties)["values"]["Frames"].size();
+			};
+			const std::string path = "Sheet:" + id->ToString() + ":Frames:" + InspectorLayerOwnerIdentity(context, true);
+			const ImGuiID frames = ImHashStr("##Container", 0, InspectorLayerIntId(inspector->ID, static_cast<int>(FNV1a32(path))));
+
+			// Add element appends a frame: one asset.setProperties, one undo step.
+			const auto before = context.Editor.GetHistory().GetUndoCount();
+			REQUIRE(test.Ui.Click(draw, InspectorLayerScrolledItem(test, ImHashStr("Add element", 0, frames)).GetCenter()));
+			REQUIRE(test.Layer.OnSafePoint(0.0));
+			CHECK(frameCount() == 2);
+			CHECK(context.Editor.GetHistory().GetUndoCount() == before + 1);
+			REQUIRE(automation.Call("edit.undo", Json::object()));
+			CHECK(frameCount() == 1);
+			REQUIRE(test.Frame());
+
+			// Removing the frame the clip plays is asset.setProperties' validation error, reported as a failed action: nothing
+			// changes.
+			const Test::ExpectLog refused(LogLevel::Error, "InspectorPanel:");
+			const ImGuiID first = InspectorLayerIntId(frames, static_cast<int>(FNV1a32("0")));
+			REQUIRE(test.Ui.Click(draw, InspectorLayerScrolledItem(test, ImHashStr("Remove entry", 0, first)).GetCenter()));
+			REQUIRE(test.Layer.OnSafePoint(0.0));
+			REQUIRE(test.Frame());
+			CHECK(frameCount() == 1);
+			CHECK(context.Editor.GetHistory().GetUndoCount() == before);
+		}
+
 		TEST_CASE("InspectorPanel: primary Euler rotation offers the serialized prefab override revert")
 		{
 			InspectorLayerHarness test;

@@ -9,19 +9,37 @@
 
 namespace Engine {
 
+	namespace Utils {
+
+		// The input rules Navigate and Navigate2D share: finite pointer delta and wheel, nonnegative finite time and speed,
+		// fly axes finite and in [-1, 1].
+		static Status ValidateEditorCameraInput(const EditorCameraInput& input)
+		{
+			if (!std::isfinite(input.PointerDelta.x) || !std::isfinite(input.PointerDelta.y)
+				|| !std::isfinite(input.Wheel) || !std::isfinite(input.DeltaSeconds) || input.DeltaSeconds < 0.0f
+				|| !std::isfinite(input.MoveSpeed) || input.MoveSpeed < 0.0f)
+				return MakeError(ErrorCode::InvalidArgument, "Camera navigation needs finite input and nonnegative time and speed");
+			for (int axis = 0; axis < 3; ++axis)
+			{
+				if (!std::isfinite(input.FlyAxis[axis]) || std::abs(input.FlyAxis[axis]) > 1.0f)
+					return MakeError(ErrorCode::InvalidArgument, "Camera fly axes must be finite and in [-1,1]");
+			}
+			return {};
+		}
+
+		// The 2D camera's zoom range: its orthographic half height in metres.
+		constexpr double MinEditorCamera2DSize = 0.01;
+		constexpr double MaxEditorCamera2DSize = 100000.0;
+		// The 2D camera's zoom factor per wheel notch.
+		constexpr double EditorCamera2DZoomStep = 1.2;
+
+	}
+
 	Result<ExplicitRenderCamera> EditorCamera::Navigate(const ExplicitRenderCamera& camera, const EditorCameraInput& input)
 	{
 		EditorViewportState validator;
 		ENGINE_TRY(validator.SetCamera(camera));
-		if (!std::isfinite(input.PointerDelta.x) || !std::isfinite(input.PointerDelta.y)
-			|| !std::isfinite(input.Wheel) || !std::isfinite(input.DeltaSeconds) || input.DeltaSeconds < 0.0f
-			|| !std::isfinite(input.MoveSpeed) || input.MoveSpeed < 0.0f)
-			return MakeError(ErrorCode::InvalidArgument, "Camera navigation needs finite input and nonnegative time and speed");
-		for (int axis = 0; axis < 3; ++axis)
-		{
-			if (!std::isfinite(input.FlyAxis[axis]) || std::abs(input.FlyAxis[axis]) > 1.0f)
-				return MakeError(ErrorCode::InvalidArgument, "Camera fly axes must be finite and in [-1,1]");
-		}
+		ENGINE_TRY(Utils::ValidateEditorCameraInput(input));
 		ExplicitRenderCamera candidate = camera;
 		glm::dvec3 position(camera.Position);
 		glm::dvec3 target(camera.Target);
@@ -70,16 +88,55 @@ namespace Engine {
 		return candidate;
 	}
 
-	Result<ExplicitRenderCamera> EditorCamera::Make2D(const ExplicitRenderCamera& /*camera*/)
+	Result<ExplicitRenderCamera> EditorCamera::Make2D(const ExplicitRenderCamera& camera)
 	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "the 2D editor camera (Docs/Decisions/0032-m21-contract.md decision 14, stream D)");
+		EditorViewportState validator;
+		ENGINE_TRY(validator.SetCamera(camera));
+		ExplicitRenderCamera candidate = camera;
+		if (camera.Projection == RenderProjection::Perspective)
+		{
+			// The half height the perspective view shows at its target, so the 2D view keeps about the same scale.
+			const double distance = glm::length(glm::dvec3(camera.Target) - glm::dvec3(camera.Position));
+			const double tangent = std::tan(static_cast<double>(camera.VerticalFov) * std::numbers::pi / 360.0);
+			candidate.OrthographicSize = static_cast<float>(distance * tangent);
+		}
+		candidate.Projection = RenderProjection::Orthographic;
+		candidate.Target = glm::vec3(camera.Target.x, camera.Target.y, 0.0f);
+		candidate.Position = glm::vec3(camera.Target.x, camera.Target.y, Make2DDistance);
+		candidate.NearClip = 0.1f;
+		candidate.FarClip = 2.0f * Make2DDistance;
+		ENGINE_TRY(validator.SetCamera(candidate));
+		return candidate;
 	}
 
-	Result<ExplicitRenderCamera> EditorCamera::Navigate2D(const ExplicitRenderCamera& /*camera*/, const EditorCameraInput& /*input*/, float /*viewHeight*/)
+	Result<ExplicitRenderCamera> EditorCamera::Navigate2D(const ExplicitRenderCamera& camera, const EditorCameraInput& input, float viewHeight)
 	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "the 2D editor camera (Docs/Decisions/0032-m21-contract.md decision 14, stream D)");
+		ENGINE_TRY(Utils::ValidateEditorCameraInput(input));
+		if (!std::isfinite(viewHeight) || viewHeight < 1.0f)
+			return MakeError(ErrorCode::InvalidArgument, "2D camera navigation needs a view at least one pixel high");
+		// A camera Make2D made is unchanged by it; any other becomes the 2D camera of its target first, so the result is
+		// always a 2D camera.
+		ENGINE_TRY_ASSIGN(ExplicitRenderCamera candidate, Make2D(camera));
+		if (input.Pan)
+		{
+			// The content follows the pointer: the view moves against the pointer's motion, by the units the pixels span
+			// (+Y up in the world, down on the screen).
+			const double unitsPerPixel = 2.0 * static_cast<double>(candidate.OrthographicSize) / static_cast<double>(viewHeight);
+			const glm::dvec2 offset(-static_cast<double>(input.PointerDelta.x) * unitsPerPixel, static_cast<double>(input.PointerDelta.y) * unitsPerPixel);
+			const glm::dvec2 target = glm::dvec2(candidate.Target.x, candidate.Target.y) + offset;
+			candidate.Target = glm::vec3(static_cast<float>(target.x), static_cast<float>(target.y), 0.0f);
+			candidate.Position = glm::vec3(candidate.Target.x, candidate.Target.y, Make2DDistance);
+		}
+		if (input.Wheel != 0.0f)
+		{
+			// Positive notches zoom in. The exponent is clamped so an extreme wheel value cannot overflow the factor.
+			const double factor = std::pow(Utils::EditorCamera2DZoomStep, std::clamp(-static_cast<double>(input.Wheel), -1000.0, 1000.0));
+			candidate.OrthographicSize = static_cast<float>(std::clamp(static_cast<double>(candidate.OrthographicSize) * factor,
+				Utils::MinEditorCamera2DSize, Utils::MaxEditorCamera2DSize));
+		}
+		EditorViewportState validator;
+		ENGINE_TRY(validator.SetCamera(candidate));
+		return candidate;
 	}
 
 	Result<ExplicitRenderCamera> EditorCamera::FrameBounds(const ExplicitRenderCamera& camera, const glm::vec3& minimum,

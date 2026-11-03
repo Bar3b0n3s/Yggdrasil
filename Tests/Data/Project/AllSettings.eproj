@@ -88,5 +88,11 @@
 		"CaseTimeoutTicks": 1200,
 		"SuiteTickLimit": 72000,
 		"CoverageGates": true
+	},
+	"SortingLayers": {
+		"Layers": ["Default", "Background", "Foreground"]
+	},
+	"Physics2D": {
+		"Gravity": [1.5, -4]
 	}
 }

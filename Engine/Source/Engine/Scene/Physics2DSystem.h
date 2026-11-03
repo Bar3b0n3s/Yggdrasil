@@ -35,6 +35,11 @@
 //     (ToPhysics2DPose). An owner whose world rotation is not a rotation about Z alone (beyond PhysicsUnitRotationTolerance)
 //     is PHYSICS2D_OFF_PLANE (Warning): its body takes the twist. PostStep writes back X, Y and the rotation about Z,
 //     keeping the entity's world Z (free for draw depth) and replacing a swing by none; so a 2D body never leaves its plane.
+//     A body is placed again (teleported, its partners woken) only when its owner's planar pose changes: PreStep compares
+//     the planar pose of the owner's Transform with the one it had at the body's last creation, placement, kinematic
+//     move or write-back, bit for bit, never with the body's own pose (whose angle a round trip through the quaternion may
+//     move by an ulp). So a Transform write of the world Z alone (draw depth) moves and wakes nothing, Static, Kinematic
+//     and Dynamic bodies alike.
 //   - The phases (§5.7, ADR 0028's phase-2 execution order): Physics2DPreStep, Physics2DStep and Physics2DPostStep run after
 //     the 3D PhysicsPostStep and before DestroyFlush, in Play and Simulate alike. Physics2DPreStep first runs the transform
 //     update when the 3D post-step changed a transform, since PreStep reads the cached world matrices. 3D callbacks see an
@@ -51,10 +56,12 @@
 //   - The world is created at the first 2D body. Create makes no Physics2DWorld (no second Jolt world, temp allocator or
 //     pair and manifold caches) while the scene's components make no 2D body; the PreStep that composes the first creates it
 //     (Create itself when the scene starts with one), and it lives until the system is destroyed, even when its last body
-//     goes. Before it exists the system answers as an empty world: queries hit nothing, GetStats and the hash block are
-//     empty, GetGravity returns the specification's gravity (or SetGravity's, which the world takes when it is created),
-//     and Step and PostStep do nothing. So a session without 2D bodies, every 3D game's, costs and behaves exactly as before
-//     M21: it holds one PhysicsWorld ("PhysicsSystem: destroying the session destroys every body and the world").
+//     goes. Before it exists the system answers as an empty world: queries hit nothing, GetStats counts no body and the
+//     hash block is empty, GetGravity returns the specification's gravity (or SetGravity's, which the world takes when it
+//     is created), and Step and PostStep do nothing. While there is no world and the scene holds no 2D physics component,
+//     PreStep returns at once, whatever else changed (an entity enabled or disabled, a 3D component): it composes nothing
+//     (GetStats().Compositions). So a session without 2D bodies, every 3D game's, costs and behaves exactly as before M21:
+//     it holds one PhysicsWorld ("PhysicsSystem: destroying the session destroys every body and the world").
 //
 // Determinism, threading and ownership as PhysicsSystem's. Frozen by the M21 contract (C21.1); stream P2 implements it.
 
@@ -106,6 +113,9 @@ namespace Engine {
 		uint32_t BodyCount = 0;
 		uint32_t ActiveBodyCount = 0;
 		uint32_t ContactPairCount = 0;
+		// The compositions of the scene's 2D bodies run so far (Create's and PreStep's rebuilds), counted whether or not the
+		// world exists: a scene without 2D physics components runs none.
+		uint64_t Compositions = 0;
 	};
 
 	class Physics2DSystem
@@ -129,8 +139,9 @@ namespace Engine {
 		// The 2D physics of `specification.RuntimeScene`: the layer table, then, when the scene's current components make a 2D
 		// body, the Physics2DWorld and every 2D body, created in canonical order (see the file comment: a scene without one
 		// gets no world yet). Create checks everything Physics2DWorld::Create would (the PhysicsEngine initialized, the
-		// gravity, the limits) and the layers whether or not it creates the world, so a session that cannot have a 2D world
-		// fails to start as before, and the world's later creation cannot fail. Errors: as PhysicsSystem::Create's.
+		// gravity, the limits, through ValidatePhysicsWorldLimits) and the layers whether or not it creates the world, so a
+		// session that cannot have a 2D world fails to start as before, and the world's later creation cannot fail. Errors:
+		// as PhysicsSystem::Create's.
 		[[nodiscard]] static Result<Scope<Physics2DSystem>> Create(const Physics2DSystemSpecification& specification);
 
 		// --- The step (Physics2DPreStep, Physics2DStep, Physics2DPostStep; see the file comment) -----------------------------
@@ -159,6 +170,10 @@ namespace Engine {
 		[[nodiscard]] Status Teleport(UUID entity, const glm::vec2& position, std::optional<float> angle);
 		[[nodiscard]] Result<bool> IsSleeping(UUID entity) const;
 		[[nodiscard]] Status WakeUp(UUID entity);
+		// The motion type of `entity`'s RigidBody2D body as the world simulates it (a Static RigidBody2D whose colliders are
+		// triggers is a Kinematic sensor, as in the 3D world), so a caller checks a body function's motion type before it
+		// acts (the RigidBody2D proxy validates before it marks the session changed, as the 3D proxy does).
+		[[nodiscard]] Result<PhysicsMotionType> GetMotionType(UUID entity) const;
 
 		// --- Queries (between steps; PhysicsSystem's rules and sorting) ------------------------------------------------------
 		[[nodiscard]] Result<std::optional<Physics2DRaycastHit>> Raycast(const glm::vec2& origin, const glm::vec2& direction, float maxDistance,

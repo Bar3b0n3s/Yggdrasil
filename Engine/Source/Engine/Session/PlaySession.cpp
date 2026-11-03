@@ -12,6 +12,10 @@
 #include "Engine/Native/NativeComponents.h"
 #include "Engine/Reflection/FuzzySuggest.h"
 #include "Engine/Scene/AudioSystem.h"
+#include "Engine/Scene/Components/BoxCollider2DComponent.h"
+#include "Engine/Scene/Components/CircleCollider2DComponent.h"
+#include "Engine/Scene/Components/PolygonCollider2DComponent.h"
+#include "Engine/Scene/Components/RigidBody2DComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Entity.h"
@@ -22,6 +26,7 @@
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Scene/SpriteAnimationSystem.h"
 #include "Engine/Scene/TransformSystem.h"
 #include "Engine/Scripting/RegisterBindings.h"
 #include "Engine/Scripting/ScriptApiRegistry.h"
@@ -146,6 +151,34 @@ namespace Engine {
 			return result;
 		}
 
+		// The session's 2D physics (M21, Docs/Decisions/0032-m21-contract.md decision 10): Project.Physics2D's gravity, the
+		// project's physics layers and collisions (shared with the 3D world) and its FixedHz, over the session's runtime scene.
+		static Physics2DSystemSpecification MakePhysics2DSpecification(const PlaySessionSpecification& specification, Scene& scene)
+		{
+			const PhysicsSettings& physics = specification.Project.Physics;
+			Physics2DSystemSpecification result;
+			result.RuntimeScene = &scene;
+			result.Gravity = specification.Project.Physics2D.Gravity;
+			result.Layers = physics.Layers;
+			result.Collisions = physics.Collisions;
+			result.FixedHz = specification.Project.Simulation.FixedHz;
+			return result;
+		}
+
+		// Whether `scene` holds a 2D physics component (EnTT storage sizes): the Physics2DPreStep transform update is needed
+		// only then (decision 10).
+		static bool HoldsPhysics2DComponents(const Scene& scene)
+		{
+			const entt::registry& registry = scene.GetRegistry();
+			const auto holds = [&registry]<typename Component>()
+			{
+				const auto* storage = registry.storage<Component>();
+				return storage != nullptr && !storage->empty();
+			};
+			return holds.template operator()<RigidBody2DComponent>() || holds.template operator()<BoxCollider2DComponent>()
+				|| holds.template operator()<CircleCollider2DComponent>() || holds.template operator()<PolygonCollider2DComponent>();
+		}
+
 		// The entity cap's error for a scene that holds more entities than a session may (§5.7), with the start's context.
 		static std::unexpected<Error> MakeSceneOverLimitError(uint32_t limit, size_t count)
 		{
@@ -180,8 +213,11 @@ namespace Engine {
 		Scope<Scene> RuntimeScene;
 		// The scene's physics (M11), declared after the scene it refers to, so it is destroyed first.
 		Scope<PhysicsSystem> Physics;
-		// The scene's 2D physics (M21, decision 10), likewise; null until stream P2 creates it.
+		// The scene's 2D physics (M21, Docs/Decisions/0032-m21-contract.md decision 10), likewise.
 		Scope<Physics2DSystem> Physics2D{};
+		// The scene's sprite animation (M21, decisions 5 and 10), likewise: the SpriteAnimation phase's system, null in a
+		// session without an asset manager (CreateSpriteAnimation).
+		Scope<SpriteAnimationSystem> SpriteAnimation{};
 		PlayInput Input;
 		uint64_t Tick = 0;       // the next tick
 		uint64_t FrameIndex = 0; // frame phases run so far
@@ -314,6 +350,10 @@ namespace Engine {
 				FatalError = Errors.GetErrors().back();
 		}
 		[[nodiscard]] Status PrepareScripts();
+		// The SpriteAnimation phase's system over `scene` (M21, Docs/Decisions/0032-m21-contract.md decisions 5 and 10), loading
+		// sprite sheets through the session's asset manager; null without one, since no sheet can load then and the phase
+		// changes nothing.
+		[[nodiscard]] Result<Scope<SpriteAnimationSystem>> CreateSpriteAnimation(Scene& scene) const;
 		// Creates and starts the scene's instances; a failure is reported as the session error of `transition`, the request
 		// that made the scene current (ReportSessionError).
 		void StartScripts(std::string_view transition);
@@ -552,7 +592,15 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(auto engine, ScriptEngine::Create({ .Host = this, .Api = Api, .Settings = Project.Scripting, .Mode = ScriptRunMode, .TestMode = TestMode, .TestHost = TestHost, .ReadOnly = false, .ClockSeconds = {} }));
 		Scripts = std::move(engine);
 		Physics->SetEventListener(Scripts.get());
+		Physics2D->SetEventListener(Scripts.get());
 		return {};
+	}
+
+	Result<Scope<SpriteAnimationSystem>> PlaySession::State::CreateSpriteAnimation(Scene& scene) const
+	{
+		if (Assets == nullptr)
+			return Scope<SpriteAnimationSystem>();
+		return SpriteAnimationSystem::Create({ .RuntimeScene = &scene, .Assets = Assets });
 	}
 
 	void PlaySession::State::StartScripts(std::string_view transition)
@@ -568,6 +616,8 @@ namespace Engine {
 		}
 		for (const PhysicsDiagnostic& diagnostic : Physics->GetDiagnostics())
 			Scripts->OnPhysicsDiagnostic(diagnostic);
+		for (const PhysicsDiagnostic& diagnostic : Physics2D->GetDiagnostics())
+			Scripts->OnPhysics2DDiagnostic(diagnostic);
 		Scripts->StartPending();
 	}
 
@@ -575,16 +625,22 @@ namespace Engine {
 	{
 		// OnDestroy may destroy peers; synthesized exits can do the same. Each script entry is marked before invocation,
 		// so alternating these phases reaches a fixed point without rerunning a callback or using an arbitrary spin cap.
+		// Both worlds flush, the 3D one first (M21, Docs/Decisions/0032-m21-contract.md decision 10).
+		const auto flushPhysics = [this]()
+		{
+			Physics->FlushDestroyed(Tick);
+			Physics2D->FlushDestroyed(Tick);
+		};
 		if (Scripts != nullptr)
 		{
 			while (Scripts->PrepareDestroyFlush() != 0)
-				Physics->FlushDestroyed(Tick);
+				flushPhysics();
 		}
-		Physics->FlushDestroyed(Tick);
+		flushPhysics();
 		if (Scripts != nullptr)
 		{
 			while (Scripts->PrepareDestroyFlush() != 0)
-				Physics->FlushDestroyed(Tick);
+				flushPhysics();
 			Scripts->FinishDestroyFlush();
 		}
 		RuntimeScene->FlushPendingDestroys();
@@ -623,6 +679,15 @@ namespace Engine {
 		const std::string_view transition = reload ? "Scene.Reload" : "Scene.Load";
 		// Create the new physics world before discarding the old scene. Failed setup leaves the current session intact.
 		TransformSystem::Update(*PendingScene);
+		// M21 (decision 10): the new scene's sprite animation, first, since it holds nothing that must go before the pending
+		// scene does.
+		Result<Scope<SpriteAnimationSystem>> spriteAnimation = CreateSpriteAnimation(*PendingScene);
+		if (!spriteAnimation)
+		{
+			ReportSessionError(spriteAnimation.error(), transition);
+			ClearPendingTransition();
+			return;
+		}
 		PlaySessionSpecification specification{};
 		specification.Project = Project;
 		specification.Assets = Assets;
@@ -633,25 +698,39 @@ namespace Engine {
 			ClearPendingTransition();
 			return;
 		}
+		auto physics2D = Physics2DSystem::Create(Utils::MakePhysics2DSpecification(specification, *PendingScene));
+		if (!physics2D)
+		{
+			ReportSessionError(physics2D.error(), transition);
+			physics->reset();
+			ClearPendingTransition();
+			return;
+		}
 		ReplacingScene = true;
 		if (Scripts != nullptr)
 			Scripts->Stop();
 		// OnDestroy may request quit or hit a fatal budget error. Do not enter another scene after either request.
 		if (QuitRequest.has_value() || FatalStop)
 		{
-			// The candidate physics system owns signal connections into PendingScene. Disconnect them while that
+			// The candidate physics systems own signal connections into PendingScene. Disconnect them while that
 			// registry still exists, just as the committed session destroys physics before its scene.
+			physics2D->reset();
 			physics->reset();
 			ClearPendingTransition();
 			ReplacingScene = false;
 			return;
 		}
 		Physics->SetEventListener(nullptr);
+		Physics2D->SetEventListener(nullptr);
 		Scripts.reset();
 		SceneAudio.reset();
+		SpriteAnimation.reset();
+		Physics2D.reset();
 		Physics.reset();
 		RuntimeScene = std::move(PendingScene);
 		Physics = std::move(*physics);
+		Physics2D = std::move(*physics2D);
+		SpriteAnimation = std::move(*spriteAnimation);
 		Parameters = std::move(PendingParameters);
 		CurrentDocument = std::move(PendingDocument);
 		CurrentSceneAsset = PendingSceneAsset;
@@ -793,7 +872,8 @@ namespace Engine {
 			.Width = ViewWidth,
 			.Height = ViewHeight,
 			.Alpha = alpha,
-			.Quality = { .ShadowMapSize = Project.Rendering.ShadowMapSize, .SsaoHalfResolution = Project.Rendering.SsaoHalfResolution } };
+			.Quality = { .ShadowMapSize = Project.Rendering.ShadowMapSize, .SsaoHalfResolution = Project.Rendering.SsaoHalfResolution },
+			.SortingLayers = Project.SortingLayers.Layers };
 		Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(*RuntimeScene, request);
 		if (snapshot)
 		{
@@ -907,6 +987,35 @@ namespace Engine {
 		return glm::vec2(mapped);
 	}
 
+	std::optional<glm::vec2> MapImageToViewCoordinates(const glm::vec2& position, const glm::vec2& displayMin, const glm::vec2& displaySize,
+		const glm::uvec2& imageSize, const glm::uvec2& viewSize, const RenderOutputSettings& output)
+	{
+		if (imageSize.x == 0 || imageSize.y == 0 || viewSize.x == 0 || viewSize.y == 0)
+			return std::nullopt;
+		const RenderOutputMapping image = ComputeRenderOutputMapping(imageSize.x, imageSize.y, output);
+		const RenderOutputMapping view = ComputeRenderOutputMapping(viewSize.x, viewSize.y, output);
+		if (imageSize == viewSize || (image.IsIdentity() && view.IsIdentity()))
+			return MapToViewCoordinates(position, displayMin, displaySize, viewSize);
+		const glm::dvec2 imageOffset(image.OffsetX, image.OffsetY);
+		const glm::dvec2 viewOffset(view.OffsetX, view.OffsetY);
+		const glm::dvec2 imageScene(image.SceneWidth, image.SceneHeight);
+		const glm::dvec2 viewScene(view.SceneWidth, view.SceneHeight);
+		glm::dvec2 mapped(0.0);
+		for (int axis = 0; axis < 2; ++axis)
+		{
+			if (!std::isfinite(position[axis]) || !std::isfinite(displayMin[axis]) || !std::isfinite(displaySize[axis]) || !(displaySize[axis] > 0.0f))
+				return std::nullopt;
+			// The image's pixels, its scene point (MapViewPointToScenePoint, in double), the view's scene resolution (the
+			// same under a PixelPerfectCamera, so unchanged), then the view's pixels.
+			const double inImage = (static_cast<double>(position[axis]) - displayMin[axis]) / displaySize[axis] * imageSize[axis];
+			const double scene = (inImage - imageOffset[axis]) / image.Scale * viewScene[axis] / imageScene[axis];
+			mapped[axis] = scene * view.Scale + viewOffset[axis];
+			if (!std::isfinite(mapped[axis]) || std::abs(mapped[axis]) > static_cast<double>(std::numeric_limits<float>::max()))
+				return std::nullopt;
+		}
+		return glm::vec2(mapped);
+	}
+
 	glm::uvec2 GetDeterministicViewSize(const WindowSettings& window)
 	{
 		return { std::max(window.Width, 1u), std::max(window.Height, 1u) };
@@ -924,6 +1033,8 @@ namespace Engine {
 			m_State->Scripts->Stop();
 		if (m_State->Physics != nullptr)
 			m_State->Physics->SetEventListener(nullptr);
+		if (m_State->Physics2D != nullptr)
+			m_State->Physics2D->SetEventListener(nullptr);
 		m_State->Scripts.reset();
 		// M12 (§10.2 Stop): the AudioSystem releases its voices and restores the group volumes while the scene exists, and
 		// only then does the engine's time go back to the device, so the device never plays a voice of the ended session.
@@ -1026,7 +1137,17 @@ namespace Engine {
 		if (!physics)
 			return std::unexpected(std::move(physics).error().WithContext("while starting the play session"));
 		state.Physics = std::move(*physics);
+		// M21 (decision 10): the 2D bodies, right after the 3D ones; the system makes its world only at the first 2D body.
+		Result<Scope<Physics2DSystem>> physics2D = Physics2DSystem::Create(Utils::MakePhysics2DSpecification(specification, *state.RuntimeScene));
+		if (!physics2D)
+			return std::unexpected(std::move(physics2D).error().WithContext("while starting the play session"));
+		state.Physics2D = std::move(*physics2D);
 		state.RecordReferenceTransforms();
+		// M21 (decision 10): the SpriteAnimation phase's system.
+		Result<Scope<SpriteAnimationSystem>> spriteAnimation = state.CreateSpriteAnimation(*state.RuntimeScene);
+		if (!spriteAnimation)
+			return std::unexpected(std::move(spriteAnimation).error().WithContext("while starting the play session"));
+		state.SpriteAnimation = std::move(*spriteAnimation);
 
 		if (specification.Audio != nullptr && specification.Mode == PlayMode::Play)
 		{
@@ -1075,6 +1196,7 @@ namespace Engine {
 		const uint64_t tick = state.Tick;
 		const SimStep step = SimStep::FromTick(tick, state.FixedDelta);
 		PhysicsSystem& physics = *state.Physics;
+		Physics2DSystem& physics2D = *state.Physics2D;
 		const bool play = state.Mode == PlayMode::Play;
 		// The checkpoint of the completed-tick boundary this step starts from, before anything of the step runs
 		// (ReplayRecorder.h). A step that follows the previous one in the same frame (a grouping scripted clock) starts from
@@ -1116,6 +1238,11 @@ namespace Engine {
 			if (state.FatalStop)
 				return;
 		}
+		// M21 (decision 5): every playing SpriteAnimator advances one tick, after the tick's gameplay code started or stopped
+		// its clip and before the transform update, in Play and Simulate alike.
+		state.EnterPhase(*this, PlaySessionPhase::SpriteAnimation, tick);
+		if (state.SpriteAnimation != nullptr)
+			state.SpriteAnimation->Step(step);
 		state.EnterPhase(*this, PlaySessionPhase::PreStepTransformUpdate, tick);
 		state.UpdateTransforms();
 		state.EnterPhase(*this, PlaySessionPhase::PhysicsPreStep, tick);
@@ -1124,6 +1251,23 @@ namespace Engine {
 		physics.Step(step);
 		state.EnterPhase(*this, PlaySessionPhase::PhysicsPostStep, tick);
 		physics.PostStep(step);
+		// M21 (decision 10): the 2D world after the 3D one. Its pre-step reads cached world matrices and detects teleports
+		// from local writes, so the transform update runs first when the 3D post-step may have changed a transform: when the
+		// scene holds 2D components and the 3D world holds a body or a character (whose write-back and callbacks write
+		// transforms) or the scene changed since the last update. A scene without 2D components skips it, so every 3D game
+		// steps as before.
+		state.EnterPhase(*this, PlaySessionPhase::Physics2DPreStep, tick);
+		if (Utils::HoldsPhysics2DComponents(*state.RuntimeScene))
+		{
+			const PhysicsSystemStats stats3D = physics.GetStats();
+			if (stats3D.BodyCount != 0 || stats3D.CharacterCount != 0 || state.RuntimeScene->GetRevision() != state.TransformRevision)
+				state.UpdateTransforms();
+		}
+		physics2D.PreStep(step);
+		state.EnterPhase(*this, PlaySessionPhase::Physics2DStep, tick);
+		physics2D.Step(step);
+		state.EnterPhase(*this, PlaySessionPhase::Physics2DPostStep, tick);
+		physics2D.PostStep(step);
 		state.EnterPhase(*this, PlaySessionPhase::DestroyFlush, tick);
 		state.FlushDestroyed();
 		state.EnterPhase(*this, PlaySessionPhase::PostStepTransformUpdate, tick);
@@ -1361,6 +1505,8 @@ namespace Engine {
 		// M19 (decision 28): the native block, the module's resources; nothing without a module.
 		if (state.Native != nullptr)
 			state.Native->AppendStateHash(hasher);
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 11): the physics2d block; nothing without a 2D body.
+		state.Physics2D->AppendStateHash(hasher);
 		return hasher.Digest();
 	}
 

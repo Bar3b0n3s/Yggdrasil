@@ -33,8 +33,10 @@
 #include "Engine/Scene/Components/SpotLightComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
+#include "Engine/Scene/Physics2DValidation.h"
 #include "Engine/Scene/RenderAnnotations.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Scene/SpriteValidation.h"
 #include "Engine/Scripting/ScriptAssetLoads.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/AutomationTestClient.h"
@@ -1298,9 +1300,9 @@ end
 		{
 			const std::span<const std::string_view> codes = ProjectValidator::GetCodes();
 			// M4's 14 codes, M6's 11 (the asset codes but the runtime-only ASSET_UPLOAD_FAILED, and PREFAB_MISSING_ASSET), M8's
-			// RENDER_LIGHT_LIMIT_EXCEEDED, M9's two render warnings, M11's 10 physics codes, M12's 2 audio codes, M13's 7 and
-			// M19's SCRIPT_COMPUTED_ASSET_LOAD and M20's PREFAB_CYCLE.
-			CHECK(codes.size() == 39 + PhysicsDiagnosticCodes.size());
+			// RENDER_LIGHT_LIMIT_EXCEEDED, M9's two render warnings, M11's 10 physics codes, M12's 2 audio codes, M13's 7,
+			// M19's SCRIPT_COMPUTED_ASSET_LOAD, M20's PREFAB_CYCLE and M21's three sprite codes and 2D physics codes.
+			CHECK(codes.size() == 42 + PhysicsDiagnosticCodes.size() + Physics2DDiagnosticCodes.size());
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -1316,10 +1318,16 @@ end
 			CHECK(position(PhysicsLimitExceededCode) + 1 == position("SCRIPT_COMPILE_ERROR"));
 			CHECK(position("INPUT_UNKNOWN_ACTION") + 1 == position(AudioNoListenerCode));
 			// The codes of later milestones are appended in landing order (Docs/Decisions/0028-backlog-program.md, the reservation
-			// ledger): M19's after TEST_SUITE_INVALID, then M20's.
+			// ledger): M19's after TEST_SUITE_INVALID, then M20's, then M21's in Docs/Decisions/0032-m21-contract.md decision 12's
+			// order (the sprite codes, then the 2D physics codes).
 			CHECK(position("TEST_SUITE_INVALID") + 1 == position(ScriptComputedAssetLoadCode));
 			CHECK(position(ScriptComputedAssetLoadCode) + 1 == position(PrefabCycleCode));
-			CHECK(codes.back() == PrefabCycleCode);
+			CHECK(position(PrefabCycleCode) + 1 == position(SpriteUnknownSortingLayerCode));
+			CHECK(position(SpriteUnknownSortingLayerCode) + 1 == position(SpriteFrameOutOfRangeCode));
+			CHECK(position(SpriteFrameOutOfRangeCode) + 1 == position(SpriteUnknownClipCode));
+			CHECK(position(SpriteUnknownClipCode) + 1 == position(Physics2DMixedWorldsCode));
+			CHECK(position(Physics2DMixedWorldsCode) + 1 == position(Physics2DOffPlaneCode));
+			CHECK(codes.back() == Physics2DOffPlaneCode);
 			CHECK(position(AudioNoListenerCode) + 1 == position(AudioMultiplePrimaryListenersCode));
 			CHECK(position(AudioMultiplePrimaryListenersCode) < position(RenderLightLimitExceededCode));
 			CHECK(position(RenderLightLimitExceededCode) < position(BuildStartSceneMissingCode));

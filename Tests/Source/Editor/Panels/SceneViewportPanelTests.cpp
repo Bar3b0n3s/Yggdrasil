@@ -3,13 +3,16 @@
 
 #include "Editor/PanelInteractionFixture.h"
 #include "Editor/Ui/EditorStyle.h"
+#include "Editor/Viewport/GizmoOverlay.h"
 #include "EditorCore/Commands/SceneEdit.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Play/EditorPlayController.h"
+#include "EditorCore/Viewport/EditorCamera.h"
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
+#include "Engine/Scene/Components/SpriteRendererComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/RenderExtraction.h"
@@ -20,6 +23,7 @@
 #include <ImGuizmo.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <functional>
 #include <span>
@@ -217,6 +221,26 @@ namespace Engine {
 		size_t CountEntities(const Scene& scene)
 		{
 			return scene.GetCanonicalOrder().size();
+		}
+
+		// Activates the toolbar's 2D toggle with the keyboard (Space on the focused button), then runs its queued
+		// viewport.setOptions and the frame that collects its result.
+		void Toggle2D(ScenePanelHarness& harness)
+		{
+			harness.FrameOk([]()
+			{
+				ImGuiWindow* window = ScenePanelHarness::SceneWindow();
+				REQUIRE(window != nullptr);
+				ImGui::SetWindowFocus(Utils::EditorWindowTitle(EditorPanel::SceneViewport));
+				ImGui::SetNavID(window->GetID("2D"), ImGuiNavLayer_Main, window->NavRootFocusScopeId, ImRect());
+				ImGui::SetNavCursorVisible(true);
+			});
+			ImGui::GetIO().AddKeyEvent(ImGuiKey_Space, true);
+			harness.FrameOk();
+			ImGui::GetIO().AddKeyEvent(ImGuiKey_Space, false);
+			harness.FrameOk();
+			harness.GetContext().Actions.Pump();
+			harness.FrameOk();
 		}
 
 	}
@@ -418,6 +442,80 @@ namespace Engine {
 			CHECK(glm::dot(flown.Position - panned.Position, forward) > 0.1f);
 			CHECK(glm::length(glm::normalize(flown.Target - flown.Position) - forward) < 1.0e-4f);
 			CHECK(test.Viewport.Clicks.empty());
+		}
+
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 14): the toolbar's 2D toggle and the 2D mode's navigation.
+		TEST_CASE("SceneViewportPanel: the 2D toggle makes a 2D camera that pans with every button and zooms in the plane")
+		{
+			ScenePanelHarness test("Scene2D");
+			const size_t history = test.GetEditor().GetHistory().GetUndoCount();
+			Toggle2D(test);
+			REQUIRE(test.GetEditor().GetViewportState().GetOptions().Mode2D);
+			const ExplicitRenderCamera flat = test.Camera();
+			CHECK(flat.Projection == RenderProjection::Orthographic);
+			CHECK(flat.Position == glm::vec3(flat.Target.x, flat.Target.y, EditorCamera::Make2DDistance));
+			CHECK(flat.Target.z == 0.0f);
+			test.RefreshCamera();
+
+			// The middle button pans: the content follows the pointer, so the camera moves against it, in X only here.
+			test.MoveTo(test.Center());
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Middle, true);
+			test.FrameOk();
+			for (int frame = 1; frame <= 4; ++frame)
+				test.MoveTo(ImVec2(test.Center().x + 10.0f * static_cast<float>(frame), test.Center().y));
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Middle, false);
+			test.FrameOk();
+			const ExplicitRenderCamera panned = test.Camera();
+			CHECK(panned.Target.x < flat.Target.x);
+			CHECK(panned.Target.y == flat.Target.y);
+			CHECK(panned.Target.z == 0.0f);
+			CHECK(panned.Position.z == EditorCamera::Make2DDistance);
+			CHECK(panned.OrthographicSize == flat.OrthographicSize);
+
+			// The right button pans too instead of flying, and W moves nothing.
+			test.MoveTo(test.Center());
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Right, true);
+			test.FrameOk();
+			ImGui::GetIO().AddKeyEvent(ImGuiKey_W, true);
+			for (int frame = 1; frame <= 4; ++frame)
+				test.MoveTo(ImVec2(test.Center().x, test.Center().y + 10.0f * static_cast<float>(frame)));
+			ImGui::GetIO().AddKeyEvent(ImGuiKey_W, false);
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Right, false);
+			test.FrameOk();
+			const ExplicitRenderCamera dragged = test.Camera();
+			CHECK(dragged.Target.x == panned.Target.x);
+			CHECK(dragged.Target.y > panned.Target.y);
+			CHECK(dragged.Position.z == EditorCamera::Make2DDistance);
+			CHECK(dragged.Projection == RenderProjection::Orthographic);
+
+			// The wheel zooms the orthographic size and keeps the pose.
+			ImGui::GetIO().AddMouseWheelEvent(0.0f, 1.0f);
+			test.FrameOk();
+			const ExplicitRenderCamera zoomed = test.Camera();
+			CHECK(zoomed.OrthographicSize == doctest::Approx(dragged.OrthographicSize / 1.2f));
+			CHECK(zoomed.Position == dragged.Position);
+			CHECK(test.Viewport.Clicks.empty());
+
+			// Turning the mode off keeps the camera; neither is a scene change.
+			Toggle2D(test);
+			CHECK_FALSE(test.GetEditor().GetViewportState().GetOptions().Mode2D);
+			CHECK(test.Camera().Position == zoomed.Position);
+			CHECK(test.Camera().Projection == RenderProjection::Orthographic);
+			CHECK(test.GetEditor().GetHistory().GetUndoCount() == history);
+		}
+
+		TEST_CASE("SceneViewportPanel: the 2D mode's gizmo moves in X and Y, rotates about Z and scales in X and Y")
+		{
+			const auto bits = [](ImGuizmo::OPERATION operation)
+			{
+				return static_cast<uint32_t>(operation);
+			};
+			CHECK(GetGizmoOperationMask(GizmoOperation::Translate, false) == bits(ImGuizmo::TRANSLATE));
+			CHECK(GetGizmoOperationMask(GizmoOperation::Rotate, false) == bits(ImGuizmo::ROTATE));
+			CHECK(GetGizmoOperationMask(GizmoOperation::Scale, false) == bits(ImGuizmo::SCALE));
+			CHECK(GetGizmoOperationMask(GizmoOperation::Translate, true) == bits(ImGuizmo::TRANSLATE_X | ImGuizmo::TRANSLATE_Y));
+			CHECK(GetGizmoOperationMask(GizmoOperation::Rotate, true) == bits(ImGuizmo::ROTATE_Z));
+			CHECK(GetGizmoOperationMask(GizmoOperation::Scale, true) == bits(ImGuizmo::SCALE_X | ImGuizmo::SCALE_Y));
 		}
 
 		TEST_CASE("SceneViewportPanel: the first left click on an unfocused view focuses it and requests one pick")
@@ -634,6 +732,33 @@ namespace Engine {
 				REQUIRE(DropOnImage(test, AssetPayload(BuiltinAssetHandles::SkyEnvironment)).has_value());
 				CHECK(CountEntities(scene) == entities + 1);
 				CHECK(scene.FindEntityByID(environment).GetComponent<EnvironmentComponent>().Environment.GetHandle() == BuiltinAssetHandles::SkyEnvironment);
+			}
+			SUBCASE("a texture or a sprite sheet creates a sprite where the cursor's ray meets z = 0")
+			{
+				// The default camera looks from (0, 3, 10) at the origin, so the image's centre shows about the origin.
+				REQUIRE(DropOnImage(test, AssetPayload(BuiltinAssetHandles::CheckerTexture)).has_value());
+				REQUIRE(CountEntities(scene) == entities + 1);
+				const ConstEntity textured = scene.FindEntityByID(scene.GetCanonicalOrder().back());
+				CHECK(textured.GetName() == "Sprite");
+				REQUIRE(textured.HasComponent<SpriteRendererComponent>());
+				CHECK(textured.GetComponent<SpriteRendererComponent>().Texture.GetHandle() == BuiltinAssetHandles::CheckerTexture);
+				CHECK_FALSE(textured.GetComponent<SpriteRendererComponent>().Sheet.GetHandle().IsValid());
+				const glm::vec3 position = textured.GetComponent<TransformComponent>().Translation;
+				CHECK(position.z == 0.0f);
+				CHECK(std::abs(position.x) < 0.1f);
+				CHECK(std::abs(position.y) < 0.1f);
+				CHECK(editor.GetHistory().GetUndoCount() == history + 1);
+
+				const auto created = test.GetAutomation().Call("asset.create", Json{ { "type", "SpriteSheet" }, { "path", "Assets/Sheets/Drop.spritesheet" } });
+				REQUIRE_MESSAGE(created.has_value(), (created ? std::string() : created.error().ToString()));
+				const auto sheet = JsonReader((*created)["asset"]["id"]).ReadUUID();
+				REQUIRE(sheet.has_value());
+				REQUIRE(DropOnImage(test, AssetPayload(*sheet)).has_value());
+				REQUIRE(CountEntities(scene) == entities + 2);
+				const ConstEntity sheeted = scene.FindEntityByID(scene.GetCanonicalOrder().back());
+				CHECK(sheeted.GetComponent<SpriteRendererComponent>().Sheet.GetHandle() == *sheet);
+				CHECK(sheeted.GetComponent<SpriteRendererComponent>().Frame == 0);
+				CHECK(sheeted.GetComponent<TransformComponent>().Translation.z == 0.0f);
 			}
 			SUBCASE("malformed payloads and unknown assets are refused without a command")
 			{

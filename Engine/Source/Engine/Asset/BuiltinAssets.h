@@ -62,8 +62,8 @@ namespace Engine {
 		static constexpr AssetHandle BlueNoiseTexture{ 0x0186 };
 		// M21 (ADR 0028's phase-2 ledger; Docs/Decisions/0032-m21-contract.md decision 7): engine://Textures/{SpriteSquare,
 		// SpriteRounded, SpriteBevel, SpriteCircle}, the procedural sprite textures (BuiltinTexture::Sprite*, BuiltinTextures.h):
-		// 16 x 16 white shapes a SpriteRenderer tints with its Color, never compressed. Stream B adds their catalogue entries
-		// (Resources/EngineAssets.json and the compiled-in procedural entries); until then no catalogue names them.
+		// 16 x 16 white shapes a SpriteRenderer tints with its Color, never compressed; Procedural entries of
+		// Resources/EngineAssets.json and of GetProceduralBuiltinEntries.
 		static constexpr AssetHandle SpriteSquareTexture{ 0x0187 };
 		static constexpr AssetHandle SpriteRoundedTexture{ 0x0188 };
 		static constexpr AssetHandle SpriteBevelTexture{ 0x0189 };

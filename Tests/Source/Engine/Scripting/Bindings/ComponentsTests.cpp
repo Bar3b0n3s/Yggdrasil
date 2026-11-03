@@ -156,9 +156,9 @@ return true
 		// and right (ComputeRenderOutputMapping), orthographic at a half height of 180 / 32 whatever the Camera's own
 		// (perspective) projection. The camera at (0.3, -0.2, 10) snaps to (0.3125, -0.1875, 10), so the view's left edge is
 		// x = -9.6875 and its top y = 5.4375; view pixel (69, 49), whose centre (69.5, 49.5) shows the centre of scene pixel
-		// (16, 16), looks at (-9.6875 + 16.5 / 16, 5.4375 - 16.5 / 16) = (-8.65625, 4.40625). Skipped until stream C maps them.
-		TEST_CASE("ComponentBindings: under a PixelPerfectCamera, ScreenToWorldRay and WorldToScreen map view pixels through the output mapping"
-			* doctest::skip(true))
+		// (16, 16), looks at (-9.6875 + 16.5 / 16, 5.4375 - 16.5 / 16) = (-8.65625, 4.40625). A pixel of the left letterbox
+		// maps outside the scene image, beside its left edge: view pixel 5's centre is scene x (5.5 - 20) / 3 = -14.5 / 3.
+		TEST_CASE("ComponentBindings: under a PixelPerfectCamera, ScreenToWorldRay and WorldToScreen map view pixels through the output mapping")
 		{
 			Test::ScriptTestFixture fixture({ .TestMode = true });
 			fixture.Environment.WindowSize = { 1000, 540 };
@@ -176,6 +176,8 @@ assert(vector.magnitude(origin - vector.create(-8.65625, 4.40625, 10 - camera.Ne
 assert(direction == vector.create(0, 0, -1))
 local screen = camera:WorldToScreen(vector.create(-8.65625, 4.40625, 0))
 assert(math.abs(screen.x - 69) < 0.0001 and math.abs(screen.y - 49) < 0.0001)
+local letterbox = camera:ScreenToWorldRay(5, 49)
+assert(math.abs(letterbox.x - (-9.6875 - 14.5 / 48)) < 0.0001)
 return true
 )");
 		}

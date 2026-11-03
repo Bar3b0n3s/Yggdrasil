@@ -11,9 +11,11 @@
 #include "EditorCore/Scripting/EditorScriptService.h"
 #include "EditorCore/Thumbnails/ThumbnailCache.h"
 #include "Engine/Asset/MaterialData.h"
+#include "Engine/Asset/SpriteSheetData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/AssetPipeline/Importers/SoundEffectImporter.h"
+#include "Engine/AssetPipeline/Importers/SpriteSheetImporter.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Log.h"
@@ -393,6 +395,7 @@ namespace Engine {
 	{
 		EndActiveEdit(context);
 		m_Pending.reset();
+		m_SheetEdit.reset();
 	}
 
 	void InspectorPanel::BeginPendingEdit(EditorPanelContext& context, PendingEdit pending)
@@ -446,7 +449,8 @@ namespace Engine {
 			if (const IAssetImporter* importer = importers.FindById(record->Metadata.Importer))
 				properties.Settings = types.FindStruct(importer->GetSettingsTypeName());
 			const bool material = record->Metadata.Type == AssetType::Material;
-			if (material || record->Metadata.Importer == SoundEffectImporter::Id)
+			const bool sheet = record->Metadata.Importer == SpriteSheetImporter::Id;
+			if (material || sheet || record->Metadata.Importer == SoundEffectImporter::Id)
 			{
 				const Status read = [&]() -> Status
 				{
@@ -456,6 +460,14 @@ namespace Engine {
 						MaterialLoadReport report;
 						ENGINE_TRY_ASSIGN(const MaterialData data, MaterialFromText(text, types, report));
 						properties.Type = types.FindStruct<MaterialData>();
+						ENGINE_TRY_ASSIGN(properties.Values, properties.Type->ToJson(&data));
+					}
+					else if (sheet)
+					{
+						// M21: the sheet's texture, frames and clips (the sheet inspector, decision 14).
+						SpriteSheetLoadReport report;
+						ENGINE_TRY_ASSIGN(const SpriteSheetData data, SpriteSheetFromText(text, types, report));
+						properties.Type = types.FindStruct<SpriteSheetData>();
 						ENGINE_TRY_ASSIGN(properties.Values, properties.Type->ToJson(&data));
 					}
 					else
@@ -479,6 +491,89 @@ namespace Engine {
 		}
 		m_AssetProperties = std::move(properties);
 		return *m_AssetProperties;
+	}
+
+	void InspectorPanel::DrawSpriteSheet(EditorPanelContext& context, AssetHandle asset, const AssetProperties& properties, bool escape)
+	{
+		EditorContext& editor = context.Editor;
+		if (m_SheetEdit && (m_SheetEdit->Asset != asset || escape || editor.IsReadOnly()))
+			m_SheetEdit.reset();
+		Utils::EditorSectionHeading("Sprite sheet");
+		if (!properties.Error.empty())
+		{
+			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.48f, 0.48f, 1.0f));
+			ImGui::TextWrapped("This sprite sheet cannot be read: %s", properties.Error.c_str());
+			ImGui::PopStyleColor();
+			ImGui::TextDisabled("Fix the file, or reimport it from Assets.");
+			return;
+		}
+		if (properties.Type == nullptr)
+			return;
+		const JsonReader values(properties.Values);
+		const auto count = [&properties](const char* member)
+		{
+			const auto found = properties.Values.find(member);
+			return found != properties.Values.end() && found->is_array() ? found->size() : size_t{ 0 };
+		};
+		ImGui::TextDisabled("Frames: %zu   Clips: %zu", count("Frames"), count("Clips"));
+		ImGui::TextWrapped("Frames are texel rectangles of the texture, with a pivot and 9-slice borders; each named clip plays frames by index, each for whole ticks.");
+		const TypeRegistry& types = editor.GetTypeRegistry();
+		for (const auto& field : properties.Type->GetFields())
+		{
+			if (field->GetMeta().Hidden)
+				continue;
+			const auto found = properties.Values.find(field->GetName());
+			if (found == properties.Values.end())
+				continue;
+			Result<Value> read = ValueFromJson(JsonReader(*found), field->GetType());
+			if (!read)
+				continue;
+			const bool editing = m_SheetEdit && m_SheetEdit->Field == field->GetName();
+			Value value = editing ? m_SheetEdit->Candidate : std::move(*read);
+			std::string path = "Sheet:" + asset.ToString() + ":" + field->GetName() + ":" + m_OwnerIdentity;
+			auto result = DrawReflectedValue(*field, value, { .Types = types, .Resolve = { .Registry = &types, .OwnerType = properties.Type, .OwnerJson = &values, .Key = {} }, .Path = std::move(path), .ReadOnly = editor.IsReadOnly(), .Mixed = false, .MixedComponents = 0u, .FindReferences = [&editor](const FieldInfo& referenceField, std::string_view query)
+			{
+				return Utils::FindInspectorReferenceCandidates(editor, SceneTarget::Edit, referenceField, query);
+			},
+																.ScriptSchema = nullptr,
+																.DisplayLabel = Utils::InspectorFieldLabel("SpriteSheet", field->GetName()),
+																.DescribeReference = [&editor](const FieldInfo& referenceField, UUID id)
+			{
+				return Utils::DescribeInspectorReference(editor, SceneTarget::Edit, referenceField, id);
+			} });
+			if (!result)
+			{
+				ReportFailure(result.error());
+				if (editing)
+					m_SheetEdit.reset();
+				continue;
+			}
+			if (escape || result->Cancelled)
+			{
+				m_SheetEdit.reset();
+				continue;
+			}
+			if (result->Changed)
+				m_SheetEdit = SheetEdit{ .Asset = asset, .Field = field->GetName(), .Candidate = value };
+			const bool released = result->Committed || (result->Changed && !result->Active);
+			if (released && m_SheetEdit && m_SheetEdit->Field == field->GetName())
+			{
+				// The method's own action: its texture check, its undo step and its error, shown like any failed action.
+				Result<Json> json = ValueToJson(m_SheetEdit->Candidate, field->GetType());
+				m_SheetEdit.reset();
+				if (!json)
+				{
+					ReportFailure(json.error());
+					continue;
+				}
+				QueueAction(context, "asset.setProperties", Json{ { "asset", asset.ToString() }, { "values", Json{ { field->GetName(), std::move(*json) } } } });
+			}
+			else if (editing && !result->Active && !result->Activated && !result->Changed)
+			{
+				// The gesture ended without a change to submit.
+				m_SheetEdit.reset();
+			}
+		}
 	}
 
 	Status InspectorPanel::Draw(EditorPanelContext& context)
@@ -692,7 +787,11 @@ namespace Engine {
 							{ .Registry = &types, .OwnerType = &type, .OwnerJson = &reader, .Key = {} }, false, 0u);
 				}
 			};
-			if (record->Metadata.Type == AssetType::Material || record->Metadata.Importer == SoundEffectImporter::Id)
+			if (record->Metadata.Importer == SpriteSheetImporter::Id)
+			{
+				DrawSpriteSheet(context, asset, properties, escape);
+			}
+			else if (record->Metadata.Type == AssetType::Material || record->Metadata.Importer == SoundEffectImporter::Id)
 			{
 				Utils::EditorSectionHeading("Properties");
 				if (!properties.Error.empty())

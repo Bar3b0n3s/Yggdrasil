@@ -2,15 +2,23 @@
 
 #include "Engine/Session/PlaySession.h"
 
+#include "Engine/Core/Aabb.h"
+#include "Engine/Scene/Components/BoxCollider2DComponent.h"
+#include "Engine/Scene/Components/BoxColliderComponent.h"
+#include "Engine/Scene/Components/RigidBody2DComponent.h"
+#include "Engine/Scene/Components/RigidBodyComponent.h"
+#include "Engine/Scene/Components/TransformComponent.h"
+#include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Physics2DSystem.h"
 #include "Engine/Scene/Scene.h"
 #include "Support/SceneTestFixture.h"
 
+#include <optional>
 #include <vector>
 
 // M21's place in the play session (ADR 0028's phase-2 execution order; Docs/Decisions/0032-m21-contract.md decisions 5 and
-// 10). The phase names are live; the phases' order is skipped until streams B and P2 enter them (they then add the new phases
-// to PlaySessionTests.cpp's lists, at these places).
+// 10): the phase names, and the order in which the session enters them (streams B and P2; PlaySessionTests.cpp's lists name
+// them at the same places).
 
 namespace Engine {
 
@@ -22,6 +30,25 @@ namespace Engine {
 			void OnPhase(PlaySession& /*session*/, PlaySessionPhase phase, uint64_t /*tick*/) override { Phases.push_back(phase); }
 
 			std::vector<PlaySessionPhase> Phases{};
+		};
+
+		// At the start of the 3D post-step of tick `Tick`, writes `Translation` into the local Transform of `Target` directly,
+		// as the 3D write-back and a 3D contact callback write transforms, after the step's transform update.
+		class PostStepWriter final : public IPlaySessionObserver
+		{
+		public:
+			void OnPhase(PlaySession& session, PlaySessionPhase phase, uint64_t tick) override
+			{
+				if (phase != PlaySessionPhase::PhysicsPostStep || tick != Tick)
+					return;
+				const Entity target = session.GetScene().FindEntityByID(Target);
+				REQUIRE(target.IsValid());
+				session.GetScene().GetRegistry().get<TransformComponent>(target.GetHandle()).Translation = Translation;
+			}
+
+			UUID Target{};
+			uint64_t Tick = 0;
+			glm::vec3 Translation = glm::vec3(0.0f);
 		};
 
 	}
@@ -40,7 +67,7 @@ namespace Engine {
 			CHECK(static_cast<int>(PlaySessionPhase::DestroyFlush) == static_cast<int>(PlaySessionPhase::Physics2DPostStep) + 1);
 		}
 
-		TEST_CASE("PlaySession: SpriteAnimation runs before the transform update and the 2D phases after the 3D post-step, in Simulate too" * doctest::skip(true))
+		TEST_CASE("PlaySession: SpriteAnimation runs before the transform update and the 2D phases after the 3D post-step, in Simulate too")
 		{
 			Test::SceneTestFixture fixture;
 			Recording2DPhases observer;
@@ -72,6 +99,40 @@ namespace Engine {
 			};
 			CHECK(observer.Phases == expected);
 			CHECK((*session)->GetPhysics2D() != nullptr);
+		}
+
+		// Decision 10 and the phase-2 ledger's execution order (W21.1's review): Physics2DPreStep reads the cached world
+		// matrices, so when the scene holds 2D components and the 3D world holds a body it runs the transform update first,
+		// and a transform the 3D post-step wrote (its write-back, a 3D contact callback) moves the 2D body in the same tick.
+		TEST_CASE("PlaySession: the 2D pre-step sees a transform the 3D post-step wrote in the same tick")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity crate = scene.CreateEntity("Crate3D");
+			crate.AddComponent<RigidBodyComponent>(RigidBodyComponent{ .Type = BodyType::Static });
+			crate.AddComponent<BoxColliderComponent>();
+			Entity lift = scene.CreateEntity("Lift2D");
+			lift.AddComponent<RigidBody2DComponent>(RigidBody2DComponent{ .Type = BodyType::Kinematic });
+			lift.AddComponent<BoxCollider2DComponent>();
+			PostStepWriter writer;
+			writer.Target = lift.GetUUID();
+			writer.Tick = 2;
+			writer.Translation = glm::vec3(4.0f, 3.0f, 0.0f);
+			PlaySessionSpecification specification;
+			specification.Registry = &fixture.GetRegistry();
+			specification.Seed = 42;
+			specification.Observer = &writer;
+			specification.Mode = PlayMode::Simulate;
+			Result<Scope<PlaySession>> session = PlaySession::CreateFromScene(specification, scene);
+			REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+			Physics2DSystem& physics2D = *(*session)->GetPhysics2D();
+			for (int tick = 0; tick < 3; ++tick)
+				(*session)->Tick();
+			// Tick 2's 2D step swept the kinematic lift to the written pose.
+			const std::optional<Aabb> bounds = physics2D.GetBodyBounds(lift.GetUUID());
+			REQUIRE(bounds.has_value());
+			CHECK(bounds->GetCenter().x == doctest::Approx(4.0f).epsilon(0.001));
+			CHECK(bounds->GetCenter().y == doctest::Approx(3.0f).epsilon(0.001));
 		}
 	}
 

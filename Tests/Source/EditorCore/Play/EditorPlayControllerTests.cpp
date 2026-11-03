@@ -811,6 +811,41 @@ return Script.Define("Host", Host)
 			REQUIRE(play.Stop().has_value());
 		}
 
+		TEST_CASE("EditorPlayController: under a PixelPerfectCamera a fixed-view session takes a live cursor at the scene pixel the Game image shows")
+		{
+			// M21 (Docs/Decisions/0032-m21-contract.md decision 6): the camera's 100x60 reference resolution fills the 800x450
+			// Game image at scale 7 from offset (50, 15) and the session's fixed 320x180 view at scale 3 from offset (10, 0).
+			// Image point (123.5, 158.5) shows scene point (10.5, 20.5), which is view point (41.5, 61.5); stretching the image
+			// over the view would name (49.4, 63.4), another scene pixel.
+			Test::AutomationFixture fixture("FixedViewPixelPerfectInput");
+			EditorContext& editor = fixture.GetEditor();
+			EditorPlayController& play = editor.GetPlay();
+			CallEditorHost(fixture, "project.setSettings", Json{ { "patch", Json{ { "Window", Json{ { "Width", 320 }, { "Height", 180 } } } } } });
+			REQUIRE(editor.GetViewportState().SetPixelSize(ViewportView::Game, { 800, 450 }).has_value());
+			CallEditorHost(fixture, "entity.create",
+				Json{ { "name", "Camera" },
+					{ "components",
+						Json{ { "Transform", Json{ { "Translation", Json::array({ 0, 0, 10 }) } } }, { "Camera", Json{ { "Primary", true } } },
+							{ "PixelPerfectCamera", Json{ { "ReferenceWidth", 100 }, { "ReferenceHeight", 60 } } } } } });
+			const auto mouseAt = [&fixture](float x, float y)
+			{
+				return CallEditorHost(fixture, "script.eval", Json{ { "context", "play" }, { "code", std::format("Input.GetMousePosition() == vector.create({}, {}, 0)", x, y) } })["value"] == Json(true);
+			};
+			// A lockstep session its owner left (play.pause) takes live input in its fixed view; one frame phase gives it the
+			// output settings its extraction (and the Game image) renders with.
+			CallEditorHost(fixture, "play.start", Json{ { "lockstep", true } });
+			CallEditorHost(fixture, "play.pause");
+			PlaySession* session = play.GetSession();
+			REQUIRE(session != nullptr);
+			REQUIRE_FALSE(session->IsLockstep());
+			session->Tick();
+			REQUIRE(session->GetLastExtraction().Output.SceneWidth == 100);
+			play.OnInputEvent(MouseMoveEvent{ .Position = { 123.5f, 158.5f } }, true);
+			session->Tick();
+			CHECK(mouseAt(41.5f, 61.5f));
+			REQUIRE(play.Stop().has_value());
+		}
+
 		TEST_CASE("EditorPlayController: a running gameplay callback is the automation watchdog's phase")
 		{
 			// §13.2: a Busy answer names "Script:<Script>.<Callback>". The probe reads the phase marker while the callback runs.

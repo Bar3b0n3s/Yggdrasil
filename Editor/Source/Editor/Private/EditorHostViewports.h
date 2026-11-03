@@ -9,6 +9,7 @@
 
 #include <array>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace Engine {
@@ -17,6 +18,7 @@ namespace Engine {
 	class GizmoController;
 	class ImGuiRenderer;
 	class PlaySession;
+	class Scene;
 	struct RenderContext;
 
 	// EditorApp-owned adapter. All services are borrowed, main-thread-only and outlive this adapter.
@@ -42,6 +44,17 @@ namespace Engine {
 	// otherwise the active scene. A pick selects in the scene its view shows, so a click in another tab's Scene view while a
 	// session plays selects in that tab's edit scene. A device loss recovers the views and nothing of a scene, so every open
 	// scene's view renders again as it rendered before the loss when its tab is next shown.
+	//
+	// M21 (Docs/Decisions/0032-m21-contract.md decisions 4 and 14): both views extract in the project's sorting layers
+	// (SortingLayers.Layers, copied into the request as the rendering quality is), in edit and in play. In the 2D mode
+	// (EditorViewportOptions::Mode2D) the Scene view draws its grid in the plane z = 0 (EditorGrid2D) instead of the ground
+	// grid. A click selects the sprite its pixel shows first (PickSprite, through the image's camera and output mapping, in
+	// the project's sorting layers), and the mesh the GPU pick read only when it shows no sprite: sprites write no EntityId,
+	// so a sprite wins over a mesh in front of it (Backlog §6). The sprite is picked in the clicked image itself: each view
+	// keeps its displayed image's sprites in draw order (the snapshot's), and the click's sprite is picked from them when its
+	// GPU pick is requested, in the frame that rendered the image, so a sprite that moves on before the pick completes (a
+	// playing session's) is still the one selected. The selection is made when the GPU pick completes, under its staleness
+	// rules, so a click selects one thing once.
 	class EditorHostViewports final : public EditorViewportHost
 	{
 	public:
@@ -106,6 +119,9 @@ namespace Engine {
 		{
 			PickTicket Ticket{};
 			EditorViewportClick Click{};
+			// M21: the sprite the click's pixel shows in the clicked image (PickSpriteAt when the pick was requested), the
+			// invalid UUID for none; selected before the mesh the GPU pick reads.
+			UUID Sprite{};
 		};
 		struct View
 		{
@@ -123,6 +139,9 @@ namespace Engine {
 			// M18 (C18.4, decision 44): the requested size whose Resize ran out of memory (0x0: none), not asked for again
 			// until the requested size changes.
 			glm::uvec2 FailedSize = glm::uvec2(0);
+			// M21: the displayed image's sprites in their draw order (RenderSnapshot::Sprites, at the image's pose and in the
+			// project's sorting layers), the ones a click on it picks among.
+			std::vector<SpriteItem> Sprites{};
 		};
 		[[nodiscard]] static size_t Index(ViewportView view);
 		// The size view `index` (0 the Scene view, 1 the Game view) renders at: the forced Game view's (ForceGameView: the game
@@ -140,6 +159,11 @@ namespace Engine {
 		[[nodiscard]] PlaySession* GetShownSession(ViewportView view) const;
 		// Completes `view`'s pending picks (the view `kind`) and selects what they hit in the scene the view shows.
 		[[nodiscard]] Status Poll(View& view, ViewportView kind, uint64_t frameIndex);
+		// M21: the sprite that `click`'s pixel of `view`'s displayed image shows among the image's sprites (PickSprite over
+		// View::Sprites), or the invalid UUID when it shows none.
+		[[nodiscard]] Result<UUID> PickSpriteAt(const View& view, const EditorViewportClick& click) const;
+		// M21: the project's sorting layers (SortingLayers.Layers), empty without a project.
+		[[nodiscard]] std::vector<std::string> GetSortingLayers() const;
 		[[nodiscard]] Status RenderView(size_t index, RenderContext& context, bool sceneChanged);
 		[[nodiscard]] bool IsCursorLocked() const;
 	private:

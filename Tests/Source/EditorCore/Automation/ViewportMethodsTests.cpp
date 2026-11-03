@@ -4,7 +4,9 @@
 #include "EditorCore/Automation/Private/M10MethodFixture.h"
 #include "EditorCore/Commands/SceneEdit.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Viewport/EditorCamera.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 
 #include <limits>
@@ -199,6 +201,60 @@ namespace Engine {
 				CHECK(state.GetDebugView() == RenderDebugView::Normals);
 				CHECK(state.GetGameResolution() == glm::uvec2(0));
 			}
+		}
+
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 14): the scene view's 2D mode, the toolbar's 2D toggle.
+		TEST_CASE("ViewportMethods: setOptions mode2D makes the scene camera a 2D camera, keeps it when turned off and frames in the plane")
+		{
+			Test::M10MethodFixture setup;
+			EditorContext& editor = setup.Fixture.GetEditor();
+			{
+				SceneEdit edit(editor, "Create");
+				const Entity sprite = editor.GetScene().CreateEntity("Sprite");
+				sprite.Patch<TransformComponent>([](TransformComponent& transform)
+				{
+					transform.Translation = { 6.0f, -2.0f, 3.0f };
+				});
+				REQUIRE(edit.Commit().has_value());
+			}
+			const auto initial = setup.Call("viewport.setOptions");
+			REQUIRE(initial.has_value());
+			CHECK((*initial)["mode2D"] == false);
+			REQUIRE(setup.Call("viewport.camera", Json{ { "position", { 4, 3, 10 } }, { "target", { 4, 1, 2 } } }).has_value());
+			const auto revision = editor.GetRevision();
+			const auto history = editor.GetHistory().GetCurrentSequence();
+
+			const auto on = setup.Call("viewport.setOptions", Json{ { "mode2D", true } });
+			REQUIRE_MESSAGE(on.has_value(), (on ? std::string() : on.error().ToString()));
+			CHECK((*on)["mode2D"] == true);
+			CHECK(editor.GetViewportState().GetOptions().Mode2D);
+			const auto flat = setup.Call("viewport.camera");
+			REQUIRE(flat.has_value());
+			CHECK((*flat)["projection"] == "Orthographic");
+			CHECK((*flat)["position"] == Json::array({ 4, 1, EditorCamera::Make2DDistance }));
+			CHECK((*flat)["target"] == Json::array({ 4, 1, 0 }));
+
+			// Setting it again leaves a camera the user moved alone; turning it off keeps the camera too.
+			REQUIRE(setup.Call("viewport.camera", Json{ { "position", { 0, 0, 500 } }, { "target", { 0, 0, 0 } }, { "orthographicSize", 2 } }).has_value());
+			REQUIRE(setup.Call("viewport.setOptions", Json{ { "mode2D", true } }).has_value());
+			CHECK(editor.GetViewportState().GetCamera().OrthographicSize == 2.0f);
+			const auto off = setup.Call("viewport.setOptions", Json{ { "mode2D", false } });
+			REQUIRE(off.has_value());
+			CHECK((*off)["mode2D"] == false);
+			CHECK(editor.GetViewportState().GetCamera().Projection == RenderProjection::Orthographic);
+			CHECK(editor.GetViewportState().GetCamera().Position == glm::vec3(0.0f, 0.0f, 500.0f));
+
+			// Framing in the 2D mode keeps a 2D camera on the entity's X and Y.
+			REQUIRE(setup.Call("viewport.setOptions", Json{ { "mode2D", true } }).has_value());
+			const auto framed = setup.Call("viewport.frame", Json{ { "entities", { "/Sprite" } } });
+			REQUIRE_MESSAGE(framed.has_value(), (framed ? std::string() : framed.error().ToString()));
+			CHECK((*framed)["target"] == Json::array({ 6, -2, 0 }));
+			CHECK((*framed)["position"] == Json::array({ 6, -2, EditorCamera::Make2DDistance }));
+			CHECK(editor.GetViewportState().GetCamera().Projection == RenderProjection::Orthographic);
+
+			// UI state only: no scene revision or history step.
+			CHECK(editor.GetRevision() == revision);
+			CHECK(editor.GetHistory().GetCurrentSequence() == history);
 		}
 
 		TEST_CASE("ViewportMethods: a camera inside the renderer's degenerate up band is refused")

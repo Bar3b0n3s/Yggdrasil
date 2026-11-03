@@ -6,6 +6,7 @@
 #include "Engine/Scene/SceneRaycast.h"
 
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -42,5 +43,12 @@ namespace Engine {
 	// sprite hit. Errors: InvalidArgument for a non-finite or zero direction, a non-finite origin, an invalid distance
 	// interval or Alpha. Main thread.
 	[[nodiscard]] Result<std::optional<SceneRaycastHit>> PickSprite(const Scene& scene, AssetManager& assets, const SpritePickRequest& request);
+
+	// PickSprite against `sprites`, a snapshot's sprites in their draw order (RenderSnapshot::Sprites: effectively enabled,
+	// at the pose and in the sorting layers that snapshot was extracted with), so a caller picks in the image it rendered
+	// whatever the scene has done since: the editor's click selection keeps its displayed image's sprites for a click
+	// (EditorHostViewports). The request's Alpha and SortingLayers are the snapshot's own and are not read; its ray and
+	// distances are checked as PickSprite checks them. Errors: PickSprite's. Main thread.
+	[[nodiscard]] Result<std::optional<SceneRaycastHit>> PickSprite(std::span<const SpriteItem> sprites, AssetManager& assets, const SpritePickRequest& request);
 
 }

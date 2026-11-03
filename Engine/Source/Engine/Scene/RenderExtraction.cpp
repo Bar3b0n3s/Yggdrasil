@@ -8,12 +8,16 @@
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
+#include "Engine/Scene/Components/PixelPerfectCameraComponent.h"
 #include "Engine/Scene/Components/PointLightComponent.h"
 #include "Engine/Scene/Components/PostProcessComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
+#include "Engine/Scene/Components/SpriteRendererComponent.h"
 #include "Engine/Scene/Components/TextComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/PixelPerfectCamera.h"
+#include "Engine/Scene/Private/SpriteDrawing.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
 
@@ -164,12 +168,11 @@ namespace Engine {
 			return view;
 		}
 
-		// The view matrix of `world`, a camera entity's rendered world matrix, with its scale removed: the rotation of its
-		// decomposition, or the identity rotation for a matrix that does not decompose (a zero scale, which the
-		// Transform.Scale field rule already rejects for authored data).
-		static glm::mat4 MakeEntityViewMatrix(const glm::mat4& world)
+		// The view matrix of a camera at `position` turned as `world`, a camera entity's rendered world matrix, with its scale
+		// removed: the rotation of its decomposition, or the identity rotation for a matrix that does not decompose (a zero
+		// scale, which the Transform.Scale field rule already rejects for authored data).
+		static glm::mat4 MakeEntityViewMatrix(const glm::mat4& world, const glm::vec3& position)
 		{
-			const glm::vec3 position(world[3]);
 			const Result<TransformDecomposition> decomposed = TransformSystem::DecomposeMatrix(world);
 			return MakeViewMatrix(position, decomposed.has_value() ? decomposed->Rotation : glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
 		}
@@ -212,22 +215,36 @@ namespace Engine {
 			return -axis / length;
 		}
 
-		// The camera data of a CameraComponent seen through `world` (its rendered world matrix).
+		// The camera data of a CameraComponent seen through `world` (its rendered world matrix) in a `width` x `height` view.
+		// Through the entity's PixelPerfectCamera when it holds one (Docs/Decisions/0032-m21-contract.md decision 6): at the
+		// position ComputePixelPerfectView snaps to the pixel grid, orthographic with its half height at the reference
+		// resolution's aspect whatever the Camera's own Projection and OrthographicSize, with the reference resolution as the
+		// viewport (the scene resolution), and `output` set to the view's output stage; otherwise `output` is left as it is.
 		static CameraData MakeEntityCameraData(ConstEntity entity, const CameraComponent& camera, const glm::mat4& world, uint32_t width,
-			uint32_t height)
+			uint32_t height, RenderOutputSettings& output)
 		{
 			CameraData data;
-			data.View = MakeEntityViewMatrix(world);
 			data.Position = glm::vec3(world[3]);
 			data.ProjectionKind = ToRenderProjection(camera.Projection);
 			data.VerticalFov = camera.VerticalFov;
 			data.OrthographicSize = camera.OrthographicSize;
+			data.ViewportWidth = width;
+			data.ViewportHeight = height;
+			if (const PixelPerfectCameraComponent* pixelPerfect = entity.TryGetComponent<PixelPerfectCameraComponent>())
+			{
+				const PixelPerfectView view = ComputePixelPerfectView(*pixelPerfect, data.Position);
+				data.Position = view.Position;
+				data.ProjectionKind = RenderProjection::Orthographic;
+				data.OrthographicSize = view.OrthographicSize;
+				data.ViewportWidth = view.Output.SceneWidth;
+				data.ViewportHeight = view.Output.SceneHeight;
+				output = view.Output;
+			}
+			data.View = MakeEntityViewMatrix(world, data.Position);
 			data.NearClip = camera.NearClip;
 			data.FarClip = camera.FarClip;
 			data.Projection = ComputeReverseZProjection(data.ProjectionKind, data.VerticalFov, data.OrthographicSize, data.NearClip, data.FarClip,
-				width, height);
-			data.ViewportWidth = width;
-			data.ViewportHeight = height;
+				data.ViewportWidth, data.ViewportHeight);
 			data.ClearColor = camera.ClearColor;
 			data.ClearToSkybox = camera.Clear == ClearMode::Skybox;
 			data.Entity = entity.GetUUID();
@@ -275,7 +292,7 @@ namespace Engine {
 					if (!camera.IsValid())
 						return {}; // a game view without a primary camera: no camera, the default clear colour
 					snapshot.Camera = MakeEntityCameraData(camera, camera.GetComponent<CameraComponent>(), ComputeRenderedWorldMatrix(camera, request.Alpha),
-						request.Width, request.Height);
+						request.Width, request.Height, snapshot.Output);
 					snapshot.HasCamera = true;
 					return {};
 				}
@@ -292,7 +309,7 @@ namespace Engine {
 								.WithHint("add a Camera component to it, or name a camera entity"));
 					}
 					snapshot.Camera = MakeEntityCameraData(camera, *component, ComputeRenderedWorldMatrix(camera, request.Alpha), request.Width,
-						request.Height);
+						request.Height, snapshot.Output);
 					snapshot.HasCamera = true;
 					return {};
 				}
@@ -517,9 +534,13 @@ namespace Engine {
 					.FxaaEnabled = component->FxaaEnabled,
 				};
 			}
+			// M21 (Docs/Decisions/0032-m21-contract.md decision 4): listed in canonical order, sorted into draw order below.
+			if (const SpriteRendererComponent* sprite = entity.TryGetComponent<SpriteRendererComponent>())
+				snapshot.Sprites.push_back(Utils::MakeSpriteItem(*sprite, getWorld(), id, request.SortingLayers));
 		});
 		snapshot.Environment = environment.value_or(RenderEnvironment{});
 		snapshot.Post = post.value_or(PostProcessSettings{});
+		Utils::SortSpritesForDrawing(snapshot.Sprites);
 		// Moved, so the containers keep `resource` (a copy would allocate from the default resource).
 		return Result<RenderSnapshot>(std::move(snapshot));
 	}

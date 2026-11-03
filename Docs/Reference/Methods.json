@@ -30,7 +30,7 @@
 						"type": "string"
 					},
 					"values": {
-						"description": "A Material's, a SoundEffect's or a SpriteSheet's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, or a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads); absent for other types."
+						"description": "A Material's, a SoundEffect's or a SpriteSheet's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, or a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads; the Texture takes any asset reference: a handle, an Assets/ path or an engine:// path); absent for other types."
 					},
 					"dryRun": {
 						"description": "Validate and return the would-be result without applying anything.",
@@ -1252,7 +1252,7 @@
 						"type": "string"
 					},
 					"values": {
-						"description": "An RFC 7386 merge patch of its properties: members replace, null resets a field."
+						"description": "An RFC 7386 merge patch of its properties: members replace, null resets a field; a sprite sheet's Texture takes any asset reference (a handle, an Assets/ path or an engine:// path)."
 					},
 					"dryRun": {
 						"description": "Validate and return the would-be result without applying anything.",
@@ -9264,6 +9264,321 @@
 			]
 		},
 		{
+			"name": "physics2d.overlap",
+			"domain": "physics2d",
+			"description": "Lists the 2D colliders of the play scene that a circle or a rotated rectangle in the XY plane overlaps, each once, sorted by id. Needs a play session.",
+			"exposeAsTool": false,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": true,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["shape", "center"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "Physics2DOverlapParams",
+				"description": "The params of physics2d.overlap.",
+				"type": "object",
+				"properties": {
+					"shape": {
+						"description": "The query shape.",
+						"enum": ["Circle", "Box"]
+					},
+					"center": {
+						"description": "The shape's centre, in the XY plane, in metres.",
+						"type": "array",
+						"prefixItems": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "number"
+							}
+						],
+						"minItems": 2,
+						"maxItems": 2
+					},
+					"radius": {
+						"description": "Circle: the radius in metres.",
+						"type": "number"
+					},
+					"halfExtents": {
+						"description": "Box: half the rectangle's size along X and Y before its rotation, in metres.",
+						"type": "array",
+						"prefixItems": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "number"
+							}
+						],
+						"minItems": 2,
+						"maxItems": 2
+					},
+					"angle": {
+						"description": "Box: the rectangle's rotation about +Z, counter-clockwise, in degrees.",
+						"type": "number"
+					},
+					"layerMask": {
+						"description": "The physics layers found: bit i is the project's Physics.Layers[i]; all by default.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["shape", "center"],
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "Physics2DOverlapResult",
+				"description": "The 2D colliders a shape overlaps in the play scene.",
+				"type": "object",
+				"properties": {
+					"entities": {
+						"description": "The overlapping collider entities, each once, sorted by id.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/EntitySummary"
+						}
+					},
+					"tick": {
+						"description": "The play session's tick when the query ran.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"EntitySummary": {
+						"description": "An entity's canonical id with its readable name and path.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The entity's id: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"name": {
+								"description": "The entity's name.",
+								"type": "string"
+							},
+							"path": {
+								"description": "The entity's path from the scene root, such as \"/Game/Board\".",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Find what touches a point.",
+					"params": {
+						"shape": "Circle",
+						"center": [1, 0],
+						"radius": 0.1
+					}
+				}
+			]
+		},
+		{
+			"name": "physics2d.raycast",
+			"domain": "physics2d",
+			"description": "Casts a ray in the play scene's 2D physics world (the XY plane) and reports the closest hit, or every hit with `all`: the collider entity, its body's owner, the point, the normal and the distance. Needs a play session.",
+			"exposeAsTool": false,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": true,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["origin", "direction", "maxDistance"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "Physics2DRaycastParams",
+				"description": "The params of physics2d.raycast.",
+				"type": "object",
+				"properties": {
+					"origin": {
+						"description": "Where the ray starts, in the XY plane, in metres.",
+						"type": "array",
+						"prefixItems": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "number"
+							}
+						],
+						"minItems": 2,
+						"maxItems": 2
+					},
+					"direction": {
+						"description": "The ray's direction in the XY plane; normalized, not zero.",
+						"type": "array",
+						"prefixItems": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "number"
+							}
+						],
+						"minItems": 2,
+						"maxItems": 2
+					},
+					"maxDistance": {
+						"description": "How far the ray reaches, in metres; positive.",
+						"type": "number"
+					},
+					"layerMask": {
+						"description": "The physics layers hit: bit i is the project's Physics.Layers[i]; all by default.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"all": {
+						"description": "Whether every hit is reported, sorted by distance then collider id, instead of the closest.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["origin", "direction", "maxDistance"],
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "Physics2DRaycastResult",
+				"description": "The hits of a 2D ray in the play scene.",
+				"type": "object",
+				"properties": {
+					"hits": {
+						"description": "The hits: none for a miss, the closest one without `all`.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/Physics2DRaycastHitSummary"
+						}
+					},
+					"tick": {
+						"description": "The play session's tick when the query ran.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"Physics2DRaycastHitSummary": {
+						"description": "One 2D ray hit.",
+						"type": "object",
+						"properties": {
+							"entity": {
+								"description": "The collider entity that was hit.",
+								"$ref": "#/$defs/EntitySummary"
+							},
+							"body": {
+								"description": "The owner of the 2D body the collider belongs to.",
+								"$ref": "#/$defs/EntitySummary"
+							},
+							"point": {
+								"description": "Where the ray hits, in the XY plane, in metres.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"normal": {
+								"description": "The surface normal at the hit, unit, against the ray.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"distance": {
+								"description": "How far along the ray the hit is, in metres.",
+								"type": "number"
+							}
+						},
+						"additionalProperties": false
+					},
+					"EntitySummary": {
+						"description": "An entity's canonical id with its readable name and path.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The entity's id: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"name": {
+								"description": "The entity's name.",
+								"type": "string"
+							},
+							"path": {
+								"description": "The entity's path from the scene root, such as \"/Game/Board\".",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Look for the ground below the player.",
+					"params": {
+						"origin": [0, 2],
+						"direction": [0, -1],
+						"maxDistance": 10
+					}
+				}
+			]
+		},
+		{
 			"name": "play.pause",
 			"domain": "play",
 			"description": "Pauses the play session; the lockstep owner's pause also leaves lockstep. Returns the session's state.",
@@ -13418,6 +13733,14 @@
 							"Testing": {
 								"description": "Test suites and replays.",
 								"$ref": "#/$defs/TestingSettings"
+							},
+							"SortingLayers": {
+								"description": "The sorting layers of sprites.",
+								"$ref": "#/$defs/SortingLayersSettings"
+							},
+							"Physics2D": {
+								"description": "The 2D physics world's gravity.",
+								"$ref": "#/$defs/Physics2DSettings"
 							}
 						},
 						"additionalProperties": false
@@ -13663,6 +13986,45 @@
 							"CoverageGates": {
 								"description": "Whether unfiltered test runs record coverage and fail on any gap of the per-mode coverage gates (FeatureTest).",
 								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"SortingLayersSettings": {
+						"description": "The sorting layers sprites draw in, back to front.",
+						"type": "object",
+						"properties": {
+							"Layers": {
+								"description": "Sorting layer names in draw order, back to front, unique and non-empty: 1 to 32, the first one \"Default\". A sprite's SortingLayer names one; an undeclared name draws in the first.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							}
+						},
+						"additionalProperties": false
+					},
+					"Physics2DSettings": {
+						"description": "The 2D physics world; its layers are Physics.Layers.",
+						"type": "object",
+						"properties": {
+							"Gravity": {
+								"description": "Gravity of the 2D world along X and Y in metres per second squared; each component at most 1e12 in magnitude.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": -999999995904,
+										"maximum": 999999995904
+									},
+									{
+										"type": "number",
+										"minimum": -999999995904,
+										"maximum": 999999995904
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
 							}
 						},
 						"additionalProperties": false
@@ -14338,6 +14700,14 @@
 							"Testing": {
 								"description": "Test suites and replays.",
 								"$ref": "#/$defs/TestingSettings"
+							},
+							"SortingLayers": {
+								"description": "The sorting layers of sprites.",
+								"$ref": "#/$defs/SortingLayersSettings"
+							},
+							"Physics2D": {
+								"description": "The 2D physics world's gravity.",
+								"$ref": "#/$defs/Physics2DSettings"
 							}
 						},
 						"additionalProperties": false
@@ -14583,6 +14953,45 @@
 							"CoverageGates": {
 								"description": "Whether unfiltered test runs record coverage and fail on any gap of the per-mode coverage gates (FeatureTest).",
 								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"SortingLayersSettings": {
+						"description": "The sorting layers sprites draw in, back to front.",
+						"type": "object",
+						"properties": {
+							"Layers": {
+								"description": "Sorting layer names in draw order, back to front, unique and non-empty: 1 to 32, the first one \"Default\". A sprite's SortingLayer names one; an undeclared name draws in the first.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							}
+						},
+						"additionalProperties": false
+					},
+					"Physics2DSettings": {
+						"description": "The 2D physics world; its layers are Physics.Layers.",
+						"type": "object",
+						"properties": {
+							"Gravity": {
+								"description": "Gravity of the 2D world along X and Y in metres per second squared; each component at most 1e12 in magnitude.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": -999999995904,
+										"maximum": 999999995904
+									},
+									{
+										"type": "number",
+										"minimum": -999999995904,
+										"maximum": 999999995904
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
 							}
 						},
 						"additionalProperties": false
@@ -19013,7 +19422,7 @@
 		{
 			"name": "viewport.pick",
 			"domain": "viewport",
-			"description": "Queries visual triangles at a viewport pixel without a GPU, clipping to the camera's near and far planes. Returns the hit without changing selection.",
+			"description": "Queries what a viewport pixel shows without a GPU, clipping to the camera's near and far planes: the last-drawn sprite whose quad covers it, in the project's sorting layers, else the nearest mesh triangle. Returns the hit without changing selection.",
 			"exposeAsTool": false,
 			"mutates": false,
 			"supportsDryRun": true,
@@ -19085,7 +19494,7 @@
 						"maximum": 4294967295
 					},
 					"raycast": {
-						"description": "Nearest triangle in the camera's near-to-far interval.",
+						"description": "The sprite the pixel shows (the last drawn whose quad covers it: submesh 0, triangle 0 or 1 of the quad), else the nearest mesh triangle, in the camera's near-to-far interval.",
 						"$ref": "#/$defs/SceneRaycastResult"
 					},
 					"_meta": {
@@ -19392,7 +19801,7 @@
 		{
 			"name": "viewport.setOptions",
 			"domain": "viewport",
-			"description": "Patches the scene viewport's overlays and debug view and the Game view's resolution; absent members remain unchanged.",
+			"description": "Patches the scene viewport's overlays, debug view and 2D mode and the Game view's resolution; absent members remain unchanged.",
 			"exposeAsTool": false,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -19439,6 +19848,10 @@
 							"minimum": 0,
 							"maximum": 4294967295
 						}
+					},
+					"mode2D": {
+						"description": "The scene view's 2D mode: turning it on makes the scene camera orthographic, looking down -Z at its target's X and Y; it then pans and zooms only, and its gizmos move in X and Y, rotate about Z and scale in X and Y. Turning it off keeps the camera.",
+						"type": "boolean"
 					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
@@ -19488,6 +19901,10 @@
 							"maximum": 4294967295
 						}
 					},
+					"mode2D": {
+						"description": "Whether the scene view is in its 2D mode.",
+						"type": "boolean"
+					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
@@ -19512,6 +19929,12 @@
 					"params": {
 						"debugView": "Normals",
 						"gameResolution": [1280, 720]
+					}
+				},
+				{
+					"description": "Switch the scene view to its 2D mode.",
+					"params": {
+						"mode2D": true
 					}
 				}
 			]

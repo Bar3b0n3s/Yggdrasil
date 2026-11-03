@@ -153,6 +153,46 @@
 			"Generator": "BlueNoise"
 		},
 		{
+			"Handle": "0000000000000187",
+			"Path": "engine://Textures/SpriteSquare",
+			"Type": "Texture",
+			"Source": "Procedural",
+			"File": "",
+			"Importer": "",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "0000000000000188",
+			"Path": "engine://Textures/SpriteRounded",
+			"Type": "Texture",
+			"Source": "Procedural",
+			"File": "",
+			"Importer": "",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "0000000000000189",
+			"Path": "engine://Textures/SpriteBevel",
+			"Type": "Texture",
+			"Source": "Procedural",
+			"File": "",
+			"Importer": "",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "000000000000018a",
+			"Path": "engine://Textures/SpriteCircle",
+			"Type": "Texture",
+			"Source": "Procedural",
+			"File": "",
+			"Importer": "",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
 			"Handle": "00000000000001c1",
 			"Path": "engine://Fonts/Default",
 			"Type": "Font",

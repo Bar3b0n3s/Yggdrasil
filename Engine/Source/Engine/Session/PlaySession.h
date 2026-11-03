@@ -117,6 +117,18 @@ namespace Engine {
 	// keeps moving continuously. nullopt for a non-finite position, a rectangle without area or an empty view. Pure.
 	[[nodiscard]] std::optional<glm::vec2> MapToViewCoordinates(const glm::vec2& position, const glm::vec2& displayMin,
 		const glm::vec2& displaySize, const glm::uvec2& viewSize);
+	// M21 (Docs/Decisions/0032-m21-contract.md decision 6): MapToViewCoordinates for a display rectangle that shows an image of
+	// `imageSize` pixels, stretched over it, which renders the session's scene with the output settings `output` (the
+	// session's last extraction's), when the session's view of `viewSize` renders it with the same settings. The point goes
+	// to the image's pixels, through the image's output mapping to its scene point (MapViewPointToScenePoint of
+	// ComputeRenderOutputMapping), from the image's scene resolution to the view's, and through the view's mapping to the
+	// view's pixels, so it names the scene pixel the image shows there: under a PixelPerfectCamera the two mappings have
+	// different integer scales and letterboxes, and a plain stretch would name another pixel. When both mappings are the
+	// identity (no PixelPerfectCamera: each scene is its own view) or the image is the view's size, this is
+	// MapToViewCoordinates exactly. Linear and unclamped; nullopt as MapToViewCoordinates, or for an image without pixels.
+	// Pure.
+	[[nodiscard]] std::optional<glm::vec2> MapImageToViewCoordinates(const glm::vec2& position, const glm::vec2& displayMin,
+		const glm::vec2& displaySize, const glm::uvec2& imageSize, const glm::uvec2& viewSize, const RenderOutputSettings& output);
 	// The fixed view of a deterministic session (see MapToViewCoordinates): the project's window size in logical pixels,
 	// at least 1 x 1. Pure.
 	[[nodiscard]] glm::uvec2 GetDeterministicViewSize(const WindowSettings& window);
@@ -458,12 +470,13 @@ namespace Engine {
 		[[nodiscard]] NativeWorld* GetNative();
 		[[nodiscard]] const NativeWorld* GetNative() const;
 
-		// M21 (Docs/Decisions/0032-m21-contract.md decision 10): the session's 2D physics (Scene/Physics2DSystem.h). Stream P2
-		// creates it right after the PhysicsSystem, from Project.Physics2D's gravity, Project.Physics's layers and
-		// collisions and Project.Simulation.FixedHz (its errors fail Create like the 3D system's), in Play and Simulate alike;
-		// the fixed step calls its PreStep, Step and PostStep in the Physics2D phases, and both destroy flushes call its
-		// FlushDestroyed after the 3D system's. The system creates its Physics2DWorld only at the first 2D body, so a session
-		// without one holds one PhysicsWorld, as before M21. Null until stream P2 creates it. Valid for the session's lifetime.
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 10): the session's 2D physics (Scene/Physics2DSystem.h), created
+		// right after the PhysicsSystem (and again with it at a scene transition), from Project.Physics2D's gravity,
+		// Project.Physics's layers and collisions and Project.Simulation.FixedHz (its errors fail Create like the 3D
+		// system's), in Play and Simulate alike; the fixed step calls its PreStep, Step and PostStep in the Physics2D phases,
+		// and both destroy flushes call its FlushDestroyed after the 3D system's. The system creates its Physics2DWorld only
+		// at the first 2D body, so a session without one holds one PhysicsWorld, as before M21. Never null; valid for the
+		// session's lifetime.
 		[[nodiscard]] Physics2DSystem* GetPhysics2D();
 		[[nodiscard]] const Physics2DSystem* GetPhysics2D() const;
 

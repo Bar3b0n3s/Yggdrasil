@@ -31,6 +31,14 @@ namespace Engine {
 			constexpr auto operator<=>(const ScriptInstanceKey&) const = default;
 		};
 
+		// A physics callback held for an instance that has not started: the event and the world that raised it (M21,
+		// Docs/Decisions/0032-m21-contract.md decision 13: the 2D world's events reach the 2D callbacks).
+		struct HeldPhysicsEvent
+		{
+			PhysicsEvent Event{};
+			bool Is2D = false;
+		};
+
 	}
 
 	struct ScriptEngine::State
@@ -57,8 +65,9 @@ namespace Engine {
 			bool FaultDisabled = false;
 			bool DestroyPrepared = false;
 			std::map<std::string, VariantValue> Overrides{};
-			// Physics callbacks that arrived before OnStart, in dispatch order; delivered after the start flush (§9.4 pairs).
-			std::vector<PhysicsEvent> PendingPhysics{};
+			// Physics callbacks that arrived before OnStart, in dispatch order (both worlds' interleaved as they arrived);
+			// delivered after the start flush (§9.4 pairs).
+			std::vector<Detail::HeldPhysicsEvent> PendingPhysics{};
 		};
 
 		// Evaluation and replay-predicate failures are reported without disabling the addressed instance.
@@ -144,7 +153,12 @@ namespace Engine {
 		// slice.
 		void InvokeDeferredCreates();
 		void Invoke(InstanceKey key, std::string_view callback, const PhysicsEvent* event = nullptr, bool destroying = false);
-		void InvokePhysics(InstanceKey key, const PhysicsEvent& event);
+		// The 3D callbacks (OnCollisionEnter, ...), or with `is2D` the 2D ones (OnCollisionEnter2D, ...; M21).
+		void InvokePhysics(InstanceKey key, const PhysicsEvent& event, bool is2D = false);
+		// OnPhysicsEvent's and OnPhysics2DEvent's delivery: every instance of the receiving entity, in slot order.
+		void DeliverPhysics(const PhysicsEvent& event, bool is2D);
+		// OnPhysicsDiagnostic's and OnPhysics2DDiagnostic's script error, its callback `callback`.
+		void PublishPhysicsDiagnostic(const PhysicsDiagnostic& diagnostic, std::string_view callback);
 		// Delivers physics callbacks held for started instances: an entity's instances together, in slot order, at the turn
 		// of its first in (ExecutionOrder, canonical entity, slot) order (decision 17's entity callbacks), and dispatch order
 		// per instance; an instance removed or faulted by a callback discards the rest of its held events.

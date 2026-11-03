@@ -10,8 +10,7 @@
 
 #include <string_view>
 
-// physics2d.raycast and physics2d.overlap (Docs/Decisions/0032-m21-contract.md decision 15, stream P2): their C++ round trip,
-// skipped until stream P2 registers the methods with their handlers.
+// physics2d.raycast and physics2d.overlap (Docs/Decisions/0032-m21-contract.md decision 15, stream P2): their C++ round trip.
 
 namespace Engine {
 
@@ -28,7 +27,7 @@ namespace Engine {
 
 	TEST_SUITE("Automation")
 	{
-		TEST_CASE("Physics2DMethods: physics2d.raycast and physics2d.overlap report the play scene's 2D colliders" * doctest::skip(true))
+		TEST_CASE("Physics2DMethods: physics2d.raycast and physics2d.overlap report the play scene's 2D colliders")
 		{
 			Test::AutomationFixture setup("Physics2DQueries");
 			REQUIRE(setup.Call("edit.batch", ParsePhysics2DMethodJson(R"({"label":"Physics2D","ops":[
@@ -55,6 +54,88 @@ namespace Engine {
 			const Result<Json> box = setup.Call("physics2d.overlap", Json{ { "shape", "Box" }, { "center", { 0, 0 } }, { "halfExtents", { 4, 0.1 } }, { "angle", 0 } });
 			REQUIRE(box.has_value());
 			CHECK((*box)["entities"].size() == 2);
+		}
+
+		// Decision 15 (W21.1's review): the methods' own paths: the play session they need (InvalidState, the hint naming
+		// play.start), each param they refuse at its pointer, every hit with `all` sorted by distance, the layer mask, the
+		// hit's body, normal and tick, and each collider entity once in an overlap whose entity lies in two bodies.
+		TEST_CASE("Physics2DMethods: the queries need a play session, refuse bad params at their pointers, list every hit and each entity once")
+		{
+			Test::AutomationFixture setup("Physics2DQueryPaths");
+			REQUIRE(setup.Call("edit.batch", ParsePhysics2DMethodJson(R"({"label":"Physics2D","ops":[
+				{"method":"entity.create","params":{"name":"Wall","components":{"Transform":{"Translation":[3,0,0]},
+					"RigidBody2D":{"Type":"Static"},"BoxCollider2D":{"HalfExtents":[0.5,2]}}}},
+				{"method":"entity.create","params":{"name":"Post","components":{"Transform":{"Translation":[6,0,0]},
+					"BoxCollider2D":{"HalfExtents":[0.5,2]}}}},
+				{"method":"entity.create","params":{"name":"Cart","components":{"Transform":{"Translation":[-6,0,0]},
+					"RigidBody2D":{"Type":"Static"}}}},
+				{"method":"entity.create","params":{"name":"Bumper","parent":"/Cart","components":{
+					"BoxCollider2D":{"HalfExtents":[0.5,0.5]},"CircleCollider2D":{"Radius":0.3,"IsTrigger":true}}}}]})"))
+					.has_value());
+
+			// Bodies exist only in a play session: InvalidState, and the hint names the play.start that makes one.
+			const Json notPlaying = setup.Request("physics2d.raycast", Json{ { "origin", { 0, 1 } }, { "direction", { 1, 0 } }, { "maxDistance", 10 } });
+			CHECK(notPlaying["error"]["data"]["errorCode"] == Json("InvalidState"));
+			CHECK(notPlaying["error"]["data"]["hint"].dump().contains("play.start"));
+			const Result<Json> overlapNotPlaying = setup.Call("physics2d.overlap", Json{ { "shape", "Circle" }, { "center", { 0, 0 } }, { "radius", 1 } });
+			REQUIRE_FALSE(overlapNotPlaying.has_value());
+			CHECK(overlapNotPlaying.error().GetCode() == ErrorCode::InvalidState);
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true }, { "seed", 3 }, { "mode", "simulate" } }).has_value());
+
+			const auto refusedAt = [&setup](std::string_view method, const Json& params, std::string_view pointer)
+			{
+				CAPTURE(params.dump());
+				const Result<Json> refused = setup.Call(method, params);
+				REQUIRE_FALSE(refused.has_value());
+				CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
+				REQUIRE_FALSE(refused.error().GetIssues().empty());
+				CHECK(refused.error().GetIssues()[0].JsonPointer == pointer);
+			};
+			refusedAt("physics2d.raycast", Json{ { "origin", { 0, 1 } }, { "direction", { 0, 0 } }, { "maxDistance", 10 } }, "/direction");
+			refusedAt("physics2d.raycast", Json{ { "origin", { 0, 1 } }, { "direction", { 1, 0 } }, { "maxDistance", 0 } }, "/maxDistance");
+			refusedAt("physics2d.raycast", Json{ { "origin", { 0, 1 } }, { "direction", { 1, 0 } }, { "maxDistance", -2 } }, "/maxDistance");
+			refusedAt("physics2d.overlap", Json{ { "shape", "Circle" }, { "center", { 0, 0 } }, { "radius", 0 } }, "/radius");
+			refusedAt("physics2d.overlap", Json{ { "shape", "Box" }, { "center", { 0, 0 } }, { "halfExtents", { 0, 1 } } }, "/halfExtents/0");
+			refusedAt("physics2d.overlap", Json{ { "shape", "Box" }, { "center", { 0, 0 } }, { "halfExtents", { 1, 0 } } }, "/halfExtents/1");
+
+			// `all`: every hit, by distance; without it, the closest one.
+			const Json ray{ { "origin", { 0, 1 } }, { "direction", { 1, 0 } }, { "maxDistance", 10 }, { "all", true } };
+			const Result<Json> every = setup.Call("physics2d.raycast", ray);
+			REQUIRE_MESSAGE(every.has_value(), every.error().ToString());
+			REQUIRE((*every)["hits"].size() == 2);
+			CHECK((*every)["hits"][0]["entity"]["name"] == Json("Wall"));
+			CHECK((*every)["hits"][1]["entity"]["name"] == Json("Post"));
+			CHECK(JsonReader((*every)["hits"][0]["distance"]).ReadFloat().value_or(0.0f) == doctest::Approx(2.5f));
+			CHECK(JsonReader((*every)["hits"][1]["distance"]).ReadFloat().value_or(0.0f) == doctest::Approx(5.5f));
+			// The hit's body (the wall's own), its normal in the plane against the ray, and the session's tick.
+			CHECK((*every)["hits"][0]["body"]["name"] == Json("Wall"));
+			REQUIRE((*every)["hits"][0]["normal"].size() == 2);
+			CHECK(JsonReader((*every)["hits"][0]["normal"][0]).ReadFloat().value_or(0.0f) == doctest::Approx(-1.0f));
+			CHECK(JsonReader((*every)["hits"][0]["normal"][1]).ReadFloat().value_or(1.0f) == doctest::Approx(0.0f));
+			CHECK((*every)["tick"] == Json(0));
+			// A mask without the Default layer (bit 0) hits nothing.
+			Json masked = ray;
+			masked["layerMask"] = 0;
+			const Result<Json> none = setup.Call("physics2d.raycast", masked);
+			REQUIRE(none.has_value());
+			CHECK((*none)["hits"].empty());
+
+			// A gathered collider's hit (the Bumper's box, above its smaller trigger circle) names the body's owner; after a step
+			// the result names the new tick.
+			REQUIRE(setup.Call("play.step", Json{ { "ticks", 1 } }).has_value());
+			const Result<Json> gathered = setup.Call("physics2d.raycast", Json{ { "origin", { -6, 3 } }, { "direction", { 0, -1 } }, { "maxDistance", 10 } });
+			REQUIRE(gathered.has_value());
+			REQUIRE((*gathered)["hits"].size() == 1);
+			CHECK((*gathered)["hits"][0]["entity"]["name"] == Json("Bumper"));
+			CHECK((*gathered)["hits"][0]["body"]["name"] == Json("Cart"));
+			CHECK((*gathered)["tick"] == Json(1));
+
+			// The Bumper's solid box lies in the Cart's body and its trigger circle in a sensor body of its own: two hits of one
+			// collider entity, which the overlap names once.
+			const Result<Json> once = setup.Call("physics2d.overlap", Json{ { "shape", "Circle" }, { "center", { -6, 0 } }, { "radius", 0.1 } });
+			REQUIRE(once.has_value());
+			REQUIRE((*once)["entities"].size() == 1);
+			CHECK((*once)["entities"][0]["name"] == Json("Bumper"));
 		}
 	}
 

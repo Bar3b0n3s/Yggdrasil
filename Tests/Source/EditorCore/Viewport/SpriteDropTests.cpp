@@ -4,16 +4,16 @@
 
 #include <nlohmann/json.hpp>
 
+#include <limits>
 #include <optional>
 
-// Dropping sprites into the scene view (Docs/Decisions/0032-m21-contract.md decision 14, stream D): skipped until stream D
-// implements it.
+// Dropping sprites into the scene view (Docs/Decisions/0032-m21-contract.md decision 14, stream D).
 
 namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("SpriteDrop: a dropped sheet or texture becomes an entity.create of a sprite on the plane z = 0" * doctest::skip(true))
+		TEST_CASE("SpriteDrop: a dropped sheet or texture becomes an entity.create of a sprite on the plane z = 0")
 		{
 			const std::optional<glm::vec3> point = IntersectSpritePlane(RenderRay{ .Origin = glm::vec3(1.0f, 2.0f, 10.0f), .Direction = glm::vec3(0.0f, 0.0f, -1.0f) });
 			REQUIRE(point.has_value());
@@ -35,6 +35,28 @@ namespace Engine {
 			CHECK((*textureParams)["target"] == Json("play"));
 			CHECK((*textureParams)["components"]["SpriteRenderer"]["Texture"] == Json(sheet.ToString()));
 			CHECK_FALSE(MakeSpriteDropParams({ .Asset = sheet, .Type = AssetType::Mesh }).has_value());
+		}
+
+		TEST_CASE("SpriteDrop: a slanted ray meets the plane exactly, and invalid drops are refused")
+		{
+			// A perspective ray at 45 degrees from (0, 3, 10) meets z = 0 ten units along X, exactly on the plane.
+			const std::optional<glm::vec3> slanted = IntersectSpritePlane(RenderRay{ .Origin = glm::vec3(0.0f, 3.0f, 10.0f), .Direction = glm::normalize(glm::vec3(1.0f, 0.0f, -1.0f)) });
+			REQUIRE(slanted.has_value());
+			CHECK(slanted->x == doctest::Approx(10.0f));
+			CHECK(slanted->y == 3.0f);
+			CHECK(slanted->z == 0.0f);
+			// A ray starting on the plane meets it at its origin; non-finite rays meet nothing.
+			const std::optional<glm::vec3> start = IntersectSpritePlane(RenderRay{ .Origin = glm::vec3(2.0f, 1.0f, 0.0f), .Direction = glm::vec3(0.0f, 0.0f, -1.0f) });
+			REQUIRE(start.has_value());
+			CHECK(*start == glm::vec3(2.0f, 1.0f, 0.0f));
+			CHECK_FALSE(IntersectSpritePlane(RenderRay{ .Origin = glm::vec3(std::numeric_limits<float>::quiet_NaN()), .Direction = glm::vec3(0.0f, 0.0f, -1.0f) }).has_value());
+
+			const Result<Json> invalidHandle = MakeSpriteDropParams({ .Asset = AssetHandle(), .Type = AssetType::Texture });
+			REQUIRE_FALSE(invalidHandle.has_value());
+			CHECK(invalidHandle.error().GetCode() == ErrorCode::InvalidArgument);
+			const Result<Json> nonFinite = MakeSpriteDropParams({ .Asset = AssetHandle(0x5a1d0c77e3b14f20), .Type = AssetType::Texture, .Position = glm::vec3(std::numeric_limits<float>::infinity()) });
+			REQUIRE_FALSE(nonFinite.has_value());
+			CHECK(nonFinite.error().GetCode() == ErrorCode::InvalidArgument);
 		}
 	}
 
