@@ -115,16 +115,20 @@ Ogg pages of one logical stream (20 ms CELT packets, about 14 a page), the last 
 
 Beeps: MPEG-1 Layer III, 48 kHz joint stereo, 128 kbit/s constant bit rate with CRC-protected frames, 4.39 s.
 
-## Generated format fixtures (`Assets/Environments/Gradient.hdr`, `Assets/Fonts/Glyphs.ttf`)
+## Generated format fixtures (`Assets/Environments/Gradient.hdr`, `Gradient.exr`, `GradientZip.exr`, `GradientBlocks*.exr`, `Assets/Fonts/Glyphs.ttf`)
 
 | | |
 |---|---|
-| Files | `Tests/Data/Assets/Environments/Gradient.hdr`, `Tests/Data/Assets/Fonts/Glyphs.ttf` |
-| Origin | First-party: written by `Tests/Data/Generate/MakeFormatFixtures.py` from the Radiance RGBE and TrueType (sfnt) specifications, with the Python standard library only. The texels and glyph outlines are computed in the script; no third-party image, font or tool output is included. |
+| Files | `Tests/Data/Assets/Environments/Gradient.hdr`, `Tests/Data/Assets/Environments/Gradient.exr`, `Tests/Data/Assets/Environments/GradientZip.exr`, `Tests/Data/Assets/Environments/GradientBlocksNone.exr`, `GradientBlocksRle.exr`, `GradientBlocksZips.exr`, `GradientBlocksZip.exr`, `GradientBlocksPiz.exr`, `GradientBlocksPxr24.exr`, `Tests/Data/Assets/Fonts/Glyphs.ttf` |
+| Origin | First-party: written by `Tests/Data/Generate/MakeFormatFixtures.py` from the Radiance RGBE, OpenEXR and TrueType (sfnt) specifications, with the Python standard library only (the OpenEXR ZIP, ZIPS and PXR24 data deflated by the script's own encoder, and the PIZ data coded by its own wavelet and Huffman encoders). The texels and glyph outlines are computed in the script; no third-party image, font or tool output is included. |
 | License | First-party: the same terms as the repository's code; no third-party rights |
 | Reproduce | `python Tests/Data/Generate/MakeFormatFixtures.py` writes them; `--check` verifies that the committed files are byte-identical to a fresh generation |
 
-`Gradient.hdr` is a 32 x 16 equirectangular sky gradient in flat (not run-length encoded) RGBE scanlines. `Glyphs.ttf` is
+`Gradient.hdr` is a 32 x 16 equirectangular sky gradient in flat (not run-length encoded) RGBE scanlines; `Gradient.exr`
+(uncompressed) and `GradientZip.exr` (ZIP) hold the same texels as half-float OpenEXR scanlines (M23, ADR 0034
+decision 14), and the `GradientBlocks*.exr` images the same texels each repeated over 4 x 4 texels (128 x 64) in several
+scanline blocks of each compression the environment importer reads: NONE, RLE, ZIPS, ZIP, PIZ and PXR24 (decision 21's
+review). `Glyphs.ttf` is
 a TrueType font with quadratic outlines for `.notdef`, space, `A`, `O` and `V` (`.notdef`, `A` and `O` with counters), a
 format 4 Unicode character map and a legacy `kern` table that kerns `A` and `V`.
 

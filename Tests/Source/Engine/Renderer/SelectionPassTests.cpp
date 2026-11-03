@@ -284,6 +284,67 @@ namespace Engine {
 			CHECK(stats.Passes.empty());
 		}
 
+		// M23 (C-MESH2; Docs/Decisions/0034-m23-contract.md decisions 9 and 10): the mask's alpha test samples the base colour
+		// map with the base colour's UV set and multiplies the vertex colour's alpha, as the forward passes do. The quad's
+		// TexCoord1 mirrors its TexCoord, so the texture of the UV transform case (its left texel transparent) keeps the right
+		// half on UV0 and the left half on UV1, and a vertex alpha below the cutoff keeps neither.
+		TEST_CASE("Selection: a Mask material's silhouette reads the base colour's UV set and multiplies the vertex alpha")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::InMemoryAssetManager assets;
+			GpuResourceCache cache(gpu.GetDevice(), assets);
+			auto pass = SelectionPass::Create(gpu.GetDevice(), gpu.GetPipelines());
+			REQUIRE_MESSAGE(pass.has_value(), pass.error().ToString());
+			auto targets = Utils::MakeSelectionTestTargets(gpu.GetDevice(), 32);
+			const auto snapshot = Utils::SelectionTestSnapshot(assets, RenderProjection::Orthographic, false, false, AlphaMode::Mask, false);
+			auto texture = CreateRef<TextureData>();
+			texture->Format = TextureFormat::RGBA8Srgb;
+			texture->Width = 2;
+			texture->Height = 1;
+			texture->Mips = { { .Width = 2, .Height = 1, .Size = 8 } };
+			texture->Pixels.assign(8, std::byte{ 255 });
+			texture->Pixels[3] = std::byte{ 0 };
+			assets.Publish(UUID(903), texture);
+			const auto publishQuad = [&assets](float alpha)
+			{
+				auto mesh = CreateRef<MeshData>();
+				for (const glm::vec2 corner : { glm::vec2(0.0f, 0.0f), glm::vec2(1.0f, 0.0f), glm::vec2(1.0f, 1.0f), glm::vec2(0.0f, 1.0f) })
+				{
+					mesh->Vertices.push_back({ .Position = { corner.x - 0.5f, corner.y - 0.5f, -2.0f }, .TexCoord = corner });
+					mesh->Attributes.push_back({ .TexCoord1 = { 1.0f - corner.x, corner.y }, .Color = { 1.0f, 1.0f, 1.0f, alpha } });
+				}
+				mesh->Indices = { 0, 1, 2, 0, 2, 3 };
+				mesh->Bounds = { { -0.5f, -0.5f, -2.0f }, { 0.5f, 0.5f, -2.0f } };
+				mesh->Submeshes = { { .IndexCount = 6, .Bounds = mesh->Bounds } };
+				mesh->Slots = { {} };
+				REQUIRE_MESSAGE(ValidateMeshData(*mesh).has_value(), ValidateMeshData(*mesh).error().ToString());
+				assets.Publish(UUID(901), mesh);
+			};
+			struct Case
+			{
+				TextureCoordinateSet Set = TextureCoordinateSet::UV0;
+				float Alpha = 1.0f;
+				uint32_t LeftOutline = 0;  // red two pixels outside the quad's left edge
+				uint32_t RightOutline = 0; // and outside its right edge
+			};
+			for (const Case& probe : { Case{ TextureCoordinateSet::UV0, 1.0f, 0, 255 }, Case{ TextureCoordinateSet::UV1, 1.0f, 255, 0 },
+					 Case{ TextureCoordinateSet::UV1, 0.25f, 0, 0 } })
+			{
+				INFO("UV set ", static_cast<int>(probe.Set), ", vertex alpha ", probe.Alpha);
+				publishQuad(probe.Alpha);
+				auto material = CreateRef<MaterialData>();
+				material->AlphaMode = AlphaMode::Mask;
+				material->BaseColorMap = TypedAssetHandle<AssetType::Texture>(UUID(903));
+				material->BaseColorUVSet = probe.Set;
+				assets.Publish(UUID(902), material);
+				RenderStats stats;
+				const auto image = Utils::RenderSelectionTest(gpu.GetDevice(), **pass, cache, targets, snapshot, 0.0f, stats);
+				CHECK(Utils::SelectionTestRed(image, 6, 16) == probe.LeftOutline);
+				CHECK(Utils::SelectionTestRed(image, 25, 16) == probe.RightOutline);
+			}
+		}
+
 		// M23 (R-INST; Docs/Decisions/0034-m23-contract.md decision 2): two selected items of one mesh and material are one
 		// instanced mask draw, and the outline equals the per-draw reference path's.
 		TEST_CASE("Selection: selected items of one mesh draw one instanced mask draw with the per-draw outline")

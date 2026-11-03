@@ -434,9 +434,10 @@ def validation_fixtures() -> list[Fixture]:
                   {"Format": "AssetMeta", "Version": 1, "Handle": "3a7e000000000005", "Type": "Dependency",
                    "Owner": "3a7e0000000000ff"})
 
+    # ASSET_VERTEX_COLORS_IGNORED has no fixture: GltfImporter version 2 imports COLOR_0, so nothing reports it any more
+    # (ProjectValidator::GetRetiredCodes; Docs/Decisions/0034-m23-contract.md decision 18).
     for code, source in (("ASSET_TANGENTS_APPROXIMATED", "NoNormalsNoUvs.gltf"),
-                         ("ASSET_UNSUPPORTED_UV_SET", "TexCoord1Occlusion.gltf"),
-                         ("ASSET_VERTEX_COLORS_IGNORED", "VertexColors.gltf"),
+                         ("ASSET_UNSUPPORTED_UV_SET", "TexCoord2Occlusion.gltf"),
                          ("ASSET_CONTENT_SKIPPED", "SkippedContent.gltf")):
         item = fixture(code)
         item.copy_asset(f"Gltf/{source}", f"Project/Assets/Models/{source}")
@@ -610,7 +611,8 @@ files
 (`NonCanonical`). The test "Validation: each fixture reports exactly its expected codes" copies each project into a
 temporary directory, opens it, loads its assets (scenes and scripts excepted: the validator and the script service check
 those) and runs `ProjectValidator::Validate` with the project scope; coverage gate 6
-requires a fixture for every code.
+requires a fixture for every code but the retired ones (`ProjectValidator::GetRetiredCodes`), which nothing reports:
+`ASSET_VERTEX_COLORS_IGNORED` since GltfImporter version 2 imports `COLOR_0` (M23).
 
 - `COMPONENT_MISSING_REQUIREMENT` and `ENTITY_DANGLING_REFERENCE` use the test components `ValidatorTarget` and
   `ValidatorFollower`: every built-in requirement is Transform, which every entity has.

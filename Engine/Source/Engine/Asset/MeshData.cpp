@@ -22,6 +22,10 @@ namespace Engine {
 		static constexpr size_t SubmeshRecordSize = 3 * sizeof(uint32_t) + 6 * sizeof(float);
 		static constexpr size_t MinimumSlotRecordSize = sizeof(uint32_t) + sizeof(uint64_t);
 
+		// The Streams bits this payload version defines a section for (MeshData version 2: the attribute stream). C23.3 adds
+		// Skin and Morph with their sections.
+		static constexpr MeshStreams KnownStreams = MeshStreams::Attributes;
+
 		static bool IsFinite(const glm::vec2& value)
 		{
 			return std::isfinite(value.x) && std::isfinite(value.y);
@@ -90,6 +94,16 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(const uint32_t indexCount, reader.ReadU32());
 			ENGINE_TRY_ASSIGN(const uint32_t submeshCount, reader.ReadU32());
 			ENGINE_TRY_ASSIGN(const uint32_t slotCount, reader.ReadU32());
+			ENGINE_TRY_ASSIGN(const uint32_t streamBits, reader.ReadU32());
+			ENGINE_TRY_ASSIGN(const uint32_t reserved, reader.ReadU32());
+			const MeshStreams streams = static_cast<MeshStreams>(streamBits);
+			if ((streams & ~KnownStreams) != MeshStreams::None)
+			{
+				return MakeError(ErrorCode::Parse, "mesh payload sets the stream bits {:#x}, which mesh format version {} does not define",
+					streamBits & ~std::to_underlying(KnownStreams), MeshData::FormatVersion);
+			}
+			if (reserved != 0)
+				return MakeError(ErrorCode::Parse, "mesh payload has the reserved word {:#x}, not 0", reserved);
 
 			MeshData mesh;
 			ENGINE_TRY_ASSIGN(mesh.Bounds, ReadBounds(reader));
@@ -119,6 +133,10 @@ namespace Engine {
 
 			ENGINE_TRY_ASSIGN(mesh.Vertices, reader.ReadArray<MeshVertex>(vertexCount));
 			ENGINE_TRY_ASSIGN(mesh.Indices, reader.ReadArray<uint32_t>(indexCount));
+			if ((streams & MeshStreams::Attributes) != MeshStreams::None)
+			{
+				ENGINE_TRY_ASSIGN(mesh.Attributes, reader.ReadArray<MeshVertexAttributes>(vertexCount));
+			}
 			if (!reader.IsAtEnd())
 				return MakeError(ErrorCode::Parse, "mesh payload has {} trailing bytes after offset {}", reader.GetRemaining(), reader.GetPosition());
 			return mesh;
@@ -197,7 +215,26 @@ namespace Engine {
 			return MakeError(ErrorCode::Validation, "the mesh bounds are not finite");
 		if (bounds != mesh.Bounds)
 			return MakeError(ErrorCode::Validation, "the mesh bounds differ from the bounds of its vertices");
+
+		if (!mesh.Attributes.empty() && mesh.Attributes.size() != mesh.Vertices.size())
+		{
+			return MakeError(ErrorCode::Validation, "the mesh has {} attribute vertices for its {} vertices; the attribute stream has one per vertex",
+				mesh.Attributes.size(), mesh.Vertices.size());
+		}
+		for (size_t index = 0; index < mesh.Attributes.size(); ++index)
+		{
+			const MeshVertexAttributes& attributes = mesh.Attributes[index];
+			if (!Utils::IsFinite(attributes.TexCoord1) || !Utils::IsFinite(attributes.Color))
+				return MakeError(ErrorCode::Validation, "the attributes of vertex {} have a non-finite value", index);
+			if (glm::any(glm::lessThan(attributes.Color, glm::vec4(0.0f))) || glm::any(glm::greaterThan(attributes.Color, glm::vec4(1.0f))))
+				return MakeError(ErrorCode::Validation, "the colour of vertex {} has a channel outside [0, 1]", index);
+		}
 		return {};
+	}
+
+	MeshStreams GetMeshStreams(const MeshData& mesh)
+	{
+		return mesh.Attributes.empty() ? MeshStreams::None : MeshStreams::Attributes;
 	}
 
 	Buffer SerializeMeshPayload(const MeshData& mesh)
@@ -209,6 +246,8 @@ namespace Engine {
 		writer.WriteU32(static_cast<uint32_t>(mesh.Indices.size()));
 		writer.WriteU32(static_cast<uint32_t>(mesh.Submeshes.size()));
 		writer.WriteU32(static_cast<uint32_t>(mesh.Slots.size()));
+		writer.WriteU32(std::to_underlying(GetMeshStreams(mesh)));
+		writer.WriteU32(0); // Reserved (C23.3's)
 		Utils::WriteVector(writer, mesh.Bounds.Min);
 		Utils::WriteVector(writer, mesh.Bounds.Max);
 		for (const MeshSubmesh& submesh : mesh.Submeshes)
@@ -226,6 +265,7 @@ namespace Engine {
 		}
 		writer.WriteArray(std::span<const MeshVertex>(mesh.Vertices));
 		writer.WriteArray(std::span<const uint32_t>(mesh.Indices));
+		writer.WriteArray(std::span<const MeshVertexAttributes>(mesh.Attributes));
 		return writer.TakeBuffer();
 	}
 

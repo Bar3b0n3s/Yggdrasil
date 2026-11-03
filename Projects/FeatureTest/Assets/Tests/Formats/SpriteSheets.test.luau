@@ -1,8 +1,9 @@
 --!strict
 -- Formats.scene's sprite sheet (Architecture §15.5; ADR 0029 decision 22): Tiles.spritesheet, which SpriteSheets.jsonl
--- created over Formats.jsonl's Rgba.png, loads with its type and path, so the SpriteSheet importer and the .spritesheet
--- extension are cooked and loaded in every run mode (gate 9), and SheetHolder's Field.Asset("SpriteSheet") property,
--- which the scene sets to the sheet, resolves to the same sheet after the scene's serialization and the export.
+-- created over its own import of Rgba.png with Compression None (sprite art is never block-compressed; ADR 0034
+-- decision 13), loads with its type and path, so the SpriteSheet importer and the .spritesheet extension are cooked
+-- and loaded in every run mode (gate 9), and SheetHolder's Field.Asset("SpriteSheet") property, which the scene sets
+-- to the sheet, resolves to the same sheet after the scene's serialization and the export.
 local SheetHolderScript = require("../../Scripts/Formats/SheetHolder")
 
 local SHEET = "Assets/Formats/SpriteSheets/Tiles.spritesheet"

@@ -40,7 +40,8 @@ namespace Engine {
 	// attribute stream, bound as vertex binding 1 of every mesh pipeline (the 24 mesh pipelines take both bindings): the
 	// second texture coordinate set (glTF TEXCOORD_1, which Material version 2's UV sets select) and the vertex colour (glTF
 	// COLOR_0, linear RGBA, which always multiplies the material's base colour, as glTF defines it). 24 bytes, no padding.
-	// A mesh without the stream draws with (0, 0) and opaque white, which leaves its image as before.
+	// A mesh without the stream draws with (0, 0) and opaque white, so its image is as before within rounding: the
+	// interpolated white times the base colour moves a few pixels by 1/255 (decision 21).
 	struct MeshVertexAttributes
 	{
 		glm::vec2 TexCoord1{ 0.0f };
@@ -89,8 +90,9 @@ namespace Engine {
 	struct MeshData : Asset
 	{
 		static constexpr AssetType StaticType = AssetType::Mesh;
-		// The cooked payload layout below (CookedHeader::FormatVersion).
-		static constexpr uint16_t FormatVersion = 1;
+		// The cooked payload layout below (CookedHeader::FormatVersion). M23 (C-MESH2): version 2, the attribute stream; cooked
+		// meshes are cache artifacts that GltfImporter version 2 rebuilds, so no reader keeps version 1.
+		static constexpr uint16_t FormatVersion = 2;
 
 		MeshData()
 			: Asset(StaticType)
@@ -98,8 +100,8 @@ namespace Engine {
 		}
 
 		std::vector<MeshVertex> Vertices{};
-		// M23 (C23.1, MeshData version 2): empty, or one per vertex (MeshStreams::Attributes). Stream M serializes and
-		// validates it with the version 2 payload.
+		// M23 (C23.1, MeshData version 2): empty (a mesh without the attribute stream), or one per vertex
+		// (MeshStreams::Attributes).
 		std::vector<MeshVertexAttributes> Attributes{};
 		std::vector<uint32_t> Indices{}; // uint32 triangle-list indices (§6.8)
 		std::vector<MeshSubmesh> Submeshes{};
@@ -111,21 +113,29 @@ namespace Engine {
 	// index and submesh; every index below the vertex count; each submesh's range inside the index buffer, offset and count
 	// multiples of 3, slot below the slot count; every float finite; unit-length normals and tangent directions within 1e-3,
 	// tangent signs +-1; each submesh's bounds equal the bounds of the vertices it references and Bounds the bounds of every
-	// vertex. Pure. Errors: Validation naming the first violation ("index 12 is 400, beyond the 300 vertices").
+	// vertex; Attributes empty or one per vertex, each colour channel in [0, 1] (glTF's COLOR_0 range). Pure. Errors:
+	// Validation naming the first violation ("index 12 is 400, beyond the 300 vertices").
 	[[nodiscard]] Status ValidateMeshData(const MeshData& mesh);
 
-	// The cooked mesh payload (FormatVersion 1), little-endian:
+	// The streams `mesh` carries (MeshStreams::Attributes when Attributes is not empty): the payload's Streams word.
+	[[nodiscard]] MeshStreams GetMeshStreams(const MeshData& mesh);
+
+	// The cooked mesh payload (FormatVersion 2; Docs/Decisions/0034-m23-contract.md "Data formats"), little-endian:
 	//     uint32 VertexCount; uint32 IndexCount; uint32 SubmeshCount; uint32 SlotCount;
+	//     uint32 Streams (MeshStreams bits: 1 Attributes; 2 Skin and 4 Morph reserved for C23.3); uint32 Reserved (0);
 	//     f32x3 BoundsMin; f32x3 BoundsMax;
 	//     SubmeshCount x { uint32 IndexOffset; uint32 IndexCount; uint32 MaterialSlot; f32x3 Min; f32x3 Max; }
 	//     SlotCount x { uint32 NameLength; UTF-8 Name; uint64 DefaultMaterial (0 = none); }
 	//     VertexCount x MeshVertex (48 bytes); IndexCount x uint32
-	// Asserts ValidateMeshData. Pure; identical meshes give identical bytes.
+	//     [Streams & Attributes] VertexCount x MeshVertexAttributes (24 bytes)
+	// The optional sections follow the indices in bit order. Asserts ValidateMeshData. Pure; identical meshes give identical
+	// bytes.
 	[[nodiscard]] Buffer SerializeMeshPayload(const MeshData& mesh);
 
 	// Reads a payload written by SerializeMeshPayload through BinaryReader, then ValidateMeshData (an untrusted payload may
-	// hold any bytes). Never asserts on data. Errors: Parse for truncation or trailing bytes; Validation from
-	// ValidateMeshData or for invalid UTF-8 in a slot name.
+	// hold any bytes). Never asserts on data. Errors: Parse for truncation or trailing bytes, for a Streams bit this version
+	// does not define (Skin and Morph until C23.3 defines their sections, and every higher bit) and for a non-zero Reserved
+	// word; Validation from ValidateMeshData or for invalid UTF-8 in a slot name.
 	[[nodiscard]] Result<MeshData> DeserializeMeshPayload(std::span<const std::byte> payload);
 
 	// The complete cooked artifact (CookedHeader + payload) of `mesh`, produced by a source of version `importerVersion`.

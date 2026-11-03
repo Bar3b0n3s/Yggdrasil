@@ -167,6 +167,9 @@ export type TextSpace = "Screen" | "World"
 -- Whether an imported texture or environment is stored block-compressed for the GPU.
 export type TextureCompression = "Auto" | "None"
 
+-- The texture coordinates a material map samples (glTF textureInfo.texCoord).
+export type TextureCoordinateSet = "UV0" | "UV1"
+
 -- How a texture's texels are interpreted.
 export type TextureUsage = "Color" | "Linear" | "NormalMap"
 

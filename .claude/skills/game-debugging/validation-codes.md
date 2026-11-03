@@ -24,8 +24,8 @@ A reference page of the `game-debugging` skill (`skills/game-debugging`).
 | `ASSET_DUPLICATE_HANDLE` | Error | Copied .meta files share a handle. | Let the fix give each copy a fresh handle. |
 | `ASSET_ORPHAN_DEPENDENCY` | Warning | A dependency .meta names a missing owner. | Restore the owner, or let the fix trash the dependency .meta. |
 | `ASSET_TANGENTS_APPROXIMATED` | Warning | A glTF primitive needs tangents but has no UVs. | Export the model with UVs or tangents. |
-| `ASSET_UNSUPPORTED_UV_SET` | Warning | A glTF texture uses TEXCOORD_1, which is ignored. | Bind it to TEXCOORD_0 in the model. |
-| `ASSET_VERTEX_COLORS_IGNORED` | Warning | A glTF primitive has vertex colours, which are ignored. | Bake them into a texture or material. |
+| `ASSET_UNSUPPORTED_UV_SET` | Warning | A glTF texture uses TEXCOORD_2 or a later set, which is ignored. | Bind it to TEXCOORD_0 or TEXCOORD_1 in the model. |
+| `ASSET_VERTEX_COLORS_IGNORED` | Warning | No longer reported: since GltfImporter version 2, `COLOR_0` is imported. | Nothing to fix. |
 | `ASSET_CONTENT_SKIPPED` | Warning | A glTF holds skins, animations, cameras, lights, points or lines. | Remove them, or rebuild cameras and lights as components. |
 | `PATH_CASE_MISMATCH` | Error | A .meta or path matches a file only ignoring case. | Use the exact spelling; the fix renames the .meta. |
 | `PREFAB_MISSING_ASSET` | Warning | An instance names an unregistered prefab. | Restore the prefab, or `prefab.unpack` the instance. |

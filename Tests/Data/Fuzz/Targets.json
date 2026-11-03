@@ -15,6 +15,7 @@
 		{ "Reader": "EditorPreferences", "Case": "EditorPreferences: 1,000 seeded mutations of Editor.json never crash", "Iterations": 1000000 },
 		{ "Reader": "EnvironmentData", "Case": "EnvironmentData: 1,000 seeded mutations of a payload never crash", "Iterations": 1000000 },
 		{ "Reader": "EnvironmentImporter", "Case": "EnvironmentImporter: 200 seeded mutations of a Radiance .hdr never crash", "Iterations": 1000000 },
+		{ "Reader": "EnvironmentImporterExr", "Case": "EnvironmentImporter: 200 seeded mutations of an OpenEXR file never crash", "Iterations": 1000000 },
 		{ "Reader": "FontData", "Case": "FontData: 10,000 seeded mutations of a payload never crash", "Iterations": 1000000 },
 		{ "Reader": "FontImporter", "Case": "FontImporter: 200 seeded mutations of TrueType and OpenType fonts never crash", "Iterations": 1000000 },
 		{ "Reader": "Framing", "Case": "Framing: random byte streams never crash the decoder", "Iterations": 1000000 },

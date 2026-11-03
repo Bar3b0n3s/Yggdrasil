@@ -27,8 +27,8 @@ and configuration:
 3. a Jolt consumer is compiled for another instruction set than JoltPhysics. Jolt/Core/Core.h derives JPH_USE_AVX2,
    JPH_USE_AVX, JPH_USE_F16C, JPH_USE_LZCNT, JPH_USE_TZCNT and more from the compiler's predefined __AVX2__,
    __AVX__, ... macros, and those are not part of JPH_VERSION_ID, so VerifyJoltVersionID() cannot catch a mismatch;
-4. a first-party project, JoltPhysics, MikkTSpace, Luau or CMP_Core uses a non-precise floating-point model: MSVC
-   FloatingPointModel=Fast, /fp:fast, /fp:contract or /Qfast_transcendentals; GCC/Clang (and clang-cl's /clang:
+4. a first-party project, JoltPhysics, MikkTSpace, Luau, CMP_Core or tinyexr uses a non-precise floating-point model:
+   MSVC FloatingPointModel=Fast, /fp:fast, /fp:contract or /Qfast_transcendentals; GCC/Clang (and clang-cl's /clang:
    options) -ffast-math, -Ofast, -ffp-model=fast or any component of -ffast-math in effect (unsafe, associative or
    reciprocal math, finite math only, no NaNs or infinities, no signed zeros, no trapping math, limited complex
    range, approximate functions, fast excess precision), or an effective -ffp-contract other than "off" (it must be
@@ -157,6 +157,9 @@ VENDOR_ABI_FAMILIES: dict[str, DefineFamily] = {
     # opusfile: opusfile.h reads no configuration macro, and OP_FIXED_POINT is the library's own
     # (Vendor/opusfile/VENDOR.md), so a consumer defines none of the family.
     "opusfile": DefineFamily(prefixes=("OP_",)),
+    # tinyexr: its configuration macros (TINYEXR_USE_MINIZ, TINYEXR_USE_STB_ZLIB, TINYEXR_USE_THREAD and
+    # TINYEXR_USE_OPENMP), which the library and its consumers set alike (Vendor/tinyexr/VENDOR.md).
+    "tinyexr": DefineFamily(prefixes=("TINYEXR_",)),
 }
 GLOBAL_ABI_DEFINES = ("NDEBUG",)
 
@@ -181,10 +184,12 @@ JOLT_PROJECT = "JoltPhysics"
 # Vendored projects that must use the precise floating-point model like first-party code (Architecture §2.2): Jolt
 # (simulation determinism, §9.1), MikkTSpace (generated tangents are cooked into meshes, which must be identical in
 # every configuration, Docs/Decisions/0010-m6-decisions.md), the Luau VM (scripts' gameplay arithmetic runs in its
-# interpreter and vector/math libraries on the simulation path, §11.1) and CMP_Core (compressed texture blocks are
+# interpreter and vector/math libraries on the simulation path, §11.1), CMP_Core (compressed texture blocks are
 # cooked into the asset cache, which must be identical from every configuration of one compiler,
-# Docs/Decisions/0034-m23-contract.md). LuauAnalysis only type-checks in the editor.
-PRECISE_VENDOR_PROJECTS = (JOLT_PROJECT, "MikkTSpace", "Luau", "CMP_Core")
+# Docs/Decisions/0034-m23-contract.md) and tinyexr (an OpenEXR image's decoded texels, its half-float conversion among
+# them, are baked into a cooked environment under the same configuration-independent key, decision 14). LuauAnalysis
+# only type-checks in the editor.
+PRECISE_VENDOR_PROJECTS = (JOLT_PROJECT, "MikkTSpace", "Luau", "CMP_Core", "tinyexr")
 DETERMINISM_DEFINE = "JPH_CROSS_PLATFORM_DETERMINISTIC"
 NOT_IN_DIST = ("EditorCore", "Editor", "Tests")
 BUILT_IN_DIST = ("Engine", "Runtime")
@@ -1106,8 +1111,8 @@ def check_floating_point(workspace: GeneratedWorkspace, first_party: set[str], f
                 for problem in problems:
                     findings.append(
                         f"[{target.name}] {config}: {unit_location(name, unit)} uses a non-precise floating-point "
-                        f"model: {problem} (first-party projects, JoltPhysics, MikkTSpace, Luau and CMP_Core must use "
-                        "the precise model, Docs/Architecture.md section 2.2)"
+                        f"model: {problem} (first-party projects, JoltPhysics, MikkTSpace, Luau, CMP_Core and tinyexr "
+                        "must use the precise model, Docs/Architecture.md section 2.2)"
                     )
 
 

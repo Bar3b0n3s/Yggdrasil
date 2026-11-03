@@ -20,7 +20,7 @@
 		},
 		{
 			"Path": "Assets/Materials/Red.material",
-			"XXH64": "62256d35414487cd",
+			"XXH64": "a38670d5d92e5b8d",
 			"Method": "edit.batch",
 			"RequestId": 4,
 			"Client": "engine-mcp",
@@ -36,7 +36,7 @@
 		},
 		{
 			"Path": "Assets/Materials/red.material",
-			"XXH64": "62256d35414487cd",
+			"XXH64": "a38670d5d92e5b8d",
 			"Method": "asset.create",
 			"RequestId": 5,
 			"Client": "engine-mcp",

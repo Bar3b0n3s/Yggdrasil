@@ -55,6 +55,17 @@ namespace Engine {
 			bool operator==(const MirrorKey&) const = default;
 		};
 
+		// M23 (C23.1, C-MESH2; Docs/Decisions/0034-m23-contract.md decision 9): the cache's one shared default attribute
+		// stream, the vertex binding 1 of every mesh without MeshData version 2's attribute stream: Count entries of
+		// MeshVertexAttributes' defaults (TexCoord1 (0, 0), opaque white), as many as the largest such mesh has vertices. All
+		// its entries are equal, so every such mesh binds it at offset 0. A larger mesh replaces it with a larger one; the
+		// mirrors that hold the smaller one keep it alive until they are released.
+		struct DefaultAttributeStream
+		{
+			nvrhi::BufferHandle Buffer{};
+			uint32_t Count = 0;
+		};
+
 		// The services an upload and its failure report need.
 		struct UploadContext
 		{
@@ -63,6 +74,8 @@ namespace Engine {
 			size_t* UploadFailures = nullptr;
 			// M23 (decision 15): whether the cache logged its block-compressed textures' path (once per cache).
 			bool* BlockPathLogged = nullptr;
+			// M23 (decision 9): the cache's shared default attribute stream, which a mesh upload may grow.
+			DefaultAttributeStream* DefaultAttributes = nullptr;
 		};
 
 		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 43): whether GpuResourceCache::TrimUnused releases the mirror
@@ -154,8 +167,8 @@ namespace Engine {
 			*context.BlockPathLogged = true;
 			if (decode)
 			{
-				ENGINE_CORE_INFO("GpuResourceCache: the device has no BC texture support, so block-compressed textures are decompressed at "
-								 "upload (the decode fallback: RGBA8 or R8, more GPU memory)");
+				ENGINE_CORE_INFO("GpuResourceCache: the device has no BC texture support, so block-compressed textures and environment cubes "
+								 "are decompressed at upload (the decode fallback: RGBA8, R8 or RGBA16F, more GPU memory)");
 			}
 			else
 			{
@@ -195,6 +208,19 @@ namespace Engine {
 			constants.UVOffset = material.UVOffset;
 			constants.AlphaMode = static_cast<uint32_t>(std::to_underlying(material.AlphaMode));
 			constants.Flags = material.EmissiveMap.IsValid() ? MaterialFlagEmissiveMap : 0U;
+			// M23 (Material version 2, decision 10): the maps that sample the second UV set.
+			const std::array<std::pair<TextureCoordinateSet, uint32_t>, 5> uvSets = {
+				std::pair(material.BaseColorUVSet, MaterialFlagBaseColorUV1),
+				std::pair(material.MetallicRoughnessUVSet, MaterialFlagMetallicRoughnessUV1),
+				std::pair(material.NormalUVSet, MaterialFlagNormalUV1),
+				std::pair(material.OcclusionUVSet, MaterialFlagOcclusionUV1),
+				std::pair(material.EmissiveUVSet, MaterialFlagEmissiveUV1),
+			};
+			for (const auto& [set, flag] : uvSets)
+			{
+				if (set == TextureCoordinateSet::UV1)
+					constants.Flags |= flag;
+			}
 			return constants;
 		}
 
@@ -218,38 +244,63 @@ namespace Engine {
 			return buffer;
 		}
 
-		// An immutable RGBA16_FLOAT cube texture with every mip of `cube` (CubeMapData's layout), through HostImageUpload.
-		// Errors: InvalidArgument for a cube whose sizes do not describe its texels; those of HostImageUpload::CreateTexture.
-		static Result<nvrhi::TextureHandle> UploadCube(GraphicsDevice& device, const CubeMapData& cube, std::string debugName)
+		// An immutable cube texture with every mip of `cube` (CubeMapData's layout), through HostImageUpload: RGBA16_FLOAT for
+		// an Rgba16Float cube; for a BC6HUfloat cube (M23, Docs/Decisions/0034-m23-contract.md decisions 14 and 15) its blocks
+		// as BC6H_UFLOAT on a device with BC support, or on a device without it each face level decompressed with
+		// DecompressTextureBlocks to RGBA16_FLOAT (the decode fallback, logged once per cache with the textures' path).
+		// Errors: InvalidArgument for a cube whose format or sizes do not describe its texels; those of
+		// DecompressTextureBlocks, naming the level and face; those of HostImageUpload::CreateTexture.
+		static Result<nvrhi::TextureHandle> UploadCube(const UploadContext& context, const CubeMapData& cube, std::string debugName)
 		{
+			GraphicsDevice& device = *context.Device;
 			const auto fullMipCount = static_cast<uint32_t>(std::bit_width(cube.FaceSize));
-			if (cube.FaceSize == 0 || cube.MipCount == 0 || cube.MipCount > fullMipCount
-				|| cube.Texels.size() != ComputeCubeMapByteSize(cube.FaceSize, cube.MipCount))
+			const bool blocks = cube.Format == CubeMapFormat::BC6HUfloat;
+			if ((!blocks && cube.Format != CubeMapFormat::Rgba16Float) || cube.FaceSize == 0 || cube.MipCount == 0 || cube.MipCount > fullMipCount
+				|| cube.Texels.size() != ComputeCubeMapByteSize(cube.FaceSize, cube.MipCount, cube.Format))
 			{
-				return MakeError(ErrorCode::InvalidArgument, "the cube '{}' of face size {} and {} mips does not hold its {} bytes of texels", debugName,
-					cube.FaceSize, cube.MipCount, cube.Texels.size());
+				return MakeError(ErrorCode::InvalidArgument, "the {} cube '{}' of face size {} and {} mips does not hold its {} bytes of texels",
+					CubeMapFormatToString(cube.Format), debugName, cube.FaceSize, cube.MipCount, cube.Texels.size());
 			}
+			const bool decode = blocks && !device.GetInfo().TextureCompressionBC;
+			if (blocks)
+				LogBlockPath(context, decode);
 			nvrhi::TextureDesc desc;
 			desc.width = cube.FaceSize;
 			desc.height = cube.FaceSize;
 			desc.arraySize = CubeMapData::FaceCount;
 			desc.mipLevels = cube.MipCount;
-			desc.format = nvrhi::Format::RGBA16_FLOAT;
+			desc.format = blocks && !decode ? nvrhi::Format::BC6H_UFLOAT : nvrhi::Format::RGBA16_FLOAT;
 			desc.dimension = nvrhi::TextureDimension::TextureCube;
 			desc.debugName = std::move(debugName);
+			// The decode fallback's face levels, which the subresources view until the upload returns.
+			std::vector<Buffer> decoded;
 			std::vector<TextureSubresourceData> subresources;
 			subresources.reserve(static_cast<size_t>(cube.MipCount) * CubeMapData::FaceCount);
+			if (decode)
+				decoded.reserve(static_cast<size_t>(cube.MipCount) * CubeMapData::FaceCount);
 			size_t offset = 0;
 			for (uint32_t level = 0; level < cube.MipCount; ++level)
 			{
-				const size_t edge = std::max<size_t>(1, cube.FaceSize >> level);
-				const size_t faceBytes = edge * edge * CubeMapData::BytesPerTexel;
+				const uint32_t edge = std::max(1U, cube.FaceSize >> level);
+				const size_t faceBytes = ComputeCubeMapFaceByteSize(cube.FaceSize, level, cube.Format);
 				for (uint32_t face = 0; face < CubeMapData::FaceCount; ++face)
 				{
+					std::span<const std::byte> data(cube.Texels.data() + offset, faceBytes);
+					if (decode)
+					{
+						Result<Buffer> texels = DecompressTextureBlocks(TextureBlockCodec::BC6H, edge, edge, data);
+						if (!texels.has_value())
+						{
+							return std::unexpected(std::move(texels).error().WithContext(
+								std::format("while decoding mip level {}, face {} of the cube '{}'", level, face, desc.debugName)));
+						}
+						decoded.push_back(std::move(*texels));
+						data = decoded.back();
+					}
 					subresources.push_back({
 						.MipLevel = level,
 						.ArraySlice = face,
-						.Data = std::span<const std::byte>(cube.Texels.data() + offset, faceBytes),
+						.Data = data,
 						.RowPitch = 0,
 						.DepthPitch = 0,
 					});
@@ -261,11 +312,11 @@ namespace Engine {
 		}
 
 		// The GPU mirror of `environment`: both cubes and the SH9.
-		static Result<GpuEnvironment> UploadEnvironment(GraphicsDevice& device, const EnvironmentData& environment, const std::string& name)
+		static Result<GpuEnvironment> UploadEnvironment(const UploadContext& context, const EnvironmentData& environment, const std::string& name)
 		{
 			GpuEnvironment mirror;
-			ENGINE_TRY_ASSIGN(mirror.Skybox, UploadCube(device, environment.Skybox, std::format("{} (skybox)", name)));
-			ENGINE_TRY_ASSIGN(mirror.Specular, UploadCube(device, environment.Specular, std::format("{} (specular)", name)));
+			ENGINE_TRY_ASSIGN(mirror.Skybox, UploadCube(context, environment.Skybox, std::format("{} (skybox)", name)));
+			ENGINE_TRY_ASSIGN(mirror.Specular, UploadCube(context, environment.Specular, std::format("{} (specular)", name)));
 			mirror.SkyboxMipCount = environment.Skybox.MipCount;
 			mirror.SpecularMipCount = environment.Specular.MipCount;
 			mirror.IrradianceSH9 = environment.IrradianceSH9;
@@ -276,14 +327,39 @@ namespace Engine {
 
 	namespace {
 
-		// The mesh half of the cache: a vertex and an index buffer filled by one command list (§8.14 item 1).
+		// The mesh half of the cache: a vertex and an index buffer, and the attribute stream (M23: the mesh's own, or the
+		// shared default stream, grown when needed), filled by one command list (§8.14 item 1).
 		struct MeshTraits
 		{
 			using Data = MeshData;
 			using Mirror = GpuMesh;
 			static constexpr std::string_view Kind = "mesh";
 
-			[[nodiscard]] static bool HasGpuObjects(const GpuMesh& mirror) { return mirror.VertexBuffer != nullptr && mirror.IndexBuffer != nullptr; }
+			[[nodiscard]] static bool HasGpuObjects(const GpuMesh& mirror)
+			{
+				return mirror.VertexBuffer != nullptr && mirror.AttributeBuffer != nullptr && mirror.IndexBuffer != nullptr;
+			}
+
+			// The attribute stream of `mesh` (binding 1): its own buffer, written by `commandList`; or the shared default
+			// stream, a new one of the mesh's vertex count written by `commandList` when the current one is shorter. `grown`
+			// receives that new stream, which the caller makes the shared one once the list has executed.
+			[[nodiscard]] static Result<nvrhi::BufferHandle> CreateAttributeBuffer(const UploadContext& context, nvrhi::ICommandList& commandList,
+				const MeshData& mesh, const std::string& name, DefaultAttributeStream& grown)
+			{
+				if (!mesh.Attributes.empty())
+				{
+					return Utils::CreateGeometryBuffer(*context.Device, commandList, mesh.Attributes.data(),
+						mesh.Attributes.size() * sizeof(MeshVertexAttributes), false, std::format("{} (attributes)", name));
+				}
+				const DefaultAttributeStream& shared = *context.DefaultAttributes;
+				const auto count = static_cast<uint32_t>(mesh.Vertices.size());
+				if (shared.Buffer != nullptr && shared.Count >= count)
+					return shared.Buffer;
+				const std::vector<MeshVertexAttributes> defaults(count);
+				ENGINE_TRY_ASSIGN(grown.Buffer, Utils::CreateGeometryBuffer(*context.Device, commandList, defaults.data(), defaults.size() * sizeof(MeshVertexAttributes), false, "GpuResourceCache.DefaultAttributes"));
+				grown.Count = count;
+				return grown.Buffer;
+			}
 
 			[[nodiscard]] static Result<GpuMesh> Upload(const UploadContext& context, const MeshData& mesh, const std::string& name)
 			{
@@ -301,17 +377,25 @@ namespace Engine {
 					? Utils::CreateGeometryBuffer(device, *commandList, mesh.Indices.data(), mesh.Indices.size() * sizeof(uint32_t), true,
 						  std::format("{} (indices)", name))
 					: Result<nvrhi::BufferHandle>(nvrhi::BufferHandle());
+				DefaultAttributeStream grown;
+				Result<nvrhi::BufferHandle> attributes =
+					indices ? CreateAttributeBuffer(context, *commandList, mesh, name, grown) : Result<nvrhi::BufferHandle>(nvrhi::BufferHandle());
 				// The list is executed whatever the buffers' results: a list that never executes keeps itself, and the buffer
-				// it wrote, alive (CommandListRecording), which would fail the next device loss's recovery. Without both
-				// buffers its writes are discarded with them.
+				// it wrote, alive (CommandListRecording), which would fail the next device loss's recovery. Without every
+				// buffer its writes are discarded with them.
 				recording.Execute();
 				if (!vertices)
 					return std::unexpected(std::move(vertices).error());
 				if (!indices)
 					return std::unexpected(std::move(indices).error());
+				if (!attributes)
+					return std::unexpected(std::move(attributes).error());
+				if (grown.Buffer != nullptr)
+					*context.DefaultAttributes = std::move(grown);
 
 				GpuMesh mirror;
 				mirror.VertexBuffer = std::move(*vertices);
+				mirror.AttributeBuffer = std::move(*attributes);
 				mirror.IndexBuffer = std::move(*indices);
 				mirror.VertexCount = static_cast<uint32_t>(mesh.Vertices.size());
 				mirror.IndexCount = static_cast<uint32_t>(mesh.Indices.size());
@@ -435,6 +519,16 @@ namespace Engine {
 			void Clear() { m_Entries.clear(); }
 
 			[[nodiscard]] size_t GetCount() const { return m_Entries.size(); }
+
+			// Whether a mirror of the table satisfies `predicate` (M23: whether a mesh still binds the shared default stream).
+			template<typename Predicate>
+			[[nodiscard]] bool AnyMirror(Predicate predicate) const
+			{
+				return std::ranges::any_of(m_Entries, [&predicate](const auto& item)
+				{
+					return predicate(item.second.Value);
+				});
+			}
 		private:
 			struct Entry
 			{
@@ -589,6 +683,9 @@ namespace Engine {
 		std::map<MirrorKey, EnvironmentEntry> Environments;
 		size_t UploadFailures = 0;
 		uint64_t NextGeneration = 1; // GpuMaterial::Generation: only increases
+		// M23 (decision 9): the shared default attribute stream of the meshes without one. Dropped with every mirror (Clear,
+		// ReleaseGpuObjects); the next mesh upload creates it again.
+		DefaultAttributeStream DefaultAttributes{};
 		// M23 (decision 15): the Info line naming the block-compressed textures' path was logged. Kept across a device loss:
 		// the recovered device has the same specification, so the same path.
 		bool BlockPathLogged = false;
@@ -597,7 +694,11 @@ namespace Engine {
 
 		[[nodiscard]] UploadContext GetContext()
 		{
-			return { .Device = Device, .Assets = Assets, .UploadFailures = &UploadFailures, .BlockPathLogged = &BlockPathLogged };
+			return { .Device = Device,
+				.Assets = Assets,
+				.UploadFailures = &UploadFailures,
+				.BlockPathLogged = &BlockPathLogged,
+				.DefaultAttributes = &DefaultAttributes };
 		}
 		// The texture mirror of `slot`, or of the built-in `fallback` when the slot is empty.
 		[[nodiscard]] const GpuTexture& ResolveSlot(const TypedAssetHandle<AssetType::Texture>& slot, AssetHandle fallback);
@@ -608,6 +709,10 @@ namespace Engine {
 		void ReportMaterialFailure(AssetHandle handle, MaterialEntry& entry);
 		// Reports why environment `handle` has no mirror (GpuResourceCache.h): once per (handle, version), as its entry is made.
 		void ReportEnvironmentFailure(AssetHandle handle, std::string code, std::string message, std::string hint);
+		// M23 (decision 9): drops the shared default attribute stream once no mesh mirror binds it, so a collection or a trim
+		// that released every mesh without a stream leaves none of the cache's buffers alive; the next such mesh creates it
+		// again.
+		void ReleaseUnboundDefaultAttributes();
 	};
 
 	GpuResourceCache::GpuResourceCache(GraphicsDevice& device, AssetManager& assets)
@@ -697,6 +802,19 @@ namespace Engine {
 		diagnostic.Message = std::move(message);
 		diagnostic.Hint = std::move(hint);
 		Assets->ReportDiagnostic(std::move(diagnostic));
+	}
+
+	void GpuResourceCache::State::ReleaseUnboundDefaultAttributes()
+	{
+		if (DefaultAttributes.Buffer == nullptr)
+			return;
+		const nvrhi::IBuffer* shared = DefaultAttributes.Buffer.Get();
+		const bool bound = Meshes.AnyMirror([shared](const GpuMesh& mirror)
+		{
+			return mirror.AttributeBuffer.Get() == shared;
+		});
+		if (!bound)
+			DefaultAttributes = {};
 	}
 
 	const GpuMaterial& GpuResourceCache::GetMaterial(AssetHandle handle)
@@ -822,7 +940,7 @@ namespace Engine {
 		else if (const AssetRef<EnvironmentData> environment = AssetCast<EnvironmentData>(*loaded))
 		{
 			const std::string name = Utils::GetAssetName(assets, handle);
-			Result<GpuEnvironment> uploaded = Utils::UploadEnvironment(*state.Device, *environment, name);
+			Result<GpuEnvironment> uploaded = Utils::UploadEnvironment(state.GetContext(), *environment, name);
 			if (uploaded.has_value())
 			{
 				entry.Value = std::move(*uploaded);
@@ -856,6 +974,7 @@ namespace Engine {
 		CollectStaleEntries(m_State->Environments, *m_State->Assets, releaseUnused);
 		m_State->Meshes.CollectStale(*m_State->Assets, releaseUnused);
 		m_State->Textures.CollectStale(*m_State->Assets, releaseUnused);
+		m_State->ReleaseUnboundDefaultAttributes();
 	}
 
 	void GpuResourceCache::Clear()
@@ -864,20 +983,22 @@ namespace Engine {
 		m_State->Environments.clear();
 		m_State->Meshes.Clear();
 		m_State->Textures.Clear();
+		m_State->DefaultAttributes = {};
 	}
 
 	void GpuResourceCache::ReleaseGpuObjects()
 	{
-		// The mirrors hold every GPU object of the cache: an upload's command list is executed at once and dropped, and the
-		// host images of HostImageUpload are the device's, which GraphicsDevice::Recover releases. NextGeneration and
-		// UploadFailures stay, so no material generation from before the loss is ever made again.
+		// The mirrors and the shared default attribute stream hold every GPU object of the cache: an upload's command list is
+		// executed at once and dropped, and the host images of HostImageUpload are the device's, which GraphicsDevice::Recover
+		// releases. NextGeneration and UploadFailures stay, so no material generation from before the loss is ever made again.
 		Clear();
 	}
 
 	void GpuResourceCache::TrimUnused()
 	{
 		// Only what nothing current needs; the use flags of the host's CollectStale period, the material generation counter
-		// and UploadFailures stay (GpuResourceCache.h).
+		// and UploadFailures stay, and the shared default attribute stream while a remaining mesh binds it
+		// (GpuResourceCache.h).
 		const AssetManager& assets = *m_State->Assets;
 		std::erase_if(m_State->Materials, [&assets](const auto& item)
 		{
@@ -889,6 +1010,7 @@ namespace Engine {
 		});
 		m_State->Meshes.TrimUnused(assets);
 		m_State->Textures.TrimUnused(assets);
+		m_State->ReleaseUnboundDefaultAttributes();
 	}
 
 	GpuResourceCacheStats GpuResourceCache::GetStats() const

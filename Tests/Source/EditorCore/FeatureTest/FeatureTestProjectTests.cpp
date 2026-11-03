@@ -329,6 +329,56 @@ namespace Engine {
 			CHECK(references.empty());
 		}
 
+		// M23 (Docs/Decisions/0034-m23-contract.md decision 13; ADR 0028's phase 2 ledger): sprite art is never
+		// block-compressed, so every sprite sheet of the project cuts its frames from a texture whose .meta sets Compression
+		// None; Tiles.spritesheet's frames sampled BC7 blocks while it shared Formats.jsonl's Rgba.png, whose Compression is
+		// Auto. This walks the committed .spritesheet files and the texture .meta files, without a GPU.
+		TEST_CASE("FeatureTest: every sprite sheet cuts its frames from a texture imported with Compression None")
+		{
+			const std::filesystem::path root = Test::GetRepositoryRoot() / "Projects" / "FeatureTest";
+			const Result<std::vector<std::filesystem::path>> files = FileSystem::ListDirectory(root / "Assets", true);
+			REQUIRE_MESSAGE(files.has_value(), files.error().ToString());
+			std::map<std::string, std::string> textures; // handle -> the texture .meta's project-relative path
+			std::vector<std::string> sheets;
+			for (const std::filesystem::path& file : *files)
+			{
+				std::string relative = FileSystem::PathToUtf8(file.lexically_relative(root));
+				std::ranges::replace(relative, '\\', '/');
+				const std::string extension = FileSystem::PathToUtf8(file.extension());
+				if (extension == ".spritesheet")
+				{
+					sheets.push_back(relative);
+				}
+				else if (extension == ".meta")
+				{
+					Json meta;
+					const JsonReader reader = ReadProjectFile(meta, relative);
+					const auto type = reader.ReadMember<std::string>("Type");
+					const auto handle = reader.ReadMember<std::string>("Handle");
+					if (type && *type == "Texture" && handle)
+						textures.emplace(*handle, relative);
+				}
+			}
+			REQUIRE_FALSE(sheets.empty());
+			for (const std::string& sheet : sheets)
+			{
+				CAPTURE(sheet);
+				Json document;
+				const auto texture = ReadProjectFile(document, sheet).ReadMember<std::string>("Texture");
+				REQUIRE(texture.has_value());
+				const auto found = textures.find(*texture);
+				REQUIRE_MESSAGE(found != textures.end(), "the sheet's texture is a texture of the project");
+				CAPTURE(found->second);
+				Json meta;
+				const auto compression = ReadProjectFile(meta, found->second).GetMember("Settings").and_then([](const JsonReader& settings)
+				{
+					return settings.ReadMember<std::string>("Compression");
+				});
+				REQUIRE_MESSAGE(compression.has_value(), compression.error().ToString());
+				CHECK(*compression == "None");
+			}
+		}
+
 		// Roadmap M14 acceptance (ADR 0022 decision 9): the committed FinalStateHash of Assets/Tests/Replays/Determinism.replay
 		// is reproduced by strict replay verification; the unit suite runs this in Debug and Release, without a GPU.
 		TEST_CASE("FeatureTest: Determinism.replay matches its committed hash in both editor configurations")

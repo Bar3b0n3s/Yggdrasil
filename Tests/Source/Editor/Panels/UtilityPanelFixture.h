@@ -9,6 +9,7 @@
 #include "EditorCore/Inspector/ReflectedEditController.h"
 #include "EditorCore/Thumbnails/ThumbnailCache.h"
 #include "EditorCore/Viewport/GizmoController.h"
+#include "Engine/Automation/Methods/StatsMethods.h"
 #include "Engine/Core/FileSystem.h"
 #include "Support/AutomationTestClient.h"
 
@@ -50,8 +51,9 @@ namespace Engine {
 		};
 
 		// Real editor, server, queued human actions, the host's preference queue (EditorHostPreferences) and ImGui. Only the
-		// renderer is an injected boundary, and the native module host's backends when `native` gives fakes (M19). Frames
-		// advance explicitly; no GPU, sleeps, or private ImGui inspection is involved.
+		// renderer is an injected boundary, with the displayed views' statistics the host would report (SetHostViews), and
+		// the native module host's backends when `native` gives fakes (M19). Frames advance explicitly; no GPU, sleeps, or
+		// private ImGui inspection is involved.
 		class UtilityPanelFixture
 		{
 		public:
@@ -89,6 +91,10 @@ namespace Engine {
 			~UtilityPanelFixture() { ImGui::DestroyContext(m_ImGui); }
 			UtilityPanelFixture(const UtilityPanelFixture&) = delete;
 			UtilityPanelFixture& operator=(const UtilityPanelFixture&) = delete;
+
+			// The displayed views stats.get reports from here on, as the editor host's renderers would (ReadHostStatistics);
+			// none, the default, reports the scene and game views unavailable.
+			void SetHostViews(std::vector<StatsViewSummary> views) { m_HostViews = std::move(views); }
 
 			void OpenProject()
 			{
@@ -201,6 +207,12 @@ namespace Engine {
 			{
 				auto specification = MakeTestServerSpecification();
 				specification.SessionsDirectory = m_Environment.GetDirectory() / "Sessions";
+				specification.ReadHostStatistics = [this]()
+				{
+					StatsGetResult result;
+					result.Views = m_HostViews;
+					return result;
+				};
 				if (m_Clock == UtilityPanelClock::Stepped)
 				{
 					specification.WallClock = [this]()
@@ -214,6 +226,7 @@ namespace Engine {
 		private:
 			UtilityPanelClock m_Clock = UtilityPanelClock::Real;
 			std::chrono::steady_clock::time_point m_Now{}; // the Stepped clock's reading; read only through the server
+			std::vector<StatsViewSummary> m_HostViews{};   // SetHostViews; read only through the server
 			EditorTestFixture m_Environment;
 			AutomationTestClient m_Client;
 			EditorActions m_Actions;

@@ -661,9 +661,10 @@ namespace Engine {
 
 			// The mirror is valid until the next upload (resolving materials uploads textures): what is needed is copied now.
 			const GpuMesh& mesh = Cache->GetMesh(item.Mesh);
-			if (mesh.VertexBuffer == nullptr || mesh.IndexBuffer == nullptr)
+			if (mesh.VertexBuffer == nullptr || mesh.AttributeBuffer == nullptr || mesh.IndexBuffer == nullptr)
 				continue; // not even the placeholder could be created (reported by the cache)
 			nvrhi::IBuffer* vertexBuffer = mesh.VertexBuffer.Get();
+			nvrhi::IBuffer* attributeBuffer = mesh.AttributeBuffer.Get();
 			nvrhi::IBuffer* indexBuffer = mesh.IndexBuffer.Get();
 			submeshes.assign(mesh.Submeshes.begin(), mesh.Submeshes.end());
 			defaults.assign(mesh.DefaultMaterials.begin(), mesh.DefaultMaterials.end());
@@ -703,6 +704,7 @@ namespace Engine {
 				const Utils::MeshCullMode cullMode = Utils::SelectCullMode(mirrored, material.DoubleSided);
 				Detail::SceneRendererDraw draw;
 				draw.VertexBuffer = vertexBuffer;
+				draw.AttributeBuffer = attributeBuffer;
 				draw.IndexBuffer = indexBuffer;
 				draw.IndexOffset = submesh.IndexOffset;
 				draw.IndexCount = submesh.IndexCount;
@@ -823,6 +825,8 @@ namespace Engine {
 				state.viewport.addViewportAndScissorRect(viewport);
 				state.bindings = { &viewSet, draw.Material };
 				state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(draw.VertexBuffer).setSlot(0).setOffset(0));
+				// The attribute stream (M23, C-MESH2): the mesh's own, or the cache's shared default stream, read from offset 0.
+				state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(draw.AttributeBuffer).setSlot(Utils::MeshAttributeStreamSlot).setOffset(0));
 				state.setIndexBuffer(nvrhi::IndexBufferBinding().setBuffer(draw.IndexBuffer).setFormat(nvrhi::Format::R32_UINT).setOffset(0));
 				commandList.setGraphicsState(state);
 				lastPipeline = pipeline.Pipeline.Get();

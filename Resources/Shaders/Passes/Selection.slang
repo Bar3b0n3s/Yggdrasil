@@ -1,6 +1,11 @@
 // SelectionMask: the selected meshes' coverage for the selection outline (Renderer/SelectionPass.h). Every draw is instanced
 // (M23, R-INST; Docs/Decisions/0034-m23-contract.md decision 2): instance i of a draw is the view's instance record
-// Instances[MaskDraw.FirstInstance + i] (t10, Shared/InstanceRecord.h), whose world matrix places it.
+// Instances[MaskDraw.FirstInstance + i] (t10, Shared/InstanceRecord.h), whose world matrix places it. Vertices are
+// MeshVertex's position and texture coordinates (binding 0, locations 0 and 1) and the attribute stream (M23, C-MESH2:
+// binding 1, locations 2 and 3), which a Mask material's alpha test reads: the base colour map's UV set and the vertex
+// colour's alpha. The vertex colour reaches the fragment shader whole: as a scalar alpha, the Opaque variants' fragment
+// shader, which does not read it, leaves it out of its interface, which the validation layer reports
+// (WARNING-Shader-OutputNotConsumed).
 
 #include "Shared/InstanceRecord.h"
 #include "Shared/MaterialConstants.h"
@@ -21,12 +26,16 @@ struct SelectionVertexInput
 {
 	float3 Position : POSITION;
 	float2 TexCoord : TEXCOORD0;
+	float2 TexCoord1 : TEXCOORD1;
+	float4 Color : COLOR;
 };
 
 struct SelectionVertexOutput
 {
 	float4 Position : SV_Position;
 	float2 TexCoord : TEXCOORD0;
+	float2 TexCoord1 : TEXCOORD1;
+	float4 Color : COLOR; // the vertex colour, whose alpha a Mask material's test reads
 };
 
 // Match the Scene vertex shader's separate, NoContraction world and view-projection products.
@@ -47,6 +56,8 @@ SelectionVertexOutput VSMain(SelectionVertexInput input, uint instance : SV_Vulk
 	const float4x4 world = Instances[MaskDraw.FirstInstance + instance].World;
 	result.Position = SelectionMultiplyExact(MaskDraw.ViewProjection, SelectionMultiplyExact(world, float4(input.Position, 1.0)));
 	result.TexCoord = input.TexCoord;
+	result.TexCoord1 = input.TexCoord1;
+	result.Color = input.Color;
 	return result;
 }
 
@@ -64,7 +75,8 @@ SelectionMaskOutput PSMask(SelectionVertexOutput input)
 	result.Mask = input.Position.z >= depth ? 1.0 : 0.5;
 	result.Coverage = 0xffffffff;
 #if ALPHA_MASK
-	const float alpha = BaseColorMap.Sample(SelectionSampler, input.TexCoord * Material.UVScale + Material.UVOffset).a * Material.BaseColor.a;
+	const float2 uv = ((Material.Flags & MaterialFlagBaseColorUV1) != 0 ? input.TexCoord1 : input.TexCoord) * Material.UVScale + Material.UVOffset;
+	const float alpha = BaseColorMap.Sample(SelectionSampler, uv).a * Material.BaseColor.a * input.Color.a;
 	if (alpha < Material.AlphaCutoff)
 		result.Coverage = 0;
 #endif

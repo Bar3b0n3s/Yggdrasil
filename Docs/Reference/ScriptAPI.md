@@ -3352,9 +3352,9 @@ The kind of a loadable asset (§7.1).
 
 - `Texture`: A texture (PNG, JPEG, TGA, BMP, or a glTF's texture sub-asset).
 
-- `Environment`: An image-based lighting environment (.hdr).
+- `Environment`: An image-based lighting environment (.hdr or .exr).
 
-- `AudioClip`: A sound (WAV, FLAC, MP3, or a .sfx preset).
+- `AudioClip`: A sound (WAV, FLAC, MP3, Ogg Vorbis, Ogg Opus, or a .sfx preset).
 
 - `Script`: A Luau script (.luau).
 
@@ -4243,6 +4243,14 @@ Whether an imported texture or environment is stored block-compressed for the GP
 - `Auto`: Compress by usage: BC7 for colour and linear data, BC5 for normal maps; BC6H for an environment's cubes.
 
 - `None`: Keep the texels uncompressed (RGBA8, or RGBA16F for an environment): sprite, tile and UI art.
+
+## TextureCoordinateSet
+
+The texture coordinates a material map samples (glTF textureInfo.texCoord).
+
+- `UV0`: The mesh's first texture coordinates.
+
+- `UV1`: The mesh's second texture coordinates (glTF TEXCOORD_1); (0, 0) on a mesh without them.
 
 ## TextureUsage
 

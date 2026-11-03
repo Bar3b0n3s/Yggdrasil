@@ -126,6 +126,35 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "MeshPath.jsonl",
+			"IdSeed": 2101,
+			"Renderer": "none"
+		},
+		{
+			"File": "AssetFormats.jsonl",
+			"IdSeed": 2102,
+			"Renderer": "vulkan"
+		},
+		{
+			"File": "GoldenTextured.jsonl",
+			"IdSeed": 2103,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Materials/GoldenTextured",
+				"Assets/Scenes/GoldenTextured",
+				"Assets/Textures/GoldenTextured"
+			]
+		},
+		{
+			"File": "GoldenClusteredLights.jsonl",
+			"IdSeed": 2106,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Materials/GoldenClusteredLights",
+				"Assets/Scenes/GoldenClusteredLights"
+			]
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

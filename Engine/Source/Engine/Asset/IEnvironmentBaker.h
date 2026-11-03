@@ -15,7 +15,8 @@
 
 namespace Engine {
 
-	// The source of one bake: a Radiance .hdr decoded to RGB32F (stbi_loadf, §8.6 step 1).
+	// The source of one bake: a Radiance .hdr (stbi_loadf) or, since M23, an OpenEXR image (tinyexr) decoded to RGB32F (§8.6
+	// step 1).
 	struct EnvironmentBakeInput
 	{
 		uint32_t Width = 0; // equirectangular: Width == 2 * Height

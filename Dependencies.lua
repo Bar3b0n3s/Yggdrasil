@@ -80,6 +80,7 @@ IncludeDir["MikkTSpace"] = RepositoryRoot .. "/Vendor/MikkTSpace"
 IncludeDir["nfd"] = RepositoryRoot .. "/Vendor/nativefiledialog-extended/src/include"
 IncludeDir["doctest"] = RepositoryRoot .. "/Vendor/doctest"
 IncludeDir["CMP_Core"] = RepositoryRoot .. "/Vendor/CMP_Core/cmp_core/source"
+IncludeDir["tinyexr"] = RepositoryRoot .. "/Vendor/tinyexr"
 
 -- Project kinds that produce a linked binary and therefore link libraries.
 local LinkingKinds = "kind:ConsoleApp or WindowedApp or SharedLib"
@@ -449,6 +450,22 @@ function UseCMPCore()
 
 	filter { LinkingKinds }
 		links { "CMP_Core" }
+
+	filter {}
+end
+
+-- tinyexr (Vendor/tinyexr/VENDOR.md): the OpenEXR reader of the environment importer (M23, Docs/Decisions/0034-m23-contract.md
+-- decision 14). Engine takes the include directory and the library's configuration defines: its
+-- AssetPipeline/Importers/EnvironmentImporter.cpp alone includes tinyexr.h (Scripts/ModuleRules.json). ZIP and PXR24 data
+-- inflate through stb_image's zlib, whose implementation is the Engine library's, so the executables that link the
+-- library link Engine as well. AssetPipeline is editor-only: EditorCore, Editor and Tests call this function, the
+-- Runtime's projects never do (UseRuntimeDependencies).
+function UseTinyExr()
+	externalincludedirs { IncludeDir.tinyexr }
+	defines { "TINYEXR_USE_MINIZ=0", "TINYEXR_USE_STB_ZLIB=1", "TINYEXR_USE_THREAD=0", "TINYEXR_USE_OPENMP=0" }
+
+	filter { LinkingKinds }
+		links { "tinyexr" }
 
 	filter {}
 end

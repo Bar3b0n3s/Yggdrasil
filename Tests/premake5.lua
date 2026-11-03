@@ -80,4 +80,5 @@ project "Tests"
 	UseMikkTSpace()
 	UseNativeFileDialog()
 	UseCMPCore()
+	UseTinyExr()
 	UseLuau(true)

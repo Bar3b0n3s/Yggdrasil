@@ -122,7 +122,8 @@ namespace Engine {
 			};
 		}
 
-		// MeshVertex (§6.8) at locations 0 to 3, the order of the Scene program's VertexInput.
+		// MeshVertex (§6.8) at locations 0 to 3 and the attribute stream (M23) at 4 and 5, the order of the Scene program's
+		// VertexInput.
 		[[nodiscard]] static std::vector<nvrhi::VertexAttributeDesc> MakeMeshVertexAttributes()
 		{
 			constexpr uint32_t Stride = sizeof(MeshVertex);
@@ -130,12 +131,15 @@ namespace Engine {
 			{
 				return nvrhi::VertexAttributeDesc().setName(name).setFormat(format).setOffset(static_cast<uint32_t>(offset)).setElementStride(Stride);
 			};
-			return {
+			std::vector<nvrhi::VertexAttributeDesc> attributes = {
 				attribute("POSITION", nvrhi::Format::RGB32_FLOAT, offsetof(MeshVertex, Position)),
 				attribute("NORMAL", nvrhi::Format::RGB32_FLOAT, offsetof(MeshVertex, Normal)),
 				attribute("TANGENT", nvrhi::Format::RGBA32_FLOAT, offsetof(MeshVertex, Tangent)),
 				attribute("TEXCOORD", nvrhi::Format::RG32_FLOAT, offsetof(MeshVertex, TexCoord)),
 			};
+			const std::array<nvrhi::VertexAttributeDesc, 2> stream = MakeMeshAttributeStreamAttributes();
+			attributes.insert(attributes.end(), stream.begin(), stream.end());
+			return attributes;
 		}
 
 		[[nodiscard]] static nvrhi::RasterCullMode ToRasterCullMode(uint32_t variant)
@@ -178,6 +182,24 @@ namespace Engine {
 			specification.Framebuffer.addColorFormat(prepass ? SceneNormalsFormat : SceneColorFormat);
 			specification.Framebuffer.setDepthFormat(SceneDepthFormat);
 			return specification;
+		}
+
+		std::array<nvrhi::VertexAttributeDesc, 2> MakeMeshAttributeStreamAttributes()
+		{
+			constexpr uint32_t Stride = sizeof(MeshVertexAttributes);
+			const auto attribute = [](const char* name, nvrhi::Format format, size_t offset)
+			{
+				return nvrhi::VertexAttributeDesc()
+					.setName(name)
+					.setFormat(format)
+					.setBufferIndex(MeshAttributeStreamSlot)
+					.setOffset(static_cast<uint32_t>(offset))
+					.setElementStride(Stride);
+			};
+			return {
+				attribute("TEXCOORD1", nvrhi::Format::RG32_FLOAT, offsetof(MeshVertexAttributes, TexCoord1)),
+				attribute("COLOR", nvrhi::Format::RGBA32_FLOAT, offsetof(MeshVertexAttributes, Color)),
+			};
 		}
 
 		MeshCullMode SelectCullMode(bool mirrored, bool doubleSided)
@@ -265,12 +287,15 @@ namespace Engine {
 			layout.Name = std::format("SceneOverdraw{}", CullModeNames[cullMode]);
 			layout.Entries = { "VSOverdraw", "PSOverdraw" };
 			auto specification = MakeMeshPipelineSpecification(std::move(layout), layouts, true, cullMode);
-			// VSOverdraw reads only MeshVertex's position and texture coordinates (Scene.slang's OverdrawVertexInput).
+			// VSOverdraw reads only MeshVertex's position and texture coordinates (Scene.slang's OverdrawVertexInput), then the
+			// attribute stream (M23) at locations 2 and 3.
 			constexpr uint32_t Stride = sizeof(MeshVertex);
 			specification.VertexAttributes = {
 				nvrhi::VertexAttributeDesc().setName("POSITION").setFormat(nvrhi::Format::RGB32_FLOAT).setOffset(offsetof(MeshVertex, Position)).setElementStride(Stride),
 				nvrhi::VertexAttributeDesc().setName("TEXCOORD").setFormat(nvrhi::Format::RG32_FLOAT).setOffset(offsetof(MeshVertex, TexCoord)).setElementStride(Stride),
 			};
+			const std::array<nvrhi::VertexAttributeDesc, 2> stream = MakeMeshAttributeStreamAttributes();
+			specification.VertexAttributes.insert(specification.VertexAttributes.end(), stream.begin(), stream.end());
 			specification.Framebuffer = nvrhi::FramebufferInfo().addColorFormat(nvrhi::Format::RGBA16_FLOAT);
 			specification.RenderState.depthStencilState.setDepthTestEnable(false).setDepthWriteEnable(false);
 			specification.RenderState.blendState.targets[0].setBlendEnable(true).setSrcBlend(nvrhi::BlendFactor::One).setDestBlend(nvrhi::BlendFactor::One).setBlendOp(nvrhi::BlendOp::Add).setSrcBlendAlpha(nvrhi::BlendFactor::One).setDestBlendAlpha(nvrhi::BlendFactor::One).setBlendOpAlpha(nvrhi::BlendOp::Add);

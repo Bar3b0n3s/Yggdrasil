@@ -1,0 +1,4 @@
+{"type":"request","time":"2026-11-03T03:47:22.551Z","client":"cli","id":1,"method":"project.refreshAssets","params":{}}
+{"type":"response","time":"2026-11-03T03:47:22.752Z","client":"cli","id":1,"requestLine":1,"ok":true,"summary":"ok"}
+{"type":"request","time":"2026-11-03T03:47:22.754Z","client":"cli","id":2,"method":"project.upgrade","params":{}}
+{"type":"response","time":"2026-11-03T03:47:23.201Z","client":"cli","id":2,"requestLine":3,"ok":true,"summary":"ok"}

@@ -20,15 +20,18 @@
 // pipelines specialize constant 0 (SceneDebugViewConstantId) with the debug view (Shared/DrawConstants.h): a view other
 // than Lit outputs its quantity, linear, with alpha 1.
 // Vertices are MeshVertex (§6.8): position, normal, tangent (w: the bitangent sign) and texture coordinates at locations
-// 0 to 3. Every draw is instanced (M23, R-INST; Docs/Decisions/0034-m23-contract.md decision 2): instance i of a draw is
+// 0 to 3 (vertex binding 0), and the attribute stream (M23, C-MESH2: MeshVertexAttributes, binding 1) at locations 4 and 5:
+// the second texture coordinates, which a map whose MaterialFlag<Map>UV1 bit is set samples, and the vertex colour, which
+// always multiplies the base colour (RGBA), as glTF defines it; a mesh without the stream binds (0, 0) and opaque white.
+// Every draw is instanced (M23, R-INST; Docs/Decisions/0034-m23-contract.md decision 2): instance i of a draw is
 // the view's instance record Instances[Draw.FirstInstance + i] (t10, Shared/InstanceRecord.h), whose world matrix places
 // it and whose draw flags (and, for the picking prepass, pick id) the vertex shader hands to the fragment shaders, flat.
 // Three vertex entries transform a vertex with the same NoContraction products, one per set of outputs its fragment
 // shaders read, since the validation layer reports a flat integer output a fragment shader does not read
 // (WARNING-Shader-OutputNotConsumed): VSMain for PSPrepass and PSForward, VSPicking (with the pick id) for PSPicking and
-// VSOverdraw for PSOverdraw, which reads only the position and texture coordinates of MeshVertex, the two attributes the
-// overdraw pipelines bind (as the shadow casters' do), since the layer also reports a vertex attribute the vertex shader
-// does not read. The normal matrix is the
+// VSOverdraw for PSOverdraw, which reads only the position and texture coordinates of MeshVertex and the attribute stream,
+// the attributes the overdraw pipelines bind (as the shadow casters' do), since the layer also reports a vertex attribute
+// the vertex shader does not read. The normal matrix is the
 // cofactor of the world matrix's upper 3x3 (§8.4), negated for a mirroring world (DrawFlagMirrored), whose draws use the
 // CullFront pipelines; front faces are SV_IsFrontFace, inverted when mirrored, and double-sided materials (CullNone) flip
 // the normals of back faces.
@@ -93,6 +96,8 @@ struct VertexInput
 	float3 Normal : NORMAL;
 	float4 Tangent : TANGENT;
 	float2 TexCoord : TEXCOORD0;
+	float2 TexCoord1 : TEXCOORD1; // M23: the attribute stream (binding 1)
+	float4 Color : COLOR;
 };
 
 // VSMain's outputs, which PSPrepass and PSForward read.
@@ -103,6 +108,8 @@ struct VertexOutput
 	float3 WorldNormal : NORMAL;
 	float4 WorldTangent : TANGENT;
 	float2 TexCoord : TEXCOORD0;
+	float2 TexCoord1 : TEXCOORD1;
+	float4 Color : COLOR;
 	// The instance record's draw flags (a fragment shader has no instance index to read the record with).
 	nointerpolation uint Flags : DRAWFLAGS;
 };
@@ -114,18 +121,22 @@ struct PickingVertexOutput
 	nointerpolation uint EntityId : ENTITYID;
 };
 
-// VSOverdraw's inputs: MeshVertex's position and texture coordinates at locations 0 and 1.
+// VSOverdraw's inputs: MeshVertex's position and texture coordinates at locations 0 and 1, the attribute stream at 2 and 3.
 struct OverdrawVertexInput
 {
 	float3 Position : POSITION;
 	float2 TexCoord : TEXCOORD0;
+	float2 TexCoord1 : TEXCOORD1;
+	float4 Color : COLOR;
 };
 
-// VSOverdraw's outputs, which PSOverdraw reads: the position and the texture coordinates of its alpha test.
+// VSOverdraw's outputs, which PSOverdraw reads: the position, and the texture coordinates and vertex alpha of its alpha test.
 struct OverdrawVertexOutput
 {
 	float4 Position : SV_Position;
 	float2 TexCoord : TEXCOORD0;
+	float2 TexCoord1 : TEXCOORD1;
+	float Alpha : COLOR;
 };
 
 // What the material says about the shaded point.
@@ -191,19 +202,28 @@ float3 MakePerpendicular(float3 normal)
 	return normalize(cross(axis, normal));
 }
 
-// Samples the material's maps and builds the normal-mapped shading frame.
+// The texture coordinates a map samples (M23, Material version 2): the second set when the material's `uv1Flag` is set,
+// else the first, through the material's one UV transform.
+float2 GetMapTexCoord(float2 texCoord, float2 texCoord1, uint uv1Flag)
+{
+	return ((Material.Flags & uv1Flag) != 0 ? texCoord1 : texCoord) * Material.UVScale + Material.UVOffset;
+}
+
+// Samples the material's maps, each with its UV set, and builds the normal-mapped shading frame. The vertex colour
+// multiplies the base colour (M23).
 Surface EvaluateSurface(VertexOutput input, bool isFrontFace)
 {
-	const float2 uv = input.TexCoord * Material.UVScale + Material.UVOffset;
-	const float4 baseColor = BaseColorMap.Sample(AnisoWrap, uv) * Material.BaseColor;
-	const float4 metallicRoughness = MetallicRoughnessMap.Sample(AnisoWrap, uv);
-	float3 tangentNormal = NormalMap.Sample(AnisoWrap, uv).xyz * 2.0 - 1.0;
+	const float4 baseColor = BaseColorMap.Sample(AnisoWrap, GetMapTexCoord(input.TexCoord, input.TexCoord1, MaterialFlagBaseColorUV1)) * Material.BaseColor
+		* input.Color;
+	const float4 metallicRoughness =
+		MetallicRoughnessMap.Sample(AnisoWrap, GetMapTexCoord(input.TexCoord, input.TexCoord1, MaterialFlagMetallicRoughnessUV1));
+	float3 tangentNormal = NormalMap.Sample(AnisoWrap, GetMapTexCoord(input.TexCoord, input.TexCoord1, MaterialFlagNormalUV1)).xyz * 2.0 - 1.0;
 	// A two-channel normal map (BC5, or the decode fallback's RGBA8 copy of one, MaterialFlagNormalMapTwoChannel) stores x
 	// and y only: z is reconstructed from them, before NormalScale scales x and y, as glTF's unit normals have it.
 	if ((Material.Flags & MaterialFlagNormalMapTwoChannel) != 0)
 		tangentNormal.z = sqrt(saturate(1.0 - dot(tangentNormal.xy, tangentNormal.xy)));
-	const float occlusion = OcclusionMap.Sample(AnisoWrap, uv).r;
-	const float3 emissiveMap = EmissiveMap.Sample(AnisoWrap, uv).rgb;
+	const float occlusion = OcclusionMap.Sample(AnisoWrap, GetMapTexCoord(input.TexCoord, input.TexCoord1, MaterialFlagOcclusionUV1)).r;
+	const float3 emissiveMap = EmissiveMap.Sample(AnisoWrap, GetMapTexCoord(input.TexCoord, input.TexCoord1, MaterialFlagEmissiveUV1)).rgb;
 
 	Surface surface;
 	surface.BaseColor = baseColor;
@@ -263,6 +283,8 @@ VertexOutput TransformVertex(VertexInput input, InstanceRecord record)
 	// A mirroring world turns the frame's handedness: the bitangent's sign flips with it.
 	output.WorldTangent = float4(mul((float3x3)record.World, input.Tangent.xyz), mirrored ? -input.Tangent.w : input.Tangent.w);
 	output.TexCoord = input.TexCoord;
+	output.TexCoord1 = input.TexCoord1;
+	output.Color = input.Color;
 	output.Flags = record.Flags;
 	return output;
 }
@@ -290,6 +312,8 @@ OverdrawVertexOutput VSOverdraw(OverdrawVertexInput input, uint instance : SV_Vu
 	OverdrawVertexOutput output;
 	output.Position = MultiplyExact(View.ViewProjection, MultiplyExact(record.World, float4(input.Position, 1.0)));
 	output.TexCoord = input.TexCoord;
+	output.TexCoord1 = input.TexCoord1;
+	output.Alpha = input.Color.a;
 	return output;
 }
 
@@ -426,7 +450,8 @@ struct OverdrawOutput
 [shader("fragment")]
 OverdrawOutput PSOverdraw(OverdrawVertexOutput input)
 {
-	const float alpha = BaseColorMap.Sample(AnisoWrap, input.TexCoord * Material.UVScale + Material.UVOffset).a * Material.BaseColor.a;
+	const float alpha = BaseColorMap.Sample(AnisoWrap, GetMapTexCoord(input.TexCoord, input.TexCoord1, MaterialFlagBaseColorUV1)).a * Material.BaseColor.a
+		* input.Alpha;
 	const bool rejected = (Material.AlphaMode == MaterialAlphaModeMask && alpha < Material.AlphaCutoff)
 		|| (Material.AlphaMode == MaterialAlphaModeBlend && alpha <= 0.0);
 	OverdrawOutput output;

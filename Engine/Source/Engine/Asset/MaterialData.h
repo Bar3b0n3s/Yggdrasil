@@ -45,8 +45,10 @@ namespace Engine {
 	};
 
 	// A PBR metallic-roughness material (§6.5, §8.5), registry struct "Material". Every field is serialized under its member
-	// name, in member order, after "Format": "Material" and "Version": 1. Texture slots are null for "no texture" (the
-	// renderer binds White, FlatNormal or Black then, §8.4). Defaults and bounds (also enforced on every write path, §5.4):
+	// name, in member order, after "Format": "Material" and "Version": 2. Texture slots are null for "no texture" (the
+	// renderer binds White, FlatNormal or Black then, §8.4); each map's UV set follows it (M23, version 2: UV0 by default, and
+	// a version 1 file, which has none, loads with UV0 everywhere). Defaults and bounds (also enforced on every write path,
+	// §5.4):
 	//   BaseColor (1, 1, 1, 1), each 0 to 1 (linear; the map is sRGB)   Metallic 0, Roughness 0.5, both 0 to 1
 	//   NormalScale 1, >= 0          OcclusionStrength 1, 0 to 1        Emissive (0, 0, 0), each 0 to 1
 	//   EmissiveStrength 1, >= 0     AlphaMode Opaque                   AlphaCutoff 0.5, 0 to 1
@@ -57,9 +59,11 @@ namespace Engine {
 	{
 		static constexpr AssetType StaticType = AssetType::Material;
 		static constexpr std::string_view FormatName = "Material";
-		static constexpr uint32_t CurrentVersion = 1;
-		// The cooked payload layout (CookedHeader::FormatVersion): the minified canonical document.
-		static constexpr uint16_t FormatVersion = 1;
+		// M23 (Material version 2; Docs/Decisions/0034-m23-contract.md decision 10): the five <Map>UVSet fields. Version 1
+		// files load with UV0 sets and save as version 2.
+		static constexpr uint32_t CurrentVersion = 2;
+		// The cooked payload layout (CookedHeader::FormatVersion): the minified canonical document, version 2 with the UV sets.
+		static constexpr uint16_t FormatVersion = 2;
 
 		MaterialData()
 			: Asset(StaticType)
@@ -68,8 +72,8 @@ namespace Engine {
 
 		glm::vec4 BaseColor{ 1.0f, 1.0f, 1.0f, 1.0f };
 		TypedAssetHandle<AssetType::Texture> BaseColorMap{};
-		// M23 (Material version 2, decision 10): each map's texture coordinate set follows its map; stream M registers them
-		// (until then they are UV0 and never written).
+		// M23 (Material version 2, decision 10): each map's texture coordinate set follows its map (MaterialConstants'
+		// MaterialFlag<Map>UV1 bits); one UVScale and UVOffset still transform every map.
 		Engine::TextureCoordinateSet BaseColorUVSet = Engine::TextureCoordinateSet::UV0;
 		float Metallic = 0.0f;
 		float Roughness = 0.5f;
@@ -92,8 +96,8 @@ namespace Engine {
 		glm::vec2 UVOffset{ 0.0f, 0.0f };
 	};
 
-	// Registers the enum "AlphaMode" and the struct "Material" (MaterialData; colours as ColorFields, the bounds above, a
-	// Generate hook when a Validate rule exists, §5.4).
+	// Registers the enums "AlphaMode" and "TextureCoordinateSet" and the struct "Material" (MaterialData; colours as
+	// ColorFields, the bounds above, a Generate hook when a Validate rule exists, §5.4).
 	void RegisterMaterialTypes(TypeRegistry& registry);
 
 	// The texture handles `material` references, without nulls, sorted and unique: its dependencies in the
@@ -118,8 +122,9 @@ namespace Engine {
 
 	// Reads a .material document strictly through the registry (StructInfo::FromJson of "Material": missing keys keep their
 	// defaults, unknown keys warn into `report`, or fail with `strictUnknowns`, every value validated, enum names exact).
-	// Errors: Validation (located, with every bad field as an issue) for a wrong "Format", a version below 1, a wrong JSON
-	// type or an out-of-range value; UnsupportedVersion naming both versions for a newer file.
+	// Versions 1 and 2 read alike: version 1 has no UV set keys, which keep their default UV0. Errors: Validation (located,
+	// with every bad field as an issue) for a wrong "Format", a version below 1, a wrong JSON type or an out-of-range value;
+	// UnsupportedVersion naming both versions for a newer file.
 	[[nodiscard]] Result<MaterialData> MaterialFromJson(const Json& document, const TypeRegistry& registry, MaterialLoadReport& report,
 		bool strictUnknowns = false);
 

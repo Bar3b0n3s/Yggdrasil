@@ -23,7 +23,9 @@
 #include <format>
 #include <list>
 #include <set>
+#include <span>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <vector>
 
@@ -206,7 +208,8 @@ namespace Engine {
 			return outcome;
 		}
 
-		// The codes no fixture's Codes contain, the fixtures named in `excluded` left out: gate 6's Missing list, sorted.
+		// The codes no fixture's Codes contain, the fixtures named in `excluded` left out: gate 6's Missing list, sorted. A
+		// retired code (ProjectValidator::GetRetiredCodes), which nothing reports, is never missing.
 		std::vector<std::string> FindUntriggeredCodes(const std::set<std::string>& excluded)
 		{
 			std::set<std::string> triggered;
@@ -217,9 +220,10 @@ namespace Engine {
 					triggered.insert(fixture.Codes.begin(), fixture.Codes.end());
 			}
 			std::vector<std::string> missing;
+			const std::span<const std::string_view> retired = ProjectValidator::GetRetiredCodes();
 			for (const std::string_view code : ProjectValidator::GetCodes())
 			{
-				if (!triggered.contains(std::string(code)))
+				if (!triggered.contains(std::string(code)) && std::ranges::find(retired, code) == retired.end())
 					missing.emplace_back(code);
 			}
 			return missing;
@@ -230,11 +234,13 @@ namespace Engine {
 	TEST_SUITE("EditorCore")
 	{
 		// Architecture §15.6 gate 6. Each directory is named after the code it exists for (or "Clean", the baseline that
-		// reports nothing) and its Expected.json lists every code the fixture reports.
+		// reports nothing) and its Expected.json lists every code the fixture reports. A retired code (M23,
+		// ProjectValidator::GetRetiredCodes) has no fixture, since nothing reports it.
 		TEST_CASE("Validation: every project.validate code is triggered by a fixture in Tests/Data/Validation")
 		{
 			const std::vector<std::string> fixtures = ListValidationFixtures();
 			REQUIRE_FALSE(fixtures.empty());
+			const std::span<const std::string_view> retired = ProjectValidator::GetRetiredCodes();
 			bool clean = false;
 			for (const std::string& file : fixtures)
 			{
@@ -252,10 +258,27 @@ namespace Engine {
 				{
 					CAPTURE(code);
 					CHECK(std::ranges::find(ProjectValidator::GetCodes(), code) != ProjectValidator::GetCodes().end());
+					CHECK(std::ranges::find(retired, code) == retired.end());
 				}
 			}
 			CHECK(clean);
 			CHECK(FindUntriggeredCodes({}).empty());
+			// Every retired code stays a code, in GetCodes order, and is documented as no longer reported.
+			const auto codes = ProjectValidator::GetCodes();
+			const auto infos = ProjectValidator::GetCodeInfos();
+			CHECK(std::ranges::is_sorted(retired, {}, [&codes](std::string_view code)
+			{
+				return std::ranges::find(codes, code) - codes.begin();
+			}));
+			for (const std::string_view code : retired)
+			{
+				CAPTURE(code);
+				CHECK(std::ranges::find(codes, code) != codes.end());
+				const auto info = std::ranges::find(infos, code, &ValidationCodeInfo::Code);
+				REQUIRE(info != infos.end());
+				CHECK(info->Description.starts_with("No longer reported"));
+			}
+			CHECK(std::ranges::find(retired, AssetVertexColorsIgnoredCode) != retired.end());
 		}
 
 		TEST_CASE("Validation: each fixture reports exactly its expected codes")

@@ -4,7 +4,7 @@
 	"Handle": "630ec0c721d9d0f6",
 	"Type": "Prefab",
 	"Importer": "Gltf",
-	"ImporterVersion": 1,
+	"ImporterVersion": 2,
 	"Settings": {
 		"Scale": 1,
 		"GenerateMissingTangents": true,

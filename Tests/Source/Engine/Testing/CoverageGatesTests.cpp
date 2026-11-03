@@ -2,6 +2,7 @@
 #include "Engine/Testing/CoverageGates.h"
 
 #include "Engine/Asset/MeshData.h"
+#include "Engine/Asset/SourceFormats.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Scene/Components/CameraComponent.h"
@@ -572,9 +573,18 @@ namespace Engine {
 			const auto initial = recorder.GetCounters();
 			REQUIRE_FALSE(initial.empty());
 			CHECK(std::ranges::is_sorted(initial, {}, &TestCoverageCounter::Id));
-			CHECK(std::ranges::none_of(initial, [](const TestCoverageCounter& counter)
+			// Every importable extension is a counter, .exr among them since M23's EnvironmentImporter version 2 imports it
+			// (an extension an importer claims only to refuse would not be one; none is left).
+			CHECK(std::ranges::any_of(initial, [](const TestCoverageCounter& counter)
 			{
 				return counter.Id == "format:Environment/.exr";
+			}));
+			CHECK(std::ranges::all_of(GetSourceFormats(), [&initial](const SourceFormat& format)
+			{
+				return !format.Importable || std::ranges::any_of(initial, [&format](const TestCoverageCounter& counter)
+				{
+					return counter.Id == std::format("format:{}/{}", format.Importer, format.Extension);
+				});
 			}));
 
 			for (int frame = 0; frame < 3; ++frame)

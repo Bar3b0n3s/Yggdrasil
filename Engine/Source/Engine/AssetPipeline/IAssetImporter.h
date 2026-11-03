@@ -159,9 +159,9 @@ namespace Engine {
 		// Export.PruneUnreferenced, Game.pak hold. The one reference an importer cannot see is a scene's or prefab's Script
 		// field value, which it reads without the scripts' field schemas; the exporter collects those itself.
 		std::vector<AssetHandle> Dependencies{};
-		// Warnings found (ASSET_UNSUPPORTED_UV_SET, ASSET_VERTEX_COLORS_IGNORED, ASSET_TANGENTS_APPROXIMATED,
-		// ASSET_CONTENT_SKIPPED), in the order found; their Asset and Path are filled in by the importer. Stored in the cache
-		// manifest, so they are reported again when the cache serves the import.
+		// Warnings found (ASSET_UNSUPPORTED_UV_SET, ASSET_TANGENTS_APPROXIMATED, ASSET_CONTENT_SKIPPED), in the order found;
+		// their Asset and Path are filled in by the importer. Stored in the cache manifest, so they are reported again when
+		// the cache serves the import.
 		std::vector<AssetDiagnostic> Diagnostics{};
 	};
 

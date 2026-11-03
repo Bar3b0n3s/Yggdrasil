@@ -5,7 +5,7 @@
 	"Seed": 0,
 	"ComponentVersions": {
 		"Transform": 1,
-		"Prefab": 1,
+		"Prefab": 2,
 		"PrefabLink": 1,
 		"MeshRenderer": 1,
 		"Camera": 1,
@@ -149,7 +149,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "5cc9b88209088b98",
-					"InstanceRoot": "155dd98002eff778"
+					"InstanceRoot": "155dd98002eff778",
+					"OuterPrefabEntityID": null
 				}
 			}
 		},
@@ -167,7 +168,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "a52f07f2aa43c866",
-					"InstanceRoot": "155dd98002eff778"
+					"InstanceRoot": "155dd98002eff778",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "95b2b0ffa573c606",
@@ -196,7 +198,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "d356a8c163ce2b48",
-					"InstanceRoot": "282f2f83a0cb82ce"
+					"InstanceRoot": "282f2f83a0cb82ce",
+					"OuterPrefabEntityID": null
 				}
 			}
 		},
@@ -214,7 +217,8 @@
 				},
 				"PrefabLink": {
 					"PrefabEntityID": "51b3abe2bc4f4a47",
-					"InstanceRoot": "282f2f83a0cb82ce"
+					"InstanceRoot": "282f2f83a0cb82ce",
+					"OuterPrefabEntityID": null
 				},
 				"MeshRenderer": {
 					"Mesh": "754a6bb94ccf1dce",

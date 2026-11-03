@@ -103,9 +103,10 @@ namespace Engine {
 		constexpr std::string_view AssetMetaExample = R"({"Format": "AssetMeta", "Version": 1, "Handle": "8c5e9fa7d7637795", "Type": "Texture", "Importer": "Texture",
 "ImporterVersion": 1, "Settings": {"Usage": "Color", "GenerateMips": true}, "SubAssets": []})";
 
-		constexpr std::string_view MaterialExample = R"({"Format": "Material", "Version": 1, "BaseColor": [0.9, 0.15, 0.15, 1], "BaseColorMap": null, "Metallic": 0,
-"Roughness": 0.45, "MetallicRoughnessMap": null, "NormalMap": null, "NormalScale": 1, "OcclusionMap": null, "OcclusionStrength": 1,
-"Emissive": [0, 0, 0], "EmissiveStrength": 1, "EmissiveMap": null, "AlphaMode": "Opaque", "AlphaCutoff": 0.5, "DoubleSided": false,
+		constexpr std::string_view MaterialExample = R"({"Format": "Material", "Version": 2, "BaseColor": [0.9, 0.15, 0.15, 1], "BaseColorMap": null,
+"BaseColorUVSet": "UV0", "Metallic": 0, "Roughness": 0.45, "MetallicRoughnessMap": null, "MetallicRoughnessUVSet": "UV0", "NormalMap": null,
+"NormalUVSet": "UV0", "NormalScale": 1, "OcclusionMap": null, "OcclusionUVSet": "UV0", "OcclusionStrength": 1, "Emissive": [0, 0, 0],
+"EmissiveStrength": 1, "EmissiveMap": null, "EmissiveUVSet": "UV0", "AlphaMode": "Opaque", "AlphaCutoff": 0.5, "DoubleSided": false,
 "UVScale": [1, 1], "UVOffset": [0, 0]})";
 
 		constexpr std::string_view SoundEffectExample = R"({"Format": "SoundEffect", "Version": 1, "Seed": 7, "Volume": 0.7,
@@ -658,12 +659,13 @@ namespace Engine {
 		static std::string GenerateValidation()
 		{
 			std::string out = std::format("# Validation codes\n\n{}\n\n", GeneratedNote);
-			out += "The codes `project.validate` reports (Architecture §13.7), in report order, from `ProjectValidator::GetCodeInfos`. Each "
-				   "diagnostic is `{id, severity, code, message, entity?, component?, field?, asset?, file?, line?, hint, autoFixable}`; "
-				   "`project.validate {fix: true}` applies every safe fix and `fix: [ids or codes]` only the selected ones, as one "
-				   "undoable command. Auto-fix says whether at least some diagnostics of a code are fixable; each diagnostic's own "
-				   "`autoFixable` is authoritative. Every code has a fixture under `Tests/Data/Validation/<CODE>/` that triggers it "
-				   "(coverage gate 6).\n\n";
+			out += "The codes `project.validate` reports (Architecture §13.7), in report order, from `ProjectValidator::GetCodeInfos`; "
+				   "the list keeps the retired codes it no longer reports (`ProjectValidator::GetRetiredCodes`), so that a code is never "
+				   "reused. Each diagnostic is `{id, severity, code, message, entity?, component?, field?, asset?, file?, line?, hint, "
+				   "autoFixable}`; `project.validate {fix: true}` applies every safe fix and `fix: [ids or codes]` only the selected "
+				   "ones, as one undoable command. Auto-fix says whether at least some diagnostics of a code are fixable; each "
+				   "diagnostic's own `autoFixable` is authoritative. Every code but a retired one has a fixture under "
+				   "`Tests/Data/Validation/<CODE>/` that triggers it (coverage gate 6).\n\n";
 			out += "| Code | Severity | Auto-fix | Description | Fix |\n|---|---|---|---|---|\n";
 			for (const ValidationCodeInfo& info : ProjectValidator::GetCodeInfos())
 			{

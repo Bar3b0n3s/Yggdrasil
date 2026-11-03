@@ -35,7 +35,12 @@ namespace Engine {
 			}
 			CHECK(std::ranges::is_sorted(table));
 			CHECK(table == registered);
-			CHECK(refused == std::vector<std::string>{ ".exr" });
+			// M23 (Docs/Decisions/0034-m23-contract.md decision 14): EnvironmentImporter version 2 imports .exr, which version 1
+			// claimed only to refuse, so no extension is refused.
+			CHECK(refused.empty());
+			const SourceFormat* exr = FindSourceFormat(".exr");
+			REQUIRE(exr != nullptr);
+			CHECK(exr->Importable);
 
 			const SourceFormat* jpeg = FindSourceFormat(".JPEG");
 			REQUIRE(jpeg != nullptr);

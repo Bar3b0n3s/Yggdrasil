@@ -22,8 +22,11 @@ Kept content: Golden.jsonl's outputs below Assets/Scenes/Golden, Assets/Material
 Assets/Textures/Golden are not regenerated: they are exactly the files Scaffold/Baseline/Provenance.json records below
 Assets/, each with the XXH64 of the bytes its recorded run wrote. They change only through a recorded regeneration (ADR
 0028's ledger): their requests move into a golden scaffold, whose run writes them again with provenance, and their
-baseline entries go (T-FTPROV moved the M9 part this way into GoldenRendererII.jsonl). A baseline entry below Assets/
-outside the kept directories is refused (exit code 1).
+baseline entries go (T-FTPROV moved the M9 part this way into GoldenRendererII.jsonl); or the project's recorded upgrade
+(Editor --upgrade, transcribed in Automation/BuildLog.jsonl) rewrites them in their canonical form, which changes no
+image, and the provenance entries it records replace their baseline entries (M23's Material version 2,
+Docs/Decisions/0034-m23-contract.md decision 21). A baseline entry below Assets/ outside the kept directories is refused
+(exit code 1).
 
 Regeneration, in place (the default) or in a temporary copy (--check):
   1. remove every output of the scaffolds: every file below Assets/ but the kept files (a file in a kept directory
@@ -43,10 +46,10 @@ Regeneration, in place (the default) or in a temporary copy (--check):
 that differs, is missing or is extra, unless every file outside Library/ is byte-identical to the repository's (the
 editor's *.bak backups, which the project's .gitignore excludes, are not compared), and each kept file of the
 repository's project holds the bytes its baseline entry records ("kept-differs", "kept-missing"). A
-scaffold with Renderer "vulkan" (an .hdr import needs the GPU environment baker) fails without a usable Vulkan device
-and names the reason. In place, an editor that has the project open makes the run fail before anything is removed: the
-project's Library/Editor.lock is probed on every OS like the engine's ProjectLock::IsHeld (a non-blocking lock of the
-lock's byte on Windows, a shared non-blocking flock on Linux and macOS), released at once if it succeeds.
+scaffold with Renderer "vulkan" (an .hdr or .exr import needs the GPU environment baker) fails without a usable Vulkan
+device and names the reason. In place, an editor that has the project open makes the run fail before anything is
+removed: the project's Library/Editor.lock is probed on every OS like the engine's ProjectLock::IsHeld (a non-blocking
+lock of the lock's byte on Windows, a shared non-blocking flock on Linux and macOS), released at once if it succeeds.
 
 Every run, --check included, holds the machine-wide GPU lock (Scripts/Lib/locks.py; Docs/Architecture.md §2.3, ADR 0028
 decision 16), shared by every checkout of the repository, from its start to its end: it waits while another GPU run

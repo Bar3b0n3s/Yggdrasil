@@ -305,11 +305,11 @@ namespace Engine {
 
 		TEST_CASE("GoldenScene: the scaffold's sources and their imported copies are the Tests/Data fixtures")
 		{
-			// Projects/FeatureTest/Scaffold/Sources holds the files Golden.jsonl and Formats.jsonl import (asset.import takes
-			// project paths or absolute ones, so the committed scaffolds import from inside the project): a subset mirror of
-			// Tests/Data/Assets, never a deliberately invalid fixture (ADR 0022 decision 16). Every source and every copy the
-			// imports made under Assets/ must stay byte-identical to its generated or pinned fixture (Tests/Data/Generate,
-			// FetchAssets.py fixture).
+			// Projects/FeatureTest/Scaffold/Sources holds the files the scaffolds import, Golden.jsonl's, Formats.jsonl's and
+			// later ones' such as GoldenTextured.jsonl's (asset.import takes project paths or absolute ones, so the committed
+			// scaffolds import from inside the project): a subset mirror of Tests/Data/Assets, never a deliberately invalid
+			// fixture (ADR 0022 decision 16). Every source and every copy the imports made under Assets/ must stay
+			// byte-identical to its generated or pinned fixture (Tests/Data/Generate, FetchAssets.py fixture).
 			const std::filesystem::path sources = GetFeatureTestPath("Scaffold/Sources");
 			const Result<std::vector<std::filesystem::path>> entries = FileSystem::ListDirectory(sources, true);
 			REQUIRE_MESSAGE(entries.has_value(), entries.error().ToString());
@@ -330,29 +330,42 @@ namespace Engine {
 				mirrored.push_back(relative);
 			}
 
-			// The golden imports keep their M8 destinations; Formats.jsonl imports into Assets/Formats/<same relative path>.
-			struct SourceCopy
+			// Every copy an import made under Assets/, wherever its scaffold put it (the golden imports' M8 destinations,
+			// GoldenTextured.jsonl's textures with Compression Auto and None, AssetFormats.jsonl's uncompressed environment,
+			// SpriteSheets.jsonl's texture and every later scaffold's): each file whose name is a source's (the sources' names
+			// are unique) holds that source's bytes, so a copy edited or imported from another file fails here.
+			std::map<std::string, std::string> sourceByName;
+			for (const std::string& relative : mirrored)
 			{
-				std::string_view Fixture;  // below Tests/Data/Assets
-				std::string_view Imported; // below Projects/FeatureTest/Assets
-			};
-			constexpr std::array<SourceCopy, 5> GoldenCopies = { {
-				{ "Gltf/NormalMapped.gltf", "Models/Golden/NormalMapped.gltf" },
-				{ "Gltf/Textured.bin", "Models/Golden/Textured.bin" },
-				{ "Gltf/Textured.gltf", "Models/Golden/Textured.gltf" },
-				{ "Gltf/Textures/Checker.png", "Models/Golden/Textures/Checker.png" },
-				{ "Textures/Rgba.png", "Textures/Golden/Rgba.png" },
-			} };
+				const std::string name = FileSystem::PathToUtf8(FileSystem::PathFromUtf8(relative).filename());
+				CAPTURE(relative);
+				CHECK(sourceByName.emplace(name, relative).second);
+			}
+			const std::filesystem::path assets = GetFeatureTestPath("Assets");
+			const Result<std::vector<std::filesystem::path>> assetFiles = FileSystem::ListDirectory(assets, true);
+			REQUIRE_MESSAGE(assetFiles.has_value(), assetFiles.error().ToString());
 			std::vector<std::string> imported;
-			for (const SourceCopy& copy : GoldenCopies)
+			for (const std::filesystem::path& entry : *assetFiles)
 			{
-				CAPTURE(std::string(copy.Fixture));
-				const Result<Buffer> fixture = FileSystem::ReadFile(Test::GetTestDataPath("Assets/" + std::string(copy.Fixture)));
-				const Result<Buffer> copied = FileSystem::ReadFile(GetFeatureTestPath("Assets/" + std::string(copy.Imported)));
+				const Result<FileInfo> info = FileSystem::GetInfo(entry);
+				REQUIRE(info.has_value());
+				const auto source = sourceByName.find(FileSystem::PathToUtf8(entry.filename()));
+				if (info->IsDirectory || source == sourceByName.end())
+					continue;
+				CAPTURE(FileSystem::PathToUtf8(entry.lexically_relative(assets)));
+				const Result<Buffer> fixture = FileSystem::ReadFile(Test::GetTestDataPath("Assets/" + source->second));
+				const Result<Buffer> copied = FileSystem::ReadFile(entry);
 				REQUIRE(fixture.has_value());
 				REQUIRE(copied.has_value());
 				CHECK(*copied == *fixture);
-				imported.emplace_back(copy.Fixture);
+				imported.push_back(source->second);
+			}
+			// The copies outside Assets/Formats that the scaffolds are known to make: the walk reaches them.
+			for (const std::string_view copy : { "Models/Golden/Textured.gltf", "Textures/Golden/Rgba.png", "Textures/GoldenTextured/None/Normal.png",
+					 "Textures/Uncompressed/Rgba.png", "Textures/SpriteSheets/Rgba.png", "Environments/Uncompressed/Gradient.exr" })
+			{
+				CAPTURE(std::string(copy));
+				CHECK(FileSystem::Exists(GetFeatureTestPath("Assets/" + std::string(copy))));
 			}
 			const std::filesystem::path formats = GetFeatureTestPath("Assets/Formats");
 			const Result<std::vector<std::filesystem::path>> copies = FileSystem::ListDirectory(formats, true);

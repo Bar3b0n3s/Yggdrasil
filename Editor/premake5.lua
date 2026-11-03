@@ -45,6 +45,7 @@ project "EditorCore"
 	UseMiniaudio()
 	UseMikkTSpace()
 	UseCMPCore()
+	UseTinyExr()
 	UseLuau(true)
 
 project "Editor"
@@ -94,4 +95,5 @@ project "Editor"
 	UseMikkTSpace()
 	UseNativeFileDialog()
 	UseCMPCore()
+	UseTinyExr()
 	UseLuau(true)

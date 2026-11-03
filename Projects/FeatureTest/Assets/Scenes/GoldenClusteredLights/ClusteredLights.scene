@@ -1,0 +1,1779 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "ClusteredLights",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"PointLight": 2,
+		"SpotLight": 1,
+		"Environment": 1,
+		"PostProcess": 1
+	},
+	"Entities": [
+		{
+			"ID": "5c2709e629bf72d8",
+			"Name": "Rendering",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Environment": {
+					"Environment": null,
+					"Intensity": 1,
+					"Rotation": 0,
+					"ShowSkybox": true,
+					"SkyboxBlur": 0,
+					"FallbackColor": [0.015, 0.015, 0.02]
+				},
+				"PostProcess": {
+					"ExposureEV": 0,
+					"Tonemap": "AgX",
+					"SsaoEnabled": false,
+					"SsaoRadius": 0.5,
+					"SsaoIntensity": 1,
+					"SsaoQuality": "Medium",
+					"BloomEnabled": false,
+					"BloomIntensity": 0.04,
+					"FxaaEnabled": true
+				}
+			}
+		},
+		{
+			"ID": "3eb4d5145fc903fe",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 7.5, 10.5],
+					"Rotation": [-0.309017, 0, 0, 0.95105654],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 50,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 60,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.01, 0.012, 0.018]
+				}
+			}
+		},
+		{
+			"ID": "fd4e72decaa8a7d5",
+			"Name": "Ground",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [20, 1, 20]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000103",
+					"Materials": ["818d840ccae88694"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "ada9a3a082e13994",
+			"Name": "Block00",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-5, 0.3, -5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.6, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "c00c2d96ad621f4f",
+			"Name": "Block01",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3, 0.5, -5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 1, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "1448be60e072c31b",
+			"Name": "Block02",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1, 0.3, -5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.6, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "698ce4bb2cda0769",
+			"Name": "Block03",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1, 0.5, -5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 1, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "1095a947ceb1fe8e",
+			"Name": "Block04",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3, 0.3, -5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.6, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "22f740575f0d1a06",
+			"Name": "Block05",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [5, 0.5, -5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 1, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "05e9093feed00903",
+			"Name": "Block06",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-5, 0.4, -3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.8, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "e10cd6898c130c19",
+			"Name": "Block07",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3, 0.6, -3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 1.2, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "4109f42438dc9596",
+			"Name": "Block08",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1, 0.4, -3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.8, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "5bf6394e42f17b76",
+			"Name": "Block09",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1, 0.6, -3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 1.2, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "04e6bb34e87afad2",
+			"Name": "Block10",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3, 0.4, -3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.8, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "baf57a223c25f1ff",
+			"Name": "Block11",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [5, 0.6, -3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 1.2, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "a941de30421e6591",
+			"Name": "Block12",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-5, 0.5, -1],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 1, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "b49d306220ae6bbc",
+			"Name": "Block13",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3, 0.3, -1],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.6, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "82a357274a30a58b",
+			"Name": "Block14",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1, 0.5, -1],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 1, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "bad937a3cfe77079",
+			"Name": "Block15",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1, 0.3, -1],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.6, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "16a5a10f8a7400f2",
+			"Name": "Block16",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3, 0.5, -1],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 1, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "2441dd9f8ef18308",
+			"Name": "Block17",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [5, 0.3, -1],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.6, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "22fc6ea7461a0d19",
+			"Name": "Block18",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-5, 0.6, 1],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 1.2, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "9e7b5737b2d3678c",
+			"Name": "Block19",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3, 0.4, 1],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.8, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "58286288be0b9a76",
+			"Name": "Block20",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1, 0.6, 1],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 1.2, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "509212fa01b415f5",
+			"Name": "Block21",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1, 0.4, 1],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.8, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "56ba4c0f219edc01",
+			"Name": "Block22",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3, 0.6, 1],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 1.2, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "06a2251eaf22d3d8",
+			"Name": "Block23",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [5, 0.4, 1],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.8, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "428515e6e60758fd",
+			"Name": "Block24",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-5, 0.3, 3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.6, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "e4d9626f6afe1b9f",
+			"Name": "Block25",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3, 0.5, 3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 1, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "374d6ec54ff8b68a",
+			"Name": "Block26",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1, 0.3, 3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.6, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "cf95851904c5dfd9",
+			"Name": "Block27",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1, 0.5, 3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 1, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "de9a4b90bff324fd",
+			"Name": "Block28",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3, 0.3, 3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.6, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "071bc4ec9fa3ed94",
+			"Name": "Block29",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [5, 0.5, 3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 1, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "28bf04c2537e2ff8",
+			"Name": "Block30",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-5, 0.4, 5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.8, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "07a24fc4a58959e3",
+			"Name": "Block31",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3, 0.6, 5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 1.2, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "6c753d203e482770",
+			"Name": "Block32",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1, 0.4, 5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.8, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "2c5f6a2a3e62a69e",
+			"Name": "Block33",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1, 0.6, 5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 1.2, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "76572b8a258a11a2",
+			"Name": "Block34",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3, 0.4, 5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.8, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "bccda06084402d8b",
+			"Name": "Block35",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [5, 0.6, 5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 1.2, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["7bc90846b3c9e579"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "6757c614ad2d89a2",
+			"Name": "Orb0",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-4, 0.4, -4],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.8, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["42e964bb68cc3ab9"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "249dcf8772501560",
+			"Name": "Orb1",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.4, -4],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.8, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["42e964bb68cc3ab9"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "afc0b5dfbfb1ded7",
+			"Name": "Orb2",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [4, 0.4, -4],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.8, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["42e964bb68cc3ab9"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "0f657c8311c1d7e1",
+			"Name": "Orb3",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-4, 0.4, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.8, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["42e964bb68cc3ab9"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "2d700198c27500bf",
+			"Name": "Orb4",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.4, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.8, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["42e964bb68cc3ab9"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "fa0ec4fec0652f74",
+			"Name": "Orb5",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [4, 0.4, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.8, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["42e964bb68cc3ab9"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "d64df814c592dfac",
+			"Name": "Orb6",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-4, 0.4, 4],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.8, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["42e964bb68cc3ab9"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "6401a16567c770e9",
+			"Name": "Orb7",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.4, 4],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.8, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["42e964bb68cc3ab9"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "54f0796d0fbd70dc",
+			"Name": "Orb8",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [4, 0.4, 4],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.8, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["42e964bb68cc3ab9"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "a999d6cfbd91be92",
+			"Name": "ShadowLamp1",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3, 2.2, -2],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [1, 0.55, 0.3],
+					"Intensity": 14,
+					"Range": 8,
+					"CastShadows": true,
+					"SourceRadius": 0.08
+				}
+			}
+		},
+		{
+			"ID": "26d6373d36588935",
+			"Name": "ShadowLamp2",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3, 2.2, -2],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [0.35, 0.7, 1],
+					"Intensity": 14,
+					"Range": 8,
+					"CastShadows": true,
+					"SourceRadius": 0.08
+				}
+			}
+		},
+		{
+			"ID": "53269a1bb4dfb11c",
+			"Name": "ShadowLamp3",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 2.2, 3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [0.5, 1, 0.45],
+					"Intensity": 14,
+					"Range": 8,
+					"CastShadows": true,
+					"SourceRadius": 0.08
+				}
+			}
+		},
+		{
+			"ID": "fb292b35a196168e",
+			"Name": "Lamp01",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-6, 0.5, -5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [1, 0.4, 0.75],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "f7762dd9fdd9d7ed",
+			"Name": "Lamp02",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3.6, 0.5, -5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [1, 0.9, 0.4],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "40d45d2ec95e5fc3",
+			"Name": "Lamp03",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1.2, 0.5, -5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [0.6, 0.45, 1],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "420472722422ebb7",
+			"Name": "Lamp04",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1.2, 0.5, -5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [0.4, 1, 0.9],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "c3dac8d7eef85b1a",
+			"Name": "Lamp05",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3.6, 0.5, -5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [1, 0.3, 0.3],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "8f8bc70655cf846a",
+			"Name": "Lamp06",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [6, 0.5, -5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [1, 0.55, 0.3],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "bd2d069611f56092",
+			"Name": "Lamp07",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-6, 0.5, -2.5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [0.35, 0.7, 1],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "0e7a6edf757f3c3f",
+			"Name": "Lamp08",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3.6, 0.5, -2.5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [0.5, 1, 0.45],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "c4b75e235ce9b1cc",
+			"Name": "Lamp09",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1.2, 0.5, -2.5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [1, 0.4, 0.75],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "3147a3ab8b1e90af",
+			"Name": "Lamp10",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1.2, 0.5, -2.5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [1, 0.9, 0.4],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "6e21465169872d72",
+			"Name": "Lamp11",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3.6, 0.5, -2.5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [0.6, 0.45, 1],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "886f295bd064de18",
+			"Name": "Lamp12",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [6, 0.5, -2.5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [0.4, 1, 0.9],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "73ce96798257b80f",
+			"Name": "Lamp13",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-6, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [1, 0.3, 0.3],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "1c5233a744009e56",
+			"Name": "Lamp14",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3.6, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [1, 0.55, 0.3],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "d7ba1c96d26c73b5",
+			"Name": "Lamp15",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1.2, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [0.35, 0.7, 1],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "498ede30e942ca6d",
+			"Name": "Lamp16",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1.2, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [0.5, 1, 0.45],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "7e59430577ac35d8",
+			"Name": "Lamp17",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3.6, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [1, 0.4, 0.75],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "97afe915b647c01e",
+			"Name": "Lamp18",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [6, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [1, 0.9, 0.4],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "a8e85aa4ca135250",
+			"Name": "Lamp19",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-6, 0.5, 2.5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [0.6, 0.45, 1],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "a983db2a9cb87cd0",
+			"Name": "Lamp20",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3.6, 0.5, 2.5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [0.4, 1, 0.9],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "7678270d0d8ec0dc",
+			"Name": "Lamp21",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1.2, 0.5, 2.5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [1, 0.3, 0.3],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "2f2c805a4aa4e0d2",
+			"Name": "Lamp22",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1.2, 0.5, 2.5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [1, 0.55, 0.3],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "6a04ee12c5abd1f0",
+			"Name": "Lamp23",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3.6, 0.5, 2.5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [0.35, 0.7, 1],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "e8af331dbdca0a17",
+			"Name": "Lamp24",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [6, 0.5, 2.5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [0.5, 1, 0.45],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "2034cb2f0af88d4f",
+			"Name": "Lamp25",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-6, 0.5, 5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [1, 0.4, 0.75],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "90eff9757b4d9749",
+			"Name": "Lamp26",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3.6, 0.5, 5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [1, 0.9, 0.4],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "b4bca45e371c2977",
+			"Name": "Lamp27",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1.2, 0.5, 5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [0.6, 0.45, 1],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "ddb58ea9735d70f9",
+			"Name": "Lamp28",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1.2, 0.5, 5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [0.4, 1, 0.9],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "31acef0913701325",
+			"Name": "Lamp29",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3.6, 0.5, 5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [1, 0.3, 0.3],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "d249c9b55ad9aa68",
+			"Name": "Lamp30",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [6, 0.5, 5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [1, 0.55, 0.3],
+					"Intensity": 2.5,
+					"Range": 2,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "ec7a538cc6b7137a",
+			"Name": "Spot1",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-8, 5, 2],
+					"Rotation": [-0.29619813, -0.4698463, -0.17101008, 0.81379765],
+					"Scale": [1, 1, 1]
+				},
+				"SpotLight": {
+					"Color": [0.6, 0.45, 1],
+					"Intensity": 40,
+					"Range": 16,
+					"InnerConeAngle": 12,
+					"OuterConeAngle": 22,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "6d6bfbb370a28cc6",
+			"Name": "Spot2",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [8, 5, 2],
+					"Rotation": [-0.29619813, 0.4698463, 0.17101008, 0.81379765],
+					"Scale": [1, 1, 1]
+				},
+				"SpotLight": {
+					"Color": [0.4, 1, 0.9],
+					"Intensity": 40,
+					"Range": 16,
+					"InnerConeAngle": 12,
+					"OuterConeAngle": 22,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		}
+	]
+}

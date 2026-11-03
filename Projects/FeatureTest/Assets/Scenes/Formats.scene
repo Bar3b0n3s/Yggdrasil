@@ -571,7 +571,7 @@
 			}
 		},
 		{
-			"ID": "12b48182da7780cd",
+			"ID": "8f2550153c82ec0e",
 			"Name": "SheetHolder",
 			"Parent": null,
 			"Active": true,
@@ -585,13 +585,83 @@
 				"Script": {
 					"Scripts": [
 						{
-							"Script": "5f6d935758e2bfd1",
+							"Script": "12b48182da7780cd",
 							"Fields": {
-								"Sheet": "aa3013b7e31d75ca"
+								"Sheet": "5f6d935758e2bfd1"
 							},
 							"ExecutionOrder": 0
 						}
 					]
+				}
+			}
+		},
+		{
+			"ID": "c46669308830602a",
+			"Name": "Attributes",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-4.5, 2, -1],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Prefab": {
+					"Prefab": "c7e24a022e43c158",
+					"Overrides": []
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "c142ace051717e52",
+					"InstanceRoot": "c46669308830602a",
+					"OuterPrefabEntityID": null
+				}
+			}
+		},
+		{
+			"ID": "21c160d5fd28c4c3",
+			"Name": "Painted",
+			"Parent": "c46669308830602a",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "800c52b012c2f8b4",
+					"InstanceRoot": "c46669308830602a",
+					"OuterPrefabEntityID": null
+				},
+				"MeshRenderer": {
+					"Mesh": "fb623fc953757190",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "a9143dbd5ec17b4c",
+			"Name": "SecondUV",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [5, 2, -1],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000104",
+					"Materials": ["88401d8605bd8817"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
 				}
 			}
 		}

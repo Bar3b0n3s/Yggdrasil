@@ -67,13 +67,16 @@ namespace Engine {
 		};
 
 		// Positions, normals and tangents of a primitive in its node's space, with the triangle list; the attribute
-		// vectors have one entry per vertex.
+		// vectors have one entry per vertex. TexCoords1 and Colors (M23, MeshData version 2's attribute stream) are empty
+		// when the primitive has no TEXCOORD_1 or no COLOR_0.
 		struct PrimitiveAttributes
 		{
 			std::vector<glm::vec3> Positions{};
 			std::vector<glm::vec3> Normals{};
 			std::vector<glm::vec2> TexCoords{};
 			std::vector<glm::vec4> Tangents{};
+			std::vector<glm::vec2> TexCoords1{};
+			std::vector<glm::vec4> Colors{};
 			std::vector<uint32_t> Indices{};
 		};
 
@@ -81,6 +84,8 @@ namespace Engine {
 		struct PrimitiveGeometry
 		{
 			std::vector<MeshVertex> Vertices{};
+			// One per vertex when the primitive has TEXCOORD_1 or COLOR_0 (the missing one at its default), else empty.
+			std::vector<MeshVertexAttributes> Attributes{};
 			std::vector<uint32_t> Indices{}; // triangle list, counter-clockwise front faces
 		};
 
@@ -434,6 +439,28 @@ namespace Engine {
 			return "invalid";
 		}
 
+		// The TEXCOORD_<n> set a texture view samples: KHR_texture_transform's texCoord override, else textureInfo.texCoord.
+		static cgltf_int GetTexCoord(const cgltf_texture_view& view)
+		{
+			return view.has_transform && view.transform.has_texcoord ? view.transform.texcoord : view.texcoord;
+		}
+
+		// M23 (Material version 2): the UV set of a map imported as `map`: UV1 for a texture on TEXCOORD_1, else UV0 (an
+		// empty slot, or a texture on TEXCOORD_2 and up, which the importer ignores with ASSET_UNSUPPORTED_UV_SET).
+		static TextureCoordinateSet GetTextureCoordinateSet(const cgltf_texture_view& view, AssetHandle map)
+		{
+			return map.IsValid() && GetTexCoord(view) == 1 ? TextureCoordinateSet::UV1 : TextureCoordinateSet::UV0;
+		}
+
+		// The TEXCOORD_<n> set the normal texture of `primitive`'s material samples, which its generated tangents follow;
+		// 0 without a material or a normal texture.
+		static cgltf_int GetNormalTexCoord(const cgltf_primitive& primitive)
+		{
+			if (primitive.material == nullptr || primitive.material->normal_texture.texture == nullptr)
+				return 0;
+			return GetTexCoord(primitive.material->normal_texture);
+		}
+
 		static bool IsFinite(const glm::vec3& value)
 		{
 			return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
@@ -547,6 +574,10 @@ namespace Engine {
 				attributes.Normals.push_back(attributes.Normals[vertex]);
 				attributes.TexCoords.push_back(attributes.TexCoords[vertex]);
 				attributes.Tangents.push_back(tangent);
+				if (!attributes.TexCoords1.empty())
+					attributes.TexCoords1.push_back(attributes.TexCoords1[vertex]);
+				if (!attributes.Colors.empty())
+					attributes.Colors.push_back(attributes.Colors[vertex]);
 				copies[vertex].emplace_back(tangent, copyIndex);
 				attributes.Indices[corner] = copyIndex;
 			}
@@ -614,6 +645,7 @@ namespace Engine {
 
 			[[nodiscard]] Status ImportMaterials();
 			[[nodiscard]] Result<AssetHandle> ImportTextureSlot(const cgltf_texture_view& view, ImageUse use, size_t material, std::string_view slot);
+			[[nodiscard]] Result<std::vector<glm::vec4>> ReadColors(const cgltf_accessor& accessor, std::string_view subject) const;
 			[[nodiscard]] Result<AssetHandle> FindStandaloneTexture(size_t image);
 			[[nodiscard]] Result<Buffer> ReadImage(size_t image);
 
@@ -946,14 +978,17 @@ namespace Engine {
 			if (view.texture == nullptr)
 				return AssetHandle();
 
-			const cgltf_int texCoord = view.has_transform && view.transform.has_texcoord ? view.transform.texcoord : view.texcoord;
-			if (texCoord != 0)
+			// M23 (GltfImporter version 2): TEXCOORD_0 and TEXCOORD_1 are the mesh's two UV sets (the map's UV set,
+			// GetTextureCoordinateSet); a texture bound to a third set is ignored.
+			const cgltf_int texCoord = Utils::GetTexCoord(view);
+			if (texCoord < 0 || texCoord > 1)
 			{
 				const std::string materialName = Utils::GetName(m_Data->materials[material].name, std::format("Material {}", material));
 				AddWarning(AssetUnsupportedUvSetCode, std::format("materials[{}].{}", material, slot),
-					std::format("materials[{}] '{}' binds its {} to TEXCOORD_{}; the vertex format has one UV set, so the texture is ignored", material,
-						materialName, slot, texCoord),
-					"bake the texture against TEXCOORD_0, or remove it from the material");
+					std::format("materials[{}] '{}' binds its {} to TEXCOORD_{}; meshes have the UV sets TEXCOORD_0 and TEXCOORD_1, so the texture "
+								"is ignored",
+						material, materialName, slot, texCoord),
+					"bake the texture against TEXCOORD_0 or TEXCOORD_1, or remove it from the material");
 				return AssetHandle();
 			}
 
@@ -1033,6 +1068,12 @@ namespace Engine {
 				material.NormalMap = TypedAssetHandle<AssetType::Texture>(normalMap);
 				material.OcclusionMap = TypedAssetHandle<AssetType::Texture>(occlusionMap);
 				material.EmissiveMap = TypedAssetHandle<AssetType::Texture>(emissiveMap);
+				// M23 (Material version 2): each bound map samples its textureInfo.texCoord; an empty slot keeps UV0.
+				material.BaseColorUVSet = Utils::GetTextureCoordinateSet(pbr.base_color_texture, baseColorMap);
+				material.MetallicRoughnessUVSet = Utils::GetTextureCoordinateSet(pbr.metallic_roughness_texture, metallicRoughnessMap);
+				material.NormalUVSet = Utils::GetTextureCoordinateSet(source.normal_texture, normalMap);
+				material.OcclusionUVSet = Utils::GetTextureCoordinateSet(source.occlusion_texture, occlusionMap);
+				material.EmissiveUVSet = Utils::GetTextureCoordinateSet(source.emissive_texture, emissiveMap);
 
 				// Factors: glTF bounds them as the Material registry does, except for the unbounded scales and strength;
 				// the clamps keep a slightly out-of-range exporter value loadable. A non-finite value is an error.
@@ -1293,12 +1334,6 @@ namespace Engine {
 				AddWarning(AssetContentSkippedCode, subject + ".targets",
 					std::format("{} has morph targets, which the engine does not import: the base shape is used", subject), {});
 			}
-			if (cgltf_find_accessor(&primitive, cgltf_attribute_type_color, 0) != nullptr)
-			{
-				AddWarning(AssetVertexColorsIgnoredCode, subject,
-					std::format("{} has COLOR_0 vertex colours, which the engine ignores (the vertex format has no colour)", subject),
-					"bake the vertex colours into a base colour texture");
-			}
 
 			const size_t vertexCount = positionAccessor->count;
 			if (vertexCount > std::numeric_limits<uint32_t>::max())
@@ -1409,7 +1444,29 @@ namespace Engine {
 					attributes.TexCoords[vertex] = glm::vec2(texCoords[usedVertices[vertex] * 2], texCoords[usedVertices[vertex] * 2 + 1]);
 			}
 
-			// Tangents: the file's (with its normals), else MikkTSpace, else a perpendicular basis.
+			// M23 (GltfImporter version 2): the attribute stream's second UV set and vertex colour (MeshVertexAttributes).
+			const cgltf_accessor* texCoord1Accessor = cgltf_find_accessor(&primitive, cgltf_attribute_type_texcoord, 1);
+			if (texCoord1Accessor != nullptr)
+			{
+				ENGINE_TRY_ASSIGN(const std::vector<float> texCoords, ReadFloats(*texCoord1Accessor, cgltf_type_vec2, subject, "TEXCOORD_1"));
+				attributes.TexCoords1.resize(usedVertices.size());
+				for (size_t vertex = 0; vertex < usedVertices.size(); ++vertex)
+					attributes.TexCoords1[vertex] = glm::vec2(texCoords[usedVertices[vertex] * 2], texCoords[usedVertices[vertex] * 2 + 1]);
+			}
+			const cgltf_accessor* colorAccessor = cgltf_find_accessor(&primitive, cgltf_attribute_type_color, 0);
+			if (colorAccessor != nullptr)
+			{
+				ENGINE_TRY_ASSIGN(const std::vector<glm::vec4> colors, ReadColors(*colorAccessor, subject));
+				attributes.Colors.resize(usedVertices.size());
+				for (size_t vertex = 0; vertex < usedVertices.size(); ++vertex)
+					attributes.Colors[vertex] = colors[usedVertices[vertex]];
+			}
+
+			// Tangents: the file's (with its normals), else MikkTSpace over the UV set the primitive's normal texture samples
+			// (glTF 2.0 §3.7.2.1; TEXCOORD_0 unless its material binds the normal texture to TEXCOORD_1 and the primitive has
+			// it), else a perpendicular basis.
+			const bool tangentsFromTexCoord1 = Utils::GetNormalTexCoord(primitive) == 1 && texCoord1Accessor != nullptr;
+			const cgltf_accessor* tangentTexCoords = tangentsFromTexCoord1 ? texCoord1Accessor : texCoordAccessor;
 			bool haveTangents = false;
 			const cgltf_accessor* tangentAccessor = cgltf_find_accessor(&primitive, cgltf_attribute_type_tangent, 0);
 			if (tangentAccessor != nullptr && normalAccessor != nullptr)
@@ -1430,12 +1487,12 @@ namespace Engine {
 			}
 			if (!haveTangents)
 			{
-				if (m_Settings.GenerateMissingTangents && texCoordAccessor != nullptr)
+				if (m_Settings.GenerateMissingTangents && tangentTexCoords != nullptr)
 				{
 					ENGINE_TRY_ASSIGN(const std::vector<glm::vec4> cornerTangents, WithContext(Utils::GenerateCornerTangents({
 																								   .Positions = attributes.Positions,
 																								   .Normals = attributes.Normals,
-																								   .TexCoords = attributes.TexCoords,
+																								   .TexCoords = tangentsFromTexCoord1 ? attributes.TexCoords1 : attributes.TexCoords,
 																								   .Indices = attributes.Indices,
 																							   }),
 																					   std::format("while generating the tangents of {} in '{}'", subject, m_DisplayPath)));
@@ -1468,13 +1525,58 @@ namespace Engine {
 					.TexCoord = attributes.TexCoords[vertex],
 				};
 			}
+			if (!attributes.TexCoords1.empty() || !attributes.Colors.empty())
+			{
+				geometry.Attributes.resize(attributes.Positions.size());
+				for (size_t vertex = 0; vertex < attributes.Positions.size(); ++vertex)
+				{
+					if (!attributes.TexCoords1.empty())
+						geometry.Attributes[vertex].TexCoord1 = attributes.TexCoords1[vertex];
+					if (!attributes.Colors.empty())
+						geometry.Attributes[vertex].Color = attributes.Colors[vertex];
+				}
+			}
 			geometry.Indices = std::move(attributes.Indices);
 			return geometry;
+		}
+
+		// COLOR_0 as RGBA: a VEC3 accessor takes alpha 1 (glTF 2.0 §3.7.2.1), float or normalized unsigned byte or short
+		// (cgltf_accessor_unpack_floats reads normalized integers as [0, 1]). A float channel outside [0, 1] is clamped into
+		// it, as the material factors are.
+		Result<std::vector<glm::vec4>> GltfImport::ReadColors(const cgltf_accessor& accessor, std::string_view subject) const
+		{
+			if (accessor.type != cgltf_type_vec3 && accessor.type != cgltf_type_vec4)
+			{
+				return std::unexpected(Fail(std::format("{} has a COLOR_0 accessor of type {}, expected VEC3 or VEC4", subject,
+					Utils::GetAccessorTypeName(accessor.type))));
+			}
+			const bool rgb = accessor.type == cgltf_type_vec3;
+			ENGINE_TRY_ASSIGN(const std::vector<float> values, ReadFloats(accessor, accessor.type, subject, "COLOR_0"));
+			const size_t components = rgb ? 3 : 4;
+			std::vector<glm::vec4> colors(accessor.count);
+			for (size_t vertex = 0; vertex < colors.size(); ++vertex)
+			{
+				const float* channels = values.data() + vertex * components;
+				const glm::vec4 color(channels[0], channels[1], channels[2], rgb ? 1.0f : channels[3]);
+				colors[vertex] = glm::clamp(color, 0.0f, 1.0f);
+			}
+			return colors;
 		}
 
 		void GltfImport::AppendSubmesh(MeshData& mesh, PrimitiveGeometry geometry, const cgltf_primitive& primitive) const
 		{
 			const uint32_t baseVertex = static_cast<uint32_t>(mesh.Vertices.size());
+			// The mesh has the attribute stream once one of its primitives has it: the vertices of the others take the
+			// defaults (TexCoord1 (0, 0), opaque white), which draw them as a mesh without the stream draws. Until then the
+			// stream is empty, so resizing it to the vertices so far gives the earlier primitives their defaults.
+			if (!geometry.Attributes.empty() || !mesh.Attributes.empty())
+			{
+				mesh.Attributes.resize(mesh.Vertices.size());
+				if (geometry.Attributes.empty())
+					mesh.Attributes.resize(mesh.Vertices.size() + geometry.Vertices.size());
+				else
+					mesh.Attributes.insert(mesh.Attributes.end(), geometry.Attributes.begin(), geometry.Attributes.end());
+			}
 			MeshSubmesh submesh;
 			submesh.IndexOffset = static_cast<uint32_t>(mesh.Indices.size());
 			submesh.IndexCount = static_cast<uint32_t>(geometry.Indices.size());

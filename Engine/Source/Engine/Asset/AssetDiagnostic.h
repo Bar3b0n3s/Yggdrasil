@@ -40,10 +40,12 @@ namespace Engine {
 	// Warning: a glTF primitive needs generated tangents but has no TEXCOORD_0, so MikkTSpace cannot run and the tangents
 	// are an arbitrary basis perpendicular to the normal (Appendix C; MikkTSpace is vendored, ADR 0001).
 	inline constexpr std::string_view AssetTangentsApproximatedCode = "ASSET_TANGENTS_APPROXIMATED";
-	// Warning: a glTF texture is bound to TEXCOORD_1 (an occlusion map, typically) and is ignored: the vertex format has UV0
-	// only (§6.8, §7.4).
+	// Warning: a glTF texture is bound to TEXCOORD_2 or a later set and is ignored: meshes have the UV sets TEXCOORD_0 and
+	// TEXCOORD_1 (M23, MeshData version 2; §6.8, §7.4).
 	inline constexpr std::string_view AssetUnsupportedUvSetCode = "ASSET_UNSUPPORTED_UV_SET";
-	// Warning: a glTF primitive has COLOR_0, which is ignored: the vertex format has no colour (§7.4).
+	// Retired (M23): GltfImporter version 2 imports COLOR_0 into the mesh's attribute stream, so nothing reports it; the code
+	// stays so it is never reused (ProjectValidator::GetRetiredCodes). Version 1 warned that a glTF primitive's COLOR_0 was
+	// ignored.
 	inline constexpr std::string_view AssetVertexColorsIgnoredCode = "ASSET_VERTEX_COLORS_IGNORED";
 	// Warning: glTF content the engine does not import was skipped (§1.2, §7.4): a points or lines primitive, a skin, an
 	// animation, a camera or a light. Subject names the item ("meshes[2].primitives[0]", "animations[0]"). Recorded in

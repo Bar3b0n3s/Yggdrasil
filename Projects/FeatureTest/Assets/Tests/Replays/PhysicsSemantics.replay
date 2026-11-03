@@ -189,13 +189,13 @@
 				"Handle": "00ccaf2a32599084",
 				"Path": "Assets/Scenes/Components/Materials/Glow.material",
 				"Type": "Material",
-				"Hash": "cadc5b1385919e49"
+				"Hash": "442044ac447b0d97"
 			},
 			{
 				"Handle": "103291d13c7ad4df",
 				"Path": "Assets/Scenes/Components/Materials/Metal.material",
 				"Type": "Material",
-				"Hash": "b05eae1d9bf71722"
+				"Hash": "45fedfa386929650"
 			},
 			{
 				"Handle": "271b19875531f0e3",
@@ -219,13 +219,13 @@
 				"Handle": "9016817dbe7d2c7a",
 				"Path": "Assets/Scenes/Components/Materials/Crate.material",
 				"Type": "Material",
-				"Hash": "b7623843a4e03375"
+				"Hash": "a18f6315cf2ebe2f"
 			},
 			{
 				"Handle": "d31facacf6bb6908",
 				"Path": "Assets/Scenes/Components/Materials/Ground.material",
 				"Type": "Material",
-				"Hash": "2ea00f6cb6cac4da"
+				"Hash": "6c73020cc30c1dd8"
 			}
 		]
 	},

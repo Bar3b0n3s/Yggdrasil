@@ -37,7 +37,8 @@
 // ("/Models/Box.bin"), DriveLetterUri.gltf ("C:/Models/Box.bin"), HttpUri.gltf ("http://example.com/Box.bin"),
 // EncodedParentEscape.gltf ("%2e%2e/Outside.bin"), EncodedBackslash.gltf ("..%5COutside.bin"), EncodedAbsolute.gltf
 // ("%2FModels/Box.bin"), EncodedUri.gltf with "Encoded Data/Box.bin" (URI "Encoded%20Data/Box.bin"),
-// TexCoord1Occlusion.gltf, VertexColors.gltf, DracoRequired.gltf (extensionsRequired KHR_draco_mesh_compression),
+// TexCoord1Occlusion.gltf, TexCoord2Occlusion.gltf, VertexColors.gltf, Attributes.gltf (M23: TEXCOORD_1 and COLOR_0 in
+// their normalized forms), DracoRequired.gltf (extensionsRequired KHR_draco_mesh_compression),
 // StandaloneTexture.gltf with Textures/Shared.png, Hierarchy.gltf, PrimitiveModes.gltf, SkippedContent.gltf,
 // Materials.gltf and NoNormalsNoUvs.gltf (the generator's docstring describes each).
 
@@ -48,9 +49,10 @@ namespace Engine {
 	namespace {
 
 		// Every fixture that imports.
-		constexpr std::array<std::string_view, 15> ImportableFixtures = { "Box.gltf", "Box.glb", "Textured.gltf", "NormalMapped.gltf",
-			"NormalMappedNoTangents.gltf", "AlphaModes.gltf", "DataUri.gltf", "TexCoord1Occlusion.gltf", "VertexColors.gltf", "StandaloneTexture.gltf",
-			"Hierarchy.gltf", "PrimitiveModes.gltf", "SkippedContent.gltf", "Materials.gltf", "NoNormalsNoUvs.gltf" };
+		constexpr std::array<std::string_view, 18> ImportableFixtures = { "Box.gltf", "Box.glb", "Textured.gltf", "NormalMapped.gltf",
+			"NormalMappedNoTangents.gltf", "AlphaModes.gltf", "DataUri.gltf", "TexCoord1Occlusion.gltf", "TexCoord2Occlusion.gltf", "VertexColors.gltf",
+			"Attributes.gltf", "LateAttributes.gltf", "StandaloneTexture.gltf", "Hierarchy.gltf", "PrimitiveModes.gltf", "SkippedContent.gltf",
+			"Materials.gltf", "NoNormalsNoUvs.gltf" };
 
 		// Copies Tests/Data/Assets/Gltf into project://Assets/Models.
 		void CopyGltfFixtures(Test::AssetTestFixture& fixture)
@@ -630,32 +632,121 @@ namespace Engine {
 			CHECK(parsed.error().GetCode() == ErrorCode::Parse);
 		}
 
-		TEST_CASE("GltfImporter: TEXCOORD_1 and COLOR_0 raise their diagnostics")
+		// M23 (GltfImporter version 2; Docs/Decisions/0034-m23-contract.md decision 9): meshes have the UV sets TEXCOORD_0 and
+		// TEXCOORD_1, so only a texture on a later set is ignored, with ASSET_UNSUPPORTED_UV_SET.
+		TEST_CASE("GltfImporter: a texture bound to TEXCOORD_2 is ignored with ASSET_UNSUPPORTED_UV_SET")
 		{
 			Test::AssetTestFixture fixture;
 			CopyGltfFixtures(fixture);
-			Result<ImportResult> occlusion = ImportGltf(fixture, "Assets/Models/TexCoord1Occlusion.gltf", MakeGltfMetadata(AssetHandle(0xf1)));
+			Result<ImportResult> occlusion = ImportGltf(fixture, "Assets/Models/TexCoord2Occlusion.gltf", MakeGltfMetadata(AssetHandle(0xf1)));
 			REQUIRE_MESSAGE(occlusion.has_value(), occlusion.error().ToString());
 			REQUIRE(occlusion->Diagnostics.size() == 1);
 			CHECK(occlusion->Diagnostics.front().Code == AssetUnsupportedUvSetCode);
 			CHECK(occlusion->Diagnostics.front().Severity == DiagnosticSeverity::Warning);
-			CHECK(occlusion->Diagnostics.front().Path == "Assets/Models/TexCoord1Occlusion.gltf");
+			CHECK(occlusion->Diagnostics.front().Path == "Assets/Models/TexCoord2Occlusion.gltf");
 			CHECK(occlusion->Diagnostics.front().Asset == AssetHandle(0xf1));
 			CHECK(occlusion->Diagnostics.front().Subject == "materials[0].occlusionTexture");
 			// The occlusion texture is ignored: the material has no occlusion map, and no texture is imported for it.
-			const ImportedArtifact* material = FindArtifact(*occlusion, AssetType::Material);
-			REQUIRE(material != nullptr);
-			Result<AssetRef<MaterialData>> loaded = LoadCookedMaterial(material->Cooked, fixture.GetRegistry());
-			REQUIRE(loaded.has_value());
-			CHECK_FALSE((*loaded)->OcclusionMap.IsValid());
+			const AssetRef<MaterialData> material = LoadMaterial(fixture, FindArtifact(*occlusion, AssetType::Material));
+			CHECK_FALSE(material->OcclusionMap.IsValid());
+			CHECK(material->OcclusionUVSet == TextureCoordinateSet::UV0);
 			CHECK(FindArtifact(*occlusion, AssetType::Texture) == nullptr);
+			// TEXCOORD_1 is still the mesh's second UV set; TEXCOORD_2 is dropped.
+			const AssetRef<MeshData> mesh = LoadMesh(FindArtifact(*occlusion, AssetType::Mesh));
+			REQUIRE(mesh->Attributes.size() == mesh->Vertices.size());
+			CHECK(mesh->Attributes[2].TexCoord1 == glm::vec2(0.5f, 0.5f));
+		}
 
+		// M23 (GltfImporter version 2, MeshData and Material version 2; decisions 9 and 10): TEXCOORD_1 and COLOR_0, in every
+		// component type glTF allows them, fill the mesh's attribute stream, and each map samples the UV set its textureInfo
+		// names. ASSET_VERTEX_COLORS_IGNORED is no longer produced.
+		TEST_CASE("GltfImporter: TEXCOORD_1 and COLOR_0 import into the attribute stream, and each map takes its UV set")
+		{
+			Test::AssetTestFixture fixture;
+			CopyGltfFixtures(fixture);
+
+			// Float VEC4 colours, and no TEXCOORD_1: the second set is (0, 0).
 			Result<ImportResult> colors = ImportGltf(fixture, "Assets/Models/VertexColors.gltf", MakeGltfMetadata(AssetHandle(0xf2)));
 			REQUIRE_MESSAGE(colors.has_value(), colors.error().ToString());
-			REQUIRE(colors->Diagnostics.size() == 1);
-			CHECK(colors->Diagnostics.front().Code == AssetVertexColorsIgnoredCode);
-			CHECK(colors->Diagnostics.front().Subject == "meshes[0].primitives[0]");
-			CHECK(colors->Diagnostics.front().Path == "Assets/Models/VertexColors.gltf");
+			CHECK(colors->Diagnostics.empty());
+			const AssetRef<MeshData> painted = LoadMesh(FindArtifact(*colors, AssetType::Mesh));
+			REQUIRE(painted->Attributes.size() == 4);
+			CHECK(painted->Attributes[0].Color == glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
+			CHECK(painted->Attributes[2].Color == glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
+			CHECK(painted->Attributes[3].TexCoord1 == glm::vec2(0.0f));
+
+			// An occlusion texture on TEXCOORD_1 is imported, sampling UV1; the mesh's colours are white.
+			Result<ImportResult> occlusion = ImportGltf(fixture, "Assets/Models/TexCoord1Occlusion.gltf", MakeGltfMetadata(AssetHandle(0xf3)));
+			REQUIRE_MESSAGE(occlusion.has_value(), occlusion.error().ToString());
+			CHECK(occlusion->Diagnostics.empty());
+			const AssetRef<MaterialData> occluded = LoadMaterial(fixture, FindArtifact(*occlusion, AssetType::Material));
+			CHECK(occluded->OcclusionMap.IsValid());
+			CHECK(occluded->OcclusionUVSet == TextureCoordinateSet::UV1);
+			CHECK(occluded->BaseColorUVSet == TextureCoordinateSet::UV0);
+			const AssetRef<MeshData> second = LoadMesh(FindArtifact(*occlusion, AssetType::Mesh));
+			REQUIRE(second->Attributes.size() == 4);
+			CHECK(second->Attributes[2].TexCoord1 == glm::vec2(0.5f, 0.5f));
+			CHECK(second->Attributes[2].Color == glm::vec4(1.0f));
+
+			// Attributes.gltf: normalized unsigned byte TEXCOORD_1 and unsigned short VEC3 COLOR_0 (alpha 1) on the first
+			// quad, normalized unsigned byte VEC4 COLOR_0 on the second, neither on the third (the stream's defaults).
+			Result<ImportResult> attributes = ImportGltf(fixture, "Assets/Models/Attributes.gltf", MakeGltfMetadata(AssetHandle(0xf4)));
+			REQUIRE_MESSAGE(attributes.has_value(), attributes.error().ToString());
+			CHECK(attributes->Diagnostics.empty());
+			const AssetRef<MeshData> mesh = LoadMesh(FindArtifact(*attributes, AssetType::Mesh));
+			REQUIRE(mesh->Submeshes.size() == 3);
+			REQUIRE(mesh->Vertices.size() == 12);
+			REQUIRE(mesh->Attributes.size() == 12);
+			// The first quad's corners: top-left, top-right, bottom-right, bottom-left (u, v); TEXCOORD_1 is (1 - u, v).
+			CHECK(mesh->Attributes[0].TexCoord1 == glm::vec2(1.0f, 0.0f));
+			CHECK(mesh->Attributes[1].TexCoord1 == glm::vec2(0.0f, 0.0f));
+			CHECK(mesh->Attributes[2].TexCoord1 == glm::vec2(0.0f, 1.0f));
+			CHECK(mesh->Attributes[0].Color == glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
+			CHECK(mesh->Attributes[2].Color == glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
+			CHECK(Test::ApproxEqual(mesh->Attributes[3].Color, glm::vec4(glm::vec3(32768.0f / 65535.0f), 1.0f)));
+			CHECK(Test::ApproxEqual(mesh->Attributes[5].Color, glm::vec4(0.0f, 1.0f, 0.0f, 128.0f / 255.0f)));
+			CHECK(mesh->Attributes[7].Color == glm::vec4(1.0f, 1.0f, 1.0f, 0.0f));
+			CHECK(mesh->Attributes[5].TexCoord1 == glm::vec2(0.0f));
+			for (size_t vertex = 8; vertex < 12; ++vertex)
+				CHECK(mesh->Attributes[vertex] == MeshVertexAttributes{});
+
+			// The first quad's material samples its base colour and normal maps with UV1, the others nothing.
+			const AssetRef<MaterialData> material = LoadMaterial(fixture, FindArtifact(*attributes, "material:0:Painted"));
+			CHECK(material->BaseColorMap.IsValid());
+			CHECK(material->BaseColorUVSet == TextureCoordinateSet::UV1);
+			CHECK(material->NormalUVSet == TextureCoordinateSet::UV1);
+			CHECK(material->MetallicRoughnessUVSet == TextureCoordinateSet::UV0);
+			// Its tangents follow the normal texture's set: TEXCOORD_1 mirrors u, so the tangent runs along -X (glTF 2.0
+			// §3.7.2.1), where TEXCOORD_0's would run along +X.
+			CHECK(Test::ApproxEqual(mesh->Vertices[0].Tangent, glm::vec4(-1.0f, 0.0f, 0.0f, -1.0f), 1e-5f));
+			CHECK(Test::ApproxEqual(mesh->Vertices[4].Tangent, glm::vec4(1.0f, 0.0f, 0.0f, 1.0f), 1e-5f));
+
+			// LateAttributes.gltf: the first quad has neither attribute and the second both, with float COLOR_0 channels above 1
+			// and below 0. The first quad's vertices take the stream's defaults once the second's arrive, and the colours are
+			// clamped into [0, 1], which MeshData version 2 requires.
+			Result<ImportResult> late = ImportGltf(fixture, "Assets/Models/LateAttributes.gltf", MakeGltfMetadata(AssetHandle(0xf7)));
+			REQUIRE_MESSAGE(late.has_value(), late.error().ToString());
+			CHECK(late->Diagnostics.empty());
+			const AssetRef<MeshData> lateMesh = LoadMesh(FindArtifact(*late, AssetType::Mesh));
+			REQUIRE(lateMesh->Submeshes.size() == 2);
+			REQUIRE(lateMesh->Vertices.size() == 8);
+			REQUIRE(lateMesh->Attributes.size() == 8);
+			for (size_t vertex = 0; vertex < 4; ++vertex)
+				CHECK(lateMesh->Attributes[vertex] == MeshVertexAttributes{});
+			CHECK(lateMesh->Attributes[4].Color == glm::vec4(1.0f, 0.0f, 0.5f, 1.0f));
+			CHECK(lateMesh->Attributes[5].Color == glm::vec4(0.0f, 0.25f, 1.0f, 0.0f));
+			CHECK(lateMesh->Attributes[6].Color == glm::vec4(0.0f, 1.0f, 0.75f, 1.0f));
+			CHECK(lateMesh->Attributes[7].Color == glm::vec4(1.0f, 1.0f, 1.0f, 0.5f));
+			CHECK(lateMesh->Attributes[5].TexCoord1 == glm::vec2(0.5f, 0.0f));
+			CHECK(lateMesh->Attributes[6].TexCoord1 == glm::vec2(0.5f, 0.5f));
+
+			// MergeMeshes keeps the stream, and a mesh without either attribute has none.
+			Result<ImportResult> merged = ImportGltf(fixture, "Assets/Models/Attributes.gltf", MakeGltfMetadata(AssetHandle(0xf5), "MergeMeshes", Json(true)));
+			REQUIRE_MESSAGE(merged.has_value(), merged.error().ToString());
+			CHECK(LoadMesh(FindArtifact(*merged, "mesh:merged"))->Attributes == mesh->Attributes);
+			Result<ImportResult> box = ImportGltf(fixture, "Assets/Models/Box.gltf", MakeGltfMetadata(AssetHandle(0xf6)));
+			REQUIRE(box.has_value());
+			CHECK(LoadMesh(FindArtifact(*box, AssetType::Mesh))->Attributes.empty());
 		}
 
 		TEST_CASE("GltfImporter: an image with its own Texture meta is referenced, not duplicated")
@@ -1143,6 +1234,14 @@ namespace Engine {
 				document["nodes"][0]["matrix"] = Json::array({ 1, 0, 0, 0.5, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 });
 				CheckImportFails(ImportDocument(fixture, "Projective.gltf", document), ErrorCode::ImportFailed, { "nodes[0]", "projective" });
 			}
+			SUBCASE("a COLOR_0 accessor that is neither VEC3 nor VEC4")
+			{
+				// M23 (GltfImporter version 2): COLOR_0 is imported, so its type is checked; here it shares TEXCOORD_0's VEC2.
+				Json document = ReadBoxDocument(fixture);
+				Json& attributes = document["meshes"][0]["primitives"][0]["attributes"];
+				attributes["COLOR_0"] = attributes["TEXCOORD_0"];
+				CheckImportFails(ImportDocument(fixture, "Vec2Colors.gltf", document), ErrorCode::ImportFailed, { "meshes[0].primitives[0]", "COLOR_0", "VEC2" });
+			}
 			SUBCASE("a zero rotation")
 			{
 				Json document = ReadBoxDocument(fixture);
@@ -1264,7 +1363,7 @@ namespace Engine {
 		{
 			const GltfImporter importer;
 			CHECK(importer.GetId() == "Gltf");
-			CHECK(importer.GetVersion() == 1);
+			CHECK(importer.GetVersion() == 2);
 			CHECK(importer.GetMainType() == AssetType::Prefab);
 			CHECK(importer.GetSettingsTypeName() == "GltfImportSettings");
 			CHECK_FALSE(importer.RequiresMainThread());

@@ -131,8 +131,19 @@ project "CMP_Core"
 	filter { "toolset:clang", "action:vs*" }
 		buildoptions { "/clang:-fno-fast-math", "/clang:-ffp-contract=off" }
 
+	-- Debug is optimized too, for size (/O1), with the Debug runtime (its CRT and iterator debugging, as every consumer
+	-- links them): unoptimized, the BC6H encoder at CMP_Core's fixed quality made an environment import about six times
+	-- slower (Docs/Decisions/0034-m23-contract.md decision 21 has the measurements). The three configurations still compile
+	-- CMP_Core differently on purpose (Debug /O1, Release /O2, Dist "full" with link-time code generation): the cooked
+	-- bytes must not depend on the configuration, and a read of uninitialized memory, such as the one that kept BC3 out
+	-- (decision 13), leaves different stack contents under different code generation, so "TextureCompression: the fixture
+	-- set compresses to the committed bytes in every configuration" can still expose one by comparing Debug and Release.
+	-- Precise floating point without contraction (above) makes the level change no result of correct code. MSVC refuses
+	-- its run-time checks (/RTC1, which a Debug-runtime project gets by default) with optimization, so they are off.
 	filter "configurations:Debug"
 		runtime "Debug"
+		optimize "Size"
+		runtimechecks "Off"
 		symbols "on"
 
 	filter "configurations:Release"

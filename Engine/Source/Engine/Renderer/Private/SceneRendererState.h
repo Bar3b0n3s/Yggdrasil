@@ -49,6 +49,9 @@ namespace Engine {
 		struct SceneRendererDraw
 		{
 			nvrhi::IBuffer* VertexBuffer = nullptr; // held by the GpuResourceCache for the render
+			// M23 (C23.1, C-MESH2; Docs/Decisions/0034-m23-contract.md decision 9): vertex binding 1, the mesh's attribute stream
+			// or the cache's shared default stream (GpuMesh::AttributeBuffer), a function of the mesh; held by the cache.
+			nvrhi::IBuffer* AttributeBuffer = nullptr;
 			nvrhi::IBuffer* IndexBuffer = nullptr;
 			uint32_t IndexOffset = 0;
 			uint32_t IndexCount = 0;

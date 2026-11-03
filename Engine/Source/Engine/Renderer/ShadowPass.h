@@ -38,6 +38,7 @@ namespace Engine {
 	struct ShadowCasterDraw
 	{
 		nvrhi::BufferHandle Vertices{};
+		nvrhi::BufferHandle Attributes{}; // M23 (C-MESH2): vertex binding 1, the mesh's attribute stream (GpuMesh::AttributeBuffer)
 		nvrhi::BufferHandle Indices{};
 		uint32_t IndexOffset = 0;
 		uint32_t IndexCount = 0;

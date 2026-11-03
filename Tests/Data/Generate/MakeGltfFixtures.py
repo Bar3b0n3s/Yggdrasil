@@ -30,8 +30,18 @@ no TANGENT (the importer generates tangents with MikkTSpace), texture coordinate
   EncodedAbsolute.gltf         a buffer URI "%2FModels/Box.bin" (rejected: absolute once percent-decoded)
   EncodedUri.gltf              the cube with its buffer at the URI "Encoded%20Data/Box.bin", which names
   Encoded Data/Box.bin         "Encoded Data/Box.bin" once percent-decoded (accepted)
-  TexCoord1Occlusion.gltf      an occlusion texture on TEXCOORD_1 (ASSET_UNSUPPORTED_UV_SET; the slot is left empty)
-  VertexColors.gltf            a primitive with COLOR_0 (ASSET_VERTEX_COLORS_IGNORED)
+  TexCoord1Occlusion.gltf      an occlusion texture on TEXCOORD_1, which the primitive has (the material's
+                               OcclusionUVSet is UV1, M23)
+  TexCoord2Occlusion.gltf      an occlusion texture on TEXCOORD_2, which the primitive has (ASSET_UNSUPPORTED_UV_SET;
+                               the slot is left empty)
+  VertexColors.gltf            a primitive with float VEC4 COLOR_0 (the mesh's attribute stream, M23)
+  Attributes.gltf              one mesh of three quads (M23, MeshData version 2's attribute stream): the first with
+                               TEXCOORD_1 as normalized unsigned bytes and COLOR_0 as normalized unsigned short VEC3,
+                               its material's base colour and normal textures on TEXCOORD_1; the second with COLOR_0
+                               as normalized unsigned byte VEC4 only; the third with neither (the stream's defaults)
+  LateAttributes.gltf          one mesh of two quads (M23): the first with neither TEXCOORD_1 nor COLOR_0, so its
+                               vertices take the stream's defaults once the second's are imported; the second with float
+                               TEXCOORD_1 and float VEC4 COLOR_0 channels above 1 and below 0 (clamped into [0, 1])
   DracoRequired.gltf           extensionsRequired ["KHR_draco_mesh_compression"] (refused with ASSET_IMPORT_FAILED)
   StandaloneTexture.gltf       a material whose base color is Textures/Shared.png, which a project also imports as a
   Textures/Shared.png          standalone texture asset (the material reuses that asset instead of a sub-asset)
@@ -69,6 +79,7 @@ OUTPUT_DIRECTORY = Path(__file__).resolve().parents[1] / "Assets" / "Gltf"
 
 # glTF 2.0 constants: accessor component types, buffer view targets and primitive modes.
 FLOAT = 5126
+UNSIGNED_BYTE = 5121
 UNSIGNED_SHORT = 5123
 ARRAY_BUFFER = 34962
 ELEMENT_ARRAY_BUFFER = 34963
@@ -270,6 +281,18 @@ class GltfBuilder:
             accessor["min"] = [min(value[axis] for value in rounded) for axis in range(width)]
             accessor["max"] = [max(value[axis] for value in rounded) for axis in range(width)]
         return self.add_accessor(payload, accessor, target)
+
+    def add_normalized(self, values: Sequence[Sequence[int]], kind: str, component_type: int) -> int:
+        """A normalized unsigned byte or short vertex accessor, its elements 4-byte aligned (glTF 2.0 3.6.2.4)."""
+        width = len(values[0])
+        code = "B" if component_type == UNSIGNED_BYTE else "H"
+        element = struct.calcsize(f"<{width}{code}")
+        stride = element + (-element % 4)
+        payload = b"".join(struct.pack(f"<{width}{code}", *value) + b"\0" * (stride - element) for value in values)
+        accessor = {"componentType": component_type, "count": len(values), "normalized": True, "type": kind}
+        index = self.add_accessor(payload, accessor, ARRAY_BUFFER)
+        self.buffer_views[self.accessors[index]["bufferView"]]["byteStride"] = stride
+        return index
 
     def add_indices(self, indices: Sequence[int]) -> int:
         payload = b"".join(struct.pack("<H", index) for index in indices)
@@ -497,6 +520,68 @@ def make_texcoord1_occlusion() -> dict[str, bytes]:
     return {"TexCoord1Occlusion.gltf": gltf_text(builder.embedded_document())}
 
 
+def make_texcoord2_occlusion() -> dict[str, bytes]:
+    builder = GltfBuilder()
+    texture = builder.add_image({"uri": data_uri("image/png", OCCLUSION_PNG)})
+    material = plain_material("Occluded")
+    material["occlusionTexture"] = {"index": texture, "strength": 1.0, "texCoord": 2}
+    material_index = builder.add_material(material)
+    geometry = quad_geometry()
+    primitive = builder.add_primitive(geometry, material_index)
+    for name, scale in (("TEXCOORD_1", 0.5), ("TEXCOORD_2", 0.25)):
+        scaled = [(u * scale, v * scale) for u, v in geometry.texcoords]
+        primitive["attributes"][name] = builder.add_floats(scaled, "VEC2")
+    mesh = builder.add_mesh("Occluded", [primitive])
+    builder.add_node({"mesh": mesh, "name": "Occluded"})
+    return {"TexCoord2Occlusion.gltf": gltf_text(builder.embedded_document())}
+
+
+def make_attributes() -> dict[str, bytes]:
+    builder = GltfBuilder()
+    base_color = builder.add_image({"uri": data_uri("image/png", BASE_COLOR_PNG)})
+    normal = builder.add_image({"uri": data_uri("image/png", FLAT_NORMAL_PNG)})
+    painted = textured_material("Painted", base_color)
+    painted["pbrMetallicRoughness"]["baseColorTexture"]["texCoord"] = 1
+    painted["normalTexture"] = {"index": normal, "scale": 1.0, "texCoord": 1}
+    plain = plain_material("Plain")
+    materials = [builder.add_material(material) for material in (painted, plain, plain_material("Bare"))]
+    primitives = []
+    for slot, material in enumerate(materials):
+        geometry = quad_geometry((float(slot) * 1.5, 0.0, 0.0))
+        primitive = builder.add_primitive(geometry, material)
+        if slot == 0:
+            # The second UV set mirrors the first horizontally, in 255ths; the colours are 16-bit RGB.
+            second_set = [(255 - round(u * 255), round(v * 255)) for u, v in geometry.texcoords]
+            primitive["attributes"]["TEXCOORD_1"] = builder.add_normalized(second_set, "VEC2", UNSIGNED_BYTE)
+            colors = [(65535, 0, 0), (0, 65535, 0), (0, 0, 65535), (32768, 32768, 32768)]
+            primitive["attributes"]["COLOR_0"] = builder.add_normalized(colors, "VEC3", UNSIGNED_SHORT)
+        elif slot == 1:
+            colors = [(255, 0, 0, 255), (0, 255, 0, 128), (0, 0, 255, 64), (255, 255, 255, 0)]
+            primitive["attributes"]["COLOR_0"] = builder.add_normalized(colors, "VEC4", UNSIGNED_BYTE)
+        primitives.append(primitive)
+    mesh = builder.add_mesh("Painted", primitives)
+    builder.add_node({"mesh": mesh, "name": "Painted"})
+    return {"Attributes.gltf": gltf_text(builder.embedded_document())}
+
+
+def make_late_attributes() -> dict[str, bytes]:
+    builder = GltfBuilder()
+    materials = [builder.add_material(plain_material(name)) for name in ("Bare", "Late")]
+    primitives = []
+    for slot, material in enumerate(materials):
+        geometry = quad_geometry((float(slot) * 1.5, 0.0, 0.0))
+        primitive = builder.add_primitive(geometry, material)
+        if slot == 1:
+            second_set = [(u * 0.5, v * 0.5) for u, v in geometry.texcoords]
+            primitive["attributes"]["TEXCOORD_1"] = builder.add_floats(second_set, "VEC2")
+            colors = [(1.5, -0.25, 0.5, 2.0), (-1.0, 0.25, 1.0001, -0.5), (0.0, 1.0, 0.75, 1.0), (4.0, 4.0, 4.0, 0.5)]
+            primitive["attributes"]["COLOR_0"] = builder.add_floats(colors, "VEC4")
+        primitives.append(primitive)
+    mesh = builder.add_mesh("Late", primitives)
+    builder.add_node({"mesh": mesh, "name": "Late"})
+    return {"LateAttributes.gltf": gltf_text(builder.embedded_document())}
+
+
 def make_vertex_colors() -> dict[str, bytes]:
     builder = GltfBuilder()
     material = builder.add_material(plain_material("Painted"))
@@ -657,7 +742,10 @@ def build_fixtures() -> dict[str, bytes]:
         make_data_uri,
         make_uri_fixtures,
         make_texcoord1_occlusion,
+        make_texcoord2_occlusion,
         make_vertex_colors,
+        make_attributes,
+        make_late_attributes,
         make_draco_required,
         make_standalone_texture,
         make_hierarchy,

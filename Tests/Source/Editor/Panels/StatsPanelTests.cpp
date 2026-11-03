@@ -71,6 +71,26 @@ namespace Engine {
 			CHECK(Utils::HasStatsMetricRow(refreshed, "Audio voices", 0));
 		}
 
+		TEST_CASE("StatsPanel: a displayed view shows its spot and point shadow counts")
+		{
+			// M23 (Docs/Decisions/0034-m23-contract.md decision 21): the view metrics list the point-shadow counts stats.get
+			// reports (ShadowedPointLights, DroppedPointShadows) after the spot-shadow ones.
+			Test::UtilityPanelFixture fixture;
+			fixture.SetHostViews({ StatsViewSummary{ .Name = "scene", .Available = true, .Frame = "12", .Width = 640, .Height = 360, .ShadowDraws = 9, .ShadowedSpotLights = 3, .DroppedSpotShadows = 1, .ShadowedPointLights = 4, .DroppedPointShadows = 2 } });
+			fixture.OpenProject();
+			StatsPanel panel;
+			fixture.Draw(panel);
+			fixture.Pump();
+			const std::string text = fixture.Draw(panel);
+			INFO(text);
+			CHECK(text.contains("Scene view"));
+			CHECK(Utils::HasStatsMetricRow(text, "Shadow draws", 9));
+			CHECK(Utils::HasStatsMetricRow(text, "Shadowed spot lights", 3));
+			CHECK(Utils::HasStatsMetricRow(text, "Dropped spot shadows", 1));
+			CHECK(Utils::HasStatsMetricRow(text, "Shadowed point lights", 4));
+			CHECK(Utils::HasStatsMetricRow(text, "Dropped point shadows", 2));
+		}
+
 		TEST_CASE("StatsPanel: a project change discards the pending statistics action")
 		{
 			Test::UtilityPanelFixture fixture;

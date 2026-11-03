@@ -105,6 +105,9 @@
 		],
 		"CMP_Core": [
 			"Vendor/CMP_Core/cmp_core/source"
+		],
+		"tinyexr": [
+			"Vendor/tinyexr"
 		]
 	},
 	"GlobalThirdParty": {
@@ -402,18 +405,22 @@
 			"Layer": 5,
 			"Includes": [],
 			"MaxLayer": 4,
-			"Notes": "The importers' third-party code, all private (section 3 rule 3): cgltf (GltfImporter, CgltfImplementation.cpp), stb_image and stb_image_resize2 (TextureImporter; stb_image's implementation is Graphics', Docs/Decisions/0009-m5-decisions.md decision 11), stb_truetype.h (FontImporter, compiled with STBTT_STATIC in its own translation unit, Appendix C; Docs/Decisions/0030-m19-contract.md decision 23) and MikkTSpace, which only the glTF importer's tangent generator includes (Docs/Decisions/0010-m6-decisions.md).",
+			"Notes": "The importers' third-party code, all private (section 3 rule 3): cgltf (GltfImporter, CgltfImplementation.cpp), stb_image and stb_image_resize2 (TextureImporter; stb_image's implementation is Graphics', Docs/Decisions/0009-m5-decisions.md decision 11), stb_truetype.h (FontImporter, compiled with STBTT_STATIC in its own translation unit, Appendix C; Docs/Decisions/0030-m19-contract.md decision 23) and MikkTSpace, which only the glTF importer's tangent generator includes (Docs/Decisions/0010-m6-decisions.md). M23 (Docs/Decisions/0034-m23-contract.md decision 14): tinyexr, which only the environment importer includes (OpenEXR; its ZIP and PXR24 inflate is stb_image's zlib, Graphics' implementation).",
 			"ThirdParty": {
 				"Public": [],
 				"Private": [
 					"cgltf",
 					"stb",
-					"MikkTSpace"
+					"MikkTSpace",
+					"tinyexr"
 				]
 			},
 			"RestrictedThirdParty": {
 				"MikkTSpace": [
 					"Engine/Source/Engine/AssetPipeline/Private/TangentGenerator.cpp"
+				],
+				"tinyexr": [
+					"Engine/Source/Engine/AssetPipeline/Importers/EnvironmentImporter.cpp"
 				]
 			}
 		},

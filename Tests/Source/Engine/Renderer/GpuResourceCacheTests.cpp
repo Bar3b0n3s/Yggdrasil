@@ -361,7 +361,7 @@ namespace Engine {
 		// for every face (+X to -Z: a face read from the wrong layer fails) and close to the source's. Each face is a distinct
 		// constant colour, which BC6H holds within a few per cent. BC6HUfloat is CubeMapFormat's frozen value.
 		TEST_CASE("GpuResourceCache: a BC6H environment uploads as BC6H with BC support and through the decode fallback without it"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			constexpr uint32_t FaceSize = 8;
 			constexpr uint32_t MipCount = 4;
@@ -444,6 +444,116 @@ namespace Engine {
 					}
 				}
 				gpu.GetDevice().RunGarbageCollection();
+			}
+		}
+
+		// M23 (R-TEXC-HDR, decisions 7, 14 and 15, stream Y): BC6H environment cubes are asset mirrors of the placement rule's
+		// place 3. A skybox drawn from a BC6H environment matches the one drawn from its RGBA16F source within BC6H's error,
+		// on a device with BC (BC6H_UFLOAT) and through the decode fallback without it (RGBA16_FLOAT), and a device loss
+		// releases the mirror with the cache, whose next Get uploads the BC6H cube again, so the render after the recovery is
+		// byte-identical. Each face is a distinct constant colour below 1, which the Linear tonemapper keeps.
+		TEST_CASE("GpuResourceCache: a BC6H environment's skybox renders like its RGBA16F source, and after a device loss"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			constexpr uint32_t FaceSize = 16;
+			constexpr uint32_t MipCount = 5;
+			const std::array<glm::dvec3, CubeMapData::FaceCount> faceColors = { glm::dvec3(0.8, 0.2, 0.1), glm::dvec3(0.1, 0.7, 0.2),
+				glm::dvec3(0.2, 0.3, 0.9), glm::dvec3(0.9, 0.9, 0.2), glm::dvec3(0.1, 0.6, 0.6), glm::dvec3(0.7, 0.1, 0.7) };
+			EnvironmentData source;
+			source.Skybox = { .FaceSize = FaceSize, .MipCount = MipCount, .Format = CubeMapFormat::Rgba16Float, .Texels = {} };
+			EnvironmentData compressed;
+			compressed.Skybox = { .FaceSize = FaceSize, .MipCount = MipCount, .Format = CubeMapFormat::BC6HUfloat, .Texels = {} };
+			for (uint32_t level = 0; level < MipCount; ++level)
+			{
+				const uint32_t size = std::max(1U, FaceSize >> level);
+				for (uint32_t face = 0; face < CubeMapData::FaceCount; ++face)
+				{
+					Buffer texels;
+					for (uint32_t texel = 0; texel < size * size; ++texel)
+					{
+						for (const double value : { faceColors[face].x, faceColors[face].y, faceColors[face].z, 1.0 })
+						{
+							const uint16_t half = Test::DoubleToHalf(value);
+							texels.push_back(static_cast<std::byte>(half & 0xFFU));
+							texels.push_back(static_cast<std::byte>(half >> 8));
+						}
+					}
+					const Result<Buffer> blocks = CompressTextureBlocks(TextureBlockCodec::BC6H, size, size, texels);
+					REQUIRE_MESSAGE(blocks.has_value(), blocks.error().ToString());
+					source.Skybox.Texels.insert(source.Skybox.Texels.end(), texels.begin(), texels.end());
+					compressed.Skybox.Texels.insert(compressed.Skybox.Texels.end(), blocks->begin(), blocks->end());
+				}
+			}
+			for (EnvironmentData* environment : { &source, &compressed })
+			{
+				environment->Specular = { .FaceSize = EnvironmentData::SpecularFaceSize,
+					.MipCount = EnvironmentData::SpecularMipCount,
+					.Format = CubeMapFormat::Rgba16Float,
+					.Texels = Buffer(ComputeCubeMapByteSize(EnvironmentData::SpecularFaceSize, EnvironmentData::SpecularMipCount), std::byte{ 0 }) };
+				REQUIRE_MESSAGE(ValidateEnvironmentData(*environment).has_value(), ValidateEnvironmentData(*environment).error().ToString());
+			}
+			const AssetHandle sourceHandle(0x7E57BC6000000011ULL);
+			const AssetHandle compressedHandle(0x7E57BC6000000012ULL);
+			const auto sourceAsset = CreateRef<EnvironmentData>(std::move(source));
+			const auto compressedAsset = CreateRef<EnvironmentData>(std::move(compressed));
+
+			for (const bool withBc : { true, false })
+			{
+				CAPTURE(withBc);
+				Test::HeadlessGpuFixture gpu({ .DisableTextureCompressionBC = !withBc });
+				ENGINE_REQUIRE_GPU(gpu);
+				GraphicsDevice& device = gpu.GetDevice();
+				{
+					Test::SceneRendererIntegrationFixture setup(gpu);
+					setup.Assets().Publish(sourceHandle, sourceAsset);
+					setup.Assets().Publish(compressedHandle, compressedAsset);
+					uint64_t frame = 60;
+					// The skybox of `environment` over the whole view (no meshes), read back.
+					const auto render = [&device, &setup, &frame](AssetHandle environment) -> Result<std::vector<std::byte>>
+					{
+						RenderSnapshot snapshot = setup.Snapshot();
+						snapshot.FrameIndex = ++frame;
+						snapshot.Meshes.clear();
+						snapshot.Camera.ClearToSkybox = true;
+						snapshot.Environment = RenderEnvironment{ .Environment = environment, .Intensity = 1.0f, .ShowSkybox = true };
+						ENGINE_TRY_ASSIGN(nvrhi::CommandListHandle list, device.CreateCommandList());
+						list->open();
+						const Status rendered = setup.Renderer().Render(*list, snapshot);
+						list->close();
+						setup.Renderer().OnSubmitted(snapshot.FrameIndex, device.ExecuteCommandList(*list));
+						ENGINE_TRY(rendered);
+						Readback readback(device);
+						ENGINE_TRY_ASSIGN(const Image pixels, readback.ReadTexture(*setup.Renderer().GetFinalTexture()));
+						return pixels.Pixels;
+					};
+					Test::DeviceLossTest test;
+					test.Owners = { "GpuResourceCache", "SceneRendererPipelines", "SceneRenderer" };
+					test.Use = [&render, compressedHandle]() -> Result<std::vector<std::byte>>
+					{
+						return render(compressedHandle);
+					};
+					const Result<Test::DeviceLossReport> report = Test::RunDeviceLossTest(gpu, test);
+					REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+
+					const GpuEnvironment* mirror = setup.Cache().GetEnvironment(compressedHandle);
+					REQUIRE(mirror != nullptr);
+					REQUIRE(mirror->Skybox != nullptr);
+					CHECK(mirror->Skybox->getDesc().format == (withBc ? nvrhi::Format::BC6H_UFLOAT : nvrhi::Format::RGBA16_FLOAT));
+					// The RGBA16F source's render, after the loss test, which compares the GPU objects alive before and after.
+					const Result<std::vector<std::byte>> reference = render(sourceHandle);
+					REQUIRE_MESSAGE(reference.has_value(), reference.error().ToString());
+					REQUIRE(report->After.size() == reference->size());
+					int largest = 0;
+					for (size_t index = 0; index < reference->size(); ++index)
+						largest = std::max(largest, std::abs(std::to_integer<int>(report->After[index]) - std::to_integer<int>((*reference)[index])));
+					CHECK(largest <= 4);
+					// The view shows a lit sky, so the comparison is not of two black images.
+					CHECK(std::ranges::any_of(*reference, [](std::byte value)
+					{
+						return std::to_integer<int>(value) > 32;
+					}));
+				}
+				device.RunGarbageCollection();
 			}
 		}
 
@@ -1178,6 +1288,194 @@ namespace Engine {
 				CHECK(cache.GetTexture(kept).Texture == current);
 			}
 			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// M23 (C23.1, C-MESH2; Docs/Decisions/0034-m23-contract.md decision 9, stream M): a mesh without MeshData version 2's
+		// attribute stream binds the cache's one shared default stream (TexCoord1 (0, 0), opaque white), which holds as many
+		// entries as the largest such mesh has vertices; a mesh with the stream uploads its own. Clear drops the shared stream
+		// with the mirrors.
+		TEST_CASE("GpuResourceCache: meshes without the attribute stream share one default stream, grown to the largest of them"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::InMemoryAssetManager assets;
+			// A strip of `quads` unit quads along X, with the attribute stream when `painted`.
+			const auto makeStrip = [](uint32_t quads, bool painted)
+			{
+				auto mesh = CreateRef<MeshData>();
+				for (uint32_t quad = 0; quad < quads; ++quad)
+				{
+					const auto base = static_cast<uint32_t>(mesh->Vertices.size());
+					const float left = static_cast<float>(quad);
+					for (const glm::vec2 corner : { glm::vec2(0, 0), glm::vec2(1, 0), glm::vec2(1, 1), glm::vec2(0, 1) })
+					{
+						const glm::vec3 position(left + corner.x, corner.y, 0.0f);
+						mesh->Vertices.push_back({ .Position = position, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = corner });
+						mesh->Bounds.Extend(position);
+						if (painted)
+							mesh->Attributes.push_back({ .TexCoord1 = corner, .Color = { corner.x, corner.y, 0.5f, 1.0f } });
+					}
+					mesh->Indices.insert(mesh->Indices.end(), { base, base + 1, base + 2, base, base + 2, base + 3 });
+				}
+				mesh->Submeshes = { { .IndexCount = static_cast<uint32_t>(mesh->Indices.size()), .Bounds = mesh->Bounds } };
+				mesh->Slots = { {} };
+				REQUIRE_MESSAGE(ValidateMeshData(*mesh).has_value(), ValidateMeshData(*mesh).error().ToString());
+				return mesh;
+			};
+			const AssetHandle small(0x5A7E000000000011ULL);
+			const AssetHandle large(0x5A7E000000000012ULL);
+			const AssetHandle smallAgain(0x5A7E000000000013ULL);
+			const AssetHandle painted(0x5A7E000000000014ULL);
+			assets.Publish(small, makeStrip(1, false));
+			assets.Publish(large, makeStrip(2, false));
+			assets.Publish(smallAgain, makeStrip(1, false));
+			assets.Publish(painted, makeStrip(1, true));
+			constexpr uint64_t Entry = sizeof(MeshVertexAttributes);
+			{
+				GpuResourceCache cache(gpu.GetDevice(), assets);
+				const nvrhi::BufferHandle first = cache.GetMesh(small).AttributeBuffer;
+				REQUIRE(first != nullptr);
+				CHECK(first->getDesc().byteSize == 4 * Entry);
+				CHECK(first->getDesc().isVertexBuffer);
+				// A larger mesh grows the shared stream; the smaller mesh keeps the one it took, and later meshes share the new one.
+				const nvrhi::BufferHandle grown = cache.GetMesh(large).AttributeBuffer;
+				REQUIRE(grown != nullptr);
+				CHECK(grown != first);
+				CHECK(grown->getDesc().byteSize == 8 * Entry);
+				CHECK(cache.GetMesh(small).AttributeBuffer == first);
+				CHECK(cache.GetMesh(smallAgain).AttributeBuffer == grown);
+				// A mesh with the stream has its own buffer of one entry per vertex.
+				const GpuMesh& own = cache.GetMesh(painted);
+				REQUIRE(own.AttributeBuffer != nullptr);
+				CHECK(own.AttributeBuffer != grown);
+				CHECK(own.AttributeBuffer->getDesc().byteSize == 4 * Entry);
+				// The placeholder (Cube, 24 vertices, no stream) grows it again.
+				CHECK(cache.GetMesh(AssetHandle()).AttributeBuffer->getDesc().byteSize == 24 * Entry);
+
+				// A stream whose creation runs out of memory fails the mesh's upload, as its other buffers' would: the
+				// placeholder stands in, the failure is reported, and the shared stream is kept.
+				const AssetHandle failing(0x5A7E000000000015ULL);
+				assets.Publish(failing, makeStrip(1, true));
+				{
+					Test::ExpectLog failed(LogLevel::Error, std::string(AssetUploadFailedCode));
+					const Test::BufferCreationFails failure([](const VkBufferCreateInfo& info)
+					{
+						return info.size == 4 * sizeof(MeshVertexAttributes);
+					});
+					const GpuMesh& placeholder = cache.GetMesh(failing);
+					CHECK(placeholder.IsPlaceholder);
+					CHECK(placeholder.AttributeBuffer != nullptr);
+					CHECK(cache.GetStats().UploadFailures == 1);
+				}
+				CHECK(cache.GetMesh(smallAgain).AttributeBuffer == grown);
+
+				// Clear drops the shared stream with the mirrors: the next mesh without one starts a stream of its own size.
+				cache.Clear();
+				CHECK(cache.GetMesh(small).AttributeBuffer->getDesc().byteSize == 4 * Entry);
+
+				// A collection keeps the shared stream while a mesh binds it, and drops it with the last such mesh.
+				const nvrhi::BufferHandle shared = cache.GetMesh(small).AttributeBuffer;
+				cache.CollectStale(true);
+				CHECK(cache.GetMesh(small).AttributeBuffer == shared);
+				CHECK(cache.GetMesh(large).AttributeBuffer->getDesc().byteSize == 8 * Entry);
+				cache.CollectStale(true);
+				cache.CollectStale(true);
+				CHECK(cache.GetStats().MeshCount == 0);
+				// Released: the next mesh starts a stream of its own size, not the 8-entry one the collection would otherwise keep.
+				CHECK(cache.GetMesh(small).AttributeBuffer->getDesc().byteSize == 4 * Entry);
+
+				// TrimUnused (an out-of-memory trim) keeps the shared stream while a remaining mesh binds it and releases it with
+				// the last one. It keeps the mirrors of loaded assets, so the meshes' assets are unloaded first.
+				cache.Clear();
+				CHECK(cache.GetMesh(smallAgain).AttributeBuffer->getDesc().byteSize == 4 * Entry);
+				const nvrhi::BufferHandle current = cache.GetMesh(large).AttributeBuffer;
+				REQUIRE(current->getDesc().byteSize == 8 * Entry);
+				assets.Remove(smallAgain);
+				cache.TrimUnused();
+				CHECK(cache.GetStats().MeshCount == 1);
+				CHECK(cache.GetMesh(small).AttributeBuffer == current);
+				assets.Remove(small);
+				assets.Remove(large);
+				cache.TrimUnused();
+				CHECK(cache.GetStats().MeshCount == 0);
+				assets.Publish(small, makeStrip(1, false));
+				CHECK(cache.GetMesh(small).AttributeBuffer->getDesc().byteSize == 4 * Entry);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// M23 (decision 7, the recreation protocol's place 3; stream M): the attribute streams are GpuResourceCache mirrors,
+		// so a device loss drops them, the shared default stream included, and the next GetMesh uploads them again; the
+		// render after the recovery equals the one before.
+		TEST_CASE("GpuResourceCache: a device loss drops the attribute streams, and the next GetMesh uploads them again"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			Test::SceneRendererIntegrationFixture setup(gpu);
+			// The fixture's quad with the attribute stream.
+			auto painted = CreateRef<MeshData>();
+			for (const glm::vec3& position : { glm::vec3(-1, -1, 0), glm::vec3(1, -1, 0), glm::vec3(1, 1, 0), glm::vec3(-1, 1, 0) })
+			{
+				const float shade = static_cast<float>(painted->Vertices.size()) * 0.25f;
+				painted->Vertices.push_back({ .Position = position, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 0, 0 } });
+				painted->Attributes.push_back({ .TexCoord1 = glm::vec2(0.5f), .Color = glm::vec4(shade, 1.0f, 0.5f, 1.0f) });
+			}
+			painted->Indices = { 0, 1, 2, 0, 2, 3 };
+			painted->Bounds = { { -1, -1, 0 }, { 1, 1, 0 } };
+			painted->Submeshes = { { .IndexCount = 6, .Bounds = painted->Bounds } };
+			painted->Slots = { {} };
+			const UUID paintedHandle(0x5A7E000000000021ULL);
+			setup.Assets().Publish(paintedHandle, painted);
+
+			uint64_t frame = 60;
+			Test::DeviceLossTest test;
+			test.Owners = { "GpuResourceCache", "SceneRendererPipelines", "SceneRenderer" };
+			test.Use = [&device, &setup, &frame, paintedHandle]() -> Result<std::vector<std::byte>>
+			{
+				// The fixture's quad (the default stream) on the left, the painted one on the right.
+				RenderSnapshot snapshot = setup.Snapshot();
+				snapshot.FrameIndex = ++frame;
+				snapshot.Meshes.front().World = glm::translate(glm::mat4(1.0f), glm::vec3(-1.1f, 0.0f, -4.0f));
+				MeshDrawItem right = snapshot.Meshes.front();
+				right.World = glm::translate(glm::mat4(1.0f), glm::vec3(1.1f, 0.0f, -4.0f));
+				right.Mesh = paintedHandle;
+				right.Entity = UUID(40);
+				right.PickId = 2;
+				snapshot.Meshes.push_back(right);
+				// Unsaturated, so the painted quad's colours show: no ambient light, a dim sun.
+				snapshot.Environment.FallbackColor = glm::vec3(0.0f);
+				snapshot.Lights.push_back(LightData{ .Type = RenderLightType::Directional, .Intensity = 0.4f, .Direction = glm::vec3(0.0f, 0.0f, -1.0f) });
+				ENGINE_TRY_ASSIGN(nvrhi::CommandListHandle list, device.CreateCommandList());
+				list->open();
+				const Status rendered = setup.Renderer().Render(*list, snapshot);
+				list->close();
+				setup.Renderer().OnSubmitted(snapshot.FrameIndex, device.ExecuteCommandList(*list));
+				ENGINE_TRY(rendered);
+				Readback readback(device);
+				ENGINE_TRY_ASSIGN(const Image pixels, readback.ReadTexture(*setup.Renderer().GetFinalTexture()));
+				return pixels.Pixels;
+			};
+			const Result<Test::DeviceLossReport> report = Test::RunDeviceLossTest(gpu, test);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+
+			// Both meshes have their streams again, the painted one its own, the plain one the shared default.
+			const nvrhi::BufferHandle plain = setup.Cache().GetMesh(UUID(8910)).AttributeBuffer;
+			const GpuMesh& mirror = setup.Cache().GetMesh(paintedHandle);
+			REQUIRE(plain != nullptr);
+			REQUIRE(mirror.AttributeBuffer != nullptr);
+			CHECK_FALSE(mirror.IsPlaceholder);
+			CHECK(mirror.AttributeBuffer != plain);
+			// The painted quad's colours show: the two halves of the image differ.
+			const std::vector<std::byte>& image = report->After;
+			const auto pixel = [&image](uint32_t x, uint32_t y)
+			{
+				return std::to_integer<int>(image[(static_cast<size_t>(y) * 64 + x) * 4]) + std::to_integer<int>(image[(static_cast<size_t>(y) * 64 + x) * 4 + 1]) * 256
+					+ std::to_integer<int>(image[(static_cast<size_t>(y) * 64 + x) * 4 + 2]) * 65536;
+			};
+			CHECK(pixel(18, 32) != pixel(46, 32));
 		}
 	}
 

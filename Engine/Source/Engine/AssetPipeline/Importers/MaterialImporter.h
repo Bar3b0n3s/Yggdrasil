@@ -13,12 +13,13 @@ namespace Engine {
 	// unknown members are an error at import, so a typo never silently drops a property), validated through the registry,
 	// cooked with CookMaterial. Dependencies: the referenced textures (GetMaterialTextureHandles). A referenced texture that
 	// is not registered is not an import error (the reference is kept; the validator reports ASSET_MISSING and the renderer
-	// binds the placeholder). No settings.
+	// binds the placeholder). No settings. M23 (Docs/Decisions/0034-m23-contract.md decision 10): version 2 cooks Material
+	// version 2 (the UV sets) from a version 1 or 2 file.
 	class MaterialImporter final : public IAssetImporter
 	{
 	public:
 		static constexpr std::string_view Id = "Material";
-		static constexpr uint32_t Version = 1;
+		static constexpr uint32_t Version = 2;
 
 		[[nodiscard]] std::string_view GetId() const override { return Id; }
 		[[nodiscard]] uint32_t GetVersion() const override { return Version; }

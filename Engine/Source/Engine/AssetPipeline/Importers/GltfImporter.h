@@ -42,11 +42,18 @@ namespace Engine {
 	//     (EditorContext::CreatePrefabUpdateCommand);
 	//   - "mesh:<index>[:<name>]": one Mesh per glTF mesh, one submesh per triangle primitive (strips and fans converted;
 	//     points and lines skipped with ASSET_CONTENT_SKIPPED), positions, normals (generated area-weighted when missing),
-	//     TEXCOORD_0, tangents from the file or else MikkTSpace (Vendor/MikkTSpace) when GenerateMissingTangents, uint32
-	//     indices (generated for non-indexed primitives); a primitive needing generated tangents without TEXCOORD_0 gets an
-	//     arbitrary perpendicular basis and ASSET_TANGENTS_APPROXIMATED;
+	//     TEXCOORD_0, tangents from the file or else MikkTSpace (Vendor/MikkTSpace) when GenerateMissingTangents, over the UV
+	//     set the primitive's normal texture samples (TEXCOORD_1 when its material binds the normal texture to it and the
+	//     primitive has it, else TEXCOORD_0; glTF 2.0 §3.7.2.1), uint32 indices (generated for non-indexed primitives); a
+	//     primitive needing generated tangents without those texture coordinates gets an arbitrary perpendicular basis and
+	//     ASSET_TANGENTS_APPROXIMATED. M23 (version 2, MeshData version 2; Docs/Decisions/0034-m23-contract.md decision 9):
+	//     TEXCOORD_1 (float, or normalized unsigned byte or short) and COLOR_0 (VEC3 or VEC4, float or normalized unsigned
+	//     byte or short; VEC3 takes alpha 1; float channels clamped to [0, 1]) go into the attribute stream
+	//     (MeshData::Attributes). A mesh whose primitives have neither gets no stream; in a mesh where some do, the others'
+	//     vertices take the defaults, TexCoord1 (0, 0) and opaque white, which draw as a mesh without the stream draws;
 	//   - "material:<index>[:<name>]": one Material per glTF material (metallic-roughness factors and textures,
-	//     KHR_materials_emissive_strength, KHR_texture_transform scale and offset, alpha mode and cutoff, double-sided);
+	//     KHR_materials_emissive_strength, KHR_texture_transform scale and offset, alpha mode and cutoff, double-sided; M23,
+	//     Material version 2: each bound map's UV set, UV1 for a texture on TEXCOORD_1, else UV0);
 	//   - "texture:<image index>" (colour data), "texture:<image index>:linear" (metallic-roughness, occlusion) and
 	//     "texture:<image index>:normal" (normal maps): Textures through TextureImporter::ImportTextureFromMemory with mips
 	//     and Compression Auto, so each compresses by its usage (BC7 for colour and linear data, BC5 for normal maps; M23,
@@ -82,14 +89,16 @@ namespace Engine {
 	// are dropped. Skins, animations, cameras and lights are skipped (§1.2) with ASSET_CONTENT_SKIPPED.
 	//
 	// Warnings (ImportResult::Diagnostics, so they persist in the cache manifest): ASSET_UNSUPPORTED_UV_SET for a texture
-	// bound to TEXCOORD_1 (ignored), ASSET_VERTEX_COLORS_IGNORED for COLOR_0 ("GltfImporter: TEXCOORD_1 and COLOR_0 raise
-	// their diagnostics"), ASSET_TANGENTS_APPROXIMATED, and ASSET_CONTENT_SKIPPED with the skipped item as Subject
-	// ("meshes[1].primitives[0]", "skins[0]", "animations[0]", "cameras[0]", "KHR_lights_punctual.lights[0]").
+	// bound to TEXCOORD_2 or a later set (ignored: meshes have two UV sets), ASSET_TANGENTS_APPROXIMATED, and
+	// ASSET_CONTENT_SKIPPED with the skipped item as Subject ("meshes[1].primitives[0]", "skins[0]", "animations[0]",
+	// "cameras[0]", "KHR_lights_punctual.lights[0]"). Version 2 no longer produces ASSET_VERTEX_COLORS_IGNORED: COLOR_0 is
+	// imported (the code stays, never reused; ProjectValidator::GetRetiredCodes).
 	class GltfImporter final : public IAssetImporter
 	{
 	public:
 		static constexpr std::string_view Id = "Gltf";
-		static constexpr uint32_t Version = 1;
+		// M23: version 2 imports TEXCOORD_1 and COLOR_0 (MeshData version 2) and each map's UV set (Material version 2).
+		static constexpr uint32_t Version = 2;
 
 		[[nodiscard]] std::string_view GetId() const override { return Id; }
 		[[nodiscard]] uint32_t GetVersion() const override { return Version; }

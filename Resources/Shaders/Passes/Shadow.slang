@@ -1,7 +1,11 @@
 // Shadow: the shadow casters of a directional cascade, a spot tile or a point light's cube face (M23's PointShadows, drawn
 // with the reflected cull variants; Renderer/ShadowPass.h, Architecture §8.7), depth only. Every draw is instanced (M23,
 // R-INST; Docs/Decisions/0034-m23-contract.md decision 2): instance i of a draw is the view's instance record
-// Instances[Draw.FirstInstance + i] (t10, Shared/InstanceRecord.h), whose world matrix places it.
+// Instances[Draw.FirstInstance + i] (t10, Shared/InstanceRecord.h), whose world matrix places it. Vertices are MeshVertex's
+// position and texture coordinates (binding 0, locations 0 and 1) and the attribute stream (M23, C-MESH2: binding 1,
+// locations 2 and 3), which a Mask caster's alpha test reads: the base colour map's UV set and the vertex colour's alpha.
+// The vertex colour reaches the fragment shader whole: as a scalar alpha, the Opaque variants' fragment shader, which does
+// not read it, leaves it out of its interface, which the validation layer reports (WARNING-Shader-OutputNotConsumed).
 
 #include "Shared/DrawConstants.h"
 #include "Shared/InstanceRecord.h"
@@ -25,12 +29,16 @@ struct VertexInput
 {
 	float3 Position : POSITION;
 	float2 TexCoord : TEXCOORD0;
+	float2 TexCoord1 : TEXCOORD1;
+	float4 Color : COLOR;
 };
 
 struct VertexOutput
 {
 	float4 Position : SV_Position;
 	float2 TexCoord : TEXCOORD0;
+	float2 TexCoord1 : TEXCOORD2;
+	float4 Color : COLOR; // the vertex colour, whose alpha a Mask material's test reads
 	// The caster's light-space depth, interpolated linearly in screen space exactly as the rasterizer interpolates
 	// SV_Position.z. Read only when Caster.Bias.z pancakes (orthographic directional maps, w = 1).
 	noperspective float Depth : TEXCOORD1;
@@ -52,6 +60,8 @@ VertexOutput VSMain(VertexInput input, uint instance : SV_VulkanInstanceID)
 	if (Caster.Bias.z != 0.0)
 		output.Position.z = 0.5 * clip.w;
 	output.TexCoord = input.TexCoord;
+	output.TexCoord1 = input.TexCoord1;
+	output.Color = input.Color;
 	return output;
 }
 
@@ -67,8 +77,8 @@ ShadowPixel PSMain(VertexOutput input)
 	ShadowPixel output;
 	output.Coverage = 1;
 #if ALPHA_MASK
-	float2 uv = input.TexCoord * Material.UVScale + Material.UVOffset;
-	float alpha = BaseColorMap.Sample(AnisoWrap, uv).a * Material.BaseColor.a;
+	float2 uv = ((Material.Flags & MaterialFlagBaseColorUV1) != 0 ? input.TexCoord1 : input.TexCoord) * Material.UVScale + Material.UVOffset;
+	float alpha = BaseColorMap.Sample(AnisoWrap, uv).a * Material.BaseColor.a * input.Color.a;
 	// Match Scene.slang's coverage mask without requiring shader-demote support.
 	output.Coverage = alpha < Material.AlphaCutoff ? 0 : 1;
 #endif

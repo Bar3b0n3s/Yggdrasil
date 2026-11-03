@@ -38,7 +38,9 @@
 // PREFAB_CYCLE (Scene/LoadReport.h) on every prefab file that nests itself, directly or through other prefabs
 // (Docs/Decisions/0031-m20-contract.md decision 8). M23 adds RENDER_POINT_SHADOW_BUDGET (Renderer/PointShadowMaps.h) when
 // more than MaxPointShadowLights point lights of a scene cast shadows (Docs/Decisions/0034-m23-contract.md decision 18).
-// GetCodes lists every code in §13.7 order, later milestones' codes appended in landing order.
+// GetCodes lists every code in §13.7 order, later milestones' codes appended in landing order. A code is never removed or
+// reused: one that nothing reports any more stays in GetCodes and is listed by GetRetiredCodes (M23: GltfImporter version 2
+// imports COLOR_0, so ASSET_VERTEX_COLORS_IGNORED is retired; decision 18).
 
 namespace Engine {
 
@@ -180,6 +182,10 @@ namespace Engine {
 
 		// M14: one entry per code of GetCodes, in the same order, each with a non-empty severity, description and fix.
 		[[nodiscard]] static std::span<const ValidationCodeInfo> GetCodeInfos();
+
+		// M23: the codes of GetCodes that nothing reports any more, in GetCodes order: kept so a code is never reused, with
+		// their documentation saying since when they are not reported. Gate 6 (Architecture §15.6) asks no fixture for them.
+		[[nodiscard]] static std::span<const std::string_view> GetRetiredCodes();
 
 		// The validator code of a scene-load diagnostic code (ADR 0006 decision 35); empty for load codes the validator does
 		// not report (unknown keys and components, which stay load warnings).

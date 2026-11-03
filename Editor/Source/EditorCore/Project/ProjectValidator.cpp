@@ -198,11 +198,11 @@ namespace Engine {
 				"A glTF primitive needs tangents but has no TEXCOORD_0, so its tangents are an arbitrary basis.",
 				"Export the model with texture coordinates or with its own tangents." },
 			ValidationCodeInfo{ AssetUnsupportedUvSetCode, "Warning", false,
-				"A glTF texture is bound to TEXCOORD_1, which the engine ignores because meshes have one UV set.",
-				"Bind the texture to TEXCOORD_0 in the model, or bake it into the first UV set." },
+				"A glTF texture is bound to TEXCOORD_2 or a later set, which the engine ignores because meshes have two UV sets (TEXCOORD_0 and TEXCOORD_1).",
+				"Bind the texture to TEXCOORD_0 or TEXCOORD_1 in the model, or bake it into one of those UV sets." },
 			ValidationCodeInfo{ AssetVertexColorsIgnoredCode, "Warning", false,
-				"A glTF primitive has vertex colours, which the engine ignores.",
-				"Bake the colours into a texture or a material, or remove COLOR_0 from the model." },
+				"No longer reported: since GltfImporter version 2 (M23) a glTF primitive's COLOR_0 is imported and multiplies the base colour. The code is kept so it is never reused.",
+				"Nothing to fix: no import reports it." },
 			ValidationCodeInfo{ AssetContentSkippedCode, "Warning", false,
 				"A glTF file holds content the engine does not import: points or lines, skins, animations, cameras or lights.",
 				"Remove the content from the model, or rebuild it with engine components (Camera, lights) in the scene." },
@@ -310,6 +310,11 @@ namespace Engine {
 			return true;
 		}
 		static_assert(CodeInfosMatchCodes(), "ValidatorCodeInfos must document every code of ValidatorCodes, in the same order");
+
+		// The codes of ValidatorCodes that nothing reports any more (GetRetiredCodes), in its order.
+		constexpr std::array RetiredCodes = {
+			AssetVertexColorsIgnoredCode, // M23: GltfImporter version 2 imports COLOR_0 (Docs/Decisions/0034-m23-contract.md decision 18)
+		};
 
 		// The import diagnostics the asset manager records for an asset (the scan's come from the validator's own scan).
 		constexpr std::array ImportDiagnosticCodes = {
@@ -2308,6 +2313,11 @@ namespace Engine {
 	std::span<const ValidationCodeInfo> ProjectValidator::GetCodeInfos()
 	{
 		return ValidatorCodeInfos;
+	}
+
+	std::span<const std::string_view> ProjectValidator::GetRetiredCodes()
+	{
+		return RetiredCodes;
 	}
 
 	std::string_view ProjectValidator::MapLoadCode(std::string_view loadCode)

@@ -106,6 +106,20 @@
 				"Modes": ["Editor", "Release", "Dist"]
 			},
 			{
+				"Script": "Assets/Tests/MeshPath/MeshPath.test.luau",
+				"Scene": "Assets/Scenes/MeshPath.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
 				"Script": "Assets/Tests/Physics/Physics.test.luau",
 				"Scene": "Assets/Scenes/Physics.scene",
 				"Parameters": null,
@@ -177,6 +191,20 @@
 			},
 			{
 				"Script": "Assets/Tests/Formats/OpusAndCompression.test.luau",
+				"Scene": "Assets/Scenes/Formats.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
+				"Script": "Assets/Tests/Formats/AssetFormats.test.luau",
 				"Scene": "Assets/Scenes/Formats.scene",
 				"Parameters": null,
 				"Isolation": "Suite",

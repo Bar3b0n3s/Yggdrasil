@@ -7,7 +7,8 @@ registered (`TestComponents`), the entities the test repeats into a scene (`Expa
 (`NonCanonical`). The test "Validation: each fixture reports exactly its expected codes" copies each project into a
 temporary directory, opens it, loads its assets (scenes and scripts excepted: the validator and the script service check
 those) and runs `ProjectValidator::Validate` with the project scope; coverage gate 6
-requires a fixture for every code.
+requires a fixture for every code but the retired ones (`ProjectValidator::GetRetiredCodes`), which nothing reports:
+`ASSET_VERTEX_COLORS_IGNORED` since GltfImporter version 2 imports `COLOR_0` (M23).
 
 - `COMPONENT_MISSING_REQUIREMENT` and `ENTITY_DANGLING_REFERENCE` use the test components `ValidatorTarget` and
   `ValidatorFollower`: every built-in requirement is Transform, which every entity has.

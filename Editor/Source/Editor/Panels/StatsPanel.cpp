@@ -165,6 +165,8 @@ namespace Engine {
 				Utils::DrawSupportingMetric("Shadow draws", std::to_string(view.ShadowDraws));
 				Utils::DrawSupportingMetric("Shadowed spot lights", std::to_string(view.ShadowedSpotLights));
 				Utils::DrawSupportingMetric("Dropped spot shadows", std::to_string(view.DroppedSpotShadows));
+				Utils::DrawSupportingMetric("Shadowed point lights", std::to_string(view.ShadowedPointLights));
+				Utils::DrawSupportingMetric("Dropped point shadows", std::to_string(view.DroppedPointShadows));
 				ImGui::EndTable();
 			}
 			for (const StatsPassSummary& pass : view.Passes)

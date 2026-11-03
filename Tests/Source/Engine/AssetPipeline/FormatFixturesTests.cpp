@@ -23,10 +23,6 @@ namespace Engine {
 				|| importer == "SpriteSheet";
 		}
 
-		// An extension the importers claim only to refuse it with a hint: SourceFormats.h marks it not Importable, and gate 9
-		// excludes it (EnvironmentImporterTests proves the refusal).
-		constexpr std::string_view RefusedExtension = ".exr";
-
 	}
 
 	TEST_SUITE("AssetPipeline")
@@ -43,7 +39,9 @@ namespace Engine {
 				"Assets/Audio/Tone.ogg",
 				"Assets/Audio/Tone.wav",
 				"Assets/Audio/Water.opus",
+				"Assets/Environments/Gradient.exr",
 				"Assets/Environments/Gradient.hdr",
+				"Assets/Environments/GradientZip.exr",
 				"Assets/Fonts/Glyphs.ttf",
 				"Assets/Fonts/Inter-Regular.otf",
 				"Assets/Gltf/Box.glb",
@@ -75,8 +73,6 @@ namespace Engine {
 				for (const std::string_view extension : importer->GetExtensions())
 				{
 					CAPTURE(std::string(extension));
-					if (extension == RefusedExtension)
-						continue;
 					CHECK(extensions.contains(std::string(extension)));
 					++foreign;
 				}
@@ -84,14 +80,14 @@ namespace Engine {
 			// No fixture is of an extension the importers do not claim.
 			CHECK(foreign == extensions.size());
 
-			// The same through the Asset layer's table that gate 9 evaluates in every mode.
+			// The same through the Asset layer's table that gate 9 evaluates in every mode. No extension is claimed only to be
+			// refused since M23's EnvironmentImporter version 2 imports .exr (Docs/Decisions/0034-m23-contract.md decision 14).
 			for (const SourceFormat& format : GetSourceFormats())
 			{
 				CAPTURE(format.Extension);
-				if (format.Importable && !IsNativeImporter(format.Importer))
+				CHECK(format.Importable);
+				if (!IsNativeImporter(format.Importer))
 					CHECK(extensions.contains(std::string(format.Extension)));
-				if (!format.Importable)
-					CHECK(format.Extension == RefusedExtension);
 			}
 		}
 	}

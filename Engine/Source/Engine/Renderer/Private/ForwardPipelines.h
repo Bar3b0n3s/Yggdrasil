@@ -8,13 +8,15 @@
 
 #include <nvrhi/nvrhi.h>
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
 // The scene renderer's mesh pipelines (SceneRenderer.h; Architecture §8.4, §8.5; Docs/Decisions/0013-m8-decisions.md
 // decision 7): the Scene program's prepass and forward variants, their layout descriptions and their shared binding
-// layouts. Every variant draws MeshVertex (§6.8; the overdraw variants only its position and texture coordinates) with
-// frontCounterClockwise = true (§8.3) and reverse-Z depth (GreaterOrEqual). A variant is an alpha mode and a cull mode:
+// layouts. Every variant draws MeshVertex (§6.8; the overdraw variants only its position and texture coordinates) from
+// vertex binding 0 and MeshVertexAttributes (M23, MeshData version 2) from binding 1 (MakeMeshAttributeStreamAttributes),
+// with frontCounterClockwise = true (§8.3) and reverse-Z depth (GreaterOrEqual). A variant is an alpha mode and a cull mode:
 //   - prepass (pass 4, SceneNormals with SceneDepth written): {Opaque, Mask} x {CullBack, CullFront, CullNone};
 //   - forward opaque (pass 7, SceneColor, depth tested without writes): the same six;
 //   - forward transparent (pass 9, SceneColor, depth tested without writes, straight alpha blending): Blend x the three.
@@ -79,6 +81,15 @@ namespace Engine {
 		inline constexpr uint32_t PrepassVariantCount = 2 * MeshCullModeCount;
 		// {Opaque, Mask} x the cull modes, then Blend x the cull modes.
 		inline constexpr uint32_t ForwardVariantCount = 3 * MeshCullModeCount;
+
+		// M23 (C23.1, C-MESH2; Docs/Decisions/0034-m23-contract.md decision 9): vertex binding 1 of every mesh-drawing
+		// pipeline (the Scene program's 24, the debug views', the shadow casters and the selection mask), the mesh's attribute
+		// stream (GpuMesh::AttributeBuffer, 24-byte MeshVertexAttributes): TEXCOORD1 (RG32_FLOAT, offset 0) and COLOR
+		// (RGBA32_FLOAT, offset 8), at the two locations after a pipeline's binding 0 attributes (4 and 5 for the Scene
+		// program's VSMain and VSPicking), since NVRHI numbers locations in attribute order. Every program that draws meshes
+		// reads them: a Mask material's alpha test samples the base colour's UV set and multiplies the vertex colour's alpha.
+		inline constexpr uint32_t MeshAttributeStreamSlot = 1;
+		[[nodiscard]] std::array<nvrhi::VertexAttributeDesc, 2> MakeMeshAttributeStreamAttributes();
 
 		// The cull mode of a draw: CullNone for a double-sided material, else CullFront for a mirroring world, else CullBack.
 		[[nodiscard]] MeshCullMode SelectCullMode(bool mirrored, bool doubleSided);

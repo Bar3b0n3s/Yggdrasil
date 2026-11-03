@@ -170,11 +170,13 @@ def scene_document() -> dict[str, Any]:
 
 
 def material_document() -> dict[str, Any]:
-    return {"Format": "Material", "Version": 1, "BaseColor": [0.8, 0.1, 0.1, 1], "BaseColorMap": None,
-            "Metallic": 0, "Roughness": 0.5, "MetallicRoughnessMap": None, "NormalMap": None, "NormalScale": 1,
-            "OcclusionMap": None, "OcclusionStrength": 1, "Emissive": [0, 0, 0], "EmissiveStrength": 1,
-            "EmissiveMap": None, "AlphaMode": "Opaque", "AlphaCutoff": 0.5, "DoubleSided": False, "UVScale": [1, 1],
-            "UVOffset": [0, 0]}
+    """A canonical Material version 2 document (M23: each map's UV set follows it)."""
+    return {"Format": "Material", "Version": 2, "BaseColor": [0.8, 0.1, 0.1, 1], "BaseColorMap": None,
+            "BaseColorUVSet": "UV0", "Metallic": 0, "Roughness": 0.5, "MetallicRoughnessMap": None,
+            "MetallicRoughnessUVSet": "UV0", "NormalMap": None, "NormalUVSet": "UV0", "NormalScale": 1,
+            "OcclusionMap": None, "OcclusionUVSet": "UV0", "OcclusionStrength": 1, "Emissive": [0, 0, 0],
+            "EmissiveStrength": 1, "EmissiveMap": None, "EmissiveUVSet": "UV0", "AlphaMode": "Opaque",
+            "AlphaCutoff": 0.5, "DoubleSided": False, "UVScale": [1, 1], "UVOffset": [0, 0]}
 
 
 def meta_document(handle: str, kind: str) -> dict[str, Any]:

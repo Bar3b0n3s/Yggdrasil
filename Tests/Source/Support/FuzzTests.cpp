@@ -226,12 +226,13 @@ namespace Engine {
 			REQUIRE(targets.has_value());
 			CHECK((*targets)["Format"] == "FuzzTargets");
 			CHECK((*targets)["Version"] == 1);
-			// The required readers of decision 13; Targets.json may list more.
-			const std::vector<std::string> required = { "AssetMetadata", "AudioClipData", "AudioDecoder", "AutosaveRecovery", "BinaryReader",
-				"BuiltinAssetCatalog", "Bindings", "CookedFormat", "DecodePng", "EditorPreferences", "EnvironmentData", "EnvironmentImporter", "FontData",
-				"FontImporter", "Framing", "GameManifest", "GltfImporter", "JsonReader", "JsonRpc", "MaterialData", "MeshData", "PakReader", "PakToc",
-				"PlayInputEventCodec", "Prefab", "ProjectLock", "ProjectSerializer", "ReplayData", "SceneSerializer", "ScriptCompiler", "ScriptData",
-				"ShaderReflection", "SoundEffect", "TextureData", "TextureImporter" };
+			// The required readers of decision 13 and of later milestones' new readers (M23's Ogg Opus and OpenEXR decodes,
+			// Docs/Decisions/0034-m23-contract.md decision 19); Targets.json may list more.
+			const std::vector<std::string> required = { "AssetMetadata", "AudioClipData", "AudioDecoder", "AudioDecoderOpus", "AutosaveRecovery",
+				"BinaryReader", "BuiltinAssetCatalog", "Bindings", "CookedFormat", "DecodePng", "EditorPreferences", "EnvironmentData", "EnvironmentImporter",
+				"EnvironmentImporterExr", "FontData", "FontImporter", "Framing", "GameManifest", "GltfImporter", "JsonReader", "JsonRpc", "MaterialData",
+				"MeshData", "PakReader", "PakToc", "PlayInputEventCodec", "Prefab", "ProjectLock", "ProjectSerializer", "ReplayData", "SceneSerializer",
+				"ScriptCompiler", "ScriptData", "ShaderReflection", "SoundEffect", "TextureData", "TextureImporter" };
 			const Json& listed = (*targets)["Targets"];
 			REQUIRE(listed.is_array());
 			for (const std::string& reader : required)

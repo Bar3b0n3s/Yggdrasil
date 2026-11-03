@@ -12,11 +12,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Bumper.material",
-			"XXH64": "5f711809017f5b31",
-			"Method": "edit.batch",
-			"RequestId": 44,
-			"Client": "engine-mcp",
-			"TranscriptLine": 81
+			"XXH64": "e9b1a19236a03949",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 171
 		},
 		{
 			"Path": "Assets/Materials/Bumper.material.meta",
@@ -28,11 +28,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Ground.material",
-			"XXH64": "1cac6f12035f8054",
-			"Method": "edit.batch",
-			"RequestId": 44,
-			"Client": "engine-mcp",
-			"TranscriptLine": 81
+			"XXH64": "a2212177aa6f4bc2",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 171
 		},
 		{
 			"Path": "Assets/Materials/Ground.material.meta",
@@ -44,11 +44,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Spinner.material",
-			"XXH64": "8e42aea0a0af0842",
-			"Method": "edit.batch",
-			"RequestId": 44,
-			"Client": "engine-mcp",
-			"TranscriptLine": 81
+			"XXH64": "f7a9930c8253eced",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 171
 		},
 		{
 			"Path": "Assets/Materials/Spinner.material.meta",

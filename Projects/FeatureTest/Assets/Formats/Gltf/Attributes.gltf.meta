@@ -1,0 +1,46 @@
+{
+	"Format": "AssetMeta",
+	"Version": 1,
+	"Handle": "c7e24a022e43c158",
+	"Type": "Prefab",
+	"Importer": "Gltf",
+	"ImporterVersion": 2,
+	"Settings": {
+		"Scale": 1,
+		"GenerateMissingTangents": true,
+		"ImportMaterials": true,
+		"MergeMeshes": false
+	},
+	"SubAssets": [
+		{
+			"Key": "material:0:Painted",
+			"Handle": "083483ae4146a636",
+			"Type": "Material"
+		},
+		{
+			"Key": "material:1:Plain",
+			"Handle": "8586ac660abced0a",
+			"Type": "Material"
+		},
+		{
+			"Key": "material:2:Bare",
+			"Handle": "94655cdff38505b4",
+			"Type": "Material"
+		},
+		{
+			"Key": "mesh:0:Painted",
+			"Handle": "fb623fc953757190",
+			"Type": "Mesh"
+		},
+		{
+			"Key": "texture:0",
+			"Handle": "2ef60ed46383740b",
+			"Type": "Texture"
+		},
+		{
+			"Key": "texture:1:normal",
+			"Handle": "b910b52833ae8783",
+			"Type": "Texture"
+		}
+	]
+}

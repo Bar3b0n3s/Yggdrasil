@@ -10,7 +10,7 @@
 		},
 		"Version": {
 			"description": "The format version this build writes; older versions are migrated when read.",
-			"enum": [1]
+			"enum": [2]
 		},
 		"BaseColor": {
 			"description": "The linear base colour and alpha, multiplied with BaseColorMap.",
@@ -46,6 +46,10 @@
 			"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
 			"x-assetType": "Texture"
 		},
+		"BaseColorUVSet": {
+			"description": "The texture coordinates the base colour map samples.",
+			"enum": ["UV0", "UV1"]
+		},
 		"Metallic": {
 			"description": "How metallic the surface is: 0 dielectric, 1 metal; multiplied with the map's blue channel.",
 			"type": "number",
@@ -64,11 +68,19 @@
 			"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
 			"x-assetType": "Texture"
 		},
+		"MetallicRoughnessUVSet": {
+			"description": "The texture coordinates the metallic-roughness map samples.",
+			"enum": ["UV0", "UV1"]
+		},
 		"NormalMap": {
 			"description": "The tangent-space normal map; null for none (FlatNormal is bound).",
 			"type": ["string", "null"],
 			"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
 			"x-assetType": "Texture"
+		},
+		"NormalUVSet": {
+			"description": "The texture coordinates the normal map samples.",
+			"enum": ["UV0", "UV1"]
 		},
 		"NormalScale": {
 			"description": "The strength of the normal map's X and Y deflection.",
@@ -80,6 +92,10 @@
 			"type": ["string", "null"],
 			"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
 			"x-assetType": "Texture"
+		},
+		"OcclusionUVSet": {
+			"description": "The texture coordinates the occlusion map samples.",
+			"enum": ["UV0", "UV1"]
 		},
 		"OcclusionStrength": {
 			"description": "How much the occlusion map darkens ambient light: 0 none, 1 fully.",
@@ -120,6 +136,10 @@
 			"type": ["string", "null"],
 			"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
 			"x-assetType": "Texture"
+		},
+		"EmissiveUVSet": {
+			"description": "The texture coordinates the emissive map samples.",
+			"enum": ["UV0", "UV1"]
 		},
 		"AlphaMode": {
 			"description": "How the base colour alpha is used.",

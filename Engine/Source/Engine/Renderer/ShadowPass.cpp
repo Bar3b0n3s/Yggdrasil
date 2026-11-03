@@ -150,6 +150,9 @@ namespace Engine {
 					.setOffset(offsetof(MeshVertex, TexCoord))
 					.setElementStride(Stride),
 			};
+			// M23 (C-MESH2): the attribute stream at locations 2 and 3, which a Mask caster's alpha test reads.
+			const std::array<nvrhi::VertexAttributeDesc, 2> stream = Utils::MakeMeshAttributeStreamAttributes();
+			specification.VertexAttributes.insert(specification.VertexAttributes.end(), stream.begin(), stream.end());
 			specification.Framebuffer.setDepthFormat(ShadowDepthFormat);
 			constexpr std::array<nvrhi::RasterCullMode, 3> Modes{ nvrhi::RasterCullMode::Back, nvrhi::RasterCullMode::Front,
 				nvrhi::RasterCullMode::None };
@@ -255,7 +258,7 @@ namespace Engine {
 				return MakeError(ErrorCode::InvalidArgument, "Shadow caster {} has a non-finite world transform", item.Entity);
 			// Cache uploads invalidate borrowed references; own this mesh's handles and value arrays before resolving materials.
 			const GpuMesh mesh = cache.GetMesh(item.Mesh);
-			if (!mesh.VertexBuffer || !mesh.IndexBuffer)
+			if (!mesh.VertexBuffer || !mesh.IndexBuffer || !mesh.AttributeBuffer)
 				continue;
 			const bool mirrored = glm::determinant(glm::mat3(item.World)) < 0;
 			for (uint32_t submeshIndex = 0; submeshIndex < mesh.Submeshes.size(); ++submeshIndex)
@@ -274,6 +277,7 @@ namespace Engine {
 				const bool mask = material.AlphaMode == AlphaMode::Mask;
 				Candidate candidate;
 				candidate.Draw = { .Vertices = mesh.VertexBuffer,
+					.Attributes = mesh.AttributeBuffer,
 					.Indices = mesh.IndexBuffer,
 					.IndexOffset = submesh.IndexOffset,
 					.IndexCount = submesh.IndexCount,
@@ -374,6 +378,7 @@ namespace Engine {
 			if (materialSets[first] != nullptr)
 				state.bindings.push_back(materialSets[first]);
 			state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(draw.Vertices).setSlot(0));
+			state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(draw.Attributes).setSlot(Utils::MeshAttributeStreamSlot));
 			state.setIndexBuffer(nvrhi::IndexBufferBinding().setBuffer(draw.Indices).setFormat(nvrhi::Format::R32_UINT));
 			commandList.setGraphicsState(state);
 			DrawConstants push{};

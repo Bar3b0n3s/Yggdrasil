@@ -319,7 +319,9 @@ namespace Engine {
 		// .replay and .spritesheet under Projects/FeatureTest and Tests/Data validates against its format's schema, except the deliberately
 		// invalid or other-version fixtures: Scenes/Invalid/, Formats/ (v0.scene, NewerVersion.scene), Validation/,
 		// CoverageGaps/ and Lint/. The project's Automation/Provenance.json files and every line of its batch scaffolds
-		// validate against the Provenance and BatchRequest schemas too.
+		// (Scaffold/*.jsonl) validate against the Provenance and BatchRequest schemas too; Automation/BuildLog.jsonl, the
+		// transcript of the project's recorded upgrade (Docs/Decisions/0034-m23-contract.md decision 21), is the editor's
+		// record of requests and responses, not a batch.
 		TEST_CASE("ReferenceGenerator: every authored file validates against its generated format schema")
 		{
 			Test::EditorTestFixture fixture("ReferenceSchemas");
@@ -385,7 +387,7 @@ namespace Engine {
 				{
 					addFile(path, label, "Provenance");
 				}
-				else if (extension == ".jsonl")
+				else if (extension == ".jsonl" && relative.starts_with("Scaffold/"))
 				{
 					const Result<std::string> text = FileSystem::ReadText(path);
 					REQUIRE(text.has_value());

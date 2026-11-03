@@ -11,7 +11,7 @@ Every authored file is UTF-8 JSON with LF line ends and tabs, written by the can
 | AssetMeta | `.meta` | 1 | [Schemas/AssetMeta.schema.json](Schemas/AssetMeta.schema.json) |
 | BatchRequest | `.jsonl` | none | [Schemas/BatchRequest.schema.json](Schemas/BatchRequest.schema.json) |
 | GameManifest | `Game.json` | 2 | [Schemas/GameManifest.schema.json](Schemas/GameManifest.schema.json) |
-| Material | `.material` | 1 | [Schemas/Material.schema.json](Schemas/Material.schema.json) |
+| Material | `.material` | 2 | [Schemas/Material.schema.json](Schemas/Material.schema.json) |
 | Prefab | `.prefab` | 1 | [Schemas/Prefab.schema.json](Schemas/Prefab.schema.json) |
 | Project | `.eproj` | 1 | [Schemas/Project.schema.json](Schemas/Project.schema.json) |
 | Provenance | `Automation/Provenance.json` | 1 | [Schemas/Provenance.schema.json](Schemas/Provenance.schema.json) |
@@ -98,24 +98,29 @@ Header: `"Format": "GameManifest", "Version": 2`. Schema: [Schemas/GameManifest.
 
 A PBR metallic-roughness material (§6.5).
 
-Header: `"Format": "Material", "Version": 1`. Schema: [Schemas/Material.schema.json](Schemas/Material.schema.json).
+Header: `"Format": "Material", "Version": 2`. Schema: [Schemas/Material.schema.json](Schemas/Material.schema.json).
 
 ```json
 {
 	"Format": "Material",
-	"Version": 1,
+	"Version": 2,
 	"BaseColor": [0.9, 0.15, 0.15, 1],
 	"BaseColorMap": null,
+	"BaseColorUVSet": "UV0",
 	"Metallic": 0,
 	"Roughness": 0.45,
 	"MetallicRoughnessMap": null,
+	"MetallicRoughnessUVSet": "UV0",
 	"NormalMap": null,
+	"NormalUVSet": "UV0",
 	"NormalScale": 1,
 	"OcclusionMap": null,
+	"OcclusionUVSet": "UV0",
 	"OcclusionStrength": 1,
 	"Emissive": [0, 0, 0],
 	"EmissiveStrength": 1,
 	"EmissiveMap": null,
+	"EmissiveUVSet": "UV0",
 	"AlphaMode": "Opaque",
 	"AlphaCutoff": 0.5,
 	"DoubleSided": false,
@@ -636,13 +641,13 @@ The files the editor imports from `Assets/`, by importer and extension (§7.4). 
 | Audio | `.ogg` | AudioClip | 2 | `AudioImportSettings` | yes |
 | Audio | `.opus` | AudioClip | 2 | `AudioImportSettings` | yes |
 | Audio | `.wav` | AudioClip | 2 | `AudioImportSettings` | yes |
-| Environment | `.exr` | Environment | 1 | `EnvironmentImportSettings` | no |
-| Environment | `.hdr` | Environment | 1 | `EnvironmentImportSettings` | yes |
+| Environment | `.exr` | Environment | 2 | `EnvironmentImportSettings` | yes |
+| Environment | `.hdr` | Environment | 2 | `EnvironmentImportSettings` | yes |
 | Font | `.otf` | Font | 3 | `FontImportSettings` | yes |
 | Font | `.ttf` | Font | 3 | `FontImportSettings` | yes |
-| Gltf | `.glb` | Prefab | 1 | `GltfImportSettings` | yes |
-| Gltf | `.gltf` | Prefab | 1 | `GltfImportSettings` | yes |
-| Material | `.material` | Material | 1 | none | yes |
+| Gltf | `.glb` | Prefab | 2 | `GltfImportSettings` | yes |
+| Gltf | `.gltf` | Prefab | 2 | `GltfImportSettings` | yes |
+| Material | `.material` | Material | 2 | none | yes |
 | Prefab | `.prefab` | Prefab | 1 | none | yes |
 | Replay | `.replay` | Replay | 3 | none | yes |
 | Scene | `.scene` | Scene | 1 | none | yes |

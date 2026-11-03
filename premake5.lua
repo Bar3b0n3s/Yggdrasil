@@ -85,6 +85,7 @@ group "Dependencies"
 	include "Vendor/libogg"
 	include "Vendor/libopus"
 	include "Vendor/opusfile"
+	include "Vendor/tinyexr"
 
 group "Engine"
 	include "Engine"

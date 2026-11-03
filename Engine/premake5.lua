@@ -112,6 +112,7 @@ project "Engine"
 	UseMikkTSpace()
 	UseNativeFileDialog()
 	UseCMPCore()
+	UseTinyExr()
 	UseLuau(false)
 
 	if UseShadersProject then

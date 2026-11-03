@@ -32,9 +32,10 @@ namespace Engine {
 			registry.Freeze();
 			const StructInfo* material = registry.FindStruct<MaterialData>();
 			REQUIRE(material != nullptr);
-			const std::vector<std::string> expected = { "BaseColor", "BaseColorMap", "Metallic", "Roughness", "MetallicRoughnessMap", "NormalMap",
-				"NormalScale", "OcclusionMap", "OcclusionStrength", "Emissive", "EmissiveStrength", "EmissiveMap", "AlphaMode", "AlphaCutoff",
-				"DoubleSided", "UVScale", "UVOffset" };
+			// M23 (Material version 2): each map's UV set follows its map.
+			const std::vector<std::string> expected = { "BaseColor", "BaseColorMap", "BaseColorUVSet", "Metallic", "Roughness", "MetallicRoughnessMap",
+				"MetallicRoughnessUVSet", "NormalMap", "NormalUVSet", "NormalScale", "OcclusionMap", "OcclusionUVSet", "OcclusionStrength", "Emissive",
+				"EmissiveStrength", "EmissiveMap", "EmissiveUVSet", "AlphaMode", "AlphaCutoff", "DoubleSided", "UVScale", "UVOffset" };
 			std::vector<std::string> names;
 			for (const Scope<FieldInfo>& field : material->GetFields())
 				names.push_back(field->GetName());
@@ -49,6 +50,11 @@ namespace Engine {
 			const EnumInfo* alphaMode = registry.FindEnum<AlphaMode>();
 			REQUIRE(alphaMode != nullptr);
 			CHECK(alphaMode->GetEntries().size() == 3);
+			const EnumInfo* uvSet = registry.FindEnum<TextureCoordinateSet>();
+			REQUIRE(uvSet != nullptr);
+			CHECK(uvSet == registry.FindEnum("TextureCoordinateSet"));
+			CHECK(uvSet->GetEntries().size() == 2);
+			CHECK(material->FindField("OcclusionUVSet")->GetKind() == FieldType::Enum);
 		}
 
 		// M18 (Docs/Decisions/0029-m18-contract.md decisions 14 and 15): the sheet's structs follow their C++ members, with the

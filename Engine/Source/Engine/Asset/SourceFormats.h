@@ -20,8 +20,9 @@ namespace Engine {
 		std::string_view Importer{};          // the importer id, as in .meta files: "Texture"
 		std::string_view Extension{};         // lower case with the dot: ".jpeg"
 		AssetType MainType = AssetType::None; // the importer's main asset type
-		// False for an extension an importer claims only to refuse it with a hint (.exr: EnvironmentImporter fails with
-		// "OpenEXR is not supported"). Gate 9 requires a cooked and loaded fixture for exactly the importable rows.
+		// False for an extension an importer claims only to refuse it with a hint (none since M23's EnvironmentImporter
+		// version 2 imports .exr, which version 1 refused). Gate 9 requires a cooked and loaded fixture for exactly the
+		// importable rows.
 		bool Importable = true;
 	};
 

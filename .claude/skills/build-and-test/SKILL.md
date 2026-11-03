@@ -66,7 +66,7 @@ python Scripts/CI.py  # all stages; --stages build,unit for a subset; --gpu-opti
 - unit: Debug and Release, each failing on a test case skipped outside the child-process targets;
 - gpu: Debug and Release, each under API 1.4 and capped with `--vulkan-api=1.3`, with validation and synchronization validation and `--require-gpu` (`--gpu-optional` drops it on a machine without a device);
 - golden: Release, compared with `Tests/Golden/<DeviceClass>/`; smoke mode (a warning) on a device class without goldens, a failure instead when a class of the same vendor has them (the driver changed; golden-images skill);
-- feature: Debug and Release, `Editor --headless --project Projects/FeatureTest --run-tests` with `--require-gpu` (an `.hdr` import needs the GPU baker); see "The feature and determinism suites" in `skills/build-and-test/test-suites`;
+- feature: Debug and Release, `Editor --headless --project Projects/FeatureTest --run-tests` with `--require-gpu` (an `.hdr` or `.exr` import needs the GPU baker); see "The feature and determinism suites" in `skills/build-and-test/test-suites`;
 - automation: Release, with `--require-gpu` like gpu (its screenshot tests start rendering editors); see "The automation suite" in `skills/build-and-test/test-suites`;
 - export: Release and Dist testing exports of FeatureTest, with `--require-gpu`; see "The export and hardening stages" in `skills/build-and-test/test-suites`;
 - determinism: the Debug and Release editors (no GPU needed) and the export stage's current Release and Dist reports, with `--require-gpu`; see "The feature and determinism suites" in `skills/build-and-test/test-suites`;

@@ -7,6 +7,7 @@
 #include "Support/Fuzz.h"
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <string>
 
@@ -31,6 +32,18 @@ namespace Engine {
 			return mesh;
 		}
 
+		// The quad with MeshData version 2's attribute stream: a second UV set and a vertex colour per vertex.
+		MeshData MakeColoredQuad()
+		{
+			MeshData quad = MakeQuad();
+			for (size_t index = 0; index < quad.Vertices.size(); ++index)
+			{
+				const float shade = static_cast<float>(index) * 0.25f;
+				quad.Attributes.push_back({ .TexCoord1 = { shade, 1.0f - shade }, .Color = { shade, 0.5f, 1.0f, 1.0f - shade } });
+			}
+			return quad;
+		}
+
 	}
 
 	TEST_SUITE("Asset")
@@ -40,8 +53,9 @@ namespace Engine {
 			const MeshData quad = MakeQuad();
 			REQUIRE(ValidateMeshData(quad).has_value());
 			const Buffer payload = SerializeMeshPayload(quad);
-			// 4 counts (16) + bounds (24) + 1 submesh (36) + 1 slot (4 + 7 + 8) + 4 vertices (192) + 6 indices (24).
-			CHECK(payload.size() == 16 + 24 + 36 + 19 + 192 + 24);
+			// 4 counts (16) + Streams and Reserved (8) + bounds (24) + 1 submesh (36) + 1 slot (4 + 7 + 8) + 4 vertices (192) + 6
+			// indices (24).
+			CHECK(payload.size() == 16 + 8 + 24 + 36 + 19 + 192 + 24);
 			Result<MeshData> read = DeserializeMeshPayload(payload);
 			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
 			CHECK(read->Vertices == quad.Vertices);
@@ -59,16 +73,12 @@ namespace Engine {
 		// attribute stream (TexCoord1 and the vertex colour) after the indices, flagged by MeshStreams::Attributes, and keeps
 		// the version 1 layout's other members; a payload that sets a bit C23.3 reserves (Skin, Morph) or holds attributes
 		// for another vertex count is refused.
-		TEST_CASE("MeshData: a version 2 payload round-trips the attribute stream and refuses the reserved bits" * doctest::skip(true))
+		TEST_CASE("MeshData: a version 2 payload round-trips the attribute stream and refuses the reserved bits")
 		{
-			MeshData quad = MakeQuad();
-			for (size_t index = 0; index < quad.Vertices.size(); ++index)
-			{
-				const float shade = static_cast<float>(index) * 0.25f;
-				quad.Attributes.push_back({ .TexCoord1 = { shade, 1.0f - shade }, .Color = { shade, 0.5f, 1.0f, 1.0f - shade } });
-			}
+			const MeshData quad = MakeColoredQuad();
 			CHECK(MeshData::FormatVersion == 2);
 			REQUIRE(ValidateMeshData(quad).has_value());
+			CHECK(GetMeshStreams(quad) == MeshStreams::Attributes);
 			const Buffer payload = SerializeMeshPayload(quad);
 			// Version 1's 311 bytes, the Streams and Reserved words (8) and 4 attribute vertices (96).
 			CHECK(payload.size() == 311 + 8 + 96);
@@ -92,6 +102,44 @@ namespace Engine {
 			Buffer skinned = payload;
 			skinned[16] = static_cast<std::byte>(std::to_integer<uint32_t>(skinned[16]) | 2U);
 			CHECK_FALSE(DeserializeMeshPayload(skinned).has_value());
+			// So are the Morph bit, a bit no version defines and a non-zero Reserved word, each a Parse error.
+			Buffer morphed = payload;
+			morphed[16] = static_cast<std::byte>(std::to_integer<uint32_t>(morphed[16]) | 4U);
+			Buffer unknown = payload;
+			unknown[19] = std::byte{ 0x80 };
+			Buffer reserved = payload;
+			reserved[20] = std::byte{ 1 };
+			for (const Buffer* refused : { &morphed, &unknown, &reserved })
+			{
+				const Result<MeshData> rejected = DeserializeMeshPayload(*refused);
+				REQUIRE_FALSE(rejected.has_value());
+				CHECK(rejected.error().GetCode() == ErrorCode::Parse);
+			}
+			// The Attributes bit promises the stream: without its bytes the payload is truncated, and the stream's bytes
+			// without the bit are trailing bytes.
+			Buffer withoutBit = payload;
+			withoutBit[16] = std::byte{ 0 };
+			CHECK_FALSE(DeserializeMeshPayload(withoutBit).has_value());
+			Buffer withoutStream = SerializeMeshPayload(plain);
+			withoutStream[16] = std::byte{ 1 };
+			CHECK_FALSE(DeserializeMeshPayload(withoutStream).has_value());
+		}
+
+		TEST_CASE("MeshData: attribute colours outside [0, 1] and non-finite attributes fail validation")
+		{
+			MeshData bright = MakeColoredQuad();
+			bright.Attributes[2].Color.g = 1.5f;
+			CHECK_FALSE(ValidateMeshData(bright).has_value());
+			MeshData negative = MakeColoredQuad();
+			negative.Attributes[0].Color.a = -0.25f;
+			CHECK_FALSE(ValidateMeshData(negative).has_value());
+			MeshData notFinite = MakeColoredQuad();
+			notFinite.Attributes[1].TexCoord1.x = std::numeric_limits<float>::quiet_NaN();
+			CHECK_FALSE(ValidateMeshData(notFinite).has_value());
+			MeshData bounds = MakeColoredQuad();
+			bounds.Attributes[3].Color = glm::vec4(0.0f);
+			bounds.Attributes[1].Color = glm::vec4(1.0f);
+			CHECK(ValidateMeshData(bounds).has_value());
 		}
 
 		TEST_CASE("MeshData: invalid meshes fail validation")
@@ -200,12 +248,14 @@ namespace Engine {
 			CHECK(newer.error().GetCode() == ErrorCode::UnsupportedVersion);
 		}
 
+		// M23 (C-MESH2): every other mutation starts from a version 2 payload with the attribute stream, so its section and the
+		// Streams word are mutated too (Docs/Decisions/0034-m23-contract.md decision 19).
 		TEST_CASE("MeshData: 10,000 seeded mutations of a payload never crash" * doctest::test_suite(Test::FuzzSuite))
 		{
-			const Buffer payload = SerializeMeshPayload(MakeQuad());
-			const Test::FuzzRun run = Test::RunFuzzCase(0x3E54, 10000, [&payload](Random& random, uint64_t /*index*/)
+			const std::array<Buffer, 2> payloads = { SerializeMeshPayload(MakeQuad()), SerializeMeshPayload(MakeColoredQuad()) };
+			const Test::FuzzRun run = Test::RunFuzzCase(0x3E54, 10000, [&payloads](Random& random, uint64_t index)
 			{
-				Buffer mutated = payload;
+				Buffer mutated = payloads[index % payloads.size()];
 				Test::MutateBytes(mutated, random);
 				// A payload the reader accepts is a valid mesh.
 				const Result<MeshData> read = DeserializeMeshPayload(mutated);

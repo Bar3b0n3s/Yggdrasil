@@ -16,7 +16,7 @@ namespace Engine {
 
 	namespace Utils {
 
-		// The oldest readable .material version (there has been no other yet).
+		// The oldest readable .material version: version 1 lacks only version 2's UV sets, whose absent keys keep UV0.
 		static constexpr uint32_t MinimumMaterialVersion = 1;
 
 		// A linear colour channel or a factor in [0, 1].
@@ -78,18 +78,26 @@ namespace Engine {
 			.Entry(AlphaMode::Mask, "Mask", "Pixels whose alpha is below AlphaCutoff are discarded; the others are opaque.")
 			.Entry(AlphaMode::Blend, "Blend", "The surface is blended over what lies behind it by its alpha.");
 
+		registry.Enum<TextureCoordinateSet>("TextureCoordinateSet", "The texture coordinates a material map samples (glTF textureInfo.texCoord).")
+			.Entry(TextureCoordinateSet::UV0, "UV0", "The mesh's first texture coordinates.")
+			.Entry(TextureCoordinateSet::UV1, "UV1", "The mesh's second texture coordinates (glTF TEXCOORD_1); (0, 0) on a mesh without them.");
+
 		registry.Struct<MaterialData>("Material", "A PBR metallic-roughness material: a .material file, a glTF material or a built-in material.")
 			.ColorField("BaseColor", &MaterialData::BaseColor, "The linear base colour and alpha, multiplied with BaseColorMap.", Utils::UnitRange())
 			.Field("BaseColorMap", &MaterialData::BaseColorMap, "The sRGB base colour texture; null for none (White is bound).")
+			.Field("BaseColorUVSet", &MaterialData::BaseColorUVSet, "The texture coordinates the base colour map samples.")
 			.Field("Metallic", &MaterialData::Metallic, "How metallic the surface is: 0 dielectric, 1 metal; multiplied with the map's blue channel.",
 				Utils::UnitRange())
 			.Field("Roughness", &MaterialData::Roughness, "The perceptual roughness: 0 mirror-like, 1 fully rough; multiplied with the map's green channel.",
 				Utils::UnitRange())
 			.Field("MetallicRoughnessMap", &MaterialData::MetallicRoughnessMap,
 				"The linear texture holding roughness in green and metalness in blue (glTF); null for none.")
+			.Field("MetallicRoughnessUVSet", &MaterialData::MetallicRoughnessUVSet, "The texture coordinates the metallic-roughness map samples.")
 			.Field("NormalMap", &MaterialData::NormalMap, "The tangent-space normal map; null for none (FlatNormal is bound).")
+			.Field("NormalUVSet", &MaterialData::NormalUVSet, "The texture coordinates the normal map samples.")
 			.Field("NormalScale", &MaterialData::NormalScale, "The strength of the normal map's X and Y deflection.", Utils::NonNegative())
 			.Field("OcclusionMap", &MaterialData::OcclusionMap, "The linear ambient occlusion texture (red channel); null for none.")
+			.Field("OcclusionUVSet", &MaterialData::OcclusionUVSet, "The texture coordinates the occlusion map samples.")
 			.Field("OcclusionStrength", &MaterialData::OcclusionStrength, "How much the occlusion map darkens ambient light: 0 none, 1 fully.",
 				Utils::UnitRange())
 			.ColorField("Emissive", &MaterialData::Emissive, "The linear emitted colour, multiplied with EmissiveMap and EmissiveStrength.",
@@ -97,6 +105,7 @@ namespace Engine {
 			.Field("EmissiveStrength", &MaterialData::EmissiveStrength, "The emission multiplier for HDR emission (KHR_materials_emissive_strength).",
 				Utils::NonNegative())
 			.Field("EmissiveMap", &MaterialData::EmissiveMap, "The sRGB emission texture; null for none (Black is bound).")
+			.Field("EmissiveUVSet", &MaterialData::EmissiveUVSet, "The texture coordinates the emissive map samples.")
 			.Field("AlphaMode", &MaterialData::AlphaMode, "How the base colour alpha is used.")
 			.Field("AlphaCutoff", &MaterialData::AlphaCutoff, "The alpha below which Mask discards a pixel.", Utils::UnitRange())
 			.Field("DoubleSided", &MaterialData::DoubleSided, "Whether back faces are drawn (and lit with flipped normals).")

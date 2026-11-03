@@ -126,6 +126,35 @@ class AssetTests(AutomationTestCase):
         client.call("edit.undo")
         self.assertFalse((root / "Assets" / "Models" / "Textured.gltf").exists())
 
+    def test_material_uv_sets_and_gltf_attribute_stream(self) -> None:
+        """M23 (Docs/Decisions/0034-m23-contract.md decisions 9, 10 and 18): Material version 2's UV sets through
+        asset.*, and glTF importer version 2, which imports TEXCOORD_1 and COLOR_0 and warns only for a texture on
+        TEXCOORD_2."""
+        client, root = self.open_editor_with_scene()
+        created = client.call("asset.create", {"type": "Material", "path": "Assets/Materials/Layered.material",
+                                               "values": {"OcclusionUVSet": "UV1"}})
+        asset_id = created["asset"]["id"]
+        document = read_json(root / "Assets" / "Materials" / "Layered.material")
+        self.assertEqual(document["Version"], 2)
+        self.assertEqual(document["OcclusionUVSet"], "UV1")
+        self.assertEqual(document["BaseColorUVSet"], "UV0")
+        changed = client.call("asset.setProperties", {"asset": asset_id, "values": {"BaseColorUVSet": "UV1"}})
+        self.assertEqual(changed["values"]["BaseColorUVSet"], "UV1")
+        self.assertEqual(read_json(root / "Assets" / "Materials" / "Layered.material")["BaseColorUVSet"], "UV1")
+        with self.assertRaises(engine_client.EngineError) as refused:
+            client.call("asset.setProperties", {"asset": asset_id, "values": {"EmissiveUVSet": "UV2"}})
+        self.assert_engine_error(refused.exception, engine_client.VALIDATION_FAILED, "Validation")
+
+        source_dir = self.directory / "Downloads"
+        shutil.copytree(GLTF_FIXTURES, source_dir)
+        for name in ("VertexColors.gltf", "Attributes.gltf", "TexCoord2Occlusion.gltf"):
+            client.call("asset.import", {"source": str(source_dir / name), "destDir": "Assets/Models"})
+        codes = {(item["code"], item.get("file")) for item in client.call("project.validate")["diagnostics"]}
+        self.assertIn(("ASSET_UNSUPPORTED_UV_SET", "Assets/Models/TexCoord2Occlusion.gltf"), codes)
+        self.assertNotIn("ASSET_VERTEX_COLORS_IGNORED", {code for code, _ in codes})
+        self.assertFalse(any(code == "ASSET_UNSUPPORTED_UV_SET" and file != "Assets/Models/TexCoord2Occlusion.gltf"
+                             for code, file in codes))
+
     def test_asset_list_info_and_import_settings(self) -> None:
         client, root = self.open_editor_with_scene()
         shutil.copy(GLTF_FIXTURES / "Textures" / "Checker.png", root / "Assets" / "Checker.png")

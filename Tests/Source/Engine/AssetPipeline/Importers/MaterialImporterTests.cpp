@@ -2,6 +2,7 @@
 
 #include "Engine/AssetPipeline/Importers/MaterialImporter.h"
 
+#include "Engine/Asset/CookedFormat.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/TestData.h"
@@ -103,6 +104,42 @@ namespace Engine {
 			REQUIRE(again.has_value());
 			CHECK(again->Artifacts.front().Cooked == textured->Artifacts.front().Cooked);
 			CHECK(again->Dependencies == textured->Dependencies);
+		}
+
+		// M23 (Material version 2; Docs/Decisions/0034-m23-contract.md decision 10): importer version 2 cooks Material version 2
+		// from a version 1 file (every UV set UV0) and from a version 2 file (its UV sets), and lists the textures of both as
+		// its dependencies (the importer-dependency rule).
+		TEST_CASE("MaterialImporter: version 2 cooks Material version 2 with each map's UV set from version 1 and 2 files")
+		{
+			CHECK(MaterialImporter::Version == 2);
+			Test::AssetTestFixture fixture;
+			const Result<std::string> legacy = Test::ReadTestDataText("Formats/Material/MaterialV1.material");
+			REQUIRE(legacy.has_value());
+			fixture.WriteProjectText("Assets/Legacy.material", *legacy);
+			fixture.WriteProjectText("Assets/Layered.material", R"({"Format": "Material", "Version": 2, "BaseColorMap": "00000000000000aa",
+				"OcclusionMap": "0000000000000055", "OcclusionUVSet": "UV1", "EmissiveUVSet": "UV1"})");
+
+			Result<ImportResult> fromLegacy = ImportMaterial(fixture, "Assets/Legacy.material");
+			REQUIRE_MESSAGE(fromLegacy.has_value(), fromLegacy.error().ToString());
+			const Result<CookedArtifactView> legacyView = ReadCookedArtifact(fromLegacy->Artifacts.front().Cooked);
+			REQUIRE(legacyView.has_value());
+			CHECK(legacyView->Header.FormatVersion == 2);
+			CHECK(legacyView->Header.ImporterVersion == 2);
+			CHECK(AsStringView(legacyView->Payload).find(R"("Version":2)") != std::string_view::npos);
+			Result<AssetRef<MaterialData>> legacyMaterial = LoadCookedMaterial(fromLegacy->Artifacts.front().Cooked, fixture.GetRegistry());
+			REQUIRE(legacyMaterial.has_value());
+			CHECK((*legacyMaterial)->OcclusionUVSet == TextureCoordinateSet::UV0);
+			CHECK(fromLegacy->Dependencies
+				== std::vector<AssetHandle>{ AssetHandle(0x7e57000000000001ull), AssetHandle(0x7e57000000000002ull), AssetHandle(0x7e57000000000003ull) });
+
+			Result<ImportResult> layered = ImportMaterial(fixture, "Assets/Layered.material");
+			REQUIRE_MESSAGE(layered.has_value(), layered.error().ToString());
+			Result<AssetRef<MaterialData>> material = LoadCookedMaterial(layered->Artifacts.front().Cooked, fixture.GetRegistry());
+			REQUIRE(material.has_value());
+			CHECK((*material)->BaseColorUVSet == TextureCoordinateSet::UV0);
+			CHECK((*material)->OcclusionUVSet == TextureCoordinateSet::UV1);
+			CHECK((*material)->EmissiveUVSet == TextureCoordinateSet::UV1);
+			CHECK(layered->Dependencies == std::vector<AssetHandle>{ AssetHandle(0x55), AssetHandle(0xaa) });
 		}
 	}
 

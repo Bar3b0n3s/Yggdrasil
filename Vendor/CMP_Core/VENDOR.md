@@ -97,7 +97,21 @@ support, in the editor and in exported games alike.
   do not include the build configuration (§7.5), so a Debug and a Release editor must produce identical bytes.
   `Scripts/CheckBuildConfig.py` checks the model (`PRECISE_VENDOR_PROJECTS`), and its fixture
   `Tests/Data/BuildConfig/FastMathCMPCore` proves the check.
-- Debug: `symbols "on"`; Release: `optimize "on"`, `symbols "on"`; Dist: `optimize "full"`, `symbols "off"`.
+- Debug: `optimize "Size"` (`/O1`), `runtimechecks "Off"`, `symbols "on"`, with the Debug runtime; Release:
+  `optimize "on"` (`/Ox`: premake writes `Optimization` `Full` for it in Visual Studio projects), `symbols "on"`; Dist:
+  `optimize "full"` (`/Ox` too, with `NDEBUG`, which compiles out the BC6H and BC7 kernels' `assert`s), `symbols "off"`.
+  Debug is optimized since M23's W23.2 integration (Docs/Decisions/0034-m23-contract.md decision 21): unoptimized, the
+  BC6H encoder made an environment import about six times slower ("EnvironmentImporter: bakes and cooks the Studio HDRI
+  deterministically", two imports of the built-in Studio HDRI, took 51.2 s in Debug unoptimized, 8.4 s at `/Ox` and
+  8.6 s at `/O1`, about 4.3 s an import, the bake unchanged). MSVC refuses `/RTC1`, which a project with the Debug
+  runtime gets by default, together with optimization, so premake writes `BasicRuntimeChecks` `Default` (no run-time
+  checks).
+- **Why the configurations compile it differently** (W23.2's review, the lead's decision): the precise floating-point
+  model makes the optimization level change no result of correct code, but a read of uninitialized memory, like the one
+  that keeps BC3 out (above; decision 13), leaves different stack contents under different code generation. Debug at
+  `/O1` with the Debug runtime and Release at `/Ox` therefore stay different builds of the library, so the determinism
+  check, which compares the cooked bytes of the Debug and the Release editor (the configurations that cook), can still
+  expose such a read; at the integration's `optimize "on"` Debug compiled exactly like Release and could not.
 - Warnings: the compiler's default level; the library compiles without warnings under MSVC 14.51 (the M23 contract's
   Debug and Release builds, which fail on any MSBuild warning).
 
@@ -112,8 +126,10 @@ support, in the editor and in exported games alike.
 - **The check.** "TextureCompression: the fixture set compresses to the committed bytes in every configuration"
   (`Tests/Source/Engine/Asset/TextureCompressionTests.cpp`) compresses the committed PNG textures and procedural LDR and
   HDR levels with every codec the engine uses and compares the XXH64 of the blocks with one committed digest, in Debug
-  and in Release. It passed in both at the contract (decision 13), which is what adopting CMP_Core waited for (ADR 0028
-  decision 7, plan §6 "M23"). Bytes are never compared across compilers.
+  and in Release. It passed in both at the contract (decision 13), with Debug unoptimized, which is what adopting
+  CMP_Core waited for (ADR 0028 decision 7, plan §6 "M23"), and passes with Debug at `/O1` since W23.2's review. Dist
+  builds no test executable, and no Dist program encodes (the Runtime only decodes, through the fallback), so Debug and
+  Release are the configurations whose bytes must agree. Bytes are never compared across compilers.
 - **Thread safety.** After that step every codec call builds its own options (`CreateOptionsBC*`), so concurrent calls
   share no mutable state.
 
@@ -136,7 +152,9 @@ support, in the editor and in exported games alike.
 - The M23 contract builds the library in Debug and Release with MSVC 14.51 without warnings, and in Release and Dist with
   clang-cl in the portability workspace (`Generate.py --toolset clang`; vendored code's warnings tolerated, as the
   portability stage tolerates them); `Scripts/CheckBuildConfig.py` passes on the workspace and fails on
-  `FastMathCMPCore`; the determinism check above passes in Debug and Release.
+  `FastMathCMPCore`; the determinism check above passes in Debug and Release. W23.2's review built it again in Debug
+  (`/O1`), Release and Dist with MSVC 14.51 and in Release and Dist with clang-cl, and the determinism check passed in
+  Debug and Release.
 
 ## Updating
 
@@ -144,8 +162,11 @@ support, in the editor and in exported games alike.
 2. Clone the new tag as above and compare the three trees; replace the kept files, add any new source that upstream's
    `cmp_core/CMakeLists.txt` lists, and update `LICENSE` if the notice changed.
 3. Update this file (version, commit, date, hashes), rebuild every configuration, run `python Scripts/CheckBuildConfig.py`
-   and the TextureCompression tests in Debug and Release. A codec change changes the committed digest: update it only
-   together with `TextureImporter::Version` and `EnvironmentImporter::Version`, so cached textures are rebuilt.
+   and the TextureCompression tests in Debug and Release. Keep the configurations' optimization levels different (Debug
+   `/O1`, Release `/Ox`, above): the determinism check compares the two builds' bytes, so a read of uninitialized memory
+   in a new pin, or in a codec the engine starts using, shows as a digest that differs between them. A codec change
+   changes the committed digest: update it only together with `TextureImporter::Version` and
+   `EnvironmentImporter::Version`, so cached textures are rebuilt.
 
 ## Notices
 

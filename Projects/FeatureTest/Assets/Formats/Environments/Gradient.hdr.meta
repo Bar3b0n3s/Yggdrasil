@@ -4,10 +4,11 @@
 	"Handle": "5ef219b299d80323",
 	"Type": "Environment",
 	"Importer": "Environment",
-	"ImporterVersion": 1,
+	"ImporterVersion": 2,
 	"Settings": {
 		"ClampLuminance": false,
-		"MaxLuminance": 1000
+		"MaxLuminance": 1000,
+		"Compression": "Auto"
 	},
 	"SubAssets": []
 }

@@ -26,6 +26,11 @@ namespace Engine {
 			return static_cast<uint32_t>(std::bit_width(faceSize));
 		}
 
+		[[nodiscard]] static bool IsCubeMapFormat(CubeMapFormat format)
+		{
+			return format == CubeMapFormat::Rgba16Float || format == CubeMapFormat::BC6HUfloat;
+		}
+
 		// Whether a binary16 value is finite and not negative: its exponent is not all ones (infinity, NaN), and its sign bit
 		// is clear or the value is zero (-0 equals 0).
 		[[nodiscard]] static bool IsFiniteNonNegativeHalf(uint16_t half)
@@ -35,7 +40,8 @@ namespace Engine {
 			return finite && !negative;
 		}
 
-		// Where the binary16 value at `valueIndex` of a cube's texels lies, as "mip M, face F, texel (column, row)".
+		// Where the binary16 value at `valueIndex` of an Rgba16Float cube's texels lies, as "mip M, face F, texel (column,
+		// row)".
 		[[nodiscard]] static std::string DescribeCubeValue(const CubeMapData& cube, size_t valueIndex)
 		{
 			size_t texel = valueIndex / 4;
@@ -54,15 +60,20 @@ namespace Engine {
 			return std::format("value {}", valueIndex);
 		}
 
-		// The size, mip-chain and texel checks of one cube; `name` names it in messages ("skybox", "specular cube").
+		// The format, size, mip-chain and texel checks of one cube; `name` names it in messages ("skybox", "specular cube").
 		[[nodiscard]] static Status ValidateCube(const CubeMapData& cube, std::string_view name)
 		{
-			const size_t expected = ComputeCubeMapByteSize(cube.FaceSize, cube.MipCount);
+			if (!IsCubeMapFormat(cube.Format))
+				return MakeError(ErrorCode::Validation, "the {} has the unknown format {}", name, std::to_underlying(cube.Format));
+			const size_t expected = ComputeCubeMapByteSize(cube.FaceSize, cube.MipCount, cube.Format);
 			if (cube.Texels.size() != expected)
 			{
-				return MakeError(ErrorCode::Validation, "the {} of {}x{} with {} mips holds {} texel bytes instead of {}", name, cube.FaceSize, cube.FaceSize, cube.MipCount,
-					cube.Texels.size(), expected);
+				return MakeError(ErrorCode::Validation, "the {} {} of {}x{} with {} mips holds {} texel bytes instead of {}", CubeMapFormatToString(cube.Format), name,
+					cube.FaceSize, cube.FaceSize, cube.MipCount, cube.Texels.size(), expected);
 			}
+			// BC6H's unsigned half floats decode to finite, non-negative values whatever the block bytes (the header).
+			if (cube.Format == CubeMapFormat::BC6HUfloat)
+				return {};
 			const size_t valueCount = cube.Texels.size() / sizeof(uint16_t);
 			for (size_t index = 0; index < valueCount; ++index)
 			{
@@ -77,6 +88,45 @@ namespace Engine {
 			return {};
 		}
 
+		// One cube's header: its face size, mip count, format byte and three reserved zero bytes.
+		static void WriteCubeHeader(BinaryWriter& writer, const CubeMapData& cube)
+		{
+			writer.WriteU32(cube.FaceSize);
+			writer.WriteU32(cube.MipCount);
+			writer.WriteU8(std::to_underlying(cube.Format));
+			for (int reserved = 0; reserved < 3; ++reserved)
+				writer.WriteU8(0);
+		}
+
+		// Reads one cube's header into `cube` (its texels stay empty). Errors: Parse for truncation, a format byte outside
+		// CubeMapFormat or a reserved byte that is not 0, naming `name`.
+		[[nodiscard]] static Status ReadCubeHeader(BinaryReader& reader, CubeMapData& cube, std::string_view name)
+		{
+			ENGINE_TRY_ASSIGN(cube.FaceSize, reader.ReadU32());
+			ENGINE_TRY_ASSIGN(cube.MipCount, reader.ReadU32());
+			ENGINE_TRY_ASSIGN(const uint8_t format, reader.ReadU8());
+			cube.Format = static_cast<CubeMapFormat>(format);
+			if (!IsCubeMapFormat(cube.Format))
+				return MakeError(ErrorCode::Parse, "environment payload: the {} has the unknown format {} at offset {}", name, format, reader.GetPosition() - 1);
+			for (int index = 0; index < 3; ++index)
+			{
+				ENGINE_TRY_ASSIGN(const uint8_t reserved, reader.ReadU8());
+				if (reserved != 0)
+					return MakeError(ErrorCode::Parse, "environment payload: the {}'s reserved byte at offset {} is {}, not 0", name, reader.GetPosition() - 1, reserved);
+			}
+			return {};
+		}
+
+	}
+
+	std::string_view CubeMapFormatToString(CubeMapFormat format)
+	{
+		switch (format)
+		{
+			case CubeMapFormat::Rgba16Float: return "Rgba16Float";
+			case CubeMapFormat::BC6HUfloat:  return "BC6HUfloat";
+		}
+		return "Unknown";
 	}
 
 	Status ValidateEnvironmentData(const EnvironmentData& environment)
@@ -113,10 +163,8 @@ namespace Engine {
 	{
 		ENGINE_CORE_ASSERT(ValidateEnvironmentData(environment).has_value(), "SerializeEnvironmentPayload needs a valid environment");
 		BinaryWriter writer;
-		writer.WriteU32(environment.Skybox.FaceSize);
-		writer.WriteU32(environment.Skybox.MipCount);
-		writer.WriteU32(environment.Specular.FaceSize);
-		writer.WriteU32(environment.Specular.MipCount);
+		Utils::WriteCubeHeader(writer, environment.Skybox);
+		Utils::WriteCubeHeader(writer, environment.Specular);
 		for (const glm::vec3& coefficient : environment.IrradianceSH9)
 		{
 			writer.WriteF32(coefficient.x);
@@ -132,10 +180,8 @@ namespace Engine {
 	{
 		BinaryReader reader(payload);
 		EnvironmentData environment;
-		ENGINE_TRY_ASSIGN(environment.Skybox.FaceSize, reader.ReadU32());
-		ENGINE_TRY_ASSIGN(environment.Skybox.MipCount, reader.ReadU32());
-		ENGINE_TRY_ASSIGN(environment.Specular.FaceSize, reader.ReadU32());
-		ENGINE_TRY_ASSIGN(environment.Specular.MipCount, reader.ReadU32());
+		ENGINE_TRY(Utils::ReadCubeHeader(reader, environment.Skybox, "skybox"));
+		ENGINE_TRY(Utils::ReadCubeHeader(reader, environment.Specular, "specular cube"));
 		for (glm::vec3& coefficient : environment.IrradianceSH9)
 		{
 			ENGINE_TRY_ASSIGN(coefficient.x, reader.ReadF32());
@@ -145,16 +191,19 @@ namespace Engine {
 
 		// The texel sizes come from untrusted header values: ComputeCubeMapByteSize is total (it saturates instead of
 		// overflowing), and both are checked against the bytes left before anything is allocated (§6.8).
-		const size_t skyboxBytes = ComputeCubeMapByteSize(environment.Skybox.FaceSize, environment.Skybox.MipCount);
-		const size_t specularBytes = ComputeCubeMapByteSize(environment.Specular.FaceSize, environment.Specular.MipCount);
+		const CubeMapData& skyboxHeader = environment.Skybox;
+		const CubeMapData& specularHeader = environment.Specular;
+		const size_t skyboxBytes = ComputeCubeMapByteSize(skyboxHeader.FaceSize, skyboxHeader.MipCount, skyboxHeader.Format);
+		const size_t specularBytes = ComputeCubeMapByteSize(specularHeader.FaceSize, specularHeader.MipCount, specularHeader.Format);
 		const size_t remaining = reader.GetRemaining();
 		if (skyboxBytes > remaining || specularBytes != remaining - skyboxBytes)
 		{
 			return MakeError(ErrorCode::Parse,
-				"environment payload: the header's {}x{} skybox with {} mips and {}x{} specular cube with {} mips do not match the {} texel bytes that "
-				"follow at offset {}",
-				environment.Skybox.FaceSize, environment.Skybox.FaceSize, environment.Skybox.MipCount, environment.Specular.FaceSize,
-				environment.Specular.FaceSize, environment.Specular.MipCount, remaining, reader.GetPosition());
+				"environment payload: the header's {} {}x{} skybox with {} mips and {} {}x{} specular cube with {} mips do not match the {} texel "
+				"bytes that follow at offset {}",
+				CubeMapFormatToString(skyboxHeader.Format), skyboxHeader.FaceSize, skyboxHeader.FaceSize, skyboxHeader.MipCount,
+				CubeMapFormatToString(specularHeader.Format), specularHeader.FaceSize, specularHeader.FaceSize, specularHeader.MipCount, remaining,
+				reader.GetPosition());
 		}
 		ENGINE_TRY_ASSIGN(const std::span<const std::byte> skybox, reader.ReadBytes(skyboxBytes));
 		environment.Skybox.Texels.assign(skybox.begin(), skybox.end());

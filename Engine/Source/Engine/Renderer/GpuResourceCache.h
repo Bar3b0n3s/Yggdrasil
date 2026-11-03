@@ -37,14 +37,14 @@ namespace Engine {
 		Aabb Bounds{};
 	};
 
-	// A mesh's GPU mirror: a vertex buffer of MeshVertex (48 bytes each, §6.8) and a uint32 index buffer, both in their
-	// shader-readable states (keepInitialState: VertexBuffer and IndexBuffer).
+	// A mesh's GPU mirror: a vertex buffer of MeshVertex (48 bytes each, §6.8), an attribute buffer and a uint32 index
+	// buffer, each in its shader-readable state (keepInitialState: VertexBuffer and IndexBuffer).
 	struct GpuMesh
 	{
 		nvrhi::BufferHandle VertexBuffer{};
 		// M23 (C23.1, C-MESH2; Docs/Decisions/0034-m23-contract.md decision 9): vertex binding 1, MeshVertexAttributes (24
-		// bytes each): the mesh's attribute stream, or the cache's shared default stream (TexCoord1 (0, 0), opaque white)
-		// for a mesh without one, at least VertexCount entries. Stream M creates it; null until then.
+		// bytes each), bound at offset 0: the mesh's attribute stream (MeshData::Attributes), or for a mesh without one the
+		// cache's shared default stream (TexCoord1 (0, 0), opaque white), which holds at least VertexCount entries, all equal.
 		nvrhi::BufferHandle AttributeBuffer{};
 		nvrhi::BufferHandle IndexBuffer{};
 		uint32_t VertexCount = 0;
@@ -99,8 +99,9 @@ namespace Engine {
 		bool IsPlaceholder = false; // the material was missing or failed: this mirrors the Error material
 	};
 
-	// An environment's GPU mirror (§8.6): EnvironmentData's cubes as immutable sampled cube textures (RGBA16_FLOAT, every mip,
-	// ShaderResource) and its SH9 coefficients (EnvironmentData.h's convention) for EnvironmentConstants.
+	// An environment's GPU mirror (§8.6): EnvironmentData's cubes as immutable sampled cube textures (every mip,
+	// ShaderResource: RGBA16_FLOAT, or for a BC6H cube BC6H_UFLOAT, or RGBA16_FLOAT through the decode fallback on a device
+	// without BC support, M23) and its SH9 coefficients (EnvironmentData.h's convention) for EnvironmentConstants.
 	struct GpuEnvironment
 	{
 		nvrhi::TextureHandle Skybox{};
@@ -145,8 +146,11 @@ namespace Engine {
 		GpuResourceCache& operator=(const GpuResourceCache&) = delete;
 
 		// The mirror of mesh `handle` at its current version, uploading it when needed (one command list, executed at once).
-		// A null handle gives the placeholder (Cube) mirror without a diagnostic. The reference stays valid until the next call
-		// that uploads, CollectStale or Clear.
+		// A null handle gives the placeholder (Cube) mirror without a diagnostic. M23 (decision 9): a mesh without the
+		// attribute stream binds the cache's shared default stream, created at the first such mesh and replaced by a longer
+		// one when a mesh has more vertices than it holds; Clear and ReleaseGpuObjects drop it with the mirrors, and
+		// CollectStale and TrimUnused once no mesh mirror binds it. The reference stays valid until the next call that
+		// uploads, CollectStale or Clear.
 		[[nodiscard]] const GpuMesh& GetMesh(AssetHandle handle);
 
 		// The mirror of texture `handle`, as GetMesh (placeholder: the Missing texture). TextureFormat maps to RGBA8_UNORM,
@@ -156,7 +160,7 @@ namespace Engine {
 		// decompresses every level (DecompressTextureBlocks, Asset/TextureCompression.h) into RGBA8_UNORM (BC1Unorm, BC5Unorm,
 		// as (x, y, 0, 255), and BC7Unorm), SRGBA8_UNORM (BC1Srgb and BC7Srgb) or R8_UNORM (BC4Unorm), so a BC texture is
 		// never replaced by its placeholder for want of the feature. The cache logs one Info line naming the path at its first
-		// block-compressed texture.
+		// block-compressed texture or BC6H environment cube (GetEnvironment).
 		[[nodiscard]] const GpuTexture& GetTexture(AssetHandle handle);
 
 		// M8: the mirror of material `handle` at its current version (a null handle: the Default material; a missing or failed

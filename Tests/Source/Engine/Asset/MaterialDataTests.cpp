@@ -15,22 +15,27 @@ namespace Engine {
 
 	namespace {
 
-		// The §6.5 example with every field present (canonical order and spelling).
+		// The §6.5 example with every field present (canonical order and spelling; Material version 2, M23).
 		constexpr std::string_view RedMaterial = R"({
 	"Format": "Material",
-	"Version": 1,
+	"Version": 2,
 	"BaseColor": [0.9, 0.15, 0.15, 1],
 	"BaseColorMap": null,
+	"BaseColorUVSet": "UV0",
 	"Metallic": 0,
 	"Roughness": 0.45,
 	"MetallicRoughnessMap": null,
+	"MetallicRoughnessUVSet": "UV0",
 	"NormalMap": null,
+	"NormalUVSet": "UV0",
 	"NormalScale": 1,
 	"OcclusionMap": null,
+	"OcclusionUVSet": "UV1",
 	"OcclusionStrength": 1,
 	"Emissive": [0, 0, 0],
 	"EmissiveStrength": 1,
 	"EmissiveMap": null,
+	"EmissiveUVSet": "UV0",
 	"AlphaMode": "Opaque",
 	"AlphaCutoff": 0.5,
 	"DoubleSided": false,
@@ -49,11 +54,12 @@ namespace Engine {
 			MaterialLoadReport report;
 			Result<MaterialData> material = MaterialFromText(RedMaterial, *registry, report);
 			REQUIRE_MESSAGE(material.has_value(), material.error().ToString());
-			CHECK(report.FileVersion == 1);
+			CHECK(report.FileVersion == 2);
 			CHECK(report.Diagnostics.empty());
 			CHECK(material->BaseColor == glm::vec4(0.9f, 0.15f, 0.15f, 1.0f));
 			CHECK(material->Roughness == 0.45f);
 			CHECK(material->AlphaMode == AlphaMode::Opaque);
+			CHECK(material->OcclusionUVSet == TextureCoordinateSet::UV1);
 			Result<std::string> text = MaterialToText(*material, *registry);
 			REQUIRE(text.has_value());
 			CHECK(*text == RedMaterial);
@@ -120,7 +126,7 @@ namespace Engine {
 			CHECK(unknownReport.Diagnostics.size() == 1);
 			CHECK_FALSE(MaterialFromText(R"({"Format": "Material", "Version": 1, "Shininess": 3})", *registry, unknownReport, true).has_value());
 
-			Result<MaterialData> newer = MaterialFromText(R"({"Format": "Material", "Version": 2})", *registry, report);
+			Result<MaterialData> newer = MaterialFromText(R"({"Format": "Material", "Version": 3})", *registry, report);
 			REQUIRE_FALSE(newer.has_value());
 			CHECK(newer.error().GetCode() == ErrorCode::UnsupportedVersion);
 		}
@@ -132,8 +138,9 @@ namespace Engine {
 			REQUIRE(document.has_value());
 			REQUIRE(document->is_object());
 			CHECK(document->begin().key() == "Format");
-			CHECK((*document)["Version"] == Json(1));
-			CHECK(document->size() == 2 + 17);
+			CHECK((*document)["Version"] == Json(2));
+			CHECK(document->size() == 2 + 22);
+			CHECK((*document)["NormalUVSet"] == Json("UV0"));
 			CHECK((*document)["BaseColorMap"].is_null());
 			CHECK((*document)["AlphaMode"] == Json("Opaque"));
 
@@ -158,6 +165,9 @@ namespace Engine {
 			Result<MaterialData> wrongType = MaterialFromText(R"({"Format": "Material", "Version": 1, "DoubleSided": 1})", *registry, report);
 			REQUIRE_FALSE(wrongType.has_value());
 			CHECK(wrongType.error().GetCode() == ErrorCode::Validation);
+			Result<MaterialData> unknownSet = MaterialFromText(R"({"Format": "Material", "Version": 2, "EmissiveUVSet": "UV2"})", *registry, report);
+			REQUIRE_FALSE(unknownSet.has_value());
+			CHECK(unknownSet.error().GetCode() == ErrorCode::Validation);
 			Result<MaterialData> negative = MaterialFromText(R"({"Format": "Material", "Version": 1, "NormalScale": -0.5})", *registry, report);
 			REQUIRE_FALSE(negative.has_value());
 			CHECK(negative.error().GetCode() == ErrorCode::Validation);
@@ -214,7 +224,7 @@ namespace Engine {
 		// M23 (C23.1, Material version 2; Docs/Decisions/0034-m23-contract.md decision 10, stream M): a version 1 file loads
 		// with every map's texture coordinate set UV0 and saves as version 2, each map's UV set after it: the Formats/Material
 		// fixture and its upgraded counterpart.
-		TEST_CASE("MaterialData: MaterialV1 fixture loads with UV0 sets and saves as version 2" * doctest::skip(true))
+		TEST_CASE("MaterialData: MaterialV1 fixture loads with UV0 sets and saves as version 2")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			const Result<std::string> legacy = Test::ReadTestDataText("Formats/Material/MaterialV1.material");

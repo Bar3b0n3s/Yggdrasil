@@ -165,6 +165,9 @@ namespace Engine {
 				nvrhi::VertexAttributeDesc().setName("POSITION").setFormat(nvrhi::Format::RGB32_FLOAT).setOffset(offsetof(MeshVertex, Position)).setElementStride(sizeof(MeshVertex)),
 				nvrhi::VertexAttributeDesc().setName("TEXCOORD").setFormat(nvrhi::Format::RG32_FLOAT).setOffset(offsetof(MeshVertex, TexCoord)).setElementStride(sizeof(MeshVertex))
 			};
+			// M23 (C-MESH2): the attribute stream at locations 2 and 3, which a Mask material's alpha test reads.
+			const std::array<nvrhi::VertexAttributeDesc, 2> stream = Utils::MakeMeshAttributeStreamAttributes();
+			specification.VertexAttributes.insert(specification.VertexAttributes.end(), stream.begin(), stream.end());
 			specification.RenderState.rasterState.frontCounterClockwise = true;
 			specification.RenderState.rasterState.cullMode = variant % 3 == 0 ? nvrhi::RasterCullMode::Back
 				: variant % 3 == 1                                            ? nvrhi::RasterCullMode::Front
@@ -220,7 +223,7 @@ namespace Engine {
 				continue;
 			// Cache uploads invalidate borrowed references; own this mesh's handles and value arrays before resolving materials.
 			const GpuMesh mesh = cache.GetMesh(item.Mesh);
-			if (!mesh.VertexBuffer || !mesh.IndexBuffer)
+			if (!mesh.VertexBuffer || !mesh.IndexBuffer || !mesh.AttributeBuffer)
 				continue;
 			const bool mirrored = glm::determinant(glm::mat3(item.World)) < 0.0f;
 			for (uint32_t submeshIndex = 0; submeshIndex < mesh.Submeshes.size(); ++submeshIndex)
@@ -239,6 +242,7 @@ namespace Engine {
 					continue;
 				const uint32_t variant = (masked ? 3U : 0U) + (material.DoubleSided ? 2U : (mirrored ? 1U : 0U));
 				set.Draws.push_back({ .Vertices = mesh.VertexBuffer,
+					.Attributes = mesh.AttributeBuffer,
 					.Indices = mesh.IndexBuffer,
 					.IndexOffset = submesh.IndexOffset,
 					.IndexCount = submesh.IndexCount,
@@ -314,6 +318,7 @@ namespace Engine {
 					graphics.bindings.push_back(materialSet);
 				}
 				graphics.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(draw.Vertices).setSlot(0));
+				graphics.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(draw.Attributes).setSlot(Utils::MeshAttributeStreamSlot));
 				graphics.setIndexBuffer(nvrhi::IndexBufferBinding().setBuffer(draw.Indices).setFormat(nvrhi::Format::R32_UINT));
 				commandList.setGraphicsState(graphics);
 				SelectionMaskConstants constants{};

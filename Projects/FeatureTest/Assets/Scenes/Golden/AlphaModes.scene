@@ -7,7 +7,7 @@
 		"Transform": 1,
 		"MeshRenderer": 1,
 		"Camera": 1,
-		"PointLight": 1,
+		"PointLight": 2,
 		"SpotLight": 1,
 		"Environment": 1,
 		"PostProcess": 1
@@ -100,6 +100,7 @@
 					"Color": [1, 0.75, 0.45],
 					"Intensity": 12,
 					"Range": 8,
+					"CastShadows": false,
 					"SourceRadius": 0.05
 				}
 			}
