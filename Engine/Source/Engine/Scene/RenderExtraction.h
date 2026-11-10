@@ -158,8 +158,8 @@ namespace Engine {
 	// sources (the game view and a camera's view; a view without a primary camera draws its UI too, as it draws its screen
 	// texts). The editor's scene view (Explicit) draws no Screen canvas. C22.3 (decision 51, stream W): World canvases
 	// (UiCanvasComponent::RenderMode) draw in every view that draws the world, the editor's scene view included
-	// (AppendUiDrawItems' worldOnly for the Explicit source), at their render pose; Screen canvases still draw in the
-	// Primary and Entity views only.
+	// (AppendUiDrawItems' worldOnly for the Explicit source), at their render pose at request.Alpha, as the meshes (the
+	// milestone review); Screen canvases still draw in the Primary and Entity views only.
 	// Asset-dependent overlays are appended afterwards with AppendRenderAnnotations at the snapshot's Alpha.
 	// Errors: InvalidArgument for a zero Width or Height or an Alpha that is not finite or outside [0, 1]; NotFound for an
 	// Entity request whose CameraEntity names no entity of the scene, and InvalidArgument when that entity has no

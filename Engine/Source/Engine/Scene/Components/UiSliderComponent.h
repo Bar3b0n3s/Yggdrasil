@@ -28,7 +28,7 @@ namespace Engine {
 	//     directions move focus as usual. The step is Step (0: a tenth of Max - Min); with WholeNumbers it is rounded to a
 	//     whole number, floor(step + 0.5), and at least 1, whatever Step says, so every press moves a whole-number slider
 	//     that is not at its end.
-	// Requires a UiRect; excludes UiButton, UiToggle and UiScrollView.
+	// Requires a UiRect; excludes UiButton, UiToggle, UiScrollView and UiTextInput.
 	struct UiSliderComponent
 	{
 		bool Interactable = true; // as UiButtonComponent::Interactable

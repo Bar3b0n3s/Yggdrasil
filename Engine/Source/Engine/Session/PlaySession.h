@@ -502,13 +502,14 @@ namespace Engine {
 		[[nodiscard]] Physics2DSystem* GetPhysics2D();
 		[[nodiscard]] const Physics2DSystem* GetPhysics2D() const;
 		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 3): the session's UI (Scene/UiSystem.h): the layouts of the
-		// UiLayout and FrameUiLayout phases at the session's scene resolution (GetViewSize in W22.1; the later lander of M21
-		// and M22 makes it the scene resolution M21's PixelPerfectCamera sets), in Play and Simulate alike; ui.tree reads the
-		// current one for the play scene, and W22.2's UiInput hit-tests it. Valid for the session's lifetime. Activate, and a
-		// Scene.Load or Scene.Reload's replacement of the scene at the end of a frame, run UiSystem::LayoutStep of the current
-		// scene both before the scene's startup callbacks and after them (not a phase: no observer reports it), so the current
-		// layout always describes the current scene, in its OnCreate and OnStart and before its first step included (the
-		// review of W22.2). C22.2 (decisions 24, 27 and 29): its interaction state, which the UiInput phase updates from the
+		// UiLayout and FrameUiLayout phases at the session's scene resolution (the game view's, ComputeGameViewOutputMapping
+		// of GetViewSize: the view's size, or a primary camera's PixelPerfectCamera's reference resolution, since M22's
+		// landing), in Play and Simulate alike; ui.tree reads the current one for the play scene, and W22.2's UiInput
+		// hit-tests it. Valid for the session's lifetime. Activate, and a Scene.Load or Scene.Reload's replacement of the scene
+		// at the end of a frame, run UiSystem::LayoutStep of the current scene both before the scene's startup callbacks and
+		// after them (not a phase: no observer reports it), the second once the world transforms the callbacks changed are up
+		// to date (the milestone review), so the current layout always describes the current scene, in its OnCreate and
+		// OnStart and before its first step included (the review of W22.2). C22.2 (decisions 24, 27 and 29): its interaction state, which the UiInput phase updates from the
 		// step view and the project's Ui settings (and keeps empty while the scene has no canvas), the UiEvents phase's queue,
 		// and the ui block of ComputeStateHash; a scene replacement resets the interaction (UiSystem::ResetInteraction) before
 		// its layouts. The session's script host

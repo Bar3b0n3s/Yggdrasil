@@ -65,7 +65,7 @@ Section references (§) point to `Docs/Architecture.md` unless marked CodeStyle 
 ## 3. Architecture and layers (§3)
 
 - [ ] Every include respects the layer table and the explicit layer-5 DAG in `Scripts/ModuleRules.json`. `Renderer` does not include `Scene`, and `AssetPipeline` is never included by Runtime code.
-- [ ] Public headers expose no GLFW, Jolt, Luau, miniaudio, cgltf, stb, HarfBuzz or SheenBidi types. NVRHI types appear only in Graphics, Renderer and ImGui headers, and EnTT only in Scene headers. `RenderSnapshot.h` and `DebugDrawList.h` stay free of NVRHI.
+- [ ] Public headers expose no GLFW, Jolt, Luau, miniaudio, cgltf, stb, HarfBuzz or SheenBidi types. NVRHI types appear only in Graphics, Renderer and ImGui headers, and EnTT only in Scene headers. `RenderSnapshot.h`, `DebugDrawList.h` and `UiDrawList.h` stay free of NVRHI.
 - [ ] Platform-specific code is only in `Platform/<OS>/` (or the Graphics device setup) and is guarded by `ENGINE_PLATFORM_*`.
 - [ ] No new mutable global beyond the process-level state that §3 rule 5 lists; a vendored library's own process-level state meets §3 rule 5's rule for vendored libraries (thread-safe, and no result depends on it).
 - [ ] Services are passed explicitly (`EngineContext&` or the specific service). There is no `Application::Get()`-style singleton access.

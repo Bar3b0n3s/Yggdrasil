@@ -199,7 +199,10 @@ namespace Engine {
 		{
 			return FindUiLayoutNode(table, id) != nullptr;
 		};
-		if (state.Focused.IsValid() && !IsUiFocusable(scene, table, state.Focused))
+		// A focus the stored layout does not hold focusable is checked against the scene as it is, as SetFocus checked it: a
+		// focus taken outside the phases (script.eval between two ticks) on UI changed since the last layout is kept (the
+		// milestone review). Inside the phases a layout follows every script's change, so both layouts agree there.
+		if (state.Focused.IsValid() && !IsUiFocusable(scene, table, state.Focused) && !IsUiFocusable(scene, Utils::LayOutUiNow(scene, table), state.Focused))
 			Utils::QueueUiLoss(scene, m_Events, UiEventKind::Focus, std::exchange(state.Focused, UUID{}));
 		if (state.Hovered.IsValid() && !isElement(state.Hovered))
 			Utils::QueueUiLoss(scene, m_Events, UiEventKind::Hover, std::exchange(state.Hovered, UUID{}));
@@ -216,8 +219,11 @@ namespace Engine {
 		}
 
 		// 2. Hover: the widget the topmost target reaches, when it is interactable; a Screen canvas's target first, else the
-		// nearest World canvas's along the pointer's ray (C22.3, decision 50).
-		const UiPointerHit pointerHit = HitTestUiPointer(scene, table, input.Pointer, input.Ray);
+		// nearest World canvas's along the pointer's ray (C22.3, decision 50). A pointer outside the scene image (a
+		// PixelPerfectCamera's letterbox, where nothing is drawn) reaches no UI (the milestone review).
+		const bool inSceneImage = input.Pointer.x >= 0.0f && input.Pointer.x < static_cast<float>(table.SceneSize.x) && input.Pointer.y >= 0.0f
+			&& input.Pointer.y < static_cast<float>(table.SceneSize.y);
+		const UiPointerHit pointerHit = inSceneImage ? HitTestUiPointer(scene, table, input.Pointer, input.Ray) : UiPointerHit{};
 		const UiHit& hit = pointerHit.Hit;
 		state.PointerOverUi = hit.Target.IsValid();
 		const UUID hovered = hit.Widget.IsValid() && IsUiInteractable(scene, hit.Widget) ? hit.Widget : UUID{};
@@ -313,12 +319,14 @@ namespace Engine {
 
 		// 7a. Text input (C22.3, decision 47): the focused interactable text input takes the step's text and editing keys
 		// (TextChanged, then Submit for Enter), and while it has focus only the gamepad's commands, the stick's direction,
-		// Next, Previous and Cancel navigate, so a key typed into it (an arrow, Space, Enter) never navigates or submits.
+		// and Next, Previous and Cancel pressed by a control it does not edit with navigate, so a key typed into it (an arrow,
+		// Space, Enter) never navigates or submits, and an editing key bound to Cancel (Backspace as "back") only edits (the
+		// milestone review).
 		if (state.Focused.IsValid() && GetUiWidgetType(scene, state.Focused) == UiWidgetType::TextInput && IsUiInteractable(scene, state.Focused))
 		{
 			static_cast<void>(EditUiTextInput(scene, state.Focused, input.Text, input.TextKeys, m_Events));
 			constexpr UiNavigation KeptCommands = UiNavigation::Next | UiNavigation::Previous | UiNavigation::Cancel;
-			navigation = input.GamepadNavigation | (input.Navigation & KeptCommands) | stickNavigation;
+			navigation = input.GamepadNavigation | (input.NonEditingNavigation & KeptCommands) | stickNavigation;
 		}
 
 		// 8. Navigation in the order Next, Previous, Up, Down, Left, Right. A focused slider or scroll view may consume a

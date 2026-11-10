@@ -27,10 +27,10 @@ namespace Engine {
 	};
 
 	// Registry struct "UiTheme" (M22, C22.2, R-UI-THEME; Docs/Decisions/0033-m22-contract.md decision 25): the state tints of
-	// a canvas's widgets (UiButton, UiToggle, UiSlider, UiScrollView). The tint of a widget's state multiplies the colour of
-	// the widget element's own UiImage when it is drawn (Scene/UiExtraction.h), never its texts or its children's images;
-	// a widget without a UiImage shows no tint. The state, first match: Disabled (Interactable false), Pressed (the pointer
-	// holds it), Focused, Hovered, else Normal. Linear RGB with straight alpha, each component 0 to 1. Outside a play session
+	// a canvas's widgets (UiButton, UiToggle, UiSlider, UiScrollView, UiTextInput). The tint of a widget's state multiplies
+	// the colour of the widget element's own UiImage when it is drawn (Scene/UiExtraction.h), never its texts or its
+	// children's images; a widget without a UiImage shows no tint. The state, first match: Disabled (Interactable false),
+	// Pressed (the pointer holds it), Focused, Hovered, else Normal. Linear RGB with straight alpha, each component 0 to 1. Outside a play session
 	// (the edit scene, its screenshots and the UI preview) every widget is Normal, or Disabled when not interactable.
 	struct UiTheme
 	{

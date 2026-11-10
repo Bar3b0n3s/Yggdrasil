@@ -3,13 +3,14 @@
 #include "Engine/Scene/UiExtraction.h"
 
 #include "Engine/Scene/Components/CameraComponent.h"
+#include "Engine/Scene/Components/RuntimeComponents.h"
+#include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Components/UiButtonComponent.h"
 #include "Engine/Scene/Components/UiCanvasComponent.h"
 #include "Engine/Scene/Components/UiImageComponent.h"
 #include "Engine/Scene/Components/UiRectComponent.h"
 #include "Engine/Scene/Components/UiScrollViewComponent.h"
 #include "Engine/Scene/Components/UiSliderComponent.h"
-#include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Components/UiTextComponent.h"
 #include "Engine/Scene/Components/UiTextInputComponent.h"
 #include "Engine/Scene/Components/UiToggleComponent.h"
@@ -18,6 +19,7 @@
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
+#include "Support/GlmApprox.h"
 #include "Support/InMemoryAssetManager.h"
 #include "Support/SceneTestFixture.h"
 
@@ -580,6 +582,46 @@ namespace Engine {
 			CHECK(sceneView->Ui.WorldCanvases.size() == 1);
 		}
 
+		// The milestone review (decision 51, the lead's decision 1): a World canvas is placed at the extraction request's
+		// interpolation alpha, as the camera, the meshes, the sprites and the texts are, never at the scene's own alpha, which
+		// the play session sets only inside its RenderExtraction phase (between frames it is 1, while PlaySession::ExtractView of
+		// a live session extracts at the last frame's alpha). A canvas moving from x = 0 to x = 4 is drawn at the interpolated
+		// pose of its entity at the request's alpha, with the scene's alpha left at 1; at alpha 1 at its latest pose.
+		TEST_CASE("RenderExtraction: a World canvas is placed at the request's interpolation alpha, as the meshes are")
+		{
+			// A runtime scene, as a play session's: only it interpolates.
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Entity camera = scene.CreateEntity("Camera");
+			camera.AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			Entity board = scene.CreateEntity("Board");
+			board.AddComponent<UiCanvasComponent>(
+				UiCanvasComponent{ .RenderMode = UiCanvasRenderMode::World, .WorldWidth = 64, .WorldHeight = 32, .PixelsPerUnit = 32.0f });
+			AddElement(scene, "Sign", board, glm::vec2(8.0f), glm::vec2(16.0f)).AddComponent<UiImageComponent>(UiImageComponent{});
+			TransformSystem::Update(scene);
+			// The previous tick's pose at the origin, the latest at x = 4, as the session's interpolation snapshot leaves them.
+			board.AddComponent<PreviousWorldTransformComponent>(PreviousWorldTransformComponent{ .Matrix = board.GetComponent<WorldTransformComponent>().Matrix });
+			board.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(4.0f, 0.0f, 0.0f);
+			});
+			TransformSystem::Update(scene);
+			REQUIRE(scene.GetInterpolationAlpha() == 1.0f);
+
+			for (const float alpha : { 0.25f, 1.0f })
+			{
+				CAPTURE(alpha);
+				const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, { .Width = 200, .Height = 100, .Alpha = alpha });
+				REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+				REQUIRE(snapshot->Ui.WorldCanvases.size() == 1);
+				// The canvas's centre stands where the entity's rendered world matrix at the request's alpha puts its origin.
+				const glm::vec3 centre(snapshot->Ui.WorldCanvases[0].World * glm::vec4(32.0f, 16.0f, 0.0f, 1.0f));
+				const glm::vec3 rendered(ComputeRenderedWorldMatrix(board, alpha)[3]);
+				CHECK(Test::ApproxEqual(centre, rendered));
+				CHECK(Test::ApproxEqual(centre, glm::vec3(4.0f * alpha, 0.0f, 0.0f)));
+			}
+		}
+
 		// C22.3 (the review of C22.3, its major on the consumers of World canvases' pixels; stream W, UiExtraction.h): a World
 		// canvas's element is outlined and labelled at the scene-pixel rectangle bounding its corners as the camera projects
 		// them, and not at all without a camera or when a corner lies behind the camera's plane; a Screen canvas's element
@@ -639,6 +681,61 @@ namespace Engine {
 				CHECK(snapshot.Ui.Annotations[0].Entity == hud.GetUUID());
 				CHECK(snapshot.Ui.Annotations[1].Entity == hud.GetUUID());
 			}
+		}
+
+		// The milestone review (decision 51, the lead's decision 3): a World canvas's element is annotated only where the
+		// camera draws it, within the camera's clip range by view-space depth, the rule decision 50 gives the pointer: beyond
+		// the near plane, and before the far plane of an orthographic camera, whose projection clips there (a perspective
+		// camera's far plane is at infinity). Clip-space w cannot tell: an orthographic projection's w is always 1, so a canvas
+		// behind such a camera or beyond its far plane was outlined over a scene that shows nothing there.
+		TEST_CASE("RenderAnnotations: a World canvas's element is annotated only within the camera's clip range")
+		{
+			Test::SceneTestFixture fixture;
+			Entity sign = fixture.GetScene().CreateEntity("Sign");
+			const auto annotated = [&fixture, &sign](RenderProjection kind, float z)
+			{
+				RenderSnapshot snapshot;
+				snapshot.HasCamera = true;
+				// The camera at the origin, looking down -Z, its clip range 1 to 10 deep. Orthographic: a projection whose w is 1
+				// (the view's x and y are NDC). Perspective: one whose w is the view-space -z.
+				snapshot.Camera.ProjectionKind = kind;
+				snapshot.Camera.NearClip = 1.0f;
+				snapshot.Camera.FarClip = 10.0f;
+				snapshot.Camera.Projection = glm::mat4(1.0f);
+				if (kind == RenderProjection::Perspective)
+				{
+					snapshot.Camera.Projection[2][3] = -1.0f;
+					snapshot.Camera.Projection[3][3] = 0.0f;
+				}
+				snapshot.Camera.ViewportWidth = 200;
+				snapshot.Camera.ViewportHeight = 100;
+				snapshot.Annotations = RenderAnnotations{ .Labels = RenderAnnotationLabels::All, .Bounds = true };
+				// A 64 x 32 World canvas at 128 canvas pixels per unit centred on (0, 0, z): the sign spans x -0.125 to 0.125.
+				snapshot.Ui.WorldCanvases.push_back(UiWorldCanvas{ .Canvas = UUID(0xB0A2D),
+					.Size = glm::uvec2(64, 32),
+					.World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, z))
+						* glm::scale(glm::mat4(1.0f), glm::vec3(1.0f / 128.0f, -1.0f / 128.0f, 1.0f))
+						* glm::translate(glm::mat4(1.0f), glm::vec3(-32.0f, -16.0f, 0.0f)) });
+				snapshot.Ui.Items.push_back(UiDrawItem{ .Kind = UiDrawKind::Image,
+					.Entity = sign.GetUUID(),
+					.Min = glm::vec2(16.0f, 8.0f),
+					.Max = glm::vec2(48.0f, 24.0f),
+					.WorldCanvas = 0 });
+				AppendUiRenderAnnotations(fixture.GetScene(), snapshot);
+				return snapshot.Ui.Annotations.size() == 2;
+			};
+
+			// Orthographic: drawn between the near and the far plane; not behind the camera, before its near plane or beyond
+			// its far plane.
+			CHECK(annotated(RenderProjection::Orthographic, -5.0f));
+			CHECK(annotated(RenderProjection::Orthographic, -10.0f));
+			CHECK_FALSE(annotated(RenderProjection::Orthographic, 0.5f));
+			CHECK_FALSE(annotated(RenderProjection::Orthographic, -0.5f));
+			CHECK_FALSE(annotated(RenderProjection::Orthographic, -20.0f));
+			// Perspective: drawn beyond the near plane, however far; not between the camera and its near plane.
+			CHECK(annotated(RenderProjection::Perspective, -5.0f));
+			CHECK(annotated(RenderProjection::Perspective, -20.0f));
+			CHECK_FALSE(annotated(RenderProjection::Perspective, -0.5f));
 		}
 	}
 

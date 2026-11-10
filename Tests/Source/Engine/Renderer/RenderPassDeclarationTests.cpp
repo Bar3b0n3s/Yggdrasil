@@ -108,7 +108,8 @@ namespace Engine {
 			// M17's order (§8.3) with Text moved to the SceneOverlay stage, the output stage's Upscale after it, the labels
 			// after the other editor overlays and the letterbox repaint last; M21's Sprites, then Lights2D (C21.2), in the Sprites
 			// stage, between the forward passes and Bloom, and M22's Ui after Text in M18's reserved slot
-			// (Docs/Decisions/0033-m22-contract.md decision 7) (ADR 0028's phase-2 ledger); a frozen contract of stats.get.
+			// (Docs/Decisions/0033-m22-contract.md decision 7, at ADR 0028's phase-2 ledger's place); a frozen contract of
+			// stats.get.
 			constexpr std::array<std::string_view, 28> Expected = { "Prepare", "DirectionalShadows", "SpotShadows", "DepthNormal", "DepthPyramid", "GTAO",
 				"GTAODenoiseHorizontal", "GTAODenoiseVertical", "ForwardOpaque", "Skybox", "ForwardTransparent", "Overdraw", "Sprites", "Lights2D", "Bloom",
 				"Tonemap", "FXAA", "Text", "Ui", "Upscale", "SelectionMask", "SelectionDilateHorizontal", "SelectionDilateVertical", "SelectionComposite",

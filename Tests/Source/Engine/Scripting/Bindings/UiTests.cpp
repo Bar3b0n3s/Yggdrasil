@@ -1,7 +1,9 @@
 #include "TestsPCH.h"
 
 #include "Engine/Core/VfsPath.h"
+#include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
+#include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Components/UiButtonComponent.h"
 #include "Engine/Scene/Components/UiCanvasComponent.h"
 #include "Engine/Scene/Components/UiImageComponent.h"
@@ -314,6 +316,74 @@ return Script.Define("Menu", Menu)
 			CHECK(traces() == std::vector<std::string>{ "start 10,20" });
 			session.Tick();
 			CHECK(traces() == std::vector<std::string>{ "start 10,20", "focus Play true" });
+		}
+
+		// The milestone review (decision 3, the lead's decision 5): the layout made after the startup callbacks takes the world
+		// transforms they changed, so a World canvas that an OnStart moves is hit-tested on the first tick where it is drawn, at
+		// the session's start and after a Scene.Reload. The canvas "Kiosk" (2 x 2 units) starts far to the right; its OnStart
+		// moves it in front of the camera, where the pointer's ray through the view's centre meets its button.
+		TEST_CASE("Ui: a World canvas that an OnStart moves takes a click on the first tick where it is drawn")
+		{
+			Test::ScriptTestFixture fixture;
+			const AssetHandle script(0x7100c2);
+			REQUIRE(fixture.AddScript(script, "Assets/Scripts/Kiosk.luau", R"(
+local Kiosk = {}
+function Kiosk:OnStart()
+	self.Entity.Transform.Translation = vector.create(0, 0, -5)
+end
+return Script.Define("Kiosk", Kiosk)
+)"));
+			Scene& scene = fixture.GetScene();
+			Entity camera = scene.CreateEntity("Camera");
+			camera.AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			Entity kiosk = scene.CreateEntity("Kiosk");
+			kiosk.GetComponent<TransformComponent>().Translation = glm::vec3(100.0f, 0.0f, -5.0f);
+			kiosk.AddComponent<UiCanvasComponent>(UiCanvasComponent{ .RenderMode = UiCanvasRenderMode::World, .WorldWidth = 64, .WorldHeight = 64, .PixelsPerUnit = 32.0f });
+			ScriptSlot slot{};
+			slot.Script.SetHandle(script);
+			kiosk.AddComponent<ScriptComponent>(ScriptComponent{ { slot } });
+			Entity button = scene.CreateEntity("Button", kiosk);
+			button.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f), .AnchorMax = glm::vec2(1.0f), .Size = glm::vec2(0.0f) });
+			button.AddComponent<UiImageComponent>(UiImageComponent{});
+			button.AddComponent<UiButtonComponent>(UiButtonComponent{});
+			PlaySessionSpecification specification;
+			specification.Registry = &fixture.GetTypes();
+			specification.Assets = &fixture.GetAssetManager();
+			specification.ScriptSchemas = fixture.GetSchemaSnapshot();
+			specification.Serial = 1;
+			specification.ViewWidth = 320;
+			specification.ViewHeight = 180;
+			auto created = PlaySession::CreateFromScene(specification, fixture.GetScene());
+			REQUIRE_MESSAGE(created.has_value(), (created ? "" : created.error().ToString()));
+			PlaySession& session = **created;
+			session.SetExtractionEnabled(false);
+			REQUIRE(session.GetScriptErrors().GetErrors().empty());
+			const auto clickCentre = [&session]()
+			{
+				const PlayInputEvent click{ .Type = PlayInputEventType::MouseButtonInput,
+					.State = PlayInputEventState::Tap,
+					.Button = MouseButton::Left,
+					.HasPosition = true,
+					.Position = glm::vec2(160.0f, 90.0f) };
+				REQUIRE(session.GetInput().Queue(session.GetTick(), click).has_value());
+				session.Tick();
+				const UUID pressed = session.GetScene().FindEntityByPath("/Kiosk/Button").GetUUID();
+				CHECK(session.GetUi().GetInteraction().Hovered == pressed);
+				CHECK(session.GetUi().GetInteraction().Pressed == pressed);
+			};
+
+			clickCentre();
+			// The kiosk moved away in the running scene, then the scene reloaded: its OnStart moves the reloaded kiosk again.
+			session.Tick();
+			session.GetScene().FindEntityByPath("/Kiosk").Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(-100.0f, 0.0f, -5.0f);
+			});
+			REQUIRE(session.GetScripts()->GetHost().RequestSceneReload(std::nullopt).has_value());
+			session.Tick();
+			REQUIRE(session.GetSceneGeneration() == 2);
+			REQUIRE(session.GetScriptErrors().GetErrors().empty());
+			clickCentre();
 		}
 
 		// Decision 28: the module reads the session's interaction state and layout; SetFocus moves focus to a focusable

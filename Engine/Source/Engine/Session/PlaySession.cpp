@@ -302,6 +302,15 @@ namespace Engine {
 			return keys;
 		}
 
+		// The milestone review (decision 47): whether `control` is a key a focused text input edits with (GetUiTextKeys' keys
+		// but Enter, whose Submit keeps its meaning), whose Cancel, Next or Previous binding a focused text input ignores.
+		static bool IsUiTextEditingControl(const InputBinding::Control& control)
+		{
+			const Key* key = std::get_if<Key>(&control);
+			return key != nullptr
+				&& (*key == Key::Backspace || *key == Key::Delete || *key == Key::Left || *key == Key::Right || *key == Key::Home || *key == Key::End);
+		}
+
 	}
 
 	struct PlaySession::State final : IScriptHost
@@ -914,7 +923,11 @@ namespace Engine {
 			StartScripts(transition);
 		if (SceneAudio != nullptr)
 			SceneAudio->Start();
-		// M22 (decision 3): the new scene as its startup callbacks left it is the current layout before the next step.
+		// M22 (decision 3): the new scene as its startup callbacks left it is the current layout before the next step, its
+		// world transforms first brought up to date, so a World canvas they moved is laid out where it is drawn (the
+		// milestone review; the next InterpolationSnapshot would make the same update, so nothing else changes).
+		if (RuntimeScene->GetRevision() != TransformRevision)
+			UpdateTransforms();
 		Ui.LayoutStep(*RuntimeScene, GetUiSceneResolution());
 	}
 
@@ -1074,18 +1087,21 @@ namespace Engine {
 		if (!Project.Ui.Navigation)
 			return frame;
 
-		// A command a gamepad button binding pressed also goes to GamepadNavigation (C22.3), which a focused text input keeps.
+		// A command a gamepad button binding pressed also goes to GamepadNavigation (C22.3), and one a control other than a
+		// text-editing key pressed to NonEditingNavigation (the milestone review), which a focused text input keeps.
 		const bool shift = devices.IsKeyDown(Step, Key::LeftShift) || devices.IsKeyDown(Step, Key::RightShift);
 		for (const Utils::UiCommandControls& command : UiCommands)
 		{
 			bool pressed = false;
 			bool pressedByGamepad = false;
+			bool pressedByNonEditing = false;
 			for (const InputBinding::Control& control : command.Controls)
 			{
 				if (!Utils::WasUiControlPressed(devices, control))
 					continue;
 				pressed = true;
 				pressedByGamepad = pressedByGamepad || std::holds_alternative<GamepadButton>(control);
+				pressedByNonEditing = pressedByNonEditing || !Utils::IsUiTextEditingControl(control);
 			}
 			if (!pressed)
 				continue;
@@ -1093,6 +1109,8 @@ namespace Engine {
 			frame.Navigation |= navigation;
 			if (pressedByGamepad)
 				frame.GamepadNavigation |= navigation;
+			if (pressedByNonEditing)
+				frame.NonEditingNavigation |= navigation;
 		}
 		if (!Project.Ui.StickNavigation)
 			return frame;
@@ -1413,7 +1431,11 @@ namespace Engine {
 		state.StartScripts("Scene.Load");
 		if (state.SceneAudio != nullptr)
 			state.SceneAudio->Start();
-		// M22 (decision 3): the current layout describes the scene as its startup callbacks left it, before its first step.
+		// M22 (decision 3): the current layout describes the scene as its startup callbacks left it, before its first step, its
+		// world transforms first brought up to date, so a World canvas they moved is laid out where it is drawn (the
+		// milestone review; the first InterpolationSnapshot would make the same update, so nothing else changes).
+		if (state.RuntimeScene->GetRevision() != state.TransformRevision)
+			state.UpdateTransforms();
 		state.Ui.LayoutStep(*state.RuntimeScene, state.GetUiSceneResolution());
 	}
 

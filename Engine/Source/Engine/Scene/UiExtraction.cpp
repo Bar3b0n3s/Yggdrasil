@@ -119,34 +119,42 @@ namespace Engine {
 		constexpr glm::vec4 UiLabelColor = glm::vec4(1.0f);
 
 		// C22.3 (decision 51): a World canvas's matrix at its entity's render pose, the interpolated world matrix meshes draw
-		// with (ComputeRenderedWorldMatrix at the scene's interpolation alpha, the alpha of TransformSystem::GetRenderPosition
-		// and GetRenderRotation), times the canvas's own placement (Private/UiWorldCanvas.h); the layout's simulated matrix for a
-		// canvas the scene no longer holds.
-		static glm::mat4 GetUiWorldCanvasRenderMatrix(const Scene& scene, const UiCanvasLayout& canvas, ConstEntity entity,
-			const UiCanvasComponent* component)
+		// with (ComputeRenderedWorldMatrix at the extraction's interpolation alpha, the milestone review: never the scene's,
+		// which is the frame's only inside the play session's RenderExtraction phase), times the canvas's own placement
+		// (Private/UiWorldCanvas.h); the layout's simulated matrix for a canvas the scene no longer holds.
+		static glm::mat4 GetUiWorldCanvasRenderMatrix(const UiCanvasLayout& canvas, ConstEntity entity, const UiCanvasComponent* component, float alpha)
 		{
 			if (!entity.IsValid() || component == nullptr)
 				return canvas.World;
-			const float alpha = std::clamp(scene.GetInterpolationAlpha(), 0.0f, 1.0f);
-			return ComputeRenderedWorldMatrix(entity, alpha) * MakeUiWorldCanvasLocalMatrix(canvas.SceneSize, component->PixelsPerUnit);
+			return ComputeRenderedWorldMatrix(entity, std::clamp(alpha, 0.0f, 1.0f)) * MakeUiWorldCanvasLocalMatrix(canvas.SceneSize, component->PixelsPerUnit);
 		}
 
 		// The scene-pixel rectangle bounding a World canvas element's rectangle [min, max] (its canvas's pixels) as `snapshot`'s
-		// camera projects it through `world` (UiExtraction.h's annotation rule); nullopt without a camera, or when a corner's
-		// clip-space w is not positive (on or behind the camera's plane).
+		// camera projects it through `world` (UiExtraction.h's annotation rule); nullopt without a camera, or when a corner lies
+		// outside the camera's clip range by view-space depth (the milestone review: decision 50's rule for the pointer, since
+		// an orthographic projection's clip-space w is always 1) or its clip-space w is not positive.
 		static std::optional<std::pair<glm::vec2, glm::vec2>> ProjectUiWorldRect(const RenderSnapshot& snapshot, const glm::mat4& world, glm::vec2 min,
 			glm::vec2 max)
 		{
 			if (!snapshot.HasCamera)
 				return std::nullopt;
-			const glm::mat4 toClip = snapshot.Camera.Projection * snapshot.Camera.View * world;
-			const glm::vec2 viewport(static_cast<float>(snapshot.Camera.ViewportWidth), static_cast<float>(snapshot.Camera.ViewportHeight));
+			const CameraData& camera = snapshot.Camera;
+			const glm::mat4 toView = camera.View * world;
+			const glm::mat4 toClip = camera.Projection * toView;
+			const glm::vec2 viewport(static_cast<float>(camera.ViewportWidth), static_cast<float>(camera.ViewportHeight));
+			const bool orthographic = camera.ProjectionKind == RenderProjection::Orthographic;
 			glm::vec2 lowest(0.0f);
 			glm::vec2 highest(0.0f);
 			const std::array<glm::vec2, 4> corners = { min, glm::vec2(max.x, min.y), max, glm::vec2(min.x, max.y) };
 			for (size_t index = 0; index < corners.size(); ++index)
 			{
-				const glm::vec4 clip = toClip * glm::vec4(corners[index], 0.0f, 1.0f);
+				const glm::vec4 corner(corners[index], 0.0f, 1.0f);
+				// Drawn from the near plane on, and up to the far plane for an orthographic camera (a perspective one's is at
+				// infinity, Architecture §8.3), inclusive, as the pointer's ray takes the clip range.
+				const float depth = -(toView * corner).z;
+				if (!(depth >= camera.NearClip) || (orthographic && !(depth <= camera.FarClip)))
+					return std::nullopt;
+				const glm::vec4 clip = toClip * corner;
 				if (!(clip.w > 0.0f))
 					return std::nullopt;
 				const glm::vec2 pixel((clip.x / clip.w + 1.0f) * 0.5f * viewport.x, (1.0f - clip.y / clip.w) * 0.5f * viewport.y);
@@ -175,7 +183,8 @@ namespace Engine {
 
 	}
 
-	void AppendUiDrawItems(const Scene& scene, const UiLayoutTable& table, UiDrawList& list, const UiInteractionState* interaction, bool worldOnly)
+	void AppendUiDrawItems(const Scene& scene, const UiLayoutTable& table, UiDrawList& list, const UiInteractionState* interaction, bool worldOnly,
+		float alpha)
 	{
 		for (const UiCanvasLayout& canvas : table.Canvases)
 		{
@@ -195,7 +204,7 @@ namespace Engine {
 				worldCanvas = static_cast<uint32_t>(list.WorldCanvases.size());
 				list.WorldCanvases.push_back(UiWorldCanvas{ .Canvas = canvas.Canvas,
 					.Size = canvas.SceneSize,
-					.World = Utils::GetUiWorldCanvasRenderMatrix(scene, canvas, canvasEntity, canvasComponent) });
+					.World = Utils::GetUiWorldCanvasRenderMatrix(canvas, canvasEntity, canvasComponent, alpha) });
 			}
 			const UiTheme theme = canvasComponent != nullptr ? canvasComponent->Theme : UiTheme{};
 			const AssetHandle canvasFont = canvasComponent != nullptr ? canvasComponent->Font.GetHandle() : AssetHandle();

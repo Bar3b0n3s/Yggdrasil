@@ -17,9 +17,10 @@
 // A PixelPerfectCamera renders its 200 x 120 reference resolution, which the 640 x 360 golden view upscales 3 times into
 // 600 x 360 between two 20-pixel letterbox bars: three sprites (the Ground strip along the bottom 16 rows, the Hero standing
 // on it and a Coin) and a Screen canvas laid out at the reference resolution, its Step button at scene pixels (8, 8) to
-// (64, 26) with its label and a Counter label at the top right. The UI draws at the scene resolution before the upscale, so its pixels are 3 x 3 blocks as the sprites'
-// are. Reference pixel (x, y) covers view pixels [20 + 3x, 23 + 3x) x [3y, 3y + 3). Its image is committed for the device
-// class nvidia-62x; the upscale, the bars and the button's place are also checked on every device, in smoke mode too.
+// (64, 26) with its label and a Counter label at the top right. The UI draws at the scene resolution before the upscale, so
+// its pixels are 3 x 3 blocks as the sprites' are. Reference pixel (x, y) covers view pixels [20 + 3x, 23 + 3x) x
+// [3y, 3y + 3). Its image is committed for the device class nvidia-62x; the upscale, the bars and the button's place are
+// also checked on every device, in smoke mode too.
 // Assets/Tests/Replays/Combined2DUi.replay presses the button in this scene through the same camera.
 
 namespace Engine {

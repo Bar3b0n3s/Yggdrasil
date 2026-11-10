@@ -191,6 +191,36 @@ namespace Engine {
 			CHECK_FALSE(PickUiElement(table, glm::vec2(150.0f, 100.0f)).IsValid());
 			CHECK(PickUiElement(table, glm::vec2(260.0f, 110.0f)) == button.GetUUID());
 		}
+
+		// The milestone review (decision 34, the lead's decision 2): a point outside the scene image picks nothing, as the
+		// play session's hit test and viewport.pick take nothing there: a PixelPerfectCamera's letterbox shows no UI, though an
+		// element's rectangle reaches past the image's edge into it.
+		TEST_CASE("UiAuthoring: the UI preview picks nothing outside the scene image, where an element reaches past its edge")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity hud = scene.CreateEntity("Hud");
+			hud.AddComponent<UiCanvasComponent>(UiCanvasComponent{});
+			const auto addElement = [&scene, &hud](std::string_view name, glm::vec2 position, glm::vec2 size)
+			{
+				Entity element = scene.CreateEntity(name, hud);
+				element.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f),
+					.AnchorMax = glm::vec2(0.0f),
+					.Pivot = glm::vec2(0.0f),
+					.Position = position,
+					.Size = size });
+				return element;
+			};
+			// In a 400 x 300 scene image: "Left" over [-20, 40) x [10, 40), "Right" over [380, 440) x [260, 300).
+			const Entity left = addElement("Left", glm::vec2(-20.0f, 10.0f), glm::vec2(60.0f, 30.0f));
+			const Entity right = addElement("Right", glm::vec2(380.0f, 260.0f), glm::vec2(60.0f, 40.0f));
+			const UiLayoutTable table = ComputeUiLayout(scene, glm::uvec2(400, 300));
+			CHECK(PickUiElement(table, glm::vec2(5.0f, 20.0f)) == left.GetUUID());
+			CHECK(PickUiElement(table, glm::vec2(390.0f, 290.0f)) == right.GetUUID());
+			CHECK_FALSE(PickUiElement(table, glm::vec2(-5.0f, 20.0f)).IsValid());
+			CHECK_FALSE(PickUiElement(table, glm::vec2(400.0f, 290.0f)).IsValid());
+			CHECK_FALSE(PickUiElement(table, glm::vec2(390.0f, 300.0f)).IsValid());
+		}
 	}
 
 }

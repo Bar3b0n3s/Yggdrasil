@@ -12,8 +12,8 @@ scaffolds import into the project's `Assets/` (Docs/Decisions/0022-m14-contract.
 second byte-identical copy of each imported file. Each copy, in either place, is covered by the section of its fixture
 here. The third-party copies are those of the pinned fixtures below: every copy of the OpenType font fixture
 (`Inter-Regular.otf`) and of the Noto font fixtures (SIL OFL 1.1, whose full texts their sections hold) in
-`Scaffold/Sources/Fonts/` or imported from there into `Assets/` (today `Assets/Formats/Fonts/`, `Assets/Ui/Fonts/` and
-`Assets/Fonts/GoldenUiScripts/`), and `Projects/FeatureTest/Assets/Formats/Audio/Tone.mp3` and
+`Scaffold/Sources/Fonts/` or imported from there into `Assets/` (today `Assets/Formats/Fonts/`, `Assets/Ui/Fonts/`,
+`Assets/Ui/FallbackFonts/` and `Assets/Fonts/GoldenUiScripts/`), and `Projects/FeatureTest/Assets/Formats/Audio/Tone.mp3` and
 `Projects/FeatureTest/Assets/Formats/Audio/Tone.ogg` (public domain) with their `Scaffold/Sources/Audio/` counterparts;
 every other copy is first-party.
 

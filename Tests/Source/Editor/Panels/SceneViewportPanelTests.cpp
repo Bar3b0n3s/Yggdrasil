@@ -36,6 +36,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Engine {
@@ -1167,6 +1168,170 @@ namespace Engine {
 			test.FrameOk();
 			REQUIRE(editor.GetSelection().size() == 1);
 			CHECK(editor.GetSelection().front() == panel);
+		}
+
+		// The milestone review (decisions 33 and 34, the lead's decisions 2 and 10): under a PixelPerfectCamera whose upscale
+		// leaves letterbox bars, the preview places, picks and drags the UI through the output mapping's scale and offset: a
+		// 200 x 120 reference resolution in the 640 x 360 game frame is upscaled 3 times between 20-pixel bars, so scene pixel
+		// p is frame pixel 20 + 3 p across. A drag of the right edge by 30 frame pixels grows the element by 10 canvas units;
+		// a click in the left bar selects nothing, though the element "Bleed" reaches past the image's edge into it.
+		TEST_CASE("SceneViewportPanel: the UI preview picks and drags through a PixelPerfectCamera's letterboxed upscale, and the letterbox picks nothing")
+		{
+			ScenePanelHarness test("SceneUiPreviewLetterbox");
+			EditorContext& editor = test.GetEditor();
+			REQUIRE(editor.GetViewportState().SetGameResolution(glm::uvec2(640, 360)).has_value());
+			UUID panel;
+			UUID bleed;
+			{
+				SceneEdit edit(editor, "Create UI");
+				const Entity camera = editor.GetScene().CreateEntity("Camera");
+				camera.AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+				camera.AddComponent<PixelPerfectCameraComponent>(PixelPerfectCameraComponent{ .ReferenceWidth = 200, .ReferenceHeight = 120, .PixelsPerUnit = 16.0f });
+				const Entity canvas = editor.GetScene().CreateEntity("Canvas");
+				canvas.AddComponent<UiCanvasComponent>();
+				const auto addElement = [&editor, &canvas](std::string_view name, glm::vec2 position, glm::vec2 size)
+				{
+					const Entity element = editor.GetScene().CreateEntity(name, canvas);
+					element.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f),
+						.AnchorMax = glm::vec2(0.0f),
+						.Pivot = glm::vec2(0.0f),
+						.Position = position,
+						.Size = size });
+					return element.GetUUID();
+				};
+				// "Panel": scene pixels [50, 150] x [25, 75], frame pixels [170, 470] x [75, 225]. "Bleed": scene pixels
+				// [-10, 30] x [90, 110], frame pixels [-10, 110] x [270, 330].
+				panel = addElement("Panel", glm::vec2(50.0f, 25.0f), glm::vec2(100.0f, 50.0f));
+				bleed = addElement("Bleed", glm::vec2(-10.0f, 90.0f), glm::vec2(40.0f, 20.0f));
+				REQUIRE(edit.Commit().has_value());
+			}
+			REQUIRE(test.GetAutomation().Call("viewport.setOptions", Json{ { "uiPreview", true } }).has_value());
+			REQUIRE(editor.SetSelection({}, SceneTarget::Edit).has_value());
+			test.Viewport.Image.Width = 640;
+			test.Viewport.Image.Height = 360;
+			test.FrameOk();
+			const EditorViewportRect frame = test.Viewport.Rectangle;
+			REQUIRE(frame.Size.x > 0.0f);
+			const float scale = frame.Size.x / 640.0f;
+			const auto at = [&frame, scale](glm::vec2 framePixel)
+			{
+				return ImVec2(frame.Min.x + framePixel.x * scale, frame.Min.y + framePixel.y * scale);
+			};
+			const auto click = [&test, &at](glm::vec2 framePixel)
+			{
+				test.MoveTo(at(framePixel));
+				ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+				test.FrameOk();
+				ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+				test.FrameOk();
+				test.GetContext().Actions.Pump();
+				test.FrameOk();
+			};
+
+			// Frame pixel 165 is scene pixel 48.3, left of the panel (at 55 without the bar's offset); 460 is 146.7, on it (153.3).
+			click(glm::vec2(165.0f, 150.0f));
+			CHECK(editor.GetSelection().empty());
+			click(glm::vec2(460.0f, 150.0f));
+			REQUIRE(editor.GetSelection().size() == 1);
+			CHECK(editor.GetSelection().front() == panel);
+
+			// The right edge, at frame pixel 470, dragged 30 frame pixels right: 10 scene pixels, 10 canvas units.
+			const size_t history = editor.GetHistory().GetUndoCount();
+			test.MoveTo(at(glm::vec2(470.0f, 150.0f)));
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+			test.FrameOk();
+			for (int step = 1; step <= 3; ++step)
+				test.MoveTo(at(glm::vec2(470.0f + 10.0f * static_cast<float>(step), 150.0f)));
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+			test.FrameOk();
+			test.GetContext().Actions.Pump();
+			test.FrameOk();
+			CHECK(editor.GetHistory().GetUndoCount() == history + 1);
+			const UiRectComponent& resized = editor.GetScene().FindEntityByID(panel).GetComponent<UiRectComponent>();
+			CHECK(resized.Size.x == doctest::Approx(110.0f).epsilon(1e-3));
+			CHECK(resized.Size.y == 50.0f);
+			CHECK(resized.Position == glm::vec2(50.0f, 25.0f));
+
+			// Frame pixel 40 is scene pixel 6.7, on Bleed; frame pixel 10, in the left bar, is scene pixel -3.3, which Bleed's
+			// rectangle holds but the image does not show: the click there clears the selection.
+			click(glm::vec2(40.0f, 300.0f));
+			REQUIRE(editor.GetSelection().size() == 1);
+			CHECK(editor.GetSelection().front() == bleed);
+			click(glm::vec2(10.0f, 300.0f));
+			CHECK(editor.GetSelection().empty());
+		}
+
+		// The milestone review (the lead's decision 10; "Landing" f): where M21's 2D mode meets M22's UI preview, the preview's
+		// presses are the UI authoring overlay's, never a stroke of an armed tile brush: a click over a UI element in the
+		// preview selects the element and paints no tile.
+		TEST_CASE("SceneViewportPanel: an armed tile brush paints nothing when a click lands in the UI preview")
+		{
+			ScenePanelHarness test("SceneTileBrushUiPreview");
+			EditorContext& editor = test.GetEditor();
+			Test::AutomationFixture& automation = test.GetAutomation();
+			REQUIRE(editor.GetViewportState().SetGameResolution(glm::uvec2(400, 300)).has_value());
+			const Json sheet{ { "Texture", "engine://Textures/Checker" },
+				{ "Frames", Json::array({ Json{ { "Name", "Ground" }, { "Rect", Json{ { "X", 0 }, { "Y", 0 }, { "Width", 16 }, { "Height", 16 } } } } }) } };
+			REQUIRE(automation.Call("asset.create", Json{ { "type", "SpriteSheet" }, { "path", "Assets/Sheets/Brush.spritesheet" }, { "values", sheet } }).has_value());
+			const Json palette = Json::array({ Json{ { "Sheet", "Assets/Sheets/Brush.spritesheet" }, { "Frame", 0 }, { "Solid", true } } });
+			const auto tilemap = automation.Call("asset.create", Json{ { "type", "Tilemap" }, { "path", "Assets/Tilemaps/Brush.tilemap" }, { "values", Json{ { "Palette", palette } } } });
+			REQUIRE_MESSAGE(tilemap.has_value(), (tilemap ? std::string() : tilemap.error().ToString()));
+			const auto created = automation.Call("entity.create", Json{ { "name", "Ground" }, { "components", Json{ { "TilemapRenderer", Json{ { "Tilemap", "Assets/Tilemaps/Brush.tilemap" } } } } } });
+			REQUIRE_MESSAGE(created.has_value(), (created ? std::string() : created.error().ToString()));
+			const auto ground = JsonReader((*created)["entity"]["id"]).ReadUUID();
+			REQUIRE(ground.has_value());
+			// A UI element over the whole 400 x 300 game frame.
+			UUID panel;
+			{
+				SceneEdit edit(editor, "Create UI");
+				const Entity canvas = editor.GetScene().CreateEntity("Canvas");
+				canvas.AddComponent<UiCanvasComponent>();
+				const Entity element = editor.GetScene().CreateEntity("Panel", canvas);
+				element.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f), .AnchorMax = glm::vec2(1.0f), .Size = glm::vec2(0.0f) });
+				panel = element.GetUUID();
+				REQUIRE(edit.Commit().has_value());
+			}
+			REQUIRE(editor.SetSelection({ *ground }, SceneTarget::Edit).has_value());
+			Toggle2D(test);
+			test.RefreshCamera();
+			test.FrameOk();
+			// The picker's first entry arms the brush, as in the brush's own case.
+			test.FrameOk([]()
+			{
+				ImGuiWindow* window = ScenePanelHarness::SceneWindow();
+				REQUIRE(window != nullptr);
+				ImGui::SetWindowFocus(Utils::EditorWindowTitle(EditorPanel::SceneViewport));
+				ImGui::SetNavID(window->GetID("##TilemapBrushTile"), ImGuiNavLayer_Main, window->NavRootFocusScopeId, ImRect());
+				ImGui::SetNavCursorVisible(true);
+			});
+			for (const ImGuiKey key : { ImGuiKey_Space, ImGuiKey_DownArrow, ImGuiKey_Space })
+			{
+				ImGui::GetIO().AddKeyEvent(key, true);
+				test.FrameOk();
+				ImGui::GetIO().AddKeyEvent(key, false);
+				test.FrameOk();
+			}
+			REQUIRE(test.GetAutomation().Call("viewport.setOptions", Json{ { "uiPreview", true } }).has_value());
+			test.Viewport.Image.Width = 400;
+			test.Viewport.Image.Height = 300;
+			test.FrameOk();
+			const EditorViewportRect frame = test.Viewport.Rectangle;
+			REQUIRE(frame.Size.x > 0.0f);
+			const size_t history = editor.GetHistory().GetUndoCount();
+			const std::string before = editor.GetVfs().ReadText(VfsPath::Create("project", "Assets/Tilemaps/Brush.tilemap").value_or(VfsPath())).value_or(std::string());
+
+			test.MoveTo(ImVec2(frame.Min.x + frame.Size.x * 0.5f, frame.Min.y + frame.Size.y * 0.5f));
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+			test.FrameOk();
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+			test.FrameOk();
+			test.GetContext().Actions.Pump();
+			test.FrameOk();
+			REQUIRE(editor.GetSelection().size() == 1);
+			CHECK(editor.GetSelection().front() == panel);
+			CHECK(editor.GetHistory().GetUndoCount() == history);
+			CHECK(editor.GetVfs().ReadText(VfsPath::Create("project", "Assets/Tilemaps/Brush.tilemap").value_or(VfsPath())).value_or(std::string()) == before);
+			CHECK(test.Viewport.Clicks.empty());
 		}
 
 		// M22 (decision 34; the review of W22.2): over the UI preview, a click on the selected element's body keeps it

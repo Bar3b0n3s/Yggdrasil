@@ -136,9 +136,10 @@ namespace Engine {
 	//     (AssetManager::Load; there is no placeholder sheet, so an unknown handle, an asset of another type or a failed load
 	//     skips the item and is reported once per plan through AssetManager::ReportDiagnostic as GetOrPlaceholder reports
 	//     one: ASSET_MISSING, ASSET_TYPE_MISMATCH or ASSET_IMPORT_FAILED, logged once per manager) and its texture's size (the
-	//     texture's CPU data, a missing or failed texture its placeholder's) give the frame's texel rectangle: Simple is one quad with the frame's rectangle as its
-	//     texture coordinates (texel edges over the texture's size, no half-texel inset); Sliced is ExpandNineSlice of the
-	//     frame's Rect and Borders over the rectangle's size with BorderScale, one quad per patch, offset by Min.
+	//     texture's CPU data, a missing or failed texture its placeholder's) give the frame's texel rectangle: Simple is one
+	//     quad with the frame's rectangle as its texture coordinates (texel edges over the texture's size, no half-texel
+	//     inset); Sliced is ExpandNineSlice of the frame's Rect and Borders over the rectangle's size with BorderScale, one
+	//     quad per patch, offset by Min.
 	//   - Text: MeasureText with the item's font (null: the Default font; missing or failed: its placeholder) at FontSize,
 	//     LineSpacing and the horizontal alignment, Wrap Word when Wrap is set, and MaxWidth the rectangle's width; the block's
 	//     top-left corner at Min plus the vertical alignment's offset (Start 0, Center half, End all of the height the block

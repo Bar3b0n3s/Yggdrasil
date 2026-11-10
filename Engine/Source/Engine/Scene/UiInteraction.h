@@ -56,12 +56,17 @@
 // space: every Screen canvas's together, as before C22.3, or one World canvas's; Next, Previous and the default focus
 // span every canvas in draw order. The same IEEE-exact operations, with DetMath for the camera's field of view
 // (Core/DetMath.h), so a world canvas interacts identically in every configuration.
+//
+// The scene image (the milestone review). The UiInput phase hit-tests only a pointer inside the scene image ([0, SceneSize)
+// of the layout on both axes; UiSystem::ProcessInput's step 2): outside it, in a PixelPerfectCamera's letterbox, nothing is
+// drawn, so the pointer reaches no UI there, as viewport.pick takes nothing, whatever an element's rectangle or a World
+// canvas reaches past the image's edge. HitTestUi and HitTestUiPointer stay pure geometry and take any point.
 
 namespace Engine {
 
 	class Scene;
 
-	// The widget an element holds (one at most: the four components exclude each other).
+	// The widget an element holds (one at most: the five components exclude each other).
 	enum class UiWidgetType : uint8_t
 	{
 		None,
@@ -163,9 +168,14 @@ namespace Engine {
 		std::string Text{};
 		UiTextKeys TextKeys = UiTextKeys::None; // C22.3: the editing keys pressed in the step view
 		// C22.3: the commands of Navigation pressed through a gamepad button binding (a subset of Navigation; the stick's
-		// edges are UiSystem::ProcessInput's own, step 7); while a text input has focus only these, Next, Previous and Cancel
-		// navigate (decision 47).
+		// edges are UiSystem::ProcessInput's own, step 7); while a text input has focus only these, and NonEditingNavigation's
+		// Next, Previous and Cancel, navigate (decision 47).
 		UiNavigation GamepadNavigation = UiNavigation::None;
+		// The milestone review (decision 47): the commands of Navigation pressed through a gamepad button binding or a key
+		// binding other than the keys a text input edits with (Backspace, Delete, Left, Right, Home, End), a subset of
+		// Navigation holding GamepadNavigation; while a text input has focus its Next, Previous and Cancel navigate, so an
+		// editing key bound to one of them only edits.
+		UiNavigation NonEditingNavigation = UiNavigation::None;
 		// C22.3: the pointer's ray through the primary camera (ComputeUiPointerRay); nullopt without a primary camera, and
 		// whenever the current layout holds no World canvas (the session computes none then).
 		std::optional<UiPointerRay> Ray{};

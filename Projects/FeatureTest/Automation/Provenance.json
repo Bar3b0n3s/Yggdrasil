@@ -1699,6 +1699,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scenes/Components/UiFallback.scene",
+			"XXH64": "0de86793abd2ac09",
+			"Method": "scene.save",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Components/UiFallback.scene.meta",
+			"XXH64": "a49610ca5162db39",
+			"Method": "edit.batch",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scenes/Components/UiTextInput.scene",
 			"XXH64": "a899be7f4058603b",
 			"Method": "scene.save",
@@ -4547,6 +4563,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/UiFallback/UiFallback.test.luau",
+			"XXH64": "31382f53a22b42f3",
+			"Method": "script.write",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/UiFallback/UiFallback.test.luau.meta",
+			"XXH64": "dc521cad1d29869f",
+			"Method": "script.write",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/UiTextInput/UiTextInput.test.luau",
 			"XXH64": "1ade5ded927ec717",
 			"Method": "script.write",
@@ -4835,6 +4867,38 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Ui/FallbackFonts/Inter-Regular.otf",
+			"XXH64": "38e610539efec6b5",
+			"Method": "asset.import",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Ui/FallbackFonts/Inter-Regular.otf.meta",
+			"XXH64": "5e830e01d5b94f73",
+			"Method": "asset.import",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Ui/FallbackFonts/NotoSansHebrew-Regular.ttf",
+			"XXH64": "93e220f9d5cf71c7",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Ui/FallbackFonts/NotoSansHebrew-Regular.ttf.meta",
+			"XXH64": "53e827aa5d4c64f1",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Ui/Fonts/Inter-Regular.otf",
 			"XXH64": "38e610539efec6b5",
 			"Method": "asset.import",
@@ -4852,7 +4916,7 @@
 		},
 		{
 			"Path": "FeatureTest.eproj",
-			"XXH64": "0c479b88d944289d",
+			"XXH64": "72a38f52487d2826",
 			"Method": "project.setSettings",
 			"RequestId": 1,
 			"Client": "batch",

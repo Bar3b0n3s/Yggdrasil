@@ -242,8 +242,9 @@ namespace Engine {
 
 		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 7): the UI draw list after game Text, into the same
 		// framebuffer, before the output stage's upscale and under the editor overlays, with or without a camera (the UI is
-		// in scene pixels). The "Ui" row appears only when the plan records a run; the glyph runs share the Text pass's
-		// binding sets (the same atlases and ViewConstants).
+		// in scene pixels). The "Ui" row appears only when the plan holds a run the pass draws: a view without a camera draws
+		// no World canvas (C22.3), so a plan of World canvases' runs alone records no row there (the milestone review). The
+		// glyph runs share the Text pass's binding sets (the same atlases and ViewConstants).
 		if (snapshot.Ui.Items.empty() && snapshot.Ui.Annotations.empty())
 			return;
 		ENGINE_CORE_ASSERT(Pipelines->Quads != nullptr, "the pipeline set has no QuadBatcher");
@@ -253,7 +254,11 @@ namespace Engine {
 			return;
 		}
 		const UiPassPlan plan = PlanUiPass(snapshot.Ui, *Assets);
-		if (plan.Runs.empty())
+		const bool drawsRun = std::ranges::any_of(plan.Runs, [&frame](const UiPassRun& run)
+		{
+			return frame.HasCamera || run.WorldCanvas == UiScreenCanvas;
+		});
+		if (!drawsRun)
 			return;
 		recording.BeginPass("Ui", &commandList);
 		RenderPassCounters counters;

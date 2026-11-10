@@ -30,9 +30,9 @@
 // with the vertex buffer's capacity and is written through the recording command list the first time a capacity is used,
 // so creating the batcher records no command list.
 //
-// Two binding layouts: Hdr, Ldr and M22's LdrDepth bind the texture and the sampler; M21's HdrLit and Normals (decision 22) also bind a
-// second texture, HdrLit's light accumulation or the Normals batch's normal map (the white texture without one, with the
-// push constants' HasNormalMap 0).
+// Two binding layouts: Hdr, Ldr and M22's LdrDepth bind the texture and the sampler; M21's HdrLit and Normals (decision
+// 22) also bind a second texture, HdrLit's light accumulation or the Normals batch's normal map (the white texture without
+// one, with the push constants' HasNormalMap 0).
 
 namespace Engine {
 

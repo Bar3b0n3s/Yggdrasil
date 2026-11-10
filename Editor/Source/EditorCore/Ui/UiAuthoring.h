@@ -98,7 +98,9 @@ namespace Engine {
 
 	// The element the preview selects at `point` (scene pixels): the topmost element of `table` (the last in draw order)
 	// whose rectangle holds the point (Min <= p < Max) and, when Clipped, whose clip does, whether it draws or not; Hidden
-	// elements are left out. Null when none. Pure.
+	// elements are left out. Null when none, and for a point outside the table's scene image ([0, SceneSize) on both axes:
+	// a PixelPerfectCamera's letterbox, where nothing is drawn, as the play session's hit test and viewport.pick take
+	// nothing there; the milestone review). Pure.
 	// C22.3 (the review of C22.3; stream W): the elements of a World canvas are left out too, since their rectangles are in
 	// that canvas's own pixels, not the frame's; the Editor's authoring overlay likewise outlines, and gives the rect tool's
 	// handles to, Screen canvases' elements only. A World canvas is placed by its entity's Transform (the scene view's
@@ -111,7 +113,9 @@ namespace Engine {
 	[[nodiscard]] glm::uvec2 GetUiPreviewFrameSize(glm::uvec2 gameResolution, const WindowSettings& window);
 
 	// Where the preview's frame image lands in the scene viewport's panel: the frame fitted into the panel with its aspect
-	// kept and centred (letterboxed), Scale panel pixels per scene pixel.
+	// kept and centred (letterboxed), Scale panel pixels per frame pixel (the game frame's view pixels, which are scene
+	// pixels unless a PixelPerfectCamera upscales the scene image into the frame: the overlay maps them through the game
+	// view's output mapping, ComputeGameViewOutputMapping).
 	struct UiPreviewFrame
 	{
 		glm::vec2 Min = glm::vec2(0.0f);  // panel pixels
@@ -125,8 +129,10 @@ namespace Engine {
 	// zero-area frame with Scale 0). Pure.
 	[[nodiscard]] UiPreviewFrame ComputeUiPreviewFrame(glm::uvec2 frameSize, glm::vec2 panelMin, glm::vec2 panelSize);
 
-	// A panel point in the frame's scene pixels: (point - Min) / Scale, unclamped (a point of the letterbox maps outside the
-	// frame); the point itself for a frame with Scale 0. Pure.
+	// A panel point in the frame's view pixels: (point - Min) / Scale, unclamped (a point of the panel's letterbox maps
+	// outside the frame); the point itself for a frame with Scale 0. A frame pixel is a scene pixel only without a
+	// PixelPerfectCamera: the overlay maps it to the scene pixel PickUiElement takes through the game view's output mapping
+	// (MapViewPointToScenePoint). Pure.
 	[[nodiscard]] glm::vec2 MapUiPreviewPointToScene(const UiPreviewFrame& frame, glm::vec2 panelPoint);
 
 }

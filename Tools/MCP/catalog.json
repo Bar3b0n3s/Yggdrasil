@@ -1935,7 +1935,7 @@
 		{
 			"name": "project_upgrade",
 			"method": "project.upgrade",
-			"description": "Applies migrations and canonical re-saves to every project file (the .eproj, and every scene, prefab, .meta, material, sound effect, replay, sprite sheet and string table under Assets/), records each rewrite in provenance and reports the changed files, each with its reason (changes: \"format version 1 to 2\", \"canonical form\"). Run it after an engine change to canonical output; dryRun: true lists what it would rewrite. An unknown member in a material, sound effect, replay, sprite sheet or string table fails the upgrade at its file and pointer, as its importer refuses it. Not undoable; refuses while an open scene has unsaved changes (save them first), and reloads every open scene whose file it rewrote.",
+			"description": "Applies migrations and canonical re-saves to every project file (the .eproj, and every scene, prefab, .meta, material, sound effect, replay, sprite sheet, tilemap and string table under Assets/), records each rewrite in provenance and reports the changed files, each with its reason (changes: \"format version 1 to 2\", \"canonical form\"). Run it after an engine change to canonical output; dryRun: true lists what it would rewrite. An unknown member in a material, sound effect, replay, sprite sheet, tilemap or string table fails the upgrade at its file and pointer, as its importer refuses it. Not undoable; refuses while an open scene has unsaved changes (save them first), and reloads every open scene whose file it rewrote.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "NoParams",

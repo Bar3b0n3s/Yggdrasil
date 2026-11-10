@@ -1,0 +1,106 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "UiFallback",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Camera": 1,
+		"UiCanvas": 1,
+		"UiRect": 1,
+		"UiText": 1
+	},
+	"Entities": [
+		{
+			"ID": "7c7024915222f721",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 60,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.08, 0.09, 0.12]
+				}
+			}
+		},
+		{
+			"ID": "a6f6317d9496d67f",
+			"Name": "Hud",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiCanvas": {
+					"SortOrder": 0,
+					"ScaleMode": "ConstantPixelSize",
+					"ScaleFactor": 1,
+					"ReferenceHeight": 1080,
+					"PixelSnap": true,
+					"Font": null,
+					"Theme": {
+						"Normal": [1, 1, 1, 1],
+						"Hovered": [0.85, 0.85, 0.85, 1],
+						"Pressed": [0.6, 0.6, 0.6, 1],
+						"Focused": [0.75, 0.85, 1, 1],
+						"Disabled": [0.5, 0.5, 0.5, 0.5]
+					},
+					"DefaultFocus": null,
+					"RenderMode": "Screen",
+					"WorldWidth": 1024,
+					"WorldHeight": 576,
+					"PixelsPerUnit": 512
+				}
+			}
+		},
+		{
+			"ID": "f83ee583d77a046e",
+			"Name": "Mixed",
+			"Parent": "a6f6317d9496d67f",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0.5, 0.5],
+					"AnchorMax": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [640, 96],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "Shalom שלום",
+					"Font": "b634b2871f975332",
+					"Size": 64,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Center",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		}
+	]
+}

@@ -3,6 +3,7 @@
 #include "Engine/Session/PlaySession.h"
 
 #include "Engine/Asset/DocumentData.h"
+#include "Engine/Core/FixedStepScheduler.h"
 #include "Engine/Core/Json/Json.h"
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/PixelPerfectCameraComponent.h"
@@ -162,6 +163,44 @@ namespace Engine {
 		void QueuePointer(PlaySession& session, uint64_t tick, glm::vec2 position)
 		{
 			REQUIRE(session.GetInput().Queue(tick, PlayInputEvent{ .Type = PlayInputEventType::MouseMove, .Position = position }).has_value());
+		}
+
+		// A left click at `position` (view coordinates): pressed at `tick`, released at the next.
+		void QueueClick(PlaySession& session, uint64_t tick, glm::vec2 position)
+		{
+			const PlayInputEvent click{ .Type = PlayInputEventType::MouseButtonInput,
+				.State = PlayInputEventState::Tap,
+				.Button = MouseButton::Left,
+				.HasPosition = true,
+				.Position = position };
+			REQUIRE(session.GetInput().Queue(tick, click).has_value());
+		}
+
+		// M22's milestone review: a World canvas of `pixels` x `pixels` canvas pixels at 4 per world unit, centred on its entity
+		// at `position` and facing +Z, whose element "Button" (a UiButton with an image) covers it.
+		Entity AddWorldButtonCanvas(Scene& scene, std::string_view name, glm::vec3 position, uint32_t pixels)
+		{
+			Entity canvas = scene.CreateEntity(name);
+			canvas.GetComponent<TransformComponent>().Translation = position;
+			canvas.AddComponent<UiCanvasComponent>(
+				UiCanvasComponent{ .RenderMode = UiCanvasRenderMode::World, .WorldWidth = pixels, .WorldHeight = pixels, .PixelsPerUnit = 4.0f });
+			Entity button = scene.CreateEntity("Button", canvas);
+			button.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f), .AnchorMax = glm::vec2(1.0f), .Size = glm::vec2(0.0f) });
+			button.AddComponent<UiImageComponent>(UiImageComponent{});
+			button.AddComponent<UiButtonComponent>(UiButtonComponent{});
+			return canvas;
+		}
+
+		// The Click events of `events`, by target.
+		std::vector<UUID> GetClicks(const std::vector<UiEvent>& events)
+		{
+			std::vector<UUID> clicks;
+			for (const UiEvent& event : events)
+			{
+				if (event.Kind == UiEventKind::Click)
+					clicks.push_back(event.Target);
+			}
+			return clicks;
 		}
 
 		// A small edit scene: a root with a child and a moved root.
@@ -590,6 +629,177 @@ namespace Engine {
 			CHECK_FALSE(session.GetUi().GetInteraction().Hovered.IsValid());
 		}
 
+		// The milestone review (decisions 24 and 50, the lead's decision 2): a pointer outside the scene image, in a
+		// PixelPerfectCamera's letterbox, reaches no UI, as viewport.pick takes nothing there: neither a Screen canvas's element
+		// whose rectangle reaches past the image's edge nor a World canvas that the pointer's ray meets beyond the view's edge,
+		// where neither draws. The 200 x 120 reference resolution in the 640 x 360 view is upscaled 3 times between 20-pixel
+		// bars; "Bleed" covers scene pixels [-10, 30) x [90, 110), and the World canvas "Board" (16 x 16 units, x -16 to 0,
+		// 5 units in front of the camera, whose view spans x -6.25 to 6.25) reaches past the image's left edge. A click inside
+		// the image on each still clicks it.
+		TEST_CASE("PlaySession: under a PixelPerfectCamera a click in the letterbox reaches no UI, though an element or a World canvas reaches past the image")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			PopulateUiScene(scene);
+			Entity bleed = scene.CreateEntity("Bleed", scene.FindEntityByPath("/Canvas"));
+			bleed.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f),
+				.AnchorMax = glm::vec2(0.0f),
+				.Pivot = glm::vec2(0.0f),
+				.Position = glm::vec2(-10.0f, 90.0f),
+				.Size = glm::vec2(40.0f, 20.0f) });
+			bleed.AddComponent<UiImageComponent>(UiImageComponent{});
+			bleed.AddComponent<UiButtonComponent>(UiButtonComponent{});
+			Entity camera = scene.CreateEntity("Camera");
+			camera.AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			camera.AddComponent<PixelPerfectCameraComponent>(PixelPerfectCameraComponent{ .ReferenceWidth = 200, .ReferenceHeight = 120, .PixelsPerUnit = 16.0f });
+			static_cast<void>(AddWorldButtonCanvas(scene, "Board", glm::vec3(-8.0f, 0.0f, -5.0f), 64));
+			UiEventTaker events;
+			PlaySessionSpecification specification = MakeSpecification(fixture, &events);
+			specification.ViewWidth = 640;
+			specification.ViewHeight = 360;
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(specification, scene);
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& session = **created;
+			const UUID bleedId = session.GetScene().FindEntityByPath("/Canvas/Bleed").GetUUID();
+			const UUID boardButton = session.GetScene().FindEntityByPath("/Board/Button").GetUUID();
+
+			// Ticks 0 and 2: view (10, 300), scene (-3.3, 100), on Bleed's rectangle; view (10, 210), scene (-3.3, 70), whose ray
+			// meets the Board at x -6.46. Ticks 4 and 6: view (50, 300), scene (10, 100), on Bleed; view (170, 210), scene
+			// (50, 70), whose ray meets the Board at x -3.1.
+			QueueClick(session, 0, glm::vec2(10.0f, 300.0f));
+			QueueClick(session, 2, glm::vec2(10.0f, 210.0f));
+			QueueClick(session, 4, glm::vec2(50.0f, 300.0f));
+			QueueClick(session, 6, glm::vec2(170.0f, 210.0f));
+			for (const uint64_t bar : { uint64_t{ 0 }, uint64_t{ 2 } })
+			{
+				while (session.GetTick() <= bar)
+					session.Tick();
+				INFO("tick " << bar);
+				CHECK_FALSE(session.GetUi().GetInteraction().Hovered.IsValid());
+				CHECK_FALSE(session.GetUi().GetInteraction().Pressed.IsValid());
+				CHECK_FALSE(session.GetUi().GetInteraction().PointerOverUi);
+			}
+			while (session.GetTick() < 8)
+				session.Tick();
+			CHECK(GetClicks(events.Events) == std::vector<UUID>{ bleedId, boardButton });
+		}
+
+		// The milestone review (decision 50, the lead's decision 10): a World canvas takes a click through a PixelPerfectCamera's
+		// ray, the orthographic projection the camera draws with whatever its Camera says (its own projection is perspective
+		// here). "Sign", 2 x 2 units at (4, 2, -50), is at scene pixel (164, 28) of the 200 x 120 reference resolution, view
+		// (512, 84) of the 640 x 360 view; the Camera's perspective ray through that view point would pass it at x 31.
+		TEST_CASE("PlaySession: under a PixelPerfectCamera a click on a World canvas's button through the camera clicks it")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity camera = scene.CreateEntity("Camera");
+			camera.AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			camera.AddComponent<PixelPerfectCameraComponent>(PixelPerfectCameraComponent{ .ReferenceWidth = 200, .ReferenceHeight = 120, .PixelsPerUnit = 16.0f });
+			static_cast<void>(AddWorldButtonCanvas(scene, "Sign", glm::vec3(4.0f, 2.0f, -50.0f), 8));
+			UiEventTaker events;
+			PlaySessionSpecification specification = MakeSpecification(fixture, &events);
+			specification.ViewWidth = 640;
+			specification.ViewHeight = 360;
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(specification, scene);
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& session = **created;
+			const UUID button = session.GetScene().FindEntityByPath("/Sign/Button").GetUUID();
+			QueueClick(session, 0, glm::vec2(512.0f, 84.0f));
+			session.Tick();
+			CHECK(session.GetUi().GetInteraction().Hovered == button);
+			CHECK(session.GetUi().GetInteraction().Pressed == button);
+			CHECK(session.GetUi().GetInteraction().PointerOverUi);
+			session.Tick();
+			CHECK(GetClicks(events.Events) == std::vector<UUID>{ button });
+		}
+
+		// The milestone review (decision 28, the lead's decision 4): a focus that Ui.SetFocus sets outside the session's phases
+		// (script.eval {context: Play} between two ticks) on a menu enabled after the last layout is kept at the next UiInput:
+		// the stale-state step checks a focus the stored layout does not hold against the scene as it is, the layout SetFocus
+		// checked it against, so the focus neither receives Focus (false) nor is lost.
+		TEST_CASE("PlaySession: a focus a script sets between two ticks on a menu it has just shown is kept at the next tick")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			PopulateUiScene(scene);
+			Entity pause = scene.CreateEntity("Pause");
+			pause.AddComponent<UiCanvasComponent>(UiCanvasComponent{ .SortOrder = 1 });
+			Entity resume = scene.CreateEntity("Resume", pause);
+			resume.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f),
+				.AnchorMax = glm::vec2(0.0f),
+				.Pivot = glm::vec2(0.0f),
+				.Position = glm::vec2(0.0f, 60.0f),
+				.Size = glm::vec2(100.0f, 20.0f) });
+			resume.AddComponent<UiImageComponent>(UiImageComponent{});
+			resume.AddComponent<UiButtonComponent>(UiButtonComponent{});
+			pause.SetActive(false);
+			UiEventTaker events;
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(MakeSpecification(fixture, &events), scene);
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& session = **created;
+			QueuePointer(session, 0, glm::vec2(500.0f));
+			session.Tick();
+			const UUID resumeId = session.GetScene().FindEntityByPath("/Pause/Resume").GetUUID();
+			REQUIRE(FindUiLayoutNode(session.GetUi().GetLayout(), resumeId) == nullptr);
+
+			const auto shown = session.GetScripts()->Evaluate(R"(
+local pause = Scene.FindByName("Pause")
+pause:SetActive(true)
+Ui.SetFocus(Scene.FindByName("Resume"))
+return Ui.GetFocus() == Scene.FindByName("Resume")
+)",
+				{});
+			REQUIRE_MESSAGE(shown.has_value(), (shown ? "" : shown.error().ToString()));
+			CHECK(shown->Value.Get() == Json(true));
+			REQUIRE(session.GetUi().GetInteraction().Focused == resumeId);
+
+			session.Tick();
+			CHECK(session.GetUi().GetInteraction().Focused == resumeId);
+			CHECK(events.Events == std::vector<UiEvent>{ UiEvent{ .Kind = UiEventKind::Focus, .Target = resumeId, .Flag = true } });
+			session.Tick();
+			CHECK(session.GetUi().GetInteraction().Focused == resumeId);
+		}
+
+		// The milestone review (decision 24, the lead's decision 6: an accepted limit, Backlog §6): UI input, events and
+		// callbacks run in the fixed step, for determinism, so while the time scale is 0 live play runs frames but no tick, and
+		// a click reaches no widget; it is processed once the scale lets ticks run again. A pause menu keeps the time scale and
+		// pauses gameplay with a flag its behaviours check. The frames are driven as a live host drives them, through a
+		// FixedStepScheduler advanced at the session's time scale.
+		TEST_CASE("PlaySession: with a time scale of 0 live play runs no tick, so a click fires nothing until the scale returns")
+		{
+			Test::SceneTestFixture fixture;
+			PopulateUiScene(fixture.GetScene());
+			UiEventTaker events;
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(MakeSpecification(fixture, &events), fixture.GetScene());
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& session = **created;
+			const UUID a = session.GetScene().FindEntityByPath("/Canvas/A").GetUUID();
+			FixedStepScheduler scheduler(FrameLoopConfig{ .FixedHz = 60 });
+			uint64_t frameIndex = 0;
+			const auto frame = [&session, &scheduler, &frameIndex]()
+			{
+				constexpr double Delta = 1.0 / 60.0;
+				const FrameSteps steps = scheduler.Advance(Delta, session.GetTimeScale());
+				for (uint32_t step = 0; step < steps.StepCount; ++step)
+					session.FixedStep();
+				session.FrameUpdate(FrameTime{ .DeltaTime = Delta * session.GetTimeScale(), .UnscaledDeltaTime = Delta, .Alpha = steps.Alpha, .FrameIndex = frameIndex++ });
+			};
+
+			REQUIRE(session.SetTimeScale(0.0).has_value());
+			QueueClick(session, 0, glm::vec2(10.0f));
+			for (int count = 0; count < 30; ++count)
+				frame();
+			CHECK(session.GetTick() == 0);
+			CHECK(session.GetUi().GetInteraction().IsEmpty());
+			CHECK(events.Events.empty());
+
+			REQUIRE(session.SetTimeScale(1.0).has_value());
+			for (int count = 0; count < 30 && session.GetTick() < 2; ++count)
+				frame();
+			REQUIRE(session.GetTick() >= 2);
+			CHECK(GetClicks(events.Events) == std::vector<UUID>{ a });
+		}
+
 		// Decision 25 (the review of W22.2's tests major, the lead's decision 3): the session passes its interaction state to
 		// the extraction of its game view (the RenderExtraction phase) and to ExtractView (what viewport.screenshot of the play
 		// scene captures), so a widget the pointer hovers or presses, or that has focus, takes its canvas's tint for that state
@@ -820,6 +1030,63 @@ namespace Engine {
 					UiEvent{ .Kind = UiEventKind::TextChanged, .Target = fieldId }, UiEvent{ .Kind = UiEventKind::Submit, .Target = fieldId },
 					UiEvent{ .Kind = UiEventKind::Submit, .Target = fieldId }, UiEvent{ .Kind = UiEventKind::Focus, .Target = fieldId, .Flag = false },
 					UiEvent{ .Kind = UiEventKind::Focus, .Target = b, .Flag = true } });
+		}
+
+		// The milestone review (decision 47, the lead's decision 7): while a text input has focus, the keys it edits with
+		// (Backspace, Delete, Left, Right, Home and End) do not fire Cancel, Next or Previous when the Ui settings bind them to
+		// those commands, so Backspace bound to Cancel ("back") only deletes and Home bound to Next only moves the caret; a key
+		// it does not edit with (Escape, Tab) still fires its command.
+		TEST_CASE("PlaySession: a key a focused text input edits with fires no Cancel, Next or Previous bound to it")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			PopulateUiScene(scene);
+			Entity field = scene.CreateEntity("Field", scene.FindEntityByPath("/Canvas"));
+			field.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f),
+				.AnchorMax = glm::vec2(0.0f),
+				.Pivot = glm::vec2(0.0f),
+				.Position = glm::vec2(0.0f, 60.0f),
+				.Size = glm::vec2(100.0f, 20.0f) });
+			field.AddComponent<UiImageComponent>(UiImageComponent{});
+			field.AddComponent<UiTextInputComponent>(UiTextInputComponent{});
+			UiEventTaker events;
+			PlaySessionSpecification specification = MakeSpecification(fixture, &events);
+			specification.Project.Ui.Cancel = { "Key.Escape", "Key.Backspace", "Gamepad.East" };
+			specification.Project.Ui.Next = { "Key.Tab", "Key.Home" };
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(specification, scene);
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& session = **created;
+			const UUID fieldId = session.GetScene().FindEntityByPath("/Canvas/Field").GetUUID();
+			// Tick 0: a click focuses the field. Tick 1: "ab". Tick 3: Backspace. Tick 5: Home. Tick 7: Escape. Tick 9: Tab.
+			QueueClick(session, 0, glm::vec2(10.0f, 70.0f));
+			REQUIRE(session.GetInput().Queue(1, PlayInputEvent{ .Type = PlayInputEventType::Text, .Text = "ab" }).has_value());
+			QueueKeyTap(session, 3, Key::Backspace);
+			QueueKeyTap(session, 5, Key::Home);
+			QueueKeyTap(session, 7, Key::Escape);
+			QueueKeyTap(session, 9, Key::Tab);
+
+			while (session.GetTick() < 7)
+				session.Tick();
+			const UiTextInputComponent& typed = session.GetScene().FindEntityByPath("/Canvas/Field").GetComponent<UiTextInputComponent>();
+			CHECK(typed.Text == "a");
+			CHECK(typed.Caret == 0u);
+			CHECK(session.GetUi().GetInteraction().Focused == fieldId);
+			while (session.GetTick() < 11)
+				session.Tick();
+			CHECK(session.GetUi().GetInteraction().Focused != fieldId);
+			std::vector<UiEvent> received;
+			std::ranges::copy_if(events.Events, std::back_inserter(received), [](const UiEvent& event)
+			{
+				return event.Kind != UiEventKind::Hover;
+			});
+			REQUIRE(received.size() == 6);
+			CHECK(received[0] == UiEvent{ .Kind = UiEventKind::Focus, .Target = fieldId, .Flag = true });
+			CHECK(received[1] == UiEvent{ .Kind = UiEventKind::TextChanged, .Target = fieldId });
+			CHECK(received[2] == UiEvent{ .Kind = UiEventKind::TextChanged, .Target = fieldId });
+			CHECK(received[3] == UiEvent{ .Kind = UiEventKind::Cancel, .Target = fieldId });
+			CHECK(received[4] == UiEvent{ .Kind = UiEventKind::Focus, .Target = fieldId, .Flag = false });
+			CHECK(received[5].Kind == UiEventKind::Focus);
+			CHECK(received[5].Flag);
 		}
 
 		// Roadmap M22's "every widget works by keyboard and gamepad", for the text input (decision 47, amended by W22.3's

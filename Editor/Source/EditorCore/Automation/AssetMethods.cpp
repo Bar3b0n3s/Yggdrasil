@@ -17,7 +17,6 @@
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/Asset/SpriteSheetData.h"
 #include "Engine/Asset/StringTableData.h"
-#include "Engine/Asset/TextureData.h"
 #include "Engine/Asset/TilemapData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"

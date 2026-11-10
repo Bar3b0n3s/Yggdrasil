@@ -19,7 +19,8 @@ namespace Engine {
 
 	// The UI authoring overlay (M22, C22.2, R-UI-EDITOR; Docs/Decisions/0033-m22-contract.md decision 34), drawn over the scene
 	// view's UI preview only (UiPreview.h), over the scene the scene view shows (the play scene while the editor shows it,
-	// M20 decisions 13 and 23), laid out at the preview image's size (ComputeUiLayout, the layout the image was extracted with):
+	// M20 decisions 13 and 23), laid out at the preview image's scene resolution (ComputeUiLayout, the layout the image was
+	// extracted with: the image's size, or a PixelPerfectCamera's reference resolution, since M22's landing):
 	//   - every laid-out element's outline (Hidden elements left out), and the selected element's rectangle with its eight
 	//     handles when one element is selected in the shown scene;
 	//   - a click (a press and release without a drag) selects the topmost element at the point, drawn or not
@@ -35,10 +36,12 @@ namespace Engine {
 	class UiAuthoringOverlay
 	{
 	public:
-		// Draws the overlay for the preview image placed at `frame` (panel pixels) in the current window, whose `imageSize`
-		// pixels are the scene pixels it was laid out at, and takes the pointer over it as one ImGui item (the last item when
-		// it returns, so a drop target can follow). `active` reports whether that item holds a press. Errors: a failed action
-		// of an earlier frame, once.
+		// Draws the overlay for the preview image placed at `frame` (panel pixels) in the current window, the game view of
+		// `imageSize` view (frame) pixels: the UI is laid out at that view's scene resolution and placed, picked and dragged
+		// through its output mapping (ComputeGameViewOutputMapping: the identity, or a PixelPerfectCamera's upscale and
+		// letterbox, where scene pixel p is frame pixel p * Scale + Offset). Takes the pointer over the frame as one ImGui
+		// item (the last item when it returns, so a drop target can follow). `active` reports whether that item holds a
+		// press. Errors: a failed action of an earlier frame, once.
 		[[nodiscard]] Status Draw(EditorPanelContext& context, const UiPreviewFrame& frame, glm::uvec2 imageSize, bool& active);
 	private:
 		struct Drag

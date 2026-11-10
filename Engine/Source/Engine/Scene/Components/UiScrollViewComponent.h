@@ -24,7 +24,7 @@ namespace Engine {
 	//     focus itself, and while focused the directions along its scrolling axes scroll it by ScrollStep (the other two
 	//     move focus).
 	// Interaction writes ScrollPosition clamped as read, raising OnUiScroll with the new position. Requires a UiRect;
-	// excludes UiButton, UiToggle and UiSlider.
+	// excludes UiButton, UiToggle, UiSlider and UiTextInput.
 	struct UiScrollViewComponent
 	{
 		bool Interactable = true; // as UiButtonComponent::Interactable (wheel, drag and focus)

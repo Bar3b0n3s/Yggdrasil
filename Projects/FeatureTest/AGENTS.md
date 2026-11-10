@@ -21,7 +21,9 @@ serves its skills and generated reference through automation (`docs.get {}` list
   `Scaffold/Scaffolds.json` lists them in run order, each with its id seed (`Editor --id-seed`) and renderer:
   `Settings.jsonl` writes the project settings, the stream scaffolds write the scenes, scripts, suites and test assets
   under `Assets/Scenes/`, `Assets/Scripts/`, `Assets/Prefabs/`, `Assets/Formats/`, `Assets/Localization/` (M22's string
-  table), `Assets/Ui/` (M22's font imported with `Ranges`) and `Assets/Tests/<Area>/`,
+  table), `Assets/Ui/` (M22's font imported with `Ranges` in `Assets/Ui/Fonts/`, and in `Assets/Ui/FallbackFonts/` the
+  Hebrew font and the copy of Inter whose `Fallbacks` names it, which `UiFallback.jsonl`'s scene draws, M22's milestone
+  review) and `Assets/Tests/<Area>/`,
   `Suites.jsonl` writes `Testing.Suites` and `Testing.Replays`, and `Replays.jsonl` records `Input.replay` and
   `Determinism.replay` last (`PhysicsSemantics.jsonl` and `MultiScript.jsonl` record their scenes' replays in
   `Assets/Tests/Replays/` themselves, and so does `Replays2D.jsonl` for `Sprites2D.replay` and `Physics2D.replay`, with

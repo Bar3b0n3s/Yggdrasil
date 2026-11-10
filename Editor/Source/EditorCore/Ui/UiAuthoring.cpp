@@ -234,6 +234,9 @@ namespace Engine {
 
 	UUID PickUiElement(const UiLayoutTable& table, glm::vec2 point)
 	{
+		// Outside the scene image (a PixelPerfectCamera's letterbox) nothing is drawn: the milestone review.
+		if (!(point.x >= 0.0f && point.x < static_cast<float>(table.SceneSize.x) && point.y >= 0.0f && point.y < static_cast<float>(table.SceneSize.y)))
+			return {};
 		for (auto node = table.Nodes.rbegin(); node != table.Nodes.rend(); ++node)
 		{
 			if (node->Hidden || Utils::IsUiWorldCanvasElement(table, *node))

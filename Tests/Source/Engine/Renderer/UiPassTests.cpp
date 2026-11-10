@@ -662,6 +662,34 @@ namespace Engine {
 			CHECK(Test::SceneRendererIntegrationFixture::FindPass(setup.Renderer().GetRenderStats(), "Ui") == nullptr);
 		}
 
+		// The milestone review (decision 7's stats rule): the "Ui" row appears only when the pass draws something, so a view
+		// without a camera, which draws no World canvas, records no row for a UI of World canvases alone; with a camera the
+		// same UI draws, with its row.
+		TEST_CASE("UiPass: a view without a camera records no Ui row for World canvases alone")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu, 32, 32);
+			RenderSnapshot snapshot = setup.Snapshot();
+			snapshot.Ui.WorldCanvases.push_back(UiWorldCanvas{ .Canvas = UUID(0xB0A2D),
+				.Size = glm::uvec2(64),
+				.World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -6.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(0.125f, -0.125f, 1.0f))
+					* glm::translate(glm::mat4(1.0f), glm::vec3(-32.0f, -32.0f, 0.0f)) });
+			UiDrawItem board = MakeImage(glm::vec2(0.0f), glm::vec2(64.0f));
+			board.Color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
+			board.WorldCanvas = 0;
+			snapshot.Ui.Items.push_back(board);
+			snapshot.HasCamera = false;
+			static_cast<void>(setup.Render(snapshot));
+			CHECK(Test::SceneRendererIntegrationFixture::FindPass(setup.Renderer().GetRenderStats(), "Ui") == nullptr);
+
+			snapshot.HasCamera = true;
+			snapshot.FrameIndex += 1;
+			const Image drawn = setup.Render(snapshot);
+			CHECK(Test::SceneRendererIntegrationFixture::Channel(drawn, 1, 1, 0) == 255);
+			CHECK(Test::SceneRendererIntegrationFixture::FindPass(setup.Renderer().GetRenderStats(), "Ui") != nullptr);
+		}
+
 		TEST_CASE("UiPass: at scale 3 the UI is upscaled with the scene image, its row between Text and Upscale")
 		{
 			// A 16 x 16 scene in a 48 x 48 view: the frame drawn 1:1 at scene pixels [2, 10) shows as 3 x 3 blocks of its texels.

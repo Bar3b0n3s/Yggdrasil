@@ -20,10 +20,12 @@
 // only on the state, never on how many frames ran between two ticks. The session also runs LayoutStep, outside the phase
 // list, in PlaySession::Activate and right after a Scene.Load or Scene.Reload replaces its scene, each time both before the
 // scene's startup callbacks (OnCreate, OnStart) and after them, so the current layout always describes the session's current
-// scene, in those callbacks too: never a replaced scene's, and empty only before Activate. Both layouts are at the session's
-// scene resolution (the view's size in W22.1; the later lander of M21 and M22 makes it the scene resolution M21's
-// PixelPerfectCamera sets). Layouts are derived data: they never reach the state hash (W22.2's ui hash block holds the
-// interaction state and the event queue only).
+// scene, in those callbacks too: never a replaced scene's, and empty only before Activate; the layout after the startup
+// callbacks is made once the world transforms they changed are up to date (the milestone review), so a World canvas they
+// moved is hit-tested where it is drawn. Both layouts are at the session's scene resolution: the game view's, through
+// ComputeGameViewOutputMapping (the view's size, or a primary camera's PixelPerfectCamera's reference resolution; M22's
+// landing). Layouts are derived data: they never reach the state hash (W22.2's ui hash block holds the interaction state
+// and the event queue only).
 // Owned by the PlaySession (GetUi); runs in Play and Simulate alike. Main thread; not copyable.
 //
 // Interaction (C22.2, R-UI-INPUT, R-UI-EVENTS and R-UI-DET; decisions 23, 24, 27 and 29). The UiInput phase (after
@@ -68,13 +70,19 @@ namespace Engine {
 		// The UiInput phase (decision 24): against GetLayout(), a layout of `scene`, in this order, appending each event to
 		// the queue as it is raised:
 		//   1. Stale state: an id of the state that is not an element of the layout is cleared, and so are a Focused that is
-		//      no longer focusable and a Pressed or Dragged no longer interactable; a cleared Focused or Hovered whose entity
+		//      no longer focusable and a Pressed or Dragged no longer interactable; a Focused that the layout does not hold
+		//      focusable is first checked against a layout of `scene` as it is (ComputeUiLayout at the layout's scene size,
+		//      SetFocus's rule), and kept when focusable there, so a focus Ui.SetFocus took outside the phases (script.eval
+		//      between two ticks) on UI changed since the last layout is not lost (the milestone review; inside the phases a
+		//      layout always follows a script's change, so both agree); a cleared Focused or Hovered whose entity
 		//      the scene still holds (not pending destruction) raises Focus or Hover (false) at it. When the layout holds no
 		//      canvas, the rest of the state then returns to its default (DragOrigin and DragStart zero, Stick None,
 		//      PointerOverUi false) and the phase ends here, reading no input: a scene without a canvas keeps an empty state
 		//      whatever the pointer, the wheel, the stick and the bindings do (Roadmap M22: scenes without UI keep their hash).
-		//   2. Hover: HitTestUi at input.Pointer; PointerOverUi is whether a target was hit; the hovered widget is the hit's
-		//      widget when it is interactable, else none. A change raises Hover (false) at the old one, then (true) at the new.
+		//   2. Hover: HitTestUi at input.Pointer, nothing for a pointer outside the scene image ([0, SceneSize) of the layout on
+		//      both axes: a PixelPerfectCamera's letterbox; the milestone review); PointerOverUi is whether a target was hit;
+		//      the hovered widget is the hit's widget when it is interactable, else none. A change raises Hover (false) at the
+		//      old one, then (true) at the new.
 		//   3. Press (PointerPressed) on the hovered widget: it becomes Pressed; a focusable one (IsUiFocusable) takes focus
 		//      (Focus false at the old focus, true at it), while one whose Focusable is off leaves focus as it is, so a HUD
 		//      button that is not Focusable is clicked without taking keyboard focus; a Slider takes the value at the pointer
@@ -107,10 +115,12 @@ namespace Engine {
 		//     DragOrigin then holds; step 6's wheel scrolls the scroll view under the hit target, on whichever canvas.
 		//   - Text input (stream T), a step 7a after the stick: when the focused element is an interactable UiTextInput,
 		//     EditUiTextInput with input.Text and input.TextKeys (TextChanged, then Submit for Enter); and while it has
-		//     focus this step's navigation commands are input.GamepadNavigation plus input.Navigation's Next, Previous and
-		//     Cancel (the stick's direction kept), so a keyboard key typed into the field never navigates. Step 9's Submit
-		//     on a focused interactable text input raises Submit at it (ActivateUiWidget leaves a text input alone, so a
-		//     click on one only focuses it).
+		//     focus this step's navigation commands are input.GamepadNavigation plus the Next, Previous and Cancel of
+		//     input.NonEditingNavigation, those a gamepad button or a key the input does not edit with pressed (the stick's
+		//     direction kept), so a keyboard key typed into the field never navigates, and an editing key (Backspace,
+		//     Delete, Left, Right, Home, End) bound to Cancel, Next or Previous only edits (the milestone review). Step 9's
+		//     Submit on a focused interactable text input raises Submit at it (ActivateUiWidget leaves a text input alone,
+		//     so a click on one only focuses it).
 		void ProcessInput(Scene& scene, const UiInputFrame& input);
 
 		// The interaction state (decision 24), the default before the first UiInput and after ResetInteraction.
