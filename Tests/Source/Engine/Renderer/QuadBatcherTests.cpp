@@ -485,6 +485,30 @@ namespace Engine {
 			CHECK(second.Pixels == image.Pixels);
 		}
 
+		// M21's milestone review: the staging that a record lays its vertices out in keeps room for at most one batch between
+		// records (the vertex buffer's capacity), so a record of more quads leaves no outsized CPU copy behind it.
+		TEST_CASE("QuadBatcher: after a record beyond one batch, the staging keeps room for one batch at most")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			QuadSetup setup(gpu, 4, 4, glm::uvec2(4));
+			const QuadDraw quad = MakePixelQuad(glm::vec2(0.0f), glm::vec2(2.0f), glm::vec2(0.0f), glm::vec2(1.0f), nullptr);
+			// A record within one batch keeps its room for the next record.
+			const std::vector<QuadDraw> few(16, quad);
+			const Result<uint32_t> small = setup.Record(few);
+			REQUIRE_MESSAGE(small.has_value(), small.error().ToString());
+			CHECK(setup.GetBatcher().GetStagingCapacity() >= few.size());
+			const std::vector<QuadDraw> many(QuadBatcher::MaxQuadsPerRecord + 1, quad);
+			const Result<uint32_t> large = setup.Record(many);
+			REQUIRE_MESSAGE(large.has_value(), large.error().ToString());
+			CHECK(*large == many.size());
+			CHECK(setup.GetBatcher().GetStagingCapacity() <= QuadBatcher::MaxQuadsPerRecord);
+			// The next record draws as before.
+			const Result<uint32_t> again = setup.Record(few);
+			REQUIRE_MESSAGE(again.has_value(), again.error().ToString());
+			CHECK(*again == few.size());
+		}
+
 		TEST_CASE("QuadBatcher: a record whose binding set fails keeps no unwritten index buffer, and the next record draws")
 		{
 			// A record of 1,500 quads grows the buffers past their first 1,024 quads; its first texture's binding set fails

@@ -5,19 +5,24 @@
 #include "Engine/Physics/Physics2DWorld.h"
 #include "Engine/Physics/PhysicsEngine.h"
 #include "Engine/Physics/PhysicsShape.h"
+#include "Engine/Physics/PhysicsTypes.h"
+#include "Engine/Scene/Components/RigidBody2DComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Private/Physics2DComposition.h"
 #include "Engine/Scene/Scene.h"
 
 #include <algorithm>
 #include <format>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <tuple>
+#include <utility>
 
 // The 2D checks of one scene (Physics2DValidation.h): the 2D composition's diagnostics (PHYSICS2D_MIXED_WORLDS,
 // PHYSICS2D_OFF_PLANE and the shared PHYSICS_* codes), then PHYSICS_INVALID_SHAPE for every creatable 2D body whose shape
-// cannot be built (its TilemapColliders' tilemaps loaded through the asset manager), as the play session's Physics2DSystem
-// would refuse it.
+// cannot be built (its TilemapColliders' tilemaps loaded through the asset manager), and the Dynamic body check of every
+// Dynamic RigidBody2D's built shape (M21's milestone review), as the play session's Physics2DSystem would refuse it.
 
 namespace Engine {
 
@@ -54,6 +59,37 @@ namespace Engine {
 			return diagnostic;
 		}
 
+		// The check of a Dynamic RigidBody2D against its built shape (PhysicsShape::CheckDynamicBody, which the play session's
+		// Physics2DSystem makes before it creates the body, with Physics2DTranslationDofs under FixedRotation): a Mass the world
+		// refuses, or an inertia too large for Jolt, reported as the system reports it: the carried code (PHYSICS_INVALID_SHAPE
+		// without one), an Error on the owner's RigidBody2D, Field Mass.
+		static std::optional<PhysicsDiagnostic> CheckDynamicBody2D(const Scene& scene, const Physics2DBodyPlan& plan, const PhysicsShape& shape)
+		{
+			if (plan.Origin != PhysicsBodyOrigin::RigidBody || plan.MotionType != PhysicsMotionType::Dynamic)
+				return std::nullopt;
+			const ConstEntity owner = scene.FindEntityByID(plan.Owner);
+			const RigidBody2DComponent* body = owner.IsValid() ? owner.TryGetComponent<RigidBody2DComponent>() : nullptr;
+			if (body == nullptr)
+				return std::nullopt;
+			const Status checked = shape.CheckDynamicBody(body->Mass, body->FixedRotation ? Physics2DTranslationDofs : Physics2DDofs);
+			if (checked.has_value())
+				return std::nullopt;
+			const std::string_view carried = GetPhysicsDiagnosticCode(checked.error());
+			const std::string_view text = checked.error().GetMessageText();
+			PhysicsDiagnostic diagnostic;
+			diagnostic.Code = std::string(carried.empty() ? PhysicsInvalidShapeCode : carried);
+			diagnostic.Severity = DiagnosticSeverity::Error;
+			diagnostic.Entity = plan.Owner;
+			diagnostic.Component = "RigidBody2D";
+			diagnostic.Field = "Mass";
+			diagnostic.Message = std::format("the Dynamic 2D body of '{}' cannot be created: {}", scene.GetEntityPath(owner),
+				carried.empty() || text.size() <= carried.size() + 2 ? text : text.substr(carried.size() + 2));
+			diagnostic.Hint = std::format("lower Mass (at most {} kg), or bring the colliders closer together or make them smaller; the play session does not "
+										  "create the body otherwise",
+				MaxPhysicsMass);
+			return diagnostic;
+		}
+
 	}
 
 	std::vector<PhysicsDiagnostic> ValidateScenePhysics2D(const Scene& scene, const PhysicsLayerTable& layers, AssetManager* assets)
@@ -75,8 +111,11 @@ namespace Engine {
 				// Tilemaps without a solid cell leave the body no sub-shape: no body, as the session, and no diagnostic.
 				if (description->Colliders.empty())
 					continue;
-				if (const Result<Ref<const PhysicsShape>> shape = CreatePhysics2DBodyShape(plan, *description); !shape)
+				const Result<Ref<const PhysicsShape>> shape = CreatePhysics2DBodyShape(plan, *description);
+				if (!shape)
 					diagnostics.push_back(Utils::MakeInvalid2DShapeDiagnostic(scene, plan, shape.error()));
+				else if (std::optional<PhysicsDiagnostic> dynamic = Utils::CheckDynamicBody2D(scene, plan, **shape))
+					diagnostics.push_back(std::move(*dynamic));
 			}
 		}
 		else

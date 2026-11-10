@@ -511,7 +511,7 @@ declare extern type Entity with
 	GetScripts: (self: Entity) -> {any}
 	-- Copy tags in insertion order. [All modes; Runtime|Test; pure/read]
 	GetTags: (self: Entity) -> {string}
-	-- Get this entity's render mesh world AABB; nil without a mesh. [All modes; Runtime|Test; pure/read]
+	-- Get the world AABB of what this entity draws: its render mesh, its sprite's quad and its tilemap's drawn tiles; nil without any of them. [All modes; Runtime|Test; pure/read]
 	GetWorldBounds: (self: Entity) -> (vector?, vector?)
 	-- Check an exposed component by its exact registry name. [All modes; Runtime|Test; pure/read]
 	HasComponent: (self: Entity, name: string) -> boolean

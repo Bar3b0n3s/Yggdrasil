@@ -11,6 +11,7 @@ namespace Engine {
 
 	class AutomationMethodContext;
 	class MethodRegistry;
+	class PlaySession;
 	class TypeRegistry;
 	struct RenderStats;
 
@@ -78,6 +79,10 @@ namespace Engine {
 	// Owned diagnostic copy of one displayed renderer's history, preserving both CPU and delayed GPU identities.
 	// No rendering, waits, asset access or mutation. An unavailable history produces only the supplied view name.
 	[[nodiscard]] StatsViewSummary MakeStatsViewSummary(std::string name, const RenderStats& stats);
+
+	// M21's milestone review: the live bodies of `session`'s physics worlds, the 3D world's and the 2D world's together:
+	// stats.get's bodies (which the hardening soak's no-growth rule reads) and the Runtime's stats overlay.
+	[[nodiscard]] uint32_t CountSessionBodies(const PlaySession& session);
 
 	namespace Automation {
 

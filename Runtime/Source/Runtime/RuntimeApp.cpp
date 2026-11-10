@@ -63,7 +63,6 @@
 	#include "Engine/Automation/Methods/RuntimeAutomationServer.h"
 	#include "Engine/Automation/Methods/StatsMethods.h"
 	#include "Engine/ImGui/StatsOverlay.h"
-	#include "Engine/Scene/PhysicsSystem.h"
 	#include "Engine/Scripting/ScriptCompiler.h"
 #endif
 
@@ -1424,7 +1423,7 @@ namespace Engine {
 		{
 			data.Tick = session->GetTick();
 			data.Entities = static_cast<uint32_t>(session->GetScene().GetEntityCount());
-			data.Bodies = session->GetPhysics().GetStats().BodyCount;
+			data.Bodies = CountSessionBodies(*session); // both physics worlds (M21's milestone review)
 			if (const ScriptEngine* scripts = session->GetScripts())
 				data.ScriptHeapBytes = scripts->GetMemoryState().UsedBytes;
 		}

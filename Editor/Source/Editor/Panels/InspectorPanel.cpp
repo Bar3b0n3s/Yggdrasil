@@ -22,6 +22,7 @@
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/VirtualFileSystem.h"
+#include "Engine/Reflection/StructInfo.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/ComponentHostOps.h"
@@ -521,6 +522,11 @@ namespace Engine {
 		EditorContext& editor = context.Editor;
 		const JsonReader values(properties.Values);
 		const TypeRegistry& types = editor.GetTypeRegistry();
+		if (m_ListedAsset != asset)
+		{
+			m_ListedAsset = asset;
+			m_ListedElements.clear();
+		}
 		for (const auto& field : properties.Type->GetFields())
 		{
 			if (field->GetMeta().Hidden)
@@ -528,12 +534,18 @@ namespace Engine {
 			const auto found = properties.Values.find(field->GetName());
 			if (found == properties.Values.end())
 				continue;
+			std::string path = std::string(idPrefix) + ":" + asset.ToString() + ":" + field->GetName() + ":" + m_OwnerIdentity;
+			// M21's milestone review: a long array is listed, its elements never converted or drawn all at once.
+			if (field->GetKind() == FieldType::Array && found->is_array() && found->size() > InlineAssetElements)
+			{
+				DrawListedAssetArray(context, asset, properties, *field, *found, escape, path, typeName);
+				continue;
+			}
 			Result<Value> read = ValueFromJson(JsonReader(*found), field->GetType());
 			if (!read)
 				continue;
-			const bool editing = m_AssetFieldEdit && m_AssetFieldEdit->Field == field->GetName();
+			const bool editing = m_AssetFieldEdit && m_AssetFieldEdit->Field == field->GetName() && !m_AssetFieldEdit->Element.has_value();
 			Value value = editing ? m_AssetFieldEdit->Candidate : std::move(*read);
-			std::string path = std::string(idPrefix) + ":" + asset.ToString() + ":" + field->GetName() + ":" + m_OwnerIdentity;
 			auto result = DrawReflectedValue(*field, value, { .Types = types, .Resolve = { .Registry = &types, .OwnerType = properties.Type, .OwnerJson = &values, .Key = {} }, .Path = std::move(path), .ReadOnly = editor.IsReadOnly(), .Mixed = false, .MixedComponents = 0u, .FindReferences = [&editor](const FieldInfo& referenceField, std::string_view query)
 			{
 				return Utils::FindInspectorReferenceCandidates(editor, SceneTarget::Edit, referenceField, query);
@@ -577,6 +589,156 @@ namespace Engine {
 				m_AssetFieldEdit.reset();
 			}
 		}
+	}
+
+	void InspectorPanel::DrawListedAssetArray(EditorPanelContext& context, AssetHandle asset, const AssetProperties& properties, const FieldInfo& field,
+		const Json& elements, bool escape, const std::string& path, std::string_view typeName)
+	{
+		EditorContext& editor = context.Editor;
+		const TypeRegistry& types = editor.GetTypeRegistry();
+		const TypeInfo* elementType = field.GetType().GetElement();
+		if (elementType == nullptr || elements.empty())
+			return;
+		const size_t count = elements.size();
+		// The selection is kept as picked (Add element selects the element it appends before the properties are read again)
+		// and shown within the array.
+		size_t& selected = m_ListedElements[field.GetName()];
+		size_t shown = std::min(selected, count - 1);
+		const auto submit = [this, &context, asset, &field](Json array)
+		{
+			QueueAction(context, "asset.setProperties", Json{ { "asset", asset.ToString() }, { "values", Json{ { field.GetName(), std::move(array) } } } });
+		};
+
+		ImGui::PushID(static_cast<int>(FNV1a32(path)));
+		ImGui::TextUnformatted(std::format("{} ({} elements)", Utils::InspectorFieldLabel(typeName, field.GetName()), count).c_str());
+		// The element shown below: typed by its index, which scrolls the list to it, or picked in the list.
+		int typed = static_cast<int>(shown);
+		bool scrollToShown = false;
+		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8.0f);
+		if (ImGui::InputInt("Element", &typed, 0, 0))
+		{
+			selected = shown = static_cast<size_t>(std::clamp(typed, 0, static_cast<int>(count - 1)));
+			scrollToShown = true;
+		}
+		const float rows = std::min(static_cast<float>(count), 8.0f);
+		if (ImGui::BeginListBox("##Elements", ImVec2(-1.0f, ImGui::GetTextLineHeightWithSpacing() * rows + ImGui::GetStyle().FramePadding.y * 2.0f)))
+		{
+			// Only the rows in view are submitted and described (an element's own name when it has one, else its JSON), and
+			// the shown one, so a typed index can scroll to it.
+			ImGuiListClipper clipper;
+			clipper.Begin(static_cast<int>(count));
+			clipper.IncludeItemByIndex(static_cast<int>(shown));
+			while (clipper.Step())
+			{
+				for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row)
+				{
+					const Json& entry = elements[static_cast<size_t>(row)];
+					std::string description;
+					if (const auto name = entry.is_object() ? entry.find("Name") : entry.end(); name != entry.end())
+						description = JsonReader(*name).ReadString().value_or(std::string());
+					if (description.empty())
+						description = entry.dump();
+					if (description.size() > 80)
+						description = description.substr(0, 77) + "...";
+					const std::string label = std::format("{}: {}###Element{}", row, description, row);
+					if (ImGui::Selectable(label.c_str(), static_cast<size_t>(row) == shown))
+						selected = static_cast<size_t>(row);
+					if (scrollToShown && static_cast<size_t>(row) == shown)
+						ImGui::SetScrollHereY(0.5f);
+				}
+			}
+			ImGui::EndListBox();
+		}
+
+		// Add appends the element type's default, as the inline list's Add element does, and selects it; Remove takes the
+		// shown element out.
+		ImGui::BeginDisabled(editor.IsReadOnly());
+		if (ImGui::SmallButton("Add element") && elementType->GetKind() == FieldType::Struct && elementType->GetStruct() != nullptr)
+		{
+			Json array = elements;
+			array.push_back(elementType->GetStruct()->MakeDefaultJson());
+			submit(std::move(array));
+			selected = count;
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Remove element"))
+		{
+			Json array = elements;
+			array.erase(array.begin() + static_cast<std::ptrdiff_t>(shown));
+			submit(std::move(array));
+		}
+		ImGui::EndDisabled();
+		shown = std::min(selected, count - 1);
+
+		// The shown element's fields, as the container drawer draws an element (a field of the element's type).
+		const FieldInfo* elementSchema = field.GetType().GetElementSchema();
+		const FieldInfo& descriptor = elementSchema != nullptr ? *elementSchema : field;
+		FieldMeta meta = descriptor.GetMeta();
+		if (elementType->GetKind() == FieldType::AssetRef)
+			meta.AssetFilter = elementType->GetAssetTypeName();
+		const FieldInfo element(FieldInfo::Specification{ .Name = std::to_string(shown),
+			.Description = descriptor.GetDescription(),
+			.Type = elementType,
+			.Meta = std::move(meta),
+			.Accessor = {},
+			.Resolver = descriptor.GetResolver() });
+		const bool editing = m_AssetFieldEdit && m_AssetFieldEdit->Field == field.GetName() && m_AssetFieldEdit->Element == shown;
+		Result<Value> read = editing ? Result<Value>(m_AssetFieldEdit->Candidate) : ValueFromJson(JsonReader(elements[shown]), *elementType);
+		if (!read)
+		{
+			ReportFailure(read.error());
+			ImGui::PopID();
+			return;
+		}
+		Value value = std::move(*read);
+		const JsonReader values(properties.Values);
+		auto result = DrawReflectedValue(element, value, { .Types = types, .Resolve = { .Registry = &types, .OwnerType = properties.Type, .OwnerJson = &values, .Key = {} }, .Path = path + "[" + std::to_string(shown) + "]", .ReadOnly = editor.IsReadOnly(), .Mixed = false, .MixedComponents = 0u, .FindReferences = [&editor](const FieldInfo& referenceField, std::string_view query)
+		{
+			return Utils::FindInspectorReferenceCandidates(editor, SceneTarget::Edit, referenceField, query);
+		},
+															 .ScriptSchema = nullptr,
+															 .DisplayLabel = std::format("Element {}", shown),
+															 .DescribeReference = [&editor](const FieldInfo& referenceField, UUID id)
+		{
+			return Utils::DescribeInspectorReference(editor, SceneTarget::Edit, referenceField, id);
+		} });
+		if (!result)
+		{
+			ReportFailure(result.error());
+			if (editing)
+				m_AssetFieldEdit.reset();
+		}
+		else if (escape || result->Cancelled)
+		{
+			m_AssetFieldEdit.reset();
+		}
+		else
+		{
+			if (result->Changed)
+				m_AssetFieldEdit = AssetFieldEdit{ .Asset = asset, .Field = field.GetName(), .Candidate = value, .Element = shown };
+			const bool released = result->Committed || (result->Changed && !result->Active);
+			if (released && m_AssetFieldEdit && m_AssetFieldEdit->Field == field.GetName() && m_AssetFieldEdit->Element == shown)
+			{
+				// The element replaced in the whole array, the method's own action as for a whole field.
+				Result<Json> json = ValueToJson(m_AssetFieldEdit->Candidate, *elementType);
+				m_AssetFieldEdit.reset();
+				if (!json)
+				{
+					ReportFailure(json.error());
+				}
+				else
+				{
+					Json array = elements;
+					array[shown] = std::move(*json);
+					submit(std::move(array));
+				}
+			}
+			else if (editing && !result->Active && !result->Activated && !result->Changed)
+			{
+				m_AssetFieldEdit.reset();
+			}
+		}
+		ImGui::PopID();
 	}
 
 	void InspectorPanel::DrawSpriteSheet(EditorPanelContext& context, AssetHandle asset, const AssetProperties& properties, bool escape)

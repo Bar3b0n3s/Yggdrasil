@@ -110,13 +110,13 @@ namespace Engine {
 			.Field("width", &ViewportPickResult::Width, "Actual framebuffer width used for the projection.")
 			.Field("height", &ViewportPickResult::Height, "Actual framebuffer height used for the projection.")
 			.Field("raycast", &ViewportPickResult::Raycast,
-				"The sprite the pixel shows (the last drawn whose quad covers it: submesh 0, triangle 0 or 1 of the quad), else the nearest "
-				"mesh triangle, in the camera's near-to-far interval.");
+				"The sprite or tile the pixel shows (the last drawn whose quad covers it: submesh 0, triangle 0 or 1 of the quad; a tile is "
+				"reported as its tilemap's entity), else the nearest mesh triangle, in the camera's near-to-far interval.");
 	}
 
 	void RegisterViewportPickMethods(MethodRegistry& methods)
 	{
-		methods.Add({ .Name = "viewport.pick", .Description = "Queries what a viewport pixel shows without a GPU, clipping to the camera's near and far planes: the last-drawn sprite whose quad covers it, in the project's sorting layers, else the nearest mesh triangle. Returns the hit without changing selection.", .RequiredParams = { "x", "y", "view" }, .SupportsDryRun = true, .AllowedInBatch = true, .Examples = { { .Description = "Query the centre of the default scene viewport.", .Params = Json{ { "x", 320 }, { "y", 180 }, { "view", "scene" } } } } },
+		methods.Add({ .Name = "viewport.pick", .Description = "Queries what a viewport pixel shows without a GPU, clipping to the camera's near and far planes: the last-drawn sprite or tile whose quad covers it, in the project's sorting layers (a tile names its tilemap's entity), else the nearest mesh triangle. Returns the hit without changing selection.", .RequiredParams = { "x", "y", "view" }, .SupportsDryRun = true, .AllowedInBatch = true, .Examples = { { .Description = "Query the centre of the default scene viewport.", .Params = Json{ { "x", 320 }, { "y", 180 }, { "view", "scene" } } } } },
 			&Automation::ViewportPick);
 	}
 

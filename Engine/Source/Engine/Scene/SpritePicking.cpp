@@ -10,6 +10,7 @@
 #include <cmath>
 #include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace Engine {
@@ -88,19 +89,71 @@ namespace Engine {
 			return IntersectSpriteQuad(corners, origin, direction, request.MinDistance, request.MaxDistance, entity);
 		}
 
+		// Where the ray (`origin`, unit `direction`) meets the plane z = 0 of the space `world` maps to world space, in that
+		// space's X and Y; nullopt for a singular or non-finite matrix, or a ray parallel to the plane (which crosses no quad
+		// of it: IntersectSpriteQuad's test refuses a ray in a quad's plane).
+		static std::optional<glm::dvec2> IntersectLocalPlane(const glm::mat4& world, const glm::dvec3& origin, const glm::dvec3& direction)
+		{
+			const glm::dmat4 matrix(world);
+			const double determinant = glm::determinant(matrix);
+			if (!std::isfinite(determinant) || determinant == 0)
+				return std::nullopt;
+			const glm::dmat4 inverse = glm::inverse(matrix);
+			const glm::dvec3 localOrigin(inverse * glm::dvec4(origin, 1.0));
+			const glm::dvec3 localDirection(inverse * glm::dvec4(direction, 0.0));
+			if (!std::isfinite(localDirection.z) || localDirection.z == 0)
+				return std::nullopt;
+			const glm::dvec2 point = glm::dvec2(localOrigin) - (localOrigin.z / localDirection.z) * glm::dvec2(localDirection);
+			if (!std::isfinite(point.x) || !std::isfinite(point.y))
+				return std::nullopt;
+			return point;
+		}
+
 		// The last-drawn tile of `tilemap` the ray crosses (C21.2, decision 24): its tiles backwards in their draw order, each
-		// the sprite TilemapRendererComponent.h describes, a hit naming the tilemap's entity.
+		// the sprite TilemapRendererComponent.h describes, a hit naming the tilemap's entity. M21's milestone review: every tile
+		// lies in the tilemap's local plane z = 0, so the ray can cross only the tiles over the one point where it meets that
+		// plane, and only the chunks whose bounds hold that point are walked: a chunk's bounds are the rectangle of its cells'
+		// centres widened by the extents of the palette's quads about their centres (every tile it can hold lies inside),
+		// and by one cell for the rounding between the point and the tiles' world quads. The tiles of those chunks are tested
+		// exactly as before, in the one draw order, so the hit is the one a walk over every tile finds.
 		static std::optional<SceneRaycastHit> PickTilemapTile(const TilemapItem& tilemap, AssetManager& assets, const glm::dvec3& origin,
 			const glm::dvec3& direction, const SpritePickRequest& request)
 		{
 			const std::optional<TilemapTiles> tiles = ResolveTilemapTiles(assets, tilemap);
 			if (!tiles.has_value())
 				return std::nullopt;
-			std::optional<SceneRaycastHit> hit;
-			const auto includeChunk = [](size_t /*chunk*/)
+			const std::optional<glm::dvec2> point = IntersectLocalPlane(tilemap.World, origin, direction);
+			if (!point.has_value())
+				return std::nullopt;
+			// The extents of every palette entry's quad about its cell's centre.
+			std::optional<std::pair<glm::dvec2, glm::dvec2>> extents;
+			for (const std::optional<std::array<glm::vec2, 4>>& quad : tiles->Palette)
 			{
-				return true;
+				if (!quad.has_value())
+					continue;
+				for (const glm::vec2& corner : *quad)
+				{
+					const glm::dvec2 offset(corner);
+					extents = extents.has_value() ? std::pair(glm::min(extents->first, offset), glm::max(extents->second, offset)) : std::pair(offset, offset);
+				}
+			}
+			if (!extents.has_value())
+				return std::nullopt;
+			const TilemapData& data = *tiles->Tilemap;
+			const glm::dvec2 cell(data.CellSize);
+			const double chunkSize = static_cast<double>(data.ChunkSize);
+			const glm::dvec2 low = extents->first - glm::abs(cell);
+			const glm::dvec2 high = extents->second + glm::abs(cell);
+			const auto includeChunk = [&data, &cell, chunkSize, &low, &high, &point](size_t chunk)
+			{
+				const TilemapChunk& bounds = data.Chunks[chunk];
+				const glm::dvec2 first((bounds.X * chunkSize + 0.5) * cell.x, (bounds.Y * chunkSize + 0.5) * cell.y);
+				const glm::dvec2 last(((bounds.X + 1) * chunkSize - 0.5) * cell.x, ((bounds.Y + 1) * chunkSize - 0.5) * cell.y);
+				const glm::dvec2 minimum = glm::min(first, last) + low;
+				const glm::dvec2 maximum = glm::max(first, last) + high;
+				return point->x >= minimum.x && point->x <= maximum.x && point->y >= minimum.y && point->y <= maximum.y;
 			};
+			std::optional<SceneRaycastHit> hit;
 			ForEachTilemapTileInDrawOrder(*tiles->Tilemap, true, includeChunk,
 				[&tilemap, &tiles, &origin, &direction, &request, &hit](size_t /*chunk*/, glm::ivec2 cell, uint32_t value)
 			{

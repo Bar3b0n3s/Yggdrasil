@@ -469,7 +469,7 @@ namespace Engine {
 		TEST_CASE("Physics2DWorld: a small body's angular acceleration under a torque follows its 2D inertia")
 		{
 			// A 4 cm box's inertia about Z is m (w^2 + h^2) / 12, whatever its depth, with no isotropic floor added for a size
-			// the depth would make ill-conditioned; a circle's is its sphere's, 0.4 m r^2.
+			// the depth would make ill-conditioned; a circle's is a disc's, m r^2 / 2 (M21's milestone review).
 			Scope<Physics2DWorld> world = Create2DWorld();
 			REQUIRE(world->SetGravity(glm::vec2(0.0f)).has_value());
 			const Result<BodyHandle> box = world->CreateBody({ .Shape = Create2DShape(BoxShape2D{ .HalfExtents = glm::vec2(0.02f) }), .Mass = 2.0f, .AngularDamping = 0.0f });
@@ -481,10 +481,52 @@ namespace Engine {
 			world->AddTorque(*box, BoxTorque);
 			world->AddTorque(*circle, CircleTorque);
 			REQUIRE(world->Step(FixedDelta2D, 1).has_value());
+			// Each response over the one its 2D inertia gives, within 1% (an Approx of the angular velocities themselves, about
+			// 0.003 and 0.0013 rad/s, would take any value within 0.01 of them).
 			const float boxInertia = 2.0f * (0.04f * 0.04f + 0.04f * 0.04f) / 12.0f;
-			CHECK(world->GetAngularVelocity(*box) == doctest::Approx(BoxTorque / boxInertia * FixedDelta2D).epsilon(0.01));
-			const float circleInertia = 0.4f * 1.0f * 0.5f * 0.5f;
-			CHECK(world->GetAngularVelocity(*circle) == doctest::Approx(CircleTorque / circleInertia * FixedDelta2D).epsilon(0.01));
+			CHECK(world->GetAngularVelocity(*box) / (BoxTorque / boxInertia * FixedDelta2D) == doctest::Approx(1.0f).epsilon(0.005));
+			const float circleInertia = 0.5f * 1.0f * 0.5f * 0.5f;
+			CHECK(world->GetAngularVelocity(*circle) / (CircleTorque / circleInertia * FixedDelta2D) == doctest::Approx(1.0f).epsilon(0.005));
+		}
+
+		// M21's milestone review: a circle is a sphere laid in the plane, which turns about Z as a disc (BodyDescription::
+		// SpheresAsDiscs): its own moment is m r^2 / 2, not a sphere's 2 m r^2 / 5, alone, placed off the body's origin and in a
+		// compound (each circle's share of the mass by volume, plus its offset from the centre of mass), and after a new shape.
+		TEST_CASE("Physics2DWorld: a circle turns as a disc, alone, off the origin, in a compound and after a new shape")
+		{
+			Scope<Physics2DWorld> world = Create2DWorld();
+			REQUIRE(world->SetGravity(glm::vec2(0.0f)).has_value());
+			constexpr float Torque = 0.01f;
+			// The moment about Z one step of Torque shows `body` to have: Torque times the step over the angular velocity it gives.
+			const auto moment = [&world](BodyHandle body)
+			{
+				world->SetAngularVelocity(body, 0.0f);
+				world->AddTorque(body, Torque);
+				REQUIRE(world->Step(FixedDelta2D, 1).has_value());
+				return Torque * FixedDelta2D / world->GetAngularVelocity(body);
+			};
+			const auto create = [&world](const std::vector<Collider2DShapeDescription>& colliders, float mass, float x)
+			{
+				const Result<BodyHandle> body = world->CreateBody({ .Shape = Create2DShape(colliders), .Pose = { .Position = glm::vec2(x, 0.0f) }, .Mass = mass, .AngularDamping = 0.0f });
+				REQUIRE_MESSAGE(body.has_value(), body.error().ToString());
+				return *body;
+			};
+			// A 2 kg circle of 0.5 m: 0.25 kg m^2.
+			const BodyHandle alone = create({ Collider2DShapeDescription{ .Geometry = CircleShape2D{ .Radius = 0.5f } } }, 2.0f, 0.0f);
+			CHECK(moment(alone) == doctest::Approx(0.25f).epsilon(0.001));
+			// The same circle 0.3 m off the body's origin: its centre of mass is the circle's, the same moment.
+			const BodyHandle offset = create({ Collider2DShapeDescription{ .Geometry = CircleShape2D{ .Radius = 0.5f }, .Position = glm::vec2(0.3f, 0.0f) } }, 2.0f, 10.0f);
+			CHECK(moment(offset) == doctest::Approx(0.25f).epsilon(0.001));
+			// Two equal circles 1 m either side of the origin, 1 kg each: 2 (0.5 x 1 x 0.25 + 1 x 1^2) = 2.25 kg m^2.
+			const BodyHandle pair = create({ Collider2DShapeDescription{ .Geometry = CircleShape2D{ .Radius = 0.5f }, .Position = glm::vec2(-1.0f, 0.0f), .UserData = 1 },
+											   Collider2DShapeDescription{ .Geometry = CircleShape2D{ .Radius = 0.5f }, .Position = glm::vec2(1.0f, 0.0f), .UserData = 2 } },
+				2.0f, 20.0f);
+			CHECK(moment(pair) == doctest::Approx(2.25f).epsilon(0.001));
+			// A 2 kg unit box (1/3 kg m^2) given the circle's shape takes the disc's moment.
+			const BodyHandle reshaped = create({ Collider2DShapeDescription{ .Geometry = BoxShape2D{} } }, 2.0f, 30.0f);
+			CHECK(moment(reshaped) == doctest::Approx(2.0f * 2.0f / 12.0f).epsilon(0.001));
+			REQUIRE(world->SetShape(reshaped, Create2DShape(CircleShape2D{ .Radius = 0.5f })).has_value());
+			CHECK(moment(reshaped) == doctest::Approx(0.25f).epsilon(0.001));
 		}
 
 		TEST_CASE("Physics2DWorld: forces, impulses, velocities, teleports and kinematic moves act in the plane")

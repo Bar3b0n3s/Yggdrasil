@@ -398,6 +398,8 @@ namespace Engine {
 			if (description.IsSensor)
 				return MakeError(ErrorCode::Validation, "{}: a Dynamic body cannot be a trigger; triggers are Kinematic sensors", PhysicsDynamicTriggerCode);
 			ENGINE_TRY_ASSIGN(dynamicMass, Detail::GetDynamicMassProperties(*shape.Shape, shape.HasMesh, description.Mass, description.AllowedDofs));
+			if (description.SpheresAsDiscs)
+				Detail::AddDiscInertiaAboutZ(*shape.Shape, dynamicMass);
 		}
 
 		const uint32_t limit = state.Specification.Limits.MaxBodies;
@@ -474,7 +476,8 @@ namespace Engine {
 			.CollisionGroup = description.CollisionGroup,
 			.Collider = shape.ColliderUserData.empty() ? 0 : shape.ColliderUserData.front(),
 			.IsSensor = description.IsSensor,
-			.WantsLinearCast = wantsLinearCast };
+			.WantsLinearCast = wantsLinearCast,
+			.SpheresAsDiscs = isDynamic && description.SpheresAsDiscs };
 
 		Utils::WarnWhenNearLimit(state.HasWarnedBodies, state.System->GetNumBodies(), limit, "bodies", "PhysicsWorldLimits::MaxBodies",
 			"no further body is created");
@@ -572,6 +575,8 @@ namespace Engine {
 				dofs = static_cast<PhysicsDofs>(std::to_underlying(lock.GetBody().GetMotionProperties()->GetAllowedDOFs()));
 			}
 			ENGINE_TRY_ASSIGN(dynamicMass, Detail::GetDynamicMassProperties(*newShape.Shape, newShape.HasMesh, record.Mass, dofs));
+			if (record.SpheresAsDiscs)
+				Detail::AddDiscInertiaAboutZ(*newShape.Shape, dynamicMass);
 		}
 
 		const JPH::AABox oldBounds = bodyInterface.GetTransformedShape(live->ID).GetWorldSpaceBounds();

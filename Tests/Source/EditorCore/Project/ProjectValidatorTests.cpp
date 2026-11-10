@@ -1302,9 +1302,9 @@ end
 			const std::span<const std::string_view> codes = ProjectValidator::GetCodes();
 			// M4's 14 codes, M6's 11 (the asset codes but the runtime-only ASSET_UPLOAD_FAILED, and PREFAB_MISSING_ASSET), M8's
 			// RENDER_LIGHT_LIMIT_EXCEEDED, M9's two render warnings, M11's 10 physics codes, M12's 2 audio codes, M13's 7,
-			// M19's SCRIPT_COMPUTED_ASSET_LOAD, M20's PREFAB_CYCLE, M21's three sprite codes and 2D physics codes and its
-			// TILEMAP_FRAME_OUT_OF_RANGE.
-			CHECK(codes.size() == 43 + PhysicsDiagnosticCodes.size() + Physics2DDiagnosticCodes.size());
+			// M19's SCRIPT_COMPUTED_ASSET_LOAD, M20's PREFAB_CYCLE, M21's three sprite codes and 2D physics codes, its
+			// TILEMAP_FRAME_OUT_OF_RANGE and its milestone review's SPRITE_FRAME_OUTSIDE_TEXTURE.
+			CHECK(codes.size() == 44 + PhysicsDiagnosticCodes.size() + Physics2DDiagnosticCodes.size());
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -1324,7 +1324,7 @@ end
 			// landing order, so M22's codes come before or after M21's: M21's block is checked by its relative order and its
 			// own chain only, never by an absolute neighbour or the last code, which a sibling's block can take (M22's C22.2
 			// lesson; Docs/Decisions/0032-m21-contract.md decisions 12 and 30): the sprite codes, then the 2D physics codes, then
-			// TILEMAP_FRAME_OUT_OF_RANGE, one after another.
+			// TILEMAP_FRAME_OUT_OF_RANGE, then the milestone review's SPRITE_FRAME_OUTSIDE_TEXTURE, one after another.
 			CHECK(position("TEST_SUITE_INVALID") + 1 == position(ScriptComputedAssetLoadCode));
 			CHECK(position(ScriptComputedAssetLoadCode) + 1 == position(PrefabCycleCode));
 			CHECK(position(PrefabCycleCode) < position(SpriteUnknownSortingLayerCode));
@@ -1333,6 +1333,7 @@ end
 			CHECK(position(SpriteUnknownClipCode) + 1 == position(Physics2DMixedWorldsCode));
 			CHECK(position(Physics2DMixedWorldsCode) + 1 == position(Physics2DOffPlaneCode));
 			CHECK(position(Physics2DOffPlaneCode) + 1 == position(TilemapFrameOutOfRangeCode));
+			CHECK(position(TilemapFrameOutOfRangeCode) + 1 == position(SpriteFrameOutsideTextureCode));
 			CHECK(position(AudioNoListenerCode) + 1 == position(AudioMultiplePrimaryListenersCode));
 			CHECK(position(AudioMultiplePrimaryListenersCode) < position(RenderLightLimitExceededCode));
 			CHECK(position(RenderLightLimitExceededCode) < position(BuildStartSceneMissingCode));
@@ -1586,6 +1587,52 @@ end
 				CHECK(FindFileDiagnostic(*report, file, AssetMissingCode) == nullptr);
 				CHECK(FindFileDiagnostic(*report, file, AssetTypeMismatchCode) == nullptr);
 			}
+		}
+
+		// M21's milestone review: a sprite sheet's frame past its texture's size is reported on the sheet, and a tilemap's palette
+		// entry naming it on the tilemap, once each, as SPRITE_FRAME_OUTSIDE_TEXTURE; the texture's size is its imported data's.
+		TEST_CASE("ProjectValidator: a sprite sheet frame past its texture, and a tilemap entry naming it, are SPRITE_FRAME_OUTSIDE_TEXTURE")
+		{
+			Test::EditorTestFixture fixture("ValidatorFrameOutsideTexture");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			const auto meta = [](std::string_view handle, std::string_view type)
+			{
+				return std::format(R"({{"Format": "AssetMeta", "Version": 1, "Handle": "{}", "Type": "{}", "Importer": "{}", "ImporterVersion": 1, "Settings": null, "SubAssets": []}})",
+					handle, type, type);
+			};
+			// The 16 x 16 built-in SpriteSquare texture: frame 0 covers it, frame 1, 16 x 16 texels at (8, 8), ends at (24, 24).
+			WriteValidatorFile(editor, "Assets/Tiles.spritesheet",
+				std::format(R"({{"Format": "SpriteSheet", "Version": 1, "Texture": "{}", "Frames": [{{"Rect": {{"X": 0, "Y": 0, "Width": 16, "Height": 16}}}},
+					{{"Rect": {{"X": 8, "Y": 8, "Width": 16, "Height": 16}}}}], "Clips": []}})",
+					BuiltinAssetHandles::SpriteSquareTexture.ToString()));
+			WriteValidatorFile(editor, "Assets/Tiles.spritesheet.meta", meta("5b5e0000000000c1", "SpriteSheet"));
+			WriteValidatorFile(editor, "Assets/Level.tilemap",
+				R"({"Format": "Tilemap", "Version": 1, "CellSize": [1, 1], "ChunkSize": 1, "Palette": [{"Sheet": "5b5e0000000000c1", "Frame": 0, "Solid": true},
+					{"Sheet": "5b5e0000000000c1", "Frame": 1, "Solid": true}], "Chunks": [{"X": 0, "Y": 0, "Tiles": [1]}, {"X": 1, "Y": 0, "Tiles": [2]}]})");
+			WriteValidatorFile(editor, "Assets/Level.tilemap.meta", meta("5b5e0000000000c2", "Tilemap"));
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+
+			Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Project);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			INFO(DescribeDiagnostics(*report));
+			const ProjectDiagnostic* frame = FindFileDiagnostic(*report, "Assets/Tiles.spritesheet", SpriteFrameOutsideTextureCode);
+			REQUIRE(frame != nullptr);
+			CHECK(frame->Severity == DiagnosticSeverity::Warning);
+			CHECK_FALSE(frame->AutoFixable);
+			CHECK(frame->Field == "Frames[1].Rect");
+			CHECK(frame->Asset == "5b5e0000000000c1");
+			const ProjectDiagnostic* entry = FindFileDiagnostic(*report, "Assets/Level.tilemap", SpriteFrameOutsideTextureCode);
+			REQUIRE(entry != nullptr);
+			CHECK(entry->Severity == DiagnosticSeverity::Warning);
+			CHECK(entry->Field == "Palette[1].Frame");
+			CHECK(entry->Asset == "5b5e0000000000c2");
+			// Frame 0 and palette entry 0 lie inside the texture: one diagnostic on each file.
+			const auto reported = std::ranges::count_if(report->Diagnostics, [](const ProjectDiagnostic& diagnostic)
+			{
+				return diagnostic.Code == SpriteFrameOutsideTextureCode;
+			});
+			CHECK(reported == 2);
 		}
 
 		TEST_CASE("ProjectValidator: an instance of an unregistered prefab is PREFAB_MISSING_ASSET")

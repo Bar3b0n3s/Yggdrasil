@@ -337,7 +337,10 @@ namespace Engine {
 			PlaySession* session = GetShownSession(kind);
 			Scene* scene = session ? &session->GetScene() : m_Editor.HasScene() ? &m_Editor.GetScene()
 																				: nullptr;
-			if (!scene || scene != view.Source || scene->GetRevision() != picked.SceneRevision
+			// M21's milestone review: a play scene's revision moves with its ticks (a playing SpriteAnimator, scripts' proxy
+			// writes), and the pick resolves against the clicked image itself (its sprites, tilemaps and PickTable), so only an
+			// edit scene's revision makes a completed pick stale; the hit must still exist either way.
+			if (!scene || scene != view.Source || (session == nullptr && scene->GetRevision() != picked.SceneRevision)
 				|| picked.Sequence != view.LatestSequence || picked.FrameIndex != click.FrameIndex || picked.SceneRevision != click.SceneRevision
 				|| picked.ViewGeneration != view.Renderer->GetViewGeneration())
 				continue;
@@ -459,9 +462,12 @@ namespace Engine {
 																				   : nullptr;
 		// Cancel before polling: a proportional resize keeps the camera matrices equal, but the old pixel no longer
 		// identifies the image about to be rendered. A Resize above has already cancelled the renderer's picks and
-		// incremented its generation; this cancels the view's queued and pending clicks too.
-		if (view.Image.Width != rendered.x || view.Image.Height != rendered.y
-			|| view.Source != source || view.Image.SceneRevision != snapshot.SceneRevision || view.Image.Camera.View != snapshot.Camera.View
+		// incremented its generation; this cancels the view's queued and pending clicks too. M21's milestone review: an edit
+		// scene's new revision cancels them, a play scene's does not (its ticks move it, and Poll resolves the pick against
+		// the clicked image), while a shown scene replaced or a session started or stopped (sceneChanged, which also sees
+		// one at the same address) always does.
+		if (view.Image.Width != rendered.x || view.Image.Height != rendered.y || view.Source != source || sceneChanged
+			|| (session == nullptr && view.Image.SceneRevision != snapshot.SceneRevision) || view.Image.Camera.View != snapshot.Camera.View
 			|| view.Image.Camera.Projection != snapshot.Camera.Projection || view.Flags != snapshot.Flags || m_Gizmos.IsDragging())
 			Cancel(view);
 		view.Source = source;

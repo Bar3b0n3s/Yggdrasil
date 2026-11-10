@@ -3,6 +3,7 @@
 
 #include "Engine/Asset/AssetManager.h"
 #include "Engine/Asset/SpriteSheetData.h"
+#include "Engine/Asset/TextureData.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/SpriteAnimatorComponent.h"
 #include "Engine/Scene/Components/SpriteRendererComponent.h"
@@ -103,6 +104,28 @@ namespace Engine {
 			if (const TilemapRendererComponent* tilemap = entity.TryGetComponent<TilemapRendererComponent>())
 				Utils::FindTilemapRendererIssues(entity, *tilemap, sortingLayers, issues);
 		});
+		return issues;
+	}
+
+	std::vector<SpriteFrameTextureIssue> FindSpriteFramesOutsideTexture(const SpriteSheetData& sheet, AssetManager& assets)
+	{
+		std::vector<SpriteFrameTextureIssue> issues;
+		const AssetHandle handle = sheet.Texture.GetHandle();
+		if (!handle.IsValid() || assets.GetAssetType(handle) != AssetType::Texture)
+			return issues;
+		const Result<AssetRef<Asset>> loaded = assets.Load(handle);
+		const AssetRef<TextureData> texture = loaded.has_value() ? AssetCast<TextureData>(*loaded) : nullptr;
+		if (texture == nullptr)
+			return issues;
+		for (size_t index = 0; index < sheet.Frames.size(); ++index)
+		{
+			const SpriteRect& rect = sheet.Frames[index].Rect;
+			const uint64_t right = static_cast<uint64_t>(rect.X) + rect.Width;
+			const uint64_t bottom = static_cast<uint64_t>(rect.Y) + rect.Height;
+			if (right <= texture->Width && bottom <= texture->Height)
+				continue;
+			issues.push_back({ .Frame = static_cast<uint32_t>(index), .Right = right, .Bottom = bottom, .TextureWidth = texture->Width, .TextureHeight = texture->Height });
+		}
 		return issues;
 	}
 

@@ -26,9 +26,9 @@ namespace Engine {
 		Font,
 		Replay,
 		SpriteSheet, // M18 (ADR 0028's phase-1 ledger; Docs/Decisions/0029-m18-contract.md decision 14)
-		// M21 (C21.2; Docs/Decisions/0032-m21-contract.md decision 23). ADR 0028's phase-2 ledger: the first of M21 and M22 to
-		// land takes 12 and the other 13, the later lander renumbering its own at its merge (the value lives only in cooked
-		// headers, so its checkouts' cooked caches are rebuilt).
+		// M21 (C21.2; Docs/Decisions/0032-m21-contract.md decision 23): 12. ADR 0028's phase-2 ledger gives 12 to the first of
+		// M21 and M22 to land; M21 landed first, so M22 renumbers its own to follow it at its merge (the value lives only in
+		// cooked headers, so its checkouts' cooked caches are rebuilt).
 		Tilemap
 	};
 

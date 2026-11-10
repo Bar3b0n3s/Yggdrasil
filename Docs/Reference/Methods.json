@@ -2850,7 +2850,7 @@
 		{
 			"name": "entity.bounds",
 			"domain": "entity",
-			"description": "Reports the world-space bounding box of each entity's meshes (and, by default, its descendants'), for layout checks.",
+			"description": "Reports the world-space bounding box of what each entity draws (and, by default, its descendants): its meshes, the quad of its sprite and the quads of its tilemap's drawn tiles, for layout checks.",
 			"exposeAsTool": true,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -2873,7 +2873,7 @@
 						}
 					},
 					"includeDescendants": {
-						"description": "Also include every descendant's meshes.",
+						"description": "Also include every descendant's meshes, sprites and tiles.",
 						"type": "boolean"
 					},
 					"target": {
@@ -2929,7 +2929,7 @@
 								"$ref": "#/$defs/EntitySummary"
 							},
 							"hasBounds": {
-								"description": "False when neither it nor (with includeDescendants) a descendant has a mesh.",
+								"description": "False when neither it nor (with includeDescendants) a descendant draws a mesh, a sprite or a tile.",
 								"type": "boolean"
 							},
 							"min": {
@@ -19046,7 +19046,7 @@
 						"maximum": 4294967295
 					},
 					"bodies": {
-						"description": "Live physics body count.",
+						"description": "Live physics body count of the play session: the 3D world's bodies and the 2D world's together; 0 without a session.",
 						"type": "integer",
 						"minimum": 0,
 						"maximum": 4294967295
@@ -20250,7 +20250,7 @@
 		{
 			"name": "viewport.pick",
 			"domain": "viewport",
-			"description": "Queries what a viewport pixel shows without a GPU, clipping to the camera's near and far planes: the last-drawn sprite whose quad covers it, in the project's sorting layers, else the nearest mesh triangle. Returns the hit without changing selection.",
+			"description": "Queries what a viewport pixel shows without a GPU, clipping to the camera's near and far planes: the last-drawn sprite or tile whose quad covers it, in the project's sorting layers (a tile names its tilemap's entity), else the nearest mesh triangle. Returns the hit without changing selection.",
 			"exposeAsTool": false,
 			"mutates": false,
 			"supportsDryRun": true,
@@ -20322,7 +20322,7 @@
 						"maximum": 4294967295
 					},
 					"raycast": {
-						"description": "The sprite the pixel shows (the last drawn whose quad covers it: submesh 0, triangle 0 or 1 of the quad), else the nearest mesh triangle, in the camera's near-to-far interval.",
+						"description": "The sprite or tile the pixel shows (the last drawn whose quad covers it: submesh 0, triangle 0 or 1 of the quad; a tile is reported as its tilemap's entity), else the nearest mesh triangle, in the camera's near-to-far interval.",
 						"$ref": "#/$defs/SceneRaycastResult"
 					},
 					"_meta": {

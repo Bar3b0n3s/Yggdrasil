@@ -209,7 +209,9 @@ namespace Engine {
 	// included. Returns the number of cells whose value changed (a cell edited twice back to its value counts none).
 	// Atomic: on error `tilemap` is unchanged. Errors: InvalidArgument naming the edit's index for a cell outside
 	// MaxTilemapCellCoordinate or a Tile above the palette's size; Validation when the result would store more than
-	// MaxTilemapCells cells.
+	// MaxTilemapCells cells, located at "/Chunks/<i>", the result's first chunk past the limit: the result is merged in its
+	// sorted order and refused before that chunk joins it, so a call never holds more than MaxTilemapCells cells and the one
+	// chunk being merged, however many chunks its edits touch (M21's milestone review).
 	[[nodiscard]] Result<uint32_t> ApplyTilemapCellEdits(TilemapData& tilemap, std::span<const TilemapCellEdit> edits);
 
 	// --- Validation (project.validate) ----------------------------------------------------------------------------------------

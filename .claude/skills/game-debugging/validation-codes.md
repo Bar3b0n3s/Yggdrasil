@@ -4,7 +4,7 @@ A reference page of the `game-debugging` skill (`skills/game-debugging`).
 
 `project.validate {fix: true}` applies every safe fix; `fix: ["<id or CODE>"]` only the selected ones, as one undoable command. Each diagnostic's `autoFixable` says whether that one can be fixed automatically.
 
-The `PHYSICS_*` codes also report the 2D world (RigidBody2D, BoxCollider2D, CircleCollider2D, PolygonCollider2D), naming the 2D component; a CircleCollider2D's `PHYSICS_NONUNIFORM_SCALE` is a scale that differs in X and Y.
+The `PHYSICS_*` codes also report the 2D world (RigidBody2D, BoxCollider2D, CircleCollider2D, PolygonCollider2D, TilemapCollider), naming the 2D component; a CircleCollider2D's `PHYSICS_NONUNIFORM_SCALE` is a scale that differs in X and Y.
 
 | Code | Severity | What it means | Fix |
 |---|---|---|---|
@@ -35,7 +35,7 @@ The `PHYSICS_*` codes also report the 2D world (RigidBody2D, BoxCollider2D, Circ
 | `PHYSICS_MIXED_TRIGGER` | Error | A body's colliders disagree on IsTrigger. | Make all or none triggers; move triggers to a child with its own body. |
 | `PHYSICS_DYNAMIC_TRIGGER` | Error | A Dynamic body has only trigger colliders. | Make it Kinematic or Static, or clear IsTrigger. |
 | `PHYSICS_ALL_DOFS_LOCKED` | Error | A Dynamic body has every axis locked. | Unlock an axis, or make it Kinematic or Static. |
-| `PHYSICS_INVALID_SHAPE` | Error | A collider shape cannot be created. | Fix its size or scale, or use a mesh with volume. |
+| `PHYSICS_INVALID_SHAPE` | Error | A collider shape cannot be created, or a Dynamic body cannot take its shape (on RigidBody's or RigidBody2D's `Mass`: an inertia too large for its Mass); for a TilemapCollider (field `Tilemap`), no tilemap (neither its own nor its TilemapRenderer's), one that is missing or fails to load, or more than 65,536 merged boxes. | Fix its size or scale, or use a mesh with volume; lower the Mass or bring the colliders closer; set the TilemapCollider's or the TilemapRenderer's `Tilemap`, or split a map whose solid cells merge into too many boxes. |
 | `PHYSICS_ADJACENT_STATIC_BODIES` | Warning | Touching static bodies make a rolling body bump. | The fix adds a Static RigidBody to their common ancestor (one compound). |
 | `PHYSICS_UNKNOWN_LAYER` | Error | A body names an undeclared layer (it uses Default). | Declare it in `Physics.Layers`, or name a declared layer. |
 | `PHYSICS_NONUNIFORM_SCALE` | Warning | A sphere or capsule under non-uniform scale. | Use a uniform scale or a box/convex collider. |
@@ -63,3 +63,4 @@ The `PHYSICS_*` codes also report the 2D world (RigidBody2D, BoxCollider2D, Circ
 | `PHYSICS2D_MIXED_WORLDS` | Error | An entity holds both 2D (RigidBody2D, a 2D collider) and 3D physics components; it stays in the 3D world and its 2D components make no body. | Remove the components of the world it does not belong to, or split the entity in two. |
 | `PHYSICS2D_OFF_PLANE` | Warning | A 2D body's entity (or an ancestor) is rotated about X or Y; the body takes only its rotation about Z, and its write-back drops the tilt. | Rotate the entity and its ancestors about Z only. |
 | `TILEMAP_FRAME_OUT_OF_RANGE` | Warning | A `.tilemap`'s palette entry names a frame its sprite sheet does not have (reported on the tilemap file, field `Palette[<i>].Frame`); the cells holding it draw nothing, are never picked and have no bounds. | Set the entry's Frame below the sheet's frame count (`asset.setProperties` on the tilemap), add the frame to the sheet, or repaint the cells with another entry. |
+| `SPRITE_FRAME_OUTSIDE_TEXTURE` | Warning | A sprite sheet's frame extends past its texture's size (reported on the sheet file, field `Frames[<i>].Rect`), or a `.tilemap`'s palette entry names such a frame (on the tilemap file, field `Palette[<i>].Frame`); the sprite or the tiles sample the texture's edge texels there. A hand-edited sheet or a texture reimported smaller causes it: `asset.setProperties` refuses such a frame. | Keep the frame's X + Width within the texture's width and Y + Height within its height (`asset.setProperties` on the sheet), reimport the texture at the size the frames expect, or name another frame. |

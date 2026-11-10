@@ -214,6 +214,48 @@ namespace Engine {
 			CHECK_FALSE((*system)->GetBodyBounds(sliver.GetUUID()).has_value());
 		}
 
+		// M21's milestone review: the validator checks every Dynamic RigidBody2D's built shape as the session's system does before
+		// it creates the body (PhysicsShape::CheckDynamicBody), so a body the session refuses is reported at edit time, on the
+		// same component and field: here a body of the largest Mass whose two collider-only circles lie 40 km either side of it,
+		// whose inertia (about m d^2 = 1.6e18 kg m^2) exceeds what Jolt takes; the same colliders under a 1 kg body are valid.
+		TEST_CASE("Physics2DValidation: a Dynamic RigidBody2D whose shape the world refuses is reported as the session reports it")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			const auto addWheels = [&scene](Entity body, float distance)
+			{
+				for (const float side : { -1.0f, 1.0f })
+				{
+					Entity wheel = CreatePlanarEntity(scene, "Wheel", glm::vec2(side * distance, 0.0f));
+					wheel.AddComponent<CircleCollider2DComponent>();
+					REQUIRE(scene.SetParent(wheel, body, {}, false).has_value());
+				}
+			};
+			Entity heavy = CreatePlanarBody(scene, "Heavy", glm::vec2(0.0f), BodyType::Dynamic);
+			heavy.Patch<RigidBody2DComponent>([](RigidBody2DComponent& body)
+			{
+				body.Mass = MaxPhysicsMass;
+			});
+			addWheels(heavy, 40000.0f);
+			Entity light = CreatePlanarBody(scene, "Light", glm::vec2(0.0f, 100.0f), BodyType::Dynamic);
+			addWheels(light, 40000.0f);
+			TransformSystem::Update(scene);
+
+			const PhysicsLayerTable layers = MakeDefaultLayers();
+			const std::vector<PhysicsDiagnostic> validated = ValidateScenePhysics2D(scene, layers, nullptr);
+			CheckReported(validated, PhysicsInvalidShapeCode, heavy.GetUUID(), DiagnosticSeverity::Error, "RigidBody2D", "Mass");
+			CHECK(validated.size() == 1);
+
+			const Test::ExpectLog refused(LogLevel::Error, PhysicsInvalidShapeCode);
+			Result<Scope<Physics2DSystem>> system = Physics2DSystem::Create({ .RuntimeScene = &scene });
+			REQUIRE_MESSAGE(system.has_value(), system.error().ToString());
+			const std::span<const PhysicsDiagnostic> raised = (*system)->GetDiagnostics();
+			CheckReported(raised, PhysicsInvalidShapeCode, heavy.GetUUID(), DiagnosticSeverity::Error, "RigidBody2D", "Mass");
+			CHECK(raised.size() == validated.size());
+			CHECK_FALSE((*system)->GetBodyBounds(heavy.GetUUID()).has_value());
+			CHECK((*system)->GetBodyBounds(light.GetUUID()).has_value());
+		}
+
 		// Decision 12 (W21.1's review): the 2D bodies beyond the world's limit are refused in canonical order, one
 		// PHYSICS_LIMIT_EXCEEDED Error per refused owner, subject "bodies", as the 3D world's.
 		TEST_CASE("Physics2DValidation: 2D bodies beyond the body limit are refused with PHYSICS_LIMIT_EXCEEDED in canonical order")

@@ -16,7 +16,6 @@
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/Asset/SpriteSheetData.h"
-#include "Engine/Asset/TextureData.h"
 #include "Engine/Asset/TilemapData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
@@ -40,6 +39,7 @@
 #include "Engine/Scene/PrefabAsset.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Scene/SpriteValidation.h"
 
 #include <nlohmann/json.hpp>
 
@@ -263,28 +263,15 @@ namespace Engine {
 		// report it). Errors: Validation with one issue per frame that leaves the texture, at `pointer`/Frames/<i>/Rect.
 		Status CheckSpriteSheetTexture(EditorAssetManager& assets, const SpriteSheetData& sheet, std::string_view pointer)
 		{
-			const AssetHandle handle = sheet.Texture.GetHandle();
-			if (!handle.IsValid() || assets.GetAssetType(handle) != AssetType::Texture)
-				return {};
-			const Result<AssetRef<Asset>> loaded = assets.Load(handle);
-			if (!loaded.has_value())
-				return {};
-			const AssetRef<TextureData> texture = AssetCast<TextureData>(*loaded);
-			if (texture == nullptr)
-				return {};
+			// The frames project.validate reports as SPRITE_FRAME_OUTSIDE_TEXTURE (Scene/SpriteValidation.h), refused here.
 			ValidationContext context{ std::string(pointer) };
-			for (size_t index = 0; index < sheet.Frames.size(); ++index)
+			for (const SpriteFrameTextureIssue& frame : FindSpriteFramesOutsideTexture(sheet, assets))
 			{
-				const SpriteRect& rect = sheet.Frames[index].Rect;
-				const uint64_t right = static_cast<uint64_t>(rect.X) + rect.Width;
-				const uint64_t bottom = static_cast<uint64_t>(rect.Y) + rect.Height;
-				if (right <= texture->Width && bottom <= texture->Height)
-					continue;
 				ValidationIssue issue;
 				issue.Severity = DiagnosticSeverity::Error;
-				issue.JsonPointer = std::format("{}/Frames/{}/Rect", pointer, index);
-				issue.Message = std::format("frame {} ends at texel ({}, {}), outside its texture '{}' of {} x {} texels", index, right, bottom,
-					assets.GetReferencePath(handle), texture->Width, texture->Height);
+				issue.JsonPointer = std::format("{}/Frames/{}/Rect", pointer, frame.Frame);
+				issue.Message = std::format("frame {} ends at texel ({}, {}), outside its texture '{}' of {} x {} texels", frame.Frame, frame.Right, frame.Bottom,
+					assets.GetReferencePath(sheet.Texture.GetHandle()), frame.TextureWidth, frame.TextureHeight);
 				issue.Hint = "X + Width must be at most the texture's width and Y + Height at most its height";
 				context.AddIssue(std::move(issue));
 			}

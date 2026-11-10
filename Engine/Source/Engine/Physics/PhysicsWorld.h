@@ -104,6 +104,13 @@ namespace Engine {
 		bool AllowSleeping = true;
 		// Jolt's mEnhancedInternalEdgeRemoval (§9.2 "Seams"): set on rolling bodies.
 		bool EnhancedInternalEdgeRemoval = false;
+		// M21's milestone review (Docs/Decisions/0032-m21-contract.md decision 8): Dynamic bodies of the 2D world, whose
+		// circles are spheres (Physics2DWorld.h): each sphere of the shape turns about Z as a disc of its radius, its own
+		// moment about Z m r^2 / 2 instead of a sphere's 2 m r^2 / 5 (m its share of Mass, as Jolt shares Mass by volume);
+		// the other moments, the centre of mass and every contact are the shape's. Added after PhysicsShape::CheckDynamicBody's
+		// inertia limit, which it exceeds by at most a quarter (far below what Jolt's decomposition takes), so the edit-time
+		// check and the world refuse the same bodies. SetShape keeps it. Ignored for other bodies.
+		bool SpheresAsDiscs = false;
 		// The world-space velocities the body starts with (Dynamic and Kinematic; Static bodies ignore them), clamped to
 		// MaxLinearVelocity and MaxAngularVelocity as Jolt's BodyInterface::SetLinearVelocity clamps (Jolt asserts on a
 		// longer starting velocity).

@@ -33,9 +33,11 @@ namespace Engine {
 	//     whatever its frame's size and pivot, never only its cell), in world space, and a chunk meets the view unless they
 	//     lie wholly outside its clip rectangle. So a tile drawn larger than its cell never pops in or out at the view's
 	//     edge. The tiles of the chunks drawn are merged into the cell order above.
-	//   - No quad is lost to a budget: the QuadBatcher draws a record of more than MaxQuadsPerRecord quads in further draws
-	//     (Renderer/QuadBatcher.h), so however many tiles a zoomed-out view shows, every one draws and so does every sprite
-	//     after the tilemap in the draw order.
+	//   - One bound a view: the QuadBatcher draws a record of more than MaxQuadsPerRecord quads in further draws
+	//     (Renderer/QuadBatcher.h), and a view draws at most SceneRenderer::MaxTileQuadsPerView (2^19, two of its batches)
+	//     tiles, the first in its 2D draw order across its tilemaps, of the chunks that meet it, so the renderer's CPU memory
+	//     stays bounded however many tiles a zoomed-out view shows; the tiles past it are not drawn, which the renderer logs
+	//     once, and every sprite still draws, those after the tilemap in the draw order included (M21's milestone review).
 	// Rendering only: it makes no 2D body (TilemapColliderComponent does) and adds nothing to the state hash beyond its own
 	// component data in the scene's canonical text.
 	struct TilemapRendererComponent

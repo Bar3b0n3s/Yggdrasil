@@ -103,7 +103,9 @@ namespace Engine {
 	//   - The inertia is the 2D one. A box's or hull's inertia about Z does not depend on its depth (m (w^2 + h^2) / 12 for a
 	//     box of mass m), and a depth proportional to the in-plane size keeps the inertia tensor's conditioning the same at
 	//     every size, so the mass properties' isotropic floor (Physics/Private/PhysicsMassProperties.cpp) never adds to a
-	//     small body's inertia about Z. A circle's inertia is its sphere's, 0.4 m r^2 (a disc's would be 0.5 m r^2).
+	//     small body's inertia about Z. A circle, laid as a sphere, turns about Z as a disc: CreateBody sets
+	//     BodyDescription::SpheresAsDiscs, so its own moment about Z is m r^2 / 2, not a sphere's 2 m r^2 / 5 (M21's
+	//     milestone review).
 	//   - The depth, 2h, is a collider dimension: PhysicsShape::Create refuses a box or polygon whose bounding rectangle's
 	//     diagonal exceeds PhysicsShape::MaxColliderSize / 2 (50 km).
 	// Pure; `geometry` and `scale` as MakeBody2DShape accepts them (asserted).
@@ -199,7 +201,8 @@ namespace Engine {
 		[[nodiscard]] static Result<Scope<Physics2DWorld>> Create(const Physics2DWorldSpecification& specification);
 
 		// --- Bodies (PhysicsWorld's rules) ------------------------------------------------------------------------------
-		// A Dynamic body gets Physics2DDofs (Physics2DTranslationDofs with FixedRotation). Errors: PhysicsWorld::CreateBody's.
+		// A Dynamic body gets Physics2DDofs (Physics2DTranslationDofs with FixedRotation), and its circles turn as discs
+		// (BodyDescription::SpheresAsDiscs). Errors: PhysicsWorld::CreateBody's.
 		[[nodiscard]] Result<BodyHandle> CreateBody(const Body2DDescription& description);
 		void DestroyBody(BodyHandle body);
 		[[nodiscard]] bool IsBodyValid(BodyHandle body) const;

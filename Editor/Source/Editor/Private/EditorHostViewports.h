@@ -54,8 +54,12 @@ namespace Engine {
 	// keeps its displayed image's sprites in draw order (the snapshot's), and the click's sprite is picked from them when its
 	// GPU pick is requested, in the frame that rendered the image, so a sprite that moves on before the pick completes (a
 	// playing session's) is still the one selected. The selection is made when the GPU pick completes, under its staleness
-	// rules, so a click selects one thing once. M21 (C21.2, decision 24): a tile is picked as a sprite of its tilemap's
-	// entity, in the one draw order of the image's sprites and tilemaps, so a click on a tile selects its tilemap.
+	// rules, so a click selects one thing once. Those rules take an edit scene's revision, never a play scene's: a play
+	// scene's ticks move its revision (a playing SpriteAnimator's frames, scripts' proxy writes), while the sprite and the
+	// GPU pick are both resolved against the clicked image, so a click in a playing scene selects what its pixel showed, as
+	// long as that entity still exists (M21's milestone review); a shown scene replaced, or a session started or stopped,
+	// still cancels the views' clicks. M21 (C21.2, decision 24): a tile is picked as a sprite of its tilemap's entity, in the
+	// one draw order of the image's sprites and tilemaps, so a click on a tile selects its tilemap.
 	class EditorHostViewports final : public EditorViewportHost
 	{
 	public:

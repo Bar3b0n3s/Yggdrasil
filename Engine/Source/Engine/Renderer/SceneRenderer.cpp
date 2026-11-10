@@ -1520,13 +1520,17 @@ namespace Engine {
 	{
 		const RenderSnapshot& snapshot = *frame.Snapshot;
 		// Sprites and tilemaps draw in the Lit view only (decision 4): the data views, the material views and the wireframe
-		// show none.
+		// show none. A render that draws no 2D item keeps no tilemap of an earlier render (M21's milestone review).
 		if ((snapshot.Sprites.empty() && snapshot.Tilemaps.empty()) || !frame.HasCamera || !frame.IsLit || frame.Wireframe)
+		{
+			ReleaseUnusedTilemaps();
 			return;
+		}
 		ENGINE_CORE_ASSERT(Pipelines->Quads != nullptr, "the pipeline set has no QuadBatcher");
 		if (Pipelines->Quads == nullptr)
 		{
 			frame.KeepFirstError(MakeError(ErrorCode::InvalidState, "the scene renderer's pipelines have no QuadBatcher; the sprites are not drawn"));
+			ReleaseUnusedTilemaps();
 			return;
 		}
 		const glm::mat4 viewProjection = frame.Camera.Projection * frame.Camera.View;
@@ -1547,6 +1551,8 @@ namespace Engine {
 
 		SpriteQuads.clear();
 		SpriteQuadLit.clear();
+		TileQuadsDrawn = 0;
+		TileQuadsDropped = 0;
 		// C21.2 (decision 24): the tilemaps draw in the one 2D draw order, each before Sprites[DrawPosition] (after every sprite
 		// at Sprites.size()).
 		size_t nextTilemap = 0;
@@ -1630,12 +1636,23 @@ namespace Engine {
 		}
 		appendTilemapsBefore(snapshot.Sprites.size());
 
+		// M21's milestone review: the tiles past the view's limit, reported once per renderer.
+		Stats.DroppedTiles = TileQuadsDropped;
+		if (TileQuadsDropped > 0 && !TileLimitLogged)
+		{
+			TileLimitLogged = true;
+			ENGINE_CORE_WARN("{} visible tile(s) exceed the view's budget of {} tiles; the view draws the first {} in its 2D draw order, and every "
+							 "sprite (logged once per view)",
+				TileQuadsDropped, MaxTileQuadsPerView, MaxTileQuadsPerView);
+		}
+
 		// C21.2 (decision 22): the lights the lit quads sample, then the quads in the one draw order.
 		nvrhi::ITexture* light = RecordLights2D(frame, viewProjection);
 		RecordSpriteQuads(frame, viewProjection, light);
 		// The borrowed texture pointers are valid for this render only.
 		SpriteQuads.clear();
 		SpriteQuadLit.clear();
+		ReleaseOutsizedSpriteQuads();
 		ReleaseUnusedTilemaps();
 	}
 
@@ -1643,6 +1660,28 @@ namespace Engine {
 	{
 		SpriteQuads.push_back(quad);
 		SpriteQuadLit.push_back(lit ? 1 : 0);
+	}
+
+	// A view's tiles fill at most two of the QuadBatcher's batches (SceneRenderer.h).
+	static_assert(SceneRenderer::MaxTileQuadsPerView == 2 * QuadBatcher::MaxQuadsPerRecord);
+
+	void SceneRenderer::State::ReleaseOutsizedSpriteQuads()
+	{
+		constexpr size_t Kept = QuadBatcher::MaxQuadsPerRecord;
+		if (SpriteQuads.capacity() > Kept)
+			std::vector<QuadDraw>().swap(SpriteQuads);
+		if (SpriteQuadLit.capacity() > Kept)
+			std::vector<uint8_t>().swap(SpriteQuadLit);
+		if (LitSpriteQuads.capacity() > Kept)
+			std::vector<QuadDraw>().swap(LitSpriteQuads);
+		if (TilemapChunksDrawn.capacity() > Kept)
+			std::vector<uint8_t>().swap(TilemapChunksDrawn);
+	}
+
+	size_t SceneRenderer::GetSpriteQuadCapacity() const
+	{
+		const State& state = *m_State;
+		return std::max({ state.SpriteQuads.capacity(), state.SpriteQuadLit.capacity(), state.LitSpriteQuads.capacity() });
 	}
 
 	Status SceneRenderer::State::EnsureLights2DTargets()
@@ -1914,6 +1953,14 @@ namespace Engine {
 		{
 			if (value > palette.size() || !palette[value - 1].Draws)
 				return true;
+			// M21's milestone review: the view's tiles past MaxTileQuadsPerView are counted, never built.
+			if (TileQuadsDrawn >= MaxTileQuadsPerView)
+			{
+				if (TileQuadsDropped < std::numeric_limits<uint32_t>::max())
+					++TileQuadsDropped;
+				return true;
+			}
+			++TileQuadsDrawn;
 			const Utils::TilemapPaletteQuad& entry = palette[value - 1];
 			const glm::mat4 world = GetTilemapTileWorld(item.World, *tilemap, cell);
 			QuadDraw quad{ .TexCoordMin = entry.TexCoordMin, .TexCoordMax = entry.TexCoordMax, .Color = item.Color, .Texture = entry.Texture, .Sampler = QuadSampler::Point };

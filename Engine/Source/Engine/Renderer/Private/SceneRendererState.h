@@ -313,6 +313,7 @@ namespace Engine {
 		bool WireframeBudgetLogged = false; // wireframe edges beyond the debug draw budget are reported once per renderer
 		bool AllocationLimitLogged = false;
 		bool Light2DLimitLogged = false; // lights beyond MaxVisibleLights2D are reported once per renderer (M21, C21.2)
+		bool TileLimitLogged = false;    // tiles beyond MaxTileQuadsPerView are reported once per renderer (M21's milestone review)
 		nvrhi::BufferHandle ShadowConstantsBuffer{};
 		nvrhi::BufferHandle ShadowCasterConstantsBuffer{}; // ShadowPass::GetCasterConstantsDesc
 		Utils::MaterialBindingCache Materials{};
@@ -349,9 +350,16 @@ namespace Engine {
 		// C21.2: the lit quads of SpriteQuads, in order, for the Normals record, and the 2D lights the view draws.
 		std::vector<QuadDraw> LitSpriteQuads{};
 		std::vector<Light2DItem> VisibleLights2D{};
+		// M21's milestone review: the tiles this render's Sprites stage has drawn and dropped (SceneRenderer::
+		// MaxTileQuadsPerView), counted by AppendTilemapQuads. The quad vectors above hold at most that many tiles and the
+		// snapshot's sprites during a render, and keep room for at most QuadBatcher::MaxQuadsPerRecord quads after it
+		// (ReleaseOutsizedSpriteQuads).
+		uint32_t TileQuadsDrawn = 0;
+		uint32_t TileQuadsDropped = 0;
 		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 24): the Sprites stage's chunk bounds of each tilemap it
-		// drew in its last render (TilemapDrawCache.h), and its scratch flags of the chunks that meet the view. CPU state that
-		// a device loss's release keeps.
+		// drew in its last render (TilemapDrawCache.h; a render without drawn 2D items keeps none), and its scratch flags of
+		// the chunks that meet the view. CPU state; a device loss's release drops it with the rest of the state, and the next
+		// render rebuilds it.
 		std::vector<Detail::TilemapDrawCache> TilemapCaches{};
 		std::vector<uint8_t> TilemapChunksDrawn{};
 		std::vector<ShaderLight> Lights{};
@@ -413,7 +421,9 @@ namespace Engine {
 		// the Sprites row; a sprite whose quad lies wholly outside the view is culled. C21.2's tilemaps draw in the same order,
 		// each before Sprites[DrawPosition], their tiles' quads appended by AppendTilemapQuads. C21.2 (decision 22): when a
 		// drawn quad is lit, the Lights2D pass first (RecordLights2D), then the quads in runs of one lit-ness
-		// (RecordSpriteQuads).
+		// (RecordSpriteQuads). M21's milestone review: at most SceneRenderer::MaxTileQuadsPerView tiles a render (the rest are
+		// counted in Stats.DroppedTiles and logged once per renderer); a render without drawn 2D items releases every tilemap
+		// cache, and every render releases its outsized quad vectors (ReleaseOutsizedSpriteQuads).
 		void RecordSpritesStage(Detail::SceneRendererFrame& frame);
 		// C21.2 (decision 22): appends `quad` to SpriteQuads and its lit-ness to SpriteQuadLit, in the 2D draw order.
 		void AddSpriteQuad(const QuadDraw& quad, bool lit);
@@ -423,10 +433,15 @@ namespace Engine {
 		// its sheet resolved through `resolveSheet` (the stage's sheets of the render: null for one that is missing or fails
 		// to load, reported there). A tilemap that is missing or fails to load draws nothing and is reported with
 		// GetOrPlaceholder's codes; a non-finite world matrix or PixelsPerUnit draws nothing and is kept as frame's error.
+		// M21's milestone review: once the render has drawn MaxTileQuadsPerView tiles (TileQuadsDrawn), a further tile adds no
+		// quad and counts in TileQuadsDropped.
 		void AppendTilemapQuads(Detail::SceneRendererFrame& frame, const TilemapItem& tilemap, const glm::mat4& viewProjection,
 			const std::function<const SpriteSheetData*(AssetHandle)>& resolveSheet);
 		// M21 (C21.2, decision 24): drops the tilemap caches the render did not draw, and clears the others' Used flags.
 		void ReleaseUnusedTilemaps();
+		// M21's milestone review: releases each of the Sprites stage's quad vectors (and its chunk flags) whose capacity a render
+		// grew past QuadBatcher::MaxQuadsPerRecord quads, so an outsized render keeps no memory after it.
+		void ReleaseOutsizedSpriteQuads();
 		// C21.2: the Lights2D targets and their framebuffers at the scene resolution (Targets), created when missing.
 		// Errors: those of the pool and the framebuffer creation (Gpu, OutOfMemory after its trim and retry).
 		[[nodiscard]] Status EnsureLights2DTargets();

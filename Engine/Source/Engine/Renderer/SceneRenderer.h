@@ -10,6 +10,7 @@
 
 #include <nvrhi/nvrhi.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -138,6 +139,9 @@ namespace Engine {
 		uint32_t DroppedLights = 0;     // visible lights beyond MaxVisibleLights (RENDER_LIGHT_LIMIT_EXCEEDED)
 		uint32_t TextDraws = 0;         // text items and debug labels drawn
 		uint32_t DebugLineVertices = 0; // vertices of the debug lines drawn
+		// M21's milestone review: the visible tiles (of chunks that meet the view) past SceneRenderer::MaxTileQuadsPerView,
+		// which the Sprites stage did not draw.
+		uint32_t DroppedTiles = 0;
 	};
 
 	// The pipelines of the pass list (see the file comment), created once per device at startup and shared by every
@@ -259,6 +263,15 @@ namespace Engine {
 	class SceneRenderer
 	{
 	public:
+		// M21's milestone review: the most tiles one Render's Sprites stage draws, two of the QuadBatcher's batches
+		// (2 x QuadBatcher::MaxQuadsPerRecord, checked in SceneRenderer.cpp), so the stage's CPU working set has a bound that
+		// tilemaps cannot raise, beside the vertex buffer's GPU bound. The tiles of a view are counted in its one 2D draw order
+		// across its tilemaps, only those of chunks that meet the view; the tiles past the limit are not drawn
+		// (SceneRenderStats::DroppedTiles), which the renderer logs once, while every sprite, those drawn after the tiles
+		// included, still draws. Between renders the stage keeps room for at most QuadBatcher::MaxQuadsPerRecord quads
+		// (GetSpriteQuadCapacity): a render that needed more releases its vectors.
+		static constexpr uint32_t MaxTileQuadsPerView = 1U << 19;
+
 		// Restricts construction to Create; CreateScope still reaches the constructor.
 		class ConstructionKey
 		{
@@ -358,6 +371,9 @@ namespace Engine {
 		// identity at the renderer's size before the first Render and after Resize.
 		[[nodiscard]] RenderOutputMapping GetOutputMapping() const;
 		[[nodiscard]] const SceneRenderStats& GetLastStats() const;
+		// M21's milestone review: the quads the Sprites stage's vectors keep room for between renders (the largest of their
+		// capacities): at most QuadBatcher::MaxQuadsPerRecord, since a render that needed more releases them (MaxTileQuadsPerView).
+		[[nodiscard]] size_t GetSpriteQuadCapacity() const;
 		// M18 (C18.4, decision 44): the debug view the last recorded Render drew in (Lit before the first): the snapshot's,
 		// or, after a debug-view switch that ran out of memory, the view Render stayed on. A device loss's release and
 		// recreation keep it. A host whose switch failed sets its setting back to it, so the next frames do not try again.

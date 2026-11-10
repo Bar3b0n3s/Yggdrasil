@@ -835,6 +835,57 @@ end)
 			REQUIRE(client.Call("play.stop", Json::object()).has_value());
 		}
 
+		// M21's milestone review: a playing SpriteAnimator writes its sprite's frame through the scene every tick, which moves the
+		// play scene's revision, while the click is still resolved against the clicked image: ticks between the click and the
+		// GPU pick's completion make no pick stale (decision 14), so the animated sprite is selected.
+		TEST_CASE("EditorHostViewports: a click selects a sprite whose animator plays on before the pick completes"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::EditorTestFixture fixture("HostAnimatedSpritePick");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			Test::AutomationTestClient client(editor);
+			// Two 16-texel frames, the clip changing frame every tick: one unit at the default 16 pixels per unit.
+			const Json frames = Json::array({ Json{ { "Rect", Json{ { "X", 0 }, { "Y", 0 }, { "Width", 16 }, { "Height", 16 } } } },
+				Json{ { "Rect", Json{ { "X", 16 }, { "Y", 0 }, { "Width", 16 }, { "Height", 16 } } } } });
+			const Json clips = Json::array({ Json{ { "Name", "Walk" }, { "Frames", Json::array({ Json{ { "Frame", 0 }, { "Ticks", 1 } }, Json{ { "Frame", 1 }, { "Ticks", 1 } } }) }, { "Loop", true } } });
+			REQUIRE(client.Call("asset.create", Json{ { "type", "SpriteSheet" }, { "path", "Assets/Sprites/Walk.spritesheet" }, { "values", Json{ { "Frames", frames }, { "Clips", clips } } } })
+					.has_value());
+			REQUIRE(client.Call("entity.create", Json{ { "name", "Walker" }, { "components", Json{ { "SpriteRenderer", Json{ { "Sheet", "Assets/Sprites/Walk.spritesheet" } } }, { "SpriteAnimator", Json{ { "Clip", "Walk" }, { "Playing", true } } } } } })
+					.has_value());
+			const UUID walker = editor.GetScene().FindEntityByPath("/Walker").GetUUID();
+			REQUIRE(client.Call("viewport.setOptions", Json{ { "grid", false }, { "icons", false }, { "mode2D", true } }).has_value());
+			REQUIRE(client.Call("viewport.camera", Json{ { "position", { 0, 0, 500 } }, { "target", { 0, 0, 0 } }, { "orthographicSize", 2 } }).has_value());
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::SceneViewport, true).has_value());
+			REQUIRE(client.Call("play.start", Json{ { "lockstep", true } }).has_value());
+			{
+				HostGpuHarness harness(gpu, editor);
+				EditorHostViewports& host = harness.GetHost();
+				host.SetRectangle(ViewportView::Scene, { .Size = glm::vec2(96, 64) });
+				REQUIRE(harness.Frame(0).has_value());
+				const EditorViewportImage image = host.GetImage(ViewportView::Scene);
+				const EditorViewportClick click{ .View = ViewportView::Scene,
+					.Pixel = { image.Width / 2, image.Height / 2 },
+					.FrameIndex = 1,
+					.SceneRevision = image.SceneRevision,
+					.Sequence = 1,
+					.ViewGeneration = image.Generation };
+				REQUIRE(harness.Frame(1, click).has_value());
+				// Two ticks: the animator writes the sprite's frame and its own step through the scene in each.
+				const uint64_t before = editor.GetPlay().GetSession()->GetScene().GetRevision();
+				REQUIRE(client.Call("play.step", Json{ { "ticks", 2 } }).has_value());
+				REQUIRE(editor.GetPlay().GetSession()->GetScene().GetRevision() != before);
+				REQUIRE(harness.Frame(2).has_value());
+				REQUIRE(harness.Frame(3).has_value());
+				CHECK(editor.GetSelectionTarget() == SceneTarget::Play);
+				CHECK(std::vector<UUID>(editor.GetSelection().begin(), editor.GetSelection().end()) == std::vector<UUID>{ walker });
+			}
+			REQUIRE(client.Call("play.stop", Json::object()).has_value());
+		}
+
 		TEST_CASE("EditorHostViewports: a click queued in the frame that lost the device is dropped without a failure"
 			* doctest::test_suite(Test::GpuSuite))
 		{

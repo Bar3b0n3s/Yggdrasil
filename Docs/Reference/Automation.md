@@ -668,7 +668,7 @@ Example: Read editor state.
 
 ### entity.bounds
 
-Reports the world-space bounding box of each entity's meshes (and, by default, its descendants'), for layout checks.
+Reports the world-space bounding box of what each entity draws (and, by default, its descendants): its meshes, the quad of its sprite and the quads of its tilemap's drawn tiles, for layout checks.
 
 - Flags: tool `entity_bounds`, runtime, batch, scene target
 - Timeout: 60 s
@@ -677,7 +677,7 @@ Reports the world-space bounding box of each entity's meshes (and, by default, i
 | Param | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `entities` | `Array<String>` | yes | `[]` | The entities: 16 hex digits, unique id prefixes or paths. |
-| `includeDescendants` | `Bool` |  | `true` | Also include every descendant's meshes. |
+| `includeDescendants` | `Bool` |  | `true` | Also include every descendant's meshes, sprites and tiles. |
 | `target` | `SceneTarget` |  | `"Edit"` | Which scene to read; the play scene while playing when absent. |
 
 | Result | Type | Description |
@@ -2666,7 +2666,7 @@ Param: none.
 | `cpuMilliseconds` | `Float` | Approximate observed host CPU frame time in milliseconds. |
 | `droppedSeconds` | `Float` | Approximate accumulated scheduler time dropped in this session. |
 | `entities` | `UInt32` | Active target scene entity count. |
-| `bodies` | `UInt32` | Live physics body count. |
+| `bodies` | `UInt32` | Live physics body count of the play session: the 3D world's bodies and the 2D world's together; 0 without a session. |
 | `voices` | `UInt32` | Live audio voice count. |
 | `scriptAvailable` | `Bool` | Whether the scripting heap service exists. |
 | `scriptHeapBytes` | `Float` | Approximate current script heap bytes when available. |
@@ -2842,7 +2842,7 @@ Example: Frame the board.
 
 ### viewport.pick
 
-Queries what a viewport pixel shows without a GPU, clipping to the camera's near and far planes: the last-drawn sprite whose quad covers it, in the project's sorting layers, else the nearest mesh triangle. Returns the hit without changing selection.
+Queries what a viewport pixel shows without a GPU, clipping to the camera's near and far planes: the last-drawn sprite or tile whose quad covers it, in the project's sorting layers (a tile names its tilemap's entity), else the nearest mesh triangle. Returns the hit without changing selection.
 
 - Flags: dry run, batch
 - Timeout: 60 s
@@ -2860,7 +2860,7 @@ Queries what a viewport pixel shows without a GPU, clipping to the camera's near
 | `view` | `ViewportView` | The viewport queried. |
 | `width` | `UInt32` | Actual framebuffer width used for the projection. |
 | `height` | `UInt32` | Actual framebuffer height used for the projection. |
-| `raycast` | `SceneRaycastResult` | The sprite the pixel shows (the last drawn whose quad covers it: submesh 0, triangle 0 or 1 of the quad), else the nearest mesh triangle, in the camera's near-to-far interval. |
+| `raycast` | `SceneRaycastResult` | The sprite or tile the pixel shows (the last drawn whose quad covers it: submesh 0, triangle 0 or 1 of the quad; a tile is reported as its tilemap's entity), else the nearest mesh triangle, in the camera's near-to-far interval. |
 
 Example: Query the centre of the default scene viewport.
 

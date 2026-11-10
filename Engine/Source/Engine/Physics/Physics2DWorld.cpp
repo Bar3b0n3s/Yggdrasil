@@ -310,6 +310,8 @@ namespace Engine {
 		body.MaxAngularVelocity = description.MaxAngularVelocity;
 		body.AllowSleeping = description.AllowSleeping;
 		body.EnhancedInternalEdgeRemoval = description.EnhancedInternalEdgeRemoval;
+		// A circle is a sphere laid in the plane, which turns about Z as a disc (M21's milestone review).
+		body.SpheresAsDiscs = true;
 		body.LinearVelocity = Utils::ToPlane(description.LinearVelocity);
 		body.AngularVelocity = glm::vec3(0.0f, 0.0f, description.AngularVelocity);
 		body.UserData = description.UserData;

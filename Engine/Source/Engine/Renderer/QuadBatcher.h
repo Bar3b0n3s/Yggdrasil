@@ -9,6 +9,7 @@
 #include <nvrhi/nvrhi.h>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -58,8 +59,11 @@
 // their order, in consecutive batches of at most MaxQuadsPerRecord quads, each written into the vertex buffer and drawn
 // before the next is written, with every binding set and buffer created before the first command as for one batch (so a
 // failed record still draws nothing), and returns the count of every finite quad. So a tilemap that fills a record never
-// drops the sprites after it. A quad with a non-finite corner, texture coordinate or colour is skipped. Main thread only;
-// not copyable or movable.
+// drops the sprites after it. A quad with a non-finite corner, texture coordinate or colour is skipped. The CPU side is bounded
+// by the caller and by the batcher (M21's milestone review): a record stages its quads' vertices for the call, and between
+// records the staging keeps room for at most MaxQuadsPerRecord quads, the vertex buffer's capacity, a larger record
+// releasing it (GetStagingCapacity); the Sprites stage passes at most SceneRenderer::MaxTileQuadsPerView tiles a view, two
+// batches, besides its sprites. Main thread only; not copyable or movable.
 
 namespace Engine {
 
@@ -205,6 +209,9 @@ namespace Engine {
 		// the vertex buffer or a binding set cannot be created (the quads are skipped).
 		[[nodiscard]] Result<uint32_t> Record(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const QuadBatchInputs& inputs,
 			RenderPassCounters& counters);
+		// M21's milestone review: the quads the staging keeps room for between records, at most MaxQuadsPerRecord (a record of
+		// more releases it).
+		[[nodiscard]] size_t GetStagingCapacity() const;
 	private:
 		// The back-reference, the pipelines, the samplers, the white texture and the buffers (QuadBatcher.cpp).
 		struct State;

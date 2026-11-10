@@ -449,7 +449,7 @@ namespace Engine {
 				.Method("SetParent", Utils::EntitySetParent, "(self: Entity, parent: Entity?, keepWorld: boolean?) -> ()", "Reparent to the last sibling, preserving world pose by default; synchronize effective lifecycle transitions.", write)
 				.Method("GetChildren", Utils::EntityChildren, "(self: Entity) -> {Entity}", "Copy the children in sibling order.", read)
 				.Method("FindChild", Utils::EntityFindChild, "(self: Entity, name: string, recursive: boolean?) -> Entity?", "Find the first exact child name in depth-first sibling order; recursive defaults false.", read)
-				.Method("GetWorldBounds", Utils::EntityBounds, "(self: Entity) -> (vector?, vector?)", "Get this entity's render mesh world AABB; nil without a mesh.", read)
+				.Method("GetWorldBounds", Utils::EntityBounds, "(self: Entity) -> (vector?, vector?)", "Get the world AABB of what this entity draws: its render mesh, its sprite's quad and its tilemap's drawn tiles; nil without any of them.", read)
 				.Method("Destroy", Utils::EntityDestroy, "(self: Entity) -> ()", "Mark this subtree for the normal destruction flush.", write)
 				.Operator("__eq", Utils::EntityEqual, "(self: Entity, other: Entity) -> boolean", "Compare UUIDs; equality does not authorize access to an expired scene.", read);
 			return {};

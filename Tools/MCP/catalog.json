@@ -499,7 +499,7 @@
 		{
 			"name": "entity_bounds",
 			"method": "entity.bounds",
-			"description": "Reports the world-space bounding box of each entity's meshes (and, by default, its descendants'), for layout checks.",
+			"description": "Reports the world-space bounding box of what each entity draws (and, by default, its descendants): its meshes, the quad of its sprite and the quads of its tilemap's drawn tiles, for layout checks.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "EntityBoundsParams",
@@ -514,7 +514,7 @@
 						}
 					},
 					"includeDescendants": {
-						"description": "Also include every descendant's meshes.",
+						"description": "Also include every descendant's meshes, sprites and tiles.",
 						"type": "boolean"
 					},
 					"target": {

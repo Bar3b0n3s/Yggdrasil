@@ -2234,7 +2234,7 @@ All modes; Runtime|Test; pure/read.
 
 `(self: Entity) -> (vector?, vector?)`
 
-Get this entity's render mesh world AABB; nil without a mesh.
+Get the world AABB of what this entity draws: its render mesh, its sprite's quad and its tilemap's drawn tiles; nil without any of them.
 
 All modes; Runtime|Test; pure/read.
 

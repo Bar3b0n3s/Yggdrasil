@@ -23,6 +23,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <memory>
 #include <span>
 #include <utility>
 #include <vector>
@@ -441,6 +442,92 @@ namespace Engine {
 			CHECK(std::to_integer<int>(row[4 * (4 * 4 + 2) + 2]) == 0);
 			// Scene pixel (8, 12), world (0.25, -2.25), shows a tile.
 			CHECK(std::to_integer<int>(row[4 * (4 * 8 + 2) + 2]) > 0);
+		}
+
+		// M21's milestone review: a view draws at most SceneRenderer::MaxTileQuadsPerView tiles, the first in its draw order, so
+		// the Sprites stage's CPU working set is bounded however many tiles a zoomed-out view shows. The rest are counted and
+		// logged once per view, the sprite drawn after the tilemap still draws, and the stage's vectors keep no outsized room
+		// after the render: 16 x 16 chunks of 64 x 64 cells of 1/128 unit, 1,048,576 tiles over the view [-4, 4]^2, so the
+		// first MaxTileQuadsPerView, the 512 rows from the top, cover [-4, 4] x [0, 4]; then a green-tinted sprite over
+		// [-3, -1]^2.
+		TEST_CASE("Tilemaps: a view draws at most MaxTileQuadsPerView tiles and every sprite, and keeps no outsized vectors"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu);
+			constexpr uint32_t ChunkSide = 64;
+			constexpr int32_t Chunks = 16;
+			Ref<TilemapData> tilemap = CreateRef<TilemapData>();
+			tilemap->CellSize = glm::vec2(1.0f / 128.0f);
+			tilemap->ChunkSize = ChunkSide;
+			tilemap->Palette = { TilemapTile{ .Sheet = TypedAssetHandle<AssetType::SpriteSheet>(TileSheetHandle), .Frame = 0 } };
+			for (int32_t y = 0; y < Chunks; ++y)
+			{
+				for (int32_t x = 0; x < Chunks; ++x)
+					tilemap->Chunks.push_back(TilemapChunk{ .X = x, .Y = y, .Tiles = std::vector<uint32_t>(ChunkSide * ChunkSide, 1) });
+			}
+			constexpr uint32_t TileCount = static_cast<uint32_t>(Chunks * Chunks) * ChunkSide * ChunkSide;
+			static_assert(TileCount == 2 * SceneRenderer::MaxTileQuadsPerView);
+			PublishTiles(setup, tilemap);
+
+			RenderSnapshot snapshot = MakeTileSnapshot(setup);
+			const SpriteItem sprite{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(-2.0f, -2.0f, 0.0f)),
+				.Texture = TileTextureHandle,
+				.Color = glm::vec4(0.0f, 1.0f, 0.0f, 1.0f),
+				.PixelsPerUnit = 4.0f,
+				.Entity = UUID(91) };
+			snapshot.Sprites.push_back(sprite);
+			// The sprite alone, for the pixels no tile covers.
+			const Image alone = setup.Render(snapshot);
+			// A 4-texel frame at 512 pixels per unit is one 1/128-unit cell: the tiles lie edge to edge.
+			snapshot.Tilemaps.push_back(TilemapItem{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(-4.0f, -4.0f, 0.0f)),
+				.Tilemap = TilemapHandle,
+				.PixelsPerUnit = 512.0f,
+				.DrawPosition = 0,
+				.Entity = UUID(90) });
+			const Test::ExpectLog limit(LogLevel::Warn, "exceed the view's budget");
+			const Image image = setup.Render(snapshot);
+			// The first MaxTileQuadsPerView tiles and the sprite were drawn; the rest were counted.
+			CHECK(SpriteTriangles(setup) == 2 * (SceneRenderer::MaxTileQuadsPerView + 1));
+			CHECK(setup.Renderer().GetLastStats().DroppedTiles == TileCount - SceneRenderer::MaxTileQuadsPerView);
+			const auto blue = [](const Image& read, uint32_t x, uint32_t y)
+			{
+				return Test::SceneRendererIntegrationFixture::Channel(read, 4 * x + 2, 4 * y + 2, 2);
+			};
+			// Scene pixel (4, 12), world (-1.75, -2.25), shows the sprite: its green-tinted texel has no blue, every tile's has.
+			CHECK(blue(image, 4, 12) == 0);
+			// Scene pixel (12, 4), world (2.25, 1.75), in the upper half, shows a tile; scene pixel (12, 12), world (2.25, -2.25),
+			// in the lower half past the limit, shows what the view shows without the tilemap.
+			CHECK(blue(image, 12, 4) > 0);
+			CHECK(blue(image, 12, 12) == blue(alone, 12, 12));
+			// Nothing outsized is kept for the next render.
+			CHECK(setup.Renderer().GetSpriteQuadCapacity() <= QuadBatcher::MaxQuadsPerRecord);
+			// Logged once per view: a second render draws the same image without logging again.
+			const Image again = setup.Render(snapshot);
+			CHECK(again.Pixels == image.Pixels);
+			CHECK(limit.GetMatchCount() == 1);
+		}
+
+		// M21's milestone review: the renderer keeps a tilemap's chunk bounds, and so the tilemap, only while its renders draw
+		// it: a render without 2D items releases them, so a tilemap the asset manager has dropped is not kept alive.
+		TEST_CASE("Tilemaps: a render without 2D items keeps no tilemap of an earlier render" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu);
+			Ref<TilemapData> tilemap = MakeTilemap(false);
+			const std::weak_ptr<const TilemapData> drawn = tilemap;
+			PublishTiles(setup, std::move(tilemap));
+			RenderSnapshot snapshot = MakeTileSnapshot(setup);
+			snapshot.Tilemaps.push_back(TilemapItem{ .Tilemap = TilemapHandle, .PixelsPerUnit = 2.0f, .Entity = UUID(90) });
+			static_cast<void>(setup.Render(snapshot));
+			REQUIRE(SpriteTriangles(setup) > 0);
+			// The asset is deleted; the next view shows no 2D item.
+			setup.Assets().Remove(TilemapHandle);
+			REQUIRE_FALSE(drawn.expired());
+			static_cast<void>(setup.Render(MakeTileSnapshot(setup)));
+			CHECK(drawn.expired());
 		}
 
 		TEST_CASE("Tilemaps: a renderer drawing a tilemap recovers from a device loss with the same image" * doctest::test_suite(Test::GpuSuite))

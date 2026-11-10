@@ -43,7 +43,9 @@ namespace Engine {
 	// sprite hit. Errors: InvalidArgument for a non-finite or zero direction, a non-finite origin, an invalid distance
 	// interval or Alpha. Main thread. M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 24, stream T1): the
 	// TilemapRenderers take part as the sprites they draw: a ray that crosses a drawn tile's quad hits the tilemap's entity,
-	// in the one draw order of sprites and tilemaps (TilemapItem::DrawPosition), the last-drawn tile of a tilemap first.
+	// in the one draw order of sprites and tilemaps (TilemapItem::DrawPosition), the last-drawn tile of a tilemap first. M21's
+	// milestone review: a tilemap's tiles are tested only in the chunks whose bounds hold the point where the ray meets the
+	// tilemap's plane, so a pick over a large tilemap tests the tiles under the ray, not every tile, with the same result.
 	[[nodiscard]] Result<std::optional<SceneRaycastHit>> PickSprite(const Scene& scene, AssetManager& assets, const SpritePickRequest& request);
 
 	// PickSprite against `sprites`, a snapshot's sprites in their draw order (RenderSnapshot::Sprites: effectively enabled,

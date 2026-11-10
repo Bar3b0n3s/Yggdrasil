@@ -196,6 +196,9 @@ namespace Engine {
 		void AddQuad(std::vector<QuadBatch>& batches, nvrhi::ITexture* texture, QuadSampler sampler, nvrhi::ITexture* normalMap) const;
 		// Records the indices of IndexCapacity quads into the index buffer.
 		void WriteIndices(nvrhi::ICommandList& commandList) const;
+		// The record itself: QuadBatcher::Record's work, before it releases an outsized Staging.
+		[[nodiscard]] Result<uint32_t> RecordQuads(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const QuadBatchInputs& inputs,
+			RenderPassCounters& counters);
 	};
 
 	void QuadBatcher::State::WriteIndices(nvrhi::ICommandList& commandList) const
@@ -391,13 +394,29 @@ namespace Engine {
 	Result<uint32_t> QuadBatcher::Record(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const QuadBatchInputs& inputs,
 		RenderPassCounters& counters)
 	{
+		Result<uint32_t> recorded = m_State->RecordQuads(commandList, bindings, inputs, counters);
+		// M21's milestone review: between records the staging keeps room for at most one batch, the vertex buffer's capacity, so
+		// its CPU copy never stays larger than the GPU buffer it fills; a record of more quads releases it.
+		if (m_State->Staging.capacity() > static_cast<size_t>(MaxQuadsPerRecord) * Utils::VerticesPerQuad)
+			std::vector<QuadVertex>().swap(m_State->Staging);
+		return recorded;
+	}
+
+	size_t QuadBatcher::GetStagingCapacity() const
+	{
+		return m_State->Staging.capacity() / Utils::VerticesPerQuad;
+	}
+
+	Result<uint32_t> QuadBatcher::State::RecordQuads(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const QuadBatchInputs& inputs,
+		RenderPassCounters& counters)
+	{
 		ENGINE_CORE_ASSERT(inputs.Framebuffer != nullptr, "QuadBatcher::Record needs a framebuffer");
 		if (inputs.Framebuffer == nullptr)
 			return MakeError(ErrorCode::InvalidArgument, "the quad batcher needs a framebuffer");
 		ENGINE_CORE_ASSERT(inputs.Target != QuadBatchTarget::HdrLit || inputs.Light != nullptr, "QuadBatcher::Record's HdrLit target needs the light accumulation");
 		if (inputs.Target == QuadBatchTarget::HdrLit && inputs.Light == nullptr)
 			return MakeError(ErrorCode::InvalidArgument, "the quad batcher's HdrLit target needs the light accumulation");
-		State& state = *m_State;
+		State& state = *this;
 		state.Staging.clear();
 		// The record's batches name its textures, so they live only for the call.
 		std::vector<QuadBatch> batches;

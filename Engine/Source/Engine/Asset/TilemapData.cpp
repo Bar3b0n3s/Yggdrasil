@@ -552,24 +552,45 @@ namespace Engine {
 		}
 
 		// The chunks after the edits: the untouched ones as they are and the touched ones rewritten, merged in sorted order, an
-		// emptied chunk left out.
+		// emptied chunk left out. The result only grows, so it is refused as soon as its next chunk would pass MaxTilemapCells,
+		// before that chunk joins it or any later chunk is built (M21's milestone review: one tilemap.paint of cells in distinct
+		// chunks would otherwise build every touched chunk first, about 1 GiB at ChunkSize 64); it holds at most MaxTilemapCells
+		// cells and the one chunk being merged.
 		const size_t cellsPerChunk = static_cast<size_t>(tilemap.ChunkSize) * tilemap.ChunkSize;
+		const size_t maxChunks = static_cast<size_t>(MaxTilemapCells / cellsPerChunk);
 		std::vector<TilemapChunk> chunks;
-		chunks.reserve(tilemap.Chunks.size() + written.size());
+		chunks.reserve(std::min(tilemap.Chunks.size() + written.size(), maxChunks));
 		uint32_t changed = 0;
 		size_t next = 0;
-		const auto copyUntil = [&tilemap, &chunks, &next](const glm::ivec2* stop)
+		// The refusal, located at the result's first chunk past the limit (its index: the chunks already merged).
+		const auto refuseAt = [&chunks]()
+		{
+			ValidationContext context;
+			Utils::AddTilemapIssue(context, std::format("/Chunks/{}", chunks.size()),
+				std::format("the edits would store more than the {} cells a tilemap may have: the result's chunk {} would pass the limit", MaxTilemapCells,
+					chunks.size()),
+				"use a smaller chunk size, or split the map");
+			const Status refused = context.ToStatus("the tilemap");
+			return std::unexpected(refused.error());
+		};
+		// The untouched chunks before `stop` (all that are left for null) copied into the result, or false when the next one
+		// would pass the limit (checked before it is copied).
+		const auto copyUntil = [&tilemap, &chunks, &next, maxChunks](const glm::ivec2* stop)
 		{
 			while (next < tilemap.Chunks.size()
 				&& (stop == nullptr || Utils::IsChunkBefore(tilemap.Chunks[next].X, tilemap.Chunks[next].Y, stop->x, stop->y)))
 			{
+				if (chunks.size() >= maxChunks)
+					return false;
 				chunks.push_back(tilemap.Chunks[next]);
 				++next;
 			}
+			return true;
 		};
 		for (const auto& [coordinate, cells] : written)
 		{
-			copyUntil(&coordinate);
+			if (!copyUntil(&coordinate))
+				return refuseAt();
 			TilemapChunk chunk{ .X = coordinate.x, .Y = coordinate.y, .Tiles = std::vector<uint32_t>(cellsPerChunk, 0) };
 			if (next < tilemap.Chunks.size() && tilemap.Chunks[next].X == coordinate.x && tilemap.Chunks[next].Y == coordinate.y)
 			{
@@ -582,24 +603,17 @@ namespace Engine {
 					++changed;
 				chunk.Tiles[index] = value;
 			}
-			if (std::ranges::any_of(chunk.Tiles, [](uint32_t value)
+			if (std::ranges::none_of(chunk.Tiles, [](uint32_t value)
 			{
 				return value != 0;
 			}))
-				chunks.push_back(std::move(chunk));
+				continue;
+			if (chunks.size() >= maxChunks)
+				return refuseAt();
+			chunks.push_back(std::move(chunk));
 		}
-		copyUntil(nullptr);
-
-		const uint64_t stored = static_cast<uint64_t>(chunks.size()) * cellsPerChunk;
-		if (stored > MaxTilemapCells)
-		{
-			ValidationContext context;
-			Utils::AddTilemapIssue(context, "/Chunks",
-				std::format("the edits would store {} cells in {} chunks, more than the {} a tilemap may have", stored, chunks.size(), MaxTilemapCells),
-				"use a smaller chunk size, or split the map");
-			const Status refused = context.ToStatus("the tilemap");
-			return std::unexpected(refused.error());
-		}
+		if (!copyUntil(nullptr))
+			return refuseAt();
 		tilemap.Chunks = std::move(chunks);
 		return changed;
 	}

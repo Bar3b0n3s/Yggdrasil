@@ -3908,7 +3908,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Physics2D.replay",
-			"XXH64": "af0db3f8efa65a8b",
+			"XXH64": "869fc40fa163c70a",
 			"Method": "input.record",
 			"RequestId": 7,
 			"Client": "batch",
@@ -3956,7 +3956,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Tilemap.replay",
-			"XXH64": "abd2dfda00f64f95",
+			"XXH64": "2ecb7e57ab22d01d",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",

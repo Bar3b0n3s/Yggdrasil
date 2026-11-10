@@ -320,6 +320,37 @@ namespace Engine {
 			}
 		}
 
+		// M21's milestone review: the merge stops at the first chunk past MaxTilemapCells, before building it or any later one, so
+		// the most cells one tilemap.paint takes (65,536), each in a 64 x 64 chunk of its own, is refused after 1,024 chunks
+		// (16 MiB of cells) instead of building all 65,536 (1 GiB) first; the refusal names that chunk and changes nothing.
+		TEST_CASE("TilemapData: cell edits past the cell limit are refused at the first chunk past it, before it is built")
+		{
+			TilemapData tilemap;
+			tilemap.ChunkSize = MaxTilemapChunkSize;
+			tilemap.Palette = { TilemapTile{} };
+			constexpr int32_t Side = 256;
+			std::vector<TilemapCellEdit> edits;
+			for (int32_t index = 0; index < Side * Side; ++index)
+			{
+				const glm::ivec2 chunk(index % Side, index / Side);
+				edits.push_back({ .Cell = chunk * static_cast<int32_t>(MaxTilemapChunkSize), .Tile = 1 });
+			}
+			const Result<uint32_t> refused = ApplyTilemapCellEdits(tilemap, edits);
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::Validation);
+			const uint64_t chunksAtLimit = MaxTilemapCells / (uint64_t{ MaxTilemapChunkSize } * MaxTilemapChunkSize);
+			CHECK(FirstPointer(refused.error()) == "/Chunks/" + std::to_string(chunksAtLimit));
+			CHECK(tilemap.Chunks.empty());
+
+			// The limit itself is accepted: one chunk fewer.
+			edits.resize(static_cast<size_t>(chunksAtLimit));
+			const Result<uint32_t> painted = ApplyTilemapCellEdits(tilemap, edits);
+			REQUIRE_MESSAGE(painted.has_value(), painted.error().ToString());
+			CHECK(*painted == chunksAtLimit);
+			CHECK(tilemap.Chunks.size() == chunksAtLimit);
+			CHECK(ValidateTilemap(tilemap).has_value());
+		}
+
 		TEST_CASE("TilemapData: the palette's sheets are its dependencies, and frames their sheets lack are found")
 		{
 			TilemapData tilemap = MakeGroundTilemap();

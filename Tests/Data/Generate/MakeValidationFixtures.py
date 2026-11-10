@@ -246,11 +246,11 @@ TEXTURE_SETTINGS = {"Usage": "Color", "GenerateMips": True}
 
 
 def sprite_sheet(frames: list[tuple[str, int, int]], clips: list[tuple[str, list[tuple[int, int]]]],
-                 size: int = 8) -> dict[str, Any]:
-    """A .spritesheet without a texture: `size` x `size` frames (name, x, y) and looping clips (name, [(frame,
-    ticks)])."""
+                 size: int = 8, texture: str | None = None) -> dict[str, Any]:
+    """A .spritesheet of `texture` (a handle, None for none): `size` x `size` frames (name, x, y) and looping clips
+    (name, [(frame, ticks)])."""
     return {
-        "Format": "SpriteSheet", "Version": 1, "Texture": None,
+        "Format": "SpriteSheet", "Version": 1, "Texture": texture,
         "Frames": [{"Name": name, "Rect": {"X": x, "Y": y, "Width": size, "Height": size}, "Pivot": [0.5, 0.5],
                     "Borders": {"Left": 0, "Top": 0, "Right": 0, "Bottom": 0}} for name, x, y in frames],
         "Clips": [{"Name": name, "Frames": [{"Frame": frame, "Ticks": ticks} for frame, ticks in steps], "Loop": True}
@@ -660,6 +660,21 @@ return Script.Define("Jumper", Jumper)
                   meta("3a7e00000000000a", "SpriteSheet", "SpriteSheet"))
     item.add_json("Project/Assets/Tilemaps/Level.tilemap",
                   tilemap([("3a7e00000000000a", 0, True), ("3a7e00000000000a", 3, False)], [(0, 0, [1]), (1, 0, [2])]))
+    item.add_json("Project/Assets/Tilemaps/Level.tilemap.meta", meta("7113000000000001", "Tilemap", "Tilemap"))
+
+    # M21's milestone review (Docs/Decisions/0032-m21-contract.md): a sheet of the 4 x 4 Grey.png whose second
+    # frame, 4 x 4 texels at (2, 2), extends past it, reported on the sheet, and a tilemap whose second palette entry
+    # names that frame, reported on the tilemap; the first frame and entry lie inside the texture.
+    item = fixture("SPRITE_FRAME_OUTSIDE_TEXTURE")
+    item.copy_asset("Textures/Grey.png", "Project/Assets/Textures/Grey.png")
+    item.add_json("Project/Assets/Textures/Grey.png.meta",
+                  meta("3a7e00000000000b", "Texture", "Texture", TEXTURE_SETTINGS))
+    item.add_json("Project/Assets/Sprites/Tiles.spritesheet",
+                  sprite_sheet([("Inside", 0, 0), ("Past", 2, 2)], [], 4, "3a7e00000000000b"))
+    item.add_json("Project/Assets/Sprites/Tiles.spritesheet.meta",
+                  meta("3a7e00000000000c", "SpriteSheet", "SpriteSheet"))
+    item.add_json("Project/Assets/Tilemaps/Level.tilemap",
+                  tilemap([("3a7e00000000000c", 0, True), ("3a7e00000000000c", 1, False)], [(0, 0, [1]), (1, 0, [2])]))
     item.add_json("Project/Assets/Tilemaps/Level.tilemap.meta", meta("7113000000000001", "Tilemap", "Tilemap"))
 
     # M21 (Docs/Decisions/0032-m21-contract.md decision 23; W21.2's review): a tilemap's palette sheets are checked as

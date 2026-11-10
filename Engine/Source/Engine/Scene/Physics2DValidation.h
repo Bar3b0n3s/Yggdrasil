@@ -38,8 +38,11 @@ namespace Engine {
 
 	// Every 2D physics diagnostic of `scene` (an edit scene or a scratch copy of a scene file), sorted by (entity UUID, code,
 	// subject): the 2D composition's (the shared PHYSICS_* codes and PHYSICS2D_OFF_PLANE), PHYSICS_INVALID_SHAPE for every 2D
-	// body whose shape MakeBody2DShape or PhysicsShape::Create refuses, and PHYSICS2D_MIXED_WORLDS for every entity that
-	// holds both kinds of physics components. Building shapes needs the process's PhysicsEngine (skipped and logged once at
+	// body whose shape MakeBody2DShape or PhysicsShape::Create refuses, the Dynamic body check of every Dynamic RigidBody2D's
+	// built shape (PhysicsShape::CheckDynamicBody with its Mass and its degrees of freedom: a Mass or inertia the world
+	// refuses, under the code it carries, PHYSICS_INVALID_SHAPE without one, on the RigidBody2D's Mass, as the play session's
+	// Physics2DSystem reports it; M21's milestone review), and PHYSICS2D_MIXED_WORLDS for every entity that holds both kinds
+	// of physics components. Building shapes needs the process's PhysicsEngine (skipped and logged once at
 	// Warn without it, as ValidateScenePhysics). Pure function of its inputs otherwise; main thread. M21 (C21.2,
 	// Docs/Decisions/0032-m21-contract.md decision 25): a TilemapCollider's tilemap loads through `assets` as the play
 	// session's Physics2DSystem loads it (Physics2DSystem.h's tilemap paragraph), so their diagnostics agree: a collider

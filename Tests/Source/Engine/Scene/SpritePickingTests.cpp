@@ -5,6 +5,7 @@
 #include "Engine/Asset/SpriteSheetData.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/Asset/TilemapData.h"
+#include "Engine/Asset/TilemapDrawOrder.h"
 #include "Engine/Scene/Components/SpriteRendererComponent.h"
 #include "Engine/Scene/Components/TilemapRendererComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
@@ -15,11 +16,15 @@
 #include "Support/InMemoryAssetManager.h"
 #include "Support/SceneTestFixture.h"
 
+#include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
+#include <vector>
 
 // 2D picking (Docs/Decisions/0032-m21-contract.md decision 14, stream A).
 
@@ -222,6 +227,105 @@ namespace Engine {
 			REQUIRE_MESSAGE(fromImage.has_value(), fromImage.error().ToString());
 			REQUIRE(fromImage->has_value());
 			CHECK((*fromImage)->Entity == ground.GetUUID());
+		}
+
+		// M21's milestone review: a tilemap's tiles are tested only in the chunks whose bounds hold the point where the ray meets
+		// the tilemap's plane, with the same result as testing every tile: each ray of a grid, oblique to a rotated, scaled
+		// tilemap whose tiles overhang their cells and overlap across chunk edges (negative chunks included), picks exactly what
+		// the same tiles drawn as sprites in the tilemap's draw order pick, which PickSprite tests one by one.
+		TEST_CASE("SpritePicking: a tile picked through its chunks' bounds is the one every tile's test finds")
+		{
+			Test::InMemoryAssetManager assets;
+			assets.Publish(PickTextureHandle, MakePickTexture(), "Assets/Textures/Pick.png");
+			// Frame 0 is the 16-texel square (one unit at 16 pixels per unit), frame 1 a 16 x 8 strip pivoted at its right edge,
+			// so its tile lies left of its cell's centre.
+			const AssetHandle sheetHandle = UUID(8933);
+			Ref<SpriteSheetData> sheet = CreateRef<SpriteSheetData>();
+			sheet->Texture = TypedAssetHandle<AssetType::Texture>(PickTextureHandle);
+			sheet->Frames.push_back(SpriteFrame{ .Rect = { .Width = 16, .Height = 16 } });
+			sheet->Frames.push_back(SpriteFrame{ .Rect = { .Width = 16, .Height = 8 }, .Pivot = glm::vec2(1.0f, 0.5f) });
+			assets.Publish(sheetHandle, sheet, "Assets/Sprites/Overhang.spritesheet");
+			// Cells of 0.75 x 0.6 units in chunks of 4 x 4, so tiles overlap their neighbours and reach across chunk edges.
+			const AssetHandle tilemapHandle = UUID(8934);
+			Ref<TilemapData> tilemap = CreateRef<TilemapData>();
+			tilemap->CellSize = glm::vec2(0.75f, 0.6f);
+			tilemap->ChunkSize = 4;
+			tilemap->Palette = { TilemapTile{ .Sheet = TypedAssetHandle<AssetType::SpriteSheet>(sheetHandle), .Frame = 0 },
+				TilemapTile{ .Sheet = TypedAssetHandle<AssetType::SpriteSheet>(sheetHandle), .Frame = 1 } };
+			for (int32_t y = -2; y <= 1; ++y)
+			{
+				for (int32_t x = -2; x <= 2; ++x)
+				{
+					TilemapChunk chunk{ .X = x, .Y = y, .Tiles = std::vector<uint32_t>(16, 0) };
+					for (size_t cell = 0; cell < chunk.Tiles.size(); ++cell)
+						chunk.Tiles[cell] = static_cast<uint32_t>((cell * 7 + static_cast<size_t>(x * 3 + y * 5 + 40)) % 3);
+					if (std::ranges::any_of(chunk.Tiles, [](uint32_t value)
+					{
+						return value != 0;
+					}))
+						tilemap->Chunks.push_back(std::move(chunk));
+				}
+			}
+			REQUIRE(ValidateTilemap(*tilemap).has_value());
+			assets.Publish(tilemapHandle, tilemap, "Assets/Tilemaps/Overhang.tilemap");
+
+			// Rotated by 30 degrees about Z, scaled (1.5, 0.8) and moved off the origin, below the rays' start.
+			const float cosine = 0.8660254f;
+			const float sine = 0.5f;
+			glm::mat4 world(1.0f);
+			world[0] = glm::vec4(1.5f * cosine, 1.5f * sine, 0.0f, 0.0f);
+			world[1] = glm::vec4(-0.8f * sine, 0.8f * cosine, 0.0f, 0.0f);
+			world[3] = glm::vec4(0.3f, -0.2f, 1.0f, 1.0f);
+			const UUID entity = UUID(8935);
+			const TilemapItem item{ .World = world, .Tilemap = tilemapHandle, .PixelsPerUnit = 16.0f, .DrawPosition = 0, .Entity = entity };
+			// The same tiles as sprites of the tilemap's entity, in its draw order.
+			std::vector<SpriteItem> tiles;
+			ForEachTilemapTileInDrawOrder(*tilemap, false, [](size_t /*chunk*/)
+			{
+				return true;
+			}, [&tiles, &tilemap, &item](size_t /*chunk*/, glm::ivec2 cell, uint32_t value)
+			{
+				const TilemapTile& entry = tilemap->Palette[value - 1];
+				tiles.push_back(SpriteItem{ .World = GetTilemapTileWorld(item.World, *tilemap, cell),
+					.Sheet = entry.Sheet.GetHandle(),
+					.Frame = entry.Frame,
+					.PixelsPerUnit = item.PixelsPerUnit,
+					.Entity = item.Entity });
+				return true;
+			});
+			REQUIRE(tiles.size() > 100);
+
+			uint32_t hits = 0;
+			uint32_t misses = 0;
+			// A grid of 64 x 64 rays over and around the tilemap.
+			for (int32_t row = 0; row < 64; ++row)
+			{
+				for (int32_t column = 0; column < 64; ++column)
+				{
+					SpritePickRequest request;
+					request.Ray = RenderRay{ .Origin = glm::vec3(-12.0f + 24.0f * static_cast<float>(column) / 63.0f, -10.0f + 20.0f * static_cast<float>(row) / 63.0f, 10.0f),
+						.Direction = glm::vec3(0.1f, -0.05f, -1.0f) };
+					CAPTURE(request.Ray.Origin);
+					const Result<std::optional<SceneRaycastHit>> picked = PickSprite(std::span<const SpriteItem>(), std::span<const TilemapItem>(&item, 1), assets, request);
+					const Result<std::optional<SceneRaycastHit>> reference = PickSprite(tiles, std::span<const TilemapItem>(), assets, request);
+					REQUIRE(picked.has_value());
+					REQUIRE(reference.has_value());
+					REQUIRE(picked->has_value() == reference->has_value());
+					if (!picked->has_value())
+					{
+						++misses;
+						continue;
+					}
+					++hits;
+					CHECK((*picked)->Entity == entity);
+					CHECK((*picked)->Distance == (*reference)->Distance);
+					CHECK((*picked)->Position == (*reference)->Position);
+					CHECK((*picked)->Triangle == (*reference)->Triangle);
+					CHECK((*picked)->Barycentric == (*reference)->Barycentric);
+				}
+			}
+			CHECK(hits > 200);
+			CHECK(misses > 200);
 		}
 	}
 
