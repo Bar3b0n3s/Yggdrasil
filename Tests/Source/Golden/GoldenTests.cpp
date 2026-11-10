@@ -149,9 +149,11 @@ namespace Engine {
 
 		// M8 (Roadmap M8, §15.4): the scenes Projects/FeatureTest/Scaffold/Golden.jsonl wrote into
 		// Projects/FeatureTest/Assets/Scenes/Golden, rendered by Test::RenderGoldenScene. Their images are committed for the
-		// device class nvidia-61x (Docs/Decisions/0013-m8-decisions.md decision 24, with LitScene's regenerated for the PBR
-		// renderer, AgX, bloom and FXAA); every other device class checks them in smoke mode and the golden stage warns
-		// "goldens missing" (GoldenImage.h).
+		// device class nvidia-62x (Docs/Decisions/0013-m8-decisions.md decision 24 committed them for nvidia-61x, with
+		// LitScene's regenerated for the PBR renderer, AgX, bloom and FXAA; Docs/Decisions/0028-backlog-program.md
+		// decision 9, amended 2026-11-10, renamed the class for driver 621.14); another vendor's device class checks them
+		// in smoke mode and the golden stage warns "goldens missing", and another class of the same vendor fails the
+		// device-class check (GoldenImage.h).
 
 		// Renders golden scene `name` with `options` and compares it with the golden of the same name.
 		static void CheckGoldenScene(std::string_view name, const Test::GoldenSceneOptions& options = {})

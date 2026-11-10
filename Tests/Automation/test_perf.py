@@ -125,11 +125,11 @@ class PerfTests(unittest.TestCase):
         self.assertEqual(Perf.Capture.gpu_pass_times(stats), {"Opaque": 9.0})  # the scene view's without a game view
         self.assertEqual(Perf.Capture.gpu_pass_times({"views": []}), {})
         line = ("[21:00:00.000] [Engine] [info] Graphics device: 'NVIDIA GeForce RTX 5070 Ti Laptop GPU' (Discrete, "
-                "Vulkan 1.4, class nvidia-61x, queue family 0); optional paths: none; validation off")
+                "Vulkan 1.4, class nvidia-62x, queue family 0); optional paths: none; validation off")
         match = Perf.DEVICE_LINE.search(line)
         self.assertIsNotNone(match)
         self.assertEqual((match.group("name"), match.group("class")),
-                         ("NVIDIA GeForce RTX 5070 Ti Laptop GPU", "nvidia-61x"))
+                         ("NVIDIA GeForce RTX 5070 Ti Laptop GPU", "nvidia-62x"))
 
 
 if __name__ == "__main__":
