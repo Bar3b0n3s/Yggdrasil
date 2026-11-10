@@ -4,27 +4,37 @@
 #include "Engine/Reflection/TypeList.h"
 #include "Engine/Scene/Components/AudioListenerComponent.h"
 #include "Engine/Scene/Components/AudioSourceComponent.h"
+#include "Engine/Scene/Components/BoxCollider2DComponent.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/CapsuleColliderComponent.h"
 #include "Engine/Scene/Components/CharacterControllerComponent.h"
+#include "Engine/Scene/Components/CircleCollider2DComponent.h"
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
 #include "Engine/Scene/Components/IDComponent.h"
+#include "Engine/Scene/Components/Light2DComponent.h"
 #include "Engine/Scene/Components/MeshColliderComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/NameComponent.h"
+#include "Engine/Scene/Components/PixelPerfectCameraComponent.h"
 #include "Engine/Scene/Components/PointLightComponent.h"
+#include "Engine/Scene/Components/PolygonCollider2DComponent.h"
 #include "Engine/Scene/Components/PostProcessComponent.h"
 #include "Engine/Scene/Components/PrefabInstanceComponent.h"
 #include "Engine/Scene/Components/PrefabLinkComponent.h"
 #include "Engine/Scene/Components/RelationshipComponent.h"
+#include "Engine/Scene/Components/RigidBody2DComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/SphereColliderComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
+#include "Engine/Scene/Components/SpriteAnimatorComponent.h"
+#include "Engine/Scene/Components/SpriteRendererComponent.h"
 #include "Engine/Scene/Components/TagsComponent.h"
 #include "Engine/Scene/Components/TextComponent.h"
+#include "Engine/Scene/Components/TilemapColliderComponent.h"
+#include "Engine/Scene/Components/TilemapRendererComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Components/UiButtonComponent.h"
 #include "Engine/Scene/Components/UiCanvasComponent.h"
@@ -60,9 +70,14 @@ namespace Engine {
 		AudioSourceComponent, AudioListenerComponent,
 		// Scripting (Registration/ScriptingRegistration.cpp)
 		ScriptComponent,
+		// Rendering2D (Registration/Rendering2DRegistration.cpp; M21, Docs/Decisions/0032-m21-contract.md decisions 3, 5, 6,
+		// 20 and 24)
+		SpriteRendererComponent, SpriteAnimatorComponent, PixelPerfectCameraComponent, Light2DComponent, TilemapRendererComponent,
+		// Physics2D (Registration/Physics2DRegistration.cpp; M21, Docs/Decisions/0032-m21-contract.md decisions 9 and 25)
+		RigidBody2DComponent, BoxCollider2DComponent, CircleCollider2DComponent, PolygonCollider2DComponent, TilemapColliderComponent,
 		// Ui (Registration/UiRegistration.cpp; M22, Docs/Decisions/0033-m22-contract.md decision 2: phase 2's categories go
-		// after Scripting in landing order, ADR 0028's phase-2 ledger; C22.2's widgets appended, decision 21; C22.3's text
-		// input appended, decision 45)
+		// after Scripting in landing order, ADR 0028's phase-2 ledger, so after M21's; C22.2's widgets appended, decision 21;
+		// C22.3's text input appended, decision 45)
 		UiCanvasComponent, UiRectComponent, UiImageComponent, UiTextComponent, UiLayoutComponent, UiLayoutElementComponent,
 		UiButtonComponent, UiToggleComponent, UiSliderComponent, UiScrollViewComponent, UiTextInputComponent>;
 
@@ -74,9 +89,13 @@ namespace Engine {
 	void RegisterPhysicsComponents(TypeRegistry& registry);
 	void RegisterAudioComponents(TypeRegistry& registry);
 	void RegisterScriptingComponents(TypeRegistry& registry);
+	// M21 (ADR 0028's phase-2 ledger: a milestone's new components go in categories of their own after Scripting).
+	void RegisterRendering2DComponents(TypeRegistry& registry);
+	void RegisterPhysics2DComponents(TypeRegistry& registry);
+	// M22 (ADR 0028's phase-2 ledger: after M21's categories, in landing order).
 	void RegisterUiComponents(TypeRegistry& registry);
 
-	// Registers every built-in component (the six functions above, in order) into a registry that is not frozen yet, then
+	// Registers every built-in component (the eight functions above, in order) into a registry that is not frozen yet, then
 	// asserts that every BuiltinComponents type is registered and that the registration order equals the list order
 	// (the startup check of §5.4). The caller adds its own types (project settings, automation structs) and then freezes
 	// the registry.

@@ -136,6 +136,31 @@ namespace Engine {
 			});
 		}
 
+		// The layers the loader activated for the instance of `device`, in its order: device layers are deprecated, so the
+		// loader answers vkEnumerateDeviceLayerProperties with the instance's active layers, the implicit ones it inserted
+		// and the explicit ones the instance enabled.
+		static Result<std::vector<std::string>> EnumerateActiveLayers(VkPhysicalDevice device)
+		{
+			const vk::detail::DispatchLoaderDynamic& dispatcher = VULKAN_HPP_DEFAULT_DISPATCHER;
+			std::vector<VkLayerProperties> layers;
+			VkResult result = VK_INCOMPLETE;
+			while (result == VK_INCOMPLETE)
+			{
+				uint32_t count = 0;
+				ENGINE_TRY(CheckVulkan(dispatcher.vkEnumerateDeviceLayerProperties(device, &count, nullptr), "vkEnumerateDeviceLayerProperties"));
+				layers.resize(count);
+				result = dispatcher.vkEnumerateDeviceLayerProperties(device, &count, layers.data());
+				layers.resize(count);
+			}
+			ENGINE_TRY(CheckVulkan(result, "vkEnumerateDeviceLayerProperties"));
+
+			std::vector<std::string> names;
+			names.reserve(layers.size());
+			for (const VkLayerProperties& layer : layers)
+				names.emplace_back(layer.layerName);
+			return names;
+		}
+
 		static Result<std::vector<std::string>> EnumerateDeviceExtensions(VkPhysicalDevice device)
 		{
 			const vk::detail::DispatchLoaderDynamic& dispatcher = VULKAN_HPP_DEFAULT_DISPATCHER;
@@ -763,6 +788,22 @@ namespace Engine {
 		const DeviceCandidate& candidate = chosen.Candidate;
 		m_PhysicalDevice = chosen.Device;
 
+		// The implicit layers in the process, for the log line: a diagnostic, so a loader that cannot list them leaves them
+		// unknown instead of failing the device.
+		if (Result<std::vector<std::string>> active = Utils::EnumerateActiveLayers(m_PhysicalDevice))
+		{
+			std::erase_if(*active, [this](const std::string& layer)
+			{
+				return m_Info.Validation && layer == Utils::ValidationLayerName;
+			});
+			m_Info.ImplicitLayers = std::move(*active);
+		}
+		else
+		{
+			m_Info.ImplicitLayers.reset();
+			ENGINE_CORE_WARN("Cannot list the Vulkan layers the loader activated: {}", active.error());
+		}
+
 		// The device uses min(instance, device) API version; 1.4 capabilities only at 1.4.
 		const bool deviceVulkan14 = m_Info.ApiVersion == VulkanApiVersion::Vulkan14 && Utils::GetMajorMinor(candidate.ApiVersion) >= VK_API_VERSION_1_4;
 		m_Info.ApiVersion = deviceVulkan14 ? VulkanApiVersion::Vulkan14 : VulkanApiVersion::Vulkan13;
@@ -920,9 +961,14 @@ namespace Engine {
 		addPath(m_Info.PortabilitySubset, "portability subset");
 		addPath(m_Info.BloomFormat == nvrhi::Format::R11G11B10_FLOAT, "B10G11R11 bloom");
 		const std::string_view validation = !m_Info.Validation ? "off" : (m_Info.SynchronizationValidation ? "on, with synchronization" : "on");
-		ENGINE_CORE_INFO("Graphics device: '{}' ({}, Vulkan {}, class {}, queue family {}); optional paths: {}; validation {}", m_Info.DeviceName,
-			GpuDeviceTypeToString(m_Info.Type), VulkanApiVersionToString(m_Info.ApiVersion), m_Info.DeviceClass, m_Info.GraphicsQueueFamily,
-			paths.empty() ? std::string("none") : paths, validation);
+		std::string implicitLayers;
+		for (const std::string& layer : m_Info.ImplicitLayers.value_or(std::vector<std::string>()))
+			implicitLayers += (implicitLayers.empty() ? "" : ", ") + layer;
+		if (implicitLayers.empty())
+			implicitLayers = m_Info.ImplicitLayers.has_value() ? "none" : "unknown";
+		ENGINE_CORE_INFO("Graphics device: '{}' ({}, Vulkan {}, class {}, queue family {}); optional paths: {}; validation {}; implicit layers: {}",
+			m_Info.DeviceName, GpuDeviceTypeToString(m_Info.Type), VulkanApiVersionToString(m_Info.ApiVersion), m_Info.DeviceClass,
+			m_Info.GraphicsQueueFamily, paths.empty() ? std::string("none") : paths, validation, implicitLayers);
 	}
 
 	nvrhi::IDevice* GraphicsDevice::GetNvrhiDevice() const

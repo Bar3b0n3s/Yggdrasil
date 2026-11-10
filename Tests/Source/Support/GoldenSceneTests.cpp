@@ -305,10 +305,10 @@ namespace Engine {
 
 		TEST_CASE("GoldenScene: the scaffold's sources and their imported copies are the Tests/Data fixtures")
 		{
-			// Projects/FeatureTest/Scaffold/Sources holds the files Golden.jsonl and Formats.jsonl import (asset.import takes
-			// project paths or absolute ones, so the committed scaffolds import from inside the project): a subset mirror of
-			// Tests/Data/Assets, never a deliberately invalid fixture (ADR 0022 decision 16). Every source and every copy the
-			// imports made under Assets/ must stay byte-identical to its generated or pinned fixture (Tests/Data/Generate,
+			// Projects/FeatureTest/Scaffold/Sources holds the files Golden.jsonl, Formats.jsonl and M21's 2D scaffolds import
+			// (asset.import takes project paths or absolute ones, so the committed scaffolds import from inside the project): a
+			// subset mirror of Tests/Data/Assets, never a deliberately invalid fixture (ADR 0022 decision 16). Every source and every
+			// copy the imports made under Assets/ must stay byte-identical to its generated or pinned fixture (Tests/Data/Generate,
 			// FetchAssets.py fixture).
 			const std::filesystem::path sources = GetFeatureTestPath("Scaffold/Sources");
 			const Result<std::vector<std::filesystem::path>> entries = FileSystem::ListDirectory(sources, true);
@@ -330,20 +330,28 @@ namespace Engine {
 				mirrored.push_back(relative);
 			}
 
-			// The golden imports keep their M8 destinations, and M22's UiGolden.jsonl and UiScriptsGolden.jsonl import into their
-			// own golden directories (Docs/Decisions/0033-m22-contract.md decisions 14 and 55: UiScriptsGolden.jsonl the three Noto
-			// fonts and a copy of Inter whose fallbacks they are); Formats.jsonl imports into Assets/Formats/<same relative path>.
+			// The golden imports keep their M8 destinations, M21's scaffolds import into directories of their own (the sprite
+			// textures, the 2D lights' texture and normal map, the tilemap sheet's texture; Docs/Decisions/0032-m21-contract.md
+			// decisions 17 and 32), and so do M22's UiGolden.jsonl and UiScriptsGolden.jsonl (Docs/Decisions/0033-m22-contract.md
+			// decisions 14 and 55: UiScriptsGolden.jsonl the three Noto fonts and a copy of Inter whose fallbacks they are);
+			// Formats.jsonl imports into Assets/Formats/<same relative path>.
 			struct SourceCopy
 			{
 				std::string_view Fixture;  // below Tests/Data/Assets
 				std::string_view Imported; // below Projects/FeatureTest/Assets
 			};
-			constexpr std::array<SourceCopy, 10> GoldenCopies = { {
+			constexpr std::array<SourceCopy, 16> ScaffoldCopies = { {
 				{ "Gltf/NormalMapped.gltf", "Models/Golden/NormalMapped.gltf" },
 				{ "Gltf/Textured.bin", "Models/Golden/Textured.bin" },
 				{ "Gltf/Textured.gltf", "Models/Golden/Textured.gltf" },
 				{ "Gltf/Textures/Checker.png", "Models/Golden/Textures/Checker.png" },
 				{ "Textures/Rgba.png", "Textures/Golden/Rgba.png" },
+				{ "Textures/Rgba.png", "Textures/Sprites2D/Rgba.png" },
+				{ "Textures/Rgba.png", "Textures/Sprites2DGolden/Rgba.png" },
+				{ "Textures/Rgba.png", "Textures/Lights2D/Rgba.png" },
+				{ "Textures/Normal.png", "Textures/Lights2D/Normal.png" },
+				{ "Textures/Normal.png", "Textures/Lights2DGolden/Normal.png" },
+				{ "Textures/Rgba.png", "Textures/Tilemaps/Rgba.png" },
 				{ "Textures/Rgba.png", "Textures/GoldenUi/Rgba.png" },
 				{ "Fonts/Inter-Regular.otf", "Fonts/GoldenUiScripts/Inter-Regular.otf" },
 				{ "Fonts/NotoSansArabic-Regular.ttf", "Fonts/GoldenUiScripts/NotoSansArabic-Regular.ttf" },
@@ -351,9 +359,9 @@ namespace Engine {
 				{ "Fonts/NotoSansJP-Regular.otf", "Fonts/GoldenUiScripts/NotoSansJP-Regular.otf" },
 			} };
 			std::vector<std::string> imported;
-			for (const SourceCopy& copy : GoldenCopies)
+			for (const SourceCopy& copy : ScaffoldCopies)
 			{
-				CAPTURE(std::string(copy.Fixture));
+				CAPTURE(std::string(copy.Imported));
 				const Result<Buffer> fixture = FileSystem::ReadFile(Test::GetTestDataPath("Assets/" + std::string(copy.Fixture)));
 				const Result<Buffer> copied = FileSystem::ReadFile(GetFeatureTestPath("Assets/" + std::string(copy.Imported)));
 				REQUIRE(fixture.has_value());

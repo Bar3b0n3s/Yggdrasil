@@ -22,6 +22,7 @@ namespace Engine {
 	class AudioSystem;
 	class DebugDrawList;
 	class IFieldSchemaSource;
+	class Physics2DSystem;
 	class PhysicsSystem;
 	class Random;
 	class Scene;
@@ -70,6 +71,10 @@ namespace Engine {
 		[[nodiscard]] virtual AssetManager* GetAssets() = 0;
 		[[nodiscard]] virtual const IFieldSchemaSource* GetFieldSchemas() const = 0;
 		[[nodiscard]] virtual PhysicsSystem* GetPhysics() = 0;
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 10): the session's 2D physics, which the RigidBody2D proxy and the
+		// Physics2D module use (stream P2). Null by default, where there is none (the edit evaluation host keeps the default);
+		// the play session and the script test fixture override it.
+		[[nodiscard]] virtual Physics2DSystem* GetPhysics2D() { return nullptr; }
 		[[nodiscard]] virtual AudioSystem* GetAudio() = 0;
 		[[nodiscard]] virtual DebugDrawList* GetDebugDraw() = 0;
 		[[nodiscard]] virtual Random& GetRandom() = 0;

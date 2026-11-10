@@ -19,7 +19,7 @@ Every authored file is UTF-8 JSON with LF line ends and tabs, written by the can
 | Scene | `.scene` | 1 | [Schemas/Scene.schema.json](Schemas/Scene.schema.json) |
 | SoundEffect | `.sfx` | 1 | [Schemas/SoundEffect.schema.json](Schemas/SoundEffect.schema.json) |
 | SpriteSheet | `.spritesheet` | 1 | [Schemas/SpriteSheet.schema.json](Schemas/SpriteSheet.schema.json) |
-| StringTable | `.stringtable` | 1 | [Schemas/StringTable.schema.json](Schemas/StringTable.schema.json) |
+| Tilemap | `.tilemap` | 1 | [Schemas/Tilemap.schema.json](Schemas/Tilemap.schema.json) |
 
 ### AssetMeta (`.meta`)
 
@@ -626,51 +626,73 @@ One step of a sprite clip: a frame shown for a number of fixed-step ticks.
 | `Frame` | `UInt32` | `0` | 0 to 65535 |  |  | The index of the frame in the sheet's Frames, from 0. |
 | `Ticks` | `UInt32` | `1` | 1 to 65535 | ticks |  | How many fixed-step ticks the frame shows. |
 
-### StringTable (`.stringtable`)
+### Tilemap (`.tilemap`)
 
-A string table (§6.10): locale tags, the first of them the fallback, and entries that give each key a string per locale, read by `Loc.Get` in the project's `Localization.Locale` (the table's locale equal to it ignoring ASCII case, else its language's, the part before its first `-`, else the fallback; an entry without a string for that locale gives the fallback's). Lookups are byte-wise and deterministic. The tables below list every field, its rules and the limits.
+A tilemap (§6.9): a palette of sprite sheet frames, each Solid or not for the TilemapCollider, and cells in chunks of `ChunkSize` x `ChunkSize` (a power of two), sorted by (Y, X), none empty. Cell (x, y), x right and y up in the entity's local plane, spans `[x CellSize.x, (x + 1) CellSize.x]` in X; chunk (X, Y) holds the cells from (X ChunkSize, Y ChunkSize), its `Tiles` row by row from its bottom row up, each 0 for empty or k for `Palette[k - 1]`. The tables below list every field, its range and the limits.
 
-Header: `"Format": "StringTable", "Version": 1`. Schema: [Schemas/StringTable.schema.json](Schemas/StringTable.schema.json).
+Header: `"Format": "Tilemap", "Version": 1`. Schema: [Schemas/Tilemap.schema.json](Schemas/Tilemap.schema.json).
 
 ```json
 {
-	"Format": "StringTable",
+	"Format": "Tilemap",
 	"Version": 1,
-	"Locales": ["en", "fr", "pt-BR"],
-	"Entries": [
+	"CellSize": [1, 1],
+	"ChunkSize": 2,
+	"Palette": [
 		{
-			"Key": "Menu.Start",
-			"Values": {
-				"en": "Start",
-				"fr": "Commencer",
-				"pt-BR": "Iniciar"
-			}
+			"Sheet": "5b5e000000000002",
+			"Frame": 0,
+			"Solid": true
 		},
 		{
-			"Key": "Menu.Quit",
-			"Values": {
-				"en": "Quit"
-			}
+			"Sheet": "5b5e000000000003",
+			"Frame": 4,
+			"Solid": false
+		}
+	],
+	"Chunks": [
+		{
+			"X": -1,
+			"Y": 0,
+			"Tiles": [0, 1, 0, 0]
+		},
+		{
+			"X": 0,
+			"Y": 0,
+			"Tiles": [1, 1, 2, 0]
 		}
 	]
 }
 ```
 
-#### Fields of StringTable
+#### Fields of Tilemap
 
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
-| `Locales` | `Array<String>` | `["en"]` |  |  |  | 1 to 64 locale tags (1 to 35 ASCII letters, digits and '-', starting with a letter, such as en, fr or pt-BR), unique ignoring ASCII case; the first is the fallback locale. |
-| `Entries` | `Array<StringTableEntry>` | `[]` |  |  |  | At most 65536 entries, in authored order (sorted by Key once cooked). |
+| `CellSize` | `Vec2` | `[1,1]` | 0.001 to 1000 | units |  | The size of a cell in the entity's local units: cell (x, y) spans [x CellSize.x, (x + 1) CellSize.x] in X. |
+| `ChunkSize` | `UInt32` | `16` | 1 to 64 |  |  | The cells a chunk holds a side: a power of two from 1 to 64 (16 by default). |
+| `Palette` | `Array<TilemapTile>` | `[]` |  |  |  | At most 65535 entries; a cell value k draws Palette[k - 1]. |
+| `Chunks` | `Array<TilemapChunk>` | `[]` |  |  |  | The stored chunks, sorted by Y, then X, each once, none empty; at most 4194304 cells in all. |
 
-#### Fields of StringTableEntry
+#### Fields of TilemapTile
 
-One key and its strings by locale.
+One entry of a tilemap's palette: the sprite sheet frame drawn in the cells holding it, and whether the TilemapCollider collides with them.
 
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
-| `Key` | `String` | `""` |  |  |  | The entry's identity, which Loc.Get looks up: 1 to 256 bytes of text without control characters, unique in the table. |
-| `Values` | `Map<String>` | `{}` |  |  |  | The entry's strings by locale (each key one of the table's Locales, written sorted): at most 16384 bytes of UTF-8 each, line feeds and tabs their only control characters; the fallback locale's string is required, the others optional. |
+| `Sheet` | `AssetRef(SpriteSheet)` | `null` |  |  |  | The sprite sheet the tile is cut from; null draws nothing. |
+| `Frame` | `UInt32` | `0` | 0 to 65535 |  |  | The index of the frame in the sheet's Frames, from 0; a frame the sheet lacks draws nothing (TILEMAP_FRAME_OUT_OF_RANGE). |
+| `Solid` | `Bool` | `true` |  |  |  | Whether the TilemapCollider collides with the cells holding this entry. |
+
+#### Fields of TilemapChunk
+
+A square of ChunkSize x ChunkSize cells of a tilemap, stored while one of them is not empty; chunk (X, Y) holds the cells from (X ChunkSize, Y ChunkSize).
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `X` | `Int32` | `0` |  |  |  | The chunk's column: its cells' x lie in [X ChunkSize, (X + 1) ChunkSize), and in [-1048576, 1048576). |
+| `Y` | `Int32` | `0` |  |  |  | The chunk's row: its cells' y lie in [Y ChunkSize, (Y + 1) ChunkSize), and in [-1048576, 1048576). |
+| `Tiles` | `Array<UInt32>` | `[]` |  |  |  | The ChunkSize^2 cell values, row by row from the chunk's bottom row up, each row left to right: 0 for an empty cell, k for Palette[k - 1]; not all 0. |
 
 ## Source formats
 
@@ -684,8 +706,8 @@ The files the editor imports from `Assets/`, by importer and extension (§7.4). 
 | Audio | `.wav` | AudioClip | 1 | `AudioImportSettings` | yes |
 | Environment | `.exr` | Environment | 1 | `EnvironmentImportSettings` | no |
 | Environment | `.hdr` | Environment | 1 | `EnvironmentImportSettings` | yes |
-| Font | `.otf` | Font | 5 | `FontImportSettings` | yes |
-| Font | `.ttf` | Font | 5 | `FontImportSettings` | yes |
+| Font | `.otf` | Font | 3 | `FontImportSettings` | yes |
+| Font | `.ttf` | Font | 3 | `FontImportSettings` | yes |
 | Gltf | `.glb` | Prefab | 1 | `GltfImportSettings` | yes |
 | Gltf | `.gltf` | Prefab | 1 | `GltfImportSettings` | yes |
 | Material | `.material` | Material | 1 | none | yes |
@@ -695,9 +717,9 @@ The files the editor imports from `Assets/`, by importer and extension (§7.4). 
 | Script | `.luau` | Script | 1 | none | yes |
 | SoundEffect | `.sfx` | AudioClip | 1 | none | yes |
 | SpriteSheet | `.spritesheet` | SpriteSheet | 1 | none | yes |
-| StringTable | `.stringtable` | StringTable | 1 | none | yes |
 | Texture | `.bmp` | Texture | 1 | `TextureImportSettings` | yes |
 | Texture | `.jpeg` | Texture | 1 | `TextureImportSettings` | yes |
 | Texture | `.jpg` | Texture | 1 | `TextureImportSettings` | yes |
 | Texture | `.png` | Texture | 1 | `TextureImportSettings` | yes |
 | Texture | `.tga` | Texture | 1 | `TextureImportSettings` | yes |
+| Tilemap | `.tilemap` | Tilemap | 1 | none | yes |

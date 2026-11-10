@@ -14,6 +14,7 @@
 #include "Engine/AssetPipeline/Importers/SpriteSheetImporter.h"
 #include "Engine/AssetPipeline/Importers/StringTableImporter.h"
 #include "Engine/AssetPipeline/Importers/TextureImporter.h"
+#include "Engine/AssetPipeline/Importers/TilemapImporter.h"
 #include "Engine/Core/Assert.h"
 
 #include <algorithm>
@@ -117,14 +118,17 @@ namespace Engine {
 		registry.Register(CreateScope<ReplayImporter>());
 		// M18 (Docs/Decisions/0029-m18-contract.md decision 17).
 		registry.Register(CreateScope<SpriteSheetImporter>());
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 23).
+		registry.Register(CreateScope<TilemapImporter>());
 		// M22 (Docs/Decisions/0033-m22-contract.md decision 10).
 		registry.Register(CreateScope<StringTableImporter>());
 	}
 
 	void RegisterAssetPipelineTypes(TypeRegistry& registry)
 	{
-		// In the order of RegisterBuiltinImporters; the material, scene, prefab, script, replay, sprite sheet and string table
-		// importers have no settings (the sprite sheet and string table structs are the Asset module's, RegisterAssetTypes).
+		// In the order of RegisterBuiltinImporters; the material, scene, prefab, script, replay, sprite sheet, tilemap and string
+		// table importers have no settings (the sprite sheet, tilemap and string table structs are the Asset module's,
+		// RegisterAssetTypes).
 		TextureImporter::RegisterTypes(registry);
 		GltfImporter::RegisterTypes(registry);
 		FontImporter::RegisterTypes(registry);

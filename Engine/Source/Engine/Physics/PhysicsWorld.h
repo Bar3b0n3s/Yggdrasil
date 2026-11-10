@@ -55,6 +55,12 @@ namespace Engine {
 		PhysicsWorldLimits Limits{};
 	};
 
+	// The checks PhysicsWorld::Create makes of `limits`, for a caller that creates its world later and must not fail then
+	// (Scene/Physics2DSystem's Create, which makes its world at the first 2D body). Errors: InvalidArgument for a MaxBodies of
+	// 0 or above Jolt's limit (8,388,608 bodies), a MaxBodyPairs or MaxContactConstraints of 0, or a TempAllocatorBytes of 0
+	// or above 2^32 - 1.
+	[[nodiscard]] Status ValidatePhysicsWorldLimits(const PhysicsWorldLimits& limits);
+
 	// Everything a body is created from (Jolt's BodyCreationSettings, §9.2 "Body settings"). Every float finite. Settings
 	// that Jolt asserts on are made safe before they reach it (§9.1), as each member says: AllowedDofs and Mass act on
 	// Dynamic bodies only, and starting velocities are clamped.
@@ -98,6 +104,13 @@ namespace Engine {
 		bool AllowSleeping = true;
 		// Jolt's mEnhancedInternalEdgeRemoval (§9.2 "Seams"): set on rolling bodies.
 		bool EnhancedInternalEdgeRemoval = false;
+		// M21's milestone review (Docs/Decisions/0032-m21-contract.md decision 8): Dynamic bodies of the 2D world, whose
+		// circles are spheres (Physics2DWorld.h): each sphere of the shape turns about Z as a disc of its radius, its own
+		// moment about Z m r^2 / 2 instead of a sphere's 2 m r^2 / 5 (m its share of Mass, as Jolt shares Mass by volume);
+		// the other moments, the centre of mass and every contact are the shape's. Added after PhysicsShape::CheckDynamicBody's
+		// inertia limit, which it exceeds by at most a quarter (far below what Jolt's decomposition takes), so the edit-time
+		// check and the world refuse the same bodies. SetShape keeps it. Ignored for other bodies.
+		bool SpheresAsDiscs = false;
 		// The world-space velocities the body starts with (Dynamic and Kinematic; Static bodies ignore them), clamped to
 		// MaxLinearVelocity and MaxAngularVelocity as Jolt's BodyInterface::SetLinearVelocity clamps (Jolt asserts on a
 		// longer starting velocity).

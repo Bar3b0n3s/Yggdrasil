@@ -1,0 +1,6 @@
+{"method": "input.record", "params": {"action": "Start", "scene": "Assets/Scenes/Tilemaps.scene"}}
+{"method": "play.step", "params": {"ticks": 361, "input": [{"tick": 8, "type": "Action", "name": "MoveX", "value": 1}, {"tick": 72, "type": "Action", "name": "MoveX", "value": 0}, {"tick": 175, "type": "Action", "name": "Jump", "state": "Tap"}], "render": "None"}}
+{"method": "input.record", "params": {"action": "Stop", "path": "Assets/Tests/Replays/Tilemap.replay", "expect": [{"tick": 360, "luau": "local b = Scene.FindByName(\"Ball\")\nreturn b:GetScript(\"Roller\").Jumps == 1 and b.Transform.Translation.x > 4 and b.Transform.Translation.y > 1.3 and Scene.FindByName(\"Goal\"):GetScript(\"GoalZone\").Entered >= 1"}]}}
+{"method": "physics2d.bodyInfo", "params": {"entity": "/Ball"}}
+{"method": "play.stop", "params": {}}
+{"method": "project.refreshAssets", "params": {}}

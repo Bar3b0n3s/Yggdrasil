@@ -10,9 +10,11 @@
 #include "Engine/Renderer/DepthPyramidPass.h"
 #include "Engine/Renderer/FxaaPass.h"
 #include "Engine/Renderer/GtaoPass.h"
+#include "Engine/Renderer/Lights2DPass.h"
 #include "Engine/Renderer/PassBindingCache.h"
 #include "Engine/Renderer/Private/ForwardPipelines.h"
 #include "Engine/Renderer/Private/MaterialBindingCache.h"
+#include "Engine/Renderer/Private/TilemapDrawCache.h"
 #include "Engine/Renderer/QuadBatcher.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/RenderStats.h"
@@ -32,12 +34,16 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <optional>
 #include <span>
 #include <utility>
 #include <vector>
 
 namespace Engine {
+
+	struct SpriteSheetData;
 
 	namespace Detail {
 
@@ -105,6 +111,13 @@ namespace Engine {
 			nvrhi::FramebufferHandle PrepassFramebuffer{};
 			nvrhi::FramebufferHandle ForwardFramebuffer{};
 			std::array<nvrhi::FramebufferHandle, 2> OverlayFramebuffers{}; // each LDR target with SceneDepth (tested, not written)
+			// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 22): the Lights2D pass's targets, created by the first
+			// render that draws a lit 2D item (SceneRenderer::State::EnsureLights2DTargets) and kept like the other lazily
+			// created targets until the size changes.
+			nvrhi::TextureHandle Lights2DNormals{};                // Lights2DNormalsFormat
+			nvrhi::TextureHandle Lights2DLight{};                  // Lights2DLightFormat
+			nvrhi::FramebufferHandle Lights2DNormalsFramebuffer{}; // Lights2DNormals with SceneDepth (tested, not written)
+			nvrhi::FramebufferHandle Lights2DLightFramebuffer{};   // Lights2DLight alone
 		};
 
 		// M18 (C18.1, Docs/Decisions/0029-m18-contract.md decision 6): the output stage's per-view objects at the renderer's
@@ -241,6 +254,9 @@ namespace Engine {
 		// integrates them.
 		Scope<QuadBatcher> Quads{};
 		Scope<UpscalePass> Upscale{};
+		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 22): the 2D lights' accumulation (place 1 of ADR 0029
+		// decision 27).
+		Scope<Lights2DPass> Lights2D{};
 		uint32_t PipelineCount = 0;
 		// M18 (C18.1): SceneRendererPipelines::GetGeneration: 0 until Create's CreatePipelines, which makes it 1, and increased
 		// by every later successful CreatePipelines.
@@ -275,6 +291,11 @@ namespace Engine {
 		PassBindingCache GtaoBindings{};
 		PassBindingCache SelectionBindings{};
 		PassBindingCache DataViewBindings{};
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 4): the Sprites stage's sets, the QuadBatcher's one per texture and
+		// sampler (place 2 of ADR 0029 decision 27: released with the state on a device loss, like every set above).
+		PassBindingCache SpriteBindings{};
+		// M21 (C21.2, decision 22): the Lights2D pass's set (its view's Lights2DNormals).
+		PassBindingCache Lights2DBindings{};
 		Scope<RenderTargetPool> TargetPool{};
 		Scope<AsyncPicker> Picker{};
 		Scope<GpuProfiler> Profiler{};
@@ -294,6 +315,8 @@ namespace Engine {
 		bool ShadowRejectionLogged = false; // a light the shadow planners reject is reported once per renderer
 		bool WireframeBudgetLogged = false; // wireframe edges beyond the debug draw budget are reported once per renderer
 		bool AllocationLimitLogged = false;
+		bool Light2DLimitLogged = false; // lights beyond MaxVisibleLights2D are reported once per renderer (M21, C21.2)
+		bool TileLimitLogged = false;    // tiles beyond MaxTileQuadsPerView are reported once per renderer (M21's milestone review)
 		nvrhi::BufferHandle ShadowConstantsBuffer{};
 		nvrhi::BufferHandle ShadowCasterConstantsBuffer{}; // ShadowPass::GetCasterConstantsDesc
 		Utils::MaterialBindingCache Materials{};
@@ -322,6 +345,26 @@ namespace Engine {
 		// Reused by every Render.
 		std::vector<Detail::SceneRendererDraw> OpaqueDraws{};
 		std::vector<Detail::SceneRendererDraw> TransparentDraws{};
+		// M21: the Sprites stage's quads in the snapshot's draw order, their textures borrowed from the GpuResourceCache's
+		// mirrors for the render, and, one per quad, whether it is lit (C21.2, decision 22: 1 for a lit sprite or tile, which
+		// draws with the HdrLit pipeline); AddSpriteQuad appends to both.
+		std::vector<QuadDraw> SpriteQuads{};
+		std::vector<uint8_t> SpriteQuadLit{};
+		// C21.2: the lit quads of SpriteQuads, in order, for the Normals record, and the 2D lights the view draws.
+		std::vector<QuadDraw> LitSpriteQuads{};
+		std::vector<Light2DItem> VisibleLights2D{};
+		// M21's milestone review: the tiles this render's Sprites stage has drawn and dropped (SceneRenderer::
+		// MaxTileQuadsPerView), counted by AppendTilemapQuads. The quad vectors above hold at most that many tiles and the
+		// snapshot's sprites during a render, and keep room for at most QuadBatcher::MaxQuadsPerRecord quads after it
+		// (ReleaseOutsizedSpriteQuads).
+		uint32_t TileQuadsDrawn = 0;
+		uint32_t TileQuadsDropped = 0;
+		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 24): the Sprites stage's chunk bounds of each tilemap it
+		// drew in its last render (TilemapDrawCache.h; a render without drawn 2D items keeps none), and its scratch flags of
+		// the chunks that meet the view. CPU state; a device loss's release drops it with the rest of the state, and the next
+		// render rebuilds it.
+		std::vector<Detail::TilemapDrawCache> TilemapCaches{};
+		std::vector<uint8_t> TilemapChunksDrawn{};
 		std::vector<ShaderLight> Lights{};
 		bool LightLimitLogged = false; // RENDER_LIGHT_LIMIT_EXCEEDED is logged once per renderer
 		SceneRenderStats Stats{};
@@ -374,8 +417,47 @@ namespace Engine {
 		void RecordDepthNormalStage(Detail::SceneRendererFrame& frame);
 		void RecordAmbientStage(Detail::SceneRendererFrame& frame);
 		void RecordForwardStage(Detail::SceneRendererFrame& frame);
-		// Reserved for M21's Sprites and Lights2D passes; records nothing in M18.
+		// M21's Sprites pass (Docs/Decisions/0032-m21-contract.md decision 4): in a Lit view with a camera (not the wireframe),
+		// the snapshot's sprites in its draw order, one QuadBatcher quad each in world space (Asset/SpriteGeometry.h's quad of
+		// the frame or texture this stage resolves through the GpuResourceCache, the camera's view-projection, the Point
+		// sampler, Color as the quad's colour), with the Hdr pipeline into SceneColor depth-tested against SceneDepth, under
+		// the Sprites row; a sprite whose quad lies wholly outside the view is culled. C21.2's tilemaps draw in the same order,
+		// each before Sprites[DrawPosition], their tiles' quads appended by AppendTilemapQuads. C21.2 (decision 22): when a
+		// drawn quad is lit, the Lights2D pass first (RecordLights2D), then the quads in runs of one lit-ness
+		// (RecordSpriteQuads). M21's milestone review: at most SceneRenderer::MaxTileQuadsPerView tiles a render (the rest are
+		// counted in Stats.DroppedTiles and logged once per renderer); a render without drawn 2D items releases every tilemap
+		// cache, and every render releases its outsized quad vectors (ReleaseOutsizedSpriteQuads).
 		void RecordSpritesStage(Detail::SceneRendererFrame& frame);
+		// C21.2 (decision 22): appends `quad` to SpriteQuads and its lit-ness to SpriteQuadLit, in the 2D draw order.
+		void AddSpriteQuad(const QuadDraw& quad, bool lit);
+		// M21 (C21.2, decision 24): appends to SpriteQuads the quads of `tilemap`'s tiles that the Sprites stage draws, in the
+		// tilemap's draw order (Asset/TilemapDrawOrder.h): every tile of each chunk whose bounds (TilemapCaches, rebuilt when
+		// stale) meet the clip volume of `viewProjection`, each the quad of the sprite TilemapRendererComponent.h describes,
+		// its sheet resolved through `resolveSheet` (the stage's sheets of the render: null for one that is missing or fails
+		// to load, reported there). A tilemap that is missing or fails to load draws nothing and is reported with
+		// GetOrPlaceholder's codes; a non-finite world matrix or PixelsPerUnit draws nothing and is kept as frame's error.
+		// M21's milestone review: once the render has drawn MaxTileQuadsPerView tiles (TileQuadsDrawn), a further tile adds no
+		// quad and counts in TileQuadsDropped.
+		void AppendTilemapQuads(Detail::SceneRendererFrame& frame, const TilemapItem& tilemap, const glm::mat4& viewProjection,
+			const std::function<const SpriteSheetData*(AssetHandle)>& resolveSheet);
+		// M21 (C21.2, decision 24): drops the tilemap caches the render did not draw, and clears the others' Used flags.
+		void ReleaseUnusedTilemaps();
+		// M21's milestone review: releases each of the Sprites stage's quad vectors (and its chunk flags) whose capacity a render
+		// grew past QuadBatcher::MaxQuadsPerRecord quads, so an outsized render keeps no memory after it.
+		void ReleaseOutsizedSpriteQuads();
+		// C21.2: the Lights2D targets and their framebuffers at the scene resolution (Targets), created when missing.
+		// Errors: those of the pool and the framebuffer creation (Gpu, OutOfMemory after its trim and retry).
+		[[nodiscard]] Status EnsureLights2DTargets();
+		// C21.2, the Lights2D row, recorded when a quad of SpriteQuads is lit: Lights2DNormals cleared to the flat normal and,
+		// when a lit quad has a normal map, every lit quad's normal drawn into it in draw order (the QuadBatcher's Normals
+		// pipeline); then Lights2DLight cleared and the lights the view draws added (Lights2DPass: the snapshot's Lights2D that
+		// reach the view of `viewProjection`, in their order, at most MaxVisibleLights2D, the first skip logged once per
+		// renderer). Returns the light accumulation the lit quads sample, or null when no quad is lit, or when its targets or
+		// its pass failed (the error kept in frame.FirstError).
+		[[nodiscard]] nvrhi::ITexture* RecordLights2D(Detail::SceneRendererFrame& frame, const glm::mat4& viewProjection);
+		// C21.2, the Sprites row: SpriteQuads in their order, each run of one lit-ness one QuadBatcher record (Hdr, or HdrLit
+		// sampling `light`); a lit run without `light` is not drawn (RecordLights2D kept its error).
+		void RecordSpriteQuads(Detail::SceneRendererFrame& frame, const glm::mat4& viewProjection, nvrhi::ITexture* light);
 		void RecordHdrPostStage(Detail::SceneRendererFrame& frame);
 		// Tonemap (or the data views' composite); with frame.PixelArt the 2D colour path (decision 7).
 		void RecordTonemapStage(Detail::SceneRendererFrame& frame);

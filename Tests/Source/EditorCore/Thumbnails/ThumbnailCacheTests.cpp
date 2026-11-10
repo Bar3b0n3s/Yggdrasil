@@ -634,6 +634,70 @@ namespace Engine {
 			CHECK(rendered.size() == 4);
 		}
 
+		TEST_CASE("ThumbnailCache: a sorting-layer change marks captured images stale and keys their disk entries")
+		{
+			// M21 (Docs/Decisions/0032-m21-contract.md decision 4): captures extract in the project's sorting layers, so a
+			// prefab's sprites change order with them; captured images are keyed by the layers as by the render quality.
+			Test::AutomationFixture fixture("ThumbnailSortingLayers", false);
+			auto& editor = fixture.GetEditor();
+			const AssetHandle material = WriteThumbnailMaterial(editor, "Assets/Layers.material", 0.5f);
+			const AssetHandle texture = WriteThumbnailTexture(editor, "Assets/Textures/Layers.png", 16, std::byte{ 70 });
+			std::vector<AssetHandle> rendered;
+			ThumbnailCache cache(editor, [&rendered](const ThumbnailRequest& request)
+			{
+				rendered.push_back(request.Asset);
+				return RenderContentTestThumbnail(request);
+			});
+			REQUIRE(cache.BindProject(1));
+			const std::vector<std::string> original = editor.GetProject().GetSettings().SortingLayers.Layers;
+			const auto first = cache.Request(MakeContentThumbnailRequest(editor, cache, material));
+			REQUIRE(first);
+			REQUIRE(cache.Request(MakeContentThumbnailRequest(editor, cache, texture)));
+			REQUIRE(rendered.size() == 2);
+
+			const auto setLayers = [&fixture](const std::vector<std::string>& layers)
+			{
+				REQUIRE(fixture.Call("project.setSettings", Json{ { "patch", Json{ { "SortingLayers", Json{ { "Layers", layers } } } } } }));
+			};
+			setLayers({ "Default", "Background", "Foreground" });
+			// The captured material image stays displayable until regenerated; a texture's decoded preview has no layers.
+			const auto stale = cache.Find(MakeContentThumbnailRequest(editor, cache, material));
+			REQUIRE(stale);
+			REQUIRE(stale->has_value());
+			CHECK((*stale)->Stale);
+			CHECK((*stale)->Path == first->Path);
+			const auto textureImage = cache.Find(MakeContentThumbnailRequest(editor, cache, texture));
+			REQUIRE(textureImage);
+			REQUIRE(textureImage->has_value());
+			CHECK_FALSE((*textureImage)->Stale);
+			const auto second = cache.Request(MakeContentThumbnailRequest(editor, cache, material));
+			REQUIRE(second);
+			CHECK_FALSE(second->Cached);
+			CHECK(second->Path != first->Path);
+			CHECK(cache.Request(MakeContentThumbnailRequest(editor, cache, texture))->Cached);
+			CHECK(rendered.size() == 3);
+
+			// A later binding reuses the image of the current layers, never the earlier one's; renaming a layer is a change.
+			cache.Reset();
+			REQUIRE(cache.BindProject(2));
+			const auto reused = cache.Request(MakeContentThumbnailRequest(editor, cache, material));
+			REQUIRE(reused);
+			CHECK(reused->Cached);
+			CHECK(reused->Path == second->Path);
+			setLayers({ "Default", "Background", "Front" });
+			const auto renamed = cache.Request(MakeContentThumbnailRequest(editor, cache, material));
+			REQUIRE(renamed);
+			CHECK_FALSE(renamed->Cached);
+			CHECK(rendered.size() == 4);
+			setLayers(original);
+			cache.Reset();
+			REQUIRE(cache.BindProject(3));
+			const auto restored = cache.Request(MakeContentThumbnailRequest(editor, cache, material));
+			REQUIRE(restored);
+			CHECK_FALSE(restored->Cached);
+			CHECK(rendered.size() == 5);
+		}
+
 		TEST_CASE("ThumbnailCache: a remembered failure is retried after a referenced asset changes")
 		{
 			Test::EditorTestFixture fixture("ThumbnailRetry");

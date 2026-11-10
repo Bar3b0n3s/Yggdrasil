@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["PHYSICS_NONUNIFORM_SCALE"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

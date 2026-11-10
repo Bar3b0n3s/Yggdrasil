@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <memory_resource>
+#include <string>
 #include <vector>
 
 // Render extraction (Architecture §5.2, §5.7 frame phase step 4, §8.2): builds the plain RenderSnapshot of one view from a
@@ -78,6 +79,10 @@ namespace Engine {
 		std::vector<UUID> SelectedEntities{};
 		RenderAnnotations Annotations{};
 		RenderQualitySettings Quality{}; // host copies ProjectSettings.Rendering, including screenshot and Runtime paths
+		// M21 (C21.1, Docs/Decisions/0032-m21-contract.md decision 4): the project's SortingLayers.Layers, which every host
+		// copies as it copies Quality; a sprite's sorting layer is its name's index here (SpriteItem::SortingLayer), 0 for a
+		// name it lacks (SPRITE_UNKNOWN_SORTING_LAYER). Empty: every sprite is in layer 0.
+		std::vector<std::string> SortingLayers{};
 		// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 25): the play session's UI interaction state, whose widget
 		// states pick the UI's tints (AppendUiDrawItems, Scene/UiExtraction.h); a borrowed pointer valid for the call. The
 		// session sets it for its game view and its views between ticks (PlaySession's RenderExtraction phase and
@@ -112,6 +117,24 @@ namespace Engine {
 	//     TextItem (Space, Alignment and the font handle as they are; World = the rendered world matrix, used by World
 	//     texts). DebugDraw stays empty (its producers append: M11's colliders, M13's scripts) and DebugView is Lit (a
 	//     screenshot sets it).
+	//   - Sprites (M21, C21.1; Docs/Decisions/0032-m21-contract.md decision 4): every effectively enabled entity with a
+	//     SpriteRendererComponent, at its rendered world matrix, with Sheet, Frame, Texture, Color, FlipX, FlipY,
+	//     PixelsPerUnit, OrderInLayer and Lit as they are and SortingLayer resolved against request.SortingLayers, sorted
+	//     stably by (SortingLayer, OrderInLayer) from canonical order (RenderSnapshot::Sprites); NormalMap as it is (C21.2,
+	//     decision 21; stream L).
+	//   - Tilemaps (M21, C21.2; decision 24, stream T1): every effectively enabled entity with a TilemapRendererComponent whose
+	//     Tilemap is not null, at its rendered world matrix, with Tilemap, Color, PixelsPerUnit, OrderInLayer and Lit as they
+	//     are and SortingLayer resolved as a sprite's, sorted stably by (SortingLayer, OrderInLayer) from canonical order; each
+	//     one's DrawPosition is the number of sprites before it in the one order of sprites and tilemaps by (SortingLayer,
+	//     OrderInLayer, canonical entity order) (RenderSnapshot::Tilemaps).
+	//   - Lights2D (M21, C21.2; decision 22, stream L): every effectively enabled entity with a Light2DComponent, in canonical
+	//     order, Position its rendered world matrix's translation, with Type, Color, Intensity, Radius, Falloff and Height as
+	//     they are (RenderSnapshot::Lights2D).
+	//   - PixelPerfectCamera (M21, decision 6): for the Primary and Entity sources, when the camera entity holds a
+	//     PixelPerfectCameraComponent, Output, the camera's position and its orthographic projection come from
+	//     ComputePixelPerfectView (Scene/PixelPerfectCamera.h), at the reference resolution's aspect, whatever the Camera's
+	//     own Projection and OrthographicSize, and the camera's viewport is the reference resolution (the scene resolution);
+	//     Explicit cameras ignore it. Without one, Output keeps its defaults.
 	// M9 additions: copy Flags, Quality, Annotations and SelectedEntities (sort/unique/filter unknown ids), assign mesh
 	// PickIds/PickTable in canonical entity order before GPU culling, and copy all five directional shadow fields.
 	// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 7): Ui, every effectively enabled canvas laid out at the scene

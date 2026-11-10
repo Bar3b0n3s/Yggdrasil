@@ -3,11 +3,17 @@
 #include "Support/TestCaseTracker.h"
 
 #include "Engine/Core/Assert.h"
+#include "Engine/Core/Log.h"
+#include "Engine/Platform/Process.h"
 #include "Support/ChildProcess.h"
 #include "Support/DeathTest.h"
 #include "Support/TestOptions.h"
 
+#include <algorithm>
+#include <format>
+#include <string>
 #include <thread>
+#include <vector>
 
 namespace Engine {
 
@@ -44,6 +50,24 @@ namespace Engine {
 			CHECK(running->File.ends_with("TestCaseTrackerTests.cpp"));
 			CHECK(running->Line > 0);
 			CHECK(running->Serial > 0);
+		}
+
+		TEST_CASE("TestCaseTracker: the log of a process that is not a child names each started test case at Trace")
+		{
+			// Started by the test runner itself, never as a child: the line goes to the process's log file, where
+			// Scripts/Test.py looks for the last case a process started. Nothing logs between the case's start and its body.
+			REQUIRE_FALSE(Test::GetTestOptions().IsChildProcess());
+			const std::string_view name = "TestCaseTracker: the log of a process that is not a child names each started test case at Trace";
+			const std::string expected = Test::FormatTestCaseLogLine(Process::GetCurrentId(), name);
+			// The line's form is Scripts/Test.py's TEST_CASE_LOG_PATTERN.
+			CHECK(expected == std::format("Test case of process {}: {}", Process::GetCurrentId(), name));
+			const std::vector<LogEntry> entries = Log::GetRingBuffer().ReadLast(8);
+			const auto named = std::ranges::find_if(entries, [&expected](const LogEntry& entry)
+			{
+				return entry.Message == expected;
+			});
+			REQUIRE(named != entries.end());
+			CHECK(named->Level == LogLevel::Trace);
 		}
 
 		TEST_CASE("TestCaseTracker: other threads see the same running test case")

@@ -30,17 +30,16 @@ Every component of the type registry, in canonical component order: the order of
 | `AudioSource` | Audio | Serializable, ScriptVisible, EditorVisible, Removable | Plays an audio clip, optionally positioned at the entity. |
 | `AudioListener` | Audio | Serializable, ScriptVisible, EditorVisible, Removable | Hears the scene from the entity's position and orientation. |
 | `Script` | Scripting | Serializable, ScriptVisible, EditorVisible, Removable, NoShortcut | Attaches Behaviour scripts to the entity, an ordered list of slots. |
-| `UiCanvas` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text, or, in World mode, laid out in its own canvas pixels and drawn as a rectangle in the world. |
-| `UiRect` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A UI element's rectangle in its parent's (or its canvas's), in canvas units, x right and y down. |
-| `UiImage` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | Draws a sprite sheet frame, or a plain colour, over a UI element's rectangle. |
-| `UiText` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | Draws text in a UI element's rectangle, wrapped and aligned in it. |
-| `UiLayout` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A container that places its children's rectangles in a stack, a grid or a flexible row or column. |
-| `UiLayoutElement` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | How a UI element takes part in its parent's layout container: flex weights, a minimum size, or none. |
-| `UiButton` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A UI button: a pointer click or Submit while focused raises OnUiClick. |
-| `UiToggle` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A UI toggle: a pointer click or Submit while focused flips IsOn and raises OnUiValueChanged; Graphic shows while it is on. |
-| `UiSlider` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A UI slider: the pointer drags its value between Min and Max and the directions along it step it, raising OnUiValueChanged. |
-| `UiScrollView` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A UI scroll view: clips its descendants and moves its Content by the scroll position, which the wheel, a drag and focus change. |
-| `UiTextInput` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A UI text field: while focused, typed characters insert at its caret and the editing keys edit it, raising OnUiTextChanged; Enter raises OnUiSubmit. |
+| `SpriteRenderer` | Rendering2D | Serializable, ScriptVisible, EditorVisible, Removable | Draws a sprite: a sprite sheet frame or a texture in the entity's XY plane. |
+| `SpriteAnimator` | Rendering2D | Serializable, ScriptVisible, EditorVisible, Removable | Plays a clip of the SpriteRenderer's sprite sheet, one step per clip frame for its ticks, driven by the fixed step. |
+| `PixelPerfectCamera` | Rendering2D | Serializable, ScriptVisible, EditorVisible, Removable | Renders the entity's camera at a reference resolution, upscaled by the largest whole factor that fits the view in a letterbox. |
+| `Light2D` | Rendering2D | Serializable, ScriptVisible, EditorVisible, Removable | A 2D light: lights the lit sprites and tilemaps of the view, never unlit ones; no shadows. |
+| `TilemapRenderer` | Rendering2D | Serializable, ScriptVisible, EditorVisible, Removable | Draws a tilemap's tiles in the entity's XY plane, each tile as a sprite of its palette entry's sheet frame. |
+| `RigidBody2D` | Physics2D | Serializable, ScriptVisible, EditorVisible, Removable | Simulates the entity in the 2D world: moves along world X and Y and rotates about world Z. |
+| `BoxCollider2D` | Physics2D | Serializable, ScriptVisible, EditorVisible, Removable | A rectangle collider in the entity's XY plane. |
+| `CircleCollider2D` | Physics2D | Serializable, ScriptVisible, EditorVisible, Removable | A circle collider in the entity's XY plane. |
+| `PolygonCollider2D` | Physics2D | Serializable, ScriptVisible, EditorVisible, Removable | A convex polygon collider in the entity's XY plane. |
+| `TilemapCollider` | Physics2D | Serializable, ScriptVisible, EditorVisible, Removable | The solid cells of a tilemap as 2D colliders: each chunk's solid cells merged into boxes, one static compound without a RigidBody2D. |
 
 ## ID
 
@@ -238,9 +237,9 @@ Script members of `Camera`:
 | `OrthographicSize` | proxy field | `number` | read/write | All | Half the visible height of the orthographic projection, in metres. |
 | `Primary` | proxy field | `boolean` | read/write | All | Whether this is the scene's primary camera (exactly one active camera should be). |
 | `Projection` | proxy field | `ProjectionType` | read/write | All | Perspective or orthographic projection. |
-| `ScreenToWorldRay` | method | `(self: Camera, x: number, y: number) -> (vector, vector)` |  | All | Ray through a viewport pixel center, origin top-left, using the rendered camera pose. |
+| `ScreenToWorldRay` | method | `(self: Camera, x: number, y: number) -> (vector, vector)` |  | All | Ray through a viewport pixel center, origin top-left, using the rendered camera pose; under a PixelPerfectCamera through its snapped reference view and the output mapping. |
 | `VerticalFov` | proxy field | `number` | read/write | All | The vertical field of view of the perspective projection, in degrees. |
-| `WorldToScreen` | method | `(self: Camera, point: vector) -> vector` |  | All | Project to top-left pixel coordinates and reverse-Z depth using the rendered camera pose. |
+| `WorldToScreen` | method | `(self: Camera, point: vector) -> vector` |  | All | Project to top-left pixel coordinates and reverse-Z depth using the rendered camera pose; under a PixelPerfectCamera through its snapped reference view and the output mapping. |
 
 ## DirectionalLight
 
@@ -732,357 +731,321 @@ Script members of `Script`:
 |---|---|---|---|---|---|
 | `Scripts` | proxy field | `{{Script: AssetRef?, Fields: {[string]: any}, ExecutionOrder: number}}` | read/write | All | The behaviours of the entity, in slot order; each slot is its own instance. A value a script writes holds at most 4096 bytes of text. |
 
-## UiCanvas
+## SpriteRenderer
 
-The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text, or, in World mode, laid out in its own canvas pixels and drawn as a rectangle in the world.
+Draws a sprite: a sprite sheet frame or a texture in the entity's XY plane.
 
-- Category: Ui
+- Category: Rendering2D
 - Version: 1
 - Flags: Serializable, ScriptVisible, EditorVisible, Removable
-- Requires: none
-- Excludes: `UiRect`
-
-| Field | Type | Default | Range | Unit | Notes | Description |
-|---|---|---|---|---|---|---|
-| `SortOrder` | `Int32` | `0` |  |  |  | Canvases draw in ascending SortOrder, ties in entity order; a later canvas draws over earlier ones. |
-| `ScaleMode` | `UiScaleMode` | `"ConstantPixelSize"` |  |  |  | How canvas units map to scene pixels. |
-| `ScaleFactor` | `Float` | `1` | 0.01 to 100 |  |  | ConstantPixelSize: the scene pixels per canvas unit. |
-| `ReferenceHeight` | `Float` | `1080` | 1 to 1e+05 | units |  | MatchHeight: the canvas's height in canvas units, so one unit is the scene's height / ReferenceHeight scene pixels. |
-| `PixelSnap` | `Bool` | `true` |  |  |  | Rounds every element's corners to whole scene pixels, so images and clips land on pixel corners. |
-| `Font` | `AssetRef(Font)` | `null` |  |  |  | The font of the canvas's texts whose own Font is null; null uses the default font. |
-| `Theme` | `UiTheme` | `{"Normal":[1,1,1,1],"Hovered":[0.85,0.85,0.85,1],"Pressed":[0.6,0.6,0.6,1],"Focused":[0.75,0.85,1,1],"Disabled":[0.5,0.5,0.5,0.5]}` |  |  |  | The state tints of the canvas's widgets (buttons, toggles, sliders and scroll views). |
-| `DefaultFocus` | `EntityRef` | `null` |  |  |  | The UI widget keyboard and gamepad navigation focuses first while nothing has focus; null: navigation starts only from a pointer press or Ui.SetFocus. |
-| `RenderMode` | `UiCanvasRenderMode` | `"Screen"` |  |  |  | Screen draws the canvas over the scene image; World draws it as a rectangle in the world at the entity's transform, depth-tested against the scene. |
-| `WorldWidth` | `UInt32` | `1024` | 1 to 16384 | px |  | A World canvas's width in canvas pixels (its layout's scene resolution); Screen canvases ignore it. |
-| `WorldHeight` | `UInt32` | `576` | 1 to 16384 | px |  | A World canvas's height in canvas pixels (its layout's scene resolution); Screen canvases ignore it. |
-| `PixelsPerUnit` | `Float` | `512` | 0.001 to 1e+06 |  |  | A World canvas's canvas pixels per world unit: its rectangle is WorldWidth x WorldHeight over this, centred on the entity. |
-
-Script members of `UiCanvas`:
-
-| Member | Kind | Signature | Access | Modes | Description |
-|---|---|---|---|---|---|
-| `DefaultFocus` | proxy field | `Entity?` | read/write | All | The UI widget keyboard and gamepad navigation focuses first while nothing has focus; null: navigation starts only from a pointer press or Ui.SetFocus. |
-| `Font` | proxy field | `AssetRef?` | read/write | All | The font of the canvas's texts whose own Font is null; null uses the default font. |
-| `PixelSnap` | proxy field | `boolean` | read/write | All | Rounds every element's corners to whole scene pixels, so images and clips land on pixel corners. |
-| `PixelsPerUnit` | proxy field | `number` | read/write | All | A World canvas's canvas pixels per world unit: its rectangle is WorldWidth x WorldHeight over this, centred on the entity. |
-| `ReferenceHeight` | proxy field | `number` | read/write | All | MatchHeight: the canvas's height in canvas units, so one unit is the scene's height / ReferenceHeight scene pixels. |
-| `RenderMode` | proxy field | `UiCanvasRenderMode` | read/write | All | Screen draws the canvas over the scene image; World draws it as a rectangle in the world at the entity's transform, depth-tested against the scene. |
-| `ScaleFactor` | proxy field | `number` | read/write | All | ConstantPixelSize: the scene pixels per canvas unit. |
-| `ScaleMode` | proxy field | `UiScaleMode` | read/write | All | How canvas units map to scene pixels. |
-| `SortOrder` | proxy field | `number` | read/write | All | Canvases draw in ascending SortOrder, ties in entity order; a later canvas draws over earlier ones. |
-| `Theme` | proxy field | `{Normal: Color, Hovered: Color, Pressed: Color, Focused: Color, Disabled: Color}` | read/write | All | The state tints of the canvas's widgets (buttons, toggles, sliders and scroll views). |
-| `WorldHeight` | proxy field | `number` | read/write | All | A World canvas's height in canvas pixels (its layout's scene resolution); Screen canvases ignore it. |
-| `WorldWidth` | proxy field | `number` | read/write | All | A World canvas's width in canvas pixels (its layout's scene resolution); Screen canvases ignore it. |
-
-## UiRect
-
-A UI element's rectangle in its parent's (or its canvas's), in canvas units, x right and y down.
-
-- Category: Ui
-- Version: 1
-- Flags: Serializable, ScriptVisible, EditorVisible, Removable
-- Requires: none
-- Excludes: `UiCanvas`
-
-| Field | Type | Default | Range | Unit | Notes | Description |
-|---|---|---|---|---|---|---|
-| `AnchorMin` | `Vec2` | `[0.5,0.5]` | 0 to 1 |  |  | The anchor rectangle's top-left corner, normalized in the parent's rectangle: (0, 0) its top-left corner, (1, 1) its bottom-right. |
-| `AnchorMax` | `Vec2` | `[0.5,0.5]` | 0 to 1 |  |  | The anchor rectangle's bottom-right corner, normalized in the parent's rectangle; equal to AnchorMin for a fixed-size element. |
-| `Pivot` | `Vec2` | `[0.5,0.5]` | 0 to 1 |  |  | The point of the element that Position places, normalized to the element: (0, 0) its top-left corner, (1, 1) its bottom-right. |
-| `Position` | `Vec2` | `[0,0]` | -1e+06 to 1e+06 | units |  | The pivot's offset from its point in the anchor rectangle, in canvas units, x right and y down. |
-| `Size` | `Vec2` | `[100,100]` | -1e+06 to 1e+06 | units |  | The element's size in canvas units, added to the anchor rectangle's size (negative values inset stretched anchors); a container's child takes it as its preferred size. |
-| `ClipChildren` | `Bool` | `false` |  |  |  | Whether the element's descendants are clipped to its rectangle. |
-
-Script members of `UiRect`:
-
-| Member | Kind | Signature | Access | Modes | Description |
-|---|---|---|---|---|---|
-| `AnchorMax` | proxy field | `vector` | read/write | All | The anchor rectangle's bottom-right corner, normalized in the parent's rectangle; equal to AnchorMin for a fixed-size element. |
-| `AnchorMin` | proxy field | `vector` | read/write | All | The anchor rectangle's top-left corner, normalized in the parent's rectangle: (0, 0) its top-left corner, (1, 1) its bottom-right. |
-| `ClipChildren` | proxy field | `boolean` | read/write | All | Whether the element's descendants are clipped to its rectangle. |
-| `Pivot` | proxy field | `vector` | read/write | All | The point of the element that Position places, normalized to the element: (0, 0) its top-left corner, (1, 1) its bottom-right. |
-| `Position` | proxy field | `vector` | read/write | All | The pivot's offset from its point in the anchor rectangle, in canvas units, x right and y down. |
-| `Size` | proxy field | `vector` | read/write | All | The element's size in canvas units, added to the anchor rectangle's size (negative values inset stretched anchors); a container's child takes it as its preferred size. |
-
-## UiImage
-
-Draws a sprite sheet frame, or a plain colour, over a UI element's rectangle.
-
-- Category: Ui
-- Version: 1
-- Flags: Serializable, ScriptVisible, EditorVisible, Removable
-- Requires: `UiRect`
+- Requires: `Transform`
 - Excludes: none
 
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
-| `Sheet` | `AssetRef(SpriteSheet)` | `null` |  |  |  | The sprite sheet whose frame is drawn; null draws a plain rectangle of Color. |
-| `Frame` | `UInt32` | `0` | 0 to 65535 |  |  | The index of the frame in the sheet's Frames; a frame the sheet lacks draws nothing. |
-| `Color` | `Color4` | `[1,1,1,1]` | 0 to 1 |  |  | The linear tint multiplied with the frame's texels, with opacity in the fourth component. |
-| `Type` | `UiImageType` | `"Simple"` |  |  |  | Whether the frame stretches or keeps its 9-slice borders. |
-| `BorderScale` | `Float` | `1` | 0.01 to 1000 |  |  | Sliced: the canvas units each border texel takes. |
-| `Filter` | `UiImageFilter` | `"Point"` |  |  |  | How the frame's texture is sampled. |
-| `RaycastTarget` | `Bool` | `true` |  |  |  | Whether the image catches the pointer for its nearest widget; false lets the pointer pass through it. |
+| `Sheet` | `AssetRef(SpriteSheet)` | `null` |  |  |  | The sprite sheet whose frame Frame is drawn; null draws Texture whole. |
+| `Frame` | `UInt32` | `0` | 0 to 65535 |  |  | The index of the sheet's frame to draw; an index the sheet lacks draws nothing (SPRITE_FRAME_OUT_OF_RANGE). |
+| `Texture` | `AssetRef(Texture)` | `null` |  |  |  | The texture drawn whole, pivoted at its centre, when Sheet is null; null draws the built-in white square. |
+| `Color` | `Color4` | `[1,1,1,1]` | 0 to 1 |  |  | The linear colour every texel is multiplied with, with opacity in the fourth component. |
+| `FlipX` | `Bool` | `false` |  |  |  | Whether the image is mirrored left to right about its pivot. |
+| `FlipY` | `Bool` | `false` |  |  |  | Whether the image is mirrored top to bottom about its pivot. |
+| `PixelsPerUnit` | `Float` | `16` | 0.001 to 65536 | px |  | How many texels of the image make one unit of the entity's local space; the sprite's size is its texels divided by this. |
+| `SortingLayer` | `String` | `"Default"` |  |  |  | The sorting layer name from project settings; later layers draw over earlier ones, and an undeclared name draws in the first. |
+| `OrderInLayer` | `Int32` | `0` |  |  |  | The draw order within the sorting layer: higher values draw over lower ones, equal values in canonical entity order. |
+| `Lit` | `Bool` | `false` |  |  |  | Whether 2D lights light the sprite; an unlit sprite keeps its texels unchanged. |
+| `NormalMap` | `AssetRef(Texture)` | `null` |  |  |  | A lit sprite's tangent-space normal map, laid like its image; point lights then light it by the angle to the light. Null: flat. |
 
-Script members of `UiImage`:
+Script members of `SpriteRenderer`:
 
 | Member | Kind | Signature | Access | Modes | Description |
 |---|---|---|---|---|---|
-| `BorderScale` | proxy field | `number` | read/write | All | Sliced: the canvas units each border texel takes. |
-| `Color` | proxy field | `Color` | read/write | All | The linear tint multiplied with the frame's texels, with opacity in the fourth component. |
-| `Filter` | proxy field | `UiImageFilter` | read/write | All | How the frame's texture is sampled. |
-| `Frame` | proxy field | `number` | read/write | All | The index of the frame in the sheet's Frames; a frame the sheet lacks draws nothing. |
-| `RaycastTarget` | proxy field | `boolean` | read/write | All | Whether the image catches the pointer for its nearest widget; false lets the pointer pass through it. |
-| `Sheet` | proxy field | `AssetRef?` | read/write | All | The sprite sheet whose frame is drawn; null draws a plain rectangle of Color. |
-| `Type` | proxy field | `UiImageType` | read/write | All | Whether the frame stretches or keeps its 9-slice borders. |
+| `Color` | proxy field | `Color` | read/write | All | The linear colour every texel is multiplied with, with opacity in the fourth component. |
+| `FlipX` | proxy field | `boolean` | read/write | All | Whether the image is mirrored left to right about its pivot. |
+| `FlipY` | proxy field | `boolean` | read/write | All | Whether the image is mirrored top to bottom about its pivot. |
+| `Frame` | proxy field | `number` | read/write | All | The index of the sheet's frame to draw; an index the sheet lacks draws nothing (SPRITE_FRAME_OUT_OF_RANGE). |
+| `Lit` | proxy field | `boolean` | read/write | All | Whether 2D lights light the sprite; an unlit sprite keeps its texels unchanged. |
+| `NormalMap` | proxy field | `AssetRef?` | read/write | All | A lit sprite's tangent-space normal map, laid like its image; point lights then light it by the angle to the light. Null: flat. |
+| `OrderInLayer` | proxy field | `number` | read/write | All | The draw order within the sorting layer: higher values draw over lower ones, equal values in canonical entity order. |
+| `PixelsPerUnit` | proxy field | `number` | read/write | All | How many texels of the image make one unit of the entity's local space; the sprite's size is its texels divided by this. |
+| `SetFrameByName` | method | `(self: SpriteRenderer, name: string) -> ()` |  | All | Set Frame to the index of the sprite sheet's frame named name; an error names the sheet when it has no such frame. |
+| `Sheet` | proxy field | `AssetRef?` | read/write | All | The sprite sheet whose frame Frame is drawn; null draws Texture whole. |
+| `SortingLayer` | proxy field | `string` | read/write | All | The sorting layer name from project settings; later layers draw over earlier ones, and an undeclared name draws in the first. A value a script writes holds at most 4096 bytes of text. |
+| `Texture` | proxy field | `AssetRef?` | read/write | All | The texture drawn whole, pivoted at its centre, when Sheet is null; null draws the built-in white square. |
 
-## UiText
+## SpriteAnimator
 
-Draws text in a UI element's rectangle, wrapped and aligned in it.
+Plays a clip of the SpriteRenderer's sprite sheet, one step per clip frame for its ticks, driven by the fixed step.
 
-- Category: Ui
+- Category: Rendering2D
 - Version: 1
 - Flags: Serializable, ScriptVisible, EditorVisible, Removable
-- Requires: `UiRect`
+- Requires: `SpriteRenderer`
 - Excludes: none
 
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
-| `Text` | `String` | `""` |  |  |  | The UTF-8 text; a line feed starts a new line. Scripts read localized strings with Loc.Get. |
-| `Font` | `AssetRef(Font)` | `null` |  |  |  | The font; null uses its canvas's Font, or the default font when the canvas names none. |
-| `Size` | `Float` | `32` | 1 to 1e+05 | units |  | The em size in canvas units. |
-| `Color` | `Color4` | `[1,1,1,1]` | 0 to 1 |  |  | The linear text colour with opacity in the fourth component. |
-| `Alignment` | `TextAlignment` | `"Left"` |  |  |  | How each line is aligned within the rectangle's width. |
-| `VerticalAlignment` | `UiTextVerticalAlignment` | `"Top"` |  |  |  | Where the text block sits in the rectangle's height. |
-| `Wrap` | `Bool` | `true` |  |  |  | Whether lines break at spaces to fit the rectangle's width. |
-| `LineSpacing` | `Float` | `1` | 0.1 to 10 |  |  | Multiplies the font's line height. |
-| `RaycastTarget` | `Bool` | `true` |  |  |  | Whether the text catches the pointer for its nearest widget; false lets the pointer pass through it. |
+| `Clip` | `String` | `""` |  |  |  | The name of the sheet's clip to play; empty plays nothing. |
+| `Playing` | `Bool` | `true` |  |  |  | Whether the clip advances each fixed step; a clip without Loop clears it after its last step and holds its last frame. |
+| `Step` | `UInt32` | `0` | 0 to 1023 |  |  | The index of the clip step shown. |
+| `StepTicks` | `UInt32` | `0` | 0 to 65534 |  |  | How many fixed steps the current clip step has been shown. |
 
-Script members of `UiText`:
+Script members of `SpriteAnimator`:
 
 | Member | Kind | Signature | Access | Modes | Description |
 |---|---|---|---|---|---|
-| `Alignment` | proxy field | `TextAlignment` | read/write | All | How each line is aligned within the rectangle's width. |
-| `Color` | proxy field | `Color` | read/write | All | The linear text colour with opacity in the fourth component. |
-| `Font` | proxy field | `AssetRef?` | read/write | All | The font; null uses its canvas's Font, or the default font when the canvas names none. |
-| `LineSpacing` | proxy field | `number` | read/write | All | Multiplies the font's line height. |
-| `RaycastTarget` | proxy field | `boolean` | read/write | All | Whether the text catches the pointer for its nearest widget; false lets the pointer pass through it. |
-| `Size` | proxy field | `number` | read/write | All | The em size in canvas units. |
-| `Text` | proxy field | `string` | read/write | All | The UTF-8 text; a line feed starts a new line. Scripts read localized strings with Loc.Get. A value a script writes holds at most 4096 bytes of text. |
-| `VerticalAlignment` | proxy field | `UiTextVerticalAlignment` | read/write | All | Where the text block sits in the rectangle's height. |
-| `Wrap` | proxy field | `boolean` | read/write | All | Whether lines break at spaces to fit the rectangle's width. |
+| `Clip` | proxy field | `string` | read/write | All | The name of the sheet's clip to play; empty plays nothing. A value a script writes holds at most 4096 bytes of text. |
+| `Play` | method | `(self: SpriteAnimator, clip: string) -> ()` |  | All | Play the sheet's clip named clip from its first step, which shows at the next fixed step's SpriteAnimation phase. |
+| `Playing` | proxy field | `boolean` | read/write | All | Whether the clip advances each fixed step; a clip without Loop clears it after its last step and holds its last frame. |
+| `Step` | proxy field | `number` | read/write | All | The index of the clip step shown. |
+| `StepTicks` | proxy field | `number` | read/write | All | How many fixed steps the current clip step has been shown. |
+| `Stop` | method | `(self: SpriteAnimator) -> ()` |  | All | Stop advancing the clip; the frame shown stays. |
 
-## UiLayout
+## PixelPerfectCamera
 
-A container that places its children's rectangles in a stack, a grid or a flexible row or column.
+Renders the entity's camera at a reference resolution, upscaled by the largest whole factor that fits the view in a letterbox.
 
-- Category: Ui
+- Category: Rendering2D
 - Version: 1
 - Flags: Serializable, ScriptVisible, EditorVisible, Removable
-- Requires: `UiRect`
+- Requires: `Camera`
 - Excludes: none
 
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
-| `Kind` | `UiLayoutKind` | `"Stack"` |  |  |  | How the children are placed. |
-| `Direction` | `UiLayoutDirection` | `"Vertical"` |  |  |  | The main axis the children follow. |
-| `Padding` | `UiPadding` | `{"Left":0,"Top":0,"Right":0,"Bottom":0}` |  |  |  | Insets of the container's rectangle that the children are placed in. |
-| `Spacing` | `Vec2` | `[0,0]` | 0 to 1e+06 | units |  | The gaps between children, lines and cells along x and y, in canvas units. |
-| `MainAlignment` | `UiMainAlignment` | `"Start"` |  |  |  | Where the children sit along the main axis when they do not fill it. |
-| `CrossAlignment` | `UiCrossAlignment` | `"Start"` |  |  |  | Where each child sits across the main axis. |
-| `Columns` | `UInt32` | `0` | 0 to 1024 |  |  | Grid: the cells per row (Horizontal) or per column (Vertical); 0 fits as many as the container holds. |
-| `CellSize` | `Vec2` | `[100,100]` | 0 to 1e+06 | units |  | Grid: the size of each cell in canvas units. |
-| `Wrap` | `Bool` | `false` |  |  |  | Flex: whether a child that does not fit the line starts a new line. |
+| `ReferenceWidth` | `UInt32` | `320` | 1 to 8192 | px |  | The width the scene renders at, in pixels. |
+| `ReferenceHeight` | `UInt32` | `180` | 1 to 8192 | px |  | The height the scene renders at, in pixels; the orthographic view is this many pixels of PixelsPerUnit high. |
+| `PixelsPerUnit` | `Float` | `16` | 0.001 to 65536 | px |  | How many scene pixels make one world unit; sprites of the same PixelsPerUnit map each texel to one pixel. |
+| `LetterboxColor` | `Color3` | `[0,0,0]` | 0 to 1 |  |  | The linear colour of the bars around the upscaled image. |
 
-Script members of `UiLayout`:
+Script members of `PixelPerfectCamera`:
 
 | Member | Kind | Signature | Access | Modes | Description |
 |---|---|---|---|---|---|
-| `CellSize` | proxy field | `vector` | read/write | All | Grid: the size of each cell in canvas units. |
-| `Columns` | proxy field | `number` | read/write | All | Grid: the cells per row (Horizontal) or per column (Vertical); 0 fits as many as the container holds. |
-| `CrossAlignment` | proxy field | `UiCrossAlignment` | read/write | All | Where each child sits across the main axis. |
-| `Direction` | proxy field | `UiLayoutDirection` | read/write | All | The main axis the children follow. |
-| `Kind` | proxy field | `UiLayoutKind` | read/write | All | How the children are placed. |
-| `MainAlignment` | proxy field | `UiMainAlignment` | read/write | All | Where the children sit along the main axis when they do not fill it. |
-| `Padding` | proxy field | `{Left: number, Top: number, Right: number, Bottom: number}` | read/write | All | Insets of the container's rectangle that the children are placed in. |
-| `Spacing` | proxy field | `vector` | read/write | All | The gaps between children, lines and cells along x and y, in canvas units. |
-| `Wrap` | proxy field | `boolean` | read/write | All | Flex: whether a child that does not fit the line starts a new line. |
+| `LetterboxColor` | proxy field | `Color` | read/write | All | The linear colour of the bars around the upscaled image. |
+| `PixelsPerUnit` | proxy field | `number` | read/write | All | How many scene pixels make one world unit; sprites of the same PixelsPerUnit map each texel to one pixel. |
+| `ReferenceHeight` | proxy field | `number` | read/write | All | The height the scene renders at, in pixels; the orthographic view is this many pixels of PixelsPerUnit high. |
+| `ReferenceWidth` | proxy field | `number` | read/write | All | The width the scene renders at, in pixels. |
 
-## UiLayoutElement
+## Light2D
 
-How a UI element takes part in its parent's layout container: flex weights, a minimum size, or none.
+A 2D light: lights the lit sprites and tilemaps of the view, never unlit ones; no shadows.
 
-- Category: Ui
+- Category: Rendering2D
 - Version: 1
 - Flags: Serializable, ScriptVisible, EditorVisible, Removable
-- Requires: `UiRect`
+- Requires: `Transform`
 - Excludes: none
 
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
-| `IgnoreLayout` | `Bool` | `false` |  |  |  | Whether the element keeps its own placement and takes no space in the container. |
-| `Grow` | `Float` | `0` | 0 to 1000 |  |  | Flex: the element's share of the main axis's free space. |
-| `Shrink` | `Float` | `1` | 0 to 1000 |  |  | Flex: the element's share, times its preferred size, of the main axis's overflow. |
-| `MinSize` | `Vec2` | `[0,0]` | 0 to 1e+06 | units |  | The size the element never goes below in a Stack or Flex container, in canvas units. |
+| `Type` | `Light2DType` | `"Point"` |  |  |  | Whether the light is a point light around the entity or a global light of the whole view. |
+| `Color` | `Color3` | `[1,1,1]` | 0 to 1 |  |  | The light's linear colour. |
+| `Intensity` | `Float` | `1` | 0 to 1000 |  |  | How strong the light is: its colour is multiplied by this, so values above 1 overbright. |
+| `Radius` | `Float` | `5` | 0.001 to 1e+05 | m |  | Point: how far the light reaches from the entity, in world units. |
+| `Falloff` | `Float` | `0.5` | 0 to 1 |  |  | Point: the fraction of the radius, from its edge inward, over which the light fades smoothly to nothing; 0 is a hard edge. |
+| `Height` | `Float` | `1` | 0.001 to 1e+05 | m |  | Point: how far above the lit plane the light sits, in world units; only normal-mapped sprites read it. |
 
-Script members of `UiLayoutElement`:
+Script members of `Light2D`:
 
 | Member | Kind | Signature | Access | Modes | Description |
 |---|---|---|---|---|---|
-| `Grow` | proxy field | `number` | read/write | All | Flex: the element's share of the main axis's free space. |
-| `IgnoreLayout` | proxy field | `boolean` | read/write | All | Whether the element keeps its own placement and takes no space in the container. |
-| `MinSize` | proxy field | `vector` | read/write | All | The size the element never goes below in a Stack or Flex container, in canvas units. |
-| `Shrink` | proxy field | `number` | read/write | All | Flex: the element's share, times its preferred size, of the main axis's overflow. |
+| `Color` | proxy field | `Color` | read/write | All | The light's linear colour. |
+| `Falloff` | proxy field | `number` | read/write | All | Point: the fraction of the radius, from its edge inward, over which the light fades smoothly to nothing; 0 is a hard edge. |
+| `Height` | proxy field | `number` | read/write | All | Point: how far above the lit plane the light sits, in world units; only normal-mapped sprites read it. |
+| `Intensity` | proxy field | `number` | read/write | All | How strong the light is: its colour is multiplied by this, so values above 1 overbright. |
+| `Radius` | proxy field | `number` | read/write | All | Point: how far the light reaches from the entity, in world units. |
+| `Type` | proxy field | `Light2DType` | read/write | All | Whether the light is a point light around the entity or a global light of the whole view. |
 
-## UiButton
+## TilemapRenderer
 
-A UI button: a pointer click or Submit while focused raises OnUiClick.
+Draws a tilemap's tiles in the entity's XY plane, each tile as a sprite of its palette entry's sheet frame.
 
-- Category: Ui
+- Category: Rendering2D
 - Version: 1
 - Flags: Serializable, ScriptVisible, EditorVisible, Removable
-- Requires: `UiRect`
-- Excludes: `UiToggle`, `UiSlider`, `UiScrollView`, `UiTextInput`
+- Requires: `Transform`
+- Excludes: none
 
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
-| `Interactable` | `Bool` | `true` |  |  |  | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
-| `Focusable` | `Bool` | `true` |  |  |  | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
+| `Tilemap` | `AssetRef(Tilemap)` | `null` |  |  |  | The tilemap whose tiles are drawn; null draws nothing. |
+| `Color` | `Color4` | `[1,1,1,1]` | 0 to 1 |  |  | The linear colour every tile's texels are multiplied with, with opacity in the fourth component. |
+| `PixelsPerUnit` | `Float` | `16` | 0.001 to 65536 | px |  | How many texels of a tile's frame make one unit of the entity's local space, as a sprite's. |
+| `SortingLayer` | `String` | `"Default"` |  |  |  | The sorting layer name from project settings; the tilemap sorts with the sprites, and an undeclared name draws in the first. |
+| `OrderInLayer` | `Int32` | `0` |  |  |  | The draw order within the sorting layer, among the sprites: higher values draw over lower ones, equal values in canonical entity order. |
+| `Lit` | `Bool` | `false` |  |  |  | Whether 2D lights light the tiles; unlit tiles keep their texels unchanged. |
 
-Script members of `UiButton`:
+Script members of `TilemapRenderer`:
 
 | Member | Kind | Signature | Access | Modes | Description |
 |---|---|---|---|---|---|
-| `Focusable` | proxy field | `boolean` | read/write | All | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
-| `Interactable` | proxy field | `boolean` | read/write | All | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
+| `Color` | proxy field | `Color` | read/write | All | The linear colour every tile's texels are multiplied with, with opacity in the fourth component. |
+| `Lit` | proxy field | `boolean` | read/write | All | Whether 2D lights light the tiles; unlit tiles keep their texels unchanged. |
+| `OrderInLayer` | proxy field | `number` | read/write | All | The draw order within the sorting layer, among the sprites: higher values draw over lower ones, equal values in canonical entity order. |
+| `PixelsPerUnit` | proxy field | `number` | read/write | All | How many texels of a tile's frame make one unit of the entity's local space, as a sprite's. |
+| `SortingLayer` | proxy field | `string` | read/write | All | The sorting layer name from project settings; the tilemap sorts with the sprites, and an undeclared name draws in the first. A value a script writes holds at most 4096 bytes of text. |
+| `Tilemap` | proxy field | `AssetRef?` | read/write | All | The tilemap whose tiles are drawn; null draws nothing. |
 
-## UiToggle
+## RigidBody2D
 
-A UI toggle: a pointer click or Submit while focused flips IsOn and raises OnUiValueChanged; Graphic shows while it is on.
+Simulates the entity in the 2D world: moves along world X and Y and rotates about world Z.
 
-- Category: Ui
+- Category: Physics2D
 - Version: 1
 - Flags: Serializable, ScriptVisible, EditorVisible, Removable
-- Requires: `UiRect`
-- Excludes: `UiButton`, `UiSlider`, `UiScrollView`, `UiTextInput`
+- Requires: `Transform`
+- Excludes: none
 
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
-| `Interactable` | `Bool` | `true` |  |  |  | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
-| `Focusable` | `Bool` | `true` |  |  |  | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
-| `IsOn` | `Bool` | `false` |  |  |  | Whether the toggle is on. |
-| `Graphic` | `EntityRef` | `null` |  |  |  | A UI element below the toggle (its check mark) that is drawn and hit only while the toggle is on; null for none. |
+| `Type` | `BodyType` | `"Dynamic"` |  |  |  | Static never moves; Kinematic is moved by script; Dynamic is simulated. |
+| `Mass` | `Float` | `1` | 0.001 to 1e+09 | kg |  | Mass in kilograms (Dynamic only). |
+| `Friction` | `Float` | `0.5` | >= 0 |  |  | The friction coefficient of the body's surfaces; a contact uses the geometric mean of both bodies' values. |
+| `Restitution` | `Float` | `0` | 0 to 1 |  |  | Bounciness, from no bounce (0) to a perfectly elastic bounce (1); a contact uses the larger of both bodies' values. |
+| `LinearDamping` | `Float` | `0.05` | >= 0 |  |  | How quickly linear velocity decays, per second. |
+| `AngularDamping` | `Float` | `0.05` | >= 0 |  |  | How quickly angular velocity decays, per second. |
+| `GravityFactor` | `Float` | `1` |  |  |  | The multiplier of the project's 2D gravity for this body (0 floats). |
+| `MotionQuality` | `MotionQuality` | `"Discrete"` |  |  |  | Discrete or continuous (LinearCast) collision detection. |
+| `AllowSleeping` | `Bool` | `true` |  |  |  | Whether the body may sleep when it comes to rest. |
+| `FixedRotation` | `Bool` | `false` |  |  |  | Whether a Dynamic body is kept from rotating. |
+| `Layer` | `String` | `"Default"` |  |  |  | Physics layer name from project settings (the 3D world's layers). |
+| `MaxLinearVelocity` | `Float` | `500` | >= 0 | m/s |  | The speed the body is clamped to, in metres per second. |
+| `MaxAngularVelocity` | `Float` | `47.12` | >= 0 | rad/s |  | The angular speed the body is clamped to, in radians per second. |
+| `EnhancedInternalEdgeRemoval` | `Bool` | `false` |  |  |  | Removes ghost collisions with internal edges of compound shapes; set it on bodies that roll or slide across tiles. |
+| `InitialLinearVelocity` | `Vec2` | `[0,0]` |  | m/s |  | The velocity along world X and Y the body starts with, in metres per second. |
+| `InitialAngularVelocity` | `Float` | `0` |  | rad/s |  | The angular velocity about world Z the body starts with, in radians per second, counter-clockwise seen from +Z. |
 
-Script members of `UiToggle`:
+Script members of `RigidBody2D`:
 
 | Member | Kind | Signature | Access | Modes | Description |
 |---|---|---|---|---|---|
-| `Focusable` | proxy field | `boolean` | read/write | All | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
-| `Graphic` | proxy field | `Entity?` | read/write | All | A UI element below the toggle (its check mark) that is drawn and hit only while the toggle is on; null for none. |
-| `Interactable` | proxy field | `boolean` | read/write | All | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
-| `IsOn` | proxy field | `boolean` | read/write | All | Whether the toggle is on. |
+| `AddAngularImpulse` | method | `(self: RigidBody2D, impulse: number) -> ()` |  | All | Apply an angular impulse about +Z to a Dynamic 2D body. |
+| `AddForce` | method | `(self: RigidBody2D, force: vector) -> ()` |  | All | Apply a force in the XY plane to a Dynamic 2D body. |
+| `AddForceAtPosition` | method | `(self: RigidBody2D, force: vector, position: vector) -> ()` |  | All | Apply a force in the XY plane at a world position of the plane to a Dynamic 2D body. |
+| `AddImpulse` | method | `(self: RigidBody2D, impulse: vector) -> ()` |  | All | Apply an impulse in the XY plane to a Dynamic 2D body. |
+| `AddTorque` | method | `(self: RigidBody2D, torque: number) -> ()` |  | All | Apply a torque about +Z, in newton metres, to a Dynamic 2D body. |
+| `AllowSleeping` | proxy field | `boolean` | read/write | All | Whether the body may sleep when it comes to rest. |
+| `AngularDamping` | proxy field | `number` | read/write | All | How quickly angular velocity decays, per second. |
+| `EnhancedInternalEdgeRemoval` | proxy field | `boolean` | read/write | All | Removes ghost collisions with internal edges of compound shapes; set it on bodies that roll or slide across tiles. |
+| `FixedRotation` | proxy field | `boolean` | read/write | All | Whether a Dynamic body is kept from rotating. |
+| `Friction` | proxy field | `number` | read/write | All | The friction coefficient of the body's surfaces; a contact uses the geometric mean of both bodies' values. |
+| `GetAngularVelocity` | method | `(self: RigidBody2D) -> number` |  | All | Read the angular velocity about +Z in radians per second. |
+| `GetLinearVelocity` | method | `(self: RigidBody2D) -> vector` |  | All | Read the linear velocity in the XY plane (Z is 0). |
+| `GravityFactor` | proxy field | `number` | read/write | All | The multiplier of the project's 2D gravity for this body (0 floats). |
+| `InitialAngularVelocity` | proxy field | `number` | read/write | All | The angular velocity about world Z the body starts with, in radians per second, counter-clockwise seen from +Z. |
+| `InitialLinearVelocity` | proxy field | `vector` | read/write | All | The velocity along world X and Y the body starts with, in metres per second. |
+| `IsSleeping` | method | `(self: RigidBody2D) -> boolean` |  | All | Whether the 2D body is sleeping. |
+| `Layer` | proxy field | `string` | read/write | All | Physics layer name from project settings (the 3D world's layers). A value a script writes holds at most 4096 bytes of text. |
+| `LinearDamping` | proxy field | `number` | read/write | All | How quickly linear velocity decays, per second. |
+| `Mass` | proxy field | `number` | read/write | All | Mass in kilograms (Dynamic only). |
+| `MaxAngularVelocity` | proxy field | `number` | read/write | All | The angular speed the body is clamped to, in radians per second. |
+| `MaxLinearVelocity` | proxy field | `number` | read/write | All | The speed the body is clamped to, in metres per second. |
+| `MotionQuality` | proxy field | `MotionQuality` | read/write | All | Discrete or continuous (LinearCast) collision detection. |
+| `MoveKinematic` | method | `(self: RigidBody2D, position: vector, angle: number) -> ()` |  | All | Set a Kinematic 2D target in the plane, the angle in degrees about +Z, for the next fixed step. |
+| `Restitution` | proxy field | `number` | read/write | All | Bounciness, from no bounce (0) to a perfectly elastic bounce (1); a contact uses the larger of both bodies' values. |
+| `SetAngularVelocity` | method | `(self: RigidBody2D, velocity: number) -> ()` |  | All | Set a Dynamic 2D body's angular velocity about +Z in radians per second. |
+| `SetLinearVelocity` | method | `(self: RigidBody2D, velocity: vector) -> ()` |  | All | Set a Dynamic 2D body's linear velocity from the vector's X and Y. |
+| `Teleport` | method | `(self: RigidBody2D, position: vector, angle: number?) -> ()` |  | All | Place a 2D body at once in the plane (the entity keeps its Z), the angle in degrees about +Z kept when omitted, preserving velocity and resetting interpolation. |
+| `Type` | proxy field | `BodyType` | read/write | All | Static never moves; Kinematic is moved by script; Dynamic is simulated. |
+| `WakeUp` | method | `(self: RigidBody2D) -> ()` |  | All | Wake a sleeping 2D body. |
 
-## UiSlider
+## BoxCollider2D
 
-A UI slider: the pointer drags its value between Min and Max and the directions along it step it, raising OnUiValueChanged.
+A rectangle collider in the entity's XY plane.
 
-- Category: Ui
+- Category: Physics2D
 - Version: 1
 - Flags: Serializable, ScriptVisible, EditorVisible, Removable
-- Requires: `UiRect`
-- Excludes: `UiButton`, `UiToggle`, `UiScrollView`, `UiTextInput`
+- Requires: `Transform`
+- Excludes: none
 
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
-| `Interactable` | `Bool` | `true` |  |  |  | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
-| `Focusable` | `Bool` | `true` |  |  |  | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
-| `Value` | `Float` | `0` | -1e+06 to 1e+06 |  |  | The value, read clamped to Min and Max (and rounded with WholeNumbers). |
-| `Min` | `Float` | `0` | -1e+06 to 1e+06 |  |  | The value at the start edge (left, or bottom when Vertical); below Max. |
-| `Max` | `Float` | `1` | -1e+06 to 1e+06 |  |  | The value at the end edge (right, or top when Vertical). |
-| `WholeNumbers` | `Bool` | `false` |  |  |  | Whether the value is rounded to whole numbers. |
-| `Step` | `Float` | `0` | 0 to 1e+06 |  |  | The change per navigation press along the slider; 0 is a tenth of the range. With WholeNumbers it is rounded to a whole number of at least 1. |
-| `Direction` | `UiLayoutDirection` | `"Horizontal"` |  |  |  | Horizontal puts Min at the left edge; Vertical puts it at the bottom edge. |
-| `Fill` | `EntityRef` | `null` |  |  |  | A UI element below the slider stretched from the Min edge to the value; null for none. |
-| `Handle` | `EntityRef` | `null` |  |  |  | A UI element below the slider placed at the value; null for none. |
+| `HalfExtents` | `Vec2` | `[0.5,0.5]` | >= 0.001 | m |  | Half the rectangle's size along local X and Y; at least 1 mm. |
+| `Offset` | `Vec2` | `[0,0]` |  | m |  | The rectangle's centre relative to the entity, in its XY plane. |
+| `Angle` | `Float` | `0` |  | deg |  | The rectangle's rotation about the entity's Z axis, counter-clockwise, in degrees. |
+| `IsTrigger` | `Bool` | `false` |  |  |  | Whether the collider only detects overlaps instead of colliding. |
 
-Script members of `UiSlider`:
+Script members of `BoxCollider2D`:
 
 | Member | Kind | Signature | Access | Modes | Description |
 |---|---|---|---|---|---|
-| `Direction` | proxy field | `UiLayoutDirection` | read/write | All | Horizontal puts Min at the left edge; Vertical puts it at the bottom edge. |
-| `Fill` | proxy field | `Entity?` | read/write | All | A UI element below the slider stretched from the Min edge to the value; null for none. |
-| `Focusable` | proxy field | `boolean` | read/write | All | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
-| `Handle` | proxy field | `Entity?` | read/write | All | A UI element below the slider placed at the value; null for none. |
-| `Interactable` | proxy field | `boolean` | read/write | All | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
-| `Max` | proxy field | `number` | read/write | All | The value at the end edge (right, or top when Vertical). |
-| `Min` | proxy field | `number` | read/write | All | The value at the start edge (left, or bottom when Vertical); below Max. |
-| `Step` | proxy field | `number` | read/write | All | The change per navigation press along the slider; 0 is a tenth of the range. With WholeNumbers it is rounded to a whole number of at least 1. |
-| `Value` | proxy field | `number` | read/write | All | The value, read clamped to Min and Max (and rounded with WholeNumbers). |
-| `WholeNumbers` | proxy field | `boolean` | read/write | All | Whether the value is rounded to whole numbers. |
+| `Angle` | proxy field | `number` | read/write | All | The rectangle's rotation about the entity's Z axis, counter-clockwise, in degrees. |
+| `HalfExtents` | proxy field | `vector` | read/write | All | Half the rectangle's size along local X and Y; at least 1 mm. |
+| `IsTrigger` | proxy field | `boolean` | read/write | All | Whether the collider only detects overlaps instead of colliding. |
+| `Offset` | proxy field | `vector` | read/write | All | The rectangle's centre relative to the entity, in its XY plane. |
 
-## UiScrollView
+## CircleCollider2D
 
-A UI scroll view: clips its descendants and moves its Content by the scroll position, which the wheel, a drag and focus change.
+A circle collider in the entity's XY plane.
 
-- Category: Ui
+- Category: Physics2D
 - Version: 1
 - Flags: Serializable, ScriptVisible, EditorVisible, Removable
-- Requires: `UiRect`
-- Excludes: `UiButton`, `UiToggle`, `UiSlider`, `UiTextInput`
+- Requires: `Transform`
+- Excludes: none
 
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
-| `Interactable` | `Bool` | `true` |  |  |  | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
-| `Focusable` | `Bool` | `false` |  |  |  | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
-| `Content` | `EntityRef` | `null` |  |  |  | The UI element below the scroll view that scrolls; null scrolls nothing. |
-| `Horizontal` | `Bool` | `false` |  |  |  | Whether the content scrolls along x. |
-| `Vertical` | `Bool` | `true` |  |  |  | Whether the content scrolls along y. |
-| `ScrollPosition` | `Vec2` | `[0,0]` | 0 to 1e+06 | units |  | Canvas units the content is moved left (x) and up (y), read clamped to the content's overflow. |
-| `ScrollStep` | `Float` | `40` | 0 to 1e+06 | units |  | Canvas units per wheel step and per navigation press. |
+| `Radius` | `Float` | `0.5` | >= 0.001 | m |  | The circle's radius; at least 1 mm. |
+| `Offset` | `Vec2` | `[0,0]` |  | m |  | The circle's centre relative to the entity, in its XY plane. |
+| `IsTrigger` | `Bool` | `false` |  |  |  | Whether the collider only detects overlaps instead of colliding. |
 
-Script members of `UiScrollView`:
+Script members of `CircleCollider2D`:
 
 | Member | Kind | Signature | Access | Modes | Description |
 |---|---|---|---|---|---|
-| `Content` | proxy field | `Entity?` | read/write | All | The UI element below the scroll view that scrolls; null scrolls nothing. |
-| `Focusable` | proxy field | `boolean` | read/write | All | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
-| `Horizontal` | proxy field | `boolean` | read/write | All | Whether the content scrolls along x. |
-| `Interactable` | proxy field | `boolean` | read/write | All | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
-| `ScrollPosition` | proxy field | `vector` | read/write | All | Canvas units the content is moved left (x) and up (y), read clamped to the content's overflow. |
-| `ScrollStep` | proxy field | `number` | read/write | All | Canvas units per wheel step and per navigation press. |
-| `Vertical` | proxy field | `boolean` | read/write | All | Whether the content scrolls along y. |
+| `IsTrigger` | proxy field | `boolean` | read/write | All | Whether the collider only detects overlaps instead of colliding. |
+| `Offset` | proxy field | `vector` | read/write | All | The circle's centre relative to the entity, in its XY plane. |
+| `Radius` | proxy field | `number` | read/write | All | The circle's radius; at least 1 mm. |
 
-## UiTextInput
+## PolygonCollider2D
 
-A UI text field: while focused, typed characters insert at its caret and the editing keys edit it, raising OnUiTextChanged; Enter raises OnUiSubmit.
+A convex polygon collider in the entity's XY plane.
 
-- Category: Ui
+- Category: Physics2D
 - Version: 1
 - Flags: Serializable, ScriptVisible, EditorVisible, Removable
-- Requires: `UiRect`
-- Excludes: `UiButton`, `UiToggle`, `UiSlider`, `UiScrollView`
+- Requires: `Transform`
+- Excludes: none
 
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
-| `Interactable` | `Bool` | `true` |  |  |  | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
-| `Focusable` | `Bool` | `true` |  |  |  | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
-| `Text` | `String` | `""` |  |  |  | The field's UTF-8 text: typing inserts at the caret; a script's write raises no OnUiTextChanged. |
-| `MaxLength` | `UInt32` | `256` | 1 to 1024 |  |  | The most codepoints typing reaches; characters typed past it are dropped. |
-| `Caret` | `UInt32` | `0` | >= 0 |  |  | The caret, in codepoints from the start of Text, read clamped to Text's length; typing and the editing keys move it. |
-| `TextElement` | `EntityRef` | `null` |  |  |  | A UI element below the input whose UiText shows the input's Text, with the caret while focused; null shows nothing. |
-| `Placeholder` | `EntityRef` | `null` |  |  |  | A UI element below the input shown only while its Text is empty (a hint); null for none. |
+| `Points` | `Array<Vec2>` | `[[-0.5,-0.5],[0.5,-0.5],[0,0.5]]` |  | m |  | The points whose convex hull is the collider, 3 to 64 of them, in the collider's own space before Offset and Angle. |
+| `Offset` | `Vec2` | `[0,0]` |  | m |  | Where the polygon's origin sits relative to the entity, in its XY plane. |
+| `Angle` | `Float` | `0` |  | deg |  | The polygon's rotation about the entity's Z axis, counter-clockwise, in degrees. |
+| `IsTrigger` | `Bool` | `false` |  |  |  | Whether the collider only detects overlaps instead of colliding. |
 
-Script members of `UiTextInput`:
+Script members of `PolygonCollider2D`:
 
 | Member | Kind | Signature | Access | Modes | Description |
 |---|---|---|---|---|---|
-| `Caret` | proxy field | `number` | read/write | All | The caret, in codepoints from the start of Text, read clamped to Text's length; typing and the editing keys move it. |
-| `Focusable` | proxy field | `boolean` | read/write | All | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
-| `Interactable` | proxy field | `boolean` | read/write | All | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
-| `MaxLength` | proxy field | `number` | read/write | All | The most codepoints typing reaches; characters typed past it are dropped. |
-| `Placeholder` | proxy field | `Entity?` | read/write | All | A UI element below the input shown only while its Text is empty (a hint); null for none. |
-| `Text` | proxy field | `string` | read/write | All | The field's UTF-8 text: typing inserts at the caret; a script's write raises no OnUiTextChanged. A value a script writes holds at most 4096 bytes of text. |
-| `TextElement` | proxy field | `Entity?` | read/write | All | A UI element below the input whose UiText shows the input's Text, with the caret while focused; null shows nothing. |
+| `Angle` | proxy field | `number` | read/write | All | The polygon's rotation about the entity's Z axis, counter-clockwise, in degrees. |
+| `IsTrigger` | proxy field | `boolean` | read/write | All | Whether the collider only detects overlaps instead of colliding. |
+| `Offset` | proxy field | `vector` | read/write | All | Where the polygon's origin sits relative to the entity, in its XY plane. |
+| `Points` | proxy field | `{vector}` | read/write | All | The points whose convex hull is the collider, 3 to 64 of them, in the collider's own space before Offset and Angle. |
+
+## TilemapCollider
+
+The solid cells of a tilemap as 2D colliders: each chunk's solid cells merged into boxes, one static compound without a RigidBody2D.
+
+- Category: Physics2D
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Tilemap` | `AssetRef(Tilemap)` | `null` |  |  |  | The tilemap whose solid cells collide; null takes the entity's TilemapRenderer.Tilemap. |
+| `IsTrigger` | `Bool` | `false` |  |  |  | Whether the collider only detects overlaps instead of colliding. |
+
+Script members of `TilemapCollider`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `IsTrigger` | proxy field | `boolean` | read/write | All | Whether the collider only detects overlaps instead of colliding. |
+| `Tilemap` | proxy field | `AssetRef?` | read/write | All | The tilemap whose solid cells collide; null takes the entity's TilemapRenderer.Tilemap. |
 
 ## Structs
 
@@ -1109,29 +1072,6 @@ One behaviour of a Script component.
 | `Script` | `AssetRef(Script)` | `null` |  |  |  | The Behaviour script. |
 | `Fields` | `Map<Variant>` | `{}` |  |  |  | Overrides of the script's declared fields, by name. |
 | `ExecutionOrder` | `Int32` | `0` |  |  |  | Callbacks run in (ExecutionOrder, canonical entity order, slot) order. |
-
-### UiPadding
-
-Insets of a UI layout container's rectangle, in canvas units.
-
-| Field | Type | Default | Range | Unit | Notes | Description |
-|---|---|---|---|---|---|---|
-| `Left` | `Float` | `0` | 0 to 1e+06 | units |  | The inset from the left edge. |
-| `Top` | `Float` | `0` | 0 to 1e+06 | units |  | The inset from the top edge. |
-| `Right` | `Float` | `0` | 0 to 1e+06 | units |  | The inset from the right edge. |
-| `Bottom` | `Float` | `0` | 0 to 1e+06 | units |  | The inset from the bottom edge. |
-
-### UiTheme
-
-The state tints of a canvas's widgets: each multiplies the colour of a widget element's own UiImage in that state.
-
-| Field | Type | Default | Range | Unit | Notes | Description |
-|---|---|---|---|---|---|---|
-| `Normal` | `Color4` | `[1,1,1,1]` | 0 to 1 |  |  | The tint of an interactable widget that is neither hovered, pressed nor focused. |
-| `Hovered` | `Color4` | `[0.85,0.85,0.85,1]` | 0 to 1 |  |  | The tint of a widget under the pointer. |
-| `Pressed` | `Color4` | `[0.6,0.6,0.6,1]` | 0 to 1 |  |  | The tint of a widget the pointer presses. |
-| `Focused` | `Color4` | `[0.75,0.85,1,1]` | 0 to 1 |  |  | The tint of the widget that has keyboard and gamepad focus. |
-| `Disabled` | `Color4` | `[0.5,0.5,0.5,0.5]` | 0 to 1 |  |  | The tint of a widget whose Interactable is false. |
 
 ## Enums
 
@@ -1176,6 +1116,15 @@ What a camera draws behind the scene's geometry.
 |---|---|
 | `Skybox` | The scene's Environment skybox (its fallback colour when none is shown). |
 | `Color` | The camera's ClearColor. |
+
+### Light2DType
+
+What a 2D light lights.
+
+| Value | Description |
+|---|---|
+| `Point` | A circle of light around the entity, fading to nothing at its Radius. |
+| `Global` | The same light at every lit pixel of the view, wherever the entity is. |
 
 ### MotionQuality
 
@@ -1246,89 +1195,3 @@ The curve that maps HDR scene colours to the display.
 | `ACES` | The ACES filmic approximation: higher contrast and saturation. |
 | `PbrNeutral` | Khronos PBR Neutral: keeps base colours faithful up to the highlights. |
 | `Linear` | No curve: exposure only, then clamped to the display range. |
-
-### UiCanvasRenderMode
-
-Where a UI canvas is drawn: over the scene image, or in the world.
-
-| Value | Description |
-|---|---|
-| `Screen` | Over the scene image, after the scene and its texts, laid out in scene pixels. |
-| `World` | As a rectangle in the world at the canvas entity's transform, depth-tested against the scene, laid out in its own canvas pixels. |
-
-### UiCrossAlignment
-
-Where each child of a container sits across its main axis.
-
-| Value | Description |
-|---|---|
-| `Start` | At the start of its line: the top (Horizontal) or the left edge (Vertical). |
-| `Center` | Centred across the main axis. |
-| `End` | At the end of its line: the bottom (Horizontal) or the right edge (Vertical). |
-| `Stretch` | Stretched to fill its line's cross size (a Grid child: its cell's). |
-
-### UiImageFilter
-
-How a UI image samples its texture.
-
-| Value | Description |
-|---|---|
-| `Point` | The nearest texel: pixel art, and a 1:1 image reproduces its texels exactly. |
-| `Linear` | Bilinear filtering between texels. |
-
-### UiImageType
-
-How a UI image fills its element's rectangle.
-
-| Value | Description |
-|---|---|
-| `Simple` | The sprite frame is stretched over the rectangle. |
-| `Sliced` | The frame's 9-slice borders keep their size; the edges and the centre stretch. |
-
-### UiLayoutDirection
-
-The main axis of a UI layout container.
-
-| Value | Description |
-|---|---|
-| `Horizontal` | Children follow each other from left to right. |
-| `Vertical` | Children follow each other from top to bottom. |
-
-### UiLayoutKind
-
-How a UI layout container places its children.
-
-| Value | Description |
-|---|---|
-| `Stack` | One after another along Direction, each at its own size. |
-| `Grid` | In cells of CellSize, Columns cells per row (Horizontal) or per column (Vertical). |
-| `Flex` | A stack whose children grow into free space and shrink when they overflow, wrapping with Wrap. |
-
-### UiMainAlignment
-
-Where a container's children sit along its main axis when they do not fill it.
-
-| Value | Description |
-|---|---|
-| `Start` | At the start: the left edge (Horizontal) or the top (Vertical). |
-| `Center` | Centred along the main axis. |
-| `End` | At the end: the right edge (Horizontal) or the bottom (Vertical). |
-
-### UiScaleMode
-
-How a UI canvas maps its units to scene pixels.
-
-| Value | Description |
-|---|---|
-| `ConstantPixelSize` | ScaleFactor scene pixels per canvas unit, whatever the scene resolution. |
-| `MatchHeight` | The canvas is ReferenceHeight units high, so it scales with the scene's height. |
-
-### UiTextVerticalAlignment
-
-Where a UI text block sits in its element's rectangle.
-
-| Value | Description |
-|---|---|
-| `Top` | The first line starts at the rectangle's top edge. |
-| `Middle` | The block is centred vertically in the rectangle. |
-| `Bottom` | The last line ends at the rectangle's bottom edge. |

@@ -70,6 +70,7 @@ namespace Engine {
 			[[nodiscard]] AssetManager* GetAssets() override { return &m_Assets; }
 			[[nodiscard]] const IFieldSchemaSource* GetFieldSchemas() const override { return m_Schemas.get(); }
 			[[nodiscard]] PhysicsSystem* GetPhysics() override { return Physics; }
+			[[nodiscard]] Physics2DSystem* GetPhysics2D() override { return Physics2D; }
 			[[nodiscard]] AudioSystem* GetAudio() override { return Audio; }
 			[[nodiscard]] DebugDrawList* GetDebugDraw() override { return &DebugDraw; }
 			[[nodiscard]] Random& GetRandom() override { return m_Random; }
@@ -103,6 +104,7 @@ namespace Engine {
 			DebugDrawList DebugDraw{};
 			// Optional test services over GetScene(); callers stop the VM before destroying these borrowed systems.
 			PhysicsSystem* Physics = nullptr;
+			Physics2DSystem* Physics2D = nullptr; // M21
 			AudioSystem* Audio = nullptr;
 			// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 28): the UI the Ui module reads (IScriptHost::GetUi); null
 			// as in an edit evaluation.

@@ -44,6 +44,8 @@ namespace Engine {
 				{ ".replay", "Replay", AssetType::Replay },
 				// M18.
 				{ ".spritesheet", "SpriteSheet", AssetType::SpriteSheet },
+				// M21.
+				{ ".tilemap", "Tilemap", AssetType::Tilemap },
 				// M22.
 				{ ".stringtable", "StringTable", AssetType::StringTable },
 			};
@@ -62,7 +64,7 @@ namespace Engine {
 			CHECK(importers.FindForExtension(".unknown") == nullptr);
 			CHECK(importers.FindForExtension(".SpriteSheet") == importers.FindById("SpriteSheet"));
 			CHECK(importers.FindForExtension(".StringTable") == importers.FindById("StringTable"));
-			CHECK(importers.GetImporters().size() == 13);
+			CHECK(importers.GetImporters().size() == 14);
 		}
 
 		TEST_CASE("ImporterRegistry: Describe lists ids, main types and extensions sorted by id")
@@ -70,9 +72,9 @@ namespace Engine {
 			ImporterRegistry importers;
 			RegisterBuiltinImporters(importers);
 			const std::vector<AssetImporterDescription> descriptions = importers.Describe();
-			REQUIRE(descriptions.size() == 13);
+			REQUIRE(descriptions.size() == 14);
 			CHECK(descriptions.front().Id == "Audio");
-			CHECK(descriptions.back().Id == "Texture");
+			CHECK(descriptions.back().Id == "Tilemap");
 			for (size_t index = 1; index < descriptions.size(); ++index)
 				CHECK(descriptions[index - 1].Id < descriptions[index].Id);
 		}
@@ -98,6 +100,9 @@ namespace Engine {
 			// M18: the sprite sheet importer has no settings; its document struct is the Asset module's (RegisterAssetTypes).
 			CHECK(importers.FindById("SpriteSheet")->GetSettingsTypeName().empty());
 			CHECK(registry->FindStruct("SpriteSheet") != nullptr);
+			// M21: neither has the tilemap importer; its document struct is the Asset module's too.
+			CHECK(importers.FindById("Tilemap")->GetSettingsTypeName().empty());
+			CHECK(registry->FindStruct("Tilemap") != nullptr);
 			// M22: neither has the string table importer; its document structs are the Asset module's too.
 			CHECK(importers.FindById("StringTable")->GetSettingsTypeName().empty());
 			CHECK(registry->FindStruct("StringTable") != nullptr);

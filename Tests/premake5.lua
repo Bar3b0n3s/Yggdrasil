@@ -20,7 +20,8 @@ project "Tests"
 	{
 		"Source/**.h",
 		"Source/**.cpp",
-		"../Editor/Source/Editor/**.cpp"
+		"../Editor/Source/Editor/**.cpp",
+		"../Runtime/Source/Runtime/RuntimeCursor.cpp"
 	}
 
 	-- Exercise the production UI with a headless ImGui context, without linking the Editor executable or moving UI
@@ -34,12 +35,19 @@ project "Tests"
 	filter "files:../Editor/Source/Editor/**.cpp"
 		enablepch "Off"
 
+	-- The Runtime's pure cursor mapping (RuntimeCursor.cpp, a RuntimeCore source without a precompiled header), compiled here
+	-- as the editor's sources are, so its test runs without a Runtime window (Docs/Decisions/0032-m21-contract.md, W21.1's
+	-- review).
+	filter "files:../Runtime/Source/Runtime/RuntimeCursor.cpp"
+		enablepch "Off"
+
 	filter {}
 
 	includedirs
 	{
 		"Source",
-		RepositoryRoot .. "/Editor/Source"
+		RepositoryRoot .. "/Editor/Source",
+		RepositoryRoot .. "/Runtime/Source"
 	}
 
 	externalincludedirs

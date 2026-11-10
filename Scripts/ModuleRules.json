@@ -625,6 +625,7 @@
 			"Projects": [
 				"EditorCore",
 				"Editor",
+				"Runtime",
 				"Tests",
 				"ShaderShared"
 			],
@@ -762,6 +763,7 @@
 			".meta",
 			".replay",
 			".spritesheet",
+			".tilemap",
 			".stringtable"
 		],
 		"LineDelimitedExtensions": [

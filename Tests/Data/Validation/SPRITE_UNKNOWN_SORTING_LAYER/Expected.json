@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["SPRITE_UNKNOWN_SORTING_LAYER"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

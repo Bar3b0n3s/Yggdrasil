@@ -14,6 +14,7 @@
 #include "Engine/Asset/AssetRegistry.h"
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/Asset/SpriteSheetData.h"
+#include "Engine/Asset/TilemapData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/Core/Assert.h"
@@ -50,20 +51,26 @@
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
 #include "Engine/Scene/Migrations.h"
+#include "Engine/Scene/Physics2DValidation.h"
 #include "Engine/Scene/PhysicsValidation.h"
 #include "Engine/Scene/Prefab.h"
 #include "Engine/Scene/RenderAnnotations.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Scene/SpriteValidation.h"
 #include "Engine/Scripting/ScriptAssetLoads.h"
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <charconv>
+#include <format>
+#include <iterator>
 #include <map>
 #include <optional>
 #include <set>
+#include <string>
+#include <string_view>
 #include <system_error>
 #include <tuple>
 #include <utility>
@@ -144,7 +151,18 @@ namespace Engine {
 			ScriptComputedAssetLoadCode,
 			// M20 (Scene/LoadReport.h, Docs/Decisions/0031-m20-contract.md decision 10), appended in landing order.
 			PrefabCycleCode,
-			// M22 (Docs/Decisions/0033-m22-contract.md decision 13), appended in landing order (ADR 0028's phase-2 ledger).
+			// M21 (Scene/SpriteValidation.h and Scene/Physics2DValidation.h, Docs/Decisions/0032-m21-contract.md decision 12), in
+			// that decision's order.
+			SpriteUnknownSortingLayerCode,
+			SpriteFrameOutOfRangeCode,
+			SpriteUnknownClipCode,
+			Physics2DMixedWorldsCode,
+			Physics2DOffPlaneCode,
+			// M21's C21.2 (Asset/TilemapData.h, Docs/Decisions/0032-m21-contract.md decision 30), after its C21.1 codes.
+			TilemapFrameOutOfRangeCode,
+			// M21's milestone review (Scene/SpriteValidation.h), at the end of M21's block.
+			SpriteFrameOutsideTextureCode,
+			// M22 (Docs/Decisions/0033-m22-contract.md decision 13), appended in landing order after M21's (ADR 0028's phase-2 ledger).
 			UiElementWithoutCanvasCode,
 			UiImageFrameOutOfRangeCode,
 			UiWidgetPartInvalidCode,
@@ -306,6 +324,29 @@ namespace Engine {
 			ValidationCodeInfo{ PrefabCycleCode, "Error", false,
 				"A prefab nests itself, directly or through other prefabs.",
 				"Remove the nested instance that closes the cycle from one of the prefab files, then reimport it." },
+			ValidationCodeInfo{ SpriteUnknownSortingLayerCode, "Warning", false,
+				"A SpriteRenderer or TilemapRenderer names a sorting layer that SortingLayers.Layers does not declare; it draws in the first layer.",
+				"Declare the layer with project.setSettings, or correct the name." },
+			ValidationCodeInfo{ SpriteFrameOutOfRangeCode, "Warning", false,
+				"A SpriteRenderer's Frame is not an index of its sprite sheet's frames; it draws nothing.",
+				"Set Frame below the sheet's frame count, or add the frame to the sheet." },
+			ValidationCodeInfo{ SpriteUnknownClipCode, "Warning", false,
+				"A SpriteAnimator's Clip names no clip of its SpriteRenderer's sprite sheet; it plays nothing.",
+				"Name a clip of the sheet, add the clip, or clear Clip." },
+			ValidationCodeInfo{ Physics2DMixedWorldsCode, "Error", false,
+				"An entity holds both 2D and 3D physics components; it stays in the 3D world and its 2D components make no body.",
+				"Remove the components of the world it does not belong to, or split the entity." },
+			ValidationCodeInfo{ Physics2DOffPlaneCode, "Warning", false,
+				"A 2D body's world rotation is not a rotation about Z alone; the body takes its rotation about Z.",
+				"Rotate the entity and its ancestors about Z only." },
+			ValidationCodeInfo{ TilemapFrameOutOfRangeCode, "Warning", false,
+				"A Tilemap's palette entry names a frame its sprite sheet does not have; the cells holding it draw nothing.",
+				"Set the entry's Frame below the sheet's frame count, add the frame to the sheet, or repaint the cells." },
+			ValidationCodeInfo{ SpriteFrameOutsideTextureCode, "Warning", false,
+				"A sprite sheet's frame extends past its texture's size, or a Tilemap's palette entry names such a frame; the sprite or the tiles "
+				"sample the texture's edge texels there.",
+				"Keep the frame's X + Width within the texture's width and Y + Height within its height, reimport the texture at the size the "
+				"frames expect, or name another frame." },
 			ValidationCodeInfo{ UiElementWithoutCanvasCode, "Warning", false,
 				"A UI element (an entity with UiRect) has no UiCanvas on an ancestor, so it is never laid out or drawn.",
 				"Move it below a canvas, or add a UiCanvas to its root." },
@@ -685,6 +726,23 @@ namespace Engine {
 			}
 		}
 
+		// The sprite checks (M21, Scene/SpriteValidation.h): SPRITE_UNKNOWN_SORTING_LAYER against the project's
+		// SortingLayers.Layers, and SPRITE_FRAME_OUT_OF_RANGE and SPRITE_UNKNOWN_CLIP against each sheet that loads; none is
+		// fixable.
+		static void CheckSprites(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			const std::vector<std::string>& layers = editor.GetProject().GetSettings().SortingLayers.Layers;
+			for (SpriteSceneIssue& issue : FindSpriteSceneIssues(*checked.Target, editor.GetEngine().GetAssetManager(), layers))
+			{
+				DiagnosticSite site;
+				site.File = checked.File;
+				site.Entity = FormatOptionalUUID(issue.Entity);
+				site.Component = std::move(issue.Component);
+				site.Field = std::move(issue.Field);
+				diagnostics.push_back(MakeDiagnostic(issue.Code, issue.Severity, std::move(issue.Message), site, std::move(issue.Hint), false));
+			}
+		}
+
 		static void CheckDanglingReferences(const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			const Scene& scene = *checked.Target;
@@ -1016,14 +1074,19 @@ namespace Engine {
 			});
 		}
 
-		// The physics codes of the scene (M11, Scene/PhysicsValidation.h). Mesh colliders load their meshes through the asset
-		// manager the editor injects into its engine context (EditorContext::Create). Only the open scene's diagnostics are
-		// fixable: the fix edits the open scene.
+		// The physics codes of the scene (M11, Scene/PhysicsValidation.h). Mesh colliders load their meshes, and (M21,
+		// Docs/Decisions/0032-m21-contract.md decision 25) tilemap colliders their tilemaps, through the asset manager the editor
+		// injects into its engine context (EditorContext::Create). Only the open scene's diagnostics are fixable: the fix edits
+		// the open scene.
 		static void CheckPhysics(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			if (checked.Layers == nullptr)
 				return;
-			for (const PhysicsDiagnostic& physics : ValidateScenePhysics(*checked.Target, *checked.Layers, editor.GetEngine().GetAssetManager()))
+			// M21 (Docs/Decisions/0032-m21-contract.md decision 12): the 2D world's diagnostics follow the 3D world's.
+			std::vector<PhysicsDiagnostic> found = ValidateScenePhysics(*checked.Target, *checked.Layers, editor.GetEngine().GetAssetManager());
+			std::vector<PhysicsDiagnostic> found2D = ValidateScenePhysics2D(*checked.Target, *checked.Layers, editor.GetEngine().GetAssetManager());
+			found.insert(found.end(), std::make_move_iterator(found2D.begin()), std::make_move_iterator(found2D.end()));
+			for (const PhysicsDiagnostic& physics : found)
 			{
 				DiagnosticSite site;
 				site.File = checked.File;
@@ -1325,6 +1388,7 @@ namespace Engine {
 			ENGINE_TRY(CheckSceneScripts(editor, checked, diagnostics));
 			CheckPhysics(editor, checked, diagnostics);
 			CheckLightLimit(checked, diagnostics);
+			CheckSprites(editor, checked, diagnostics);
 			CheckUi(editor, checked, diagnostics);
 			return CheckRenderScene(editor, checked, diagnostics);
 		}
@@ -1521,9 +1585,9 @@ namespace Engine {
 			}
 		}
 
-		// The asset references in the project's material, sprite sheet and prefab files: the registered main assets of the
-		// Material, SpriteSheet and Prefab importers (a glTF's materials reference its own textures and are checked by its
-		// import).
+		// The asset references in the project's material, sprite sheet, tilemap and prefab files: the registered main assets of
+		// the Material, SpriteSheet, Tilemap and Prefab importers (a glTF's materials reference its own textures and are checked
+		// by its import).
 		static void CheckAssetFiles(const EditorContext& editor, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			const TypeRegistry& registry = editor.GetTypeRegistry();
@@ -1532,8 +1596,9 @@ namespace Engine {
 				const AssetMetadata& metadata = record->Metadata;
 				const bool isMaterial = metadata.Kind == AssetMetaKind::Asset && metadata.Importer == "Material";
 				const bool isSpriteSheet = metadata.Kind == AssetMetaKind::Asset && metadata.Importer == "SpriteSheet";
+				const bool isTilemap = metadata.Kind == AssetMetaKind::Asset && metadata.Importer == "Tilemap";
 				const bool isPrefab = metadata.Kind == AssetMetaKind::Asset && metadata.Importer == "Prefab";
-				if (!isMaterial && !isSpriteSheet && !isPrefab)
+				if (!isMaterial && !isSpriteSheet && !isTilemap && !isPrefab)
 					continue;
 				const Result<std::string> text = editor.GetVfs().ReadText(record->SourcePath);
 				// An unreadable file is the import's to report (ASSET_IMPORT_FAILED).
@@ -1543,13 +1608,16 @@ namespace Engine {
 				if (!document.has_value() || !document->is_object())
 					continue;
 				const std::string file(record->SourcePath.GetPath());
-				if (isMaterial || isSpriteSheet)
+				if (isMaterial || isSpriteSheet || isTilemap)
 				{
-					// A sprite sheet's texture is checked as a material's (Docs/Decisions/0029-m18-contract.md decision 17).
-					const StructInfo* type = registry.FindStruct(isMaterial ? "Material" : "SpriteSheet");
+					// A sprite sheet's texture is checked as a material's (Docs/Decisions/0029-m18-contract.md decision 17), and a
+					// tilemap's palette sheets as a sprite sheet's texture (Docs/Decisions/0032-m21-contract.md decision 23).
+					const StructInfo* type = registry.FindStruct(isMaterial ? "Material" : isSpriteSheet ? "SpriteSheet"
+																										 : "Tilemap");
 					if (type == nullptr)
 						continue;
-					const std::string_view what = isMaterial ? "material" : "sprite sheet";
+					const std::string_view what = isMaterial ? "material" : isSpriteSheet ? "sprite sheet"
+																						  : "tilemap";
 					const auto visit = [&](const EntityRefSite& reference, AssetHandle handle, std::string_view acceptedType)
 					{
 						DiagnosticSite site;
@@ -1591,6 +1659,139 @@ namespace Engine {
 						};
 						CheckComponentAssets(editor, *info, component.value(), site, owner, diagnostics);
 					}
+				}
+			}
+		}
+
+		// TILEMAP_FRAME_OUT_OF_RANGE (M21, Docs/Decisions/0032-m21-contract.md decision 30): every palette entry of a tilemap
+		// file (a registered main asset of the Tilemap importer) whose Frame its sprite sheet lacks, once per entry, on the file
+		// with Field "Palette[<i>].Frame" (FindTilemapPaletteIssues, the sheets loaded through the editor's asset manager). A
+		// file that does not read is the import's to report (ASSET_IMPORT_FAILED), a sheet that is missing or of another type
+		// CheckAssetFiles' (ASSET_MISSING, ASSET_TYPE_MISMATCH).
+		static void CheckTilemapFrames(const EditorContext& editor, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			const TypeRegistry& registry = editor.GetTypeRegistry();
+			AssetManager* assets = editor.GetEngine().GetAssetManager();
+			if (assets == nullptr)
+				return;
+			for (const AssetRecord* record : editor.GetAssets().GetRegistry().GetRecords())
+			{
+				const AssetMetadata& metadata = record->Metadata;
+				if (metadata.Kind != AssetMetaKind::Asset || metadata.Importer != "Tilemap")
+					continue;
+				const Result<std::string> text = editor.GetVfs().ReadText(record->SourcePath);
+				if (!text.has_value())
+					continue;
+				TilemapLoadReport report;
+				const Result<TilemapData> tilemap = TilemapFromText(*text, registry, report);
+				if (!tilemap.has_value())
+					continue;
+				for (const TilemapPaletteIssue& issue : FindTilemapPaletteIssues(*tilemap, *assets))
+				{
+					DiagnosticSite site;
+					site.File = std::string(record->SourcePath.GetPath());
+					site.Field = std::format("Palette[{}].Frame", issue.Entry);
+					CollectedDiagnostic collected = MakeDiagnostic(TilemapFrameOutOfRangeCode, DiagnosticSeverity::Warning,
+						std::format("palette entry {} of the tilemap names frame {} of sprite sheet '{}', which has {} frames; the cells holding it draw nothing",
+							issue.Entry, issue.Frame, assets->GetReferencePath(issue.Sheet), issue.FrameCount),
+						site, "set the entry's Frame below the sheet's frame count, add the frame to the sheet, or repaint the cells", false);
+					collected.Diagnostic.Asset = metadata.Handle.ToString();
+					diagnostics.push_back(std::move(collected));
+				}
+			}
+		}
+
+		// SPRITE_FRAME_OUTSIDE_TEXTURE (M21's milestone review; Scene/SpriteValidation.h): every frame of a sprite sheet (a
+		// registered main asset of the SpriteSheet importer, loaded through the editor's asset manager) that extends past its
+		// texture's size, once per frame on the sheet's file with Field "Frames[<i>].Rect", and every palette entry of a
+		// tilemap file that names such a frame, once per entry with Field "Palette[<i>].Frame" (FindSpriteFramesOutsideTexture,
+		// the texture's imported width and height). A sheet or tilemap that does not load or read is the import's to report
+		// (ASSET_IMPORT_FAILED), a texture or sheet that is missing or of another type CheckAssetFiles' (ASSET_MISSING,
+		// ASSET_TYPE_MISMATCH), and a frame index past the sheet's frames TILEMAP_FRAME_OUT_OF_RANGE.
+		static void CheckSpriteFrameTextures(const EditorContext& editor, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			AssetManager* assets = editor.GetEngine().GetAssetManager();
+			if (assets == nullptr)
+				return;
+			// Each sheet checked once: its texture and the frames past it, by frame index (none for a sheet that does not load).
+			struct CheckedSheet
+			{
+				AssetHandle Texture{};
+				std::map<uint32_t, SpriteFrameTextureIssue> Frames{};
+			};
+			std::map<AssetHandle, CheckedSheet> sheets;
+			const auto check = [assets, &sheets](AssetHandle handle) -> const CheckedSheet&
+			{
+				if (const auto found = sheets.find(handle); found != sheets.end())
+					return found->second;
+				CheckedSheet& checked = sheets[handle];
+				if (assets->GetAssetType(handle) != AssetType::SpriteSheet)
+					return checked;
+				const Result<AssetRef<Asset>> loaded = assets->Load(handle);
+				const AssetRef<SpriteSheetData> sheet = loaded.has_value() ? AssetCast<SpriteSheetData>(*loaded) : nullptr;
+				if (sheet == nullptr)
+					return checked;
+				checked.Texture = sheet->Texture.GetHandle();
+				for (const SpriteFrameTextureIssue& issue : FindSpriteFramesOutsideTexture(*sheet, *assets))
+					checked.Frames.emplace(issue.Frame, issue);
+				return checked;
+			};
+			const std::string_view hint = "keep the frame's X + Width within the texture's width and Y + Height within its height, or reimport the "
+										  "texture at the size the frames expect";
+			const TypeRegistry& registry = editor.GetTypeRegistry();
+			for (const AssetRecord* record : editor.GetAssets().GetRegistry().GetRecords())
+			{
+				const AssetMetadata& metadata = record->Metadata;
+				if (metadata.Kind != AssetMetaKind::Asset)
+					continue;
+				const std::string file(record->SourcePath.GetPath());
+				if (metadata.Importer == "SpriteSheet")
+				{
+					const CheckedSheet& sheet = check(metadata.Handle);
+					for (const auto& [frame, issue] : sheet.Frames)
+					{
+						DiagnosticSite site;
+						site.File = file;
+						site.Field = std::format("Frames[{}].Rect", frame);
+						CollectedDiagnostic collected = MakeDiagnostic(SpriteFrameOutsideTextureCode, DiagnosticSeverity::Warning,
+							std::format("frame {} of the sprite sheet ends at texel ({}, {}), past its texture '{}' of {} x {} texels; it samples the texture's "
+										"edge texels there",
+								frame, issue.Right, issue.Bottom, assets->GetReferencePath(sheet.Texture), issue.TextureWidth, issue.TextureHeight),
+							site, std::string(hint), false);
+						collected.Diagnostic.Asset = metadata.Handle.ToString();
+						diagnostics.push_back(std::move(collected));
+					}
+					continue;
+				}
+				if (metadata.Importer != "Tilemap")
+					continue;
+				const Result<std::string> text = editor.GetVfs().ReadText(record->SourcePath);
+				if (!text.has_value())
+					continue;
+				TilemapLoadReport report;
+				const Result<TilemapData> tilemap = TilemapFromText(*text, registry, report);
+				if (!tilemap.has_value())
+					continue;
+				for (size_t entry = 0; entry < tilemap->Palette.size(); ++entry)
+				{
+					const TilemapTile& tile = tilemap->Palette[entry];
+					if (!tile.Sheet.GetHandle().IsValid())
+						continue;
+					const CheckedSheet& sheet = check(tile.Sheet.GetHandle());
+					const auto found = sheet.Frames.find(tile.Frame);
+					if (found == sheet.Frames.end())
+						continue;
+					DiagnosticSite site;
+					site.File = file;
+					site.Field = std::format("Palette[{}].Frame", entry);
+					CollectedDiagnostic collected = MakeDiagnostic(SpriteFrameOutsideTextureCode, DiagnosticSeverity::Warning,
+						std::format("palette entry {} of the tilemap names frame {} of sprite sheet '{}', which ends at texel ({}, {}), past its texture of {} x {} "
+									"texels; the cells holding it sample the texture's edge texels there",
+							entry, tile.Frame, assets->GetReferencePath(tile.Sheet.GetHandle()), found->second.Right, found->second.Bottom,
+							found->second.TextureWidth, found->second.TextureHeight),
+						site, "fix the sheet's frame, or name another frame", false);
+					collected.Diagnostic.Asset = metadata.Handle.ToString();
+					diagnostics.push_back(std::move(collected));
 				}
 			}
 		}
@@ -2020,6 +2221,8 @@ namespace Engine {
 				ENGINE_TRY_ASSIGN(collection.Scanned, ScanAssets(context, diagnostics));
 				CollectImportDiagnostics(context, diagnostics);
 				CheckAssetFiles(context, diagnostics);
+				CheckTilemapFrames(context, diagnostics);
+				CheckSpriteFrameTextures(context, diagnostics);
 				CheckPrefabNesting(context, diagnostics);
 				ENGINE_TRY(CheckPrefabScriptFields(context, diagnostics));
 				// Every other open scene's in-memory state replaces its file too (M20, Docs/Decisions/0031-m20-contract.md

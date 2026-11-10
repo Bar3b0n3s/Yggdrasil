@@ -512,17 +512,23 @@ namespace Engine {
 		return ComponentAccess::AddComponent(entity, component.GetName(), nullptr, schemas);
 	}
 
-	// True when `json` holds a null as the value of an object member that a merge patch reaches member by member, which an
-	// RFC 7386 merge patch cannot set (null deletes the member), so entity.update cannot write it either. A patch replaces
-	// an array whole, so the members of the objects inside an array (the slots of a Script component's list) are written as
-	// they are, nulls included.
-	static bool HasNullMember(const Json& json)
+	// True when `json` holds a null as the value of an object member that a merge patch reaches member by member and whose
+	// value in `defaults` (the component's default JSON at the same place) is not null: an RFC 7386 merge patch's null
+	// resets the member to its default (ComponentAccess::PatchComponentJson), so entity.update writes a null only where the
+	// default is null (a null asset reference, M21's SpriteRenderer holding three). A patch replaces an array whole, so the
+	// members of the objects inside an array (the slots of a Script component's list) are written as they are, nulls
+	// included.
+	static bool HasUnwritableNull(const Json& json, const Json& defaults)
 	{
 		if (!json.is_object())
 			return false;
 		for (auto member = json.begin(); member != json.end(); ++member)
 		{
-			if (member->is_null() || HasNullMember(*member))
+			const auto found = defaults.is_object() ? defaults.find(member.key()) : defaults.end();
+			const bool hasDefault = defaults.is_object() && found != defaults.end();
+			if (member->is_null() && !(hasDefault && found->is_null()))
+				return true;
+			if (HasUnwritableNull(*member, hasDefault ? *found : Json()))
 				return true;
 		}
 		return false;
@@ -676,12 +682,13 @@ namespace Engine {
 			owner.Registry = &registry;
 			owner.OwnerType = component;
 			owner.Schemas = &schemas;
+			const Json defaults = component->MakeDefaultJson();
 			int writtenValues = 0;
 			for (int iteration = 0; iteration < iterations * RoundTripDrawsPerValue && writtenValues < iterations; ++iteration)
 			{
 				CAPTURE(iteration);
 				const Json target = generator.RandomJson(component->GetSelfField(), owner);
-				if (HasNullMember(target) || HasFieldsWithoutScript(*component, target))
+				if (HasUnwritableNull(target, defaults) || HasFieldsWithoutScript(*component, target))
 					continue;
 				const Result<Json> current = ComponentAccess::GetComponentJson(entity, name);
 				REQUIRE(current.has_value());

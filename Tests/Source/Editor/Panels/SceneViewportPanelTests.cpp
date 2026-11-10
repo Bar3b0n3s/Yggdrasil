@@ -3,13 +3,19 @@
 
 #include "Editor/PanelInteractionFixture.h"
 #include "Editor/Ui/EditorStyle.h"
+#include "Editor/Viewport/GizmoOverlay.h"
 #include "EditorCore/Commands/SceneEdit.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Play/EditorPlayController.h"
+#include "EditorCore/Viewport/EditorCamera.h"
+#include "EditorCore/Viewport/TilemapPainting.h"
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/TilemapData.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
+#include "Engine/Scene/Components/SpriteRendererComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Components/UiCanvasComponent.h"
 #include "Engine/Scene/Components/UiRectComponent.h"
@@ -25,6 +31,7 @@
 #include <cmath>
 #include <cstddef>
 #include <functional>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -220,6 +227,26 @@ namespace Engine {
 		size_t CountEntities(const Scene& scene)
 		{
 			return scene.GetCanonicalOrder().size();
+		}
+
+		// Activates the toolbar's 2D toggle with the keyboard (Space on the focused button), then runs its queued
+		// viewport.setOptions and the frame that collects its result.
+		void Toggle2D(ScenePanelHarness& harness)
+		{
+			harness.FrameOk([]()
+			{
+				ImGuiWindow* window = ScenePanelHarness::SceneWindow();
+				REQUIRE(window != nullptr);
+				ImGui::SetWindowFocus(Utils::EditorWindowTitle(EditorPanel::SceneViewport));
+				ImGui::SetNavID(window->GetID("2D"), ImGuiNavLayer_Main, window->NavRootFocusScopeId, ImRect());
+				ImGui::SetNavCursorVisible(true);
+			});
+			ImGui::GetIO().AddKeyEvent(ImGuiKey_Space, true);
+			harness.FrameOk();
+			ImGui::GetIO().AddKeyEvent(ImGuiKey_Space, false);
+			harness.FrameOk();
+			harness.GetContext().Actions.Pump();
+			harness.FrameOk();
 		}
 
 	}
@@ -421,6 +448,80 @@ namespace Engine {
 			CHECK(glm::dot(flown.Position - panned.Position, forward) > 0.1f);
 			CHECK(glm::length(glm::normalize(flown.Target - flown.Position) - forward) < 1.0e-4f);
 			CHECK(test.Viewport.Clicks.empty());
+		}
+
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 14): the toolbar's 2D toggle and the 2D mode's navigation.
+		TEST_CASE("SceneViewportPanel: the 2D toggle makes a 2D camera that pans with every button and zooms in the plane")
+		{
+			ScenePanelHarness test("Scene2D");
+			const size_t history = test.GetEditor().GetHistory().GetUndoCount();
+			Toggle2D(test);
+			REQUIRE(test.GetEditor().GetViewportState().GetOptions().Mode2D);
+			const ExplicitRenderCamera flat = test.Camera();
+			CHECK(flat.Projection == RenderProjection::Orthographic);
+			CHECK(flat.Position == glm::vec3(flat.Target.x, flat.Target.y, EditorCamera::Make2DDistance));
+			CHECK(flat.Target.z == 0.0f);
+			test.RefreshCamera();
+
+			// The middle button pans: the content follows the pointer, so the camera moves against it, in X only here.
+			test.MoveTo(test.Center());
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Middle, true);
+			test.FrameOk();
+			for (int frame = 1; frame <= 4; ++frame)
+				test.MoveTo(ImVec2(test.Center().x + 10.0f * static_cast<float>(frame), test.Center().y));
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Middle, false);
+			test.FrameOk();
+			const ExplicitRenderCamera panned = test.Camera();
+			CHECK(panned.Target.x < flat.Target.x);
+			CHECK(panned.Target.y == flat.Target.y);
+			CHECK(panned.Target.z == 0.0f);
+			CHECK(panned.Position.z == EditorCamera::Make2DDistance);
+			CHECK(panned.OrthographicSize == flat.OrthographicSize);
+
+			// The right button pans too instead of flying, and W moves nothing.
+			test.MoveTo(test.Center());
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Right, true);
+			test.FrameOk();
+			ImGui::GetIO().AddKeyEvent(ImGuiKey_W, true);
+			for (int frame = 1; frame <= 4; ++frame)
+				test.MoveTo(ImVec2(test.Center().x, test.Center().y + 10.0f * static_cast<float>(frame)));
+			ImGui::GetIO().AddKeyEvent(ImGuiKey_W, false);
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Right, false);
+			test.FrameOk();
+			const ExplicitRenderCamera dragged = test.Camera();
+			CHECK(dragged.Target.x == panned.Target.x);
+			CHECK(dragged.Target.y > panned.Target.y);
+			CHECK(dragged.Position.z == EditorCamera::Make2DDistance);
+			CHECK(dragged.Projection == RenderProjection::Orthographic);
+
+			// The wheel zooms the orthographic size and keeps the pose.
+			ImGui::GetIO().AddMouseWheelEvent(0.0f, 1.0f);
+			test.FrameOk();
+			const ExplicitRenderCamera zoomed = test.Camera();
+			CHECK(zoomed.OrthographicSize == doctest::Approx(dragged.OrthographicSize / 1.2f));
+			CHECK(zoomed.Position == dragged.Position);
+			CHECK(test.Viewport.Clicks.empty());
+
+			// Turning the mode off keeps the camera; neither is a scene change.
+			Toggle2D(test);
+			CHECK_FALSE(test.GetEditor().GetViewportState().GetOptions().Mode2D);
+			CHECK(test.Camera().Position == zoomed.Position);
+			CHECK(test.Camera().Projection == RenderProjection::Orthographic);
+			CHECK(test.GetEditor().GetHistory().GetUndoCount() == history);
+		}
+
+		TEST_CASE("SceneViewportPanel: the 2D mode's gizmo moves in X and Y, rotates about Z and scales in X and Y")
+		{
+			const auto bits = [](ImGuizmo::OPERATION operation)
+			{
+				return static_cast<uint32_t>(operation);
+			};
+			CHECK(GetGizmoOperationMask(GizmoOperation::Translate, false) == bits(ImGuizmo::TRANSLATE));
+			CHECK(GetGizmoOperationMask(GizmoOperation::Rotate, false) == bits(ImGuizmo::ROTATE));
+			CHECK(GetGizmoOperationMask(GizmoOperation::Scale, false) == bits(ImGuizmo::SCALE));
+			CHECK(GetGizmoOperationMask(GizmoOperation::Translate, true) == bits(ImGuizmo::TRANSLATE_X | ImGuizmo::TRANSLATE_Y));
+			CHECK(GetGizmoOperationMask(GizmoOperation::Rotate, true) == bits(ImGuizmo::ROTATE_Z));
+			CHECK(GetGizmoOperationMask(GizmoOperation::Scale, true) == bits(ImGuizmo::SCALE_X | ImGuizmo::SCALE_Y));
 		}
 
 		TEST_CASE("SceneViewportPanel: the first left click on an unfocused view focuses it and requests one pick")
@@ -638,6 +739,33 @@ namespace Engine {
 				CHECK(CountEntities(scene) == entities + 1);
 				CHECK(scene.FindEntityByID(environment).GetComponent<EnvironmentComponent>().Environment.GetHandle() == BuiltinAssetHandles::SkyEnvironment);
 			}
+			SUBCASE("a texture or a sprite sheet creates a sprite where the cursor's ray meets z = 0")
+			{
+				// The default camera looks from (0, 3, 10) at the origin, so the image's centre shows about the origin.
+				REQUIRE(DropOnImage(test, AssetPayload(BuiltinAssetHandles::CheckerTexture)).has_value());
+				REQUIRE(CountEntities(scene) == entities + 1);
+				const ConstEntity textured = scene.FindEntityByID(scene.GetCanonicalOrder().back());
+				CHECK(textured.GetName() == "Sprite");
+				REQUIRE(textured.HasComponent<SpriteRendererComponent>());
+				CHECK(textured.GetComponent<SpriteRendererComponent>().Texture.GetHandle() == BuiltinAssetHandles::CheckerTexture);
+				CHECK_FALSE(textured.GetComponent<SpriteRendererComponent>().Sheet.GetHandle().IsValid());
+				const glm::vec3 position = textured.GetComponent<TransformComponent>().Translation;
+				CHECK(position.z == 0.0f);
+				CHECK(std::abs(position.x) < 0.1f);
+				CHECK(std::abs(position.y) < 0.1f);
+				CHECK(editor.GetHistory().GetUndoCount() == history + 1);
+
+				const auto created = test.GetAutomation().Call("asset.create", Json{ { "type", "SpriteSheet" }, { "path", "Assets/Sheets/Drop.spritesheet" } });
+				REQUIRE_MESSAGE(created.has_value(), (created ? std::string() : created.error().ToString()));
+				const auto sheet = JsonReader((*created)["asset"]["id"]).ReadUUID();
+				REQUIRE(sheet.has_value());
+				REQUIRE(DropOnImage(test, AssetPayload(*sheet)).has_value());
+				REQUIRE(CountEntities(scene) == entities + 2);
+				const ConstEntity sheeted = scene.FindEntityByID(scene.GetCanonicalOrder().back());
+				CHECK(sheeted.GetComponent<SpriteRendererComponent>().Sheet.GetHandle() == *sheet);
+				CHECK(sheeted.GetComponent<SpriteRendererComponent>().Frame == 0);
+				CHECK(sheeted.GetComponent<TransformComponent>().Translation.z == 0.0f);
+			}
 			SUBCASE("malformed payloads and unknown assets are refused without a command")
 			{
 				std::vector<std::byte> truncated = AssetPayload(BuiltinAssetHandles::CubeMesh);
@@ -654,6 +782,245 @@ namespace Engine {
 				CHECK(CountEntities(scene) == entities);
 				CHECK(editor.GetHistory().GetUndoCount() == history);
 			}
+		}
+
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 26): the tile brush. It needs stream T1's Tilemap asset (its
+		// importer, loader and asset.create) and tilemap.paint's registration, so it runs from W21.2's integration (decision 33).
+		TEST_CASE("SceneViewportPanel: the tile brush paints a left stroke's cells and erases a right stroke's, each in one tilemap.paint")
+		{
+			ScenePanelHarness test("SceneTileBrush");
+			EditorContext& editor = test.GetEditor();
+			Test::AutomationFixture& automation = test.GetAutomation();
+			const Json sheet{ { "Texture", "engine://Textures/Checker" },
+				{ "Frames", Json::array({ Json{ { "Name", "Ground" }, { "Rect", Json{ { "X", 0 }, { "Y", 0 }, { "Width", 16 }, { "Height", 16 } } } } }) } };
+			REQUIRE(automation.Call("asset.create", Json{ { "type", "SpriteSheet" }, { "path", "Assets/Sheets/Brush.spritesheet" }, { "values", sheet } }).has_value());
+			const Json palette = Json::array({ Json{ { "Sheet", "Assets/Sheets/Brush.spritesheet" }, { "Frame", 0 }, { "Solid", true } } });
+			const auto tilemap = automation.Call("asset.create", Json{ { "type", "Tilemap" }, { "path", "Assets/Tilemaps/Brush.tilemap" }, { "values", Json{ { "Palette", palette } } } });
+			REQUIRE_MESSAGE(tilemap.has_value(), (tilemap ? std::string() : tilemap.error().ToString()));
+			const auto created = automation.Call("entity.create", Json{ { "name", "Ground" }, { "components", Json{ { "TilemapRenderer", Json{ { "Tilemap", "Assets/Tilemaps/Brush.tilemap" } } } } } });
+			REQUIRE_MESSAGE(created.has_value(), (created ? std::string() : created.error().ToString()));
+			const auto ground = JsonReader((*created)["entity"]["id"]).ReadUUID();
+			REQUIRE(ground.has_value());
+			REQUIRE(editor.SetSelection({ *ground }, SceneTarget::Edit).has_value());
+			Toggle2D(test);
+			test.RefreshCamera();
+			test.FrameOk();
+			const ExplicitRenderCamera camera = test.Camera();
+
+			// The cells the brush must find: those under three image points, through the displayed image's camera.
+			const EditorViewportImage& image = test.Viewport.Image;
+			const auto cellAt = [&image](glm::uvec2 pixel)
+			{
+				const RenderOutputMapping mapping = ComputeRenderOutputMapping(image.Width, image.Height, RenderOutputSettings{});
+				const auto ray = ComputeOutputPixelRayInterval(image.Camera, mapping, pixel.x, pixel.y);
+				REQUIRE(ray.has_value());
+				REQUIRE(ray->has_value());
+				const std::optional<glm::ivec2> cell = IntersectTilemapCell((*ray)->Ray, glm::mat4(1.0f), glm::vec2(1.0f));
+				REQUIRE(cell.has_value());
+				return *cell;
+			};
+			const auto pointAt = [&test](glm::uvec2 pixel)
+			{
+				// The image fills the measured rectangle one to one, so pixel p lies at the rectangle's corner plus p.
+				return ImVec2(test.Viewport.Rectangle.Min.x + static_cast<float>(pixel.x) + 0.5f, test.Viewport.Rectangle.Min.y + static_cast<float>(pixel.y) + 0.5f);
+			};
+			const glm::uvec2 middle(image.Width / 2, image.Height / 2);
+			const std::vector<glm::uvec2> path = { middle, middle + glm::uvec2(120, 0), middle + glm::uvec2(120, 0) - glm::uvec2(0, 60) };
+			std::vector<glm::ivec2> expected;
+			for (size_t index = 0; index < path.size(); ++index)
+			{
+				const std::vector<glm::ivec2> segment = index == 0 ? std::vector<glm::ivec2>{ cellAt(path[0]) } : GetTilemapStrokeCells(cellAt(path[index - 1]), cellAt(path[index]));
+				for (const glm::ivec2 cell : segment)
+				{
+					if (std::ranges::find(expected, cell) == expected.end())
+						expected.push_back(cell);
+				}
+			}
+			REQUIRE(expected.size() > 3);
+			const auto readCells = [&editor]()
+			{
+				const VfsPath file = VfsPath::Create("project", "Assets/Tilemaps/Brush.tilemap").value_or(VfsPath());
+				const Result<std::string> text = editor.GetVfs().ReadText(file);
+				REQUIRE(text.has_value());
+				TilemapLoadReport report;
+				Result<TilemapData> data = TilemapFromText(*text, editor.GetTypeRegistry(), report, true);
+				REQUIRE_MESSAGE(data.has_value(), data.error().ToString());
+				return std::move(*data);
+			};
+			const auto stroke = [&test, &pointAt, &path](ImGuiMouseButton button, size_t points)
+			{
+				test.MoveTo(pointAt(path[0]));
+				ImGui::GetIO().AddMouseButtonEvent(button, true);
+				test.FrameOk();
+				for (size_t index = 1; index < points; ++index)
+					test.MoveTo(pointAt(path[index]));
+				ImGui::GetIO().AddMouseButtonEvent(button, false);
+				test.FrameOk();
+				test.GetContext().Actions.Pump();
+				test.FrameOk();
+			};
+
+			// Unarmed, the toolbar shows the brush but a left click away from the gizmo still picks.
+			test.MoveTo(pointAt(glm::uvec2(40, 40)));
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+			test.FrameOk();
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+			test.FrameOk();
+			CHECK(test.Viewport.Clicks.size() == 1);
+			CHECK(readCells().Chunks.empty());
+
+			// The picker's first entry arms the brush: Space opens it on "Off", Down moves to the entry and Space takes it.
+			test.FrameOk([]()
+			{
+				ImGuiWindow* window = ScenePanelHarness::SceneWindow();
+				REQUIRE(window != nullptr);
+				ImGui::SetWindowFocus(Utils::EditorWindowTitle(EditorPanel::SceneViewport));
+				ImGui::SetNavID(window->GetID("##TilemapBrushTile"), ImGuiNavLayer_Main, window->NavRootFocusScopeId, ImRect());
+				ImGui::SetNavCursorVisible(true);
+			});
+			for (const ImGuiKey key : { ImGuiKey_Space, ImGuiKey_DownArrow, ImGuiKey_Space })
+			{
+				ImGui::GetIO().AddKeyEvent(key, true);
+				test.FrameOk();
+				ImGui::GetIO().AddKeyEvent(key, false);
+				test.FrameOk();
+			}
+
+			// A left stroke through the three points paints every cell it crossed, once each, as one undo step; it neither
+			// picks nor moves the camera, and it starts on the tilemap's origin, where the hidden gizmo's handles were.
+			const size_t history = editor.GetHistory().GetUndoCount();
+			stroke(ImGuiMouseButton_Left, path.size());
+			CHECK(test.Viewport.Clicks.size() == 1);
+			CHECK(editor.GetHistory().GetUndoCount() == history + 1);
+			CHECK(test.Camera().Position == camera.Position);
+			TilemapData painted = readCells();
+			for (const glm::ivec2 cell : expected)
+			{
+				CAPTURE(cell.x);
+				CAPTURE(cell.y);
+				CHECK(GetTilemapCell(painted, cell) == 1);
+			}
+
+			// A right stroke over the first two points erases what it crossed and keeps the rest, again one step, and the
+			// right button flies nowhere.
+			stroke(ImGuiMouseButton_Right, 2);
+			CHECK(editor.GetHistory().GetUndoCount() == history + 2);
+			CHECK(test.Camera().Position == camera.Position);
+			const std::vector<glm::ivec2> erased = GetTilemapStrokeCells(cellAt(path[0]), cellAt(path[1]));
+			painted = readCells();
+			for (const glm::ivec2 cell : expected)
+			{
+				CAPTURE(cell.x);
+				CAPTURE(cell.y);
+				CHECK(GetTilemapCell(painted, cell) == (std::ranges::find(erased, cell) == erased.end() ? 1u : 0u));
+			}
+			REQUIRE(automation.Call("edit.undo", Json::object()).has_value());
+			CHECK(GetTilemapCell(readCells(), cellAt(path[0])) == 1);
+
+			// A selection change during a stroke cancels it with a Conflict, and nothing is painted.
+			const size_t undone = editor.GetHistory().GetUndoCount();
+			const std::string before = editor.GetVfs().ReadText(VfsPath::Create("project", "Assets/Tilemaps/Brush.tilemap").value_or(VfsPath())).value_or(std::string());
+			test.MoveTo(pointAt(path[2]));
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Right, true);
+			test.FrameOk();
+			REQUIRE(editor.SetSelection({}, SceneTarget::Edit).has_value());
+			const Status cancelled = test.Frame();
+			REQUIRE_FALSE(cancelled.has_value());
+			CHECK(cancelled.error().GetCode() == ErrorCode::Conflict);
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Right, false);
+			test.FrameOk();
+			test.GetContext().Actions.Pump();
+			test.FrameOk();
+			CHECK(editor.GetHistory().GetUndoCount() == undone);
+			CHECK(editor.GetVfs().ReadText(VfsPath::Create("project", "Assets/Tilemaps/Brush.tilemap").value_or(VfsPath())).value_or(std::string()) == before);
+		}
+
+		// Decision 26 (W21.2's review): the brush finds the cell under the cursor at the pose the displayed image shows, the
+		// target's rendered world matrix at the image's interpolation alpha, as the click selection picks tiles among the image's
+		// own tilemaps. Between two ticks of a play scene a moving tilemap is drawn behind its current pose, and a click paints
+		// the cell the image shows under the cursor, never the one the current pose puts there.
+		TEST_CASE("SceneViewportPanel: the tile brush paints the cell the image shows under the cursor on a moving tilemap")
+		{
+			ScenePanelHarness test("SceneTileBrushMoving");
+			EditorContext& editor = test.GetEditor();
+			Test::AutomationFixture& automation = test.GetAutomation();
+			const Json palette = Json::array({ Json{ { "Sheet", nullptr }, { "Frame", 0 }, { "Solid", true } } });
+			const auto tilemap = automation.Call("asset.create", Json{ { "type", "Tilemap" }, { "path", "Assets/Tilemaps/Moving.tilemap" }, { "values", Json{ { "Palette", palette } } } });
+			REQUIRE_MESSAGE(tilemap.has_value(), (tilemap ? std::string() : tilemap.error().ToString()));
+			// A platform the 2D world carries along +X at 240 units a second, without gravity or damping.
+			const Json components{ { "TilemapRenderer", Json{ { "Tilemap", "Assets/Tilemaps/Moving.tilemap" } } },
+				{ "RigidBody2D", Json{ { "GravityFactor", 0 }, { "LinearDamping", 0 }, { "InitialLinearVelocity", Json::array({ 240, 0 }) } } },
+				{ "BoxCollider2D", Json::object() } };
+			const auto created = automation.Call("entity.create", Json{ { "name", "Platform" }, { "components", components } });
+			REQUIRE_MESSAGE(created.has_value(), (created ? std::string() : created.error().ToString()));
+			const auto platform = JsonReader((*created)["entity"]["id"]).ReadUUID();
+			REQUIRE(platform.has_value());
+			Toggle2D(test);
+			const auto started = automation.Call("play.start", Json{ { "lockstep", true }, { "mode", "simulate" } });
+			REQUIRE_MESSAGE(started.has_value(), (started ? std::string() : started.error().ToString()));
+			REQUIRE(automation.Call("play.step", Json{ { "ticks", 2 } }).has_value());
+			REQUIRE(editor.SetSelection({ *platform }, SceneTarget::Play).has_value());
+			// The play scene's view sits under its notice line: rendered at the region it measures now, as a host renders it, and
+			// halfway between its last two ticks, as a host extracting between ticks shows it.
+			test.FrameOk();
+			test.Viewport.Image.Width = static_cast<uint32_t>(test.Viewport.Rectangle.Size.x);
+			test.Viewport.Image.Height = static_cast<uint32_t>(test.Viewport.Rectangle.Size.y);
+			test.RefreshCamera();
+			test.Viewport.Image.Alpha = 0.5f;
+			test.FrameOk();
+
+			// The cell under the image's middle at the pose the image shows, and the other one the current pose puts there.
+			const EditorViewportImage& image = test.Viewport.Image;
+			const ConstEntity entity = editor.GetPlay().GetSession()->GetScene().FindEntityByID(*platform);
+			REQUIRE(entity.IsValid());
+			const ImVec2 pointer(test.Viewport.Rectangle.Min.x + test.Viewport.Rectangle.Size.x * 0.5f, test.Viewport.Rectangle.Min.y + test.Viewport.Rectangle.Size.y * 0.5f);
+			const std::optional<EditorViewportPixel> pixel = ToViewportPixel(test.Viewport.Rectangle, glm::vec2(pointer.x, pointer.y));
+			REQUIRE(pixel.has_value());
+			const RenderOutputMapping mapping = ComputeRenderOutputMapping(image.Width, image.Height, RenderOutputSettings{});
+			const auto ray = ComputeOutputPixelRayInterval(image.Camera, mapping, pixel->X, pixel->Y);
+			REQUIRE(ray.has_value());
+			REQUIRE(ray->has_value());
+			const std::optional<glm::ivec2> shown = IntersectTilemapCell((*ray)->Ray, ComputeRenderedWorldMatrix(entity, image.Alpha), glm::vec2(1.0f));
+			const std::optional<glm::ivec2> current = IntersectTilemapCell((*ray)->Ray, ComputeRenderedWorldMatrix(entity, 1.0f), glm::vec2(1.0f));
+			REQUIRE(shown.has_value());
+			REQUIRE(current.has_value());
+			REQUIRE(*shown != *current);
+
+			// The picker's first entry arms the brush, then a left click at the image's middle paints one cell.
+			test.FrameOk([]()
+			{
+				ImGuiWindow* window = ScenePanelHarness::SceneWindow();
+				REQUIRE(window != nullptr);
+				ImGui::SetWindowFocus(Utils::EditorWindowTitle(EditorPanel::SceneViewport));
+				ImGui::SetNavID(window->GetID("##TilemapBrushTile"), ImGuiNavLayer_Main, window->NavRootFocusScopeId, ImRect());
+				ImGui::SetNavCursorVisible(true);
+			});
+			for (const ImGuiKey key : { ImGuiKey_Space, ImGuiKey_DownArrow, ImGuiKey_Space })
+			{
+				ImGui::GetIO().AddKeyEvent(key, true);
+				test.FrameOk();
+				ImGui::GetIO().AddKeyEvent(key, false);
+				test.FrameOk();
+			}
+			const size_t history = editor.GetHistory().GetUndoCount();
+			test.MoveTo(pointer);
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+			test.FrameOk();
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+			test.FrameOk();
+			test.GetContext().Actions.Pump();
+			test.FrameOk();
+			// The click painted, as one undo step, and picked nothing.
+			CHECK(test.Viewport.Clicks.empty());
+			CHECK(editor.GetHistory().GetUndoCount() == history + 1);
+
+			const Result<std::string> text = editor.GetVfs().ReadText(VfsPath::Create("project", "Assets/Tilemaps/Moving.tilemap").value_or(VfsPath()));
+			REQUIRE(text.has_value());
+			TilemapLoadReport report;
+			const Result<TilemapData> painted = TilemapFromText(*text, editor.GetTypeRegistry(), report, true);
+			REQUIRE_MESSAGE(painted.has_value(), painted.error().ToString());
+			CHECK(GetTilemapCell(*painted, *shown) == 1);
+			CHECK(GetTilemapCell(*painted, *current) == 0);
 		}
 
 		// M22 (Docs/Decisions/0033-m22-contract.md decisions 33 and 34): the UI preview shows the game frame letterboxed in the

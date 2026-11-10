@@ -36,6 +36,19 @@ namespace Engine {
 		// max(old, fitted)): the bounds always fit inside it and nothing the old range showed is clipped.
 		[[nodiscard]] static Result<ExplicitRenderCamera> FrameBounds(const ExplicitRenderCamera& camera,
 			const glm::vec3& minimum, const glm::vec3& maximum, float aspect);
+
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 14, stream D): the 2D mode's camera for `camera`: orthographic,
+		// looking down -Z at (Target.x, Target.y, 0) from Position (Target.x, Target.y, Make2DDistance), +Y up, with the
+		// orthographic size kept for an orthographic camera and, for a perspective one, the half height its field of view
+		// shows at its target distance; the clip range [0.1, 2 * Make2DDistance]. InvalidArgument for an invalid camera.
+		[[nodiscard]] static Result<ExplicitRenderCamera> Make2D(const ExplicitRenderCamera& camera);
+		// M21: one frame of 2D navigation of a camera Make2D made: pan (MMB, or LMB-drag with Pan) moves Position and Target
+		// together in X and Y by the pointer delta at the camera's pixels per unit (`viewHeight` logical pixels, >= 1); the
+		// wheel zooms the orthographic size by a factor of 1.2 per notch, kept in [0.01, 100000]; Orbit and Fly are ignored.
+		// The camera stays a 2D camera. InvalidArgument for an invalid camera or input.
+		[[nodiscard]] static Result<ExplicitRenderCamera> Navigate2D(const ExplicitRenderCamera& camera, const EditorCameraInput& input, float viewHeight);
+		// The distance along +Z of Make2D's camera from the plane z = 0, in metres.
+		static constexpr float Make2DDistance = 500.0f;
 	};
 
 }

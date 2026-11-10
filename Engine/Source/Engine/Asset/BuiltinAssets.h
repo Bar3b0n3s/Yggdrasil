@@ -60,6 +60,14 @@ namespace Engine {
 		// "BlueNoise" (Renderer/BlueNoise.h) the editor registers (EditorCore/EngineAssetGenerators.h;
 		// Docs/Decisions/0013-m8-decisions.md decision 8).
 		static constexpr AssetHandle BlueNoiseTexture{ 0x0186 };
+		// M21 (ADR 0028's phase-2 ledger; Docs/Decisions/0032-m21-contract.md decision 7): engine://Textures/{SpriteSquare,
+		// SpriteRounded, SpriteBevel, SpriteCircle}, the procedural sprite textures (BuiltinTexture::Sprite*, BuiltinTextures.h):
+		// 16 x 16 white shapes a SpriteRenderer tints with its Color, never compressed; Procedural entries of
+		// Resources/EngineAssets.json and of GetProceduralBuiltinEntries.
+		static constexpr AssetHandle SpriteSquareTexture{ 0x0187 };
+		static constexpr AssetHandle SpriteRoundedTexture{ 0x0188 };
+		static constexpr AssetHandle SpriteBevelTexture{ 0x0189 };
+		static constexpr AssetHandle SpriteCircleTexture{ 0x018a };
 		// engine://Fonts/Default: Inter Regular (SIL OFL), Resources/Fonts/Inter-Regular.ttf through FontImporter.
 		static constexpr AssetHandle DefaultFont{ 0x01c1 };
 		// engine://Environments/{Studio, Sky}: Poly Haven CC0 studio_small_09 and kloofendal_48d_partly_cloudy_puresky at 1k,

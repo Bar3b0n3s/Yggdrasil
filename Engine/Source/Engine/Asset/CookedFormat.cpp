@@ -51,7 +51,9 @@ namespace Engine {
 			return MakeError(ErrorCode::Parse, "the header names a payload of {} bytes, but {} bytes follow it", view.Header.PayloadSize,
 				reader.GetRemaining());
 		}
-		if (type == std::to_underlying(AssetType::None) || type > std::to_underlying(AssetType::StringTable))
+		// None, and every value the enumeration does not name (AssetTypeToString's "None"), so the range follows AssetType.h
+		// and no appended type moves a bound here (Docs/Decisions/0032-m21-contract.md decision 31).
+		if (AssetTypeToString(static_cast<AssetType>(type)) == AssetTypeToString(AssetType::None))
 			return MakeError(ErrorCode::Validation, "cooked artifact of unknown asset type {}", type);
 		view.Header.Type = static_cast<AssetType>(type);
 

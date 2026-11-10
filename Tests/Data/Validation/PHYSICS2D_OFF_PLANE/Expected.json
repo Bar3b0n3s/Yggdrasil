@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["PHYSICS2D_OFF_PLANE"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

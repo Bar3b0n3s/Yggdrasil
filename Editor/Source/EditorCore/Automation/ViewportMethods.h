@@ -58,6 +58,9 @@ namespace Engine {
 		bool Wireframe = false;
 		std::string DebugView{};                // the scene view's debug-view dropdown: any RenderDebugView name, any ASCII case
 		std::vector<uint32_t> GameResolution{}; // the Game panel's resolution: [width, height], [0, 0] for free
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 14): the scene view's 2D mode, the toolbar's 2D toggle. Turning
+		// it on makes the scene camera EditorCamera::Make2D's; turning it off keeps the camera.
+		bool Mode2D = false;
 		bool UiPreview = false;                 // M22 (decision 33): EditorViewportOptions::UiPreview
 	};
 	struct ViewportSetOptionsResult
@@ -69,6 +72,7 @@ namespace Engine {
 		bool Wireframe = false;
 		std::string DebugView{};                // canonical RenderDebugView name
 		std::vector<uint32_t> GameResolution{}; // [width, height]; [0, 0] is free resolution
+		bool Mode2D = false;                    // M21: the scene view's 2D mode
 		bool UiPreview = false;                 // M22 (decision 33): EditorViewportOptions::UiPreview
 	};
 
@@ -81,12 +85,14 @@ namespace Engine {
 		[[nodiscard]] Result<ViewportCameraResult> ViewportCamera(EditorMethodContext& context, const ViewportCameraParams& params);
 		// Resolve every EntityRef before moving; NotFound invalid target, InvalidArgument empty list.
 		// Bounds use entity.bounds' existing semantics (transform point for no renderable bounds), aspect uses last
-		// nonzero scene-view size, default 16:9 headless; EditorCamera::FrameBounds adds 10% padding.
+		// nonzero scene-view size, default 16:9 headless; EditorCamera::FrameBounds adds 10% padding. In the 2D mode (M21)
+		// the framed camera stays a 2D camera (EditorCamera::Make2D of the framed one: its target's X and Y, its size).
 		[[nodiscard]] Result<ViewportFrameResult> ViewportFrame(EditorMethodContext& context, const ViewportFrameParams& params);
 		// Presence-aware patch. UI state only, valid headless and without a renderer; returns every current option,
 		// including the scene view's debug view and the Game panel's resolution (which takes effect in the image once
 		// rendered). InvalidArgument (located) for an unknown debug view or a resolution that is not [0, 0] or two sides
-		// in [1, 8192]; nothing changes then.
+		// in [1, 8192]; nothing changes then. M21: mode2D true, when the mode was off, also makes the scene camera
+		// EditorCamera::Make2D's (orthographic, looking down -Z at its target's X and Y); false keeps the camera.
 		[[nodiscard]] Result<ViewportSetOptionsResult> ViewportSetOptions(EditorMethodContext& context, const ViewportSetOptionsParams& params);
 
 	}

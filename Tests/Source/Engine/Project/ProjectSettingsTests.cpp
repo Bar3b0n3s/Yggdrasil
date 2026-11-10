@@ -117,7 +117,7 @@ namespace Engine {
 		TEST_CASE("ProjectSettings: every settings struct and enum is registered")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
-			const std::array<std::string_view, 13> structs = {
+			const std::array<std::string_view, 15> structs = {
 				"ProjectSettings",
 				"WindowSettings",
 				"SimulationSettings",
@@ -130,6 +130,8 @@ namespace Engine {
 				"TestingSettings",
 				"TestSuite",
 				"TestSuiteOverrides",
+				"SortingLayersSettings",
+				"Physics2DSettings",
 				"LocalizationSettings",
 			};
 			for (const std::string_view name : structs)
@@ -366,6 +368,48 @@ namespace Engine {
 			CHECK(pointersOf(collisions) == std::vector<std::string>{ "/Collisions/1", "/Collisions/2/1" });
 		}
 
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 4): the sorting layers follow the physics layers' rules, with
+		// SortingLayersSettings::MaxSortingLayers names.
+		TEST_CASE("ProjectSettings: sorting layers are 1 to 32 unique non-empty names starting with Default")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			const auto pointersOf = [&registry](std::vector<std::string> layers)
+			{
+				return ValidationErrorPointers(*registry, SortingLayersSettings{ .Layers = std::move(layers) });
+			};
+			CHECK(ValidationErrorPointers(*registry, SortingLayersSettings{}).empty());
+			CHECK(pointersOf({ "Default", "Background", "Foreground" }).empty());
+			CHECK(pointersOf({}) == std::vector<std::string>{ "/Layers" });
+			CHECK(pointersOf({ "Background", "Default" }) == std::vector<std::string>{ "/Layers/0" });
+			CHECK(pointersOf({ "Default", "Sky", "", "Sky" }) == std::vector<std::string>{ "/Layers/2", "/Layers/3" });
+
+			static_assert(SortingLayersSettings::MaxSortingLayers == 32);
+			std::vector<std::string> full = { "Default" };
+			for (uint32_t layer = 1; layer < SortingLayersSettings::MaxSortingLayers; ++layer)
+				full.push_back(std::format("Layer{}", layer));
+			CHECK(pointersOf(full).empty());
+			full.push_back("OneTooMany");
+			CHECK(pointersOf(full) == std::vector<std::string>{ "/Layers" });
+
+			// The section is registered after Testing, so a project without it (every .eproj before M21's upgrade) loads with
+			// the default list, and the 2D world's section with its default gravity.
+			ProjectLoadReport report;
+			const Result<ProjectSettings> older = ProjectSerializer::LoadFromString(R"({ "Format": "Project", "Version": 1 })", *registry, ProjectLoadOptions{}, report);
+			REQUIRE_MESSAGE(older.has_value(), older.error().ToString());
+			CHECK(older->SortingLayers.Layers == std::vector<std::string>{ "Default" });
+			CHECK(older->Physics2D.Gravity == glm::vec2(0.0f, -9.81f));
+			const Result<ProjectSettings> loaded =
+				ProjectSerializer::LoadFromString(R"({ "Format": "Project", "Version": 1, "SortingLayers": { "Layers": ["Default", "Sky"] } })", *registry,
+					ProjectLoadOptions{}, report);
+			REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
+			CHECK(loaded->SortingLayers.Layers == std::vector<std::string>{ "Default", "Sky" });
+			const Result<ProjectSettings> rejected =
+				ProjectSerializer::LoadFromString(R"({ "Format": "Project", "Version": 1, "SortingLayers": { "Layers": ["Sky"] } })", *registry,
+					ProjectLoadOptions{}, report);
+			REQUIRE_FALSE(rejected.has_value());
+			CHECK(rejected.error().GetLocation().JsonPointer == "/SortingLayers/Layers/0");
+		}
+
 		TEST_CASE("ProjectSettings: each physics gravity component is at most MaxPhysicsGravity in magnitude")
 		{
 			// The physics world refuses a stronger gravity (ADR 0014 decision 34); the settings stop it at every write.
@@ -375,6 +419,22 @@ namespace Engine {
 			CHECK(ValidationErrorPointers(*registry, strongest).empty());
 			PhysicsSettings tooStrong;
 			tooStrong.Gravity = glm::vec3(0.0f, -1.0e37f, 0.0f);
+			const std::vector<std::string> pointers = ValidationErrorPointers(*registry, tooStrong);
+			REQUIRE(pointers.size() == 1);
+			CHECK(pointers[0].starts_with("/Gravity"));
+		}
+
+		TEST_CASE("ProjectSettings: each Physics2D gravity component is at most MaxPhysicsGravity in magnitude")
+		{
+			// The 2D world refuses a stronger gravity as the 3D one does (Physics2DSystem::Create); the settings stop it at every
+			// write (Docs/Decisions/0032-m21-contract.md decision 9, Architecture §9.9).
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			CHECK(ValidationErrorPointers(*registry, Physics2DSettings{}).empty());
+			Physics2DSettings strongest;
+			strongest.Gravity = glm::vec2(MaxPhysicsGravity, -MaxPhysicsGravity);
+			CHECK(ValidationErrorPointers(*registry, strongest).empty());
+			Physics2DSettings tooStrong;
+			tooStrong.Gravity = glm::vec2(0.0f, -1.0e37f);
 			const std::vector<std::string> pointers = ValidationErrorPointers(*registry, tooStrong);
 			REQUIRE(pointers.size() == 1);
 			CHECK(pointers[0].starts_with("/Gravity"));

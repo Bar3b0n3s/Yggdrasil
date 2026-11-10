@@ -5,6 +5,9 @@
 
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Vec3.h>
+#include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
+#include <Jolt/Physics/Collision/Shape/SphereShape.h>
+#include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
 
 #include <array>
 #include <cmath>
@@ -29,6 +32,31 @@ namespace Engine {
 			JPH::Mat44 rotation;
 			JPH::Vec3 diagonal;
 			return properties.DecomposePrincipalMomentsOfInertia(rotation, diagonal) && !diagonal.IsNearZero();
+		}
+
+		// The sum over the spheres of `shape` (as AddDiscInertiaAboutZ finds them) of each one's mass at ColliderDensity times
+		// its radius squared.
+		[[nodiscard]] double SumSphereMassRadiusSquared(const JPH::Shape& shape)
+		{
+			switch (shape.GetSubType())
+			{
+				case JPH::EShapeSubType::Sphere:
+				{
+					const double radius = static_cast<const JPH::SphereShape&>(shape).GetRadius();
+					return static_cast<double>(shape.GetMassProperties().mMass) * radius * radius;
+				}
+				case JPH::EShapeSubType::RotatedTranslated:
+					return SumSphereMassRadiusSquared(*static_cast<const JPH::RotatedTranslatedShape&>(shape).GetInnerShape());
+				case JPH::EShapeSubType::StaticCompound:
+				{
+					double sum = 0.0;
+					for (const JPH::CompoundShape::SubShape& sub : static_cast<const JPH::StaticCompoundShape&>(shape).GetSubShapes())
+						sum += SumSphereMassRadiusSquared(*sub.mShape);
+					return sum;
+				}
+				default:
+					return 0.0;
+			}
 		}
 
 	}
@@ -84,6 +112,17 @@ namespace Engine {
 			if (!CanTakeMassProperties(allowedDofs, properties))
 				return MakeError(ErrorCode::Validation, "{}: a Dynamic body that cannot translate needs a shape with rotational inertia", PhysicsAllDofsLockedCode);
 			return properties;
+		}
+
+		void AddDiscInertiaAboutZ(const JPH::Shape& shape, JPH::MassProperties& properties)
+		{
+			const double spheres = SumSphereMassRadiusSquared(shape);
+			const double shapeMass = shape.GetMassProperties().mMass;
+			if (spheres <= 0.0 || !(shapeMass > 0.0))
+				return;
+			// The spheres' share of the body's mass, scaled as ScaleToMass scales the shape's moments.
+			const double added = 0.1 * spheres * (static_cast<double>(properties.mMass) / shapeMass);
+			properties.mInertia(2, 2) = static_cast<float>(static_cast<double>(properties.mInertia(2, 2)) + added);
 		}
 
 	}

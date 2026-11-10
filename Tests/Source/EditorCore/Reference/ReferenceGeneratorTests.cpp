@@ -10,6 +10,7 @@
 #include "Engine/Asset/SpriteSheetData.h"
 #include "Engine/Asset/StringTableData.h"
 #include "Engine/Asset/TextureData.h"
+#include "Engine/Asset/TilemapData.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/Audio/SoundSynth.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
@@ -139,7 +140,7 @@ namespace Engine {
 					 "ScriptAPI.md", "Validation.md", "Schemas/AssetMeta.schema.json", "Schemas/BatchRequest.schema.json",
 					 "Schemas/GameManifest.schema.json", "Schemas/Material.schema.json", "Schemas/Prefab.schema.json", "Schemas/Project.schema.json",
 					 "Schemas/Provenance.schema.json", "Schemas/Replay.schema.json", "Schemas/Scene.schema.json", "Schemas/SoundEffect.schema.json",
-					 "Schemas/SpriteSheet.schema.json", "Schemas/StringTable.schema.json" })
+					 "Schemas/SpriteSheet.schema.json", "Schemas/StringTable.schema.json", "Schemas/Tilemap.schema.json" })
 			{
 				CAPTURE(path);
 				CHECK(FindFile(*files, path) != nullptr);
@@ -317,10 +318,10 @@ namespace Engine {
 		}
 
 		// The schemas describe the files authors and agents write: every .eproj, .scene, .prefab, .material, .sfx, .meta,
-		// .replay, .spritesheet and .stringtable under Projects/FeatureTest and Tests/Data validates against its format's schema, except the deliberately
-		// invalid or other-version fixtures: Scenes/Invalid/, Formats/ (v0.scene, NewerVersion.scene), Validation/,
-		// CoverageGaps/ and Lint/. The project's Automation/Provenance.json files and every line of its batch scaffolds
-		// validate against the Provenance and BatchRequest schemas too.
+		// .replay, .spritesheet, .tilemap and .stringtable under Projects/FeatureTest and Tests/Data validates against its format's
+		// schema, except the deliberately invalid or other-version fixtures: Scenes/Invalid/, Formats/ (v0.scene,
+		// NewerVersion.scene), Validation/, CoverageGaps/ and Lint/. The project's Automation/Provenance.json files and every line
+		// of its batch scaffolds validate against the Provenance and BatchRequest schemas too.
 		TEST_CASE("ReferenceGenerator: every authored file validates against its generated format schema")
 		{
 			Test::EditorTestFixture fixture("ReferenceSchemas");
@@ -329,10 +330,11 @@ namespace Engine {
 			REQUIRE_MESSAGE(files.has_value(), files.error().ToString());
 			const std::map<std::string, std::string> formats = { { ".eproj", "Project" }, { ".scene", "Scene" }, { ".prefab", "Prefab" },
 				{ ".material", "Material" }, { ".sfx", "SoundEffect" }, { ".meta", "AssetMeta" }, { ".replay", "Replay" }, { ".spritesheet", "SpriteSheet" },
-				{ ".stringtable", "StringTable" } };
+				{ ".tilemap", "Tilemap" }, { ".stringtable", "StringTable" } };
 			std::map<std::string, Json> schemas;
 			for (const std::string_view format :
-				{ "Project", "Scene", "Prefab", "Material", "SoundEffect", "AssetMeta", "Replay", "Provenance", "BatchRequest", "SpriteSheet", "StringTable" })
+				{ "Project", "Scene", "Prefab", "Material", "SoundEffect", "AssetMeta", "Replay", "Provenance", "BatchRequest", "SpriteSheet", "Tilemap",
+					"StringTable" })
 				schemas.emplace(std::string(format), ParseSchema(*files, format));
 
 			// (label, text, format) of every document to validate.
@@ -504,6 +506,59 @@ namespace Engine {
 				CHECK(section.find(text) != std::string::npos);
 				CHECK(schemaText.find(text) != std::string::npos);
 			}
+		}
+
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 23): FileFormats.md documents the .tilemap format with the fields of
+		// the tilemap, its palette entries and its chunks, and its schema and section state the limits a builder must respect;
+		// the schema accepts the format's example and the canonical text of a tilemap.
+		TEST_CASE("ReferenceGenerator: the Tilemap section lists every field of the tilemap, its palette and chunks, and the limits")
+		{
+			Test::EditorTestFixture fixture("ReferenceTilemap");
+			const ReferenceRegistries registries(fixture);
+			const auto files = GenerateReferences(registries.GetSources());
+			REQUIRE_MESSAGE(files.has_value(), files.error().ToString());
+			const std::string& formats = FindFile(*files, "FileFormats.md")->Content;
+			CHECK(formats.find("| Tilemap | `.tilemap` | 1 | [Schemas/Tilemap.schema.json](Schemas/Tilemap.schema.json) |") != std::string::npos);
+			CHECK(formats.find("| Tilemap | `.tilemap` | Tilemap | 1 | none | yes |") != std::string::npos);
+			const size_t begin = formats.find("### Tilemap (`.tilemap`)");
+			const size_t end = formats.find("## Source formats");
+			REQUIRE(begin != std::string::npos);
+			REQUIRE(end != std::string::npos);
+			REQUIRE(begin < end);
+			const std::string section = formats.substr(begin, end - begin);
+			const TypeRegistry& types = fixture.GetEngine().GetTypeRegistry();
+			for (const std::string_view name : { "Tilemap", "TilemapTile", "TilemapChunk" })
+			{
+				CAPTURE(name);
+				const StructInfo* type = types.FindStruct(name);
+				REQUIRE(type != nullptr);
+				CHECK(section.find(std::format("#### Fields of {}\n", name)) != std::string::npos);
+				for (const auto& field : type->GetFields())
+				{
+					CAPTURE(field->GetName());
+					CHECK(section.find(std::format("| `{}` |", field->GetName())) != std::string::npos);
+				}
+			}
+
+			const Json schema = ParseSchema(*files, "Tilemap");
+			const std::string schemaText = schema.dump();
+			for (const std::string& text : { std::format("At most {} entries", MaxTilemapPaletteEntries), std::format("at most {} cells in all", MaxTilemapCells),
+					 std::format("a power of two from 1 to {}", MaxTilemapChunkSize) })
+			{
+				CAPTURE(text);
+				CHECK(section.find(text) != std::string::npos);
+				CHECK(schemaText.find(text) != std::string::npos);
+			}
+			TilemapData tilemap;
+			tilemap.ChunkSize = 1;
+			tilemap.Palette = { TilemapTile{ .Frame = 3, .Solid = false } };
+			tilemap.Chunks = { TilemapChunk{ .X = -4, .Y = 2, .Tiles = { 1 } } };
+			const Result<std::string> text = TilemapToText(tilemap, types);
+			REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+			const auto instance = JsonReader::Parse(*text);
+			REQUIRE(instance.has_value());
+			const Status valid = JsonSchema::Validate(schema, *instance);
+			CHECK_MESSAGE(valid.has_value(), (valid ? std::string() : valid.error().ToString()));
 		}
 
 		// M22 (Docs/Decisions/0033-m22-contract.md decision 10): FileFormats.md documents the .stringtable format with the fields

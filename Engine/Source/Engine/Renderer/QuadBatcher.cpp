@@ -2,7 +2,6 @@
 #include "Engine/Renderer/QuadBatcher.h"
 
 #include "Engine/Core/Assert.h"
-#include "Engine/Core/Log.h"
 #include "Engine/Graphics/CommandListRecording.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Renderer/RenderStats.h"
@@ -22,21 +21,33 @@
 #include <vector>
 
 // Record lays the quads out on the CPU into one vertex list (four QuadVertex per quad, in the order of QuadVertex.h's
-// corners), cutting it into batches wherever the texture or the sampler changes, so the quads keep their order; then it
-// uploads the list once and draws each batch with one indexed draw over the static index buffer (0, 1, 2, 0, 2, 3 per quad,
-// absolute vertex numbers, so a batch starts at its first quad's sixth index). The index buffer grows with the vertex
-// buffer's capacity and is written through the recording command list the first time a capacity is used, so creating the
-// batcher records no command list.
+// corners), cutting it into batches wherever the texture or the sampler changes (and, for the Normals target, the normal
+// map), and at every MaxQuadsPerRecord quads, so the quads keep their order and no batch crosses a chunk of the vertex
+// buffer's capacity; then it uploads the list one chunk at a time and draws each chunk's batches with one indexed draw each
+// over the static index buffer (0, 1, 2, 0, 2, 3 per quad, absolute vertex numbers, so a batch starts at its first quad's
+// sixth index within its chunk) before it writes the next chunk (M21, C21.2, Docs/Decisions/0032-m21-contract.md decision
+// 24: NVRHI's write tracks the buffer's state, so the write after the chunk's draws waits for them). The index buffer grows
+// with the vertex buffer's capacity and is written through the recording command list the first time a capacity is used,
+// so creating the batcher records no command list.
+//
+// Two binding layouts: Hdr, Ldr and M22's LdrDepth bind the texture and the sampler; M21's HdrLit and Normals (decision 22) also bind a
+// second texture, HdrLit's light accumulation or the Normals batch's normal map (the white texture without one, with the
+// push constants' HasNormalMap 0).
 
 namespace Engine {
 
 	namespace Utils {
 
 		constexpr std::string_view QuadProgram = "Quad";
-		// Indices of the pipelines (QuadBatchTarget's values and GetLayoutDescriptions' order).
+		// Indices of the five pipelines (QuadBatchTarget's values and GetLayoutDescriptions' order).
 		constexpr size_t QuadHdrPipeline = 0;
 		constexpr size_t QuadLdrPipeline = 1;
-		constexpr size_t QuadLdrDepthPipeline = 2; // M22 (C22.3, decision 57)
+		constexpr size_t QuadHdrLitPipeline = 2;
+		constexpr size_t QuadNormalsPipeline = 3;
+		constexpr size_t QuadLdrDepthPipeline = 4; // M22 (C22.3, Docs/Decisions/0033-m22-contract.md decision 57)
+		static_assert(static_cast<size_t>(QuadBatchTarget::Hdr) == QuadHdrPipeline && static_cast<size_t>(QuadBatchTarget::Ldr) == QuadLdrPipeline
+			&& static_cast<size_t>(QuadBatchTarget::HdrLit) == QuadHdrLitPipeline && static_cast<size_t>(QuadBatchTarget::Normals) == QuadNormalsPipeline
+			&& static_cast<size_t>(QuadBatchTarget::LdrDepth) == QuadLdrDepthPipeline);
 		// The first capacity of the vertex and index buffers, in quads; it doubles until a record fits, up to
 		// QuadBatcher::MaxQuadsPerRecord.
 		constexpr uint32_t InitialQuadCapacity = 1024;
@@ -45,49 +56,38 @@ namespace Engine {
 		// A quad's two triangles over its corners (top left, top right, bottom right, bottom left).
 		constexpr std::array<uint32_t, IndicesPerQuad> QuadCornerIndices = { 0, 1, 2, 0, 2, 3 };
 
-		static PipelineLayoutDescription MakeQuadDescription(std::string name, std::string fragmentEntry)
+		// Whether `target` binds the lit layout's second texture (QuadLitTexture, t1).
+		static bool IsLitQuadTarget(QuadBatchTarget target)
+		{
+			return target == QuadBatchTarget::HdrLit || target == QuadBatchTarget::Normals;
+		}
+
+		// A quad pipeline's layout: the texture and the sampler, and for the lit entries (VSLit) the second texture.
+		static PipelineLayoutDescription MakeQuadDescription(std::string name, std::string fragmentEntry, bool lit)
 		{
 			nvrhi::BindingLayoutDesc layout;
 			layout.visibility = nvrhi::ShaderType::All;
 			layout.registerSpace = 0;
 			layout.registerSpaceIsDescriptorSet = true;
-			layout.bindings = {
-				nvrhi::BindingLayoutItem::Texture_SRV(0),
-				nvrhi::BindingLayoutItem::Sampler(0),
-				nvrhi::BindingLayoutItem::PushConstants(0, sizeof(QuadConstants)),
-			};
+			layout.bindings = { nvrhi::BindingLayoutItem::Texture_SRV(0) };
+			if (lit)
+				layout.bindings.push_back(nvrhi::BindingLayoutItem::Texture_SRV(1));
+			layout.bindings.push_back(nvrhi::BindingLayoutItem::Sampler(0));
+			layout.bindings.push_back(nvrhi::BindingLayoutItem::PushConstants(0, sizeof(QuadConstants)));
 			return {
 				.Name = std::move(name),
 				.Program = std::string(QuadProgram),
-				.Entries = { "VSMain", std::move(fragmentEntry) },
+				.Entries = { lit ? "VSLit" : "VSMain", std::move(fragmentEntry) },
 				.BindingLayouts = { layout },
 			};
 		}
 
-		// LdrDepth shades as Ldr does (its fragment entry), only its depth state differs.
+		// LdrDepth shades as Ldr does (its fragment entry); only its depth state differs.
 		static std::vector<PipelineLayoutDescription> MakeQuadDescriptions()
 		{
-			return { MakeQuadDescription("QuadHdr", "PSHdr"), MakeQuadDescription("QuadLdr", "PSLdr"), MakeQuadDescription("QuadLdrDepth", "PSLdr") };
-		}
-
-		// The pipeline of a target, by QuadBatchTarget's value.
-		static size_t GetQuadPipelineIndex(QuadBatchTarget target)
-		{
-			switch (target)
-			{
-				case QuadBatchTarget::Hdr:      return QuadHdrPipeline;
-				case QuadBatchTarget::Ldr:      return QuadLdrPipeline;
-				case QuadBatchTarget::LdrDepth: return QuadLdrDepthPipeline;
-			}
-			return QuadLdrPipeline;
-		}
-
-		// The target of a pipeline index (GetQuadPipelineIndex's inverse).
-		static QuadBatchTarget GetQuadPipelineTarget(size_t index)
-		{
-			if (index == QuadHdrPipeline)
-				return QuadBatchTarget::Hdr;
-			return index == QuadLdrDepthPipeline ? QuadBatchTarget::LdrDepth : QuadBatchTarget::Ldr;
+			return { MakeQuadDescription("QuadHdr", "PSHdr", false), MakeQuadDescription("QuadLdr", "PSLdr", false),
+				MakeQuadDescription("QuadHdrLit", "PSHdrLit", true), MakeQuadDescription("QuadNormals", "PSNormals", true),
+				MakeQuadDescription("QuadLdrDepth", "PSLdr", false) };
 		}
 
 		static std::vector<nvrhi::VertexAttributeDesc> MakeQuadVertexAttributes()
@@ -104,8 +104,9 @@ namespace Engine {
 			};
 		}
 
-		// A quad pipeline: double-sided quads with straight alpha (as TextRenderer), no depth writes; the Hdr and LdrDepth ones
-		// test against SceneDepth (reverse-Z, GreaterOrEqual), the Ldr one draws on top.
+		// A quad pipeline: double-sided quads with straight alpha (as TextRenderer; the Normals one without blending), no depth
+		// writes; the Hdr, HdrLit, Normals and LdrDepth ones test against SceneDepth (reverse-Z, GreaterOrEqual), the Ldr one
+		// draws on top.
 		static GraphicsPipelineSpecification MakeQuadSpecification(PipelineLayoutDescription layout, QuadBatchTarget target,
 			const std::vector<nvrhi::BindingLayoutHandle>& sharedLayouts)
 		{
@@ -114,14 +115,17 @@ namespace Engine {
 			specification.SharedBindingLayouts = sharedLayouts;
 			specification.VertexAttributes = MakeQuadVertexAttributes();
 			specification.Primitive = nvrhi::PrimitiveType::TriangleList;
-			nvrhi::BlendState::RenderTarget& blend = specification.RenderState.blendState.targets[0];
-			blend.enableBlend()
-				.setSrcBlend(nvrhi::BlendFactor::SrcAlpha)
-				.setDestBlend(nvrhi::BlendFactor::InvSrcAlpha)
-				.setBlendOp(nvrhi::BlendOp::Add)
-				.setSrcBlendAlpha(nvrhi::BlendFactor::One)
-				.setDestBlendAlpha(nvrhi::BlendFactor::InvSrcAlpha)
-				.setBlendOpAlpha(nvrhi::BlendOp::Add);
+			if (target != QuadBatchTarget::Normals)
+			{
+				nvrhi::BlendState::RenderTarget& blend = specification.RenderState.blendState.targets[0];
+				blend.enableBlend()
+					.setSrcBlend(nvrhi::BlendFactor::SrcAlpha)
+					.setDestBlend(nvrhi::BlendFactor::InvSrcAlpha)
+					.setBlendOp(nvrhi::BlendOp::Add)
+					.setSrcBlendAlpha(nvrhi::BlendFactor::One)
+					.setDestBlendAlpha(nvrhi::BlendFactor::InvSrcAlpha)
+					.setBlendOpAlpha(nvrhi::BlendOp::Add);
+			}
 			specification.RenderState.rasterState.setCullNone().enableDepthClip();
 			specification.RenderState.depthStencilState.setDepthTestEnable(target != QuadBatchTarget::Ldr)
 				.setDepthWriteEnable(false)
@@ -166,11 +170,13 @@ namespace Engine {
 
 	namespace {
 
-		// A run of consecutive quads drawn with one texture and one sampler.
+		// A run of consecutive quads drawn with one texture and one sampler (and, for the Normals target, one normal map), all
+		// in one chunk of MaxQuadsPerRecord quads.
 		struct QuadBatch
 		{
 			nvrhi::ITexture* Texture = nullptr; // the white texture for a quad without one
 			QuadSampler Sampler = QuadSampler::Point;
+			nvrhi::ITexture* NormalMap = nullptr; // the Normals target's; null for the flat normal and for the other targets
 			uint32_t FirstQuad = 0;
 			uint32_t QuadCount = 0;
 		};
@@ -187,15 +193,17 @@ namespace Engine {
 		nvrhi::BufferHandle Indices{};
 		uint32_t VertexCapacity = 0; // quads
 		uint32_t IndexCapacity = 0;  // quads
-		bool HasWarnedBudget = false;
 		// Reused by every Record.
 		std::vector<QuadVertex> Staging{};
 
-		// Batches the quad Staging just received into `batches`: it extends the last batch when it has the same texture and
-		// sampler.
-		void AddQuad(std::vector<QuadBatch>& batches, nvrhi::ITexture* texture, QuadSampler sampler) const;
+		// Batches the quad Staging just received into `batches`: it extends the last batch when it has the same texture,
+		// sampler and normal map and the quad does not begin a new chunk of MaxQuadsPerRecord quads.
+		void AddQuad(std::vector<QuadBatch>& batches, nvrhi::ITexture* texture, QuadSampler sampler, nvrhi::ITexture* normalMap) const;
 		// Records the indices of IndexCapacity quads into the index buffer.
 		void WriteIndices(nvrhi::ICommandList& commandList) const;
+		// The record itself: QuadBatcher::Record's work, before it releases an outsized Staging.
+		[[nodiscard]] Result<uint32_t> RecordQuads(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const QuadBatchInputs& inputs,
+			RenderPassCounters& counters);
 	};
 
 	void QuadBatcher::State::WriteIndices(nvrhi::ICommandList& commandList) const
@@ -210,15 +218,16 @@ namespace Engine {
 		commandList.writeBuffer(Indices, indices.data(), indices.size() * sizeof(uint32_t), 0);
 	}
 
-	void QuadBatcher::State::AddQuad(std::vector<QuadBatch>& batches, nvrhi::ITexture* texture, QuadSampler sampler) const
+	void QuadBatcher::State::AddQuad(std::vector<QuadBatch>& batches, nvrhi::ITexture* texture, QuadSampler sampler, nvrhi::ITexture* normalMap) const
 	{
 		const uint32_t quad = static_cast<uint32_t>(Staging.size() / Utils::VerticesPerQuad) - 1;
-		if (!batches.empty() && batches.back().Texture == texture && batches.back().Sampler == sampler)
+		if (!batches.empty() && batches.back().Texture == texture && batches.back().Sampler == sampler && batches.back().NormalMap == normalMap
+			&& quad % MaxQuadsPerRecord != 0)
 		{
 			++batches.back().QuadCount;
 			return;
 		}
-		batches.push_back({ .Texture = texture, .Sampler = sampler, .FirstQuad = quad, .QuadCount = 1 });
+		batches.push_back({ .Texture = texture, .Sampler = sampler, .NormalMap = normalMap, .FirstQuad = quad, .QuadCount = 1 });
 	}
 
 	NineSliceExpansion ExpandNineSlice(const NineSliceSource& source, glm::vec2 size, float borderScale)
@@ -300,14 +309,18 @@ namespace Engine {
 		State& state = *batcher->m_State;
 		state.Device = &device;
 		std::vector<PipelineLayoutDescription> descriptions = Utils::MakeQuadDescriptions();
-		// The pipelines share one binding layout, so one binding set per texture and sampler serves them all.
+		// Hdr, Ldr and LdrDepth share one binding layout, so one binding set per texture and sampler serves them; HdrLit and
+		// Normals share the lit one.
 		ENGINE_TRY_ASSIGN(const std::vector<nvrhi::BindingLayoutHandle> sharedLayouts,
 			WithContext(pipelines.CreateBindingLayouts(descriptions[Utils::QuadHdrPipeline]), "while creating the quad pipelines"));
+		ENGINE_TRY_ASSIGN(const std::vector<nvrhi::BindingLayoutHandle> litLayouts,
+			WithContext(pipelines.CreateBindingLayouts(descriptions[Utils::QuadHdrLitPipeline]), "while creating the quad pipelines"));
 		for (size_t index = 0; index < descriptions.size(); ++index)
 		{
-			const QuadBatchTarget target = Utils::GetQuadPipelineTarget(index);
+			const auto target = static_cast<QuadBatchTarget>(index);
 			ENGINE_TRY_ASSIGN(state.Pipelines[index],
-				WithContext(pipelines.CreateGraphicsPipeline(Utils::MakeQuadSpecification(std::move(descriptions[index]), target, sharedLayouts)),
+				WithContext(pipelines.CreateGraphicsPipeline(Utils::MakeQuadSpecification(std::move(descriptions[index]), target,
+								Utils::IsLitQuadTarget(target) ? litLayouts : sharedLayouts)),
 					"while creating the quad pipelines"));
 		}
 		ENGINE_TRY_ASSIGN(state.Samplers[static_cast<size_t>(QuadSampler::Point)],
@@ -358,8 +371,16 @@ namespace Engine {
 
 	nvrhi::FramebufferInfo QuadBatcher::GetFramebufferInfo(QuadBatchTarget target)
 	{
-		// LdrDepth draws into Ldr's target, the scene overlay's framebuffer with SceneDepth.
-		return target == QuadBatchTarget::Hdr ? GetSceneColorFramebufferInfo() : GetOverlayFramebufferInfo();
+		switch (target)
+		{
+			case QuadBatchTarget::Hdr:
+			case QuadBatchTarget::HdrLit:  return GetSceneColorFramebufferInfo();
+			case QuadBatchTarget::Ldr:     return GetOverlayFramebufferInfo();
+			case QuadBatchTarget::Normals: return GetLights2DNormalsFramebufferInfo();
+			// LdrDepth draws into Ldr's target, the scene overlay's framebuffer with SceneDepth.
+			case QuadBatchTarget::LdrDepth: return GetOverlayFramebufferInfo();
+		}
+		return GetOverlayFramebufferInfo();
 	}
 
 	uint32_t QuadBatcher::GetPipelineCount() const
@@ -380,10 +401,29 @@ namespace Engine {
 	Result<uint32_t> QuadBatcher::Record(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const QuadBatchInputs& inputs,
 		RenderPassCounters& counters)
 	{
+		Result<uint32_t> recorded = m_State->RecordQuads(commandList, bindings, inputs, counters);
+		// M21's milestone review: between records the staging keeps room for at most one batch, the vertex buffer's capacity, so
+		// its CPU copy never stays larger than the GPU buffer it fills; a record of more quads releases it.
+		if (m_State->Staging.capacity() > static_cast<size_t>(MaxQuadsPerRecord) * Utils::VerticesPerQuad)
+			std::vector<QuadVertex>().swap(m_State->Staging);
+		return recorded;
+	}
+
+	size_t QuadBatcher::GetStagingCapacity() const
+	{
+		return m_State->Staging.capacity() / Utils::VerticesPerQuad;
+	}
+
+	Result<uint32_t> QuadBatcher::State::RecordQuads(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const QuadBatchInputs& inputs,
+		RenderPassCounters& counters)
+	{
 		ENGINE_CORE_ASSERT(inputs.Framebuffer != nullptr, "QuadBatcher::Record needs a framebuffer");
 		if (inputs.Framebuffer == nullptr)
 			return MakeError(ErrorCode::InvalidArgument, "the quad batcher needs a framebuffer");
-		State& state = *m_State;
+		ENGINE_CORE_ASSERT(inputs.Target != QuadBatchTarget::HdrLit || inputs.Light != nullptr, "QuadBatcher::Record's HdrLit target needs the light accumulation");
+		if (inputs.Target == QuadBatchTarget::HdrLit && inputs.Light == nullptr)
+			return MakeError(ErrorCode::InvalidArgument, "the quad batcher's HdrLit target needs the light accumulation");
+		State& state = *this;
 		state.Staging.clear();
 		// The record's batches name its textures, so they live only for the call.
 		std::vector<QuadBatch> batches;
@@ -395,15 +435,10 @@ namespace Engine {
 		if (inputs.Quads.empty() || scissor.maxX <= scissor.minX || scissor.maxY <= scissor.minY)
 			return 0U;
 
-		// Lay out every quad that fits the budget and has finite values, in the given order.
-		uint32_t budgetSkipped = 0;
+		// Lay out every quad with finite values, in the given order; only the Normals target batches by normal map.
+		const bool normals = inputs.Target == QuadBatchTarget::Normals;
 		for (const QuadDraw& quad : inputs.Quads)
 		{
-			if (state.Staging.size() / Utils::VerticesPerQuad >= MaxQuadsPerRecord)
-			{
-				++budgetSkipped;
-				continue;
-			}
 			if (!Utils::IsQuadFinite(quad))
 				continue;
 			const std::array<glm::vec2, 4> texCoords = {
@@ -414,43 +449,44 @@ namespace Engine {
 			};
 			for (size_t corner = 0; corner < quad.Corners.size(); ++corner)
 				state.Staging.push_back({ .Position = quad.Corners[corner], .TexCoord = texCoords[corner], .Color = quad.Color });
-			state.AddQuad(batches, quad.Texture != nullptr ? quad.Texture : state.White.Get(), quad.Sampler);
-		}
-		if (budgetSkipped > 0 && !state.HasWarnedBudget)
-		{
-			state.HasWarnedBudget = true;
-			ENGINE_CORE_WARN("The quad batcher skipped {} quad(s) beyond the budget of {} quads per record; further quads beyond the budget are "
-							 "skipped without a warning",
-				budgetSkipped, MaxQuadsPerRecord);
+			state.AddQuad(batches, quad.Texture != nullptr ? quad.Texture : state.White.Get(), quad.Sampler, normals ? quad.NormalMap : nullptr);
 		}
 		if (state.Staging.empty())
 			return 0U;
-		const uint32_t quadCount = static_cast<uint32_t>(state.Staging.size() / Utils::VerticesPerQuad);
+		const size_t quadTotal = state.Staging.size() / Utils::VerticesPerQuad;
+		// The quads one chunk writes into the vertex buffer: the record's, up to MaxQuadsPerRecord.
+		const auto largestChunk = static_cast<uint32_t>(std::min(quadTotal, static_cast<size_t>(MaxQuadsPerRecord)));
 
 		// Everything that can fail, before the first command and before any change to the state but the vertex buffer's: the
 		// binding sets, then the buffers. A grown vertex buffer may be kept after a later failure (every record writes its
 		// vertices before drawing), but a new index buffer is kept only together with the recording of its indices, so the
 		// state never holds an index buffer whose indices were not written (a failed record leaves IndexCapacity below
-		// VertexCapacity, and the next record creates and writes it). The record never exceeds MaxQuadsPerRecord, so neither
-		// do the buffers.
-		nvrhi::IBindingLayout& layout = *state.Pipelines[Utils::QuadHdrPipeline].BindingLayouts[0];
+		// VertexCapacity, and the next record creates and writes it). A chunk never exceeds MaxQuadsPerRecord, so neither do
+		// the buffers.
+		const auto pipeline = static_cast<size_t>(inputs.Target);
+		const bool lit = Utils::IsLitQuadTarget(inputs.Target);
+		nvrhi::IBindingLayout& layout = *state.Pipelines[pipeline].BindingLayouts[0];
 		std::vector<nvrhi::IBindingSet*> sets;
 		sets.reserve(batches.size());
 		for (const QuadBatch& batch : batches)
 		{
 			nvrhi::BindingSetDesc desc;
-			desc.bindings = {
-				nvrhi::BindingSetItem::Texture_SRV(0, batch.Texture),
-				nvrhi::BindingSetItem::Sampler(0, state.Samplers[static_cast<size_t>(batch.Sampler)]),
-				nvrhi::BindingSetItem::PushConstants(0, sizeof(QuadConstants)),
-			};
+			desc.bindings = { nvrhi::BindingSetItem::Texture_SRV(0, batch.Texture) };
+			if (lit)
+			{
+				// HdrLit's light accumulation, or the Normals batch's normal map (white for the flat normal, unread).
+				nvrhi::ITexture* second = inputs.Target == QuadBatchTarget::HdrLit ? inputs.Light : batch.NormalMap;
+				desc.bindings.push_back(nvrhi::BindingSetItem::Texture_SRV(1, second != nullptr ? second : state.White.Get()));
+			}
+			desc.bindings.push_back(nvrhi::BindingSetItem::Sampler(0, state.Samplers[static_cast<size_t>(batch.Sampler)]));
+			desc.bindings.push_back(nvrhi::BindingSetItem::PushConstants(0, sizeof(QuadConstants)));
 			ENGINE_TRY_ASSIGN(nvrhi::IBindingSet * set, WithContext(bindings.GetOrCreate(*state.Device, desc, layout), "while recording the quads"));
 			sets.push_back(set);
 		}
-		if (state.Vertices == nullptr || state.VertexCapacity < quadCount)
+		if (state.Vertices == nullptr || state.VertexCapacity < largestChunk)
 		{
 			uint32_t capacity = std::max(state.VertexCapacity, Utils::InitialQuadCapacity);
-			while (capacity < quadCount)
+			while (capacity < largestChunk)
 				capacity *= 2;
 			capacity = std::min(capacity, MaxQuadsPerRecord);
 			nvrhi::BufferDesc desc;
@@ -477,15 +513,13 @@ namespace Engine {
 		}
 
 		commandList.beginMarker("Quads");
-		commandList.writeBuffer(state.Vertices, state.Staging.data(), state.Staging.size() * sizeof(QuadVertex), 0);
 		if (newIndices != nullptr)
 		{
 			state.Indices = std::move(newIndices);
 			state.IndexCapacity = state.VertexCapacity;
 			state.WriteIndices(commandList);
 		}
-		const QuadConstants constants{ .Transform = inputs.Transform };
-		const size_t pipeline = Utils::GetQuadPipelineIndex(inputs.Target);
+		QuadConstants constants{ .Transform = inputs.Transform };
 		nvrhi::GraphicsState graphics;
 		graphics.pipeline = state.Pipelines[pipeline].Pipeline;
 		graphics.framebuffer = inputs.Framebuffer;
@@ -494,22 +528,37 @@ namespace Engine {
 		graphics.bindings.push_back(nullptr);
 		graphics.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(state.Vertices).setSlot(0).setOffset(0));
 		graphics.setIndexBuffer(nvrhi::IndexBufferBinding().setBuffer(state.Indices).setFormat(nvrhi::Format::R32_UINT).setOffset(0));
-		for (size_t index = 0; index < batches.size(); ++index)
+		// One chunk of at most MaxQuadsPerRecord quads at a time: its vertices written at the start of the buffer, then its
+		// batches drawn (each lies in one chunk, State::AddQuad), before the next chunk's write.
+		size_t index = 0;
+		for (size_t chunkStart = 0; chunkStart < quadTotal; chunkStart += MaxQuadsPerRecord)
 		{
-			const QuadBatch& batch = batches[index];
-			if (index == 0 || graphics.bindings[0] != sets[index])
+			const size_t chunkQuads = std::min(quadTotal - chunkStart, static_cast<size_t>(MaxQuadsPerRecord));
+			commandList.writeBuffer(state.Vertices, state.Staging.data() + chunkStart * Utils::VerticesPerQuad,
+				chunkQuads * Utils::VerticesPerQuad * sizeof(QuadVertex), 0);
+			// The write leaves the buffer in its copy state: the chunk's first draw sets the graphics state again.
+			bool stateSet = false;
+			for (; index < batches.size() && batches[index].FirstQuad < chunkStart + chunkQuads; ++index)
 			{
-				graphics.bindings[0] = sets[index];
-				// Setting the graphics state invalidates the push constants, so every change sets them again.
-				commandList.setGraphicsState(graphics);
-				commandList.setPushConstants(&constants, sizeof(constants));
+				const QuadBatch& batch = batches[index];
+				if (!stateSet || graphics.bindings[0] != sets[index])
+				{
+					stateSet = true;
+					graphics.bindings[0] = sets[index];
+					constants.HasNormalMap = normals && batch.NormalMap != nullptr ? 1U : 0U;
+					// Setting the graphics state invalidates the push constants, so every change sets them again.
+					commandList.setGraphicsState(graphics);
+					commandList.setPushConstants(&constants, sizeof(constants));
+				}
+				const auto firstInChunk = static_cast<uint32_t>(batch.FirstQuad - chunkStart);
+				commandList.drawIndexed(
+					nvrhi::DrawArguments().setVertexCount(batch.QuadCount * Utils::IndicesPerQuad).setStartIndexLocation(firstInChunk * Utils::IndicesPerQuad));
+				++counters.DrawCalls;
+				counters.Triangles += batch.QuadCount * 2;
 			}
-			commandList.drawIndexed(nvrhi::DrawArguments().setVertexCount(batch.QuadCount * Utils::IndicesPerQuad).setStartIndexLocation(batch.FirstQuad * Utils::IndicesPerQuad));
-			++counters.DrawCalls;
-			counters.Triangles += batch.QuadCount * 2;
 		}
 		commandList.endMarker();
-		return quadCount;
+		return static_cast<uint32_t>(quadTotal);
 	}
 
 }

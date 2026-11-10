@@ -27,6 +27,9 @@ namespace Engine {
 		uint64_t SceneRevision = 0; // revision of the scene from which this image and its PickTable were extracted
 		CameraData Camera{};        // camera copied from the same render snapshot as the displayed image
 		bool Picking = false;       // rendered with RenderViewFlags::Picking: only such an image accepts RequestPick
+		// M21: the interpolation alpha the image's snapshot was extracted at (RenderSnapshot::Alpha; 1 for an edit scene), so
+		// what the UI finds under the cursor (the tile brush's cell) is posed as the image shows it (ComputeRenderedWorldMatrix).
+		float Alpha = 1.0f;
 	};
 
 	struct EditorViewportClick

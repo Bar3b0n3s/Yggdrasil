@@ -16,10 +16,12 @@ namespace Engine {
 			ENGINE_TRY(ScriptBindings::RegisterScript(api));
 			ENGINE_TRY(ScriptBindings::RegisterEntity(api));
 			ENGINE_TRY(ScriptBindings::RegisterComponents(api));
+			ENGINE_TRY(ScriptBindings::RegisterSprites(api));
 			ENGINE_TRY(ScriptBindings::RegisterScene(api));
 			ENGINE_TRY(ScriptBindings::RegisterInput(api));
 			ENGINE_TRY(ScriptBindings::RegisterTime(api));
 			ENGINE_TRY(ScriptBindings::RegisterPhysics(api));
+			ENGINE_TRY(ScriptBindings::RegisterPhysics2D(api));
 			ENGINE_TRY(ScriptBindings::RegisterAudio(api));
 			ENGINE_TRY(ScriptBindings::RegisterAssets(api));
 			ENGINE_TRY(ScriptBindings::RegisterTask(api));

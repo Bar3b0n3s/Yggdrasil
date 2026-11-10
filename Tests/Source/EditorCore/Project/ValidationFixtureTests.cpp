@@ -67,6 +67,14 @@ namespace Engine {
 			return values;
 		}
 
+		// The code a fixture exists for: its name, or the part before the dot of a variant's name, <CODE>.<Variant> (a further
+		// fixture of that code for another path that reports it: <CODE>.2D, the 2D world's composition,
+		// Docs/Decisions/0032-m21-contract.md decision 12; <CODE>.Tilemap, a tilemap's palette sheets, its decision 23).
+		std::string_view GetFixtureCode(std::string_view name)
+		{
+			return name.substr(0, name.find('.'));
+		}
+
 		// Tests/Data/Validation/<Name>/Expected.json of every fixture (ADR 0022 decision 11), sorted.
 		std::vector<std::string> ListValidationFixtures()
 		{
@@ -160,10 +168,15 @@ namespace Engine {
 		ValidationOutcome ValidateFixture(const ValidationFixture& fixture)
 		{
 			// The asset manager logs a failed import and every missing or mistyped reference it hands a placeholder for at Error
-			// (§7.2): a fixture reporting those codes declares the entries.
+			// (§7.2): a fixture reporting those codes declares the entries. A <CODE>.Tilemap fixture's reference is a tilemap
+			// palette's sprite sheet, which has no placeholder (Docs/Decisions/0032-m21-contract.md decision 23), so only the
+			// validator reports it and nothing is logged.
+			const bool tilemapSheets = fixture.Name.ends_with(".Tilemap");
 			std::list<Test::ExpectLog> expectedLogs;
 			for (const std::string_view code : { AssetImportFailedCode, AssetMissingCode, AssetTypeMismatchCode })
 			{
+				if (tilemapSheets && code != AssetImportFailedCode)
+					continue;
 				if (std::ranges::find(fixture.Codes, code) != fixture.Codes.end())
 					expectedLogs.emplace_back(LogLevel::Error, code);
 			}
@@ -229,8 +242,9 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		// Architecture §15.6 gate 6. Each directory is named after the code it exists for (or "Clean", the baseline that
-		// reports nothing) and its Expected.json lists every code the fixture reports.
+		// Architecture §15.6 gate 6. Each directory is named after the code it exists for, or <CODE>.<Variant> for a further
+		// fixture of a code (or "Clean", the baseline that reports nothing), and its Expected.json lists every code the
+		// fixture reports.
 		TEST_CASE("Validation: every project.validate code is triggered by a fixture in Tests/Data/Validation")
 		{
 			const std::vector<std::string> fixtures = ListValidationFixtures();
@@ -246,8 +260,9 @@ namespace Engine {
 					CHECK(fixture.Codes.empty());
 					continue;
 				}
-				CHECK(std::ranges::find(ProjectValidator::GetCodes(), fixture.Name) != ProjectValidator::GetCodes().end());
-				CHECK(std::ranges::find(fixture.Codes, fixture.Name) != fixture.Codes.end());
+				const std::string_view fixtureCode = GetFixtureCode(fixture.Name);
+				CHECK(std::ranges::find(ProjectValidator::GetCodes(), fixtureCode) != ProjectValidator::GetCodes().end());
+				CHECK(std::ranges::find(fixture.Codes, fixtureCode) != fixture.Codes.end());
 				for (const std::string& code : fixture.Codes)
 				{
 					CAPTURE(code);

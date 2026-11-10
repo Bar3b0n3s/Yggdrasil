@@ -16,6 +16,7 @@
 #include "Engine/Asset/ReplayData.h"
 #include "Engine/Asset/SpriteSheetData.h"
 #include "Engine/Asset/StringTableData.h"
+#include "Engine/Asset/TilemapData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/Importers/SoundEffectImporter.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
@@ -234,6 +235,16 @@ namespace Engine {
 				ENGINE_TRY_ASSIGN(std::string canonical, SpriteSheetToText(*sheet, registry));
 				return CanonicalProjectFile{ .Text = std::move(canonical), .Reason = DescribeUpgrade(report.FileVersion, SpriteSheetFormatVersion, false) };
 			}
+			// M21 (Docs/Decisions/0032-m21-contract.md decision 23): tilemaps, every field written.
+			if (extension == ".tilemap")
+			{
+				TilemapLoadReport report;
+				Result<TilemapData> tilemap = TilemapFromText(text, registry, report, true);
+				if (!tilemap)
+					return std::unexpected(locate(std::move(tilemap).error()));
+				ENGINE_TRY_ASSIGN(std::string canonical, TilemapToText(*tilemap, registry));
+				return CanonicalProjectFile{ .Text = std::move(canonical), .Reason = DescribeUpgrade(report.FileVersion, TilemapFormatVersion, false) };
+			}
 			// M22 (Docs/Decisions/0033-m22-contract.md decision 10): string tables, every field written.
 			if (extension == ".stringtable")
 			{
@@ -250,7 +261,7 @@ namespace Engine {
 		// Whether project.upgrade rewrites files with `extension` below Assets/ (MakeCanonicalFile has their canonical form).
 		static bool IsUpgradedAssetExtension(std::string_view extension)
 		{
-			constexpr std::string_view Extensions[] = { ".scene", ".prefab", ".meta", ".material", ".sfx", ".replay", ".spritesheet", ".stringtable" };
+			constexpr std::string_view Extensions[] = { ".scene", ".prefab", ".meta", ".material", ".sfx", ".replay", ".spritesheet", ".tilemap", ".stringtable" };
 			return std::ranges::find(Extensions, extension) != std::end(Extensions);
 		}
 
@@ -293,7 +304,7 @@ namespace Engine {
 		}
 
 		// The project files project.upgrade rewrites: the .eproj, then every .scene, .prefab, .meta, .material, .sfx, .replay,
-		// .spritesheet and .stringtable file under Assets/ (IsUpgradedAssetExtension), sorted.
+		// .spritesheet, .tilemap and .stringtable file under Assets/ (IsUpgradedAssetExtension), sorted.
 		static Result<std::vector<VfsPath>> ListUpgradeFiles(const EditorContext& editor)
 		{
 			std::vector<VfsPath> files;

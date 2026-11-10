@@ -23,10 +23,13 @@ serves its skills and generated reference through automation (`docs.get {}` list
   under `Assets/Scenes/`, `Assets/Scripts/`, `Assets/Prefabs/`, `Assets/Formats/`, `Assets/Localization/` (M22's string
   table), `Assets/Ui/` (M22's font imported with `Ranges`) and `Assets/Tests/<Area>/`,
   `Suites.jsonl` writes `Testing.Suites` and `Testing.Replays`, and `Replays.jsonl` records `Input.replay` and
-  `Determinism.replay` last (`PhysicsSemantics.jsonl`, `MultiScript.jsonl` and M22's `UiReplay.jsonl` record their
-  scenes' replays in `Assets/Tests/Replays/` themselves, and M22's `UiTextInputReplay.jsonl` and `UiWorld.jsonl` record
-  `TextInput.replay` and `UiWorld.replay` with `test.run {record}` from their recording suites in `Assets/Tests/Record/`,
-  which `Testing.Suites` keeps in the Editor mode, so re-recording one is that one call).
+  `Determinism.replay` last (`PhysicsSemantics.jsonl` and `MultiScript.jsonl` record their scenes' replays in
+  `Assets/Tests/Replays/` themselves, and so does `Replays2D.jsonl` for `Sprites2D.replay` and `Physics2D.replay`, with
+  `input.record` around a `play.step` of the planned input that the `Record.Sprites2D` and `Record.Physics2D` suites
+  inject, and `TilemapReplay.jsonl` for `Tilemap.replay`, with `input.record` around a `play.step` of its planned input;
+  M22's `UiReplay.jsonl` records its scene's replay there itself, and M22's `UiTextInputReplay.jsonl` and `UiWorld.jsonl`
+  record `TextInput.replay` and `UiWorld.replay` with `test.run {record}` from their recording suites in
+  `Assets/Tests/Record/`, which `Testing.Suites` keeps in the Editor mode, so re-recording one is that one call).
   `python Scripts/Scaffold.py`, run from the engine repository's root with every editor on the project closed, restores
   `Scaffold/Baseline/` and runs them all; `python Scripts/Scaffold.py --check` proves that they reproduce the project byte
   for byte. To change the content, change a scaffold and regenerate; a changed setting, scene or id re-records the replays.
@@ -37,13 +40,17 @@ serves its skills and generated reference through automation (`docs.get {}` list
   later golden scene comes from a golden scaffold, a `Scaffolds.json` entry with `GoldenDirectories`, which writes only
   below directories of its own and is regenerated like every other scaffold: `Scaffold/GoldenRendererII.jsonl` (M18's
   recorded regeneration of `Golden.jsonl`'s M9 part) writes the Renderer II scenes under
-  `Assets/Scenes/GoldenRendererII/` and their materials under `Assets/Materials/GoldenRendererII/`,
-  `Scaffold/UiGolden.jsonl` (M22) writes the UI golden scene under `Assets/Scenes/GoldenUi/` and its sprite sheet and
-  texture under `Assets/Textures/GoldenUi/`, `Scaffold/UiWidgetsGolden.jsonl` (M22) writes the widgets golden scene
-  under `Assets/Scenes/GoldenUiWidgets/`, `Scaffold/UiScriptsGolden.jsonl` (M22) writes the CJK, Arabic and Hebrew
-  golden scenes under `Assets/Scenes/GoldenUiScripts/` and their fonts (the Noto fixtures and a copy of Inter that falls
-  back to them) under `Assets/Fonts/GoldenUiScripts/`, and `Scaffold/UiWorldGolden.jsonl` (M22) writes the World canvas
-  golden scene under `Assets/Scenes/GoldenUiWorld/`.
+  `Assets/Scenes/GoldenRendererII/` and their materials under `Assets/Materials/GoldenRendererII/`;
+  `Scaffold/Sprites2DGolden.jsonl` (M21) writes the pixel-art scene under `Assets/Scenes/Sprites2DGolden/` and its
+  texture and sprite sheet under `Assets/Textures/Sprites2DGolden/`; `Scaffold/Lights2DGolden.jsonl` (M21) writes the 2D
+  lighting scene under `Assets/Scenes/Lights2DGolden/` and its normal map, sprite sheet and tilemap under
+  `Assets/Textures/Lights2DGolden/`; `Scaffold/UiGolden.jsonl` (M22) writes the UI golden scene under
+  `Assets/Scenes/GoldenUi/` and its sprite sheet and texture under `Assets/Textures/GoldenUi/`,
+  `Scaffold/UiWidgetsGolden.jsonl` (M22) writes the widgets golden scene under `Assets/Scenes/GoldenUiWidgets/`,
+  `Scaffold/UiScriptsGolden.jsonl` (M22) writes the CJK, Arabic and Hebrew golden scenes under
+  `Assets/Scenes/GoldenUiScripts/` and their fonts (the Noto fixtures and a copy of Inter that falls back to them) under
+  `Assets/Fonts/GoldenUiScripts/`, and `Scaffold/UiWorldGolden.jsonl` (M22) writes the World canvas golden scene under
+  `Assets/Scenes/GoldenUiWorld/`.
   `asset.import` reads only project paths and absolute ones, so imported files come from `Scaffold/Sources/`,
   byte-identical copies of the `Tests/Data/Assets` fixtures (`Tests/Data/Generate`), which a unit test keeps in step. The
   editor's `.bak` backups of rewritten files are not committed (`.gitignore` leaves them out).

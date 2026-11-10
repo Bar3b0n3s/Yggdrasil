@@ -42,12 +42,13 @@ namespace Engine {
 	// editor session) reuses them: <asset>-<size>-<digest>.png, and the manifest <asset>-<size>.json lists the inputs
 	// (the asset and everything it references through the asset dependency graph) whose files the digest covers: the
 	// renderer format, EngineCookVersion, asset, size, for a captured image (mesh, material, prefab, environment) the
-	// render quality (GetRenderQuality) and, for each input, the size and modification time of its source, its .meta and
-	// its dependency files (built-ins contribute their handle). A reused image is valid only while recomputing that digest
-	// from the current files and settings matches; in memory, a quality change marks captured images stale the way a
-	// changed input does. Writing a new image removes the asset's previous one, and BindProject removes images no manifest
-	// names, manifests of unregistered assets and the files of the earlier per-session naming, so the directory holds at
-	// most one image per asset and size.
+	// render quality (GetRenderQuality) and the project's sorting layers (a prefab's sprites draw in them; M21) and, for
+	// each input, the size and modification time of its source, its .meta and its dependency files (built-ins contribute
+	// their handle). A reused image is valid only while recomputing that digest from the current files and settings
+	// matches; in memory, a quality or sorting-layer change marks captured images stale the way a changed input does.
+	// Writing a new image removes the asset's previous one, and BindProject removes images no manifest names, manifests
+	// of unregistered assets and the files of the earlier per-session naming, so the directory holds at most one image
+	// per asset and size.
 	//
 	// Constructed unbound. The host binds after project open and resets BEFORE unmounting/releasing that project; it
 	// also retires the old thumbnail ImGui texture keys. A queued request can never migrate to the next project.
@@ -66,7 +67,8 @@ namespace Engine {
 		[[nodiscard]] Status BindProject(uint64_t projectGeneration);
 		[[nodiscard]] uint64_t GetProjectGeneration() const; // 0 unbound
 		// The quality the renderer captures meshes, materials, prefabs and environments with: the open project's Rendering
-		// settings (the defaults without a project). Captured images are keyed by it on disk and in memory.
+		// settings (the defaults without a project). Captured images are keyed by it, and by the project's sorting layers,
+		// on disk and in memory.
 		[[nodiscard]] RenderQualitySettings GetRenderQuality() const;
 		// Main thread outside renderer callbacks: cancels every queued request, drops results/errors and withdraws the
 		// binding before mounts/private cache disappear. No disk deletion. Does not forget the last generation ever bound.

@@ -1,0 +1,226 @@
+{
+	"Format": "Replay",
+	"Version": 3,
+	"Scene": {
+		"Handle": "05851fbd80d7938f",
+		"Path": "Assets/Scenes/Physics2D.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.1.0",
+	"Config": "Editor",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "1b53dfcbda293079",
+				"Path": "/Wedge",
+				"Hash": "9a57c6fdf2937dcd",
+				"Components": {
+					"Transform": "de6294c1e745262c",
+					"RigidBody2D": "eca0f36ce9111aa9",
+					"PolygonCollider2D": "914079e80d482187"
+				}
+			},
+			{
+				"Id": "271bc181db2c9ff9",
+				"Path": "/WallRight",
+				"Hash": "d37bcc0b62a975e4",
+				"Components": {
+					"Transform": "3777ad82ddd6d9bc",
+					"RigidBody2D": "3719e571e3be3371",
+					"BoxCollider2D": "edf5d9123da338ef"
+				}
+			},
+			{
+				"Id": "2a1b14b9807d6988",
+				"Path": "/Ball",
+				"Hash": "ace55e30c2c1ef62",
+				"Components": {
+					"Transform": "ecb46939d9145dba",
+					"Script": "a949147729bd5a24",
+					"RigidBody2D": "f701119d6733a8a1",
+					"CircleCollider2D": "e5838c87641b9c91"
+				}
+			},
+			{
+				"Id": "423f055e3eee1a9d",
+				"Path": "/Camera",
+				"Hash": "c4fa4fb71f7aa1e7",
+				"Components": {
+					"Transform": "a75f7acb44fb9902",
+					"Camera": "7df5525c9c3d5e17",
+					"AudioListener": "5364d8903ff7ab7d"
+				}
+			},
+			{
+				"Id": "455b877ee3f6e0bd",
+				"Path": "/BoxSensor",
+				"Hash": "dee664e2ac5cf1d9",
+				"Components": {
+					"Transform": "8121e4a4a3015ae3",
+					"Script": "2e41d2045f30f8f0",
+					"RigidBody2D": "6be22fbac1fea8eb",
+					"BoxCollider2D": "17f04c09f85c2ca6"
+				}
+			},
+			{
+				"Id": "9b7ae6199b5668cd",
+				"Path": "/WedgeSensor",
+				"Hash": "b7691ce6e852113e",
+				"Components": {
+					"Transform": "a95ba040e4dce552",
+					"Script": "2e41d2045f30f8f0",
+					"RigidBody2D": "6be22fbac1fea8eb",
+					"PolygonCollider2D": "b7c4fddccf4292d3"
+				}
+			},
+			{
+				"Id": "b5796367c695320d",
+				"Path": "/Floor",
+				"Hash": "3e2fe4cbef4d19d3",
+				"Components": {
+					"Transform": "ea712709ea9d5e96",
+					"Script": "2e41d2045f30f8f0",
+					"RigidBody2D": "4f622401f0a107ba",
+					"BoxCollider2D": "ac2af2056380c2d2"
+				}
+			},
+			{
+				"Id": "b88aabbf8d076d57",
+				"Path": "/Lift",
+				"Hash": "a71dd95963aced9a",
+				"Components": {
+					"Transform": "6074d358ee5f8368",
+					"RigidBody2D": "d28a824eebb0817f",
+					"BoxCollider2D": "c868a49ce7fe2b08"
+				}
+			},
+			{
+				"Id": "c8eea157c8046cff",
+				"Path": "/CircleSensor",
+				"Hash": "1a4be4286e730852",
+				"Components": {
+					"Transform": "45d55efc5d6b2fad",
+					"Script": "2e41d2045f30f8f0",
+					"RigidBody2D": "6be22fbac1fea8eb",
+					"CircleCollider2D": "9500fe067ab4d174"
+				}
+			},
+			{
+				"Id": "cafe226c42a16263",
+				"Path": "/Ramp",
+				"Hash": "25234e0a0f8692d0",
+				"Components": {
+					"Transform": "1a7e484cd67dffde",
+					"RigidBody2D": "3719e571e3be3371",
+					"BoxCollider2D": "68d540040754f596"
+				}
+			},
+			{
+				"Id": "ed7e539955c4f873",
+				"Path": "/WallLeft",
+				"Hash": "2909ca7e210341f4",
+				"Components": {
+					"Transform": "438616825b0e1674",
+					"RigidBody2D": "3719e571e3be3371",
+					"BoxCollider2D": "edf5d9123da338ef"
+				}
+			},
+			{
+				"Id": "f5ea34025c7b11b8",
+				"Path": "/Crate",
+				"Hash": "c38a08ad04e17e26",
+				"Components": {
+					"Transform": "63819c6a748549bc",
+					"RigidBody2D": "052463dd929bc553",
+					"BoxCollider2D": "d710e5ed1668319c"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "5c3036d6f52752ba",
+				"Path": "Assets/Scripts/Physics2D/Pusher.luau",
+				"Type": "Script",
+				"Hash": "0188b8d8596bcc5e"
+			},
+			{
+				"Handle": "fe49c756f2c056af",
+				"Path": "Assets/Scripts/Physics2D/Contacts2D.luau",
+				"Type": "Script",
+				"Hash": "da1a6fc25fd2368a"
+			}
+		]
+	},
+	"Events": [
+		{
+			"Tick": 9,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 1
+		},
+		{
+			"Tick": 71,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Down"
+		},
+		{
+			"Tick": 72,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Up"
+		},
+		{
+			"Tick": 111,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -1
+		},
+		{
+			"Tick": 151,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Down"
+		},
+		{
+			"Tick": 152,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Up"
+		},
+		{
+			"Tick": 191,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 260,
+			"Luau": "local b = Scene.FindByName(\"Ball\")\nreturn b:GetScript(\"Pusher\").Kicks == 2 and #Scene.FindByName(\"BoxSensor\"):GetScript(\"Contacts2D\").Events >= 1"
+		}
+	],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "62cdf384049e6b25"
+		},
+		{
+			"Tick": 120,
+			"StateHash": "a662c11d40eed1fe"
+		},
+		{
+			"Tick": 180,
+			"StateHash": "5ba6f94db6737af6"
+		},
+		{
+			"Tick": 240,
+			"StateHash": "32496b80bd42283e"
+		}
+	],
+	"FinalTick": 261,
+	"FinalStateHash": "a7d3bf019afda673"
+}

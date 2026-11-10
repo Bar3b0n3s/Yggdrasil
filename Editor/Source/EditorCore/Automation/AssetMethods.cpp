@@ -18,6 +18,7 @@
 #include "Engine/Asset/SpriteSheetData.h"
 #include "Engine/Asset/StringTableData.h"
 #include "Engine/Asset/TextureData.h"
+#include "Engine/Asset/TilemapData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/AssetPipeline/Importers/GltfImporter.h"
@@ -25,10 +26,12 @@
 #include "Engine/AssetPipeline/Importers/SoundEffectImporter.h"
 #include "Engine/AssetPipeline/Importers/SpriteSheetImporter.h"
 #include "Engine/AssetPipeline/Importers/StringTableImporter.h"
+#include "Engine/AssetPipeline/Importers/TilemapImporter.h"
 #include "Engine/Audio/SoundSynth.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Automation/Protocol/PendingOperation.h"
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Reflection/MergePatch.h"
@@ -39,6 +42,7 @@
 #include "Engine/Scene/PrefabAsset.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Scene/SpriteValidation.h"
 
 #include <nlohmann/json.hpp>
 
@@ -46,6 +50,7 @@
 #include <charconv>
 #include <filesystem>
 #include <set>
+#include <tuple>
 #include <utility>
 
 namespace Engine {
@@ -225,6 +230,36 @@ namespace Engine {
 			return sheet;
 		}
 
+		// A sprite sheet's values (asset.create, asset.setProperties) take its Texture in every spelling of an asset reference
+		// (Architecture §7.1: a 16-hex handle, a project path, a sub-asset path or an engine path), as the AssetRef fields of
+		// params do (MethodRegistry.h convention 13; Docs/Decisions/0032-m21-contract.md, W21.1's review): a Texture that is a
+		// string but not a handle is rewritten to the handle of the Texture it names; a handle is kept as given (it may name a
+		// missing asset). Errors, located at `pointer`/Texture: ResolveAssetParam's (InvalidArgument for a malformed
+		// reference, NotFound for one that names nothing, the refresh's errors) and InvalidArgument for an asset of another
+		// type.
+		Status ResolveSpriteSheetTexture(EditorMethodContext& context, Json& values, std::string_view pointer)
+		{
+			if (!values.is_object())
+				return {};
+			const auto texture = values.find("Texture");
+			if (texture == values.end() || !texture->is_string())
+				return {};
+			const Result<std::string> reference = JsonReader(*texture).ReadString();
+			if (!reference || UUID::FromString(*reference).has_value())
+				return {};
+			const std::string location = std::format("{}/Texture", pointer);
+			ENGINE_TRY_ASSIGN(const AssetHandle handle, Utils::ResolveAssetParam(context, *reference, location));
+			const AssetType type = context.GetEditor().GetAssets().GetAssetType(handle);
+			if (type != AssetType::Texture)
+			{
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, location,
+					std::format("'{}' is a {}, not a Texture", *reference, AssetTypeToString(type)),
+					"give a Texture asset; asset.list {\"type\": \"Texture\"} lists them"));
+			}
+			*texture = handle.ToString();
+			return {};
+		}
+
 		// The registry JSON of `table` as asset.getProperties reports it: every field, without "Format" and "Version".
 		Result<Json> StringTableToValues(const StringTableData& table, const TypeRegistry& registry)
 		{
@@ -267,32 +302,184 @@ namespace Engine {
 		// report it). Errors: Validation with one issue per frame that leaves the texture, at `pointer`/Frames/<i>/Rect.
 		Status CheckSpriteSheetTexture(EditorAssetManager& assets, const SpriteSheetData& sheet, std::string_view pointer)
 		{
-			const AssetHandle handle = sheet.Texture.GetHandle();
-			if (!handle.IsValid() || assets.GetAssetType(handle) != AssetType::Texture)
-				return {};
-			const Result<AssetRef<Asset>> loaded = assets.Load(handle);
-			if (!loaded.has_value())
-				return {};
-			const AssetRef<TextureData> texture = AssetCast<TextureData>(*loaded);
-			if (texture == nullptr)
-				return {};
+			// The frames project.validate reports as SPRITE_FRAME_OUTSIDE_TEXTURE (Scene/SpriteValidation.h), refused here.
 			ValidationContext context{ std::string(pointer) };
-			for (size_t index = 0; index < sheet.Frames.size(); ++index)
+			for (const SpriteFrameTextureIssue& frame : FindSpriteFramesOutsideTexture(sheet, assets))
 			{
-				const SpriteRect& rect = sheet.Frames[index].Rect;
-				const uint64_t right = static_cast<uint64_t>(rect.X) + rect.Width;
-				const uint64_t bottom = static_cast<uint64_t>(rect.Y) + rect.Height;
-				if (right <= texture->Width && bottom <= texture->Height)
-					continue;
 				ValidationIssue issue;
 				issue.Severity = DiagnosticSeverity::Error;
-				issue.JsonPointer = std::format("{}/Frames/{}/Rect", pointer, index);
-				issue.Message = std::format("frame {} ends at texel ({}, {}), outside its texture '{}' of {} x {} texels", index, right, bottom,
-					assets.GetReferencePath(handle), texture->Width, texture->Height);
+				issue.JsonPointer = std::format("{}/Frames/{}/Rect", pointer, frame.Frame);
+				issue.Message = std::format("frame {} ends at texel ({}, {}), outside its texture '{}' of {} x {} texels", frame.Frame, frame.Right, frame.Bottom,
+					assets.GetReferencePath(sheet.Texture.GetHandle()), frame.TextureWidth, frame.TextureHeight);
 				issue.Hint = "X + Width must be at most the texture's width and Y + Height at most its height";
 				context.AddIssue(std::move(issue));
 			}
 			return context.ToStatus("the sprite sheet");
+		}
+
+		// The registry JSON of `tilemap` as asset.getProperties reports it: every field, without "Format" and "Version".
+		Result<Json> TilemapToValues(const TilemapData& tilemap, const TypeRegistry& registry)
+		{
+			ENGINE_TRY_ASSIGN(Json document, TilemapToJson(tilemap, registry));
+			document.erase("Format");
+			document.erase("Version");
+			return document;
+		}
+
+		// The cells of `tilemap` (valid) laid in chunks of `chunkSize` cells a side, a chunk size ValidateTilemap accepted: every
+		// cell keeps its value, and the chunks are canonical, sorted by (Y, X) with none empty (Asset/TilemapData.h), so a cell's
+		// value reads back unchanged through GetTilemapCell. PatchTilemap's ChunkSize set without Chunks
+		// (Docs/Decisions/0032-m21-contract.md decision 23). Errors: Validation at `pointer`/ChunkSize when the new chunks would
+		// store more than MaxTilemapCells cells.
+		Result<std::vector<TilemapChunk>> RechunkTilemapCells(const TilemapData& tilemap, uint32_t chunkSize, std::string_view pointer)
+		{
+			struct PlacedCell
+			{
+				glm::ivec2 Chunk = glm::ivec2(0);
+				uint32_t Index = 0;
+				uint32_t Value = 0;
+			};
+			const int64_t from = tilemap.ChunkSize;
+			const int64_t to = chunkSize;
+			std::vector<PlacedCell> cells;
+			for (const TilemapChunk& chunk : tilemap.Chunks)
+			{
+				for (size_t index = 0; index < chunk.Tiles.size(); ++index)
+				{
+					if (chunk.Tiles[index] == 0)
+						continue;
+					// Every cell of a valid chunk lies within MaxTilemapCellCoordinate, so its coordinates fit in 32 bits.
+					const glm::ivec2 cell(static_cast<int32_t>(chunk.X * from + static_cast<int64_t>(index) % from),
+						static_cast<int32_t>(chunk.Y * from + static_cast<int64_t>(index) / from));
+					const glm::ivec2 coordinate = GetTilemapChunkCoordinate(cell, chunkSize);
+					const int64_t row = cell.y - coordinate.y * to;
+					const int64_t column = cell.x - coordinate.x * to;
+					cells.push_back(PlacedCell{ .Chunk = coordinate, .Index = static_cast<uint32_t>(row * to + column), .Value = chunk.Tiles[index] });
+				}
+			}
+			std::ranges::sort(cells, [](const PlacedCell& left, const PlacedCell& right)
+			{
+				return std::tie(left.Chunk.y, left.Chunk.x, left.Index) < std::tie(right.Chunk.y, right.Chunk.x, right.Index);
+			});
+			uint64_t chunkCount = 0;
+			for (size_t index = 0; index < cells.size(); ++index)
+			{
+				if (index == 0 || cells[index].Chunk != cells[index - 1].Chunk)
+					++chunkCount;
+			}
+			const uint64_t cellsPerChunk = static_cast<uint64_t>(chunkSize) * chunkSize;
+			if (chunkCount * cellsPerChunk > MaxTilemapCells)
+			{
+				ValidationContext context{ std::string(pointer) };
+				ValidationIssue issue;
+				issue.Severity = DiagnosticSeverity::Error;
+				issue.JsonPointer = std::format("{}/ChunkSize", pointer);
+				issue.Message = std::format("the painted cells in chunks of {} would store {} cells in {} chunks, more than the {} a tilemap may have", chunkSize,
+					chunkCount * cellsPerChunk, chunkCount, MaxTilemapCells);
+				issue.Hint = "use a smaller chunk size, or split the map";
+				context.AddIssue(std::move(issue));
+				const Status refused = context.ToStatus("the tilemap");
+				return std::unexpected(refused.error());
+			}
+			std::vector<TilemapChunk> chunks;
+			chunks.reserve(static_cast<size_t>(chunkCount));
+			for (const PlacedCell& cell : cells)
+			{
+				if (chunks.empty() || chunks.back().X != cell.Chunk.x || chunks.back().Y != cell.Chunk.y)
+					chunks.push_back(TilemapChunk{ .X = cell.Chunk.x, .Y = cell.Chunk.y, .Tiles = std::vector<uint32_t>(static_cast<size_t>(cellsPerChunk), 0) });
+				chunks.back().Tiles[cell.Index] = cell.Value;
+			}
+			return chunks;
+		}
+
+		// The tilemap `document` (a canonical .tilemap document) with the merge patch `values` applied (null resets a field; an
+		// array such as Palette or Chunks replaces the whole array, RFC 7386), read strictly through the registry and checked by
+		// ValidateTilemap (TilemapFromJson). A ChunkSize set without Chunks (a value, or null for the default) keeps the
+		// document's cells, laid in chunks of the new size (RechunkTilemapCells), so a painted map's chunk size can be changed
+		// alone, as the inspector's field does; Chunks set beside it replace the cells whole, at the chunk size the patch sets.
+		// The same rule as PatchMaterial: InvalidArgument at `pointer` for values that are not an object or that set "Format" or
+		// "Version"; Validation located under `pointer` for every violation of the registry ranges or of ValidateTilemap, and
+		// RechunkTilemapCells' (Docs/Decisions/0032-m21-contract.md decision 23).
+		Result<TilemapData> PatchTilemap(const Json& document, const Json& values, const TypeRegistry& registry, std::string_view pointer)
+		{
+			if (!values.is_object())
+			{
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, pointer, "the values must be an object of tilemap fields",
+					"for example {\"CellSize\": [1, 1], \"Palette\": [{\"Sheet\": \"Assets/Sheets/Tiles.spritesheet\", \"Frame\": 0, \"Solid\": true}]}"));
+			}
+			for (const std::string_view key : { std::string_view("Format"), std::string_view("Version") })
+			{
+				if (values.contains(key))
+				{
+					return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, std::format("{}/{}", pointer, key),
+						std::format("'{}' is part of the file format, not a tilemap property", key)));
+				}
+			}
+			TilemapLoadReport report;
+			Json patched = ApplyMergePatch(document, values);
+			if (values.contains("ChunkSize") && !values.contains("Chunks"))
+			{
+				// The patched map without its cells (every field the patch sets, the new ChunkSize's rules included), then with the
+				// document's cells at the document's chunk size (the cells against the patched palette), then those cells re-chunked.
+				Json withCells = patched;
+				if (const auto previous = document.find("ChunkSize"); previous != document.end())
+					withCells["ChunkSize"] = *previous;
+				else
+					withCells.erase("ChunkSize");
+				patched["Chunks"] = Json::array();
+				Result<TilemapData> tilemap = TilemapFromJson(patched, registry, report, true);
+				if (!tilemap)
+					return std::unexpected(Utils::PrefixPointers(tilemap.error(), pointer));
+				Result<TilemapData> cells = TilemapFromJson(withCells, registry, report, true);
+				if (!cells)
+					return std::unexpected(Utils::PrefixPointers(cells.error(), pointer));
+				if (cells->ChunkSize == tilemap->ChunkSize)
+					return cells;
+				ENGINE_TRY_ASSIGN(tilemap->Chunks, RechunkTilemapCells(*cells, tilemap->ChunkSize, pointer));
+				return tilemap;
+			}
+			Result<TilemapData> tilemap = TilemapFromJson(patched, registry, report, true);
+			if (!tilemap)
+				return std::unexpected(Utils::PrefixPointers(tilemap.error(), pointer));
+			return tilemap;
+		}
+
+		// A tilemap's values (asset.create, asset.setProperties) take each palette entry's Sheet in every spelling of an asset
+		// reference (Architecture §7.1), as a sprite sheet's Texture does (ResolveSpriteSheetTexture;
+		// Docs/Decisions/0032-m21-contract.md decision 23): a Sheet that is a string but not a handle is rewritten to the handle
+		// of the SpriteSheet it names; a handle is kept as given (it may name a missing asset). Values that are not an object, a
+		// Palette that is not an array and entries that are not objects are left to PatchTilemap's errors. Errors, located at
+		// `pointer`/Palette/<i>/Sheet: ResolveAssetParam's and InvalidArgument for an asset of another type.
+		Status ResolveTilemapSheets(EditorMethodContext& context, Json& values, std::string_view pointer)
+		{
+			if (!values.is_object())
+				return {};
+			const auto palette = values.find("Palette");
+			if (palette == values.end() || !palette->is_array())
+				return {};
+			for (size_t index = 0; index < palette->size(); ++index)
+			{
+				Json& entry = (*palette)[index];
+				if (!entry.is_object())
+					continue;
+				const auto sheet = entry.find("Sheet");
+				if (sheet == entry.end() || !sheet->is_string())
+					continue;
+				const Result<std::string> reference = JsonReader(*sheet).ReadString();
+				if (!reference || UUID::FromString(*reference).has_value())
+					continue;
+				const std::string location = std::format("{}/Palette/{}/Sheet", pointer, index);
+				ENGINE_TRY_ASSIGN(const AssetHandle handle, Utils::ResolveAssetParam(context, *reference, location));
+				const AssetType type = context.GetEditor().GetAssets().GetAssetType(handle);
+				if (type != AssetType::SpriteSheet)
+				{
+					return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, location,
+						std::format("'{}' is a {}, not a SpriteSheet", *reference, AssetTypeToString(type)),
+						"give a SpriteSheet asset; asset.list {\"type\": \"SpriteSheet\"} lists them"));
+				}
+				*sheet = handle.ToString();
+			}
+			return {};
 		}
 
 		// The native assets with properties of their own (asset.getProperties, asset.setProperties), by importer.
@@ -301,7 +488,8 @@ namespace Engine {
 			Material,
 			SoundEffect,
 			SpriteSheet,
-			StringTable
+			Tilemap, // M21 (Docs/Decisions/0032-m21-contract.md decision 23)
+			StringTable // M22 (Docs/Decisions/0033-m22-contract.md decision 10)
 		};
 
 		std::optional<NativePropertiesKind> FindNativePropertiesKind(const AssetRecord& record)
@@ -312,6 +500,8 @@ namespace Engine {
 				return NativePropertiesKind::SoundEffect;
 			if (record.Metadata.Importer == SpriteSheetImporter::Id)
 				return NativePropertiesKind::SpriteSheet;
+			if (record.Metadata.Importer == TilemapImporter::Id)
+				return NativePropertiesKind::Tilemap;
 			if (record.Metadata.Importer == StringTableImporter::Id)
 				return NativePropertiesKind::StringTable;
 			return std::nullopt;
@@ -325,6 +515,7 @@ namespace Engine {
 				case NativePropertiesKind::Material:    return "Material";
 				case NativePropertiesKind::SoundEffect: return "Sound Effect";
 				case NativePropertiesKind::SpriteSheet: return "Sprite Sheet";
+				case NativePropertiesKind::Tilemap:     return "Tilemap";
 				case NativePropertiesKind::StringTable: return "String Table";
 			}
 			return "Asset";
@@ -340,8 +531,8 @@ namespace Engine {
 		// The properties of the native asset of `kind` whose file holds `text`, read from `source` (named in errors), with
 		// the merge patch `patch` applied when given (a patched sprite sheet's frames are checked against its texture through
 		// `assets`). Errors: those of the readers (Parse, Validation, UnsupportedVersion, with "reading '<source>'"), of
-		// PatchMaterial, PatchSoundEffect, PatchSpriteSheet, CheckSpriteSheetTexture and PatchStringTable (located under
-		// /values) and of the writers.
+		// PatchMaterial, PatchSoundEffect, PatchSpriteSheet, CheckSpriteSheetTexture, PatchTilemap and PatchStringTable (located
+		// under /values) and of the writers.
 		Result<NativeProperties> ReadNativeProperties(NativePropertiesKind kind, std::string_view text, const VfsPath& source, const TypeRegistry& registry,
 			const Json* patch, EditorAssetManager& assets)
 		{
@@ -389,6 +580,19 @@ namespace Engine {
 					ENGINE_TRY_ASSIGN(properties.Values, SpriteSheetToValues(sheet, registry));
 					return properties;
 				}
+				case NativePropertiesKind::Tilemap:
+				{
+					TilemapLoadReport report;
+					ENGINE_TRY_ASSIGN(TilemapData tilemap, WithContext(TilemapFromText(text, registry, report), reading));
+					if (patch != nullptr)
+					{
+						ENGINE_TRY_ASSIGN(const Json document, TilemapToJson(tilemap, registry));
+						ENGINE_TRY_ASSIGN(tilemap, PatchTilemap(document, *patch, registry, "/values"));
+					}
+					ENGINE_TRY_ASSIGN(properties.Text, TilemapToText(tilemap, registry));
+					ENGINE_TRY_ASSIGN(properties.Values, TilemapToValues(tilemap, registry));
+					return properties;
+				}
 				case NativePropertiesKind::StringTable:
 				{
 					StringTableLoadReport report;
@@ -408,10 +612,10 @@ namespace Engine {
 			return MakeError(ErrorCode::Unsupported, "this asset has no properties of its own");
 		}
 
-		// The text of a new native asset of `type` at `path`: a material, a sound effect, a sprite sheet or a string table from
-		// `values` over the defaults, an empty scene named after the file stem, or a prefab with one root entity named after it.
-		// Errors: those of PatchMaterial, PatchSoundEffect, PatchSpriteSheet, CheckSpriteSheetTexture, PatchStringTable and the
-		// serializers.
+		// The text of a new native asset of `type` at `path`: a material, a sound effect, a sprite sheet, a tilemap or a string
+		// table from `values` over the defaults, an empty scene named after the file stem, or a prefab with one root entity
+		// named after it. Errors: those of PatchMaterial, PatchSoundEffect, PatchSpriteSheet, CheckSpriteSheetTexture,
+		// PatchTilemap, PatchStringTable and the serializers.
 		Result<std::string> MakeNativeAssetText(EditorContext& editor, AssetCreateType type, const VfsPath& path, const VariantValue& values)
 		{
 			const std::string stem(path.GetStem());
@@ -460,6 +664,17 @@ namespace Engine {
 					ENGINE_TRY(CheckSpriteSheetTexture(editor.GetAssets(), sheet, "/values"));
 					return SpriteSheetToText(sheet, registry);
 				}
+				case AssetCreateType::Tilemap:
+				{
+					// The defaults are an empty map of unit cells in 16-cell chunks without a palette, which absent values create.
+					TilemapData tilemap;
+					if (!values.Get().is_null())
+					{
+						ENGINE_TRY_ASSIGN(const Json defaults, TilemapToJson(tilemap, registry));
+						ENGINE_TRY_ASSIGN(tilemap, PatchTilemap(defaults, values.Get(), registry, "/values"));
+					}
+					return TilemapToText(tilemap, registry);
+				}
 				case AssetCreateType::StringTable:
 				{
 					// The defaults are an empty table in the locale "en", which absent values create.
@@ -488,6 +703,7 @@ namespace Engine {
 				case AssetCreateType::SoundEffect: return ".sfx";
 				case AssetCreateType::Folder:      return {};
 				case AssetCreateType::SpriteSheet: return ".spritesheet";
+				case AssetCreateType::Tilemap:     return ".tilemap";
 				case AssetCreateType::StringTable: return ".stringtable";
 			}
 			return {};
@@ -1092,12 +1308,12 @@ namespace Engine {
 		Result<AssetCreateResult> AssetCreate(EditorMethodContext& context, const AssetCreateParams& params)
 		{
 			EditorContext& editor = context.GetEditor();
-			const bool takesValues = params.Type == AssetCreateType::Material || params.Type == AssetCreateType::SoundEffect || params.Type == AssetCreateType::SpriteSheet
-				|| params.Type == AssetCreateType::StringTable;
+			const bool takesValues = params.Type == AssetCreateType::Material || params.Type == AssetCreateType::SoundEffect
+				|| params.Type == AssetCreateType::SpriteSheet || params.Type == AssetCreateType::Tilemap || params.Type == AssetCreateType::StringTable;
 			if (!takesValues && context.HasParam("values") && !params.Values.Get().is_null())
 			{
-				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/values", "only a Material, a SoundEffect, a SpriteSheet or a StringTable takes values",
-					"leave values out for scenes, prefabs and folders"));
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/values",
+					"only a Material, a SoundEffect, a SpriteSheet, a Tilemap or a StringTable takes values", "leave values out for scenes, prefabs and folders"));
 			}
 			ENGINE_TRY_ASSIGN(const VfsPath path, Utils::ResolveAssetsPath(context, params.Path, "/path", GetCreateExtension(params.Type)));
 			ENGINE_TRY(Utils::RefreshAssets(editor));
@@ -1131,7 +1347,12 @@ namespace Engine {
 			else
 			{
 				ENGINE_TRY(Utils::CheckAssetPathFree(vfs, path, "/path"));
-				ENGINE_TRY_ASSIGN(const std::string text, MakeNativeAssetText(editor, params.Type, path, params.Values));
+				Json values = params.Values.Get();
+				if (params.Type == AssetCreateType::SpriteSheet)
+					ENGINE_TRY(ResolveSpriteSheetTexture(context, values, "/values"));
+				else if (params.Type == AssetCreateType::Tilemap)
+					ENGINE_TRY(ResolveTilemapSheets(context, values, "/values"));
+				ENGINE_TRY_ASSIGN(const std::string text, MakeNativeAssetText(editor, params.Type, path, VariantValue(std::move(values))));
 				ENGINE_TRY_ASSIGN(const AssetMetadata metadata, editor.GetAssets().CreateMetadata(path));
 				const std::string metaText = SerializeAssetMetadata(metadata);
 				ENGINE_TRY_ASSIGN(const VfsPath metaPath, GetMetaPath(path));
@@ -1194,8 +1415,12 @@ namespace Engine {
 			Result<std::string> text = editor.GetVfs().ReadText(source);
 			if (!text)
 				return std::unexpected(Utils::ToEditorFileError(std::move(text).error()));
-			ENGINE_TRY_ASSIGN(NativeProperties patched,
-				ReadNativeProperties(*kind, *text, source, editor.GetTypeRegistry(), &params.Values.Get(), editor.GetAssets()));
+			Json values = params.Values.Get();
+			if (*kind == NativePropertiesKind::SpriteSheet)
+				ENGINE_TRY(ResolveSpriteSheetTexture(context, values, "/values"));
+			else if (*kind == NativePropertiesKind::Tilemap)
+				ENGINE_TRY(ResolveTilemapSheets(context, values, "/values"));
+			ENGINE_TRY_ASSIGN(NativeProperties patched, ReadNativeProperties(*kind, *text, source, editor.GetTypeRegistry(), &values, editor.GetAssets()));
 
 			AssetSetPropertiesResult result;
 			if (patched.Text != *text)
@@ -1312,6 +1537,8 @@ namespace Engine {
 			.Entry(AssetCreateType::Folder, "Folder", "A folder below Assets/; one that already exists is left as it is (created: false).")
 			.Entry(AssetCreateType::SpriteSheet, "SpriteSheet",
 				"A .spritesheet sprite sheet: frames of a texture with pivots and 9-slice borders, and clips; without values an empty sheet.")
+			.Entry(AssetCreateType::Tilemap, "Tilemap",
+				"A .tilemap tilemap: a palette of sprite sheet frames and cells in chunks; without values an empty map of unit cells in 16-cell chunks.")
 			.Entry(AssetCreateType::StringTable, "StringTable",
 				"A .stringtable string table: keyed strings in several locales, read by Loc.Get; without values the locale en and no entries.");
 
@@ -1377,12 +1604,13 @@ namespace Engine {
 		registry.Struct<AssetCreateParams>("AssetCreateParams", "The params of asset.create.")
 			.Field("type", &AssetCreateParams::Type, "What to create.")
 			.Field("path", &AssetCreateParams::Path,
-				"The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx, .spritesheet, .stringtable; "
-				"none for a folder); missing parent folders are created with it.")
+				"The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx, .spritesheet, .tilemap, "
+				".stringtable; none for a folder); missing parent folders are created with it.")
 			.Field("values", &AssetCreateParams::Values,
-				"A Material's, a SoundEffect's, a SpriteSheet's or a StringTable's fields over the defaults (registry names, such as Roughness, "
-				"Layers, which a sound effect needs, a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads, or a "
-				"table's Locales and Entries); absent for other types.");
+				"A Material's, a SoundEffect's, a SpriteSheet's, a Tilemap's or a StringTable's fields over the defaults (registry names, such as "
+				"Roughness, Layers, which a sound effect needs, a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that "
+				"loads, a tilemap's CellSize, ChunkSize, Palette and Chunks, or a table's Locales and Entries; a sheet's Texture and a palette "
+				"entry's Sheet take any asset reference: a handle, an Assets/ path or an engine:// path); absent for other types.");
 
 		registry.Struct<AssetCreateResult>("AssetCreateResult", "The created asset.")
 			.Field("asset", &AssetCreateResult::Asset, "The created asset; an empty id and type None for a folder.")
@@ -1392,15 +1620,18 @@ namespace Engine {
 				"Whether anything was created: false only for a Folder whose path is already a folder, which succeeds without a command.");
 
 		registry.Struct<AssetGetPropertiesParams>("AssetGetPropertiesParams", "The params of asset.getProperties.")
-			.Field("asset", &AssetGetPropertiesParams::Asset, "The native asset (a material, a sound effect, a sprite sheet or a string table).");
+			.Field("asset", &AssetGetPropertiesParams::Asset, "The native asset (a material, a sound effect, a sprite sheet, a tilemap or a string table).");
 
 		registry.Struct<AssetGetPropertiesResult>("AssetGetPropertiesResult", "A native asset's properties.")
 			.Field("asset", &AssetGetPropertiesResult::Asset, "The asset.")
 			.Field("values", &AssetGetPropertiesResult::Values, "Every property, by registry name.");
 
 		registry.Struct<AssetSetPropertiesParams>("AssetSetPropertiesParams", "The params of asset.setProperties.")
-			.Field("asset", &AssetSetPropertiesParams::Asset, "The native asset (a material, a sound effect, a sprite sheet or a string table).")
-			.Field("values", &AssetSetPropertiesParams::Values, "An RFC 7386 merge patch of its properties: members replace, null resets a field.");
+			.Field("asset", &AssetSetPropertiesParams::Asset, "The native asset (a material, a sound effect, a sprite sheet, a tilemap or a string table).")
+			.Field("values", &AssetSetPropertiesParams::Values,
+				"An RFC 7386 merge patch of its properties: members replace, null resets a field, an array is replaced whole; a sprite sheet's "
+				"Texture and a tilemap palette entry's Sheet take any asset reference (a handle, an Assets/ path or an engine:// path); a tilemap's "
+				"ChunkSize set without Chunks keeps its painted cells, laid in chunks of the new size.");
 
 		registry.Struct<AssetSetPropertiesResult>("AssetSetPropertiesResult", "The properties after the patch.")
 			.Field("asset", &AssetSetPropertiesResult::Asset, "The asset.")
@@ -1559,9 +1790,9 @@ namespace Engine {
 		methods.Add(
 			{
 				.Name = "asset.create",
-				.Description = "Creates a material, a sound effect, a sprite sheet or a string table (with values over the defaults), an empty scene, a one-entity "
-							   "prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that "
-							   "already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
+				.Description = "Creates a material, a sound effect, a sprite sheet, a tilemap or a string table (with values over the defaults), an empty "
+							   "scene, a one-entity prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A "
+							   "folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
 				.RequiredParams = { "type", "path" },
 				.ExposeAsTool = true,
 				.Mutates = true,
@@ -1579,7 +1810,7 @@ namespace Engine {
 		methods.Add(
 			{
 				.Name = "asset.getProperties",
-				.Description = "Returns every property of a native asset (a material, a sound effect, a sprite sheet or a string table) by registry name.",
+				.Description = "Returns every property of a native asset (a material, a sound effect, a sprite sheet, a tilemap or a string table) by registry name.",
 				.RequiredParams = { "asset" },
 				.ExposeAsTool = true,
 				.AllowedInBatch = true,
@@ -1594,9 +1825,10 @@ namespace Engine {
 		methods.Add(
 			{
 				.Name = "asset.setProperties",
-				.Description = "Applies an RFC 7386 merge patch to a native asset's properties (a material, a sound effect, a sprite sheet or a string table; an "
-							   "array such as a sheet's Frames is replaced whole) and writes it, as one undoable command. A running lockstep, recording, "
-							   "replay or test session sees the change only after it ends: asset reloads are deferred like script reloads.",
+				.Description = "Applies an RFC 7386 merge patch to a native asset's properties (a material, a sound effect, a sprite sheet, a tilemap or "
+							   "a string table; an array such as a sheet's Frames or a tilemap's Palette is replaced whole) and writes it, as one undoable "
+							   "command. A running lockstep, recording, replay or test session sees the change only after it ends: asset reloads are deferred "
+							   "like script reloads.",
 				.RequiredParams = { "asset", "values" },
 				.ExposeAsTool = true,
 				.Mutates = true,

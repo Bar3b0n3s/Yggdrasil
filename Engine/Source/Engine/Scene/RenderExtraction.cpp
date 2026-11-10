@@ -7,13 +7,20 @@
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
+#include "Engine/Scene/Components/Light2DComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
+#include "Engine/Scene/Components/PixelPerfectCameraComponent.h"
 #include "Engine/Scene/Components/PointLightComponent.h"
 #include "Engine/Scene/Components/PostProcessComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
+#include "Engine/Scene/Components/SpriteRendererComponent.h"
 #include "Engine/Scene/Components/TextComponent.h"
+#include "Engine/Scene/Components/TilemapRendererComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/PixelPerfectCamera.h"
+#include "Engine/Scene/Private/SpriteDrawing.h"
+#include "Engine/Scene/Private/TilemapDrawing.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
 #include "Engine/Scene/UiExtraction.h"
@@ -166,12 +173,11 @@ namespace Engine {
 			return view;
 		}
 
-		// The view matrix of `world`, a camera entity's rendered world matrix, with its scale removed: the rotation of its
-		// decomposition, or the identity rotation for a matrix that does not decompose (a zero scale, which the
-		// Transform.Scale field rule already rejects for authored data).
-		static glm::mat4 MakeEntityViewMatrix(const glm::mat4& world)
+		// The view matrix of a camera at `position` turned as `world`, a camera entity's rendered world matrix, with its scale
+		// removed: the rotation of its decomposition, or the identity rotation for a matrix that does not decompose (a zero
+		// scale, which the Transform.Scale field rule already rejects for authored data).
+		static glm::mat4 MakeEntityViewMatrix(const glm::mat4& world, const glm::vec3& position)
 		{
-			const glm::vec3 position(world[3]);
 			const Result<TransformDecomposition> decomposed = TransformSystem::DecomposeMatrix(world);
 			return MakeViewMatrix(position, decomposed.has_value() ? decomposed->Rotation : glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
 		}
@@ -214,22 +220,36 @@ namespace Engine {
 			return -axis / length;
 		}
 
-		// The camera data of a CameraComponent seen through `world` (its rendered world matrix).
+		// The camera data of a CameraComponent seen through `world` (its rendered world matrix) in a `width` x `height` view.
+		// Through the entity's PixelPerfectCamera when it holds one (Docs/Decisions/0032-m21-contract.md decision 6): at the
+		// position ComputePixelPerfectView snaps to the pixel grid, orthographic with its half height at the reference
+		// resolution's aspect whatever the Camera's own Projection and OrthographicSize, with the reference resolution as the
+		// viewport (the scene resolution), and `output` set to the view's output stage; otherwise `output` is left as it is.
 		static CameraData MakeEntityCameraData(ConstEntity entity, const CameraComponent& camera, const glm::mat4& world, uint32_t width,
-			uint32_t height)
+			uint32_t height, RenderOutputSettings& output)
 		{
 			CameraData data;
-			data.View = MakeEntityViewMatrix(world);
 			data.Position = glm::vec3(world[3]);
 			data.ProjectionKind = ToRenderProjection(camera.Projection);
 			data.VerticalFov = camera.VerticalFov;
 			data.OrthographicSize = camera.OrthographicSize;
+			data.ViewportWidth = width;
+			data.ViewportHeight = height;
+			if (const PixelPerfectCameraComponent* pixelPerfect = entity.TryGetComponent<PixelPerfectCameraComponent>())
+			{
+				const PixelPerfectView view = ComputePixelPerfectView(*pixelPerfect, data.Position);
+				data.Position = view.Position;
+				data.ProjectionKind = RenderProjection::Orthographic;
+				data.OrthographicSize = view.OrthographicSize;
+				data.ViewportWidth = view.Output.SceneWidth;
+				data.ViewportHeight = view.Output.SceneHeight;
+				output = view.Output;
+			}
+			data.View = MakeEntityViewMatrix(world, data.Position);
 			data.NearClip = camera.NearClip;
 			data.FarClip = camera.FarClip;
 			data.Projection = ComputeReverseZProjection(data.ProjectionKind, data.VerticalFov, data.OrthographicSize, data.NearClip, data.FarClip,
-				width, height);
-			data.ViewportWidth = width;
-			data.ViewportHeight = height;
+				data.ViewportWidth, data.ViewportHeight);
 			data.ClearColor = camera.ClearColor;
 			data.ClearToSkybox = camera.Clear == ClearMode::Skybox;
 			data.Entity = entity.GetUUID();
@@ -277,7 +297,7 @@ namespace Engine {
 					if (!camera.IsValid())
 						return {}; // a game view without a primary camera: no camera, the default clear colour
 					snapshot.Camera = MakeEntityCameraData(camera, camera.GetComponent<CameraComponent>(), ComputeRenderedWorldMatrix(camera, request.Alpha),
-						request.Width, request.Height);
+						request.Width, request.Height, snapshot.Output);
 					snapshot.HasCamera = true;
 					return {};
 				}
@@ -294,7 +314,7 @@ namespace Engine {
 								.WithHint("add a Camera component to it, or name a camera entity"));
 					}
 					snapshot.Camera = MakeEntityCameraData(camera, *component, ComputeRenderedWorldMatrix(camera, request.Alpha), request.Width,
-						request.Height);
+						request.Height, snapshot.Output);
 					snapshot.HasCamera = true;
 					return {};
 				}
@@ -403,10 +423,16 @@ namespace Engine {
 
 		std::optional<RenderEnvironment> environment;
 		std::optional<PostProcessSettings> post;
-		scene.ForEachCanonical([&snapshot, &environment, &post, &request](ConstEntity entity)
+		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 24): the sprites' places in the one 2D draw order and the
+		// tilemaps' canonical positions, from which the tilemaps are placed among the sprites below.
+		std::vector<Utils::SpriteDrawKey> spriteKeys;
+		std::vector<uint32_t> tilemapPositions;
+		uint32_t canonicalPosition = 0;
+		scene.ForEachCanonical([&snapshot, &environment, &post, &request, &spriteKeys, &tilemapPositions, &canonicalPosition](ConstEntity entity)
 		{
 			if (!Utils::IsEffectivelyEnabled(entity))
 				return;
+			const uint32_t position = canonicalPosition++;
 			const UUID id = entity.GetUUID();
 			// The rendered matrix is computed once per entity, and only for entities that draw or light.
 			std::optional<glm::mat4> world;
@@ -519,9 +545,39 @@ namespace Engine {
 					.FxaaEnabled = component->FxaaEnabled,
 				};
 			}
+			// M21 (Docs/Decisions/0032-m21-contract.md decision 4): listed in canonical order, sorted into draw order below.
+			if (const SpriteRendererComponent* sprite = entity.TryGetComponent<SpriteRendererComponent>())
+			{
+				snapshot.Sprites.push_back(Utils::MakeSpriteItem(*sprite, getWorld(), id, request.SortingLayers));
+				const SpriteItem& item = snapshot.Sprites.back();
+				spriteKeys.push_back(Utils::SpriteDrawKey{ .SortingLayer = item.SortingLayer, .OrderInLayer = item.OrderInLayer, .Canonical = position });
+			}
+			// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 22): in canonical order, the order the Lights2D pass adds
+			// them in, at the rendered world position.
+			if (const Light2DComponent* light = entity.TryGetComponent<Light2DComponent>())
+			{
+				snapshot.Lights2D.push_back(Light2DItem{
+					.Type = light->Type == Light2DType::Global ? RenderLight2DType::Global : RenderLight2DType::Point,
+					.Position = glm::vec3(getWorld()[3]),
+					.Color = light->Color,
+					.Intensity = light->Intensity,
+					.Radius = light->Radius,
+					.Falloff = light->Falloff,
+					.Height = light->Height,
+					.Entity = id,
+				});
+			}
+			// M21 (C21.2, decision 24): listed in canonical order, placed among the sprites below.
+			if (const TilemapRendererComponent* tilemap = entity.TryGetComponent<TilemapRendererComponent>(); tilemap != nullptr && tilemap->Tilemap.IsValid())
+			{
+				snapshot.Tilemaps.push_back(Utils::MakeTilemapItem(*tilemap, getWorld(), id, request.SortingLayers));
+				tilemapPositions.push_back(position);
+			}
 		});
 		snapshot.Environment = environment.value_or(RenderEnvironment{});
 		snapshot.Post = post.value_or(PostProcessSettings{});
+		Utils::SortSpritesForDrawing(snapshot.Sprites);
+		Utils::PlaceTilemapsForDrawing(snapshot.Tilemaps, tilemapPositions, std::move(spriteKeys));
 		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 7): the view's UI, laid out at the scene resolution of the
 		// snapshot's Output (the view's size by default), for the game view and a camera's view. Its widgets take their theme's
 		// tints from the session's interaction state (C22.2, decision 25), null outside a play session. C22.3 (decision 51):

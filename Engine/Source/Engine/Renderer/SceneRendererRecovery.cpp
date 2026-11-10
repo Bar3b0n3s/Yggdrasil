@@ -72,6 +72,8 @@ namespace Engine {
 		state.WireframeBudgetLogged = released.WireframeBudgetLogged;
 		state.AllocationLimitLogged = released.AllocationLimitLogged;
 		state.LightLimitLogged = released.LightLimitLogged;
+		state.Light2DLimitLogged = released.Light2DLimitLogged;
+		state.TileLimitLogged = released.TileLimitLogged;
 		// M18 (C18.4, decision 44): the mode a failed debug-view switch falls back to, and its once-per-view log flags.
 		state.RenderedDebugView = released.RenderedDebugView;
 		state.DebugViewFailureLogged = released.DebugViewFailureLogged;

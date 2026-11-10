@@ -52,6 +52,12 @@
 		"SuiteTickLimit": 36000,
 		"CoverageGates": false
 	},
+	"SortingLayers": {
+		"Layers": ["Default"]
+	},
+	"Physics2D": {
+		"Gravity": [0, -9.81]
+	},
 	"Localization": {
 		"Locale": ""
 	},

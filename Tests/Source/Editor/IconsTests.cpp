@@ -12,7 +12,7 @@ namespace Engine {
 
 		constexpr EditorIcon AllEditorIcons[] = { EditorIcon::Folder, EditorIcon::Scene, EditorIcon::Prefab, EditorIcon::Mesh, EditorIcon::Material,
 			EditorIcon::Texture, EditorIcon::Environment, EditorIcon::Audio, EditorIcon::Script, EditorIcon::Font, EditorIcon::Replay,
-			EditorIcon::SpriteSheet, EditorIcon::StringTable };
+			EditorIcon::SpriteSheet, EditorIcon::Tilemap, EditorIcon::StringTable };
 
 		struct DrawnIcon
 		{
@@ -88,6 +88,7 @@ namespace Engine {
 			CHECK(AssetTypeToEditorIcon(AssetType::Font) == EditorIcon::Font);
 			CHECK(AssetTypeToEditorIcon(AssetType::Replay) == EditorIcon::Replay);
 			CHECK(AssetTypeToEditorIcon(AssetType::SpriteSheet) == EditorIcon::SpriteSheet);
+			CHECK(AssetTypeToEditorIcon(AssetType::Tilemap) == EditorIcon::Tilemap);
 			CHECK(AssetTypeToEditorIcon(AssetType::StringTable) == EditorIcon::StringTable);
 		}
 	}

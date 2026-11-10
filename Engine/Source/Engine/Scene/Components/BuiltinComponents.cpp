@@ -18,6 +18,8 @@ namespace Engine {
 		RegisterPhysicsComponents(registry);
 		RegisterAudioComponents(registry);
 		RegisterScriptingComponents(registry);
+		RegisterRendering2DComponents(registry);
+		RegisterPhysics2DComponents(registry);
 		RegisterUiComponents(registry);
 
 		// The startup check of §5.4: every listed type is registered, in list order and nothing else, so the registration

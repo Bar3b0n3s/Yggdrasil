@@ -4,6 +4,7 @@
 #include "Editor/Ui/UiPreview.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Play/EditorPlayController.h"
+#include "EditorCore/Viewport/EditorGrid2D.h"
 #include "EditorCore/Viewport/GizmoController.h"
 #include "Engine/App/EngineContext.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
@@ -14,9 +15,11 @@
 #include "Engine/ImGui/ImGuiRenderer.h"
 #include "Engine/Platform/GlfwLibrary.h"
 #include "Engine/Platform/Window.h"
+#include "Engine/Project/ProjectSettings.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/RenderAnnotations.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Scene/SpritePicking.h"
 #include "Engine/Scene/TransformSystem.h"
 #include "Engine/Session/PlaySession.h"
 
@@ -77,6 +80,8 @@ namespace Engine {
 				++m_Withdrawals;
 			}
 			view.Image = {};
+			view.Sprites.clear();
+			view.Tilemaps.clear();
 			view.RegisteredTexture = nullptr;
 			view.HoldsSceneResources = false;
 		}
@@ -220,7 +225,8 @@ namespace Engine {
 	Status EditorHostViewports::ConfigureSceneSnapshot(RenderSnapshot& snapshot, const EditorViewportOptions& options, std::span<const UUID> selection)
 	{
 		snapshot.Flags = RenderViewFlags::EditorOverlays | RenderViewFlags::Picking;
-		if (options.Grid)
+		// The 2D mode's grid lies in z = 0, which Extract draws itself (EditorGrid2D); the renderer's grid lies in y = 0.
+		if (options.Grid && !options.Mode2D)
 			snapshot.Flags |= RenderViewFlags::Grid;
 		if (options.Colliders)
 			snapshot.Flags |= RenderViewFlags::Colliders;
@@ -270,18 +276,27 @@ namespace Engine {
 		{
 			const auto& rendering = m_Editor.GetProject().GetSettings().Rendering;
 			request.Quality = { .ShadowMapSize = rendering.ShadowMapSize, .SsaoHalfResolution = rendering.SsaoHalfResolution };
+			// M21 (decision 4): sprites sort in the project's layers, in edit and in play (ExtractView takes the request as it is).
+			request.SortingLayers = GetSortingLayers();
 		}
 		if (!session && !preview)
 			TransformSystem::Update(m_Editor.GetScene());
 		ENGINE_TRY_ASSIGN(RenderSnapshot snapshot, session && !preview ? session->ExtractView(request) : ExtractRenderSnapshot(*scene, request));
 		snapshot.SceneRevision = scene->GetRevision();
 		if (view == ViewportView::Scene && !uiPreview)
+		{
 			snapshot.DebugView = m_Editor.GetViewportState().GetDebugView();
+			// M21 (decision 14): the 2D mode's grid, in the plane z = 0 (ConfigureSceneSnapshot leaves the ground grid off).
+			const EditorViewportOptions& sceneOptions = m_Editor.GetViewportState().GetOptions();
+			if (sceneOptions.Mode2D && sceneOptions.Grid && snapshot.HasCamera)
+				ENGINE_TRY(AppendEditorGrid2D(snapshot.Camera, snapshot.DebugDraw));
+		}
 		if (m_Editor.HasProject())
 		{
 			const auto& physics = m_Editor.GetProject().GetSettings().Physics;
 			ENGINE_TRY_ASSIGN(const PhysicsLayerTable layers, PhysicsLayerTable::Create(physics.Layers, physics.Collisions));
-			ENGINE_TRY(AppendRenderAnnotations(*scene, m_Editor.GetAssets(), layers, session && !preview ? &session->GetPhysics() : nullptr, snapshot));
+			ENGINE_TRY(AppendRenderAnnotations(*scene, m_Editor.GetAssets(), layers, session && !preview ? &session->GetPhysics() : nullptr, snapshot,
+				session && !preview ? session->GetPhysics2D() : nullptr));
 		}
 		return snapshot;
 	}
@@ -321,30 +336,56 @@ namespace Engine {
 			}
 			const PickResult picked = **result;
 			const EditorViewportClick click = item->Click;
+			const UUID sprite = item->Sprite;
 			item = view.Pending.erase(item);
 			// The scene the view shows (GetShownSession), which the pick's image rendered: a pick in another open scene's tab
 			// while a session plays selects in that tab's edit scene.
 			PlaySession* session = GetShownSession(kind);
 			Scene* scene = session ? &session->GetScene() : m_Editor.HasScene() ? &m_Editor.GetScene()
 																				: nullptr;
-			if (!scene || scene != view.Source || scene->GetRevision() != picked.SceneRevision
+			// M21's milestone review: a play scene's revision moves with its ticks (a playing SpriteAnimator, scripts' proxy
+			// writes), and the pick resolves against the clicked image itself (its sprites, tilemaps and PickTable), so only an
+			// edit scene's revision makes a completed pick stale; the hit must still exist either way.
+			if (!scene || scene != view.Source || (session == nullptr && scene->GetRevision() != picked.SceneRevision)
 				|| picked.Sequence != view.LatestSequence || picked.FrameIndex != click.FrameIndex || picked.SceneRevision != click.SceneRevision
 				|| picked.ViewGeneration != view.Renderer->GetViewGeneration())
 				continue;
 			const SceneTarget target = session ? SceneTarget::Play : SceneTarget::Edit;
+			// M21 (decision 14): the sprite the pixel showed in the clicked image first; the mesh the GPU pick read only when it
+			// showed none.
+			const UUID hit = sprite.IsValid() ? sprite : picked.Entity;
 			std::vector<UUID> selection;
-			if (picked.Entity.IsValid())
+			if (hit.IsValid())
 			{
-				if (!scene->FindEntityByID(picked.Entity))
+				if (!scene->FindEntityByID(hit))
 					continue;
 				if (click.ExtendSelection && m_Editor.GetSelectionTarget() == target)
 					selection.assign(m_Editor.GetSelection().begin(), m_Editor.GetSelection().end());
-				if (std::ranges::find(selection, picked.Entity) == selection.end())
-					selection.push_back(picked.Entity);
+				if (std::ranges::find(selection, hit) == selection.end())
+					selection.push_back(hit);
 			}
 			ENGINE_TRY(m_Editor.SetSelection(selection, target));
 		}
 		return {};
+	}
+	Result<UUID> EditorHostViewports::PickSpriteAt(const View& view, const EditorViewportClick& click) const
+	{
+		if (view.Sprites.empty() && view.Tilemaps.empty())
+			return UUID();
+		// The pixel's ray through the displayed image's camera and the renderer's output mapping, as the GPU pick maps it; a
+		// pixel of the letterbox shows no scene.
+		ENGINE_TRY_ASSIGN(const std::optional<RenderRayInterval> ray, ComputeOutputPixelRayInterval(view.Image.Camera, view.Renderer->GetOutputMapping(), click.Pixel.X, click.Pixel.Y));
+		if (!ray)
+			return UUID();
+		const SpritePickRequest request{ .Ray = ray->Ray, .MaxDistance = ray->MaxDistance, .MinDistance = ray->MinDistance };
+		ENGINE_TRY_ASSIGN(const std::optional<SceneRaycastHit> hit, PickSprite(view.Sprites, view.Tilemaps, m_Editor.GetAssets(), request));
+		return hit ? hit->Entity : UUID();
+	}
+	std::vector<std::string> EditorHostViewports::GetSortingLayers() const
+	{
+		if (!m_Editor.HasProject())
+			return {};
+		return m_Editor.GetProject().GetSettings().SortingLayers.Layers;
 	}
 	Status EditorHostViewports::Render(RenderContext& context)
 	{
@@ -382,6 +423,8 @@ namespace Engine {
 				Cancel(view);
 			}
 			view.Image = {};
+			view.Sprites.clear();
+			view.Tilemaps.clear();
 			view.RegisteredTexture = nullptr;
 			// A hidden view renders nothing, so its renderer would never drop the bindings that keep the previous scene's
 			// textures alive (they go one render after their last use): release it and recreate it when displayed again.
@@ -425,9 +468,12 @@ namespace Engine {
 																				   : nullptr;
 		// Cancel before polling: a proportional resize keeps the camera matrices equal, but the old pixel no longer
 		// identifies the image about to be rendered. A Resize above has already cancelled the renderer's picks and
-		// incremented its generation; this cancels the view's queued and pending clicks too.
-		if (view.Image.Width != rendered.x || view.Image.Height != rendered.y
-			|| view.Source != source || view.Image.SceneRevision != snapshot.SceneRevision || view.Image.Camera.View != snapshot.Camera.View
+		// incremented its generation; this cancels the view's queued and pending clicks too. M21's milestone review: an edit
+		// scene's new revision cancels them, a play scene's does not (its ticks move it, and Poll resolves the pick against
+		// the clicked image), while a shown scene replaced or a session started or stopped (sceneChanged, which also sees
+		// one at the same address) always does.
+		if (view.Image.Width != rendered.x || view.Image.Height != rendered.y || view.Source != source || sceneChanged
+			|| (session == nullptr && view.Image.SceneRevision != snapshot.SceneRevision) || view.Image.Camera.View != snapshot.Camera.View
 			|| view.Image.Camera.Projection != snapshot.Camera.Projection || view.Flags != snapshot.Flags || m_Gizmos.IsDragging())
 			Cancel(view);
 		view.Source = source;
@@ -462,6 +508,9 @@ namespace Engine {
 		view.Image.SceneRevision = snapshot.SceneRevision;
 		view.Image.Camera = snapshot.Camera;
 		view.Image.Picking = HasFlag(snapshot.Flags, RenderViewFlags::Picking);
+		view.Image.Alpha = snapshot.Alpha;
+		view.Sprites.assign(snapshot.Sprites.begin(), snapshot.Sprites.end());
+		view.Tilemaps.assign(snapshot.Tilemaps.begin(), snapshot.Tilemaps.end());
 		// A frame forced while minimized renders the images for the UI capture only (ADR 0018: screenshot captures do not
 		// publish viewport extents); the views stay unavailable until the window is restored.
 		if (!m_Unavailable)
@@ -488,6 +537,16 @@ namespace Engine {
 			// not a failure to report (decision 28).
 			if (m_Device != nullptr && m_Device->IsLost())
 				continue;
+			// M21 (decision 14): the sprite the clicked pixel shows, picked now among the sprites of the image the click names
+			// (the frame just submitted rendered it), so the selection is the clicked sprite even if it moves on before the
+			// GPU pick completes.
+			const Result<UUID> sprite = PickSpriteAt(view, click);
+			if (!sprite)
+			{
+				if (!failure)
+					failure = sprite.error();
+				continue;
+			}
 			const auto ticket = view.Renderer->RequestPick({ .X = click.Pixel.X, .Y = click.Pixel.Y, .FrameIndex = click.FrameIndex, .SceneRevision = click.SceneRevision, .Sequence = click.Sequence, .ViewGeneration = click.ViewGeneration });
 			if (!ticket)
 			{
@@ -495,7 +554,7 @@ namespace Engine {
 					failure = ticket.error();
 				continue;
 			}
-			view.Pending.push_back({ .Ticket = *ticket, .Click = click });
+			view.Pending.push_back({ .Ticket = *ticket, .Click = click, .Sprite = *sprite });
 		}
 		// M18 (C18.4, decision 44): after the frame's submission and the views' notifications, the trim an out-of-memory view
 		// render asked for. It waits for the device's last submission before any owner drops what it can rebuild, and does

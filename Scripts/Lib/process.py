@@ -19,7 +19,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any, Mapping, Sequence, TextIO
+from typing import Any, Callable, Mapping, Sequence, TextIO
 
 from . import debugheap
 
@@ -28,6 +28,12 @@ from . import debugheap
 READER_GRACE_SECONDS = 5.0
 TERMINATE_GRACE_SECONDS = 5.0
 DEFAULT_TAIL_LINES = 200
+# terminate_tree on Windows: the snapshots of the process table it takes at most, each after ending what the one before
+# found, until one finds no new descendant (a tree that keeps starting processes while it is ended).
+TERMINATE_SNAPSHOT_ROUNDS = 8
+_TH32CS_SNAPPROCESS = 0x00000002
+_PROCESS_TERMINATE = 0x0001
+_SYNCHRONIZE = 0x00100000
 
 
 class ToolNotFoundError(Exception):
@@ -102,20 +108,141 @@ def _popen_options() -> dict:
     return {"start_new_session": True}
 
 
+def find_new_descendants(parents: Mapping[int, int], members: dict[int, int],
+                         creation_time: Callable[[int], int | None], snapshot_time: int) -> list[int]:
+    """Adds to `members` (process id: creation time, the tree's root among them) every process of `parents` (process id:
+    recorded parent id, a snapshot taken at `snapshot_time`) that descends from a member, and returns their ids, each
+    after its parent. A process descends from the member its recorded parent id names only when it was created no
+    earlier than that member: Windows never updates a recorded parent id when the parent exits and gives ids out again,
+    so a process older than the holder of its parent's id was started by an earlier holder and is some other program's.
+    `creation_time` reads a process's creation time (None when it is gone); one created after the snapshot holds an id
+    whose snapshot process is gone, so it is no member either. Times are FILETIME ticks."""
+    added: list[int] = []
+    frontier = list(members)
+    while frontier:
+        parent = frontier.pop(0)
+        for child, recorded_parent in parents.items():
+            if recorded_parent != parent or child == parent or child in members:
+                continue
+            created = creation_time(child)
+            if created is None or created < members[parent] or created > snapshot_time:
+                continue
+            members[child] = created
+            added.append(child)
+            frontier.append(child)
+    return added
+
+
+def _terminate_windows_tree(root: int) -> None:
+    """Terminates the process `root` (whose id its Popen object keeps from changing hands) and its descendants
+    (find_new_descendants), each through a handle opened before it is ended, so no id changes hands meanwhile; snapshots
+    are taken again until one finds no new descendant, which catches what the tree started while it was ended."""
+    import ctypes  # noqa: PLC0415  (Windows only)
+    from ctypes import wintypes  # noqa: PLC0415
+
+    class ProcessEntry(ctypes.Structure):
+        _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD), ("th32ProcessID", wintypes.DWORD),
+                    ("th32DefaultHeapID", ctypes.c_size_t), ("th32ModuleID", wintypes.DWORD),
+                    ("cntThreads", wintypes.DWORD), ("th32ParentProcessID", wintypes.DWORD),
+                    ("pcPriClassBase", ctypes.c_long), ("dwFlags", wintypes.DWORD),
+                    ("szExeFile", wintypes.WCHAR * 260)]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    filetime_pointer = ctypes.POINTER(wintypes.FILETIME)
+    kernel32.CreateToolhelp32Snapshot.argtypes = (wintypes.DWORD, wintypes.DWORD)
+    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel32.Process32FirstW.argtypes = (wintypes.HANDLE, ctypes.POINTER(ProcessEntry))
+    kernel32.Process32FirstW.restype = wintypes.BOOL
+    kernel32.Process32NextW.argtypes = (wintypes.HANDLE, ctypes.POINTER(ProcessEntry))
+    kernel32.Process32NextW.restype = wintypes.BOOL
+    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.GetProcessTimes.argtypes = (wintypes.HANDLE, filetime_pointer, filetime_pointer, filetime_pointer,
+                                         filetime_pointer)
+    kernel32.GetProcessTimes.restype = wintypes.BOOL
+    kernel32.GetSystemTimeAsFileTime.argtypes = (filetime_pointer,)
+    kernel32.GetSystemTimeAsFileTime.restype = None
+    kernel32.TerminateProcess.argtypes = (wintypes.HANDLE, wintypes.UINT)
+    kernel32.TerminateProcess.restype = wintypes.BOOL
+    kernel32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    invalid_handle = wintypes.HANDLE(-1).value
+
+    def ticks(filetime: wintypes.FILETIME) -> int:
+        return (filetime.dwHighDateTime << 32) | filetime.dwLowDateTime
+
+    def now() -> int:
+        filetime = wintypes.FILETIME()
+        kernel32.GetSystemTimeAsFileTime(ctypes.byref(filetime))
+        return ticks(filetime)
+
+    def snapshot() -> dict[int, int]:
+        handle = kernel32.CreateToolhelp32Snapshot(_TH32CS_SNAPPROCESS, 0)
+        if handle is None or handle == invalid_handle:
+            return {}
+        parents: dict[int, int] = {}
+        try:
+            entry = ProcessEntry()
+            entry.dwSize = ctypes.sizeof(ProcessEntry)
+            listed = kernel32.Process32FirstW(handle, ctypes.byref(entry))
+            while listed:
+                parents[int(entry.th32ProcessID)] = int(entry.th32ParentProcessID)
+                listed = kernel32.Process32NextW(handle, ctypes.byref(entry))
+        finally:
+            kernel32.CloseHandle(handle)
+        return parents
+
+    handles: dict[int, int] = {}
+
+    def open_process(process_id: int) -> int | None:
+        """Opens `process_id` for good and returns its creation time; None when it cannot be opened."""
+        handle = kernel32.OpenProcess(_PROCESS_TERMINATE | _PROCESS_QUERY_LIMITED_INFORMATION | _SYNCHRONIZE, False,
+                                      process_id)
+        if not handle:
+            return None
+        times = [wintypes.FILETIME() for _ in range(4)]
+        if not kernel32.GetProcessTimes(handle, *(ctypes.byref(filetime) for filetime in times)):
+            kernel32.CloseHandle(handle)
+            return None
+        handles[process_id] = handle
+        return ticks(times[0])
+
+    try:
+        root_created = open_process(root)
+        if root_created is None:
+            return  # gone already; the caller's kill() and wait() settle it
+        members = {root: root_created}
+        ended: set[int] = set()
+        for _ in range(TERMINATE_SNAPSHOT_ROUNDS):
+            taken = now()
+            find_new_descendants(snapshot(), members, open_process, taken)
+            fresh = [member for member in members if member not in ended]
+            if not fresh:
+                break
+            for member in fresh:  # the root first, then each process after its parent
+                kernel32.TerminateProcess(handles[member], 1)
+                ended.add(member)
+        deadline = time.monotonic() + TERMINATE_GRACE_SECONDS
+        for handle in handles.values():
+            kernel32.WaitForSingleObject(handle, int(max(0.0, deadline - time.monotonic()) * 1000))
+    finally:
+        for handle in handles.values():
+            kernel32.CloseHandle(handle)
+
+
 def terminate_tree(process: subprocess.Popen) -> None:
-    """Terminate a process and all of its descendants."""
+    """Terminate a process and all of its descendants: on Windows those that find_new_descendants finds in snapshots of
+    the processes' recorded parent ids (never `taskkill /T`, which follows the ids alone and so also ends another
+    program's process older than the holder of its parent's id; Docs/Backlog.md, R-GPUCRASH's evidence), elsewhere the
+    process group the process leads."""
     if process.poll() is not None:
         return
     if os.name == "nt":
         try:
-            subprocess.run(
-                ["taskkill", "/F", "/T", "/PID", str(process.pid)],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=TERMINATE_GRACE_SECONDS * 6,
-                check=False,
-            )
-        except (OSError, subprocess.TimeoutExpired):
+            _terminate_windows_tree(process.pid)
+        except OSError:
             pass  # process.kill() below still terminates the process itself
     else:
         try:

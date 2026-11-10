@@ -53,6 +53,8 @@ namespace Engine {
 			// BodyDescription::MotionQuality was LinearCast: the body casts whenever its shape has an inner radius
 			// (PhysicsWorld::SetShape decides again for a new shape).
 			bool WantsLinearCast = false;
+			// BodyDescription::SpheresAsDiscs of a Dynamic body, which PhysicsWorld::SetShape keeps.
+			bool SpheresAsDiscs = false;
 		};
 
 		// The collider index of `subShape` on a body whose Jolt shape is `shape` (PhysicsShape.h "Collider identity"): for a

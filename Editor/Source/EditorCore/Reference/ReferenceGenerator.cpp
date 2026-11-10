@@ -13,6 +13,7 @@
 #include "Engine/Asset/SourceFormats.h"
 #include "Engine/Asset/SpriteSheetData.h"
 #include "Engine/Asset/StringTableData.h"
+#include "Engine/Asset/TilemapData.h"
 #include "Engine/AssetPipeline/IAssetImporter.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/AssetPipeline/Importers/SoundEffectImporter.h"
@@ -119,6 +120,10 @@ namespace Engine {
 {"Name": "Panel", "Rect": {"X": 0, "Y": 8, "Width": 12, "Height": 6}, "Pivot": [0.5, 0.5], "Borders": {"Left": 3, "Top": 2, "Right": 4, "Bottom": 1}}],
 "Clips": [{"Name": "Idle", "Frames": [{"Frame": 0, "Ticks": 8}, {"Frame": 1, "Ticks": 12}], "Loop": true}]})";
 
+		constexpr std::string_view TilemapExample = R"({"Format": "Tilemap", "Version": 1, "CellSize": [1, 1], "ChunkSize": 2,
+"Palette": [{"Sheet": "5b5e000000000002", "Frame": 0, "Solid": true}, {"Sheet": "5b5e000000000003", "Frame": 4, "Solid": false}],
+"Chunks": [{"X": -1, "Y": 0, "Tiles": [0, 1, 0, 0]}, {"X": 0, "Y": 0, "Tiles": [1, 1, 2, 0]}]})";
+
 		constexpr std::string_view StringTableExample = R"({"Format": "StringTable", "Version": 1, "Locales": ["en", "fr", "pt-BR"],
 "Entries": [{"Key": "Menu.Start", "Values": {"en": "Start", "fr": "Commencer", "pt-BR": "Iniciar"}}, {"Key": "Menu.Quit", "Values": {"en": "Quit"}}]})";
 
@@ -144,7 +149,7 @@ namespace Engine {
 
 		constexpr std::string_view BatchRequestExample = R"({"method": "entity.create", "params": {"name": "Ball", "components": {"Transform": {"Translation": [0, 2, 0]}}}})";
 
-		constexpr std::array<AuthoredFormat, 12> AuthoredFormats = {
+		constexpr std::array<AuthoredFormat, 13> AuthoredFormats = {
 			AuthoredFormat{ "AssetMeta", ".meta", AssetMetadata::CurrentVersion,
 				"The sidecar of every asset file (§6.4): its handle, type, importer, import settings and sub-assets; or, for a file a glTF references, a dependency meta naming its owner.",
 				AssetMetaExample },
@@ -191,6 +196,12 @@ namespace Engine {
 				"part before its first `-`, else the fallback; an entry without a string for that locale gives the fallback's). Lookups are "
 				"byte-wise and deterministic. The tables below list every field, its rules and the limits.",
 				StringTableExample, "StringTable" },
+			AuthoredFormat{ "Tilemap", ".tilemap", TilemapFormatVersion,
+				"A tilemap (§6.9): a palette of sprite sheet frames, each Solid or not for the TilemapCollider, and cells in chunks of `ChunkSize` x "
+				"`ChunkSize` (a power of two), sorted by (Y, X), none empty. Cell (x, y), x right and y up in the entity's local plane, spans "
+				"`[x CellSize.x, (x + 1) CellSize.x]` in X; chunk (X, Y) holds the cells from (X ChunkSize, Y ChunkSize), its `Tiles` row by row from "
+				"its bottom row up, each 0 for empty or k for `Palette[k - 1]`. The tables below list every field, its range and the limits.",
+				TilemapExample, "Tilemap" },
 		};
 
 	}
@@ -1174,11 +1185,12 @@ namespace Engine {
 			const StructInfo* material = types.FindStruct("Material");
 			const StructInfo* soundEffect = types.FindStruct("SoundEffect");
 			const StructInfo* spriteSheet = types.FindStruct("SpriteSheet");
+			const StructInfo* tilemap = types.FindStruct("Tilemap");
 			const StructInfo* stringTable = types.FindStruct("StringTable");
-			if (project == nullptr || material == nullptr || soundEffect == nullptr || spriteSheet == nullptr || stringTable == nullptr)
+			if (project == nullptr || material == nullptr || soundEffect == nullptr || spriteSheet == nullptr || tilemap == nullptr || stringTable == nullptr)
 			{
 				return MakeError(ErrorCode::InvalidArgument,
-					"the type registry lacks ProjectSettings, Material, SoundEffect, SpriteSheet or StringTable, which the file format schemas use");
+					"the type registry lacks ProjectSettings, Material, SoundEffect, SpriteSheet, Tilemap or StringTable, which the file format schemas use");
 			}
 
 			std::map<std::string, Json> schemas;
@@ -1198,6 +1210,7 @@ namespace Engine {
 				StructDocumentSchema(*soundEffect, SoundEffectFormatName, SoundEffectFormatVersion, "A sound effect file (§6.6)."));
 			schemas.emplace("SpriteSheet",
 				StructDocumentSchema(*spriteSheet, SpriteSheetFormatName, SpriteSheetFormatVersion, "A sprite sheet file (§6.9)."));
+			schemas.emplace("Tilemap", StructDocumentSchema(*tilemap, TilemapFormatName, TilemapFormatVersion, "A tilemap file (§6.9)."));
 			schemas.emplace("StringTable", StructDocumentSchema(*stringTable, StringTableFormatName, StringTableFormatVersion, "A string table file (§6.10)."));
 			return schemas;
 		}

@@ -27,6 +27,9 @@ namespace Engine {
 
 	namespace Test {
 
+		// M21's 2D callbacks through real 2D contacts (Engine/Scripting/ScriptPhysics2DTests.cpp).
+		void RunBehaviour2DCallbacksCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
+
 		static int RecordScriptLifecycle(ScriptCall& call)
 		{
 			const std::string message = Lua::Check<std::string>(call, 1);
@@ -452,6 +455,7 @@ return Script.Define("UiCoverage", T)
 		{
 			const size_t firstSnapshot = snapshots.size();
 			RunBehaviourSessionCoverage(mode, snapshots);
+			RunBehaviour2DCallbacksCoverage(mode, snapshots);
 			RunBehaviourUiCoverage(mode, snapshots);
 			if (mode == RunModes::Editor)
 				RunBehaviourReloadCoverage(snapshots);

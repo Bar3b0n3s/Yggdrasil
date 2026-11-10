@@ -31,6 +31,7 @@ namespace Engine {
 
 	class AssetManager;
 	class DebugDrawList;
+	class Physics2DSystem;
 	class PhysicsSystem;
 	class Scene;
 
@@ -127,6 +128,20 @@ namespace Engine {
 	// Main thread; a pure function of its inputs.
 	[[nodiscard]] std::vector<ColliderDebugShape> BuildColliderDebugDraw(const Scene& scene, const PhysicsLayerTable& layers, const PhysicsSystem* physics,
 		AssetManager* assets, const ColliderDebugDrawOptions& options = {});
+
+	// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 28, stream P3): the wire shapes of `scene`'s 2D colliders, as
+	// BuildColliderDebugDraw's for the 3D ones: one record per 2D collider of every body the 2D composition lists, in its order
+	// (bodies in canonical order of their owners, colliders in sub-shape order), each a Lines record in the plane z = its
+	// collider entity's world Z: a BoxCollider2D's rectangle, a CircleCollider2D's circle as a polygon of 32 sides, a
+	// PolygonCollider2D's convex hull and a TilemapCollider's merged boxes (MergeTilemapBoxes, its tilemap loaded through
+	// `assets`; a tilemap collider without one draws nothing), each at its entity's world pose with the scale its body
+	// applies. Categories as BuildColliderDebugDraw's but Character: with `physics2D` (the session's Physics2DSystem; null for
+	// an edit scene, and for a host that passes none) awake and sleeping Dynamic bodies are told apart and a body the session
+	// did not create is Invalid; without it each body's shape is built as the session builds it and one it refuses is
+	// Invalid. Options.Triggers and Alpha as BuildColliderDebugDraw's; Characters and MaxMeshEdges do not apply. Only DetMath
+	// on the way (Scene is on the simulation path's lint scope). Main thread; a pure function of its inputs.
+	[[nodiscard]] std::vector<ColliderDebugShape> BuildCollider2DDebugDraw(const Scene& scene, const PhysicsLayerTable& layers,
+		const Physics2DSystem* physics2D, AssetManager* assets, const ColliderDebugDrawOptions& options = {});
 
 	// Appends `shapes` to `list`, in their order (Docs/Decisions/0014-m11-decisions.md decision 16): a Box record becomes a
 	// DebugBox (Position, HalfExtents, Rotation), a Sphere record a DebugSphere (Position, Radius), a Capsule record a

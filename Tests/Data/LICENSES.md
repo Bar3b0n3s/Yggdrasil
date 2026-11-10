@@ -61,12 +61,12 @@ geometry is a unit cube and unit quads computed in the script.
 
 `Truncated.png` is deliberately cut short, so the texture importer's failure path has a fixture.
 
-## Hand-written asset fixtures (`Assets/Materials/`, `Assets/Scenes/`, `Assets/Prefabs/`, `Assets/SpriteSheets/`, `Assets/StringTables/`)
+## Hand-written asset fixtures (`Assets/Materials/`, `Assets/Scenes/`, `Assets/Prefabs/`, `Assets/SpriteSheets/`, `Assets/Tilemaps/`, `Assets/StringTables/`)
 
 | | |
 |---|---|
-| Files | `Tests/Data/Assets/Materials/**`, `Tests/Data/Assets/Scenes/**`, `Tests/Data/Assets/Prefabs/**`, `Tests/Data/Assets/SpriteSheets/**`, `Tests/Data/Assets/StringTables/**` |
-| Origin | First-party: hand-written canonical JSON documents (materials, a scene, prefabs, sprite sheets and string tables) |
+| Files | `Tests/Data/Assets/Materials/**`, `Tests/Data/Assets/Scenes/**`, `Tests/Data/Assets/Prefabs/**`, `Tests/Data/Assets/SpriteSheets/**`, `Tests/Data/Assets/Tilemaps/**`, `Tests/Data/Assets/StringTables/**` |
+| Origin | First-party: hand-written canonical JSON documents (materials, a scene, prefabs, sprite sheets, a tilemap and string tables) |
 | License | First-party: the same terms as the repository's code; no third-party rights |
 
 ## Generated audio fixtures (`Assets/Audio/Tone.wav`, `Assets/Audio/Tone.flac`)

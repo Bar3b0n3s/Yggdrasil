@@ -3,6 +3,7 @@
 #include "Engine/Asset/BuiltinAssets.h"
 
 #include "Engine/Asset/AudioClipData.h"
+#include "Engine/Asset/BuiltinTextures.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/TextureData.h"
@@ -11,6 +12,7 @@
 #include "Support/TestData.h"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <format>
@@ -18,6 +20,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace Engine {
@@ -90,7 +93,7 @@ namespace Engine {
 		TEST_CASE("BuiltinAssets: the procedural entries are the compiled-in meshes, materials, textures and the silent clip")
 		{
 			const std::span<const BuiltinAssetEntry> entries = GetProceduralBuiltinEntries();
-			REQUIRE(entries.size() == 15);
+			REQUIRE(entries.size() == 19);
 			std::set<std::string> paths;
 			for (size_t index = 0; index < entries.size(); ++index)
 			{
@@ -111,6 +114,28 @@ namespace Engine {
 			CHECK(entries.back().Handle == BuiltinAssetHandles::SilentClip);
 			CHECK(entries.back().Path == "engine://Audio/Silence");
 			CHECK(entries.back().Type == AssetType::AudioClip);
+
+			// M21 (Docs/Decisions/0032-m21-contract.md decision 7): the four sprite textures at their reserved handles, each
+			// generated in code as the BuiltinTexture of its name.
+			const std::array<std::pair<AssetHandle, BuiltinTexture>, 4> sprites = { {
+				{ BuiltinAssetHandles::SpriteSquareTexture, BuiltinTexture::SpriteSquare },
+				{ BuiltinAssetHandles::SpriteRoundedTexture, BuiltinTexture::SpriteRounded },
+				{ BuiltinAssetHandles::SpriteBevelTexture, BuiltinTexture::SpriteBevel },
+				{ BuiltinAssetHandles::SpriteCircleTexture, BuiltinTexture::SpriteCircle },
+			} };
+			for (const auto& [handle, sprite] : sprites)
+			{
+				CAPTURE(BuiltinTextureToString(sprite));
+				const auto entry = std::ranges::find(entries, handle, &BuiltinAssetEntry::Handle);
+				REQUIRE(entry != entries.end());
+				CHECK(entry->Path == std::format("engine://Textures/{}", BuiltinTextureToString(sprite)));
+				CHECK(entry->Type == AssetType::Texture);
+				const Result<AssetRef<Asset>> created = CreateProceduralBuiltinAsset(handle);
+				REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+				const AssetRef<TextureData> texture = AssetCast<TextureData>(*created);
+				REQUIRE(texture != nullptr);
+				CHECK(std::ranges::equal(texture->Pixels, GenerateBuiltinSpriteTexture(sprite).Pixels));
+			}
 		}
 
 		TEST_CASE("BuiltinAssets: EngineAssets.json names exactly the compiled-in handles")

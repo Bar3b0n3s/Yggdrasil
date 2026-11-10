@@ -35,6 +35,7 @@ namespace Engine {
 			{ .Importer = "Texture", .Extension = ".jpg", .MainType = AssetType::Texture, .Importable = true },
 			{ .Importer = "Texture", .Extension = ".png", .MainType = AssetType::Texture, .Importable = true },
 			{ .Importer = "Texture", .Extension = ".tga", .MainType = AssetType::Texture, .Importable = true },
+			{ .Importer = "Tilemap", .Extension = ".tilemap", .MainType = AssetType::Tilemap, .Importable = true },
 		});
 
 		constexpr char ToLowerAscii(char c)

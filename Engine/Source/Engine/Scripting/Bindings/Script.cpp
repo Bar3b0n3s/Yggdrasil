@@ -571,8 +571,8 @@ namespace Engine {
 				.Function("Entity", Utils::FieldConstructor<FieldType::EntityRef>, "() -> FieldDescriptor", "Declare an Entity reference with a null default.", pure)
 				.Function("Asset", Utils::FieldConstructor<FieldType::AssetRef>, "(type: string) -> FieldDescriptor",
 					"Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for "
-					"imported audio and .sfx sound effects, Script, Font, Replay, SpriteSheet or StringTable), with a null default; any other name fails "
-					"the import.",
+					"imported audio and .sfx sound effects, Script, Font, Replay, SpriteSheet, Tilemap or StringTable), with a null default; any other "
+					"name fails the import.",
 					pure)
 				.Function("Enum", Utils::FieldConstructor<FieldType::Enum>, "(values: {string}, default: string?) -> FieldDescriptor", "Declare ordered unique string choices; the omitted default is the first choice.", pure)
 				.Function("Array", Utils::FieldConstructor<FieldType::Array>, "(element: FieldDescriptor) -> FieldDescriptor", "Declare an empty array whose element keeps its complete nested field schema.", pure);
@@ -585,6 +585,11 @@ namespace Engine {
 			for (const char* name : { "OnCollisionExit", "OnTriggerEnter", "OnTriggerExit" })
 				behaviour.Callback(name, "(self: ScriptInstance, other: Entity) -> ()", "Called when the corresponding collision or trigger transition occurs.");
 			behaviour.Callback("OnHotReload", "(self: ScriptInstance) -> ()", "Called after the class is replaced while instance state survives.", { .Modes = RunModes::EditorOnly });
+			// M21 (Docs/Decisions/0032-m21-contract.md decision 13): the 2D world's callbacks, appended in landing order.
+			behaviour.Callback("OnCollisionEnter2D", "(self: ScriptInstance, other: Entity, contact: CollisionContact) -> ()",
+				"Called when a 2D collision begins, with the other entity and the contact in the XY plane.");
+			for (const char* name : { "OnCollisionExit2D", "OnTriggerEnter2D", "OnTriggerExit2D" })
+				behaviour.Callback(name, "(self: ScriptInstance, other: Entity) -> ()", "Called when the corresponding 2D collision or trigger transition occurs.");
 			// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 27): the UI events, which bubble from the element to its
 			// ancestors (ScriptEngine::DispatchUiEvents); phase 2's callbacks append in landing order.
 			behaviour.Callback("OnUiClick", "(self: ScriptInstance, element: Entity) -> boolean?",

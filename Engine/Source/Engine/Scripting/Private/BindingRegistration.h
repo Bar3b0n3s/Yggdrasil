@@ -112,10 +112,14 @@ namespace Engine {
 		[[nodiscard]] Status RegisterScript(ScriptApiRegistry& api);
 		[[nodiscard]] Status RegisterEntity(ScriptApiRegistry& api);
 		[[nodiscard]] Status RegisterComponents(ScriptApiRegistry& api);
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 13): the SpriteRenderer and SpriteAnimator proxies' methods.
+		[[nodiscard]] Status RegisterSprites(ScriptApiRegistry& api);
 		[[nodiscard]] Status RegisterScene(ScriptApiRegistry& api);
 		[[nodiscard]] Status RegisterInput(ScriptApiRegistry& api);
 		[[nodiscard]] Status RegisterTime(ScriptApiRegistry& api);
 		[[nodiscard]] Status RegisterPhysics(ScriptApiRegistry& api);
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 13): the RigidBody2D proxy and the Physics2D module.
+		[[nodiscard]] Status RegisterPhysics2D(ScriptApiRegistry& api);
 		[[nodiscard]] Status RegisterAudio(ScriptApiRegistry& api);
 		[[nodiscard]] Status RegisterAssets(ScriptApiRegistry& api);
 		[[nodiscard]] Status RegisterTask(ScriptApiRegistry& api);

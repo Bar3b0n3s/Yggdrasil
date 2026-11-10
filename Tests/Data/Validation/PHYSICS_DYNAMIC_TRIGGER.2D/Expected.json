@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["PHYSICS_DYNAMIC_TRIGGER"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

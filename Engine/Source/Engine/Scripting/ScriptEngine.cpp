@@ -416,25 +416,7 @@ namespace Engine {
 
 	void ScriptEngine::OnPhysicsEvent(const PhysicsEvent& event)
 	{
-		m_State->AssertOwner();
-		// Every instance of the receiving entity, in slot order; each holds or discards its own events. A callback may
-		// remove a later slot's instance, which then receives nothing.
-		for (const State::InstanceKey key : m_State->InstancesOf(event.Self))
-		{
-			const auto found = m_State->Instances.find(key);
-			if (found == m_State->Instances.end())
-				continue;
-			if (!found->second.Started || !found->second.PendingPhysics.empty())
-			{
-				// Physics marks this side entered whether or not a script observes it, so dropping the event would leave a
-				// later exit unpaired. Hold it (behind any earlier held event) until the instance has started; a removed or
-				// faulted instance discards its queue.
-				if (!IsStopped() && !IsReadOnly() && !found->second.FaultDisabled && !found->second.DestroyPrepared && found->second.Table != LUA_NOREF)
-					found->second.PendingPhysics.push_back(event);
-				continue;
-			}
-			m_State->InvokePhysics(key, event);
-		}
+		m_State->DeliverPhysics(event, false);
 	}
 
 	// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 27; ADR 0031 decision 18). An event's walk is the chain of its
@@ -478,26 +460,17 @@ namespace Engine {
 
 	void ScriptEngine::OnPhysicsDiagnostic(const PhysicsDiagnostic& diagnostic)
 	{
-		m_State->AssertOwner();
-		if (diagnostic.Severity != DiagnosticSeverity::Error)
-			return;
-		ScriptError error{};
-		error.Kind = ScriptErrorKind::Runtime;
-		error.Message = diagnostic.Code + ": " + diagnostic.Message;
-		error.Callback = "Physics";
-		error.Entity = diagnostic.Entity;
-		// Physics already logged this diagnostic; retain script observability and policy without a second log entry. The
-		// diagnostic belongs to the entity, not to one of its behaviours, so it names, and disables, the entity's first slot
-		// that has an instance (a slot without a script has none), as an entity-addressed evaluation does; an entity without
-		// an instance is named from the scene.
-		const std::vector<State::InstanceKey> instances = m_State->InstancesOf(diagnostic.Entity);
-		if (instances.empty())
-		{
-			if (const Entity entity = GetHost().GetScene().FindEntityByID(diagnostic.Entity))
-				error.EntityName = entity.GetName();
-		}
-		const uint32_t slot = instances.empty() ? 0 : instances.front().Slot;
-		m_State->Publish(std::move(error), { .Entity = diagnostic.Entity, .Case = m_State->CurrentOwner.Case, .Slot = slot }, false, true);
+		m_State->PublishPhysicsDiagnostic(diagnostic, "Physics");
+	}
+
+	void ScriptEngine::OnPhysics2DEvent(const PhysicsEvent& event)
+	{
+		m_State->DeliverPhysics(event, true);
+	}
+
+	void ScriptEngine::OnPhysics2DDiagnostic(const PhysicsDiagnostic& diagnostic)
+	{
+		m_State->PublishPhysicsDiagnostic(diagnostic, "Physics2D");
 	}
 
 	void ScriptEngine::Stop()

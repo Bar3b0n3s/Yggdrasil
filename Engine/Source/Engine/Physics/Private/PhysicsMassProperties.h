@@ -49,6 +49,16 @@ namespace Engine {
 		// whose inertia at `mass` is not finite or exceeds MaxBodyInertia.
 		[[nodiscard]] Result<JPH::MassProperties> GetDynamicMassProperties(const JPH::Shape& shape, bool hasMesh, float mass, PhysicsDofs allowedDofs);
 
+		// M21's milestone review (BodyDescription::SpheresAsDiscs): adds to `properties`, GetDynamicMassProperties' result for
+		// `shape` (a Dynamic body's), the moment about Z that makes each sphere of `shape` turn about Z as a disc of its radius:
+		// a tenth of its share of the body's mass times its radius squared, so its own moment is m r^2 / 2 instead of a
+		// sphere's 2 m r^2 / 5. A sphere's share is its mass at ColliderDensity over the shape's, as Jolt shares a compound's
+		// mass by volume. The spheres are found as PhysicsShape::Create builds them: the shape itself, the shape a
+		// RotatedTranslatedShape places, or a sub-shape of a StaticCompoundShape; nothing else changes. Computed in double and
+		// added to the inertia's Z diagonal (a sphere's own moment is the same about every axis, so neither its centre's place
+		// nor the compound's rotations enter).
+		void AddDiscInertiaAboutZ(const JPH::Shape& shape, JPH::MassProperties& properties);
+
 	}
 
 }

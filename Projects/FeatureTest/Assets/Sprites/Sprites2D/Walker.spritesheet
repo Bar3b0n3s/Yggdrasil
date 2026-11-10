@@ -1,0 +1,149 @@
+{
+	"Format": "SpriteSheet",
+	"Version": 1,
+	"Texture": "c559ed2e76a3cdde",
+	"Frames": [
+		{
+			"Name": "Idle0",
+			"Rect": {
+				"X": 0,
+				"Y": 0,
+				"Width": 4,
+				"Height": 8
+			},
+			"Pivot": [0.5, 0],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		},
+		{
+			"Name": "Idle1",
+			"Rect": {
+				"X": 4,
+				"Y": 0,
+				"Width": 4,
+				"Height": 8
+			},
+			"Pivot": [0.5, 0],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		},
+		{
+			"Name": "Step0",
+			"Rect": {
+				"X": 8,
+				"Y": 0,
+				"Width": 4,
+				"Height": 8
+			},
+			"Pivot": [0.5, 0],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		},
+		{
+			"Name": "Step1",
+			"Rect": {
+				"X": 12,
+				"Y": 0,
+				"Width": 4,
+				"Height": 8
+			},
+			"Pivot": [0.5, 0],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		},
+		{
+			"Name": "Leap",
+			"Rect": {
+				"X": 0,
+				"Y": 0,
+				"Width": 8,
+				"Height": 8
+			},
+			"Pivot": [0.5, 0],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		}
+	],
+	"Clips": [
+		{
+			"Name": "Idle",
+			"Frames": [
+				{
+					"Frame": 0,
+					"Ticks": 8
+				},
+				{
+					"Frame": 1,
+					"Ticks": 8
+				}
+			],
+			"Loop": true
+		},
+		{
+			"Name": "Walk",
+			"Frames": [
+				{
+					"Frame": 2,
+					"Ticks": 4
+				},
+				{
+					"Frame": 3,
+					"Ticks": 4
+				}
+			],
+			"Loop": true
+		},
+		{
+			"Name": "Wave",
+			"Frames": [
+				{
+					"Frame": 0,
+					"Ticks": 3
+				},
+				{
+					"Frame": 1,
+					"Ticks": 3
+				},
+				{
+					"Frame": 4,
+					"Ticks": 6
+				}
+			],
+			"Loop": false
+		},
+		{
+			"Name": "Jump",
+			"Frames": [
+				{
+					"Frame": 4,
+					"Ticks": 10
+				},
+				{
+					"Frame": 0,
+					"Ticks": 2
+				}
+			],
+			"Loop": false
+		}
+	]
+}

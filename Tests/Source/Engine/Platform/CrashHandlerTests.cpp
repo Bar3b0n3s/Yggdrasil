@@ -254,6 +254,85 @@ namespace Engine {
 	}
 #endif
 
+#if defined(ENGINE_PLATFORM_WINDOWS)
+	// The exit code the exit-watch children end with: neither doctest's nor the engine's own.
+	static constexpr int WatchedExitCode = 7;
+
+	// Installs the handler and begins the exit watch. Returns false, having logged why, when that fails.
+	static bool BeginTestExitWatch()
+	{
+		if (!InstallTestCrashHandler())
+			return false;
+		const Status watching = CrashHandler::BeginExitWatch();
+		if (!watching.has_value())
+		{
+			ENGINE_CORE_ERROR("The exit watch child could not begin the watch: {}", watching.error());
+			return false;
+		}
+		return true;
+	}
+
+	// Calls exit() on a thread that did not begin the watch, as a driver's thread would.
+	ENGINE_DEATH_TEST("Platform/ExitsOnAnotherThreadWhileWatched")
+	{
+		if (!BeginTestExitWatch())
+			return;
+		CrashHandler::SetBreadcrumb(CrashBreadcrumb::FramePhase, "Exit child");
+		std::thread exiting([]()
+		{
+			std::exit(WatchedExitCode);
+		});
+		exiting.join();
+	}
+
+	// Ends the process without exit()'s handlers (std::_Exit calls ExitProcess) on the thread that began the watch.
+	ENGINE_DEATH_TEST("Platform/QuickExitsWhileWatched")
+	{
+		if (!BeginTestExitWatch())
+			return;
+		std::_Exit(WatchedExitCode);
+	}
+
+	// Ends the watch, then exits.
+	ENGINE_DEATH_TEST("Platform/ExitsAfterTheWatchEnded")
+	{
+		if (!BeginTestExitWatch())
+			return;
+		CrashHandler::EndExitWatch();
+		std::exit(WatchedExitCode);
+	}
+
+	// Writes a fatal error's report while watched, then ends the process as FatalError does.
+	ENGINE_DEATH_TEST("Platform/QuickExitsAfterAFatalErrorReport")
+	{
+		if (!BeginTestExitWatch())
+			return;
+		const Result<std::filesystem::path> report = CrashHandler::WriteFatalErrorReport(FatalErrorKind::DeviceLost, "Simulated device loss");
+		ENGINE_CORE_WARN("Fatal error report: [{}]", DescribeReportResult(report));
+		std::_Exit(WatchedExitCode);
+	}
+
+	// Begins the watch, then returns: the Tests main's ProcessContext uninstalls the handler before main returns.
+	ENGINE_DEATH_TEST("Platform/ReturnsWhileWatched")
+	{
+		if (BeginTestExitWatch())
+			ENGINE_CORE_WARN("Watching exits: [true]");
+	}
+
+	// Tries to begin the watch without a handler and with one that writes no reports.
+	ENGINE_DEATH_TEST("Platform/BeginsTheExitWatchWithoutReports")
+	{
+		CrashHandler::Uninstall();
+		const Status uninstalled = CrashHandler::BeginExitWatch();
+		ENGINE_CORE_WARN("Without a handler: [{}]", uninstalled.has_value() ? "watching" : ErrorCodeToString(uninstalled.error().GetCode()));
+		if (!InstallTestCrashHandler())
+			return;
+		const Status withoutReports = CrashHandler::BeginExitWatch();
+		ENGINE_CORE_WARN("Without reports: [{}]", withoutReports.has_value() ? "watching" : ErrorCodeToString(withoutReports.error().GetCode()));
+		std::exit(WatchedExitCode);
+	}
+#endif
+
 	// Installs the handler without a report directory, tries a fatal-error report, then crashes.
 	ENGINE_DEATH_TEST("Platform/CrashesWithoutReports")
 	{
@@ -447,6 +526,7 @@ namespace Engine {
 			CHECK(report->contains(std::format("\n  AutomationMethod: {}\n", std::string(CrashHandler::MaxBreadcrumbLength, 'm'))));
 			CHECK(report->contains("\n  ScriptCallback: (none)\n"));
 			CHECK(report->contains("\n  FramePhase: (none)\n"));
+			CHECK(report->contains("\n  TestCase: (none)\n")); // a death-test child runs no doctest case
 
 			// The last LogLineCount entries: lines 45 to 299 and the long line, which is cut at MaxLogLineLength.
 			CHECK(report->contains("Captured log line [45]"));
@@ -730,6 +810,123 @@ namespace Engine {
 			CHECK(standardError.contains("; no report written\n"));
 		}
 
+#if defined(ENGINE_PLATFORM_WINDOWS)
+		TEST_CASE("CrashHandler: exit() on another thread while exits are watched writes a report of that thread on Windows")
+		{
+			Test::TempDirectory directory("ExitWatchExit");
+			const std::filesystem::path reports = directory / "Crashes";
+			const Result<HandlerChildResult> child = RunHandlerChild("Platform/ExitsOnAnotherThreadWhileWatched", Test::PathToUtf8(reports));
+			REQUIRE_MESSAGE(child.has_value(), child.error().ToString());
+			INFO("child stderr: ", child->Result.StandardError);
+			// The process still ends with the code exit() was given.
+			CHECK(child->Result.ExitCode == WatchedExitCode);
+
+			const Result<std::string> report = ReadHandlerChildReport(*child, reports);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			INFO("report: ", *report);
+			const std::string reason = FindLineValue(*report, "\nReason: ");
+			CHECK(reason.starts_with("Unexpected exit (exit()) on thread "));
+			CHECK(reason.ends_with(", not the thread that began the exit watch"));
+			CHECK(child->Result.StandardError.contains(reason + "; report written to "));
+			CHECK(report->contains("\n  FramePhase: Exit child\n"));
+			// The exiting thread's stack, through the C runtime's exit() (ucrtbase, or ucrtbased in Debug).
+			CHECK(report->contains("\nStack trace:\n  #0 0x"));
+			CHECK(report->contains(" ucrtbase"));
+			CHECK(report->contains("\nLast log lines:\n"));
+			std::filesystem::path dump = Test::ListCrashFiles(reports, ".txt").front();
+			dump.replace_extension(".dmp");
+			const Result<FileInfo> dumpInfo = FileSystem::GetInfo(dump);
+			REQUIRE(dumpInfo.has_value());
+			CHECK(dumpInfo->Size > 0);
+		}
+
+		TEST_CASE("CrashHandler: an exit through ExitProcess while exits are watched writes a report naming its exit code on Windows")
+		{
+			Test::TempDirectory directory("ExitWatchExitProcess");
+			const std::filesystem::path reports = directory / "Crashes";
+			const Result<HandlerChildResult> child = RunHandlerChild("Platform/QuickExitsWhileWatched", Test::PathToUtf8(reports));
+			REQUIRE_MESSAGE(child.has_value(), child.error().ToString());
+			INFO("child stderr: ", child->Result.StandardError);
+			CHECK(child->Result.ExitCode == WatchedExitCode);
+
+			const Result<std::string> report = ReadHandlerChildReport(*child, reports);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			INFO("report: ", *report);
+			const std::string reason = FindLineValue(*report, "\nReason: ");
+			CHECK(reason.starts_with(std::format("Unexpected exit (ExitProcess) with exit code {} on thread ", WatchedExitCode)));
+			CHECK(reason.ends_with(", the thread that began the exit watch"));
+			CHECK(child->Result.StandardError.contains(reason + "; report written to "));
+			// The exiting thread's frames by module and offset: the loader's shutdown, the C runtime's _Exit that called
+			// ExitProcess (ucrtbase, or ucrtbased in Debug).
+			CHECK(report->contains("\nStack trace:\n  #0 0x"));
+			CHECK(report->contains(" ntdll+0x"));
+			CHECK(report->contains(" ucrtbase"));
+			CHECK(report->contains("\nLast log lines:\n"));
+			std::filesystem::path dump = Test::ListCrashFiles(reports, ".txt").front();
+			dump.replace_extension(".dmp");
+			const Result<FileInfo> dumpInfo = FileSystem::GetInfo(dump);
+			REQUIRE(dumpInfo.has_value());
+			CHECK(dumpInfo->Size > 0);
+		}
+
+		TEST_CASE("CrashHandler: an exit after the exit watch ended writes no report on Windows")
+		{
+			Test::TempDirectory directory("ExitWatchEnded");
+			const std::filesystem::path reports = directory / "Crashes";
+			const Result<HandlerChildResult> ended = RunHandlerChild("Platform/ExitsAfterTheWatchEnded", Test::PathToUtf8(reports));
+			REQUIRE_MESSAGE(ended.has_value(), ended.error().ToString());
+			INFO("child stderr: ", ended->Result.StandardError);
+			CHECK(ended->Result.ExitCode == WatchedExitCode);
+			CHECK_FALSE(ended->Result.StandardError.contains("Unexpected exit"));
+			CHECK(Test::ListCrashFiles(reports, ".txt").empty());
+
+			// Uninstall ends it too: the Tests main uninstalls the handler before main returns.
+			const Result<HandlerChildResult> returned = RunHandlerChild("Platform/ReturnsWhileWatched", Test::PathToUtf8(reports));
+			REQUIRE_MESSAGE(returned.has_value(), returned.error().ToString());
+			INFO("child stderr: ", returned->Result.StandardError);
+			CHECK(Test::FindBracketedValue(returned->Result.StandardError, "Watching exits: ") == "true");
+			CHECK(returned->Result.ExitCode == ExitCode::Failed); // the body returns: "returned without dying"
+			CHECK_FALSE(returned->Result.StandardError.contains("Unexpected exit"));
+			CHECK(Test::ListCrashFiles(reports, ".txt").empty());
+		}
+
+		TEST_CASE("CrashHandler: a fatal error's report ends the exit watch on Windows")
+		{
+			Test::TempDirectory directory("ExitWatchFatal");
+			const std::filesystem::path reports = directory / "Crashes";
+			const Result<HandlerChildResult> child = RunHandlerChild("Platform/QuickExitsAfterAFatalErrorReport", Test::PathToUtf8(reports));
+			REQUIRE_MESSAGE(child.has_value(), child.error().ToString());
+			INFO("child stderr: ", child->Result.StandardError);
+			CHECK(child->Result.ExitCode == WatchedExitCode);
+			CHECK(Test::FindBracketedValue(child->Result.StandardError, "Fatal error report: ") == "written");
+			CHECK_FALSE(child->Result.StandardError.contains("Unexpected exit"));
+			const std::vector<std::filesystem::path> files = Test::ListCrashFiles(reports, ".txt");
+			REQUIRE(files.size() == 1);
+			const Result<std::string> report = FileSystem::ReadText(files.front());
+			REQUIRE(report.has_value());
+			CHECK(report->starts_with("Crash report\nReason: Fatal error (DeviceLost): Simulated device loss\n"));
+		}
+
+		TEST_CASE("CrashHandler: BeginExitWatch fails with InvalidState without a handler or without reports on Windows")
+		{
+			const Result<HandlerChildResult> child = RunHandlerChild("Platform/BeginsTheExitWatchWithoutReports", "");
+			REQUIRE_MESSAGE(child.has_value(), child.error().ToString());
+			const std::string& standardError = child->Result.StandardError;
+			INFO("child stderr: ", standardError);
+			CHECK(Test::FindBracketedValue(standardError, "Without a handler: ") == "InvalidState");
+			CHECK(Test::FindBracketedValue(standardError, "Without reports: ") == "InvalidState");
+			CHECK(child->Result.ExitCode == WatchedExitCode);
+			CHECK_FALSE(standardError.contains("Unexpected exit"));
+		}
+#else
+		TEST_CASE("CrashHandler: BeginExitWatch is unsupported on POSIX")
+		{
+			const Status watching = CrashHandler::BeginExitWatch();
+			REQUIRE_FALSE(watching.has_value());
+			CHECK(watching.error().GetCode() == ErrorCode::Unsupported);
+		}
+#endif
+
 		TEST_CASE("CrashHandler: WriteFatalErrorReport writes a report naming the kind and returns its path")
 		{
 			Test::TempDirectory directory("CrashFatal");
@@ -792,6 +989,7 @@ namespace Engine {
 			CHECK(CrashBreadcrumbToString(CrashBreadcrumb::AutomationMethod) == "AutomationMethod");
 			CHECK(CrashBreadcrumbToString(CrashBreadcrumb::ScriptCallback) == "ScriptCallback");
 			CHECK(CrashBreadcrumbToString(CrashBreadcrumb::FramePhase) == "FramePhase");
+			CHECK(CrashBreadcrumbToString(CrashBreadcrumb::TestCase) == "TestCase");
 		}
 	}
 

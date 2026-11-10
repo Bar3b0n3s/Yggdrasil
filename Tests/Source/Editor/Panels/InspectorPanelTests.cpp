@@ -26,12 +26,15 @@
 
 #include <imgui_internal.h>
 
+#include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <filesystem>
 #include <format>
 #include <functional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 namespace Engine {
@@ -1023,6 +1026,254 @@ namespace Engine {
 			settings = automation.Call("asset.getImportSettings", Json{ { "asset", textureId->ToString() } });
 			REQUIRE(settings);
 			CHECK((*settings)["settings"]["GenerateMips"] == Json(true));
+		}
+
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 14; Backlog §2): the sprite sheet inspector.
+		TEST_CASE("InspectorPanel: a sprite sheet shows its frames and clips and edits them through asset.setProperties")
+		{
+			InspectorLayerHarness test;
+			auto& context = test.Fixture.GetContext();
+			auto& automation = test.Fixture.GetAutomation();
+			const Json values{ { "Frames", Json::array({ Json{ { "Name", "Idle" }, { "Rect", Json{ { "X", 0 }, { "Y", 0 }, { "Width", 8 }, { "Height", 8 } } } } }) },
+				{ "Clips", Json::array({ Json{ { "Name", "Spin" }, { "Frames", Json::array({ Json{ { "Frame", 0 }, { "Ticks", 2 } } }) }, { "Loop", true } } }) } };
+			const auto created = automation.Call("asset.create", Json{ { "type", "SpriteSheet" }, { "path", "Assets/Sheets/Inspector.spritesheet" }, { "values", values } });
+			REQUIRE_MESSAGE(created.has_value(), (created ? std::string() : created.error().ToString()));
+			const auto id = JsonReader((*created)["asset"]["id"]).ReadUUID();
+			REQUIRE(id);
+			context.Editor.GetUiState().SetSelectedAsset(*id);
+			test.CaptureText = true;
+			REQUIRE(test.Frame());
+			REQUIRE(test.Frame());
+			test.CaptureText = false;
+			CAPTURE(test.Text);
+			CHECK(test.Text.contains("Frames: 1"));
+			CHECK(test.Text.contains("Clips: 1"));
+			const auto draw = [&test]()
+			{
+				return test.Draw();
+			};
+			const auto* inspector = ImGui::FindWindowByName(Utils::EditorWindowTitle(EditorPanel::Inspector));
+			REQUIRE(inspector != nullptr);
+			const auto frameCount = [&automation, &id]()
+			{
+				const auto properties = automation.Call("asset.getProperties", Json{ { "asset", id->ToString() } });
+				REQUIRE(properties);
+				return (*properties)["values"]["Frames"].size();
+			};
+			const std::string path = "Sheet:" + id->ToString() + ":Frames:" + InspectorLayerOwnerIdentity(context, true);
+			const ImGuiID frames = ImHashStr("##Container", 0, InspectorLayerIntId(inspector->ID, static_cast<int>(FNV1a32(path))));
+
+			// Add element appends a frame: one asset.setProperties, one undo step.
+			const auto before = context.Editor.GetHistory().GetUndoCount();
+			REQUIRE(test.Ui.Click(draw, InspectorLayerScrolledItem(test, ImHashStr("Add element", 0, frames)).GetCenter()));
+			REQUIRE(test.Layer.OnSafePoint(0.0));
+			CHECK(frameCount() == 2);
+			CHECK(context.Editor.GetHistory().GetUndoCount() == before + 1);
+			REQUIRE(automation.Call("edit.undo", Json::object()));
+			CHECK(frameCount() == 1);
+			REQUIRE(test.Frame());
+
+			// Removing the frame the clip plays is asset.setProperties' validation error, reported as a failed action: nothing
+			// changes.
+			const Test::ExpectLog refused(LogLevel::Error, "InspectorPanel:");
+			const ImGuiID first = InspectorLayerIntId(frames, static_cast<int>(FNV1a32("0")));
+			REQUIRE(test.Ui.Click(draw, InspectorLayerScrolledItem(test, ImHashStr("Remove entry", 0, first)).GetCenter()));
+			REQUIRE(test.Layer.OnSafePoint(0.0));
+			REQUIRE(test.Frame());
+			CHECK(frameCount() == 1);
+			CHECK(context.Editor.GetHistory().GetUndoCount() == before);
+		}
+
+		// M21's milestone review: an array of more than InlineAssetElements elements is a clipped list with its selected element's
+		// fields, so a large sheet never draws or converts every frame each frame: one frame submits the rows in view and the
+		// selected one only. ImGuiListClipper submits every row while ImGui logs text (CaptureText), so the rows are read from
+		// ImGui's clipper debug log. Remove element takes out the selected element and Add element appends a default one, each
+		// through asset.setProperties, one undo step each.
+		TEST_CASE("InspectorPanel: a sprite sheet of many frames lists them clipped and removes the frame its index picks")
+		{
+			InspectorLayerHarness test;
+			auto& context = test.Fixture.GetContext();
+			auto& automation = test.Fixture.GetAutomation();
+			static constexpr size_t FrameCount = 300;
+			static_assert(FrameCount > InspectorPanel::InlineAssetElements);
+			Json frames = Json::array();
+			for (size_t index = 0; index < FrameCount; ++index)
+				frames.push_back(Json{ { "Name", std::format("F{}", index) }, { "Rect", Json{ { "X", index }, { "Y", 0 }, { "Width", 1 }, { "Height", 1 } } } });
+			const auto created = automation.Call("asset.create", Json{ { "type", "SpriteSheet" }, { "path", "Assets/Sheets/Many.spritesheet" }, { "values", Json{ { "Frames", frames } } } });
+			REQUIRE_MESSAGE(created.has_value(), (created ? std::string() : created.error().ToString()));
+			const auto id = JsonReader((*created)["asset"]["id"]).ReadUUID();
+			REQUIRE(id);
+			context.Editor.GetUiState().SetSelectedAsset(*id);
+			REQUIRE(test.Frame());
+			// The rows of the frames' list one frame submits, from the clipper's "display <first> to <end>" lines between its
+			// Begin of FrameCount items and its End.
+			const auto submittedRows = [&test]()
+			{
+				ImGuiContext& gui = *ImGui::GetCurrentContext();
+				gui.DebugLogBuf.clear();
+				gui.DebugLogIndex.clear();
+				gui.DebugLogFlags |= ImGuiDebugLogFlags_EventClipper;
+				REQUIRE(test.Frame());
+				gui.DebugLogFlags &= ~ImGuiDebugLogFlags_EventClipper;
+				const std::string log = gui.DebugLogBuf.c_str();
+				const std::string begin = std::format("Clipper: Begin({},", FrameCount);
+				std::vector<size_t> rows;
+				bool inList = false;
+				for (size_t start = 0; start < log.size();)
+				{
+					const size_t stop = std::min(log.find('\n', start), log.size());
+					const std::string_view line = std::string_view(log).substr(start, stop - start);
+					start = stop + 1;
+					if (line.contains(begin))
+						inList = true;
+					else if (line.contains("Clipper: End()"))
+						inList = false;
+					else if (const size_t display = line.find("display "); inList && display != std::string_view::npos)
+					{
+						size_t first = 0;
+						size_t last = 0;
+						const std::string_view range = line.substr(display + 8);
+						const size_t to = range.find(" to ");
+						REQUIRE(to != std::string_view::npos);
+						REQUIRE(std::from_chars(range.data(), range.data() + to, first).ec == std::errc());
+						REQUIRE(std::from_chars(range.data() + to + 4, range.data() + range.size(), last).ec == std::errc());
+						for (size_t row = first; row < last; ++row)
+							rows.push_back(row);
+					}
+				}
+				return rows;
+			};
+			const auto describe = [](const std::vector<size_t>& rows)
+			{
+				std::string text;
+				for (const size_t row : rows)
+					text += std::format("{} ", row);
+				return text;
+			};
+			// The rows in view (the first ones, the selected row 0 among them, which the clipper also submits first to measure the
+			// rows' height) and no other.
+			const std::vector<size_t> first = submittedRows();
+			INFO("first frame's rows: ", describe(first));
+			CHECK(std::ranges::contains(first, size_t{ 0 }));
+			CHECK(first.size() <= 16);
+			CHECK_FALSE(std::ranges::contains(first, size_t{ 150 }));
+			CHECK_FALSE(std::ranges::contains(first, size_t{ 299 }));
+			const auto draw = [&test]()
+			{
+				return test.Draw();
+			};
+			const auto* inspector = ImGui::FindWindowByName(Utils::EditorWindowTitle(EditorPanel::Inspector));
+			REQUIRE(inspector != nullptr);
+			const auto names = [&automation, &id]()
+			{
+				const auto properties = automation.Call("asset.getProperties", Json{ { "asset", id->ToString() } });
+				REQUIRE(properties);
+				std::vector<std::string> result;
+				for (const Json& frame : (*properties)["values"]["Frames"])
+					result.push_back(JsonReader(frame["Name"]).ReadString().value_or(std::string()));
+				return result;
+			};
+			const std::string path = "Sheet:" + id->ToString() + ":Frames:" + InspectorLayerOwnerIdentity(context, true);
+			const ImGuiID list = InspectorLayerIntId(inspector->ID, static_cast<int>(FNV1a32(path)));
+
+			// The index picks frame 250: the list scrolls to it, still submitting only the rows in view, and its fields show.
+			const ImVec2 index = InspectorLayerScrolledItem(test, ImHashStr("Element", 0, list)).GetCenter();
+			REQUIRE(test.Ui.Click(draw, index));
+			InspectorLayerReplaceText(test.Ui, draw, "250");
+			ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, true);
+			REQUIRE(test.Frame());
+			ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, false);
+			REQUIRE(test.Frame());
+			const std::vector<size_t> scrolled = submittedRows();
+			INFO("scrolled rows: ", describe(scrolled));
+			// The clipper always submits row 0, which measures the rows' height; the rest lie around 250.
+			CHECK(std::ranges::contains(scrolled, size_t{ 250 }));
+			CHECK(scrolled.size() <= 17);
+			CHECK(std::ranges::all_of(scrolled, [](size_t row)
+			{
+				return row == 0 || (row >= 240 && row <= 260);
+			}));
+			test.CaptureText = true;
+			REQUIRE(test.Frame());
+			test.CaptureText = false;
+			CHECK(test.Text.contains("Element 250"));
+
+			// Remove element takes out frame 250: one asset.setProperties, one undo step.
+			const auto before = context.Editor.GetHistory().GetUndoCount();
+			REQUIRE(test.Ui.Click(draw, InspectorLayerScrolledItem(test, ImHashStr("Remove element", 0, list)).GetCenter()));
+			REQUIRE(test.Layer.OnSafePoint(0.0));
+			const std::vector<std::string> removed = names();
+			REQUIRE(removed.size() == FrameCount - 1);
+			CHECK(removed[249] == "F249");
+			CHECK(removed[250] == "F251");
+			CHECK(context.Editor.GetHistory().GetUndoCount() == before + 1);
+			REQUIRE(automation.Call("edit.undo", Json::object()));
+			CHECK(names().size() == FrameCount);
+			REQUIRE(test.Frame());
+			REQUIRE(test.Frame());
+
+			// Add element appends an unnamed default frame.
+			REQUIRE(test.Ui.Click(draw, InspectorLayerScrolledItem(test, ImHashStr("Add element", 0, list)).GetCenter()));
+			REQUIRE(test.Layer.OnSafePoint(0.0));
+			const std::vector<std::string> added = names();
+			REQUIRE(added.size() == FrameCount + 1);
+			CHECK(added.back().empty());
+			CHECK(added[FrameCount - 1] == "F299");
+		}
+
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 26): the tilemap's inspector section. It needs stream T1's Tilemap
+		// asset (its importer and asset.create, asset.getProperties and asset.setProperties of a tilemap) and tilemap.paint's
+		// registration, so it runs from W21.2's integration (decision 33).
+		TEST_CASE("InspectorPanel: a tilemap shows its counts and edits its palette through asset.setProperties, keeping its cells")
+		{
+			InspectorLayerHarness test;
+			auto& context = test.Fixture.GetContext();
+			auto& automation = test.Fixture.GetAutomation();
+			const Json palette = Json::array({ Json{ { "Sheet", nullptr }, { "Frame", 0 }, { "Solid", true } } });
+			const auto created = automation.Call("asset.create", Json{ { "type", "Tilemap" }, { "path", "Assets/Tilemaps/Inspector.tilemap" }, { "values", Json{ { "ChunkSize", 4 }, { "Palette", palette } } } });
+			REQUIRE_MESSAGE(created.has_value(), (created ? std::string() : created.error().ToString()));
+			const auto id = JsonReader((*created)["asset"]["id"]).ReadUUID();
+			REQUIRE(id);
+			const auto cell = [](int32_t x, int32_t y)
+			{
+				return Json{ { "x", x }, { "y", y }, { "tile", 1 } };
+			};
+			const auto painted = automation.Call("tilemap.paint", Json{ { "tilemap", id->ToString() }, { "cells", Json::array({ cell(0, 0), cell(1, 0), cell(9, 9) }) } });
+			REQUIRE_MESSAGE(painted.has_value(), (painted ? std::string() : painted.error().ToString()));
+			context.Editor.GetUiState().SetSelectedAsset(*id);
+			test.CaptureText = true;
+			REQUIRE(test.Frame());
+			REQUIRE(test.Frame());
+			test.CaptureText = false;
+			CAPTURE(test.Text);
+			CHECK(test.Text.contains("Palette entries: 1"));
+			CHECK(test.Text.contains("Chunks: 2"));
+			CHECK(test.Text.contains("Painted cells: 3"));
+			const auto draw = [&test]()
+			{
+				return test.Draw();
+			};
+			const auto* inspector = ImGui::FindWindowByName(Utils::EditorWindowTitle(EditorPanel::Inspector));
+			REQUIRE(inspector != nullptr);
+			const auto values = [&automation, &id]()
+			{
+				const auto properties = automation.Call("asset.getProperties", Json{ { "asset", id->ToString() } });
+				REQUIRE(properties);
+				return (*properties)["values"];
+			};
+			const std::string path = "Tilemap:" + id->ToString() + ":Palette:" + InspectorLayerOwnerIdentity(context, true);
+			const ImGuiID entries = ImHashStr("##Container", 0, InspectorLayerIntId(inspector->ID, static_cast<int>(FNV1a32(path))));
+
+			// Add element appends a palette entry: one asset.setProperties, one undo step, the painted cells kept.
+			const auto before = context.Editor.GetHistory().GetUndoCount();
+			REQUIRE(test.Ui.Click(draw, InspectorLayerScrolledItem(test, ImHashStr("Add element", 0, entries)).GetCenter()));
+			REQUIRE(test.Layer.OnSafePoint(0.0));
+			const Json added = values();
+			CHECK(added["Palette"].size() == 2);
+			CHECK(added["Chunks"].size() == 2);
+			CHECK(context.Editor.GetHistory().GetUndoCount() == before + 1);
+			REQUIRE(automation.Call("edit.undo", Json::object()));
+			CHECK(values()["Palette"].size() == 1);
 		}
 
 		TEST_CASE("InspectorPanel: primary Euler rotation offers the serialized prefab override revert")

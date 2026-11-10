@@ -40,6 +40,7 @@ namespace Engine {
 	class AudioEngine;
 	class AudioSystem;
 	class Entity;
+	class Physics2DSystem;
 	class PhysicsSystem;
 	class ReplayRecorder;
 	class Scene;
@@ -87,10 +88,16 @@ namespace Engine {
 		Tasks,                   // 4: Task.Wait*/Task.Delay threads due at this tick, then the test case thread (M13; empty)
 		NativeStep,              // 4a: the native module's systems (NativeWorld::Step; M19, Docs/Decisions/0030-m19-contract.md
 								 //     decision 28): only in Play with a native module (PlaySessionSpecification::Native)
+		SpriteAnimation,         // 4b: SpriteAnimationSystem::Step, every playing SpriteAnimator advanced one tick (M21,
+								 //     Docs/Decisions/0032-m21-contract.md decision 5); Play and Simulate
 		PreStepTransformUpdate,  // 5: TransformSystem::Update, before PhysicsSystem::PreStep
 		PhysicsPreStep,          // 5: PhysicsSystem::PreStep: create, rebuild or remove bodies; teleports; MoveKinematic (M11)
 		PhysicsStep,             // 6: PhysicsSystem::Step: PhysicsWorld::Step(fixedDt) (M11)
 		PhysicsPostStep,         // 7: PhysicsSystem::PostStep: dynamic poses written back; sorted collision and trigger events (M11)
+		Physics2DPreStep,        // 7a: TransformSystem::Update when the 3D post-step changed a transform, then
+								 //     Physics2DSystem::PreStep (M21, Docs/Decisions/0032-m21-contract.md decision 10)
+		Physics2DStep,           // 7b: Physics2DSystem::Step: Physics2DWorld::Step(fixedDt) (M21)
+		Physics2DPostStep,       // 7c: Physics2DSystem::PostStep: 2D poses written back; sorted 2D collision and trigger events (M21)
 		DestroyFlush,            // 8: OnDestroy, synthesized exits, body/voice/instance removal (M11-M13), then entity destruction,
 								 //    children first (Scene::FlushPendingDestroys)
 		PostStepTransformUpdate, // 9: TransformSystem::Update
@@ -129,6 +136,18 @@ namespace Engine {
 	// keeps moving continuously. nullopt for a non-finite position, a rectangle without area or an empty view. Pure.
 	[[nodiscard]] std::optional<glm::vec2> MapToViewCoordinates(const glm::vec2& position, const glm::vec2& displayMin,
 		const glm::vec2& displaySize, const glm::uvec2& viewSize);
+	// M21 (Docs/Decisions/0032-m21-contract.md decision 6): MapToViewCoordinates for a display rectangle that shows an image of
+	// `imageSize` pixels, stretched over it, which renders the session's scene with the output settings `output` (the
+	// session's last extraction's), when the session's view of `viewSize` renders it with the same settings. The point goes
+	// to the image's pixels, through the image's output mapping to its scene point (MapViewPointToScenePoint of
+	// ComputeRenderOutputMapping), from the image's scene resolution to the view's, and through the view's mapping to the
+	// view's pixels, so it names the scene pixel the image shows there: under a PixelPerfectCamera the two mappings have
+	// different integer scales and letterboxes, and a plain stretch would name another pixel. When both mappings are the
+	// identity (no PixelPerfectCamera: each scene is its own view) or the image is the view's size, this is
+	// MapToViewCoordinates exactly. Linear and unclamped; nullopt as MapToViewCoordinates, or for an image without pixels.
+	// Pure.
+	[[nodiscard]] std::optional<glm::vec2> MapImageToViewCoordinates(const glm::vec2& position, const glm::vec2& displayMin,
+		const glm::vec2& displaySize, const glm::uvec2& imageSize, const glm::uvec2& viewSize, const RenderOutputSettings& output);
 	// The fixed view of a deterministic session (see MapToViewCoordinates): the project's window size in logical pixels,
 	// at least 1 x 1. Pure.
 	[[nodiscard]] glm::uvec2 GetDeterministicViewSize(const WindowSettings& window);
@@ -473,6 +492,15 @@ namespace Engine {
 		[[nodiscard]] NativeWorld* GetNative();
 		[[nodiscard]] const NativeWorld* GetNative() const;
 
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 10): the session's 2D physics (Scene/Physics2DSystem.h), created
+		// right after the PhysicsSystem (and again with it at a scene transition), from Project.Physics2D's gravity,
+		// Project.Physics's layers and collisions and Project.Simulation.FixedHz (its errors fail Create like the 3D
+		// system's), in Play and Simulate alike; the fixed step calls its PreStep, Step and PostStep in the Physics2D phases,
+		// and both destroy flushes call its FlushDestroyed after the 3D system's. The system creates its Physics2DWorld only
+		// at the first 2D body, so a session without one holds one PhysicsWorld, as before M21. Never null; valid for the
+		// session's lifetime.
+		[[nodiscard]] Physics2DSystem* GetPhysics2D();
+		[[nodiscard]] const Physics2DSystem* GetPhysics2D() const;
 		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 3): the session's UI (Scene/UiSystem.h): the layouts of the
 		// UiLayout and FrameUiLayout phases at the session's scene resolution (GetViewSize in W22.1; the later lander of M21
 		// and M22 makes it the scene resolution M21's PixelPerfectCamera sets), in Play and Simulate alike; ui.tree reads the
@@ -500,13 +528,14 @@ namespace Engine {
 		// Equal for equal sessions in every configuration (§1.3); play.state, play.step and input.replay report it as 16
 		// lowercase hex digits. Returns 0 only when the scene cannot be serialized (logged). M19 (decision 28): the native
 		// block follows the physics block, NativeWorld::AppendStateHash (the module's resources; native components are in the
-		// scene's serialization), and is empty without a native module, so a session without one hashes as before. M22 (C22.2,
-		// Docs/Decisions/0033-m22-contract.md decision 29): the ui block follows (ADR 0028's phase-2 ledger: after M21's
-		// physics2d block, which a merge inserts before it), UiSystem::AppendStateHash, the UI interaction state (focus,
-		// hover, press, drag, the stick, the pointer over the UI) and the UI events still queued; it is empty while both
-		// are, which the UiInput phase keeps so in every scene without a canvas, so such a scene hashes as before, whatever
-		// its input. What interaction writes (a toggle's IsOn, a slider's Value, a scroll view's ScrollPosition) is in the
-		// scene's serialization.
+		// scene's serialization), and is empty without a native module, so a session without one hashes as before. M21
+		// (Docs/Decisions/0032-m21-contract.md decision 11): the physics2d block, Physics2DSystem::AppendStateHash, follows
+		// the native block and is empty without a 2D body. M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 29): the
+		// ui block follows the physics2d block (ADR 0028's phase-2 ledger), UiSystem::AppendStateHash, the UI interaction
+		// state (focus, hover, press, drag, the stick, the pointer over the UI) and the UI events still queued; it is empty
+		// while both are, which the UiInput phase keeps so in every scene without a canvas, so such a scene hashes as before,
+		// whatever its input. What interaction writes (a toggle's IsOn, a slider's Value, a scroll view's ScrollPosition) is
+		// in the scene's serialization.
 		[[nodiscard]] uint64_t ComputeStateHash() const;
 
 		// The entity cap (see the class comment).

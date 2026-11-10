@@ -6,6 +6,7 @@
 #include "Engine/Asset/SpriteSheetData.h"
 #include "Engine/Asset/StringTableData.h"
 #include "Engine/Asset/TextureData.h"
+#include "Engine/Asset/TilemapData.h"
 #include "Engine/Reflection/TypeRegistry.h"
 
 namespace Engine {
@@ -98,6 +99,43 @@ namespace Engine {
 				CHECK(hooked->HasValidators());
 				CHECK(hooked->HasGenerators());
 			}
+		}
+
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 23): the tilemap's structs follow their C++ members, with the ranges of
+		// TilemapData.h, and the rules across fields (ChunkSize's power of two, the chunks) run as the Tilemap struct's Validate
+		// hook with a Generate hook beside it.
+		TEST_CASE("AssetTypeRegistration: the tilemap structs follow their members with their ranges and hooks")
+		{
+			TypeRegistry registry;
+			RegisterAssetTypes(registry);
+			registry.Freeze();
+			const auto names = [](const StructInfo& type)
+			{
+				std::vector<std::string> fields;
+				for (const Scope<FieldInfo>& field : type.GetFields())
+					fields.push_back(field->GetName());
+				return fields;
+			};
+			const StructInfo* tilemap = registry.FindStruct<TilemapData>();
+			REQUIRE(tilemap != nullptr);
+			CHECK(tilemap == registry.FindStruct("Tilemap"));
+			CHECK(names(*tilemap) == std::vector<std::string>{ "CellSize", "ChunkSize", "Palette", "Chunks" });
+			CHECK(tilemap->FindField("CellSize")->GetMeta().Min == static_cast<double>(MinTilemapCellSize));
+			CHECK(tilemap->FindField("CellSize")->GetMeta().Max == static_cast<double>(MaxTilemapCellSize));
+			CHECK(tilemap->FindField("ChunkSize")->GetMeta().Min == 1.0);
+			CHECK(tilemap->FindField("ChunkSize")->GetMeta().Max == static_cast<double>(MaxTilemapChunkSize));
+			CHECK(tilemap->HasValidators());
+			CHECK(tilemap->HasGenerators());
+			const StructInfo* tile = registry.FindStruct<TilemapTile>();
+			REQUIRE(tile != nullptr);
+			CHECK(tile == registry.FindStruct("TilemapTile"));
+			CHECK(names(*tile) == std::vector<std::string>{ "Sheet", "Frame", "Solid" });
+			CHECK(tile->FindField("Sheet")->GetMeta().AssetFilter == "SpriteSheet");
+			CHECK(tile->FindField("Frame")->GetMeta().Max == static_cast<double>(MaxSpriteSheetFrames - 1));
+			const StructInfo* chunk = registry.FindStruct<TilemapChunk>();
+			REQUIRE(chunk != nullptr);
+			CHECK(chunk == registry.FindStruct("TilemapChunk"));
+			CHECK(names(*chunk) == std::vector<std::string>{ "X", "Y", "Tiles" });
 		}
 
 		// M22 (Docs/Decisions/0033-m22-contract.md decision 10): the string table's structs follow their C++ members; the rules

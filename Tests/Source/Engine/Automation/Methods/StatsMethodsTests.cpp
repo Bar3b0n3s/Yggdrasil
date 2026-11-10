@@ -10,6 +10,7 @@
 #include "Support/SceneTestFixture.h"
 
 #include <cmath>
+#include <format>
 #include <limits>
 #include <variant>
 
@@ -77,6 +78,25 @@ namespace Engine {
 			REQUIRE(stopped);
 			CHECK((*stopped)["scriptAvailable"] == Json(false));
 			CHECK((*stopped)["scriptHeapBytes"] == Json(0));
+		}
+
+		// M21's milestone review: bodies counts both physics worlds of the play session (the soak's no-growth rule reads it).
+		TEST_CASE("StatsGet: play counts the bodies of the 3D and the 2D world")
+		{
+			Test::AutomationFixture setup("StatsBothWorlds");
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Cube" }, { "components", Json{ { "RigidBody", Json{ { "Type", "Static" } } }, { "BoxCollider", Json::object() } } } }));
+			for (int index = 0; index < 3; ++index)
+			{
+				REQUIRE(setup.Call("entity.create", Json{ { "name", std::format("Crate{}", index) }, { "components", Json{ { "Transform", Json{ { "Translation", Json::array({ 3 * index, 0, 0 }) } } }, { "RigidBody2D", Json{ { "Type", "Static" } } }, { "BoxCollider2D", Json::object() } } } }));
+			}
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true }, { "mode", "simulate" } }));
+			const auto playing = setup.Call("stats.get", Json::object());
+			REQUIRE(playing);
+			CHECK((*playing)["bodies"] == Json(4));
+			REQUIRE(setup.Call("play.stop", Json::object()));
+			const auto stopped = setup.Call("stats.get", Json::object());
+			REQUIRE(stopped);
+			CHECK((*stopped)["bodies"] == Json(0));
 		}
 
 		TEST_CASE("StatsGet: telemetry conversion stays finite and range safe")

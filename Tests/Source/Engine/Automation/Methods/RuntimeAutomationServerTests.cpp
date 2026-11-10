@@ -610,7 +610,8 @@ namespace Engine {
 			for (const char* name : { "session.hello", "session.info", "session.shutdown", "rpc.discover", "scene.tree", "scene.query", "scene.get",
 					 "entity.get", "entity.bounds", "log.read", "events.read", "play.pause", "play.resume", "play.step", "play.state",
 					 "play.setTimeScale", "input.inject", "viewport.screenshot", "physics.bodyInfo", "audio.stats", "stats.get",
-					 "script.eval", "script.errors", "play.waitFor", "input.record", "input.replay", "ui.tree" })
+					 "script.eval", "script.errors", "play.waitFor", "input.record", "input.replay", "physics2d.raycast", "physics2d.overlap", "physics2d.bodyInfo",
+					 "ui.tree" })
 			{
 				INFO(std::string(name));
 				const MethodDescriptor* method = methods.Find(name);
@@ -753,6 +754,55 @@ namespace Engine {
 			CHECK(result["contacts"].empty());
 			CHECK(result["tick"] == Json(0));
 			CHECK(JsonReader(result["boundsMax"][0]).ReadFloat().value_or(0.0f) == doctest::Approx(5.0f));
+		}
+
+		// M21's milestone review (Docs/Decisions/0032-m21-contract.md decisions 15 and 27): physics2d.raycast, physics2d.overlap
+		// and physics2d.bodyInfo are in the Runtime subset (§13.5) and read the Runtime's own session: a static 2D floor and a
+		// Dynamic crate above it, which the session created at tick 0, and an entity without a 2D body.
+		TEST_CASE("RuntimeAutomationServer: the physics2d methods read the 2D bodies of the Runtime's session")
+		{
+			RuntimeServerFixture fixture({ .GameName = "Tiny" }, [](Scene& scene)
+			{
+				Entity floor = scene.CreateEntity("Floor");
+				floor.AddComponent<RigidBody2DComponent>(RigidBody2DComponent{ .Type = BodyType::Static });
+				floor.AddComponent<BoxCollider2DComponent>(BoxCollider2DComponent{ .HalfExtents = glm::vec2(5.0f, 0.5f) });
+				Entity crate = scene.CreateEntity("Crate");
+				crate.Patch<TransformComponent>([](TransformComponent& transform)
+				{
+					transform.Translation = glm::vec3(0.0f, 3.0f, 0.0f);
+				});
+				crate.AddComponent<RigidBody2DComponent>();
+				crate.AddComponent<BoxCollider2DComponent>();
+				static_cast<void>(scene.CreateEntity("Marker"));
+			});
+			// A ray straight down meets the crate's top (y = 3.5), then the floor's (y = 0.5), by distance.
+			const Json ray = fixture.Call("physics2d.raycast", Json{ { "origin", Json::array({ 0, 10 }) }, { "direction", Json::array({ 0, -1 }) }, { "maxDistance", 20 }, { "all", true } });
+			REQUIRE_MESSAGE(RuntimeServerFixture::GetErrorCode(ray) == 0, ray.dump());
+			const Json& hits = ray["result"]["hits"];
+			REQUIRE(hits.size() == 2);
+			CHECK(hits[0]["entity"]["name"] == Json("Crate"));
+			CHECK(JsonReader(hits[0]["distance"]).ReadFloat().value_or(0.0f) == doctest::Approx(6.5f));
+			CHECK(JsonReader(hits[0]["normal"][1]).ReadFloat().value_or(0.0f) == doctest::Approx(1.0f));
+			CHECK(hits[1]["entity"]["name"] == Json("Floor"));
+			CHECK(JsonReader(hits[1]["distance"]).ReadFloat().value_or(0.0f) == doctest::Approx(9.5f));
+			CHECK(ray["result"]["tick"] == Json(0));
+			// A box over the floor's right half overlaps the floor alone.
+			const Json overlap = fixture.Call("physics2d.overlap", Json{ { "shape", "Box" }, { "center", Json::array({ 3, 0 }) }, { "halfExtents", Json::array({ 0.5, 0.25 }) } });
+			REQUIRE_MESSAGE(RuntimeServerFixture::GetErrorCode(overlap) == 0, overlap.dump());
+			REQUIRE(overlap["result"]["entities"].size() == 1);
+			CHECK(overlap["result"]["entities"][0]["name"] == Json("Floor"));
+			// The crate's own body, Dynamic, at its place; an entity without a 2D body is NotFound at /entity.
+			const Json info = fixture.Call("physics2d.bodyInfo", Json{ { "entity", "/Crate" } });
+			REQUIRE_MESSAGE(RuntimeServerFixture::GetErrorCode(info) == 0, info.dump());
+			const Json& body = info["result"];
+			CHECK(body["body"]["name"] == Json("Crate"));
+			CHECK(body["origin"] == Json("RigidBody"));
+			CHECK(body["type"] == Json("Dynamic"));
+			REQUIRE(body["position"].size() == 2);
+			CHECK(JsonReader(body["position"][1]).ReadFloat().value_or(0.0f) == doctest::Approx(3.0f));
+			const Json none = fixture.Call("physics2d.bodyInfo", Json{ { "entity", "/Marker" } });
+			CHECK(RuntimeServerFixture::GetErrorCode(none) == static_cast<int64_t>(RpcErrorCode::NotFound));
+			CHECK(none["error"]["data"]["issues"][0]["pointer"] == Json("/entity"));
 		}
 
 		TEST_CASE("RuntimeAutomationServer: a disconnect releases the client's lockstep and pauses play")

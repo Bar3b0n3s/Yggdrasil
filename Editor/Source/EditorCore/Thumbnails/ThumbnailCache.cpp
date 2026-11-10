@@ -21,6 +21,9 @@
 #include <deque>
 #include <map>
 #include <set>
+#include <span>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -103,7 +106,7 @@ namespace Engine {
 			Result<ThumbnailResult> Value = ThumbnailResult{};
 			uint64_t Version = 0; // the asset's version when the result was produced
 			std::vector<Input> Inputs{};
-			uint64_t Quality = 0; // QualityKey when the result was produced
+			uint64_t Quality = 0; // QualityKey (the render quality and sorting layers) when the result was produced
 			bool Revalidate = false;
 		};
 
@@ -163,8 +166,8 @@ namespace Engine {
 			return IsVisual(type) && type != AssetType::Texture;
 		}
 
-		// The render quality captures use: the bound project's Rendering settings. Every field reaching the captures belongs
-		// in GetRenderQuality and in QualityKey.
+		// The render quality captures use: the bound project's Rendering settings. Every setting reaching the captures belongs
+		// in QualityKey: the quality's fields (GetRenderQuality) and the sorting layers (GetSortingLayers).
 		[[nodiscard]] RenderQualitySettings GetRenderQuality() const
 		{
 			if (!Context.HasProject())
@@ -173,13 +176,34 @@ namespace Engine {
 			return { .ShadowMapSize = rendering.ShadowMapSize, .SsaoHalfResolution = rendering.SsaoHalfResolution };
 		}
 
-		// What an image of `asset` depends on besides its asset inputs: the render quality for a captured type, 0 otherwise.
+		// The project's sorting layers, which captures extract with (EditorHostThumbnails): a prefab's sprites draw in them
+		// (M21, Docs/Decisions/0032-m21-contract.md decision 4). None without a project.
+		[[nodiscard]] std::span<const std::string> GetSortingLayers() const
+		{
+			if (!Context.HasProject())
+				return {};
+			return Context.GetProject().GetSettings().SortingLayers.Layers;
+		}
+
+		// What an image of `asset` depends on besides its asset inputs: for a captured type, the settings its capture
+		// renders with, the render quality and the sorting layers (each layer's length, then its bytes), hashed, with the
+		// low bit set so it is never 0; 0 otherwise.
 		[[nodiscard]] uint64_t QualityKey(AssetHandle asset) const
 		{
 			if (!IsCaptured(Context.GetAssets().GetAssetType(asset)))
 				return 0;
 			const RenderQualitySettings quality = GetRenderQuality();
-			return (static_cast<uint64_t>(quality.ShadowMapSize) << 2) | (quality.SsaoHalfResolution ? 2u : 0u) | 1u;
+			XXH64Hasher hasher;
+			hasher.UpdateU64(quality.ShadowMapSize);
+			hasher.UpdateU64(quality.SsaoHalfResolution ? 1u : 0u);
+			const std::span<const std::string> layers = GetSortingLayers();
+			hasher.UpdateU64(layers.size());
+			for (const std::string& layer : layers)
+			{
+				hasher.UpdateU64(layer.size());
+				hasher.Update(std::string_view(layer));
+			}
+			return hasher.Digest() | 1u;
 		}
 
 		// The asset and everything it references directly or through others, sorted. Imports record their references

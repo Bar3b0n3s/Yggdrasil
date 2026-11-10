@@ -225,8 +225,8 @@ namespace Engine {
 		// Review finding M08 (ADR 0022 decision 9, "Integration"): Export.Exclude leaves Assets/Tests/** out of a plain export,
 		// so no asset an export includes may reference an asset below it; Exporter::CheckReferences would refuse such an
 		// export. Scripting.scene referenced Assets/Tests/Api/Beep.sfx until the sound moved to Assets/Audio/. This walks the
-		// committed documents (every string of every scene, prefab, material and sound effect outside the excluded globs)
-		// against the handles of the excluded assets' .meta files, without a GPU.
+		// committed documents (every string of every scene, prefab, material, sound effect, sprite sheet and tilemap outside the
+		// excluded globs) against the handles of the excluded assets' .meta files, without a GPU.
 		TEST_CASE("FeatureTest: no asset a plain export includes references one that Export.Exclude leaves out")
 		{
 			const std::filesystem::path root = Test::GetRepositoryRoot() / "Projects" / "FeatureTest";
@@ -286,7 +286,8 @@ namespace Engine {
 							excludedHandles.emplace(*subHandle, source);
 					}
 				}
-				else if ((extension == ".scene" || extension == ".prefab" || extension == ".material" || extension == ".sfx" || extension == ".spritesheet")
+				else if ((extension == ".scene" || extension == ".prefab" || extension == ".material" || extension == ".sfx" || extension == ".spritesheet"
+							 || extension == ".tilemap")
 					&& !excluded(relative))
 				{
 					documents.emplace_back(relative, file);

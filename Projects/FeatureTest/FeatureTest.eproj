@@ -134,6 +134,20 @@
 				"Modes": ["Editor", "Release", "Dist"]
 			},
 			{
+				"Script": "Assets/Tests/Physics2D/Physics2D.test.luau",
+				"Scene": "Assets/Scenes/Physics2D.scene",
+				"Parameters": null,
+				"Isolation": "Case",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
 				"Script": "Assets/Tests/Audio/Audio.test.luau",
 				"Scene": "Assets/Scenes/Audio.scene",
 				"Parameters": null,
@@ -166,6 +180,48 @@
 				"Scene": "Assets/Scenes/Formats.scene",
 				"Parameters": null,
 				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
+				"Script": "Assets/Tests/Sprites2D/Sprites2D.test.luau",
+				"Scene": "Assets/Scenes/Sprites2D.scene",
+				"Parameters": null,
+				"Isolation": "Case",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
+				"Script": "Assets/Tests/Lights2D/Lights2D.test.luau",
+				"Scene": "Assets/Scenes/Lights2D.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
+				"Script": "Assets/Tests/Tilemaps/Tilemaps.test.luau",
+				"Scene": "Assets/Scenes/Tilemaps.scene",
+				"Parameters": null,
+				"Isolation": "Case",
 				"Clock": [],
 				"Overrides": {
 					"CallbackBudgetMs": 0,
@@ -274,6 +330,20 @@
 				"Modes": ["Editor", "Release", "Dist"]
 			},
 			{
+				"Script": "Assets/Tests/Api/BoxCollider2D.test.luau",
+				"Scene": "Assets/Scenes/Physics2D.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
 				"Script": "Assets/Tests/Api/Camera.test.luau",
 				"Scene": "Assets/Scenes/Scripting.scene",
 				"Parameters": null,
@@ -304,6 +374,20 @@
 			{
 				"Script": "Assets/Tests/Api/CharacterController.test.luau",
 				"Scene": "Assets/Scenes/Scripting.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
+				"Script": "Assets/Tests/Api/CircleCollider2D.test.luau",
+				"Scene": "Assets/Scenes/Physics2D.scene",
 				"Parameters": null,
 				"Isolation": "Suite",
 				"Clock": [],
@@ -414,6 +498,20 @@
 				"Modes": ["Editor", "Release", "Dist"]
 			},
 			{
+				"Script": "Assets/Tests/Api/Light2D.test.luau",
+				"Scene": "Assets/Scenes/Lights2D.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
 				"Script": "Assets/Tests/Api/Log.test.luau",
 				"Scene": "Assets/Scenes/Scripting.scene",
 				"Parameters": null,
@@ -484,8 +582,50 @@
 				"Modes": ["Editor", "Release", "Dist"]
 			},
 			{
+				"Script": "Assets/Tests/Api/Physics2D.test.luau",
+				"Scene": "Assets/Scenes/Physics2D.scene",
+				"Parameters": null,
+				"Isolation": "Case",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
+				"Script": "Assets/Tests/Api/PixelPerfectCamera.test.luau",
+				"Scene": "Assets/Scenes/Sprites2D.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
 				"Script": "Assets/Tests/Api/PointLight.test.luau",
 				"Scene": "Assets/Scenes/Scripting.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
+				"Script": "Assets/Tests/Api/PolygonCollider2D.test.luau",
+				"Scene": "Assets/Scenes/Physics2D.scene",
 				"Parameters": null,
 				"Isolation": "Suite",
 				"Clock": [],
@@ -568,6 +708,20 @@
 				"Modes": ["Editor", "Release", "Dist"]
 			},
 			{
+				"Script": "Assets/Tests/Api/RigidBody2D.test.luau",
+				"Scene": "Assets/Scenes/Physics2D.scene",
+				"Parameters": null,
+				"Isolation": "Case",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
 				"Script": "Assets/Tests/Api/Scene.test.luau",
 				"Scene": "Assets/Scenes/Scripting.scene",
 				"Parameters": null,
@@ -624,6 +778,34 @@
 				"Modes": ["Editor", "Release", "Dist"]
 			},
 			{
+				"Script": "Assets/Tests/Api/SpriteAnimator.test.luau",
+				"Scene": "Assets/Scenes/Sprites2D.scene",
+				"Parameters": null,
+				"Isolation": "Case",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
+				"Script": "Assets/Tests/Api/SpriteRenderer.test.luau",
+				"Scene": "Assets/Scenes/Sprites2D.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
 				"Script": "Assets/Tests/Api/Task.test.luau",
 				"Scene": "Assets/Scenes/Scripting.scene",
 				"Parameters": null,
@@ -654,6 +836,34 @@
 			{
 				"Script": "Assets/Tests/Api/Text.test.luau",
 				"Scene": "Assets/Scenes/Scripting.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
+				"Script": "Assets/Tests/Api/TilemapCollider.test.luau",
+				"Scene": "Assets/Scenes/Tilemaps.scene",
+				"Parameters": null,
+				"Isolation": "Case",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
+				"Script": "Assets/Tests/Api/TilemapRenderer.test.luau",
+				"Scene": "Assets/Scenes/Tilemaps.scene",
 				"Parameters": null,
 				"Isolation": "Suite",
 				"Clock": [],
@@ -1020,12 +1230,46 @@
 				},
 				"ExpectQuit": 3,
 				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
+				"Script": "Assets/Tests/Record/Sprites2D.test.luau",
+				"Scene": "Assets/Scenes/Sprites2D.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor"]
+			},
+			{
+				"Script": "Assets/Tests/Record/Physics2D.test.luau",
+				"Scene": "Assets/Scenes/Physics2D.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor"]
 			}
 		],
 		"Replays": ["Assets/Tests/Replays/*.replay"],
 		"CaseTimeoutTicks": 600,
 		"SuiteTickLimit": 36000,
 		"CoverageGates": true
+	},
+	"SortingLayers": {
+		"Layers": ["Default", "Background", "Characters", "Foreground"]
+	},
+	"Physics2D": {
+		"Gravity": [0, -12]
 	},
 	"Localization": {
 		"Locale": "fr-CA"

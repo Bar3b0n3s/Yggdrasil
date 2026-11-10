@@ -6,7 +6,9 @@ Two output roots, each owned whole by this generator (a file it does not write i
 - Tests/Data/Validation/<Name>/: `Project/` (a complete mini project: the .eproj, a .luaurc when it has scripts,
   Assets/) and `Expected.json` ({"Format": "ValidationFixture", "Version": 1, "Scope": "Project", "Codes",
   "TestComponents", "Expand", "NonCanonical"}). <Name> is a code of ProjectValidator::GetCodes, whose Codes contain it,
-  or Clean, the baseline (a primary camera with the audio listener, and a sun) that reports nothing. Every fixture
+  or <CODE>.<Variant>, a further fixture of that code for another path that reports it (<CODE>.2D: the 2D world's
+  composition, Docs/Decisions/0032-m21-contract.md decision 12; <CODE>.Tilemap: a tilemap's palette sheets, its decision
+  23), or Clean, the baseline (a primary camera with the audio listener, and a sun) that reports nothing. Every fixture
   starts from that baseline, so incidental codes stay out; Codes lists every code the project reports, sorted.
 - Tests/Data/SettingsObservation/Project/: the files Tests/Data/Project/AllSettings.eproj names (Assets/Icon.png, the
   start, build and suite scenes, the suite script and its replay) and a module whose Assets.Load path is computed (for
@@ -20,10 +22,14 @@ Special cases (also in Tests/Data/Validation/README.md, which this generator wri
 - PATH_CASE_MISMATCH pairs Grey.png with grey.png.meta. The two names differ in more than letter case, so git checks
   both out on every file system, and the scan reports the meta whose name matches its source only ignoring case,
   whether the file system is case-sensitive or not.
-- PHYSICS_LIMIT_EXCEEDED and RENDER_LIGHT_LIMIT_EXCEEDED name an entity in Expand ({"Path", "Entity", "Count"}): the
-  test repeats it until the scene holds Count of it, so no multi-megabyte scene is committed.
+- PHYSICS_LIMIT_EXCEEDED, PHYSICS_LIMIT_EXCEEDED.2D and RENDER_LIGHT_LIMIT_EXCEEDED name an entity in Expand
+  ({"Path", "Entity", "Count"}): the test repeats it until the scene holds Count of it, so no multi-megabyte scene is
+  committed.
 - NonCanonical lists project-relative paths that are deliberately not canonical JSON (ASSET_IMPORT_FAILED's unreadable
   .meta); the authored-files test exempts exactly those.
+- ASSET_MISSING.Tilemap and ASSET_TYPE_MISMATCH.Tilemap name a sprite sheet from a tilemap's palette. Sheets have no
+  placeholder, so the asset manager logs nothing for them and only the validator reports them; the test declares no
+  Error entry for those two codes there.
 
 Scenes, metas and project files are written in the canonical JsonWriter form; images are PNGs of stored deflate blocks,
 so no zlib build changes their bytes. The glTF diagnostics fixtures and Truncated.png are byte copies of
@@ -61,8 +67,10 @@ COMPONENT_ORDER = [
     "ID", "Name", "Tags", "Relationship", "Transform", "Prefab", "PrefabLink", "MeshRenderer", "Camera",
     "DirectionalLight", "PointLight", "SpotLight", "Environment", "PostProcess", "Text", "RigidBody", "BoxCollider",
     "SphereCollider", "CapsuleCollider", "MeshCollider", "CharacterController", "AudioSource", "AudioListener",
-    "Script", "UiCanvas", "UiRect", "UiImage", "UiText", "UiLayout", "UiLayoutElement", "UiButton", "UiToggle",
-    "UiSlider", "UiScrollView", "UiTextInput", "ValidatorTarget", "ValidatorFollower",
+    "Script", "SpriteRenderer", "SpriteAnimator", "PixelPerfectCamera", "Light2D", "TilemapRenderer", "RigidBody2D",
+    "BoxCollider2D", "CircleCollider2D", "PolygonCollider2D", "TilemapCollider", "UiCanvas", "UiRect", "UiImage", "UiText",
+    "UiLayout", "UiLayoutElement", "UiButton", "UiToggle", "UiSlider", "UiScrollView", "UiTextInput", "ValidatorTarget",
+    "ValidatorFollower",
 ]
 
 # The registered version of each component above 1 ("ComponentVersions"); every other component is at version 1.
@@ -200,6 +208,8 @@ def default_project(name: str) -> dict[str, Any]:
                    "PruneUnreferenced": False},
         "Testing": {"Suites": [], "Replays": [], "CaseTimeoutTicks": 600, "SuiteTickLimit": 36000,
                     "CoverageGates": False},
+        "SortingLayers": {"Layers": ["Default"]},
+        "Physics2D": {"Gravity": [0, -9.81]},
         "Localization": {"Locale": ""},
         "Ui": {"Navigation": True, "Submit": ["Key.Enter", "Key.Space", "Gamepad.South"],
                "Cancel": ["Key.Escape", "Gamepad.East"], "Up": ["Key.Up", "Gamepad.DPadUp"],
@@ -245,6 +255,29 @@ def meta(handle: str, kind: str, importer: str, settings: dict[str, Any] | None 
 
 
 TEXTURE_SETTINGS = {"Usage": "Color", "GenerateMips": True}
+
+
+def sprite_sheet(frames: list[tuple[str, int, int]], clips: list[tuple[str, list[tuple[int, int]]]],
+                 size: int = 8, texture: str | None = None) -> dict[str, Any]:
+    """A .spritesheet of `texture` (a handle, None for none): `size` x `size` frames (name, x, y) and looping clips
+    (name, [(frame, ticks)])."""
+    return {
+        "Format": "SpriteSheet", "Version": 1, "Texture": texture,
+        "Frames": [{"Name": name, "Rect": {"X": x, "Y": y, "Width": size, "Height": size}, "Pivot": [0.5, 0.5],
+                    "Borders": {"Left": 0, "Top": 0, "Right": 0, "Bottom": 0}} for name, x, y in frames],
+        "Clips": [{"Name": name, "Frames": [{"Frame": frame, "Ticks": ticks} for frame, ticks in steps], "Loop": True}
+                  for name, steps in clips],
+    }
+
+
+def tilemap(palette: list[tuple[str | None, int, bool]], chunks: list[tuple[int, int, list[int]]],
+            chunk_size: int = 1) -> dict[str, Any]:
+    """A .tilemap of unit cells: palette entries (sheet handle, frame, solid) and chunks (x, y, tiles)."""
+    return {
+        "Format": "Tilemap", "Version": 1, "CellSize": [1, 1], "ChunkSize": chunk_size,
+        "Palette": [{"Sheet": sheet, "Frame": frame, "Solid": solid} for sheet, frame, solid in palette],
+        "Chunks": [{"X": x, "Y": y, "Tiles": tiles} for x, y, tiles in chunks],
+    }
 
 
 def baseline_entities() -> list[dict[str, Any]]:
@@ -302,6 +335,14 @@ def body(identifier: str, name: str, x: float, body_type: str = "Static", collid
          parent: str | None = None, **rigid_body: Any) -> dict[str, Any]:
     components: dict[str, Any] = {"Transform": transform(x, 0, -20), "RigidBody": {"Type": body_type, **rigid_body}}
     components.update(collider or {"BoxCollider": {"HalfExtents": [0.5, 0.5, 0.5]}})
+    return entity(identifier, name, components, parent)
+
+
+def body_2d(identifier: str, name: str, x: float, body_type: str = "Static", collider: dict[str, Any] | None = None,
+            parent: str | None = None, **rigid_body: Any) -> dict[str, Any]:
+    """body() in the 2D world: a RigidBody2D with a 2D collider (a unit BoxCollider2D by default)."""
+    components: dict[str, Any] = {"Transform": transform(x, 0, -20), "RigidBody2D": {"Type": body_type, **rigid_body}}
+    components.update(collider or {"BoxCollider2D": {"HalfExtents": [0.5, 0.5]}})
     return entity(identifier, name, components, parent)
 
 
@@ -600,6 +641,116 @@ return Script.Define("Jumper", Jumper)
     item.project["Export"]["PruneUnreferenced"] = True
     item.add_script("Project/Assets/Scripts/Loader.luau", "5c41000000000006", COMPUTED_LOADER)
 
+    # M21 (Docs/Decisions/0032-m21-contract.md decision 12): a sprite in a sorting layer SortingLayers.Layers does not
+    # declare, beside a tilemap renderer in another (decision 30), and one whose Frame the sheet lacks.
+    item = fixture("SPRITE_UNKNOWN_SORTING_LAYER")
+    item.entities.append(entity("e000000000000003", "Sprite", {
+        "Transform": transform(), "SpriteRenderer": {"SortingLayer": "Sky"}}))
+    item.entities.append(entity("e000000000000004", "Tiles", {
+        "Transform": transform(), "TilemapRenderer": {"SortingLayer": "Ground"}}))
+
+    item = fixture("SPRITE_FRAME_OUT_OF_RANGE")
+    item.add_json("Project/Assets/Sprites/Hero.spritesheet", sprite_sheet([("Idle", 0, 0)], [], 16))
+    item.add_json("Project/Assets/Sprites/Hero.spritesheet.meta",
+                  meta("3a7e000000000009", "SpriteSheet", "SpriteSheet"))
+    item.entities.append(entity("e000000000000003", "Sprite", {
+        "Transform": transform(), "SpriteRenderer": {"Sheet": "3a7e000000000009", "Frame": 1}}))
+
+    # M21 (Docs/Decisions/0032-m21-contract.md decision 12): a SpriteAnimator naming a clip its sheet lacks.
+    item = fixture("SPRITE_UNKNOWN_CLIP")
+    item.add_json("Project/Assets/Sprites/Hero.spritesheet", sprite_sheet([("Idle", 0, 0)], [("Idle", [(0, 4)])]))
+    item.add_json("Project/Assets/Sprites/Hero.spritesheet.meta",
+                  meta("3a7e000000000009", "SpriteSheet", "SpriteSheet"))
+    item.entities.append(entity("e000000000000003", "Hero", {
+        "Transform": transform(), "SpriteRenderer": {"Sheet": "3a7e000000000009"}, "SpriteAnimator": {"Clip": "Run"}}))
+
+    # M21 (Docs/Decisions/0032-m21-contract.md decision 30): a tilemap whose second palette entry names a frame its
+    # one-frame sheet lacks.
+    item = fixture("TILEMAP_FRAME_OUT_OF_RANGE")
+    item.add_json("Project/Assets/Sprites/Tiles.spritesheet", sprite_sheet([("Ground", 0, 0)], []))
+    item.add_json("Project/Assets/Sprites/Tiles.spritesheet.meta",
+                  meta("3a7e00000000000a", "SpriteSheet", "SpriteSheet"))
+    item.add_json("Project/Assets/Tilemaps/Level.tilemap",
+                  tilemap([("3a7e00000000000a", 0, True), ("3a7e00000000000a", 3, False)], [(0, 0, [1]), (1, 0, [2])]))
+    item.add_json("Project/Assets/Tilemaps/Level.tilemap.meta", meta("7113000000000001", "Tilemap", "Tilemap"))
+
+    # M21's milestone review (Docs/Decisions/0032-m21-contract.md): a sheet of the 4 x 4 Grey.png whose second
+    # frame, 4 x 4 texels at (2, 2), extends past it, reported on the sheet, and a tilemap whose second palette entry
+    # names that frame, reported on the tilemap; the first frame and entry lie inside the texture.
+    item = fixture("SPRITE_FRAME_OUTSIDE_TEXTURE")
+    item.copy_asset("Textures/Grey.png", "Project/Assets/Textures/Grey.png")
+    item.add_json("Project/Assets/Textures/Grey.png.meta",
+                  meta("3a7e00000000000b", "Texture", "Texture", TEXTURE_SETTINGS))
+    item.add_json("Project/Assets/Sprites/Tiles.spritesheet",
+                  sprite_sheet([("Inside", 0, 0), ("Past", 2, 2)], [], 4, "3a7e00000000000b"))
+    item.add_json("Project/Assets/Sprites/Tiles.spritesheet.meta",
+                  meta("3a7e00000000000c", "SpriteSheet", "SpriteSheet"))
+    item.add_json("Project/Assets/Tilemaps/Level.tilemap",
+                  tilemap([("3a7e00000000000c", 0, True), ("3a7e00000000000c", 1, False)], [(0, 0, [1]), (1, 0, [2])]))
+    item.add_json("Project/Assets/Tilemaps/Level.tilemap.meta", meta("7113000000000001", "Tilemap", "Tilemap"))
+
+    # M21 (Docs/Decisions/0032-m21-contract.md decision 23; W21.2's review): a tilemap's palette sheets are checked as
+    # a sprite sheet's texture is, each in a second fixture of its code named <CODE>.Tilemap: a palette entry naming a
+    # sheet that is not registered, and one naming a registered asset of another type. The null entry before it is no
+    # issue.
+    item = fixture("ASSET_MISSING.Tilemap", ["ASSET_MISSING"])
+    item.add_json("Project/Assets/Tilemaps/Level.tilemap",
+                  tilemap([(None, 0, True), ("00000000abcdef02", 0, True)], [(0, 0, [1]), (1, 0, [2])]))
+    item.add_json("Project/Assets/Tilemaps/Level.tilemap.meta", meta("7113000000000001", "Tilemap", "Tilemap"))
+
+    item = fixture("ASSET_TYPE_MISMATCH.Tilemap", ["ASSET_TYPE_MISMATCH"])
+    item.copy_asset("Materials/Red.material", "Project/Assets/Materials/Red.material")
+    item.add_json("Project/Assets/Materials/Red.material.meta", meta("3a7e000000000001", "Material", "Material"))
+    item.add_json("Project/Assets/Tilemaps/Level.tilemap",
+                  tilemap([(None, 0, True), ("3a7e000000000001", 0, True)], [(0, 0, [1]), (1, 0, [2])]))
+    item.add_json("Project/Assets/Tilemaps/Level.tilemap.meta", meta("7113000000000001", "Tilemap", "Tilemap"))
+
+    # M21 (Docs/Decisions/0032-m21-contract.md decision 12). An entity with 2D and 3D physics components stays in the 3D
+    # world; its 2D components make no body.
+    item = fixture("PHYSICS2D_MIXED_WORLDS")
+    item.entities.append(entity("e000000000000003", "Mixed", {
+        "Transform": transform(0, 0, -20), "BoxCollider": {"HalfExtents": [0.5, 0.5, 0.5]},
+        "RigidBody2D": {"Type": "Static"}, "CircleCollider2D": {"Radius": 0.5}}))
+
+    # A 2D body rotated 30 degrees about X: it takes its rotation about Z (none) and is reported.
+    item = fixture("PHYSICS2D_OFF_PLANE")
+    tilted = entity("e000000000000003", "Tilted", {
+        "Transform": transform(0, 0, -20), "RigidBody2D": {"Type": "Static"},
+        "BoxCollider2D": {"HalfExtents": [0.5, 0.5]}})
+    tilted["Components"]["Transform"]["Rotation"] = [0.25881904, 0, 0, 0.9659258]
+    item.entities.append(tilted)
+
+    # M21 (Docs/Decisions/0032-m21-contract.md decision 12; W21.1's review): the rules the 2D world shares with the 3D
+    # one, reported under the 3D codes for the 2D components, each in a second fixture of its code named <CODE>.2D.
+    item = fixture("PHYSICS_UNKNOWN_LAYER.2D", ["PHYSICS_UNKNOWN_LAYER"])
+    item.entities.append(body_2d("e000000000000003", "Lost", 0, "Static", None, Layer="Nowhere"))
+
+    item = fixture("PHYSICS_MIXED_TRIGGER.2D", ["PHYSICS_MIXED_TRIGGER"])
+    item.entities.append(body_2d("e000000000000003", "Mixed", 0, "Static",
+                                 {"BoxCollider2D": {"IsTrigger": True}, "CircleCollider2D": {"IsTrigger": False}}))
+
+    item = fixture("PHYSICS_DYNAMIC_TRIGGER.2D", ["PHYSICS_DYNAMIC_TRIGGER"])
+    item.entities.append(body_2d("e000000000000003", "Sensor", 0, "Dynamic", {"BoxCollider2D": {"IsTrigger": True}}))
+
+    # Points on one line have no convex hull.
+    item = fixture("PHYSICS_INVALID_SHAPE.2D", ["PHYSICS_INVALID_SHAPE"])
+    item.entities.append(body_2d("e000000000000003", "Sliver", 0, "Static",
+                                 {"PolygonCollider2D": {"Points": [[-1, 0], [0, 0], [1, 0]]}}))
+
+    item = fixture("PHYSICS_NONUNIFORM_SCALE.2D", ["PHYSICS_NONUNIFORM_SCALE"])
+    stretched = body_2d("e000000000000003", "Egg", 0, "Static", {"CircleCollider2D": {"Radius": 0.5}})
+    stretched["Components"]["Transform"]["Scale"] = [2, 1, 1]
+    item.entities.append(stretched)
+
+    item = fixture("PHYSICS_DYNAMIC_UNDER_MOVING_PARENT.2D", ["PHYSICS_DYNAMIC_UNDER_MOVING_PARENT"])
+    item.entities.append(body_2d("e000000000000003", "Platform", 0, "Kinematic"))
+    item.entities.append(body_2d("e000000000000004", "Crate", 0, "Dynamic", parent="e000000000000003"))
+    item.entities[-1]["Components"]["Transform"]["Translation"] = [0, 2, 0]
+
+    item = fixture("PHYSICS_LIMIT_EXCEEDED.2D", ["PHYSICS_LIMIT_EXCEEDED"])
+    item.entities.append(body_2d("e000000000000003", "Pebble", 0, "Dynamic", {"CircleCollider2D": {"Radius": 0.25}}))
+    item.expand.append({"Path": MAIN_SCENE, "Entity": "e000000000000003", "Count": 16385})
+
     # M22 (Docs/Decisions/0033-m22-contract.md decision 13). A UI element whose parent holds no UiCanvas: layout never
     # reaches it.
     item = fixture("UI_ELEMENT_WITHOUT_CANVAS")
@@ -636,24 +787,25 @@ return Script.Define("Jumper", Jumper)
 
 README = """# Validation fixtures
 
-Generated by `Tests/Data/Generate/MakeValidationFixtures.py`; do not edit by hand (ADR 0022 decision 11). Each \
-directory is
-named after the `project.validate` code it triggers, or `Clean`, the baseline that reports nothing. `Project/` is a \
-complete
-mini project; `Expected.json` lists every code it reports (`Codes`, sorted), whether the validator test components are
-registered (`TestComponents`), the entities the test repeats into a scene (`Expand`) and the deliberately malformed \
-files
-(`NonCanonical`). The test "Validation: each fixture reports exactly its expected codes" copies each project into a
-temporary directory, opens it, loads its assets (scenes and scripts excepted: the validator and the script service check
-those) and runs `ProjectValidator::Validate` with the project scope; coverage gate 6
-requires a fixture for every code.
+Generated by `Tests/Data/Generate/MakeValidationFixtures.py`; do not edit by hand (ADR 0022 decision 11). Each
+directory is named after the `project.validate` code it triggers, or `<CODE>.<Variant>` for a further fixture of that
+code (`.2D`: the 2D world's composition, ADR 0032 decision 12; `.Tilemap`: a tilemap's palette sheets, its decision 23),
+or `Clean`, the baseline that reports nothing.
+`Project/` is a complete mini project; `Expected.json` lists every code it reports (`Codes`, sorted), whether the
+validator test components are registered (`TestComponents`), the entities the test repeats into a scene (`Expand`)
+and the deliberately malformed files (`NonCanonical`). The test "Validation: each fixture reports exactly its expected
+codes" copies each project into a temporary directory, opens it, loads its assets (scenes and scripts excepted: the
+validator and the script service check those) and runs `ProjectValidator::Validate` with the project scope; coverage
+gate 6 requires a fixture for every code.
 
 - `COMPONENT_MISSING_REQUIREMENT` and `ENTITY_DANGLING_REFERENCE` use the test components `ValidatorTarget` and
   `ValidatorFollower`: every built-in requirement is Transform, which every entity has.
-- `PATH_CASE_MISMATCH` pairs `Grey.png` with `grey.png.meta`; the names differ in more than letter case, so git checks \
-both
-  out everywhere and the scan reports the mismatch on case-sensitive and case-insensitive file systems alike.
-- `PHYSICS_LIMIT_EXCEEDED` (16,385 bodies) and `RENDER_LIGHT_LIMIT_EXCEEDED` (257 lights) are expanded at test time.
+- `PATH_CASE_MISMATCH` pairs `Grey.png` with `grey.png.meta`; the names differ in more than letter case, so git checks
+  both out everywhere and the scan reports the mismatch on case-sensitive and case-insensitive file systems alike.
+- `PHYSICS_LIMIT_EXCEEDED` and `PHYSICS_LIMIT_EXCEEDED.2D` (16,385 bodies) and `RENDER_LIGHT_LIMIT_EXCEEDED` (257
+  lights) are expanded at test time.
+- `ASSET_MISSING.Tilemap` and `ASSET_TYPE_MISMATCH.Tilemap` name a sprite sheet from a tilemap's palette. Sheets have no
+  placeholder, so the asset manager logs nothing for them and only the validator reports them.
 """
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -740,6 +892,12 @@ def observation_files() -> dict[str, bytes]:
         entity("0b5e000000000004", "Probe", {
             "Transform": transform(),
             "Script": {"Scripts": [{"Script": "0b5e0000000000a3", "Fields": {}, "ExecutionOrder": 0}]}}),
+        # SortingLayers.Layers: Front comes first and has the lower OrderInLayer, so only the declared layers draw Back
+        # before it in the session's extraction.
+        entity("0b5e000000000005", "Front", {
+            "Transform": transform(), "SpriteRenderer": {"SortingLayer": "Foreground", "OrderInLayer": 0}}),
+        entity("0b5e000000000006", "Back", {
+            "Transform": transform(), "SpriteRenderer": {"SortingLayer": "Background", "OrderInLayer": 5}}),
     ], seed=7)
     add_json("Assets/Scenes/Main.scene", main)
     add_json("Assets/Scenes/Main.scene.meta", meta("0b5e0000000000a1", "Scene", "Scene"))
@@ -784,7 +942,8 @@ def outputs() -> dict[Path, dict[str, bytes]]:
         if item.name in names:
             raise ValueError(f"fixture {item.name} is defined twice")
         names.add(item.name)
-        if item.name != "Clean" and item.name not in item.codes:
+        # <CODE>.<Variant> is a further fixture of <CODE>.
+        if item.name != "Clean" and item.name.split(".", 1)[0] not in item.codes:
             raise ValueError(f"fixture {item.name} must report its own code")
         validation.update(item.outputs())
     return {VALIDATION: validation, OBSERVATION: observation_files()}

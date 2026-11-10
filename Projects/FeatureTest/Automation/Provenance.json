@@ -19,70 +19,6 @@
 			"TranscriptLine": null
 		},
 		{
-			"Path": "Assets/Fonts/GoldenUiScripts/Inter-Regular.otf",
-			"XXH64": "38e610539efec6b5",
-			"Method": "asset.import",
-			"RequestId": 4,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Fonts/GoldenUiScripts/Inter-Regular.otf.meta",
-			"XXH64": "697115431c2235c0",
-			"Method": "asset.import",
-			"RequestId": 4,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Fonts/GoldenUiScripts/NotoSansArabic-Regular.ttf",
-			"XXH64": "6e5d0a216abd24ba",
-			"Method": "asset.import",
-			"RequestId": 1,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Fonts/GoldenUiScripts/NotoSansArabic-Regular.ttf.meta",
-			"XXH64": "98af890d612be3dc",
-			"Method": "asset.import",
-			"RequestId": 1,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Fonts/GoldenUiScripts/NotoSansHebrew-Regular.ttf",
-			"XXH64": "93e220f9d5cf71c7",
-			"Method": "asset.import",
-			"RequestId": 2,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Fonts/GoldenUiScripts/NotoSansHebrew-Regular.ttf.meta",
-			"XXH64": "110874f9cab10c7e",
-			"Method": "asset.import",
-			"RequestId": 2,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Fonts/GoldenUiScripts/NotoSansJP-Regular.otf",
-			"XXH64": "502ba55328063af0",
-			"Method": "asset.import",
-			"RequestId": 3,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Fonts/GoldenUiScripts/NotoSansJP-Regular.otf.meta",
-			"XXH64": "832f67d4851fba5b",
-			"Method": "asset.import",
-			"RequestId": 3,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
 			"Path": "Assets/Formats/Audio/Blip.sfx",
 			"XXH64": "2593dcec2af50301",
 			"Method": "asset.create",
@@ -204,7 +140,7 @@
 		},
 		{
 			"Path": "Assets/Formats/Fonts/Glyphs.ttf.meta",
-			"XXH64": "3cc7d97e6308f2a5",
+			"XXH64": "b9366683d1f7b4fb",
 			"Method": "asset.import",
 			"RequestId": 10,
 			"Client": "batch",
@@ -220,7 +156,7 @@
 		},
 		{
 			"Path": "Assets/Formats/Fonts/Inter-Regular.otf.meta",
-			"XXH64": "18a88fad899eb1f4",
+			"XXH64": "5a0586840534a3d3",
 			"Method": "asset.import",
 			"RequestId": 11,
 			"Client": "batch",
@@ -431,22 +367,6 @@
 			"XXH64": "2a7feee1d6ad0621",
 			"Method": "asset.import",
 			"RequestId": 5,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Localization/Menu.stringtable",
-			"XXH64": "7845d9d7a60e3df0",
-			"Method": "asset.create",
-			"RequestId": 1,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Localization/Menu.stringtable.meta",
-			"XXH64": "a4f17cbd3db878c3",
-			"Method": "asset.create",
-			"RequestId": 1,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -1667,70 +1587,6 @@
 			"TranscriptLine": null
 		},
 		{
-			"Path": "Assets/Scenes/Components/Ui.scene",
-			"XXH64": "157460a7366aa973",
-			"Method": "scene.save",
-			"RequestId": 4,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Scenes/Components/Ui.scene.meta",
-			"XXH64": "83ed4174058c7e6a",
-			"Method": "edit.batch",
-			"RequestId": 3,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Scenes/Components/UiTextInput.scene",
-			"XXH64": "a899be7f4058603b",
-			"Method": "scene.save",
-			"RequestId": 8,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Scenes/Components/UiTextInput.scene.meta",
-			"XXH64": "fe697de3ab4ce378",
-			"Method": "edit.batch",
-			"RequestId": 6,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Scenes/Components/UiWidgets.scene",
-			"XXH64": "1e94969b7743d8fb",
-			"Method": "scene.save",
-			"RequestId": 8,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Scenes/Components/UiWidgets.scene.meta",
-			"XXH64": "f32dbda30b27a991",
-			"Method": "edit.batch",
-			"RequestId": 6,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Scenes/Components/UiWorld.scene",
-			"XXH64": "4b1b748f9cfa5bd5",
-			"Method": "scene.save",
-			"RequestId": 10,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Scenes/Components/UiWorld.scene.meta",
-			"XXH64": "9bb0b957271d837a",
-			"Method": "edit.batch",
-			"RequestId": 8,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
 			"Path": "Assets/Scenes/Determinism.scene",
 			"XXH64": "bc29650306d34633",
 			"Method": "scene.save",
@@ -2051,102 +1907,6 @@
 			"TranscriptLine": null
 		},
 		{
-			"Path": "Assets/Scenes/GoldenUi/Ui.scene",
-			"XXH64": "019a5a8bba0edc45",
-			"Method": "scene.save",
-			"RequestId": 5,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Scenes/GoldenUi/Ui.scene.meta",
-			"XXH64": "81ac38771509bdf4",
-			"Method": "edit.batch",
-			"RequestId": 4,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Scenes/GoldenUiScripts/UiArabic.scene",
-			"XXH64": "58000e34b24b34ea",
-			"Method": "scene.save",
-			"RequestId": 10,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Scenes/GoldenUiScripts/UiArabic.scene.meta",
-			"XXH64": "19c6296a33911631",
-			"Method": "edit.batch",
-			"RequestId": 9,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Scenes/GoldenUiScripts/UiCjk.scene",
-			"XXH64": "d8a5efcb769a2e3f",
-			"Method": "scene.save",
-			"RequestId": 7,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Scenes/GoldenUiScripts/UiCjk.scene.meta",
-			"XXH64": "6ddaab7a5301c4da",
-			"Method": "edit.batch",
-			"RequestId": 6,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Scenes/GoldenUiScripts/UiHebrew.scene",
-			"XXH64": "ccbaae0f7696187a",
-			"Method": "scene.save",
-			"RequestId": 13,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Scenes/GoldenUiScripts/UiHebrew.scene.meta",
-			"XXH64": "d185a81e1e98bc1a",
-			"Method": "edit.batch",
-			"RequestId": 12,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Scenes/GoldenUiWidgets/UiWidgets.scene",
-			"XXH64": "010dfad0fb9a6104",
-			"Method": "scene.save",
-			"RequestId": 4,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Scenes/GoldenUiWidgets/UiWidgets.scene.meta",
-			"XXH64": "8e7ca1d8c6d024a7",
-			"Method": "project.refreshAssets",
-			"RequestId": 5,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Scenes/GoldenUiWorld/UiWorld.scene",
-			"XXH64": "aa5b1fc7beac7299",
-			"Method": "scene.save",
-			"RequestId": 3,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Scenes/GoldenUiWorld/UiWorld.scene.meta",
-			"XXH64": "24a541dac72d8aca",
-			"Method": "project.refreshAssets",
-			"RequestId": 4,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
 			"Path": "Assets/Scenes/Input.scene",
 			"XXH64": "dfb167c8e167aca7",
 			"Method": "scene.save",
@@ -2159,6 +1919,38 @@
 			"XXH64": "108fe27d542d8792",
 			"Method": "edit.batch",
 			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Lights2D.scene",
+			"XXH64": "14a4f24310ad8b61",
+			"Method": "scene.save",
+			"RequestId": 8,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Lights2D.scene.meta",
+			"XXH64": "d5ef4cf2b7d1f9a9",
+			"Method": "edit.batch",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Lights2DGolden/Lights2DPixelArt.scene",
+			"XXH64": "39355d55a5ff6912",
+			"Method": "scene.save",
+			"RequestId": 8,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Lights2DGolden/Lights2DPixelArt.scene.meta",
+			"XXH64": "c4eb3b6dee20c88f",
+			"Method": "edit.batch",
+			"RequestId": 7,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -2239,6 +2031,22 @@
 			"XXH64": "3162d96c6f8176fc",
 			"Method": "edit.batch",
 			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Physics2D.scene",
+			"XXH64": "dad106b0c28ad655",
+			"Method": "scene.save",
+			"RequestId": 14,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Physics2D.scene.meta",
+			"XXH64": "9df216933c7fb0db",
+			"Method": "edit.batch",
+			"RequestId": 13,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -2335,6 +2143,54 @@
 			"XXH64": "449fe4e7bccef09b",
 			"Method": "edit.batch",
 			"RequestId": 44,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Sprites2D.scene",
+			"XXH64": "22615fc725d49d44",
+			"Method": "scene.save",
+			"RequestId": 14,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Sprites2D.scene.meta",
+			"XXH64": "f0a030138cb232bb",
+			"Method": "edit.batch",
+			"RequestId": 13,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Sprites2DGolden/Sprites2DPixelArt.scene",
+			"XXH64": "ce7d04a71a7032cf",
+			"Method": "scene.save",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Sprites2DGolden/Sprites2DPixelArt.scene.meta",
+			"XXH64": "1b675690c8572faf",
+			"Method": "edit.batch",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Tilemaps.scene",
+			"XXH64": "5f207813b5e90139",
+			"Method": "scene.save",
+			"RequestId": 16,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Tilemaps.scene.meta",
+			"XXH64": "aaf6d7cd4b3405da",
+			"Method": "edit.batch",
+			"RequestId": 15,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -2579,6 +2435,38 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scripts/Physics2D/Contacts2D.luau",
+			"XXH64": "02b59f4e3aa3b72c",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Physics2D/Contacts2D.luau.meta",
+			"XXH64": "cbb9d9cbf76997ad",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Physics2D/Pusher.luau",
+			"XXH64": "be5f183f2104b436",
+			"Method": "script.write",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Physics2D/Pusher.luau.meta",
+			"XXH64": "199c5911640100af",
+			"Method": "script.write",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scripts/PhysicsSemantics/ColliderProbe.luau",
 			"XXH64": "04db9f3f26d81ab5",
 			"Method": "script.write",
@@ -2707,6 +2595,70 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scripts/Sprites2D/Strider.luau",
+			"XXH64": "34cff8e588ff5398",
+			"Method": "script.write",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Sprites2D/Strider.luau.meta",
+			"XXH64": "194b194dbc9afcc2",
+			"Method": "script.write",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Tilemaps/GoalZone.luau",
+			"XXH64": "b450d37369b3fe1b",
+			"Method": "script.write",
+			"RequestId": 8,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Tilemaps/GoalZone.luau.meta",
+			"XXH64": "9fd9b6f8a1d7ac68",
+			"Method": "script.write",
+			"RequestId": 8,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Tilemaps/LevelProbe.luau",
+			"XXH64": "448837edbd969c0e",
+			"Method": "script.write",
+			"RequestId": 9,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Tilemaps/LevelProbe.luau.meta",
+			"XXH64": "f5cbd253c4fe70b1",
+			"Method": "script.write",
+			"RequestId": 9,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Tilemaps/Roller.luau",
+			"XXH64": "8b1e8f7ae1e971f7",
+			"Method": "script.write",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Tilemaps/Roller.luau.meta",
+			"XXH64": "ae5715266d928028",
+			"Method": "script.write",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scripts/Timing/Mover.luau",
 			"XXH64": "e25d2583270402ab",
 			"Method": "script.write",
@@ -2739,66 +2691,18 @@
 			"TranscriptLine": null
 		},
 		{
-			"Path": "Assets/Scripts/UiTextInput/TextRecorder.luau",
-			"XXH64": "ada63f020663367c",
-			"Method": "script.write",
-			"RequestId": 1,
+			"Path": "Assets/Sprites/Sprites2D/Walker.spritesheet",
+			"XXH64": "157a3196a3608b27",
+			"Method": "asset.create",
+			"RequestId": 4,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
-			"Path": "Assets/Scripts/UiTextInput/TextRecorder.luau.meta",
-			"XXH64": "cf58108a68c2ed61",
-			"Method": "script.write",
-			"RequestId": 1,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Scripts/UiWidgets/UiRecorder.luau",
-			"XXH64": "7c214077cd2e8fa7",
-			"Method": "script.write",
-			"RequestId": 1,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Scripts/UiWidgets/UiRecorder.luau.meta",
-			"XXH64": "5b35ccef051c82d3",
-			"Method": "script.write",
-			"RequestId": 1,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Scripts/UiWorld/WorldPointer.luau",
-			"XXH64": "f4bf2b00c114bcca",
-			"Method": "script.write",
-			"RequestId": 2,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Scripts/UiWorld/WorldPointer.luau.meta",
-			"XXH64": "6476eae85556699e",
-			"Method": "script.write",
-			"RequestId": 2,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Scripts/UiWorld/WorldRecorder.luau",
-			"XXH64": "be8b11ab59c4d185",
-			"Method": "script.write",
-			"RequestId": 1,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Scripts/UiWorld/WorldRecorder.luau.meta",
-			"XXH64": "fe7dcca0326b5372",
-			"Method": "script.write",
-			"RequestId": 1,
+			"Path": "Assets/Sprites/Sprites2D/Walker.spritesheet.meta",
+			"XXH64": "2b628cfe29715aaa",
+			"Method": "asset.create",
+			"RequestId": 4,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -2915,6 +2819,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Api/BoxCollider2D.test.luau",
+			"XXH64": "bf207db78c2f9157",
+			"Method": "script.write",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/BoxCollider2D.test.luau.meta",
+			"XXH64": "cba8bc5e295b39a6",
+			"Method": "script.write",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Api/Camera.test.luau",
 			"XXH64": "e214c2a91f243471",
 			"Method": "script.write",
@@ -2959,6 +2879,22 @@
 			"XXH64": "84e2e25b16f2c77b",
 			"Method": "script.write",
 			"RequestId": 12,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/CircleCollider2D.test.luau",
+			"XXH64": "8c5e3eb49c1b1cc0",
+			"Method": "script.write",
+			"RequestId": 8,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/CircleCollider2D.test.luau.meta",
+			"XXH64": "e9c0ce9fd4171811",
+			"Method": "script.write",
+			"RequestId": 8,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -3091,6 +3027,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Api/Light2D.test.luau",
+			"XXH64": "497cd12bcdc0c7e6",
+			"Method": "script.write",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/Light2D.test.luau.meta",
+			"XXH64": "f950f9bc0b594a8b",
+			"Method": "script.write",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Api/Log.test.luau",
 			"XXH64": "aaa1c14d6fe7ec63",
 			"Method": "script.write",
@@ -3171,6 +3123,38 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Api/Physics2D.test.luau",
+			"XXH64": "f79aa09ec33fe969",
+			"Method": "script.write",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/Physics2D.test.luau.meta",
+			"XXH64": "8745394a85dd857e",
+			"Method": "script.write",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/PixelPerfectCamera.test.luau",
+			"XXH64": "3f520933be1a63de",
+			"Method": "script.write",
+			"RequestId": 9,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/PixelPerfectCamera.test.luau.meta",
+			"XXH64": "3502d3378ffd0fd6",
+			"Method": "script.write",
+			"RequestId": 9,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Api/PointLight.test.luau",
 			"XXH64": "11762977da6a3d6e",
 			"Method": "script.write",
@@ -3183,6 +3167,22 @@
 			"XXH64": "d8a4e8c62a7dbe04",
 			"Method": "script.write",
 			"RequestId": 25,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/PolygonCollider2D.test.luau",
+			"XXH64": "9b17259585be6bd9",
+			"Method": "script.write",
+			"RequestId": 9,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/PolygonCollider2D.test.luau.meta",
+			"XXH64": "968c3a0ad199eb25",
+			"Method": "script.write",
+			"RequestId": 9,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -3267,6 +3267,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Api/RigidBody2D.test.luau",
+			"XXH64": "f3619d3d808225d9",
+			"Method": "script.write",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/RigidBody2D.test.luau.meta",
+			"XXH64": "cca7e114f517cbe9",
+			"Method": "script.write",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Api/Scene.test.luau",
 			"XXH64": "2aaf66e2cd0e776f",
 			"Method": "script.write",
@@ -3327,6 +3343,38 @@
 			"XXH64": "fed3f7e06f1b847a",
 			"Method": "script.write",
 			"RequestId": 34,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/SpriteAnimator.test.luau",
+			"XXH64": "f1be1b449f0b88f8",
+			"Method": "script.write",
+			"RequestId": 8,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/SpriteAnimator.test.luau.meta",
+			"XXH64": "72d02577ef1e8e5a",
+			"Method": "script.write",
+			"RequestId": 8,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/SpriteRenderer.test.luau",
+			"XXH64": "ef9f200993ff202c",
+			"Method": "script.write",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/SpriteRenderer.test.luau.meta",
+			"XXH64": "de2f7f4971d1541a",
+			"Method": "script.write",
+			"RequestId": 7,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -3395,6 +3443,38 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Api/TilemapCollider.test.luau",
+			"XXH64": "10f8b7af3569f92c",
+			"Method": "script.write",
+			"RequestId": 12,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/TilemapCollider.test.luau.meta",
+			"XXH64": "036e6f54e0752092",
+			"Method": "script.write",
+			"RequestId": 12,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/TilemapRenderer.test.luau",
+			"XXH64": "2743d951c1cfbaff",
+			"Method": "script.write",
+			"RequestId": 11,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/TilemapRenderer.test.luau.meta",
+			"XXH64": "63e7aa2d4b80630f",
+			"Method": "script.write",
+			"RequestId": 11,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Api/Time.test.luau",
 			"XXH64": "98af0d077bd2008e",
 			"Method": "script.write",
@@ -3423,70 +3503,6 @@
 			"XXH64": "e09435a2b72bee6c",
 			"Method": "script.write",
 			"RequestId": 39,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Tests/Api/Ui.test.luau",
-			"XXH64": "2067c12628979121",
-			"Method": "script.write",
-			"RequestId": 5,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Tests/Api/Ui.test.luau.meta",
-			"XXH64": "2f1792cb2f7df9a1",
-			"Method": "script.write",
-			"RequestId": 5,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Tests/Api/UiTextInput.test.luau",
-			"XXH64": "f1457ffbdc300221",
-			"Method": "script.write",
-			"RequestId": 2,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Tests/Api/UiTextInput.test.luau.meta",
-			"XXH64": "2830e302f0149d32",
-			"Method": "script.write",
-			"RequestId": 2,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Tests/Api/UiWidgets.test.luau",
-			"XXH64": "e4c223c4fcc9ea57",
-			"Method": "script.write",
-			"RequestId": 2,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Tests/Api/UiWidgets.test.luau.meta",
-			"XXH64": "d6236f9c58a91a1c",
-			"Method": "script.write",
-			"RequestId": 2,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Tests/Api/UiWorld.test.luau",
-			"XXH64": "d96d54f351fc8e5f",
-			"Method": "script.write",
-			"RequestId": 3,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Tests/Api/UiWorld.test.luau.meta",
-			"XXH64": "9d7b43a40762ea94",
-			"Method": "script.write",
-			"RequestId": 3,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -3635,18 +3651,18 @@
 			"TranscriptLine": null
 		},
 		{
-			"Path": "Assets/Tests/Localization/Localization.test.luau",
-			"XXH64": "cc143b795c4da836",
+			"Path": "Assets/Tests/Lights2D/Lights2D.test.luau",
+			"XXH64": "b4095a0a18d8639f",
 			"Method": "script.write",
-			"RequestId": 2,
+			"RequestId": 3,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
-			"Path": "Assets/Tests/Localization/Localization.test.luau.meta",
-			"XXH64": "49b80b53f39b9699",
+			"Path": "Assets/Tests/Lights2D/Lights2D.test.luau.meta",
+			"XXH64": "745fc538da54e85e",
 			"Method": "script.write",
-			"RequestId": 2,
+			"RequestId": 3,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -3747,6 +3763,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Physics2D/Physics2D.test.luau",
+			"XXH64": "d89fd30136eb604a",
+			"Method": "script.write",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Physics2D/Physics2D.test.luau.meta",
+			"XXH64": "1c98dd190996ccf0",
+			"Method": "script.write",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/PhysicsSemantics/PhysicsSemantics.test.luau",
 			"XXH64": "071682d469ccaf75",
 			"Method": "script.write",
@@ -3795,34 +3827,34 @@
 			"TranscriptLine": null
 		},
 		{
-			"Path": "Assets/Tests/Record/TextInput.test.luau",
-			"XXH64": "9418a247dfab3e3b",
+			"Path": "Assets/Tests/Record/Physics2D.test.luau",
+			"XXH64": "92a8c902b7ccf500",
 			"Method": "script.write",
-			"RequestId": 1,
+			"RequestId": 10,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
-			"Path": "Assets/Tests/Record/TextInput.test.luau.meta",
-			"XXH64": "4dc31bf9862f0fef",
+			"Path": "Assets/Tests/Record/Physics2D.test.luau.meta",
+			"XXH64": "98b576eb8e066b3a",
 			"Method": "script.write",
-			"RequestId": 1,
+			"RequestId": 10,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
-			"Path": "Assets/Tests/Record/UiWorld.test.luau",
-			"XXH64": "32054e7a398afb02",
+			"Path": "Assets/Tests/Record/Sprites2D.test.luau",
+			"XXH64": "218869ab2740dccf",
 			"Method": "script.write",
-			"RequestId": 5,
+			"RequestId": 10,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
-			"Path": "Assets/Tests/Record/UiWorld.test.luau.meta",
-			"XXH64": "79d64a35a6bf303a",
+			"Path": "Assets/Tests/Record/Sprites2D.test.luau.meta",
+			"XXH64": "be9c548a0673090c",
 			"Method": "script.write",
-			"RequestId": 5,
+			"RequestId": 10,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -3875,6 +3907,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Replays/Physics2D.replay",
+			"XXH64": "869fc40fa163c70a",
+			"Method": "input.record",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/Physics2D.replay.meta",
+			"XXH64": "c1a5d8dff2bd80ef",
+			"Method": "input.record",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Replays/PhysicsSemantics.replay",
 			"XXH64": "54cbde8469a02228",
 			"Method": "input.record",
@@ -3891,50 +3939,34 @@
 			"TranscriptLine": null
 		},
 		{
-			"Path": "Assets/Tests/Replays/TextInput.replay",
-			"XXH64": "8ce9bc4660bd550d",
-			"Method": "test.run",
-			"RequestId": 4,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Tests/Replays/TextInput.replay.meta",
-			"XXH64": "149eaf4de881daaf",
-			"Method": "test.run",
-			"RequestId": 4,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Tests/Replays/Ui.replay",
-			"XXH64": "79bd3f7d5fb19afb",
+			"Path": "Assets/Tests/Replays/Sprites2D.replay",
+			"XXH64": "98e38c869e6d63df",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
-			"Path": "Assets/Tests/Replays/Ui.replay.meta",
-			"XXH64": "21b6f63297011d54",
+			"Path": "Assets/Tests/Replays/Sprites2D.replay.meta",
+			"XXH64": "8d0b8e038ee22c96",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
-			"Path": "Assets/Tests/Replays/UiWorld.replay",
-			"XXH64": "8a49c49d9ba3641a",
-			"Method": "test.run",
-			"RequestId": 13,
+			"Path": "Assets/Tests/Replays/Tilemap.replay",
+			"XXH64": "2ecb7e57ab22d01d",
+			"Method": "input.record",
+			"RequestId": 3,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
-			"Path": "Assets/Tests/Replays/UiWorld.replay.meta",
-			"XXH64": "cab47d7ba4a804d7",
-			"Method": "test.run",
-			"RequestId": 13,
+			"Path": "Assets/Tests/Replays/Tilemap.replay.meta",
+			"XXH64": "e224ea1e9f2cb414",
+			"Method": "input.record",
+			"RequestId": 3,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -3955,6 +3987,38 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Sprites2D/Sprites2D.test.luau",
+			"XXH64": "2c1c6ea82f8bf5c2",
+			"Method": "script.write",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Sprites2D/Sprites2D.test.luau.meta",
+			"XXH64": "ab8cdc21fc19a9bf",
+			"Method": "script.write",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Tilemaps/Tilemaps.test.luau",
+			"XXH64": "26e6a5e8f9db5da0",
+			"Method": "script.write",
+			"RequestId": 10,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Tilemaps/Tilemaps.test.luau.meta",
+			"XXH64": "d5aae4a9ea993c56",
+			"Method": "script.write",
+			"RequestId": 10,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Timing/Timing.test.luau",
 			"XXH64": "69ad5c16a941d4d7",
 			"Method": "script.write",
@@ -3967,54 +4031,6 @@
 			"XXH64": "37b139a8880493d9",
 			"Method": "script.write",
 			"RequestId": 3,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Tests/UiTextInput/UiTextInput.test.luau",
-			"XXH64": "1ade5ded927ec717",
-			"Method": "script.write",
-			"RequestId": 3,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Tests/UiTextInput/UiTextInput.test.luau.meta",
-			"XXH64": "d8e54a3cb4b5a0be",
-			"Method": "script.write",
-			"RequestId": 3,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Tests/UiWidgets/UiWidgets.test.luau",
-			"XXH64": "c0d300b5bf326261",
-			"Method": "script.write",
-			"RequestId": 3,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Tests/UiWidgets/UiWidgets.test.luau.meta",
-			"XXH64": "deb045fb5daf0fe4",
-			"Method": "script.write",
-			"RequestId": 3,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Tests/UiWorld/UiWorld.test.luau",
-			"XXH64": "63627b4739e82203",
-			"Method": "script.write",
-			"RequestId": 4,
-			"Client": "batch",
-			"TranscriptLine": null
-		},
-		{
-			"Path": "Assets/Tests/UiWorld/UiWorld.test.luau.meta",
-			"XXH64": "53d060d8560a1797",
-			"Method": "script.write",
-			"RequestId": 4,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -4035,7 +4051,23 @@
 			"TranscriptLine": null
 		},
 		{
-			"Path": "Assets/Textures/GoldenUi/Rgba.png",
+			"Path": "Assets/Textures/Lights2D/Normal.png",
+			"XXH64": "2a3c5de3ed3788f6",
+			"Method": "asset.import",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Textures/Lights2D/Normal.png.meta",
+			"XXH64": "6d8ee458447cbbed",
+			"Method": "asset.import",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Textures/Lights2D/Rgba.png",
 			"XXH64": "2a4bed42f9a31ba0",
 			"Method": "asset.import",
 			"RequestId": 1,
@@ -4043,48 +4075,176 @@
 			"TranscriptLine": null
 		},
 		{
-			"Path": "Assets/Textures/GoldenUi/Rgba.png.meta",
-			"XXH64": "62a9b80161545f8e",
+			"Path": "Assets/Textures/Lights2D/Rgba.png.meta",
+			"XXH64": "7a06e38a559f4793",
 			"Method": "asset.import",
 			"RequestId": 1,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
-			"Path": "Assets/Textures/GoldenUi/Ui.spritesheet",
-			"XXH64": "ea997daef390e8d4",
+			"Path": "Assets/Textures/Lights2DGolden/Bevel.spritesheet",
+			"XXH64": "6137f1cbb06e4564",
 			"Method": "asset.create",
 			"RequestId": 2,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
-			"Path": "Assets/Textures/GoldenUi/Ui.spritesheet.meta",
-			"XXH64": "07a0bd198d8beafd",
+			"Path": "Assets/Textures/Lights2DGolden/Bevel.spritesheet.meta",
+			"XXH64": "e27ee5fe2f8796f7",
 			"Method": "asset.create",
 			"RequestId": 2,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
-			"Path": "Assets/Ui/Fonts/Inter-Regular.otf",
-			"XXH64": "38e610539efec6b5",
+			"Path": "Assets/Textures/Lights2DGolden/Floor.tilemap",
+			"XXH64": "f24bb53fd3bef653",
+			"Method": "tilemap.paint",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Textures/Lights2DGolden/Floor.tilemap.meta",
+			"XXH64": "8b8b035fa1ec7985",
+			"Method": "asset.create",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Textures/Lights2DGolden/Normal.png",
+			"XXH64": "2a3c5de3ed3788f6",
 			"Method": "asset.import",
 			"RequestId": 1,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
-			"Path": "Assets/Ui/Fonts/Inter-Regular.otf.meta",
-			"XXH64": "48d9dac09d1ad495",
+			"Path": "Assets/Textures/Lights2DGolden/Normal.png.meta",
+			"XXH64": "5a1eeed8aec89d8f",
 			"Method": "asset.import",
 			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Textures/Sprites2D/Rgba.png",
+			"XXH64": "2a4bed42f9a31ba0",
+			"Method": "asset.import",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Textures/Sprites2D/Rgba.png.meta",
+			"XXH64": "14dc891865df449f",
+			"Method": "asset.import",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Textures/Sprites2DGolden/Rgba.png",
+			"XXH64": "2a4bed42f9a31ba0",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Textures/Sprites2DGolden/Rgba.png.meta",
+			"XXH64": "7537800b511d4115",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Textures/Sprites2DGolden/Strip.spritesheet",
+			"XXH64": "7cf1e6e2f2917d07",
+			"Method": "asset.create",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Textures/Sprites2DGolden/Strip.spritesheet.meta",
+			"XXH64": "8fc6ecc438fb6b86",
+			"Method": "asset.create",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Textures/Tilemaps/Rgba.png",
+			"XXH64": "2a4bed42f9a31ba0",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Textures/Tilemaps/Rgba.png.meta",
+			"XXH64": "e633e95f8cc3b98f",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tilemaps/Goal.tilemap",
+			"XXH64": "9244539b2da4a3c3",
+			"Method": "tilemap.paint",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tilemaps/Goal.tilemap.meta",
+			"XXH64": "5479aff9a4c32a73",
+			"Method": "asset.create",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tilemaps/Level.tilemap",
+			"XXH64": "f4f67fb2030f0389",
+			"Method": "tilemap.paint",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tilemaps/Level.tilemap.meta",
+			"XXH64": "f917f1afa3224a69",
+			"Method": "asset.create",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tilemaps/Tiles.spritesheet",
+			"XXH64": "a4f86a0d5b2af8b7",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tilemaps/Tiles.spritesheet.meta",
+			"XXH64": "5abcd6c7e4220d63",
+			"Method": "asset.create",
+			"RequestId": 2,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
 			"Path": "FeatureTest.eproj",
-			"XXH64": "2732a6b936dff6ad",
+			"XXH64": "09a1353aede84b86",
 			"Method": "project.setSettings",
 			"RequestId": 1,
 			"Client": "batch",

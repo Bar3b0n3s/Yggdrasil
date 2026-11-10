@@ -23,6 +23,12 @@ namespace Engine {
 		bool Colliders = false;
 		bool Icons = true;
 		bool Wireframe = false;
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 14, stream D): the scene view's 2D mode: the camera looks down -Z
+		// orthographically (EditorCamera::Make2D) and navigates by pan and zoom only (Navigate2D), the gizmos move in X and Y,
+		// rotate about Z and scale in X and Y, the grid lies in the XY plane, and a click picks the sprite it shows first
+		// (Scene/SpritePicking.h). The toolbar's 2D toggle and viewport.setOptions {mode2D} share it; it is UI state, as
+		// every option here, and leaves the camera's projection to the camera when it is turned off.
+		bool Mode2D = false;
 		// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 33): the UI preview. The scene view shows its scene as the
 		// game frames it, through the primary camera with its UI and without the editor overlays, at the game frame
 		// (GetUiPreviewFrameSize, EditorCore/Ui/UiAuthoring.h) letterboxed in the panel, under the UI authoring overlay; the

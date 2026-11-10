@@ -564,11 +564,7 @@
 {"type": "response", "time": "2026-10-29T14:04:54.995Z", "client": "engine-mcp", "id": 22, "requestLine": 563, "ok": true, "summary": "savedFiles 0; rev 0"}
 {"type": "request", "time": "2026-10-29T14:04:58.043Z", "client": "engine-mcp", "id": 23, "method": "session.shutdown", "params": {"save": false, "force": false}}
 {"type": "response", "time": "2026-10-29T14:04:58.078Z", "client": "engine-mcp", "id": 23, "requestLine": 565, "ok": true, "summary": "savedFiles 0; saved no; rev 0"}
-{"type":"request","time":"2026-11-02T16:49:48.107Z","client":"cli","id":1,"method":"project.refreshAssets","params":{}}
-{"type":"response","time":"2026-11-02T16:49:49.215Z","client":"cli","id":1,"requestLine":567,"ok":true,"summary":"ok"}
-{"type":"request","time":"2026-11-02T16:49:49.217Z","client":"cli","id":2,"method":"project.upgrade","params":{}}
-{"type":"response","time":"2026-11-02T16:49:49.315Z","client":"cli","id":2,"requestLine":569,"ok":true,"summary":"ok"}
-{"type":"request","time":"2026-11-03T03:23:27.862Z","client":"cli","id":1,"method":"project.refreshAssets","params":{}}
-{"type":"response","time":"2026-11-03T03:23:28.393Z","client":"cli","id":1,"requestLine":571,"ok":true,"summary":"ok"}
-{"type":"request","time":"2026-11-03T03:23:28.395Z","client":"cli","id":2,"method":"project.upgrade","params":{}}
-{"type":"response","time":"2026-11-03T03:23:28.431Z","client":"cli","id":2,"requestLine":573,"ok":true,"summary":"ok"}
+{"type":"request","time":"2026-11-02T20:21:13.962Z","client":"cli","id":1,"method":"project.refreshAssets","params":{}}
+{"type":"response","time":"2026-11-02T20:21:14.141Z","client":"cli","id":1,"requestLine":567,"ok":true,"summary":"ok"}
+{"type":"request","time":"2026-11-02T20:21:14.143Z","client":"cli","id":2,"method":"project.upgrade","params":{}}
+{"type":"response","time":"2026-11-02T20:21:14.225Z","client":"cli","id":2,"requestLine":569,"ok":true,"summary":"ok"}

@@ -1,0 +1,341 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Sprites2DPixelArt",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Camera": 1,
+		"SpriteRenderer": 1,
+		"PixelPerfectCamera": 1
+	},
+	"Entities": [
+		{
+			"ID": "914160c8fb02bf7a",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 10],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Orthographic",
+					"VerticalFov": 60,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.06, 0.07, 0.12]
+				},
+				"PixelPerfectCamera": {
+					"ReferenceWidth": 200,
+					"ReferenceHeight": 120,
+					"PixelsPerUnit": 16,
+					"LetterboxColor": [0.25, 0.04, 0.08]
+				}
+			}
+		},
+		{
+			"ID": "2257e21843fc55a5",
+			"Name": "Overlay",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0.5, 1.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"SpriteRenderer": {
+					"Sheet": null,
+					"Frame": 0,
+					"Texture": "000000000000018a",
+					"Color": [1, 1, 1, 0.5],
+					"FlipX": false,
+					"FlipY": false,
+					"PixelsPerUnit": 8,
+					"SortingLayer": "Foreground",
+					"OrderInLayer": -10,
+					"Lit": false,
+					"NormalMap": null
+				}
+			}
+		},
+		{
+			"ID": "92de0f0a3798e41b",
+			"Name": "Hero",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"SpriteRenderer": {
+					"Sheet": "998ff56c375c24aa",
+					"Frame": 0,
+					"Texture": null,
+					"Color": [1, 1, 1, 1],
+					"FlipX": false,
+					"FlipY": false,
+					"PixelsPerUnit": 4,
+					"SortingLayer": "Characters",
+					"OrderInLayer": 0,
+					"Lit": false,
+					"NormalMap": null
+				}
+			}
+		},
+		{
+			"ID": "7c37725bae90fd10",
+			"Name": "Backdrop",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"SpriteRenderer": {
+					"Sheet": null,
+					"Frame": 0,
+					"Texture": "0000000000000187",
+					"Color": [0.15, 0.2, 0.45, 1],
+					"FlipX": false,
+					"FlipY": false,
+					"PixelsPerUnit": 4,
+					"SortingLayer": "Background",
+					"OrderInLayer": 20,
+					"Lit": false,
+					"NormalMap": null
+				}
+			}
+		},
+		{
+			"ID": "02d6dd21d632857e",
+			"Name": "HeroFlippedX",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-4, 1, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"SpriteRenderer": {
+					"Sheet": "998ff56c375c24aa",
+					"Frame": 1,
+					"Texture": null,
+					"Color": [1, 1, 1, 1],
+					"FlipX": true,
+					"FlipY": false,
+					"PixelsPerUnit": 4,
+					"SortingLayer": "Characters",
+					"OrderInLayer": 0,
+					"Lit": false,
+					"NormalMap": null
+				}
+			}
+		},
+		{
+			"ID": "e68ff339c2f76d9b",
+			"Name": "HeroFlippedY",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [4, 1, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"SpriteRenderer": {
+					"Sheet": "998ff56c375c24aa",
+					"Frame": 0,
+					"Texture": null,
+					"Color": [1, 1, 1, 1],
+					"FlipX": false,
+					"FlipY": true,
+					"PixelsPerUnit": 4,
+					"SortingLayer": "Characters",
+					"OrderInLayer": 0,
+					"Lit": false,
+					"NormalMap": null
+				}
+			}
+		},
+		{
+			"ID": "e47ae896a3a73eb7",
+			"Name": "Badge",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-5, -0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"SpriteRenderer": {
+					"Sheet": null,
+					"Frame": 0,
+					"Texture": "7623f87ac1c3c4f8",
+					"Color": [1, 1, 1, 1],
+					"FlipX": false,
+					"FlipY": false,
+					"PixelsPerUnit": 16,
+					"SortingLayer": "Characters",
+					"OrderInLayer": 0,
+					"Lit": false,
+					"NormalMap": null
+				}
+			}
+		},
+		{
+			"ID": "bb3881f80e59eb51",
+			"Name": "Ground",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, -2, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"SpriteRenderer": {
+					"Sheet": null,
+					"Frame": 0,
+					"Texture": "0000000000000189",
+					"Color": [0.22, 0.22, 0.24, 1],
+					"FlipX": false,
+					"FlipY": false,
+					"PixelsPerUnit": 1.6,
+					"SortingLayer": "Default",
+					"OrderInLayer": 0,
+					"Lit": false,
+					"NormalMap": null
+				}
+			}
+		},
+		{
+			"ID": "f1b18780ef7082ab",
+			"Name": "Square",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3, -2, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"SpriteRenderer": {
+					"Sheet": null,
+					"Frame": 0,
+					"Texture": "0000000000000187",
+					"Color": [0.95, 0.35, 0.2, 1],
+					"FlipX": false,
+					"FlipY": false,
+					"PixelsPerUnit": 16,
+					"SortingLayer": "Characters",
+					"OrderInLayer": 0,
+					"Lit": false,
+					"NormalMap": null
+				}
+			}
+		},
+		{
+			"ID": "a0fd77fedf4b6df2",
+			"Name": "Rounded",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1, -2, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"SpriteRenderer": {
+					"Sheet": null,
+					"Frame": 0,
+					"Texture": "0000000000000188",
+					"Color": [0.3, 0.85, 0.35, 1],
+					"FlipX": false,
+					"FlipY": false,
+					"PixelsPerUnit": 16,
+					"SortingLayer": "Characters",
+					"OrderInLayer": 0,
+					"Lit": false,
+					"NormalMap": null
+				}
+			}
+		},
+		{
+			"ID": "9c364bc87af412f6",
+			"Name": "Bevel",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1, -2, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"SpriteRenderer": {
+					"Sheet": null,
+					"Frame": 0,
+					"Texture": "0000000000000189",
+					"Color": [0.25, 0.5, 0.95, 1],
+					"FlipX": false,
+					"FlipY": false,
+					"PixelsPerUnit": 16,
+					"SortingLayer": "Characters",
+					"OrderInLayer": 0,
+					"Lit": false,
+					"NormalMap": null
+				}
+			}
+		},
+		{
+			"ID": "36980972927e3676",
+			"Name": "Circle",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3, -2, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"SpriteRenderer": {
+					"Sheet": null,
+					"Frame": 0,
+					"Texture": "000000000000018a",
+					"Color": [0.95, 0.85, 0.25, 1],
+					"FlipX": false,
+					"FlipY": false,
+					"PixelsPerUnit": 16,
+					"SortingLayer": "Characters",
+					"OrderInLayer": 0,
+					"Lit": false,
+					"NormalMap": null
+				}
+			}
+		}
+	]
+}

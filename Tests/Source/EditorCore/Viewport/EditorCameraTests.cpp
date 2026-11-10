@@ -11,6 +11,7 @@
 
 #include <cmath>
 #include <limits>
+#include <numbers>
 
 namespace Engine {
 
@@ -188,6 +189,79 @@ namespace Engine {
 			CHECK(orthographic->OrthographicSize < camera.OrthographicSize);
 			CHECK(orthographic->Position == camera.Position);
 			CHECK(orthographic->Target == camera.Target);
+		}
+
+		// Docs/Decisions/0032-m21-contract.md decision 14 (stream D): the scene view's 2D mode.
+		TEST_CASE("EditorCamera: the 2D camera looks down -Z orthographically and navigates by pan and zoom only")
+		{
+			const ExplicitRenderCamera perspective{ .Position = glm::vec3(4.0f, 3.0f, 10.0f), .Target = glm::vec3(4.0f, 1.0f, 0.0f) };
+			const Result<ExplicitRenderCamera> flat = EditorCamera::Make2D(perspective);
+			REQUIRE_MESSAGE(flat.has_value(), flat.error().ToString());
+			CHECK(flat->Projection == RenderProjection::Orthographic);
+			CHECK(flat->Target == glm::vec3(4.0f, 1.0f, 0.0f));
+			CHECK(flat->Position == glm::vec3(4.0f, 1.0f, EditorCamera::Make2DDistance));
+			CHECK(flat->OrthographicSize > 0.0f);
+
+			// Orbit and fly are ignored; pan moves both points in X and Y; the wheel zooms.
+			const Result<ExplicitRenderCamera> orbited = EditorCamera::Navigate2D(*flat, { .PointerDelta = glm::vec2(50.0f, 0.0f), .Orbit = true }, 360.0f);
+			REQUIRE(orbited.has_value());
+			CHECK(orbited->Position == flat->Position);
+			const Result<ExplicitRenderCamera> panned = EditorCamera::Navigate2D(*flat, { .PointerDelta = glm::vec2(36.0f, 0.0f), .Pan = true }, 360.0f);
+			REQUIRE(panned.has_value());
+			CHECK(panned->Position.z == flat->Position.z);
+			CHECK(panned->Target.z == 0.0f);
+			CHECK(panned->Position.x != flat->Position.x);
+			CHECK(panned->Position.x - flat->Position.x == doctest::Approx(panned->Target.x - flat->Target.x));
+			const Result<ExplicitRenderCamera> zoomed = EditorCamera::Navigate2D(*flat, { .Wheel = 1.0f }, 360.0f);
+			REQUIRE(zoomed.has_value());
+			CHECK(zoomed->OrthographicSize == doctest::Approx(flat->OrthographicSize / 1.2f));
+			CHECK(zoomed->Projection == RenderProjection::Orthographic);
+		}
+
+		TEST_CASE("EditorCamera: the 2D camera keeps an orthographic size, clamps its zoom and refuses invalid input")
+		{
+			// A perspective camera's half height at its target distance: 10 m away at 60 degrees shows 10 tan 30 degrees.
+			const ExplicitRenderCamera ahead{ .Position = glm::vec3(0.0f, 0.0f, 10.0f), .Target = glm::vec3(0.0f) };
+			const Result<ExplicitRenderCamera> fromPerspective = EditorCamera::Make2D(ahead);
+			REQUIRE(fromPerspective.has_value());
+			CHECK(fromPerspective->OrthographicSize == doctest::Approx(10.0 * std::tan(std::numbers::pi / 6.0)));
+			CHECK(fromPerspective->NearClip == 0.1f);
+			CHECK(fromPerspective->FarClip == 2.0f * EditorCamera::Make2DDistance);
+
+			// An orthographic camera keeps its size, and a 2D camera is its own 2D camera.
+			const ExplicitRenderCamera side{ .Position = glm::vec3(10.0f, 2.0f, -3.0f), .Target = glm::vec3(0.0f, 2.0f, -3.0f), .Projection = RenderProjection::Orthographic, .OrthographicSize = 3.5f };
+			const Result<ExplicitRenderCamera> flat = EditorCamera::Make2D(side);
+			REQUIRE(flat.has_value());
+			CHECK(flat->OrthographicSize == 3.5f);
+			CHECK(flat->Target == glm::vec3(0.0f, 2.0f, 0.0f));
+			const Result<ExplicitRenderCamera> again = EditorCamera::Make2D(*flat);
+			REQUIRE(again.has_value());
+			CHECK(again->Position == flat->Position);
+			CHECK(again->Target == flat->Target);
+			CHECK(again->OrthographicSize == flat->OrthographicSize);
+
+			// The wheel's zoom stays in [0.01, 100000]; navigating a camera that is not 2D makes it 2D first.
+			const Result<ExplicitRenderCamera> closest = EditorCamera::Navigate2D(*flat, { .Wheel = 100.0f }, 360.0f);
+			REQUIRE(closest.has_value());
+			CHECK(closest->OrthographicSize == doctest::Approx(0.01f));
+			const Result<ExplicitRenderCamera> farthest = EditorCamera::Navigate2D(*flat, { .Wheel = -200.0f }, 360.0f);
+			REQUIRE(farthest.has_value());
+			CHECK(farthest->OrthographicSize == doctest::Approx(100000.0f));
+			const Result<ExplicitRenderCamera> made = EditorCamera::Navigate2D(ahead, {}, 360.0f);
+			REQUIRE(made.has_value());
+			CHECK(made->Projection == RenderProjection::Orthographic);
+			CHECK(made->Position == glm::vec3(0.0f, 0.0f, EditorCamera::Make2DDistance));
+
+			// Invalid cameras, views and input are refused.
+			const Result<ExplicitRenderCamera> coincident = EditorCamera::Make2D({ .Position = glm::vec3(1.0f), .Target = glm::vec3(1.0f) });
+			REQUIRE_FALSE(coincident.has_value());
+			CHECK(coincident.error().GetCode() == ErrorCode::InvalidArgument);
+			const Result<ExplicitRenderCamera> flatView = EditorCamera::Navigate2D(*flat, {}, 0.5f);
+			REQUIRE_FALSE(flatView.has_value());
+			CHECK(flatView.error().GetCode() == ErrorCode::InvalidArgument);
+			const Result<ExplicitRenderCamera> infinite = EditorCamera::Navigate2D(*flat, { .Wheel = std::numeric_limits<float>::infinity() }, 360.0f);
+			REQUIRE_FALSE(infinite.has_value());
+			CHECK(infinite.error().GetCode() == ErrorCode::InvalidArgument);
 		}
 	}
 
