@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine/Core/Aabb.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
 #include "Engine/Graphics/PipelineFactory.h"
@@ -39,7 +40,22 @@ namespace Engine {
 	// pose (decision 27): the renderer's side of the AnimationSystem's ANIMATION_SKELETON_MISMATCH.
 	inline constexpr std::string_view RenderSkinMismatchCode = "RENDER_SKIN_MISMATCH";
 
-	// What one Record reads and writes, borrowed for the call.
+	// What the draws of one snapshot item bind instead of its mesh's vertices in every pass that draws it (the camera's, the
+	// shadow casters' and the selection mask's), resolved by the Prepare stage: a deformed item's Vertices are its
+	// SceneRenderer's deformed vertex buffer (vertex binding 0; the attribute stream stays the mesh's), its VertexStream keeps
+	// its draws out of every other item's instanced draw (MeshInstanceKey::VertexStream), and its Bounds, in its local space
+	// (ComputeDeformedBounds), replace its submeshes' bounds for culling. Null Vertices: the item draws its mesh's own
+	// vertices and bounds. Skipped: none of the item's draws is recorded this render (its deformation failed). Borrowed for
+	// the render.
+	struct DeformedVertexSource
+	{
+		nvrhi::IBuffer* Vertices = nullptr;
+		uint32_t VertexStream = 0;
+		Aabb Bounds{};
+		bool Skipped = false;
+	};
+
+	// What one item of a Record reads and writes, borrowed for the call.
 	struct SkinningPassInputs
 	{
 		nvrhi::IBuffer* SourceVertices = nullptr;    // the mesh's vertices (GpuMesh::VertexBuffer), VertexCount MeshVertex
@@ -95,15 +111,18 @@ namespace Engine {
 		// The morph weights: a structured buffer of MaxMeshMorphTargets floats, kept in ShaderResource.
 		[[nodiscard]] static nvrhi::BufferDesc GetMorphWeightsDesc();
 
-		// Records the Skinning row's dispatch of one item: writes inputs.Palette and inputs.MorphWeights into their buffers,
-		// then deforms inputs.VertexCount vertices into inputs.Vertices and inputs.PreviousPositions. The caller resolves the
-		// item's weights (the Prepare stage: ResolveMorphWeights against GpuMesh::DeformBounds.DefaultWeights), so the pass
-		// applies exactly what the CPU reference applies. Errors, with nothing recorded: InvalidArgument for a missing buffer,
-		// a vertex count of 0, a palette shorter than SkinJointCount, a morph target count above MaxMeshMorphTargets, morph
-		// weights not exactly MorphTargetCount, or nothing to deform (SkinJointCount and MorphTargetCount both 0); those of the
-		// binding set's creation (Gpu). Main thread; the command list is open.
-		[[nodiscard]] Status Record(nvrhi::ICommandList& commandList, RenderRecordingContext& recording, PassBindingCache& bindings,
-			const SkinningPassInputs& inputs);
+		// Records the Skinning row's pass: one dispatch per item of `items`, in order, all inside one pass scope (one
+		// RenderRecordingContext pass, so one profiler scope and debug marker however many items a frame deforms; W23.3's
+		// integration, ADR 0034). Each item's dispatch writes its Palette and MorphWeights into their buffers, then deforms its
+		// VertexCount vertices into its Vertices and PreviousPositions. The caller resolves each item's weights (the Prepare
+		// stage: ResolveMorphWeights against GpuMesh::DeformBounds.DefaultWeights), so the pass applies exactly what the CPU
+		// reference applies. Returns one Status per item, in order; an item's error leaves nothing of it recorded and the
+		// other items' dispatches recorded: InvalidArgument for a missing buffer, a vertex count of 0, a palette shorter than
+		// SkinJointCount, a morph target count above MaxMeshMorphTargets, morph weights not exactly MorphTargetCount, or nothing
+		// to deform (SkinJointCount and MorphTargetCount both 0); those of the binding set's creation (Gpu). The pass is not
+		// begun, and its stats row not added, when no item records. Main thread; the command list is open.
+		[[nodiscard]] std::vector<Status> Record(nvrhi::ICommandList& commandList, RenderRecordingContext& recording, PassBindingCache& bindings,
+			std::span<const SkinningPassInputs> items);
 	private:
 		struct State;
 		Scope<State> m_State;

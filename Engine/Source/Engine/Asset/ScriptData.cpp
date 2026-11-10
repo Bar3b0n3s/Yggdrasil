@@ -64,7 +64,7 @@ namespace Engine {
 		{
 			static constexpr std::string_view Reserved[] = { "Entity", "Fields", "OnCreate", "OnStart", "OnFixedUpdate",
 				"OnUpdate", "OnLateUpdate", "OnDestroy", "OnEnable", "OnDisable", "OnCollisionEnter", "OnCollisionExit",
-				"OnTriggerEnter", "OnTriggerExit", "OnHotReload" };
+				"OnTriggerEnter", "OnTriggerExit", "OnHotReload", "OnAnimationEvent" };
 			return name.starts_with("__") || std::find(std::begin(Reserved), std::end(Reserved), name) != std::end(Reserved);
 		}
 

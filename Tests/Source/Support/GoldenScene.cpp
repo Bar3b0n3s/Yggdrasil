@@ -223,6 +223,8 @@ namespace Engine {
 					return MakeError(ErrorCode::Validation, "the golden scene '{}' loads with diagnostics: {}", name, DescribeLoadDiagnostics(report));
 				TransformSystem::Update(*loaded);
 				ENGINE_TRY_ASSIGN(const std::string sceneBefore, SceneSerializer::SaveToString(*loaded));
+				if (options.PrepareScene)
+					ENGINE_TRY(WithContext(options.PrepareScene(*loaded, assets.GetManager()), std::format("preparing the golden scene '{}'", name)));
 
 				GpuResourceCache cache(device, assets.GetManager());
 				ENGINE_TRY_ASSIGN(const Scope<SceneRendererPipelines> pipelines, SceneRendererPipelines::Create(device, gpu.GetPipelines()));

@@ -14,8 +14,7 @@
 
 #include <vector>
 
-// The animation checks of a scene (M23, C23.3; Docs/Decisions/0034-m23-contract.md decision 30, stream B). Skipped until
-// stream B implements them.
+// The animation checks of a scene (M23, C23.3; Docs/Decisions/0034-m23-contract.md decision 30, stream B).
 
 namespace Engine {
 
@@ -59,7 +58,7 @@ namespace Engine {
 	{
 		// A SkinnedMesh whose mesh has a skin needs an Animator on its entity or an ancestor whose skeleton holds the skin's
 		// joints; a morph-only mesh needs none, and an unloaded mesh or skeleton is the asset checks' to report.
-		TEST_CASE("AnimationValidation: a SkinnedMesh without an Animator and a skeleton with too few joints are reported" * doctest::skip(true))
+		TEST_CASE("AnimationValidation: a SkinnedMesh without an Animator and a skeleton with too few joints are reported")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();

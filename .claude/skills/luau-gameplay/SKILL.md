@@ -7,6 +7,11 @@ description: Write or debug gameplay behaviours, shared modules and test suites 
 
 The API is served by `docs.get` (a connected editor answers it): `reference/ScriptAPI` describes every module, type, member and callback, and `scripting/Engine.d.luau` is the declarations file the type checker uses. Both are long, so ask for one section (`{topic: "reference/ScriptAPI", section: "Input"}`, a type such as `{topic: "scripting/Engine.d.luau", section: "Entity"}`, where the Script component's type is `Script (type)` and the `Script` global is `Script`) or page with `offset` and `length`. The script templates are `templates/Scripts/Behaviour`, `templates/Scripts/Module` and `templates/Scripts/Test`: the Behaviour and Module templates name their table `Script_<File>` (a Behaviour also its exported alias and `Script.Define` name), which you rename; the Test template has no type and names its suite after the file stem without `.test` (`Assets/Tests/Board.test.luau` gives `Test.Suite("Board", ...)`). In an automation-only game-building task, create and edit scripts through `script.create` and `script.write`; their results include compile, type and lint diagnostics. Iterate until `script.check` returns an empty `diagnostics` array before testing: its `passed` counts only errors, but the games suite fails a game on lint warnings too. (Engine developers find the semantics behind the API in Architecture §5.7 and §11 of the repository.)
 
+## Pages
+
+A reference page beside this file, a `docs.get` topic and a file in this skill's directory:
+- `skills/luau-gameplay/animation` ([animation.md](animation.md)): skeletal and morph animation in scripts: the `Animator` and `SkinnedMesh` fields and methods, script-driven blending, root motion, `OnAnimationEvent` and `Test.GetPoseDigest`.
+
 ## Script shape
 
 A Behaviour starts with a local table, adds fields and methods to that table, then returns `Script.Define("Name", class)`. Its exported instance alias is `ScriptInstance & { ... }`, used to annotate `self`. Do not add members to a sealed object returned from a constructor. A Module returns ordinary library data. A TestSuite returns `Test.Suite`; only a Behaviour may be attached to an entity.

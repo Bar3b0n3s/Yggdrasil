@@ -18,8 +18,9 @@ from engine_mcp import server  # noqa: E402
 # (Docs/Decisions/0012-m7-decisions.md decisions 4, 8 and 14), plus M13's script, replay and test tools, and M16's
 # project_upgrade (Docs/Decisions/0026-m16-contract.md, friction S3-09), M17's asset_get_properties
 # (Docs/Decisions/0027-m17-contract.md, friction F11), M19's input_read_replay (Docs/Decisions/0030-m19-contract.md
-# decision 14) and seven native tools (decision 32), and M20's scene_list, scene_activate and scene_close
-# (Docs/Decisions/0031-m20-contract.md decision 14).
+# decision 14) and seven native tools (decision 32), M20's scene_list, scene_activate and scene_close
+# (Docs/Decisions/0031-m20-contract.md decision 14), and M23's animation_preview (Docs/Decisions/0034-m23-contract.md
+# decision 32).
 PROXIED_TOOLS = {
     "project_create", "project_open", "project_save", "project_get_settings", "project_set_settings",
     "project_validate", "project_export", "project_upgrade",
@@ -34,7 +35,7 @@ PROXIED_TOOLS = {
     "script_read",
     "script_write", "script_check", "script_errors", "script_eval", "test_run",
     "native_build", "native_get_components", "native_load", "native_read", "native_set_components", "native_status",
-    "native_write",
+    "native_write", "animation_preview",
 }
 MAX_SCHEMA_BYTES = 4096
 

@@ -221,8 +221,8 @@ namespace Engine {
 		bool AudioHeld = false;
 		// M19: the native module's runtime (NativeWorld.h), in Play with PlaySessionSpecification::Native; null otherwise.
 		Scope<NativeWorld> Native{};
-		// M23 (Docs/Decisions/0034-m23-contract.md decision 29): the scene's animation (GetAnimation), null until stream B
-		// creates it right after the PhysicsSystem.
+		// M23 (Docs/Decisions/0034-m23-contract.md decision 29): the scene's animation (GetAnimation), created right after the
+		// PhysicsSystem and replaced with it at a scene transition; never null once the session is created.
 		Scope<AnimationSystem> Animation{};
 		Scope<ScriptApiRegistry> OwnedApi{};
 		ScriptApiRegistry* Api = nullptr;
@@ -552,6 +552,8 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(auto engine, ScriptEngine::Create({ .Host = this, .Api = Api, .Settings = Project.Scripting, .Mode = ScriptRunMode, .TestMode = TestMode, .TestHost = TestHost, .ReadOnly = false, .ClockSeconds = {} }));
 		Scripts = std::move(engine);
 		Physics->SetEventListener(Scripts.get());
+		// M23 (decision 29): the animation events reach the same engine, from its first tick and after every transition.
+		Animation->SetEventListener(Scripts.get());
 		return {};
 	}
 
@@ -623,6 +625,15 @@ namespace Engine {
 		const std::string_view transition = reload ? "Scene.Reload" : "Scene.Load";
 		// Create the new physics world before discarding the old scene. Failed setup leaves the current session intact.
 		TransformSystem::Update(*PendingScene);
+		// M23 (decision 29): the new scene's animation, first, since it holds nothing that must go before the pending scene
+		// does.
+		Result<Scope<AnimationSystem>> animation = AnimationSystem::Create({ .RuntimeScene = PendingScene.get(), .Assets = Assets });
+		if (!animation)
+		{
+			ReportSessionError(animation.error(), transition);
+			ClearPendingTransition();
+			return;
+		}
 		PlaySessionSpecification specification{};
 		specification.Project = Project;
 		specification.Assets = Assets;
@@ -647,11 +658,14 @@ namespace Engine {
 			return;
 		}
 		Physics->SetEventListener(nullptr);
+		Animation->SetEventListener(nullptr);
 		Scripts.reset();
 		SceneAudio.reset();
+		Animation.reset();
 		Physics.reset();
 		RuntimeScene = std::move(PendingScene);
 		Physics = std::move(*physics);
+		Animation = std::move(*animation);
 		Parameters = std::move(PendingParameters);
 		CurrentDocument = std::move(PendingDocument);
 		CurrentSceneAsset = PendingSceneAsset;
@@ -921,6 +935,8 @@ namespace Engine {
 			m_State->Scripts->Stop();
 		if (m_State->Physics != nullptr)
 			m_State->Physics->SetEventListener(nullptr);
+		if (m_State->Animation != nullptr)
+			m_State->Animation->SetEventListener(nullptr);
 		m_State->Scripts.reset();
 		// M12 (§10.2 Stop): the AudioSystem releases its voices and restores the group volumes while the scene exists, and
 		// only then does the engine's time go back to the device, so the device never plays a voice of the ended session.
@@ -1024,6 +1040,11 @@ namespace Engine {
 			return std::unexpected(std::move(physics).error().WithContext("while starting the play session"));
 		state.Physics = std::move(*physics);
 		state.RecordReferenceTransforms();
+		// M23 (decision 29): the AnimationSystem phase's system, right after the physics system.
+		Result<Scope<AnimationSystem>> animation = AnimationSystem::Create({ .RuntimeScene = state.RuntimeScene.get(), .Assets = state.Assets });
+		if (!animation)
+			return std::unexpected(std::move(animation).error().WithContext("while starting the play session"));
+		state.Animation = std::move(*animation);
 
 		if (specification.Audio != nullptr && specification.Mode == PlayMode::Play)
 		{
@@ -1113,6 +1134,11 @@ namespace Engine {
 			if (state.FatalStop)
 				return;
 		}
+		// M23 (decision 29): every Animator's layers advance and its pose is sampled after the tick's gameplay code, which
+		// starts clips and sets weights, and before the transform update, so root motion reaches physics; in Play and
+		// Simulate alike. Its events reach the scripts after every Animator was stepped.
+		state.EnterPhase(*this, PlaySessionPhase::AnimationSystem, tick);
+		state.Animation->Step(step);
 		state.EnterPhase(*this, PlaySessionPhase::PreStepTransformUpdate, tick);
 		state.UpdateTransforms();
 		state.EnterPhase(*this, PlaySessionPhase::PhysicsPreStep, tick);

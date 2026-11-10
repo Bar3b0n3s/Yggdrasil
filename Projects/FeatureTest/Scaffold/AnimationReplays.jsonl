@@ -1,0 +1,5 @@
+{"method": "input.record", "params": {"action": "Start", "scene": "Assets/Scenes/Animation.scene"}}
+{"method": "play.step", "params": {"ticks": 240, "input": [{"tick": 8, "type": "Action", "name": "Jump", "state": "Tap"}, {"tick": 60, "type": "Action", "name": "MoveX", "value": 0.6}, {"tick": 150, "type": "Action", "name": "MoveX", "value": 0}], "render": "None"}}
+{"method": "input.record", "params": {"action": "Stop", "path": "Assets/Tests/Replays/Animation.replay", "expect": [{"tick": 240, "luau": "local character = Scene.FindByPath(\"/Walker/Character\")\nlocal animator = character.Animator\nreturn character:GetScript(\"Director\").Starts == 1 and animator.Playing and #animator.Layers == 2 and animator.Layers[2].Weight == 0 and character.Transform.Translation.x > 3"}]}}
+{"method": "play.stop", "params": {}}
+{"method": "project.refreshAssets", "params": {}}

@@ -44,6 +44,21 @@ namespace Engine {
 			return quad;
 		}
 
+		// M23 (C23.3): the coloured quad with the skin section (three joints, two influences a vertex) and the morph section
+		// (one target "Smile" of default weight 0.5 that lifts each vertex by a tenth of its index).
+		MeshData MakeSkinnedQuad()
+		{
+			MeshData quad = MakeColoredQuad();
+			quad.SkinJointCount = 3;
+			for (uint16_t index = 0; index < 4; ++index)
+				quad.Skin.push_back({ .Joints = { static_cast<uint16_t>(index % 3), 2, 0, 0 }, .Weights = { 0.75f, 0.25f, 0.0f, 0.0f } });
+			MeshMorphTarget smile{ .Name = "Smile", .DefaultWeight = 0.5f };
+			for (size_t index = 0; index < 4; ++index)
+				smile.Deltas.push_back({ .Position = { 0.0f, 0.1f * static_cast<float>(index), 0.0f } });
+			quad.MorphTargets.push_back(smile);
+			return quad;
+		}
+
 	}
 
 	TEST_SUITE("Asset")
@@ -71,8 +86,8 @@ namespace Engine {
 
 		// M23 (C23.1, C-MESH2; Docs/Decisions/0034-m23-contract.md decision 9, stream M): MeshData version 2 carries the
 		// attribute stream (TexCoord1 and the vertex colour) after the indices, flagged by MeshStreams::Attributes, and keeps
-		// the version 1 layout's other members; a payload that sets a bit C23.3 reserves (Skin, Morph) or holds attributes
-		// for another vertex count is refused.
+		// the version 1 layout's other members; a payload that sets the Skin or Morph bit (C23.3's sections) without its
+		// section is truncated, and one that sets an undefined bit or holds attributes for another vertex count is refused.
 		TEST_CASE("MeshData: a version 2 payload round-trips the attribute stream and refuses the reserved bits")
 		{
 			const MeshData quad = MakeColoredQuad();
@@ -98,11 +113,12 @@ namespace Engine {
 			mismatched.Attributes.pop_back();
 			CHECK_FALSE(ValidateMeshData(mismatched).has_value());
 
-			// The Streams word follows the four counts; setting the Skin bit (C23.3's) is refused.
+			// The Streams word follows the four counts; setting the Skin bit (C23.3's) without its section is refused.
 			Buffer skinned = payload;
 			skinned[16] = static_cast<std::byte>(std::to_integer<uint32_t>(skinned[16]) | 2U);
 			CHECK_FALSE(DeserializeMeshPayload(skinned).has_value());
-			// So are the Morph bit, a bit no version defines and a non-zero Reserved word, each a Parse error.
+			// So are the Morph bit without its section, a bit no version defines and a non-zero Reserved word, each a Parse
+			// error.
 			Buffer morphed = payload;
 			morphed[16] = static_cast<std::byte>(std::to_integer<uint32_t>(morphed[16]) | 4U);
 			Buffer unknown = payload;
@@ -129,16 +145,10 @@ namespace Engine {
 		// count, then a joint quadruple and its weights per vertex) and the morph section (the target count, then per target
 		// its name, default weight and one delta per vertex) follow the attribute stream in bit order, and their invariants are
 		// validated.
-		TEST_CASE("MeshData: a version 2 payload round-trips the skin and morph sections" * doctest::skip(true))
+		TEST_CASE("MeshData: a version 2 payload round-trips the skin and morph sections")
 		{
-			MeshData quad = MakeColoredQuad();
-			quad.SkinJointCount = 3;
-			for (uint16_t index = 0; index < 4; ++index)
-				quad.Skin.push_back({ .Joints = { static_cast<uint16_t>(index % 3), 2, 0, 0 }, .Weights = { 0.75f, 0.25f, 0.0f, 0.0f } });
-			MeshMorphTarget smile{ .Name = "Smile", .DefaultWeight = 0.5f };
-			for (size_t index = 0; index < 4; ++index)
-				smile.Deltas.push_back({ .Position = { 0.0f, 0.1f * static_cast<float>(index), 0.0f } });
-			quad.MorphTargets.push_back(smile);
+			const MeshData quad = MakeSkinnedQuad();
+			const MeshMorphTarget& smile = quad.MorphTargets.front();
 			REQUIRE(ValidateMeshData(quad).has_value());
 			CHECK(GetMeshStreams(quad) == (MeshStreams::Attributes | MeshStreams::Skin | MeshStreams::Morph));
 			const Buffer payload = SerializeMeshPayload(quad);
@@ -292,11 +302,14 @@ namespace Engine {
 			CHECK(newer.error().GetCode() == ErrorCode::UnsupportedVersion);
 		}
 
-		// M23 (C-MESH2): every other mutation starts from a version 2 payload with the attribute stream, so its section and the
-		// Streams word are mutated too (Docs/Decisions/0034-m23-contract.md decision 19).
+		// M23 (C-MESH2): a third of the mutations start from a version 2 payload with the attribute stream, so its section and
+		// the Streams word are mutated too (Docs/Decisions/0034-m23-contract.md decision 19); since C23.3 another third from
+		// the skinned and morphed quad, so they reach the skin and morph sections' counts, joint indices, names and deltas
+		// (decision 24).
 		TEST_CASE("MeshData: 10,000 seeded mutations of a payload never crash" * doctest::test_suite(Test::FuzzSuite))
 		{
-			const std::array<Buffer, 2> payloads = { SerializeMeshPayload(MakeQuad()), SerializeMeshPayload(MakeColoredQuad()) };
+			const std::array<Buffer, 3> payloads = { SerializeMeshPayload(MakeQuad()), SerializeMeshPayload(MakeColoredQuad()),
+				SerializeMeshPayload(MakeSkinnedQuad()) };
 			const Test::FuzzRun run = Test::RunFuzzCase(0x3E54, 10000, [&payloads](Random& random, uint64_t index)
 			{
 				Buffer mutated = payloads[index % payloads.size()];

@@ -4,6 +4,8 @@
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/DetMath.h"
 #include "Engine/Core/Profiler.h"
+#include "Engine/Scene/AnimationSystem.h"
+#include "Engine/Scene/Components/AnimationPoseComponent.h"
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
@@ -11,9 +13,11 @@
 #include "Engine/Scene/Components/PointLightComponent.h"
 #include "Engine/Scene/Components/PostProcessComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
+#include "Engine/Scene/Components/SkinnedMeshComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
 #include "Engine/Scene/Components/TextComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/Private/AnimationTargets.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
 
@@ -23,6 +27,8 @@
 #include <cmath>
 #include <memory_resource>
 #include <optional>
+#include <span>
+#include <string>
 
 // Simulation path (§4.12): only + - * /, sqrt (glm's normalize, cross, inverse and mat4_cast are built from them) and
 // Core/DetMath, so a snapshot is bit-identical in every configuration.
@@ -103,6 +109,30 @@ namespace Engine {
 		static bool IsEffectivelyEnabled(ConstEntity entity)
 		{
 			return !entity.HasComponent<HierarchyDisabledTag>();
+		}
+
+		// M23 (C23.3; Docs/Decisions/0034-m23-contract.md decisions 27 and 29): a SkinnedMesh's deformation. Its driving
+		// Animator's pose (the runtime AnimationPoseComponent the AnimationSystem phase or the editor's preview wrote) gives the
+		// palette, each skin matrix taken into the item's space at the rendered poses (inverse(World) * the Animator entity's
+		// rendered world matrix * Skin[j]), and the morph weights of the entity's path from the Animator, which replace the
+		// component's at their indices; without a pose the item has no palette (its bind pose) and the component's weights.
+		static void ExtractSkinnedItem(ConstEntity entity, const SkinnedMeshComponent& skinned, float alpha, MeshDrawItem& item)
+		{
+			std::span<const float> animated;
+			const ConstEntity animator = FindDrivingAnimator(entity);
+			if (const AnimationPoseComponent* pose = animator.IsValid() ? animator.TryGetComponent<AnimationPoseComponent>() : nullptr)
+			{
+				const glm::mat4 toItem = glm::inverse(item.World) * ComputeRenderedWorldMatrix(animator, alpha);
+				item.JointPalette.reserve(pose->Skin.size());
+				for (const glm::mat4& skin : pose->Skin)
+					item.JointPalette.push_back(toItem * skin);
+				if (const std::optional<std::string> target = Detail::GetAnimationTargetPath(animator, entity))
+				{
+					if (const AnimationMorphWeights* morph = Detail::FindPoseMorphWeights(pose->Morphs, *target))
+						animated = morph->Weights;
+				}
+			}
+			item.MorphWeights = Detail::MergeAnimatedMorphWeights(skinned.MorphWeights, animated);
 		}
 
 		static RenderProjection ToRenderProjection(ProjectionType projection)
@@ -426,6 +456,8 @@ namespace Engine {
 				item.CastShadows = renderer->CastShadows;
 				item.ReceiveShadows = renderer->ReceiveShadows;
 				item.Entity = id;
+				if (const SkinnedMeshComponent* skinned = entity.TryGetComponent<SkinnedMeshComponent>())
+					Utils::ExtractSkinnedItem(entity, *skinned, request.Alpha, item);
 				snapshot.PickTable.push_back(id);
 				item.PickId = static_cast<uint32_t>(snapshot.PickTable.size());
 				snapshot.Meshes.push_back(std::move(item));

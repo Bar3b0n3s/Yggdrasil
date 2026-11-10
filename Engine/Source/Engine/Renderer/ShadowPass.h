@@ -10,6 +10,7 @@
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/RenderStats.h"
 #include "Engine/Renderer/ShadowCascades.h"
+#include "Engine/Renderer/SkinningPass.h"
 #include "Engine/Renderer/SpotShadowAtlas.h"
 #include "Shared/InstanceRecord.h"
 
@@ -139,8 +140,11 @@ namespace Engine {
 		// to `instances` ({World, World, PickId, the mirroring flag}), the draws' records in their order, and groups the
 		// draws into batches (one per draw when `instancing` is false). Main thread; the caller writes `instances` into the
 		// buffer Record reads. Errors: InvalidArgument for a caster with a non-finite world matrix (nothing is appended).
+		// M23 (C23.3, decision 27): `sources`, empty or one per caster, are the vertices each caster's draws bind
+		// (SkinningPass.h): a deformed caster's draws bind its deformed vertices, are culled by its deformed bounds and key
+		// its VertexStream, so they batch with no other caster's; a Skipped caster casts nothing.
 		[[nodiscard]] static Result<ShadowCasterSet> PrepareCasters(GpuResourceCache& cache, std::span<const MeshDrawItem> casters, bool instancing,
-			std::vector<InstanceRecord>& instances);
+			std::vector<InstanceRecord>& instances, std::span<const DeformedVertexSource> sources = {});
 
 		// Culls the prepared casters per face and records shadow passes only. All inputs borrowed for this call;
 		// commandList open, targets match descriptions and Casters' records are in Instances (asserted). Gpu errors from

@@ -26,8 +26,9 @@ namespace Engine {
 		}
 
 		// Match copied glyphs against actual rendered quads. No current font or window is needed after Render().
-		std::optional<ImVec2> SupportingPanelTestUi::FindRenderedText(std::span<const ImFontGlyph> glyphs)
+		std::optional<ImVec2> SupportingPanelTestUi::FindRenderedText(std::span<const ImFontGlyph> glyphs, size_t occurrence)
 		{
+			size_t skipped = 0;
 			const ImDrawData* data = ImGui::GetDrawData();
 			if (!data || glyphs.empty())
 				return std::nullopt;
@@ -59,17 +60,24 @@ namespace Engine {
 						if (center.x < 0.0f || center.y < 0.0f || center.x >= data->DisplaySize.x || center.y >= data->DisplaySize.y)
 							continue;
 						// The log fixture also submits clipped content. Accept only geometry inside its draw command's clip.
+						bool visible = false;
 						for (const ImDrawCmd& command : list.CmdBuffer)
 						{
 							if (top.x < command.ClipRect.x || top.y < command.ClipRect.y || bottom.x > command.ClipRect.z || bottom.y > command.ClipRect.w)
 								continue;
-							for (unsigned int element = 0; element < command.ElemCount; ++element)
+							for (unsigned int element = 0; element < command.ElemCount && !visible; ++element)
 							{
 								const auto vertex = static_cast<size_t>(list.IdxBuffer[static_cast<int>(command.IdxOffset + element)]) + command.VtxOffset;
-								if (vertex == first)
-									return center;
+								visible = vertex == first;
 							}
+							if (visible)
+								break;
 						}
+						if (!visible)
+							continue;
+						if (skipped == occurrence)
+							return center;
+						++skipped;
 					}
 				}
 			}

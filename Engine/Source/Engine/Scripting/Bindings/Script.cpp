@@ -559,6 +559,9 @@ namespace Engine {
 			ENGINE_TRY(api.RegisterAlias("ScriptInstance", "{Entity: Entity}", "Every behaviour instance owns an Entity identity and copies its declared field defaults."));
 			static_cast<void>(api.Type("FieldDescriptor", "An authenticated immutable Field constructor descriptor."));
 			ENGINE_TRY(api.RegisterAlias("CollisionContact", "{Point: vector, Normal: vector, RelativeSpeed: number, Collider: Entity, OtherCollider: Entity}", "First contact from the receiving body's side, with collider identities for compounds."));
+			// M23 (Docs/Decisions/0034-m23-contract.md decision 31).
+			ENGINE_TRY(api.RegisterAlias("AnimationEvent", "{Name: string, Layer: number, Clip: AssetRef, Time: number}",
+				"An animation clip's named event that an Animator layer's time passed: its name, the 1-based layer, the layer's clip and the event's time in it."));
 			api.Module("Script", "Behaviour class registration.").Function("Define", Utils::Define, "<T>(name: string, class: T) -> T", "Authenticate a behaviour class and return the exact same table.", pure);
 			api.Module("Field", "Persistent behaviour field schemas.")
 				.Function("Number", Utils::FieldConstructor<FieldType::Float>, "(default: number?, options: FieldOptions?) -> FieldDescriptor", "Declare a finite f32 number; the omitted default is zero.", pure)
@@ -585,6 +588,10 @@ namespace Engine {
 			for (const char* name : { "OnCollisionExit", "OnTriggerEnter", "OnTriggerExit" })
 				behaviour.Callback(name, "(self: ScriptInstance, other: Entity) -> ()", "Called when the corresponding collision or trigger transition occurs.");
 			behaviour.Callback("OnHotReload", "(self: ScriptInstance) -> ()", "Called after the class is replaced while instance state survives.", { .Modes = RunModes::EditorOnly });
+			// M23 (Docs/Decisions/0034-m23-contract.md decision 31): the AnimationSystem phase's events, appended in landing order.
+			behaviour.Callback("OnAnimationEvent", "(self: ScriptInstance, event: AnimationEvent) -> ()",
+				"Called in the fixed step for each event an Animator layer's time passes on this entity, after every Animator of the tick was posed, in "
+				"layer and firing order.");
 			return {};
 		}
 

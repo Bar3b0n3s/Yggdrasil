@@ -24,6 +24,7 @@
 #include "Shared/MaterialConstants.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/BufferCreationFails.h"
+#include "Support/BufferReadback.h"
 #include "Support/DeviceLossTest.h"
 #include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
@@ -39,7 +40,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <format>
+#include <limits>
 #include <map>
 #include <numeric>
 #include <optional>
@@ -1476,6 +1479,116 @@ namespace Engine {
 					+ std::to_integer<int>(image[(static_cast<size_t>(y) * 64 + x) * 4 + 2]) * 65536;
 			};
 			CHECK(pixel(18, 32) != pixel(46, 32));
+		}
+
+		// M23 (C23.3, C-SKEL, C-MORPH; Docs/Decisions/0034-m23-contract.md decision 27, stream C): a mesh with a skin and morph
+		// targets uploads them for the Skinning pass (its skin one MeshSkinVertex per vertex, its morph deltas target by
+		// target, both raw buffers, and its vertices readable as a raw buffer too), with their counts and the deform bounds the
+		// Prepare stage culls and resolves weights with; a mesh with neither has none of them.
+		TEST_CASE("GpuResourceCache: a skinned and morphed mesh uploads its skin, its morph deltas and its deform bounds"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::InMemoryAssetManager assets;
+			// A quad skinned to two joints (its left column to joint 0, its right to joint 1), with two morph targets.
+			auto skinned = CreateRef<MeshData>();
+			for (const glm::vec2 corner : { glm::vec2(0, 0), glm::vec2(1, 0), glm::vec2(1, 1), glm::vec2(0, 1) })
+			{
+				const glm::vec3 position(corner, 0.0f);
+				skinned->Vertices.push_back({ .Position = position, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = corner });
+				skinned->Bounds.Extend(position);
+				skinned->Skin.push_back({ .Joints = { static_cast<uint16_t>(corner.x), 0, 0, 0 }, .Weights = { 1, 0, 0, 0 } });
+			}
+			skinned->SkinJointCount = 2;
+			skinned->Indices = { 0, 1, 2, 0, 2, 3 };
+			skinned->Submeshes = { { .IndexCount = 6, .Bounds = skinned->Bounds } };
+			skinned->Slots = { {} };
+			for (const float lift : { 0.25f, -0.5f })
+			{
+				MeshMorphTarget target{ .Name = std::format("Lift{}", lift), .DefaultWeight = lift };
+				for (uint32_t vertex = 0; vertex < 4; ++vertex)
+					target.Deltas.push_back({ .Position = { 0.0f, 0.0f, lift * static_cast<float>(vertex) } });
+				skinned->MorphTargets.push_back(std::move(target));
+			}
+			REQUIRE_MESSAGE(ValidateMeshData(*skinned).has_value(), ValidateMeshData(*skinned).error().ToString());
+			const AssetHandle skinnedHandle(0x5A7E000000000021ULL);
+			const AssetHandle plainHandle(0x5A7E000000000022ULL);
+			assets.Publish(skinnedHandle, skinned);
+			auto plain = CreateRef<MeshData>(*skinned);
+			plain->Skin.clear();
+			plain->SkinJointCount = 0;
+			plain->MorphTargets.clear();
+			assets.Publish(plainHandle, plain);
+			{
+				GpuResourceCache cache(gpu.GetDevice(), assets);
+				const GpuMesh mirror = cache.GetMesh(skinnedHandle);
+				REQUIRE_FALSE(mirror.IsPlaceholder);
+				REQUIRE(mirror.SkinBuffer != nullptr);
+				REQUIRE(mirror.MorphBuffer != nullptr);
+				CHECK(mirror.SkinJointCount == 2);
+				CHECK(mirror.MorphTargetCount == 2);
+				CHECK(mirror.VertexBuffer->getDesc().canHaveRawViews);
+				CHECK(mirror.SkinBuffer->getDesc().canHaveRawViews);
+				CHECK(mirror.MorphBuffer->getDesc().canHaveRawViews);
+				CHECK(mirror.DeformBounds == ComputeMeshDeformBounds(*skinned));
+				CHECK(mirror.DeformBounds.DefaultWeights == std::vector<float>{ 0.25f, -0.5f });
+				// The buffers hold the skin and the deltas, target by target, byte for byte.
+				const Result<std::vector<std::byte>> skin = Test::ReadBufferBytes(gpu.GetDevice(), *mirror.SkinBuffer, 4 * sizeof(MeshSkinVertex));
+				REQUIRE_MESSAGE(skin.has_value(), skin.error().ToString());
+				CHECK(std::memcmp(skin->data(), skinned->Skin.data(), skin->size()) == 0);
+				const Result<std::vector<std::byte>> morphs = Test::ReadBufferBytes(gpu.GetDevice(), *mirror.MorphBuffer, 8 * sizeof(MeshMorphDelta));
+				REQUIRE_MESSAGE(morphs.has_value(), morphs.error().ToString());
+				CHECK(std::memcmp(morphs->data(), skinned->MorphTargets[0].Deltas.data(), 4 * sizeof(MeshMorphDelta)) == 0);
+				CHECK(std::memcmp(morphs->data() + 4 * sizeof(MeshMorphDelta), skinned->MorphTargets[1].Deltas.data(), 4 * sizeof(MeshMorphDelta)) == 0);
+
+				const GpuMesh& rigid = cache.GetMesh(plainHandle);
+				CHECK(rigid.SkinBuffer == nullptr);
+				CHECK(rigid.MorphBuffer == nullptr);
+				CHECK(rigid.SkinJointCount == 0);
+				CHECK(rigid.MorphTargetCount == 0);
+				CHECK(rigid.DeformBounds == MeshDeformBounds{});
+				CHECK_FALSE(rigid.VertexBuffer->getDesc().canHaveRawViews);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// W23.3's review: the Skinning pass addresses a deformable mesh's bytes with 32-bit offsets, so a mesh whose vertices
+		// or morph deltas would exceed 4 GiB is refused before any buffer is made: the placeholder draws and the failure is
+		// reported. The size comes from the counts alone, so a mesh built in memory with 1,000 morph targets over 120,000
+		// vertices (4.3 GB of deltas, none of them held) reaches the refusal without the memory a real one would take.
+		TEST_CASE("GpuResourceCache: a deformable mesh beyond the Skinning pass's 4 GiB is refused, and its placeholder draws"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::InMemoryAssetManager assets;
+			auto huge = CreateRef<MeshData>();
+			huge->Vertices.resize(120000);
+			huge->Indices = { 0, 1, 2 };
+			huge->Bounds = { glm::vec3(0.0f), glm::vec3(0.0f) };
+			huge->Submeshes = { { .IndexCount = 3, .Bounds = huge->Bounds } };
+			huge->Slots = { {} };
+			huge->MorphTargets.resize(1000);
+			REQUIRE(static_cast<uint64_t>(huge->MorphTargets.size()) * huge->Vertices.size() * sizeof(MeshMorphDelta) > std::numeric_limits<uint32_t>::max());
+			const AssetHandle hugeHandle(0x5A7E000000000023ULL);
+			assets.Publish(hugeHandle, huge);
+			{
+				GpuResourceCache cache(gpu.GetDevice(), assets);
+				const Test::ExpectLog refused(LogLevel::Error, std::string(AssetUploadFailedCode));
+				const GpuMesh& mirror = cache.GetMesh(hugeHandle);
+				CHECK(mirror.IsPlaceholder);
+				CHECK(mirror.MorphBuffer == nullptr);
+				CHECK(cache.GetStats().UploadFailures == 1);
+				const std::span<const AssetDiagnostic> diagnostics = assets.GetDiagnostics();
+				const auto found = std::ranges::find_if(diagnostics, [hugeHandle](const AssetDiagnostic& diagnostic)
+				{
+					return diagnostic.Code == AssetUploadFailedCode && diagnostic.Asset == hugeHandle;
+				});
+				REQUIRE(found != diagnostics.end());
+				CHECK(found->Message.contains("4 GiB"));
+			}
+			gpu.GetDevice().RunGarbageCollection();
 		}
 	}
 

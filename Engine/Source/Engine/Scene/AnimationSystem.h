@@ -45,6 +45,8 @@
 //        drawn deformed.
 //     3. With RootMotion Apply, the entity's Transform moves by the blended delta: Translation += Rotation * (Scale * delta
 //        translation), Rotation = Rotation * delta rotation (normalized), through the scene.
+//   Then each effectively enabled SkinnedMesh's finding (AnimationValidation.h's checks) is raised once per entity and code
+//   (GetDiagnostics), logged as a warning.
 //   Dispatch, after every Animator was stepped: the collected events, in (canonical entity, layer, firing) order, reach the
 //   listener (SetEventListener: the session's ScriptEngine in Play; none in Simulate) as AnimationEventRecords. So every
 //   callback reads every Animator's new pose, and what a callback changes (a clip started, an Animator destroyed, disabled
@@ -99,8 +101,11 @@ namespace Engine {
 	// ScriptEngine and replaces that engine at a scene transition, so it sets the receiver with SetEventListener.
 	struct AnimationSystemSpecification
 	{
-		// Required, outliving the system (documented back-references): the play session's runtime scene and asset manager.
+		// Required, outliving the system (documented back-reference): the play session's runtime scene.
 		Scene* RuntimeScene = nullptr;
+		// The play session's asset manager, outliving the system (documented back-reference), or null for a session without
+		// one (PlaySessionSpecification::Assets): then no skeleton or clip loads, so no layer advances and no Animator is
+		// posed, while the phase still runs (PlaySession::GetAnimation is never null).
 		AssetManager* Assets = nullptr;
 	};
 
@@ -121,7 +126,7 @@ namespace Engine {
 		AnimationSystem(const AnimationSystem&) = delete;
 		AnimationSystem& operator=(const AnimationSystem&) = delete;
 
-		// Errors: InvalidArgument for a missing scene or asset manager.
+		// Errors: InvalidArgument for a missing scene.
 		[[nodiscard]] static Result<Scope<AnimationSystem>> Create(const AnimationSystemSpecification& specification);
 
 		// The AnimationSystem phase (see the file comment) for `step` (its Tick and FixedDelta).
@@ -145,10 +150,11 @@ namespace Engine {
 
 	// Writes the pose of the Animator on `animator` (valid, holding an Animator) into its AnimationPoseComponent (step 2 of
 	// the file comment, Tick 0, no root motion and no events), each layer sampled at its Time advanced by `previewTime`
-	// seconds (>= 0, finite) times its Speed, wrapped or held at its clip's end as AdvanceAnimationTime does (0: the layers'
-	// times): the editor's preview of an edit scene (EditorCore/Animation/AnimationPreview.h). Writes nothing to the Animator,
-	// whatever Playing says. Errors: NotFound when the Skeleton is null or fails to load (the component is removed), naming
-	// the asset; InvalidArgument for a `previewTime` that is not finite or below 0.
+	// seconds (finite, in [0, MaxAnimatorTime], the range of a layer's own Time) times its Speed, wrapped or held at its
+	// clip's end as AdvanceAnimationTime does (0: the layers' times): the editor's preview of an edit scene
+	// (EditorCore/Animation/AnimationPreview.h). Writes nothing to the Animator, whatever Playing says. Errors: NotFound when
+	// the Skeleton is null or fails to load (the component is removed), naming the asset; InvalidArgument for a
+	// `previewTime` that is not finite or outside [0, MaxAnimatorTime].
 	[[nodiscard]] Status PoseAnimator(Entity animator, AssetManager& assets, float previewTime = 0.0f);
 
 	// The Animator that poses `entity`'s SkinnedMesh: `entity` itself or its nearest ancestor holding an Animator; an invalid

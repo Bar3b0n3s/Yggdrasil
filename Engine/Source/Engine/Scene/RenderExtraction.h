@@ -33,6 +33,10 @@
 // PlaySession::ExtractView run TransformSystem::Update first, so a follow camera placed from RenderPosition (M13) and the
 // rendered image agree.
 //
+// Skinned items (M23, Docs/Decisions/0034-m23-contract.md decision 27): a SkinnedMesh's item carries its driving Animator's
+// palette (the runtime AnimationPoseComponent's skin matrices taken into the item's space at the rendered poses) and its
+// morph weights, the pose's channel for the entity's path overriding the component's (RenderSnapshot.h's MeshDrawItem).
+//
 // Pure function of the scene's components and the request: no asset access, no clock, no randomness; vectors in canonical
 // order (§5.1), so a deterministic scene gives an identical snapshot in every configuration. Only IEEE-exact operations and
 // Core/DetMath (Scene is on the simulation path's lint scope, §4.12). Main thread, like the scene (§4.11).

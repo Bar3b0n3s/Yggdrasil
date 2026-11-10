@@ -645,8 +645,8 @@ The files the editor imports from `Assets/`, by importer and extension (§7.4). 
 | Environment | `.hdr` | Environment | 2 | `EnvironmentImportSettings` | yes |
 | Font | `.otf` | Font | 3 | `FontImportSettings` | yes |
 | Font | `.ttf` | Font | 3 | `FontImportSettings` | yes |
-| Gltf | `.glb` | Prefab | 2 | `GltfImportSettings` | yes |
-| Gltf | `.gltf` | Prefab | 2 | `GltfImportSettings` | yes |
+| Gltf | `.glb` | Prefab | 3 | `GltfImportSettings` | yes |
+| Gltf | `.gltf` | Prefab | 3 | `GltfImportSettings` | yes |
 | Material | `.material` | Material | 2 | none | yes |
 | Prefab | `.prefab` | Prefab | 1 | none | yes |
 | Replay | `.replay` | Replay | 3 | none | yes |

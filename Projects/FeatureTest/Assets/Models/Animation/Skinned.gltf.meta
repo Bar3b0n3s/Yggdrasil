@@ -1,0 +1,53 @@
+{
+	"Format": "AssetMeta",
+	"Version": 1,
+	"Handle": "e707c63160b28aa4",
+	"Type": "Prefab",
+	"Importer": "Gltf",
+	"ImporterVersion": 3,
+	"Settings": {
+		"Scale": 1,
+		"GenerateMissingTangents": true,
+		"ImportMaterials": true,
+		"MergeMeshes": false,
+		"AnimationEvents": [
+			{
+				"Animation": "animation:0:Wave",
+				"Name": "Start",
+				"Time": 0
+			},
+			{
+				"Animation": "animation:0:Wave",
+				"Name": "Peak",
+				"Time": 0.5
+			},
+			{
+				"Animation": "animation:0:Wave",
+				"Name": "End",
+				"Time": 1
+			}
+		]
+	},
+	"SubAssets": [
+		{
+			"Key": "animation:0:Wave",
+			"Handle": "79e581911985caaf",
+			"Type": "AnimationClip"
+		},
+		{
+			"Key": "material:0:StripMaterial",
+			"Handle": "48bc37000411a847",
+			"Type": "Material"
+		},
+		{
+			"Key": "mesh:0:Strip",
+			"Handle": "5a831424c6906c00",
+			"Type": "Mesh"
+		},
+		{
+			"Key": "skin:0",
+			"Handle": "aa94bd7ed48f6cb8",
+			"Type": "Skeleton"
+		}
+	]
+}

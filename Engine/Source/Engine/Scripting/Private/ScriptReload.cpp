@@ -847,7 +847,7 @@ namespace Engine {
 				// A table that never existed (module-top fault) or was dropped (memory fault) holds no state to keep:
 				// it restarts the lifecycle, so OnCreate runs now and OnStart at the next start flush (§5.7).
 				found->second.Started = false;
-				found->second.PendingPhysics.clear();
+				found->second.PendingEvents.clear();
 				// Transfer the new instance's root to State; every other transaction root remains scoped here.
 				const auto reference = std::ranges::find(roots.References, update.Table);
 				ENGINE_CORE_VERIFY(reference != roots.References.end(), "missing reload instance root");

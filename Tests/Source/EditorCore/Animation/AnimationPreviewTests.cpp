@@ -19,7 +19,6 @@
 
 // The editor's animation preview (M23, C23.3; Docs/Decisions/0034-m23-contract.md decision 32, stream D): an open edit
 // scene's Animator posed at a time without changing the scene, the preview belonging to that scene among M20's open scenes.
-// Skipped until stream D implements it.
 
 namespace Engine {
 
@@ -58,8 +57,7 @@ namespace Engine {
 	{
 		// Begin poses the Animator at once without touching the scene's revision or the component; playing advances the time by
 		// the frame's seconds; End removes the pose, and a preview whose entity is gone ends by itself.
-		TEST_CASE("AnimationPreview: previewing an Animator poses the edit scene without changing it, and ending restores the bind pose"
-			* doctest::skip(true))
+		TEST_CASE("AnimationPreview: previewing an Animator poses the edit scene without changing it, and ending restores the bind pose")
 		{
 			Test::EditorTestFixture fixture("AnimationPreview");
 			OpenMainScene(fixture);
@@ -121,8 +119,7 @@ namespace Engine {
 		// belongs: previewing an Animator of another scene (even an entity of the same id, as a scene saved as a copy holds)
 		// removes the first scene's pose; switching the active tab ends the preview at the next frame, removing its pose; and
 		// closing its scene ends it with the scene.
-		TEST_CASE("AnimationPreview: a preview belongs to its scene, and previewing another scene, switching tabs or closing the scene removes its pose"
-			* doctest::skip(true))
+		TEST_CASE("AnimationPreview: a preview belongs to its scene, and previewing another scene, switching tabs or closing the scene removes its pose")
 		{
 			Test::EditorTestFixture fixture("AnimationPreviewScenes");
 			OpenMainScene(fixture);

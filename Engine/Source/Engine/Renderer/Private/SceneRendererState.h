@@ -91,12 +91,14 @@ namespace Engine {
 		// state, kept by its SceneRenderer across renders (the placement rule's place 2, SceneRenderer::State::DeformedMeshes),
 		// keyed by the item's Entity and Mesh, which is how its previous positions survive from one render to the next: each
 		// deformed item of a snapshot carries its own Entity (render extraction gives every item its entity, and a snapshot
-		// built by hand gives each deformed item one, as the tests do), so two deformed items never share an entry, and each
-		// entry's VertexStream keeps its draws out of every other item's instanced draw (each has its own pose). The Deform
-		// stage creates it at the item's first deformation, grows it with the mesh's vertex and joint counts, and writes it
-		// each render that draws the item; one that a render did not use is released at that render's end (with
-		// ReleaseUnusedBindings), so an item that leaves the view deforms afresh, its previous positions its new ones, when it
-		// returns. A device loss's release drops every entry with the state.
+		// built by hand gives each deformed item one, as the tests do), so two deformed items never share an entry (two items
+		// of one key in one snapshot take two entries, in snapshot order), and each entry's VertexStream keeps its draws out of
+		// every other item's instanced draw (each has its own pose). The Prepare stage acquires it (AcquireDeformedMesh) when
+		// one of the item's draws survives culling, creating it at the item's first deformation and growing its buffers with
+		// the mesh's vertex and joint counts; the Deform stage writes it each render that draws the item; one that a render
+		// did not use is released at that render's end (with ReleaseUnusedBindings), so an item that leaves the view deforms
+		// afresh, its previous positions its new ones, when it returns. A device loss's release drops every entry with the
+		// state.
 		struct SceneRendererDeformedMesh
 		{
 			UUID Entity{};
@@ -109,6 +111,30 @@ namespace Engine {
 			uint32_t VertexStream = 0;               // never 0: SceneRendererDraw::VertexStream of its draws, unique per renderer
 			uint64_t LastRender = 0;                 // the render that last deformed it
 			bool Deformed = false;                   // a deformation was recorded since its creation (otherwise FirstDeform)
+			size_t SnapshotIndex = 0;                // the item of the LastRender's snapshot it deforms (SceneRenderer::State::ItemDeforms)
+		};
+
+		// M23 (C23.3, decision 27; stream C): how one snapshot item is drawn this render, resolved once by the Prepare stage
+		// from its mesh's GPU mirror (SceneRenderer::State::ResolveItemDeform) by MeshDrawItem's rule: deformed when the mesh
+		// has a skin that JointPalette covers, or morph targets with a resolved weight that is not 0. It holds what the Deform
+		// stage dispatches with, so the mirror may change meanwhile, and is dropped at the render's end.
+		struct SceneRendererItemDeform
+		{
+			bool Resolved = false;
+			bool Deformed = false;
+			// The item's deformation cannot be drawn this render (a palette matrix or morph weight that is not finite, its
+			// buffers' creation failed, or its dispatch failed): none of its draws is recorded, and the error is the render's.
+			bool Skipped = false;
+			std::optional<size_t> Entry{}; // its DeformedMeshes entry, once acquired this render
+			Aabb Bounds{};                 // ComputeDeformedBounds in the item's local space, which culls its draws
+			std::vector<float> Weights{};  // ResolveMorphWeights against the mesh's defaults, MorphTargetCount of them
+			nvrhi::BufferHandle SourceVertices{};
+			nvrhi::BufferHandle Skin{};
+			nvrhi::BufferHandle Morphs{};
+			uint64_t MeshVersion = 0;
+			uint32_t VertexCount = 0;
+			uint32_t SkinJointCount = 0; // the mesh's when JointPalette covers its skin, else 0 (no skinning)
+			uint32_t MorphTargetCount = 0;
 		};
 
 		// Which mesh pass RecordMeshPass records.
@@ -412,6 +438,8 @@ namespace Engine {
 		uint32_t NextVertexStream = 1;
 		uint64_t DeformRender = 0;
 		bool SkinMismatchLogged = false;
+		// The render's items' deformations, one per snapshot item (ResolveItemDeform), cleared at the render's end.
+		std::vector<Detail::SceneRendererItemDeform> ItemDeforms{};
 		SceneRenderStats Stats{};
 		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 44): the debug view the last Render recorded (Lit before the
 		// first), which a Render records instead of a debug view whose first pipelines ran out of memory after their trim and
@@ -439,8 +467,29 @@ namespace Engine {
 		// then (M23) their instance records into Instances and their instanced draws (SceneRendererDraw's Instance and Batch).
 		// A material of a culled submesh keeps the set it already has while its mirror is current (R-MATSET,
 		// MaterialBindingCache::Keep), so it makes no new set when it re-enters the view; a culled material never gets one.
-		// Returns the first non-finite world matrix's error, after skipping that draw, or a material set's creation error.
-		[[nodiscard]] Status PrepareDraws(const RenderSnapshot& snapshot, const CameraData& camera);
+		// M23 (C23.3, stream C): a deformed item's submeshes are culled by its deformed bounds, and its surviving draws bind
+		// its DeformedMeshes entry's vertices with its VertexStream (AcquireDeformedMesh, into frame.Deforms).
+		// Returns the first non-finite world matrix's error, after skipping that draw, or a material set's creation error,
+		// or a deformation's (ResolveItemDeform, AcquireDeformedMesh), after skipping that item's draws.
+		[[nodiscard]] Status PrepareDraws(Detail::SceneRendererFrame& frame, const RenderSnapshot& snapshot, const CameraData& camera);
+		// M23 (C23.3, decision 27; stream C): resolves ItemDeforms[index] (a valid mesh handle) once per render from the item's
+		// mesh mirror (GetMesh, which may upload: the caller holds no mirror reference across it), logging a palette shorter
+		// than a skin once per renderer (RenderSkinMismatchCode; an empty palette is the bind pose without a warning). Errors,
+		// with the item Skipped: InvalidArgument for a palette matrix or a morph weight that is not finite.
+		[[nodiscard]] Status ResolveItemDeform(const RenderSnapshot& snapshot, size_t index);
+		// M23 (C23.3): the DeformedMeshes entry of the resolved, deformed ItemDeforms[index], acquired once per render: the
+		// first entry of the item's Entity and Mesh this render has not acquired, or a new one with the next VertexStream, its
+		// buffers created or grown for the item's mesh (a new mesh version deforms afresh), its index added to frame.Deforms.
+		// Errors, with the item Skipped: those of GraphicsDevice::CreateBuffer (Gpu), naming the entity.
+		[[nodiscard]] Result<size_t> AcquireDeformedMesh(Detail::SceneRendererFrame& frame, size_t index);
+		// M23 (C23.3): what the draws of snapshot items `indices` bind (SkinningPass.h's DeformedVertexSource), acquiring
+		// the deformed ones' entries (their errors kept in frame), for the shadow casters and the selection mask.
+		[[nodiscard]] std::vector<DeformedVertexSource> PrepareVertexSources(Detail::SceneRendererFrame& frame, std::span<const size_t> indices);
+		// M23 (C23.3): the draws of the DeformedMeshes entry `entry` are not recorded this render (its dispatch failed): the
+		// camera's draws of its VertexStream, and the shadow casters' and the selection's batches that bind its vertices.
+		void SkipDeformedDraws(Detail::SceneRendererFrame& frame, const Detail::SceneRendererDeformedMesh& entry);
+		// M23 (C23.3): releases the DeformedMeshes entries the last render did not acquire, and the render's ItemDeforms.
+		void ReleaseUnusedDeforms();
 		// Passes 4, 7 and 9: `draws` with the pipelines of `pass` (the forward ones of `view`) and the view set `viewSet`, one
 		// instanced draw per batch of `draws` (M23, R-INST).
 		void RecordMeshPass(nvrhi::ICommandList& commandList, Detail::SceneRendererMeshPass pass, std::span<const Detail::SceneRendererDraw> draws, nvrhi::IBindingSet& viewSet,
@@ -464,9 +513,10 @@ namespace Engine {
 		// per-view constants and ensures the frame's targets at the scene resolution. An error returned here is one of
 		// Render's errors before recording: Render returns it and records nothing.
 		[[nodiscard]] Status RecordPrepareStage(Detail::SceneRendererFrame& frame);
-		// M23 (C23.3, decision 27; stream C): the Skinning pass, one dispatch per entry of frame.Deforms, each writing the
-		// item's DeformedMeshes entry; an entry whose dispatch fails keeps its error in frame.FirstError and its draws are
-		// skipped this render. Records nothing without a deformed item (every render until stream C).
+		// M23 (C23.3, decision 27; stream C): the Skinning pass, one dispatch per entry of frame.Deforms in one Record (one
+		// pass scope for the stage, W23.3's integration), each writing the item's DeformedMeshes entry; an entry whose
+		// dispatch fails keeps its error in frame.FirstError and its draws are skipped this render (SkipDeformedDraws).
+		// Records nothing without a deformed item.
 		void RecordDeformStage(Detail::SceneRendererFrame& frame);
 		void RecordShadowsStage(Detail::SceneRendererFrame& frame);
 		void RecordDepthNormalStage(Detail::SceneRendererFrame& frame);

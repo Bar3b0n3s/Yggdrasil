@@ -441,7 +441,7 @@ namespace Engine {
 		// follow its deformation (Asset/MeshDeform.h's DeformMeshVertices with its palette and its resolved morph weights) and
 		// are culled by its deformed bounds (ComputeDeformedBounds), so a skinned character's wireframe lies over its shading,
 		// never over its bind pose.
-		TEST_CASE("Wireframe: a deformed item's edges follow its palette and morph weights, culled by its deformed bounds" * doctest::skip(true))
+		TEST_CASE("Wireframe: a deformed item's edges follow its palette and morph weights, culled by its deformed bounds")
 		{
 			Test::InMemoryAssetManager assets;
 			auto snapshot = Utils::WireframeTestSnapshot(assets, false, false, false);
@@ -485,6 +485,21 @@ namespace Engine {
 			DebugDrawList behind;
 			REQUIRE(AppendWireframeOverlay(snapshot, assets, behind).has_value());
 			CHECK(behind.IsEmpty());
+
+			// W23.3's review: a palette matrix or a morph weight that is not finite is InvalidArgument, and the output is
+			// left as it was.
+			snapshot.Meshes[0].JointPalette = { glm::translate(glm::mat4(1.0f), glm::vec3(std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.0f)) };
+			DebugDrawList undefined;
+			const Status undefinedPalette = AppendWireframeOverlay(snapshot, assets, undefined);
+			REQUIRE_FALSE(undefinedPalette.has_value());
+			CHECK(undefinedPalette.error().GetCode() == ErrorCode::InvalidArgument);
+			CHECK(undefined.IsEmpty());
+			snapshot.Meshes[0].JointPalette = { glm::mat4(1.0f) };
+			snapshot.Meshes[0].MorphWeights = { std::numeric_limits<float>::infinity() };
+			const Status infiniteWeight = AppendWireframeOverlay(snapshot, assets, undefined);
+			REQUIRE_FALSE(infiniteWeight.has_value());
+			CHECK(infiniteWeight.error().GetCode() == ErrorCode::InvalidArgument);
+			CHECK(undefined.IsEmpty());
 		}
 	}
 

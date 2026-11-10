@@ -1,6 +1,7 @@
 #include "EditorPCH.h"
 #include "EditorCore/Automation/RegisterMethods.h"
 
+#include "EditorCore/Automation/AnimationMethods.h"
 #include "EditorCore/Automation/AssetMethods.h"
 #include "EditorCore/Automation/AutomationTypes.h"
 #include "EditorCore/Automation/ComponentMethods.h"
@@ -59,6 +60,8 @@ namespace Engine {
 		// M18 (ADR 0029 decisions 3 and 11): the editor's shader hot reload and its Chrome trace capture.
 		RegisterShaderMethodTypes(registry);
 		RegisterProfilerMethodTypes(registry);
+		// M23 (Docs/Decisions/0034-m23-contract.md decision 32): the editor's animation preview.
+		RegisterAnimationMethodTypes(registry);
 	}
 
 	void RegisterEditorMethods(MethodRegistry& methods, const EditorMethodOptions& options)
@@ -82,6 +85,7 @@ namespace Engine {
 		RegisterNativeMethods(methods);
 		RegisterShaderMethods(methods);
 		RegisterProfilerMethods(methods);
+		RegisterAnimationMethods(methods);
 		if (options.TestHooks)
 			RegisterDebugMethods(methods);
 	}

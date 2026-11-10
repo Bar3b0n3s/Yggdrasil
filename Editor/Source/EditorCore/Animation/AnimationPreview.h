@@ -40,7 +40,7 @@ namespace Engine {
 		OpenSceneId Scene = NoOpenScene;       // the open edit scene the preview poses (EditorContext's id)
 		OpenSceneId ActiveScene = NoOpenScene; // the active scene when the preview began: Update ends it at a tab switch
 		UUID Entity{};                         // the previewed Animator's entity, in Scene
-		float Time = 0.0f;                     // seconds added to every layer's time (times its Speed), >= 0
+		float Time = 0.0f;                     // seconds added to every layer's time (times its Speed), in [0, MaxAnimatorTime]
 		bool Playing = false;                  // Update advances Time by the frame's time
 		float Duration = 0.0f;                 // the longest loaded layer clip's Duration (0 without one): the slider's end
 
@@ -62,7 +62,8 @@ namespace Engine {
 		// scene; the same scene and entity changes the running preview. Records the active scene of `context` (ActiveScene),
 		// against which Update detects a tab switch. `context` and `assets` are borrowed for the call. Errors: NotFound when no
 		// open scene has the id `scene` or that scene has no entity `entity`, InvalidArgument when the entity holds no Animator,
-		// for a time that is not finite or below 0, and PoseAnimator's errors (the preview is then not started).
+		// for a time that is not finite or outside [0, MaxAnimatorTime] (a layer time's own range, so the time times a layer's
+		// Speed stays finite), and PoseAnimator's errors (the preview is then not started).
 		[[nodiscard]] Result<AnimationPreviewState> Begin(EditorContext& context, OpenSceneId scene, UUID entity, AssetManager& assets,
 			float time, bool playing);
 

@@ -152,7 +152,7 @@ namespace Engine {
 		// M23 (C23.3, Docs/Decisions/0034-m23-contract.md decision 27; stream C): the Skinning pass's one compute pipeline joins
 		// its declaration with the pass, and the deformed draws keep the 24 mesh pipelines (Roadmap M23: "there are still 24
 		// mesh pipelines").
-		TEST_CASE("RenderPassDeclarations: the Skinning pass declares its compute pipeline, and the mesh pipelines stay 24" * doctest::skip(true))
+		TEST_CASE("RenderPassDeclarations: the Skinning pass declares its compute pipeline, and the mesh pipelines stay 24")
 		{
 			CHECK(GetDeclaredPipelineCountOf("Skinning") == SkinningPass::PipelineCount);
 			CHECK(SkinningPass::PipelineCount == 1);
@@ -180,8 +180,8 @@ namespace Engine {
 		TEST_CASE("Pipelines: Create makes exactly the declared startup pipelines")
 		{
 			// M18 acceptance (C18.1): the startup count is the declarations' sum, and Create goes through CreatePipelines. M23's
-			// LightClusters pass makes it 59 (Docs/Decisions/0034-m23-contract.md decision 5).
-			static_assert(GetDeclaredPipelineCount() == 59);
+			// LightClusters and Skinning passes make it 60 (Docs/Decisions/0034-m23-contract.md decisions 5 and 27).
+			static_assert(GetDeclaredPipelineCount() == 60);
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());

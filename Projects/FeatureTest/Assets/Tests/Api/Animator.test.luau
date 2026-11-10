@@ -1,0 +1,83 @@
+--!strict
+-- The Animator proxy (M23; Docs/Decisions/0034-m23-contract.md decision 31) in Animation.scene: Play, SetWeight,
+-- GetJointTransform and GetRootMotion, and every field read and written.
+local Animation = require("../Animation/Animation")
+local Support = require("./Support")
+
+return Test.Suite("Api.Animator", function()
+	Test.Case("Play and SetWeight drive the layers, and refuse what the Animator lacks", function()
+		local animator = Animation.Animator("/Statue/Armature")
+		local wave = Animation.Load(Animation.WAVE)
+		Test.ExpectEqual(#animator.Layers, 0)
+		animator:Play(1, wave, 0.25)
+		Test.ExpectEqual(#animator.Layers, 1, "the next index appends a layer")
+		local first = animator.Layers[1]
+		Test.ExpectEqual(first.Clip, wave)
+		Test.ExpectEqual(first.Time, 0.25)
+		Test.ExpectEqual(first.Speed, 1)
+		Test.ExpectEqual(first.Weight, 1)
+		Test.ExpectEqual(first.Loop, true)
+		animator:Play(2, wave)
+		Test.ExpectEqual(animator.Layers[2].Time, 0, "an absent time starts the clip")
+		animator:SetWeight(2, 0.5)
+		Test.ExpectEqual(animator.Layers[2].Weight, 0.5)
+		animator:Play(1, nil)
+		Test.ExpectEqual(animator.Layers[1].Clip, nil, "a nil clip clears the layer")
+		Test.ExpectEqual(animator.Layers[1].Weight, 1, "Play keeps the weight")
+		Test.Expect(not pcall(function()
+			animator:Play(4, wave)
+		end), "a layer past the next one raises")
+		Test.Expect(not pcall(function()
+			animator:Play(1, wave, -1)
+		end), "a negative time raises")
+		Test.Expect(not pcall(function()
+			animator:SetWeight(3, 0.5)
+		end), "a layer the Animator lacks raises")
+		Test.Expect(not pcall(function()
+			animator:SetWeight(1, 1.5)
+		end), "a weight above 1 raises")
+		for layer = 3, 8 do
+			animator:Play(layer, wave)
+		end
+		Test.ExpectEqual(#animator.Layers, 8)
+		Test.Expect(not pcall(function()
+			animator:Play(9, wave)
+		end), "a ninth layer raises")
+	end)
+
+	Test.Case("GetJointTransform and GetRootMotion read the last step's pose", function()
+		local animator = Animation.Animator("/Waver/Armature")
+		Test.WaitTicks(1)
+		local position, rotation = animator:GetJointTransform("Joint1")
+		Test.Expect(position ~= nil and rotation ~= nil, "the skeleton has Joint1")
+		local armature = (Animation.Find("/Waver/Armature").Transform :: Transform).WorldPosition
+		Test.ExpectNear((position :: vector).y - armature.y, 1, 1e-4, "Joint1 sits a metre above the chain's root")
+		local missing, none = animator:GetJointTransform("NoSuchJoint")
+		Test.ExpectEqual(missing, nil)
+		Test.ExpectEqual(none, nil)
+		local motion, turn = Animation.Animator("/Statue/Armature"):GetRootMotion()
+		Test.ExpectEqual(motion, vector.zero, "RootMotion None reports no motion")
+		Support.ExpectQuatNear(turn, Quat.Identity(), 1e-6, "and no turn")
+	end)
+
+	Test.Case("every field reads and writes through the proxy", function()
+		local animator = Animation.Animator("/Waver/Armature")
+		local skeleton = animator.Skeleton
+		Test.ExpectEqual(Support.RoundTrip(animator, "Skeleton", nil), skeleton, "the imported skeleton")
+		animator.Skeleton = skeleton
+		Test.ExpectEqual(Support.RoundTrip(animator, "Playing", false), true)
+		Test.ExpectEqual(Support.RoundTrip(animator, "RootMotion", "Apply"), "Extract")
+		Support.RoundTrip(animator, "RootMotion", "None")
+		local wave = Animation.Load(Animation.WAVE)
+		animator.Layers = { { Clip = wave, Time = 0.5, Speed = 2, Weight = 0.25, Loop = false } }
+		local layers = animator.Layers
+		Test.ExpectEqual(#layers, 1)
+		Test.ExpectEqual(layers[1].Clip, wave)
+		Test.ExpectEqual(layers[1].Time, 0.5)
+		Test.ExpectEqual(layers[1].Speed, 2)
+		Test.ExpectEqual(layers[1].Weight, 0.25)
+		Test.ExpectEqual(layers[1].Loop, false)
+		animator.Layers = {}
+		Test.ExpectEqual(#animator.Layers, 0)
+	end)
+end)

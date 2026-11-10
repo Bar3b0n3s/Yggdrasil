@@ -1,0 +1,94 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Main",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"AudioListener": 1,
+		"Animator": 1,
+		"SkinnedMesh": 1
+	},
+	"Entities": [
+		{
+			"ID": "e000000000000001",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 2, 10],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Primary": true
+				},
+				"AudioListener": {
+					"Primary": true
+				}
+			}
+		},
+		{
+			"ID": "e000000000000002",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 10, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Intensity": 3
+				}
+			}
+		},
+		{
+			"ID": "e000000000000031",
+			"Name": "Hero",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Animator": {
+					"Skeleton": "198e38cdbd20dd60",
+					"Layers": [],
+					"Playing": true,
+					"RootMotion": "None"
+				}
+			}
+		},
+		{
+			"ID": "e000000000000032",
+			"Name": "Body",
+			"Parent": "e000000000000031",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "450bb804ab380516"
+				},
+				"SkinnedMesh": {
+					"MorphWeights": []
+				}
+			}
+		}
+	]
+}

@@ -240,8 +240,9 @@ namespace Engine {
 	}
 
 	Result<ShadowCasterSet> ShadowPass::PrepareCasters(GpuResourceCache& cache, std::span<const MeshDrawItem> casters, bool instancing,
-		std::vector<InstanceRecord>& instances)
+		std::vector<InstanceRecord>& instances, std::span<const DeformedVertexSource> sources)
 	{
+		ENGINE_CORE_ASSERT(sources.empty() || sources.size() == casters.size(), "the casters' vertex sources are none or one per caster");
 		// The draws in caster order with their keys and records, sorted below.
 		struct Candidate
 		{
@@ -250,9 +251,12 @@ namespace Engine {
 			InstanceRecord Record{};
 		};
 		std::vector<Candidate> candidates;
-		for (const MeshDrawItem& item : casters)
+		for (size_t casterIndex = 0; casterIndex < casters.size(); ++casterIndex)
 		{
-			if (!item.CastShadows || !item.Mesh.IsValid())
+			const MeshDrawItem& item = casters[casterIndex];
+			// M23 (C23.3): a deformed caster's vertices and bounds (SkinningPass.h).
+			const DeformedVertexSource source = casterIndex < sources.size() ? sources[casterIndex] : DeformedVertexSource{};
+			if (!item.CastShadows || !item.Mesh.IsValid() || source.Skipped)
 				continue;
 			if (!Utils::IsFiniteShadowWorld(item.World))
 				return MakeError(ErrorCode::InvalidArgument, "Shadow caster {} has a non-finite world transform", item.Entity);
@@ -276,19 +280,23 @@ namespace Engine {
 					continue;
 				const bool mask = material.AlphaMode == AlphaMode::Mask;
 				Candidate candidate;
-				candidate.Draw = { .Vertices = mesh.VertexBuffer,
+				candidate.Draw = { .Vertices = source.Vertices != nullptr ? nvrhi::BufferHandle(source.Vertices) : mesh.VertexBuffer,
 					.Attributes = mesh.AttributeBuffer,
 					.Indices = mesh.IndexBuffer,
 					.IndexOffset = submesh.IndexOffset,
 					.IndexCount = submesh.IndexCount,
-					.Bounds = submesh.Bounds,
+					.Bounds = source.Vertices != nullptr ? source.Bounds : submesh.Bounds,
 					.World = item.World,
 					.Variant = Utils::GetPrepassVariant(material.AlphaMode, Utils::SelectCullMode(mirrored, material.DoubleSided)),
 					.ReflectedVariant = Utils::GetPrepassVariant(material.AlphaMode, Utils::SelectCullMode(!mirrored, material.DoubleSided)),
 					.MaterialConstants = mask ? material.Constants : nvrhi::BufferHandle(),
 					.BaseColorMap = mask ? material.BaseColorMap : nvrhi::TextureHandle() };
 				// An Opaque caster binds no material, so the Opaque casters of one mesh batch whatever their materials.
-				candidate.Key = { .Pipeline = candidate.Draw.Variant, .Material = mask ? materialHandle : AssetHandle(), .Mesh = item.Mesh, .Submesh = submeshIndex };
+				candidate.Key = { .Pipeline = candidate.Draw.Variant,
+					.Material = mask ? materialHandle : AssetHandle(),
+					.Mesh = item.Mesh,
+					.Submesh = submeshIndex,
+					.VertexStream = source.VertexStream };
 				candidate.Record = { .World = item.World,
 					.PreviousWorld = item.PreviousWorld.value_or(item.World),
 					.EntityId = item.PickId,

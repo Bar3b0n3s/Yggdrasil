@@ -239,6 +239,9 @@ return true
 				{ "Camera.ScreenToWorldRay", "local origin = d.Camera:ScreenToWorldRay(49.5, 49.5); assert(origin == vector.create(1, 2, 0))" },
 				{ "Camera.WorldToScreen", "assert(d.Camera:WorldToScreen(vector.create(1, 2, -5)).z > 0)" },
 				{ "MeshRenderer.GetMaterial", "assert(d.MeshRenderer:GetMaterial(1) ~= nil)" },
+				// M23 (Docs/Decisions/0034-m23-contract.md decision 31): the pose of the last AnimationSystem phase (none here).
+				{ "Animator.GetJointTransform", "assert(holders.Animator.Animator:GetJointTransform(\"Hips\") == nil)" },
+				{ "Animator.GetRootMotion", "assert(holders.Animator.Animator:GetRootMotion() == vector.zero)" },
 			};
 			const std::set<std::string_view> identityReads = { "Entity.ID", "Entity.IsValid", "Entity.__eq" };
 			// Reads of a system's state of the entity, which is leaving with it (decision 4, "Unchanged").
@@ -281,6 +284,10 @@ return true
 				{ "AudioSource.Pause", "holders.AudioSource.AudioSource:Pause()" },
 				{ "AudioSource.Resume", "holders.AudioSource.AudioSource:Resume()" },
 				{ "MeshRenderer.SetMaterial", "d.MeshRenderer:SetMaterial(1, nil)" },
+				// M23 (Docs/Decisions/0034-m23-contract.md decision 31).
+				{ "Animator.Play", "holders.Animator.Animator:Play(1, nil)" },
+				{ "Animator.SetWeight", "holders.Animator.Animator:SetWeight(1, 0.5)" },
+				{ "SkinnedMesh.SetMorphWeight", "holders.SkinnedMesh.SkinnedMesh:SetMorphWeight(\"Smile\", 0.5)" },
 			};
 
 			Test::ScriptTestFixture fixture({ .ConfigureApi = RegisterIdentityProbe });

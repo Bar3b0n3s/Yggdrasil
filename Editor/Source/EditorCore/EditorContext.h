@@ -1,5 +1,6 @@
 #pragma once
 
+#include "EditorCore/Animation/AnimationPreview.h"
 #include "EditorCore/Automation/ProvenanceRecorder.h"
 #include "EditorCore/Commands/Command.h"
 #include "EditorCore/Commands/CommandHistory.h"
@@ -240,6 +241,11 @@ namespace Engine {
 		// nullptr when the engine context has none (most in-process tests). Valid for the editor's lifetime; CloseProject
 		// stops it.
 		[[nodiscard]] AudioPreview* GetAudioPreview() { return m_AudioPreview.get(); }
+		// M23 (Docs/Decisions/0034-m23-contract.md decision 32): the editor's animation preview (EditorCore/Animation/
+		// AnimationPreview.h), one for the editor's lifetime, even headless: animation.preview drives it, the panel shows it
+		// and the editor's frame (EditorApp::OnUpdate) updates it.
+		[[nodiscard]] AnimationPreview& GetAnimationPreview() { return m_AnimationPreview; }
+		[[nodiscard]] const AnimationPreview& GetAnimationPreview() const { return m_AnimationPreview; }
 
 		// Once per frame (EditorApp::OnUpdate) with a monotonic time in seconds (the frame clock's accumulated unscaled time,
 		// so headless editors on a ManualClock are deterministic); tests pass chosen times: drives asset hot reload
@@ -724,6 +730,8 @@ namespace Engine {
 		bool m_TestImportActive = false;
 		Scope<AudioPreview> m_AudioPreview; // M12: after the manager it loads clips through, so it is destroyed first
 		bool m_SceneChangedOnDisk = false;  // IsSceneChangedOnDisk
+		// M23: the animation preview; it holds no pointer, only the open scene and the entity it poses.
+		AnimationPreview m_AnimationPreview{};
 		Scope<LoadedProject> m_Project;
 		// The addressed scene's document (see the private open-scenes members above).
 		Scope<Scene> m_Scene;

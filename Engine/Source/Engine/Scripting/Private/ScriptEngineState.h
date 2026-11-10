@@ -15,6 +15,7 @@
 #include <span>
 #include <string>
 #include <thread>
+#include <variant>
 #include <vector>
 
 namespace Engine {
@@ -36,6 +37,9 @@ namespace Engine {
 	struct ScriptEngine::State
 	{
 		using InstanceKey = Detail::ScriptInstanceKey;
+		// A fixed-step callback an instance holds until it has started: a physics callback, or an animation event (M23,
+		// Docs/Decisions/0034-m23-contract.md decision 31).
+		using HeldEvent = std::variant<PhysicsEvent, AnimationEventRecord>;
 
 		struct Instance
 		{
@@ -57,8 +61,9 @@ namespace Engine {
 			bool FaultDisabled = false;
 			bool DestroyPrepared = false;
 			std::map<std::string, VariantValue> Overrides{};
-			// Physics callbacks that arrived before OnStart, in dispatch order; delivered after the start flush (§9.4 pairs).
-			std::vector<PhysicsEvent> PendingPhysics{};
+			// Physics callbacks and animation events that arrived before OnStart, in dispatch order; delivered after the start
+			// flush (§9.4 pairs).
+			std::vector<HeldEvent> PendingEvents{};
 		};
 
 		// Evaluation and replay-predicate failures are reported without disabling the addressed instance.
@@ -143,12 +148,16 @@ namespace Engine {
 		// Runs the deferred OnCreate callbacks in (ExecutionOrder, canonical entity, slot) order; a no-op inside a faulted
 		// slice.
 		void InvokeDeferredCreates();
-		void Invoke(InstanceKey key, std::string_view callback, const PhysicsEvent* event = nullptr, bool destroying = false);
+		// `event` is a physics callback's (its other entity and contact), `animation` OnAnimationEvent's (its AnimationEvent).
+		void Invoke(InstanceKey key, std::string_view callback, const PhysicsEvent* event = nullptr, bool destroying = false,
+			const AnimationEventRecord* animation = nullptr);
 		void InvokePhysics(InstanceKey key, const PhysicsEvent& event);
-		// Delivers physics callbacks held for started instances: an entity's instances together, in slot order, at the turn
-		// of its first in (ExecutionOrder, canonical entity, slot) order (decision 17's entity callbacks), and dispatch order
-		// per instance; an instance removed or faulted by a callback discards the rest of its held events.
-		void DeliverPendingPhysics();
+		void InvokeAnimation(InstanceKey key, const AnimationEventRecord& event);
+		// Delivers the physics callbacks and animation events held for started instances: an entity's instances together,
+		// in slot order, at the turn of its first in (ExecutionOrder, canonical entity, slot) order (decision 17's entity
+		// callbacks), and dispatch order per instance; an instance removed or faulted by a callback discards the rest of its
+		// held events.
+		void DeliverPendingEvents();
 		// Unreferences the instance's table, erases it and marks the lifecycle order for a refresh. Returns the next one.
 		std::map<InstanceKey, Instance>::iterator EraseInstance(std::map<InstanceKey, Instance>::iterator instance);
 		void Phase(std::string_view callback);

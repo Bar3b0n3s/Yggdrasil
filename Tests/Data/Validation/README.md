@@ -15,3 +15,5 @@ requires a fixture for every code but the retired ones (`ProjectValidator::GetRe
 - `PATH_CASE_MISMATCH` pairs `Grey.png` with `grey.png.meta`; the names differ in more than letter case, so git checks both
   out everywhere and the scan reports the mismatch on case-sensitive and case-insensitive file systems alike.
 - `PHYSICS_LIMIT_EXCEEDED` (16,385 bodies) and `RENDER_LIGHT_LIMIT_EXCEEDED` (257 lights) are expanded at test time.
+- `ANIMATION_NO_ANIMATOR` and `ANIMATION_SKELETON_MISMATCH` reference the meshes and skeletons of generated skinned glTF
+  files by their sub-asset handles, so their `.meta` files fix the source handles.

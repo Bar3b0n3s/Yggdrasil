@@ -4,12 +4,13 @@
 	"Handle": "2a68836c6e412aca",
 	"Type": "Prefab",
 	"Importer": "Gltf",
-	"ImporterVersion": 2,
+	"ImporterVersion": 3,
 	"Settings": {
 		"Scale": 1,
 		"GenerateMissingTangents": true,
 		"ImportMaterials": true,
-		"MergeMeshes": false
+		"MergeMeshes": false,
+		"AnimationEvents": []
 	},
 	"SubAssets": [
 		{

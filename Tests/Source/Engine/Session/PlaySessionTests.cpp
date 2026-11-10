@@ -233,6 +233,7 @@ namespace Engine {
 				PlaySessionPhase::StartFlush,
 				PlaySessionPhase::FixedUpdate,
 				PlaySessionPhase::Tasks,
+				PlaySessionPhase::AnimationSystem,
 				PlaySessionPhase::PreStepTransformUpdate,
 				PlaySessionPhase::PhysicsPreStep,
 				PlaySessionPhase::PhysicsStep,
@@ -253,10 +254,10 @@ namespace Engine {
 			// FixedStep alone runs the fixed step only; FrameUpdate alone the frame phase only.
 			observer.Phases.clear();
 			(*session)->FixedStep();
-			CHECK(observer.Phases == std::vector<PlaySessionPhase>(expected.begin(), expected.begin() + 11));
+			CHECK(observer.Phases == std::vector<PlaySessionPhase>(expected.begin(), expected.begin() + 12));
 			observer.Phases.clear();
 			(*session)->FrameUpdate(FrameTime{ .DeltaTime = 1.0 / 60.0, .UnscaledDeltaTime = 1.0 / 60.0, .Alpha = 0.5, .FrameIndex = 0 });
-			CHECK(observer.Phases == std::vector<PlaySessionPhase>(expected.begin() + 11, expected.end()));
+			CHECK(observer.Phases == std::vector<PlaySessionPhase>(expected.begin() + 12, expected.end()));
 		}
 
 		TEST_CASE("PlaySession: Simulate mode skips the script and audio phases")
@@ -271,6 +272,7 @@ namespace Engine {
 			const std::vector<PlaySessionPhase> expected = {
 				PlaySessionPhase::InterpolationSnapshot,
 				PlaySessionPhase::ApplyInput,
+				PlaySessionPhase::AnimationSystem,
 				PlaySessionPhase::PreStepTransformUpdate,
 				PlaySessionPhase::PhysicsPreStep,
 				PlaySessionPhase::PhysicsStep,

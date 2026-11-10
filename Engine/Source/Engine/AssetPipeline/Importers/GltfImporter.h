@@ -32,9 +32,9 @@ namespace Engine {
 		bool ImportMaterials = true;         // false: no material sub-assets; every slot uses the Default material
 		bool MergeMeshes = false;            // true: every mesh of the scene merged into the one mesh sub-asset "mesh:merged"
 		// M23 (C23.3; decision 25): the events of the imported clips, each added to the clip its Animation names, sorted by
-		// time in its clip (stable); an event naming no clip of the file, or past its clip's end, fails the import naming it.
-		// Registered after MergeMeshes by stream A with version 3, so an earlier .meta reads as no events; unregistered and
-		// read by nothing until then.
+		// time in its clip (stable); an event naming no clip of the file (a skipped animation's included), with a name that
+		// is not 1 to MaxAnimationNameBytes bytes of UTF-8, or outside its clip's [0, Duration], fails the import naming it.
+		// Registered after MergeMeshes with version 3, so an earlier .meta reads as no events.
 		std::vector<GltfAnimationEvent> AnimationEvents{};
 	};
 
@@ -77,38 +77,64 @@ namespace Engine {
 	//     rebuilt (AssetCache::Find, §7.5; decision 20). An image file with its own Texture meta is referenced by that
 	//     standalone handle instead and not imported again ("GltfImporter: an image with its own Texture meta is referenced,
 	//     not duplicated"; §6.4); its own settings apply.
-	//   - M23 (version 3, C23.3, C-SKEL, C-MORPH; Docs/Decisions/0034-m23-contract.md decision 25; stream A): skins,
-	//     animations and morph targets, which version 2 skips:
-	//       - "skin:<index>[:<name>]": one Skeleton per glTF skin (SkeletonData.h): its joints and every node between them and
-	//         the skin's Animator entity (the static joints), parents first, each named after its node ("Node <index>" without
-	//         a name; a name a joint of the skin already took gets " <index>" appended), with the node's TRS as its rest pose
-	//         and the skin's inverse bind matrix (the identity for a node that is not one of skin.joints); Scale is baked into
-	//         the rest translations and the inverse binds' translations. Its RootMotionJoint is the skin's first root joint
-	//         (the first of skin.joints whose parent is not one of skin.joints), so a rig under an intermediate node moves its
-	//         hips, never that node;
-	//       - "animation:<index>[:<name>]": one AnimationClip per glTF animation whose channels target a joint of a skin or a
-	//         skinned node's morph weights (AnimationClipData.h): a joint channel names its joint, a weights channel the path
-	//         of the morphed node's entity from the Animator's entity; translations are scaled by Scale; the clip's events are
-	//         the settings' AnimationEvents that name it; a channel targeting another node is skipped with
-	//         ASSET_CONTENT_SKIPPED ("animations[0].channels[2]"), and an animation left with no channel is skipped whole. Its
-	//         Duration is its largest key time; an animation whose largest key time is above 0 but below
-	//         MinAnimationClipDuration (a fuzzed or broken file) is skipped whole with ASSET_CONTENT_SKIPPED ("animations[1]"),
-	//         as AnimationClipData's validation refuses it;
+	//   - M23 (version 3, C23.3, C-SKEL, C-MORPH; Docs/Decisions/0034-m23-contract.md decision 25 and stream A's notes):
+	//     skins, animations and morph targets, which version 2 skips (MergeMeshes still skips them, with
+	//     ASSET_CONTENT_SKIPPED for each skin, animation and primitive's targets, since its one mesh is static):
+	//       - a skin's Animator entity is the entity of the nearest node that is not a joint (of any imported skin) at or above
+	//         the lowest common ancestor of the skin's root joints (its joints whose parent is not one of them) and of the
+	//         nodes drawn with it: that ancestor itself when it is not a joint, else its nearest ancestor that is not one (a
+	//         skinned node may lie below its own root joint), and the root entity when there is none (the ancestor is the
+	//         scene, or every node above it is a joint). A skin whose joints are not all in the default scene is skipped with
+	//         ASSET_CONTENT_SKIPPED ("skins[2]"), and the nodes drawn with it draw unskinned;
+	//       - "skin:<index>[:<name>]": one Skeleton per Animator entity (SkeletonData.h). Skins that resolve to the same
+	//         Animator entity (common when an exporter gives each skinned mesh its own skin over shared joints) are merged
+	//         into one Skeleton, keyed by the first of them (the lowest skin index); skins that resolve to different entities
+	//         stay separate Skeletons. Its joints are the union of its skins' joints and every node between them and the
+	//         Animator's node (the static joints), in canonical node order (so parents first), each named after its node
+	//         ("Node <index>" without a name; a name a joint of the Skeleton already took gets " <index>" appended), with the
+	//         node's TRS as its rest pose. A joint's inverse bind matrix is that of the first of the merged skins that lists
+	//         it, and a later skin that shares a joint with the earlier ones is carried into their bind space by the
+	//         correction its first shared joint gives (the earlier skin's inverse bind's inverse times its own), which the
+	//         joints it adds take too; a static joint's is the identity. Scale is baked into the rest translations and the
+	//         inverse binds' translations. Its RootMotionJoint is the first skin's first root joint, so a rig under an
+	//         intermediate node moves its hips, never that node;
 	//       - a skinned primitive's JOINTS_0 and WEIGHTS_0 (unsigned byte or short joints; float, or normalized unsigned byte
-	//         or short weights, renormalized to sum to 1) become the mesh's skin (MeshData::Skin, its indices remapped to the
-	//         Skeleton's joint order, SkinJointCount the skeleton's joint count); a mesh that nodes use with different skins,
-	//         or with and without one, is imported once per skin, keyed "mesh:<index>[:<name>]:skin:<skin index>". Its
-	//         primitives' morph targets (POSITION, NORMAL and TANGENT deltas; the mesh's extras "targetNames", else
-	//         "Target <i>"; its weights as the defaults) become MeshData::MorphTargets; a mesh whose primitives disagree on
-	//         their target count keeps none and is reported with ASSET_CONTENT_SKIPPED;
-	//       - the prefab: joint nodes become no entity (they are the Skeleton's joints). A skin's Animator entity is the
-	//         entity of the nearest node that is not a joint at or above the lowest common ancestor of the skin's root joints
-	//         and of the nodes it skins: that ancestor itself when it is not a joint, else its nearest ancestor that is not one
-	//         (a skinned node may lie below its own root joint), and the root entity when there is none (the ancestor is the
-	//         scene, or every node above it is a joint). That entity gets an Animator with the Skeleton and one layer playing
-	//         the first imported clip that animates it (none without one); the skeleton's model space is that entity's. Each
-	//         skinned or morphed node's entity gets a SkinnedMesh beside its MeshRenderer, with the mesh's default weights. A
-	//         non-joint node below a joint is placed under the Animator's entity at its bind-pose transform relative to it.
+	//         or short weights, renormalized to sum to 1, a vertex without a positive weight bound to its first joint) become
+	//         the mesh's skin (MeshData::Skin), its indices mapped into its Skeleton's joint order (SkinJointCount the
+	//         Skeleton's joint count). Each skinned mesh keeps its own inverse bind matrices: where its skin's differ from its
+	//         Skeleton's (a merged skin bound elsewhere), each vertex is moved into the Skeleton's bind space by its heaviest
+	//         joint's correction (its Skeleton inverse bind's inverse times its skin's), its normal and tangent turned with it
+	//         and its morph deltas too, so it deforms exactly as its own skin deforms it whenever the skins share one bind
+	//         pose, which exporters give. A mesh that nodes draw with different skins, or with and without one, is imported
+	//         once per skin, each skinned variant keyed "mesh:<index>[:<name>]:skin:<skin index>" (the unskinned one keeps the
+	//         mesh's key, as does the only variant of a mesh drawn one way). A node whose mesh's triangle primitives lack
+	//         JOINTS_0 or WEIGHTS_0 draws unskinned, reported ("nodes[3].skin"); more than four influences (JOINTS_1) are
+	//         reported and ignored;
+	//       - a mesh's morph targets (POSITION, NORMAL and TANGENT deltas, a NORMAL or TANGENT delta only where the file gives
+	//         the base attribute; named after the mesh's extras "targetNames", else "Target <i>", a name taken earlier getting
+	//         " <i>" appended; the mesh's weights as their defaults) become MeshData::MorphTargets; a mesh of more than
+	//         MaxMeshMorphTargets targets keeps none, reported ("meshes[1].targets") (cgltf_validate refuses primitives that
+	//         disagree on their target count);
+	//       - "animation:<index>[:<name>]": one AnimationClip per glTF animation (AnimationClipData.h): a translation,
+	//         rotation or scale channel of a joint names the joint (its name in the first Skeleton holding it), a weights
+	//         channel of a node drawn with imported morph targets the path of its entity from the entity of the nearest
+	//         Animator at or above it; translations are scaled by Scale and Step and Linear rotations normalized. A channel
+	//         of another node, a node's weights no Animator plays, or a target an earlier channel keys, is skipped with
+	//         ASSET_CONTENT_SKIPPED ("animations[0].channels[2]"); an animation left with no channel is skipped whole
+	//         ("animations[0]"), as is one whose largest key time is above 0 but below MinAnimationClipDuration (a fuzzed or
+	//         broken file), which AnimationClipData's validation refuses. Its Duration is its largest key time, and its events
+	//         are the settings' AnimationEvents that name it. A sampler whose input is not float key times strictly increasing
+	//         from 0 within a day, or whose output does not fit its path, fails the import;
+	//       - the prefab: joint nodes become no entity (they are the Skeleton's joints; a mesh on a joint is reported,
+	//         "nodes[4].mesh", and not placed). A non-joint node below a joint is placed under the Animator entity of the first
+	//         Skeleton holding that joint, at its rest transform relative to it (from the nodes' TRS; a shear non-uniformly
+	//         scaled joints make is approximated). A skinned node whose nearest Animator would not be its own Skeleton's is
+	//         placed under its own Skeleton's Animator the same way, or, when its own entity holds another Skeleton's
+	//         Animator, draws unskinned, reported ("nodes[5].skin"). Each Animator entity gets an Animator with its Skeleton
+	//         and one layer playing the first imported clip that animates it (none without one), so one Animator drives every
+	//         SkinnedMesh of a merged Skeleton; the Skeleton's model space is that entity's. Each node drawn with a skin or
+	//         with imported morph targets gets a SkinnedMesh beside its MeshRenderer, its MorphWeights the node's glTF weights,
+	//         else its mesh's, clamped into [-1, 1]. Entities are written in canonical order (§5.1).
 	//     The skins and clips reference only sub-assets of their own source, so Import.Dependencies gains nothing for them
 	//     (ADR 0028's phase-2 importer-dependency rule holds: every asset outside the source a skin or clip references is
 	//     listed, and there is none).
@@ -136,21 +162,22 @@ namespace Engine {
 	// precise message"); a buffer view or accessor (sparse parts included) whose elements do not fit in its data, naming it
 	// ("accessors[<i>]"; an accessor without a buffer view may have at most 2^24 elements); cgltf_validate failures; an index
 	// out of range, a NaN or infinite attribute value, or a primitive with no non-degenerate triangle. Degenerate triangles
-	// are dropped. Skins, animations, cameras and lights are skipped (§1.2) with ASSET_CONTENT_SKIPPED (skins and animations
-	// only until version 3, above).
+	// are dropped. Cameras and lights are skipped (§1.2) with ASSET_CONTENT_SKIPPED, as are skins and animations with
+	// MergeMeshes (version 3 imports them otherwise, above).
 	//
 	// Warnings (ImportResult::Diagnostics, so they persist in the cache manifest): ASSET_UNSUPPORTED_UV_SET for a texture
 	// bound to TEXCOORD_2 or a later set (ignored: meshes have two UV sets), ASSET_TANGENTS_APPROXIMATED, and
 	// ASSET_CONTENT_SKIPPED with the skipped item as Subject ("meshes[1].primitives[0]", "skins[0]", "animations[0]",
-	// "cameras[0]", "KHR_lights_punctual.lights[0]"). Version 2 no longer produces ASSET_VERTEX_COLORS_IGNORED: COLOR_0 is
-	// imported (the code stays, never reused; ProjectValidator::GetRetiredCodes).
+	// "animations[0].channels[1]", "nodes[2].skin", "cameras[0]", "KHR_lights_punctual.lights[0]"). Version 2 no longer
+	// produces ASSET_VERTEX_COLORS_IGNORED: COLOR_0 is imported (the code stays, never reused;
+	// ProjectValidator::GetRetiredCodes).
 	class GltfImporter final : public IAssetImporter
 	{
 	public:
 		static constexpr std::string_view Id = "Gltf";
 		// M23: version 2 imports TEXCOORD_1 and COLOR_0 (MeshData version 2) and each map's UV set (Material version 2);
-		// stream A's version 3 (C23.3, ADR 0028's phase-2 ledger) skins, animations and morph targets.
-		static constexpr uint32_t Version = 2;
+		// version 3 (C23.3, ADR 0028's phase-2 ledger) skins, animations and morph targets, and the AnimationEvents setting.
+		static constexpr uint32_t Version = 3;
 
 		[[nodiscard]] std::string_view GetId() const override { return Id; }
 		[[nodiscard]] uint32_t GetVersion() const override { return Version; }
@@ -170,7 +197,7 @@ namespace Engine {
 		// URI, naming it as written.
 		[[nodiscard]] static Result<std::vector<std::string>> ListExternalUris(std::span<const std::byte> source);
 
-		// Registers GltfImportSettings.
+		// Registers GltfAnimationEvent and GltfImportSettings.
 		static void RegisterTypes(TypeRegistry& registry);
 	};
 

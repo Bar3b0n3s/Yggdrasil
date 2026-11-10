@@ -18,6 +18,7 @@
 #include <bit>
 #include <compare>
 #include <format>
+#include <limits>
 #include <map>
 #include <optional>
 #include <span>
@@ -177,20 +178,35 @@ namespace Engine {
 		}
 
 		// Creates a vertex or index buffer of `size` bytes, kept in its shader-readable state between command lists, and
-		// records its upload into `commandList`.
+		// records its upload into `commandList`. M23 (C23.3): `rawViews` lets a deformable mesh's vertex buffer be the
+		// Skinning pass's raw source too (SkinningPass.h).
 		static Result<nvrhi::BufferHandle> CreateGeometryBuffer(GraphicsDevice& device, nvrhi::ICommandList& commandList, const void* data,
-			size_t size, bool isIndexBuffer, std::string debugName)
+			size_t size, bool isIndexBuffer, std::string debugName, bool rawViews = false)
 		{
 			nvrhi::BufferDesc desc;
 			desc.byteSize = size;
 			desc.isVertexBuffer = !isIndexBuffer;
 			desc.isIndexBuffer = isIndexBuffer;
+			desc.canHaveRawViews = rawViews;
 			desc.initialState = isIndexBuffer ? nvrhi::ResourceStates::IndexBuffer : nvrhi::ResourceStates::VertexBuffer;
 			desc.keepInitialState = true;
 			desc.debugName = std::move(debugName);
 			ENGINE_TRY_ASSIGN(nvrhi::BufferHandle buffer, device.CreateBuffer(desc));
 			commandList.writeBuffer(buffer, data, size);
 			return buffer;
+		}
+
+		// M23 (C23.3, decision 27): a raw buffer of `size` bytes the Skinning pass reads (a mesh's skin or morph deltas), kept
+		// in ShaderResource between command lists; the caller records its contents.
+		static Result<nvrhi::BufferHandle> CreateDeformBuffer(GraphicsDevice& device, uint64_t size, std::string debugName)
+		{
+			nvrhi::BufferDesc desc;
+			desc.byteSize = size;
+			desc.canHaveRawViews = true;
+			desc.initialState = nvrhi::ResourceStates::ShaderResource;
+			desc.keepInitialState = true;
+			desc.debugName = std::move(debugName);
+			return device.CreateBuffer(desc);
 		}
 
 		// The constants of `material` (Shared/MaterialConstants.h).
@@ -328,7 +344,9 @@ namespace Engine {
 	namespace {
 
 		// The mesh half of the cache: a vertex and an index buffer, and the attribute stream (M23: the mesh's own, or the
-		// shared default stream, grown when needed), filled by one command list (§8.14 item 1).
+		// shared default stream, grown when needed), filled by one command list (§8.14 item 1). M23 (C23.3, decision 27): a
+		// mesh with a skin or morph targets also gets its skin and morph buffers, its vertex buffer is a raw buffer too (the
+		// Skinning pass's source), and its deform bounds are computed once (MeshDeform.h).
 		struct MeshTraits
 		{
 			using Data = MeshData;
@@ -368,11 +386,19 @@ namespace Engine {
 					return MakeError(ErrorCode::InvalidArgument, "mesh '{}' has no vertices or no indices", name);
 				// Not an immediate command list: the scene renderer resolves its meshes inside the frame (§8.3 pass 1), while the
 				// frame's immediate list is open, and NVRHI's validation allows one open immediate list at a time.
+				// M23 (C23.3): the Skinning pass addresses a deformable mesh's bytes with 32-bit offsets (Passes/Skinning.slang).
+				const bool skinned = !mesh.Skin.empty() && mesh.SkinJointCount > 0;
+				const bool morphed = !mesh.MorphTargets.empty();
+				const uint64_t vertexBytes = static_cast<uint64_t>(mesh.Vertices.size()) * sizeof(MeshVertex);
+				const uint64_t morphTargetBytes = static_cast<uint64_t>(mesh.Vertices.size()) * sizeof(MeshMorphDelta);
+				const uint64_t morphBytes = mesh.MorphTargets.size() * morphTargetBytes;
+				if ((skinned || morphed) && std::max(vertexBytes, morphBytes) > std::numeric_limits<uint32_t>::max())
+					return MakeError(ErrorCode::InvalidArgument, "mesh '{}' is too large to deform: its vertices or morph deltas exceed 4 GiB", name);
 				ENGINE_TRY_ASSIGN(nvrhi::CommandListHandle commandList,
 					device.CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false)));
 				CommandListRecording recording(device, *commandList);
 				Result<nvrhi::BufferHandle> vertices = Utils::CreateGeometryBuffer(device, *commandList, mesh.Vertices.data(),
-					mesh.Vertices.size() * sizeof(MeshVertex), false, std::format("{} (vertices)", name));
+					mesh.Vertices.size() * sizeof(MeshVertex), false, std::format("{} (vertices)", name), skinned || morphed);
 				Result<nvrhi::BufferHandle> indices = vertices
 					? Utils::CreateGeometryBuffer(device, *commandList, mesh.Indices.data(), mesh.Indices.size() * sizeof(uint32_t), true,
 						  std::format("{} (indices)", name))
@@ -380,6 +406,21 @@ namespace Engine {
 				DefaultAttributeStream grown;
 				Result<nvrhi::BufferHandle> attributes =
 					indices ? CreateAttributeBuffer(context, *commandList, mesh, name, grown) : Result<nvrhi::BufferHandle>(nvrhi::BufferHandle());
+				Result<nvrhi::BufferHandle> skin = nvrhi::BufferHandle();
+				if (attributes && skinned)
+				{
+					skin = Utils::CreateDeformBuffer(device, mesh.Skin.size() * sizeof(MeshSkinVertex), std::format("{} (skin)", name));
+					if (skin)
+						commandList->writeBuffer(*skin, mesh.Skin.data(), mesh.Skin.size() * sizeof(MeshSkinVertex));
+				}
+				Result<nvrhi::BufferHandle> morphs = nvrhi::BufferHandle();
+				if (attributes && skin && morphed)
+				{
+					// Target by target, each of one delta per vertex.
+					morphs = Utils::CreateDeformBuffer(device, morphBytes, std::format("{} (morph targets)", name));
+					for (size_t target = 0; morphs && target < mesh.MorphTargets.size(); ++target)
+						commandList->writeBuffer(*morphs, mesh.MorphTargets[target].Deltas.data(), morphTargetBytes, target * morphTargetBytes);
+				}
 				// The list is executed whatever the buffers' results: a list that never executes keeps itself, and the buffer
 				// it wrote, alive (CommandListRecording), which would fail the next device loss's recovery. Without every
 				// buffer its writes are discarded with them.
@@ -390,6 +431,10 @@ namespace Engine {
 					return std::unexpected(std::move(indices).error());
 				if (!attributes)
 					return std::unexpected(std::move(attributes).error());
+				if (!skin)
+					return std::unexpected(std::move(skin).error());
+				if (!morphs)
+					return std::unexpected(std::move(morphs).error());
 				if (grown.Buffer != nullptr)
 					*context.DefaultAttributes = std::move(grown);
 
@@ -397,6 +442,14 @@ namespace Engine {
 				mirror.VertexBuffer = std::move(*vertices);
 				mirror.AttributeBuffer = std::move(*attributes);
 				mirror.IndexBuffer = std::move(*indices);
+				if (skinned || morphed)
+				{
+					mirror.SkinBuffer = std::move(*skin);
+					mirror.MorphBuffer = std::move(*morphs);
+					mirror.SkinJointCount = skinned ? mesh.SkinJointCount : 0;
+					mirror.MorphTargetCount = static_cast<uint32_t>(mesh.MorphTargets.size());
+					mirror.DeformBounds = ComputeMeshDeformBounds(mesh);
+				}
 				mirror.VertexCount = static_cast<uint32_t>(mesh.Vertices.size());
 				mirror.IndexCount = static_cast<uint32_t>(mesh.Indices.size());
 				mirror.Submeshes.reserve(mesh.Submeshes.size());

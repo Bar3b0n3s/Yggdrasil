@@ -81,7 +81,8 @@ namespace Engine {
 	[[nodiscard]] std::vector<glm::mat4> ComputeSkinMatrices(const SkeletonData& skeleton, std::span<const glm::mat4> jointModel);
 
 	// The pose digest: XXH64 (seed 0) over the joint model matrices' floats (column-major, in joint order) and then each
-	// morph list's Target bytes, its weight count and its weights, every float and count as its little-endian bit pattern.
+	// morph list's Target bytes, its weight count and its weights, every float and count (32 bits) as its little-endian bit
+	// pattern.
 	// What "a sampled pose hashes equal in all three configurations" compares (Roadmap M23), and what scripts' test suites
 	// read through Test.GetPoseDigest in the Release and Dist runs (decision 31). Pure.
 	[[nodiscard]] uint64_t ComputeAnimationPoseDigest(std::span<const glm::mat4> jointModel, std::span<const AnimationMorphWeights> morphs);

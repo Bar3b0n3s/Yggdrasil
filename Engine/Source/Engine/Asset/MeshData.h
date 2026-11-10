@@ -54,8 +54,7 @@ namespace Engine {
 
 	// The optional streams of a version 2 mesh, persisted as the payload's Streams bits (append only). Their sections follow
 	// the indices in bit order. Skin and Morph are defined by C23.3 (C-SKEL, C-MORPH; Docs/Decisions/0034-m23-contract.md
-	// decision 25): until stream A implements their sections the reader still refuses them, and every higher bit stays
-	// reserved.
+	// decision 25); every higher bit stays reserved.
 	enum class MeshStreams : uint32_t
 	{
 		None = 0,
@@ -151,11 +150,11 @@ namespace Engine {
 		// (MeshStreams::Attributes).
 		std::vector<MeshVertexAttributes> Attributes{};
 		// M23 (C23.3, C-SKEL; decision 25): empty (no skin), or one per vertex (MeshStreams::Skin), each addressing joints
-		// below SkinJointCount, which is 1 to MaxMeshSkinJoints with a skin and 0 without. Unserialized until stream A.
+		// below SkinJointCount, which is 1 to MaxMeshSkinJoints with a skin and 0 without.
 		std::vector<MeshSkinVertex> Skin{};
 		uint32_t SkinJointCount = 0;
 		// M23 (C23.3, C-MORPH; decision 25): empty (no morph targets), or 1 to MaxMeshMorphTargets targets with unique names,
-		// each of one delta per vertex (MeshStreams::Morph). Unserialized until stream A.
+		// each of one delta per vertex (MeshStreams::Morph).
 		std::vector<MeshMorphTarget> MorphTargets{};
 		std::vector<uint32_t> Indices{}; // uint32 triangle-list indices (§6.8)
 		std::vector<MeshSubmesh> Submeshes{};
@@ -168,14 +167,14 @@ namespace Engine {
 	// multiples of 3, slot below the slot count; every float finite; unit-length normals and tangent directions within 1e-3,
 	// tangent signs +-1; each submesh's bounds equal the bounds of the vertices it references and Bounds the bounds of every
 	// vertex; Attributes empty or one per vertex, each colour channel in [0, 1] (glTF's COLOR_0 range). Pure. Errors:
-	// Validation naming the first violation ("index 12 is 400, beyond the 300 vertices"). M23 (C23.3, stream A): Skin empty
-	// or one per vertex with SkinJointCount 1 to MaxMeshSkinJoints (0 without a skin), every joint index below it and every
-	// weight as MeshSkinVertex states; MorphTargets at most MaxMeshMorphTargets, each name valid UTF-8 of 1 to
+	// Validation naming the first violation ("index 12 is 400, beyond the 300 vertices"). M23 (C23.3): Skin empty or one per
+	// vertex with SkinJointCount 1 to MaxMeshSkinJoints (0 without a skin), every joint index below it and every weight as
+	// MeshSkinVertex states; MorphTargets at most MaxMeshMorphTargets, each name valid UTF-8 of 1 to
 	// MaxMeshMorphTargetNameBytes bytes and unique, its DefaultWeight finite and its Deltas one per vertex, all finite.
 	[[nodiscard]] Status ValidateMeshData(const MeshData& mesh);
 
-	// The streams `mesh` carries (MeshStreams::Attributes when Attributes is not empty; from C23.3's stream A, Skin when Skin
-	// is not empty and Morph when MorphTargets is not empty): the payload's Streams word.
+	// The streams `mesh` carries (MeshStreams::Attributes when Attributes is not empty; since C23.3, Skin when Skin is not
+	// empty and Morph when MorphTargets is not empty): the payload's Streams word.
 	[[nodiscard]] MeshStreams GetMeshStreams(const MeshData& mesh);
 
 	// The cooked mesh payload (FormatVersion 2; Docs/Decisions/0034-m23-contract.md "Data formats"), little-endian:
@@ -190,15 +189,14 @@ namespace Engine {
 	//     [Streams & Morph] uint32 TargetCount;
 	//         TargetCount x { uint32 NameLength; UTF-8 Name; f32 DefaultWeight; VertexCount x MeshMorphDelta (36 bytes) }
 	// The optional sections follow the indices in bit order. Asserts ValidateMeshData. Pure; identical meshes give identical
-	// bytes. The Skin and Morph sections are C23.3's (Docs/Decisions/0034-m23-contract.md decision 25): stream A writes them,
-	// and until then a mesh's Skin and MorphTargets are not serialized.
+	// bytes. The Skin and Morph sections are C23.3's (Docs/Decisions/0034-m23-contract.md decision 25).
 	[[nodiscard]] Buffer SerializeMeshPayload(const MeshData& mesh);
 
 	// Reads a payload written by SerializeMeshPayload through BinaryReader, then ValidateMeshData (an untrusted payload may
 	// hold any bytes). Never asserts on data. Errors: Parse for truncation or trailing bytes, for a Streams bit this version
-	// does not define (every bit above Morph; Skin and Morph until stream A reads their sections, C23.3), for a count above
-	// its limit and for a non-zero Reserved word; Validation from ValidateMeshData or for invalid UTF-8 in a slot or morph
-	// target name.
+	// does not define (every bit above Morph), for a count above its limit (a skin addressing 0 or more than
+	// MaxMeshSkinJoints joints, a morph section of 0 or more than MaxMeshMorphTargets targets among them) and for a non-zero
+	// Reserved word; Validation from ValidateMeshData or for invalid UTF-8 in a slot or morph target name.
 	[[nodiscard]] Result<MeshData> DeserializeMeshPayload(std::span<const std::byte> payload);
 
 	// The complete cooked artifact (CookedHeader + payload) of `mesh`, produced by a source of version `importerVersion`.

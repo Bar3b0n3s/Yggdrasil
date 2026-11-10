@@ -91,6 +91,16 @@
 // in order, so the image equals the one RenderQualitySettings::Instancing false records with one draw per submesh draw
 // (the reference path), byte for byte; RenderPassStats::DrawCalls counts the instanced draws and SceneRenderStats::MeshDraws
 // the submesh draws.
+//
+// Deformation (M23, C23.3, C-SKEL, C-MORPH; Docs/Decisions/0034-m23-contract.md decision 27). The Prepare stage resolves each
+// item it looks at (ResolveItemDeform) from its mesh's mirror: an item is deformed when its mesh has a skin its JointPalette
+// covers, or morph targets with a resolved weight that is not 0 (MeshDrawItem's rule). A deformed item's submeshes are culled
+// by its deformed bounds (ComputeDeformedBounds, in its local space), and when one of its draws survives, the camera's, a
+// shadow caster's or the selection mask's, the item acquires its DeformedMeshes entry (AcquireDeformedMesh: keyed by Entity
+// and Mesh, with buffers of the mesh's size and a VertexStream of its own), whose deformed vertices its draws bind as vertex
+// binding 0 in every pass, keying that VertexStream so they never batch with another item's. The Deform stage records one
+// Skinning dispatch per acquired entry (frame.Deforms, in snapshot order) before any pass draws, and the render releases the
+// entries it did not acquire at its end.
 
 namespace Engine {
 
@@ -99,7 +109,7 @@ namespace Engine {
 		== SceneRendererPipelines::MeshPipelineCount + SkyboxPass::PipelineCount + BloomPass::PipelineCount + TonemapPass::PipelineCount
 			+ FxaaPass::PipelineCount + DebugRenderer::PipelineCount + TextRenderer::PipelineCount + BrdfLut::PipelineCount
 			+ ShadowPass::PipelineCount + DepthPyramidPass::PipelineCount + GtaoPass::PipelineCount + LightClusterPass::PipelineCount
-			+ SelectionPass::PipelineCount + 1 + QuadBatcher::PipelineCount + UpscalePass::PipelineCount);
+			+ SelectionPass::PipelineCount + 1 + QuadBatcher::PipelineCount + UpscalePass::PipelineCount + SkinningPass::PipelineCount);
 	static_assert(SceneRendererPipelines::MeshPipelineCount == 2 * Utils::PrepassVariantCount + Utils::ForwardVariantCount + Utils::MeshCullModeCount);
 	static_assert(SceneRendererPipelines::DebugViewPipelineCount == Utils::ForwardVariantCount);
 	// The Scene program's specialization constant takes RenderDebugView's values (Shared/DrawConstants.h).
@@ -417,6 +427,7 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(created.DepthPyramid, DepthPyramidPass::Create(device, pipelines));
 		ENGINE_TRY_ASSIGN(created.Gtao, GtaoPass::Create(device, pipelines));
 		ENGINE_TRY_ASSIGN(created.LightClusters, LightClusterPass::Create(device, pipelines));
+		ENGINE_TRY_ASSIGN(created.Skinning, SkinningPass::Create(device, pipelines));
 		ENGINE_TRY_ASSIGN(created.Selection, SelectionPass::Create(device, pipelines));
 
 		ENGINE_TRY_ASSIGN(created.Skybox, SkyboxPass::Create(device, pipelines));
@@ -431,8 +442,8 @@ namespace Engine {
 		created.PipelineCount = MeshPipelineCount + created.Skybox->GetPipelineCount() + created.Bloom->GetPipelineCount()
 			+ created.Tonemap->GetPipelineCount() + created.Fxaa->GetPipelineCount() + created.Debug->GetPipelineCount()
 			+ created.Text->GetPipelineCount() + created.DfgLut->GetPipelineCount() + ShadowPass::PipelineCount + DepthPyramidPass::PipelineCount
-			+ GtaoPass::PipelineCount + LightClusterPass::PipelineCount + SelectionPass::PipelineCount + 1 + created.Quads->GetPipelineCount()
-			+ created.Upscale->GetPipelineCount();
+			+ GtaoPass::PipelineCount + LightClusterPass::PipelineCount + SkinningPass::PipelineCount + SelectionPass::PipelineCount + 1
+			+ created.Quads->GetPipelineCount() + created.Upscale->GetPipelineCount();
 
 		// Every creation succeeded: the new passes replace the current ones, and the set keeps its back-references and its
 		// registration (moving an empty registration over another calls nothing on the registry, so this also runs inside a
@@ -453,6 +464,7 @@ namespace Engine {
 	std::vector<PipelineLayoutDescription> SceneRendererPipelines::GetLayoutDescriptions(nvrhi::Format bloomFormat)
 	{
 		std::vector<PipelineLayoutDescription> descriptions = Utils::GetMeshLayoutDescriptions();
+		Utils::AppendDescriptions(descriptions, SkinningPass::GetLayoutDescriptions());
 		Utils::AppendDescriptions(descriptions, SkyboxPass::GetLayoutDescriptions());
 		Utils::AppendDescriptions(descriptions, BloomPass::GetLayoutDescriptions(bloomFormat));
 		Utils::AppendDescriptions(descriptions, TonemapPass::GetLayoutDescriptions());
@@ -598,6 +610,7 @@ namespace Engine {
 	{
 		ClearTargetBindings();
 		LightClusterBindings.Clear();
+		SkinningBindings.Clear();
 		UpscaleBindings.Clear();
 		Materials.Clear();
 	}
@@ -617,6 +630,7 @@ namespace Engine {
 		SelectionBindings.ReleaseUnused();
 		DataViewBindings.ReleaseUnused();
 		LightClusterBindings.ReleaseUnused();
+		SkinningBindings.ReleaseUnused();
 		UpscaleBindings.ReleaseUnused();
 
 		Materials.ReleaseUnused();
@@ -635,7 +649,7 @@ namespace Engine {
 		return Detail::SceneRendererMaterial{ .Set = *set, .Mode = material.AlphaMode, .DoubleSided = material.DoubleSided };
 	}
 
-	Status SceneRenderer::State::PrepareDraws(const RenderSnapshot& snapshot, const CameraData& camera)
+	Status SceneRenderer::State::PrepareDraws(Detail::SceneRendererFrame& frame, const RenderSnapshot& snapshot, const CameraData& camera)
 	{
 		OpaqueDraws.clear();
 		TransparentDraws.clear();
@@ -659,6 +673,16 @@ namespace Engine {
 				continue;
 			}
 
+			// M23 (C23.3): the item's deformation, resolved before its mirror is read (resolving it uploads the mesh too).
+			const Status deformResolved = ResolveItemDeform(snapshot, index);
+			if (!deformResolved.has_value())
+			{
+				if (status.has_value())
+					status = deformResolved;
+				continue;
+			}
+			const Detail::SceneRendererItemDeform& deform = ItemDeforms[index];
+
 			// The mirror is valid until the next upload (resolving materials uploads textures): what is needed is copied now.
 			const GpuMesh& mesh = Cache->GetMesh(item.Mesh);
 			if (mesh.VertexBuffer == nullptr || mesh.AttributeBuffer == nullptr || mesh.IndexBuffer == nullptr)
@@ -677,7 +701,9 @@ namespace Engine {
 				if (submesh.IndexCount == 0)
 					continue;
 				const AssetHandle materialHandle = Utils::SelectMaterial(item, defaults, submesh.MaterialSlot);
-				if (IsOutsideView(submesh.Bounds, item.World, camera))
+				// M23 (C23.3): a deformed item's submeshes are culled by its deformed bounds.
+				const Aabb& bounds = deform.Deformed ? deform.Bounds : submesh.Bounds;
+				if (IsOutsideView(bounds, item.World, camera))
 				{
 					++Stats.CulledSubmeshes;
 					// R-MATSET (M18): a material whose draws left the view keeps the set it has while it stays in the snapshot,
@@ -700,10 +726,26 @@ namespace Engine {
 				const Detail::SceneRendererMaterial& material = found->second;
 				if (material.Set == nullptr)
 					continue; // its GPU objects are missing (reported)
+				// M23 (C23.3): a deformed item's draws bind its entry's deformed vertices and key its VertexStream.
+				nvrhi::IBuffer* drawVertices = vertexBuffer;
+				uint32_t vertexStream = 0;
+				if (deform.Deformed)
+				{
+					const Result<size_t> entry = AcquireDeformedMesh(frame, index);
+					if (!entry.has_value())
+					{
+						if (status.has_value())
+							status = std::unexpected(entry.error());
+						break; // the item's draws are skipped
+					}
+					drawVertices = DeformedMeshes[*entry].Vertices.Get();
+					vertexStream = DeformedMeshes[*entry].VertexStream;
+				}
 
 				const Utils::MeshCullMode cullMode = Utils::SelectCullMode(mirrored, material.DoubleSided);
 				Detail::SceneRendererDraw draw;
-				draw.VertexBuffer = vertexBuffer;
+				draw.VertexBuffer = drawVertices;
+				draw.VertexStream = vertexStream;
 				draw.AttributeBuffer = attributeBuffer;
 				draw.IndexBuffer = indexBuffer;
 				draw.IndexOffset = submesh.IndexOffset;
@@ -717,7 +759,7 @@ namespace Engine {
 				draw.SnapshotIndex = index;
 				if (material.Mode == AlphaMode::Blend)
 				{
-					const glm::vec3 centre = submesh.Bounds.IsEmpty() ? glm::vec3(0.0f) : (submesh.Bounds.Min + submesh.Bounds.Max) * 0.5f;
+					const glm::vec3 centre = bounds.IsEmpty() ? glm::vec3(0.0f) : (bounds.Min + bounds.Max) * 0.5f;
 					draw.ViewDepth = -(worldView * glm::vec4(centre, 1.0f)).z;
 					TransparentDraws.push_back(draw);
 				}
@@ -775,7 +817,11 @@ namespace Engine {
 					.PreviousWorld = item.PreviousWorld.value_or(item.World),
 					.EntityId = item.PickId,
 					.Flags = (mirrored ? DrawFlagMirrored : 0U) | (item.ReceiveShadows ? DrawFlagReceiveShadows : 0U) });
-				keys.push_back({ .Pipeline = draw.ForwardVariant, .Material = draw.MaterialHandle, .Mesh = draw.Mesh, .Submesh = draw.Submesh });
+				keys.push_back({ .Pipeline = draw.ForwardVariant,
+					.Material = draw.MaterialHandle,
+					.Mesh = draw.Mesh,
+					.Submesh = draw.Submesh,
+					.VertexStream = draw.VertexStream });
 			}
 			if (!snapshot.Quality.Instancing)
 				return; // the reference path: one draw per submesh draw
@@ -1106,6 +1152,7 @@ namespace Engine {
 		recordStage(RenderStage::EditorOverlay, &State::RecordEditorOverlayStage);
 		commandList.endMarker();
 		state.ReleaseUnusedBindings();
+		state.ReleaseUnusedDeforms();
 		std::set<size_t> visibleMeshes;
 		for (const auto& draw : state.OpaqueDraws)
 			visibleMeshes.insert(draw.SnapshotIndex);
@@ -1366,27 +1413,64 @@ namespace Engine {
 		OpaqueDraws.clear();
 		TransparentDraws.clear();
 		Instances.clear();
+		// M23 (C23.3): this render's deformations, resolved as the passes look at their items.
+		++DeformRender;
+		ItemDeforms.assign(snapshot.Meshes.size(), Detail::SceneRendererItemDeform{});
 		if (hasCamera)
-			frame.KeepFirstError(PrepareDraws(snapshot, camera));
+			frame.KeepFirstError(PrepareDraws(frame, snapshot, camera));
 		// M23 (R-INST): the shadow casters' and the selection's draws, with their instance records after the camera's. The
 		// casters are the full snapshot list (off-screen casters shadow visible receivers), the ones with a finite world matrix;
 		// one caster set serves every cascade, spot tile and point face (R-PLS), each culling it against its own frustum.
 		if (frame.Cascades.Count != 0 || !frame.Spots.Tiles.empty() || !frame.Points.Lights.empty())
 		{
+			// M23 (C23.3): a deformed caster draws its deformed vertices; every shadow-casting item is a candidate of every
+			// face, so each deformed one is deformed whether or not the camera sees it.
 			std::vector<MeshDrawItem> finiteCasters;
-			for (const MeshDrawItem& item : snapshot.Meshes)
+			std::vector<size_t> castingPositions; // in finiteCasters
+			std::vector<size_t> castingItems;     // in the snapshot
+			for (size_t index = 0; index < snapshot.Meshes.size(); ++index)
 			{
-				if (Utils::IsFinite(item.World))
-					finiteCasters.push_back(item);
+				const MeshDrawItem& item = snapshot.Meshes[index];
+				if (!Utils::IsFinite(item.World))
+					continue;
+				if (item.CastShadows && item.Mesh.IsValid())
+				{
+					castingPositions.push_back(finiteCasters.size());
+					castingItems.push_back(index);
+				}
+				finiteCasters.push_back(item);
 			}
-			Result<ShadowCasterSet> casters = ShadowPass::PrepareCasters(*Cache, finiteCasters, snapshot.Quality.Instancing, Instances);
+			std::vector<DeformedVertexSource> sources(finiteCasters.size());
+			const std::vector<DeformedVertexSource> castingSources = PrepareVertexSources(frame, castingItems);
+			for (size_t position = 0; position < castingItems.size(); ++position)
+				sources[castingPositions[position]] = castingSources[position];
+			Result<ShadowCasterSet> casters = ShadowPass::PrepareCasters(*Cache, finiteCasters, snapshot.Quality.Instancing, Instances, sources);
 			if (casters.has_value())
 				frame.ShadowCasters = std::move(*casters);
 			else
 				frame.KeepFirstError(std::unexpected(std::move(casters).error()));
 		}
 		if (frame.Selection)
-			frame.SelectionDraws = SelectionPass::PrepareDraws(*Cache, snapshot, snapshot.Quality.Instancing, Instances);
+		{
+			// M23 (C23.3): a selected deformed item's mask draws its deformed vertices.
+			std::vector<size_t> selected;
+			for (size_t index = 0; index < snapshot.Meshes.size(); ++index)
+			{
+				const MeshDrawItem& item = snapshot.Meshes[index];
+				if (item.Entity.IsValid() && std::ranges::find(snapshot.SelectedEntities, item.Entity) != snapshot.SelectedEntities.end())
+					selected.push_back(index);
+			}
+			std::vector<DeformedVertexSource> sources(snapshot.Meshes.size());
+			const std::vector<DeformedVertexSource> selectedSources = PrepareVertexSources(frame, selected);
+			for (size_t position = 0; position < selected.size(); ++position)
+				sources[selected[position]] = selectedSources[position];
+			frame.SelectionDraws = SelectionPass::PrepareDraws(*Cache, snapshot, snapshot.Quality.Instancing, Instances, sources);
+		}
+		// M23 (C23.3): the Deform stage dispatches in snapshot order.
+		std::ranges::sort(frame.Deforms, [this](size_t left, size_t right)
+		{
+			return DeformedMeshes[left].SnapshotIndex < DeformedMeshes[right].SnapshotIndex;
+		});
 		const GpuEnvironment* environment = hasCamera && frame.IsLit && !frame.Wireframe ? Cache->GetEnvironment(snapshot.Environment.Environment) : nullptr;
 		frame.Environment = Utils::MakeEnvironmentConstants(snapshot.Environment, environment);
 		frame.EnvironmentSpecular = environment != nullptr ? environment->Specular : Pipelines->BlackCube;
@@ -1403,10 +1487,236 @@ namespace Engine {
 			!frame.Points.Lights.empty() ? GetPointShadowFaceSize(snapshot.Quality.ShadowMapSize) : 0, frame.Selection, frame.IsOverdraw);
 	}
 
-	// Reserved for M23's Skinning pass (RenderStage::Deform), the first GPU work of a frame: no mesh is deformed in M18, so
-	// the shadow casters, the prepass and the forward passes draw the mirrors' own vertex buffers.
-	void SceneRenderer::State::RecordDeformStage(Detail::SceneRendererFrame& /*frame*/)
+	Status SceneRenderer::State::ResolveItemDeform(const RenderSnapshot& snapshot, size_t index)
 	{
+		Detail::SceneRendererItemDeform& deform = ItemDeforms[index];
+		if (deform.Resolved)
+			return deform.Skipped ? MakeError(ErrorCode::InvalidArgument, "the deformation of entity {} cannot be drawn", snapshot.Meshes[index].Entity) : Status{};
+		deform.Resolved = true;
+		const MeshDrawItem& item = snapshot.Meshes[index];
+		if (!item.Mesh.IsValid())
+			return {};
+		const GpuMesh& mesh = Cache->GetMesh(item.Mesh);
+		if (mesh.SkinJointCount == 0 && mesh.MorphTargetCount == 0)
+			return {};
+		for (const glm::mat4& joint : item.JointPalette)
+		{
+			if (!Utils::IsFinite(joint))
+			{
+				deform.Skipped = true;
+				return MakeError(ErrorCode::InvalidArgument, "the joint palette of entity {} in the render snapshot is not finite; its draws are skipped", item.Entity);
+			}
+		}
+		for (const float weight : item.MorphWeights)
+		{
+			if (!std::isfinite(weight))
+			{
+				deform.Skipped = true;
+				return MakeError(ErrorCode::InvalidArgument, "a morph weight of entity {} in the render snapshot is not finite; its draws are skipped", item.Entity);
+			}
+		}
+		const bool skinned = mesh.SkinJointCount > 0 && item.JointPalette.size() >= mesh.SkinJointCount;
+		if (mesh.SkinJointCount > 0 && !item.JointPalette.empty() && !skinned && !SkinMismatchLogged)
+		{
+			SkinMismatchLogged = true;
+			ENGINE_CORE_WARN("{}: entity {} has a joint palette of {} matrices for a skin of {} joints and draws its bind pose (logged once per view)",
+				RenderSkinMismatchCode, item.Entity, item.JointPalette.size(), mesh.SkinJointCount);
+		}
+		deform.Weights = ResolveMorphWeights(mesh.DeformBounds.DefaultWeights, item.MorphWeights);
+		const bool morphed = std::ranges::any_of(deform.Weights, [](float weight)
+		{
+			return weight != 0.0f;
+		});
+		if (!skinned && !morphed)
+			return {};
+		const std::span<const glm::mat4> palette = skinned ? std::span<const glm::mat4>(item.JointPalette) : std::span<const glm::mat4>();
+		deform.Deformed = true;
+		deform.Bounds = ComputeDeformedBounds(mesh.DeformBounds, palette, deform.Weights);
+		deform.SourceVertices = mesh.VertexBuffer;
+		deform.Skin = mesh.SkinBuffer;
+		deform.Morphs = mesh.MorphBuffer;
+		deform.MeshVersion = mesh.Version;
+		deform.VertexCount = mesh.VertexCount;
+		deform.SkinJointCount = skinned ? mesh.SkinJointCount : 0;
+		deform.MorphTargetCount = mesh.MorphTargetCount;
+		return {};
+	}
+
+	Result<size_t> SceneRenderer::State::AcquireDeformedMesh(Detail::SceneRendererFrame& frame, size_t index)
+	{
+		Detail::SceneRendererItemDeform& deform = ItemDeforms[index];
+		ENGINE_CORE_ASSERT(deform.Resolved && deform.Deformed, "AcquireDeformedMesh needs a resolved, deformed item");
+		const MeshDrawItem& item = frame.Snapshot->Meshes[index];
+		if (deform.Entry.has_value())
+			return *deform.Entry;
+		if (deform.Skipped)
+			return MakeError(ErrorCode::InvalidArgument, "the deformation of entity {} cannot be drawn", item.Entity);
+		// The first entry of the item's key this render has not acquired, so two items of one key take two entries.
+		auto found = std::ranges::find_if(DeformedMeshes, [this, &item](const Detail::SceneRendererDeformedMesh& entry)
+		{
+			return entry.Entity == item.Entity && entry.Mesh == item.Mesh && entry.LastRender != DeformRender;
+		});
+		if (found == DeformedMeshes.end())
+		{
+			Detail::SceneRendererDeformedMesh created;
+			created.Entity = item.Entity;
+			created.Mesh = item.Mesh;
+			created.MeshVersion = deform.MeshVersion;
+			created.VertexStream = NextVertexStream;
+			// 0 is the mesh's own vertices: a renderer that made 2^32 entries starts again at 1.
+			NextVertexStream = NextVertexStream == std::numeric_limits<uint32_t>::max() ? 1 : NextVertexStream + 1;
+			DeformedMeshes.push_back(std::move(created));
+			found = std::prev(DeformedMeshes.end());
+		}
+		Detail::SceneRendererDeformedMesh& entry = *found;
+		if (entry.MeshVersion != deform.MeshVersion)
+		{
+			entry.MeshVersion = deform.MeshVersion;
+			entry.Deformed = false; // another version of the mesh deforms afresh
+		}
+		// The buffers, created or grown for the mesh; a grown vertex buffer holds no earlier deformation.
+		const auto ensure = [this, &item](nvrhi::BufferHandle& buffer, const nvrhi::BufferDesc& desc) -> Status
+		{
+			if (buffer != nullptr && buffer->getDesc().byteSize >= desc.byteSize)
+				return {};
+			Result<nvrhi::BufferHandle> created = Device->CreateBuffer(desc);
+			if (!created.has_value())
+				return std::unexpected(std::move(created).error().WithContext(std::format("while creating the deformation buffers of entity {}", item.Entity)));
+			buffer = std::move(*created);
+			return {};
+		};
+		const uint64_t verticesBefore = entry.Vertices != nullptr ? entry.Vertices->getDesc().byteSize : 0;
+		Status created = ensure(entry.Vertices, SkinningPass::GetVerticesDesc(deform.VertexCount));
+		if (created.has_value())
+			created = ensure(entry.PreviousPositions, SkinningPass::GetPreviousPositionsDesc(deform.VertexCount));
+		if (created.has_value())
+			created = ensure(entry.Palette, SkinningPass::GetPaletteDesc(deform.SkinJointCount));
+		if (created.has_value())
+			created = ensure(entry.MorphWeights, SkinningPass::GetMorphWeightsDesc());
+		if (entry.Vertices == nullptr || entry.Vertices->getDesc().byteSize != verticesBefore)
+			entry.Deformed = false;
+		if (!created.has_value())
+		{
+			deform.Skipped = true;
+			return std::unexpected(std::move(created).error());
+		}
+		const auto entryIndex = static_cast<size_t>(found - DeformedMeshes.begin());
+		entry.LastRender = DeformRender;
+		entry.SnapshotIndex = index;
+		deform.Entry = entryIndex;
+		frame.Deforms.push_back(entryIndex);
+		return entryIndex;
+	}
+
+	std::vector<DeformedVertexSource> SceneRenderer::State::PrepareVertexSources(Detail::SceneRendererFrame& frame, std::span<const size_t> indices)
+	{
+		const RenderSnapshot& snapshot = *frame.Snapshot;
+		std::vector<DeformedVertexSource> sources(indices.size());
+		for (size_t position = 0; position < indices.size(); ++position)
+		{
+			const size_t index = indices[position];
+			if (!snapshot.Meshes[index].Mesh.IsValid())
+				continue;
+			DeformedVertexSource& source = sources[position];
+			const Status resolved = ResolveItemDeform(snapshot, index);
+			if (!resolved.has_value())
+			{
+				frame.KeepFirstError(resolved);
+				source.Skipped = true;
+				continue;
+			}
+			const Detail::SceneRendererItemDeform& deform = ItemDeforms[index];
+			if (!deform.Deformed)
+				continue;
+			const Result<size_t> entry = AcquireDeformedMesh(frame, index);
+			if (!entry.has_value())
+			{
+				frame.KeepFirstError(std::unexpected(entry.error()));
+				source.Skipped = true;
+				continue;
+			}
+			source.Vertices = DeformedMeshes[*entry].Vertices.Get();
+			source.VertexStream = DeformedMeshes[*entry].VertexStream;
+			source.Bounds = deform.Bounds;
+		}
+		return sources;
+	}
+
+	void SceneRenderer::State::SkipDeformedDraws(Detail::SceneRendererFrame& frame, const Detail::SceneRendererDeformedMesh& entry)
+	{
+		// A deformed draw's batch is itself alone (its VertexStream is its item's): the camera's lists skip it as an instance
+		// of another draw, and the casters' and the selection's lose its batch.
+		for (std::vector<Detail::SceneRendererDraw>* draws : { &OpaqueDraws, &TransparentDraws })
+		{
+			for (Detail::SceneRendererDraw& draw : *draws)
+			{
+				if (draw.VertexStream == entry.VertexStream)
+					draw.Batch = 0;
+			}
+		}
+		const nvrhi::IBuffer* vertices = entry.Vertices.Get();
+		std::erase_if(frame.ShadowCasters.Batches, [&frame, vertices](const MeshInstanceBatch& batch)
+		{
+			return frame.ShadowCasters.Draws[batch.First].Vertices.Get() == vertices;
+		});
+		std::erase_if(frame.SelectionDraws.Batches, [&frame, vertices](const MeshInstanceBatch& batch)
+		{
+			return frame.SelectionDraws.Draws[batch.First].Vertices.Get() == vertices;
+		});
+	}
+
+	void SceneRenderer::State::ReleaseUnusedDeforms()
+	{
+		std::erase_if(DeformedMeshes, [this](const Detail::SceneRendererDeformedMesh& entry)
+		{
+			return entry.LastRender != DeformRender;
+		});
+		ItemDeforms.clear();
+	}
+
+	// The Skinning pass (RenderStage::Deform), the first GPU work of a frame: every deformed item one of whose draws survived
+	// culling, in snapshot order, deformed into its entry's vertices before the shadow casters, the prepass and the forward
+	// passes draw them.
+	void SceneRenderer::State::RecordDeformStage(Detail::SceneRendererFrame& frame)
+	{
+		if (frame.Deforms.empty())
+			return;
+		const RenderSnapshot& snapshot = *frame.Snapshot;
+		std::vector<SkinningPassInputs> items;
+		items.reserve(frame.Deforms.size());
+		for (const size_t entryIndex : frame.Deforms)
+		{
+			const Detail::SceneRendererDeformedMesh& entry = DeformedMeshes[entryIndex];
+			const Detail::SceneRendererItemDeform& deform = ItemDeforms[entry.SnapshotIndex];
+			const MeshDrawItem& item = snapshot.Meshes[entry.SnapshotIndex];
+			items.push_back({ .SourceVertices = deform.SourceVertices,
+				.Skin = deform.Skin,
+				.Morphs = deform.Morphs,
+				.Palette = deform.SkinJointCount > 0 ? std::span<const glm::mat4>(item.JointPalette) : std::span<const glm::mat4>(),
+				.MorphWeights = deform.Weights,
+				.PaletteBuffer = entry.Palette,
+				.MorphWeightBuffer = entry.MorphWeights,
+				.Vertices = entry.Vertices,
+				.PreviousPositions = entry.PreviousPositions,
+				.VertexCount = deform.VertexCount,
+				.SkinJointCount = deform.SkinJointCount,
+				.MorphTargetCount = deform.MorphTargetCount,
+				.FirstDeform = !entry.Deformed });
+		}
+		// One Record for the whole stage: the Skinning pass is one profiler scope however many items it deforms.
+		const std::vector<Status> recorded = Pipelines->Skinning->Record(*frame.CommandList, *frame.Recording, SkinningBindings, items);
+		for (size_t index = 0; index < frame.Deforms.size(); ++index)
+		{
+			Detail::SceneRendererDeformedMesh& entry = DeformedMeshes[frame.Deforms[index]];
+			if (recorded[index].has_value())
+			{
+				entry.Deformed = true;
+				continue;
+			}
+			const MeshDrawItem& item = snapshot.Meshes[entry.SnapshotIndex];
+			frame.KeepFirstError(std::unexpected(Error(recorded[index].error()).WithContext(std::format("while deforming entity {}", item.Entity))));
+			SkipDeformedDraws(frame, entry);
+		}
 	}
 
 	void SceneRenderer::State::RecordShadowsStage(Detail::SceneRendererFrame& frame)

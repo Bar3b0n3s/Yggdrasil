@@ -260,8 +260,8 @@ namespace Engine {
 		// cover it). An item is deformed when its mesh has a skin and JointPalette covers the skin's joints, or has morph targets
 		// and a resolved weight is not 0; otherwise it draws the mesh's own vertices. A deformed item's GPU state is keyed by its
 		// Entity and Mesh, so each deformed item of a snapshot has its own Entity (render extraction gives every item its entity;
-		// a snapshot built by hand must too), and deformed items are never instanced together (each has its own pose). Extraction
-		// fills them (stream B); empty until then.
+		// a snapshot built by hand must too), and deformed items are never instanced together (each has its own pose). Render
+		// extraction fills them (RenderExtraction.h).
 		std::vector<glm::mat4> JointPalette{};
 		std::vector<float> MorphWeights{};
 	};

@@ -155,6 +155,25 @@
 			]
 		},
 		{
+			"File": "Animation.jsonl",
+			"IdSeed": 2107,
+			"Renderer": "vulkan"
+		},
+		{
+			"File": "GoldenSkinnedPose.jsonl",
+			"IdSeed": 2108,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Models/GoldenSkinnedPose",
+				"Assets/Scenes/GoldenSkinnedPose"
+			]
+		},
+		{
+			"File": "AnimationReplays.jsonl",
+			"IdSeed": 2109,
+			"Renderer": "none"
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

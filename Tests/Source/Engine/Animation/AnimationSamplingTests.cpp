@@ -11,7 +11,7 @@
 #include <vector>
 
 // Joint transforms, quaternion interpolation, a layer's time and its events (M23, C23.3; Docs/Decisions/0034-m23-contract.md
-// decision 26, stream B). Skipped until stream B implements them.
+// decision 26, stream B).
 
 namespace Engine {
 
@@ -37,7 +37,7 @@ namespace Engine {
 
 	TEST_SUITE("Animation")
 	{
-		TEST_CASE("AnimationSampling: a joint transform composes translation, then rotation, then scale" * doctest::skip(true))
+		TEST_CASE("AnimationSampling: a joint transform composes translation, then rotation, then scale")
 		{
 			const JointTransform transform{ .Translation = { 1.0f, 2.0f, 3.0f }, .Rotation = RotationZ(90.0), .Scale = { 2.0f, 2.0f, 2.0f } };
 			const glm::mat4 matrix = ComposeJointTransform(transform);
@@ -52,7 +52,7 @@ namespace Engine {
 		// SlerpQuaternion is the simulation path's slerp (glm::slerp calls the CRT's acos and sin): the ends exactly, the middle
 		// of a 90-degree arc at 45 degrees, the shorter arc for a negated target, and normalized linear interpolation for
 		// nearly parallel rotations.
-		TEST_CASE("AnimationSampling: rotations slerp along the shorter arc through DetMath" * doctest::skip(true))
+		TEST_CASE("AnimationSampling: rotations slerp along the shorter arc through DetMath")
 		{
 			const glm::quat from = RotationZ(0.0);
 			const glm::quat to = RotationZ(90.0);
@@ -71,7 +71,7 @@ namespace Engine {
 			CHECK(std::abs(glm::length(close) - 1.0f) < 1e-6f);
 		}
 
-		TEST_CASE("AnimationSampling: time advances, wraps a looping clip and holds a clip that ends" * doctest::skip(true))
+		TEST_CASE("AnimationSampling: time advances, wraps a looping clip and holds a clip that ends")
 		{
 			// A looping layer wraps, counting the ends it passes.
 			const AnimationTimeStep looped = AdvanceAnimationTime(0.75f, 0.5f, 1.0f, true);
@@ -113,7 +113,7 @@ namespace Engine {
 			CHECK_FALSE(fuzzed.Ended);
 		}
 
-		TEST_CASE("AnimationSampling: events between two times fire once, in time order, across a wrap" * doctest::skip(true))
+		TEST_CASE("AnimationSampling: events between two times fire once, in time order, across a wrap")
 		{
 			const AnimationClipData clip = MakeEventClip();
 			std::vector<uint32_t> events;

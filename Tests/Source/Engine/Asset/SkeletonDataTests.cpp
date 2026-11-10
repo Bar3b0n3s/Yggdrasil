@@ -14,9 +14,8 @@
 #include <limits>
 #include <string>
 
-// Skeletons (M23, C23.3, C-SKEL; Docs/Decisions/0034-m23-contract.md decision 24, stream A): the cooked format version 1, its
-// validation and its fuzz target. The artifact wrappers and the loader's registration are the contract's (live); the rest is
-// skipped until stream A implements it.
+// Skeletons (M23, C23.3, C-SKEL; Docs/Decisions/0034-m23-contract.md decision 24): the cooked format version 1, its validation
+// and its fuzz target.
 
 namespace Engine {
 
@@ -58,7 +57,7 @@ namespace Engine {
 			CHECK(newer.error().GetCode() == ErrorCode::UnsupportedVersion);
 		}
 
-		TEST_CASE("SkeletonData: a payload round-trips its joints, and the lookup finds a joint by its exact name" * doctest::skip(true))
+		TEST_CASE("SkeletonData: a payload round-trips its joints, and the lookup finds a joint by its exact name")
 		{
 			// The shoulder taken as a static joint above the skin's root, the elbow (what the importer writes for a rig under
 			// an intermediate node).
@@ -85,7 +84,7 @@ namespace Engine {
 			CHECK_FALSE(FindSkeletonJoint(arm, "Hand").has_value());
 		}
 
-		TEST_CASE("SkeletonData: joints that break the format's rules are refused, naming the joint" * doctest::skip(true))
+		TEST_CASE("SkeletonData: joints that break the format's rules are refused, naming the joint")
 		{
 			const auto refused = [](const SkeletonData& skeleton)
 			{
@@ -131,7 +130,7 @@ namespace Engine {
 			CHECK(read.error().GetCode() == ErrorCode::Parse);
 		}
 
-		TEST_CASE("SkeletonData: 10,000 seeded mutations of a payload never crash" * doctest::test_suite(Test::FuzzSuite) * doctest::skip(true))
+		TEST_CASE("SkeletonData: 10,000 seeded mutations of a payload never crash" * doctest::test_suite(Test::FuzzSuite))
 		{
 			const Buffer payload = SerializeSkeletonPayload(MakeArm());
 			REQUIRE(DeserializeSkeletonPayload(payload).has_value());

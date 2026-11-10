@@ -3,10 +3,13 @@
 #include "Engine/Scene/AnimationSystem.h"
 
 #include "Engine/Asset/AnimationClipData.h"
+#include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/SkeletonData.h"
 #include "Engine/Core/DetMath.h"
 #include "Engine/Scene/Components/AnimationPoseComponent.h"
 #include "Engine/Scene/Components/AnimatorComponent.h"
+#include "Engine/Scene/Components/MeshRendererComponent.h"
+#include "Engine/Scene/Components/SkinnedMeshComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
@@ -19,10 +22,11 @@
 
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 // The AnimationSystem phase, the editor's posing and the joint query (M23, C23.3, C-SKEL, C-ANIM-BLEND;
-// Docs/Decisions/0034-m23-contract.md decision 29, stream B). Skipped until stream B implements them.
+// Docs/Decisions/0034-m23-contract.md decision 29, stream B).
 
 namespace Engine {
 
@@ -112,6 +116,31 @@ namespace Engine {
 
 		constexpr double FixedDelta = 1.0 / 60.0;
 
+		// A triangle skinned to `jointCount` joints (every vertex on the last one), with the morph targets "Smile" (default
+		// weight 0.25) and "Blink" (default 0.75).
+		Ref<MeshData> MakeFace(uint32_t jointCount)
+		{
+			Ref<MeshData> mesh = CreateRef<MeshData>();
+			mesh->Vertices = { { .Position = { 0.0f, 0.0f, 0.0f } }, { .Position = { 1.0f, 0.0f, 0.0f } }, { .Position = { 0.0f, 1.0f, 0.0f } } };
+			for (const MeshVertex& vertex : mesh->Vertices)
+				mesh->Bounds.Extend(vertex.Position);
+			mesh->Indices = { 0, 1, 2 };
+			mesh->Submeshes.push_back({ .IndexCount = 3, .Bounds = mesh->Bounds });
+			mesh->Slots.push_back({ .Name = "Default" });
+			mesh->SkinJointCount = jointCount;
+			mesh->Skin.assign(3, MeshSkinVertex{ .Joints = { static_cast<uint16_t>(jointCount - 1), 0, 0, 0 } });
+			mesh->MorphTargets.push_back({ .Name = "Smile", .DefaultWeight = 0.25f, .Deltas = std::vector<MeshMorphDelta>(3) });
+			mesh->MorphTargets.push_back({ .Name = "Blink", .DefaultWeight = 0.75f, .Deltas = std::vector<MeshMorphDelta>(3) });
+			return mesh;
+		}
+
+		MeshRendererComponent MakeMeshRenderer(AssetHandle mesh)
+		{
+			MeshRendererComponent renderer;
+			renderer.Mesh = TypedAssetHandle<AssetType::Mesh>(mesh);
+			return renderer;
+		}
+
 	}
 
 	TEST_SUITE("Scene")
@@ -119,7 +148,7 @@ namespace Engine {
 		// Each playing Animator's layers advance by the fixed delta times their Speed, written back to the component, and the
 		// blended pose lands in its AnimationPoseComponent; a paused Animator keeps its times but is still posed at them; an
 		// entity without an Animator gains no pose.
-		TEST_CASE("AnimationSystem: the phase advances playing animators in canonical order and writes their poses" * doctest::skip(true))
+		TEST_CASE("AnimationSystem: the phase advances playing animators in canonical order and writes their poses")
 		{
 			Test::SceneTestFixture fixture(1, true);
 			Scene& scene = fixture.GetScene();
@@ -160,7 +189,7 @@ namespace Engine {
 
 		// Apply moves the entity by the tick's planar delta and holds the hips at the clip's start; Extract holds them too but
 		// leaves the entity, reporting the delta in the pose; None keeps the motion in the pose.
-		TEST_CASE("AnimationSystem: root motion Apply moves the entity, Extract reports it and None keeps it in the pose" * doctest::skip(true))
+		TEST_CASE("AnimationSystem: root motion Apply moves the entity, Extract reports it and None keeps it in the pose")
 		{
 			Test::SceneTestFixture fixture(1, true);
 			Scene& scene = fixture.GetScene();
@@ -190,7 +219,7 @@ namespace Engine {
 
 		// Events reach the listener after the entity's pose is written, in canonical entity order, then layer order, then
 		// firing order within a layer, each with its tick.
-		TEST_CASE("AnimationSystem: events reach the listener in canonical, layer and firing order" * doctest::skip(true))
+		TEST_CASE("AnimationSystem: events reach the listener in canonical, layer and firing order")
 		{
 			Test::SceneTestFixture fixture(1, true);
 			Scene& scene = fixture.GetScene();
@@ -225,8 +254,7 @@ namespace Engine {
 		// order finds that Animator already advanced and posed this tick, its events of the tick are dropped, and until the
 		// flush it is skipped (pending destruction), so what a callback does takes effect from the next tick whatever the
 		// entities' order.
-		TEST_CASE("AnimationSystem: events are dispatched after every Animator steps, and an event that destroys another Animator drops its events"
-			* doctest::skip(true))
+		TEST_CASE("AnimationSystem: events are dispatched after every Animator steps, and an event that destroys another Animator drops its events")
 		{
 			Test::SceneTestFixture fixture(1, true);
 			Scene& scene = fixture.GetScene();
@@ -261,8 +289,7 @@ namespace Engine {
 		// fastest speed) passes about 1,700 ends in one step: the layer counts at most MaxAnimationWrapsPerStep of them, and the
 		// Animator delivers at most MaxAnimationEventsPerStep events, the rest dropped with one warning for the Animator, never
 		// again.
-		TEST_CASE("AnimationSystem: an Animator delivers at most MaxAnimationEventsPerStep events a step and warns once when it drops some"
-			* doctest::skip(true))
+		TEST_CASE("AnimationSystem: an Animator delivers at most MaxAnimationEventsPerStep events a step and warns once when it drops some")
 		{
 			Test::SceneTestFixture fixture(1, true);
 			Scene& scene = fixture.GetScene();
@@ -300,7 +327,7 @@ namespace Engine {
 
 		// The editor's preview poses an Animator at its layers' times plus a preview time without touching the component, and
 		// the joint query reads the last pose in world space.
-		TEST_CASE("AnimationSystem: PoseAnimator samples without advancing, and the joint query reads the pose in world space" * doctest::skip(true))
+		TEST_CASE("AnimationSystem: PoseAnimator samples without advancing, and the joint query reads the pose in world space")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -340,6 +367,153 @@ namespace Engine {
 			REQUIRE_FALSE(missing.has_value());
 			CHECK(missing.error().GetCode() == ErrorCode::NotFound);
 			CHECK_FALSE(hero.HasComponent<AnimationPoseComponent>());
+		}
+
+		// A morph layer blends over the SkinnedMesh's own weights, each missing one its target's default (decision 26's base),
+		// as a joint blends over its rest pose: at weight 0.5 the face is half way from {0.5, 0.75} to the clip's {1, 0}.
+		TEST_CASE("AnimationSystem: a morph layer blends from the SkinnedMesh's weights, the targets' defaults filling the missing ones")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Test::InMemoryAssetManager assets;
+			PublishRig(assets);
+			const AssetHandle faceHandle(0x3e50000000000021);
+			assets.Publish(faceHandle, MakeFace(2), "Assets/Models/Hero.gltf");
+			const AssetHandle smileHandle(0xa41c000000000004);
+			Ref<AnimationClipData> smile = CreateRef<AnimationClipData>();
+			smile->Duration = 1.0f;
+			smile->Channels.push_back(AnimationChannel{ .Target = "Face", .Path = AnimationPath::Weights, .Interpolation = AnimationInterpolation::Step, .WeightCount = 2, .Times = { 0.0f }, .Values = { 1.0f, 0.0f } });
+			assets.Publish(smileHandle, smile, "Assets/Models/Hero.gltf");
+			Entity hero = scene.CreateEntity("Hero");
+			AnimatorComponent animator;
+			animator.Skeleton = TypedAssetHandle<AssetType::Skeleton>(SkeletonHandle);
+			animator.Layers.push_back(AnimatorLayer{ .Clip = TypedAssetHandle<AssetType::AnimationClip>(smileHandle), .Weight = 0.5f });
+			hero.AddComponent<AnimatorComponent>(animator);
+			Entity face = scene.CreateEntity("Face", hero);
+			face.AddComponent<MeshRendererComponent>(MakeMeshRenderer(faceHandle));
+			face.AddComponent<SkinnedMeshComponent>(SkinnedMeshComponent{ .MorphWeights = { 0.5f } });
+			TransformSystem::Update(scene);
+
+			Result<Scope<AnimationSystem>> system = AnimationSystem::Create({ .RuntimeScene = &scene, .Assets = &assets });
+			REQUIRE_MESSAGE(system.has_value(), system.error().ToString());
+			(*system)->Step(SimStep::FromTick(0, FixedDelta));
+			const AnimationPoseComponent& pose = hero.GetComponent<AnimationPoseComponent>();
+			REQUIRE(pose.Morphs.size() == 1);
+			CHECK(pose.Morphs[0].Target == "Face");
+			CHECK(pose.Morphs[0].Weights == std::vector<float>{ 0.75f, 0.375f });
+			CHECK((*system)->GetDiagnostics().empty());
+		}
+
+		// The phase raises the animation checks at run time (decision 30), once per entity and code however many ticks run:
+		// a skinned mesh without an Animator above it, and one whose Animator's skeleton holds fewer joints than its skin.
+		TEST_CASE("AnimationSystem: a SkinnedMesh without an Animator or with too few joints is reported once at run time")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Test::InMemoryAssetManager assets;
+			PublishRig(assets);
+			const AssetHandle faceHandle(0x3e50000000000022);
+			assets.Publish(faceHandle, MakeFace(3), "Assets/Models/Hero.gltf");
+			Entity orphan = scene.CreateEntity("Orphan");
+			orphan.AddComponent<MeshRendererComponent>(MakeMeshRenderer(faceHandle));
+			orphan.AddComponent<SkinnedMeshComponent>();
+			Entity hero = scene.CreateEntity("Hero");
+			hero.AddComponent<AnimatorComponent>(MakeAnimator());
+			Entity body = scene.CreateEntity("Body", hero);
+			body.AddComponent<MeshRendererComponent>(MakeMeshRenderer(faceHandle));
+			body.AddComponent<SkinnedMeshComponent>();
+			TransformSystem::Update(scene);
+
+			Result<Scope<AnimationSystem>> system = AnimationSystem::Create({ .RuntimeScene = &scene, .Assets = &assets });
+			REQUIRE_MESSAGE(system.has_value(), system.error().ToString());
+			const Test::ExpectLog noAnimator(LogLevel::Warn, AnimationNoAnimatorCode);
+			const Test::ExpectLog mismatch(LogLevel::Warn, AnimationSkeletonMismatchCode);
+			for (uint64_t tick = 0; tick < 3; ++tick)
+				(*system)->Step(SimStep::FromTick(tick, FixedDelta));
+			const std::span<const AnimationSceneIssue> issues = (*system)->GetDiagnostics();
+			REQUIRE(issues.size() == 2);
+			CHECK(issues[0].Code == AnimationNoAnimatorCode);
+			CHECK(issues[0].Entity == orphan.GetUUID());
+			CHECK(issues[1].Code == AnimationSkeletonMismatchCode);
+			CHECK(issues[1].Entity == body.GetUUID());
+			CHECK(noAnimator.GetMatchCount() == 1);
+			CHECK(mismatch.GetMatchCount() == 1);
+			// The Animator is still posed: the renderer draws the mismatched mesh in its bind pose.
+			CHECK(hero.HasComponent<AnimationPoseComponent>());
+		}
+
+		// A session without an asset manager still steps the phase: no skeleton or clip loads, so nothing advances or is posed.
+		TEST_CASE("AnimationSystem: without an asset manager no layer advances and nothing is posed")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Entity hero = scene.CreateEntity("Hero");
+			hero.AddComponent<AnimatorComponent>(MakeAnimator());
+			TransformSystem::Update(scene);
+			CHECK_FALSE(AnimationSystem::Create({ .RuntimeScene = nullptr }).has_value());
+			Result<Scope<AnimationSystem>> system = AnimationSystem::Create({ .RuntimeScene = &scene });
+			REQUIRE_MESSAGE(system.has_value(), system.error().ToString());
+			const uint64_t revision = scene.GetRevision();
+			(*system)->Step(SimStep::FromTick(0, FixedDelta));
+			CHECK(hero.GetComponent<AnimatorComponent>().Layers[0].Time == 0.0f);
+			CHECK_FALSE(hero.HasComponent<AnimationPoseComponent>());
+			CHECK(scene.GetRevision() == revision);
+		}
+
+		// The editor's posing refuses a preview time that is not a duration and names an Animator without a Skeleton.
+		TEST_CASE("AnimationSystem: PoseAnimator refuses a negative or non-finite preview time and an Animator without a Skeleton")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Test::InMemoryAssetManager assets;
+			PublishRig(assets);
+			Entity hero = scene.CreateEntity("Hero");
+			hero.AddComponent<AnimatorComponent>(MakeAnimator());
+			TransformSystem::Update(scene);
+			for (const float time : { -0.5f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN() })
+			{
+				const Status refused = PoseAnimator(hero, assets, time);
+				REQUIRE_FALSE(refused.has_value());
+				CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
+			}
+			CHECK_FALSE(hero.HasComponent<AnimationPoseComponent>());
+			REQUIRE(PoseAnimator(hero, assets).has_value());
+			REQUIRE(hero.HasComponent<AnimationPoseComponent>());
+			hero.Patch<AnimatorComponent>([](AnimatorComponent& animator)
+			{
+				animator.Skeleton = {};
+			});
+			const Status missing = PoseAnimator(hero, assets);
+			REQUIRE_FALSE(missing.has_value());
+			CHECK(missing.error().GetCode() == ErrorCode::NotFound);
+			CHECK_FALSE(hero.HasComponent<AnimationPoseComponent>());
+		}
+
+		// A script can write a new problem every tick, so the system keeps at most MaxAnimationSystemDiagnostics findings: past
+		// them a finding is neither kept nor logged, and one warning says so.
+		TEST_CASE("AnimationSystem: findings past MaxAnimationSystemDiagnostics are neither kept nor logged, and one warning says so")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Test::InMemoryAssetManager assets;
+			const AssetHandle faceHandle(0x3e50000000000023);
+			assets.Publish(faceHandle, MakeFace(1), "Assets/Models/Hero.gltf");
+			for (size_t index = 0; index < MaxAnimationSystemDiagnostics + 1; ++index)
+			{
+				Entity orphan = scene.CreateEntity("Orphan");
+				orphan.AddComponent<MeshRendererComponent>(MakeMeshRenderer(faceHandle));
+				orphan.AddComponent<SkinnedMeshComponent>();
+			}
+			TransformSystem::Update(scene);
+			Result<Scope<AnimationSystem>> system = AnimationSystem::Create({ .RuntimeScene = &scene, .Assets = &assets });
+			REQUIRE_MESSAGE(system.has_value(), system.error().ToString());
+			const Test::ExpectLog findings(LogLevel::Warn, AnimationNoAnimatorCode);
+			const Test::ExpectLog reached(LogLevel::Warn, "animation findings reached");
+			(*system)->Step(SimStep::FromTick(0, FixedDelta));
+			(*system)->Step(SimStep::FromTick(1, FixedDelta));
+			CHECK((*system)->GetDiagnostics().size() == MaxAnimationSystemDiagnostics);
+			CHECK(findings.GetMatchCount() == MaxAnimationSystemDiagnostics);
+			CHECK(reached.GetMatchCount() == 1);
 		}
 	}
 

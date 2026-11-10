@@ -9,6 +9,7 @@
 #include "Engine/Graphics/Readback.h"
 #include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Renderer/ShadowPass.h"
+#include "Engine/Renderer/SkinningPass.h"
 #include "Shared/InstanceRecord.h"
 #include "Shared/ShadowConstants.h"
 #include "Shared/ShadowProbeConstants.h"
@@ -384,6 +385,59 @@ namespace Engine {
 			CHECK(ShadowPixel(instancedDepth, 128, 128).x == doctest::Approx(0.5)); // the third
 			CHECK(ShadowPixel(instancedDepth, 128, 51).x == doctest::Approx(0.4));  // the mirrored one, at clip y 0.6
 			CHECK(ShadowPixel(instancedDepth, 204, 128).x == doctest::Approx(0.8)); // the fifth
+		}
+
+		// M23 (C23.3, C-SKEL, C-MORPH; Docs/Decisions/0034-m23-contract.md decision 27, stream C): a deformed caster's draws bind
+		// the deformed vertices its source names (the attribute stream and the indices stay its mesh's), carry its deformed
+		// bounds for each face's culling and key its VertexStream, so two deformed casters of one mesh are two batches where
+		// the same casters undeformed are one; a skipped caster casts nothing.
+		TEST_CASE("ShadowPass: a deformed caster draws its own vertices and bounds in a batch of its own")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::InMemoryAssetManager assets;
+			PublishShadowQuad(assets);
+			{
+				GpuResourceCache cache(gpu.GetDevice(), assets);
+				std::array<MeshDrawItem, 3> items{};
+				for (size_t index = 0; index < items.size(); ++index)
+				{
+					items[index].Mesh = ShadowQuadHandle;
+					items[index].World = glm::translate(glm::mat4(1), glm::vec3(static_cast<float>(index), 0, 0));
+				}
+				std::vector<InstanceRecord> instances;
+				const Result<ShadowCasterSet> rigid = ShadowPass::PrepareCasters(cache, items, true, instances);
+				REQUIRE_MESSAGE(rigid.has_value(), rigid.error().ToString());
+				CHECK(rigid->Draws.size() == 3);
+				CHECK(rigid->Batches.size() == 1);
+
+				Result<nvrhi::BufferHandle> first = gpu.GetDevice().CreateBuffer(SkinningPass::GetVerticesDesc(4));
+				Result<nvrhi::BufferHandle> second = gpu.GetDevice().CreateBuffer(SkinningPass::GetVerticesDesc(4));
+				REQUIRE(first.has_value());
+				REQUIRE(second.has_value());
+				const Aabb bent{ .Min = glm::vec3(-1, -1, 0), .Max = glm::vec3(1, 1, 2) };
+				const std::array<DeformedVertexSource, 3> sources = { DeformedVertexSource{ .Vertices = *second, .VertexStream = 2, .Bounds = bent },
+					DeformedVertexSource{ .Vertices = *first, .VertexStream = 1, .Bounds = bent }, DeformedVertexSource{ .Skipped = true } };
+				instances.clear();
+				const Result<ShadowCasterSet> deformed = ShadowPass::PrepareCasters(cache, items, true, instances, sources);
+				REQUIRE_MESSAGE(deformed.has_value(), deformed.error().ToString());
+				REQUIRE(deformed->Draws.size() == 2);
+				CHECK(deformed->Batches.size() == 2);
+				CHECK(instances.size() == 2);
+				// Equal draws sort by their vertex stream: the second caster's (stream 1) first.
+				CHECK(deformed->Draws[0].Vertices == *first);
+				CHECK(deformed->Draws[0].World == items[1].World);
+				CHECK(deformed->Draws[1].Vertices == *second);
+				CHECK(deformed->Draws[1].World == items[0].World);
+				const GpuMesh& mesh = cache.GetMesh(ShadowQuadHandle);
+				for (const ShadowCasterDraw& draw : deformed->Draws)
+				{
+					CHECK(draw.Bounds == bent);
+					CHECK(draw.Attributes == mesh.AttributeBuffer);
+					CHECK(draw.Indices == mesh.IndexBuffer);
+				}
+			}
+			gpu.GetDevice().RunGarbageCollection();
 		}
 
 		TEST_CASE("Shadows: both depth-clamp and extended-near fallback render off-screen casters")

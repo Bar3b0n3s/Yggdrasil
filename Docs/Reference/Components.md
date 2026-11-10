@@ -746,9 +746,13 @@ Script members of `Animator`:
 
 | Member | Kind | Signature | Access | Modes | Description |
 |---|---|---|---|---|---|
+| `GetJointTransform` | method | `(self: Animator, joint: string) -> (vector?, Quat?)` |  | All | Read the world position and rotation of the skeleton's joint named joint in the pose of the last fixed step's AnimationSystem phase; nil, nil without a pose or such a joint, and the position with a nil rotation when a scale of 0 on the way (a clip scaling a joint to nothing) leaves the joint no rotation. |
+| `GetRootMotion` | method | `(self: Animator) -> (vector, Quat)` |  | All | Read the last fixed step's blended root motion in the entity's parent space: the translation RootMotion Apply adds to the Transform's Translation and the rotation it multiplies into Rotation; zero and identity without a pose or with RootMotion None. |
 | `Layers` | proxy field | `{{Clip: AssetRef?, Time: number, Speed: number, Weight: number, Loop: boolean}}` | read/write | All | The layers, at most eight, blended in order over the skeleton's rest pose. |
+| `Play` | method | `(self: Animator, layer: number, clip: AssetRef?, time: number?) -> ()` |  | All | Set the 1-based layer to play the clip from time seconds (0 when absent), keeping its Speed, Weight and Loop; the next index appends a layer with Speed 1, Weight 1 and Loop. A layer beyond the next one or beyond 8, or a time below 0, raises an error. |
 | `Playing` | proxy field | `boolean` | read/write | All | Whether the layers' times advance each fixed step; the pose follows the times either way. |
 | `RootMotion` | proxy field | `AnimatorRootMotion` | read/write | All | What happens to the skeleton's root motion: kept in the pose, applied to the entity or only reported. |
+| `SetWeight` | method | `(self: Animator, layer: number, weight: number) -> ()` |  | All | Set the 1-based layer's Weight, from 0 (no effect) to 1 (it overrides the layers before it on the paths its clip keys); a crossfade tweens two layers' weights. A layer the Animator lacks or a weight outside [0, 1] raises an error. |
 | `Skeleton` | proxy field | `AssetRef?` | read/write | All | The skeleton the layers' clips pose; null poses nothing. |
 
 ## SkinnedMesh
@@ -770,6 +774,7 @@ Script members of `SkinnedMesh`:
 | Member | Kind | Signature | Access | Modes | Description |
 |---|---|---|---|---|---|
 | `MorphWeights` | proxy field | `{number}` | read/write | All | One weight in [-1, 1] per morph target of the mesh, in order; a missing weight is the target's default, and an animated weight overrides it. |
+| `SetMorphWeight` | method | `(self: SkinnedMesh, target: string, weight: number) -> ()` |  | All | Set the weight of the mesh's morph target named target, growing MorphWeights with the targets' default weights; an error names the target when the mesh has no such target, and a weight outside [-1, 1] raises one. |
 
 ## Structs
 

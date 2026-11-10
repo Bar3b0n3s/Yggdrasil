@@ -24,6 +24,9 @@ Special cases (also in Tests/Data/Validation/README.md, which this generator wri
   test repeats it until the scene holds Count of it, so no multi-megabyte scene is committed.
 - NonCanonical lists project-relative paths that are deliberately not canonical JSON (ASSET_IMPORT_FAILED's unreadable
   .meta); the authored-files test exempts exactly those.
+- ANIMATION_NO_ANIMATOR and ANIMATION_SKELETON_MISMATCH reference the meshes and skeletons of generated skinned glTF
+  files (GltfImporter version 3) by their sub-asset handles, Hash64(the .meta's handle, the sub-asset key), so their
+  .meta files fix the handles.
 
 Scenes, metas and project files are written in the canonical JsonWriter form; images are PNGs of stored deflate blocks,
 so no zlib build changes their bytes. The glTF diagnostics fixtures and Truncated.png are byte copies of
@@ -36,6 +39,7 @@ Exit codes: 0 fixtures generated or verified, 1 stale or extra files or an I/O f
 from __future__ import annotations
 
 import argparse
+import base64
 import binascii
 import json
 import math
@@ -61,7 +65,7 @@ COMPONENT_ORDER = [
     "ID", "Name", "Tags", "Relationship", "Transform", "Prefab", "PrefabLink", "MeshRenderer", "Camera",
     "DirectionalLight", "PointLight", "SpotLight", "Environment", "PostProcess", "Text", "RigidBody", "BoxCollider",
     "SphereCollider", "CapsuleCollider", "MeshCollider", "CharacterController", "AudioSource", "AudioListener",
-    "Script", "ValidatorTarget", "ValidatorFollower",
+    "Script", "Animator", "SkinnedMesh", "ValidatorTarget", "ValidatorFollower",
 ]
 
 # The registered version of each component above 1 ("ComponentVersions"); every other component is at version 1.
@@ -176,6 +180,107 @@ def checker_png(size: int) -> bytes:
     header = struct.pack(">IIBBBBB", size, size, 1, 0, 0, 0, 0)
     return (b"\x89PNG\r\n\x1a\n" + png_chunk(b"IHDR", header) + png_chunk(b"IDAT", zlib_stored(bytes(rows)))
             + png_chunk(b"IEND", b""))
+
+
+_XXH_MASK = (1 << 64) - 1
+_XXH_PRIMES = (0x9E3779B185EBCA87, 0xC2B2AE3D27D4EB4F, 0x165667B19E3779F9, 0x85EBCA77C2B2AE63, 0x27D4EB2F165667C5)
+
+
+def hash64(seed: int, key: str) -> str:
+    """Hash64(seed, key) of Engine/Core/Hash.h: the XXH64 of the key's UTF-8 bytes with `seed`, as a sub-asset's handle
+    (Hash64(source handle, sub-asset key), Architecture section 7.1), in 16 lowercase hexadecimal digits."""
+    prime1, prime2, prime3, prime4, prime5 = _XXH_PRIMES
+
+    def rotate(value: int, count: int) -> int:
+        value &= _XXH_MASK
+        return ((value << count) | (value >> (64 - count))) & _XXH_MASK
+
+    def round_lane(accumulator: int, lane: int) -> int:
+        return (rotate(accumulator + lane * prime2, 31) * prime1) & _XXH_MASK
+
+    data = key.encode("utf-8")
+    offset = 0
+    if len(data) >= 32:
+        lanes = [(seed + prime1 + prime2) & _XXH_MASK, (seed + prime2) & _XXH_MASK, seed & _XXH_MASK,
+                 (seed - prime1) & _XXH_MASK]
+        while offset + 32 <= len(data):
+            for index, word in enumerate(struct.unpack_from("<4Q", data, offset)):
+                lanes[index] = round_lane(lanes[index], word)
+            offset += 32
+        result = sum(rotate(value, shift) for value, shift in zip(lanes, (1, 7, 12, 18))) & _XXH_MASK
+        for value in lanes:
+            result = ((result ^ round_lane(0, value)) * prime1 + prime4) & _XXH_MASK
+    else:
+        result = (seed + prime5) & _XXH_MASK
+    result = (result + len(data)) & _XXH_MASK
+    while offset + 8 <= len(data):
+        result ^= round_lane(0, struct.unpack_from("<Q", data, offset)[0])
+        result = (rotate(result, 27) * prime1 + prime4) & _XXH_MASK
+        offset += 8
+    if offset + 4 <= len(data):
+        result ^= struct.unpack_from("<I", data, offset)[0] * prime1
+        result = (rotate(result, 23) * prime2 + prime3) & _XXH_MASK
+        offset += 4
+    for byte in data[offset:]:
+        result ^= byte * prime5
+        result = (rotate(result, 11) * prime1) & _XXH_MASK
+    result = ((result ^ (result >> 33)) * prime2) & _XXH_MASK
+    result = ((result ^ (result >> 29)) * prime3) & _XXH_MASK
+    return f"{result ^ (result >> 32):016x}"
+
+
+def skinned_gltf(mesh: str, skin: str, joints: list[str]) -> str:
+    """A glTF 2.0 file with one skinned triangle (the mesh `mesh` on its own node, every vertex on one joint) and the
+    skin `skin` of `joints`, a chain from a root node, each one unit above its parent, with their inverse bind matrices.
+    Its buffer is a base64 data URI; it has normals and tangents, so nothing is generated or approximated."""
+    count = len(joints)
+    positions = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
+    payload = b"".join(struct.pack("<3f", *position) for position in positions)
+    payload += struct.pack("<9f", *([0.0, 0.0, 1.0] * 3))
+    payload += struct.pack("<12f", *([1.0, 0.0, 0.0, 1.0] * 3))
+    payload += bytes(sum(([min(vertex, count - 1), 0, 0, 0] for vertex in range(3)), []))
+    payload += struct.pack("<12f", *([1.0, 0.0, 0.0, 0.0] * 3))
+    payload += struct.pack("<3H", 0, 1, 2) + bytes(2)
+    for index in range(count):
+        payload += struct.pack("<16f", 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -float(index), 0, 1)
+    views = [(0, 36, 34962), (36, 36, 34962), (72, 48, 34962), (120, 12, 34962), (132, 48, 34962), (180, 6, 34963),
+             (188, 64 * count, None)]
+    accessors = [
+        {"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3", "min": [0, 0, 0], "max": [1, 1, 0]},
+        {"bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3"},
+        {"bufferView": 2, "componentType": 5126, "count": 3, "type": "VEC4"},
+        {"bufferView": 3, "componentType": 5121, "count": 3, "type": "VEC4"},
+        {"bufferView": 4, "componentType": 5126, "count": 3, "type": "VEC4"},
+        {"bufferView": 5, "componentType": 5123, "count": 3, "type": "SCALAR"},
+        {"bufferView": 6, "componentType": 5126, "count": count, "type": "MAT4"},
+    ]
+    nodes: list[dict[str, Any]] = []
+    for index, name in enumerate(joints):
+        node: dict[str, Any] = {"name": name}
+        if index > 0:
+            node["translation"] = [0, 1, 0]
+        if index + 1 < count:
+            node["children"] = [index + 1]
+        nodes.append(node)
+    nodes.append({"name": mesh, "mesh": 0, "skin": 0})
+    document = {
+        "asset": {"version": "2.0"},
+        "scene": 0,
+        "scenes": [{"nodes": [0, count]}],
+        "nodes": nodes,
+        "skins": [{"name": skin, "joints": list(range(count)), "inverseBindMatrices": 6}],
+        "meshes": [{"name": mesh, "primitives": [{
+            "attributes": {"POSITION": 0, "NORMAL": 1, "TANGENT": 2, "JOINTS_0": 3, "WEIGHTS_0": 4}, "indices": 5}]}],
+        "accessors": accessors,
+        "bufferViews": [dict({"buffer": 0, "byteOffset": offset, "byteLength": length},
+                             **({"target": target} if target is not None else {})) for offset, length, target in views],
+        "buffers": [{"byteLength": len(payload),
+                     "uri": "data:application/octet-stream;base64," + base64.b64encode(payload).decode("ascii")}],
+    }
+    return json.dumps(document, indent="\t") + "\n"
+
+
+GLTF_SETTINGS = {"Scale": 1, "GenerateMissingTangents": False, "ImportMaterials": True, "MergeMeshes": False}
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -596,6 +701,32 @@ return Script.Define("Jumper", Jumper)
         item.entities.append(entity(f"e00000000000002{index}", f"Bulb{index}", {
             "Transform": transform(index * 2, 3, 0), "PointLight": {"CastShadows": True}}))
 
+    # The animation checks (Docs/Decisions/0034-m23-contract.md decision 30): a mesh skinned to a three-joint skin,
+    # drawn by a SkinnedMesh with no Animator above it, and drawn below an Animator posing the one-joint skeleton of
+    # another file.
+    rig_handle, bone_handle = 0x3a7e000000000011, 0x3a7e000000000012
+    body_mesh = hash64(rig_handle, "mesh:0:Body")
+    skinned_body = {"Transform": transform(), "MeshRenderer": {"Mesh": body_mesh}, "SkinnedMesh": {"MorphWeights": []}}
+
+    def add_rigs(target: Fixture) -> None:
+        for name, handle, mesh, joints in (("Rig", rig_handle, "Body", ["Root", "Mid", "Tip"]),
+                                           ("Bone", bone_handle, "Tail", ["Bone"])):
+            target.add(f"Project/Assets/Models/{name}.gltf", skinned_gltf(mesh, name, joints))
+            target.add_json(f"Project/Assets/Models/{name}.gltf.meta",
+                            meta(f"{handle:016x}", "Prefab", "Gltf", GLTF_SETTINGS))
+
+    item = fixture("ANIMATION_NO_ANIMATOR")
+    add_rigs(item)
+    item.entities.append(entity("e000000000000030", "Body", skinned_body))
+
+    item = fixture("ANIMATION_SKELETON_MISMATCH")
+    add_rigs(item)
+    item.entities.append(entity("e000000000000031", "Hero", {
+        "Transform": transform(),
+        "Animator": {"Skeleton": hash64(bone_handle, "skin:0:Bone"), "Layers": [], "Playing": True,
+                     "RootMotion": "None"}}))
+    item.entities.append(entity("e000000000000032", "Body", skinned_body, parent="e000000000000031"))
+
     return fixtures
 
 
@@ -620,6 +751,8 @@ requires a fixture for every code but the retired ones (`ProjectValidator::GetRe
 both
   out everywhere and the scan reports the mismatch on case-sensitive and case-insensitive file systems alike.
 - `PHYSICS_LIMIT_EXCEEDED` (16,385 bodies) and `RENDER_LIGHT_LIMIT_EXCEEDED` (257 lights) are expanded at test time.
+- `ANIMATION_NO_ANIMATOR` and `ANIMATION_SKELETON_MISMATCH` reference the meshes and skeletons of generated skinned glTF
+  files by their sub-asset handles, so their `.meta` files fix the source handles.
 """
 
 # ---------------------------------------------------------------------------------------------------------------------

@@ -14,8 +14,8 @@
 // The Animation category (M23, C23.3, C-SKEL, C-MORPH, C-ANIM-BLEND; Docs/Decisions/0034-m23-contract.md decision 28; ADR
 // 0028's phase-2 ledger: a milestone's new components go in categories of their own after Scripting): the Animator, which
 // poses a skeleton from its layers' clips in the fixed step, and the SkinnedMesh, which deforms its MeshRenderer's mesh by
-// that pose and by morph weights. Registered by the contract, so every W23.3 stream builds on the final entries; no scene
-// of FeatureTest or of the audited projects holds them until stream D's coverage adds its scenes.
+// that pose and by morph weights. Registered by the contract, so every W23.3 stream builds on the final entries.
+// FeatureTest's Animation.scene and the SkinnedPose golden scene hold them; no audited demo does.
 
 namespace Engine {
 

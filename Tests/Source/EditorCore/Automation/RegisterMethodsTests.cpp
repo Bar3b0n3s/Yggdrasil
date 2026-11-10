@@ -21,11 +21,12 @@ namespace Engine {
 	// asset.*, prefab.*, entity.bounds and project.refreshAssets (ADR 0010 decision 20), M7's play.*, input.inject and
 	// project.export (ADR 0012 decisions 4, 8 and 14), M11's physics.bodyInfo (ADR 0014 decision 18), M12's audio.stats
 	// (ADR 0015 decision 15), M19's input.readReplay and native.* (ADR 0030 decisions 14 and 32), M18's shaders.reload and
-	// profiler.capture (ADR 0029 decisions 3 and 11), and M20's scene.list, scene.activate and scene.close
-	// (Docs/Decisions/0031-m20-contract.md decision 14), test hooks excluded.
+	// profiler.capture (ADR 0029 decisions 3 and 11), M20's scene.list, scene.activate and scene.close
+	// (Docs/Decisions/0031-m20-contract.md decision 14), and M23's animation.preview (Docs/Decisions/0034-m23-contract.md
+	// decision 32), test hooks excluded.
 	static const std::vector<std::string>& GetExpectedMethodNames()
 	{
-		static const std::vector<std::string> ExpectedNames = { "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
+		static const std::vector<std::string> ExpectedNames = { "animation.preview", "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
 			"asset.import", "asset.info", "asset.list", "asset.move", "asset.reimport", "asset.setImportSettings", "asset.setProperties",
 			"audio.stats", "component.list", "component.schema", "docs.get", "edit.batch", "edit.getSelection", "edit.history", "edit.redo", "edit.select",
 			"edit.undo", "editor.screenshot", "editor.state", "entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get",
@@ -113,7 +114,7 @@ namespace Engine {
 			methods.Freeze();
 			const std::vector<std::string> launcher = { "docs.get", "project.create", "project.open", "rpc.discover", "session.hello",
 				"session.info", "session.shutdown" };
-			const std::vector<std::string> tools = { "asset.create", "asset.delete", "asset.getProperties", "asset.import", "asset.list", "asset.move",
+			const std::vector<std::string> tools = { "animation.preview", "asset.create", "asset.delete", "asset.getProperties", "asset.import", "asset.list", "asset.move",
 				"asset.setProperties", "component.list", "component.schema", "docs.get", "edit.batch", "edit.redo", "edit.undo", "editor.screenshot",
 				"entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get", "entity.reparent", "entity.update", "input.inject",
 				"input.readReplay", "input.record", "input.replay", "log.read", "native.build", "native.getComponents", "native.load", "native.read",
@@ -284,9 +285,10 @@ namespace Engine {
 			// asset_set_properties, asset_move, asset_delete, prefab_create, prefab_instantiate, prefab_apply and entity_bounds, and
 			// M7's play_start, play_stop, play_step, input_inject and project_export, plus M13's ten script/replay/test tools, and
 			// M16's project_upgrade (friction S3-09), M17's asset_get_properties (friction F11), M19's input_read_replay
-			// (ADR 0030 decision 14) and seven native tools (decision 32), and M20's scene_list, scene_activate and scene_close
-			// (Docs/Decisions/0031-m20-contract.md decision 14).
-			CHECK(catalog["Tools"].size() == 65);
+			// (ADR 0030 decision 14) and seven native tools (decision 32), M20's scene_list, scene_activate and scene_close
+			// (Docs/Decisions/0031-m20-contract.md decision 14), and M23's animation_preview (Docs/Decisions/0034-m23-contract.md
+			// decision 32).
+			CHECK(catalog["Tools"].size() == 66);
 			for (Json& tool : catalog["Tools"])
 			{
 				INFO(tool["name"].dump());

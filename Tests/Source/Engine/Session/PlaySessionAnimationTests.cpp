@@ -123,7 +123,7 @@ return Script.Define("Patrol", Patrol)
 		// Stream B enters the phase: after the tick's gameplay phases (scripts, tasks, the native step) and before the
 		// transform update, in Simulate too, and the session holds its AnimationSystem. The streams that enter a phase add it to
 		// PlaySessionTests.cpp's phase lists at its place (ADR 0028's phase-2 ledger).
-		TEST_CASE("PlaySession: AnimationSystem runs after the gameplay phases and before the transform update, in Simulate too" * doctest::skip(true))
+		TEST_CASE("PlaySession: AnimationSystem runs after the gameplay phases and before the transform update, in Simulate too")
 		{
 			for (const PlayMode mode : { PlayMode::Play, PlayMode::Simulate })
 			{

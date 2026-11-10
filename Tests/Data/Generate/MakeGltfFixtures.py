@@ -55,6 +55,15 @@ no TANGENT (the importer generates tangents with MikkTSpace), texture coordinate
                                (also in extensionsRequired), KHR_texture_transform, double-sided, and five texture
                                slots over three images (one image used as colour twice, one as linear data twice)
   NoNormalsNoUvs.gltf          a quad with POSITION only (normals generated, ASSET_TANGENTS_APPROXIMATED)
+  Skinned.gltf                 M23 (GltfImporter version 3): a strip of two quads skinned to a two-joint chain under an
+                               "Armature" node beside the skinned "Body", one morph target "Bulge" and one animation
+                               "Wave" turning the second joint and keying the bulge's weight
+  SkinnedRigs.gltf             M23: a rig under an intermediate node "Rig" (a static joint above the root-motion
+                               joint "Hips"), a root-level joint "Tail" holding its own skinned mesh, an animation
+                               "Walk" and an animation "Blink" shorter than a clip's shortest duration
+  SharedSkins.gltf             M23: two skins over shared joints, each with its own mesh and inverse bind matrices (the
+                               second mesh authored one unit off), merged into one Skeleton; a static use of the first
+                               mesh; and an animation "Sway" over joints of both skins
 
 Run from the repository root: `python Tests/Data/Generate/MakeGltfFixtures.py` writes the files (and removes files of
 the output directory it does not generate); `--check` compares a fresh generation with the committed files and writes
@@ -730,6 +739,280 @@ def make_no_normals_no_uvs() -> dict[str, bytes]:
     return {"NoNormalsNoUvs.gltf": gltf_text(builder.embedded_document())}
 
 
+# M23 (C23.3, GltfImporter version 3): skins, animations and morph targets. Matrices are 4 x 4 lists of rows; glTF
+# stores them column-major (matrix_floats).
+Matrix = list[list[float]]
+
+
+def identity_matrix() -> Matrix:
+    return [[1.0 if row == column else 0.0 for column in range(4)] for row in range(4)]
+
+
+def multiply(a: Matrix, b: Matrix) -> Matrix:
+    return [[sum(a[row][k] * b[k][column] for k in range(4)) for column in range(4)] for row in range(4)]
+
+
+def translation_matrix(offset: Vector3) -> Matrix:
+    matrix = identity_matrix()
+    for axis in range(3):
+        matrix[axis][3] = offset[axis]
+    return matrix
+
+
+def rotation_matrix(rotation: Vector4) -> Matrix:
+    """The rotation of the unit quaternion (x, y, z, w)."""
+    x, y, z, w = rotation
+    return [
+        [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w), 0.0],
+        [2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w), 0.0],
+        [2.0 * (x * z - y * w), 2.0 * (y * z + x * w), 1.0 - 2.0 * (x * x + y * y), 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+
+
+def rigid_inverse(matrix: Matrix) -> Matrix:
+    """The inverse of a rotation followed by a translation: the transposed rotation, and the translation undone."""
+    inverse = identity_matrix()
+    for row in range(3):
+        for column in range(3):
+            inverse[row][column] = matrix[column][row]
+    for row in range(3):
+        inverse[row][3] = -sum(inverse[row][k] * matrix[k][3] for k in range(3))
+    return inverse
+
+
+def matrix_floats(matrix: Matrix) -> tuple[float, ...]:
+    """The 16 floats of a glTF MAT4, column-major; -0.0 written as 0.0 so the bytes do not depend on rounding signs."""
+    return tuple(matrix[row][column] + 0.0 for column in range(4) for row in range(4))
+
+
+# The sine and cosine of half of each angle the fixtures turn by, as exact literals: the doubles the committed fixtures
+# were generated with. The C runtime's sin and cos, which Python's math module calls, are not guaranteed bit-identical
+# across machines or runtime updates, so the committed bytes never depend on them (the engine bans them on its
+# simulation path for the same reason; W23.3's review).
+HALF_TURN_SINES_AND_COSINES: dict[float, tuple[float, float]] = {
+    10.0: (float.fromhex("0x1.64fd6b8c28102p-4"), float.fromhex("0x1.fe0d3b41815a2p-1")),
+    45.0: (float.fromhex("0x1.87de2a6aea963p-2"), float.fromhex("0x1.d906bcf328d46p-1")),
+    90.0: (float.fromhex("0x1.6a09e667f3bcdp-1"), float.fromhex("0x1.6a09e667f3bcdp-1")),
+}
+assert all(abs(sine * sine + cosine * cosine - 1.0) <= 4.0e-16 for sine, cosine in HALF_TURN_SINES_AND_COSINES.values())
+
+
+def axis_rotation(axis: Vector3, degrees: float) -> Vector4:
+    """The unit quaternion (x, y, z, w) turning `degrees` (an angle of HALF_TURN_SINES_AND_COSINES) about the unit
+    `axis`."""
+    sine, cosine = HALF_TURN_SINES_AND_COSINES[degrees]
+    return (axis[0] * sine, axis[1] * sine, axis[2] * sine, cosine)
+
+
+def node_matrix(node: dict[str, Any]) -> Matrix:
+    """A node's local transform (translation and rotation; the fixtures' joints have no scale)."""
+    translation = node.get("translation", [0.0, 0.0, 0.0])
+    rotation = node.get("rotation", [0.0, 0.0, 0.0, 1.0])
+    return multiply(translation_matrix((translation[0], translation[1], translation[2])),
+                    rotation_matrix((rotation[0], rotation[1], rotation[2], rotation[3])))
+
+
+def world_matrices(nodes: list[dict[str, Any]]) -> list[Matrix]:
+    """Every node's world transform (parents listed before their children in the fixtures)."""
+    parents: dict[int, int] = {}
+    for index, node in enumerate(nodes):
+        for child in node.get("children", []):
+            parents[child] = index
+    worlds: list[Matrix] = []
+    for index, node in enumerate(nodes):
+        local = node_matrix(node)
+        worlds.append(multiply(worlds[parents[index]], local) if index in parents else local)
+    return worlds
+
+
+def strip_geometry(left: float, bottom: float, width: float, row_height: float) -> Geometry:
+    """A vertical strip of two quads in the XY plane facing +Z: three rows of two vertices (bottom row first), each quad
+    as two counter-clockwise triangles."""
+    geometry = Geometry([], [], [], [])
+    for row in range(3):
+        for column in range(2):
+            geometry.positions.append((left + width * column, bottom + row_height * row, 0.0))
+            geometry.normals.append((0.0, 0.0, 1.0))
+            geometry.texcoords.append((float(column), 1.0 - row / 2.0))
+    for quad in range(2):
+        base = quad * 2
+        geometry.indices.extend((base, base + 1, base + 3, base, base + 3, base + 2))
+    return geometry
+
+
+def add_joints(builder: GltfBuilder, joints: Sequence[Sequence[int]]) -> int:
+    """A JOINTS_0 accessor: VEC4 unsigned bytes (4 bytes an element, so aligned without padding)."""
+    payload = b"".join(struct.pack("<4B", *joint) for joint in joints)
+    accessor = {"componentType": UNSIGNED_BYTE, "count": len(joints), "type": "VEC4"}
+    return builder.add_accessor(payload, accessor, ARRAY_BUFFER)
+
+
+def add_skinned_primitive(
+    builder: GltfBuilder, geometry: Geometry, material: int, rows: Sequence[tuple[tuple[int, int], Vector2]]
+) -> dict[str, Any]:
+    """A primitive of a strip whose row r's two vertices take JOINTS_0 (rows[r][0], 0, 0) and WEIGHTS_0
+    (rows[r][1], 0, 0)."""
+    primitive = builder.add_primitive(geometry, material)
+    count = len(geometry.positions)
+    joints = [(rows[vertex // 2][0][0], rows[vertex // 2][0][1], 0, 0) for vertex in range(count)]
+    weights = [(rows[vertex // 2][1][0], rows[vertex // 2][1][1], 0.0, 0.0) for vertex in range(count)]
+    primitive["attributes"]["JOINTS_0"] = add_joints(builder, joints)
+    primitive["attributes"]["WEIGHTS_0"] = builder.add_floats(weights, "VEC4")
+    return primitive
+
+
+def add_inverse_binds(builder: GltfBuilder, matrices: Sequence[Matrix]) -> int:
+    return builder.add_floats([matrix_floats(matrix) for matrix in matrices], "MAT4", target=None)
+
+
+def add_sampler(
+    builder: GltfBuilder,
+    samplers: list[dict[str, Any]],
+    times: Sequence[float],
+    values: Sequence[Sequence[float]],
+    kind: str,
+) -> int:
+    """A LINEAR sampler keying `values` (of glTF accessor type `kind`) at `times`; returns its index in `samplers`."""
+    times_accessor = builder.add_floats([(time,) for time in times], "SCALAR", with_bounds=True, target=None)
+    values_accessor = builder.add_floats(values, kind, target=None)
+    samplers.append({"input": times_accessor, "interpolation": "LINEAR", "output": values_accessor})
+    return len(samplers) - 1
+
+
+def make_skinned() -> dict[str, bytes]:
+    """Skinned.gltf: a strip of two quads (rows at y 0, 1 and 2) skinned to the two-joint chain Joint0 -> Joint1 under
+    "Armature", beside the skinned "Body" (so Body's Animator goes on Armature), with one morph target "Bulge" (the
+    middle row pushed 0.25 along +Z, the outer rows' normals tilted to follow) and one animation "Wave" that turns
+    Joint1 45 degrees about Z and back and keys the bulge's weight 0, 1, 0 over one second."""
+    builder = GltfBuilder()
+    material = builder.add_material(plain_material("StripMaterial", (0.8, 0.5, 0.3, 1.0)))
+    geometry = strip_geometry(-0.5, 0.0, 1.0, 1.0)
+    rows = (((0, 0), (1.0, 0.0)), ((0, 1), (0.5, 0.5)), ((1, 0), (1.0, 0.0)))
+    primitive = add_skinned_primitive(builder, geometry, material, rows)
+    bulge = 0.25
+    length = (1.0 + bulge * bulge) ** 0.5
+    row_normals = ((0.0, -bulge / length, 1.0 / length), (0.0, 0.0, 1.0), (0.0, bulge / length, 1.0 / length))
+    position_deltas = [(0.0, 0.0, bulge if vertex // 2 == 1 else 0.0) for vertex in range(6)]
+    normal_deltas = [
+        tuple(row_normals[vertex // 2][axis] - (0.0, 0.0, 1.0)[axis] for axis in range(3)) for vertex in range(6)
+    ]
+    primitive["targets"] = [{"NORMAL": builder.add_floats(normal_deltas, "VEC3"),
+                             "POSITION": builder.add_floats(position_deltas, "VEC3", with_bounds=True)}]
+    mesh = builder.add_mesh("Strip", [primitive])
+    builder.meshes[mesh]["weights"] = [0.0]
+    builder.meshes[mesh]["extras"] = {"targetNames": ["Bulge"]}
+
+    builder.add_node({"children": [1, 3], "name": "Armature"})
+    builder.add_node({"children": [2], "name": "Joint0"})
+    builder.add_node({"name": "Joint1", "translation": [0.0, 1.0, 0.0]})
+    builder.add_node({"mesh": mesh, "name": "Body", "skin": 0})
+    worlds = world_matrices(builder.nodes)
+    inverse_binds = add_inverse_binds(builder, [rigid_inverse(worlds[1]), rigid_inverse(worlds[2])])
+
+    samplers: list[dict[str, Any]] = []
+    turned = axis_rotation((0.0, 0.0, 1.0), 45.0)
+    rest = (0.0, 0.0, 0.0, 1.0)
+    rotation = add_sampler(builder, samplers, (0.0, 0.5, 1.0), (rest, turned, rest), "VEC4")
+    weights = add_sampler(builder, samplers, (0.0, 0.5, 1.0), ((0.0,), (1.0,), (0.0,)), "SCALAR")
+    builder.extra = {
+        "animations": [{"channels": [{"sampler": rotation, "target": {"node": 2, "path": "rotation"}},
+                                     {"sampler": weights, "target": {"node": 3, "path": "weights"}}],
+                        "name": "Wave", "samplers": samplers}],
+        "skins": [{"inverseBindMatrices": inverse_binds, "joints": [1, 2]}],
+    }
+    return {"Skinned.gltf": gltf_text(builder.embedded_document(scene_nodes=[0]))}
+
+
+def make_skinned_rigs() -> dict[str, bytes]:
+    """SkinnedRigs.gltf, two rigs for the Animator placement rules. "Character" holds "Rig" (turned 90 degrees about Y
+    and lifted 1, not a joint) above skin 0's root joint "Hips" and its child "Spine", beside the skinned "Body"; the
+    root-level joint "Tail" (skin 1, at x 2) holds its own skinned "TailMesh". Animation "Walk" moves the hips 1 along
+    +Z over one second; "Blink" turns the spine over 0.0001 s, shorter than a clip's shortest duration."""
+    builder = GltfBuilder()
+    material = builder.add_material(plain_material("RigMaterial"))
+    body = add_skinned_primitive(builder, strip_geometry(-0.25, 1.5, 0.5, 0.5), material,
+                                 (((0, 0), (1.0, 0.0)), ((0, 1), (0.5, 0.5)), ((1, 0), (1.0, 0.0))))
+    body_mesh = builder.add_mesh("BodyMesh", [body])
+    tail = add_skinned_primitive(builder, strip_geometry(1.75, 0.0, 0.5, 0.25), material,
+                                 (((0, 0), (1.0, 0.0)), ((0, 0), (1.0, 0.0)), ((0, 0), (1.0, 0.0))))
+    tail_mesh = builder.add_mesh("TailMesh", [tail])
+
+    builder.add_node({"children": [1, 4], "name": "Character"})
+    builder.add_node({"children": [2], "name": "Rig", "rotation": list(axis_rotation((0.0, 1.0, 0.0), 90.0)),
+                      "translation": [0.0, 1.0, 0.0]})
+    builder.add_node({"children": [3], "name": "Hips", "translation": [0.0, 0.5, 0.0]})
+    builder.add_node({"name": "Spine", "translation": [0.0, 0.5, 0.0]})
+    builder.add_node({"mesh": body_mesh, "name": "Body", "skin": 0})
+    builder.add_node({"children": [6], "name": "Tail", "translation": [2.0, 0.0, 0.0]})
+    builder.add_node({"mesh": tail_mesh, "name": "TailMesh", "skin": 1})
+    worlds = world_matrices(builder.nodes)
+    rig_binds = add_inverse_binds(builder, [rigid_inverse(worlds[2]), rigid_inverse(worlds[3])])
+    tail_binds = add_inverse_binds(builder, [rigid_inverse(worlds[5])])
+
+    walk: list[dict[str, Any]] = []
+    stride = add_sampler(builder, walk, (0.0, 1.0), ((0.0, 0.5, 0.0), (0.0, 0.5, 1.0)), "VEC3")
+    blink: list[dict[str, Any]] = []
+    nodded = axis_rotation((1.0, 0.0, 0.0), 10.0)
+    nod = add_sampler(builder, blink, (0.0, 0.0001), ((0.0, 0.0, 0.0, 1.0), nodded), "VEC4")
+    builder.extra = {
+        "animations": [
+            {"channels": [{"sampler": stride, "target": {"node": 2, "path": "translation"}}], "name": "Walk",
+             "samplers": walk},
+            {"channels": [{"sampler": nod, "target": {"node": 3, "path": "rotation"}}], "name": "Blink",
+             "samplers": blink},
+        ],
+        "skins": [{"inverseBindMatrices": rig_binds, "joints": [2, 3]},
+                  {"inverseBindMatrices": tail_binds, "joints": [5]}],
+    }
+    return {"SkinnedRigs.gltf": gltf_text(builder.embedded_document(scene_nodes=[0, 5]))}
+
+
+def make_shared_skins() -> dict[str, bytes]:
+    """SharedSkins.gltf (the merge rule of GltfImporter version 3): the chain Root -> Upper -> Tip under "Armature",
+    with two skins over shared joints, as an exporter gives each skinned mesh its own skin: "Lower" draws LowerMesh
+    (rows at y 0, 0.5 and 1) with skin 0 over Root and Upper; "Top" draws TopMesh with skin 1 over Upper and Tip, its
+    vertices authored one unit along -X of where they show (rows at y 1, 1.5 and 2, x from -1.5 to -0.5), which skin 1's
+    inverse bind matrices carry back (each the inverse of its joint's world transform times a translation of +1 along
+    X). Both skins resolve to Armature, so they import as one Skeleton. "Statue" draws LowerMesh without a skin, at
+    x 3. Animation "Sway" turns Root and Tip 10 degrees about Z over one second."""
+    builder = GltfBuilder()
+    material = builder.add_material(plain_material("SharedMaterial"))
+    lower = add_skinned_primitive(builder, strip_geometry(-0.5, 0.0, 1.0, 0.5), material,
+                                  (((0, 0), (1.0, 0.0)), ((0, 1), (0.5, 0.5)), ((1, 0), (1.0, 0.0))))
+    lower_mesh = builder.add_mesh("LowerMesh", [lower])
+    top = add_skinned_primitive(builder, strip_geometry(-1.5, 1.0, 1.0, 0.5), material,
+                                (((0, 0), (1.0, 0.0)), ((0, 1), (0.5, 0.5)), ((1, 0), (1.0, 0.0))))
+    top_mesh = builder.add_mesh("TopMesh", [top])
+
+    builder.add_node({"children": [1, 4, 5, 6], "name": "Armature"})
+    builder.add_node({"children": [2], "name": "Root"})
+    builder.add_node({"children": [3], "name": "Upper", "translation": [0.0, 1.0, 0.0]})
+    builder.add_node({"name": "Tip", "translation": [0.0, 1.0, 0.0]})
+    builder.add_node({"mesh": lower_mesh, "name": "Lower", "skin": 0})
+    builder.add_node({"mesh": top_mesh, "name": "Top", "skin": 1})
+    builder.add_node({"mesh": lower_mesh, "name": "Statue", "translation": [3.0, 0.0, 0.0]})
+    worlds = world_matrices(builder.nodes)
+    authored = translation_matrix((1.0, 0.0, 0.0))
+    lower_binds = add_inverse_binds(builder, [rigid_inverse(worlds[1]), rigid_inverse(worlds[2])])
+    top_binds = add_inverse_binds(
+        builder, [multiply(rigid_inverse(worlds[2]), authored), multiply(rigid_inverse(worlds[3]), authored)]
+    )
+
+    samplers: list[dict[str, Any]] = []
+    swayed = axis_rotation((0.0, 0.0, 1.0), 10.0)
+    root = add_sampler(builder, samplers, (0.0, 1.0), ((0.0, 0.0, 0.0, 1.0), swayed), "VEC4")
+    tip = add_sampler(builder, samplers, (0.0, 1.0), ((0.0, 0.0, 0.0, 1.0), swayed), "VEC4")
+    builder.extra = {
+        "animations": [{"channels": [{"sampler": root, "target": {"node": 1, "path": "rotation"}},
+                                     {"sampler": tip, "target": {"node": 3, "path": "rotation"}}],
+                        "name": "Sway", "samplers": samplers}],
+        "skins": [{"inverseBindMatrices": lower_binds, "joints": [1, 2]},
+                  {"inverseBindMatrices": top_binds, "joints": [2, 3]}],
+    }
+    return {"SharedSkins.gltf": gltf_text(builder.embedded_document(scene_nodes=[0]))}
+
+
 def build_fixtures() -> dict[str, bytes]:
     """Every fixture, keyed by its '/'-separated path relative to the output directory."""
     fixtures: dict[str, bytes] = {}
@@ -753,6 +1036,9 @@ def build_fixtures() -> dict[str, bytes]:
         make_skipped_content,
         make_materials,
         make_no_normals_no_uvs,
+        make_skinned,
+        make_skinned_rigs,
+        make_shared_skins,
     ):
         for name, content in make().items():
             if name in fixtures:

@@ -333,11 +333,11 @@ namespace Engine {
 			found->second.Started = true;
 			m_State->Invoke(key, "OnStart");
 		}
-		// Physics callbacks belong to the fixed step. Contacts that began before an instance's OnStart follow the whole
-		// start flush of the next fixed step (frame-rate independent), before FixedUpdate, so each side sees its enter
-		// before the matching exit (§9.4).
+		// Physics callbacks and animation events belong to the fixed step. Contacts that began before an instance's OnStart
+		// follow the whole start flush of the next fixed step (frame-rate independent), before FixedUpdate, so each side sees
+		// its enter before the matching exit (§9.4); held animation events follow it the same way.
 		if (GetHost().GetFrameState().Phase == InputPhase::Step)
-			m_State->DeliverPendingPhysics();
+			m_State->DeliverPendingEvents();
 	}
 
 	void ScriptEngine::FixedUpdate()
@@ -424,13 +424,13 @@ namespace Engine {
 			const auto found = m_State->Instances.find(key);
 			if (found == m_State->Instances.end())
 				continue;
-			if (!found->second.Started || !found->second.PendingPhysics.empty())
+			if (!found->second.Started || !found->second.PendingEvents.empty())
 			{
 				// Physics marks this side entered whether or not a script observes it, so dropping the event would leave a
 				// later exit unpaired. Hold it (behind any earlier held event) until the instance has started; a removed or
 				// faulted instance discards its queue.
 				if (!IsStopped() && !IsReadOnly() && !found->second.FaultDisabled && !found->second.DestroyPrepared && found->second.Table != LUA_NOREF)
-					found->second.PendingPhysics.push_back(event);
+					found->second.PendingEvents.emplace_back(event);
 				continue;
 			}
 			m_State->InvokePhysics(key, event);
@@ -461,9 +461,25 @@ namespace Engine {
 		m_State->Publish(std::move(error), { .Entity = diagnostic.Entity, .Case = m_State->CurrentOwner.Case, .Slot = slot }, false, true);
 	}
 
-	void ScriptEngine::OnAnimationEvent(const AnimationEventRecord& /*event*/)
+	void ScriptEngine::OnAnimationEvent(const AnimationEventRecord& event)
 	{
-		ENGINE_CONTRACT_STUB();
+		m_State->AssertOwner();
+		// Every instance of the Animator's entity, in slot order, as physics callbacks (ADR 0031 decision 17): a started
+		// instance at once; an unstarted one, or one still holding earlier events, holds it behind them until the next fixed
+		// step's start flush, so it never arrives before OnStart or out of order.
+		for (const State::InstanceKey key : m_State->InstancesOf(event.Entity))
+		{
+			const auto found = m_State->Instances.find(key);
+			if (found == m_State->Instances.end())
+				continue;
+			if (!found->second.Started || !found->second.PendingEvents.empty())
+			{
+				if (!IsStopped() && !IsReadOnly() && !found->second.FaultDisabled && !found->second.DestroyPrepared && found->second.Table != LUA_NOREF)
+					found->second.PendingEvents.emplace_back(event);
+				continue;
+			}
+			m_State->InvokeAnimation(key, event);
+		}
 	}
 
 	void ScriptEngine::Stop()

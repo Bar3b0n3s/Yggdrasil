@@ -22,9 +22,12 @@ namespace Engine {
 		static constexpr size_t SubmeshRecordSize = 3 * sizeof(uint32_t) + 6 * sizeof(float);
 		static constexpr size_t MinimumSlotRecordSize = sizeof(uint32_t) + sizeof(uint64_t);
 
-		// The Streams bits this payload version defines a section for (MeshData version 2: the attribute stream). C23.3 adds
-		// Skin and Morph with their sections.
-		static constexpr MeshStreams KnownStreams = MeshStreams::Attributes;
+		// The Streams bits this payload version defines a section for (MeshData version 2: the attribute stream, and C23.3's
+		// skin and morph sections).
+		static constexpr MeshStreams KnownStreams = MeshStreams::Attributes | MeshStreams::Skin | MeshStreams::Morph;
+
+		// How far a skinned vertex's weights may sum from 1 (MeshSkinVertex).
+		static constexpr double SkinWeightSumTolerance = 1e-3;
 
 		static bool IsFinite(const glm::vec2& value)
 		{
@@ -137,6 +140,34 @@ namespace Engine {
 			{
 				ENGINE_TRY_ASSIGN(mesh.Attributes, reader.ReadArray<MeshVertexAttributes>(vertexCount));
 			}
+			if ((streams & MeshStreams::Skin) != MeshStreams::None)
+			{
+				ENGINE_TRY_ASSIGN(mesh.SkinJointCount, reader.ReadU32());
+				if (mesh.SkinJointCount == 0 || mesh.SkinJointCount > MaxMeshSkinJoints)
+				{
+					return MakeError(ErrorCode::Parse, "mesh payload's skin section addresses {} joints, not 1 to {}",
+						mesh.SkinJointCount, MaxMeshSkinJoints);
+				}
+				ENGINE_TRY_ASSIGN(mesh.Skin, reader.ReadArray<MeshSkinVertex>(vertexCount));
+			}
+			if ((streams & MeshStreams::Morph) != MeshStreams::None)
+			{
+				ENGINE_TRY_ASSIGN(const uint32_t targetCount, reader.ReadU32());
+				if (targetCount == 0 || targetCount > MaxMeshMorphTargets)
+				{
+					return MakeError(ErrorCode::Parse, "mesh payload's morph section holds {} targets, not 1 to {}", targetCount,
+						MaxMeshMorphTargets);
+				}
+				mesh.MorphTargets.reserve(targetCount);
+				for (uint32_t index = 0; index < targetCount; ++index)
+				{
+					MeshMorphTarget target;
+					ENGINE_TRY_ASSIGN(target.Name, WithContext(reader.ReadString(), std::format("in the name of morph target {}", index)));
+					ENGINE_TRY_ASSIGN(target.DefaultWeight, reader.ReadF32());
+					ENGINE_TRY_ASSIGN(target.Deltas, reader.ReadArray<MeshMorphDelta>(vertexCount));
+					mesh.MorphTargets.push_back(std::move(target));
+				}
+			}
 			if (!reader.IsAtEnd())
 				return MakeError(ErrorCode::Parse, "mesh payload has {} trailing bytes after offset {}", reader.GetRemaining(), reader.GetPosition());
 			return mesh;
@@ -229,12 +260,95 @@ namespace Engine {
 			if (glm::any(glm::lessThan(attributes.Color, glm::vec4(0.0f))) || glm::any(glm::greaterThan(attributes.Color, glm::vec4(1.0f))))
 				return MakeError(ErrorCode::Validation, "the colour of vertex {} has a channel outside [0, 1]", index);
 		}
+
+		// M23 (C23.3): the skin and the morph targets (MeshData.h).
+		if (mesh.Skin.empty())
+		{
+			if (mesh.SkinJointCount != 0)
+			{
+				return MakeError(ErrorCode::Validation,
+					"the mesh has no skin but addresses {} skin joints; a mesh without a skin addresses 0", mesh.SkinJointCount);
+			}
+		}
+		else
+		{
+			if (mesh.Skin.size() != mesh.Vertices.size())
+			{
+				return MakeError(ErrorCode::Validation, "the mesh has {} skin vertices for its {} vertices; the skin has one per vertex", mesh.Skin.size(),
+					mesh.Vertices.size());
+			}
+			if (mesh.SkinJointCount == 0 || mesh.SkinJointCount > MaxMeshSkinJoints)
+			{
+				return MakeError(ErrorCode::Validation, "the skin of the mesh addresses {} joints, not 1 to {}", mesh.SkinJointCount,
+					MaxMeshSkinJoints);
+			}
+		}
+		for (size_t index = 0; index < mesh.Skin.size(); ++index)
+		{
+			const MeshSkinVertex& skin = mesh.Skin[index];
+			double sum = 0.0;
+			for (glm::length_t influence = 0; influence < 4; ++influence)
+			{
+				const uint16_t joint = skin.Joints[static_cast<size_t>(influence)];
+				const float weight = skin.Weights[influence];
+				if (joint >= mesh.SkinJointCount)
+				{
+					return MakeError(ErrorCode::Validation, "skin vertex {} names joint {}, beyond the skin's {} joints", index, joint,
+						mesh.SkinJointCount);
+				}
+				if (!std::isfinite(weight) || weight < 0.0f || weight > 1.0f)
+					return MakeError(ErrorCode::Validation, "skin vertex {} has a weight outside [0, 1]", index);
+				sum += weight;
+			}
+			if (std::fabs(sum - 1.0) > Utils::SkinWeightSumTolerance)
+				return MakeError(ErrorCode::Validation, "the weights of skin vertex {} sum to {}, not 1", index, sum);
+		}
+
+		if (mesh.MorphTargets.size() > MaxMeshMorphTargets)
+		{
+			return MakeError(ErrorCode::Validation, "the mesh has {} morph targets, more than the {} a mesh may have", mesh.MorphTargets.size(),
+				MaxMeshMorphTargets);
+		}
+		for (size_t index = 0; index < mesh.MorphTargets.size(); ++index)
+		{
+			const MeshMorphTarget& target = mesh.MorphTargets[index];
+			if (target.Name.empty() || target.Name.size() > MaxMeshMorphTargetNameBytes || !IsValidUtf8(target.Name))
+			{
+				return MakeError(ErrorCode::Validation, "morph target {} has a name that is not 1 to {} bytes of valid UTF-8", index,
+					MaxMeshMorphTargetNameBytes);
+			}
+			for (size_t earlier = 0; earlier < index; ++earlier)
+			{
+				if (mesh.MorphTargets[earlier].Name == target.Name)
+					return MakeError(ErrorCode::Validation, "morph target {} is named '{}', as morph target {} is", index, target.Name, earlier);
+			}
+			if (!std::isfinite(target.DefaultWeight))
+				return MakeError(ErrorCode::Validation, "morph target {} '{}' has a default weight that is not a finite number", index, target.Name);
+			if (target.Deltas.size() != mesh.Vertices.size())
+			{
+				return MakeError(ErrorCode::Validation, "morph target {} '{}' has {} deltas for the mesh's {} vertices", index, target.Name, target.Deltas.size(),
+					mesh.Vertices.size());
+			}
+			for (size_t vertex = 0; vertex < target.Deltas.size(); ++vertex)
+			{
+				const MeshMorphDelta& delta = target.Deltas[vertex];
+				if (!Utils::IsFinite(delta.Position) || !Utils::IsFinite(delta.Normal) || !Utils::IsFinite(delta.Tangent))
+					return MakeError(ErrorCode::Validation, "morph target {} '{}' has a non-finite delta at vertex {}", index, target.Name, vertex);
+			}
+		}
 		return {};
 	}
 
 	MeshStreams GetMeshStreams(const MeshData& mesh)
 	{
-		return mesh.Attributes.empty() ? MeshStreams::None : MeshStreams::Attributes;
+		MeshStreams streams = MeshStreams::None;
+		if (!mesh.Attributes.empty())
+			streams = streams | MeshStreams::Attributes;
+		if (!mesh.Skin.empty())
+			streams = streams | MeshStreams::Skin;
+		if (!mesh.MorphTargets.empty())
+			streams = streams | MeshStreams::Morph;
+		return streams;
 	}
 
 	Buffer SerializeMeshPayload(const MeshData& mesh)
@@ -247,7 +361,7 @@ namespace Engine {
 		writer.WriteU32(static_cast<uint32_t>(mesh.Submeshes.size()));
 		writer.WriteU32(static_cast<uint32_t>(mesh.Slots.size()));
 		writer.WriteU32(std::to_underlying(GetMeshStreams(mesh)));
-		writer.WriteU32(0); // Reserved (C23.3's)
+		writer.WriteU32(0); // Reserved (kept 0 by C23.3)
 		Utils::WriteVector(writer, mesh.Bounds.Min);
 		Utils::WriteVector(writer, mesh.Bounds.Max);
 		for (const MeshSubmesh& submesh : mesh.Submeshes)
@@ -266,6 +380,21 @@ namespace Engine {
 		writer.WriteArray(std::span<const MeshVertex>(mesh.Vertices));
 		writer.WriteArray(std::span<const uint32_t>(mesh.Indices));
 		writer.WriteArray(std::span<const MeshVertexAttributes>(mesh.Attributes));
+		if (!mesh.Skin.empty())
+		{
+			writer.WriteU32(mesh.SkinJointCount);
+			writer.WriteArray(std::span<const MeshSkinVertex>(mesh.Skin));
+		}
+		if (!mesh.MorphTargets.empty())
+		{
+			writer.WriteU32(static_cast<uint32_t>(mesh.MorphTargets.size()));
+			for (const MeshMorphTarget& target : mesh.MorphTargets)
+			{
+				writer.WriteString(target.Name);
+				writer.WriteF32(target.DefaultWeight);
+				writer.WriteArray(std::span<const MeshMorphDelta>(target.Deltas));
+			}
+		}
 		return writer.TakeBuffer();
 	}
 

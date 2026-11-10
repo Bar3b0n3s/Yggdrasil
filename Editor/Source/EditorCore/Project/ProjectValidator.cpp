@@ -28,6 +28,7 @@
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Renderer/PointShadowMaps.h"
 #include "Engine/Renderer/SpotShadowAtlas.h"
+#include "Engine/Scene/AnimationValidation.h"
 #include "Engine/Scene/AudioSystem.h"
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/ComponentHostOps.h"
@@ -134,6 +135,9 @@ namespace Engine {
 			PrefabCycleCode,
 			// M23 (Renderer/PointShadowMaps.h, Docs/Decisions/0034-m23-contract.md decision 18).
 			RenderPointShadowBudgetCode,
+			// M23 (Scene/AnimationValidation.h, Docs/Decisions/0034-m23-contract.md decision 30).
+			AnimationNoAnimatorCode,
+			AnimationSkeletonMismatchCode,
 		};
 
 		// The documentation of every code, in ValidatorCodes order (M14, ADR 0022 decision 10): Docs/Reference/Validation.md, the
@@ -204,8 +208,13 @@ namespace Engine {
 				"No longer reported: since GltfImporter version 2 (M23) a glTF primitive's COLOR_0 is imported and multiplies the base colour. The code is kept so it is never reused.",
 				"Nothing to fix: no import reports it." },
 			ValidationCodeInfo{ AssetContentSkippedCode, "Warning", false,
-				"A glTF file holds content the engine does not import: points or lines, skins, animations, cameras or lights.",
-				"Remove the content from the model, or rebuild it with engine components (Camera, lights) in the scene." },
+				"A glTF file holds content the importer skips: cameras, lights, points or lines (or a primitive without positions), GPU instancing, "
+				"a texture rotation or an image that is not PNG or JPEG; of skins and animations, more than four joint influences, more than 32 morph "
+				"targets, a skin whose joints leave the default scene, a mesh on a joint or one it cannot skin, animation channels of nodes that are "
+				"not joints, of weights no Animator plays or repeating a target, an animation left without channels or shorter than 1 ms, and skins, "
+				"animations and morph targets under MergeMeshes. The subject names the item.",
+				"Rebuild cameras and lights as components, animate other nodes with scripts, parent meshes to nodes that are not joints, and export "
+				"at most four influences and 32 morph targets; the message says what each item needs." },
 			ValidationCodeInfo{ PathCaseMismatchCode, "Error", true,
 				"A .meta or a path matches a file only when letter case is ignored, which resolves differently on other systems.",
 				"Use the file's exact spelling; the fix renames a .meta to its source's case." },
@@ -295,6 +304,12 @@ namespace Engine {
 			ValidationCodeInfo{ RenderPointShadowBudgetCode, "Warning", false,
 				"More than four shadow-casting point lights are enabled in the scene; the least important ones are lit without shadows.",
 				"Turn off CastShadows on less important point lights, or keep fewer of them in view at once." },
+			ValidationCodeInfo{ AnimationNoAnimatorCode, "Warning", false,
+				"A SkinnedMesh's mesh has a skin, but no Animator is on its entity or an ancestor; it draws its bind pose.",
+				"Add an Animator with the mesh's Skeleton to the entity or an ancestor, or remove the SkinnedMesh." },
+			ValidationCodeInfo{ AnimationSkeletonMismatchCode, "Warning", false,
+				"A SkinnedMesh's mesh skin addresses more joints than its Animator's Skeleton holds; it draws its bind pose.",
+				"Set the Animator's Skeleton to the skin the mesh was imported with." },
 		};
 
 		// The code documentation lists exactly the codes, in order.
@@ -1022,6 +1037,24 @@ namespace Engine {
 			}
 		}
 
+		// The animation checks of §13.7 (M23, Scene/AnimationValidation.h): ANIMATION_NO_ANIMATOR and ANIMATION_SKELETON_MISMATCH
+		// on each SkinnedMesh they name, its mesh and skeleton loaded through the editor's asset manager. Neither is fixable.
+		static void CheckAnimation(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			AssetManager* assets = editor.GetEngine().GetAssetManager();
+			if (assets == nullptr)
+				return;
+			for (AnimationSceneIssue& issue : FindAnimationSceneIssues(*checked.Target, *assets))
+			{
+				DiagnosticSite site;
+				site.File = checked.File;
+				site.Entity = FormatOptionalUUID(issue.Entity);
+				site.Component = issue.Component;
+				site.Field = issue.Field;
+				diagnostics.push_back(MakeDiagnostic(issue.Code, issue.Severity, std::move(issue.Message), site, std::move(issue.Hint), false));
+			}
+		}
+
 		static Status CheckRenderScene(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			const auto render = EvaluateRenderSceneValidation(*checked.Target, *editor.GetEngine().GetAssetManager());
@@ -1210,6 +1243,7 @@ namespace Engine {
 			CheckSceneAssets(editor, checked, diagnostics);
 			ENGINE_TRY(CheckSceneScripts(editor, checked, diagnostics));
 			CheckPhysics(editor, checked, diagnostics);
+			CheckAnimation(editor, checked, diagnostics);
 			CheckLightLimit(checked, diagnostics);
 			return CheckRenderScene(editor, checked, diagnostics);
 		}

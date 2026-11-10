@@ -21,6 +21,9 @@
 
 namespace Engine {
 
+	class AssetManager;
+	class Scene;
+
 	namespace Test {
 
 		class HeadlessGpuFixture;
@@ -45,6 +48,11 @@ namespace Engine {
 		{
 			uint32_t Width = 640;
 			uint32_t Height = 360;
+			// Applied to the loaded scene after its transform update, before the extraction, with the project copy's asset
+			// manager: the SkinnedPose golden poses its Animators there as the editor's animation preview does
+			// (PoseAnimator, M23). It may write only runtime components: the render fails when the scene's serialization
+			// changed, and on its error.
+			std::function<Status(Scene&, AssetManager&)> PrepareScene{};
 			// Applied to the extracted snapshot before it renders: the DebugDraw golden appends its primitives (scripts emit
 			// them from M13), the Tonemappers golden selects each tonemapper.
 			std::function<void(RenderSnapshot&)> EditSnapshot{};

@@ -112,6 +112,8 @@ namespace Engine {
 		[[nodiscard]] Status RegisterScript(ScriptApiRegistry& api);
 		[[nodiscard]] Status RegisterEntity(ScriptApiRegistry& api);
 		[[nodiscard]] Status RegisterComponents(ScriptApiRegistry& api);
+		// M23 (Docs/Decisions/0034-m23-contract.md decision 31): the Animator and SkinnedMesh proxies' methods.
+		[[nodiscard]] Status RegisterAnimation(ScriptApiRegistry& api);
 		[[nodiscard]] Status RegisterScene(ScriptApiRegistry& api);
 		[[nodiscard]] Status RegisterInput(ScriptApiRegistry& api);
 		[[nodiscard]] Status RegisterTime(ScriptApiRegistry& api);

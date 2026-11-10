@@ -19,9 +19,6 @@ BODY = "/Skinned/Armature/Body"
 # How long a test waits for the editor's frame to end a preview after a tab switch (a bound on a failure only).
 FRAME_WAIT_SECONDS = 30.0
 
-SKIP_PREVIEW = ("contract stub: the animation preview (ADR 0034 decision 32, stream D) over the skinned glTF fixture "
-                "(decision 25, stream A)")
-
 
 def import_skinned_fixture(client: engine_client.EngineClient, root: Path) -> None:
     """Copies the skinned glTF fixture into the project at `root` and imports it."""
@@ -32,12 +29,13 @@ def import_skinned_fixture(client: engine_client.EngineClient, root: Path) -> No
 
 
 def body_bounds(client: engine_client.EngineClient, scene: str) -> dict[str, Any]:
-    """entity.bounds of the skinned body in `scene`: a skinned mesh is bounded by its pose, so it shows a preview."""
-    return client.call("entity.bounds", {"entities": [BODY], "scene": scene})["bounds"][0]
+    """The world box of the skinned body in `scene` (entity.bounds' min and max): a skinned mesh is bounded by its pose,
+    so it shows a preview. The two scenes' bodies are different entities, so the box leaves out the entity."""
+    bounds = client.call("entity.bounds", {"entities": [BODY], "scene": scene})["bounds"][0]
+    return {"min": bounds["min"], "max": bounds["max"]}
 
 
 class AnimationPreviewTests(AutomationTestCase):
-    @unittest.skip(SKIP_PREVIEW)
     def test_animation_preview_poses_the_edit_scene_without_changing_it(self) -> None:
         # Decision 32: the preview poses the Animator in the edit scene without an undo step, a revision or a file
         # change, keeps its time and playing flag between calls, ends with stop, and refuses an entity without an
@@ -67,7 +65,6 @@ class AnimationPreviewTests(AutomationTestCase):
             client.call("animation.preview", {"entity": "/Skinned/Armature", "time": -1.0})
         self.assert_engine_error(negative.exception, engine_client.INVALID_PARAMS)
 
-    @unittest.skip(SKIP_PREVIEW)
     def test_animation_preview_belongs_to_its_scene(self) -> None:
         # Decision 32 (C23.3's review): with two open scenes the preview poses only the scene it belongs to: previewing
         # in the other scene removes the first one's pose, switching the active tab ends the preview and removes its
@@ -88,20 +85,51 @@ class AnimationPreviewTests(AutomationTestCase):
         self.assertEqual(body_bounds(client, MAIN), rest)
         self.assertNotEqual(body_bounds(client, SECOND), rest)
 
-        # The tab switch ends the preview at the editor's next frame.
+        # The tab switch ends the preview at the editor's next frame: its pose goes, and a preview of the entity
+        # without a time is then a new one, at time 0, never the ended one's 0.5.
         client.call("scene.activate", {"scene": SECOND})
         deadline = time.monotonic() + FRAME_WAIT_SECONDS
         while body_bounds(client, SECOND) != rest:
             if time.monotonic() > deadline:
                 self.fail(f"the preview kept its pose {FRAME_WAIT_SECONDS:.0f} s after the tab switch")
-        stopped = client.call("animation.preview", {"entity": "/Skinned/Armature", "scene": SECOND, "stop": True})
-        self.assertFalse(stopped["previewing"])
+        restarted = client.call("animation.preview", {"entity": "/Skinned/Armature", "scene": SECOND})
+        self.assertTrue(restarted["previewing"])
+        self.assertEqual(restarted["time"], 0.0)
+        client.call("animation.preview", {"entity": "/Skinned/Armature", "scene": SECOND, "stop": True})
 
+        # Closing its scene ends the preview with the scene: the other scene keeps its rest pose, previews by itself,
+        # and its stop restores the rest pose.
         client.call("animation.preview", {"entity": "/Skinned/Armature", "time": 0.5, "scene": MAIN})
         client.call("scene.close", {"scene": MAIN, "discardChanges": True})
         self.assertEqual(body_bounds(client, SECOND), rest)
-        after_close = client.call("animation.preview", {"entity": "/Skinned/Armature", "scene": SECOND, "stop": True})
-        self.assertFalse(after_close["previewing"])
+        posed = client.call("animation.preview", {"entity": "/Skinned/Armature", "time": 0.5, "scene": SECOND})
+        self.assertTrue(posed["previewing"])
+        self.assertNotEqual(body_bounds(client, SECOND), rest)
+        client.call("animation.preview", {"entity": "/Skinned/Armature", "scene": SECOND, "stop": True})
+        self.assertEqual(body_bounds(client, SECOND), rest)
+
+    def test_animation_preview_refuses_a_time_above_a_layer_times_bound(self) -> None:
+        # W23.3's review: the preview time is bounded like a layer's own time (the time field's maximum), so the time
+        # times a layer's speed stays finite: 3e38 at a looping layer's speed 2 would be an infinite step. It is refused
+        # before anything is posed, and the bound itself previews.
+        client, root = self.open_editor_with_scene()
+        import_skinned_fixture(client, root)
+        client.call("prefab.instantiate", {"prefab": "Assets/Models/Skinned.gltf"})
+        animator = client.call("entity.get", {"entity": "/Skinned/Armature", "components": ["Animator"]})
+        layers = animator["entity"]["components"]["Animator"]["Layers"]
+        self.assertTrue(layers[0]["Loop"])
+        layers[0]["Speed"] = 2.0
+        client.call("entity.update", {"entity": "/Skinned/Armature", "components": {"Animator": {"Layers": layers}}})
+        rest = body_bounds(client, MAIN)
+
+        with self.assertRaises(engine_client.EngineError) as refused:
+            client.call("animation.preview", {"entity": "/Skinned/Armature", "time": 3.0e38})
+        self.assert_engine_error(refused.exception, engine_client.INVALID_PARAMS)
+        self.assertEqual(body_bounds(client, MAIN), rest)
+
+        bound = client.call("animation.preview", {"entity": "/Skinned/Armature", "time": 1.0e6})
+        self.assertTrue(bound["previewing"])
+        client.call("animation.preview", {"entity": "/Skinned/Armature", "stop": True})
 
 
 if __name__ == "__main__":

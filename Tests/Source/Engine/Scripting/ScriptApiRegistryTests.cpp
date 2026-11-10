@@ -29,6 +29,7 @@ namespace Engine {
 		void RunEntityBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 		void RunScriptBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 		void RunComponentsBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
+		void RunAnimationBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 		void RunReflectedFieldCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 		void RunPhysicsBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 		void RunAudioBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
@@ -145,6 +146,7 @@ namespace Engine {
 				&Test::RunEntityBindingsCoverage,
 				&Test::RunScriptBindingsCoverage,
 				&Test::RunComponentsBindingsCoverage,
+				&Test::RunAnimationBindingsCoverage,
 				&Test::RunReflectedFieldCoverage,
 				&Test::RunPhysicsBindingsCoverage,
 				&Test::RunAudioBindingsCoverage,
@@ -785,7 +787,7 @@ return true
 				{
 					return group.Name == name;
 				}));
-			for (const char* name : { "Entity", "Transform", "RigidBody", "CharacterController", "AudioSource", "Camera", "MeshRenderer", "Quat", "Color", "RandomGenerator", "TaskHandle", "AssetRef", "Behaviour" })
+			for (const char* name : { "Entity", "Transform", "RigidBody", "CharacterController", "AudioSource", "Camera", "MeshRenderer", "Animator", "SkinnedMesh", "Quat", "Color", "RandomGenerator", "TaskHandle", "AssetRef", "Behaviour" })
 				CHECK(std::ranges::any_of(fixture.GetApi().GetTypes(), [name](const auto& group)
 				{
 					return group.Name == name;
@@ -793,7 +795,8 @@ return true
 			for (const auto& group : fixture.GetApi().GetTypes())
 				if (group.Name == "Behaviour")
 				{
-					REQUIRE(group.Members.size() == 13);
+					// M13's 13 callbacks, then M23's OnAnimationEvent (Docs/Decisions/0034-m23-contract.md decision 31).
+					REQUIRE(group.Members.size() == 14);
 					for (const auto& member : group.Members)
 					{
 						CHECK(member.Kind == ScriptApiMemberKind::Callback);

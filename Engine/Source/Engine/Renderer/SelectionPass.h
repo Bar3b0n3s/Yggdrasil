@@ -7,6 +7,7 @@
 #include "Engine/Renderer/RenderPrepare.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/RenderStats.h"
+#include "Engine/Renderer/SkinningPass.h"
 #include "Shared/InstanceRecord.h"
 
 #include <nvrhi/nvrhi.h>
@@ -83,9 +84,12 @@ namespace Engine {
 		// material with its constants and base colour map), in snapshot and submesh order, through the cache's mirrors;
 		// appends one instance record per draw to `instances` ({World, World, PickId, the mirroring flag}) and groups the
 		// draws into batches (one per draw when `instancing` is false). Nothing for a snapshot without a camera or a
-		// selection. Main thread; the caller writes `instances` into the buffer Record reads.
+		// selection. Main thread; the caller writes `instances` into the buffer Record reads. M23 (C23.3, decision 27):
+		// `sources`, empty or one per snapshot item, are the vertices each item's draws bind (SkinningPass.h): a deformed
+		// item's draws bind its deformed vertices and key its VertexStream, so they batch with no other item's; a Skipped item
+		// draws no mask.
 		[[nodiscard]] static SelectionDrawSet PrepareDraws(GpuResourceCache& cache, const RenderSnapshot& snapshot, bool instancing,
-			std::vector<InstanceRecord>& instances);
+			std::vector<InstanceRecord>& instances, std::span<const DeformedVertexSource> sources = {});
 		// Empty selection clears mask and does no composite; invalid/deleted ids are ignored. InvalidArgument for invalid
 		// radius/descriptors, or a selection without its prepared draws or instance buffer; Gpu from resources/bindings.
 		// commandList open asserted; all inputs borrowed for this call. Every mask draw is instanced (Selection.slang reads its

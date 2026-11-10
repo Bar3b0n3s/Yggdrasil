@@ -29,6 +29,7 @@ Reference pages beside this file, each a `docs.get` topic and a file in this ski
 - `skills/game-building/look` ([look.md](look.md)): the look: lights and shadows (point and spot lights included), repeated meshes, glow, background, screen text, GTAO and framing.
 - `skills/game-building/replays` ([replays.md](replays.md)): recording and verifying replays, the input check, recording suites and re-recording.
 - `skills/game-building/exports` ([exports.md](exports.md)): testing, pruned and command-line exports.
+- `skills/game-building/animation` ([animation.md](animation.md)): skinned and morphed glTF characters, their Animators and events, and the editor's animation preview.
 
 ## Ground rules
 

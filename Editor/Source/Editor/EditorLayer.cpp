@@ -2,6 +2,7 @@
 #include "Editor/EditorLayer.h"
 
 #include "Editor/EditorPanelContext.h"
+#include "Editor/Panels/AnimationPreviewPanel.h"
 #include "Editor/Panels/AutomationPanel.h"
 #include "Editor/Panels/ConsolePanel.h"
 #include "Editor/Panels/ContentBrowserPanel.h"
@@ -171,6 +172,7 @@ namespace Engine {
 		AutomationPanel Automation{};
 		UndoHistoryPanel History{};
 		NativePanel Native{};
+		AnimationPreviewPanel AnimationPreview{}; // M23: a window of its own while the selection holds an Animator
 		ProjectLauncher Launcher{};
 		std::vector<uint64_t> Tickets{};
 		std::string ErrorMessage{};
@@ -1053,6 +1055,9 @@ namespace Engine {
 					m_State->Inspector.CancelEdit(context);
 			}
 		}
+		// M23 (Docs/Decisions/0034-m23-contract.md decision 32): the animation preview's controls.
+		if (Status preview = m_State->AnimationPreview.Draw(context); !preview && firstFailure)
+			firstFailure = std::unexpected(std::move(preview).error());
 		if (m_State->SelectDefaultTabs)
 		{
 			// Select after all windows join their tabs; this runs only for a new or explicitly reset dock layout.

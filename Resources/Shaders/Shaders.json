@@ -303,6 +303,16 @@
 			]
 		},
 		{
+			"Name": "Skinning",
+			"File": "Passes/Skinning.slang",
+			"Entries": [
+				{
+					"Name": "CSMain",
+					"Stage": "compute"
+				}
+			]
+		},
+		{
 			"Name": "Skybox",
 			"File": "Passes/Skybox.slang",
 			"Entries": [

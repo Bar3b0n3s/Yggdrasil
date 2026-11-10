@@ -7,7 +7,7 @@
 #include <cmath>
 
 // Root motion (M23, C23.3, C-ANIM-BLEND; Docs/Decisions/0034-m23-contract.md decision 26, stream B): the root-motion joint's
-// planar motion taken out of the pose. Skipped until stream B implements it.
+// planar motion taken out of the pose.
 
 namespace Engine {
 
@@ -43,7 +43,7 @@ namespace Engine {
 	{
 		// The delta is the planar part only (X and Z, and the twist about +Y), across a wrap the pieces to the end and from the
 		// start; the hold keeps the hips at the clip's start in X, Z and yaw while their bob stays in the pose.
-		TEST_CASE("RootMotion: the planar delta of the root-motion joint follows the clip across a wrap, and the hold keeps the mesh at the start" * doctest::skip(true))
+		TEST_CASE("RootMotion: the planar delta of the root-motion joint follows the clip across a wrap, and the hold keeps the mesh at the start")
 		{
 			const AnimationClipData walk = MakeWalk();
 			const SkeletonData hips = MakeHips();
@@ -82,8 +82,7 @@ namespace Engine {
 		// rotation leaves the walk's translation whole, and a layer keying neither contributes nothing. The root-motion joint
 		// below a static joint (the importer's "Rig" node, turned 90 degrees about +Y) moves in the Animator entity's space,
 		// and the hold keeps its model position and yaw at the clip's start.
-		TEST_CASE("RootMotion: a layer blends only the root paths its clip keys, and a root-motion joint below a static joint moves in model space"
-			* doctest::skip(true))
+		TEST_CASE("RootMotion: a layer blends only the root paths its clip keys, and a root-motion joint below a static joint moves in model space")
 		{
 			const RootMotionDelta walk{ .Translation = { 0.0f, 0.0f, 1.0f } };
 			const RootMotionDelta turn{ .Rotation = RotationY(90.0) };
@@ -119,6 +118,35 @@ namespace Engine {
 			CHECK(std::abs(pose.Joints[1].Translation.y - 1.25f) < 1e-5f);
 			CHECK(std::abs(pose.Joints[1].Translation.z) < 1e-5f);
 			CHECK(std::abs(pose.Joints[1].Rotation.y) < 1e-5f);
+		}
+
+		// W23.3's review: a clip may key a joint's scale to 0 (rigs hide parts that way), so the root-motion joint's parent
+		// model transform can be singular; the hold then keeps the sampled translation instead of dividing by a zero
+		// determinant, and the pose, its model transforms and its skin matrices stay finite. The rotation is still held.
+		TEST_CASE("RootMotion: a root-motion joint below a joint a clip scales to nothing keeps a finite pose")
+		{
+			SkeletonData rig;
+			rig.Joints.push_back({ .Name = "Rig", .Translation = { 0.0f, 0.5f, 0.0f } });
+			rig.Joints.push_back({ .Name = "Hips", .Parent = 0, .Translation = { 0.0f, 1.0f, 0.0f } });
+			rig.RootMotionJoint = 1;
+			AnimationClipData clip = MakeWalk();
+			clip.Channels.push_back(AnimationChannel{ .Target = "Rig", .Path = AnimationPath::Scale, .Interpolation = AnimationInterpolation::Step, .Times = { 0.0f }, .Values = { 0.0f, 0.0f, 0.0f } });
+
+			AnimationPose pose = MakeRestPose(rig);
+			REQUIRE(pose.Joints.size() == 2);
+			SampleAnimationClip(clip, rig, 0.5f, pose);
+			const glm::vec3 sampled = pose.Joints[1].Translation;
+			HoldRootMotion(clip, rig, pose);
+			CHECK(pose.Joints[1].Translation == sampled);
+			CHECK(std::abs(pose.Joints[1].Rotation.y) < 1e-5f);
+			for (const glm::mat4& matrix : ComputeSkinMatrices(rig, ComputeJointModelTransforms(rig, pose)))
+			{
+				for (glm::length_t column = 0; column < 4; ++column)
+				{
+					for (glm::length_t row = 0; row < 4; ++row)
+						CHECK(std::isfinite(matrix[column][row]));
+				}
+			}
 		}
 	}
 

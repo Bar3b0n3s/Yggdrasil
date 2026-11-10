@@ -24,7 +24,12 @@ namespace Engine {
 	// correct between TransformSystem updates) and merged. Effectively disabled entities (HierarchyDisabledTag) are skipped,
 	// as rendering skips them; MeshRenderer::Visible does not matter (an invisible mesh still occupies its space for layout).
 	// A mesh that is missing or fails to load counts with its placeholder's bounds (the unit cube, AssetManager::
-	// GetOrPlaceholder, which records the diagnostic). nullopt when no included entity has a MeshRenderer with a mesh.
+	// GetOrPlaceholder, which records the diagnostic). M23 (C23.3, Docs/Decisions/0034-m23-contract.md decision 27): a mesh
+	// with a skin or morph targets counts with the bounds of its deformation as the renderer draws it (Asset/MeshDeform.h's
+	// ComputeDeformedBounds): its SkinnedMesh's morph weights overridden by the driving Animator's pose (the nearest Animator
+	// on the entity or an ancestor, its AnimationPoseComponent), the pose's skin matrices when they cover the skin (without
+	// them, the bind pose), and its targets' default weights for the weights missing. nullopt when no included entity has a
+	// MeshRenderer with a mesh.
 	// `entity` is readable (Entity::IsReadable): an entity pending destruction and its subtree, also pending, still have
 	// their bounds until the flush (Entity:GetWorldBounds; M20, decision 4 of Docs/Decisions/0031-m20-contract.md).
 	// Main thread (the scene and the manager).

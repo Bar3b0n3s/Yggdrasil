@@ -7,6 +7,7 @@
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Readback.h"
 #include "Engine/Renderer/GpuResourceCache.h"
+#include "Engine/Renderer/SkinningPass.h"
 #include "Shared/InstanceRecord.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/InMemoryAssetManager.h"
@@ -376,6 +377,46 @@ namespace Engine {
 			// Both quads are outlined: each one's outer edge, two pixels outside it.
 			CHECK(Utils::SelectionTestRed(instanced, 2, 16) == 255);
 			CHECK(Utils::SelectionTestRed(instanced, 29, 16) == 255);
+		}
+
+		// M23 (C23.3, C-SKEL, C-MORPH; Docs/Decisions/0034-m23-contract.md decision 27, stream C): a selected deformed item's mask
+		// draws bind the deformed vertices its source names and key its VertexStream, so two deformed items of one mesh are two
+		// mask draws where the same items undeformed are one instanced draw; a skipped item draws no mask.
+		TEST_CASE("Selection: a deformed item's mask draws its own vertices in a draw of its own")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::InMemoryAssetManager assets;
+			{
+				GpuResourceCache cache(gpu.GetDevice(), assets);
+				RenderSnapshot snapshot = Utils::SelectionTestSnapshot(assets, RenderProjection::Perspective, false, false, AlphaMode::Opaque, false);
+				MeshDrawItem second = snapshot.Meshes[0];
+				second.Entity = UUID(43);
+				MeshDrawItem third = snapshot.Meshes[0];
+				third.Entity = UUID(44);
+				snapshot.Meshes = { snapshot.Meshes[0], second, third };
+				snapshot.SelectedEntities = { UUID(42), UUID(43), UUID(44) };
+				std::vector<InstanceRecord> instances;
+				const SelectionDrawSet rigid = SelectionPass::PrepareDraws(cache, snapshot, true, instances);
+				CHECK(rigid.Draws.size() == 3);
+				CHECK(rigid.Batches.size() == 1);
+
+				Result<nvrhi::BufferHandle> first = gpu.GetDevice().CreateBuffer(SkinningPass::GetVerticesDesc(4));
+				Result<nvrhi::BufferHandle> other = gpu.GetDevice().CreateBuffer(SkinningPass::GetVerticesDesc(4));
+				REQUIRE(first.has_value());
+				REQUIRE(other.has_value());
+				const std::array<DeformedVertexSource, 3> sources = { DeformedVertexSource{ .Vertices = *first, .VertexStream = 1 },
+					DeformedVertexSource{ .Vertices = *other, .VertexStream = 2 }, DeformedVertexSource{ .Skipped = true } };
+				instances.clear();
+				const SelectionDrawSet deformed = SelectionPass::PrepareDraws(cache, snapshot, true, instances, sources);
+				REQUIRE(deformed.Draws.size() == 2);
+				CHECK(deformed.Batches.size() == 2);
+				CHECK(instances.size() == 2);
+				CHECK(deformed.Draws[0].Vertices == *first);
+				CHECK(deformed.Draws[1].Vertices == *other);
+				CHECK(deformed.Draws[0].Attributes == cache.GetMesh(snapshot.Meshes[0].Mesh).AttributeBuffer);
+			}
+			gpu.GetDevice().RunGarbageCollection();
 		}
 
 		TEST_CASE("Selection: deselection clears stale mask and resize releases view targets")

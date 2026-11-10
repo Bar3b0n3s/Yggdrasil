@@ -48,12 +48,14 @@ namespace Engine {
 		// cache's shared default stream (TexCoord1 (0, 0), opaque white), which holds at least VertexCount entries, all equal.
 		nvrhi::BufferHandle AttributeBuffer{};
 		nvrhi::BufferHandle IndexBuffer{};
-		// M23 (C23.3, C-SKEL, C-MORPH; Docs/Decisions/0034-m23-contract.md decision 27; stream C): the mesh's skin (a
-		// structured buffer of VertexCount MeshSkinVertex, 24 bytes each) and morph deltas (MorphTargetCount x VertexCount
+		// M23 (C23.3, C-SKEL, C-MORPH; Docs/Decisions/0034-m23-contract.md decision 27; stream C): the mesh's skin (a raw
+		// buffer of VertexCount MeshSkinVertex, 24 bytes each) and morph deltas (a raw buffer of MorphTargetCount x VertexCount
 		// MeshMorphDelta, 36 bytes each, target by target), which the Skinning pass reads, null for a mesh without them; their
 		// counts; and the bounds the Prepare stage culls a deformed item with (ComputeMeshDeformBounds, a CPU copy), whose
 		// DefaultWeights are the morph targets' defaults the Prepare stage resolves each item's MorphWeights against
-		// (ResolveMorphWeights), so they travel with the GPU mesh.
+		// (ResolveMorphWeights), so they travel with the GPU mesh. A mesh with either also has a VertexBuffer that the Skinning
+		// pass can read as a raw buffer (its source vertices), and refuses to upload when its vertices or morph deltas exceed
+		// the pass's 32-bit byte offsets (4 GiB). DeformBounds is empty for a mesh with neither.
 		nvrhi::BufferHandle SkinBuffer{};
 		nvrhi::BufferHandle MorphBuffer{};
 		uint32_t SkinJointCount = 0;

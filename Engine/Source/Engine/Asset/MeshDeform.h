@@ -28,13 +28,14 @@
 //   2. Skin: with a palette (one matrix per skin joint, palette[j] = the joint's skin matrix taken into the drawn entity's
 //      space, RenderSnapshot.h's MeshDrawItem::JointPalette) and a mesh with a skin, M = sum(Weights[i] * palette[Joints[i]])
 //      over the vertex's four influences in order, skipping a weight of 0; Position = (M * (Position, 1)).xyz, Normal =
-//      normalize(mat3(M) * Normal), Tangent.xyz = normalize(mat3(M) * Tangent.xyz). Without a palette or a skin, Normal
-//      and Tangent.xyz are normalized after the morph.
+//      normalize((M * (Normal, 0)).xyz) and Tangent.xyz = normalize((M * (Tangent.xyz, 0)).xyz), the upper 3 x 3 of M.
+//      Without a palette or a skin, Normal and Tangent.xyz are normalized after the morph.
 //   3. TexCoord and Tangent.w are kept; the attribute stream (MeshData::Attributes) is not deformed.
-// Normals are transformed by the blended matrix itself, not its inverse transpose, so a joint with a non-uniform scale
-// shades approximately (Backlog §6). Only IEEE-exact operations and sqrt, so the CPU result is identical in every
-// configuration; the GPU's equals it within the tolerance the Skinning pass's test states (fused multiply-adds and the
-// GPU's square roots).
+// normalize(v) is v * (1 / sqrt(dot(v, v))), and a zero vector (a morph that cancels a normal) stays zero. Normals are
+// transformed by the blended matrix itself, not its inverse transpose, so a joint with a non-uniform scale shades
+// approximately (Backlog §6). Only IEEE-exact operations and sqrt, so the CPU result is identical in every configuration;
+// the GPU's (Passes/Skinning.slang, the same operations in the same order) equals it within the tolerance the Skinning
+// pass's test states (fused multiply-adds and the GPU's square roots).
 //
 // Frozen by the M23 contract C23.3; stream C implements it.
 
@@ -79,7 +80,9 @@ namespace Engine {
 
 	// The CPU reference: the vertices of `mesh` deformed by the file comment's rule, `morphWeights` resolved against its
 	// morph targets' DefaultWeight. Errors: InvalidArgument when `palette` is not empty and holds fewer matrices than the
-	// mesh's SkinJointCount, or holds a non-finite matrix, or when a morph weight is not finite. Pure.
+	// mesh's SkinJointCount, or holds a non-finite matrix, or when a morph weight is not finite; also, for a mesh that breaks
+	// ValidateMeshData's skin and morph rules (a skin or a target without one entry per vertex, a weighted joint beyond
+	// SkinJointCount), never reading past its data. Pure.
 	[[nodiscard]] Result<std::vector<MeshVertex>> DeformMeshVertices(const MeshData& mesh, std::span<const glm::mat4> palette,
 		std::span<const float> morphWeights);
 

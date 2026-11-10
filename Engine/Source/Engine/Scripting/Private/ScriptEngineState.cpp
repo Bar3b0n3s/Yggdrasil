@@ -271,7 +271,7 @@ namespace Engine {
 			if (error.Script.empty() && instance->second.Script != nullptr)
 				error.Script = instance->second.Script->SourceMap.Path;
 			instance->second.FaultDisabled = true;
-			instance->second.PendingPhysics.clear();
+			instance->second.PendingEvents.clear();
 			if (Scheduler != nullptr)
 				Scheduler->CancelInstance(error.Entity, error.Slot);
 			if (error.Kind == ScriptErrorKind::Memory && instance->second.Table != LUA_NOREF && !nested)

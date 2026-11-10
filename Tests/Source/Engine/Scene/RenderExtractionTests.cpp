@@ -549,7 +549,7 @@ namespace Engine {
 		// matrix times the Animator entity's, times each Skin matrix), and its morph weights, the pose's channel for its path
 		// overriding the component's; an item without a pose has no palette (its bind pose), a MeshRenderer without a
 		// SkinnedMesh neither.
-		TEST_CASE("RenderExtraction: a SkinnedMesh's item carries its Animator's palette in its own space and its morph weights" * doctest::skip(true))
+		TEST_CASE("RenderExtraction: a SkinnedMesh's item carries its Animator's palette in its own space and its morph weights")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -590,6 +590,31 @@ namespace Engine {
 			REQUIRE(unposed.has_value());
 			CHECK(unposed->Meshes[0].JointPalette.empty());
 			CHECK(unposed->Meshes[0].MorphWeights == std::vector<float>{ 0.25f, 0.5f });
+		}
+
+		// The Animator's own entity is its clips' empty path, and a pose's morph list longer than the SkinnedMesh's weights is
+		// kept whole (the item holds the longer of the two; a sampled weight may leave [-1, 1]).
+		TEST_CASE("RenderExtraction: a SkinnedMesh on its Animator's entity takes the pose's whole morph list at the empty path")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			static_cast<void>(CreateCamera(scene, "Camera", true));
+			Entity hero = scene.CreateEntity("Hero");
+			hero.AddComponent<AnimatorComponent>();
+			hero.AddComponent<MeshRendererComponent>(MakeMeshRenderer(AssetHandle(0x5c3)));
+			hero.AddComponent<SkinnedMeshComponent>(SkinnedMeshComponent{ .MorphWeights = { 0.25f } });
+			AnimationPoseComponent pose;
+			pose.JointModel = { glm::mat4(1.0f) };
+			pose.Skin = { glm::mat4(1.0f) };
+			pose.Morphs = { AnimationMorphWeights{ .Target = "Elsewhere", .Weights = { 1.0f } }, AnimationMorphWeights{ .Target = "", .Weights = { 0.5f, -0.5f, 1.5f } } };
+			hero.AddComponent<AnimationPoseComponent>(pose);
+			TransformSystem::Update(scene);
+
+			const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, RenderExtractionRequest{ .Width = 64, .Height = 64 });
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			REQUIRE(snapshot->Meshes.size() == 1);
+			CHECK(snapshot->Meshes[0].JointPalette == std::vector<glm::mat4>{ glm::mat4(1.0f) });
+			CHECK(snapshot->Meshes[0].MorphWeights == std::vector<float>{ 0.5f, -0.5f, 1.5f });
 		}
 	}
 

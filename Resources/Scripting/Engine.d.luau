@@ -185,6 +185,9 @@ export type ValidationScope = "Project" | "Scene"
 -- Which view viewport.screenshot renders.
 export type ViewportView = "Scene" | "Game"
 
+-- An animation clip's named event that an Animator layer's time passed: its name, the 1-based layer, the layer's clip and the event's time in it.
+export type AnimationEvent = {Name: string, Layer: number, Clip: AssetRef, Time: number}
+
 -- First contact from the receiving body's side, with collider identities for compounds.
 export type CollisionContact = {Point: vector, Normal: vector, RelativeSpeed: number, Collider: Entity, OtherCollider: Entity}
 
@@ -217,12 +220,20 @@ export type TestSuiteOptions = {CaseTimeoutTicks: number?}
 
 -- Poses a skeleton from layers of animation clips, blended by their weights, each fixed step; skinned meshes on the entity and below it follow.
 declare extern type Animator with
+	-- Read the world position and rotation of the skeleton's joint named joint in the pose of the last fixed step's AnimationSystem phase; nil, nil without a pose or such a joint, and the position with a nil rotation when a scale of 0 on the way (a clip scaling a joint to nothing) leaves the joint no rotation. [All modes; Runtime|Test; pure/read]
+	GetJointTransform: (self: Animator, joint: string) -> (vector?, Quat?)
+	-- Read the last fixed step's blended root motion in the entity's parent space: the translation RootMotion Apply adds to the Transform's Translation and the rotation it multiplies into Rotation; zero and identity without a pose or with RootMotion None. [All modes; Runtime|Test; pure/read]
+	GetRootMotion: (self: Animator) -> (vector, Quat)
 	-- The layers, at most eight, blended in order over the skeleton's rest pose. [All modes; Runtime|Test; pure/read; setter mutates]
 	Layers: {{Clip: AssetRef?, Time: number, Speed: number, Weight: number, Loop: boolean}}
+	-- Set the 1-based layer to play the clip from time seconds (0 when absent), keeping its Speed, Weight and Loop; the next index appends a layer with Speed 1, Weight 1 and Loop. A layer beyond the next one or beyond 8, or a time below 0, raises an error. [All modes; Runtime|Test; mutates]
+	Play: (self: Animator, layer: number, clip: AssetRef?, time: number?) -> ()
 	-- Whether the layers' times advance each fixed step; the pose follows the times either way. [All modes; Runtime|Test; pure/read; setter mutates]
 	Playing: boolean
 	-- What happens to the skeleton's root motion: kept in the pose, applied to the entity or only reported. [All modes; Runtime|Test; pure/read; setter mutates]
 	RootMotion: AnimatorRootMotion
+	-- Set the 1-based layer's Weight, from 0 (no effect) to 1 (it overrides the layers before it on the paths its clip keys); a crossfade tweens two layers' weights. A layer the Animator lacks or a weight outside [0, 1] raises an error. [All modes; Runtime|Test; mutates]
+	SetWeight: (self: Animator, layer: number, weight: number) -> ()
 	-- The skeleton the layers' clips pose; null poses nothing. [All modes; Runtime|Test; pure/read; setter mutates]
 	Skeleton: AssetRef?
 end
@@ -279,6 +290,8 @@ end
 
 -- Optional behaviour lifecycle callbacks in execution order and canonical entity order.
 declare extern type Behaviour with
+	-- Called in the fixed step for each event an Animator layer's time passes on this entity, after every Animator of the tick was posed, in layer and firing order. [All modes; Runtime|Test; mutates]
+	OnAnimationEvent: (self: ScriptInstance, event: AnimationEvent) -> ()
 	-- Called when a collision begins, with the other entity and contact. [All modes; Runtime|Test; mutates]
 	OnCollisionEnter: (self: ScriptInstance, other: Entity, contact: CollisionContact) -> ()
 	-- Called when the corresponding collision or trigger transition occurs. [All modes; Runtime|Test; mutates]
@@ -755,6 +768,8 @@ end
 declare extern type SkinnedMesh with
 	-- One weight in [-1, 1] per morph target of the mesh, in order; a missing weight is the target's default, and an animated weight overrides it. [All modes; Runtime|Test; pure/read; setter mutates]
 	MorphWeights: {number}
+	-- Set the weight of the mesh's morph target named target, growing MorphWeights with the targets' default weights; an error names the target when the mesh has no such target, and a weight outside [-1, 1] raises one. [All modes; Runtime|Test; mutates]
+	SetMorphWeight: (self: SkinnedMesh, target: string, weight: number) -> ()
 end
 
 -- A sphere-shaped collider in the entity's space.
@@ -1153,6 +1168,8 @@ declare Test: {
 	GetExtractedPosition: (entity: Entity) -> vector?,
 	-- Read the last completed render extraction. [All modes; Test; pure/read]
 	GetLastExtraction: () -> TestExtraction,
+	-- Returns the digest of an Animator entity's pose sampled in the last fixed step (the XXH64 of its joint model matrices and morph weights) as 16 hexadecimal digits, or nil without a pose; the same in every configuration, so a suite compares it across runs; test suites only. [All modes; Test; pure/read]
+	GetPoseDigest: (entity: Entity) -> string?,
 	-- Read occurrences newer than an exclusive error cursor; claimed errors remain visible. The VM keeps the 256 distinct errors with the latest occurrences. [All modes; Test; pure/read]
 	GetScriptErrors: (since: number?) -> {ScriptError},
 	-- Read the canonical simulated state hash: the world (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input. It includes the tick, so two reads at different ticks always differ: compare two runs with input.replay's stateHash instead. [All modes; Test; pure/read]

@@ -32,7 +32,10 @@ namespace Engine {
 	// against opaque/mask depth, without writing depth. Solid EntityId coverage remains unchanged, including mask holes.
 	// Uses DebugDrawList command budget and reports dropped commands; no silent truncation, no polygon-line capability.
 	// InvalidArgument for invalid camera/world data leaves output unchanged; budget drops are reported, not errors.
-	// No camera, non-Lit or Wireframe off: no output.
+	// No camera, non-Lit or Wireframe off: no output. M23 (C23.3): a deformed item (a skin its JointPalette covers, or a
+	// resolved morph weight that is not 0, MeshDrawItem's rule) shows the edges of its deformation (Asset/MeshDeform.h's
+	// DeformMeshVertices), culled by its deformed bounds (ComputeDeformedBounds); InvalidArgument for a palette or morph
+	// weight that is not finite.
 	[[nodiscard]] Status AppendWireframeOverlay(const RenderSnapshot& snapshot, AssetManager& assets, DebugDrawList& output);
 
 }

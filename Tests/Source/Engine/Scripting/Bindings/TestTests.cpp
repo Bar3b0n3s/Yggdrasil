@@ -1,11 +1,14 @@
 #include "TestsPCH.h"
 #include "Engine/Scripting/ScriptTestHost.h"
 
+#include "Engine/Animation/AnimationPose.h"
 #include "Engine/Asset/AudioClipData.h"
 #include "Engine/Audio/AudioDecoder.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Platform/Input/KeyCodes.h"
+#include "Engine/Scene/Components/AnimationPoseComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/Scene.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Scripting/ScriptLimits.h"
 #include "Engine/Scripting/TaskScheduler.h"
@@ -14,6 +17,7 @@
 #include "Support/ScriptTestFixture.h"
 #include "Support/TestOptions.h"
 
+#include <glm/gtc/matrix_transform.hpp>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -419,6 +423,32 @@ return true
 			CaptureCoverage(fixture, mode, snapshots);
 		}
 
+		// Test.GetPoseDigest of an entity with a sampled pose (ComputeAnimationPoseDigest of its joint model matrices and morph
+		// weights, as 16 hexadecimal digits), and nil for an entity without one, a pending one (still readable) included (M23,
+		// Docs/Decisions/0034-m23-contract.md decision 31).
+		void RunPoseDigestScenario(RunModes mode, std::vector<ScriptApiCoverage>& snapshots)
+		{
+			TestServices services;
+			Test::ScriptTestFixture fixture({ .Mode = mode, .TestMode = true, .TestHost = &services });
+			Scene& scene = fixture.GetScene();
+			AnimationPoseComponent pose;
+			pose.JointModel = { glm::mat4(1.0f), glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 1.0f, 0.0f)) };
+			pose.Morphs = { AnimationMorphWeights{ .Target = "Face", .Weights = { 0.5f, -0.25f } } };
+			scene.CreateEntity("Posed").AddComponent<AnimationPoseComponent>(pose);
+			static_cast<void>(scene.CreateEntity("Plain"));
+			REQUIRE(fixture.Start());
+			CheckTrue(fixture, std::format(R"(
+assert(Test.GetPoseDigest(Scene.FindByName("Posed"))=="{:016x}")
+assert(Test.GetPoseDigest(Scene.FindByName("Plain"))==nil)
+local gone=Scene.CreateEntity("Gone")
+gone:Destroy()
+assert(Test.GetPoseDigest(gone)==nil)
+return true
+)",
+								   ComputeAnimationPoseDigest(pose.JointModel, pose.Morphs)));
+			CaptureCoverage(fixture, mode, snapshots);
+		}
+
 	}
 
 	namespace Test {
@@ -431,6 +461,7 @@ return true
 			RunInputScenario(mode, snapshots);
 			RunClaimsScenario(mode, snapshots);
 			RunAudioClipDigestScenario(mode, snapshots);
+			RunPoseDigestScenario(mode, snapshots);
 		}
 
 	}
@@ -805,6 +836,14 @@ end))");
 			RunAudioClipDigestScenario(RunModes::Editor, snapshots);
 		}
 
+		// M23 (Docs/Decisions/0034-m23-contract.md decision 31): FeatureTest's Animation suite compares a sampled pose's digest
+		// in the Editor, Release and Dist runs.
+		TEST_CASE("TestBindings: GetPoseDigest reads the digest of an entity's sampled pose, and nil without one")
+		{
+			std::vector<ScriptApiCoverage> snapshots;
+			RunPoseDigestScenario(RunModes::Editor, snapshots);
+		}
+
 		TEST_CASE("TestBindings: registry rejects ordinary play and read only mutations before host effects")
 		{
 			SUBCASE("runtime")
@@ -843,7 +882,7 @@ return Test.GetStateHash()=="0000000000001234"
 		{
 			Test::ScriptTestFixture fixture;
 			REQUIRE(fixture.Start());
-			const std::array<std::string_view, 22> names{ "Suite", "Case", "Expect", "ExpectEqual", "ExpectNear", "Fail", "Skip", "WaitTicks", "WaitUntil", "ExpectScriptError", "CaptureAudio", "InjectAction", "InjectKey", "InjectMouse", "InjectGamepad", "Screenshot", "ReloadScript", "GetStateHash", "GetLastExtraction", "GetExtractedPosition", "GetScriptErrors", "GetAudioClipDigest" };
+			const std::array<std::string_view, 23> names{ "Suite", "Case", "Expect", "ExpectEqual", "ExpectNear", "Fail", "Skip", "WaitTicks", "WaitUntil", "ExpectScriptError", "CaptureAudio", "InjectAction", "InjectKey", "InjectMouse", "InjectGamepad", "Screenshot", "ReloadScript", "GetStateHash", "GetLastExtraction", "GetExtractedPosition", "GetScriptErrors", "GetAudioClipDigest", "GetPoseDigest" };
 			const auto modules = fixture.GetApi().GetModules();
 			const auto found = std::find_if(modules.begin(), modules.end(), [](const auto& group)
 			{

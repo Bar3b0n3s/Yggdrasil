@@ -20,6 +20,7 @@
 #include <map>
 #include <optional>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace Engine {
@@ -274,7 +275,8 @@ namespace Engine {
 		return current != Instances.end() && current->second.Serial == serial && current->second.Table != LUA_NOREF;
 	}
 
-	void ScriptEngine::State::Invoke(InstanceKey key, std::string_view callback, const PhysicsEvent* event, bool destroying)
+	void ScriptEngine::State::Invoke(InstanceKey key, std::string_view callback, const PhysicsEvent* event, bool destroying,
+		const AnimationEventRecord* animation)
 	{
 		if (Engine.IsStopped() || Engine.IsReadOnly())
 			return;
@@ -296,7 +298,7 @@ namespace Engine {
 		const ScriptTaskOwner owner{ .Entity = key.Entity, .Case = {}, .Slot = key.Slot };
 		const bool outerSignal = std::exchange(TestSignalRaised, false);
 		std::optional<ScriptError> callbackFailure;
-		const auto operation = [this, tableReference, callback, event, &callbackFailure](ScriptCall& call) -> int
+		const auto operation = [this, tableReference, callback, event, animation, &callbackFailure](ScriptCall& call) -> int
 		{
 			lua_getref(call.State, tableReference);
 			const int self = lua_gettop(call.State);
@@ -337,6 +339,20 @@ namespace Engine {
 					++arguments;
 				}
 			}
+			if (animation != nullptr)
+			{
+				// AnimationEvent {Name, Layer (1-based), Clip, Time} (Docs/Decisions/0034-m23-contract.md decision 31).
+				lua_createtable(call.State, 0, 4);
+				Lua::PushString(call, animation->Name);
+				lua_setfield(call.State, -2, "Name");
+				Lua::Push(call, animation->Layer + 1);
+				lua_setfield(call.State, -2, "Layer");
+				Lua::Push(call, animation->Clip);
+				lua_setfield(call.State, -2, "Clip");
+				Lua::Push(call, animation->Time);
+				lua_setfield(call.State, -2, "Time");
+				++arguments;
+			}
 			const auto result = Lua::ProtectedCall(call, arguments, 0);
 			if (!result)
 				return Lua::RaiseError(call, result.error());
@@ -374,11 +390,17 @@ namespace Engine {
 		ENGINE_CORE_ASSERT(false, "Unknown physics event");
 	}
 
-	void ScriptEngine::State::DeliverPendingPhysics()
+	void ScriptEngine::State::InvokeAnimation(InstanceKey key, const AnimationEventRecord& event)
+	{
+		ENGINE_CORE_ASSERT(key.Entity == event.Entity, "An animation event reaches an instance of its Animator's entity");
+		Invoke(key, "OnAnimationEvent", nullptr, false, &event);
+	}
+
+	void ScriptEngine::State::DeliverPendingEvents()
 	{
 		if (std::none_of(Instances.begin(), Instances.end(), [](const auto& entry)
 		{
-			return !entry.second.PendingPhysics.empty();
+			return !entry.second.PendingEvents.empty();
 		}))
 			return;
 		// Held events are addressed to an entity, as live ones are (decision 17): they reach the entity's slots together, in
@@ -389,7 +411,7 @@ namespace Engine {
 		for (const InstanceKey key : OrderedInstances(false))
 		{
 			const auto found = Instances.find(key);
-			if (found != Instances.end() && found->second.Started && !found->second.PendingPhysics.empty())
+			if (found != Instances.end() && found->second.Started && !found->second.PendingEvents.empty())
 				snapshot.push_back(key);
 		}
 		std::map<UUID, size_t> turns;
@@ -404,18 +426,21 @@ namespace Engine {
 		for (const InstanceKey key : snapshot)
 		{
 			const auto found = Instances.find(key);
-			if (found == Instances.end() || !found->second.Started || found->second.PendingPhysics.empty())
+			if (found == Instances.end() || !found->second.Started || found->second.PendingEvents.empty())
 				continue;
 			const uint64_t serial = found->second.Serial;
-			const std::vector<PhysicsEvent> events = std::exchange(found->second.PendingPhysics, {});
-			for (const PhysicsEvent& event : events)
+			const std::vector<HeldEvent> events = std::exchange(found->second.PendingEvents, {});
+			for (const HeldEvent& event : events)
 			{
 				// A callback may remove, replace or fault this instance; its remaining held events are then discarded.
 				const auto current = Instances.find(key);
 				if (Engine.IsStopped() || current == Instances.end() || current->second.Serial != serial || current->second.FaultDisabled
 					|| current->second.DestroyPrepared)
 					break;
-				InvokePhysics(key, event);
+				if (const PhysicsEvent* physics = std::get_if<PhysicsEvent>(&event))
+					InvokePhysics(key, *physics);
+				else
+					InvokeAnimation(key, std::get<AnimationEventRecord>(event));
 			}
 		}
 	}

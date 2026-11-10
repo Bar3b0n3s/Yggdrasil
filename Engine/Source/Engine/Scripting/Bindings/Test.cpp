@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/Scripting/Private/BindingRegistration.h"
 
+#include "Engine/Animation/AnimationPose.h"
 #include "Engine/Asset/AssetManager.h"
 #include "Engine/Asset/AudioClipData.h"
 #include "Engine/Audio/AudioDecoder.h"
@@ -8,6 +9,9 @@
 #include "Engine/Core/Utf8.h"
 #include "Engine/Platform/Input/KeyCodes.h"
 #include "Engine/Reflection/EnumInfo.h"
+#include "Engine/Scene/Components/AnimationPoseComponent.h"
+#include "Engine/Scene/Entity.h"
+#include "Engine/Scene/Scene.h"
 #include "Engine/Scripting/Private/ScriptEngineAccess.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Scripting/ScriptLimits.h"
@@ -474,6 +478,25 @@ namespace Engine {
 			return 1;
 		}
 
+		// Test.GetPoseDigest(entity): the digest of the entity's sampled pose (ComputeAnimationPoseDigest of its
+		// AnimationPoseComponent's joint model matrices and morph weights, M23; Docs/Decisions/0034-m23-contract.md decision
+		// 31), what a suite compares across the Editor, Release and Dist runs; nil without a pose.
+		static int GetPoseDigest(ScriptCall& call)
+		{
+			const auto identity = Lua::Check<ScriptEntityIdentity>(call, 1);
+			IScriptHost& host = call.Engine->GetHost();
+			Checked(call, ScriptProxy::ValidateEntityForRead(host, identity));
+			const ConstEntity entity = host.GetScene().FindReadableEntityByID(identity.ID);
+			const AnimationPoseComponent* pose = entity.TryGetComponent<AnimationPoseComponent>();
+			if (pose == nullptr)
+			{
+				Lua::PushNil(call);
+				return 1;
+			}
+			Lua::PushString(call, std::format("{:016x}", ComputeAnimationPoseDigest(pose->JointModel, pose->Morphs)));
+			return 1;
+		}
+
 		static int GetScriptErrors(ScriptCall& call)
 		{
 			uint64_t since = 0;
@@ -616,7 +639,12 @@ namespace Engine {
 				.Function("GetExtractedPosition", Utils::GetExtractedPosition, "(entity: Entity) -> vector?", "Read an entity's position in the last render snapshot.", pure)
 				.Function("GetScriptErrors", Utils::GetScriptErrors, "(since: number?) -> {ScriptError}", std::format("Read occurrences newer than an exclusive error cursor; claimed errors remain visible. The VM keeps the {} distinct errors with the latest occurrences.", MaxScriptErrorEntries), pure)
 				.Function("GetAudioClipDigest", Utils::GetAudioClipDigest, "(clip: AssetRef) -> string",
-					"Returns the XXH64 of an audio clip's samples decoded to 32-bit float at its own rate, as 16 hexadecimal digits; test suites only.", pure);
+					"Returns the XXH64 of an audio clip's samples decoded to 32-bit float at its own rate, as 16 hexadecimal digits; test suites only.", pure)
+				.Function("GetPoseDigest", Utils::GetPoseDigest, "(entity: Entity) -> string?",
+					"Returns the digest of an Animator entity's pose sampled in the last fixed step (the XXH64 of its joint model matrices and morph "
+					"weights) as 16 hexadecimal digits, or nil without a pose; the same in every configuration, so a suite compares it across runs; "
+					"test suites only.",
+					pure);
 			return {};
 		}
 

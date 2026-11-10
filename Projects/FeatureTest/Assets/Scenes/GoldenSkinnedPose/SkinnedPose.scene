@@ -1,0 +1,338 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "SkinnedPose",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Prefab": 2,
+		"PrefabLink": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"PointLight": 2,
+		"Environment": 1,
+		"PostProcess": 1,
+		"Animator": 1,
+		"SkinnedMesh": 1
+	},
+	"Entities": [
+		{
+			"ID": "a6f10a9f9ddf422e",
+			"Name": "Rendering",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Environment": {
+					"Environment": null,
+					"Intensity": 1,
+					"Rotation": 0,
+					"ShowSkybox": true,
+					"SkyboxBlur": 0,
+					"FallbackColor": [0.04, 0.04, 0.045]
+				},
+				"PostProcess": {
+					"ExposureEV": 0,
+					"Tonemap": "AgX",
+					"SsaoEnabled": false,
+					"SsaoRadius": 0.5,
+					"SsaoIntensity": 1,
+					"SsaoQuality": "Medium",
+					"BloomEnabled": false,
+					"BloomIntensity": 0.04,
+					"FxaaEnabled": true
+				}
+			}
+		},
+		{
+			"ID": "4d83fd60cee6a1e3",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [2.9, 1.4, 2.7],
+					"Rotation": [-0.040001597, 0.39836955, 0.01739319, 0.9161872],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 45,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.02, 0.025, 0.035]
+				}
+			}
+		},
+		{
+			"ID": "d70cd26d14746628",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [-0.24321035, -0.33036608, -0.088521324, 0.90767336],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 1.2,
+					"CastShadows": false,
+					"ShadowDistance": 100,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 1,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "c54ff70edb641971",
+			"Name": "Fill",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [2.5, 2.4, 1],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 2.5,
+					"Range": 8,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "a961f849b2f51ba2",
+			"Name": "Ground",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [8, 1, 8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000103",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "bc9669885985df9a",
+			"Name": "Posed",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-0.8, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Prefab": {
+					"Prefab": "3f5ffc585d1a1a6c",
+					"Overrides": [
+						{
+							"Path": ["f38db704cf4c77d4"],
+							"Kind": "Field",
+							"Component": "Animator",
+							"Field": "Layers",
+							"Value": [
+								{
+									"Clip": "fe25c2c743885b9f",
+									"Time": 0.375,
+									"Speed": 1,
+									"Weight": 1,
+									"Loop": true
+								}
+							]
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "77138573a8164fc7",
+					"InstanceRoot": "bc9669885985df9a",
+					"OuterPrefabEntityID": null
+				}
+			}
+		},
+		{
+			"ID": "bf63b8443b64d6cc",
+			"Name": "Armature",
+			"Parent": "bc9669885985df9a",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "f38db704cf4c77d4",
+					"InstanceRoot": "bc9669885985df9a",
+					"OuterPrefabEntityID": null
+				},
+				"Animator": {
+					"Skeleton": "b917ce323c922df2",
+					"Layers": [
+						{
+							"Clip": "fe25c2c743885b9f",
+							"Time": 0.375,
+							"Speed": 1,
+							"Weight": 1,
+							"Loop": true
+						}
+					],
+					"Playing": true,
+					"RootMotion": "None"
+				}
+			}
+		},
+		{
+			"ID": "8825a358c36b30ee",
+			"Name": "Body",
+			"Parent": "bf63b8443b64d6cc",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "cca3ae6b03e363a7",
+					"InstanceRoot": "bc9669885985df9a",
+					"OuterPrefabEntityID": null
+				},
+				"MeshRenderer": {
+					"Mesh": "853ad2812b2c36df",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"SkinnedMesh": {
+					"MorphWeights": [0]
+				}
+			}
+		},
+		{
+			"ID": "c4bd8d276a053f3a",
+			"Name": "Morphed",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0.8, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Prefab": {
+					"Prefab": "3f5ffc585d1a1a6c",
+					"Overrides": [
+						{
+							"Path": ["cca3ae6b03e363a7"],
+							"Kind": "Field",
+							"Component": "SkinnedMesh",
+							"Field": "MorphWeights",
+							"Value": [1]
+						},
+						{
+							"Path": ["f38db704cf4c77d4"],
+							"Kind": "Field",
+							"Component": "Animator",
+							"Field": "Layers",
+							"Value": []
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "77138573a8164fc7",
+					"InstanceRoot": "c4bd8d276a053f3a",
+					"OuterPrefabEntityID": null
+				}
+			}
+		},
+		{
+			"ID": "f856134d9dd9303a",
+			"Name": "Armature",
+			"Parent": "c4bd8d276a053f3a",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "f38db704cf4c77d4",
+					"InstanceRoot": "c4bd8d276a053f3a",
+					"OuterPrefabEntityID": null
+				},
+				"Animator": {
+					"Skeleton": "b917ce323c922df2",
+					"Layers": [],
+					"Playing": true,
+					"RootMotion": "None"
+				}
+			}
+		},
+		{
+			"ID": "b260c0da3820ddf2",
+			"Name": "Body",
+			"Parent": "f856134d9dd9303a",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "cca3ae6b03e363a7",
+					"InstanceRoot": "c4bd8d276a053f3a",
+					"OuterPrefabEntityID": null
+				},
+				"MeshRenderer": {
+					"Mesh": "853ad2812b2c36df",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"SkinnedMesh": {
+					"MorphWeights": [1]
+				}
+			}
+		}
+	]
+}

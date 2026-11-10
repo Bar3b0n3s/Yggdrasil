@@ -2,17 +2,18 @@
 
 #include "Engine/Animation/AnimationPose.h"
 
+#include "Engine/Animation/RootMotion.h"
 #include "Engine/Core/DetMath.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 // A skeleton's pose: sampling, the script-driven blend of layers, joint and skin matrices and the pose digest (M23, C23.3,
-// C-SKEL, C-MORPH, C-ANIM-BLEND; Docs/Decisions/0034-m23-contract.md decision 26, stream B). Skipped until stream B implements
-// them.
+// C-SKEL, C-MORPH, C-ANIM-BLEND; Docs/Decisions/0034-m23-contract.md decision 26, stream B).
 
 namespace Engine {
 
@@ -54,7 +55,7 @@ namespace Engine {
 		// glTF 2.0 Appendix C: Step holds the earlier key, Linear interpolates (rotations along the shorter arc), CubicSpline is
 		// the Hermite spline of the keys' values and tangents scaled by the interval; outside the keys the ends hold. A channel
 		// whose joint the skeleton lacks ("Tail") is ignored, and a sampled path is marked keyed.
-		TEST_CASE("AnimationPose: keys interpolate step, linear and cubic-spline as glTF defines them" * doctest::skip(true))
+		TEST_CASE("AnimationPose: keys interpolate step, linear and cubic-spline as glTF defines them")
 		{
 			const SkeletonData arm = MakeArm();
 			const AnimationClipData wave = MakeWave();
@@ -84,9 +85,41 @@ namespace Engine {
 			CHECK(pose.Morphs[0].Weights[0] == 1.0f);
 		}
 
+		// W23.3's review: a time that is not a number samples every channel's first key, and an infinite one an end (the
+		// clamp to the clip, then the key search's end tests), so no time indexes past a channel's keys; the root-motion
+		// sampling, which does not clamp, keeps the same rule.
+		TEST_CASE("AnimationPose: a time that is not a number or infinite samples a key, never past the keys")
+		{
+			const SkeletonData arm = MakeArm();
+			const AnimationClipData wave = MakeWave();
+			const float notANumber = std::numeric_limits<float>::quiet_NaN();
+			const float infinity = std::numeric_limits<float>::infinity();
+			AnimationPose first = MakeRestPose(arm);
+			SampleAnimationClip(wave, arm, 0.0f, first);
+			AnimationPose last = MakeRestPose(arm);
+			SampleAnimationClip(wave, arm, 1.0f, last);
+
+			AnimationPose undefined = MakeRestPose(arm);
+			SampleAnimationClip(wave, arm, notANumber, undefined);
+			CHECK(undefined == first);
+			AnimationPose late = MakeRestPose(arm);
+			SampleAnimationClip(wave, arm, infinity, late);
+			CHECK(late == last);
+			AnimationPose early = MakeRestPose(arm);
+			SampleAnimationClip(wave, arm, -infinity, early);
+			CHECK(early == first);
+
+			SkeletonData shoulder;
+			shoulder.Joints.push_back({ .Name = "Shoulder" });
+			const RootMotionDelta undefinedMotion = ComputeRootMotion(wave, shoulder, AnimationTimeStep{ .PreviousTime = notANumber, .Time = notANumber });
+			CHECK(undefinedMotion == RootMotionDelta{});
+			const RootMotionDelta endless = ComputeRootMotion(wave, shoulder, AnimationTimeStep{ .PreviousTime = -infinity, .Time = infinity });
+			CHECK(endless.Translation == glm::vec3(0.0f));
+		}
+
 		// Script-driven blending: layer 1 at weight 0.5 over layer 0 halves the elbow's turn; a layer keys only its own paths,
 		// so the shoulder layer 0 moved stays moved; weight 0 leaves the result and weight 1 copies the layer exactly.
-		TEST_CASE("AnimationPose: layers blend in order by their weights over the rest pose, only on the paths they key" * doctest::skip(true))
+		TEST_CASE("AnimationPose: layers blend in order by their weights over the rest pose, only on the paths they key")
 		{
 			const SkeletonData arm = MakeArm();
 			AnimationPose result = MakeRestPose(arm);
@@ -113,7 +146,7 @@ namespace Engine {
 			CHECK(result.Keyed[1] == AnimationPoseRotationBit);
 		}
 
-		TEST_CASE("AnimationPose: joint model transforms compose parent before child, and skin matrices apply the inverse binds" * doctest::skip(true))
+		TEST_CASE("AnimationPose: joint model transforms compose parent before child, and skin matrices apply the inverse binds")
 		{
 			const SkeletonData arm = MakeArm();
 			AnimationPose pose = MakeRestPose(arm);
@@ -139,10 +172,10 @@ namespace Engine {
 		// at 0.3 s over the arm, with the layer of 0.5 s blended at 0.25 on top, is committed from Debug by stream B and checked
 		// in Release by this case; FeatureTest's Animation suite checks the same digest in the exported Dist run through
 		// Test.GetPoseDigest (decision 31). DetMath and IEEE-exact arithmetic make it one value everywhere.
-		TEST_CASE("AnimationPose: a sampled pose hashes to its committed digest in every configuration" * doctest::skip(true))
+		TEST_CASE("AnimationPose: a sampled pose hashes to its committed digest in every configuration")
 		{
-			// Stream B commits the digest its implementation gives in Debug, and confirms it in Release.
-			constexpr uint64_t ExpectedDigest = 0;
+			// Committed from Debug by stream B and confirmed in Release.
+			constexpr uint64_t ExpectedDigest = 0xdc382bf023fb35c5;
 			const SkeletonData arm = MakeArm();
 			const AnimationClipData wave = MakeWave();
 			AnimationPose pose = MakeRestPose(arm);

@@ -29,7 +29,7 @@ namespace Engine {
 	struct AnimationPreviewParams
 	{
 		std::string Entity{}; // required: an entity of the target scene holding an Animator (an EntityRef)
-		float Time = 0.0f;    // seconds added to every layer's time times its Speed, >= 0
+		float Time = 0.0f;    // seconds added to every layer's time times its Speed, in [0, MaxAnimatorTime]
 		bool Playing = false; // whether the editor's frames advance the time
 		bool Stop = false;    // end the preview: the entity draws its bind pose again; time and playing are then refused
 	};
@@ -47,10 +47,12 @@ namespace Engine {
 
 		// animation.preview: AnimationPreview::Begin in the target scene with the params over the preview's state (a preview
 		// running in another scene or of another entity ends first, its pose removed from its own scene), or with stop End when
-		// the running preview is the target scene's `entity` (otherwise stop changes nothing). Errors: InvalidParams at /entity
-		// for an entity the target scene does not hold, InvalidArgument at /entity for one without an Animator, at /time for a
-		// time that is not finite or below 0, and at /time or /playing with stop; InvalidState for the play scene as the target
-		// (the hint names play.stop); NotFound naming the Skeleton when it is null or fails to load.
+		// the running preview is the target scene's `entity` (otherwise stop changes nothing). Errors: NotFound at /entity for
+		// an entity the target scene does not hold (ResolveEntity's), InvalidArgument at /entity for one without an Animator or
+		// for a malformed or ambiguous reference, at /time for a time that is not finite or outside [0, MaxAnimatorTime] (the
+		// registered field's range), and at /time or /playing with stop; InvalidState for the play scene as the target (the
+		// hint names play.stop); NotFound naming the Skeleton when it is null or fails to load (no preview is then started, and
+		// no pose written).
 		[[nodiscard]] Result<AnimationPreviewResult> AnimationPreviewMethod(EditorMethodContext& context, const AnimationPreviewParams& params);
 
 	}

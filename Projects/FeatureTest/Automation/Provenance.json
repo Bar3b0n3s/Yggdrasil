@@ -220,7 +220,7 @@
 		},
 		{
 			"Path": "Assets/Formats/Gltf/Attributes.gltf.meta",
-			"XXH64": "f7d035ed2c9764d0",
+			"XXH64": "f0b22ec43e9b83b0",
 			"Method": "asset.import",
 			"RequestId": 1,
 			"Client": "batch",
@@ -236,7 +236,7 @@
 		},
 		{
 			"Path": "Assets/Formats/Gltf/Box.glb.meta",
-			"XXH64": "4843ca3ef5bd6fb8",
+			"XXH64": "8dcfb007e7618cec",
 			"Method": "asset.import",
 			"RequestId": 13,
 			"Client": "batch",
@@ -252,7 +252,7 @@
 		},
 		{
 			"Path": "Assets/Formats/Gltf/Box.gltf.meta",
-			"XXH64": "c26340c9e080c8bb",
+			"XXH64": "f4be688428b9add3",
 			"Method": "asset.import",
 			"RequestId": 14,
 			"Client": "batch",
@@ -268,7 +268,7 @@
 		},
 		{
 			"Path": "Assets/Formats/Gltf/DataUri.gltf.meta",
-			"XXH64": "c415f2fe9bcc5a18",
+			"XXH64": "a7ae9a601dd17d57",
 			"Method": "asset.import",
 			"RequestId": 15,
 			"Client": "batch",
@@ -300,7 +300,7 @@
 		},
 		{
 			"Path": "Assets/Formats/Gltf/Textured.gltf.meta",
-			"XXH64": "c2f67d5de1a2bde8",
+			"XXH64": "c6ddf15823e2e21f",
 			"Method": "asset.import",
 			"RequestId": 16,
 			"Client": "batch",
@@ -447,6 +447,22 @@
 			"XXH64": "dabc8a4d967989aa",
 			"Method": "asset.import",
 			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Animation/Floor.material",
+			"XXH64": "9d352d9771821a73",
+			"Method": "asset.create",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Animation/Floor.material.meta",
+			"XXH64": "6c2d93286cabd74b",
+			"Method": "asset.create",
+			"RequestId": 3,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -1603,6 +1619,38 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Models/Animation/Skinned.gltf",
+			"XXH64": "2e4aa09b15907bc6",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Models/Animation/Skinned.gltf.meta",
+			"XXH64": "a0391b5d4288bb5e",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Models/Animation/SkinnedRigs.gltf",
+			"XXH64": "27f85bbae2d40289",
+			"Method": "asset.import",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Models/Animation/SkinnedRigs.gltf.meta",
+			"XXH64": "f92cc52d1de00968",
+			"Method": "asset.import",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Models/Golden/NormalMapped.gltf",
 			"XXH64": "0e0fa6232698a6e9",
 			"Method": "asset.import",
@@ -1663,6 +1711,22 @@
 			"XXH64": "1fc6de8fd90dca0c",
 			"Method": "asset.import",
 			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Models/GoldenSkinnedPose/Skinned.gltf",
+			"XXH64": "2e4aa09b15907bc6",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Models/GoldenSkinnedPose/Skinned.gltf.meta",
+			"XXH64": "9aa7af9f9a5bf34e",
+			"Method": "asset.import",
+			"RequestId": 1,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -1775,6 +1839,22 @@
 			"XXH64": "09126842f4e7c66f",
 			"Method": "prefab.create",
 			"RequestId": 9,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Animation.scene",
+			"XXH64": "d283d094d8662c62",
+			"Method": "scene.save",
+			"RequestId": 15,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Animation.scene.meta",
+			"XXH64": "fc155b4ec2219c5a",
+			"Method": "edit.batch",
+			"RequestId": 7,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -2291,6 +2371,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scenes/GoldenSkinnedPose/SkinnedPose.scene",
+			"XXH64": "1583b71c4e444464",
+			"Method": "scene.save",
+			"RequestId": 9,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenSkinnedPose/SkinnedPose.scene.meta",
+			"XXH64": "f790df8dd3d47fcb",
+			"Method": "prefab.instantiate",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scenes/GoldenTextured/TextureCompression.scene",
 			"XXH64": "b884e098004f15af",
 			"Method": "scene.save",
@@ -2527,6 +2623,38 @@
 			"XXH64": "293d6a49df7565d4",
 			"Method": "edit.batch",
 			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Animation/Director.luau",
+			"XXH64": "88d386433805299d",
+			"Method": "script.write",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Animation/Director.luau.meta",
+			"XXH64": "af1c35e06ad5c5ad",
+			"Method": "script.write",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Animation/EventProbe.luau",
+			"XXH64": "3cef3bafc8e56aeb",
+			"Method": "script.write",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Animation/EventProbe.luau.meta",
+			"XXH64": "d66fd32230d47985",
+			"Method": "script.write",
+			"RequestId": 4,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -2911,6 +3039,54 @@
 			"XXH64": "634e4ae20d6ef667",
 			"Method": "script.write",
 			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Animation/Animation.luau",
+			"XXH64": "b14515921b1727a7",
+			"Method": "script.write",
+			"RequestId": 16,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Animation/Animation.luau.meta",
+			"XXH64": "b7e414be10534764",
+			"Method": "script.write",
+			"RequestId": 16,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Animation/Animation.test.luau",
+			"XXH64": "df59c177a291787f",
+			"Method": "script.write",
+			"RequestId": 17,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Animation/Animation.test.luau.meta",
+			"XXH64": "dbe44efb1a91da20",
+			"Method": "script.write",
+			"RequestId": 17,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/Animator.test.luau",
+			"XXH64": "cafa247d5af36ecd",
+			"Method": "script.write",
+			"RequestId": 18,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/Animator.test.luau.meta",
+			"XXH64": "87ac3f75411ad1cb",
+			"Method": "script.write",
+			"RequestId": 18,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -3411,6 +3587,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Api/SkinnedMesh.test.luau",
+			"XXH64": "7b58c34dd2b9bfec",
+			"Method": "script.write",
+			"RequestId": 19,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/SkinnedMesh.test.luau.meta",
+			"XXH64": "29d89448fc05113e",
+			"Method": "script.write",
+			"RequestId": 19,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Api/SphereCollider.test.luau",
 			"XXH64": "7d243109082c8332",
 			"Method": "script.write",
@@ -3875,6 +4067,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Replays/Animation.replay",
+			"XXH64": "d950ef45d5a1c19f",
+			"Method": "input.record",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/Animation.replay.meta",
+			"XXH64": "48caaea1cb10b18e",
+			"Method": "input.record",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Replays/Determinism.replay",
 			"XXH64": "efc0b907708f6299",
 			"Method": "input.record",
@@ -4148,7 +4356,7 @@
 		},
 		{
 			"Path": "FeatureTest.eproj",
-			"XXH64": "a91e971bc89d27bd",
+			"XXH64": "7a69836028d25a00",
 			"Method": "project.setSettings",
 			"RequestId": 1,
 			"Client": "batch",

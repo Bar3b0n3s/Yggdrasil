@@ -5,6 +5,7 @@
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/MeshData.h"
+#include "Engine/Asset/MeshDeform.h"
 #include "Engine/Renderer/RenderPrepare.h"
 
 #include <algorithm>
@@ -12,7 +13,9 @@
 #include <cmath>
 #include <limits>
 #include <numbers>
+#include <optional>
 #include <span>
+#include <vector>
 
 namespace Engine {
 
@@ -340,6 +343,26 @@ namespace Engine {
 				continue;
 			const auto mesh = assets.GetOrPlaceholder<MeshData>(item.Mesh);
 			const double determinant = glm::determinant(glm::dmat3(item.World));
+			// M23 (C23.3, C-SKEL, C-MORPH; Docs/Decisions/0034-m23-contract.md decision 27): a deformed item (MeshDrawItem's
+			// rule, as the renderer applies it: a skin its palette covers, or a resolved morph weight that is not 0) shows its
+			// deformed edges (the CPU reference, which the Skinning pass equals), culled by its deformed bounds.
+			const bool skinned = mesh->SkinJointCount > 0 && !mesh->Skin.empty() && item.JointPalette.size() >= mesh->SkinJointCount;
+			std::vector<float> defaults;
+			for (const MeshMorphTarget& target : mesh->MorphTargets)
+				defaults.push_back(target.DefaultWeight);
+			const bool morphed = std::ranges::any_of(ResolveMorphWeights(defaults, item.MorphWeights), [](float weight)
+			{
+				return weight != 0.0f;
+			});
+			const std::span<const glm::mat4> palette = skinned ? std::span<const glm::mat4>(item.JointPalette) : std::span<const glm::mat4>();
+			std::vector<MeshVertex> deformed;
+			std::optional<Aabb> deformedBounds;
+			if (skinned || morphed)
+			{
+				ENGINE_TRY_ASSIGN(deformed, DeformMeshVertices(*mesh, palette, item.MorphWeights));
+				deformedBounds = ComputeDeformedBounds(ComputeMeshDeformBounds(*mesh), palette, item.MorphWeights);
+			}
+			const std::span<const MeshVertex> vertices = deformedBounds.has_value() ? std::span<const MeshVertex>(deformed) : std::span<const MeshVertex>(mesh->Vertices);
 			for (const MeshSubmesh& submesh : mesh->Submeshes)
 			{
 				AssetHandle materialHandle = BuiltinAssetHandles::DefaultMaterial;
@@ -349,7 +372,7 @@ namespace Engine {
 					materialHandle = mesh->Slots[submesh.MaterialSlot].DefaultMaterial;
 				// The solid passes' culling, FarClip included: an edge of a submesh they do not draw would show where Lit shows
 				// nothing and spend the command budget before visible meshes later in canonical order.
-				if (IsOutsideView(submesh.Bounds, item.World, snapshot.Camera))
+				if (IsOutsideView(deformedBounds.value_or(submesh.Bounds), item.World, snapshot.Camera))
 					continue;
 				const auto material = assets.GetOrPlaceholder<MaterialData>(materialHandle);
 				for (uint32_t offset = 0; offset < submesh.IndexCount; offset += 3)
@@ -358,7 +381,7 @@ namespace Engine {
 					for (size_t corner = 0; corner < triangle.size(); ++corner)
 					{
 						const uint32_t index = mesh->Indices[submesh.IndexOffset + offset + corner];
-						triangle[corner] = glm::dvec3(glm::dmat4(item.World) * glm::dvec4(mesh->Vertices[index].Position, 1.0));
+						triangle[corner] = glm::dvec3(glm::dmat4(item.World) * glm::dvec4(vertices[index].Position, 1.0));
 						if (!Utils::OverlayFinite(triangle[corner]))
 							return MakeError(ErrorCode::InvalidArgument, "Wireframe vertices overflow world coordinates");
 					}

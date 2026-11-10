@@ -1058,6 +1058,14 @@ Read the last completed render extraction.
 
 All modes; Test; pure/read.
 
+### Test.GetPoseDigest
+
+`(entity: Entity) -> string?`
+
+Returns the digest of an Animator entity's pose sampled in the last fixed step (the XXH64 of its joint model matrices and morph weights) as 16 hexadecimal digits, or nil without a pose; the same in every configuration, so a suite compares it across runs; test suites only.
+
+All modes; Test; pure/read.
+
 ### Test.GetScriptErrors
 
 `(since: number?) -> {ScriptError}`
@@ -1250,6 +1258,22 @@ All modes; Runtime|Test; mutates.
 
 Poses a skeleton from layers of animation clips, blended by their weights, each fixed step; skinned meshes on the entity and below it follow.
 
+### Animator.GetJointTransform
+
+`(self: Animator, joint: string) -> (vector?, Quat?)`
+
+Read the world position and rotation of the skeleton's joint named joint in the pose of the last fixed step's AnimationSystem phase; nil, nil without a pose or such a joint, and the position with a nil rotation when a scale of 0 on the way (a clip scaling a joint to nothing) leaves the joint no rotation.
+
+All modes; Runtime|Test; pure/read.
+
+### Animator.GetRootMotion
+
+`(self: Animator) -> (vector, Quat)`
+
+Read the last fixed step's blended root motion in the entity's parent space: the translation RootMotion Apply adds to the Transform's Translation and the rotation it multiplies into Rotation; zero and identity without a pose or with RootMotion None.
+
+All modes; Runtime|Test; pure/read.
+
 ### Animator.Layers
 
 `{{Clip: AssetRef?, Time: number, Speed: number, Weight: number, Loop: boolean}}`
@@ -1257,6 +1281,14 @@ Poses a skeleton from layers of animation clips, blended by their weights, each 
 The layers, at most eight, blended in order over the skeleton's rest pose.
 
 All modes; Runtime|Test; pure/read; setter mutates.
+
+### Animator.Play
+
+`(self: Animator, layer: number, clip: AssetRef?, time: number?) -> ()`
+
+Set the 1-based layer to play the clip from time seconds (0 when absent), keeping its Speed, Weight and Loop; the next index appends a layer with Speed 1, Weight 1 and Loop. A layer beyond the next one or beyond 8, or a time below 0, raises an error.
+
+All modes; Runtime|Test; mutates.
 
 ### Animator.Playing
 
@@ -1273,6 +1305,14 @@ All modes; Runtime|Test; pure/read; setter mutates.
 What happens to the skeleton's root motion: kept in the pose, applied to the entity or only reported.
 
 All modes; Runtime|Test; pure/read; setter mutates.
+
+### Animator.SetWeight
+
+`(self: Animator, layer: number, weight: number) -> ()`
+
+Set the 1-based layer's Weight, from 0 (no effect) to 1 (it overrides the layers before it on the paths its clip keys); a crossfade tweens two layers' weights. A layer the Animator lacks or a weight outside [0, 1] raises an error.
+
+All modes; Runtime|Test; mutates.
 
 ### Animator.Skeleton
 
@@ -1449,6 +1489,14 @@ All modes; Runtime|Test; pure/read; setter mutates.
 ## Behaviour
 
 Optional behaviour lifecycle callbacks in execution order and canonical entity order.
+
+### Behaviour.OnAnimationEvent
+
+`(self: ScriptInstance, event: AnimationEvent) -> ()`
+
+Called in the fixed step for each event an Animator layer's time passes on this entity, after every Animator of the tick was posed, in layer and firing order.
+
+All modes; Runtime|Test; mutates.
 
 ### Behaviour.OnCollisionEnter
 
@@ -3026,6 +3074,14 @@ One weight in [-1, 1] per morph target of the mesh, in order; a missing weight i
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
+### SkinnedMesh.SetMorphWeight
+
+`(self: SkinnedMesh, target: string, weight: number) -> ()`
+
+Set the weight of the mesh's morph target named target, growing MorphWeights with the targets' default weights; an error names the target when the mesh has no such target, and a weight outside [-1, 1] raises one.
+
+All modes; Runtime|Test; mutates.
+
 ## SphereCollider
 
 A sphere-shaped collider in the entity's space.
@@ -4367,6 +4423,12 @@ Which view viewport.screenshot renders.
 - `Scene`: The target scene through the editor's scene-view camera (the editor only).
 
 - `Game`: The target scene through its primary camera: what the game shows.
+
+## AnimationEvent
+
+`{Name: string, Layer: number, Clip: AssetRef, Time: number}`
+
+An animation clip's named event that an Animator layer's time passed: its name, the 1-based layer, the layer's clip and the event's time in it.
 
 ## CollisionContact
 

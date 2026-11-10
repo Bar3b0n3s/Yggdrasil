@@ -140,10 +140,10 @@ namespace Engine {
 		// step and enter/exit pairs stay symmetric (§9.4); destruction or a fault discards held events.
 		void OnPhysicsEvent(const PhysicsEvent& event) override;
 		void OnPhysicsDiagnostic(const PhysicsDiagnostic& diagnostic) override;
-		// M23 (Docs/Decisions/0034-m23-contract.md decision 31; stream B): an AnimationSystem phase's event reaches
+		// M23 (Docs/Decisions/0034-m23-contract.md decision 31): an AnimationSystem phase's event reaches
 		// OnAnimationEvent(self, event) on every slot of the event's entity, in slot order (decision 17), as physics callbacks
-		// do: a started instance at once, an unstarted one holding it until the first fixed-step start flush after its
-		// OnStart; destruction or a fault discards held events. A stub until stream B: nothing is delivered.
+		// do: a started instance at once, an unstarted one holding it (with its held physics callbacks, in arrival order)
+		// until the first fixed-step start flush after its OnStart; destruction or a fault discards held events.
 		void OnAnimationEvent(const AnimationEventRecord& event) override;
 		// Idempotent. OnDestroy for all remaining instances and cancellation while host/scene/services still exist.
 		void Stop();

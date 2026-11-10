@@ -44,6 +44,8 @@ namespace Engine {
 		{
 			static const std::map<std::string, SceneRelation, std::less<>> Relations = {
 				// The open scene's content, history and selection, and the reads and renders of one scene.
+				// M23: poses the target scene's Animator; the play scene is refused.
+				{ "animation.preview", SceneRelation::Target },
 				{ "edit.batch", SceneRelation::Target }, // its ops inherit the batch's target and carry none of their own
 				{ "edit.getSelection", SceneRelation::Target },
 				{ "edit.history", SceneRelation::Target },

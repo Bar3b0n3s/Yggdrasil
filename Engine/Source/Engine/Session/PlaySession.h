@@ -462,9 +462,9 @@ namespace Engine {
 		// engine at the start, a Scene.Load or a Scene.Reload, AnimationSystem::SetEventListener beside
 		// PhysicsSystem::SetEventListener) and cleared wherever that one is cleared (the transition and the destructor, before
 		// the engine is destroyed), so events reach scripts from the session's first tick and after every transition, and
-		// never a destroyed engine; none in Simulate. Null until stream B creates it; then never null, and valid until the
-		// next scene transition replaces it. A scene without an Animator costs it one empty view per tick and changes nothing
-		// (decision 29).
+		// never a destroyed engine; none in Simulate. Never null (a session without an asset manager gets one too, which
+		// poses nothing), and valid until the next scene transition replaces it. A scene without an Animator or a SkinnedMesh
+		// costs it two empty views per tick and changes nothing (decision 29).
 		[[nodiscard]] AnimationSystem* GetAnimation();
 		[[nodiscard]] const AnimationSystem* GetAnimation() const;
 

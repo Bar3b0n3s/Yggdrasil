@@ -5,11 +5,12 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <cmath>
+#include <cstdint>
+#include <limits>
 #include <vector>
 
 // The CPU deformation of skinned and morphed meshes (M23, C23.3, C-SKEL, C-MORPH; Docs/Decisions/0034-m23-contract.md
-// decision 27, stream C): the reference the Skinning pass equals and the bounds deformed draws are culled with. The weight
-// resolution is the contract's (live); the rest is skipped until stream C implements it.
+// decision 27, stream C): the reference the Skinning pass equals and the bounds deformed draws are culled with.
 
 namespace Engine {
 
@@ -62,7 +63,7 @@ namespace Engine {
 		// Morph first, then skin: the top row pushed 0.5 along +Z by the full-weight target, then carried by joint 1, which the
 		// palette translates by (0, 0, 1) and rotates 90 degrees about +X around the origin; the bottom row stays (joint 0 is
 		// the identity); the middle row moves half way.
-		TEST_CASE("MeshDeform: the CPU reference morphs, then skins positions, normals and tangents" * doctest::skip(true))
+		TEST_CASE("MeshDeform: the CPU reference morphs, then skins positions, normals and tangents")
 		{
 			const MeshData strip = MakeBendingStrip();
 			const glm::mat4 bend = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 1.0f))
@@ -104,7 +105,7 @@ namespace Engine {
 
 		// For any finite weights, a clip's sampled weight beyond [-1, 1] (a cubic spline's overshoot) included, with or without
 		// a palette, and for a weight resolved from the target's default.
-		TEST_CASE("MeshDeform: deformed bounds contain every deformed vertex" * doctest::skip(true))
+		TEST_CASE("MeshDeform: deformed bounds contain every deformed vertex")
 		{
 			MeshData strip = MakeBendingStrip();
 			strip.MorphTargets[0].DefaultWeight = 0.5f;
@@ -144,6 +145,63 @@ namespace Engine {
 				const Result<std::vector<MeshVertex>> byDefault = DeformMeshVertices(strip, palette, {});
 				REQUIRE(byDefault.has_value());
 				contains(ComputeDeformedBounds(bounds, palette, {}), *byDefault);
+			}
+		}
+
+		// W23.3's review: the CPU reference never reads past a mesh built in memory against the format's rules, and refuses
+		// what it cannot deform: a skin or a morph target without one entry per vertex, a palette matrix or a morph weight that
+		// is not finite, and a weighted joint beyond the skin's joints. EntityBounds and the wireframe overlay deform through
+		// it.
+		TEST_CASE("MeshDeform: a malformed mesh, a non-finite palette or weight and a joint beyond the skin are refused")
+		{
+			const MeshData strip = MakeBendingStrip();
+			const std::vector<glm::mat4> palette = { glm::mat4(1.0f), glm::mat4(1.0f) };
+			const std::vector<float> weights = { 1.0f };
+			REQUIRE(DeformMeshVertices(strip, palette, weights).has_value());
+			const auto refused = [](const Result<std::vector<MeshVertex>>& deformed)
+			{
+				REQUIRE_FALSE(deformed.has_value());
+				CHECK(deformed.error().GetCode() == ErrorCode::InvalidArgument);
+			};
+
+			SUBCASE("a skin one entry short")
+			{
+				MeshData shortSkin = strip;
+				shortSkin.Skin.pop_back();
+				refused(DeformMeshVertices(shortSkin, palette, weights));
+				refused(DeformMeshVertices(shortSkin, {}, weights));
+			}
+			SUBCASE("a morph target one delta short")
+			{
+				MeshData shortTarget = strip;
+				shortTarget.MorphTargets[0].Deltas.pop_back();
+				refused(DeformMeshVertices(shortTarget, palette, weights));
+				refused(DeformMeshVertices(shortTarget, palette, {}));
+			}
+			SUBCASE("a palette matrix that is not finite")
+			{
+				std::vector<glm::mat4> broken = palette;
+				broken[1][3][1] = std::numeric_limits<float>::quiet_NaN();
+				refused(DeformMeshVertices(strip, broken, weights));
+				broken[1][3][1] = std::numeric_limits<float>::infinity();
+				refused(DeformMeshVertices(strip, broken, weights));
+			}
+			SUBCASE("a morph weight that is not finite")
+			{
+				const std::vector<float> infinite = { std::numeric_limits<float>::infinity() };
+				refused(DeformMeshVertices(strip, palette, infinite));
+				const std::vector<float> undefined = { std::numeric_limits<float>::quiet_NaN() };
+				refused(DeformMeshVertices(strip, {}, undefined));
+			}
+			SUBCASE("a weighted joint beyond the skin's joints")
+			{
+				MeshData beyond = strip;
+				beyond.Skin[5].Joints[1] = static_cast<uint16_t>(beyond.SkinJointCount);
+				refused(DeformMeshVertices(beyond, palette, weights));
+				// An influence of weight 0 is never read, whatever its joint.
+				MeshData unweighted = strip;
+				unweighted.Skin[0].Joints[3] = 200;
+				CHECK(DeformMeshVertices(unweighted, palette, weights).has_value());
 			}
 		}
 	}

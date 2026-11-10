@@ -4,6 +4,53 @@
 	"ProtocolVersion": "1.0",
 	"Tools": [
 		{
+			"name": "animation_preview",
+			"method": "animation.preview",
+			"description": "Shows an edit scene's Animator posed at a time without playing or changing the scene (no undo step, nothing saved), or ends the preview with stop; scene views, thumbnails and viewport.screenshot show the pose. Edit scenes otherwise draw skinned meshes in their bind pose.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "AnimationPreviewParams",
+				"description": "The params of animation.preview.",
+				"type": "object",
+				"properties": {
+					"entity": {
+						"description": "The entity whose Animator to preview: its id, a unique id prefix or its path.",
+						"type": "string"
+					},
+					"time": {
+						"description": "Seconds added to every layer's time, times the layer's speed, at most a layer time's own bound; absent keeps the running preview's (0 for a new one).",
+						"type": "number",
+						"minimum": 0,
+						"maximum": 1000000
+					},
+					"playing": {
+						"description": "Whether the editor's frames advance the preview's time; absent keeps the running preview's (false for a new one).",
+						"type": "boolean"
+					},
+					"stop": {
+						"description": "End the preview, so the entity draws its bind pose again; time and playing are then refused.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
+					}
+				},
+				"additionalProperties": false,
+				"required": ["entity"]
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
 			"name": "asset_create",
 			"method": "asset.create",
 			"description": "Creates a material, a sound effect or a sprite sheet (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",

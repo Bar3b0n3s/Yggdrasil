@@ -24,6 +24,7 @@
 #include "Engine/Renderer/PointShadowMaps.h"
 #include "Engine/Renderer/RenderPrepare.h"
 #include "Engine/Renderer/SpotShadowAtlas.h"
+#include "Engine/Scene/AnimationValidation.h"
 #include "Engine/Scene/AudioSystem.h"
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/ComponentRegistration.h"
@@ -1301,8 +1302,8 @@ end
 			const std::span<const std::string_view> codes = ProjectValidator::GetCodes();
 			// M4's 14 codes, M6's 11 (the asset codes but the runtime-only ASSET_UPLOAD_FAILED, and PREFAB_MISSING_ASSET), M8's
 			// RENDER_LIGHT_LIMIT_EXCEEDED, M9's two render warnings, M11's 10 physics codes, M12's 2 audio codes, M13's 7 and
-			// M19's SCRIPT_COMPUTED_ASSET_LOAD, M20's PREFAB_CYCLE and M23's RENDER_POINT_SHADOW_BUDGET.
-			CHECK(codes.size() == 40 + PhysicsDiagnosticCodes.size());
+			// M19's SCRIPT_COMPUTED_ASSET_LOAD, M20's PREFAB_CYCLE and M23's RENDER_POINT_SHADOW_BUDGET and two animation codes.
+			CHECK(codes.size() == 42 + PhysicsDiagnosticCodes.size());
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -1322,7 +1323,9 @@ end
 			CHECK(position("TEST_SUITE_INVALID") + 1 == position(ScriptComputedAssetLoadCode));
 			CHECK(position(ScriptComputedAssetLoadCode) + 1 == position(PrefabCycleCode));
 			CHECK(position(PrefabCycleCode) + 1 == position(RenderPointShadowBudgetCode));
-			CHECK(codes.back() == RenderPointShadowBudgetCode);
+			CHECK(position(RenderPointShadowBudgetCode) + 1 == position(AnimationNoAnimatorCode));
+			CHECK(position(AnimationNoAnimatorCode) + 1 == position(AnimationSkeletonMismatchCode));
+			CHECK(codes.back() == AnimationSkeletonMismatchCode);
 			CHECK(position(AudioNoListenerCode) + 1 == position(AudioMultiplePrimaryListenersCode));
 			CHECK(position(AudioMultiplePrimaryListenersCode) < position(RenderLightLimitExceededCode));
 			CHECK(position(RenderLightLimitExceededCode) < position(BuildStartSceneMissingCode));

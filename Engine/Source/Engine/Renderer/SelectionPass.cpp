@@ -210,16 +210,20 @@ namespace Engine {
 	}
 
 	SelectionDrawSet SelectionPass::PrepareDraws(GpuResourceCache& cache, const RenderSnapshot& snapshot, bool instancing,
-		std::vector<InstanceRecord>& instances)
+		std::vector<InstanceRecord>& instances, std::span<const DeformedVertexSource> sources)
 	{
+		ENGINE_CORE_ASSERT(sources.empty() || sources.size() == snapshot.Meshes.size(), "the items' vertex sources are none or one per item");
 		SelectionDrawSet set;
 		if (!snapshot.HasCamera || snapshot.SelectedEntities.empty())
 			return set;
 		std::vector<MeshInstanceKey> keys;
-		for (const MeshDrawItem& item : snapshot.Meshes)
+		for (size_t itemIndex = 0; itemIndex < snapshot.Meshes.size(); ++itemIndex)
 		{
+			const MeshDrawItem& item = snapshot.Meshes[itemIndex];
+			// M23 (C23.3): a deformed item's vertices (SkinningPass.h).
+			const DeformedVertexSource source = itemIndex < sources.size() ? sources[itemIndex] : DeformedVertexSource{};
 			if (!item.Mesh.IsValid() || !item.Entity.IsValid() || std::ranges::find(snapshot.SelectedEntities, item.Entity) == snapshot.SelectedEntities.end()
-				|| !Utils::SelectionFiniteMatrix(item.World))
+				|| !Utils::SelectionFiniteMatrix(item.World) || source.Skipped)
 				continue;
 			// Cache uploads invalidate borrowed references; own this mesh's handles and value arrays before resolving materials.
 			const GpuMesh mesh = cache.GetMesh(item.Mesh);
@@ -241,7 +245,7 @@ namespace Engine {
 				if (masked && (!material.Constants || !material.BaseColorMap))
 					continue;
 				const uint32_t variant = (masked ? 3U : 0U) + (material.DoubleSided ? 2U : (mirrored ? 1U : 0U));
-				set.Draws.push_back({ .Vertices = mesh.VertexBuffer,
+				set.Draws.push_back({ .Vertices = source.Vertices != nullptr ? nvrhi::BufferHandle(source.Vertices) : mesh.VertexBuffer,
 					.Attributes = mesh.AttributeBuffer,
 					.Indices = mesh.IndexBuffer,
 					.IndexOffset = submesh.IndexOffset,
@@ -255,7 +259,11 @@ namespace Engine {
 					.EntityId = item.PickId,
 					.Flags = mirrored ? DrawFlagMirrored : 0U });
 				// Only a Mask draw binds its material: the other draws of one mesh batch whatever their materials.
-				keys.push_back({ .Pipeline = variant, .Material = masked ? materialHandle : AssetHandle(), .Mesh = item.Mesh, .Submesh = submeshIndex });
+				keys.push_back({ .Pipeline = variant,
+					.Material = masked ? materialHandle : AssetHandle(),
+					.Mesh = item.Mesh,
+					.Submesh = submeshIndex,
+					.VertexStream = source.VertexStream });
 			}
 		}
 		if (instancing)

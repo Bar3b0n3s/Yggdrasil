@@ -26,6 +26,9 @@ namespace Engine {
 
 	namespace Test {
 
+		// M23 (Docs/Decisions/0034-m23-contract.md decision 31): OnAnimationEvent in a play session (ScriptAnimationTests.cpp).
+		void RunAnimationCallbackCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
+
 		static int RecordScriptLifecycle(ScriptCall& call)
 		{
 			const std::string message = Lua::Check<std::string>(call, 1);
@@ -408,6 +411,7 @@ return Script.Define("ReloadCoverage", T)
 		{
 			const size_t firstSnapshot = snapshots.size();
 			RunBehaviourSessionCoverage(mode, snapshots);
+			RunAnimationCallbackCoverage(mode, snapshots);
 			if (mode == RunModes::Editor)
 				RunBehaviourReloadCoverage(snapshots);
 			REQUIRE(snapshots.size() > firstSnapshot);

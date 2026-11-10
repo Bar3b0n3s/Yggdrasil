@@ -11,9 +11,8 @@
 #include <limits>
 #include <utility>
 
-// Animation clips (M23, C23.3, C-SKEL, C-MORPH, C-ANIM-BLEND; Docs/Decisions/0034-m23-contract.md decision 24, stream A): the
-// cooked format version 1, its validation and its fuzz target. The key layout, the artifact wrappers and the loader's
-// registration are the contract's (live); the rest is skipped until stream A implements it.
+// Animation clips (M23, C23.3, C-SKEL, C-MORPH, C-ANIM-BLEND; Docs/Decisions/0034-m23-contract.md decision 24): the cooked
+// format version 1, its validation and its fuzz target.
 
 namespace Engine {
 
@@ -61,7 +60,7 @@ namespace Engine {
 			CHECK(newer.error().GetCode() == ErrorCode::UnsupportedVersion);
 		}
 
-		TEST_CASE("AnimationClipData: a payload round-trips its channels and events" * doctest::skip(true))
+		TEST_CASE("AnimationClipData: a payload round-trips its channels and events")
 		{
 			const AnimationClipData wave = MakeWave();
 			REQUIRE(ValidateAnimationClipData(wave).has_value());
@@ -78,7 +77,7 @@ namespace Engine {
 			CHECK((*loaded)->Channels == wave.Channels);
 		}
 
-		TEST_CASE("AnimationClipData: channels and events that break the format's rules are refused" * doctest::skip(true))
+		TEST_CASE("AnimationClipData: channels and events that break the format's rules are refused")
 		{
 			const auto refused = [](const AnimationClipData& clip)
 			{
@@ -142,7 +141,7 @@ namespace Engine {
 			CHECK(read.error().GetCode() == ErrorCode::Parse);
 		}
 
-		TEST_CASE("AnimationClipData: 10,000 seeded mutations of a payload never crash" * doctest::test_suite(Test::FuzzSuite) * doctest::skip(true))
+		TEST_CASE("AnimationClipData: 10,000 seeded mutations of a payload never crash" * doctest::test_suite(Test::FuzzSuite))
 		{
 			const Buffer payload = SerializeAnimationClipPayload(MakeWave());
 			REQUIRE(DeserializeAnimationClipPayload(payload).has_value());

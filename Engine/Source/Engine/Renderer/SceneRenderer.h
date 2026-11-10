@@ -157,10 +157,11 @@ namespace Engine {
 		// their dedicated passes (ADR0017).
 		// Data-view pipelines are included in StartupPipelineCount.
 		static constexpr uint32_t DebugViewPipelineCount = 9;
-		// Every pipeline Create makes: the mesh pipelines plus SkyboxPass (1), BloomPass (3), TonemapPass (1), FxaaPass (1),
-		// DebugRenderer (2), TextRenderer (2), BrdfLut (1), ShadowPass (6), DepthPyramid (2), GTAO (2), LightClusterPass (1, M23),
-		// Selection (8), the data-view composite (1), QuadBatcher (2) and UpscalePass (2): 59, the declarations' sum
-		// (GetDeclaredPipelineCount, RenderPassDeclaration.h), which SceneRenderer.cpp checks against each pass's PipelineCount.
+		// Every pipeline Create makes: the mesh pipelines plus SkinningPass (1, M23), SkyboxPass (1), BloomPass (3), TonemapPass
+		// (1), FxaaPass (1), DebugRenderer (2), TextRenderer (2), BrdfLut (1), ShadowPass (6), DepthPyramid (2), GTAO (2),
+		// LightClusterPass (1, M23), Selection (8), the data-view composite (1), QuadBatcher (2) and UpscalePass (2): 60, the
+		// declarations' sum (GetDeclaredPipelineCount, RenderPassDeclaration.h), which SceneRenderer.cpp checks against each
+		// pass's PipelineCount.
 		static constexpr uint32_t StartupPipelineCount = GetDeclaredPipelineCount();
 
 		// Restricts construction to Create; CreateScope still reaches the constructor.

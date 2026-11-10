@@ -47,9 +47,14 @@ namespace Engine {
 	// stays so it is never reused (ProjectValidator::GetRetiredCodes). Version 1 warned that a glTF primitive's COLOR_0 was
 	// ignored.
 	inline constexpr std::string_view AssetVertexColorsIgnoredCode = "ASSET_VERTEX_COLORS_IGNORED";
-	// Warning: glTF content the engine does not import was skipped (§1.2, §7.4): a points or lines primitive, a skin, an
-	// animation, a camera or a light. Subject names the item ("meshes[2].primitives[0]", "animations[0]"). Recorded in
-	// ImportResult::Diagnostics, so it persists in the cache manifest and reappears on cache hits.
+	// Warning: glTF content the importer skips was skipped (§7.4; GltfImporter.h's version 3 paragraph): a camera, a light, a
+	// points or lines primitive (or one without positions), GPU instancing, a texture rotation or an image that is not PNG
+	// or JPEG; of skins and animations, JOINTS_1 (more than four influences), more than 32 morph targets, a skin whose joints
+	// leave the default scene, a mesh on a joint, a skinned node whose mesh it cannot skin, an animation channel of a node
+	// that is not a joint, of weights no Animator plays or repeating a target, an animation left without channels or
+	// shorter than MinAnimationClipDuration, and skins, animations and morph targets under MergeMeshes. Subject names the
+	// item ("meshes[2].primitives[0]", "animations[0].channels[2]"). Recorded in ImportResult::Diagnostics, so it persists
+	// in the cache manifest and reappears on cache hits.
 	inline constexpr std::string_view AssetContentSkippedCode = "ASSET_CONTENT_SKIPPED";
 	// Error, auto-fixable (a case-only rename of the .meta to its source's spelling): a .meta whose name matches a source
 	// file only when letter case is ignored (§4.10 case policy, §7.3 "case mismatch"). A reference whose path matches an

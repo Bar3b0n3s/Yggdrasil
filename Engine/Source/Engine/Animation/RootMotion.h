@@ -52,7 +52,10 @@ namespace Engine {
 	// model translation's X and Z become those `clip` samples at time 0, and its model rotation r becomes Q(0) *
 	// inverse(twist(r)) * r (the twist replaced by the one at time 0), both written back into the joint's local transform
 	// through its parent's model transform at the pose (for a root, directly), so the mesh stays where the clip starts while
-	// the entity carries the motion. Nothing changes when the clip keys neither path of the joint. Pure apart from `layerPose`.
+	// the entity carries the motion. Nothing changes when the clip keys neither path of the joint. A parent model transform
+	// that cannot be inverted (a clip scales a joint of the chain to 0: the determinant of its upper 3 x 3 is 0 or not
+	// finite) holds nothing of the translation, which keeps its sampled value, so the pose stays finite. Pure apart from
+	// `layerPose`.
 	void HoldRootMotion(const AnimationClipData& clip, const SkeletonData& skeleton, AnimationPose& layerPose);
 
 	// Blends a layer's delta over `result` by `weight` (clamped to [0, 1]), as BlendAnimationPose blends a joint, only on the

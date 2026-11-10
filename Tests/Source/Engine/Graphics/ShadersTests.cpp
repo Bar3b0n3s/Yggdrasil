@@ -28,6 +28,7 @@
 #include "Shared/LightClusterConstants.h"
 #include "Shared/ShadowCasterConstants.h"
 #include "Shared/ShadowProbeConstants.h"
+#include "Shared/SkinningConstants.h"
 #include "Shared/Private/SceneDataViewConstants.h"
 #include "Shared/Private/SelectionPassConstants.h"
 #include "Shared/Private/UpscaleConstants.h"
@@ -186,6 +187,12 @@ namespace Engine {
 																						  ENGINE_TEST_SHARED_FIELD(LightClusterConstants, Mode),
 																					  },
 				.Program = "LightClusters",
+				.Entry = "CSMain" },
+			// M23 (C23.3, stream C): one Skinning dispatch's push constants.
+			{ .Name = "SkinningConstants", .Size = sizeof(SkinningConstants), .Fields = {
+																				  ENGINE_TEST_SHARED_FIELD(SkinningConstants, Counts),
+																			  },
+				.Program = "Skinning",
 				.Entry = "CSMain" },
 			{ .Name = "ShadowCasterConstants", .Size = sizeof(ShadowCasterConstants), .Fields = {
 																						  ENGINE_TEST_SHARED_FIELD(ShadowCasterConstants, ViewProjection),

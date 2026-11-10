@@ -1320,6 +1320,9 @@ namespace Engine {
 			// The play session's frame phase (§4.2 step 6, §5.7), then the editor's own frame work.
 			play.OnUpdate(frame);
 			state.Editor->Update(state.ElapsedSeconds);
+			// M23 (Docs/Decisions/0034-m23-contract.md decision 32): the animation preview follows the active tab and, while
+			// playing, the frame's unscaled time (presentation only).
+			state.Editor->GetAnimationPreview().Update(*state.Editor, state.Editor->GetAssets(), frame.UnscaledDeltaTime);
 		}
 
 		if (m_Rendering)
