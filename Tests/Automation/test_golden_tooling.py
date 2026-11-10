@@ -294,18 +294,18 @@ class GoldenDeviceClassReportTests(unittest.TestCase):
 
     def test_a_changed_device_class_is_reported_apart_from_the_smoke_mode(self) -> None:
         lines = [
-            "[warn] Golden image 'Bloom' on device class 'nvidia-62x': device class changed: no "
-            "'Tests/Golden/nvidia-62x/Bloom.png', but the same vendor's device class 'nvidia-61x' has this golden",
-            "[info] Golden image 'Text' on device class 'nvidia-62x': matched 'Tests/Golden/nvidia-62x/Text.png'",
-            "[warn] Golden image 'Other' on device class 'nvidia-62x': goldens missing (no "
-            "'Tests/Golden/nvidia-62x/Other.png'), smoke checks passed",
+            "[warn] Golden image 'Bloom' on device class 'nvidia-63x': device class changed: no "
+            "'Tests/Golden/nvidia-63x/Bloom.png', but the same vendor's device class 'nvidia-62x' has this golden",
+            "[info] Golden image 'Text' on device class 'nvidia-63x': matched 'Tests/Golden/nvidia-63x/Text.png'",
+            "[warn] Golden image 'Other' on device class 'nvidia-63x': goldens missing (no "
+            "'Tests/Golden/nvidia-63x/Other.png'), smoke checks passed",
         ]
         report = test_script.DeviceReport.parse(lines)
         self.assertEqual(report.class_changed, {"Bloom"})
         self.assertEqual(report.goldens_missing, {"Other"})
         self.assertEqual(report.matched, {"Text"})
         self.assertEqual(report.candidates_written, set())
-        self.assertEqual(report.device_classes, {"nvidia-62x"})
+        self.assertEqual(report.device_classes, {"nvidia-63x"})
         self.assertEqual(report.to_json()["deviceClassChanged"], ["Bloom"])
 
 

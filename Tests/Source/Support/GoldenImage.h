@@ -71,7 +71,7 @@ namespace Engine {
 		//     an earlier failure (Matched); on a mismatch writes <name>-actual.png, <name>-expected.png and, unless the sizes
 		//     differ, <name>-diff.png into GetGoldenOutputDirectory() (Mismatched); a golden that cannot be read is an Error;
 		//   - otherwise, when another device class of the same vendor (the class's text before its last '-', "nvidia" of
-		//     "nvidia-61x") has <name>.png: DeviceClassChanged, naming those classes, a failure;
+		//     "nvidia-62x") has <name>.png: DeviceClassChanged, naming those classes, a failure;
 		//   - otherwise the smoke mode: the image is valid and non-empty, has at least 2 distinct colours and a mean
 		//     luminance in [0.01, 0.99] (SmokePassed or SmokeFailed), never a pass of the comparison.
 		// Every message but the invalid-name Error starts with "Golden image '<name>' on device class '<class>'", which
