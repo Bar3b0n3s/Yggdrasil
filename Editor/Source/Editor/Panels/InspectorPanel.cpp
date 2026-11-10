@@ -12,10 +12,12 @@
 #include "EditorCore/Thumbnails/ThumbnailCache.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/SpriteSheetData.h"
+#include "Engine/Asset/TilemapData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/AssetPipeline/Importers/SoundEffectImporter.h"
 #include "Engine/AssetPipeline/Importers/SpriteSheetImporter.h"
+#include "Engine/AssetPipeline/Importers/TilemapImporter.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Log.h"
@@ -395,7 +397,7 @@ namespace Engine {
 	{
 		EndActiveEdit(context);
 		m_Pending.reset();
-		m_SheetEdit.reset();
+		m_AssetFieldEdit.reset();
 	}
 
 	void InspectorPanel::BeginPendingEdit(EditorPanelContext& context, PendingEdit pending)
@@ -450,7 +452,8 @@ namespace Engine {
 				properties.Settings = types.FindStruct(importer->GetSettingsTypeName());
 			const bool material = record->Metadata.Type == AssetType::Material;
 			const bool sheet = record->Metadata.Importer == SpriteSheetImporter::Id;
-			if (material || sheet || record->Metadata.Importer == SoundEffectImporter::Id)
+			const bool tilemap = record->Metadata.Importer == TilemapImporter::Id;
+			if (material || sheet || tilemap || record->Metadata.Importer == SoundEffectImporter::Id)
 			{
 				const Status read = [&]() -> Status
 				{
@@ -469,6 +472,25 @@ namespace Engine {
 						ENGINE_TRY_ASSIGN(const SpriteSheetData data, SpriteSheetFromText(text, types, report));
 						properties.Type = types.FindStruct<SpriteSheetData>();
 						ENGINE_TRY_ASSIGN(properties.Values, properties.Type->ToJson(&data));
+					}
+					else if (tilemap)
+					{
+						// M21: the tilemap's palette, cell size and chunk size (decision 26). Its cells are painted (the scene
+						// view's tile brush, tilemap.paint), never edited here, so its chunks are counted and left out.
+						TilemapLoadReport report;
+						ENGINE_TRY_ASSIGN(const TilemapData data, TilemapFromText(text, types, report));
+						properties.Type = types.FindStruct<TilemapData>();
+						ENGINE_TRY_ASSIGN(properties.Values, properties.Type->ToJson(&data));
+						properties.Values.erase("Chunks");
+						size_t painted = 0;
+						for (const TilemapChunk& chunk : data.Chunks)
+						{
+							painted += static_cast<size_t>(std::ranges::count_if(chunk.Tiles, [](uint32_t value)
+							{
+								return value != 0;
+							}));
+						}
+						properties.Summary = std::format("Palette entries: {}   Chunks: {}   Painted cells: {}", data.Palette.size(), data.Chunks.size(), painted);
 					}
 					else
 					{
@@ -493,30 +515,11 @@ namespace Engine {
 		return *m_AssetProperties;
 	}
 
-	void InspectorPanel::DrawSpriteSheet(EditorPanelContext& context, AssetHandle asset, const AssetProperties& properties, bool escape)
+	void InspectorPanel::DrawAssetFields(EditorPanelContext& context, AssetHandle asset, const AssetProperties& properties, bool escape,
+		std::string_view idPrefix, std::string_view typeName)
 	{
 		EditorContext& editor = context.Editor;
-		if (m_SheetEdit && (m_SheetEdit->Asset != asset || escape || editor.IsReadOnly()))
-			m_SheetEdit.reset();
-		Utils::EditorSectionHeading("Sprite sheet");
-		if (!properties.Error.empty())
-		{
-			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.48f, 0.48f, 1.0f));
-			ImGui::TextWrapped("This sprite sheet cannot be read: %s", properties.Error.c_str());
-			ImGui::PopStyleColor();
-			ImGui::TextDisabled("Fix the file, or reimport it from Assets.");
-			return;
-		}
-		if (properties.Type == nullptr)
-			return;
 		const JsonReader values(properties.Values);
-		const auto count = [&properties](const char* member)
-		{
-			const auto found = properties.Values.find(member);
-			return found != properties.Values.end() && found->is_array() ? found->size() : size_t{ 0 };
-		};
-		ImGui::TextDisabled("Frames: %zu   Clips: %zu", count("Frames"), count("Clips"));
-		ImGui::TextWrapped("Frames are texel rectangles of the texture, with a pivot and 9-slice borders; each named clip plays frames by index, each for whole ticks.");
 		const TypeRegistry& types = editor.GetTypeRegistry();
 		for (const auto& field : properties.Type->GetFields())
 		{
@@ -528,15 +531,15 @@ namespace Engine {
 			Result<Value> read = ValueFromJson(JsonReader(*found), field->GetType());
 			if (!read)
 				continue;
-			const bool editing = m_SheetEdit && m_SheetEdit->Field == field->GetName();
-			Value value = editing ? m_SheetEdit->Candidate : std::move(*read);
-			std::string path = "Sheet:" + asset.ToString() + ":" + field->GetName() + ":" + m_OwnerIdentity;
+			const bool editing = m_AssetFieldEdit && m_AssetFieldEdit->Field == field->GetName();
+			Value value = editing ? m_AssetFieldEdit->Candidate : std::move(*read);
+			std::string path = std::string(idPrefix) + ":" + asset.ToString() + ":" + field->GetName() + ":" + m_OwnerIdentity;
 			auto result = DrawReflectedValue(*field, value, { .Types = types, .Resolve = { .Registry = &types, .OwnerType = properties.Type, .OwnerJson = &values, .Key = {} }, .Path = std::move(path), .ReadOnly = editor.IsReadOnly(), .Mixed = false, .MixedComponents = 0u, .FindReferences = [&editor](const FieldInfo& referenceField, std::string_view query)
 			{
 				return Utils::FindInspectorReferenceCandidates(editor, SceneTarget::Edit, referenceField, query);
 			},
 																.ScriptSchema = nullptr,
-																.DisplayLabel = Utils::InspectorFieldLabel("SpriteSheet", field->GetName()),
+																.DisplayLabel = Utils::InspectorFieldLabel(typeName, field->GetName()),
 																.DescribeReference = [&editor](const FieldInfo& referenceField, UUID id)
 			{
 				return Utils::DescribeInspectorReference(editor, SceneTarget::Edit, referenceField, id);
@@ -545,22 +548,22 @@ namespace Engine {
 			{
 				ReportFailure(result.error());
 				if (editing)
-					m_SheetEdit.reset();
+					m_AssetFieldEdit.reset();
 				continue;
 			}
 			if (escape || result->Cancelled)
 			{
-				m_SheetEdit.reset();
+				m_AssetFieldEdit.reset();
 				continue;
 			}
 			if (result->Changed)
-				m_SheetEdit = SheetEdit{ .Asset = asset, .Field = field->GetName(), .Candidate = value };
+				m_AssetFieldEdit = AssetFieldEdit{ .Asset = asset, .Field = field->GetName(), .Candidate = value };
 			const bool released = result->Committed || (result->Changed && !result->Active);
-			if (released && m_SheetEdit && m_SheetEdit->Field == field->GetName())
+			if (released && m_AssetFieldEdit && m_AssetFieldEdit->Field == field->GetName())
 			{
-				// The method's own action: its texture check, its undo step and its error, shown like any failed action.
-				Result<Json> json = ValueToJson(m_SheetEdit->Candidate, field->GetType());
-				m_SheetEdit.reset();
+				// The method's own action: its checks, its undo step and its error, shown like any failed action.
+				Result<Json> json = ValueToJson(m_AssetFieldEdit->Candidate, field->GetType());
+				m_AssetFieldEdit.reset();
 				if (!json)
 				{
 					ReportFailure(json.error());
@@ -571,9 +574,55 @@ namespace Engine {
 			else if (editing && !result->Active && !result->Activated && !result->Changed)
 			{
 				// The gesture ended without a change to submit.
-				m_SheetEdit.reset();
+				m_AssetFieldEdit.reset();
 			}
 		}
+	}
+
+	void InspectorPanel::DrawSpriteSheet(EditorPanelContext& context, AssetHandle asset, const AssetProperties& properties, bool escape)
+	{
+		if (m_AssetFieldEdit && (m_AssetFieldEdit->Asset != asset || escape || context.Editor.IsReadOnly()))
+			m_AssetFieldEdit.reset();
+		Utils::EditorSectionHeading("Sprite sheet");
+		if (!properties.Error.empty())
+		{
+			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.48f, 0.48f, 1.0f));
+			ImGui::TextWrapped("This sprite sheet cannot be read: %s", properties.Error.c_str());
+			ImGui::PopStyleColor();
+			ImGui::TextDisabled("Fix the file, or reimport it from Assets.");
+			return;
+		}
+		if (properties.Type == nullptr)
+			return;
+		const auto count = [&properties](const char* member)
+		{
+			const auto found = properties.Values.find(member);
+			return found != properties.Values.end() && found->is_array() ? found->size() : size_t{ 0 };
+		};
+		ImGui::TextDisabled("Frames: %zu   Clips: %zu", count("Frames"), count("Clips"));
+		ImGui::TextWrapped("Frames are texel rectangles of the texture, with a pivot and 9-slice borders; each named clip plays frames by index, each for whole ticks.");
+		DrawAssetFields(context, asset, properties, escape, "Sheet", "SpriteSheet");
+	}
+
+	void InspectorPanel::DrawTilemap(EditorPanelContext& context, AssetHandle asset, const AssetProperties& properties, bool escape)
+	{
+		if (m_AssetFieldEdit && (m_AssetFieldEdit->Asset != asset || escape || context.Editor.IsReadOnly()))
+			m_AssetFieldEdit.reset();
+		Utils::EditorSectionHeading("Tilemap");
+		if (!properties.Error.empty())
+		{
+			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.48f, 0.48f, 1.0f));
+			ImGui::TextWrapped("This tilemap cannot be read: %s", properties.Error.c_str());
+			ImGui::PopStyleColor();
+			ImGui::TextDisabled("Fix the file, or reimport it from Assets.");
+			return;
+		}
+		if (properties.Type == nullptr)
+			return;
+		ImGui::TextDisabled("%s", properties.Summary.c_str());
+		ImGui::TextWrapped("A cell holds 0 (empty) or k, the palette's entry k - 1: a sprite sheet frame, and whether the TilemapCollider collides "
+						   "with it. Paint cells with the scene view's tile brush (select an entity whose TilemapRenderer draws this tilemap) or tilemap.paint.");
+		DrawAssetFields(context, asset, properties, escape, "Tilemap", "Tilemap");
 	}
 
 	Status InspectorPanel::Draw(EditorPanelContext& context)
@@ -790,6 +839,10 @@ namespace Engine {
 			if (record->Metadata.Importer == SpriteSheetImporter::Id)
 			{
 				DrawSpriteSheet(context, asset, properties, escape);
+			}
+			else if (record->Metadata.Importer == TilemapImporter::Id)
+			{
+				DrawTilemap(context, asset, properties, escape);
 			}
 			else if (record->Metadata.Type == AssetType::Material || record->Metadata.Importer == SoundEffectImporter::Id)
 			{

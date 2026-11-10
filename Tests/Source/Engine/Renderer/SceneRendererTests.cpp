@@ -460,9 +460,10 @@ namespace Engine {
 		{
 			// §8.5: "The total pipeline count is logged and asserted by a test." Mesh 24 + Skybox 1 + Bloom 3 + Tonemap 1 +
 			// FXAA 1 + debug lines 2 + text 2 + DFG LUT 1 + shadows 6 + depth pyramid 2 + GTAO 2 + selection 8 + data views 1 +
-			// quads 2 + upscale 2 (M18: the QuadBatcher and the output stage's UpscalePass, ADR 0029 decision 2).
+			// quads 2 + upscale 2 (M18: the QuadBatcher and the output stage's UpscalePass, ADR 0029 decision 2) + the
+			// QuadBatcher's lit 2 and Lights2D 1 (M21: the 2D lights, ADR 0032 decision 22).
 			// Each material debug view adds its 9 forward variants the first time it renders, 45 for the five.
-			static_assert(SceneRendererPipelines::StartupPipelineCount == 58);
+			static_assert(SceneRendererPipelines::StartupPipelineCount == 61);
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			Test::AssetTestFixture assets;
@@ -470,8 +471,8 @@ namespace Engine {
 				GpuResourceCache cache(gpu.GetDevice(), assets.GetManager());
 				Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());
 				REQUIRE_MESSAGE(pipelines.has_value(), pipelines.error().ToString());
-				CHECK((*pipelines)->GetPipelineCount() == 58);
-				CHECK(SceneRendererPipelines::GetLayoutDescriptions().size() == 58);
+				CHECK((*pipelines)->GetPipelineCount() == 61);
+				CHECK(SceneRendererPipelines::GetLayoutDescriptions().size() == 61);
 				Result<Scope<SceneRenderer>> renderer = SceneRenderer::Create(gpu.GetDevice(), **pipelines, cache, assets.GetManager(),
 					{ .Width = 16, .Height = 16 });
 				REQUIRE_MESSAGE(renderer.has_value(), renderer.error().ToString());
@@ -482,13 +483,13 @@ namespace Engine {
 					snapshot.DebugView = view;
 					static_cast<void>(RenderToImage(gpu.GetDevice(), **renderer, snapshot));
 				}
-				CHECK((*pipelines)->GetPipelineCount() == 58 + 5 * SceneRendererPipelines::DebugViewPipelineCount);
+				CHECK((*pipelines)->GetPipelineCount() == 61 + 5 * SceneRendererPipelines::DebugViewPipelineCount);
 				// EnsureDebugView, which Render called, has no effect for Lit or for a view that exists.
 				const Status lit = (*pipelines)->EnsureDebugView(RenderDebugView::Lit);
 				const Status existing = (*pipelines)->EnsureDebugView(RenderDebugView::Albedo);
 				CHECK(lit.has_value());
 				CHECK(existing.has_value());
-				CHECK((*pipelines)->GetPipelineCount() == 58 + 5 * SceneRendererPipelines::DebugViewPipelineCount);
+				CHECK((*pipelines)->GetPipelineCount() == 61 + 5 * SceneRendererPipelines::DebugViewPipelineCount);
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}

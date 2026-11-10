@@ -223,7 +223,8 @@ namespace Engine {
 				if (assets == nullptr)
 					return MakeError(ErrorCode::Unsupported, "viewport annotations need the host's asset manager");
 				ENGINE_TRY_ASSIGN(const PhysicsLayerTable layers, PhysicsLayerTable::Create(settings->Physics.Layers, settings->Physics.Collisions));
-				ENGINE_TRY(AppendRenderAnnotations(*scene, *assets, layers, isPlayScene ? &session->GetPhysics() : nullptr, snapshot));
+				ENGINE_TRY(AppendRenderAnnotations(*scene, *assets, layers, isPlayScene ? &session->GetPhysics() : nullptr, snapshot,
+					isPlayScene ? session->GetPhysics2D() : nullptr));
 			}
 
 			const ViewportScreenshotRequest capture{ .Width = params.Width, .Height = params.Height, .MaxDimension = 0 };

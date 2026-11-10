@@ -1081,6 +1081,61 @@ namespace Engine {
 			CHECK(context.Editor.GetHistory().GetUndoCount() == before);
 		}
 
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 26): the tilemap's inspector section. It needs stream T1's Tilemap
+		// asset (its importer and asset.create, asset.getProperties and asset.setProperties of a tilemap) and tilemap.paint's
+		// registration, so it runs from W21.2's integration (decision 33).
+		TEST_CASE("InspectorPanel: a tilemap shows its counts and edits its palette through asset.setProperties, keeping its cells")
+		{
+			InspectorLayerHarness test;
+			auto& context = test.Fixture.GetContext();
+			auto& automation = test.Fixture.GetAutomation();
+			const Json palette = Json::array({ Json{ { "Sheet", nullptr }, { "Frame", 0 }, { "Solid", true } } });
+			const auto created = automation.Call("asset.create", Json{ { "type", "Tilemap" }, { "path", "Assets/Tilemaps/Inspector.tilemap" }, { "values", Json{ { "ChunkSize", 4 }, { "Palette", palette } } } });
+			REQUIRE_MESSAGE(created.has_value(), (created ? std::string() : created.error().ToString()));
+			const auto id = JsonReader((*created)["asset"]["id"]).ReadUUID();
+			REQUIRE(id);
+			const auto cell = [](int32_t x, int32_t y)
+			{
+				return Json{ { "x", x }, { "y", y }, { "tile", 1 } };
+			};
+			const auto painted = automation.Call("tilemap.paint", Json{ { "tilemap", id->ToString() }, { "cells", Json::array({ cell(0, 0), cell(1, 0), cell(9, 9) }) } });
+			REQUIRE_MESSAGE(painted.has_value(), (painted ? std::string() : painted.error().ToString()));
+			context.Editor.GetUiState().SetSelectedAsset(*id);
+			test.CaptureText = true;
+			REQUIRE(test.Frame());
+			REQUIRE(test.Frame());
+			test.CaptureText = false;
+			CAPTURE(test.Text);
+			CHECK(test.Text.contains("Palette entries: 1"));
+			CHECK(test.Text.contains("Chunks: 2"));
+			CHECK(test.Text.contains("Painted cells: 3"));
+			const auto draw = [&test]()
+			{
+				return test.Draw();
+			};
+			const auto* inspector = ImGui::FindWindowByName(Utils::EditorWindowTitle(EditorPanel::Inspector));
+			REQUIRE(inspector != nullptr);
+			const auto values = [&automation, &id]()
+			{
+				const auto properties = automation.Call("asset.getProperties", Json{ { "asset", id->ToString() } });
+				REQUIRE(properties);
+				return (*properties)["values"];
+			};
+			const std::string path = "Tilemap:" + id->ToString() + ":Palette:" + InspectorLayerOwnerIdentity(context, true);
+			const ImGuiID entries = ImHashStr("##Container", 0, InspectorLayerIntId(inspector->ID, static_cast<int>(FNV1a32(path))));
+
+			// Add element appends a palette entry: one asset.setProperties, one undo step, the painted cells kept.
+			const auto before = context.Editor.GetHistory().GetUndoCount();
+			REQUIRE(test.Ui.Click(draw, InspectorLayerScrolledItem(test, ImHashStr("Add element", 0, entries)).GetCenter()));
+			REQUIRE(test.Layer.OnSafePoint(0.0));
+			const Json added = values();
+			CHECK(added["Palette"].size() == 2);
+			CHECK(added["Chunks"].size() == 2);
+			CHECK(context.Editor.GetHistory().GetUndoCount() == before + 1);
+			REQUIRE(automation.Call("edit.undo", Json::object()));
+			CHECK(values()["Palette"].size() == 1);
+		}
+
 		TEST_CASE("InspectorPanel: primary Euler rotation offers the serialized prefab override revert")
 		{
 			InspectorLayerHarness test;

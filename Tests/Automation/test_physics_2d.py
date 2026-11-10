@@ -1,13 +1,11 @@
-"""2D physics on Jolt through automation (Docs/Decisions/0032-m21-contract.md decisions 8 to 13 and 15; Roadmap M21's 2D
-physics, R-2D-PHYS)."""
+"""2D physics on Jolt through automation (Docs/Decisions/0032-m21-contract.md decisions 8 to 13, 15 and 27; Roadmap
+M21's 2D physics, R-2D-PHYS)."""
 
 from __future__ import annotations
 
 import unittest
 
 from harness import AutomationTestCase
-
-SKIP_BODY_INFO = "contract stub: physics2d.bodyInfo (ADR 0032 decision 27, stream P3)"
 
 RECORDER = """local T = {}
 function T:OnCollisionEnter2D(other, contact) Scene.CreateEntity("Trace:" .. self.Entity.Name .. ":" .. other.Name) end
@@ -64,7 +62,6 @@ class Physics2DTests(AutomationTestCase):
         codes = [diagnostic["code"] for diagnostic in report["diagnostics"]]
         self.assertIn("PHYSICS2D_MIXED_WORLDS", codes)
 
-    @unittest.skip(SKIP_BODY_INFO)
     def test_physics2d_body_info_reports_a_2d_body(self) -> None:
         # C21.2, decision 27: physics.bodyInfo in the plane; a gathered child reports its owner's body, and the resting
         # crate's contact with the floor is listed.

@@ -1,23 +1,29 @@
 #include "TestsPCH.h"
 
+#include "Engine/Asset/TilemapData.h"
 #include "Engine/Scene/Components/BoxCollider2DComponent.h"
 #include "Engine/Scene/Components/CircleCollider2DComponent.h"
 #include "Engine/Scene/Components/RigidBody2DComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
+#include "Engine/Scene/Components/TilemapColliderComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Physics2DSystem.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Session/PlaySession.h"
+#include "Support/InMemoryAssetManager.h"
 #include "Support/PhysicsTestScene.h"
 #include "Support/SceneTestFixture.h"
 #include "Support/TestTimeout.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <utility>
 #include <vector>
 
 // 2D physics determinism through the play session's state hash (ADR 0028 decision 6; Docs/Decisions/0032-m21-contract.md
-// decisions 10 and 11, stream P2).
+// decisions 10 and 11, stream P2; decision 25's tilemap collider, stream T2).
 
 namespace Engine {
 
@@ -152,6 +158,95 @@ namespace Engine {
 			REQUIRE(colliderEvents >= 20);
 			CHECK(one == none);
 			CHECK(eight == none);
+		}
+
+		// Roadmap M21 "Tilemap collision is merged boxes per chunk, built in canonical order" and "The Tilemap replay is
+		// identical in all four runs": the world-level half. A TilemapCollider's terrain of merged boxes over several chunks,
+		// with steps and a gap, and balls and crates thrown across its seams; the state hash and every 2D event the session
+		// dispatches are equal at every thread count.
+		TEST_CASE("Physics2D: a tilemap collider's state hash and events are identical at 0, 1 and 8 Jolt threads")
+		{
+			Test::SetTestCaseTimeLimit(150.0);
+			// Columns -12 to 11 of unit cells in 4-cell chunks, solid up to row 1 + |x| / 3 (into the second chunk row) except
+			// the gap at columns 3 and 4, and a non-solid cell on top of every third column.
+			Ref<TilemapData> tilemap = CreateRef<TilemapData>();
+			tilemap->ChunkSize = 4;
+			tilemap->Palette = { TilemapTile{ .Solid = true }, TilemapTile{ .Solid = false } };
+			for (int32_t chunkY = 0; chunkY < 2; ++chunkY)
+			{
+				for (int32_t chunkX = -3; chunkX < 3; ++chunkX)
+				{
+					TilemapChunk chunk{ .X = chunkX, .Y = chunkY, .Tiles = std::vector<uint32_t>(16, 0) };
+					bool holdsTile = false; // chunks are never empty
+					for (int32_t y = 0; y < 4; ++y)
+					{
+						for (int32_t x = 0; x < 4; ++x)
+						{
+							const int32_t cellX = chunkX * 4 + x;
+							const int32_t cellY = chunkY * 4 + y;
+							const int32_t height = cellX == 3 || cellX == 4 ? 0 : 1 + (cellX < 0 ? -cellX : cellX) / 3;
+							uint32_t tile = cellY < height ? 1u : 0u;
+							if (cellY == height && height > 0 && (cellX + 12) % 3 == 0)
+								tile = 2;
+							chunk.Tiles[static_cast<size_t>(y * 4 + x)] = tile;
+							holdsTile = holdsTile || tile != 0;
+						}
+					}
+					if (holdsTile)
+						tilemap->Chunks.push_back(std::move(chunk));
+				}
+			}
+			const auto run = [&tilemap](uint32_t workerThreads)
+			{
+				const Test::ScopedWorkerThreadCount threads(workerThreads);
+				Test::SceneTestFixture fixture;
+				Scene& scene = fixture.GetScene();
+				Test::InMemoryAssetManager assets;
+				const AssetHandle tilemapHandle = UUID(8965);
+				assets.Publish(tilemapHandle, tilemap, "Assets/Tilemaps/Terrain.tilemap");
+				Entity ground = scene.CreateEntity("Ground");
+				ground.AddComponent<TilemapColliderComponent>(TilemapColliderComponent{ .Tilemap = TypedAssetHandle<AssetType::Tilemap>(tilemapHandle) });
+				for (int index = 0; index < 24; ++index)
+				{
+					Entity body = scene.CreateEntity("Body");
+					body.Patch<TransformComponent>([index](TransformComponent& transform)
+					{
+						transform.Translation = glm::vec3(static_cast<float>(index % 12) * 1.75f - 10.5f, 7.0f + static_cast<float>(index / 12) * 1.5f, 0.0f);
+					});
+					// Thrown sideways across the boxes' seams, over the steps and into the gap.
+					body.AddComponent<RigidBody2DComponent>(RigidBody2DComponent{ .EnhancedInternalEdgeRemoval = true,
+						.InitialLinearVelocity = glm::vec2(index % 2 == 0 ? 4.0f : -4.0f, 0.0f) });
+					if (index % 3 == 0)
+						body.AddComponent<BoxCollider2DComponent>(BoxCollider2DComponent{ .HalfExtents = glm::vec2(0.3f) });
+					else
+						body.AddComponent<CircleCollider2DComponent>(CircleCollider2DComponent{ .Radius = 0.3f });
+				}
+				PlaySessionSpecification specification;
+				specification.Registry = &fixture.GetRegistry();
+				specification.Assets = &assets;
+				specification.Seed = 21;
+				specification.Mode = PlayMode::Simulate;
+				Result<Scope<PlaySession>> session = PlaySession::CreateFromScene(specification, scene);
+				REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+				REQUIRE((*session)->GetPhysics2D() != nullptr);
+				Recording2DEventListener listener;
+				(*session)->GetPhysics2D()->SetEventListener(&listener);
+				for (int tick = 0; tick < 240; ++tick)
+					(*session)->Tick();
+				(*session)->GetPhysics2D()->SetEventListener(nullptr);
+				CHECK((*session)->GetPhysics2D()->GetStats().BodyCount == 25u);
+				CHECK((*session)->GetPhysics2D()->GetDiagnostics().empty());
+				return std::make_pair((*session)->ComputeStateHash(), std::move(listener.Events));
+			};
+			const auto none = run(0);
+			const auto one = run(1);
+			const auto eight = run(8);
+			INFO("events: ", none.second.size());
+			REQUIRE(none.second.size() >= 24);
+			CHECK(one.first == none.first);
+			CHECK(eight.first == none.first);
+			CHECK(one.second == none.second);
+			CHECK(eight.second == none.second);
 		}
 	}
 

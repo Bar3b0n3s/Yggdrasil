@@ -3,9 +3,12 @@
 
 #include "Engine/Asset/AssetManager.h"
 #include "Engine/Asset/MeshData.h"
+#include "Engine/Asset/TilemapDrawOrder.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/SpriteRendererComponent.h"
+#include "Engine/Scene/Components/TilemapRendererComponent.h"
 #include "Engine/Scene/Private/SpriteDrawing.h"
+#include "Engine/Scene/Private/TilemapDrawing.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
 
@@ -49,6 +52,37 @@ namespace Engine {
 			return true;
 		}
 
+		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 24): extends `bounds` by the world box of every tile
+		// `entity`'s TilemapRenderer draws, each tile's quad as its sprite's at its cell's centre (TilemapDrawing.h). Returns
+		// whether it did.
+		static bool AddTilemapBounds(ConstEntity entity, AssetManager& assets, Aabb& bounds)
+		{
+			const TilemapRendererComponent* renderer = entity.TryGetComponent<TilemapRendererComponent>();
+			if (renderer == nullptr || !renderer->Tilemap.IsValid())
+				return false;
+			const glm::mat4 world = TransformSystem::ComputeWorldMatrix(entity);
+			// Only the tiles' quads matter, so the sorting layers are left out.
+			const std::optional<TilemapTiles> tiles = ResolveTilemapTiles(assets, MakeTilemapItem(*renderer, world, entity.GetUUID(), {}));
+			if (!tiles.has_value())
+				return false;
+			bool found = false;
+			const auto includeChunk = [](size_t /*chunk*/)
+			{
+				return true;
+			};
+			ForEachTilemapTileInDrawOrder(*tiles->Tilemap, false, includeChunk, [&tiles, &world, &bounds, &found](size_t /*chunk*/, glm::ivec2 cell, uint32_t value)
+			{
+				if (value > tiles->Palette.size() || !tiles->Palette[value - 1].has_value())
+					return true;
+				const glm::mat4 tileWorld = GetTilemapTileWorld(world, *tiles->Tilemap, cell);
+				for (const glm::vec2& corner : *tiles->Palette[value - 1])
+					bounds.Extend(glm::vec3(tileWorld * glm::vec4(corner, 0.0f, 1.0f)));
+				found = true;
+				return true;
+			});
+			return found;
+		}
+
 	}
 
 	std::optional<Aabb> ComputeEntityWorldBounds(ConstEntity entity, AssetManager& assets, const EntityBoundsOptions& options)
@@ -67,6 +101,7 @@ namespace Engine {
 				continue;
 			found = Utils::AddMeshBounds(current, assets, bounds) || found;
 			found = Utils::AddSpriteBounds(current, assets, bounds) || found;
+			found = Utils::AddTilemapBounds(current, assets, bounds) || found;
 			if (!options.IncludeDescendants)
 				break;
 			for (const UUID child : current.GetChildren())

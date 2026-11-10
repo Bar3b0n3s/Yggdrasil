@@ -12,13 +12,13 @@
 #include <vector>
 
 // The editor's tile brush (M21, C21.2, R-2D-TILE; Docs/Decisions/0032-m21-contract.md decision 26, stream T3): the view's rays
-// to cells and a stroke to its one tilemap.paint. Skipped until stream T3 implements them.
+// to cells and a stroke to its one tilemap.paint.
 
 namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("TilemapPainting: a scene-view ray finds the cell under the cursor and a stroke becomes one tilemap.paint" * doctest::skip(true))
+		TEST_CASE("TilemapPainting: a scene-view ray finds the cell under the cursor and a stroke becomes one tilemap.paint")
 		{
 			// A tilemap entity at (10, 5) with cells of 2 x 0.5 units: the ray down through (13.5, 4.9) meets local (3.5, -0.1), cell
 			// (1, -1); one through (9.99, 5) lies just left of cell 0, in cell (-1, 0).

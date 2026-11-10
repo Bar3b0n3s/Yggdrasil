@@ -70,7 +70,8 @@
 //     collider's user data, so contacts and queries name the tilemap's entity. Tilemaps load through the specification's
 //     Assets (AssetManager::Load: a missing or failed tilemap, no Assets, an entity whose TilemapCollider has no Tilemap and
 //     no TilemapRenderer one, or more than MaxTilemapColliderBoxes boxes is PHYSICS_INVALID_SHAPE and makes no body; a
-//     tilemap without a solid cell adds no shape, and a body left without any is not created, without a diagnostic). As a
+//     tilemap without a solid cell adds no shape, and a body left without any is not created, without a diagnostic: an
+//     edit that erases its last solid cell removes it so, and one that paints a solid cell again creates it). As a
 //     MeshCollider's mesh, a collider's tilemap getting a new asset version (AssetManager::GetVersion: a tilemap.paint edit,
 //     a reimport) rebuilds its body's shape in place at the next PreStep (PhysicsWorld::SetShape: pose, velocities and
 //     pairs kept), and so does a change of the TilemapRenderer.Tilemap of an entity whose TilemapCollider has no Tilemap

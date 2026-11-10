@@ -12,6 +12,7 @@
 #include "Engine/Renderer/DepthPyramidPass.h"
 #include "Engine/Renderer/FxaaPass.h"
 #include "Engine/Renderer/GtaoPass.h"
+#include "Engine/Renderer/Lights2DPass.h"
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Engine/Renderer/QuadBatcher.h"
 #include "Engine/Renderer/RenderStage.h"
@@ -142,9 +143,9 @@ namespace Engine {
 			CHECK(GetDeclaredPipelineCountOf("Letterbox") == 0);
 		}
 
-		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 22): stream L gives the Lights2D declaration its pipeline of
-		// the Lights2D program and the QuadBatcher its HdrLit and Normals pipelines: 61 startup pipelines.
-		TEST_CASE("RenderPassDeclarations: the Lights2D pass declares one pipeline of its program and the QuadBatcher four" * doctest::skip(true))
+		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 22): the Lights2D declaration has its pipeline of the Lights2D
+		// program and the QuadBatcher its HdrLit and Normals pipelines: 61 startup pipelines.
+		TEST_CASE("RenderPassDeclarations: the Lights2D pass declares one pipeline of its program and the QuadBatcher four")
 		{
 			const auto lights = std::find_if(ScenePassDeclarations.begin(), ScenePassDeclarations.end(), [](const RenderPassDeclaration& declaration)
 			{
@@ -164,6 +165,9 @@ namespace Engine {
 			CHECK(GetDeclaredPipelineCountOf("QuadBatcher") == 4);
 			CHECK(QuadBatcher::PipelineCount == 4);
 			CHECK(GetDeclaredPipelineCount() == 61);
+			CHECK(GetDeclaredPipelineCountOf("Lights2D") == Lights2DPass::PipelineCount);
+			CHECK(Lights2DPass::GetLayoutDescriptions().size() == Lights2DPass::PipelineCount);
+			CHECK(QuadBatcher::GetLayoutDescriptions().size() == QuadBatcher::PipelineCount);
 		}
 	}
 
@@ -186,7 +190,7 @@ namespace Engine {
 		TEST_CASE("Pipelines: Create makes exactly the declared startup pipelines")
 		{
 			// M18 acceptance (C18.1): the startup count is the declarations' sum, and Create goes through CreatePipelines.
-			static_assert(GetDeclaredPipelineCount() == 58);
+			static_assert(GetDeclaredPipelineCount() == 61);
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());

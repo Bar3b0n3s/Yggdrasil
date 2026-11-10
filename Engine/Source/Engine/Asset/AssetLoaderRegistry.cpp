@@ -12,6 +12,7 @@
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/Asset/SpriteSheetData.h"
 #include "Engine/Asset/TextureData.h"
+#include "Engine/Asset/TilemapData.h"
 #include "Engine/Core/Assert.h"
 
 #include <algorithm>
@@ -97,6 +98,11 @@ namespace Engine {
 			return LoadCookedSpriteSheet(cooked);
 		}
 
+		static Result<AssetRef<TilemapData>> LoadTilemap(std::span<const std::byte> cooked, const AssetLoadContext& /*context*/)
+		{
+			return LoadCookedTilemap(cooked);
+		}
+
 	}
 
 	AssetLoaderRegistry::AssetLoaderRegistry() = default;
@@ -164,6 +170,8 @@ namespace Engine {
 		registry.Register(CreateScope<PayloadLoader<ReplayData, &Utils::LoadReplay>>());
 		// M18 (Docs/Decisions/0029-m18-contract.md decision 17).
 		registry.Register(CreateScope<PayloadLoader<SpriteSheetData, &Utils::LoadSpriteSheet>>());
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 23).
+		registry.Register(CreateScope<PayloadLoader<TilemapData, &Utils::LoadTilemap>>());
 	}
 
 }

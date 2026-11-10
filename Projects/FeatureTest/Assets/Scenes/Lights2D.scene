@@ -1,0 +1,174 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Lights2D",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Camera": 1,
+		"AudioListener": 1,
+		"SpriteRenderer": 1,
+		"PixelPerfectCamera": 1,
+		"Light2D": 1
+	},
+	"Entities": [
+		{
+			"ID": "5abc0bbaeb41a3e9",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 10],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Orthographic",
+					"VerticalFov": 60,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.05, 0.05, 0.08]
+				},
+				"AudioListener": {
+					"Primary": true
+				},
+				"PixelPerfectCamera": {
+					"ReferenceWidth": 256,
+					"ReferenceHeight": 144,
+					"PixelsPerUnit": 16,
+					"LetterboxColor": [0, 0, 0]
+				}
+			}
+		},
+		{
+			"ID": "a5266d6643038520",
+			"Name": "Lamp",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-2, 1, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Light2D": {
+					"Type": "Point",
+					"Color": [1, 0.6, 0.3],
+					"Intensity": 2.5,
+					"Radius": 4,
+					"Falloff": 0.25,
+					"Height": 0.5
+				}
+			}
+		},
+		{
+			"ID": "a4018f5fd1272640",
+			"Name": "Sky",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Light2D": {
+					"Type": "Global",
+					"Color": [0.2, 0.25, 0.4],
+					"Intensity": 0.75,
+					"Radius": 5,
+					"Falloff": 0.5,
+					"Height": 1
+				}
+			}
+		},
+		{
+			"ID": "54edf50b9c7a4cca",
+			"Name": "Embossed",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-2, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"SpriteRenderer": {
+					"Sheet": null,
+					"Frame": 0,
+					"Texture": "857c47fa28cdd10e",
+					"Color": [1, 1, 1, 1],
+					"FlipX": false,
+					"FlipY": false,
+					"PixelsPerUnit": 4,
+					"SortingLayer": "Default",
+					"OrderInLayer": 0,
+					"Lit": true,
+					"NormalMap": "e7253b7025cde174"
+				}
+			}
+		},
+		{
+			"ID": "a8bbd3eaefc82a91",
+			"Name": "Plain",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [2, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"SpriteRenderer": {
+					"Sheet": null,
+					"Frame": 0,
+					"Texture": "000000000000018a",
+					"Color": [0.9, 0.95, 1, 1],
+					"FlipX": false,
+					"FlipY": false,
+					"PixelsPerUnit": 16,
+					"SortingLayer": "Default",
+					"OrderInLayer": 0,
+					"Lit": true,
+					"NormalMap": null
+				}
+			}
+		},
+		{
+			"ID": "4b12c45ce78d8c72",
+			"Name": "Shade",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3, -2, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"SpriteRenderer": {
+					"Sheet": null,
+					"Frame": 0,
+					"Texture": "0000000000000187",
+					"Color": [0.3, 0.8, 0.4, 1],
+					"FlipX": false,
+					"FlipY": false,
+					"PixelsPerUnit": 16,
+					"SortingLayer": "Default",
+					"OrderInLayer": 0,
+					"Lit": false,
+					"NormalMap": null
+				}
+			}
+		}
+	]
+}

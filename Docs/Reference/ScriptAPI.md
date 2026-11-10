@@ -208,7 +208,7 @@ All modes; LoadTime|Runtime|Test; pure/read.
 
 `(type: string) -> FieldDescriptor`
 
-Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for imported audio and .sfx sound effects, Script, Font, Replay or SpriteSheet), with a null default; any other name fails the import.
+Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for imported audio and .sfx sound effects, Script, Font, Replay, SpriteSheet or Tilemap), with a null default; any other name fails the import.
 
 All modes; LoadTime|Runtime|Test; pure/read.
 
@@ -3718,6 +3718,14 @@ Whether 2D lights light the sprite; an unlit sprite keeps its texels unchanged.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
+### SpriteRenderer.NormalMap
+
+`AssetRef?`
+
+A lit sprite's tangent-space normal map, laid like its image; point lights then light it by the angle to the light. Null: flat.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
 ### SpriteRenderer.OrderInLayer
 
 `number`
@@ -4111,6 +4119,8 @@ What asset.create makes.
 - `Folder`: A folder below Assets/; one that already exists is left as it is (created: false).
 
 - `SpriteSheet`: A .spritesheet sprite sheet: frames of a texture with pivots and 9-slice borders, and clips; without values an empty sheet.
+
+- `Tilemap`: A .tilemap tilemap: a palette of sprite sheet frames and cells in chunks; without values an empty map of unit cells in 16-cell chunks.
 
 ## AssetState
 

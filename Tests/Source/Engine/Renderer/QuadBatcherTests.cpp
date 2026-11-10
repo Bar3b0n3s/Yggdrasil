@@ -449,34 +449,11 @@ namespace Engine {
 			device.WaitForIdle();
 		}
 
-		TEST_CASE("QuadBatcher: quads beyond the per-record budget are skipped with one warning")
-		{
-			// MaxQuadsPerRecord quads draw; the one after them is skipped, and the warning is logged once per batcher.
-			Test::HeadlessGpuFixture gpu;
-			ENGINE_REQUIRE_GPU(gpu);
-			QuadSetup setup(gpu, 4, 4, glm::uvec2(4));
-			std::vector<QuadDraw> quads(QuadBatcher::MaxQuadsPerRecord + 1,
-				MakePixelQuad(glm::vec2(0.0f), glm::vec2(2.0f), glm::vec2(0.0f), glm::vec2(1.0f), nullptr));
-			// The quad past the budget would light the bottom-right pixels.
-			quads.back() = MakePixelQuad(glm::vec2(2.0f), glm::vec2(4.0f), glm::vec2(0.0f), glm::vec2(1.0f), nullptr);
-			Test::ExpectLog warning(LogLevel::Warn, "budget");
-			uint32_t drawn = 0;
-			const Image first = setup.Render(quads, drawn);
-			CHECK(drawn == QuadBatcher::MaxQuadsPerRecord);
-			CHECK(GetPixel(first, 0, 0) == glm::u8vec4(255, 255, 255, 255));
-			CHECK(GetPixel(first, 3, 3) == glm::u8vec4(0, 0, 0, 255));
-			const Image second = setup.Render(quads, drawn);
-			CHECK(drawn == QuadBatcher::MaxQuadsPerRecord);
-			CHECK(GetPixel(second, 3, 3) == glm::u8vec4(0, 0, 0, 255));
-			CHECK(warning.GetMatchCount() == 1);
-		}
-
-		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 24, stream L): no quad is lost to the vertex buffer's
-		// capacity. A record of more than MaxQuadsPerRecord quads draws them all, in their order, in consecutive batches of at
-		// most MaxQuadsPerRecord quads, so a tilemap that fills a record never drops the sprites after it. When stream L
-		// implements it, this case replaces "QuadBatcher: quads beyond the per-record budget are skipped with one warning",
-		// whose skipped quad then draws.
-		TEST_CASE("QuadBatcher: a record beyond the vertex buffer's capacity draws every quad in order, in further batches" * doctest::skip(true))
+		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 24): no quad is lost to the vertex buffer's capacity. A record
+		// of more than MaxQuadsPerRecord quads draws them all, in their order, in consecutive batches of at most
+		// MaxQuadsPerRecord quads, so a tilemap that fills a record never drops the sprites after it. This case replaces M18's
+		// "QuadBatcher: quads beyond the per-record budget are skipped with one warning", whose skipped quad now draws.
+		TEST_CASE("QuadBatcher: a record beyond the vertex buffer's capacity draws every quad in order, in further batches")
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);

@@ -259,6 +259,10 @@ namespace Engine {
 		if (Utils::EditorToolbarButton("2D", "2D mode: look down -Z orthographically, pan and zoom, and move in X and Y", options.Mode2D))
 			record(QueueAction(context, "viewport.setOptions", Json{ { "mode2D", !options.Mode2D } }));
 		ImGui::EndDisabled();
+		// The tile brush's controls (M21, decision 26), shown only while one entity holding a TilemapRenderer whose Tilemap is
+		// set is selected; its target is posed as the displayed image shows it.
+		const EditorViewportImage image = context.Viewports.GetImage(ViewportView::Scene);
+		m_TilemapBrush.DrawControls(context, image, toolbarRight);
 		ImGui::Separator();
 		if (playing)
 			ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.25f, 1.0f), "Runtime scene: changes are discarded on Stop");
@@ -269,7 +273,6 @@ namespace Engine {
 			if (ImGui::SmallButton("Dismiss##SceneError"))
 				m_LastError.clear();
 		}
-		const EditorViewportImage image = context.Viewports.GetImage(ViewportView::Scene);
 		const ImVec2 available = ImGui::GetContentRegionAvail();
 		const ImVec2 minimum = ImGui::GetCursorScreenPos();
 		const ImVec2 maximum(minimum.x + available.x, minimum.y + available.y);
@@ -300,7 +303,8 @@ namespace Engine {
 		}
 		else
 		{
-			record(DrawGizmoOverlay(context.Editor, context.Gizmos, image.Camera, rectangle, m_GizmoSettings, gizmoOwnsPointer));
+			// An armed tile brush hides the gizmo, so its handles never stand over a cell the brush would paint.
+			record(DrawGizmoOverlay(context.Editor, context.Gizmos, image.Camera, m_TilemapBrush.IsArmed() ? EditorViewportRect{} : rectangle, m_GizmoSettings, gizmoOwnsPointer));
 		}
 		if (context.Gizmos.IsDragging() && !draggingAtStart)
 		{
@@ -317,6 +321,7 @@ namespace Engine {
 		// over that handle. Between presses an ID-less item stands in and the view claims the wheel itself.
 		bool imageActive = false;
 		bool leftPressed = false;
+		bool rightPressed = false;
 		if (imageShown)
 		{
 			const ImGuiID imageId = ImGui::GetID("##SceneImage");
@@ -336,6 +341,7 @@ namespace Engine {
 				ImGui::PopItemFlag();
 				imageActive = ImGui::IsItemActive();
 				leftPressed = ImGui::IsItemActivated() && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+				rightPressed = ImGui::IsItemActivated() && ImGui::IsMouseClicked(ImGuiMouseButton_Right);
 				// The wheel zooms the camera; it must never also scroll the window.
 				ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
 			}
@@ -353,17 +359,27 @@ namespace Engine {
 		context.Viewports.SetRectangle(ViewportView::Scene, rectangle);
 		const bool otherItemActive = ImGui::IsAnyItemActive() && !imageActive;
 		// ImGuizmo::IsOver also reports the previous frame's hover: a press that leaves a handle in that frame still
-		// belongs to the gizmo, never to a background pick.
+		// belongs to the gizmo, never to a background pick. An armed tile brush hides the gizmo, whose last handles then
+		// own nothing.
+		const bool gizmoShown = !m_TilemapBrush.IsArmed();
 		const bool inputCaptured = io.WantTextInput || otherItemActive
 			|| ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)
-			|| ImGui::GetDragDropPayload() != nullptr || draggingAtStart || context.Gizmos.IsDragging() || ImGuizmo::IsUsingAny()
-			|| ImGuizmo::IsOver() || gizmoOwnsPointer;
+			|| ImGui::GetDragDropPayload() != nullptr || draggingAtStart || context.Gizmos.IsDragging()
+			|| (gizmoShown && (ImGuizmo::IsUsingAny() || ImGuizmo::IsOver())) || gizmoOwnsPointer;
+		// An armed tile brush takes the image's left and right strokes (M21, decision 26); each finished stroke is one
+		// tilemap.paint.
+		Result<std::optional<Json>> stroke = m_TilemapBrush.Update(rectangle, image, { .ImageShown = imageShown, .Captured = inputCaptured, .LeftPressed = leftPressed, .RightPressed = rightPressed });
+		if (!stroke)
+			record(std::unexpected(std::move(stroke).error()));
+		else if (stroke->has_value())
+			record(QueueAction(context, "tilemap.paint", **stroke));
+		const bool brushStroking = m_TilemapBrush.IsStroking();
 		if (imageShown && !inputCaptured)
 		{
 			// Buttons navigate only while they hold the image item they pressed; the wheel zooms the hovered view.
-			const bool fly = imageActive && ImGui::IsMouseDown(ImGuiMouseButton_Right);
-			const bool orbit = imageActive && io.KeyAlt && ImGui::IsMouseDown(ImGuiMouseButton_Left);
-			const bool pan = imageActive && ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+			const bool fly = imageActive && !brushStroking && ImGui::IsMouseDown(ImGuiMouseButton_Right);
+			const bool orbit = imageActive && !brushStroking && io.KeyAlt && ImGui::IsMouseDown(ImGuiMouseButton_Left);
+			const bool pan = imageActive && !brushStroking && ImGui::IsMouseDown(ImGuiMouseButton_Middle);
 			const float wheel = rectangle.Hovered ? io.MouseWheel : 0.0f;
 			if (options.Mode2D && (fly || orbit || pan || wheel != 0.0f))
 			{
@@ -400,7 +416,7 @@ namespace Engine {
 				else
 					record(std::unexpected(std::move(navigated).error()));
 			}
-			else if (leftPressed && !io.KeyAlt && image.Picking)
+			else if (leftPressed && !io.KeyAlt && image.Picking && !brushStroking)
 			{
 				if (const auto pixel = ToViewportPixel(rectangle, { io.MousePos.x, io.MousePos.y }))
 				{

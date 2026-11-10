@@ -6,16 +6,22 @@
 #include "Engine/Graphics/Readback.h"
 #include "Engine/Graphics/RenderTargetPool.h"
 #include "Engine/Renderer/Light2DShading.h"
+#include "Engine/Renderer/Lights2DPass.h"
+#include "Engine/Renderer/PassBindingCache.h"
 #include "Engine/Renderer/RenderSnapshot.h"
+#include "Engine/Renderer/RenderStats.h"
 #include "Engine/Renderer/SceneRenderer.h"
+#include "Engine/Renderer/SceneTargetFormats.h"
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Support/DeviceLossTest.h"
+#include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/RenderReference.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -28,7 +34,7 @@
 // The Lights2D pass and lit sprites (M21, C21.2, R-2D-LIGHT; Docs/Decisions/0032-m21-contract.md decisions 21 and 22, stream
 // L; Roadmap M21 "A lit sprite matches its CPU reference", plan §3.5 "unlit sprites and existing goldens are unchanged"; plan
 // §7 item 3: every new GPU owner has a loss test through the shared helper). The gpu suite runs every case under API 1.4 and
-// again capped at 1.3. Skipped until stream L implements the pass.
+// again capped at 1.3.
 
 namespace Engine {
 
@@ -126,8 +132,9 @@ namespace Engine {
 		}
 
 		// Every scene pixel of the sprite, read at the centre of its 4 x 4 block of view pixels, matches texel x light within
-		// `tolerance` 8-bit levels (the half-float accumulation's rounding), its alpha opaque.
-		void CheckLitSprite(const Image& image, const RenderSnapshot& snapshot, const std::optional<glm::vec3>& normal, int tolerance)
+		// `tolerance` 8-bit levels (the half-float accumulation's rounding), its alpha opaque; with `flipX` scene pixel (x, y)
+		// shows texel (11 - x, y - 4).
+		void CheckLitSprite(const Image& image, const RenderSnapshot& snapshot, const std::optional<glm::vec3>& normal, int tolerance, bool flipX = false)
 		{
 			for (uint32_t y = 4; y < 12; ++y)
 			{
@@ -135,7 +142,7 @@ namespace Engine {
 				{
 					CAPTURE(x);
 					CAPTURE(y);
-					const uint32_t texelX = x - 4;
+					const uint32_t texelX = flipX ? 11 - x : x - 4;
 					const uint32_t texelY = y - 4;
 					const glm::dvec3 texel(Test::SrgbToLinear(32.0 * texelX / 255.0), Test::SrgbToLinear(32.0 * texelY / 255.0),
 						Test::SrgbToLinear((255.0 - 16.0 * texelX) / 255.0));
@@ -154,7 +161,7 @@ namespace Engine {
 
 	TEST_SUITE("Renderer")
 	{
-		TEST_CASE("Lights2D: a lit sprite matches its CPU reference" * doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		TEST_CASE("Lights2D: a lit sprite matches its CPU reference" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -176,7 +183,7 @@ namespace Engine {
 		// come first in the snapshot's order, then MaxVisibleLights2D + 1 dim global lights: the view draws the first
 		// MaxVisibleLights2D globals, and the CPU reference over the lights that reach the view matches its image.
 		TEST_CASE("Lights2D: a view draws the first MaxVisibleLights2D lights that reach it, and lights off the view do not count"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -206,10 +213,19 @@ namespace Engine {
 			CHECK(EvaluateLights2D(reachable.Lights2D, center, std::nullopt).x == doctest::Approx(0.5));
 			// A cap over the snapshot's own order, off-view lights included, would leave out 100 of the globals.
 			CHECK(EvaluateLights2D(snapshot.Lights2D, center, std::nullopt).x < EvaluateLights2D(reachable.Lights2D, center, std::nullopt).x);
+			// The renderer skips the last global, logging the first skip once.
+			Test::ExpectLog skipped(LogLevel::Warn, "2D light");
 			CheckLitSprite(setup.Render(snapshot), reachable, std::nullopt, 2);
+			const RenderStats stats = setup.Renderer().GetRenderStats();
+			const RenderPassStats* lights = Test::SceneRendererIntegrationFixture::FindPass(stats, "Lights2D");
+			REQUIRE(lights != nullptr);
+			CHECK(lights->DrawCalls == MaxVisibleLights2D);
+			snapshot.FrameIndex += 1;
+			CheckLitSprite(setup.Render(snapshot), reachable, std::nullopt, 2);
+			CHECK(skipped.GetMatchCount() == 1);
 		}
 
-		TEST_CASE("Lights2D: a normal-mapped lit sprite matches its CPU reference" * doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		TEST_CASE("Lights2D: a normal-mapped lit sprite matches its CPU reference" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -222,21 +238,75 @@ namespace Engine {
 			const glm::vec3 normal = glm::normalize(glm::vec3(2.0f * LeaningNormalRed / 255.0f - 1.0f, 2.0f * LeaningNormalGreen / 255.0f - 1.0f,
 				2.0f * LeaningNormalBlue / 255.0f - 1.0f));
 			CheckLitSprite(setup.Render(snapshot), snapshot, normal, 2);
-			// FlipX mirrors the tangent frame: the normal then leans towards +X, away from the light on the left.
+			// FlipX mirrors the tangent frame: the normal then leans towards +X. Right of the light (at x = -1), where the
+			// unflipped normal leaned towards it, the mirrored one leans away from it.
 			snapshot.Sprites.front().FlipX = true;
 			snapshot.FrameIndex += 1;
 			const Image flipped = setup.Render(snapshot);
 			const glm::vec3 mirrored(-normal.x, normal.y, normal.z);
-			const glm::vec2 world = ScenePixelToWorld(4, 4);
-			CHECK(EvaluateLights2D(snapshot.Lights2D, world, mirrored).x < EvaluateLights2D(snapshot.Lights2D, world, normal).x);
+			const glm::vec2 rightOfLight = ScenePixelToWorld(7, 4);
+			CHECK(EvaluateLights2D(snapshot.Lights2D, rightOfLight, mirrored).x < EvaluateLights2D(snapshot.Lights2D, rightOfLight, normal).x);
 			// Scene pixel (4, 4) now shows texel (7, 0).
+			const glm::vec2 world = ScenePixelToWorld(4, 4);
 			const double texelRed = Test::SrgbToLinear(32.0 * 7 / 255.0);
 			const int expectedRed = EncodeLitChannel(texelRed * EvaluateLights2D(snapshot.Lights2D, world, mirrored).x);
 			CHECK(std::abs(static_cast<int>(LitPixel(flipped, 18, 18).r) - expectedRed) <= 2);
+			// Every pixel shows its mirrored texel lit with the mirrored normal.
+			CheckLitSprite(flipped, snapshot, mirrored, 2, true);
 		}
 
-		TEST_CASE("Lights2D: unlit sprites keep their texels, and a view without lit items records no Lights2D pass" * doctest::test_suite(Test::GpuSuite)
-			* doctest::skip(true))
+		// Decision 22's one normal per pixel: a flat lit sprite drawn over a normal-mapped one gives the pixels it covers the
+		// flat normal (each light whole), and the normal-mapped sprite's other pixels keep its normals; the Normals record
+		// splits its draws where the normal map changes.
+		TEST_CASE("Lights2D: a pixel takes the light with the normal of its topmost lit sprite" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu);
+			setup.Assets().Publish(LitTextureHandle, MakeColorTexture());
+			setup.Assets().Publish(NormalMapHandle, MakeNormalMap());
+			RenderSnapshot snapshot = MakeLitSnapshot(setup);
+			snapshot.Sprites.front().NormalMap = NormalMapHandle;
+			// A flat lit sprite 2 units (4 scene pixels) to the right, drawn after: scene pixels [8, 16) x [4, 12).
+			SpriteItem flat = snapshot.Sprites.front();
+			flat.World = glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 0.0f, 0.0f));
+			flat.NormalMap = AssetHandle();
+			flat.Entity = UUID(80);
+			snapshot.Sprites.push_back(flat);
+			const Image image = setup.Render(snapshot);
+			const glm::vec3 normal = glm::normalize(glm::vec3(2.0f * LeaningNormalRed / 255.0f - 1.0f, 2.0f * LeaningNormalGreen / 255.0f - 1.0f,
+				2.0f * LeaningNormalBlue / 255.0f - 1.0f));
+			for (uint32_t y = 4; y < 12; ++y)
+			{
+				for (uint32_t x = 4; x < 16; ++x)
+				{
+					CAPTURE(x);
+					CAPTURE(y);
+					const bool top = x >= 8;
+					const uint32_t texelX = top ? x - 8 : x - 4;
+					const uint32_t texelY = y - 4;
+					const glm::dvec3 texel(Test::SrgbToLinear(32.0 * texelX / 255.0), Test::SrgbToLinear(32.0 * texelY / 255.0),
+						Test::SrgbToLinear((255.0 - 16.0 * texelX) / 255.0));
+					const std::optional<glm::vec3> pixelNormal = top ? std::nullopt : std::optional<glm::vec3>(normal);
+					const glm::dvec3 expected = texel * glm::dvec3(EvaluateLights2D(snapshot.Lights2D, ScenePixelToWorld(x, y), pixelNormal));
+					const glm::u8vec4 actual = LitPixel(image, 4 * x + 2, 4 * y + 2);
+					CHECK(std::abs(static_cast<int>(actual.r) - EncodeLitChannel(expected.x)) <= 2);
+					CHECK(std::abs(static_cast<int>(actual.g) - EncodeLitChannel(expected.y)) <= 2);
+					CHECK(std::abs(static_cast<int>(actual.b) - EncodeLitChannel(expected.z)) <= 2);
+				}
+			}
+			// Where the flat sprite covers the normal-mapped one, the pixel takes the point light whole, more than the leaning
+			// normal beneath would take: scene pixel (9, 6) is lit with the flat normal.
+			const glm::vec2 covered = ScenePixelToWorld(9, 6);
+			CHECK(EvaluateLights2D(snapshot.Lights2D, covered, std::nullopt).x > EvaluateLights2D(snapshot.Lights2D, covered, normal).x);
+			// The Lights2D row: the two lit quads' normals (one draw per normal map) and the two lights.
+			const RenderStats stats = setup.Renderer().GetRenderStats();
+			const RenderPassStats* lights = Test::SceneRendererIntegrationFixture::FindPass(stats, "Lights2D");
+			REQUIRE(lights != nullptr);
+			CHECK(lights->DrawCalls == 4);
+		}
+
+		TEST_CASE("Lights2D: unlit sprites keep their texels, and a view without lit items records no Lights2D pass" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -262,8 +332,7 @@ namespace Engine {
 			CHECK(LitPixel(setup.Render(snapshot), 32, 32) == glm::u8vec4(0, 0, 0, 255));
 		}
 
-		TEST_CASE("Lights2D: a renderer drawing 2D lights recovers from a device loss with the same image" * doctest::test_suite(Test::GpuSuite)
-			* doctest::skip(true))
+		TEST_CASE("Lights2D: a renderer drawing 2D lights recovers from a device loss with the same image" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -310,6 +379,68 @@ namespace Engine {
 			// The lit sprite was drawn: its centre is neither the clear colour nor black.
 			REQUIRE(report->Before.size() == 64 * 64 * 4);
 			CHECK(std::to_integer<int>(report->Before[(32 * 64 + 32) * 4 + 2]) > 0);
+		}
+
+		TEST_CASE("Lights2DPass: a record whose binding set fails returns the error and records nothing" * doctest::test_suite(Test::GpuSuite))
+		{
+			// NVRHI's validation refuses a texture handle whose description has no mip level (as the QuadBatcher's case): the
+			// pass creates its one binding set before its first command, so the failed record clears and draws nothing, and
+			// the same record with a texture it can bind then draws its light.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			Result<Scope<Lights2DPass>> pass = Lights2DPass::Create(device, gpu.GetPipelines());
+			REQUIRE_MESSAGE(pass.has_value(), pass.error().ToString());
+			CHECK((*pass)->GetPipelineCount() == Lights2DPass::PipelineCount);
+			nvrhi::TextureDesc desc;
+			desc.width = 4;
+			desc.height = 4;
+			desc.format = Lights2DLightFormat;
+			desc.isRenderTarget = true;
+			desc.isShaderResource = true;
+			desc.initialState = nvrhi::ResourceStates::RenderTarget;
+			desc.keepInitialState = true;
+			desc.debugName = "Lights2DTests.Light";
+			Result<nvrhi::TextureHandle> light = device.CreateTexture(desc);
+			desc.format = Lights2DNormalsFormat;
+			desc.debugName = "Lights2DTests.Normals";
+			Result<nvrhi::TextureHandle> normals = device.CreateTexture(desc);
+			REQUIRE(light.has_value());
+			REQUIRE(normals.has_value());
+			Result<nvrhi::FramebufferHandle> framebuffer = device.CreateFramebuffer(nvrhi::FramebufferDesc().addColorAttachment(*light));
+			REQUIRE(framebuffer.has_value());
+			nvrhi::TextureDesc unbindableDesc = (*normals)->getDesc();
+			unbindableDesc.mipLevels = 0;
+			unbindableDesc.debugName = "Lights2DTests.Unbindable";
+			nvrhi::TextureHandle unbindable = device.GetNvrhiDevice()->createHandleForNativeTexture(nvrhi::ObjectTypes::VK_Image,
+				(*normals)->getNativeObject(nvrhi::ObjectTypes::VK_Image), unbindableDesc);
+			REQUIRE(unbindable != nullptr);
+			const std::array<Light2DItem, 1> lights = { Light2DItem{ .Type = RenderLight2DType::Global } };
+			PassBindingCache bindings;
+			Result<nvrhi::CommandListHandle> list = device.CreateCommandList();
+			REQUIRE(list.has_value());
+			RenderPassCounters counters;
+			{
+				Test::ExpectLog refused(LogLevel::Error, "does not intersect");
+				(*list)->open();
+				const Status recorded = (*pass)->Record(**list, bindings, { .Lights = lights, .Normals = unbindable.Get(), .Light = *framebuffer }, counters);
+				(*list)->close();
+				device.ExecuteCommandList(**list);
+				REQUIRE_FALSE(recorded.has_value());
+				CHECK(recorded.error().GetCode() == ErrorCode::Gpu);
+			}
+			CHECK(counters.DrawCalls == 0);
+			CHECK(bindings.GetSize() == 0);
+			device.GetDiagnostics().ResetCounts();
+			unbindable = nullptr;
+
+			(*list)->open();
+			const Status drawn = (*pass)->Record(**list, bindings, { .Lights = lights, .Normals = *normals, .Light = *framebuffer }, counters);
+			(*list)->close();
+			device.ExecuteCommandList(**list);
+			REQUIRE_MESSAGE(drawn.has_value(), drawn.error().ToString());
+			CHECK(counters.DrawCalls == 1);
+			device.WaitForIdle();
 		}
 	}
 

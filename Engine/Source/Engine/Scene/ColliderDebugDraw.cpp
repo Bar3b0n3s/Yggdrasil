@@ -4,6 +4,8 @@
 #include "Engine/Asset/AssetManager.h"
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Core/Assert.h"
+#include "Engine/Core/DetMath.h"
+#include "Engine/Physics/Physics2DWorld.h"
 #include "Engine/Physics/PhysicsEngine.h"
 #include "Engine/Physics/PhysicsShape.h"
 #include "Engine/Renderer/DebugDrawList.h"
@@ -12,11 +14,14 @@
 #include "Engine/Scene/Components/CharacterControllerComponent.h"
 #include "Engine/Scene/Components/MeshColliderComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
+#include "Engine/Scene/Components/RigidBody2DComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/SphereColliderComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/Physics2DSystem.h"
 #include "Engine/Scene/PhysicsComposition.h"
 #include "Engine/Scene/PhysicsSystem.h"
+#include "Engine/Scene/Private/Physics2DComposition.h"
 #include "Engine/Scene/Private/PhysicsBodySettings.h"
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
@@ -28,16 +33,20 @@
 #include <array>
 #include <bit>
 #include <cmath>
+#include <numbers>
 #include <optional>
 #include <tuple>
 #include <utility>
+#include <variant>
 
 // The collider visualization (Docs/Decisions/0014-m11-decisions.md decision 16): the composition decides which bodies
 // exist and which colliders each holds, the components give the shapes, and each collider's world matrix (its rendered one
 // in a play view between steps, Docs/Decisions/0016-m8-m11-m12-integration.md decision 3) gives its frame, so the records
 // show what DescribePhysicsBodyShape bakes into the bodies (scale along the collider's axes, the largest component for
 // spheres and capsules). A body the composition accepts but the session refuses is Invalid too: in play, one the session
-// has not created; in edit, one whose shape cannot be built as the session builds it.
+// has not created; in edit, one whose shape cannot be built as the session builds it. The 2D colliders (M21,
+// Docs/Decisions/0032-m21-contract.md decision 28) follow the same rules through the 2D composition: each collider's shapes
+// as DescribePhysics2DBodyShape places them in its body, drawn at the body's planar pose as edges in its entity's plane.
 
 namespace Engine {
 
@@ -399,11 +408,246 @@ namespace Engine {
 		}
 	}
 
-	std::vector<ColliderDebugShape> BuildCollider2DDebugDraw(const Scene& /*scene*/, const PhysicsLayerTable& /*layers*/,
-		const Physics2DSystem* /*physics2D*/, AssetManager* /*assets*/, const ColliderDebugDrawOptions& /*options*/)
+	// --- 2D colliders (Docs/Decisions/0032-m21-contract.md decision 28) --------------------------------------------------
+
+	namespace Utils {
+
+		// The sides of a 2D circle's outline.
+		constexpr uint32_t Collider2DCircleSides = 32;
+
+		// Whether the body `plan` describes can be built as the play session builds it (Physics2DSystem's BuildShape and
+		// CreateBody): its shape (DescribePhysics2DBodyShape, MakeBody2DShape, PhysicsShape::Create) and, for a Dynamic
+		// RigidBody2D, PhysicsShape::CheckDynamicBody with the plane's degrees of freedom. True without the physics engine,
+		// which nothing can be built without.
+		static bool CanBuild2DBody(const Scene& scene, const Physics2DBodyPlan& plan, AssetManager* assets)
+		{
+			const ConstEntity owner = scene.FindEntityByID(plan.Owner);
+			if (!owner.IsValid())
+				return false;
+			if (!PhysicsEngine::IsInitialized())
+				return true;
+			const Result<Body2DShapeDescription> described = DescribePhysics2DBodyShape(scene, plan, assets);
+			if (!described)
+				return false;
+			const Result<BodyShapeDescription> laid = MakeBody2DShape(*described);
+			if (!laid)
+				return false;
+			const Result<Ref<const PhysicsShape>> shape = PhysicsShape::Create(*laid);
+			if (!shape)
+				return false;
+			const RigidBody2DComponent* body = owner.TryGetComponent<RigidBody2DComponent>();
+			if (plan.Origin == PhysicsBodyOrigin::RigidBody && plan.MotionType == PhysicsMotionType::Dynamic && body != nullptr)
+				return (*shape)->CheckDynamicBody(body->Mass, body->FixedRotation ? Physics2DTranslationDofs : Physics2DDofs).has_value();
+			return true;
+		}
+
+		// Whether the play session created the 2D body `plan` describes, as HasSessionBody for the 3D world: GetBodyInfo
+		// reports an owner's RigidBody2D or implicit static body before its implicit sensor body, so an implicit sensor body
+		// whose owner reports another one is decided by its shape.
+		static bool HasSession2DBody(const Scene& scene, const Physics2DSystem& physics2D, const Physics2DBodyPlan& plan, AssetManager* assets)
+		{
+			const std::optional<Physics2DBodyReport> report = physics2D.GetBodyInfo(plan.Owner);
+			if (!report.has_value() || report->Owner != plan.Owner)
+				return false;
+			return report->Origin == plan.Origin || CanBuild2DBody(scene, plan, assets);
+		}
+
+		// The category of a 2D body's colliders, as GetCategory's for the 3D ones (2D bodies have no characters).
+		static ColliderDebugCategory Get2DCategory(const Scene& scene, const Physics2DBodyPlan& plan, const Physics2DSystem* physics2D, AssetManager* assets)
+		{
+			if (!plan.IsCreatable)
+				return ColliderDebugCategory::Invalid;
+			if (physics2D != nullptr ? !HasSession2DBody(scene, *physics2D, plan, assets) : !CanBuild2DBody(scene, plan, assets))
+				return ColliderDebugCategory::Invalid;
+			if (plan.IsSensor)
+				return ColliderDebugCategory::Trigger;
+			switch (plan.MotionType)
+			{
+				case PhysicsMotionType::Static:    return ColliderDebugCategory::Static;
+				case PhysicsMotionType::Kinematic: return ColliderDebugCategory::Kinematic;
+				case PhysicsMotionType::Dynamic:   break;
+			}
+			if (physics2D != nullptr)
+			{
+				const Result<bool> sleeping = physics2D->IsSleeping(plan.Owner);
+				if (sleeping.has_value() && *sleeping)
+					return ColliderDebugCategory::Sleeping;
+			}
+			return ColliderDebugCategory::Dynamic;
+		}
+
+		// The planar pose a 2D body's records are drawn at: its owner's world X and Y and the twist about Z of its world
+		// rotation, the pose the play session gives the body (ToPhysics2DPose drops the swing), taken from the owner's
+		// rendered pose in a runtime scene below alpha 1 (ColliderDebugDrawOptions::Alpha). nullopt when that rendered matrix
+		// does not decompose.
+		static std::optional<Physics2DPose> GetDrawn2DPose(ConstEntity owner, float alpha)
+		{
+			if (alpha < 1.0f && owner.GetScene()->IsRuntime())
+			{
+				const glm::mat4 rendered = ComputeRenderedWorldMatrix(owner, alpha);
+				const Result<TransformDecomposition> decomposed = TransformSystem::DecomposeMatrix(rendered);
+				if (!decomposed)
+					return std::nullopt;
+				return ToPhysics2DPose(PhysicsPose{ .Position = glm::vec3(rendered[3]), .Rotation = decomposed->Rotation });
+			}
+			return ToPhysics2DPose(
+				PhysicsPose{ .Position = glm::vec3(TransformSystem::ComputeWorldMatrix(owner)[3]), .Rotation = TransformSystem::GetWorldRotation(owner) });
+		}
+
+		static glm::vec2 Rotate2D(const glm::vec2& value, const SinCosResult<float>& turn)
+		{
+			return glm::vec2(turn.Cos * value.x - turn.Sin * value.y, turn.Sin * value.x + turn.Cos * value.y);
+		}
+
+		// The convex hull of `points` counter-clockwise (Andrew's monotone chain, collinear points dropped): what Jolt builds
+		// a PolygonShape2D's hull of. Two points for collinear input, fewer for fewer distinct points. The points are finite.
+		static std::vector<glm::vec2> ComputeConvexHull2D(std::vector<glm::vec2> points)
+		{
+			std::ranges::sort(points, [](const glm::vec2& a, const glm::vec2& b)
+			{
+				return std::tie(a.x, a.y) < std::tie(b.x, b.y);
+			});
+			points.erase(std::unique(points.begin(), points.end()), points.end());
+			if (points.size() < 3)
+				return points;
+			const auto turnsLeft = [](const glm::vec2& origin, const glm::vec2& a, const glm::vec2& b)
+			{
+				return (a.x - origin.x) * (b.y - origin.y) - (a.y - origin.y) * (b.x - origin.x) > 0.0f;
+			};
+			std::vector<glm::vec2> hull;
+			hull.reserve(points.size() * 2);
+			for (const glm::vec2& point : points)
+			{
+				while (hull.size() >= 2 && !turnsLeft(hull[hull.size() - 2], hull.back(), point))
+					hull.pop_back();
+				hull.push_back(point);
+			}
+			const size_t lower = hull.size() + 1;
+			for (size_t index = points.size() - 1; index-- > 0;)
+			{
+				while (hull.size() >= lower && !turnsLeft(hull[hull.size() - 2], hull.back(), points[index]))
+					hull.pop_back();
+				hull.push_back(points[index]);
+			}
+			hull.pop_back(); // the first point, closing the chain
+			return hull;
+		}
+
+		// The outline of one collider of a 2D body in its geometry's own space: a box's corners, a circle's polygon, a
+		// polygon's convex hull, in order around it. Empty for a polygon with a point that is not finite (the body is refused).
+		static std::vector<glm::vec2> GetCollider2DOutline(const Shape2DGeometry& geometry)
+		{
+			if (const BoxShape2D* box = std::get_if<BoxShape2D>(&geometry))
+			{
+				const glm::vec2 half = box->HalfExtents;
+				return { glm::vec2(-half.x, -half.y), glm::vec2(half.x, -half.y), glm::vec2(half.x, half.y), glm::vec2(-half.x, half.y) };
+			}
+			if (const CircleShape2D* circle = std::get_if<CircleShape2D>(&geometry))
+			{
+				std::vector<glm::vec2> corners;
+				corners.reserve(Collider2DCircleSides);
+				constexpr float Step = 2.0f * std::numbers::pi_v<float> / static_cast<float>(Collider2DCircleSides);
+				for (uint32_t side = 0; side < Collider2DCircleSides; ++side)
+				{
+					const SinCosResult<float> turn = DetMath::SinCos(static_cast<float>(side) * Step);
+					corners.emplace_back(circle->Radius * turn.Cos, circle->Radius * turn.Sin);
+				}
+				return corners;
+			}
+			const PolygonShape2D* polygon = std::get_if<PolygonShape2D>(&geometry);
+			ENGINE_CORE_ASSERT(polygon != nullptr, "Unknown Shape2DGeometry alternative {}", geometry.index());
+			const auto isFinite = [](const glm::vec2& point)
+			{
+				return std::isfinite(point.x) && std::isfinite(point.y);
+			};
+			if (polygon == nullptr || !std::ranges::all_of(polygon->Points, isFinite))
+				return {};
+			return ComputeConvexHull2D(polygon->Points);
+		}
+
+		// Appends the edges of `collider`'s outline, placed in its body (its Scale, Angle and Position) and by the body's pose,
+		// to `vertices` in the plane z = `z`, two vertices per edge; nothing when a placed vertex is not finite.
+		static void AppendCollider2DEdges(const Collider2DShapeDescription& collider, const Physics2DPose& body, float z, std::vector<glm::vec3>& vertices)
+		{
+			const SinCosResult<float> colliderTurn = DetMath::SinCos(collider.Angle);
+			const SinCosResult<float> bodyTurn = DetMath::SinCos(body.Angle);
+			std::vector<glm::vec3> corners;
+			for (const glm::vec2& point : GetCollider2DOutline(collider.Geometry))
+			{
+				const glm::vec2 inBody = collider.Position + Rotate2D(point * collider.Scale, colliderTurn);
+				const glm::vec3 world(body.Position + Rotate2D(inBody, bodyTurn), z);
+				if (!std::isfinite(world.x) || !std::isfinite(world.y) || !std::isfinite(world.z))
+					return;
+				corners.push_back(world);
+			}
+			// A segment for two corners (a degenerate hull), a closed loop for more.
+			const size_t edges = corners.size() == 2 ? 1 : (corners.size() >= 3 ? corners.size() : 0);
+			for (size_t edge = 0; edge < edges; ++edge)
+			{
+				vertices.push_back(corners[edge]);
+				vertices.push_back(corners[(edge + 1) % corners.size()]);
+			}
+		}
+
+		// The record of collider `collider` of the 2D body `plan`, drawn at the body's pose `body`: one Lines record of the
+		// edges of every shape the collider adds to the body (DescribePhysics2DBodyShape of it alone, so a collider that
+		// cannot be placed costs only its own record) in the plane of its entity's world Z. Its frame is the body's pose at
+		// that Z. nullopt when its entity is gone, it cannot be described or it has nothing to draw.
+		static std::optional<ColliderDebugShape> MakeCollider2DShape(const Scene& scene, const Physics2DBodyPlan& plan, const Physics2DColliderPlan& collider,
+			ColliderDebugCategory category, const Physics2DPose& body, float alpha, AssetManager* assets)
+		{
+			const ConstEntity entity = scene.FindEntityByID(collider.Entity);
+			if (!entity.IsValid())
+				return std::nullopt;
+			const Physics2DBodyPlan alone{ .Owner = plan.Owner,
+				.Origin = plan.Origin,
+				.MotionType = plan.MotionType,
+				.IsSensor = plan.IsSensor,
+				.Layer = plan.Layer,
+				.CollisionGroup = plan.CollisionGroup,
+				.Colliders = { collider },
+				.IsCreatable = plan.IsCreatable };
+			const Result<Body2DShapeDescription> described = DescribePhysics2DBodyShape(scene, alone, assets);
+			if (!described)
+				return std::nullopt;
+			const float z = GetDrawnWorldMatrix(entity, alpha)[3].z;
+			ColliderDebugShape shape = MakeShape(ColliderDebugShapeType::Lines, category, collider.Entity, plan.Owner);
+			shape.Position = glm::vec3(body.Position, z);
+			shape.Rotation = ToPhysicsPose(body).Rotation;
+			for (const Collider2DShapeDescription& placed : described->Colliders)
+				AppendCollider2DEdges(placed, body, z, shape.LineVertices);
+			if (shape.LineVertices.empty())
+				return std::nullopt;
+			return shape;
+		}
+
+	}
+
+	std::vector<ColliderDebugShape> BuildCollider2DDebugDraw(const Scene& scene, const PhysicsLayerTable& layers, const Physics2DSystem* physics2D,
+		AssetManager* assets, const ColliderDebugDrawOptions& options)
 	{
-		ENGINE_CONTRACT_STUB();
-		return {};
+		ENGINE_CORE_ASSERT(std::isfinite(options.Alpha) && options.Alpha >= 0.0f && options.Alpha <= 1.0f,
+			"BuildCollider2DDebugDraw needs an alpha in [0, 1], got {}", options.Alpha);
+		const Physics2DComposition composition = ComposePhysics2DBodies(scene, layers);
+		std::vector<ColliderDebugShape> shapes;
+		for (const Physics2DBodyPlan& plan : composition.Bodies)
+		{
+			if (plan.IsSensor && !options.Triggers)
+				continue;
+			const ConstEntity owner = scene.FindEntityByID(plan.Owner);
+			if (!owner.IsValid())
+				continue;
+			const std::optional<Physics2DPose> body = Utils::GetDrawn2DPose(owner, options.Alpha);
+			if (!body.has_value())
+				continue;
+			const ColliderDebugCategory category = Utils::Get2DCategory(scene, plan, physics2D, assets);
+			for (const Physics2DColliderPlan& collider : plan.Colliders)
+			{
+				if (std::optional<ColliderDebugShape> shape = Utils::MakeCollider2DShape(scene, plan, collider, category, *body, options.Alpha, assets))
+					shapes.push_back(std::move(*shape));
+			}
+		}
+		return shapes;
 	}
 
 }

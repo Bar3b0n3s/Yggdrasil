@@ -9,11 +9,8 @@ from pathlib import Path
 from harness import AutomationTestCase
 from test_environment import png_pixels
 
-SKIP_LIGHTS_2D = "contract stub: the Lights2D pass and lit sprites (ADR 0032 decisions 20 to 22, stream L)"
-
 
 class Lights2DTests(AutomationTestCase):
-    @unittest.skip(SKIP_LIGHTS_2D)
     def test_a_lit_sprite_takes_the_2d_lights_and_an_unlit_one_keeps_its_texels(self) -> None:
         # Decisions 20 to 22 through viewport.screenshot's own extraction: under a PixelPerfectCamera of 320 x 180 at
         # scale 3, two built-in white squares, the left one lit; a global light of (0.25, 0.125, 1) lights the lit
@@ -48,7 +45,7 @@ class Lights2DTests(AutomationTestCase):
             self.assertLessEqual(abs(actual - expected), 2)
         self.assertEqual(pixel(576, 270), bytes([255, 255, 255, 255]))
         # Without any light the lit square is black, and the unlit one still white.
-        client.call("entity.destroy", {"entity": "/Sky"})
+        client.call("entity.destroy", {"entities": ["/Sky"]})
         dark = client.call("viewport.screenshot", {"view": "game", "width": 960, "height": 540, "maxDimension": 960})
         width, _, pixels = png_pixels(Path(dark["path"]))
         self.assertEqual(pixel(384, 270), bytes([0, 0, 0, 255]))

@@ -15,9 +15,8 @@
 #include <string_view>
 #include <vector>
 
-// Tilemaps (M21, C21.2, R-2D-TILE; Docs/Decisions/0032-m21-contract.md decision 23): the chunk and cell arithmetic the contract
-// implements is live; the format, the cooked payload, the cell edits and the palette checks are skipped until stream T1
-// implements them.
+// Tilemaps (M21, C21.2, R-2D-TILE; Docs/Decisions/0032-m21-contract.md decision 23): the chunk and cell arithmetic, the format,
+// the cooked payload and its fuzz target, the cell edits and the palette checks.
 
 namespace Engine {
 
@@ -83,7 +82,7 @@ namespace Engine {
 			CHECK(GetTilemapCellCenter(tilemap, glm::ivec2(-1, 3)) == glm::vec2(-0.5f, 1.75f));
 		}
 
-		TEST_CASE("TilemapData: a .tilemap file round-trips canonically and its rules are located" * doctest::skip(true))
+		TEST_CASE("TilemapData: a .tilemap file round-trips canonically and its rules are located")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			// The defaults: a unit grid of 16-cell chunks, no palette, no chunks, every field written.
@@ -170,7 +169,7 @@ namespace Engine {
 			});
 		}
 
-		TEST_CASE("TilemapData: the cooked payload is the documented little-endian layout" * doctest::skip(true))
+		TEST_CASE("TilemapData: the cooked payload is the documented little-endian layout")
 		{
 			// The bytes TilemapData.h documents, written here independently of the serializer, so the Debug and Release unit runs
 			// both prove that a tilemap cooks to the same bytes in every configuration.
@@ -218,8 +217,7 @@ namespace Engine {
 			CHECK(DeserializeTilemapPayload(badSolid).error().GetCode() == ErrorCode::Parse);
 		}
 
-		TEST_CASE("TilemapData: 1,000 seeded mutations of a tilemap file and of its cooked form never crash" * doctest::test_suite(Test::FuzzSuite)
-			* doctest::skip(true))
+		TEST_CASE("TilemapData: 1,000 seeded mutations of a tilemap file and of its cooked form never crash" * doctest::test_suite(Test::FuzzSuite))
 		{
 			// The seed corpus: the ground tilemap's text and payload. The text goes through TilemapFromText, the cooked form (the
 			// payload hash sealed again) through LoadCookedTilemap; a tilemap either accepts is valid and writes back.
@@ -259,7 +257,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("TilemapData: cells are read and written by chunk, and an emptied chunk is removed" * doctest::skip(true))
+		TEST_CASE("TilemapData: cells are read and written by chunk, and an emptied chunk is removed")
 		{
 			TilemapData tilemap = MakeGroundTilemap();
 			CHECK(GetTilemapCell(tilemap, glm::ivec2(-1, 0)) == 1);
@@ -322,7 +320,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("TilemapData: the palette's sheets are its dependencies, and frames their sheets lack are found" * doctest::skip(true))
+		TEST_CASE("TilemapData: the palette's sheets are its dependencies, and frames their sheets lack are found")
 		{
 			TilemapData tilemap = MakeGroundTilemap();
 			tilemap.Palette.push_back(TilemapTile{ .Sheet = TypedAssetHandle<AssetType::SpriteSheet>(GroundSheet), .Frame = 7 });

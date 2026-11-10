@@ -155,7 +155,8 @@ namespace Engine {
 		static constexpr uint32_t DebugViewPipelineCount = 9;
 		// Every pipeline Create makes: the mesh pipelines plus SkyboxPass (1), BloomPass (3), TonemapPass (1), FxaaPass (1),
 		// DebugRenderer (2), TextRenderer (2), BrdfLut (1), ShadowPass (6), DepthPyramid (2), GTAO (2), Selection (8),
-		// the data-view composite (1), QuadBatcher (2) and UpscalePass (2): 58, the declarations' sum
+		// the data-view composite (1), QuadBatcher (4: M18's 2 and M21's HdrLit and Normals), UpscalePass (2) and M21's
+		// Lights2DPass (1): 61, the declarations' sum
 		// (GetDeclaredPipelineCount, RenderPassDeclaration.h), which SceneRenderer.cpp checks against each pass's PipelineCount.
 		static constexpr uint32_t StartupPipelineCount = GetDeclaredPipelineCount();
 

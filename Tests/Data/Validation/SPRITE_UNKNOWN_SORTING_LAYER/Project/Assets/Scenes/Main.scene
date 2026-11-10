@@ -8,7 +8,8 @@
 		"Camera": 1,
 		"DirectionalLight": 1,
 		"AudioListener": 1,
-		"SpriteRenderer": 1
+		"SpriteRenderer": 1,
+		"TilemapRenderer": 1
 	},
 	"Entities": [
 		{
@@ -62,6 +63,23 @@
 				},
 				"SpriteRenderer": {
 					"SortingLayer": "Sky"
+				}
+			}
+		},
+		{
+			"ID": "e000000000000004",
+			"Name": "Tiles",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"TilemapRenderer": {
+					"SortingLayer": "Ground"
 				}
 			}
 		}

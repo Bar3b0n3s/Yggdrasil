@@ -1,0 +1,162 @@
+{
+	"Format": "Replay",
+	"Version": 3,
+	"Scene": {
+		"Handle": "c15ef4fb12b167e0",
+		"Path": "Assets/Scenes/Tilemaps.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.1.0",
+	"Config": "Editor",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "0c558ce570e191d2",
+				"Path": "/Camera",
+				"Hash": "65217240fc229810",
+				"Components": {
+					"Transform": "0452654d5f117792",
+					"Camera": "cd40617b886094c0",
+					"AudioListener": "5364d8903ff7ab7d",
+					"PixelPerfectCamera": "e4371224bf96d879"
+				}
+			},
+			{
+				"Id": "72452d9580d0cfa2",
+				"Path": "/Daylight",
+				"Hash": "e7952c6a7f643acc",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Light2D": "1824ceab3c45ae35"
+				}
+			},
+			{
+				"Id": "c316e5af46c6d444",
+				"Path": "/Ball",
+				"Hash": "3280d2dbbb1f70b0",
+				"Components": {
+					"Transform": "c7b71a87684725e3",
+					"Script": "996709b229eeb131",
+					"SpriteRenderer": "015040d9a1499dcb",
+					"RigidBody2D": "6ae776b7c5442ae1",
+					"CircleCollider2D": "211289866f3e2780"
+				}
+			},
+			{
+				"Id": "e9b4d9b79a8ace69",
+				"Path": "/Goal",
+				"Hash": "3414c1172574224d",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Script": "5dae8f345d30f7d1",
+					"TilemapCollider": "d2e3ce5000593d88"
+				}
+			},
+			{
+				"Id": "fa5da7255469b21d",
+				"Path": "/Level",
+				"Hash": "237a1789991b190c",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Script": "874bdd1393ea4f91",
+					"TilemapRenderer": "86099001a9e3a846",
+					"TilemapCollider": "7bf36c6552f39d6e"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "171c476453add36f",
+				"Path": "Assets/Scripts/Tilemaps/Roller.luau",
+				"Type": "Script",
+				"Hash": "8d2d1babc3cf57e0"
+			},
+			{
+				"Handle": "210e99611d91d47c",
+				"Path": "Assets/Scripts/Tilemaps/LevelProbe.luau",
+				"Type": "Script",
+				"Hash": "bafb945dd5aa6002"
+			},
+			{
+				"Handle": "3c070e69a8f48c0a",
+				"Path": "Assets/Scripts/Tilemaps/GoalZone.luau",
+				"Type": "Script",
+				"Hash": "8844cffda130b6aa"
+			},
+			{
+				"Handle": "6426cd3230e5e980",
+				"Path": "Assets/Tilemaps/Level.tilemap",
+				"Type": "Tilemap",
+				"Hash": "9bceda39ebf595e1"
+			},
+			{
+				"Handle": "a3860674b7a6a82a",
+				"Path": "Assets/Tilemaps/Goal.tilemap",
+				"Type": "Tilemap",
+				"Hash": "030900c375340d71"
+			}
+		]
+	},
+	"Events": [
+		{
+			"Tick": 8,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 1
+		},
+		{
+			"Tick": 72,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 175,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Down"
+		},
+		{
+			"Tick": 176,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Up"
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 360,
+			"Luau": "local b = Scene.FindByName(\"Ball\")\nreturn b:GetScript(\"Roller\").Jumps == 1 and b.Transform.Translation.x > 4 and b.Transform.Translation.y > 1.3 and Scene.FindByName(\"Goal\"):GetScript(\"GoalZone\").Entered >= 1"
+		}
+	],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "bb0f79673e5ad33a"
+		},
+		{
+			"Tick": 120,
+			"StateHash": "eb6a61e8fbaabfa0"
+		},
+		{
+			"Tick": 180,
+			"StateHash": "f2d3365842363571"
+		},
+		{
+			"Tick": 240,
+			"StateHash": "e91fc3fd3006c974"
+		},
+		{
+			"Tick": 300,
+			"StateHash": "8994d40f09a4d0da"
+		},
+		{
+			"Tick": 360,
+			"StateHash": "7ac365757a3282d0"
+		}
+	],
+	"FinalTick": 361,
+	"FinalStateHash": "3abdce9f0c6762ef"
+}

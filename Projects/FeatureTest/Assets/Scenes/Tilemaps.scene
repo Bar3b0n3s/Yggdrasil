@@ -1,0 +1,199 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Tilemaps",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Camera": 1,
+		"AudioListener": 1,
+		"Script": 2,
+		"SpriteRenderer": 1,
+		"PixelPerfectCamera": 1,
+		"Light2D": 1,
+		"TilemapRenderer": 1,
+		"RigidBody2D": 1,
+		"CircleCollider2D": 1,
+		"TilemapCollider": 1
+	},
+	"Entities": [
+		{
+			"ID": "0c558ce570e191d2",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 2, 10],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Orthographic",
+					"VerticalFov": 60,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Skybox",
+					"ClearColor": [0.05, 0.05, 0.06]
+				},
+				"AudioListener": {
+					"Primary": true
+				},
+				"PixelPerfectCamera": {
+					"ReferenceWidth": 256,
+					"ReferenceHeight": 144,
+					"PixelsPerUnit": 8,
+					"LetterboxColor": [0, 0, 0]
+				}
+			}
+		},
+		{
+			"ID": "72452d9580d0cfa2",
+			"Name": "Daylight",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Light2D": {
+					"Type": "Global",
+					"Color": [1, 0.95, 0.85],
+					"Intensity": 1,
+					"Radius": 5,
+					"Falloff": 0.5,
+					"Height": 1
+				}
+			}
+		},
+		{
+			"ID": "fa5da7255469b21d",
+			"Name": "Level",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "210e99611d91d47c",
+							"Fields": {
+								"Level": "6426cd3230e5e980"
+							},
+							"ExecutionOrder": 0
+						}
+					]
+				},
+				"TilemapRenderer": {
+					"Tilemap": "6426cd3230e5e980",
+					"Color": [0.95, 0.9, 0.8, 1],
+					"PixelsPerUnit": 8,
+					"SortingLayer": "Background",
+					"OrderInLayer": -5,
+					"Lit": true
+				},
+				"TilemapCollider": {
+					"Tilemap": null,
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "e9b4d9b79a8ace69",
+			"Name": "Goal",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "3c070e69a8f48c0a",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				},
+				"TilemapCollider": {
+					"Tilemap": "a3860674b7a6a82a",
+					"IsTrigger": true
+				}
+			}
+		},
+		{
+			"ID": "c316e5af46c6d444",
+			"Name": "Ball",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-6, 0.4, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "171c476453add36f",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				},
+				"SpriteRenderer": {
+					"Sheet": null,
+					"Frame": 0,
+					"Texture": "000000000000018a",
+					"Color": [0.95, 0.4, 0.3, 1],
+					"FlipX": false,
+					"FlipY": false,
+					"PixelsPerUnit": 20,
+					"SortingLayer": "Characters",
+					"OrderInLayer": 0,
+					"Lit": false,
+					"NormalMap": null
+				},
+				"RigidBody2D": {
+					"Type": "Dynamic",
+					"Mass": 1,
+					"Friction": 0.6,
+					"Restitution": 0,
+					"LinearDamping": 0.1,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": false,
+					"FixedRotation": false,
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": true,
+					"InitialLinearVelocity": [0, 0],
+					"InitialAngularVelocity": 0
+				},
+				"CircleCollider2D": {
+					"Radius": 0.4,
+					"Offset": [0, 0],
+					"IsTrigger": false
+				}
+			}
+		}
+	]
+}

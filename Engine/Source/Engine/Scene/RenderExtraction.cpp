@@ -7,6 +7,7 @@
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
+#include "Engine/Scene/Components/Light2DComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/PixelPerfectCameraComponent.h"
 #include "Engine/Scene/Components/PointLightComponent.h"
@@ -15,9 +16,11 @@
 #include "Engine/Scene/Components/SpotLightComponent.h"
 #include "Engine/Scene/Components/SpriteRendererComponent.h"
 #include "Engine/Scene/Components/TextComponent.h"
+#include "Engine/Scene/Components/TilemapRendererComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/PixelPerfectCamera.h"
 #include "Engine/Scene/Private/SpriteDrawing.h"
+#include "Engine/Scene/Private/TilemapDrawing.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
 
@@ -418,10 +421,16 @@ namespace Engine {
 
 		std::optional<RenderEnvironment> environment;
 		std::optional<PostProcessSettings> post;
-		scene.ForEachCanonical([&snapshot, &environment, &post, &request](ConstEntity entity)
+		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 24): the sprites' places in the one 2D draw order and the
+		// tilemaps' canonical positions, from which the tilemaps are placed among the sprites below.
+		std::vector<Utils::SpriteDrawKey> spriteKeys;
+		std::vector<uint32_t> tilemapPositions;
+		uint32_t canonicalPosition = 0;
+		scene.ForEachCanonical([&snapshot, &environment, &post, &request, &spriteKeys, &tilemapPositions, &canonicalPosition](ConstEntity entity)
 		{
 			if (!Utils::IsEffectivelyEnabled(entity))
 				return;
+			const uint32_t position = canonicalPosition++;
 			const UUID id = entity.GetUUID();
 			// The rendered matrix is computed once per entity, and only for entities that draw or light.
 			std::optional<glm::mat4> world;
@@ -536,11 +545,37 @@ namespace Engine {
 			}
 			// M21 (Docs/Decisions/0032-m21-contract.md decision 4): listed in canonical order, sorted into draw order below.
 			if (const SpriteRendererComponent* sprite = entity.TryGetComponent<SpriteRendererComponent>())
+			{
 				snapshot.Sprites.push_back(Utils::MakeSpriteItem(*sprite, getWorld(), id, request.SortingLayers));
+				const SpriteItem& item = snapshot.Sprites.back();
+				spriteKeys.push_back(Utils::SpriteDrawKey{ .SortingLayer = item.SortingLayer, .OrderInLayer = item.OrderInLayer, .Canonical = position });
+			}
+			// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 22): in canonical order, the order the Lights2D pass adds
+			// them in, at the rendered world position.
+			if (const Light2DComponent* light = entity.TryGetComponent<Light2DComponent>())
+			{
+				snapshot.Lights2D.push_back(Light2DItem{
+					.Type = light->Type == Light2DType::Global ? RenderLight2DType::Global : RenderLight2DType::Point,
+					.Position = glm::vec3(getWorld()[3]),
+					.Color = light->Color,
+					.Intensity = light->Intensity,
+					.Radius = light->Radius,
+					.Falloff = light->Falloff,
+					.Height = light->Height,
+					.Entity = id,
+				});
+			}
+			// M21 (C21.2, decision 24): listed in canonical order, placed among the sprites below.
+			if (const TilemapRendererComponent* tilemap = entity.TryGetComponent<TilemapRendererComponent>(); tilemap != nullptr && tilemap->Tilemap.IsValid())
+			{
+				snapshot.Tilemaps.push_back(Utils::MakeTilemapItem(*tilemap, getWorld(), id, request.SortingLayers));
+				tilemapPositions.push_back(position);
+			}
 		});
 		snapshot.Environment = environment.value_or(RenderEnvironment{});
 		snapshot.Post = post.value_or(PostProcessSettings{});
 		Utils::SortSpritesForDrawing(snapshot.Sprites);
+		Utils::PlaceTilemapsForDrawing(snapshot.Tilemaps, tilemapPositions, std::move(spriteKeys));
 		// Moved, so the containers keep `resource` (a copy would allocate from the default resource).
 		return Result<RenderSnapshot>(std::move(snapshot));
 	}

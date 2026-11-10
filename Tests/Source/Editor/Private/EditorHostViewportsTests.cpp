@@ -750,6 +750,49 @@ end)
 			}
 		}
 
+		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 24, stream T1): tiles write no EntityId either, so the click
+		// selection picks a tile among the clicked image's tilemaps as it picks a sprite, selecting its tilemap's entity.
+		TEST_CASE("EditorHostViewports: a click selects the tilemap whose tile its pixel shows" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::EditorTestFixture fixture("HostTilemapPick");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			Test::AutomationTestClient client(editor);
+			// A 16-texel frame at the default 16 pixels per unit is one unit: the four tiles of chunk (0, 0) cover [0, 2]^2, and the
+			// view's centre shows the tile of cell (0, 0).
+			REQUIRE(client.Call("asset.create", Json{ { "type", "SpriteSheet" }, { "path", "Assets/Sprites/Tiles.spritesheet" }, { "values", Json{ { "Frames", Json::array({ Json{ { "Rect", Json{ { "Width", 16 }, { "Height", 16 } } } } }) } } } })
+					.has_value());
+			REQUIRE(client.Call("asset.create", Json{ { "type", "Tilemap" }, { "path", "Assets/Tilemaps/Ground.tilemap" }, { "values", Json{ { "ChunkSize", 2 }, { "Palette", Json::array({ Json{ { "Sheet", "Assets/Sprites/Tiles.spritesheet" } } }) }, { "Chunks", Json::array({ Json{ { "X", 0 }, { "Y", 0 }, { "Tiles", Json::array({ 1, 1, 1, 1 }) } } }) } } } })
+					.has_value());
+			REQUIRE(client.Call("entity.create", Json{ { "name", "Ground" }, { "components", Json{ { "TilemapRenderer", Json{ { "Tilemap", "Assets/Tilemaps/Ground.tilemap" } } } } } })
+					.has_value());
+			const UUID ground = editor.GetScene().FindEntityByPath("/Ground").GetUUID();
+			REQUIRE(client.Call("viewport.setOptions", Json{ { "grid", false }, { "icons", false }, { "mode2D", true } }).has_value());
+			REQUIRE(client.Call("viewport.camera", Json{ { "position", { 0.5, 0.5, 500 } }, { "target", { 0.5, 0.5, 0 } }, { "orthographicSize", 2 } }).has_value());
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::SceneViewport, true).has_value());
+			{
+				HostGpuHarness harness(gpu, editor);
+				EditorHostViewports& host = harness.GetHost();
+				host.SetRectangle(ViewportView::Scene, { .Size = glm::vec2(96, 64) });
+				REQUIRE(harness.Frame(0).has_value());
+				const EditorViewportImage image = host.GetImage(ViewportView::Scene);
+				const EditorViewportClick click{ .View = ViewportView::Scene,
+					.Pixel = { image.Width / 2, image.Height / 2 },
+					.FrameIndex = 1,
+					.SceneRevision = image.SceneRevision,
+					.Sequence = 1,
+					.ViewGeneration = image.Generation };
+				REQUIRE(harness.Frame(1, click).has_value());
+				REQUIRE(harness.Frame(2).has_value());
+				REQUIRE(harness.Frame(3).has_value());
+				CHECK(editor.GetSelectionTarget() == SceneTarget::Edit);
+				CHECK(std::vector<UUID>(editor.GetSelection().begin(), editor.GetSelection().end()) == std::vector<UUID>{ ground });
+			}
+		}
+
 		// M21 (decision 14; W21.1's review): the sprite is picked in the clicked image, among the sprites that image drew, so a
 		// sprite that a playing session moves on before the GPU pick completes (two frames later) is still the one selected.
 		TEST_CASE("EditorHostViewports: a click selects the sprite the clicked image showed, though it moves on before the pick completes"

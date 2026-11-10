@@ -1,0 +1,109 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "Tilemap",
+	"description": "A tilemap file (§6.9).",
+	"type": "object",
+	"properties": {
+		"Format": {
+			"description": "The file's format name; first key of the file.",
+			"enum": ["Tilemap"]
+		},
+		"Version": {
+			"description": "The format version this build writes; older versions are migrated when read.",
+			"enum": [1]
+		},
+		"CellSize": {
+			"description": "The size of a cell in the entity's local units: cell (x, y) spans [x CellSize.x, (x + 1) CellSize.x] in X.",
+			"type": "array",
+			"prefixItems": [
+				{
+					"type": "number",
+					"minimum": 0.001,
+					"maximum": 1000
+				},
+				{
+					"type": "number",
+					"minimum": 0.001,
+					"maximum": 1000
+				}
+			],
+			"minItems": 2,
+			"maxItems": 2
+		},
+		"ChunkSize": {
+			"description": "The cells a chunk holds a side: a power of two from 1 to 64 (16 by default).",
+			"type": "integer",
+			"minimum": 1,
+			"maximum": 64
+		},
+		"Palette": {
+			"description": "At most 65535 entries; a cell value k draws Palette[k - 1].",
+			"type": "array",
+			"items": {
+				"$ref": "#/$defs/TilemapTile"
+			}
+		},
+		"Chunks": {
+			"description": "The stored chunks, sorted by Y, then X, each once, none empty; at most 4194304 cells in all.",
+			"type": "array",
+			"items": {
+				"$ref": "#/$defs/TilemapChunk"
+			}
+		}
+	},
+	"required": ["Format", "Version"],
+	"additionalProperties": false,
+	"$defs": {
+		"TilemapTile": {
+			"description": "One entry of a tilemap's palette: the sprite sheet frame drawn in the cells holding it, and whether the TilemapCollider collides with them.",
+			"type": "object",
+			"properties": {
+				"Sheet": {
+					"description": "The sprite sheet the tile is cut from; null draws nothing.",
+					"type": ["string", "null"],
+					"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+					"x-assetType": "SpriteSheet"
+				},
+				"Frame": {
+					"description": "The index of the frame in the sheet's Frames, from 0; a frame the sheet lacks draws nothing (TILEMAP_FRAME_OUT_OF_RANGE).",
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 65535
+				},
+				"Solid": {
+					"description": "Whether the TilemapCollider collides with the cells holding this entry.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"TilemapChunk": {
+			"description": "A square of ChunkSize x ChunkSize cells of a tilemap, stored while one of them is not empty; chunk (X, Y) holds the cells from (X ChunkSize, Y ChunkSize).",
+			"type": "object",
+			"properties": {
+				"X": {
+					"description": "The chunk's column: its cells' x lie in [X ChunkSize, (X + 1) ChunkSize), and in [-1048576, 1048576).",
+					"type": "integer",
+					"minimum": -2147483648,
+					"maximum": 2147483647
+				},
+				"Y": {
+					"description": "The chunk's row: its cells' y lie in [Y ChunkSize, (Y + 1) ChunkSize), and in [-1048576, 1048576).",
+					"type": "integer",
+					"minimum": -2147483648,
+					"maximum": 2147483647
+				},
+				"Tiles": {
+					"description": "The ChunkSize^2 cell values, row by row from the chunk's bottom row up, each row left to right: 0 for an empty cell, k for Palette[k - 1]; not all 0.",
+					"type": "array",
+					"items": {
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					}
+				}
+			},
+			"additionalProperties": false
+		}
+	}
+}

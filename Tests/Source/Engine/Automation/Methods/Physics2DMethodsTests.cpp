@@ -140,7 +140,7 @@ namespace Engine {
 
 		// C21.2 (Docs/Decisions/0032-m21-contract.md decision 27, stream P3): physics2d.bodyInfo, physics.bodyInfo in the plane;
 		// stream P3 registers it.
-		TEST_CASE("Physics2DMethods: physics2d.bodyInfo reports a 2D body's pose, colliders and contacts" * doctest::skip(true))
+		TEST_CASE("Physics2DMethods: physics2d.bodyInfo reports a 2D body's pose, colliders and contacts")
 		{
 			Test::AutomationFixture setup("Physics2DBodyInfo");
 			REQUIRE(setup.Call("edit.batch", ParsePhysics2DMethodJson(R"({"label":"Physics2D","ops":[
@@ -150,6 +150,8 @@ namespace Engine {
 					"RigidBody2D":{},"BoxCollider2D":{}}}},
 				{"method":"entity.create","params":{"name":"Lid","parent":"/Crate","components":{"Transform":{"Translation":[0,0.6,0]},
 					"BoxCollider2D":{"HalfExtents":[0.5,0.1]}}}},
+				{"method":"entity.create","params":{"name":"Wedge","components":{"Transform":{"Translation":[-3,3,0],
+					"Rotation":[0,0,0.70710678,0.70710678]},"RigidBody2D":{"Type":"Static"},"BoxCollider2D":{}}}},
 				{"method":"entity.create","params":{"name":"Marker","components":{}}}]})"))
 					.has_value());
 			// Bodies exist only in a play session: InvalidState, the hint naming play.start.
@@ -179,11 +181,20 @@ namespace Engine {
 			REQUIRE((*lid)["contacts"].size() == 1);
 			CHECK((*lid)["contacts"][0]["other"]["name"] == Json("Floor"));
 			CHECK((*lid)["tick"] == Json(30));
+			// The angle is reported in degrees about +Z: a quarter turn is 90.
+			const Result<Json> wedge = setup.Call("physics2d.bodyInfo", Json{ { "entity", "/Wedge" } });
+			REQUIRE_MESSAGE(wedge.has_value(), wedge.error().ToString());
+			CHECK((*wedge)["origin"] == Json("RigidBody"));
+			CHECK((*wedge)["type"] == Json("Static"));
+			CHECK(JsonReader((*wedge)["angle"]).ReadFloat().value_or(0.0f) == doctest::Approx(90.0f).epsilon(1e-4));
+			CHECK(JsonReader((*wedge)["position"][1]).ReadFloat().value_or(0.0f) == doctest::Approx(3.0f));
 			// An entity without a 2D body: NotFound at /entity.
 			const Result<Json> none = setup.Call("physics2d.bodyInfo", Json{ { "entity", "/Marker" } });
 			REQUIRE_FALSE(none.has_value());
 			CHECK(none.error().GetCode() == ErrorCode::NotFound);
-			CHECK(none.error().GetLocation().JsonPointer.value_or(std::string()) == "/entity");
+			// The client rebuilds an error from its wire form, whose issues carry the location.
+			REQUIRE_FALSE(none.error().GetIssues().empty());
+			CHECK(none.error().GetIssues()[0].JsonPointer == "/entity");
 		}
 	}
 

@@ -1,6 +1,9 @@
 #include "EnginePCH.h"
 #include "Engine/Scene/Private/Physics2DComposition.h"
 
+#include "Engine/Asset/AssetManager.h"
+#include "Engine/Asset/TilemapCollision.h"
+#include "Engine/Asset/TilemapData.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Reflection/FuzzySuggest.h"
 #include "Engine/Scene/Components/BoxCollider2DComponent.h"
@@ -14,6 +17,8 @@
 #include "Engine/Scene/Components/RigidBody2DComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/SphereColliderComponent.h"
+#include "Engine/Scene/Components/TilemapColliderComponent.h"
+#include "Engine/Scene/Components/TilemapRendererComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Physics2DValidation.h"
@@ -25,6 +30,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <format>
 #include <iterator>
 #include <optional>
@@ -33,10 +39,12 @@
 #include <tuple>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 // The 2D composition in one canonical walk, as ComposePhysicsBodies (PhysicsComposition.cpp): every entity inherits from
 // its parent what the rules need (its nearest RigidBody2D, the layer implicit bodies take, the owner of an implicit static
-// compound, whether an ancestor moves), so each plan is complete when its owner is visited.
+// compound, whether an ancestor moves), so each plan is complete when its owner is visited. A TilemapCollider's boxes are
+// laid by DescribePhysics2DBodyShape, the only place that loads its tilemap.
 
 namespace Engine {
 
@@ -71,6 +79,8 @@ namespace Engine {
 				colliders.push_back(Physics2DColliderPlan{ .Entity = id, .Type = Physics2DColliderType::Circle, .IsTrigger = circle->IsTrigger });
 			if (const PolygonCollider2DComponent* polygon = entity.TryGetComponent<PolygonCollider2DComponent>())
 				colliders.push_back(Physics2DColliderPlan{ .Entity = id, .Type = Physics2DColliderType::Polygon, .IsTrigger = polygon->IsTrigger });
+			if (const TilemapColliderComponent* tilemap = entity.TryGetComponent<TilemapColliderComponent>())
+				colliders.push_back(Physics2DColliderPlan{ .Entity = id, .Type = Physics2DColliderType::Tilemap, .IsTrigger = tilemap->IsTrigger });
 		}
 
 		// "'Name' (<uuid>)", how diagnostics name an entity.
@@ -274,7 +284,7 @@ namespace Engine {
 		}
 
 		// The collider's frame within its entity: its Offset in the XY plane, then its Angle (degrees) about Z (circles have
-		// none).
+		// none; a tilemap's cells lie in the entity's own plane).
 		static glm::mat4 GetCollider2DLocalMatrix(ConstEntity entity, Physics2DColliderType type)
 		{
 			glm::vec2 offset(0.0f);
@@ -298,10 +308,61 @@ namespace Engine {
 					angle = polygon.Angle;
 					break;
 				}
+				case Physics2DColliderType::Tilemap:
+					return glm::mat4(1.0f);
 			}
 			glm::mat4 matrix = glm::mat4_cast(TransformSystem::QuaternionFromEulerDegrees(glm::vec3(0.0f, 0.0f, angle)));
 			matrix[3] = glm::vec4(offset, 0.0f, 1.0f);
 			return matrix;
+		}
+
+		// The PHYSICS_INVALID_SHAPE error of the TilemapCollider at `index` in its plan, named by that index (Utils::
+		// ParseColliderIndex reads it back) and located at its entity.
+		static std::unexpected<Error> MakeTilemapShapeError(ConstEntity entity, size_t index, std::string reason, std::string hint)
+		{
+			ErrorLocation location;
+			location.Entity = entity.GetUUID();
+			return std::unexpected(Error(ErrorCode::Validation,
+				std::format("{}: collider {}: the TilemapCollider of {} {}", PhysicsInvalidShapeCode, index, Describe2DEntity(entity), std::move(reason)))
+					.WithLocation(location)
+					.WithHint(std::move(hint)));
+		}
+
+		// The merged boxes of the TilemapCollider at `index` of its plan, on `entity`: its tilemap loaded through `assets`.
+		static Result<std::pair<AssetRef<TilemapData>, std::vector<TilemapBox>>> LoadTilemapColliderBoxes(ConstEntity entity, size_t index,
+			AssetManager* assets)
+		{
+			const AssetHandle handle = GetTilemapColliderTilemap(entity);
+			if (!handle.IsValid())
+			{
+				return MakeTilemapShapeError(entity, index, "has no tilemap: neither its Tilemap nor a TilemapRenderer on its entity names one",
+					"set the TilemapCollider's Tilemap, or give its entity a TilemapRenderer that draws the tilemap");
+			}
+			if (assets == nullptr)
+			{
+				return MakeTilemapShapeError(entity, index, std::format("cannot load its tilemap {}: no asset manager loads tilemaps here", handle),
+					"tilemap colliders need the session's or the editor's asset manager");
+			}
+			Result<AssetRef<Asset>> loaded = assets->Load(handle);
+			if (!loaded)
+			{
+				return MakeTilemapShapeError(entity, index, std::format("cannot load its tilemap {}: {}", handle, loaded.error().GetMessageText()),
+					"name an existing .tilemap that imports, or fix the one it names (project.validate reports why it fails)");
+			}
+			AssetRef<TilemapData> tilemap = AssetCast<TilemapData>(*loaded);
+			if (tilemap == nullptr)
+			{
+				return MakeTilemapShapeError(entity, index, std::format("names {}, which is a {}, not a Tilemap", handle, AssetTypeToString((*loaded)->GetAssetType())),
+					"name a .tilemap asset");
+			}
+			std::vector<TilemapBox> boxes = MergeTilemapBoxes(*tilemap);
+			if (boxes.size() > MaxTilemapColliderBoxes)
+			{
+				return MakeTilemapShapeError(entity, index,
+					std::format("makes {} boxes of its tilemap {}, more than the {} one collider holds", boxes.size(), handle, MaxTilemapColliderBoxes),
+					"split the tilemap's solid cells into several tilemaps, or make large solid areas rectangular so they merge into fewer boxes");
+			}
+			return std::make_pair(std::move(tilemap), std::move(boxes));
 		}
 
 		// A placement as translation, rotation and the scale along its axes (the lengths of its columns), as the 3D
@@ -328,7 +389,7 @@ namespace Engine {
 	bool HasPhysics2DComponent(ConstEntity entity)
 	{
 		return entity.HasComponent<RigidBody2DComponent>() || entity.HasComponent<BoxCollider2DComponent>() || entity.HasComponent<CircleCollider2DComponent>()
-			|| entity.HasComponent<PolygonCollider2DComponent>();
+			|| entity.HasComponent<PolygonCollider2DComponent>() || entity.HasComponent<TilemapColliderComponent>();
 	}
 
 	bool HasPhysics3DComponent(ConstEntity entity)
@@ -475,7 +536,18 @@ namespace Engine {
 		return composition;
 	}
 
-	Result<Body2DShapeDescription> DescribePhysics2DBodyShape(const Scene& scene, const Physics2DBodyPlan& plan)
+	AssetHandle GetTilemapColliderTilemap(ConstEntity entity)
+	{
+		const TilemapColliderComponent* collider = entity.TryGetComponent<TilemapColliderComponent>();
+		if (collider == nullptr)
+			return AssetHandle();
+		if (collider->Tilemap.IsValid())
+			return collider->Tilemap.GetHandle();
+		const TilemapRendererComponent* renderer = entity.TryGetComponent<TilemapRendererComponent>();
+		return renderer != nullptr ? renderer->Tilemap.GetHandle() : AssetHandle();
+	}
+
+	Result<Body2DShapeDescription> DescribePhysics2DBodyShape(const Scene& scene, const Physics2DBodyPlan& plan, AssetManager* assets)
 	{
 		const ConstEntity owner = scene.FindEntityByID(plan.Owner);
 		if (!owner.IsValid())
@@ -509,6 +581,27 @@ namespace Engine {
 
 			// The placement in the plane: its X and Y, and its rotation's twist about Z (ToPhysics2DPose drops the swing).
 			const Physics2DPose planar = ToPhysics2DPose(PhysicsPose{ .Position = decomposed->Translation, .Rotation = decomposed->Rotation });
+			if (collider.Type == Physics2DColliderType::Tilemap)
+			{
+				// One box per merged rectangle of cells, centred on it in the entity's plane, all with the collider's index.
+				ENGINE_TRY_ASSIGN(const auto tilemapBoxes, Utils::LoadTilemapColliderBoxes(entity, index, assets));
+				const auto& [tilemap, boxes] = tilemapBoxes;
+				const glm::vec2 cellSize = tilemap->CellSize;
+				for (const TilemapBox& box : boxes)
+				{
+					const glm::vec2 low = glm::vec2(box.Min) * cellSize;
+					const glm::vec2 high = (glm::vec2(box.Min) + glm::vec2(box.Size)) * cellSize;
+					const glm::vec2 center = 0.5f * (low + high);
+					Collider2DShapeDescription& shape = description.Colliders.emplace_back();
+					shape.Geometry = BoxShape2D{ .HalfExtents = 0.5f * (high - low) };
+					shape.Position = glm::vec2(placement * glm::vec4(center, 0.0f, 1.0f));
+					shape.Angle = planar.Angle;
+					shape.Scale = glm::vec2(decomposed->Scale.x, decomposed->Scale.y);
+					shape.UserData = static_cast<uint32_t>(index);
+				}
+				continue;
+			}
+
 			Collider2DShapeDescription shape;
 			shape.Position = planar.Position;
 			shape.Angle = planar.Angle;
@@ -529,10 +622,71 @@ namespace Engine {
 				case Physics2DColliderType::Polygon:
 					shape.Geometry = PolygonShape2D{ .Points = entity.GetComponent<PolygonCollider2DComponent>().Points };
 					break;
+				case Physics2DColliderType::Tilemap:
+					ENGINE_CORE_ASSERT(false, "DescribePhysics2DBodyShape: a TilemapCollider is laid above");
+					break;
 			}
 			description.Colliders.push_back(std::move(shape));
 		}
 		return description;
+	}
+
+	Result<Ref<const PhysicsShape>> CreatePhysics2DBodyShape(const Physics2DBodyPlan& plan, const Body2DShapeDescription& description)
+	{
+		Result<Ref<const PhysicsShape>> shape = MakeBody2DShape(description).and_then([](const BodyShapeDescription& laid)
+		{
+			return PhysicsShape::Create(laid);
+		});
+		if (shape)
+			return shape;
+
+		// "<code>: collider <place>: <reason>" names the place in description.Colliders: renamed to the plan's collider.
+		const Error& error = shape.error();
+		const std::string_view code = GetPhysicsDiagnosticCode(error);
+		const std::string_view message = error.GetMessageText();
+		const std::string_view reason = code.empty() ? message : message.substr(code.size() + 2);
+		const std::optional<uint32_t> place = Utils::ParseColliderIndex(reason);
+		if (!place.has_value() || *place >= description.Colliders.size() || description.Colliders[*place].UserData >= plan.Colliders.size())
+			return shape;
+		const uint32_t index = description.Colliders[*place].UserData;
+		const Physics2DColliderPlan& collider = plan.Colliders[index];
+		const std::string_view detail = reason.substr(reason.find(':') + 1);
+		std::string renamed = std::format("{}: collider {}:", code, index);
+		if (collider.Type == Physics2DColliderType::Tilemap)
+		{
+			const auto box = static_cast<size_t>(std::count_if(description.Colliders.begin(), description.Colliders.begin() + static_cast<std::ptrdiff_t>(*place),
+				[index](const Collider2DShapeDescription& candidate)
+			{
+				return candidate.UserData == index;
+			}));
+			renamed += std::format(" box {} of its tilemap:", box);
+		}
+		renamed += detail;
+		ErrorLocation location;
+		location.Entity = collider.Entity;
+		return std::unexpected(Error(error.GetCode(), std::move(renamed)).WithLocation(std::move(location)).WithHint(error.GetHint()));
+	}
+
+	const Physics2DColliderPlan* FindRefusedCollider2D(const Physics2DBodyPlan& plan, const Error& error)
+	{
+		const std::string_view code = GetPhysicsDiagnosticCode(error);
+		const std::string_view message = error.GetMessageText();
+		const std::string_view reason = code.empty() ? message : message.substr(code.size() + 2);
+		if (const std::optional<uint32_t> index = Utils::ParseColliderIndex(reason); index.has_value() && *index < plan.Colliders.size())
+			return &plan.Colliders[*index];
+		const UUID entity = error.GetLocation().Entity;
+		if (!entity.IsValid())
+			return nullptr;
+		const auto collider = std::ranges::find_if(plan.Colliders, [entity](const Physics2DColliderPlan& candidate)
+		{
+			return candidate.Entity == entity;
+		});
+		return collider != plan.Colliders.end() ? &*collider : nullptr;
+	}
+
+	std::string_view GetCollider2DShapeField(Physics2DColliderType type)
+	{
+		return type == Physics2DColliderType::Tilemap ? "Tilemap" : "";
 	}
 
 	std::string_view GetCollider2DComponentName(Physics2DColliderType type)
@@ -542,6 +696,7 @@ namespace Engine {
 			case Physics2DColliderType::Box:     return "BoxCollider2D";
 			case Physics2DColliderType::Circle:  return "CircleCollider2D";
 			case Physics2DColliderType::Polygon: return "PolygonCollider2D";
+			case Physics2DColliderType::Tilemap: return "TilemapCollider";
 		}
 
 		ENGINE_CORE_ASSERT(false, "Unknown Physics2DColliderType {}", std::to_underlying(type));

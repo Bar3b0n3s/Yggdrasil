@@ -10,8 +10,7 @@
 #include <string_view>
 #include <vector>
 
-// TilemapImporter (M21, C21.2, R-2D-TILE; Docs/Decisions/0032-m21-contract.md decision 23, stream T1): skipped until stream T1
-// implements it.
+// TilemapImporter (M21, C21.2, R-2D-TILE; Docs/Decisions/0032-m21-contract.md decision 23, stream T1).
 
 namespace Engine {
 
@@ -58,7 +57,7 @@ namespace Engine {
 
 	TEST_SUITE("AssetPipeline")
 	{
-		TEST_CASE("TilemapImporter: a .tilemap imports strictly and lists its sheets as dependencies" * doctest::skip(true))
+		TEST_CASE("TilemapImporter: a .tilemap imports strictly and lists its sheets as dependencies")
 		{
 			CHECK(TilemapImporter().CanImport(".tilemap"));
 			CHECK(TilemapImporter().GetMainType() == AssetType::Tilemap);

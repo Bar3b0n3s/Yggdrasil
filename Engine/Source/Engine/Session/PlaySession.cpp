@@ -18,6 +18,7 @@
 #include "Engine/Scene/Components/RigidBody2DComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
+#include "Engine/Scene/Components/TilemapColliderComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
 #include "Engine/Scene/Physics2DSystem.h"
@@ -152,7 +153,8 @@ namespace Engine {
 		}
 
 		// The session's 2D physics (M21, Docs/Decisions/0032-m21-contract.md decision 10): Project.Physics2D's gravity, the
-		// project's physics layers and collisions (shared with the 3D world) and its FixedHz, over the session's runtime scene.
+		// project's physics layers and collisions (shared with the 3D world), its FixedHz and the session's asset manager (the
+		// TilemapColliders' tilemaps, C21.2's decision 25), over the session's runtime scene.
 		static Physics2DSystemSpecification MakePhysics2DSpecification(const PlaySessionSpecification& specification, Scene& scene)
 		{
 			const PhysicsSettings& physics = specification.Project.Physics;
@@ -162,6 +164,7 @@ namespace Engine {
 			result.Layers = physics.Layers;
 			result.Collisions = physics.Collisions;
 			result.FixedHz = specification.Project.Simulation.FixedHz;
+			result.Assets = specification.Assets;
 			return result;
 		}
 
@@ -176,7 +179,8 @@ namespace Engine {
 				return storage != nullptr && !storage->empty();
 			};
 			return holds.template operator()<RigidBody2DComponent>() || holds.template operator()<BoxCollider2DComponent>()
-				|| holds.template operator()<CircleCollider2DComponent>() || holds.template operator()<PolygonCollider2DComponent>();
+				|| holds.template operator()<CircleCollider2DComponent>() || holds.template operator()<PolygonCollider2DComponent>()
+				|| holds.template operator()<TilemapColliderComponent>();
 		}
 
 		// The entity cap's error for a scene that holds more entities than a session may (§5.7), with the start's context.

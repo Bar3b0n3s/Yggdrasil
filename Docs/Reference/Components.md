@@ -753,6 +753,7 @@ Draws a sprite: a sprite sheet frame or a texture in the entity's XY plane.
 | `SortingLayer` | `String` | `"Default"` |  |  |  | The sorting layer name from project settings; later layers draw over earlier ones, and an undeclared name draws in the first. |
 | `OrderInLayer` | `Int32` | `0` |  |  |  | The draw order within the sorting layer: higher values draw over lower ones, equal values in canonical entity order. |
 | `Lit` | `Bool` | `false` |  |  |  | Whether 2D lights light the sprite; an unlit sprite keeps its texels unchanged. |
+| `NormalMap` | `AssetRef(Texture)` | `null` |  |  |  | A lit sprite's tangent-space normal map, laid like its image; point lights then light it by the angle to the light. Null: flat. |
 
 Script members of `SpriteRenderer`:
 
@@ -763,6 +764,7 @@ Script members of `SpriteRenderer`:
 | `FlipY` | proxy field | `boolean` | read/write | All | Whether the image is mirrored top to bottom about its pivot. |
 | `Frame` | proxy field | `number` | read/write | All | The index of the sheet's frame to draw; an index the sheet lacks draws nothing (SPRITE_FRAME_OUT_OF_RANGE). |
 | `Lit` | proxy field | `boolean` | read/write | All | Whether 2D lights light the sprite; an unlit sprite keeps its texels unchanged. |
+| `NormalMap` | proxy field | `AssetRef?` | read/write | All | A lit sprite's tangent-space normal map, laid like its image; point lights then light it by the angle to the light. Null: flat. |
 | `OrderInLayer` | proxy field | `number` | read/write | All | The draw order within the sorting layer: higher values draw over lower ones, equal values in canonical entity order. |
 | `PixelsPerUnit` | proxy field | `number` | read/write | All | How many texels of the image make one unit of the entity's local space; the sprite's size is its texels divided by this. |
 | `SetFrameByName` | method | `(self: SpriteRenderer, name: string) -> ()` |  | All | Set Frame to the index of the sprite sheet's frame named name; an error names the sheet when it has no such frame. |

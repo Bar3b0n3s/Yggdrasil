@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/Scene/Physics2DSystem.h"
 
+#include "Engine/Asset/AssetManager.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Log.h"
@@ -21,6 +22,8 @@
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/SphereColliderComponent.h"
+#include "Engine/Scene/Components/TilemapColliderComponent.h"
+#include "Engine/Scene/Components/TilemapRendererComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Private/Physics2DSystemState.h"
@@ -38,6 +41,7 @@
 #include <format>
 #include <limits>
 #include <numbers>
+#include <set>
 #include <tuple>
 #include <utility>
 #include <variant>
@@ -58,6 +62,11 @@
 //   - Contacts and query hits are planar as Physics2DWorld reports them (points at z = 0, normals in the plane): the system
 //     passes them on unchanged.
 //   - The signals of the 3D physics components count only on entities that hold a 2D one (PHYSICS2D_MIXED_WORLDS).
+//   - Tilemap colliders (decision 25): a TilemapCollider's shape is its tilemap's merged boxes, loaded through the
+//     specification's Assets by DescribePhysics2DBodyShape. A rebuild records the version of every creatable plan's
+//     tilemaps (TilemapInputs) and PreStep rebuilds when one changes, marking its colliders changed, so a tilemap.paint edit
+//     rebuilds the shape in place and a body its tilemap left without a solid cell is created once it has one; a
+//     TilemapRenderer's signals count only on an entity whose TilemapCollider takes the renderer's tilemap.
 
 namespace Engine {
 
@@ -463,6 +472,9 @@ namespace Engine {
 		Utils::Connect2DSignals<BoxCollider2DComponent, &State::On2DComponentChanged>(registry, *this);
 		Utils::Connect2DSignals<CircleCollider2DComponent, &State::On2DComponentChanged>(registry, *this);
 		Utils::Connect2DSignals<PolygonCollider2DComponent, &State::On2DComponentChanged>(registry, *this);
+		Utils::Connect2DSignals<TilemapColliderComponent, &State::On2DComponentChanged>(registry, *this);
+		// A TilemapCollider without a Tilemap takes its entity's TilemapRenderer's.
+		Utils::Connect2DSignals<TilemapRendererComponent, &State::OnTilemapRendererChanged>(registry, *this);
 		// A 3D physics component added to or removed from an entity that holds a 2D one makes or ends PHYSICS2D_MIXED_WORLDS.
 		Utils::Connect2DSignals<RigidBodyComponent, &State::On3DComponentChanged>(registry, *this);
 		Utils::Connect2DSignals<BoxColliderComponent, &State::On3DComponentChanged>(registry, *this);
@@ -483,6 +495,8 @@ namespace Engine {
 		Utils::Disconnect2DSignals<BoxCollider2DComponent>(registry, *this);
 		Utils::Disconnect2DSignals<CircleCollider2DComponent>(registry, *this);
 		Utils::Disconnect2DSignals<PolygonCollider2DComponent>(registry, *this);
+		Utils::Disconnect2DSignals<TilemapColliderComponent>(registry, *this);
+		Utils::Disconnect2DSignals<TilemapRendererComponent>(registry, *this);
 		Utils::Disconnect2DSignals<RigidBodyComponent>(registry, *this);
 		Utils::Disconnect2DSignals<BoxColliderComponent>(registry, *this);
 		Utils::Disconnect2DSignals<SphereColliderComponent>(registry, *this);
@@ -505,7 +519,16 @@ namespace Engine {
 
 	void Physics2DSystem::State::On3DComponentChanged(entt::registry& registry, entt::entity entity)
 	{
-		if (!registry.any_of<RigidBody2DComponent, BoxCollider2DComponent, CircleCollider2DComponent, PolygonCollider2DComponent>(entity))
+		if (!registry.any_of<RigidBody2DComponent, BoxCollider2DComponent, CircleCollider2DComponent, PolygonCollider2DComponent, TilemapColliderComponent>(entity))
+			return;
+		On2DComponentChanged(registry, entity);
+	}
+
+	void Physics2DSystem::State::OnTilemapRendererChanged(entt::registry& registry, entt::entity entity)
+	{
+		// Only a TilemapCollider without a Tilemap of its own reads the renderer's: any other renderer change composes nothing.
+		const TilemapColliderComponent* collider = registry.try_get<TilemapColliderComponent>(entity);
+		if (collider == nullptr || collider->Tilemap.IsValid())
 			return;
 		On2DComponentChanged(registry, entity);
 	}
@@ -525,7 +548,8 @@ namespace Engine {
 			return storage != nullptr && !storage->empty();
 		};
 		return holds.template operator()<RigidBody2DComponent>() || holds.template operator()<BoxCollider2DComponent>()
-			|| holds.template operator()<CircleCollider2DComponent>() || holds.template operator()<PolygonCollider2DComponent>();
+			|| holds.template operator()<CircleCollider2DComponent>() || holds.template operator()<PolygonCollider2DComponent>()
+			|| holds.template operator()<TilemapColliderComponent>();
 	}
 
 	bool Physics2DSystem::State::IsPresent(UUID entity) const
@@ -612,20 +636,22 @@ namespace Engine {
 
 		UUID entity = plan.Owner;
 		std::string component;
+		std::string_view diagnosticField = field;
 		if (plan.Origin == PhysicsBodyOrigin::RigidBody && (code != PhysicsInvalidShapeCode || !carriesCode || !field.empty()))
 			component = "RigidBody2D";
 		if (component.empty() && code == PhysicsInvalidShapeCode)
 		{
-			if (error.GetLocation().Entity.IsValid())
-				entity = error.GetLocation().Entity;
-			else if (const std::optional<uint32_t> index = Utils::ParseColliderIndex(reason); index.has_value() && *index < plan.Colliders.size())
-				entity = plan.Colliders[*index].Entity;
-			const auto collider = std::ranges::find_if(plan.Colliders, [entity](const Physics2DColliderPlan& candidate)
+			// The collider the refusal names (a TilemapCollider's: its Tilemap field), else its location's entity.
+			if (const Physics2DColliderPlan* collider = FindRefusedCollider2D(plan, error))
 			{
-				return candidate.Entity == entity;
-			});
-			if (collider != plan.Colliders.end())
+				entity = collider->Entity;
 				component = std::string(GetCollider2DComponentName(collider->Type));
+				diagnosticField = GetCollider2DShapeField(collider->Type);
+			}
+			else if (error.GetLocation().Entity.IsValid())
+			{
+				entity = error.GetLocation().Entity;
+			}
 		}
 
 		const ConstEntity owner = scene.FindEntityByID(plan.Owner);
@@ -635,7 +661,7 @@ namespace Engine {
 		diagnostic.Severity = DiagnosticSeverity::Error;
 		diagnostic.Entity = entity;
 		diagnostic.Component = std::move(component);
-		diagnostic.Field = std::string(field);
+		diagnostic.Field = std::string(diagnosticField);
 		diagnostic.Message = std::format("the 2D body of '{}' ({}) is not created: {}", ownerName, plan.Owner, reason);
 		diagnostic.Hint = error.GetHint().empty() ? std::string("fix the component values the message names; the rest of the scene keeps simulating")
 												  : error.GetHint();
@@ -1004,11 +1030,45 @@ namespace Engine {
 		return inputs;
 	}
 
+	std::vector<Physics2DTilemapInput> Physics2DSystem::State::CaptureTilemapInputs(const Physics2DComposition& composition) const
+	{
+		const Scene& scene = *Specification.RuntimeScene;
+		std::vector<Physics2DTilemapInput> inputs;
+		for (const Physics2DBodyPlan& plan : composition.Bodies)
+		{
+			if (!plan.IsCreatable)
+				continue;
+			for (const Physics2DColliderPlan& collider : plan.Colliders)
+			{
+				if (collider.Type != Physics2DColliderType::Tilemap)
+					continue;
+				const AssetHandle tilemap = GetTilemapColliderTilemap(scene.FindEntityByID(collider.Entity));
+				const uint64_t version = Specification.Assets != nullptr && tilemap.IsValid() ? Specification.Assets->GetVersion(tilemap) : 0;
+				inputs.push_back(Physics2DTilemapInput{ .Collider = collider.Entity, .Tilemap = tilemap, .Version = version });
+			}
+		}
+		return inputs;
+	}
+
+	std::set<UUID> Physics2DSystem::State::FindTilemapChanges() const
+	{
+		std::set<UUID> changed;
+		if (Specification.Assets == nullptr)
+			return changed;
+		for (const Physics2DTilemapInput& input : TilemapInputs)
+		{
+			if (input.Tilemap.IsValid() && Specification.Assets->GetVersion(input.Tilemap) != input.Version)
+				changed.insert(input.Collider);
+		}
+		return changed;
+	}
+
 	Result<Ref<const PhysicsShape>> Physics2DSystem::State::BuildShape(const Physics2DBodyPlan& plan, Body2DShapeDescription& description)
 	{
-		ENGINE_TRY_ASSIGN(description, DescribePhysics2DBodyShape(*Specification.RuntimeScene, plan));
-		ENGINE_TRY_ASSIGN(const BodyShapeDescription laid, MakeBody2DShape(description));
-		return PhysicsShape::Create(laid);
+		ENGINE_TRY_ASSIGN(description, DescribePhysics2DBodyShape(*Specification.RuntimeScene, plan, Specification.Assets));
+		if (description.Colliders.empty())
+			return Ref<const PhysicsShape>();
+		return CreatePhysics2DBodyShape(plan, description);
 	}
 
 	bool Physics2DSystem::State::CreateBody(const Physics2DBodyPlan& plan, std::optional<std::pair<glm::vec2, float>> velocities)
@@ -1022,6 +1082,9 @@ namespace Engine {
 			RaiseBodyError(plan, shape.error());
 			return false;
 		}
+		// No sub-shape (TilemapColliders whose tilemaps have no solid cell): no body, without a diagnostic.
+		if (*shape == nullptr)
+			return false;
 
 		const glm::mat4 world = Utils::Get2DWorldMatrix(owner);
 		Body2DDescription body = Utils::MakeBody2DSettings(plan, owner);
@@ -1119,7 +1182,7 @@ namespace Engine {
 	bool Physics2DSystem::State::ReplaceShape(Physics2DBodyEntry& entry, const Physics2DBodyPlan& plan, std::set<UUID>& woken)
 	{
 		const uint32_t handle = entry.Handle.GetValue();
-		Result<Body2DShapeDescription> description = DescribePhysics2DBodyShape(*Specification.RuntimeScene, plan);
+		Result<Body2DShapeDescription> description = DescribePhysics2DBodyShape(*Specification.RuntimeScene, plan, Specification.Assets);
 		if (!description)
 		{
 			// A body refused after an edit: removed, its pairs end at PostStep.
@@ -1127,13 +1190,17 @@ namespace Engine {
 			RemoveBody(handle, woken);
 			return false;
 		}
+		// Left without a sub-shape (its tilemaps' solid cells erased): removed without a diagnostic, as a body never created
+		// for it; a later rebuild creates it again once a tilemap has a solid cell.
+		if (description->Colliders.empty())
+		{
+			RemoveBody(handle, woken);
+			return false;
+		}
 		// An input written back to the same value changes nothing.
 		if (!Utils::SameShape2DDescription(*description, entry.ShapeDescription))
 		{
-			Result<Ref<const PhysicsShape>> shape = MakeBody2DShape(*description).and_then([](const BodyShapeDescription& laid)
-			{
-				return PhysicsShape::Create(laid);
-			});
+			Result<Ref<const PhysicsShape>> shape = CreatePhysics2DBodyShape(plan, *description);
 			if (!shape)
 			{
 				RaiseBodyError(plan, shape.error());
@@ -1231,6 +1298,8 @@ namespace Engine {
 			if (touched)
 				static_cast<void>(ReplaceShape(*existing, plan, woken));
 		}
+		// After the loads above, so each version is the one the shapes were built from.
+		TilemapInputs = CaptureTilemapInputs(composition);
 	}
 
 	void Physics2DSystem::State::RefreshShapes(const std::set<UUID>& owners, std::set<UUID>& woken)
@@ -1357,8 +1426,14 @@ namespace Engine {
 		const auto deltaTime = static_cast<float>(step.FixedDelta);
 		std::set<UUID> woken;
 
-		// Rebuilds, and the partners of destroyed bodies woken so the step reports what still touches.
+		// Rebuilds, and the partners of destroyed bodies woken so the step reports what still touches. A tilemap with a new
+		// version (a tilemap.paint edit, a reimport) rebuilds the plans of its colliders, as a component change of them.
 		const bool hierarchyChanged = state.HasHierarchyChanged();
+		if (const std::set<UUID> tilemaps = state.FindTilemapChanges(); !tilemaps.empty())
+		{
+			state.ComponentsChanged = true;
+			state.ChangedEntities.insert(tilemaps.begin(), tilemaps.end());
+		}
 		if (state.ComponentsChanged || hierarchyChanged)
 			state.Rebuild(hierarchyChanged, woken);
 		else if (const std::set<UUID> changed = state.FindShapeChanges(false); !changed.empty())
@@ -2453,10 +2528,75 @@ namespace Engine {
 		return stats;
 	}
 
-	std::optional<Physics2DBodyReport> Physics2DSystem::GetBodyInfo(UUID /*entity*/) const
+	std::optional<Physics2DBodyReport> Physics2DSystem::GetBodyInfo(UUID entity) const
 	{
-		ENGINE_CONTRACT_STUB();
-		return std::nullopt;
+		const State& state = *m_State;
+		// Before the world exists there is no body; an entity pending destruction or disabled has none for scripts and
+		// automation, as for the body functions.
+		if (state.World == nullptr || !state.IsPresent(entity))
+			return std::nullopt;
+		const Physics2DBodyEntry* entry = nullptr;
+		for (const PhysicsBodyOrigin origin : Utils::Body2DOrigins)
+		{
+			entry = state.FindOwnedBody(entity, origin);
+			if (entry != nullptr)
+				break;
+		}
+		if (entry == nullptr)
+		{
+			if (const auto gathered = state.GatheredColliders.find(entity); gathered != state.GatheredColliders.end())
+				entry = state.FindBody(gathered->second);
+		}
+		if (entry == nullptr || !state.IsPresent(entry->Owner))
+			return std::nullopt;
+
+		Physics2DBodyReport report;
+		report.Owner = entry->Owner;
+		report.Origin = entry->Origin;
+		report.MotionType = entry->Plan.MotionType;
+		report.IsSensor = entry->Plan.IsSensor;
+		report.Layer = entry->Plan.Layer;
+		report.LayerName = report.Layer < state.Layers.GetLayerCount() ? state.Layers.GetName(report.Layer) : std::string();
+		// Each collider entity once, in sub-shape user data order: an entity holding two 2D collider components is listed at
+		// its first, and a tilemap's boxes share their collider's entry.
+		std::set<UUID> listed;
+		for (const UUID collider : entry->Colliders)
+		{
+			if (listed.insert(collider).second)
+				report.Colliders.push_back(collider);
+		}
+		report.Pose = state.World->GetPose(entry->Handle);
+		report.LinearVelocity = state.World->GetLinearVelocity(entry->Handle);
+		report.AngularVelocity = state.World->GetAngularVelocity(entry->Handle);
+		report.IsSleeping = state.World->IsSleeping(entry->Handle);
+		if (const std::optional<Aabb> bounds = state.World->GetBodyBounds(entry->Handle); bounds.has_value() && !bounds->IsEmpty())
+		{
+			report.BoundsMin = glm::vec2(bounds->Min.x, bounds->Min.y);
+			report.BoundsMax = glm::vec2(bounds->Max.x, bounds->Max.y);
+		}
+		if (const auto owned = state.PairsByOwner.find(report.Owner); owned != state.PairsByOwner.end())
+		{
+			for (const PhysicsPairKey& key : owned->second)
+			{
+				const auto found = state.Pairs.find(key);
+				ENGINE_CORE_VERIFY(found != state.Pairs.end(), "Physics2DSystem: an owner's pair does not exist (PairsByOwner and Pairs out of step)");
+				// The body's pairs: a collider pair is its collider's (M20), not the body's.
+				if (found == state.Pairs.end() || !found->second.Active || key.IsColliderPair())
+					continue;
+				const PhysicsPair& pair = found->second;
+				const bool low = key.Low == report.Owner;
+				report.Contacts.push_back(PhysicsContactInfo{ .Other = low ? key.High : key.Low,
+					.Collider = low ? pair.LowCollider : pair.HighCollider,
+					.OtherCollider = low ? pair.HighCollider : pair.LowCollider,
+					.IsTrigger = key.Kind == PhysicsPairKind::Trigger,
+					.SinceTick = pair.SinceTick });
+			}
+		}
+		std::ranges::sort(report.Contacts, [](const PhysicsContactInfo& a, const PhysicsContactInfo& b)
+		{
+			return std::tie(a.Other, a.IsTrigger) < std::tie(b.Other, b.IsTrigger);
+		});
+		return report;
 	}
 
 	void Physics2DSystem::AppendStateHash(XXH64Hasher& hasher) const

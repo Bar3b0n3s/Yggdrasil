@@ -247,7 +247,7 @@ namespace Engine {
 			return SpriteOpaque;
 		}
 
-		static bool IsSpriteTexture(BuiltinTexture texture)
+		[[maybe_unused]] static bool IsSpriteTexture(BuiltinTexture texture)
 		{
 			return texture == BuiltinTexture::SpriteSquare || texture == BuiltinTexture::SpriteRounded || texture == BuiltinTexture::SpriteBevel
 				|| texture == BuiltinTexture::SpriteCircle;

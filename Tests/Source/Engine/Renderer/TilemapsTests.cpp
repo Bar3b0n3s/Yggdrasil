@@ -1,5 +1,6 @@
 #include "TestsPCH.h"
 
+#include "Engine/Asset/AssetDiagnostic.h"
 #include "Engine/Asset/SpriteSheetData.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/Asset/TilemapData.h"
@@ -9,9 +10,11 @@
 #include "Engine/Graphics/RenderTargetPool.h"
 #include "Engine/Renderer/QuadBatcher.h"
 #include "Engine/Renderer/RenderSnapshot.h"
+#include "Engine/Renderer/RenderStats.h"
 #include "Engine/Renderer/SceneRenderer.h"
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Support/DeviceLossTest.h"
+#include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -26,8 +29,9 @@
 
 // Tilemaps through the sprite path (M21, C21.2, R-2D-TILE; Docs/Decisions/0032-m21-contract.md decision 24, stream T1; Roadmap
 // M21 "A tilemap renders byte-identical to the same tiles drawn as sprites"; plan §7 item 3: every new GPU owner has a loss
-// test through the shared helper). The gpu suite runs every case under API 1.4 and again capped at 1.3. Skipped until stream
-// T1 implements the tilemaps' extraction and drawing.
+// test through the shared helper). The gpu suite runs every case under API 1.4 and again capped at 1.3. The byte-identical
+// case's lit variant (lit tiles through stream L's HdrLit pipeline) and the case of a tilemap of more than MaxQuadsPerRecord
+// tiles (stream L's batches beyond the QuadBatcher's capacity) need two streams and run from W21.2's integration (decision 33).
 
 namespace Engine {
 
@@ -59,15 +63,16 @@ namespace Engine {
 			return texture;
 		}
 
-		// Frames 0 to 3 are the texture's four 4 x 4 quarters, pivoted at their centres; frame 4 is the whole 8 x 8 texture
-		// pivoted at the middle of its right edge, so a tile of it lies left of its cell's centre.
-		Ref<SpriteSheetData> MakeTileSheet()
+		// Frames 0 to 3 are the texture's four 4 x 4 quarters, pivoted at their centres; frame 4 is the texture's
+		// `overhangTexels` x `overhangTexels` corner (by default the whole 8 x 8 texture) pivoted at the middle of its right
+		// edge, so a tile of it lies left of its cell's centre.
+		Ref<SpriteSheetData> MakeTileSheet(uint32_t overhangTexels = TileTexels)
 		{
 			Ref<SpriteSheetData> sheet = CreateRef<SpriteSheetData>();
 			sheet->Texture = TypedAssetHandle<AssetType::Texture>(TileTextureHandle);
 			for (const glm::uvec2 origin : { glm::uvec2(0, 0), glm::uvec2(4, 0), glm::uvec2(0, 4), glm::uvec2(4, 4) })
 				sheet->Frames.push_back(SpriteFrame{ .Rect = { .X = origin.x, .Y = origin.y, .Width = 4, .Height = 4 } });
-			sheet->Frames.push_back(SpriteFrame{ .Rect = { .X = 0, .Y = 0, .Width = TileTexels, .Height = TileTexels }, .Pivot = glm::vec2(1.0f, 0.5f) });
+			sheet->Frames.push_back(SpriteFrame{ .Rect = { .X = 0, .Y = 0, .Width = overhangTexels, .Height = overhangTexels }, .Pivot = glm::vec2(1.0f, 0.5f) });
 			return sheet;
 		}
 
@@ -107,7 +112,7 @@ namespace Engine {
 
 		// The tiles of `cells` (empty cells skipped) as sprites, each with the world matrix of its cell's centre, in that order.
 		void AppendTileSprites(RenderSnapshot& snapshot, const TilemapData& tilemap, std::span<const glm::ivec2> cells, const glm::vec4& tint,
-			float pixelsPerUnit)
+			float pixelsPerUnit, bool lit = false)
 		{
 			for (const glm::ivec2 cell : cells)
 			{
@@ -120,8 +125,24 @@ namespace Engine {
 					.Frame = tilemap.Palette[value - 1].Frame,
 					.Color = tint,
 					.PixelsPerUnit = pixelsPerUnit,
+					.Lit = lit,
 					.Entity = UUID(91) });
 			}
+		}
+
+		// A warm point light over the view's upper left, fading out across it, and a dim global light (C21.2, decision 22): both
+		// reach the view, so lit tiles and lit sprites take the same light at each pixel.
+		void AddTileLights(RenderSnapshot& snapshot)
+		{
+			snapshot.Lights2D.push_back(Light2DItem{ .Type = RenderLight2DType::Point,
+				.Position = glm::vec3(-1.0f, 1.0f, 0.0f),
+				.Color = glm::vec3(1.0f, 0.8f, 0.6f),
+				.Intensity = 1.5f,
+				.Radius = 3.0f,
+				.Falloff = 0.5f,
+				.Height = 1.0f,
+				.Entity = UUID(92) });
+			snapshot.Lights2D.push_back(Light2DItem{ .Type = RenderLight2DType::Global, .Color = glm::vec3(0.1f), .Intensity = 1.0f, .Entity = UUID(93) });
 		}
 
 		// A 64 x 64 view of a 16 x 16 pixel-art scene (scale 4) whose orthographic camera at z = 10 shows 8 units: a unit is 2
@@ -162,7 +183,7 @@ namespace Engine {
 		// Decision 24's rules, each of which the comparison catches: a tile larger than its cell draws as its sprite; the tiles
 		// draw in the tilemap's cell order across the chunks' edges, never chunk by chunk; and a chunk's bounds are its tiles'
 		// quads, so chunk (2, 0), outside the view, draws its tile that reaches into it.
-		TEST_CASE("Tilemaps: a tilemap renders byte-identical to the same tiles drawn as sprites" * doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		TEST_CASE("Tilemaps: a tilemap renders byte-identical to the same tiles drawn as sprites" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -221,9 +242,31 @@ namespace Engine {
 			AppendTileSprites(culledByCells, *tilemap, cellsInView, tint, OverhangPixelsPerUnit);
 			REQUIRE(culledByCells.Sprites.size() == 13);
 			CHECK(setup.Render(culledByCells).Pixels != tileImage.Pixels);
+
+			// The lit variant (decision 33: stream T1's tiles through stream L's HdrLit pipeline): the tilemap made Lit, under a
+			// point light and a global light, renders byte-identical to the same tiles drawn as lit sprites, through the Lights2D
+			// pass, and the lights change the image.
+			RenderSnapshot litTiles = MakeTileSnapshot(setup);
+			litTiles.FrameIndex += 4;
+			litTiles.Tilemaps.push_back(
+				TilemapItem{ .Tilemap = TilemapHandle, .Color = tint, .PixelsPerUnit = OverhangPixelsPerUnit, .Lit = true, .Entity = UUID(90) });
+			AddTileLights(litTiles);
+			const Image litTileImage = setup.Render(litTiles);
+			CHECK(SpriteTriangles(setup) == 28);
+			const RenderStats litStats = setup.Renderer().GetRenderStats();
+			const RenderPassStats* lights = Test::SceneRendererIntegrationFixture::FindPass(litStats, "Lights2D");
+			REQUIRE(lights != nullptr);
+			CHECK(lights->DrawCalls >= 2);
+			RenderSnapshot litSprites = MakeTileSnapshot(setup);
+			litSprites.FrameIndex += 5;
+			AppendTileSprites(litSprites, *tilemap, rows, tint, OverhangPixelsPerUnit, true);
+			REQUIRE(litSprites.Sprites.size() == 14);
+			AddTileLights(litSprites);
+			CHECK(setup.Render(litSprites).Pixels == litTileImage.Pixels);
+			CHECK(litTileImage.Pixels != tileImage.Pixels);
 		}
 
-		TEST_CASE("Tilemaps: only the chunks that meet the view are drawn" * doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		TEST_CASE("Tilemaps: only the chunks that meet the view are drawn" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -242,12 +285,122 @@ namespace Engine {
 			CHECK(moved.Pixels != image.Pixels);
 		}
 
+		// Decision 24: the tilemaps and the sprites form one draw order, each tilemap drawn before Sprites[DrawPosition], so a
+		// sprite over a tile shows when the tilemap draws before it and the tile when the tilemap draws after it.
+		TEST_CASE("Tilemaps: a tilemap draws among the sprites at its DrawPosition" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu);
+			PublishTiles(setup, MakeTilemap(false));
+			// A green-tinted sprite over the tile of cell (1, 0) (world [2, 4] x [0, 2], scene pixels x [12, 16), y [4, 8)): its
+			// texels have no blue, every tile's has.
+			RenderSnapshot snapshot = MakeTileSnapshot(setup);
+			snapshot.Sprites.push_back(SpriteItem{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(3.0f, 1.0f, 0.0f)),
+				.Texture = TileTextureHandle,
+				.Color = glm::vec4(0.0f, 1.0f, 0.0f, 1.0f),
+				.PixelsPerUnit = 4.0f,
+				.Entity = UUID(91) });
+			const auto blueAt = [](const Image& image, uint32_t x, uint32_t y)
+			{
+				// The 16 x 16 scene upscaled 4 times: scene pixel (x, y) is view pixel (4 x + 2, 4 y + 2).
+				const std::span<const std::byte> row = image.GetRow(4 * y + 2);
+				return std::to_integer<int>(row[4 * (4 * x + 2) + 2]);
+			};
+			snapshot.Tilemaps.push_back(TilemapItem{ .Tilemap = TilemapHandle, .PixelsPerUnit = 2.0f, .DrawPosition = 0, .Entity = UUID(90) });
+			const Image spriteOnTop = setup.Render(snapshot);
+			CHECK(blueAt(spriteOnTop, 13, 5) == 0);
+			snapshot.Tilemaps.front().DrawPosition = 1;
+			snapshot.FrameIndex += 1;
+			const Image tileOnTop = setup.Render(snapshot);
+			CHECK(blueAt(tileOnTop, 13, 5) > 0);
+			// Elsewhere both images show the same tiles.
+			CHECK(blueAt(spriteOnTop, 2, 13) == blueAt(tileOnTop, 2, 13));
+		}
+
+		// Decision 24: the chunk bounds kept between renders follow the tilemap: a new version (another map under the same handle)
+		// redraws from its own chunks, whose indices name other places, and a missing tilemap draws nothing, reported with
+		// GetOrPlaceholder's code.
+		TEST_CASE("Tilemaps: a tilemap's new version draws its own chunks, and a missing tilemap draws nothing" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu);
+			PublishTiles(setup, MakeTilemap(true));
+			RenderSnapshot snapshot = MakeTileSnapshot(setup);
+			snapshot.Tilemaps.push_back(TilemapItem{ .Tilemap = TilemapHandle, .PixelsPerUnit = 2.0f, .Entity = UUID(90) });
+			static_cast<void>(setup.Render(snapshot));
+			CHECK(SpriteTriangles(setup) == 26);
+
+			// Four far chunks take the indices of the chunks in view before, and the one chunk in view now takes the index of the
+			// far chunk before: kept bounds would draw the four and cull the one.
+			Ref<TilemapData> moved = MakeTilemap(false);
+			moved->Chunks.clear();
+			for (int32_t x = -40; x < -36; ++x)
+				moved->Chunks.push_back(TilemapChunk{ .X = x, .Y = -40, .Tiles = { 1, 1, 1, 1 } });
+			moved->Chunks.push_back(TilemapChunk{ .X = 0, .Y = 0, .Tiles = { 1, 1, 1, 1 } });
+			setup.Assets().Publish(TilemapHandle, std::move(moved));
+			snapshot.FrameIndex += 1;
+			static_cast<void>(setup.Render(snapshot));
+			CHECK(SpriteTriangles(setup) == 8);
+
+			const AssetHandle missing(0x89430000ull);
+			snapshot.Tilemaps.front().Tilemap = missing;
+			snapshot.FrameIndex += 1;
+			{
+				const Test::ExpectLog log(LogLevel::Error, missing.ToString());
+				static_cast<void>(setup.Render(snapshot));
+			}
+			CHECK(SpriteTriangles(setup) == 0);
+			CHECK(std::ranges::any_of(setup.Assets().GetDiagnostics(), [missing](const AssetDiagnostic& diagnostic)
+			{
+				return diagnostic.Asset == missing && diagnostic.Code == AssetMissingCode;
+			}));
+		}
+
+		// Decision 24 (W21.2's review): the chunk bounds kept between renders are rebuilt when the pixels per unit or a palette
+		// sheet's version changes, so a tile that grows into the view draws at once and never pops in later: chunk (2, 0),
+		// outside the view, draws its frame-4 tile exactly when the tile reaches into the view. The 8 x 8 frame's tile spans
+		// [1, 9] x [-3, 5] at 1 pixel per unit and [5, 9] x [-1, 3] at 2; a 4 x 4 frame's spans [5, 9] x [-1, 3] at 1.
+		TEST_CASE("Tilemaps: the kept chunk bounds follow the pixels per unit and a palette sheet's new version" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu);
+			PublishTiles(setup, MakeOverhangingTilemap());
+			RenderSnapshot snapshot = MakeTileSnapshot(setup);
+			snapshot.Tilemaps.push_back(TilemapItem{ .Tilemap = TilemapHandle, .PixelsPerUnit = 2.0f, .Entity = UUID(90) });
+			const Image twoPixels = setup.Render(snapshot);
+			// The 13 tiles of the cells in view; chunk (2, 0)'s tile stays outside it.
+			CHECK(SpriteTriangles(setup) == 26);
+
+			// The same tilemap at 1 pixel per unit: the tile reaches into the view, and its chunk draws it.
+			snapshot.Tilemaps.front().PixelsPerUnit = OverhangPixelsPerUnit;
+			snapshot.FrameIndex += 1;
+			const Image onePixel = setup.Render(snapshot);
+			CHECK(SpriteTriangles(setup) == 28);
+			CHECK(onePixel.Pixels != twoPixels.Pixels);
+
+			// The sheet's new version with a 4 x 4 frame 4: the tile no longer reaches the view, and its chunk is culled.
+			setup.Assets().Publish(TileSheetHandle, MakeTileSheet(4));
+			snapshot.FrameIndex += 1;
+			const Image shrunk = setup.Render(snapshot);
+			CHECK(SpriteTriangles(setup) == 26);
+			CHECK(shrunk.Pixels != onePixel.Pixels);
+
+			// Its next version, with the 8 x 8 frame again: the tile reaches into the view at once, as before.
+			setup.Assets().Publish(TileSheetHandle, MakeTileSheet());
+			snapshot.FrameIndex += 1;
+			const Image grown = setup.Render(snapshot);
+			CHECK(SpriteTriangles(setup) == 28);
+			CHECK(grown.Pixels == onePixel.Pixels);
+		}
+
 		// Decision 24 (C21.2's review): the QuadBatcher loses no quad to its capacity (stream L), so a zoomed-out tilemap of
 		// more than MaxQuadsPerRecord visible tiles (stream T1) never drops the sprite drawn after it: 72 chunks of 64 x 64 cells
 		// of 1/128 unit, 294,912 tiles over [-4, 0.5] x [-4, 0], then a green-tinted sprite over [-3, -1]^2. Stream T1's
-		// tilemaps with stream L's batches: run at W21.2's integration (decision 33).
-		TEST_CASE("Tilemaps: a sprite drawn after a tilemap of more than MaxQuadsPerRecord visible tiles still draws" * doctest::test_suite(Test::GpuSuite)
-			* doctest::skip(true))
+		// tilemaps with stream L's batches: run from W21.2's integration (decision 33).
+		TEST_CASE("Tilemaps: a sprite drawn after a tilemap of more than MaxQuadsPerRecord visible tiles still draws" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -290,8 +443,7 @@ namespace Engine {
 			CHECK(std::to_integer<int>(row[4 * (4 * 8 + 2) + 2]) > 0);
 		}
 
-		TEST_CASE("Tilemaps: a renderer drawing a tilemap recovers from a device loss with the same image" * doctest::test_suite(Test::GpuSuite)
-			* doctest::skip(true))
+		TEST_CASE("Tilemaps: a renderer drawing a tilemap recovers from a device loss with the same image" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);

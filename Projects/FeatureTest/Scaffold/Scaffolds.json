@@ -136,6 +136,30 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "Lights2D.jsonl",
+			"IdSeed": 1920,
+			"Renderer": "none"
+		},
+		{
+			"File": "Tilemaps.jsonl",
+			"IdSeed": 1921,
+			"Renderer": "none"
+		},
+		{
+			"File": "Lights2DGolden.jsonl",
+			"IdSeed": 1922,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Scenes/Lights2DGolden",
+				"Assets/Textures/Lights2DGolden"
+			]
+		},
+		{
+			"File": "TilemapReplay.jsonl",
+			"IdSeed": 1923,
+			"Renderer": "none"
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

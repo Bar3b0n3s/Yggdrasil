@@ -62,7 +62,8 @@
 					"PixelsPerUnit": 8,
 					"SortingLayer": "Foreground",
 					"OrderInLayer": -10,
-					"Lit": false
+					"Lit": false,
+					"NormalMap": null
 				}
 			}
 		},
@@ -88,7 +89,8 @@
 					"PixelsPerUnit": 4,
 					"SortingLayer": "Characters",
 					"OrderInLayer": 0,
-					"Lit": false
+					"Lit": false,
+					"NormalMap": null
 				}
 			}
 		},
@@ -114,7 +116,8 @@
 					"PixelsPerUnit": 4,
 					"SortingLayer": "Background",
 					"OrderInLayer": 20,
-					"Lit": false
+					"Lit": false,
+					"NormalMap": null
 				}
 			}
 		},
@@ -140,7 +143,8 @@
 					"PixelsPerUnit": 4,
 					"SortingLayer": "Characters",
 					"OrderInLayer": 0,
-					"Lit": false
+					"Lit": false,
+					"NormalMap": null
 				}
 			}
 		},
@@ -166,7 +170,8 @@
 					"PixelsPerUnit": 4,
 					"SortingLayer": "Characters",
 					"OrderInLayer": 0,
-					"Lit": false
+					"Lit": false,
+					"NormalMap": null
 				}
 			}
 		},
@@ -192,7 +197,8 @@
 					"PixelsPerUnit": 16,
 					"SortingLayer": "Characters",
 					"OrderInLayer": 0,
-					"Lit": false
+					"Lit": false,
+					"NormalMap": null
 				}
 			}
 		},
@@ -218,7 +224,8 @@
 					"PixelsPerUnit": 1.6,
 					"SortingLayer": "Default",
 					"OrderInLayer": 0,
-					"Lit": false
+					"Lit": false,
+					"NormalMap": null
 				}
 			}
 		},
@@ -244,7 +251,8 @@
 					"PixelsPerUnit": 16,
 					"SortingLayer": "Characters",
 					"OrderInLayer": 0,
-					"Lit": false
+					"Lit": false,
+					"NormalMap": null
 				}
 			}
 		},
@@ -270,7 +278,8 @@
 					"PixelsPerUnit": 16,
 					"SortingLayer": "Characters",
 					"OrderInLayer": 0,
-					"Lit": false
+					"Lit": false,
+					"NormalMap": null
 				}
 			}
 		},
@@ -296,7 +305,8 @@
 					"PixelsPerUnit": 16,
 					"SortingLayer": "Characters",
 					"OrderInLayer": 0,
-					"Lit": false
+					"Lit": false,
+					"NormalMap": null
 				}
 			}
 		},
@@ -322,7 +332,8 @@
 					"PixelsPerUnit": 16,
 					"SortingLayer": "Characters",
 					"OrderInLayer": 0,
-					"Lit": false
+					"Lit": false,
+					"NormalMap": null
 				}
 			}
 		}

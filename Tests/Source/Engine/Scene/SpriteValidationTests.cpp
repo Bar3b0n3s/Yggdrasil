@@ -16,7 +16,7 @@
 
 // The sprite validation codes (Docs/Decisions/0032-m21-contract.md decision 12): stream A's two (the sorting layer and the
 // frame) and stream B's clip, each in a case of its own so each stream proves its checks alone; C21.2's stream T1 extends the
-// sorting-layer check to TilemapRenderer (decision 30), skipped until it lands.
+// sorting-layer check to TilemapRenderer (decision 30).
 
 namespace Engine {
 
@@ -134,7 +134,7 @@ namespace Engine {
 
 		// C21.2 (decision 30, stream T1): a TilemapRenderer's SortingLayer sorts with the sprites, so an undeclared one draws in
 		// the first layer and is reported with the sprites' code, naming the TilemapRenderer; the check needs no asset manager.
-		TEST_CASE("SpriteValidation: a TilemapRenderer's unknown sorting layer is reported" * doctest::skip(true))
+		TEST_CASE("SpriteValidation: a TilemapRenderer's unknown sorting layer is reported")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();

@@ -7,9 +7,9 @@ Two output roots, each owned whole by this generator (a file it does not write i
   Assets/) and `Expected.json` ({"Format": "ValidationFixture", "Version": 1, "Scope": "Project", "Codes",
   "TestComponents", "Expand", "NonCanonical"}). <Name> is a code of ProjectValidator::GetCodes, whose Codes contain it,
   or <CODE>.<Variant>, a further fixture of that code for another path that reports it (<CODE>.2D: the 2D world's
-  composition, Docs/Decisions/0032-m21-contract.md decision 12), or Clean, the baseline (a primary camera with the
-  audio listener, and a sun) that reports nothing. Every fixture starts from that baseline, so incidental codes stay
-  out; Codes lists every code the project reports, sorted.
+  composition, Docs/Decisions/0032-m21-contract.md decision 12; <CODE>.Tilemap: a tilemap's palette sheets, its decision
+  23), or Clean, the baseline (a primary camera with the audio listener, and a sun) that reports nothing. Every fixture
+  starts from that baseline, so incidental codes stay out; Codes lists every code the project reports, sorted.
 - Tests/Data/SettingsObservation/Project/: the files Tests/Data/Project/AllSettings.eproj names (Assets/Icon.png, the
   start, build and suite scenes, the suite script and its replay) and a module whose Assets.Load path is computed (for
   Export.PruneUnreferenced), opened by "ProjectSettings: every AllSettings.eproj value is observed by its consumer"
@@ -27,6 +27,9 @@ Special cases (also in Tests/Data/Validation/README.md, which this generator wri
   committed.
 - NonCanonical lists project-relative paths that are deliberately not canonical JSON (ASSET_IMPORT_FAILED's unreadable
   .meta); the authored-files test exempts exactly those.
+- ASSET_MISSING.Tilemap and ASSET_TYPE_MISMATCH.Tilemap name a sprite sheet from a tilemap's palette. Sheets have no
+  placeholder, so the asset manager logs nothing for them and only the validator reports them; the test declares no
+  Error entry for those two codes there.
 
 Scenes, metas and project files are written in the canonical JsonWriter form; images are PNGs of stored deflate blocks,
 so no zlib build changes their bytes. The glTF diagnostics fixtures and Truncated.png are byte copies of
@@ -64,8 +67,8 @@ COMPONENT_ORDER = [
     "ID", "Name", "Tags", "Relationship", "Transform", "Prefab", "PrefabLink", "MeshRenderer", "Camera",
     "DirectionalLight", "PointLight", "SpotLight", "Environment", "PostProcess", "Text", "RigidBody", "BoxCollider",
     "SphereCollider", "CapsuleCollider", "MeshCollider", "CharacterController", "AudioSource", "AudioListener",
-    "Script", "SpriteRenderer", "SpriteAnimator", "PixelPerfectCamera", "RigidBody2D", "BoxCollider2D",
-    "CircleCollider2D", "PolygonCollider2D", "ValidatorTarget", "ValidatorFollower",
+    "Script", "SpriteRenderer", "SpriteAnimator", "PixelPerfectCamera", "Light2D", "TilemapRenderer", "RigidBody2D",
+    "BoxCollider2D", "CircleCollider2D", "PolygonCollider2D", "TilemapCollider", "ValidatorTarget", "ValidatorFollower",
 ]
 
 # The registered version of each component above 1 ("ComponentVersions"); every other component is at version 1.
@@ -252,6 +255,16 @@ def sprite_sheet(frames: list[tuple[str, int, int]], clips: list[tuple[str, list
                     "Borders": {"Left": 0, "Top": 0, "Right": 0, "Bottom": 0}} for name, x, y in frames],
         "Clips": [{"Name": name, "Frames": [{"Frame": frame, "Ticks": ticks} for frame, ticks in steps], "Loop": True}
                   for name, steps in clips],
+    }
+
+
+def tilemap(palette: list[tuple[str | None, int, bool]], chunks: list[tuple[int, int, list[int]]],
+            chunk_size: int = 1) -> dict[str, Any]:
+    """A .tilemap of unit cells: palette entries (sheet handle, frame, solid) and chunks (x, y, tiles)."""
+    return {
+        "Format": "Tilemap", "Version": 1, "CellSize": [1, 1], "ChunkSize": chunk_size,
+        "Palette": [{"Sheet": sheet, "Frame": frame, "Solid": solid} for sheet, frame, solid in palette],
+        "Chunks": [{"X": x, "Y": y, "Tiles": tiles} for x, y, tiles in chunks],
     }
 
 
@@ -617,10 +630,12 @@ return Script.Define("Jumper", Jumper)
     item.add_script("Project/Assets/Scripts/Loader.luau", "5c41000000000006", COMPUTED_LOADER)
 
     # M21 (Docs/Decisions/0032-m21-contract.md decision 12): a sprite in a sorting layer SortingLayers.Layers does not
-    # declare, and one whose Frame the sheet lacks.
+    # declare, beside a tilemap renderer in another (decision 30), and one whose Frame the sheet lacks.
     item = fixture("SPRITE_UNKNOWN_SORTING_LAYER")
     item.entities.append(entity("e000000000000003", "Sprite", {
         "Transform": transform(), "SpriteRenderer": {"SortingLayer": "Sky"}}))
+    item.entities.append(entity("e000000000000004", "Tiles", {
+        "Transform": transform(), "TilemapRenderer": {"SortingLayer": "Ground"}}))
 
     item = fixture("SPRITE_FRAME_OUT_OF_RANGE")
     item.add_json("Project/Assets/Sprites/Hero.spritesheet", sprite_sheet([("Idle", 0, 0)], [], 16))
@@ -636,6 +651,32 @@ return Script.Define("Jumper", Jumper)
                   meta("3a7e000000000009", "SpriteSheet", "SpriteSheet"))
     item.entities.append(entity("e000000000000003", "Hero", {
         "Transform": transform(), "SpriteRenderer": {"Sheet": "3a7e000000000009"}, "SpriteAnimator": {"Clip": "Run"}}))
+
+    # M21 (Docs/Decisions/0032-m21-contract.md decision 30): a tilemap whose second palette entry names a frame its
+    # one-frame sheet lacks.
+    item = fixture("TILEMAP_FRAME_OUT_OF_RANGE")
+    item.add_json("Project/Assets/Sprites/Tiles.spritesheet", sprite_sheet([("Ground", 0, 0)], []))
+    item.add_json("Project/Assets/Sprites/Tiles.spritesheet.meta",
+                  meta("3a7e00000000000a", "SpriteSheet", "SpriteSheet"))
+    item.add_json("Project/Assets/Tilemaps/Level.tilemap",
+                  tilemap([("3a7e00000000000a", 0, True), ("3a7e00000000000a", 3, False)], [(0, 0, [1]), (1, 0, [2])]))
+    item.add_json("Project/Assets/Tilemaps/Level.tilemap.meta", meta("7113000000000001", "Tilemap", "Tilemap"))
+
+    # M21 (Docs/Decisions/0032-m21-contract.md decision 23; W21.2's review): a tilemap's palette sheets are checked as
+    # a sprite sheet's texture is, each in a second fixture of its code named <CODE>.Tilemap: a palette entry naming a
+    # sheet that is not registered, and one naming a registered asset of another type. The null entry before it is no
+    # issue.
+    item = fixture("ASSET_MISSING.Tilemap", ["ASSET_MISSING"])
+    item.add_json("Project/Assets/Tilemaps/Level.tilemap",
+                  tilemap([(None, 0, True), ("00000000abcdef02", 0, True)], [(0, 0, [1]), (1, 0, [2])]))
+    item.add_json("Project/Assets/Tilemaps/Level.tilemap.meta", meta("7113000000000001", "Tilemap", "Tilemap"))
+
+    item = fixture("ASSET_TYPE_MISMATCH.Tilemap", ["ASSET_TYPE_MISMATCH"])
+    item.copy_asset("Materials/Red.material", "Project/Assets/Materials/Red.material")
+    item.add_json("Project/Assets/Materials/Red.material.meta", meta("3a7e000000000001", "Material", "Material"))
+    item.add_json("Project/Assets/Tilemaps/Level.tilemap",
+                  tilemap([(None, 0, True), ("3a7e000000000001", 0, True)], [(0, 0, [1]), (1, 0, [2])]))
+    item.add_json("Project/Assets/Tilemaps/Level.tilemap.meta", meta("7113000000000001", "Tilemap", "Tilemap"))
 
     # M21 (Docs/Decisions/0032-m21-contract.md decision 12). An entity with 2D and 3D physics components stays in the 3D
     # world; its 2D components make no body.
@@ -690,7 +731,8 @@ README = """# Validation fixtures
 
 Generated by `Tests/Data/Generate/MakeValidationFixtures.py`; do not edit by hand (ADR 0022 decision 11). Each
 directory is named after the `project.validate` code it triggers, or `<CODE>.<Variant>` for a further fixture of that
-code (`.2D`: the 2D world's composition, ADR 0032 decision 12), or `Clean`, the baseline that reports nothing.
+code (`.2D`: the 2D world's composition, ADR 0032 decision 12; `.Tilemap`: a tilemap's palette sheets, its decision 23),
+or `Clean`, the baseline that reports nothing.
 `Project/` is a complete mini project; `Expected.json` lists every code it reports (`Codes`, sorted), whether the
 validator test components are registered (`TestComponents`), the entities the test repeats into a scene (`Expand`)
 and the deliberately malformed files (`NonCanonical`). The test "Validation: each fixture reports exactly its expected
@@ -704,6 +746,8 @@ gate 6 requires a fixture for every code.
   both out everywhere and the scan reports the mismatch on case-sensitive and case-insensitive file systems alike.
 - `PHYSICS_LIMIT_EXCEEDED` and `PHYSICS_LIMIT_EXCEEDED.2D` (16,385 bodies) and `RENDER_LIGHT_LIMIT_EXCEEDED` (257
   lights) are expanded at test time.
+- `ASSET_MISSING.Tilemap` and `ASSET_TYPE_MISMATCH.Tilemap` name a sprite sheet from a tilemap's palette. Sheets have no
+  placeholder, so the asset manager logs nothing for them and only the validator reports them.
 """
 
 # ---------------------------------------------------------------------------------------------------------------------

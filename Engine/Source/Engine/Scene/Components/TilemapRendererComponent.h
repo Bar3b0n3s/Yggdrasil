@@ -27,8 +27,9 @@ namespace Engine {
 	//     canonical entity order); its own tiles draw in the tilemap's cell order, row by row from the top row (highest y)
 	//     down, each row left to right, across the whole tilemap and never chunk by chunk, so a tile taller than its cell
 	//     draws over the row above it and tiles overlapping across a chunk edge draw in that order.
-	//   - Chunked rendering: the renderer keeps each tilemap's tile quads per chunk between frames and draws only the chunks
-	//     whose bounds meet the view: a chunk's bounds are the union of its tiles' quads (each tile's whole sprite rectangle,
+	//   - Chunked rendering: the renderer keeps each tilemap's chunk bounds between frames (rebuilt when the tilemap, a
+	//     sheet of it or PixelsPerUnit changes; the textures are looked up every render) and draws only the chunks whose
+	//     bounds meet the view: a chunk's bounds are the union of its tiles' quads (each tile's whole sprite rectangle,
 	//     whatever its frame's size and pivot, never only its cell), in world space, and a chunk meets the view unless they
 	//     lie wholly outside its clip rectangle. So a tile drawn larger than its cell never pops in or out at the view's
 	//     edge. The tiles of the chunks drawn are merged into the cell order above.

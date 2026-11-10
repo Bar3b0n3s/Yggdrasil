@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Editor/Viewport/TilemapBrush.h"
 #include "EditorCore/Viewport/EditorViewportState.h"
 #include "EditorCore/Viewport/GizmoController.h"
 #include "Engine/Core/Json/Json.h"
@@ -28,7 +29,9 @@ namespace Engine {
 	// method's own action. In the 2D mode the view pans (MMB, RMB or Alt+LMB) and zooms (the wheel) with
 	// EditorCamera::Navigate2D, never orbits or flies, and its Orthographic overlay toggle is off limits (the 2D camera is
 	// orthographic). A dropped sprite sheet or texture creates a sprite where the cursor's ray meets z = 0 (SpriteDrop.h; the
-	// camera's target when it meets no point of it), through entity.create.
+	// camera's target when it meets no point of it), through entity.create. With one entity holding a TilemapRenderer whose
+	// Tilemap is set selected, the toolbar shows the tile brush's controls and an armed brush takes the image's left and
+	// right strokes, each one tilemap.paint (Editor/Viewport/TilemapBrush.h; M21, decision 26).
 	// Main thread inside ImGui. Retains only UI presentation state, no entity/component/asset pointers across frames.
 	class SceneViewportPanel
 	{
@@ -47,6 +50,7 @@ namespace Engine {
 		[[nodiscard]] Status AcceptAssetDrop(EditorPanelContext& context, const EditorViewportRect& rectangle, const EditorViewportImage& image);
 	private:
 		GizmoSettings m_GizmoSettings{};
+		TilemapBrush m_TilemapBrush{};
 		uint64_t m_ClickSequence = 0;
 		std::vector<uint64_t> m_ActionTickets{};
 		std::vector<UUID> m_DragSelection{};

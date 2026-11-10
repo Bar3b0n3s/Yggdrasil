@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine/Asset/AssetHandle.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/UUID.h"
 #include "Engine/Physics/Physics2DWorld.h"
@@ -16,6 +17,7 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <array>
+#include <cstdint>
 #include <map>
 #include <optional>
 #include <set>
@@ -31,6 +33,15 @@
 // pairs by the same rules. Private to Scene.
 
 namespace Engine {
+
+	// The tilemap a TilemapCollider of a creatable body plan collided with at the last rebuild (M21, C21.2; decision 25), and
+	// its AssetManager::GetVersion then.
+	struct Physics2DTilemapInput
+	{
+		UUID Collider{};
+		AssetHandle Tilemap{};
+		uint64_t Version = 0;
+	};
 
 	// One created 2D body: what contacts and query hits resolve its handle and sub-shape user data through.
 	struct Physics2DBodyEntry
@@ -95,14 +106,20 @@ namespace Engine {
 		std::set<std::tuple<std::string, DiagnosticSeverity, UUID, std::string>> RaisedDiagnostics;
 		std::vector<PhysicsDiagnostic> PendingListenerDiagnostics;
 
-		// What PreStep rebuilds from: a 2D physics component (or a 3D one on an entity holding a 2D one, or DisabledTag)
-		// changed, and on which entities; the scene revision and the hierarchy at the last look.
+		// What PreStep rebuilds from: a 2D physics component (or a 3D one on an entity holding a 2D one, a TilemapRenderer on
+		// an entity whose TilemapCollider takes its tilemap, or DisabledTag) changed, and on which entities; the scene revision
+		// and the hierarchy at the last look.
 		bool ComponentsChanged = false;
 		std::set<UUID> ChangedEntities;
 		uint64_t SeenRevision = 0;
 		std::vector<std::pair<UUID, UUID>> SeenHierarchy;
 		// Entities that became pending destruction or effectively disabled since the last flush.
 		std::set<UUID> FlushCandidates;
+		// The tilemaps of the TilemapColliders of every creatable body plan at the last rebuild, in plan order, whether or not
+		// their bodies were created (a tilemap without a solid cell, a missing one): PreStep rebuilds when one's version
+		// changes, so a tilemap.paint edit or a reimport rebuilds the shape in place, and a body its tilemap left without a
+		// shape is created once the tilemap has a solid cell (decision 25). Empty in a scene without TilemapColliders.
+		std::vector<Physics2DTilemapInput> TilemapInputs;
 		// max(1, ceil(60 / FixedHz)).
 		uint32_t CollisionSteps = 1;
 		// The compositions Rebuild ran (Physics2DSystemStats::Compositions).
@@ -114,6 +131,7 @@ namespace Engine {
 		void DisconnectSignals();
 		void On2DComponentChanged(entt::registry& registry, entt::entity entity);
 		void On3DComponentChanged(entt::registry& registry, entt::entity entity);
+		void OnTilemapRendererChanged(entt::registry& registry, entt::entity entity);
 		void OnEntityLeavingPlay(entt::registry& registry, entt::entity entity);
 
 		// Whether the scene holds any 2D physics component (EnTT storage sizes): without one and without a world, PreStep has
@@ -128,6 +146,12 @@ namespace Engine {
 		void RefreshShapes(const std::set<UUID>& owners, std::set<UUID>& woken);
 		[[nodiscard]] std::set<UUID> FindShapeChanges(bool hierarchyChanged) const;
 		[[nodiscard]] std::vector<PhysicsShapeInput> CaptureShapeInputs(const Physics2DBodyPlan& plan) const;
+		// The TilemapInputs of `composition`'s creatable plans as the asset manager holds them now.
+		[[nodiscard]] std::vector<Physics2DTilemapInput> CaptureTilemapInputs(const Physics2DComposition& composition) const;
+		// The TilemapColliders whose tilemap has a version other than the one TilemapInputs recorded.
+		[[nodiscard]] std::set<UUID> FindTilemapChanges() const;
+		// The body's shape and its description; a null shape, without an error, when the description holds no collider (its
+		// TilemapColliders' tilemaps have no solid cell): the body is not created, without a diagnostic.
 		[[nodiscard]] Result<Ref<const PhysicsShape>> BuildShape(const Physics2DBodyPlan& plan, Body2DShapeDescription& description);
 		[[nodiscard]] bool CreateBody(const Physics2DBodyPlan& plan, std::optional<std::pair<glm::vec2, float>> velocities);
 		void AssignPlan(Physics2DBodyEntry& entry, const Physics2DBodyPlan& plan);

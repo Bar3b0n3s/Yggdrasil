@@ -10,7 +10,7 @@ The API is served by `docs.get` (a connected editor answers it): `reference/Scri
 ## Pages
 
 A reference page beside this file, a `docs.get` topic and a file in this skill's directory:
-- `skills/luau-gameplay/sprites-2d` ([sprites-2d.md](sprites-2d.md)): sprites, sprite animation and the 2D physics world in scripts: their fields, methods, the `Physics2D` module and the 2D callbacks.
+- `skills/luau-gameplay/sprites-2d` ([sprites-2d.md](sprites-2d.md)): sprites, sprite animation, 2D lights, tilemaps and the 2D physics world in scripts: their fields, methods, the `Physics2D` module and the 2D callbacks.
 
 ## Script shape
 

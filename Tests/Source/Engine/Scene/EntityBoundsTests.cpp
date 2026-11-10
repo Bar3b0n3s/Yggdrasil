@@ -204,7 +204,7 @@ namespace Engine {
 
 		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 24, stream T1): a tilemap is bounded by the quads of the tiles it
 		// draws, each a sprite of its palette entry's frame at its cell's centre.
-		TEST_CASE("EntityBounds: a tilemap's bounds are its drawn tiles' quads" * doctest::skip(true))
+		TEST_CASE("EntityBounds: a tilemap's bounds are its drawn tiles' quads")
 		{
 			Test::SceneTestFixture scene;
 			Test::InMemoryAssetManager assets;

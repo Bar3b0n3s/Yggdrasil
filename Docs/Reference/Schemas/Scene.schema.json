@@ -1226,6 +1226,12 @@
 				"Lit": {
 					"description": "Whether 2D lights light the sprite; an unlit sprite keeps its texels unchanged.",
 					"type": "boolean"
+				},
+				"NormalMap": {
+					"description": "A lit sprite's tangent-space normal map, laid like its image; point lights then light it by the angle to the light. Null: flat.",
+					"type": ["string", "null"],
+					"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+					"x-assetType": "Texture"
 				}
 			},
 			"additionalProperties": false

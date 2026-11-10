@@ -204,6 +204,34 @@
 				"Modes": ["Editor", "Release", "Dist"]
 			},
 			{
+				"Script": "Assets/Tests/Lights2D/Lights2D.test.luau",
+				"Scene": "Assets/Scenes/Lights2D.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
+				"Script": "Assets/Tests/Tilemaps/Tilemaps.test.luau",
+				"Scene": "Assets/Scenes/Tilemaps.scene",
+				"Parameters": null,
+				"Isolation": "Case",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
 				"Script": "Assets/Tests/Api/Application.test.luau",
 				"Scene": "Assets/Scenes/Scripting.scene",
 				"Parameters": null,
@@ -458,6 +486,20 @@
 			{
 				"Script": "Assets/Tests/Api/Input.test.luau",
 				"Scene": "Assets/Scenes/Scripting.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
+				"Script": "Assets/Tests/Api/Light2D.test.luau",
+				"Scene": "Assets/Scenes/Lights2D.scene",
 				"Parameters": null,
 				"Isolation": "Suite",
 				"Clock": [],
@@ -794,6 +836,34 @@
 			{
 				"Script": "Assets/Tests/Api/Text.test.luau",
 				"Scene": "Assets/Scenes/Scripting.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
+				"Script": "Assets/Tests/Api/TilemapCollider.test.luau",
+				"Scene": "Assets/Scenes/Tilemaps.scene",
+				"Parameters": null,
+				"Isolation": "Case",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
+				"Script": "Assets/Tests/Api/TilemapRenderer.test.luau",
+				"Scene": "Assets/Scenes/Tilemaps.scene",
 				"Parameters": null,
 				"Isolation": "Suite",
 				"Clock": [],

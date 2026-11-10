@@ -6,6 +6,7 @@
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/SpriteAnimatorComponent.h"
 #include "Engine/Scene/Components/SpriteRendererComponent.h"
+#include "Engine/Scene/Components/TilemapRendererComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Private/SpriteClipLookup.h"
 #include "Engine/Scene/Scene.h"
@@ -53,6 +54,25 @@ namespace Engine {
 			});
 		}
 
+		// SPRITE_UNKNOWN_SORTING_LAYER of `entity`'s TilemapRenderer `tilemap` (C21.2, Docs/Decisions/0032-m21-contract.md
+		// decision 30): it sorts with the sprites, so an undeclared layer draws it in the first layer, whatever its Tilemap.
+		static void FindTilemapRendererIssues(ConstEntity entity, const TilemapRendererComponent& tilemap, std::span<const std::string> sortingLayers,
+			std::vector<SpriteSceneIssue>& issues)
+		{
+			if (std::ranges::find(sortingLayers, tilemap.SortingLayer) != sortingLayers.end())
+				return;
+			issues.push_back(SpriteSceneIssue{
+				.Code = std::string(SpriteUnknownSortingLayerCode),
+				.Severity = DiagnosticSeverity::Warning,
+				.Entity = entity.GetUUID(),
+				.Component = "TilemapRenderer",
+				.Field = "SortingLayer",
+				.Message = std::format("the tilemap names the sorting layer '{}', which SortingLayers.Layers does not declare; it draws in the first layer",
+					tilemap.SortingLayer),
+				.Hint = "Declare the layer with project.setSettings, or correct the name.",
+			});
+		}
+
 		// SPRITE_UNKNOWN_CLIP (stream B): a SpriteAnimator whose Clip is not empty and names no clip of its SpriteRenderer's
 		// sheet, when the sheet loads or there is none. A sheet that does not load is the asset checks' finding
 		// (ASSET_MISSING, ASSET_TYPE_MISMATCH, ASSET_IMPORT_FAILED), not this code's.
@@ -80,6 +100,8 @@ namespace Engine {
 				Utils::FindSpriteRendererIssues(entity, *sprite, assets, sortingLayers, issues);
 			if (assets != nullptr)
 				Utils::FindUnknownClip(scene, entity, *assets, issues);
+			if (const TilemapRendererComponent* tilemap = entity.TryGetComponent<TilemapRendererComponent>())
+				Utils::FindTilemapRendererIssues(entity, *tilemap, sortingLayers, issues);
 		});
 		return issues;
 	}

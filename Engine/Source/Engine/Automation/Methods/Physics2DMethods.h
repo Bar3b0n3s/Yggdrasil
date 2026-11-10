@@ -21,9 +21,8 @@
 //
 // Frozen by the M21 contract (C21.1): the wire format below; P2 registered raycast and overlap (RegisterSharedMethodTypes and
 // RegisterSharedMethods call the functions below). C21.2 (Docs/Decisions/0032-m21-contract.md decision 27) adds
-// physics2d.bodyInfo's wire format and handler, which stream P3 registers in these two functions together with its C++ round
-// trip, its Python test, its scene-target inventory entry (None: the play session's 2D world) and the regenerated
-// references; until then it is not registered.
+// physics2d.bodyInfo's wire format and handler, which stream P3 registers in these two functions, with its scene-target
+// inventory entry (None: the play session's 2D world).
 
 namespace Engine {
 
@@ -121,7 +120,7 @@ namespace Engine {
 		// physics2d.overlap: Physics2DSystem::OverlapCircle or OverlapBox. Errors: as physics2d.raycast's; InvalidArgument at
 		// /radius or /halfExtents for the shape's missing or out-of-bounds size.
 		[[nodiscard]] Result<Physics2DOverlapResult> Physics2DOverlap(AutomationMethodContext& context, const Physics2DOverlapParams& params);
-		// physics2d.bodyInfo (C21.2, stream P3). Errors: physics.bodyInfo's: InvalidState "not playing" without a play session
+		// physics2d.bodyInfo (C21.2): Physics2DSystem::GetBodyInfo. Errors: physics.bodyInfo's: InvalidState "not playing" without a play session
 		// (the hint names play.start {mode: "simulate"}); the errors of AutomationMethodContext::ResolveEntity at /entity;
 		// NotFound at /entity "entity '<name>' (<id>) has no 2D physics body" when it owns none and none of its colliders
 		// belongs to one (the hint names project.validate).
@@ -129,13 +128,12 @@ namespace Engine {
 
 	}
 
-	// Registers the enum "Physics2DQueryShape" and the structs above (stream P3 adds Physics2DBodyInfoParams and
-	// Physics2DBodyInfoResult; PhysicsContactSummary and PhysicsBodyOrigin are RegisterPhysicsMethodTypes').
+	// Registers the enum "Physics2DQueryShape" and the structs above (PhysicsContactSummary and PhysicsBodyOrigin are
+	// RegisterPhysicsMethodTypes', which runs first).
 	void RegisterPhysics2DMethodTypes(TypeRegistry& registry);
 
-	// Registers physics2d.raycast and physics2d.overlap (and, from stream P3, physics2d.bodyInfo, required param "entity"):
-	// read-only, AllowedInBatch, available in the Runtime; not tools (agents reach them through engine_call, as
-	// physics.bodyInfo).
+	// Registers physics2d.raycast, physics2d.overlap and physics2d.bodyInfo (required param "entity"): read-only,
+	// AllowedInBatch, available in the Runtime; not tools (agents reach them through engine_call, as physics.bodyInfo).
 	void RegisterPhysics2DMethods(MethodRegistry& methods);
 
 }

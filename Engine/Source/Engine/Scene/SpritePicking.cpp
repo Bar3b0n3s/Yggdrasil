@@ -1,13 +1,14 @@
 #include "EnginePCH.h"
 #include "Engine/Scene/SpritePicking.h"
 
+#include "Engine/Asset/TilemapDrawOrder.h"
 #include "Engine/Scene/Private/SpriteDrawing.h"
+#include "Engine/Scene/Private/TilemapDrawing.h"
 #include "Engine/Scene/Scene.h"
 
 #include <array>
 #include <cmath>
 #include <optional>
-#include <ranges>
 #include <span>
 #include <vector>
 
@@ -68,6 +69,50 @@ namespace Engine {
 			return std::nullopt;
 		}
 
+		// The hit of the ray (`origin`, unit `direction`) within the request's distances on the quad of local corners `local`
+		// drawn with the world matrix `world` by `entity`, or nullopt (also for a singular or non-finite matrix or corner).
+		static std::optional<SceneRaycastHit> IntersectSpriteAt(const glm::mat4& world, const std::array<glm::vec2, 4>& local, const glm::dvec3& origin,
+			const glm::dvec3& direction, const SpritePickRequest& request, UUID entity)
+		{
+			const glm::dmat4 matrix(world);
+			const double determinant = glm::determinant(matrix);
+			if (!std::isfinite(determinant) || determinant == 0)
+				return std::nullopt;
+			std::array<glm::dvec3, 4> corners{};
+			for (size_t index = 0; index < corners.size(); ++index)
+			{
+				corners[index] = glm::dvec3(matrix * glm::dvec4(local[index].x, local[index].y, 0.0, 1.0));
+				if (!IsFiniteSpriteRayVector(glm::vec3(corners[index])))
+					return std::nullopt;
+			}
+			return IntersectSpriteQuad(corners, origin, direction, request.MinDistance, request.MaxDistance, entity);
+		}
+
+		// The last-drawn tile of `tilemap` the ray crosses (C21.2, decision 24): its tiles backwards in their draw order, each
+		// the sprite TilemapRendererComponent.h describes, a hit naming the tilemap's entity.
+		static std::optional<SceneRaycastHit> PickTilemapTile(const TilemapItem& tilemap, AssetManager& assets, const glm::dvec3& origin,
+			const glm::dvec3& direction, const SpritePickRequest& request)
+		{
+			const std::optional<TilemapTiles> tiles = ResolveTilemapTiles(assets, tilemap);
+			if (!tiles.has_value())
+				return std::nullopt;
+			std::optional<SceneRaycastHit> hit;
+			const auto includeChunk = [](size_t /*chunk*/)
+			{
+				return true;
+			};
+			ForEachTilemapTileInDrawOrder(*tiles->Tilemap, true, includeChunk,
+				[&tilemap, &tiles, &origin, &direction, &request, &hit](size_t /*chunk*/, glm::ivec2 cell, uint32_t value)
+			{
+				if (value > tiles->Palette.size() || !tiles->Palette[value - 1].has_value())
+					return true;
+				const glm::mat4 world = GetTilemapTileWorld(tilemap.World, *tiles->Tilemap, cell);
+				hit = IntersectSpriteAt(world, *tiles->Palette[value - 1], origin, direction, request, tilemap.Entity);
+				return !hit.has_value();
+			});
+			return hit;
+		}
+
 	}
 
 	Result<std::optional<SceneRaycastHit>> PickSprite(const Scene& scene, AssetManager& assets, const SpritePickRequest& request)
@@ -76,45 +121,49 @@ namespace Engine {
 		if (!std::isfinite(request.Alpha) || request.Alpha < 0 || request.Alpha > 1)
 			return MakeError(ErrorCode::InvalidArgument, "ray alpha must be in [0,1]");
 		const std::vector<SpriteItem> sprites = Utils::CollectSprites(scene, request.SortingLayers, request.Alpha);
-		return PickSprite(sprites, assets, request);
+		const std::vector<TilemapItem> tilemaps = Utils::CollectTilemaps(scene, request.SortingLayers, request.Alpha);
+		return PickSprite(sprites, tilemaps, assets, request);
 	}
 
 	Result<std::optional<SceneRaycastHit>> PickSprite(std::span<const SpriteItem> sprites, AssetManager& assets, const SpritePickRequest& request)
+	{
+		return PickSprite(sprites, std::span<const TilemapItem>(), assets, request);
+	}
+
+	Result<std::optional<SceneRaycastHit>> PickSprite(std::span<const SpriteItem> sprites, std::span<const TilemapItem> tilemaps, AssetManager& assets,
+		const SpritePickRequest& request)
 	{
 		ENGINE_TRY(Utils::CheckSpritePickRequest(request));
 		const glm::dvec3 origin(request.Ray.Origin);
 		const glm::dvec3 direction = glm::dvec3(request.Ray.Direction) / glm::length(glm::dvec3(request.Ray.Direction));
 
-		// The pixel shows the last sprite drawn over it: the draw order backwards, the first hit wins whatever its distance.
-		for (const SpriteItem& sprite : std::views::reverse(sprites))
+		// The pixel shows the last sprite or tile drawn over it: the one draw order backwards (a tilemap draws before
+		// Sprites[DrawPosition]), the first hit wins whatever its distance.
+		size_t nextTilemap = tilemaps.size();
+		const auto pickTilemapsFrom = [&tilemaps, &nextTilemap, &assets, &origin, &direction, &request](size_t position)
 		{
-			const glm::dmat4 world(sprite.World);
-			const double determinant = glm::determinant(world);
-			if (!std::isfinite(determinant) || determinant == 0)
-				continue;
-			const std::optional<std::array<glm::vec2, 4>> local = Utils::ResolveSpriteCorners(assets, sprite);
-			if (!local.has_value())
-				continue;
-			std::array<glm::dvec3, 4> corners{};
-			bool finite = true;
-			for (size_t index = 0; index < corners.size(); ++index)
+			while (nextTilemap > 0 && tilemaps[nextTilemap - 1].DrawPosition >= position)
 			{
-				corners[index] = glm::dvec3(world * glm::dvec4((*local)[index].x, (*local)[index].y, 0.0, 1.0));
-				finite = finite && Utils::IsFiniteSpriteRayVector(glm::vec3(corners[index]));
+				--nextTilemap;
+				if (std::optional<SceneRaycastHit> hit = Utils::PickTilemapTile(tilemaps[nextTilemap], assets, origin, direction, request))
+					return hit;
 			}
-			if (!finite)
-				continue;
-			if (std::optional<SceneRaycastHit> hit = Utils::IntersectSpriteQuad(corners, origin, direction, request.MinDistance, request.MaxDistance, sprite.Entity))
+			return std::optional<SceneRaycastHit>();
+		};
+		if (std::optional<SceneRaycastHit> hit = pickTilemapsFrom(sprites.size()))
+			return hit;
+		for (size_t index = sprites.size(); index-- > 0;)
+		{
+			const SpriteItem& sprite = sprites[index];
+			if (const std::optional<std::array<glm::vec2, 4>> local = Utils::ResolveSpriteCorners(assets, sprite))
+			{
+				if (std::optional<SceneRaycastHit> hit = Utils::IntersectSpriteAt(sprite.World, *local, origin, direction, request, sprite.Entity))
+					return hit;
+			}
+			if (std::optional<SceneRaycastHit> hit = pickTilemapsFrom(index))
 				return hit;
 		}
 		return std::optional<SceneRaycastHit>();
-	}
-
-	Result<std::optional<SceneRaycastHit>> PickSprite(std::span<const SpriteItem> /*sprites*/, std::span<const TilemapItem> /*tilemaps*/,
-		AssetManager& /*assets*/, const SpritePickRequest& /*request*/)
-	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "tilemap picking (Docs/Decisions/0032-m21-contract.md decision 24, stream T1)");
 	}
 
 }

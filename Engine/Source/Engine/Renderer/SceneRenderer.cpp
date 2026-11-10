@@ -7,6 +7,8 @@
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/SpriteGeometry.h"
 #include "Engine/Asset/SpriteSheetData.h"
+#include "Engine/Asset/TilemapData.h"
+#include "Engine/Asset/TilemapDrawOrder.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Graphics/CommandListRecording.h"
@@ -19,6 +21,8 @@
 #include "Engine/Renderer/EditorOverlay.h"
 #include "Engine/Renderer/FxaaPass.h"
 #include "Engine/Renderer/GpuResourceCache.h"
+#include "Engine/Renderer/Light2DShading.h"
+#include "Engine/Renderer/Lights2DPass.h"
 #include "Engine/Renderer/PassBindingCache.h"
 #include "Engine/Renderer/Private/ForwardPipelines.h"
 #include "Engine/Renderer/Private/LightingInputs.h"
@@ -87,7 +91,7 @@ namespace Engine {
 		== SceneRendererPipelines::MeshPipelineCount + SkyboxPass::PipelineCount + BloomPass::PipelineCount + TonemapPass::PipelineCount
 			+ FxaaPass::PipelineCount + DebugRenderer::PipelineCount + TextRenderer::PipelineCount + BrdfLut::PipelineCount
 			+ ShadowPass::PipelineCount + DepthPyramidPass::PipelineCount + GtaoPass::PipelineCount + SelectionPass::PipelineCount + 1
-			+ QuadBatcher::PipelineCount + UpscalePass::PipelineCount);
+			+ QuadBatcher::PipelineCount + UpscalePass::PipelineCount + Lights2DPass::PipelineCount);
 	static_assert(SceneRendererPipelines::MeshPipelineCount == 2 * Utils::PrepassVariantCount + Utils::ForwardVariantCount + Utils::MeshCullModeCount);
 	static_assert(SceneRendererPipelines::DebugViewPipelineCount == Utils::ForwardVariantCount);
 	// The Scene program's specialization constant takes RenderDebugView's values (Shared/DrawConstants.h).
@@ -174,6 +178,50 @@ namespace Engine {
 			}
 			assets.ReportDiagnostic(std::move(diagnostic));
 		}
+
+		// The Sprites stage's report of tilemap `handle` (M21, C21.2, decision 24), which is missing, fails to load (`error`) or
+		// is not a tilemap (`error` null), with GetOrPlaceholder's codes as a sheet's: tilemaps have no placeholder, so it draws
+		// nothing.
+		static void ReportTilemapFailure(AssetManager& assets, AssetHandle handle, const Error* error)
+		{
+			AssetDiagnostic diagnostic;
+			diagnostic.Severity = DiagnosticSeverity::Error;
+			diagnostic.Asset = handle;
+			diagnostic.Path = assets.GetReferencePath(handle);
+			if (error == nullptr || error->GetCode() == ErrorCode::InvalidArgument)
+			{
+				diagnostic.Code = std::string(AssetTypeMismatchCode);
+				diagnostic.Message = std::format("asset {} cannot be used as a Tilemap; its tilemap renderers draw nothing", handle.ToString());
+				diagnostic.Hint = "assign an asset of type Tilemap";
+			}
+			else if (error->GetCode() == ErrorCode::NotFound)
+			{
+				diagnostic.Code = std::string(AssetMissingCode);
+				diagnostic.Message = std::format("tilemap {} is missing; its tilemap renderers draw nothing", handle.ToString());
+				diagnostic.Hint = "restore the asset, or assign another one";
+			}
+			else
+			{
+				diagnostic.Code = std::string(AssetImportFailedCode);
+				diagnostic.Message = std::format("tilemap {} failed to load; its tilemap renderers draw nothing: {}", handle.ToString(),
+					Error(*error).WithHint(std::string()).ToString());
+				diagnostic.Hint = error->GetHint();
+			}
+			assets.ReportDiagnostic(std::move(diagnostic));
+		}
+
+		// One palette entry of a tilemap as its tiles draw in a render (M21, C21.2, decision 24): the quad of the sprite they
+		// draw as (SpriteRendererComponent.h's one rule), HasQuad false for an entry whose tiles draw nothing (a null, missing
+		// or failed sheet, a Frame the sheet lacks), and Draws false also when not even its texture's placeholder exists.
+		struct TilemapPaletteQuad
+		{
+			bool HasQuad = false;
+			bool Draws = false;
+			std::array<glm::vec2, 4> Corners{};
+			glm::vec2 TexCoordMin = glm::vec2(0.0f);
+			glm::vec2 TexCoordMax = glm::vec2(1.0f);
+			nvrhi::ITexture* Texture = nullptr;
+		};
 
 		// How a target is written.
 		enum class TargetUsage : uint8_t
@@ -443,10 +491,12 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(created.DfgLut, BrdfLut::Create(device, pipelines));
 		ENGINE_TRY_ASSIGN(created.Quads, QuadBatcher::Create(device, pipelines));
 		ENGINE_TRY_ASSIGN(created.Upscale, UpscalePass::Create(device, pipelines));
+		ENGINE_TRY_ASSIGN(created.Lights2D, Lights2DPass::Create(device, pipelines));
 		created.PipelineCount = MeshPipelineCount + created.Skybox->GetPipelineCount() + created.Bloom->GetPipelineCount()
 			+ created.Tonemap->GetPipelineCount() + created.Fxaa->GetPipelineCount() + created.Debug->GetPipelineCount()
 			+ created.Text->GetPipelineCount() + created.DfgLut->GetPipelineCount() + ShadowPass::PipelineCount + DepthPyramidPass::PipelineCount
-			+ GtaoPass::PipelineCount + SelectionPass::PipelineCount + 1 + created.Quads->GetPipelineCount() + created.Upscale->GetPipelineCount();
+			+ GtaoPass::PipelineCount + SelectionPass::PipelineCount + 1 + created.Quads->GetPipelineCount() + created.Upscale->GetPipelineCount()
+			+ created.Lights2D->GetPipelineCount();
 
 		// Every creation succeeded: the new passes replace the current ones, and the set keeps its back-references and its
 		// registration (moving an empty registration over another calls nothing on the registry, so this also runs inside a
@@ -480,6 +530,7 @@ namespace Engine {
 		Utils::AppendDescriptions(descriptions, SelectionPass::GetLayoutDescriptions());
 		Utils::AppendDescriptions(descriptions, QuadBatcher::GetLayoutDescriptions());
 		Utils::AppendDescriptions(descriptions, UpscalePass::GetLayoutDescriptions());
+		Utils::AppendDescriptions(descriptions, Lights2DPass::GetLayoutDescriptions());
 		descriptions.push_back(Utils::GetSceneDataViewLayout());
 		return descriptions;
 	}
@@ -597,6 +648,7 @@ namespace Engine {
 		SelectionBindings.Clear();
 		DataViewBindings.Clear();
 		SpriteBindings.Clear();
+		Lights2DBindings.Clear();
 	}
 
 	void SceneRenderer::State::ClearBindings()
@@ -621,6 +673,7 @@ namespace Engine {
 		SelectionBindings.ReleaseUnused();
 		DataViewBindings.ReleaseUnused();
 		SpriteBindings.ReleaseUnused();
+		Lights2DBindings.ReleaseUnused();
 		UpscaleBindings.ReleaseUnused();
 
 		Materials.ReleaseUnused();
@@ -1466,8 +1519,9 @@ namespace Engine {
 	void SceneRenderer::State::RecordSpritesStage(Detail::SceneRendererFrame& frame)
 	{
 		const RenderSnapshot& snapshot = *frame.Snapshot;
-		// Sprites draw in the Lit view only (decision 4): the data views, the material views and the wireframe show none.
-		if (snapshot.Sprites.empty() || !frame.HasCamera || !frame.IsLit || frame.Wireframe)
+		// Sprites and tilemaps draw in the Lit view only (decision 4): the data views, the material views and the wireframe
+		// show none.
+		if ((snapshot.Sprites.empty() && snapshot.Tilemaps.empty()) || !frame.HasCamera || !frame.IsLit || frame.Wireframe)
 			return;
 		ENGINE_CORE_ASSERT(Pipelines->Quads != nullptr, "the pipeline set has no QuadBatcher");
 		if (Pipelines->Quads == nullptr)
@@ -1475,8 +1529,6 @@ namespace Engine {
 			frame.KeepFirstError(MakeError(ErrorCode::InvalidState, "the scene renderer's pipelines have no QuadBatcher; the sprites are not drawn"));
 			return;
 		}
-		nvrhi::ICommandList& commandList = *frame.CommandList;
-		RenderRecordingContext& recording = *frame.Recording;
 		const glm::mat4 viewProjection = frame.Camera.Projection * frame.Camera.View;
 
 		// The sheets of this render, each loaded once: null for one that is missing or fails to load, which draws nothing and is
@@ -1494,8 +1546,19 @@ namespace Engine {
 		};
 
 		SpriteQuads.clear();
-		for (const SpriteItem& sprite : snapshot.Sprites)
+		SpriteQuadLit.clear();
+		// C21.2 (decision 24): the tilemaps draw in the one 2D draw order, each before Sprites[DrawPosition] (after every sprite
+		// at Sprites.size()).
+		size_t nextTilemap = 0;
+		const auto appendTilemapsBefore = [this, &frame, &snapshot, &viewProjection, &resolveSheet, &nextTilemap](size_t position)
 		{
+			for (; nextTilemap < snapshot.Tilemaps.size() && snapshot.Tilemaps[nextTilemap].DrawPosition <= position; ++nextTilemap)
+				AppendTilemapQuads(frame, snapshot.Tilemaps[nextTilemap], viewProjection, resolveSheet);
+		};
+		for (size_t spriteIndex = 0; spriteIndex < snapshot.Sprites.size(); ++spriteIndex)
+		{
+			appendTilemapsBefore(spriteIndex);
+			const SpriteItem& sprite = snapshot.Sprites[spriteIndex];
 			if (!Utils::IsFinite(sprite.World))
 			{
 				frame.KeepFirstError(MakeError(ErrorCode::InvalidArgument,
@@ -1557,19 +1620,318 @@ namespace Engine {
 				quad.Corners[index] = glm::vec3(world);
 				clip[index] = viewProjection * world;
 			}
-			if (!Utils::IsOutsideClipVolume(clip))
-				SpriteQuads.push_back(quad);
+			if (Utils::IsOutsideClipVolume(clip))
+				continue;
+			// C21.2 (decision 21): a lit sprite's normal map, laid like its image; a missing or failed one is its placeholder's
+			// mirror, as a material's (the cache reports it), and only a mirror without a texture leaves the flat normal.
+			if (sprite.Lit && sprite.NormalMap.IsValid())
+				quad.NormalMap = Cache->GetTexture(sprite.NormalMap).Texture.Get();
+			AddSpriteQuad(quad, sprite.Lit);
 		}
+		appendTilemapsBefore(snapshot.Sprites.size());
 
-		recording.BeginPass("Sprites", &commandList);
-		RenderPassCounters counters;
-		Result<uint32_t> drawn = Pipelines->Quads->Record(commandList, SpriteBindings,
-			{ .Quads = SpriteQuads, .Target = QuadBatchTarget::Hdr, .Framebuffer = Targets.ForwardFramebuffer, .Transform = viewProjection }, counters);
-		if (!drawn)
-			frame.KeepFirstError(std::unexpected(std::move(drawn).error()));
-		recording.EndPass(counters);
+		// C21.2 (decision 22): the lights the lit quads sample, then the quads in the one draw order.
+		nvrhi::ITexture* light = RecordLights2D(frame, viewProjection);
+		RecordSpriteQuads(frame, viewProjection, light);
 		// The borrowed texture pointers are valid for this render only.
 		SpriteQuads.clear();
+		SpriteQuadLit.clear();
+		ReleaseUnusedTilemaps();
+	}
+
+	void SceneRenderer::State::AddSpriteQuad(const QuadDraw& quad, bool lit)
+	{
+		SpriteQuads.push_back(quad);
+		SpriteQuadLit.push_back(lit ? 1 : 0);
+	}
+
+	Status SceneRenderer::State::EnsureLights2DTargets()
+	{
+		const uint32_t width = Targets.Width;
+		const uint32_t height = Targets.Height;
+		if (Targets.Lights2DNormals == nullptr)
+		{
+			ENGINE_TRY_ASSIGN(Targets.Lights2DNormals,
+				Utils::CreateTarget(*TargetPool, width, height, Lights2DNormalsFormat, Utils::TargetUsage::Attachment, "Lights2DNormals"));
+		}
+		if (Targets.Lights2DLight == nullptr)
+		{
+			ENGINE_TRY_ASSIGN(Targets.Lights2DLight,
+				Utils::CreateTarget(*TargetPool, width, height, Lights2DLightFormat, Utils::TargetUsage::Attachment, "Lights2DLight"));
+		}
+		if (Targets.Lights2DNormalsFramebuffer == nullptr)
+		{
+			ENGINE_TRY_ASSIGN(Targets.Lights2DNormalsFramebuffer,
+				Device->CreateFramebuffer(nvrhi::FramebufferDesc().addColorAttachment(Targets.Lights2DNormals).setDepthAttachment(Targets.SceneDepth)));
+		}
+		if (Targets.Lights2DLightFramebuffer == nullptr)
+		{
+			ENGINE_TRY_ASSIGN(Targets.Lights2DLightFramebuffer, Device->CreateFramebuffer(nvrhi::FramebufferDesc().addColorAttachment(Targets.Lights2DLight)));
+		}
+		return {};
+	}
+
+	nvrhi::ITexture* SceneRenderer::State::RecordLights2D(Detail::SceneRendererFrame& frame, const glm::mat4& viewProjection)
+	{
+		// Without a lit quad nothing is recorded and the targets are not created: unlit sprites keep their texels.
+		if (std::ranges::find(SpriteQuadLit, uint8_t{ 1 }) == SpriteQuadLit.end())
+			return nullptr;
+		ENGINE_CORE_ASSERT(Pipelines->Lights2D != nullptr, "the pipeline set has no Lights2D pass");
+		if (Pipelines->Lights2D == nullptr)
+		{
+			frame.KeepFirstError(MakeError(ErrorCode::InvalidState, "the scene renderer's pipelines have no Lights2D pass; the lit sprites are not drawn"));
+			return nullptr;
+		}
+		if (Status ensured = EnsureLights2DTargets(); !ensured)
+		{
+			frame.KeepFirstError(std::move(ensured));
+			return nullptr;
+		}
+		nvrhi::ICommandList& commandList = *frame.CommandList;
+		frame.Recording->BeginPass("Lights2D", &commandList);
+		RenderPassCounters counters;
+
+		// (1) The normals: the flat normal everywhere, then the lit quads' in draw order when one has a normal map. A failed
+		// record leaves the normals flat and keeps its error.
+		commandList.clearTextureFloat(Targets.Lights2DNormals, nvrhi::AllSubresources, nvrhi::Color(0.0f, 0.0f, 1.0f, 0.0f));
+		bool normalMapped = false;
+		for (size_t index = 0; index < SpriteQuads.size() && !normalMapped; ++index)
+			normalMapped = SpriteQuadLit[index] != 0 && SpriteQuads[index].NormalMap != nullptr;
+		if (normalMapped)
+		{
+			LitSpriteQuads.clear();
+			for (size_t index = 0; index < SpriteQuads.size(); ++index)
+			{
+				if (SpriteQuadLit[index] != 0)
+					LitSpriteQuads.push_back(SpriteQuads[index]);
+			}
+			Result<uint32_t> drawn = Pipelines->Quads->Record(commandList, SpriteBindings,
+				{ .Quads = LitSpriteQuads, .Target = QuadBatchTarget::Normals, .Framebuffer = Targets.Lights2DNormalsFramebuffer, .Transform = viewProjection },
+				counters);
+			if (!drawn)
+				frame.KeepFirstError(std::unexpected(std::move(drawn).error()));
+			LitSpriteQuads.clear();
+		}
+
+		// (2) The lights the view draws: the first MaxVisibleLights2D of the snapshot's that reach it, in their order.
+		VisibleLights2D.clear();
+		uint32_t skipped = 0;
+		for (const Light2DItem& item : frame.Snapshot->Lights2D)
+		{
+			if (!Light2DReachesView(item, viewProjection))
+				continue;
+			if (VisibleLights2D.size() < MaxVisibleLights2D)
+				VisibleLights2D.push_back(item);
+			else
+				++skipped;
+		}
+		if (skipped > 0 && !Light2DLimitLogged)
+		{
+			Light2DLimitLogged = true;
+			ENGINE_CORE_WARN("{} 2D light(s) that reach the view exceed its budget of {}; the view draws the first {} in canonical entity order (logged "
+							 "once per view)",
+				skipped, MaxVisibleLights2D, MaxVisibleLights2D);
+		}
+		Status added = Pipelines->Lights2D->Record(commandList, Lights2DBindings,
+			{ .Lights = VisibleLights2D, .ViewProjection = viewProjection, .Normals = Targets.Lights2DNormals, .Light = Targets.Lights2DLightFramebuffer },
+			counters);
+		VisibleLights2D.clear();
+		frame.Recording->EndPass(counters);
+		if (!added)
+		{
+			frame.KeepFirstError(std::move(added));
+			return nullptr;
+		}
+		return Targets.Lights2DLight.Get();
+	}
+
+	void SceneRenderer::State::RecordSpriteQuads(Detail::SceneRendererFrame& frame, const glm::mat4& viewProjection, nvrhi::ITexture* light)
+	{
+		nvrhi::ICommandList& commandList = *frame.CommandList;
+		frame.Recording->BeginPass("Sprites", &commandList);
+		RenderPassCounters counters;
+		const std::span<const QuadDraw> quads = SpriteQuads;
+		size_t first = 0;
+		while (first < quads.size())
+		{
+			const bool lit = SpriteQuadLit[first] != 0;
+			size_t end = first + 1;
+			while (end < quads.size() && (SpriteQuadLit[end] != 0) == lit)
+				++end;
+			if (!lit || light != nullptr)
+			{
+				Result<uint32_t> drawn = Pipelines->Quads->Record(commandList, SpriteBindings,
+					{ .Quads = quads.subspan(first, end - first),
+						.Target = lit ? QuadBatchTarget::HdrLit : QuadBatchTarget::Hdr,
+						.Framebuffer = Targets.ForwardFramebuffer,
+						.Transform = viewProjection,
+						.Light = lit ? light : nullptr },
+					counters);
+				if (!drawn)
+					frame.KeepFirstError(std::unexpected(std::move(drawn).error()));
+			}
+			first = end;
+		}
+		frame.Recording->EndPass(counters);
+	}
+
+	void SceneRenderer::State::AppendTilemapQuads(Detail::SceneRendererFrame& frame, const TilemapItem& item, const glm::mat4& viewProjection,
+		const std::function<const SpriteSheetData*(AssetHandle)>& resolveSheet)
+	{
+		if (!Utils::IsFinite(item.World))
+		{
+			frame.KeepFirstError(MakeError(ErrorCode::InvalidArgument,
+				"the world matrix of tilemap entity {} in the render snapshot is not finite; its draw is skipped", item.Entity));
+			return;
+		}
+		if (!std::isfinite(item.PixelsPerUnit) || !(item.PixelsPerUnit > 0.0f))
+		{
+			frame.KeepFirstError(MakeError(ErrorCode::InvalidArgument,
+				"tilemap entity {} in the render snapshot has {} pixels per unit, not a finite positive value; its draw is skipped", item.Entity,
+				item.PixelsPerUnit));
+			return;
+		}
+		// Tilemaps have no placeholder (TilemapRendererComponent.h): a missing or failed one draws nothing.
+		const Result<AssetRef<Asset>> loaded = Assets->Load(item.Tilemap);
+		AssetRef<TilemapData> tilemap = loaded.has_value() ? AssetCast<TilemapData>(*loaded) : nullptr;
+		if (tilemap == nullptr)
+		{
+			Utils::ReportTilemapFailure(*Assets, item.Tilemap, loaded.has_value() ? nullptr : &loaded.error());
+			return;
+		}
+
+		// This render's quad of each palette entry: the sprite its tiles draw as, unflipped (SpriteRendererComponent.h's one
+		// rule, as the sprites above: the sheet's frame over the sheet's texture, white without one, a missing or failed
+		// texture's placeholder shown whole over the quad).
+		std::vector<Utils::TilemapPaletteQuad> palette(tilemap->Palette.size());
+		std::vector<std::pair<AssetHandle, uint64_t>> sheetVersions;
+		for (size_t index = 0; index < palette.size(); ++index)
+		{
+			const TilemapTile& entry = tilemap->Palette[index];
+			Utils::TilemapPaletteQuad& quad = palette[index];
+			if (!entry.Sheet.GetHandle().IsValid())
+				continue;
+			const SpriteSheetData* sheet = resolveSheet(entry.Sheet.GetHandle());
+			sheetVersions.emplace_back(entry.Sheet.GetHandle(), Assets->GetVersion(entry.Sheet.GetHandle()));
+			if (sheet == nullptr || entry.Frame >= sheet->Frames.size())
+				continue; // no quad: TILEMAP_FRAME_OUT_OF_RANGE, or the sheet's failure reported by resolveSheet
+			const SpriteRect& rect = sheet->Frames[entry.Frame].Rect;
+			glm::uvec2 textureSize = glm::uvec2(rect.X + rect.Width, rect.Y + rect.Height);
+			bool wholeTexture = false;
+			bool hasTexture = true;
+			if (sheet->Texture.IsValid())
+			{
+				const GpuTexture& mirror = Cache->GetTexture(sheet->Texture.GetHandle());
+				if (mirror.Texture == nullptr)
+					hasTexture = false; // not even the placeholder could be created (GpuResourceCache.h)
+				else
+				{
+					quad.Texture = mirror.Texture.Get();
+					wholeTexture = mirror.IsPlaceholder;
+					textureSize = glm::uvec2(std::max(quad.Texture->getDesc().width, 1u), std::max(quad.Texture->getDesc().height, 1u));
+				}
+			}
+			const std::optional<SpriteFrameGeometry> geometry = GetSpriteFrameGeometry(sheet, entry.Frame, textureSize);
+			if (!geometry.has_value())
+				continue;
+			const SpriteLocalQuad local = ComputeSpriteLocalQuad(*geometry, item.PixelsPerUnit, false, false);
+			quad.HasQuad = true;
+			quad.Draws = hasTexture;
+			quad.Corners = local.Corners;
+			quad.TexCoordMin = wholeTexture ? glm::vec2(0.0f) : local.TexCoordMin;
+			quad.TexCoordMax = wholeTexture ? glm::vec2(1.0f) : local.TexCoordMax;
+		}
+		std::ranges::sort(sheetVersions);
+		const auto duplicates = std::ranges::unique(sheetVersions);
+		sheetVersions.erase(duplicates.begin(), duplicates.end());
+
+		// The chunks' bounds, kept between renders (TilemapDrawCache.h) and rebuilt when stale: each the union of its tiles'
+		// local quads (the cell's centre plus the entry's quad), whatever their frames' sizes and pivots.
+		const uint64_t version = Assets->GetVersion(item.Tilemap);
+		auto cache = std::ranges::find_if(TilemapCaches, [&item](const Detail::TilemapDrawCache& candidate)
+		{
+			return candidate.Tilemap == item.Tilemap && candidate.PixelsPerUnit == item.PixelsPerUnit;
+		});
+		if (cache == TilemapCaches.end())
+		{
+			TilemapCaches.push_back(Detail::TilemapDrawCache{ .Tilemap = item.Tilemap, .PixelsPerUnit = item.PixelsPerUnit });
+			cache = std::prev(TilemapCaches.end());
+		}
+		if (cache->Data != tilemap || cache->Version != version || cache->SheetVersions != sheetVersions)
+		{
+			const int64_t chunkSize = tilemap->ChunkSize;
+			cache->Chunks.assign(tilemap->Chunks.size(), Detail::TilemapChunkBounds{});
+			for (size_t chunkIndex = 0; chunkIndex < tilemap->Chunks.size(); ++chunkIndex)
+			{
+				const TilemapChunk& chunk = tilemap->Chunks[chunkIndex];
+				Detail::TilemapChunkBounds& bounds = cache->Chunks[chunkIndex];
+				for (size_t cellIndex = 0; cellIndex < chunk.Tiles.size(); ++cellIndex)
+				{
+					const uint32_t value = chunk.Tiles[cellIndex];
+					if (value == 0 || value > palette.size() || !palette[value - 1].HasQuad)
+						continue;
+					const int64_t column = static_cast<int64_t>(cellIndex) % chunkSize;
+					const int64_t row = static_cast<int64_t>(cellIndex) / chunkSize;
+					const glm::ivec2 cell(static_cast<int32_t>(chunk.X * chunkSize + column), static_cast<int32_t>(chunk.Y * chunkSize + row));
+					const glm::vec2 center = GetTilemapCellCenter(*tilemap, cell);
+					for (const glm::vec2& corner : palette[value - 1].Corners)
+					{
+						const glm::vec2 point = center + corner;
+						bounds.Min = bounds.HasTiles ? glm::min(bounds.Min, point) : point;
+						bounds.Max = bounds.HasTiles ? glm::max(bounds.Max, point) : point;
+						bounds.HasTiles = true;
+					}
+				}
+			}
+			cache->Data = tilemap;
+			cache->Version = version;
+			cache->SheetVersions = std::move(sheetVersions);
+		}
+		cache->Used = true;
+
+		// The chunks whose bounds meet the view: a chunk is culled only when its bounds, in world space, lie wholly outside
+		// one plane of the clip volume, so a tile larger than its cell never pops in or out at the view's edge.
+		TilemapChunksDrawn.assign(cache->Chunks.size(), 0);
+		for (size_t chunkIndex = 0; chunkIndex < cache->Chunks.size(); ++chunkIndex)
+		{
+			const Detail::TilemapChunkBounds& bounds = cache->Chunks[chunkIndex];
+			if (!bounds.HasTiles)
+				continue;
+			const std::array<glm::vec2, 4> corners = { bounds.Min, glm::vec2(bounds.Max.x, bounds.Min.y), bounds.Max, glm::vec2(bounds.Min.x, bounds.Max.y) };
+			std::array<glm::vec4, 4> clip{};
+			for (size_t index = 0; index < corners.size(); ++index)
+				clip[index] = viewProjection * (item.World * glm::vec4(corners[index], 0.0f, 1.0f));
+			TilemapChunksDrawn[chunkIndex] = Utils::IsOutsideClipVolume(clip) ? 0 : 1;
+		}
+
+		// The drawn chunks' tiles in the tilemap's cell order, never chunk by chunk, each the quad of its sprite at the tile's
+		// world matrix (the tilemap's times the translation to its cell's centre), Color as the quad's colour.
+		const auto includeChunk = [this](size_t chunk)
+		{
+			return TilemapChunksDrawn[chunk] != 0;
+		};
+		ForEachTilemapTileInDrawOrder(*tilemap, false, includeChunk, [this, &item, &tilemap, &palette](size_t /*chunk*/, glm::ivec2 cell, uint32_t value)
+		{
+			if (value > palette.size() || !palette[value - 1].Draws)
+				return true;
+			const Utils::TilemapPaletteQuad& entry = palette[value - 1];
+			const glm::mat4 world = GetTilemapTileWorld(item.World, *tilemap, cell);
+			QuadDraw quad{ .TexCoordMin = entry.TexCoordMin, .TexCoordMax = entry.TexCoordMax, .Color = item.Color, .Texture = entry.Texture, .Sampler = QuadSampler::Point };
+			for (size_t index = 0; index < quad.Corners.size(); ++index)
+				quad.Corners[index] = glm::vec3(world * glm::vec4(entry.Corners[index], 0.0f, 1.0f));
+			AddSpriteQuad(quad, item.Lit);
+			return true;
+		});
+	}
+
+	void SceneRenderer::State::ReleaseUnusedTilemaps()
+	{
+		std::erase_if(TilemapCaches, [](const Detail::TilemapDrawCache& cache)
+		{
+			return !cache.Used;
+		});
+		for (Detail::TilemapDrawCache& cache : TilemapCaches)
+			cache.Used = false;
 	}
 
 	void SceneRenderer::State::RecordHdrPostStage(Detail::SceneRendererFrame& frame)

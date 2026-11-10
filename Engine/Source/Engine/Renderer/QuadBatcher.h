@@ -33,9 +33,12 @@
 //   - Normals (M21, C21.2): into Lights2DNormals with SceneDepth (GetLights2DNormalsFramebufferInfo), depth-tested
 //     GreaterOrEqual, without blending: where the quad's texel alpha times its colour's alpha is above 0, the fragment
 //     writes the quad's world normal and 1 when the quad has a NormalMap (its texel decoded as 2 rgb - 1, turned from the
-//     quad's tangent frame: +X along the texture's u, +Y against its v, +Z their cross product, each from the screen-space
-//     derivatives of the quad's position and texture coordinates), else (0, 0, 1) and 0; elsewhere it writes nothing.
-//   Stream L implements both, raising PipelineCount to 4; until then Record refuses them with Unsupported.
+//     quad's tangent frame and normalized: +X along the texture's u, +Y against its v, each from the screen-space
+//     derivatives of the quad's position and texture coordinates, and +Z the unit normal of the quad's plane facing the
+//     viewer, so a quad mirrored by its flips mirrors its normals' X or Y and keeps them facing the lights above its
+//     plane), else (0, 0, 1) and 0; elsewhere it writes nothing.
+//   The four pipelines are created at Create (PipelineCount); HdrLit and Normals bind a second texture (QuadBatchInputs::Light
+//   and QuadDraw::NormalMap), so they have a binding layout of their own.
 // Colour textures are sampled through their sRGB views, so the shader sees linear values; an 8-bit sRGB texel drawn with a
 // white colour reaches an Ldr target, or an Hdr one through the 2D colour path (RenderOutputSettings::PixelArt), unchanged.
 //
@@ -51,13 +54,12 @@
 // declaration "QuadBatcher" in RenderPassDeclaration.h); the batcher keeps no binding sets (each Record takes them, one per
 // texture and sampler, from the caller's PassBindingCache) and records under its caller's stats row. Its vertex buffer
 // holds at most MaxQuadsPerRecord quads, so quads that external input controls cannot exhaust GPU memory. No quad is lost to
-// that capacity (M21, C21.2, Docs/Decisions/0032-m21-contract.md decision 24, stream L; until then a record skips and counts
-// its quads beyond it, with a warning the first time, as M18 made it): a record of more quads draws them all, in their
-// order, in consecutive batches of at most MaxQuadsPerRecord quads, each written into the vertex buffer and drawn before
-// the next is written, with every binding set and buffer created before the first command as for one batch (so a failed
-// record still draws nothing), and returns the count of every finite quad. So a tilemap that fills a record never drops
-// the sprites after it. A quad with a non-finite corner, texture coordinate or colour is skipped. Main thread only; not
-// copyable or movable.
+// that capacity (M21, C21.2, Docs/Decisions/0032-m21-contract.md decision 24): a record of more quads draws them all, in
+// their order, in consecutive batches of at most MaxQuadsPerRecord quads, each written into the vertex buffer and drawn
+// before the next is written, with every binding set and buffer created before the first command as for one batch (so a
+// failed record still draws nothing), and returns the count of every finite quad. So a tilemap that fills a record never
+// drops the sprites after it. A quad with a non-finite corner, texture coordinate or colour is skipped. Main thread only;
+// not copyable or movable.
 
 namespace Engine {
 
@@ -163,10 +165,10 @@ namespace Engine {
 	class QuadBatcher
 	{
 	public:
-		// Hdr and Ldr; stream L adds HdrLit and Normals (4, Docs/Decisions/0032-m21-contract.md decision 22).
-		static constexpr uint32_t PipelineCount = 2;
+		// Hdr, Ldr, and M21's HdrLit and Normals (Docs/Decisions/0032-m21-contract.md decision 22), in QuadBatchTarget's order.
+		static constexpr uint32_t PipelineCount = 4;
 		// The vertex buffer's capacity in quads (2^20 vertices, 36 MiB of vertex data): the most one batch of a Record draws.
-		// A Record of more draws them in further batches (the file comment; stream L, until then the rest are skipped).
+		// A Record of more draws them in further batches (the file comment).
 		static constexpr uint32_t MaxQuadsPerRecord = 1U << 18;
 
 		// Restricts construction to Create; CreateScope still reaches the constructor.
@@ -183,12 +185,12 @@ namespace Engine {
 		QuadBatcher(const QuadBatcher&) = delete;
 		QuadBatcher& operator=(const QuadBatcher&) = delete;
 
-		// Creates the two pipelines (checked against their reflection), the two samplers, the white texture and the index
+		// Creates the four pipelines (checked against their reflection), the two samplers, the white texture and the index
 		// buffer. `device` is a documented back-reference that outlives the batcher. Errors: those of PipelineFactory and the
 		// GraphicsDevice wrappers (Gpu: an out-of-memory creation, §8.14 item 7).
 		[[nodiscard]] static Result<Scope<QuadBatcher>> Create(GraphicsDevice& device, PipelineFactory& pipelines);
 
-		// The layout descriptions of both pipelines, for "Shaders: LayoutsMatchReflection".
+		// The layout descriptions of the four pipelines, in QuadBatchTarget's order, for "Shaders: LayoutsMatchReflection".
 		[[nodiscard]] static std::vector<PipelineLayoutDescription> GetLayoutDescriptions();
 		// The framebuffer a batch of `target` records into (see the file comment).
 		[[nodiscard]] static nvrhi::FramebufferInfo GetFramebufferInfo(QuadBatchTarget target);
@@ -199,7 +201,8 @@ namespace Engine {
 		// Records `inputs.Quads` into `inputs.Framebuffer` (asserted non-null), clipped to `inputs.Scissor`, with binding sets
 		// from the caller's `bindings`, adding the draw calls and triangles to `counters`. Returns the number of quads drawn
 		// (skipped ones, see the file comment, do not count). Records nothing for no quads or an empty clip rectangle.
-		// Errors: Gpu when the vertex buffer or a binding set cannot be created (the quads are skipped).
+		// Errors: InvalidArgument for a null framebuffer, or an HdrLit record without inputs.Light (both asserted); Gpu when
+		// the vertex buffer or a binding set cannot be created (the quads are skipped).
 		[[nodiscard]] Result<uint32_t> Record(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const QuadBatchInputs& inputs,
 			RenderPassCounters& counters);
 	private:

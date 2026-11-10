@@ -672,7 +672,7 @@ namespace Engine {
 		// physics system to its render annotations (the one argument, isPlayScene ? session->GetPhysics2D() : nullptr, that
 		// the ledger amendment on main of 2026-11-02 grants M21 in ScreenshotMethods.cpp), so a play scene's colliders tell a
 		// sleeping 2D body from an awake one, as the editor's views do.
-		TEST_CASE("ScreenshotMethods: a play scene's screenshot draws a sleeping 2D body's collider in the sleeping category" * doctest::skip(true))
+		TEST_CASE("ScreenshotMethods: a play scene's screenshot draws a sleeping 2D body's collider in the sleeping category")
 		{
 			CaptureLog log;
 			ScreenshotSetup setup("ViewportScreenshotSleeping2D", log);

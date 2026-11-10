@@ -41,12 +41,13 @@ namespace Engine {
 	// body whose shape MakeBody2DShape or PhysicsShape::Create refuses, and PHYSICS2D_MIXED_WORLDS for every entity that
 	// holds both kinds of physics components. Building shapes needs the process's PhysicsEngine (skipped and logged once at
 	// Warn without it, as ValidateScenePhysics). Pure function of its inputs otherwise; main thread. M21 (C21.2,
-	// Docs/Decisions/0032-m21-contract.md decision 25, stream T2): a TilemapCollider's tilemap loads through `assets` as the
-	// play session's Physics2DSystem loads it (Physics2DSystem.h's tilemap paragraph), so its PHYSICS_INVALID_SHAPE cases agree;
-	// null `assets` makes every tilemap collider PHYSICS_INVALID_SHAPE, as ValidateScenePhysics does for mesh colliders.
-	// project.validate passes the editor's asset manager (stream T2). The default exists only so that the contract tree's
-	// callers compile unchanged: stream T2 removes it when it passes the editor's manager from ProjectValidator.cpp, so a
-	// caller can never forget the argument and see every tilemap collider reported (ValidateScenePhysics' signature).
-	[[nodiscard]] std::vector<PhysicsDiagnostic> ValidateScenePhysics2D(const Scene& scene, const PhysicsLayerTable& layers, AssetManager* assets = nullptr);
+	// Docs/Decisions/0032-m21-contract.md decision 25): a TilemapCollider's tilemap loads through `assets` as the play
+	// session's Physics2DSystem loads it (Physics2DSystem.h's tilemap paragraph), so their diagnostics agree: a collider
+	// without a tilemap, or whose tilemap is missing, fails to load or merges into too many boxes, is PHYSICS_INVALID_SHAPE
+	// (Component TilemapCollider, Field Tilemap), and a body whose tilemaps have no solid cell is no body, without a
+	// diagnostic; null `assets` makes every tilemap collider PHYSICS_INVALID_SHAPE, as ValidateScenePhysics does for mesh
+	// colliders. project.validate passes the editor's asset manager. No default, as ValidateScenePhysics has none, so a
+	// caller never forgets it and sees every tilemap collider reported.
+	[[nodiscard]] std::vector<PhysicsDiagnostic> ValidateScenePhysics2D(const Scene& scene, const PhysicsLayerTable& layers, AssetManager* assets);
 
 }

@@ -54,7 +54,8 @@ namespace Engine {
 	// keeps its displayed image's sprites in draw order (the snapshot's), and the click's sprite is picked from them when its
 	// GPU pick is requested, in the frame that rendered the image, so a sprite that moves on before the pick completes (a
 	// playing session's) is still the one selected. The selection is made when the GPU pick completes, under its staleness
-	// rules, so a click selects one thing once.
+	// rules, so a click selects one thing once. M21 (C21.2, decision 24): a tile is picked as a sprite of its tilemap's
+	// entity, in the one draw order of the image's sprites and tilemaps, so a click on a tile selects its tilemap.
 	class EditorHostViewports final : public EditorViewportHost
 	{
 	public:
@@ -140,8 +141,10 @@ namespace Engine {
 			// until the requested size changes.
 			glm::uvec2 FailedSize = glm::uvec2(0);
 			// M21: the displayed image's sprites in their draw order (RenderSnapshot::Sprites, at the image's pose and in the
-			// project's sorting layers), the ones a click on it picks among.
+			// project's sorting layers), the ones a click on it picks among, and (C21.2, Docs/Decisions/0032-m21-contract.md
+			// decision 24) its tilemaps placed among them (RenderSnapshot::Tilemaps), whose tiles a click picks as sprites.
 			std::vector<SpriteItem> Sprites{};
+			std::vector<TilemapItem> Tilemaps{};
 		};
 		[[nodiscard]] static size_t Index(ViewportView view);
 		// The size view `index` (0 the Scene view, 1 the Game view) renders at: the forced Game view's (ForceGameView: the game
@@ -159,8 +162,9 @@ namespace Engine {
 		[[nodiscard]] PlaySession* GetShownSession(ViewportView view) const;
 		// Completes `view`'s pending picks (the view `kind`) and selects what they hit in the scene the view shows.
 		[[nodiscard]] Status Poll(View& view, ViewportView kind, uint64_t frameIndex);
-		// M21: the sprite that `click`'s pixel of `view`'s displayed image shows among the image's sprites (PickSprite over
-		// View::Sprites), or the invalid UUID when it shows none.
+		// M21: the sprite, or the tilemap of the tile (C21.2), that `click`'s pixel of `view`'s displayed image shows among the
+		// image's sprites and tilemaps (PickSprite over View::Sprites and View::Tilemaps), or the invalid UUID when it shows
+		// none.
 		[[nodiscard]] Result<UUID> PickSpriteAt(const View& view, const EditorViewportClick& click) const;
 		// M21: the project's sorting layers (SortingLayers.Layers), empty without a project.
 		[[nodiscard]] std::vector<std::string> GetSortingLayers() const;

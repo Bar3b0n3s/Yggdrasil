@@ -2,6 +2,8 @@
 
 #include "Engine/Scene/Physics2DValidation.h"
 
+#include "Engine/Asset/SpriteSheetData.h"
+#include "Engine/Asset/TilemapCollision.h"
 #include "Engine/Asset/TilemapData.h"
 #include "Engine/Physics/PhysicsDiagnostics.h"
 #include "Engine/Scene/Components/BoxCollider2DComponent.h"
@@ -22,10 +24,13 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 // The 2D physics validation codes (Docs/Decisions/0032-m21-contract.md decision 12, stream P2; Roadmap M21 "An entity holding
@@ -116,7 +121,7 @@ namespace Engine {
 
 			Result<PhysicsLayerTable> layers = PhysicsLayerTable::Create(std::vector<std::string>{ "Default" }, std::vector<std::vector<std::string>>{ { "Default", "Default" } });
 			REQUIRE(layers.has_value());
-			const std::vector<PhysicsDiagnostic> diagnostics = ValidateScenePhysics2D(scene, *layers);
+			const std::vector<PhysicsDiagnostic> diagnostics = ValidateScenePhysics2D(scene, *layers, nullptr);
 			REQUIRE(diagnostics.size() == 2);
 			CHECK(diagnostics[0].Code == Physics2DMixedWorldsCode);
 			CHECK(diagnostics[0].Entity == mixed.GetUUID());
@@ -176,7 +181,7 @@ namespace Engine {
 			TransformSystem::Update(scene);
 
 			const PhysicsLayerTable layers = MakeDefaultLayers();
-			const std::vector<PhysicsDiagnostic> validated = ValidateScenePhysics2D(scene, layers);
+			const std::vector<PhysicsDiagnostic> validated = ValidateScenePhysics2D(scene, layers, nullptr);
 			CheckReported(validated, PhysicsUnknownLayerCode, lost.GetUUID(), DiagnosticSeverity::Error, "RigidBody2D", "Layer");
 			CheckReported(validated, PhysicsMixedTriggerCode, mixed.GetUUID(), DiagnosticSeverity::Error, "", "IsTrigger");
 			CheckReported(validated, PhysicsDynamicTriggerCode, sensor.GetUUID(), DiagnosticSeverity::Error, "RigidBody2D", "Type");
@@ -243,8 +248,7 @@ namespace Engine {
 
 		// C21.2 (Docs/Decisions/0032-m21-contract.md decision 25, stream T2): a TilemapCollider loads its tilemap through the
 		// validator's asset manager as the session's system does, so project.validate and the session agree.
-		TEST_CASE("Physics2DValidation: a TilemapCollider without a tilemap is PHYSICS_INVALID_SHAPE, and one without a solid cell is quiet"
-			* doctest::skip(true))
+		TEST_CASE("Physics2DValidation: a TilemapCollider without a tilemap is PHYSICS_INVALID_SHAPE, and one without a solid cell is quiet")
 		{
 			Test::SceneTestFixture fixture(1, true);
 			Scene& scene = fixture.GetScene();
@@ -283,14 +287,130 @@ namespace Engine {
 				return diagnostic.Entity == decor.GetUUID();
 			}));
 			// Without an asset manager every tilemap collider is PHYSICS_INVALID_SHAPE, as a mesh collider is in the 3D world.
-			const std::vector<PhysicsDiagnostic> withoutAssets = ValidateScenePhysics2D(scene, layers);
+			const std::vector<PhysicsDiagnostic> withoutAssets = ValidateScenePhysics2D(scene, layers, nullptr);
 			CHECK(FindDiagnostic(withoutAssets, PhysicsInvalidShapeCode, decor.GetUUID()).has_value());
 
 			// The session reports the same and creates none of these bodies.
+			const Test::ExpectLog shapeLogged(LogLevel::Error, PhysicsInvalidShapeCode);
+			const Test::ExpectLog mixedLogged(LogLevel::Error, Physics2DMixedWorldsCode);
 			Result<Scope<Physics2DSystem>> system = Physics2DSystem::Create({ .RuntimeScene = &scene, .Assets = &assets });
 			REQUIRE_MESSAGE(system.has_value(), system.error().ToString());
 			CHECK((*system)->GetStats().BodyCount == 0);
 			CHECK(FindDiagnostic((*system)->GetDiagnostics(), PhysicsInvalidShapeCode, bare.GetUUID()).has_value());
+		}
+
+		// Stream T2 (decision 25): a TilemapCollider's boxes are several sub-shapes of one collider, so a shape the 2D world
+		// refuses is named by the collider it comes from, not by its place among the sub-shapes: a polygon gathered after a
+		// tilemap's three boxes names its PolygonCollider2D, and a tilemap box too large for the world (a 64-cell row of
+		// 1 km cells) names the TilemapCollider and its Tilemap field, in project.validate and in the session alike.
+		TEST_CASE("Physics2DValidation: a shape refused after a tilemap's boxes names its own collider, and a refused box the TilemapCollider")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Test::InMemoryAssetManager assets;
+			const AssetHandle dotsHandle = UUID(8971);
+			Ref<TilemapData> dots = CreateRef<TilemapData>();
+			dots->ChunkSize = 4;
+			dots->Palette = { TilemapTile{ .Solid = true } };
+			dots->Chunks = { TilemapChunk{ .X = 0, .Y = 0, .Tiles = { 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0 } } };
+			assets.Publish(dotsHandle, dots, "Assets/Tilemaps/Dots.tilemap");
+			const AssetHandle wideHandle = UUID(8972);
+			Ref<TilemapData> wide = CreateRef<TilemapData>();
+			wide->CellSize = glm::vec2(MaxTilemapCellSize);
+			wide->ChunkSize = MaxTilemapChunkSize;
+			wide->Palette = { TilemapTile{ .Solid = true } };
+			TilemapChunk row{ .X = 0, .Y = 0, .Tiles = std::vector<uint32_t>(static_cast<size_t>(MaxTilemapChunkSize) * MaxTilemapChunkSize, 0) };
+			std::fill_n(row.Tiles.begin(), MaxTilemapChunkSize, 1u);
+			wide->Chunks = { std::move(row) };
+			assets.Publish(wideHandle, wide, "Assets/Tilemaps/Wide.tilemap");
+
+			// The terrain's implicit static body: its tilemap's three boxes, then the gathered polygon whose points lie on a line.
+			Entity terrain = CreatePlanarEntity(scene, "Terrain", glm::vec2(0.0f));
+			terrain.AddComponent<TilemapColliderComponent>(TilemapColliderComponent{ .Tilemap = TypedAssetHandle<AssetType::Tilemap>(dotsHandle) });
+			Entity sliver = CreatePlanarEntity(scene, "Sliver", glm::vec2(0.0f, 6.0f));
+			sliver.AddComponent<PolygonCollider2DComponent>(
+				PolygonCollider2DComponent{ .Points = { glm::vec2(-1.0f, 0.0f), glm::vec2(0.0f), glm::vec2(1.0f, 0.0f) } });
+			REQUIRE(scene.SetParent(sliver, terrain, {}, false).has_value());
+			// A box, then the tilemap's one 64 km box.
+			Entity plain = CreatePlanarEntity(scene, "Plain", glm::vec2(0.0f, -100.0f));
+			plain.AddComponent<BoxCollider2DComponent>();
+			plain.AddComponent<TilemapColliderComponent>(TilemapColliderComponent{ .Tilemap = TypedAssetHandle<AssetType::Tilemap>(wideHandle) });
+			TransformSystem::Update(scene);
+
+			const std::vector<PhysicsDiagnostic> validated = ValidateScenePhysics2D(scene, MakeDefaultLayers(), &assets);
+			CheckReported(validated, PhysicsInvalidShapeCode, sliver.GetUUID(), DiagnosticSeverity::Error, "PolygonCollider2D", "");
+			CheckReported(validated, PhysicsInvalidShapeCode, plain.GetUUID(), DiagnosticSeverity::Error, "TilemapCollider", "Tilemap");
+			CHECK_FALSE(FindDiagnostic(validated, PhysicsInvalidShapeCode, terrain.GetUUID()).has_value());
+
+			const Test::ExpectLog shapeLogged(LogLevel::Error, PhysicsInvalidShapeCode);
+			Result<Scope<Physics2DSystem>> system = Physics2DSystem::Create({ .RuntimeScene = &scene, .Assets = &assets });
+			REQUIRE_MESSAGE(system.has_value(), system.error().ToString());
+			const std::span<const PhysicsDiagnostic> raised = (*system)->GetDiagnostics();
+			CheckReported(raised, PhysicsInvalidShapeCode, sliver.GetUUID(), DiagnosticSeverity::Error, "PolygonCollider2D", "");
+			CheckReported(raised, PhysicsInvalidShapeCode, plain.GetUUID(), DiagnosticSeverity::Error, "TilemapCollider", "Tilemap");
+			CHECK((*system)->GetStats().BodyCount == 0);
+		}
+
+		// Decision 25 (W21.2's review): one TilemapCollider holds at most MaxTilemapColliderBoxes merged boxes, and its Tilemap
+		// must load as a tilemap. A map of exactly that many boxes makes its body; one more box, or a Tilemap that names a sprite
+		// sheet, is PHYSICS_INVALID_SHAPE on the TilemapCollider's Tilemap and makes none, in project.validate and in the session.
+		TEST_CASE("Physics2DValidation: a TilemapCollider past MaxTilemapColliderBoxes boxes or naming another asset type is PHYSICS_INVALID_SHAPE")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Test::InMemoryAssetManager assets;
+			// A 64 x 64 checkerboard chunk merges into 2,048 boxes of one cell, so 32 of them make exactly the limit.
+			constexpr uint32_t Side = MaxTilemapChunkSize;
+			constexpr int32_t FullChunks = 32;
+			static_assert(static_cast<uint32_t>(FullChunks) * Side * Side / 2 == MaxTilemapColliderBoxes);
+			std::vector<uint32_t> checkerboard(static_cast<size_t>(Side) * Side, 0);
+			for (uint32_t y = 0; y < Side; ++y)
+			{
+				for (uint32_t x = 0; x < Side; ++x)
+					checkerboard[static_cast<size_t>(y) * Side + x] = (x + y) % 2 == 0 ? 1u : 0u;
+			}
+			Ref<TilemapData> full = CreateRef<TilemapData>();
+			full->ChunkSize = Side;
+			full->Palette = { TilemapTile{ .Solid = true } };
+			for (int32_t x = 0; x < FullChunks; ++x)
+				full->Chunks.push_back(TilemapChunk{ .X = x, .Y = 0, .Tiles = checkerboard });
+			REQUIRE(MergeTilemapBoxes(*full).size() == MaxTilemapColliderBoxes);
+			Ref<TilemapData> over = CreateRef<TilemapData>(*full);
+			TilemapChunk extra{ .X = FullChunks, .Y = 0, .Tiles = std::vector<uint32_t>(static_cast<size_t>(Side) * Side, 0) };
+			extra.Tiles.front() = 1;
+			over->Chunks.push_back(std::move(extra));
+			REQUIRE(MergeTilemapBoxes(*over).size() == MaxTilemapColliderBoxes + 1);
+			const AssetHandle fullHandle = UUID(8973);
+			const AssetHandle overHandle = UUID(8974);
+			const AssetHandle sheetHandle = UUID(8975);
+			assets.Publish(fullHandle, full, "Assets/Tilemaps/Full.tilemap");
+			assets.Publish(overHandle, over, "Assets/Tilemaps/Over.tilemap");
+			assets.Publish(sheetHandle, CreateRef<SpriteSheetData>(), "Assets/Sprites/Tiles.spritesheet");
+
+			Entity atLimit = CreatePlanarEntity(scene, "AtLimit", glm::vec2(0.0f));
+			atLimit.AddComponent<TilemapColliderComponent>(TilemapColliderComponent{ .Tilemap = TypedAssetHandle<AssetType::Tilemap>(fullHandle) });
+			Entity beyond = CreatePlanarEntity(scene, "Beyond", glm::vec2(0.0f, -100.0f));
+			beyond.AddComponent<TilemapColliderComponent>(TilemapColliderComponent{ .Tilemap = TypedAssetHandle<AssetType::Tilemap>(overHandle) });
+			Entity sheet = CreatePlanarEntity(scene, "Sheet", glm::vec2(0.0f, -200.0f));
+			sheet.AddComponent<TilemapColliderComponent>(TilemapColliderComponent{ .Tilemap = TypedAssetHandle<AssetType::Tilemap>(sheetHandle) });
+			TransformSystem::Update(scene);
+
+			const std::vector<PhysicsDiagnostic> validated = ValidateScenePhysics2D(scene, MakeDefaultLayers(), &assets);
+			CheckReported(validated, PhysicsInvalidShapeCode, beyond.GetUUID(), DiagnosticSeverity::Error, "TilemapCollider", "Tilemap");
+			CheckReported(validated, PhysicsInvalidShapeCode, sheet.GetUUID(), DiagnosticSeverity::Error, "TilemapCollider", "Tilemap");
+			CHECK(std::ranges::none_of(validated, [&atLimit](const PhysicsDiagnostic& diagnostic)
+			{
+				return diagnostic.Entity == atLimit.GetUUID();
+			}));
+
+			const Test::ExpectLog shapeLogged(LogLevel::Error, PhysicsInvalidShapeCode);
+			Result<Scope<Physics2DSystem>> system = Physics2DSystem::Create({ .RuntimeScene = &scene, .Assets = &assets });
+			REQUIRE_MESSAGE(system.has_value(), system.error().ToString());
+			const std::span<const PhysicsDiagnostic> raised = (*system)->GetDiagnostics();
+			CheckReported(raised, PhysicsInvalidShapeCode, beyond.GetUUID(), DiagnosticSeverity::Error, "TilemapCollider", "Tilemap");
+			CheckReported(raised, PhysicsInvalidShapeCode, sheet.GetUUID(), DiagnosticSeverity::Error, "TilemapCollider", "Tilemap");
+			// Only the map at the limit makes a body.
+			CHECK((*system)->GetStats().BodyCount == 1);
 		}
 	}
 

@@ -29,11 +29,14 @@
 
 #include <algorithm>
 #include <bit>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <map>
 #include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 // The play session's 2D physics (ADR 0028 decision 6; Docs/Decisions/0032-m21-contract.md decisions 9 to 12, stream P2;
@@ -137,6 +140,29 @@ namespace Engine {
 			const auto bits = std::bit_cast<uint32_t>(value);
 			for (uint32_t shift = 0; shift < 32; shift += 8)
 				bytes.push_back(static_cast<std::byte>((bits >> shift) & 0xffu));
+		}
+
+		// A tilemap of `chunkSize`-cell chunks of `cellSize` cells holding `cells` (cell, value), its chunks built in canonical
+		// order (sorted by (Y, X)), as tilemap.paint would leave them.
+		Ref<TilemapData> MakeTestTilemap(const std::vector<std::pair<glm::ivec2, uint32_t>>& cells, uint32_t chunkSize, const glm::vec2& cellSize)
+		{
+			Ref<TilemapData> tilemap = CreateRef<TilemapData>();
+			tilemap->CellSize = cellSize;
+			tilemap->ChunkSize = chunkSize;
+			tilemap->Palette = { TilemapTile{ .Solid = true }, TilemapTile{ .Solid = false } };
+			const auto size = static_cast<int32_t>(chunkSize);
+			std::map<std::pair<int32_t, int32_t>, TilemapChunk> chunks;
+			for (const auto& [cell, tile] : cells)
+			{
+				const glm::ivec2 chunk = GetTilemapChunkCoordinate(cell, chunkSize);
+				auto [found, created] = chunks.try_emplace(std::make_pair(chunk.y, chunk.x),
+					TilemapChunk{ .X = chunk.x, .Y = chunk.y, .Tiles = std::vector<uint32_t>(static_cast<size_t>(chunkSize) * chunkSize, 0) });
+				const glm::ivec2 local = cell - chunk * size;
+				found->second.Tiles[static_cast<size_t>(local.y * size + local.x)] = tile;
+			}
+			for (auto& [key, chunk] : chunks)
+				tilemap->Chunks.push_back(std::move(chunk));
+			return tilemap;
 		}
 
 		// One body's entry of the physics2d hash block (Physics2DSystem::AppendStateHash) for a body at rest at `position`.
@@ -906,7 +932,7 @@ namespace Engine {
 		// C21.2 (Docs/Decisions/0032-m21-contract.md decision 25, stream T2): the TilemapCollider's tilemap, a ground row in two
 		// chunks of 4 x 4 unit cells with a non-solid cell above it: its boxes, [0, 4] x [0, 1] and [4, 8] x [0, 1] (never merged
 		// across the chunks' edge), form the implicit static body of the tilemap's entity.
-		TEST_CASE("Physics2DSystem: a TilemapCollider makes one static compound of its merged boxes in canonical order" * doctest::skip(true))
+		TEST_CASE("Physics2DSystem: a TilemapCollider makes one static compound of its merged boxes in canonical order")
 		{
 			Test::SceneTestFixture fixture(1, true);
 			Scene& scene = fixture.GetScene();
@@ -963,7 +989,7 @@ namespace Engine {
 		// C21.2 (decision 25, stream T2): a new asset version of the tilemap (a tilemap.paint edit) rebuilds the shape in place at
 		// the next pre-step, as a mesh collider's hot reload; so does a new TilemapRenderer.Tilemap on an entity whose
 		// TilemapCollider has none, as a MeshRenderer's new Mesh does for a MeshCollider without one (C21.2's review).
-		TEST_CASE("Physics2DSystem: a tilemap's new version rebuilds its collider's shape in place" * doctest::skip(true))
+		TEST_CASE("Physics2DSystem: a tilemap's new version rebuilds its collider's shape in place")
 		{
 			Test::SceneTestFixture fixture(1, true);
 			Scene& scene = fixture.GetScene();
@@ -1025,18 +1051,181 @@ namespace Engine {
 			UpdateAndStep(scene, **system, 2);
 			CHECK((*system)->GetStats().BodyCount == 1);
 			CHECK((*system)->GetDiagnostics().empty());
+			// Painting a solid cell again creates the body once more (stream T2: the body its tilemap left without a shape).
+			publish(tilemapHandle, { 0, 0, 1, 0 });
+			UpdateAndStep(scene, **system, 3);
+			CHECK((*system)->GetStats().BodyCount == 2);
+			CHECK(topAt(0.5f) == doctest::Approx(2.0f));
+			CHECK(topAt(1.5f) == -1.0f);
+			CHECK((*system)->GetDiagnostics().empty());
+		}
+
+		// Stream T2 (decision 25): merging changes how many sub-shapes a tilemap's body has, never where it is solid. A stepped
+		// terrain of half-unit cells in 4-cell chunks, with a hole and non-solid cells on top, collided once by a TilemapCollider
+		// (merged boxes) and once by a static RigidBody2D gathering one BoxCollider2D per solid cell (the tiles' unmerged boxes):
+		// every cell centre overlaps the ground exactly where a cell is solid, rays down meet the same tops, and bodies dropped
+		// on it come to rest at the same places.
+		TEST_CASE("Physics2DSystem: bodies collide with a TilemapCollider's merged boxes as with the tiles' unmerged boxes")
+		{
+			// Column x (0 to 15) is solid up to row 1 + (x / 3) % 3, except the hole at column 7; every fourth column carries a
+			// non-solid cell on its top.
+			constexpr float CellSide = 0.5f;
+			constexpr int32_t Columns = 16;
+			const auto heightOf = [](int32_t x)
+			{
+				return x == 7 ? 0 : 1 + (x / 3) % 3;
+			};
+			std::vector<std::pair<glm::ivec2, uint32_t>> cells;
+			for (int32_t x = 0; x < Columns; ++x)
+			{
+				for (int32_t y = 0; y < heightOf(x); ++y)
+					cells.emplace_back(glm::ivec2(x, y), 1u);
+				if (x % 4 == 0)
+					cells.emplace_back(glm::ivec2(x, heightOf(x)), 2u);
+			}
+			const Ref<TilemapData> tilemap = MakeTestTilemap(cells, 4, glm::vec2(CellSide));
+			const glm::vec2 origin(-3.0f, -2.0f);
+			const auto cellCenter = [&origin](int32_t x, int32_t y)
+			{
+				return origin + (glm::vec2(static_cast<float>(x), static_cast<float>(y)) + 0.5f) * CellSide;
+			};
+
+			struct Outcome
+			{
+				std::vector<bool> Solid{};
+				std::vector<float> Tops{};
+				std::vector<glm::vec2> Rests{};
+			};
+			const auto run = [&](bool merged)
+			{
+				Test::SceneTestFixture fixture(1, true);
+				Scene& scene = fixture.GetScene();
+				Test::InMemoryAssetManager assets;
+				const AssetHandle tilemapHandle = UUID(8964);
+				assets.Publish(tilemapHandle, tilemap, "Assets/Tilemaps/Steps.tilemap");
+				Entity ground = Create2DEntity(scene, "Ground", origin);
+				if (merged)
+				{
+					ground.AddComponent<TilemapColliderComponent>(TilemapColliderComponent{ .Tilemap = TypedAssetHandle<AssetType::Tilemap>(tilemapHandle) });
+				}
+				else
+				{
+					ground.AddComponent<RigidBody2DComponent>(RigidBody2DComponent{ .Type = BodyType::Static });
+					for (const auto& [cell, tile] : cells)
+					{
+						if (tile != 1)
+							continue;
+						Entity piece = Create2DEntity(scene, "Tile", (glm::vec2(cell) + 0.5f) * CellSide);
+						piece.AddComponent<BoxCollider2DComponent>(BoxCollider2DComponent{ .HalfExtents = glm::vec2(0.5f * CellSide) });
+						REQUIRE(scene.SetParent(piece, ground, std::nullopt, false).has_value());
+					}
+				}
+				// A ball over the middle of every solid column, and a crate over the flat top of columns 9 to 11 across the chunk
+				// edge at column 12's left.
+				std::vector<Entity> dropped;
+				for (int32_t x = 0; x < Columns; ++x)
+				{
+					if (heightOf(x) == 0)
+						continue;
+					Entity ball = Create2DEntity(scene, "Ball", cellCenter(x, 5));
+					ball.AddComponent<RigidBody2DComponent>();
+					ball.AddComponent<CircleCollider2DComponent>(CircleCollider2DComponent{ .Radius = 0.2f });
+					dropped.push_back(ball);
+				}
+				Entity crate = Create2DEntity(scene, "Crate", cellCenter(10, 7));
+				crate.AddComponent<RigidBody2DComponent>();
+				crate.AddComponent<BoxCollider2DComponent>(BoxCollider2DComponent{ .HalfExtents = glm::vec2(0.6f, 0.2f) });
+				dropped.push_back(crate);
+				TransformSystem::Update(scene);
+				Result<Scope<Physics2DSystem>> system = Physics2DSystem::Create({ .RuntimeScene = &scene, .Assets = &assets });
+				REQUIRE_MESSAGE(system.has_value(), system.error().ToString());
+				CHECK((*system)->GetDiagnostics().empty());
+
+				Outcome outcome;
+				// Every cell centre of the map and a margin around it: solid where the ground is.
+				for (int32_t y = -1; y < 5; ++y)
+				{
+					for (int32_t x = -1; x <= Columns; ++x)
+					{
+						const Result<std::vector<PhysicsOverlapHit>> hits = (*system)->OverlapCircle(cellCenter(x, y), 0.1f * CellSide);
+						REQUIRE(hits.has_value());
+						outcome.Solid.push_back(std::ranges::any_of(*hits, [&ground](const PhysicsOverlapHit& hit)
+						{
+							return hit.Body == ground.GetUUID();
+						}));
+					}
+				}
+				// The ground's top under every column's centre and every seam between columns.
+				for (int32_t step = 0; step < 2 * Columns; ++step)
+				{
+					const float x = origin.x + static_cast<float>(step) * 0.5f * CellSide + 0.25f * CellSide;
+					const Result<std::vector<Physics2DRaycastHit>> hits = (*system)->RaycastAll(glm::vec2(x, 10.0f), glm::vec2(0.0f, -1.0f), 20.0f);
+					REQUIRE(hits.has_value());
+					const auto top = std::ranges::find_if(*hits, [&ground](const Physics2DRaycastHit& hit)
+					{
+						return hit.Body == ground.GetUUID();
+					});
+					outcome.Tops.push_back(top != hits->end() ? top->Point.y : -100.0f);
+				}
+				for (uint64_t tick = 0; tick < 150; ++tick)
+					UpdateAndStep(scene, **system, tick);
+				for (const Entity body : dropped)
+					outcome.Rests.push_back(glm::vec2(body.GetComponent<TransformComponent>().Translation));
+				return outcome;
+			};
+
+			const Outcome merged = run(true);
+			const Outcome unmerged = run(false);
+			CHECK(merged.Solid == unmerged.Solid);
+			// The overlaps are the cells: solid exactly where a solid cell is.
+			size_t index = 0;
+			for (int32_t y = -1; y < 5; ++y)
+			{
+				for (int32_t x = -1; x <= Columns; ++x)
+				{
+					CAPTURE(x);
+					CAPTURE(y);
+					const bool solid = x >= 0 && x < Columns && y >= 0 && y < heightOf(x);
+					CHECK(merged.Solid[index++] == solid);
+				}
+			}
+			REQUIRE(merged.Tops.size() == unmerged.Tops.size());
+			for (size_t column = 0; column < merged.Tops.size(); ++column)
+			{
+				CAPTURE(column);
+				CHECK(merged.Tops[column] == doctest::Approx(unmerged.Tops[column]).epsilon(1e-5));
+			}
+			REQUIRE(merged.Rests.size() == unmerged.Rests.size());
+			for (size_t body = 0; body < merged.Rests.size(); ++body)
+			{
+				CAPTURE(body);
+				CHECK(merged.Rests[body].x == doctest::Approx(unmerged.Rests[body].x).epsilon(1e-3));
+				CHECK(merged.Rests[body].y == doctest::Approx(unmerged.Rests[body].y).epsilon(1e-3));
+			}
+			// Each ball rests on its column's top, within Jolt's penetration slop (2 cm).
+			size_t ball = 0;
+			for (int32_t x = 0; x < Columns; ++x)
+			{
+				if (heightOf(x) == 0)
+					continue;
+				CAPTURE(x);
+				const float top = origin.y + static_cast<float>(heightOf(x)) * CellSide;
+				CHECK(std::abs(merged.Rests[ball].y - (top + 0.2f)) <= 0.025f);
+				CHECK(merged.Rests[ball].x == doctest::Approx(cellCenter(x, 0).x));
+				++ball;
+			}
 		}
 
 		// C21.2 (decision 27, stream P3): physics2d.bodyInfo's report, PhysicsSystem::GetBodyInfo's in the plane.
-		TEST_CASE("Physics2DSystem: GetBodyInfo reports a 2D body's pose, colliders and contacts" * doctest::skip(true))
+		TEST_CASE("Physics2DSystem: GetBodyInfo reports a 2D body's pose, colliders and contacts")
 		{
 			Test::SceneTestFixture fixture(1, true);
 			Scene& scene = fixture.GetScene();
 			Entity floor = Create2DBox(scene, "Floor", glm::vec2(0.0f, -0.5f), glm::vec2(5.0f, 0.5f), BodyType::Static);
 			Entity crate = Create2DBox(scene, "Crate", glm::vec2(1.0f, 0.5f), glm::vec2(0.5f), BodyType::Dynamic);
-			// A collider-only child gathered into the crate's body.
+			// A collider-only child gathered into the crate's body, 0.6 above its centre (its local Transform kept).
 			Entity lid = Create2DBox(scene, "Lid", glm::vec2(0.0f, 0.6f), glm::vec2(0.5f, 0.1f), std::nullopt);
-			REQUIRE(scene.SetParent(lid, crate).has_value());
+			REQUIRE(scene.SetParent(lid, crate, {}, false).has_value());
 			TransformSystem::Update(scene);
 			Result<Scope<Physics2DSystem>> system = Physics2DSystem::Create({ .RuntimeScene = &scene, .Gravity = glm::vec2(0.0f, -9.81f) });
 			REQUIRE_MESSAGE(system.has_value(), system.error().ToString());

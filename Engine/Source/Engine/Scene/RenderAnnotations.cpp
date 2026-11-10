@@ -11,6 +11,7 @@
 #include "Engine/Scene/Components/AudioSourceComponent.h"
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
+#include "Engine/Scene/Components/Light2DComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/PointLightComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
@@ -54,7 +55,7 @@ namespace Engine {
 	}
 
 	Status AppendRenderAnnotations(const Scene& scene, AssetManager& assets, const PhysicsLayerTable& layers,
-		const PhysicsSystem* physics, RenderSnapshot& snapshot, const Physics2DSystem* /*physics2D*/)
+		const PhysicsSystem* physics, RenderSnapshot& snapshot, const Physics2DSystem* physics2D)
 	{
 		const RenderAnnotations& options = snapshot.Annotations;
 		if (!std::isfinite(snapshot.Alpha) || snapshot.Alpha < 0 || snapshot.Alpha > 1
@@ -113,10 +114,17 @@ namespace Engine {
 					add(RenderIconKind::AudioSource, glm::vec4(0.4f, 1, 0.6f, 1));
 				if (entity.HasComponent<AudioListenerComponent>())
 					add(RenderIconKind::AudioListener, glm::vec4(0.4f, 1, 0.6f, 1));
+				// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 20): a 2D light shows where it is in its own colour.
+				if (const auto* light2D = entity.TryGetComponent<Light2DComponent>())
+					add(RenderIconKind::PointLight, glm::vec4(light2D->Color, 1.0f));
 			}
 		}
 		if (HasFlag(snapshot.Flags, RenderViewFlags::Colliders))
+		{
 			AppendColliderDebugDraw(BuildColliderDebugDraw(scene, layers, physics, &assets, { .Alpha = snapshot.Alpha }), debug);
+			// M21 (decision 28): the 2D colliders after the 3D ones, told asleep from awake by the session's 2D system.
+			AppendColliderDebugDraw(BuildCollider2DDebugDraw(scene, layers, physics2D, &assets, { .Alpha = snapshot.Alpha }), debug);
+		}
 		snapshot.AnnotationDraw = std::move(debug);
 		snapshot.Icons = std::move(icons);
 		return {};

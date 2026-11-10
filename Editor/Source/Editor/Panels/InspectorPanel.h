@@ -44,6 +44,9 @@ namespace Engine {
 	// shows its texture, frames and clips. A field's gesture shows its candidate while it lasts and, on release, submits
 	// asset.setProperties {asset, values: {<field>: <whole value>}} (an array replaces the whole array, RFC 7386), the
 	// method's own action, so its texture check and its undo step are asset.setProperties'; Escape discards the gesture.
+	// A selected tilemap (decision 26) shows its palette, cell size and chunk size the same way, each field's release
+	// submitting asset.setProperties, and the counts of its chunks and painted cells; its cells are painted with the scene
+	// view's tile brush or tilemap.paint, never edited here.
 	// Main thread inside ImGui. Retains only UI presentation state, no entity/component/asset pointers across frames.
 	class InspectorPanel
 	{
@@ -74,10 +77,11 @@ namespace Engine {
 			const StructInfo* Settings = nullptr; // import settings schema; immutable registry data
 			Json Values{};
 			std::string Error{};
+			std::string Summary{}; // M21: a tilemap's counts, taken when it is read
 		};
-		// M21: the sprite sheet field a gesture is changing (the sheet inspector), with the value it shows until its release
-		// submits it.
-		struct SheetEdit
+		// M21: the field of a selected sprite sheet or tilemap a gesture is changing, with the value it shows until its
+		// release submits it.
+		struct AssetFieldEdit
 		{
 			AssetHandle Asset{};
 			std::string Field{};
@@ -111,6 +115,12 @@ namespace Engine {
 		[[nodiscard]] const AssetProperties& ReadAssetProperties(EditorPanelContext& context, AssetHandle asset);
 		// M21: the selected sprite sheet `asset`'s fields, read in `properties`; `escape` discards a gesture.
 		void DrawSpriteSheet(EditorPanelContext& context, AssetHandle asset, const AssetProperties& properties, bool escape);
+		// M21 (decision 26): the selected tilemap `asset`'s palette, cell size and chunk size, read in `properties`.
+		void DrawTilemap(EditorPanelContext& context, AssetHandle asset, const AssetProperties& properties, bool escape);
+		// M21: the fields of a native asset's `properties` (those its values hold), each gesture's release submitting
+		// asset.setProperties; the fields' ids are keyed by `idPrefix`, their labels by the registry type `typeName`.
+		void DrawAssetFields(EditorPanelContext& context, AssetHandle asset, const AssetProperties& properties, bool escape,
+			std::string_view idPrefix, std::string_view typeName);
 		std::optional<InspectorEditTarget> m_ActiveTarget{};
 		std::optional<PendingEdit> m_Pending{};
 		uint32_t m_ActiveComponents = 0;
@@ -122,7 +132,7 @@ namespace Engine {
 		std::vector<uint64_t> m_Tickets{};
 		std::string m_ComponentSearch{};
 		std::optional<AssetProperties> m_AssetProperties{};
-		std::optional<SheetEdit> m_SheetEdit{};
+		std::optional<AssetFieldEdit> m_AssetFieldEdit{};
 		std::optional<PrefabViewCache> m_PrefabView{};
 		UUID m_ApplyInstance{}; // the instance the level picker belongs to
 		UUID m_ApplyLevel{};    // the picked level's root; reset to the outermost for another instance

@@ -749,7 +749,8 @@
 			".sfx",
 			".meta",
 			".replay",
-			".spritesheet"
+			".spritesheet",
+			".tilemap"
 		],
 		"LineDelimitedExtensions": [
 			".jsonl"

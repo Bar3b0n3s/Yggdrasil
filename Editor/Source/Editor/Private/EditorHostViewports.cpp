@@ -80,6 +80,7 @@ namespace Engine {
 			}
 			view.Image = {};
 			view.Sprites.clear();
+			view.Tilemaps.clear();
 			view.RegisteredTexture = nullptr;
 			view.HoldsSceneResources = false;
 		}
@@ -288,7 +289,8 @@ namespace Engine {
 		{
 			const auto& physics = m_Editor.GetProject().GetSettings().Physics;
 			ENGINE_TRY_ASSIGN(const PhysicsLayerTable layers, PhysicsLayerTable::Create(physics.Layers, physics.Collisions));
-			ENGINE_TRY(AppendRenderAnnotations(*scene, m_Editor.GetAssets(), layers, session && !preview ? &session->GetPhysics() : nullptr, snapshot));
+			ENGINE_TRY(AppendRenderAnnotations(*scene, m_Editor.GetAssets(), layers, session && !preview ? &session->GetPhysics() : nullptr, snapshot,
+				session && !preview ? session->GetPhysics2D() : nullptr));
 		}
 		return snapshot;
 	}
@@ -359,7 +361,7 @@ namespace Engine {
 	}
 	Result<UUID> EditorHostViewports::PickSpriteAt(const View& view, const EditorViewportClick& click) const
 	{
-		if (view.Sprites.empty())
+		if (view.Sprites.empty() && view.Tilemaps.empty())
 			return UUID();
 		// The pixel's ray through the displayed image's camera and the renderer's output mapping, as the GPU pick maps it; a
 		// pixel of the letterbox shows no scene.
@@ -367,7 +369,7 @@ namespace Engine {
 		if (!ray)
 			return UUID();
 		const SpritePickRequest request{ .Ray = ray->Ray, .MaxDistance = ray->MaxDistance, .MinDistance = ray->MinDistance };
-		ENGINE_TRY_ASSIGN(const std::optional<SceneRaycastHit> hit, PickSprite(view.Sprites, m_Editor.GetAssets(), request));
+		ENGINE_TRY_ASSIGN(const std::optional<SceneRaycastHit> hit, PickSprite(view.Sprites, view.Tilemaps, m_Editor.GetAssets(), request));
 		return hit ? hit->Entity : UUID();
 	}
 	std::vector<std::string> EditorHostViewports::GetSortingLayers() const
@@ -413,6 +415,7 @@ namespace Engine {
 			}
 			view.Image = {};
 			view.Sprites.clear();
+			view.Tilemaps.clear();
 			view.RegisteredTexture = nullptr;
 			// A hidden view renders nothing, so its renderer would never drop the bindings that keep the previous scene's
 			// textures alive (they go one render after their last use): release it and recreate it when displayed again.
@@ -493,7 +496,9 @@ namespace Engine {
 		view.Image.SceneRevision = snapshot.SceneRevision;
 		view.Image.Camera = snapshot.Camera;
 		view.Image.Picking = HasFlag(snapshot.Flags, RenderViewFlags::Picking);
+		view.Image.Alpha = snapshot.Alpha;
 		view.Sprites.assign(snapshot.Sprites.begin(), snapshot.Sprites.end());
+		view.Tilemaps.assign(snapshot.Tilemaps.begin(), snapshot.Tilemaps.end());
 		// A frame forced while minimized renders the images for the UI capture only (ADR 0018: screenshot captures do not
 		// publish viewport extents); the views stay unavailable until the window is restored.
 		if (!m_Unavailable)

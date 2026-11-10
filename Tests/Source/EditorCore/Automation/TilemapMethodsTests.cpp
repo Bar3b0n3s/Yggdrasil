@@ -7,16 +7,19 @@
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Support/AutomationTestClient.h"
+#include "Support/ExpectLog.h"
 
 #include <nlohmann/json.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <span>
 #include <string>
 #include <string_view>
 
-// tilemap.paint (M21, C21.2, R-2D-TILE; Docs/Decisions/0032-m21-contract.md decision 26, stream T3): its C++ round trip.
-// Skipped until stream T3 registers and implements the method (with stream T1's importer).
+// tilemap.paint (M21, C21.2, R-2D-TILE; Docs/Decisions/0032-m21-contract.md decision 26, stream T3): its C++ round trip
+// (cells written in one undo step) and its refusals at their pointers. Stream T3's method over stream T1's file functions and
+// importer, so the cases run from W21.2's integration (decision 33).
 
 namespace Engine {
 
@@ -56,7 +59,7 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("TilemapMethods: tilemap.paint writes cells in one undo step and refuses bad params at their pointers" * doctest::skip(true))
+		TEST_CASE("TilemapMethods: tilemap.paint writes cells in one undo step and refuses bad params at their pointers")
 		{
 			Test::AutomationFixture setup("TilemapPaint");
 			const VfsPath path = VfsPath::Create("project", LevelPath).value_or(VfsPath());
@@ -107,6 +110,67 @@ namespace Engine {
 			refusedAt(Json{ { "tilemap", "engine://Textures/SpriteSquare" }, { "cells", Json::array({ Cell(0, 0, 1) }) } }, "InvalidArgument", "/tilemap");
 			refusedAt(Json{ { "tilemap", "Assets/Tilemaps/Missing.tilemap" }, { "cells", Json::array({ Cell(0, 0, 1) }) } }, "NotFound", "/tilemap");
 			CHECK(setup.GetEditor().GetVfs().ReadText(path).value_or(std::string()) == before);
+		}
+
+		// Stream T3's further paths, over stream T1's file functions and importer like the case above, so it also runs from
+		// W21.2's integration (Docs/Decisions/0032-m21-contract.md decision 33).
+		TEST_CASE("TilemapMethods: tilemap.paint refuses another type, an unreadable source and a map past its cell limit, and a dry run writes nothing")
+		{
+			Test::AutomationFixture setup("TilemapPaintPaths");
+			const VfsPath path = VfsPath::Create("project", LevelPath).value_or(VfsPath());
+			REQUIRE(setup.GetEditor().CreateProjectDirectory(path.GetParent()).has_value());
+			REQUIRE(setup.GetEditor().WriteProjectFile(path, std::as_bytes(std::span(EmptyLevel))).has_value());
+			CallTilemapOrFail(setup, "project.refreshAssets", Json::object());
+			const std::string original = setup.GetEditor().GetVfs().ReadText(path).value_or(std::string());
+			const size_t history = setup.GetEditor().GetHistory().GetUndoCount();
+			const auto refused = [&setup](const Json& params)
+			{
+				CAPTURE(params.dump());
+				const Json response = setup.Request("tilemap.paint", params);
+				REQUIRE(response.contains("error"));
+				return response["error"]["data"];
+			};
+
+			// A dry run reports the edit and writes nothing.
+			const Json dry = CallTilemapOrFail(setup, "tilemap.paint",
+				Json{ { "tilemap", std::string(LevelPath) }, { "cells", Json::array({ Cell(0, 0, 1), Cell(1, 0, 2) }) }, { "dryRun", true } });
+			CHECK(dry["changed"] == Json(2));
+			CHECK(dry["chunks"] == Json(1));
+			CHECK(dry["undoIndex"] == Json(0));
+			CHECK(setup.GetEditor().GetVfs().ReadText(path).value_or(std::string()) == original);
+			CHECK(setup.GetEditor().GetHistory().GetUndoCount() == history);
+
+			// An asset of another type is no tilemap.
+			CallTilemapOrFail(setup, "asset.create", Json{ { "type", "SpriteSheet" }, { "path", "Assets/Sheets/Tiles.spritesheet" } });
+			const Json sheet = refused(Json{ { "tilemap", "Assets/Sheets/Tiles.spritesheet" }, { "cells", Json::array({ Cell(0, 0, 1) }) } });
+			CHECK(sheet["errorCode"] == Json("InvalidArgument"));
+			CHECK(sheet["location"]["pointer"] == Json("/tilemap"));
+
+			// One cell in each of 1,025 chunks of 64 x 64 cells would store more than MaxTilemapCells cells.
+			const VfsPath widePath = VfsPath::Create("project", "Assets/Tilemaps/Wide.tilemap").value_or(VfsPath());
+			constexpr std::string_view Wide = R"({"Format": "Tilemap", "Version": 1, "CellSize": [1, 1], "ChunkSize": 64,
+				"Palette": [{"Sheet": null, "Frame": 0, "Solid": true}], "Chunks": []})";
+			REQUIRE(setup.GetEditor().WriteProjectFile(widePath, std::as_bytes(std::span(Wide))).has_value());
+			CallTilemapOrFail(setup, "project.refreshAssets", Json::object());
+			const std::string wide = setup.GetEditor().GetVfs().ReadText(widePath).value_or(std::string());
+			Json spread = Json::array();
+			for (uint64_t chunk = 0; chunk <= MaxTilemapCells / (uint64_t{ MaxTilemapChunkSize } * MaxTilemapChunkSize); ++chunk)
+				spread.push_back(Cell(static_cast<int32_t>(chunk * MaxTilemapChunkSize), 0, 1));
+			const Json limit = refused(Json{ { "tilemap", "Assets/Tilemaps/Wide.tilemap" }, { "cells", std::move(spread) } });
+			CHECK(limit["errorCode"] == Json("Validation"));
+			CHECK(limit["location"]["pointer"] == Json("/cells"));
+			CHECK(setup.GetEditor().GetVfs().ReadText(widePath).value_or(std::string()) == wide);
+
+			// A source that no longer reads is ImportFailed, naming the file; nothing is written. The refresh before the call
+			// reports the failed reimport.
+			const Test::ExpectLog reimport(LogLevel::Error, "ASSET_IMPORT_FAILED");
+			constexpr std::string_view Broken = R"({"Format": "Tilemap", "Version": 1, "ChunkSize": 3})";
+			REQUIRE(setup.GetEditor().WriteProjectFile(path, std::as_bytes(std::span(Broken))).has_value());
+			const Json unreadable = refused(Json{ { "tilemap", std::string(LevelPath) }, { "cells", Json::array({ Cell(0, 0, 1) }) } });
+			CHECK(unreadable["errorCode"] == Json("ImportFailed"));
+			CHECK(unreadable["location"]["file"] == Json(std::string(LevelPath)));
+			CHECK(setup.GetEditor().GetVfs().ReadText(path).value_or(std::string()) == Broken);
+			CHECK(setup.GetEditor().GetHistory().GetUndoCount() == history + 1); // the sheet's asset.create only
 		}
 	}
 

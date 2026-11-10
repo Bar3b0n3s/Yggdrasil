@@ -1,6 +1,7 @@
 #include "TestsPCH.h"
 
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Renderer/Light2DShading.h"
 #include "Engine/Scene/Components/BuiltinComponents.h"
 #include "Support/SceneTestFixture.h"
 
@@ -10,7 +11,7 @@
 
 // The Rendering2D category (Docs/Decisions/0032-m21-contract.md decisions 3, 5, 6, 20 and 24): the contracts register M21's
 // sprite, light and tilemap components, so these cases are live; their behaviour is frozen by the skipped cases of the systems
-// that read them. SpriteRenderer's NormalMap (C21.2, decision 21) is registered by stream L.
+// that read them. SpriteRenderer's NormalMap (C21.2, decision 21) follows Lit.
 
 namespace Engine {
 
@@ -113,9 +114,34 @@ namespace Engine {
 			CHECK(tilemap.FindField("Lit")->GetKind() == FieldType::Bool);
 		}
 
-		// Decision 21: NormalMap is frozen in SpriteRendererComponent.h and registered by stream L, whose registration changes
+		// Decision 22 (W21.2's review): Light2D's registered ranges are the ones IsLight2DValid takes (Renderer/Light2DShading.h,
+		// which Scene may not include, so the registration keeps copies of its constants), so every value the component, its
+		// script proxy, entity.update and project.validate accept lights the view. The fields are floats, so each bound is
+		// compared as the float it bounds.
+		TEST_CASE("Rendering2DRegistration: Light2D's registered ranges are those the 2D light model takes")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			const ComponentInfo& light = Require2DComponent(*registry, "Light2D");
+			const auto checkRange = [&light](std::string_view name, float min, float max)
+			{
+				CAPTURE(name);
+				const FieldInfo* field = light.FindField(name);
+				REQUIRE(field != nullptr);
+				REQUIRE(field->GetMeta().Min.has_value());
+				REQUIRE(field->GetMeta().Max.has_value());
+				CHECK(static_cast<float>(*field->GetMeta().Min) == min);
+				CHECK(static_cast<float>(*field->GetMeta().Max) == max);
+			};
+			checkRange("Color", 0.0f, 1.0f);
+			checkRange("Intensity", 0.0f, MaxLight2DIntensity);
+			checkRange("Radius", MinLight2DDistance, MaxLight2DDistance);
+			checkRange("Falloff", 0.0f, 1.0f);
+			checkRange("Height", MinLight2DDistance, MaxLight2DDistance);
+		}
+
+		// Decision 21: NormalMap follows Lit, so the component's registered order matches its header; its registration changes
 		// FeatureTest's canonical sprite scenes, which W21.2's integration regenerates.
-		TEST_CASE("Rendering2DRegistration: SpriteRenderer's NormalMap is a texture field after Lit" * doctest::skip(true))
+		TEST_CASE("Rendering2DRegistration: SpriteRenderer's NormalMap is a texture field after Lit")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			const ComponentInfo& sprite = Require2DComponent(*registry, "SpriteRenderer");

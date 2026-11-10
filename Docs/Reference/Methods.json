@@ -6,7 +6,7 @@
 		{
 			"name": "asset.create",
 			"domain": "asset",
-			"description": "Creates a material, a sound effect or a sprite sheet (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
+			"description": "Creates a material, a sound effect, a sprite sheet or a tilemap (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": true,
@@ -23,14 +23,14 @@
 				"properties": {
 					"type": {
 						"description": "What to create.",
-						"enum": ["Material", "Scene", "Prefab", "SoundEffect", "Folder", "SpriteSheet"]
+						"enum": ["Material", "Scene", "Prefab", "SoundEffect", "Folder", "SpriteSheet", "Tilemap"]
 					},
 					"path": {
-						"description": "The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx, .spritesheet; none for a folder); missing parent folders are created with it.",
+						"description": "The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx, .spritesheet, .tilemap; none for a folder); missing parent folders are created with it.",
 						"type": "string"
 					},
 					"values": {
-						"description": "A Material's, a SoundEffect's or a SpriteSheet's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, or a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads; the Texture takes any asset reference: a handle, an Assets/ path or an engine:// path); absent for other types."
+						"description": "A Material's, a SoundEffect's, a SpriteSheet's or a Tilemap's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads, or a tilemap's CellSize, ChunkSize, Palette and Chunks; a sheet's Texture and a palette entry's Sheet take any asset reference: a handle, an Assets/ path or an engine:// path); absent for other types."
 					},
 					"dryRun": {
 						"description": "Validate and return the would-be result without applying anything.",
@@ -378,7 +378,7 @@
 		{
 			"name": "asset.getProperties",
 			"domain": "asset",
-			"description": "Returns every property of a native asset (a material, a sound effect or a sprite sheet) by registry name.",
+			"description": "Returns every property of a native asset (a material, a sound effect, a sprite sheet or a tilemap) by registry name.",
 			"exposeAsTool": true,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -394,7 +394,7 @@
 				"type": "object",
 				"properties": {
 					"asset": {
-						"description": "The native asset (a material, a sound effect or a sprite sheet).",
+						"description": "The native asset (a material, a sound effect, a sprite sheet or a tilemap).",
 						"type": "string"
 					},
 					"ifRevision": {
@@ -1232,7 +1232,7 @@
 		{
 			"name": "asset.setProperties",
 			"domain": "asset",
-			"description": "Applies an RFC 7386 merge patch to a native asset's properties (a material, a sound effect or a sprite sheet; an array such as a sheet's Frames is replaced whole) and writes it, as one undoable command. A running lockstep, recording, replay or test session sees the change only after it ends: asset reloads are deferred like script reloads.",
+			"description": "Applies an RFC 7386 merge patch to a native asset's properties (a material, a sound effect, a sprite sheet or a tilemap; an array such as a sheet's Frames or a tilemap's Palette is replaced whole) and writes it, as one undoable command. A running lockstep, recording, replay or test session sees the change only after it ends: asset reloads are deferred like script reloads.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": true,
@@ -1248,11 +1248,11 @@
 				"type": "object",
 				"properties": {
 					"asset": {
-						"description": "The native asset (a material, a sound effect or a sprite sheet).",
+						"description": "The native asset (a material, a sound effect, a sprite sheet or a tilemap).",
 						"type": "string"
 					},
 					"values": {
-						"description": "An RFC 7386 merge patch of its properties: members replace, null resets a field; a sprite sheet's Texture takes any asset reference (a handle, an Assets/ path or an engine:// path)."
+						"description": "An RFC 7386 merge patch of its properties: members replace, null resets a field, an array is replaced whole; a sprite sheet's Texture and a tilemap palette entry's Sheet take any asset reference (a handle, an Assets/ path or an engine:// path); a tilemap's ChunkSize set without Chunks keeps its painted cells, laid in chunks of the new size."
 					},
 					"dryRun": {
 						"description": "Validate and return the would-be result without applying anything.",
@@ -4394,6 +4394,12 @@
 							"Lit": {
 								"description": "Whether 2D lights light the sprite; an unlit sprite keeps its texels unchanged.",
 								"type": "boolean"
+							},
+							"NormalMap": {
+								"description": "A lit sprite's tangent-space normal map, laid like its image; point lights then light it by the angle to the light. Null: flat.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Texture"
 							}
 						},
 						"additionalProperties": false
@@ -6814,6 +6820,12 @@
 							"Lit": {
 								"description": "Whether 2D lights light the sprite; an unlit sprite keeps its texels unchanged.",
 								"type": "boolean"
+							},
+							"NormalMap": {
+								"description": "A lit sprite's tangent-space normal map, laid like its image; point lights then light it by the angle to the light. Null: flat.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Texture"
 							}
 						},
 						"additionalProperties": false
@@ -9549,6 +9561,226 @@
 					"description": "Check whether the ball rests on the ground.",
 					"params": {
 						"entity": "/Ball"
+					}
+				}
+			]
+		},
+		{
+			"name": "physics2d.bodyInfo",
+			"domain": "physics2d",
+			"description": "Reports the 2D physics body of an entity of the play scene (the body it owns, or the compound its colliders belong to): type, layer, colliders, position and angle in the XY plane, velocities, sleeping state, bounds and active contacts. Needs a play session.",
+			"exposeAsTool": false,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": true,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["entity"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "Physics2DBodyInfoParams",
+				"description": "The params of physics2d.bodyInfo.",
+				"type": "object",
+				"properties": {
+					"entity": {
+						"description": "An entity of the play scene: 16 hex digits, a unique id prefix or a path.",
+						"type": "string"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["entity"],
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "Physics2DBodyInfoResult",
+				"description": "The 2D physics body of an entity of the play scene.",
+				"type": "object",
+				"properties": {
+					"entity": {
+						"description": "The entity asked about.",
+						"$ref": "#/$defs/EntitySummary"
+					},
+					"body": {
+						"description": "The body's owner: the entity itself, or the ancestor whose compound holds its colliders.",
+						"$ref": "#/$defs/EntitySummary"
+					},
+					"origin": {
+						"description": "Why the 2D body exists, the entries meaning the 2D components: RigidBody is the owner's RigidBody2D, ImplicitStatic the solid 2D colliders without a RigidBody2D above them, ImplicitSensor the trigger 2D colliders of an entity without its own RigidBody2D; never Character.",
+						"enum": ["RigidBody", "ImplicitStatic", "ImplicitSensor", "Character"]
+					},
+					"type": {
+						"description": "How the body moves; a Static RigidBody2D whose colliders are triggers is Kinematic.",
+						"enum": ["Static", "Kinematic", "Dynamic"]
+					},
+					"isSensor": {
+						"description": "Whether the body is a trigger (detects overlaps without colliding).",
+						"type": "boolean"
+					},
+					"layer": {
+						"description": "The body's physics layer (a name of the project's PhysicsSettings.Layers).",
+						"type": "string"
+					},
+					"colliders": {
+						"description": "The collider entities of the body, in sub-shape order, each once (a tilemap collider's entity for all its boxes).",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/EntitySummary"
+						}
+					},
+					"position": {
+						"description": "The body origin's position in the XY plane, in metres.",
+						"type": "array",
+						"prefixItems": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "number"
+							}
+						],
+						"minItems": 2,
+						"maxItems": 2
+					},
+					"angle": {
+						"description": "The body's rotation about +Z, counter-clockwise, in degrees.",
+						"type": "number"
+					},
+					"linearVelocity": {
+						"description": "The linear velocity in the XY plane, in m/s.",
+						"type": "array",
+						"prefixItems": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "number"
+							}
+						],
+						"minItems": 2,
+						"maxItems": 2
+					},
+					"angularVelocity": {
+						"description": "The angular velocity about +Z, in rad/s.",
+						"type": "number"
+					},
+					"sleeping": {
+						"description": "Whether the body is asleep (at rest, not simulated until something wakes it).",
+						"type": "boolean"
+					},
+					"boundsMin": {
+						"description": "The minimum corner of the body's world rectangle in the XY plane, in metres.",
+						"type": "array",
+						"prefixItems": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "number"
+							}
+						],
+						"minItems": 2,
+						"maxItems": 2
+					},
+					"boundsMax": {
+						"description": "The maximum corner of the body's world rectangle in the XY plane, in metres.",
+						"type": "array",
+						"prefixItems": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "number"
+							}
+						],
+						"minItems": 2,
+						"maxItems": 2
+					},
+					"contacts": {
+						"description": "The body's active contact pairs in the 2D world, sorted by the partner's id.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/PhysicsContactSummary"
+						}
+					},
+					"tick": {
+						"description": "The play session's tick when the body was read.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"EntitySummary": {
+						"description": "An entity's canonical id with its readable name and path.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The entity's id: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"name": {
+								"description": "The entity's name.",
+								"type": "string"
+							},
+							"path": {
+								"description": "The entity's path from the scene root, such as \"/Game/Board\".",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					},
+					"PhysicsContactSummary": {
+						"description": "One active contact pair of a body, from its side.",
+						"type": "object",
+						"properties": {
+							"other": {
+								"description": "The partner body's owner.",
+								"$ref": "#/$defs/EntitySummary"
+							},
+							"collider": {
+								"description": "This body's collider entity of the first sub-shape pair that touched.",
+								"$ref": "#/$defs/EntitySummary"
+							},
+							"otherCollider": {
+								"description": "The partner's collider entity of that sub-shape pair.",
+								"$ref": "#/$defs/EntitySummary"
+							},
+							"isTrigger": {
+								"description": "A sensor pair (trigger events), not a collision.",
+								"type": "boolean"
+							},
+							"sinceTick": {
+								"description": "The tick whose physics step reported the pair's enter.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Check whether the crate rests on the ground.",
+					"params": {
+						"entity": "/Crate"
 					}
 				}
 			]
@@ -12662,6 +12894,12 @@
 							"Lit": {
 								"description": "Whether 2D lights light the sprite; an unlit sprite keeps its texels unchanged.",
 								"type": "boolean"
+							},
+							"NormalMap": {
+								"description": "A lit sprite's tangent-space normal map, laid like its image; point lights then light it by the angle to the light. Null: flat.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Texture"
 							}
 						},
 						"additionalProperties": false
@@ -19558,6 +19796,161 @@
 					"description": "Run every test and return the script API coverage counters.",
 					"params": {
 						"coverage": true
+					}
+				}
+			]
+		},
+		{
+			"name": "tilemap.paint",
+			"domain": "tilemap",
+			"description": "Writes cells of a Tilemap asset (0 erases a cell, k paints the palette's entry k - 1) and saves it, as one undoable command; the cells' chunks are created and removed as needed. The editor's tile brush paints through it. A running lockstep, recording, replay or test session sees the change only after it ends.",
+			"exposeAsTool": true,
+			"mutates": true,
+			"supportsDryRun": true,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["tilemap", "cells"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "TilemapPaintParams",
+				"description": "The params of tilemap.paint.",
+				"type": "object",
+				"properties": {
+					"tilemap": {
+						"description": "The Tilemap asset: its id, its \"Assets/...\" path or another asset reference.",
+						"type": "string"
+					},
+					"cells": {
+						"description": "The cells to write, 1 to 65536 of them, in order: a later entry for the same cell wins.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/TilemapPaintCell"
+						}
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["tilemap", "cells"],
+				"$defs": {
+					"TilemapPaintCell": {
+						"description": "One tilemap cell to write.",
+						"type": "object",
+						"properties": {
+							"x": {
+								"description": "The cell's column: x grows to the right, cell 0's left edge at the tilemap entity's origin.",
+								"type": "integer",
+								"minimum": -2147483648,
+								"maximum": 2147483647
+							},
+							"y": {
+								"description": "The cell's row: y grows upwards, cell 0's bottom edge at the tilemap entity's origin.",
+								"type": "integer",
+								"minimum": -2147483648,
+								"maximum": 2147483647
+							},
+							"tile": {
+								"description": "The new cell value: 0 erases the cell, k paints the tilemap's palette entry k - 1.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "TilemapPaintResult",
+				"description": "The outcome of a tilemap.paint.",
+				"type": "object",
+				"properties": {
+					"tilemap": {
+						"description": "The tilemap painted.",
+						"$ref": "#/$defs/AssetSummary"
+					},
+					"changed": {
+						"description": "How many cells changed value; 0 writes nothing.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"chunks": {
+						"description": "How many chunks the tilemap holds after the edit (a chunk exists while one of its cells is not empty).",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"undoIndex": {
+						"description": "The edit's undo step; 0 in a dry run, in a batch or when nothing changed.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"AssetSummary": {
+						"description": "An asset's canonical id with its readable path and type.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The asset's handle: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"path": {
+								"description": "Its readable reference, such as \"Assets/Models/Track.glb#mesh:0:Straight\" or \"engine://Meshes/Cube\".",
+								"type": "string"
+							},
+							"type": {
+								"description": "Its type.",
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap"]
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Paint two ground tiles and erase a third.",
+					"params": {
+						"tilemap": "Assets/Tilemaps/Level1.tilemap",
+						"cells": [
+							{
+								"x": 0,
+								"y": 0,
+								"tile": 1
+							},
+							{
+								"x": 1,
+								"y": 0,
+								"tile": 1
+							},
+							{
+								"x": 2,
+								"y": 0,
+								"tile": 0
+							}
+						]
 					}
 				}
 			]

@@ -159,9 +159,9 @@ namespace Engine {
 			CHECK(plain.Icons.empty());
 		}
 
-		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 20, stream L): where the view's icons are on, a Light2D shows
-		// the PointLight icon in its Color, so the scene view shows where each 2D light is.
-		TEST_CASE("RenderAnnotations: a Light2D shows the PointLight icon in its colour when icons are on" * doctest::skip(true))
+		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 20): where the view's icons are on, a Light2D shows the
+		// PointLight icon in its Color, so the scene view shows where each 2D light is.
+		TEST_CASE("RenderAnnotations: a Light2D shows the PointLight icon in its colour when icons are on")
 		{
 			Test::SceneTestFixture fixture;
 			Test::InMemoryAssetManager assets;
@@ -188,7 +188,7 @@ namespace Engine {
 		// M21 (C21.2, decision 28, stream P3): with Colliders, AppendRenderAnnotations appends the 2D colliders after the 3D ones
 		// (BuildCollider2DDebugDraw's records through AppendColliderDebugDraw), told asleep from awake by the session's
 		// Physics2DSystem the host passes; without it they draw as an edit scene's.
-		TEST_CASE("RenderAnnotations: with Colliders, a play scene's 2D colliders follow the 3D ones" * doctest::skip(true))
+		TEST_CASE("RenderAnnotations: with Colliders, a play scene's 2D colliders follow the 3D ones")
 		{
 			Test::SceneTestFixture fixture(1, true);
 			Scene& scene = fixture.GetScene();

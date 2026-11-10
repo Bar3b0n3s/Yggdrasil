@@ -69,7 +69,7 @@ namespace Engine {
 
 		// The code a fixture exists for: its name, or the part before the dot of a variant's name, <CODE>.<Variant> (a further
 		// fixture of that code for another path that reports it: <CODE>.2D, the 2D world's composition,
-		// Docs/Decisions/0032-m21-contract.md decision 12).
+		// Docs/Decisions/0032-m21-contract.md decision 12; <CODE>.Tilemap, a tilemap's palette sheets, its decision 23).
 		std::string_view GetFixtureCode(std::string_view name)
 		{
 			return name.substr(0, name.find('.'));
@@ -168,10 +168,15 @@ namespace Engine {
 		ValidationOutcome ValidateFixture(const ValidationFixture& fixture)
 		{
 			// The asset manager logs a failed import and every missing or mistyped reference it hands a placeholder for at Error
-			// (§7.2): a fixture reporting those codes declares the entries.
+			// (§7.2): a fixture reporting those codes declares the entries. A <CODE>.Tilemap fixture's reference is a tilemap
+			// palette's sprite sheet, which has no placeholder (Docs/Decisions/0032-m21-contract.md decision 23), so only the
+			// validator reports it and nothing is logged.
+			const bool tilemapSheets = fixture.Name.ends_with(".Tilemap");
 			std::list<Test::ExpectLog> expectedLogs;
 			for (const std::string_view code : { AssetImportFailedCode, AssetMissingCode, AssetTypeMismatchCode })
 			{
+				if (tilemapSheets && code != AssetImportFailedCode)
+					continue;
 				if (std::ranges::find(fixture.Codes, code) != fixture.Codes.end())
 					expectedLogs.emplace_back(LogLevel::Error, code);
 			}

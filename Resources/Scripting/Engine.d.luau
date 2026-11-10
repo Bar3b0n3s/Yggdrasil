@@ -3,7 +3,7 @@
 export type AlphaMode = "Opaque" | "Mask" | "Blend"
 
 -- What asset.create makes.
-export type AssetCreateType = "Material" | "Scene" | "Prefab" | "SoundEffect" | "Folder" | "SpriteSheet"
+export type AssetCreateType = "Material" | "Scene" | "Prefab" | "SoundEffect" | "Folder" | "SpriteSheet" | "Tilemap"
 
 -- Where an asset is in its life (§7.2).
 export type AssetState = "Unloaded" | "Loading" | "Loaded" | "Failed"
@@ -943,6 +943,8 @@ declare extern type SpriteRenderer with
 	Frame: number
 	-- Whether 2D lights light the sprite; an unlit sprite keeps its texels unchanged. [All modes; Runtime|Test; pure/read; setter mutates]
 	Lit: boolean
+	-- A lit sprite's tangent-space normal map, laid like its image; point lights then light it by the angle to the light. Null: flat. [All modes; Runtime|Test; pure/read; setter mutates]
+	NormalMap: AssetRef?
 	-- The draw order within the sorting layer: higher values draw over lower ones, equal values in canonical entity order. [All modes; Runtime|Test; pure/read; setter mutates]
 	OrderInLayer: number
 	-- How many texels of the image make one unit of the entity's local space; the sprite's size is its texels divided by this. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -1113,7 +1115,7 @@ declare Debug: {
 declare Field: {
 	-- Declare an empty array whose element keeps its complete nested field schema. [All modes; LoadTime|Runtime|Test; pure/read]
 	Array: (element: FieldDescriptor) -> FieldDescriptor,
-	-- Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for imported audio and .sfx sound effects, Script, Font, Replay or SpriteSheet), with a null default; any other name fails the import. [All modes; LoadTime|Runtime|Test; pure/read]
+	-- Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for imported audio and .sfx sound effects, Script, Font, Replay, SpriteSheet or Tilemap), with a null default; any other name fails the import. [All modes; LoadTime|Runtime|Test; pure/read]
 	Asset: (type: string) -> FieldDescriptor,
 	-- Declare a boolean; the omitted default is false. [All modes; LoadTime|Runtime|Test; pure/read]
 	Bool: (default: boolean?, options: FieldOptions?) -> FieldDescriptor,

@@ -4,6 +4,7 @@
 #include "Engine/Automation/Methods/AutomationMethodContext.h"
 #include "Engine/Automation/Methods/SharedMethodSupport.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
+#include "Engine/Core/Assert.h"
 #include "Engine/Physics/PhysicsShape.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/Entity.h"
@@ -15,12 +16,15 @@
 
 #include <cmath>
 #include <format>
+#include <numbers>
 #include <optional>
 #include <string_view>
+#include <utility>
 
-// physics2d.raycast and physics2d.overlap (Docs/Decisions/0032-m21-contract.md decision 15): reads of the play session's
-// Physics2DSystem, shared by the Editor and the Runtime. Params are checked here, located at their members, before the system
-// sees them; the system's own refusals (an end point beyond the physics range) keep its message.
+// physics2d.raycast and physics2d.overlap (Docs/Decisions/0032-m21-contract.md decision 15) and physics2d.bodyInfo (decision
+// 27): reads of the play session's Physics2DSystem, shared by the Editor and the Runtime. Params are checked here, located at
+// their members, before the system sees them; the system's own refusals (an end point beyond the physics range) keep its
+// message.
 
 namespace Engine {
 
@@ -60,6 +64,26 @@ namespace Engine {
 					"give the query shape a collider's size"));
 			}
 			return {};
+		}
+
+		// The registry's BodyType of a 2D body's motion type as simulated.
+		static BodyType ToBody2DType(PhysicsMotionType type)
+		{
+			switch (type)
+			{
+				case PhysicsMotionType::Static:    return BodyType::Static;
+				case PhysicsMotionType::Kinematic: return BodyType::Kinematic;
+				case PhysicsMotionType::Dynamic:   return BodyType::Dynamic;
+			}
+
+			ENGINE_CORE_ASSERT(false, "Unknown PhysicsMotionType {}", std::to_underlying(type));
+			return BodyType::Static;
+		}
+
+		// Radians about +Z to degrees, the unit of every angle the 2D methods take and report.
+		static float DegreesFromRadians2D(float radians)
+		{
+			return radians * (180.0f / std::numbers::pi_v<float>);
 		}
 
 	}
@@ -152,10 +176,52 @@ namespace Engine {
 			return result;
 		}
 
-		Result<Physics2DBodyInfoResult> Physics2DBodyInfo(AutomationMethodContext& /*context*/, const Physics2DBodyInfoParams& /*params*/)
+		Result<Physics2DBodyInfoResult> Physics2DBodyInfo(AutomationMethodContext& context, const Physics2DBodyInfoParams& params)
 		{
-			ENGINE_CONTRACT_STUB();
-			return MakeError(ErrorCode::Unsupported, "physics2d.bodyInfo (Docs/Decisions/0032-m21-contract.md decision 27, stream P3)");
+			PlaySession* session = context.GetPlaySession();
+			if (session == nullptr || session->GetPhysics2D() == nullptr)
+				return Utils::MakeNot2DPlayingError();
+			Scene& scene = session->GetScene();
+			ENGINE_TRY_ASSIGN(const Entity entity, context.ResolveEntity(scene, params.Entity, "/entity"));
+			const std::optional<Physics2DBodyReport> report = session->GetPhysics2D()->GetBodyInfo(entity.GetUUID());
+			if (!report.has_value())
+			{
+				return std::unexpected(Utils::MakeParamError(ErrorCode::NotFound, "/entity",
+					std::format("entity '{}' ({}) has no 2D physics body", entity.GetName(), entity.GetUUID().ToString()),
+					"2D bodies come from a RigidBody2D or 2D colliders on an active entity; project.validate lists the bodies a diagnostic "
+					"refuses"));
+			}
+
+			Physics2DBodyInfoResult result;
+			result.Entity = context.MakeEntitySummary(entity);
+			result.Body = Utils::Summarize2DEntity(context, scene, report->Owner);
+			result.Origin = report->Origin;
+			result.Type = Utils::ToBody2DType(report->MotionType);
+			result.IsSensor = report->IsSensor;
+			result.Layer = report->LayerName;
+			result.Colliders.reserve(report->Colliders.size());
+			for (const UUID collider : report->Colliders)
+				result.Colliders.push_back(Utils::Summarize2DEntity(context, scene, collider));
+			result.Position = report->Pose.Position;
+			result.Angle = Utils::DegreesFromRadians2D(report->Pose.Angle);
+			result.LinearVelocity = report->LinearVelocity;
+			result.AngularVelocity = report->AngularVelocity;
+			result.Sleeping = report->IsSleeping;
+			result.BoundsMin = report->BoundsMin;
+			result.BoundsMax = report->BoundsMax;
+			result.Contacts.reserve(report->Contacts.size());
+			for (const PhysicsContactInfo& contact : report->Contacts)
+			{
+				result.Contacts.push_back(PhysicsContactSummary{
+					.Other = Utils::Summarize2DEntity(context, scene, contact.Other),
+					.Collider = Utils::Summarize2DEntity(context, scene, contact.Collider),
+					.OtherCollider = Utils::Summarize2DEntity(context, scene, contact.OtherCollider),
+					.IsTrigger = contact.IsTrigger,
+					.SinceTick = ToAutomationCounter(contact.SinceTick),
+				});
+			}
+			result.Tick = ToAutomationCounter(session->GetTick());
+			return result;
 		}
 
 	}
@@ -195,6 +261,31 @@ namespace Engine {
 		registry.Struct<Physics2DOverlapResult>("Physics2DOverlapResult", "The 2D colliders a shape overlaps in the play scene.")
 			.Field("entities", &Physics2DOverlapResult::Entities, "The overlapping collider entities, each once, sorted by id.")
 			.Field("tick", &Physics2DOverlapResult::Tick, "The play session's tick when the query ran.");
+
+		registry.Struct<Physics2DBodyInfoParams>("Physics2DBodyInfoParams", "The params of physics2d.bodyInfo.")
+			.Field("entity", &Physics2DBodyInfoParams::Entity, "An entity of the play scene: 16 hex digits, a unique id prefix or a path.");
+
+		registry.Struct<Physics2DBodyInfoResult>("Physics2DBodyInfoResult", "The 2D physics body of an entity of the play scene.")
+			.Field("entity", &Physics2DBodyInfoResult::Entity, "The entity asked about.")
+			.Field("body", &Physics2DBodyInfoResult::Body, "The body's owner: the entity itself, or the ancestor whose compound holds its colliders.")
+			.Field("origin", &Physics2DBodyInfoResult::Origin,
+				"Why the 2D body exists, the entries meaning the 2D components: RigidBody is the owner's RigidBody2D, ImplicitStatic the solid "
+				"2D colliders without a RigidBody2D above them, ImplicitSensor the trigger 2D colliders of an entity without its own RigidBody2D; "
+				"never Character.")
+			.Field("type", &Physics2DBodyInfoResult::Type, "How the body moves; a Static RigidBody2D whose colliders are triggers is Kinematic.")
+			.Field("isSensor", &Physics2DBodyInfoResult::IsSensor, "Whether the body is a trigger (detects overlaps without colliding).")
+			.Field("layer", &Physics2DBodyInfoResult::Layer, "The body's physics layer (a name of the project's PhysicsSettings.Layers).")
+			.Field("colliders", &Physics2DBodyInfoResult::Colliders,
+				"The collider entities of the body, in sub-shape order, each once (a tilemap collider's entity for all its boxes).")
+			.Field("position", &Physics2DBodyInfoResult::Position, "The body origin's position in the XY plane, in metres.")
+			.Field("angle", &Physics2DBodyInfoResult::Angle, "The body's rotation about +Z, counter-clockwise, in degrees.")
+			.Field("linearVelocity", &Physics2DBodyInfoResult::LinearVelocity, "The linear velocity in the XY plane, in m/s.")
+			.Field("angularVelocity", &Physics2DBodyInfoResult::AngularVelocity, "The angular velocity about +Z, in rad/s.")
+			.Field("sleeping", &Physics2DBodyInfoResult::Sleeping, "Whether the body is asleep (at rest, not simulated until something wakes it).")
+			.Field("boundsMin", &Physics2DBodyInfoResult::BoundsMin, "The minimum corner of the body's world rectangle in the XY plane, in metres.")
+			.Field("boundsMax", &Physics2DBodyInfoResult::BoundsMax, "The maximum corner of the body's world rectangle in the XY plane, in metres.")
+			.Field("contacts", &Physics2DBodyInfoResult::Contacts, "The body's active contact pairs in the 2D world, sorted by the partner's id.")
+			.Field("tick", &Physics2DBodyInfoResult::Tick, "The play session's tick when the body was read.");
 	}
 
 	void RegisterPhysics2DMethods(MethodRegistry& methods)
@@ -222,6 +313,18 @@ namespace Engine {
 				.Examples = { { .Description = "Find what touches a point.", .Params = Json{ { "shape", "Circle" }, { "center", { 1, 0 } }, { "radius", 0.1 } } } },
 			},
 			&Automation::Physics2DOverlap);
+		methods.Add(
+			{
+				.Name = "physics2d.bodyInfo",
+				.Description = "Reports the 2D physics body of an entity of the play scene (the body it owns, or the compound its colliders belong "
+							   "to): type, layer, colliders, position and angle in the XY plane, velocities, sleeping state, bounds and active "
+							   "contacts. Needs a play session.",
+				.RequiredParams = { "entity" },
+				.AvailableInRuntime = true,
+				.AllowedInBatch = true,
+				.Examples = { { .Description = "Check whether the crate rests on the ground.", .Params = Json{ { "entity", "/Crate" } } } },
+			},
+			&Automation::Physics2DBodyInfo);
 	}
 
 }

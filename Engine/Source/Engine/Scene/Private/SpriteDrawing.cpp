@@ -39,6 +39,7 @@ namespace Engine {
 				.SortingLayer = FindSortingLayerIndex(sortingLayers, sprite.SortingLayer),
 				.OrderInLayer = sprite.OrderInLayer,
 				.Lit = sprite.Lit,
+				.NormalMap = sprite.NormalMap.GetHandle(),
 				.Entity = entity,
 			};
 		}

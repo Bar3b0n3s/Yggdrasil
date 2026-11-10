@@ -157,7 +157,7 @@ namespace Engine {
 
 		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 24, stream T1): a tile is picked as a sprite of its tilemap's
 		// entity, in the one draw order of sprites and tilemaps, in the scene and in a snapshot's sprites and tilemaps alike.
-		TEST_CASE("SpritePicking: a tile is picked as its tilemap's entity in the draw order" * doctest::skip(true))
+		TEST_CASE("SpritePicking: a tile is picked as its tilemap's entity in the draw order")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();

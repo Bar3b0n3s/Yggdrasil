@@ -628,9 +628,9 @@ namespace Engine {
 			CHECK(sceneView->Output == RenderOutputSettings{});
 		}
 
-		// C21.2 (Docs/Decisions/0032-m21-contract.md decisions 21 and 22, stream L): the 2D lights in canonical order with every
-		// field, at their rendered position, and a lit sprite's normal map.
-		TEST_CASE("RenderExtraction: Light2D components become 2D lights in canonical order, and sprites carry their normal maps" * doctest::skip(true))
+		// C21.2 (Docs/Decisions/0032-m21-contract.md decisions 21 and 22): the 2D lights in canonical order with every field, at
+		// their rendered position, and a lit sprite's normal map.
+		TEST_CASE("RenderExtraction: Light2D components become 2D lights in canonical order, and sprites carry their normal maps")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -672,7 +672,7 @@ namespace Engine {
 
 		// C21.2 (decision 24, stream T1): tilemaps sort with the sprites by (sorting layer, order in layer, canonical order), each
 		// placed among them by its DrawPosition.
-		TEST_CASE("RenderExtraction: tilemaps are extracted in sorting-layer order and placed among the sprites" * doctest::skip(true))
+		TEST_CASE("RenderExtraction: tilemaps are extracted in sorting-layer order and placed among the sprites")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();

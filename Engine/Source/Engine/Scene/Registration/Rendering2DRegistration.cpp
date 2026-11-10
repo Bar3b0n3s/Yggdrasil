@@ -8,8 +8,8 @@
 // The Rendering2D category (M21, Docs/Decisions/0032-m21-contract.md decisions 3, 5, 6, 20 and 24; ADR 0028's phase-2 ledger:
 // a milestone's new components go in categories of their own after Scripting): sprites, their tick-driven animation and the
 // pixel-perfect camera (C21.1), then the 2D lights and the tilemap renderer (C21.2). Colours are linear and registered as
-// Color fields in [0, 1]. SpriteRenderer's NormalMap (C21.2, decision 21) is registered after Lit by stream L, which
-// regenerates FeatureTest's canonical sprite scenes with it at W21.2's integration.
+// Color fields in [0, 1]. SpriteRenderer's NormalMap (C21.2, decision 21) follows Lit; W21.2's integration regenerates
+// FeatureTest's canonical sprite scenes with it.
 
 namespace Engine {
 
@@ -59,7 +59,9 @@ namespace Engine {
 				"The sorting layer name from project settings; later layers draw over earlier ones, and an undeclared name draws in the first.")
 			.Field("OrderInLayer", &SpriteRendererComponent::OrderInLayer,
 				"The draw order within the sorting layer: higher values draw over lower ones, equal values in canonical entity order.")
-			.Field("Lit", &SpriteRendererComponent::Lit, "Whether 2D lights light the sprite; an unlit sprite keeps its texels unchanged.");
+			.Field("Lit", &SpriteRendererComponent::Lit, "Whether 2D lights light the sprite; an unlit sprite keeps its texels unchanged.")
+			.Field("NormalMap", &SpriteRendererComponent::NormalMap,
+				"A lit sprite's tangent-space normal map, laid like its image; point lights then light it by the angle to the light. Null: flat.");
 
 		RegisterComponent<SpriteAnimatorComponent>(registry, "SpriteAnimator",
 			"Plays a clip of the SpriteRenderer's sprite sheet, one step per clip frame for its ticks, driven by the fixed step.")

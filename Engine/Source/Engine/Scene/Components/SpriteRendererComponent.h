@@ -42,8 +42,8 @@ namespace Engine {
 	//     texture: sampled at the same normalized texture coordinates, so a sheet's normal map has the sheet texture's layout.
 	//     Point lights then light the sprite by the cosine between its normal (turned with the sprite's quad: its flips and its
 	//     entity's rotation) and the direction to the light (Light2DComponent::Height above the plane). Null: the flat normal,
-	//     which takes each light whole. An unlit sprite ignores it. Frozen here and registered (after Lit) by stream L, which
-	//     regenerates FeatureTest's canonical sprite scenes with it at W21.2's integration.
+	//     which takes each light whole. An unlit sprite ignores it. Registered after Lit; W21.2's integration regenerates
+	//     FeatureTest's canonical sprite scenes with it.
 	struct SpriteRendererComponent
 	{
 		TypedAssetHandle<AssetType::SpriteSheet> Sheet{};
@@ -56,7 +56,7 @@ namespace Engine {
 		std::string SortingLayer = std::string(DefaultSortingLayerName);
 		int32_t OrderInLayer = 0;
 		bool Lit = false;
-		TypedAssetHandle<AssetType::Texture> NormalMap{}; // C21.2; registered by stream L (see above)
+		TypedAssetHandle<AssetType::Texture> NormalMap{}; // C21.2 (see above)
 	};
 
 }

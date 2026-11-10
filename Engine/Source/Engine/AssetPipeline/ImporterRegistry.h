@@ -43,7 +43,7 @@ namespace Engine {
 
 	// Registers the built-in importers (§7.4): M6's TextureImporter, GltfImporter, MaterialImporter, SceneImporter,
 	// PrefabImporter and FontImporter, M8's EnvironmentImporter, M12's AudioImporter and SoundEffectImporter, M13's
-	// ScriptImporter and ReplayImporter, and M18's SpriteSheetImporter.
+	// ScriptImporter and ReplayImporter, M18's SpriteSheetImporter and M21's TilemapImporter.
 	void RegisterBuiltinImporters(ImporterRegistry& registry);
 
 	// Registers every importer's settings struct and enum (§5.4: "every *ImportSettings" is a reflected struct) in the order
