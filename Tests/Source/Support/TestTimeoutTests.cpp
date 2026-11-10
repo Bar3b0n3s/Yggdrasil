@@ -2,8 +2,11 @@
 
 #include "Support/TestTimeout.h"
 
+#include "Support/ChildOutput.h"
 #include "Support/ChildProcess.h"
+#include "Support/TempDirectory.h"
 #include "Support/TestOptions.h"
+#include "Support/Utf8Path.h"
 
 #include <condition_variable>
 #include <mutex>
@@ -53,6 +56,26 @@ namespace Engine {
 			REQUIRE(result.has_value());
 			CHECK(result->ExitCode == Test::TestTimeoutExitCode);
 			CHECK(result->StandardError.contains("TestTimeout: the watchdog target blocks until it is killed"));
+		}
+
+		TEST_CASE("TestTimeout: a timed-out run ends the exit watch and leaves no crash report")
+		{
+			// With a user-data root the child writes crash reports and watches exits (Architecture §15.2); the watchdog's
+			// exit is announced by its Critical line, so the watch reports nothing.
+			Test::TempDirectory userData("TimeoutExitWatch");
+			const std::vector<std::string> arguments = {
+				"--no-skip",
+				"--test-case=TestTimeout: the watchdog target blocks until it is killed",
+				"--test-timeout=1",
+				"--user-data-dir=" + Test::PathToUtf8(userData.GetPath()),
+			};
+			const Result<Test::ChildProcessResult> result = Test::RunChildProcess(Test::GetTestOptions().ExecutablePath,
+				arguments, std::chrono::seconds(60));
+			REQUIRE(result.has_value());
+			INFO("child stderr: ", result->StandardError);
+			CHECK(result->ExitCode == Test::TestTimeoutExitCode);
+			CHECK_FALSE(result->StandardError.contains("Unexpected exit"));
+			CHECK(Test::ListCrashFiles(userData / ENGINE_PRODUCT_NAME / "Crashes", ".txt").empty());
 		}
 
 		TEST_CASE("TestTimeout: SetTestCaseTimeLimit replaces the default limit")

@@ -19,12 +19,12 @@ namespace Engine {
 		// sets with SetTestCaseTimeLimit, otherwise `defaultSeconds` (--test-timeout), either one multiplied by
 		// GetTestOptions().TimeoutScale (--test-timeout-scale, for the sanitizer and long fuzz runs of the hardening stage,
 		// Docs/Decisions/0024-m15-contract.md decision 13) and counted from the start of the case. A case still running at
-		// its limit makes the watchdog log a Critical entry naming the case and the scaled limit, flush the log and exit the
-		// process with TestTimeoutExitCode. The watchdog is the only per-case limit: it ignores doctest::timeout, which
-		// doctest checks itself once a case ends and which --test-timeout-scale cannot scale, so no test case carries that
-		// decorator (a --list-test-cases run logs an Error naming each one, GetDoctestTimeoutFailure, which the case
-		// "TestTimeout: no test case carries a doctest::timeout decorator" checks). The limit is measured with the steady
-		// clock; no test logic depends on it. `defaultSeconds` must be > 0 and the scale >= 1 (asserted; ParseTestOptions
+		// its limit makes the watchdog log a Critical entry naming the case and the scaled limit, flush the log, end the
+		// crash handler's exit watch (the exit is announced, not unexpected) and exit the process with TestTimeoutExitCode.
+		// The watchdog is the only per-case limit: it ignores doctest::timeout, which doctest checks itself once a case ends
+		// and which --test-timeout-scale cannot scale, so no test case carries that decorator (a --list-test-cases run logs
+		// an Error naming each one, GetDoctestTimeoutFailure, which the case "TestTimeout: no test case carries a
+		// doctest::timeout decorator" checks). The limit is measured with the steady clock; no test logic depends on it. `defaultSeconds` must be > 0 and the scale >= 1 (asserted; ParseTestOptions
 		// refuses others).
 		void StartTestTimeoutWatchdog(double defaultSeconds);
 

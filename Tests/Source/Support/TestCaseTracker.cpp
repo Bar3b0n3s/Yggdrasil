@@ -1,6 +1,12 @@
 #include "TestsPCH.h"
 #include "Support/TestCaseTracker.h"
 
+#include "Engine/Core/Log.h"
+#include "Engine/Platform/CrashHandler.h"
+#include "Engine/Platform/Process.h"
+#include "Support/TestOptions.h"
+
+#include <format>
 #include <mutex>
 
 namespace Engine {
@@ -42,24 +48,43 @@ namespace Engine {
 
 				void test_case_start(const doctest::TestCaseData& testCase) override
 				{
-					TrackerState& state = Utils::GetTrackerState();
-					std::scoped_lock lock(state.Mutex);
-					RunningTestCase running;
-					running.Name = testCase.m_name;
-					running.File = testCase.m_file.c_str();
-					running.Line = testCase.m_line;
-					running.Serial = ++state.LastSerial;
-					state.Running = std::move(running);
+					{
+						TrackerState& state = Utils::GetTrackerState();
+						std::scoped_lock lock(state.Mutex);
+						RunningTestCase running;
+						running.Name = testCase.m_name;
+						running.File = testCase.m_file.c_str();
+						running.Line = testCase.m_line;
+						running.Serial = ++state.LastSerial;
+						state.Running = std::move(running);
+					}
+					CrashHandler::SetBreadcrumb(CrashBreadcrumb::TestCase, testCase.m_name);
+					// The process's log names every case it starts (Scripts/Test.py reads the last one of a process that
+					// ended without a report), flushed so that the line outlives a process terminated in the case. A child
+					// logs only to the console its parent reads.
+					if (!GetTestOptions().IsChildProcess())
+					{
+						ENGINE_CORE_TRACE("{}", FormatTestCaseLogLine(Process::GetCurrentId(), testCase.m_name));
+						Log::Flush();
+					}
 				}
 
 				void test_case_end(const doctest::CurrentTestCaseStats& /*stats*/) override
 				{
-					TrackerState& state = Utils::GetTrackerState();
-					std::scoped_lock lock(state.Mutex);
-					state.Running.reset();
+					{
+						TrackerState& state = Utils::GetTrackerState();
+						std::scoped_lock lock(state.Mutex);
+						state.Running.reset();
+					}
+					CrashHandler::SetBreadcrumb(CrashBreadcrumb::TestCase, {});
 				}
 			};
 
+		}
+
+		std::string FormatTestCaseLogLine(uint32_t processId, std::string_view name)
+		{
+			return std::format("Test case of process {}: {}", processId, name);
 		}
 
 		std::optional<RunningTestCase> GetRunningTestCase()

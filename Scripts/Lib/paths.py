@@ -180,6 +180,13 @@ def crash_report_folder(user_data: Path) -> Path:
     return user_data / workspace_name() / "Crashes"
 
 
+def log_folder(user_data: Path) -> Path:
+    """Where a process of the workspace whose user-data root is `user_data` writes its log (Architecture §4.4):
+    <root>/<product>/Logs/, the file named after the executable's stem (Tests.log) and rotated into <stem>.1.log, the
+    newest, to <stem>.4.log."""
+    return user_data / workspace_name() / "Logs"
+
+
 def parse_configurations(text: str, allowed: tuple[str, ...] = CONFIGURATIONS) -> list[str]:
     """Parse a comma-separated configuration list ("Debug,Release"), case-insensitively, keeping the canonical order.
 
