@@ -35,7 +35,7 @@ namespace Engine {
 	{
 		TEST_CASE("BuiltinComponents: every listed type is plain component data")
 		{
-			static_assert(BuiltinComponents::Size == 26);
+			static_assert(BuiltinComponents::Size == 36);
 			size_t count = 0;
 			ForEachType(BuiltinComponents{}, [&count]<typename T>()
 			{
@@ -258,6 +258,70 @@ namespace Engine {
 			CHECK(slot.ExecutionOrder == 0);
 		}
 
+		// M21 (Docs/Decisions/0032-m21-contract.md decisions 3, 5, 6 and 9).
+		TEST_CASE("BuiltinComponents: 2D defaults follow the component table")
+		{
+			const SpriteRendererComponent sprite;
+			CHECK_FALSE(sprite.Sheet.IsValid());
+			CHECK(sprite.Frame == 0);
+			CHECK_FALSE(sprite.Texture.IsValid());
+			CHECK(sprite.Color == glm::vec4(1.0f));
+			CHECK_FALSE(sprite.FlipX);
+			CHECK_FALSE(sprite.FlipY);
+			CHECK(sprite.PixelsPerUnit == 16.0f);
+			CHECK(sprite.SortingLayer == "Default");
+			CHECK(sprite.OrderInLayer == 0);
+			CHECK_FALSE(sprite.Lit);
+			CHECK_FALSE(sprite.NormalMap.IsValid());
+
+			const SpriteAnimatorComponent animator;
+			CHECK(animator.Clip.empty());
+			CHECK(animator.Playing);
+			CHECK(animator.Step == 0);
+			CHECK(animator.StepTicks == 0);
+
+			const PixelPerfectCameraComponent camera;
+			CHECK(camera.ReferenceWidth == 320);
+			CHECK(camera.ReferenceHeight == 180);
+			CHECK(camera.PixelsPerUnit == 16.0f);
+			CHECK(camera.LetterboxColor == glm::vec3(0.0f));
+
+			// C21.2 (Docs/Decisions/0032-m21-contract.md decisions 20, 24 and 25).
+			const Light2DComponent light;
+			CHECK(light.Type == Light2DType::Point);
+			CHECK(light.Color == glm::vec3(1.0f));
+			CHECK(light.Intensity == 1.0f);
+			CHECK(light.Radius == 5.0f);
+			CHECK(light.Falloff == 0.5f);
+			CHECK(light.Height == 1.0f);
+
+			const TilemapRendererComponent tiles;
+			CHECK_FALSE(tiles.Tilemap.IsValid());
+			CHECK(tiles.Color == glm::vec4(1.0f));
+			CHECK(tiles.PixelsPerUnit == 16.0f);
+			CHECK(tiles.SortingLayer == "Default");
+			CHECK(tiles.OrderInLayer == 0);
+			CHECK_FALSE(tiles.Lit);
+
+			const RigidBody2DComponent body;
+			CHECK(body.Type == BodyType::Dynamic);
+			CHECK(body.Mass == 1.0f);
+			CHECK_FALSE(body.FixedRotation);
+			CHECK(body.Layer == "Default");
+			CHECK_FALSE(body.EnhancedInternalEdgeRemoval);
+			CHECK(body.InitialLinearVelocity == glm::vec2(0.0f));
+			CHECK(body.InitialAngularVelocity == 0.0f);
+			CHECK(BoxCollider2DComponent{}.HalfExtents == glm::vec2(0.5f));
+			CHECK(BoxCollider2DComponent{}.Angle == 0.0f);
+			CHECK(CircleCollider2DComponent{}.Radius == 0.5f);
+			const PolygonCollider2DComponent polygon;
+			REQUIRE(polygon.Points.size() == 3);
+			CHECK(polygon.Points[2] == glm::vec2(0.0f, 0.5f));
+			CHECK_FALSE(polygon.IsTrigger);
+			CHECK_FALSE(TilemapColliderComponent{}.Tilemap.IsValid());
+			CHECK_FALSE(TilemapColliderComponent{}.IsTrigger);
+		}
+
 		// M23 (C23.3, Docs/Decisions/0034-m23-contract.md decision 28).
 		TEST_CASE("BuiltinComponents: animation defaults follow the component table")
 		{
@@ -344,6 +408,17 @@ namespace Engine {
 				"AudioSource",
 				"AudioListener",
 				"Script",
+				// M21 (Docs/Decisions/0032-m21-contract.md decision 2).
+				"SpriteRenderer",
+				"SpriteAnimator",
+				"PixelPerfectCamera",
+				"Light2D",         // C21.2
+				"TilemapRenderer", // C21.2
+				"RigidBody2D",
+				"BoxCollider2D",
+				"CircleCollider2D",
+				"PolygonCollider2D",
+				"TilemapCollider", // C21.2
 				// M23 (Docs/Decisions/0034-m23-contract.md decision 28): after M21's and M22's categories on phase 2's merged tree.
 				"Animator",
 				"SkinnedMesh",
@@ -357,7 +432,7 @@ namespace Engine {
 		TEST_CASE("BuiltinComponents: every component has a category, a version and descriptions")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
-			const std::vector<std::string> categories = { "Core", "Rendering", "Physics", "Audio", "Scripting", "Animation" };
+			const std::vector<std::string> categories = { "Core", "Rendering", "Physics", "Audio", "Scripting", "Rendering2D", "Physics2D", "Animation" };
 			// The components that migrated since their first version: Prefab's override paths and Script's list of slots (M20,
 			// Docs/Decisions/0031-m20-contract.md decisions 10 and 17), and PointLight's CastShadows (M23,
 			// Docs/Decisions/0034-m23-contract.md decision 3). Every other component is at version 1.

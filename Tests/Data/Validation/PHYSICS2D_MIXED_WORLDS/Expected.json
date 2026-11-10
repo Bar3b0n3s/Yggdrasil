@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["PHYSICS2D_MIXED_WORLDS"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

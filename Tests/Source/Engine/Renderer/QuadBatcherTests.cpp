@@ -449,26 +449,64 @@ namespace Engine {
 			device.WaitForIdle();
 		}
 
-		TEST_CASE("QuadBatcher: quads beyond the per-record budget are skipped with one warning")
+		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 24): no quad is lost to the vertex buffer's capacity. A record
+		// of more than MaxQuadsPerRecord quads draws them all, in their order, in consecutive batches of at most
+		// MaxQuadsPerRecord quads, so a tilemap that fills a record never drops the sprites after it. This case replaces M18's
+		// "QuadBatcher: quads beyond the per-record budget are skipped with one warning", whose skipped quad now draws.
+		TEST_CASE("QuadBatcher: a record beyond the vertex buffer's capacity draws every quad in order, in further batches")
 		{
-			// MaxQuadsPerRecord quads draw; the one after them is skipped, and the warning is logged once per batcher.
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			QuadSetup setup(gpu, 4, 4, glm::uvec2(4));
-			std::vector<QuadDraw> quads(QuadBatcher::MaxQuadsPerRecord + 1,
+			// MaxQuadsPerRecord white quads over the top-left 2 x 2 pixels, then, past the capacity, a red quad over pixel (0, 0)
+			// and a green one over the bottom-right 2 x 2 pixels: the red one covers the white ones, so the order holds across
+			// the batches.
+			std::vector<QuadDraw> quads(QuadBatcher::MaxQuadsPerRecord,
 				MakePixelQuad(glm::vec2(0.0f), glm::vec2(2.0f), glm::vec2(0.0f), glm::vec2(1.0f), nullptr));
-			// The quad past the budget would light the bottom-right pixels.
-			quads.back() = MakePixelQuad(glm::vec2(2.0f), glm::vec2(4.0f), glm::vec2(0.0f), glm::vec2(1.0f), nullptr);
-			Test::ExpectLog warning(LogLevel::Warn, "budget");
+			QuadDraw red = MakePixelQuad(glm::vec2(0.0f), glm::vec2(1.0f), glm::vec2(0.0f), glm::vec2(1.0f), nullptr);
+			red.Color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
+			QuadDraw green = MakePixelQuad(glm::vec2(2.0f), glm::vec2(4.0f), glm::vec2(0.0f), glm::vec2(1.0f), nullptr);
+			green.Color = glm::vec4(0.0f, 1.0f, 0.0f, 1.0f);
+			quads.push_back(red);
+			quads.push_back(green);
 			uint32_t drawn = 0;
-			const Image first = setup.Render(quads, drawn);
-			CHECK(drawn == QuadBatcher::MaxQuadsPerRecord);
-			CHECK(GetPixel(first, 0, 0) == glm::u8vec4(255, 255, 255, 255));
-			CHECK(GetPixel(first, 3, 3) == glm::u8vec4(0, 0, 0, 255));
+			RenderPassCounters counters;
+			const Image image = setup.Render(quads, drawn, std::nullopt, &counters);
+			CHECK(drawn == QuadBatcher::MaxQuadsPerRecord + 2);
+			// One texture and sampler: one draw per batch.
+			CHECK(counters.DrawCalls == 2);
+			CHECK(counters.Triangles == 2 * (QuadBatcher::MaxQuadsPerRecord + 2));
+			CHECK(GetPixel(image, 0, 0) == glm::u8vec4(255, 0, 0, 255));
+			CHECK(GetPixel(image, 1, 1) == glm::u8vec4(255, 255, 255, 255));
+			CHECK(GetPixel(image, 3, 3) == glm::u8vec4(0, 255, 0, 255));
+			// The buffer keeps its capacity: the next record of the same quads draws the same image.
 			const Image second = setup.Render(quads, drawn);
-			CHECK(drawn == QuadBatcher::MaxQuadsPerRecord);
-			CHECK(GetPixel(second, 3, 3) == glm::u8vec4(0, 0, 0, 255));
-			CHECK(warning.GetMatchCount() == 1);
+			CHECK(drawn == QuadBatcher::MaxQuadsPerRecord + 2);
+			CHECK(second.Pixels == image.Pixels);
+		}
+
+		// M21's milestone review: the staging that a record lays its vertices out in keeps room for at most one batch between
+		// records (the vertex buffer's capacity), so a record of more quads leaves no outsized CPU copy behind it.
+		TEST_CASE("QuadBatcher: after a record beyond one batch, the staging keeps room for one batch at most")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			QuadSetup setup(gpu, 4, 4, glm::uvec2(4));
+			const QuadDraw quad = MakePixelQuad(glm::vec2(0.0f), glm::vec2(2.0f), glm::vec2(0.0f), glm::vec2(1.0f), nullptr);
+			// A record within one batch keeps its room for the next record.
+			const std::vector<QuadDraw> few(16, quad);
+			const Result<uint32_t> small = setup.Record(few);
+			REQUIRE_MESSAGE(small.has_value(), small.error().ToString());
+			CHECK(setup.GetBatcher().GetStagingCapacity() >= few.size());
+			const std::vector<QuadDraw> many(QuadBatcher::MaxQuadsPerRecord + 1, quad);
+			const Result<uint32_t> large = setup.Record(many);
+			REQUIRE_MESSAGE(large.has_value(), large.error().ToString());
+			CHECK(*large == many.size());
+			CHECK(setup.GetBatcher().GetStagingCapacity() <= QuadBatcher::MaxQuadsPerRecord);
+			// The next record draws as before.
+			const Result<uint32_t> again = setup.Record(few);
+			REQUIRE_MESSAGE(again.has_value(), again.error().ToString());
+			CHECK(*again == few.size());
 		}
 
 		TEST_CASE("QuadBatcher: a record whose binding set fails keeps no unwritten index buffer, and the next record draws")

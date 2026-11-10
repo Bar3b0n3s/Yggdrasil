@@ -61,6 +61,10 @@ The assets the engine ships, which every project references by engine path, such
 | `engine://Textures/Checker` | Texture | `0000000000000184` | procedural: generated in code |
 | `engine://Textures/FlatNormal` | Texture | `0000000000000183` | procedural: generated in code |
 | `engine://Textures/Missing` | Texture | `0000000000000185` | procedural: generated in code |
+| `engine://Textures/SpriteBevel` | Texture | `0000000000000189` | procedural: generated in code |
+| `engine://Textures/SpriteCircle` | Texture | `000000000000018a` | procedural: generated in code |
+| `engine://Textures/SpriteRounded` | Texture | `0000000000000188` | procedural: generated in code |
+| `engine://Textures/SpriteSquare` | Texture | `0000000000000187` | procedural: generated in code |
 | `engine://Textures/White` | Texture | `0000000000000181` | procedural: generated in code |
 
 ## Placeholders

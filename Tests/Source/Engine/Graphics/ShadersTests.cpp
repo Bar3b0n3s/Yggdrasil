@@ -25,6 +25,7 @@
 #include "Shared/MaterialConstants.h"
 #include "Shared/DepthPyramidConstants.h"
 #include "Shared/GtaoConstants.h"
+#include "Shared/Light2DConstants.h"
 #include "Shared/LightClusterConstants.h"
 #include "Shared/ShadowCasterConstants.h"
 #include "Shared/ShadowProbeConstants.h"
@@ -439,9 +440,29 @@ namespace Engine {
 				.Size = sizeof(QuadConstants),
 				.Fields = {
 					ENGINE_TEST_SHARED_FIELD(QuadConstants, Transform),
+					ENGINE_TEST_SHARED_FIELD(QuadConstants, HasNormalMap),
+					ENGINE_TEST_SHARED_FIELD(QuadConstants, Padding0),
+					ENGINE_TEST_SHARED_FIELD(QuadConstants, Padding1),
+					ENGINE_TEST_SHARED_FIELD(QuadConstants, Padding2),
 				},
 				.Program = "Quad",
 				.Entry = "VSMain",
+			},
+			{
+				// M21 (C21.2): the Lights2D program's push constants.
+				.Name = "Light2DConstants",
+				.Size = sizeof(Light2DConstants),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(Light2DConstants, ViewProjection),
+					ENGINE_TEST_SHARED_FIELD(Light2DConstants, PositionRadius),
+					ENGINE_TEST_SHARED_FIELD(Light2DConstants, RadianceFalloff),
+					ENGINE_TEST_SHARED_FIELD(Light2DConstants, Height),
+					ENGINE_TEST_SHARED_FIELD(Light2DConstants, Type),
+					ENGINE_TEST_SHARED_FIELD(Light2DConstants, Padding0),
+					ENGINE_TEST_SHARED_FIELD(Light2DConstants, Padding1),
+				},
+				.Program = "Lights2D",
+				.Entry = "PSMain",
 			},
 			{
 				.Name = "UpscaleConstants",

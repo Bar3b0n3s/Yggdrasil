@@ -73,9 +73,10 @@ namespace Engine {
 			checkParseError(std::span<const std::byte>(artifact).first(31));
 		}
 
-		// The type range follows the enumeration (Docs/Decisions/0034-m23-contract.md decision 23; M21's contract makes the same
-		// change), so it holds whichever types phase 2's milestones append and in whichever order they land: every type
-		// AssetTypeToString names reads back, and None and the values past the last enumerator are unknown.
+		// The type range follows the enumeration (Docs/Decisions/0032-m21-contract.md decision 31,
+		// Docs/Decisions/0034-m23-contract.md decision 23), so it holds whichever types phase 2's milestones append and in
+		// whichever order they land: every type AssetTypeToString names reads back, and None and the values past the last
+		// enumerator are unknown.
 		TEST_CASE("CookedFormat: every named asset type reads back, and None and values past the enumeration are refused")
 		{
 			const Buffer payload = MakePayload(8);
@@ -87,6 +88,7 @@ namespace Engine {
 				REQUIRE_MESSAGE(view.has_value(), view.error().ToString());
 				CHECK(std::to_underlying(view->Header.Type) == value);
 			}
+			CHECK(value > std::to_underlying(AssetType::Tilemap));
 			CHECK(value > std::to_underlying(AssetType::AnimationClip));
 			Buffer artifact = WriteCookedArtifact(AssetType::Texture, 1, 1, payload);
 			constexpr size_t TypeOffset = 6; // the little-endian uint16 after the magic and the format version

@@ -60,6 +60,17 @@ namespace Engine {
 		constexpr Texel DarkGrey = { 128, 128, 128, 255 };
 		constexpr Texel Magenta = { 255, 0, 255, 255 };
 
+		// The sprite textures (M21, BuiltinTextures.h): their side, the rounded square's corner radius, the bevel's edge width,
+		// and their texels. A transparent texel stays white, so a linear sampler blends no dark fringe into a tinted edge.
+		constexpr uint32_t SpriteSize = 16;
+		constexpr uint32_t SpriteCornerRadius = 4;
+		constexpr uint32_t SpriteBevelWidth = 2;
+		constexpr Texel SpriteOpaque = { 255, 255, 255, 255 };
+		constexpr Texel SpriteClear = { 255, 255, 255, 0 };
+		constexpr Texel SpriteBevelLit = { 255, 255, 255, 255 };
+		constexpr Texel SpriteBevelShaded = { 128, 128, 128, 255 };
+		constexpr Texel SpriteBevelFace = { 204, 204, 204, 255 };
+
 	}
 
 	namespace Utils {
@@ -188,6 +199,60 @@ namespace Engine {
 			return texture;
 		}
 
+		// Whether the centre of texel (x, y), (x + 0.5, y + 0.5), lies at most `radius` texels from (centreX, centreY). In
+		// doubled integer coordinates, so the comparison is exact.
+		static bool IsWithinRadius(uint32_t x, uint32_t y, uint32_t centreX, uint32_t centreY, uint32_t radius)
+		{
+			const int64_t dx = static_cast<int64_t>(2 * x + 1) - static_cast<int64_t>(2 * centreX);
+			const int64_t dy = static_cast<int64_t>(2 * y + 1) - static_cast<int64_t>(2 * centreY);
+			const int64_t limit = static_cast<int64_t>(2 * radius);
+			return dx * dx + dy * dy <= limit * limit;
+		}
+
+		// The centre of the corner circle whose block holds `coordinate` along one axis (SpriteCornerRadius or
+		// SpriteSize - SpriteCornerRadius), or nothing between the corner blocks.
+		static bool FindCornerCentre(uint32_t coordinate, uint32_t& centre)
+		{
+			if (coordinate < SpriteCornerRadius)
+				centre = SpriteCornerRadius;
+			else if (coordinate >= SpriteSize - SpriteCornerRadius)
+				centre = SpriteSize - SpriteCornerRadius;
+			else
+				return false;
+			return true;
+		}
+
+		// Texel (x, y) of the sprite texture `texture`, as the enumerators' comments define it (BuiltinTextures.h); every
+		// texel of SpriteSquare is opaque.
+		static Texel GetSpriteTexel(BuiltinTexture texture, uint32_t x, uint32_t y)
+		{
+			if (texture == BuiltinTexture::SpriteRounded)
+			{
+				uint32_t centreX = 0;
+				uint32_t centreY = 0;
+				const bool corner = FindCornerCentre(x, centreX) && FindCornerCentre(y, centreY);
+				return corner && !IsWithinRadius(x, y, centreX, centreY, SpriteCornerRadius) ? SpriteClear : SpriteOpaque;
+			}
+			if (texture == BuiltinTexture::SpriteBevel)
+			{
+				// The distance in texels to the nearer of the top and left edges, and to the nearer of the bottom and right.
+				const uint32_t nearEdge = std::min(x, y);
+				const uint32_t farEdge = std::min(SpriteSize - 1 - x, SpriteSize - 1 - y);
+				if (nearEdge < SpriteBevelWidth && nearEdge <= farEdge)
+					return SpriteBevelLit;
+				return farEdge < SpriteBevelWidth ? SpriteBevelShaded : SpriteBevelFace;
+			}
+			if (texture == BuiltinTexture::SpriteCircle)
+				return IsWithinRadius(x, y, SpriteSize / 2, SpriteSize / 2, SpriteSize / 2) ? SpriteOpaque : SpriteClear;
+			return SpriteOpaque;
+		}
+
+		[[maybe_unused]] static bool IsSpriteTexture(BuiltinTexture texture)
+		{
+			return texture == BuiltinTexture::SpriteSquare || texture == BuiltinTexture::SpriteRounded || texture == BuiltinTexture::SpriteBevel
+				|| texture == BuiltinTexture::SpriteCircle;
+		}
+
 		static TextureData CreateTexture(BuiltinTexture texture)
 		{
 			switch (texture)
@@ -197,6 +262,11 @@ namespace Engine {
 				case BuiltinTexture::FlatNormal: return CreateSolid(TextureFormat::RGBA8Unorm, FlatNormal);
 				case BuiltinTexture::Checker:    return CreateChecker(LightGrey, DarkGrey);
 				case BuiltinTexture::Missing:    return CreateChecker(Magenta, Black);
+				case BuiltinTexture::SpriteSquare:
+				case BuiltinTexture::SpriteRounded:
+				case BuiltinTexture::SpriteBevel:
+				case BuiltinTexture::SpriteCircle:
+					return GenerateBuiltinSpriteTexture(texture);
 			}
 			ENGINE_CORE_ASSERT(false, "Unknown BuiltinTexture {}", std::to_underlying(texture));
 			return CreateChecker(Magenta, Black);
@@ -208,13 +278,36 @@ namespace Engine {
 	{
 		switch (texture)
 		{
-			case BuiltinTexture::White:      return "White";
-			case BuiltinTexture::Black:      return "Black";
-			case BuiltinTexture::FlatNormal: return "FlatNormal";
-			case BuiltinTexture::Checker:    return "Checker";
-			case BuiltinTexture::Missing:    return "Missing";
+			case BuiltinTexture::White:         return "White";
+			case BuiltinTexture::Black:         return "Black";
+			case BuiltinTexture::FlatNormal:    return "FlatNormal";
+			case BuiltinTexture::Checker:       return "Checker";
+			case BuiltinTexture::Missing:       return "Missing";
+			case BuiltinTexture::SpriteSquare:  return "SpriteSquare";
+			case BuiltinTexture::SpriteRounded: return "SpriteRounded";
+			case BuiltinTexture::SpriteBevel:   return "SpriteBevel";
+			case BuiltinTexture::SpriteCircle:  return "SpriteCircle";
 		}
 		return "Unknown";
+	}
+
+	TextureData GenerateBuiltinSpriteTexture(BuiltinTexture texture)
+	{
+		ENGINE_CORE_ASSERT(Utils::IsSpriteTexture(texture), "'{}' is not a sprite texture", BuiltinTextureToString(texture));
+		TextureData generated;
+		generated.Format = TextureFormat::RGBA8Srgb;
+		generated.Width = SpriteSize;
+		generated.Height = SpriteSize;
+		std::vector<Texel> texels;
+		texels.reserve(static_cast<size_t>(SpriteSize) * SpriteSize);
+		for (uint32_t y = 0; y < SpriteSize; ++y)
+		{
+			for (uint32_t x = 0; x < SpriteSize; ++x)
+				texels.push_back(Utils::GetSpriteTexel(texture, x, y));
+		}
+		// One level: sprites sample without mips.
+		Utils::AppendLevel(generated, SpriteSize, SpriteSize, texels);
+		return generated;
 	}
 
 	TextureData GenerateBuiltinTexture(BuiltinTexture texture)

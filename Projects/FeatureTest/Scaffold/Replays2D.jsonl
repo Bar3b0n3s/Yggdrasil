@@ -1,0 +1,9 @@
+{"method": "input.record", "params": {"action": "Start", "scene": "Assets/Scenes/Sprites2D.scene"}}
+{"method": "play.step", "params": {"ticks": 241, "input": [{"tick": 7, "type": "Action", "name": "MoveX", "value": 1}, {"tick": 47, "type": "Action", "name": "MoveX", "value": 0}, {"tick": 61, "type": "Action", "name": "Jump", "state": "Tap"}, {"tick": 91, "type": "Action", "name": "MoveX", "value": -0.5}, {"tick": 131, "type": "Action", "name": "MoveX", "value": 0}, {"tick": 171, "type": "Action", "name": "Jump", "state": "Tap"}], "render": "None"}}
+{"method": "input.record", "params": {"action": "Stop", "path": "Assets/Tests/Replays/Sprites2D.replay", "expect": [{"tick": 240, "luau": "local s = Scene.FindByName(\"Strider\")\nreturn s:GetScript().Jumps == 2 and s.Transform.Translation.x > 1 and s.SpriteRenderer.FlipX"}]}}
+{"method": "play.stop", "params": {}}
+{"method": "input.record", "params": {"action": "Start", "scene": "Assets/Scenes/Physics2D.scene"}}
+{"method": "play.step", "params": {"ticks": 261, "input": [{"tick": 9, "type": "Action", "name": "MoveX", "value": 1}, {"tick": 71, "type": "Action", "name": "Jump", "state": "Tap"}, {"tick": 111, "type": "Action", "name": "MoveX", "value": -1}, {"tick": 151, "type": "Action", "name": "Jump", "state": "Tap"}, {"tick": 191, "type": "Action", "name": "MoveX", "value": 0}], "render": "None"}}
+{"method": "input.record", "params": {"action": "Stop", "path": "Assets/Tests/Replays/Physics2D.replay", "expect": [{"tick": 260, "luau": "local b = Scene.FindByName(\"Ball\")\nreturn b:GetScript(\"Pusher\").Kicks == 2 and #Scene.FindByName(\"BoxSensor\"):GetScript(\"Contacts2D\").Events >= 1"}]}}
+{"method": "play.stop", "params": {}}
+{"method": "project.refreshAssets", "params": {}}

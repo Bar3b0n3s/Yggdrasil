@@ -25,7 +25,8 @@
 // Skinning, the first GPU work of a frame, alone in the Deform stage (before the shadow casters and the prepass read the
 // deformed vertices); PointShadows in Shadows, after SpotShadows; LightClusters at the end of Ambient, after the depth
 // pyramid it can bound clusters with and before the forward passes read the clusters; Sprites and Lights2D in the Sprites
-// stage; Ui after Text in SceneOverlay. Phase 3's (Particles, Exposure, Lut, Taa, Ssr and terrain) take the stages their
+// stage (Sprites, then Lights2D: M21's C21.2 records the accumulated light before the lit sprites that sample it); Ui after
+// Text in SceneOverlay. Phase 3's (Particles, Exposure, Lut, Taa, Ssr and terrain) take the stages their
 // contracts name. A declaration with no stats row creates pipelines its users record under their own rows (the
 // QuadBatcher), or is a startup-only computation (the DFG LUT); one with no pipeline records with another declaration's
 // pipelines (Wireframe and Overlays share the debug lines' pipelines, Labels the Text pipelines, Letterbox the Upscale
@@ -77,6 +78,11 @@ namespace Engine {
 		inline constexpr std::array<std::string_view, 1> OverdrawRows = { "Overdraw" };
 		inline constexpr std::array<std::string_view, 1> OverdrawTargets = { "Overdraw" };
 		inline constexpr std::array<std::string_view, 1> QuadPrograms = { "Quad" };
+		inline constexpr std::array<std::string_view, 1> SpritesRows = { "Sprites" };
+		// M21 (C21.2): the Lights2D program (Passes/Lights2D.slang, Renderer/Lights2DPass.h).
+		inline constexpr std::array<std::string_view, 1> Lights2DPrograms = { "Lights2D" };
+		inline constexpr std::array<std::string_view, 1> Lights2DRows = { "Lights2D" };
+		inline constexpr std::array<std::string_view, 2> Lights2DTargets = { "Lights2DNormals", "Lights2DLight" };
 		inline constexpr std::array<std::string_view, 1> BloomPrograms = { "Bloom" };
 		inline constexpr std::array<std::string_view, 1> BloomRows = { "Bloom" };
 		inline constexpr std::array<std::string_view, 1> BloomTargets = { "Bloom" };
@@ -104,15 +110,15 @@ namespace Engine {
 
 	}
 
-	// The pass list, in stats order (see the file comment). 60 pipelines at startup: M17's 54 plus the QuadBatcher's 2 and the
-	// output stage's 2, and M23's LightClusters 1 and Skinning 1. M23's C23.1 adds PointShadows and LightClusters at the places
-	// phase 2's ledger fixes (ADR 0028), and C23.3 Skinning, alone in Deform.
+	// The pass list, in stats order (see the file comment). 63 pipelines at startup: M17's 54 plus the QuadBatcher's 2 and the
+	// output stage's 2 (M18), M21's Lights2D 1 and the QuadBatcher's HdrLit and Normals 2 (C21.2; M21's Sprites records with
+	// the QuadBatcher's), and M23's LightClusters 1 and Skinning 1. M23's C23.1 adds PointShadows and LightClusters at the
+	// places phase 2's ledger fixes (ADR 0028), and C23.3 Skinning, alone in Deform.
 	inline constexpr std::array ScenePassDeclarations = std::to_array<RenderPassDeclaration>({
 		{ .Name = "Prepare", .Stage = RenderStage::Prepare, .StatsRows = Detail::PrepareRows },
 		// M23 (C23.3, Docs/Decisions/0034-m23-contract.md decision 27): the skinned and morphed meshes' vertices, deformed by
 		// SkinningPass's compute pipeline of the program Skinning into each deformed item's own vertex buffer before the
-		// shadow casters, the prepass and the forward passes draw them; no target (the vertices are buffers). Its one
-		// pipeline makes the startup count 60.
+		// shadow casters, the prepass and the forward passes draw them; no target (the vertices are buffers). One pipeline.
 		{ .Name = "Skinning", .Stage = RenderStage::Deform, .PipelineCount = 1, .Programs = Detail::SkinningPrograms, .StatsRows = Detail::SkinningRows },
 		{ .Name = "Shadows", .Stage = RenderStage::Shadows, .PipelineCount = 6, .Programs = Detail::ShadowPrograms, .StatsRows = Detail::ShadowRows, .Targets = Detail::ShadowTargets },
 		// M23 (C23.1, Docs/Decisions/0034-m23-contract.md decision 3): the point lights' cube faces, drawn with the Shadows
@@ -134,8 +140,17 @@ namespace Engine {
 		{ .Name = "ForwardTransparent", .Stage = RenderStage::Forward, .PipelineCount = 3, .Programs = Detail::ScenePrograms, .StatsRows = Detail::ForwardTransparentRows, .Targets = Detail::SceneColorTargets },
 		// The Overdraw data view's additive pass, for the three cull modes.
 		{ .Name = "Overdraw", .Stage = RenderStage::Forward, .PipelineCount = 3, .Programs = Detail::ScenePrograms, .StatsRows = Detail::OverdrawRows, .Targets = Detail::OverdrawTargets },
-		// QuadBatcher.h: its users record under their own rows (M21's Sprites in this stage, M22's Ui in SceneOverlay).
-		{ .Name = "QuadBatcher", .Stage = RenderStage::Sprites, .PipelineCount = 2, .Programs = Detail::QuadPrograms },
+		// QuadBatcher.h: its users record under their own rows (M21's Sprites and Lights2D in this stage, M22's Ui in
+		// SceneOverlay); Hdr and Ldr, and M21's HdrLit and Normals (C21.2, Docs/Decisions/0032-m21-contract.md decision 22).
+		{ .Name = "QuadBatcher", .Stage = RenderStage::Sprites, .PipelineCount = 4, .Programs = Detail::QuadPrograms },
+		// M21 (C21.1, Docs/Decisions/0032-m21-contract.md decision 4): the snapshot's sprites, in its draw order, with the
+		// QuadBatcher's Hdr pipeline into SceneColor, depth-tested against SceneDepth (lit ones with its HdrLit pipeline, C21.2).
+		{ .Name = "Sprites", .Stage = RenderStage::Sprites, .StatsRows = Detail::SpritesRows },
+		// M21 (C21.2, decision 22): with a lit sprite or tilemap in a Lit view, the lit items' normals (the QuadBatcher's
+		// Normals pipeline) into Lights2DNormals, then every 2D light added into Lights2DLight at the scene resolution, recorded
+		// before the lit items that sample it; its row counts the normals' and the lights' draws. Its one pipeline is the
+		// Lights2D program's (Renderer/Lights2DPass.h).
+		{ .Name = "Lights2D", .Stage = RenderStage::Sprites, .PipelineCount = 1, .Programs = Detail::Lights2DPrograms, .StatsRows = Detail::Lights2DRows, .Targets = Detail::Lights2DTargets },
 		{ .Name = "Bloom", .Stage = RenderStage::HdrPost, .PipelineCount = 3, .Programs = Detail::BloomPrograms, .StatsRows = Detail::BloomRows, .Targets = Detail::BloomTargets },
 		// The tonemap pass and the data views' composite, which replaces it under the same row.
 		{ .Name = "Tonemap", .Stage = RenderStage::Tonemap, .PipelineCount = 2, .Programs = Detail::TonemapPrograms, .StatsRows = Detail::TonemapRows, .Targets = Detail::TonemapTargets },

@@ -1,0 +1,24 @@
+{
+	"Format": "SpriteSheet",
+	"Version": 1,
+	"Texture": null,
+	"Frames": [
+		{
+			"Name": "Idle",
+			"Rect": {
+				"X": 0,
+				"Y": 0,
+				"Width": 16,
+				"Height": 16
+			},
+			"Pivot": [0.5, 0.5],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		}
+	],
+	"Clips": []
+}

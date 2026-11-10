@@ -298,6 +298,19 @@ namespace Engine {
 		Detail::UnregisterPhysicsWorld(*m_State->System);
 	}
 
+	Status ValidatePhysicsWorldLimits(const PhysicsWorldLimits& limits)
+	{
+		if (limits.MaxBodies == 0 || limits.MaxBodies > JPH::PhysicsSystem::cMaxBodiesLimit)
+			return MakeError(ErrorCode::InvalidArgument, "MaxBodies must be 1 to {} (got {})", JPH::PhysicsSystem::cMaxBodiesLimit, limits.MaxBodies);
+		if (limits.MaxBodyPairs == 0)
+			return MakeError(ErrorCode::InvalidArgument, "MaxBodyPairs must be at least 1");
+		if (limits.MaxContactConstraints == 0)
+			return MakeError(ErrorCode::InvalidArgument, "MaxContactConstraints must be at least 1");
+		if (limits.TempAllocatorBytes == 0 || limits.TempAllocatorBytes > std::numeric_limits<JPH::uint>::max())
+			return MakeError(ErrorCode::InvalidArgument, "TempAllocatorBytes must be 1 to {} (got {})", std::numeric_limits<JPH::uint>::max(), limits.TempAllocatorBytes);
+		return {};
+	}
+
 	Result<Scope<PhysicsWorld>> PhysicsWorld::Create(const PhysicsWorldSpecification& specification)
 	{
 		if (!PhysicsEngine::IsInitialized())
@@ -307,17 +320,9 @@ namespace Engine {
 		}
 		ENGINE_CORE_ASSERT(Detail::IsPhysicsMainThread(), "PhysicsWorld::Create called off the main thread");
 		ENGINE_TRY(Utils::CheckGravity(specification.Gravity));
+		ENGINE_TRY(ValidatePhysicsWorldLimits(specification.Limits));
 
 		const PhysicsWorldLimits& limits = specification.Limits;
-		if (limits.MaxBodies == 0 || limits.MaxBodies > JPH::PhysicsSystem::cMaxBodiesLimit)
-			return MakeError(ErrorCode::InvalidArgument, "MaxBodies must be 1 to {} (got {})", JPH::PhysicsSystem::cMaxBodiesLimit, limits.MaxBodies);
-		if (limits.MaxBodyPairs == 0)
-			return MakeError(ErrorCode::InvalidArgument, "MaxBodyPairs must be at least 1");
-		if (limits.MaxContactConstraints == 0)
-			return MakeError(ErrorCode::InvalidArgument, "MaxContactConstraints must be at least 1");
-		if (limits.TempAllocatorBytes == 0 || limits.TempAllocatorBytes > std::numeric_limits<JPH::uint>::max())
-			return MakeError(ErrorCode::InvalidArgument, "TempAllocatorBytes must be 1 to {} (got {})", std::numeric_limits<JPH::uint>::max(), limits.TempAllocatorBytes);
-
 		Scope<PhysicsWorld> world = CreateScope<PhysicsWorld>(ConstructionKey{});
 		State& state = *world->m_State;
 		state.Specification = specification;
@@ -393,6 +398,8 @@ namespace Engine {
 			if (description.IsSensor)
 				return MakeError(ErrorCode::Validation, "{}: a Dynamic body cannot be a trigger; triggers are Kinematic sensors", PhysicsDynamicTriggerCode);
 			ENGINE_TRY_ASSIGN(dynamicMass, Detail::GetDynamicMassProperties(*shape.Shape, shape.HasMesh, description.Mass, description.AllowedDofs));
+			if (description.SpheresAsDiscs)
+				Detail::AddDiscInertiaAboutZ(*shape.Shape, dynamicMass);
 		}
 
 		const uint32_t limit = state.Specification.Limits.MaxBodies;
@@ -469,7 +476,8 @@ namespace Engine {
 			.CollisionGroup = description.CollisionGroup,
 			.Collider = shape.ColliderUserData.empty() ? 0 : shape.ColliderUserData.front(),
 			.IsSensor = description.IsSensor,
-			.WantsLinearCast = wantsLinearCast };
+			.WantsLinearCast = wantsLinearCast,
+			.SpheresAsDiscs = isDynamic && description.SpheresAsDiscs };
 
 		Utils::WarnWhenNearLimit(state.HasWarnedBodies, state.System->GetNumBodies(), limit, "bodies", "PhysicsWorldLimits::MaxBodies",
 			"no further body is created");
@@ -567,6 +575,8 @@ namespace Engine {
 				dofs = static_cast<PhysicsDofs>(std::to_underlying(lock.GetBody().GetMotionProperties()->GetAllowedDOFs()));
 			}
 			ENGINE_TRY_ASSIGN(dynamicMass, Detail::GetDynamicMassProperties(*newShape.Shape, newShape.HasMesh, record.Mass, dofs));
+			if (record.SpheresAsDiscs)
+				Detail::AddDiscInertiaAboutZ(*newShape.Shape, dynamicMass);
 		}
 
 		const JPH::AABox oldBounds = bodyInterface.GetTransformedShape(live->ID).GetWorldSpaceBounds();

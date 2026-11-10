@@ -6,13 +6,13 @@ export type AlphaMode = "Opaque" | "Mask" | "Blend"
 export type AnimatorRootMotion = "None" | "Apply" | "Extract"
 
 -- What asset.create makes.
-export type AssetCreateType = "Material" | "Scene" | "Prefab" | "SoundEffect" | "Folder" | "SpriteSheet"
+export type AssetCreateType = "Material" | "Scene" | "Prefab" | "SoundEffect" | "Folder" | "SpriteSheet" | "Tilemap"
 
 -- Where an asset is in its life (§7.2).
 export type AssetState = "Unloaded" | "Loading" | "Loaded" | "Failed"
 
 -- The kind of a loadable asset (§7.1).
-export type AssetType = "None" | "Scene" | "Prefab" | "Mesh" | "Material" | "Texture" | "Environment" | "AudioClip" | "Script" | "Font" | "Replay" | "SpriteSheet" | "Skeleton" | "AnimationClip"
+export type AssetType = "None" | "Scene" | "Prefab" | "Mesh" | "Material" | "Texture" | "Environment" | "AudioClip" | "Script" | "Font" | "Replay" | "SpriteSheet" | "Tilemap" | "Skeleton" | "AnimationClip"
 
 -- How a spatial sound's volume falls off with distance.
 export type Attenuation = "None" | "Inverse" | "Linear" | "Exponential"
@@ -80,6 +80,9 @@ export type InputRecordAction = "Start" | "Stop"
 -- Keyboard keys by their US-layout position.
 export type Key = "Space" | "Apostrophe" | "Comma" | "Minus" | "Period" | "Slash" | "D0" | "D1" | "D2" | "D3" | "D4" | "D5" | "D6" | "D7" | "D8" | "D9" | "Semicolon" | "Equal" | "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z" | "LeftBracket" | "Backslash" | "RightBracket" | "GraveAccent" | "World1" | "World2" | "Escape" | "Enter" | "Tab" | "Backspace" | "Insert" | "Delete" | "Right" | "Left" | "Down" | "Up" | "PageUp" | "PageDown" | "Home" | "End" | "CapsLock" | "ScrollLock" | "NumLock" | "PrintScreen" | "Pause" | "F1" | "F2" | "F3" | "F4" | "F5" | "F6" | "F7" | "F8" | "F9" | "F10" | "F11" | "F12" | "F13" | "F14" | "F15" | "F16" | "F17" | "F18" | "F19" | "F20" | "F21" | "F22" | "F23" | "F24" | "F25" | "Keypad0" | "Keypad1" | "Keypad2" | "Keypad3" | "Keypad4" | "Keypad5" | "Keypad6" | "Keypad7" | "Keypad8" | "Keypad9" | "KeypadDecimal" | "KeypadDivide" | "KeypadMultiply" | "KeypadSubtract" | "KeypadAdd" | "KeypadEnter" | "KeypadEqual" | "LeftShift" | "LeftControl" | "LeftAlt" | "LeftSuper" | "RightShift" | "RightControl" | "RightAlt" | "RightSuper" | "Menu"
 
+-- What a 2D light lights.
+export type Light2DType = "Point" | "Global"
+
 -- The logger an entry came from.
 export type LogChannel = "Engine" | "App" | "Script"
 
@@ -94,6 +97,9 @@ export type MouseButton = "Left" | "Right" | "Middle" | "Button4" | "Button5" | 
 
 -- What a type of a game's native module is.
 export type NativeTypeRole = "Component" | "Resource"
+
+-- The shape of a 2D overlap query.
+export type Physics2DQueryShape = "Circle" | "Box"
 
 -- Why a physics body exists (§5.3 composition rules).
 export type PhysicsBodyOrigin = "RigidBody" | "ImplicitStatic" | "ImplicitSensor" | "Character"
@@ -294,8 +300,12 @@ declare extern type Behaviour with
 	OnAnimationEvent: (self: ScriptInstance, event: AnimationEvent) -> ()
 	-- Called when a collision begins, with the other entity and contact. [All modes; Runtime|Test; mutates]
 	OnCollisionEnter: (self: ScriptInstance, other: Entity, contact: CollisionContact) -> ()
+	-- Called when a 2D collision begins, with the other entity and the contact in the XY plane. [All modes; Runtime|Test; mutates]
+	OnCollisionEnter2D: (self: ScriptInstance, other: Entity, contact: CollisionContact) -> ()
 	-- Called when the corresponding collision or trigger transition occurs. [All modes; Runtime|Test; mutates]
 	OnCollisionExit: (self: ScriptInstance, other: Entity) -> ()
+	-- Called when the corresponding 2D collision or trigger transition occurs. [All modes; Runtime|Test; mutates]
+	OnCollisionExit2D: (self: ScriptInstance, other: Entity) -> ()
 	-- Called at the corresponding lifecycle transition. [All modes; Runtime|Test; mutates]
 	OnCreate: (self: ScriptInstance) -> ()
 	-- Called at the corresponding lifecycle transition. [All modes; Runtime|Test; mutates]
@@ -314,8 +324,12 @@ declare extern type Behaviour with
 	OnStart: (self: ScriptInstance) -> ()
 	-- Called when the corresponding collision or trigger transition occurs. [All modes; Runtime|Test; mutates]
 	OnTriggerEnter: (self: ScriptInstance, other: Entity) -> ()
+	-- Called when the corresponding 2D collision or trigger transition occurs. [All modes; Runtime|Test; mutates]
+	OnTriggerEnter2D: (self: ScriptInstance, other: Entity) -> ()
 	-- Called when the corresponding collision or trigger transition occurs. [All modes; Runtime|Test; mutates]
 	OnTriggerExit: (self: ScriptInstance, other: Entity) -> ()
+	-- Called when the corresponding 2D collision or trigger transition occurs. [All modes; Runtime|Test; mutates]
+	OnTriggerExit2D: (self: ScriptInstance, other: Entity) -> ()
 	-- Called for the current fixed, presentation or late presentation phase. [All modes; Runtime|Test; mutates]
 	OnUpdate: (self: ScriptInstance, dt: number) -> ()
 end
@@ -330,6 +344,18 @@ declare extern type BoxCollider with
 	Offset: vector
 	-- The box rotation relative to the entity: a unit quaternion. [All modes; Runtime|Test; pure/read; setter mutates]
 	Rotation: Quat
+end
+
+-- A rectangle collider in the entity's XY plane.
+declare extern type BoxCollider2D with
+	-- The rectangle's rotation about the entity's Z axis, counter-clockwise, in degrees. [All modes; Runtime|Test; pure/read; setter mutates]
+	Angle: number
+	-- Half the rectangle's size along local X and Y; at least 1 mm. [All modes; Runtime|Test; pure/read; setter mutates]
+	HalfExtents: vector
+	-- Whether the collider only detects overlaps instead of colliding. [All modes; Runtime|Test; pure/read; setter mutates]
+	IsTrigger: boolean
+	-- The rectangle's centre relative to the entity, in its XY plane. [All modes; Runtime|Test; pure/read; setter mutates]
+	Offset: vector
 end
 
 -- Renders the scene from the entity, looking down its local -Z axis.
@@ -348,11 +374,11 @@ declare extern type Camera with
 	Primary: boolean
 	-- Perspective or orthographic projection. [All modes; Runtime|Test; pure/read; setter mutates]
 	Projection: ProjectionType
-	-- Ray through a viewport pixel center, origin top-left, using the rendered camera pose. [All modes; Runtime|Test; pure/read]
+	-- Ray through a viewport pixel center, origin top-left, using the rendered camera pose; under a PixelPerfectCamera through its snapped reference view and the output mapping. [All modes; Runtime|Test; pure/read]
 	ScreenToWorldRay: (self: Camera, x: number, y: number) -> (vector, vector)
 	-- The vertical field of view of the perspective projection, in degrees. [All modes; Runtime|Test; pure/read; setter mutates]
 	VerticalFov: number
-	-- Project to top-left pixel coordinates and reverse-Z depth using the rendered camera pose. [All modes; Runtime|Test; pure/read]
+	-- Project to top-left pixel coordinates and reverse-Z depth using the rendered camera pose; under a PixelPerfectCamera through its snapped reference view and the output mapping. [All modes; Runtime|Test; pure/read]
 	WorldToScreen: (self: Camera, point: vector) -> vector
 end
 
@@ -396,6 +422,16 @@ declare extern type CharacterController with
 	Radius: number
 	-- The highest step the character climbs without jumping, in metres. [All modes; Runtime|Test; pure/read; setter mutates]
 	StepHeight: number
+end
+
+-- A circle collider in the entity's XY plane.
+declare extern type CircleCollider2D with
+	-- Whether the collider only detects overlaps instead of colliding. [All modes; Runtime|Test; pure/read; setter mutates]
+	IsTrigger: boolean
+	-- The circle's centre relative to the entity, in its XY plane. [All modes; Runtime|Test; pure/read; setter mutates]
+	Offset: vector
+	-- The circle's radius; at least 1 mm. [All modes; Runtime|Test; pure/read; setter mutates]
+	Radius: number
 end
 
 -- A local linear RGBA float value. Channels are finite and unclamped, allowing HDR values.
@@ -457,12 +493,16 @@ declare extern type Entity with
 	AudioSource: AudioSource?
 	-- The entity's BoxCollider component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	BoxCollider: BoxCollider?
+	-- The entity's BoxCollider2D component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	BoxCollider2D: BoxCollider2D?
 	-- The entity's Camera component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	Camera: Camera?
 	-- The entity's CapsuleCollider component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	CapsuleCollider: CapsuleCollider?
 	-- The entity's CharacterController component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	CharacterController: CharacterController?
+	-- The entity's CircleCollider2D component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	CircleCollider2D: CircleCollider2D?
 	-- Mark this subtree for the normal destruction flush. [All modes; Runtime|Test; mutates]
 	Destroy: (self: Entity) -> ()
 	-- The entity's DirectionalLight component, or nil when absent. [All modes; Runtime|Test; pure/read]
@@ -492,6 +532,16 @@ declare extern type Entity with
 	function GetComponent(self, name: "AudioSource"): AudioSource?
 	function GetComponent(self, name: "AudioListener"): AudioListener?
 	function GetComponent(self, name: "Script"): Script?
+	function GetComponent(self, name: "SpriteRenderer"): SpriteRenderer?
+	function GetComponent(self, name: "SpriteAnimator"): SpriteAnimator?
+	function GetComponent(self, name: "PixelPerfectCamera"): PixelPerfectCamera?
+	function GetComponent(self, name: "Light2D"): Light2D?
+	function GetComponent(self, name: "TilemapRenderer"): TilemapRenderer?
+	function GetComponent(self, name: "RigidBody2D"): RigidBody2D?
+	function GetComponent(self, name: "BoxCollider2D"): BoxCollider2D?
+	function GetComponent(self, name: "CircleCollider2D"): CircleCollider2D?
+	function GetComponent(self, name: "PolygonCollider2D"): PolygonCollider2D?
+	function GetComponent(self, name: "TilemapCollider"): TilemapCollider?
 	function GetComponent(self, name: "Animator"): Animator?
 	function GetComponent(self, name: "SkinnedMesh"): SkinnedMesh?
 	-- Get the parent, or nil for a root. [All modes; Runtime|Test; pure/read]
@@ -502,7 +552,7 @@ declare extern type Entity with
 	GetScripts: (self: Entity) -> {any}
 	-- Copy tags in insertion order. [All modes; Runtime|Test; pure/read]
 	GetTags: (self: Entity) -> {string}
-	-- Get this entity's render mesh world AABB; nil without a mesh. [All modes; Runtime|Test; pure/read]
+	-- Get the world AABB of what this entity draws: its render mesh, its sprite's quad and its tilemap's drawn tiles; nil without any of them. [All modes; Runtime|Test; pure/read]
 	GetWorldBounds: (self: Entity) -> (vector?, vector?)
 	-- Check an exposed component by its exact registry name. [All modes; Runtime|Test; pure/read]
 	HasComponent: (self: Entity, name: string) -> boolean
@@ -516,14 +566,20 @@ declare extern type Entity with
 	IsActiveSelf: (self: Entity) -> boolean
 	-- Whether this identity still names a live entity in this scene. [All modes; Runtime|Test; pure/read]
 	IsValid: (self: Entity) -> boolean
+	-- The entity's Light2D component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	Light2D: Light2D?
 	-- The entity's MeshCollider component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	MeshCollider: MeshCollider?
 	-- The entity's MeshRenderer component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	MeshRenderer: MeshRenderer?
 	-- The entity name; a written name is UTF-8 without NUL and at most 256 bytes. [All modes; Runtime|Test; pure/read; setter mutates]
 	Name: string
+	-- The entity's PixelPerfectCamera component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	PixelPerfectCamera: PixelPerfectCamera?
 	-- The entity's PointLight component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	PointLight: PointLight?
+	-- The entity's PolygonCollider2D component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	PolygonCollider2D: PolygonCollider2D?
 	-- The entity's PostProcess component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	PostProcess: PostProcess?
 	-- Remove a removable component when no present component requires it. [All modes; Runtime|Test; mutates]
@@ -532,6 +588,8 @@ declare extern type Entity with
 	RemoveTag: (self: Entity, tag: string) -> ()
 	-- The entity's RigidBody component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	RigidBody: RigidBody?
+	-- The entity's RigidBody2D component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	RigidBody2D: RigidBody2D?
 	-- Change local active state and dispatch effective lifecycle transitions before returning. [All modes; Runtime|Test; mutates]
 	SetActive: (self: Entity, active: boolean) -> ()
 	-- Reparent to the last sibling, preserving world pose by default; synchronize effective lifecycle transitions. [All modes; Runtime|Test; mutates]
@@ -542,8 +600,16 @@ declare extern type Entity with
 	SphereCollider: SphereCollider?
 	-- The entity's SpotLight component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	SpotLight: SpotLight?
+	-- The entity's SpriteAnimator component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	SpriteAnimator: SpriteAnimator?
+	-- The entity's SpriteRenderer component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	SpriteRenderer: SpriteRenderer?
 	-- The entity's Text component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	Text: Text?
+	-- The entity's TilemapCollider component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	TilemapCollider: TilemapCollider?
+	-- The entity's TilemapRenderer component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	TilemapRenderer: TilemapRenderer?
 	-- The entity's Transform component, which every entity has. [All modes; Runtime|Test; pure/read]
 	Transform: Transform
 	-- Compare UUIDs; equality does not authorize access to an expired scene. [All modes; Runtime|Test; pure/read]
@@ -568,6 +634,22 @@ end
 
 -- An authenticated immutable Field constructor descriptor.
 declare extern type FieldDescriptor with
+end
+
+-- A 2D light: lights the lit sprites and tilemaps of the view, never unlit ones; no shadows.
+declare extern type Light2D with
+	-- The light's linear colour. [All modes; Runtime|Test; pure/read; setter mutates]
+	Color: Color
+	-- Point: the fraction of the radius, from its edge inward, over which the light fades smoothly to nothing; 0 is a hard edge. [All modes; Runtime|Test; pure/read; setter mutates]
+	Falloff: number
+	-- Point: how far above the lit plane the light sits, in world units; only normal-mapped sprites read it. [All modes; Runtime|Test; pure/read; setter mutates]
+	Height: number
+	-- How strong the light is: its colour is multiplied by this, so values above 1 overbright. [All modes; Runtime|Test; pure/read; setter mutates]
+	Intensity: number
+	-- Point: how far the light reaches from the entity, in world units. [All modes; Runtime|Test; pure/read; setter mutates]
+	Radius: number
+	-- Whether the light is a point light around the entity or a global light of the whole view. [All modes; Runtime|Test; pure/read; setter mutates]
+	Type: Light2DType
 end
 
 -- A collider shaped like a mesh: its convex hull, or the exact triangles for Static and Kinematic bodies.
@@ -598,6 +680,18 @@ declare extern type MeshRenderer with
 	Visible: boolean
 end
 
+-- Renders the entity's camera at a reference resolution, upscaled by the largest whole factor that fits the view in a letterbox.
+declare extern type PixelPerfectCamera with
+	-- The linear colour of the bars around the upscaled image. [All modes; Runtime|Test; pure/read; setter mutates]
+	LetterboxColor: Color
+	-- How many scene pixels make one world unit; sprites of the same PixelsPerUnit map each texel to one pixel. [All modes; Runtime|Test; pure/read; setter mutates]
+	PixelsPerUnit: number
+	-- The height the scene renders at, in pixels; the orthographic view is this many pixels of PixelsPerUnit high. [All modes; Runtime|Test; pure/read; setter mutates]
+	ReferenceHeight: number
+	-- The width the scene renders at, in pixels. [All modes; Runtime|Test; pure/read; setter mutates]
+	ReferenceWidth: number
+end
+
 -- A light shining in every direction from the entity.
 declare extern type PointLight with
 	-- Whether the light casts soft shadows (at most four point lights per view; the shadow budget applies). [All modes; Runtime|Test; pure/read; setter mutates]
@@ -610,6 +704,18 @@ declare extern type PointLight with
 	Range: number
 	-- The radius of the emitting sphere, in metres; widens highlights and shadow penumbrae. [All modes; Runtime|Test; pure/read; setter mutates]
 	SourceRadius: number
+end
+
+-- A convex polygon collider in the entity's XY plane.
+declare extern type PolygonCollider2D with
+	-- The polygon's rotation about the entity's Z axis, counter-clockwise, in degrees. [All modes; Runtime|Test; pure/read; setter mutates]
+	Angle: number
+	-- Whether the collider only detects overlaps instead of colliding. [All modes; Runtime|Test; pure/read; setter mutates]
+	IsTrigger: boolean
+	-- Where the polygon's origin sits relative to the entity, in its XY plane. [All modes; Runtime|Test; pure/read; setter mutates]
+	Offset: vector
+	-- The points whose convex hull is the collider, 3 to 64 of them, in the collider's own space before Offset and Angle. [All modes; Runtime|Test; pure/read; setter mutates]
+	Points: {vector}
 end
 
 -- The scene's exposure, tone mapping, ambient occlusion, bloom and anti-aliasing (one per scene).
@@ -758,6 +864,68 @@ declare extern type RigidBody with
 	WakeUp: (self: RigidBody) -> ()
 end
 
+-- Simulates the entity in the 2D world: moves along world X and Y and rotates about world Z.
+declare extern type RigidBody2D with
+	-- Apply an angular impulse about +Z to a Dynamic 2D body. [All modes; Runtime|Test; mutates]
+	AddAngularImpulse: (self: RigidBody2D, impulse: number) -> ()
+	-- Apply a force in the XY plane to a Dynamic 2D body. [All modes; Runtime|Test; mutates]
+	AddForce: (self: RigidBody2D, force: vector) -> ()
+	-- Apply a force in the XY plane at a world position of the plane to a Dynamic 2D body. [All modes; Runtime|Test; mutates]
+	AddForceAtPosition: (self: RigidBody2D, force: vector, position: vector) -> ()
+	-- Apply an impulse in the XY plane to a Dynamic 2D body. [All modes; Runtime|Test; mutates]
+	AddImpulse: (self: RigidBody2D, impulse: vector) -> ()
+	-- Apply a torque about +Z, in newton metres, to a Dynamic 2D body. [All modes; Runtime|Test; mutates]
+	AddTorque: (self: RigidBody2D, torque: number) -> ()
+	-- Whether the body may sleep when it comes to rest. [All modes; Runtime|Test; pure/read; setter mutates]
+	AllowSleeping: boolean
+	-- How quickly angular velocity decays, per second. [All modes; Runtime|Test; pure/read; setter mutates]
+	AngularDamping: number
+	-- Removes ghost collisions with internal edges of compound shapes; set it on bodies that roll or slide across tiles. [All modes; Runtime|Test; pure/read; setter mutates]
+	EnhancedInternalEdgeRemoval: boolean
+	-- Whether a Dynamic body is kept from rotating. [All modes; Runtime|Test; pure/read; setter mutates]
+	FixedRotation: boolean
+	-- The friction coefficient of the body's surfaces; a contact uses the geometric mean of both bodies' values. [All modes; Runtime|Test; pure/read; setter mutates]
+	Friction: number
+	-- Read the angular velocity about +Z in radians per second. [All modes; Runtime|Test; pure/read]
+	GetAngularVelocity: (self: RigidBody2D) -> number
+	-- Read the linear velocity in the XY plane (Z is 0). [All modes; Runtime|Test; pure/read]
+	GetLinearVelocity: (self: RigidBody2D) -> vector
+	-- The multiplier of the project's 2D gravity for this body (0 floats). [All modes; Runtime|Test; pure/read; setter mutates]
+	GravityFactor: number
+	-- The angular velocity about world Z the body starts with, in radians per second, counter-clockwise seen from +Z. [All modes; Runtime|Test; pure/read; setter mutates]
+	InitialAngularVelocity: number
+	-- The velocity along world X and Y the body starts with, in metres per second. [All modes; Runtime|Test; pure/read; setter mutates]
+	InitialLinearVelocity: vector
+	-- Whether the 2D body is sleeping. [All modes; Runtime|Test; pure/read]
+	IsSleeping: (self: RigidBody2D) -> boolean
+	-- Physics layer name from project settings (the 3D world's layers). A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
+	Layer: string
+	-- How quickly linear velocity decays, per second. [All modes; Runtime|Test; pure/read; setter mutates]
+	LinearDamping: number
+	-- Mass in kilograms (Dynamic only). [All modes; Runtime|Test; pure/read; setter mutates]
+	Mass: number
+	-- The angular speed the body is clamped to, in radians per second. [All modes; Runtime|Test; pure/read; setter mutates]
+	MaxAngularVelocity: number
+	-- The speed the body is clamped to, in metres per second. [All modes; Runtime|Test; pure/read; setter mutates]
+	MaxLinearVelocity: number
+	-- Discrete or continuous (LinearCast) collision detection. [All modes; Runtime|Test; pure/read; setter mutates]
+	MotionQuality: MotionQuality
+	-- Set a Kinematic 2D target in the plane, the angle in degrees about +Z, for the next fixed step. [All modes; Runtime|Test; mutates]
+	MoveKinematic: (self: RigidBody2D, position: vector, angle: number) -> ()
+	-- Bounciness, from no bounce (0) to a perfectly elastic bounce (1); a contact uses the larger of both bodies' values. [All modes; Runtime|Test; pure/read; setter mutates]
+	Restitution: number
+	-- Set a Dynamic 2D body's angular velocity about +Z in radians per second. [All modes; Runtime|Test; mutates]
+	SetAngularVelocity: (self: RigidBody2D, velocity: number) -> ()
+	-- Set a Dynamic 2D body's linear velocity from the vector's X and Y. [All modes; Runtime|Test; mutates]
+	SetLinearVelocity: (self: RigidBody2D, velocity: vector) -> ()
+	-- Place a 2D body at once in the plane (the entity keeps its Z), the angle in degrees about +Z kept when omitted, preserving velocity and resetting interpolation. [All modes; Runtime|Test; mutates]
+	Teleport: (self: RigidBody2D, position: vector, angle: number?) -> ()
+	-- Static never moves; Kinematic is moved by script; Dynamic is simulated. [All modes; Runtime|Test; pure/read; setter mutates]
+	Type: BodyType
+	-- Wake a sleeping 2D body. [All modes; Runtime|Test; mutates]
+	WakeUp: (self: RigidBody2D) -> ()
+end
+
 -- Attaches Behaviour scripts to the entity, an ordered list of slots.
 declare extern type Script with
 	-- The behaviours of the entity, in slot order; each slot is its own instance. A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -800,6 +968,50 @@ declare extern type SpotLight with
 	SourceRadius: number
 end
 
+-- Plays a clip of the SpriteRenderer's sprite sheet, one step per clip frame for its ticks, driven by the fixed step.
+declare extern type SpriteAnimator with
+	-- The name of the sheet's clip to play; empty plays nothing. A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
+	Clip: string
+	-- Play the sheet's clip named clip from its first step, which shows at the next fixed step's SpriteAnimation phase. [All modes; Runtime|Test; mutates]
+	Play: (self: SpriteAnimator, clip: string) -> ()
+	-- Whether the clip advances each fixed step; a clip without Loop clears it after its last step and holds its last frame. [All modes; Runtime|Test; pure/read; setter mutates]
+	Playing: boolean
+	-- The index of the clip step shown. [All modes; Runtime|Test; pure/read; setter mutates]
+	Step: number
+	-- How many fixed steps the current clip step has been shown. [All modes; Runtime|Test; pure/read; setter mutates]
+	StepTicks: number
+	-- Stop advancing the clip; the frame shown stays. [All modes; Runtime|Test; mutates]
+	Stop: (self: SpriteAnimator) -> ()
+end
+
+-- Draws a sprite: a sprite sheet frame or a texture in the entity's XY plane.
+declare extern type SpriteRenderer with
+	-- The linear colour every texel is multiplied with, with opacity in the fourth component. [All modes; Runtime|Test; pure/read; setter mutates]
+	Color: Color
+	-- Whether the image is mirrored left to right about its pivot. [All modes; Runtime|Test; pure/read; setter mutates]
+	FlipX: boolean
+	-- Whether the image is mirrored top to bottom about its pivot. [All modes; Runtime|Test; pure/read; setter mutates]
+	FlipY: boolean
+	-- The index of the sheet's frame to draw; an index the sheet lacks draws nothing (SPRITE_FRAME_OUT_OF_RANGE). [All modes; Runtime|Test; pure/read; setter mutates]
+	Frame: number
+	-- Whether 2D lights light the sprite; an unlit sprite keeps its texels unchanged. [All modes; Runtime|Test; pure/read; setter mutates]
+	Lit: boolean
+	-- A lit sprite's tangent-space normal map, laid like its image; point lights then light it by the angle to the light. Null: flat. [All modes; Runtime|Test; pure/read; setter mutates]
+	NormalMap: AssetRef?
+	-- The draw order within the sorting layer: higher values draw over lower ones, equal values in canonical entity order. [All modes; Runtime|Test; pure/read; setter mutates]
+	OrderInLayer: number
+	-- How many texels of the image make one unit of the entity's local space; the sprite's size is its texels divided by this. [All modes; Runtime|Test; pure/read; setter mutates]
+	PixelsPerUnit: number
+	-- Set Frame to the index of the sprite sheet's frame named name; an error names the sheet when it has no such frame. [All modes; Runtime|Test; mutates]
+	SetFrameByName: (self: SpriteRenderer, name: string) -> ()
+	-- The sprite sheet whose frame Frame is drawn; null draws Texture whole. [All modes; Runtime|Test; pure/read; setter mutates]
+	Sheet: AssetRef?
+	-- The sorting layer name from project settings; later layers draw over earlier ones, and an undeclared name draws in the first. A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
+	SortingLayer: string
+	-- The texture drawn whole, pivoted at its centre, when Sheet is null; null draws the built-in white square. [All modes; Runtime|Test; pure/read; setter mutates]
+	Texture: AssetRef?
+end
+
 -- An opaque coroutine handle owned by one script VM.
 declare extern type TaskHandle with
 end
@@ -826,6 +1038,30 @@ declare extern type Text with
 	Space: TextSpace
 	-- The UTF-8 text; a line feed starts a new line. A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
 	Text: string
+end
+
+-- The solid cells of a tilemap as 2D colliders: each chunk's solid cells merged into boxes, one static compound without a RigidBody2D.
+declare extern type TilemapCollider with
+	-- Whether the collider only detects overlaps instead of colliding. [All modes; Runtime|Test; pure/read; setter mutates]
+	IsTrigger: boolean
+	-- The tilemap whose solid cells collide; null takes the entity's TilemapRenderer.Tilemap. [All modes; Runtime|Test; pure/read; setter mutates]
+	Tilemap: AssetRef?
+end
+
+-- Draws a tilemap's tiles in the entity's XY plane, each tile as a sprite of its palette entry's sheet frame.
+declare extern type TilemapRenderer with
+	-- The linear colour every tile's texels are multiplied with, with opacity in the fourth component. [All modes; Runtime|Test; pure/read; setter mutates]
+	Color: Color
+	-- Whether 2D lights light the tiles; unlit tiles keep their texels unchanged. [All modes; Runtime|Test; pure/read; setter mutates]
+	Lit: boolean
+	-- The draw order within the sorting layer, among the sprites: higher values draw over lower ones, equal values in canonical entity order. [All modes; Runtime|Test; pure/read; setter mutates]
+	OrderInLayer: number
+	-- How many texels of a tile's frame make one unit of the entity's local space, as a sprite's. [All modes; Runtime|Test; pure/read; setter mutates]
+	PixelsPerUnit: number
+	-- The sorting layer name from project settings; the tilemap sorts with the sprites, and an undeclared name draws in the first. A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
+	SortingLayer: string
+	-- The tilemap whose tiles are drawn; null draws nothing. [All modes; Runtime|Test; pure/read; setter mutates]
+	Tilemap: AssetRef?
 end
 
 -- Positions, rotates and scales the entity relative to its parent.
@@ -932,7 +1168,7 @@ declare Debug: {
 declare Field: {
 	-- Declare an empty array whose element keeps its complete nested field schema. [All modes; LoadTime|Runtime|Test; pure/read]
 	Array: (element: FieldDescriptor) -> FieldDescriptor,
-	-- Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for imported audio and .sfx sound effects, Script, Font, Replay, SpriteSheet, Skeleton or AnimationClip), with a null default; any other name fails the import. [All modes; LoadTime|Runtime|Test; pure/read]
+	-- Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for imported audio and .sfx sound effects, Script, Font, Replay, SpriteSheet, Tilemap, Skeleton or AnimationClip), with a null default; any other name fails the import. [All modes; LoadTime|Runtime|Test; pure/read]
 	Asset: (type: string) -> FieldDescriptor,
 	-- Declare a boolean; the omitted default is false. [All modes; LoadTime|Runtime|Test; pure/read]
 	Bool: (default: boolean?, options: FieldOptions?) -> FieldDescriptor,
@@ -1066,6 +1302,22 @@ declare Physics: {
 	SetGravity: (gravity: vector) -> (),
 	-- Closest swept sphere hit; radius obeys collider size bounds. [All modes; Runtime|Test; pure/read]
 	SphereCast: (origin: vector, radius: number, direction: vector, maxDistance: number, layerMask: number?) -> RaycastHit?,
+}
+
+-- Queries and gravity for the active scene's 2D physics world, in the XY plane.
+declare Physics2D: {
+	-- Current 2D world gravity (Z is 0). [All modes; Runtime|Test; pure/read]
+	GetGravity: () -> vector,
+	-- Unique overlapping 2D collider entities sorted by UUID; the box rotated by angle degrees about +Z (0 by default). [All modes; Runtime|Test; pure/read]
+	OverlapBox: (center: vector, halfExtents: vector, angle: number?, layerMask: number?) -> {Entity},
+	-- Unique overlapping 2D collider entities sorted by UUID; radius obeys collider size bounds. [All modes; Runtime|Test; pure/read]
+	OverlapCircle: (center: vector, radius: number, layerMask: number?) -> {Entity},
+	-- Closest 2D hit, including sensors; vectors in the plane (Z ignored, results with Z 0). [All modes; Runtime|Test; pure/read]
+	Raycast: (origin: vector, direction: vector, maxDistance: number, layerMask: number?) -> RaycastHit?,
+	-- All 2D hits sorted by distance then collider UUID. [All modes; Runtime|Test; pure/read]
+	RaycastAll: (origin: vector, direction: vector, maxDistance: number, layerMask: number?) -> {RaycastHit},
+	-- Set the 2D world's gravity from the vector's X and Y for the session. [All modes; Runtime|Test; mutates]
+	SetGravity: (gravity: vector) -> (),
 }
 
 -- Deterministic shared simulation randomness. Invalid arguments never advance the stream.

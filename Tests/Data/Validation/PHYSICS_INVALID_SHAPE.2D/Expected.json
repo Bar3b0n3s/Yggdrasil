@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["PHYSICS_INVALID_SHAPE"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

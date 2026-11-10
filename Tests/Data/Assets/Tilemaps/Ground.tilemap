@@ -1,0 +1,40 @@
+{
+	"Format": "Tilemap",
+	"Version": 1,
+	"CellSize": [1, 0.5],
+	"ChunkSize": 2,
+	"Palette": [
+		{
+			"Sheet": "5b5e000000000002",
+			"Frame": 0,
+			"Solid": true
+		},
+		{
+			"Sheet": "5b5e000000000003",
+			"Frame": 4,
+			"Solid": false
+		},
+		{
+			"Sheet": null,
+			"Frame": 0,
+			"Solid": true
+		}
+	],
+	"Chunks": [
+		{
+			"X": -1,
+			"Y": 0,
+			"Tiles": [0, 1, 0, 0]
+		},
+		{
+			"X": 0,
+			"Y": 0,
+			"Tiles": [1, 1, 2, 3]
+		},
+		{
+			"X": 3,
+			"Y": 1,
+			"Tiles": [0, 0, 0, 1]
+		}
+	]
+}

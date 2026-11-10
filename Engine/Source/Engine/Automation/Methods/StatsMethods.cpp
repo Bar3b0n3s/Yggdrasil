@@ -5,6 +5,8 @@
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Renderer/RenderStats.h"
+#include "Engine/Scene/Physics2DSystem.h"
+#include "Engine/Scene/PhysicsSystem.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Session/PlaySession.h"
 
@@ -23,6 +25,9 @@ namespace Engine {
 	Result<StatsGetResult> Automation::StatsGet(AutomationMethodContext& context, const StatsGetParams&)
 	{
 		ENGINE_TRY_ASSIGN(StatsGetResult result, context.GetHostStatistics());
+		// M21's milestone review: the bodies of both physics worlds, so the hardening soak's no-growth rule sees 2D bodies too.
+		if (const PlaySession* session = context.GetPlaySession(); session != nullptr)
+			result.Bodies = CountSessionBodies(*session);
 		if (const PlaySession* session = context.GetPlaySession(); session != nullptr && session->GetScripts() != nullptr)
 		{
 			const ScriptMemoryState memory = session->GetScripts()->GetMemoryState();
@@ -47,6 +52,12 @@ namespace Engine {
 			}
 		}
 		return result;
+	}
+
+	uint32_t CountSessionBodies(const PlaySession& session)
+	{
+		const Physics2DSystem* physics2D = session.GetPhysics2D();
+		return session.GetPhysics().GetStats().BodyCount + (physics2D != nullptr ? physics2D->GetStats().BodyCount : 0);
 	}
 
 	StatsViewSummary MakeStatsViewSummary(std::string name, const RenderStats& stats)
@@ -119,7 +130,7 @@ namespace Engine {
 			.Field("cpuMilliseconds", &StatsGetResult::CpuMilliseconds, "Approximate observed host CPU frame time in milliseconds.")
 			.Field("droppedSeconds", &StatsGetResult::DroppedSeconds, "Approximate accumulated scheduler time dropped in this session.")
 			.Field("entities", &StatsGetResult::Entities, "Active target scene entity count.")
-			.Field("bodies", &StatsGetResult::Bodies, "Live physics body count.")
+			.Field("bodies", &StatsGetResult::Bodies, "Live physics body count of the play session: the 3D world's bodies and the 2D world's together; 0 without a session.")
 			.Field("voices", &StatsGetResult::Voices, "Live audio voice count.")
 			.Field("scriptAvailable", &StatsGetResult::ScriptAvailable, "Whether the scripting heap service exists.")
 			.Field("scriptHeapBytes", &StatsGetResult::ScriptHeapBytes, "Approximate current script heap bytes when available.")

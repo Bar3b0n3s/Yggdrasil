@@ -51,6 +51,14 @@
 		"Testing": {
 			"description": "Test suites and replays.",
 			"$ref": "#/$defs/TestingSettings"
+		},
+		"SortingLayers": {
+			"description": "The sorting layers of sprites.",
+			"$ref": "#/$defs/SortingLayersSettings"
+		},
+		"Physics2D": {
+			"description": "The 2D physics world's gravity.",
+			"$ref": "#/$defs/Physics2DSettings"
 		}
 	},
 	"required": ["Format", "Version"],
@@ -297,6 +305,45 @@
 				"CoverageGates": {
 					"description": "Whether unfiltered test runs record coverage and fail on any gap of the per-mode coverage gates (FeatureTest).",
 					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"SortingLayersSettings": {
+			"description": "The sorting layers sprites draw in, back to front.",
+			"type": "object",
+			"properties": {
+				"Layers": {
+					"description": "Sorting layer names in draw order, back to front, unique and non-empty: 1 to 32, the first one \"Default\". A sprite's SortingLayer names one; an undeclared name draws in the first.",
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				}
+			},
+			"additionalProperties": false
+		},
+		"Physics2DSettings": {
+			"description": "The 2D physics world; its layers are Physics.Layers.",
+			"type": "object",
+			"properties": {
+				"Gravity": {
+					"description": "Gravity of the 2D world along X and Y in metres per second squared; each component at most 1e12 in magnitude.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": -999999995904,
+							"maximum": 999999995904
+						},
+						{
+							"type": "number",
+							"minimum": -999999995904,
+							"maximum": 999999995904
+						}
+					],
+					"minItems": 2,
+					"maxItems": 2
 				}
 			},
 			"additionalProperties": false

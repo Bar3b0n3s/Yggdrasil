@@ -237,11 +237,13 @@ namespace Engine {
 				if (!projectReport.Diagnostics.empty())
 					return MakeError(ErrorCode::Validation, "the golden project settings load with diagnostics");
 
-				// The game view at the requested size, as viewport.screenshot {view: "game"} extracts it.
+				// The game view at the requested size, as viewport.screenshot {view: "game"} extracts it, sprites in the project's
+				// sorting layers (M21, Docs/Decisions/0032-m21-contract.md decision 4).
 				const RenderExtractionRequest request{
 					.Width = options.Width,
 					.Height = options.Height,
 					.Quality = { .ShadowMapSize = settings.Rendering.ShadowMapSize, .SsaoHalfResolution = settings.Rendering.SsaoHalfResolution },
+					.SortingLayers = settings.SortingLayers.Layers,
 				};
 				ENGINE_TRY_ASSIGN(RenderSnapshot snapshot, ExtractRenderSnapshot(*loaded, request));
 				if (!snapshot.HasCamera)

@@ -131,6 +131,47 @@ namespace Engine {
 			CHECK((*played)["raycast"]["entity"]["name"] == Json("Cube"));
 			REQUIRE(setup.Call("play.stop", Json::object()));
 		}
+
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 14, stream A): sprites draw over meshes without writing depth, so
+		// viewport.pick asks 2D picking first, in the project's sorting layers, and falls back to the mesh pick.
+		TEST_CASE("ViewportPick: the sprite a pixel shows is picked before the meshes, in the project's sorting layers")
+		{
+			Test::AutomationFixture setup("PickSprites");
+			MakePickScene(setup);
+			REQUIRE(setup.GetEditor().GetViewportState().SetPixelSize(ViewportView::Scene, glm::uvec2(5, 3)));
+			REQUIRE(setup.Call("project.setSettings", Json{ { "patch", { { "SortingLayers", { { "Layers", Json::array({ "Default", "Background", "Foreground" }) } } } } } }));
+			// A sheet of one 16 x 16 frame without a texture: a unit square at the default 16 pixels per unit.
+			REQUIRE(setup.Call("asset.create", Json{ { "type", "SpriteSheet" }, { "path", "Assets/Sprites/Square.spritesheet" }, { "values", { { "Frames", Json::array({ { { "Rect", { { "Width", 16 }, { "Height", 16 } } } } }) } } } }));
+			const auto addSprite = [&setup](std::string_view name, float z, std::string_view layer, int32_t order)
+			{
+				REQUIRE(setup.Call("entity.create", Json{ { "name", name }, { "components", { { "Transform", { { "Translation", { 0, 0, z } } } }, { "SpriteRenderer", { { "Sheet", "Assets/Sprites/Square.spritesheet" }, { "SortingLayer", layer }, { "OrderInLayer", order } } } } } }));
+			};
+			// Front lies before the cube and comes first in canonical order with the higher OrderInLayer; Behind lies behind the
+			// cube, in the later sorting layer, so it draws last and the pixel shows it.
+			addSprite("Front", 2.0f, "Background", 5);
+			addSprite("Behind", -2.0f, "Foreground", -5);
+			const Json pixel{ { "x", 2 }, { "y", 1 }, { "view", "scene" } };
+			const auto behind = setup.Call("viewport.pick", pixel);
+			REQUIRE_MESSAGE(behind.has_value(), behind.error().ToString());
+			CHECK((*behind)["raycast"]["entity"]["name"] == Json("Behind"));
+			CHECK((*behind)["raycast"]["distance"] == Json(7.0f));
+			CHECK((*behind)["raycast"]["submesh"] == Json(0));
+
+			// In one layer the higher OrderInLayer draws last.
+			REQUIRE(setup.Call("entity.update", Json{ { "entity", "/Behind" }, { "components", { { "SpriteRenderer", { { "SortingLayer", "Background" } } } } } }));
+			const auto front = setup.Call("viewport.pick", pixel);
+			REQUIRE_MESSAGE(front.has_value(), front.error().ToString());
+			CHECK((*front)["raycast"]["entity"]["name"] == Json("Front"));
+			CHECK((*front)["raycast"]["distance"] == Json(3.0f));
+
+			// A frame the sheet lacks gives no quad, so the mesh pick answers.
+			for (const std::string_view name : { "/Front", "/Behind" })
+				REQUIRE(setup.Call("entity.update", Json{ { "entity", name }, { "components", { { "SpriteRenderer", { { "Frame", 1 } } } } } }));
+			const auto mesh = setup.Call("viewport.pick", pixel);
+			REQUIRE_MESSAGE(mesh.has_value(), mesh.error().ToString());
+			CHECK((*mesh)["raycast"]["entity"]["name"] == Json("Cube"));
+			CHECK((*mesh)["raycast"]["distance"] == Json(4.5f));
+		}
 	}
 
 }

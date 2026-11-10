@@ -1,9 +1,11 @@
 """Scripts/Test.py's runs (Docs/Architecture.md §2.3). Every Tests process it starts gets a user-data root below
 the run's own directory, bin/TestResults/<report stem>/UserData, so its log and its crash reports stay with the run and
 never reach the user's real user-data folder (AGENTS.md "Tests"; the "Milestone review" of
-Docs/Decisions/0029-m18-contract.md): that test runs the Tests binary of the automation suite's configuration. The
-automation suite's run is bounded by its configuration's default unless --timeout is given
-(Docs/Decisions/0039-script-budget-cpu-time.md decision 5): those tests start no process. No editor.
+Docs/Decisions/0029-m18-contract.md): that test runs the Tests binary of the automation suite's configuration. A run
+that ends with a non-zero exit code and no crash report names the last test case its process started and its last log
+lines (Architecture §15.2). The automation suite's run is bounded by its configuration's default unless --timeout is
+given (Docs/Decisions/0039-script-budget-cpu-time.md decision 5): those tests and the ones of a run without a report
+start no process. No editor.
 """
 
 from __future__ import annotations
@@ -93,7 +95,14 @@ class TestsRunUserDataTests(unittest.TestCase):
         text = report.read_text(encoding="utf-8", errors="replace")
         self.assertIn("Reason: Fatal error (Assert)", text)
         self.assertIn("The recorded answer is 41", text)
-        self.assertTrue((logs / "Tests.log").read_text(encoding="utf-8").startswith("another run's log line\n"))
+        # The report names the test case that was running, and the process's log the case as it started.
+        self.assertIn(f"\n  TestCase: {ASSERTING_TARGET}\n", text)
+        match = test_script.CRASH_REPORT_NAME_PATTERN.match(report.name)
+        self.assertIsNotNone(match, report.name)
+        log_text = (logs / "Tests.log").read_text(encoding="utf-8", errors="replace")
+        self.assertTrue(log_text.startswith("another run's log line\n"))
+        process_id = match.group(1) if match else ""
+        self.assertIn(f"] [trace] Test case of process {process_id}: {ASSERTING_TARGET}\n", log_text)
         # The report's path stays visible in the run's output: the process's own line, Test.py's line, the step's detail
         # and its JSON data.
         shown = test_script.paths.display_path(report)
@@ -108,6 +117,113 @@ class TestsRunUserDataTests(unittest.TestCase):
         if real is not None:
             self.assertFalse((real / app_name() / "Crashes" / report.name).exists(),
                              f"the run wrote {report.name} into the real user-data folder {real}")
+
+
+class EndWithoutReportTests(unittest.TestCase):
+    """A Tests run that ends with a non-zero exit code, no failed test case and no crash report of its own names, from
+    the log files below the run's user-data root, the last test case its process started and the last lines that
+    process's doctest thread logged. No process starts: run_streamed returns the ended run."""
+
+    PROCESS_ID = 4242
+    THREAD = "7700"  # the doctest thread of process 4242
+    OTHER_THREAD = "8800"  # the doctest thread of an overlapping run's process, 5151
+    CASE = "Application: --expect-no-gpu-errors fails a run whose device reported an error"
+
+    @staticmethod
+    def line(thread: str, level: str, message: str) -> str:
+        return f"[2026-11-02 15:36:23.495] [{thread}] [Engine] [{level}] {message}\n"
+
+    def run_without_report(self, logs: dict[str, str], exit_code: int = 1) -> Any:
+        """Runs the gpu suite's Debug run under the 1.4 cap against a Tests process that ended with `exit_code` and left
+        `logs` (file name: text) in its log folder and no crash report; returns the step."""
+        results = Path(tempfile.mkdtemp(prefix="TestScriptEndWithoutReport-")).resolve()
+        self.addCleanup(shutil.rmtree, results, ignore_errors=True)
+        executable = results / "bin" / test_script.paths.executable_name("Tests")
+        executable.parent.mkdir(parents=True)
+        executable.write_bytes(b"")
+        with contextlib.redirect_stderr(io.StringIO()):
+            arguments = test_script.parse_arguments(["--suite", "gpu", "--config", "Debug"])
+        run = test_script.TestRun("gpu", "Debug", ("--test-suite=GPU",), ("--vulkan-api=1.4",), "1.4")
+        folder = test_script.paths.log_folder(results / run.report_stem / "UserData")
+        folder.mkdir(parents=True)
+        for name, text in logs.items():
+            (folder / name).write_text(text, encoding="utf-8")
+        console = Console()
+        console.stream = io.StringIO()
+        ended = ProcessResult([str(executable)], exit_code, False, 1.0, "", process_id=self.PROCESS_ID)
+        no_skips = test_script.SkipCheck([], [], [])
+        with mock.patch.object(test_script.paths, "TEST_RESULTS_ROOT", results), \
+                mock.patch.object(test_script, "tests_executable", return_value=executable), \
+                mock.patch.object(test_script, "run_streamed", return_value=ended), \
+                mock.patch.object(test_script, "list_skipped_test_cases", return_value=no_skips):
+            return test_script.run_tests(run, arguments, console)
+
+    def test_a_run_that_ends_without_a_report_names_its_last_test_case_and_log_lines(self) -> None:
+        # The process's earlier case, then its last one; an overlapping run's process logs in between and after.
+        log = "".join([
+            self.line(self.THREAD, "trace", f"Test case of process {self.PROCESS_ID}: Application: an earlier case"),
+            self.line(self.THREAD, "info", "The earlier case's line"),
+            self.line(self.THREAD, "trace", f"Test case of process {self.PROCESS_ID}: {self.CASE}"),
+            self.line(self.THREAD, "info", "Engine context: window 'Application test' created (64x64)"),
+            self.line(self.OTHER_THREAD, "trace", "Test case of process 5151: Another run's case"),
+            self.line(self.THREAD, "info", "Frame loop started: Manual clock, 60 Hz, unthrottled"),
+            self.line(self.OTHER_THREAD, "info", "Another run's line"),
+            self.line(self.THREAD, "error", "ApplicationTests: a provoked GPU message"),
+            self.line(self.OTHER_THREAD, "info", "Another run's last line"),
+        ])
+        step = self.run_without_report({"Tests.log": log})
+
+        self.assertEqual(step.status, Status.FAILED, step.detail)
+        self.assertTrue(step.detail.startswith("Tests exited with code 1; no crash report"), step.detail)
+        if os.name == "nt":
+            self.assertIn("ended by TerminateProcess", step.detail)
+        self.assertIn(f"the last test case it started: '{self.CASE}'", step.detail)
+        own = [line for line in log.splitlines() if f"] [{self.THREAD}] " in line][2:]
+        self.assertEqual(step.data["lastTestCase"], self.CASE)
+        self.assertEqual(step.data["lastLogLines"], own)
+        self.assertIn(f"its last log lines: {' | '.join(own[-test_script.LOG_LINES_IN_DETAIL:])}", step.detail)
+        self.assertNotIn("Another run", step.detail)
+
+    def test_the_last_test_case_is_found_before_the_log_rotated(self) -> None:
+        # The case started in what is now Tests.1.log; the process went on logging into the new Tests.log.
+        older = "".join([
+            self.line(self.THREAD, "trace", f"Test case of process {self.PROCESS_ID}: {self.CASE}"),
+            self.line(self.THREAD, "info", "Before the rotation"),
+        ])
+        newer = "".join([
+            self.line(self.OTHER_THREAD, "info", "Another run's line"),
+            self.line(self.THREAD, "info", "After the rotation"),
+        ])
+        step = self.run_without_report({"Tests.2.log": self.line(self.THREAD, "info", "Long before"),
+                                        "Tests.1.log": older, "Tests.log": newer})
+
+        self.assertEqual(step.data["lastTestCase"], self.CASE)
+        self.assertEqual(step.data["lastLogLines"], [*older.splitlines(), newer.splitlines()[1]])
+        self.assertIn(f"the last test case it started: '{self.CASE}'", step.detail)
+
+    def test_a_run_whose_log_names_no_test_case_says_so(self) -> None:
+        # Another process's case only, and an exception status no handler saw.
+        other = self.line(self.OTHER_THREAD, "trace", "Test case of process 5151: Other")
+        step = self.run_without_report({"Tests.log": other}, exit_code=0xC0000409)
+
+        self.assertEqual(step.status, Status.FAILED, step.detail)
+        self.assertIn("its log names no test case it started", step.detail)
+        self.assertNotIn("its last log lines", step.detail)
+        self.assertIsNone(step.data["lastTestCase"])
+        self.assertEqual(step.data["lastLogLines"], [])
+        if os.name == "nt":
+            self.assertIn("Tests exited with code 0xC0000409", step.detail)
+            self.assertIn("an exception status that no handler of the process saw", step.detail)
+
+    def test_an_exit_code_of_the_tests_binary_is_named_as_its_own_end(self) -> None:
+        # Exit code 5: the timeout watchdog ended the process after its Critical line, which no outside kill does.
+        case = self.line(self.THREAD, "trace", f"Test case of process {self.PROCESS_ID}: {self.CASE}")
+        step = self.run_without_report({"Tests.log": case}, exit_code=5)
+
+        self.assertIn("no crash report: exit code 5 is the Tests binary's own, a test case past its time limit",
+                      step.detail)
+        self.assertNotIn("TerminateProcess", step.detail)
+        self.assertIn(f"the last test case it started: '{self.CASE}'", step.detail)
 
 
 class SuiteBoundTests(unittest.TestCase):

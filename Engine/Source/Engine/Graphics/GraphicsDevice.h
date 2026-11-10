@@ -71,6 +71,11 @@ namespace Engine {
 		// Whether validation, and synchronization validation, are on.
 		bool Validation = false;
 		bool SynchronizationValidation = false;
+		// The implicit layers the loader activated for the instance (the driver's own, an overlay's, a capture tool's), in
+		// the loader's order, without the validation layer the engine enables itself; nullopt when the loader could not
+		// list them. The device's log line names them, so a log or crash report says which layers ran in the process
+		// (R-GPUCRASH, Docs/Backlog.md §3).
+		std::optional<std::vector<std::string>> ImplicitLayers{};
 		// VkPhysicalDeviceLimits::maxMemoryAllocationCount (RenderStats warns above 2,000 allocations, §8.14 item 5).
 		uint32_t MaxMemoryAllocationCount = 0;
 		// The graphics (and present) queue family.

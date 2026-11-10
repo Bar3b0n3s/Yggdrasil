@@ -207,6 +207,42 @@ namespace Engine {
 			context.PopKey();
 		}
 
+		// SortingLayers.Layers (M21, Docs/Decisions/0032-m21-contract.md decision 4): PhysicsSettings.Layers' rules, with
+		// SortingLayersSettings::MaxSortingLayers names.
+		static void ValidateSortingLayers(const SortingLayersSettings& sorting, ValidationContext& context)
+		{
+			const std::vector<std::string>& layers = sorting.Layers;
+			if (layers.empty() || layers.size() > SortingLayersSettings::MaxSortingLayers)
+				context.Error("Layers", std::format("must declare 1 to {} sorting layers (got {})", SortingLayersSettings::MaxSortingLayers, layers.size()));
+
+			context.PushKey("Layers");
+			for (size_t index = 0; index < layers.size(); ++index)
+			{
+				const std::string key = std::to_string(index);
+				const auto previous = layers.begin() + static_cast<std::ptrdiff_t>(index);
+				if (index == 0 && layers[index] != DefaultLayer)
+					context.Error(key, std::format("the first sorting layer must be '{}' (got '{}')", DefaultLayer, layers[index]));
+				else if (layers[index].empty())
+					context.Error(key, "a sorting layer name must not be empty");
+				else if (std::find(layers.begin(), previous, layers[index]) != previous)
+					context.Error(key, std::format("the sorting layer '{}' is declared twice", layers[index]));
+			}
+			context.PopKey();
+		}
+
+		static void GenerateSortingLayers(SortingLayersSettings& sorting, Random& /*random*/)
+		{
+			std::vector<std::string> layers = { std::string(DefaultLayer) };
+			for (const std::string& layer : sorting.Layers)
+			{
+				if (layers.size() == SortingLayersSettings::MaxSortingLayers)
+					break;
+				if (!layer.empty() && std::find(layers.begin(), layers.end(), layer) == layers.end())
+					layers.push_back(layer);
+			}
+			sorting.Layers = std::move(layers);
+		}
+
 		static void GenerateSuite(TestSuiteSettings& suite, Random& random)
 		{
 			if (!suite.Parameters.IsNull() && !suite.Parameters.Get().is_object())
@@ -275,6 +311,7 @@ namespace Engine {
 	{
 		// The Company field's description names the bound.
 		static_assert(ExportSettings::MaxCompanyBytes == 32000, "update the Company description below");
+		static_assert(SortingLayersSettings::MaxSortingLayers == 32, "update the SortingLayers description below");
 
 		registry.Enum<InputActionSettings::ActionType>("InputActionType", "How an input action reads its controls.")
 			.Entry(InputActionSettings::ActionType::Button, "Button", "Pressed or released, driven by the action's Bindings.")
@@ -397,6 +434,18 @@ namespace Engine {
 			.Field("CoverageGates", &TestingSettings::CoverageGates,
 				"Whether unfiltered test runs record coverage and fail on any gap of the per-mode coverage gates (FeatureTest).");
 
+		registry.Struct<SortingLayersSettings>("SortingLayersSettings", "The sorting layers sprites draw in, back to front.")
+			.Field("Layers", &SortingLayersSettings::Layers,
+				"Sorting layer names in draw order, back to front, unique and non-empty: 1 to 32, the first one \"Default\". A sprite's "
+				"SortingLayer names one; an undeclared name draws in the first.")
+			.Validate(&Utils::ValidateSortingLayers)
+			.Generate(&Utils::GenerateSortingLayers);
+
+		registry.Struct<Physics2DSettings>("Physics2DSettings", "The 2D physics world; its layers are Physics.Layers.")
+			.Field("Gravity", &Physics2DSettings::Gravity,
+				"Gravity of the 2D world along X and Y in metres per second squared; each component at most 1e12 in magnitude.",
+				{ .Min = -Utils::MaxProjectGravity, .Max = Utils::MaxProjectGravity, .Unit = "m/s^2" });
+
 		registry.Struct<ProjectSettings>("ProjectSettings", "The settings of a project: the .eproj file below its header.")
 			.Field("Name", &ProjectSettings::Name, "Display name of the game; exported games name their user-data folder after it.")
 			.Field("StartScene", &ProjectSettings::StartScene, "Project-relative scene the game starts with; empty while none is chosen.")
@@ -407,7 +456,10 @@ namespace Engine {
 			.Field("Rendering", &ProjectSettings::Rendering, "Rendering quality.")
 			.Field("Scripting", &ProjectSettings::Scripting, "Script VM limits and error behaviour.")
 			.Field("Export", &ProjectSettings::Export, "Contents and labelling of exported games.")
-			.Field("Testing", &ProjectSettings::Testing, "Test suites and replays.");
+			.Field("Testing", &ProjectSettings::Testing, "Test suites and replays.")
+			.Field("SortingLayers", &ProjectSettings::SortingLayers, "The sorting layers of sprites.")
+			// M21 (Docs/Decisions/0032-m21-contract.md decision 9): after SortingLayers, in the phase-2 ledger's order.
+			.Field("Physics2D", &ProjectSettings::Physics2D, "The 2D physics world's gravity.");
 	}
 
 }

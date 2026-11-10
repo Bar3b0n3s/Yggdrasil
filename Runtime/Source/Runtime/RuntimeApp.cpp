@@ -53,6 +53,7 @@
 #include "Engine/Session/ReplayPlayer.h"
 #include "Engine/Testing/CoverageGates.h"
 #include "Engine/Testing/FeatureTestRunner.h"
+#include "Runtime/RuntimeCursor.h"
 
 #if !defined(ENGINE_DIST)
 	#include "Engine/App/VulkanErrorHandler.h"
@@ -62,7 +63,6 @@
 	#include "Engine/Automation/Methods/RuntimeAutomationServer.h"
 	#include "Engine/Automation/Methods/StatsMethods.h"
 	#include "Engine/ImGui/StatsOverlay.h"
-	#include "Engine/Scene/PhysicsSystem.h"
 	#include "Engine/Scripting/ScriptCompiler.h"
 #endif
 
@@ -1132,16 +1132,18 @@ namespace Engine {
 		// Every game input goes through the session's tick-stamped queue: real devices reach the next tick (§13.6).
 		if (m_State->Session == nullptr || m_State->Options.FeatureTest || m_State->ReplayInputSerial != 0)
 			return;
-		// Cursor positions arrive in window coordinates; the game reads view coordinates (PlaySession.h). The view fills the
-		// window: live play's view is the framebuffer, so the mapping is its scale (identity unless scaled), and a
-		// deterministic session's fixed view (a recording its owner resumed) is stretched over the window.
+		// Cursor positions arrive in window coordinates; the game reads view coordinates (PlaySession.h). The window shows the
+		// game image at the framebuffer's size: live play's view is that image, and a deterministic session's fixed view (a
+		// recording its owner resumed) is reached through both output mappings of the session's output settings
+		// (MapRuntimeCursorToView).
 		if (const auto* move = std::get_if<MouseMoveEvent>(&event))
 		{
 			const Window& window = *GetContext().GetWindow();
 			const auto [viewWidth, viewHeight] = Utils::GetViewSize(window);
-			const glm::uvec2 view = m_State->SessionViewFixed ? m_State->Session->GetViewSize() : glm::uvec2(viewWidth, viewHeight);
-			const std::optional<glm::vec2> position = MapToViewCoordinates(move->Position, glm::vec2(0.0f),
-				glm::vec2(static_cast<float>(window.GetWidth()), static_cast<float>(window.GetHeight())), view);
+			const std::optional<glm::uvec2> fixedView = m_State->SessionViewFixed ? std::optional<glm::uvec2>(m_State->Session->GetViewSize()) : std::nullopt;
+			const std::optional<glm::vec2> position = MapRuntimeCursorToView(move->Position,
+				glm::vec2(static_cast<float>(window.GetWidth()), static_cast<float>(window.GetHeight())), glm::uvec2(viewWidth, viewHeight), fixedView,
+				m_State->Session->GetLastExtraction().Output);
 			if (position)
 				m_State->Session->GetInput().QueueDeviceEvent(MouseMoveEvent{ .Position = *position });
 			return;
@@ -1421,7 +1423,7 @@ namespace Engine {
 		{
 			data.Tick = session->GetTick();
 			data.Entities = static_cast<uint32_t>(session->GetScene().GetEntityCount());
-			data.Bodies = session->GetPhysics().GetStats().BodyCount;
+			data.Bodies = CountSessionBodies(*session); // both physics worlds (M21's milestone review)
 			if (const ScriptEngine* scripts = session->GetScripts())
 				data.ScriptHeapBytes = scripts->GetMemoryState().UsedBytes;
 		}
@@ -1484,6 +1486,7 @@ namespace Engine {
 		request.Height = height;
 		const RenderingSettings& quality = state.Session->GetProjectSettings().Rendering;
 		request.Quality = { .ShadowMapSize = quality.ShadowMapSize, .SsaoHalfResolution = quality.SsaoHalfResolution };
+		request.SortingLayers = state.Session->GetProjectSettings().SortingLayers.Layers;
 		Result<RenderSnapshot> snapshot = state.Session->ExtractView(request);
 		Result<Image> image = snapshot.has_value() ? state.Capture->Capture({ .Width = width, .Height = height, .MaxDimension = 0 }, *snapshot)
 												   : Result<Image>(std::unexpected(snapshot.error()));

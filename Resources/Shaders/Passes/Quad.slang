@@ -8,6 +8,20 @@
 //     as Text encodes its colour (the SceneOverlay stage's UI).
 // Textures are sampled at their first mip level ("without mips"), so a point-sampled quad whose screen size is an integer
 // multiple of its texel rectangle reproduces every source texel.
+//
+// M21's lit entries (C21.2; Docs/Decisions/0032-m21-contract.md decision 22), with their own vertex entry VSLit, which also
+// passes the quad's batch-space position on:
+//   - PSHdrLit: PSHdr's product with its RGB multiplied by the light accumulation (QuadLitTexture: Lights2DLight, the
+//     framebuffer's size) loaded at the fragment's pixel, its alpha unchanged (the HdrLit pipeline);
+//   - PSNormals: the world normal of the quad at the fragment (the Normals pipeline, into Lights2DNormals): where the texel's
+//     alpha times the vertex colour's alpha is above 0, its normal map's texel (QuadLitTexture, decoded as 2 rgb - 1)
+//     turned by the quad's tangent frame, normalized, with 1 in w; without a normal map (Quad.HasNormalMap 0) the flat
+//     normal (0, 0, 1) with 0 in w; elsewhere nothing (a zero SV_Coverage, as Scene.slang drops its Mask fragments: a
+//     discard needs a device feature the device does not enable). The tangent frame comes from the screen-space
+//     derivatives of the batch-space position and the texture coordinates, taken before any branch: +X along the
+//     increasing u, +Y against the increasing v (texture space runs down), +Z the unit normal of the quad's plane facing
+//     the viewer, so a quad mirrored by its flips or a negative scale mirrors its normals' X or Y and keeps them facing the
+//     lights above the plane.
 
 #include "Shared/QuadVertex.h"
 
@@ -16,6 +30,8 @@ import Common.Color;
 [[vk::push_constant]] ConstantBuffer<QuadConstants> Quad;
 Texture2D<float4> QuadTexture : register(t0, space0);
 SamplerState QuadSampler : register(s0, space0);
+// The lit entries' second texture: PSHdrLit's light accumulation, PSNormals' normal map (a white texel without one).
+Texture2D<float4> QuadLitTexture : register(t1, space0);
 
 // QuadVertex member by member (locations 0, 1, 2).
 struct VertexInput
@@ -32,6 +48,14 @@ struct VertexOutput
 	float4 Color : COLOR0;
 };
 
+struct LitVertexOutput
+{
+	float4 Position : SV_Position;
+	float2 TexCoord : TEXCOORD0;
+	float4 Color : COLOR0;
+	float3 BatchPosition : TEXCOORD1; // the corner in the batch's space (world space for sprites and tiles)
+};
+
 [shader("vertex")]
 VertexOutput VSMain(VertexInput input)
 {
@@ -42,21 +66,85 @@ VertexOutput VSMain(VertexInput input)
 	return output;
 }
 
-// The sampled texel times the vertex colour: linear RGB and straight alpha.
-float4 ShadeQuad(VertexOutput input)
+[shader("vertex")]
+LitVertexOutput VSLit(VertexInput input)
 {
-	return QuadTexture.SampleLevel(QuadSampler, input.TexCoord, 0.0) * input.Color;
+	LitVertexOutput output;
+	output.Position = mul(Quad.Transform, float4(input.Position, 1.0));
+	output.TexCoord = input.TexCoord;
+	output.Color = input.Color;
+	output.BatchPosition = input.Position;
+	return output;
+}
+
+// The sampled texel times the vertex colour: linear RGB and straight alpha.
+float4 ShadeQuad(float2 texCoord, float4 color)
+{
+	return QuadTexture.SampleLevel(QuadSampler, texCoord, 0.0) * color;
 }
 
 [shader("fragment")]
 float4 PSHdr(VertexOutput input) : SV_Target0
 {
-	return ShadeQuad(input);
+	return ShadeQuad(input.TexCoord, input.Color);
 }
 
 [shader("fragment")]
 float4 PSLdr(VertexOutput input) : SV_Target0
 {
-	const float4 shaded = ShadeQuad(input);
+	const float4 shaded = ShadeQuad(input.TexCoord, input.Color);
 	return float4(LinearToSrgb(shaded.rgb), saturate(shaded.a));
+}
+
+[shader("fragment")]
+float4 PSHdrLit(LitVertexOutput input) : SV_Target0
+{
+	const float4 shaded = ShadeQuad(input.TexCoord, input.Color);
+	const float3 light = QuadLitTexture.Load(int3(int2(input.Position.xy), 0)).rgb;
+	return float4(shaded.rgb * light, shaded.a);
+}
+
+struct NormalsOutput
+{
+	float4 Normal : SV_Target0;
+	uint Coverage : SV_Coverage;
+};
+
+// Normalizes `vector`, or returns `fallback` for a zero or non-finite one.
+float3 NormalizeOr(float3 vector, float3 fallback)
+{
+	const float lengthSquared = dot(vector, vector);
+	return lengthSquared > 1e-30 && !isinf(lengthSquared) ? vector * rsqrt(lengthSquared) : fallback;
+}
+
+[shader("fragment")]
+NormalsOutput PSNormals(LitVertexOutput input)
+{
+	// The tangent frame from the derivatives, before any branch: P(u, v) is affine over the quad, so
+	// ddx(P) = Pu ddx(u) + Pv ddx(v) and ddy(P) = Pu ddy(u) + Pv ddy(v), solved for Pu and Pv.
+	const float3 positionX = ddx(input.BatchPosition);
+	const float3 positionY = ddy(input.BatchPosition);
+	const float2 texCoordX = ddx(input.TexCoord);
+	const float2 texCoordY = ddy(input.TexCoord);
+	const float determinant = texCoordX.x * texCoordY.y - texCoordY.x * texCoordX.y;
+	const float3 alongU = positionX * texCoordY.y - positionY * texCoordX.y;
+	const float3 alongV = positionY * texCoordX.x - positionX * texCoordY.x;
+	const float inverse = determinant != 0.0 ? 1.0 / determinant : 0.0;
+	// cross(ddy, ddx) faces the viewer: screen x runs right and y down.
+	const float3 tangentZ = NormalizeOr(cross(positionY, positionX), float3(0.0, 0.0, 1.0));
+	const float3 tangentX = NormalizeOr(alongU * inverse, float3(1.0, 0.0, 0.0));
+	const float3 tangentY = NormalizeOr(-alongV * inverse, float3(0.0, 1.0, 0.0));
+
+	const float alpha = QuadTexture.SampleLevel(QuadSampler, input.TexCoord, 0.0).a * input.Color.a;
+	NormalsOutput output;
+	output.Coverage = alpha > 0.0 ? 0xFFFFFFFFu : 0u;
+	if (Quad.HasNormalMap == 0u)
+	{
+		output.Normal = float4(0.0, 0.0, 1.0, 0.0);
+		return output;
+	}
+	const float3 encoded = QuadLitTexture.SampleLevel(QuadSampler, input.TexCoord, 0.0).rgb * 2.0 - 1.0;
+	const float3 normal = tangentX * encoded.x + tangentY * encoded.y + tangentZ * encoded.z;
+	output.Normal = float4(NormalizeOr(normal, tangentZ), 1.0);
+	return output;
 }

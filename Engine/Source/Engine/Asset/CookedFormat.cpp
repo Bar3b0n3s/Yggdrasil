@@ -53,7 +53,7 @@ namespace Engine {
 		}
 		// None, and every value the enumeration does not name (AssetTypeToString's "None"), so the range follows AssetType.h
 		// and no appended type moves a bound here, whichever of phase 2's milestones appends its types first
-		// (Docs/Decisions/0034-m23-contract.md decision 23; M21's contract makes the same change).
+		// (Docs/Decisions/0032-m21-contract.md decision 31, Docs/Decisions/0034-m23-contract.md decision 23).
 		if (AssetTypeToString(static_cast<AssetType>(type)) == AssetTypeToString(AssetType::None))
 			return MakeError(ErrorCode::Validation, "cooked artifact of unknown asset type {}", type);
 		view.Header.Type = static_cast<AssetType>(type);

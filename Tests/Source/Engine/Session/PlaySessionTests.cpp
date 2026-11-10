@@ -226,18 +226,24 @@ namespace Engine {
 			REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
 
 			(*session)->Tick();
-			// §5.7: the fixed step (0 to 9, TransformSystem::Update before PhysicsSystem::PreStep), then the frame phase.
+			// §5.7: the fixed step (0 to 9, M21's SpriteAnimation 4b and M23's AnimationSystem 4c after the gameplay code,
+			// TransformSystem::Update before PhysicsSystem::PreStep, M21's 2D phases 7a to 7c after the 3D post-step), then the
+			// frame phase.
 			const std::vector<PlaySessionPhase> expected = {
 				PlaySessionPhase::InterpolationSnapshot,
 				PlaySessionPhase::ApplyInput,
 				PlaySessionPhase::StartFlush,
 				PlaySessionPhase::FixedUpdate,
 				PlaySessionPhase::Tasks,
+				PlaySessionPhase::SpriteAnimation,
 				PlaySessionPhase::AnimationSystem,
 				PlaySessionPhase::PreStepTransformUpdate,
 				PlaySessionPhase::PhysicsPreStep,
 				PlaySessionPhase::PhysicsStep,
 				PlaySessionPhase::PhysicsPostStep,
+				PlaySessionPhase::Physics2DPreStep,
+				PlaySessionPhase::Physics2DStep,
+				PlaySessionPhase::Physics2DPostStep,
 				PlaySessionPhase::DestroyFlush,
 				PlaySessionPhase::PostStepTransformUpdate,
 				PlaySessionPhase::LatchFrame,
@@ -254,10 +260,10 @@ namespace Engine {
 			// FixedStep alone runs the fixed step only; FrameUpdate alone the frame phase only.
 			observer.Phases.clear();
 			(*session)->FixedStep();
-			CHECK(observer.Phases == std::vector<PlaySessionPhase>(expected.begin(), expected.begin() + 12));
+			CHECK(observer.Phases == std::vector<PlaySessionPhase>(expected.begin(), expected.begin() + 16));
 			observer.Phases.clear();
 			(*session)->FrameUpdate(FrameTime{ .DeltaTime = 1.0 / 60.0, .UnscaledDeltaTime = 1.0 / 60.0, .Alpha = 0.5, .FrameIndex = 0 });
-			CHECK(observer.Phases == std::vector<PlaySessionPhase>(expected.begin() + 12, expected.end()));
+			CHECK(observer.Phases == std::vector<PlaySessionPhase>(expected.begin() + 16, expected.end()));
 		}
 
 		TEST_CASE("PlaySession: Simulate mode skips the script and audio phases")
@@ -272,11 +278,15 @@ namespace Engine {
 			const std::vector<PlaySessionPhase> expected = {
 				PlaySessionPhase::InterpolationSnapshot,
 				PlaySessionPhase::ApplyInput,
+				PlaySessionPhase::SpriteAnimation,
 				PlaySessionPhase::AnimationSystem,
 				PlaySessionPhase::PreStepTransformUpdate,
 				PlaySessionPhase::PhysicsPreStep,
 				PlaySessionPhase::PhysicsStep,
 				PlaySessionPhase::PhysicsPostStep,
+				PlaySessionPhase::Physics2DPreStep,
+				PlaySessionPhase::Physics2DStep,
+				PlaySessionPhase::Physics2DPostStep,
 				PlaySessionPhase::DestroyFlush,
 				PlaySessionPhase::PostStepTransformUpdate,
 				PlaySessionPhase::LatchFrame,
@@ -699,6 +709,40 @@ return vector.magnitude(direction - vector.create(0, 0, -1)) < 0.00001)")
 			CHECK_FALSE(MapToViewCoordinates({ 1.0f, 1.0f }, minimum, size, { 0, 1080 }).has_value());
 			CHECK_FALSE(MapToViewCoordinates({ std::numeric_limits<float>::infinity(), 1.0f }, minimum, size, view).has_value());
 			CHECK_FALSE(MapToViewCoordinates({ 1.0f, 1.0f }, { std::numeric_limits<float>::quiet_NaN(), 0.0f }, size, view).has_value());
+		}
+
+		TEST_CASE("PlaySession: a fixed view maps an image point through both output mappings to the scene pixel the image shows")
+		{
+			// M21 (Docs/Decisions/0032-m21-contract.md decision 6): a PixelPerfectCamera's 100x60 reference resolution fills an
+			// 800x450 image at scale 7 from offset (50, 15) and a 320x180 view at scale 3 from offset (10, 0), so image point
+			// (123.5, 158.5), scene point (10.5, 20.5), is view point (41.5, 61.5); a stretch would give (49.4, 63.4).
+			const RenderOutputSettings pixelArt{ .SceneWidth = 100, .SceneHeight = 60, .PixelArt = true };
+			const glm::uvec2 image(800, 450);
+			const glm::uvec2 view(320, 180);
+			CHECK(MapImageToViewCoordinates({ 123.5f, 158.5f }, glm::vec2(0.0f), glm::vec2(image), image, view, pixelArt) == glm::vec2(41.5f, 61.5f));
+			// The letterbox stays outside the scene image, unclamped: the image's top-left corner lies 50/7 scene pixels left
+			// of the scene and 15/7 above it, which the view shows 150/7 and 45/7 pixels from its own offset (10, 0).
+			const std::optional<glm::vec2> corner = MapImageToViewCoordinates({ 0.0f, 0.0f }, glm::vec2(0.0f), glm::vec2(image), image, view, pixelArt);
+			REQUIRE(corner.has_value());
+			CHECK(corner->x == doctest::Approx(10.0 - 150.0 / 7.0));
+			CHECK(corner->y == doctest::Approx(-45.0 / 7.0));
+			// The Runtime: window coordinates (logical, half the 1600x900 framebuffer image) reach the image's pixels first.
+			CHECK(MapImageToViewCoordinates({ 400.0f, 225.0f }, glm::vec2(0.0f), { 800.0f, 450.0f }, { 1600, 900 }, view, pixelArt)
+				== glm::vec2(160.0f, 90.0f));
+			// Without a PixelPerfectCamera (default settings: each scene is its view), and for an image of the view's size,
+			// it is MapToViewCoordinates's stretch exactly.
+			for (const glm::vec2 point : { glm::vec2(123.5f, 158.5f), glm::vec2(-7.25f, 1000.0f), glm::vec2(0.1f, 0.3f) })
+			{
+				CHECK(MapImageToViewCoordinates(point, glm::vec2(0.0f), glm::vec2(image), image, view, RenderOutputSettings{})
+					== MapToViewCoordinates(point, glm::vec2(0.0f), glm::vec2(image), view));
+				CHECK(MapImageToViewCoordinates(point, glm::vec2(0.0f), { 640.0f, 360.0f }, view, view, pixelArt)
+					== MapToViewCoordinates(point, glm::vec2(0.0f), { 640.0f, 360.0f }, view));
+			}
+			CHECK_FALSE(MapImageToViewCoordinates({ 1.0f, 1.0f }, glm::vec2(0.0f), glm::vec2(image), { 0, 450 }, view, pixelArt).has_value());
+			CHECK_FALSE(MapImageToViewCoordinates({ 1.0f, 1.0f }, glm::vec2(0.0f), glm::vec2(image), image, { 320, 0 }, pixelArt).has_value());
+			CHECK_FALSE(MapImageToViewCoordinates({ std::numeric_limits<float>::infinity(), 1.0f }, glm::vec2(0.0f), glm::vec2(image), image, view, pixelArt)
+					.has_value());
+			CHECK_FALSE(MapImageToViewCoordinates({ 1.0f, 1.0f }, glm::vec2(0.0f), { 0.0f, 450.0f }, image, view, pixelArt).has_value());
 		}
 
 		TEST_CASE("PlaySession: a deterministic session's view is the project's window size in logical pixels")

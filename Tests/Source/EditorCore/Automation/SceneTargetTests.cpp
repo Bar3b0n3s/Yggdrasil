@@ -125,7 +125,10 @@ namespace Engine {
 				{ "native.read", SceneRelation::None },
 				{ "native.status", SceneRelation::None },
 				{ "native.write", SceneRelation::None },
-				{ "physics.bodyInfo", SceneRelation::None }, // the play session's scene
+				{ "physics.bodyInfo", SceneRelation::None },   // the play session's scene
+				{ "physics2d.bodyInfo", SceneRelation::None }, // M21: the play session's 2D world (ADR 0032 decision 27)
+				{ "physics2d.overlap", SceneRelation::None },  // M21: the play session's 2D world (ADR 0032 decision 15)
+				{ "physics2d.raycast", SceneRelation::None },  // M21: the play session's 2D world
 				{ "play.pause", SceneRelation::None },
 				{ "play.resume", SceneRelation::None },
 				{ "play.setTimeScale", SceneRelation::None },
@@ -147,6 +150,7 @@ namespace Engine {
 				{ "shaders.reload", SceneRelation::None }, // M18: the scene renderer's pipelines
 				{ "stats.get", SceneRelation::None },
 				{ "test.list", SceneRelation::None },
+				{ "tilemap.paint", SceneRelation::None }, // M21: a Tilemap asset's cells (ADR 0032 decision 26)
 				{ "viewport.camera", SceneRelation::None },
 				{ "viewport.setOptions", SceneRelation::None },
 			};

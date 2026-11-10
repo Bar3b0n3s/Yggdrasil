@@ -10,6 +10,7 @@
 #include "EditorCore/EditorUiState.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Viewport/EditorCamera.h"
+#include "EditorCore/Viewport/SpriteDrop.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
 #include "Engine/Scene/Entity.h"
@@ -72,7 +73,7 @@ namespace Engine {
 		return QueueAction(context, "viewport.frame", Json{ { "entities", std::move(entities) }, { "ifRevision", context.Editor.GetRevision() } });
 	}
 
-	Status SceneViewportPanel::AcceptAssetDrop(EditorPanelContext& context)
+	Status SceneViewportPanel::AcceptAssetDrop(EditorPanelContext& context, const EditorViewportRect& rectangle, const EditorViewportImage& image)
 	{
 		if (!ImGui::BeginDragDropTarget())
 			return {};
@@ -120,6 +121,25 @@ namespace Engine {
 		{
 			return QueueAction(context, "entity.create", Json{ { "name", "Mesh" }, { "target", target }, { "ifRevision", revision }, { "components", { { "MeshRenderer", { { "Mesh", reference } } } } } });
 		}
+		if (type == AssetType::SpriteSheet || type == AssetType::Texture)
+		{
+			// A sprite where the cursor's ray meets the plane z = 0 (M21, decision 14), through the displayed image's camera,
+			// or at the camera's target when the ray meets no point of the plane in front of it.
+			glm::vec3 position = context.Editor.GetViewportState().GetCamera().Target;
+			const ImVec2 pointer = ImGui::GetIO().MousePos;
+			if (const std::optional<EditorViewportPixel> pixel = ToViewportPixel(rectangle, { pointer.x, pointer.y }))
+			{
+				const RenderOutputMapping mapping = ComputeRenderOutputMapping(image.Width, image.Height, RenderOutputSettings{});
+				ENGINE_TRY_ASSIGN(const std::optional<RenderRayInterval> ray, ComputeOutputPixelRayInterval(image.Camera, mapping, pixel->X, pixel->Y));
+				if (ray)
+				{
+					if (const std::optional<glm::vec3> point = IntersectSpritePlane(ray->Ray))
+						position = *point;
+				}
+			}
+			ENGINE_TRY_ASSIGN(const Json params, MakeSpriteDropParams({ .Asset = *handle, .Type = type, .Position = position, .PlayScene = session != nullptr, .Revision = revision }));
+			return QueueAction(context, "entity.create", params);
+		}
 		if (type == AssetType::Environment)
 		{
 			UUID environment;
@@ -143,7 +163,7 @@ namespace Engine {
 		}
 		if (type == AssetType::None)
 			return MakeError(ErrorCode::NotFound, "The dropped asset {} is no longer available", *handle);
-		return MakeError(ErrorCode::InvalidArgument, "Drop a mesh, prefab or environment into the scene view");
+		return MakeError(ErrorCode::InvalidArgument, "Drop a mesh, prefab, environment, sprite sheet or texture into the scene view");
 	}
 
 	Status SceneViewportPanel::Draw(EditorPanelContext& context)
@@ -218,11 +238,14 @@ namespace Engine {
 			ImGui::Separator();
 			ExplicitRenderCamera camera = state.GetCamera();
 			bool orthographic = camera.Projection == RenderProjection::Orthographic;
+			// The 2D mode's camera is orthographic (M21): its projection follows the 2D toggle.
+			ImGui::BeginDisabled(options.Mode2D);
 			if (ImGui::Checkbox("Orthographic", &orthographic))
 			{
 				camera.Projection = orthographic ? RenderProjection::Orthographic : RenderProjection::Perspective;
 				record(state.SetCamera(camera));
 			}
+			ImGui::EndDisabled();
 			ImGui::EndPopup();
 		}
 		nextTool(buttonWidth("Frame"));
@@ -230,6 +253,16 @@ namespace Engine {
 		if (Utils::EditorToolbarButton("Frame", "Frame the selected objects (F)"))
 			record(FrameSelection(context));
 		ImGui::EndDisabled();
+		// The 2D mode (M21, decision 14), through viewport.setOptions as automation sets it.
+		nextTool(buttonWidth("2D"));
+		ImGui::BeginDisabled(draggingAtStart);
+		if (Utils::EditorToolbarButton("2D", "2D mode: look down -Z orthographically, pan and zoom, and move in X and Y", options.Mode2D))
+			record(QueueAction(context, "viewport.setOptions", Json{ { "mode2D", !options.Mode2D } }));
+		ImGui::EndDisabled();
+		// The tile brush's controls (M21, decision 26), shown only while one entity holding a TilemapRenderer whose Tilemap is
+		// set is selected; its target is posed as the displayed image shows it.
+		const EditorViewportImage image = context.Viewports.GetImage(ViewportView::Scene);
+		m_TilemapBrush.DrawControls(context, image, toolbarRight);
 		ImGui::Separator();
 		if (playing)
 			ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.25f, 1.0f), "Runtime scene: changes are discarded on Stop");
@@ -240,7 +273,6 @@ namespace Engine {
 			if (ImGui::SmallButton("Dismiss##SceneError"))
 				m_LastError.clear();
 		}
-		const EditorViewportImage image = context.Viewports.GetImage(ViewportView::Scene);
 		const ImVec2 available = ImGui::GetContentRegionAvail();
 		const ImVec2 minimum = ImGui::GetCursorScreenPos();
 		const ImVec2 maximum(minimum.x + available.x, minimum.y + available.y);
@@ -271,7 +303,8 @@ namespace Engine {
 		}
 		else
 		{
-			record(DrawGizmoOverlay(context.Editor, context.Gizmos, image.Camera, rectangle, m_GizmoSettings, gizmoOwnsPointer));
+			// An armed tile brush hides the gizmo, so its handles never stand over a cell the brush would paint.
+			record(DrawGizmoOverlay(context.Editor, context.Gizmos, image.Camera, m_TilemapBrush.IsArmed() ? EditorViewportRect{} : rectangle, m_GizmoSettings, gizmoOwnsPointer));
 		}
 		if (context.Gizmos.IsDragging() && !draggingAtStart)
 		{
@@ -288,6 +321,7 @@ namespace Engine {
 		// over that handle. Between presses an ID-less item stands in and the view claims the wheel itself.
 		bool imageActive = false;
 		bool leftPressed = false;
+		bool rightPressed = false;
 		if (imageShown)
 		{
 			const ImGuiID imageId = ImGui::GetID("##SceneImage");
@@ -307,13 +341,14 @@ namespace Engine {
 				ImGui::PopItemFlag();
 				imageActive = ImGui::IsItemActive();
 				leftPressed = ImGui::IsItemActivated() && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+				rightPressed = ImGui::IsItemActivated() && ImGui::IsMouseClicked(ImGuiMouseButton_Right);
 				// The wheel zooms the camera; it must never also scroll the window.
 				ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
 			}
 			// A press on the image focuses the view within this frame, so the first click both focuses and picks.
 			rectangle.Focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
 			if (!draggingAtStart)
-				record(AcceptAssetDrop(context));
+				record(AcceptAssetDrop(context, rectangle, image));
 		}
 		else if (hasRegion)
 		{
@@ -324,19 +359,43 @@ namespace Engine {
 		context.Viewports.SetRectangle(ViewportView::Scene, rectangle);
 		const bool otherItemActive = ImGui::IsAnyItemActive() && !imageActive;
 		// ImGuizmo::IsOver also reports the previous frame's hover: a press that leaves a handle in that frame still
-		// belongs to the gizmo, never to a background pick.
+		// belongs to the gizmo, never to a background pick. An armed tile brush hides the gizmo, whose last handles then
+		// own nothing.
+		const bool gizmoShown = !m_TilemapBrush.IsArmed();
 		const bool inputCaptured = io.WantTextInput || otherItemActive
 			|| ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)
-			|| ImGui::GetDragDropPayload() != nullptr || draggingAtStart || context.Gizmos.IsDragging() || ImGuizmo::IsUsingAny()
-			|| ImGuizmo::IsOver() || gizmoOwnsPointer;
+			|| ImGui::GetDragDropPayload() != nullptr || draggingAtStart || context.Gizmos.IsDragging()
+			|| (gizmoShown && (ImGuizmo::IsUsingAny() || ImGuizmo::IsOver())) || gizmoOwnsPointer;
+		// An armed tile brush takes the image's left and right strokes (M21, decision 26); each finished stroke is one
+		// tilemap.paint.
+		Result<std::optional<Json>> stroke = m_TilemapBrush.Update(rectangle, image, { .ImageShown = imageShown, .Captured = inputCaptured, .LeftPressed = leftPressed, .RightPressed = rightPressed });
+		if (!stroke)
+			record(std::unexpected(std::move(stroke).error()));
+		else if (stroke->has_value())
+			record(QueueAction(context, "tilemap.paint", **stroke));
+		const bool brushStroking = m_TilemapBrush.IsStroking();
 		if (imageShown && !inputCaptured)
 		{
 			// Buttons navigate only while they hold the image item they pressed; the wheel zooms the hovered view.
-			const bool fly = imageActive && ImGui::IsMouseDown(ImGuiMouseButton_Right);
-			const bool orbit = imageActive && io.KeyAlt && ImGui::IsMouseDown(ImGuiMouseButton_Left);
-			const bool pan = imageActive && ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+			const bool fly = imageActive && !brushStroking && ImGui::IsMouseDown(ImGuiMouseButton_Right);
+			const bool orbit = imageActive && !brushStroking && io.KeyAlt && ImGui::IsMouseDown(ImGuiMouseButton_Left);
+			const bool pan = imageActive && !brushStroking && ImGui::IsMouseDown(ImGuiMouseButton_Middle);
 			const float wheel = rectangle.Hovered ? io.MouseWheel : 0.0f;
-			if (fly || orbit || pan || wheel != 0.0f)
+			if (options.Mode2D && (fly || orbit || pan || wheel != 0.0f))
+			{
+				// The 2D mode pans with any navigation button and zooms with the wheel (M21, decision 14).
+				EditorCameraInput input;
+				input.PointerDelta = { io.MouseDelta.x, io.MouseDelta.y };
+				input.Wheel = wheel;
+				input.DeltaSeconds = io.DeltaTime;
+				input.Pan = fly || orbit || pan;
+				Result<ExplicitRenderCamera> navigated = EditorCamera::Navigate2D(state.GetCamera(), input, rectangle.Size.y);
+				if (navigated)
+					record(state.SetCamera(*navigated));
+				else
+					record(std::unexpected(std::move(navigated).error()));
+			}
+			else if (fly || orbit || pan || wheel != 0.0f)
 			{
 				EditorCameraInput input;
 				input.PointerDelta = { io.MouseDelta.x, io.MouseDelta.y };
@@ -357,7 +416,7 @@ namespace Engine {
 				else
 					record(std::unexpected(std::move(navigated).error()));
 			}
-			else if (leftPressed && !io.KeyAlt && image.Picking)
+			else if (leftPressed && !io.KeyAlt && image.Picking && !brushStroking)
 			{
 				if (const auto pixel = ToViewportPixel(rectangle, { io.MousePos.x, io.MousePos.y }))
 				{

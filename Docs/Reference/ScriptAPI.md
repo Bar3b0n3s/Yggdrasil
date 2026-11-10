@@ -208,7 +208,7 @@ All modes; LoadTime|Runtime|Test; pure/read.
 
 `(type: string) -> FieldDescriptor`
 
-Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for imported audio and .sfx sound effects, Script, Font, Replay, SpriteSheet, Skeleton or AnimationClip), with a null default; any other name fails the import.
+Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for imported audio and .sfx sound effects, Script, Font, Replay, SpriteSheet, Tilemap, Skeleton or AnimationClip), with a null default; any other name fails the import.
 
 All modes; LoadTime|Runtime|Test; pure/read.
 
@@ -709,6 +709,58 @@ All modes; Runtime|Test; mutates.
 Closest swept sphere hit; radius obeys collider size bounds.
 
 All modes; Runtime|Test; pure/read.
+
+## Physics2D
+
+Queries and gravity for the active scene's 2D physics world, in the XY plane.
+
+### Physics2D.GetGravity
+
+`() -> vector`
+
+Current 2D world gravity (Z is 0).
+
+All modes; Runtime|Test; pure/read.
+
+### Physics2D.OverlapBox
+
+`(center: vector, halfExtents: vector, angle: number?, layerMask: number?) -> {Entity}`
+
+Unique overlapping 2D collider entities sorted by UUID; the box rotated by angle degrees about +Z (0 by default).
+
+All modes; Runtime|Test; pure/read.
+
+### Physics2D.OverlapCircle
+
+`(center: vector, radius: number, layerMask: number?) -> {Entity}`
+
+Unique overlapping 2D collider entities sorted by UUID; radius obeys collider size bounds.
+
+All modes; Runtime|Test; pure/read.
+
+### Physics2D.Raycast
+
+`(origin: vector, direction: vector, maxDistance: number, layerMask: number?) -> RaycastHit?`
+
+Closest 2D hit, including sensors; vectors in the plane (Z ignored, results with Z 0).
+
+All modes; Runtime|Test; pure/read.
+
+### Physics2D.RaycastAll
+
+`(origin: vector, direction: vector, maxDistance: number, layerMask: number?) -> {RaycastHit}`
+
+All 2D hits sorted by distance then collider UUID.
+
+All modes; Runtime|Test; pure/read.
+
+### Physics2D.SetGravity
+
+`(gravity: vector) -> ()`
+
+Set the 2D world's gravity from the vector's X and Y for the session.
+
+All modes; Runtime|Test; mutates.
 
 ## Random
 
@@ -1506,11 +1558,27 @@ Called when a collision begins, with the other entity and contact.
 
 All modes; Runtime|Test; mutates.
 
+### Behaviour.OnCollisionEnter2D
+
+`(self: ScriptInstance, other: Entity, contact: CollisionContact) -> ()`
+
+Called when a 2D collision begins, with the other entity and the contact in the XY plane.
+
+All modes; Runtime|Test; mutates.
+
 ### Behaviour.OnCollisionExit
 
 `(self: ScriptInstance, other: Entity) -> ()`
 
 Called when the corresponding collision or trigger transition occurs.
+
+All modes; Runtime|Test; mutates.
+
+### Behaviour.OnCollisionExit2D
+
+`(self: ScriptInstance, other: Entity) -> ()`
+
+Called when the corresponding 2D collision or trigger transition occurs.
 
 All modes; Runtime|Test; mutates.
 
@@ -1586,11 +1654,27 @@ Called when the corresponding collision or trigger transition occurs.
 
 All modes; Runtime|Test; mutates.
 
+### Behaviour.OnTriggerEnter2D
+
+`(self: ScriptInstance, other: Entity) -> ()`
+
+Called when the corresponding 2D collision or trigger transition occurs.
+
+All modes; Runtime|Test; mutates.
+
 ### Behaviour.OnTriggerExit
 
 `(self: ScriptInstance, other: Entity) -> ()`
 
 Called when the corresponding collision or trigger transition occurs.
+
+All modes; Runtime|Test; mutates.
+
+### Behaviour.OnTriggerExit2D
+
+`(self: ScriptInstance, other: Entity) -> ()`
+
+Called when the corresponding 2D collision or trigger transition occurs.
 
 All modes; Runtime|Test; mutates.
 
@@ -1635,6 +1719,42 @@ All modes; Runtime|Test; pure/read; setter mutates.
 `Quat`
 
 The box rotation relative to the entity: a unit quaternion.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## BoxCollider2D
+
+A rectangle collider in the entity's XY plane.
+
+### BoxCollider2D.Angle
+
+`number`
+
+The rectangle's rotation about the entity's Z axis, counter-clockwise, in degrees.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### BoxCollider2D.HalfExtents
+
+`vector`
+
+Half the rectangle's size along local X and Y; at least 1 mm.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### BoxCollider2D.IsTrigger
+
+`boolean`
+
+Whether the collider only detects overlaps instead of colliding.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### BoxCollider2D.Offset
+
+`vector`
+
+The rectangle's centre relative to the entity, in its XY plane.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -1702,7 +1822,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `(self: Camera, x: number, y: number) -> (vector, vector)`
 
-Ray through a viewport pixel center, origin top-left, using the rendered camera pose.
+Ray through a viewport pixel center, origin top-left, using the rendered camera pose; under a PixelPerfectCamera through its snapped reference view and the output mapping.
 
 All modes; Runtime|Test; pure/read.
 
@@ -1718,7 +1838,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `(self: Camera, point: vector) -> vector`
 
-Project to top-left pixel coordinates and reverse-Z depth using the rendered camera pose.
+Project to top-left pixel coordinates and reverse-Z depth using the rendered camera pose; under a PixelPerfectCamera through its snapped reference view and the output mapping.
 
 All modes; Runtime|Test; pure/read.
 
@@ -1863,6 +1983,34 @@ All modes; Runtime|Test; pure/read; setter mutates.
 `number`
 
 The highest step the character climbs without jumping, in metres.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## CircleCollider2D
+
+A circle collider in the entity's XY plane.
+
+### CircleCollider2D.IsTrigger
+
+`boolean`
+
+Whether the collider only detects overlaps instead of colliding.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### CircleCollider2D.Offset
+
+`vector`
+
+The circle's centre relative to the entity, in its XY plane.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### CircleCollider2D.Radius
+
+`number`
+
+The circle's radius; at least 1 mm.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -2062,6 +2210,14 @@ The entity's BoxCollider component, or nil when absent.
 
 All modes; Runtime|Test; pure/read.
 
+### Entity.BoxCollider2D
+
+`BoxCollider2D?`
+
+The entity's BoxCollider2D component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
 ### Entity.Camera
 
 `Camera?`
@@ -2083,6 +2239,14 @@ All modes; Runtime|Test; pure/read.
 `CharacterController?`
 
 The entity's CharacterController component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.CircleCollider2D
+
+`CircleCollider2D?`
+
+The entity's CircleCollider2D component, or nil when absent.
 
 All modes; Runtime|Test; pure/read.
 
@@ -2128,7 +2292,7 @@ All modes; Runtime|Test; pure/read.
 
 ### Entity.GetComponent
 
-`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "Animator") -> Animator?) & ((self: Entity, name: "SkinnedMesh") -> SkinnedMesh?)`
+`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "SpriteRenderer") -> SpriteRenderer?) & ((self: Entity, name: "SpriteAnimator") -> SpriteAnimator?) & ((self: Entity, name: "PixelPerfectCamera") -> PixelPerfectCamera?) & ((self: Entity, name: "Light2D") -> Light2D?) & ((self: Entity, name: "TilemapRenderer") -> TilemapRenderer?) & ((self: Entity, name: "RigidBody2D") -> RigidBody2D?) & ((self: Entity, name: "BoxCollider2D") -> BoxCollider2D?) & ((self: Entity, name: "CircleCollider2D") -> CircleCollider2D?) & ((self: Entity, name: "PolygonCollider2D") -> PolygonCollider2D?) & ((self: Entity, name: "TilemapCollider") -> TilemapCollider?) & ((self: Entity, name: "Animator") -> Animator?) & ((self: Entity, name: "SkinnedMesh") -> SkinnedMesh?)`
 
 Get a component proxy, or nil when absent.
 
@@ -2170,7 +2334,7 @@ All modes; Runtime|Test; pure/read.
 
 `(self: Entity) -> (vector?, vector?)`
 
-Get this entity's render mesh world AABB; nil without a mesh.
+Get the world AABB of what this entity draws: its render mesh, its sprite's quad and its tilemap's drawn tiles; nil without any of them.
 
 All modes; Runtime|Test; pure/read.
 
@@ -2222,6 +2386,14 @@ Whether this identity still names a live entity in this scene.
 
 All modes; Runtime|Test; pure/read.
 
+### Entity.Light2D
+
+`Light2D?`
+
+The entity's Light2D component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
 ### Entity.MeshCollider
 
 `MeshCollider?`
@@ -2246,11 +2418,27 @@ The entity name; a written name is UTF-8 without NUL and at most 256 bytes.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
+### Entity.PixelPerfectCamera
+
+`PixelPerfectCamera?`
+
+The entity's PixelPerfectCamera component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
 ### Entity.PointLight
 
 `PointLight?`
 
 The entity's PointLight component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.PolygonCollider2D
+
+`PolygonCollider2D?`
+
+The entity's PolygonCollider2D component, or nil when absent.
 
 All modes; Runtime|Test; pure/read.
 
@@ -2283,6 +2471,14 @@ All modes; Runtime|Test; mutates.
 `RigidBody?`
 
 The entity's RigidBody component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.RigidBody2D
+
+`RigidBody2D?`
+
+The entity's RigidBody2D component, or nil when absent.
 
 All modes; Runtime|Test; pure/read.
 
@@ -2326,11 +2522,43 @@ The entity's SpotLight component, or nil when absent.
 
 All modes; Runtime|Test; pure/read.
 
+### Entity.SpriteAnimator
+
+`SpriteAnimator?`
+
+The entity's SpriteAnimator component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.SpriteRenderer
+
+`SpriteRenderer?`
+
+The entity's SpriteRenderer component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
 ### Entity.Text
 
 `Text?`
 
 The entity's Text component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.TilemapCollider
+
+`TilemapCollider?`
+
+The entity's TilemapCollider component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.TilemapRenderer
+
+`TilemapRenderer?`
+
+The entity's TilemapRenderer component, or nil when absent.
 
 All modes; Runtime|Test; pure/read.
 
@@ -2405,6 +2633,58 @@ All modes; Runtime|Test; pure/read; setter mutates.
 ## FieldDescriptor
 
 An authenticated immutable Field constructor descriptor.
+
+## Light2D
+
+A 2D light: lights the lit sprites and tilemaps of the view, never unlit ones; no shadows.
+
+### Light2D.Color
+
+`Color`
+
+The light's linear colour.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Light2D.Falloff
+
+`number`
+
+Point: the fraction of the radius, from its edge inward, over which the light fades smoothly to nothing; 0 is a hard edge.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Light2D.Height
+
+`number`
+
+Point: how far above the lit plane the light sits, in world units; only normal-mapped sprites read it.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Light2D.Intensity
+
+`number`
+
+How strong the light is: its colour is multiplied by this, so values above 1 overbright.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Light2D.Radius
+
+`number`
+
+Point: how far the light reaches from the entity, in world units.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Light2D.Type
+
+`Light2DType`
+
+Whether the light is a point light around the entity or a global light of the whole view.
+
+All modes; Runtime|Test; pure/read; setter mutates.
 
 ## MeshCollider
 
@@ -2494,6 +2774,42 @@ Whether the mesh is drawn at all.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
+## PixelPerfectCamera
+
+Renders the entity's camera at a reference resolution, upscaled by the largest whole factor that fits the view in a letterbox.
+
+### PixelPerfectCamera.LetterboxColor
+
+`Color`
+
+The linear colour of the bars around the upscaled image.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### PixelPerfectCamera.PixelsPerUnit
+
+`number`
+
+How many scene pixels make one world unit; sprites of the same PixelsPerUnit map each texel to one pixel.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### PixelPerfectCamera.ReferenceHeight
+
+`number`
+
+The height the scene renders at, in pixels; the orthographic view is this many pixels of PixelsPerUnit high.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### PixelPerfectCamera.ReferenceWidth
+
+`number`
+
+The width the scene renders at, in pixels.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
 ## PointLight
 
 A light shining in every direction from the entity.
@@ -2535,6 +2851,42 @@ All modes; Runtime|Test; pure/read; setter mutates.
 `number`
 
 The radius of the emitting sphere, in metres; widens highlights and shadow penumbrae.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## PolygonCollider2D
+
+A convex polygon collider in the entity's XY plane.
+
+### PolygonCollider2D.Angle
+
+`number`
+
+The polygon's rotation about the entity's Z axis, counter-clockwise, in degrees.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### PolygonCollider2D.IsTrigger
+
+`boolean`
+
+Whether the collider only detects overlaps instead of colliding.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### PolygonCollider2D.Offset
+
+`vector`
+
+Where the polygon's origin sits relative to the entity, in its XY plane.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### PolygonCollider2D.Points
+
+`{vector}`
+
+The points whose convex hull is the collider, 3 to 64 of them, in the collider's own space before Offset and Angle.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -3050,6 +3402,242 @@ Wake a sleeping body.
 
 All modes; Runtime|Test; mutates.
 
+## RigidBody2D
+
+Simulates the entity in the 2D world: moves along world X and Y and rotates about world Z.
+
+### RigidBody2D.AddAngularImpulse
+
+`(self: RigidBody2D, impulse: number) -> ()`
+
+Apply an angular impulse about +Z to a Dynamic 2D body.
+
+All modes; Runtime|Test; mutates.
+
+### RigidBody2D.AddForce
+
+`(self: RigidBody2D, force: vector) -> ()`
+
+Apply a force in the XY plane to a Dynamic 2D body.
+
+All modes; Runtime|Test; mutates.
+
+### RigidBody2D.AddForceAtPosition
+
+`(self: RigidBody2D, force: vector, position: vector) -> ()`
+
+Apply a force in the XY plane at a world position of the plane to a Dynamic 2D body.
+
+All modes; Runtime|Test; mutates.
+
+### RigidBody2D.AddImpulse
+
+`(self: RigidBody2D, impulse: vector) -> ()`
+
+Apply an impulse in the XY plane to a Dynamic 2D body.
+
+All modes; Runtime|Test; mutates.
+
+### RigidBody2D.AddTorque
+
+`(self: RigidBody2D, torque: number) -> ()`
+
+Apply a torque about +Z, in newton metres, to a Dynamic 2D body.
+
+All modes; Runtime|Test; mutates.
+
+### RigidBody2D.AllowSleeping
+
+`boolean`
+
+Whether the body may sleep when it comes to rest.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### RigidBody2D.AngularDamping
+
+`number`
+
+How quickly angular velocity decays, per second.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### RigidBody2D.EnhancedInternalEdgeRemoval
+
+`boolean`
+
+Removes ghost collisions with internal edges of compound shapes; set it on bodies that roll or slide across tiles.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### RigidBody2D.FixedRotation
+
+`boolean`
+
+Whether a Dynamic body is kept from rotating.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### RigidBody2D.Friction
+
+`number`
+
+The friction coefficient of the body's surfaces; a contact uses the geometric mean of both bodies' values.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### RigidBody2D.GetAngularVelocity
+
+`(self: RigidBody2D) -> number`
+
+Read the angular velocity about +Z in radians per second.
+
+All modes; Runtime|Test; pure/read.
+
+### RigidBody2D.GetLinearVelocity
+
+`(self: RigidBody2D) -> vector`
+
+Read the linear velocity in the XY plane (Z is 0).
+
+All modes; Runtime|Test; pure/read.
+
+### RigidBody2D.GravityFactor
+
+`number`
+
+The multiplier of the project's 2D gravity for this body (0 floats).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### RigidBody2D.InitialAngularVelocity
+
+`number`
+
+The angular velocity about world Z the body starts with, in radians per second, counter-clockwise seen from +Z.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### RigidBody2D.InitialLinearVelocity
+
+`vector`
+
+The velocity along world X and Y the body starts with, in metres per second.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### RigidBody2D.IsSleeping
+
+`(self: RigidBody2D) -> boolean`
+
+Whether the 2D body is sleeping.
+
+All modes; Runtime|Test; pure/read.
+
+### RigidBody2D.Layer
+
+`string`
+
+Physics layer name from project settings (the 3D world's layers). A value a script writes holds at most 4096 bytes of text.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### RigidBody2D.LinearDamping
+
+`number`
+
+How quickly linear velocity decays, per second.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### RigidBody2D.Mass
+
+`number`
+
+Mass in kilograms (Dynamic only).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### RigidBody2D.MaxAngularVelocity
+
+`number`
+
+The angular speed the body is clamped to, in radians per second.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### RigidBody2D.MaxLinearVelocity
+
+`number`
+
+The speed the body is clamped to, in metres per second.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### RigidBody2D.MotionQuality
+
+`MotionQuality`
+
+Discrete or continuous (LinearCast) collision detection.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### RigidBody2D.MoveKinematic
+
+`(self: RigidBody2D, position: vector, angle: number) -> ()`
+
+Set a Kinematic 2D target in the plane, the angle in degrees about +Z, for the next fixed step.
+
+All modes; Runtime|Test; mutates.
+
+### RigidBody2D.Restitution
+
+`number`
+
+Bounciness, from no bounce (0) to a perfectly elastic bounce (1); a contact uses the larger of both bodies' values.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### RigidBody2D.SetAngularVelocity
+
+`(self: RigidBody2D, velocity: number) -> ()`
+
+Set a Dynamic 2D body's angular velocity about +Z in radians per second.
+
+All modes; Runtime|Test; mutates.
+
+### RigidBody2D.SetLinearVelocity
+
+`(self: RigidBody2D, velocity: vector) -> ()`
+
+Set a Dynamic 2D body's linear velocity from the vector's X and Y.
+
+All modes; Runtime|Test; mutates.
+
+### RigidBody2D.Teleport
+
+`(self: RigidBody2D, position: vector, angle: number?) -> ()`
+
+Place a 2D body at once in the plane (the entity keeps its Z), the angle in degrees about +Z kept when omitted, preserving velocity and resetting interpolation.
+
+All modes; Runtime|Test; mutates.
+
+### RigidBody2D.Type
+
+`BodyType`
+
+Static never moves; Kinematic is moved by script; Dynamic is simulated.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### RigidBody2D.WakeUp
+
+`(self: RigidBody2D) -> ()`
+
+Wake a sleeping 2D body.
+
+All modes; Runtime|Test; mutates.
+
 ## Script (component)
 
 Attaches Behaviour scripts to the entity, an ordered list of slots.
@@ -3170,6 +3758,158 @@ The radius of the emitting disc, in metres; widens highlights and shadow penumbr
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
+## SpriteAnimator
+
+Plays a clip of the SpriteRenderer's sprite sheet, one step per clip frame for its ticks, driven by the fixed step.
+
+### SpriteAnimator.Clip
+
+`string`
+
+The name of the sheet's clip to play; empty plays nothing. A value a script writes holds at most 4096 bytes of text.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SpriteAnimator.Play
+
+`(self: SpriteAnimator, clip: string) -> ()`
+
+Play the sheet's clip named clip from its first step, which shows at the next fixed step's SpriteAnimation phase.
+
+All modes; Runtime|Test; mutates.
+
+### SpriteAnimator.Playing
+
+`boolean`
+
+Whether the clip advances each fixed step; a clip without Loop clears it after its last step and holds its last frame.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SpriteAnimator.Step
+
+`number`
+
+The index of the clip step shown.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SpriteAnimator.StepTicks
+
+`number`
+
+How many fixed steps the current clip step has been shown.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SpriteAnimator.Stop
+
+`(self: SpriteAnimator) -> ()`
+
+Stop advancing the clip; the frame shown stays.
+
+All modes; Runtime|Test; mutates.
+
+## SpriteRenderer
+
+Draws a sprite: a sprite sheet frame or a texture in the entity's XY plane.
+
+### SpriteRenderer.Color
+
+`Color`
+
+The linear colour every texel is multiplied with, with opacity in the fourth component.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SpriteRenderer.FlipX
+
+`boolean`
+
+Whether the image is mirrored left to right about its pivot.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SpriteRenderer.FlipY
+
+`boolean`
+
+Whether the image is mirrored top to bottom about its pivot.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SpriteRenderer.Frame
+
+`number`
+
+The index of the sheet's frame to draw; an index the sheet lacks draws nothing (SPRITE_FRAME_OUT_OF_RANGE).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SpriteRenderer.Lit
+
+`boolean`
+
+Whether 2D lights light the sprite; an unlit sprite keeps its texels unchanged.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SpriteRenderer.NormalMap
+
+`AssetRef?`
+
+A lit sprite's tangent-space normal map, laid like its image; point lights then light it by the angle to the light. Null: flat.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SpriteRenderer.OrderInLayer
+
+`number`
+
+The draw order within the sorting layer: higher values draw over lower ones, equal values in canonical entity order.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SpriteRenderer.PixelsPerUnit
+
+`number`
+
+How many texels of the image make one unit of the entity's local space; the sprite's size is its texels divided by this.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SpriteRenderer.SetFrameByName
+
+`(self: SpriteRenderer, name: string) -> ()`
+
+Set Frame to the index of the sprite sheet's frame named name; an error names the sheet when it has no such frame.
+
+All modes; Runtime|Test; mutates.
+
+### SpriteRenderer.Sheet
+
+`AssetRef?`
+
+The sprite sheet whose frame Frame is drawn; null draws Texture whole.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SpriteRenderer.SortingLayer
+
+`string`
+
+The sorting layer name from project settings; later layers draw over earlier ones, and an undeclared name draws in the first. A value a script writes holds at most 4096 bytes of text.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SpriteRenderer.Texture
+
+`AssetRef?`
+
+The texture drawn whole, pivoted at its centre, when Sheet is null; null draws the built-in white square.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
 ## TaskHandle
 
 An opaque coroutine handle owned by one script VM.
@@ -3255,6 +3995,78 @@ All modes; Runtime|Test; pure/read; setter mutates.
 `string`
 
 The UTF-8 text; a line feed starts a new line. A value a script writes holds at most 4096 bytes of text.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## TilemapCollider
+
+The solid cells of a tilemap as 2D colliders: each chunk's solid cells merged into boxes, one static compound without a RigidBody2D.
+
+### TilemapCollider.IsTrigger
+
+`boolean`
+
+Whether the collider only detects overlaps instead of colliding.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### TilemapCollider.Tilemap
+
+`AssetRef?`
+
+The tilemap whose solid cells collide; null takes the entity's TilemapRenderer.Tilemap.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## TilemapRenderer
+
+Draws a tilemap's tiles in the entity's XY plane, each tile as a sprite of its palette entry's sheet frame.
+
+### TilemapRenderer.Color
+
+`Color`
+
+The linear colour every tile's texels are multiplied with, with opacity in the fourth component.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### TilemapRenderer.Lit
+
+`boolean`
+
+Whether 2D lights light the tiles; unlit tiles keep their texels unchanged.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### TilemapRenderer.OrderInLayer
+
+`number`
+
+The draw order within the sorting layer, among the sprites: higher values draw over lower ones, equal values in canonical entity order.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### TilemapRenderer.PixelsPerUnit
+
+`number`
+
+How many texels of a tile's frame make one unit of the entity's local space, as a sprite's.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### TilemapRenderer.SortingLayer
+
+`string`
+
+The sorting layer name from project settings; the tilemap sorts with the sprites, and an undeclared name draws in the first. A value a script writes holds at most 4096 bytes of text.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### TilemapRenderer.Tilemap
+
+`AssetRef?`
+
+The tilemap whose tiles are drawn; null draws nothing.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -3454,6 +4266,8 @@ What asset.create makes.
 
 - `SpriteSheet`: A .spritesheet sprite sheet: frames of a texture with pivots and 9-slice borders, and clips; without values an empty sheet.
 
+- `Tilemap`: A .tilemap tilemap: a palette of sprite sheet frames and cells in chunks; without values an empty map of unit cells in 16-cell chunks.
+
 ## AssetState
 
 Where an asset is in its life (§7.2).
@@ -3493,6 +4307,8 @@ The kind of a loadable asset (§7.1).
 - `Replay`: An input replay (.replay).
 
 - `SpriteSheet`: A sprite sheet (.spritesheet): frames of a texture with pivots and 9-slice borders, and clips.
+
+- `Tilemap`: A tilemap (.tilemap): a grid of cells in chunks, each empty or a palette entry's sprite sheet frame.
 
 - `Skeleton`: A skeleton (a glTF's skin sub-asset): named joints in a hierarchy with their rest pose and inverse binds.
 
@@ -4068,6 +4884,14 @@ Keyboard keys by their US-layout position.
 
 - `Menu`: The Menu input value.
 
+## Light2DType (enum)
+
+What a 2D light lights.
+
+- `Point`: A circle of light around the entity, fading to nothing at its Radius.
+
+- `Global`: The same light at every lit pixel of the view, wherever the entity is.
+
 ## LogChannel
 
 The logger an entry came from.
@@ -4127,6 +4951,14 @@ What a type of a game's native module is.
 - `Component`: Data on entities, saved in scenes and prefabs as Native.<Name>.
 
 - `Resource`: One value per play session, part of the state hash, never saved.
+
+## Physics2DQueryShape
+
+The shape of a 2D overlap query.
+
+- `Circle`: A circle of radius `radius` around `center`.
+
+- `Box`: A rectangle of half extents `halfExtents` around `center`, rotated by `angle` degrees.
 
 ## PhysicsBodyOrigin
 

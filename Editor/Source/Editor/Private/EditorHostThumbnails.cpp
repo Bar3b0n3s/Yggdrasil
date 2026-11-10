@@ -14,6 +14,7 @@
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/HostImageUpload.h"
 #include "Engine/ImGui/ImGuiRenderer.h"
+#include "Engine/Project/ProjectSettings.h"
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
@@ -29,6 +30,8 @@
 #include <optional>
 #include <ranges>
 #include <span>
+#include <string>
+#include <vector>
 
 namespace Engine {
 
@@ -285,6 +288,7 @@ namespace Engine {
 			.Width = request.Size,
 			.Height = request.Size,
 			.Quality = m_Cache.GetRenderQuality(),
+			.SortingLayers = m_Editor.HasProject() ? m_Editor.GetProject().GetSettings().SortingLayers.Layers : std::vector<std::string>{},
 		};
 		ENGINE_TRY_ASSIGN(const RenderSnapshot snapshot, ExtractRenderSnapshot(scene, extraction));
 		return m_Capture(snapshot, request.Size);

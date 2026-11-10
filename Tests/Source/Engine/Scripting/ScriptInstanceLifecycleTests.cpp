@@ -26,6 +26,9 @@ namespace Engine {
 
 	namespace Test {
 
+		// M21's 2D callbacks through real 2D contacts (Engine/Scripting/ScriptPhysics2DTests.cpp).
+		void RunBehaviour2DCallbacksCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
+
 		// M23 (Docs/Decisions/0034-m23-contract.md decision 31): OnAnimationEvent in a play session (ScriptAnimationTests.cpp).
 		void RunAnimationCallbackCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 
@@ -411,6 +414,7 @@ return Script.Define("ReloadCoverage", T)
 		{
 			const size_t firstSnapshot = snapshots.size();
 			RunBehaviourSessionCoverage(mode, snapshots);
+			RunBehaviour2DCallbacksCoverage(mode, snapshots);
 			RunAnimationCallbackCoverage(mode, snapshots);
 			if (mode == RunModes::Editor)
 				RunBehaviourReloadCoverage(snapshots);

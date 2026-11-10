@@ -155,6 +155,20 @@
 			]
 		},
 		{
+			"Name": "Lights2D",
+			"File": "Passes/Lights2D.slang",
+			"Entries": [
+				{
+					"Name": "VSMain",
+					"Stage": "vertex"
+				},
+				{
+					"Name": "PSMain",
+					"Stage": "fragment"
+				}
+			]
+		},
+		{
 			"Name": "MatrixConvention",
 			"File": "Passes/MatrixConvention.slang",
 			"Entries": [
@@ -178,6 +192,18 @@
 				},
 				{
 					"Name": "PSLdr",
+					"Stage": "fragment"
+				},
+				{
+					"Name": "VSLit",
+					"Stage": "vertex"
+				},
+				{
+					"Name": "PSHdrLit",
+					"Stage": "fragment"
+				},
+				{
+					"Name": "PSNormals",
 					"Stage": "fragment"
 				}
 			]

@@ -203,6 +203,28 @@ namespace Engine {
 		bool CoverageGates = false;
 	};
 
+	// Registry struct "SortingLayersSettings" (§6.1 "SortingLayers"; M21, Docs/Decisions/0032-m21-contract.md decision 4): the
+	// sorting layers of sprites, back to front. Layers: 1 to MaxSortingLayers unique non-empty names, the first "Default"
+	// (DefaultSortingLayerName), as PhysicsSettings.Layers. Registered as the section "SortingLayers" after Testing (ADR
+	// 0028's phase-2 ledger); every host copies Layers into its RenderExtractionRequest::SortingLayers, and project.validate
+	// checks the sprites' names against it (SPRITE_UNKNOWN_SORTING_LAYER).
+	struct SortingLayersSettings
+	{
+		// The most sorting layers a project declares.
+		static constexpr uint32_t MaxSortingLayers = 32;
+
+		std::vector<std::string> Layers = { "Default" };
+	};
+
+	// Registry struct "Physics2DSettings" (§6.1 "Physics2D"; M21, Docs/Decisions/0032-m21-contract.md decision 9): the 2D
+	// world's gravity in metres per second squared along X and Y, each component finite and at most MaxPhysicsGravity in
+	// magnitude; its layers are Physics.Layers. Registered as the section "Physics2D" after SortingLayers (ADR 0028's
+	// phase-2 ledger); the play session's Physics2DSystem reads it.
+	struct Physics2DSettings
+	{
+		glm::vec2 Gravity = glm::vec2(0.0f, -9.81f);
+	};
+
 	// Registry struct "ProjectSettings": the whole .eproj below its "Format"/"Version" header (§6.1). Name is the game's
 	// display name (exported games use it for their user-data folder, §14.1); StartScene is the project-relative scene the
 	// game starts with (empty: none yet).
@@ -218,13 +240,17 @@ namespace Engine {
 		ScriptingSettings Scripting;
 		ExportSettings Export;
 		TestingSettings Testing;
+		// M21 (Docs/Decisions/0032-m21-contract.md decisions 4 and 9): the sections "SortingLayers" and "Physics2D".
+		SortingLayersSettings SortingLayers;
+		Physics2DSettings Physics2D;
 	};
 
 	// Registers the enums and structs above (InputActionType, TestPauseOnError, TestIsolation, TestMode, WindowSettings,
 	// SimulationSettings, PhysicsSettings, InputAction, InputSettings, RenderingSettings, ScriptingSettings,
-	// ExportSettings, TestSuiteOverrides, TestSuite, TestingSettings, ProjectSettings) with their field metadata, the
-	// type-level validators of the rules in the comments above and, for each validated type, the Generate hook that turns
-	// random field values into valid settings (FieldBuilder::Generate). Call once per registry, before Freeze.
+	// ExportSettings, TestSuiteOverrides, TestSuite, TestingSettings, SortingLayersSettings, Physics2DSettings,
+	// ProjectSettings) with their field metadata, the type-level validators of the rules in the comments above and, for each
+	// validated type, the Generate hook that turns random field values into valid settings (FieldBuilder::Generate). Call
+	// once per registry, before Freeze.
 	void RegisterProjectSettingsTypes(TypeRegistry& registry);
 
 }

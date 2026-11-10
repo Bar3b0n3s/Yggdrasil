@@ -5,6 +5,7 @@
 #include "Engine/Automation/Methods/EntityMethods.h"
 #include "Engine/Automation/Methods/InputMethods.h"
 #include "Engine/Automation/Methods/ObserveMethods.h"
+#include "Engine/Automation/Methods/Physics2DMethods.h"
 #include "Engine/Automation/Methods/PhysicsMethods.h"
 #include "Engine/Automation/Methods/PlayMethods.h"
 #include "Engine/Automation/Methods/RaycastMethods.h"
@@ -38,6 +39,8 @@ namespace Engine {
 		RegisterStatsMethodTypes(registry);
 		RegisterSharedScriptMethodTypes(registry);
 		RegisterReplayMethodTypes(registry);
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 15): physics2d.raycast and physics2d.overlap.
+		RegisterPhysics2DMethodTypes(registry);
 	}
 
 	void RegisterSharedMethods(MethodRegistry& methods, AutomationHost host)
@@ -58,6 +61,8 @@ namespace Engine {
 		RegisterStatsMethods(methods);
 		RegisterSharedScriptMethods(methods);
 		RegisterReplayMethods(methods);
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 15).
+		RegisterPhysics2DMethods(methods);
 	}
 
 }

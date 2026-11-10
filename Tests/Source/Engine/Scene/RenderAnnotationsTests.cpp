@@ -6,21 +6,30 @@
 #include "Engine/Asset/EnvironmentData.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/MeshData.h"
+#include "Engine/Core/Time.h"
+#include "Engine/Scene/ColliderDebugDraw.h"
+#include "Engine/Scene/Components/BoxCollider2DComponent.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
+#include "Engine/Scene/Components/Light2DComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/PointLightComponent.h"
+#include "Engine/Scene/Components/RigidBody2DComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/Physics2DSystem.h"
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/TransformSystem.h"
 #include "Support/InMemoryAssetManager.h"
 #include "Support/SceneTestFixture.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <limits>
+#include <string_view>
 #include <variant>
 
 namespace Engine {
@@ -148,6 +157,99 @@ namespace Engine {
 			plain.Flags = RenderViewFlags::Icons;
 			REQUIRE(AppendRenderAnnotations(fixture.GetScene(), assets, {}, nullptr, plain));
 			CHECK(plain.Icons.empty());
+		}
+
+		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 20): where the view's icons are on, a Light2D shows the
+		// PointLight icon in its Color, so the scene view shows where each 2D light is.
+		TEST_CASE("RenderAnnotations: a Light2D shows the PointLight icon in its colour when icons are on")
+		{
+			Test::SceneTestFixture fixture;
+			Test::InMemoryAssetManager assets;
+			Entity torch = fixture.GetScene().CreateEntity("Torch");
+			torch.AddComponent<Light2DComponent>(Light2DComponent{ .Color = glm::vec3(1.0f, 0.5f, 0.25f) });
+			auto view = AnnotationView();
+			view.Flags = RenderViewFlags::EditorOverlays | RenderViewFlags::Icons;
+			REQUIRE(AppendRenderAnnotations(fixture.GetScene(), assets, {}, nullptr, view));
+			REQUIRE(view.Icons.size() == 1);
+			CHECK(view.Icons[0].Kind == RenderIconKind::PointLight);
+			CHECK(view.Icons[0].Entity == torch.GetUUID());
+			CHECK(view.Icons[0].Color == glm::vec4(1.0f, 0.5f, 0.25f, 1.0f));
+			// Icons off, or a view without the editor overlays: none.
+			auto plain = AnnotationView();
+			plain.Flags = RenderViewFlags::Icons;
+			REQUIRE(AppendRenderAnnotations(fixture.GetScene(), assets, {}, nullptr, plain));
+			CHECK(plain.Icons.empty());
+			auto hidden = AnnotationView();
+			hidden.Flags = RenderViewFlags::EditorOverlays;
+			REQUIRE(AppendRenderAnnotations(fixture.GetScene(), assets, {}, nullptr, hidden));
+			CHECK(hidden.Icons.empty());
+		}
+
+		// M21 (C21.2, decision 28, stream P3): with Colliders, AppendRenderAnnotations appends the 2D colliders after the 3D ones
+		// (BuildCollider2DDebugDraw's records through AppendColliderDebugDraw), told asleep from awake by the session's
+		// Physics2DSystem the host passes; without it they draw as an edit scene's.
+		TEST_CASE("RenderAnnotations: with Colliders, a play scene's 2D colliders follow the 3D ones")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Test::InMemoryAssetManager assets;
+			// A 3D box first in canonical order, then a 2D ground and a 2D crate resting on it.
+			Entity crate3D = scene.CreateEntity("Crate3D");
+			crate3D.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.0f, 5.0f, 0.0f);
+			});
+			crate3D.AddComponent<BoxColliderComponent>();
+			const auto addBox = [&scene](std::string_view name, const glm::vec2& position, const glm::vec2& halfExtents, BodyType type)
+			{
+				Entity entity = scene.CreateEntity(name);
+				entity.Patch<TransformComponent>([position](TransformComponent& transform)
+				{
+					transform.Translation = glm::vec3(position, 0.0f);
+				});
+				entity.AddComponent<RigidBody2DComponent>(RigidBody2DComponent{ .Type = type });
+				entity.AddComponent<BoxCollider2DComponent>(BoxCollider2DComponent{ .HalfExtents = halfExtents });
+				return entity;
+			};
+			static_cast<void>(addBox("Ground", glm::vec2(0.0f, -0.5f), glm::vec2(20.0f, 0.5f), BodyType::Static));
+			const Entity crate = addBox("Crate", glm::vec2(0.0f, 0.5f), glm::vec2(0.5f), BodyType::Dynamic);
+			TransformSystem::Update(scene);
+			Result<Scope<Physics2DSystem>> physics2D = Physics2DSystem::Create({ .RuntimeScene = &scene });
+			REQUIRE_MESSAGE(physics2D.has_value(), physics2D.error().ToString());
+			for (uint64_t tick = 0; tick < 180; ++tick)
+			{
+				TransformSystem::Update(scene);
+				const SimStep step = SimStep::FromTick(tick, 1.0 / 60.0);
+				(*physics2D)->PreStep(step);
+				(*physics2D)->Step(step);
+				(*physics2D)->PostStep(step);
+			}
+			TransformSystem::Update(scene);
+			REQUIRE((*physics2D)->IsSleeping(crate.GetUUID()).value_or(false));
+
+			// The 3D box, then the ground's four edges, then the crate's four edges, in the Sleeping colour.
+			const auto annotate = [&scene, &assets](const Physics2DSystem* system)
+			{
+				auto view = AnnotationView();
+				view.Flags = RenderViewFlags::Colliders;
+				REQUIRE(AppendRenderAnnotations(scene, assets, {}, nullptr, view, system));
+				return view;
+			};
+			const RenderSnapshot played = annotate(physics2D->get());
+			const auto& commands = played.AnnotationDraw.GetCommands();
+			REQUIRE(commands.size() == 9);
+			CHECK(std::holds_alternative<DebugBox>(commands[0].Shape));
+			for (size_t index = 1; index < commands.size(); ++index)
+			{
+				CAPTURE(index);
+				CHECK(std::holds_alternative<DebugLine>(commands[index].Shape));
+				const ColliderDebugCategory category = index < 5 ? ColliderDebugCategory::Static : ColliderDebugCategory::Sleeping;
+				CHECK(commands[index].Color == GetColliderDebugColor(category));
+			}
+			// Without the session's system the crate is Dynamic, as in an edit scene.
+			const RenderSnapshot edited = annotate(nullptr);
+			REQUIRE(edited.AnnotationDraw.GetCommands().size() == 9);
+			CHECK(edited.AnnotationDraw.GetCommands()[8].Color == GetColliderDebugColor(ColliderDebugCategory::Dynamic));
 		}
 
 		TEST_CASE("RenderAnnotations: explicit label IDs are independent of editor selection")

@@ -618,6 +618,54 @@ namespace Engine {
 			CHECK(provenance->Find("Assets/Sprites/Typo.spritesheet") == nullptr);
 		}
 
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 23): tilemaps are canonical authored files too: a minified tilemap
+		// gets the editor's bytes back, one that leaves members at their defaults gets every field written, and one with an
+		// unknown member fails at its pointer, unchanged.
+		TEST_CASE("ProjectMethods: project.upgrade rewrites .tilemap files canonically and fails at an unknown member of one")
+		{
+			Test::AutomationFixture setup("ProjectUpgradeTilemaps", false);
+			REQUIRE(setup.Call("asset.create", ParseProjectJson(R"({"type": "Tilemap", "path": "Assets/Tilemaps/Level.tilemap",
+				"values": {"ChunkSize": 2, "Palette": [{"Sheet": null, "Frame": 3, "Solid": false}],
+				"Chunks": [{"X": 0, "Y": 0, "Tiles": [1, 0, 0, 1]}]}})"))
+					.has_value());
+			const std::filesystem::path root = setup.GetEditor().GetProject().GetRoot();
+			const Result<std::string> canonical = FileSystem::ReadText(root / "Assets/Tilemaps/Level.tilemap");
+			REQUIRE(canonical.has_value());
+			REQUIRE(FileSystem::WriteFileAtomic(root / "Assets/Tilemaps/Level.tilemap", AsBytes(ParseProjectJson(*canonical).dump()), { .KeepBackup = false })
+					.has_value());
+			// A valid tilemap written by hand with its cell size, chunk size and chunks left at their defaults.
+			const std::string sparse = R"({"Format": "Tilemap", "Version": 1, "Palette": [{"Frame": 1}]})";
+			REQUIRE(FileSystem::WriteFileAtomic(root / "Assets/Tilemaps/Sparse.tilemap", AsBytes(sparse), { .KeepBackup = false }).has_value());
+
+			const Json expected = ParseProjectJson(R"([
+				{"path": "Assets/Tilemaps/Level.tilemap", "reason": "canonical form"},
+				{"path": "Assets/Tilemaps/Sparse.tilemap", "reason": "canonical form"}])");
+			Result<Json> upgraded = setup.Call("project.upgrade", Json::object());
+			REQUIRE_MESSAGE(upgraded.has_value(), upgraded.error().ToString());
+			CHECK((*upgraded)["changes"] == expected);
+			CHECK(FileSystem::ReadText(root / "Assets/Tilemaps/Level.tilemap").value_or("") == *canonical);
+			const Json rewritten = ParseProjectJson(FileSystem::ReadText(root / "Assets/Tilemaps/Sparse.tilemap").value_or("{}"));
+			CHECK(rewritten["CellSize"] == Json::array({ 1, 1 }));
+			CHECK(rewritten["ChunkSize"] == Json(16));
+			CHECK(rewritten["Palette"][0]["Solid"] == Json(true));
+			CHECK(rewritten["Chunks"] == Json::array());
+			Result<Json> again = setup.Call("project.upgrade", Json::object());
+			REQUIRE(again.has_value());
+			CHECK((*again)["changes"] == Json::array());
+
+			Json typo = ParseProjectJson(*canonical);
+			typo["Chunkz"] = Json::array();
+			const std::string typoText = typo.dump(1, '	');
+			REQUIRE(FileSystem::WriteFileAtomic(root / "Assets/Tilemaps/Typo.tilemap", AsBytes(typoText), { .KeepBackup = false }).has_value());
+			const Json response = setup.Request("project.upgrade", Json::object());
+			REQUIRE_MESSAGE(response.contains("error"), response.dump());
+			const Json& data = response["error"]["data"];
+			CHECK(data["errorCode"] == Json("Validation"));
+			CHECK(data["location"]["file"] == Json("Assets/Tilemaps/Typo.tilemap"));
+			CHECK(data["location"]["pointer"] == Json("/Chunkz"));
+			CHECK(FileSystem::ReadText(root / "Assets/Tilemaps/Typo.tilemap").value_or(std::string()) == typoText);
+		}
+
 		TEST_CASE("ProjectMethods: project.refreshAssets registers an externally written file")
 		{
 			Test::AutomationFixture setup("ProjectRefreshAssets", false);

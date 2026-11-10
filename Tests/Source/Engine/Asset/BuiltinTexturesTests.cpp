@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstddef>
 #include <format>
+#include <span>
 #include <string>
 
 namespace Engine {
@@ -22,6 +23,52 @@ namespace Engine {
 			CHECK(BuiltinTextureToString(BuiltinTexture::FlatNormal) == "FlatNormal");
 			CHECK(BuiltinTextureToString(BuiltinTexture::Missing) == "Missing");
 			CHECK(BuiltinTextureToString(static_cast<BuiltinTexture>(99)) == "Unknown");
+			// M21 (Docs/Decisions/0032-m21-contract.md decision 7): engine://Textures/Sprite<Shape>.
+			CHECK(BuiltinTextureToString(BuiltinTexture::SpriteSquare) == "SpriteSquare");
+			CHECK(BuiltinTextureToString(BuiltinTexture::SpriteRounded) == "SpriteRounded");
+			CHECK(BuiltinTextureToString(BuiltinTexture::SpriteBevel) == "SpriteBevel");
+			CHECK(BuiltinTextureToString(BuiltinTexture::SpriteCircle) == "SpriteCircle");
+		}
+
+		// Docs/Decisions/0032-m21-contract.md decision 7 (stream B): the procedural sprite textures, white shapes a sprite tints.
+		TEST_CASE("BuiltinTextures: the sprite textures are 16x16 white shapes of one level, identical on every run")
+		{
+			const auto texel = [](const TextureData& texture, uint32_t x, uint32_t y)
+			{
+				const std::span<const std::byte> pixels = GetMipPixels(texture, 0);
+				const size_t offset = (static_cast<size_t>(y) * texture.Width + x) * 4;
+				return std::array<uint8_t, 4>{ static_cast<uint8_t>(pixels[offset]), static_cast<uint8_t>(pixels[offset + 1]), static_cast<uint8_t>(pixels[offset + 2]),
+					static_cast<uint8_t>(pixels[offset + 3]) };
+			};
+			constexpr std::array<uint8_t, 4> Opaque = { 255, 255, 255, 255 };
+			constexpr std::array<uint8_t, 4> Clear = { 255, 255, 255, 0 };
+			for (const BuiltinTexture sprite : { BuiltinTexture::SpriteSquare, BuiltinTexture::SpriteRounded, BuiltinTexture::SpriteBevel, BuiltinTexture::SpriteCircle })
+			{
+				CAPTURE(BuiltinTextureToString(sprite));
+				const TextureData texture = GenerateBuiltinSpriteTexture(sprite);
+				REQUIRE(ValidateTextureData(texture).has_value());
+				CHECK(texture.Format == TextureFormat::RGBA8Srgb);
+				CHECK(texture.Width == 16);
+				CHECK(texture.Height == 16);
+				CHECK(texture.Mips.size() == 1);
+				const TextureData again = GenerateBuiltinSpriteTexture(sprite);
+				CHECK(std::ranges::equal(GetMipPixels(texture, 0), GetMipPixels(again, 0)));
+			}
+			const TextureData square = GenerateBuiltinSpriteTexture(BuiltinTexture::SpriteSquare);
+			CHECK(texel(square, 0, 0) == Opaque);
+			CHECK(texel(square, 15, 15) == Opaque);
+			const TextureData rounded = GenerateBuiltinSpriteTexture(BuiltinTexture::SpriteRounded);
+			CHECK(texel(rounded, 0, 0) == Clear);
+			CHECK(texel(rounded, 8, 0) == Opaque);
+			CHECK(texel(rounded, 15, 15) == Clear);
+			const TextureData bevel = GenerateBuiltinSpriteTexture(BuiltinTexture::SpriteBevel);
+			CHECK(texel(bevel, 0, 8) == Opaque);
+			CHECK(texel(bevel, 15, 8) == std::array<uint8_t, 4>{ 128, 128, 128, 255 });
+			CHECK(texel(bevel, 8, 8) == std::array<uint8_t, 4>{ 204, 204, 204, 255 });
+			const TextureData circle = GenerateBuiltinSpriteTexture(BuiltinTexture::SpriteCircle);
+			CHECK(texel(circle, 0, 0) == Clear);
+			CHECK(texel(circle, 8, 8) == Opaque);
+			CHECK(texel(circle, 0, 8) == Opaque);
 		}
 
 		TEST_CASE("BuiltinTextures: textures have their documented sizes, formats and texels")
@@ -66,10 +113,12 @@ namespace Engine {
 		TEST_CASE("BuiltinTextures: the generated texels match the hashes recorded in every configuration")
 		{
 			// Integer arithmetic and a fixed table only, so the recorded hashes hold in every configuration and on every platform.
-			constexpr std::array<BuiltinTexture, 5> Textures = { BuiltinTexture::White, BuiltinTexture::Black, BuiltinTexture::FlatNormal,
-				BuiltinTexture::Checker, BuiltinTexture::Missing };
-			constexpr std::array<uint64_t, 5> RecordedHashes = { 0x2e54fae2959dbb84ull, 0x088910b435c92dc1ull, 0xee5a85739c397f1cull,
-				0xc4e010a786d84db6ull, 0x959a5dac370947e5ull };
+			// M21's sprite textures (Docs/Decisions/0032-m21-contract.md decision 7) follow the M6 textures.
+			constexpr std::array<BuiltinTexture, 9> Textures = { BuiltinTexture::White, BuiltinTexture::Black, BuiltinTexture::FlatNormal,
+				BuiltinTexture::Checker, BuiltinTexture::Missing, BuiltinTexture::SpriteSquare, BuiltinTexture::SpriteRounded, BuiltinTexture::SpriteBevel,
+				BuiltinTexture::SpriteCircle };
+			constexpr std::array<uint64_t, 9> RecordedHashes = { 0x2e54fae2959dbb84ull, 0x088910b435c92dc1ull, 0xee5a85739c397f1cull,
+				0xc4e010a786d84db6ull, 0x959a5dac370947e5ull, 0x9ea922e57a320e17ull, 0xc0165963ae845894ull, 0xbb5ce8d25334fb6dull, 0x3737bbbc5466cf4eull };
 			for (size_t index = 0; index < Textures.size(); ++index)
 			{
 				CAPTURE(std::string(BuiltinTextureToString(Textures[index])));

@@ -19,6 +19,7 @@
 #include "Engine/Project/ProjectSettings.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Renderer/RenderSnapshot.h"
+#include "Engine/Scene/Physics2DSystem.h"
 #include "Engine/Scene/PhysicsSystem.h"
 #include "Engine/Scripting/ScriptAssetLoads.h"
 #include "Engine/Scripting/ScriptEngine.h"
@@ -145,10 +146,11 @@ namespace Engine {
 		// ProjectSettings is observed through its production consumer, never by reading the settings struct back: the game
 		// process's application specification, the exporter's executable resources and its Export.Exclude, the runner's
 		// inventory and run, the play session (its fixed delta, seed, entity cap and view, its physics world's gravity and
-		// layers, its input actions, its extraction's quality, its ScriptEngine's limits and enforcement), the play
-		// controller's PauseOnError and BlockPlayOnTypeErrors behaviour, the suite overrides' application and the validator's
-		// StartScene and BuildScenes checks and its computed Assets.Load check (Export.PruneUnreferenced). The test ends by
-		// comparing the observed pointers with the reflected leaf walk and naming each unobserved one.
+		// layers, its 2D physics world's gravity, its input actions, its extraction's quality and sorting layers, its
+		// ScriptEngine's limits and enforcement), the play controller's PauseOnError and BlockPlayOnTypeErrors behaviour, the
+		// suite overrides' application and the validator's StartScene and BuildScenes checks and its computed Assets.Load check
+		// (Export.PruneUnreferenced). The test ends by comparing the observed pointers with the reflected leaf walk and naming
+		// each unobserved one.
 		TEST_CASE("ProjectSettings: every AllSettings.eproj value is observed by its consumer")
 		{
 			Test::SetTestCaseTimeLimit(600.0);
@@ -276,6 +278,8 @@ namespace Engine {
 				return first.has_value() && second.has_value() && layers.LayersCollide(*first, *second);
 			};
 			observe("/Physics/Collisions", collide("Default", "Ball") && collide("Ball", "Track") && collide("Ball", "Trigger") && !collide("Default", "Default") && !collide("Track", "Trigger"));
+			// M21 (Docs/Decisions/0032-m21-contract.md decision 9): the session's 2D world takes Physics2D.Gravity.
+			observe("/Physics2D/Gravity", session->GetPhysics2D() != nullptr && session->GetPhysics2D()->GetGravity() == settings.Physics2D.Gravity);
 
 			// The session's input actions, resolved against device states.
 			const InputActionMap& actions = session->GetInput().GetActions();
@@ -302,6 +306,10 @@ namespace Engine {
 			session->Tick();
 			observe("/Rendering/ShadowMapSize", session->GetLastExtraction().Quality.ShadowMapSize == settings.Rendering.ShadowMapSize);
 			observe("/Rendering/SsaoHalfResolution", session->GetLastExtraction().Quality.SsaoHalfResolution == settings.Rendering.SsaoHalfResolution);
+			// M21 (Docs/Decisions/0032-m21-contract.md decision 4): Main.scene's Front sprite comes first in canonical order with
+			// the lower OrderInLayer, so only the declared layers draw Back (Background) before it (Foreground).
+			const auto& sprites = session->GetLastExtraction().Sprites;
+			observe("/SortingLayers/Layers", sprites.size() == 2 && sprites[0].Entity == UUID(0x0b5e000000000006) && sprites[0].SortingLayer == 1 && sprites[1].Entity == UUID(0x0b5e000000000005) && sprites[1].SortingLayer == 2);
 			REQUIRE(session->GetScripts() != nullptr);
 			observe("/Scripting/MemoryLimitMB", session->GetScripts()->GetMemoryState().SoftLimitBytes == settings.Scripting.MemoryLimitMB * MiB);
 			CallOrFail(client, "play.stop", Json::object());

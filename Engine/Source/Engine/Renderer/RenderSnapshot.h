@@ -33,17 +33,19 @@
 // mapping) and the memory resource of the containers (decision 9). The M23 contract (C23.1,
 // Docs/Decisions/0034-m23-contract.md decisions 2 to 5) changed existing members only, as phase 2's ledger lets it: the mesh
 // draw item's PreviousWorld for its instance record, the point lights' shadows and the quality settings' two reference
-// paths; its C23.3 (decision 27) the mesh draw item's deformation (JointPalette, MorphWeights). Additions are frozen-header
-// changes reviewed by their contract owner; no member here changes meaning. A plain value type: copyable, movable,
-// thread-compatible.
+// paths; its C23.3 (decision 27) the mesh draw item's deformation (JointPalette, MorphWeights). The M21 contract (C21.1,
+// Docs/Decisions/0032-m21-contract.md decision 4) added the sprites (SpriteItem, Sprites) after Output, as ADR 0028's
+// phase-2 ledger places phase 2's members, and C21.2 (decisions 21, 22 and 24) the tilemaps and the 2D lights after them
+// (TilemapItem, Tilemaps, Light2DItem, Lights2D) and a sprite's normal map. Additions are frozen-header changes reviewed by
+// their contract owner; no member here changes meaning. A plain value type: copyable, movable, thread-compatible.
 //
 // Containers (M18, R-ARENA): the snapshot's own containers that grow with the scene (Meshes, Lights, Texts, PickTable,
-// Icons, and the commands of DebugDraw and AnnotationDraw) are std::pmr containers. A snapshot built with
-// RenderSnapshot(resource) allocates them from that memory resource, which must outlive the snapshot; a default-constructed
-// one, and every copy (std::pmr's copy construction), allocates from std::pmr::get_default_resource(), the global heap
-// unless a host changed it. Assignment keeps the target's resource. SelectedEntities (a handful of UUIDs, copied from the
-// host's selection) and the nested containers (a mesh item's Materials, JointPalette and MorphWeights, a text's Text, the
-// annotations' label list) keep the default allocator.
+// Icons, M21's Sprites, Tilemaps and Lights2D, and the commands of DebugDraw and AnnotationDraw) are std::pmr containers.
+// A snapshot built with RenderSnapshot(resource) allocates them from that memory resource, which must outlive the
+// snapshot; a default-constructed one, and every copy (std::pmr's copy construction), allocates from
+// std::pmr::get_default_resource(), the global heap unless a host changed it. Assignment keeps the target's resource.
+// SelectedEntities (a handful of UUIDs, copied from the host's selection) and the nested containers (a mesh item's
+// Materials, JointPalette and MorphWeights, a text's Text, the annotations' label list) keep the default allocator.
 //
 // The output stage (M18, decisions 5 to 8): a view renders its scene at the scene resolution of RenderOutputSettings (the
 // view's size by default, which renders exactly as before the output stage), then the output stage upscales the scene image
@@ -397,8 +399,82 @@ namespace Engine {
 		bool operator==(const RenderOutputMapping&) const = default;
 	};
 
+	// One SpriteRenderer to draw (M21, C21.1; Docs/Decisions/0032-m21-contract.md decisions 3 and 4), from render extraction.
+	// The renderer resolves the sheet's frame (its texel rectangle and pivot) and the texture through the AssetManager and its
+	// GpuResourceCache, so extraction never touches assets, and draws the sprite in the Sprites stage as one QuadBatcher quad
+	// in world space (Asset/SpriteGeometry.h gives its corners), depth-tested against the opaque meshes without writing depth.
+	// A texture that is missing or fails to load (Texture, or the sheet's) draws its placeholder, the Missing checker, whole
+	// over the sprite's quad (the frame's, or the placeholder's 64 x 64 texels centred); a sheet that is missing or fails to
+	// load, or an out-of-range Frame, draws nothing (Scene/Components/SpriteRendererComponent.h states the one rule, which
+	// picking and bounds follow).
+	struct SpriteItem
+	{
+		glm::mat4 World = glm::mat4(1.0f); // the rendered (interpolated, §5.2) world matrix
+		AssetHandle Sheet{};               // the sprite sheet; null draws Texture whole
+		uint32_t Frame = 0;                // the index of the sheet's frame
+		// The texture drawn whole when Sheet is null; null draws the built-in white square (engine://Textures/SpriteSquare).
+		AssetHandle Texture{};
+		glm::vec4 Color = glm::vec4(1.0f); // linear RGB, straight alpha; multiplies every texel
+		bool FlipX = false;
+		bool FlipY = false;
+		float PixelsPerUnit = 16.0f; // texels per unit of the entity's local space
+		// The sprite's sorting layer: its index in the project's SortingLayers.Layers (RenderExtractionRequest::SortingLayers),
+		// 0 for an undeclared name.
+		uint32_t SortingLayer = 0;
+		int32_t OrderInLayer = 0;
+		// C21.2 (decision 22): the sprite takes the view's 2D lights (Lights2D): each texel is multiplied by the light
+		// accumulated at its pixel.
+		bool Lit = false;
+		// C21.2 (decision 21): a lit sprite's tangent-space normal map (a linear texture laid like the image's); null for the
+		// flat normal. Unlit sprites ignore it.
+		AssetHandle NormalMap{};
+		UUID Entity{};
+	};
+
+	// M21 (C21.2; Docs/Decisions/0032-m21-contract.md decision 20): what a 2D light lights (Light2DComponent's Light2DType).
+	enum class RenderLight2DType : uint8_t
+	{
+		Point,
+		Global
+	};
+
+	// One Light2D to draw (C21.2, decision 22), from render extraction: the Lights2D pass adds its light into the view's light
+	// accumulation (Renderer/Light2DShading.h states the formula), which lit sprites and tilemaps sample.
+	struct Light2DItem
+	{
+		RenderLight2DType Type = RenderLight2DType::Point;
+		glm::vec3 Position = glm::vec3(0.0f); // the rendered world position; a Point light lights in the plane z = Position.z
+		glm::vec3 Color = glm::vec3(1.0f);    // linear
+		float Intensity = 1.0f;
+		float Radius = 5.0f;  // Point: world units
+		float Falloff = 0.5f; // Point: [0, 1]
+		float Height = 1.0f;  // Point: world units above the lit plane, for normal-mapped sprites
+		UUID Entity{};
+	};
+
+	// One TilemapRenderer to draw (C21.2, decision 24), from render extraction. The renderer resolves the tilemap, its
+	// palette's sheets and their textures through its AssetManager and GpuResourceCache, as for sprites, and draws every
+	// non-empty cell's tile as the sprite TilemapRendererComponent.h describes (world matrix World times the translation to
+	// the cell's centre), in the Sprites stage through the QuadBatcher, in the tilemap's cell order: the chunks whose bounds
+	// (the union of their tiles' quads) meet the view only. A tilemap that is missing or fails to load draws nothing.
+	struct TilemapItem
+	{
+		glm::mat4 World = glm::mat4(1.0f); // the rendered (interpolated, §5.2) world matrix
+		AssetHandle Tilemap{};
+		glm::vec4 Color = glm::vec4(1.0f); // linear RGB, straight alpha; multiplies every tile's texels
+		float PixelsPerUnit = 16.0f;
+		uint32_t SortingLayer = 0; // as SpriteItem's
+		int32_t OrderInLayer = 0;
+		bool Lit = false;
+		// Where the tilemap draws among the snapshot's sprites: before Sprites[DrawPosition] (after all of them at
+		// Sprites.size()), the sprites and tilemaps forming one draw order sorted by (SortingLayer, OrderInLayer, canonical
+		// entity order). Tilemaps of one DrawPosition draw in their order in Tilemaps.
+		uint32_t DrawPosition = 0;
+		UUID Entity{};
+	};
+
 	// One view's render snapshot (§8.2). Vectors are in canonical entity order (§5.1), so a snapshot of a deterministic scene
-	// is deterministic.
+	// is deterministic; Sprites (M21) are in draw order instead.
 	struct RenderSnapshot
 	{
 		// The containers allocate from the default memory resource (see the file comment).
@@ -443,6 +519,16 @@ namespace Engine {
 		uint64_t SceneRevision = 0; // opaque host revision stamped alongside FrameIndex before Render, echoed by picking
 		// M18 (C18.1): the output stage (RenderOutputSettings); the default renders the scene at the view's size.
 		RenderOutputSettings Output{};
+		// M21 (C21.1, Docs/Decisions/0032-m21-contract.md decision 4): every effectively enabled SpriteRenderer, in draw order:
+		// sorted by (SortingLayer, OrderInLayer), ties in canonical entity order (a stable sort of the canonical list), so the
+		// Sprites stage draws them back to front exactly in this order.
+		std::pmr::vector<SpriteItem> Sprites{};
+		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 24): every effectively enabled TilemapRenderer with a
+		// Tilemap, in draw order (sorted as Sprites, each placed among them by its DrawPosition).
+		std::pmr::vector<TilemapItem> Tilemaps{};
+		// M21 (C21.2, decision 22): every effectively enabled Light2D, in canonical entity order, the order the Lights2D pass
+		// adds them in.
+		std::pmr::vector<Light2DItem> Lights2D{};
 	};
 
 	// World ray through pixel centre (x + 0.5, y + 0.5), top-left origin, in Camera.ViewportWidth/Height: scene pixels (M18:

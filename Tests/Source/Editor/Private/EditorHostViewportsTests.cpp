@@ -3,6 +3,7 @@
 #include "Editor/Private/EditorHostViewports.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Play/EditorPlayController.h"
+#include "EditorCore/Viewport/EditorCamera.h"
 #include "EditorCore/Viewport/GizmoController.h"
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
@@ -35,6 +36,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace Engine {
@@ -247,6 +249,49 @@ return vector.magnitude(direction - vector.create(0, 0, -1)) < 0.001)")
 					REQUIRE(snapshot.has_value());
 					CHECK(snapshot->Quality.ShadowMapSize == 512);
 					CHECK(snapshot->Quality.SsaoHalfResolution);
+				}
+			}
+			REQUIRE(client.Call("play.stop", Json::object()).has_value());
+		}
+
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 4, stream D): the editor's scene and game views copy the project's
+		// SortingLayers.Layers into their extraction request, in edit and in play (PlaySession::ExtractView takes the request
+		// as it is), as they copy the rendering quality (EditorHostViewports::Extract, over stream A's section and sprite
+		// extraction; decision 18's integration case).
+		TEST_CASE("EditorHostViewports: scene and game extraction carry the project's sorting layers")
+		{
+			Test::EditorTestFixture fixture("HostSortingLayers");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			editor.GetScene().CreateEntity("Camera").AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			Test::AutomationTestClient client(editor);
+			REQUIRE(client.Call("project.setSettings", Json{ { "patch", Json{ { "SortingLayers", Json{ { "Layers", Json::array({ "Default", "Background", "Foreground" }) } } } } } }).has_value());
+			// Front comes first in canonical order and has the lower OrderInLayer: only its sorting layer draws it last.
+			const Result<Json> front = client.Call("entity.create", Json{ { "name", "Front" }, { "components", Json{ { "SpriteRenderer", Json{ { "SortingLayer", "Foreground" }, { "OrderInLayer", 0 } } } } } });
+			const Result<Json> back = client.Call("entity.create", Json{ { "name", "Back" }, { "components", Json{ { "SpriteRenderer", Json{ { "SortingLayer", "Background" }, { "OrderInLayer", 5 } } } } } });
+			REQUIRE(front.has_value());
+			REQUIRE(back.has_value());
+			const std::vector<std::string> expected = { "Back", "Front" };
+			GizmoController gizmos(editor);
+			EditorHostViewports host(editor, gizmos);
+			for (const bool playing : { false, true })
+			{
+				CAPTURE(playing);
+				if (playing)
+					REQUIRE(client.Call("play.start", Json{ { "paused", true } }).has_value());
+				const Scene& shown = playing ? editor.GetPlay().GetSession()->GetScene() : editor.GetScene();
+				for (const ViewportView view : { ViewportView::Scene, ViewportView::Game })
+				{
+					const auto snapshot = host.Extract(view, 160, 90);
+					REQUIRE(snapshot.has_value());
+					std::vector<std::string> order;
+					for (const SpriteItem& sprite : snapshot->Sprites)
+						order.push_back(shown.FindEntityByID(sprite.Entity).GetName());
+					CHECK(order == expected);
+					REQUIRE(snapshot->Sprites.size() == 2);
+					CHECK(snapshot->Sprites[0].SortingLayer == 1);
+					CHECK(snapshot->Sprites[1].SortingLayer == 2);
 				}
 			}
 			REQUIRE(client.Call("play.stop", Json::object()).has_value());
@@ -657,6 +702,190 @@ end)
 			REQUIRE(client.Call("play.stop", Json::object()).has_value());
 		}
 
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 14, stream D): sprites write no EntityId, so the click selection asks
+		// PickSprite first, in the project's sorting layers, and takes the GPU pick's mesh only where no sprite shows (over
+		// stream A's PickSprite and sorting-layers section; decision 18's integration case).
+		TEST_CASE("EditorHostViewports: a click selects the sprite its pixel shows before the mesh the GPU pick reads"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::EditorTestFixture fixture("HostSpritePick");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			Test::AutomationTestClient client(editor);
+			REQUIRE(client.Call("project.setSettings", Json{ { "patch", Json{ { "SortingLayers", Json{ { "Layers", Json::array({ "Default", "Background", "Foreground" }) } } } } } }).has_value());
+			// A cube between the camera and the sprites, which the GPU pick reads at the centre pixel.
+			const Entity cube = editor.GetScene().CreateEntity("Cube");
+			cube.AddComponent<MeshRendererComponent>(MeshRendererComponent{ .Mesh = TypedAssetHandle<AssetType::Mesh>(BuiltinAssetHandles::CubeMesh), .Materials = {} });
+			cube.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = { 0.0f, 0.0f, 2.0f };
+			});
+			// Front comes first in canonical order and has the lower OrderInLayer: only its sorting layer draws it last.
+			REQUIRE(client.Call("entity.create", Json{ { "name", "Front" }, { "components", Json{ { "SpriteRenderer", Json{ { "SortingLayer", "Foreground" }, { "OrderInLayer", 0 } } } } } }).has_value());
+			REQUIRE(client.Call("entity.create", Json{ { "name", "Back" }, { "components", Json{ { "SpriteRenderer", Json{ { "SortingLayer", "Background" }, { "OrderInLayer", 5 } } } } } }).has_value());
+			REQUIRE(client.Call("viewport.setOptions", Json{ { "grid", false }, { "icons", false }, { "mode2D", true } }).has_value());
+			REQUIRE(client.Call("viewport.camera", Json{ { "position", { 0, 0, 500 } }, { "target", { 0, 0, 0 } }, { "orthographicSize", 2 } }).has_value());
+			const UUID front = editor.GetScene().FindEntityByPath("/Front").GetUUID();
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::SceneViewport, true).has_value());
+			{
+				HostGpuHarness harness(gpu, editor);
+				EditorHostViewports& host = harness.GetHost();
+				host.SetRectangle(ViewportView::Scene, { .Size = glm::vec2(96, 64) });
+				REQUIRE(harness.Frame(0).has_value());
+				const EditorViewportImage image = host.GetImage(ViewportView::Scene);
+				const EditorViewportClick click{ .View = ViewportView::Scene,
+					.Pixel = { image.Width / 2, image.Height / 2 },
+					.FrameIndex = 1,
+					.SceneRevision = image.SceneRevision,
+					.Sequence = 1,
+					.ViewGeneration = image.Generation };
+				REQUIRE(harness.Frame(1, click).has_value());
+				REQUIRE(harness.Frame(2).has_value());
+				REQUIRE(harness.Frame(3).has_value());
+				CHECK(editor.GetSelectionTarget() == SceneTarget::Edit);
+				CHECK(std::vector<UUID>(editor.GetSelection().begin(), editor.GetSelection().end()) == std::vector<UUID>{ front });
+			}
+		}
+
+		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 24, stream T1): tiles write no EntityId either, so the click
+		// selection picks a tile among the clicked image's tilemaps as it picks a sprite, selecting its tilemap's entity.
+		TEST_CASE("EditorHostViewports: a click selects the tilemap whose tile its pixel shows" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::EditorTestFixture fixture("HostTilemapPick");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			Test::AutomationTestClient client(editor);
+			// A 16-texel frame at the default 16 pixels per unit is one unit: the four tiles of chunk (0, 0) cover [0, 2]^2, and the
+			// view's centre shows the tile of cell (0, 0).
+			REQUIRE(client.Call("asset.create", Json{ { "type", "SpriteSheet" }, { "path", "Assets/Sprites/Tiles.spritesheet" }, { "values", Json{ { "Frames", Json::array({ Json{ { "Rect", Json{ { "Width", 16 }, { "Height", 16 } } } } }) } } } })
+					.has_value());
+			REQUIRE(client.Call("asset.create", Json{ { "type", "Tilemap" }, { "path", "Assets/Tilemaps/Ground.tilemap" }, { "values", Json{ { "ChunkSize", 2 }, { "Palette", Json::array({ Json{ { "Sheet", "Assets/Sprites/Tiles.spritesheet" } } }) }, { "Chunks", Json::array({ Json{ { "X", 0 }, { "Y", 0 }, { "Tiles", Json::array({ 1, 1, 1, 1 }) } } }) } } } })
+					.has_value());
+			REQUIRE(client.Call("entity.create", Json{ { "name", "Ground" }, { "components", Json{ { "TilemapRenderer", Json{ { "Tilemap", "Assets/Tilemaps/Ground.tilemap" } } } } } })
+					.has_value());
+			const UUID ground = editor.GetScene().FindEntityByPath("/Ground").GetUUID();
+			REQUIRE(client.Call("viewport.setOptions", Json{ { "grid", false }, { "icons", false }, { "mode2D", true } }).has_value());
+			REQUIRE(client.Call("viewport.camera", Json{ { "position", { 0.5, 0.5, 500 } }, { "target", { 0.5, 0.5, 0 } }, { "orthographicSize", 2 } }).has_value());
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::SceneViewport, true).has_value());
+			{
+				HostGpuHarness harness(gpu, editor);
+				EditorHostViewports& host = harness.GetHost();
+				host.SetRectangle(ViewportView::Scene, { .Size = glm::vec2(96, 64) });
+				REQUIRE(harness.Frame(0).has_value());
+				const EditorViewportImage image = host.GetImage(ViewportView::Scene);
+				const EditorViewportClick click{ .View = ViewportView::Scene,
+					.Pixel = { image.Width / 2, image.Height / 2 },
+					.FrameIndex = 1,
+					.SceneRevision = image.SceneRevision,
+					.Sequence = 1,
+					.ViewGeneration = image.Generation };
+				REQUIRE(harness.Frame(1, click).has_value());
+				REQUIRE(harness.Frame(2).has_value());
+				REQUIRE(harness.Frame(3).has_value());
+				CHECK(editor.GetSelectionTarget() == SceneTarget::Edit);
+				CHECK(std::vector<UUID>(editor.GetSelection().begin(), editor.GetSelection().end()) == std::vector<UUID>{ ground });
+			}
+		}
+
+		// M21 (decision 14; W21.1's review): the sprite is picked in the clicked image, among the sprites that image drew, so a
+		// sprite that a playing session moves on before the GPU pick completes (two frames later) is still the one selected.
+		TEST_CASE("EditorHostViewports: a click selects the sprite the clicked image showed, though it moves on before the pick completes"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::EditorTestFixture fixture("HostMovingSpritePick");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			Test::AutomationTestClient client(editor);
+			// A sprite at the view's centre whose 2D body falls under the project's gravity.
+			REQUIRE(client.Call("entity.create", Json{ { "name", "Faller" }, { "components", Json{ { "SpriteRenderer", Json::object() }, { "RigidBody2D", Json::object() }, { "CircleCollider2D", Json{ { "Radius", 0.5 } } } } } }).has_value());
+			const UUID faller = editor.GetScene().FindEntityByPath("/Faller").GetUUID();
+			REQUIRE(client.Call("viewport.setOptions", Json{ { "grid", false }, { "icons", false }, { "mode2D", true } }).has_value());
+			REQUIRE(client.Call("viewport.camera", Json{ { "position", { 0, 0, 500 } }, { "target", { 0, 0, 0 } }, { "orthographicSize", 2 } }).has_value());
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::SceneViewport, true).has_value());
+			REQUIRE(client.Call("play.start", Json{ { "lockstep", true } }).has_value());
+			{
+				HostGpuHarness harness(gpu, editor);
+				EditorHostViewports& host = harness.GetHost();
+				host.SetRectangle(ViewportView::Scene, { .Size = glm::vec2(96, 64) });
+				REQUIRE(harness.Frame(0).has_value());
+				const EditorViewportImage image = host.GetImage(ViewportView::Scene);
+				const EditorViewportClick click{ .View = ViewportView::Scene,
+					.Pixel = { image.Width / 2, image.Height / 2 },
+					.FrameIndex = 1,
+					.SceneRevision = image.SceneRevision,
+					.Sequence = 1,
+					.ViewGeneration = image.Generation };
+				REQUIRE(harness.Frame(1, click).has_value());
+				// The session steps on: the sprite falls well below the clicked pixel before the pick completes.
+				REQUIRE(client.Call("play.step", Json{ { "ticks", 40 } }).has_value());
+				REQUIRE(harness.Frame(2).has_value());
+				REQUIRE(harness.Frame(3).has_value());
+				CHECK(editor.GetSelectionTarget() == SceneTarget::Play);
+				CHECK(std::vector<UUID>(editor.GetSelection().begin(), editor.GetSelection().end()) == std::vector<UUID>{ faller });
+			}
+			REQUIRE(client.Call("play.stop", Json::object()).has_value());
+		}
+
+		// M21's milestone review: a playing SpriteAnimator writes its sprite's frame through the scene every tick, which moves the
+		// play scene's revision, while the click is still resolved against the clicked image: ticks between the click and the
+		// GPU pick's completion make no pick stale (decision 14), so the animated sprite is selected.
+		TEST_CASE("EditorHostViewports: a click selects a sprite whose animator plays on before the pick completes"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::EditorTestFixture fixture("HostAnimatedSpritePick");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			Test::AutomationTestClient client(editor);
+			// Two 16-texel frames, the clip changing frame every tick: one unit at the default 16 pixels per unit.
+			const Json frames = Json::array({ Json{ { "Rect", Json{ { "X", 0 }, { "Y", 0 }, { "Width", 16 }, { "Height", 16 } } } },
+				Json{ { "Rect", Json{ { "X", 16 }, { "Y", 0 }, { "Width", 16 }, { "Height", 16 } } } } });
+			const Json clips = Json::array({ Json{ { "Name", "Walk" }, { "Frames", Json::array({ Json{ { "Frame", 0 }, { "Ticks", 1 } }, Json{ { "Frame", 1 }, { "Ticks", 1 } } }) }, { "Loop", true } } });
+			REQUIRE(client.Call("asset.create", Json{ { "type", "SpriteSheet" }, { "path", "Assets/Sprites/Walk.spritesheet" }, { "values", Json{ { "Frames", frames }, { "Clips", clips } } } })
+					.has_value());
+			REQUIRE(client.Call("entity.create", Json{ { "name", "Walker" }, { "components", Json{ { "SpriteRenderer", Json{ { "Sheet", "Assets/Sprites/Walk.spritesheet" } } }, { "SpriteAnimator", Json{ { "Clip", "Walk" }, { "Playing", true } } } } } })
+					.has_value());
+			const UUID walker = editor.GetScene().FindEntityByPath("/Walker").GetUUID();
+			REQUIRE(client.Call("viewport.setOptions", Json{ { "grid", false }, { "icons", false }, { "mode2D", true } }).has_value());
+			REQUIRE(client.Call("viewport.camera", Json{ { "position", { 0, 0, 500 } }, { "target", { 0, 0, 0 } }, { "orthographicSize", 2 } }).has_value());
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::SceneViewport, true).has_value());
+			REQUIRE(client.Call("play.start", Json{ { "lockstep", true } }).has_value());
+			{
+				HostGpuHarness harness(gpu, editor);
+				EditorHostViewports& host = harness.GetHost();
+				host.SetRectangle(ViewportView::Scene, { .Size = glm::vec2(96, 64) });
+				REQUIRE(harness.Frame(0).has_value());
+				const EditorViewportImage image = host.GetImage(ViewportView::Scene);
+				const EditorViewportClick click{ .View = ViewportView::Scene,
+					.Pixel = { image.Width / 2, image.Height / 2 },
+					.FrameIndex = 1,
+					.SceneRevision = image.SceneRevision,
+					.Sequence = 1,
+					.ViewGeneration = image.Generation };
+				REQUIRE(harness.Frame(1, click).has_value());
+				// Two ticks: the animator writes the sprite's frame and its own step through the scene in each.
+				const uint64_t before = editor.GetPlay().GetSession()->GetScene().GetRevision();
+				REQUIRE(client.Call("play.step", Json{ { "ticks", 2 } }).has_value());
+				REQUIRE(editor.GetPlay().GetSession()->GetScene().GetRevision() != before);
+				REQUIRE(harness.Frame(2).has_value());
+				REQUIRE(harness.Frame(3).has_value());
+				CHECK(editor.GetSelectionTarget() == SceneTarget::Play);
+				CHECK(std::vector<UUID>(editor.GetSelection().begin(), editor.GetSelection().end()) == std::vector<UUID>{ walker });
+			}
+			REQUIRE(client.Call("play.stop", Json::object()).has_value());
+		}
+
 		TEST_CASE("EditorHostViewports: a click queued in the frame that lost the device is dropped without a failure"
 			* doctest::test_suite(Test::GpuSuite))
 		{
@@ -769,6 +998,48 @@ end)
 			CHECK(scene->SceneRevision == editor.GetScene().GetRevision());
 			REQUIRE(game->Meshes.size() == 1);
 			CHECK(game->Meshes.front().PickId != 0);
+		}
+
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 14, stream D): the 2D mode's grid lies in the plane z = 0.
+		TEST_CASE("EditorHostViewports: the 2D mode draws the scene view's grid in the plane z = 0 instead of the ground grid")
+		{
+			Test::EditorTestFixture fixture("HostGrid2D");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			GizmoController gizmos(editor);
+			EditorHostViewports host(editor, gizmos);
+			EditorViewportState& state = editor.GetViewportState();
+			state.SetOptions({ .Grid = true, .Icons = false });
+			const auto ground = host.Extract(ViewportView::Scene, 320, 180);
+			REQUIRE(ground.has_value());
+			CHECK(HasFlag(ground->Flags, RenderViewFlags::Grid));
+			CHECK(ground->DebugDraw.GetCommands().empty());
+
+			state.SetOptions({ .Grid = true, .Icons = false, .Mode2D = true });
+			const Result<ExplicitRenderCamera> flat = EditorCamera::Make2D(state.GetCamera());
+			REQUIRE(flat.has_value());
+			REQUIRE(state.SetCamera(*flat).has_value());
+			const auto plane = host.Extract(ViewportView::Scene, 320, 180);
+			REQUIRE(plane.has_value());
+			CHECK_FALSE(HasFlag(plane->Flags, RenderViewFlags::Grid));
+			REQUIRE_FALSE(plane->DebugDraw.GetCommands().empty());
+			for (const DebugDrawCommand& command : plane->DebugDraw.GetCommands())
+			{
+				const auto* line = std::get_if<DebugLine>(&command.Shape);
+				REQUIRE(line != nullptr);
+				CHECK(line->From.z == 0.0f);
+				CHECK(line->To.z == 0.0f);
+			}
+			// The game view never inherits the scene view's overlays, its grid included.
+			const auto game = host.Extract(ViewportView::Game, 320, 180);
+			REQUIRE(game.has_value());
+			CHECK(game->DebugDraw.GetCommands().empty());
+			// Without the Grid option the 2D mode draws no grid either.
+			state.SetOptions({ .Grid = false, .Icons = false, .Mode2D = true });
+			const auto hidden = host.Extract(ViewportView::Scene, 320, 180);
+			REQUIRE(hidden.has_value());
+			CHECK(hidden->DebugDraw.GetCommands().empty());
 		}
 
 		TEST_CASE("EditorHostViewports: scene options map to renderer flags without changing camera quality or annotations")

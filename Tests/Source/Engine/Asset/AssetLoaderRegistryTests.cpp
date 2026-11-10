@@ -24,7 +24,7 @@ namespace Engine {
 			// Every supported asset kind, in persisted AssetType order.
 			const std::vector<AssetType> expected = { AssetType::Scene, AssetType::Prefab, AssetType::Mesh, AssetType::Material,
 				AssetType::Texture, AssetType::Environment, AssetType::AudioClip, AssetType::Script, AssetType::Font, AssetType::Replay,
-				AssetType::SpriteSheet, AssetType::Skeleton, AssetType::AnimationClip };
+				AssetType::SpriteSheet, AssetType::Tilemap, AssetType::Skeleton, AssetType::AnimationClip };
 			CHECK(loaders.GetTypes() == expected);
 			for (const AssetType type : expected)
 			{

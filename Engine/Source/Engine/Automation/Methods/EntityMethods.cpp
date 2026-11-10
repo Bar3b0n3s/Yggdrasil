@@ -197,7 +197,7 @@ namespace Engine {
 
 		registry.Struct<EntityWorldBounds>("EntityWorldBounds", "One entity's world-space axis-aligned bounding box.")
 			.Field("entity", &EntityWorldBounds::Entity, "The entity.")
-			.Field("hasBounds", &EntityWorldBounds::HasBounds, "False when neither it nor (with includeDescendants) a descendant has a mesh.")
+			.Field("hasBounds", &EntityWorldBounds::HasBounds, "False when neither it nor (with includeDescendants) a descendant draws a mesh, a sprite or a tile.")
 			.Field("min", &EntityWorldBounds::Min, "The minimum corner [x, y, z] in metres; empty without bounds.")
 			.Field("max", &EntityWorldBounds::Max, "The maximum corner [x, y, z] in metres; empty without bounds.")
 			.Field("center", &EntityWorldBounds::Center, "The centre [x, y, z] in metres; empty without bounds.")
@@ -205,7 +205,7 @@ namespace Engine {
 
 		registry.Struct<EntityBoundsParams>("EntityBoundsParams", "The params of entity.bounds.")
 			.Field("entities", &EntityBoundsParams::Entities, "The entities: 16 hex digits, unique id prefixes or paths.")
-			.Field("includeDescendants", &EntityBoundsParams::IncludeDescendants, "Also include every descendant's meshes.")
+			.Field("includeDescendants", &EntityBoundsParams::IncludeDescendants, "Also include every descendant's meshes, sprites and tiles.")
 			.Field("target", &EntityBoundsParams::Target, "Which scene to read; the play scene while playing when absent.");
 
 		registry.Struct<EntityBoundsResult>("EntityBoundsResult", "The world bounds of the entities, in the order given.")
@@ -237,8 +237,8 @@ namespace Engine {
 		methods.Add(
 			{
 				.Name = "entity.bounds",
-				.Description = "Reports the world-space bounding box of each entity's meshes (and, by default, its descendants'), for layout "
-							   "checks.",
+				.Description = "Reports the world-space bounding box of what each entity draws (and, by default, its descendants): its meshes, the "
+							   "quad of its sprite and the quads of its tilemap's drawn tiles, for layout checks.",
 				.RequiredParams = { "entities" },
 				.ExposeAsTool = true,
 				.SupportsSceneTarget = true,

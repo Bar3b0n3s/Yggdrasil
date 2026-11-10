@@ -305,10 +305,10 @@ namespace Engine {
 
 		TEST_CASE("GoldenScene: the scaffold's sources and their imported copies are the Tests/Data fixtures")
 		{
-			// Projects/FeatureTest/Scaffold/Sources holds the files the scaffolds import, Golden.jsonl's, Formats.jsonl's and
-			// later ones' such as GoldenTextured.jsonl's (asset.import takes project paths or absolute ones, so the committed
-			// scaffolds import from inside the project): a subset mirror of Tests/Data/Assets, never a deliberately invalid
-			// fixture (ADR 0022 decision 16). Every source and every copy the imports made under Assets/ must stay
+			// Projects/FeatureTest/Scaffold/Sources holds the files the scaffolds import, Golden.jsonl's, Formats.jsonl's, M21's
+			// 2D scaffolds' and later ones' such as GoldenTextured.jsonl's (asset.import takes project paths or absolute ones, so
+			// the committed scaffolds import from inside the project): a subset mirror of Tests/Data/Assets, never a deliberately
+			// invalid fixture (ADR 0022 decision 16). Every source and every copy the imports made under Assets/ must stay
 			// byte-identical to its generated or pinned fixture (Tests/Data/Generate, FetchAssets.py fixture).
 			const std::filesystem::path sources = GetFeatureTestPath("Scaffold/Sources");
 			const Result<std::vector<std::filesystem::path>> entries = FileSystem::ListDirectory(sources, true);
@@ -330,10 +330,12 @@ namespace Engine {
 				mirrored.push_back(relative);
 			}
 
-			// Every copy an import made under Assets/, wherever its scaffold put it (the golden imports' M8 destinations,
-			// GoldenTextured.jsonl's textures with Compression Auto and None, AssetFormats.jsonl's uncompressed environment,
-			// SpriteSheets.jsonl's texture and every later scaffold's): each file whose name is a source's (the sources' names
-			// are unique) holds that source's bytes, so a copy edited or imported from another file fails here.
+			// Every copy an import made under Assets/, wherever its scaffold put it (the golden imports' M8 destinations, M21's
+			// sprite textures, the 2D lights' texture and normal map and the tilemap sheet's texture in directories of their own,
+			// Docs/Decisions/0032-m21-contract.md decisions 17 and 32, GoldenTextured.jsonl's textures with Compression Auto and
+			// None, AssetFormats.jsonl's uncompressed environment, SpriteSheets.jsonl's texture and every later scaffold's): each
+			// file whose name is a source's (the sources' names are unique) holds that source's bytes, so a copy edited or
+			// imported from another file fails here.
 			std::map<std::string, std::string> sourceByName;
 			for (const std::string& relative : mirrored)
 			{

@@ -5,28 +5,38 @@
 #include "Engine/Scene/Components/AnimatorComponent.h"
 #include "Engine/Scene/Components/AudioListenerComponent.h"
 #include "Engine/Scene/Components/AudioSourceComponent.h"
+#include "Engine/Scene/Components/BoxCollider2DComponent.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/CapsuleColliderComponent.h"
 #include "Engine/Scene/Components/CharacterControllerComponent.h"
+#include "Engine/Scene/Components/CircleCollider2DComponent.h"
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
 #include "Engine/Scene/Components/IDComponent.h"
+#include "Engine/Scene/Components/Light2DComponent.h"
 #include "Engine/Scene/Components/MeshColliderComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/NameComponent.h"
+#include "Engine/Scene/Components/PixelPerfectCameraComponent.h"
 #include "Engine/Scene/Components/PointLightComponent.h"
+#include "Engine/Scene/Components/PolygonCollider2DComponent.h"
 #include "Engine/Scene/Components/PostProcessComponent.h"
 #include "Engine/Scene/Components/PrefabInstanceComponent.h"
 #include "Engine/Scene/Components/PrefabLinkComponent.h"
 #include "Engine/Scene/Components/RelationshipComponent.h"
+#include "Engine/Scene/Components/RigidBody2DComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/SkinnedMeshComponent.h"
 #include "Engine/Scene/Components/SphereColliderComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
+#include "Engine/Scene/Components/SpriteAnimatorComponent.h"
+#include "Engine/Scene/Components/SpriteRendererComponent.h"
 #include "Engine/Scene/Components/TagsComponent.h"
 #include "Engine/Scene/Components/TextComponent.h"
+#include "Engine/Scene/Components/TilemapColliderComponent.h"
+#include "Engine/Scene/Components/TilemapRendererComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 
 namespace Engine {
@@ -51,6 +61,11 @@ namespace Engine {
 		AudioSourceComponent, AudioListenerComponent,
 		// Scripting (Registration/ScriptingRegistration.cpp)
 		ScriptComponent,
+		// Rendering2D (Registration/Rendering2DRegistration.cpp; M21, Docs/Decisions/0032-m21-contract.md decisions 3, 5, 6,
+		// 20 and 24)
+		SpriteRendererComponent, SpriteAnimatorComponent, PixelPerfectCameraComponent, Light2DComponent, TilemapRendererComponent,
+		// Physics2D (Registration/Physics2DRegistration.cpp; M21, Docs/Decisions/0032-m21-contract.md decisions 9 and 25)
+		RigidBody2DComponent, BoxCollider2DComponent, CircleCollider2DComponent, PolygonCollider2DComponent, TilemapColliderComponent,
 		// Animation (Registration/AnimationRegistration.cpp; M23, Docs/Decisions/0034-m23-contract.md decision 28). ADR 0028's
 		// phase-2 ledger: a milestone's new components go in categories of their own after Scripting, appended in landing
 		// order, so M23, the last lander, appends this category after M21's and M22's at its merge.
@@ -64,6 +79,10 @@ namespace Engine {
 	void RegisterPhysicsComponents(TypeRegistry& registry);
 	void RegisterAudioComponents(TypeRegistry& registry);
 	void RegisterScriptingComponents(TypeRegistry& registry);
+	// M21 (ADR 0028's phase-2 ledger: a milestone's new components go in categories of their own after Scripting).
+	void RegisterRendering2DComponents(TypeRegistry& registry);
+	void RegisterPhysics2DComponents(TypeRegistry& registry);
+	// M23 (Docs/Decisions/0034-m23-contract.md decision 28), after M21's categories.
 	void RegisterAnimationComponents(TypeRegistry& registry);
 
 	// Registers every built-in component (the functions above, in order) into a registry that is not frozen yet, then

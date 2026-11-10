@@ -20,7 +20,7 @@ namespace Engine {
 		bool IsNativeImporter(std::string_view importer)
 		{
 			return importer == "Material" || importer == "Prefab" || importer == "Scene" || importer == "Script" || importer == "Replay" || importer == "SoundEffect"
-				|| importer == "SpriteSheet";
+				|| importer == "SpriteSheet" || importer == "Tilemap";
 		}
 
 	}

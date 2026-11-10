@@ -3,6 +3,7 @@
 
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Platform/CrashHandler.h"
 #include "Support/TestCaseTracker.h"
 #include "Support/TestOptions.h"
 
@@ -93,8 +94,10 @@ namespace Engine {
 						return isReported;
 					});
 				}
-				// std::_Exit ends every thread without running destructors, so `reporter` is never joined or destroyed.
+				// std::_Exit ends every thread without running destructors, so `reporter` is never joined or destroyed. The
+				// exit is announced by the Critical line, so the crash handler's exit watch reports nothing.
 				std::fflush(nullptr);
+				CrashHandler::EndExitWatch();
 				std::_Exit(TestTimeoutExitCode);
 			}
 

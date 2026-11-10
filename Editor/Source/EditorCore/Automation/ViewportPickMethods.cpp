@@ -10,6 +10,7 @@
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/SceneRaycast.h"
+#include "Engine/Scene/SpritePicking.h"
 #include "Engine/Scene/TransformSystem.h"
 #include "Engine/Session/PlaySession.h"
 
@@ -52,6 +53,7 @@ namespace Engine {
 		const ProjectSettings* settings = context.GetProjectSettings();
 		if (settings == nullptr)
 			return MakeError(ErrorCode::InvalidState, "no project settings available for visual queries");
+		request.SortingLayers = settings->SortingLayers.Layers;
 		PlaySession* session = context.GetPlaySession();
 		const bool playTarget = session != nullptr && &session->GetScene() == scene;
 		if (!playTarget)
@@ -67,7 +69,14 @@ namespace Engine {
 		ViewportPickResult result{ .View = params.View, .Width = size.Width, .Height = size.Height };
 		if (!ray)
 			return result;
-		ENGINE_TRY_ASSIGN(const auto hit, RaycastScene(*scene, *assets, layers, { .Ray = ray->Ray, .MaxDistance = ray->MaxDistance, .MinDistance = ray->MinDistance, .Alpha = snapshot.Alpha }));
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 14): sprites draw over meshes without writing depth, so the sprite
+		// the pixel shows comes first, in the project's sorting layers; without one, the nearest mesh triangle.
+		ENGINE_TRY_ASSIGN(std::optional<SceneRaycastHit> hit,
+			PickSprite(*scene, *assets, { .Ray = ray->Ray, .MaxDistance = ray->MaxDistance, .MinDistance = ray->MinDistance, .Alpha = snapshot.Alpha, .SortingLayers = settings->SortingLayers.Layers }));
+		if (!hit)
+		{
+			ENGINE_TRY_ASSIGN(hit, RaycastScene(*scene, *assets, layers, { .Ray = ray->Ray, .MaxDistance = ray->MaxDistance, .MinDistance = ray->MinDistance, .Alpha = snapshot.Alpha }));
+		}
 		if (hit)
 		{
 			result.Raycast.Hit = true;
@@ -100,12 +109,14 @@ namespace Engine {
 			.Field("view", &ViewportPickResult::View, "The viewport queried.")
 			.Field("width", &ViewportPickResult::Width, "Actual framebuffer width used for the projection.")
 			.Field("height", &ViewportPickResult::Height, "Actual framebuffer height used for the projection.")
-			.Field("raycast", &ViewportPickResult::Raycast, "Nearest triangle in the camera's near-to-far interval.");
+			.Field("raycast", &ViewportPickResult::Raycast,
+				"The sprite or tile the pixel shows (the last drawn whose quad covers it: submesh 0, triangle 0 or 1 of the quad; a tile is "
+				"reported as its tilemap's entity), else the nearest mesh triangle, in the camera's near-to-far interval.");
 	}
 
 	void RegisterViewportPickMethods(MethodRegistry& methods)
 	{
-		methods.Add({ .Name = "viewport.pick", .Description = "Queries visual triangles at a viewport pixel without a GPU, clipping to the camera's near and far planes. Returns the hit without changing selection.", .RequiredParams = { "x", "y", "view" }, .SupportsDryRun = true, .AllowedInBatch = true, .Examples = { { .Description = "Query the centre of the default scene viewport.", .Params = Json{ { "x", 320 }, { "y", 180 }, { "view", "scene" } } } } },
+		methods.Add({ .Name = "viewport.pick", .Description = "Queries what a viewport pixel shows without a GPU, clipping to the camera's near and far planes: the last-drawn sprite or tile whose quad covers it, in the project's sorting layers (a tile names its tilemap's entity), else the nearest mesh triangle. Returns the hit without changing selection.", .RequiredParams = { "x", "y", "view" }, .SupportsDryRun = true, .AllowedInBatch = true, .Examples = { { .Description = "Query the centre of the default scene viewport.", .Params = Json{ { "x", 320 }, { "y", 180 }, { "view", "scene" } } } } },
 			&Automation::ViewportPick);
 	}
 

@@ -377,9 +377,22 @@ namespace Engine {
 			Publish(*callbackFailure, owner);
 	}
 
-	void ScriptEngine::State::InvokePhysics(InstanceKey key, const PhysicsEvent& event)
+	void ScriptEngine::State::InvokePhysics(InstanceKey key, const PhysicsEvent& event, bool is2D)
 	{
 		ENGINE_CORE_ASSERT(key.Entity == event.Self, "A physics callback reaches an instance of its receiving entity");
+		if (is2D)
+		{
+			// M21 (Docs/Decisions/0032-m21-contract.md decision 13): the 2D world's callbacks, the contact's vectors in the plane.
+			switch (event.Type)
+			{
+				case PhysicsEventType::CollisionEnter: Invoke(key, "OnCollisionEnter2D", &event); return;
+				case PhysicsEventType::CollisionExit:  Invoke(key, "OnCollisionExit2D", &event); return;
+				case PhysicsEventType::TriggerEnter:   Invoke(key, "OnTriggerEnter2D", &event); return;
+				case PhysicsEventType::TriggerExit:    Invoke(key, "OnTriggerExit2D", &event); return;
+			}
+			ENGINE_CORE_ASSERT(false, "Unknown 2D physics event");
+			return;
+		}
 		switch (event.Type)
 		{
 			case PhysicsEventType::CollisionEnter: Invoke(key, "OnCollisionEnter", &event); return;
@@ -394,6 +407,54 @@ namespace Engine {
 	{
 		ENGINE_CORE_ASSERT(key.Entity == event.Entity, "An animation event reaches an instance of its Animator's entity");
 		Invoke(key, "OnAnimationEvent", nullptr, false, &event);
+	}
+
+	void ScriptEngine::State::DeliverPhysics(const PhysicsEvent& event, bool is2D)
+	{
+		AssertOwner();
+		// Every instance of the receiving entity, in slot order; each holds or discards its own events. A callback may
+		// remove a later slot's instance, which then receives nothing.
+		for (const InstanceKey key : InstancesOf(event.Self))
+		{
+			const auto found = Instances.find(key);
+			if (found == Instances.end())
+				continue;
+			if (!found->second.Started || !found->second.PendingEvents.empty())
+			{
+				// Physics marks this side entered whether or not a script observes it, so dropping the event would leave a
+				// later exit unpaired. Hold it (behind any earlier held event of either world or of an Animator) until the
+				// instance has started; a removed or faulted instance discards its queue.
+				if (!Engine.IsStopped() && !Engine.IsReadOnly() && !found->second.FaultDisabled && !found->second.DestroyPrepared
+					&& found->second.Table != LUA_NOREF)
+					found->second.PendingEvents.emplace_back(Detail::HeldPhysicsEvent{ .Event = event, .Is2D = is2D });
+				continue;
+			}
+			InvokePhysics(key, event, is2D);
+		}
+	}
+
+	void ScriptEngine::State::PublishPhysicsDiagnostic(const PhysicsDiagnostic& diagnostic, std::string_view callback)
+	{
+		AssertOwner();
+		if (diagnostic.Severity != DiagnosticSeverity::Error)
+			return;
+		ScriptError error{};
+		error.Kind = ScriptErrorKind::Runtime;
+		error.Message = diagnostic.Code + ": " + diagnostic.Message;
+		error.Callback = std::string(callback);
+		error.Entity = diagnostic.Entity;
+		// Physics already logged this diagnostic; retain script observability and policy without a second log entry. The
+		// diagnostic belongs to the entity, not to one of its behaviours, so it names, and disables, the entity's first slot
+		// that has an instance (a slot without a script has none), as an entity-addressed evaluation does; an entity without
+		// an instance is named from the scene.
+		const std::vector<InstanceKey> instances = InstancesOf(diagnostic.Entity);
+		if (instances.empty())
+		{
+			if (const Entity entity = Engine.GetHost().GetScene().FindEntityByID(diagnostic.Entity))
+				error.EntityName = entity.GetName();
+		}
+		const uint32_t slot = instances.empty() ? 0 : instances.front().Slot;
+		Publish(std::move(error), { .Entity = diagnostic.Entity, .Case = CurrentOwner.Case, .Slot = slot }, false, true);
 	}
 
 	void ScriptEngine::State::DeliverPendingEvents()
@@ -437,8 +498,8 @@ namespace Engine {
 				if (Engine.IsStopped() || current == Instances.end() || current->second.Serial != serial || current->second.FaultDisabled
 					|| current->second.DestroyPrepared)
 					break;
-				if (const PhysicsEvent* physics = std::get_if<PhysicsEvent>(&event))
-					InvokePhysics(key, *physics);
+				if (const Detail::HeldPhysicsEvent* physics = std::get_if<Detail::HeldPhysicsEvent>(&event))
+					InvokePhysics(key, physics->Event, physics->Is2D);
 				else
 					InvokeAnimation(key, std::get<AnimationEventRecord>(event));
 			}

@@ -6,6 +6,7 @@
 #include "Engine/Project/ProjectSettings.h"
 #include "Engine/Reflection/FieldType.h"
 #include "Engine/Scene/AnimationSystem.h"
+#include "Engine/Scene/Physics2DSystem.h"
 #include "Engine/Scene/PhysicsSystem.h"
 #include "Engine/Scripting/Sandbox.h"
 #include "Engine/Scripting/ScriptHost.h"
@@ -90,7 +91,7 @@ namespace Engine {
 	// behaviour that defines the callback receives it, in slot order; propagation to the next ancestor stops after an
 	// entity where any behaviour's callback returned true, and that entity's other behaviours still receive it.
 	// Non-bubbling callbacks ignore return values, so no slot can keep another from receiving one.
-	class ScriptEngine final : public IPhysicsEventListener, public IAnimationEventListener
+	class ScriptEngine final : public IPhysicsEventListener, public IPhysics2DEventListener, public IAnimationEventListener
 	{
 	public:
 		class ConstructionKey
@@ -140,6 +141,12 @@ namespace Engine {
 		// step and enter/exit pairs stay symmetric (§9.4); destruction or a fault discards held events.
 		void OnPhysicsEvent(const PhysicsEvent& event) override;
 		void OnPhysicsDiagnostic(const PhysicsDiagnostic& diagnostic) override;
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 13, stream P2): the 2D world's events, delivered as OnPhysicsEvent
+		// delivers the 3D ones (held for unstarted instances, every slot of the receiving entity in slot order), to the
+		// callbacks OnCollisionEnter2D (with the contact), OnCollisionExit2D, OnTriggerEnter2D and OnTriggerExit2D; and its
+		// diagnostics, turned into script errors as OnPhysicsDiagnostic turns the 3D ones.
+		void OnPhysics2DEvent(const PhysicsEvent& event) override;
+		void OnPhysics2DDiagnostic(const PhysicsDiagnostic& diagnostic) override;
 		// M23 (Docs/Decisions/0034-m23-contract.md decision 31): an AnimationSystem phase's event reaches
 		// OnAnimationEvent(self, event) on every slot of the event's entity, in slot order (decision 17), as physics callbacks
 		// do: a started instance at once, an unstarted one holding it (with its held physics callbacks, in arrival order)

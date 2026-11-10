@@ -3,33 +3,44 @@
 #include "Engine/Scene/ColliderDebugDraw.h"
 
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/TilemapData.h"
 #include "Engine/Core/Time.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Image.h"
+#include "Engine/Physics/PhysicsDiagnostics.h"
 #include "Engine/Physics/PhysicsTypes.h"
 #include "Engine/Renderer/DebugDrawList.h"
 #include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Renderer/SceneRenderer.h"
 #include "Engine/Renderer/ViewportCapture.h"
+#include "Engine/Scene/Components/BoxCollider2DComponent.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/CapsuleColliderComponent.h"
 #include "Engine/Scene/Components/CharacterControllerComponent.h"
+#include "Engine/Scene/Components/CircleCollider2DComponent.h"
 #include "Engine/Scene/Components/MeshColliderComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
+#include "Engine/Scene/Components/PolygonCollider2DComponent.h"
+#include "Engine/Scene/Components/RigidBody2DComponent.h"
+#include "Engine/Scene/Components/TilemapColliderComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
+#include "Engine/Scene/Physics2DSystem.h"
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
+#include "Support/InMemoryAssetManager.h"
 #include "Support/PhysicsTestScene.h"
 #include "Support/RenderReference.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <set>
 #include <span>
 #include <tuple>
@@ -551,6 +562,233 @@ namespace Engine {
 				CHECK(CountColor(*drawn, staticColor, 240, 0, 400, 120) > 0);
 			}
 			device.RunGarbageCollection();
+		}
+
+		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 28, stream P3): the 2D colliders draw as outlines in their
+		// entity's plane, by their body's category, a tilemap collider's merged boxes in one record. The tilemap's boxes are
+		// stream T2's (MergeTilemapBoxes, the composition's TilemapCollider), so this case runs at W21.2's integration
+		// (decision 33); the next case proves P3's play path alone.
+		TEST_CASE("ColliderDebugDraw: 2D colliders draw in their plane, a tilemap's merged boxes included")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Test::InMemoryAssetManager assets;
+			const auto place = [&scene](std::string_view name, const glm::vec3& position)
+			{
+				Entity entity = scene.CreateEntity(name);
+				entity.Patch<TransformComponent>([position](TransformComponent& transform)
+				{
+					transform.Translation = position;
+				});
+				return entity;
+			};
+			Entity wall = place("Wall", glm::vec3(0.0f, 0.0f, 2.0f));
+			wall.AddComponent<RigidBody2DComponent>(RigidBody2DComponent{ .Type = BodyType::Static });
+			wall.AddComponent<BoxCollider2DComponent>(BoxCollider2DComponent{ .HalfExtents = glm::vec2(1.0f, 0.5f) });
+			Entity ball = place("Ball", glm::vec3(3.0f, 0.0f, 0.0f));
+			ball.AddComponent<RigidBody2DComponent>();
+			ball.AddComponent<CircleCollider2DComponent>(CircleCollider2DComponent{ .Radius = 0.5f });
+			// A tilemap of two boxes: the solid row of chunk (0, 0) and cell (2, 0) of chunk (1, 0), 2 units a cell.
+			const AssetHandle tilemapHandle = UUID(8980);
+			Ref<TilemapData> tilemap = CreateRef<TilemapData>();
+			tilemap->CellSize = glm::vec2(2.0f);
+			tilemap->ChunkSize = 2;
+			tilemap->Palette = { TilemapTile{ .Solid = true } };
+			tilemap->Chunks = { TilemapChunk{ .X = 0, .Y = 0, .Tiles = { 1, 1, 0, 0 } }, TilemapChunk{ .X = 1, .Y = 0, .Tiles = { 1, 0, 0, 0 } } };
+			assets.Publish(tilemapHandle, tilemap, "Assets/Tilemaps/Debug.tilemap");
+			Entity ground = place("Ground", glm::vec3(-10.0f, -5.0f, 0.0f));
+			ground.AddComponent<TilemapColliderComponent>(TilemapColliderComponent{ .Tilemap = TypedAssetHandle<AssetType::Tilemap>(tilemapHandle) });
+			TransformSystem::Update(scene);
+
+			const std::vector<ColliderDebugShape> shapes = BuildCollider2DDebugDraw(scene, PhysicsLayerTable(), nullptr, &assets);
+			REQUIRE(shapes.size() == 3);
+			const ColliderDebugShape* wallShape = FindShape(shapes, wall.GetUUID());
+			REQUIRE(wallShape != nullptr);
+			CHECK(wallShape->Type == ColliderDebugShapeType::Lines);
+			CHECK(wallShape->Category == ColliderDebugCategory::Static);
+			// The rectangle's four edges, in the plane z = 2.
+			REQUIRE(wallShape->LineVertices.size() == 8);
+			for (const glm::vec3& vertex : wallShape->LineVertices)
+			{
+				CHECK(vertex.z == doctest::Approx(2.0f));
+				CHECK(std::abs(vertex.x) == doctest::Approx(1.0f));
+				CHECK(std::abs(vertex.y) == doctest::Approx(0.5f));
+			}
+			const ColliderDebugShape* ballShape = FindShape(shapes, ball.GetUUID());
+			REQUIRE(ballShape != nullptr);
+			CHECK(ballShape->Category == ColliderDebugCategory::Dynamic);
+			// A circle of 32 sides.
+			REQUIRE(ballShape->LineVertices.size() == 64);
+			for (const glm::vec3& vertex : ballShape->LineVertices)
+				CHECK(glm::length(glm::vec2(vertex) - glm::vec2(3.0f, 0.0f)) == doctest::Approx(0.5f).epsilon(1e-4));
+			const ColliderDebugShape* groundShape = FindShape(shapes, ground.GetUUID());
+			REQUIRE(groundShape != nullptr);
+			CHECK(groundShape->Category == ColliderDebugCategory::Static);
+			CHECK(groundShape->Body == ground.GetUUID());
+			// Two boxes, [0, 4] x [0, 2] and [4, 6] x [0, 2] of the tilemap's plane, moved by its entity: eight edges.
+			REQUIRE(groundShape->LineVertices.size() == 16);
+			for (const glm::vec3& vertex : groundShape->LineVertices)
+			{
+				CHECK(vertex.x >= -10.0f - 1e-4f);
+				CHECK(vertex.x <= -4.0f + 1e-4f);
+				CHECK(vertex.y >= -5.0f - 1e-4f);
+				CHECK(vertex.y <= -3.0f + 1e-4f);
+			}
+			// Without the asset manager the tilemap collider draws nothing.
+			CHECK(BuildCollider2DDebugDraw(scene, PhysicsLayerTable(), nullptr, nullptr).size() == 2);
+		}
+
+		// C21.2 (decision 28, stream P3): the play path, as "ColliderDebugDraw: a play session tells sleeping Dynamic bodies
+		// apart" and "... draws a body it did not create as Invalid" in the plane. With the session's Physics2DSystem a resting
+		// body that fell asleep is Sleeping, a falling one Dynamic and a body the session refused Invalid; without it the same
+		// scene draws as an edit scene: every Dynamic body Dynamic, the refused one included, since its shape builds.
+		TEST_CASE("ColliderDebugDraw: with the session's 2D system, sleeping 2D bodies are Sleeping and refused ones Invalid")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			const auto addBox = [&scene](std::string_view name, const glm::vec2& position, const glm::vec2& halfExtents, BodyType type)
+			{
+				Entity entity = scene.CreateEntity(name);
+				entity.Patch<TransformComponent>([position](TransformComponent& transform)
+				{
+					transform.Translation = glm::vec3(position, 0.0f);
+				});
+				entity.AddComponent<RigidBody2DComponent>(RigidBody2DComponent{ .Type = type });
+				entity.AddComponent<BoxCollider2DComponent>(BoxCollider2DComponent{ .HalfExtents = halfExtents });
+				return entity;
+			};
+			static_cast<void>(addBox("Ground", glm::vec2(0.0f, -0.5f), glm::vec2(20.0f, 0.5f), BodyType::Static));
+			const Entity sleeper = addBox("Sleeper", glm::vec2(0.0f, 0.5f), glm::vec2(0.5f), BodyType::Dynamic);
+			const Entity faller = addBox("Faller", glm::vec2(5.0f, 50.0f), glm::vec2(0.5f), BodyType::Dynamic);
+			// The fourth body in canonical order, beyond the session's limit of three: refused (PHYSICS_LIMIT_EXCEEDED), though
+			// its shape builds.
+			const Entity extra = addBox("Extra", glm::vec2(-5.0f, 50.0f), glm::vec2(0.5f), BodyType::Dynamic);
+			TransformSystem::Update(scene);
+			const Test::ExpectLog refused(LogLevel::Error, PhysicsLimitExceededCode);
+			Result<Scope<Physics2DSystem>> system =
+				Physics2DSystem::Create({ .RuntimeScene = &scene, .Limits = PhysicsWorldLimits{ .MaxBodies = 3 } });
+			REQUIRE_MESSAGE(system.has_value(), system.error().ToString());
+			// Three seconds at 60 Hz: the sleeper rests and sleeps, the faller is still falling.
+			for (uint64_t tick = 0; tick < 180; ++tick)
+			{
+				TransformSystem::Update(scene);
+				const SimStep step = SimStep::FromTick(tick, 1.0 / 60.0);
+				(*system)->PreStep(step);
+				(*system)->Step(step);
+				(*system)->PostStep(step);
+			}
+			TransformSystem::Update(scene);
+			REQUIRE((*system)->IsSleeping(sleeper.GetUUID()).value_or(false));
+			REQUIRE_FALSE((*system)->IsSleeping(faller.GetUUID()).value_or(true));
+
+			const std::vector<ColliderDebugShape> played = BuildCollider2DDebugDraw(scene, PhysicsLayerTable(), system->get(), nullptr);
+			const ColliderDebugShape* sleeping = FindShape(played, sleeper.GetUUID());
+			const ColliderDebugShape* falling = FindShape(played, faller.GetUUID());
+			const ColliderDebugShape* missing = FindShape(played, extra.GetUUID());
+			REQUIRE(sleeping != nullptr);
+			REQUIRE(falling != nullptr);
+			REQUIRE(missing != nullptr);
+			CHECK(sleeping->Category == ColliderDebugCategory::Sleeping);
+			CHECK(sleeping->Color == GetColliderDebugColor(ColliderDebugCategory::Sleeping));
+			CHECK(falling->Category == ColliderDebugCategory::Dynamic);
+			CHECK(missing->Category == ColliderDebugCategory::Invalid);
+
+			const std::vector<ColliderDebugShape> edited = BuildCollider2DDebugDraw(scene, PhysicsLayerTable(), nullptr, nullptr);
+			for (const Entity entity : { sleeper, faller, extra })
+			{
+				CAPTURE(entity.GetName());
+				const ColliderDebugShape* shape = FindShape(edited, entity.GetUUID());
+				REQUIRE(shape != nullptr);
+				CHECK(shape->Category == ColliderDebugCategory::Dynamic);
+			}
+		}
+
+		// C21.2 (decision 28, stream P3): the outlines of the three 2D collider components, without a tilemap, as the session
+		// places their shapes: a box with its offset, a gathered child's polygon as the convex hull of its points (an inner
+		// point dropped), both at their body's pose turned a quarter about Z, and a trigger circle; each in its own entity's
+		// plane, by its body's category. Options.Triggers leaves the trigger out.
+		TEST_CASE("ColliderDebugDraw: 2D boxes, circles and polygons outline their placed shapes in their entity's plane")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			// A quarter turn about +Z: (x, y) becomes (-y, x).
+			const glm::quat quarter(0.70710678f, 0.0f, 0.0f, 0.70710678f);
+			Entity cart = scene.CreateEntity("Cart");
+			cart.Patch<TransformComponent>([&quarter](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(2.0f, 1.0f, 3.0f);
+				transform.Rotation = quarter;
+			});
+			cart.AddComponent<RigidBody2DComponent>(RigidBody2DComponent{ .Type = BodyType::Kinematic });
+			cart.AddComponent<BoxCollider2DComponent>(BoxCollider2DComponent{ .HalfExtents = glm::vec2(1.0f, 0.5f), .Offset = glm::vec2(0.5f, 0.0f) });
+			// Gathered into the cart's body, one unit nearer the camera's -Z.
+			Entity flag = scene.CreateEntity("Flag", cart);
+			flag.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.0f, 0.0f, -1.0f);
+			});
+			flag.AddComponent<PolygonCollider2DComponent>(PolygonCollider2DComponent{
+				.Points = { glm::vec2(0.0f, 0.0f), glm::vec2(1.0f, 0.0f), glm::vec2(0.2f, 0.2f), glm::vec2(0.0f, 1.0f) } });
+			Entity coin = scene.CreateEntity("Coin");
+			coin.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(-3.0f, 0.0f, 0.0f);
+			});
+			coin.AddComponent<CircleCollider2DComponent>(CircleCollider2DComponent{ .Radius = 0.25f, .IsTrigger = true });
+			TransformSystem::Update(scene);
+
+			const std::vector<ColliderDebugShape> shapes = BuildCollider2DDebugDraw(scene, PhysicsLayerTable(), nullptr, nullptr);
+			REQUIRE(shapes.size() == 3);
+			// How many of `vertices` lie at `corner`: a corner of a closed outline ends two edges.
+			const auto countAt = [](const std::vector<glm::vec3>& vertices, const glm::vec3& corner)
+			{
+				return std::ranges::count_if(vertices, [&corner](const glm::vec3& vertex)
+				{
+					return glm::length(vertex - corner) < 1e-4f;
+				});
+			};
+
+			// The box spans x in [-0.5, 1.5] and y in [-0.5, 0.5] of the body; turned and moved: x in [1.5, 2.5], y in [0.5, 2.5].
+			const ColliderDebugShape* box = FindShape(shapes, cart.GetUUID());
+			REQUIRE(box != nullptr);
+			CHECK(box->Type == ColliderDebugShapeType::Lines);
+			CHECK(box->Category == ColliderDebugCategory::Kinematic);
+			CHECK(box->Body == cart.GetUUID());
+			REQUIRE(box->LineVertices.size() == 8);
+			for (const glm::vec3 corner : { glm::vec3(1.5f, 0.5f, 3.0f), glm::vec3(2.5f, 0.5f, 3.0f), glm::vec3(2.5f, 2.5f, 3.0f), glm::vec3(1.5f, 2.5f, 3.0f) })
+			{
+				CAPTURE(corner);
+				CHECK(countAt(box->LineVertices, corner) == 2);
+			}
+
+			// The polygon's hull is the triangle (0, 0), (1, 0), (0, 1) of the flag, which sits at the cart's origin: three
+			// edges in the plane z = 2.
+			const ColliderDebugShape* polygon = FindShape(shapes, flag.GetUUID());
+			REQUIRE(polygon != nullptr);
+			CHECK(polygon->Category == ColliderDebugCategory::Kinematic);
+			CHECK(polygon->Body == cart.GetUUID());
+			REQUIRE(polygon->LineVertices.size() == 6);
+			for (const glm::vec3 corner : { glm::vec3(2.0f, 1.0f, 2.0f), glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(1.0f, 1.0f, 2.0f) })
+			{
+				CAPTURE(corner);
+				CHECK(countAt(polygon->LineVertices, corner) == 2);
+			}
+
+			// The trigger circle: its own sensor body, 32 edges on the circle.
+			const ColliderDebugShape* circle = FindShape(shapes, coin.GetUUID());
+			REQUIRE(circle != nullptr);
+			CHECK(circle->Category == ColliderDebugCategory::Trigger);
+			CHECK(circle->Color == GetColliderDebugColor(ColliderDebugCategory::Trigger));
+			REQUIRE(circle->LineVertices.size() == 64);
+			for (const glm::vec3& vertex : circle->LineVertices)
+			{
+				CHECK(glm::length(glm::vec2(vertex) - glm::vec2(-3.0f, 0.0f)) == doctest::Approx(0.25f).epsilon(1e-4));
+				CHECK(vertex.z == 0.0f);
+			}
+
+			const std::vector<ColliderDebugShape> solid = BuildCollider2DDebugDraw(scene, PhysicsLayerTable(), nullptr, nullptr, { .Triggers = false });
+			CHECK(solid.size() == 2);
+			CHECK(FindShape(solid, coin.GetUUID()) == nullptr);
 		}
 	}
 

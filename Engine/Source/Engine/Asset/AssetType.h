@@ -26,10 +26,14 @@ namespace Engine {
 		Font,
 		Replay,
 		SpriteSheet, // M18 (ADR 0028's phase-1 ledger; Docs/Decisions/0029-m18-contract.md decision 14)
+		// M21 (C21.2; Docs/Decisions/0032-m21-contract.md decision 23): 12. ADR 0028's phase-2 ledger gives 12 to the first of
+		// M21 and M22 to land; M21 landed first, so M22 renumbers its own to follow it at its merge (the value lives only in
+		// cooked headers, so its checkouts' cooked caches are rebuilt).
+		Tilemap,
 		// M23 (C23.3; Docs/Decisions/0034-m23-contract.md decision 23): a skin's joints and an animation's channels, the glTF
 		// importer's sub-assets. ADR 0028's phase-2 ledger gives M23, the last lander, 14 and 15 after M21's and M22's types;
-		// on M23's branch they follow SpriteSheet, and M23's merge of main renumbers them after main's (the values live only in
-		// cooked headers, so its checkouts' cooked caches are rebuilt).
+		// M23's merge of main renumbers them after main's (13 and 14 after M21's Tilemap until M22's StringTable lands; the
+		// values live only in cooked headers, so its checkouts' cooked caches are rebuilt).
 		Skeleton,
 		AnimationClip
 	};
@@ -53,6 +57,7 @@ namespace Engine {
 			case AssetType::Font:          return "Font";
 			case AssetType::Replay:        return "Replay";
 			case AssetType::SpriteSheet:   return "SpriteSheet";
+			case AssetType::Tilemap:       return "Tilemap";
 			case AssetType::Skeleton:      return "Skeleton";
 			case AssetType::AnimationClip: return "AnimationClip";
 		}
@@ -76,6 +81,7 @@ namespace Engine {
 			AssetType::Font,
 			AssetType::Replay,
 			AssetType::SpriteSheet,
+			AssetType::Tilemap,
 			AssetType::Skeleton,
 			AssetType::AnimationClip,
 		};

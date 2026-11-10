@@ -9,10 +9,11 @@ Use this skill when a game built through automation does something unexpected: a
 
 ## Pages
 
-Three reference pages beside this file hold the error tables and the native module's rules; each is a `docs.get` topic and a file in this skill's directory:
+Four reference pages beside this file hold the error tables, the native module's rules and the 2D checks; each is a `docs.get` topic and a file in this skill's directory:
 - `skills/game-debugging/error-codes` ([error-codes.md](error-codes.md)): the JSON-RPC errors, the engine `ErrorCode` values, the script error kinds and the MCP bridge errors, each with its fix.
 - `skills/game-debugging/validation-codes` ([validation-codes.md](validation-codes.md)): every `project.validate` code with its severity, what it means and its fix.
 - `skills/game-debugging/native-module` ([native-module.md](native-module.md)): a game's C++ module: why it does not run, its build diagnostics and refusals, native components, fatal stops, what a module reaches, and its provenance and format rules.
+- `skills/game-debugging/sprites-2d` ([sprites-2d.md](sprites-2d.md)): 2D games: a sprite or tilemap that does not show, sort, animate, light or look sharp, and a 2D body, tilemap collider or 2D callback that does not behave, with the 2D collider overlay and `physics2d.bodyInfo`.
 
 ## The observability loop
 

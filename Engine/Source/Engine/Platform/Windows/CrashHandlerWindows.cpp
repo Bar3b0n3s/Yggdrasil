@@ -32,6 +32,16 @@
 // WriteFatalErrorReport keeps the fatal error as the reason once its text is copied, and the reporter writes the
 // interrupted report again under its name. Only a thread that crashes again while it prints the line ends the process
 // at once.
+//
+// The exit watch (CrashHandler::BeginExitWatch) writes its report on the exiting thread itself, as WriteFatalErrorReport
+// does, from one of the two places every end of the process except TerminateProcess passes: exit()'s path, through a
+// handler registered with std::atexit, which runs while the other threads still run and before the static objects of
+// the crash handler are destroyed; and ExitProcess's path, through the executable's TLS callback at DLL_PROCESS_DETACH,
+// which the loader calls on the exiting thread after the system ended every other thread. exit() also ends in
+// ExitProcess, so its handler turns the watch off and the TLS callback leaves that exit alone; by then the static objects
+// the report needs are gone. That far into ExitProcess DbgHelp's module refresh ends the process, so the TLS callback's
+// report walks its stack with RtlCaptureStackBackTrace and names modules through the loader (WriteModuleStackTrace);
+// MiniDumpWriteDump still works there.
 
 #if defined(ENGINE_PLATFORM_WINDOWS)
 
@@ -92,6 +102,9 @@ namespace Engine {
 			DWORD ThreadId = 0;
 			std::span<const std::string_view> ReasonParts{}; // empty: the reason describes Exception's record
 			ReportFiles* InterruptedFiles = nullptr;         // a fatal-error report the crash interrupted, written again
+			// The exit watch's report at DLL_PROCESS_DETACH, written by the exiting thread itself: its stack trace is
+			// WriteModuleStackTrace's, because DbgHelp's module refresh ends a process that is that far into ExitProcess.
+			bool IsProcessDetaching = false;
 		};
 
 		// The fatal-error report that WriteFatalErrorReport is writing. A crash inside it hands the reporter this report
@@ -157,7 +170,8 @@ namespace Engine {
 		// The longest file name a report path appends to its directory: "\crash-<20 digits>-<10 digits>-<2 digits>.txt".
 		constexpr size_t MaxReportFileNameLength = 64;
 		// The exception codes recorded in the minidump for crashes that are not structured exceptions.
-		constexpr DWORD StatusFatalAppExit = 0x40000015;             // STATUS_FATAL_APP_EXIT: abort, pure virtual call, FatalError
+		// STATUS_FATAL_APP_EXIT: abort, a pure virtual call, FatalError and an unexpected exit.
+		constexpr DWORD StatusFatalAppExit = 0x40000015;
 		constexpr DWORD StatusInvalidCRuntimeParameter = 0xc0000417; // STATUS_INVALID_CRUNTIME_PARAMETER
 		constexpr DWORD StatusAssertionFailure = 0xc0000420;         // STATUS_ASSERTION_FAILURE: a debug runtime assertion
 		constexpr DWORD StatusHeapCorruption = 0xc0000374;
@@ -185,6 +199,11 @@ namespace Engine {
 		static constinit std::atomic<uintptr_t> s_HandlerFaultAddress{ 0 };
 		// Whether threads that start get CrashStackGuaranteeBytes (while a handler is installed), read by the TLS callback.
 		static constinit std::atomic<bool> s_ReservesOverflowStack{ false };
+		// The exit watch: whether it is on, the thread that began it, and whether its exit() handler is registered (once per
+		// process: std::atexit cannot take a handler back, so the handler does nothing while no watch is on).
+		static constinit std::atomic<bool> s_IsWatchingExits{ false };
+		static constinit std::atomic<DWORD> s_ExitWatchThreadId{ 0 };
+		static constinit std::atomic<bool> s_IsExitHandlerRegistered{ false };
 		// The reason in the report, composed by the reporter, and the reason and stderr line composed by the thread that
 		// finishes the crash. None of them is on a crashing thread's stack.
 		static CrashText<MaxCrashReasonLength> s_ReportReason;
@@ -192,6 +211,8 @@ namespace Engine {
 		static CrashText<MaxCrashReasonLength> s_LineReason;
 		static std::array<std::string_view, 1> s_LineReasonParts{};
 		static CrashText<4096> s_StandardErrorLine;
+		// The reason of the exit watch's report, composed by the exiting thread.
+		static CrashText<MaxCrashReasonLength> s_ExitReason;
 
 		[[noreturn]] static void TerminateCrashedProcess()
 		{
@@ -229,11 +250,17 @@ namespace Engine {
 			SetThreadStackGuarantee(&requested);
 		}
 
-		// The TLS callback (registered after the Utils namespace): runs on every new thread before the thread's own code.
+		// The exit watch's ExitProcess path, defined with the other report paths below.
+		static void OnProcessDetach();
+
+		// The TLS callback (registered after the Utils namespace): runs on every new thread before the thread's own code,
+		// and on the exiting thread when the process ends through ExitProcess.
 		static void NTAPI OnThreadNotification(PVOID /*module*/, DWORD reason, PVOID /*reserved*/)
 		{
 			if (reason == DLL_THREAD_ATTACH && s_ReservesOverflowStack.load(std::memory_order_acquire))
 				ReserveOverflowStack();
+			else if (reason == DLL_PROCESS_DETACH)
+				OnProcessDetach();
 		}
 
 		// The report path of `stem` and `extension` in s_State.ReportPath (UTF-16, NUL-terminated) and, for the text report,
@@ -425,6 +452,48 @@ namespace Engine {
 				writer.Append("  (unavailable)\n");
 		}
 
+		// The calling thread's stack without DbgHelp, one line per frame: "  #<n> <address> <module>+<offset>", the module
+		// named without its extension, as DbgHelp names it ("ntdll"); a frame outside every module has no module part. At
+		// DLL_PROCESS_DETACH, after the system ended every other thread, DbgHelp's module refresh ends the process, while
+		// RtlCaptureStackBackTrace and the loader's lookups still work; the minidump keeps the context for symbols later.
+		static void WriteModuleStackTrace(CrashReportWriter& writer)
+		{
+			writer.Append("Stack trace:\n");
+			std::array<void*, MaxStackFrames> frames{};
+			const USHORT count = RtlCaptureStackBackTrace(0, MaxStackFrames, frames.data(), nullptr);
+			for (USHORT index = 0; index < count; ++index)
+			{
+				const auto address = reinterpret_cast<uintptr_t>(frames[index]);
+				writer.Append("  #");
+				writer.AppendDecimal(index);
+				writer.Append(" ");
+				writer.AppendHex(address, 16);
+				HMODULE module = nullptr;
+				if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+						static_cast<LPCWSTR>(frames[index]), &module)
+					!= FALSE)
+				{
+					std::array<wchar_t, MAX_PATH> path{};
+					std::wstring_view name(path.data(), GetModuleFileNameW(module, path.data(), static_cast<DWORD>(path.size())));
+					if (const size_t separator = name.find_last_of(L"\\/"); separator != std::wstring_view::npos)
+						name.remove_prefix(separator + 1);
+					if (const size_t extension = name.find_last_of(L'.'); extension != std::wstring_view::npos)
+						name.remove_suffix(name.size() - extension);
+					// UTF-8 takes at most 3 bytes per UTF-16 unit.
+					std::array<char, MAX_PATH * 3> utf8{};
+					const int length = WideCharToMultiByte(CP_UTF8, 0, name.data(), static_cast<int>(name.size()), utf8.data(),
+						static_cast<int>(utf8.size()), nullptr, nullptr);
+					writer.Append(" ");
+					writer.Append(std::string_view(utf8.data(), static_cast<size_t>(std::max(length, 0))));
+					writer.Append("+");
+					writer.AppendHex(address - reinterpret_cast<uintptr_t>(module));
+				}
+				writer.Append("\n");
+			}
+			if (count == 0)
+				writer.Append("  (unavailable)\n");
+		}
+
 		// Creates the text report's file, under `files.Stem` when the report already has a name (an interrupted fatal-error
 		// report, replaced), otherwise under the first free name of this second and process, which goes into `files.Stem`.
 		// INVALID_HANDLE_VALUE when that fails.
@@ -481,7 +550,10 @@ namespace Engine {
 				// lock the crash left held.
 				writer.Flush();
 				files.Progress.store(ReportProgress::Started, std::memory_order_release);
-				WriteStackTrace(writer, request.Thread, *request.Exception->ContextRecord);
+				if (request.IsProcessDetaching)
+					WriteModuleStackTrace(writer);
+				else
+					WriteStackTrace(writer, request.Thread, *request.Exception->ContextRecord);
 				WriteCrashReportLogLines(writer);
 			}
 			FlushFileBuffers(file);
@@ -513,16 +585,17 @@ namespace Engine {
 			files.OpenFile = nullptr;
 		}
 
-		// "Crash: <reason>; report written to <path>", "...; incomplete report written to <path>" or "...; no report
-		// written", on stderr. The reason names a fault of the crash handler itself (DescribeRequestedCrash).
-		static void WriteStandardErrorLine(std::span<const std::string_view> reasonParts, ReportProgress progress)
+		// "<prefix><reason>; report written to <path>", "...; incomplete report written to <path>" or "...; no report
+		// written", on stderr: "Crash: " before a crash's reason, which names a fault of the crash handler itself
+		// (DescribeRequestedCrash), and nothing before the exit watch's ("Unexpected exit ...").
+		static void WriteStandardErrorLine(std::string_view prefix, std::span<const std::string_view> reasonParts, ReportProgress progress)
 		{
 			const HANDLE output = GetStdHandle(STD_ERROR_HANDLE);
 			if (output == nullptr || output == INVALID_HANDLE_VALUE)
 				return;
 			CrashText<4096>& line = s_StandardErrorLine;
 			line.Clear();
-			line.Append("Crash: ");
+			line.Append(prefix);
 			for (const std::string_view part : reasonParts)
 				line.Append(part);
 			switch (progress)
@@ -557,7 +630,7 @@ namespace Engine {
 				while (true)
 					Sleep(INFINITE);
 			}
-			WriteStandardErrorLine(DescribeRequestedCrash(s_LineReason, s_LineReasonParts),
+			WriteStandardErrorLine("Crash: ", DescribeRequestedCrash(s_LineReason, s_LineReasonParts),
 				s_ReporterFiles.Progress.load(std::memory_order_acquire));
 			TerminateCrashedProcess();
 		}
@@ -945,6 +1018,101 @@ namespace Engine {
 			s_FatalErrorReport.IsActive.store(false, std::memory_order_release);
 		}
 
+		// The two ends of the process that the exit watch reports.
+		enum class ExitPath : uint8_t
+		{
+			ExitFunction, // this C runtime's exit(): reported by its std::atexit handler while the other threads run
+			ExitProcess   // ExitProcess without this C runtime's exit(): reported at DLL_PROCESS_DETACH, every other thread gone
+		};
+
+		// The exit watch's reason in s_ExitReason: "Unexpected exit (exit()) on thread <id>, ..." or "Unexpected exit
+		// (ExitProcess) with exit code <code> on thread <id>, ...", ending with whether the exiting thread began the watch.
+		static void DescribeExit(ExitPath path, std::optional<DWORD> exitCode)
+		{
+			CrashText<MaxCrashReasonLength>& reason = s_ExitReason;
+			reason.Clear();
+			reason.Append(path == ExitPath::ExitFunction ? "Unexpected exit (exit())" : "Unexpected exit (ExitProcess)");
+			if (exitCode.has_value())
+			{
+				reason.Append(" with exit code ");
+				// An NTSTATUS-like code (0xc0000005) reads in hexadecimal, an exit code an application chose in decimal.
+				if (*exitCode >= 0x80000000u)
+					reason.AppendHex(*exitCode, 8);
+				else
+					reason.AppendDecimal(*exitCode);
+			}
+			const DWORD threadId = GetCurrentThreadId();
+			reason.Append(" on thread ");
+			reason.AppendDecimal(threadId);
+			reason.Append(threadId == s_ExitWatchThreadId.load() ? ", the thread that began the exit watch"
+																 : ", not the thread that began the exit watch");
+		}
+
+		// Writes the exit watch's report on the exiting thread, as WriteFatalErrorReport writes a fatal error's (a crash
+		// while it writes hands the report to the reporter, as a crash inside WriteFatalErrorReport does), and prints its
+		// stderr line. On exit()'s path a thread that is writing a crash report ends the process with it, so this one waits
+		// for that; on ExitProcess's path that thread is gone and its report never comes, so this one writes nothing.
+		static void WriteExitReport(ExitPath path, std::optional<DWORD> exitCode)
+		{
+			if (!CrashHandler::IsInstalled() || !AreCrashReportsEnabled())
+				return;
+			switch (EnterCrashReport(GetCurrentThreadId()))
+			{
+				case CrashReportEntry::Entered:
+					break;
+				case CrashReportEntry::Recursive:
+					// The exit came from inside a report this thread is writing, which is the process's last.
+					return;
+				case CrashReportEntry::Busy:
+				{
+					if (path == ExitPath::ExitProcess)
+						return;
+					while (true)
+						Sleep(INFINITE);
+				}
+			}
+
+			DescribeExit(path, exitCode);
+			const std::array<std::string_view, 1> parts = { s_ExitReason.GetText() };
+			CONTEXT context{};
+			RtlCaptureContext(&context);
+			EXCEPTION_RECORD record{};
+			record.ExceptionCode = StatusFatalAppExit;
+			record.ExceptionAddress = reinterpret_cast<PVOID>(context.Rip);
+			EXCEPTION_POINTERS pointers{ &record, &context };
+			BeginFatalErrorReport(&pointers, parts);
+
+			const CrashReportRequest request = {
+				.Exception = &pointers,
+				.Thread = GetCurrentThread(),
+				.ThreadId = GetCurrentThreadId(),
+				.ReasonParts = parts,
+				.IsProcessDetaching = path == ExitPath::ExitProcess,
+			};
+			ReportFiles& files = s_FatalErrorReport.Files;
+			WriteReportFiles(request, files);
+			WriteStandardErrorLine({}, parts, files.Progress.load());
+			EndFatalErrorReport();
+			LeaveCrashReport();
+		}
+
+		// The exit watch's handler of exit(), registered with std::atexit by the first BeginExitWatch.
+		static void __cdecl OnProcessExit()
+		{
+			if (s_IsWatchingExits.exchange(false))
+				WriteExitReport(ExitPath::ExitFunction, std::nullopt);
+		}
+
+		static void OnProcessDetach()
+		{
+			if (!s_IsWatchingExits.exchange(false))
+				return;
+			// ExitProcess has recorded the process's exit code by the time the loader calls the TLS callbacks.
+			DWORD exitCode = 0;
+			const bool isKnown = GetExitCodeProcess(GetCurrentProcess(), &exitCode) != FALSE && exitCode != STILL_ACTIVE;
+			WriteExitReport(ExitPath::ExitProcess, isKnown ? std::optional<DWORD>(exitCode) : std::nullopt);
+		}
+
 	}
 
 	// OnThreadNotification as a TLS callback of the executable: the C runtime's TLS directory (_tls_used) calls every
@@ -995,6 +1163,7 @@ namespace Engine {
 	{
 		if (!IsInstalled())
 			return;
+		EndExitWatch();
 		Utils::RemoveHandlers();
 		Utils::ResetCrashHandlerState();
 	}
@@ -1005,6 +1174,8 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidState, "no crash handler is installed");
 		if (!Utils::AreCrashReportsEnabled())
 			return MakeError(ErrorCode::InvalidState, "crash reports are disabled (the crash handler has no report directory)");
+		// FatalError ends the process after this report with its own exit code, which is no unexpected exit.
+		EndExitWatch();
 
 		switch (Utils::EnterCrashReport(GetCurrentThreadId()))
 		{
@@ -1049,6 +1220,28 @@ namespace Engine {
 				Utils::NativePathToUtf8(Utils::GetCrashReportDirectory()));
 		}
 		return std::move(*report);
+	}
+
+	Status CrashHandler::BeginExitWatch()
+	{
+		if (!IsInstalled())
+			return MakeError(ErrorCode::InvalidState, "no crash handler is installed");
+		if (!Utils::AreCrashReportsEnabled())
+			return MakeError(ErrorCode::InvalidState, "crash reports are disabled (the crash handler has no report directory)");
+		if (!Utils::s_IsExitHandlerRegistered.load())
+		{
+			if (std::atexit(&Utils::OnProcessExit) != 0)
+				return MakeError(ErrorCode::Io, "cannot watch exits: std::atexit refused the exit handler");
+			Utils::s_IsExitHandlerRegistered.store(true);
+		}
+		Utils::s_ExitWatchThreadId.store(GetCurrentThreadId());
+		Utils::s_IsWatchingExits.store(true);
+		return {};
+	}
+
+	void CrashHandler::EndExitWatch()
+	{
+		Utils::s_IsWatchingExits.store(false);
 	}
 
 	void CrashHandler::SimulateCrash()

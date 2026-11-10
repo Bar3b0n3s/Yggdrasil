@@ -30,6 +30,16 @@ Every component of the type registry, in canonical component order: the order of
 | `AudioSource` | Audio | Serializable, ScriptVisible, EditorVisible, Removable | Plays an audio clip, optionally positioned at the entity. |
 | `AudioListener` | Audio | Serializable, ScriptVisible, EditorVisible, Removable | Hears the scene from the entity's position and orientation. |
 | `Script` | Scripting | Serializable, ScriptVisible, EditorVisible, Removable, NoShortcut | Attaches Behaviour scripts to the entity, an ordered list of slots. |
+| `SpriteRenderer` | Rendering2D | Serializable, ScriptVisible, EditorVisible, Removable | Draws a sprite: a sprite sheet frame or a texture in the entity's XY plane. |
+| `SpriteAnimator` | Rendering2D | Serializable, ScriptVisible, EditorVisible, Removable | Plays a clip of the SpriteRenderer's sprite sheet, one step per clip frame for its ticks, driven by the fixed step. |
+| `PixelPerfectCamera` | Rendering2D | Serializable, ScriptVisible, EditorVisible, Removable | Renders the entity's camera at a reference resolution, upscaled by the largest whole factor that fits the view in a letterbox. |
+| `Light2D` | Rendering2D | Serializable, ScriptVisible, EditorVisible, Removable | A 2D light: lights the lit sprites and tilemaps of the view, never unlit ones; no shadows. |
+| `TilemapRenderer` | Rendering2D | Serializable, ScriptVisible, EditorVisible, Removable | Draws a tilemap's tiles in the entity's XY plane, each tile as a sprite of its palette entry's sheet frame. |
+| `RigidBody2D` | Physics2D | Serializable, ScriptVisible, EditorVisible, Removable | Simulates the entity in the 2D world: moves along world X and Y and rotates about world Z. |
+| `BoxCollider2D` | Physics2D | Serializable, ScriptVisible, EditorVisible, Removable | A rectangle collider in the entity's XY plane. |
+| `CircleCollider2D` | Physics2D | Serializable, ScriptVisible, EditorVisible, Removable | A circle collider in the entity's XY plane. |
+| `PolygonCollider2D` | Physics2D | Serializable, ScriptVisible, EditorVisible, Removable | A convex polygon collider in the entity's XY plane. |
+| `TilemapCollider` | Physics2D | Serializable, ScriptVisible, EditorVisible, Removable | The solid cells of a tilemap as 2D colliders: each chunk's solid cells merged into boxes, one static compound without a RigidBody2D. |
 | `Animator` | Animation | Serializable, ScriptVisible, EditorVisible, Removable | Poses a skeleton from layers of animation clips, blended by their weights, each fixed step; skinned meshes on the entity and below it follow. |
 | `SkinnedMesh` | Animation | Serializable, ScriptVisible, EditorVisible, Removable | Deforms the entity's MeshRenderer mesh: its skin follows the nearest Animator on the entity or above it, and its morph targets take weights. |
 
@@ -229,9 +239,9 @@ Script members of `Camera`:
 | `OrthographicSize` | proxy field | `number` | read/write | All | Half the visible height of the orthographic projection, in metres. |
 | `Primary` | proxy field | `boolean` | read/write | All | Whether this is the scene's primary camera (exactly one active camera should be). |
 | `Projection` | proxy field | `ProjectionType` | read/write | All | Perspective or orthographic projection. |
-| `ScreenToWorldRay` | method | `(self: Camera, x: number, y: number) -> (vector, vector)` |  | All | Ray through a viewport pixel center, origin top-left, using the rendered camera pose. |
+| `ScreenToWorldRay` | method | `(self: Camera, x: number, y: number) -> (vector, vector)` |  | All | Ray through a viewport pixel center, origin top-left, using the rendered camera pose; under a PixelPerfectCamera through its snapped reference view and the output mapping. |
 | `VerticalFov` | proxy field | `number` | read/write | All | The vertical field of view of the perspective projection, in degrees. |
-| `WorldToScreen` | method | `(self: Camera, point: vector) -> vector` |  | All | Project to top-left pixel coordinates and reverse-Z depth using the rendered camera pose. |
+| `WorldToScreen` | method | `(self: Camera, point: vector) -> vector` |  | All | Project to top-left pixel coordinates and reverse-Z depth using the rendered camera pose; under a PixelPerfectCamera through its snapped reference view and the output mapping. |
 
 ## DirectionalLight
 
@@ -725,6 +735,322 @@ Script members of `Script`:
 |---|---|---|---|---|---|
 | `Scripts` | proxy field | `{{Script: AssetRef?, Fields: {[string]: any}, ExecutionOrder: number}}` | read/write | All | The behaviours of the entity, in slot order; each slot is its own instance. A value a script writes holds at most 4096 bytes of text. |
 
+## SpriteRenderer
+
+Draws a sprite: a sprite sheet frame or a texture in the entity's XY plane.
+
+- Category: Rendering2D
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Sheet` | `AssetRef(SpriteSheet)` | `null` |  |  |  | The sprite sheet whose frame Frame is drawn; null draws Texture whole. |
+| `Frame` | `UInt32` | `0` | 0 to 65535 |  |  | The index of the sheet's frame to draw; an index the sheet lacks draws nothing (SPRITE_FRAME_OUT_OF_RANGE). |
+| `Texture` | `AssetRef(Texture)` | `null` |  |  |  | The texture drawn whole, pivoted at its centre, when Sheet is null; null draws the built-in white square. |
+| `Color` | `Color4` | `[1,1,1,1]` | 0 to 1 |  |  | The linear colour every texel is multiplied with, with opacity in the fourth component. |
+| `FlipX` | `Bool` | `false` |  |  |  | Whether the image is mirrored left to right about its pivot. |
+| `FlipY` | `Bool` | `false` |  |  |  | Whether the image is mirrored top to bottom about its pivot. |
+| `PixelsPerUnit` | `Float` | `16` | 0.001 to 65536 | px |  | How many texels of the image make one unit of the entity's local space; the sprite's size is its texels divided by this. |
+| `SortingLayer` | `String` | `"Default"` |  |  |  | The sorting layer name from project settings; later layers draw over earlier ones, and an undeclared name draws in the first. |
+| `OrderInLayer` | `Int32` | `0` |  |  |  | The draw order within the sorting layer: higher values draw over lower ones, equal values in canonical entity order. |
+| `Lit` | `Bool` | `false` |  |  |  | Whether 2D lights light the sprite; an unlit sprite keeps its texels unchanged. |
+| `NormalMap` | `AssetRef(Texture)` | `null` |  |  |  | A lit sprite's tangent-space normal map, laid like its image; point lights then light it by the angle to the light. Null: flat. |
+
+Script members of `SpriteRenderer`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Color` | proxy field | `Color` | read/write | All | The linear colour every texel is multiplied with, with opacity in the fourth component. |
+| `FlipX` | proxy field | `boolean` | read/write | All | Whether the image is mirrored left to right about its pivot. |
+| `FlipY` | proxy field | `boolean` | read/write | All | Whether the image is mirrored top to bottom about its pivot. |
+| `Frame` | proxy field | `number` | read/write | All | The index of the sheet's frame to draw; an index the sheet lacks draws nothing (SPRITE_FRAME_OUT_OF_RANGE). |
+| `Lit` | proxy field | `boolean` | read/write | All | Whether 2D lights light the sprite; an unlit sprite keeps its texels unchanged. |
+| `NormalMap` | proxy field | `AssetRef?` | read/write | All | A lit sprite's tangent-space normal map, laid like its image; point lights then light it by the angle to the light. Null: flat. |
+| `OrderInLayer` | proxy field | `number` | read/write | All | The draw order within the sorting layer: higher values draw over lower ones, equal values in canonical entity order. |
+| `PixelsPerUnit` | proxy field | `number` | read/write | All | How many texels of the image make one unit of the entity's local space; the sprite's size is its texels divided by this. |
+| `SetFrameByName` | method | `(self: SpriteRenderer, name: string) -> ()` |  | All | Set Frame to the index of the sprite sheet's frame named name; an error names the sheet when it has no such frame. |
+| `Sheet` | proxy field | `AssetRef?` | read/write | All | The sprite sheet whose frame Frame is drawn; null draws Texture whole. |
+| `SortingLayer` | proxy field | `string` | read/write | All | The sorting layer name from project settings; later layers draw over earlier ones, and an undeclared name draws in the first. A value a script writes holds at most 4096 bytes of text. |
+| `Texture` | proxy field | `AssetRef?` | read/write | All | The texture drawn whole, pivoted at its centre, when Sheet is null; null draws the built-in white square. |
+
+## SpriteAnimator
+
+Plays a clip of the SpriteRenderer's sprite sheet, one step per clip frame for its ticks, driven by the fixed step.
+
+- Category: Rendering2D
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `SpriteRenderer`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Clip` | `String` | `""` |  |  |  | The name of the sheet's clip to play; empty plays nothing. |
+| `Playing` | `Bool` | `true` |  |  |  | Whether the clip advances each fixed step; a clip without Loop clears it after its last step and holds its last frame. |
+| `Step` | `UInt32` | `0` | 0 to 1023 |  |  | The index of the clip step shown. |
+| `StepTicks` | `UInt32` | `0` | 0 to 65534 |  |  | How many fixed steps the current clip step has been shown. |
+
+Script members of `SpriteAnimator`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Clip` | proxy field | `string` | read/write | All | The name of the sheet's clip to play; empty plays nothing. A value a script writes holds at most 4096 bytes of text. |
+| `Play` | method | `(self: SpriteAnimator, clip: string) -> ()` |  | All | Play the sheet's clip named clip from its first step, which shows at the next fixed step's SpriteAnimation phase. |
+| `Playing` | proxy field | `boolean` | read/write | All | Whether the clip advances each fixed step; a clip without Loop clears it after its last step and holds its last frame. |
+| `Step` | proxy field | `number` | read/write | All | The index of the clip step shown. |
+| `StepTicks` | proxy field | `number` | read/write | All | How many fixed steps the current clip step has been shown. |
+| `Stop` | method | `(self: SpriteAnimator) -> ()` |  | All | Stop advancing the clip; the frame shown stays. |
+
+## PixelPerfectCamera
+
+Renders the entity's camera at a reference resolution, upscaled by the largest whole factor that fits the view in a letterbox.
+
+- Category: Rendering2D
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Camera`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `ReferenceWidth` | `UInt32` | `320` | 1 to 8192 | px |  | The width the scene renders at, in pixels. |
+| `ReferenceHeight` | `UInt32` | `180` | 1 to 8192 | px |  | The height the scene renders at, in pixels; the orthographic view is this many pixels of PixelsPerUnit high. |
+| `PixelsPerUnit` | `Float` | `16` | 0.001 to 65536 | px |  | How many scene pixels make one world unit; sprites of the same PixelsPerUnit map each texel to one pixel. |
+| `LetterboxColor` | `Color3` | `[0,0,0]` | 0 to 1 |  |  | The linear colour of the bars around the upscaled image. |
+
+Script members of `PixelPerfectCamera`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `LetterboxColor` | proxy field | `Color` | read/write | All | The linear colour of the bars around the upscaled image. |
+| `PixelsPerUnit` | proxy field | `number` | read/write | All | How many scene pixels make one world unit; sprites of the same PixelsPerUnit map each texel to one pixel. |
+| `ReferenceHeight` | proxy field | `number` | read/write | All | The height the scene renders at, in pixels; the orthographic view is this many pixels of PixelsPerUnit high. |
+| `ReferenceWidth` | proxy field | `number` | read/write | All | The width the scene renders at, in pixels. |
+
+## Light2D
+
+A 2D light: lights the lit sprites and tilemaps of the view, never unlit ones; no shadows.
+
+- Category: Rendering2D
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Type` | `Light2DType` | `"Point"` |  |  |  | Whether the light is a point light around the entity or a global light of the whole view. |
+| `Color` | `Color3` | `[1,1,1]` | 0 to 1 |  |  | The light's linear colour. |
+| `Intensity` | `Float` | `1` | 0 to 1000 |  |  | How strong the light is: its colour is multiplied by this, so values above 1 overbright. |
+| `Radius` | `Float` | `5` | 0.001 to 1e+05 | m |  | Point: how far the light reaches from the entity, in world units. |
+| `Falloff` | `Float` | `0.5` | 0 to 1 |  |  | Point: the fraction of the radius, from its edge inward, over which the light fades smoothly to nothing; 0 is a hard edge. |
+| `Height` | `Float` | `1` | 0.001 to 1e+05 | m |  | Point: how far above the lit plane the light sits, in world units; only normal-mapped sprites read it. |
+
+Script members of `Light2D`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Color` | proxy field | `Color` | read/write | All | The light's linear colour. |
+| `Falloff` | proxy field | `number` | read/write | All | Point: the fraction of the radius, from its edge inward, over which the light fades smoothly to nothing; 0 is a hard edge. |
+| `Height` | proxy field | `number` | read/write | All | Point: how far above the lit plane the light sits, in world units; only normal-mapped sprites read it. |
+| `Intensity` | proxy field | `number` | read/write | All | How strong the light is: its colour is multiplied by this, so values above 1 overbright. |
+| `Radius` | proxy field | `number` | read/write | All | Point: how far the light reaches from the entity, in world units. |
+| `Type` | proxy field | `Light2DType` | read/write | All | Whether the light is a point light around the entity or a global light of the whole view. |
+
+## TilemapRenderer
+
+Draws a tilemap's tiles in the entity's XY plane, each tile as a sprite of its palette entry's sheet frame.
+
+- Category: Rendering2D
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Tilemap` | `AssetRef(Tilemap)` | `null` |  |  |  | The tilemap whose tiles are drawn; null draws nothing. |
+| `Color` | `Color4` | `[1,1,1,1]` | 0 to 1 |  |  | The linear colour every tile's texels are multiplied with, with opacity in the fourth component. |
+| `PixelsPerUnit` | `Float` | `16` | 0.001 to 65536 | px |  | How many texels of a tile's frame make one unit of the entity's local space, as a sprite's. |
+| `SortingLayer` | `String` | `"Default"` |  |  |  | The sorting layer name from project settings; the tilemap sorts with the sprites, and an undeclared name draws in the first. |
+| `OrderInLayer` | `Int32` | `0` |  |  |  | The draw order within the sorting layer, among the sprites: higher values draw over lower ones, equal values in canonical entity order. |
+| `Lit` | `Bool` | `false` |  |  |  | Whether 2D lights light the tiles; unlit tiles keep their texels unchanged. |
+
+Script members of `TilemapRenderer`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Color` | proxy field | `Color` | read/write | All | The linear colour every tile's texels are multiplied with, with opacity in the fourth component. |
+| `Lit` | proxy field | `boolean` | read/write | All | Whether 2D lights light the tiles; unlit tiles keep their texels unchanged. |
+| `OrderInLayer` | proxy field | `number` | read/write | All | The draw order within the sorting layer, among the sprites: higher values draw over lower ones, equal values in canonical entity order. |
+| `PixelsPerUnit` | proxy field | `number` | read/write | All | How many texels of a tile's frame make one unit of the entity's local space, as a sprite's. |
+| `SortingLayer` | proxy field | `string` | read/write | All | The sorting layer name from project settings; the tilemap sorts with the sprites, and an undeclared name draws in the first. A value a script writes holds at most 4096 bytes of text. |
+| `Tilemap` | proxy field | `AssetRef?` | read/write | All | The tilemap whose tiles are drawn; null draws nothing. |
+
+## RigidBody2D
+
+Simulates the entity in the 2D world: moves along world X and Y and rotates about world Z.
+
+- Category: Physics2D
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Type` | `BodyType` | `"Dynamic"` |  |  |  | Static never moves; Kinematic is moved by script; Dynamic is simulated. |
+| `Mass` | `Float` | `1` | 0.001 to 1e+09 | kg |  | Mass in kilograms (Dynamic only). |
+| `Friction` | `Float` | `0.5` | >= 0 |  |  | The friction coefficient of the body's surfaces; a contact uses the geometric mean of both bodies' values. |
+| `Restitution` | `Float` | `0` | 0 to 1 |  |  | Bounciness, from no bounce (0) to a perfectly elastic bounce (1); a contact uses the larger of both bodies' values. |
+| `LinearDamping` | `Float` | `0.05` | >= 0 |  |  | How quickly linear velocity decays, per second. |
+| `AngularDamping` | `Float` | `0.05` | >= 0 |  |  | How quickly angular velocity decays, per second. |
+| `GravityFactor` | `Float` | `1` |  |  |  | The multiplier of the project's 2D gravity for this body (0 floats). |
+| `MotionQuality` | `MotionQuality` | `"Discrete"` |  |  |  | Discrete or continuous (LinearCast) collision detection. |
+| `AllowSleeping` | `Bool` | `true` |  |  |  | Whether the body may sleep when it comes to rest. |
+| `FixedRotation` | `Bool` | `false` |  |  |  | Whether a Dynamic body is kept from rotating. |
+| `Layer` | `String` | `"Default"` |  |  |  | Physics layer name from project settings (the 3D world's layers). |
+| `MaxLinearVelocity` | `Float` | `500` | >= 0 | m/s |  | The speed the body is clamped to, in metres per second. |
+| `MaxAngularVelocity` | `Float` | `47.12` | >= 0 | rad/s |  | The angular speed the body is clamped to, in radians per second. |
+| `EnhancedInternalEdgeRemoval` | `Bool` | `false` |  |  |  | Removes ghost collisions with internal edges of compound shapes; set it on bodies that roll or slide across tiles. |
+| `InitialLinearVelocity` | `Vec2` | `[0,0]` |  | m/s |  | The velocity along world X and Y the body starts with, in metres per second. |
+| `InitialAngularVelocity` | `Float` | `0` |  | rad/s |  | The angular velocity about world Z the body starts with, in radians per second, counter-clockwise seen from +Z. |
+
+Script members of `RigidBody2D`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `AddAngularImpulse` | method | `(self: RigidBody2D, impulse: number) -> ()` |  | All | Apply an angular impulse about +Z to a Dynamic 2D body. |
+| `AddForce` | method | `(self: RigidBody2D, force: vector) -> ()` |  | All | Apply a force in the XY plane to a Dynamic 2D body. |
+| `AddForceAtPosition` | method | `(self: RigidBody2D, force: vector, position: vector) -> ()` |  | All | Apply a force in the XY plane at a world position of the plane to a Dynamic 2D body. |
+| `AddImpulse` | method | `(self: RigidBody2D, impulse: vector) -> ()` |  | All | Apply an impulse in the XY plane to a Dynamic 2D body. |
+| `AddTorque` | method | `(self: RigidBody2D, torque: number) -> ()` |  | All | Apply a torque about +Z, in newton metres, to a Dynamic 2D body. |
+| `AllowSleeping` | proxy field | `boolean` | read/write | All | Whether the body may sleep when it comes to rest. |
+| `AngularDamping` | proxy field | `number` | read/write | All | How quickly angular velocity decays, per second. |
+| `EnhancedInternalEdgeRemoval` | proxy field | `boolean` | read/write | All | Removes ghost collisions with internal edges of compound shapes; set it on bodies that roll or slide across tiles. |
+| `FixedRotation` | proxy field | `boolean` | read/write | All | Whether a Dynamic body is kept from rotating. |
+| `Friction` | proxy field | `number` | read/write | All | The friction coefficient of the body's surfaces; a contact uses the geometric mean of both bodies' values. |
+| `GetAngularVelocity` | method | `(self: RigidBody2D) -> number` |  | All | Read the angular velocity about +Z in radians per second. |
+| `GetLinearVelocity` | method | `(self: RigidBody2D) -> vector` |  | All | Read the linear velocity in the XY plane (Z is 0). |
+| `GravityFactor` | proxy field | `number` | read/write | All | The multiplier of the project's 2D gravity for this body (0 floats). |
+| `InitialAngularVelocity` | proxy field | `number` | read/write | All | The angular velocity about world Z the body starts with, in radians per second, counter-clockwise seen from +Z. |
+| `InitialLinearVelocity` | proxy field | `vector` | read/write | All | The velocity along world X and Y the body starts with, in metres per second. |
+| `IsSleeping` | method | `(self: RigidBody2D) -> boolean` |  | All | Whether the 2D body is sleeping. |
+| `Layer` | proxy field | `string` | read/write | All | Physics layer name from project settings (the 3D world's layers). A value a script writes holds at most 4096 bytes of text. |
+| `LinearDamping` | proxy field | `number` | read/write | All | How quickly linear velocity decays, per second. |
+| `Mass` | proxy field | `number` | read/write | All | Mass in kilograms (Dynamic only). |
+| `MaxAngularVelocity` | proxy field | `number` | read/write | All | The angular speed the body is clamped to, in radians per second. |
+| `MaxLinearVelocity` | proxy field | `number` | read/write | All | The speed the body is clamped to, in metres per second. |
+| `MotionQuality` | proxy field | `MotionQuality` | read/write | All | Discrete or continuous (LinearCast) collision detection. |
+| `MoveKinematic` | method | `(self: RigidBody2D, position: vector, angle: number) -> ()` |  | All | Set a Kinematic 2D target in the plane, the angle in degrees about +Z, for the next fixed step. |
+| `Restitution` | proxy field | `number` | read/write | All | Bounciness, from no bounce (0) to a perfectly elastic bounce (1); a contact uses the larger of both bodies' values. |
+| `SetAngularVelocity` | method | `(self: RigidBody2D, velocity: number) -> ()` |  | All | Set a Dynamic 2D body's angular velocity about +Z in radians per second. |
+| `SetLinearVelocity` | method | `(self: RigidBody2D, velocity: vector) -> ()` |  | All | Set a Dynamic 2D body's linear velocity from the vector's X and Y. |
+| `Teleport` | method | `(self: RigidBody2D, position: vector, angle: number?) -> ()` |  | All | Place a 2D body at once in the plane (the entity keeps its Z), the angle in degrees about +Z kept when omitted, preserving velocity and resetting interpolation. |
+| `Type` | proxy field | `BodyType` | read/write | All | Static never moves; Kinematic is moved by script; Dynamic is simulated. |
+| `WakeUp` | method | `(self: RigidBody2D) -> ()` |  | All | Wake a sleeping 2D body. |
+
+## BoxCollider2D
+
+A rectangle collider in the entity's XY plane.
+
+- Category: Physics2D
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `HalfExtents` | `Vec2` | `[0.5,0.5]` | >= 0.001 | m |  | Half the rectangle's size along local X and Y; at least 1 mm. |
+| `Offset` | `Vec2` | `[0,0]` |  | m |  | The rectangle's centre relative to the entity, in its XY plane. |
+| `Angle` | `Float` | `0` |  | deg |  | The rectangle's rotation about the entity's Z axis, counter-clockwise, in degrees. |
+| `IsTrigger` | `Bool` | `false` |  |  |  | Whether the collider only detects overlaps instead of colliding. |
+
+Script members of `BoxCollider2D`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Angle` | proxy field | `number` | read/write | All | The rectangle's rotation about the entity's Z axis, counter-clockwise, in degrees. |
+| `HalfExtents` | proxy field | `vector` | read/write | All | Half the rectangle's size along local X and Y; at least 1 mm. |
+| `IsTrigger` | proxy field | `boolean` | read/write | All | Whether the collider only detects overlaps instead of colliding. |
+| `Offset` | proxy field | `vector` | read/write | All | The rectangle's centre relative to the entity, in its XY plane. |
+
+## CircleCollider2D
+
+A circle collider in the entity's XY plane.
+
+- Category: Physics2D
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Radius` | `Float` | `0.5` | >= 0.001 | m |  | The circle's radius; at least 1 mm. |
+| `Offset` | `Vec2` | `[0,0]` |  | m |  | The circle's centre relative to the entity, in its XY plane. |
+| `IsTrigger` | `Bool` | `false` |  |  |  | Whether the collider only detects overlaps instead of colliding. |
+
+Script members of `CircleCollider2D`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `IsTrigger` | proxy field | `boolean` | read/write | All | Whether the collider only detects overlaps instead of colliding. |
+| `Offset` | proxy field | `vector` | read/write | All | The circle's centre relative to the entity, in its XY plane. |
+| `Radius` | proxy field | `number` | read/write | All | The circle's radius; at least 1 mm. |
+
+## PolygonCollider2D
+
+A convex polygon collider in the entity's XY plane.
+
+- Category: Physics2D
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Points` | `Array<Vec2>` | `[[-0.5,-0.5],[0.5,-0.5],[0,0.5]]` |  | m |  | The points whose convex hull is the collider, 3 to 64 of them, in the collider's own space before Offset and Angle. |
+| `Offset` | `Vec2` | `[0,0]` |  | m |  | Where the polygon's origin sits relative to the entity, in its XY plane. |
+| `Angle` | `Float` | `0` |  | deg |  | The polygon's rotation about the entity's Z axis, counter-clockwise, in degrees. |
+| `IsTrigger` | `Bool` | `false` |  |  |  | Whether the collider only detects overlaps instead of colliding. |
+
+Script members of `PolygonCollider2D`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Angle` | proxy field | `number` | read/write | All | The polygon's rotation about the entity's Z axis, counter-clockwise, in degrees. |
+| `IsTrigger` | proxy field | `boolean` | read/write | All | Whether the collider only detects overlaps instead of colliding. |
+| `Offset` | proxy field | `vector` | read/write | All | Where the polygon's origin sits relative to the entity, in its XY plane. |
+| `Points` | proxy field | `{vector}` | read/write | All | The points whose convex hull is the collider, 3 to 64 of them, in the collider's own space before Offset and Angle. |
+
+## TilemapCollider
+
+The solid cells of a tilemap as 2D colliders: each chunk's solid cells merged into boxes, one static compound without a RigidBody2D.
+
+- Category: Physics2D
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Tilemap` | `AssetRef(Tilemap)` | `null` |  |  |  | The tilemap whose solid cells collide; null takes the entity's TilemapRenderer.Tilemap. |
+| `IsTrigger` | `Bool` | `false` |  |  |  | Whether the collider only detects overlaps instead of colliding. |
+
+Script members of `TilemapCollider`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `IsTrigger` | proxy field | `boolean` | read/write | All | Whether the collider only detects overlaps instead of colliding. |
+| `Tilemap` | proxy field | `AssetRef?` | read/write | All | The tilemap whose solid cells collide; null takes the entity's TilemapRenderer.Tilemap. |
+
 ## Animator
 
 Poses a skeleton from layers of animation clips, blended by their weights, each fixed step; skinned meshes on the entity and below it follow.
@@ -867,6 +1193,15 @@ What a camera draws behind the scene's geometry.
 |---|---|
 | `Skybox` | The scene's Environment skybox (its fallback colour when none is shown). |
 | `Color` | The camera's ClearColor. |
+
+### Light2DType
+
+What a 2D light lights.
+
+| Value | Description |
+|---|---|
+| `Point` | A circle of light around the entity, fading to nothing at its Radius. |
+| `Global` | The same light at every lit pixel of the view, wherever the entity is. |
 
 ### MotionQuality
 

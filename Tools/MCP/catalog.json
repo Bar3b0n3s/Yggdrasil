@@ -53,7 +53,7 @@
 		{
 			"name": "asset_create",
 			"method": "asset.create",
-			"description": "Creates a material, a sound effect or a sprite sheet (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
+			"description": "Creates a material, a sound effect, a sprite sheet or a tilemap (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "AssetCreateParams",
@@ -62,14 +62,14 @@
 				"properties": {
 					"type": {
 						"description": "What to create.",
-						"enum": ["Material", "Scene", "Prefab", "SoundEffect", "Folder", "SpriteSheet"]
+						"enum": ["Material", "Scene", "Prefab", "SoundEffect", "Folder", "SpriteSheet", "Tilemap"]
 					},
 					"path": {
-						"description": "The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx, .spritesheet; none for a folder); missing parent folders are created with it.",
+						"description": "The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx, .spritesheet, .tilemap; none for a folder); missing parent folders are created with it.",
 						"type": "string"
 					},
 					"values": {
-						"description": "A Material's, a SoundEffect's or a SpriteSheet's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, or a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads); absent for other types."
+						"description": "A Material's, a SoundEffect's, a SpriteSheet's or a Tilemap's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads, or a tilemap's CellSize, ChunkSize, Palette and Chunks; a sheet's Texture and a palette entry's Sheet take any asset reference: a handle, an Assets/ path or an engine:// path); absent for other types."
 					},
 					"dryRun": {
 						"description": "Validate and return the would-be result without applying anything.",
@@ -118,7 +118,7 @@
 		{
 			"name": "asset_get_properties",
 			"method": "asset.getProperties",
-			"description": "Returns every property of a native asset (a material, a sound effect or a sprite sheet) by registry name.",
+			"description": "Returns every property of a native asset (a material, a sound effect, a sprite sheet or a tilemap) by registry name.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "AssetGetPropertiesParams",
@@ -126,7 +126,7 @@
 				"type": "object",
 				"properties": {
 					"asset": {
-						"description": "The native asset (a material, a sound effect or a sprite sheet).",
+						"description": "The native asset (a material, a sound effect, a sprite sheet or a tilemap).",
 						"type": "string"
 					},
 					"ifRevision": {
@@ -192,7 +192,7 @@
 					},
 					"type": {
 						"description": "Only assets of this type; None lists every type.",
-						"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Skeleton", "AnimationClip"]
+						"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "Skeleton", "AnimationClip"]
 					},
 					"recursive": {
 						"description": "Also list the folders below dir.",
@@ -258,7 +258,7 @@
 		{
 			"name": "asset_set_properties",
 			"method": "asset.setProperties",
-			"description": "Applies an RFC 7386 merge patch to a native asset's properties (a material, a sound effect or a sprite sheet; an array such as a sheet's Frames is replaced whole) and writes it, as one undoable command. A running lockstep, recording, replay or test session sees the change only after it ends: asset reloads are deferred like script reloads.",
+			"description": "Applies an RFC 7386 merge patch to a native asset's properties (a material, a sound effect, a sprite sheet or a tilemap; an array such as a sheet's Frames or a tilemap's Palette is replaced whole) and writes it, as one undoable command. A running lockstep, recording, replay or test session sees the change only after it ends: asset reloads are deferred like script reloads.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "AssetSetPropertiesParams",
@@ -266,11 +266,11 @@
 				"type": "object",
 				"properties": {
 					"asset": {
-						"description": "The native asset (a material, a sound effect or a sprite sheet).",
+						"description": "The native asset (a material, a sound effect, a sprite sheet or a tilemap).",
 						"type": "string"
 					},
 					"values": {
-						"description": "An RFC 7386 merge patch of its properties: members replace, null resets a field."
+						"description": "An RFC 7386 merge patch of its properties: members replace, null resets a field, an array is replaced whole; a sprite sheet's Texture and a tilemap palette entry's Sheet take any asset reference (a handle, an Assets/ path or an engine:// path); a tilemap's ChunkSize set without Chunks keeps its painted cells, laid in chunks of the new size."
 					},
 					"dryRun": {
 						"description": "Validate and return the would-be result without applying anything.",
@@ -546,7 +546,7 @@
 		{
 			"name": "entity_bounds",
 			"method": "entity.bounds",
-			"description": "Reports the world-space bounding box of each entity's meshes (and, by default, its descendants'), for layout checks.",
+			"description": "Reports the world-space bounding box of what each entity draws (and, by default, its descendants): its meshes, the quad of its sprite and the quads of its tilemap's drawn tiles, for layout checks.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "EntityBoundsParams",
@@ -561,7 +561,7 @@
 						}
 					},
 					"includeDescendants": {
-						"description": "Also include every descendant's meshes.",
+						"description": "Also include every descendant's meshes, sprites and tiles.",
 						"type": "boolean"
 					},
 					"target": {
@@ -2680,6 +2680,66 @@
 			"mutates": false,
 			"supportsDryRun": false,
 			"timeoutSeconds": 900
+		},
+		{
+			"name": "tilemap_paint",
+			"method": "tilemap.paint",
+			"description": "Writes cells of a Tilemap asset (0 erases a cell, k paints the palette's entry k - 1) and saves it, as one undoable command; the cells' chunks are created and removed as needed. The editor's tile brush paints through it. A running lockstep, recording, replay or test session sees the change only after it ends.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "TilemapPaintParams",
+				"description": "The params of tilemap.paint.",
+				"type": "object",
+				"properties": {
+					"tilemap": {
+						"description": "The Tilemap asset: its id, its \"Assets/...\" path or another asset reference.",
+						"type": "string"
+					},
+					"cells": {
+						"description": "The cells to write, 1 to 65536 of them, in order: a later entry for the same cell wins.",
+						"type": "array",
+						"items": {
+							"description": "One tilemap cell to write.",
+							"type": "object",
+							"properties": {
+								"x": {
+									"description": "The cell's column: x grows to the right, cell 0's left edge at the tilemap entity's origin.",
+									"type": "integer",
+									"minimum": -2147483648,
+									"maximum": 2147483647
+								},
+								"y": {
+									"description": "The cell's row: y grows upwards, cell 0's bottom edge at the tilemap entity's origin.",
+									"type": "integer",
+									"minimum": -2147483648,
+									"maximum": 2147483647
+								},
+								"tile": {
+									"description": "The new cell value: 0 erases the cell, k paints the tilemap's palette entry k - 1.",
+									"type": "integer",
+									"minimum": 0,
+									"maximum": 4294967295
+								}
+							},
+							"additionalProperties": false
+						}
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["tilemap", "cells"]
+			},
+			"mutates": true,
+			"supportsDryRun": true,
+			"timeoutSeconds": 60
 		},
 		{
 			"name": "viewport_screenshot",

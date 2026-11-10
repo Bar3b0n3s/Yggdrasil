@@ -42,6 +42,7 @@
 #include <span>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 // viewport.screenshot, the handler the Editor and the Runtime share, in process (Architecture §15.2) through the editor's
@@ -641,6 +642,64 @@ namespace Engine {
 			// Without the member the view is Lit.
 			REQUIRE(setup.Call("viewport.screenshot", Json{ { "view", "scene" } }).has_value());
 			CHECK(log.LastSnapshot->DebugView == RenderDebugView::Lit);
+		}
+
+		// M21 (Docs/Decisions/0032-m21-contract.md decisions 4 and 16, stream A): viewport.screenshot copies the project's
+		// SortingLayers.Layers into its extraction request (the one statement ADR 0028's phase-2 ledger grants M21 in
+		// ScreenshotMethods.cpp), so a capture draws the sprites in the project's layer order, never every sprite in the first
+		// layer.
+		TEST_CASE("ScreenshotMethods: viewport.screenshot extracts sprites in the project's sorting layers")
+		{
+			CaptureLog log;
+			ScreenshotSetup setup("ViewportScreenshotSortingLayers", log);
+			const Result<Json> layers = setup.Call("project.setSettings", ParseJson(R"({"patch":{"SortingLayers":{"Layers":["Default","Background","Foreground"]}}})"));
+			REQUIRE_MESSAGE(layers.has_value(), layers.error().ToString());
+			// Front comes first in canonical order and has the lower OrderInLayer: only its sorting layer draws it last.
+			const Result<Json> front = setup.Call("entity.create", ParseJson(R"({"name":"Front","components":{"SpriteRenderer":{"SortingLayer":"Foreground","OrderInLayer":0}}})"));
+			const Result<Json> back = setup.Call("entity.create", ParseJson(R"({"name":"Back","components":{"SpriteRenderer":{"SortingLayer":"Background","OrderInLayer":5}}})"));
+			REQUIRE_MESSAGE(front.has_value(), front.error().ToString());
+			REQUIRE_MESSAGE(back.has_value(), back.error().ToString());
+			const Result<Json> shot = setup.Call("viewport.screenshot", Json{ { "view", "scene" }, { "width", 32 }, { "height", 24 } });
+			REQUIRE_MESSAGE(shot.has_value(), shot.error().ToString());
+			REQUIRE(log.LastSnapshot.has_value());
+			const auto& sprites = log.LastSnapshot->Sprites;
+			REQUIRE(sprites.size() == 2);
+			CHECK(sprites[0].Entity == JsonReader((*back)["entity"]["id"]).ReadUUID().value());
+			CHECK(sprites[0].SortingLayer == 1);
+			CHECK(sprites[1].Entity == JsonReader((*front)["entity"]["id"]).ReadUUID().value());
+			CHECK(sprites[1].SortingLayer == 2);
+		}
+
+		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 28, stream P3): viewport.screenshot passes a play scene's 2D
+		// physics system to its render annotations (the one argument, isPlayScene ? session->GetPhysics2D() : nullptr, that
+		// the ledger amendment on main of 2026-11-02 grants M21 in ScreenshotMethods.cpp), so a play scene's colliders tell a
+		// sleeping 2D body from an awake one, as the editor's views do.
+		TEST_CASE("ScreenshotMethods: a play scene's screenshot draws a sleeping 2D body's collider in the sleeping category")
+		{
+			CaptureLog log;
+			ScreenshotSetup setup("ViewportScreenshotSleeping2D", log);
+			REQUIRE(setup.Call("entity.create", ParseJson(R"({"name":"Ground","components":{"Transform":{"Translation":[0,-0.5,0]},
+				"RigidBody2D":{"Type":"Static"},"BoxCollider2D":{"HalfExtents":[20,0.5]}}})")));
+			REQUIRE(setup.Call("entity.create", ParseJson(R"({"name":"Crate","components":{"Transform":{"Translation":[0,0.5,0]},
+				"RigidBody2D":{},"BoxCollider2D":{}}})")));
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true }, { "mode", "simulate" } }));
+			// Three seconds at the default 60 Hz: the crate rests on the ground and sleeps.
+			REQUIRE(setup.Call("play.step", Json{ { "ticks", 180 }, { "render", "none" } }));
+			const Result<Json> shot = setup.Call("viewport.screenshot", ParseJson(R"({"view":"scene","target":"play","width":32,"height":24,"annotate":{"colliders":true}})"));
+			REQUIRE_MESSAGE(shot.has_value(), shot.error().ToString());
+			REQUIRE(log.LastSnapshot.has_value());
+			// The ground's four edges in the Static colour, the crate's four in the Sleeping one.
+			uint32_t staticLines = 0;
+			uint32_t sleepingLines = 0;
+			for (const DebugDrawCommand& command : log.LastSnapshot->AnnotationDraw.GetCommands())
+			{
+				if (!std::holds_alternative<DebugLine>(command.Shape))
+					continue;
+				staticLines += command.Color == GetColliderDebugColor(ColliderDebugCategory::Static) ? 1U : 0U;
+				sleepingLines += command.Color == GetColliderDebugColor(ColliderDebugCategory::Sleeping) ? 1U : 0U;
+			}
+			CHECK(staticLines == 4);
+			CHECK(sleepingLines == 4);
 		}
 
 		TEST_CASE("ScreenshotMethods: an unknown debug view is InvalidArgument at /debugView naming the valid views")

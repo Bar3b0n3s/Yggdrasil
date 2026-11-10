@@ -31,7 +31,7 @@ namespace Engine {
 			AssetType Type = AssetType::None;
 		};
 
-		constexpr std::array<ProceduralEntry, 15> ProceduralEntries = { {
+		constexpr std::array<ProceduralEntry, 19> ProceduralEntries = { {
 			{ BuiltinAssetHandles::CubeMesh, "engine://Meshes/Cube", AssetType::Mesh },
 			{ BuiltinAssetHandles::SphereMesh, "engine://Meshes/Sphere", AssetType::Mesh },
 			{ BuiltinAssetHandles::PlaneMesh, "engine://Meshes/Plane", AssetType::Mesh },
@@ -46,6 +46,10 @@ namespace Engine {
 			{ BuiltinAssetHandles::FlatNormalTexture, "engine://Textures/FlatNormal", AssetType::Texture },
 			{ BuiltinAssetHandles::CheckerTexture, "engine://Textures/Checker", AssetType::Texture },
 			{ BuiltinAssetHandles::MissingTexture, "engine://Textures/Missing", AssetType::Texture },
+			{ BuiltinAssetHandles::SpriteSquareTexture, "engine://Textures/SpriteSquare", AssetType::Texture },
+			{ BuiltinAssetHandles::SpriteRoundedTexture, "engine://Textures/SpriteRounded", AssetType::Texture },
+			{ BuiltinAssetHandles::SpriteBevelTexture, "engine://Textures/SpriteBevel", AssetType::Texture },
+			{ BuiltinAssetHandles::SpriteCircleTexture, "engine://Textures/SpriteCircle", AssetType::Texture },
 			{ BuiltinAssetHandles::SilentClip, "engine://Audio/Silence", AssetType::AudioClip },
 		} };
 
@@ -63,12 +67,17 @@ namespace Engine {
 			{ BuiltinAssetHandles::DefaultMaterial, BuiltinMaterial::Default },
 			{ BuiltinAssetHandles::ErrorMaterial, BuiltinMaterial::Error },
 		} };
-		constexpr std::array<std::pair<AssetHandle, BuiltinTexture>, 5> ProceduralTextures = { {
+		constexpr std::array<std::pair<AssetHandle, BuiltinTexture>, 9> ProceduralTextures = { {
 			{ BuiltinAssetHandles::WhiteTexture, BuiltinTexture::White },
 			{ BuiltinAssetHandles::BlackTexture, BuiltinTexture::Black },
 			{ BuiltinAssetHandles::FlatNormalTexture, BuiltinTexture::FlatNormal },
 			{ BuiltinAssetHandles::CheckerTexture, BuiltinTexture::Checker },
 			{ BuiltinAssetHandles::MissingTexture, BuiltinTexture::Missing },
+			// M21 (Docs/Decisions/0032-m21-contract.md decision 7): the sprite textures, never compressed.
+			{ BuiltinAssetHandles::SpriteSquareTexture, BuiltinTexture::SpriteSquare },
+			{ BuiltinAssetHandles::SpriteRoundedTexture, BuiltinTexture::SpriteRounded },
+			{ BuiltinAssetHandles::SpriteBevelTexture, BuiltinTexture::SpriteBevel },
+			{ BuiltinAssetHandles::SpriteCircleTexture, BuiltinTexture::SpriteCircle },
 		} };
 
 		// The members of the catalogue and of its entries, in their canonical order.

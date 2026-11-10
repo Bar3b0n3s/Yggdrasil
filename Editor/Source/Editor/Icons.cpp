@@ -100,6 +100,15 @@ namespace Engine {
 					path({ { 0.15f, 0.62f }, { 0.85f, 0.62f } });
 					path({ { 0.15f, 0.15f }, { 0.38f, 0.38f } });
 					break;
+				case EditorIcon::Tilemap:
+					// The ground of a tile map: a staircase of cells rising to the right, each step's cell outlined.
+					path({ { 0.1f, 0.85f }, { 0.9f, 0.85f }, { 0.9f, 0.15f }, { 0.63f, 0.15f }, { 0.63f, 0.38f }, { 0.37f, 0.38f }, { 0.37f, 0.62f },
+						{ 0.1f, 0.62f }, { 0.1f, 0.85f } });
+					path({ { 0.37f, 0.62f }, { 0.37f, 0.85f } });
+					path({ { 0.63f, 0.38f }, { 0.63f, 0.85f } });
+					path({ { 0.37f, 0.62f }, { 0.9f, 0.62f } });
+					path({ { 0.63f, 0.38f }, { 0.9f, 0.38f } });
+					break;
 				case EditorIcon::Skeleton:
 					// A chain of three bones from a root joint, branching at the second joint.
 					circle({ 0.25f, 0.8f }, 0.07f);
@@ -151,6 +160,7 @@ namespace Engine {
 			case AssetType::Font:          return EditorIcon::Font;
 			case AssetType::Replay:        return EditorIcon::Replay;
 			case AssetType::SpriteSheet:   return EditorIcon::SpriteSheet;
+			case AssetType::Tilemap:       return EditorIcon::Tilemap;
 			case AssetType::Skeleton:      return EditorIcon::Skeleton;
 			case AssetType::AnimationClip: return EditorIcon::AnimationClip;
 		}

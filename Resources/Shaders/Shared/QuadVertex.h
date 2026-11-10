@@ -4,6 +4,7 @@
 
 #if !defined(ENGINE_SHADER)
 	#include <cstddef>
+	#include <cstdint>
 
 namespace Engine {
 
@@ -24,17 +25,24 @@ namespace Engine {
 		Float4 Color;
 	};
 
-	// The push constants of the Quad program: the batch's space to clip space (clip = mul(Transform, float4(Position, 1))).
+	// The push constants of the Quad program: the batch's space to clip space (clip = mul(Transform, float4(Position, 1))) and,
+	// for M21's Normals entry (C21.2, Docs/Decisions/0032-m21-contract.md decision 22), whether the batch's quads sample their
+	// normal map: 1 then, 0 for the flat normal; the other entries ignore it and the batcher leaves it 0.
 	struct QuadConstants
 	{
 		Float4x4 Transform;
+		uint32_t HasNormalMap = 0;
+		uint32_t Padding0 = 0;
+		uint32_t Padding1 = 0;
+		uint32_t Padding2 = 0;
 	};
 
 #if !defined(ENGINE_SHADER)
 	static_assert(sizeof(QuadVertex) == 36, "QuadVertex must match its 36-byte vertex layout");
 	static_assert(offsetof(QuadVertex, Position) == 0 && offsetof(QuadVertex, TexCoord) == 12 && offsetof(QuadVertex, Color) == 20,
 		"QuadVertex's members must keep their vertex-attribute offsets");
-	static_assert(sizeof(QuadConstants) == 64, "QuadConstants must match its 64-byte push-constant layout");
+	static_assert(sizeof(QuadConstants) == 80, "QuadConstants must match its 80-byte push-constant layout");
+	static_assert(offsetof(QuadConstants, HasNormalMap) == 64, "QuadConstants members must sit where the push-constant layout puts them");
 
 }
 #endif

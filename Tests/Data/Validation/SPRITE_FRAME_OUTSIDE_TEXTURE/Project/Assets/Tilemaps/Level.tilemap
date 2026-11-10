@@ -1,0 +1,30 @@
+{
+	"Format": "Tilemap",
+	"Version": 1,
+	"CellSize": [1, 1],
+	"ChunkSize": 1,
+	"Palette": [
+		{
+			"Sheet": "3a7e00000000000c",
+			"Frame": 0,
+			"Solid": true
+		},
+		{
+			"Sheet": "3a7e00000000000c",
+			"Frame": 1,
+			"Solid": false
+		}
+	],
+	"Chunks": [
+		{
+			"X": 0,
+			"Y": 0,
+			"Tiles": [1]
+		},
+		{
+			"X": 1,
+			"Y": 0,
+			"Tiles": [2]
+		}
+	]
+}

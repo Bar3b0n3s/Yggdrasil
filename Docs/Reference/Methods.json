@@ -127,7 +127,7 @@
 		{
 			"name": "asset.create",
 			"domain": "asset",
-			"description": "Creates a material, a sound effect or a sprite sheet (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
+			"description": "Creates a material, a sound effect, a sprite sheet or a tilemap (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": true,
@@ -144,14 +144,14 @@
 				"properties": {
 					"type": {
 						"description": "What to create.",
-						"enum": ["Material", "Scene", "Prefab", "SoundEffect", "Folder", "SpriteSheet"]
+						"enum": ["Material", "Scene", "Prefab", "SoundEffect", "Folder", "SpriteSheet", "Tilemap"]
 					},
 					"path": {
-						"description": "The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx, .spritesheet; none for a folder); missing parent folders are created with it.",
+						"description": "The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx, .spritesheet, .tilemap; none for a folder); missing parent folders are created with it.",
 						"type": "string"
 					},
 					"values": {
-						"description": "A Material's, a SoundEffect's or a SpriteSheet's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, or a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads); absent for other types."
+						"description": "A Material's, a SoundEffect's, a SpriteSheet's or a Tilemap's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads, or a tilemap's CellSize, ChunkSize, Palette and Chunks; a sheet's Texture and a palette entry's Sheet take any asset reference: a handle, an Assets/ path or an engine:// path); absent for other types."
 					},
 					"dryRun": {
 						"description": "Validate and return the would-be result without applying anything.",
@@ -216,7 +216,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "Skeleton", "AnimationClip"]
 							}
 						},
 						"additionalProperties": false
@@ -390,7 +390,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "Skeleton", "AnimationClip"]
 							}
 						},
 						"additionalProperties": false
@@ -480,7 +480,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "Skeleton", "AnimationClip"]
 							}
 						},
 						"additionalProperties": false
@@ -499,7 +499,7 @@
 		{
 			"name": "asset.getProperties",
 			"domain": "asset",
-			"description": "Returns every property of a native asset (a material, a sound effect or a sprite sheet) by registry name.",
+			"description": "Returns every property of a native asset (a material, a sound effect, a sprite sheet or a tilemap) by registry name.",
 			"exposeAsTool": true,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -515,7 +515,7 @@
 				"type": "object",
 				"properties": {
 					"asset": {
-						"description": "The native asset (a material, a sound effect or a sprite sheet).",
+						"description": "The native asset (a material, a sound effect, a sprite sheet or a tilemap).",
 						"type": "string"
 					},
 					"ifRevision": {
@@ -566,7 +566,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "Skeleton", "AnimationClip"]
 							}
 						},
 						"additionalProperties": false
@@ -683,7 +683,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "Skeleton", "AnimationClip"]
 							}
 						},
 						"additionalProperties": false
@@ -856,7 +856,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "Skeleton", "AnimationClip"]
 							}
 						},
 						"additionalProperties": false
@@ -923,7 +923,7 @@
 					},
 					"type": {
 						"description": "Only assets of this type; None lists every type.",
-						"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Skeleton", "AnimationClip"]
+						"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "Skeleton", "AnimationClip"]
 					},
 					"recursive": {
 						"description": "Also list the folders below dir.",
@@ -1000,7 +1000,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "Skeleton", "AnimationClip"]
 							}
 						},
 						"additionalProperties": false
@@ -1107,7 +1107,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "Skeleton", "AnimationClip"]
 							}
 						},
 						"additionalProperties": false
@@ -1205,7 +1205,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "Skeleton", "AnimationClip"]
 							}
 						},
 						"additionalProperties": false
@@ -1331,7 +1331,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "Skeleton", "AnimationClip"]
 							}
 						},
 						"additionalProperties": false
@@ -1353,7 +1353,7 @@
 		{
 			"name": "asset.setProperties",
 			"domain": "asset",
-			"description": "Applies an RFC 7386 merge patch to a native asset's properties (a material, a sound effect or a sprite sheet; an array such as a sheet's Frames is replaced whole) and writes it, as one undoable command. A running lockstep, recording, replay or test session sees the change only after it ends: asset reloads are deferred like script reloads.",
+			"description": "Applies an RFC 7386 merge patch to a native asset's properties (a material, a sound effect, a sprite sheet or a tilemap; an array such as a sheet's Frames or a tilemap's Palette is replaced whole) and writes it, as one undoable command. A running lockstep, recording, replay or test session sees the change only after it ends: asset reloads are deferred like script reloads.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": true,
@@ -1369,11 +1369,11 @@
 				"type": "object",
 				"properties": {
 					"asset": {
-						"description": "The native asset (a material, a sound effect or a sprite sheet).",
+						"description": "The native asset (a material, a sound effect, a sprite sheet or a tilemap).",
 						"type": "string"
 					},
 					"values": {
-						"description": "An RFC 7386 merge patch of its properties: members replace, null resets a field."
+						"description": "An RFC 7386 merge patch of its properties: members replace, null resets a field, an array is replaced whole; a sprite sheet's Texture and a tilemap palette entry's Sheet take any asset reference (a handle, an Assets/ path or an engine:// path); a tilemap's ChunkSize set without Chunks keeps its painted cells, laid in chunks of the new size."
 					},
 					"dryRun": {
 						"description": "Validate and return the would-be result without applying anything.",
@@ -1433,7 +1433,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "Skeleton", "AnimationClip"]
 							}
 						},
 						"additionalProperties": false
@@ -1663,7 +1663,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "Skeleton", "AnimationClip"]
 							}
 						},
 						"additionalProperties": false
@@ -2971,7 +2971,7 @@
 		{
 			"name": "entity.bounds",
 			"domain": "entity",
-			"description": "Reports the world-space bounding box of each entity's meshes (and, by default, its descendants'), for layout checks.",
+			"description": "Reports the world-space bounding box of what each entity draws (and, by default, its descendants): its meshes, the quad of its sprite and the quads of its tilemap's drawn tiles, for layout checks.",
 			"exposeAsTool": true,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -2994,7 +2994,7 @@
 						}
 					},
 					"includeDescendants": {
-						"description": "Also include every descendant's meshes.",
+						"description": "Also include every descendant's meshes, sprites and tiles.",
 						"type": "boolean"
 					},
 					"target": {
@@ -3050,7 +3050,7 @@
 								"$ref": "#/$defs/EntitySummary"
 							},
 							"hasBounds": {
-								"description": "False when neither it nor (with includeDescendants) a descendant has a mesh.",
+								"description": "False when neither it nor (with includeDescendants) a descendant draws a mesh, a sprite or a tile.",
 								"type": "boolean"
 							},
 							"min": {
@@ -3220,6 +3220,36 @@
 							},
 							"Script": {
 								"$ref": "#/$defs/Script"
+							},
+							"SpriteRenderer": {
+								"$ref": "#/$defs/SpriteRenderer"
+							},
+							"SpriteAnimator": {
+								"$ref": "#/$defs/SpriteAnimator"
+							},
+							"PixelPerfectCamera": {
+								"$ref": "#/$defs/PixelPerfectCamera"
+							},
+							"Light2D": {
+								"$ref": "#/$defs/Light2D"
+							},
+							"TilemapRenderer": {
+								"$ref": "#/$defs/TilemapRenderer"
+							},
+							"RigidBody2D": {
+								"$ref": "#/$defs/RigidBody2D"
+							},
+							"BoxCollider2D": {
+								"$ref": "#/$defs/BoxCollider2D"
+							},
+							"CircleCollider2D": {
+								"$ref": "#/$defs/CircleCollider2D"
+							},
+							"PolygonCollider2D": {
+								"$ref": "#/$defs/PolygonCollider2D"
+							},
+							"TilemapCollider": {
+								"$ref": "#/$defs/TilemapCollider"
 							},
 							"Animator": {
 								"$ref": "#/$defs/Animator"
@@ -4418,6 +4448,515 @@
 						},
 						"additionalProperties": false
 					},
+					"SpriteRenderer": {
+						"description": "Draws a sprite: a sprite sheet frame or a texture in the entity's XY plane.",
+						"type": "object",
+						"properties": {
+							"Sheet": {
+								"description": "The sprite sheet whose frame Frame is drawn; null draws Texture whole.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "SpriteSheet"
+							},
+							"Frame": {
+								"description": "The index of the sheet's frame to draw; an index the sheet lacks draws nothing (SPRITE_FRAME_OUT_OF_RANGE).",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 65535
+							},
+							"Texture": {
+								"description": "The texture drawn whole, pivoted at its centre, when Sheet is null; null draws the built-in white square.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Texture"
+							},
+							"Color": {
+								"description": "The linear colour every texel is multiplied with, with opacity in the fourth component.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"FlipX": {
+								"description": "Whether the image is mirrored left to right about its pivot.",
+								"type": "boolean"
+							},
+							"FlipY": {
+								"description": "Whether the image is mirrored top to bottom about its pivot.",
+								"type": "boolean"
+							},
+							"PixelsPerUnit": {
+								"description": "How many texels of the image make one unit of the entity's local space; the sprite's size is its texels divided by this.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 65536
+							},
+							"SortingLayer": {
+								"description": "The sorting layer name from project settings; later layers draw over earlier ones, and an undeclared name draws in the first.",
+								"type": "string"
+							},
+							"OrderInLayer": {
+								"description": "The draw order within the sorting layer: higher values draw over lower ones, equal values in canonical entity order.",
+								"type": "integer",
+								"minimum": -2147483648,
+								"maximum": 2147483647
+							},
+							"Lit": {
+								"description": "Whether 2D lights light the sprite; an unlit sprite keeps its texels unchanged.",
+								"type": "boolean"
+							},
+							"NormalMap": {
+								"description": "A lit sprite's tangent-space normal map, laid like its image; point lights then light it by the angle to the light. Null: flat.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Texture"
+							}
+						},
+						"additionalProperties": false
+					},
+					"SpriteAnimator": {
+						"description": "Plays a clip of the SpriteRenderer's sprite sheet, one step per clip frame for its ticks, driven by the fixed step.",
+						"type": "object",
+						"properties": {
+							"Clip": {
+								"description": "The name of the sheet's clip to play; empty plays nothing.",
+								"type": "string"
+							},
+							"Playing": {
+								"description": "Whether the clip advances each fixed step; a clip without Loop clears it after its last step and holds its last frame.",
+								"type": "boolean"
+							},
+							"Step": {
+								"description": "The index of the clip step shown.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 1023
+							},
+							"StepTicks": {
+								"description": "How many fixed steps the current clip step has been shown.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 65534
+							}
+						},
+						"additionalProperties": false
+					},
+					"PixelPerfectCamera": {
+						"description": "Renders the entity's camera at a reference resolution, upscaled by the largest whole factor that fits the view in a letterbox.",
+						"type": "object",
+						"properties": {
+							"ReferenceWidth": {
+								"description": "The width the scene renders at, in pixels.",
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 8192
+							},
+							"ReferenceHeight": {
+								"description": "The height the scene renders at, in pixels; the orthographic view is this many pixels of PixelsPerUnit high.",
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 8192
+							},
+							"PixelsPerUnit": {
+								"description": "How many scene pixels make one world unit; sprites of the same PixelsPerUnit map each texel to one pixel.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 65536
+							},
+							"LetterboxColor": {
+								"description": "The linear colour of the bars around the upscaled image.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							}
+						},
+						"additionalProperties": false
+					},
+					"Light2D": {
+						"description": "A 2D light: lights the lit sprites and tilemaps of the view, never unlit ones; no shadows.",
+						"type": "object",
+						"properties": {
+							"Type": {
+								"description": "Whether the light is a point light around the entity or a global light of the whole view.",
+								"enum": ["Point", "Global"]
+							},
+							"Color": {
+								"description": "The light's linear colour.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"Intensity": {
+								"description": "How strong the light is: its colour is multiplied by this, so values above 1 overbright.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"Radius": {
+								"description": "Point: how far the light reaches from the entity, in world units.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 100000
+							},
+							"Falloff": {
+								"description": "Point: the fraction of the radius, from its edge inward, over which the light fades smoothly to nothing; 0 is a hard edge.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"Height": {
+								"description": "Point: how far above the lit plane the light sits, in world units; only normal-mapped sprites read it.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 100000
+							}
+						},
+						"additionalProperties": false
+					},
+					"TilemapRenderer": {
+						"description": "Draws a tilemap's tiles in the entity's XY plane, each tile as a sprite of its palette entry's sheet frame.",
+						"type": "object",
+						"properties": {
+							"Tilemap": {
+								"description": "The tilemap whose tiles are drawn; null draws nothing.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Tilemap"
+							},
+							"Color": {
+								"description": "The linear colour every tile's texels are multiplied with, with opacity in the fourth component.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"PixelsPerUnit": {
+								"description": "How many texels of a tile's frame make one unit of the entity's local space, as a sprite's.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 65536
+							},
+							"SortingLayer": {
+								"description": "The sorting layer name from project settings; the tilemap sorts with the sprites, and an undeclared name draws in the first.",
+								"type": "string"
+							},
+							"OrderInLayer": {
+								"description": "The draw order within the sorting layer, among the sprites: higher values draw over lower ones, equal values in canonical entity order.",
+								"type": "integer",
+								"minimum": -2147483648,
+								"maximum": 2147483647
+							},
+							"Lit": {
+								"description": "Whether 2D lights light the tiles; unlit tiles keep their texels unchanged.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"RigidBody2D": {
+						"description": "Simulates the entity in the 2D world: moves along world X and Y and rotates about world Z.",
+						"type": "object",
+						"properties": {
+							"Type": {
+								"description": "Static never moves; Kinematic is moved by script; Dynamic is simulated.",
+								"enum": ["Static", "Kinematic", "Dynamic"]
+							},
+							"Mass": {
+								"description": "Mass in kilograms (Dynamic only).",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 1000000000
+							},
+							"Friction": {
+								"description": "The friction coefficient of the body's surfaces; a contact uses the geometric mean of both bodies' values.",
+								"type": "number",
+								"minimum": 0
+							},
+							"Restitution": {
+								"description": "Bounciness, from no bounce (0) to a perfectly elastic bounce (1); a contact uses the larger of both bodies' values.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"LinearDamping": {
+								"description": "How quickly linear velocity decays, per second.",
+								"type": "number",
+								"minimum": 0
+							},
+							"AngularDamping": {
+								"description": "How quickly angular velocity decays, per second.",
+								"type": "number",
+								"minimum": 0
+							},
+							"GravityFactor": {
+								"description": "The multiplier of the project's 2D gravity for this body (0 floats).",
+								"type": "number"
+							},
+							"MotionQuality": {
+								"description": "Discrete or continuous (LinearCast) collision detection.",
+								"enum": ["Discrete", "LinearCast"]
+							},
+							"AllowSleeping": {
+								"description": "Whether the body may sleep when it comes to rest.",
+								"type": "boolean"
+							},
+							"FixedRotation": {
+								"description": "Whether a Dynamic body is kept from rotating.",
+								"type": "boolean"
+							},
+							"Layer": {
+								"description": "Physics layer name from project settings (the 3D world's layers).",
+								"type": "string"
+							},
+							"MaxLinearVelocity": {
+								"description": "The speed the body is clamped to, in metres per second.",
+								"type": "number",
+								"minimum": 0
+							},
+							"MaxAngularVelocity": {
+								"description": "The angular speed the body is clamped to, in radians per second.",
+								"type": "number",
+								"minimum": 0
+							},
+							"EnhancedInternalEdgeRemoval": {
+								"description": "Removes ghost collisions with internal edges of compound shapes; set it on bodies that roll or slide across tiles.",
+								"type": "boolean"
+							},
+							"InitialLinearVelocity": {
+								"description": "The velocity along world X and Y the body starts with, in metres per second.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"InitialAngularVelocity": {
+								"description": "The angular velocity about world Z the body starts with, in radians per second, counter-clockwise seen from +Z.",
+								"type": "number"
+							}
+						},
+						"additionalProperties": false
+					},
+					"BoxCollider2D": {
+						"description": "A rectangle collider in the entity's XY plane.",
+						"type": "object",
+						"properties": {
+							"HalfExtents": {
+								"description": "Half the rectangle's size along local X and Y; at least 1 mm.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0.001
+									},
+									{
+										"type": "number",
+										"minimum": 0.001
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Offset": {
+								"description": "The rectangle's centre relative to the entity, in its XY plane.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Angle": {
+								"description": "The rectangle's rotation about the entity's Z axis, counter-clockwise, in degrees.",
+								"type": "number"
+							},
+							"IsTrigger": {
+								"description": "Whether the collider only detects overlaps instead of colliding.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"CircleCollider2D": {
+						"description": "A circle collider in the entity's XY plane.",
+						"type": "object",
+						"properties": {
+							"Radius": {
+								"description": "The circle's radius; at least 1 mm.",
+								"type": "number",
+								"minimum": 0.001
+							},
+							"Offset": {
+								"description": "The circle's centre relative to the entity, in its XY plane.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"IsTrigger": {
+								"description": "Whether the collider only detects overlaps instead of colliding.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"PolygonCollider2D": {
+						"description": "A convex polygon collider in the entity's XY plane.",
+						"type": "object",
+						"properties": {
+							"Points": {
+								"description": "The points whose convex hull is the collider, 3 to 64 of them, in the collider's own space before Offset and Angle.",
+								"type": "array",
+								"items": {
+									"type": "array",
+									"prefixItems": [
+										{
+											"type": "number"
+										},
+										{
+											"type": "number"
+										}
+									],
+									"minItems": 2,
+									"maxItems": 2
+								}
+							},
+							"Offset": {
+								"description": "Where the polygon's origin sits relative to the entity, in its XY plane.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Angle": {
+								"description": "The polygon's rotation about the entity's Z axis, counter-clockwise, in degrees.",
+								"type": "number"
+							},
+							"IsTrigger": {
+								"description": "Whether the collider only detects overlaps instead of colliding.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"TilemapCollider": {
+						"description": "The solid cells of a tilemap as 2D colliders: each chunk's solid cells merged into boxes, one static compound without a RigidBody2D.",
+						"type": "object",
+						"properties": {
+							"Tilemap": {
+								"description": "The tilemap whose solid cells collide; null takes the entity's TilemapRenderer.Tilemap.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Tilemap"
+							},
+							"IsTrigger": {
+								"description": "Whether the collider only detects overlaps instead of colliding.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
 					"Animator": {
 						"description": "Poses a skeleton from layers of animation clips, blended by their weights, each fixed step; skinned meshes on the entity and below it follow.",
 						"type": "object",
@@ -5187,6 +5726,36 @@
 							},
 							"Script": {
 								"$ref": "#/$defs/Script"
+							},
+							"SpriteRenderer": {
+								"$ref": "#/$defs/SpriteRenderer"
+							},
+							"SpriteAnimator": {
+								"$ref": "#/$defs/SpriteAnimator"
+							},
+							"PixelPerfectCamera": {
+								"$ref": "#/$defs/PixelPerfectCamera"
+							},
+							"Light2D": {
+								"$ref": "#/$defs/Light2D"
+							},
+							"TilemapRenderer": {
+								"$ref": "#/$defs/TilemapRenderer"
+							},
+							"RigidBody2D": {
+								"$ref": "#/$defs/RigidBody2D"
+							},
+							"BoxCollider2D": {
+								"$ref": "#/$defs/BoxCollider2D"
+							},
+							"CircleCollider2D": {
+								"$ref": "#/$defs/CircleCollider2D"
+							},
+							"PolygonCollider2D": {
+								"$ref": "#/$defs/PolygonCollider2D"
+							},
+							"TilemapCollider": {
+								"$ref": "#/$defs/TilemapCollider"
 							},
 							"Animator": {
 								"$ref": "#/$defs/Animator"
@@ -6388,6 +6957,515 @@
 								"items": {
 									"$ref": "#/$defs/ScriptSlot"
 								}
+							}
+						},
+						"additionalProperties": false
+					},
+					"SpriteRenderer": {
+						"description": "Draws a sprite: a sprite sheet frame or a texture in the entity's XY plane.",
+						"type": "object",
+						"properties": {
+							"Sheet": {
+								"description": "The sprite sheet whose frame Frame is drawn; null draws Texture whole.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "SpriteSheet"
+							},
+							"Frame": {
+								"description": "The index of the sheet's frame to draw; an index the sheet lacks draws nothing (SPRITE_FRAME_OUT_OF_RANGE).",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 65535
+							},
+							"Texture": {
+								"description": "The texture drawn whole, pivoted at its centre, when Sheet is null; null draws the built-in white square.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Texture"
+							},
+							"Color": {
+								"description": "The linear colour every texel is multiplied with, with opacity in the fourth component.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"FlipX": {
+								"description": "Whether the image is mirrored left to right about its pivot.",
+								"type": "boolean"
+							},
+							"FlipY": {
+								"description": "Whether the image is mirrored top to bottom about its pivot.",
+								"type": "boolean"
+							},
+							"PixelsPerUnit": {
+								"description": "How many texels of the image make one unit of the entity's local space; the sprite's size is its texels divided by this.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 65536
+							},
+							"SortingLayer": {
+								"description": "The sorting layer name from project settings; later layers draw over earlier ones, and an undeclared name draws in the first.",
+								"type": "string"
+							},
+							"OrderInLayer": {
+								"description": "The draw order within the sorting layer: higher values draw over lower ones, equal values in canonical entity order.",
+								"type": "integer",
+								"minimum": -2147483648,
+								"maximum": 2147483647
+							},
+							"Lit": {
+								"description": "Whether 2D lights light the sprite; an unlit sprite keeps its texels unchanged.",
+								"type": "boolean"
+							},
+							"NormalMap": {
+								"description": "A lit sprite's tangent-space normal map, laid like its image; point lights then light it by the angle to the light. Null: flat.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Texture"
+							}
+						},
+						"additionalProperties": false
+					},
+					"SpriteAnimator": {
+						"description": "Plays a clip of the SpriteRenderer's sprite sheet, one step per clip frame for its ticks, driven by the fixed step.",
+						"type": "object",
+						"properties": {
+							"Clip": {
+								"description": "The name of the sheet's clip to play; empty plays nothing.",
+								"type": "string"
+							},
+							"Playing": {
+								"description": "Whether the clip advances each fixed step; a clip without Loop clears it after its last step and holds its last frame.",
+								"type": "boolean"
+							},
+							"Step": {
+								"description": "The index of the clip step shown.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 1023
+							},
+							"StepTicks": {
+								"description": "How many fixed steps the current clip step has been shown.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 65534
+							}
+						},
+						"additionalProperties": false
+					},
+					"PixelPerfectCamera": {
+						"description": "Renders the entity's camera at a reference resolution, upscaled by the largest whole factor that fits the view in a letterbox.",
+						"type": "object",
+						"properties": {
+							"ReferenceWidth": {
+								"description": "The width the scene renders at, in pixels.",
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 8192
+							},
+							"ReferenceHeight": {
+								"description": "The height the scene renders at, in pixels; the orthographic view is this many pixels of PixelsPerUnit high.",
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 8192
+							},
+							"PixelsPerUnit": {
+								"description": "How many scene pixels make one world unit; sprites of the same PixelsPerUnit map each texel to one pixel.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 65536
+							},
+							"LetterboxColor": {
+								"description": "The linear colour of the bars around the upscaled image.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							}
+						},
+						"additionalProperties": false
+					},
+					"Light2D": {
+						"description": "A 2D light: lights the lit sprites and tilemaps of the view, never unlit ones; no shadows.",
+						"type": "object",
+						"properties": {
+							"Type": {
+								"description": "Whether the light is a point light around the entity or a global light of the whole view.",
+								"enum": ["Point", "Global"]
+							},
+							"Color": {
+								"description": "The light's linear colour.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"Intensity": {
+								"description": "How strong the light is: its colour is multiplied by this, so values above 1 overbright.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"Radius": {
+								"description": "Point: how far the light reaches from the entity, in world units.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 100000
+							},
+							"Falloff": {
+								"description": "Point: the fraction of the radius, from its edge inward, over which the light fades smoothly to nothing; 0 is a hard edge.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"Height": {
+								"description": "Point: how far above the lit plane the light sits, in world units; only normal-mapped sprites read it.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 100000
+							}
+						},
+						"additionalProperties": false
+					},
+					"TilemapRenderer": {
+						"description": "Draws a tilemap's tiles in the entity's XY plane, each tile as a sprite of its palette entry's sheet frame.",
+						"type": "object",
+						"properties": {
+							"Tilemap": {
+								"description": "The tilemap whose tiles are drawn; null draws nothing.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Tilemap"
+							},
+							"Color": {
+								"description": "The linear colour every tile's texels are multiplied with, with opacity in the fourth component.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"PixelsPerUnit": {
+								"description": "How many texels of a tile's frame make one unit of the entity's local space, as a sprite's.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 65536
+							},
+							"SortingLayer": {
+								"description": "The sorting layer name from project settings; the tilemap sorts with the sprites, and an undeclared name draws in the first.",
+								"type": "string"
+							},
+							"OrderInLayer": {
+								"description": "The draw order within the sorting layer, among the sprites: higher values draw over lower ones, equal values in canonical entity order.",
+								"type": "integer",
+								"minimum": -2147483648,
+								"maximum": 2147483647
+							},
+							"Lit": {
+								"description": "Whether 2D lights light the tiles; unlit tiles keep their texels unchanged.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"RigidBody2D": {
+						"description": "Simulates the entity in the 2D world: moves along world X and Y and rotates about world Z.",
+						"type": "object",
+						"properties": {
+							"Type": {
+								"description": "Static never moves; Kinematic is moved by script; Dynamic is simulated.",
+								"enum": ["Static", "Kinematic", "Dynamic"]
+							},
+							"Mass": {
+								"description": "Mass in kilograms (Dynamic only).",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 1000000000
+							},
+							"Friction": {
+								"description": "The friction coefficient of the body's surfaces; a contact uses the geometric mean of both bodies' values.",
+								"type": "number",
+								"minimum": 0
+							},
+							"Restitution": {
+								"description": "Bounciness, from no bounce (0) to a perfectly elastic bounce (1); a contact uses the larger of both bodies' values.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"LinearDamping": {
+								"description": "How quickly linear velocity decays, per second.",
+								"type": "number",
+								"minimum": 0
+							},
+							"AngularDamping": {
+								"description": "How quickly angular velocity decays, per second.",
+								"type": "number",
+								"minimum": 0
+							},
+							"GravityFactor": {
+								"description": "The multiplier of the project's 2D gravity for this body (0 floats).",
+								"type": "number"
+							},
+							"MotionQuality": {
+								"description": "Discrete or continuous (LinearCast) collision detection.",
+								"enum": ["Discrete", "LinearCast"]
+							},
+							"AllowSleeping": {
+								"description": "Whether the body may sleep when it comes to rest.",
+								"type": "boolean"
+							},
+							"FixedRotation": {
+								"description": "Whether a Dynamic body is kept from rotating.",
+								"type": "boolean"
+							},
+							"Layer": {
+								"description": "Physics layer name from project settings (the 3D world's layers).",
+								"type": "string"
+							},
+							"MaxLinearVelocity": {
+								"description": "The speed the body is clamped to, in metres per second.",
+								"type": "number",
+								"minimum": 0
+							},
+							"MaxAngularVelocity": {
+								"description": "The angular speed the body is clamped to, in radians per second.",
+								"type": "number",
+								"minimum": 0
+							},
+							"EnhancedInternalEdgeRemoval": {
+								"description": "Removes ghost collisions with internal edges of compound shapes; set it on bodies that roll or slide across tiles.",
+								"type": "boolean"
+							},
+							"InitialLinearVelocity": {
+								"description": "The velocity along world X and Y the body starts with, in metres per second.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"InitialAngularVelocity": {
+								"description": "The angular velocity about world Z the body starts with, in radians per second, counter-clockwise seen from +Z.",
+								"type": "number"
+							}
+						},
+						"additionalProperties": false
+					},
+					"BoxCollider2D": {
+						"description": "A rectangle collider in the entity's XY plane.",
+						"type": "object",
+						"properties": {
+							"HalfExtents": {
+								"description": "Half the rectangle's size along local X and Y; at least 1 mm.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0.001
+									},
+									{
+										"type": "number",
+										"minimum": 0.001
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Offset": {
+								"description": "The rectangle's centre relative to the entity, in its XY plane.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Angle": {
+								"description": "The rectangle's rotation about the entity's Z axis, counter-clockwise, in degrees.",
+								"type": "number"
+							},
+							"IsTrigger": {
+								"description": "Whether the collider only detects overlaps instead of colliding.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"CircleCollider2D": {
+						"description": "A circle collider in the entity's XY plane.",
+						"type": "object",
+						"properties": {
+							"Radius": {
+								"description": "The circle's radius; at least 1 mm.",
+								"type": "number",
+								"minimum": 0.001
+							},
+							"Offset": {
+								"description": "The circle's centre relative to the entity, in its XY plane.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"IsTrigger": {
+								"description": "Whether the collider only detects overlaps instead of colliding.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"PolygonCollider2D": {
+						"description": "A convex polygon collider in the entity's XY plane.",
+						"type": "object",
+						"properties": {
+							"Points": {
+								"description": "The points whose convex hull is the collider, 3 to 64 of them, in the collider's own space before Offset and Angle.",
+								"type": "array",
+								"items": {
+									"type": "array",
+									"prefixItems": [
+										{
+											"type": "number"
+										},
+										{
+											"type": "number"
+										}
+									],
+									"minItems": 2,
+									"maxItems": 2
+								}
+							},
+							"Offset": {
+								"description": "Where the polygon's origin sits relative to the entity, in its XY plane.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Angle": {
+								"description": "The polygon's rotation about the entity's Z axis, counter-clockwise, in degrees.",
+								"type": "number"
+							},
+							"IsTrigger": {
+								"description": "Whether the collider only detects overlaps instead of colliding.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"TilemapCollider": {
+						"description": "The solid cells of a tilemap as 2D colliders: each chunk's solid cells merged into boxes, one static compound without a RigidBody2D.",
+						"type": "object",
+						"properties": {
+							"Tilemap": {
+								"description": "The tilemap whose solid cells collide; null takes the entity's TilemapRenderer.Tilemap.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Tilemap"
+							},
+							"IsTrigger": {
+								"description": "Whether the collider only detects overlaps instead of colliding.",
+								"type": "boolean"
 							}
 						},
 						"additionalProperties": false
@@ -8783,6 +9861,541 @@
 			]
 		},
 		{
+			"name": "physics2d.bodyInfo",
+			"domain": "physics2d",
+			"description": "Reports the 2D physics body of an entity of the play scene (the body it owns, or the compound its colliders belong to): type, layer, colliders, position and angle in the XY plane, velocities, sleeping state, bounds and active contacts. Needs a play session.",
+			"exposeAsTool": false,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": true,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["entity"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "Physics2DBodyInfoParams",
+				"description": "The params of physics2d.bodyInfo.",
+				"type": "object",
+				"properties": {
+					"entity": {
+						"description": "An entity of the play scene: 16 hex digits, a unique id prefix or a path.",
+						"type": "string"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["entity"],
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "Physics2DBodyInfoResult",
+				"description": "The 2D physics body of an entity of the play scene.",
+				"type": "object",
+				"properties": {
+					"entity": {
+						"description": "The entity asked about.",
+						"$ref": "#/$defs/EntitySummary"
+					},
+					"body": {
+						"description": "The body's owner: the entity itself, or the ancestor whose compound holds its colliders.",
+						"$ref": "#/$defs/EntitySummary"
+					},
+					"origin": {
+						"description": "Why the 2D body exists, the entries meaning the 2D components: RigidBody is the owner's RigidBody2D, ImplicitStatic the solid 2D colliders without a RigidBody2D above them, ImplicitSensor the trigger 2D colliders of an entity without its own RigidBody2D; never Character.",
+						"enum": ["RigidBody", "ImplicitStatic", "ImplicitSensor", "Character"]
+					},
+					"type": {
+						"description": "How the body moves; a Static RigidBody2D whose colliders are triggers is Kinematic.",
+						"enum": ["Static", "Kinematic", "Dynamic"]
+					},
+					"isSensor": {
+						"description": "Whether the body is a trigger (detects overlaps without colliding).",
+						"type": "boolean"
+					},
+					"layer": {
+						"description": "The body's physics layer (a name of the project's PhysicsSettings.Layers).",
+						"type": "string"
+					},
+					"colliders": {
+						"description": "The collider entities of the body, in sub-shape order, each once (a tilemap collider's entity for all its boxes).",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/EntitySummary"
+						}
+					},
+					"position": {
+						"description": "The body origin's position in the XY plane, in metres.",
+						"type": "array",
+						"prefixItems": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "number"
+							}
+						],
+						"minItems": 2,
+						"maxItems": 2
+					},
+					"angle": {
+						"description": "The body's rotation about +Z, counter-clockwise, in degrees.",
+						"type": "number"
+					},
+					"linearVelocity": {
+						"description": "The linear velocity in the XY plane, in m/s.",
+						"type": "array",
+						"prefixItems": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "number"
+							}
+						],
+						"minItems": 2,
+						"maxItems": 2
+					},
+					"angularVelocity": {
+						"description": "The angular velocity about +Z, in rad/s.",
+						"type": "number"
+					},
+					"sleeping": {
+						"description": "Whether the body is asleep (at rest, not simulated until something wakes it).",
+						"type": "boolean"
+					},
+					"boundsMin": {
+						"description": "The minimum corner of the body's world rectangle in the XY plane, in metres.",
+						"type": "array",
+						"prefixItems": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "number"
+							}
+						],
+						"minItems": 2,
+						"maxItems": 2
+					},
+					"boundsMax": {
+						"description": "The maximum corner of the body's world rectangle in the XY plane, in metres.",
+						"type": "array",
+						"prefixItems": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "number"
+							}
+						],
+						"minItems": 2,
+						"maxItems": 2
+					},
+					"contacts": {
+						"description": "The body's active contact pairs in the 2D world, sorted by the partner's id.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/PhysicsContactSummary"
+						}
+					},
+					"tick": {
+						"description": "The play session's tick when the body was read.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"EntitySummary": {
+						"description": "An entity's canonical id with its readable name and path.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The entity's id: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"name": {
+								"description": "The entity's name.",
+								"type": "string"
+							},
+							"path": {
+								"description": "The entity's path from the scene root, such as \"/Game/Board\".",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					},
+					"PhysicsContactSummary": {
+						"description": "One active contact pair of a body, from its side.",
+						"type": "object",
+						"properties": {
+							"other": {
+								"description": "The partner body's owner.",
+								"$ref": "#/$defs/EntitySummary"
+							},
+							"collider": {
+								"description": "This body's collider entity of the first sub-shape pair that touched.",
+								"$ref": "#/$defs/EntitySummary"
+							},
+							"otherCollider": {
+								"description": "The partner's collider entity of that sub-shape pair.",
+								"$ref": "#/$defs/EntitySummary"
+							},
+							"isTrigger": {
+								"description": "A sensor pair (trigger events), not a collision.",
+								"type": "boolean"
+							},
+							"sinceTick": {
+								"description": "The tick whose physics step reported the pair's enter.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Check whether the crate rests on the ground.",
+					"params": {
+						"entity": "/Crate"
+					}
+				}
+			]
+		},
+		{
+			"name": "physics2d.overlap",
+			"domain": "physics2d",
+			"description": "Lists the 2D colliders of the play scene that a circle or a rotated rectangle in the XY plane overlaps, each once, sorted by id. Needs a play session.",
+			"exposeAsTool": false,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": true,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["shape", "center"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "Physics2DOverlapParams",
+				"description": "The params of physics2d.overlap.",
+				"type": "object",
+				"properties": {
+					"shape": {
+						"description": "The query shape.",
+						"enum": ["Circle", "Box"]
+					},
+					"center": {
+						"description": "The shape's centre, in the XY plane, in metres.",
+						"type": "array",
+						"prefixItems": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "number"
+							}
+						],
+						"minItems": 2,
+						"maxItems": 2
+					},
+					"radius": {
+						"description": "Circle: the radius in metres.",
+						"type": "number"
+					},
+					"halfExtents": {
+						"description": "Box: half the rectangle's size along X and Y before its rotation, in metres.",
+						"type": "array",
+						"prefixItems": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "number"
+							}
+						],
+						"minItems": 2,
+						"maxItems": 2
+					},
+					"angle": {
+						"description": "Box: the rectangle's rotation about +Z, counter-clockwise, in degrees.",
+						"type": "number"
+					},
+					"layerMask": {
+						"description": "The physics layers found: bit i is the project's Physics.Layers[i]; all by default.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["shape", "center"],
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "Physics2DOverlapResult",
+				"description": "The 2D colliders a shape overlaps in the play scene.",
+				"type": "object",
+				"properties": {
+					"entities": {
+						"description": "The overlapping collider entities, each once, sorted by id.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/EntitySummary"
+						}
+					},
+					"tick": {
+						"description": "The play session's tick when the query ran.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"EntitySummary": {
+						"description": "An entity's canonical id with its readable name and path.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The entity's id: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"name": {
+								"description": "The entity's name.",
+								"type": "string"
+							},
+							"path": {
+								"description": "The entity's path from the scene root, such as \"/Game/Board\".",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Find what touches a point.",
+					"params": {
+						"shape": "Circle",
+						"center": [1, 0],
+						"radius": 0.1
+					}
+				}
+			]
+		},
+		{
+			"name": "physics2d.raycast",
+			"domain": "physics2d",
+			"description": "Casts a ray in the play scene's 2D physics world (the XY plane) and reports the closest hit, or every hit with `all`: the collider entity, its body's owner, the point, the normal and the distance. Needs a play session.",
+			"exposeAsTool": false,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": true,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["origin", "direction", "maxDistance"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "Physics2DRaycastParams",
+				"description": "The params of physics2d.raycast.",
+				"type": "object",
+				"properties": {
+					"origin": {
+						"description": "Where the ray starts, in the XY plane, in metres.",
+						"type": "array",
+						"prefixItems": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "number"
+							}
+						],
+						"minItems": 2,
+						"maxItems": 2
+					},
+					"direction": {
+						"description": "The ray's direction in the XY plane; normalized, not zero.",
+						"type": "array",
+						"prefixItems": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "number"
+							}
+						],
+						"minItems": 2,
+						"maxItems": 2
+					},
+					"maxDistance": {
+						"description": "How far the ray reaches, in metres; positive.",
+						"type": "number"
+					},
+					"layerMask": {
+						"description": "The physics layers hit: bit i is the project's Physics.Layers[i]; all by default.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"all": {
+						"description": "Whether every hit is reported, sorted by distance then collider id, instead of the closest.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["origin", "direction", "maxDistance"],
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "Physics2DRaycastResult",
+				"description": "The hits of a 2D ray in the play scene.",
+				"type": "object",
+				"properties": {
+					"hits": {
+						"description": "The hits: none for a miss, the closest one without `all`.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/Physics2DRaycastHitSummary"
+						}
+					},
+					"tick": {
+						"description": "The play session's tick when the query ran.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"Physics2DRaycastHitSummary": {
+						"description": "One 2D ray hit.",
+						"type": "object",
+						"properties": {
+							"entity": {
+								"description": "The collider entity that was hit.",
+								"$ref": "#/$defs/EntitySummary"
+							},
+							"body": {
+								"description": "The owner of the 2D body the collider belongs to.",
+								"$ref": "#/$defs/EntitySummary"
+							},
+							"point": {
+								"description": "Where the ray hits, in the XY plane, in metres.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"normal": {
+								"description": "The surface normal at the hit, unit, against the ray.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"distance": {
+								"description": "How far along the ray the hit is, in metres.",
+								"type": "number"
+							}
+						},
+						"additionalProperties": false
+					},
+					"EntitySummary": {
+						"description": "An entity's canonical id with its readable name and path.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The entity's id: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"name": {
+								"description": "The entity's name.",
+								"type": "string"
+							},
+							"path": {
+								"description": "The entity's path from the scene root, such as \"/Game/Board\".",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Look for the ground below the player.",
+					"params": {
+						"origin": [0, 2],
+						"direction": [0, -1],
+						"maxDistance": 10
+					}
+				}
+			]
+		},
+		{
 			"name": "play.pause",
 			"domain": "play",
 			"description": "Pauses the play session; the lockstep owner's pause also leaves lockstep. Returns the session's state.",
@@ -10028,7 +11641,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "Skeleton", "AnimationClip"]
 							}
 						},
 						"additionalProperties": false
@@ -10146,7 +11759,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "Skeleton", "AnimationClip"]
 							}
 						},
 						"additionalProperties": false
@@ -10285,6 +11898,36 @@
 							},
 							"Script": {
 								"$ref": "#/$defs/Script"
+							},
+							"SpriteRenderer": {
+								"$ref": "#/$defs/SpriteRenderer"
+							},
+							"SpriteAnimator": {
+								"$ref": "#/$defs/SpriteAnimator"
+							},
+							"PixelPerfectCamera": {
+								"$ref": "#/$defs/PixelPerfectCamera"
+							},
+							"Light2D": {
+								"$ref": "#/$defs/Light2D"
+							},
+							"TilemapRenderer": {
+								"$ref": "#/$defs/TilemapRenderer"
+							},
+							"RigidBody2D": {
+								"$ref": "#/$defs/RigidBody2D"
+							},
+							"BoxCollider2D": {
+								"$ref": "#/$defs/BoxCollider2D"
+							},
+							"CircleCollider2D": {
+								"$ref": "#/$defs/CircleCollider2D"
+							},
+							"PolygonCollider2D": {
+								"$ref": "#/$defs/PolygonCollider2D"
+							},
+							"TilemapCollider": {
+								"$ref": "#/$defs/TilemapCollider"
 							},
 							"Animator": {
 								"$ref": "#/$defs/Animator"
@@ -11479,6 +13122,515 @@
 						},
 						"additionalProperties": false
 					},
+					"SpriteRenderer": {
+						"description": "Draws a sprite: a sprite sheet frame or a texture in the entity's XY plane.",
+						"type": "object",
+						"properties": {
+							"Sheet": {
+								"description": "The sprite sheet whose frame Frame is drawn; null draws Texture whole.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "SpriteSheet"
+							},
+							"Frame": {
+								"description": "The index of the sheet's frame to draw; an index the sheet lacks draws nothing (SPRITE_FRAME_OUT_OF_RANGE).",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 65535
+							},
+							"Texture": {
+								"description": "The texture drawn whole, pivoted at its centre, when Sheet is null; null draws the built-in white square.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Texture"
+							},
+							"Color": {
+								"description": "The linear colour every texel is multiplied with, with opacity in the fourth component.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"FlipX": {
+								"description": "Whether the image is mirrored left to right about its pivot.",
+								"type": "boolean"
+							},
+							"FlipY": {
+								"description": "Whether the image is mirrored top to bottom about its pivot.",
+								"type": "boolean"
+							},
+							"PixelsPerUnit": {
+								"description": "How many texels of the image make one unit of the entity's local space; the sprite's size is its texels divided by this.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 65536
+							},
+							"SortingLayer": {
+								"description": "The sorting layer name from project settings; later layers draw over earlier ones, and an undeclared name draws in the first.",
+								"type": "string"
+							},
+							"OrderInLayer": {
+								"description": "The draw order within the sorting layer: higher values draw over lower ones, equal values in canonical entity order.",
+								"type": "integer",
+								"minimum": -2147483648,
+								"maximum": 2147483647
+							},
+							"Lit": {
+								"description": "Whether 2D lights light the sprite; an unlit sprite keeps its texels unchanged.",
+								"type": "boolean"
+							},
+							"NormalMap": {
+								"description": "A lit sprite's tangent-space normal map, laid like its image; point lights then light it by the angle to the light. Null: flat.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Texture"
+							}
+						},
+						"additionalProperties": false
+					},
+					"SpriteAnimator": {
+						"description": "Plays a clip of the SpriteRenderer's sprite sheet, one step per clip frame for its ticks, driven by the fixed step.",
+						"type": "object",
+						"properties": {
+							"Clip": {
+								"description": "The name of the sheet's clip to play; empty plays nothing.",
+								"type": "string"
+							},
+							"Playing": {
+								"description": "Whether the clip advances each fixed step; a clip without Loop clears it after its last step and holds its last frame.",
+								"type": "boolean"
+							},
+							"Step": {
+								"description": "The index of the clip step shown.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 1023
+							},
+							"StepTicks": {
+								"description": "How many fixed steps the current clip step has been shown.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 65534
+							}
+						},
+						"additionalProperties": false
+					},
+					"PixelPerfectCamera": {
+						"description": "Renders the entity's camera at a reference resolution, upscaled by the largest whole factor that fits the view in a letterbox.",
+						"type": "object",
+						"properties": {
+							"ReferenceWidth": {
+								"description": "The width the scene renders at, in pixels.",
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 8192
+							},
+							"ReferenceHeight": {
+								"description": "The height the scene renders at, in pixels; the orthographic view is this many pixels of PixelsPerUnit high.",
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 8192
+							},
+							"PixelsPerUnit": {
+								"description": "How many scene pixels make one world unit; sprites of the same PixelsPerUnit map each texel to one pixel.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 65536
+							},
+							"LetterboxColor": {
+								"description": "The linear colour of the bars around the upscaled image.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							}
+						},
+						"additionalProperties": false
+					},
+					"Light2D": {
+						"description": "A 2D light: lights the lit sprites and tilemaps of the view, never unlit ones; no shadows.",
+						"type": "object",
+						"properties": {
+							"Type": {
+								"description": "Whether the light is a point light around the entity or a global light of the whole view.",
+								"enum": ["Point", "Global"]
+							},
+							"Color": {
+								"description": "The light's linear colour.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"Intensity": {
+								"description": "How strong the light is: its colour is multiplied by this, so values above 1 overbright.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"Radius": {
+								"description": "Point: how far the light reaches from the entity, in world units.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 100000
+							},
+							"Falloff": {
+								"description": "Point: the fraction of the radius, from its edge inward, over which the light fades smoothly to nothing; 0 is a hard edge.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"Height": {
+								"description": "Point: how far above the lit plane the light sits, in world units; only normal-mapped sprites read it.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 100000
+							}
+						},
+						"additionalProperties": false
+					},
+					"TilemapRenderer": {
+						"description": "Draws a tilemap's tiles in the entity's XY plane, each tile as a sprite of its palette entry's sheet frame.",
+						"type": "object",
+						"properties": {
+							"Tilemap": {
+								"description": "The tilemap whose tiles are drawn; null draws nothing.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Tilemap"
+							},
+							"Color": {
+								"description": "The linear colour every tile's texels are multiplied with, with opacity in the fourth component.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"PixelsPerUnit": {
+								"description": "How many texels of a tile's frame make one unit of the entity's local space, as a sprite's.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 65536
+							},
+							"SortingLayer": {
+								"description": "The sorting layer name from project settings; the tilemap sorts with the sprites, and an undeclared name draws in the first.",
+								"type": "string"
+							},
+							"OrderInLayer": {
+								"description": "The draw order within the sorting layer, among the sprites: higher values draw over lower ones, equal values in canonical entity order.",
+								"type": "integer",
+								"minimum": -2147483648,
+								"maximum": 2147483647
+							},
+							"Lit": {
+								"description": "Whether 2D lights light the tiles; unlit tiles keep their texels unchanged.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"RigidBody2D": {
+						"description": "Simulates the entity in the 2D world: moves along world X and Y and rotates about world Z.",
+						"type": "object",
+						"properties": {
+							"Type": {
+								"description": "Static never moves; Kinematic is moved by script; Dynamic is simulated.",
+								"enum": ["Static", "Kinematic", "Dynamic"]
+							},
+							"Mass": {
+								"description": "Mass in kilograms (Dynamic only).",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 1000000000
+							},
+							"Friction": {
+								"description": "The friction coefficient of the body's surfaces; a contact uses the geometric mean of both bodies' values.",
+								"type": "number",
+								"minimum": 0
+							},
+							"Restitution": {
+								"description": "Bounciness, from no bounce (0) to a perfectly elastic bounce (1); a contact uses the larger of both bodies' values.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"LinearDamping": {
+								"description": "How quickly linear velocity decays, per second.",
+								"type": "number",
+								"minimum": 0
+							},
+							"AngularDamping": {
+								"description": "How quickly angular velocity decays, per second.",
+								"type": "number",
+								"minimum": 0
+							},
+							"GravityFactor": {
+								"description": "The multiplier of the project's 2D gravity for this body (0 floats).",
+								"type": "number"
+							},
+							"MotionQuality": {
+								"description": "Discrete or continuous (LinearCast) collision detection.",
+								"enum": ["Discrete", "LinearCast"]
+							},
+							"AllowSleeping": {
+								"description": "Whether the body may sleep when it comes to rest.",
+								"type": "boolean"
+							},
+							"FixedRotation": {
+								"description": "Whether a Dynamic body is kept from rotating.",
+								"type": "boolean"
+							},
+							"Layer": {
+								"description": "Physics layer name from project settings (the 3D world's layers).",
+								"type": "string"
+							},
+							"MaxLinearVelocity": {
+								"description": "The speed the body is clamped to, in metres per second.",
+								"type": "number",
+								"minimum": 0
+							},
+							"MaxAngularVelocity": {
+								"description": "The angular speed the body is clamped to, in radians per second.",
+								"type": "number",
+								"minimum": 0
+							},
+							"EnhancedInternalEdgeRemoval": {
+								"description": "Removes ghost collisions with internal edges of compound shapes; set it on bodies that roll or slide across tiles.",
+								"type": "boolean"
+							},
+							"InitialLinearVelocity": {
+								"description": "The velocity along world X and Y the body starts with, in metres per second.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"InitialAngularVelocity": {
+								"description": "The angular velocity about world Z the body starts with, in radians per second, counter-clockwise seen from +Z.",
+								"type": "number"
+							}
+						},
+						"additionalProperties": false
+					},
+					"BoxCollider2D": {
+						"description": "A rectangle collider in the entity's XY plane.",
+						"type": "object",
+						"properties": {
+							"HalfExtents": {
+								"description": "Half the rectangle's size along local X and Y; at least 1 mm.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0.001
+									},
+									{
+										"type": "number",
+										"minimum": 0.001
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Offset": {
+								"description": "The rectangle's centre relative to the entity, in its XY plane.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Angle": {
+								"description": "The rectangle's rotation about the entity's Z axis, counter-clockwise, in degrees.",
+								"type": "number"
+							},
+							"IsTrigger": {
+								"description": "Whether the collider only detects overlaps instead of colliding.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"CircleCollider2D": {
+						"description": "A circle collider in the entity's XY plane.",
+						"type": "object",
+						"properties": {
+							"Radius": {
+								"description": "The circle's radius; at least 1 mm.",
+								"type": "number",
+								"minimum": 0.001
+							},
+							"Offset": {
+								"description": "The circle's centre relative to the entity, in its XY plane.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"IsTrigger": {
+								"description": "Whether the collider only detects overlaps instead of colliding.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"PolygonCollider2D": {
+						"description": "A convex polygon collider in the entity's XY plane.",
+						"type": "object",
+						"properties": {
+							"Points": {
+								"description": "The points whose convex hull is the collider, 3 to 64 of them, in the collider's own space before Offset and Angle.",
+								"type": "array",
+								"items": {
+									"type": "array",
+									"prefixItems": [
+										{
+											"type": "number"
+										},
+										{
+											"type": "number"
+										}
+									],
+									"minItems": 2,
+									"maxItems": 2
+								}
+							},
+							"Offset": {
+								"description": "Where the polygon's origin sits relative to the entity, in its XY plane.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Angle": {
+								"description": "The polygon's rotation about the entity's Z axis, counter-clockwise, in degrees.",
+								"type": "number"
+							},
+							"IsTrigger": {
+								"description": "Whether the collider only detects overlaps instead of colliding.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"TilemapCollider": {
+						"description": "The solid cells of a tilemap as 2D colliders: each chunk's solid cells merged into boxes, one static compound without a RigidBody2D.",
+						"type": "object",
+						"properties": {
+							"Tilemap": {
+								"description": "The tilemap whose solid cells collide; null takes the entity's TilemapRenderer.Tilemap.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Tilemap"
+							},
+							"IsTrigger": {
+								"description": "Whether the collider only detects overlaps instead of colliding.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
 					"Animator": {
 						"description": "Poses a skeleton from layers of animation clips, blended by their weights, each fixed step; skinned meshes on the entity and below it follow.",
 						"type": "object",
@@ -11676,7 +13828,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "Skeleton", "AnimationClip"]
 							}
 						},
 						"additionalProperties": false
@@ -12636,6 +14788,14 @@
 							"Testing": {
 								"description": "Test suites and replays.",
 								"$ref": "#/$defs/TestingSettings"
+							},
+							"SortingLayers": {
+								"description": "The sorting layers of sprites.",
+								"$ref": "#/$defs/SortingLayersSettings"
+							},
+							"Physics2D": {
+								"description": "The 2D physics world's gravity.",
+								"$ref": "#/$defs/Physics2DSettings"
 							}
 						},
 						"additionalProperties": false
@@ -12881,6 +15041,45 @@
 							"CoverageGates": {
 								"description": "Whether unfiltered test runs record coverage and fail on any gap of the per-mode coverage gates (FeatureTest).",
 								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"SortingLayersSettings": {
+						"description": "The sorting layers sprites draw in, back to front.",
+						"type": "object",
+						"properties": {
+							"Layers": {
+								"description": "Sorting layer names in draw order, back to front, unique and non-empty: 1 to 32, the first one \"Default\". A sprite's SortingLayer names one; an undeclared name draws in the first.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							}
+						},
+						"additionalProperties": false
+					},
+					"Physics2DSettings": {
+						"description": "The 2D physics world; its layers are Physics.Layers.",
+						"type": "object",
+						"properties": {
+							"Gravity": {
+								"description": "Gravity of the 2D world along X and Y in metres per second squared; each component at most 1e12 in magnitude.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": -999999995904,
+										"maximum": 999999995904
+									},
+									{
+										"type": "number",
+										"minimum": -999999995904,
+										"maximum": 999999995904
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
 							}
 						},
 						"additionalProperties": false
@@ -13556,6 +15755,14 @@
 							"Testing": {
 								"description": "Test suites and replays.",
 								"$ref": "#/$defs/TestingSettings"
+							},
+							"SortingLayers": {
+								"description": "The sorting layers of sprites.",
+								"$ref": "#/$defs/SortingLayersSettings"
+							},
+							"Physics2D": {
+								"description": "The 2D physics world's gravity.",
+								"$ref": "#/$defs/Physics2DSettings"
 							}
 						},
 						"additionalProperties": false
@@ -13801,6 +16008,45 @@
 							"CoverageGates": {
 								"description": "Whether unfiltered test runs record coverage and fail on any gap of the per-mode coverage gates (FeatureTest).",
 								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"SortingLayersSettings": {
+						"description": "The sorting layers sprites draw in, back to front.",
+						"type": "object",
+						"properties": {
+							"Layers": {
+								"description": "Sorting layer names in draw order, back to front, unique and non-empty: 1 to 32, the first one \"Default\". A sprite's SortingLayer names one; an undeclared name draws in the first.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							}
+						},
+						"additionalProperties": false
+					},
+					"Physics2DSettings": {
+						"description": "The 2D physics world; its layers are Physics.Layers.",
+						"type": "object",
+						"properties": {
+							"Gravity": {
+								"description": "Gravity of the 2D world along X and Y in metres per second squared; each component at most 1e12 in magnitude.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": -999999995904,
+										"maximum": 999999995904
+									},
+									{
+										"type": "number",
+										"minimum": -999999995904,
+										"maximum": 999999995904
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
 							}
 						},
 						"additionalProperties": false
@@ -15974,7 +18220,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "Skeleton", "AnimationClip"]
 							}
 						},
 						"additionalProperties": false
@@ -16406,7 +18652,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "Skeleton", "AnimationClip"]
 							}
 						},
 						"additionalProperties": false
@@ -16518,7 +18764,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "Skeleton", "AnimationClip"]
 							}
 						},
 						"additionalProperties": false
@@ -16622,7 +18868,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "Skeleton", "AnimationClip"]
 							}
 						},
 						"additionalProperties": false
@@ -17182,7 +19428,7 @@
 						"maximum": 4294967295
 					},
 					"bodies": {
-						"description": "Live physics body count.",
+						"description": "Live physics body count of the play session: the 3D world's bodies and the 2D world's together; 0 without a session.",
 						"type": "integer",
 						"minimum": 0,
 						"maximum": 4294967295
@@ -17949,6 +20195,161 @@
 			]
 		},
 		{
+			"name": "tilemap.paint",
+			"domain": "tilemap",
+			"description": "Writes cells of a Tilemap asset (0 erases a cell, k paints the palette's entry k - 1) and saves it, as one undoable command; the cells' chunks are created and removed as needed. The editor's tile brush paints through it. A running lockstep, recording, replay or test session sees the change only after it ends.",
+			"exposeAsTool": true,
+			"mutates": true,
+			"supportsDryRun": true,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["tilemap", "cells"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "TilemapPaintParams",
+				"description": "The params of tilemap.paint.",
+				"type": "object",
+				"properties": {
+					"tilemap": {
+						"description": "The Tilemap asset: its id, its \"Assets/...\" path or another asset reference.",
+						"type": "string"
+					},
+					"cells": {
+						"description": "The cells to write, 1 to 65536 of them, in order: a later entry for the same cell wins.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/TilemapPaintCell"
+						}
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["tilemap", "cells"],
+				"$defs": {
+					"TilemapPaintCell": {
+						"description": "One tilemap cell to write.",
+						"type": "object",
+						"properties": {
+							"x": {
+								"description": "The cell's column: x grows to the right, cell 0's left edge at the tilemap entity's origin.",
+								"type": "integer",
+								"minimum": -2147483648,
+								"maximum": 2147483647
+							},
+							"y": {
+								"description": "The cell's row: y grows upwards, cell 0's bottom edge at the tilemap entity's origin.",
+								"type": "integer",
+								"minimum": -2147483648,
+								"maximum": 2147483647
+							},
+							"tile": {
+								"description": "The new cell value: 0 erases the cell, k paints the tilemap's palette entry k - 1.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "TilemapPaintResult",
+				"description": "The outcome of a tilemap.paint.",
+				"type": "object",
+				"properties": {
+					"tilemap": {
+						"description": "The tilemap painted.",
+						"$ref": "#/$defs/AssetSummary"
+					},
+					"changed": {
+						"description": "How many cells changed value; 0 writes nothing.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"chunks": {
+						"description": "How many chunks the tilemap holds after the edit (a chunk exists while one of its cells is not empty).",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"undoIndex": {
+						"description": "The edit's undo step; 0 in a dry run, in a batch or when nothing changed.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"AssetSummary": {
+						"description": "An asset's canonical id with its readable path and type.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The asset's handle: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"path": {
+								"description": "Its readable reference, such as \"Assets/Models/Track.glb#mesh:0:Straight\" or \"engine://Meshes/Cube\".",
+								"type": "string"
+							},
+							"type": {
+								"description": "Its type.",
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "Skeleton", "AnimationClip"]
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Paint two ground tiles and erase a third.",
+					"params": {
+						"tilemap": "Assets/Tilemaps/Level1.tilemap",
+						"cells": [
+							{
+								"x": 0,
+								"y": 0,
+								"tile": 1
+							},
+							{
+								"x": 1,
+								"y": 0,
+								"tile": 1
+							},
+							{
+								"x": 2,
+								"y": 0,
+								"tile": 0
+							}
+						]
+					}
+				}
+			]
+		},
+		{
 			"name": "viewport.camera",
 			"domain": "viewport",
 			"description": "Reads or patches the editor scene camera (pose, projection, field of view, orthographic size and clip range) without changing the scene or history.",
@@ -18243,7 +20644,7 @@
 		{
 			"name": "viewport.pick",
 			"domain": "viewport",
-			"description": "Queries visual triangles at a viewport pixel without a GPU, clipping to the camera's near and far planes. Returns the hit without changing selection.",
+			"description": "Queries what a viewport pixel shows without a GPU, clipping to the camera's near and far planes: the last-drawn sprite or tile whose quad covers it, in the project's sorting layers (a tile names its tilemap's entity), else the nearest mesh triangle. Returns the hit without changing selection.",
 			"exposeAsTool": false,
 			"mutates": false,
 			"supportsDryRun": true,
@@ -18315,7 +20716,7 @@
 						"maximum": 4294967295
 					},
 					"raycast": {
-						"description": "Nearest triangle in the camera's near-to-far interval.",
+						"description": "The sprite or tile the pixel shows (the last drawn whose quad covers it: submesh 0, triangle 0 or 1 of the quad; a tile is reported as its tilemap's entity), else the nearest mesh triangle, in the camera's near-to-far interval.",
 						"$ref": "#/$defs/SceneRaycastResult"
 					},
 					"_meta": {
@@ -18622,7 +21023,7 @@
 		{
 			"name": "viewport.setOptions",
 			"domain": "viewport",
-			"description": "Patches the scene viewport's overlays and debug view and the Game view's resolution; absent members remain unchanged.",
+			"description": "Patches the scene viewport's overlays, debug view and 2D mode and the Game view's resolution; absent members remain unchanged.",
 			"exposeAsTool": false,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -18669,6 +21070,10 @@
 							"minimum": 0,
 							"maximum": 4294967295
 						}
+					},
+					"mode2D": {
+						"description": "The scene view's 2D mode: turning it on makes the scene camera orthographic, looking down -Z at its target's X and Y; it then pans and zooms only, and its gizmos move in X and Y, rotate about Z and scale in X and Y. Turning it off keeps the camera.",
+						"type": "boolean"
 					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
@@ -18718,6 +21123,10 @@
 							"maximum": 4294967295
 						}
 					},
+					"mode2D": {
+						"description": "Whether the scene view is in its 2D mode.",
+						"type": "boolean"
+					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
@@ -18742,6 +21151,12 @@
 					"params": {
 						"debugView": "Normals",
 						"gameResolution": [1280, 720]
+					}
+				},
+				{
+					"description": "Switch the scene view to its 2D mode.",
+					"params": {
+						"mode2D": true
 					}
 				}
 			]

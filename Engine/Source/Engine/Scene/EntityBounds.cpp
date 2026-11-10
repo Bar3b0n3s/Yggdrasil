@@ -4,14 +4,20 @@
 #include "Engine/Asset/AssetManager.h"
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/MeshDeform.h"
+#include "Engine/Asset/TilemapDrawOrder.h"
 #include "Engine/Scene/AnimationSystem.h"
 #include "Engine/Scene/Components/AnimationPoseComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/SkinnedMeshComponent.h"
+#include "Engine/Scene/Components/SpriteRendererComponent.h"
+#include "Engine/Scene/Components/TilemapRendererComponent.h"
 #include "Engine/Scene/Private/AnimationTargets.h"
+#include "Engine/Scene/Private/SpriteDrawing.h"
+#include "Engine/Scene/Private/TilemapDrawing.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
 
+#include <array>
 #include <optional>
 #include <span>
 #include <string>
@@ -80,6 +86,54 @@ namespace Engine {
 			return true;
 		}
 
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 3): extends `bounds` by the world box of the quad `entity`'s
+		// SpriteRenderer is drawn with, when it has one with a quad. Returns whether it did.
+		static bool AddSpriteBounds(ConstEntity entity, AssetManager& assets, Aabb& bounds)
+		{
+			const SpriteRendererComponent* sprite = entity.TryGetComponent<SpriteRendererComponent>();
+			if (sprite == nullptr)
+				return false;
+			const glm::mat4 world = TransformSystem::ComputeWorldMatrix(entity);
+			// Only the quad's corners matter, so the sorting layers are left out.
+			const std::optional<std::array<glm::vec2, 4>> corners = ResolveSpriteCorners(assets, MakeSpriteItem(*sprite, world, entity.GetUUID(), {}));
+			if (!corners.has_value())
+				return false;
+			for (const glm::vec2& corner : *corners)
+				bounds.Extend(glm::vec3(world * glm::vec4(corner, 0.0f, 1.0f)));
+			return true;
+		}
+
+		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 24): extends `bounds` by the world box of every tile
+		// `entity`'s TilemapRenderer draws, each tile's quad as its sprite's at its cell's centre (TilemapDrawing.h). Returns
+		// whether it did.
+		static bool AddTilemapBounds(ConstEntity entity, AssetManager& assets, Aabb& bounds)
+		{
+			const TilemapRendererComponent* renderer = entity.TryGetComponent<TilemapRendererComponent>();
+			if (renderer == nullptr || !renderer->Tilemap.IsValid())
+				return false;
+			const glm::mat4 world = TransformSystem::ComputeWorldMatrix(entity);
+			// Only the tiles' quads matter, so the sorting layers are left out.
+			const std::optional<TilemapTiles> tiles = ResolveTilemapTiles(assets, MakeTilemapItem(*renderer, world, entity.GetUUID(), {}));
+			if (!tiles.has_value())
+				return false;
+			bool found = false;
+			const auto includeChunk = [](size_t /*chunk*/)
+			{
+				return true;
+			};
+			ForEachTilemapTileInDrawOrder(*tiles->Tilemap, false, includeChunk, [&tiles, &world, &bounds, &found](size_t /*chunk*/, glm::ivec2 cell, uint32_t value)
+			{
+				if (value > tiles->Palette.size() || !tiles->Palette[value - 1].has_value())
+					return true;
+				const glm::mat4 tileWorld = GetTilemapTileWorld(world, *tiles->Tilemap, cell);
+				for (const glm::vec2& corner : *tiles->Palette[value - 1])
+					bounds.Extend(glm::vec3(tileWorld * glm::vec4(corner, 0.0f, 1.0f)));
+				found = true;
+				return true;
+			});
+			return found;
+		}
+
 	}
 
 	std::optional<Aabb> ComputeEntityWorldBounds(ConstEntity entity, AssetManager& assets, const EntityBoundsOptions& options)
@@ -97,6 +151,8 @@ namespace Engine {
 			if (!current.IsReadable() || !current.IsActive())
 				continue;
 			found = Utils::AddMeshBounds(current, assets, bounds) || found;
+			found = Utils::AddSpriteBounds(current, assets, bounds) || found;
+			found = Utils::AddTilemapBounds(current, assets, bounds) || found;
 			if (!options.IncludeDescendants)
 				break;
 			for (const UUID child : current.GetChildren())

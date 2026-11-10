@@ -1436,6 +1436,7 @@ namespace Engine {
 		request.Width = width;
 		request.Height = height;
 		request.Quality = { .ShadowMapSize = rendering.ShadowMapSize, .SsaoHalfResolution = rendering.SsaoHalfResolution };
+		request.SortingLayers = session.GetProjectSettings().SortingLayers.Layers;
 		return request;
 	}
 

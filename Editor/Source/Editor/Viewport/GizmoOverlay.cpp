@@ -41,6 +41,19 @@ namespace Engine {
 
 	}
 
+	uint32_t GetGizmoOperationMask(GizmoOperation operation, bool mode2D)
+	{
+		// The 2D mode's handles move in X and Y, rotate about Z and scale in X and Y (M21, decision 14).
+		ImGuizmo::OPERATION bits = ImGuizmo::TRANSLATE;
+		switch (operation)
+		{
+			case GizmoOperation::Translate: bits = mode2D ? ImGuizmo::TRANSLATE_X | ImGuizmo::TRANSLATE_Y : ImGuizmo::TRANSLATE; break;
+			case GizmoOperation::Rotate:    bits = mode2D ? ImGuizmo::ROTATE_Z : ImGuizmo::ROTATE; break;
+			case GizmoOperation::Scale:     bits = mode2D ? ImGuizmo::SCALE_X | ImGuizmo::SCALE_Y : ImGuizmo::SCALE; break;
+		}
+		return static_cast<uint32_t>(bits);
+	}
+
 	Status DrawGizmoOverlay(EditorContext& context, GizmoController& controller, const CameraData& camera,
 		const EditorViewportRect& rectangle, GizmoSettings& settings, bool& ownsPointer)
 	{
@@ -118,13 +131,7 @@ namespace Engine {
 			? glm::perspectiveRH_NO(glm::radians(camera.VerticalFov), aspect, camera.NearClip, camera.FarClip)
 			: glm::orthoRH_NO(-camera.OrthographicSize * aspect, camera.OrthographicSize * aspect,
 				  -camera.OrthographicSize, camera.OrthographicSize, camera.NearClip, camera.FarClip);
-		ImGuizmo::OPERATION operation = ImGuizmo::TRANSLATE;
-		switch (settings.Operation)
-		{
-			case GizmoOperation::Translate: operation = ImGuizmo::TRANSLATE; break;
-			case GizmoOperation::Rotate:    operation = ImGuizmo::ROTATE; break;
-			case GizmoOperation::Scale:     operation = ImGuizmo::SCALE; break;
-		}
+		const auto operation = static_cast<ImGuizmo::OPERATION>(GetGizmoOperationMask(settings.Operation, context.GetViewportState().GetOptions().Mode2D));
 		ImGuizmo::SetDrawlist();
 		ImGuizmo::SetRect(rectangle.Min.x, rectangle.Min.y, rectangle.Size.x, rectangle.Size.y);
 		ImGuizmo::SetOrthographic(camera.ProjectionKind == RenderProjection::Orthographic);

@@ -32,14 +32,22 @@ namespace Engine {
 			constexpr auto operator<=>(const ScriptInstanceKey&) const = default;
 		};
 
+		// A physics callback held for an instance that has not started: the event and the world that raised it (M21,
+		// Docs/Decisions/0032-m21-contract.md decision 13: the 2D world's events reach the 2D callbacks).
+		struct HeldPhysicsEvent
+		{
+			PhysicsEvent Event{};
+			bool Is2D = false;
+		};
+
 	}
 
 	struct ScriptEngine::State
 	{
 		using InstanceKey = Detail::ScriptInstanceKey;
-		// A fixed-step callback an instance holds until it has started: a physics callback, or an animation event (M23,
-		// Docs/Decisions/0034-m23-contract.md decision 31).
-		using HeldEvent = std::variant<PhysicsEvent, AnimationEventRecord>;
+		// A fixed-step callback an instance holds until it has started: a physics callback of either world (M21), or an
+		// animation event (M23, Docs/Decisions/0034-m23-contract.md decision 31).
+		using HeldEvent = std::variant<Detail::HeldPhysicsEvent, AnimationEventRecord>;
 
 		struct Instance
 		{
@@ -61,8 +69,8 @@ namespace Engine {
 			bool FaultDisabled = false;
 			bool DestroyPrepared = false;
 			std::map<std::string, VariantValue> Overrides{};
-			// Physics callbacks and animation events that arrived before OnStart, in dispatch order; delivered after the start
-			// flush (§9.4 pairs).
+			// Physics callbacks (of both worlds, interleaved as they arrived) and animation events that arrived before OnStart,
+			// in dispatch order; delivered after the start flush (§9.4 pairs).
 			std::vector<HeldEvent> PendingEvents{};
 		};
 
@@ -151,12 +159,17 @@ namespace Engine {
 		// `event` is a physics callback's (its other entity and contact), `animation` OnAnimationEvent's (its AnimationEvent).
 		void Invoke(InstanceKey key, std::string_view callback, const PhysicsEvent* event = nullptr, bool destroying = false,
 			const AnimationEventRecord* animation = nullptr);
-		void InvokePhysics(InstanceKey key, const PhysicsEvent& event);
+		// The 3D callbacks (OnCollisionEnter, ...), or with `is2D` the 2D ones (OnCollisionEnter2D, ...; M21).
+		void InvokePhysics(InstanceKey key, const PhysicsEvent& event, bool is2D = false);
 		void InvokeAnimation(InstanceKey key, const AnimationEventRecord& event);
-		// Delivers the physics callbacks and animation events held for started instances: an entity's instances together,
-		// in slot order, at the turn of its first in (ExecutionOrder, canonical entity, slot) order (decision 17's entity
-		// callbacks), and dispatch order per instance; an instance removed or faulted by a callback discards the rest of its
-		// held events.
+		// OnPhysicsEvent's and OnPhysics2DEvent's delivery: every instance of the receiving entity, in slot order.
+		void DeliverPhysics(const PhysicsEvent& event, bool is2D);
+		// OnPhysicsDiagnostic's and OnPhysics2DDiagnostic's script error, its callback `callback`.
+		void PublishPhysicsDiagnostic(const PhysicsDiagnostic& diagnostic, std::string_view callback);
+		// Delivers the physics callbacks (of both worlds) and animation events held for started instances: an entity's
+		// instances together, in slot order, at the turn of its first in (ExecutionOrder, canonical entity, slot) order
+		// (decision 17's entity callbacks), and dispatch order per instance; an instance removed or faulted by a callback
+		// discards the rest of its held events.
 		void DeliverPendingEvents();
 		// Unreferences the instance's table, erases it and marks the lifecycle order for a refresh. Returns the next one.
 		std::map<InstanceKey, Instance>::iterator EraseInstance(std::map<InstanceKey, Instance>::iterator instance);

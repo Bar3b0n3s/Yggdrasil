@@ -66,6 +66,7 @@ namespace Engine {
 			.Entry(AssetType::Font, "Font", "A font (TTF, OTF) as a signed distance field atlas.")
 			.Entry(AssetType::Replay, "Replay", "An input replay (.replay).")
 			.Entry(AssetType::SpriteSheet, "SpriteSheet", "A sprite sheet (.spritesheet): frames of a texture with pivots and 9-slice borders, and clips.")
+			.Entry(AssetType::Tilemap, "Tilemap", "A tilemap (.tilemap): a grid of cells in chunks, each empty or a palette entry's sprite sheet frame.")
 			.Entry(AssetType::Skeleton, "Skeleton", "A skeleton (a glTF's skin sub-asset): named joints in a hierarchy with their rest pose and inverse binds.")
 			.Entry(AssetType::AnimationClip, "AnimationClip",
 				"An animation clip (a glTF's animation sub-asset): keyed joint transforms and morph weights, with named events.");

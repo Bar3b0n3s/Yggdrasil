@@ -5,6 +5,7 @@
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/TilemapData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
@@ -18,11 +19,14 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <format>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 namespace Engine {
@@ -749,6 +753,217 @@ namespace Engine {
 			const Json header = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "SpriteSheet", "path": "Assets/Sprites/Bad.spritesheet",
 				"values": {"Format": "SpriteSheet"}})"));
 			CHECK(header["error"]["code"] == Json(-32602));
+		}
+
+		// Architecture §7.1's asset references (W21.1's review): a sprite sheet's Texture in asset.create's and
+		// asset.setProperties' values takes every spelling an AssetRef param takes (MethodRegistry.h convention 13), written to
+		// the file as the handle; a reference that names nothing is NotFound, one of another type InvalidParams, located at it.
+		TEST_CASE("AssetMethods: a sprite sheet's Texture takes a handle, a project path or an engine path")
+		{
+			Test::AutomationFixture setup("AssetSpriteSheetTexture");
+			const Result<Buffer> png = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Textures/Rgba.png"));
+			REQUIRE_MESSAGE(png.has_value(), png.error().ToString());
+			const VfsPath texturePath = VfsPath::Create("project", "Assets/Textures/Rgba.png").value_or(VfsPath());
+			REQUIRE(setup.GetEditor().CreateProjectDirectory(texturePath.GetParent()).has_value());
+			REQUIRE(setup.GetEditor().WriteProjectFile(texturePath, *png).has_value());
+			CallOrFail(setup, "project.refreshAssets", Json::object());
+			const std::string texture = JsonReader(CallOrFail(setup, "asset.info", Json{ { "asset", "Assets/Textures/Rgba.png" } })["asset"]["id"])
+											.ReadString()
+											.value_or(std::string());
+			REQUIRE(texture.size() == 16);
+
+			// A project path, written as the handle it names, its frames checked against that texture.
+			const Json frame = ParseAssetMethodJson(R"([{"Name": "Corner", "Rect": {"X": 8, "Y": 0, "Width": 8, "Height": 8}}])");
+			CallOrFail(setup, "asset.create", Json{ { "type", "SpriteSheet" }, { "path", "Assets/Sprites/ByPath.spritesheet" }, { "values", Json{ { "Texture", "Assets/Textures/Rgba.png" }, { "Frames", frame } } } });
+			const Json byPath = CallOrFail(setup, "asset.getProperties", ParseAssetMethodJson(R"({"asset": "Assets/Sprites/ByPath.spritesheet"})"));
+			CHECK(byPath["values"]["Texture"] == Json(texture));
+			Json beyond = frame;
+			beyond[0]["Rect"]["X"] = 9;
+			const Json outside = setup.Request("asset.create", Json{ { "type", "SpriteSheet" }, { "path", "Assets/Sprites/Outside.spritesheet" }, { "values", Json{ { "Texture", "Assets/Textures/Rgba.png" }, { "Frames", beyond } } } });
+			CHECK(outside["error"]["data"]["errorCode"] == Json("Validation"));
+			CHECK(outside["error"]["data"]["issues"][0]["pointer"] == Json("/values/Frames/0/Rect"));
+
+			// An engine path (a built-in sprite texture) through asset.setProperties, and a handle kept as given.
+			const Json engine = CallOrFail(setup, "asset.setProperties",
+				ParseAssetMethodJson(R"({"asset": "Assets/Sprites/ByPath.spritesheet", "values": {"Texture": "engine://Textures/SpriteSquare"}})"));
+			CHECK(engine["values"]["Texture"] == Json(BuiltinAssetHandles::SpriteSquareTexture.ToString()));
+			const Json handle = CallOrFail(setup, "asset.setProperties", Json{ { "asset", "Assets/Sprites/ByPath.spritesheet" }, { "values", Json{ { "Texture", texture } } } });
+			CHECK(handle["values"]["Texture"] == Json(texture));
+
+			// A path that names nothing, and an asset that is not a texture, are refused at the Texture, changing nothing.
+			const Json missing = setup.Request("asset.setProperties",
+				ParseAssetMethodJson(R"({"asset": "Assets/Sprites/ByPath.spritesheet", "values": {"Texture": "Assets/Textures/Missing.png"}})"));
+			CHECK(missing["error"]["data"]["errorCode"] == Json("NotFound"));
+			CHECK(missing["error"]["data"]["location"]["pointer"] == Json("/values/Texture"));
+			const Json wrongType = setup.Request("asset.create",
+				ParseAssetMethodJson(R"({"type": "SpriteSheet", "path": "Assets/Sprites/Wrong.spritesheet", "values": {"Texture": "Assets/Sprites/ByPath.spritesheet"}})"));
+			CHECK(wrongType["error"]["data"]["errorCode"] == Json("InvalidArgument"));
+			CHECK(wrongType["error"]["data"]["location"]["pointer"] == Json("/values/Texture"));
+			CHECK_FALSE(setup.GetEditor().GetVfs().Exists(VfsPath::Create("project", "Assets/Sprites/Wrong.spritesheet").value_or(VfsPath())));
+			const Json unchanged = CallOrFail(setup, "asset.getProperties", ParseAssetMethodJson(R"({"asset": "Assets/Sprites/ByPath.spritesheet"})"));
+			CHECK(unchanged["values"]["Texture"] == Json(texture));
+		}
+
+		// M21 (Docs/Decisions/0032-m21-contract.md decision 23): tilemaps through asset.create, asset.getProperties and
+		// asset.setProperties, checked by ValidateTilemap; a palette entry's Sheet takes every spelling of an asset reference,
+		// written as the handle, and the palette's sheets are the tilemap's dependencies.
+		TEST_CASE("AssetMethods: a tilemap is created over the defaults and patched, its palette's sheets by any reference")
+		{
+			Test::AutomationFixture setup("AssetTilemap");
+			const Json sheetCreated = CallOrFail(setup, "asset.create",
+				ParseAssetMethodJson(R"({"type": "SpriteSheet", "path": "Assets/Sprites/Tiles.spritesheet", "values": {"Frames": [{"Rect": {"Width": 8, "Height": 8}}]}})"));
+			const std::string sheet = JsonReader(sheetCreated["asset"]["id"]).ReadString().value_or(std::string());
+			REQUIRE(sheet.size() == 16);
+
+			// Without values: an empty map of unit cells in 16-cell chunks, every field written.
+			const Json empty = CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "Tilemap", "path": "Assets/Tilemaps/Empty.tilemap"})"));
+			CHECK(empty["asset"]["type"] == Json("Tilemap"));
+			const Result<std::string> emptyText = setup.GetEditor().GetVfs().ReadText(VfsPath::Create("project", "Assets/Tilemaps/Empty.tilemap").value_or(VfsPath()));
+			REQUIRE_MESSAGE(emptyText.has_value(), emptyText.error().ToString());
+			CHECK(*emptyText == "{\n\t\"Format\": \"Tilemap\",\n\t\"Version\": 1,\n\t\"CellSize\": [1, 1],\n\t\"ChunkSize\": 16,\n\t\"Palette\": [],\n\t\"Chunks\": []\n}\n");
+
+			// A palette entry's Sheet by project path, written as the handle; the sheet is the tilemap's dependency.
+			const Json created = CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "Tilemap", "path": "Assets/Tilemaps/Level.tilemap",
+				"values": {"ChunkSize": 2, "Palette": [{"Sheet": "Assets/Sprites/Tiles.spritesheet", "Frame": 0}], "Chunks": [{"X": 0, "Y": 0, "Tiles": [1, 0, 0, 1]}]}})"));
+			CHECK(created["undoIndex"] != Json(0));
+			CallOrFail(setup, "asset.reimport", ParseAssetMethodJson(R"({"asset": "Assets/Tilemaps/Level.tilemap"})"));
+			const Json info = CallOrFail(setup, "asset.info", ParseAssetMethodJson(R"({"asset": "Assets/Tilemaps/Level.tilemap"})"));
+			CHECK(info["importer"] == Json("Tilemap"));
+			REQUIRE(info["dependencies"].size() == 1);
+			CHECK(info["dependencies"][0]["id"] == Json(sheet));
+			CHECK(info["diagnostics"].empty());
+			const Json properties = CallOrFail(setup, "asset.getProperties", ParseAssetMethodJson(R"({"asset": "Assets/Tilemaps/Level.tilemap"})"));
+			CHECK(properties["values"]["Palette"][0]["Sheet"] == Json(sheet));
+			CHECK(properties["values"]["Palette"][0]["Solid"] == Json(true));
+			CHECK(properties["values"]["Chunks"][0]["Tiles"] == Json::array({ 1, 0, 0, 1 }));
+
+			// A patch is one undo step; an array (the palette) is replaced whole.
+			const Json patched = CallOrFail(setup, "asset.setProperties",
+				Json{ { "asset", "Assets/Tilemaps/Level.tilemap" }, { "values", Json{ { "CellSize", Json::array({ 2, 2 }) }, { "Palette", Json::array({ Json{ { "Sheet", sheet }, { "Frame", 0 }, { "Solid", false } } }) } } } });
+			CHECK(patched["values"]["CellSize"] == Json::array({ 2, 2 }));
+			CHECK(patched["values"]["Palette"][0]["Solid"] == Json(false));
+			CHECK(patched["values"]["Chunks"].size() == 1);
+			CallOrFail(setup, "edit.undo", Json::object());
+			const Json undone = CallOrFail(setup, "asset.getProperties", ParseAssetMethodJson(R"({"asset": "Assets/Tilemaps/Level.tilemap"})"));
+			CHECK(undone["values"]["CellSize"] == Json::array({ 1, 1 }));
+
+			// The tilemap's rules, located under /values, by a create and by a patch, which leaves the file as it was.
+			const Json beyond = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "Tilemap", "path": "Assets/Tilemaps/Bad.tilemap",
+				"values": {"ChunkSize": 1, "Palette": [{"Sheet": null}], "Chunks": [{"X": 0, "Y": 0, "Tiles": [2]}]}})"));
+			CHECK(beyond["error"]["data"]["errorCode"] == Json("Validation"));
+			CHECK(beyond["error"]["data"]["issues"][0]["pointer"] == Json("/values/Chunks/0/Tiles/0"));
+			CHECK_FALSE(setup.GetEditor().GetVfs().Exists(VfsPath::Create("project", "Assets/Tilemaps/Bad.tilemap").value_or(VfsPath())));
+			const Json chunkSize = setup.Request("asset.setProperties", ParseAssetMethodJson(R"({"asset": "Assets/Tilemaps/Level.tilemap", "values": {"ChunkSize": 3}})"));
+			CHECK(chunkSize["error"]["data"]["errorCode"] == Json("Validation"));
+			CHECK(chunkSize["error"]["data"]["issues"][0]["pointer"] == Json("/values/ChunkSize"));
+			const Json unchanged = CallOrFail(setup, "asset.getProperties", ParseAssetMethodJson(R"({"asset": "Assets/Tilemaps/Level.tilemap"})"));
+			CHECK(unchanged["values"]["ChunkSize"] == Json(2));
+
+			// A Sheet that names nothing is NotFound, one of another type InvalidArgument, each at its pointer, changing nothing.
+			const Json missing = setup.Request("asset.setProperties",
+				ParseAssetMethodJson(R"({"asset": "Assets/Tilemaps/Level.tilemap", "values": {"Palette": [{"Sheet": "Assets/Sprites/Missing.spritesheet"}]}})"));
+			CHECK(missing["error"]["data"]["errorCode"] == Json("NotFound"));
+			CHECK(missing["error"]["data"]["location"]["pointer"] == Json("/values/Palette/0/Sheet"));
+			const Json wrongType = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "Tilemap", "path": "Assets/Tilemaps/Wrong.tilemap",
+				"values": {"Palette": [{"Sheet": null}, {"Sheet": "Assets/Tilemaps/Level.tilemap"}]}})"));
+			CHECK(wrongType["error"]["data"]["errorCode"] == Json("InvalidArgument"));
+			CHECK(wrongType["error"]["data"]["location"]["pointer"] == Json("/values/Palette/1/Sheet"));
+			CHECK_FALSE(setup.GetEditor().GetVfs().Exists(VfsPath::Create("project", "Assets/Tilemaps/Wrong.tilemap").value_or(VfsPath())));
+		}
+
+		// Decision 23 (W21.2's review): asset.setProperties changes a painted tilemap's chunk size alone, as the inspector's
+		// ChunkSize field submits it, by laying the cells in chunks of the new size: every cell keeps its value, the chunks are
+		// canonical (sorted by (Y, X), none empty), and the edit is one undo step. A chunk size whose chunks would store more than
+		// MaxTilemapCells cells, or a palette too short for the cells, is refused and changes nothing.
+		TEST_CASE("AssetMethods: a tilemap's new ChunkSize keeps its painted cells, laid in chunks of that size")
+		{
+			Test::AutomationFixture setup("AssetTilemapChunkSize");
+			EditorContext& editor = setup.GetEditor();
+			CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "Tilemap", "path": "Assets/Tilemaps/Level.tilemap",
+				"values": {"ChunkSize": 2, "Palette": [{"Sheet": null, "Frame": 0}, {"Sheet": null, "Frame": 1, "Solid": false}]}})"));
+			// Cells on both sides of the origin, in chunks of every size apart from 64, which holds all six.
+			const std::vector<std::pair<glm::ivec2, uint32_t>> painted = { { glm::ivec2(-3, -1), 1u }, { glm::ivec2(-1, 2), 2u }, { glm::ivec2(0, 0), 1u },
+				{ glm::ivec2(1, 0), 2u }, { glm::ivec2(5, -4), 1u }, { glm::ivec2(6, 7), 2u } };
+			Json cells = Json::array();
+			for (const auto& [cell, tile] : painted)
+				cells.push_back(Json{ { "x", cell.x }, { "y", cell.y }, { "tile", tile } });
+			CallOrFail(setup, "tilemap.paint", Json{ { "tilemap", "Assets/Tilemaps/Level.tilemap" }, { "cells", cells } });
+			const VfsPath file = VfsPath::Create("project", "Assets/Tilemaps/Level.tilemap").value_or(VfsPath());
+			const auto read = [&editor, &file]()
+			{
+				const Result<std::string> text = editor.GetVfs().ReadText(file);
+				REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+				TilemapLoadReport report;
+				Result<TilemapData> tilemap = TilemapFromText(*text, editor.GetTypeRegistry(), report, true);
+				REQUIRE_MESSAGE(tilemap.has_value(), tilemap.error().ToString());
+				return std::move(*tilemap);
+			};
+			// The tilemap holds exactly the painted cells, in the chunks of `chunkSize` that hold them, sorted by (Y, X).
+			const auto checkCells = [&read, &painted](uint32_t chunkSize)
+			{
+				CAPTURE(chunkSize);
+				const TilemapData tilemap = read();
+				CHECK(tilemap.ChunkSize == chunkSize);
+				std::vector<std::pair<int32_t, int32_t>> expectedChunks;
+				for (const auto& [cell, tile] : painted)
+				{
+					CAPTURE(cell.x);
+					CAPTURE(cell.y);
+					CHECK(GetTilemapCell(tilemap, cell) == tile);
+					const glm::ivec2 chunk = GetTilemapChunkCoordinate(cell, chunkSize);
+					expectedChunks.emplace_back(chunk.y, chunk.x);
+				}
+				std::ranges::sort(expectedChunks);
+				const auto duplicates = std::ranges::unique(expectedChunks);
+				expectedChunks.erase(duplicates.begin(), duplicates.end());
+				std::vector<std::pair<int32_t, int32_t>> chunks;
+				size_t stored = 0;
+				for (const TilemapChunk& chunk : tilemap.Chunks)
+				{
+					chunks.emplace_back(chunk.Y, chunk.X);
+					stored += static_cast<size_t>(std::ranges::count_if(chunk.Tiles, [](uint32_t value)
+					{
+						return value != 0;
+					}));
+				}
+				CHECK(chunks == expectedChunks);
+				CHECK(stored == painted.size());
+			};
+			checkCells(2);
+
+			// Larger chunks merge cells of several, smaller ones split them; null is the default chunk size.
+			const Json merged = CallOrFail(setup, "asset.setProperties", ParseAssetMethodJson(R"({"asset": "Assets/Tilemaps/Level.tilemap", "values": {"ChunkSize": 4}})"));
+			CHECK(merged["values"]["ChunkSize"] == Json(4));
+			CHECK(merged["undoIndex"] != Json(0));
+			checkCells(4);
+			CallOrFail(setup, "edit.undo", Json::object());
+			checkCells(2);
+			CallOrFail(setup, "asset.setProperties", ParseAssetMethodJson(R"({"asset": "Assets/Tilemaps/Level.tilemap", "values": {"ChunkSize": 1}})"));
+			checkCells(1);
+			CallOrFail(setup, "asset.setProperties", ParseAssetMethodJson(R"({"asset": "Assets/Tilemaps/Level.tilemap", "values": {"ChunkSize": null}})"));
+			checkCells(DefaultTilemapChunkSize);
+
+			// A palette too short for the cells is refused at the cells, and nothing changes.
+			const std::string before = editor.GetVfs().ReadText(file).value_or(std::string());
+			const Json shortPalette = setup.Request("asset.setProperties",
+				ParseAssetMethodJson(R"({"asset": "Assets/Tilemaps/Level.tilemap", "values": {"ChunkSize": 8, "Palette": [{"Sheet": null}]}})"));
+			CHECK(shortPalette["error"]["data"]["errorCode"] == Json("Validation"));
+			CHECK(editor.GetVfs().ReadText(file).value_or(std::string()) == before);
+
+			// 1,025 cells 64 apart in chunks of 1 lie in 1,025 chunks of 64 x 64 cells: more than MaxTilemapCells, refused.
+			CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "Tilemap", "path": "Assets/Tilemaps/Sparse.tilemap",
+				"values": {"ChunkSize": 1, "Palette": [{"Sheet": null}]}})"));
+			Json sparse = Json::array();
+			for (int32_t index = 0; index < 1025; ++index)
+				sparse.push_back(Json{ { "x", 64 * index }, { "y", 0 }, { "tile", 1 } });
+			static_assert(uint64_t{ 1025 } * MaxTilemapChunkSize * MaxTilemapChunkSize > MaxTilemapCells);
+			CallOrFail(setup, "tilemap.paint", Json{ { "tilemap", "Assets/Tilemaps/Sparse.tilemap" }, { "cells", sparse } });
+			const VfsPath sparseFile = VfsPath::Create("project", "Assets/Tilemaps/Sparse.tilemap").value_or(VfsPath());
+			const std::string sparseBefore = editor.GetVfs().ReadText(sparseFile).value_or(std::string());
+			const Json tooLarge = setup.Request("asset.setProperties", ParseAssetMethodJson(R"({"asset": "Assets/Tilemaps/Sparse.tilemap", "values": {"ChunkSize": 64}})"));
+			CHECK(tooLarge["error"]["data"]["errorCode"] == Json("Validation"));
+			CHECK(tooLarge["error"]["data"]["issues"][0]["pointer"] == Json("/values/ChunkSize"));
+			CHECK(editor.GetVfs().ReadText(sparseFile).value_or(std::string()) == sparseBefore);
 		}
 	}
 

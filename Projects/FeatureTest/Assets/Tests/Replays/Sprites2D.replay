@@ -1,0 +1,190 @@
+{
+	"Format": "Replay",
+	"Version": 3,
+	"Scene": {
+		"Handle": "87ce3b1694b964a2",
+		"Path": "Assets/Scenes/Sprites2D.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.1.0",
+	"Config": "Editor",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "0f8a33e6c4c6ceae",
+				"Path": "/Bevel",
+				"Hash": "47e464489f012092",
+				"Components": {
+					"Transform": "b9e8bb7dcb1bf1d6",
+					"SpriteRenderer": "43f01d47846887f6"
+				}
+			},
+			{
+				"Id": "260053dc61ffc2de",
+				"Path": "/Circle",
+				"Hash": "cc702f6f296e4b77",
+				"Components": {
+					"Transform": "de4143d762c92821",
+					"SpriteRenderer": "55ea7fbd5f065987"
+				}
+			},
+			{
+				"Id": "3cd4807b33469b2b",
+				"Path": "/Waver",
+				"Hash": "2abac5c7ecfe858a",
+				"Components": {
+					"Transform": "42145849d9cbb614",
+					"SpriteRenderer": "2e6701bf51184ebe",
+					"SpriteAnimator": "dac4dddb8c2fbd7f"
+				}
+			},
+			{
+				"Id": "7b776bca349342ef",
+				"Path": "/Badge",
+				"Hash": "c657647619cd4093",
+				"Components": {
+					"Transform": "6109f10c9ec86640",
+					"SpriteRenderer": "04fb3cc8e94163de"
+				}
+			},
+			{
+				"Id": "a6fd45d508f447b1",
+				"Path": "/Square",
+				"Hash": "4453e36ba61a64d4",
+				"Components": {
+					"Transform": "bec069c4bd69007f",
+					"SpriteRenderer": "c46190b94ae90d6f"
+				}
+			},
+			{
+				"Id": "b496931e077dade5",
+				"Path": "/Strider",
+				"Hash": "9ef1fce67e02bde1",
+				"Components": {
+					"Transform": "51af4967850c3d8a",
+					"Script": "3ba0816b8f1bff8c",
+					"SpriteRenderer": "3a11b1ec1ba164d5",
+					"SpriteAnimator": "a0276a4914b6aacb"
+				}
+			},
+			{
+				"Id": "c1408b78d4ad7176",
+				"Path": "/Camera",
+				"Hash": "30efbd800e5923c2",
+				"Components": {
+					"Transform": "b571ff7d96fca57d",
+					"Camera": "cd40617b886094c0",
+					"AudioListener": "5364d8903ff7ab7d",
+					"PixelPerfectCamera": "ca53b1ff7b841a2f"
+				}
+			},
+			{
+				"Id": "e59f071d24b26ad3",
+				"Path": "/Rounded",
+				"Hash": "ba06cec0c109e731",
+				"Components": {
+					"Transform": "22cfb0dc49c4ee51",
+					"SpriteRenderer": "6743061ac3f09658"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "2e67c99347230c56",
+				"Path": "Assets/Scripts/Sprites2D/Strider.luau",
+				"Type": "Script",
+				"Hash": "7ce852ae42847c80"
+			},
+			{
+				"Handle": "503b1f98ce848765",
+				"Path": "Assets/Sprites/Sprites2D/Walker.spritesheet",
+				"Type": "SpriteSheet",
+				"Hash": "f97967e4a88fe336"
+			},
+			{
+				"Handle": "c559ed2e76a3cdde",
+				"Path": "Assets/Textures/Sprites2D/Rgba.png",
+				"Type": "Texture",
+				"Hash": "6e9f2866f2aa6626"
+			}
+		]
+	},
+	"Events": [
+		{
+			"Tick": 7,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 1
+		},
+		{
+			"Tick": 47,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 61,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Down"
+		},
+		{
+			"Tick": 62,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Up"
+		},
+		{
+			"Tick": 91,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.5
+		},
+		{
+			"Tick": 131,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 171,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Down"
+		},
+		{
+			"Tick": 172,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Up"
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 240,
+			"Luau": "local s = Scene.FindByName(\"Strider\")\nreturn s:GetScript().Jumps == 2 and s.Transform.Translation.x > 1 and s.SpriteRenderer.FlipX"
+		}
+	],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "c3e76ade42c1333a"
+		},
+		{
+			"Tick": 120,
+			"StateHash": "d48c2ad51029f031"
+		},
+		{
+			"Tick": 180,
+			"StateHash": "585faa2857e1aef2"
+		},
+		{
+			"Tick": 240,
+			"StateHash": "7770accb073d9e68"
+		}
+	],
+	"FinalTick": 241,
+	"FinalStateHash": "3a39060058306dc2"
+}

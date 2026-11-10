@@ -22,8 +22,9 @@ namespace Engine {
 	// project.export (ADR 0012 decisions 4, 8 and 14), M11's physics.bodyInfo (ADR 0014 decision 18), M12's audio.stats
 	// (ADR 0015 decision 15), M19's input.readReplay and native.* (ADR 0030 decisions 14 and 32), M18's shaders.reload and
 	// profiler.capture (ADR 0029 decisions 3 and 11), M20's scene.list, scene.activate and scene.close
-	// (Docs/Decisions/0031-m20-contract.md decision 14), and M23's animation.preview (Docs/Decisions/0034-m23-contract.md
-	// decision 32), test hooks excluded.
+	// (Docs/Decisions/0031-m20-contract.md decision 14), M21's physics2d.raycast, physics2d.overlap and physics2d.bodyInfo
+	// (Docs/Decisions/0032-m21-contract.md decisions 15 and 27) and tilemap.paint (decision 26), and M23's animation.preview
+	// (Docs/Decisions/0034-m23-contract.md decision 32), test hooks excluded.
 	static const std::vector<std::string>& GetExpectedMethodNames()
 	{
 		static const std::vector<std::string> ExpectedNames = { "animation.preview", "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
@@ -32,12 +33,13 @@ namespace Engine {
 			"edit.undo", "editor.screenshot", "editor.state", "entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get",
 			"entity.reparent", "entity.update", "events.read", "input.inject", "input.readReplay", "input.record", "input.replay", "log.read",
 			"native.build", "native.getComponents", "native.load", "native.read", "native.setComponents", "native.status", "native.write",
-			"physics.bodyInfo", "play.pause", "play.resume",
+			"physics.bodyInfo", "physics2d.bodyInfo", "physics2d.overlap", "physics2d.raycast", "play.pause", "play.resume",
 			"play.setTimeScale", "play.start", "play.state", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "prefab.revert",
 			"prefab.unpack", "profiler.capture", "project.create", "project.export", "project.getSettings", "project.info", "project.open", "project.refreshAssets",
 			"project.save", "project.setSettings", "project.upgrade", "project.validate", "rpc.discover", "scene.activate", "scene.close", "scene.diff", "scene.get",
 			"scene.list", "scene.new", "scene.open", "scene.query", "scene.raycast", "scene.save", "scene.tree", "script.check", "script.create", "script.errors", "script.eval", "script.fields", "script.read", "script.write",
-			"session.hello", "session.info", "session.shutdown", "shaders.reload", "stats.get", "test.list", "test.run", "viewport.camera", "viewport.frame",
+			"session.hello", "session.info", "session.shutdown", "shaders.reload", "stats.get", "test.list", "test.run", "tilemap.paint", "viewport.camera",
+			"viewport.frame",
 			"viewport.pick", "viewport.screenshot", "viewport.setOptions" };
 		return ExpectedNames;
 	}
@@ -121,17 +123,18 @@ namespace Engine {
 				"native.setComponents", "native.status", "native.write", "play.start", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "project.create",
 				"project.export", "project.getSettings", "project.open", "project.save", "project.setSettings", "project.upgrade", "project.validate",
 				"scene.activate", "scene.close", "scene.diff", "scene.list", "scene.new", "scene.open", "scene.query", "scene.save", "scene.tree",
-				"script.check", "script.create", "script.errors", "script.eval", "script.read", "script.write", "test.run", "viewport.screenshot" };
+				"script.check", "script.create", "script.errors", "script.eval", "script.read", "script.write", "test.run", "tilemap.paint",
+				"viewport.screenshot" };
 			// The edit.batch ops (ADR 0008 decision 8): pure reads and methods whose effects all go through Execute. asset.import and
 			// asset.reimport are pending operations; project.refreshAssets writes outside a command (ADR 0010 decision 20).
 			const std::vector<std::string> batchable = { "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
 				"asset.info", "asset.list", "asset.move", "asset.setImportSettings", "asset.setProperties", "audio.stats", "component.list", "component.schema",
 				"docs.get", "edit.getSelection", "edit.history", "editor.state", "entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get",
 				"entity.reparent", "entity.update", "events.read", "log.read", "native.getComponents", "native.read", "native.setComponents", "native.status",
-				"native.write", "physics.bodyInfo", "prefab.apply", "prefab.create", "prefab.instantiate",
+				"native.write", "physics.bodyInfo", "physics2d.bodyInfo", "physics2d.overlap", "physics2d.raycast", "prefab.apply", "prefab.create", "prefab.instantiate",
 				"prefab.revert", "prefab.unpack", "project.getSettings", "project.info", "project.setSettings", "project.validate", "rpc.discover", "scene.diff",
 				"scene.get", "scene.query", "scene.raycast", "scene.tree", "script.check", "script.create", "script.errors", "script.fields", "script.read", "script.write",
-				"session.info", "stats.get", "viewport.pick" };
+				"session.info", "stats.get", "tilemap.paint", "viewport.pick" };
 			for (const MethodDescriptor* method : methods.GetMethods())
 			{
 				const MethodSpecification& specification = method->Specification;
@@ -286,9 +289,9 @@ namespace Engine {
 			// M7's play_start, play_stop, play_step, input_inject and project_export, plus M13's ten script/replay/test tools, and
 			// M16's project_upgrade (friction S3-09), M17's asset_get_properties (friction F11), M19's input_read_replay
 			// (ADR 0030 decision 14) and seven native tools (decision 32), M20's scene_list, scene_activate and scene_close
-			// (Docs/Decisions/0031-m20-contract.md decision 14), and M23's animation_preview (Docs/Decisions/0034-m23-contract.md
-			// decision 32).
-			CHECK(catalog["Tools"].size() == 66);
+			// (Docs/Decisions/0031-m20-contract.md decision 14), M21's tilemap_paint (Docs/Decisions/0032-m21-contract.md
+			// decision 26) and M23's animation_preview (Docs/Decisions/0034-m23-contract.md decision 32).
+			CHECK(catalog["Tools"].size() == 67);
 			for (Json& tool : catalog["Tools"])
 			{
 				INFO(tool["name"].dump());

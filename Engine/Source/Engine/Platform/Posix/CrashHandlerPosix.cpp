@@ -353,6 +353,15 @@ namespace Engine {
 		return std::move(*report);
 	}
 
+	Status CrashHandler::BeginExitWatch()
+	{
+		return MakeError(ErrorCode::Unsupported, "the exit watch has no POSIX backend (ADR 0028 decision 10)");
+	}
+
+	void CrashHandler::EndExitWatch()
+	{
+	}
+
 	void CrashHandler::SimulateCrash()
 	{
 		raise(SIGSEGV);

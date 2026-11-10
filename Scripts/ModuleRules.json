@@ -637,6 +637,7 @@
 			"Projects": [
 				"EditorCore",
 				"Editor",
+				"Runtime",
 				"Tests",
 				"ShaderShared"
 			],
@@ -774,7 +775,8 @@
 			".sfx",
 			".meta",
 			".replay",
-			".spritesheet"
+			".spritesheet",
+			".tilemap"
 		],
 		"LineDelimitedExtensions": [
 			".jsonl"
