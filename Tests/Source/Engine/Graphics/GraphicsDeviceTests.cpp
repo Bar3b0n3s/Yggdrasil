@@ -14,6 +14,9 @@
 
 #include <vulkan/vulkan.hpp>
 
+#include <algorithm>
+#include <string>
+
 // The device (Architecture §8.1, §8.14). Every case runs in the gpu stage under both API caps: Test.py runs the GPU suite
 // once as it is and once with --vulkan-api=1.3, which the fixture applies.
 
@@ -94,6 +97,27 @@ namespace Engine {
 			// The fixture's destruction checks zero validation errors and zero live objects (HeadlessGpuFixture.h).
 			gpu.Reset();
 			CHECK_FALSE(gpu.IsAvailable());
+		}
+
+		TEST_CASE("GraphicsDevice: the device's log line names the implicit layers the loader activated, not the validation layer"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			const uint64_t first = Log::GetRingBuffer().GetNextSeq();
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			const GraphicsDeviceInfo& info = gpu.GetDevice().GetInfo();
+			// A GPU test's device has validation on: the engine enabled that layer itself, so it is no implicit layer.
+			REQUIRE(info.Validation);
+			REQUIRE(info.ImplicitLayers.has_value());
+			CHECK(std::ranges::find(*info.ImplicitLayers, "VK_LAYER_KHRONOS_validation") == info.ImplicitLayers->end());
+
+			std::string named;
+			for (const std::string& layer : *info.ImplicitLayers)
+				named += (named.empty() ? "" : ", ") + layer;
+			const LogReadResult read = Log::GetRingBuffer().Read(
+				{ .Cursor = first, .MinimumLevel = LogLevel::Trace, .Channels = {}, .Contains = "Graphics device: '", .Limit = 100 });
+			REQUIRE_FALSE(read.Entries.empty());
+			CHECK(read.Entries.back().Message.ends_with("; implicit layers: " + (named.empty() ? std::string("none") : named)));
 		}
 
 		TEST_CASE("GraphicsDevice: disabling depth clamp turns shadow pancaking off on any device" * doctest::test_suite(Test::GpuSuite))

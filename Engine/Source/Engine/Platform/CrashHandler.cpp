@@ -409,6 +409,7 @@ namespace Engine {
 			case CrashBreadcrumb::AutomationMethod: return "AutomationMethod";
 			case CrashBreadcrumb::ScriptCallback:   return "ScriptCallback";
 			case CrashBreadcrumb::FramePhase:       return "FramePhase";
+			case CrashBreadcrumb::TestCase:         return "TestCase";
 		}
 
 		ENGINE_CORE_ASSERT(false, "Unknown CrashBreadcrumb {}", std::to_underlying(breadcrumb));

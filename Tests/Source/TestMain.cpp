@@ -42,7 +42,8 @@ namespace Engine {
 			return ExitCode::UsageError;
 		}
 
-		// doctest with the test harness of a normal run: the ExpectLog listener and the per-test-case watchdog.
+		// doctest with the test harness of a normal run: the ExpectLog listener, the per-test-case watchdog and the crash
+		// handler's exit watch.
 		static int RunDoctest(int argc, char** argv, const TestOptions& options)
 		{
 			InstallExpectLogListener();
@@ -56,7 +57,15 @@ namespace Engine {
 			{
 				doctest::Context context;
 				context.applyCommandLine(argc, argv);
+				// The process ends only after doctest's run, so an exit during it leaves a crash report naming the exiting
+				// thread, its stack and the running test case (Architecture §15.2). The watch begins once the watchdog
+				// runs, so its exit() handler runs before the watchdog's state is destroyed. A process whose crash handler
+				// writes no reports (a child given no user-data root) and a host without the watch (POSIX) run without it.
+				const Status watching = CrashHandler::BeginExitWatch();
+				if (!watching.has_value() && watching.error().GetCode() == ErrorCode::Io)
+					ENGINE_CORE_WARN("The tests run without the exit watch: {}", watching.error());
 				exitCode = context.run();
+				CrashHandler::EndExitWatch();
 			}
 			StopTestTimeoutWatchdog();
 			UninstallExpectLogListener();

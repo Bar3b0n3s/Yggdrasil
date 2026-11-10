@@ -71,7 +71,12 @@ never reach the user's real user-data folder; the listing of skipped test cases 
 never emptied: every run of that suite and configuration in the checkout shares it, and two can overlap (a unit run
 takes no machine lock). A run names only the crash reports its own Tests process wrote (new since the run started, with
 that process's id in the name): each is printed as a "CRASH REPORT: <path>" line and named in the step's detail, and
-with --json the step holds "userData" and "crashReports".
+with --json the step holds "userData" and "crashReports". The crash handler of a Tests process also reports an exit
+through exit() or ExitProcess during doctest's run (Windows; Architecture §15.2). A run that ends with a non-zero exit
+code, no failed test case and no crash report of its own names in its detail, from the log files below its root, the
+last test case its process started (the Tests binary logs "Test case of process <pid>: <name>" as each case starts) and
+the last LOG_LINES_IN_DETAIL lines that thread logged; with --json the step holds "lastTestCase" and the last
+LOG_LINES_IN_DATA lines as "lastLogLines".
 
 The automation suite (Roadmap M4, Docs/Decisions/0008-m4-decisions.md decisions 33 and 34; its skip rule is
 decision 16):
@@ -323,6 +328,27 @@ CHILD_TARGET_SUITE = "ChildTargets"
 # The name of a crash report a process writes in its crash report folder (Lib/paths.py's crash_report_folder; Engine/
 # Source/Engine/Platform/CrashHandler.cpp, FormatCrashReportStem): crash-<epoch>-<process id>[-<attempt>].txt.
 CRASH_REPORT_NAME_PATTERN = re.compile(r"^crash-\d+-(\d+)(?:-\d+)?\.txt$")
+# A line of a log file (Lib/paths.py's log_folder; Engine/Source/Engine/Core/Log.cpp, FilePattern): "[<date> <time>]
+# [<thread id>] [<logger>] [<level>] <message>". It names the thread, not the process.
+LOG_FILE_LINE_PATTERN = re.compile(r"^\[[^\]]*\] \[(?P<thread>\d+)\] \[[^\]]*\] \[[^\]]*\] (?P<message>.*)$")
+# The message a Tests process that is not a child logs on doctest's thread as it starts a test case (Tests/Source/
+# Support/TestCaseTracker.h, FormatTestCaseLogLine).
+TEST_CASE_LOG_PATTERN = re.compile(r"^Test case of process (?P<process>\d+): (?P<name>.*)$")
+# A rotated log file of the Tests binary, <stem>.<n>.log (Lib/paths.py's log_folder).
+ROTATED_LOG_PATTERN = re.compile(r"^(?P<stem>.+)\.(?P<index>\d+)\.log$")
+# How many of its last log lines a Tests run that ended without a crash report names: in the step's detail (each cut at
+# LOG_LINE_LENGTH_IN_DETAIL characters) and in its JSON data.
+LOG_LINES_IN_DETAIL = 3
+LOG_LINE_LENGTH_IN_DETAIL = 200
+LOG_LINES_IN_DATA = 20
+# The Tests binary's own exit codes besides doctest's 0 and 1 (Tests/Source/TestMain.cpp, Architecture §4.1), each an
+# end its log announces, so a run that ends with one and no crash report was not ended from outside.
+TESTS_EXIT_CODE_MEANINGS = {
+    2: "a malformed option",
+    3: "an initialization that failed",
+    4: "a crash or failed assertion whose report could not be written",
+    5: "a test case past its time limit",
+}
 LISTING_TIMEOUT_SECONDS = 120.0
 UNEXPECTED_SKIPS_IN_DETAIL = 3
 NAMES_IN_DETAIL = 4
@@ -700,6 +726,81 @@ def describe_crash_reports(reports: list[Path]) -> str:
     return f"crash report(s) of the run: {', '.join(paths.display_path(report) for report in reports)}"
 
 
+@dataclasses.dataclass(frozen=True)
+class ProcessLog:
+    """What the log files below a run's user-data root say about one Tests process (read_process_log)."""
+
+    last_test_case: str | None  # the last test case the process started; None when its log names none
+    last_lines: list[str]  # the last lines doctest's thread logged from that case's line on, oldest first
+
+
+def log_files(user_data: Path, stem: str) -> list[Path]:
+    """The log files of the processes of executable `stem` whose user-data root is `user_data`, newest first:
+    <stem>.log, then the rotated <stem>.1.log, <stem>.2.log and on (Lib/paths.py's log_folder)."""
+    folder = paths.log_folder(user_data)
+    rotated: list[tuple[int, Path]] = []
+    for path in folder.glob(f"{stem}.*.log"):
+        match = ROTATED_LOG_PATTERN.match(path.name)
+        if match is not None and match.group("stem") == stem:
+            rotated.append((int(match.group("index")), path))
+    return [folder / f"{stem}.log", *(path for _, path in sorted(rotated))]
+
+
+def read_process_log(user_data: Path, stem: str, process_id: int, line_count: int) -> ProcessLog:
+    """The last test case the Tests process `process_id` (executable `stem`) started and the last `line_count` lines
+    doctest's thread logged from that case's line on, from the log files below `user_data`. Every run of the suite and
+    configuration in the checkout shares the files and two can overlap, and a line names its thread, not its process, so
+    the process's lines are those of the thread that logged its last test case line (TEST_CASE_LOG_PATTERN), followed
+    into newer files when the log rotated after it. A file that cannot be read counts as empty."""
+    texts: list[list[str]] = []
+    for path in log_files(user_data, stem):
+        try:
+            texts.append(path.read_text(encoding="utf-8", errors="replace").splitlines())
+        except OSError:
+            texts.append([])
+    for age, lines in enumerate(texts):
+        for index in range(len(lines) - 1, -1, -1):
+            line = LOG_FILE_LINE_PATTERN.match(lines[index])
+            case = TEST_CASE_LOG_PATTERN.match(line.group("message")) if line is not None else None
+            if line is None or case is None or int(case.group("process")) != process_id:
+                continue
+            thread = line.group("thread")
+            later = [text for newer in reversed(texts[:age]) for text in newer]
+            tail = [text for text in [*lines[index:], *later]
+                    if (match := LOG_FILE_LINE_PATTERN.match(text)) is not None and match.group("thread") == thread]
+            return ProcessLog(case.group("name"), tail[-line_count:])
+    return ProcessLog(None, [])
+
+
+def describe_end_without_report(exit_code: int, log: ProcessLog) -> str:
+    """The step detail's part for a Tests process that ended with the non-zero `exit_code` and no crash report, with
+    what its log says (read_process_log). An exit code of TESTS_EXIT_CODE_MEANINGS is the binary's own announced end. On
+    Windows the crash handler reports a crash, a fatal error and, while doctest runs, an exit through exit() or
+    ExitProcess (Architecture §15.2), which leaves TerminateProcess, called inside the process or outside it, or an
+    exception status (0xC0000409 of a __fastfail) that the system ended it with before any handler of the process saw
+    it."""
+    if exit_code in TESTS_EXIT_CODE_MEANINGS:
+        meaning = TESTS_EXIT_CODE_MEANINGS[exit_code]
+        parts = [f"no crash report: exit code {exit_code} is the Tests binary's own, {meaning}, which its log names"]
+    elif os.name != "nt":
+        parts = ["no crash report"]
+    elif exit_code < 0 or exit_code >= 0x80000000:
+        parts = ["no crash report: the system ended the process with an exception status that no handler of the "
+                 "process saw (a __fastfail, or an exception it could not dispatch)"]
+    else:
+        parts = ["no crash report: the crash handler reports crashes, fatal errors and exits during doctest's run, so "
+                 "the process was ended by TerminateProcess, called inside or outside it"]
+    if log.last_test_case is not None:
+        parts.append(f"the last test case it started: '{log.last_test_case}'")
+    else:
+        parts.append("its log names no test case it started")
+    if log.last_lines:
+        shown = [line if len(line) <= LOG_LINE_LENGTH_IN_DETAIL else line[:LOG_LINE_LENGTH_IN_DETAIL] + "..."
+                 for line in log.last_lines[-LOG_LINES_IN_DETAIL:]]
+        parts.append(f"its last log lines: {' | '.join(shown)}")
+    return "; ".join(parts)
+
+
 def read_junit(path: Path, suite_name: str | None) -> TestCounts:
     """Count a JUnit file's test cases and, with `suite_name`, rename its test suites (doctest names its suite after the
     executable's path)."""
@@ -892,6 +993,12 @@ def run_tests(run: TestRun, arguments: argparse.Namespace, console: Console) -> 
             detail = f"{counts.failed} of {counts.executed} test case(s) failed"
         else:
             detail = f"Tests exited with code {describe_exit_code(result.exit_code)}"
+            exit_code = result.exit_code
+            if exit_code is not None and exit_code != 0 and not reports and result.process_id is not None:
+                log = read_process_log(user_data, executable.stem, result.process_id, LOG_LINES_IN_DATA)
+                data["lastTestCase"] = log.last_test_case
+                data["lastLogLines"] = log.last_lines
+                detail += f"; {describe_end_without_report(exit_code, log)}"
         if sanitizer_errors:
             detail += f"; {describe_sanitizer_errors(sanitizer_errors)}"
         if reports:
