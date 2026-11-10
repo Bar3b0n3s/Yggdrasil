@@ -69,7 +69,7 @@
 						"type": "string"
 					},
 					"values": {
-						"description": "A Material's, a SoundEffect's, a SpriteSheet's or a Tilemap's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads, or a tilemap's CellSize, ChunkSize, Palette and Chunks; a sheet's Texture and a palette entry's Sheet take any asset reference: a handle, an Assets/ path or an engine:// path); absent for other types."
+						"description": "A Material's, a SoundEffect's, a SpriteSheet's or a Tilemap's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads, or a tilemap's CellSize, ChunkSize, Palette and Chunks; a material's maps, a sheet's Texture and a palette entry's Sheet take any asset reference: a handle, an Assets/ path or an engine:// path; a sheet's imported Texture is set to Compression None in the same step, so sprite art is never block-compressed); absent for other types."
 					},
 					"dryRun": {
 						"description": "Validate and return the would-be result without applying anything.",
@@ -270,7 +270,7 @@
 						"type": "string"
 					},
 					"values": {
-						"description": "An RFC 7386 merge patch of its properties: members replace, null resets a field, an array is replaced whole; a sprite sheet's Texture and a tilemap palette entry's Sheet take any asset reference (a handle, an Assets/ path or an engine:// path); a tilemap's ChunkSize set without Chunks keeps its painted cells, laid in chunks of the new size."
+						"description": "An RFC 7386 merge patch of its properties: members replace, null resets a field, an array is replaced whole; a material's maps, a sprite sheet's Texture and a tilemap palette entry's Sheet take any asset reference (a handle, an Assets/ path or an engine:// path); a sprite sheet's imported Texture is set to Compression None in the same step; a tilemap's ChunkSize set without Chunks keeps its painted cells, laid in chunks of the new size."
 					},
 					"dryRun": {
 						"description": "Validate and return the would-be result without applying anything.",

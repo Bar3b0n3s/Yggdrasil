@@ -1,5 +1,6 @@
 #include "TestsPCH.h"
 
+#include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/PathGlob.h"
@@ -332,8 +333,9 @@ namespace Engine {
 
 		// M23 (Docs/Decisions/0034-m23-contract.md decision 13; ADR 0028's phase 2 ledger): sprite art is never
 		// block-compressed, so every sprite sheet of the project cuts its frames from a texture whose .meta sets Compression
-		// None; Tiles.spritesheet's frames sampled BC7 blocks while it shared Formats.jsonl's Rgba.png, whose Compression is
-		// Auto. This walks the committed .spritesheet files and the texture .meta files, without a GPU.
+		// None, or from a built-in texture, which is generated uncompressed (M21's sheets of the built-in sprite shapes; M23's
+		// landing); Tiles.spritesheet's frames sampled BC7 blocks while it shared Formats.jsonl's Rgba.png, whose Compression
+		// is Auto. This walks the committed .spritesheet files and the texture .meta files, without a GPU.
 		TEST_CASE("FeatureTest: every sprite sheet cuts its frames from a texture imported with Compression None")
 		{
 			const std::filesystem::path root = Test::GetRepositoryRoot() / "Projects" / "FeatureTest";
@@ -367,6 +369,10 @@ namespace Engine {
 				Json document;
 				const auto texture = ReadProjectFile(document, sheet).ReadMember<std::string>("Texture");
 				REQUIRE(texture.has_value());
+				const std::optional<UUID> handle = UUID::FromString(*texture);
+				REQUIRE(handle.has_value());
+				if (IsBuiltinAssetHandle(AssetHandle(*handle)))
+					continue;
 				const auto found = textures.find(*texture);
 				REQUIRE_MESSAGE(found != textures.end(), "the sheet's texture is a texture of the project");
 				CAPTURE(found->second);

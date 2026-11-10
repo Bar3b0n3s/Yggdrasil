@@ -79,10 +79,13 @@ namespace Engine {
 			Result<Scope<PlaySession>> session = PlaySession::CreateFromScene(specification, fixture.GetScene());
 			REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
 			(*session)->Tick();
+			// M23's AnimationSystem follows SpriteAnimation on phase 2's merged tree (ADR 0028's phase-2 execution order;
+			// Docs/Decisions/0034-m23-contract.md decision 29 and its Landing).
 			const std::vector<PlaySessionPhase> expected = {
 				PlaySessionPhase::InterpolationSnapshot,
 				PlaySessionPhase::ApplyInput,
 				PlaySessionPhase::SpriteAnimation,
+				PlaySessionPhase::AnimationSystem,
 				PlaySessionPhase::PreStepTransformUpdate,
 				PlaySessionPhase::PhysicsPreStep,
 				PlaySessionPhase::PhysicsStep,

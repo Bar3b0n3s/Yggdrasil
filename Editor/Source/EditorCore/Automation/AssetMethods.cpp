@@ -23,6 +23,7 @@
 #include "Engine/AssetPipeline/Importers/MaterialImporter.h"
 #include "Engine/AssetPipeline/Importers/SoundEffectImporter.h"
 #include "Engine/AssetPipeline/Importers/SpriteSheetImporter.h"
+#include "Engine/AssetPipeline/Importers/TextureImporter.h"
 #include "Engine/AssetPipeline/Importers/TilemapImporter.h"
 #include "Engine/Audio/SoundSynth.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
@@ -46,9 +47,12 @@
 #include <algorithm>
 #include <charconv>
 #include <filesystem>
+#include <optional>
 #include <set>
+#include <span>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 namespace Engine {
 
@@ -227,24 +231,25 @@ namespace Engine {
 			return sheet;
 		}
 
-		// A sprite sheet's values (asset.create, asset.setProperties) take its Texture in every spelling of an asset reference
-		// (Architecture §7.1: a 16-hex handle, a project path, a sub-asset path or an engine path), as the AssetRef fields of
-		// params do (MethodRegistry.h convention 13; Docs/Decisions/0032-m21-contract.md, W21.1's review): a Texture that is a
-		// string but not a handle is rewritten to the handle of the Texture it names; a handle is kept as given (it may name a
-		// missing asset). Errors, located at `pointer`/Texture: ResolveAssetParam's (InvalidArgument for a malformed
+		// Native-asset values (asset.create, asset.setProperties) take a texture field `key` in every spelling of an asset
+		// reference (Architecture §7.1: a 16-hex handle, a project path, a sub-asset path or an engine path), as the AssetRef
+		// fields of params do (MethodRegistry.h convention 13): a value that is a string but not a handle is rewritten to the
+		// handle of the Texture it names; a handle is kept as given (it may name a missing asset). A sprite sheet's Texture
+		// (Docs/Decisions/0032-m21-contract.md, W21.1's review) and a Material's maps (Docs/Decisions/0034-m23-contract.md
+		// decision 21 and its Landing). Errors, located at `pointer`/`key`: ResolveAssetParam's (InvalidArgument for a malformed
 		// reference, NotFound for one that names nothing, the refresh's errors) and InvalidArgument for an asset of another
 		// type.
-		Status ResolveSpriteSheetTexture(EditorMethodContext& context, Json& values, std::string_view pointer)
+		Status ResolveTextureReference(EditorMethodContext& context, Json& values, std::string_view key, std::string_view pointer)
 		{
 			if (!values.is_object())
 				return {};
-			const auto texture = values.find("Texture");
+			const auto texture = values.find(std::string(key));
 			if (texture == values.end() || !texture->is_string())
 				return {};
 			const Result<std::string> reference = JsonReader(*texture).ReadString();
 			if (!reference || UUID::FromString(*reference).has_value())
 				return {};
-			const std::string location = std::format("{}/Texture", pointer);
+			const std::string location = std::format("{}/{}", pointer, key);
 			ENGINE_TRY_ASSIGN(const AssetHandle handle, Utils::ResolveAssetParam(context, *reference, location));
 			const AssetType type = context.GetEditor().GetAssets().GetAssetType(handle);
 			if (type != AssetType::Texture)
@@ -255,6 +260,38 @@ namespace Engine {
 			}
 			*texture = handle.ToString();
 			return {};
+		}
+
+		// A sprite sheet's Texture through ResolveTextureReference.
+		Status ResolveSpriteSheetTexture(EditorMethodContext& context, Json& values, std::string_view pointer)
+		{
+			return ResolveTextureReference(context, values, "Texture", pointer);
+		}
+
+		// A Material's five maps through ResolveTextureReference, each located at its own name.
+		Status ResolveMaterialTextures(EditorMethodContext& context, Json& values, std::string_view pointer)
+		{
+			for (const std::string_view key : { "BaseColorMap", "MetallicRoughnessMap", "NormalMap", "OcclusionMap", "EmissiveMap" })
+				ENGINE_TRY(ResolveTextureReference(context, values, key, pointer));
+			return {};
+		}
+
+		// The texture handle a sprite sheet's values name after ResolveSpriteSheetTexture: its Texture when that is a handle,
+		// nullopt otherwise (absent or null, or a value the sheet's own validation refuses).
+		std::optional<AssetHandle> FindSpriteSheetTexture(const Json& values)
+		{
+			if (!values.is_object())
+				return std::nullopt;
+			const auto texture = values.find("Texture");
+			if (texture == values.end() || !texture->is_string())
+				return std::nullopt;
+			const Result<std::string> reference = JsonReader(*texture).ReadString();
+			if (!reference)
+				return std::nullopt;
+			const std::optional<UUID> handle = UUID::FromString(*reference);
+			if (!handle.has_value())
+				return std::nullopt;
+			return AssetHandle(*handle);
 		}
 
 		// asset.create's and asset.setProperties' texture check of a sprite sheet (Docs/Decisions/0029-m18-contract.md decision
@@ -671,6 +708,35 @@ namespace Engine {
 				return std::unexpected(Utils::PrefixPointers(merged.error(), pointer));
 			}
 			return merged;
+		}
+
+		// A file to write and its new bytes (AssetEditCommand::CreateForWrites).
+		using FileWrite = std::pair<VfsPath, Buffer>;
+
+		// Sprite, tile and UI art is stored uncompressed (ADR 0028's phase-2 ledger, "Texture compression";
+		// Docs/Decisions/0034-m23-contract.md decision 13 and its Landing): asset.create and asset.setProperties of a sprite sheet
+		// (and so the content browser's create list and the inspector's sheet fields, which go through them) give the sheet's
+		// Texture Compression None in the sheet's own undo step, so a texture a sprite sheet references never cooks as BC
+		// blocks, which blur hard pixel edges and shift flat colours. Returns the .meta of the texture `texture` with
+		// Compression None, to write with the sheet (the write schedules the texture's import), or nullopt when there is
+		// nothing to change: a null handle, a built-in texture (never compressed), an asset that is not a registered source of
+		// the TextureImporter (missing, another type, or a glTF's texture sub-asset, which follows its source's settings), or
+		// a texture already at None. Errors: MergeSettings's, located at `pointer`.
+		Result<std::optional<FileWrite>> MakeUncompressedTextureMeta(const EditorAssetManager& assets, AssetHandle texture, std::string_view pointer)
+		{
+			if (!texture.IsValid() || IsBuiltinAssetHandle(texture) || assets.GetBuiltins().Find(texture) != nullptr)
+				return std::nullopt;
+			const AssetRecord* record = assets.GetRegistry().Find(texture);
+			if (record == nullptr || record->Metadata.Kind == AssetMetaKind::Dependency || record->Metadata.Handle != texture
+				|| record->Metadata.Importer != TextureImporter::Id)
+				return std::nullopt;
+			const Json patch{ { "Compression", "None" } };
+			ENGINE_TRY_ASSIGN(VariantValue settings, MergeSettings(assets, record->Metadata.Importer, record->Metadata.Settings, patch, pointer));
+			if (settings == record->Metadata.Settings)
+				return std::nullopt;
+			AssetMetadata changed = record->Metadata;
+			changed.Settings = std::move(settings);
+			return std::make_optional(FileWrite{ record->MetaPath, TextToBuffer(SerializeAssetMetadata(changed)) });
 		}
 
 		// The decimal offset of a list cursor ("" is 0). Errors: InvalidArgument at "/cursor" for anything else, or an offset
@@ -1284,13 +1350,27 @@ namespace Engine {
 					ENGINE_TRY(ResolveSpriteSheetTexture(context, values, "/values"));
 				else if (params.Type == AssetCreateType::Tilemap)
 					ENGINE_TRY(ResolveTilemapSheets(context, values, "/values"));
+				else if (params.Type == AssetCreateType::Material)
+					ENGINE_TRY(ResolveMaterialTextures(context, values, "/values"));
+				const std::optional<AssetHandle> sheetTexture = params.Type == AssetCreateType::SpriteSheet ? FindSpriteSheetTexture(values) : std::nullopt;
 				ENGINE_TRY_ASSIGN(const std::string text, MakeNativeAssetText(editor, params.Type, path, VariantValue(std::move(values))));
+				std::optional<FileWrite> uncompressed;
+				if (sheetTexture.has_value())
+				{
+					ENGINE_TRY_ASSIGN(uncompressed, MakeUncompressedTextureMeta(editor.GetAssets(), *sheetTexture, "/values/Texture"));
+				}
 				ENGINE_TRY_ASSIGN(const AssetMetadata metadata, editor.GetAssets().CreateMetadata(path));
 				const std::string metaText = SerializeAssetMetadata(metadata);
 				ENGINE_TRY_ASSIGN(const VfsPath metaPath, GetMetaPath(path));
 				Utils::AddMissingDirectoryEdits(vfs, path.GetParent(), edits);
 				edits.push_back(AssetFileEdit{ .Path = path, .Kind = AssetFileKind::File, .Before = std::nullopt, .After = TextToBuffer(text) });
 				edits.push_back(AssetFileEdit{ .Path = metaPath, .Kind = AssetFileKind::File, .Before = std::nullopt, .After = TextToBuffer(metaText) });
+				if (uncompressed.has_value())
+				{
+					// The sheet's texture's .meta, written with its current bytes as the Before state, in the same step.
+					ENGINE_TRY_ASSIGN(const Scope<AssetEditCommand> textureWrite, AssetEditCommand::CreateForWrites(editor, std::span(&*uncompressed, 1), ""));
+					edits.insert(edits.end(), textureWrite->GetEdits().begin(), textureWrite->GetEdits().end());
+				}
 				result.Asset = AssetSummary{ .Id = metadata.Handle.ToString(), .Path = relative, .Type = metadata.Type };
 				// A sound effect is an AudioClip asset (SoundEffectImporter's main type); its undo label names what was created.
 				std::string_view what = AssetTypeToString(metadata.Type);
@@ -1350,12 +1430,28 @@ namespace Engine {
 				ENGINE_TRY(ResolveSpriteSheetTexture(context, values, "/values"));
 			else if (*kind == NativePropertiesKind::Tilemap)
 				ENGINE_TRY(ResolveTilemapSheets(context, values, "/values"));
+			else if (*kind == NativePropertiesKind::Material)
+				ENGINE_TRY(ResolveMaterialTextures(context, values, "/values"));
 			ENGINE_TRY_ASSIGN(NativeProperties patched, ReadNativeProperties(*kind, *text, source, editor.GetTypeRegistry(), &values, editor.GetAssets()));
 
-			AssetSetPropertiesResult result;
+			// The sheet's file and, when its texture is not at None yet, the texture's .meta (MakeUncompressedTextureMeta), as one
+			// step.
+			std::vector<FileWrite> writes;
 			if (patched.Text != *text)
+				writes.emplace_back(source, TextToBuffer(patched.Text));
+			if (*kind == NativePropertiesKind::SpriteSheet)
 			{
-				ENGINE_TRY_ASSIGN(Scope<AssetEditCommand> command, AssetEditCommand::CreateForWrite(editor, source, AsBytes(patched.Text), std::format("Set {} '{}'", GetNativePropertiesLabel(*kind), source.GetStem())));
+				if (const std::optional<AssetHandle> texture = FindSpriteSheetTexture(patched.Values); texture.has_value())
+				{
+					ENGINE_TRY_ASSIGN(std::optional<FileWrite> uncompressed, MakeUncompressedTextureMeta(editor.GetAssets(), *texture, "/values/Texture"));
+					if (uncompressed.has_value())
+						writes.push_back(std::move(*uncompressed));
+				}
+			}
+			AssetSetPropertiesResult result;
+			if (!writes.empty())
+			{
+				ENGINE_TRY_ASSIGN(Scope<AssetEditCommand> command, AssetEditCommand::CreateForWrites(editor, writes, std::format("Set {} '{}'", GetNativePropertiesLabel(*kind), source.GetStem())));
 				ENGINE_TRY_ASSIGN(const uint64_t undoIndex, editor.Execute(std::move(command)));
 				result.UndoIndex = ToAutomationCounter(undoIndex);
 			}
@@ -1537,8 +1633,9 @@ namespace Engine {
 			.Field("values", &AssetCreateParams::Values,
 				"A Material's, a SoundEffect's, a SpriteSheet's or a Tilemap's fields over the defaults (registry names, such as Roughness, Layers, "
 				"which a sound effect needs, a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads, or a tilemap's "
-				"CellSize, ChunkSize, Palette and Chunks; a sheet's Texture and a palette entry's Sheet take any asset reference: a handle, an "
-				"Assets/ path or an engine:// path); absent for other types.");
+				"CellSize, ChunkSize, Palette and Chunks; a material's maps, a sheet's Texture and a palette entry's Sheet take any asset reference: "
+				"a handle, an Assets/ path or an engine:// path; a sheet's imported Texture is set to Compression None in the same step, so sprite "
+				"art is never block-compressed); absent for other types.");
 
 		registry.Struct<AssetCreateResult>("AssetCreateResult", "The created asset.")
 			.Field("asset", &AssetCreateResult::Asset, "The created asset; an empty id and type None for a folder.")
@@ -1557,9 +1654,10 @@ namespace Engine {
 		registry.Struct<AssetSetPropertiesParams>("AssetSetPropertiesParams", "The params of asset.setProperties.")
 			.Field("asset", &AssetSetPropertiesParams::Asset, "The native asset (a material, a sound effect, a sprite sheet or a tilemap).")
 			.Field("values", &AssetSetPropertiesParams::Values,
-				"An RFC 7386 merge patch of its properties: members replace, null resets a field, an array is replaced whole; a sprite sheet's "
-				"Texture and a tilemap palette entry's Sheet take any asset reference (a handle, an Assets/ path or an engine:// path); a tilemap's "
-				"ChunkSize set without Chunks keeps its painted cells, laid in chunks of the new size.");
+				"An RFC 7386 merge patch of its properties: members replace, null resets a field, an array is replaced whole; a material's maps, a "
+				"sprite sheet's Texture and a tilemap palette entry's Sheet take any asset reference (a handle, an Assets/ path or an engine:// "
+				"path); a sprite sheet's imported Texture is set to Compression None in the same step; a tilemap's ChunkSize set without Chunks "
+				"keeps its painted cells, laid in chunks of the new size.");
 
 		registry.Struct<AssetSetPropertiesResult>("AssetSetPropertiesResult", "The properties after the patch.")
 			.Field("asset", &AssetSetPropertiesResult::Asset, "The asset.")

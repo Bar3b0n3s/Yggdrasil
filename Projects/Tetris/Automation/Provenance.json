@@ -156,11 +156,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Accent.material",
-			"XXH64": "7c7da17dc562d335",
-			"Method": "edit.batch",
-			"RequestId": 41,
-			"Client": "engine-mcp",
-			"TranscriptLine": 381
+			"XXH64": "c6ac9e9215ccd59e",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 573
 		},
 		{
 			"Path": "Assets/Materials/Accent.material.meta",
@@ -172,11 +172,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Backboard.material",
-			"XXH64": "f42ad0b0d14b9e49",
-			"Method": "asset.setProperties",
-			"RequestId": 120,
-			"Client": "engine-mcp",
-			"TranscriptLine": 233
+			"XXH64": "411aba44baac57a8",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 573
 		},
 		{
 			"Path": "Assets/Materials/Backboard.material.meta",
@@ -188,11 +188,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Backdrop.material",
-			"XXH64": "ddfbef6a21ec7d77",
-			"Method": "edit.batch",
-			"RequestId": 45,
-			"Client": "engine-mcp",
-			"TranscriptLine": 85
+			"XXH64": "d9cb9216f04eb568",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 573
 		},
 		{
 			"Path": "Assets/Materials/Backdrop.material.meta",
@@ -204,11 +204,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Frame.material",
-			"XXH64": "6039febdc4f5b19f",
-			"Method": "edit.batch",
-			"RequestId": 45,
-			"Client": "engine-mcp",
-			"TranscriptLine": 85
+			"XXH64": "b4a5e64f47a48494",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 573
 		},
 		{
 			"Path": "Assets/Materials/Frame.material.meta",
@@ -220,11 +220,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Garbage.material",
-			"XXH64": "515a15d2b947e46d",
-			"Method": "edit.batch",
-			"RequestId": 45,
-			"Client": "engine-mcp",
-			"TranscriptLine": 85
+			"XXH64": "55a193ec1daf9dff",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 573
 		},
 		{
 			"Path": "Assets/Materials/Garbage.material.meta",
@@ -236,11 +236,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Ghost.material",
-			"XXH64": "684e86917b6901ea",
-			"Method": "edit.batch",
-			"RequestId": 71,
-			"Client": "engine-mcp",
-			"TranscriptLine": 137
+			"XXH64": "88302bd2ad6fbd03",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 573
 		},
 		{
 			"Path": "Assets/Materials/Ghost.material.meta",
@@ -252,11 +252,11 @@
 		},
 		{
 			"Path": "Assets/Materials/PieceI.material",
-			"XXH64": "98b767f4af91b464",
-			"Method": "edit.batch",
-			"RequestId": 41,
-			"Client": "engine-mcp",
-			"TranscriptLine": 381
+			"XXH64": "6f8311beb5e0c0ad",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 573
 		},
 		{
 			"Path": "Assets/Materials/PieceI.material.meta",
@@ -268,11 +268,11 @@
 		},
 		{
 			"Path": "Assets/Materials/PieceJ.material",
-			"XXH64": "827afda50c5c136a",
-			"Method": "edit.batch",
-			"RequestId": 41,
-			"Client": "engine-mcp",
-			"TranscriptLine": 381
+			"XXH64": "c8015c429148393b",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 573
 		},
 		{
 			"Path": "Assets/Materials/PieceJ.material.meta",
@@ -284,11 +284,11 @@
 		},
 		{
 			"Path": "Assets/Materials/PieceL.material",
-			"XXH64": "3401c36f10e53b6f",
-			"Method": "edit.batch",
-			"RequestId": 41,
-			"Client": "engine-mcp",
-			"TranscriptLine": 381
+			"XXH64": "13e6585e6db34984",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 573
 		},
 		{
 			"Path": "Assets/Materials/PieceL.material.meta",
@@ -300,11 +300,11 @@
 		},
 		{
 			"Path": "Assets/Materials/PieceO.material",
-			"XXH64": "4be317e808794ad7",
-			"Method": "edit.batch",
-			"RequestId": 41,
-			"Client": "engine-mcp",
-			"TranscriptLine": 381
+			"XXH64": "674c2b7d9878243d",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 573
 		},
 		{
 			"Path": "Assets/Materials/PieceO.material.meta",
@@ -316,11 +316,11 @@
 		},
 		{
 			"Path": "Assets/Materials/PieceS.material",
-			"XXH64": "6942599ba8af3939",
-			"Method": "edit.batch",
-			"RequestId": 41,
-			"Client": "engine-mcp",
-			"TranscriptLine": 381
+			"XXH64": "ce25a284fe0a0c6a",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 573
 		},
 		{
 			"Path": "Assets/Materials/PieceS.material.meta",
@@ -332,11 +332,11 @@
 		},
 		{
 			"Path": "Assets/Materials/PieceT.material",
-			"XXH64": "9829f97c5c9a9bea",
-			"Method": "edit.batch",
-			"RequestId": 41,
-			"Client": "engine-mcp",
-			"TranscriptLine": 381
+			"XXH64": "0dceda4a7c869c3c",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 573
 		},
 		{
 			"Path": "Assets/Materials/PieceT.material.meta",
@@ -348,11 +348,11 @@
 		},
 		{
 			"Path": "Assets/Materials/PieceZ.material",
-			"XXH64": "54128ae70a10f089",
-			"Method": "edit.batch",
-			"RequestId": 41,
-			"Client": "engine-mcp",
-			"TranscriptLine": 381
+			"XXH64": "e841050238eb72d3",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 573
 		},
 		{
 			"Path": "Assets/Materials/PieceZ.material.meta",

@@ -159,11 +159,13 @@ namespace Engine {
 			CHECK(GetDeclaredPipelineCountOf("Skinning") == SkinningPass::PipelineCount);
 			CHECK(SkinningPass::PipelineCount == 1);
 			CHECK(SceneRendererPipelines::MeshPipelineCount == 24);
-			CHECK(GetDeclaredPipelineCount() == 60);
+			// 63 on phase 2's merged tree with M21's Lights2D and QuadBatcher pipelines (60 on M23's branch).
+			CHECK(GetDeclaredPipelineCount() == 63);
 		}
 
 		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 22): the Lights2D declaration has its pipeline of the Lights2D
-		// program and the QuadBatcher its HdrLit and Normals pipelines: 61 startup pipelines.
+		// program and the QuadBatcher its HdrLit and Normals pipelines: 61 startup pipelines on M21's branch, 63 with M23's
+		// LightClusters and Skinning on phase 2's merged tree.
 		TEST_CASE("RenderPassDeclarations: the Lights2D pass declares one pipeline of its program and the QuadBatcher four")
 		{
 			const auto lights = std::find_if(ScenePassDeclarations.begin(), ScenePassDeclarations.end(), [](const RenderPassDeclaration& declaration)
@@ -183,7 +185,7 @@ namespace Engine {
 			CHECK((lights - 1)->Name == "Sprites");
 			CHECK(GetDeclaredPipelineCountOf("QuadBatcher") == 4);
 			CHECK(QuadBatcher::PipelineCount == 4);
-			CHECK(GetDeclaredPipelineCount() == 61);
+			CHECK(GetDeclaredPipelineCount() == 63);
 			CHECK(GetDeclaredPipelineCountOf("Lights2D") == Lights2DPass::PipelineCount);
 			CHECK(Lights2DPass::GetLayoutDescriptions().size() == Lights2DPass::PipelineCount);
 			CHECK(QuadBatcher::GetLayoutDescriptions().size() == QuadBatcher::PipelineCount);

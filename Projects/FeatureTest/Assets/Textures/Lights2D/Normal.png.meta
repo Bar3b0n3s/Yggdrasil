@@ -4,10 +4,11 @@
 	"Handle": "e7253b7025cde174",
 	"Type": "Texture",
 	"Importer": "Texture",
-	"ImporterVersion": 1,
+	"ImporterVersion": 2,
 	"Settings": {
 		"Usage": "NormalMap",
-		"GenerateMips": true
+		"GenerateMips": true,
+		"Compression": "None"
 	},
 	"SubAssets": []
 }

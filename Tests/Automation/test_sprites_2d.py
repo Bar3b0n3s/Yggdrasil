@@ -3,10 +3,11 @@
 
 from __future__ import annotations
 
+import shutil
 import unittest
 from pathlib import Path
 
-from harness import AutomationTestCase, engine_client
+from harness import REPOSITORY_ROOT, AutomationTestCase, engine_client
 from test_environment import png_pixels
 
 # engine://Textures/Checker (64 x 64): a sheet's Texture takes any asset reference (W21.1's review), here an engine
@@ -59,6 +60,35 @@ class Sprite2DTests(AutomationTestCase):
                 "asset": "Assets/Sheets/Spin.spritesheet", "values": {"Texture": "Assets/Textures/Missing.png"}})
         self.assertEqual(raised.exception.data["errorCode"], "NotFound")
         self.assertEqual(raised.exception.data["location"]["pointer"], "/values/Texture")
+
+    def test_a_sprite_sheet_stores_its_texture_uncompressed(self) -> None:
+        # ADR 0028's phase-2 ledger and Docs/Decisions/0034-m23-contract.md decision 13 (M23's landing): asset.create
+        # and asset.setProperties of a sprite sheet set its imported Texture's Compression to None in the sheet's own
+        # undo step, so sprite art is never stored as BC blocks.
+        client, root = self.open_editor_with_scene()
+        (root / "Assets" / "Textures").mkdir(parents=True, exist_ok=True)
+        shutil.copy(REPOSITORY_ROOT / "Tests" / "Data" / "Assets" / "Textures" / "Rgba.png",
+                    root / "Assets" / "Textures" / "Hero.png")
+        client.call("project.refreshAssets")
+
+        def compression() -> str:
+            settings = client.call("asset.getImportSettings", {"asset": "Assets/Textures/Hero.png"})["settings"]
+            return settings["Compression"]
+
+        self.assertEqual(compression(), "Auto")
+        client.call("asset.create", {"type": "SpriteSheet", "path": "Assets/Sheets/Hero.spritesheet", "values": {
+            "Texture": "Assets/Textures/Hero.png", "Frames": [{"Rect": {"X": 0, "Y": 0, "Width": 8, "Height": 8}}]}})
+        self.assertEqual(compression(), "None")
+        client.call("edit.undo")
+        self.assertFalse((root / "Assets" / "Sheets" / "Hero.spritesheet").exists())
+        self.assertEqual(compression(), "Auto")
+
+        client.call("asset.create", {"type": "SpriteSheet", "path": "Assets/Sheets/Empty.spritesheet"})
+        self.assertEqual(compression(), "Auto")
+        patched = client.call("asset.setProperties", {
+            "asset": "Assets/Sheets/Empty.spritesheet", "values": {"Texture": "Assets/Textures/Hero.png"}})
+        self.assertNotEqual(patched["undoIndex"], 0)
+        self.assertEqual(compression(), "None")
 
     def test_a_pixel_perfect_camera_renders_its_reference_resolution(self) -> None:
         # Decision 6: the game view of a PixelPerfectCamera at 320 x 180 in a 960 x 540 view is upscaled by 3 with point

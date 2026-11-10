@@ -1,4 +1,4 @@
-{"method": "asset.import", "params": {"source": "Scaffold/Sources/Textures/Rgba.png", "destDir": "Assets/Textures/Sprites2DGolden"}}
+{"method": "asset.import", "params": {"source": "Scaffold/Sources/Textures/Rgba.png", "destDir": "Assets/Textures/Sprites2DGolden", "settings": {"Compression": "None"}}}
 {"method": "asset.info", "params": {"asset": "Assets/Textures/Sprites2DGolden/Rgba.png"}}
 {"method": "asset.create", "params": {"type": "SpriteSheet", "path": "Assets/Textures/Sprites2DGolden/Strip.spritesheet", "values": {"Texture": {"$ref": "2.asset.id"}, "Frames": [{"Name": "Left", "Rect": {"X": 0, "Y": 0, "Width": 8, "Height": 8}, "Pivot": [0.5, 0.5]}, {"Name": "Right", "Rect": {"X": 8, "Y": 0, "Width": 8, "Height": 8}, "Pivot": [0.5, 0.5]}], "Clips": []}}}
 {"method": "project.refreshAssets", "params": {}}

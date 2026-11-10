@@ -155,6 +155,29 @@ class AssetTests(AutomationTestCase):
         self.assertFalse(any(code == "ASSET_UNSUPPORTED_UV_SET" and file != "Assets/Models/TexCoord2Occlusion.gltf"
                              for code, file in codes))
 
+    def test_material_maps_take_any_asset_reference(self) -> None:
+        """Docs/Decisions/0034-m23-contract.md decision 21 and its Landing: a Material's maps in asset.create's and
+        asset.setProperties' values take a handle, a project path or an engine path, written as the handle, through the
+        resolver M21 gave a sprite sheet's Texture; a reference that names nothing is refused at the map."""
+        client, root = self.open_editor_with_scene()
+        shutil.copy(GLTF_FIXTURES / "Textures" / "Checker.png", root / "Assets" / "Checker.png")
+        client.call("project.refreshAssets")
+        texture = client.call("asset.info", {"asset": "Assets/Checker.png"})["asset"]["id"]
+        created = client.call("asset.create", {"type": "Material", "path": "Assets/Materials/Checker.material",
+                                               "values": {"BaseColorMap": "Assets/Checker.png",
+                                                          "NormalMap": "engine://Textures/FlatNormal"}})
+        document = read_json(root / "Assets" / "Materials" / "Checker.material")
+        self.assertEqual(document["BaseColorMap"], texture)
+        self.assertEqual(document["NormalMap"], "0000000000000183")
+        changed = client.call("asset.setProperties", {"asset": created["asset"]["id"],
+                                                       "values": {"EmissiveMap": "Assets/Checker.png"}})
+        self.assertEqual(changed["values"]["EmissiveMap"], texture)
+        with self.assertRaises(engine_client.EngineError) as refused:
+            client.call("asset.setProperties", {"asset": created["asset"]["id"],
+                                                "values": {"OcclusionMap": "Assets/Missing.png"}})
+        self.assertEqual(refused.exception.data["errorCode"], "NotFound")
+        self.assertEqual(refused.exception.data["location"]["pointer"], "/values/OcclusionMap")
+
     def test_asset_list_info_and_import_settings(self) -> None:
         client, root = self.open_editor_with_scene()
         shutil.copy(GLTF_FIXTURES / "Textures" / "Checker.png", root / "Assets" / "Checker.png")

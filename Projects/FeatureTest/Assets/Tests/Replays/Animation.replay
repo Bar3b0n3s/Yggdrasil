@@ -195,31 +195,31 @@
 				"Handle": "6edf887d5f78a42a",
 				"Path": "Assets/Models/Animation/SkinnedRigs.gltf#skin:1",
 				"Type": "Skeleton",
-				"Hash": "58872eb10c1119dc"
+				"Hash": "6f8d07d0706e6dc0"
 			},
 			{
 				"Handle": "79e581911985caaf",
 				"Path": "Assets/Models/Animation/Skinned.gltf#animation:0:Wave",
 				"Type": "AnimationClip",
-				"Hash": "643c6faa38a8739e"
+				"Hash": "a989532c7925604a"
 			},
 			{
 				"Handle": "aa94bd7ed48f6cb8",
 				"Path": "Assets/Models/Animation/Skinned.gltf#skin:0",
 				"Type": "Skeleton",
-				"Hash": "ae0a734f9fab4c23"
+				"Hash": "53a1f70bdbd05dbd"
 			},
 			{
 				"Handle": "ad0bee37d93bd2f2",
 				"Path": "Assets/Models/Animation/SkinnedRigs.gltf#animation:0:Walk",
 				"Type": "AnimationClip",
-				"Hash": "b5e3e9e4bb3aa92f"
+				"Hash": "d06c3f55cf53f2c6"
 			},
 			{
 				"Handle": "cb7763da4e141bc8",
 				"Path": "Assets/Models/Animation/SkinnedRigs.gltf#skin:0",
 				"Type": "Skeleton",
-				"Hash": "28423062d3e4eff5"
+				"Hash": "a10d9ce2a21020ff"
 			},
 			{
 				"Handle": "d1e95b279142f879",

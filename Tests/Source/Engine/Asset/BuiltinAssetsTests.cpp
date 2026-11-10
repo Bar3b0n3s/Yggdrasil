@@ -179,6 +179,41 @@ namespace Engine {
 			CHECK(catalog->GetEntries().size() == GetProceduralBuiltinEntries().size() + 14);
 		}
 
+		// ADR 0028's phase-2 ledger ("Texture compression") and Docs/Decisions/0034-m23-contract.md decision 13: the built-in
+		// procedural textures, M21's four sprite textures among them, are generated in code and never pass through the
+		// TextureImporter, whose Compression Auto would store BC blocks; no built-in texture is a File entry, the blue noise is
+		// generated (Renderer/BlueNoise.h), and the default font's atlas is FontData's own bytes, never a texture.
+		TEST_CASE("BuiltinAssets: the built-in textures, the sprite textures among them, are never block-compressed")
+		{
+			Result<std::string> text = FileSystem::ReadText(Test::GetRepositoryRoot() / "Resources" / BuiltinAssetCatalog::FileName);
+			REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+			Result<BuiltinAssetCatalog> catalog = BuiltinAssetCatalog::Parse(*text);
+			REQUIRE_MESSAGE(catalog.has_value(), catalog.error().ToString());
+			size_t procedural = 0;
+			for (const BuiltinAssetEntry& entry : catalog->GetEntries())
+			{
+				if (entry.Type != AssetType::Texture)
+					continue;
+				CAPTURE(entry.Path);
+				CHECK(entry.Source != BuiltinAssetSource::File);
+				CHECK(entry.Importer.empty());
+				if (entry.Source != BuiltinAssetSource::Procedural)
+					continue;
+				++procedural;
+				const Result<AssetRef<Asset>> created = CreateProceduralBuiltinAsset(entry.Handle);
+				REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+				const AssetRef<TextureData> texture = AssetCast<TextureData>(*created);
+				REQUIRE(texture != nullptr);
+				CHECK_FALSE(GetTextureBlockCodec(texture->Format).has_value());
+			}
+			// White, Black, FlatNormal, Checker, Missing and M21's SpriteSquare, SpriteRounded, SpriteBevel and SpriteCircle.
+			CHECK(procedural == 9);
+			const BuiltinAssetEntry* font = catalog->Find(BuiltinAssetHandles::DefaultFont);
+			REQUIRE(font != nullptr);
+			CHECK(font->Type == AssetType::Font);
+			CHECK(font->Importer == "Font");
+		}
+
 		TEST_CASE("BuiltinAssets: a catalogue with settings and generated entries round-trips and finds its entries")
 		{
 			const std::string text = MakeCatalogue({

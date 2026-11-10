@@ -81,7 +81,7 @@ Creates a material, a sound effect, a sprite sheet or a tilemap (with values ove
 |---|---|---|---|---|
 | `type` | `AssetCreateType` | yes | `"Material"` | What to create. |
 | `path` | `String` | yes | `""` | The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx, .spritesheet, .tilemap; none for a folder); missing parent folders are created with it. |
-| `values` | `Variant` |  | `null` | A Material's, a SoundEffect's, a SpriteSheet's or a Tilemap's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads, or a tilemap's CellSize, ChunkSize, Palette and Chunks; a sheet's Texture and a palette entry's Sheet take any asset reference: a handle, an Assets/ path or an engine:// path); absent for other types. |
+| `values` | `Variant` |  | `null` | A Material's, a SoundEffect's, a SpriteSheet's or a Tilemap's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads, or a tilemap's CellSize, ChunkSize, Palette and Chunks; a material's maps, a sheet's Texture and a palette entry's Sheet take any asset reference: a handle, an Assets/ path or an engine:// path; a sheet's imported Texture is set to Compression None in the same step, so sprite art is never block-compressed); absent for other types. |
 
 | Result | Type | Description |
 |---|---|---|
@@ -362,7 +362,7 @@ Applies an RFC 7386 merge patch to a native asset's properties (a material, a so
 | Param | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `asset` | `String` | yes | `""` | The native asset (a material, a sound effect, a sprite sheet or a tilemap). |
-| `values` | `Variant` | yes | `null` | An RFC 7386 merge patch of its properties: members replace, null resets a field, an array is replaced whole; a sprite sheet's Texture and a tilemap palette entry's Sheet take any asset reference (a handle, an Assets/ path or an engine:// path); a tilemap's ChunkSize set without Chunks keeps its painted cells, laid in chunks of the new size. |
+| `values` | `Variant` | yes | `null` | An RFC 7386 merge patch of its properties: members replace, null resets a field, an array is replaced whole; a material's maps, a sprite sheet's Texture and a tilemap palette entry's Sheet take any asset reference (a handle, an Assets/ path or an engine:// path); a sprite sheet's imported Texture is set to Compression None in the same step; a tilemap's ChunkSize set without Chunks keeps its painted cells, laid in chunks of the new size. |
 
 | Result | Type | Description |
 |---|---|---|

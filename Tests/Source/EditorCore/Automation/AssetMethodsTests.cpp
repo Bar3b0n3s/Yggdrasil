@@ -5,6 +5,7 @@
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/TextureData.h"
 #include "Engine/Asset/TilemapData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/FileSystem.h"
@@ -23,6 +24,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <format>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -802,6 +804,121 @@ namespace Engine {
 			CHECK_FALSE(setup.GetEditor().GetVfs().Exists(VfsPath::Create("project", "Assets/Sprites/Wrong.spritesheet").value_or(VfsPath())));
 			const Json unchanged = CallOrFail(setup, "asset.getProperties", ParseAssetMethodJson(R"({"asset": "Assets/Sprites/ByPath.spritesheet"})"));
 			CHECK(unchanged["values"]["Texture"] == Json(texture));
+		}
+
+		// ADR 0028's phase-2 ledger ("Texture compression": sprite, tile and UI art takes None) and
+		// Docs/Decisions/0034-m23-contract.md decision 13 and its Landing: asset.create and asset.setProperties of a sprite sheet,
+		// the paths the content browser's create list and the inspector's sheet fields take, give the sheet's Texture Compression
+		// None in the sheet's own undo step, so a texture a sprite sheet references never cooks as BC blocks; a built-in texture
+		// and a texture already at None are left as they are.
+		TEST_CASE("AssetMethods: a sprite sheet's texture is stored uncompressed, in the sheet's undo step")
+		{
+			Test::AutomationFixture setup("AssetSpriteSheetUncompressed");
+			for (const std::string_view file : { "Assets/Textures/Hero.png", "Assets/Textures/Tiles.png" })
+			{
+				const VfsPath path = VfsPath::Create("project", std::string(file)).value_or(VfsPath());
+				REQUIRE(setup.GetEditor().CreateProjectDirectory(path.GetParent()).has_value());
+				REQUIRE(setup.GetEditor().WriteProjectFile(path, Test::MakeTestPng(16, 16)).has_value());
+			}
+			CallOrFail(setup, "project.refreshAssets", Json::object());
+			const auto compression = [&setup](std::string_view texture)
+			{
+				const Json settings = CallOrFail(setup, "asset.getImportSettings", Json{ { "asset", std::string(texture) } });
+				return JsonReader(settings["settings"]["Compression"]).ReadString().value_or(std::string());
+			};
+			// The cooked texture's format after an import of its current settings.
+			const auto cookedFormat = [&setup](std::string_view texture)
+			{
+				CallOrFail(setup, "asset.reimport", Json{ { "asset", std::string(texture) } });
+				const std::optional<AssetHandle> handle = setup.GetEditor().GetAssets().Resolve(texture);
+				REQUIRE(handle.has_value());
+				const Result<AssetRef<Asset>> loaded = setup.GetEditor().GetAssets().Load(*handle);
+				REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
+				const AssetRef<TextureData> data = AssetCast<TextureData>(*loaded);
+				REQUIRE(data != nullptr);
+				return data->Format;
+			};
+			// Imported with the defaults, a colour texture is BC7.
+			CHECK(compression("Assets/Textures/Hero.png") == "Auto");
+			CHECK(cookedFormat("Assets/Textures/Hero.png") == TextureFormat::BC7Srgb);
+
+			// asset.create: the sheet and its texture's Compression None are one undo step.
+			const Json frame = ParseAssetMethodJson(R"([{"Name": "Idle", "Rect": {"X": 0, "Y": 0, "Width": 16, "Height": 16}}])");
+			const Json created = CallOrFail(setup, "asset.create",
+				Json{ { "type", "SpriteSheet" }, { "path", "Assets/Sprites/Hero.spritesheet" }, { "values", Json{ { "Texture", "Assets/Textures/Hero.png" }, { "Frames", frame } } } });
+			CHECK(created["undoIndex"] != Json(0));
+			CHECK(compression("Assets/Textures/Hero.png") == "None");
+			CHECK(cookedFormat("Assets/Textures/Hero.png") == TextureFormat::RGBA8Srgb);
+			CallOrFail(setup, "edit.undo", Json::object());
+			CHECK_FALSE(setup.GetEditor().GetVfs().Exists(VfsPath::Create("project", "Assets/Sprites/Hero.spritesheet").value_or(VfsPath())));
+			CHECK(compression("Assets/Textures/Hero.png") == "Auto");
+			CallOrFail(setup, "edit.redo", Json::object());
+			CHECK(compression("Assets/Textures/Hero.png") == "None");
+
+			// asset.setProperties: a sheet given another texture stores that one uncompressed too, in the edit's one step.
+			CHECK(compression("Assets/Textures/Tiles.png") == "Auto");
+			const Json patched = CallOrFail(setup, "asset.setProperties",
+				ParseAssetMethodJson(R"({"asset": "Assets/Sprites/Hero.spritesheet", "values": {"Texture": "Assets/Textures/Tiles.png"}})"));
+			CHECK(patched["undoIndex"] != Json(0));
+			CHECK(compression("Assets/Textures/Tiles.png") == "None");
+			CHECK(cookedFormat("Assets/Textures/Tiles.png") == TextureFormat::RGBA8Srgb);
+			CallOrFail(setup, "edit.undo", Json::object());
+			CHECK(compression("Assets/Textures/Tiles.png") == "Auto");
+			const Json undone = CallOrFail(setup, "asset.getProperties", ParseAssetMethodJson(R"({"asset": "Assets/Sprites/Hero.spritesheet"})"));
+			CHECK(undone["values"]["Texture"] == CallOrFail(setup, "asset.info", ParseAssetMethodJson(R"({"asset": "Assets/Textures/Hero.png"})"))["asset"]["id"]);
+
+			// A texture already at None writes nothing more (a patch that changes nothing is no step), and a built-in texture,
+			// which is never compressed, is left alone.
+			const Json same = CallOrFail(setup, "asset.setProperties",
+				ParseAssetMethodJson(R"({"asset": "Assets/Sprites/Hero.spritesheet", "values": {"Texture": "Assets/Textures/Hero.png"}})"));
+			CHECK(same["undoIndex"] == Json(0));
+			const Json builtin = CallOrFail(setup, "asset.setProperties",
+				ParseAssetMethodJson(R"({"asset": "Assets/Sprites/Hero.spritesheet", "values": {"Texture": "engine://Textures/SpriteSquare"}})"));
+			CHECK(builtin["values"]["Texture"] == Json(BuiltinAssetHandles::SpriteSquareTexture.ToString()));
+		}
+
+		// Docs/Decisions/0034-m23-contract.md decision 21 and its Landing: a Material's five maps take every spelling of an asset
+		// reference in asset.create's and asset.setProperties' values, through the resolver M21 gave a sprite sheet's Texture
+		// (MethodRegistry.h convention 13), written to the file as the handle; a reference that names nothing is NotFound, one
+		// of another type InvalidArgument, located at the map, and the material is left as it was.
+		TEST_CASE("AssetMethods: a Material's maps take a handle, a project path or an engine path")
+		{
+			Test::AutomationFixture setup("AssetMaterialTextures");
+			const VfsPath png = VfsPath::Create("project", "Assets/Textures/Brick.png").value_or(VfsPath());
+			REQUIRE(setup.GetEditor().CreateProjectDirectory(png.GetParent()).has_value());
+			REQUIRE(setup.GetEditor().WriteProjectFile(png, Test::MakeTestPng(8, 8)).has_value());
+			CallOrFail(setup, "project.refreshAssets", Json::object());
+			const std::string texture = JsonReader(CallOrFail(setup, "asset.info", Json{ { "asset", "Assets/Textures/Brick.png" } })["asset"]["id"])
+											.ReadString()
+											.value_or(std::string());
+			REQUIRE(texture.size() == 16);
+
+			// Project paths and an engine path, each written as the handle it names; a handle is kept as given.
+			const Json created = CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "Material", "path": "Assets/Materials/Brick.material",
+				"values": {"BaseColorMap": "Assets/Textures/Brick.png", "NormalMap": "engine://Textures/FlatNormal", "OcclusionMap": "Assets/Textures/Brick.png"}})"));
+			CHECK(created["undoIndex"] != Json(0));
+			const Json properties = CallOrFail(setup, "asset.getProperties", ParseAssetMethodJson(R"({"asset": "Assets/Materials/Brick.material"})"));
+			CHECK(properties["values"]["BaseColorMap"] == Json(texture));
+			CHECK(properties["values"]["NormalMap"] == Json(BuiltinAssetHandles::FlatNormalTexture.ToString()));
+			CHECK(properties["values"]["OcclusionMap"] == Json(texture));
+			CHECK(properties["values"]["EmissiveMap"].is_null());
+			const Json patched = CallOrFail(setup, "asset.setProperties",
+				Json{ { "asset", "Assets/Materials/Brick.material" }, { "values", Json{ { "MetallicRoughnessMap", "Assets/Textures/Brick.png" }, { "EmissiveMap", texture } } } });
+			CHECK(patched["values"]["MetallicRoughnessMap"] == Json(texture));
+			CHECK(patched["values"]["EmissiveMap"] == Json(texture));
+
+			// A path that names nothing and an asset that is not a texture are refused at the map, changing nothing.
+			const Json missing = setup.Request("asset.setProperties",
+				ParseAssetMethodJson(R"({"asset": "Assets/Materials/Brick.material", "values": {"BaseColorMap": "Assets/Textures/Missing.png"}})"));
+			CHECK(missing["error"]["data"]["errorCode"] == Json("NotFound"));
+			CHECK(missing["error"]["data"]["location"]["pointer"] == Json("/values/BaseColorMap"));
+			const Json wrongType = setup.Request("asset.create",
+				ParseAssetMethodJson(R"({"type": "Material", "path": "Assets/Materials/Wrong.material", "values": {"EmissiveMap": "Assets/Materials/Brick.material"}})"));
+			CHECK(wrongType["error"]["data"]["errorCode"] == Json("InvalidArgument"));
+			CHECK(wrongType["error"]["data"]["location"]["pointer"] == Json("/values/EmissiveMap"));
+			CHECK_FALSE(setup.GetEditor().GetVfs().Exists(VfsPath::Create("project", "Assets/Materials/Wrong.material").value_or(VfsPath())));
+			const Json unchanged = CallOrFail(setup, "asset.getProperties", ParseAssetMethodJson(R"({"asset": "Assets/Materials/Brick.material"})"));
+			CHECK(unchanged["values"]["BaseColorMap"] == Json(texture));
 		}
 
 		// M21 (Docs/Decisions/0032-m21-contract.md decision 23): tilemaps through asset.create, asset.getProperties and
