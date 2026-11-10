@@ -45,6 +45,7 @@
 #include "Engine/Scene/Components/UiRectComponent.h"
 #include "Engine/Scene/Components/UiScrollViewComponent.h"
 #include "Engine/Scene/Components/UiSliderComponent.h"
+#include "Engine/Scene/Components/UiTextInputComponent.h"
 #include "Engine/Scene/Components/UiToggleComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
@@ -312,8 +313,8 @@ namespace Engine {
 				"A UiImage's Frame is not an index of its sprite sheet's Frames, so it draws nothing.",
 				"Set Frame below the sheet's frame count, or add the frame to the sheet." },
 			ValidationCodeInfo{ UiWidgetPartInvalidCode, "Warning", false,
-				"A UiToggle's Graphic, a UiSlider's Fill or Handle, or a UiScrollView's Content names an entity that is not a UI element below "
-				"the widget in its canvas, so the widget ignores it.",
+				"A UiToggle's Graphic, a UiSlider's Fill or Handle, a UiScrollView's Content, or a UiTextInput's TextElement or Placeholder "
+				"names an entity that is not a UI element below the widget in its canvas, so the widget ignores it.",
 				"Name an element below the widget, or clear the reference." },
 		};
 
@@ -1248,12 +1249,13 @@ namespace Engine {
 
 		// The UI checks (M22, Docs/Decisions/0033-m22-contract.md decisions 13 and 35), in canonical order:
 		// UI_ELEMENT_WITHOUT_CANVAS on every entity with a UiRect and no UiCanvas on an ancestor, which layout leaves out
-		// (Scene/UiLayout.h); UI_WIDGET_PART_INVALID on every UiToggle Graphic, UiSlider Fill or Handle and UiScrollView Content
-		// that names an entity of the scene that is not a UI element below its widget in its canvas, which the widget ignores (a
-		// null part is no part, and one the scene lacks is ENTITY_DANGLING_REFERENCE's); and UI_IMAGE_FRAME_OUT_OF_RANGE on every
-		// UiImage whose Frame is not an index of its sheet's Frames, which the Ui pass skips (Renderer/UiPass.h). A null sheet
-		// draws a plain rectangle and has no frames to check; a sheet that is missing or fails to load is ASSET_MISSING's or
-		// ASSET_IMPORT_FAILED's. None is fixable: only the author knows where an element, a part or a frame belongs.
+		// (Scene/UiLayout.h); UI_WIDGET_PART_INVALID on every UiToggle Graphic, UiSlider Fill or Handle, UiScrollView Content and
+		// UiTextInput TextElement or Placeholder (C22.3, decision 53) that names an entity of the scene that is not a UI element
+		// below its widget in its canvas, which the widget ignores (a null part is no part, and one the scene lacks is
+		// ENTITY_DANGLING_REFERENCE's); and UI_IMAGE_FRAME_OUT_OF_RANGE on every UiImage whose Frame is not an index of its
+		// sheet's Frames, which the Ui pass skips (Renderer/UiPass.h). A null sheet draws a plain rectangle and has no frames to
+		// check; a sheet that is missing or fails to load is ASSET_MISSING's or ASSET_IMPORT_FAILED's. None is fixable: only
+		// the author knows where an element, a part or a frame belongs.
 		static void CheckUi(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			const Scene& scene = *checked.Target;
@@ -1293,6 +1295,11 @@ namespace Engine {
 				}
 				if (const UiScrollViewComponent* scrollView = entity.TryGetComponent<UiScrollViewComponent>())
 					checkPart("UiScrollView", "Content", scrollView->Content);
+				if (const UiTextInputComponent* textInput = entity.TryGetComponent<UiTextInputComponent>())
+				{
+					checkPart("UiTextInput", "TextElement", textInput->TextElement);
+					checkPart("UiTextInput", "Placeholder", textInput->Placeholder);
+				}
 				const UiImageComponent* image = entity.TryGetComponent<UiImageComponent>();
 				if (image == nullptr || !image->Sheet.IsValid() || assets == nullptr)
 					return;

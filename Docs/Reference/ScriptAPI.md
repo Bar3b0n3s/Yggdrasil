@@ -338,6 +338,14 @@ Returns accumulated scroll, right-positive and up-positive.
 
 All modes; Runtime|Test; pure/read.
 
+### Input.GetText
+
+`() -> string`
+
+Returns the characters typed in the latched view as UTF-8: in the fixed step (OnFixedUpdate, tasks, physics and UI callbacks) the tick's committed characters, in the frame phase (OnUpdate, OnLateUpdate) those of every tick since the previous frame; empty when none were typed.
+
+All modes; Runtime|Test; pure/read.
+
 ### Input.IsActionDown
 
 `(name: string) -> boolean`
@@ -1142,6 +1150,30 @@ Argument 1: MouseButton.
 
 Argument 2: InputEventState.
 
+### Test.InjectMouseMove
+
+`(position: vector) -> ()`
+
+Queue a mouse move to a finite XY position in view coordinates for the next unapplied input tick.
+
+All modes; Test; mutates.
+
+### Test.InjectScroll
+
+`(delta: vector) -> ()`
+
+Queue a scroll of a finite XY delta (wheel steps, y up-positive) for the next unapplied input tick.
+
+All modes; Test; mutates.
+
+### Test.InjectText
+
+`(text: string) -> ()`
+
+Queue committed text (non-empty UTF-8) for the next unapplied input tick, as typed characters.
+
+All modes; Test; mutates.
+
 ### Test.ReloadScript
 
 `(asset: AssetRef) -> ()`
@@ -1298,7 +1330,7 @@ All modes; Runtime|Test; pure/read.
 
 `(element: Entity) -> UiElementRect?`
 
-Returns element's rectangle in the current UI layout, in scene pixels (which are view coordinates unless the output is upscaled), or nil when it is not laid out.
+Returns element's rectangle in the current UI layout, in scene pixels (which are view coordinates unless the output is upscaled) or, for an element of a World canvas, in that canvas's own pixels, with its canvas; nil when it is not laid out.
 
 All modes; Runtime|Test; pure/read.
 
@@ -1619,6 +1651,22 @@ All modes; Runtime|Test; mutates.
 `(self: ScriptInstance, element: Entity, position: vector) -> boolean?`
 
 Called when interaction scrolls a UI scroll view, with its new ScrollPosition (x, y, 0); bubbles like OnUiClick.
+
+All modes; Runtime|Test; mutates.
+
+### Behaviour.OnUiSubmit
+
+`(self: ScriptInstance, element: Entity, text: string) -> boolean?`
+
+Called when Enter (or Submit) is pressed while a UI text input has focus, with its text; bubbles like OnUiClick.
+
+All modes; Runtime|Test; mutates.
+
+### Behaviour.OnUiTextChanged
+
+`(self: ScriptInstance, element: Entity, text: string) -> boolean?`
+
+Called when typing or an editing key changes a UI text input's Text, with its new text; bubbles like OnUiClick.
 
 All modes; Runtime|Test; mutates.
 
@@ -3520,7 +3568,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 ## UiCanvas
 
-The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text.
+The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text, or, in World mode, laid out in its own canvas pixels and drawn as a rectangle in the world.
 
 ### UiCanvas.DefaultFocus
 
@@ -3546,11 +3594,27 @@ Rounds every element's corners to whole scene pixels, so images and clips land o
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
+### UiCanvas.PixelsPerUnit
+
+`number`
+
+A World canvas's canvas pixels per world unit: its rectangle is WorldWidth x WorldHeight over this, centred on the entity.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
 ### UiCanvas.ReferenceHeight
 
 `number`
 
 MatchHeight: the canvas's height in canvas units, so one unit is the scene's height / ReferenceHeight scene pixels.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiCanvas.RenderMode
+
+`UiCanvasRenderMode`
+
+Screen draws the canvas over the scene image; World draws it as a rectangle in the world at the entity's transform, depth-tested against the scene.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -3583,6 +3647,22 @@ All modes; Runtime|Test; pure/read; setter mutates.
 `{Normal: Color, Hovered: Color, Pressed: Color, Focused: Color, Disabled: Color}`
 
 The state tints of the canvas's widgets (buttons, toggles, sliders and scroll views).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiCanvas.WorldHeight
+
+`number`
+
+A World canvas's height in canvas pixels (its layout's scene resolution); Screen canvases ignore it.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiCanvas.WorldWidth
+
+`number`
+
+A World canvas's width in canvas pixels (its layout's scene resolution); Screen canvases ignore it.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -5066,6 +5146,14 @@ The curve that maps HDR scene colours to the display.
 
 - `Linear`: No curve: exposure only, then clamped to the display range.
 
+## UiCanvasRenderMode (enum)
+
+Where a UI canvas is drawn: over the scene image, or in the world.
+
+- `Screen`: Over the scene image, after the scene and its texts, laid out in scene pixels.
+
+- `World`: As a rectangle in the world at the canvas entity's transform, depth-tested against the scene, laid out in its own canvas pixels.
+
 ## UiCrossAlignment
 
 Where each child of a container sits across its main axis.
@@ -5160,6 +5248,8 @@ The UI widget ui.createWidget builds.
 
 - `ScrollView`: A vertical scroll view whose Content child stacks its children.
 
+- `TextInput`: A single-line text field with a Text child that shows what is typed and a Placeholder child.
+
 ## ValidationScope
 
 What project.validate checks.
@@ -5238,6 +5328,6 @@ Default positive tick timeout for cases in a suite.
 
 ## UiElementRect
 
-`{Min: vector, Max: vector}`
+`{Min: vector, Max: vector, Canvas: Entity}`
 
-A UI element's laid-out rectangle in scene pixels: its top-left (Min) and bottom-right (Max) corners as (x, y, 0), x right and y down.
+A UI element's laid-out rectangle: its top-left (Min) and bottom-right (Max) corners as (x, y, 0), x right and y down, in scene pixels for an element of a Screen canvas and in its canvas's own pixels for one of a World canvas, and the canvas it belongs to (Canvas).

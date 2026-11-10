@@ -4,11 +4,12 @@
 	"Handle": "b561ff12ccbe15c0",
 	"Type": "Font",
 	"Importer": "Font",
-	"ImporterVersion": 4,
+	"ImporterVersion": 5,
 	"Settings": {
 		"PixelSize": 48,
 		"Spread": 8,
-		"Ranges": []
+		"Ranges": [],
+		"Fallbacks": []
 	},
 	"SubAssets": []
 }

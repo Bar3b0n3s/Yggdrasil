@@ -62,7 +62,7 @@ COMPONENT_ORDER = [
     "DirectionalLight", "PointLight", "SpotLight", "Environment", "PostProcess", "Text", "RigidBody", "BoxCollider",
     "SphereCollider", "CapsuleCollider", "MeshCollider", "CharacterController", "AudioSource", "AudioListener",
     "Script", "UiCanvas", "UiRect", "UiImage", "UiText", "UiLayout", "UiLayoutElement", "UiButton", "UiToggle",
-    "UiSlider", "UiScrollView", "ValidatorTarget", "ValidatorFollower",
+    "UiSlider", "UiScrollView", "UiTextInput", "ValidatorTarget", "ValidatorFollower",
 ]
 
 # The registered version of each component above 1 ("ComponentVersions"); every other component is at version 1.
@@ -625,6 +625,11 @@ return Script.Define("Jumper", Jumper)
         parent="e000000000000003"))
     item.entities.append(entity("e000000000000005", "Check", {"Transform": transform(), "UiRect": ui_rect()},
                                 parent="e000000000000003"))
+    # C22.3 (decision 53). A text input whose Placeholder is that same sibling: the input ignores it, so the hint never
+    # hides.
+    item.entities.append(entity("e000000000000006", "Name", {
+        "Transform": transform(), "UiRect": ui_rect(), "UiTextInput": {"Placeholder": "e000000000000005"}},
+        parent="e000000000000003"))
 
     return fixtures
 

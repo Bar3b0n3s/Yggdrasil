@@ -18,10 +18,14 @@ Commands:
   fixture [--check]
       The pinned format fixtures that are not generated first-party (Architecture §15.5,
       Docs/Decisions/0022-m14-contract.md decision 16): Inter-Regular.otf (the member extras/otf/Inter-Regular.otf of
-      the pinned Inter release archive) as Tests/Data/Assets/Fonts/Inter-Regular.otf, and the public-domain Tone.mp3
-      and Tone.ogg from upload.wikimedia.org as Tests/Data/Assets/Audio/, each verified against the SHA-256 and size
-      pinned below (FIXTURE_FILES), which Tests/Data/LICENSES.md mirrors (a pin missing there, or different, fails the
-      command). Only a file that is missing or does not match its pin is downloaded. --check downloads nothing: it
+      the pinned Inter release archive) as Tests/Data/Assets/Fonts/Inter-Regular.otf; the public-domain Tone.mp3
+      and Tone.ogg from upload.wikimedia.org as Tests/Data/Assets/Audio/; and the Noto fonts of M22's fallback chain
+      (Docs/Decisions/0033-m22-contract.md decision 42) as Tests/Data/Assets/Fonts/: NotoSansArabic-Regular.ttf and
+      NotoSansHebrew-Regular.ttf (members of the pinned github.com/notofonts release archives) and
+      NotoSansJP-Regular.otf (a file of the noto-cjk repository at its pinned tag, from raw.githubusercontent.com).
+      Each is verified against the SHA-256 and size pinned below (FIXTURE_FILES), which Tests/Data/LICENSES.md mirrors
+      (a pin missing there, or different, fails the command), and a release archive against its own pinned SHA-256 and
+      size first. Only a file that is missing or does not match its pin is downloaded. --check downloads nothing: it
       verifies the committed files and the mirror only. The other format fixtures (WAV, FLAC, TTF, HDR, the textures
       and glTF) are generated first-party by Tests/Data/Generate/.
 
@@ -93,6 +97,8 @@ GITHUB_RELEASE_HOSTS = frozenset(
 
 # Wikimedia Commons serves its uploads from this host; each fixture's Commons page names its exact file URL.
 WIKIMEDIA_UPLOAD_HOST = "upload.wikimedia.org"
+# GitHub serves a repository's files at a tag from this host (kind "raw"): https://<host>/<owner>/<repo>/<tag>/<path>.
+GITHUB_RAW_HOST = "raw.githubusercontent.com"
 
 USER_AGENT = "Engine-FetchAssets/1.0"
 DOWNLOAD_ATTEMPTS = 3
@@ -115,13 +121,19 @@ class FetchError(Exception):
 @dataclasses.dataclass(frozen=True)
 class PinnedResource:
     destination: str  # repository-relative path of the committed file
-    kind: str  # "hdri", "font" (a member of the pinned Inter archive) or "commons" (a Wikimedia Commons upload)
+    # "hdri", "font" (a member of the pinned Inter archive), "commons" (a Wikimedia Commons upload), "release" (a member
+    # of a pinned GitHub release archive) or "raw" (a file of a GitHub repository at a tag, from GITHUB_RAW_HOST)
+    kind: str
     sha256: str
     size: int
     asset_id: str = ""  # kind "hdri": the Poly Haven id
     resolution: str = ""  # kind "hdri": one of HDRI_RESOLUTIONS
-    member: str = INTER_ARCHIVE_MEMBER  # kind "font": the member of the Inter release archive
-    url: str = ""  # kind "commons": the file's https URL on WIKIMEDIA_UPLOAD_HOST
+    member: str = INTER_ARCHIVE_MEMBER  # kinds "font" and "release": the member of the release archive
+    # Kind "commons": the file's https URL on WIKIMEDIA_UPLOAD_HOST; kind "release": the release archive's URL on
+    # github.com; kind "raw": the file's URL on GITHUB_RAW_HOST, at a tag.
+    url: str = ""
+    archive_sha256: str = ""  # kind "release": the release archive's pinned SHA-256
+    archive_size: int = 0  # kind "release": the release archive's pinned size in bytes
 
     @property
     def path(self) -> Path:
@@ -131,8 +143,10 @@ class PinnedResource:
     def label(self) -> str:
         if self.kind == "hdri":
             return f"{self.asset_id} {self.resolution}"
-        if self.kind == "commons":
+        if self.kind in ("commons", "raw"):
             return self.url
+        if self.kind == "release":
+            return f"{self.url} {self.member}"
         return f"Inter {INTER_VERSION} {self.member}"
 
 
@@ -166,7 +180,8 @@ DEFAULT_RESOURCES = (
 
 # The pinned format fixtures; Tests/Data/LICENSES.md names their sources and licenses. The Commons digests were computed
 # from the unmodified downloads when the files were first committed (Roadmap M12, ADR 0015 decision 25), the OTF's from
-# the pinned Inter archive (Roadmap M14, ADR 0022 decision 16).
+# the pinned Inter archive (Roadmap M14, ADR 0022 decision 16), and the Noto fonts' from their official release archives
+# and tagged file (M22, Docs/Decisions/0033-m22-contract.md decision 42, which pins them; SIL OFL 1.1).
 FIXTURE_FILES = (
     PinnedResource(
         destination="Tests/Data/Assets/Audio/Tone.mp3",
@@ -188,6 +203,33 @@ FIXTURE_FILES = (
         sha256=INTER_OTF_SHA256,
         size=INTER_OTF_SIZE,
         member=INTER_OTF_MEMBER,
+    ),
+    PinnedResource(
+        destination="Tests/Data/Assets/Fonts/NotoSansArabic-Regular.ttf",
+        kind="release",
+        sha256="bd86ca02f087d7f3c3788ba458fb6b73744c7639ed276b8d870dba6def6c40d0",
+        size=142140,
+        member="NotoSansArabic/unhinted/ttf/NotoSansArabic-Regular.ttf",
+        url="https://github.com/notofonts/arabic/releases/download/NotoSansArabic-v2.013/NotoSansArabic-v2.013.zip",
+        archive_sha256="1301aceaea84c501cf2e6dcfb3182e2328c8eae5725817fcb239672bda7154f1",
+        archive_size=18777381,
+    ),
+    PinnedResource(
+        destination="Tests/Data/Assets/Fonts/NotoSansHebrew-Regular.ttf",
+        kind="release",
+        sha256="04272f5600d0ec816d31d0df73b23aa8d3501ea359ebe820da31c11ffcf00853",
+        size=16836,
+        member="NotoSansHebrew/unhinted/ttf/NotoSansHebrew-Regular.ttf",
+        url="https://github.com/notofonts/hebrew/releases/download/NotoSansHebrew-v3.001/NotoSansHebrew-v3.001.zip",
+        archive_sha256="df0a71814b4e63644cf40fcc4529111b61266b7a2dafbe95068b29a7520cc3cb",
+        archive_size=3734185,
+    ),
+    PinnedResource(
+        destination="Tests/Data/Assets/Fonts/NotoSansJP-Regular.otf",
+        kind="raw",
+        sha256="dff723ba59d57d136764a04b9b2d03205544f7cd785a711442d6d2d085ac5073",
+        size=4533028,
+        url=f"https://{GITHUB_RAW_HOST}/notofonts/noto-cjk/Sans2.004/Sans/SubsetOTF/JP/NotoSansJP-Regular.otf",
     ),
 )
 
@@ -330,28 +372,52 @@ def download_font(log: Callable[[str], None]) -> bytes:
 def download_inter_member(member: str, size: int, sha256: str, log: Callable[[str], None]) -> bytes:
     """The member `member` of the pinned Inter release archive; the archive and the member are verified against their
     pinned size and SHA-256."""
-    log(f"downloading {INTER_ARCHIVE_URL}")
-    archive = download(INTER_ARCHIVE_URL, GITHUB_RELEASE_HOSTS, INTER_ARCHIVE_SIZE, log)
+    return download_release_member(
+        INTER_ARCHIVE_URL, INTER_ARCHIVE_SIZE, INTER_ARCHIVE_SHA256, member, size, sha256, log
+    )
+
+
+def download_release_member(
+    url: str, archive_size: int, archive_sha256: str, member: str, size: int, sha256: str, log: Callable[[str], None]
+) -> bytes:
+    """The member `member` of the GitHub release archive (a zip file) at `url` (https on GITHUB_RELEASE_HOSTS only); the
+    archive and the member are verified against their pinned size and SHA-256."""
+    log(f"downloading {url}")
+    archive = download(url, GITHUB_RELEASE_HOSTS, archive_size, log)
     digest = sha256_bytes(archive)
-    if len(archive) != INTER_ARCHIVE_SIZE or digest != INTER_ARCHIVE_SHA256:
+    if len(archive) != archive_size or digest != archive_sha256:
         raise FetchError(
-            f"SHA-256 mismatch for {INTER_ARCHIVE_URL}: expected {INTER_ARCHIVE_SHA256} ({INTER_ARCHIVE_SIZE} "
-            f"bytes), got {digest} ({len(archive)} bytes); the download is corrupt or not the official release"
+            f"SHA-256 mismatch for {url}: expected {archive_sha256} ({archive_size} bytes), got {digest} "
+            f"({len(archive)} bytes); the download is corrupt or not the official release"
         )
     try:
         with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
             info = bundle.getinfo(member)
             if info.is_dir() or info.file_size != size:
-                raise FetchError(f"{member} in the Inter archive is not the pinned {size}-byte file")
-            font = bundle.read(info)
+                raise FetchError(f"{member} in {url} is not the pinned {size}-byte file")
+            data = bundle.read(info)
     except KeyError:
-        raise FetchError(f"the Inter archive does not contain {member}") from None
+        raise FetchError(f"{url} does not contain {member}") from None
     except (zipfile.BadZipFile, OSError) as error:
-        raise FetchError(f"the Inter archive is not a valid zip file: {error}") from None
-    font_digest = sha256_bytes(font)
-    if font_digest != sha256:
-        raise FetchError(f"SHA-256 mismatch for {member}: expected {sha256}, got {font_digest}")
-    return font
+        raise FetchError(f"{url} is not a valid zip file: {error}") from None
+    member_digest = sha256_bytes(data)
+    if member_digest != sha256:
+        raise FetchError(f"SHA-256 mismatch for {member}: expected {sha256}, got {member_digest}")
+    return data
+
+
+def download_raw(url: str, size: int, sha256: str, log: Callable[[str], None]) -> bytes:
+    """The repository file at `url` (https on GITHUB_RAW_HOST only, at a tag), verified against its pinned size and
+    SHA-256."""
+    log(f"downloading {url}")
+    data = download(url, frozenset({GITHUB_RAW_HOST}), size, log)
+    digest = sha256_bytes(data)
+    if len(data) != size or digest != sha256:
+        raise FetchError(
+            f"SHA-256 mismatch for {url}: expected {sha256} ({size} bytes), got {digest} ({len(data)} bytes); the "
+            "download is corrupt or not the tagged file"
+        )
+    return data
 
 
 def download_commons(url: str, size: int, sha256: str, log: Callable[[str], None]) -> bytes:
@@ -451,6 +517,13 @@ def download_pinned(resource: PinnedResource, log: Callable[[str], None]) -> byt
         data = download_hdri(resource.asset_id, resource.resolution, log)
     elif resource.kind == "commons":
         data = download_commons(resource.url, resource.size, resource.sha256, log)
+    elif resource.kind == "release":
+        data = download_release_member(
+            resource.url, resource.archive_size, resource.archive_sha256, resource.member, resource.size,
+            resource.sha256, log
+        )
+    elif resource.kind == "raw":
+        data = download_raw(resource.url, resource.size, resource.sha256, log)
     else:
         data = download_inter_member(resource.member, resource.size, resource.sha256, log)
     verify_pinned(resource, data)

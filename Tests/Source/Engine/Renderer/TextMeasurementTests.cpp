@@ -50,6 +50,31 @@ namespace Engine {
 			return font;
 		}
 
+		// MakeFont with two Hebrew letters (Alef U+05D0 like A, Bet U+05D1 like B, kerned by -0.1 as A and B are), a
+		// combining acute accent (U+0301, advance 0, a box above the letters) and a paragraph separator (U+2029, no outline):
+		// right-to-left text without shaping data. Without the accent when asked.
+		FontData MakeBidiFont(bool withAccent = true)
+		{
+			FontData font = MakeFont();
+			if (withAccent)
+				font.Glyphs.push_back(FontGlyph{ .Codepoint = 0x0301, .Advance = 0.0f, .PlaneMin = glm::vec2(-0.3f, 0.8f), .PlaneMax = glm::vec2(-0.1f, 0.9f), .AtlasMin = glm::vec2(0.0f), .AtlasMax = glm::vec2(0.25f) });
+			font.Glyphs.push_back(FontGlyph{ .Codepoint = 0x05D0, .Advance = 0.5f, .PlaneMin = glm::vec2(0.0f), .PlaneMax = glm::vec2(0.5f, 0.7f), .AtlasMin = glm::vec2(0.0f), .AtlasMax = glm::vec2(0.5f) });
+			font.Glyphs.push_back(FontGlyph{ .Codepoint = 0x05D1, .Advance = 0.6f, .PlaneMin = glm::vec2(0.05f, 0.0f), .PlaneMax = glm::vec2(0.55f, 0.7f), .AtlasMin = glm::vec2(0.5f), .AtlasMax = glm::vec2(1.0f) });
+			font.Glyphs.push_back(FontGlyph{ .Codepoint = 0x2029, .Advance = 0.25f });
+			font.Kerning.push_back(FontKerningPair{ .First = 0x05D0, .Second = 0x05D1, .Advance = -0.1f });
+			REQUIRE(ValidateFontData(font).has_value());
+			return font;
+		}
+
+		// The first byte of each cluster, in the measurement's order (visual order, line by line).
+		std::vector<uint32_t> GetVisualOrder(const TextMeasurement& measured)
+		{
+			std::vector<uint32_t> order;
+			for (const TextMeasuredCluster& cluster : measured.Clusters)
+				order.push_back(cluster.ByteBegin);
+			return order;
+		}
+
 	}
 
 	TEST_SUITE("Renderer")
@@ -239,7 +264,8 @@ namespace Engine {
 			CHECK(empty.Size.x == doctest::Approx(20.0f));
 			CHECK(empty.Size.y == doctest::Approx(0.0f));
 
-			// Shaping and bidi are W22.3's: in W22.1 every TextDirection gives the left-to-right layout.
+			// Left-to-right text lays out left to right in every TextDirection: the bidirectional algorithm (C22.3) puts its
+			// runs at an even level.
 			const TextMeasurement leftToRight = MeasureText(chain, "AB A", { .Size = 10.0f, .Direction = TextDirection::LeftToRight });
 			CHECK(MeasureText(chain, "AB A", { .Size = 10.0f, .Direction = TextDirection::RightToLeft }) == leftToRight);
 			CHECK(MeasureText(chain, "AB A", { .Size = 10.0f, .Direction = TextDirection::Auto }) == leftToRight);
@@ -288,7 +314,7 @@ namespace Engine {
 		}
 
 		// C22.3 (Docs/Decisions/0033-m22-contract.md decisions 43 and 48; stream S): clusters and carets, shaping and bidi.
-		TEST_CASE("TextMeasurement: the caret of a byte offset is its cluster's leading edge in visual order" * doctest::skip(true))
+		TEST_CASE("TextMeasurement: the caret of a byte offset is its cluster's leading edge in visual order")
 		{
 			const FontData font = MakeFont();
 			const std::array<const FontData*, 1> chain = { &font };
@@ -317,8 +343,128 @@ namespace Engine {
 			CHECK(FindTextCaret(leading, 1) == TextCaret{ .Top = glm::vec2(0.0f), .Line = 0 });
 		}
 
+		// Stream S's rules (TextMeasurement.h, TextMeasurement.cpp's file comment) on fonts without shaping data: the
+		// bidirectional algorithm reorders runs codepoint by codepoint, kerning stays between its pair in a right-to-left
+		// run, a mark takes the font of the codepoint before it, and a paragraph separator other than the line feed ends
+		// no line.
+		TEST_CASE("TextMeasurement: right-to-left text without shaping data is reordered codepoint by codepoint, with its kerning between its pair")
+		{
+			const FontData font = MakeBidiFont();
+			const std::array<const FontData*, 1> chain = { &font };
+			// "\u05D0\u05D1" (Alef, Bet: 4 bytes) at 10 pixels per em, a right-to-left paragraph (Auto): Bet at the left, then the
+			// pair's kerning (-1), then Alef: Bet 0 to 5, Alef 5 to 10.
+			const TextMeasurement measured = MeasureText(chain, "\xD7\x90\xD7\x91", { .Size = 10.0f });
+			REQUIRE(measured.Lines.size() == 1);
+			CHECK(measured.Lines[0].Width == 10.0f);
+			REQUIRE(measured.Clusters.size() == 2);
+			CHECK(measured.Clusters[0] == TextMeasuredCluster{ .ByteBegin = 2, .ByteEnd = 4, .Line = 0, .Left = 0.0f, .Right = 5.0f, .RightToLeft = true });
+			CHECK(measured.Clusters[1] == TextMeasuredCluster{ .ByteBegin = 0, .ByteEnd = 2, .Line = 0, .Left = 5.0f, .Right = 10.0f, .RightToLeft = true });
+			REQUIRE(measured.Glyphs.size() == 2);
+			CHECK(measured.Glyphs[0].ByteOffset == 2u); // glyphs in visual order
+			CHECK(measured.Glyphs[0].Min.x == doctest::Approx(0.5f));
+			CHECK(measured.Glyphs[1].Min.x == doctest::Approx(5.0f));
+			// The caret before Alef is its right edge, before Bet Bet's right edge, and after the text the left edge.
+			CHECK(FindTextCaret(measured, 0).Top.x == 10.0f);
+			CHECK(FindTextCaret(measured, 2).Top.x == 5.0f);
+			CHECK(FindTextCaret(measured, 4).Top.x == 0.0f);
+			// A left-to-right paragraph holds the one right-to-left run the same way.
+			CHECK(MeasureText(chain, "\xD7\x90\xD7\x91", { .Size = 10.0f, .Direction = TextDirection::LeftToRight }) == measured);
+
+			// "A \u05D0\u05D1 B": left to right, the Hebrew run reversed in place; right to left, the whole line reversed but
+			// each Latin letter (a run of its own) read left to right.
+			const std::string mixed = "A \xD7\x90\xD7\x91 B";
+			CHECK(GetVisualOrder(MeasureText(chain, mixed, { .Size = 10.0f })) == std::vector<uint32_t>{ 0, 1, 4, 2, 6, 7 });
+			const TextMeasurement rightToLeft = MeasureText(chain, mixed, { .Size = 10.0f, .Direction = TextDirection::RightToLeft });
+			CHECK(GetVisualOrder(rightToLeft) == std::vector<uint32_t>{ 7, 6, 4, 2, 1, 0 });
+			CHECK_FALSE(rightToLeft.Clusters.front().RightToLeft);
+			CHECK(rightToLeft.Clusters[1].RightToLeft);
+
+			// A paragraph separator other than the line feed is drawn and ends no line.
+			const TextMeasurement separated = MeasureText(chain, std::string("A\xE2\x80\xA9") + "B", { .Size = 10.0f });
+			CHECK(separated.Lines.size() == 1);
+			CHECK(separated.Clusters.size() == 3);
+		}
+
+		TEST_CASE("TextMeasurement: a combining mark takes the font of the codepoint before it when that font has it")
+		{
+			// The first font has A and the accent, the second B and the accent: the accent after B is the second font's, the
+			// accent after A the first's; without the accent in the second font, the accent after B is the first font's.
+			const FontData first = MakeBidiFont();
+			FontData second = MakeBidiFont();
+			std::erase_if(second.Glyphs, [](const FontGlyph& glyph)
+			{
+				return glyph.Codepoint == 'A';
+			});
+			second.Kerning.clear();
+			FontData firstWithoutB = first;
+			std::erase_if(firstWithoutB.Glyphs, [](const FontGlyph& glyph)
+			{
+				return glyph.Codepoint == 'B';
+			});
+			firstWithoutB.Kerning.clear();
+			REQUIRE(ValidateFontData(second).has_value());
+			REQUIRE(ValidateFontData(firstWithoutB).has_value());
+			const std::array<const FontData*, 2> chain = { &firstWithoutB, &second };
+			const TextMeasurement measured = MeasureText(chain, std::string("B\xCC\x81") + "A\xCC\x81", { .Size = 10.0f });
+			REQUIRE(measured.Glyphs.size() == 4);
+			CHECK(measured.Glyphs[0].Font == 1u);
+			CHECK(measured.Glyphs[1].Font == 1u);
+			CHECK(measured.Glyphs[1].ByteOffset == 1u);
+			CHECK(measured.Glyphs[2].Font == 0u);
+			CHECK(measured.Glyphs[3].Font == 0u);
+			const FontData secondWithoutAccent = MakeBidiFont(false);
+			const std::array<const FontData*, 2> fallback = { &firstWithoutB, &secondWithoutAccent };
+			const TextMeasurement fallen = MeasureText(fallback, "B\xCC\x81", { .Size = 10.0f });
+			REQUIRE(fallen.Glyphs.size() == 2);
+			CHECK(fallen.Glyphs[0].Font == 1u);
+			CHECK(fallen.Glyphs[1].Font == 0u);
+		}
+
+		// The generated Glyphs.ttf (MakeFormatFixtures.py: 1000 units per em, A and V advancing 600 units, its legacy kern table
+		// kerning A-V by -80 and V-A by -60) baked by FontImporter version 5 carries shaping data: HarfBuzz shapes it with the
+		// kern table its subset keeps, and positions are font units converted once to pixels.
+		TEST_CASE("TextMeasurement: a font with shaping data is shaped in font units, with the kerning its subset keeps")
+		{
+			Result<Buffer> source = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Fonts") / "Glyphs.ttf");
+			REQUIRE_MESSAGE(source.has_value(), source.error().ToString());
+			FontBakeReport report;
+			const Result<FontData> font = FontImporter::Bake(*source, {}, "Glyphs.ttf", report);
+			REQUIRE_MESSAGE(font.has_value(), font.error().ToString());
+			REQUIRE_FALSE(font->ShapingSource.empty());
+			REQUIRE(font->UnitsPerEm == 1000u);
+			const std::array<const FontData*, 1> chain = { &*font };
+
+			// "AVA": HarfBuzz splits a kern table's adjustment between its pair, half to the first glyph's advance and the rest
+			// to the second's advance and offset, so A advances 600 - 40, V 600 - 40 - 30 and the last A 600 - 30 units, V
+			// drawn 40 units left of its cluster's start; every position is units / 1000 * 10, converted once.
+			const TextMeasurement measured = MeasureText(chain, "AVA", { .Size = 10.0f });
+			REQUIRE(measured.Clusters.size() == 3);
+			const auto pixels = [](float units)
+			{
+				return units / 1000.0f * 10.0f;
+			};
+			CHECK(measured.Clusters[1].Left == pixels(560.0f));
+			CHECK(measured.Clusters[2].Left == pixels(1090.0f));
+			CHECK(measured.Lines[0].Width == pixels(1660.0f));
+			REQUIRE(measured.Glyphs.size() == 3);
+			const FontGlyph* letter = FindGlyph(*font, 'V');
+			REQUIRE(letter != nullptr);
+			CHECK(measured.Glyphs[1].Min.x == pixels(520.0f) + letter->PlaneMin.x * 10.0f);
+			CHECK(measured.Glyphs[1].AtlasMin == FindGlyphByIndex(*font, letter->GlyphIndex)->AtlasMin);
+			CHECK(measured.SkippedCodepoints == 0u);
+
+			// Without shaping data the same font lays out codepoint by codepoint with its kerning pairs, to the same width.
+			FontData unshaped = *font;
+			unshaped.ShapingSource.clear();
+			unshaped.UnitsPerEm = 0;
+			unshaped.IndexedGlyphs.clear();
+			REQUIRE(ValidateFontData(unshaped).has_value());
+			const std::array<const FontData*, 1> unshapedChain = { &unshaped };
+			CHECK(MeasureText(unshapedChain, "AVA", { .Size = 10.0f }).Lines[0].Width == doctest::Approx(16.6f));
+		}
+
 		// The Noto fixtures are stream F's (pinned in decision 42), so these cases run once streams S and F have both landed.
-		TEST_CASE("TextMeasurement: Arabic is shaped into its joined forms and laid out right to left" * doctest::skip(true))
+		TEST_CASE("TextMeasurement: Arabic is shaped into its joined forms and laid out right to left")
 		{
 			Result<Buffer> source = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Fonts") / "NotoSansArabic-Regular.ttf");
 			REQUIRE_MESSAGE(source.has_value(), source.error().ToString());
@@ -329,30 +475,34 @@ namespace Engine {
 			REQUIRE_MESSAGE(font.has_value(), font.error().ToString());
 			const std::array<const FontData*, 1> chain = { &*font };
 
-			// "بيت" (Beh, Yeh, Teh: 6 bytes): three joined glyphs, the first letter's initial form at the right.
+			// "بيت" (Beh, Yeh, Teh: 6 bytes): three joined letters, the first letter's initial form at the right.
 			const TextMeasurement measured = MeasureText(chain, "\xD8\xA8\xD9\x8A\xD8\xAA", { .Size = 48.0f });
-			REQUIRE(measured.Glyphs.size() == 3);
+			// Noto Sans Arabic draws a dotted letter as its dotless joined form and its dots, so a letter's cluster holds several
+			// glyphs (stream S of W22.3 amended the contract's count of one glyph a letter, which this font does not give).
 			REQUIRE(measured.Clusters.size() == 3);
-			const auto first = std::ranges::find_if(measured.Glyphs, [](const TextMeasuredGlyph& glyph)
+			REQUIRE(measured.Glyphs.size() >= 3);
+			const auto rightmost = std::ranges::max_element(measured.Glyphs, {}, [](const TextMeasuredGlyph& glyph)
 			{
-				return glyph.ByteOffset == 0;
+				return glyph.Max.x;
 			});
-			REQUIRE(first != measured.Glyphs.end());
-			for (const TextMeasuredGlyph& glyph : measured.Glyphs)
-				CHECK(first->Min.x >= glyph.Min.x);
-			// Every cluster is right to left, the first in visual order is the last letter, and no glyph is the isolated form
-			// of its codepoint (each is a joined form only shaping reaches).
+			CHECK(rightmost->ByteOffset == 0u);
+			// Every cluster is right to left, the first in visual order is the last letter and the last the first, and no
+			// glyph of the first letter is the isolated form of its codepoint (each is a joined form only shaping reaches).
 			CHECK(measured.Clusters[0].ByteBegin == 4u);
 			CHECK(measured.Clusters[0].RightToLeft);
+			CHECK(measured.Clusters[2].ByteBegin == 0u);
 			CHECK(measured.SkippedCodepoints == 0u);
-			CHECK(first->AtlasMin != FindGlyph(*font, 0x0628)->AtlasMin);
+			for (const TextMeasuredGlyph& glyph : measured.Glyphs)
+			{
+				if (glyph.ByteOffset == 0)
+					CHECK(glyph.AtlasMin != FindGlyph(*font, 0x0628)->AtlasMin);
+			}
 			// The caret before the text is its right edge; after it, its left edge.
 			CHECK(FindTextCaret(measured, 0).Top.x == measured.Lines[0].Left + measured.Lines[0].Width);
 			CHECK(FindTextCaret(measured, 6).Top.x == measured.Lines[0].Left);
 		}
 
-		TEST_CASE("TextMeasurement: a mixed-direction line is reordered by the bidirectional algorithm in either base direction, and Alignment places it"
-			* doctest::skip(true))
+		TEST_CASE("TextMeasurement: a mixed-direction line is reordered by the bidirectional algorithm in either base direction, and Alignment places it")
 		{
 			Result<Buffer> hebrewSource = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Fonts") / "NotoSansHebrew-Regular.ttf");
 			REQUIRE_MESSAGE(hebrewSource.has_value(), hebrewSource.error().ToString());
@@ -416,11 +566,10 @@ namespace Engine {
 		// alternates and ligatures), Arabic, Hebrew, a mixed-direction line and Japanese through the fallback chain, each in
 		// both base directions, wrapped and centred at a size, line spacing and width that binary floats do not hold
 		// exactly, so every conversion rounds.
-		TEST_CASE("TextMeasurement: shaped Latin, Arabic, Hebrew, mixed-direction and fallback CJK text measures to the same bytes in every configuration"
-			* doctest::skip(true))
+		TEST_CASE("TextMeasurement: shaped Latin, Arabic, Hebrew, mixed-direction and fallback CJK text measures to the same bytes in every configuration")
 		{
-			// Stream S records here the digest its Debug run measures; its Release run must measure the same.
-			constexpr uint64_t ExpectedDigest = 0;
+			// Stream S recorded the digest its Debug run measured; its Release run measured the same.
+			constexpr uint64_t ExpectedDigest = 0x813084c4db179ee9ull;
 			const auto bake = [](const std::filesystem::path& path, std::vector<FontCharacterRange> ranges)
 			{
 				Result<Buffer> source = FileSystem::ReadFile(path);

@@ -133,7 +133,6 @@ class UiInteractionTests(AutomationTestCase):
         self.assertFalse(button["pressed"])
         client.call("play.stop")
 
-    @unittest.skip("contract stub: Docs/Decisions/0033-m22-contract.md decisions 46, 47 and 53 (stream T)")
     def test_typed_text_reaches_on_ui_text_changed_and_ui_tree_reports_it(self) -> None:
         # M22 C22.3: a press focuses a text field; Text events injected through play.step are latched by the
         # TextLatch phase and typed into it, OnUiTextChanged and OnUiSubmit (Enter) bubble to the canvas's behaviour
@@ -206,6 +205,51 @@ class UiInteractionTests(AutomationTestCase):
         self.assertFalse(released["pressed"])
         runtime.call("session.shutdown")
         self.assertEqual(game.wait(), EXIT_SUCCESS, game.output())
+
+
+class UiWorldCanvasTests(AutomationTestCase):
+    """World canvases through automation (Docs/Decisions/0033-m22-contract.md decisions 49 to 53)."""
+
+    def test_a_click_through_the_camera_reaches_a_world_canvas_button_and_ui_tree_reports_its_pixels(self) -> None:
+        # M22 C22.3: a World canvas of 200 x 100 canvas pixels at 20 per world unit faces a primary camera 10 units in
+        # front of it with a 90 degree field of view. ui.tree reports the canvas and its button in the canvas's own
+        # pixels, whatever the scene resolution, and a press and release injected through play.step at the image's
+        # centre reach the button along the camera's ray (the canvas's centre), so OnUiClick bubbles to the canvas's
+        # behaviour.
+        client, _ = self.open_editor_with_scene()
+        client.call("script.write", {"path": "Assets/Scripts/ClickCounter.luau", "source": CLICK_COUNTER})
+        button_rect = {"AnchorMin": [0, 0], "AnchorMax": [0, 0], "Pivot": [0, 0], "Position": [80, 30],
+                       "Size": [40, 40]}
+        board = {"RenderMode": "World", "WorldWidth": 200, "WorldHeight": 100, "PixelsPerUnit": 20}
+        client.call("edit.batch", {"label": "World UI", "ops": [
+            {"method": "entity.create", "params": {"name": "Camera", "components": {
+                "Transform": {"Translation": [0, 0, 10]}, "Camera": {"VerticalFov": 90, "Primary": True}}}},
+            {"method": "entity.create", "params": {"name": "Board", "components": {
+                "UiCanvas": board, "Script": {"Scripts": [{"Script": "Assets/Scripts/ClickCounter.luau"}]}}}},
+            {"method": "entity.create", "params": {"name": "Play", "parent": {"$ref": "1.entity.id"}, "components": {
+                "UiRect": button_rect, "UiImage": {}, "UiButton": {}}}},
+        ]})
+        listed = client.call("ui.tree", {"format": "Json", "width": 640, "height": 360})
+        canvas, button = listed["elements"]
+        self.assertTrue(canvas["worldCanvas"])
+        self.assertEqual(canvas["rect"], {"x": 0, "y": 0, "width": 200, "height": 100})
+        self.assertTrue(button["worldCanvas"])
+        self.assertEqual(button["rect"], {"x": 80, "y": 30, "width": 40, "height": 40})
+        self.assertIn("world 200x100", client.call("ui.tree")["text"])
+
+        window = client.call("project.getSettings")["settings"]["Window"]
+        centre = [window["Width"] / 2, window["Height"] / 2]
+        client.call("play.start", {"lockstep": True})
+        client.call("play.step", {"ticks": 3, "render": "none", "input": [
+            {"type": "mouseButton", "button": "Left", "state": "tap", "position": centre}]})
+        clicks = client.call("script.eval", {"context": "play", "entity": "/Board",
+                                             "code": "return {self.Clicks, self.Last}"})
+        self.assertEqual(clicks["value"], [1, "Play"])
+        played = client.call("ui.tree", {"format": "Json", "target": "play"})
+        played_button = next(element for element in played["elements"] if element["name"] == "Play")
+        self.assertTrue(played_button["worldCanvas"])
+        self.assertTrue(played_button["hovered"])
+        client.call("play.stop")
 
 
 if __name__ == "__main__":

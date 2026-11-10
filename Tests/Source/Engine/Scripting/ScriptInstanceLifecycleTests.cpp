@@ -3,6 +3,7 @@
 
 #include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
+#include "Engine/Scene/Components/UiTextInputComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scripting/LuaHelpers.h"
 #include "Engine/Scripting/ScriptError.h"
@@ -404,8 +405,9 @@ return Script.Define("ReloadCoverage", T)
 			snapshots.push_back(*coverage);
 		}
 
-		// M22 (Docs/Decisions/0033-m22-contract.md decision 27): the six UI callbacks, each delivered once through the UiEvents
-		// phase's dispatcher (ScriptEngine::DispatchUiEvents) in `mode`; the UI interaction that raises them is UiSystem's.
+		// M22 (Docs/Decisions/0033-m22-contract.md decisions 27 and 47): the eight UI callbacks, each delivered once through the
+		// UiEvents phase's dispatcher (ScriptEngine::DispatchUiEvents) in `mode`; the UI interaction that raises them is
+		// UiSystem's. The text input's two receive its Text.
 		static void RunBehaviourUiCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots)
 		{
 			ScriptTestFixtureSpecification specification = LifecycleSpecification();
@@ -420,9 +422,12 @@ function T:OnUiFocus(element, focused) Probe.Record("Ui:focus:" .. tostring(focu
 function T:OnUiHover(element, hovered) Probe.Record("Ui:hover:" .. tostring(hovered)) end
 function T:OnUiCancel(element) Probe.Record("Ui:cancel:" .. element.Name) end
 function T:OnUiScroll(element, position) Probe.Record("Ui:scroll:" .. tostring(position.y)) return true end
+function T:OnUiTextChanged(element, text) Probe.Record("Ui:text:" .. text) end
+function T:OnUiSubmit(element, text) Probe.Record("Ui:submit:" .. text) end
 return Script.Define("UiCoverage", T)
 )"));
 			const Entity widget = fixture.GetScene().CreateEntity("Widget");
+			widget.AddComponent<UiTextInputComponent>(UiTextInputComponent{ .Text = "typed" });
 			AttachLifecycleScript(widget, handle);
 			REQUIRE(fixture.Start());
 			fixture.GetEngine()->DispatchUiEvents(std::vector<UiEvent>{
@@ -432,9 +437,11 @@ return Script.Define("UiCoverage", T)
 				UiEvent{ .Kind = UiEventKind::Hover, .Target = widget.GetUUID(), .Flag = false },
 				UiEvent{ .Kind = UiEventKind::Cancel, .Target = widget.GetUUID() },
 				UiEvent{ .Kind = UiEventKind::Scroll, .Target = widget.GetUUID(), .Vector = glm::vec2(0.0f, 8.0f) },
+				UiEvent{ .Kind = UiEventKind::TextChanged, .Target = widget.GetUUID() },
+				UiEvent{ .Kind = UiEventKind::Submit, .Target = widget.GetUUID() },
 			});
 			CHECK(BehaviourTrace(fixture.GetScene(), "Ui")
-				== std::vector<std::string>{ "click:Widget", "value:0.5", "focus:true", "hover:false", "cancel:Widget", "scroll:8" });
+				== std::vector<std::string>{ "click:Widget", "value:0.5", "focus:true", "hover:false", "cancel:Widget", "scroll:8", "text:typed", "submit:typed" });
 			CHECK(fixture.Errors.empty());
 			const auto coverage = fixture.GetApi().GetCoverage(mode);
 			REQUIRE(coverage);

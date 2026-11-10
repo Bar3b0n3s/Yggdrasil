@@ -30,7 +30,7 @@ Every component of the type registry, in canonical component order: the order of
 | `AudioSource` | Audio | Serializable, ScriptVisible, EditorVisible, Removable | Plays an audio clip, optionally positioned at the entity. |
 | `AudioListener` | Audio | Serializable, ScriptVisible, EditorVisible, Removable | Hears the scene from the entity's position and orientation. |
 | `Script` | Scripting | Serializable, ScriptVisible, EditorVisible, Removable, NoShortcut | Attaches Behaviour scripts to the entity, an ordered list of slots. |
-| `UiCanvas` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text. |
+| `UiCanvas` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text, or, in World mode, laid out in its own canvas pixels and drawn as a rectangle in the world. |
 | `UiRect` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A UI element's rectangle in its parent's (or its canvas's), in canvas units, x right and y down. |
 | `UiImage` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | Draws a sprite sheet frame, or a plain colour, over a UI element's rectangle. |
 | `UiText` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | Draws text in a UI element's rectangle, wrapped and aligned in it. |
@@ -734,7 +734,7 @@ Script members of `Script`:
 
 ## UiCanvas
 
-The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text.
+The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text, or, in World mode, laid out in its own canvas pixels and drawn as a rectangle in the world.
 
 - Category: Ui
 - Version: 1
@@ -752,6 +752,10 @@ The root of a UI tree, laid out over the whole scene image in scene pixels and d
 | `Font` | `AssetRef(Font)` | `null` |  |  |  | The font of the canvas's texts whose own Font is null; null uses the default font. |
 | `Theme` | `UiTheme` | `{"Normal":[1,1,1,1],"Hovered":[0.85,0.85,0.85,1],"Pressed":[0.6,0.6,0.6,1],"Focused":[0.75,0.85,1,1],"Disabled":[0.5,0.5,0.5,0.5]}` |  |  |  | The state tints of the canvas's widgets (buttons, toggles, sliders and scroll views). |
 | `DefaultFocus` | `EntityRef` | `null` |  |  |  | The UI widget keyboard and gamepad navigation focuses first while nothing has focus; null: navigation starts only from a pointer press or Ui.SetFocus. |
+| `RenderMode` | `UiCanvasRenderMode` | `"Screen"` |  |  |  | Screen draws the canvas over the scene image; World draws it as a rectangle in the world at the entity's transform, depth-tested against the scene. |
+| `WorldWidth` | `UInt32` | `1024` | 1 to 16384 | px |  | A World canvas's width in canvas pixels (its layout's scene resolution); Screen canvases ignore it. |
+| `WorldHeight` | `UInt32` | `576` | 1 to 16384 | px |  | A World canvas's height in canvas pixels (its layout's scene resolution); Screen canvases ignore it. |
+| `PixelsPerUnit` | `Float` | `512` | 0.001 to 1e+06 |  |  | A World canvas's canvas pixels per world unit: its rectangle is WorldWidth x WorldHeight over this, centred on the entity. |
 
 Script members of `UiCanvas`:
 
@@ -760,11 +764,15 @@ Script members of `UiCanvas`:
 | `DefaultFocus` | proxy field | `Entity?` | read/write | All | The UI widget keyboard and gamepad navigation focuses first while nothing has focus; null: navigation starts only from a pointer press or Ui.SetFocus. |
 | `Font` | proxy field | `AssetRef?` | read/write | All | The font of the canvas's texts whose own Font is null; null uses the default font. |
 | `PixelSnap` | proxy field | `boolean` | read/write | All | Rounds every element's corners to whole scene pixels, so images and clips land on pixel corners. |
+| `PixelsPerUnit` | proxy field | `number` | read/write | All | A World canvas's canvas pixels per world unit: its rectangle is WorldWidth x WorldHeight over this, centred on the entity. |
 | `ReferenceHeight` | proxy field | `number` | read/write | All | MatchHeight: the canvas's height in canvas units, so one unit is the scene's height / ReferenceHeight scene pixels. |
+| `RenderMode` | proxy field | `UiCanvasRenderMode` | read/write | All | Screen draws the canvas over the scene image; World draws it as a rectangle in the world at the entity's transform, depth-tested against the scene. |
 | `ScaleFactor` | proxy field | `number` | read/write | All | ConstantPixelSize: the scene pixels per canvas unit. |
 | `ScaleMode` | proxy field | `UiScaleMode` | read/write | All | How canvas units map to scene pixels. |
 | `SortOrder` | proxy field | `number` | read/write | All | Canvases draw in ascending SortOrder, ties in entity order; a later canvas draws over earlier ones. |
 | `Theme` | proxy field | `{Normal: Color, Hovered: Color, Pressed: Color, Focused: Color, Disabled: Color}` | read/write | All | The state tints of the canvas's widgets (buttons, toggles, sliders and scroll views). |
+| `WorldHeight` | proxy field | `number` | read/write | All | A World canvas's height in canvas pixels (its layout's scene resolution); Screen canvases ignore it. |
+| `WorldWidth` | proxy field | `number` | read/write | All | A World canvas's width in canvas pixels (its layout's scene resolution); Screen canvases ignore it. |
 
 ## UiRect
 
@@ -1238,6 +1246,15 @@ The curve that maps HDR scene colours to the display.
 | `ACES` | The ACES filmic approximation: higher contrast and saturation. |
 | `PbrNeutral` | Khronos PBR Neutral: keeps base colours faithful up to the highlights. |
 | `Linear` | No curve: exposure only, then clamped to the display range. |
+
+### UiCanvasRenderMode
+
+Where a UI canvas is drawn: over the scene image, or in the world.
+
+| Value | Description |
+|---|---|
+| `Screen` | Over the scene image, after the scene and its texts, laid out in scene pixels. |
+| `World` | As a rectangle in the world at the canvas entity's transform, depth-tested against the scene, laid out in its own canvas pixels. |
 
 ### UiCrossAlignment
 

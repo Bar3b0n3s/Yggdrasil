@@ -324,6 +324,18 @@ return true
 			// Case-insensitive input reaches the host in canonical spelling.
 			CHECK(services.Inputs[10] == Json{ { "type", "action" }, { "name", "Jump" }, { "state", "Up" } });
 			CHECK(services.Inputs[17] == Json{ { "type", "gamepadButton" }, { "gamepad", 0 }, { "button", "South" }, { "state", "Tap" } });
+			// A slider drag, a scroll list and a text field (Docs/Decisions/0033-m22-contract.md decision 52).
+			const size_t queued = services.Inputs.size();
+			CheckTrue(fixture, R"(
+Test.InjectMouseMove(vector.create(6, 7, 0))
+Test.InjectScroll(vector.create(1, -1, 0))
+Test.InjectText("ok")
+return true
+)");
+			REQUIRE(services.Inputs.size() == queued + 3);
+			CHECK(services.Inputs[queued] == Json{ { "type", "mouseMove" }, { "position", { 6, 7 } } });
+			CHECK(services.Inputs[queued + 1] == Json{ { "type", "scroll" }, { "delta", { 1, -1 } } });
+			CHECK(services.Inputs[queued + 2] == Json{ { "type", "text" }, { "text", "ok" } });
 			if (mode == RunModes::Editor)
 			{
 				CheckTrue(fixture, "Test.ReloadScript(Assets.Load(\"Assets/Scripts/Reload.luau\")); return true");
@@ -784,7 +796,7 @@ return Test.GetStateHash()=="0000000000001234"
 		{
 			Test::ScriptTestFixture fixture;
 			REQUIRE(fixture.Start());
-			const std::array<std::string_view, 21> names{ "Suite", "Case", "Expect", "ExpectEqual", "ExpectNear", "Fail", "Skip", "WaitTicks", "WaitUntil", "ExpectScriptError", "CaptureAudio", "InjectAction", "InjectKey", "InjectMouse", "InjectGamepad", "Screenshot", "ReloadScript", "GetStateHash", "GetLastExtraction", "GetExtractedPosition", "GetScriptErrors" };
+			const std::array<std::string_view, 24> names{ "Suite", "Case", "Expect", "ExpectEqual", "ExpectNear", "Fail", "Skip", "WaitTicks", "WaitUntil", "ExpectScriptError", "CaptureAudio", "InjectAction", "InjectKey", "InjectMouse", "InjectGamepad", "InjectMouseMove", "InjectScroll", "InjectText", "Screenshot", "ReloadScript", "GetStateHash", "GetLastExtraction", "GetExtractedPosition", "GetScriptErrors" };
 			const auto modules = fixture.GetApi().GetModules();
 			const auto found = std::find_if(modules.begin(), modules.end(), [](const auto& group)
 			{
@@ -809,9 +821,9 @@ return Test.GetStateHash()=="0000000000001234"
 			}
 		}
 
-		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 52; stream I, which registers the three functions and adds them
-		// to the member list above): a recording suite drives a slider, a scroll list and a text field as input.record does.
-		TEST_CASE("TestBindings: InjectMouseMove, InjectScroll and InjectText queue their events for the next unapplied tick" * doctest::skip(true))
+		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 52): a recording suite drives a slider, a scroll list and a text
+		// field as input.record does, through the service forms input.inject takes, each argument refused before the host.
+		TEST_CASE("TestBindings: InjectMouseMove, InjectScroll and InjectText queue their events for the next unapplied tick")
 		{
 			TestServices services;
 			Test::ScriptTestFixture fixture({ .Mode = RunModes::Editor, .TestMode = true, .TestHost = &services });
@@ -825,6 +837,11 @@ for _, call in {
 	function() Test.InjectScroll(vector.create(math.huge, 0, 0)) end,
 	function() Test.InjectText("") end,
 	function() Test.InjectText("\255") end,
+	function() Test.InjectMouseMove(vector.create(1, 2, 3)) end,
+	function() Test.InjectMouseMove() end,
+	function() Test.InjectScroll(1) end,
+	function() Test.InjectText(7) end,
+	function() Test.InjectText("ok\192") end,
 } do assert(not pcall(call)) end
 return true
 )");
@@ -832,6 +849,12 @@ return true
 			CHECK(services.Inputs[0] == Json{ { "type", "mouseMove" }, { "position", { 12.5f, 40.0f } } });
 			CHECK(services.Inputs[1] == Json{ { "type", "scroll" }, { "delta", { 0.0f, -2.0f } } });
 			CHECK(services.Inputs[2] == Json{ { "type", "text" }, { "text", "h\xC3\xA9" } });
+			// The generated declarations (Engine.d.luau) type them as registered.
+			const auto declarations = fixture.GetApi().GenerateDefinitions();
+			REQUIRE(declarations.has_value());
+			CHECK(declarations->find("InjectMouseMove: (position: vector) -> ()") != std::string::npos);
+			CHECK(declarations->find("InjectScroll: (delta: vector) -> ()") != std::string::npos);
+			CHECK(declarations->find("InjectText: (text: string) -> ()") != std::string::npos);
 		}
 	}
 

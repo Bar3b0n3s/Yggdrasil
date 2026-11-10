@@ -247,6 +247,23 @@ namespace Engine {
 			return false;
 		}
 
+		// M22 (C22.3, Docs/Decisions/0033-m22-contract.md decision 47): the text input's editing keys pressed in the step
+		// view, fixed keys that no setting rebinds.
+		static UiTextKeys GetUiTextKeys(const InputState& devices)
+		{
+			constexpr std::array<std::pair<Key, UiTextKeys>, 8> Keys = { std::pair{ Key::Backspace, UiTextKeys::Backspace },
+				std::pair{ Key::Delete, UiTextKeys::Delete }, std::pair{ Key::Left, UiTextKeys::Left }, std::pair{ Key::Right, UiTextKeys::Right },
+				std::pair{ Key::Home, UiTextKeys::Home }, std::pair{ Key::End, UiTextKeys::End }, std::pair{ Key::Enter, UiTextKeys::Enter },
+				std::pair{ Key::KeypadEnter, UiTextKeys::Enter } };
+			UiTextKeys keys = UiTextKeys::None;
+			for (const auto& [key, flag] : Keys)
+			{
+				if (devices.WasKeyPressed(InputPhase::Step, key))
+					keys |= flag;
+			}
+			return keys;
+		}
+
 	}
 
 	struct PlaySession::State final : IScriptHost
@@ -402,6 +419,8 @@ namespace Engine {
 		}
 		// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 28): the session's UI, which the Ui script module reads.
 		[[nodiscard]] UiSystem* GetUi() override { return &Ui; }
+		// M22 (C22.3, decision 46): the text latch, which Input.GetText reads.
+		[[nodiscard]] std::string_view GetText(InputPhase phase) const override { return Input.GetText(phase); }
 		// FatalStop with the session error that caused it, already published (ReportSessionError).
 		void StopAfterSessionError()
 		{
@@ -941,24 +960,44 @@ namespace Engine {
 	{
 		const InputState& devices = Input.GetDevices();
 		constexpr InputPhase Step = InputPhase::Step;
+		// C22.3 (decisions 46 and 47): the text latch's characters and the editing keys, whether navigation is on or not.
 		UiInputFrame frame{ .Pointer = MapViewPointToScenePoint(GetUiOutputMapping(), devices.GetMousePosition(Step)),
 			.PointerDown = devices.IsMouseButtonDown(Step, MouseButton::Left),
 			.PointerPressed = devices.WasMouseButtonPressed(Step, MouseButton::Left),
 			.PointerReleased = devices.WasMouseButtonReleased(Step, MouseButton::Left),
-			.Scroll = devices.GetScrollDelta(Step) };
+			.Scroll = devices.GetScrollDelta(Step),
+			.Text = std::string(Input.GetText(Step)),
+			.TextKeys = Utils::GetUiTextKeys(devices) };
+		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 50): the pointer's ray through the primary camera at its simulated
+		// pose, cast only while the current layout holds a World canvas (none otherwise, so a scene without one hashes as before).
+		const bool hasWorldCanvas = std::ranges::any_of(Ui.GetLayout().Canvases, [](const UiCanvasLayout& canvas)
+		{
+			return canvas.RenderMode == UiCanvasRenderMode::World;
+		});
+		if (hasWorldCanvas)
+			frame.Ray = ComputeUiPointerRay(*RuntimeScene, frame.Pointer, GetUiSceneResolution());
 		if (!Project.Ui.Navigation)
 			return frame;
 
+		// A command a gamepad button binding pressed also goes to GamepadNavigation (C22.3), which a focused text input keeps.
 		const bool shift = devices.IsKeyDown(Step, Key::LeftShift) || devices.IsKeyDown(Step, Key::RightShift);
 		for (const Utils::UiCommandControls& command : UiCommands)
 		{
-			const bool pressed = std::ranges::any_of(command.Controls, [&devices](const InputBinding::Control& control)
+			bool pressed = false;
+			bool pressedByGamepad = false;
+			for (const InputBinding::Control& control : command.Controls)
 			{
-				return Utils::WasUiControlPressed(devices, control);
-			});
+				if (!Utils::WasUiControlPressed(devices, control))
+					continue;
+				pressed = true;
+				pressedByGamepad = pressedByGamepad || std::holds_alternative<GamepadButton>(control);
+			}
 			if (!pressed)
 				continue;
-			frame.Navigation |= command.Command == UiNavigation::Next && shift ? UiNavigation::Previous : command.Command;
+			const UiNavigation navigation = command.Command == UiNavigation::Next && shift ? UiNavigation::Previous : command.Command;
+			frame.Navigation |= navigation;
+			if (pressedByGamepad)
+				frame.GamepadNavigation |= navigation;
 		}
 		if (!Project.Ui.StickNavigation)
 			return frame;
@@ -1277,6 +1316,10 @@ namespace Engine {
 			if (!captured)
 				state.Recorder->Invalidate(captured.error().ToString());
 		}
+		// M22 (C22.3, Docs/Decisions/0033-m22-contract.md decision 46): the tick's committed characters latched into the step
+		// view, so UiInput and the tick's scripts read the same text, in Play and Simulate.
+		state.EnterPhase(*this, PlaySessionPhase::TextLatch, tick);
+		state.Input.LatchStepText();
 		// M22 (C22.2, decision 24): the tick's latched input against the current UI layout, in Play and Simulate, with or
 		// without a canvas (without one it reads no input and keeps the interaction state empty).
 		state.EnterPhase(*this, PlaySessionPhase::UiInput, tick);

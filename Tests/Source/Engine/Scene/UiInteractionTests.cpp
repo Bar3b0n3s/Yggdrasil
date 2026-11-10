@@ -18,6 +18,7 @@
 
 #include <glm/glm.hpp>
 
+#include <limits>
 #include <optional>
 #include <string_view>
 
@@ -265,7 +266,7 @@ namespace Engine {
 		}
 
 		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 50; stream W): the pointer's ray and the world canvases' hit test.
-		TEST_CASE("UiInteraction: the pointer's ray goes through the primary camera at its simulated pose" * doctest::skip(true))
+		TEST_CASE("UiInteraction: the pointer's ray goes through the primary camera at its simulated pose")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -302,8 +303,7 @@ namespace Engine {
 			CHECK(ray->Direction == glm::vec3(0.0f, 0.0f, -1.0f));
 		}
 
-		TEST_CASE("UiInteraction: the pointer hits a World canvas through its ray, under the Screen canvases and nearest first"
-			* doctest::skip(true))
+		TEST_CASE("UiInteraction: the pointer hits a World canvas through its ray, under the Screen canvases and nearest first")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -350,6 +350,145 @@ namespace Engine {
 			CHECK(hit.Hit.Target == screenButton.GetUUID());
 			CHECK(hit.Canvas == screen.GetUUID());
 			CHECK(HitTestUi(scene, table, glm::vec2(50.0f)).Target.IsValid() == false);
+		}
+
+		TEST_CASE("UiInteraction: a World canvas takes the pointer only inside its rectangle")
+		{
+			// A World canvas of 100 x 100 canvas pixels at 10 pixels per unit at the origin, facing +Z, holding a button that
+			// starts at its middle and reaches 50 pixels beyond its right edge: the canvas is drawn only inside its rectangle
+			// (UiPass.h), so the pointer reaches the button there only, while MapUiPointerToCanvas maps any point of the plane.
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity board = scene.CreateEntity("Board");
+			board.AddComponent<UiCanvasComponent>(
+				UiCanvasComponent{ .RenderMode = UiCanvasRenderMode::World, .WorldWidth = 100, .WorldHeight = 100, .PixelsPerUnit = 10.0f });
+			Entity button = AddInteractionButton(scene, "Button", board, glm::vec2(50.0f, 0.0f), glm::vec2(100.0f));
+			TransformSystem::Update(scene);
+			const UiLayoutTable table = ComputeUiLayout(scene, glm::uvec2(100, 100));
+			const auto down = [](float x)
+			{
+				return UiPointerRay{ .Origin = glm::vec3(x, 0.0f, 10.0f), .Direction = glm::vec3(0.0f, 0.0f, -1.0f) };
+			};
+			// World x 2.5 is canvas pixel (75, 50), inside both; world x 7.5 is (125, 50), on the button beyond the canvas.
+			const UiPointerHit inside = HitTestUiPointer(scene, table, glm::vec2(-1.0f), down(2.5f));
+			CHECK(inside.Hit.Target == button.GetUUID());
+			CHECK(inside.CanvasPoint == glm::vec2(75.0f, 50.0f));
+			CHECK_FALSE(HitTestUiPointer(scene, table, glm::vec2(-1.0f), down(7.5f)).Hit.Target.IsValid());
+			const UiCanvasLayout* layout = FindUiCanvasLayout(table, board.GetUUID());
+			REQUIRE(layout != nullptr);
+			const std::optional<UiCanvasPointer> beyond = MapUiPointerToCanvas(*layout, glm::vec2(-1.0f), down(7.5f));
+			REQUIRE(beyond.has_value());
+			CHECK(beyond->Point == glm::vec2(125.0f, 50.0f));
+			CHECK(beyond->Distance == 10.0f);
+			// A Screen canvas's pointer is the point itself, with or without a ray.
+			Entity hud = AddInteractionCanvas(scene);
+			const UiLayoutTable withHud = ComputeUiLayout(scene, glm::uvec2(100, 100));
+			const UiCanvasLayout* screen = FindUiCanvasLayout(withHud, hud.GetUUID());
+			REQUIRE(screen != nullptr);
+			CHECK(MapUiPointerToCanvas(*screen, glm::vec2(12.0f, 34.0f), std::nullopt) == UiCanvasPointer{ .Point = glm::vec2(12.0f, 34.0f) });
+		}
+
+		// W22.3's review (decision 50): the pointer reaches a World canvas only where the camera draws it, between the ray's
+		// MinDistance and MaxDistance: beyond a perspective camera's near plane (its far plane is at infinity), and between
+		// an orthographic camera's near and far planes.
+		TEST_CASE("UiInteraction: a World canvas takes the pointer only within the camera's clip range")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			// A perspective camera at (0, 0, 10) looking down -Z with NearClip 1 and FarClip 5, a 90 degree field of view on a
+			// 200 x 100 image; a World canvas of 100 x 100 canvas pixels at 10 pixels per unit, all one button, facing it.
+			Entity camera = scene.CreateEntity("Camera");
+			camera.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, 0.0f, 10.0f);
+			camera.AddComponent<CameraComponent>(CameraComponent{ .VerticalFov = 90.0f, .NearClip = 1.0f, .FarClip = 5.0f, .Primary = true });
+			Entity board = scene.CreateEntity("Board");
+			board.AddComponent<UiCanvasComponent>(
+				UiCanvasComponent{ .RenderMode = UiCanvasRenderMode::World, .WorldWidth = 100, .WorldHeight = 100, .PixelsPerUnit = 10.0f });
+			Entity button = AddInteractionButton(scene, "Button", board, glm::vec2(0.0f), glm::vec2(100.0f));
+			const glm::uvec2 image(200, 100);
+			const glm::vec2 centre(100.0f, 50.0f);
+			const auto hitAt = [&scene, &board, image, centre](float z)
+			{
+				board.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, 0.0f, z);
+				TransformSystem::Update(scene);
+				const UiLayoutTable table = ComputeUiLayout(scene, image);
+				return HitTestUiPointer(scene, table, centre, ComputeUiPointerRay(scene, centre, image)).Hit.Target;
+			};
+
+			// The perspective ray's range: NearClip along -Z is NearClip / c along a ray at the angle whose cosine is c (the
+			// top-right corner's ray runs along (2, 1, -1), c = 1 / sqrt(6)), and no end.
+			std::optional<UiPointerRay> ray = ComputeUiPointerRay(scene, centre, image);
+			REQUIRE(ray.has_value());
+			CHECK(ray->MinDistance == 1.0f);
+			CHECK(ray->MaxDistance == std::numeric_limits<float>::infinity());
+			ray = ComputeUiPointerRay(scene, glm::vec2(200.0f, 0.0f), image);
+			REQUIRE(ray.has_value());
+			CHECK(ray->MinDistance == doctest::Approx(2.4494897f));
+			// A canvas 0.5 in front of the camera lies before its near plane, which clips it: no hit. At 2 and at 20 (beyond
+			// FarClip, which a perspective projection does not clip at) the camera draws it, and the pointer takes it.
+			CHECK_FALSE(hitAt(9.5f).IsValid());
+			CHECK(hitAt(8.0f) == button.GetUUID());
+			CHECK(hitAt(-10.0f) == button.GetUUID());
+
+			// An orthographic camera clips at both planes: its rays start on the near plane (z 9) and end on the far plane (z 5),
+			// so a canvas at 5.5 takes the pointer and one at 4.5 does not.
+			camera.GetComponent<CameraComponent>().Projection = ProjectionType::Orthographic;
+			camera.GetComponent<CameraComponent>().OrthographicSize = 5.0f;
+			ray = ComputeUiPointerRay(scene, centre, image);
+			REQUIRE(ray.has_value());
+			CHECK(ray->MinDistance == 0.0f);
+			CHECK(ray->MaxDistance == 4.0f);
+			CHECK_FALSE(hitAt(9.5f).IsValid());
+			CHECK(hitAt(8.0f) == button.GetUUID());
+			CHECK(hitAt(5.5f) == button.GetUUID());
+			CHECK_FALSE(hitAt(4.5f).IsValid());
+			CHECK_FALSE(hitAt(-10.0f).IsValid());
+
+			// MapUiPointerToCanvas applies a hand-made ray's range alike, and a farther canvas within it still takes the pointer
+			// that a nearer, clipped one leaves.
+			board.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f);
+			TransformSystem::Update(scene);
+			const UiLayoutTable table = ComputeUiLayout(scene, image);
+			const UiCanvasLayout* layout = FindUiCanvasLayout(table, board.GetUUID());
+			REQUIRE(layout != nullptr);
+			const UiPointerRay down{ .Origin = glm::vec3(0.0f, 0.0f, 10.0f), .Direction = glm::vec3(0.0f, 0.0f, -1.0f) };
+			CHECK(MapUiPointerToCanvas(*layout, centre, down).has_value());
+			CHECK_FALSE(MapUiPointerToCanvas(*layout, centre, UiPointerRay{ .Origin = down.Origin, .Direction = down.Direction, .MinDistance = 10.5f }).has_value());
+			CHECK_FALSE(MapUiPointerToCanvas(*layout, centre, UiPointerRay{ .Origin = down.Origin, .Direction = down.Direction, .MaxDistance = 9.5f }).has_value());
+			Entity near = scene.CreateEntity("Near");
+			near.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, 0.0f, 9.5f);
+			near.AddComponent<UiCanvasComponent>(
+				UiCanvasComponent{ .RenderMode = UiCanvasRenderMode::World, .WorldWidth = 100, .WorldHeight = 100, .PixelsPerUnit = 10.0f });
+			static_cast<void>(AddInteractionButton(scene, "Blocked", near, glm::vec2(0.0f), glm::vec2(100.0f)));
+			TransformSystem::Update(scene);
+			const UiLayoutTable both = ComputeUiLayout(scene, image);
+			CHECK(HitTestUiPointer(scene, both, centre, UiPointerRay{ .Origin = down.Origin, .Direction = down.Direction, .MinDistance = 1.0f }).Hit.Target
+				== button.GetUUID());
+		}
+
+		TEST_CASE("UiInteraction: directional navigation stays within a render space, and Next and Previous span every canvas")
+		{
+			// A Screen canvas holding "Top" at y 0 and "Bottom" at y 100, then a World canvas holding "Near" at y 50 and "Far"
+			// at y 200 of its own pixels, all focusable buttons. Down from Top reaches Bottom, never the World canvas's Near
+			// (its y is another canvas's pixels); Down from Near reaches Far; Next and Previous walk every canvas in draw order.
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity hud = AddInteractionCanvas(scene);
+			Entity top = AddInteractionButton(scene, "Top", hud, glm::vec2(0.0f), glm::vec2(10.0f));
+			Entity bottom = AddInteractionButton(scene, "Bottom", hud, glm::vec2(0.0f, 100.0f), glm::vec2(10.0f));
+			Entity board = scene.CreateEntity("Board");
+			board.AddComponent<UiCanvasComponent>(UiCanvasComponent{ .RenderMode = UiCanvasRenderMode::World, .WorldWidth = 300, .WorldHeight = 300 });
+			Entity near = AddInteractionButton(scene, "Near", board, glm::vec2(0.0f, 50.0f), glm::vec2(10.0f));
+			Entity far = AddInteractionButton(scene, "Far", board, glm::vec2(0.0f, 200.0f), glm::vec2(10.0f));
+			TransformSystem::Update(scene);
+			const UiLayoutTable table = ComputeUiLayout(scene, glm::uvec2(200, 200));
+
+			CHECK(FindUiNavigationTarget(scene, table, top.GetUUID(), UiDirection::Down) == bottom.GetUUID());
+			CHECK_FALSE(FindUiNavigationTarget(scene, table, bottom.GetUUID(), UiDirection::Down).IsValid());
+			CHECK(FindUiNavigationTarget(scene, table, near.GetUUID(), UiDirection::Down) == far.GetUUID());
+			CHECK_FALSE(FindUiNavigationTarget(scene, table, near.GetUUID(), UiDirection::Up).IsValid());
+			CHECK(FindNextUiFocus(scene, table, bottom.GetUUID(), true) == near.GetUUID());
+			CHECK(FindNextUiFocus(scene, table, far.GetUUID(), true) == top.GetUUID());
+			CHECK(FindNextUiFocus(scene, table, near.GetUUID(), false) == bottom.GetUUID());
 		}
 	}
 

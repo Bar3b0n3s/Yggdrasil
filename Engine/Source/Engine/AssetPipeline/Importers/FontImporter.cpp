@@ -2,6 +2,7 @@
 #include "Engine/AssetPipeline/Importers/FontImporter.h"
 
 #include "Engine/Asset/FontData.h"
+#include "Engine/AssetPipeline/Private/FontShaping.h"
 #include "Engine/AssetPipeline/Private/TrueTypeFont.h"
 #include "Engine/AssetPipeline/Private/TrueTypeTables.h"
 #include "Engine/Core/Json/JsonReader.h"
@@ -23,8 +24,8 @@ namespace Engine {
 
 	namespace {
 
-		// One glyph of the atlas being built: its codepoint, glyph index, metrics, distance-field box, atlas position and,
-		// once the boxes are packed, its distance field.
+		// One glyph of the atlas being built: its codepoint (0 for a glyph only shaping reaches), glyph index, metrics,
+		// distance-field box, atlas position and, once the boxes are packed, its distance field.
 		struct BakedGlyph
 		{
 			uint32_t Codepoint = 0;
@@ -83,7 +84,8 @@ namespace Engine {
 				std::swap(range.First, range.Last);
 		}
 
-		// The "FontImportSettings" Validate hook: the limits on Ranges that bound the baker's work.
+		// The "FontImportSettings" Validate hook: the limits on Ranges that bound the baker's work, and the rules on Fallbacks
+		// that need no handle of the font's own (at most MaxFontFallbacks, none null; Import refuses the font itself).
 		static void ValidateFontImportSettings(const FontImportSettings& settings, ValidationContext& context)
 		{
 			if (settings.Ranges.size() > MaxFontCharacterRanges)
@@ -91,16 +93,58 @@ namespace Engine {
 			const uint64_t codepoints = CountRangeCodepoints(settings.Ranges);
 			if (codepoints > MaxFontRangeCodepoints)
 				context.Error("Ranges", std::format("must name at most {} codepoints in all (got {})", MaxFontRangeCodepoints, codepoints));
+
+			if (settings.Fallbacks.size() > MaxFontFallbacks)
+				context.Error("Fallbacks", std::format("must name at most {} fonts (got {})", MaxFontFallbacks, settings.Fallbacks.size()));
+			context.PushKey("Fallbacks");
+			for (size_t index = 0; index < settings.Fallbacks.size(); ++index)
+			{
+				if (!settings.Fallbacks[index].IsValid())
+					context.Error(std::to_string(index), "must name a font, not null");
+			}
+			context.PopKey();
 		}
 
 		// The "FontImportSettings" Generate hook: at most MaxFontCharacterRanges ranges (each already turned around by its own
-		// hook), each cut to MaxGeneratedRangeCodepoints codepoints.
+		// hook), each cut to MaxGeneratedRangeCodepoints codepoints; Fallbacks without its null handles, cut to
+		// MaxFontFallbacks.
 		static void GenerateFontImportSettings(FontImportSettings& settings, Random& /*random*/)
 		{
 			if (settings.Ranges.size() > MaxFontCharacterRanges)
 				settings.Ranges.resize(MaxFontCharacterRanges);
 			for (FontCharacterRange& range : settings.Ranges)
 				range.Last = std::min(range.Last, range.First + (MaxGeneratedRangeCodepoints - 1));
+			std::erase_if(settings.Fallbacks, [](const TypedAssetHandle<AssetType::Font>& fallback)
+			{
+				return !fallback.IsValid();
+			});
+			if (settings.Fallbacks.size() > MaxFontFallbacks)
+				settings.Fallbacks.resize(MaxFontFallbacks);
+		}
+
+		// The rule on Fallbacks that the Validate hook cannot check, since only the import knows the font's handle `font`:
+		// no fallback is the font itself, each such element a Validation error located at /Fallbacks/<index>.
+		[[nodiscard]] static Status ValidateFallbacksOfFont(const FontImportSettings& settings, AssetHandle font)
+		{
+			ValidationContext context;
+			context.PushKey("Fallbacks");
+			for (size_t index = 0; index < settings.Fallbacks.size(); ++index)
+			{
+				if (settings.Fallbacks[index].GetHandle() == font)
+					context.Error(std::to_string(index), std::format("must not name the font itself ({})", font));
+			}
+			context.PopKey();
+			return context.ToStatus("FontImportSettings");
+		}
+
+		// The cooked chain of a font imported with `settings` (FontData::Fallbacks): its Fallbacks' handles, in order.
+		[[nodiscard]] static std::vector<AssetHandle> GetFallbackHandles(const FontImportSettings& settings)
+		{
+			std::vector<AssetHandle> handles;
+			handles.reserve(settings.Fallbacks.size());
+			for (const TypedAssetHandle<AssetType::Font>& fallback : settings.Fallbacks)
+				handles.push_back(fallback.GetHandle());
+			return handles;
 		}
 
 		// The codepoints a font with `settings` bakes: FontCharacterSet and the settings' Ranges, sorted and unique.
@@ -177,6 +221,34 @@ namespace Engine {
 			return true;
 		}
 
+		// The FontGlyph of `glyph`, packed in an atlas `atlasSize` pixels on a side, with its field copied into `atlas`.
+		[[nodiscard]] static FontGlyph MakeFontGlyph(const BakedGlyph& glyph, float unitsPerEm, float pixelsPerEm, uint32_t atlasSize, Buffer& atlas)
+		{
+			FontGlyph out;
+			out.Codepoint = glyph.Codepoint;
+			out.GlyphIndex = static_cast<uint32_t>(glyph.Glyph);
+			out.Advance = static_cast<float>(glyph.Advance) / unitsPerEm;
+			// The field is its box, packed at (AtlasX, AtlasY) (TrueTypeFont::RenderGlyphSdf).
+			const TrueTypeGlyphSdf& sdf = glyph.Sdf;
+			if (sdf.Width != 0)
+			{
+				for (uint32_t row = 0; row < sdf.Height; ++row)
+				{
+					const auto rowStart = sdf.Pixels.begin() + static_cast<std::ptrdiff_t>(static_cast<size_t>(row) * sdf.Width);
+					const size_t target = (static_cast<size_t>(glyph.AtlasY) + row) * atlasSize + glyph.AtlasX;
+					std::copy(rowStart, rowStart + sdf.Width, atlas.begin() + static_cast<std::ptrdiff_t>(target));
+				}
+				// The bitmap's top-left corner lies at (OffsetX, OffsetY) pixels from the pen, y down; plane coordinates are
+				// em units, y up.
+				const float size = static_cast<float>(atlasSize);
+				out.PlaneMin = { static_cast<float>(sdf.OffsetX) / pixelsPerEm, -static_cast<float>(sdf.OffsetY + static_cast<int32_t>(sdf.Height)) / pixelsPerEm };
+				out.PlaneMax = { static_cast<float>(sdf.OffsetX + static_cast<int32_t>(sdf.Width)) / pixelsPerEm, -static_cast<float>(sdf.OffsetY) / pixelsPerEm };
+				out.AtlasMin = { static_cast<float>(glyph.AtlasX) / size, static_cast<float>(glyph.AtlasY) / size };
+				out.AtlasMax = { static_cast<float>(glyph.AtlasX + sdf.Width) / size, static_cast<float>(glyph.AtlasY + sdf.Height) / size };
+			}
+			return out;
+		}
+
 		// The smallest power-of-two atlas side the glyphs' boxes fit in, with their positions set. Errors: ImportFailed when
 		// they need more than MaxFontAtlasSize.
 		[[nodiscard]] static Result<uint32_t> PackAtlas(std::vector<BakedGlyph>& glyphs, std::string_view name)
@@ -218,6 +290,33 @@ namespace Engine {
 		if (glyphs.empty())
 			return MakeError(ErrorCode::ImportFailed, "the font '{}' has no glyph for any character of ASCII, Latin-1 or its Ranges", name);
 
+		// Version 5: the glyphs shaping reaches from the baked codepoints that none of them maps to, after them by glyph
+		// index (FontImporter.h).
+		const size_t codepointGlyphCount = glyphs.size();
+		std::vector<uint32_t> bakedCodepoints;
+		std::vector<uint32_t> bakedGlyphs;
+		bakedCodepoints.reserve(codepointGlyphCount);
+		for (const BakedGlyph& glyph : glyphs)
+		{
+			bakedCodepoints.push_back(glyph.Codepoint);
+			bakedGlyphs.push_back(static_cast<uint32_t>(glyph.Glyph));
+		}
+		std::ranges::sort(bakedGlyphs);
+		const auto [repeated, uniqueEnd] = std::ranges::unique(bakedGlyphs);
+		bakedGlyphs.erase(repeated, uniqueEnd);
+		ENGINE_TRY_ASSIGN(const FontShapingClosure closure, WithContext(Utils::FindFontShapingClosure(source, bakedCodepoints), std::format("while finding the glyphs shaping reaches in '{}'", name)));
+		for (const uint32_t glyph : closure.Glyphs)
+		{
+			if (std::ranges::binary_search(bakedGlyphs, glyph))
+				continue;
+			BakedGlyph shaped;
+			shaped.Glyph = static_cast<int32_t>(glyph);
+			shaped.Advance = font.GetGlyphMetrics(shaped.Glyph).Advance;
+			glyphs.push_back(std::move(shaped));
+			++report.ShapingGlyphs;
+		}
+		report.Glyphs = static_cast<uint32_t>(glyphs.size());
+
 		const TrueTypeVerticalMetrics vertical = font.GetVerticalMetrics();
 		if (vertical.Ascent < 0 || vertical.Descent > 0)
 		{
@@ -231,7 +330,7 @@ namespace Engine {
 		const int32_t padding = static_cast<int32_t>(std::ceil(settings.Spread));
 		for (BakedGlyph& glyph : glyphs)
 		{
-			ENGINE_TRY_ASSIGN(glyph.Box, WithContext(font.GetGlyphSdfBox(glyph.Glyph, settings.PixelSize, padding), std::format("while measuring U+{:04X} of '{}'", glyph.Codepoint, name)));
+			ENGINE_TRY_ASSIGN(glyph.Box, WithContext(font.GetGlyphSdfBox(glyph.Glyph, settings.PixelSize, padding), std::format("while measuring U+{:04X} (glyph {}) of '{}'", glyph.Codepoint, glyph.Glyph, name)));
 		}
 		ENGINE_TRY_ASSIGN(const uint32_t atlasSize, Utils::PackAtlas(glyphs, name));
 		report.AtlasSize = atlasSize;
@@ -241,7 +340,7 @@ namespace Engine {
 		{
 			if (glyph.Box.Width == 0)
 				continue;
-			ENGINE_TRY_ASSIGN(glyph.Sdf, WithContext(font.RenderGlyphSdf(glyph.Glyph, glyph.Box, settings.PixelSize, valuePerPixel), std::format("while rasterizing U+{:04X} of '{}'", glyph.Codepoint, name)));
+			ENGINE_TRY_ASSIGN(glyph.Sdf, WithContext(font.RenderGlyphSdf(glyph.Glyph, glyph.Box, settings.PixelSize, valuePerPixel), std::format("while rasterizing U+{:04X} (glyph {}) of '{}'", glyph.Codepoint, glyph.Glyph, name)));
 			++report.RasterizedGlyphs;
 		}
 
@@ -255,38 +354,34 @@ namespace Engine {
 		data.AtlasHeight = atlasSize;
 		data.AtlasPixels.assign(static_cast<size_t>(atlasSize) * atlasSize, std::byte{ 0 });
 
-		const float size = static_cast<float>(atlasSize);
-		const float pixelsPerEm = settings.PixelSize;
-		data.Glyphs.reserve(glyphs.size());
-		for (const BakedGlyph& glyph : glyphs)
+		// The codepoint glyphs in codepoint order; every baked glyph once by glyph index, a codepoint glyph with its smallest
+		// codepoint (the first in codepoint order) and a glyph only shaping reaches with Codepoint 0.
+		data.Glyphs.reserve(codepointGlyphCount);
+		data.IndexedGlyphs.reserve(glyphs.size());
+		for (size_t index = 0; index < glyphs.size(); ++index)
 		{
-			FontGlyph out;
-			out.Codepoint = glyph.Codepoint;
-			out.Advance = static_cast<float>(glyph.Advance) / unitsPerEm;
-			// The field is its box, packed at (AtlasX, AtlasY) (TrueTypeFont::RenderGlyphSdf).
-			const TrueTypeGlyphSdf& sdf = glyph.Sdf;
-			if (sdf.Width != 0)
-			{
-				for (uint32_t row = 0; row < sdf.Height; ++row)
-				{
-					const auto rowStart = sdf.Pixels.begin() + static_cast<std::ptrdiff_t>(static_cast<size_t>(row) * sdf.Width);
-					const size_t target = (static_cast<size_t>(glyph.AtlasY) + row) * atlasSize + glyph.AtlasX;
-					std::copy(rowStart, rowStart + sdf.Width, data.AtlasPixels.begin() + static_cast<std::ptrdiff_t>(target));
-				}
-				// The bitmap's top-left corner lies at (OffsetX, OffsetY) pixels from the pen, y down; plane coordinates
-				// are em units, y up.
-				out.PlaneMin = { static_cast<float>(sdf.OffsetX) / pixelsPerEm, -static_cast<float>(sdf.OffsetY + static_cast<int32_t>(sdf.Height)) / pixelsPerEm };
-				out.PlaneMax = { static_cast<float>(sdf.OffsetX + static_cast<int32_t>(sdf.Width)) / pixelsPerEm, -static_cast<float>(sdf.OffsetY) / pixelsPerEm };
-				out.AtlasMin = { static_cast<float>(glyph.AtlasX) / size, static_cast<float>(glyph.AtlasY) / size };
-				out.AtlasMax = { static_cast<float>(glyph.AtlasX + sdf.Width) / size, static_cast<float>(glyph.AtlasY + sdf.Height) / size };
-			}
-			data.Glyphs.push_back(out);
+			const FontGlyph out = Utils::MakeFontGlyph(glyphs[index], unitsPerEm, settings.PixelSize, atlasSize, data.AtlasPixels);
+			if (index < codepointGlyphCount)
+				data.Glyphs.push_back(out);
+			data.IndexedGlyphs.push_back(out);
 		}
+		std::ranges::stable_sort(data.IndexedGlyphs, {}, &FontGlyph::GlyphIndex);
+		const auto [laterCodepoints, indexedEnd] = std::ranges::unique(data.IndexedGlyphs, {}, &FontGlyph::GlyphIndex);
+		data.IndexedGlyphs.erase(laterCodepoints, indexedEnd);
+		data.UnitsPerEm = static_cast<uint32_t>(font.GetUnitsPerEm());
 
 		ENGINE_TRY_ASSIGN(const std::vector<TrueTypeKerningEntry> kerning, WithContext(Utils::ReadTrueTypeKerning(source, entries), std::format("while reading the kerning of '{}'", name)));
 		data.Kerning.reserve(kerning.size());
 		for (const TrueTypeKerningEntry& pair : kerning)
 			data.Kerning.push_back({ .First = pair.First, .Second = pair.Second, .Advance = static_cast<float>(pair.Adjustment) / unitsPerEm });
+
+		// The subset shaping reads: the baked codepoints (and the mirrored forms right-to-left runs draw) and every baked
+		// glyph, by its index.
+		std::vector<uint32_t> subsetGlyphs;
+		subsetGlyphs.reserve(data.IndexedGlyphs.size());
+		for (const FontGlyph& glyph : data.IndexedGlyphs)
+			subsetGlyphs.push_back(glyph.GlyphIndex);
+		ENGINE_TRY_ASSIGN(data.ShapingSource, WithContext(Utils::SubsetFontForShaping(source, closure.Codepoints, subsetGlyphs), std::format("while subsetting '{}' for shaping", name)));
 
 		ENGINE_TRY(WithContext(ValidateFontData(data), std::format("while baking the font '{}'", name)));
 		return data;
@@ -302,11 +397,19 @@ namespace Engine {
 	{
 		const std::string sourcePath = context.GetSourcePath().ToString();
 		ENGINE_TRY_ASSIGN(const FontImportSettings settings, WithContext(Utils::ReadSettings(context.GetSettings(), context.GetRegistry()), std::format("while reading the import settings of '{}'", sourcePath)));
+		ENGINE_TRY(WithContext(Utils::ValidateFallbacksOfFont(settings, metadata.Handle), std::format("while reading the import settings of '{}'", sourcePath)));
 		FontBakeReport report;
-		ENGINE_TRY_ASSIGN(const FontData font, Bake(context.GetSourceBytes(), settings, sourcePath, report));
+		ENGINE_TRY_ASSIGN(FontData font, Bake(context.GetSourceBytes(), settings, sourcePath, report));
+		// The chain's fallbacks (C22.3, Docs/Decisions/0033-m22-contract.md decision 42), cooked in order and recorded as the
+		// import's dependencies, sorted and unique, so an export that prunes keeps them; a fallback need not exist yet.
+		font.Fallbacks = Utils::GetFallbackHandles(settings);
 
 		ImportResult result;
 		result.Artifacts.push_back(ImportedArtifact{ .Handle = metadata.Handle, .Type = AssetType::Font, .SubAssetKey = {}, .Cooked = CookFont(font, Version) });
+		result.Dependencies = font.Fallbacks;
+		std::ranges::sort(result.Dependencies);
+		const auto [duplicates, end] = std::ranges::unique(result.Dependencies);
+		result.Dependencies.erase(duplicates, end);
 		return result;
 	}
 
@@ -333,6 +436,8 @@ namespace Engine {
 			.Field("Spread", &FontImportSettings::Spread, "The distance field's range in atlas pixels on each side of an outline.",
 				{ .Min = 1.0, .Max = 32.0, .Unit = "px" })
 			.Field("Ranges", &FontImportSettings::Ranges, "Codepoint ranges baked besides ASCII and Latin-1; codepoints the font lacks are left out.")
+			.Field("Fallbacks", &FontImportSettings::Fallbacks,
+				"Fonts a text in this font falls back to, in order, for a codepoint it lacks; at most 8, recorded as the import's dependencies.")
 			.Validate(&Utils::ValidateFontImportSettings)
 			.Generate(&Utils::GenerateFontImportSettings);
 	}

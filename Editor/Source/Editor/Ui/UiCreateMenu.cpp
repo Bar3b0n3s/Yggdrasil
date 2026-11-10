@@ -11,14 +11,15 @@ namespace Engine {
 	std::optional<Json> DrawUiCreateMenu(const char* label, UUID parent, bool enabled)
 	{
 		// The menu labels and UiWidgetKind's registry names, in the enum's order.
-		static constexpr std::array<std::pair<const char*, const char*>, 8> Kinds = { { { "Canvas", "Canvas" },
+		static constexpr std::array<std::pair<const char*, const char*>, 9> Kinds = { { { "Canvas", "Canvas" },
 			{ "Panel", "Panel" },
 			{ "Image", "Image" },
 			{ "Text", "Text" },
 			{ "Button", "Button" },
 			{ "Toggle", "Toggle" },
 			{ "Slider", "Slider" },
-			{ "Scroll view", "ScrollView" } } };
+			{ "Scroll view", "ScrollView" },
+			{ "Text input", "TextInput" } } };
 		if (!ImGui::BeginMenu(label, enabled))
 			return std::nullopt;
 		std::optional<Json> chosen;

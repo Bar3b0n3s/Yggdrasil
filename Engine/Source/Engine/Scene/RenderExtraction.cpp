@@ -523,14 +523,13 @@ namespace Engine {
 		snapshot.Environment = environment.value_or(RenderEnvironment{});
 		snapshot.Post = post.value_or(PostProcessSettings{});
 		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 7): the view's UI, laid out at the scene resolution of the
-		// snapshot's Output (the view's size by default), for the game view and a camera's view; the editor's scene view
-		// (Explicit) draws no game UI. Its widgets take their theme's tints from the session's interaction state (C22.2,
-		// decision 25), null outside a play session.
-		if (request.Camera != RenderCameraSource::Explicit)
-		{
-			const RenderOutputMapping mapping = ComputeRenderOutputMapping(request.Width, request.Height, snapshot.Output);
-			AppendUiDrawItems(scene, ComputeUiLayout(scene, glm::uvec2(mapping.SceneWidth, mapping.SceneHeight)), snapshot.Ui, request.UiInteraction);
-		}
+		// snapshot's Output (the view's size by default), for the game view and a camera's view. Its widgets take their theme's
+		// tints from the session's interaction state (C22.2, decision 25), null outside a play session. C22.3 (decision 51):
+		// World canvases draw in every view that draws the world, so the editor's scene view (Explicit) draws them and no
+		// Screen canvas.
+		const RenderOutputMapping mapping = ComputeRenderOutputMapping(request.Width, request.Height, snapshot.Output);
+		AppendUiDrawItems(scene, ComputeUiLayout(scene, glm::uvec2(mapping.SceneWidth, mapping.SceneHeight)), snapshot.Ui, request.UiInteraction,
+			request.Camera == RenderCameraSource::Explicit);
 		// Moved, so the containers keep `resource` (a copy would allocate from the default resource).
 		return Result<RenderSnapshot>(std::move(snapshot));
 	}

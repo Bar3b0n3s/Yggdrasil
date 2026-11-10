@@ -19,6 +19,7 @@
 #include "Support/InMemoryAssetManager.h"
 
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -372,8 +373,7 @@ namespace Engine {
 		}
 
 		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 42; stream F): the font chain.
-		TEST_CASE("UiPass: a text's font chain follows its fallbacks depth first, each font once, and leaves out a missing one"
-			* doctest::skip(true))
+		TEST_CASE("UiPass: a text's font chain follows its fallbacks depth first, each font once, and leaves out a missing one")
 		{
 			Test::InMemoryAssetManager assets;
 			PublishUiAssets(assets);
@@ -392,6 +392,9 @@ namespace Engine {
 			publish(FontD, {});
 			CHECK(BuildUiFontChain(FontA, assets) == std::vector<AssetHandle>{ FontA, FontB, FontD, FontC });
 			CHECK(BuildUiFontChain(FontC, assets) == std::vector<AssetHandle>{ FontC });
+			// A null fallback (which no loaded font holds: ValidateFontData) names no font and is left out unreported.
+			publish(FontC, { AssetHandle{}, FontD });
+			CHECK(BuildUiFontChain(FontC, assets) == std::vector<AssetHandle>{ FontC, FontD });
 			// A null font is the Default font's chain; a chain stops at MaxUiFontChainLength fonts.
 			CHECK(BuildUiFontChain({}, assets) == std::vector<AssetHandle>{ BuiltinAssetHandles::DefaultFont });
 			std::vector<AssetHandle> many;
@@ -410,7 +413,7 @@ namespace Engine {
 			CHECK(missing.GetMatchCount() == 1);
 		}
 
-		TEST_CASE("UiPass: a codepoint the text's font lacks falls back to the first font of its chain that has it" * doctest::skip(true))
+		TEST_CASE("UiPass: a codepoint the text's font lacks falls back to the first font of its chain that has it")
 		{
 			Test::InMemoryAssetManager assets;
 			PublishUiAssets(assets);
@@ -446,7 +449,7 @@ namespace Engine {
 		}
 
 		// C22.3 (decision 48; streams T and S): the text input's caret.
-		TEST_CASE("UiPass: a focused text input's caret stands before its byte and keeps inside the rectangle" * doctest::skip(true))
+		TEST_CASE("UiPass: a focused text input's caret stands before its byte and keeps inside the rectangle")
 		{
 			Test::InMemoryAssetManager assets;
 			PublishUiAssets(assets);
@@ -507,6 +510,63 @@ namespace Engine {
 			REQUIRE(plan.Quads.size() == 1);
 			CHECK(plan.Quads[0].Min == glm::vec2(100.0f, 60.0f));
 			CHECK(plan.Quads[0].Max == glm::vec2(101.0f, 70.0f));
+		}
+
+		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 51; stream W): a World canvas's items stay in its pixels, cut on
+		// the CPU to their clip and the canvas's rectangle (a scissor is screen-space), in runs of their canvas.
+		TEST_CASE("UiPass: a World canvas's items are planned in its pixels, cut to their clip and its rectangle, in runs of their canvas")
+		{
+			Test::InMemoryAssetManager assets;
+			PublishUiAssets(assets);
+			UiDrawList list;
+			list.WorldCanvases.push_back(UiWorldCanvas{ .Canvas = UUID(0xB0A2D), .Size = glm::uvec2(64, 32) });
+			// A plain image over [-8, 4] to [24, 20], left of the canvas and below its clip's bottom at 12: cut to [0, 4] to
+			// [24, 12], its texture rectangle with it (a quarter off the left, half off the bottom).
+			UiDrawItem board = MakeImage(glm::vec2(-8.0f, 4.0f), glm::vec2(24.0f, 20.0f));
+			board.Color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
+			board.Clipped = true;
+			board.Clip = UiClipRect{ .MinX = -100, .MinY = -100, .MaxX = 100, .MaxY = 12 };
+			board.WorldCanvas = 0;
+			list.Items.push_back(board);
+			// A Screen canvas's image after it, beyond the World canvas's rectangle: a run of its own, as before.
+			list.Items.push_back(MakeImage(glm::vec2(70.0f, 0.0f), glm::vec2(80.0f, 10.0f)));
+			// Wholly outside the World canvas, and naming a canvas the list does not hold: neither draws.
+			UiDrawItem outside = MakeImage(glm::vec2(70.0f, 0.0f), glm::vec2(80.0f, 10.0f));
+			outside.WorldCanvas = 0;
+			list.Items.push_back(outside);
+			UiDrawItem unknown = MakeImage(glm::vec2(0.0f), glm::vec2(8.0f));
+			unknown.WorldCanvas = 5;
+			list.Items.push_back(unknown);
+			// A text on the World canvas: its glyphs in a glyph run of the canvas, unclipped by a scissor.
+			UiDrawItem label = MakeText(glm::vec2(0.0f), glm::vec2(64.0f, 32.0f), "AB");
+			label.WorldCanvas = 0;
+			list.Items.push_back(label);
+
+			const UiPassPlan plan = PlanUiPass(list, assets);
+			CHECK(plan.WorldCanvases == std::vector<UiWorldCanvas>(list.WorldCanvases.begin(), list.WorldCanvases.end()));
+			REQUIRE(plan.Quads.size() == 2);
+			CHECK(plan.Quads[0]
+				== UiPassQuad{ .Min = glm::vec2(0.0f, 4.0f),
+					.Max = glm::vec2(24.0f, 12.0f),
+					.TexCoordMin = glm::vec2(0.25f, 0.0f),
+					.TexCoordMax = glm::vec2(1.0f, 0.5f),
+					.Color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f),
+					.WorldCanvas = 0 });
+			CHECK(plan.Quads[1].WorldCanvas == UiScreenCanvas);
+			REQUIRE(plan.Runs.size() == 3);
+			CHECK(plan.Runs[0] == UiPassRun{ .Kind = UiPassRunKind::Quads, .First = 0, .Count = 1, .WorldCanvas = 0 });
+			CHECK(plan.Runs[1] == UiPassRun{ .Kind = UiPassRunKind::Quads, .First = 1, .Count = 1 });
+			CHECK(plan.Runs[2].Kind == UiPassRunKind::Glyphs);
+			CHECK(plan.Runs[2].WorldCanvas == 0u);
+			CHECK_FALSE(plan.Runs[2].Clipped);
+			CHECK(plan.Runs[2].Font == TestFont);
+			CHECK(plan.Runs[2].Count == 2);
+			for (const TextPixelGlyph& glyph : plan.Glyphs)
+			{
+				CHECK(glyph.Min.x >= 0.0f);
+				CHECK(glyph.Max.x <= 64.0f);
+			}
+			CHECK(plan.DrawnItems == 3);
 		}
 	}
 
@@ -675,7 +735,7 @@ namespace Engine {
 		}
 
 		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 51; stream W): World canvases in the world.
-		TEST_CASE("UiPass: a World canvas is depth-tested against the scene and drawn under the Screen canvases" * doctest::skip(true))
+		TEST_CASE("UiPass: a World canvas is depth-tested against the scene and drawn under the Screen canvases")
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -702,15 +762,23 @@ namespace Engine {
 			CHECK(Test::SceneRendererIntegrationFixture::Channel(image, 12, 16, 0) != 255);
 			CHECK(Test::SceneRendererIntegrationFixture::Channel(image, 16, 16, 1) == 255);
 			CHECK(Test::SceneRendererIntegrationFixture::Channel(image, 16, 16, 0) == 0);
-			// A view without a camera draws no World canvas, only the overlay.
+			// A view without a camera draws no World canvas, only the overlay: the corner keeps what the same view draws without
+			// the canvas (the view's clear colour, which no camera sets).
 			snapshot.HasCamera = false;
+			snapshot.FrameIndex += 1;
 			const Image cameraless = setup.Render(snapshot);
-			CHECK(Test::SceneRendererIntegrationFixture::Channel(cameraless, 1, 1, 0) == 0);
+			RenderSnapshot withoutCanvas = snapshot;
+			withoutCanvas.Ui.Items.erase(withoutCanvas.Ui.Items.begin());
+			withoutCanvas.Ui.WorldCanvases.clear();
+			withoutCanvas.FrameIndex += 1;
+			const Image clear = setup.Render(withoutCanvas);
+			for (size_t channel = 0; channel < 3; ++channel)
+				CHECK(Test::SceneRendererIntegrationFixture::Channel(cameraless, 1, 1, channel) == Test::SceneRendererIntegrationFixture::Channel(clear, 1, 1, channel));
+			CHECK(Test::SceneRendererIntegrationFixture::Channel(cameraless, 1, 1, 0) != 255);
 			CHECK(Test::SceneRendererIntegrationFixture::Channel(cameraless, 16, 16, 1) == 255);
 		}
 
-		TEST_CASE("UiPass: a device loss recreates the world canvases' pipeline and a World canvas draws the same image afterwards"
-			* doctest::skip(true))
+		TEST_CASE("UiPass: a device loss recreates the world canvases' pipeline and a World canvas draws the same image afterwards")
 		{
 			// The recreation protocol (C18.3): the depth-tested pipeline World canvases draw with is SceneRendererPipelines'
 			// (the QuadBatcher's LdrDepth target, decision 57's ledger amendment, granted on main in 1707cf47), so its owner's
@@ -751,6 +819,38 @@ namespace Engine {
 			// The canvas was drawn: its sheet's frame covers the whole view, so no pixel keeps the black clear colour.
 			REQUIRE(report->Before.size() >= 4);
 			CHECK(std::to_integer<int>(report->Before[0]) + std::to_integer<int>(report->Before[1]) + std::to_integer<int>(report->Before[2]) > 0);
+		}
+
+		TEST_CASE("UiPass: World canvases draw back to front by their centres' depth, whatever their list order")
+		{
+			// Two World canvases over the whole view, without the fixture's cube: a green one at z = -5 listed first and a red one
+			// at z = -6 listed second. Neither writes depth, so the one drawn last shows: the nearer, green, since the canvases
+			// draw from the farthest to the nearest.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu, 32, 32);
+			RenderSnapshot snapshot = setup.Snapshot();
+			snapshot.Meshes.clear();
+			const auto addCanvas = [&snapshot](float z, glm::vec4 color)
+			{
+				const auto index = static_cast<uint32_t>(snapshot.Ui.WorldCanvases.size());
+				snapshot.Ui.WorldCanvases.push_back(UiWorldCanvas{ .Canvas = UUID(0xB0A2D + index),
+					.Size = glm::uvec2(64),
+					.World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, z)) * glm::scale(glm::mat4(1.0f), glm::vec3(0.125f, -0.125f, 1.0f))
+						* glm::translate(glm::mat4(1.0f), glm::vec3(-32.0f, -32.0f, 0.0f)) });
+				UiDrawItem board = MakeImage(glm::vec2(0.0f), glm::vec2(64.0f));
+				board.Color = color;
+				board.WorldCanvas = index;
+				snapshot.Ui.Items.push_back(board);
+			};
+			addCanvas(-5.0f, glm::vec4(0.0f, 1.0f, 0.0f, 1.0f));
+			addCanvas(-6.0f, glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
+			const Image image = setup.Render(snapshot);
+			for (const glm::uvec2 pixel : { glm::uvec2(1), glm::uvec2(16), glm::uvec2(30) })
+			{
+				CHECK(Test::SceneRendererIntegrationFixture::Channel(image, pixel.x, pixel.y, 1) == 255);
+				CHECK(Test::SceneRendererIntegrationFixture::Channel(image, pixel.x, pixel.y, 0) == 0);
+			}
 		}
 	}
 

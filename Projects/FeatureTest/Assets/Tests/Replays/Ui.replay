@@ -148,7 +148,7 @@
 				"Components": {
 					"Transform": "82125f902860db21",
 					"Script": "5ba1881be86021a7",
-					"UiCanvas": "c7368b1ba83dc6da"
+					"UiCanvas": "1eb659037660070a"
 				}
 			},
 			{
@@ -474,7 +474,7 @@
 				"Handle": "8437e42391ce559f",
 				"Path": "Assets/Ui/Fonts/Inter-Regular.otf",
 				"Type": "Font",
-				"Hash": "2421d1513c7bea58"
+				"Hash": "e67ffca513fb248d"
 			},
 			{
 				"Handle": "d219d993c72cdbe5",
@@ -802,9 +802,9 @@
 	"Checkpoints": [
 		{
 			"Tick": 60,
-			"StateHash": "28e5309edc944ed4"
+			"StateHash": "f680de2d377bccb1"
 		}
 	],
 	"FinalTick": 80,
-	"FinalStateHash": "94b2457e1ed7567b"
+	"FinalStateHash": "14057c3734e9a42b"
 }

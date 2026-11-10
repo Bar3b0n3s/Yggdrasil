@@ -2637,7 +2637,7 @@
 		{
 			"name": "ui_create_widget",
 			"method": "ui.createWidget",
-			"description": "Builds a UI widget (a canvas, panel, image, text, button, toggle, slider or scroll view) with its child entities and components in the edit scene, as one undoable command; the editor's Create UI menu submits it.",
+			"description": "Builds a UI widget (a canvas, panel, image, text, button, toggle, slider, scroll view or text input) with its child entities and components in the edit scene, as one undoable command; the editor's Create UI menu submits it.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "UiCreateWidgetParams",
@@ -2646,7 +2646,7 @@
 				"properties": {
 					"kind": {
 						"description": "The widget to build.",
-						"enum": ["Canvas", "Panel", "Image", "Text", "Button", "Toggle", "Slider", "ScrollView"]
+						"enum": ["Canvas", "Panel", "Image", "Text", "Button", "Toggle", "Slider", "ScrollView", "TextInput"]
 					},
 					"parent": {
 						"description": "The parent entity (16 hex digits, a unique id prefix of at least 6, or a path); a kind other than Canvas below a parent without a UiCanvas at or above it goes below a new canvas created there. Omitted: a Canvas is a root, any other kind goes below a new root canvas.",
@@ -2663,7 +2663,7 @@
 						"type": "string"
 					},
 					"text": {
-						"description": "The label of a Text, Button or Toggle; omitted: the kind's name.",
+						"description": "The label of a Text, Button or Toggle, or a TextInput's placeholder; omitted: the kind's name (\"Enter text\" for a TextInput).",
 						"type": "string"
 					},
 					"dryRun": {
@@ -2710,7 +2710,7 @@
 						"maximum": 4294967295
 					},
 					"format": {
-						"description": "Text: a compact outline (widgets as UiButton, UiToggle(on|off), UiSlider(<value>) and UiScrollView(<x>,<y>), marked disabled, focused, hovered or pressed); Json: a flat list of entries.",
+						"description": "Text: a compact outline (widgets as UiButton, UiToggle(on|off), UiSlider(<value>), UiScrollView(<x>,<y>) and UiTextInput(\"<text>\"), marked disabled, focused, hovered or pressed); Json: a flat list of entries.",
 						"enum": ["Text", "Json"]
 					},
 					"width": {

@@ -576,6 +576,76 @@ namespace Engine {
 			CHECK(radiance(6, 2) == glm::vec4(2.0f, 0.5f, 0.25f, 1.0f));
 			device.WaitForIdle();
 		}
+
+		TEST_CASE("QuadBatcher: an LdrDepth record draws encoded colour tested against SceneDepth, which an Ldr record ignores")
+		{
+			// M22 (C22.3, Docs/Decisions/0033-m22-contract.md decision 57): LdrDepth is Ldr's target and sRGB encoding with the
+			// depth test (reverse-Z, GreaterOrEqual) and no depth writes: with the depth cleared to 0.5, its quad at depth 0.25
+			// (farther) is hidden and the one at 0.75 (nearer) draws; Ldr draws both.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			Result<Scope<QuadBatcher>> batcher = QuadBatcher::Create(device, gpu.GetPipelines());
+			REQUIRE_MESSAGE(batcher.has_value(), batcher.error().ToString());
+			CHECK((*batcher)->GetPipelineCount() == 3);
+			nvrhi::TextureDesc colorDesc;
+			colorDesc.width = 8;
+			colorDesc.height = 4;
+			colorDesc.format = LdrColorFormat;
+			colorDesc.isRenderTarget = true;
+			colorDesc.isShaderResource = true;
+			colorDesc.initialState = nvrhi::ResourceStates::RenderTarget;
+			colorDesc.keepInitialState = true;
+			colorDesc.debugName = "QuadBatcherTests.LdrColor";
+			nvrhi::TextureDesc depthDesc = colorDesc;
+			depthDesc.format = SceneDepthFormat;
+			depthDesc.isShaderResource = false;
+			depthDesc.initialState = nvrhi::ResourceStates::DepthWrite;
+			depthDesc.debugName = "QuadBatcherTests.LdrDepth";
+			Result<nvrhi::TextureHandle> color = device.CreateTexture(colorDesc);
+			Result<nvrhi::TextureHandle> depth = device.CreateTexture(depthDesc);
+			REQUIRE(color.has_value());
+			REQUIRE(depth.has_value());
+			Result<nvrhi::FramebufferHandle> framebuffer = device.CreateFramebuffer(nvrhi::FramebufferDesc().addColorAttachment(*color).setDepthAttachment(*depth));
+			REQUIRE(framebuffer.has_value());
+			const auto atDepth = [](float minX, float depthValue, glm::vec4 colour)
+			{
+				QuadDraw draw = MakePixelQuad(glm::vec2(minX, 0.0f), glm::vec2(minX + 4.0f, 4.0f), glm::vec2(0.0f), glm::vec2(1.0f), nullptr);
+				for (glm::vec3& corner : draw.Corners)
+					corner.z = depthValue;
+				draw.Color = colour;
+				return draw;
+			};
+			const std::array<QuadDraw, 2> quads = { atDepth(0.0f, 0.25f, glm::vec4(0.0f, 1.0f, 0.0f, 1.0f)),
+				atDepth(4.0f, 0.75f, glm::vec4(1.0f, 0.0f, 0.0f, 1.0f)) };
+			PassBindingCache bindings;
+			const auto render = [&device, &batcher, &bindings, &color, &depth, &framebuffer, &quads](QuadBatchTarget target)
+			{
+				Result<nvrhi::CommandListHandle> list = device.CreateCommandList();
+				REQUIRE(list.has_value());
+				(*list)->open();
+				(*list)->clearTextureFloat(*color, nvrhi::AllSubresources, nvrhi::Color(0.0f, 0.0f, 0.0f, 1.0f));
+				(*list)->clearDepthStencilTexture(*depth, nvrhi::AllSubresources, true, 0.5f, false, 0);
+				RenderPassCounters counters;
+				const Result<uint32_t> recorded = (*batcher)->Record(**list, bindings,
+					{ .Quads = quads, .Target = target, .Framebuffer = *framebuffer, .Transform = MakeQuadPixelTransform(8, 4) }, counters);
+				(*list)->close();
+				device.ExecuteCommandList(**list);
+				REQUIRE_MESSAGE(recorded.has_value(), recorded.error().ToString());
+				CHECK(*recorded == 2);
+				Readback readback(device);
+				Result<Image> image = readback.ReadTexture(**color);
+				REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
+				return std::move(*image);
+			};
+			const Image tested = render(QuadBatchTarget::LdrDepth);
+			CHECK(GetPixel(tested, 1, 1) == glm::u8vec4(0, 0, 0, 255));
+			CHECK(GetPixel(tested, 6, 2) == glm::u8vec4(255, 0, 0, 255));
+			const Image onTop = render(QuadBatchTarget::Ldr);
+			CHECK(GetPixel(onTop, 1, 1) == glm::u8vec4(0, 255, 0, 255));
+			CHECK(GetPixel(onTop, 6, 2) == glm::u8vec4(255, 0, 0, 255));
+			device.WaitForIdle();
+		}
 	}
 
 }

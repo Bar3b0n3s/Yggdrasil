@@ -501,6 +501,13 @@ namespace Engine {
 			Entity hidden = AddUiSystemElement(scene, "Hidden", toggle, glm::vec2(0.0f), glm::vec2(20.0f));
 			hidden.AddComponent<UiButtonComponent>(UiButtonComponent{});
 			toggle.AddComponent<UiToggleComponent>(UiToggleComponent{ .Graphic = hidden.GetUUID() });
+			// A button in a text input's Placeholder, hidden while the input's Text is not empty (decision 48): the refusal names
+			// both rules that hide an element (W22.3's review).
+			Entity field = AddUiSystemElement(scene, "Field", canvas, glm::vec2(120.0f, 60.0f), glm::vec2(60.0f, 20.0f));
+			Entity placeholder = AddUiSystemElement(scene, "Placeholder", field, glm::vec2(0.0f), glm::vec2(60.0f, 20.0f));
+			Entity clear = AddUiSystemElement(scene, "Clear", placeholder, glm::vec2(0.0f), glm::vec2(20.0f));
+			clear.AddComponent<UiButtonComponent>(UiButtonComponent{});
+			field.AddComponent<UiTextInputComponent>(UiTextInputComponent{ .Text = "typed", .Placeholder = placeholder.GetUUID() });
 			UiSystem ui;
 			// Before the first layout there is no scene size, so nothing is laid out and nothing takes focus.
 			const Status unlaid = ui.SetFocus(scene, play.GetUUID());
@@ -513,7 +520,7 @@ namespace Engine {
 			REQUIRE(ui.SetFocus(scene, play.GetUUID()).has_value());
 			CHECK(ui.GetInteraction().Focused == play.GetUUID());
 			CHECK(ui.TakeEvents() == std::vector<UiEvent>{ MakeUiEvent(UiEventKind::Focus, play, true) });
-			for (const Entity refused : { disabled, label, canvas, flat, hidden })
+			for (const Entity refused : { disabled, label, canvas, flat, hidden, clear })
 			{
 				CAPTURE(refused.GetName());
 				const Status status = ui.SetFocus(scene, refused.GetUUID());
@@ -535,6 +542,10 @@ namespace Engine {
 			REQUIRE(ui.SetFocus(scene, UUID{}).has_value());
 			CHECK(ui.TakeEvents() == std::vector<UiEvent>{ MakeUiEvent(UiEventKind::Focus, play, false) });
 			CHECK(ui.GetInteraction().IsEmpty());
+			// With the input's Text empty its Placeholder shows, and the button in it takes focus (laid out at the call).
+			field.GetComponent<UiTextInputComponent>().Text.clear();
+			REQUIRE(ui.SetFocus(scene, clear.GetUUID()).has_value());
+			CHECK(ui.GetInteraction().Focused == clear.GetUUID());
 		}
 
 		// Decision 28, amended by the review of W22.2 (the lead's decision 2): Ui.SetFocus checks against the scene as it is at
@@ -713,8 +724,7 @@ namespace Engine {
 		}
 
 		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 47; stream T): the text step 7a.
-		TEST_CASE("UiSystem: a focused text input takes the step's text and editing keys, and keyboard navigation pauses while it has focus"
-			* doctest::skip(true))
+		TEST_CASE("UiSystem: a focused text input takes the step's text and editing keys, and keyboard navigation pauses while it has focus")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -761,8 +771,7 @@ namespace Engine {
 		}
 
 		// C22.3 (decisions 50 and 51; stream W): a World canvas takes the pointer through the camera.
-		TEST_CASE("UiSystem: a World canvas's button is hovered and clicked through the camera, and its slider drags along its plane"
-			* doctest::skip(true))
+		TEST_CASE("UiSystem: a World canvas's button is hovered and clicked through the camera, and its slider drags along its plane")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();

@@ -72,7 +72,8 @@ no public header exposes a SheenBidi type. How the engine calls it is ADR 0033's
 
 - The kept files match the tag archive's byte for byte (the tree digest above).
 - `python Scripts/CheckBuildConfig.py` passes on the workspace and fails on `FastMathSheenBidi`.
-- The library builds without warnings in Debug and Release with MSVC (14.51), and in Release and Dist with clang-cl (the
+- The library builds without warnings in Debug, Release and Dist with MSVC (14.51; Dist rebuilt in the workspace and
+  through the vendor cache by W22.3's stream S), and in Release and Dist with clang-cl (the
   portability stage's build of Architecture §15.8), where Dist reports one warning in the vendored code, tolerated as
   the portability stage tolerates vendored code's warnings: `SBParagraph.c`'s `stringLength`, which only an assertion
   reads, is unused once `NDEBUG` removes it (`-Wunused-variable`). Its GCC, Clang and Apple Clang builds are never

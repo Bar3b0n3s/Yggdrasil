@@ -94,6 +94,16 @@ namespace Engine {
 			return 1;
 		}
 
+		// M22 (C22.3, Docs/Decisions/0033-m22-contract.md decision 46): the text latch of the current phase's view
+		// (IScriptHost::GetText), empty in every host but the play session's (Lua::PushString pushes an empty view, the
+		// default host's without a data pointer included, as "").
+		static int InputGetText(ScriptCall& call)
+		{
+			const auto& host = call.Engine->GetHost();
+			Lua::PushString(call, host.GetText(host.GetFrameState().Phase));
+			return 1;
+		}
+
 		template<typename Code, auto Name>
 		static Status RegisterInputEnum(ScriptApiRegistry& api, std::string name, std::string description, size_t count)
 		{
@@ -149,7 +159,12 @@ namespace Engine {
 				.Function("IsGamepadButtonDown", &Utils::InputGamepadButton, "(index: number, button: GamepadButton) -> boolean", "Returns a gamepad button's held state.", { .Mutates = false, .EnumParameters = { { 2, "GamepadButton" } } })
 				.Function("GetGamepadAxis", &Utils::InputGamepadAxis, "(index: number, axis: GamepadAxis) -> number", "Returns an engine-convention axis, or zero for a disconnected pad.", { .Mutates = false, .EnumParameters = { { 2, "GamepadAxis" } } })
 				.Function("SetCursorMode", &Utils::InputSetCursor, "(mode: CursorMode) -> ()", "Changes cursor visibility/capture; refused during read-only evaluation.", { .EnumParameters = { { 1, "CursorMode" } } })
-				.Function("GetCursorMode", &Utils::InputGetCursor, "() -> CursorMode", "Returns the canonical cursor mode name.", read);
+				.Function("GetCursorMode", &Utils::InputGetCursor, "() -> CursorMode", "Returns the canonical cursor mode name.", read)
+				.Function("GetText", &Utils::InputGetText, "() -> string",
+					"Returns the characters typed in the latched view as UTF-8: in the fixed step (OnFixedUpdate, tasks, physics and UI callbacks) "
+					"the tick's committed characters, in the frame phase (OnUpdate, OnLateUpdate) those of every tick since the previous frame; "
+					"empty when none were typed.",
+					read);
 			return {};
 		}
 

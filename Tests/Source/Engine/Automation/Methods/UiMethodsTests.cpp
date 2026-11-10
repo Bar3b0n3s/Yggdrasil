@@ -330,7 +330,7 @@ namespace Engine {
 		}
 
 		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 53; stream T): a text input in ui.tree.
-		TEST_CASE("UiMethods: ui.tree reports a text input as TextInput with its text" * doctest::skip(true))
+		TEST_CASE("UiMethods: ui.tree reports a text input as TextInput with its text")
 		{
 			Test::AutomationFixture setup("UiTreeTextInput");
 			REQUIRE(setup.Call("edit.batch", ParseUiMethodJson(R"({"label":"Ui","ops":[
@@ -351,7 +351,7 @@ namespace Engine {
 		}
 
 		// C22.3 (decision 53; stream W): a World canvas in ui.tree, in its own pixels, whatever the scene resolution.
-		TEST_CASE("UiMethods: ui.tree reports a World canvas and its elements in the canvas's own pixels" * doctest::skip(true))
+		TEST_CASE("UiMethods: ui.tree reports a World canvas and its elements in the canvas's own pixels")
 		{
 			Test::AutomationFixture setup("UiTreeWorld");
 			REQUIRE(setup.Call("edit.batch", ParseUiMethodJson(R"({"label":"Ui","ops":[

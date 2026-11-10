@@ -62,8 +62,7 @@ namespace Engine {
 			CHECK_FALSE(caret->GetMeta().Max.has_value());
 		}
 
-		TEST_CASE("UiTextInput: typed characters insert at the caret up to MaxLength, and the editing keys remove and move by codepoint"
-			* doctest::skip(true))
+		TEST_CASE("UiTextInput: typed characters insert at the caret up to MaxLength, and the editing keys remove and move by codepoint")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();

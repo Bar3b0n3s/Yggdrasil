@@ -684,8 +684,8 @@ The files the editor imports from `Assets/`, by importer and extension (§7.4). 
 | Audio | `.wav` | AudioClip | 1 | `AudioImportSettings` | yes |
 | Environment | `.exr` | Environment | 1 | `EnvironmentImportSettings` | no |
 | Environment | `.hdr` | Environment | 1 | `EnvironmentImportSettings` | yes |
-| Font | `.otf` | Font | 4 | `FontImportSettings` | yes |
-| Font | `.ttf` | Font | 4 | `FontImportSettings` | yes |
+| Font | `.otf` | Font | 5 | `FontImportSettings` | yes |
+| Font | `.ttf` | Font | 5 | `FontImportSettings` | yes |
 | Gltf | `.glb` | Prefab | 1 | `GltfImportSettings` | yes |
 | Gltf | `.gltf` | Prefab | 1 | `GltfImportSettings` | yes |
 | Material | `.material` | Material | 1 | none | yes |

@@ -1654,8 +1654,9 @@ end
 		}
 
 		// M22 C22.2 (Docs/Decisions/0033-m22-contract.md decision 35; stream B, the review's m9): a widget part (a UiToggle's
-		// Graphic, a UiSlider's Fill or Handle, a UiScrollView's Content) that is not a UI element below its widget in the
-		// same canvas is named once, at its widget's entity, component and field; valid parts and null parts stay quiet.
+		// Graphic, a UiSlider's Fill or Handle, a UiScrollView's Content, and C22.3's UiTextInput TextElement and Placeholder,
+		// decision 53) that is not a UI element below its widget in the same canvas is named once, at its widget's entity,
+		// component and field; valid parts and null parts stay quiet.
 		TEST_CASE("ProjectValidator: UI_WIDGET_PART_INVALID names each widget part that is not an element below its widget and stays quiet for valid parts")
 		{
 			Test::EditorTestFixture fixture("ValidatorUiParts");
@@ -1708,6 +1709,16 @@ end
 				addWidget(list, "UiScrollView", std::format(R"({{"Content": "{}"}})", panel.GetUUID().ToString()));
 				const Entity dangling = add("Dangling", hud, "UiRect", "{}");
 				addWidget(dangling, "UiToggle", R"({"Graphic": "7e57000000000123"})");
+				// C22.3. Faulty: a text input whose TextElement is in another canvas and whose Placeholder is the input itself.
+				// Quiet: a text input whose two parts are its children.
+				const Entity strayInput = add("Field", hud, "UiRect", "{}");
+				addWidget(strayInput, "UiTextInput",
+					std::format(R"({{"TextElement": "{}", "Placeholder": "{}"}})", elsewhere.GetUUID().ToString(), strayInput.GetUUID().ToString()));
+				const Entity validInput = add("Name", hud, "UiRect", "{}");
+				const Entity shown = add("Shown", validInput, "UiRect", "{}");
+				const Entity hint = add("Hint", validInput, "UiRect", "{}");
+				addWidget(validInput, "UiTextInput",
+					std::format(R"({{"TextElement": "{}", "Placeholder": "{}"}})", shown.GetUUID().ToString(), hint.GetUUID().ToString()));
 				REQUIRE(edit.Commit().has_value());
 			}
 
@@ -1730,6 +1741,8 @@ end
 				std::format("{} UiSlider.Fill", scene.FindEntityByPath("/Hud/Panel/Slider").GetUUID().ToString()),
 				std::format("{} UiSlider.Handle", scene.FindEntityByPath("/Hud/Panel/Slider").GetUUID().ToString()),
 				std::format("{} UiScrollView.Content", scene.FindEntityByPath("/Hud/List").GetUUID().ToString()),
+				std::format("{} UiTextInput.TextElement", scene.FindEntityByPath("/Hud/Field").GetUUID().ToString()),
+				std::format("{} UiTextInput.Placeholder", scene.FindEntityByPath("/Hud/Field").GetUUID().ToString()),
 			};
 			std::ranges::sort(expected);
 			CHECK(found == expected);

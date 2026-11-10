@@ -170,7 +170,8 @@ namespace Engine {
 	// Production code installs none. Simulate mode skips the script and audio
 	// phases (StartFlush, UiEvents, FixedUpdate, Tasks, FrameStartFlush, Update, LateUpdate, AudioUpdate) entirely, so they are
 	// not reported there. NativeStep (M19) runs, and is reported, only in Play mode with a native module. UiLayout and
-	// FrameUiLayout (M22), and UiInput (M22 C22.2), run, and are reported, in both modes, with or without a canvas.
+	// FrameUiLayout (M22), UiInput (M22 C22.2) and TextLatch (M22 C22.3), run, and are reported, in both modes, with or without
+	// a canvas.
 	class IPlaySessionObserver
 	{
 	public:

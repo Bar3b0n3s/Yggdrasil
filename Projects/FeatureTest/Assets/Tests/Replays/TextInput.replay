@@ -1,0 +1,393 @@
+{
+	"Format": "Replay",
+	"Version": 3,
+	"Scene": {
+		"Handle": "c6f4ffa9824c511d",
+		"Path": "Assets/Scenes/Components/UiTextInput.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.1.0",
+	"Config": "Editor",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "303569402aae43c2",
+				"Path": "/Camera",
+				"Hash": "6533f19b2759b425",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Camera": "a94fe4dc954700ed"
+				}
+			},
+			{
+				"Id": "426c26511a474ed0",
+				"Path": "/Form/Log/Lines",
+				"Hash": "5b8aeb08b98b21f1",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "b065db93ad1ebec2",
+					"UiText": "483371900063ae2b"
+				}
+			},
+			{
+				"Id": "4c70f2f26a658427",
+				"Path": "/Form/Title",
+				"Hash": "336f30d539083bfe",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "851f9c753bbb5876",
+					"UiText": "585e568b98e58ecf"
+				}
+			},
+			{
+				"Id": "4d19697cd258573a",
+				"Path": "/Form/Locked",
+				"Hash": "b5aee0ddf64833a6",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "e7391321d7c7f686",
+					"UiImage": "0103a2e56dc8fa72",
+					"UiTextInput": "85579476f55921ed"
+				}
+			},
+			{
+				"Id": "620eee0d4ac8ab6f",
+				"Path": "/Form/Greeting/GreetingText",
+				"Hash": "16a9f1f463ac6dc3",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "abe59fa24de4932f",
+					"UiText": "c7ceb56b0fb2ee82"
+				}
+			},
+			{
+				"Id": "83eb474e59494f34",
+				"Path": "/Form/Send/SendLabel",
+				"Hash": "3d3432cf073ae9e0",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "03793cb79c1eb999",
+					"UiText": "41bb173807fc1f2a"
+				}
+			},
+			{
+				"Id": "95cf12eacb8d6c2a",
+				"Path": "/Form/Code/CodePlaceholder",
+				"Hash": "5a3193951ee00b42",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "abe59fa24de4932f",
+					"UiText": "cb450fcd1d20db15"
+				}
+			},
+			{
+				"Id": "9af59e591b30f4f9",
+				"Path": "/Form/Send",
+				"Hash": "dcd5e7880067ff84",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "ed81ff5a15ec86b4",
+					"UiImage": "74126dfe5f85f24d",
+					"UiButton": "2a3523b8a133ae8f"
+				}
+			},
+			{
+				"Id": "afd9f6937b8f4677",
+				"Path": "/Form/Name/NamePlaceholder",
+				"Hash": "110397d8db2407ec",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "abe59fa24de4932f",
+					"UiText": "2d1f6f6bc4d3f96f"
+				}
+			},
+			{
+				"Id": "b0bd8e3a39b9cd02",
+				"Path": "/Form",
+				"Hash": "4286374be1e900e2",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Script": "0c5f0130d5ce0737",
+					"UiCanvas": "a5af45cc50283b9c"
+				}
+			},
+			{
+				"Id": "b352828dcad7a8f4",
+				"Path": "/Form/Greeting",
+				"Hash": "69860129f75cdd53",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "064e25e97b2c46ad",
+					"UiImage": "9ed88827bf9781ff",
+					"UiTextInput": "5b287a733864a8ca"
+				}
+			},
+			{
+				"Id": "b723719075de267f",
+				"Path": "/Form/Code/CodeText",
+				"Hash": "4942d1227d63001c",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "abe59fa24de4932f",
+					"UiText": "c7ceb56b0fb2ee82"
+				}
+			},
+			{
+				"Id": "bef083a6022b8194",
+				"Path": "/Form/Locked/LockedText",
+				"Hash": "65353e63dc5b3662",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "abe59fa24de4932f",
+					"UiText": "c7ceb56b0fb2ee82"
+				}
+			},
+			{
+				"Id": "cbb3ef6e09847e33",
+				"Path": "/Form/Code",
+				"Hash": "ab7519c527e234da",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "393b4f28ece04478",
+					"UiImage": "9ed88827bf9781ff",
+					"UiTextInput": "a49924feb4e3c636"
+				}
+			},
+			{
+				"Id": "e3276476a36825d7",
+				"Path": "/Form/Name/NameText",
+				"Hash": "b60365175edbe29d",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "abe59fa24de4932f",
+					"UiText": "c7ceb56b0fb2ee82"
+				}
+			},
+			{
+				"Id": "e510d28c17e7ebe7",
+				"Path": "/Form/Log",
+				"Hash": "ee780bbb0207f164",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "ec652f154449a1db",
+					"UiImage": "87c81a59319412fd",
+					"UiScrollView": "637edf6f21c83697"
+				}
+			},
+			{
+				"Id": "f0261177d3952b64",
+				"Path": "/Form/Greeting/GreetingPlaceholder",
+				"Hash": "38fe5c4ae083b913",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "abe59fa24de4932f",
+					"UiText": "5d6a5c9b223b6361"
+				}
+			},
+			{
+				"Id": "fba79b6de39c5de2",
+				"Path": "/Form/Name",
+				"Hash": "6a331db21c0a5f9b",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "8f9c8c6de1d6a434",
+					"UiImage": "9ed88827bf9781ff",
+					"UiTextInput": "3a181d56b1843d2b"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "3b167ff11ec44c82",
+				"Path": "Assets/Scripts/UiTextInput/TextRecorder.luau",
+				"Type": "Script",
+				"Hash": "5d974bae4351b1e6"
+			}
+		]
+	},
+	"Events": [
+		{
+			"Tick": 1,
+			"Type": "MouseButton",
+			"State": "Down",
+			"Button": "Left",
+			"Position": [240, 124]
+		},
+		{
+			"Tick": 2,
+			"Type": "MouseButton",
+			"State": "Up",
+			"Button": "Left",
+			"Position": [240, 124]
+		},
+		{
+			"Tick": 3,
+			"Type": "Text",
+			"Text": "Grace"
+		},
+		{
+			"Tick": 5,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Home"
+		},
+		{
+			"Tick": 6,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Home"
+		},
+		{
+			"Tick": 7,
+			"Type": "Text",
+			"Text": "Ms "
+		},
+		{
+			"Tick": 9,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "End"
+		},
+		{
+			"Tick": 10,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "End"
+		},
+		{
+			"Tick": 11,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Backspace"
+		},
+		{
+			"Tick": 12,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Backspace"
+		},
+		{
+			"Tick": 13,
+			"Type": "Text",
+			"Text": "e Hopper"
+		},
+		{
+			"Tick": 15,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Enter"
+		},
+		{
+			"Tick": 16,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Enter"
+		},
+		{
+			"Tick": 17,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Tab"
+		},
+		{
+			"Tick": 18,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Tab"
+		},
+		{
+			"Tick": 19,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "End"
+		},
+		{
+			"Tick": 20,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "End"
+		},
+		{
+			"Tick": 21,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Left"
+		},
+		{
+			"Tick": 22,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Left"
+		},
+		{
+			"Tick": 23,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Left"
+		},
+		{
+			"Tick": 24,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Left"
+		},
+		{
+			"Tick": 25,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Delete"
+		},
+		{
+			"Tick": 26,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Delete"
+		},
+		{
+			"Tick": 27,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Delete"
+		},
+		{
+			"Tick": 28,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Delete"
+		},
+		{
+			"Tick": 29,
+			"Type": "Text",
+			"Text": "hello"
+		},
+		{
+			"Tick": 31,
+			"Type": "GamepadButton",
+			"State": "Down",
+			"Button": "South",
+			"Gamepad": 0
+		},
+		{
+			"Tick": 32,
+			"Type": "GamepadButton",
+			"State": "Up",
+			"Button": "South",
+			"Gamepad": 0
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 17,
+			"Luau": "local form = Scene.FindByName(\"Form\"):GetScript()\nreturn Scene.FindByName(\"Name\").UiTextInput.Text == \"Ms Grace Hop\" and form.Submits.Name == \"Ms Grace Hop\" and Ui.GetFocus() == Scene.FindByName(\"Name\")"
+		},
+		{
+			"Tick": 33,
+			"Luau": "local form = Scene.FindByName(\"Form\"):GetScript()\nlocal greeting = Scene.FindByName(\"Greeting\").UiTextInput\nreturn greeting.Text == \"Zoë says hello\" and greeting.Caret == 14 and form.Submits.Greeting == \"Zoë says hello\" and Ui.GetFocus() == Scene.FindByName(\"Greeting\") and Scene.FindByName(\"Name\").UiTextInput.Text == \"Ms Grace Hop\""
+		}
+	],
+	"Checkpoints": [],
+	"FinalTick": 33,
+	"FinalStateHash": "76aecb0dd6e1153a"
+}

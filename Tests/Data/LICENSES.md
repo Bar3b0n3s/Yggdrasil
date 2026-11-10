@@ -10,10 +10,12 @@ committed: its source, version or commit, license, checksum and the files it cov
 `Projects/FeatureTest/Scaffold/Sources/` holds byte-identical copies of some of these fixtures, which the FeatureTest
 scaffolds import into the project's `Assets/` (Docs/Decisions/0022-m14-contract.md decision 16), so `Assets/` holds a
 second byte-identical copy of each imported file. Each copy, in either place, is covered by the section of its fixture
-here. The third-party copies are those of the pinned fixtures below:
-`Projects/FeatureTest/Assets/Formats/Fonts/Inter-Regular.otf` (SIL OFL 1.1, whose full text the OpenType font fixture
-section holds), `Projects/FeatureTest/Assets/Formats/Audio/Tone.mp3` and `Projects/FeatureTest/Assets/Formats/Audio/Tone.ogg`
-(public domain), with their `Scaffold/Sources/` counterparts; every other copy is first-party.
+here. The third-party copies are those of the pinned fixtures below: every copy of the OpenType font fixture
+(`Inter-Regular.otf`) and of the Noto font fixtures (SIL OFL 1.1, whose full texts their sections hold) in
+`Scaffold/Sources/Fonts/` or imported from there into `Assets/` (today `Assets/Formats/Fonts/`, `Assets/Ui/Fonts/` and
+`Assets/Fonts/GoldenUiScripts/`), and `Projects/FeatureTest/Assets/Formats/Audio/Tone.mp3` and
+`Projects/FeatureTest/Assets/Formats/Audio/Tone.ogg` (public domain) with their `Scaffold/Sources/Audio/` counterparts;
+every other copy is first-party.
 
 ## Pinned third-party fixtures (`Scripts/FetchAssets.py fixture`)
 
@@ -28,6 +30,9 @@ one reviewed change. The sections below give each file's origin and license.
 | `Tests/Data/Assets/Audio/Tone.mp3` | Wikimedia Commons `File:Sputnik - Beep.mp3` (NASA) | Public domain | 70272 | `84ab44b58396913c75ba0d8f5c29b18bca382269a10527bcf90a39c5c1460215` |
 | `Tests/Data/Assets/Audio/Tone.ogg` | Wikimedia Commons `File:1000Hz.ogg` | Public domain | 5490 | `f6d213190ddd88313ea689fadcbce10083932fa2779243ca28d0bafb30d3ba8f` |
 | `Tests/Data/Assets/Fonts/Inter-Regular.otf` | Inter 4.1, Regular (`extras/otf/Inter-Regular.otf` of the release archive) | SIL OFL 1.1 | 609600 | `d4f2b9e148059a15f014cb0f0b8fea8cd11bfa447dd483bedf1b0adc0e2ba799` |
+| `Tests/Data/Assets/Fonts/NotoSansArabic-Regular.ttf` | Noto Sans Arabic 2.013, Regular (`NotoSansArabic/unhinted/ttf/NotoSansArabic-Regular.ttf` of the release archive) | SIL OFL 1.1 | 142140 | `bd86ca02f087d7f3c3788ba458fb6b73744c7639ed276b8d870dba6def6c40d0` |
+| `Tests/Data/Assets/Fonts/NotoSansHebrew-Regular.ttf` | Noto Sans Hebrew 3.001, Regular (`NotoSansHebrew/unhinted/ttf/NotoSansHebrew-Regular.ttf` of the release archive) | SIL OFL 1.1 | 16836 | `04272f5600d0ec816d31d0df73b23aa8d3501ea359ebe820da31c11ffcf00853` |
+| `Tests/Data/Assets/Fonts/NotoSansJP-Regular.otf` | Noto Sans CJK 2.004, Japanese subset, Regular (`Sans/SubsetOTF/JP/NotoSansJP-Regular.otf` at tag `Sans2.004` of noto-cjk) | SIL OFL 1.1 | 4533028 | `dff723ba59d57d136764a04b9b2d03205544f7cd785a711442d6d2d085ac5073` |
 
 ## M13 Luau fixtures (`TypeChecker/`)
 
@@ -222,6 +227,345 @@ must be distributed entirely under this license, and must not be
 distributed under any other license. The requirement for fonts to
 remain under this license does not apply to any document created
 using the Font Software.
+
+TERMINATION
+This license becomes null and void if any of the above conditions are
+not met.
+
+DISCLAIMER
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+OTHER DEALINGS IN THE FONT SOFTWARE.
+```
+
+## Noto Sans Arabic font fixture (`Assets/Fonts/NotoSansArabic-Regular.ttf`)
+
+| | |
+|---|---|
+| Files | `Tests/Data/Assets/Fonts/NotoSansArabic-Regular.ttf` |
+| Origin | The member `NotoSansArabic/unhinted/ttf/NotoSansArabic-Regular.ttf` of the release archive `https://github.com/notofonts/arabic/releases/download/NotoSansArabic-v2.013/NotoSansArabic-v2.013.zip` (18777381 bytes, SHA-256 `1301aceaea84c501cf2e6dcfb3182e2328c8eae5725817fcb239672bda7154f1`), release `NotoSansArabic-v2.013` (2025-10-15) of https://github.com/notofonts/arabic, byte-identical |
+| Version | Noto Sans Arabic 2.013 |
+| License | SIL Open Font License 1.1 (the text below) |
+| SHA-256 | `bd86ca02f087d7f3c3788ba458fb6b73744c7639ed276b8d870dba6def6c40d0` (142,140 bytes) |
+
+A TrueType font of the Arabic script whose GSUB substitutes each letter's contextual forms (isolated, initial, medial
+and final) and whose GPOS places its marks: the fallback chain's and the shaper's Arabic fixture
+(Docs/Decisions/0033-m22-contract.md decisions 42 and 43). Condition 2 of the license requires that every copy carries
+the copyright notice and the license: this section is that text, copied verbatim from `OFL.txt` of the archive (SHA-256
+`a7a5a25eb188bf1cd96982030d53e23c33485c69b1044a562254226857ee13af`, 4,382 bytes), and the font's own `name` table
+carries the notice and the license reference in every copy, including the FeatureTest project's.
+
+```text
+Copyright 2022 The Noto Project Authors (https://github.com/notofonts/arabic)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+This license is copied below, and is also available with a FAQ at:
+https://openfontlicense.org
+
+
+-----------------------------------------------------------
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+-----------------------------------------------------------
+
+PREAMBLE
+The goals of the Open Font License (OFL) are to stimulate worldwide
+development of collaborative font projects, to support the font creation
+efforts of academic and linguistic communities, and to provide a free and
+open framework in which fonts may be shared and improved in partnership
+with others.
+
+The OFL allows the licensed fonts to be used, studied, modified and
+redistributed freely as long as they are not sold by themselves. The
+fonts, including any derivative works, can be bundled, embedded, 
+redistributed and/or sold with any software provided that any reserved
+names are not used by derivative works. The fonts and derivatives,
+however, cannot be released under any other type of license. The
+requirement for fonts to remain under this license does not apply
+to any document created using the fonts or their derivatives.
+
+DEFINITIONS
+"Font Software" refers to the set of files released by the Copyright
+Holder(s) under this license and clearly marked as such. This may
+include source files, build scripts and documentation.
+
+"Reserved Font Name" refers to any names specified as such after the
+copyright statement(s).
+
+"Original Version" refers to the collection of Font Software components as
+distributed by the Copyright Holder(s).
+
+"Modified Version" refers to any derivative made by adding to, deleting,
+or substituting -- in part or in whole -- any of the components of the
+Original Version, by changing formats or by porting the Font Software to a
+new environment.
+
+"Author" refers to any designer, engineer, programmer, technical
+writer or other person who contributed to the Font Software.
+
+PERMISSION & CONDITIONS
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the Font Software, to use, study, copy, merge, embed, modify,
+redistribute, and sell modified and unmodified copies of the Font
+Software, subject to the following conditions:
+
+1) Neither the Font Software nor any of its individual components,
+in Original or Modified Versions, may be sold by itself.
+
+2) Original or Modified Versions of the Font Software may be bundled,
+redistributed and/or sold with any software, provided that each copy
+contains the above copyright notice and this license. These can be
+included either as stand-alone text files, human-readable headers or
+in the appropriate machine-readable metadata fields within text or
+binary files as long as those fields can be easily viewed by the user.
+
+3) No Modified Version of the Font Software may use the Reserved Font
+Name(s) unless explicit written permission is granted by the corresponding
+Copyright Holder. This restriction only applies to the primary font name as
+presented to the users.
+
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+Software shall not be used to promote, endorse or advertise any
+Modified Version, except to acknowledge the contribution(s) of the
+Copyright Holder(s) and the Author(s) or with their explicit written
+permission.
+
+5) The Font Software, modified or unmodified, in part or in whole,
+must be distributed entirely under this license, and must not be
+distributed under any other license. The requirement for fonts to
+remain under this license does not apply to any document created
+using the Font Software.
+
+TERMINATION
+This license becomes null and void if any of the above conditions are
+not met.
+
+DISCLAIMER
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+OTHER DEALINGS IN THE FONT SOFTWARE.
+```
+
+## Noto Sans Hebrew font fixture (`Assets/Fonts/NotoSansHebrew-Regular.ttf`)
+
+| | |
+|---|---|
+| Files | `Tests/Data/Assets/Fonts/NotoSansHebrew-Regular.ttf` |
+| Origin | The member `NotoSansHebrew/unhinted/ttf/NotoSansHebrew-Regular.ttf` of the release archive `https://github.com/notofonts/hebrew/releases/download/NotoSansHebrew-v3.001/NotoSansHebrew-v3.001.zip` (3734185 bytes, SHA-256 `df0a71814b4e63644cf40fcc4529111b61266b7a2dafbe95068b29a7520cc3cb`), release `NotoSansHebrew-v3.001` (2024-06-03) of https://github.com/notofonts/hebrew, byte-identical |
+| Version | Noto Sans Hebrew 3.001 |
+| License | SIL Open Font License 1.1 (the text below) |
+| SHA-256 | `04272f5600d0ec816d31d0df73b23aa8d3501ea359ebe820da31c11ffcf00853` (16,836 bytes) |
+
+A TrueType font of the Hebrew script, a right-to-left script without contextual forms: the fallback chain's and the
+bidirectional algorithm's Hebrew fixture (Docs/Decisions/0033-m22-contract.md decisions 42 and 43). Condition 2 of the
+license requires that every copy carries the copyright notice and the license: this section is that text, copied
+verbatim from `OFL.txt` of the archive (SHA-256 `9b9fe028b5ba74d231659a1bbaf0ed09b11e759d1ca6a070999e16d151616b47`,
+4,382 bytes), and the font's own `name` table carries the notice and the license reference in every copy, including the
+FeatureTest project's.
+
+```text
+Copyright 2022 The Noto Project Authors (https://github.com/notofonts/hebrew)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+This license is copied below, and is also available with a FAQ at:
+https://scripts.sil.org/OFL
+
+
+-----------------------------------------------------------
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+-----------------------------------------------------------
+
+PREAMBLE
+The goals of the Open Font License (OFL) are to stimulate worldwide
+development of collaborative font projects, to support the font creation
+efforts of academic and linguistic communities, and to provide a free and
+open framework in which fonts may be shared and improved in partnership
+with others.
+
+The OFL allows the licensed fonts to be used, studied, modified and
+redistributed freely as long as they are not sold by themselves. The
+fonts, including any derivative works, can be bundled, embedded, 
+redistributed and/or sold with any software provided that any reserved
+names are not used by derivative works. The fonts and derivatives,
+however, cannot be released under any other type of license. The
+requirement for fonts to remain under this license does not apply
+to any document created using the fonts or their derivatives.
+
+DEFINITIONS
+"Font Software" refers to the set of files released by the Copyright
+Holder(s) under this license and clearly marked as such. This may
+include source files, build scripts and documentation.
+
+"Reserved Font Name" refers to any names specified as such after the
+copyright statement(s).
+
+"Original Version" refers to the collection of Font Software components as
+distributed by the Copyright Holder(s).
+
+"Modified Version" refers to any derivative made by adding to, deleting,
+or substituting -- in part or in whole -- any of the components of the
+Original Version, by changing formats or by porting the Font Software to a
+new environment.
+
+"Author" refers to any designer, engineer, programmer, technical
+writer or other person who contributed to the Font Software.
+
+PERMISSION & CONDITIONS
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the Font Software, to use, study, copy, merge, embed, modify,
+redistribute, and sell modified and unmodified copies of the Font
+Software, subject to the following conditions:
+
+1) Neither the Font Software nor any of its individual components,
+in Original or Modified Versions, may be sold by itself.
+
+2) Original or Modified Versions of the Font Software may be bundled,
+redistributed and/or sold with any software, provided that each copy
+contains the above copyright notice and this license. These can be
+included either as stand-alone text files, human-readable headers or
+in the appropriate machine-readable metadata fields within text or
+binary files as long as those fields can be easily viewed by the user.
+
+3) No Modified Version of the Font Software may use the Reserved Font
+Name(s) unless explicit written permission is granted by the corresponding
+Copyright Holder. This restriction only applies to the primary font name as
+presented to the users.
+
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+Software shall not be used to promote, endorse or advertise any
+Modified Version, except to acknowledge the contribution(s) of the
+Copyright Holder(s) and the Author(s) or with their explicit written
+permission.
+
+5) The Font Software, modified or unmodified, in part or in whole,
+must be distributed entirely under this license, and must not be
+distributed under any other license. The requirement for fonts to
+remain under this license does not apply to any document created
+using the Font Software.
+
+TERMINATION
+This license becomes null and void if any of the above conditions are
+not met.
+
+DISCLAIMER
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+OTHER DEALINGS IN THE FONT SOFTWARE.
+```
+
+## Noto Sans CJK JP font fixture (`Assets/Fonts/NotoSansJP-Regular.otf`)
+
+| | |
+|---|---|
+| Files | `Tests/Data/Assets/Fonts/NotoSansJP-Regular.otf` |
+| Origin | The file `Sans/SubsetOTF/JP/NotoSansJP-Regular.otf` of https://github.com/notofonts/noto-cjk at tag `Sans2.004` (commit `523d033d6cb47f4a80c58a35753646f5c3608a78`; its git blob `4af556abb9cc42e585aab777b01857246a110746`), downloaded from `https://raw.githubusercontent.com/notofonts/noto-cjk/Sans2.004/Sans/SubsetOTF/JP/NotoSansJP-Regular.otf`, byte-identical |
+| Version | Noto Sans CJK 2.004, the Japanese region subset (the smallest of the five region subsets) |
+| License | SIL Open Font License 1.1 (the text below) |
+| SHA-256 | `dff723ba59d57d136764a04b9b2d03205544f7cd785a711442d6d2d085ac5073` (4,533,028 bytes) |
+
+A CID-keyed OpenType font with CFF outlines covering Japanese kana and ideographs: the fallback chain's CJK fixture,
+whose texts bake only the codepoints their `Ranges` name (Docs/Decisions/0033-m22-contract.md decision 42). Condition 2
+of the license requires that every copy carries the copyright notice and the license: this section is that text, copied
+verbatim from `LICENSE` of the repository at the same tag
+(`https://raw.githubusercontent.com/notofonts/noto-cjk/Sans2.004/LICENSE`, SHA-256
+`6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2`, 4,301 bytes), and the font's own `name` table
+carries the notice and the license reference in every copy, including the FeatureTest project's.
+
+```text
+This Font Software is licensed under the SIL Open Font License,
+Version 1.1.
+
+This license is copied below, and is also available with a FAQ at:
+http://scripts.sil.org/OFL
+
+-----------------------------------------------------------
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+-----------------------------------------------------------
+
+PREAMBLE
+The goals of the Open Font License (OFL) are to stimulate worldwide
+development of collaborative font projects, to support the font
+creation efforts of academic and linguistic communities, and to
+provide a free and open framework in which fonts may be shared and
+improved in partnership with others.
+
+The OFL allows the licensed fonts to be used, studied, modified and
+redistributed freely as long as they are not sold by themselves. The
+fonts, including any derivative works, can be bundled, embedded,
+redistributed and/or sold with any software provided that any reserved
+names are not used by derivative works. The fonts and derivatives,
+however, cannot be released under any other type of license. The
+requirement for fonts to remain under this license does not apply to
+any document created using the fonts or their derivatives.
+
+DEFINITIONS
+"Font Software" refers to the set of files released by the Copyright
+Holder(s) under this license and clearly marked as such. This may
+include source files, build scripts and documentation.
+
+"Reserved Font Name" refers to any names specified as such after the
+copyright statement(s).
+
+"Original Version" refers to the collection of Font Software
+components as distributed by the Copyright Holder(s).
+
+"Modified Version" refers to any derivative made by adding to,
+deleting, or substituting -- in part or in whole -- any of the
+components of the Original Version, by changing formats or by porting
+the Font Software to a new environment.
+
+"Author" refers to any designer, engineer, programmer, technical
+writer or other person who contributed to the Font Software.
+
+PERMISSION & CONDITIONS
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the Font Software, to use, study, copy, merge, embed,
+modify, redistribute, and sell modified and unmodified copies of the
+Font Software, subject to the following conditions:
+
+1) Neither the Font Software nor any of its individual components, in
+Original or Modified Versions, may be sold by itself.
+
+2) Original or Modified Versions of the Font Software may be bundled,
+redistributed and/or sold with any software, provided that each copy
+contains the above copyright notice and this license. These can be
+included either as stand-alone text files, human-readable headers or
+in the appropriate machine-readable metadata fields within text or
+binary files as long as those fields can be easily viewed by the user.
+
+3) No Modified Version of the Font Software may use the Reserved Font
+Name(s) unless explicit written permission is granted by the
+corresponding Copyright Holder. This restriction only applies to the
+primary font name as presented to the users.
+
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+Software shall not be used to promote, endorse or advertise any
+Modified Version, except to acknowledge the contribution(s) of the
+Copyright Holder(s) and the Author(s) or with their explicit written
+permission.
+
+5) The Font Software, modified or unmodified, in part or in whole,
+must be distributed entirely under this license, and must not be
+distributed under any other license. The requirement for fonts to
+remain under this license does not apply to any document created using
+the Font Software.
 
 TERMINATION
 This license becomes null and void if any of the above conditions are

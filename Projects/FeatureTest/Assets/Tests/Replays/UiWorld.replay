@@ -1,0 +1,207 @@
+{
+	"Format": "Replay",
+	"Version": 3,
+	"Scene": {
+		"Handle": "127dd341463dba20",
+		"Path": "Assets/Scenes/Components/UiWorld.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.1.0",
+	"Config": "Editor",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "0951320c86ebe0ec",
+				"Path": "/Hud",
+				"Hash": "10648349b147acc2",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiCanvas": "a5af45cc50283b9c"
+				}
+			},
+			{
+				"Id": "0f646c7b9027c566",
+				"Path": "/Hud/HudLabel",
+				"Hash": "922798b261813937",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "c588ee6a7f7a57a8",
+					"UiText": "ebb5c45874bb9716"
+				}
+			},
+			{
+				"Id": "29a3e52dbc3b11a3",
+				"Path": "/Board/Press",
+				"Hash": "aa1c8bfbaf36a608",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "be680e4638ba6d09",
+					"UiImage": "74126dfe5f85f24d",
+					"UiButton": "2a3523b8a133ae8f"
+				}
+			},
+			{
+				"Id": "5c7aee6e0f6a0b72",
+				"Path": "/Camera",
+				"Hash": "2fcf17a7f1f5bba9",
+				"Components": {
+					"Transform": "41d5331bf5f4b7b3",
+					"Camera": "a4d0f97bf7cadaec"
+				}
+			},
+			{
+				"Id": "82410b221db78af7",
+				"Path": "/Board",
+				"Hash": "43a6bfe3147d8f6b",
+				"Components": {
+					"Transform": "c9219d0b6a7f8e14",
+					"Script": "8f36c2a8d901f49e",
+					"UiCanvas": "a38e3a2f87220bfb"
+				}
+			},
+			{
+				"Id": "92da7f17455a93cb",
+				"Path": "/Board/Level/LevelHandle",
+				"Hash": "6a1e32da323def56",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "f0861f9976b73d7e",
+					"UiImage": "4fb7a4ab08d0e632"
+				}
+			},
+			{
+				"Id": "9d8873be788579a9",
+				"Path": "/Board/Title",
+				"Hash": "5c4bc7136fd3e549",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "ca7a3f4e7086f3d3",
+					"UiText": "f6d0c6f4a48f217e"
+				}
+			},
+			{
+				"Id": "a67836a0553733ea",
+				"Path": "/Board/Panel",
+				"Hash": "048f777b214f4725",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "03793cb79c1eb999",
+					"UiImage": "4fa0d3eb8ccd87af"
+				}
+			},
+			{
+				"Id": "a89b6cbb27ba6d6b",
+				"Path": "/Board/Press/PressLabel",
+				"Hash": "95412c095d290b39",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "03793cb79c1eb999",
+					"UiText": "4bc329c295b23f9c"
+				}
+			},
+			{
+				"Id": "bfdf11cec8ec5c4a",
+				"Path": "/Board/Level",
+				"Hash": "866b383633a7125c",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "577f1ba981f387be",
+					"UiImage": "868e800b17b4df3f",
+					"UiSlider": "9c2336bdeebf55fb"
+				}
+			},
+			{
+				"Id": "fb2462d3282069e5",
+				"Path": "/Board/Level/LevelFill",
+				"Hash": "2c1aa18d25e01f97",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "03793cb79c1eb999",
+					"UiImage": "78e9702b6cb56f1b"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "dc715c98ce1771ae",
+				"Path": "Assets/Scripts/UiWorld/WorldRecorder.luau",
+				"Type": "Script",
+				"Hash": "507bbe1b757c3eed"
+			}
+		]
+	},
+	"Events": [
+		{
+			"Tick": 1,
+			"Type": "MouseMove",
+			"Position": [539.12976, 270.7736]
+		},
+		{
+			"Tick": 3,
+			"Type": "MouseButton",
+			"State": "Down",
+			"Button": "Left",
+			"Position": [539.12976, 270.7736]
+		},
+		{
+			"Tick": 4,
+			"Type": "MouseButton",
+			"State": "Up",
+			"Button": "Left",
+			"Position": [539.12976, 270.7736]
+		},
+		{
+			"Tick": 6,
+			"Type": "MouseButton",
+			"State": "Down",
+			"Button": "Left",
+			"Position": [502.26712, 360.66342]
+		},
+		{
+			"Tick": 7,
+			"Type": "MouseMove",
+			"Position": [549.6761, 362.89883]
+		},
+		{
+			"Tick": 8,
+			"Type": "MouseMove",
+			"Position": [600.373, 365.2893]
+		},
+		{
+			"Tick": 9,
+			"Type": "MouseMove",
+			"Position": [654.71216, 367.8515]
+		},
+		{
+			"Tick": 10,
+			"Type": "MouseMove",
+			"Position": [713.1008, 370.6046]
+		},
+		{
+			"Tick": 11,
+			"Type": "MouseMove",
+			"Position": [754.50555, 372.55692]
+		},
+		{
+			"Tick": 12,
+			"Type": "MouseButton",
+			"State": "Up",
+			"Button": "Left"
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 5,
+			"Luau": "local board = Scene.FindByName(\"Board\"):GetScript()\nreturn board.Clicks.Press == 1 and Ui.GetFocus() == Scene.FindByName(\"Press\") and Scene.FindByName(\"Level\").UiSlider.Value == 0"
+		},
+		{
+			"Tick": 14,
+			"Luau": "local board = Scene.FindByName(\"Board\"):GetScript()\nreturn Scene.FindByName(\"Level\").UiSlider.Value == 8 and board.Values.Level == 8 and board.Clicks.Press == 1 and Ui.GetPressed() == nil"
+		}
+	],
+	"Checkpoints": [],
+	"FinalTick": 14,
+	"FinalStateHash": "365eabca1abb20c0"
+}

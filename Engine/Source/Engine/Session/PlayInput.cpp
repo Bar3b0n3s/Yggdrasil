@@ -269,6 +269,12 @@ namespace Engine {
 		bool FramePreview = false;
 		std::optional<TrackedDevices> Frame{};
 		bool FrameAhead = false;
+		// M22 (C22.3, the text latch; Docs/Decisions/0033-m22-contract.md decision 46). StepText: the last LatchStepText's
+		// characters; PendingFrameText: every step text latched since the last LatchFrame, in order; FrameText: what the last
+		// LatchFrame took from it. Text events are never previewed.
+		std::string StepText{};
+		std::string PendingFrameText{};
+		std::string FrameText{};
 
 		// Applies one queued event (Tap already expanded) to the devices or the injected actions.
 		void Apply(const PlayInputEvent& event);
@@ -940,6 +946,8 @@ namespace Engine {
 			state.Devices.Input.LatchFrame();
 		}
 		state.LatchActions(InputPhase::Frame);
+		// The text latch (C22.3): the frame's text is every step text latched since the previous frame.
+		state.FrameText = std::exchange(state.PendingFrameText, std::string());
 	}
 
 	void PlayInput::SetFramePreview(bool enabled)
@@ -952,16 +960,21 @@ namespace Engine {
 		return m_State->FramePreview;
 	}
 
-	// Stubs of the M22 contract (C22.3, Docs/Decisions/0033-m22-contract.md decision 46) that stream T implements.
 	void PlayInput::LatchStepText()
 	{
-		ENGINE_CONTRACT_STUB();
+		State& state = *m_State;
+		state.StepText.clear();
+		for (const PlayInputEvent& event : state.LastApplied)
+		{
+			if (event.Type == PlayInputEventType::Text)
+				state.StepText += event.Text;
+		}
+		state.PendingFrameText += state.StepText;
 	}
 
-	std::string_view PlayInput::GetText(InputPhase /*phase*/) const
+	std::string_view PlayInput::GetText(InputPhase phase) const
 	{
-		ENGINE_CONTRACT_STUB();
-		return {};
+		return phase == InputPhase::Step ? m_State->StepText : m_State->FrameText;
 	}
 
 	uint64_t PlayInput::GetNextTick() const

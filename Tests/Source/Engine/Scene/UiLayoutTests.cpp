@@ -512,7 +512,7 @@ namespace Engine {
 		}
 
 		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 48; stream T).
-		TEST_CASE("UiLayout: a text input clips its descendants and hides its Placeholder while its Text is not empty" * doctest::skip(true))
+		TEST_CASE("UiLayout: a text input clips its descendants and hides its Placeholder while its Text is not empty")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -539,7 +539,7 @@ namespace Engine {
 		}
 
 		// C22.3 (decision 49; stream W).
-		TEST_CASE("UiLayout: a World canvas lays out over its own size and carries its world matrix" * doctest::skip(true))
+		TEST_CASE("UiLayout: a World canvas lays out over its own size and carries its world matrix")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();

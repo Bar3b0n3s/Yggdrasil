@@ -149,6 +149,38 @@
 			]
 		},
 		{
+			"File": "UiTextInput.jsonl",
+			"IdSeed": 2013,
+			"Renderer": "none"
+		},
+		{
+			"File": "UiTextInputReplay.jsonl",
+			"IdSeed": 2014,
+			"Renderer": "none"
+		},
+		{
+			"File": "UiWorld.jsonl",
+			"IdSeed": 2015,
+			"Renderer": "none"
+		},
+		{
+			"File": "UiScriptsGolden.jsonl",
+			"IdSeed": 2016,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Fonts/GoldenUiScripts",
+				"Assets/Scenes/GoldenUiScripts"
+			]
+		},
+		{
+			"File": "UiWorldGolden.jsonl",
+			"IdSeed": 2017,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Scenes/GoldenUiWorld"
+			]
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

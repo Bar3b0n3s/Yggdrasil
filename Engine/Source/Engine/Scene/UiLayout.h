@@ -76,7 +76,8 @@ namespace Engine {
 		// Its rectangle, clipped and inside the scene image (a World canvas's element: inside its canvas's rectangle, (0, 0) to
 		// SceneSize), covers a pixel, and it is not Hidden.
 		bool Visible = false;
-		// C22.2 (decision 26): inside an off toggle's Graphic subtree, so neither drawn, hit nor focusable (never Visible).
+		// C22.2 (decision 26): inside an off toggle's Graphic subtree, so neither drawn, hit nor focusable (never Visible);
+		// C22.3 (decision 48): or inside a text input's Placeholder subtree while the input's Text is not empty.
 		bool Hidden = false;
 
 		bool operator==(const UiLayoutNode&) const = default;

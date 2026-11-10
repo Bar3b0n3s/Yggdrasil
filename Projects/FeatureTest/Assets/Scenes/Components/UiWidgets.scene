@@ -77,7 +77,11 @@
 						"Focused": [1, 0.9, 0.6, 1],
 						"Disabled": [0.45, 0.45, 0.45, 0.6]
 					},
-					"DefaultFocus": "508b3258c795c2a8"
+					"DefaultFocus": "508b3258c795c2a8",
+					"RenderMode": "Screen",
+					"WorldWidth": 1024,
+					"WorldHeight": 576,
+					"PixelsPerUnit": 512
 				}
 			}
 		},

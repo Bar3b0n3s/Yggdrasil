@@ -33,9 +33,10 @@ namespace Engine {
 	namespace Utils {
 
 		constexpr std::string_view QuadProgram = "Quad";
-		// Indices of the two pipelines (QuadBatchTarget's values and GetLayoutDescriptions' order).
+		// Indices of the pipelines (QuadBatchTarget's values and GetLayoutDescriptions' order).
 		constexpr size_t QuadHdrPipeline = 0;
 		constexpr size_t QuadLdrPipeline = 1;
+		constexpr size_t QuadLdrDepthPipeline = 2; // M22 (C22.3, decision 57)
 		// The first capacity of the vertex and index buffers, in quads; it doubles until a record fits, up to
 		// QuadBatcher::MaxQuadsPerRecord.
 		constexpr uint32_t InitialQuadCapacity = 1024;
@@ -63,9 +64,30 @@ namespace Engine {
 			};
 		}
 
+		// LdrDepth shades as Ldr does (its fragment entry), only its depth state differs.
 		static std::vector<PipelineLayoutDescription> MakeQuadDescriptions()
 		{
-			return { MakeQuadDescription("QuadHdr", "PSHdr"), MakeQuadDescription("QuadLdr", "PSLdr") };
+			return { MakeQuadDescription("QuadHdr", "PSHdr"), MakeQuadDescription("QuadLdr", "PSLdr"), MakeQuadDescription("QuadLdrDepth", "PSLdr") };
+		}
+
+		// The pipeline of a target, by QuadBatchTarget's value.
+		static size_t GetQuadPipelineIndex(QuadBatchTarget target)
+		{
+			switch (target)
+			{
+				case QuadBatchTarget::Hdr:      return QuadHdrPipeline;
+				case QuadBatchTarget::Ldr:      return QuadLdrPipeline;
+				case QuadBatchTarget::LdrDepth: return QuadLdrDepthPipeline;
+			}
+			return QuadLdrPipeline;
+		}
+
+		// The target of a pipeline index (GetQuadPipelineIndex's inverse).
+		static QuadBatchTarget GetQuadPipelineTarget(size_t index)
+		{
+			if (index == QuadHdrPipeline)
+				return QuadBatchTarget::Hdr;
+			return index == QuadLdrDepthPipeline ? QuadBatchTarget::LdrDepth : QuadBatchTarget::Ldr;
 		}
 
 		static std::vector<nvrhi::VertexAttributeDesc> MakeQuadVertexAttributes()
@@ -82,8 +104,8 @@ namespace Engine {
 			};
 		}
 
-		// A quad pipeline: double-sided quads with straight alpha (as TextRenderer), no depth writes; the Hdr one tests
-		// against SceneDepth (reverse-Z, GreaterOrEqual), the Ldr one draws on top.
+		// A quad pipeline: double-sided quads with straight alpha (as TextRenderer), no depth writes; the Hdr and LdrDepth ones
+		// test against SceneDepth (reverse-Z, GreaterOrEqual), the Ldr one draws on top.
 		static GraphicsPipelineSpecification MakeQuadSpecification(PipelineLayoutDescription layout, QuadBatchTarget target,
 			const std::vector<nvrhi::BindingLayoutHandle>& sharedLayouts)
 		{
@@ -101,7 +123,7 @@ namespace Engine {
 				.setDestBlendAlpha(nvrhi::BlendFactor::InvSrcAlpha)
 				.setBlendOpAlpha(nvrhi::BlendOp::Add);
 			specification.RenderState.rasterState.setCullNone().enableDepthClip();
-			specification.RenderState.depthStencilState.setDepthTestEnable(target == QuadBatchTarget::Hdr)
+			specification.RenderState.depthStencilState.setDepthTestEnable(target != QuadBatchTarget::Ldr)
 				.setDepthWriteEnable(false)
 				.setDepthFunc(nvrhi::ComparisonFunc::GreaterOrEqual)
 				.setStencilEnable(false);
@@ -278,12 +300,12 @@ namespace Engine {
 		State& state = *batcher->m_State;
 		state.Device = &device;
 		std::vector<PipelineLayoutDescription> descriptions = Utils::MakeQuadDescriptions();
-		// Both pipelines share one binding layout, so one binding set per texture and sampler serves both.
+		// The pipelines share one binding layout, so one binding set per texture and sampler serves them all.
 		ENGINE_TRY_ASSIGN(const std::vector<nvrhi::BindingLayoutHandle> sharedLayouts,
 			WithContext(pipelines.CreateBindingLayouts(descriptions[Utils::QuadHdrPipeline]), "while creating the quad pipelines"));
 		for (size_t index = 0; index < descriptions.size(); ++index)
 		{
-			const QuadBatchTarget target = index == Utils::QuadHdrPipeline ? QuadBatchTarget::Hdr : QuadBatchTarget::Ldr;
+			const QuadBatchTarget target = Utils::GetQuadPipelineTarget(index);
 			ENGINE_TRY_ASSIGN(state.Pipelines[index],
 				WithContext(pipelines.CreateGraphicsPipeline(Utils::MakeQuadSpecification(std::move(descriptions[index]), target, sharedLayouts)),
 					"while creating the quad pipelines"));
@@ -336,6 +358,7 @@ namespace Engine {
 
 	nvrhi::FramebufferInfo QuadBatcher::GetFramebufferInfo(QuadBatchTarget target)
 	{
+		// LdrDepth draws into Ldr's target, the scene overlay's framebuffer with SceneDepth.
 		return target == QuadBatchTarget::Hdr ? GetSceneColorFramebufferInfo() : GetOverlayFramebufferInfo();
 	}
 
@@ -462,7 +485,7 @@ namespace Engine {
 			state.WriteIndices(commandList);
 		}
 		const QuadConstants constants{ .Transform = inputs.Transform };
-		const size_t pipeline = inputs.Target == QuadBatchTarget::Hdr ? Utils::QuadHdrPipeline : Utils::QuadLdrPipeline;
+		const size_t pipeline = Utils::GetQuadPipelineIndex(inputs.Target);
 		nvrhi::GraphicsState graphics;
 		graphics.pipeline = state.Pipelines[pipeline].Pipeline;
 		graphics.framebuffer = inputs.Framebuffer;

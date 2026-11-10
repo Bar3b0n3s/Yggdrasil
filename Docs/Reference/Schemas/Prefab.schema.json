@@ -1149,7 +1149,7 @@
 			"additionalProperties": false
 		},
 		"UiCanvas": {
-			"description": "The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text.",
+			"description": "The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text, or, in World mode, laid out in its own canvas pixels and drawn as a rectangle in the world.",
 			"type": "object",
 			"properties": {
 				"SortOrder": {
@@ -1192,6 +1192,28 @@
 					"description": "The UI widget keyboard and gamepad navigation focuses first while nothing has focus; null: navigation starts only from a pointer press or Ui.SetFocus.",
 					"type": ["string", "null"],
 					"pattern": "^[0-9a-fA-F]{16}$"
+				},
+				"RenderMode": {
+					"description": "Screen draws the canvas over the scene image; World draws it as a rectangle in the world at the entity's transform, depth-tested against the scene.",
+					"enum": ["Screen", "World"]
+				},
+				"WorldWidth": {
+					"description": "A World canvas's width in canvas pixels (its layout's scene resolution); Screen canvases ignore it.",
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 16384
+				},
+				"WorldHeight": {
+					"description": "A World canvas's height in canvas pixels (its layout's scene resolution); Screen canvases ignore it.",
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 16384
+				},
+				"PixelsPerUnit": {
+					"description": "A World canvas's canvas pixels per world unit: its rectangle is WorldWidth x WorldHeight over this, centred on the entity.",
+					"type": "number",
+					"minimum": 0.001,
+					"maximum": 1000000
 				}
 			},
 			"additionalProperties": false

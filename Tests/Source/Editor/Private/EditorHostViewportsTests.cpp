@@ -798,7 +798,7 @@ end)
 			REQUIRE(edited.has_value());
 			CHECK(HasFlag(edited->Flags, RenderViewFlags::EditorOverlays));
 			CHECK(edited->DebugView == RenderDebugView::Normals);
-			// The scene view's own camera draws no game UI (decision 7).
+			// The scene view's own camera draws no Screen canvas (ADR 0033 decisions 7 and 51; it would draw a World canvas).
 			CHECK(edited->Ui.Items.empty());
 
 			EditorViewportOptions options = editor.GetViewportState().GetOptions();

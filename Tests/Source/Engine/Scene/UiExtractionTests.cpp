@@ -223,7 +223,9 @@ namespace Engine {
 			CHECK_FALSE(icon.Sheet.IsValid());
 		}
 
-		TEST_CASE("RenderExtraction: the editor's scene view draws no game UI, and a view without a primary camera draws it")
+		// The scene view draws World canvases (decision 51, "RenderExtraction: World canvases draw in every world view at their
+		// render pose, Screen canvases only in game and camera views"); this case's scene holds Screen canvases only.
+		TEST_CASE("RenderExtraction: the editor's scene view draws no Screen canvas, and a view without a primary camera draws it")
 		{
 			Test::SceneTestFixture fixture;
 			const UiScene ui(fixture.GetScene());
@@ -487,7 +489,7 @@ namespace Engine {
 		}
 
 		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 48; stream T).
-		TEST_CASE("UiExtraction: a text input's TextElement draws its Text, with the caret while the input is focused" * doctest::skip(true))
+		TEST_CASE("UiExtraction: a text input's TextElement draws its Text, with the caret while the input is focused")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -537,8 +539,7 @@ namespace Engine {
 		}
 
 		// C22.3 (decision 51; stream W).
-		TEST_CASE("RenderExtraction: World canvases draw in every world view at their render pose, Screen canvases only in game and camera views"
-			* doctest::skip(true))
+		TEST_CASE("RenderExtraction: World canvases draw in every world view at their render pose, Screen canvases only in game and camera views")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -583,7 +584,7 @@ namespace Engine {
 		// canvas's element is outlined and labelled at the scene-pixel rectangle bounding its corners as the camera projects
 		// them, and not at all without a camera or when a corner lies behind the camera's plane; a Screen canvas's element
 		// keeps its rectangle. The list is built by hand, as the annotations read the snapshot's own draw list.
-		TEST_CASE("RenderAnnotations: a World canvas's element is outlined and labelled where the camera projects it" * doctest::skip(true))
+		TEST_CASE("RenderAnnotations: a World canvas's element is outlined and labelled where the camera projects it")
 		{
 			Test::SceneTestFixture fixture;
 			Entity sign = fixture.GetScene().CreateEntity("Sign");

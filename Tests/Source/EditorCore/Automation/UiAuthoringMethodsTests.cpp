@@ -169,7 +169,7 @@ namespace Engine {
 		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 53; stream T): the TextInput kind, appended to UiWidgetKind: an
 		// element with a dark image and a UiTextInput whose TextElement and Placeholder are its two text children, the text as
 		// the placeholder's.
-		TEST_CASE("UiAuthoringMethods: ui.createWidget builds a text input with its text and placeholder elements" * doctest::skip(true))
+		TEST_CASE("UiAuthoringMethods: ui.createWidget builds a text input with its text and placeholder elements")
 		{
 			Test::AutomationFixture setup("UiCreateTextInput");
 			const Json created = CreateWidget(setup, Json{ { "kind", "TextInput" }, { "name", "Name" }, { "text", "Your name" } });
@@ -188,9 +188,13 @@ namespace Engine {
 			CHECK(placeholder.GetParent() == input);
 			CHECK_FALSE(text.GetComponent<UiTextComponent>().Wrap);
 			CHECK(placeholder.GetComponent<UiTextComponent>().Text == "Your name");
-			// One undo step removes all four.
+			// One undo step removes all four (their ids are read before the undo destroys the handles' entities).
+			std::vector<UUID> ids;
+			for (const Json& id : created["entities"])
+				ids.push_back(FindCreated(setup, id).GetUUID());
 			REQUIRE(setup.Call("edit.undo", Json::object()).has_value());
-			CHECK_FALSE(setup.GetEditor().GetScene().FindEntityByID(input.GetUUID()).IsValid());
+			for (const UUID id : ids)
+				CHECK_FALSE(setup.GetEditor().GetScene().FindEntityByID(id).IsValid());
 		}
 	}
 

@@ -21,21 +21,29 @@ class UiAuthoringTests(AutomationTestCase):
         self.assertEqual([element["name"] for element in tree["elements"]], ["Canvas", "Button", "Label"])
         self.assertEqual(tree["elements"][1]["widget"], "Button")
         self.assertEqual(tree["elements"][2]["text"], "Play")
-        for kind, count in (("Toggle", 3), ("Slider", 3), ("ScrollView", 2), ("Panel", 1), ("Image", 1), ("Text", 1)):
+        created_by_kind: dict[str, list[str]] = {}
+        kinds = (("Toggle", 3), ("Slider", 3), ("ScrollView", 2), ("TextInput", 3), ("Panel", 1), ("Image", 1),
+                 ("Text", 1))
+        for kind, count in kinds:
             created = client.call("ui.createWidget", {"kind": kind, "parent": "/Canvas"})
             self.assertEqual(len(created["entities"]), count, kind)
+            created_by_kind[kind] = created["entities"]
         widgets = {element["name"]: element["widget"] for element in
                    client.call("ui.tree", {"format": "Json", "width": 320, "height": 180})["elements"]}
         self.assertEqual(widgets["Toggle"], "Toggle")
         self.assertEqual(widgets["Slider"], "Slider")
         self.assertEqual(widgets["Scroll View"], "ScrollView")
+        self.assertEqual(widgets["Text Input"], "TextInput")
 
-        # Seven commands: one undo removes the text, the last widget; five more leave only the first command's canvas,
-        # button and label, and the sixth removes all three, so the new canvas took no undo step of its own.
+        # Eight commands: one undo removes the text, the last widget (checked by its id, since the text input's child
+        # is named "Text" too); six more leave only the first command's canvas, button and label, and the seventh
+        # removes all three, so the new canvas took no undo step of its own.
         self.assertEqual(client.call("edit.undo")["undone"], 1)
-        names = [element["name"] for element in client.call("scene.query", {"where": {"name": "Text"}})["entities"]]
-        self.assertEqual(names, [])
-        for _ in range(5):
+        ids = {element["id"] for element in
+               client.call("ui.tree", {"format": "Json", "width": 320, "height": 180})["elements"]}
+        self.assertNotIn(created_by_kind["Text"][0], ids)
+        self.assertTrue(set(created_by_kind["TextInput"]) <= ids)
+        for _ in range(6):
             self.assertEqual(client.call("edit.undo")["undone"], 1)
         remaining = client.call("ui.tree", {"format": "Json", "width": 320, "height": 180})["elements"]
         self.assertEqual([element["name"] for element in remaining], ["Canvas", "Button", "Label"])

@@ -799,7 +799,8 @@ return true
 			for (const auto& group : fixture.GetApi().GetTypes())
 				if (group.Name == "Behaviour")
 				{
-					REQUIRE(group.Members.size() == 19);
+					// The 13 lifecycle callbacks, M22's six UI callbacks and C22.3's OnUiTextChanged and OnUiSubmit.
+					REQUIRE(group.Members.size() == 21);
 					for (const auto& member : group.Members)
 					{
 						CHECK(member.Kind == ScriptApiMemberKind::Callback);

@@ -39,7 +39,8 @@
 // (Docs/Decisions/0031-m20-contract.md decision 8). M22 adds UI_ELEMENT_WITHOUT_CANVAS on a UiRect without a UiCanvas on
 // an ancestor and UI_IMAGE_FRAME_OUT_OF_RANGE on a UiImage whose Frame its sprite sheet lacks
 // (Docs/Decisions/0033-m22-contract.md decision 13), then UI_WIDGET_PART_INVALID on a UiToggle Graphic, UiSlider Fill or
-// Handle or UiScrollView Content that is not a UI element below its widget in its canvas (decision 35). GetCodes lists
+// Handle, UiScrollView Content or UiTextInput TextElement or Placeholder that is not a UI element below its widget in its
+// canvas (decisions 35 and 53). GetCodes lists
 // every code in §13.7 order, later milestones' codes appended in landing order.
 
 namespace Engine {

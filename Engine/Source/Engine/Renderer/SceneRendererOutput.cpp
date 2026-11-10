@@ -263,7 +263,11 @@ namespace Engine {
 			.Resources = Cache,
 			.Assets = Assets,
 			.Framebuffer = Targets.OverlayFramebuffers[frame.SceneTarget],
-			.ViewConstants = ViewConstantsBuffer };
+			.ViewConstants = ViewConstantsBuffer,
+			// C22.3 (decision 51): the view's camera, for the World canvases (none is drawn without one).
+			.HasCamera = frame.HasCamera,
+			.View = frame.Camera.View,
+			.ViewProjection = frame.Camera.Projection * frame.Camera.View };
 		const Result<uint32_t> recorded = RecordUiPass(commandList, UiQuadBindings, TextBindings, inputs, counters);
 		if (!recorded)
 			frame.KeepFirstError(std::unexpected(recorded.error()));

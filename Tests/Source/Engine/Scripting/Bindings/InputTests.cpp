@@ -85,6 +85,8 @@ assert(Input.IsActionDown("Move") and Input.IsActionPressed("Move") and not Inpu
 assert(Input.GetAxis("Move") == -0.5)
 assert(Input.IsGamepadConnected(1) and not Input.IsGamepadConnected(0))
 assert(Input.IsGamepadButtonDown(1, "South") and Input.GetGamepadAxis(1, "LeftY") == 0.75)
+-- A host without a play session latches no text (IScriptHost::GetText's default); the session's case reads typed text.
+assert(Input.GetText() == "")
 for _, mode in {"Normal", "Hidden", "Locked"} do
 	Input.SetCursorMode(mode)
 	assert(Input.GetCursorMode() == mode)
@@ -233,7 +235,7 @@ return Script.Define("ActionProbe", T))"));
 		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 46; stream T, which registers Input.GetText over
 		// IScriptHost::GetText and overrides that in the play session's host): the text latch read by scripts, the tick's
 		// characters in the step and the frame's in OnUpdate.
-		TEST_CASE("InputBindings: GetText reads the tick's committed characters in the step and the frame's in OnUpdate" * doctest::skip(true))
+		TEST_CASE("InputBindings: GetText reads the tick's committed characters in the step and the frame's in OnUpdate")
 		{
 			Test::ScriptTestFixture compiler;
 			const AssetHandle script(471);

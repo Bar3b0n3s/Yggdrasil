@@ -99,11 +99,18 @@ namespace Engine {
 		{
 			return frame.Min + point * frame.Scale;
 		};
+		// C22.3 (the review of C22.3): a World canvas's elements are in its own canvas pixels, not the frame's, so the preview
+		// neither outlines nor picks them, nor gives one the rect tool (UiAuthoring.h's PickUiElement).
+		const auto isWorldElement = [&table](const UiLayoutNode& node)
+		{
+			const UiCanvasLayout* canvas = FindUiCanvasLayout(table, node.Canvas);
+			return canvas != nullptr && canvas->RenderMode == UiCanvasRenderMode::World;
+		};
 		ImDrawList& drawList = *ImGui::GetWindowDrawList();
 		const float uiScale = Utils::EditorUiScale();
 		for (const UiLayoutNode& node : table.Nodes)
 		{
-			if (node.Hidden)
+			if (node.Hidden || isWorldElement(node))
 				continue;
 			const glm::vec2 min = toPanel(node.Min);
 			const glm::vec2 max = toPanel(node.Max);
@@ -113,6 +120,8 @@ namespace Engine {
 		// One element selected in the shown scene: the rect tool's subject.
 		const std::span<const UUID> selection = editor.GetSelectionTarget() == target ? editor.GetSelection() : std::span<const UUID>();
 		const UiLayoutNode* selected = selection.size() == 1 ? FindUiLayoutNode(table, selection.front()) : nullptr;
+		if (selected != nullptr && isWorldElement(*selected))
+			selected = nullptr;
 		const UiCanvasLayout* canvas = selected != nullptr ? FindUiCanvasLayout(table, selected->Canvas) : nullptr;
 		const ConstEntity selectedEntity = selected != nullptr ? scene->FindEntityByID(selected->Entity) : ConstEntity();
 		const bool editable = canvas != nullptr && canvas->Scale > 0.0f && selectedEntity.IsValid()

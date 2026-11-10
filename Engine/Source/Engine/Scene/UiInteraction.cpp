@@ -1,16 +1,26 @@
 #include "EnginePCH.h"
 #include "Engine/Scene/UiInteraction.h"
 
+#include "Engine/Core/DetMath.h"
+#include "Engine/Scene/Components/CameraComponent.h"
+#include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/UiButtonComponent.h"
 #include "Engine/Scene/Components/UiCanvasComponent.h"
 #include "Engine/Scene/Components/UiImageComponent.h"
 #include "Engine/Scene/Components/UiScrollViewComponent.h"
 #include "Engine/Scene/Components/UiSliderComponent.h"
 #include "Engine/Scene/Components/UiTextComponent.h"
+#include "Engine/Scene/Components/UiTextInputComponent.h"
 #include "Engine/Scene/Components/UiToggleComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Scene/TransformSystem.h"
 
+#include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
+
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 
@@ -44,6 +54,9 @@ namespace Engine {
 				return { .Type = UiWidgetType::Slider, .Interactable = slider->Interactable, .Focusable = slider->Focusable };
 			if (const UiScrollViewComponent* scrollView = entity.TryGetComponent<UiScrollViewComponent>())
 				return { .Type = UiWidgetType::ScrollView, .Interactable = scrollView->Interactable, .Focusable = scrollView->Focusable };
+			// C22.3 (decision 45): the fifth widget.
+			if (const UiTextInputComponent* textInput = entity.TryGetComponent<UiTextInputComponent>())
+				return { .Type = UiWidgetType::TextInput, .Interactable = textInput->Interactable, .Focusable = textInput->Focusable };
 			return {};
 		}
 
@@ -123,6 +136,46 @@ namespace Engine {
 			return (node.Min + node.Max) * 0.5f;
 		}
 
+		// C22.3 (decision 50): HitTestUi's rule within one canvas of the table: the last pointer target of its node range over
+		// `point` (its canvas's pixels), and its widget.
+		static UiHit HitTestUiCanvas(const Scene& scene, const UiLayoutTable& table, const UiCanvasLayout& canvas, glm::vec2 point)
+		{
+			// A table of the scene's layout holds its canvases' node ranges; a range past the nodes is cut to them.
+			const size_t first = std::min<size_t>(canvas.FirstNode, table.Nodes.size());
+			const size_t last = std::min<size_t>(first + canvas.NodeCount, table.Nodes.size());
+			for (size_t index = last; index > first; --index)
+			{
+				const UiLayoutNode& node = table.Nodes[index - 1];
+				if (!IsUiPointOverNode(node, point) || !IsUiPointerTarget(scene, node))
+					continue;
+				return UiHit{ .Target = node.Entity, .Widget = FindUiWidgetAtOrAbove(scene, table, node) };
+			}
+			return {};
+		}
+
+		// The canvas of the table whose node range holds `node` (a node of the table), or nullptr.
+		static const UiCanvasLayout* FindUiNodeCanvas(const UiLayoutTable& table, const UiLayoutNode& node)
+		{
+			const auto index = static_cast<size_t>(&node - table.Nodes.data());
+			for (const UiCanvasLayout& canvas : table.Canvases)
+			{
+				if (index >= canvas.FirstNode && index - canvas.FirstNode < canvas.NodeCount)
+					return &canvas;
+			}
+			return nullptr;
+		}
+
+		// The render space of a table's node for directional navigation (decision 50): every Screen canvas's nodes share one
+		// (the null id), and each World canvas's nodes have their own (its canvas's id).
+		static UUID GetUiRenderSpace(const UiLayoutTable& table, const UiLayoutNode& node)
+		{
+			const UiCanvasLayout* canvas = FindUiNodeCanvas(table, node);
+			return canvas != nullptr && canvas->RenderMode == UiCanvasRenderMode::World ? canvas->Canvas : UUID{};
+		}
+
+		// pi / 180 in double, as the projection of render extraction converts the field of view (RenderSnapshot.cpp's).
+		constexpr double UiRayDegreesToRadians = 0.017453292519943295769236907684886;
+
 	}
 
 	std::string_view UiWidgetTypeToString(UiWidgetType type)
@@ -190,12 +243,14 @@ namespace Engine {
 
 	UiHit HitTestUi(const Scene& scene, const UiLayoutTable& table, glm::vec2 point)
 	{
-		// The table is in draw order, so the topmost target is the last one over the point.
-		for (auto node = table.Nodes.rbegin(); node != table.Nodes.rend(); ++node)
+		// The table is in draw order, canvas after canvas, so the topmost target is the last one over the point among the
+		// Screen canvases' nodes (C22.3: a World canvas's are in its own pixels).
+		for (auto canvas = table.Canvases.rbegin(); canvas != table.Canvases.rend(); ++canvas)
 		{
-			if (!Utils::IsUiPointOverNode(*node, point) || !Utils::IsUiPointerTarget(scene, *node))
+			if (canvas->RenderMode == UiCanvasRenderMode::World)
 				continue;
-			return UiHit{ .Target = node->Entity, .Widget = Utils::FindUiWidgetAtOrAbove(scene, table, *node) };
+			if (const UiHit hit = Utils::HitTestUiCanvas(scene, table, *canvas, point); hit.Target.IsValid())
+				return hit;
 		}
 		return {};
 	}
@@ -207,11 +262,13 @@ namespace Engine {
 			return Utils::FindUiDefaultFocus(scene, table);
 
 		const glm::vec2 centre = Utils::GetUiNodeCentre(*origin);
+		// C22.3 (decision 50): only within `from`'s render space, whose rectangles share its pixels.
+		const UUID space = Utils::GetUiRenderSpace(table, *origin);
 		UUID best{};
 		float bestScore = 0.0f;
 		for (const UiLayoutNode& node : table.Nodes)
 		{
-			if (node.Entity == from || !Utils::IsUiFocusableNode(scene, node))
+			if (node.Entity == from || !Utils::IsUiFocusableNode(scene, node) || Utils::GetUiRenderSpace(table, node) != space)
 				continue;
 			const glm::vec2 offset = Utils::GetUiNodeCentre(node) - centre;
 			float along = 0.0f;
@@ -283,25 +340,126 @@ namespace Engine {
 		return stick.y > 0.0f ? UiStickDirection::Up : UiStickDirection::Down;
 	}
 
-	// World canvases: stubs of the M22 contract (C22.3, Docs/Decisions/0033-m22-contract.md decision 50) that stream W
-	// implements.
+	// World canvases (C22.3, Docs/Decisions/0033-m22-contract.md decision 50). The ray and the plane's intersection are
+	// computed in double from the float inputs (IEEE-exact operations, square roots and DetMath only), then rounded to float
+	// once, so a canvas point that lands on a whole canvas pixel in exact arithmetic lands on it here too.
 
-	std::optional<UiPointerRay> ComputeUiPointerRay(const Scene& /*scene*/, glm::vec2 /*pointer*/, glm::uvec2 /*sceneSize*/)
+	std::optional<UiPointerRay> ComputeUiPointerRay(const Scene& scene, glm::vec2 pointer, glm::uvec2 sceneSize)
 	{
-		ENGINE_CONTRACT_STUB();
-		return std::nullopt;
+		ENGINE_CORE_ASSERT(sceneSize.x >= 1 && sceneSize.y >= 1, "ComputeUiPointerRay needs a scene image of at least 1 x 1, got {} x {}", sceneSize.x,
+			sceneSize.y);
+		const ConstEntity camera = FindPrimaryCamera(scene);
+		if (!camera.IsValid() || sceneSize.x == 0 || sceneSize.y == 0)
+			return std::nullopt;
+		const CameraComponent& component = camera.GetComponent<CameraComponent>();
+		// The simulated pose: the world matrix the last TransformSystem::Update gave the camera (the chain walk before the first
+		// one), its rotation without its scale, as render extraction's view matrix takes it (the identity for a matrix that
+		// does not decompose).
+		const WorldTransformComponent* world = camera.TryGetComponent<WorldTransformComponent>();
+		const glm::mat4 matrix = world != nullptr ? world->Matrix : TransformSystem::ComputeWorldMatrix(camera);
+		const Result<TransformDecomposition> decomposed = TransformSystem::DecomposeMatrix(matrix);
+		const glm::quat orientation = decomposed.has_value() ? decomposed->Rotation : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+		const glm::dmat3 rotation = glm::mat3_cast(glm::dquat{ static_cast<double>(orientation.w), static_cast<double>(orientation.x),
+			static_cast<double>(orientation.y), static_cast<double>(orientation.z) });
+		const glm::dvec3 position(matrix[3]);
+
+		// The pointer in normalized device coordinates (+y up) and the projection's aspect.
+		const glm::dvec2 size(static_cast<double>(sceneSize.x), static_cast<double>(sceneSize.y));
+		const double x = 2.0 * static_cast<double>(pointer.x) / size.x - 1.0;
+		const double y = 1.0 - 2.0 * static_cast<double>(pointer.y) / size.y;
+		const double aspect = size.x / size.y;
+		UiPointerRay ray;
+		if (component.Projection == ProjectionType::Perspective)
+		{
+			const double tangent = DetMath::Tan(static_cast<double>(component.VerticalFov) * Utils::UiRayDegreesToRadians * 0.5);
+			const glm::dvec3 view(x * aspect * tangent, y * tangent, -1.0);
+			ray.Origin = glm::vec3(position);
+			ray.Direction = glm::vec3(rotation * glm::normalize(view));
+			// The near plane lies NearClip along the camera's -Z, so NearClip / c along the ray, c = 1 / |view| its cosine with
+			// -Z; the far plane is at infinity (MaxDistance keeps its default).
+			ray.MinDistance = static_cast<float>(static_cast<double>(component.NearClip) * glm::length(view));
+			return ray;
+		}
+		const double halfHeight = static_cast<double>(component.OrthographicSize);
+		ray.Origin = glm::vec3(position + rotation * glm::dvec3(x * aspect * halfHeight, y * halfHeight, -static_cast<double>(component.NearClip)));
+		ray.Direction = glm::vec3(rotation * glm::dvec3(0.0, 0.0, -1.0));
+		// From the near plane, where the ray starts, to the far plane.
+		ray.MaxDistance = static_cast<float>(static_cast<double>(component.FarClip) - static_cast<double>(component.NearClip));
+		return ray;
 	}
 
-	std::optional<UiCanvasPointer> MapUiPointerToCanvas(const UiCanvasLayout& /*canvas*/, glm::vec2 /*point*/, const std::optional<UiPointerRay>& /*ray*/)
+	std::optional<UiCanvasPointer> MapUiPointerToCanvas(const UiCanvasLayout& canvas, glm::vec2 point, const std::optional<UiPointerRay>& ray)
 	{
-		ENGINE_CONTRACT_STUB();
-		return std::nullopt;
+		if (canvas.RenderMode != UiCanvasRenderMode::World)
+			return UiCanvasPointer{ .Point = point, .Distance = 0.0f };
+		if (!ray.has_value())
+			return std::nullopt;
+		// The canvas's plane: its pixel (0, 0) at `corner` and its x and y pixel axes `u` and `v` in world space (World's
+		// columns), so a point of the plane is corner + a u + b v at canvas pixel (a, b).
+		const glm::dvec3 corner(canvas.World[3]);
+		const glm::dvec3 u(canvas.World[0]);
+		const glm::dvec3 v(canvas.World[1]);
+		const glm::dvec3 normal = glm::cross(u, v);
+		const glm::dvec3 origin(ray->Origin);
+		const glm::dvec3 direction(ray->Direction);
+		// The ray meets the plane at origin + t direction, from either side; none when it runs parallel to it.
+		const double facing = glm::dot(direction, normal);
+		if (!(facing != 0.0) || !std::isfinite(facing))
+			return std::nullopt;
+		const double t = glm::dot(corner - origin, normal) / facing;
+		if (!(t >= 0.0) || !std::isfinite(t))
+			return std::nullopt;
+		// Where the camera draws (W22.3's review): a plane met outside the ray's clip range is clipped away there.
+		if (!(t >= static_cast<double>(ray->MinDistance) && t <= static_cast<double>(ray->MaxDistance)))
+			return std::nullopt;
+		// The hit's canvas pixel: the least-squares solution of corner + a u + b v = hit, exact for a point of the plane, through
+		// the axes' Gram matrix (u and v need not be orthogonal: a canvas under a non-uniformly scaled, rotated parent is sheared).
+		const glm::dvec3 offset = origin + direction * t - corner;
+		const double uu = glm::dot(u, u);
+		const double uv = glm::dot(u, v);
+		const double vv = glm::dot(v, v);
+		const double determinant = uu * vv - uv * uv;
+		if (!(determinant > 0.0) || !std::isfinite(determinant))
+			return std::nullopt;
+		const double ou = glm::dot(offset, u);
+		const double ov = glm::dot(offset, v);
+		const glm::dvec2 pixel((ou * vv - ov * uv) / determinant, (ov * uu - ou * uv) / determinant);
+		return UiCanvasPointer{ .Point = glm::vec2(pixel), .Distance = static_cast<float>(t) };
 	}
 
-	UiPointerHit HitTestUiPointer(const Scene& /*scene*/, const UiLayoutTable& /*table*/, glm::vec2 /*point*/, const std::optional<UiPointerRay>& /*ray*/)
+	UiPointerHit HitTestUiPointer(const Scene& scene, const UiLayoutTable& table, glm::vec2 point, const std::optional<UiPointerRay>& ray)
 	{
-		ENGINE_CONTRACT_STUB();
-		return {};
+		// A Screen canvas's target under the pointer wins: Screen canvases draw over the world.
+		for (auto canvas = table.Canvases.rbegin(); canvas != table.Canvases.rend(); ++canvas)
+		{
+			if (canvas->RenderMode == UiCanvasRenderMode::World)
+				continue;
+			if (const UiHit hit = Utils::HitTestUiCanvas(scene, table, *canvas, point); hit.Target.IsValid())
+				return UiPointerHit{ .Hit = hit, .Canvas = canvas->Canvas, .CanvasPoint = point };
+		}
+		if (!ray.has_value())
+			return {};
+		// Otherwise the nearest World canvas along the ray with a target at its point, the later in draw order on a tie. A
+		// point outside the canvas's rectangle hits nothing on it: the canvas is drawn only inside it (UiPass.h).
+		UiPointerHit best{};
+		float bestDistance = 0.0f;
+		for (const UiCanvasLayout& canvas : table.Canvases)
+		{
+			if (canvas.RenderMode != UiCanvasRenderMode::World)
+				continue;
+			const std::optional<UiCanvasPointer> mapped = MapUiPointerToCanvas(canvas, point, ray);
+			if (!mapped.has_value() || (best.Hit.Target.IsValid() && mapped->Distance > bestDistance))
+				continue;
+			const glm::vec2 size(static_cast<float>(canvas.SceneSize.x), static_cast<float>(canvas.SceneSize.y));
+			if (!(mapped->Point.x >= 0.0f && mapped->Point.x < size.x && mapped->Point.y >= 0.0f && mapped->Point.y < size.y))
+				continue;
+			const UiHit hit = Utils::HitTestUiCanvas(scene, table, canvas, mapped->Point);
+			if (!hit.Target.IsValid())
+				continue;
+			best = UiPointerHit{ .Hit = hit, .Canvas = canvas.Canvas, .CanvasPoint = mapped->Point };
+			bestDistance = mapped->Distance;
+		}
+		return best;
 	}
 
 }

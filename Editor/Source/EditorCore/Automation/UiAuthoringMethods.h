@@ -31,12 +31,18 @@
 //   - ScrollView: UiRect Size (300, 200); UiImage Color (0.1, 0.1, 0.1, 0.8); UiScrollView Content = its child "Content":
 //     UiRect AnchorMin (0, 0), AnchorMax (1, 0), Pivot (0.5, 0), Size (0, 400), UiLayout Kind Stack, Direction Vertical,
 //     Padding 8 on each side, Spacing (0, 8).
-// The widget's root is named `name` (default: the kind's name, "Scroll View" for ScrollView) and placed below `parent` (an
-// EntityRef), last or at `index`. A kind other than Canvas needs a UiCanvas at or above its parent: below a parent without
-// one (a mesh entity the hierarchy's "Create UI child" was opened on), the widget goes below a new canvas named "Canvas",
-// created below `parent` (last or at `index`) in the same command. Without `parent`, a Canvas is a root and any other kind
-// goes below a new root canvas named "Canvas", created in the same command; `index` is then the created root's position
-// among the scene's roots (the Canvas's, or the new canvas's). Children are named as above, in the order listed.
+//   - TextInput (C22.3, Docs/Decisions/0033-m22-contract.md decision 53; stream T): UiRect Size (240, 32); UiImage Color
+//     (0.15, 0.15, 0.15, 1); UiTextInput (empty Text) whose TextElement is its child "Text": UiRect stretched with Size
+//     (-12, -12) (a 6-unit inset), UiText Text empty, Size 20, Color (1, 1, 1, 1), Wrap off, VerticalAlignment Middle;
+//     and whose Placeholder is its child "Placeholder": the same rectangle, UiText Text `text` (default "Enter text"),
+//     Size 20, Color (0.6, 0.6, 0.6, 1), Wrap off, VerticalAlignment Middle.
+// The widget's root is named `name` (default: the kind's name, "Scroll View" for ScrollView, "Text Input" for TextInput) and
+// placed below `parent` (an EntityRef), last or at `index`. A kind other than Canvas needs a UiCanvas at or above its parent:
+// below a parent without one (a mesh entity the hierarchy's "Create UI child" was opened on), the widget goes below a new
+// canvas named "Canvas", created below `parent` (last or at `index`) in the same command. Without `parent`, a Canvas is a
+// root and any other kind goes below a new root canvas named "Canvas", created in the same command; `index` is then the
+// created root's position among the scene's roots (the Canvas's, or the new canvas's). Children are named as above, in the
+// order listed.
 
 namespace Engine {
 
@@ -54,7 +60,8 @@ namespace Engine {
 		Button,
 		Toggle,
 		Slider,
-		ScrollView
+		ScrollView,
+		TextInput // C22.3 (decision 53), appended
 	};
 
 	// ui.createWidget {kind, parent?, index?, name?, text?, scene?}.
@@ -64,7 +71,7 @@ namespace Engine {
 		std::string Parent{};
 		uint32_t Index = 0; // only when given (MethodContext::HasParam)
 		std::string Name{}; // only when given; not empty
-		std::string Text{}; // only when given; Text, Button and Toggle only
+		std::string Text{}; // only when given; Text, Button, Toggle and TextInput (its placeholder) only
 	};
 
 	struct UiCreateWidgetResult

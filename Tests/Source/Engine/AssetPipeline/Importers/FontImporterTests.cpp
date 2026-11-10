@@ -15,8 +15,10 @@
 #include <array>
 #include <bit>
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <format>
+#include <utility>
 #include <vector>
 
 namespace Engine {
@@ -32,9 +34,9 @@ namespace Engine {
 		constexpr uint64_t InterCffFieldsHash = 0xc95eb57eae625ca4ull;
 		// The XXH64 of Inter's whole atlas at version 5 (Docs/Decisions/0033-m22-contract.md decision 44 and the lead's
 		// decision 2 of the review of C22.3): it adds the glyphs Inter's default features reach, so the atlas changes
-		// deliberately. Stream S, which implements version 5, records the value its Debug run bakes here, and its Release
-		// run must bake the same.
-		constexpr uint64_t InterTrueTypeShapingAtlasHash = 0;
+		// deliberately. Stream S, which implements version 5, recorded the value its Debug run baked, and its Release run
+		// baked the same.
+		constexpr uint64_t InterTrueTypeShapingAtlasHash = 0x5b79309044d6d4e8ull;
 
 		// The committed Inter-Regular.ttf (Resources/Fonts, SIL OFL).
 		Buffer ReadInter()
@@ -44,8 +46,8 @@ namespace Engine {
 			return std::move(*font);
 		}
 
-		// A committed font fixture of Tests/Data/Assets/Fonts: Glyphs.ttf (MakeFormatFixtures.py) or Inter-Regular.otf (pinned
-		// by FetchAssets.py fixture).
+		// A committed font fixture of Tests/Data/Assets/Fonts: Glyphs.ttf (MakeFormatFixtures.py), or Inter-Regular.otf or a
+		// Noto font (pinned by FetchAssets.py fixture).
 		Buffer ReadFontFixture(std::string_view name)
 		{
 			Result<Buffer> font = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Fonts") / std::string(name));
@@ -300,25 +302,40 @@ namespace Engine {
 		TEST_CASE("FontImporter: 200 seeded mutations of TrueType and OpenType fonts never crash" * doctest::test_suite(Test::FuzzSuite))
 		{
 			// The guard stb_truetype relies on (ValidateTrueTypeTables, which FontImporter::ValidateSource and the import's
-			// TrueTypeFont::Open run) must refuse every font stb_truetype would read out of bounds or assert on. Each mutation
-			// is imported from memory at the smallest settings, so a font that passes opens, answers its metrics and kerning,
-			// and rasterizes every glyph of the character set it has. The seeds: Glyphs.ttf (quadratic outlines, legacy
-			// kerning, five glyphs) and, one iteration in eight, the pinned Inter OTF (CFF outlines, GPOS kerning). Every
-			// other iteration (by index, so the mutations stay those of the seed) adds version 4's Ranges, Greek capitals and
-			// a supplementary-plane block, whose lookups reach the cmap's ranges beyond Latin-1.
-			const std::array<Buffer, 2> seeds = { ReadFontFixture("Glyphs.ttf"), ReadFontFixture("Inter-Regular.otf") };
+			// TrueTypeFont::Open run) must refuse every font stb_truetype would read out of bounds or assert on, and version 5's
+			// shaping steps (C22.3, decision 44: HarfBuzz's closure of the glyphs the default features reach, the glyph
+			// indices and units per em, and the subset it embeds) must take whatever passes it. Each mutation is imported from
+			// memory at the smallest settings, so a font that passes opens, answers its metrics and kerning, rasterizes every
+			// glyph of the character set it has, and is shaped and subset. The seeds: Glyphs.ttf (quadratic outlines, legacy
+			// kerning, five glyphs, no layout tables) six iterations in eight; the pinned Inter OTF (CFF outlines, GSUB and GPOS)
+			// one in eight; and one in eight the Noto Sans Hebrew fixture (TrueType outlines, a GSUB, and a GPOS that places its
+			// points: W22.3's review) with its letters and points, so the closure and the subset see a real font's layout
+			// lookups, and a sample holds an accepted font of a seed with layout tables. Every other iteration of the first two
+			// (by index, so the mutations stay those of the seed) adds version 4's Ranges, Greek capitals and a
+			// supplementary-plane block, whose lookups reach the cmap's ranges beyond Latin-1.
+			const std::array<Buffer, 3> seeds = { ReadFontFixture("Glyphs.ttf"), ReadFontFixture("Inter-Regular.otf"),
+				ReadFontFixture("NotoSansHebrew-Regular.ttf") };
 			Test::AssetTestFixture fixture;
 			Json settings = Json::object();
 			settings["PixelSize"] = 16.0;
 			settings["Spread"] = 1.0;
 			Json withRanges = settings;
 			withRanges["Ranges"] = Json::array({ Json{ { "First", 0x0391 }, { "Last", 0x03A9 } }, Json{ { "First", 0x1F600 }, { "Last", 0x1F64F } } });
-			const Test::FuzzRun run = Test::RunFuzzCase(0xF0A7, 200, [&seeds, &fixture, &settings, &withRanges](Random& random, uint64_t index)
+			Json hebrew = settings;
+			hebrew["Ranges"] = Json::array({ Json{ { "First", 0x0591 }, { "Last", 0x05F4 } } });
+			const std::array<Json, 3> imports = { settings, withRanges, hebrew };
+			// The accepted fonts of the seeds with layout tables (Inter and the Hebrew fixture), shaped and subset.
+			uint64_t layoutAccepted = 0;
+			const Test::FuzzRun run = Test::RunFuzzCase(0xF0A7, 200, [&seeds, &fixture, &imports, &layoutAccepted](Random& random, uint64_t index)
 			{
-				Buffer mutated = seeds[random.RangeInt(0, 7) == 0 ? 1 : 0];
+				// The seed of each of eight draws: Inter for the first, the Hebrew fixture for the second, Glyphs.ttf for the rest.
+				constexpr std::array<size_t, 8> SeedOfDraw = { 1, 2, 0, 0, 0, 0, 0, 0 };
+				const size_t seed = SeedOfDraw[static_cast<size_t>(random.RangeInt(0, 7))];
+				Buffer mutated = seeds[seed];
 				Test::MutateBytes(mutated, random);
 				const Status validated = FontImporter::ValidateSource(mutated);
-				const Result<ImportResult> imported = ImportFontBytes(fixture, "Fuzz.otf", mutated, index % 2 == 0 ? settings : withRanges);
+				const Json& settingsOfSeed = imports[seed == 2 ? size_t{ 2 } : static_cast<size_t>(index % 2)];
+				const Result<ImportResult> imported = ImportFontBytes(fixture, "Fuzz.otf", mutated, settingsOfSeed);
 				if (!imported.has_value())
 				{
 					CHECK_MESSAGE(imported.error().GetCode() == ErrorCode::ImportFailed, imported.error().ToString());
@@ -328,12 +345,15 @@ namespace Engine {
 				REQUIRE(imported->Artifacts.size() == 1);
 				const Result<AssetRef<FontData>> font = LoadCookedFont(imported->Artifacts.front().Cooked);
 				CHECK_MESSAGE(font.has_value(), font.error().ToString());
+				if (seed != 0 && font.has_value() && !(*font)->ShapingSource.empty())
+					++layoutAccepted;
 				return true;
 			});
 			if (Test::IsFuzzSample(run.Range))
 			{
 				CHECK(run.Counts.Rejected > 0);
 				CHECK(run.Counts.Accepted > 0);
+				CHECK(layoutAccepted > 0);
 			}
 		}
 
@@ -849,7 +869,8 @@ namespace Engine {
 		// settings add per-font ranges to ASCII and Latin-1 (FontImportSettings.Ranges, FontImporter version 4).
 		TEST_CASE("FontImporter: a font's Ranges add their codepoints to ASCII and Latin-1")
 		{
-			CHECK(FontImporter::Version == 4);
+			// Version 4 added Ranges; later versions keep them (version 5, C22.3, adds the glyphs shaping reaches).
+			CHECK(FontImporter::Version >= 4);
 			Test::AssetTestFixture fixture;
 			Result<ImportResult> defaults = ImportInter(fixture);
 			REQUIRE(defaults.has_value());
@@ -1174,9 +1195,68 @@ namespace Engine {
 			CHECK(HashGlyphFields(*LoadFont(*cff)) == InterCffFieldsHash);
 		}
 
+		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 44; stream S): version 5 on the committed Inter and the generated
+		// Glyphs.ttf, which need no fixture of stream F: the glyphs only shaping reaches are packed after the codepoint glyphs,
+		// every baked glyph is indexed once with its codepoint glyph's fields, the font's subset is embedded, and Inter's
+		// atlas is the one stream S recorded.
+		TEST_CASE("FontImporter: version 5 indexes every baked glyph once, packs the shaping glyphs after the codepoint glyphs and embeds their subset")
+		{
+			const Buffer inter = ReadInter();
+			FontBakeReport report;
+			const Result<FontData> font = FontImporter::Bake(inter, {}, "Inter-Regular.ttf", report);
+			REQUIRE_MESSAGE(font.has_value(), font.error().ToString());
+			CHECK(report.ShapingGlyphs > 0u);
+			CHECK(report.Glyphs == font->Glyphs.size() + report.ShapingGlyphs);
+			CHECK(std::ranges::count_if(font->IndexedGlyphs, [](const FontGlyph& glyph)
+			{
+				return glyph.Codepoint == 0;
+			}) == static_cast<std::ptrdiff_t>(report.ShapingGlyphs));
+			// Each codepoint glyph is indexed with its fields, under the smallest codepoint that maps to its glyph.
+			for (const FontGlyph& glyph : font->Glyphs)
+			{
+				CAPTURE(glyph.Codepoint);
+				const FontGlyph* indexed = FindGlyphByIndex(*font, glyph.GlyphIndex);
+				REQUIRE(indexed != nullptr);
+				CHECK(indexed->Advance == glyph.Advance);
+				CHECK(indexed->PlaneMin == glyph.PlaneMin);
+				CHECK(indexed->Codepoint <= glyph.Codepoint);
+				CHECK(indexed->Codepoint != 0u);
+			}
+			// The shelf packer places the shaping glyphs after every codepoint glyph: further down, or further right on the
+			// last codepoint glyph's shelf.
+			const auto packedAt = [](const FontGlyph& glyph)
+			{
+				return std::pair(glyph.AtlasMin.y, glyph.AtlasMin.x);
+			};
+			std::pair<float, float> lastCodepointGlyph(0.0f, 0.0f);
+			for (const FontGlyph& glyph : font->Glyphs)
+			{
+				if (glyph.AtlasMin != glyph.AtlasMax)
+					lastCodepointGlyph = std::max(lastCodepointGlyph, packedAt(glyph));
+			}
+			for (const FontGlyph& glyph : font->IndexedGlyphs)
+			{
+				if (glyph.Codepoint == 0 && glyph.AtlasMin != glyph.AtlasMax)
+					CHECK(packedAt(glyph) > lastCodepointGlyph);
+			}
+			CHECK(font->UnitsPerEm >= MinFontUnitsPerEm);
+			CHECK_FALSE(font->ShapingSource.empty());
+			CHECK(font->ShapingSource.size() < inter.size());
+			// Inter's codepoint glyphs keep their fields, and its atlas is the one recorded for version 5.
+			CHECK(HashGlyphFields(*font) == InterTrueTypeFieldsHash);
+			CHECK(XXH64(font->AtlasPixels) == InterTrueTypeShapingAtlasHash);
+
+			// Glyphs.ttf substitutes nothing: no shaping glyph, one indexed glyph per codepoint glyph.
+			const Result<FontData> glyphs = FontImporter::Bake(ReadFontFixture("Glyphs.ttf"), {}, "Glyphs.ttf", report);
+			REQUIRE_MESSAGE(glyphs.has_value(), glyphs.error().ToString());
+			CHECK(report.ShapingGlyphs == 0u);
+			CHECK(glyphs->IndexedGlyphs.size() == glyphs->Glyphs.size());
+			CHECK(glyphs->UnitsPerEm == 1000u);
+		}
+
 		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 44; stream S): version 5's shaping data. The Noto Sans Arabic
 		// fixture is stream F's (pinned in decision 42), so the case runs once both streams have landed.
-		TEST_CASE("FontImporter: version 5 bakes the glyphs shaping reaches, their indices and the font's shaping subset" * doctest::skip(true))
+		TEST_CASE("FontImporter: version 5 bakes the glyphs shaping reaches, their indices and the font's shaping subset")
 		{
 			Test::AssetTestFixture fixture;
 			// The Arabic letters Beh, Alef, Beh and Teh Marbuta (U+0628, U+0627, U+062A, U+0629) and the space.
@@ -1224,8 +1304,7 @@ namespace Engine {
 
 		// C22.3 (decision 42; stream F, after stream S: the cooked Fallbacks are read only from FontData format 2, which
 		// version 5 writes, decision 58).
-		TEST_CASE("FontImporter: a font's Fallbacks are cooked in order and recorded as its dependencies, and invalid ones are refused under /Fallbacks"
-			* doctest::skip(true))
+		TEST_CASE("FontImporter: a font's Fallbacks are cooked in order and recorded as its dependencies, and invalid ones are refused under /Fallbacks")
 		{
 			Test::AssetTestFixture fixture;
 			const AssetHandle arabic(0xA2AB);
@@ -1235,8 +1314,8 @@ namespace Engine {
 			const Result<ImportResult> imported = ImportFont(fixture, "Inter-Regular.ttf", ReadInter(), settings);
 			REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
 			CHECK(LoadFont(*imported)->Fallbacks == std::vector<AssetHandle>{ arabic, japanese });
-			// Dependencies are sorted and unique (ImportResult's rule); a fallback need not exist yet.
-			CHECK(imported->Dependencies == std::vector<AssetHandle>{ arabic, japanese });
+			// Dependencies are sorted and unique (ImportResult's rule: 0x7A9A before 0xA2AB); a fallback need not exist yet.
+			CHECK(imported->Dependencies == std::vector<AssetHandle>{ japanese, arabic });
 
 			// Nine fallbacks, a null one and the font itself are Validation errors located under /Fallbacks.
 			Json nine = Json::object();

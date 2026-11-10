@@ -20,13 +20,16 @@
 // geometrically growing dynamic vertex buffer of QuadVertex (Shared/QuadVertex.h, four vertices per quad) and one static
 // index buffer, split into draws only where the texture or the sampler changes.
 //
-// Pipelines (two, for QuadBatchTarget): straight-alpha blending (colour SrcAlpha / InvSrcAlpha, alpha One / InvSrcAlpha,
+// Pipelines (one per QuadBatchTarget): straight-alpha blending (colour SrcAlpha / InvSrcAlpha, alpha One / InvSrcAlpha,
 // as TextRenderer), no culling, no depth writes.
 //   - Hdr: into SceneColor with SceneDepth (GetSceneColorFramebufferInfo), depth-tested GreaterOrEqual; the fragment is
 //     the sampled texel times the vertex colour, in linear radiance (the Sprites stage).
 //   - Ldr: into an LDR target with SceneDepth (GetOverlayFramebufferInfo, the scene overlay's framebuffer that Text uses),
 //     without the depth test; the product is encoded with the sRGB OETF in the shader (the target holds display-encoded
 //     values, §8.9), as Text encodes its colour (the SceneOverlay stage's UI).
+//   - LdrDepth (M22, C22.3; Docs/Decisions/0033-m22-contract.md decision 57, the ledger amendment granted on main in
+//     1707cf47): Ldr's target, blending and sRGB encoding, depth-tested GreaterOrEqual against SceneDepth without depth
+//     writes (the SceneOverlay stage's World canvases, drawn in the world through a camera's view-projection).
 // Colour textures are sampled through their sRGB views, so the shader sees linear values; an 8-bit sRGB texel drawn with a
 // white colour reaches an Ldr target, or an Hdr one through the 2D colour path (RenderOutputSettings::PixelArt), unchanged.
 //
@@ -62,7 +65,8 @@ namespace Engine {
 	enum class QuadBatchTarget : uint8_t
 	{
 		Hdr,
-		Ldr
+		Ldr,
+		LdrDepth // M22 (C22.3, decision 57): appended
 	};
 
 	// One textured quad. Corners are in the batch's space; TexCoordMin lands on the top-left corner and TexCoordMax on the
@@ -140,8 +144,8 @@ namespace Engine {
 	class QuadBatcher
 	{
 	public:
-		// Hdr and Ldr.
-		static constexpr uint32_t PipelineCount = 2;
+		// Hdr, Ldr and (M22, C22.3) LdrDepth.
+		static constexpr uint32_t PipelineCount = 3;
 		// The most quads one Record draws (2^20 vertices, 36 MiB of vertex data).
 		static constexpr uint32_t MaxQuadsPerRecord = 1U << 18;
 
@@ -159,12 +163,12 @@ namespace Engine {
 		QuadBatcher(const QuadBatcher&) = delete;
 		QuadBatcher& operator=(const QuadBatcher&) = delete;
 
-		// Creates the two pipelines (checked against their reflection), the two samplers, the white texture and the index
-		// buffer. `device` is a documented back-reference that outlives the batcher. Errors: those of PipelineFactory and the
+		// Creates the pipelines (checked against their reflection), the two samplers, the white texture and the index buffer.
+		// `device` is a documented back-reference that outlives the batcher. Errors: those of PipelineFactory and the
 		// GraphicsDevice wrappers (Gpu: an out-of-memory creation, §8.14 item 7).
 		[[nodiscard]] static Result<Scope<QuadBatcher>> Create(GraphicsDevice& device, PipelineFactory& pipelines);
 
-		// The layout descriptions of both pipelines, for "Shaders: LayoutsMatchReflection".
+		// The layout descriptions of the pipelines, for "Shaders: LayoutsMatchReflection".
 		[[nodiscard]] static std::vector<PipelineLayoutDescription> GetLayoutDescriptions();
 		// The framebuffer a batch of `target` records into (see the file comment).
 		[[nodiscard]] static nvrhi::FramebufferInfo GetFramebufferInfo(QuadBatchTarget target);

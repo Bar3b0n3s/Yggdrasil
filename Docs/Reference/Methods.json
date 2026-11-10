@@ -4340,7 +4340,7 @@
 						"additionalProperties": false
 					},
 					"UiCanvas": {
-						"description": "The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text.",
+						"description": "The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text, or, in World mode, laid out in its own canvas pixels and drawn as a rectangle in the world.",
 						"type": "object",
 						"properties": {
 							"SortOrder": {
@@ -4383,6 +4383,28 @@
 								"description": "The UI widget keyboard and gamepad navigation focuses first while nothing has focus; null: navigation starts only from a pointer press or Ui.SetFocus.",
 								"type": ["string", "null"],
 								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
+							},
+							"RenderMode": {
+								"description": "Screen draws the canvas over the scene image; World draws it as a rectangle in the world at the entity's transform, depth-tested against the scene.",
+								"enum": ["Screen", "World"]
+							},
+							"WorldWidth": {
+								"description": "A World canvas's width in canvas pixels (its layout's scene resolution); Screen canvases ignore it.",
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 16384
+							},
+							"WorldHeight": {
+								"description": "A World canvas's height in canvas pixels (its layout's scene resolution); Screen canvases ignore it.",
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 16384
+							},
+							"PixelsPerUnit": {
+								"description": "A World canvas's canvas pixels per world unit: its rectangle is WorldWidth x WorldHeight over this, centred on the entity.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 1000000
 							}
 						},
 						"additionalProperties": false
@@ -7028,7 +7050,7 @@
 						"additionalProperties": false
 					},
 					"UiCanvas": {
-						"description": "The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text.",
+						"description": "The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text, or, in World mode, laid out in its own canvas pixels and drawn as a rectangle in the world.",
 						"type": "object",
 						"properties": {
 							"SortOrder": {
@@ -7071,6 +7093,28 @@
 								"description": "The UI widget keyboard and gamepad navigation focuses first while nothing has focus; null: navigation starts only from a pointer press or Ui.SetFocus.",
 								"type": ["string", "null"],
 								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
+							},
+							"RenderMode": {
+								"description": "Screen draws the canvas over the scene image; World draws it as a rectangle in the world at the entity's transform, depth-tested against the scene.",
+								"enum": ["Screen", "World"]
+							},
+							"WorldWidth": {
+								"description": "A World canvas's width in canvas pixels (its layout's scene resolution); Screen canvases ignore it.",
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 16384
+							},
+							"WorldHeight": {
+								"description": "A World canvas's height in canvas pixels (its layout's scene resolution); Screen canvases ignore it.",
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 16384
+							},
+							"PixelsPerUnit": {
+								"description": "A World canvas's canvas pixels per world unit: its rectangle is WorldWidth x WorldHeight over this, centred on the entity.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 1000000
 							}
 						},
 						"additionalProperties": false
@@ -12829,7 +12873,7 @@
 						"additionalProperties": false
 					},
 					"UiCanvas": {
-						"description": "The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text.",
+						"description": "The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text, or, in World mode, laid out in its own canvas pixels and drawn as a rectangle in the world.",
 						"type": "object",
 						"properties": {
 							"SortOrder": {
@@ -12872,6 +12916,28 @@
 								"description": "The UI widget keyboard and gamepad navigation focuses first while nothing has focus; null: navigation starts only from a pointer press or Ui.SetFocus.",
 								"type": ["string", "null"],
 								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
+							},
+							"RenderMode": {
+								"description": "Screen draws the canvas over the scene image; World draws it as a rectangle in the world at the entity's transform, depth-tested against the scene.",
+								"enum": ["Screen", "World"]
+							},
+							"WorldWidth": {
+								"description": "A World canvas's width in canvas pixels (its layout's scene resolution); Screen canvases ignore it.",
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 16384
+							},
+							"WorldHeight": {
+								"description": "A World canvas's height in canvas pixels (its layout's scene resolution); Screen canvases ignore it.",
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 16384
+							},
+							"PixelsPerUnit": {
+								"description": "A World canvas's canvas pixels per world unit: its rectangle is WorldWidth x WorldHeight over this, centred on the entity.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 1000000
 							}
 						},
 						"additionalProperties": false
@@ -20145,7 +20211,7 @@
 		{
 			"name": "ui.createWidget",
 			"domain": "ui",
-			"description": "Builds a UI widget (a canvas, panel, image, text, button, toggle, slider or scroll view) with its child entities and components in the edit scene, as one undoable command; the editor's Create UI menu submits it.",
+			"description": "Builds a UI widget (a canvas, panel, image, text, button, toggle, slider, scroll view or text input) with its child entities and components in the edit scene, as one undoable command; the editor's Create UI menu submits it.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": true,
@@ -20162,7 +20228,7 @@
 				"properties": {
 					"kind": {
 						"description": "The widget to build.",
-						"enum": ["Canvas", "Panel", "Image", "Text", "Button", "Toggle", "Slider", "ScrollView"]
+						"enum": ["Canvas", "Panel", "Image", "Text", "Button", "Toggle", "Slider", "ScrollView", "TextInput"]
 					},
 					"parent": {
 						"description": "The parent entity (16 hex digits, a unique id prefix of at least 6, or a path); a kind other than Canvas below a parent without a UiCanvas at or above it goes below a new canvas created there. Omitted: a Canvas is a root, any other kind goes below a new root canvas.",
@@ -20179,7 +20245,7 @@
 						"type": "string"
 					},
 					"text": {
-						"description": "The label of a Text, Button or Toggle; omitted: the kind's name.",
+						"description": "The label of a Text, Button or Toggle, or a TextInput's placeholder; omitted: the kind's name (\"Enter text\" for a TextInput).",
 						"type": "string"
 					},
 					"dryRun": {
@@ -20298,7 +20364,7 @@
 						"maximum": 4294967295
 					},
 					"format": {
-						"description": "Text: a compact outline (widgets as UiButton, UiToggle(on|off), UiSlider(<value>) and UiScrollView(<x>,<y>), marked disabled, focused, hovered or pressed); Json: a flat list of entries.",
+						"description": "Text: a compact outline (widgets as UiButton, UiToggle(on|off), UiSlider(<value>), UiScrollView(<x>,<y>) and UiTextInput(\"<text>\"), marked disabled, focused, hovered or pressed); Json: a flat list of entries.",
 						"enum": ["Text", "Json"]
 					},
 					"width": {
@@ -20445,7 +20511,7 @@
 								}
 							},
 							"rect": {
-								"description": "The laid-out rectangle in scene pixels; a canvas's is the whole scene image.",
+								"description": "The laid-out rectangle in scene pixels, a canvas's the whole scene image; a World canvas's and its elements' in the canvas's own pixels (worldCanvas).",
 								"$ref": "#/$defs/UiPixelRect"
 							},
 							"sortOrder": {
@@ -20471,7 +20537,7 @@
 								"type": "boolean"
 							},
 							"text": {
-								"description": "Its UiText's text, cut to 256 bytes; empty without one.",
+								"description": "Its UiTextInput's text, else its UiText's, cut to 256 bytes; empty without either.",
 								"type": "string"
 							},
 							"interactable": {
@@ -20491,8 +20557,12 @@
 								"type": "boolean"
 							},
 							"widget": {
-								"description": "The element's widget: Button, Toggle, Slider or ScrollView; empty for none.",
+								"description": "The element's widget: Button, Toggle, Slider, ScrollView or TextInput; empty for none.",
 								"type": "string"
+							},
+							"worldCanvas": {
+								"description": "True for a World canvas and its elements, whose rect and clip are in the canvas's own pixels.",
+								"type": "boolean"
 							}
 						},
 						"additionalProperties": false

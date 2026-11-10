@@ -9,9 +9,12 @@
 #include "Engine/Scene/Components/UiRectComponent.h"
 #include "Engine/Scene/Components/UiScrollViewComponent.h"
 #include "Engine/Scene/Components/UiSliderComponent.h"
+#include "Engine/Scene/Components/UiTextInputComponent.h"
 #include "Engine/Scene/Components/UiToggleComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/Private/UiWorldCanvas.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Scene/TransformSystem.h"
 #include "Engine/Scene/UiContainerLayout.h"
 #include "Engine/Scene/UiWidgets.h"
 
@@ -78,9 +81,10 @@ namespace Engine {
 			UiClipRect Clip{};
 		};
 
-		// What the slider and toggle rules (C22.2, Docs/Decisions/0033-m22-contract.md decision 26) do to one element of a
-		// canvas: a slider's Fill or Handle takes the anchors along its slider's direction in place of its own, and an off
-		// toggle's Graphic is Hidden with its subtree.
+		// What the slider and toggle rules (C22.2, Docs/Decisions/0033-m22-contract.md decision 26) and the text input's
+		// (C22.3, decision 48) do to one element of a canvas: a slider's Fill or Handle takes the anchors along its slider's
+		// direction in place of its own, and an off toggle's Graphic, or the Placeholder of a text input whose Text is not
+		// empty, is Hidden with its subtree.
 		struct UiWidgetPartRule
 		{
 			bool Anchored = false;
@@ -188,8 +192,8 @@ namespace Engine {
 			max = min + size;
 		}
 
-		// The slider and toggle rules of `canvas`'s elements (UiLayout.h), by element index; empty when none applies, as in
-		// every canvas without a slider or an off toggle that names a part. A rule applies only to a part that is an element
+		// The slider, toggle and text-input rules of `canvas`'s elements (UiLayout.h), by element index; empty when none
+		// applies, as in every canvas without a slider, an off toggle or a text input with text that names a part. A rule applies only to a part that is an element
 		// below its widget in this canvas: found among the canvas's elements, with the widget on its chain of parent
 		// elements (so neither the widget itself nor an element outside its subtree). When several rules reach one element
 		// (a Fill that is also its slider's Handle, or a part of two nested sliders), the later in canonical order wins.
@@ -246,6 +250,12 @@ namespace Engine {
 					if (UiWidgetPartRule* graphic = findPart(index, toggle->Graphic))
 						graphic->Hides = true;
 				}
+				else if (const UiTextInputComponent* textInput = entity.TryGetComponent<UiTextInputComponent>();
+					textInput != nullptr && !textInput->Text.empty())
+				{
+					if (UiWidgetPartRule* placeholder = findPart(index, textInput->Placeholder))
+						placeholder->Hides = true;
+				}
 			}
 			return rules;
 		}
@@ -270,20 +280,42 @@ namespace Engine {
 			return offset;
 		}
 
-		// Lays out the elements of `canvas` into `table`, in their order (a parent before its children).
-		static void LayoutUiCanvas(const UiScannedCanvas& canvas, glm::uvec2 sceneSize, UiLayoutTable& table)
+		// The canvas layout of `canvas` laid out over `tableSize` scene pixels (C22.3, decision 49): a Screen canvas covers the
+		// scene image; a World canvas covers its own WorldWidth x WorldHeight canvas pixels, whatever the scene resolution, and
+		// carries the matrix that places them in the world at its entity's simulated pose (the TransformSystem's world matrix).
+		static UiCanvasLayout MakeUiCanvasLayout(const UiScannedCanvas& canvas, const UiCanvasComponent& component, glm::uvec2 tableSize)
+		{
+			UiCanvasLayout layout{ .Canvas = canvas.Entity.GetUUID(), .SortOrder = canvas.SortOrder, .RenderMode = component.RenderMode };
+			glm::uvec2 size = tableSize;
+			if (component.RenderMode == UiCanvasRenderMode::World)
+			{
+				size = GetUiWorldCanvasSize(component.WorldWidth, component.WorldHeight);
+				layout.SceneSize = size;
+				// The world matrix the last TransformSystem::Update gave the entity, or the chain walk before the first one.
+				const WorldTransformComponent* world = canvas.Entity.TryGetComponent<WorldTransformComponent>();
+				const glm::mat4 entityWorld = world != nullptr ? world->Matrix : TransformSystem::ComputeWorldMatrix(canvas.Entity);
+				layout.World = entityWorld * MakeUiWorldCanvasLocalMatrix(size, component.PixelsPerUnit);
+			}
+			const glm::vec2 pixels(static_cast<float>(size.x), static_cast<float>(size.y));
+			layout.Scale = component.ScaleMode == UiScaleMode::MatchHeight ? pixels.y / component.ReferenceHeight : component.ScaleFactor;
+			layout.Size = pixels / layout.Scale;
+			return layout;
+		}
+
+		// Lays out the elements of `canvas` into `table`, in their order (a parent before its children). A World canvas's
+		// elements are placed in its own canvas pixels, over its size instead of the scene image's (C22.3, decision 49).
+		static void LayoutUiCanvas(const UiScannedCanvas& canvas, glm::uvec2 tableSize, UiLayoutTable& table)
 		{
 			const UiCanvasComponent& component = canvas.Entity.GetComponent<UiCanvasComponent>();
+			UiCanvasLayout canvasLayout = MakeUiCanvasLayout(canvas, component, tableSize);
+			const glm::uvec2 sceneSize = component.RenderMode == UiCanvasRenderMode::World ? canvasLayout.SceneSize : tableSize;
 			const glm::vec2 scenePixels(static_cast<float>(sceneSize.x), static_cast<float>(sceneSize.y));
-			const float scale = component.ScaleMode == UiScaleMode::MatchHeight ? scenePixels.y / component.ReferenceHeight : component.ScaleFactor;
+			const float scale = canvasLayout.Scale;
 			const auto firstNode = static_cast<uint32_t>(table.Nodes.size());
 			const auto count = static_cast<uint32_t>(canvas.Elements.size());
-			table.Canvases.push_back(UiCanvasLayout{ .Canvas = canvas.Entity.GetUUID(),
-				.SortOrder = canvas.SortOrder,
-				.Scale = scale,
-				.Size = scenePixels / scale,
-				.FirstNode = firstNode,
-				.NodeCount = count });
+			canvasLayout.FirstNode = firstNode;
+			canvasLayout.NodeCount = count;
+			table.Canvases.push_back(canvasLayout);
 
 			// The scene image's pixels, which bound every element's visibility.
 			const UiClipRect sceneImage{ .MinX = 0,
@@ -296,7 +328,8 @@ namespace Engine {
 			std::vector<UiInheritedClip> childClips(count);
 			std::vector<UiContainerChild> participants;
 			std::vector<uint32_t> participantIndices;
-			// The slider and toggle rules (decision 26), by element index; empty when no widget names a part here.
+			// The slider, toggle and text-input rules (decisions 26 and 48), by element index; empty when no widget names a part
+			// here.
 			const std::vector<UiWidgetPartRule> partRules = FindUiWidgetPartRules(canvas);
 
 			for (uint32_t index = 0; index < count; ++index)
@@ -359,13 +392,15 @@ namespace Engine {
 				UiClipRect visible = IntersectUiClipRects(covered, sceneImage);
 				if (clip.Clipped)
 					visible = IntersectUiClipRects(visible, clip.Clip);
-				// An off toggle's Graphic and its subtree are laid out but Hidden, so never Visible.
+				// An off toggle's Graphic, a text input's Placeholder while it has text, and their subtrees are laid out but Hidden,
+				// so never Visible.
 				node.Hidden = !partRules.empty()
 					&& (partRules[index].Hides || (element.Parent != NoUiElement && table.Nodes[firstNode + element.Parent].Hidden));
 				node.Visible = !visible.IsEmpty() && !node.Hidden;
 
-				// The element's own flag clips its descendants only; a scroll view clips its descendants whatever the flag says.
-				if (rect.ClipChildren || element.Entity.HasComponent<UiScrollViewComponent>())
+				// The element's own flag clips its descendants only; a scroll view and a text input clip their descendants whatever
+				// the flag says.
+				if (rect.ClipChildren || element.Entity.HasComponent<UiScrollViewComponent>() || element.Entity.HasComponent<UiTextInputComponent>())
 					childClips[index] = UiInheritedClip{ .Clipped = true, .Clip = clip.Clipped ? IntersectUiClipRects(clip.Clip, covered) : covered };
 				else
 					childClips[index] = clip;

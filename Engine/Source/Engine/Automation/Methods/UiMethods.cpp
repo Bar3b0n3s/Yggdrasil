@@ -14,6 +14,7 @@
 #include "Engine/Scene/Components/UiScrollViewComponent.h"
 #include "Engine/Scene/Components/UiSliderComponent.h"
 #include "Engine/Scene/Components/UiTextComponent.h"
+#include "Engine/Scene/Components/UiTextInputComponent.h"
 #include "Engine/Scene/Components/UiToggleComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
@@ -169,8 +170,8 @@ namespace Engine {
 
 		// The short forms of an element's UI components in the outline: "UiImage(<sheet>#<frame>)", "UiText(\"<text>\")",
 		// "UiLayout(<kind> <direction>)", C22.2's widgets "UiToggle(on|off)", "UiSlider(<value as read>)" and
-		// "UiScrollView(<x>,<y>)" (its position as read in `table`), and the name of any other but UiRect, which every
-		// element holds (UiButton, UiLayoutElement).
+		// "UiScrollView(<x>,<y>)" (its position as read in `table`), C22.3's "UiTextInput(\"<text>\")", and the name of any
+		// other but UiRect, which every element holds (UiButton, UiLayoutElement).
 		static std::string FormatUiOutlineComponents(ConstEntity entity, const AssetManager* assets, const UiLayoutTable& table)
 		{
 			std::string components;
@@ -198,6 +199,8 @@ namespace Engine {
 					const glm::vec2 position = ReadUiOutlineScrollPosition(*scrollView, table, entity.GetUUID());
 					append(std::format("UiScrollView({},{})", FormatUiOutlineNumber(position.x), FormatUiOutlineNumber(position.y)));
 				}
+				else if (const UiTextInputComponent* textInput = name == "UiTextInput" ? entity.TryGetComponent<UiTextInputComponent>() : nullptr)
+					append(std::format("UiTextInput(\"{}\")", CutUiText(textInput->Text, MaxUiOutlineTextLength)));
 				else
 					append(name);
 			}
@@ -304,12 +307,16 @@ namespace Engine {
 		{
 			const Scene& scene = *writer.Target;
 			UiTreeResult& result = *writer.Result;
-			const UiPixelRect sceneRect{ .X = 0.0f, .Y = 0.0f, .Width = static_cast<float>(table.SceneSize.x), .Height = static_cast<float>(table.SceneSize.y) };
+			// C22.3 (decision 53): a World canvas covers its own canvas pixels, in which its elements' rectangles and clips are.
+			const bool world = canvas.RenderMode == UiCanvasRenderMode::World;
+			const glm::uvec2 canvasSize = world ? canvas.SceneSize : table.SceneSize;
+			const UiPixelRect sceneRect{ .X = 0.0f, .Y = 0.0f, .Width = static_cast<float>(canvasSize.x), .Height = static_cast<float>(canvasSize.y) };
 			const std::string canvasId = canvasEntity.GetUUID().ToString();
 			if (writer.Text)
 			{
-				result.Text += std::format("{}  {}  UiCanvas(sort {}, scale {})\n", canvasEntity.GetName(), canvasId.substr(0, 8), canvas.SortOrder,
-					FormatUiOutlineNumber(canvas.Scale));
+				const std::string worldSize = world ? std::format(", world {}x{}", canvasSize.x, canvasSize.y) : std::string();
+				result.Text += std::format("{}  {}  UiCanvas(sort {}, scale {}{})\n", canvasEntity.GetName(), canvasId.substr(0, 8), canvas.SortOrder,
+					FormatUiOutlineNumber(canvas.Scale), worldSize);
 			}
 			else
 			{
@@ -325,6 +332,7 @@ namespace Engine {
 				entry.SortOrder = canvas.SortOrder;
 				entry.Scale = canvas.Scale;
 				entry.Visible = true;
+				entry.WorldCanvas = world;
 				result.Elements.push_back(std::move(entry));
 			}
 
@@ -390,13 +398,17 @@ namespace Engine {
 				if (node.Clipped)
 					entry.Clip = MakeUiPixelRect(node.Clip);
 				entry.Visible = node.Visible;
-				if (const UiTextComponent* text = entity.TryGetComponent<UiTextComponent>())
+				// A text input's element reports its input's Text (C22.3, decision 53), any other its UiText's.
+				if (const UiTextInputComponent* textInput = entity.TryGetComponent<UiTextInputComponent>())
+					entry.Text = CutUiText(textInput->Text, MaxUiTreeTextBytes);
+				else if (const UiTextComponent* text = entity.TryGetComponent<UiTextComponent>())
 					entry.Text = CutUiText(text->Text, MaxUiTreeTextBytes);
 				entry.Interactable = interaction.Interactable;
 				entry.Focused = interaction.Focused;
 				entry.Hovered = interaction.Hovered;
 				entry.Pressed = interaction.Pressed;
 				entry.Widget = std::string(UiWidgetTypeToString(interaction.Widget));
+				entry.WorldCanvas = world;
 				result.Elements.push_back(std::move(entry));
 			}
 		}
@@ -481,7 +493,9 @@ namespace Engine {
 			.Field("parent", &UiTreeEntry::Parent, "The parent element's id, or the canvas's for a top-level element; empty for a canvas.")
 			.Field("depth", &UiTreeEntry::Depth, "0 for a canvas, 1 for a top-level element, one more per level below it.")
 			.Field("components", &UiTreeEntry::Components, "The UI components the entity holds, in registry order.")
-			.Field("rect", &UiTreeEntry::Rect, "The laid-out rectangle in scene pixels; a canvas's is the whole scene image.")
+			.Field("rect", &UiTreeEntry::Rect,
+				"The laid-out rectangle in scene pixels, a canvas's the whole scene image; a World canvas's and its elements' in the canvas's own "
+				"pixels (worldCanvas).")
 			.Field("sortOrder", &UiTreeEntry::SortOrder, "A canvas's UiCanvas SortOrder (canvases draw in ascending order); 0 for an element.")
 			.Field("scale", &UiTreeEntry::Scale,
 				"A canvas's scale: the scene pixels per canvas unit at the resolution laid out at, which turns a pixel measurement into "
@@ -489,19 +503,20 @@ namespace Engine {
 			.Field("clipped", &UiTreeEntry::Clipped, "Whether a clipping ancestor (UiRect.ClipChildren) clips the element to clip.")
 			.Field("clip", &UiTreeEntry::Clip, "The clip rectangle in whole scene pixels, when clipped.")
 			.Field("visible", &UiTreeEntry::Visible, "Whether the element covers a pixel of the scene image once clipped.")
-			.Field("text", &UiTreeEntry::Text, "Its UiText's text, cut to 256 bytes; empty without one.")
+			.Field("text", &UiTreeEntry::Text, "Its UiTextInput's text, else its UiText's, cut to 256 bytes; empty without either.")
 			.Field("interactable", &UiTreeEntry::Interactable, "Whether the element is a widget whose Interactable is set (it takes the pointer and focus).")
 			.Field("focused", &UiTreeEntry::Focused, "Whether the element has keyboard and gamepad focus in the play session; false in the edit scene.")
 			.Field("hovered", &UiTreeEntry::Hovered, "Whether the element is the widget under the pointer in the play session; false in the edit scene.")
 			.Field("pressed", &UiTreeEntry::Pressed, "Whether the held pointer presses the element in the play session; false in the edit scene.")
-			.Field("widget", &UiTreeEntry::Widget, "The element's widget: Button, Toggle, Slider or ScrollView; empty for none.");
+			.Field("widget", &UiTreeEntry::Widget, "The element's widget: Button, Toggle, Slider, ScrollView or TextInput; empty for none.")
+			.Field("worldCanvas", &UiTreeEntry::WorldCanvas, "True for a World canvas and its elements, whose rect and clip are in the canvas's own pixels.");
 
 		registry.Struct<UiTreeParams>("UiTreeParams", "The params of ui.tree.")
 			.Field("canvas", &UiTreeParams::Canvas, "An entity with a UiCanvas whose UI alone is listed; omitted: every canvas.")
 			.Field("depth", &UiTreeParams::Depth, "The most levels listed below each canvas; 0: unlimited.")
 			.Field("format", &UiTreeParams::Format,
-				"Text: a compact outline (widgets as UiButton, UiToggle(on|off), UiSlider(<value>) and UiScrollView(<x>,<y>), marked disabled, "
-				"focused, hovered or pressed); Json: a flat list of entries.")
+				"Text: a compact outline (widgets as UiButton, UiToggle(on|off), UiSlider(<value>), UiScrollView(<x>,<y>) and "
+				"UiTextInput(\"<text>\"), marked disabled, focused, hovered or pressed); Json: a flat list of entries.")
 			.Field("width", &UiTreeParams::Width,
 				"The scene resolution's width to lay out at, with height; omitted: the play session's own, or the project's window size for "
 				"the edit scene.",

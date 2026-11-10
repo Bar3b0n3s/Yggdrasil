@@ -7,6 +7,7 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -44,12 +45,17 @@
 // rectangles are not scene pixels. The pointer reaches it along a ray through the scene's primary camera
 // (ComputeUiPointerRay, from the step's latched pointer and the camera's simulated pose): the ray meets the canvas's plane
 // at a point of its canvas pixels (MapUiPointerToCanvas), where the canvas's elements are hit-tested by the rule above,
-// restricted to that canvas. Screen canvases draw over the world, so a target of a Screen canvas under the pointer wins;
-// otherwise the nearest World canvas along the ray with a target under its point (the later in draw order on a tie)
-// (HitTestUiPointer). Directional navigation moves among the focusable elements of one render space: every Screen
-// canvas's together, as before C22.3, or one World canvas's; Next, Previous and the default focus span every canvas in
-// draw order. The same IEEE-exact operations, with DetMath for the camera's field of view (Core/DetMath.h), so a world
-// canvas interacts identically in every configuration.
+// restricted to that canvas and to its rectangle ((0, 0) to UiCanvasLayout::SceneSize, outside which it draws nothing,
+// Renderer/UiPass.h), and to the camera's clip range (UiPointerRay::MinDistance to MaxDistance: beyond the near plane,
+// and before the far plane of an orthographic camera, whose projection clips there; a perspective camera's far plane is
+// at infinity, Architecture §8.3), where it draws. Scene geometry does not occlude the pointer: a World canvas behind a
+// mesh still takes it where the ray meets it (an accepted limit, decision 50 and Backlog §6: a game that needs
+// occlusion raycasts with Physics before it acts). Screen canvases draw over the world, so a target of a Screen canvas
+// under the pointer wins; otherwise the nearest World canvas along the ray with a target under its point (the later in
+// draw order on a tie) (HitTestUiPointer). Directional navigation moves among the focusable elements of one render
+// space: every Screen canvas's together, as before C22.3, or one World canvas's; Next, Previous and the default focus
+// span every canvas in draw order. The same IEEE-exact operations, with DetMath for the camera's field of view
+// (Core/DetMath.h), so a world canvas interacts identically in every configuration.
 
 namespace Engine {
 
@@ -122,10 +128,15 @@ namespace Engine {
 	inline constexpr bool EnableFlagOperators<UiTextKeys> = true;
 
 	// C22.3 (decision 50): a pointer ray in world space, through the scene's primary camera (ComputeUiPointerRay).
+	// MinDistance and MaxDistance (added by W22.3's review) bound the ray parameters, in world units along Direction from
+	// Origin, at which the camera draws, inclusive: a World canvas is hit only where the ray meets it between them, so a
+	// canvas the camera clips takes no pointer. The defaults bound nothing beyond the origin.
 	struct UiPointerRay
 	{
 		glm::vec3 Origin = glm::vec3(0.0f);
 		glm::vec3 Direction = glm::vec3(0.0f, 0.0f, -1.0f); // unit length
+		float MinDistance = 0.0f;
+		float MaxDistance = std::numeric_limits<float>::infinity();
 
 		bool operator==(const UiPointerRay&) const = default;
 	};
@@ -182,8 +193,10 @@ namespace Engine {
 		UUID Hovered{}; // the interactable widget under the pointer
 		UUID Pressed{}; // the widget a pointer press began on, while the pointer is held
 		UUID Dragged{}; // the slider or scroll view the held pointer drags (it is Pressed)
-		// The pointer where the drag began, in scene pixels, and the dragged scroll view's ScrollPosition as read then (zero
-		// for a slider, whose value follows the pointer directly); both zero while nothing is dragged.
+		// The pointer where the drag began, in the pixels of the dragged widget's canvas (scene pixels for a Screen canvas, a
+		// World canvas's own for one of a World canvas: C22.3, UiSystem::ProcessInput's steps 3 and 4), and the dragged
+		// scroll view's ScrollPosition as read then (zero for a slider, whose value follows the pointer directly); both zero
+		// while nothing is dragged.
 		glm::vec2 DragOrigin = glm::vec2(0.0f);
 		glm::vec2 DragStart = glm::vec2(0.0f);
 		UiStickDirection Stick = UiStickDirection::None; // the stick's direction at the last UiInput (its edges navigate)
@@ -252,6 +265,11 @@ namespace Engine {
 	// sceneSize.x / sceneSize.y, a Perspective camera's ray starts at its position along its orientation times
 	// normalize(n.x aspect t, n.y t, -1), t = DetMath::Tan(VerticalFov / 2 in radians); an Orthographic camera's starts at
 	// its position plus its orientation times (n.x aspect OrthographicSize, n.y OrthographicSize, -NearClip), along its -Z.
+	// Its clip range (MinDistance to MaxDistance; W22.3's review): a Perspective ray's from NearClip / c, c the cosine
+	// between the ray and the camera's -Z (1 / |(n.x aspect t, n.y t, -1)|), without an end (the projection's far plane is
+	// at infinity, §8.3; FarClip culls meshes, not canvases); an Orthographic ray's from 0 to FarClip - NearClip (its
+	// origin is on the near plane), as viewport.pick's ray interval (ComputeViewPixelRayInterval) takes them but for the
+	// perspective far plane.
 	// A sibling that renders the primary camera through another projection or pose follows it here: on the merged tree,
 	// the later lander of M21 and M22 makes the ray the inverse of M21's PixelPerfectCamera projection (orthographic, half
 	// height ReferenceHeight / (2 PixelsPerUnit)) at its pixel-snapped position, with a case (decision 50, risk 11).
@@ -270,7 +288,8 @@ namespace Engine {
 	// The pointer in `canvas`'s pixels: a Screen canvas's is `point` itself (scene pixels); a World canvas's is the point
 	// where `ray` meets the canvas's plane (UiCanvasLayout::World's z = 0 plane, from either side), mapped through the
 	// inverse of World, with its ray parameter: nullopt without a ray, for a ray parallel to the plane, or one that meets it
-	// behind its origin (a parameter below 0). Pure.
+	// behind its origin (a parameter below 0) or outside its clip range (below MinDistance or above MaxDistance: W22.3's
+	// review). Pure.
 	[[nodiscard]] std::optional<UiCanvasPointer> MapUiPointerToCanvas(const UiCanvasLayout& canvas, glm::vec2 point,
 		const std::optional<UiPointerRay>& ray);
 

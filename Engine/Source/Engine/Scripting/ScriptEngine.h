@@ -148,14 +148,15 @@ namespace Engine {
 		// bubbles by the class comment's rule from its target: the target, then each ancestor it had when its walk started,
 		// in turn (so a callback that reparents an entity neither lengthens nor loops the walk); at each entity every
 		// started, enabled instance whose behaviour defines the event's callback (GetUiEventCallbackName: OnUiClick,
-		// OnUiValueChanged, OnUiFocus, OnUiHover, OnUiCancel, OnUiScroll) receives it in slot order, with the target as
-		// `element` and the event's value (OnUiValueChanged: a boolean for a toggle, a number for a slider; OnUiFocus and
-		// OnUiHover: a boolean; OnUiScroll: a vector (x, y, 0)); after an entity where any of those callbacks returned the
-		// boolean true (no other value), the event goes no further. An event whose target the scene no longer holds, or
-		// holds pending destruction, when its turn comes is dropped: nothing receives it. During an event's walk, an
-		// ancestor that a callback of that event destroyed (so pending destruction when the walk reaches it) is passed over,
-		// its instances receiving nothing, and the walk goes on to the next ancestor. A callback's fault disables only its
-		// instance (§11.7), and the event goes on to the next receiver.
+		// OnUiValueChanged, OnUiFocus, OnUiHover, OnUiCancel, OnUiScroll, and C22.3's OnUiTextChanged and OnUiSubmit)
+		// receives it in slot order, with the target as `element` and the event's value (OnUiValueChanged: a boolean for a
+		// toggle, a number for a slider; OnUiFocus and OnUiHover: a boolean; OnUiScroll: a vector (x, y, 0); OnUiTextChanged
+		// and OnUiSubmit: the target's UiTextInput Text as it is when the callback runs, empty without one); after an entity
+		// where any of those callbacks returned the boolean true (no other value), the event goes no further. An event whose
+		// target the scene no longer holds, or holds pending destruction, when its turn comes is dropped: nothing receives
+		// it. During an event's walk, an ancestor that a callback of that event destroyed (so pending destruction when the
+		// walk reaches it) is passed over, its instances receiving nothing, and the walk goes on to the next ancestor. A
+		// callback's fault disables only its instance (§11.7), and the event goes on to the next receiver.
 		void DispatchUiEvents(std::span<const UiEvent> events);
 		// Idempotent. OnDestroy for all remaining instances and cancellation while host/scene/services still exist.
 		void Stop();

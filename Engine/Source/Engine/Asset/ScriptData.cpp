@@ -66,7 +66,7 @@ namespace Engine {
 				"OnUpdate", "OnLateUpdate", "OnDestroy", "OnEnable", "OnDisable", "OnCollisionEnter", "OnCollisionExit",
 				"OnTriggerEnter", "OnTriggerExit", "OnHotReload",
 				// M22 (Docs/Decisions/0033-m22-contract.md decision 27): the UI callbacks, appended in landing order.
-				"OnUiClick", "OnUiValueChanged", "OnUiFocus", "OnUiHover", "OnUiCancel", "OnUiScroll" };
+				"OnUiClick", "OnUiValueChanged", "OnUiFocus", "OnUiHover", "OnUiCancel", "OnUiScroll", "OnUiTextChanged", "OnUiSubmit" };
 			return name.starts_with("__") || std::find(std::begin(Reserved), std::end(Reserved), name) != std::end(Reserved);
 		}
 

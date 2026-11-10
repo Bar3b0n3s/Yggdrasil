@@ -165,7 +165,7 @@ namespace Engine {
 		// C22.3 (the review of C22.3, its major on the consumers of World canvases' pixels; stream W): a World canvas's
 		// elements are in its own canvas pixels, which are not the preview frame's scene pixels, so the preview leaves them
 		// out: a point inside a World canvas element's canvas-pixel rectangle picks only a Screen canvas's element there.
-		TEST_CASE("UiAuthoring: the UI preview picks no element of a World canvas" * doctest::skip(true))
+		TEST_CASE("UiAuthoring: the UI preview picks no element of a World canvas")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();

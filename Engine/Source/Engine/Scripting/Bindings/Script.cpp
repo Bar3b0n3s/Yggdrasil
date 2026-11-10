@@ -599,6 +599,11 @@ namespace Engine {
 				"Called when Cancel is pressed, at the focused UI element (or the last canvas when none is focused); bubbles like OnUiClick.");
 			behaviour.Callback("OnUiScroll", "(self: ScriptInstance, element: Entity, position: vector) -> boolean?",
 				"Called when interaction scrolls a UI scroll view, with its new ScrollPosition (x, y, 0); bubbles like OnUiClick.");
+			// M22 (C22.3, Docs/Decisions/0033-m22-contract.md decision 47): the text input's callbacks.
+			behaviour.Callback("OnUiTextChanged", "(self: ScriptInstance, element: Entity, text: string) -> boolean?",
+				"Called when typing or an editing key changes a UI text input's Text, with its new text; bubbles like OnUiClick.");
+			behaviour.Callback("OnUiSubmit", "(self: ScriptInstance, element: Entity, text: string) -> boolean?",
+				"Called when Enter (or Submit) is pressed while a UI text input has focus, with its text; bubbles like OnUiClick.");
 			return {};
 		}
 

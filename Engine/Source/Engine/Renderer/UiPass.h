@@ -32,24 +32,27 @@
 // PassBindingCaches (SceneRenderer's state), so the recreation protocol covers it through those owners (C18.3's placement
 // rule; "UiPass: a device loss recreates nothing of the pass's own and the UI draws the same image afterwards").
 //
-// Deterministic: items in list order; an image's 9-slice patches row-major; a text's glyphs in text order. Main thread.
+// Deterministic: items in list order; an image's 9-slice patches row-major; a text's glyphs in MeasureText's order (line
+// by line, each line in visual order: C22.3's right-to-left runs reversed, a shaped cluster one glyph or several). Main
+// thread.
 //
 // C22.3 (Docs/Decisions/0033-m22-contract.md decisions 42, 48 and 51):
 //   - Fallback fonts (stream F): a text lays out with its font's chain (BuildUiFontChain), so a codepoint its font lacks
 //     takes the first font of the chain that has it; runs split where a glyph's font changes, as before.
 //   - The caret (stream T): an item with HasCaret draws a caret quad after its glyphs (PlanUiPass's comment).
 //   - World canvases (stream W): the items of a World canvas (UiDrawItem::WorldCanvas) are planned in its canvas pixels,
-//     clipped on the CPU to their clip (each quad's rectangle and texture coordinates cut to it, exact for these
-//     axis-aligned quads; a glyph likewise), and recorded first, canvas by canvas from the farthest to the nearest (the
-//     view-space depth of each canvas's centre, ties in list order), transformed by the canvas's World matrix and the view's
-//     view-projection and depth-tested against SceneDepth without depth writes: images through the QuadBatcher's
-//     depth-tested LDR target (QuadBatchTarget::LdrDepth, decision 57's ledger amendment, granted on main in 1707cf47)
-//     and glyphs through the TextRenderer's world pipeline (TextGlyphRun::World); then the Screen canvases' runs as
-//     before, on top. A view without a camera draws no World canvas. The world pipeline is SceneRendererPipelines' (the
-//     QuadBatcher's), so the placement rule covers it, with its own loss test ("UiPass: a device loss recreates the world
-//     canvases' pipeline and a World canvas draws the same image afterwards"). World Text, recorded in the Text row
-//     before the Ui row and depth-tested without depth writes like World canvases, never hides a World canvas: where
-//     they overlap the canvas draws over it, whichever is nearer (an accepted limit, decision 51, Backlog §6).
+//     clipped on the CPU to their clip and to the canvas's rectangle, outside which a World canvas draws nothing (each
+//     quad's rectangle and texture coordinates cut to it, exact for these axis-aligned quads; a glyph likewise), and
+//     recorded first, canvas by canvas from the farthest to the nearest (the view-space depth of each canvas's centre, ties
+//     in list order), transformed by the canvas's World matrix and the view's view-projection and depth-tested against
+//     SceneDepth without depth writes: images through the QuadBatcher's depth-tested LDR target (QuadBatchTarget::LdrDepth,
+//     decision 57's ledger amendment, granted on main in 1707cf47) and glyphs through the TextRenderer's world pipeline
+//     (TextGlyphRun::World); then the Screen canvases' runs as before, on top. A view without a camera draws no World
+//     canvas. The world pipeline is SceneRendererPipelines' (the QuadBatcher's), so the placement rule covers it, with its
+//     own loss test ("UiPass: a device loss recreates the world canvases' pipeline and a World canvas draws the same image
+//     afterwards"). World Text, recorded in the Text row before the Ui row and depth-tested without depth writes like World
+//     canvases, never hides a World canvas: where they overlap the canvas draws over it, whichever is nearer (an accepted
+//     limit, decision 51, Backlog §6).
 
 namespace Engine {
 
@@ -117,6 +120,9 @@ namespace Engine {
 		// reports such a sheet through the AssetManager's shared failure policy (PlanUiPass's comment); a frame index out of
 		// range is project.validate's UI_IMAGE_FRAME_OUT_OF_RANGE.
 		uint32_t SkippedItems = 0;
+		// C22.3 (decision 51; stream W): the list's World canvases (UiDrawList::WorldCanvases), which the runs' and quads'
+		// WorldCanvas index, so RecordUiPass orders them and places their quads and glyphs with their matrices.
+		std::vector<UiWorldCanvas> WorldCanvases{};
 
 		bool operator==(const UiPassPlan&) const = default;
 	};
@@ -181,7 +187,10 @@ namespace Engine {
 	// texture resolved through GpuResourceCache::GetTexture and its sampler from its Filter), a Glyphs run through
 	// TextRenderer::RecordGlyphRuns (the run's clip as its scissor), with binding sets from the view's `quadBindings` and
 	// `textBindings`, adding the draws and triangles to `counters`. Returns the plan's DrawnItems when every run recorded.
-	// Asserts the inputs. Errors: the first error of a record (Gpu); the later runs still record.
+	// C22.3 (stream W): the World canvases' runs first, as the file comment orders them (with a camera only): a Quads run
+	// through QuadBatchTarget::LdrDepth, its quads' corners placed by their canvas's World matrix and ViewProjection as the
+	// transform, without a scissor; a Glyphs run with TextGlyphRun::World. Asserts the inputs. Errors: the first error of a
+	// record (Gpu); the later runs still record.
 	[[nodiscard]] Result<uint32_t> RecordUiPass(nvrhi::ICommandList& commandList, PassBindingCache& quadBindings, PassBindingCache& textBindings,
 		const UiPassInputs& inputs, RenderPassCounters& counters);
 

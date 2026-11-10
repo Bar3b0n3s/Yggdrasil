@@ -16,9 +16,9 @@
 // Theme and DefaultFocus after PixelSnap, with the UiTheme struct: stream C) and to UiImage and UiText (RaycastTarget:
 // stream A) are registered by their streams, and W22.2's integration regenerates FeatureTest's UI scenes with them. The
 // components are unlanded, so they stay at version 1. C22.3 (decisions 45 and 49) appends UiTextInput, a fifth widget,
-// after UiScrollView; the fields it adds to UiCanvas (RenderMode, WorldWidth, WorldHeight and PixelsPerUnit after
-// DefaultFocus, with the UiCanvasRenderMode enum: stream W) are registered by their stream, with FeatureTest's
-// regeneration.
+// after UiScrollView; stream W registers the fields it adds to UiCanvas (RenderMode, WorldWidth, WorldHeight and
+// PixelsPerUnit after DefaultFocus, with the UiCanvasRenderMode enum), and W22.3's integration regenerates FeatureTest's UI
+// scenes with them.
 
 namespace Engine {
 
@@ -44,6 +44,10 @@ namespace Engine {
 		constexpr double MaxUiLineSpacing = 10.0;
 		constexpr double MaxUiGridColumns = 1024.0;
 		constexpr double MaxUiFlexWeight = 1000.0;
+		// C22.3 (decision 49): a World canvas's size in canvas pixels, and its canvas pixels per world unit.
+		constexpr double MaxUiWorldCanvasSize = 16384.0;
+		constexpr double MinUiPixelsPerUnit = 0.001;
+		constexpr double MaxUiPixelsPerUnit = 1000000.0;
 
 		static FieldMeta UiColorRange()
 		{
@@ -147,8 +151,15 @@ namespace Engine {
 			.ColorField("Focused", &UiTheme::Focused, "The tint of the widget that has keyboard and gamepad focus.", Utils::UiColorRange())
 			.ColorField("Disabled", &UiTheme::Disabled, "The tint of a widget whose Interactable is false.", Utils::UiColorRange());
 
+		// C22.3 (decision 49; stream W): where a canvas is drawn.
+		registry.Enum<UiCanvasRenderMode>("UiCanvasRenderMode", "Where a UI canvas is drawn: over the scene image, or in the world.")
+			.Entry(UiCanvasRenderMode::Screen, "Screen", "Over the scene image, after the scene and its texts, laid out in scene pixels.")
+			.Entry(UiCanvasRenderMode::World, "World",
+				"As a rectangle in the world at the canvas entity's transform, depth-tested against the scene, laid out in its own canvas pixels.");
+
 		RegisterComponent<UiCanvasComponent>(registry, "UiCanvas",
-			"The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text.")
+			"The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text, or, in World mode, "
+			"laid out in its own canvas pixels and drawn as a rectangle in the world.")
 			.Category("Ui")
 			.Version(1)
 			.Excludes<UiRectComponent>()
@@ -165,7 +176,19 @@ namespace Engine {
 			.Field("Theme", &UiCanvasComponent::Theme, "The state tints of the canvas's widgets (buttons, toggles, sliders and scroll views).")
 			.Field("DefaultFocus", &UiCanvasComponent::DefaultFocus,
 				"The UI widget keyboard and gamepad navigation focuses first while nothing has focus; null: navigation starts only from a pointer "
-				"press or Ui.SetFocus.");
+				"press or Ui.SetFocus.")
+			.Field("RenderMode", &UiCanvasComponent::RenderMode,
+				"Screen draws the canvas over the scene image; World draws it as a rectangle in the world at the entity's transform, depth-tested "
+				"against the scene.")
+			.Field("WorldWidth", &UiCanvasComponent::WorldWidth,
+				"A World canvas's width in canvas pixels (its layout's scene resolution); Screen canvases ignore it.",
+				{ .Min = 1.0, .Max = Utils::MaxUiWorldCanvasSize, .Unit = "px" })
+			.Field("WorldHeight", &UiCanvasComponent::WorldHeight,
+				"A World canvas's height in canvas pixels (its layout's scene resolution); Screen canvases ignore it.",
+				{ .Min = 1.0, .Max = Utils::MaxUiWorldCanvasSize, .Unit = "px" })
+			.Field("PixelsPerUnit", &UiCanvasComponent::PixelsPerUnit,
+				"A World canvas's canvas pixels per world unit: its rectangle is WorldWidth x WorldHeight over this, centred on the entity.",
+				{ .Min = Utils::MinUiPixelsPerUnit, .Max = Utils::MaxUiPixelsPerUnit });
 
 		RegisterComponent<UiRectComponent>(registry, "UiRect",
 			"A UI element's rectangle in its parent's (or its canvas's), in canvas units, x right and y down.")

@@ -15,6 +15,7 @@
 #include "Engine/Scene/Components/UiScrollViewComponent.h"
 #include "Engine/Scene/Components/UiSliderComponent.h"
 #include "Engine/Scene/Components/UiTextComponent.h"
+#include "Engine/Scene/Components/UiTextInputComponent.h"
 #include "Engine/Scene/Components/UiToggleComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
@@ -53,13 +54,43 @@ namespace Engine {
 					return "Slider";
 				case UiWidgetKind::ScrollView:
 					return "ScrollView";
+				case UiWidgetKind::TextInput:
+					return "TextInput";
 			}
 			return "Widget";
 		}
 
+		// The kinds that take `text`: a Text, a Button's or a Toggle's label, and a TextInput's placeholder (C22.3).
 		static bool HasUiWidgetLabel(UiWidgetKind kind)
 		{
-			return kind == UiWidgetKind::Text || kind == UiWidgetKind::Button || kind == UiWidgetKind::Toggle;
+			return kind == UiWidgetKind::Text || kind == UiWidgetKind::Button || kind == UiWidgetKind::Toggle || kind == UiWidgetKind::TextInput;
+		}
+
+		// The default root name: the kind's name, spelt as words where it joins two.
+		static std::string GetUiWidgetDefaultName(UiWidgetKind kind)
+		{
+			switch (kind)
+			{
+				case UiWidgetKind::ScrollView:
+					return "Scroll View";
+				case UiWidgetKind::TextInput:
+					return "Text Input";
+				case UiWidgetKind::Canvas:
+				case UiWidgetKind::Panel:
+				case UiWidgetKind::Image:
+				case UiWidgetKind::Text:
+				case UiWidgetKind::Button:
+				case UiWidgetKind::Toggle:
+				case UiWidgetKind::Slider:
+					break;
+			}
+			return std::string(GetUiWidgetKindName(kind));
+		}
+
+		// The default `text`: the kind's name, or a TextInput's placeholder "Enter text" (C22.3, decision 53).
+		static std::string GetUiWidgetDefaultText(UiWidgetKind kind)
+		{
+			return kind == UiWidgetKind::TextInput ? std::string("Enter text") : std::string(GetUiWidgetKindName(kind));
 		}
 
 		// Whether `entity` or one of its ancestors holds a UiCanvas.
@@ -80,7 +111,8 @@ namespace Engine {
 		}
 
 		// Builds the template of `kind` (UiAuthoringMethods.h's table) on the entity `root`, its children created below it and
-		// appended to `created` in the table's order. `text` is the label of a Text, Button or Toggle.
+		// appended to `created` in the table's order. `text` is the label of a Text, Button or Toggle, or a TextInput's
+		// placeholder.
 		static void BuildUiWidget(Scene& scene, Entity root, UiWidgetKind kind, const std::string& text, std::vector<UUID>& created)
 		{
 			const auto child = [&scene, root, &created](std::string_view name)
@@ -172,6 +204,25 @@ namespace Engine {
 					root.AddComponent<UiScrollViewComponent>(UiScrollViewComponent{ .Content = content.GetUUID() });
 					return;
 				}
+				case UiWidgetKind::TextInput:
+				{
+					// C22.3 (decision 53): the field's Text and Placeholder children share one inset single-line layout.
+					root.AddComponent<UiRectComponent>(UiRectComponent{ .Size = glm::vec2(240.0f, 32.0f) });
+					root.AddComponent<UiImageComponent>(UiImageComponent{ .Color = glm::vec4(0.15f, 0.15f, 0.15f, 1.0f) });
+					const Entity shown = child("Text");
+					shown.AddComponent<UiRectComponent>(MakeStretchedUiRect(glm::vec2(-12.0f)));
+					shown.AddComponent<UiTextComponent>(
+						UiTextComponent{ .Size = 20.0f, .Color = glm::vec4(1.0f), .VerticalAlignment = UiTextVerticalAlignment::Middle, .Wrap = false });
+					const Entity placeholder = child("Placeholder");
+					placeholder.AddComponent<UiRectComponent>(MakeStretchedUiRect(glm::vec2(-12.0f)));
+					placeholder.AddComponent<UiTextComponent>(UiTextComponent{ .Text = text,
+						.Size = 20.0f,
+						.Color = glm::vec4(0.6f, 0.6f, 0.6f, 1.0f),
+						.VerticalAlignment = UiTextVerticalAlignment::Middle,
+						.Wrap = false });
+					root.AddComponent<UiTextInputComponent>(UiTextInputComponent{ .TextElement = shown.GetUUID(), .Placeholder = placeholder.GetUUID() });
+					return;
+				}
 			}
 		}
 
@@ -191,7 +242,7 @@ namespace Engine {
 			{
 				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/text",
 					std::format("a {} has no label to take a text", kindName),
-					"only a Text, Button or Toggle takes text: omit it, or create a Text below the widget"));
+					"only a Text, Button, Toggle or TextInput takes text: omit it, or create a Text below the widget"));
 			}
 			Entity parent;
 			if (!params.Parent.empty())
@@ -212,10 +263,8 @@ namespace Engine {
 				index = params.Index;
 			}
 
-			const std::string name = context.HasParam("name") ? params.Name
-				: params.Kind == UiWidgetKind::ScrollView     ? std::string("Scroll View")
-															  : std::string(kindName);
-			const std::string text = context.HasParam("text") ? params.Text : std::string(kindName);
+			const std::string name = context.HasParam("name") ? params.Name : Utils::GetUiWidgetDefaultName(params.Kind);
+			const std::string text = context.HasParam("text") ? params.Text : Utils::GetUiWidgetDefaultText(params.Kind);
 			// A widget needs a canvas at or above its parent; without one it goes below a new canvas, which then takes the
 			// created root's place below `parent` (at `index`), so the command never builds UI outside a canvas.
 			const bool needsCanvas = params.Kind != UiWidgetKind::Canvas && !Utils::IsInUiCanvas(parent);
@@ -260,7 +309,8 @@ namespace Engine {
 			.Entry(UiWidgetKind::Button, "Button", "A button with an image and a Label child.")
 			.Entry(UiWidgetKind::Toggle, "Toggle", "A toggle box with a Check child that shows while it is on, and a Label child.")
 			.Entry(UiWidgetKind::Slider, "Slider", "A horizontal slider with Fill and Handle children.")
-			.Entry(UiWidgetKind::ScrollView, "ScrollView", "A vertical scroll view whose Content child stacks its children.");
+			.Entry(UiWidgetKind::ScrollView, "ScrollView", "A vertical scroll view whose Content child stacks its children.")
+			.Entry(UiWidgetKind::TextInput, "TextInput", "A single-line text field with a Text child that shows what is typed and a Placeholder child.");
 
 		registry.Struct<UiCreateWidgetParams>("UiCreateWidgetParams", "The params of ui.createWidget.")
 			.Field("kind", &UiCreateWidgetParams::Kind, "The widget to build.")
@@ -271,7 +321,8 @@ namespace Engine {
 			.Field("index", &UiCreateWidgetParams::Index,
 				"The created root's position among the parent's children (among the scene's roots without a parent); omitted: last.")
 			.Field("name", &UiCreateWidgetParams::Name, "The widget root's name; omitted: the kind's name.")
-			.Field("text", &UiCreateWidgetParams::Text, "The label of a Text, Button or Toggle; omitted: the kind's name.");
+			.Field("text", &UiCreateWidgetParams::Text,
+				"The label of a Text, Button or Toggle, or a TextInput's placeholder; omitted: the kind's name (\"Enter text\" for a TextInput).");
 
 		registry.Struct<UiCreateWidgetResult>("UiCreateWidgetResult", "The created widget.")
 			.Field("entity", &UiCreateWidgetResult::Entity, "The widget's root.")
@@ -289,7 +340,7 @@ namespace Engine {
 		methods.Add(
 			{
 				.Name = "ui.createWidget",
-				.Description = "Builds a UI widget (a canvas, panel, image, text, button, toggle, slider or scroll view) with its child "
+				.Description = "Builds a UI widget (a canvas, panel, image, text, button, toggle, slider, scroll view or text input) with its child "
 							   "entities and components in the edit scene, as one undoable command; the editor's Create UI menu submits it.",
 				.RequiredParams = { "kind" },
 				.ExposeAsTool = true,

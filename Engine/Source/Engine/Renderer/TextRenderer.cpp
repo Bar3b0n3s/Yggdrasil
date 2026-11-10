@@ -34,7 +34,8 @@
 // says how the vertex shader places each mode), cutting it into batches wherever the atlas or the pipeline changes, so the
 // items keep their order; then it uploads the list once and draws the batches. RecordGlyphRuns (M22) does the same with its
 // caller's glyphs, already in the framebuffer's pixels, cutting batches also where the scissor changes, each run's glyphs as
-// screen vertices on top; both share the vertex buffer, the binding sets and the drawing (State::Submit). Font atlases are
+// screen vertices on top (C22.3: a World canvas's run as world vertices placed by its matrix, depth-tested, without a
+// scissor); both share the vertex buffer, the binding sets and the drawing (State::Submit). Font atlases are
 // mirrored per (font handle, version); a missing font and a null font share the Default font's mirror, because both resolve
 // to the font placeholder.
 // An atlas is uploaded through HostImageUpload, whose command lists are not immediate ones and are executed at once, so it
@@ -545,7 +546,13 @@ namespace Engine {
 			ENGINE_CORE_ASSERT(inside, "a glyph run's glyphs [{}, +{}) lie outside the {} glyphs given", run.FirstGlyph, run.GlyphCount, inputs.Glyphs.size());
 			if (!inside || run.GlyphCount == 0 || !Utils::IsFinite(run.Color))
 				continue;
-			const nvrhi::Rect scissor = Utils::ClipGlyphScissor(run.Scissor, width, height);
+			// C22.3 (decision 51): a World canvas's run is placed in the world by its matrix and drawn depth-tested; its glyphs
+			// are already clipped on the CPU, so it takes no scissor.
+			ENGINE_CORE_ASSERT(!run.World.has_value() || !run.Scissor.has_value(), "a World canvas's glyph run takes no scissor");
+			const bool world = run.World.has_value();
+			if (world && !Utils::IsFinite(*run.World))
+				continue;
+			const nvrhi::Rect scissor = Utils::ClipGlyphScissor(world ? std::nullopt : run.Scissor, width, height);
 			if (scissor.maxX <= scissor.minX || scissor.maxY <= scissor.minY)
 				continue;
 			const ResolvedFont& font = state.ResolveFont(assets, run.Font);
@@ -573,6 +580,13 @@ namespace Engine {
 				};
 				for (const size_t corner : Utils::QuadCornerOrder)
 				{
+					if (world)
+					{
+						const glm::vec3 position(*run.World * glm::vec4(corners[corner], 0.0f, 1.0f));
+						state.Staging.push_back(
+							{ .Position = position, .Corner = glm::vec2(0.0f), .TexCoord = texCoords[corner], .Color = run.Color, .Mode = TextVertexWorld });
+						continue;
+					}
 					const glm::vec2 ndc = corners[corner] * pixelToNdc + glm::vec2(-1.0f, 1.0f);
 					state.Staging.push_back(
 						{ .Position = glm::vec3(ndc, 0.0f), .Corner = glm::vec2(0.0f), .TexCoord = texCoords[corner], .Color = run.Color, .Mode = TextVertexScreen });
@@ -585,8 +599,8 @@ namespace Engine {
 				state.Staging.resize(firstVertex);
 				continue;
 			}
-			// The colour is per vertex, so consecutive runs of one atlas and one scissor draw together.
-			state.AddBatch(font.Atlas, Utils::TextOnTopPipeline, firstVertex, scissor);
+			// The colour is per vertex, so consecutive runs of one atlas, one pipeline and one scissor draw together.
+			state.AddBatch(font.Atlas, world ? Utils::TextTestedPipeline : Utils::TextOnTopPipeline, firstVertex, scissor);
 			++drawn;
 		}
 

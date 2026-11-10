@@ -858,7 +858,7 @@ namespace Engine {
 		// and edits Screen canvases' elements only. An element of a World canvas, whose rectangle is in its canvas's own
 		// pixels, is neither selected by a click at those pixels nor given the rect tool's handles while selected (a World
 		// canvas is placed by its entity's Transform and its elements are edited in the inspector or with entity.update).
-		TEST_CASE("SceneViewportPanel: the UI preview neither selects nor resizes an element of a World canvas" * doctest::skip(true))
+		TEST_CASE("SceneViewportPanel: the UI preview neither selects nor resizes an element of a World canvas")
 		{
 			ScenePanelHarness test("SceneUiPreviewWorld");
 			EditorContext& editor = test.GetEditor();

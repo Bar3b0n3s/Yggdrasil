@@ -147,7 +147,7 @@ return not pcall(Ui.SetFocus, button) and not pcall(Ui.SetFocus, nil)
 		// C22.3 (the review of C22.3, its major on the consumers of World canvases' pixels; stream W, decision 56's text): an
 		// element of a World canvas is laid out in its canvas's own pixels, which Ui.GetRect reports with the canvas, as it
 		// reports every element's canvas.
-		TEST_CASE("Ui: GetRect reports a World canvas's element in its canvas pixels, with its canvas" * doctest::skip(true))
+		TEST_CASE("Ui: GetRect reports a World canvas's element in its canvas pixels, with its canvas")
 		{
 			Test::ScriptTestFixture fixture({ .TestMode = true });
 			Scene& scene = fixture.GetScene();
@@ -172,6 +172,31 @@ assert(sign.Min == vector.create(100, 50, 0) and sign.Max == vector.create(300, 
 assert(sign.Canvas == Scene.FindByName("Board"))
 local button = Ui.GetRect(Scene.FindByName("Button"))
 return button.Canvas == Scene.FindByName("Canvas")
+)");
+			REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
+			CHECK(result->Value.Get() == Json(true));
+			CHECK(fixture.Errors.empty());
+		}
+
+		// W22.3's review: UiElementRect's Canvas is an Entity, never nil, for every element GetRect reports; an element pending
+		// destruction (readable until the flush, M20's W-P02) is still reported, with its canvas, which a destroyed ancestor
+		// leaves pending too.
+		TEST_CASE("Ui: GetRect reports the canvas of an element pending destruction")
+		{
+			Test::ScriptTestFixture fixture({ .TestMode = true });
+			Scene& scene = fixture.GetScene();
+			PopulateUiModuleScene(scene);
+			UiSystem ui;
+			ui.LayoutStep(scene, glm::uvec2(320, 180));
+			fixture.Ui = &ui;
+			REQUIRE(fixture.Start());
+
+			const auto result = fixture.Evaluate(R"(
+local canvas = Scene.FindByName("Canvas")
+local button = Scene.FindByName("Button")
+Scene.Destroy(canvas)
+local rect = Ui.GetRect(button)
+return rect ~= nil and rect.Min == vector.create(10, 20, 0) and rect.Canvas ~= nil and rect.Canvas == canvas
 )");
 			REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
 			CHECK(result->Value.Get() == Json(true));

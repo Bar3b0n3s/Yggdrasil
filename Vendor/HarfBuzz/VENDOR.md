@@ -7,23 +7,27 @@
 | Commit | `35f656a1a2bab548ea7f54a6dd3fba2b09680d14` (the tag `15.0.0`, an annotated tag object `66946f52d6c27f635c0b9c23d55fa1df6b76a5fc`) |
 | Archive | `https://github.com/harfbuzz/harfbuzz/releases/download/15.0.0/harfbuzz-15.0.0.tar.xz`, 20,396,372 bytes, SHA-256 `968536e9abd782f07f7954044c0c4020199fcdd39b41d221ec42d2a3be4a44df` (the digest GitHub publishes for the release asset; verified on the downloaded bytes) |
 | Date vendored | 2026-11-03 (M22's contract C22.3, Docs/Decisions/0033-m22-contract.md decision 41) |
-| License | `MIT-Modern-Variant` ("Old MIT") - `COPYING` |
+| License | `MIT-Modern-Variant` ("Old MIT") - `COPYING`; `MIT` - `src/ms-use/COPYING` (Microsoft's Universal Shaping Engine data, from which upstream generated the compiled `src/hb-ot-shaper-use-table.hh`) |
 | Local modifications | None. Every kept file is byte-identical to the archive's (all of them use LF line endings already). |
 | Approval | `Docs/Decisions/0001-approvals.md` (HarfBuzz and SheenBidi, ADR 0028 decision 7) |
 
 ## What was kept
 
-`COPYING` and the 365 files of `src/` that the amalgamated translation unit `src/harfbuzz-subset.cc` and the public
+`COPYING`; the 365 files of `src/` that the amalgamated translation unit `src/harfbuzz-subset.cc` and the public
 headers `hb.h`, `hb-ot.h` and `hb-subset.h` include, directly or through other kept files (every `#include` followed
 whatever its condition, so a few backend headers such as `hb-ft.h` that only a disabled backend's sources include are
 kept with them, and the two string tables `hb-ot-cff1-std-str.hh` and `hb-ot-post-macroman.hh`, which
-`hb-string-array.hh` includes through the macro `HB_STRING_ARRAY_LIST`), in upstream's layout (`src/`, `src/OT/`,
-`src/graph/`): 366 files, 5,587,532 bytes.
+`hb-string-array.hh` includes through the macro `HB_STRING_ARRAY_LIST`); and `src/ms-use/COPYING`, the licence (MIT,
+Microsoft's) of the Universal Shaping Engine data from which upstream generated the compiled table
+`src/hb-ot-shaper-use-table.hh`, so the licence of every table the library compiles ships with it (restored from the
+pinned archive by W22.3's stream S, ADR 0033: C22.3's vendoring had removed it with the data). In upstream's layout
+(`src/`, `src/OT/`, `src/graph/`, `src/ms-use/`): 367 files, 5,588,673 bytes.
 
-The kept tree's digest is SHA-256 `358ba9febf6a59f5c763b809b20898403afb9f85d34779ac46c8247f302c3c90`: the SHA-256 of
+The kept tree's digest is SHA-256 `d83c6d363aca5ba3a72191cf4eeb1fc84eb72515a4450296a04ec3ac0083d5f4`: the SHA-256 of
 the UTF-8 text made of one line `<file SHA-256>  <path>\n` per kept file (lower-case hex, two spaces, the path relative
 to this directory with `/` separators), sorted by path byte-wise. `COPYING`'s SHA-256 is
-`ba8f810f2455c2f08e2d56bb49b72f37fcf68f1f4fade38977cfd7372050ad64`.
+`ba8f810f2455c2f08e2d56bb49b72f37fcf68f1f4fade38977cfd7372050ad64`; `src/ms-use/COPYING`'s (1,141 bytes) is
+`c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383`.
 
 ## What was removed
 
@@ -31,8 +35,8 @@ Everything else of the archive: `test/`, `perf/`, `util/`, `docs/`, `subprojects
 `meson_options.txt`, `CMakeLists.txt`, `replace-enum-strings.cmake`, the `*.pc.in` and `*.cmake.in` templates), the
 other amalgamations (`src/harfbuzz.cc`, which adds the platform backends, and `src/harfbuzz-world.cc`), the platform
 backends' sources (FreeType, ICU, GLib, GObject, Cairo, CoreText, DirectWrite, GDI, Uniscribe, Graphite2), the
-WebAssembly (`src/wasm/`), Rust (`src/rust/`) and `kbts` shapers, the raster, vector and GPU libraries, `src/ms-use/`
-(the Universal Shaping Engine's data sources, with their own `COPYING`), upstream's tests and tools in `src/`
+WebAssembly (`src/wasm/`), Rust (`src/rust/`) and `kbts` shapers, the raster, vector and GPU libraries, the data
+sources of `src/ms-use/` (the Universal Shaping Engine's, whose `COPYING` is kept), upstream's tests and tools in `src/`
 (`main.cc`, `test-*.cc`, the `gen-*.py` and `check-*.py` scripts and their `*.txt` inputs), and the top-level documents
 (`README*`, `NEWS`, `AUTHORS`, `THANKS`, `BUILD.md`, `CONFIG.md`, `TESTING.md`, `RELEASING.md`, `SECURITY.md`,
 `AGENTS.md`, `CLAUDE.md`, `CODE_OF_AI_CONDUCT.md`, `AVAR2-INSTANCING.md`, `harfbuzz.doap`, the images).
@@ -97,8 +101,9 @@ set explicitly (never `hb_language_get_default`), and the script and direction f
 - The archive's SHA-256 matches the digest GitHub publishes for the release asset; the kept files match the archive's
   byte for byte (the tree digest above).
 - `python Scripts/CheckBuildConfig.py` passes on the workspace and fails on `FastMathHarfBuzz`.
-- The library builds without warnings in Debug and Release with MSVC (14.51, the workspace build) and in Release and Dist
-  with clang-cl (the portability stage's build of Architecture §15.8). Its GCC, Clang and Apple Clang builds are never
+- The library builds without warnings in Debug, Release and Dist with MSVC (14.51: the workspace build, and Dist rebuilt
+  in the workspace and through the vendor cache by W22.3's stream S) and in Release and Dist with clang-cl (the
+  portability stage's build of Architecture §15.8). Its GCC, Clang and Apple Clang builds are never
   compiled (`Docs/Decisions/0028-backlog-program.md` decision 10).
 
 ## Updating
@@ -106,7 +111,9 @@ set explicitly (never `hb_language_get_default`), and the script and direction f
 1. Download the release's `harfbuzz-<version>.tar.xz` from the GitHub release and compare its SHA-256 with the digest
    the release page lists.
 2. Recompute the include closure of `src/harfbuzz-subset.cc`, `hb.h`, `hb-ot.h` and `hb-subset.h`, replace `src/` with
-   it and `COPYING` with the archive's.
+   it and `COPYING` with the archive's, and keep the licence of every data source that a compiled generated table
+   derives from (today `src/ms-use/COPYING`, for `hb-ot-shaper-use-table.hh`) among the kept files and in the notices
+   row below.
 3. Update this file (version, commit, archive, digests, the kept count), rebuild every configuration and the clang-cl
    portability build, run `python Scripts/CheckBuildConfig.py` and the text-measurement and font-importer tests, and bump
    `FontImporter::Version` when cooked fonts change.
@@ -120,7 +127,7 @@ The row `Scripts/Lib/notices.py` reads for `THIRD_PARTY_NOTICES.txt` (Docs/Decis
 | Name | HarfBuzz |
 | Upstream | https://github.com/harfbuzz/harfbuzz |
 | Version | 15.0.0 |
-| License | MIT-Modern-Variant |
+| License | MIT-Modern-Variant AND MIT |
 | Shipped | yes |
 | Projects | HarfBuzz |
-| License files | COPYING |
+| License files | COPYING, src/ms-use/COPYING |

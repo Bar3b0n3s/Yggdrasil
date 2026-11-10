@@ -19,6 +19,7 @@
 #include <format>
 #include <map>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -52,6 +53,12 @@ namespace Engine {
 	static int HelperHasEngine(ScriptCall& call)
 	{
 		Lua::Push(call, Lua::GetEngine(call) != nullptr);
+		return 1;
+	}
+	static int HelperEmptyView(ScriptCall& call)
+	{
+		// A default-constructed view's data() is null (W22.3's integration: lua_pushlstring refuses a null pointer).
+		Lua::PushString(call, std::string_view{});
 		return 1;
 	}
 	static int HelperMemory(ScriptCall& call)
@@ -125,6 +132,7 @@ namespace Engine {
 			.Function("AssetText", HelperAssetText, "(value: AssetRef) -> string", "Read an asset handle.", pure)
 			.Function("Nil", HelperNil, "() -> AssetRef?", "Push an invalid reference as nil.", pure)
 			.Function("HasEngine", HelperHasEngine, "() -> boolean", "Whether this call borrows a runtime engine.", pure)
+			.Function("EmptyView", HelperEmptyView, "() -> string", "Push an empty string from a view without data.", pure)
 			.Function("Memory", HelperMemory, "() -> string", "Allocate beyond the test VM's hard limit.", pure);
 		api.Module("Probe", "Typed marshalling probes.").Function("Forwarded", HelperForwarded, "() -> ()", "Forward a located child error.", pure);
 		api.Module("Probe", "Typed marshalling probes.").Function("Container", HelperContainer, "(kind: string, value: any) -> any", "Convert reflected containers with a shared native allowance.", pure);
@@ -572,6 +580,16 @@ assert(Probe.Nil() == nil)
 assert(not pcall(Probe.AssetText, e))
 assert(not pcall(Probe.Entity, Probe.Asset()))
 assert(not pcall(Probe.Color, vector.one))
+return true
+)");
+		}
+		TEST_CASE("LuaHelpers: PushString pushes an empty string from a view without data")
+		{
+			Test::ScriptTestFixture fixture({ .ConfigureApi = HelperProbes });
+			REQUIRE(fixture.Start());
+			CheckHelperScript(fixture, R"(
+local value = Probe.EmptyView()
+assert(type(value) == "string" and value == "" and #value == 0)
 return true
 )");
 		}

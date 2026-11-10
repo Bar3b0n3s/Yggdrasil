@@ -331,8 +331,7 @@ namespace Engine {
 		}
 
 		// M22 C22.3 (Docs/Decisions/0033-m22-contract.md decision 46; stream T): the text latch.
-		TEST_CASE("PlayInput: the text latch holds the tick's committed characters in the step view and the frame's since the last frame"
-			* doctest::skip(true))
+		TEST_CASE("PlayInput: the text latch holds the tick's committed characters in the step view and the frame's since the last frame")
 		{
 			Result<PlayInput> created = PlayInput::Create(MakeActions());
 			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());

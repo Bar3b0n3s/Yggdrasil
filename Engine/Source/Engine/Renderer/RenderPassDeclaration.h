@@ -99,8 +99,8 @@ namespace Engine {
 
 	}
 
-	// The pass list, in stats order (see the file comment). 58 pipelines at startup: M17's 54 plus the QuadBatcher's 2 and the
-	// output stage's 2 (M22's Ui adds none).
+	// The pass list, in stats order (see the file comment). 59 pipelines at startup: M17's 54 plus the QuadBatcher's 2 and the
+	// output stage's 2 (M22's Ui adds none of its own), and the QuadBatcher's LdrDepth (M22, C22.3, decision 57).
 	inline constexpr std::array ScenePassDeclarations = std::to_array<RenderPassDeclaration>({
 		{ .Name = "Prepare", .Stage = RenderStage::Prepare, .StatsRows = Detail::PrepareRows },
 		{ .Name = "Shadows", .Stage = RenderStage::Shadows, .PipelineCount = 6, .Programs = Detail::ShadowPrograms, .StatsRows = Detail::ShadowRows, .Targets = Detail::ShadowTargets },
@@ -117,8 +117,9 @@ namespace Engine {
 		{ .Name = "ForwardTransparent", .Stage = RenderStage::Forward, .PipelineCount = 3, .Programs = Detail::ScenePrograms, .StatsRows = Detail::ForwardTransparentRows, .Targets = Detail::SceneColorTargets },
 		// The Overdraw data view's additive pass, for the three cull modes.
 		{ .Name = "Overdraw", .Stage = RenderStage::Forward, .PipelineCount = 3, .Programs = Detail::ScenePrograms, .StatsRows = Detail::OverdrawRows, .Targets = Detail::OverdrawTargets },
-		// QuadBatcher.h: its users record under their own rows (M21's Sprites in this stage, M22's Ui in SceneOverlay).
-		{ .Name = "QuadBatcher", .Stage = RenderStage::Sprites, .PipelineCount = 2, .Programs = Detail::QuadPrograms },
+		// QuadBatcher.h: its users record under their own rows (M21's Sprites in this stage, M22's Ui in SceneOverlay). Hdr,
+		// Ldr and (M22, C22.3) LdrDepth.
+		{ .Name = "QuadBatcher", .Stage = RenderStage::Sprites, .PipelineCount = 3, .Programs = Detail::QuadPrograms },
 		{ .Name = "Bloom", .Stage = RenderStage::HdrPost, .PipelineCount = 3, .Programs = Detail::BloomPrograms, .StatsRows = Detail::BloomRows, .Targets = Detail::BloomTargets },
 		// The tonemap pass and the data views' composite, which replaces it under the same row.
 		{ .Name = "Tonemap", .Stage = RenderStage::Tonemap, .PipelineCount = 2, .Programs = Detail::TonemapPrograms, .StatsRows = Detail::TonemapRows, .Targets = Detail::TonemapTargets },
@@ -126,7 +127,8 @@ namespace Engine {
 		// Game Text at the scene resolution (TextRenderer's two pipelines, which Labels shares).
 		{ .Name = "Text", .Stage = RenderStage::SceneOverlay, .PipelineCount = 2, .Programs = Detail::TextPrograms, .StatsRows = Detail::TextRows },
 		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 7): the UI draw list at the scene resolution, after game Text,
-		// with the QuadBatcher's Ldr pipeline and the Text pipelines (UiPass.h), so it declares none of its own.
+		// with the QuadBatcher's Ldr pipeline (C22.3: and its LdrDepth for World canvases) and the Text pipelines (UiPass.h), so
+		// it declares none of its own.
 		{ .Name = "Ui", .Stage = RenderStage::SceneOverlay, .StatsRows = Detail::UiRows },
 		{ .Name = "Upscale", .Stage = RenderStage::Output, .PipelineCount = 2, .Programs = Detail::UpscalePrograms, .StatsRows = Detail::UpscaleRows, .Targets = Detail::UpscaleTargets },
 		{ .Name = "Selection", .Stage = RenderStage::EditorOverlay, .PipelineCount = 8, .Programs = Detail::SelectionPrograms, .StatsRows = Detail::SelectionRows, .Targets = Detail::SelectionTargets },

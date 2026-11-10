@@ -4,7 +4,7 @@
 	"Handle": "8437e42391ce559f",
 	"Type": "Font",
 	"Importer": "Font",
-	"ImporterVersion": 4,
+	"ImporterVersion": 5,
 	"Settings": {
 		"PixelSize": 48,
 		"Spread": 8,
@@ -13,7 +13,8 @@
 				"First": 256,
 				"Last": 383
 			}
-		]
+		],
+		"Fallbacks": []
 	},
 	"SubAssets": []
 }

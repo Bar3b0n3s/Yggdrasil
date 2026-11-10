@@ -140,7 +140,7 @@ namespace Engine {
 			CHECK(GetDeclaredPipelineCountOf("Wireframe") == 0);
 			CHECK(GetDeclaredPipelineCountOf("Labels") == 0);
 			CHECK(GetDeclaredPipelineCountOf("Letterbox") == 0);
-			// M22: the Ui pass records with the QuadBatcher's Ldr pipeline and the Text pipelines.
+			// M22: the Ui pass records with the QuadBatcher's Ldr and (C22.3) LdrDepth pipelines and the Text pipelines.
 			CHECK(GetDeclaredPipelineCountOf("Ui") == 0);
 		}
 	}
@@ -164,7 +164,7 @@ namespace Engine {
 		TEST_CASE("Pipelines: Create makes exactly the declared startup pipelines")
 		{
 			// M18 acceptance (C18.1): the startup count is the declarations' sum, and Create goes through CreatePipelines.
-			static_assert(GetDeclaredPipelineCount() == 58);
+			static_assert(GetDeclaredPipelineCount() == 59);
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());

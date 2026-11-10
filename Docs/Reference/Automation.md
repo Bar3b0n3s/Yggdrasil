@@ -2662,7 +2662,7 @@ Example: Run every test and return the script API coverage counters.
 
 ### ui.createWidget
 
-Builds a UI widget (a canvas, panel, image, text, button, toggle, slider or scroll view) with its child entities and components in the edit scene, as one undoable command; the editor's Create UI menu submits it.
+Builds a UI widget (a canvas, panel, image, text, button, toggle, slider, scroll view or text input) with its child entities and components in the edit scene, as one undoable command; the editor's Create UI menu submits it.
 
 - Flags: tool `ui_create_widget`, mutates, dry run, batch, scene target
 - Timeout: 60 s
@@ -2674,7 +2674,7 @@ Builds a UI widget (a canvas, panel, image, text, button, toggle, slider or scro
 | `parent` | `String` |  | `""` | The parent entity (16 hex digits, a unique id prefix of at least 6, or a path); a kind other than Canvas below a parent without a UiCanvas at or above it goes below a new canvas created there. Omitted: a Canvas is a root, any other kind goes below a new root canvas. |
 | `index` | `UInt32` |  | `0` | The created root's position among the parent's children (among the scene's roots without a parent); omitted: last. |
 | `name` | `String` |  | `""` | The widget root's name; omitted: the kind's name. |
-| `text` | `String` |  | `""` | The label of a Text, Button or Toggle; omitted: the kind's name. |
+| `text` | `String` |  | `""` | The label of a Text, Button or Toggle, or a TextInput's placeholder; omitted: the kind's name ("Enter text" for a TextInput). |
 
 | Result | Type | Description |
 |---|---|---|
@@ -2699,7 +2699,7 @@ Shows the scene's UI laid out in scene pixels: every canvas and element with its
 |---|---|---|---|---|
 | `canvas` | `String` |  | `""` | An entity with a UiCanvas whose UI alone is listed; omitted: every canvas. |
 | `depth` | `UInt32` |  | `0` | The most levels listed below each canvas; 0: unlimited. |
-| `format` | `SceneTreeFormat` |  | `"Text"` | Text: a compact outline (widgets as UiButton, UiToggle(on\|off), UiSlider(\<value>) and UiScrollView(\<x>,\<y>), marked disabled, focused, hovered or pressed); Json: a flat list of entries. |
+| `format` | `SceneTreeFormat` |  | `"Text"` | Text: a compact outline (widgets as UiButton, UiToggle(on\|off), UiSlider(\<value>), UiScrollView(\<x>,\<y>) and UiTextInput("\<text>"), marked disabled, focused, hovered or pressed); Json: a flat list of entries. |
 | `width` | `UInt32` |  | `0` | The scene resolution's width to lay out at, with height; omitted: the play session's own, or the project's window size for the edit scene. |
 | `height` | `UInt32` |  | `0` | The scene resolution's height to lay out at, with width. |
 | `target` | `SceneTarget` |  | `"Edit"` | The scene to read; omitted: the play scene while playing, else the edit scene. |

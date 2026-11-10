@@ -5,12 +5,14 @@
 #include "Engine/Scene/Components/UiScrollViewComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Scene/UiTextInput.h"
 #include "Engine/Scene/UiWidgets.h"
 
 #include <array>
 #include <bit>
 #include <cstdint>
 #include <format>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -112,6 +114,21 @@ namespace Engine {
 			return ClampUiScrollPosition(*scrollView, viewSize, contentSize, scrollView->ScrollPosition);
 		}
 
+		// The pointer of `input` in the pixels of `element`'s canvas in `table` (C22.3, decision 50: MapUiPointerToCanvas, the
+		// point itself for a Screen canvas); nullopt when the element is not laid out, or its World canvas's plane is out of
+		// the ray's reach (no ray, parallel to it, behind its origin or outside the camera's clip range).
+		static std::optional<glm::vec2> MapUiPointerToElementCanvas(const UiLayoutTable& table, UUID element, const UiInputFrame& input)
+		{
+			const UiLayoutNode* node = FindUiLayoutNode(table, element);
+			const UiCanvasLayout* canvas = node != nullptr ? FindUiCanvasLayout(table, node->Canvas) : nullptr;
+			if (canvas == nullptr)
+				return std::nullopt;
+			const std::optional<UiCanvasPointer> mapped = MapUiPointerToCanvas(*canvas, input.Pointer, input.Ray);
+			if (!mapped.has_value())
+				return std::nullopt;
+			return mapped->Point;
+		}
+
 		// The navigation command of a stick direction (None for None).
 		static UiNavigation ToUiNavigation(UiStickDirection direction)
 		{
@@ -138,9 +155,9 @@ namespace Engine {
 			if (node == nullptr)
 				return std::format("'{}' is not laid out: it is not a UI element (UiRect) below an enabled canvas", path);
 			if (node->Hidden)
-				return std::format("'{}' is hidden inside an off toggle's Graphic", path);
+				return std::format("'{}' is hidden: it is in an off toggle's Graphic, or in a text input's Placeholder while its Text is not empty", path);
 			if (GetUiWidgetType(scene, element) == UiWidgetType::None)
-				return std::format("'{}' holds no widget (UiButton, UiToggle, UiSlider or UiScrollView)", path);
+				return std::format("'{}' holds no widget (UiButton, UiToggle, UiSlider, UiScrollView or UiTextInput)", path);
 			if (!IsUiInteractable(scene, element))
 				return std::format("'{}' is not interactable (its Interactable is false)", path);
 			if (!IsUiFocusable(scene, current, element))
@@ -198,8 +215,10 @@ namespace Engine {
 			return;
 		}
 
-		// 2. Hover: the widget the topmost target reaches, when it is interactable.
-		const UiHit hit = HitTestUi(scene, table, input.Pointer);
+		// 2. Hover: the widget the topmost target reaches, when it is interactable; a Screen canvas's target first, else the
+		// nearest World canvas's along the pointer's ray (C22.3, decision 50).
+		const UiPointerHit pointerHit = HitTestUiPointer(scene, table, input.Pointer, input.Ray);
+		const UiHit& hit = pointerHit.Hit;
 		state.PointerOverUi = hit.Target.IsValid();
 		const UUID hovered = hit.Widget.IsValid() && IsUiInteractable(scene, hit.Widget) ? hit.Widget : UUID{};
 		if (hovered != state.Hovered)
@@ -210,10 +229,11 @@ namespace Engine {
 		}
 
 		// 3. Press on the hovered widget: focus for a focusable one only; a slider takes the value at the pointer and a scroll
-		// view the pointer's drag.
+		// view the pointer's drag, the pointer in the pixels of the hit's canvas (C22.3: a World canvas's own).
 		const bool pressedNow = input.PointerPressed && state.Hovered.IsValid();
 		if (pressedNow)
 		{
+			const glm::vec2 pointer = pointerHit.CanvasPoint;
 			state.Pressed = state.Hovered;
 			Utils::ClearUiDrag(state);
 			if (IsUiFocusable(scene, table, state.Pressed))
@@ -221,13 +241,13 @@ namespace Engine {
 			switch (GetUiWidgetType(scene, state.Pressed))
 			{
 				case UiWidgetType::Slider:
-					SetUiSliderFromPointer(scene, table, state.Pressed, input.Pointer, m_Events);
+					SetUiSliderFromPointer(scene, table, state.Pressed, pointer, m_Events);
 					state.Dragged = state.Pressed;
-					state.DragOrigin = input.Pointer;
+					state.DragOrigin = pointer;
 					break;
 				case UiWidgetType::ScrollView:
 					state.Dragged = state.Pressed;
-					state.DragOrigin = input.Pointer;
+					state.DragOrigin = pointer;
 					state.DragStart = Utils::ReadUiScrollPosition(scene, table, state.Pressed);
 					break;
 				case UiWidgetType::None:
@@ -238,16 +258,21 @@ namespace Engine {
 			}
 		}
 
-		// 4. Drag, after the press's own step: the slider follows the pointer, the scroll view the pointer's move.
-		if (input.PointerDown && state.Dragged.IsValid() && !pressedNow)
+		// 4. Drag, after the press's own step: the slider follows the pointer, the scroll view the pointer's move, in the
+		// pixels of the dragged widget's canvas (C22.3: along a World canvas's plane, holding its last value while the ray
+		// leaves the plane).
+		const std::optional<glm::vec2> dragPointer = input.PointerDown && state.Dragged.IsValid() && !pressedNow
+			? Utils::MapUiPointerToElementCanvas(table, state.Dragged, input)
+			: std::nullopt;
+		if (dragPointer.has_value())
 		{
 			switch (GetUiWidgetType(scene, state.Dragged))
 			{
 				case UiWidgetType::Slider:
-					SetUiSliderFromPointer(scene, table, state.Dragged, input.Pointer, m_Events);
+					SetUiSliderFromPointer(scene, table, state.Dragged, *dragPointer, m_Events);
 					break;
 				case UiWidgetType::ScrollView:
-					DragUiScrollView(scene, table, state.Dragged, state.DragStart, input.Pointer - state.DragOrigin, m_Events);
+					DragUiScrollView(scene, table, state.Dragged, state.DragStart, *dragPointer - state.DragOrigin, m_Events);
 					break;
 				case UiWidgetType::None:
 				case UiWidgetType::Button:
@@ -270,7 +295,7 @@ namespace Engine {
 		}
 
 		// 6. Wheel over a target: the innermost interactable scroll view at or above it (y up-positive: a step down scrolls
-		// down).
+		// down), on whichever canvas the target is (C22.3).
 		if ((input.Scroll.x != 0.0f || input.Scroll.y != 0.0f) && hit.Target.IsValid())
 		{
 			const UUID scrolled = FindUiScrollView(scene, table, hit.Target);
@@ -281,11 +306,20 @@ namespace Engine {
 		}
 
 		// 7. Stick: each new direction is one press.
-		UiNavigation navigation = input.Navigation;
 		const UiStickDirection stick = GetUiStickDirection(input.Stick);
-		if (stick != state.Stick)
-			navigation |= Utils::ToUiNavigation(stick);
+		const UiNavigation stickNavigation = stick != state.Stick ? Utils::ToUiNavigation(stick) : UiNavigation::None;
+		UiNavigation navigation = input.Navigation | stickNavigation;
 		state.Stick = stick;
+
+		// 7a. Text input (C22.3, decision 47): the focused interactable text input takes the step's text and editing keys
+		// (TextChanged, then Submit for Enter), and while it has focus only the gamepad's commands, the stick's direction,
+		// Next, Previous and Cancel navigate, so a key typed into it (an arrow, Space, Enter) never navigates or submits.
+		if (state.Focused.IsValid() && GetUiWidgetType(scene, state.Focused) == UiWidgetType::TextInput && IsUiInteractable(scene, state.Focused))
+		{
+			static_cast<void>(EditUiTextInput(scene, state.Focused, input.Text, input.TextKeys, m_Events));
+			constexpr UiNavigation KeptCommands = UiNavigation::Next | UiNavigation::Previous | UiNavigation::Cancel;
+			navigation = input.GamepadNavigation | (input.Navigation & KeptCommands) | stickNavigation;
+		}
 
 		// 8. Navigation in the order Next, Previous, Up, Down, Left, Right. A focused slider or scroll view may consume a
 		// direction; with nothing focused both finders give the default focus or nothing. A new focus is revealed against the
@@ -321,9 +355,18 @@ namespace Engine {
 				navigate(target);
 		}
 
-		// 9. Submit activates the focused widget; nothing without one.
+		// 9. Submit activates the focused widget; nothing without one. A focused interactable text input raises Submit itself
+		// (C22.3), since activation leaves a text input alone.
 		if (HasFlag(navigation, UiNavigation::Submit) && state.Focused.IsValid())
-			ActivateUiWidget(scene, state.Focused, m_Events);
+		{
+			if (GetUiWidgetType(scene, state.Focused) == UiWidgetType::TextInput)
+			{
+				if (IsUiInteractable(scene, state.Focused))
+					Utils::QueueUiEvent(m_Events, UiEventKind::Submit, state.Focused);
+			}
+			else
+				ActivateUiWidget(scene, state.Focused, m_Events);
+		}
 
 		// 10. Cancel at the focused element, else at the last canvas of the layout.
 		if (HasFlag(navigation, UiNavigation::Cancel))

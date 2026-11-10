@@ -24,7 +24,9 @@ serves its skills and generated reference through automation (`docs.get {}` list
   table), `Assets/Ui/` (M22's font imported with `Ranges`) and `Assets/Tests/<Area>/`,
   `Suites.jsonl` writes `Testing.Suites` and `Testing.Replays`, and `Replays.jsonl` records `Input.replay` and
   `Determinism.replay` last (`PhysicsSemantics.jsonl`, `MultiScript.jsonl` and M22's `UiReplay.jsonl` record their
-  scenes' replays in `Assets/Tests/Replays/` themselves).
+  scenes' replays in `Assets/Tests/Replays/` themselves, and M22's `UiTextInputReplay.jsonl` and `UiWorld.jsonl` record
+  `TextInput.replay` and `UiWorld.replay` with `test.run {record}` from their recording suites in `Assets/Tests/Record/`,
+  which `Testing.Suites` keeps in the Editor mode, so re-recording one is that one call).
   `python Scripts/Scaffold.py`, run from the engine repository's root with every editor on the project closed, restores
   `Scaffold/Baseline/` and runs them all; `python Scripts/Scaffold.py --check` proves that they reproduce the project byte
   for byte. To change the content, change a scaffold and regenerate; a changed setting, scene or id re-records the replays.
@@ -37,8 +39,11 @@ serves its skills and generated reference through automation (`docs.get {}` list
   recorded regeneration of `Golden.jsonl`'s M9 part) writes the Renderer II scenes under
   `Assets/Scenes/GoldenRendererII/` and their materials under `Assets/Materials/GoldenRendererII/`,
   `Scaffold/UiGolden.jsonl` (M22) writes the UI golden scene under `Assets/Scenes/GoldenUi/` and its sprite sheet and
-  texture under `Assets/Textures/GoldenUi/`, and `Scaffold/UiWidgetsGolden.jsonl` (M22) writes the widgets golden scene
-  under `Assets/Scenes/GoldenUiWidgets/`.
+  texture under `Assets/Textures/GoldenUi/`, `Scaffold/UiWidgetsGolden.jsonl` (M22) writes the widgets golden scene
+  under `Assets/Scenes/GoldenUiWidgets/`, `Scaffold/UiScriptsGolden.jsonl` (M22) writes the CJK, Arabic and Hebrew
+  golden scenes under `Assets/Scenes/GoldenUiScripts/` and their fonts (the Noto fixtures and a copy of Inter that falls
+  back to them) under `Assets/Fonts/GoldenUiScripts/`, and `Scaffold/UiWorldGolden.jsonl` (M22) writes the World canvas
+  golden scene under `Assets/Scenes/GoldenUiWorld/`.
   `asset.import` reads only project paths and absolute ones, so imported files come from `Scaffold/Sources/`,
   byte-identical copies of the `Tests/Data/Assets` fixtures (`Tests/Data/Generate`), which a unit test keeps in step. The
   editor's `.bak` backups of rewritten files are not committed (`.gitignore` leaves them out).

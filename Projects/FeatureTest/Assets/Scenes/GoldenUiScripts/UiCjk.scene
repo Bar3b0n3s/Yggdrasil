@@ -1,0 +1,238 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "UiCjk",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Camera": 1,
+		"UiCanvas": 1,
+		"UiRect": 1,
+		"UiText": 1
+	},
+	"Entities": [
+		{
+			"ID": "a25bc6376e6c9bbc",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 60,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.09, 0.08, 0.1]
+				}
+			}
+		},
+		{
+			"ID": "839fee18094502d2",
+			"Name": "Canvas",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiCanvas": {
+					"SortOrder": 0,
+					"ScaleMode": "ConstantPixelSize",
+					"ScaleFactor": 1,
+					"ReferenceHeight": 1080,
+					"PixelSnap": true,
+					"Font": "d160cd437036b5f1",
+					"Theme": {
+						"Normal": [1, 1, 1, 1],
+						"Hovered": [0.85, 0.85, 0.85, 1],
+						"Pressed": [0.6, 0.6, 0.6, 1],
+						"Focused": [0.75, 0.85, 1, 1],
+						"Disabled": [0.5, 0.5, 0.5, 0.5]
+					},
+					"DefaultFocus": null,
+					"RenderMode": "Screen",
+					"WorldWidth": 1024,
+					"WorldHeight": 576,
+					"PixelsPerUnit": 512
+				}
+			}
+		},
+		{
+			"ID": "d5d5542b85d2a9ca",
+			"Name": "Title",
+			"Parent": "839fee18094502d2",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [24, 8],
+					"Size": [592, 40],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "Japanese through Inter's fallbacks",
+					"Font": null,
+					"Size": 24,
+					"Color": [0.75, 0.8, 0.9, 1],
+					"Alignment": "Left",
+					"VerticalAlignment": "Middle",
+					"Wrap": true,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "d9c0586e56436116",
+			"Name": "Japanese",
+			"Parent": "839fee18094502d2",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [24, 52],
+					"Size": [592, 64],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "日本語のテキスト",
+					"Font": null,
+					"Size": 48,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Left",
+					"VerticalAlignment": "Middle",
+					"Wrap": true,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "7279baeca048fe1e",
+			"Name": "Kana",
+			"Parent": "839fee18094502d2",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [24, 120],
+					"Size": [592, 52],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "ひらがな・カタカナ・漢字",
+					"Font": null,
+					"Size": 36,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Center",
+					"VerticalAlignment": "Middle",
+					"Wrap": true,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "54ad082919a405ef",
+			"Name": "Mixed",
+			"Parent": "839fee18094502d2",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [24, 176],
+					"Size": [592, 52],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "Tokyo 東京 2026年10月",
+					"Font": null,
+					"Size": 36,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Right",
+					"VerticalAlignment": "Middle",
+					"Wrap": true,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "3c82aecf91cfa62b",
+			"Name": "Wrapped",
+			"Parent": "839fee18094502d2",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [24, 232],
+					"Size": [592, 96],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "こんにちは、世界！ Hello, world! こんにちは、世界！",
+					"Font": null,
+					"Size": 28,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Center",
+					"VerticalAlignment": "Middle",
+					"Wrap": true,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		}
+	]
+}

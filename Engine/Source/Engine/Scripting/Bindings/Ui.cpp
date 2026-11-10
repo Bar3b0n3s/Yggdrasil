@@ -13,6 +13,8 @@
 
 #include <lua.h>
 
+#include <utility>
+
 // The Ui module (M22, C22.2, R-UI-EVENTS; Docs/Decisions/0033-m22-contract.md decision 28): the game UI's interaction state
 // and layout in the running scene, read through the play session's UiSystem (IScriptHost::GetUi), and Ui.SetFocus. A host
 // without one (an edit evaluation) reports no focus, hover or press and no rectangle, and refuses Ui.SetFocus.
@@ -81,11 +83,20 @@ namespace Engine {
 				Lua::PushNil(call);
 				return 1;
 			}
-			lua_createtable(call.State, 0, 2);
+			// C22.3 (the review of C22.3, decision 56): in the pixels of the element's canvas (a World canvas's own), with the
+			// canvas. The canvas is read as the element is (W22.3's review): an element pending destruction (M20, W-P02) keeps
+			// reporting its canvas, which a destroyed ancestor leaves pending until the same flush, and no script runs between
+			// a flush and the next layout, so a laid-out readable element's canvas is readable too (nil is only a guard).
+			lua_createtable(call.State, 0, 3);
 			Lua::Push(call, glm::vec3(node->Min, 0.0f));
 			lua_setfield(call.State, -2, "Min");
 			Lua::Push(call, glm::vec3(node->Max, 0.0f));
 			lua_setfield(call.State, -2, "Max");
+			if (std::as_const(host.GetScene()).FindReadableEntityByID(node->Canvas).IsReadable())
+				Lua::Push(call, ScriptEntityIdentity{ node->Canvas, host.GetSceneGeneration() });
+			else
+				Lua::PushNil(call);
+			lua_setfield(call.State, -2, "Canvas");
 			return 1;
 		}
 
@@ -132,9 +143,10 @@ namespace Engine {
 		Status RegisterUi(ScriptApiRegistry& api)
 		{
 			const ScriptMemberOptions read{ .Mutates = false };
-			ENGINE_TRY(api.RegisterAlias("UiElementRect", "{Min: vector, Max: vector}",
-				"A UI element's laid-out rectangle in scene pixels: its top-left (Min) and bottom-right (Max) corners as (x, y, 0), x right and "
-				"y down."));
+			ENGINE_TRY(api.RegisterAlias("UiElementRect", "{Min: vector, Max: vector, Canvas: Entity}",
+				"A UI element's laid-out rectangle: its top-left (Min) and bottom-right (Max) corners as (x, y, 0), x right and y down, in scene "
+				"pixels for an element of a Screen canvas and in its canvas's own pixels for one of a World canvas, and the canvas it belongs to "
+				"(Canvas)."));
 			api.Module("Ui",
 				   "The game UI's interaction state in the running scene: keyboard and gamepad focus, the widget under the pointer and the one it "
 				   "presses, and where elements were laid out. UI events reach behaviours through the OnUi callbacks, which bubble from the element "
@@ -152,7 +164,7 @@ namespace Engine {
 					read)
 				.Function("GetRect", &Utils::UiGetRect, "(element: Entity) -> UiElementRect?",
 					"Returns element's rectangle in the current UI layout, in scene pixels (which are view coordinates unless the output is "
-					"upscaled), or nil when it is not laid out.",
+					"upscaled) or, for an element of a World canvas, in that canvas's own pixels, with its canvas; nil when it is not laid out.",
 					read);
 			return {};
 		}

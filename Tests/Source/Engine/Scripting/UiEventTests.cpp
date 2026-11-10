@@ -293,7 +293,7 @@ return Script.Define("Mover", T)
 
 		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 47; stream T): the text input's callbacks, registered with their
 		// reserved names by stream T; each receives the input's Text as it is when the callback runs, and bubbles.
-		TEST_CASE("UiEvents: OnUiTextChanged and OnUiSubmit receive the input's text and bubble, and their names are reserved" * doctest::skip(true))
+		TEST_CASE("UiEvents: OnUiTextChanged and OnUiSubmit receive the input's text and bubble, and their names are reserved")
 		{
 			Test::ScriptTestFixture fixture(UiEventSpecification());
 			const AssetHandle listen(0x220030);
@@ -316,6 +316,13 @@ return Script.Define("TextListen", T)
 			});
 			// TextChanged bubbles to Form; Submit's true stops it at Field.
 			CHECK(UiEventTrace(scene) == std::vector<std::string>{ "Field:changed:Field:ab", "Form:changed:Field:ab", "Field:submit:Field:ab" });
+			// An element that no longer holds a UiTextInput when its event's turn comes passes an empty text (an empty view,
+			// which Lua::PushString pushes as "").
+			field.RemoveComponent<UiTextInputComponent>();
+			fixture.GetEngine()->DispatchUiEvents(std::vector<UiEvent>{ UiEvent{ .Kind = UiEventKind::TextChanged, .Target = field.GetUUID() } });
+			CHECK(UiEventTrace(scene)
+				== std::vector<std::string>{ "Field:changed:Field:ab", "Form:changed:Field:ab", "Field:submit:Field:ab", "Field:changed:Field:",
+					"Form:changed:Field:" });
 			for (const UiEventKind kind : { UiEventKind::TextChanged, UiEventKind::Submit })
 			{
 				const std::string_view callback = GetUiEventCallbackName(kind);

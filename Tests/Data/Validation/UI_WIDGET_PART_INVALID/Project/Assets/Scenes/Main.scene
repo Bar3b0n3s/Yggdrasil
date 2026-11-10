@@ -10,7 +10,8 @@
 		"AudioListener": 1,
 		"UiCanvas": 1,
 		"UiRect": 1,
-		"UiToggle": 1
+		"UiToggle": 1,
+		"UiTextInput": 1
 	},
 	"Entities": [
 		{
@@ -107,6 +108,30 @@
 					"Pivot": [0, 0],
 					"Position": [0, 0],
 					"Size": [120, 40]
+				}
+			}
+		},
+		{
+			"ID": "e000000000000006",
+			"Name": "Name",
+			"Parent": "e000000000000003",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [0, 0],
+					"Size": [120, 40]
+				},
+				"UiTextInput": {
+					"Placeholder": "e000000000000005"
 				}
 			}
 		}

@@ -175,7 +175,6 @@ class ScriptTestRunnerTests(AutomationTestCase):
         self.assertEqual(recording["finalStateHash"], recorded["FinalStateHash"])
         self.assertEqual(recording["inputCheck"], {"ran": True, "divergedAtTick": recorded["FinalTick"]})
 
-    @unittest.skip("contract stub: Docs/Decisions/0033-m22-contract.md decision 52 (stream I)")
     def test_a_recording_suite_moving_the_pointer_scrolling_and_typing_records_what_input_record_records(self) -> None:
         # M22 C22.3: Test.InjectMouseMove, Test.InjectScroll and Test.InjectText queue the events a slider drag, a
         # scroll list and a text field need, so a recording suite records the UI replay that input.record records from

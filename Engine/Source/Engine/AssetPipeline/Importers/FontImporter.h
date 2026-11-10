@@ -54,7 +54,9 @@ namespace Engine {
 	// What one FontImporter::Bake measured and did: the bound on its work, which the tests read.
 	struct FontBakeReport
 	{
-		uint32_t Glyphs = 0;           // the character set's codepoints the font has a glyph for
+		// The glyphs baked: one per codepoint of the character set the font has a glyph for, then (version 5) one per glyph
+		// only shaping reaches (ShapingGlyphs).
+		uint32_t Glyphs = 0;
 		uint32_t AtlasSize = 0;        // the atlas side their boxes pack into; 0 when they do not fit (or the bake failed first)
 		uint32_t RasterizedGlyphs = 0; // the distance fields computed: none unless the boxes fit
 		uint32_t ShapingGlyphs = 0;    // C22.3 (stream S): of Glyphs, those only shaping reaches (no baked codepoint maps to them)
@@ -81,12 +83,16 @@ namespace Engine {
 	// 65,536 codepoints. Version 5 (M22, C22.3, decisions 42 and 44; streams S and F): FontData format 2. The bake adds the
 	// glyphs shaping can produce from the baked codepoints with the shaper's default features (HarfBuzz's
 	// hb_ot_shape_glyphs_closure, one buffer per script of the baked codepoints, no user features: an Arabic letter's
-	// contextual forms, ligatures), counted in Glyphs and ShapingGlyphs; packs the codepoint glyphs first exactly as version
-	// 4 does, then those glyphs, by glyph index, in the same packer, growing the square only when they do not fit; records
-	// every baked glyph's index (IndexedGlyphs) and the font's units per em; embeds the font subset to the baked glyphs by
-	// HarfBuzz's subsetter, glyph ids retained (ShapingSource); and cooks the settings' Fallbacks, which it records as the
-	// import's dependencies. So a font whose shaping adds no glyph keeps version 4's atlas byte for byte, one whose added
-	// glyphs fit keeps every codepoint glyph where version 4 put it, and every codepoint glyph keeps version 4's field.
+	// contextual forms, ligatures; AssetPipeline/Private/FontShaping.h states the buffers: each script's codepoints with the
+	// Common and Inherited ones, in both directions, and the mirrored forms a right-to-left run draws), counted in Glyphs
+	// and ShapingGlyphs; packs the codepoint glyphs first exactly as version 4 does, then those glyphs, by glyph index, in
+	// the same packer, growing the square only when they do not fit; records every baked glyph's index (IndexedGlyphs) and
+	// the font's units per em; embeds the font subset to the baked glyphs by HarfBuzz's subsetter, glyph ids retained
+	// (ShapingSource: a cmap of the baked codepoints and their mirrored forms, the layout tables with the legacy kern table,
+	// the metrics, no hinting; ImportFailed when it fails or exceeds MaxFontShapingSourceSize); and cooks the settings'
+	// Fallbacks, which it records as the import's dependencies. So a font whose shaping adds no glyph keeps version 4's
+	// atlas byte for byte, one whose added glyphs fit keeps every codepoint glyph where version 4 put it, and every
+	// codepoint glyph keeps version 4's field.
 	// Inter, the built-in default font, gains the glyphs its default features reach from ASCII and Latin-1 (contextual
 	// alternates, and the fraction forms of frac, numr and dnom, among them), so its atlas changes deliberately
 	// (Docs/Decisions/0033-m22-contract.md decision 44, the lead's decision 2 of the review of C22.3).
@@ -94,7 +100,7 @@ namespace Engine {
 	{
 	public:
 		static constexpr std::string_view Id = "Font";
-		static constexpr uint32_t Version = 4;
+		static constexpr uint32_t Version = 5;
 
 		[[nodiscard]] std::string_view GetId() const override { return Id; }
 		[[nodiscard]] uint32_t GetVersion() const override { return Version; }

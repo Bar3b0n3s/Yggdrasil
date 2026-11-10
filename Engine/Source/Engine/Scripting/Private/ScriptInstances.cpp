@@ -8,6 +8,7 @@
 #include "Engine/Reflection/FieldInfo.h"
 #include "Engine/Reflection/ValidationContext.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
+#include "Engine/Scene/Components/UiTextInputComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scripting/LuaHelpers.h"
 #include "Engine/Scripting/Private/BindingRegistration.h"
@@ -434,9 +435,16 @@ namespace Engine {
 					break;
 				case UiEventKind::TextChanged:
 				case UiEventKind::Submit:
-					// C22.3 (Docs/Decisions/0033-m22-contract.md decision 47): nothing raises these before stream T, which
-					// registers OnUiTextChanged and OnUiSubmit and passes the input's Text here as the third argument.
+				{
+					// C22.3 (Docs/Decisions/0033-m22-contract.md decision 47): the input's Text as it is now, which an earlier
+					// callback of the walk may have changed (read while the input is pending destruction too; empty when it
+					// no longer holds a UiTextInput).
+					const ConstEntity input = std::as_const(Engine.GetHost().GetScene()).FindReadableEntityByID(event.Target);
+					const UiTextInputComponent* textInput = input.IsReadable() ? input.TryGetComponent<UiTextInputComponent>() : nullptr;
+					Lua::PushString(call, textInput != nullptr ? std::string_view(textInput->Text) : std::string_view{});
+					++arguments;
 					break;
+				}
 			}
 			const auto result = Lua::ProtectedCall(call, arguments, 1);
 			if (!result)

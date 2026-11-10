@@ -13,6 +13,14 @@ namespace Engine {
 
 	namespace Utils {
 
+		// C22.3 (the review of C22.3): whether `node` belongs to a World canvas of `table`, whose rectangles are in that canvas's
+		// own pixels, not the preview frame's.
+		static bool IsUiWorldCanvasElement(const UiLayoutTable& table, const UiLayoutNode& node)
+		{
+			const UiCanvasLayout* canvas = FindUiCanvasLayout(table, node.Canvas);
+			return canvas != nullptr && canvas->RenderMode == UiCanvasRenderMode::World;
+		}
+
 		// The anchors (AnchorMin, AnchorMax) and the pivot SetPivot gives an axis of a preset: 0 the left or top edge, 0.5 the
 		// centre, 1 the right or bottom edge, or stretched from 0 to 1 with the pivot at its centre.
 		struct UiAnchorAxis
@@ -228,7 +236,7 @@ namespace Engine {
 	{
 		for (auto node = table.Nodes.rbegin(); node != table.Nodes.rend(); ++node)
 		{
-			if (node->Hidden)
+			if (node->Hidden || Utils::IsUiWorldCanvasElement(table, *node))
 				continue;
 			if (point.x < node->Min.x || point.x >= node->Max.x || point.y < node->Min.y || point.y >= node->Max.y)
 				continue;
