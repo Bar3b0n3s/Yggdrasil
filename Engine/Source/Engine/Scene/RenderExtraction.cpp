@@ -241,9 +241,10 @@ namespace Engine {
 				data.Position = view.Position;
 				data.ProjectionKind = RenderProjection::Orthographic;
 				data.OrthographicSize = view.OrthographicSize;
-				data.ViewportWidth = view.Output.SceneWidth;
-				data.ViewportHeight = view.Output.SceneHeight;
-				output = view.Output;
+				// M22's landing: the output stage's settings from the one function the play session's UI takes them from too.
+				output = GetCameraOutputSettings(entity);
+				data.ViewportWidth = output.SceneWidth;
+				data.ViewportHeight = output.SceneHeight;
 			}
 			data.View = MakeEntityViewMatrix(world, data.Position);
 			data.NearClip = camera.NearClip;
@@ -352,6 +353,22 @@ namespace Engine {
 			}
 		}
 		return primary;
+	}
+
+	RenderOutputSettings GetCameraOutputSettings(ConstEntity camera)
+	{
+		ENGINE_CORE_ASSERT(camera.IsValid(), "GetCameraOutputSettings needs a valid entity");
+		const PixelPerfectCameraComponent* pixelPerfect = camera.TryGetComponent<PixelPerfectCameraComponent>();
+		if (pixelPerfect == nullptr)
+			return RenderOutputSettings{};
+		// The view's Output depends on the component alone (PixelPerfectCamera.h), so the origin stands for any position.
+		return ComputePixelPerfectView(*pixelPerfect, glm::vec3(0.0f)).Output;
+	}
+
+	RenderOutputMapping ComputeGameViewOutputMapping(const Scene& scene, glm::uvec2 viewSize)
+	{
+		const ConstEntity camera = FindPrimaryCamera(scene);
+		return ComputeRenderOutputMapping(viewSize.x, viewSize.y, camera.IsValid() ? GetCameraOutputSettings(camera) : RenderOutputSettings{});
 	}
 
 	glm::mat4 ComputeRenderedWorldMatrix(ConstEntity entity, float alpha)

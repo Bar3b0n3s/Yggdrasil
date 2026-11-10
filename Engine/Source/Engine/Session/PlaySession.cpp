@@ -514,15 +514,22 @@ namespace Engine {
 		void RunFramePhase(PlaySession& session, const FrameTime& frame);
 		// The RenderExtraction phase's work: the game view through the primary camera at `alpha`.
 		void ExtractGameView(float alpha);
-		// M22 (Docs/Decisions/0033-m22-contract.md decision 3): the scene resolution the UI phases lay the scene out at, the
-		// session's view size (GetViewSize) in W22.1, as the game view's extraction uses with the default output settings.
-		[[nodiscard]] glm::uvec2 GetUiSceneResolution() const { return { ViewWidth, ViewHeight }; }
-		// M22 (C22.2, decision 24): how the UiInput phase maps the pointer's view coordinates to the scene pixels the layout is
-		// in: the output mapping of the default RenderOutputSettings (the identity at GetUiSceneResolution) in W22.2. With
-		// GetUiSceneResolution, the one place the later lander of M21 and M22 makes PixelPerfectCamera's.
+		// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 24): how the UiInput phase maps the pointer's view
+		// coordinates to the scene pixels the layout is in. Since M22's landing ("Landing", decisions 3 and 24): the game
+		// view's output mapping (ComputeGameViewOutputMapping, Scene/RenderExtraction.h), the session's view through its
+		// primary camera's output settings, which are PixelPerfectCamera's when the camera holds one, exactly as the
+		// RenderExtraction phase draws the game view; the identity otherwise.
 		[[nodiscard]] RenderOutputMapping GetUiOutputMapping() const
 		{
-			return ComputeRenderOutputMapping(ViewWidth, ViewHeight, RenderOutputSettings{});
+			return ComputeGameViewOutputMapping(*RuntimeScene, glm::uvec2(ViewWidth, ViewHeight));
+		}
+		// M22 (decision 3): the scene resolution the UI phases lay the scene out at: GetUiOutputMapping's scene size, the
+		// session's view size (GetViewSize) without a PixelPerfectCamera and its reference resolution under one, so the
+		// layout the session hit-tests is the one its game view draws (M22's landing).
+		[[nodiscard]] glm::uvec2 GetUiSceneResolution() const
+		{
+			const RenderOutputMapping mapping = GetUiOutputMapping();
+			return { mapping.SceneWidth, mapping.SceneHeight };
 		}
 		// M22 (C22.2, decisions 24 and 30): the UiInput phase's input from the tick's step view: the mouse mapped to scene
 		// pixels, Mouse.Left's state and edges and the scroll, then, while Ui.Navigation is on, the commands whose controls

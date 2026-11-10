@@ -69,8 +69,10 @@ namespace Engine {
 	// ui.tree {canvas?, depth?, format?, width?, height?, target?}: the UI of the target scene laid out in scene pixels: every
 	// canvas, or the one `canvas` names (an EntityRef to an entity with a UiCanvas), with its elements at most `depth` levels
 	// below it (0: unlimited). The play scene reads the session's current layout (UiSystem::GetLayout) at its scene resolution
-	// unless `width` and `height` ask for another; the edit scene is laid out at `width` x `height`, by default the project's
-	// window size (GetDeterministicViewSize, the size of every deterministic session's view). Text: a header line
+	// unless `width` and `height` ask for another; the edit scene is laid out at `width` x `height`, by default its game view's
+	// scene resolution at the project's window size (GetDeterministicViewSize, the size of every deterministic session's
+	// view, through ComputeGameViewOutputMapping: a PixelPerfectCamera's reference resolution under one, M22's landing).
+	// Text: a header line
 	// "<file name>  rev <n>  <width>x<height> scene pixels  <count> elements", then per canvas a line "<name> <8 hex>
 	// UiCanvas(sort <n>, scale <s>)" and per element a line with box-drawing indentation, its name, its first 8 hex digits, its
 	// short component forms ("UiImage(<sheet path>#<frame>)", "UiText(\"<text>\")", "UiLayout(<kind> <direction>)"; C22.2's

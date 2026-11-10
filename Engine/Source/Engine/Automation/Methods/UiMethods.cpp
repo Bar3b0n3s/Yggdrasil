@@ -17,6 +17,7 @@
 #include "Engine/Scene/Components/UiTextInputComponent.h"
 #include "Engine/Scene/Components/UiToggleComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/UiInteraction.h"
 #include "Engine/Scene/UiLayout.h"
@@ -214,8 +215,10 @@ namespace Engine {
 		}
 
 		// The scene resolution ui.tree lays out at, and the layout: `requested` when given (both components non-zero), else
-		// the play session's current layout for its own scene (laid out afresh at its view's size before the session's first
-		// layout, which Activate makes), else the project's window size (the view of every deterministic session).
+		// the play session's current layout for its own scene (laid out afresh at its view's scene resolution before the
+		// session's first layout, which Activate makes), else the scene resolution of the game view at the project's window size
+		// (the view of every deterministic session). A view's scene resolution is its game view output mapping's
+		// (ComputeGameViewOutputMapping: its size, or under a PixelPerfectCamera the reference resolution; M22's landing).
 		struct UiTreeLayout
 		{
 			UiLayoutTable Computed{};
@@ -239,12 +242,14 @@ namespace Engine {
 					layout.Table = &current;
 					return;
 				}
-				layout.Computed = ComputeUiLayout(scene, glm::max(session->GetViewSize(), glm::uvec2(1)));
+				const RenderOutputMapping view = ComputeGameViewOutputMapping(scene, glm::max(session->GetViewSize(), glm::uvec2(1)));
+				layout.Computed = ComputeUiLayout(scene, glm::uvec2(view.SceneWidth, view.SceneHeight));
 				layout.Table = &layout.Computed;
 				return;
 			}
 			const ProjectSettings* settings = context.GetProjectSettings();
-			layout.Computed = ComputeUiLayout(scene, GetDeterministicViewSize(settings != nullptr ? settings->Window : WindowSettings{}));
+			const RenderOutputMapping view = ComputeGameViewOutputMapping(scene, GetDeterministicViewSize(settings != nullptr ? settings->Window : WindowSettings{}));
+			layout.Computed = ComputeUiLayout(scene, glm::uvec2(view.SceneWidth, view.SceneHeight));
 			layout.Table = &layout.Computed;
 		}
 
@@ -518,8 +523,8 @@ namespace Engine {
 				"Text: a compact outline (widgets as UiButton, UiToggle(on|off), UiSlider(<value>), UiScrollView(<x>,<y>) and "
 				"UiTextInput(\"<text>\"), marked disabled, focused, hovered or pressed); Json: a flat list of entries.")
 			.Field("width", &UiTreeParams::Width,
-				"The scene resolution's width to lay out at, with height; omitted: the play session's own, or the project's window size for "
-				"the edit scene.",
+				"The scene resolution's width to lay out at, with height; omitted: the play session's own, or for the edit scene its game "
+				"view's at the project's window size (a PixelPerfectCamera's reference resolution under one).",
 				{ .Min = 0.0, .Max = 16384.0, .Unit = "px" })
 			.Field("height", &UiTreeParams::Height, "The scene resolution's height to lay out at, with width.", { .Min = 0.0, .Max = 16384.0, .Unit = "px" })
 			.Field("target", &UiTreeParams::Target, "The scene to read; omitted: the play scene while playing, else the edit scene.");

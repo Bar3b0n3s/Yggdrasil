@@ -3,6 +3,7 @@
 #include "Engine/Scene/UiInteraction.h"
 
 #include "Engine/Scene/Components/CameraComponent.h"
+#include "Engine/Scene/Components/PixelPerfectCameraComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Components/UiButtonComponent.h"
 #include "Engine/Scene/Components/UiCanvasComponent.h"
@@ -301,6 +302,43 @@ namespace Engine {
 			REQUIRE(ray.has_value());
 			CHECK(ray->Origin == glm::vec3(15.0f, 5.0f, 9.0f));
 			CHECK(ray->Direction == glm::vec3(0.0f, 0.0f, -1.0f));
+		}
+
+		// M22's landing (Docs/Decisions/0033-m22-contract.md decision 50, risk 11, "Landing"): a primary camera that holds M21's
+		// PixelPerfectCamera is drawn orthographically at its pixel-snapped position whatever its Camera's projection, so the
+		// pointer's ray is the inverse of that projection: parallel rays along -Z from the near plane of the snapped view.
+		TEST_CASE("UiInteraction: under a PixelPerfectCamera the pointer's ray is the inverse of its pixel-perfect projection")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			// A perspective Camera at (0.03, 0.02, 10) holding a 200 x 120 PixelPerfectCamera of 16 pixels per unit: the view's
+			// half height is 120 / 32 = 3.75 and its half width 6.25, and the snapped position is (0, 0, 10), since
+			// round((0.03 - 6.25) 16) / 16 + 6.25 = 0 and round((0.02 - 3.75) 16) / 16 + 3.75 = 0.
+			Entity camera = scene.CreateEntity("Camera");
+			camera.GetComponent<TransformComponent>().Translation = glm::vec3(0.03f, 0.02f, 10.0f);
+			camera.AddComponent<CameraComponent>(CameraComponent{ .VerticalFov = 90.0f, .NearClip = 1.0f, .FarClip = 50.0f, .Primary = true });
+			camera.AddComponent<PixelPerfectCameraComponent>(PixelPerfectCameraComponent{ .ReferenceWidth = 200, .ReferenceHeight = 120, .PixelsPerUnit = 16.0f });
+			TransformSystem::Update(scene);
+			const glm::uvec2 reference(200, 120);
+
+			// The reference image's centre looks down -Z from the snapped view's near plane.
+			std::optional<UiPointerRay> ray = ComputeUiPointerRay(scene, glm::vec2(100.0f, 60.0f), reference);
+			REQUIRE(ray.has_value());
+			CHECK(ray->Origin == glm::vec3(0.0f, 0.0f, 9.0f));
+			CHECK(ray->Direction == glm::vec3(0.0f, 0.0f, -1.0f));
+			CHECK(ray->MinDistance == 0.0f);
+			CHECK(ray->MaxDistance == 49.0f);
+			// Its top-right corner: the view's half width and half height, along the same direction.
+			ray = ComputeUiPointerRay(scene, glm::vec2(200.0f, 0.0f), reference);
+			REQUIRE(ray.has_value());
+			CHECK(ray->Origin.x == doctest::Approx(6.25f));
+			CHECK(ray->Origin.y == doctest::Approx(3.75f));
+			CHECK(ray->Origin.z == 9.0f);
+			CHECK(ray->Direction == glm::vec3(0.0f, 0.0f, -1.0f));
+			// A scene pixel is 1 / 16 of a world unit: the pixel one to the right moves the ray by that much.
+			const std::optional<UiPointerRay> next = ComputeUiPointerRay(scene, glm::vec2(101.0f, 60.0f), reference);
+			REQUIRE(next.has_value());
+			CHECK(next->Origin.x == doctest::Approx(1.0f / 16.0f));
 		}
 
 		TEST_CASE("UiInteraction: the pointer hits a World canvas through its ray, under the Screen canvases and nearest first")

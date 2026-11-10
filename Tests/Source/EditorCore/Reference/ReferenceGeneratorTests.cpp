@@ -145,7 +145,7 @@ namespace Engine {
 				CAPTURE(path);
 				CHECK(FindFile(*files, path) != nullptr);
 			}
-			CHECK(files->size() == 21);
+			CHECK(files->size() == 22);
 			for (const GeneratedReferenceFile& file : *files)
 			{
 				CAPTURE(file.Path);

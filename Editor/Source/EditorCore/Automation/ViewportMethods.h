@@ -61,7 +61,7 @@ namespace Engine {
 		// M21 (Docs/Decisions/0032-m21-contract.md decision 14): the scene view's 2D mode, the toolbar's 2D toggle. Turning
 		// it on makes the scene camera EditorCamera::Make2D's; turning it off keeps the camera.
 		bool Mode2D = false;
-		bool UiPreview = false;                 // M22 (decision 33): EditorViewportOptions::UiPreview
+		bool UiPreview = false; // M22 (decision 33): EditorViewportOptions::UiPreview
 	};
 	struct ViewportSetOptionsResult
 	{

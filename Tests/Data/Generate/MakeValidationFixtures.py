@@ -68,9 +68,9 @@ COMPONENT_ORDER = [
     "DirectionalLight", "PointLight", "SpotLight", "Environment", "PostProcess", "Text", "RigidBody", "BoxCollider",
     "SphereCollider", "CapsuleCollider", "MeshCollider", "CharacterController", "AudioSource", "AudioListener",
     "Script", "SpriteRenderer", "SpriteAnimator", "PixelPerfectCamera", "Light2D", "TilemapRenderer", "RigidBody2D",
-    "BoxCollider2D", "CircleCollider2D", "PolygonCollider2D", "TilemapCollider", "UiCanvas", "UiRect", "UiImage", "UiText",
-    "UiLayout", "UiLayoutElement", "UiButton", "UiToggle", "UiSlider", "UiScrollView", "UiTextInput", "ValidatorTarget",
-    "ValidatorFollower",
+    "BoxCollider2D", "CircleCollider2D", "PolygonCollider2D", "TilemapCollider", "UiCanvas", "UiRect", "UiImage",
+    "UiText", "UiLayout", "UiLayoutElement", "UiButton", "UiToggle", "UiSlider", "UiScrollView", "UiTextInput",
+    "ValidatorTarget", "ValidatorFollower",
 ]
 
 # The registered version of each component above 1 ("ComponentVersions"); every other component is at version 1.

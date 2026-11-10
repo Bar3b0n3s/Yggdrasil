@@ -1,0 +1,172 @@
+{
+	"Format": "Replay",
+	"Version": 3,
+	"Scene": {
+		"Handle": "0c54e137b38ddf34",
+		"Path": "Assets/Scenes/Combined2DUiGolden/Combined2DUi.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.1.0",
+	"Config": "Editor",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "1b1725735a47f337",
+				"Path": "/Hud/Counter",
+				"Hash": "5ee18ff3827ae115",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "f0a80249f84bceeb",
+					"UiText": "d012771e638a8197"
+				}
+			},
+			{
+				"Id": "2b356db86337c2b2",
+				"Path": "/Ground",
+				"Hash": "ec551916a8e68934",
+				"Components": {
+					"Transform": "5b3d5e0fc8dee4cd",
+					"SpriteRenderer": "da4c97ff497c023e"
+				}
+			},
+			{
+				"Id": "3fa5a0f3164d8144",
+				"Path": "/Hud/Step/StepLabel",
+				"Hash": "04c80aa85b955348",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "03793cb79c1eb999",
+					"UiText": "900a0ebf3a57d9f2"
+				}
+			},
+			{
+				"Id": "420602f792edc296",
+				"Path": "/Coin",
+				"Hash": "e85977bcd15ef48f",
+				"Components": {
+					"Transform": "747f1d8b8e3f5afb",
+					"SpriteRenderer": "f92e9c01812b4bb0"
+				}
+			},
+			{
+				"Id": "a4aabe01c4bd8f0e",
+				"Path": "/Hud",
+				"Hash": "5888caafc0266dbe",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Script": "553b28f98b68ee7b",
+					"UiCanvas": "a5af45cc50283b9c"
+				}
+			},
+			{
+				"Id": "c4b5da22e741df14",
+				"Path": "/Hud/Step",
+				"Hash": "14c0cf9f369d15df",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "b236f6494c0c2e6a",
+					"UiImage": "a324b52d6f19c4e1",
+					"UiButton": "2a3523b8a133ae8f"
+				}
+			},
+			{
+				"Id": "f4a6fa0309a12b38",
+				"Path": "/Hero",
+				"Hash": "4336eea0fe367357",
+				"Components": {
+					"Transform": "d10b16e58cec1a56",
+					"SpriteRenderer": "c83631a7382fc0f3"
+				}
+			},
+			{
+				"Id": "f723c38fe506b468",
+				"Path": "/Camera",
+				"Hash": "31450b22fda88f9b",
+				"Components": {
+					"Transform": "b571ff7d96fca57d",
+					"Camera": "aadbe3b112e95556",
+					"PixelPerfectCamera": "5582b00d6874af38"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "1c934a8387ba3072",
+				"Path": "Assets/Scripts/Combined2DUiGolden/Stepper.luau",
+				"Type": "Script",
+				"Hash": "7ac8256bfbe87345"
+			}
+		]
+	},
+	"Events": [
+		{
+			"Tick": 4,
+			"Type": "MouseMove",
+			"Position": [256, 102]
+		},
+		{
+			"Tick": 6,
+			"Type": "MouseButton",
+			"State": "Down",
+			"Button": "Left",
+			"Position": [256, 102]
+		},
+		{
+			"Tick": 7,
+			"Type": "MouseButton",
+			"State": "Up",
+			"Button": "Left"
+		},
+		{
+			"Tick": 20,
+			"Type": "MouseButton",
+			"State": "Down",
+			"Button": "Left",
+			"Position": [256, 102]
+		},
+		{
+			"Tick": 21,
+			"Type": "MouseButton",
+			"State": "Up",
+			"Button": "Left"
+		},
+		{
+			"Tick": 34,
+			"Type": "MouseMove",
+			"Position": [20, 400]
+		},
+		{
+			"Tick": 35,
+			"Type": "MouseButton",
+			"State": "Down",
+			"Button": "Left",
+			"Position": [20, 400]
+		},
+		{
+			"Tick": 36,
+			"Type": "MouseButton",
+			"State": "Up",
+			"Button": "Left"
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 30,
+			"Luau": "return Scene.FindByName(\"Hero\").Transform.Translation.x == -1 and Scene.FindByName(\"Counter\").UiText.Text == \"Steps 2\""
+		},
+		{
+			"Tick": 60,
+			"Luau": "local hud = Scene.FindByName(\"Hud\"):GetScript()\nreturn hud.Steps == 2 and Scene.FindByName(\"Hero\").Transform.Translation.x == -1"
+		}
+	],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "4568c68a164c5f05"
+		}
+	],
+	"FinalTick": 61,
+	"FinalStateHash": "bd51214863ea28c9"
+}

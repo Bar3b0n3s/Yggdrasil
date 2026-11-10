@@ -5,6 +5,7 @@
 #include "Engine/Asset/DocumentData.h"
 #include "Engine/Core/Json/Json.h"
 #include "Engine/Scene/Components/CameraComponent.h"
+#include "Engine/Scene/Components/PixelPerfectCameraComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Components/UiButtonComponent.h"
@@ -542,6 +543,51 @@ namespace Engine {
 			(*away)->Tick();
 			CHECK((*hovering)->GetUi().GetInteraction().IsEmpty());
 			CHECK((*hovering)->ComputeStateHash() == (*away)->ComputeStateHash());
+		}
+
+		// M22's landing (Docs/Decisions/0033-m22-contract.md decisions 3 and 24, "Landing"): under M21's PixelPerfectCamera the
+		// game view draws the UI at the camera's reference resolution and upscales it, so the session's UI phases lay the UI out
+		// at that resolution and UiInput maps the pointer's view coordinates through the same output mapping
+		// (ComputeGameViewOutputMapping, the one place both take it from): a 200 x 120 reference resolution in a 640 x 360 view
+		// is upscaled 3 times with 20-pixel bars at the left and right, so the view point (170, 120) shows scene pixel (50, 40),
+		// which lies on button B ((0, 30) to (100, 50)).
+		TEST_CASE("PlaySession: under a PixelPerfectCamera the UI is laid out at its reference resolution and the pointer maps through its upscale")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			PopulateUiScene(scene);
+			Entity camera = scene.CreateEntity("Camera");
+			camera.AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			camera.AddComponent<PixelPerfectCameraComponent>(PixelPerfectCameraComponent{ .ReferenceWidth = 200, .ReferenceHeight = 120, .PixelsPerUnit = 16.0f });
+			PlaySessionSpecification specification = MakeSpecification(fixture);
+			specification.ViewWidth = 640;
+			specification.ViewHeight = 360;
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(specification, scene);
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& session = **created;
+			const UUID b = session.GetScene().FindEntityByPath("/Canvas/B").GetUUID();
+
+			QueuePointer(session, 0, glm::vec2(170.0f, 120.0f));
+			session.Tick();
+			// The layout the session hit-tests is at the reference resolution, the one the game view drew.
+			CHECK(session.GetUi().GetLayout().SceneSize == glm::uvec2(200, 120));
+			const RenderSnapshot& drawn = session.GetLastExtraction();
+			CHECK(drawn.Output.SceneWidth == 200);
+			CHECK(drawn.Output.SceneHeight == 120);
+			const auto image = std::ranges::find_if(drawn.Ui.Items, [b](const UiDrawItem& item)
+			{
+				return item.Entity == b && item.Kind == UiDrawKind::Image;
+			});
+			REQUIRE(image != drawn.Ui.Items.end());
+			CHECK(image->Min == glm::vec2(0.0f, 30.0f));
+			CHECK(image->Max == glm::vec2(100.0f, 50.0f));
+			// The pointer at view (170, 120) is over B in the scene pixels the image shows there.
+			CHECK(session.GetUi().GetInteraction().Hovered == b);
+			CHECK(session.GetUi().GetInteraction().PointerOverUi);
+			// A view point in the left letterbox bar lies outside the scene image, over nothing.
+			QueuePointer(session, 1, glm::vec2(10.0f, 100.0f));
+			session.Tick();
+			CHECK_FALSE(session.GetUi().GetInteraction().Hovered.IsValid());
 		}
 
 		// Decision 25 (the review of W22.2's tests major, the lead's decision 3): the session passes its interaction state to

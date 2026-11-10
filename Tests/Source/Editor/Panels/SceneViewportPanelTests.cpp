@@ -13,8 +13,10 @@
 #include "Engine/Asset/TilemapData.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VirtualFileSystem.h"
+#include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
+#include "Engine/Scene/Components/PixelPerfectCameraComponent.h"
 #include "Engine/Scene/Components/SpriteRendererComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Components/UiCanvasComponent.h"
@@ -1112,6 +1114,59 @@ namespace Engine {
 			CHECK(full.Size.x >= frame.Size.x);
 			CHECK(full.Size.y >= frame.Size.y);
 			CHECK((full.Size.x > frame.Size.x + 1.0f || full.Size.y > frame.Size.y + 1.0f));
+		}
+
+		// M22's landing (Docs/Decisions/0033-m22-contract.md decisions 3 and 33, "Landing"): under M21's PixelPerfectCamera the
+		// preview's image is the game view, which draws the UI at the camera's reference resolution and upscales it, so the
+		// overlay lays the UI out at that resolution and maps it through the same output mapping: a 200 x 150 reference
+		// resolution in the 400 x 300 game frame is upscaled twice without bars, so a click selects the element where the
+		// upscaled image shows it.
+		TEST_CASE("SceneViewportPanel: the UI preview places and picks the UI through a PixelPerfectCamera's upscale")
+		{
+			ScenePanelHarness test("SceneUiPreviewPixelPerfect");
+			EditorContext& editor = test.GetEditor();
+			REQUIRE(editor.GetViewportState().SetGameResolution(glm::uvec2(400, 300)).has_value());
+			UUID panel;
+			{
+				SceneEdit edit(editor, "Create UI");
+				const Entity camera = editor.GetScene().CreateEntity("Camera");
+				camera.AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+				camera.AddComponent<PixelPerfectCameraComponent>(PixelPerfectCameraComponent{ .ReferenceWidth = 200, .ReferenceHeight = 150, .PixelsPerUnit = 16.0f });
+				const Entity canvas = editor.GetScene().CreateEntity("Canvas");
+				canvas.AddComponent<UiCanvasComponent>();
+				// [50, 150] x [25, 75] scene pixels: [100, 300] x [50, 150] frame pixels.
+				const Entity element = editor.GetScene().CreateEntity("Panel", canvas);
+				element.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f),
+					.AnchorMax = glm::vec2(0.0f),
+					.Pivot = glm::vec2(0.0f),
+					.Position = glm::vec2(50.0f, 25.0f),
+					.Size = glm::vec2(100.0f, 50.0f) });
+				panel = element.GetUUID();
+				REQUIRE(edit.Commit().has_value());
+			}
+			REQUIRE(test.GetAutomation().Call("viewport.setOptions", Json{ { "uiPreview", true } }).has_value());
+			REQUIRE(editor.SetSelection({}, SceneTarget::Edit).has_value());
+			test.Viewport.Image.Width = 400;
+			test.Viewport.Image.Height = 300;
+			test.FrameOk();
+			const EditorViewportRect frame = test.Viewport.Rectangle;
+			REQUIRE(frame.Size.x > 0.0f);
+			const float scale = frame.Size.x / 400.0f;
+			const auto at = [&frame, scale](glm::vec2 framePixel)
+			{
+				return ImVec2(frame.Min.x + framePixel.x * scale, frame.Min.y + framePixel.y * scale);
+			};
+			// Frame pixel (280, 140) is scene pixel (140, 70), on the element; drawn at one scene pixel per frame pixel, the element
+			// would lie at [50, 150] x [25, 75] frame pixels and the click would miss it.
+			test.MoveTo(at(glm::vec2(280.0f, 140.0f)));
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+			test.FrameOk();
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+			test.FrameOk();
+			test.GetContext().Actions.Pump();
+			test.FrameOk();
+			REQUIRE(editor.GetSelection().size() == 1);
+			CHECK(editor.GetSelection().front() == panel);
 		}
 
 		// M22 (decision 34; the review of W22.2): over the UI preview, a click on the selected element's body keeps it

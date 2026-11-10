@@ -270,9 +270,11 @@ namespace Engine {
 	// at infinity, §8.3; FarClip culls meshes, not canvases); an Orthographic ray's from 0 to FarClip - NearClip (its
 	// origin is on the near plane), as viewport.pick's ray interval (ComputeViewPixelRayInterval) takes them but for the
 	// perspective far plane.
-	// A sibling that renders the primary camera through another projection or pose follows it here: on the merged tree,
-	// the later lander of M21 and M22 makes the ray the inverse of M21's PixelPerfectCamera projection (orthographic, half
-	// height ReferenceHeight / (2 PixelsPerUnit)) at its pixel-snapped position, with a case (decision 50, risk 11).
+	// A sibling that renders the primary camera through another projection or pose follows it here: since M22's landing
+	// (decision 50, risk 11, "Landing"), a primary camera that holds M21's PixelPerfectCamera casts the inverse of its
+	// projection as render extraction draws it, whatever the Camera's own Projection and OrthographicSize: Orthographic,
+	// with ComputePixelPerfectView's half height (ReferenceHeight / (2 PixelsPerUnit)), from the position it snaps the
+	// simulated position to, `sceneSize` then being its reference resolution (the session's ComputeGameViewOutputMapping).
 	// nullopt without a primary camera. Pure.
 	[[nodiscard]] std::optional<UiPointerRay> ComputeUiPointerRay(const Scene& scene, glm::vec2 pointer, glm::uvec2 sceneSize);
 

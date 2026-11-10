@@ -3,6 +3,7 @@
 
 #include "Engine/Core/DetMath.h"
 #include "Engine/Scene/Components/CameraComponent.h"
+#include "Engine/Scene/Components/PixelPerfectCameraComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/UiButtonComponent.h"
 #include "Engine/Scene/Components/UiCanvasComponent.h"
@@ -13,6 +14,7 @@
 #include "Engine/Scene/Components/UiTextInputComponent.h"
 #include "Engine/Scene/Components/UiToggleComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/PixelPerfectCamera.h"
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
@@ -361,7 +363,20 @@ namespace Engine {
 		const glm::quat orientation = decomposed.has_value() ? decomposed->Rotation : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
 		const glm::dmat3 rotation = glm::mat3_cast(glm::dquat{ static_cast<double>(orientation.w), static_cast<double>(orientation.x),
 			static_cast<double>(orientation.y), static_cast<double>(orientation.z) });
-		const glm::dvec3 position(matrix[3]);
+		glm::dvec3 position(matrix[3]);
+		bool perspective = component.Projection == ProjectionType::Perspective;
+		double halfHeight = static_cast<double>(component.OrthographicSize);
+		// M22's landing (Docs/Decisions/0033-m22-contract.md decision 50, risk 11): through M21's PixelPerfectCamera, as render
+		// extraction draws the camera (RenderExtraction.h): orthographic with its half height, at the position it snaps to the
+		// pixel grid (here from the simulated position), whatever the Camera's own Projection and OrthographicSize; the session
+		// passes its reference resolution as `sceneSize` (ComputeGameViewOutputMapping).
+		if (const PixelPerfectCameraComponent* pixelPerfect = camera.TryGetComponent<PixelPerfectCameraComponent>())
+		{
+			const PixelPerfectView view = ComputePixelPerfectView(*pixelPerfect, glm::vec3(position));
+			position = glm::dvec3(view.Position);
+			perspective = false;
+			halfHeight = static_cast<double>(view.OrthographicSize);
+		}
 
 		// The pointer in normalized device coordinates (+y up) and the projection's aspect.
 		const glm::dvec2 size(static_cast<double>(sceneSize.x), static_cast<double>(sceneSize.y));
@@ -369,7 +384,7 @@ namespace Engine {
 		const double y = 1.0 - 2.0 * static_cast<double>(pointer.y) / size.y;
 		const double aspect = size.x / size.y;
 		UiPointerRay ray;
-		if (component.Projection == ProjectionType::Perspective)
+		if (perspective)
 		{
 			const double tangent = DetMath::Tan(static_cast<double>(component.VerticalFov) * Utils::UiRayDegreesToRadians * 0.5);
 			const glm::dvec3 view(x * aspect * tangent, y * tangent, -1.0);
@@ -380,7 +395,6 @@ namespace Engine {
 			ray.MinDistance = static_cast<float>(static_cast<double>(component.NearClip) * glm::length(view));
 			return ray;
 		}
-		const double halfHeight = static_cast<double>(component.OrthographicSize);
 		ray.Origin = glm::vec3(position + rotation * glm::dvec3(x * aspect * halfHeight, y * halfHeight, -static_cast<double>(component.NearClip)));
 		ray.Direction = glm::vec3(rotation * glm::dvec3(0.0, 0.0, -1.0));
 		// From the near plane, where the ray starts, to the far plane.

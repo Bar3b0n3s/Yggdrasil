@@ -29,7 +29,9 @@ serves its skills and generated reference through automation (`docs.get {}` list
   inject, and `TilemapReplay.jsonl` for `Tilemap.replay`, with `input.record` around a `play.step` of its planned input;
   M22's `UiReplay.jsonl` records its scene's replay there itself, and M22's `UiTextInputReplay.jsonl` and `UiWorld.jsonl`
   record `TextInput.replay` and `UiWorld.replay` with `test.run {record}` from their recording suites in
-  `Assets/Tests/Record/`, which `Testing.Suites` keeps in the Editor mode, so re-recording one is that one call).
+  `Assets/Tests/Record/`, which `Testing.Suites` keeps in the Editor mode, so re-recording one is that one call; M22's
+  landing's `Combined2DUiReplay.jsonl` records `Combined2DUi.replay` with `input.record` around a `play.step` of its
+  planned pointer input).
   `python Scripts/Scaffold.py`, run from the engine repository's root with every editor on the project closed, restores
   `Scaffold/Baseline/` and runs them all; `python Scripts/Scaffold.py --check` proves that they reproduce the project byte
   for byte. To change the content, change a scaffold and regenerate; a changed setting, scene or id re-records the replays.
@@ -49,8 +51,9 @@ serves its skills and generated reference through automation (`docs.get {}` list
   `Scaffold/UiWidgetsGolden.jsonl` (M22) writes the widgets golden scene under `Assets/Scenes/GoldenUiWidgets/`,
   `Scaffold/UiScriptsGolden.jsonl` (M22) writes the CJK, Arabic and Hebrew golden scenes under
   `Assets/Scenes/GoldenUiScripts/` and their fonts (the Noto fixtures and a copy of Inter that falls back to them) under
-  `Assets/Fonts/GoldenUiScripts/`, and `Scaffold/UiWorldGolden.jsonl` (M22) writes the World canvas golden scene under
-  `Assets/Scenes/GoldenUiWorld/`.
+  `Assets/Fonts/GoldenUiScripts/`, `Scaffold/UiWorldGolden.jsonl` (M22) writes the World canvas golden scene under
+  `Assets/Scenes/GoldenUiWorld/`, and `Scaffold/Combined2DUiGolden.jsonl` (M22's landing, the combined 2D/UI test) writes
+  its scene under `Assets/Scenes/Combined2DUiGolden/` and its behaviour under `Assets/Scripts/Combined2DUiGolden/`.
   `asset.import` reads only project paths and absolute ones, so imported files come from `Scaffold/Sources/`,
   byte-identical copies of the `Tests/Data/Assets` fixtures (`Tests/Data/Generate`), which a unit test keeps in step. The
   editor's `.bak` backups of rewritten files are not committed (`.gitignore` leaves them out).

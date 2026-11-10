@@ -40,6 +40,17 @@ Every component of the type registry, in canonical component order: the order of
 | `CircleCollider2D` | Physics2D | Serializable, ScriptVisible, EditorVisible, Removable | A circle collider in the entity's XY plane. |
 | `PolygonCollider2D` | Physics2D | Serializable, ScriptVisible, EditorVisible, Removable | A convex polygon collider in the entity's XY plane. |
 | `TilemapCollider` | Physics2D | Serializable, ScriptVisible, EditorVisible, Removable | The solid cells of a tilemap as 2D colliders: each chunk's solid cells merged into boxes, one static compound without a RigidBody2D. |
+| `UiCanvas` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text, or, in World mode, laid out in its own canvas pixels and drawn as a rectangle in the world. |
+| `UiRect` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A UI element's rectangle in its parent's (or its canvas's), in canvas units, x right and y down. |
+| `UiImage` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | Draws a sprite sheet frame, or a plain colour, over a UI element's rectangle. |
+| `UiText` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | Draws text in a UI element's rectangle, wrapped and aligned in it. |
+| `UiLayout` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A container that places its children's rectangles in a stack, a grid or a flexible row or column. |
+| `UiLayoutElement` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | How a UI element takes part in its parent's layout container: flex weights, a minimum size, or none. |
+| `UiButton` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A UI button: a pointer click or Submit while focused raises OnUiClick. |
+| `UiToggle` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A UI toggle: a pointer click or Submit while focused flips IsOn and raises OnUiValueChanged; Graphic shows while it is on. |
+| `UiSlider` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A UI slider: the pointer drags its value between Min and Max and the directions along it step it, raising OnUiValueChanged. |
+| `UiScrollView` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A UI scroll view: clips its descendants and moves its Content by the scroll position, which the wheel, a drag and focus change. |
+| `UiTextInput` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A UI text field: while focused, typed characters insert at its caret and the editing keys edit it, raising OnUiTextChanged; Enter raises OnUiSubmit. |
 
 ## ID
 
@@ -1047,6 +1058,358 @@ Script members of `TilemapCollider`:
 | `IsTrigger` | proxy field | `boolean` | read/write | All | Whether the collider only detects overlaps instead of colliding. |
 | `Tilemap` | proxy field | `AssetRef?` | read/write | All | The tilemap whose solid cells collide; null takes the entity's TilemapRenderer.Tilemap. |
 
+## UiCanvas
+
+The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text, or, in World mode, laid out in its own canvas pixels and drawn as a rectangle in the world.
+
+- Category: Ui
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: none
+- Excludes: `UiRect`
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `SortOrder` | `Int32` | `0` |  |  |  | Canvases draw in ascending SortOrder, ties in entity order; a later canvas draws over earlier ones. |
+| `ScaleMode` | `UiScaleMode` | `"ConstantPixelSize"` |  |  |  | How canvas units map to scene pixels. |
+| `ScaleFactor` | `Float` | `1` | 0.01 to 100 |  |  | ConstantPixelSize: the scene pixels per canvas unit. |
+| `ReferenceHeight` | `Float` | `1080` | 1 to 1e+05 | units |  | MatchHeight: the canvas's height in canvas units, so one unit is the scene's height / ReferenceHeight scene pixels. |
+| `PixelSnap` | `Bool` | `true` |  |  |  | Rounds every element's corners to whole scene pixels, so images and clips land on pixel corners. |
+| `Font` | `AssetRef(Font)` | `null` |  |  |  | The font of the canvas's texts whose own Font is null; null uses the default font. |
+| `Theme` | `UiTheme` | `{"Normal":[1,1,1,1],"Hovered":[0.85,0.85,0.85,1],"Pressed":[0.6,0.6,0.6,1],"Focused":[0.75,0.85,1,1],"Disabled":[0.5,0.5,0.5,0.5]}` |  |  |  | The state tints of the canvas's widgets (buttons, toggles, sliders and scroll views). |
+| `DefaultFocus` | `EntityRef` | `null` |  |  |  | The UI widget keyboard and gamepad navigation focuses first while nothing has focus; null: navigation starts only from a pointer press or Ui.SetFocus. |
+| `RenderMode` | `UiCanvasRenderMode` | `"Screen"` |  |  |  | Screen draws the canvas over the scene image; World draws it as a rectangle in the world at the entity's transform, depth-tested against the scene. |
+| `WorldWidth` | `UInt32` | `1024` | 1 to 16384 | px |  | A World canvas's width in canvas pixels (its layout's scene resolution); Screen canvases ignore it. |
+| `WorldHeight` | `UInt32` | `576` | 1 to 16384 | px |  | A World canvas's height in canvas pixels (its layout's scene resolution); Screen canvases ignore it. |
+| `PixelsPerUnit` | `Float` | `512` | 0.001 to 1e+06 |  |  | A World canvas's canvas pixels per world unit: its rectangle is WorldWidth x WorldHeight over this, centred on the entity. |
+
+Script members of `UiCanvas`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `DefaultFocus` | proxy field | `Entity?` | read/write | All | The UI widget keyboard and gamepad navigation focuses first while nothing has focus; null: navigation starts only from a pointer press or Ui.SetFocus. |
+| `Font` | proxy field | `AssetRef?` | read/write | All | The font of the canvas's texts whose own Font is null; null uses the default font. |
+| `PixelSnap` | proxy field | `boolean` | read/write | All | Rounds every element's corners to whole scene pixels, so images and clips land on pixel corners. |
+| `PixelsPerUnit` | proxy field | `number` | read/write | All | A World canvas's canvas pixels per world unit: its rectangle is WorldWidth x WorldHeight over this, centred on the entity. |
+| `ReferenceHeight` | proxy field | `number` | read/write | All | MatchHeight: the canvas's height in canvas units, so one unit is the scene's height / ReferenceHeight scene pixels. |
+| `RenderMode` | proxy field | `UiCanvasRenderMode` | read/write | All | Screen draws the canvas over the scene image; World draws it as a rectangle in the world at the entity's transform, depth-tested against the scene. |
+| `ScaleFactor` | proxy field | `number` | read/write | All | ConstantPixelSize: the scene pixels per canvas unit. |
+| `ScaleMode` | proxy field | `UiScaleMode` | read/write | All | How canvas units map to scene pixels. |
+| `SortOrder` | proxy field | `number` | read/write | All | Canvases draw in ascending SortOrder, ties in entity order; a later canvas draws over earlier ones. |
+| `Theme` | proxy field | `{Normal: Color, Hovered: Color, Pressed: Color, Focused: Color, Disabled: Color}` | read/write | All | The state tints of the canvas's widgets (buttons, toggles, sliders and scroll views). |
+| `WorldHeight` | proxy field | `number` | read/write | All | A World canvas's height in canvas pixels (its layout's scene resolution); Screen canvases ignore it. |
+| `WorldWidth` | proxy field | `number` | read/write | All | A World canvas's width in canvas pixels (its layout's scene resolution); Screen canvases ignore it. |
+
+## UiRect
+
+A UI element's rectangle in its parent's (or its canvas's), in canvas units, x right and y down.
+
+- Category: Ui
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: none
+- Excludes: `UiCanvas`
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `AnchorMin` | `Vec2` | `[0.5,0.5]` | 0 to 1 |  |  | The anchor rectangle's top-left corner, normalized in the parent's rectangle: (0, 0) its top-left corner, (1, 1) its bottom-right. |
+| `AnchorMax` | `Vec2` | `[0.5,0.5]` | 0 to 1 |  |  | The anchor rectangle's bottom-right corner, normalized in the parent's rectangle; equal to AnchorMin for a fixed-size element. |
+| `Pivot` | `Vec2` | `[0.5,0.5]` | 0 to 1 |  |  | The point of the element that Position places, normalized to the element: (0, 0) its top-left corner, (1, 1) its bottom-right. |
+| `Position` | `Vec2` | `[0,0]` | -1e+06 to 1e+06 | units |  | The pivot's offset from its point in the anchor rectangle, in canvas units, x right and y down. |
+| `Size` | `Vec2` | `[100,100]` | -1e+06 to 1e+06 | units |  | The element's size in canvas units, added to the anchor rectangle's size (negative values inset stretched anchors); a container's child takes it as its preferred size. |
+| `ClipChildren` | `Bool` | `false` |  |  |  | Whether the element's descendants are clipped to its rectangle. |
+
+Script members of `UiRect`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `AnchorMax` | proxy field | `vector` | read/write | All | The anchor rectangle's bottom-right corner, normalized in the parent's rectangle; equal to AnchorMin for a fixed-size element. |
+| `AnchorMin` | proxy field | `vector` | read/write | All | The anchor rectangle's top-left corner, normalized in the parent's rectangle: (0, 0) its top-left corner, (1, 1) its bottom-right. |
+| `ClipChildren` | proxy field | `boolean` | read/write | All | Whether the element's descendants are clipped to its rectangle. |
+| `Pivot` | proxy field | `vector` | read/write | All | The point of the element that Position places, normalized to the element: (0, 0) its top-left corner, (1, 1) its bottom-right. |
+| `Position` | proxy field | `vector` | read/write | All | The pivot's offset from its point in the anchor rectangle, in canvas units, x right and y down. |
+| `Size` | proxy field | `vector` | read/write | All | The element's size in canvas units, added to the anchor rectangle's size (negative values inset stretched anchors); a container's child takes it as its preferred size. |
+
+## UiImage
+
+Draws a sprite sheet frame, or a plain colour, over a UI element's rectangle.
+
+- Category: Ui
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `UiRect`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Sheet` | `AssetRef(SpriteSheet)` | `null` |  |  |  | The sprite sheet whose frame is drawn; null draws a plain rectangle of Color. |
+| `Frame` | `UInt32` | `0` | 0 to 65535 |  |  | The index of the frame in the sheet's Frames; a frame the sheet lacks draws nothing. |
+| `Color` | `Color4` | `[1,1,1,1]` | 0 to 1 |  |  | The linear tint multiplied with the frame's texels, with opacity in the fourth component. |
+| `Type` | `UiImageType` | `"Simple"` |  |  |  | Whether the frame stretches or keeps its 9-slice borders. |
+| `BorderScale` | `Float` | `1` | 0.01 to 1000 |  |  | Sliced: the canvas units each border texel takes. |
+| `Filter` | `UiImageFilter` | `"Point"` |  |  |  | How the frame's texture is sampled. |
+| `RaycastTarget` | `Bool` | `true` |  |  |  | Whether the image catches the pointer for its nearest widget; false lets the pointer pass through it. |
+
+Script members of `UiImage`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `BorderScale` | proxy field | `number` | read/write | All | Sliced: the canvas units each border texel takes. |
+| `Color` | proxy field | `Color` | read/write | All | The linear tint multiplied with the frame's texels, with opacity in the fourth component. |
+| `Filter` | proxy field | `UiImageFilter` | read/write | All | How the frame's texture is sampled. |
+| `Frame` | proxy field | `number` | read/write | All | The index of the frame in the sheet's Frames; a frame the sheet lacks draws nothing. |
+| `RaycastTarget` | proxy field | `boolean` | read/write | All | Whether the image catches the pointer for its nearest widget; false lets the pointer pass through it. |
+| `Sheet` | proxy field | `AssetRef?` | read/write | All | The sprite sheet whose frame is drawn; null draws a plain rectangle of Color. |
+| `Type` | proxy field | `UiImageType` | read/write | All | Whether the frame stretches or keeps its 9-slice borders. |
+
+## UiText
+
+Draws text in a UI element's rectangle, wrapped and aligned in it.
+
+- Category: Ui
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `UiRect`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Text` | `String` | `""` |  |  |  | The UTF-8 text; a line feed starts a new line. Scripts read localized strings with Loc.Get. |
+| `Font` | `AssetRef(Font)` | `null` |  |  |  | The font; null uses its canvas's Font, or the default font when the canvas names none. |
+| `Size` | `Float` | `32` | 1 to 1e+05 | units |  | The em size in canvas units. |
+| `Color` | `Color4` | `[1,1,1,1]` | 0 to 1 |  |  | The linear text colour with opacity in the fourth component. |
+| `Alignment` | `TextAlignment` | `"Left"` |  |  |  | How each line is aligned within the rectangle's width. |
+| `VerticalAlignment` | `UiTextVerticalAlignment` | `"Top"` |  |  |  | Where the text block sits in the rectangle's height. |
+| `Wrap` | `Bool` | `true` |  |  |  | Whether lines break at spaces to fit the rectangle's width. |
+| `LineSpacing` | `Float` | `1` | 0.1 to 10 |  |  | Multiplies the font's line height. |
+| `RaycastTarget` | `Bool` | `true` |  |  |  | Whether the text catches the pointer for its nearest widget; false lets the pointer pass through it. |
+
+Script members of `UiText`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Alignment` | proxy field | `TextAlignment` | read/write | All | How each line is aligned within the rectangle's width. |
+| `Color` | proxy field | `Color` | read/write | All | The linear text colour with opacity in the fourth component. |
+| `Font` | proxy field | `AssetRef?` | read/write | All | The font; null uses its canvas's Font, or the default font when the canvas names none. |
+| `LineSpacing` | proxy field | `number` | read/write | All | Multiplies the font's line height. |
+| `RaycastTarget` | proxy field | `boolean` | read/write | All | Whether the text catches the pointer for its nearest widget; false lets the pointer pass through it. |
+| `Size` | proxy field | `number` | read/write | All | The em size in canvas units. |
+| `Text` | proxy field | `string` | read/write | All | The UTF-8 text; a line feed starts a new line. Scripts read localized strings with Loc.Get. A value a script writes holds at most 4096 bytes of text. |
+| `VerticalAlignment` | proxy field | `UiTextVerticalAlignment` | read/write | All | Where the text block sits in the rectangle's height. |
+| `Wrap` | proxy field | `boolean` | read/write | All | Whether lines break at spaces to fit the rectangle's width. |
+
+## UiLayout
+
+A container that places its children's rectangles in a stack, a grid or a flexible row or column.
+
+- Category: Ui
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `UiRect`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Kind` | `UiLayoutKind` | `"Stack"` |  |  |  | How the children are placed. |
+| `Direction` | `UiLayoutDirection` | `"Vertical"` |  |  |  | The main axis the children follow. |
+| `Padding` | `UiPadding` | `{"Left":0,"Top":0,"Right":0,"Bottom":0}` |  |  |  | Insets of the container's rectangle that the children are placed in. |
+| `Spacing` | `Vec2` | `[0,0]` | 0 to 1e+06 | units |  | The gaps between children, lines and cells along x and y, in canvas units. |
+| `MainAlignment` | `UiMainAlignment` | `"Start"` |  |  |  | Where the children sit along the main axis when they do not fill it. |
+| `CrossAlignment` | `UiCrossAlignment` | `"Start"` |  |  |  | Where each child sits across the main axis. |
+| `Columns` | `UInt32` | `0` | 0 to 1024 |  |  | Grid: the cells per row (Horizontal) or per column (Vertical); 0 fits as many as the container holds. |
+| `CellSize` | `Vec2` | `[100,100]` | 0 to 1e+06 | units |  | Grid: the size of each cell in canvas units. |
+| `Wrap` | `Bool` | `false` |  |  |  | Flex: whether a child that does not fit the line starts a new line. |
+
+Script members of `UiLayout`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `CellSize` | proxy field | `vector` | read/write | All | Grid: the size of each cell in canvas units. |
+| `Columns` | proxy field | `number` | read/write | All | Grid: the cells per row (Horizontal) or per column (Vertical); 0 fits as many as the container holds. |
+| `CrossAlignment` | proxy field | `UiCrossAlignment` | read/write | All | Where each child sits across the main axis. |
+| `Direction` | proxy field | `UiLayoutDirection` | read/write | All | The main axis the children follow. |
+| `Kind` | proxy field | `UiLayoutKind` | read/write | All | How the children are placed. |
+| `MainAlignment` | proxy field | `UiMainAlignment` | read/write | All | Where the children sit along the main axis when they do not fill it. |
+| `Padding` | proxy field | `{Left: number, Top: number, Right: number, Bottom: number}` | read/write | All | Insets of the container's rectangle that the children are placed in. |
+| `Spacing` | proxy field | `vector` | read/write | All | The gaps between children, lines and cells along x and y, in canvas units. |
+| `Wrap` | proxy field | `boolean` | read/write | All | Flex: whether a child that does not fit the line starts a new line. |
+
+## UiLayoutElement
+
+How a UI element takes part in its parent's layout container: flex weights, a minimum size, or none.
+
+- Category: Ui
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `UiRect`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `IgnoreLayout` | `Bool` | `false` |  |  |  | Whether the element keeps its own placement and takes no space in the container. |
+| `Grow` | `Float` | `0` | 0 to 1000 |  |  | Flex: the element's share of the main axis's free space. |
+| `Shrink` | `Float` | `1` | 0 to 1000 |  |  | Flex: the element's share, times its preferred size, of the main axis's overflow. |
+| `MinSize` | `Vec2` | `[0,0]` | 0 to 1e+06 | units |  | The size the element never goes below in a Stack or Flex container, in canvas units. |
+
+Script members of `UiLayoutElement`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Grow` | proxy field | `number` | read/write | All | Flex: the element's share of the main axis's free space. |
+| `IgnoreLayout` | proxy field | `boolean` | read/write | All | Whether the element keeps its own placement and takes no space in the container. |
+| `MinSize` | proxy field | `vector` | read/write | All | The size the element never goes below in a Stack or Flex container, in canvas units. |
+| `Shrink` | proxy field | `number` | read/write | All | Flex: the element's share, times its preferred size, of the main axis's overflow. |
+
+## UiButton
+
+A UI button: a pointer click or Submit while focused raises OnUiClick.
+
+- Category: Ui
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `UiRect`
+- Excludes: `UiToggle`, `UiSlider`, `UiScrollView`, `UiTextInput`
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Interactable` | `Bool` | `true` |  |  |  | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
+| `Focusable` | `Bool` | `true` |  |  |  | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
+
+Script members of `UiButton`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Focusable` | proxy field | `boolean` | read/write | All | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
+| `Interactable` | proxy field | `boolean` | read/write | All | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
+
+## UiToggle
+
+A UI toggle: a pointer click or Submit while focused flips IsOn and raises OnUiValueChanged; Graphic shows while it is on.
+
+- Category: Ui
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `UiRect`
+- Excludes: `UiButton`, `UiSlider`, `UiScrollView`, `UiTextInput`
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Interactable` | `Bool` | `true` |  |  |  | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
+| `Focusable` | `Bool` | `true` |  |  |  | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
+| `IsOn` | `Bool` | `false` |  |  |  | Whether the toggle is on. |
+| `Graphic` | `EntityRef` | `null` |  |  |  | A UI element below the toggle (its check mark) that is drawn and hit only while the toggle is on; null for none. |
+
+Script members of `UiToggle`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Focusable` | proxy field | `boolean` | read/write | All | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
+| `Graphic` | proxy field | `Entity?` | read/write | All | A UI element below the toggle (its check mark) that is drawn and hit only while the toggle is on; null for none. |
+| `Interactable` | proxy field | `boolean` | read/write | All | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
+| `IsOn` | proxy field | `boolean` | read/write | All | Whether the toggle is on. |
+
+## UiSlider
+
+A UI slider: the pointer drags its value between Min and Max and the directions along it step it, raising OnUiValueChanged.
+
+- Category: Ui
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `UiRect`
+- Excludes: `UiButton`, `UiToggle`, `UiScrollView`, `UiTextInput`
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Interactable` | `Bool` | `true` |  |  |  | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
+| `Focusable` | `Bool` | `true` |  |  |  | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
+| `Value` | `Float` | `0` | -1e+06 to 1e+06 |  |  | The value, read clamped to Min and Max (and rounded with WholeNumbers). |
+| `Min` | `Float` | `0` | -1e+06 to 1e+06 |  |  | The value at the start edge (left, or bottom when Vertical); below Max. |
+| `Max` | `Float` | `1` | -1e+06 to 1e+06 |  |  | The value at the end edge (right, or top when Vertical). |
+| `WholeNumbers` | `Bool` | `false` |  |  |  | Whether the value is rounded to whole numbers. |
+| `Step` | `Float` | `0` | 0 to 1e+06 |  |  | The change per navigation press along the slider; 0 is a tenth of the range. With WholeNumbers it is rounded to a whole number of at least 1. |
+| `Direction` | `UiLayoutDirection` | `"Horizontal"` |  |  |  | Horizontal puts Min at the left edge; Vertical puts it at the bottom edge. |
+| `Fill` | `EntityRef` | `null` |  |  |  | A UI element below the slider stretched from the Min edge to the value; null for none. |
+| `Handle` | `EntityRef` | `null` |  |  |  | A UI element below the slider placed at the value; null for none. |
+
+Script members of `UiSlider`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Direction` | proxy field | `UiLayoutDirection` | read/write | All | Horizontal puts Min at the left edge; Vertical puts it at the bottom edge. |
+| `Fill` | proxy field | `Entity?` | read/write | All | A UI element below the slider stretched from the Min edge to the value; null for none. |
+| `Focusable` | proxy field | `boolean` | read/write | All | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
+| `Handle` | proxy field | `Entity?` | read/write | All | A UI element below the slider placed at the value; null for none. |
+| `Interactable` | proxy field | `boolean` | read/write | All | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
+| `Max` | proxy field | `number` | read/write | All | The value at the end edge (right, or top when Vertical). |
+| `Min` | proxy field | `number` | read/write | All | The value at the start edge (left, or bottom when Vertical); below Max. |
+| `Step` | proxy field | `number` | read/write | All | The change per navigation press along the slider; 0 is a tenth of the range. With WholeNumbers it is rounded to a whole number of at least 1. |
+| `Value` | proxy field | `number` | read/write | All | The value, read clamped to Min and Max (and rounded with WholeNumbers). |
+| `WholeNumbers` | proxy field | `boolean` | read/write | All | Whether the value is rounded to whole numbers. |
+
+## UiScrollView
+
+A UI scroll view: clips its descendants and moves its Content by the scroll position, which the wheel, a drag and focus change.
+
+- Category: Ui
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `UiRect`
+- Excludes: `UiButton`, `UiToggle`, `UiSlider`, `UiTextInput`
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Interactable` | `Bool` | `true` |  |  |  | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
+| `Focusable` | `Bool` | `false` |  |  |  | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
+| `Content` | `EntityRef` | `null` |  |  |  | The UI element below the scroll view that scrolls; null scrolls nothing. |
+| `Horizontal` | `Bool` | `false` |  |  |  | Whether the content scrolls along x. |
+| `Vertical` | `Bool` | `true` |  |  |  | Whether the content scrolls along y. |
+| `ScrollPosition` | `Vec2` | `[0,0]` | 0 to 1e+06 | units |  | Canvas units the content is moved left (x) and up (y), read clamped to the content's overflow. |
+| `ScrollStep` | `Float` | `40` | 0 to 1e+06 | units |  | Canvas units per wheel step and per navigation press. |
+
+Script members of `UiScrollView`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Content` | proxy field | `Entity?` | read/write | All | The UI element below the scroll view that scrolls; null scrolls nothing. |
+| `Focusable` | proxy field | `boolean` | read/write | All | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
+| `Horizontal` | proxy field | `boolean` | read/write | All | Whether the content scrolls along x. |
+| `Interactable` | proxy field | `boolean` | read/write | All | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
+| `ScrollPosition` | proxy field | `vector` | read/write | All | Canvas units the content is moved left (x) and up (y), read clamped to the content's overflow. |
+| `ScrollStep` | proxy field | `number` | read/write | All | Canvas units per wheel step and per navigation press. |
+| `Vertical` | proxy field | `boolean` | read/write | All | Whether the content scrolls along y. |
+
+## UiTextInput
+
+A UI text field: while focused, typed characters insert at its caret and the editing keys edit it, raising OnUiTextChanged; Enter raises OnUiSubmit.
+
+- Category: Ui
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `UiRect`
+- Excludes: `UiButton`, `UiToggle`, `UiSlider`, `UiScrollView`
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Interactable` | `Bool` | `true` |  |  |  | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
+| `Focusable` | `Bool` | `true` |  |  |  | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
+| `Text` | `String` | `""` |  |  |  | The field's UTF-8 text: typing inserts at the caret; a script's write raises no OnUiTextChanged. |
+| `MaxLength` | `UInt32` | `256` | 1 to 1024 |  |  | The most codepoints typing reaches; characters typed past it are dropped. |
+| `Caret` | `UInt32` | `0` | >= 0 |  |  | The caret, in codepoints from the start of Text, read clamped to Text's length; typing and the editing keys move it. |
+| `TextElement` | `EntityRef` | `null` |  |  |  | A UI element below the input whose UiText shows the input's Text, with the caret while focused; null shows nothing. |
+| `Placeholder` | `EntityRef` | `null` |  |  |  | A UI element below the input shown only while its Text is empty (a hint); null for none. |
+
+Script members of `UiTextInput`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Caret` | proxy field | `number` | read/write | All | The caret, in codepoints from the start of Text, read clamped to Text's length; typing and the editing keys move it. |
+| `Focusable` | proxy field | `boolean` | read/write | All | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
+| `Interactable` | proxy field | `boolean` | read/write | All | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
+| `MaxLength` | proxy field | `number` | read/write | All | The most codepoints typing reaches; characters typed past it are dropped. |
+| `Placeholder` | proxy field | `Entity?` | read/write | All | A UI element below the input shown only while its Text is empty (a hint); null for none. |
+| `Text` | proxy field | `string` | read/write | All | The field's UTF-8 text: typing inserts at the caret; a script's write raises no OnUiTextChanged. A value a script writes holds at most 4096 bytes of text. |
+| `TextElement` | proxy field | `Entity?` | read/write | All | A UI element below the input whose UiText shows the input's Text, with the caret while focused; null shows nothing. |
+
 ## Structs
 
 The structs component fields hold, in name order.
@@ -1072,6 +1435,29 @@ One behaviour of a Script component.
 | `Script` | `AssetRef(Script)` | `null` |  |  |  | The Behaviour script. |
 | `Fields` | `Map<Variant>` | `{}` |  |  |  | Overrides of the script's declared fields, by name. |
 | `ExecutionOrder` | `Int32` | `0` |  |  |  | Callbacks run in (ExecutionOrder, canonical entity order, slot) order. |
+
+### UiPadding
+
+Insets of a UI layout container's rectangle, in canvas units.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Left` | `Float` | `0` | 0 to 1e+06 | units |  | The inset from the left edge. |
+| `Top` | `Float` | `0` | 0 to 1e+06 | units |  | The inset from the top edge. |
+| `Right` | `Float` | `0` | 0 to 1e+06 | units |  | The inset from the right edge. |
+| `Bottom` | `Float` | `0` | 0 to 1e+06 | units |  | The inset from the bottom edge. |
+
+### UiTheme
+
+The state tints of a canvas's widgets: each multiplies the colour of a widget element's own UiImage in that state.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Normal` | `Color4` | `[1,1,1,1]` | 0 to 1 |  |  | The tint of an interactable widget that is neither hovered, pressed nor focused. |
+| `Hovered` | `Color4` | `[0.85,0.85,0.85,1]` | 0 to 1 |  |  | The tint of a widget under the pointer. |
+| `Pressed` | `Color4` | `[0.6,0.6,0.6,1]` | 0 to 1 |  |  | The tint of a widget the pointer presses. |
+| `Focused` | `Color4` | `[0.75,0.85,1,1]` | 0 to 1 |  |  | The tint of the widget that has keyboard and gamepad focus. |
+| `Disabled` | `Color4` | `[0.5,0.5,0.5,0.5]` | 0 to 1 |  |  | The tint of a widget whose Interactable is false. |
 
 ## Enums
 
@@ -1195,3 +1581,89 @@ The curve that maps HDR scene colours to the display.
 | `ACES` | The ACES filmic approximation: higher contrast and saturation. |
 | `PbrNeutral` | Khronos PBR Neutral: keeps base colours faithful up to the highlights. |
 | `Linear` | No curve: exposure only, then clamped to the display range. |
+
+### UiCanvasRenderMode
+
+Where a UI canvas is drawn: over the scene image, or in the world.
+
+| Value | Description |
+|---|---|
+| `Screen` | Over the scene image, after the scene and its texts, laid out in scene pixels. |
+| `World` | As a rectangle in the world at the canvas entity's transform, depth-tested against the scene, laid out in its own canvas pixels. |
+
+### UiCrossAlignment
+
+Where each child of a container sits across its main axis.
+
+| Value | Description |
+|---|---|
+| `Start` | At the start of its line: the top (Horizontal) or the left edge (Vertical). |
+| `Center` | Centred across the main axis. |
+| `End` | At the end of its line: the bottom (Horizontal) or the right edge (Vertical). |
+| `Stretch` | Stretched to fill its line's cross size (a Grid child: its cell's). |
+
+### UiImageFilter
+
+How a UI image samples its texture.
+
+| Value | Description |
+|---|---|
+| `Point` | The nearest texel: pixel art, and a 1:1 image reproduces its texels exactly. |
+| `Linear` | Bilinear filtering between texels. |
+
+### UiImageType
+
+How a UI image fills its element's rectangle.
+
+| Value | Description |
+|---|---|
+| `Simple` | The sprite frame is stretched over the rectangle. |
+| `Sliced` | The frame's 9-slice borders keep their size; the edges and the centre stretch. |
+
+### UiLayoutDirection
+
+The main axis of a UI layout container.
+
+| Value | Description |
+|---|---|
+| `Horizontal` | Children follow each other from left to right. |
+| `Vertical` | Children follow each other from top to bottom. |
+
+### UiLayoutKind
+
+How a UI layout container places its children.
+
+| Value | Description |
+|---|---|
+| `Stack` | One after another along Direction, each at its own size. |
+| `Grid` | In cells of CellSize, Columns cells per row (Horizontal) or per column (Vertical). |
+| `Flex` | A stack whose children grow into free space and shrink when they overflow, wrapping with Wrap. |
+
+### UiMainAlignment
+
+Where a container's children sit along its main axis when they do not fill it.
+
+| Value | Description |
+|---|---|
+| `Start` | At the start: the left edge (Horizontal) or the top (Vertical). |
+| `Center` | Centred along the main axis. |
+| `End` | At the end: the right edge (Horizontal) or the bottom (Vertical). |
+
+### UiScaleMode
+
+How a UI canvas maps its units to scene pixels.
+
+| Value | Description |
+|---|---|
+| `ConstantPixelSize` | ScaleFactor scene pixels per canvas unit, whatever the scene resolution. |
+| `MatchHeight` | The canvas is ReferenceHeight units high, so it scales with the scene's height. |
+
+### UiTextVerticalAlignment
+
+Where a UI text block sits in its element's rectangle.
+
+| Value | Description |
+|---|---|
+| `Top` | The first line starts at the rectangle's top edge. |
+| `Middle` | The block is centred vertically in the rectangle. |
+| `Bottom` | The last line ends at the rectangle's bottom edge. |

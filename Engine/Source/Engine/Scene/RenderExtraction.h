@@ -99,6 +99,21 @@ namespace Engine {
 	// file comment, over the entity's WorldTransformComponent as it is (callers refresh it first). Pure.
 	[[nodiscard]] glm::mat4 ComputeRenderedWorldMatrix(ConstEntity entity, float alpha);
 
+	// M22's landing (Docs/Decisions/0033-m22-contract.md decisions 3 and 24, "Landing"; ADR 0028's phase-2 ledger): the
+	// output-stage settings render extraction gives a view through `camera` (a valid entity, asserted): its
+	// PixelPerfectCamera's (ComputePixelPerfectView's Output, which the camera's position does not change) when the entity
+	// holds a PixelPerfectCameraComponent, else the defaults (the scene resolution is the view's size). It is the one place
+	// a camera's scene resolution is decided: ExtractRenderSnapshot sets RenderSnapshot::Output from it for the Primary and
+	// Entity sources, and the play session's UiLayout and FrameUiLayout phases, UiInput's pointer mapping, ui.tree and the
+	// editor's UI preview take the primary camera's through ComputeGameViewOutputMapping, so the layout the session
+	// hit-tests is the one the game view draws. Pure.
+	[[nodiscard]] RenderOutputSettings GetCameraOutputSettings(ConstEntity camera);
+
+	// The output mapping of the scene's game view (RenderCameraSource::Primary) in a `viewSize` view (each >= 1, asserted):
+	// ComputeRenderOutputMapping with the primary camera's GetCameraOutputSettings, or the defaults (the identity) without
+	// a primary camera. Its SceneWidth x SceneHeight is the scene resolution the game view lays its UI out at. Pure.
+	[[nodiscard]] RenderOutputMapping ComputeGameViewOutputMapping(const Scene& scene, glm::uvec2 viewSize);
+
 	// The snapshot of one view of `scene` (§8.2):
 	//   - Camera: per request.Camera. Primary without a primary camera is not an error: HasCamera is false and the renderer
 	//     clears to the default clear colour. View = the inverse of the camera's rendered world matrix with its scale

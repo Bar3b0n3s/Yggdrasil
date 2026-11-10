@@ -488,7 +488,7 @@ namespace Engine {
 			Material,
 			SoundEffect,
 			SpriteSheet,
-			Tilemap, // M21 (Docs/Decisions/0032-m21-contract.md decision 23)
+			Tilemap,    // M21 (Docs/Decisions/0032-m21-contract.md decision 23)
 			StringTable // M22 (Docs/Decisions/0033-m22-contract.md decision 10)
 		};
 

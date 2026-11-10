@@ -7,6 +7,7 @@
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/UiLayout.h"
 #include "Engine/Session/PlaySession.h"
@@ -94,10 +95,16 @@ namespace Engine {
 			return status;
 		}
 		const SceneTarget target = session != nullptr ? SceneTarget::Play : SceneTarget::Edit;
-		const UiLayoutTable table = ComputeUiLayout(*scene, imageSize);
-		const auto toPanel = [&frame](glm::vec2 point)
+		// The image is the game view at `imageSize` (the preview's extraction through the primary camera), so the UI is laid out
+		// at that view's scene resolution and placed in it by its output mapping: the identity, or a PixelPerfectCamera's
+		// integer upscale and letterbox (M22's landing, ComputeGameViewOutputMapping).
+		const RenderOutputMapping output = ComputeGameViewOutputMapping(*scene, imageSize);
+		const UiLayoutTable table = ComputeUiLayout(*scene, glm::uvec2(output.SceneWidth, output.SceneHeight));
+		const float outputScale = static_cast<float>(output.Scale);
+		const glm::vec2 outputOffset(static_cast<float>(output.OffsetX), static_cast<float>(output.OffsetY));
+		const auto toPanel = [&frame, outputScale, outputOffset](glm::vec2 point)
 		{
-			return frame.Min + point * frame.Scale;
+			return frame.Min + (point * outputScale + outputOffset) * frame.Scale;
 		};
 		// C22.3 (the review of C22.3): a World canvas's elements are in its own canvas pixels, not the frame's, so the preview
 		// neither outlines nor picks them, nor gives one the rect tool (UiAuthoring.h's PickUiElement).
@@ -191,7 +198,7 @@ namespace Engine {
 		std::optional<UiRectComponent> dragged;
 		if (m_Drag && m_Drag->Started)
 		{
-			const glm::vec2 delta = (m_Drag->Pointer - m_Drag->PressPoint) / (frame.Scale * m_Drag->CanvasScale);
+			const glm::vec2 delta = (m_Drag->Pointer - m_Drag->PressPoint) / (frame.Scale * outputScale * m_Drag->CanvasScale);
 			dragged = DragUiRect(m_Drag->Start, m_Drag->StartSize, m_Drag->Handle, delta);
 			// Where the dragged rectangle lies: its size and Position changed by what the drag changed, the pivot point moving
 			// with Position (UiRectComponent.h's rule), in scene pixels and then panel pixels.
@@ -238,7 +245,7 @@ namespace Engine {
 			}
 			else if (m_Click)
 			{
-				const UUID picked = PickUiElement(table, MapUiPreviewPointToScene(frame, *m_Click));
+				const UUID picked = PickUiElement(table, MapViewPointToScenePoint(output, MapUiPreviewPointToScene(frame, *m_Click)));
 				Json entities = Json::array();
 				if (picked.IsValid())
 					entities.push_back(picked.ToString());

@@ -453,7 +453,7 @@ Tests support (`Tests/Source/Support/`): recording assert handler, death-test re
 - An entity holding both 2D and 3D physics components is a validation error, and a 2D body never leaves its plane. A lit sprite matches its CPU reference. A tilemap renders byte-identical to the same tiles drawn as sprites.
 - The coverage gates pass in every mode, and the demo hashes are unchanged (the settings sections reach the demos through a recorded upgrade that keeps every hash).
 
-**Parallelization**: W21.1 (sprites and 2D physics) and W21.2 (2D lighting and tilemaps), each with a contract. If M21 lands after M22, it adds the combined 2D/UI test (M22).
+**Parallelization**: W21.1 (sprites and 2D physics) and W21.2 (2D lighting and tilemaps), each with a contract. M21 landed first, so M22 added the combined 2D/UI test at its landing (M22).
 
 ---
 
@@ -467,9 +467,9 @@ Tests support (`Tests/Source/Support/`): recording assert handler, death-test re
 - Text input, fallback fonts and CJK ranges, RTL and complex-script shaping with HarfBuzz and SheenBidi, and world-space canvases (W22.3).
 
 **Acceptance**
-- UI layout tables, string lookups and shaped text are byte-identical across configurations; a 1:1 UI image reads back pixel-exact; the CJK, Arabic and Hebrew goldens pass; every widget works by keyboard and gamepad; scenes without UI keep their hash.
+- UI layout tables, string lookups and shaped text are byte-identical across configurations; a 1:1 UI image reads back pixel-exact; the CJK, Arabic and Hebrew goldens pass; every widget works by keyboard and gamepad (a text input is focused, submitted and left by gamepad, but typing needs a text source: a recorded departure, `Docs/Decisions/0033-m22-contract.md` decision 47 and Backlog §6); scenes without UI keep their hash.
 - The Ui, TextInput and world-canvas replays are identical in all four runs, and each fails without its input.
-- The later lander of M21 and M22 adds, on the merged tree, a FeatureTest scene with a golden that holds a UI canvas and sprites under PixelPerfectCamera at scale 3, and a replay that presses a button through that camera and fails without its input.
+- The later lander of M21 and M22 adds, on the merged tree, a FeatureTest scene with a golden that holds a UI canvas and sprites under PixelPerfectCamera at scale 3, and a replay that presses a button through that camera and fails without its input. M21 landed first, so M22 adds it at its landing: `Combined2DUi.scene` (the golden scaffold `Combined2DUiGolden.jsonl`), its golden `Combined2DUi` and `Combined2DUi.replay` (`Docs/Decisions/0033-m22-contract.md`, "Landing").
 
 **Parallelization**: three waves in order, each with a contract.
 

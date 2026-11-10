@@ -229,6 +229,20 @@
 			]
 		},
 		{
+			"File": "Combined2DUiGolden.jsonl",
+			"IdSeed": 2090,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Scenes/Combined2DUiGolden",
+				"Assets/Scripts/Combined2DUiGolden"
+			]
+		},
+		{
+			"File": "Combined2DUiReplay.jsonl",
+			"IdSeed": 2091,
+			"Renderer": "none"
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

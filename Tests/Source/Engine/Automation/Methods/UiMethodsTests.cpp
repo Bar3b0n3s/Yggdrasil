@@ -113,6 +113,28 @@ namespace Engine {
 			CHECK(outline.contains("(20,10 80x40)"));
 		}
 
+		// M22's landing (Docs/Decisions/0033-m22-contract.md decision 3, "Landing"): under M21's PixelPerfectCamera the game view
+		// lays its UI out at the camera's reference resolution, so ui.tree's default layout of the edit scene is the one the
+		// game view draws at the project's window size, not one at the window size itself; an explicit size is still the scene
+		// resolution asked for.
+		TEST_CASE("UiMethods: ui.tree lays the edit scene out at a PixelPerfectCamera's reference resolution by default")
+		{
+			Test::AutomationFixture setup("UiTreePixelPerfect");
+			CreateUi(setup);
+			REQUIRE(setup.Call("entity.create", ParseUiMethodJson(R"({"name":"Camera","components":{"Camera":{"Primary":true},
+				"PixelPerfectCamera":{"ReferenceWidth":200,"ReferenceHeight":120,"PixelsPerUnit":16}}})"))
+					.has_value());
+			Result<Json> listed = setup.Call("ui.tree", Json{ { "format", "Json" } });
+			REQUIRE_MESSAGE(listed.has_value(), listed.error().ToString());
+			CHECK((*listed)["width"] == Json(200));
+			CHECK((*listed)["height"] == Json(120));
+			CHECK(FindUiTreeRect((*listed)["elements"], "Hud") == Json{ { "x", 0 }, { "y", 0 }, { "width", 200 }, { "height", 120 } });
+			Result<Json> sized = setup.Call("ui.tree", Json{ { "format", "Json" }, { "width", 400 }, { "height", 240 } });
+			REQUIRE_MESSAGE(sized.has_value(), sized.error().ToString());
+			CHECK((*sized)["width"] == Json(400));
+			CHECK(FindUiTreeRect((*sized)["elements"], "Hud") == Json{ { "x", 0 }, { "y", 0 }, { "width", 400 }, { "height", 240 } });
+		}
+
 		// Decision 8: the play scene's rectangles are the session's current layout (UiSystem::GetLayout), which W22.2's UiInput
 		// hit-tests, not a layout made afresh: an edit of the play scene shows in ui.tree only once a step lays it out, while
 		// ui.tree with an explicit size lays the scene as it is now out at once (the W22.1 review: a lockstep session's view

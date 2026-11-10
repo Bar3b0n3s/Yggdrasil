@@ -1658,6 +1658,618 @@
 			},
 			"additionalProperties": false
 		},
+		"UiCanvas": {
+			"description": "The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text, or, in World mode, laid out in its own canvas pixels and drawn as a rectangle in the world.",
+			"type": "object",
+			"properties": {
+				"SortOrder": {
+					"description": "Canvases draw in ascending SortOrder, ties in entity order; a later canvas draws over earlier ones.",
+					"type": "integer",
+					"minimum": -2147483648,
+					"maximum": 2147483647
+				},
+				"ScaleMode": {
+					"description": "How canvas units map to scene pixels.",
+					"enum": ["ConstantPixelSize", "MatchHeight"]
+				},
+				"ScaleFactor": {
+					"description": "ConstantPixelSize: the scene pixels per canvas unit.",
+					"type": "number",
+					"minimum": 0.01,
+					"maximum": 100
+				},
+				"ReferenceHeight": {
+					"description": "MatchHeight: the canvas's height in canvas units, so one unit is the scene's height / ReferenceHeight scene pixels.",
+					"type": "number",
+					"minimum": 1,
+					"maximum": 100000
+				},
+				"PixelSnap": {
+					"description": "Rounds every element's corners to whole scene pixels, so images and clips land on pixel corners.",
+					"type": "boolean"
+				},
+				"Font": {
+					"description": "The font of the canvas's texts whose own Font is null; null uses the default font.",
+					"type": ["string", "null"],
+					"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+					"x-assetType": "Font"
+				},
+				"Theme": {
+					"description": "The state tints of the canvas's widgets (buttons, toggles, sliders and scroll views).",
+					"$ref": "#/$defs/UiTheme"
+				},
+				"DefaultFocus": {
+					"description": "The UI widget keyboard and gamepad navigation focuses first while nothing has focus; null: navigation starts only from a pointer press or Ui.SetFocus.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				},
+				"RenderMode": {
+					"description": "Screen draws the canvas over the scene image; World draws it as a rectangle in the world at the entity's transform, depth-tested against the scene.",
+					"enum": ["Screen", "World"]
+				},
+				"WorldWidth": {
+					"description": "A World canvas's width in canvas pixels (its layout's scene resolution); Screen canvases ignore it.",
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 16384
+				},
+				"WorldHeight": {
+					"description": "A World canvas's height in canvas pixels (its layout's scene resolution); Screen canvases ignore it.",
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 16384
+				},
+				"PixelsPerUnit": {
+					"description": "A World canvas's canvas pixels per world unit: its rectangle is WorldWidth x WorldHeight over this, centred on the entity.",
+					"type": "number",
+					"minimum": 0.001,
+					"maximum": 1000000
+				}
+			},
+			"additionalProperties": false
+		},
+		"UiRect": {
+			"description": "A UI element's rectangle in its parent's (or its canvas's), in canvas units, x right and y down.",
+			"type": "object",
+			"properties": {
+				"AnchorMin": {
+					"description": "The anchor rectangle's top-left corner, normalized in the parent's rectangle: (0, 0) its top-left corner, (1, 1) its bottom-right.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 2,
+					"maxItems": 2
+				},
+				"AnchorMax": {
+					"description": "The anchor rectangle's bottom-right corner, normalized in the parent's rectangle; equal to AnchorMin for a fixed-size element.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 2,
+					"maxItems": 2
+				},
+				"Pivot": {
+					"description": "The point of the element that Position places, normalized to the element: (0, 0) its top-left corner, (1, 1) its bottom-right.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 2,
+					"maxItems": 2
+				},
+				"Position": {
+					"description": "The pivot's offset from its point in the anchor rectangle, in canvas units, x right and y down.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": -1000000,
+							"maximum": 1000000
+						},
+						{
+							"type": "number",
+							"minimum": -1000000,
+							"maximum": 1000000
+						}
+					],
+					"minItems": 2,
+					"maxItems": 2
+				},
+				"Size": {
+					"description": "The element's size in canvas units, added to the anchor rectangle's size (negative values inset stretched anchors); a container's child takes it as its preferred size.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": -1000000,
+							"maximum": 1000000
+						},
+						{
+							"type": "number",
+							"minimum": -1000000,
+							"maximum": 1000000
+						}
+					],
+					"minItems": 2,
+					"maxItems": 2
+				},
+				"ClipChildren": {
+					"description": "Whether the element's descendants are clipped to its rectangle.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"UiImage": {
+			"description": "Draws a sprite sheet frame, or a plain colour, over a UI element's rectangle.",
+			"type": "object",
+			"properties": {
+				"Sheet": {
+					"description": "The sprite sheet whose frame is drawn; null draws a plain rectangle of Color.",
+					"type": ["string", "null"],
+					"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+					"x-assetType": "SpriteSheet"
+				},
+				"Frame": {
+					"description": "The index of the frame in the sheet's Frames; a frame the sheet lacks draws nothing.",
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 65535
+				},
+				"Color": {
+					"description": "The linear tint multiplied with the frame's texels, with opacity in the fourth component.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 4,
+					"maxItems": 4
+				},
+				"Type": {
+					"description": "Whether the frame stretches or keeps its 9-slice borders.",
+					"enum": ["Simple", "Sliced"]
+				},
+				"BorderScale": {
+					"description": "Sliced: the canvas units each border texel takes.",
+					"type": "number",
+					"minimum": 0.01,
+					"maximum": 1000
+				},
+				"Filter": {
+					"description": "How the frame's texture is sampled.",
+					"enum": ["Point", "Linear"]
+				},
+				"RaycastTarget": {
+					"description": "Whether the image catches the pointer for its nearest widget; false lets the pointer pass through it.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"UiText": {
+			"description": "Draws text in a UI element's rectangle, wrapped and aligned in it.",
+			"type": "object",
+			"properties": {
+				"Text": {
+					"description": "The UTF-8 text; a line feed starts a new line. Scripts read localized strings with Loc.Get.",
+					"type": "string"
+				},
+				"Font": {
+					"description": "The font; null uses its canvas's Font, or the default font when the canvas names none.",
+					"type": ["string", "null"],
+					"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+					"x-assetType": "Font"
+				},
+				"Size": {
+					"description": "The em size in canvas units.",
+					"type": "number",
+					"minimum": 1,
+					"maximum": 100000
+				},
+				"Color": {
+					"description": "The linear text colour with opacity in the fourth component.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 4,
+					"maxItems": 4
+				},
+				"Alignment": {
+					"description": "How each line is aligned within the rectangle's width.",
+					"enum": ["Left", "Center", "Right"]
+				},
+				"VerticalAlignment": {
+					"description": "Where the text block sits in the rectangle's height.",
+					"enum": ["Top", "Middle", "Bottom"]
+				},
+				"Wrap": {
+					"description": "Whether lines break at spaces to fit the rectangle's width.",
+					"type": "boolean"
+				},
+				"LineSpacing": {
+					"description": "Multiplies the font's line height.",
+					"type": "number",
+					"minimum": 0.1,
+					"maximum": 10
+				},
+				"RaycastTarget": {
+					"description": "Whether the text catches the pointer for its nearest widget; false lets the pointer pass through it.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"UiLayout": {
+			"description": "A container that places its children's rectangles in a stack, a grid or a flexible row or column.",
+			"type": "object",
+			"properties": {
+				"Kind": {
+					"description": "How the children are placed.",
+					"enum": ["Stack", "Grid", "Flex"]
+				},
+				"Direction": {
+					"description": "The main axis the children follow.",
+					"enum": ["Horizontal", "Vertical"]
+				},
+				"Padding": {
+					"description": "Insets of the container's rectangle that the children are placed in.",
+					"$ref": "#/$defs/UiPadding"
+				},
+				"Spacing": {
+					"description": "The gaps between children, lines and cells along x and y, in canvas units.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1000000
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1000000
+						}
+					],
+					"minItems": 2,
+					"maxItems": 2
+				},
+				"MainAlignment": {
+					"description": "Where the children sit along the main axis when they do not fill it.",
+					"enum": ["Start", "Center", "End"]
+				},
+				"CrossAlignment": {
+					"description": "Where each child sits across the main axis.",
+					"enum": ["Start", "Center", "End", "Stretch"]
+				},
+				"Columns": {
+					"description": "Grid: the cells per row (Horizontal) or per column (Vertical); 0 fits as many as the container holds.",
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 1024
+				},
+				"CellSize": {
+					"description": "Grid: the size of each cell in canvas units.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1000000
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1000000
+						}
+					],
+					"minItems": 2,
+					"maxItems": 2
+				},
+				"Wrap": {
+					"description": "Flex: whether a child that does not fit the line starts a new line.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"UiLayoutElement": {
+			"description": "How a UI element takes part in its parent's layout container: flex weights, a minimum size, or none.",
+			"type": "object",
+			"properties": {
+				"IgnoreLayout": {
+					"description": "Whether the element keeps its own placement and takes no space in the container.",
+					"type": "boolean"
+				},
+				"Grow": {
+					"description": "Flex: the element's share of the main axis's free space.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000
+				},
+				"Shrink": {
+					"description": "Flex: the element's share, times its preferred size, of the main axis's overflow.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000
+				},
+				"MinSize": {
+					"description": "The size the element never goes below in a Stack or Flex container, in canvas units.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1000000
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1000000
+						}
+					],
+					"minItems": 2,
+					"maxItems": 2
+				}
+			},
+			"additionalProperties": false
+		},
+		"UiButton": {
+			"description": "A UI button: a pointer click or Submit while focused raises OnUiClick.",
+			"type": "object",
+			"properties": {
+				"Interactable": {
+					"description": "Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event.",
+					"type": "boolean"
+				},
+				"Focusable": {
+					"description": "Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"UiToggle": {
+			"description": "A UI toggle: a pointer click or Submit while focused flips IsOn and raises OnUiValueChanged; Graphic shows while it is on.",
+			"type": "object",
+			"properties": {
+				"Interactable": {
+					"description": "Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event.",
+					"type": "boolean"
+				},
+				"Focusable": {
+					"description": "Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it.",
+					"type": "boolean"
+				},
+				"IsOn": {
+					"description": "Whether the toggle is on.",
+					"type": "boolean"
+				},
+				"Graphic": {
+					"description": "A UI element below the toggle (its check mark) that is drawn and hit only while the toggle is on; null for none.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				}
+			},
+			"additionalProperties": false
+		},
+		"UiSlider": {
+			"description": "A UI slider: the pointer drags its value between Min and Max and the directions along it step it, raising OnUiValueChanged.",
+			"type": "object",
+			"properties": {
+				"Interactable": {
+					"description": "Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event.",
+					"type": "boolean"
+				},
+				"Focusable": {
+					"description": "Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it.",
+					"type": "boolean"
+				},
+				"Value": {
+					"description": "The value, read clamped to Min and Max (and rounded with WholeNumbers).",
+					"type": "number",
+					"minimum": -1000000,
+					"maximum": 1000000
+				},
+				"Min": {
+					"description": "The value at the start edge (left, or bottom when Vertical); below Max.",
+					"type": "number",
+					"minimum": -1000000,
+					"maximum": 1000000
+				},
+				"Max": {
+					"description": "The value at the end edge (right, or top when Vertical).",
+					"type": "number",
+					"minimum": -1000000,
+					"maximum": 1000000
+				},
+				"WholeNumbers": {
+					"description": "Whether the value is rounded to whole numbers.",
+					"type": "boolean"
+				},
+				"Step": {
+					"description": "The change per navigation press along the slider; 0 is a tenth of the range. With WholeNumbers it is rounded to a whole number of at least 1.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000000
+				},
+				"Direction": {
+					"description": "Horizontal puts Min at the left edge; Vertical puts it at the bottom edge.",
+					"enum": ["Horizontal", "Vertical"]
+				},
+				"Fill": {
+					"description": "A UI element below the slider stretched from the Min edge to the value; null for none.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				},
+				"Handle": {
+					"description": "A UI element below the slider placed at the value; null for none.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				}
+			},
+			"additionalProperties": false
+		},
+		"UiScrollView": {
+			"description": "A UI scroll view: clips its descendants and moves its Content by the scroll position, which the wheel, a drag and focus change.",
+			"type": "object",
+			"properties": {
+				"Interactable": {
+					"description": "Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event.",
+					"type": "boolean"
+				},
+				"Focusable": {
+					"description": "Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it.",
+					"type": "boolean"
+				},
+				"Content": {
+					"description": "The UI element below the scroll view that scrolls; null scrolls nothing.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				},
+				"Horizontal": {
+					"description": "Whether the content scrolls along x.",
+					"type": "boolean"
+				},
+				"Vertical": {
+					"description": "Whether the content scrolls along y.",
+					"type": "boolean"
+				},
+				"ScrollPosition": {
+					"description": "Canvas units the content is moved left (x) and up (y), read clamped to the content's overflow.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1000000
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1000000
+						}
+					],
+					"minItems": 2,
+					"maxItems": 2
+				},
+				"ScrollStep": {
+					"description": "Canvas units per wheel step and per navigation press.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000000
+				}
+			},
+			"additionalProperties": false
+		},
+		"UiTextInput": {
+			"description": "A UI text field: while focused, typed characters insert at its caret and the editing keys edit it, raising OnUiTextChanged; Enter raises OnUiSubmit.",
+			"type": "object",
+			"properties": {
+				"Interactable": {
+					"description": "Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event.",
+					"type": "boolean"
+				},
+				"Focusable": {
+					"description": "Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it.",
+					"type": "boolean"
+				},
+				"Text": {
+					"description": "The field's UTF-8 text: typing inserts at the caret; a script's write raises no OnUiTextChanged.",
+					"type": "string"
+				},
+				"MaxLength": {
+					"description": "The most codepoints typing reaches; characters typed past it are dropped.",
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 1024
+				},
+				"Caret": {
+					"description": "The caret, in codepoints from the start of Text, read clamped to Text's length; typing and the editing keys move it.",
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 4294967295
+				},
+				"TextElement": {
+					"description": "A UI element below the input whose UiText shows the input's Text, with the caret while focused; null shows nothing.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				},
+				"Placeholder": {
+					"description": "A UI element below the input shown only while its Text is empty (a hint); null for none.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				}
+			},
+			"additionalProperties": false
+		},
 		"PrefabOverride": {
 			"description": "One recorded difference between an outermost prefab instance and its prefab.",
 			"type": "object",
@@ -1708,6 +2320,184 @@
 					"type": "integer",
 					"minimum": -2147483648,
 					"maximum": 2147483647
+				}
+			},
+			"additionalProperties": false
+		},
+		"UiTheme": {
+			"description": "The state tints of a canvas's widgets: each multiplies the colour of a widget element's own UiImage in that state.",
+			"type": "object",
+			"properties": {
+				"Normal": {
+					"description": "The tint of an interactable widget that is neither hovered, pressed nor focused.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 4,
+					"maxItems": 4
+				},
+				"Hovered": {
+					"description": "The tint of a widget under the pointer.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 4,
+					"maxItems": 4
+				},
+				"Pressed": {
+					"description": "The tint of a widget the pointer presses.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 4,
+					"maxItems": 4
+				},
+				"Focused": {
+					"description": "The tint of the widget that has keyboard and gamepad focus.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 4,
+					"maxItems": 4
+				},
+				"Disabled": {
+					"description": "The tint of a widget whose Interactable is false.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 4,
+					"maxItems": 4
+				}
+			},
+			"additionalProperties": false
+		},
+		"UiPadding": {
+			"description": "Insets of a UI layout container's rectangle, in canvas units.",
+			"type": "object",
+			"properties": {
+				"Left": {
+					"description": "The inset from the left edge.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000000
+				},
+				"Top": {
+					"description": "The inset from the top edge.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000000
+				},
+				"Right": {
+					"description": "The inset from the right edge.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000000
+				},
+				"Bottom": {
+					"description": "The inset from the bottom edge.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000000
 				}
 			},
 			"additionalProperties": false
@@ -1834,6 +2624,39 @@
 						},
 						"TilemapCollider": {
 							"$ref": "#/$defs/TilemapCollider"
+						},
+						"UiCanvas": {
+							"$ref": "#/$defs/UiCanvas"
+						},
+						"UiRect": {
+							"$ref": "#/$defs/UiRect"
+						},
+						"UiImage": {
+							"$ref": "#/$defs/UiImage"
+						},
+						"UiText": {
+							"$ref": "#/$defs/UiText"
+						},
+						"UiLayout": {
+							"$ref": "#/$defs/UiLayout"
+						},
+						"UiLayoutElement": {
+							"$ref": "#/$defs/UiLayoutElement"
+						},
+						"UiButton": {
+							"$ref": "#/$defs/UiButton"
+						},
+						"UiToggle": {
+							"$ref": "#/$defs/UiToggle"
+						},
+						"UiSlider": {
+							"$ref": "#/$defs/UiSlider"
+						},
+						"UiScrollView": {
+							"$ref": "#/$defs/UiScrollView"
+						},
+						"UiTextInput": {
+							"$ref": "#/$defs/UiTextInput"
 						}
 					},
 					"additionalProperties": true

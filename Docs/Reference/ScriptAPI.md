@@ -208,7 +208,7 @@ All modes; LoadTime|Runtime|Test; pure/read.
 
 `(type: string) -> FieldDescriptor`
 
-Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for imported audio and .sfx sound effects, Script, Font, Replay, SpriteSheet or Tilemap), with a null default; any other name fails the import.
+Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for imported audio and .sfx sound effects, Script, Font, Replay, SpriteSheet, Tilemap or StringTable), with a null default; any other name fails the import.
 
 All modes; LoadTime|Runtime|Test; pure/read.
 
@@ -338,6 +338,14 @@ Returns accumulated scroll, right-positive and up-positive.
 
 All modes; Runtime|Test; pure/read.
 
+### Input.GetText
+
+`() -> string`
+
+Returns the characters typed in the latched view as UTF-8: in the fixed step (OnFixedUpdate, tasks, physics and UI callbacks) the tick's committed characters, in the frame phase (OnUpdate, OnLateUpdate) those of every tick since the previous frame; empty when none were typed.
+
+All modes; Runtime|Test; pure/read.
+
 ### Input.IsActionDown
 
 `(name: string) -> boolean`
@@ -449,6 +457,34 @@ Changes cursor visibility/capture; refused during read-only evaluation.
 All modes; Runtime|Test; mutates.
 
 Argument 1: CursorMode.
+
+## Loc
+
+Localized strings from string tables (.stringtable assets) in the project's locale (Localization.Locale): a table's locale equal to it, else its language's, else the table's first (fallback) locale; an entry without a string for that locale gives the fallback's.
+
+### Loc.Get
+
+`(table: AssetRef, key: string) -> string`
+
+Returns the string of key in the locale. A key the table lacks, an asset that is not a string table, or a table that fails to load raises a located error naming them (with the closest keys as a hint).
+
+All modes; Runtime|Test; pure/read.
+
+### Loc.GetLocale
+
+`() -> string`
+
+Returns the project's locale (Localization.Locale) that lookups use; empty when it is unset, so every table reads its fallback locale.
+
+All modes; Runtime|Test; pure/read.
+
+### Loc.Has
+
+`(table: AssetRef, key: string) -> boolean`
+
+Returns whether the string table has the key. An asset that is not a string table, or a table that fails to load, raises a located error naming it, as in Get.
+
+All modes; Runtime|Test; pure/read.
 
 ## Log
 
@@ -1166,6 +1202,30 @@ Argument 1: MouseButton.
 
 Argument 2: InputEventState.
 
+### Test.InjectMouseMove
+
+`(position: vector) -> ()`
+
+Queue a mouse move to a finite XY position in view coordinates for the next unapplied input tick.
+
+All modes; Test; mutates.
+
+### Test.InjectScroll
+
+`(delta: vector) -> ()`
+
+Queue a scroll of a finite XY delta (wheel steps, y up-positive) for the next unapplied input tick.
+
+All modes; Test; mutates.
+
+### Test.InjectText
+
+`(text: string) -> ()`
+
+Queue committed text (non-empty UTF-8) for the next unapplied input tick, as typed characters.
+
+All modes; Test; mutates.
+
 ### Test.ReloadScript
 
 `(asset: AssetRef) -> ()`
@@ -1287,6 +1347,58 @@ All modes; Runtime|Test; pure/read.
 `(scale: number) -> ()`
 
 Sets the session time scale in [0, 100]; refused during read-only evaluation.
+
+All modes; Runtime|Test; mutates.
+
+## Ui
+
+The game UI's interaction state in the running scene: keyboard and gamepad focus, the widget under the pointer and the one it presses, and where elements were laid out. UI events reach behaviours through the OnUi callbacks, which bubble from the element to its ancestors.
+
+### Ui.GetFocus
+
+`() -> Entity?`
+
+Returns the UI element that has keyboard and gamepad focus, or nil.
+
+All modes; Runtime|Test; pure/read.
+
+### Ui.GetHovered
+
+`() -> Entity?`
+
+Returns the interactable UI widget under the pointer, or nil.
+
+All modes; Runtime|Test; pure/read.
+
+### Ui.GetPressed
+
+`() -> Entity?`
+
+Returns the UI widget the held pointer pressed, or nil.
+
+All modes; Runtime|Test; pure/read.
+
+### Ui.GetRect
+
+`(element: Entity) -> UiElementRect?`
+
+Returns element's rectangle in the current UI layout, in scene pixels (which are view coordinates unless the output is upscaled) or, for an element of a World canvas, in that canvas's own pixels, with its canvas; nil when it is not laid out.
+
+All modes; Runtime|Test; pure/read.
+
+### Ui.IsPointerOverUi
+
+`() -> boolean`
+
+Returns whether the pointer was over a UI image, text or widget that catches it at this tick, so gameplay can ignore clicks meant for the UI.
+
+All modes; Runtime|Test; pure/read.
+
+### Ui.SetFocus
+
+`(element: Entity?) -> ()`
+
+Moves focus to element, a laid-out, interactable and focusable UI widget, or clears it with nil; OnUiFocus follows in the next UiEvents phase. Any other element raises a located error saying why.
 
 All modes; Runtime|Test; mutates.
 
@@ -1583,6 +1695,70 @@ All modes; Runtime|Test; mutates.
 `(self: ScriptInstance, other: Entity) -> ()`
 
 Called when the corresponding 2D collision or trigger transition occurs.
+
+All modes; Runtime|Test; mutates.
+
+### Behaviour.OnUiCancel
+
+`(self: ScriptInstance, element: Entity) -> boolean?`
+
+Called when Cancel is pressed, at the focused UI element (or the last canvas when none is focused); bubbles like OnUiClick.
+
+All modes; Runtime|Test; mutates.
+
+### Behaviour.OnUiClick
+
+`(self: ScriptInstance, element: Entity) -> boolean?`
+
+Called when a UI button is clicked or submitted, at its entity, then bubbling to its ancestors; return true to stop it.
+
+All modes; Runtime|Test; mutates.
+
+### Behaviour.OnUiFocus
+
+`(self: ScriptInstance, element: Entity, focused: boolean) -> boolean?`
+
+Called when a UI element gains (true) or loses (false) keyboard and gamepad focus; bubbles like OnUiClick.
+
+All modes; Runtime|Test; mutates.
+
+### Behaviour.OnUiHover
+
+`(self: ScriptInstance, element: Entity, hovered: boolean) -> boolean?`
+
+Called when the pointer enters (true) or leaves (false) an interactable UI widget; bubbles like OnUiClick.
+
+All modes; Runtime|Test; mutates.
+
+### Behaviour.OnUiScroll
+
+`(self: ScriptInstance, element: Entity, position: vector) -> boolean?`
+
+Called when interaction scrolls a UI scroll view, with its new ScrollPosition (x, y, 0); bubbles like OnUiClick.
+
+All modes; Runtime|Test; mutates.
+
+### Behaviour.OnUiSubmit
+
+`(self: ScriptInstance, element: Entity, text: string) -> boolean?`
+
+Called when Enter (or Submit) is pressed while a UI text input has focus, with its text; bubbles like OnUiClick.
+
+All modes; Runtime|Test; mutates.
+
+### Behaviour.OnUiTextChanged
+
+`(self: ScriptInstance, element: Entity, text: string) -> boolean?`
+
+Called when typing or an editing key changes a UI text input's Text, with its new text; bubbles like OnUiClick.
+
+All modes; Runtime|Test; mutates.
+
+### Behaviour.OnUiValueChanged
+
+`(self: ScriptInstance, element: Entity, value: boolean | number) -> boolean?`
+
+Called when interaction changes a UI toggle's IsOn (a boolean) or a UI slider's Value (a number); bubbles like OnUiClick.
 
 All modes; Runtime|Test; mutates.
 
@@ -2192,7 +2368,7 @@ All modes; Runtime|Test; pure/read.
 
 ### Entity.GetComponent
 
-`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "SpriteRenderer") -> SpriteRenderer?) & ((self: Entity, name: "SpriteAnimator") -> SpriteAnimator?) & ((self: Entity, name: "PixelPerfectCamera") -> PixelPerfectCamera?) & ((self: Entity, name: "Light2D") -> Light2D?) & ((self: Entity, name: "TilemapRenderer") -> TilemapRenderer?) & ((self: Entity, name: "RigidBody2D") -> RigidBody2D?) & ((self: Entity, name: "BoxCollider2D") -> BoxCollider2D?) & ((self: Entity, name: "CircleCollider2D") -> CircleCollider2D?) & ((self: Entity, name: "PolygonCollider2D") -> PolygonCollider2D?) & ((self: Entity, name: "TilemapCollider") -> TilemapCollider?)`
+`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "SpriteRenderer") -> SpriteRenderer?) & ((self: Entity, name: "SpriteAnimator") -> SpriteAnimator?) & ((self: Entity, name: "PixelPerfectCamera") -> PixelPerfectCamera?) & ((self: Entity, name: "Light2D") -> Light2D?) & ((self: Entity, name: "TilemapRenderer") -> TilemapRenderer?) & ((self: Entity, name: "RigidBody2D") -> RigidBody2D?) & ((self: Entity, name: "BoxCollider2D") -> BoxCollider2D?) & ((self: Entity, name: "CircleCollider2D") -> CircleCollider2D?) & ((self: Entity, name: "PolygonCollider2D") -> PolygonCollider2D?) & ((self: Entity, name: "TilemapCollider") -> TilemapCollider?) & ((self: Entity, name: "UiCanvas") -> UiCanvas?) & ((self: Entity, name: "UiRect") -> UiRect?) & ((self: Entity, name: "UiImage") -> UiImage?) & ((self: Entity, name: "UiText") -> UiText?) & ((self: Entity, name: "UiLayout") -> UiLayout?) & ((self: Entity, name: "UiLayoutElement") -> UiLayoutElement?) & ((self: Entity, name: "UiButton") -> UiButton?) & ((self: Entity, name: "UiToggle") -> UiToggle?) & ((self: Entity, name: "UiSlider") -> UiSlider?) & ((self: Entity, name: "UiScrollView") -> UiScrollView?) & ((self: Entity, name: "UiTextInput") -> UiTextInput?)`
 
 Get a component proxy, or nil when absent.
 
@@ -2459,6 +2635,94 @@ All modes; Runtime|Test; pure/read.
 `Transform`
 
 The entity's Transform component, which every entity has.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.UiButton
+
+`UiButton?`
+
+The entity's UiButton component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.UiCanvas
+
+`UiCanvas?`
+
+The entity's UiCanvas component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.UiImage
+
+`UiImage?`
+
+The entity's UiImage component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.UiLayout
+
+`UiLayout?`
+
+The entity's UiLayout component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.UiLayoutElement
+
+`UiLayoutElement?`
+
+The entity's UiLayoutElement component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.UiRect
+
+`UiRect?`
+
+The entity's UiRect component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.UiScrollView
+
+`UiScrollView?`
+
+The entity's UiScrollView component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.UiSlider
+
+`UiSlider?`
+
+The entity's UiSlider component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.UiText
+
+`UiText?`
+
+The entity's UiText component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.UiTextInput
+
+`UiTextInput?`
+
+The entity's UiTextInput component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.UiToggle
+
+`UiToggle?`
+
+The entity's UiToggle component, or nil when absent.
 
 All modes; Runtime|Test; pure/read.
 
@@ -4094,6 +4358,666 @@ Approximate scale in world space (read-only: a sheared parent chain has no exact
 
 All modes; Runtime|Test; pure/read.
 
+## UiButton
+
+A UI button: a pointer click or Submit while focused raises OnUiClick.
+
+### UiButton.Focusable
+
+`boolean`
+
+Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiButton.Interactable
+
+`boolean`
+
+Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## UiCanvas
+
+The root of a UI tree, laid out over the whole scene image in scene pixels and drawn after the game's text, or, in World mode, laid out in its own canvas pixels and drawn as a rectangle in the world.
+
+### UiCanvas.DefaultFocus
+
+`Entity?`
+
+The UI widget keyboard and gamepad navigation focuses first while nothing has focus; null: navigation starts only from a pointer press or Ui.SetFocus.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiCanvas.Font
+
+`AssetRef?`
+
+The font of the canvas's texts whose own Font is null; null uses the default font.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiCanvas.PixelSnap
+
+`boolean`
+
+Rounds every element's corners to whole scene pixels, so images and clips land on pixel corners.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiCanvas.PixelsPerUnit
+
+`number`
+
+A World canvas's canvas pixels per world unit: its rectangle is WorldWidth x WorldHeight over this, centred on the entity.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiCanvas.ReferenceHeight
+
+`number`
+
+MatchHeight: the canvas's height in canvas units, so one unit is the scene's height / ReferenceHeight scene pixels.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiCanvas.RenderMode
+
+`UiCanvasRenderMode`
+
+Screen draws the canvas over the scene image; World draws it as a rectangle in the world at the entity's transform, depth-tested against the scene.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiCanvas.ScaleFactor
+
+`number`
+
+ConstantPixelSize: the scene pixels per canvas unit.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiCanvas.ScaleMode
+
+`UiScaleMode`
+
+How canvas units map to scene pixels.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiCanvas.SortOrder
+
+`number`
+
+Canvases draw in ascending SortOrder, ties in entity order; a later canvas draws over earlier ones.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiCanvas.Theme
+
+`{Normal: Color, Hovered: Color, Pressed: Color, Focused: Color, Disabled: Color}`
+
+The state tints of the canvas's widgets (buttons, toggles, sliders and scroll views).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiCanvas.WorldHeight
+
+`number`
+
+A World canvas's height in canvas pixels (its layout's scene resolution); Screen canvases ignore it.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiCanvas.WorldWidth
+
+`number`
+
+A World canvas's width in canvas pixels (its layout's scene resolution); Screen canvases ignore it.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## UiImage
+
+Draws a sprite sheet frame, or a plain colour, over a UI element's rectangle.
+
+### UiImage.BorderScale
+
+`number`
+
+Sliced: the canvas units each border texel takes.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiImage.Color
+
+`Color`
+
+The linear tint multiplied with the frame's texels, with opacity in the fourth component.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiImage.Filter
+
+`UiImageFilter`
+
+How the frame's texture is sampled.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiImage.Frame
+
+`number`
+
+The index of the frame in the sheet's Frames; a frame the sheet lacks draws nothing.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiImage.RaycastTarget
+
+`boolean`
+
+Whether the image catches the pointer for its nearest widget; false lets the pointer pass through it.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiImage.Sheet
+
+`AssetRef?`
+
+The sprite sheet whose frame is drawn; null draws a plain rectangle of Color.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiImage.Type
+
+`UiImageType`
+
+Whether the frame stretches or keeps its 9-slice borders.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## UiLayout
+
+A container that places its children's rectangles in a stack, a grid or a flexible row or column.
+
+### UiLayout.CellSize
+
+`vector`
+
+Grid: the size of each cell in canvas units.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiLayout.Columns
+
+`number`
+
+Grid: the cells per row (Horizontal) or per column (Vertical); 0 fits as many as the container holds.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiLayout.CrossAlignment
+
+`UiCrossAlignment`
+
+Where each child sits across the main axis.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiLayout.Direction
+
+`UiLayoutDirection`
+
+The main axis the children follow.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiLayout.Kind
+
+`UiLayoutKind`
+
+How the children are placed.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiLayout.MainAlignment
+
+`UiMainAlignment`
+
+Where the children sit along the main axis when they do not fill it.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiLayout.Padding
+
+`{Left: number, Top: number, Right: number, Bottom: number}`
+
+Insets of the container's rectangle that the children are placed in.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiLayout.Spacing
+
+`vector`
+
+The gaps between children, lines and cells along x and y, in canvas units.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiLayout.Wrap
+
+`boolean`
+
+Flex: whether a child that does not fit the line starts a new line.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## UiLayoutElement
+
+How a UI element takes part in its parent's layout container: flex weights, a minimum size, or none.
+
+### UiLayoutElement.Grow
+
+`number`
+
+Flex: the element's share of the main axis's free space.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiLayoutElement.IgnoreLayout
+
+`boolean`
+
+Whether the element keeps its own placement and takes no space in the container.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiLayoutElement.MinSize
+
+`vector`
+
+The size the element never goes below in a Stack or Flex container, in canvas units.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiLayoutElement.Shrink
+
+`number`
+
+Flex: the element's share, times its preferred size, of the main axis's overflow.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## UiRect
+
+A UI element's rectangle in its parent's (or its canvas's), in canvas units, x right and y down.
+
+### UiRect.AnchorMax
+
+`vector`
+
+The anchor rectangle's bottom-right corner, normalized in the parent's rectangle; equal to AnchorMin for a fixed-size element.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiRect.AnchorMin
+
+`vector`
+
+The anchor rectangle's top-left corner, normalized in the parent's rectangle: (0, 0) its top-left corner, (1, 1) its bottom-right.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiRect.ClipChildren
+
+`boolean`
+
+Whether the element's descendants are clipped to its rectangle.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiRect.Pivot
+
+`vector`
+
+The point of the element that Position places, normalized to the element: (0, 0) its top-left corner, (1, 1) its bottom-right.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiRect.Position
+
+`vector`
+
+The pivot's offset from its point in the anchor rectangle, in canvas units, x right and y down.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiRect.Size
+
+`vector`
+
+The element's size in canvas units, added to the anchor rectangle's size (negative values inset stretched anchors); a container's child takes it as its preferred size.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## UiScrollView
+
+A UI scroll view: clips its descendants and moves its Content by the scroll position, which the wheel, a drag and focus change.
+
+### UiScrollView.Content
+
+`Entity?`
+
+The UI element below the scroll view that scrolls; null scrolls nothing.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiScrollView.Focusable
+
+`boolean`
+
+Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiScrollView.Horizontal
+
+`boolean`
+
+Whether the content scrolls along x.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiScrollView.Interactable
+
+`boolean`
+
+Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiScrollView.ScrollPosition
+
+`vector`
+
+Canvas units the content is moved left (x) and up (y), read clamped to the content's overflow.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiScrollView.ScrollStep
+
+`number`
+
+Canvas units per wheel step and per navigation press.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiScrollView.Vertical
+
+`boolean`
+
+Whether the content scrolls along y.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## UiSlider
+
+A UI slider: the pointer drags its value between Min and Max and the directions along it step it, raising OnUiValueChanged.
+
+### UiSlider.Direction
+
+`UiLayoutDirection`
+
+Horizontal puts Min at the left edge; Vertical puts it at the bottom edge.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiSlider.Fill
+
+`Entity?`
+
+A UI element below the slider stretched from the Min edge to the value; null for none.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiSlider.Focusable
+
+`boolean`
+
+Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiSlider.Handle
+
+`Entity?`
+
+A UI element below the slider placed at the value; null for none.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiSlider.Interactable
+
+`boolean`
+
+Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiSlider.Max
+
+`number`
+
+The value at the end edge (right, or top when Vertical).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiSlider.Min
+
+`number`
+
+The value at the start edge (left, or bottom when Vertical); below Max.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiSlider.Step
+
+`number`
+
+The change per navigation press along the slider; 0 is a tenth of the range. With WholeNumbers it is rounded to a whole number of at least 1.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiSlider.Value
+
+`number`
+
+The value, read clamped to Min and Max (and rounded with WholeNumbers).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiSlider.WholeNumbers
+
+`boolean`
+
+Whether the value is rounded to whole numbers.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## UiText
+
+Draws text in a UI element's rectangle, wrapped and aligned in it.
+
+### UiText.Alignment
+
+`TextAlignment`
+
+How each line is aligned within the rectangle's width.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiText.Color
+
+`Color`
+
+The linear text colour with opacity in the fourth component.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiText.Font
+
+`AssetRef?`
+
+The font; null uses its canvas's Font, or the default font when the canvas names none.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiText.LineSpacing
+
+`number`
+
+Multiplies the font's line height.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiText.RaycastTarget
+
+`boolean`
+
+Whether the text catches the pointer for its nearest widget; false lets the pointer pass through it.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiText.Size
+
+`number`
+
+The em size in canvas units.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiText.Text
+
+`string`
+
+The UTF-8 text; a line feed starts a new line. Scripts read localized strings with Loc.Get. A value a script writes holds at most 4096 bytes of text.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiText.VerticalAlignment
+
+`UiTextVerticalAlignment`
+
+Where the text block sits in the rectangle's height.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiText.Wrap
+
+`boolean`
+
+Whether lines break at spaces to fit the rectangle's width.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## UiTextInput
+
+A UI text field: while focused, typed characters insert at its caret and the editing keys edit it, raising OnUiTextChanged; Enter raises OnUiSubmit.
+
+### UiTextInput.Caret
+
+`number`
+
+The caret, in codepoints from the start of Text, read clamped to Text's length; typing and the editing keys move it.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiTextInput.Focusable
+
+`boolean`
+
+Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiTextInput.Interactable
+
+`boolean`
+
+Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiTextInput.MaxLength
+
+`number`
+
+The most codepoints typing reaches; characters typed past it are dropped.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiTextInput.Placeholder
+
+`Entity?`
+
+A UI element below the input shown only while its Text is empty (a hint); null for none.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiTextInput.Text
+
+`string`
+
+The field's UTF-8 text: typing inserts at the caret; a script's write raises no OnUiTextChanged. A value a script writes holds at most 4096 bytes of text.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiTextInput.TextElement
+
+`Entity?`
+
+A UI element below the input whose UiText shows the input's Text, with the caret while focused; null shows nothing.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## UiToggle
+
+A UI toggle: a pointer click or Submit while focused flips IsOn and raises OnUiValueChanged; Graphic shows while it is on.
+
+### UiToggle.Focusable
+
+`boolean`
+
+Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiToggle.Graphic
+
+`Entity?`
+
+A UI element below the toggle (its check mark) that is drawn and hit only while the toggle is on; null for none.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiToggle.Interactable
+
+`boolean`
+
+Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiToggle.IsOn
+
+`boolean`
+
+Whether the toggle is on.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
 ## AlphaMode
 
 How a material's base colour alpha is used (the glTF 2.0 alpha modes).
@@ -4121,6 +5045,8 @@ What asset.create makes.
 - `SpriteSheet`: A .spritesheet sprite sheet: frames of a texture with pivots and 9-slice borders, and clips; without values an empty sheet.
 
 - `Tilemap`: A .tilemap tilemap: a palette of sprite sheet frames and cells in chunks; without values an empty map of unit cells in 16-cell chunks.
+
+- `StringTable`: A .stringtable string table: keyed strings in several locales, read by Loc.Get; without values the locale en and no entries.
 
 ## AssetState
 
@@ -4163,6 +5089,8 @@ The kind of a loadable asset (§7.1).
 - `SpriteSheet`: A sprite sheet (.spritesheet): frames of a texture with pivots and 9-slice borders, and clips.
 
 - `Tilemap`: A tilemap (.tilemap): a grid of cells in chunks, each empty or a palette entry's sprite sheet frame.
+
+- `StringTable`: A string table (.stringtable): keyed strings in several locales, read by Loc.Get.
 
 ## Attenuation
 
@@ -5050,6 +5978,110 @@ The curve that maps HDR scene colours to the display.
 
 - `Linear`: No curve: exposure only, then clamped to the display range.
 
+## UiCanvasRenderMode (enum)
+
+Where a UI canvas is drawn: over the scene image, or in the world.
+
+- `Screen`: Over the scene image, after the scene and its texts, laid out in scene pixels.
+
+- `World`: As a rectangle in the world at the canvas entity's transform, depth-tested against the scene, laid out in its own canvas pixels.
+
+## UiCrossAlignment
+
+Where each child of a container sits across its main axis.
+
+- `Start`: At the start of its line: the top (Horizontal) or the left edge (Vertical).
+
+- `Center`: Centred across the main axis.
+
+- `End`: At the end of its line: the bottom (Horizontal) or the right edge (Vertical).
+
+- `Stretch`: Stretched to fill its line's cross size (a Grid child: its cell's).
+
+## UiImageFilter (enum)
+
+How a UI image samples its texture.
+
+- `Point`: The nearest texel: pixel art, and a 1:1 image reproduces its texels exactly.
+
+- `Linear`: Bilinear filtering between texels.
+
+## UiImageType (enum)
+
+How a UI image fills its element's rectangle.
+
+- `Simple`: The sprite frame is stretched over the rectangle.
+
+- `Sliced`: The frame's 9-slice borders keep their size; the edges and the centre stretch.
+
+## UiLayoutDirection (enum)
+
+The main axis of a UI layout container.
+
+- `Horizontal`: Children follow each other from left to right.
+
+- `Vertical`: Children follow each other from top to bottom.
+
+## UiLayoutKind (enum)
+
+How a UI layout container places its children.
+
+- `Stack`: One after another along Direction, each at its own size.
+
+- `Grid`: In cells of CellSize, Columns cells per row (Horizontal) or per column (Vertical).
+
+- `Flex`: A stack whose children grow into free space and shrink when they overflow, wrapping with Wrap.
+
+## UiMainAlignment
+
+Where a container's children sit along its main axis when they do not fill it.
+
+- `Start`: At the start: the left edge (Horizontal) or the top (Vertical).
+
+- `Center`: Centred along the main axis.
+
+- `End`: At the end: the right edge (Horizontal) or the bottom (Vertical).
+
+## UiScaleMode
+
+How a UI canvas maps its units to scene pixels.
+
+- `ConstantPixelSize`: ScaleFactor scene pixels per canvas unit, whatever the scene resolution.
+
+- `MatchHeight`: The canvas is ReferenceHeight units high, so it scales with the scene's height.
+
+## UiTextVerticalAlignment (enum)
+
+Where a UI text block sits in its element's rectangle.
+
+- `Top`: The first line starts at the rectangle's top edge.
+
+- `Middle`: The block is centred vertically in the rectangle.
+
+- `Bottom`: The last line ends at the rectangle's bottom edge.
+
+## UiWidgetKind
+
+The UI widget ui.createWidget builds.
+
+- `Canvas`: A UI canvas, the root of a UI tree.
+
+- `Panel`: An image stretched over its parent: a background for a group of elements.
+
+- `Image`: A 100 by 100 image.
+
+- `Text`: A centred text.
+
+- `Button`: A button with an image and a Label child.
+
+- `Toggle`: A toggle box with a Check child that shows while it is on, and a Label child.
+
+- `Slider`: A horizontal slider with Fill and Handle children.
+
+- `ScrollView`: A vertical scroll view whose Content child stacks its children.
+
+- `TextInput`: A single-line text field with a Text child that shows what is typed and a Placeholder child.
+
 ## ValidationScope
 
 What project.validate checks.
@@ -5125,3 +6157,9 @@ Authenticated suite constructor result.
 `{CaseTimeoutTicks: number?}`
 
 Default positive tick timeout for cases in a suite.
+
+## UiElementRect
+
+`{Min: vector, Max: vector, Canvas: Entity}`
+
+A UI element's laid-out rectangle: its top-left (Min) and bottom-right (Max) corners as (x, y, 0), x right and y down, in scene pixels for an element of a Screen canvas and in its canvas's own pixels for one of a World canvas, and the canvas it belongs to (Canvas).

@@ -6,6 +6,7 @@
 #include "EditorCore/Ui/UiAuthoring.h"
 #include "Engine/Scene/Components/UiRectComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/UiLayout.h"
 
@@ -128,9 +129,15 @@ namespace Engine {
 
 		const ImGuiIO& io = ImGui::GetIO();
 		const UiAnchorPresetOptions options{ .SetPivot = io.KeyShift, .SetPosition = io.KeyAlt };
-		const UiLayoutTable table = editor.HasProject()
-			? ComputeUiLayout(scene, GetUiPreviewFrameSize(editor.GetViewportState().GetGameResolution(), editor.GetProject().GetSettings().Window))
-			: UiLayoutTable{};
+		// The layout the UI preview shows: the game frame's, at its scene resolution (a PixelPerfectCamera's reference resolution
+		// under one; M22's landing, ComputeGameViewOutputMapping).
+		UiLayoutTable table;
+		if (editor.HasProject())
+		{
+			const glm::uvec2 frame = GetUiPreviewFrameSize(editor.GetViewportState().GetGameResolution(), editor.GetProject().GetSettings().Window);
+			const RenderOutputMapping output = ComputeGameViewOutputMapping(scene, frame);
+			table = ComputeUiLayout(scene, glm::uvec2(output.SceneWidth, output.SceneHeight));
+		}
 		const char* targetName = target == SceneTarget::Play ? "Play" : "Edit";
 		Json updates = Json::array();
 		for (const UUID id : selection)
