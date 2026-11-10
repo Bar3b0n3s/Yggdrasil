@@ -4458,7 +4458,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `{Normal: Color, Hovered: Color, Pressed: Color, Focused: Color, Disabled: Color}`
 
-The state tints of the canvas's widgets (buttons, toggles, sliders and scroll views).
+The state tints of the canvas's widgets (buttons, toggles, sliders, scroll views and text inputs).
 
 All modes; Runtime|Test; pure/read; setter mutates.
 

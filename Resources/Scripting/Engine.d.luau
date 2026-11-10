@@ -1163,7 +1163,7 @@ declare extern type UiCanvas with
 	ScaleMode: UiScaleMode
 	-- Canvases draw in ascending SortOrder, ties in entity order; a later canvas draws over earlier ones. [All modes; Runtime|Test; pure/read; setter mutates]
 	SortOrder: number
-	-- The state tints of the canvas's widgets (buttons, toggles, sliders and scroll views). [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The state tints of the canvas's widgets (buttons, toggles, sliders, scroll views and text inputs). [All modes; Runtime|Test; pure/read; setter mutates]
 	Theme: {Normal: Color, Hovered: Color, Pressed: Color, Focused: Color, Disabled: Color}
 	-- A World canvas's height in canvas pixels (its layout's scene resolution); Screen canvases ignore it. [All modes; Runtime|Test; pure/read; setter mutates]
 	WorldHeight: number

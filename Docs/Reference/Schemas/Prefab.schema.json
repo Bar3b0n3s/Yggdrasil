@@ -1694,7 +1694,7 @@
 					"x-assetType": "Font"
 				},
 				"Theme": {
-					"description": "The state tints of the canvas's widgets (buttons, toggles, sliders and scroll views).",
+					"description": "The state tints of the canvas's widgets (buttons, toggles, sliders, scroll views and text inputs).",
 					"$ref": "#/$defs/UiTheme"
 				},
 				"DefaultFocus": {

@@ -1076,7 +1076,7 @@ The root of a UI tree, laid out over the whole scene image in scene pixels and d
 | `ReferenceHeight` | `Float` | `1080` | 1 to 1e+05 | units |  | MatchHeight: the canvas's height in canvas units, so one unit is the scene's height / ReferenceHeight scene pixels. |
 | `PixelSnap` | `Bool` | `true` |  |  |  | Rounds every element's corners to whole scene pixels, so images and clips land on pixel corners. |
 | `Font` | `AssetRef(Font)` | `null` |  |  |  | The font of the canvas's texts whose own Font is null; null uses the default font. |
-| `Theme` | `UiTheme` | `{"Normal":[1,1,1,1],"Hovered":[0.85,0.85,0.85,1],"Pressed":[0.6,0.6,0.6,1],"Focused":[0.75,0.85,1,1],"Disabled":[0.5,0.5,0.5,0.5]}` |  |  |  | The state tints of the canvas's widgets (buttons, toggles, sliders and scroll views). |
+| `Theme` | `UiTheme` | `{"Normal":[1,1,1,1],"Hovered":[0.85,0.85,0.85,1],"Pressed":[0.6,0.6,0.6,1],"Focused":[0.75,0.85,1,1],"Disabled":[0.5,0.5,0.5,0.5]}` |  |  |  | The state tints of the canvas's widgets (buttons, toggles, sliders, scroll views and text inputs). |
 | `DefaultFocus` | `EntityRef` | `null` |  |  |  | The UI widget keyboard and gamepad navigation focuses first while nothing has focus; null: navigation starts only from a pointer press or Ui.SetFocus. |
 | `RenderMode` | `UiCanvasRenderMode` | `"Screen"` |  |  |  | Screen draws the canvas over the scene image; World draws it as a rectangle in the world at the entity's transform, depth-tested against the scene. |
 | `WorldWidth` | `UInt32` | `1024` | 1 to 16384 | px |  | A World canvas's width in canvas pixels (its layout's scene resolution); Screen canvases ignore it. |
@@ -1096,7 +1096,7 @@ Script members of `UiCanvas`:
 | `ScaleFactor` | proxy field | `number` | read/write | All | ConstantPixelSize: the scene pixels per canvas unit. |
 | `ScaleMode` | proxy field | `UiScaleMode` | read/write | All | How canvas units map to scene pixels. |
 | `SortOrder` | proxy field | `number` | read/write | All | Canvases draw in ascending SortOrder, ties in entity order; a later canvas draws over earlier ones. |
-| `Theme` | proxy field | `{Normal: Color, Hovered: Color, Pressed: Color, Focused: Color, Disabled: Color}` | read/write | All | The state tints of the canvas's widgets (buttons, toggles, sliders and scroll views). |
+| `Theme` | proxy field | `{Normal: Color, Hovered: Color, Pressed: Color, Focused: Color, Disabled: Color}` | read/write | All | The state tints of the canvas's widgets (buttons, toggles, sliders, scroll views and text inputs). |
 | `WorldHeight` | proxy field | `number` | read/write | All | A World canvas's height in canvas pixels (its layout's scene resolution); Screen canvases ignore it. |
 | `WorldWidth` | proxy field | `number` | read/write | All | A World canvas's width in canvas pixels (its layout's scene resolution); Screen canvases ignore it. |
 

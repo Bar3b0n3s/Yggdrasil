@@ -173,7 +173,7 @@ namespace Engine {
 			.Field("PixelSnap", &UiCanvasComponent::PixelSnap,
 				"Rounds every element's corners to whole scene pixels, so images and clips land on pixel corners.")
 			.Field("Font", &UiCanvasComponent::Font, "The font of the canvas's texts whose own Font is null; null uses the default font.")
-			.Field("Theme", &UiCanvasComponent::Theme, "The state tints of the canvas's widgets (buttons, toggles, sliders and scroll views).")
+			.Field("Theme", &UiCanvasComponent::Theme, "The state tints of the canvas's widgets (buttons, toggles, sliders, scroll views and text inputs).")
 			.Field("DefaultFocus", &UiCanvasComponent::DefaultFocus,
 				"The UI widget keyboard and gamepad navigation focuses first while nothing has focus; null: navigation starts only from a pointer "
 				"press or Ui.SetFocus.")
