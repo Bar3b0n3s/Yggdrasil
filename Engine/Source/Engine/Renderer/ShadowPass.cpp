@@ -297,10 +297,7 @@ namespace Engine {
 					.Mesh = item.Mesh,
 					.Submesh = submeshIndex,
 					.VertexStream = source.VertexStream };
-				candidate.Record = { .World = item.World,
-					.PreviousWorld = item.PreviousWorld.value_or(item.World),
-					.EntityId = item.PickId,
-					.Flags = mirrored ? DrawFlagMirrored : 0U };
+				candidate.Record = MakeMeshInstanceRecord(item);
 				candidates.push_back(std::move(candidate));
 			}
 		}

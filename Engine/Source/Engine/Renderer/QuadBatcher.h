@@ -33,11 +33,12 @@
 //     (a load of the light accumulation, Lights2DLight, which has the framebuffer's size), alpha unchanged.
 //   - Normals (M21, C21.2): into Lights2DNormals with SceneDepth (GetLights2DNormalsFramebufferInfo), depth-tested
 //     GreaterOrEqual, without blending: where the quad's texel alpha times its colour's alpha is above 0, the fragment
-//     writes the quad's world normal and 1 when the quad has a NormalMap (its texel decoded as 2 rgb - 1, turned from the
-//     quad's tangent frame and normalized: +X along the texture's u, +Y against its v, each from the screen-space
-//     derivatives of the quad's position and texture coordinates, and +Z the unit normal of the quad's plane facing the
-//     viewer, so a quad mirrored by its flips mirrors its normals' X or Y and keeps them facing the lights above its
-//     plane), else (0, 0, 1) and 0; elsewhere it writes nothing.
+//     writes the quad's world normal and 1 when the quad has a NormalMap (its texel decoded as 2 rgb - 1, z reconstructed
+//     from x and y for a QuadDraw::NormalMapTwoChannel map, turned from the quad's tangent frame and normalized: +X along
+//     the texture's u, +Y against its v, each from the screen-space derivatives of the quad's position and texture
+//     coordinates, and +Z the unit normal of the quad's plane facing the viewer, so a quad mirrored by its flips mirrors
+//     its normals' X or Y and keeps them facing the lights above its plane), else (0, 0, 1) and 0; elsewhere it writes
+//     nothing.
 //   - LdrDepth (M22, C22.3; Docs/Decisions/0033-m22-contract.md decision 57, the ledger amendment granted on main in
 //     1707cf47, appended after M21's targets): Ldr's target, blending and sRGB encoding, depth-tested GreaterOrEqual
 //     against SceneDepth without depth writes (the SceneOverlay stage's World canvases, drawn in the world through a
@@ -109,6 +110,11 @@ namespace Engine {
 		// M21 (C21.2): the Normals target's tangent-space normal map (a linear texture, sampled with Sampler at the quad's
 		// texture coordinates); null writes the flat normal. The other targets ignore it.
 		nvrhi::ITexture* NormalMap = nullptr;
+		// M23's milestone review (Docs/Decisions/0034-m23-contract.md, "Milestone review" item 1): NormalMap stores x and y
+		// only, in R and G (a BC5 texture, the Auto compression of a normal map, or the decode fallback's RGBA8 copy of one,
+		// GpuTexture::Format BC5Unorm), so the Normals target reconstructs z as sqrt(1 - x^2 - y^2), as the 3D path does
+		// (MaterialFlagNormalMapTwoChannel). Ignored without a NormalMap and by the other targets.
+		bool NormalMapTwoChannel = false;
 	};
 
 	// One record's quads and target.

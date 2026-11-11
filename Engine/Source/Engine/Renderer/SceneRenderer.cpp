@@ -7,6 +7,7 @@
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/SpriteGeometry.h"
 #include "Engine/Asset/SpriteSheetData.h"
+#include "Engine/Asset/TextureData.h"
 #include "Engine/Asset/TilemapData.h"
 #include "Engine/Asset/TilemapDrawOrder.h"
 #include "Engine/Core/Assert.h"
@@ -924,13 +925,9 @@ namespace Engine {
 			for (Detail::SceneRendererDraw& draw : draws)
 			{
 				const MeshDrawItem& item = snapshot.Meshes[draw.SnapshotIndex];
-				const bool mirrored = glm::determinant(glm::mat3(item.World)) < 0.0f;
 				draw.Instance = static_cast<uint32_t>(Instances.size());
 				draw.Batch = 1;
-				Instances.push_back({ .World = item.World,
-					.PreviousWorld = item.PreviousWorld.value_or(item.World),
-					.EntityId = item.PickId,
-					.Flags = (mirrored ? DrawFlagMirrored : 0U) | (item.ReceiveShadows ? DrawFlagReceiveShadows : 0U) });
+				Instances.push_back(MakeMeshInstanceRecord(item, item.ReceiveShadows ? DrawFlagReceiveShadows : 0U));
 				keys.push_back({ .Pipeline = draw.ForwardVariant,
 					.Material = draw.MaterialHandle,
 					.Mesh = draw.Mesh,
@@ -2158,9 +2155,16 @@ namespace Engine {
 			if (Utils::IsOutsideClipVolume(clip))
 				continue;
 			// C21.2 (decision 21): a lit sprite's normal map, laid like its image; a missing or failed one is its placeholder's
-			// mirror, as a material's (the cache reports it), and only a mirror without a texture leaves the flat normal.
+			// mirror, as a material's (the cache reports it), and only a mirror without a texture leaves the flat normal. A BC5
+			// map (a normal map's Auto compression) stores x and y only, on a device with BC and through the decode fallback
+			// alike, so the Normals target reconstructs its z, as GetMaterial's MaterialFlagNormalMapTwoChannel has the 3D path
+			// do (M23's milestone review).
 			if (sprite.Lit && sprite.NormalMap.IsValid())
-				quad.NormalMap = Cache->GetTexture(sprite.NormalMap).Texture.Get();
+			{
+				const GpuTexture& normalMap = Cache->GetTexture(sprite.NormalMap);
+				quad.NormalMap = normalMap.Texture.Get();
+				quad.NormalMapTwoChannel = normalMap.Format == TextureFormat::BC5Unorm;
+			}
 			AddSpriteQuad(quad, sprite.Lit);
 		}
 		appendTilemapsBefore(snapshot.Sprites.size());

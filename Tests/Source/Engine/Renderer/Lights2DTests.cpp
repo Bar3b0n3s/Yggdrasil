@@ -1,5 +1,6 @@
 #include "TestsPCH.h"
 
+#include "Engine/Asset/TextureCompression.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Image.h"
@@ -86,6 +87,23 @@ namespace Engine {
 				texture->Pixels.push_back(std::byte{ LeaningNormalBlue });
 				texture->Pixels.push_back(std::byte{ 255 });
 			}
+			return texture;
+		}
+
+		// MakeNormalMap's texels as TextureImporter's Auto compression stores a normal map (Docs/Decisions/0034-m23-contract.md
+		// decision 13): BC5, x and y in R and G, no z.
+		Ref<TextureData> MakeBc5NormalMap()
+		{
+			const Ref<TextureData> rgba = MakeNormalMap();
+			Result<Buffer> blocks = CompressTextureBlocks(TextureBlockCodec::BC5, LitTexels, LitTexels, rgba->Pixels);
+			REQUIRE_MESSAGE(blocks.has_value(), blocks.error().ToString());
+			Ref<TextureData> texture = CreateRef<TextureData>();
+			texture->Format = TextureFormat::BC5Unorm;
+			texture->Width = LitTexels;
+			texture->Height = LitTexels;
+			texture->Mips = { TextureMip{ .Width = LitTexels, .Height = LitTexels, .Offset = 0, .Size = blocks->size() } };
+			texture->Pixels = std::move(*blocks);
+			REQUIRE_MESSAGE(ValidateTextureData(*texture).has_value(), ValidateTextureData(*texture).error().ToString());
 			return texture;
 		}
 
@@ -253,6 +271,56 @@ namespace Engine {
 			CHECK(std::abs(static_cast<int>(LitPixel(flipped, 18, 18).r) - expectedRed) <= 2);
 			// Every pixel shows its mirrored texel lit with the mirrored normal.
 			CheckLitSprite(flipped, snapshot, mirrored, 2, true);
+		}
+
+		// M23's milestone review (Docs/Decisions/0034-m23-contract.md, "Milestone review" item 1): a normal map imported with
+		// Compression Auto, the default, is BC5, which samples as (x, y, 0, 1) on a device with BC and decodes to (x, y, 0, 255)
+		// through the decode fallback, so the Normals target reconstructs z from x and y, as the 3D path does: the sprite is
+		// lit as with the same normal map imported with None (RGBA8), within the case above's tolerance, on both devices. Read
+		// as 2 rgb - 1, the missing z would turn every normal away from the viewer and the lights.
+		TEST_CASE("Lights2D: a lit sprite's BC5 normal map lights it as its uncompressed import does, with BC and through the decode fallback"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			const Ref<TextureData> compressed = MakeBc5NormalMap();
+			const glm::vec3 normal = glm::normalize(glm::vec3(2.0f * LeaningNormalRed / 255.0f - 1.0f, 2.0f * LeaningNormalGreen / 255.0f - 1.0f,
+				2.0f * LeaningNormalBlue / 255.0f - 1.0f));
+			for (const bool withBc : { true, false })
+			{
+				CAPTURE(withBc);
+				Test::HeadlessGpuFixture gpu({ .DisableTextureCompressionBC = !withBc });
+				ENGINE_REQUIRE_GPU(gpu);
+				REQUIRE(gpu.GetDevice().GetInfo().TextureCompressionBC == withBc);
+				std::optional<Image> uncompressed;
+				std::optional<Image> blockCompressed;
+				RenderSnapshot snapshot;
+				{
+					Test::SceneRendererIntegrationFixture setup(gpu);
+					setup.Assets().Publish(LitTextureHandle, MakeColorTexture());
+					setup.Assets().Publish(NormalMapHandle, MakeNormalMap());
+					snapshot = MakeLitSnapshot(setup);
+					snapshot.Sprites.front().NormalMap = NormalMapHandle;
+					uncompressed = setup.Render(snapshot);
+					setup.Assets().Publish(NormalMapHandle, compressed);
+					snapshot.FrameIndex += 1;
+					blockCompressed = setup.Render(snapshot);
+				}
+				CheckLitSprite(*uncompressed, snapshot, normal, 2);
+				CheckLitSprite(*blockCompressed, snapshot, normal, 2);
+				for (uint32_t y = 4; y < 12; ++y)
+				{
+					for (uint32_t x = 4; x < 12; ++x)
+					{
+						CAPTURE(x);
+						CAPTURE(y);
+						const glm::u8vec4 expected = LitPixel(*uncompressed, 4 * x + 2, 4 * y + 2);
+						const glm::u8vec4 actual = LitPixel(*blockCompressed, 4 * x + 2, 4 * y + 2);
+						CHECK(std::abs(static_cast<int>(actual.r) - static_cast<int>(expected.r)) <= 2);
+						CHECK(std::abs(static_cast<int>(actual.g) - static_cast<int>(expected.g)) <= 2);
+						CHECK(std::abs(static_cast<int>(actual.b) - static_cast<int>(expected.b)) <= 2);
+					}
+				}
+				gpu.GetDevice().RunGarbageCollection();
+			}
 		}
 
 		// Decision 22's one normal per pixel: a flat lit sprite drawn over a normal-mapped one gives the pixels it covers the

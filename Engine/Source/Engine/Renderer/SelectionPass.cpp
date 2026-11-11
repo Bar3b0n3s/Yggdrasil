@@ -8,7 +8,6 @@
 #include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Renderer/Private/ForwardPipelines.h"
 #include "Engine/Renderer/SceneTargetFormats.h"
-#include "Shared/DrawConstants.h"
 #include "Shared/MaterialConstants.h"
 #include "Shared/Private/SelectionPassConstants.h"
 
@@ -254,10 +253,7 @@ namespace Engine {
 					.MaterialConstants = masked ? material.Constants : nvrhi::BufferHandle(),
 					.BaseColorMap = masked ? material.BaseColorMap : nvrhi::TextureHandle(),
 					.Instance = static_cast<uint32_t>(instances.size()) });
-				instances.push_back({ .World = item.World,
-					.PreviousWorld = item.PreviousWorld.value_or(item.World),
-					.EntityId = item.PickId,
-					.Flags = mirrored ? DrawFlagMirrored : 0U });
+				instances.push_back(MakeMeshInstanceRecord(item));
 				// Only a Mask draw binds its material: the other draws of one mesh batch whatever their materials.
 				keys.push_back({ .Pipeline = variant,
 					.Material = masked ? materialHandle : AssetHandle(),

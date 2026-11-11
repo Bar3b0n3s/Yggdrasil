@@ -8,6 +8,9 @@
 #include "Engine/Graphics/Readback.h"
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Engine/Renderer/RenderStats.h"
+#include "Engine/Renderer/SelectionPass.h"
+#include "Engine/Renderer/ShadowPass.h"
+#include "Shared/DrawConstants.h"
 #include "Support/HeadlessGpuFixture.h"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -15,6 +18,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -198,6 +202,27 @@ namespace Engine {
 			CHECK(batches == expected);
 			CHECK(GroupMeshInstances({}).empty());
 		}
+
+		// M23's milestone review (Docs/Decisions/0034-m23-contract.md decisions 2 and 8): the record M26's motion vectors read
+		// (plan §4.1). A moved item's PreviousWorld is the previous frame's world matrix it gives; an item without one (no
+		// motion, every item until M26) takes its World; the mirroring flag follows the World's determinant, and the flags
+		// given (the camera draws' DrawFlagReceiveShadows) join it.
+		TEST_CASE("RenderPrepare: an instance record carries its item's previous world matrix, or its world matrix without one")
+		{
+			MeshDrawItem moved{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(1.0f, 2.0f, 3.0f)), .PickId = 7 };
+			moved.PreviousWorld = glm::translate(glm::mat4(1.0f), glm::vec3(0.5f, 2.0f, 3.0f));
+			const InstanceRecord movedRecord = MakeMeshInstanceRecord(moved, DrawFlagReceiveShadows);
+			CHECK(movedRecord.World == moved.World);
+			CHECK(movedRecord.PreviousWorld == *moved.PreviousWorld);
+			CHECK(movedRecord.EntityId == 7);
+			CHECK(movedRecord.Flags == DrawFlagReceiveShadows);
+			const MeshDrawItem mirrored{ .World = glm::scale(glm::mat4(1.0f), glm::vec3(-1.0f, 1.0f, 1.0f)) };
+			const InstanceRecord mirroredRecord = MakeMeshInstanceRecord(mirrored);
+			CHECK(mirroredRecord.World == mirrored.World);
+			CHECK(mirroredRecord.PreviousWorld == mirrored.World);
+			CHECK(mirroredRecord.EntityId == 0);
+			CHECK(mirroredRecord.Flags == DrawFlagMirrored);
+		}
 	}
 
 	TEST_SUITE(Test::GpuSuite)
@@ -303,6 +328,66 @@ namespace Engine {
 			++snapshot.FrameIndex;
 			const Image perDraw = readIds(snapshot);
 			CHECK(instanced.Pixels == perDraw.Pixels);
+		}
+
+		// M23's milestone review (Docs/Decisions/0034-m23-contract.md decisions 2 and 8; plan §4.1: the instance record's
+		// PreviousWorld, which M26's motion vectors read, is M23's frozen input): every pass that draws meshes writes its records
+		// by MakeMeshInstanceRecord, the camera's draws (the Prepare stage) included, so a moved item's shadow-caster and
+		// selection-mask records carry the previous frame's world matrix it gives, and a new item's (no PreviousWorld) its
+		// current World, as its camera record does.
+		TEST_CASE("RenderPrepare: the camera, shadow and selection records carry a moved item's previous world matrix and a new item's world matrix")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			{
+				Test::SceneRendererIntegrationFixture setup(gpu);
+				RenderSnapshot snapshot = setup.Snapshot();
+				MeshDrawItem moved = snapshot.Meshes.front();
+				moved.PreviousWorld = glm::translate(glm::mat4(1.0f), glm::vec3(-0.5f, 0.0f, -3.0f));
+				MeshDrawItem added = snapshot.Meshes.front();
+				added.World = glm::translate(glm::mat4(1.0f), glm::vec3(1.5f, 0.0f, -4.0f));
+				added.Entity = UUID(901);
+				added.PickId = 2;
+				snapshot.Meshes = { moved, added };
+				snapshot.SelectedEntities = { moved.Entity, added.Entity };
+				// Each record of one pass's list is the moved item's or the new item's, by its World and pick id.
+				const auto checkRecords = [&moved, &added](std::span<const InstanceRecord> records)
+				{
+					REQUIRE(records.size() == 2);
+					uint32_t movedSeen = 0;
+					uint32_t addedSeen = 0;
+					for (const InstanceRecord& record : records)
+					{
+						if (record.EntityId == moved.PickId)
+						{
+							++movedSeen;
+							CHECK(record.World == moved.World);
+							CHECK(record.PreviousWorld == *moved.PreviousWorld);
+						}
+						else
+						{
+							++addedSeen;
+							CHECK(record.EntityId == added.PickId);
+							CHECK(record.World == added.World);
+							CHECK(record.PreviousWorld == added.World);
+						}
+					}
+					CHECK(movedSeen == 1);
+					CHECK(addedSeen == 1);
+				};
+				const std::vector<InstanceRecord> camera = { MakeMeshInstanceRecord(moved, DrawFlagReceiveShadows), MakeMeshInstanceRecord(added) };
+				checkRecords(camera);
+				std::vector<InstanceRecord> shadow;
+				const Result<ShadowCasterSet> casters = ShadowPass::PrepareCasters(setup.Cache(), snapshot.Meshes, true, shadow);
+				REQUIRE_MESSAGE(casters.has_value(), casters.error().ToString());
+				CHECK(casters->Draws.size() == 2);
+				checkRecords(shadow);
+				std::vector<InstanceRecord> selection;
+				const SelectionDrawSet mask = SelectionPass::PrepareDraws(setup.Cache(), snapshot, true, selection);
+				CHECK(mask.Draws.size() == 2);
+				checkRecords(selection);
+			}
+			gpu.GetDevice().RunGarbageCollection();
 		}
 	}
 

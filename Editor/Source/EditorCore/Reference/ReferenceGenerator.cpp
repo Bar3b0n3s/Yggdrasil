@@ -103,7 +103,7 @@ namespace Engine {
 "MeshRenderer": {"Mesh": "0000000000000101", "Materials": [], "CastShadows": true, "ReceiveShadows": true, "Visible": true}}}]})";
 
 		constexpr std::string_view AssetMetaExample = R"({"Format": "AssetMeta", "Version": 1, "Handle": "8c5e9fa7d7637795", "Type": "Texture", "Importer": "Texture",
-"ImporterVersion": 1, "Settings": {"Usage": "Color", "GenerateMips": true}, "SubAssets": []})";
+"ImporterVersion": 2, "Settings": {"Usage": "Color", "GenerateMips": true, "Compression": "Auto"}, "SubAssets": []})";
 
 		constexpr std::string_view MaterialExample = R"({"Format": "Material", "Version": 2, "BaseColor": [0.9, 0.15, 0.15, 1], "BaseColorMap": null,
 "BaseColorUVSet": "UV0", "Metallic": 0, "Roughness": 0.45, "MetallicRoughnessMap": null, "MetallicRoughnessUVSet": "UV0", "NormalMap": null,

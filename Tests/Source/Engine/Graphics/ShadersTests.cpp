@@ -441,9 +441,9 @@ namespace Engine {
 				.Fields = {
 					ENGINE_TEST_SHARED_FIELD(QuadConstants, Transform),
 					ENGINE_TEST_SHARED_FIELD(QuadConstants, HasNormalMap),
+					ENGINE_TEST_SHARED_FIELD(QuadConstants, NormalMapTwoChannel),
 					ENGINE_TEST_SHARED_FIELD(QuadConstants, Padding0),
 					ENGINE_TEST_SHARED_FIELD(QuadConstants, Padding1),
-					ENGINE_TEST_SHARED_FIELD(QuadConstants, Padding2),
 				},
 				.Program = "Quad",
 				.Entry = "VSMain",

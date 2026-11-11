@@ -24,7 +24,11 @@
 //      written (ViewConstants b0, EnvironmentConstants b2, the Lights structured buffer t0, and from M23 the Instances
 //      structured buffer t10: one instance record per submesh draw of the view, every mesh pass drawing maximal runs of
 //      adjacent equal draws as one instanced draw, which renders exactly what one draw per submesh draw renders).
+//      Then M23's Deform stage, the Skinning pass (SkinningPass.h): one compute dispatch per skinned or morphed item, its
+//      deformed vertices bound as vertex binding 0 by every later pass instead of the mesh's, its previous positions kept.
 //   2. Directional cascades and 3. spot shadow atlas: shared shadow pipelines, per-view depth targets and constants (b1).
+//      Then M23's point-light shadow cubes (PointShadowMaps.h, the PointShadows row after SpotShadows): six faces for each of
+//      at most four shadow-casting point lights, drawn with the shadow casters' pipelines.
 //   4. Depth/normal prepass: SceneDepth (reverse-Z) and SceneNormals (octahedral view-space normals, normal-mapped); Mask
 //      materials discard below AlphaCutoff here and in the forward pass. Picking adds the same visible surfaces to EntityId.
 //   5. Linear view-depth pyramid and 6. GTAO: projection-aware, with optional half resolution and edge-aware filtering.

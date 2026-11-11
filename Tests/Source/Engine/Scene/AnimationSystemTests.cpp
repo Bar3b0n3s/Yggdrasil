@@ -36,6 +36,8 @@ namespace Engine {
 		constexpr AssetHandle WalkHandle(0xa41c000000000001);
 		constexpr AssetHandle WaveHandle(0xa41c000000000002);
 		constexpr AssetHandle FlickerHandle(0xa41c000000000003);
+		constexpr AssetHandle OverflowHandle(0xa41c000000000004);
+		constexpr AssetHandle FarWalkHandle(0xa41c000000000005);
 
 		// Hips at y = 1 with a hand one unit above them.
 		Ref<SkeletonData> MakeSkeleton()
@@ -63,6 +65,26 @@ namespace Engine {
 			clip->Duration = 0.5f;
 			clip->Channels.push_back(AnimationChannel{ .Target = "Hand", .Path = AnimationPath::Translation, .Interpolation = AnimationInterpolation::Linear, .Times = { 0.0f, 0.5f }, .Values = { 0.0f, 1.0f, 0.0f, 0.5f, 1.0f, 0.0f } });
 			clip->Events = { AnimationEvent{ .Name = "Wave", .Time = 0.25f } };
+			return clip;
+		}
+
+		// M23's milestone review: finite keys whose interpolation overflows, the hips' z keyed at 2e38 and -2e38 one second
+		// apart, so every sample between them is -inf (2e38 + (-2e38 - 2e38) u), as a clip the validators accept may hold.
+		Ref<AnimationClipData> MakeOverflowingClip()
+		{
+			Ref<AnimationClipData> clip = CreateRef<AnimationClipData>();
+			clip->Duration = 1.0f;
+			clip->Channels.push_back(AnimationChannel{ .Target = "Hips", .Path = AnimationPath::Translation, .Interpolation = AnimationInterpolation::Linear, .Times = { 0.0f, 1.0f }, .Values = { 0.0f, 1.0f, 2.0e38f, 0.0f, 1.0f, -2.0e38f } });
+			return clip;
+		}
+
+		// A looping one-second walk of 3e38 along +Z: every step's delta is finite, but root motion Apply would carry the entity
+		// past the float range in the second cycle.
+		Ref<AnimationClipData> MakeFarWalk()
+		{
+			Ref<AnimationClipData> clip = CreateRef<AnimationClipData>();
+			clip->Duration = 1.0f;
+			clip->Channels.push_back(AnimationChannel{ .Target = "Hips", .Path = AnimationPath::Translation, .Interpolation = AnimationInterpolation::Linear, .Times = { 0.0f, 1.0f }, .Values = { 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 3.0e38f } });
 			return clip;
 		}
 
@@ -215,6 +237,74 @@ namespace Engine {
 			CHECK(kept.GetComponent<TransformComponent>().Translation == glm::vec3(0.0f));
 			CHECK(std::abs(kept.GetComponent<AnimationPoseComponent>().JointModel[0][3][2] - 0.5f) < 1e-4f);
 			CHECK(kept.GetComponent<AnimationPoseComponent>().RootMotion == RootMotionDelta{});
+		}
+
+		// M23's milestone review (Docs/Decisions/0034-m23-contract.md): a pose or a root motion that is not finite is never
+		// written. Keys near the float limit overflow when sampled: with None the pose's hips are not finite, with Apply and
+		// Extract its held pose is but its root motion is not, and each such Animator keeps no pose and its Transform; a
+		// looping walk whose finite steps would carry its entity past the float range moves it while the result is finite,
+		// then keeps it. Each Animator warns once, however many steps it takes; the other Animators are untouched, and
+		// PoseAnimator refuses the same pose.
+		TEST_CASE("AnimationSystem: a pose or root motion that is not finite keeps the Transform, writes no pose and warns once per Animator")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Test::InMemoryAssetManager assets;
+			PublishRig(assets);
+			assets.Publish(OverflowHandle, MakeOverflowingClip(), "Assets/Models/Hero.gltf");
+			assets.Publish(FarWalkHandle, MakeFarWalk(), "Assets/Models/Hero.gltf");
+			const auto makeAnimator = [](AssetHandle clip, AnimatorRootMotion rootMotion)
+			{
+				AnimatorComponent animator;
+				animator.Skeleton = TypedAssetHandle<AssetType::Skeleton>(SkeletonHandle);
+				animator.Layers.push_back(AnimatorLayer{ .Clip = TypedAssetHandle<AssetType::AnimationClip>(clip) });
+				animator.RootMotion = rootMotion;
+				return animator;
+			};
+			Entity applied = scene.CreateEntity("Applied");
+			applied.AddComponent<AnimatorComponent>(makeAnimator(OverflowHandle, AnimatorRootMotion::Apply));
+			Entity extracted = scene.CreateEntity("Extracted");
+			extracted.AddComponent<AnimatorComponent>(makeAnimator(OverflowHandle, AnimatorRootMotion::Extract));
+			Entity kept = scene.CreateEntity("Kept");
+			kept.AddComponent<AnimatorComponent>(makeAnimator(OverflowHandle, AnimatorRootMotion::None));
+			Entity far = scene.CreateEntity("Far");
+			far.AddComponent<AnimatorComponent>(makeAnimator(FarWalkHandle, AnimatorRootMotion::Apply));
+			Entity walker = scene.CreateEntity("Walker");
+			walker.AddComponent<AnimatorComponent>(makeAnimator(WalkHandle, AnimatorRootMotion::Apply));
+			TransformSystem::Update(scene);
+			const TransformComponent rest = applied.GetComponent<TransformComponent>();
+
+			Test::ExpectLog warned(LogLevel::Warn, "not finite");
+			Result<Scope<AnimationSystem>> system = AnimationSystem::Create({ .RuntimeScene = &scene, .Assets = &assets });
+			REQUIRE_MESSAGE(system.has_value(), system.error().ToString());
+			for (uint64_t tick = 0; tick < 150; ++tick)
+				(*system)->Step(SimStep::FromTick(tick, FixedDelta));
+
+			for (const Entity entity : { applied, extracted, kept })
+			{
+				CAPTURE(entity.GetName());
+				CHECK_FALSE(entity.HasComponent<AnimationPoseComponent>());
+				const TransformComponent& transform = entity.GetComponent<TransformComponent>();
+				CHECK(transform.Translation == rest.Translation);
+				CHECK(transform.Rotation == rest.Rotation);
+			}
+			// The far walk moved its entity as far as a finite Transform goes, then kept it, and its pose stays written.
+			const glm::vec3 reached = far.GetComponent<TransformComponent>().Translation;
+			CHECK(std::isfinite(reached.z));
+			CHECK(reached.z > 1.0e38f);
+			REQUIRE(far.HasComponent<AnimationPoseComponent>());
+			CHECK(far.GetComponent<AnimationPoseComponent>().Tick == 149);
+			// 150 ticks of the looping walk of 2 m a second: 5 m along +Z.
+			CHECK(std::abs(walker.GetComponent<TransformComponent>().Translation.z - 5.0f) < 1e-3f);
+			REQUIRE(walker.HasComponent<AnimationPoseComponent>());
+			CHECK(warned.GetMatchCount() == 4);
+
+			// Kept's layer is about half way through its clip: a quarter second on, the sample is still -inf.
+			const Status posed = PoseAnimator(kept, assets, 0.25f);
+			REQUIRE_FALSE(posed.has_value());
+			CHECK(posed.error().GetCode() == ErrorCode::Validation);
+			CHECK_FALSE(kept.HasComponent<AnimationPoseComponent>());
+			CHECK(PoseAnimator(walker, assets, 0.5f).has_value());
 		}
 
 		// Events reach the listener after the entity's pose is written, in canonical entity order, then layer order, then

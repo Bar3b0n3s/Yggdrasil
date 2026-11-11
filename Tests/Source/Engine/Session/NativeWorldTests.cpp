@@ -245,7 +245,9 @@ namespace Engine {
 		// Play with a module, once a step, after Tasks and before PreStepTransformUpdate; Simulate has no native world. The
 		// case checks that relative order, never the whole list: phase 2 enters M21's SpriteAnimation and M23's AnimationSystem
 		// between NativeStep and PreStepTransformUpdate (ADR 0028's phase-2 execution order, Docs/Decisions/0034-m23-contract.md
-		// decision 29), and PlaySessionTests.cpp's phase lists pin the whole order.
+		// decision 29), in that order, so a native system's writes reach both in the same tick. PlaySessionTests.cpp's phase
+		// lists pin the whole order without a native module, so only this case observes NativeStep among them (M23's milestone
+		// review).
 		TEST_CASE("NativeWorld: systems run in the NativeStep phase, after Tasks and before PreStepTransformUpdate")
 		{
 			Test::SceneTestFixture fixture;
@@ -264,6 +266,11 @@ namespace Engine {
 			CHECK(position(PlaySessionPhase::FixedUpdate) < position(PlaySessionPhase::Tasks));
 			CHECK(position(PlaySessionPhase::Tasks) < position(PlaySessionPhase::NativeStep));
 			CHECK(position(PlaySessionPhase::NativeStep) < position(PlaySessionPhase::PreStepTransformUpdate));
+			REQUIRE(position(PlaySessionPhase::SpriteAnimation) < observer.Phases.size());
+			REQUIRE(position(PlaySessionPhase::AnimationSystem) < observer.Phases.size());
+			CHECK(position(PlaySessionPhase::NativeStep) < position(PlaySessionPhase::SpriteAnimation));
+			CHECK(position(PlaySessionPhase::SpriteAnimation) < position(PlaySessionPhase::AnimationSystem));
+			CHECK(position(PlaySessionPhase::AnimationSystem) < position(PlaySessionPhase::PreStepTransformUpdate));
 			CHECK(PlaySessionPhaseToString(PlaySessionPhase::NativeStep) == "NativeStep");
 
 			NativeRecordingObserver simulateObserver;

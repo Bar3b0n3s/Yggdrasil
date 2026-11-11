@@ -137,9 +137,10 @@ namespace Engine {
 		// indices whose material is Opaque, or Mask with its constants and base colour map: Blend does not cast), sorted so
 		// that equal draws are adjacent: by (variant, Mask material, mesh, submesh), then caster order (a depth-only pass's
 		// result does not depend on its order, and an Opaque caster binds no material). Appends one instance record per draw
-		// to `instances` ({World, World, PickId, the mirroring flag}), the draws' records in their order, and groups the
-		// draws into batches (one per draw when `instancing` is false). Main thread; the caller writes `instances` into the
-		// buffer Record reads. Errors: InvalidArgument for a caster with a non-finite world matrix (nothing is appended).
+		// to `instances` (MakeMeshInstanceRecord's, RenderPrepare.h: {World, PreviousWorld or World, PickId, the mirroring
+		// flag}), the draws' records in their order, and groups the draws into batches (one per draw when `instancing` is
+		// false). Main thread; the caller writes `instances` into the buffer Record reads. Errors: InvalidArgument for a
+		// caster with a non-finite world matrix (nothing is appended).
 		// M23 (C23.3, decision 27): `sources`, empty or one per caster, are the vertices each caster's draws bind
 		// (SkinningPass.h): a deformed caster's draws bind its deformed vertices, are culled by its deformed bounds and key
 		// its VertexStream, so they batch with no other caster's; a Skipped caster casts nothing.

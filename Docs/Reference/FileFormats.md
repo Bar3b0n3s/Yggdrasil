@@ -35,10 +35,11 @@ Header: `"Format": "AssetMeta", "Version": 1`. Schema: [Schemas/AssetMeta.schema
 	"Handle": "8c5e9fa7d7637795",
 	"Type": "Texture",
 	"Importer": "Texture",
-	"ImporterVersion": 1,
+	"ImporterVersion": 2,
 	"Settings": {
 		"Usage": "Color",
-		"GenerateMips": true
+		"GenerateMips": true,
+		"Compression": "Auto"
 	},
 	"SubAssets": []
 }

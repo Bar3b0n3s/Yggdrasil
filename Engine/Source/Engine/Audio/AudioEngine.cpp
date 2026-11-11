@@ -967,6 +967,9 @@ namespace Engine {
 		Ref<const AudioClipPayload> payload;
 		if (streamed)
 		{
+			// The container checks the decode at registration would make (AudioDecoder.h), before the stream's bytes reach a
+			// decoder: a chained Ogg Opus file would be decoded past the decoder's buffers (M23's milestone review).
+			ENGINE_TRY(WithContext(CheckStreamedAudio(*source.Bytes), std::format("while registering the audio clip '{}'", resourceName)));
 			ENGINE_TRY(WithContext(state.ClipVfs->AddMemoryFile(resourceName, source.Bytes), std::format("while registering the audio clip '{}'", resourceName)));
 			payload = CreateRef<const AudioClipPayload>(AudioClipPayload{ .Bytes = source.Bytes });
 		}

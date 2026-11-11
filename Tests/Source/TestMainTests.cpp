@@ -26,11 +26,8 @@
 
 namespace Engine {
 
-	// The names of the child-process targets below.
-	static constexpr std::string_view ExitingTarget = "TestMain: the target calls exit(1) on another thread";
-	static constexpr std::string_view ExitProcessTarget = "TestMain: the target ends the process with std::_Exit(1)";
+	// The name of the child-process target the portable case below runs.
 	static constexpr std::string_view PassingTarget = "TestMain: the target passes";
-	static constexpr std::string_view FaultingTarget = "TestMain: the target raises an access violation on another thread";
 	// What the faulting target logs before it faults, followed by its thread's id.
 	static constexpr std::string_view FaultingThreadLine = "Raising an access violation on thread ";
 
@@ -50,6 +47,14 @@ namespace Engine {
 	{
 		return Test::ListCrashFiles(userData / ENGINE_PRODUCT_NAME / "Crashes", ".txt");
 	}
+
+#if defined(ENGINE_PLATFORM_WINDOWS)
+	// The names of the child-process targets the Windows-only cases below run (with the reader of the faulting one's
+	// minidump, inside the same block, so a build for another platform has no unused function or constant: M23's milestone
+	// review).
+	static constexpr std::string_view ExitingTarget = "TestMain: the target calls exit(1) on another thread";
+	static constexpr std::string_view ExitProcessTarget = "TestMain: the target ends the process with std::_Exit(1)";
+	static constexpr std::string_view FaultingTarget = "TestMain: the target raises an access violation on another thread";
 
 	// The thread a minidump's exception stream names: the ThreadId that begins the MINIDUMP_EXCEPTION_STREAM of the stream
 	// directory's ExceptionStream entry (type 6), read from the little-endian file; nullopt for a file that is not a
@@ -82,6 +87,7 @@ namespace Engine {
 		}
 		return std::nullopt;
 	}
+#endif
 
 	TEST_SUITE("Support")
 	{

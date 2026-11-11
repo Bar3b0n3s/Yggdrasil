@@ -1,6 +1,8 @@
 #include "EnginePCH.h"
 #include "Engine/Renderer/RenderPrepare.h"
 
+#include "Shared/DrawConstants.h"
+
 #include <glm/gtc/constants.hpp>
 
 #include <algorithm>
@@ -241,6 +243,15 @@ namespace Engine {
 				batches.push_back({ .First = index, .Count = 1 });
 		}
 		return batches;
+	}
+
+	InstanceRecord MakeMeshInstanceRecord(const MeshDrawItem& item, uint32_t flags)
+	{
+		const bool mirrored = glm::determinant(glm::mat3(item.World)) < 0.0f;
+		return InstanceRecord{ .World = item.World,
+			.PreviousWorld = item.PreviousWorld.value_or(item.World),
+			.EntityId = item.PickId,
+			.Flags = (mirrored ? DrawFlagMirrored : 0U) | flags };
 	}
 
 }

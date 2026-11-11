@@ -682,6 +682,14 @@ namespace Engine {
 		return decoded;
 	}
 
+	Status CheckStreamedAudio(std::span<const std::byte> bytes)
+	{
+		if (!Utils::HasPrefix(bytes, 0, "OggS") || !Utils::HasPrefix(Utils::GetFirstOggPacket(bytes), 0, "OpusHead"))
+			return {};
+		ENGINE_TRY_ASSIGN(const std::vector<OggPage> pages, Utils::ReadOggPages(bytes));
+		return Utils::CheckOpusStream(pages);
+	}
+
 	std::string_view EncodedAudioFormatToString(EncodedAudioFormat format)
 	{
 		switch (format)

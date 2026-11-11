@@ -32,7 +32,8 @@
 //
 // Two binding layouts: Hdr, Ldr and M22's LdrDepth bind the texture and the sampler; M21's HdrLit and Normals (decision
 // 22) also bind a second texture, HdrLit's light accumulation or the Normals batch's normal map (the white texture without
-// one, with the push constants' HasNormalMap 0).
+// one, with the push constants' HasNormalMap 0; NormalMapTwoChannel 1 for a map that stores x and y only, M23's milestone
+// review).
 
 namespace Engine {
 
@@ -177,6 +178,7 @@ namespace Engine {
 			nvrhi::ITexture* Texture = nullptr; // the white texture for a quad without one
 			QuadSampler Sampler = QuadSampler::Point;
 			nvrhi::ITexture* NormalMap = nullptr; // the Normals target's; null for the flat normal and for the other targets
+			bool NormalMapTwoChannel = false;     // the Normals target's NormalMap stores x and y only (QuadDraw)
 			uint32_t FirstQuad = 0;
 			uint32_t QuadCount = 0;
 		};
@@ -197,8 +199,10 @@ namespace Engine {
 		std::vector<QuadVertex> Staging{};
 
 		// Batches the quad Staging just received into `batches`: it extends the last batch when it has the same texture,
-		// sampler and normal map and the quad does not begin a new chunk of MaxQuadsPerRecord quads.
-		void AddQuad(std::vector<QuadBatch>& batches, nvrhi::ITexture* texture, QuadSampler sampler, nvrhi::ITexture* normalMap) const;
+		// sampler and normal map (with its two-channel flag) and the quad does not begin a new chunk of MaxQuadsPerRecord
+		// quads.
+		void AddQuad(std::vector<QuadBatch>& batches, nvrhi::ITexture* texture, QuadSampler sampler, nvrhi::ITexture* normalMap,
+			bool normalMapTwoChannel) const;
 		// Records the indices of IndexCapacity quads into the index buffer.
 		void WriteIndices(nvrhi::ICommandList& commandList) const;
 		// The record itself: QuadBatcher::Record's work, before it releases an outsized Staging.
@@ -218,16 +222,22 @@ namespace Engine {
 		commandList.writeBuffer(Indices, indices.data(), indices.size() * sizeof(uint32_t), 0);
 	}
 
-	void QuadBatcher::State::AddQuad(std::vector<QuadBatch>& batches, nvrhi::ITexture* texture, QuadSampler sampler, nvrhi::ITexture* normalMap) const
+	void QuadBatcher::State::AddQuad(std::vector<QuadBatch>& batches, nvrhi::ITexture* texture, QuadSampler sampler, nvrhi::ITexture* normalMap,
+		bool normalMapTwoChannel) const
 	{
 		const uint32_t quad = static_cast<uint32_t>(Staging.size() / Utils::VerticesPerQuad) - 1;
 		if (!batches.empty() && batches.back().Texture == texture && batches.back().Sampler == sampler && batches.back().NormalMap == normalMap
-			&& quad % MaxQuadsPerRecord != 0)
+			&& batches.back().NormalMapTwoChannel == normalMapTwoChannel && quad % MaxQuadsPerRecord != 0)
 		{
 			++batches.back().QuadCount;
 			return;
 		}
-		batches.push_back({ .Texture = texture, .Sampler = sampler, .NormalMap = normalMap, .FirstQuad = quad, .QuadCount = 1 });
+		batches.push_back({ .Texture = texture,
+			.Sampler = sampler,
+			.NormalMap = normalMap,
+			.NormalMapTwoChannel = normalMapTwoChannel,
+			.FirstQuad = quad,
+			.QuadCount = 1 });
 	}
 
 	NineSliceExpansion ExpandNineSlice(const NineSliceSource& source, glm::vec2 size, float borderScale)
@@ -449,7 +459,9 @@ namespace Engine {
 			};
 			for (size_t corner = 0; corner < quad.Corners.size(); ++corner)
 				state.Staging.push_back({ .Position = quad.Corners[corner], .TexCoord = texCoords[corner], .Color = quad.Color });
-			state.AddQuad(batches, quad.Texture != nullptr ? quad.Texture : state.White.Get(), quad.Sampler, normals ? quad.NormalMap : nullptr);
+			nvrhi::ITexture* normalMap = normals ? quad.NormalMap : nullptr;
+			state.AddQuad(batches, quad.Texture != nullptr ? quad.Texture : state.White.Get(), quad.Sampler, normalMap,
+				normalMap != nullptr && quad.NormalMapTwoChannel);
 		}
 		if (state.Staging.empty())
 			return 0U;
@@ -541,11 +553,14 @@ namespace Engine {
 			for (; index < batches.size() && batches[index].FirstQuad < chunkStart + chunkQuads; ++index)
 			{
 				const QuadBatch& batch = batches[index];
-				if (!stateSet || graphics.bindings[0] != sets[index])
+				const uint32_t hasNormalMap = normals && batch.NormalMap != nullptr ? 1U : 0U;
+				const uint32_t twoChannel = hasNormalMap != 0 && batch.NormalMapTwoChannel ? 1U : 0U;
+				if (!stateSet || graphics.bindings[0] != sets[index] || constants.HasNormalMap != hasNormalMap || constants.NormalMapTwoChannel != twoChannel)
 				{
 					stateSet = true;
 					graphics.bindings[0] = sets[index];
-					constants.HasNormalMap = normals && batch.NormalMap != nullptr ? 1U : 0U;
+					constants.HasNormalMap = hasNormalMap;
+					constants.NormalMapTwoChannel = twoChannel;
 					// Setting the graphics state invalidates the push constants, so every change sets them again.
 					commandList.setGraphicsState(graphics);
 					commandList.setPushConstants(&constants, sizeof(constants));

@@ -14,14 +14,15 @@
 //   - PSHdrLit: PSHdr's product with its RGB multiplied by the light accumulation (QuadLitTexture: Lights2DLight, the
 //     framebuffer's size) loaded at the fragment's pixel, its alpha unchanged (the HdrLit pipeline);
 //   - PSNormals: the world normal of the quad at the fragment (the Normals pipeline, into Lights2DNormals): where the texel's
-//     alpha times the vertex colour's alpha is above 0, its normal map's texel (QuadLitTexture, decoded as 2 rgb - 1)
-//     turned by the quad's tangent frame, normalized, with 1 in w; without a normal map (Quad.HasNormalMap 0) the flat
-//     normal (0, 0, 1) with 0 in w; elsewhere nothing (a zero SV_Coverage, as Scene.slang drops its Mask fragments: a
-//     discard needs a device feature the device does not enable). The tangent frame comes from the screen-space
-//     derivatives of the batch-space position and the texture coordinates, taken before any branch: +X along the
-//     increasing u, +Y against the increasing v (texture space runs down), +Z the unit normal of the quad's plane facing
-//     the viewer, so a quad mirrored by its flips or a negative scale mirrors its normals' X or Y and keeps them facing the
-//     lights above the plane.
+//     alpha times the vertex colour's alpha is above 0, its normal map's texel (QuadLitTexture, decoded as 2 rgb - 1; for a
+//     two-channel map, Quad.NormalMapTwoChannel 1, z reconstructed from x and y as Scene.slang reconstructs it, since a BC5
+//     texture and the decode fallback's copy of one hold no z: M23's milestone review) turned by the quad's tangent frame,
+//     normalized, with 1 in w; without a normal map (Quad.HasNormalMap 0) the flat normal (0, 0, 1) with 0 in w; elsewhere
+//     nothing (a zero SV_Coverage, as Scene.slang drops its Mask fragments: a discard needs a device feature the device does
+//     not enable). The tangent frame comes from the screen-space derivatives of the batch-space position and the texture
+//     coordinates, taken before any branch: +X along the increasing u, +Y against the increasing v (texture space runs
+//     down), +Z the unit normal of the quad's plane facing the viewer, so a quad mirrored by its flips or a negative scale
+//     mirrors its normals' X or Y and keeps them facing the lights above the plane.
 
 #include "Shared/QuadVertex.h"
 
@@ -143,7 +144,10 @@ NormalsOutput PSNormals(LitVertexOutput input)
 		output.Normal = float4(0.0, 0.0, 1.0, 0.0);
 		return output;
 	}
-	const float3 encoded = QuadLitTexture.SampleLevel(QuadSampler, input.TexCoord, 0.0).rgb * 2.0 - 1.0;
+	float3 encoded = QuadLitTexture.SampleLevel(QuadSampler, input.TexCoord, 0.0).rgb * 2.0 - 1.0;
+	// A two-channel normal map (BC5, or the decode fallback's RGBA8 copy of one) stores x and y only.
+	if (Quad.NormalMapTwoChannel != 0u)
+		encoded.z = sqrt(saturate(1.0 - dot(encoded.xy, encoded.xy)));
 	const float3 normal = tangentX * encoded.x + tangentY * encoded.y + tangentZ * encoded.z;
 	output.Normal = float4(NormalizeOr(normal, tangentZ), 1.0);
 	return output;

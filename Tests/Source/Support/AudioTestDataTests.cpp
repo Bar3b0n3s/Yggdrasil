@@ -3,6 +3,8 @@
 #include "Support/AudioTestData.h"
 
 #include "Engine/Core/BinaryReader.h"
+#include "Engine/Core/FileSystem.h"
+#include "Support/TestData.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -10,6 +12,7 @@
 #include <limits>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Engine {
@@ -88,6 +91,33 @@ namespace Engine {
 			CHECK(reader.ReadU32().value_or(0) == samples.size() * sizeof(float));
 			for (const float expected : samples)
 				CHECK(reader.ReadF32().value_or(0.0f) == expected);
+		}
+
+		// M23's milestone review: the committed Ogg fixtures split into pages that join back to their bytes, CRCs included, so
+		// a variant built from them changes only what its test changes.
+		TEST_CASE("AudioTestData: an Ogg file splits into pages that join back to its bytes")
+		{
+			for (const std::string_view fixture : { "Assets/Audio/Tone.ogg", "Assets/Audio/Water.opus" })
+			{
+				CAPTURE(std::string(fixture));
+				Result<Buffer> bytes = FileSystem::ReadFile(Test::GetTestDataPath(fixture));
+				REQUIRE_MESSAGE(bytes.has_value(), bytes.error().ToString());
+				const std::vector<Test::OggTestPage> pages = Test::SplitOggPages(*bytes);
+				REQUIRE(pages.size() > 2);
+				CHECK((pages.front().Flags & Test::OggBeginsStream) != 0);
+				CHECK((pages.back().Flags & Test::OggEndsStream) != 0);
+				CHECK(Test::JoinOggPages(pages) == *bytes);
+				// The first page's CRC, over the page with its CRC field zero, is the one stored at bytes 22 to 25.
+				const size_t firstSize = 27 + pages.front().Lacing.size() + pages.front().Body.size();
+				Buffer first(bytes->begin(), bytes->begin() + static_cast<std::ptrdiff_t>(firstSize));
+				uint32_t stored = 0;
+				for (size_t index = 0; index < 4; ++index)
+				{
+					stored |= std::to_integer<uint32_t>(first[22 + index]) << (8 * index);
+					first[22 + index] = std::byte{ 0 };
+				}
+				CHECK(Test::OggCrc(first) == stored);
+			}
 		}
 	}
 

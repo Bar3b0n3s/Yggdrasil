@@ -51,104 +51,6 @@ namespace Engine {
 			return std::move(*bytes);
 		}
 
-		// Ogg's CRC-32 (RFC 3533): polynomial 0x04C11DB7, no reflection, initial value and final XOR 0, over a page whose
-		// CRC field is zero.
-		uint32_t OggCrc(std::span<const std::byte> page)
-		{
-			uint32_t crc = 0;
-			for (const std::byte value : page)
-			{
-				crc ^= std::to_integer<uint32_t>(value) << 24;
-				for (int bit = 0; bit < 8; ++bit)
-					crc = (crc & 0x80000000u) != 0 ? (crc << 1) ^ 0x04C11DB7u : crc << 1;
-			}
-			return crc;
-		}
-
-		// The header flags of an Ogg page.
-		constexpr uint8_t OggBeginsStream = 0x02;
-		constexpr uint8_t OggEndsStream = 0x04;
-
-		// One page of an Ogg file, the fields a test changes.
-		struct OggTestPage
-		{
-			uint8_t Flags = 0;
-			uint64_t Granule = 0;
-			uint32_t Serial = 0;
-			uint32_t Sequence = 0;
-			std::vector<uint8_t> Lacing{};
-			Buffer Body{};
-		};
-
-		// The pages of a well-formed Ogg file; fails the test case otherwise.
-		std::vector<OggTestPage> SplitOggPages(std::span<const std::byte> bytes)
-		{
-			const auto read = [bytes](size_t offset, size_t count)
-			{
-				uint64_t value = 0;
-				for (size_t index = 0; index < count; ++index)
-					value |= std::to_integer<uint64_t>(bytes[offset + index]) << (8 * index);
-				return value;
-			};
-			std::vector<OggTestPage> pages;
-			size_t offset = 0;
-			while (offset < bytes.size())
-			{
-				REQUIRE(bytes.size() - offset >= 27);
-				REQUIRE(std::memcmp(bytes.data() + offset, "OggS", 4) == 0);
-				OggTestPage page;
-				page.Flags = std::to_integer<uint8_t>(bytes[offset + 5]);
-				page.Granule = read(offset + 6, 8);
-				page.Serial = static_cast<uint32_t>(read(offset + 14, 4));
-				page.Sequence = static_cast<uint32_t>(read(offset + 18, 4));
-				const size_t segments = std::to_integer<size_t>(bytes[offset + 26]);
-				REQUIRE(bytes.size() - offset >= 27 + segments);
-				size_t bodySize = 0;
-				for (size_t segment = 0; segment < segments; ++segment)
-				{
-					page.Lacing.push_back(std::to_integer<uint8_t>(bytes[offset + 27 + segment]));
-					bodySize += page.Lacing.back();
-				}
-				const size_t body = offset + 27 + segments;
-				REQUIRE(bytes.size() - body >= bodySize);
-				page.Body.assign(bytes.begin() + static_cast<std::ptrdiff_t>(body), bytes.begin() + static_cast<std::ptrdiff_t>(body + bodySize));
-				pages.push_back(std::move(page));
-				offset = body + bodySize;
-			}
-			return pages;
-		}
-
-		// The bytes of `pages`, each with its CRC.
-		Buffer JoinOggPages(std::span<const OggTestPage> pages)
-		{
-			Buffer bytes;
-			const auto write = [&bytes](uint64_t value, size_t count)
-			{
-				for (size_t index = 0; index < count; ++index)
-					bytes.push_back(static_cast<std::byte>(value >> (8 * index)));
-			};
-			for (const OggTestPage& page : pages)
-			{
-				const size_t start = bytes.size();
-				for (const char character : std::string_view("OggS"))
-					bytes.push_back(static_cast<std::byte>(character));
-				write(0, 1); // version
-				write(page.Flags, 1);
-				write(page.Granule, 8);
-				write(page.Serial, 4);
-				write(page.Sequence, 4);
-				write(0, 4); // the CRC, written below
-				write(page.Lacing.size(), 1);
-				for (const uint8_t lacing : page.Lacing)
-					write(lacing, 1);
-				bytes.insert(bytes.end(), page.Body.begin(), page.Body.end());
-				const uint32_t crc = OggCrc(std::span<const std::byte>(bytes).subspan(start));
-				for (size_t index = 0; index < 4; ++index)
-					bytes[start + 22 + index] = static_cast<std::byte>(crc >> (8 * index));
-			}
-			return bytes;
-		}
-
 		// Rewrites the CRC of every whole page from the start of `bytes` (a page at each "OggS" whose header and body fit),
 		// so a mutated page reaches the decoder instead of failing libogg's CRC check, as a crafted file's pages would;
 		// stops at the first byte that does not start a whole page.
@@ -166,7 +68,7 @@ namespace Engine {
 				if (bytes.size() - offset < pageSize)
 					return;
 				std::fill_n(bytes.begin() + static_cast<std::ptrdiff_t>(offset + 22), 4, std::byte{ 0 });
-				const uint32_t crc = OggCrc(std::span<const std::byte>(bytes).subspan(offset, pageSize));
+				const uint32_t crc = Test::OggCrc(std::span<const std::byte>(bytes).subspan(offset, pageSize));
 				for (size_t index = 0; index < 4; ++index)
 					bytes[offset + 22 + index] = static_cast<std::byte>(crc >> (8 * index));
 				offset += pageSize;
@@ -175,12 +77,12 @@ namespace Engine {
 
 		// Water.opus's first three pages, the third (its first audio page: 13 packets of 20 ms) now ending the stream: an
 		// Ogg Opus file of 12,168 frames, small enough to fuzz.
-		std::vector<OggTestPage> MakeShortOpusPages()
+		std::vector<Test::OggTestPage> MakeShortOpusPages()
 		{
-			std::vector<OggTestPage> pages = SplitOggPages(ReadFixture("Assets/Audio/Water.opus"));
+			std::vector<Test::OggTestPage> pages = Test::SplitOggPages(ReadFixture("Assets/Audio/Water.opus"));
 			REQUIRE(pages.size() > 3);
 			pages.resize(3);
-			pages.back().Flags |= OggEndsStream;
+			pages.back().Flags |= Test::OggEndsStream;
 			return pages;
 		}
 
@@ -196,16 +98,16 @@ namespace Engine {
 
 		// `pages` with the identification header's channel count, channel mapping family and, for a family other than 0,
 		// the stream count, coupled count and channel mapping (RFC 7845 section 5.1.1).
-		Buffer WithOpusChannelMapping(std::vector<OggTestPage> pages, uint8_t channels, uint8_t family, std::initializer_list<uint8_t> table)
+		Buffer WithOpusChannelMapping(std::vector<Test::OggTestPage> pages, uint8_t channels, uint8_t family, std::initializer_list<uint8_t> table)
 		{
-			OggTestPage& head = pages.front();
+			Test::OggTestPage& head = pages.front();
 			REQUIRE(head.Body.size() == 19);
 			head.Body[9] = std::byte{ channels };
 			head.Body[18] = std::byte{ family };
 			for (const uint8_t value : table)
 				head.Body.push_back(std::byte{ value });
 			head.Lacing = { static_cast<uint8_t>(head.Body.size()) };
-			return JoinOggPages(pages);
+			return Test::JoinOggPages(pages);
 		}
 
 	}
@@ -335,8 +237,8 @@ namespace Engine {
 		{
 			// RFC 7845 section 5.1.1: family 1 (Vorbis channel order) with one coupled stream mapped to channels 0 and 1 is
 			// the stereo layout family 0 implies.
-			const std::vector<OggTestPage> pages = MakeShortOpusPages();
-			const Result<DecodedAudio> family0 = DecodeEncodedAudio(JoinOggPages(pages));
+			const std::vector<Test::OggTestPage> pages = MakeShortOpusPages();
+			const Result<DecodedAudio> family0 = DecodeEncodedAudio(Test::JoinOggPages(pages));
 			REQUIRE_MESSAGE(family0.has_value(), family0.error().ToString());
 			CHECK(family0->Info.Format == EncodedAudioFormat::Opus);
 			CHECK(family0->Info.FrameCount == 12168); // 13 packets of 960 frames less the 312-frame pre-skip
@@ -348,7 +250,7 @@ namespace Engine {
 
 		TEST_CASE("AudioDecoder: other Ogg Opus channel layouts are Validation errors with the mono or stereo hint")
 		{
-			const std::vector<OggTestPage> pages = MakeShortOpusPages();
+			const std::vector<Test::OggTestPage> pages = MakeShortOpusPages();
 			// Family 255 (no defined channel meaning), even with two channels.
 			const Result<EncodedAudioInfo> unordered = ProbeEncodedAudio(WithOpusChannelMapping(pages, 2, 255, { 1, 1, 0, 1 }));
 			REQUIRE_FALSE(unordered.has_value());
@@ -366,17 +268,17 @@ namespace Engine {
 		{
 			// miniaudio's decoder sizes its buffers for a file's first link, so chained (a new stream after the first) and
 			// multiplexed (interleaved streams) files are refused before opusfile reads them.
-			const std::vector<OggTestPage> pages = MakeShortOpusPages();
-			REQUIRE(DecodeEncodedAudio(JoinOggPages(pages)).has_value());
-			std::vector<OggTestPage> otherSerial = pages;
+			const std::vector<Test::OggTestPage> pages = MakeShortOpusPages();
+			REQUIRE(DecodeEncodedAudio(Test::JoinOggPages(pages)).has_value());
+			std::vector<Test::OggTestPage> otherSerial = pages;
 			otherSerial[2].Serial ^= 1;
-			std::vector<OggTestPage> secondStart = pages;
-			secondStart[2].Flags |= OggBeginsStream;
-			std::vector<OggTestPage> earlyEnd = pages;
-			earlyEnd[1].Flags |= OggEndsStream;
-			std::vector<OggTestPage> headerNotAlone = pages;
+			std::vector<Test::OggTestPage> secondStart = pages;
+			secondStart[2].Flags |= Test::OggBeginsStream;
+			std::vector<Test::OggTestPage> earlyEnd = pages;
+			earlyEnd[1].Flags |= Test::OggEndsStream;
+			std::vector<Test::OggTestPage> headerNotAlone = pages;
 			headerNotAlone[0].Lacing.push_back(0);
-			const std::pair<std::string_view, const std::vector<OggTestPage>*> variants[] = {
+			const std::pair<std::string_view, const std::vector<Test::OggTestPage>*> variants[] = {
 				{ "another serial number", &otherSerial },
 				{ "a second beginning", &secondStart },
 				{ "an early end", &earlyEnd },
@@ -385,7 +287,7 @@ namespace Engine {
 			for (const auto& [what, variant] : variants)
 			{
 				CAPTURE(std::string(what));
-				const Result<EncodedAudioInfo> probed = ProbeEncodedAudio(JoinOggPages(*variant));
+				const Result<EncodedAudioInfo> probed = ProbeEncodedAudio(Test::JoinOggPages(*variant));
 				REQUIRE_FALSE(probed.has_value());
 				CHECK(probed.error().GetCode() == ErrorCode::Parse);
 			}
@@ -395,19 +297,19 @@ namespace Engine {
 		// stream checks it passes, is a Parse error whichever decoder miniaudio tries next.
 		TEST_CASE("AudioDecoder: an Ogg Opus identification header libopus refuses is a Parse error")
 		{
-			const std::vector<OggTestPage> pages = MakeShortOpusPages();
-			std::vector<OggTestPage> newerVersion = pages;
+			const std::vector<Test::OggTestPage> pages = MakeShortOpusPages();
+			std::vector<Test::OggTestPage> newerVersion = pages;
 			newerVersion[0].Body[8] = std::byte{ 16 }; // major version 1 (the upper four bits): a later specification
-			std::vector<OggTestPage> noChannels = pages;
+			std::vector<Test::OggTestPage> noChannels = pages;
 			noChannels[0].Body[9] = std::byte{ 0 };
-			const std::pair<std::string_view, const std::vector<OggTestPage>*> variants[] = {
+			const std::pair<std::string_view, const std::vector<Test::OggTestPage>*> variants[] = {
 				{ "version 16", &newerVersion },
 				{ "no channels", &noChannels },
 			};
 			for (const auto& [what, variant] : variants)
 			{
 				CAPTURE(std::string(what));
-				const Buffer bytes = JoinOggPages(*variant);
+				const Buffer bytes = Test::JoinOggPages(*variant);
 				CHECK(GetErrorCode(ProbeEncodedAudio(bytes)) == ErrorCode::Parse);
 				CHECK(GetErrorCode(DecodeEncodedAudio(bytes)) == ErrorCode::Parse);
 			}
@@ -418,14 +320,14 @@ namespace Engine {
 		// Parse error, never a clip decoded as MP3 under the Opus encoding (MiniaudioOpusBackend::Decodes).
 		TEST_CASE("AudioDecoder: an Ogg Opus file that another decoder would take is a Parse error")
 		{
-			std::vector<OggTestPage> pages = MakeShortOpusPages();
+			std::vector<Test::OggTestPage> pages = MakeShortOpusPages();
 			pages.resize(2); // the identification and comment headers
 			pages[0].Body[8] = std::byte{ 16 };
 			const Buffer mp3 = ReadFixture("Assets/Audio/Tone.mp3");
 			constexpr size_t PageBodySize = 32000;
 			for (size_t offset = 0; offset < mp3.size(); offset += PageBodySize)
 			{
-				OggTestPage page;
+				Test::OggTestPage page;
 				page.Serial = pages.front().Serial;
 				page.Sequence = static_cast<uint32_t>(pages.size());
 				page.Granule = uint64_t{ 960 } * pages.size();
@@ -433,8 +335,8 @@ namespace Engine {
 				page.Lacing = MakePacketLacing(page.Body.size());
 				pages.push_back(std::move(page));
 			}
-			pages.back().Flags |= OggEndsStream;
-			const Buffer bytes = JoinOggPages(pages);
+			pages.back().Flags |= Test::OggEndsStream;
+			const Buffer bytes = Test::JoinOggPages(pages);
 			CHECK(GetErrorCode(ProbeEncodedAudio(bytes)) == ErrorCode::Parse);
 			CHECK(GetErrorCode(DecodeEncodedAudio(bytes)) == ErrorCode::Parse);
 		}
@@ -445,15 +347,15 @@ namespace Engine {
 		// they no longer do.
 		TEST_CASE("AudioDecoder: an Ogg Opus file whose last granule position overstates its length is a Parse error")
 		{
-			std::vector<OggTestPage> pages = SplitOggPages(ReadFixture("Assets/Audio/Water.opus"));
+			std::vector<Test::OggTestPage> pages = Test::SplitOggPages(ReadFixture("Assets/Audio/Water.opus"));
 			REQUIRE(pages.size() > 4);
 			pages.resize(4);
-			pages.back().Flags |= OggEndsStream;
-			const Result<EncodedAudioInfo> complete = ProbeEncodedAudio(JoinOggPages(pages));
+			pages.back().Flags |= Test::OggEndsStream;
+			const Result<EncodedAudioInfo> complete = ProbeEncodedAudio(Test::JoinOggPages(pages));
 			REQUIRE_MESSAGE(complete.has_value(), complete.error().ToString());
 			pages.back().Granule += 48000;
-			CHECK(GetErrorCode(ProbeEncodedAudio(JoinOggPages(pages))) == ErrorCode::Parse);
-			CHECK(GetErrorCode(DecodeEncodedAudio(JoinOggPages(pages))) == ErrorCode::Parse);
+			CHECK(GetErrorCode(ProbeEncodedAudio(Test::JoinOggPages(pages))) == ErrorCode::Parse);
+			CHECK(GetErrorCode(DecodeEncodedAudio(Test::JoinOggPages(pages))) == ErrorCode::Parse);
 		}
 
 		TEST_CASE("AudioDecoder: 200 seeded mutations of an Ogg Opus file never crash" * doctest::test_suite(Test::FuzzSuite))
@@ -462,8 +364,8 @@ namespace Engine {
 			// mutations in eight then get their pages' CRCs rewritten (RepairOggCrcs), so the damage reaches opusfile's
 			// header parsing and libopus's packet decoding as a crafted file's would; the eighth keeps the broken CRCs. A
 			// clip the decoder accepts holds every promised sample, finite, at Opus's 48 kHz.
-			const std::vector<OggTestPage> pages = MakeShortOpusPages();
-			const std::vector<Buffer> seeds = { JoinOggPages(pages), WithOpusChannelMapping(pages, 2, 1, { 1, 1, 0, 1 }) };
+			const std::vector<Test::OggTestPage> pages = MakeShortOpusPages();
+			const std::vector<Buffer> seeds = { Test::JoinOggPages(pages), WithOpusChannelMapping(pages, 2, 1, { 1, 1, 0, 1 }) };
 			const Test::FuzzRun run = Test::RunFuzzCase(0xA0D10905, 200, [&seeds](Random& random, uint64_t /*index*/)
 			{
 				Buffer mutated = seeds[static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(seeds.size()) - 1))];
@@ -542,13 +444,13 @@ namespace Engine {
 			CHECK(GetErrorCode(ProbeEncodedAudio(ogg)) == ErrorCode::Parse);
 			// An Ogg Opus file cut inside a page, and one cut at a page boundary (its last page then does not end the
 			// stream).
-			const Buffer opus = JoinOggPages(MakeShortOpusPages());
+			const Buffer opus = Test::JoinOggPages(MakeShortOpusPages());
 			Buffer cut = opus;
 			cut.resize(opus.size() - 100);
 			CHECK(GetErrorCode(ProbeEncodedAudio(cut)) == ErrorCode::Parse);
-			std::vector<OggTestPage> twoPages = MakeShortOpusPages();
+			std::vector<Test::OggTestPage> twoPages = MakeShortOpusPages();
 			twoPages.pop_back();
-			CHECK(GetErrorCode(ProbeEncodedAudio(JoinOggPages(twoPages))) == ErrorCode::Parse);
+			CHECK(GetErrorCode(ProbeEncodedAudio(Test::JoinOggPages(twoPages))) == ErrorCode::Parse);
 		}
 
 		TEST_CASE("AudioDecoder: Ogg Vorbis headers stb_vorbis would overflow or over-allocate on are Parse errors")
@@ -750,11 +652,11 @@ namespace Engine {
 			extended.insert(extended.end(), setupBits.begin() + static_cast<std::ptrdiff_t>(codebooksEnd), setupBits.end());
 			const Buffer extendedSetup = packBits(extended);
 
-			// Page 1 again with the longer setup header: its lacing values and its CRC (OggCrc, over the page with its CRC
+			// Page 1 again with the longer setup header: its lacing values and its CRC (Test::OggCrc, over the page with its CRC
 			// field zeroed).
 			Buffer originalPage1(original.begin() + static_cast<std::ptrdiff_t>(page1), original.begin() + static_cast<std::ptrdiff_t>(page2));
 			std::fill_n(originalPage1.begin() + 22, 4, std::byte{ 0 });
-			REQUIRE(OggCrc(originalPage1) == readU32(original, page1 + 22));
+			REQUIRE(Test::OggCrc(originalPage1) == readU32(original, page1 + 22));
 			std::vector<std::byte> lacing = { std::byte{ 66 } };
 			for (size_t left = 7 + extendedSetup.size();; left -= 255)
 			{
@@ -768,7 +670,7 @@ namespace Engine {
 			lookup.insert(lookup.end(), original.begin() + static_cast<std::ptrdiff_t>(comment), original.begin() + static_cast<std::ptrdiff_t>(setup + 7));
 			lookup.insert(lookup.end(), extendedSetup.begin(), extendedSetup.end());
 			std::fill_n(lookup.begin() + static_cast<std::ptrdiff_t>(page1 + 22), 4, std::byte{ 0 });
-			writeU32(lookup, page1 + 22, OggCrc(std::span<const std::byte>(lookup).subspan(page1)));
+			writeU32(lookup, page1 + 22, Test::OggCrc(std::span<const std::byte>(lookup).subspan(page1)));
 			lookup.insert(lookup.end(), original.begin() + static_cast<std::ptrdiff_t>(page2), original.end());
 			expectParseError("type 1 lookup", lookup, "codebook 35 has a type 1 lookup of 1 entries in 32 dimensions");
 		}

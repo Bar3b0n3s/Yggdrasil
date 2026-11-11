@@ -5,6 +5,7 @@
 #include "Engine/Core/Base.h"
 #include "Engine/Core/UUID.h"
 #include "Engine/Renderer/RenderSnapshot.h"
+#include "Shared/InstanceRecord.h"
 
 #include <glm/glm.hpp>
 
@@ -119,5 +120,14 @@ namespace Engine {
 	// instanced draws, each instance in its run's order, draws exactly what one draw per element would, in the same order,
 	// which is why an instanced render equals the per-draw render byte for byte. Empty keys give no batch. Pure.
 	[[nodiscard]] std::vector<MeshInstanceBatch> GroupMeshInstances(std::span<const MeshInstanceKey> keys);
+
+	// M23 (C23.1, R-INST; Docs/Decisions/0034-m23-contract.md decisions 2 and 8; M23's milestone review): the instance record
+	// (Shared/InstanceRecord.h) of a submesh draw of `item`, the one rule by which every pass that draws meshes writes its
+	// records: the Prepare stage's camera draws, ShadowPass::PrepareCasters' casters and SelectionPass::PrepareDraws' mask
+	// draws. World and EntityId are the item's World and PickId; PreviousWorld is the item's PreviousWorld, or its World
+	// when it has none (no motion: every item until M26 fills it for TAA's motion vectors, plan §4.1); Flags is
+	// DrawFlagMirrored for a World whose upper 3 x 3 determinant is negative, combined with `flags` (the camera draws'
+	// DrawFlagReceiveShadows). Pure.
+	[[nodiscard]] InstanceRecord MakeMeshInstanceRecord(const MeshDrawItem& item, uint32_t flags = 0);
 
 }

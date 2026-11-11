@@ -75,6 +75,16 @@ namespace Engine {
 	// ProbeEncodedAudio.
 	[[nodiscard]] Result<DecodedAudio> DecodeEncodedAudio(std::span<const std::byte> bytes);
 
+	// The container checks of ProbeEncodedAudio that need no decoding, for a clip that streams (AudioEngine.h "Clips":
+	// miniaudio's resource manager opens a stream's bytes only when a voice plays them, through the same decoders): for
+	// Ogg Opus bytes, the one-logical-stream and channel-mapping-family checks, since opusfile reads chained and
+	// multiplexed files and miniaudio's decoder sizes its buffers for the first link's channel count while the libopus
+	// backend writes each link's own (M23's milestone review, Docs/Decisions/0034-m23-contract.md). Other bytes pass: their
+	// decoders check them when a voice opens the stream. Pure and cheap (it reads the pages, decodes nothing). Errors: as
+	// ProbeEncodedAudio's for an Ogg Opus file that is not one logical stream (Parse) or uses another channel mapping family
+	// (Validation).
+	[[nodiscard]] Status CheckStreamedAudio(std::span<const std::byte> bytes);
+
 	// "Wav", "Flac", "Mp3", "Vorbis", "Opus"; "Unknown" outside the enum (asserted).
 	[[nodiscard]] std::string_view EncodedAudioFormatToString(EncodedAudioFormat format);
 

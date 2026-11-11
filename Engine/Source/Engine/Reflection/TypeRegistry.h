@@ -341,8 +341,8 @@ namespace Engine {
 		{
 		}
 
-		// Mandatory: "Core", "Rendering", "Physics", "Audio", "Scripting", "Rendering2D" or "Physics2D" (M21), or "Animation"
-		// (M23) for the built-in components.
+		// Mandatory: "Core", "Rendering", "Physics", "Audio", "Scripting", "Rendering2D" or "Physics2D" (M21), "Ui" (M22), or
+		// "Animation" (M23) for the built-in components.
 		ComponentBuilder& Category(std::string_view category)
 		{
 			m_Component->SetCategory(std::string(category));

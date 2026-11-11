@@ -2,6 +2,7 @@
 
 #include "Engine/Audio/AudioEngine.h"
 
+#include "Engine/Audio/AudioDecoder.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/VirtualFileSystem.h"
@@ -1165,6 +1166,52 @@ namespace Engine {
 			CHECK(engine->GetVoices().empty());
 			CHECK(engine->GetStats().StartedVoices == 0);
 			REQUIRE(engine->UnregisterClip(*clip).has_value());
+		}
+
+		// M23's milestone review (Docs/Decisions/0034-m23-contract.md): a streamed clip is registered without decoding, but its
+		// bytes still pass the container checks of the import and of the decode at registration (CheckStreamedAudio). A chained
+		// Ogg Opus file whose second link has more channels than its first (mono, then stereo) would be decoded past
+		// miniaudio's buffers, which it sizes for the first link, so it is refused at registration, streamed or not, and
+		// nothing is registered; the same stream as one link still streams.
+		TEST_CASE("AudioEngine: a streamed Ogg Opus clip that is not one logical stream is refused at registration")
+		{
+			// Water.opus's first three pages, ending the stream (12,168 frames): its first link as mono, then the same pages as a
+			// stereo link of another serial number.
+			std::vector<Test::OggTestPage> stereo = Test::SplitOggPages(ReadFixture("Assets/Audio/Water.opus"));
+			REQUIRE(stereo.size() > 3);
+			stereo.resize(3);
+			stereo.back().Flags |= Test::OggEndsStream;
+			REQUIRE(stereo.front().Body.size() >= 19);
+			REQUIRE(std::to_integer<int>(stereo.front().Body[9]) == 2);
+			std::vector<Test::OggTestPage> mono = stereo;
+			mono.front().Body[9] = std::byte{ 1 }; // the identification header's channel count (RFC 7845 section 5.1)
+			for (Test::OggTestPage& page : stereo)
+				page.Serial ^= 1;
+			const Buffer single = Test::JoinOggPages(mono);
+			Buffer chained = single;
+			const Buffer second = Test::JoinOggPages(stereo);
+			chained.insert(chained.end(), second.begin(), second.end());
+			// The import's probe and the decode at registration refuse it before opusfile reads it.
+			const Result<EncodedAudioInfo> probed = ProbeEncodedAudio(chained);
+			REQUIRE_FALSE(probed.has_value());
+			CHECK(probed.error().GetCode() == ErrorCode::Parse);
+
+			VirtualFileSystem vfs;
+			const TestEngine engine = CreateTestEngine(vfs);
+			for (const bool stream : { true, false })
+			{
+				CAPTURE(stream);
+				const Result<AudioClipHandle> clip = engine->RegisterClip(
+					{ .Name = "0000000000000001", .Format = AudioClipFormat::Encoded, .Bytes = CreateRef<const Buffer>(chained), .Stream = stream });
+				REQUIRE_FALSE(clip.has_value());
+				CHECK(clip.error().GetCode() == ErrorCode::Parse);
+				CHECK(clip.error().ToString().contains("0000000000000001"));
+				CHECK(engine->GetStats().RegisteredClips == 0);
+			}
+			// One link, mono, streams and plays.
+			const AudioClipHandle clip = RegisterEncodedClip(*engine, "0000000000000002", single, true);
+			PlayTestVoice(*engine, { .Clip = clip });
+			CHECK(PullLevels(*engine, 9600).Peak > 0.0f);
 		}
 
 		TEST_CASE("AudioEngine: the voices report their settings, owner and start order")

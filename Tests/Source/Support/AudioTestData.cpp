@@ -5,7 +5,12 @@
 #include "Engine/Core/DetMath.h"
 
 #include <cmath>
+#include <cstddef>
+#include <cstring>
 #include <numbers>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 namespace Engine {
 
@@ -78,6 +83,85 @@ namespace Engine {
 				data.WriteF32(sample);
 			const Buffer bytes = data.TakeBuffer();
 			return MakeWav(3, sampleRate, channelCount, 32, bytes); // IEEE float
+		}
+
+		uint32_t OggCrc(std::span<const std::byte> page)
+		{
+			uint32_t crc = 0;
+			for (const std::byte value : page)
+			{
+				crc ^= std::to_integer<uint32_t>(value) << 24;
+				for (int bit = 0; bit < 8; ++bit)
+					crc = (crc & 0x80000000u) != 0 ? (crc << 1) ^ 0x04C11DB7u : crc << 1;
+			}
+			return crc;
+		}
+
+		std::vector<OggTestPage> SplitOggPages(std::span<const std::byte> bytes)
+		{
+			const auto read = [bytes](size_t offset, size_t count)
+			{
+				uint64_t value = 0;
+				for (size_t index = 0; index < count; ++index)
+					value |= std::to_integer<uint64_t>(bytes[offset + index]) << (8 * index);
+				return value;
+			};
+			std::vector<OggTestPage> pages;
+			size_t offset = 0;
+			while (offset < bytes.size())
+			{
+				REQUIRE(bytes.size() - offset >= 27);
+				REQUIRE(std::memcmp(bytes.data() + offset, "OggS", 4) == 0);
+				OggTestPage page;
+				page.Flags = std::to_integer<uint8_t>(bytes[offset + 5]);
+				page.Granule = read(offset + 6, 8);
+				page.Serial = static_cast<uint32_t>(read(offset + 14, 4));
+				page.Sequence = static_cast<uint32_t>(read(offset + 18, 4));
+				const size_t segments = std::to_integer<size_t>(bytes[offset + 26]);
+				REQUIRE(bytes.size() - offset >= 27 + segments);
+				size_t bodySize = 0;
+				for (size_t segment = 0; segment < segments; ++segment)
+				{
+					page.Lacing.push_back(std::to_integer<uint8_t>(bytes[offset + 27 + segment]));
+					bodySize += page.Lacing.back();
+				}
+				const size_t body = offset + 27 + segments;
+				REQUIRE(bytes.size() - body >= bodySize);
+				page.Body.assign(bytes.begin() + static_cast<std::ptrdiff_t>(body), bytes.begin() + static_cast<std::ptrdiff_t>(body + bodySize));
+				pages.push_back(std::move(page));
+				offset = body + bodySize;
+			}
+			return pages;
+		}
+
+		Buffer JoinOggPages(std::span<const OggTestPage> pages)
+		{
+			Buffer bytes;
+			const auto write = [&bytes](uint64_t value, size_t count)
+			{
+				for (size_t index = 0; index < count; ++index)
+					bytes.push_back(static_cast<std::byte>(value >> (8 * index)));
+			};
+			for (const OggTestPage& page : pages)
+			{
+				const size_t start = bytes.size();
+				for (const char character : std::string_view("OggS"))
+					bytes.push_back(static_cast<std::byte>(character));
+				write(0, 1); // version
+				write(page.Flags, 1);
+				write(page.Granule, 8);
+				write(page.Serial, 4);
+				write(page.Sequence, 4);
+				write(0, 4); // the CRC, written below
+				write(page.Lacing.size(), 1);
+				for (const uint8_t lacing : page.Lacing)
+					write(lacing, 1);
+				bytes.insert(bytes.end(), page.Body.begin(), page.Body.end());
+				const uint32_t crc = OggCrc(std::span<const std::byte>(bytes).subspan(start));
+				for (size_t index = 0; index < 4; ++index)
+					bytes[start + 22 + index] = static_cast<std::byte>(crc >> (8 * index));
+			}
+			return bytes;
 		}
 
 	}

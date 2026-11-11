@@ -27,14 +27,17 @@ namespace Engine {
 
 	// The push constants of the Quad program: the batch's space to clip space (clip = mul(Transform, float4(Position, 1))) and,
 	// for M21's Normals entry (C21.2, Docs/Decisions/0032-m21-contract.md decision 22), whether the batch's quads sample their
-	// normal map: 1 then, 0 for the flat normal; the other entries ignore it and the batcher leaves it 0.
+	// normal map: 1 then, 0 for the flat normal; and, since M23's milestone review (Docs/Decisions/0034-m23-contract.md,
+	// "Milestone review" item 1), whether that normal map stores x and y only (1: a BC5 texture, or the decode fallback's
+	// RGBA8 copy of one, whose z the entry reconstructs as Scene.slang does), 0 for an RGB normal map. The other entries
+	// ignore both, and the batcher leaves them 0.
 	struct QuadConstants
 	{
 		Float4x4 Transform;
 		uint32_t HasNormalMap = 0;
+		uint32_t NormalMapTwoChannel = 0;
 		uint32_t Padding0 = 0;
 		uint32_t Padding1 = 0;
-		uint32_t Padding2 = 0;
 	};
 
 #if !defined(ENGINE_SHADER)
@@ -42,7 +45,8 @@ namespace Engine {
 	static_assert(offsetof(QuadVertex, Position) == 0 && offsetof(QuadVertex, TexCoord) == 12 && offsetof(QuadVertex, Color) == 20,
 		"QuadVertex's members must keep their vertex-attribute offsets");
 	static_assert(sizeof(QuadConstants) == 80, "QuadConstants must match its 80-byte push-constant layout");
-	static_assert(offsetof(QuadConstants, HasNormalMap) == 64, "QuadConstants members must sit where the push-constant layout puts them");
+	static_assert(offsetof(QuadConstants, HasNormalMap) == 64 && offsetof(QuadConstants, NormalMapTwoChannel) == 68,
+		"QuadConstants members must sit where the push-constant layout puts them");
 
 }
 #endif

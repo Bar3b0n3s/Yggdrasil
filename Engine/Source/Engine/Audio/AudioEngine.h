@@ -78,7 +78,9 @@
 //     voice is an ma_sound_init_from_file on the registration's resource name, which acquires the same data buffer node,
 //     as ma_sound_init_copy does); none decodes on the fly. ma_resource_manager_register_encoded_data is not used:
 //     registered encoded data stays encoded and every voice would run its own decoder over it.
-//   - Encoded with Stream: an AudioVfs memory file under the resource name, played with MA_SOUND_FLAG_STREAM. The resource
+//   - Encoded with Stream: an AudioVfs memory file under the resource name, played with MA_SOUND_FLAG_STREAM, once the bytes
+//     pass CheckStreamedAudio's container checks (Audio/AudioDecoder.h: an Ogg Opus file is one logical stream, as the
+//     import and the decode at registration require; M23's milestone review). The resource
 //     manager decodes streams to f32 at the clip's own rate and channels (decodedFormat ma_format_f32, decodedSampleRate
 //     and decodedChannels 0), the format DecodeEncodedAudio produces, so streamed and decoded playback of one clip are
 //     sample-identical.
@@ -344,7 +346,8 @@ namespace Engine {
 		// is decoded here, on the calling thread, in every decoding mode. Errors: InvalidArgument for an empty name or one
 		// containing "://" or '@', null bytes, a Pcm16 clip with a sample rate outside 8,000 to 192,000 Hz, a channel count
 		// other than 1 or 2 or a partial frame, or Stream on a Pcm16 clip; DecodeEncodedAudio's errors (Parse, Validation)
-		// for an Encoded clip without Stream that does not decode; Io or Unsupported when miniaudio refuses the registration
+		// for an Encoded clip without Stream that does not decode, and CheckStreamedAudio's (Parse, Validation) for one with
+		// Stream whose container it refuses (nothing is registered); Io or Unsupported when miniaudio refuses the registration
 		// (with its result description); the AudioVfs's errors.
 		[[nodiscard]] Result<AudioClipHandle> RegisterClip(const AudioClipSource& source);
 

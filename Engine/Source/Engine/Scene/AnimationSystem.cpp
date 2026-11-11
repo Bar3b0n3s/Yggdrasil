@@ -18,8 +18,13 @@
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
 
+#include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
+
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <format>
 #include <limits>
 #include <set>
 #include <string_view>
@@ -108,6 +113,47 @@ namespace Engine {
 			return result;
 		}
 
+		static bool IsFiniteMatrix(const glm::mat4& matrix)
+		{
+			for (glm::length_t column = 0; column < 4; ++column)
+			{
+				for (glm::length_t row = 0; row < 4; ++row)
+				{
+					if (!std::isfinite(matrix[column][row]))
+						return false;
+				}
+			}
+			return true;
+		}
+
+		static bool IsFiniteVector(const glm::vec3& vector)
+		{
+			return std::isfinite(vector.x) && std::isfinite(vector.y) && std::isfinite(vector.z);
+		}
+
+		static bool IsFiniteQuaternion(const glm::quat& rotation)
+		{
+			return std::isfinite(rotation.w) && std::isfinite(rotation.x) && std::isfinite(rotation.y) && std::isfinite(rotation.z);
+		}
+
+		// M23's milestone review: whether every value `pose` holds is finite (its joint model and skin matrices, its morph
+		// weights and its root motion). A clip or skeleton the validators accept may hold values near the float limit, whose
+		// sampling and composition overflow (keys 2e38 and -2e38 interpolate to an infinity), and such a pose is never
+		// written (AnimationSystem.h, step 2).
+		static bool IsPoseFinite(const AnimationPoseComponent& pose)
+		{
+			const auto finiteWeights = [](const AnimationMorphWeights& morph)
+			{
+				return std::ranges::all_of(morph.Weights, [](float weight)
+				{
+					return std::isfinite(weight);
+				});
+			};
+			return std::ranges::all_of(pose.JointModel, IsFiniteMatrix) && std::ranges::all_of(pose.Skin, IsFiniteMatrix)
+				&& std::ranges::all_of(pose.Morphs, finiteWeights) && IsFiniteVector(pose.RootMotion.Translation)
+				&& IsFiniteQuaternion(pose.RootMotion.Rotation);
+		}
+
 		// Writes `pose` as `entity`'s runtime pose (neither counted nor recorded: RuntimeComponents.h's rules).
 		static void WritePose(Entity entity, AnimationPoseComponent pose)
 		{
@@ -136,11 +182,15 @@ namespace Engine {
 		std::set<std::pair<UUID, std::string_view>> RaisedIssues{};
 		// The Animators whose dropped events were logged (MaxAnimationEventsPerStep), each once.
 		std::set<UUID> EventDropsLogged{};
+		// M23's milestone review: the Animators whose pose or root motion was not finite, each logged once.
+		std::set<UUID> NonFiniteLogged{};
 		// The step's scratch, kept to reuse its capacity: the Animators in canonical order and the events collected.
 		std::vector<UUID> Animators{};
 		std::vector<AnimationEventRecord> Events{};
 
 		void StepAnimator(Entity entity, const SimStep& step);
+		// Logs `what` for the Animator on `entity` once per Animator (NonFiniteLogged).
+		void LogNonFinite(Entity entity, uint64_t tick, std::string_view what);
 		void RaiseIssue(AnimationSceneIssue issue);
 		void RaiseSkinnedMeshIssues();
 	};
@@ -209,15 +259,40 @@ namespace Engine {
 		AnimationPoseComponent pose = Utils::ComputeAnimatorPose(entity, animator, skeleton, layers, Assets, holdRootMotion, motion);
 		pose.RootMotion = motion;
 		pose.Tick = step.Tick;
+		// M23's milestone review: a pose or root motion that is not finite is never written, and the Transform keeps its value.
+		if (!Utils::IsPoseFinite(pose))
+		{
+			Utils::RemovePose(entity);
+			LogNonFinite(entity, step.Tick, "its pose is not finite; the Animator keeps no pose, and its Transform is kept");
+			return;
+		}
 		Utils::WritePose(entity, std::move(pose));
 		if (animator.RootMotion == AnimatorRootMotion::Apply && motion != RootMotionDelta{})
 		{
-			entity.Patch<TransformComponent>([&motion](TransformComponent& transform)
+			const TransformComponent& current = entity.GetComponent<TransformComponent>();
+			const glm::vec3 translation = current.Translation + current.Rotation * (current.Scale * motion.Translation);
+			const glm::quat rotation = glm::normalize(current.Rotation * motion.Rotation);
+			if (!Utils::IsFiniteVector(translation) || !Utils::IsFiniteQuaternion(rotation))
 			{
-				transform.Translation += transform.Rotation * (transform.Scale * motion.Translation);
-				transform.Rotation = glm::normalize(transform.Rotation * motion.Rotation);
+				LogNonFinite(entity, step.Tick, "applying its root motion would make its Transform not finite; the Transform is kept");
+				return;
+			}
+			entity.Patch<TransformComponent>([&translation, &rotation](TransformComponent& transform)
+			{
+				transform.Translation = translation;
+				transform.Rotation = rotation;
 			});
 		}
+	}
+
+	void AnimationSystem::State::LogNonFinite(Entity entity, uint64_t tick, std::string_view what)
+	{
+		const UUID id = entity.GetUUID();
+		if (!NonFiniteLogged.insert(id).second)
+			return;
+		ENGINE_CORE_WARN("The Animator of entity {} ('{}') at tick {}: {} (its clips or Skeleton hold values that overflow the float range); later "
+						 "such steps of this Animator are not logged",
+			id.ToString(), RuntimeScene->GetEntityPath(entity), tick, what);
 	}
 
 	void AnimationSystem::State::RaiseIssue(AnimationSceneIssue issue)
@@ -347,6 +422,14 @@ namespace Engine {
 		RootMotionDelta motion;
 		AnimationPoseComponent pose = Utils::ComputeAnimatorPose(animator, component, skeleton, layers, &assets,
 			component.RootMotion != AnimatorRootMotion::None, motion);
+		// M23's milestone review: as the phase never writes a pose that is not finite, neither does the preview.
+		if (!Utils::IsPoseFinite(pose))
+		{
+			Utils::RemovePose(animator);
+			return std::unexpected(Error(ErrorCode::Validation,
+				std::format("the Animator of '{}' poses to values that are not finite at {} s; it is not posed", animator.GetName(), previewTime))
+					.WithHint("its clips or Skeleton hold values that overflow the float range: reimport the model with smaller translations or scales"));
+		}
 		Utils::WritePose(animator, std::move(pose));
 		return {};
 	}

@@ -42,9 +42,14 @@
 //        clip keys, as poses blend only keyed paths: a layer whose clip keys neither contributes nothing. The pose's joint
 //        model and skin matrices, morph weights and root motion are written to the entity's AnimationPoseComponent (added
 //        when missing), with the tick. A skeleton that is null or fails to load removes the component, and nothing below is
-//        drawn deformed.
+//        drawn deformed. So does a pose that holds a value that is not finite (M23's milestone review: a clip or skeleton
+//        the validators accept may hold values near the float limit, whose sampling and composition overflow), which also
+//        skips step 3, so its Transform keeps its value; the Animator's first such step logs one warning naming its entity,
+//        never again for that entity.
 //     3. With RootMotion Apply, the entity's Transform moves by the blended delta: Translation += Rotation * (Scale * delta
-//        translation), Rotation = Rotation * delta rotation (normalized), through the scene.
+//        translation), Rotation = Rotation * delta rotation (normalized), through the scene, only when both results are
+//        finite: otherwise the Transform keeps its value (a looping clip whose root moves far each cycle cannot carry it past
+//        the float range), with step 2's one warning.
 //   Then each effectively enabled SkinnedMesh's finding (AnimationValidation.h's checks) is raised once per entity and code
 //   (GetDiagnostics), logged as a warning.
 //   Dispatch, after every Animator was stepped: the collected events, in (canonical entity, layer, firing) order, reach the
@@ -154,7 +159,8 @@ namespace Engine {
 	// clip's end as AdvanceAnimationTime does (0: the layers' times): the editor's preview of an edit scene
 	// (EditorCore/Animation/AnimationPreview.h). Writes nothing to the Animator, whatever Playing says. Errors: NotFound when
 	// the Skeleton is null or fails to load (the component is removed), naming the asset; InvalidArgument for a
-	// `previewTime` that is not finite or outside [0, MaxAnimatorTime].
+	// `previewTime` that is not finite or outside [0, MaxAnimatorTime]; Validation when the pose holds a value that is not
+	// finite (the component is removed, as the phase removes it: step 2 of the file comment).
 	[[nodiscard]] Status PoseAnimator(Entity animator, AssetManager& assets, float previewTime = 0.0f);
 
 	// The Animator that poses `entity`'s SkinnedMesh: `entity` itself or its nearest ancestor holding an Animator; an invalid
